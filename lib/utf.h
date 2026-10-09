@@ -53,6 +53,8 @@ size_t utf8_encode_z(uint32_t codepoint, char buf[5]);
  *         NULL-safe: returns -1 for NULL s or len==0.
  */
 int utf8_decode(const char* s, size_t len, uint32_t* out);
+/** Decode one scalar, replacing one maximal invalid subsequence with U+FFFD. */
+int utf8_decode_replacement(const char* s, size_t len, uint32_t* out);
 
 /** Byte length of a UTF-8 sequence given its lead byte (1–4), or 0 if invalid. */
 size_t utf8_char_len(unsigned char lead);

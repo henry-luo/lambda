@@ -1,0 +1,98 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>MessageEvent native interface</title></head>
+<body><div id="result">pending</div><script>
+const result = document.getElementById('result');
+function check(name, value) { result.setAttribute('data-' + name, String(value)); }
+const names = ['data', 'origin', 'lastEventId', 'source', 'ports'];
+const getters = names.map(name => Object.getOwnPropertyDescriptor(MessageEvent.prototype, name).get);
+const empty = new MessageEvent('empty');
+check('defaults', empty.data === null && empty.origin === '' && empty.lastEventId === '' &&
+    empty.source === null && empty.ports.length === 0 && Object.isFrozen(empty.ports));
+check('prototype', empty instanceof MessageEvent && empty instanceof Event &&
+    Object.getPrototypeOf(MessageEvent.prototype) === Event.prototype &&
+    Object.prototype.toString.call(empty) === '[object MessageEvent]');
+check('descriptors', names.every(name => {
+    const descriptor = Object.getOwnPropertyDescriptor(MessageEvent.prototype, name);
+    return typeof descriptor.get === 'function' && descriptor.set === undefined &&
+        descriptor.enumerable && descriptor.configurable && !Object.hasOwn(empty, name);
+}));
+let illegal = 0;
+for (const call of [() => MessageEvent('x'), () => new MessageEvent(),
+    () => new MessageEvent('x', 1), () => new MessageEvent('x', {source: {}}),
+    () => new MessageEvent('x', {ports: [{}]})]) {
+    try { call(); } catch (error) { if (error instanceof TypeError) illegal++; }
+}
+check('constructor', illegal === 5 && MessageEvent.length === 1 &&
+    new MessageEvent(undefined).type === 'undefined');
+let forged = 0;
+for (const getter of getters) {
+    for (const receiver of [Object.create(MessageEvent.prototype), new Event('x')]) {
+        try { getter.call(receiver); } catch (error) { if (error instanceof TypeError) forged++; }
+    }
+}
+check('forged', forged === 10);
+const channel = new MessageChannel();
+const inputPorts = [channel.port1];
+const data = {marker: 'retained', nested: [1, 2, 3]};
+const message = new MessageEvent('message', {data, origin: '\ud800x', lastEventId: 42,
+    source: window, ports: inputPorts, bubbles: true, cancelable: true, composed: true});
+inputPorts.length = 0;
+check('values', message.data === data && message.origin === '\ufffdx' && message.lastEventId === '42' &&
+    message.source === window && message.ports[0] === channel.port1 &&
+    message.bubbles && message.cancelable && message.composed);
+check('ports', message.ports !== inputPorts && message.ports.length === 1 && Object.isFrozen(message.ports));
+message.data = 'changed';
+check('readonly', message.data === data);
+Object.defineProperty(message, 'data', {value: 'public shadow', configurable: true});
+Object.setPrototypeOf(message, null);
+data.event = message;
+for (let index = 0; index < 40; index++) new MessageEvent('allocate', {data: {index}});
+check('captured', Object.getPrototypeOf(message) === null &&
+    getters[0].call(message) === data && getters[0].call(message).event === message &&
+    getters[1].call(message) === '\ufffdx' && getters[3].call(message) === window &&
+    getters[4].call(message)[0] === channel.port1);
+const visits = [];
+const init = {};
+for (const name of ['bubbles', 'cancelable', 'composed', 'data', 'lastEventId', 'origin', 'ports', 'source']) {
+    Object.defineProperty(init, name, {get() {
+        visits.push(name);
+        return name === 'ports' ? [] : name === 'source' || name === 'data' ? null : '';
+    }});
+}
+new MessageEvent('order', init);
+check('dictionary', visits.join(',') === 'bubbles,cancelable,composed,data,lastEventId,origin,ports,source');
+let closed = 0;
+const invalidPorts = {[Symbol.iterator]() { return {
+    next() { return {done: false, value: {}}; },
+    return() { closed++; return {}; }
+}; }};
+let invalidSequence = false;
+try { new MessageEvent('x', {ports: invalidPorts}); }
+catch (error) { invalidSequence = error instanceof TypeError; }
+check('iterator', invalidSequence && closed === 0);
+const legacy = new MessageEvent('old', {data: 'old'});
+legacy.initMessageEvent('new', true, true, data, 'origin', 'id', channel.port2, [channel.port1]);
+check('legacy', legacy.type === 'new' && legacy.data === data && legacy.origin === 'origin' &&
+    legacy.lastEventId === 'id' && legacy.source === channel.port2 && legacy.ports[0] === channel.port1 &&
+    legacy.bubbles && legacy.cancelable && MessageEvent.prototype.initMessageEvent.length === 1);
+const target = new EventTarget();
+target.addEventListener('new', function(event) { event.initMessageEvent('changed', false, false, null); });
+target.dispatchEvent(legacy);
+check('dispatch', legacy.type === 'new' && legacy.data === data);
+class ExtendedMessage extends MessageEvent {}
+const extended = new ExtendedMessage('extended', {data});
+check('subclass', extended instanceof ExtendedMessage && extended instanceof MessageEvent &&
+    getters[0].call(extended) === data);
+const locked = new MessageEvent('locked');
+const oldPrototype = Object.getPrototypeOf(locked);
+check('extensible', Object.isExtensible(locked) && Reflect.isExtensible(locked));
+Object.preventExtensions(locked);
+let rejected = false;
+try { Object.setPrototypeOf(locked, null); } catch (error) { rejected = error instanceof TypeError; }
+check('locked', !Object.isExtensible(locked) && rejected &&
+    Reflect.setPrototypeOf(locked, oldPrototype) && !Reflect.setPrototypeOf(locked, null) &&
+    Object.getPrototypeOf(locked) === oldPrototype && getters[0].call(locked) === null);
+channel.port1.close();
+channel.port2.close();
+result.textContent = 'complete';
+</script></body></html>

@@ -570,6 +570,9 @@ struct JubeHostScriptAPI {
     // Narrows only exact in-range BigInts; modules must not infer overflow
     // from the legacy clamping extractor used inside the engine.
     bool (*bigint_to_int64_exact)(Item value, int64_t* out_value);
+    // Intrinsic identities must survive replacement of script-visible globals.
+    Item (*well_known_symbol)(const char* name);
+    Item (*iterator_prototype)(void);
 };
 
 // ---------------------------------------------------------------------------

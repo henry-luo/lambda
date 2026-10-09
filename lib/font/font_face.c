@@ -49,7 +49,8 @@ bool font_face_register(FontContext* ctx, const FontFaceDesc* desc) {
     entry->weight = desc->weight;
     entry->slant  = desc->slant;
     entry->loaded_handle = NULL;
-    entry->load_failed = false;
+    entry->has_pending_sources = desc->has_pending_sources;
+    entry->load_state = FONT_FACE_UNLOADED;
 
     // copy sources
     if (desc->source_count > 0 && desc->sources) {
@@ -190,6 +191,7 @@ const FontFaceDesc* font_face_find(FontContext* ctx, const FontStyleDesc* style)
     desc.slant  = entry->slant;
     desc.unicode_ranges = entry->unicode_ranges;
     desc.unicode_range_count = entry->unicode_range_count;
+    desc.has_pending_sources = entry->has_pending_sources;
 
     int n = entry->source_count;
     if (n > 16) n = 16;
@@ -226,6 +228,7 @@ int font_face_list(FontContext* ctx, const char* family,
         d->slant  = entry->slant;
         d->unicode_ranges = entry->unicode_ranges;
         d->unicode_range_count = entry->unicode_range_count;
+        d->has_pending_sources = entry->has_pending_sources;
 
         int n = entry->source_count;
         if (n > 16) n = 16;
@@ -277,7 +280,7 @@ static FontHandle* font_face_load_local(FontContext* ctx, const char* name,
 static FontHandle* font_face_load_entry(FontContext* ctx, const FontFaceEntry* entry,
                                         float size_px) {
     if (!ctx || !entry) return NULL;
-    if (entry->load_failed) return NULL;
+    if (entry->load_state != FONT_FACE_UNLOADED) return NULL;
 
     float pixel_ratio = ctx->config.pixel_ratio;
     float physical_size = size_px * pixel_ratio;
@@ -353,10 +356,15 @@ static FontHandle* font_face_load_entry(FontContext* ctx, const FontFaceEntry* e
                   src_path ? src_path : "memory snapshot");
     }
 
-    // Sources are immutable for a document, so do not retry a failed list on
-    // every text measurement pass.
-    ((FontFaceEntry*)entry)->load_failed = true;
+    // the current list is immutable; a download publishes a new entry and
+    // generation, so pending faces use fallback without retrying local misses.
+    ((FontFaceEntry*)entry)->load_state = entry->has_pending_sources
+        ? FONT_FACE_PENDING : FONT_FACE_FAILED;
     ctx->resource_generation = generation_next(ctx->resource_generation);
+    if (entry->has_pending_sources) {
+        log_debug("font_face: waiting for downloaded sources for '%s'", entry->family);
+        return NULL;
+    }
     log_error("font_face: all sources failed for '%s'", entry->family);
     return NULL;
 }

@@ -1,6 +1,6 @@
 # Radiant — Animation & Frame Scheduling
 
-> **Last verified against tree:** 2026-10-07 (§8 presentation-style paint-only commit); 2026-09-29
+> **Last verified against tree:** 2026-10-09 (§8 detached mutation reconciliation); 2026-10-07 (§8 presentation-style paint-only commit); 2026-09-29
 
 > **Part of the [Radiant detailed-design set](RAD_00_Overview.md).** This document covers the *timing half* of Radiant: the cross-platform `RadiantFrameClock` vsync wake source, the `window.cpp` render loop it paces, the generic `AnimationScheduler`/`TimingFunction`/`AnimationInstance` engine, the CSS `@keyframes` runtime (`KeyframeRegistry`, per-frame keyframe sampling into in-place view mutations and dirty rects), and the video-frame wake path. The threading contract is the load-bearing idea: the native clock only *wakes* the loop; every animation sample and every mutation runs on the UI thread.
 >
@@ -203,6 +203,14 @@ reset releases generation-checked node pins and retains capacity. Document
 teardown frees the grown buffer. Allocation failure uses the established broad
 fallback. Reconcile selector matchers use caller-owned storage through the
 shared initializer. Neither mechanism depends on a slide scene model (D7.5.3).
+
+When every recorded mutation affects only detached nodes, reconciliation retires
+the journal without recascading, laying out or repainting the connected document
+(`post_html_handler_detached_only_commit`, D1.3v3). Node state and MutationObserver
+delivery remain intact; subsequent insertion emits a connected mutation that
+resolves and lays out the subtree. This path requires an existing layout snapshot
+and declines unknown or overflowed records, stylesheet changes and pre-existing
+reflow requests (`test/ui/dom_mutation_detached_geometry.json`).
 
 The shared DOM catalog also publishes `presentation_style_set_property(node,
 property, value)` and `presentation_style_clear(node)` (D7.5.3). Transient samples

@@ -1,6 +1,7 @@
 // Tune6 immutable JavaScript object metadata.
 
 #include "js_object_meta.h"
+#include "js_runtime.h"
 #include "../lambda.hpp"
 extern "C" bool js_promise_vmap_is(Item value);
 
@@ -124,6 +125,10 @@ static const JsClassMeta js_class_meta_table[JS_CLASS__COUNT] = {
     JS_META(JS_CLASS_HEADERS), JS_META(JS_CLASS_HEADERS_ITERATOR),
     JS_META(JS_CLASS_WEBGL_CONTEXT_EVENT),
     JS_META(JS_CLASS_TREE_WALKER),
+    JS_META(JS_CLASS_RESPONSE),
+    JS_META(JS_CLASS_NAVIGATOR),
+    JS_META(JS_CLASS_MESSAGE_EVENT),
+    JS_META(JS_CLASS_XML_HTTP_REQUEST),
 };
 #undef JS_META
 #undef JS_META_F
@@ -221,6 +226,21 @@ const JsClassMeta* js_object_meta(Item value) {
 
 bool js_object_has_class(Item value, JsClassId id) {
     return js_class_id_from_meta(js_object_meta(value)) == id;
+}
+
+Item js_native_private_array_state(Item receiver, JsClassId brand,
+        int expected_length, const char* error_message) {
+    if (get_type_id(receiver) != LMD_TYPE_MAP || !js_object_has_class(receiver, brand))
+        return js_throw_type_error(error_message);
+    // native records precede public fields; shape transitions preserve their private edge.
+    TypeMap* type = (TypeMap*)receiver.map->type;
+    ShapeEntry* entry = type ? type->shape : nullptr;
+    Item state = entry && entry->key_kind == NAME_KEY_PRIVATE
+        ? _map_read_field(entry, receiver.map->data) : ItemNull;
+    if (get_type_id(state) != LMD_TYPE_ARRAY ||
+            (expected_length >= 0 && state.array->length != expected_length))
+        return js_throw_type_error(error_message);
+    return state;
 }
 
 bool js_object_uses_ordinary_shape(Item value) {

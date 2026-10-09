@@ -590,6 +590,12 @@ bool radiant_window_platform_close(UiContext* uicon) {
     return uicon->close_approved;
 }
 
+extern "C" bool dom_engine_window_is_closed(void* context_ptr) {
+    UiContext* uicon = (UiContext*)context_ptr;
+    // scripts attach before document publication; the host's close decision spans both stages.
+    return !uicon || uicon->close_approved;
+}
+
 static void window_close_callback(GLFWwindow* window) {
     // GLFW invokes this at the user's close click (and application quit),
     // before document cleanup. A guarded edit session keeps the window open

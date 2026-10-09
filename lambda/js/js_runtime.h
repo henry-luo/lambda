@@ -334,6 +334,7 @@ LAMBDA_RT_API Item js_set_key_default(Item object, Item key, Item value);
 Item js_set_completion_with_key(Item target, Item key, Item value,
                                 Item receiver);
 Item js_dataset_owner(Item dataset);
+bool js_dataset_property_via_api(Item dataset, Item key, Item value, bool write, Item* out);
 Item js_set_primitive_completion(Item target, Item key, Item value);
 Item js_set_function_prototype_completion(Item target, Item value);
 Item js_set_error_property_completion(Item target, Item key, Item value);
@@ -351,6 +352,7 @@ Item js_delete_reference_result(Item key, Item delete_result, int64_t strict);
 // js_private_property_set_strict removed.
 Item js_private_property_set(Item object, Item key, Item value, int64_t strict);
 Item js_private_field_define(Item object, Item private_key, Item value);
+void js_dom_install_interface(Item global, const char* name);
 LAMBDA_RT_API Item js_create_data_property(Item object, Item key, Item value);
 Item js_get_reference(Item object, Item key);
 Item js_get_name_id(Item object, NameId name_id);

@@ -17,6 +17,8 @@
 #include "../js/js_runtime.h"
 #include "../js/js_runtime_state.hpp"
 #include "../js/js_class.h"
+#include "../js/js_builtin_catalog.hpp"
+#include "../js/js_function.hpp"
 #include "../lambda.h"
 #include "../lambda-data.hpp"
 #include "../lambda.hpp"
@@ -1359,8 +1361,7 @@ Item js_create_event_target(void) {
 
 static Item read_init(Item init, const char* key) {
     if (init.item == 0) return ItemNull;
-    TypeId t = get_type_id(init);
-    if (t != LMD_TYPE_MAP && t != LMD_TYPE_VMAP) return ItemNull;
+    if (!js_is_object_value(init)) return ItemNull;
     return dom_realm_get_name(init, key);
 }
 
@@ -1771,6 +1772,152 @@ extern "C" Item js_ctor_webgl_context_event_fn(Item type_arg, Item init_arg) {
 }
 #undef JS_DOM_TIMING_EVENT_CTOR
 #undef JS_DOM_UI_EVENT_CTOR
+
+enum MessageEventSlot {
+    MESSAGE_DATA, MESSAGE_ORIGIN, MESSAGE_LAST_ID, MESSAGE_SOURCE, MESSAGE_PORTS,
+    MESSAGE_SLOT_COUNT
+};
+static const char* message_event_fields[] = {"data", "origin", "lastEventId", "source", "ports"};
+
+static Item message_event_state(Item receiver) {
+    Item state = radiant_dom_event_payload(receiver, JS_CLASS_MESSAGE_EVENT);
+    if (get_type_id(state) != LMD_TYPE_ARRAY || js_array_length(state) != MESSAGE_SLOT_COUNT)
+        return dom_realm_throw_type_error("Illegal MessageEvent receiver");
+    return state;
+}
+
+static Item message_event_convert_field(int slot, Item input) {
+    RootFrame roots(4);
+    Rooted<Item> value(roots, input), ports(roots, ItemNull);
+    Rooted<Item> iterator(roots, ItemNull), entry(roots, ItemNull);
+    bool absent = input.item == 0 || get_type_id(input) == LMD_TYPE_UNDEFINED;
+    if (slot == MESSAGE_DATA) return absent ? ItemNull : value.get();
+    if (slot == MESSAGE_ORIGIN || slot == MESSAGE_LAST_ID) {
+        value.set(absent ? js_name_item("") : js_to_string(value.get()));
+        JS_RETURN_IF_ERROR(value.get());
+        return slot == MESSAGE_ORIGIN ? js_intrinsic_string_to_well_formed_body(
+            ItemNull, value.get(), nullptr, 0, nullptr) : value.get();
+    }
+    if (slot == MESSAGE_SOURCE) {
+        if (absent || get_type_id(value.get()) == LMD_TYPE_NULL) return ItemNull;
+        if (value.get().item == dom_realm_global().item ||
+                dom_realm_object_has_class(value.get(), JS_CLASS_MESSAGE_PORT)) return value.get();
+        return dom_realm_throw_type_error("MessageEvent source must be a Window or MessagePort");
+    }
+    ports.set(js_array_new(0));
+    if (!absent) {
+        if (!js_is_object_value(value.get()))
+            return dom_realm_throw_type_error("MessageEvent ports must be a sequence");
+        iterator.set(js_get_iterator(value.get()));
+        JS_RETURN_IF_ERROR(iterator.get());
+        for (;;) {
+            entry.set(js_iterator_step(iterator.get()));
+            JS_RETURN_IF_ERROR(entry.get());
+            if (entry.get().item == JS_ITER_DONE_SENTINEL) break;
+            if (!dom_realm_object_has_class(entry.get(), JS_CLASS_MESSAGE_PORT))
+                return dom_realm_throw_type_error("MessageEvent ports must contain MessagePort values");
+            JS_RETURN_IF_ERROR(js_array_push(ports.get(), entry.get()));
+        }
+    }
+    JS_RETURN_IF_ERROR(js_object_freeze(ports.get()));
+    return ports.get();
+}
+
+static Item message_event_getter(Item callee, Item receiver, Item*, int, uint64_t*) {
+    JS_ASSIGN_OR_RETURN(state, message_event_state(receiver));
+    int slot = (int)js_fn_native((JsFunction*)callee.function)->target.bits;
+    return js_elements_get_int(state, slot);
+}
+
+static Item message_event_init(Item, Item receiver, Item* args, int argc, uint64_t*) {
+    RootFrame roots(4);
+    Rooted<Item> event(roots, receiver), state(roots, message_event_state(receiver));
+    Rooted<Item> type(roots, ItemNull), value(roots, ItemNull);
+    JS_RETURN_IF_ERROR(state.get());
+    if (argc < 1) return dom_realm_throw_type_error("initMessageEvent requires a type argument");
+    type.set(js_to_string(args[0]));
+    JS_RETURN_IF_ERROR(type.get());
+    state.set(js_array_new(0));
+    // IDL positional arguments convert before any mutation, including dispatch-time no-ops.
+    for (int slot = 0; slot < MESSAGE_SLOT_COUNT; slot++) {
+        int argument = slot + 3;
+        value.set(message_event_convert_field(slot,
+            argc > argument ? args[argument] : make_js_undefined()));
+        JS_RETURN_IF_ERROR(value.get());
+        JS_RETURN_IF_ERROR(js_array_push(state.get(), value.get()));
+    }
+    if (!event_flag_get(event.get(), "__dispatch_flag")) {
+        Item init_args[] = {type.get(), argc > 1 ? args[1] : make_js_undefined(),
+            argc > 2 ? args[2] : make_js_undefined()};
+        Item ignored = ItemNull;
+        radiant_dom_event_call(event.get(), "initEvent", init_args, 3, &ignored);
+        if (!radiant_dom_event_set_payload(event.get(), state.get())) return ItemError;
+    }
+    return make_js_undefined();
+}
+
+void js_message_event_install_prototype(Item prototype) {
+    RootFrame roots(3);
+    Rooted<Item> object(roots, prototype), key(roots, ItemNull), function(roots, ItemNull);
+    for (int slot = 0; slot < MESSAGE_SLOT_COUNT; slot++) {
+        key.set(js_name_item(message_event_fields[slot]));
+        function.set(js_new_native_payload_function(message_event_getter, slot, 0));
+        js_set_function_name(function.get(), key.get());
+        dom_realm_install_accessor(object.get(), key.get(), function.get(), ItemNull, 0);
+    }
+    function.set(js_new_native_payload_function(message_event_init, 0, 1));
+    js_set_function_name(function.get(), js_name_item("initMessageEvent"));
+    dom_realm_set_cstr(object.get(), "initMessageEvent", function.get());
+    key.set(js_well_known_symbol_key(4));
+    dom_realm_set(object.get(), key.get(), js_name_item("MessageEvent"));
+    js_mark_non_writable(object.get(), key.get());
+    js_mark_non_enumerable(object.get(), key.get());
+}
+
+Item js_ctor_message_event_fn(Item type_arg, Item init_arg) {
+    RootFrame roots(5);
+    Rooted<Item> type(roots, type_arg), init(roots, init_arg);
+    Rooted<Item> state(roots, ItemNull), value(roots, ItemNull), event(roots, ItemNull);
+    type.set(js_to_string(type.get()));
+    JS_RETURN_IF_ERROR(type.get());
+    TypeId init_type = get_type_id(init.get());
+    if (init.get().item != 0 && init_type != LMD_TYPE_NULL && init_type != LMD_TYPE_UNDEFINED &&
+            !js_is_object_value(init.get())) return dom_realm_throw_type_error("Invalid MessageEventInit");
+    bool flags[3];
+    static const char* flag_names[] = {"bubbles", "cancelable", "composed"};
+    for (int flag = 0; flag < 3; flag++) {
+        value.set(read_init(init.get(), flag_names[flag]));
+        JS_RETURN_IF_ERROR(value.get());
+        flags[flag] = js_is_truthy(value.get());
+    }
+    state.set(js_array_new(MESSAGE_SLOT_COUNT));
+    // inherited dictionary members precede the subclass's alphabetically ordered members.
+    static const int order[] = {MESSAGE_DATA, MESSAGE_LAST_ID, MESSAGE_ORIGIN, MESSAGE_PORTS, MESSAGE_SOURCE};
+    for (int slot : order) {
+        value.set(read_init(init.get(), message_event_fields[slot]));
+        JS_RETURN_IF_ERROR(value.get());
+        if (!js_is_object_value(init.get())) value.set(make_js_undefined());
+        value.set(message_event_convert_field(slot, value.get()));
+        JS_RETURN_IF_ERROR(value.get());
+        JS_RETURN_IF_ERROR(js_elements_set_int(state.get(), slot, value.get()));
+    }
+    event.set(js_create_event_init_with_class(fn_to_cstr(type.get()), flags[0],
+        flags[1], flags[2], JS_CLASS_MESSAGE_EVENT));
+    JS_RETURN_IF_ERROR(event.get());
+    if (!radiant_dom_event_set_payload(event.get(), state.get())) return ItemError;
+    return event.get();
+}
+
+Item js_create_message_event(const char* type, Item data, Item source, Item origin) {
+    RootFrame roots(5);
+    Rooted<Item> data_root(roots, data), source_root(roots, source), origin_root(roots, origin);
+    Rooted<Item> init(roots, js_new_object()), type_root(roots, js_name_item(type));
+    dom_realm_set_cstr(init.get(), "data", data_root.get());
+    dom_realm_set_cstr(init.get(), "source", source_root.get());
+    if (get_type_id(origin_root.get()) != LMD_TYPE_NULL)
+        dom_realm_set_cstr(init.get(), "origin", origin_root.get());
+    return js_ctor_message_event_fn(type_root.get(), init.get());
+}
 
 // Build a synthetic click MouseEvent (composed=true, bubbles=true, cancelable=true)
 // for `HTMLElement.prototype.click()`. Per spec, all coordinate / button fields

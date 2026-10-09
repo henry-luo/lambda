@@ -9,10 +9,15 @@
 #include "../../js/js_object_meta.h"
 #include "../../js/js_property_attrs.h"
 #include "../../js/js_event_loop.h"
+#include "../../js/js_response.h"
 
 extern "C" Item js_prototype_lookup_ex(Item object, Item property, bool* out_found);
 
 Item dom_realm_get(Item o, Item k) { return js_get_key_default(o, k); }
+Item dom_realm_response_from_bytes(const void* bytes, int length, Item headers,
+        int status, Item status_text, Item url) {
+    return js_response_from_bytes(bytes, length, headers, status, status_text, url);
+}
 Item dom_realm_get_cstr(Item o, const char* k) { return js_get_key_cstr(o, k); }
 Item dom_realm_set(Item o, Item k, Item v) { return js_set_key_default(o, k, v); }
 Item dom_realm_set_cstr(Item o, const char* k, Item v) { return js_set_key_cstr(o, k, v); }
@@ -41,6 +46,13 @@ Item dom_realm_new_dom_exception(Item name, Item message) { return js_domexcepti
 
 Item dom_realm_new_object_of_class(int c) { return js_new_object_with_class(c); }
 bool dom_realm_object_has_class(Item o, int c) { return js_object_has_class(o, (JsClass)c); }
+Item dom_realm_native_private_array_state(Item receiver, int brand,
+        int expected_length, const char* error_message) {
+    return js_native_private_array_state(receiver, (JsClass)brand, expected_length, error_message);
+}
+void dom_realm_install_interface(Item global, const char* name) {
+    js_dom_install_interface(global, name);
+}
 Item dom_realm_new_array_of_class(int len, int c) { return js_array_new_with_class(len, c); }
 Item dom_realm_define_property(Item o, Item n, Item d) { return js_object_define_property(o, n, d); }
 void dom_realm_install_accessor(Item o, Item n, Item g, Item s, uint8_t a) {

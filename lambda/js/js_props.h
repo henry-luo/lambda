@@ -150,6 +150,7 @@ Map* js_obj_underlying_map(Item object);
 // Runtime-only storage key for ordinary [[Prototype]] on callable carriers.
 extern const char JS_INTERNAL_PROTO_KEY[];
 extern const int JS_INTERNAL_PROTO_KEY_LEN;
+bool js_own_stored_prototype(Item object, const char* key, int length, Item* out);
 
 // Intern an id-less String key in the current name domain. Callers retain the
 // incoming key across this collecting operation; false reports allocation

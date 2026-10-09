@@ -206,7 +206,9 @@ console.log(moduleSelectionA instanceof Selection);
 moduleSelectionA.moduleExpando = 789;
 console.log(moduleSelectionA.moduleExpando);
 console.log("moduleExpando" in moduleSelectionA);
-console.log(Object.getOwnPropertyDescriptor(moduleSelectionA, "rangeCount").value);
+// selection attributes belong to the interface prototype, with live native getters.
+if (Object.hasOwn(moduleSelectionA, "rangeCount")) throw new Error("Selection.rangeCount must be inherited");
+console.log(Object.getOwnPropertyDescriptor(Selection.prototype, "rangeCount").get.call(moduleSelectionA));
 console.log(Object.getOwnPropertyDescriptor(moduleSelectionA, "moduleExpando").value);
 console.log(delete moduleSelectionA.moduleExpando);
 console.log(moduleSelectionA.moduleExpando === undefined);

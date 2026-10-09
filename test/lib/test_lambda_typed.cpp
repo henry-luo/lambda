@@ -393,6 +393,34 @@ TEST(LambdaTypedItem, TypeMapHashLookupByNameIdFallsBackWhenTableIsFull) {
     pool_destroy(pool);
 }
 
+TEST(LambdaTypedItem, TypeMapIdlessLookupPreservesShadowedAndAncestorEntries) {
+    Pool* pool = pool_create();
+    ASSERT_NE(pool, nullptr);
+    TypeMap tm = {};
+    ShapeEntry entries[3] = {};
+    StrView names[3] = {{"first", 5}, {"same", 4}, {"same", 4}};
+    for (int i = 0; i < 3; i++) {
+        entries[i].name = &names[i];
+        entries[i].chain_index = i;
+        if (i > 0) entries[i - 1].chain_next = &entries[i];
+    }
+    entries[2].name_id = (NameId)0x401;
+    tm.shape = &entries[0];
+    tm.last = &entries[2];
+    tm.length = 3;
+    typemap_hash_build(&tm, pool);
+
+    EXPECT_EQ(typemap_hash_lookup_idless(&tm, "first", 5), &entries[0]);
+    // The hash holds the later runtime entry, but the Input seam still owns its prior entry.
+    EXPECT_EQ(typemap_hash_lookup_idless(&tm, "same", 4), &entries[1]);
+    EXPECT_EQ(typemap_hash_lookup_idless(&tm, "absent", 6), nullptr);
+    tm.last = &entries[0];
+    tm.length = 1;
+    EXPECT_EQ(typemap_hash_lookup_idless(&tm, "same", 4), nullptr);
+    EXPECT_EQ(typemap_hash_lookup_idless(&tm, "first", 5), &entries[0]);
+    pool_destroy(pool);
+}
+
 TEST(LambdaTypedItem, TypeMapHashIsAbsentUntilPopulated) {
     TypeMap tm = {};
     ShapeEntry entry = {};
@@ -443,6 +471,49 @@ TEST(LambdaTypedItem, TypeMapHashOwnedInsertGrowsWithTheShape) {
         EXPECT_EQ(typemap_hash_lookup(&tm, key_storage[i], 3), &entries[i]);
     }
 
+    pool_destroy(pool);
+}
+
+TEST(LambdaTypedItem, TypeMapHashRetainsLargeCapacityAndPrefixOwnership) {
+    Pool* pool = pool_create();
+    ASSERT_NE(pool, nullptr);
+    const int count = (1 << 16) + 1;
+    ShapeEntry* entries = (ShapeEntry*)pool_calloc(pool, count * sizeof(ShapeEntry));
+    StrView* names = (StrView*)pool_calloc(pool, count * sizeof(StrView));
+    char (*keys)[16] = (char (*)[16])pool_calloc(pool, count * sizeof(*keys));
+    ASSERT_NE(entries, nullptr);
+    ASSERT_NE(names, nullptr);
+    ASSERT_NE(keys, nullptr);
+    TypeMap tm = {};
+    for (int i = 0; i < count; i++) {
+        names[i].length = snprintf(keys[i], sizeof(keys[i]), "large%d", i);
+        names[i].str = keys[i];
+        entries[i].name = &names[i];
+        entries[i].name_id = (NameId)(i + 1);
+        entries[i].name_hash = typemap_name_hash(keys[i], (int)names[i].length);
+        entries[i].chain_index = i;
+        if (i > 0) entries[i - 1].chain_next = &entries[i];
+    }
+    tm.shape = entries;
+    tm.last = &entries[count - 1];
+    tm.length = count;
+    typemap_hash_build(&tm, pool);
+    ASSERT_GE(tm.field_capacity, (uint32_t)(count * 2));
+    ASSERT_EQ(tm.field_count, (uint32_t)count);
+    EXPECT_EQ(typemap_hash_lookup_by_name_id(&tm, entries[count - 1].name_id,
+        entries[count - 1].name_hash), &entries[count - 1]);
+    EXPECT_EQ(typemap_hash_lookup(&tm, keys[count - 1],
+        (int)names[count - 1].length), &entries[count - 1]);
+    EXPECT_EQ(typemap_hash_lookup_idless(&tm, "missing", 7), nullptr);
+
+    // Descendant entries in a shared large table must stay invisible to its prefix.
+    TypeMap prefix = tm;
+    prefix.last = &entries[0];
+    prefix.length = 1;
+    EXPECT_EQ(typemap_hash_lookup(&prefix, keys[0], (int)names[0].length), &entries[0]);
+    EXPECT_EQ(typemap_hash_lookup(&prefix, keys[count - 1],
+        (int)names[count - 1].length), nullptr);
+    EXPECT_EQ(typemap_hash_recommended_capacity(INT64_MAX), TYPEMAP_HASH_MAX_CAPACITY);
     pool_destroy(pool);
 }
 

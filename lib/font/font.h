@@ -420,6 +420,7 @@ typedef struct FontFaceDesc {
     int           source_count;
     FontFaceUnicodeRange* unicode_ranges; // NULL means the full Unicode range
     int           unicode_range_count;
+    bool          has_pending_sources; // the host will publish additional downloaded sources
 } FontFaceDesc;
 
 // register a font face descriptor (called by Radiant after parsing @font-face).

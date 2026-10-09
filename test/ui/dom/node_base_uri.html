@@ -1,0 +1,38 @@
+<!doctype html><html><head></head><body><div id="result">pending</div><script>
+const result = document.getElementById('result');
+const descriptor = Object.getOwnPropertyDescriptor(Node.prototype, 'baseURI');
+const getter = descriptor.get;
+const text = document.createTextNode('detached');
+const comment = document.createComment('detached');
+const attr = document.createAttribute('data-x');
+const fragment = document.createDocumentFragment();
+const nodes = [document, result, text, comment, attr, fragment, document.doctype];
+result.setAttribute('data-fallback', String(nodes.every(node => getter.call(node) === document.URL)));
+const first = document.createElement('base');
+const second = document.createElement('base');
+first.href = 'https://example.org/assets/';
+second.href = 'https://example.net/ignored/';
+document.head.appendChild(first);
+document.head.appendChild(second);
+result.setAttribute('data-first', String(nodes.every(node => node.baseURI === 'https://example.org/assets/')));
+first.href = '../images/';
+result.setAttribute('data-relative', String(document.baseURI === new URL('../images/', document.URL).href));
+first.href = 'http://[';
+result.setAttribute('data-invalid', String(document.baseURI === document.URL));
+first.remove();
+result.setAttribute('data-next', String(document.baseURI === 'https://example.net/ignored/'));
+second.remove();
+result.setAttribute('data-removed', String(text.baseURI === document.URL));
+Object.setPrototypeOf(text, null);
+result.setAttribute('data-native', String(getter.call(text) === document.URL));
+let rejected = false;
+try { getter.call({}); } catch (error) { rejected = error instanceof TypeError; }
+result.setAttribute('data-receiver', String(rejected && descriptor.set === undefined));
+const other = document.implementation.createHTMLDocument('other');
+const otherBase = other.createElement('base');
+otherBase.href = 'https://example.com/adopted/';
+other.head.appendChild(otherBase);
+other.adoptNode(text);
+result.setAttribute('data-adopted', String(getter.call(text) === 'https://example.com/adopted/'));
+result.textContent = 'complete';
+</script></body></html>

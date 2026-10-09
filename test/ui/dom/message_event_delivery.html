@@ -1,0 +1,40 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Native message delivery</title></head>
+<body><div id="result">pending</div><script>
+const result = document.getElementById('result');
+function check(name, value) { result.setAttribute('data-' + name, String(value)); }
+const readData = Object.getOwnPropertyDescriptor(MessageEvent.prototype, 'data').get;
+let queued = false;
+const windowData = {marker: 'window', nested: {value: 1}};
+window.addEventListener('message', function(event) {
+    const data = readData.call(event);
+    if (data.marker !== 'window') return;
+    check('window-brand', event instanceof MessageEvent && event instanceof Event &&
+        event.type === 'message' && event.source === window && event.target === window);
+    check('window-clone', data !== windowData && data.nested !== windowData.nested && data.nested.value === 1);
+    check('window-origin', event.origin === location.origin);
+    check('window-queued', queued);
+});
+window.postMessage(windowData, '*');
+windowData.nested.value = 2;
+queued = true;
+const channel = new MessageChannel();
+const portData = {marker: 'port', nested: [1, 2, 3]};
+let receivedEvent;
+channel.port2.onmessage = function(event) {
+    receivedEvent = event;
+    const data = readData.call(event);
+    check('port-brand', event instanceof MessageEvent && event instanceof Event && event.type === 'message' &&
+        event.target === channel.port2 && event.currentTarget === channel.port2);
+    check('port-clone', data !== portData && data.nested !== portData.nested && data.nested[0] === 1);
+    data.shared = 'listener';
+};
+channel.port2.addEventListener('message', function(event) {
+    check('port-identity', event === receivedEvent && readData.call(event).shared === 'listener');
+    channel.port1.close();
+    channel.port2.close();
+    result.textContent = 'complete';
+});
+channel.port1.postMessage(portData);
+portData.nested[0] = 9;
+</script></body></html>

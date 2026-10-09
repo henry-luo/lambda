@@ -1226,14 +1226,12 @@ TEST(RadiantViewTest, ExposesBinaryFetchWithoutUnsupportedWorker) {
     remove(view_log);
 }
 
-#ifndef _WIN32
 static void test_radiant_view_expect_cli_success(const char** arguments) {
     ShellOptions options = {}; options.merge_stderr = true; options.timeout_ms = 15000;
     ShellResult result = shell_exec("./lambda.exe", arguments, &options);
     EXPECT_FALSE(result.timed_out); EXPECT_EQ(result.exit_code, 0) << (result.stdout_buf ? result.stdout_buf : "");
     shell_result_free(&result);
 }
-#endif
 
 TEST(RadiantViewTest, CaptureAdmissionKeepsLocalSourcesAndDeniesColdAndWarmRemoteDependencies) {
 #ifdef _WIN32
@@ -1632,6 +1630,27 @@ TEST(RadiantViewTest, ReusesCleanRowsAfterDirectoryClose) {
     ASSERT_TRUE(test_radiant_view_profile_shifted_reuse_at(view_log, 4, &close_reuse));
     EXPECT_EQ(0ULL, initial_reuse);
     EXPECT_GT(close_reuse, 0ULL);
+    remove(view_log);
+}
+
+TEST(RadiantViewTest, ReusesCleanBlocksAroundCollapsedWhitespaceAndHiddenSiblings) {
+    const char* view_log = "./temp/test_radiant_view_collapsed_flow_reuse.log";
+    test_radiant_view_ensure_temp_dir();
+    remove(view_log);
+    const ShellEnvEntry env[] = {
+        {"LAYOUT_PROFILE", "1"},
+        {"LAMBDA_LOG_FILE", view_log},
+        {"LAMBDA_LOG_LEVEL", "NOTICE"},
+        {NULL, NULL},
+    };
+    ShellResult result = test_radiant_view_run_logged_headless(
+        "test/ui/dom_mutation_collapsed_flow_reuse.html",
+        "test/ui/dom_mutation_collapsed_flow_reuse.json", env);
+    ASSERT_EQ(0, result.exit_code) << (result.stdout_buf ? result.stdout_buf : "");
+    shell_result_free(&result);
+    unsigned long long reuse_count = 0;
+    ASSERT_TRUE(test_radiant_view_profile_shifted_reuse_at(view_log, 1, &reuse_count));
+    EXPECT_GT(reuse_count, 0ULL);
     remove(view_log);
 }
 
@@ -2077,6 +2096,59 @@ TEST(RadiantViewTest, ExecutesExternalDependencyInStaticHeadlessView) {
     remove(page);
     remove(script);
     remove(view_log);
+}
+
+TEST(RadiantViewTest, ExecutesClassicAndModuleDataUrlScriptsWithRemoteResourcesBlocked) {
+    const char* page = "./temp/test_radiant_view_data_scripts.html";
+    const char* output = "./temp/test_radiant_view_data_scripts.json";
+    test_radiant_view_ensure_temp_dir();
+    const char* document =
+        "<!doctype html><body><p id='static'>static-pending</p><p id='module'>module-pending</p>"
+        "<script src='data:text/javascript;base64,d2luZG93LmRhdGFTY3JpcHRWYWx1ZT0nYmFzZTY0LXJlYWR5Jzs='></script>"
+        "<script src=\"data:text/javascript,document.getElementById('static').textContent%3Dwindow.dataScriptValue%2B'%2Bpercent-ready';#ignored-fragment\"></script>"
+        "<script type='module' src=\"data:text/javascript,document.getElementById('module').textContent%3D'module-ready';\"></script></body>";
+    FILE* file = fopen(page, "wb");
+    ASSERT_NE(file, nullptr);
+    ASSERT_EQ(fwrite(document, 1, strlen(document), file), strlen(document));
+    ASSERT_EQ(fclose(file), 0);
+    remove(output);
+    const char* arguments[] = {"./lambda.exe", "layout", page, "--auto-close", "--view-output", output,
+        "--no-log", "--block-remote-resources", nullptr};
+    test_radiant_view_expect_cli_success(arguments);
+    EXPECT_TRUE(test_radiant_view_file_contains(output, "base64-ready+percent-ready"));
+    EXPECT_TRUE(test_radiant_view_file_contains(output, "module-ready"));
+    EXPECT_FALSE(test_radiant_view_file_contains(output, "static-pending"));
+    EXPECT_FALSE(test_radiant_view_file_contains(output, "module-pending"));
+    remove(page);
+    remove(output);
+}
+
+TEST(RadiantViewTest, LaysOutNestedGridsWithinTheSharedDomDepthLimit) {
+    const char* page = "./temp/test_radiant_view_nested_grid.html";
+    const char* output = "./temp/test_radiant_view_nested_grid.json";
+    test_radiant_view_ensure_temp_dir();
+    const int depths[] = {12, 400};
+    for (int depth : depths) {
+        SCOPED_TRACE(depth);
+        FILE* file = fopen(page, "wb");
+        ASSERT_NE(file, nullptr);
+        ASSERT_GE(fputs("<!doctype html><style>.nested{display:grid;grid-template-columns:1fr;padding:2px}"
+            "#leaf{height:17px}</style><body>", file), 0);
+        // definite sizes isolate the stack guard from repeated intrinsic sizing at extreme depth.
+        if (depth == 400) ASSERT_GE(fputs("<style>.nested{width:20px;height:20px}</style>", file), 0);
+        for (int i = 0; i < depth; i++) ASSERT_GE(fputs("<div class='nested'>", file), 0);
+        ASSERT_GE(fputs("<div id='leaf'>deep-grid-leaf</div>", file), 0);
+        for (int i = 0; i < depth; i++) ASSERT_GE(fputs("</div>", file), 0);
+        ASSERT_GE(fputs("</body>", file), 0);
+        ASSERT_EQ(fclose(file), 0);
+        remove(output);
+        const char* arguments[] = {"./lambda.exe", "layout", page, "--auto-close",
+            "--view-output", output, "--no-log", nullptr};
+        test_radiant_view_expect_cli_success(arguments);
+        EXPECT_EQ(test_radiant_view_file_contains(output, "deep-grid-leaf"), depth == 12);
+    }
+    remove(page);
+    remove(output);
 }
 
 TEST(RadiantViewTest, ExecutesUmdBrowserGlobalWithoutImplicitAmdLoader) {

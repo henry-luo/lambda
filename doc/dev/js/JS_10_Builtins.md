@@ -66,6 +66,14 @@ Catalog owner `JS_BUILTIN_OWNER_JSON_METHOD` supplies `parse`, `stringify`, plus
 - **parse** — `js_json_parse` (`js_globals.cpp:12129`) reuses the host JSON input parser to build a Lambda tree. `js_json_parse_full` (`:12256`) layers the **reviver**: it wraps the result in a `{"": value}` holder and walks bottom-up via `js_json_revive` (`:12204`), invoking the reviver with `(key, value)` and a reviver-context (source-text aware) per the ES `JSON.parse` source proposal (`js_json_make_reviver_context`, `:12168`).
 - **stringify** — `js_json_stringify_full(value, replacer, space)` (`:12672`); the plain arity-1 form is `js_json_stringify` → `_full(value, ItemNull, ItemNull)` (`:12797`). The recursive serializer `js_stringify_value` (`:12438`) applies a **replacer function** (called with `(key, value)`, `:12456`) or a **replacer array** PropertyList (`:12617`), and honors a **space/gap** indent string built once at the top. BigInt values throw a TypeError (`:12506`); `Symbol`-typed values are dropped.
 
+Each serialization frame roots its current value, callback inputs, key list,
+and active property key across recursion and user callbacks (**D5.3.3**).
+The outer frame also owns the replacement PropertyList and wrapper holder.
+Without those roots, collecting while serializing a nested array drops the
+remaining object properties. `json_stringify_gc_ownership.js` covers nested
+values, allocating getters, `toJSON`, replacers, and explicit collection in
+both execution tiers (verified 2026-10-09).
+
 ---
 
 ## 6. Math & Number
@@ -121,6 +129,8 @@ A BigInt is a Lambda `LMD_TYPE_DECIMAL` value; `js_is_bigint` checks that repres
 ## 12. Global functions
 
 Installed as own properties of `globalThis` from the `global_fns` table (`js_globals.cpp:14380`): `parseInt`/`parseFloat`/`isNaN`/`isFinite`, `eval`, the URI quartet `decodeURI`/`encodeURI`/`decodeURIComponent`/`encodeURIComponent`, the legacy `escape`/`unescape`, the timer/scheduling family (`setTimeout`/`setInterval`/`setImmediate`/`queueMicrotask`/`requestAnimationFrame` + clears), and the Web globals `structuredClone`/`fetch`. Core implementations: `js_parseInt` (`:3460`, accumulates as a double for large values), `js_parseFloat` (`:3582`, ES `StrDecimalLiteral` only — no hex/octal/binary), `js_isNaN` (`:3683`), `js_isFinite` (`:3699`); the URI codecs and `atob`/`btoa` are at `:13242`+. `Number.parseInt`/`Number.parseFloat` share these.
+
+`TextDecoder` shares the UTF-8 decoder with Response text consumption. The valid-input path copies decoded bytes directly; invalid input uses `utf8_decode_replacement` (`lib/utf.c`) to replace each maximal invalid subsequence and reconsume the offending byte. `fatal` rejects invalid UTF-8, while BOM handling preserves `ignoreBOM`. Decoder and input owners stay rooted across property reads and allocation (**D5.3.3**). Streaming and other-encoding coverage remain separate gaps.
 
 ---
 

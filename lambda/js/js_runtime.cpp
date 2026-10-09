@@ -3058,7 +3058,7 @@ static Item js_apply_resolved_constructed_prototype(Item result,
     return result_root.get();
 }
 
-static Item js_apply_constructed_default_prototype(Item result,
+Item js_apply_constructed_default_prototype(Item result,
         Item new_target, int default_class) {
     if (!js_is_object_value(result)) return result;
     RootFrame roots(3);
@@ -4121,6 +4121,12 @@ Item js_map_shape_lookup(Map* m, const char* key_str, int key_len, bool* out_fou
         }
         if (out_found) *out_found = true;
         return _map_read_field(entry, m->data);
+    }
+    // The shape records whether it contains spread links; a plain hash miss
+    // must not rescan every field looking for a link that cannot exist (D3.4.3v5).
+    if (!map_type->has_spread) {
+        if (out_found) *out_found = false;
+        return ItemNull;
     }
 
     // Fallback for spread/nested maps (field->name == NULL). Named fields were
@@ -7141,17 +7147,24 @@ extern "C" Item js_dataset_owner(Item dataset) {
     return found ? owner : ItemNull;
 }
 
-static bool js_dataset_set_via_api(Item dataset, Item key, Item value) {
+extern "C" bool js_dataset_property_via_api(Item dataset, Item key, Item value,
+        bool write, Item* out) {
     if (get_type_id(key) != LMD_TYPE_STRING) return false;
     String* key_string = it2s(key);
-    if (!key_string ||
+    if (!key_string || property_key_kind(key_string) != NAME_KEY_STRING ||
         (key_string->len == 24 &&
          strncmp(key_string->chars, "__lambda_dataset_element", 24) == 0)) {
         return false;
     }
     Item owner = js_dataset_owner(dataset);
     if (!is_element_family_type_id(get_type_id(owner))) return false;
-    jube_internal_host_api()->dom_catalog->set_data(owner, key, value);
+    RootFrame roots(4);
+    Rooted<Item> dataset_root(roots, dataset), key_root(roots, key), value_root(roots, value);
+    Rooted<Item> owner_root(roots, owner);
+    const JubeHostDomCatalogAPI* catalog = jube_internal_host_api()->dom_catalog;
+    *out = write ? catalog->set_data(owner_root.get(), key_root.get(), value_root.get())
+        : catalog->get_data(owner_root.get(), key_root.get());
+    if (!write && out->item == ITEM_NULL) *out = (Item){.item = ITEM_JS_UNDEFINED};
     return true;
 }
 
@@ -7192,8 +7205,10 @@ static Item js_set_map_core(Item object, Item key, Item value, Item receiver,
         // new String("x") must address property "x", not an unnameable slot.
         JS_ASSIGN_OR_RETURN_INTO(key, js_to_property_key(key));
     }
-    if (!bypass_accessor_dispatch && js_dataset_set_via_api(object, key, value)) {
-        return value;
+    Item dataset_result = ItemNull;
+    if (!bypass_accessor_dispatch && js_dataset_property_via_api(object, key, value,
+            true, &dataset_result)) {
+        return item_is_error(dataset_result) ? dataset_result : value;
     }
     bool private_internal_property_key = js_is_private_internal_property_key(key);
     if (private_internal_property_key && js_is_proxy(object)) {
@@ -25319,6 +25334,73 @@ static Item js_array_generic_unshift(Item object, Item* args, int argc) {
     return (Item){.item = i2it(new_len)};
 }
 
+static bool js_array_try_fast_splice(Item object, Item deleted, int64_t length,
+        int64_t start, int64_t delete_count, int64_t insert_count,
+        uint64_t* const* insertion_roots) {
+    if (get_type_id(object) != LMD_TYPE_ARRAY ||
+            get_type_id(deleted) != LMD_TYPE_ARRAY ||
+            object.item == deleted.item) return false;
+    Array* source = object.array;
+    Array* result = deleted.array;
+    int64_t new_length = length - delete_count + insert_count;
+    if (!source || !result || source->length != length ||
+            new_length > INT_MAX || source->is_js_arguments ||
+            result->is_js_arguments || source->extra || result->extra ||
+            array_has_native_lane(source) || array_has_native_lane(result) ||
+            js_array_has_props(source) || js_array_has_props(result) ||
+            length > js_array_dense_capacity(source) ||
+            !js_is_extensible(object) || !js_is_extensible(deleted) ||
+            js_array_length_is_non_writable(object) ||
+            js_array_length_is_non_writable(deleted) ||
+            js_array_proto_index_guard_is_dirty(object) ||
+            js_array_proto_index_guard_is_dirty(deleted)) return false;
+    JsElementsKind kind = container_js_elements_kind((Container*)source);
+    if (kind != JS_ELEMENTS_PACKED_TAGGED && kind != JS_ELEMENTS_PACKED_NUMERIC) {
+        return false;
+    }
+    for (int64_t i = 0; i < insert_count; i++) {
+        if (lambda_item_uses_scalar_home((Item){.item = *insertion_roots[i]})) {
+            return false;
+        }
+    }
+
+    // Coercion and species construction have already run. Only clean packed
+    // arrays can shift words without observable property calls or scalar rebasing.
+    RootFrame roots(2);
+    Rooted<Item> source_root(roots, object);
+    Rooted<Item> result_root(roots, deleted);
+    int64_t result_append_count = delete_count > result->length
+        ? delete_count - result->length : 0;
+    if (!roots.valid() || !array_reserve_append_slots(source_root.get().array,
+            new_length > length ? new_length - length : 0) ||
+            !array_reserve_append_slots(result_root.get().array, result_append_count)) {
+        return false;
+    }
+    source = source_root.get().array;
+    result = result_root.get().array;
+    AutoAssertNoGC no_gc;
+    if (delete_count > 0) {
+        memcpy(result->items, source->items + start,
+            (size_t)delete_count * sizeof(Item));
+    }
+    int64_t tail_count = length - start - delete_count;
+    if (tail_count > 0 && insert_count != delete_count) {
+        memmove(source->items + start + insert_count,
+            source->items + start + delete_count, (size_t)tail_count * sizeof(Item));
+    }
+    for (int64_t i = 0; i < insert_count; i++) {
+        source->items[start + i] = (Item){.item = *insertion_roots[i]};
+    }
+    for (int64_t i = new_length; i < length; i++) {
+        source->items[i] = lam::hole_sentinel_item();
+    }
+    source->length = new_length;
+    result->length = delete_count;
+    container_set_js_elements_kind((Container*)source, JS_ELEMENTS_PACKED_TAGGED);
+    container_set_js_elements_kind((Container*)result, JS_ELEMENTS_PACKED_TAGGED);
+    return true;
+}
+
 static Item js_array_generic_splice(Item object, Item* args, int argc) {
     // Splice shifts object-valued entries across allocating property calls;
     // root the receiver, arguments, result array, and current value so a GC
@@ -25368,6 +25450,11 @@ static Item js_array_generic_splice(Item object, Item* args, int argc) {
 
     deleted_root.set(js_array_species_create(object_root.get(), actual_delete_count));
     if (item_is_error(deleted_root.get())) return deleted_root.get();
+    if (js_array_try_fast_splice(object_root.get(), deleted_root.get(), len,
+            actual_start, actual_delete_count, insert_count,
+            insert_count > 0 ? arg_roots + 2 : NULL)) {
+        return deleted_root.get();
+    }
     int64_t k = 0;
     while (k < actual_delete_count) {
         Item from_key = js_array_method_property_key(actual_start + k);
@@ -27707,6 +27794,12 @@ JS_MATH_INTRINSIC_BODIES(JS_MATH_INTRINSIC_BODY)
 extern "C" const char JS_INTERNAL_PROTO_KEY[] = "__internal_proto__";
 extern "C" const int JS_INTERNAL_PROTO_KEY_LEN = 18;
 
+bool js_own_stored_prototype(Item object, const char* key, int length, Item* out) {
+    if (get_type_id(object) != LMD_TYPE_MAP) return false;
+    JsShapeSlotStatus status = js_own_shape_slot_status(object, key, length, out, NULL);
+    return status == JS_SHAPE_SLOT_DATA || status == JS_SHAPE_SLOT_ACCESSOR;
+}
+
 // The internal prototype key is a compile-time constant, so its shape hash is
 // one too. Every prototype hop was re-hashing these 18 bytes: js_get_prototype
 // was 6.4% of cd2 and all of it self time in this lookup. The value is
@@ -27857,10 +27950,7 @@ static void js_set_prototype_impl(Item object, Item prototype,
         return;
     }
 
-    TypeId candidate_type = get_type_id(prototype_root.get());
-    bool candidate_is_object = candidate_type == LMD_TYPE_MAP ||
-        candidate_type == LMD_TYPE_FUNC || candidate_type == LMD_TYPE_ELEMENT ||
-        js_is_js_array(prototype_root.get());
+    bool candidate_is_object = js_is_object_value(prototype_root.get());
     if (!fresh_object && candidate_is_object) {
         // Prototype walks are a hot property-read path. Establish the
         // acyclicity invariant at this rare mutation boundary instead of
@@ -27927,13 +28017,17 @@ static void js_set_prototype_impl(Item object, Item prototype,
         promise->has_prototype_override = true;
         return;
     }
+    if (is_virtual_container_type_id(ot) && virtual_host_type(object_root.get()) &&
+            jube_member_set_prototype(object_root.get(), prototype_root.get())) {
+        js_intrinsic_note_prototype_mutation(object_root.get());
+        return;
+    }
     // Functions keep [[Prototype]] in their side map, but under an internal
     // key. Using the public `__proto__` spelling made prototype walks mistake
     // the internal link for an own data property and shadow Object.prototype's
     // inherited accessor.
     if (ot == LMD_TYPE_FUNC) {
-        if (get_type_id(prototype) != LMD_TYPE_MAP && get_type_id(prototype) != LMD_TYPE_FUNC &&
-            prototype.item != ItemNull.item) return;
+        if (!js_is_object_value(prototype) && prototype.item != ItemNull.item) return;
         JsFunction* fn = (JsFunction*)object_root.get().function;
         if (fn->properties_map.item == 0) {
             fn->properties_map = js_new_object();
@@ -27966,11 +28060,8 @@ static void js_set_prototype_impl(Item object, Item prototype,
         return;
     }
     if (ot != LMD_TYPE_MAP) return;
-    TypeId proto_type = get_type_id(prototype);
-    // ES spec: prototype must be an object (MAP/FUNC/ARRAY/ELEMENT) or null
-    if (proto_type != LMD_TYPE_MAP && proto_type != LMD_TYPE_FUNC &&
-        !js_is_js_array(prototype) && proto_type != LMD_TYPE_ELEMENT &&
-        prototype.item != ItemNull.item) return;
+    // the ordinary slot accepts every Object carrier, including native hosts.
+    if (!js_is_object_value(prototype) && prototype.item != ItemNull.item) return;
     Item internal_key = js_name_item(
         JS_INTERNAL_PROTO_KEY, JS_INTERNAL_PROTO_KEY_LEN);
     js_define_own_key_storage(object_root.get(), internal_key, prototype_root.get().item == ItemNull.item
@@ -28001,13 +28092,9 @@ extern "C" Item js_func_get_custom_proto(Item func) {
     if (get_type_id(func) != LMD_TYPE_FUNC) return ItemNull;
     JsFunction* fn = (JsFunction*)func.function;
     if (fn->properties_map.item != 0 && get_type_id(fn->properties_map) == LMD_TYPE_MAP) {
-        Item pk = js_name_item(
-            JS_INTERNAL_PROTO_KEY, JS_INTERNAL_PROTO_KEY_LEN);
-        String* pks = it2s(pk);
         Item result = ItemNull;
-        JsShapeSlotStatus status = js_own_shape_slot_status(
-            fn->properties_map, pks->chars, (int)pks->len, &result, NULL);
-        if (status == JS_SHAPE_SLOT_DATA || status == JS_SHAPE_SLOT_ACCESSOR) return result;
+        if (js_own_stored_prototype(fn->properties_map, JS_INTERNAL_PROTO_KEY,
+                JS_INTERNAL_PROTO_KEY_LEN, &result)) return result;
     }
     return ItemNull;
 }
@@ -28018,13 +28105,9 @@ extern "C" Item js_elements_get_custom_proto(Item arr) {
             !js_is_ordinary_numeric_array(arr)) return ItemNull;
     if (!js_array_has_props(arr.array)) return ItemNull;
     Map* pm = js_array_props(arr.array);
-    Item pk = js_get_proto_key();
-    String* pks = it2s(pk);
     Item pm_item = (Item){.map = pm};
     Item result = ItemNull;
-    JsShapeSlotStatus status = js_own_shape_slot_status(
-        pm_item, pks->chars, (int)pks->len, &result, NULL);
-    if (status == JS_SHAPE_SLOT_DATA || status == JS_SHAPE_SLOT_ACCESSOR) return result;
+    if (js_own_stored_prototype(pm_item, "__proto__", 9, &result)) return result;
     return ItemNull;
 }
 
@@ -28223,11 +28306,8 @@ extern "C" Item js_get_prototype(Item object) {
         Item properties = js_error_properties_map(object, false);
         if (get_type_id(properties) == LMD_TYPE_MAP) {
             Item internal_proto = ItemNull;
-            JsShapeSlotStatus internal_status = js_own_shape_slot_status(
-                properties, JS_INTERNAL_PROTO_KEY, JS_INTERNAL_PROTO_KEY_LEN,
-                &internal_proto, NULL);
-            if (internal_status == JS_SHAPE_SLOT_DATA ||
-                    internal_status == JS_SHAPE_SLOT_ACCESSOR) {
+            if (js_own_stored_prototype(properties, JS_INTERNAL_PROTO_KEY,
+                    JS_INTERNAL_PROTO_KEY_LEN, &internal_proto)) {
                 return internal_proto.item == ITEM_JS_UNDEFINED
                     ? ItemNull : internal_proto;
             }
@@ -28245,7 +28325,7 @@ extern "C" Item js_get_prototype(Item object) {
     if (is_virtual_container_type_id(get_type_id(object))) {
         Item host_proto = ItemNull;
         if (js_host_object_prototype(object, &host_proto)) {
-            if (get_type_id(host_proto) == LMD_TYPE_MAP) return host_proto;
+            if (js_is_object_value(host_proto)) return host_proto;
             return ItemNull;
         }
     }
@@ -31490,7 +31570,37 @@ static Item js_promise_call_capability_reject(Item reject, Item reason) {
     return make_js_undefined();
 }
 
-static void js_promise_forward_native_to_capability(Item native_promise, Item resolve, Item reject) {
+static bool js_promise_attach_reaction(Item promise, Item on_fulfilled,
+        Item on_rejected, Item next_promise, Item domain) {
+    JS_ROOTS(roots,
+        promise_root, promise,
+        fulfilled_root, on_fulfilled,
+        rejected_root, on_rejected,
+        next_root, next_promise,
+        domain_root, domain);
+    JsPromise* p = js_get_promise(promise_root.get());
+    if (!p) return false;
+    if (js_is_callable(rejected_root.get())) {
+        js_promise_mark_rejection_handled(p);
+        p = js_get_promise(promise_root.get());
+    }
+    if (p->state == JS_PROMISE_PENDING) {
+        return js_promise_add_reaction(p, fulfilled_root.get(), rejected_root.get(),
+            next_root.get(), domain_root.get());
+    }
+    Item handler = p->state == JS_PROMISE_FULFILLED
+        ? fulfilled_root.get() : rejected_root.get();
+    if (js_is_callable(handler)) {
+        js_promise_enqueue_handler_domain(handler, p->result,
+            next_root.get(), domain_root.get());
+    } else {
+        js_promise_enqueue_passthrough(next_root.get(), p->state,
+            p->result, domain_root.get());
+    }
+    return true;
+}
+
+static bool js_promise_forward_native_to_capability(Item native_promise, Item resolve, Item reject) {
     JS_ROOTS(roots,
         native_root, native_promise,
         resolve_root, resolve,
@@ -31507,7 +31617,9 @@ static void js_promise_forward_native_to_capability(Item native_promise, Item re
     Item reject_arg = reject_root.get();
     reject_fn_root.set(js_bind_function(reject_base_root.get(), ItemNull, &reject_arg, 1));
 
-    js_promise_then(native_root.get(), resolve_fn_root.get(), reject_fn_root.get());
+    // internal forwarding must not consult mutable Promise species and recursively build another capability.
+    return js_promise_attach_reaction(native_root.get(), resolve_fn_root.get(),
+        reject_fn_root.get(), ItemNull, js_domain_get_current());
 }
 
 // PerformPromiseAll/AllSettled/Any/Race. Element handlers settle the result
@@ -32107,44 +32219,18 @@ extern "C" Item js_promise_then(Item promise, Item on_fulfilled, Item on_rejecte
     JsPromise* next = js_alloc_promise();
     if (!next) return ItemNull;
     next_root.set(js_promise_to_item(next));
-    // Promise allocation may compact the GC heap. The source Promise is rooted
-    // above, so reacquire its derived pointer before inspecting state or
-    // appending the reaction; retaining the pre-allocation pointer loses the
-    // chained reaction when the intermediate Promise is the first live edge.
-    p = js_get_promise(promise_root.get());
-    if (!p) return ItemNull;
     if (use_capability) {
-        js_promise_forward_native_to_capability(next_root.get(),
-            capability_resolve_root.get(), capability_reject_root.get());
+        if (!js_promise_forward_native_to_capability(next_root.get(),
+                capability_resolve_root.get(), capability_reject_root.get())) {
+            return js_throw_type_error("Unable to allocate Promise reaction");
+        }
     } else {
         return_promise_root.set(next_root.get());
     }
 
-    if (p->state == JS_PROMISE_PENDING) {
-        // Register callbacks with chained next promise
-        // Reactions are growable GC arrays; the old eight-entry ceiling
-        // silently dropped handlers and violated the Promise job ordering.
-        if (!js_promise_add_reaction(p, fulfilled_root.get(), rejected_root.get(),
-                next_root.get(), reaction_domain_root.get())) {
-            return js_throw_type_error("Unable to allocate Promise reaction");
-        }
-    } else if (p->state == JS_PROMISE_FULFILLED) {
-        if (js_is_callable(fulfilled_root.get())) {
-            // per spec: schedule as microtask even if already resolved
-            js_promise_enqueue_handler_domain(fulfilled_root.get(), p->result,
-                next_root.get(), reaction_domain_root.get());
-        } else {
-            js_promise_enqueue_passthrough(next_root.get(), JS_PROMISE_FULFILLED,
-                p->result, reaction_domain_root.get());
-        }
-    } else {
-        if (js_is_callable(rejected_root.get())) {
-            js_promise_enqueue_handler_domain(rejected_root.get(), p->result,
-                next_root.get(), reaction_domain_root.get());
-        } else {
-            js_promise_enqueue_passthrough(next_root.get(), JS_PROMISE_REJECTED,
-                p->result, reaction_domain_root.get());
-        }
+    if (!js_promise_attach_reaction(promise_root.get(), fulfilled_root.get(),
+            rejected_root.get(), next_root.get(), reaction_domain_root.get())) {
+        return js_throw_type_error("Unable to allocate Promise reaction");
     }
 
     return return_promise_root.get();
@@ -33728,11 +33814,13 @@ static int js_cp_to_utf8(char* buf, uint32_t cp) {
 }
 
 extern "C" Item js_text_decoder_decode(Item decoder, Item input) {
+    RootFrame roots(2);
+    Rooted<Item> decoder_root(roots, decoder), input_root(roots, input);
     // Get encoding from decoder object
     const char* encoding = "utf-8";
     char enc_buf[32] = "utf-8";
-    if (get_type_id(decoder) == LMD_TYPE_MAP) {
-        Item enc_val = js_get_name_key(decoder, "encoding");
+    if (get_type_id(decoder_root.get()) == LMD_TYPE_MAP) {
+        Item enc_val = js_get_name_key(decoder_root.get(), "encoding");
         if (get_type_id(enc_val) == LMD_TYPE_STRING) {
             String* s = it2s(enc_val);
             if (s && s->len > 0 && s->len < 32) {
@@ -33742,21 +33830,24 @@ extern "C" Item js_text_decoder_decode(Item decoder, Item input) {
         }
     }
     bool ignore_bom = false;
-    if (get_type_id(decoder) == LMD_TYPE_MAP) {
-        JS_ASSIGN_OR_RETURN(bom_value, js_get_key_default(decoder, js_runtime_make_string_item("ignoreBOM", 9)));
+    bool fatal = false;
+    if (get_type_id(decoder_root.get()) == LMD_TYPE_MAP) {
+        JS_ASSIGN_OR_RETURN(bom_value, js_get_key_default(decoder_root.get(), js_runtime_make_string_item("ignoreBOM", 9)));
         ignore_bom = it2b(bom_value);
+        JS_ASSIGN_OR_RETURN(fatal_value, js_get_key_cstr(decoder_root.get(), "fatal"));
+        fatal = js_is_truthy(fatal_value);
     }
 
     // Extract raw bytes from input
     uint8_t* bytes = NULL;
     int byte_len = 0;
     uint8_t* heap_buf = NULL;
-    TypeId tid = get_type_id(input);
-    if (tid == LMD_TYPE_MAP && js_is_typed_array(input)) {
-        bytes = (uint8_t*)js_typed_array_current_data_ptr(input);
-        byte_len = js_typed_array_byte_length(input);
-    } else if (tid == LMD_TYPE_MAP && js_is_arraybuffer(input)) {
-        JsArrayBuffer* ab = js_get_arraybuffer_ptr_item(input);
+    TypeId tid = get_type_id(input_root.get());
+    if (tid == LMD_TYPE_MAP && js_is_typed_array(input_root.get())) {
+        bytes = (uint8_t*)js_typed_array_current_data_ptr(input_root.get());
+        byte_len = js_typed_array_byte_length(input_root.get());
+    } else if (tid == LMD_TYPE_MAP && js_is_arraybuffer(input_root.get())) {
+        JsArrayBuffer* ab = js_get_arraybuffer_ptr_item(input_root.get());
         // ArrayBuffer is a BufferSource; treating it as empty dropped valid
         // TextDecoder input and made Uint8Array.buffer decode differently.
         if (ab && !js_arraybuffer_detached(ab)) {
@@ -33764,7 +33855,7 @@ extern "C" Item js_text_decoder_decode(Item decoder, Item input) {
             byte_len = js_arraybuffer_length(ab);
         }
     } else if (tid == LMD_TYPE_ARRAY) {
-        Array* arr = input.array;
+        Array* arr = input_root.get().array;
         if (arr && arr->length > 0) {
             heap_buf = (uint8_t*)mem_alloc(arr->length, MEM_CAT_JS_RUNTIME);
             for (int i = 0; i < arr->length; i++)
@@ -33775,7 +33866,7 @@ extern "C" Item js_text_decoder_decode(Item decoder, Item input) {
     } else if (tid == LMD_TYPE_STRING) {
         // Pass-through if already a string
         if (heap_buf) mem_free(heap_buf);
-        return input;
+        return input_root.get();
     }
 
     if (!bytes || byte_len == 0) {
@@ -33856,7 +33947,28 @@ extern "C" Item js_text_decoder_decode(Item decoder, Item input) {
         int start = 0;
         if (!ignore_bom && byte_len >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF)
             start = 3; // strip UTF-8 BOM
-        result = (Item){.item = s2it(heap_strcpy((char*)bytes + start, byte_len - start))};
+        const char* text = (const char*)bytes + start;
+        size_t length = (size_t)(byte_len - start);
+        if (utf8_valid(text, length)) {
+            result = (Item){.item = s2it(heap_strcpy(text, length))};
+        } else if (fatal) {
+            if (heap_buf) mem_free(heap_buf);
+            return js_throw_type_error("The encoded data is not valid UTF-8");
+        } else {
+            StrBuf* output = strbuf_new();
+            if (!output) { if (heap_buf) mem_free(heap_buf); return ItemError; }
+            // Decode invalid maximal subsequences once instead of publishing raw bytes.
+            for (size_t offset = 0; offset < length;) {
+                uint32_t cp;
+                int consumed = utf8_decode_replacement(text + offset, length - offset, &cp);
+                char encoded[4];
+                size_t written = utf8_encode(cp, encoded);
+                strbuf_append_str_n(output, encoded, written);
+                offset += (size_t)consumed;
+            }
+            result = (Item){.item = s2it(heap_strcpy(output->str, output->length))};
+            strbuf_free(output);
+        }
     }
 
     if (heap_buf) mem_free(heap_buf);

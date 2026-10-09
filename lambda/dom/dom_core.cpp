@@ -375,6 +375,7 @@ extern "C" Item dom_css_supports_operation(Item* args, int argc);
 extern "C" Item dom_css_escape_operation(Item* args, int argc);
 extern "C" Item dom_css_register_property_operation(Item definition);
 extern "C" Item dom_dataset_set_property(Item elem_item, Item prop_name, Item value);
+extern "C" Item dom_dataset_get_property(Item elem_item, Item prop_name);
 extern "C" void dom_event_handler_property_set(Item target, const char* property_name,
                                                 int property_name_len, Item value);
 
@@ -402,6 +403,10 @@ extern "C" Item dom_core_css_register_property(Item definition) {
 // and stays on the JS side, where the proxy exists.
 extern "C" Item dom_core_set_data(Item n, Item name, Item value) {
     return dom_absent_to_null(dom_dataset_set_property(n, name, value));
+}
+
+extern "C" Item dom_core_get_data(Item n, Item name) {
+    return dom_absent_to_null(dom_dataset_get_property(n, name));
 }
 
 // el.onclick = fn. This shares the listener store add_listener and

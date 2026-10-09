@@ -248,6 +248,12 @@ typedef struct FontDatabaseResult {
 // FontFaceEntry — internal storage for registered @font-face descriptors
 // ============================================================================
 
+typedef enum FontFaceLoadState {
+    FONT_FACE_UNLOADED,
+    FONT_FACE_PENDING,
+    FONT_FACE_FAILED
+} FontFaceLoadState;
+
 typedef struct FontFaceEntry {
     // copied from FontFaceDesc at registration time
     char*       family;                 // arena_strdup'd
@@ -263,7 +269,8 @@ typedef struct FontFaceEntry {
 
     // loaded handle (NULL until first load)
     FontHandle* loaded_handle;
-    bool        load_failed;            // every declared source failed in this document
+    bool        has_pending_sources;
+    FontFaceLoadState load_state;
 } FontFaceEntry;
 
 // ============================================================================

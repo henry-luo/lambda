@@ -72,6 +72,8 @@ Item js_construct_entry_bound(Item fn_item, Item* args, int argc,
         Item new_target, uint64_t* result_home, bool args_prerooted);
 Item js_native_construct_via_call_body(Item callee, Item* args, int argc,
     Item new_target, uint64_t* result_home);
+Item js_apply_constructed_default_prototype(Item result,
+    Item new_target, int default_class);
 Item js_typed_array_base_call_body(Item callee, Item this_value,
     Item* args, int argc, uint64_t* result_home);
 Item js_typed_array_base_construct_body(Item callee, Item* args, int argc,

@@ -91,3 +91,17 @@ static inline Item jube_node_object_set(const JubeHostAPI* host, Item object,
                               jube_root_item(value_root));
     return jube_root_item(object_root);
 }
+
+// Pair arrays must own both values before either array allocation or push can collect.
+static inline Item jube_node_array_pair(const JubeHostAPI* host, Item key, Item value) {
+    JubeScopedRoots roots(host, 3);
+    uint64_t* key_root = roots.slot(key);
+    uint64_t* value_root = roots.slot(value);
+    if (!key_root || !value_root) return ItemError;
+    uint64_t* pair_root = roots.slot(host->value->array_new(0));
+    if (!pair_root) return ItemError;
+    Item status = host->value->array_push(jube_root_item(pair_root), jube_root_item(key_root));
+    if (item_is_error(status)) return status;
+    status = host->value->array_push(jube_root_item(pair_root), jube_root_item(value_root));
+    return item_is_error(status) ? status : jube_root_item(pair_root);
+}

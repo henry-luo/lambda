@@ -41,6 +41,26 @@ TEST_F(UrlExtraTest, ComplexUrlParsing) {
     }
 }
 
+TEST_F(UrlExtraTest, BracketedHostsKeepAddressColonsSeparateFromThePort) {
+    const char* invalid[] = {"http://[", "http://[]/", "http://[::1]extra/",
+        "http://example]/", "http://::1/"};
+    for (const char* input : invalid) {
+        Url* url = url_parse(input);
+        EXPECT_EQ(url, nullptr) << input;
+        if (url) url_destroy(url);
+    }
+    Url* url = url_parse("http://[::1]:8080/path");
+    ASSERT_NE(url, nullptr);
+    EXPECT_STREQ(url_get_hostname(url), "[::1]");
+    EXPECT_EQ(url_get_port_number(url), 8080);
+    url_destroy(url);
+    url = url_parse("http://[2001:db8::1]/path");
+    ASSERT_NE(url, nullptr);
+    EXPECT_STREQ(url_get_hostname(url), "[2001:db8::1]");
+    EXPECT_EQ(url_get_port(url), nullptr);
+    url_destroy(url);
+}
+
 TEST_F(UrlExtraTest, SpecialSchemes) {
     Url* url;
     

@@ -1,0 +1,26 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Captured Window closed getter</title></head>
+<body><div id="result">pending</div><button id="observe">Observe close state</button><script>
+const result = document.getElementById('result');
+function check(name, value) { result.setAttribute('data-' + name, String(value)); }
+const descriptor = Object.getOwnPropertyDescriptor(window, 'closed');
+const closed = descriptor.get;
+check('descriptor', typeof closed === 'function' && descriptor.set === undefined &&
+    descriptor.enumerable && descriptor.configurable);
+check('metadata', closed.length === 0 && closed.name === 'get closed');
+check('open', closed.call(window) === false && window.closed === false);
+window.closed = true;
+check('readonly', window.closed === false);
+let forged = 0;
+for (const receiver of [{}, document, Window.prototype]) {
+    try { closed.call(receiver); } catch (error) { if (error instanceof TypeError) forged++; }
+}
+check('forged', forged === 3);
+Object.defineProperty(window, 'closed', {value: 'shadow', configurable: true});
+check('shadow', window.closed === 'shadow' && closed.call(window) === false);
+Object.defineProperty(window, 'closed', descriptor);
+document.getElementById('observe').onclick = () => {
+    check('after-close', closed.call(window) === true && window.closed === true);
+};
+result.textContent = 'complete';
+</script></body></html>

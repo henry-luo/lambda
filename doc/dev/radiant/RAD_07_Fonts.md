@@ -94,6 +94,14 @@ The engine types Radiant reads but never constructs are `FontHandle` (opaque, re
 
 Everything below the handle. Per-codepoint fallback is inside `font_load_glyph` — when the primary face lacks a glyph, the engine resolves a fallback via its own codepoint-fallback cache and `fallback_fonts` chain (`font.h:216-227`); Radiant's only fallback intervention is asking for emoji presentation via `font_load_glyph_emoji`. GPOS/`kern` kerning, COLR (`font_colr.c`) and CBDT/CBLC (`font_cbdt.c`) color-emoji bitmap extraction, WOFF1/WOFF2 decode (`font_decompress.cpp`, the only C++ file in the module, wrapping libwoff2/Brotli), the glyph cache and its generation counter (`font_context_glyph_cache_generation`, `font.h:386`, which invalidates borrowed `GlyphBitmap::buffer` pointers on arena reset), and the platform rasterizer/matcher all live in `lib/font/`. The rasterizer is split by platform: CoreText/CoreGraphics on macOS (`font_rasterize_ct.c`, guarded by `__APPLE__`) versus a custom `glyf`-outline reader (`font_glyf.c`) rasterized through ThorVG on Linux/Windows (`font_rasterize_tvg.cpp`, guarded `#ifndef __APPLE__`), with system font matching via CoreText on macOS and fontconfig (`font_config.c`) / DirectWrite (`font_backend_dwrite.cpp`) elsewhere.
 
+The WOFF2 output adapter grows a `StrBuf` up to libwoff2's output-size limit;
+it does not allocate or limit writes from the advisory `totalSfntSize` header.
+Font Awesome's transformed glyph tables reconstruct beyond that declared size.
+Only a successful decode is copied into the caller's arena or `MEM_CAT_FONT`
+allocation (**D4.2.5v3**), and the scratch buffer is released on either outcome.
+`Woff2Test.DecompressWoff2_InaccurateDeclaredSize` checks identical output for
+understated, zero, and oversized declarations with both destination owners.
+
 ---
 
 ## 5. `@font-face` — parse in Radiant, manage in the engine (`font_face.cpp`)
@@ -103,7 +111,7 @@ Radiant owns `@font-face` *parsing*; the engine owns *management* (matching, loa
 Three entry points feed it:
 
 - `parse_font_face_rule` (`font_face.cpp:97`) — parses a single CSS rule. It resolves the source URL against the document/stylesheet base path, delegates the actual descriptor parse to the CSS module (`css_parse_font_face_content`, `css_resolve_font_url`), converts the result to a `FontFaceDescriptor`, and registers it.
-- `process_font_face_rules_from_stylesheet` (`font_face.cpp:161`) — bulk-processes a stylesheet via `css_extract_font_faces`. It **skips remote sources**: any `http(s)` URL is nulled out (`is_http_url`, `font_face.cpp:17`) because remote web fonts are downloaded asynchronously by the network resource manager, not synchronously here — synchronous download would stall large documents before layout. `is_supported_web_font_source` (`font_face.cpp:21`) gates WOFF2/WOFF/TTF/OTF/TTC. Descriptors with no loadable local source are dropped.
+- `process_font_face_rules_from_stylesheet` — bulk-processes a stylesheet via `css_extract_font_faces`. Completed remote sources retain their order as owned downloaded paths (**D4.5.1v4**). Unfinished URLs are left to the asynchronous network resource manager; no transfer starts here. `radiant_is_supported_web_font_source` gates WOFF2/WOFF/TTF/OTF/TTC. Descriptors with no loadable local source are dropped until a download publishes them.
 - `process_document_font_faces` (`font_face.cpp:264`) — iterates a document's stylesheets, computing the correct base path per stylesheet (`origin_url` handling for plain paths, `file://`, `http(s)`, and relative paths resolved via `file_realpath`) so relative `src:` URLs resolve against the CSS file, not the HTML document.
 
 `local()` entries and URL entries retain their declared order through the CSS
@@ -115,6 +123,26 @@ database retains full names in its versioned disk cache, including faces from
 explicit scan directories. See [CSS Fonts `src`](https://drafts.csswg.org/css-fonts/#src-desc).
 Regression coverage: `FontLocalSourceTest`, CSS parser source-resolution tests,
 and `test/ui/font_face_local_sources.html` (verified 2026-10-09).
+
+During document font registration, completed remote sources are replaced with
+owned copies of their downloaded paths (**D4.5.1v4**), retaining their position
+after any `local()` sources in the original rule. The resource manager's ready
+path accessor checks document admission and never initiates a transfer. Dropping
+the downloaded URL while registering a later local-only copy of the same rule
+would shadow the usable network font. Regression coverage:
+`FontLocalSourceTest.CompletedDownloadStaysAfterLocalNamesInTheOriginalRule` and
+`NetworkResourceManager.AdmissionPrecedesSharedCacheAndReadyContentReuse`.
+
+When a usable remote source is still transferring, the layout registration marks
+its local subset with `has_pending_sources`. Exhausting that subset records
+`FONT_FACE_PENDING`, uses normal fallback, and avoids repeated local lookups;
+it does not report a failed download. Completion publishes a new descriptor and
+advances the font resource generation, allowing the downloaded face to replace
+fallback. `FONT_FACE_FAILED` remains reserved for exhausting a complete source
+list. Regression coverage:
+`FontLocalSourceTest.PendingDownloadUsesFallbackUntilTheHostPublishesItsSource`.
+The manager snapshots pending state under the same lock as the ready path;
+failed, cancelled, absent, and policy-blocked requests never count as pending.
 
 ### 5.1 `register_font_face` — the bridge to the engine
 

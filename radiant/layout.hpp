@@ -120,7 +120,6 @@ constexpr int MAX_LAYOUT_NODES = 50000;
 // final-height passes, so the visit guard scales with the document tree.
 constexpr int MAX_LAYOUT_NODE_VISITS_PER_DOM_NODE = 3;
 constexpr int MAX_FLEX_DEPTH = 16;
-constexpr int MAX_GRID_DEPTH = 4;
 constexpr int MAX_IFRAME_DEPTH = 3;
 constexpr int MAX_MULTICOL_BLOCKS = 1024;
 // browser layout coordinates use a signed 2^25 CSS-pixel range.
@@ -3397,8 +3396,6 @@ typedef struct LayoutContext {
     int depth;
     // Flex-specific nesting depth guard (flex-in-flex recursion)
     int flex_depth;
-    // Grid-specific nesting depth guard (grid-in-grid multipass recursion)
-    int grid_depth;
 
     // CSS Tables 3 §3.10.2 first cell-content layout uses special handling for
     // direct percentage-height descendants while row heights are provisional.
@@ -4093,6 +4090,7 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt);
 void layout_svg_foreign_object(LayoutContext* lycon, DomElement* element, float width, float height);
 void layout_svg_foreign_objects(LayoutContext* lycon, DomElement* element, unsigned depth = 0);
 bool is_only_whitespace(const char* str);
+bool should_collapse_inter_element_whitespace(DomNode* text_node);
 
 static inline bool layout_suppress_ignorable_container_text(DomNode* node) {
     if (!node || !node->is_text()) return false;

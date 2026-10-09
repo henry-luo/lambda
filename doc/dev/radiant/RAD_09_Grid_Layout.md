@@ -19,6 +19,8 @@ Radiant's computed grid model is the C+ port of the Rust [Taffy](https://github.
 
 `grid_enhanced_adapter.hpp` retains its historical filename, but it is now integration code rather than a computed-model adapter. It converts parsed sizing functions and hosts the two live drivers: `place_items_with_occupancy` and `run_enhanced_track_sizing`. Both operate on the canonical structures in place.
 
+Nested grid passes use the shared `LayoutContext.depth` / `MAX_LAYOUT_DEPTH` native-stack guard (**D5.1.1v3**), including direct grid-item recursion that bypasses `layout_flow_node`. Grid scratch is pass-owned; the legacy four-level limit assumed an obsolete 1.5 MB optimized frame. The current optimized frame is approximately 1.6 KB. The headless-view regression covers a twelve-level auto-sized grid whose leaf must be laid out, and a four-hundred-level grid with definite sizes that must stop safely at the shared limit.
+
 ---
 
 ## 2. The data model

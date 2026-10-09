@@ -4,6 +4,7 @@
 #include "../lib/font/font.h"  // unified font module — font_face_register, font_family_exists
 #include "../lambda/input/css/css_style.hpp"
 #include "../lambda/input/css/css_font_face.hpp"
+#include "../lambda/network/network_resource_manager.h"
 extern "C" {
 #include "../lib/url.h"
 #include "../lib/memtrack.h"
@@ -35,24 +36,31 @@ bool radiant_is_supported_web_font_source(const char* url, const char* format) {
            url_text_path_has_ext_ci(url, "ttc");
 }
 
-static void resolve_missing_font_source_path(char** source, const char* base_path) {
-    if (!source || !*source || !base_path || radiant_url_is_http(*source) ||
+static bool resolve_font_source_path(char** source, const char* base_path,
+                                     NetworkResourceManager* resource_manager,
+                                     const char* format) {
+    if (!source || !*source ||
         strncmp(*source, "data:", 5) == 0) {
-        return;
+        return false;
     }
 
-    char resolved[2048];
-    if (!radiant_resolve_layout_relative_resource_path(
-            *source, base_path, resolved, sizeof(resolved))) {
-        return;
+    char* replacement = nullptr;
+    bool pending = false;
+    if (radiant_url_is_http(*source)) {
+        if (!radiant_is_supported_web_font_source(*source, format)) return false;
+        // keep downloaded URLs in the original src list; a later local-only
+        // registration otherwise shadows the completed network face.
+        replacement = resource_manager_copy_ready_resource_path(resource_manager, *source, &pending);
+    } else {
+        char resolved[2048];
+        if (!base_path || !radiant_resolve_layout_relative_resource_path(
+                *source, base_path, resolved, sizeof(resolved))) return false;
+        replacement = mem_strdup(resolved, MEM_CAT_FONT);
     }
-
-    // the mirrored WPT HTML may not carry its support directory; keep the
-    // declared font family but point the source at the canonical local asset.
-    char* replacement = mem_strdup(resolved, MEM_CAT_FONT);
-    if (!replacement) return;
+    if (!replacement) return pending;
     lam::Temp<char> previous(*source);  // the replacement takes the slot
     *source = replacement;
+    return false;
 }
 
 // Text flow logging categories
@@ -166,7 +174,8 @@ void parse_font_face_rule(LayoutContext* lycon, void* rule) {
 }
 
 // Process all @font-face rules from a stylesheet - uses css_font_face.hpp module
-void process_font_face_rules_from_stylesheet(UiContext* uicon, CssStylesheet* stylesheet, const char* base_path, bool data_only) {
+void process_font_face_rules_from_stylesheet(UiContext* uicon, CssStylesheet* stylesheet,
+        const char* base_path, bool data_only, NetworkResourceManager* resource_manager) {
     if (!uicon || !stylesheet) {
         return;
     }
@@ -187,12 +196,17 @@ void process_font_face_rules_from_stylesheet(UiContext* uicon, CssStylesheet* st
     for (int i = 0; i < count; i++) {
         CssFontFaceDescriptor* css_desc = css_descs[i];
         if (!css_desc) continue;
+        bool has_pending_sources = false;
 
-        resolve_missing_font_source_path(&css_desc->src_url, base_path);
+        // only the ordered list retains format hints; its scalar compatibility
+        // URL must not reintroduce an unsupported source after list filtering.
+        has_pending_sources |= resolve_font_source_path(&css_desc->src_url, base_path,
+            !data_only && css_desc->src_count == 0 ? resource_manager : nullptr, nullptr);
         if (css_desc->src_urls) {
             for (int j = 0; j < css_desc->src_count; j++) {
                 if (!css_desc->src_urls[j].is_local)
-                    resolve_missing_font_source_path(&css_desc->src_urls[j].url, base_path);
+                    has_pending_sources |= resolve_font_source_path(&css_desc->src_urls[j].url, base_path,
+                        data_only ? nullptr : resource_manager, css_desc->src_urls[j].format);
             }
         }
 
@@ -257,7 +271,7 @@ void process_font_face_rules_from_stylesheet(UiContext* uicon, CssStylesheet* st
 
 
 
-            register_font_face(uicon, descriptor);
+            register_font_face(uicon, descriptor, has_pending_sources);
         }
 
         css_font_face_descriptor_free(css_desc);
@@ -293,12 +307,13 @@ void process_document_font_faces(UiContext* uicon, DomDocument* doc) {
                 doc_base_path, false, MEM_CAT_FONT) : nullptr);
         if (stylesheet_path) base_path = stylesheet_path.get();
 
-        process_font_face_rules_from_stylesheet(uicon, stylesheet, base_path);
+        process_font_face_rules_from_stylesheet(uicon, stylesheet, base_path, false,
+            doc->resource_manager);
     }
     doc->font_faces_processed = true;
 }
 
-void register_font_face(UiContext* uicon, FontFaceDescriptor* descriptor) {
+void register_font_face(UiContext* uicon, FontFaceDescriptor* descriptor, bool has_pending_sources) {
     if (!uicon || !descriptor) {
         clog_error(font_log, "Invalid parameters for register_font_face");
         return;
@@ -373,6 +388,7 @@ void register_font_face(UiContext* uicon, FontFaceDescriptor* descriptor) {
         face_desc.source_count = src_count;
         face_desc.unicode_ranges = descriptor->unicode_ranges;
         face_desc.unicode_range_count = descriptor->unicode_range_count;
+        face_desc.has_pending_sources = has_pending_sources;
 
         if (font_face_register(uicon->font_ctx, &face_desc)) {
             clog_debug(font_log, "register_font_face: bridged to unified font module for '%s'",

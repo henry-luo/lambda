@@ -162,6 +162,31 @@ size_t utf8_count(const char* s, size_t len) {
     return count;
 }
 
+int utf8_decode_replacement(const char* s, size_t len, uint32_t* out) {
+    int decoded = utf8_decode(s, len, out);
+    if (decoded > 0 || !s || !len || !out) return decoded;
+    *out = 0xFFFD;
+    unsigned char lead = (unsigned char)s[0];
+    int width = lead >= 0xC2 && lead <= 0xDF ? 2 :
+        lead >= 0xE0 && lead <= 0xEF ? 3 :
+        lead >= 0xF0 && lead <= 0xF4 ? 4 : 1;
+    int consumed = 1;
+    // Reconsume an invalid continuation; a valid truncated prefix is one error.
+    while (consumed < width && (size_t)consumed < len) {
+        unsigned char byte = (unsigned char)s[consumed];
+        unsigned char lower = 0x80, upper = 0xBF;
+        if (consumed == 1) {
+            if (lead == 0xE0) lower = 0xA0;
+            if (lead == 0xED) upper = 0x9F;
+            if (lead == 0xF0) lower = 0x90;
+            if (lead == 0xF4) upper = 0x8F;
+        }
+        if (byte < lower || byte > upper) break;
+        consumed++;
+    }
+    return consumed;
+}
+
 bool utf8_valid(const char* s, size_t len) {
     if (!s) return true;
     size_t i = 0;
