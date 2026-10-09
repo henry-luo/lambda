@@ -767,15 +767,25 @@ HPDF_STATUS HPDF_Page_SetRGBStroke(HPDF_Page page, float r, float g, float b) {
     return HPDF_OK;
 }
 
-HPDF_STATUS HPDF_Page_SetLineWidth(HPDF_Page page, float width) {
-    if (!page) return HPDF_ERROR_INVALID_PARAM;
-    
-    page->line_width = width;
-    
-    pdf_format_float(page->content, width);
-    strbuf_append_str(page->content, " w\n");
-    
+static HPDF_STATUS pdf_page_scalar_operator(HPDF_Page page, float value, const char* operation) {
+    if (!page || !isfinite(value)) return HPDF_ERROR_INVALID_PARAM;
+    pdf_format_float(page->content, value);
+    strbuf_append_str(page->content, operation);
     return HPDF_OK;
+}
+HPDF_STATUS HPDF_Page_SetLineWidth(HPDF_Page page, float width) {
+    if (width < 0 || pdf_page_scalar_operator(page, width, " w\n") != HPDF_OK) return HPDF_ERROR_INVALID_PARAM;
+    page->line_width = width;
+    return HPDF_OK;
+}
+HPDF_STATUS HPDF_Page_SetLineCap(HPDF_Page page, int cap) {
+    return cap < 0 || cap > 2 ? HPDF_ERROR_INVALID_PARAM : pdf_page_scalar_operator(page, (float)cap, " J\n");
+}
+HPDF_STATUS HPDF_Page_SetLineJoin(HPDF_Page page, int join) {
+    return join < 0 || join > 2 ? HPDF_ERROR_INVALID_PARAM : pdf_page_scalar_operator(page, (float)join, " j\n");
+}
+HPDF_STATUS HPDF_Page_SetMiterLimit(HPDF_Page page, float limit) {
+    return limit < 1 ? HPDF_ERROR_INVALID_PARAM : pdf_page_scalar_operator(page, limit, " M\n");
 }
 
 HPDF_ExtGState HPDF_CreateExtGState(HPDF_Doc doc) {
@@ -909,6 +919,9 @@ static HPDF_STATUS pdf_page_paint_operator(HPDF_Page page, const char* operation
 
 HPDF_STATUS HPDF_Page_Fill(HPDF_Page page) {
     return pdf_page_paint_operator(page, "f\n");
+}
+HPDF_STATUS HPDF_Page_Eofill(HPDF_Page page) {
+    return pdf_page_paint_operator(page, "f*\n");
 }
 
 HPDF_STATUS HPDF_Page_Stroke(HPDF_Page page) {

@@ -1,0 +1,8 @@
+{
+  "name": "lambda-native-map-reference",
+  "private": true,
+  "description": "Pinned upstream style evaluator used only for native map acceptance",
+  "dependencies": {
+    "@maplibre/maplibre-gl-style-spec": "26.4.4"
+  }
+}

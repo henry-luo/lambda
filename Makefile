@@ -64,7 +64,7 @@ DOM_UI_JOBS ?= $(shell n=$(NPROCS); if [ "$$n" -gt 1 ]; then echo $$((n - 1)); e
 LAYOUT_TEST_ENV ?= LAMBDA_AUTO_CLOSE=1 LAMBDA_POST_LOAD_SETTLE_MS=200
 # Ranges and reflection remain extended `make test` coverage; their large
 # known-failure inventories are not part of the fast Radiant baseline gate.
-RADIANT_BASELINE_TEST_PROJECTS := test_scene3d_gtest test_ui_automation_gtest test_page_load_gtest test_css_cascade_memory_gtest test_radiant_view_gtest test_rdt_vector_gtest test_layout_fuzzy_gtest test_wpt_css_syntax_gtest test_wpt_input_events_gtest test_view_reuse_gtest
+RADIANT_BASELINE_TEST_PROJECTS := test_scene3d_gtest test_map_gtest test_ui_automation_gtest test_page_load_gtest test_css_cascade_memory_gtest test_radiant_view_gtest test_rdt_vector_gtest test_layout_fuzzy_gtest test_wpt_css_syntax_gtest test_wpt_input_events_gtest test_view_reuse_gtest
 RADIANT_DOM2_WPT_RUNNERS := input_events
 # These are the native projects selected by test-lambda-baseline. Keep this
 # list aligned with the runner's non-extended config projects; otherwise a
@@ -678,6 +678,9 @@ help:
 	@echo "  test-mathcmp     - Compare Lambda math PNGs against pdfLaTeX (ARGS='--case Functions')"
 	@echo "  test-radiant-baseline - Run shared layout baselines ($(LAYOUT_BASELINE_SUITES)) + render visual + other checks"
 	@echo "  test-ui-dtna        - Run dtna catalog, tier contracts and native interaction tests"
+	@echo "  test-map            - Run native geomap rendering/input and Lambda package tests"
+	@echo "  test-map-export     - Verify native map PNG/SVG/PDF geometry and vector output"
+	@echo "  test-map-reference  - Compare native expressions with pinned MapLibre style-spec"
 	@echo "  test-svg-export     - Verify portable SVG/PDF fixture exports at 1x and 2x"
 	@echo "  test-svg-paint      - Verify P7/P10 raster fixtures at 1x and 2x (ARGS=--browser --references)"
 	@echo "  test-svg-smil       - Verify controlled-time SMIL UI fixtures at 1x and 2x"
@@ -2159,12 +2162,19 @@ run-layout-baseline-suites:
 
 test-radiant-baseline: build-radiant-baseline
 	@./test/test_scene3d_gtest.exe
+	@./test/test_map_gtest.exe
 	@./test/test_view_reuse_gtest.exe --gtest_filter='SecondaryViewTest.*:PagedCssTest.*:TypesetTest.*:ViewModelOptionsTest.*:FontPathTest.*:FontMetricTest.*:ResourceAdmissionTest.*'
 	@$(MAKE) --no-print-directory run-radiant-baseline
 
 .PHONY: test-scene3d
 test-scene3d: build-radiant-baseline
 	@./test/test_scene3d_gtest.exe
+
+.PHONY: test-map
+test-map: build-radiant-baseline
+	@./test/test_map_gtest.exe
+	@$(MAKE) -C build/premake config=debug_native test_lambda_gtest -j$(TEST_JOBS) CC="$(CC)" CXX="$(CXX)" AR="$(AR)" RANLIB="$(RANLIB)"
+	@./test/test_lambda_gtest.exe --gtest_filter='AutoDiscovered/*map_*'
 
 # Shipped dtna source contracts plus native pointer/keyboard interaction.
 .PHONY: test-ui-dtna
@@ -2176,6 +2186,16 @@ test-ui-dtna: build
 	@for tier in interp jit; do \
 		LAMBDA_EXEC_BACKEND=$$tier ./test/test_ui_automation_gtest.exe --suite dtna $(ARGS) || exit $$?; \
 	done
+
+# Requires test/render Node dependencies, librsvg and Poppler.
+.PHONY: test-map-export
+test-map-export: build
+	@node test/map/check_exports.cjs
+
+# Install the exact reference evaluator with npm ci --prefix test/map first.
+.PHONY: test-map-reference
+test-map-reference: build
+	@node test/map/check_expressions.cjs
 
 # Requires test/render Node dependencies, Chromium and Poppler's pdftocairo/pdfimages.
 test-svg-export: build

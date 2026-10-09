@@ -24,7 +24,8 @@ Lambda ships a set of **packages**: libraries written in Lambda Script itself, d
 8. [pdf — PDF Rendering](#8-pdf--pdf-rendering)
 9. [openapi — OpenAPI Tools](#9-openapi--openapi-tools)
 10. [Engine Packages: edit, editor, dom, doc](#10-engine-packages-edit-editor-dom-doc)
-11. [Tests](#11-tests)
+11. [map — Geographic Maps](#11-map--geographic-maps)
+12. [Tests](#12-tests)
 
 ---
 
@@ -34,6 +35,7 @@ Lambda ships a set of **packages**: libraries written in Lambda Script itself, d
 |---------|-------------|--------|--------------|-----------------|
 | `ui.dtna` | `lambda.ui.dtna` | Experimental, initial native subset | Ant-inspired components, scoped tokens and native interaction; see [Lambda UI](Lambda_UI.md) | `lambda view test/ui/dtna_gallery.ls` |
 | `chart` | `lambda.chart.chart`, `lambda.chart.vega`, `lambda.chart.wordcloud` | Library | Declarative charts and weighted word clouds, rendered as SVG elements | No command of its own; `lambda render` and `lambda view` display a script whose result is a chart |
+| `map` | `lambda.map` | Library, initial offline subset | Native `<geomap>` viewports with typed GeoJSON, camera interaction, feature queries and vector export | `lambda render` and `lambda view` display a script whose result is a map |
 | `graph` | `lambda.graph.layout`, `lambda.graph.transform`, `lambda.graph.structurizr.structurizr` | Library | Layered graph layout, and diagram rendering for Mermaid, Graphviz DOT, D2 and Structurizr sources | `lambda render`, `view`, `layout` and `convert -t html` on `.mmd`, `.dot`/`.gv`, `.d2`, `.dsl`/`.structurizr` |
 | `math` | `lambda.doc.math.math` | Library | Typesets LaTeX math as HTML | Markdown math in `lambda view`, `layout` and `render`; math inside LaTeX documents |
 | `latex` | `lambda.latex.latex` | Library | Renders LaTeX documents as HTML | `lambda convert x.tex -t html`; `lambda view`, `layout` and `render` on `.tex`/`.latex` |
@@ -79,6 +81,7 @@ The `lambda.*` root is reserved for everything Lambda ships (D7.2.4). Shipped pa
 | `lambda.<package>.<module>` | `<LAMBDA_HOME>/package/<package>/<module>.ls` |
 | `lambda.ui.dtna` | `<LAMBDA_HOME>/package/ui/dtna.ls` (explicit public module) |
 | `lambda.slide` | `<LAMBDA_HOME>/package/slide.ls` (explicit public module) |
+| `lambda.map` | `<LAMBDA_HOME>/package/map.ls` (explicit public module) |
 | `lambda.<package>.<dir>.<module>` | `<LAMBDA_HOME>/package/<package>/<dir>/<module>.ls` |
 | `lambda.doc.math.<module>` | `<LAMBDA_HOME>/package/math/<module>.ls` |
 | `lambda.math`, `lambda.io` | The built-in `math` and `io` modules, which are not packages |
@@ -976,7 +979,67 @@ comes from `package/math/`. These application resources belong to the shipped
 
 ---
 
-## 11. Tests
+## 11. `map` — Geographic Maps
+
+`lambda.map` is an explicit public package entry under D7.2.4. It produces a
+native Radiant `<geomap>` viewport. The initial implementation accepts inline,
+typed GeoJSON and a bounded subset of MapLibre Style Specification version 8:
+ordered `background`, `fill`, `line` and `circle` layers with hex/transparent
+colors, opacity, line width, circle radius, visibility and zoom limits.
+Paint expressions and boolean feature filters use the shared native evaluator.
+
+```lambda
+import maps: lambda.map
+
+let point = {type: "Feature", id: "origin", properties: {},
+    geometry: {type: "Point", coordinates: [0, 0]}};
+let spec = maps.geomap([
+    maps.source("places", point),
+    maps.layer("background", "background", null, {'background-color': "#eef3f6"}),
+    maps.layer("places", "circle", "places", {'circle-color': "#e63946", 'circle-radius': 8})
+], {width: 400, height: 240, center: [0, 0], zoom: 2});
+
+maps.interactive(spec)
+```
+
+Use `spec` directly for a static viewport. `interactive(spec)` applies a reactive
+view with independent camera state, captured pointer dragging, wheel zoom, and
+arrow/plus/minus keyboard navigation. Retain `model(spec)` and `apply` it to
+preserve that view's state across parent rerenders (S12.1.1v2, S12.1.3).
+
+| Function | Result |
+|---|---|
+| `geomap(children, options = {})`, `source(id, data)`, `layer(id, kind, source = null, paint = {}, layout = {})` | Construct typed map elements |
+| `normalize(model)`, `validate(model)` | A normalized map / `true`, or an ordinary error value for invalid or unsupported input (S7.4.1) |
+| `from_style(style, options = {})` | Convert the supported version 8 style subset into `<geomap>` |
+| `project(camera, position)`, `unproject(camera, point)` | Convert longitude/latitude degrees and viewport CSS pixels |
+| `fit_bounds(camera, bounds, padding = 0.0)`, `update(camera, event)` | Return a new camera; bounds may cross the dateline |
+| `query_source(model, source_id)`, `query_rendered(model, point, options = {})` | Source features / painted hits from the current model; rendered queries scan in reverse paint order |
+| `model(spec)`, `interactive(spec)` | A reactive view model / its applied native viewport |
+| `to_svg(model, viewport = null)` | An SVG element from the same native paint compiler (D7.5.3) |
+
+The camera uses Web Mercator, fractional zoom from −2 to 22, bearing, zero pitch
+and one world copy. Geographic calculations use a 512 CSS pixel world at zoom
+zero; device density changes raster resolution independently. Document PNG,
+SVG and PDF export use the native renderer. `to_svg` can supply an explicit
+`{width, height}` viewport.
+
+Supported expressions include `literal`, `get`, `has`, `id`, `geometry-type`,
+`zoom`, `coalesce`, comparisons, `all`, `any`, `!`, `case`, `match`, `step`,
+numeric linear `interpolate`, and `number`/`string`/`boolean` assertions.
+Paint zoom belongs at the input of an outer `step` or `interpolate`; filters
+use integer zoom. Invalid runtime property values use property defaults and
+produce diagnostics. Static type errors return ordinary errors (S7.4.1).
+The [supported manifest](../test/map/README.md) records limits and reference tests.
+
+URL/tile sources, MVT, symbols and labels remain open. Rendered queries use a linear scan of the current model;
+they do not expose a retained frame or spatial index. Interaction supports
+axis-aligned CSS scaling/translation; arbitrary rotated/skewed/perspective
+input mapping remains open. JavaScript support is Phase 2. See the
+[implementation record](../vibe/impl/Lambda_Impl_Map.md) for coverage, limits,
+engine prerequisites and validation evidence.
+
+## 12. Tests
 
 A `.ls` script in these directories runs in the Lambda runtime test suite (`test/test_lambda_gtest.exe`) when it has an expected-output `.txt` file beside it; the `test/ui/` event scripts run in the UI automation suite.
 
@@ -984,6 +1047,7 @@ A `.ls` script in these directories runs in the Lambda runtime test suite (`test
 |---------|-------|
 | `chart` | `test/lambda/chart/` |
 | `ui.dtna` | `test/lambda/ui_dtna/`; native UI fixtures in `test/ui/dtna/` (`make test-ui-dtna`) |
+| `map` | `test/lambda/map/`; native rendering and input in `test/test_map_gtest.cpp`; PNG/SVG/PDF fixtures in `test/map/` (`make test-map`, `make test-map-export`) |
 | `graph` | `test/lambda/graph/mermaid/`, `test/lambda/graph/graphviz/`, `test/lambda/graph/structurizr/`; `test/lambda/graph_layout*.ls` and `test/lambda/graph_transform_*.ls` |
 | `math` | `test/lambda/math/` |
 | `latex` | `test/lambda/latex/` |

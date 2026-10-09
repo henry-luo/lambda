@@ -8,6 +8,7 @@ bool layout_tag_is_replaced_content(NameId tag) {
         case MARKUP_NAME_CANVAS:
         case MARKUP_NAME_SVG:
         case MARKUP_NAME_SCENE3D:
+        case MARKUP_NAME_GEOMAP:
         case MARKUP_NAME_EMBED:
             return true;
         default:
@@ -36,7 +37,8 @@ bool layout_tag_is_css_replaced(NameId tag) {
         tag == MARKUP_NAME_TEXTAREA || tag == MARKUP_NAME_IFRAME ||
         tag == MARKUP_NAME_HR || tag == MARKUP_NAME_METER ||
         tag == MARKUP_NAME_PROGRESS || tag == MARKUP_NAME_CANVAS ||
-        tag == MARKUP_NAME_WEBVIEW || tag == MARKUP_NAME_EMBED || tag == MARKUP_NAME_SCENE3D;
+        tag == MARKUP_NAME_WEBVIEW || tag == MARKUP_NAME_EMBED ||
+        tag == MARKUP_NAME_SCENE3D || tag == MARKUP_NAME_GEOMAP;
 }
 
 bool layout_tag_is_non_caret_container(NameId tag, bool include_button) {
@@ -58,7 +60,7 @@ bool layout_tag_is_default_inline(NameId tag) {
         MARKUP_NAME_BDI, MARKUP_NAME_BDO, MARKUP_NAME_CODE, MARKUP_NAME_TT,
         MARKUP_NAME_KBD, MARKUP_NAME_SAMP, MARKUP_NAME_BR, MARKUP_NAME_LABEL,
         MARKUP_NAME_IMG, MARKUP_NAME_VIDEO, MARKUP_NAME_AUDIO, MARKUP_NAME_CANVAS,
-        MARKUP_NAME_IFRAME, MARKUP_NAME_EMBED, MARKUP_NAME_OBJECT, MARKUP_NAME_SVG, MARKUP_NAME_SCENE3D,
+        MARKUP_NAME_IFRAME, MARKUP_NAME_EMBED, MARKUP_NAME_OBJECT, MARKUP_NAME_SVG, MARKUP_NAME_SCENE3D, MARKUP_NAME_GEOMAP,
         MARKUP_NAME_METER, MARKUP_NAME_PROGRESS, MARKUP_NAME_BUTTON,
         MARKUP_NAME_INPUT, MARKUP_NAME_SELECT, MARKUP_NAME_TEXTAREA
     };

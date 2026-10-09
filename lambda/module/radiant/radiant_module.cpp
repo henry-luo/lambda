@@ -1,6 +1,7 @@
 #include "../../jube/jube_registry.h"
 #include "../../input/css/dom_element.hpp"
 #include "../../io/input-allocation-context.h"
+#include "../../core/mark_reader.hpp"
 #include "../../runtime/lambda-error.h"
 #include "../../runtime/interp.hpp"
 #include "../../runtime/transpiler.hpp"
@@ -10,6 +11,9 @@
 #include "../../../lib/tagged.hpp"
 #include "../../../radiant/layout.hpp"
 #include "../../../radiant/render.hpp"
+#include "../../../radiant/geomap.hpp"
+#include "../../../radiant/geomap_style.hpp"
+#include "../../../lib/color.h"
 #include "../../../radiant/event.hpp"
 #include "../../../radiant/radiant.hpp"
 #include "../../../radiant/audio.hpp"
@@ -3360,6 +3364,79 @@ RADIANT_C_API Item fn_radiant_layout(Item node_item) {
     return radiant_bool_item(ok);
 }
 
+RADIANT_C_API Item fn_radiant_geomap_validate_layer(Item layer_item) {
+    RootFrame roots(1); Rooted<Item> layer(roots, layer_item);
+    ItemReader description(layer.get().to_const());
+    if (!description.isElement()) return radiant_string_item("expected a layer element");
+    GeoMapStyle style; char diagnostic[256];
+    if (!geomap_style_compile(description.asElement(), &style, diagnostic, sizeof(diagnostic)))
+        return radiant_string_item(diagnostic);
+    geomap_style_destroy(&style);
+    return ItemNull;
+}
+
+static Item radiant_geomap_paint_record(const GeoMapStyleResult& paint, unsigned dependencies) {
+    RootFrame roots(1); Rooted<Item> result(roots, radiant_obj_new());
+    radiant_rooted_obj_set(result, "visible", radiant_bool_item(paint.visible));
+    radiant_rooted_obj_set(result, "alpha", radiant_int_item(paint.color.a));
+    radiant_rooted_obj_set(result, "size", radiant_float_item(paint.size));
+    radiant_rooted_obj_set(result, "warnings", radiant_int_item(paint.warnings));
+    radiant_rooted_obj_set(result, "dependencies", radiant_int_item(dependencies));
+    char color[8]; color_format_hex(paint.color.r, paint.color.g, paint.color.b, color);
+    radiant_rooted_obj_set(result, "color", radiant_string_item(color));
+    return result.get();
+}
+
+static Item radiant_geomap_evaluate(Item layer_item, Item feature_item, Item zoom_item, bool batch) {
+    RootFrame roots(3); Rooted<Item> layer(roots, layer_item), feature(roots, feature_item);
+    ItemReader description(layer.get().to_const()), features(feature.get().to_const()); double zoom;
+    if (!description.isElement() || !item_try_to_double(zoom_item, &zoom) || !isfinite(zoom) ||
+        (batch && (!features.isArray() || features.asArray().length() > 16384)))
+        return radiant_string_item("invalid layer, zoom or feature batch");
+    GeoMapStyle style; char diagnostic[256];
+    if (!geomap_style_compile(description.asElement(), &style, diagnostic, sizeof(diagnostic)))
+        return radiant_string_item(diagnostic);
+    if (!batch) {
+        GeoMapStyleResult paint;
+        geomap_style_evaluate(&style, features, zoom, &paint);
+        unsigned dependencies = style.dependencies;
+        geomap_style_destroy(&style);
+        return radiant_geomap_paint_record(paint, dependencies);
+    }
+    int64_t count = features.asArray().length();
+    Rooted<Item> result(roots, radiant_array_new_item((int)count));
+    // both borrowed inputs remain precisely rooted while result records allocate.
+    for (int64_t i = 0; i < count; i++) {
+        GeoMapStyleResult paint;
+        geomap_style_evaluate(&style, features.asArray().get(i), zoom, &paint);
+        Item record = radiant_geomap_paint_record(paint, style.dependencies);
+        radiant_array_push_item(result.get(), record);
+    }
+    geomap_style_destroy(&style);
+    return result.get();
+}
+RADIANT_C_API Item fn_radiant_geomap_eval_layer(Item layer, Item feature, Item zoom) {
+    return radiant_geomap_evaluate(layer, feature, zoom, false);
+}
+RADIANT_C_API Item fn_radiant_geomap_eval_features(Item layer, Item features, Item zoom) {
+    return radiant_geomap_evaluate(layer, features, zoom, true);
+}
+
+RADIANT_C_API Item fn_radiant_geomap_svg(Item model_item, Item width_item, Item height_item) {
+    RootFrame roots(1); Rooted<Item> model(roots, model_item);
+    double width, height;
+    ItemReader description(model.get().to_const());
+    if (!description.isElement() || !description.asElement().hasTag("geomap") ||
+        !item_try_to_double(width_item, &width) || !item_try_to_double(height_item, &height) ||
+        !isfinite(width) || !isfinite(height) || width <= 0 || height <= 0 || width > 1048576 || height > 1048576)
+        return ItemNull;
+    StrBuf* svg = geomap_svg((Element*)model.get().element, (float)width, (float)height);
+    if (!svg) return ItemNull;
+    Item result = radiant_string_item(svg->str);
+    strbuf_free(svg);
+    return result;
+}
+
 RADIANT_C_API Item fn_radiant_render_svg(Item html_item, Item width_item, Item height_item) {
     const char* html_source = fn_to_cstr(html_item);
     int viewport_width = 0;
@@ -4441,6 +4518,14 @@ static const JubeFuncDef radiant_functions[] = {
      "Item fn_radiant_layout(Item node)", (fn_ptr)fn_radiant_layout},
     {"render_svg", "fn(html: string, width: int, height: int) -> string|null", (fn_ptr)fn_radiant_render_svg, JUBE_FN_NONE,
      "Item fn_radiant_render_svg(Item html, Item width, Item height)", (fn_ptr)fn_radiant_render_svg},
+    {"geomap_validate_layer", "fn(layer: element) -> string|null", (fn_ptr)fn_radiant_geomap_validate_layer, JUBE_FN_NONE,
+     "Item fn_radiant_geomap_validate_layer(Item layer)", (fn_ptr)fn_radiant_geomap_validate_layer},
+    {"geomap_eval_layer", "fn(layer: element, feature: map, zoom: number) -> map|string", (fn_ptr)fn_radiant_geomap_eval_layer, JUBE_FN_NONE,
+     "Item fn_radiant_geomap_eval_layer(Item layer, Item feature, Item zoom)", (fn_ptr)fn_radiant_geomap_eval_layer},
+    {"geomap_eval_features", "fn(layer: element, features: array, zoom: number) -> array|string", (fn_ptr)fn_radiant_geomap_eval_features, JUBE_FN_NONE,
+     "Item fn_radiant_geomap_eval_features(Item layer, Item features, Item zoom)", (fn_ptr)fn_radiant_geomap_eval_features},
+    {"geomap_svg", "fn(model: element, width: number, height: number) -> string|null", (fn_ptr)fn_radiant_geomap_svg, JUBE_FN_NONE,
+     "Item fn_radiant_geomap_svg(Item model, Item width, Item height)", (fn_ptr)fn_radiant_geomap_svg},
     {"measure_svg_text", "fn(html: string, width: int, height: int) -> array|null", (fn_ptr)fn_radiant_measure_svg_text, JUBE_FN_NONE,
      "Item fn_radiant_measure_svg_text(Item html, Item width, Item height)", (fn_ptr)fn_radiant_measure_svg_text},
     {"measure_text", "fn(requests: array, faces: array|null) -> array|null", (fn_ptr)fn_radiant_measure_text, JUBE_FN_NONE,

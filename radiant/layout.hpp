@@ -21,7 +21,7 @@ typedef struct LayoutContext LayoutContext;
 
 // native scene viewports share SVG intrinsic sizing without adopting its DOM namespace.
 inline bool layout_is_svg_viewport(NameId tag) {
-    return tag == MARKUP_NAME_SVG || tag == MARKUP_NAME_SCENE3D;
+    return tag == MARKUP_NAME_SVG || tag == MARKUP_NAME_SCENE3D || tag == MARKUP_NAME_GEOMAP;
 }
 
 
