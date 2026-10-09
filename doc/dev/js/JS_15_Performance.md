@@ -145,6 +145,22 @@ capture was 65 MiB at C0 and 68 MiB at C8 (about +4.6%).
 
 ### 2.4 Runtime builtin tier
 
+- **Guarded packed-array splice.** After length/index coercion and species
+  construction, `js_array_try_fast_splice` revalidates the captured length and
+  admits only extensible packed tagged arrays with writable lengths, clean
+  indexed prototypes, no descriptor companions, and no scalar-home tails.
+  Precisely rooted owners reserve both buffers before a no-GC word shift
+  (**D5.3.3**). Holes, inherited setters, custom species, coercion mutations,
+  and out-of-band scalar ownership keep the shared property algorithm. The
+  real Kafka Lunr index exposed repeated `Vector.insert` shifts; its isolated
+  1,000-insert probe fell from 8,805 ms in release to 15 ms in optimized
+  `release_profile`. With scalable TypeMap indexes and negative-lookup fixes
+  (**D3.4.3v5**, **D3.4.4v4**), the actual 107-document corpus fell from
+  364,516 ms to 58,227 ms in ordinary release builds, retaining the same 104
+  query matches and zero tracked shutdown allocations. The Kafka page also
+  completes under the unchanged online watchdog. These runs include
+  concurrent build load; they establish workload recovery, not a quiet-machine
+  benchmark ratio.
 - **TypedArray ArrayNum bulk paths.** Same-type bulk copy uses the shared ArrayNum byte kernels and cross-type conversion hoists element policy out of the loop — `js_typed_array_try_raw_set_same_type`, `js_typed_array_raw_copy_same_type`, and `js_typed_array_raw_copy_reversed`. The former private env-gated raw family is retired; detach/out-of-bounds is validated once where no user code can run between check and access, and callback methods revalidate at the spec points. *Owner:* [JS_12 — TypedArrays](JS_12_TypedArrays.md). *Measured (earlier Tune4 T4-P2, unrelated to callable Tune4):* compliance suites were neutral, while large bulk workloads improved materially.
 - **Regex property-walk cursor.** `js_regexp_test_property_all` (`js_runtime.cpp:15653`) threads a resumable range cursor (`js_regex_sorted_range_contains_cursor`, `:12656`) through the generated-property walk for `^\p{X}+$` / `^\P{X}+$` forms; near-monotonic input advances the cursor in O(1), collapsing a per-code-point binary search to near-linear. The cursor is engaged only for the generated gc/script/scx/binary kinds (`:15674`); other kinds keep the flat binary search. *Owner:* [JS_11 — RegExp](JS_11_RegExp.md). *Measured (Tune3 §2.5, kept):* the generated-property test cluster (439 tests) fell 61.84 s → 37.67 s (−39%) on a quiet machine, with zero flipped exit codes across 583 property tests.
 - **Tune12 admitted bulk RegExp match/replace.**

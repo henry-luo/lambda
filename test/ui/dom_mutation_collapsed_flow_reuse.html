@@ -1,0 +1,15 @@
+<!doctype html><html><head><meta charset="utf-8">
+<style>body { margin: 0; } button, #first, #stable, #result { display: block; width: 100%; height: 20px; margin: 0; padding: 0; border: 0; }</style>
+</head><body>
+<button id="resize">Resize first row</button>
+<div id="first">First row</div>
+<!-- comments and collapsed whitespace do not produce inline boxes -->
+<div id="stable">Stable row</div>
+<div id="result">Result</div>
+<script>
+document.getElementById('resize').addEventListener('click', () => {
+  const first = document.getElementById('first');
+  first.style.height = '35px';
+});
+</script>
+</body></html>

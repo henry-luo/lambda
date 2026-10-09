@@ -1,0 +1,24 @@
+{
+ "name":"dtna tabs skip disabled choices, retain focus and emit typed selection; pagination emits page requests",
+ "html":"test/ui/dtna/navigation.ls",
+ "viewport":{"width":900,"height":600},
+ "events":[
+  {"type":"assert_count","target":{"selector":"#sections [role=tabpanel]"},"count":1},
+  {"type":"assert_value","target":{"selector":"#profile-name"},"equals":"Ada"},
+  {"type":"click","target":{"selector":"#sections-item-0"}},
+  {"type":"key_press","key":"right"},
+  {"type":"assert_text","target":{"selector":"#sections-panel-2"},"equals":"Preferences"},
+  {"type":"assert_focus","target":{"selector":"#sections-item-2"}},
+  {"type":"assert_text","target":{"selector":"#last-choice"},"equals":"settings"},
+  {"type":"key_press","key":"home"},
+  {"type":"assert_focus","target":{"selector":"#sections-item-0"}},
+  {"type":"assert_count","target":{"selector":"#profile-name"},"count":1},
+  {"type":"click","target":{"selector":"#sections-item-1"}},
+  {"type":"assert_count","target":{"selector":"#profile-name"},"count":1},
+  {"type":"click","target":{"selector":"#period-item-1"}},
+  {"type":"assert_text","target":{"selector":"#last-choice"},"equals":"2"},
+  {"type":"click","target":{"selector":"#pages [aria-label='Next page']"}},
+  {"type":"assert_text","target":{"selector":"#last-page"},"equals":"2"},
+  {"type":"assert_text","target":{"selector":"#pages [aria-current=page]"},"equals":"2"}
+ ]
+}

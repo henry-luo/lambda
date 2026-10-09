@@ -343,6 +343,47 @@ TEST_F(StateStoreDomMutationTest, TextControlValueIsViewStateOwnedAcrossPropRebu
     delete original_prop;
 }
 
+TEST_F(StateStoreDomMutationTest, ProgrammaticKeyboardFocusKeepsVisibleRing) {
+    // enter the transition body; this standalone fixture omits the dispatcher.
+    state()->transition_depth++;
+    // the fixture excludes every node from sequential focus, like tabindex=-1.
+    focus_set(state(), live, true);
+    EXPECT_EQ(focus_get(state()), nullptr);
+    focus_set_programmatic(state(), live, true);
+    EXPECT_EQ(focus_get(state()), live);
+    EXPECT_EQ(focus_get_visible(state()), live);
+    focus_set_programmatic(state(), orphan);
+    EXPECT_EQ(focus_get(state()), orphan);
+    EXPECT_EQ(focus_get_visible(state()), nullptr);
+    state()->transition_depth--;
+}
+
+TEST_F(StateStoreDomMutationTest, RegeneratedTextControlKeepsNativeValueOnlyForSameIdentity) {
+    FormControlProp old_prop{};
+    FormControlProp new_prop{};
+    old_prop.control_type = new_prop.control_type = FORM_CONTROL_TEXT;
+    live->tag_name = orphan->tag_name = lam::up("input");
+    live->tag_id = orphan->tag_id = MARKUP_NAME_INPUT;
+    live->id = orphan->id = lam::up("field");
+    live->form = lam::view_prop(&old_prop);
+    orphan->form = lam::view_prop(&new_prop);
+    ASSERT_TRUE(form_control_store_text_value(state(), live, "typed", 5, 5));
+    ViewState* before = view_state_get(state(), live);
+    ASSERT_NE(before, nullptr);
+
+    view_state_preserve_subtree_identity(state(), live, orphan);
+    EXPECT_EQ(view_state_get(state(), orphan), before);
+    EXPECT_STREQ(form_control_get_value(state(), orphan, nullptr), "typed");
+    EXPECT_EQ(view_state_get(state(), live), nullptr);
+
+    // a same-position control with another authored id is a different owner.
+    live->id = lam::up("other-field");
+    view_state_preserve_subtree_identity(state(), orphan, live);
+    EXPECT_EQ(view_state_get(state(), orphan), before);
+    EXPECT_EQ(view_state_get(state(), live), nullptr);
+    live->form = orphan->form = nullptr;
+}
+
 TEST_F(StateStoreDomMutationTest, DetachedTextControlRetainsValueAcrossReflow) {
     DocState* doc_state = state();
     ASSERT_NE(doc_state, nullptr);

@@ -744,6 +744,11 @@ static void validate_selection_invariants(DocState* state,
         report_fail(report, "DOM selection exceeds bounded range capacity");
         return;
     }
+    if (selection->direction != DOM_SEL_DIR_NONE &&
+            selection->direction != DOM_SEL_DIR_FORWARD &&
+            selection->direction != DOM_SEL_DIR_BACKWARD) {
+        report_fail(report, "DOM selection direction is invalid");
+    }
     for (uint32_t i = 0; i < selection->range_count; i++) {
         // Presentation and the scalar editing shadow project the first range,
         // while discontiguous table-cell ranges remain valid selection data.
@@ -785,9 +790,7 @@ static void validate_selection_invariants(DocState* state,
         report_fail(report, "DOM selection collapsed flag disagrees with range");
     }
     if (selection_collapsed) {
-        if (selection->direction != DOM_SEL_DIR_NONE) {
-            report_fail(report, "collapsed DOM selection has non-none direction");
-        }
+        // script mutations of the selected range preserve direction, even on collapse.
         if (dom_boundary_compare(&anchor, &focus) != DOM_BOUNDARY_EQUAL) {
             report_fail(report, "collapsed DOM selection endpoints differ");
         }

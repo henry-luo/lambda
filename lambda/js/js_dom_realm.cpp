@@ -50,9 +50,9 @@ extern "C" const void* radiant_dom_selection_host_type(void);
 #include "../../lib/log.h"
 #include <cstring>
 
-JS_FORWARD_STATIC_ITEM(_coll_illegal_constructor, (Item /*first*/), js_throw_type_error, ("Illegal constructor"))
+JS_FORWARD_STATIC_ITEM(_coll_illegal_constructor, (void), js_throw_type_error, ("Illegal constructor"))
 
-static Item _html_element_constructor(Item /*first*/) {
+static Item _html_element_constructor(void) {
     RootFrame roots(5);
     Rooted<Item> target_root(roots, js_get_new_target());
     Rooted<Item> name_root(roots, ItemNull);
@@ -87,7 +87,7 @@ static void _set_iface_to_string_tag(Item proto, const char* name) {
     js_set_key_default(proto, js_well_known_symbol_key(4), js_name_item(name));
 }
 
-static void _install_iface(Item global, const char* name) {
+extern "C" void js_dom_install_interface(Item global, const char* name) {
     RootFrame roots(4);
     Rooted<Item> global_root(roots, global);
     Rooted<Item> key_root(roots, js_name_item(name));
@@ -142,7 +142,7 @@ static Item _iface_proto(Item global, const char* name) {
 static Item dom_install_interface_members(Item global, const char* name,
         void (*install_members)(Item)) {
     JS_ROOTS(roots, global_root, global, prototype_root, ItemNull);
-    _install_iface(global_root.get(), name);
+    js_dom_install_interface(global_root.get(), name);
     prototype_root.set(_iface_proto(global_root.get(), name));
     install_members(prototype_root.get());
     return prototype_root.get();
@@ -478,7 +478,7 @@ static Item _custom_elements_when_defined(Item /*callee*/, Item registry, Item* 
 extern "C" void dom_install_custom_elements_global(void) {
     RootFrame roots(7);
     Rooted<Item> global_root(roots, js_get_global_this());
-    _install_iface(global_root.get(), "CustomElementRegistry");
+    js_dom_install_interface(global_root.get(), "CustomElementRegistry");
     Rooted<Item> ctor_root(roots, js_get_key_default(global_root.get(),
         js_name_item("CustomElementRegistry")));
     Rooted<Item> proto_root(roots, js_get_key_cstr(ctor_root.get(), "prototype"));
@@ -544,6 +544,20 @@ static bool _element_receiver(Item receiver) {
     return get_type_id(kind) == LMD_TYPE_INT && it2i(kind) == 1;
 }
 
+static bool _element_namespace_receiver(Item receiver, const char* expected) {
+    void* element = _element_receiver(receiver) ? dom_unwrap_element(receiver) : nullptr;
+    const char* uri = element ? dom_element_namespace_uri(element) : nullptr;
+    return uri && strcmp(uri, expected) == 0;
+}
+
+static bool _html_element_receiver(Item receiver) {
+    return _element_namespace_receiver(receiver, "http://www.w3.org/1999/xhtml");
+}
+
+static bool _svg_element_receiver(Item receiver) {
+    return _element_namespace_receiver(receiver, "http://www.w3.org/2000/svg");
+}
+
 static bool _attribute_receiver(Item receiver) {
     Item kind = dom_core_node_type(receiver);
     return get_type_id(kind) == LMD_TYPE_INT && it2i(kind) == 2;
@@ -568,12 +582,19 @@ static bool _document_receiver(Item receiver) {
     return get_type_id(kind) == LMD_TYPE_INT && it2i(kind) == 9;
 }
 
+static Item _window_closed_getter(Item /*callee*/, Item receiver, Item* /*args*/,
+        int /*argc*/, uint64_t* /*result_home*/) {
+    if (receiver.item != js_get_global_this().item)
+        return js_throw_type_error("Illegal Window.closed receiver");
+    return (Item){.item = b2it(jube_internal_host_api()->dom_catalog->window_is_closed(
+        dom_get_ui_context()))};
+}
+
 static Item _media_can_play_type(Item /*callee*/, Item receiver, Item* args,
         int argc, uint64_t* /*result_home*/) {
     void* element = _element_receiver(receiver) ? dom_unwrap_element(receiver) : nullptr;
     const char* name = element ? dom_html_interface_name(element) : nullptr;
-    const char* namespace_uri = element ? dom_element_namespace_uri(element) : nullptr;
-    if (!name || !namespace_uri || strcmp(namespace_uri, "http://www.w3.org/1999/xhtml") ||
+    if (!name || !_html_element_receiver(receiver) ||
             (strcmp(name, "HTMLVideoElement") && strcmp(name, "HTMLAudioElement")))
         return js_throw_type_error("Illegal HTMLMediaElement receiver");
     if (!argc) return js_throw_type_error("canPlayType requires a MIME type");
@@ -594,7 +615,7 @@ static void _install_media_interface(Item global) {
 
 static void _install_node_interface_members(Item global) {
     static const char* const node_members[] = {
-        "nodeName", "nodeType", "parentNode", "parentElement", "isConnected",
+        "nodeName", "nodeType", "baseURI", "parentNode", "parentElement", "isConnected",
         "ownerDocument", "firstChild", "lastChild", "nextSibling", "previousSibling",
         "childNodes", "contains", "isEqualNode", "isSameNode", "compareDocumentPosition",
         "getRootNode", "hasChildNodes", "cloneNode", NULL};
@@ -619,11 +640,17 @@ static void _install_node_interface_members(Item global) {
     static const char* const child_node_members[] = {
         "before", "after", "replaceWith", "remove", NULL};
     static const char* const document_members[] = {
+        "implementation", "defaultView", "currentScript", "readyState", "documentElement", "doctype",
+        "body", "head", "title", "URL", "fonts", "compatMode", "characterSet", "charset",
+        "contentType", "styleSheets", "designMode", "activeElement", "forms",
         "cookie", "write", "writeln",
         "createElement", "createElementNS", "createTextNode", "createDocumentFragment",
         "createComment", "createAttribute", "createAttributeNS", "importNode", "adoptNode", "createRange", "createTreeWalker",
         "getElementById", "getElementsByTagName", "getElementsByClassName",
         "getElementsByName", "querySelector", "querySelectorAll", NULL};
+    // captured URL accessors must exist on the declaring HTML prototypes.
+    static const char* const href_members[] = {"href", NULL};
+    static const char* const dataset_members[] = {"dataset", NULL};
     static const struct {
         const char* interface_name;
         const char* host_name;
@@ -641,6 +668,13 @@ static void _install_node_interface_members(Item global) {
         {"CharacterData", "dom_node", _child_node_receiver, child_node_members},
         {"DocumentType", "dom_node", _child_node_receiver, child_node_members},
         {"Document", "document", _document_receiver, document_members},
+        // mixin attributes have separate declaring-interface receiver brands.
+        {"HTMLElement", "html_element", _html_element_receiver, dataset_members},
+        {"SVGElement", "svg_element", _svg_element_receiver, dataset_members},
+        {"HTMLAnchorElement", "html_element", _element_receiver, href_members},
+        {"HTMLAreaElement", "html_element", _element_receiver, href_members},
+        {"HTMLBaseElement", "html_element", _element_receiver, href_members},
+        {"HTMLLinkElement", "html_element", _element_receiver, href_members},
     };
     RootFrame roots(1);
     Rooted<Item> prototype_root(roots, ItemNull);
@@ -658,11 +692,31 @@ static void _install_node_interface_members(Item global) {
     }
 }
 
+static void _publish_interface_records(const char* host, size_t length) {
+    jube_type_prototype(jube_iface_type_by_name(host, length));
+}
+
 extern "C" void dom_install_collection_globals(void) {
     Item global = js_get_global_this();
     dom_install_interface_members(global, "TreeWalker", dom_tree_walker_install_interface);
-    _install_iface(global, "Window");
+    {
+        JS_ROOTS(roots, prototype_root, dom_install_interface_members(global,
+            "DOMImplementation", dom_implementation_install_interface));
+        dom_set_interface_method_metadata(prototype_root.get(), "createHTMLDocument", 0);
+        dom_set_interface_method_metadata(prototype_root.get(), "createDocument", 2);
+        dom_set_interface_method_metadata(prototype_root.get(), "createDocumentType", 3);
+        dom_set_interface_method_metadata(prototype_root.get(), "hasFeature", 0);
+    }
+    js_dom_install_interface(global, "Window");
     _link_iface_proto(global, "Window", "EventTarget");
+    {
+        RootFrame roots(2);
+        Rooted<Item> global_root(roots, global);
+        Rooted<Item> getter(roots, js_new_native_payload_function(_window_closed_getter, 0, 0));
+        js_set_function_name(getter.get(), js_name_item("get closed"));
+        js_install_native_accessor(global_root.get(), js_name_item("closed"),
+            getter.get(), ItemNull, 0);
+    }
     Item window_proto = _iface_proto(global, "Window");
     if (get_type_id(window_proto) == LMD_TYPE_MAP) {
         // The browsing-context global is the Window instance; exposing only
@@ -671,7 +725,7 @@ extern "C" void dom_install_collection_globals(void) {
         js_set_prototype(global, window_proto);
     }
     _install_node_iface(global);
-    _install_iface(global, "CharacterData");
+    js_dom_install_interface(global, "CharacterData");
     _link_iface_proto(global, "CharacterData", "Node");
     dom_install_value_constructor(global, "Comment", dom_comment_ctor, true);
     _link_iface_proto(global, "Comment", "CharacterData");
@@ -688,18 +742,18 @@ extern "C" void dom_install_collection_globals(void) {
         {"SVGTextContentElement", "SVGGraphicsElement"},
     };
     for (size_t i = 0; i < sizeof(iface_links) / sizeof(iface_links[0]); i++) {
-        _install_iface(global, iface_links[i][0]);
+        js_dom_install_interface(global, iface_links[i][0]);
         _link_iface_proto(global, iface_links[i][0], iface_links[i][1]);
     }
     // JointJS Vectorizer gates its SVG implementation on window.SVGAngle;
     // without this legacy WebIDL interface it installs a non-SVG fallback.
     static const char* svg_ifaces[] = {"SVGAngle", "SVGMatrix", "SVGTransform", "SVGPoint"};
     for (size_t i = 0; i < sizeof(svg_ifaces) / sizeof(svg_ifaces[0]); i++) {
-        _install_iface(global, svg_ifaces[i]);
+        js_dom_install_interface(global, svg_ifaces[i]);
     }
     dom_install_value_constructor(global, "DOMMatrix", dom_matrix_constructor, true);
     dom_install_value_constructor(global, "DOMPoint", dom_point_constructor, true);
-    _install_iface(global, "HTMLMediaElement");
+    js_dom_install_interface(global, "HTMLMediaElement");
     _link_iface_proto(global, "HTMLMediaElement", "HTMLElement");
     _install_media_interface(global);
     int html_interface_count = dom_html_interface_count();
@@ -707,18 +761,18 @@ extern "C" void dom_install_collection_globals(void) {
         // Specialized HTML wrappers retain their browser prototype chain for
         // WebIDL brand checks instead of collapsing to the generic interface.
         const char* ctor_name = dom_html_interface_ctor_name(i);
-        _install_iface(global, ctor_name);
+        js_dom_install_interface(global, ctor_name);
         // Audio and video share HTMLMediaElement's feature-test surface.
         const char* parent_name = strcmp(ctor_name, "HTMLAudioElement") == 0 ||
             strcmp(ctor_name, "HTMLVideoElement") == 0
             ? "HTMLMediaElement" : "HTMLElement";
         _link_iface_proto(global, ctor_name, parent_name);
     }
-    _install_iface(global, "CanvasRenderingContext2D");
+    js_dom_install_interface(global, "CanvasRenderingContext2D");
     dom_canvas_install_html_interface(_iface_proto(global, "HTMLCanvasElement"));
     _install_document_fragment_iface(global);
     _link_iface_proto(global, "DocumentFragment", "Node");
-    _install_iface(global, "ShadowRoot");
+    js_dom_install_interface(global, "ShadowRoot");
     _link_iface_proto(global, "ShadowRoot", "DocumentFragment");
     Item element_proto = _iface_proto(global, "Element");
     if (get_type_id(element_proto) == LMD_TYPE_MAP) {
@@ -733,7 +787,7 @@ extern "C" void dom_install_collection_globals(void) {
         "DOMRectList", "StyleSheetList", "CSSRuleList", "CSSStyleDeclaration",
     };
     for (size_t i = 0; i < sizeof(collection_ifaces) / sizeof(collection_ifaces[0]); i++) {
-        _install_iface(global, collection_ifaces[i]);
+        js_dom_install_interface(global, collection_ifaces[i]);
         // Range and Selection share this constructor-installation table but
         // are object-like interfaces, not WebIDL collection carriers.
         if (i >= 2) _install_collection_iterator(global, collection_ifaces[i]);
@@ -741,25 +795,25 @@ extern "C" void dom_install_collection_globals(void) {
     // CSSStyleSheet is constructible unlike the other CSSOM collection interfaces.
     dom_install_value_constructor(global, "CSSStyleSheet",
         dom_cssom_stylesheet_constructor, true);
-    _install_iface(global, "StyleSheet");
+    js_dom_install_interface(global, "StyleSheet");
     _link_iface_proto(global, "CSSStyleSheet", "StyleSheet");
-    _install_iface(global, "CSSRule");
-    _install_iface(global, "CSSGroupingRule");
+    js_dom_install_interface(global, "CSSRule");
+    js_dom_install_interface(global, "CSSGroupingRule");
     _link_iface_proto(global, "CSSGroupingRule", "CSSRule");
-    _install_iface(global, "CSSConditionRule");
+    js_dom_install_interface(global, "CSSConditionRule");
     _link_iface_proto(global, "CSSConditionRule", "CSSGroupingRule");
     // native rule dispatch and exposed interface chains share one type catalog.
     for (unsigned type = CSS_RULE_STYLE; type <= CSS_RULE_PROPERTY; type++) {
         CssRule rule = {};
         rule.type = (CssRuleType)type;
         const CssRuleInterface* interface = css_rule_interface(&rule);
-        _install_iface(global, interface->name);
+        js_dom_install_interface(global, interface->name);
         _link_iface_proto(global, interface->name, interface->base);
     }
-    _install_iface(global, "CSSLayerStatementRule");
+    js_dom_install_interface(global, "CSSLayerStatementRule");
     _link_iface_proto(global, "CSSLayerStatementRule", "CSSRule");
 #define CSS_DECLARATION_INTERFACE(kind, name, host, metadata) \
-    _install_iface(global, #name); \
+    js_dom_install_interface(global, #name); \
     _link_iface_proto(global, #name, "CSSStyleDeclaration");
 #include "../input/css/css_declaration_interfaces.def"
 #undef CSS_DECLARATION_INTERFACE
@@ -780,17 +834,21 @@ extern "C" void dom_install_collection_globals(void) {
     }
     // publish declared CSSOM members before scripts can inspect bare prototypes.
 #define CSS_RULE_INTERFACE(kind, name, base, legacy, host, host_base, shape) \
-    jube_type_prototype(jube_iface_type_by_name(#host, sizeof(#host) - 1));
+    _publish_interface_records(#host, sizeof(#host) - 1);
 #define CSS_RULE_INTERFACE_ALIAS(...)
 #include "../input/css/css_rule_interfaces.def"
 #undef CSS_RULE_INTERFACE_ALIAS
 #undef CSS_RULE_INTERFACE
 #define CSS_DECLARATION_INTERFACE(kind, name, host, metadata) \
-    jube_type_prototype(jube_iface_type_by_name(#host, sizeof(#host) - 1));
+    _publish_interface_records(#host, sizeof(#host) - 1);
 #include "../input/css/css_declaration_interfaces.def"
 #undef CSS_DECLARATION_INTERFACE
+    // cold prototype inspection must see the same declared getters as live wrappers.
+    js_dom_install_interface(global, "RadioNodeList");
+    static const char* collection_records[] = {"node_list", "html_collection",
+        "html_options_collection", "html_form_controls_collection", "radio_node_list"};
+    for (const char* host : collection_records) _publish_interface_records(host, strlen(host));
     _install_nodelist_for_each(global);
-    _install_iface(global, "RadioNodeList");
     _install_collection_iterator(global, "RadioNodeList");
     _install_xpath_evaluator(global);
     log_debug("dom_install_collection_globals: installed collection interfaces");

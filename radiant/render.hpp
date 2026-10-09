@@ -2144,6 +2144,7 @@ struct RenderBackend {
     // Called for MARKUP_NAME_SVG blocks. If NULL, skipped.
     void (*render_inline_svg)(RenderContext* ctx, ViewBlock* block, float abs_x, float abs_y,
                               FontBox* font, Color color);
+    void (*render_geomap)(RenderContext* ctx, ViewBlock* block, float abs_x, float abs_y);
     void (*render_svg_subscene)(RenderContext* ctx, const PaintSvgSubscene* subscene);
 
     // Semantic export can attach destinations to elements with no paint box.

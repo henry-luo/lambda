@@ -1018,6 +1018,13 @@ static Item jube_host_call_function(Item function, Item this_value, Item* args,
     return result;
 }
 
+static Item jube_host_well_known_symbol(const char* name) {
+    if (!name) return ItemNull;
+    RootFrame roots(1);
+    Rooted<Item> key_root(roots, js_name_item(name, strlen(name)));
+    return js_symbol_well_known(key_root.get());
+}
+
 static const JubeHostScriptAPI jube_host_script_api = {
     jube_host_script_new_function,
     js_function_set_prototype,
@@ -1057,6 +1064,8 @@ static const JubeHostScriptAPI jube_host_script_api = {
     js_promise_with_resolvers,
     jube_host_script_bigint_from_decimal,
     bigint_to_int64_exact,
+    jube_host_well_known_symbol,
+    js_get_iterator_proto,
 };
 
 extern "C" Item js_formdata_collect_form_entries(void* form_elem, void* submitter_elem);

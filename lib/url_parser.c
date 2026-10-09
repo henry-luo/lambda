@@ -342,12 +342,23 @@ UrlError url_parse_into(const char* input, Url* url) {
         const char* host_start = at_sign ? (at_sign + 1) : current;
         const char* host_end = authority_end;
 
-        // Look for port colon (from right to left to handle IPv6)
-        for (const char* p = authority_end - 1; p >= host_start; p--) {
-            if (*p == ':' && (p == host_start || *(p-1) != ':')) {
-                colon_port = p;
-                host_end = p;
-                break;
+        // bracketed hosts contain port-like colons; only a colon after ']' starts a port.
+        if (host_start < authority_end && *host_start == '[') {
+            const char* close = memchr(host_start, ']', authority_end - host_start);
+            if (!close || close == host_start + 1) return URL_ERROR_INVALID_HOST;
+            host_end = close + 1;
+            if (host_end < authority_end) {
+                if (*host_end != ':') return URL_ERROR_INVALID_HOST;
+                colon_port = host_end;
+            }
+        } else {
+            for (const char* p = host_start; p < authority_end; p++) {
+                if (*p == '[' || *p == ']') return URL_ERROR_INVALID_HOST;
+                if (*p == ':') {
+                    if (colon_port) return URL_ERROR_INVALID_HOST;
+                    colon_port = p;
+                    host_end = p;
+                }
             }
         }
 

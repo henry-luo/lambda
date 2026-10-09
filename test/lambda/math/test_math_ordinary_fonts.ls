@@ -83,7 +83,7 @@ let checks = [
         default_profile.family == native.font_family},
     {name: "default variable uses bundled italic text", ok: descendants(default_x.element, 'text')[0]["font-family"] == bundled.FAMILY and
         descendants(default_x.element, 'text')[0]["font-style"] == "italic" and len(descendants(default_x.element, 'style')) == 1},
-    {name: "default rule uses ordinary metrics", ok: close(default_rule.height, native.font_metrics.underline_thickness)},
+    {name: "default rule uses CM companion metrics", ok: close(default_rule.height, 39.99900817871094)},
     {name: "default operators reuse bundled glyphs", ok: default_sum.has_math == false and
         default_sum.path == bundled_facts.glyphs[0].path and default_sum.font_family == "KaTeX_Size1" and
         bundled_facts.glyphs[1].font_family == "KaTeX_AMS"},

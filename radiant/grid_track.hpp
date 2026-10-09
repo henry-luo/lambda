@@ -24,6 +24,10 @@
 #include <math.h>
 
 #include "../lib/log.h"
+#include "../lib/ownership.hpp"
+
+struct CssValue;
+namespace radiant { float resolve_computed_length_percentage(const CssValue*, float); }
 
 // Undefine min/max macros if defined (commonly from windows.h or view.hpp)
 #ifdef min
@@ -55,10 +59,11 @@ enum class SizingFunctionType : uint8_t {
 struct TrackSizingFunctionValue {
     SizingFunctionType type;
     float value;
+    lam::Up<const CssValue> expression;
 
     constexpr TrackSizingFunctionValue(SizingFunctionType type = SizingFunctionType::Auto,
-                                       float value = 0.0f)
-        : type(type), value(value) {}
+                                       float value = 0.0f, const CssValue* expression = nullptr)
+        : type(type), value(value), expression(expression) {}
 
     constexpr bool is_intrinsic() const {
         return type == SizingFunctionType::Auto ||
@@ -71,7 +76,9 @@ struct TrackSizingFunctionValue {
             case SizingFunctionType::Length:
                 return value;
             case SizingFunctionType::Percent:
-                return container_size * (value / 100.0f);
+                if (container_size < 0.0f) return -1.0f;
+                return expression ? fmaxf(0.0f, radiant::resolve_computed_length_percentage(
+                    expression, container_size)) : container_size * (value / 100.0f);
             default:
                 return -1.0f;
         }
@@ -100,8 +107,8 @@ struct MinTrackSizingFunction : TrackSizingFunctionValue {
     static constexpr MinTrackSizingFunction Length(float px) {
         return MinTrackSizingFunction{SizingFunctionType::Length, px};
     }
-    static constexpr MinTrackSizingFunction Percent(float pct) {
-        return MinTrackSizingFunction{SizingFunctionType::Percent, pct};
+    static constexpr MinTrackSizingFunction Percent(float pct, const CssValue* expression = nullptr) {
+        return MinTrackSizingFunction{SizingFunctionType::Percent, pct, expression};
     }
 
     /**
@@ -112,8 +119,8 @@ struct MinTrackSizingFunction : TrackSizingFunctionValue {
     }
 
 private:
-    constexpr MinTrackSizingFunction(SizingFunctionType type, float value)
-        : TrackSizingFunctionValue(type, value) {}
+    constexpr MinTrackSizingFunction(SizingFunctionType type, float value, const CssValue* expression = nullptr)
+        : TrackSizingFunctionValue(type, value, expression) {}
 };
 
 /**
@@ -137,8 +144,8 @@ struct MaxTrackSizingFunction : TrackSizingFunctionValue {
     static constexpr MaxTrackSizingFunction Length(float px) {
         return MaxTrackSizingFunction{SizingFunctionType::Length, px};
     }
-    static constexpr MaxTrackSizingFunction Percent(float pct) {
-        return MaxTrackSizingFunction{SizingFunctionType::Percent, pct};
+    static constexpr MaxTrackSizingFunction Percent(float pct, const CssValue* expression = nullptr) {
+        return MaxTrackSizingFunction{SizingFunctionType::Percent, pct, expression};
     }
     static constexpr MaxTrackSizingFunction Fr(float flex) {
         return MaxTrackSizingFunction{SizingFunctionType::Fr, flex};
@@ -146,8 +153,8 @@ struct MaxTrackSizingFunction : TrackSizingFunctionValue {
     static constexpr MaxTrackSizingFunction FitContentPx(float px) {
         return MaxTrackSizingFunction{SizingFunctionType::FitContentPx, px};
     }
-    static constexpr MaxTrackSizingFunction FitContentPercent(float pct) {
-        return MaxTrackSizingFunction{SizingFunctionType::FitContentPercent, pct};
+    static constexpr MaxTrackSizingFunction FitContentPercent(float pct, const CssValue* expression = nullptr) {
+        return MaxTrackSizingFunction{SizingFunctionType::FitContentPercent, pct, expression};
     }
 
     /**
@@ -180,15 +187,17 @@ struct MaxTrackSizingFunction : TrackSizingFunctionValue {
             case SizingFunctionType::FitContentPx:
                 return value;
             case SizingFunctionType::FitContentPercent:
-                return axis_available_space * (value / 100.0f);
+                if (axis_available_space < 0.0f) return (float)INFINITY;
+                return expression ? fmaxf(0.0f, radiant::resolve_computed_length_percentage(
+                    expression, axis_available_space)) : axis_available_space * (value / 100.0f);
             default:
                 return (float)INFINITY;
         }
     }
 
 private:
-    constexpr MaxTrackSizingFunction(SizingFunctionType type, float value)
-        : TrackSizingFunctionValue(type, value) {}
+    constexpr MaxTrackSizingFunction(SizingFunctionType type, float value, const CssValue* expression = nullptr)
+        : TrackSizingFunctionValue(type, value, expression) {}
 };
 
 /**
@@ -217,8 +226,8 @@ struct TrackSizingFunction {
     static constexpr TrackSizingFunction Length(float px) {
         return TrackSizingFunction(MinTrackSizingFunction::Length(px), MaxTrackSizingFunction::Length(px));
     }
-    static constexpr TrackSizingFunction Percent(float pct) {
-        return TrackSizingFunction(MinTrackSizingFunction::Percent(pct), MaxTrackSizingFunction::Percent(pct));
+    static constexpr TrackSizingFunction Percent(float pct, const CssValue* expression = nullptr) {
+        return TrackSizingFunction(MinTrackSizingFunction::Percent(pct, expression), MaxTrackSizingFunction::Percent(pct, expression));
     }
     static constexpr TrackSizingFunction Fr(float flex) {
         // Fr tracks have auto min and fr max
@@ -228,8 +237,8 @@ struct TrackSizingFunction {
         // fit-content() has auto min and fit-content max
         return TrackSizingFunction(MinTrackSizingFunction::Auto(), MaxTrackSizingFunction::FitContentPx(px));
     }
-    static constexpr TrackSizingFunction FitContentPercent(float pct) {
-        return TrackSizingFunction(MinTrackSizingFunction::Auto(), MaxTrackSizingFunction::FitContentPercent(pct));
+    static constexpr TrackSizingFunction FitContentPercent(float pct, const CssValue* expression = nullptr) {
+        return TrackSizingFunction(MinTrackSizingFunction::Auto(), MaxTrackSizingFunction::FitContentPercent(pct, expression));
     }
     constexpr bool is_flexible() const { return max.is_fr(); }
     constexpr bool uses_percentage() const { return min.uses_percentage() || max.uses_percentage(); }

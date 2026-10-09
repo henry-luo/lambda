@@ -35,7 +35,9 @@ export function render_lambda_math(formula, options = {}) {
     cwd: PROJECT_ROOT,
     encoding: 'utf8',
     maxBuffer: 64 * 1024 * 1024,
+    timeout: options.timeout,
   });
+  if (result.error) throw new Error(`lambda.exe: ${result.error.message}`);
   if (result.status !== 0) {
     const detail = (result.stderr || result.stdout || '').trim().slice(0, 1000);
     throw new Error(`lambda.exe exited ${result.status ?? result.signal}: ${detail}`);

@@ -230,6 +230,9 @@ HPDF_STATUS HPDF_Page_SetRGBStroke(HPDF_Page page, float r, float g, float b);
  * @return      HPDF_OK on success
  */
 HPDF_STATUS HPDF_Page_SetLineWidth(HPDF_Page page, float width);
+HPDF_STATUS HPDF_Page_SetLineCap(HPDF_Page page, int cap);
+HPDF_STATUS HPDF_Page_SetLineJoin(HPDF_Page page, int join);
+HPDF_STATUS HPDF_Page_SetMiterLimit(HPDF_Page page, float limit);
 
 /**
  * Create an extended graphics state resource.
@@ -340,6 +343,8 @@ HPDF_STATUS HPDF_Page_ClosePath(HPDF_Page page);
  * @return      HPDF_OK on success
  */
 HPDF_STATUS HPDF_Page_Fill(HPDF_Page page);
+// fill a compound path using the even-odd rule (PDF f* operator).
+HPDF_STATUS HPDF_Page_Eofill(HPDF_Page page);
 
 /**
  * Stroke the current path.

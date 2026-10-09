@@ -1,0 +1,22 @@
+true
+false
+[object URLSearchParams Iterator]
+true
+[["a","1"],["b","2"],["a","3"]]
+["a","b","a"]
+["1","2","3"]
+a=1;b=2;a=3;
+true
+1
+{"value":["b","updated"],"done":false}
+{"done":true}
+{"value":["c","3"],"done":false}
+1
+3
+true
+true
+true
+[["intrinsic","yes"]]
+true
+true
+{"value":["retained","through-gc"],"done":false}

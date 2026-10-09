@@ -2,9 +2,8 @@
  * XMLHttpRequest implementation for Radiant browser context.
  *
  * Synchronous HTTP via http_fetch() from input_http.cpp.
- * XHR objects created by js_xhr_new() carry a hidden __xhr_id
- * that indexes into a flat state array. Methods read js_get_this()
- * to resolve the id and operate on the C-level state.
+ * XHR objects retain their state index and property values in traced private
+ * storage. Methods resolve that native identity through their receiver.
  */
 #pragma once
 
@@ -16,6 +15,7 @@ extern "C" {
 
 // Constructor — called by transpiler for `new XMLHttpRequest()`
 Item js_xhr_new(void);
+void dom_xhr_install_interface(Item prototype);
 
 // Reset all XHR state (call between batch runs)
 void js_xhr_reset(void);

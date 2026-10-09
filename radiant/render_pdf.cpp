@@ -1,4 +1,5 @@
 #include "render.hpp"
+#include "geomap.hpp"
 #include "render_effect_raster_fallback.hpp"
 #include "render_glyph_run_raster_lower.hpp"
 #include "view.hpp"
@@ -228,6 +229,14 @@ static void pdf_set_color(PdfRenderContext* ctx, Color color) {
 
     HPDF_Page_SetRGBFill(ctx->current_page, r, g, b);
     HPDF_Page_SetRGBStroke(ctx->current_page, r, g, b);
+    // primitive alpha composes with the enclosing effect opacity and must reset for the next paint.
+    HPDF_ExtGState alpha = HPDF_CreateExtGState(ctx->pdf_doc);
+    if (alpha) {
+        float opacity = color.a / 255.0f * ctx->paint_state.current_opacity;
+        HPDF_ExtGState_SetAlphaFill(alpha, opacity);
+        HPDF_ExtGState_SetAlphaStroke(alpha, opacity);
+        HPDF_Page_SetExtGState(ctx->current_page, alpha);
+    }
 }
 
 // Render a rectangle (for backgrounds and borders)
@@ -860,7 +869,7 @@ static bool pdf_export_paint_consume(PaintList* paint, void* context) {
         case PAINT_FILL_RECT: if (cmd.fill_rect.color.a != 255) return false; break;
         case PAINT_FILL_ROUNDED_RECT: if (cmd.fill_rounded_rect.color.a != 255) return false; break;
         case PAINT_FILL_PATH:
-            if (cmd.fill_path.color.a != 255 || cmd.fill_path.rule != RDT_FILL_WINDING) return false;
+            if (cmd.fill_path.color.a != 255) return false;
             break;
         case PAINT_PUSH_CLIP: case PAINT_POP_CLIP:
         case PAINT_BEGIN_SEMANTIC_GROUP: case PAINT_END_SEMANTIC_GROUP: break;
@@ -871,6 +880,9 @@ static bool pdf_export_paint_consume(PaintList* paint, void* context) {
     local.pdf_doc = source->pdf_doc; local.current_page = source->current_page;
     local.ui_context = source->ui_context; local.page_width = source->page_width;
     local.page_height = source->page_height;
+    // SVG's local lowerer shares the page graphics state and inherits its enclosing opacity.
+    pdf_paint_lowering_state_init(&local.paint_state);
+    local.paint_state.current_opacity = source->paint_state.current_opacity;
     pdf_lower_paint_list(&local, paint);
     source->paint_state.emitted_count += local.paint_state.emitted_count;
     return true;
@@ -1108,11 +1120,13 @@ static void pdf_lower_paint_list(PdfRenderContext* ctx, PaintList* commands) {
         case PAINT_FILL_PATH: {
             if (!caps || !caps->paths) break;
             PaintFillPath* p = &cmd->fill_path;
-            if (p->color.a == 0 || p->rule != RDT_FILL_WINDING) break;
+            if (p->color.a == 0) break;
             if (!resolve_command_transform(p->has_transform, &p->transform)) break;
             pdf_set_color(ctx, p->color);
             if (pdf_render_path(ctx, p->path, effective_transform)) {
-                HPDF_Page_Fill(ctx->current_page);
+                // PaintIR fill rules apply to all compound paths, including geographic holes.
+                if (p->rule == RDT_FILL_EVEN_ODD) HPDF_Page_Eofill(ctx->current_page);
+                else HPDF_Page_Fill(ctx->current_page);
                 state->emitted_count++;
             }
             break;
@@ -1124,6 +1138,9 @@ static void pdf_lower_paint_list(PdfRenderContext* ctx, PaintList* commands) {
             if (!resolve_command_transform(p->has_transform, &p->transform)) break;
             pdf_set_color(ctx, p->color);
             HPDF_Page_SetLineWidth(ctx->current_page, p->width);
+            HPDF_Page_SetLineCap(ctx->current_page, p->cap);
+            HPDF_Page_SetLineJoin(ctx->current_page, p->join);
+            HPDF_Page_SetMiterLimit(ctx->current_page, p->miter_limit);
             if (pdf_render_path(ctx, p->path, effective_transform)) {
                 HPDF_Page_Stroke(ctx->current_page);
                 state->emitted_count++;
@@ -1536,6 +1553,15 @@ static void pdf_cb_visit_element(RenderContext* vctx, ViewElement* view,
     }
 }
 
+static void pdf_cb_render_geomap(RenderContext* vctx, ViewBlock* block, float abs_x, float abs_y) {
+    auto* ctx = (PdfRenderContext*)vctx;
+    BlockBlot parent = {};
+    parent.x = abs_x - block->x; parent.y = abs_y - block->y;
+    geomap_paint(pdf_active_paint_list(ctx), block->as_element(),
+        render_geometry_block_content_rect(&parent, block, 1.0f));
+    pdf_lower_paint_list(ctx);
+}
+
 static void pdf_cb_render_inline_svg(RenderContext* vctx, ViewBlock* block, float abs_x, float abs_y,
                                      FontBox* font, Color color) {
     PdfRenderContext* ctx = (PdfRenderContext*)vctx;
@@ -1775,6 +1801,7 @@ static RenderBackend pdf_make_backend(PdfRenderContext* ctx) {
     b.render_text      = pdf_cb_render_text;
     b.render_image     = pdf_cb_render_image;
     b.render_inline_svg = pdf_cb_render_inline_svg;
+    b.render_geomap = pdf_cb_render_geomap;
     b.render_svg_subscene = pdf_cb_render_svg_subscene;
     b.visit_element     = pdf_cb_visit_element;
     b.begin_block_children  = NULL;

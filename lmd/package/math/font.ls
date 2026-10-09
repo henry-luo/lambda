@@ -4,6 +4,7 @@ import sym: .symbols
 import util: .util
 import fallback: .fallback
 import bundled: .bundled
+import tex_metrics: .tex_metrics
 
 pub let UNITS = 1000.0
 
@@ -95,6 +96,7 @@ pub fn prepare(ast, options) map | error {
     let chars = unique(split(source ++ "()[]{}|‖⌈⌉⌊⌋⟨⟩√̂̃̄⃗̇̈⏞⏟←→↔− /", ""))
     let styles = ["normal", "auto", "italic", "bold", "bolditalic", "script", "fraktur", "double", "sans", "mono"]
     let points = unique([for (ch in chars, style in styles) variant(ch, style)])
+    let large_points = [for (ch in sym.large_symbols() where contains(chars, ch)) ord(ch)]
     let native = text_facts(radiant.math_metrics({font_family: family, font_size: UNITS}, points, faces), family)
     if (native == null) error("math: cannot read selected font: " ++ family)
     else {
@@ -121,7 +123,11 @@ pub fn prepare(ast, options) map | error {
         error("math: selected font has invalid script scale constants")
     else {facts: facts, points: points, family: facts.font_family,
         font_metrics: facts.font_metrics, style_faces: style_faces,
-        fallback_points: fallback_points, fallback_facts: fallback_facts, faces: faces}
+        fallback_points: fallback_points, fallback_facts: fallback_facts, faces: faces,
+        tex: if (use_bundled) tex_metrics.load()^ else null,
+        large_points: large_points,
+        large_facts: if (use_bundled and len(large_points) > 0)
+            text_facts(radiant.math_metrics({font_family:"KaTeX_Size2", font_size:UNITS}, large_points, faces), "KaTeX_Size2") else null}
     }
 }
 
@@ -166,8 +172,15 @@ pub fn character(profile, ch, style) map | error {
     else glyph(profile, ord(ch))^
 }
 
+pub fn large_operator(profile, cp) map | error {
+    let base = glyph(profile, cp)^
+    let larger = lookup({points:profile.large_points}, profile.large_facts, cp);
+    if (larger != null and larger.ink.bottom - larger.ink.top > base.ink.bottom - base.ink.top) larger else base
+}
+
 pub fn scale(profile, style) {
-    if (style == "script") profile.facts.constants.script_percent_scale_down / 100.0
+    if (profile.tex != null and profile.tex.scales[style] != null) profile.tex.scales[style]
+    else if (style == "script") profile.facts.constants.script_percent_scale_down / 100.0
     else if (style == "scriptscript") profile.facts.constants.script_script_percent_scale_down / 100.0
     else 1.0
 }

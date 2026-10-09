@@ -166,6 +166,11 @@ static bool render_walk_block_paint_self(RenderPaintBlockDriver* ctx, ViewBlock*
     }
     if (hidden) return true;
 
+    if (block->tag_id == MARKUP_NAME_GEOMAP) {
+        if (backend->render_geomap) backend->render_geomap(backend->ctx, block, state->x, state->y);
+        p->stop_after_self = true;
+        return false;
+    }
     if (block->tag_id == MARKUP_NAME_SVG) {
         if (backend->render_inline_svg) {
             backend->render_inline_svg(backend->ctx, block, state->x, state->y,

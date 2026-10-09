@@ -46665,12 +46665,14 @@ static void prepass_define_function_node(MirTranspiler* mt, AstNode* node) {
         transpile_view_def(mt, view);
         char name[64];
         snprintf(name, sizeof(name), "_view_%d", mt->view_counter - 1);
-        const char* view_ref = view->name ? view->name->chars
-            : name_pool_create_len(mt->name_pool, name, strlen(name))->chars;
+        // Registration finds handlers by generated function name, independently
+        // of the authored name used for state identity (D8.1.1v17).
+        const char* view_func_name =
+            name_pool_create_len(mt->name_pool, name, strlen(name))->chars;
         int handler_index = 0;
         for (AstEventHandler* handler = view->handler; handler;
                 handler = handler->next_handler) {
-            transpile_handler_def(mt, handler, view, view_ref, handler_index++);
+            transpile_handler_def(mt, handler, view, view_func_name, handler_index++);
         }
     }
 }

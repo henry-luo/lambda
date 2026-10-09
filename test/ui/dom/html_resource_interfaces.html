@@ -1,0 +1,25 @@
+<!doctype html><html><body><div id="result">pending</div><script>
+const result = document.getElementById('result');
+const interfaces = [['area', 'HTMLAreaElement'], ['base', 'HTMLBaseElement'],
+  ['embed', 'HTMLEmbedElement'], ['frame', 'HTMLFrameElement'],
+  ['object', 'HTMLObjectElement'], ['picture', 'HTMLPictureElement'],
+  ['source', 'HTMLSourceElement'], ['track', 'HTMLTrackElement']];
+let branded = true;
+for (const [tag, name] of interfaces) {
+  const node = document.createElement(tag);
+  const ctor = window[name];
+  branded = branded && typeof ctor === 'function' && node instanceof ctor;
+  branded = branded && Object.getPrototypeOf(node) === ctor.prototype;
+  branded = branded && Object.getPrototypeOf(ctor.prototype) === HTMLElement.prototype;
+}
+result.setAttribute('data-branded', String(branded));
+const base = document.createElement('base');
+const href = Object.getOwnPropertyDescriptor(HTMLBaseElement.prototype, 'href');
+href.set.call(base, 'https://example.org/assets/');
+result.setAttribute('data-captured', String(href.get.call(base) === 'https://example.org/assets/'));
+result.setAttribute('data-reflected', String(base.getAttribute('href') === 'https://example.org/assets/'));
+Object.setPrototypeOf(base, null);
+href.set.call(base, 'https://example.org/next/');
+result.setAttribute('data-native-brand', String(href.get.call(base) === 'https://example.org/next/'));
+result.textContent = 'complete';
+</script></body></html>

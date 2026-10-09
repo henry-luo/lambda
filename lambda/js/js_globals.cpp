@@ -10,9 +10,11 @@
  */
 #include "js_runtime.h"
 #include "js_headers.h"
+#include "js_response.h"
 #include "js_typed_array.h"
 #include "js_well_known_names.h"
 #include "../dom/dom_events.h"
+#include "../dom/dom_xhr.h"
 #include "js_error_codes.h"
 #include "../jube/jube_node_permission.h"
 #include "js_property_attrs.h"
@@ -40,6 +42,7 @@
 #include "../runtime/transpiler.hpp"
 #include "../jube/jube_registry.h"
 #include "../jube/jube_interface.h"
+#include "../module/radiant/radiant_dom_bridge.hpp"
 #include "../../lib/base64.h"
 #include "../../lib/arraylist.hpp"
 #include "../../lib/escape.h"
@@ -53,7 +56,6 @@
 #include <limits.h>
 #include "../dom/dom.h"
 
-extern "C" Item js_xhr_new(void);
 extern "C" Item js_proxy_trap_set_with_receiver(Item proxy, Item key, Item value, Item receiver);
 extern "C" Item radiant_dom_window_add_event_listener(Item type, Item callback, Item opts);
 extern "C" Item radiant_dom_window_remove_event_listener(Item type, Item callback, Item opts);
@@ -5866,24 +5868,6 @@ static Item js_reflect_set_define_receiver(Item receiver, Item key, Item value, 
 
 // Reflect.set(target, key, value [, receiver]) — returns boolean.
 // ES §28.1.14 → §10.1.9.1 OrdinarySet → §10.1.9.2 OrdinarySetWithOwnDescriptor.
-// ES45: a dataset assignment crosses the DOM API. Unwrapping the dataset proxy
-// to its element is a JS-object concern and stays here, where the proxy lives;
-// the write itself is the catalog's set_data row. Returns false when the target
-// is not a dataset view, so the caller falls through to the ordinary path.
-static bool js_dataset_set_through_api(Item dataset, Item key, Item value) {
-    if (get_type_id(key) != LMD_TYPE_STRING) return false;
-    String* key_string = it2s(key);
-    if (!key_string ||
-        (key_string->len == 24 &&
-         strncmp(key_string->chars, "__lambda_dataset_element", 24) == 0)) {
-        return false;
-    }
-    Item owner = js_dataset_owner(dataset);
-    if (!is_element_family_type_id(get_type_id(owner))) return false;
-    jube_internal_host_api()->dom_catalog->set_data(owner, key, value);
-    return true;
-}
-
 static bool js_reflect_receiver_accepts_data(Item receiver_descriptor,
         Item set_key, Item get_key, Item writable_key) {
     if (get_type_id(receiver_descriptor) != LMD_TYPE_MAP) return true;
@@ -6190,12 +6174,12 @@ extern "C" Item js_set_completion_with_key(Item target, Item key, Item value,
     key = key_root.get();
     value = value_root.get();
     receiver = receiver_root.get();
+    Item dataset_result = ItemNull;
     if (receiver.item == target.item &&
-            js_dataset_set_through_api(target_root.get(), key_root.get(),
-                                               value_root.get())) {
-        // Dataset assignment otherwise takes the ordinary Map fast path and
-        // only mutates the temporary object returned by the getter.
-        return (Item){.item = b2it(true)};
+            js_dataset_property_via_api(target_root.get(), key_root.get(),
+                value_root.get(), true, &dataset_result)) {
+        // dataset writes cross the same owner-backed path as ordinary assignment.
+        return item_is_error(dataset_result) ? dataset_result : (Item){.item = b2it(true)};
     }
     if ((get_type_id(target_root.get()) == LMD_TYPE_ERROR ||
          js_is_resting_error(target_root.get())) &&
@@ -6514,10 +6498,8 @@ extern "C" Item js_reflect_set_prototype_of(Item obj, Item proto) {
     // ES §28.1.15 Reflect.setPrototypeOf: target must be an Object.
     JS_RETURN_IF_ERROR(js_require_object_type(obj, "setPrototypeOf"));
     // proto must be Object or null; otherwise TypeError (covers Symbol too).
-    TypeId pt = get_type_id(proto);
     bool proto_is_null = (proto.item == ItemNull.item);
-    bool proto_is_obj = (pt == LMD_TYPE_MAP || js_is_js_array(proto) ||
-                        pt == LMD_TYPE_FUNC || pt == LMD_TYPE_ELEMENT);
+    bool proto_is_obj = js_is_object_value(proto);
     if (!proto_is_null && !proto_is_obj) {
         return js_throw_type_error("Object prototype may only be an Object or null");
     }
@@ -6567,17 +6549,14 @@ extern "C" Item js_object_set_prototype_of(Item obj, Item proto) {
         return js_throw_type_error("Object.setPrototypeOf called on null or undefined");
     }
     // 2. proto must be Object or null (undefined throws TypeError).
-    TypeId pt = get_type_id(proto);
     bool proto_is_null = (proto.item == ItemNull.item);
-    bool proto_is_obj = (pt == LMD_TYPE_MAP || js_is_js_array(proto) ||
-                        pt == LMD_TYPE_FUNC || pt == LMD_TYPE_ELEMENT);
+    bool proto_is_obj = js_is_object_value(proto);
     if (!proto_is_null && !proto_is_obj) {
         return js_throw_type_error("Object prototype may only be an Object or null");
     }
     // 3. If O is not Object, return O (primitives pass through).
-    TypeId ot = get_type_id(obj);
-    if (ot != LMD_TYPE_MAP && !js_is_js_array(obj) && ot != LMD_TYPE_FUNC &&
-            ot != LMD_TYPE_ELEMENT) {
+    // native virtual carriers are Objects and must reach the host's prototype protocol.
+    if (!js_is_object_value(obj)) {
         return obj;
     }
     // 4. Delegate to Reflect.setPrototypeOf semantics; throw on false.
@@ -10638,6 +10617,8 @@ extern "C" Item js_object_prevent_extensions(Item obj) {
         }
         return result;
     }
+    Item host_result = ItemNull;
+    if (jube_member_extensibility(obj, true, &host_result)) return host_result;
     // ES6: non-objects return the argument
     TypeId ot = get_type_id(obj);
     if (ot != LMD_TYPE_MAP && ot != LMD_TYPE_ARRAY &&
@@ -10653,6 +10634,8 @@ extern "C" Item js_object_is_extensible(Item obj) {
     if (js_is_proxy(obj)) {
         return js_proxy_trap_is_extensible(obj);
     }
+    Item host_result = ItemNull;
+    if (jube_member_extensibility(obj, false, &host_result)) return host_result;
     // ES6: non-objects are not extensible
     TypeId ot = get_type_id(obj);
     if (ot != LMD_TYPE_MAP && ot != LMD_TYPE_ARRAY &&
@@ -11566,6 +11549,16 @@ static void js_stringify_indent(StrBuf* sb, const char* gap, int depth) {
 static Item js_stringify_value(StrBuf* sb, Item value, Item replacer, Item replacer_array,
                                const char* gap, int depth, Item holder, Item key,
                                void** visited, int visited_count, bool* out_wrote) {
+    // recursion and user callbacks can collect temporary keys and replacement values (D5.3.3).
+    RootFrame roots(8);
+    Rooted<Item> value_root(roots, value);
+    Rooted<Item> replacer_root(roots, replacer);
+    Rooted<Item> replacer_array_root(roots, replacer_array);
+    Rooted<Item> holder_root(roots, holder);
+    Rooted<Item> key_root(roots, key);
+    Rooted<Item> keys_root(roots, ItemNull);
+    Rooted<Item> current_key_root(roots, ItemNull);
+    Rooted<Item> callback_root(roots, ItemNull);
     *out_wrote = false;
     auto finish = [&](bool wrote) -> Item {
         *out_wrote = wrote;
@@ -11577,9 +11570,11 @@ static Item js_stringify_value(StrBuf* sb, Item value, Item replacer, Item repla
     if (vtype == LMD_TYPE_MAP || js_is_js_array(value) || js_global_is_bigint(value)) {
         Item toJSON_name = js_name_item("toJSON", 6);
         JS_ASSIGN_OR_RETURN(toJSON_fn, js_get_reference(value, toJSON_name));
+        callback_root.set(toJSON_fn);
         if (js_is_callable(toJSON_fn)) {
             Item args[1] = {key};
             JS_ASSIGN_OR_RETURN_INTO(value, js_call_function(toJSON_fn, value, args, 1));
+            value_root.set(value);
             vtype = get_type_id(value);
         }
     }
@@ -11588,6 +11583,7 @@ static Item js_stringify_value(StrBuf* sb, Item value, Item replacer, Item repla
     if (js_is_callable(replacer)) {
         Item args[2] = {key, value};
         JS_ASSIGN_OR_RETURN_INTO(value, js_call_function(replacer, holder, args, 2));
+        value_root.set(value);
         vtype = get_type_id(value);
     }
 
@@ -11600,12 +11596,15 @@ static Item js_stringify_value(StrBuf* sb, Item value, Item replacer, Item repla
             if (pv_own) {
                 if (cls == JS_CLASS_BOOLEAN) {
                     value = pv;
+                    value_root.set(value);
                     vtype = get_type_id(value);
                 } else if (cls == JS_CLASS_NUMBER) {
                     JS_ASSIGN_OR_RETURN_INTO(value, js_to_number(value));
+                    value_root.set(value);
                     vtype = get_type_id(value);
                 } else if (cls == JS_CLASS_STRING) {
                     JS_ASSIGN_OR_RETURN_INTO(value, js_to_string(value));
+                    value_root.set(value);
                     vtype = get_type_id(value);
                 } else if (cls == JS_CLASS_BIGINT) {
                     // ES spec step 10: BigInt → TypeError
@@ -11721,6 +11720,7 @@ static Item js_stringify_value(StrBuf* sb, Item value, Item replacer, Item repla
             // Keeping the string form here preserves the observable replacer
             // and toJSON argument contract (S#24.5.2.1).
             JS_ASSIGN_OR_RETURN(idx_key, js_to_property_key(js_json_array_index_key(i)));
+            current_key_root.set(idx_key);
             JS_ASSIGN_OR_RETURN(elem, js_get_reference(value, idx_key));
             // serialize element; if undefined/function/symbol, write "null" in array context
             bool wrote = false;
@@ -11745,6 +11745,7 @@ static Item js_stringify_value(StrBuf* sb, Item value, Item replacer, Item repla
         } else {
             JS_ASSIGN_OR_RETURN_INTO(keys, js_object_keys(value));
         }
+        keys_root.set(keys);
 
         int64_t klen = js_array_length(keys);
         strbuf_append_char(sb, '{');
@@ -11752,6 +11753,7 @@ static Item js_stringify_value(StrBuf* sb, Item value, Item replacer, Item repla
         for (int64_t i = 0; i < klen; i++) {
             Item k = js_elements_get(keys, (Item){.item = i2it((int)i)});
             JS_ASSIGN_OR_RETURN(k_str, js_to_string(k));
+            current_key_root.set(k_str);
             JS_ASSIGN_OR_RETURN(v, js_get_reference(value, k_str));
 
             // Use a temporary buffer to serialize the value
@@ -11806,14 +11808,24 @@ static Item js_throw_delete_rejected(Item key, const char* owner) {
 }
 
 extern "C" Item js_json_stringify_full(Item value, Item replacer, Item space) {
+    RootFrame roots(7);
+    Rooted<Item> value_root(roots, value);
+    Rooted<Item> replacer_root(roots, replacer);
+    Rooted<Item> space_root(roots, space);
+    Rooted<Item> replacer_array_root(roots, ItemNull);
+    Rooted<Item> property_list_root(roots, ItemNull);
+    Rooted<Item> property_name_root(roots, ItemNull);
+    Rooted<Item> holder_root(roots, ItemNull);
     // Process space parameter
     // ES spec §24.5.3 step 5: unwrap Number/String wrapper objects
     if (get_type_id(space) == LMD_TYPE_MAP) {
         JsClass cls = js_class_id(space);
         if (cls == JS_CLASS_NUMBER) {
             JS_ASSIGN_OR_RETURN_INTO(space, js_to_number(space));
+            space_root.set(space);
         } else if (cls == JS_CLASS_STRING) {
             JS_ASSIGN_OR_RETURN_INTO(space, js_to_string(space));
+            space_root.set(space);
         }
     }
     char gap_buf[11] = {0};
@@ -11859,6 +11871,7 @@ extern "C" Item js_json_stringify_full(Item value, Item replacer, Item space) {
         int64_t rlen = 0;
         JS_ASSIGN_OR_RETURN(length_status, js_json_length_of_array_like(replacer, &rlen));
         Item prop_list = js_array_new(0);
+        property_list_root.set(prop_list);
         for (int64_t i = 0; i < rlen; i++) {
             Item idx_key = js_json_array_index_key(i);
             JS_ASSIGN_OR_RETURN(v, js_get_reference(replacer, idx_key));
@@ -11877,6 +11890,7 @@ extern "C" Item js_json_stringify_full(Item value, Item replacer, Item space) {
             }
             // Skip undefined/null entries and duplicates
             if (item.item == ItemNull.item) continue;
+            property_name_root.set(item);
             // Check for duplicate
             bool dup = false;
             int64_t plen = js_array_length(prop_list);
@@ -11895,6 +11909,7 @@ extern "C" Item js_json_stringify_full(Item value, Item replacer, Item space) {
             }
         }
         replacer_array = prop_list;
+        replacer_array_root.set(replacer_array);
         }
     }
 
@@ -11902,6 +11917,7 @@ extern "C" Item js_json_stringify_full(Item value, Item replacer, Item space) {
     StrBuf* sb = strbuf_new();
     Item empty_key = ItemEmptyString;
     Item holder = js_new_object();
+    holder_root.set(holder);
     Item create_result = js_create_data_property(holder, empty_key, value);
     if (item_is_error(create_result)) {
         strbuf_free(sb);
@@ -12781,14 +12797,22 @@ static Item js_window_post_message_dispatch(Item env_item) {
 
 static Item js_window_post_message(Item message, Item target_origin,
         Item transfer_or_options) {
-    RootFrame roots(3);
+    RootFrame roots(6);
     Rooted<Item> message_root(roots, message);
-    Rooted<Item> event_root(roots, js_create_event("message", false, false));
+    Rooted<Item> transfer_root(roots, transfer_or_options);
+    Rooted<Item> origin_root(roots, dom_location_get_property(js_name_item("origin")));
+    Rooted<Item> cloned(roots, ItemNull), event_root(roots, ItemNull);
     Rooted<Item> callback_root(roots, ItemNull);
+    if (js_is_object_value(target_origin)) {
+        transfer_root.set(js_get_key_cstr(target_origin, "transfer"));
+        JS_RETURN_IF_ERROR(transfer_root.get());
+    }
+    cloned.set(structured_clone_transfer_impl(message_root.get(), transfer_root.get(), 0));
+    JS_RETURN_IF_ERROR(cloned.get());
+    event_root.set(js_create_message_event("message", cloned.get(), js_global_this_obj, origin_root.get()));
+    JS_RETURN_IF_ERROR(event_root.get());
     // The single browsing context still queues same-window messages after the
     // current task, matching the observable postMessage ordering contract.
-    js_set_key_cstr(event_root.get(), "data", message_root.get());
-    js_set_key_cstr(event_root.get(), "source", js_global_this_obj);
     callback_root.set(js_new_native_closure(js_window_post_message_dispatch, 0,
         js_alloc_env1(event_root.get()), 1));
     js_setTimeout(callback_root.get(), (Item){.item = i2it(0)});
@@ -13263,36 +13287,31 @@ static void js_message_port_remove_listener_from_key(Item port, const char* key,
 }
 
 static void js_message_port_emit_listener_array(Item target, const char* key, Item* args, int argc) {
-    Item listeners = js_get_key_default(target, make_string_item(key));
-    if (get_type_id(listeners) != LMD_TYPE_ARRAY) return;
-    int64_t count = js_array_length(listeners);
+    RootFrame roots(2);
+    Rooted<Item> receiver(roots, target), listeners(roots, js_get_key_cstr(target, key));
+    if (get_type_id(listeners.get()) != LMD_TYPE_ARRAY) return;
+    int64_t count = js_array_length(listeners.get());
     if (count <= 0) return;
-    Item* snapshot = (Item*)mem_alloc(sizeof(Item) * (size_t)count, MEM_CAT_JS_RUNTIME);
-    if (!snapshot) return;
+    // a callback can remove later listeners and collect their only ordinary array edge.
+    RootSpan snapshot((size_t)count);
+    if (!snapshot.items()) return;
     for (int64_t i = 0; i < count; i++) {
-        snapshot[i] = js_elements_get_int(listeners, i);
+        snapshot.items()[i] = js_elements_get_int(listeners.get(), i);
     }
     for (int64_t i = 0; i < count; i++) {
-        Item listener = snapshot[i];
+        Item listener = snapshot.items()[i];
         if (js_is_callable(listener)) {
-            js_call_function(listener, target, args, argc);
+            js_call_function(listener, receiver.get(), args, argc);
         }
     }
-    mem_free(snapshot);
 }
 
 static Item js_message_port_make_message_event(Item msg) {
-    Item event = js_new_object();
-    js_set_key_cstr(event, "data", msg);
-    js_set_key_cstr(event, "type", make_string_item("message"));
-    return event;
+    return js_create_message_event("message", msg, ItemNull, ItemNull);
 }
 
 static Item js_message_port_make_message_error_event(Item data) {
-    Item event = js_new_object();
-    js_set_key_cstr(event, "data", data);
-    js_set_key_cstr(event, "type", make_string_item("messageerror"));
-    return event;
+    return js_create_message_event("messageerror", data, ItemNull, ItemNull);
 }
 
 static Item js_message_port_make_close_event(void) {
@@ -13447,15 +13466,16 @@ static Item js_message_port_context_unavailable_error(void) {
 
 static Item js_message_port_emit_message_error_tick(Item env_item) {
     JS_ENV_OR_UNDEFINED(env, env_item);
-    Item target = env[0];
-    Item data = env[1];
-    if (!js_message_port_is_port(target)) return make_js_undefined();
-
-    Item onmessageerror = js_get_key_cstr(target, "onmessageerror");
-    if (js_is_callable(onmessageerror)) {
-        Item event = js_message_port_make_message_error_event(data);
-        Item args[1] = {event};
-        js_call_function(onmessageerror, target, args, 1);
+    RootFrame roots(4);
+    Rooted<Item> target(roots, env[0]), data(roots, env[1]);
+    Rooted<Item> handler(roots, ItemNull), event(roots, ItemNull);
+    if (!js_message_port_is_port(target.get())) return make_js_undefined();
+    handler.set(js_get_key_cstr(target.get(), "onmessageerror"));
+    if (js_is_callable(handler.get())) {
+        event.set(js_message_port_make_message_error_event(data.get()));
+        JS_RETURN_IF_ERROR(event.get());
+        Item args[1] = {event.get()};
+        js_call_function(handler.get(), target.get(), args, 1);
     }
     return make_js_undefined();
 }
@@ -13521,30 +13541,35 @@ JS_FORWARD_STATIC_ITEM(js_message_port_remove_event_listener, (Item event, Item 
 
 static Item js_message_port_deliver(Item env_item) {
     Item* env = (Item*)(uintptr_t)env_item.item;
-    Item target = env ? env[0] : make_js_undefined();
-    if (!js_message_port_is_port(target)) return make_js_undefined();
-    Item msg = js_message_port_shift_message(target);
-    if (get_type_id(msg) == LMD_TYPE_UNDEFINED) return make_js_undefined();
-
-    Item onmessage = js_get_key_cstr(target, "onmessage");
-    if (js_is_callable(onmessage)) {
-        Item event = js_message_port_make_message_event(msg);
-        Item args[1] = {event};
-        js_call_function(onmessage, target, args, 1);
+    RootFrame roots(4);
+    Rooted<Item> target(roots, env ? env[0] : make_js_undefined());
+    Rooted<Item> msg(roots, ItemNull), event(roots, ItemNull), handler(roots, ItemNull);
+    if (!js_message_port_is_port(target.get())) return make_js_undefined();
+    msg.set(js_message_port_shift_message(target.get()));
+    if (get_type_id(msg.get()) == LMD_TYPE_UNDEFINED) return make_js_undefined();
+    // dequeuing removes the queue's ownership before envelope construction can collect.
+    event.set(js_message_port_make_message_event(msg.get()));
+    JS_RETURN_IF_ERROR(event.get());
+    radiant_dom_event_set_target(event.get(), target.get());
+    radiant_dom_event_set_lambda_dispatch_position(event.get(), target.get(), 2);
+    js_set_key_cstr(event.get(), "__dispatch_flag", (Item){.item = ITEM_TRUE});
+    handler.set(js_get_key_cstr(target.get(), "onmessage"));
+    if (js_is_callable(handler.get())) {
+        Item args[1] = {event.get()};
+        js_call_function(handler.get(), target.get(), args, 1);
     }
-
-    Item event = js_message_port_make_message_event(msg);
-    Item event_args[1] = {event};
-    js_message_port_emit_listener_array(target, "__message_event_listeners__", event_args, 1);
-
-    Item args[1] = {msg};
-    js_message_port_emit_listener_array(target, "__message_listeners__", args, 1);
+    Item event_args[1] = {event.get()};
+    js_message_port_emit_listener_array(target.get(), "__message_event_listeners__", event_args, 1);
+    radiant_dom_event_clear_lambda_dispatch_position(event.get());
+    js_set_key_cstr(event.get(), "__dispatch_flag", (Item){.item = ITEM_FALSE});
+    Item args[1] = {msg.get()};
+    js_message_port_emit_listener_array(target.get(), "__message_listeners__", args, 1);
     return make_js_undefined();
 }
 
 static Item js_message_port_postMessage(Item msg, Item transfer_list) {
     Item self = js_get_this();
-    RootFrame roots(6);
+    RootFrame roots(7);
     Rooted<Item> self_root(roots, self);
     Rooted<Item> message_root(roots, msg);
     Rooted<Item> transfer_root(roots, transfer_list);
@@ -13648,7 +13673,10 @@ extern "C" Item js_message_port_receive_message_on_port(Item port) {
 }
 
 extern "C" Item js_message_port_new(void) {
-    Item port = js_new_object_with_class(JS_CLASS_MESSAGE_PORT);
+    RootFrame roots(1);
+    Rooted<Item> port_root(roots, js_new_object_with_class(JS_CLASS_MESSAGE_PORT));
+    // method and queue allocation must retain the endpoint until its channel owns it.
+    Item port = port_root.get();
 #define JS_MESSAGE_PORT_EVENT_METHODS(M) \
     M("on", js_message_port_add_listener) M("once", js_message_port_add_once_listener) \
     M("addEventListener", js_message_port_add_event_listener) \
@@ -13675,14 +13703,16 @@ extern "C" Item js_message_port_new(void) {
 }
 
 extern "C" Item js_message_channel_new(void) {
-    Item channel = js_new_object_with_class(JS_CLASS_MESSAGE_CHANNEL);
-    Item port1 = js_message_port_new();
-    Item port2 = js_message_port_new();
-    js_set_key_cstr(port1, "__peer__", port2);
-    js_set_key_cstr(port2, "__peer__", port1);
-    js_set_key_cstr(channel, "port1", port1);
-    js_set_key_cstr(channel, "port2", port2);
-    return channel;
+    RootFrame roots(3);
+    Rooted<Item> channel(roots, js_new_object_with_class(JS_CLASS_MESSAGE_CHANNEL));
+    Rooted<Item> port1(roots, js_message_port_new());
+    Rooted<Item> port2(roots, js_message_port_new());
+    // building either endpoint can collect the channel and its unpublished sibling.
+    js_set_key_cstr(port1.get(), "__peer__", port2.get());
+    js_set_key_cstr(port2.get(), "__peer__", port1.get());
+    js_set_key_cstr(channel.get(), "port1", port1.get());
+    js_set_key_cstr(channel.get(), "port2", port2.get());
+    return channel.get();
 }
 
 // forward declaration for populating globalThis with constructors
@@ -13750,16 +13780,9 @@ static Item js_queuing_strategy_getter(Item callee, Item receiver,
         Item* args, int argc, uint64_t* result_home) {
     const auto* getter = (const JsQueuingStrategyGetter*)(uintptr_t)
         js_fn_native((JsFunction*)callee.function)->target.bits;
-    if (!getter || !js_object_has_class(receiver, getter->brand))
-        return js_throw_type_error("Illegal queuing strategy receiver");
-    TypeMap* shape = (TypeMap*)receiver.map->type;
-    // the native constructor installs this private record before any public
-    // fields; shape transitions preserve it and cannot expose or delete it (D3.4.3v5).
-    ShapeEntry* entry = shape ? shape->shape : NULL;
-    Item state = entry && entry->key_kind == NAME_KEY_PRIVATE
-        ? _map_read_field(entry, receiver.map->data) : ItemNull;
-    if (get_type_id(state) != LMD_TYPE_ARRAY || state.array->length != JS_QUEUE_SLOT_COUNT)
-        return js_throw_type_error("Illegal queuing strategy receiver");
+    if (!getter) return js_throw_type_error("Illegal queuing strategy receiver");
+    JS_ASSIGN_OR_RETURN(state, js_native_private_array_state(receiver, getter->brand,
+        JS_QUEUE_SLOT_COUNT, "Illegal queuing strategy receiver"));
     return state.array->items[getter->slot];
 }
 
@@ -13940,6 +13963,8 @@ extern "C" Item js_get_global_this() {
         // no longer infers behavior from the global property's spelling.
         js_install_native_constructor(js_global_this_obj, "XMLHttpRequest",
             js_xhr_new);
+        dom_xhr_install_interface(js_get_key_cstr(js_get_key_cstr(js_global_this_obj,
+            "XMLHttpRequest"), "prototype"));
 
         dom_install_storage_globals(js_global_this_obj);
         js_install_native_method(js_global_this_obj, "matchMedia",
@@ -14029,6 +14054,7 @@ extern "C" Item js_get_global_this() {
         js_install_queuing_strategy(js_global_this_obj, "CountQueuingStrategy",
             JS_CLASS_COUNT_QUEUING_STRATEGY);
         js_install_headers(js_global_this_obj);
+        js_install_response(js_global_this_obj);
 
         // globalThis.performance shares the document clock used by rAF/events.
         {
@@ -15889,6 +15915,17 @@ JS_DEFINE_HOST_CTOR_BODY_2(transition_event, js_ctor_transition_event_fn)
 JS_DEFINE_HOST_CTOR_BODY_2(animation_event, js_ctor_animation_event_fn)
 JS_DEFINE_HOST_CTOR_BODY_2(webgl_context_event, js_ctor_webgl_context_event_fn)
 
+Item js_intrinsic_ctor_message_event_construct_body(Item callee, Item* args,
+        int argc, Item new_target, uint64_t* result_home) {
+    if (argc < 1) return js_throw_type_error("MessageEvent requires a type argument");
+    RootFrame roots(2);
+    Rooted<Item> target(roots, new_target);
+    Rooted<Item> result(roots, js_ctor_message_event_fn(args[0],
+        argc > 1 ? args[1] : make_js_undefined()));
+    JS_RETURN_IF_ERROR(result.get());
+    return js_apply_constructed_default_prototype(result.get(), target.get(), JS_CLASS_MESSAGE_EVENT);
+}
+
 Item js_intrinsic_ctor_placeholder_call_body(Item callee, Item this_value,
         Item* args, int argc, uint64_t* result_home) {
     return ItemNull;
@@ -16084,6 +16121,7 @@ static void js_proto_snapshot_bootstrap_constructors() {
         JS_CLASS_INPUT_EVENT, JS_CLASS_POINTER_EVENT, JS_CLASS_TOUCH_EVENT,
         JS_CLASS_STATIC_RANGE,
         JS_CLASS_TRANSITION_EVENT, JS_CLASS_ANIMATION_EVENT, JS_CLASS_WEBGL_CONTEXT_EVENT,
+        JS_CLASS_MESSAGE_EVENT,
         0
     };
     for (int i = 0; intrinsic_classes[i]; i++) {
@@ -16825,6 +16863,14 @@ static Item js_create_constructor(const JsBuiltinGlobalSpec* spec) {
         js_function_root_item_if_needed(event_ctor, &event_ctor->prototype);
     }
     // Populate static methods as own properties for all constructors
+    if (ctor_id == JS_CTOR_MESSAGE_EVENT) {
+        RootFrame roots(1);
+        Rooted<Item> prototype(roots, js_new_object());
+        js_initialize_native_constructor_prototype(fn_item, prototype.get());
+        js_set_key_cstr(prototype.get(), "constructor", fn_item);
+        js_mark_non_enumerable(prototype.get(), js_name_item("constructor"));
+        js_message_event_install_prototype(prototype.get());
+    }
     js_populate_constructor_statics(fn_item, name, strlen(name));
     // TypedArray constructors: set up per-type prototype with constructor + BYTES_PER_ELEMENT
     if (typed_array_element_type >= 0) {
@@ -16886,6 +16932,7 @@ static JsClass js_intrinsic_prototype_parent_class(JsClass cls) {
         case JS_CLASS_TRANSITION_EVENT:
         case JS_CLASS_ANIMATION_EVENT:
         case JS_CLASS_WEBGL_CONTEXT_EVENT:
+        case JS_CLASS_MESSAGE_EVENT:
             return JS_CLASS_EVENT;
         case JS_CLASS_FOCUS_EVENT:
         case JS_CLASS_MOUSE_EVENT:

@@ -1,0 +1,41 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Navigator native interface</title></head>
+<body><div id="result">pending</div><script>
+const result = document.getElementById('result');
+function check(name, value) { result.setAttribute('data-' + name, String(value)); }
+const self = navigator;
+const prototype = Navigator.prototype;
+const descriptor = Object.getOwnPropertyDescriptor(prototype, 'languages');
+const languages = descriptor.get.call(self);
+const getLanguage = Object.getOwnPropertyDescriptor(prototype, 'language').get;
+const getClipboard = Object.getOwnPropertyDescriptor(prototype, 'clipboard').get;
+const originalLanguage = getLanguage.call(self);
+const originalClipboard = getClipboard.call(self);
+check('prototype', Object.getPrototypeOf(self) === prototype && self instanceof Navigator);
+check('tag', Object.prototype.toString.call(self) === '[object Navigator]');
+check('descriptor', typeof descriptor.get === 'function' && descriptor.set === undefined &&
+    descriptor.enumerable && descriptor.configurable && !self.hasOwnProperty('languages'));
+check('languages', Array.isArray(languages) && languages.length > 0 &&
+    languages[0] === originalLanguage && Object.isFrozen(languages));
+let frozen = false;
+try { languages.push('changed'); } catch (error) { frozen = error instanceof TypeError; }
+check('frozen', frozen && descriptor.get.call(self) === languages);
+let illegal = 0;
+for (const construct of [() => new Navigator(), () => Navigator()]) {
+    try { construct(); } catch (error) { if (error instanceof TypeError) illegal++; }
+}
+check('constructor', illegal === 2 && Navigator.length === 0);
+let forged = 0;
+for (const getter of [descriptor.get, getLanguage, getClipboard]) {
+    try { getter.call(Object.create(prototype)); }
+    catch (error) { if (error instanceof TypeError) forged++; }
+}
+check('forged', forged === 3);
+self.languages = ['shadow'];
+check('readonly', self.languages === languages);
+Object.defineProperty(self, 'languages', {value: ['public-shadow'], configurable: true});
+Object.setPrototypeOf(self, null);
+check('captured', descriptor.get.call(self) === languages &&
+    getLanguage.call(self) === originalLanguage && getClipboard.call(self) === originalClipboard);
+result.textContent = 'complete';
+</script></body></html>

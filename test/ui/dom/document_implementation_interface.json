@@ -1,0 +1,18 @@
+{
+  "name": "DOMImplementation exposes document creation on its branded prototype",
+  "html": "test/ui/dom/document_implementation_interface.html",
+  "events": [
+    {"type": "assert_attribute", "target": {"selector": "#result"}, "attribute": "data-prototype", "equals": "true"},
+    {"type": "assert_attribute", "target": {"selector": "#result"}, "attribute": "data-instance", "equals": "true"},
+    {"type": "assert_attribute", "target": {"selector": "#result"}, "attribute": "data-tag", "equals": "true"},
+    {"type": "assert_attribute", "target": {"selector": "#result"}, "attribute": "data-method", "equals": "true"},
+    {"type": "assert_attribute", "target": {"selector": "#result"}, "attribute": "data-metadata", "equals": "true"},
+    {"type": "assert_attribute", "target": {"selector": "#result"}, "attribute": "data-html", "equals": "true"},
+    {"type": "assert_attribute", "target": {"selector": "#result"}, "attribute": "data-xml", "equals": "true"},
+    {"type": "assert_attribute", "target": {"selector": "#result"}, "attribute": "data-doctype", "equals": "true"},
+    {"type": "assert_attribute", "target": {"selector": "#result"}, "attribute": "data-feature", "equals": "true"},
+    {"type": "assert_attribute", "target": {"selector": "#result"}, "attribute": "data-forged", "equals": "true"},
+    {"type": "assert_attribute", "target": {"selector": "#result"}, "attribute": "data-constructor", "equals": "true"},
+    {"type": "assert_text", "target": {"selector": "#result"}, "equals": "complete"}
+  ]
+}

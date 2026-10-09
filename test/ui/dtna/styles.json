@@ -1,0 +1,19 @@
+{
+ "name":"dtna tokens inherit through nested scopes; styles and close actions use native layout",
+ "html":"test/ui/dtna/styles.ls",
+ "viewport":{"width":800,"height":500},
+ "events":[
+  {"type":"assert_style","target":{"selector":"#blue"},"property":"background-color","equals":"rgb(22, 119, 255)"},
+  {"type":"assert_style","target":{"selector":"#purple"},"property":"background-color","equals":"rgb(114, 46, 209)"},
+  {"type":"assert_style","target":{"selector":"#square"},"property":"background-color","equals":"rgb(114, 46, 209)"},
+  {"type":"assert_style","target":{"selector":"#blue-again"},"property":"background-color","equals":"rgb(22, 119, 255)"},
+  {"type":"assert_rect","target":{"selector":"#blue"},"height":32,"tolerance":0.1},
+  {"type":"assert_rect","target":{"selector":"#blue-again"},"height":40,"tolerance":0.1},
+  {"type":"assert_rect","target":{"selector":"#outcome .dtna-icon"},"width":48,"height":48,"tolerance":0.1},
+  {"type":"assert_style","target":{"selector":"#rtl-child"},"property":"direction","equals":"rtl"},
+  {"type":"assert_rect","target":{"selector":"#sized-icon"},"width":24,"height":18,"tolerance":0.1},
+  {"type":"click","target":{"selector":"#notice .dtna-close svg path"}},
+  {"type":"assert_count","target":{"selector":"#notice"},"count":0},
+  {"type":"render","file":"temp/ui_dtna/styles.png"}
+ ]
+}

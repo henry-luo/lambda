@@ -254,6 +254,31 @@ TEST_F(ViewReuseTest, IntrinsicGridUsesResolvedTracksInsteadOfAuthoredLineNames)
     arena_destroy(scratch);
 }
 
+TEST_F(ViewReuseTest, GridTrackCloneOwnsMathAfterSourcePoolRetirement) {
+    Pool* source_pool = pool_create();
+    ASSERT_NE(source_pool, nullptr);
+    const char* text = "calc(10px + 25%)";
+    CssDeclaration* declaration = css_parse_property_declaration(
+        "grid-template-columns", strlen("grid-template-columns"), text, strlen(text), source_pool);
+    ASSERT_NE(declaration, nullptr);
+    GridTrackList* source = create_grid_track_list(source_pool, 1);
+    ASSERT_NE(source, nullptr);
+    source->tracks[0] = create_grid_track_size(source_pool, GRID_TRACK_SIZE_PERCENTAGE, 0.0f);
+    ASSERT_NE(source->tracks[0], nullptr);
+    source->track_count = 1;
+    source->tracks[0]->expression_owner = lam::own(css_value_clone_owned(declaration->value, source_pool));
+    source->tracks[0]->expression = lam::up((const CssValue*)source->tracks[0]->expression_owner.get());
+    ASSERT_NE(source->tracks[0]->expression, nullptr);
+    GridTrackList* clone = clone_grid_track_list(tree.prop_pool, source);
+    ASSERT_NE(clone, nullptr);
+    ASSERT_NE(clone->tracks[0]->expression, source->tracks[0]->expression);
+    destroy_grid_track_list(source_pool, source);
+    pool_destroy(source_pool);
+    EXPECT_FLOAT_EQ(radiant::resolve_computed_length_percentage(clone->tracks[0]->expression, 200.0f), 60.0f);
+    EXPECT_FLOAT_EQ(radiant::resolve_computed_length_percentage(clone->tracks[0]->expression, 100.0f), 35.0f);
+    destroy_grid_track_list(tree.prop_pool, clone);
+}
+
 TEST_F(ViewReuseTest, ProvisionalIntrinsicQueriesReuseAndInvalidateAuthoredSizes) {
     DomElement* block = element();
     block->tag_id = MARKUP_NAME_DIV;

@@ -1,0 +1,85 @@
+{
+  "name": "Navigator exposes branded getters and frozen language preferences",
+  "html": "test/ui/dom/navigator_native_interface.html",
+  "events": [
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#result"
+      },
+      "attribute": "data-prototype",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#result"
+      },
+      "attribute": "data-tag",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#result"
+      },
+      "attribute": "data-descriptor",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#result"
+      },
+      "attribute": "data-languages",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#result"
+      },
+      "attribute": "data-frozen",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#result"
+      },
+      "attribute": "data-constructor",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#result"
+      },
+      "attribute": "data-forged",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#result"
+      },
+      "attribute": "data-readonly",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#result"
+      },
+      "attribute": "data-captured",
+      "equals": "true"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#result"
+      },
+      "equals": "complete"
+    }
+  ]
+}

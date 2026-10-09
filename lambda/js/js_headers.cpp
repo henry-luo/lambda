@@ -19,18 +19,10 @@ enum HeaderOperation {
 enum HeaderStateSlot { HEADER_LIST, HEADER_IMMUTABLE, HEADER_ITERATOR_PROTO };
 
 static Item header_state(Item receiver, JsClass brand) {
-    if (!js_object_has_class(receiver, brand))
-        return js_throw_type_error("Illegal Headers receiver");
-    TypeMap* type = (TypeMap*)receiver.map->type;
-    ShapeEntry* entry = type ? type->shape : nullptr;
-    Item state = entry && entry->key_kind == NAME_KEY_PRIVATE
-        ? _map_read_field(entry, receiver.map->data) : ItemNull;
-    if (get_type_id(state) != LMD_TYPE_ARRAY)
-        return js_throw_type_error("Illegal Headers receiver");
-    return state;
+    return js_native_private_array_state(receiver, brand, -1, "Illegal Headers receiver");
 }
 
-static Item header_byte_string(Item value) {
+Item js_fetch_byte_string(Item value) {
     RootFrame roots(1);
     Rooted<Item> text(roots, js_to_string(value));
     JS_RETURN_IF_ERROR(text.get());
@@ -38,7 +30,7 @@ static Item header_byte_string(Item value) {
     Utf16Iterator iter = {(const unsigned char*)string->chars, (int64_t)string->len, 0, -1};
     uint16_t unit;
     while (utf16_iterator_next(&iter, &unit)) {
-        if (unit > 255) return js_throw_type_error("Header is not a ByteString");
+        if (unit > 255) return js_throw_type_error("Value is not a ByteString");
     }
     return text.get();
 }
@@ -134,7 +126,7 @@ static Item header_convert_sequence(Item iterable) {
         value.set(js_iterator_step(iterator.get()));
         JS_RETURN_IF_ERROR(value.get());
         if (value.get().item == JS_ITER_DONE_SENTINEL) break;
-        value.set(header_byte_string(value.get()));
+        value.set(js_fetch_byte_string(value.get()));
         // WebIDL sequence conversion propagates errors without IteratorClose.
         JS_RETURN_IF_ERROR(value.get());
         JS_RETURN_IF_ERROR(js_array_push(result.get(), value.get()));
@@ -208,11 +200,11 @@ Item js_headers_list_from_init(Item init, bool request_guard) {
             JS_RETURN_IF_ERROR(pair.get());
             if (get_type_id(pair.get()) != LMD_TYPE_MAP ||
                     !js_is_truthy(js_get_key_default(pair.get(), js_name_item("enumerable")))) continue;
-            key.set(header_byte_string(key.get()));
+            key.set(js_fetch_byte_string(key.get()));
             JS_RETURN_IF_ERROR(key.get());
             value.set(js_get_key_default(source.get(), key.get()));
             JS_RETURN_IF_ERROR(value.get());
-            value.set(header_byte_string(value.get()));
+            value.set(js_fetch_byte_string(value.get()));
             JS_RETURN_IF_ERROR(value.get());
             pair.set(header_pair(key.get(), value.get()));
             JS_RETURN_IF_ERROR(pair.get());
@@ -284,6 +276,27 @@ Item js_headers_create_http(char* const* lines, int count) {
     return ctor ? header_create_with_list(*ctor, list.get(), true) : ItemError;
 }
 
+Item js_headers_create(Item init, bool immutable) {
+    RootFrame roots(1);
+    Rooted<Item> list(roots, js_headers_list_from_init(init));
+    JS_RETURN_IF_ERROR(list.get());
+    Item* ctor = js_realm_slot_existing(&js_runtime_state.realm_slots,
+        JS_REALM_SLOT_HEADERS_CONSTRUCTOR);
+    return ctor ? header_create_with_list(*ctor, list.get(), immutable) : ItemError;
+}
+
+Item js_headers_clone(Item headers) {
+    RootFrame roots(2);
+    Rooted<Item> state(roots, header_state(headers, JS_CLASS_HEADERS));
+    JS_RETURN_IF_ERROR(state.get());
+    bool immutable = js_is_truthy(js_elements_get_int(state.get(), HEADER_IMMUTABLE));
+    Rooted<Item> list(roots, js_elements_get_int(state.get(), HEADER_LIST));
+    Item* ctor = js_realm_slot_existing(&js_runtime_state.realm_slots,
+        JS_REALM_SLOT_HEADERS_CONSTRUCTOR);
+    // Updates replace the private list, so cloning can share its immutable snapshot.
+    return ctor ? header_create_with_list(*ctor, list.get(), immutable) : ItemError;
+}
+
 static Item header_constructor(Item callee, Item receiver, Item* args, int argc, uint64_t* home) {
     if (!js_is_object_value(js_get_new_target())) return js_throw_type_error("Headers requires new");
     RootFrame roots(2);
@@ -345,10 +358,10 @@ static Item header_method(Item callee, Item receiver, Item* args, int argc, uint
     else {
         if (argc < (operation == HEADER_APPEND || operation == HEADER_SET ? 2 : 1))
             return js_throw_type_error("Missing Headers argument");
-        key.set(header_byte_string(args[0]));
+        key.set(js_fetch_byte_string(args[0]));
         JS_RETURN_IF_ERROR(key.get());
         if (operation == HEADER_APPEND || operation == HEADER_SET) {
-            value.set(header_byte_string(args[1]));
+            value.set(js_fetch_byte_string(args[1]));
             JS_RETURN_IF_ERROR(value.get());
         }
         key.set(header_normalize(key.get(), true));

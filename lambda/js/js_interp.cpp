@@ -6094,6 +6094,8 @@ static Item js_interp_prepare_suspended_activation(JsFunction* function,
             if (bound.kind != JS_INTERP_NORMAL) return bound.value;
         }
     }
+    // hoisted closures must capture body lexicals across await/yield, as ordinary activations do.
+    init_frame.env = body_env;
     initialized = js_interp_initialize_function_declarations(&init_frame,
         js_fn_ast_function(function)->vars);
     if (initialized.kind != JS_INTERP_NORMAL) return initialized.value;

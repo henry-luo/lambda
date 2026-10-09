@@ -3287,7 +3287,7 @@ bool is_view_programmatically_focusable(View* view);
  * Set focus from HTMLElement.focus(). Negative tabindex values remain
  * programmatically focusable even though they are excluded from Tab order.
  */
-void focus_set_programmatic(DocState* state, View* view);
+void focus_set_programmatic(DocState* state, View* view, bool from_keyboard = false);
 
 // Focus a DOM element through the retained document JS realm when present.
 bool radiant_focus_element(DomDocument* doc, View* target);

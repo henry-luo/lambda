@@ -1539,7 +1539,7 @@ bool DomElement::set_attribute(const char* name, const char* value, bool preserv
 
     if (!element->is_synthetic() && element->doc) {
         Element* backing = dom_element_to_element(element);
-        MarkEditor editor(element->doc->input, EDIT_MODE_INLINE);
+        MarkEditor editor(element->doc, EDIT_MODE_INLINE);
 
         String* stored_value = dom_attribute_value(element->doc, editor.builder(), value);
         if (!stored_value) return false;
@@ -1629,7 +1629,7 @@ bool DomElement::remove_attribute(const char* name) {
 
     if (!element->is_synthetic() && element->doc) {
         Element* backing = dom_element_to_element(element);
-        MarkEditor editor(element->doc->input, EDIT_MODE_INLINE);
+        MarkEditor editor(element->doc, EDIT_MODE_INLINE);
 
         // Delete attribute via MarkEditor
         Item result = editor.elmt_delete_attr(
@@ -2836,7 +2836,7 @@ bool DomElement::append_child(DomElement* child) {
     log_debug("dom_element_append_child: appending to Lambda tree (length before=%lld)", parent_backing->length);
 
     // Preserve this live wrapper even when its detached document is non-UI.
-    MarkEditor editor(parent->doc->input, EDIT_MODE_INLINE);
+    MarkEditor editor(parent->doc, EDIT_MODE_INLINE);
     Item result = editor.dom_append_child(
         {.element = parent_backing},
         {.element = child_backing}
@@ -3395,7 +3395,7 @@ bool dom_text_set_content(DomText* text_node, const char* new_content) {
         return false;
     }
     // Create new String via MarkBuilder
-    MarkEditor editor(parent->doc->input, EDIT_MODE_INLINE);
+    MarkEditor editor(parent->doc, EDIT_MODE_INLINE);
     String* new_s = dom_create_mutation_string(
         editor.builder(), new_content, parent->doc->input->ui_mode);
     if (!new_s) {
@@ -3547,7 +3547,7 @@ bool dom_text_remove(DomText* text_node) {
     }
 
     // Remove from Lambda parent Element's children array
-    MarkEditor editor(parent->doc->input, EDIT_MODE_INLINE);
+    MarkEditor editor(parent->doc, EDIT_MODE_INLINE);
     Item result = editor.dom_delete_child(
         {.element = dom_element_to_element(parent)},
         child_idx
@@ -3592,7 +3592,7 @@ DomText* DomElement::append_text(const char* text_content) {
     }
 
     // Create String item via MarkBuilder
-    MarkEditor editor(parent->doc->input, EDIT_MODE_INLINE);
+    MarkEditor editor(parent->doc, EDIT_MODE_INLINE);
     String* s = dom_create_mutation_string(
         editor.builder(), text_content, parent->doc->input->ui_mode);
     if (!s) {
@@ -3823,7 +3823,7 @@ bool dom_comment_set_content(DomComment* comment_node, const char* new_content) 
     }
 
     // Create new String via MarkBuilder
-    MarkEditor editor(parent->doc->input, EDIT_MODE_INLINE);
+    MarkEditor editor(parent->doc, EDIT_MODE_INLINE);
     String* new_s = dom_create_mutation_string(
         editor.builder(), new_content, parent->doc->input->ui_mode);
     if (!new_s) {
@@ -3881,7 +3881,7 @@ DomComment* DomElement::append_comment(const char* comment_content) {
     }
 
     // Create Lambda comment Element with tag "!--"
-    MarkEditor editor(parent->doc->input, EDIT_MODE_INLINE);
+    MarkEditor editor(parent->doc, EDIT_MODE_INLINE);
     ElementBuilder comment_elem = editor.builder()->element("!--");
 
     // Add content as String child
@@ -3952,7 +3952,7 @@ bool dom_comment_remove(DomComment* comment_node) {
     }
 
     // Remove from Lambda parent Element's children array
-    MarkEditor editor(parent->doc->input, EDIT_MODE_INLINE);
+    MarkEditor editor(parent->doc, EDIT_MODE_INLINE);
     Item result = editor.dom_delete_child(
         {.element = dom_element_to_element(parent)},
         child_idx

@@ -10,6 +10,7 @@
 #include "../runtime/lambda-error.h"
 #include "../runtime/recovery_frame.h"
 #include "../runtime/mir_dump.h"
+#include "../../lib/base64.h"
 #include "../../lib/file.h"
 #include "../../lib/mem_factory.h"
 #include "../../lib/path_str.h"
@@ -1813,6 +1814,7 @@ char* js_load_script_source_from_cache(const char* path,
     }
 
     bool is_http = js_path_is_http_url(path);
+    bool is_data = is_data_uri(path);
     bool is_file_url = strncmp(path, "file:", 5) == 0;
     Url* file_url = is_file_url ? url_parse(path) : nullptr;
     lam::Temp<char> local_path(file_url ? url_to_local_path(file_url) : nullptr);
@@ -1820,11 +1822,11 @@ char* js_load_script_source_from_cache(const char* path,
     if (is_file_url && !local_path) return NULL;
     // inline document modules resolve to file URLs; decode them before filesystem/cache access.
     const char* read_path = local_path ? local_path.get() : path;
-    char* canonical = is_http ? NULL : file_realpath(read_path);
+    char* canonical = (is_http || is_data) ? NULL : file_realpath(read_path);
     const char* identity = canonical ? canonical : path;
     InputScriptRequest request = {};
     request.identity = identity;
-    request.source_kind = is_http ? INPUT_SCRIPT_SOURCE_URL : INPUT_SCRIPT_SOURCE_FILE;
+    request.source_kind = (is_http || is_data) ? INPUT_SCRIPT_SOURCE_URL : INPUT_SCRIPT_SOURCE_FILE;
     request.language = "javascript";
     request.profile = profile ? profile : "js-module";
     request.parser_abi = "js-direct-parser-v1";
@@ -1841,12 +1843,12 @@ char* js_load_script_source_from_cache(const char* path,
     request.module_mode = module_mode;
 
     char* source = NULL;
-    if (is_http) {
-        // Browser module imports resolve to remote URLs; retain their downloaded
-        // snapshot in the common script cache before parsing the dependency.
+    if (is_http || is_data) {
+        // embedded scripts share URL snapshot ownership instead of treating their payload as a filename.
         size_t source_length = 0;
-        char* downloaded = download_http_content_cached(path, &source_length,
-            "./temp/cache");
+        char* downloaded = is_data
+            ? (char*)parse_data_uri(path, NULL, 0, &source_length)
+            : download_http_content_cached(path, &source_length, "./temp/cache");
         if (downloaded) {
             source = input_script_cache_copy_source(
                 input_manager_global_script_cache(), &request, downloaded,

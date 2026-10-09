@@ -1,0 +1,5 @@
+async immediate 5
+generator first 10
+generator resumed 12 12
+generator complete true 12
+async resumed 7 7

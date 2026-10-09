@@ -1,0 +1,73 @@
+{
+  "name": "Window and MessagePort deliver cloned native MessageEvents",
+  "html": "test/ui/dom/message_event_delivery.html",
+  "events": [
+    {
+      "type": "wait",
+      "ms": 100
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#result"
+      },
+      "attribute": "data-window-brand",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#result"
+      },
+      "attribute": "data-window-clone",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#result"
+      },
+      "attribute": "data-window-origin",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#result"
+      },
+      "attribute": "data-window-queued",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#result"
+      },
+      "attribute": "data-port-brand",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#result"
+      },
+      "attribute": "data-port-clone",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#result"
+      },
+      "attribute": "data-port-identity",
+      "equals": "true"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#result"
+      },
+      "equals": "complete"
+    }
+  ]
+}

@@ -328,6 +328,13 @@ extern "C" JsOwnGetStatus js_ordinary_get_own_ex(Item object, Item key,
     if (kt == LMD_TYPE_STRING && !js_canonicalize_property_string(key, &key)) {
         return JS_OWN_NOT_FOUND;
     }
+    // retained dataset views read their owner's current attributes, not snapshot slots.
+    Item dataset_value = ItemNull;
+    if (js_dataset_property_via_api(object_root.get(), key, ItemNull, false, &dataset_value)) {
+        if (dataset_value.item == ITEM_JS_UNDEFINED) return JS_OWN_NOT_FOUND;
+        *out_value = dataset_value;
+        return JS_OWN_READY;
+    }
     // String and JS Symbol keys use the central shape/slot status helper so MAP
     // storage, FUNC properties_map storage, and ARRAY companion-map storage
     // share the same deleted/accessor rules.

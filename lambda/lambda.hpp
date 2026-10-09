@@ -976,6 +976,7 @@ bool vmap_keys_equal(Item a, Item b);
 }
 // retain a host's lifetime owner without exposing an author-visible property.
 extern "C" bool vmap_set_owner(VMap* vm, Item owner);
+extern "C" Item vmap_get_owner(VMap* vm);
 extern "C" bool vmap_backing_has(VMap* vm, Item key);
 
 #pragma clang diagnostic push

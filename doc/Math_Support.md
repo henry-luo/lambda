@@ -134,7 +134,13 @@ reuses the existing CMU Serif faces and small KaTeX symbol and alphabet fonts.
 No additional production font is bundled. Noto Sans Math is a test fixture
 under `test/lambda/math/fonts`, with its own SIL OFL notice.
 
-OpenType MATH is optional. Without it, layout uses measured advances/outlines,
+OpenType MATH is optional. The default bundled CMU profile uses the original
+Computer Modern symbol/extension TFM parameters as an explicit math companion,
+with TeX 10/7/5 script sizes and display/text/cramped placement.
+[Resource provenance and hashes](../lmd/package/math/fonts/tex/PROVENANCE.md)
+record the upstream files; actual glyph advances and ink bounds still come
+from the painted CMU/KaTeX faces. Explicit supplied or installed fonts do not
+inherit this companion. Without MATH, those fonts use measured advances/outlines,
 x-height, underline thickness and OS/2 script offsets, with shared
 [MathML Core fallback constants](https://w3c.github.io/mathml-core/#layout-constants-mathconstants).
 Ordinary italic/bold faces provide letters when the Unicode math alphabet is

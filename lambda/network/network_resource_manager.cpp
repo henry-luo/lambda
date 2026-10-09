@@ -726,10 +726,9 @@ char* resource_manager_copy_resource_content(NetworkResourceManager* mgr,
     return content;
 }
 
-char* resource_manager_copy_ready_resource_content(NetworkResourceManager* mgr,
-                                                   const char* url,
-                                                   size_t* out_size) {
-    if (out_size) *out_size = 0;
+char* resource_manager_copy_ready_resource_path(NetworkResourceManager* mgr,
+                                                const char* url, bool* out_pending) {
+    if (out_pending) *out_pending = false;
     if (!resource_manager_admits(mgr, url)) return NULL;
 
     char* local_path = NULL;
@@ -741,7 +740,18 @@ char* resource_manager_copy_ready_resource_content(NetworkResourceManager* mgr,
         res->local_path) {
         local_path = mem_strdup(res->local_path, MEM_CAT_NETWORK);
     }
+    if (out_pending && res && !atomic_load(&res->cancel_requested)) {
+        *out_pending = res->state == STATE_PENDING || res->state == STATE_DOWNLOADING;
+    }
     pthread_mutex_unlock(&mgr->mutex);
+    return local_path;
+}
+
+char* resource_manager_copy_ready_resource_content(NetworkResourceManager* mgr,
+                                                   const char* url,
+                                                   size_t* out_size) {
+    if (out_size) *out_size = 0;
+    char* local_path = resource_manager_copy_ready_resource_path(mgr, url, NULL);
     if (!local_path) return NULL;
 
     char* content = read_binary_file(local_path, out_size);

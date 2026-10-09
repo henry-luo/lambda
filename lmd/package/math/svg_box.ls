@@ -3,7 +3,7 @@ import util: .util
 
 pub fn make(body: any, width: any, height: any, depth: any, atom: any = "mord") => {
     body: body, width: width, height: height, depth: depth, type: atom,
-    italic: 0.0, accent: width / 2.0, glyph: null, glyph_scale: 1.0
+    italic: 0.0, accent: width / 2.0, glyph: null, glyph_scale: 1.0, character: false
 }
 
 pub fn empty(width = 0.0) => make(<g>, width, 0.0, 0.0)
@@ -22,7 +22,7 @@ pub fn glyph(g, scale, atom = "mord") {
     let attachment = if (g.accent != null) g.accent
         else if (g.has_math == false and g.advance == 0.0 and ink != null) (ink.left + ink.right) / 2.0
         else g.advance / 2.0;
-    {*:bx, italic: (g.italic or 0.0) * scale,
+    {*:bx, character: true, italic: (g.italic or 0.0) * scale,
         accent: attachment * scale, glyph: g, glyph_scale: scale}
 }
 

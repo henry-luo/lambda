@@ -397,3 +397,14 @@ extern "C" void sm_observe_action(DocState* state, uint32_t action) {
     (void)state;
     (void)action;
 }
+
+// This target has no input-value mirror; native form state is held by StateStore.
+extern "C" const char* radiant_input_peek_live_value(DomElement*) {
+    return nullptr;
+}
+
+// Containing-block geometry belongs to view_pool, absent from this pool fixture.
+// Fail loudly if a future test starts depending on that production-only path.
+void view_get_layout_position(View*, TextRect*, float*, float*, View*) {
+    abort();
+}

@@ -82,6 +82,8 @@ When the edit *does* change the shape (new field, deleted field, type change), i
 
 **The owner decides what the editor frees or regrows.** After migration, inline mode frees the old data buffer exactly when the editor's pool owns it (`pool_owns`): a parser-built buffer is the Input pool's, while a JIT result's belongs to its result arena (ui_mode) or the GC heap, which reclaim it themselves. Children grow through `MarkEditor::reserve_children`, which counts the owned wide-scalar tail at the end of the capacity and calls the io layer's `list_grow_io`: a fresh buffer from the editor's arena, the tail moved with the items that point into it, the old buffer left to its owner. Both had keyed on a proxy — `ui_mode_` for the free, "not in my arena, so malloc's" for the regrow — and the regrow's `raw_realloc` aborted on any buffer malloc had not handed out ([LR11-3](<../../../vibe/Lambda_Issue_Ledger (fixed).md#lr11-3>)). When children change in ui_mode, `dom_relink_children` re-threads the DOM linked list so the layout view stays consistent. Batch operations cap at `MAX_BATCH_UPDATES = 64` using stack arrays and **error out** above the cap rather than degrading.
 
+DOM child edits use the same ownership-checked import helper as element edits (**D4.5.2**). The editor's `DomDocument` constructor overload registers the document's node arena, preserving native node identity even when its Input is non-UI. Plain JS strings and unowned node-backed strings are copied into the destination Input; the editor checks arena ownership before reading any embedded DOM header. `DomNodeEditsValidateNodeArenaOwnership` and `test/ui/dom/document_type_interface` cover these boundaries.
+
 ---
 
 ## 5. ShapeBuilder

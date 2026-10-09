@@ -43,6 +43,8 @@ int jube_member_descriptor(Item receiver, Item key, Item* out);
 int jube_member_own_keys(Item receiver, Item* out);
 int jube_member_projection_keys(Item receiver, Item* out);
 int jube_member_prototype(Item receiver, Item* out);
+int jube_member_set_prototype(Item receiver, Item prototype);
+int jube_member_extensibility(Item receiver, bool prevent, Item* out);
 void* jube_host_identity(Item item);
 
 // DOM4 compile-time registry queries. Slots are process-stable registry

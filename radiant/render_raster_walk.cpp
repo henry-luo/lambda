@@ -1,6 +1,7 @@
 #include "render.hpp"
 #include "layout.hpp"
 #include "scene3d.hpp"
+#include "geomap.hpp"
 
 #include "../lib/tagged.hpp"
 #include "../lib/log.h"
@@ -72,6 +73,9 @@ static void render_raster_dispatch_block(RasterRenderContext* rdcon, ViewBlock* 
         if (render_trace_enabled()) log_debug("[RENDER DISPATCH] calling render_block_view for form control");
         render_block_view(rdcon, block);
     }
+    else if (block->tag_id == MARKUP_NAME_GEOMAP) {
+        render_raster_retained_media(rdcon, block, render_geomap_content);
+    }
     else if (block->tag_id == MARKUP_NAME_SCENE3D) {
         // project mutations before checking retained fragments, including changes to non-layout scene children.
         Rect rect=render_geometry_block_content_rect(&rdcon->block,block,rdcon->raster_scale);
@@ -128,7 +132,7 @@ static void render_raster_walk_inline(RenderContext* vctx, ViewSpan* span, float
     render_profiler_increment(rdcon->profiler, RENDER_PROFILE_DISPATCH);
 
     ViewBlock* block = lam::unsafe_view_block_api_span(span);
-    if (block && block->tag_id == MARKUP_NAME_SCENE3D) {
+    if (block && (block->tag_id == MARKUP_NAME_SCENE3D || block->tag_id == MARKUP_NAME_GEOMAP)) {
         // inline replaced viewports use the same media paint scope as block viewports.
         render_raster_dispatch_block(rdcon,block,false);return;
     }

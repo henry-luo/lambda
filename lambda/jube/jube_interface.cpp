@@ -1367,6 +1367,12 @@ int jube_member_projection_keys(Item receiver, Item* out) {
 int jube_member_prototype(Item receiver, Item* out) {
     JubeTypeRecord* trec = jube_record_for(receiver);
     if (!trec || !out) return 0;
+    Item override = ItemNull;
+    if (js_own_stored_prototype(jube_expando_object(receiver, false), JS_INTERNAL_PROTO_KEY,
+            JS_INTERNAL_PROTO_KEY_LEN, &override)) {
+        *out = override.item == ITEM_JS_UNDEFINED ? ItemNull : override;
+        return 1;
+    }
     if (trec->binding && trec->binding->object_prototype && jube_native_alive(receiver) &&
             trec->binding->object_prototype(receiver, out)) {
         // DOM nodes need receiver-specific Element/Text/Document prototypes;
@@ -1374,6 +1380,35 @@ int jube_member_prototype(Item receiver, Item* out) {
         return 1;
     }
     *out = jube_type_prototype_for(trec);
+    return 1;
+}
+
+int jube_member_set_prototype(Item receiver, Item prototype) {
+    if (!jube_record_for(receiver) || !jube_native_alive(receiver)) return 0;
+    RootFrame roots(3);
+    Rooted<Item> object(roots, receiver), parent(roots, prototype), expando(roots, ItemNull);
+    Item current = ItemNull;
+    if (jube_member_prototype(object.get(), &current) && current.item == parent.get().item) return 1;
+    expando.set(jube_expando_object(object.get(), true));
+    if (get_type_id(expando.get()) != LMD_TYPE_MAP) return 0;
+    // retain the ordinary prototype in the wrapper's traced side map, independently of native branding.
+    js_set_prototype(expando.get(), parent.get());
+    return 1;
+}
+
+int jube_member_extensibility(Item receiver, bool prevent, Item* out) {
+    if (!out || !jube_record_for(receiver) || !jube_native_alive(receiver)) return 0;
+    RootFrame roots(2);
+    Rooted<Item> object(roots, receiver), storage(roots, jube_expando_object(receiver, prevent));
+    if (prevent) {
+        if (get_type_id(storage.get()) != LMD_TYPE_MAP) return 0;
+        Item status = js_object_prevent_extensions(storage.get());
+        *out = item_is_error(status) ? status : object.get();
+    } else {
+        // the same side map owns both own-property creation and its extensibility marker.
+        *out = get_type_id(storage.get()) == LMD_TYPE_MAP
+            ? js_object_is_extensible(storage.get()) : (Item){.item = ITEM_TRUE};
+    }
     return 1;
 }
 

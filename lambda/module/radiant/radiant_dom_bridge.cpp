@@ -864,6 +864,7 @@ typedef struct RadiantDomEventRecord {
     bool in_passive_listener;
     bool trusted;
     bool time_event;
+    bool has_payload;
     int event_phase;
     int class_id;
     double timestamp;
@@ -1024,7 +1025,7 @@ static bool radiant_dom_event_set_field(Item receiver, const char* name,
     } else if (strcmp(name, "__in_passive") == 0) {
         record->in_passive_listener = radiant_dom_event_value_bool(value);
     } else if (strcmp(name, "target") == 0 || strcmp(name, "srcElement") == 0) {
-        record->target = radiant_dom_event_item_to_key(value);
+        radiant_dom_event_set_target(receiver, value);
     } else if (strcmp(name, "currentTarget") == 0) {
         record->current_target = radiant_dom_event_item_to_key(value);
     } else {
@@ -1110,6 +1111,34 @@ RADIANT_C_API void radiant_dom_event_set_time_values(Item event, Item view, Item
     vmap_backing_set(event_root.get().vmap, key.get(), detail_root.get());
 }
 
+RADIANT_C_API bool radiant_dom_event_set_payload(Item event, Item payload) {
+    RootFrame roots(4);
+    Rooted<Item> receiver(roots, event), value(roots, payload);
+    Rooted<Item> storage(roots, ItemNull), previous_owner(roots, ItemNull);
+    RadiantDomEventRecord* record = radiant_dom_event_record(receiver.get());
+    if (!record) return false;
+    storage.set(vmap_get_owner(receiver.get().vmap));
+    previous_owner.set(storage.get());
+    if (record->has_payload) {
+        return get_type_id(storage.get()) == LMD_TYPE_ARRAY &&
+            !item_is_error(js_elements_set_int(storage.get(), 0, value.get()));
+    }
+    // the unexposed traced owner retains payload and target without per-event arena names.
+    storage.set(js_array_new(0));
+    if (item_is_error(js_array_push(storage.get(), value.get())) ||
+            item_is_error(js_array_push(storage.get(), previous_owner.get())) ||
+            !vmap_set_owner(receiver.get().vmap, storage.get())) return false;
+    record->has_payload = true;
+    return true;
+}
+
+RADIANT_C_API Item radiant_dom_event_payload(Item event, int class_id) {
+    RadiantDomEventRecord* record = radiant_dom_event_record(event);
+    if (!record || record->class_id != class_id || !record->has_payload) return ItemNull;
+    Item storage = vmap_get_owner(event.vmap);
+    return get_type_id(storage) == LMD_TYPE_ARRAY ? js_elements_get_int(storage, 0) : ItemNull;
+}
+
 RADIANT_C_API void radiant_dom_event_set_prototype_override(Item item,
                                                              Item prototype) {
     if (!radiant_dom_event_record(item) || !item.vmap) return;
@@ -1190,8 +1219,18 @@ RADIANT_C_API void radiant_dom_event_clear_lambda_dispatch_position(Item event) 
 }
 
 RADIANT_C_API void radiant_dom_event_set_target(Item event, Item target) {
-    RadiantDomEventRecord* record = radiant_dom_event_record(event);
-    if (record) record->target = radiant_dom_event_item_to_key(target);
+    RootFrame roots(3);
+    Rooted<Item> receiver(roots, event), value(roots, target);
+    Rooted<Item> storage(roots, ItemNull);
+    RadiantDomEventRecord* record = radiant_dom_event_record(receiver.get());
+    if (!record) return;
+    record->target = radiant_dom_event_item_to_key(value.get());
+    // container keys name GC objects; keep their precise edge while native DOM keys stay borrowed.
+    if (record->target.kind != RADIANT_EVT_KEY_CONTAINER) value.set(ItemNull);
+    if (record->has_payload) {
+        storage.set(vmap_get_owner(receiver.get().vmap));
+        js_elements_set_int(storage.get(), 1, value.get());
+    } else vmap_set_owner(receiver.get().vmap, value.get());
 }
 
 RADIANT_C_API void radiant_dom_event_set_path(Item event, const RadiantEvtKey* keys, int len) {
@@ -1418,6 +1457,15 @@ static DomElement* radiant_dom_member_elem(Item receiver) {
     return (node && node->is_element()) ? node->as_element() : nullptr;
 }
 
+static int radiant_dom_member_property(Item receiver, const char* property, Item* out) {
+    if (!out || !radiant_dom_unwrap_node(receiver)) return 0;
+    RootFrame roots(2);
+    Rooted<Item> receiver_root(roots, receiver);
+    Rooted<Item> key_root(roots, radiant_dom_string_item(property));
+    *out = dom_get_property_impl(receiver_root.get(), key_root.get());
+    return 1;
+}
+
 #define RADIANT_MEMBER_GET(name, expr)                                       \
     RADIANT_C_API int name(Item receiver, Item* out) {                       \
         DomElement* elem = radiant_dom_member_elem(receiver);                \
@@ -1435,9 +1483,7 @@ RADIANT_C_API int radiant_dom_member_namespace_uri(Item receiver, Item* out) {
     if (!elem || !out) return 0;
     // Record access predates parser-created SVG nodes. Keep it on the
     // canonical resolver so namespace inheritance matches generic DOM reads.
-    *out = dom_get_property_impl(receiver,
-        (Item){.item = s2it(heap_create_name("namespaceURI"))});
-    return 1;
+    return radiant_dom_member_property(receiver, "namespaceURI", out);
 }
 RADIANT_MEMBER_GET(radiant_dom_member_prefix, ItemNull)
 RADIANT_MEMBER_GET(radiant_dom_member_id, radiant_dom_string_item(elem->id))
@@ -1447,9 +1493,7 @@ RADIANT_C_API int radiant_dom_member_class_name(Item receiver, Item* out) {
     // SVG className is SVGAnimatedString, unlike HTML's string reflection.
     // Using one resolver prevents the record fast path from changing the
     // WebIDL type according to how an element was created.
-    *out = dom_get_property_impl(receiver,
-        (Item){.item = s2it(heap_create_name("className"))});
-    return 1;
+    return radiant_dom_member_property(receiver, "className", out);
 }
 RADIANT_MEMBER_GET(radiant_dom_member_child_element_count,
     radiant_dom_int_item(radiant_dom_script_visible_element_child_count(elem)))
@@ -2244,6 +2288,11 @@ static int radiant_dom_member_character_data_property(Item receiver,
                                                       Item* out) {
     DomNode* node = (DomNode*)radiant_dom_unwrap_node(receiver);
     if (!node || !prop || !out) return 0;
+    if (node->node_type == DOM_NODE_DOCTYPE) {
+        // doctype storage resembles CharacterData; its property semantics belong to the shared DOM core.
+        *out = dom_get_property_impl(receiver, radiant_dom_string_item(prop));
+        return 1;
+    }
     if (node->is_text()) {
         DomText* text = node->as_text();
         return radiant_dom_get_character_data_property(node, text->text,
@@ -2302,6 +2351,9 @@ RADIANT_DOM_MEMBER_FROM_CATALOG(radiant_dom_member_parent_node_any, parent_node)
 RADIANT_DOM_MEMBER_FROM_CATALOG(radiant_dom_member_parent_element_any, parent_element)
 RADIANT_DOM_MEMBER_FROM_CATALOG(radiant_dom_member_node_name, node_name)
 RADIANT_DOM_MEMBER_FROM_CATALOG(radiant_dom_member_node_type_any, node_type)
+RADIANT_C_API int radiant_dom_member_base_uri(Item receiver, Item* out) {
+    return radiant_dom_member_property(receiver, "baseURI", out);
+}
 // ownerDocument stays module-owned: `radiant.*` hands back a radiant document
 // wrapper carrying document_element/ready_state, and the core answers the
 // Document object or node instead. Unifying those two is F32's job (the
@@ -2416,7 +2468,7 @@ RADIANT_C_API Item radiant_dom_get_property(Item elem_item, Item prop_name) {
             return radiant_dom_labels_item(elem);
         }
     }
-    if (node && node->is_element() && prop &&
+    if (node && node->is_element() && dom_is_connected(node) && prop &&
         (strcmp(prop, "offsetWidth") == 0 || strcmp(prop, "offsetHeight") == 0 ||
          strcmp(prop, "offsetTop") == 0 || strcmp(prop, "offsetLeft") == 0 ||
          strcmp(prop, "offsetParent") == 0 || strncmp(prop, "client", 6) == 0 ||

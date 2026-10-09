@@ -13,6 +13,7 @@
 
 #include "font_internal.h"
 #include "../memtrack.h"
+#include "../strbuf.h"
 #include <zlib.h>
 
 // WOFF2 C++ API — confined to this file
@@ -225,18 +226,49 @@ bool font_decompress_woff1(Arena* arena, const uint8_t* data, size_t len,
 // WOFF2 Decompression (wraps libwoff2)
 // ============================================================================
 
+// transformed tables can exceed totalSfntSize; bound actual writes instead of trusting the header.
+class FontWoff2Out final : public woff2::WOFF2Out {
+public:
+    FontWoff2Out() : buffer(strbuf_new()) {}
+    ~FontWoff2Out() override { strbuf_free(buffer); }
+
+    bool Write(const void* data, size_t length) override {
+        return Write(data, Size(), length);
+    }
+
+    bool Write(const void* data, size_t offset, size_t length) override {
+        if (!buffer || offset > woff2::kDefaultMaxSize ||
+            length > woff2::kDefaultMaxSize - offset) return false;
+        size_t end = offset + length;
+        if (!strbuf_ensure_cap(buffer, end + 1)) return false;
+        if (offset > buffer->length) {
+            memset(buffer->str + buffer->length, 0, offset - buffer->length);
+        }
+        if (length) memcpy(buffer->str + offset, data, length);
+        if (end > buffer->length) buffer->length = end;
+        buffer->str[buffer->length] = '\0';
+        return true;
+    }
+
+    size_t Size() override { return buffer ? buffer->length : 0; }
+    const char* data() const { return buffer ? buffer->str : NULL; }
+
+private:
+    StrBuf* buffer;
+};
+
 bool font_decompress_woff2(Arena* arena, const uint8_t* data, size_t len,
                            uint8_t** out, size_t* out_len) {
     if (!data || !out || !out_len) return false;
 
-    // compute final size first
-    size_t final_size = woff2::ComputeWOFF2FinalSize(data, len);
-    if (final_size == 0) {
-        log_error("font_decompress_woff2: ComputeWOFF2FinalSize returned 0");
+    FontWoff2Out output;
+    if (!woff2::ConvertWOFF2ToTTF(data, len, &output)) {
+        log_error("font_decompress_woff2: ConvertWOFF2ToTTF failed");
         return false;
     }
 
-    // allocate output buffer (malloc if arena is NULL, arena otherwise)
+    // publish only the complete decode into the caller's lifetime owner.
+    size_t final_size = output.Size();
     uint8_t* buf = arena
         ? (uint8_t*)arena_alloc(arena, final_size)
         : (uint8_t*)mem_alloc(final_size, MEM_CAT_FONT);
@@ -245,17 +277,9 @@ bool font_decompress_woff2(Arena* arena, const uint8_t* data, size_t len,
         return false;
     }
 
-    // use WOFF2MemoryOut to write directly into our arena buffer
-    woff2::WOFF2MemoryOut output(buf, final_size);
-
-    if (!woff2::ConvertWOFF2ToTTF(data, len, &output)) {
-        log_error("font_decompress_woff2: ConvertWOFF2ToTTF failed");
-        if (!arena) mem_free(buf);
-        return false;
-    }
-
+    memcpy(buf, output.data(), final_size);
     *out = buf;
-    *out_len = output.Size();
+    *out_len = final_size;
 
     log_info("font_decompress_woff2: decompressed %zu -> %zu bytes", len, *out_len);
     return true;

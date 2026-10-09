@@ -1,0 +1,11 @@
+{
+  "name": "Captured Document getters use the native document receiver",
+  "html": "test/ui/dom/document_captured_properties.html",
+  "events": [
+    {"type": "assert_attribute", "target": {"selector": "#result"}, "attribute": "data-captured", "equals": "true"},
+    {"type": "assert_attribute", "target": {"selector": "#result"}, "attribute": "data-foreign", "equals": "true"},
+    {"type": "assert_attribute", "target": {"selector": "#result"}, "attribute": "data-native", "equals": "true"},
+    {"type": "assert_attribute", "target": {"selector": "#result"}, "attribute": "data-receiver", "equals": "true"},
+    {"type": "assert_text", "target": {"selector": "#result"}, "equals": "complete"}
+  ]
+}

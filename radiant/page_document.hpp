@@ -43,7 +43,9 @@ struct RadiantFlowTraits {
     RadiantDecorationConditionality decoration[2][2]; // border/padding, before/after
     float column_proportion; // zero selects ordinary CSS sizing; positive values share the fixed-track remainder
     uint32_t column_number; // zero follows the preceding placed column/cell; authored numbers are one-based
-    float indents[2]; // inherited computed start/end lengths, relative to the current reference area
+    float indents[2]; // inherited computed absolute start/end lengths
+    lam::Up<const CssValue> indent_expressions[2]; // percentages retain their declaring reference area
+    lam::Up<const ViewCssStyle> indent_owners[2];
     RadiantLineStacking line_stacking;
     float text_metrics[2]; // altitude, depth
     bool text_metrics_set[2];
@@ -246,7 +248,9 @@ RadiantPageDocument* radiant_page_document_compile(ViewTree* tree, CssEngine* en
 bool radiant_page_element(DomElement* element, const char* local_name);
 // shared FO/native cardinality normalization within the common counter domain.
 bool radiant_page_rounded_count(const char* text, uint32_t minimum, uint32_t* result);
+bool radiant_page_rounded_count(double value, uint32_t minimum, uint32_t* result);
 bool radiant_page_boolean(const char* text, bool inherited, bool* result);
+DomElement* radiant_page_style_parent(DomElement* source);
 bool radiant_page_control_hidden(DomElement* element);
 const RadiantPageSequence* radiant_page_sequence_for(const RadiantPageDocument* document, DomElement* element);
 const RadiantPageRule* radiant_page_master_select(const RadiantPageSequence* sequence,

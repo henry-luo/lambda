@@ -3998,10 +3998,12 @@ extern "C" bool radiant_dispatch_submit_event_from_script(void* form_node,
                                           : (DomDocument*)dom_get_document();
     if (!doc || form->doc != doc) return false;
 
-    // A script-less document has no EventTarget realm or submit listeners.
-    // Its Lambda behavior evaluator must not manufacture JS objects: that
-    // evaluator deliberately owns no JS Input/shape pool.
-    if (!doc->js_has_dom_realm) return true;
+    // Lambda author templates remain submit listeners without a JS realm.
+    // Reuse native dispatch and its cancellation result without JS allocation.
+    if (!doc->js_has_dom_realm) {
+        return !radiant_dispatch_event_from_script_impl(
+            form_node, "submit", true, true, true);
+    }
 
     Item event = js_create_event("submit", true, true);
     js_set_key_cstr(event, "isTrusted", (Item){.item = ITEM_TRUE});
@@ -7906,6 +7908,25 @@ static bool post_html_handler_paint_only_commit(EventContext* evcon, DomDocument
     return true;
 }
 
+static bool post_html_handler_detached_only_commit(DomDocument* doc, int mutations) {
+    DocState* state = (DocState*)doc->state;
+    if (!doc->view_tree || !doc->view_tree->root || doc->js.mutation_record_count <= 0 ||
+        doc->js.mutation_record_overflow || doc->js.inline_stylesheet_mutation_count ||
+        doc->js.reflow_pending_before_batch || (state && state->reflow_scheduler.pending)) return false;
+    for (int i = 0; i < doc->js.mutation_record_count; i++) {
+        DomJsMutationRecord* record = &doc->js.mutation_records[i];
+        if (record->kind == DOM_JS_MUTATION_UNKNOWN ||
+            dom_js_record_has_connected_endpoint(doc, record)) return false;
+    }
+    // detached edits retain their node state and observer records; insertion
+    // publishes a connected record that will cascade and lay out the subtree.
+    doc_state_clear_reflow(state);
+    dom_js_record_reconcile(doc, DOM_RECONCILE_INCREMENTAL, "detached-only",
+                            mutations, doc->js.mutation_record_count, 0,
+                            "none", "none", "retained", 0);
+    return true;
+}
+
 static void post_html_handler_rebuild(EventContext* evcon,
                                        uint64_t t_start, uint64_t t_handler) {
     DomDocument* doc = event_context_target_document(evcon);
@@ -7926,6 +7947,10 @@ static void post_html_handler_rebuild(EventContext* evcon,
     // deferring text-tree changes until load completion loses dynamic keyframes.
     dom_cssom_sync_mutated_inline_stylesheets(doc);
 
+    if (post_html_handler_detached_only_commit(doc, mutations)) {
+        dom_js_mutation_reset_records(doc);
+        return;
+    }
     if (post_html_handler_paint_only_commit(evcon, doc, t0, mutations)) {
         dom_js_mutation_reset_records(doc);
         return;

@@ -128,6 +128,7 @@ bool layout_replaced_default_size(NameId tag, float* width, float* height) {
         case MARKUP_NAME_EMBED:
         case MARKUP_NAME_SVG:
         case MARKUP_NAME_SCENE3D:
+        case MARKUP_NAME_GEOMAP:
             default_width = 300.0f;
             default_height = 150.0f;
             break;

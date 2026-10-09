@@ -189,15 +189,41 @@ TEST(NetworkResourceManager, AdmissionPrecedesSharedCacheAndReadyContentReuse) {
     NetworkResourceManager* admitted = resource_manager_create(&allowed, nullptr, cache);
     NetworkResourceManager* blocked = resource_manager_create(&denied, nullptr, cache);
     ASSERT_NE(admitted, nullptr); ASSERT_NE(blocked, nullptr);
-    ASSERT_NE(resource_manager_prefetch(admitted, url, PRIORITY_HIGH), nullptr);
+    NetworkResource* resource = resource_manager_prefetch(admitted, url, PRIORITY_HIGH);
+    ASSERT_NE(resource, nullptr);
+    bool pending = true;
+    char* ready_path = resource_manager_copy_ready_resource_path(admitted, url, &pending);
+    ASSERT_NE(ready_path, nullptr);
+    EXPECT_FALSE(pending);
+    EXPECT_TRUE(file_exists(ready_path));
+    mem_free(ready_path);
     size_t size = 0;
     char* ready = resource_manager_copy_ready_resource_content(admitted, url, &size);
     ASSERT_NE(ready, nullptr); EXPECT_EQ(size, strlen(content)); EXPECT_STREQ(ready, content); mem_free(ready);
+    // snapshot state without submitting a transfer; failed/absent/cancelled requests are not pending.
+    const ResourceState states[] = {STATE_PENDING, STATE_DOWNLOADING, STATE_FAILED};
+    for (ResourceState state : states) {
+        resource->state = state;
+        EXPECT_EQ(resource_manager_copy_ready_resource_path(admitted, url, &pending), nullptr);
+        EXPECT_EQ(pending, state != STATE_FAILED);
+    }
+    resource->state = STATE_DOWNLOADING;
+    atomic_store(&resource->cancel_requested, true);
+    EXPECT_EQ(resource_manager_copy_ready_resource_path(admitted, url, &pending), nullptr);
+    EXPECT_FALSE(pending);
+    atomic_store(&resource->cancel_requested, false);
+    resource->state = STATE_CACHED;
+    EXPECT_EQ(resource_manager_copy_ready_resource_path(admitted, "https://example.test/absent", &pending), nullptr);
+    EXPECT_FALSE(pending);
     EXPECT_EQ(resource_manager_prefetch(blocked, url, PRIORITY_HIGH), nullptr);
+    EXPECT_EQ(resource_manager_copy_ready_resource_path(blocked, url, &pending), nullptr);
+    EXPECT_FALSE(pending);
     EXPECT_EQ(resource_manager_copy_ready_resource_content(blocked, url, &size), nullptr);
     EXPECT_EQ(size, 0u);
     // even a retained manager entry cannot override a subsequently selected policy.
     allowed.resource_policy = INPUT_RESOURCE_LOCAL_ONLY;
+    EXPECT_EQ(resource_manager_copy_ready_resource_path(admitted, url, &pending), nullptr);
+    EXPECT_FALSE(pending);
     EXPECT_EQ(resource_manager_copy_ready_resource_content(admitted, url, &size), nullptr);
     EXPECT_EQ(size, 0u);
     resource_manager_destroy(blocked); resource_manager_destroy(admitted); enhanced_cache_destroy(cache);

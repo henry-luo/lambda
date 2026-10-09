@@ -27,7 +27,13 @@ pub fn render(ast, options) map | error {
 }
 
 fn scale(c) => font.scale(c.profile, c.style) * c.size
-fn metric(c, key) => c.profile.facts.constants[key] * scale(c)
+fn metric(c, key, fallback_value = 0.0) {
+    let companion = c.profile.tex.styles[if (c.style == "display") "text" else c.style][key];
+    if (companion != null) companion * c.size
+    else (c.profile.facts.constants[key] or fallback_value) * scale(c)
+}
+fn math_quad(c) => metric(c, "math_quad", font.UNITS)
+fn with_style(c, style) => {*:c, style: style, cramped: false}
 fn script(c) => {*:c, style: if (c.style == "display" or c.style == "text") "script" else "scriptscript"}
 fn fraction_child(c) => if (c.style == "display") {*:c, style: "text"} else script(c)
 fn command_name(text) => if (slice(text, 0, 1) == "\\") slice(text, 1, len(text)) else text
@@ -55,14 +61,26 @@ fn text(text_value, c, literal = false) {
     if (literal) bx.row(boxes) else if (len(boxes) == 1) boxes[0] else spaced(boxes, c)
 }
 
+// TeX's first pass normalizes binary atoms sequentially, ignoring explicit glue.
+fn normalize_atoms(boxes, i, previous) {
+    if (i >= len(boxes)) []
+    else {
+        let item = boxes[i]
+        let next = [for (j in (i + 1) to (len(boxes) - 1) where boxes[j].type != "skip") boxes[j].type][0]
+        let kind = if (item.type == "mbin" and (previous == null or
+            contains(["mbin", "mop", "mrel", "mopen", "mpunct"], previous) or next == null or
+            contains(["mrel", "mclose", "mpunct"], next))) "mord" else item.type;
+        [{*:item, type:kind}, *normalize_atoms(boxes, i + 1, if (kind == "skip") previous else kind)]
+    }
+}
+
 fn spaced(boxes, c) {
-    // TeX binary operators become ordinary atoms at list boundaries.
-    let normalized = [for (i, item in boxes)
-        if (item.type == "mbin" and (i == 0 or i == len(boxes) - 1 or
-            contains(["mbin", "mop", "mrel", "mopen", "mpunct"], boxes[i - 1].type) or
-            contains(["mrel", "mclose", "mpunct"], boxes[i + 1].type))) {*:item, type: "mord"} else item]
-    let with_spaces = [for (i, item in normalized) [
-        if (i > 0) bx.empty(spaces.get_spacing(normalized[i - 1].type, item.type, c.style) * font.UNITS * scale(c)) else bx.empty(), item]]
+    let normalized = normalize_atoms(boxes, 0, null)
+    let with_spaces = [for (i, item in normalized) (
+        let previous = [for (j in 0 to (i - 1) where normalized[j].type != "skip") normalized[j]],
+        let left = previous[len(previous) - 1],
+        [if (left != null and item.type != "skip") bx.empty(spaces.get_spacing(left.type, item.type,
+            item.spacing_style or c.style) * (item.spacing_quad or math_quad(c))) else bx.empty(), item])];
     if (len(normalized) == 1) normalized[0] else bx.row([for (pair in with_spaces, item in pair) item])
 }
 
@@ -77,11 +95,11 @@ fn group_boxes(items, c, i) {
         let command = if (item is element) string(item.cmd or item.name or "") else ""
         let style = style_name(command)
         if (style != null and item.arg == null)
-            group_boxes(items, {*:c, style: style}, i + 1)^
+            group_boxes(items, with_style(c, style), i + 1)^
         else if (item is element and name(item) == 'color_switch') {
             let tail = group(slice(items, i + 1, len(items)), c)^;
             [{*:tail, body: <g fill: (item.color_raw or util.text_of(item.color)), tail.body>}]
-        } else [node(item, c)^, *group_boxes(items, c, i + 1)^]
+        } else [{*:node(item, c)^, spacing_style:c.style, spacing_quad:math_quad(c)}, *group_boxes(items, c, i + 1)^]
     }
 }
 
@@ -118,7 +136,7 @@ fn node(n, c) {
         case 'text_group': text(util.text_of(n), c, true)^
         case 'style_command': styled(n, c)^
         case 'textstyle_command': styled(n, c)^
-        case 'mathop': {*:node(n.body, {*:c, variant: "normal"})^, type: "mop"}
+        case 'mathop': {*:node(n.body, {*:c, variant: "normal"})^, type: "mop", character:false, limits:true}
         case 'overunder_command': overunder(n, c)^
         case 'extended_arrow': arrow(n, c)^
         case 'environment': matrix(n, c)^
@@ -134,6 +152,7 @@ fn node(n, c) {
         case 'not_overlay': negated(n, c)^
         case 'not_empty': character("/", {*:c, variant: "normal"}, "mrel")^
         case 'limits_modifier': bx.empty()
+        case 'group': {*:group(util.content_items(n), c)^, type: "mord"}
         default: group(util.content_items(n), c)^
     }
 }
@@ -147,7 +166,7 @@ fn command(raw, c) {
         let atom = sym.classify_symbol(key)
         let is_large = atom == "mop"
         let result = if (is_large and c.style == "display")
-            stretch.glyph(font.glyph(c.profile, ord(unicode))^, metric(c, "display_operator_min_height"), true, scale(c), atom)^
+            stretch.glyph(font.large_operator(c.profile, ord(unicode))^, metric(c, "display_operator_min_height"), true, scale(c), atom)^
             else text(unicode, if (is_large) {*:c, variant: "normal"} else c)^
         let centered = if (is_large) center_axis(result, c) else result;
         {*:centered, type: atom, limits: is_large and not contains(key, "int")}
@@ -168,9 +187,9 @@ fn command_node(n, c) {
     if (key == "rule") rule(<rule_command width: util.text_of(items[0]), height: util.text_of(items[1])>, c)
     else if (key == "genfrac" and len(items) == 6) {
         let style = ["display", "text", "script", "scriptscript"][int(util.text_of(items[3]))]
-        let result = fraction(<fraction cmd: "\\genfrac", numer: items[4], denom: items[5],
-            thickness: util.text_of(items[2])>, {*:c, style: style or c.style})^;
-        fence_box(result, util.text_of(items[0]), util.text_of(items[1]), c)^
+        fraction(<fraction cmd: "\\genfrac", numer: items[4], denom: items[5],
+            left:util.text_of(items[0]), right:util.text_of(items[1]), thickness: util.text_of(items[2])>,
+            if (style != null) with_style(c, style) else c)^
     } else if (len(items) > 0) spaced([command(key, c)^, *[for (item in items) node(item, c)^]], c)
     else command(key, c)^
 }
@@ -188,7 +207,7 @@ fn style_name(cmd) {
 fn styled(n, c) {
     let variant = font.command_variant(string(n.cmd))
     let style = style_name(string(n.cmd))
-    let child = {*:c, variant: variant or c.variant, style: style or c.style}
+    let child = {*:if (style != null) with_style(c, style) else c, variant: variant or c.variant}
     node(n.arg or content(n)^, child)^
 }
 
@@ -199,19 +218,34 @@ fn kern(b, corner, height) {
 }
 
 fn scripts(n, c) {
-    let base = node(n.base, c)^
+    if (n.base is element and name(n.base) == 'accent' and
+        not contains(["\\overline", "\\underline", "\\overbrace", "\\underbrace"], n.base.cmd))
+        accent(n.base, c, n)^
+    else side_scripts(n, c, node(n.base, c)^)^
+}
+
+fn side_scripts(n, c, base) {
     let sup = node(n.sup, script(c))^
     let sub = node(n.sub, {*:script(c), cramped: true})^
     let limits = n.modifier == "limits" or (n.modifier != "nolimits" and c.style == "display" and base.limits == true)
     if (limits) limits_box(base, if (n.sub != null) sub else null, if (n.sup != null) sup else null, c)
     else {
-        let up0 = max([metric(c, if (c.cramped) "superscript_shift_up_cramped" else "superscript_shift_up"),
-            base.height - metric(c, "superscript_baseline_drop_max"), sup.depth + metric(c, "superscript_bottom_min")])
-        let down0 = max([metric(c, "subscript_shift_down"), base.depth + metric(c, "subscript_baseline_drop_min"),
-            sub.height - metric(c, "subscript_top_max")])
-        let missing_gap = if (n.sup != null and n.sub != null)
-            max(0.0, metric(c, "sub_superscript_gap_min") - (up0 - sup.depth + down0 - sub.height)) else 0.0
-        let lift = min(missing_gap, max(0.0, metric(c, "superscript_bottom_max_with_subscript") - (up0 - sup.depth)))
+        // TeX Rule 18 exempts a character nucleus; compound drops use script-size parameters.
+        let is_character = base.character == true and base.type != "mop"
+        let up_initial = if (is_character) 0.0 else base.height - metric(script(c), "superscript_baseline_drop_max")
+        let down_initial = if (is_character) 0.0 else base.depth + metric(script(c), "subscript_baseline_drop_min")
+        let up0 = max([up_initial, metric(c, if (c.cramped) "superscript_shift_up_cramped"
+            else if (c.style == "display" and c.profile.tex != null) "superscript_shift_up_display" else "superscript_shift_up"),
+            sup.depth + metric(c, "superscript_bottom_min")])
+        let both = n.sup != null and n.sub != null
+        let down0 = if (both) max(down_initial, metric(c, "subscript_shift_down_with_superscript",
+            c.profile.facts.constants.subscript_shift_down))
+            else max([down_initial, metric(c, "subscript_shift_down"), sub.height - metric(c, "subscript_top_max")])
+        let missing_gap = if (both) max(0.0, metric(c, "sub_superscript_gap_min") -
+            (up0 - sup.depth + down0 - sub.height)) else 0.0
+        // After opening the gap, TeX raises both scripts by psi, even if psi exceeds that gap.
+        let lift = if (missing_gap > 0.0) max(0.0, metric(c, "superscript_bottom_max_with_subscript") -
+            (up0 - sup.depth)) else 0.0
         let up = up0 + lift
         let down = down0 + missing_gap - lift
         let sup_kern = min(kern(base, "top_right", up - sup.depth) + kern(sup, "bottom_left", base.height - up),
@@ -221,7 +255,8 @@ fn scripts(n, c) {
         let x_sup = base.width + base.italic + sup_kern
         let x_sub = base.width + sub_kern
         let width = max([base.width, if (n.sup != null) x_sup + sup.width else 0.0,
-            if (n.sub != null) x_sub + sub.width else 0.0]) + metric(c, "space_after_script")
+            if (n.sub != null) x_sub + sub.width else 0.0]) +
+            (if (c.profile.tex != null) dimension("0.5pt", c) else metric(c, "space_after_script"))
         let entries = [{box: base, x: 0.0, y: 0.0},
             *if (n.sup != null) [{box: sup, x: x_sup, y: 0.0 - up}] else [],
             *if (n.sub != null) [{box: sub, x: x_sub, y: down}] else []];
@@ -236,17 +271,19 @@ fn limits_box(base, lower, upper, c) {
     let entries = [{box: base, x: (width - base.width) / 2.0, y: 0.0},
         *if (upper != null) [{box: upper, x: (width - upper.width + base.italic) / 2.0, y: 0.0 - up}] else [],
         *if (lower != null) [{box: lower, x: (width - lower.width - base.italic) / 2.0, y: down}] else []];
-    bx.compose(entries, width, base.type)
+    let result = bx.compose(entries, width, base.type);
+    {*:result, height:result.height + (if (upper != null) metric(c, "limit_extra_padding") else 0.0),
+        depth:result.depth + (if (lower != null) metric(c, "limit_extra_padding") else 0.0)}
 }
 
 fn fraction(n, c) {
     let key = command_name(string(n.cmd or "frac"))
-    let context = if (contains(["dfrac", "dbinom", "cfrac"], key)) {*:c, style: "display"}
-        else if (contains(["tfrac", "tbinom"], key)) {*:c, style: "text"} else c
+    let context = if (contains(["dfrac", "dbinom", "cfrac"], key)) with_style(c, "display")
+        else if (contains(["tfrac", "tbinom"], key)) with_style(c, "text") else c
     let child = fraction_child(context)
     let numer = node(n.numer, child)^
     let denom = node(n.denom, {*:child, cramped: true})^
-    let explicit_thickness = if (n.thickness != null) dimension(string(n.thickness), context) else null
+    let explicit_thickness = if (n.thickness != null and string(n.thickness) != "") dimension(string(n.thickness), context) else null
     let bar = if (explicit_thickness != null) explicit_thickness > 0.0 else not contains(["binom", "dbinom", "tbinom", "choose", "atop", "brace", "brack"], key)
     let display = context.style == "display"
     let thickness = if (bar) explicit_thickness or metric(context, "fraction_rule_thickness") else 0.0
@@ -256,30 +293,39 @@ fn fraction(n, c) {
     let down0 = metric(context, if (bar) (if (display) "fraction_denominator_display_style_shift_down" else "fraction_denominator_shift_down")
         else (if (display) "stack_bottom_display_style_shift_down" else "stack_bottom_shift_down"))
     let gap = if (bar) 0.0 else max(0.0, metric(context, if (display) "stack_display_style_gap_min" else "stack_gap_min") - (up0 + down0 - numer.depth - denom.height))
-    let up = if (bar) max(up0, axis + thickness / 2.0 + numer.depth + metric(context,
-        if (display) "fraction_num_display_style_gap_min" else "fraction_numerator_gap_min")) else up0 + gap / 2.0
-    let down = if (bar) max(down0, thickness / 2.0 + denom.height - axis + metric(context,
-        if (display) "fraction_denom_display_style_gap_min" else "fraction_denominator_gap_min")) else down0 + gap / 2.0
+    // An authored TeX bar uses its own thickness; native MATH gaps remain font-owned.
+    let tex_bar = context.profile.tex != null or explicit_thickness != null
+    let num_gap = if (tex_bar) (if (display) 3.0 else 1.0) * thickness
+        else metric(context, if (display) "fraction_num_display_style_gap_min" else "fraction_numerator_gap_min")
+    let denom_gap = if (tex_bar) (if (display) 3.0 else 1.0) * thickness
+        else metric(context, if (display) "fraction_denom_display_style_gap_min" else "fraction_denominator_gap_min")
+    let up = if (bar) max(up0, axis + thickness / 2.0 + numer.depth + num_gap) else up0 + gap / 2.0
+    let down = if (bar) max(down0, thickness / 2.0 + denom.height - axis + denom_gap) else down0 + gap / 2.0
     let width = max(numer.width, denom.width)
     let result = bx.compose([{box: numer, x: (width - numer.width) / 2.0, y: 0.0 - up},
         {box: denom, x: (width - denom.width) / 2.0, y: down},
-        *if (bar) [{box: bx.rule(width, thickness, 0.0 - axis - thickness / 2.0), x: 0.0, y: 0.0}] else []], width, "minner")
+        *if (bar) [{box: bx.rule(width, thickness, 0.0 - axis - thickness / 2.0), x: 0.0, y: 0.0}] else []], width, "mord")
     let fences = if (contains(["binom", "dbinom", "tbinom", "choose"], key)) ["(", ")"]
-        else if (key == "brace") ["{", "}"] else if (key == "brack") ["[", "]"] else null
-    if (fences != null) fence_box(result, fences[0], fences[1], context)^ else result
+        else if (key == "brace") ["{", "}"] else if (key == "brack") ["[", "]"]
+        else [string(n.left or "."), string(n.right or ".")]
+    let target = metric(context, if (display) "delimiter_size_display" else "delimiter_size",
+        c.profile.facts.constants.delimited_sub_formula_min_height);
+    bx.row([delimiter(fences[0], target, context, "mopen")^, result,
+        delimiter(fences[1], target, context, "mclose")^], "mord")
 }
 
 fn center_axis(b, c) => bx.shifted(b, 0.0, (b.height - b.depth) / 2.0 - metric(c, "axis_height"), b.width)
 
 fn delimiter(raw, target, c, atom) {
     let ch = sym.lookup_symbol(raw) or raw
-    if (ch == "." or ch == "") bx.empty()
+    if (ch == "." or ch == "") bx.empty(dimension("1.2pt", c))
     else center_axis(stretch.glyph(font.glyph(c.profile, ord(ch))^, target, true, scale(c), atom)^, c)
 }
 
 fn fence_box(body, left, right, c) {
     let axis = metric(c, "axis_height")
-    let target = 2.0 * max(body.height - axis, body.depth + axis)
+    let extent = 2.0 * max(body.height - axis, body.depth + axis)
+    let target = max(extent * 901.0 / 1000.0, extent - dimension("5pt", c))
     bx.row([delimiter(left, target, c, "mopen")^, body, delimiter(right, target, c, "mclose")^], "minner")
 }
 
@@ -309,9 +355,9 @@ fn radical(n, c) {
     {*:result, height: result.height + metric(c, "radical_extra_ascender")}
 }
 
-fn accent(n, c) {
+fn accent(n, c, attached = null) {
     let key = command_name(string(n.cmd))
-    let base = node(n.base, {*:c, cramped: true})^
+    let base = node(n.base, if (key == "underline") c else {*:c, cramped: true})^
     if (key == "overline" or key == "underline") {
         let above = key == "overline"
         let thickness = metric(c, if (above) "overbar_rule_thickness" else "underbar_rule_thickness")
@@ -333,12 +379,16 @@ fn accent(n, c) {
         if (ch == null) error("math: unsupported accent " ++ key)
         else {
         let g = font.glyph(c.profile, ord(ch))^
-        let mark = stretch.glyph(g, base.width, false, scale(c), "mord")^
+        let wide = starts_with(key, "wide") or contains(key, "arrow")
+        let mark = if (contains(key, "arrow")) stretch.glyph(g, base.width, false, scale(c), "mord")^
+            else if (wide) stretch.accent(g, base.width, scale(c))^ else bx.glyph(g, scale(c))
         let x = base.accent - mark.accent
         // below-arrow accents must clear the base's descent instead of its top.
         let y = if (starts_with(key, "under")) base.depth + metric(c, "underbar_vertical_gap") + mark.height
             else 0.0 - max(0.0, base.height - metric(c, "accent_base_height"));
-        bx.compose([{box: base, x: 0.0, y: 0.0}, {box: mark, x: x, y: y}], base.width, base.type)
+        let scripted = if (attached != null and base.character == true) side_scripts(attached, c, base)^ else base
+        let result = bx.compose([{box: scripted, x: 0.0, y: 0.0}, {box: mark, x: x, y: y}], scripted.width, base.type);
+        if (attached != null and base.character != true) side_scripts(attached, c, result)^ else result
         }
     }
 }
@@ -362,7 +412,7 @@ fn arrow(n, c) {
 
 fn matrix(n, c) {
     let key = command_name(string(n.name or n.cmd or "matrix"))
-    let child = {*:c, style: if (key == "smallmatrix") "script" else "text"}
+    let child = with_style(c, if (key == "smallmatrix") "script" else "text")
     let items = util.content_items(n.body)
     let rows = util.parse_rows(items, 0, len(items), [], [], [])
     let cells = [for (row in rows) [for (cell in row.cells) group(cell.items, child)^]]
@@ -403,7 +453,7 @@ fn matrix(n, c) {
 fn phantom(n, c) {
     let base = node(n.content, c)^
     let key = command_name(string(n.cmd));
-    {*:base, body: if (key == "smash") base.body else <g>,
+    {*:base, character:false, body: if (key == "smash") base.body else <g>,
         width: if (key == "vphantom") 0.0 else base.width,
         height: if (key == "hphantom" or key == "smash") 0.0 else base.height,
         depth: if (key == "hphantom" or key == "smash") 0.0 else base.depth}
@@ -445,15 +495,15 @@ fn space(n, c) {
         case "qquad": 2.0
         default: null
     }
-    {*:bx.empty(if (em != null) em * font.UNITS * scale(c) else dimension(string(n.value or "0em"), c)), type: "skip"}
+    {*:bx.empty(if (em != null) em * (if (contains(["quad", "qquad", "enspace"], key)) font.UNITS * c.size else math_quad(c)) else dimension(string(n.value or "0em"), c)), type: "skip"}
 }
 
 fn dimension(raw, c) {
     let dim = util.dimension_from_string(raw)
     let units = match dim.unit {
-        case "em": font.UNITS * scale(c)
-        case "ex": c.profile.font_metrics.x_height * scale(c)
-        case "mu": font.UNITS * scale(c) / 18.0
+        case "em": font.UNITS * c.size
+        case "ex": c.profile.font_metrics.x_height * c.size
+        case "mu": math_quad(c) / 18.0
         case "pt": font.UNITS * 96.0 / 72.27 / c.pixels_per_em
         case "pc": font.UNITS * 96.0 / 72.27 * 12.0 / c.pixels_per_em
         case "in": font.UNITS * 96.0 / c.pixels_per_em

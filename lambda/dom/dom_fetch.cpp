@@ -27,6 +27,7 @@
 #include "../../lib/uv_loop.h"
 #include "../../lib/byte_builder.h"
 #include "../../lib/utf.h"
+#include "../../lib/mime-detect.h"
 
 #include <curl/curl.h>
 #include "../network/curl_trust.h"
@@ -36,8 +37,6 @@
 #include <sys/stat.h>
 #include "../../lib/mem.h"
 #include "../../radiant/radiant.hpp"
-
-#define MAX_FETCH_RESPONSES 256
 
 // --document is parsed before its EvalContext exists. This is bootstrap input
 // only: the first context copies it into its fetch capsule and clears it.
@@ -95,15 +94,11 @@ typedef struct JsFetchWork {
     atomic_int32 cancelled;
 } JsFetchWork;
 
-// Response bodies, relative-path policy, and the executor handoff are realm
+// Relative-path policy and the executor handoff are realm
 // state. Their users run under a bound context and therefore use only direct
 // owner-thread field accesses—no shared table, lock, or atomic probe.
 struct JsFetchRuntimeState {
     char* base_dir = NULL;
-    char* response_bodies[MAX_FETCH_RESPONSES] = {};
-    int response_body_lens[MAX_FETCH_RESPONSES] = {};
-    char* response_types[MAX_FETCH_RESPONSES] = {};
-    int response_body_count = 0;
     JsFetchWork* pending_work = NULL;
 };
 
@@ -170,10 +165,6 @@ extern "C" void js_fetch_apply_bootstrap_base_path(void) {
 
 #define js_fetch_state ((JsFetchRuntimeState*)context_capsule(context, CONTEXT_CAPSULE_DOM_FETCH))
 #define g_fetch_base_dir (js_fetch_state->base_dir)
-#define response_bodies (js_fetch_state->response_bodies)
-#define response_body_lens (js_fetch_state->response_body_lens)
-#define response_body_count (js_fetch_state->response_body_count)
-#define response_types (js_fetch_state->response_types)
 #define pending_fetch_work (js_fetch_state->pending_work)
 
 // =============================================================================
@@ -331,133 +322,12 @@ static void fetch_work_cb(uv_work_t* req) {
 // Response object creation + .text() / .json() methods
 // =============================================================================
 
-// Stored body text for response methods
-// (We use a simple slot array keyed by response index)
-// Per-response inferred Content-Type (used by .blob() to set Blob.type).
-
-// Infer a Content-Type from a URL path's extension. Returns a static string
-// (not freed). Used for the local-file fast path so `await fetch(x).blob()`
-// produces a Blob with a meaningful `type` field.
-static const char* mime_from_url(const char* url) {
-    if (!url) return "application/octet-stream";
-    const char* dot = strrchr(url, '.');
-    if (!dot) return "application/octet-stream";
-    const char* ext = dot + 1;
-    if (!str_icmp_cstr(ext, "png"))  return "image/png";
-    if (!str_icmp_cstr(ext, "jpg") || !str_icmp_cstr(ext, "jpeg")) return "image/jpeg";
-    if (!str_icmp_cstr(ext, "gif"))  return "image/gif";
-    if (!str_icmp_cstr(ext, "svg"))  return "image/svg+xml";
-    if (!str_icmp_cstr(ext, "html") || !str_icmp_cstr(ext, "htm")) return "text/html";
-    if (!str_icmp_cstr(ext, "css"))  return "text/css";
-    if (!str_icmp_cstr(ext, "js"))   return "application/javascript";
-    if (!str_icmp_cstr(ext, "json")) return "application/json";
-    if (!str_icmp_cstr(ext, "txt"))  return "text/plain";
-    if (!str_icmp_cstr(ext, "xml"))  return "application/xml";
-    return "application/octet-stream";
-}
-
-static Item js_response_text() {
-    if (!js_fetch_runtime_state_get()) return dom_realm_promise_resolve(ItemNull);
-    Item this_resp = dom_realm_receiver();
-    String* key = heap_create_name("__body_idx", 10);
-    Item idx_item = dom_realm_get(this_resp, (Item){.item = s2it(key)});
-    if (get_type_id(idx_item) != LMD_TYPE_INT) return dom_realm_promise_resolve(ItemNull);
-
-    int idx = (int)it2i(idx_item);
-    if (idx < 0 || idx >= response_body_count || !response_bodies[idx])
-        return dom_realm_promise_resolve(ItemNull);
-
-    Item body = make_string_item(response_bodies[idx], response_body_lens[idx]);
-    return dom_realm_promise_resolve(body);
-}
-
-static Item js_response_json() {
-    if (!js_fetch_runtime_state_get()) return dom_realm_promise_resolve(ItemNull);
-    Item this_resp = dom_realm_receiver();
-    String* key = heap_create_name("__body_idx", 10);
-    Item idx_item = dom_realm_get(this_resp, (Item){.item = s2it(key)});
-    if (get_type_id(idx_item) != LMD_TYPE_INT) return dom_realm_promise_resolve(ItemNull);
-
-    int idx = (int)it2i(idx_item);
-    if (idx < 0 || idx >= response_body_count || !response_bodies[idx])
-        return dom_realm_promise_resolve(ItemNull);
-
-    Item body_str = make_string_item(response_bodies[idx], response_body_lens[idx]);
-    Item parsed = js_json_parse(body_str);
-    return dom_realm_promise_resolve(parsed);
-}
-
-static Item js_response_array_buffer() {
-    if (!js_fetch_runtime_state_get()) return dom_realm_promise_resolve(ItemNull);
-    Item this_resp = dom_realm_receiver();
-    String* key = heap_create_name("__body_idx", 10);
-    Item idx_item = dom_realm_get(this_resp, (Item){.item = s2it(key)});
-    if (get_type_id(idx_item) != LMD_TYPE_INT) return dom_realm_promise_resolve(ItemNull);
-
-    int idx = (int)it2i(idx_item);
-    if (idx < 0 || idx >= response_body_count || !response_bodies[idx])
-        return dom_realm_promise_resolve(ItemNull);
-
-    // Fetch exposes its retained bytes as a fresh ArrayBuffer, never a String.
-    Item body = js_arraybuffer_from_bytes(response_bodies[idx], response_body_lens[idx]);
-    if (item_is_error(body)) {
-        return dom_realm_promise_reject(dom_realm_new_error(make_string_item(
-            "fetch: could not allocate response ArrayBuffer")));
-    }
-    return dom_realm_promise_resolve(body);
-}
-
-// Synthesise a Blob-shaped JS object whose `text()` / `arrayBuffer()` / `slice()`
-// methods mirror the WPT shim's Blob polyfill closely enough for the clipboard
-// suite. Used by Response.blob().
-static Item js_response_blob_text() {
-    Item this_blob = dom_realm_receiver();
-    String* tk = heap_create_name("_text", 5);
-    Item t = dom_realm_get(this_blob, (Item){.item = s2it(tk)});
-    if (get_type_id(t) != LMD_TYPE_STRING) return dom_realm_promise_resolve(make_string_item(""));
-    return dom_realm_promise_resolve(t);
-}
-
-static Item make_blob_object(const char* bytes, int len, const char* type) {
-    Item blob = js_new_object();
-    dom_realm_set_cstr(blob, "_text", make_string_item(bytes ? bytes : "", len));
-    dom_realm_set_cstr(blob, "size", (Item){.item = i2it(len)});
-    dom_realm_set_cstr(blob, "type", make_string_item(type ? type : "application/octet-stream"));
-    dom_realm_set_native(blob, make_string_item("text"), js_response_blob_text);
-    return blob;
-}
-
-static Item js_response_blob() {
-    if (!js_fetch_runtime_state_get()) return dom_realm_promise_resolve(ItemNull);
-    Item this_resp = dom_realm_receiver();
-    String* key = heap_create_name("__body_idx", 10);
-    Item idx_item = dom_realm_get(this_resp, (Item){.item = s2it(key)});
-    if (get_type_id(idx_item) != LMD_TYPE_INT) return dom_realm_promise_resolve(ItemNull);
-    int idx = (int)it2i(idx_item);
-    if (idx < 0 || idx >= response_body_count || !response_bodies[idx])
-        return dom_realm_promise_resolve(ItemNull);
-    const char* type = (idx < MAX_FETCH_RESPONSES && response_types[idx]) ?
-                       response_types[idx] : "application/octet-stream";
-    Item blob = make_blob_object(response_bodies[idx], response_body_lens[idx], type);
-    return dom_realm_promise_resolve(blob);
-}
-
 static Item build_response_object(JsFetchWork* fw) {
-    RootFrame roots(2);
-    // Response construction allocates keys and methods; retain the object
-    // and create each key only after its value is rooted (D5.3.3).
-    Rooted<Item> response(roots, js_new_object());
+    RootFrame roots(4);
+    Rooted<Item> response(roots, ItemNull);
     Rooted<Item> headers(roots, js_headers_create_http(fw->response_headers, fw->response_header_count));
+    Rooted<Item> status_text(roots, ItemNull), url(roots, ItemNull);
     JS_RETURN_IF_ERROR(headers.get());
-    Item resp = response.get();
-    dom_realm_set_cstr(resp, "headers", headers.get());
-
-    // status
-    dom_realm_set_cstr(resp, "status", (Item){.item = i2it(fw->status_code)});
-
-    // ok (200-299)
-    bool ok = fw->status_code >= 200 && fw->status_code <= 299;
-    dom_realm_set_cstr(resp, "ok", (Item){.item = b2it(ok)});
 
     // statusText
     const char* st = (fw->status_code == 200) ? "OK" :
@@ -472,23 +342,14 @@ static Item build_response_object(JsFetchWork* fw) {
                      (fw->status_code == 404) ? "Not Found" :
                      (fw->status_code == 500) ? "Internal Server Error" :
                      "";
-    dom_realm_set_cstr(resp, "statusText", make_string_item(st));
-
-    // url
-    dom_realm_set_cstr(resp, "url", make_string_item(fw->url));
-
-    // store body for text()/json()/blob() methods
-    int body_idx = -1;
-    if (response_body_count < MAX_FETCH_RESPONSES) {
-        body_idx = response_body_count++;
-        response_body_lens[body_idx] = (int)fw->response.length;
-        response_bodies[body_idx] = (char*)byte_builder_take(&fw->response, NULL);
-        // Cache an inferred MIME for blob().type. Owned: strdup.
-        if (response_types[body_idx]) { mem_free(response_types[body_idx]); response_types[body_idx] = NULL; }
-        response_types[body_idx] = mem_strdup(mime_from_url(fw->url), MEM_CAT_JS_RUNTIME);
-    }
-
-    dom_realm_set_cstr(resp, "__body_idx", (Item){.item = i2it(body_idx)});
+    status_text.set(make_string_item(st));
+    url.set(make_string_item(fw->url));
+    if (fw->response.length > INT_MAX) return dom_realm_throw_type_error("Response body is too large");
+    // the response owns a traced byte buffer; no realm-wide body index or retention cap.
+    response.set(dom_realm_response_from_bytes(fw->response.data,
+        (int)fw->response.length, headers.get(), (int)fw->status_code,
+        status_text.get(), url.get()));
+    JS_RETURN_IF_ERROR(response.get());
 
     // XMLHttpRequest reuses fetch's worker transport. Preserve the response
     // headers in its response handoff without exposing another curl path.
@@ -506,27 +367,12 @@ static Item build_response_object(JsFetchWork* fw) {
             *cursor++ = '\r';
             *cursor++ = '\n';
         }
-        dom_realm_set_cstr(resp, "__xhr_response_headers",
+        dom_realm_set_cstr(response.get(), "__xhr_response_headers",
                            make_string_item(headers_text, headers_len));
         mem_free(headers_text);
     }
 
-    // text() method
-    Item text_fn = dom_realm_new_function(js_response_text);
-    dom_realm_set_cstr(resp, "text", text_fn);
-
-    // json() method
-    Item json_fn = dom_realm_new_function(js_response_json);
-    dom_realm_set_cstr(resp, "json", json_fn);
-
-    // `arrayBuffer()` preserves binary response bodies for WASM and media loaders.
-    Item array_buffer_fn = dom_realm_new_function(js_response_array_buffer);
-    dom_realm_set_cstr(resp, "arrayBuffer", array_buffer_fn);
-
-    // blob() method — returns Promise<Blob-like object> with .type/.size/.text()
-    dom_realm_set_native(resp, make_string_item("blob"), js_response_blob);
-
-    return resp;
+    return response.get();
 }
 
 // =============================================================================
@@ -792,6 +638,19 @@ extern "C" Item js_fetch(Item url_item, Item options_item) {
         snprintf(fw->url, sizeof(fw->url), "%s", url);
         fw->status_code = 200;
         fw->response = response;
+        MimeDetector* detector = mime_detector_init();
+        const char* mime = detector ? detect_mime_from_filename(detector, url) : nullptr;
+        if (!mime) mime = "application/octet-stream";
+        size_t header_length = strlen(mime) + sizeof("Content-Type: ");
+        fw->response_headers = (char**)mem_calloc(1, sizeof(char*), MEM_CAT_JS_RUNTIME);
+        if (fw->response_headers) {
+            fw->response_headers[0] = (char*)mem_alloc(header_length, MEM_CAT_JS_RUNTIME);
+            if (fw->response_headers[0]) {
+                snprintf(fw->response_headers[0], header_length, "Content-Type: %s", mime);
+                fw->response_header_count = 1;
+            }
+        }
+        if (detector) mime_detector_destroy(detector);
 
         Item resp = build_response_object(fw);
 
@@ -885,32 +744,17 @@ extern "C" void js_fetch_reset(void) {
         mem_free(g_fetch_base_dir);
         g_fetch_base_dir = NULL;
     }
-    for (int i = 0; i < response_body_count; i++) {
-        if (response_bodies[i]) {
-            mem_free(response_bodies[i]);
-            response_bodies[i] = NULL;
-        }
-        if (response_types[i]) {
-            mem_free(response_types[i]);
-            response_types[i] = NULL;
-        }
-    }
-    response_body_count = 0;
     pending_fetch_work = NULL;
 }
 
 #undef js_fetch_state
 #undef g_fetch_base_dir
-#undef response_bodies
-#undef response_body_lens
-#undef response_body_count
-#undef response_types
 #undef pending_fetch_work
 
 static void js_fetch_capsule_destroy(void* capsule) {
     JsFetchRuntimeState* state = (JsFetchRuntimeState*)capsule;
-    // Heap reset releases response payloads before this capsule can disappear.
-    if (state->base_dir || state->response_body_count || state->pending_work) {
+    // Realm teardown releases path and pending transport ownership first.
+    if (state->base_dir || state->pending_work) {
         log_error("js-fetch: context destroyed before response state was reset");
     }
     mem_free(state);

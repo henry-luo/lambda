@@ -135,6 +135,10 @@ enum JsClass : uint8_t {
     JS_CLASS_HEADERS_ITERATOR,
     JS_CLASS_WEBGL_CONTEXT_EVENT,
     JS_CLASS_TREE_WALKER,
+    JS_CLASS_RESPONSE,
+    JS_CLASS_NAVIGATOR,
+    JS_CLASS_MESSAGE_EVENT,
+    JS_CLASS_XML_HTTP_REQUEST,
     JS_CLASS__COUNT  // sentinel
 };
 
@@ -194,6 +198,7 @@ static inline JsClass js_class_from_name(const char* nm, int nl) {
             if (!strncmp(nm, "UIEvent", 7)) return JS_CLASS_UI_EVENT;
             break;
         case 8:
+            if (!strncmp(nm, "Response", 8)) return JS_CLASS_RESPONSE;
             if (!strncmp(nm, "DataView", 8)) return JS_CLASS_DATA_VIEW;
             if (!strncmp(nm, "FormData", 8)) return JS_CLASS_FORM_DATA;
             if (!strncmp(nm, "FileList", 8)) return JS_CLASS_FILE_LIST;
@@ -203,6 +208,7 @@ static inline JsClass js_class_from_name(const char* nm, int nl) {
             if (!strncmp(nm, "Writable", 8)) return JS_CLASS_WRITABLE;
             break;
         case 9:
+            if (!strncmp(nm, "Navigator", 9)) return JS_CLASS_NAVIGATOR;
             if (!strncmp(nm, "Immediate", 9)) return JS_CLASS_IMMEDIATE;
             if (!strncmp(nm, "TLSServer", 9)) return JS_CLASS_TLS_SERVER;
             if (!strncmp(nm, "TLSSocket", 9)) return JS_CLASS_TLS_SOCKET;
@@ -239,6 +245,7 @@ static inline JsClass js_class_from_name(const char* nm, int nl) {
             if (!strncmp(nm, "PassThrough", 11)) return JS_CLASS_PASS_THROUGH;
             break;
         case 12:
+            if (!strncmp(nm, "MessageEvent", 12)) return JS_CLASS_MESSAGE_EVENT;
             if (!strncmp(nm, "DOMException", 12)) return JS_CLASS_DOM_EXCEPTION;
             if (!strncmp(nm, "EventEmitter", 12)) return JS_CLASS_EVENT_EMITTER;
             if (!strncmp(nm, "DataTransfer", 12)) return JS_CLASS_DATA_TRANSFER;
@@ -372,6 +379,10 @@ static inline const char* js_class_to_name(JsClass cls) {
         case JS_CLASS_COUNT_QUEUING_STRATEGY: return "CountQueuingStrategy";
         case JS_CLASS_HEADERS: return "Headers";
         case JS_CLASS_HEADERS_ITERATOR: return "Headers Iterator";
+        case JS_CLASS_RESPONSE: return "Response";
+        case JS_CLASS_NAVIGATOR: return "Navigator";
+        case JS_CLASS_MESSAGE_EVENT: return "MessageEvent";
+        case JS_CLASS_XML_HTTP_REQUEST: return "XMLHttpRequest";
         case JS_CLASS_TYPE_ERROR: return "TypeError";
         case JS_CLASS_RANGE_ERROR: return "RangeError";
         case JS_CLASS_SYNTAX_ERROR: return "SyntaxError";
@@ -430,6 +441,7 @@ static inline bool js_class_is_error_like(JsClass cls) {
 
 static inline bool js_class_is_event_like(JsClass cls) {
     switch (cls) {
+        case JS_CLASS_MESSAGE_EVENT:
         case JS_CLASS_EVENT:
         case JS_CLASS_CUSTOM_EVENT:
         case JS_CLASS_UI_EVENT:

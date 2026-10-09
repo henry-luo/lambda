@@ -12,6 +12,7 @@
 
 // font module internals — decompression + format detection
 #include "../../lib/font/font_internal.h"
+#include "../../lib/memtrack.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -143,9 +144,9 @@ TEST_F(Woff2Test, DetectFormatExt_Null) {
 // ============================================================================
 
 // WPT valid WOFF2 file (small, ~980 bytes)
-static const char* WOFF2_WPT_VALID = "test/wpt/css/WOFF2/support/valid-001.woff2";
+static const char* WOFF2_WPT_VALID = "ref/wpt/css/WOFF2/support/valid-001.woff2";
 // KaTeX WOFF2 file (larger, ~26KB)
-static const char* WOFF2_KATEX     = "test/latex/node_modules/katex/dist/fonts/KaTeX_Main-Regular.woff2";
+static const char* WOFF2_KATEX     = "lmd/package/math/fonts/KaTeX_AMS-Regular.woff2";
 
 TEST_F(Woff2Test, DecompressWoff2_WPT) {
     size_t len = 0;
@@ -201,6 +202,40 @@ TEST_F(Woff2Test, DecompressWoff2_KaTeX) {
     free(data);
 }
 
+TEST_F(Woff2Test, DecompressWoff2_InaccurateDeclaredSize) {
+    size_t len = 0;
+    uint8_t* data = read_file_bytes(WOFF2_KATEX, &len);
+    ASSERT_NE(data, nullptr);
+    ASSERT_GE(len, (size_t)20);
+
+    uint8_t* expected = NULL;
+    size_t expected_len = 0;
+    ASSERT_TRUE(font_decompress_woff2(arena, data, len, &expected, &expected_len));
+
+    // totalSfntSize is advisory; transformed glyph tables can grow on reconstruction.
+    const uint32_t declared_sizes[] = {0, 1, 128, UINT32_MAX};
+    Arena* destinations[] = {arena, NULL};
+    for (uint32_t declared_size : declared_sizes) {
+        SCOPED_TRACE(declared_size);
+        data[16] = (uint8_t)(declared_size >> 24);
+        data[17] = (uint8_t)(declared_size >> 16);
+        data[18] = (uint8_t)(declared_size >> 8);
+        data[19] = (uint8_t)declared_size;
+        for (Arena* destination : destinations) {
+            uint8_t* out = NULL;
+            size_t out_len = 0;
+            bool ok = font_decompress_woff2(destination, data, len, &out, &out_len);
+            EXPECT_TRUE(ok);
+            if (ok) {
+                EXPECT_EQ(out_len, expected_len);
+                if (out_len == expected_len) EXPECT_EQ(0, memcmp(out, expected, out_len));
+                if (!destination) mem_free(out);
+            }
+        }
+    }
+    free(data);
+}
+
 // ============================================================================
 // WOFF2 Decompression — edge cases
 // ============================================================================
@@ -229,7 +264,7 @@ TEST_F(Woff2Test, DecompressWoff2_TruncatedData) {
 // ============================================================================
 
 // WPT WOFF1 file (FreeSans, ~420KB)
-static const char* WOFF1_FILE = "test/wpt/svg/import/woffs/FreeSans.woff";
+static const char* WOFF1_FILE = "ref/wpt/svg/import/woffs/FreeSans.woff";
 
 TEST_F(Woff2Test, DecompressWoff1_FreeSans) {
     size_t len = 0;

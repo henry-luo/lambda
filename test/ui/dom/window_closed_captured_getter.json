@@ -1,0 +1,17 @@
+{
+  "name": "Captured Window closed getter reflects the platform close lifecycle",
+  "html": "test/ui/dom/window_closed_captured_getter.html",
+  "events": [
+    {"type": "assert_attribute", "target": {"selector": "#result"}, "attribute": "data-descriptor", "equals": "true"},
+    {"type": "assert_attribute", "target": {"selector": "#result"}, "attribute": "data-metadata", "equals": "true"},
+    {"type": "assert_attribute", "target": {"selector": "#result"}, "attribute": "data-open", "equals": "true"},
+    {"type": "assert_attribute", "target": {"selector": "#result"}, "attribute": "data-readonly", "equals": "true"},
+    {"type": "assert_attribute", "target": {"selector": "#result"}, "attribute": "data-forged", "equals": "true"},
+    {"type": "assert_attribute", "target": {"selector": "#result"}, "attribute": "data-shadow", "equals": "true"},
+    {"type": "window_close"},
+    {"type": "assert_window_closed", "closed": true, "requests": 1},
+    {"type": "click", "target": {"selector": "#observe"}},
+    {"type": "assert_attribute", "target": {"selector": "#result"}, "attribute": "data-after-close", "equals": "true"},
+    {"type": "assert_text", "target": {"selector": "#result"}, "equals": "complete"}
+  ]
+}

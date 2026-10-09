@@ -1,0 +1,1531 @@
+{
+  "schema": 1,
+  "package": "lambda.ui.dtna",
+  "date": "2026-10-09",
+  "product_phase": "partial",
+  "upstream": {
+    "version": "6.6.5",
+    "commit": "4a39f54842eade4e565ab336ef6097cd7e723cdd",
+    "release_url": "https://github.com/ant-design/ant-design/releases/tag/6.6.5",
+    "status": "tag and commit verified; reference application and pixel captures still pending"
+  },
+  "native_capture": {
+    "viewport": [
+      1100,
+      2400
+    ],
+    "scale": 1,
+    "locale": "en-US",
+    "motion": "static capture",
+    "artifact": "temp/ui_dtna/gallery.png",
+    "claim": "native inspection only; no AntD pixel-parity claim"
+  },
+  "components": [
+    {
+      "name": "Button",
+      "category": "General",
+      "reference": "https://ant.design/components/button/",
+      "milestone": "M1",
+      "required_features": [
+        "Primary/default/dashed/text/link appearances; sizes, shapes, icon, danger, loading, block, disabled, keyboard activation"
+      ],
+      "status": "partial",
+      "exports": [
+        "button"
+      ],
+      "owner": "lmd/package/ui/dtna/input.ls",
+      "implemented": [
+        "Native button, five variants, sizes, disabled/loading/danger/shape/block and action envelope"
+      ],
+      "remaining": [
+        "Groups, full icon catalog and timed loading motion"
+      ],
+      "evidence": [
+        "test/ui/dtna_gallery.ls",
+        "test/lambda/ui_dtna/dtna_display.ls",
+        "test/lambda/ui_dtna/dtna_contracts.ls",
+        "test/ui/dtna/controls.json",
+        "test/ui/dtna/styles.json"
+      ]
+    },
+    {
+      "name": "FloatButton",
+      "category": "General",
+      "reference": "https://ant.design/components/float-button/",
+      "milestone": "M6",
+      "required_features": [
+        "Floating action, grouped menu, badges, tooltip, scroll-to-top, correct placement and keyboard reachability"
+      ],
+      "status": "planned",
+      "exports": [],
+      "owner": null,
+      "implemented": [],
+      "remaining": [
+        "Floating action, grouped menu, badges, tooltip, scroll-to-top, correct placement and keyboard reachability"
+      ],
+      "evidence": []
+    },
+    {
+      "name": "Icon",
+      "category": "General",
+      "reference": "https://ant.design/components/icon/",
+      "milestone": "M1",
+      "required_features": [
+        "Consistent SVG symbols, outlined/filled/two-tone variants, sizing/rotation, decorative versus named semantics"
+      ],
+      "status": "partial",
+      "exports": [
+        "icon"
+      ],
+      "owner": "lmd/package/ui/dtna/general.ls",
+      "implemented": [
+        "Eight original SVG line icons with names or decorative semantics"
+      ],
+      "remaining": [
+        "Filled/two-tone assets, rotation and upstream icon breadth"
+      ],
+      "evidence": [
+        "test/ui/dtna_gallery.ls",
+        "test/lambda/ui_dtna/dtna_display.ls"
+      ]
+    },
+    {
+      "name": "Typography",
+      "category": "General",
+      "reference": "https://ant.design/components/typography/",
+      "milestone": "M1; editing M3",
+      "required_features": [
+        "Hierarchy, emphasis, code, copy/edit, expandable ellipsis, tooltips, selection and link semantics"
+      ],
+      "status": "partial",
+      "exports": [
+        "title",
+        "text",
+        "paragraph",
+        "link"
+      ],
+      "owner": "lmd/package/ui/dtna/general.ls",
+      "implemented": [
+        "Text, paragraphs, links and headings with style/semantic attributes"
+      ],
+      "remaining": [
+        "Copy/edit/ellipsis and full typography decoration"
+      ],
+      "evidence": [
+        "test/ui/dtna_gallery.ls",
+        "test/lambda/ui_dtna/dtna_display.ls"
+      ]
+    },
+    {
+      "name": "Divider",
+      "category": "Layout",
+      "reference": "https://ant.design/components/divider/",
+      "milestone": "M1",
+      "required_features": [
+        "Horizontal/vertical, label position, dashed/plain, spacing"
+      ],
+      "status": "partial",
+      "exports": [
+        "divider"
+      ],
+      "owner": "lmd/package/ui/dtna/general.ls",
+      "implemented": [
+        "Horizontal and vertical separators with content"
+      ],
+      "remaining": [
+        "Label alignment, dashed/plain variants"
+      ],
+      "evidence": [
+        "test/ui/dtna_gallery.ls",
+        "test/lambda/ui_dtna/dtna_display.ls"
+      ]
+    },
+    {
+      "name": "Flex",
+      "category": "Layout",
+      "reference": "https://ant.design/components/flex/",
+      "milestone": "M1",
+      "required_features": [
+        "Direction, wrap, alignment, gap, flex sizing and intrinsic constraints"
+      ],
+      "status": "partial",
+      "exports": [
+        "flex"
+      ],
+      "owner": "lmd/package/ui/dtna/general.ls",
+      "implemented": [
+        "Direction, gap, wrapping and alignment"
+      ],
+      "remaining": [
+        "Intrinsic constraint and responsive stress coverage"
+      ],
+      "evidence": [
+        "test/ui/dtna_gallery.ls",
+        "test/lambda/ui_dtna/dtna_display.ls"
+      ]
+    },
+    {
+      "name": "Grid",
+      "category": "Layout",
+      "reference": "https://ant.design/components/grid/",
+      "milestone": "M1",
+      "required_features": [
+        "24 columns, spans/offset/order, gutters, responsive breakpoints and nesting"
+      ],
+      "status": "partial",
+      "exports": [
+        "row",
+        "col"
+      ],
+      "owner": "lmd/package/ui/dtna/general.ls",
+      "implemented": [
+        "24-column row/column composition and gutter"
+      ],
+      "remaining": [
+        "Offsets, order, responsive breakpoints and complete gutter sizing"
+      ],
+      "evidence": [
+        "test/ui/dtna_gallery.ls",
+        "test/lambda/ui_dtna/dtna_display.ls"
+      ]
+    },
+    {
+      "name": "Layout",
+      "category": "Layout",
+      "reference": "https://ant.design/components/layout/",
+      "milestone": "M1",
+      "required_features": [
+        "App shells, collapsible/responsive sider, scrolling and fixed/sticky regions"
+      ],
+      "status": "partial",
+      "exports": [
+        "layout",
+        "layout_header",
+        "layout_footer",
+        "layout_content",
+        "layout_sider"
+      ],
+      "owner": "lmd/package/ui/dtna/general.ls",
+      "implemented": [
+        "Nested app shell and horizontal sider layout"
+      ],
+      "remaining": [
+        "Responsive/collapsible sider"
+      ],
+      "evidence": [
+        "test/ui/dtna_gallery.ls",
+        "test/lambda/ui_dtna/dtna_display.ls"
+      ]
+    },
+    {
+      "name": "Masonry",
+      "category": "Layout",
+      "reference": "https://ant.design/components/masonry/",
+      "milestone": "M6",
+      "required_features": [
+        "Responsive columns, gaps, mixed item heights, stable order, relayout after image/font loading"
+      ],
+      "status": "planned",
+      "exports": [],
+      "owner": null,
+      "implemented": [],
+      "remaining": [
+        "Responsive columns, gaps, mixed item heights, stable order, relayout after image/font loading"
+      ],
+      "evidence": []
+    },
+    {
+      "name": "Space",
+      "category": "Layout",
+      "reference": "https://ant.design/components/space/",
+      "milestone": "M1",
+      "required_features": [
+        "Horizontal/vertical spacing, wrap, splitters, joined control borders and focus states"
+      ],
+      "status": "partial",
+      "exports": [
+        "space",
+        "space_compact"
+      ],
+      "owner": "lmd/package/ui/dtna/general.ls",
+      "implemented": [
+        "Flex spacing and joined compact controls"
+      ],
+      "remaining": [
+        "All compact orientations, splitters and wrap edge cases"
+      ],
+      "evidence": [
+        "test/ui/dtna_gallery.ls",
+        "test/lambda/ui_dtna/dtna_display.ls"
+      ]
+    },
+    {
+      "name": "Splitter",
+      "category": "Layout",
+      "reference": "https://ant.design/components/splitter/",
+      "milestone": "M6",
+      "required_features": [
+        "Horizontal/vertical resize, limits, collapse, nested panels, pointer capture and keyboard resize"
+      ],
+      "status": "planned",
+      "exports": [],
+      "owner": null,
+      "implemented": [],
+      "remaining": [
+        "Horizontal/vertical resize, limits, collapse, nested panels, pointer capture and keyboard resize"
+      ],
+      "evidence": []
+    },
+    {
+      "name": "Anchor",
+      "category": "Navigation",
+      "reference": "https://ant.design/components/anchor/",
+      "milestone": "M6",
+      "required_features": [
+        "Scroll target links, active section, offsets, scroll containers, keyboard use"
+      ],
+      "status": "planned",
+      "exports": [],
+      "owner": null,
+      "implemented": [],
+      "remaining": [
+        "Scroll target links, active section, offsets, scroll containers, keyboard use"
+      ],
+      "evidence": []
+    },
+    {
+      "name": "Breadcrumb",
+      "category": "Navigation",
+      "reference": "https://ant.design/components/breadcrumb/",
+      "milestone": "M1; popup M2",
+      "required_features": [
+        "Items, separators, links, dropdown items, current-page semantics"
+      ],
+      "status": "partial",
+      "exports": [
+        "breadcrumb"
+      ],
+      "owner": "lmd/package/ui/dtna/general.ls",
+      "implemented": [
+        "Items, separators, links and current-page semantics"
+      ],
+      "remaining": [
+        "Dropdown items and routing adapters"
+      ],
+      "evidence": [
+        "test/ui/dtna_gallery.ls",
+        "test/lambda/ui_dtna/dtna_display.ls"
+      ]
+    },
+    {
+      "name": "Dropdown",
+      "category": "Navigation",
+      "reference": "https://ant.design/components/dropdown/",
+      "milestone": "M2",
+      "required_features": [
+        "Click/hover/context activation, nested menus, placement, selection, dismiss and focus"
+      ],
+      "status": "planned",
+      "exports": [],
+      "owner": null,
+      "implemented": [],
+      "remaining": [
+        "Click/hover/context activation, nested menus, placement, selection, dismiss and focus"
+      ],
+      "evidence": []
+    },
+    {
+      "name": "Menu",
+      "category": "Navigation",
+      "reference": "https://ant.design/components/menu/",
+      "milestone": "M2",
+      "required_features": [
+        "Horizontal/vertical/inline, groups, dividers, submenus, selected/open keys, collapse, keyboard/typeahead"
+      ],
+      "status": "partial",
+      "exports": [
+        "menu"
+      ],
+      "owner": "lmd/package/ui/dtna/navigation.ls",
+      "implemented": [
+        "Flat keyed menu with disabled items and arrow/Home/End movement"
+      ],
+      "remaining": [
+        "Nested submenus, popup ownership, inline collapse and typeahead"
+      ],
+      "evidence": [
+        "test/ui/dtna_gallery.ls",
+        "test/lambda/ui_dtna/dtna_display.ls"
+      ]
+    },
+    {
+      "name": "Pagination",
+      "category": "Navigation",
+      "reference": "https://ant.design/components/pagination/",
+      "milestone": "M1",
+      "required_features": [
+        "Page/size controls, total, quick jump, simple/small modes, disabled and controlled state"
+      ],
+      "status": "partial",
+      "exports": [
+        "pagination"
+      ],
+      "owner": "lmd/package/ui/dtna/navigation.ls",
+      "implemented": [
+        "Total/page_size, page controls and emitted requests"
+      ],
+      "remaining": [
+        "Quick jumper, size changer, localization and ellipses"
+      ],
+      "evidence": [
+        "test/ui/dtna_gallery.ls",
+        "test/lambda/ui_dtna/dtna_display.ls",
+        "test/ui/dtna/navigation.json"
+      ]
+    },
+    {
+      "name": "Steps",
+      "category": "Navigation",
+      "reference": "https://ant.design/components/steps/",
+      "milestone": "M1",
+      "required_features": [
+        "Horizontal/vertical, status, progress, icons/dots, selectable steps and responsive labels"
+      ],
+      "status": "partial",
+      "exports": [
+        "steps"
+      ],
+      "owner": "lmd/package/ui/dtna/general.ls",
+      "implemented": [
+        "Current, completed and pending steps with descriptions"
+      ],
+      "remaining": [
+        "Clickable navigation, responsive/vertical variants and status details"
+      ],
+      "evidence": [
+        "test/ui/dtna_gallery.ls",
+        "test/lambda/ui_dtna/dtna_display.ls"
+      ]
+    },
+    {
+      "name": "Tabs",
+      "category": "Navigation",
+      "reference": "https://ant.design/components/tabs/",
+      "milestone": "M2",
+      "required_features": [
+        "Positions, card variants, overflow, editable add/remove, lazy/retained panels and keyboard selection"
+      ],
+      "status": "partial",
+      "exports": [
+        "tabs"
+      ],
+      "owner": "lmd/package/ui/dtna/navigation.ls",
+      "implemented": [
+        "Keyed single panel, disabled tabs, roving keyboard focus and selection events"
+      ],
+      "remaining": [
+        "Editable tabs, overflow, keep-mounted panels and drag reorder"
+      ],
+      "evidence": [
+        "test/ui/dtna_gallery.ls",
+        "test/lambda/ui_dtna/dtna_display.ls",
+        "test/ui/dtna/navigation.json"
+      ]
+    },
+    {
+      "name": "AutoComplete",
+      "category": "Data Entry",
+      "reference": "https://ant.design/components/auto-complete/",
+      "milestone": "M4",
+      "required_features": [
+        "Search text, suggestions, groups, async results, keyboard choice, IME-safe completion"
+      ],
+      "status": "planned",
+      "exports": [],
+      "owner": null,
+      "implemented": [],
+      "remaining": [
+        "Search text, suggestions, groups, async results, keyboard choice, IME-safe completion"
+      ],
+      "evidence": []
+    },
+    {
+      "name": "Cascader",
+      "category": "Data Entry",
+      "reference": "https://ant.design/components/cascader/",
+      "milestone": "M4",
+      "required_features": [
+        "Hierarchical single/multiple selection, search, lazy children, clear, path labels and disabled nodes"
+      ],
+      "status": "planned",
+      "exports": [],
+      "owner": null,
+      "implemented": [],
+      "remaining": [
+        "Hierarchical single/multiple selection, search, lazy children, clear, path labels and disabled nodes"
+      ],
+      "evidence": []
+    },
+    {
+      "name": "Checkbox",
+      "category": "Data Entry",
+      "reference": "https://ant.design/components/checkbox/",
+      "milestone": "M1",
+      "required_features": [
+        "Controlled/uncontrolled checked state, indeterminate, groups, labels, disabled and keyboard behavior"
+      ],
+      "status": "partial",
+      "exports": [
+        "checkbox"
+      ],
+      "owner": "lmd/package/ui/dtna/input.ls",
+      "implemented": [
+        "Native checked state, disabled, labels and typed changes"
+      ],
+      "remaining": [
+        "Groups, indeterminate API and complete controlled contract"
+      ],
+      "evidence": [
+        "test/ui/dtna_gallery.ls",
+        "test/lambda/ui_dtna/dtna_display.ls",
+        "test/ui/dtna/controls.json"
+      ]
+    },
+    {
+      "name": "ColorPicker",
+      "category": "Data Entry",
+      "reference": "https://ant.design/components/color-picker/",
+      "milestone": "M4",
+      "required_features": [
+        "Palette and custom color, alpha, format conversion, presets, gradients, clear, keyboard-adjustable channels"
+      ],
+      "status": "planned",
+      "exports": [],
+      "owner": null,
+      "implemented": [],
+      "remaining": [
+        "Palette and custom color, alpha, format conversion, presets, gradients, clear, keyboard-adjustable channels"
+      ],
+      "evidence": []
+    },
+    {
+      "name": "DatePicker",
+      "category": "Data Entry",
+      "reference": "https://ant.design/components/date-picker/",
+      "milestone": "M4",
+      "required_features": [
+        "Date/week/month/quarter/year panels, date-time, multiple/range, bounds, disabled cells, presets and locale"
+      ],
+      "status": "planned",
+      "exports": [],
+      "owner": null,
+      "implemented": [],
+      "remaining": [
+        "Date/week/month/quarter/year panels, date-time, multiple/range, bounds, disabled cells, presets and locale"
+      ],
+      "evidence": []
+    },
+    {
+      "name": "Form",
+      "category": "Data Entry",
+      "reference": "https://ant.design/components/form/",
+      "milestone": "M3",
+      "required_features": [
+        "Nested fields, layouts, binding, dependencies, sync/async validation, reset, dynamic arrays and submit"
+      ],
+      "status": "partial",
+      "exports": [
+        "form",
+        "form_item"
+      ],
+      "owner": "lmd/package/ui/dtna/form.ls",
+      "implemented": [
+        "Native form/labels, required constraints, help/status and submit entries"
+      ],
+      "remaining": [
+        "Schema/list fields, dependencies, async rules and validation orchestration"
+      ],
+      "evidence": [
+        "test/ui/dtna_gallery.ls",
+        "test/lambda/ui_dtna/dtna_display.ls",
+        "test/ui/dtna/form.json"
+      ]
+    },
+    {
+      "name": "Input",
+      "category": "Data Entry",
+      "reference": "https://ant.design/components/input/",
+      "milestone": "M1; advanced M3",
+      "required_features": [
+        "Text editing, sizes/variants/status, clear, prefix/suffix/addons, autosize, password reveal and OTP paste"
+      ],
+      "status": "partial",
+      "exports": [
+        "input",
+        "text_area",
+        "password",
+        "search"
+      ],
+      "owner": "lmd/package/ui/dtna/input.ls",
+      "implemented": [
+        "Native editing, authored/default values, labels, placeholder and input/change events"
+      ],
+      "remaining": [
+        "Clear/reveal/adornments/OTP and complete controlled contract"
+      ],
+      "evidence": [
+        "test/ui/dtna_gallery.ls",
+        "test/lambda/ui_dtna/dtna_display.ls",
+        "test/ui/dtna/controls.json"
+      ]
+    },
+    {
+      "name": "InputNumber",
+      "category": "Data Entry",
+      "reference": "https://ant.design/components/input-number/",
+      "milestone": "M3",
+      "required_features": [
+        "Exact numeric values, draft text, bounds, steps, precision, formatter/parser, keyboard/wheel policy"
+      ],
+      "status": "planned",
+      "exports": [],
+      "owner": null,
+      "implemented": [],
+      "remaining": [
+        "Exact numeric values, draft text, bounds, steps, precision, formatter/parser, keyboard/wheel policy"
+      ],
+      "evidence": []
+    },
+    {
+      "name": "Mentions",
+      "category": "Data Entry",
+      "reference": "https://ant.design/components/mentions/",
+      "milestone": "M4",
+      "required_features": [
+        "Trigger search, suggestion popup, insertion/range preservation, async data and multiline composition"
+      ],
+      "status": "planned",
+      "exports": [],
+      "owner": null,
+      "implemented": [],
+      "remaining": [
+        "Trigger search, suggestion popup, insertion/range preservation, async data and multiline composition"
+      ],
+      "evidence": []
+    },
+    {
+      "name": "Radio",
+      "category": "Data Entry",
+      "reference": "https://ant.design/components/radio/",
+      "milestone": "M1",
+      "required_features": [
+        "Native group exclusivity, button variant, controlled selection, disabled and arrow-key navigation"
+      ],
+      "status": "partial",
+      "exports": [
+        "radio"
+      ],
+      "owner": "lmd/package/ui/dtna/input.ls",
+      "implemented": [
+        "Native named groups, disabled and scalar selection events"
+      ],
+      "remaining": [
+        "Button variants and group facade"
+      ],
+      "evidence": [
+        "test/ui/dtna_gallery.ls",
+        "test/lambda/ui_dtna/dtna_display.ls"
+      ]
+    },
+    {
+      "name": "Rate",
+      "category": "Data Entry",
+      "reference": "https://ant.design/components/rate/",
+      "milestone": "M3",
+      "required_features": [
+        "Full/half values, custom symbols, clear/readonly, keyboard adjustment and labels"
+      ],
+      "status": "planned",
+      "exports": [],
+      "owner": null,
+      "implemented": [],
+      "remaining": [
+        "Full/half values, custom symbols, clear/readonly, keyboard adjustment and labels"
+      ],
+      "evidence": []
+    },
+    {
+      "name": "Select",
+      "category": "Data Entry",
+      "reference": "https://ant.design/components/select/",
+      "milestone": "M4",
+      "required_features": [
+        "Single/multiple/tags, search, grouped options, remote data, clear, custom render, limits and virtualization"
+      ],
+      "status": "partial",
+      "exports": [
+        "select"
+      ],
+      "owner": "lmd/package/ui/dtna/input.ls",
+      "implemented": [
+        "Native single select with typed scalar option values"
+      ],
+      "remaining": [
+        "Custom searchable popup, multiple/tags/groups and virtualization"
+      ],
+      "evidence": [
+        "test/ui/dtna_gallery.ls",
+        "test/lambda/ui_dtna/dtna_display.ls",
+        "test/ui/dtna/controls.json"
+      ]
+    },
+    {
+      "name": "Slider",
+      "category": "Data Entry",
+      "reference": "https://ant.design/components/slider/",
+      "milestone": "M3",
+      "required_features": [
+        "Single/range, steps, marks, vertical/reverse, tooltips, constrained thumbs, pointer and keyboard input"
+      ],
+      "status": "planned",
+      "exports": [],
+      "owner": null,
+      "implemented": [],
+      "remaining": [
+        "Single/range, steps, marks, vertical/reverse, tooltips, constrained thumbs, pointer and keyboard input"
+      ],
+      "evidence": []
+    },
+    {
+      "name": "Switch",
+      "category": "Data Entry",
+      "reference": "https://ant.design/components/switch/",
+      "milestone": "M1",
+      "required_features": [
+        "Checked, labels/icons, loading/disabled, form binding, keyboard activation"
+      ],
+      "status": "partial",
+      "exports": [
+        "switch"
+      ],
+      "owner": "lmd/package/ui/dtna/input.ls",
+      "implemented": [
+        "Native checkbox semantics with visual track and change action"
+      ],
+      "remaining": [
+        "Loading/labels and complete controlled contract"
+      ],
+      "evidence": [
+        "test/ui/dtna_gallery.ls",
+        "test/lambda/ui_dtna/dtna_display.ls",
+        "test/ui/dtna/controls.json"
+      ]
+    },
+    {
+      "name": "TimePicker",
+      "category": "Data Entry",
+      "reference": "https://ant.design/components/time-picker/",
+      "milestone": "M4",
+      "required_features": [
+        "Hour/minute/second, 12/24 hour, steps, disabled times, range and confirmation"
+      ],
+      "status": "planned",
+      "exports": [],
+      "owner": null,
+      "implemented": [],
+      "remaining": [
+        "Hour/minute/second, 12/24 hour, steps, disabled times, range and confirmation"
+      ],
+      "evidence": []
+    },
+    {
+      "name": "Transfer",
+      "category": "Data Entry",
+      "reference": "https://ant.design/components/transfer/",
+      "milestone": "M5",
+      "required_features": [
+        "Dual lists, search, pagination, selected/target keys, disabled items and custom list/tree content"
+      ],
+      "status": "planned",
+      "exports": [],
+      "owner": null,
+      "implemented": [],
+      "remaining": [
+        "Dual lists, search, pagination, selected/target keys, disabled items and custom list/tree content"
+      ],
+      "evidence": []
+    },
+    {
+      "name": "TreeSelect",
+      "category": "Data Entry",
+      "reference": "https://ant.design/components/tree-select/",
+      "milestone": "M4",
+      "required_features": [
+        "Search, hierarchy, checked/multiple values, label strategy, lazy loading and virtual popup"
+      ],
+      "status": "planned",
+      "exports": [],
+      "owner": null,
+      "implemented": [],
+      "remaining": [
+        "Search, hierarchy, checked/multiple values, label strategy, lazy loading and virtual popup"
+      ],
+      "evidence": []
+    },
+    {
+      "name": "Upload",
+      "category": "Data Entry",
+      "reference": "https://ant.design/components/upload/",
+      "milestone": "M6",
+      "required_features": [
+        "File selection/drop/paste where supported, lists/previews, filtering, progress, abort/retry and transport adapter"
+      ],
+      "status": "planned",
+      "exports": [],
+      "owner": null,
+      "implemented": [],
+      "remaining": [
+        "File selection/drop/paste where supported, lists/previews, filtering, progress, abort/retry and transport adapter"
+      ],
+      "evidence": []
+    },
+    {
+      "name": "Avatar",
+      "category": "Data Display",
+      "reference": "https://ant.design/components/avatar/",
+      "milestone": "M1",
+      "required_features": [
+        "Image/icon/initials, shapes, fallback, sizing and group overflow"
+      ],
+      "status": "partial",
+      "exports": [
+        "avatar"
+      ],
+      "owner": "lmd/package/ui/dtna/general.ls",
+      "implemented": [
+        "Text/image avatars and custom dimensions"
+      ],
+      "remaining": [
+        "Groups, overflow, shape variants and image fallback"
+      ],
+      "evidence": [
+        "test/ui/dtna_gallery.ls",
+        "test/lambda/ui_dtna/dtna_display.ls"
+      ]
+    },
+    {
+      "name": "Badge",
+      "category": "Data Display",
+      "reference": "https://ant.design/components/badge/",
+      "milestone": "M1",
+      "required_features": [
+        "Counts/dots/status, overflow, offsets, ribbon and accessible descriptions"
+      ],
+      "status": "partial",
+      "exports": [
+        "badge"
+      ],
+      "owner": "lmd/package/ui/dtna/general.ls",
+      "implemented": [
+        "Numeric count/overflow and dot content"
+      ],
+      "remaining": [
+        "Ribbon, positioning/color variants and motion"
+      ],
+      "evidence": [
+        "test/ui/dtna_gallery.ls",
+        "test/lambda/ui_dtna/dtna_display.ls"
+      ]
+    },
+    {
+      "name": "Calendar",
+      "category": "Data Display",
+      "reference": "https://ant.design/components/calendar/",
+      "milestone": "M4",
+      "required_features": [
+        "Month/year views, selection, range/bounds, cell content, first weekday and locale"
+      ],
+      "status": "planned",
+      "exports": [],
+      "owner": null,
+      "implemented": [],
+      "remaining": [
+        "Month/year views, selection, range/bounds, cell content, first weekday and locale"
+      ],
+      "evidence": []
+    },
+    {
+      "name": "Card",
+      "category": "Data Display",
+      "reference": "https://ant.design/components/card/",
+      "milestone": "M1",
+      "required_features": [
+        "Header/actions/tabs/cover, borders/hover, loading, size, nested/grid content"
+      ],
+      "status": "partial",
+      "exports": [
+        "card"
+      ],
+      "owner": "lmd/package/ui/dtna/general.ls",
+      "implemented": [
+        "Title/extra/body/actions slots"
+      ],
+      "remaining": [
+        "Cover, grid, loading and tab variants"
+      ],
+      "evidence": [
+        "test/ui/dtna_gallery.ls",
+        "test/lambda/ui_dtna/dtna_display.ls"
+      ]
+    },
+    {
+      "name": "Carousel",
+      "category": "Data Display",
+      "reference": "https://ant.design/components/carousel/",
+      "milestone": "M6",
+      "required_features": [
+        "Arrows/dots, swipe/drag, autoplay/pause, orientation, transitions and keyboard use"
+      ],
+      "status": "planned",
+      "exports": [],
+      "owner": null,
+      "implemented": [],
+      "remaining": [
+        "Arrows/dots, swipe/drag, autoplay/pause, orientation, transitions and keyboard use"
+      ],
+      "evidence": []
+    },
+    {
+      "name": "Collapse",
+      "category": "Data Display",
+      "reference": "https://ant.design/components/collapse/",
+      "milestone": "M2",
+      "required_features": [
+        "Accordion/multiple panels, icons, disabled sections, retained/lazy content and keyboard use"
+      ],
+      "status": "planned",
+      "exports": [],
+      "owner": null,
+      "implemented": [],
+      "remaining": [
+        "Accordion/multiple panels, icons, disabled sections, retained/lazy content and keyboard use"
+      ],
+      "evidence": []
+    },
+    {
+      "name": "Descriptions",
+      "category": "Data Display",
+      "reference": "https://ant.design/components/descriptions/",
+      "milestone": "M1",
+      "required_features": [
+        "Responsive columns, spans, label placement, borders, sizes"
+      ],
+      "status": "partial",
+      "exports": [
+        "descriptions"
+      ],
+      "owner": "lmd/package/ui/dtna/general.ls",
+      "implemented": [
+        "Label/content rows"
+      ],
+      "remaining": [
+        "Spans, grid, borders and responsive modes"
+      ],
+      "evidence": [
+        "test/ui/dtna_gallery.ls",
+        "test/lambda/ui_dtna/dtna_display.ls"
+      ]
+    },
+    {
+      "name": "Empty",
+      "category": "Data Display",
+      "reference": "https://ant.design/components/empty/",
+      "milestone": "M1",
+      "required_features": [
+        "Preset/custom illustration, description and action slots"
+      ],
+      "status": "partial",
+      "exports": [
+        "empty"
+      ],
+      "owner": "lmd/package/ui/dtna/general.ls",
+      "implemented": [
+        "Original SVG empty-state illustration, description and child actions"
+      ],
+      "remaining": [
+        "All upstream presets and localization"
+      ],
+      "evidence": [
+        "test/ui/dtna_gallery.ls",
+        "test/lambda/ui_dtna/dtna_display.ls"
+      ]
+    },
+    {
+      "name": "Image",
+      "category": "Data Display",
+      "reference": "https://ant.design/components/image/",
+      "milestone": "M6",
+      "required_features": [
+        "Loading/fallback, preview, grouped navigation, zoom/pan/rotate and image lifecycle"
+      ],
+      "status": "planned",
+      "exports": [],
+      "owner": null,
+      "implemented": [],
+      "remaining": [
+        "Loading/fallback, preview, grouped navigation, zoom/pan/rotate and image lifecycle"
+      ],
+      "evidence": []
+    },
+    {
+      "name": "List",
+      "category": "Data Display",
+      "reference": "https://ant.design/components/list/",
+      "milestone": "M5",
+      "required_features": [
+        "Conventional rich-item layout, grid, actions, loading, pagination; reuse collection foundation and recommend Listy for new virtual lists"
+      ],
+      "status": "planned",
+      "exports": [],
+      "owner": null,
+      "implemented": [],
+      "remaining": [
+        "Conventional rich-item layout, grid, actions, loading, pagination; reuse collection foundation and recommend Listy for new virtual lists"
+      ],
+      "evidence": []
+    },
+    {
+      "name": "Listy",
+      "category": "Data Display",
+      "reference": "https://ant.design/components/listy/",
+      "milestone": "M5",
+      "required_features": [
+        "Virtual scrolling, grouped sticky headers, rich rows, infinite loading, drag reorder and scroll-to-item"
+      ],
+      "status": "planned",
+      "exports": [],
+      "owner": null,
+      "implemented": [],
+      "remaining": [
+        "Virtual scrolling, grouped sticky headers, rich rows, infinite loading, drag reorder and scroll-to-item"
+      ],
+      "evidence": []
+    },
+    {
+      "name": "Popover",
+      "category": "Data Display",
+      "reference": "https://ant.design/components/popover/",
+      "milestone": "M2",
+      "required_features": [
+        "Rich content, trigger modes, placement, controlled open state and focus/dismiss rules"
+      ],
+      "status": "planned",
+      "exports": [],
+      "owner": null,
+      "implemented": [],
+      "remaining": [
+        "Rich content, trigger modes, placement, controlled open state and focus/dismiss rules"
+      ],
+      "evidence": []
+    },
+    {
+      "name": "QRCode",
+      "category": "Data Display",
+      "reference": "https://ant.design/components/qr-code/",
+      "milestone": "M6",
+      "required_features": [
+        "Standards-based encoding, error correction, quiet zone, colors/icon, status and SVG/export"
+      ],
+      "status": "planned",
+      "exports": [],
+      "owner": null,
+      "implemented": [],
+      "remaining": [
+        "Standards-based encoding, error correction, quiet zone, colors/icon, status and SVG/export"
+      ],
+      "evidence": []
+    },
+    {
+      "name": "Segmented",
+      "category": "Data Display",
+      "reference": "https://ant.design/components/segmented/",
+      "milestone": "M1",
+      "required_features": [
+        "Single selection, icons, sizes, block/vertical presentation and keyboard use"
+      ],
+      "status": "partial",
+      "exports": [
+        "segmented"
+      ],
+      "owner": "lmd/package/ui/dtna/navigation.ls",
+      "implemented": [
+        "Typed keyed choices, disabled and roving keyboard selection"
+      ],
+      "remaining": [
+        "Vertical/block/icon variants and motion"
+      ],
+      "evidence": [
+        "test/ui/dtna_gallery.ls",
+        "test/lambda/ui_dtna/dtna_display.ls",
+        "test/ui/dtna/navigation.json"
+      ]
+    },
+    {
+      "name": "Statistic",
+      "category": "Data Display",
+      "reference": "https://ant.design/components/statistic/",
+      "milestone": "M1; timer M6",
+      "required_features": [
+        "Formatting, prefix/suffix, precision, loading and cancellable timed countdown"
+      ],
+      "status": "partial",
+      "exports": [
+        "statistic"
+      ],
+      "owner": "lmd/package/ui/dtna/general.ls",
+      "implemented": [
+        "Title, value, prefix and suffix"
+      ],
+      "remaining": [
+        "Formatting, timers/countdown and locale support"
+      ],
+      "evidence": [
+        "test/ui/dtna_gallery.ls",
+        "test/lambda/ui_dtna/dtna_display.ls"
+      ]
+    },
+    {
+      "name": "Table",
+      "category": "Data Display",
+      "reference": "https://ant.design/components/table/",
+      "milestone": "M5",
+      "required_features": [
+        "Columns, sorting/filtering, pagination, selection, expansion/tree rows, fixed regions, edit, summaries and virtualization"
+      ],
+      "status": "planned",
+      "exports": [],
+      "owner": null,
+      "implemented": [],
+      "remaining": [
+        "Columns, sorting/filtering, pagination, selection, expansion/tree rows, fixed regions, edit, summaries and virtualization"
+      ],
+      "evidence": []
+    },
+    {
+      "name": "Tag",
+      "category": "Data Display",
+      "reference": "https://ant.design/components/tag/",
+      "milestone": "M1",
+      "required_features": [
+        "Semantic/custom colors, icons, close/cancel, selection and keyboard actions"
+      ],
+      "status": "partial",
+      "exports": [
+        "tag"
+      ],
+      "owner": "lmd/package/ui/dtna/general.ls",
+      "implemented": [
+        "Text/status/close action with local template state"
+      ],
+      "remaining": [
+        "Checkable tag, color presets and removal animation"
+      ],
+      "evidence": [
+        "test/ui/dtna_gallery.ls",
+        "test/lambda/ui_dtna/dtna_display.ls"
+      ]
+    },
+    {
+      "name": "Timeline",
+      "category": "Data Display",
+      "reference": "https://ant.design/components/timeline/",
+      "milestone": "M1",
+      "required_features": [
+        "Direction, alternating/labelled items, status, pending state and custom markers"
+      ],
+      "status": "partial",
+      "exports": [
+        "timeline"
+      ],
+      "owner": "lmd/package/ui/dtna/general.ls",
+      "implemented": [
+        "Labels, child content and dot color"
+      ],
+      "remaining": [
+        "Alternate/reverse/pending modes and custom indicators"
+      ],
+      "evidence": [
+        "test/ui/dtna_gallery.ls",
+        "test/lambda/ui_dtna/dtna_display.ls"
+      ]
+    },
+    {
+      "name": "Tooltip",
+      "category": "Data Display",
+      "reference": "https://ant.design/components/tooltip/",
+      "milestone": "M2",
+      "required_features": [
+        "Hover/focus/click, delays, arrow/placement, wrapping, disabled triggers and dismiss"
+      ],
+      "status": "planned",
+      "exports": [],
+      "owner": null,
+      "implemented": [],
+      "remaining": [
+        "Hover/focus/click, delays, arrow/placement, wrapping, disabled triggers and dismiss"
+      ],
+      "evidence": []
+    },
+    {
+      "name": "Tour",
+      "category": "Data Display",
+      "reference": "https://ant.design/components/tour/",
+      "milestone": "M6",
+      "required_features": [
+        "Target geometry, spotlight/mask, steps, scroll-to-target, missing targets and keyboard exit"
+      ],
+      "status": "planned",
+      "exports": [],
+      "owner": null,
+      "implemented": [],
+      "remaining": [
+        "Target geometry, spotlight/mask, steps, scroll-to-target, missing targets and keyboard exit"
+      ],
+      "evidence": []
+    },
+    {
+      "name": "Tree",
+      "category": "Data Display",
+      "reference": "https://ant.design/components/tree/",
+      "milestone": "M5",
+      "required_features": [
+        "Expansion, checked/selected keys, disabled nodes, lazy load, drag/drop, typeahead and virtualization"
+      ],
+      "status": "planned",
+      "exports": [],
+      "owner": null,
+      "implemented": [],
+      "remaining": [
+        "Expansion, checked/selected keys, disabled nodes, lazy load, drag/drop, typeahead and virtualization"
+      ],
+      "evidence": []
+    },
+    {
+      "name": "Alert",
+      "category": "Feedback",
+      "reference": "https://ant.design/components/alert/",
+      "milestone": "M1; boundary M7",
+      "required_features": [
+        "Status, description/icon/action, close/cancel, banner; error wrapper only after failure-isolation contract is settled"
+      ],
+      "status": "partial",
+      "exports": [
+        "alert"
+      ],
+      "owner": "lmd/package/ui/dtna/general.ls",
+      "implemented": [
+        "Status, message/description and close action"
+      ],
+      "remaining": [
+        "Banner, custom icon/action, close motion and error boundary"
+      ],
+      "evidence": [
+        "test/ui/dtna_gallery.ls",
+        "test/lambda/ui_dtna/dtna_display.ls",
+        "test/ui/dtna/styles.json"
+      ]
+    },
+    {
+      "name": "Drawer",
+      "category": "Feedback",
+      "reference": "https://ant.design/components/drawer/",
+      "milestone": "M2",
+      "required_features": [
+        "Four sides, sizes, mask, push/nesting, loading, focus containment and restoration"
+      ],
+      "status": "planned",
+      "exports": [],
+      "owner": null,
+      "implemented": [],
+      "remaining": [
+        "Four sides, sizes, mask, push/nesting, loading, focus containment and restoration"
+      ],
+      "evidence": []
+    },
+    {
+      "name": "Message",
+      "category": "Feedback",
+      "reference": "https://ant.design/components/message/",
+      "milestone": "M2",
+      "required_features": [
+        "Status toasts, update by key, duration, stacking, dismissal and inherited configuration"
+      ],
+      "status": "planned",
+      "exports": [],
+      "owner": null,
+      "implemented": [],
+      "remaining": [
+        "Status toasts, update by key, duration, stacking, dismissal and inherited configuration"
+      ],
+      "evidence": []
+    },
+    {
+      "name": "Modal",
+      "category": "Feedback",
+      "reference": "https://ant.design/components/modal/",
+      "milestone": "M2; async M3",
+      "required_features": [
+        "Dialog slots, confirm variants, pending OK/cancel, mask/Escape, destroy/retain and nested focus"
+      ],
+      "status": "planned",
+      "exports": [],
+      "owner": null,
+      "implemented": [],
+      "remaining": [
+        "Dialog slots, confirm variants, pending OK/cancel, mask/Escape, destroy/retain and nested focus"
+      ],
+      "evidence": []
+    },
+    {
+      "name": "Notification",
+      "category": "Feedback",
+      "reference": "https://ant.design/components/notification/",
+      "milestone": "M2; timer M6",
+      "required_features": [
+        "Rich notices, placements, keyed updates, progress/timing, stacking and cleanup"
+      ],
+      "status": "planned",
+      "exports": [],
+      "owner": null,
+      "implemented": [],
+      "remaining": [
+        "Rich notices, placements, keyed updates, progress/timing, stacking and cleanup"
+      ],
+      "evidence": []
+    },
+    {
+      "name": "Popconfirm",
+      "category": "Feedback",
+      "reference": "https://ant.design/components/popconfirm/",
+      "milestone": "M2; async M3",
+      "required_features": [
+        "Anchored confirmation, buttons, async pending/error, cancellation and focus return"
+      ],
+      "status": "planned",
+      "exports": [],
+      "owner": null,
+      "implemented": [],
+      "remaining": [
+        "Anchored confirmation, buttons, async pending/error, cancellation and focus return"
+      ],
+      "evidence": []
+    },
+    {
+      "name": "Progress",
+      "category": "Feedback",
+      "reference": "https://ant.design/components/progress/",
+      "milestone": "M1",
+      "required_features": [
+        "Line/circle/dashboard, steps, status, labels and multi-segment colors"
+      ],
+      "status": "partial",
+      "exports": [
+        "progress"
+      ],
+      "owner": "lmd/package/ui/dtna/general.ls",
+      "implemented": [
+        "Clamped line progress, status, label and range semantics"
+      ],
+      "remaining": [
+        "Circle/dashboard/steps and multiple segments"
+      ],
+      "evidence": [
+        "test/ui/dtna_gallery.ls",
+        "test/lambda/ui_dtna/dtna_display.ls"
+      ]
+    },
+    {
+      "name": "Result",
+      "category": "Feedback",
+      "reference": "https://ant.design/components/result/",
+      "milestone": "M1",
+      "required_features": [
+        "Success/error/warning/info and result-page variants, illustrations and actions"
+      ],
+      "status": "partial",
+      "exports": [
+        "result"
+      ],
+      "owner": "lmd/package/ui/dtna/general.ls",
+      "implemented": [
+        "Status icon, title, description and child actions"
+      ],
+      "remaining": [
+        "HTTP status illustrations and full variants"
+      ],
+      "evidence": [
+        "test/ui/dtna_gallery.ls",
+        "test/lambda/ui_dtna/dtna_display.ls"
+      ]
+    },
+    {
+      "name": "Skeleton",
+      "category": "Feedback",
+      "reference": "https://ant.design/components/skeleton/",
+      "milestone": "M1",
+      "required_features": [
+        "Text/avatar/button/input/image shapes, loading transition and optional motion"
+      ],
+      "status": "partial",
+      "exports": [
+        "skeleton"
+      ],
+      "owner": "lmd/package/ui/dtna/general.ls",
+      "implemented": [
+        "Static text rows and busy semantics"
+      ],
+      "remaining": [
+        "All shape variants and animation"
+      ],
+      "evidence": [
+        "test/ui/dtna_gallery.ls",
+        "test/lambda/ui_dtna/dtna_display.ls"
+      ]
+    },
+    {
+      "name": "Spin",
+      "category": "Feedback",
+      "reference": "https://ant.design/components/spin/",
+      "milestone": "M1",
+      "required_features": [
+        "Sizes, delay, label, nested/fullscreen loading, custom indicator and busy semantics"
+      ],
+      "status": "partial",
+      "exports": [
+        "spin"
+      ],
+      "owner": "lmd/package/ui/dtna/general.ls",
+      "implemented": [
+        "Loading icon and busy/status wrapper"
+      ],
+      "remaining": [
+        "Delay, motion, custom indicator and fullscreen modes"
+      ],
+      "evidence": [
+        "test/ui/dtna_gallery.ls",
+        "test/lambda/ui_dtna/dtna_display.ls"
+      ]
+    },
+    {
+      "name": "Watermark",
+      "category": "Feedback",
+      "reference": "https://ant.design/components/watermark/",
+      "milestone": "M6",
+      "required_features": [
+        "Repeated text/image, rotation, spacing, multi-line text and deterministic export; decorative treatment, not a security guarantee"
+      ],
+      "status": "planned",
+      "exports": [],
+      "owner": null,
+      "implemented": [],
+      "remaining": [
+        "Repeated text/image, rotation, spacing, multi-line text and deterministic export; decorative treatment, not a security guarantee"
+      ],
+      "evidence": []
+    },
+    {
+      "name": "Affix",
+      "category": "Other",
+      "reference": "https://ant.design/components/affix/",
+      "milestone": "M6",
+      "required_features": [
+        "Top/bottom offsets, custom scroll container, resize and sticky/fixed transition"
+      ],
+      "status": "planned",
+      "exports": [],
+      "owner": null,
+      "implemented": [],
+      "remaining": [
+        "Top/bottom offsets, custom scroll container, resize and sticky/fixed transition"
+      ],
+      "evidence": []
+    },
+    {
+      "name": "App",
+      "category": "Other",
+      "reference": "https://ant.design/components/app/",
+      "milestone": "M0/M1",
+      "required_features": [
+        "Application scope, service hosts, stylesheet installation and cleanup"
+      ],
+      "status": "planned",
+      "exports": [],
+      "owner": null,
+      "implemented": [],
+      "remaining": [
+        "Application scope, service hosts, stylesheet installation and cleanup"
+      ],
+      "evidence": []
+    },
+    {
+      "name": "BorderBeam",
+      "category": "Other",
+      "reference": "https://ant.design/components/border-beam/",
+      "milestone": "M6",
+      "required_features": [
+        "Border-following decoration, gradients, direction/speed/size, multiple beams, hover and reduced motion"
+      ],
+      "status": "planned",
+      "exports": [],
+      "owner": null,
+      "implemented": [],
+      "remaining": [
+        "Border-following decoration, gradients, direction/speed/size, multiple beams, hover and reduced motion"
+      ],
+      "evidence": []
+    },
+    {
+      "name": "ConfigProvider",
+      "category": "Other",
+      "reference": "https://ant.design/components/config-provider/",
+      "milestone": "M0/M1",
+      "required_features": [
+        "Nested immutable configuration, locale/direction/size/disabled/motion, tokens and overlay propagation"
+      ],
+      "status": "partial",
+      "exports": [
+        "config_provider"
+      ],
+      "owner": "lmd/package/ui/dtna/general.ls",
+      "implemented": [
+        "Scoped CSS token overrides, inherited unspecified tokens, direction and native fieldset disabling"
+      ],
+      "remaining": [
+        "Locale, density/motion, overlay propagation and provider data context"
+      ],
+      "evidence": [
+        "test/ui/dtna_gallery.ls",
+        "test/lambda/ui_dtna/dtna_display.ls",
+        "test/lambda/ui_dtna/dtna_tokens.ls",
+        "test/ui/dtna/styles.json"
+      ]
+    },
+    {
+      "name": "Util",
+      "category": "Other",
+      "reference": "https://ant.design/components/util/",
+      "milestone": "M0; audit M7",
+      "required_features": [
+        "Reference utilities classified individually; responsive/debounce/value helpers where applicable, React hook/ref helpers mapped or marked inapplicable"
+      ],
+      "status": "planned",
+      "exports": [],
+      "owner": null,
+      "implemented": [],
+      "remaining": [
+        "Reference utilities classified individually; responsive/debounce/value helpers where applicable, React hook/ref helpers mapped or marked inapplicable"
+      ],
+      "evidence": []
+    }
+  ]
+}

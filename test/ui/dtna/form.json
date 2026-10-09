@@ -1,0 +1,17 @@
+{
+ "name":"dtna form uses native required validation, submit entries and reset",
+ "html":"test/ui/dtna/form.ls",
+ "viewport":{"width":800,"height":500},
+ "events":[
+  {"type":"click","target":{"selector":"#submit"}},
+  {"type":"assert_text","target":{"selector":"#submissions"},"equals":"0"},
+  {"type":"click","target":{"selector":"#project-name"}},
+  {"type":"type","target":{"selector":"#project-name"},"text":"Lambda"},
+  {"type":"click","target":{"selector":"#submit"}},
+  {"type":"assert_text","target":{"selector":"#submissions"},"equals":"1"},
+  {"type":"assert_text","target":{"selector":"#submitted"},"equals":"Lambda"},
+  {"type":"assert_value","target":{"selector":"#project-name"},"equals":"Lambda"},
+  {"type":"click","target":{"selector":"#reset"}},
+  {"type":"assert_value","target":{"selector":"#project-name"},"equals":""}
+ ]
+}

@@ -178,6 +178,9 @@ char* resource_manager_copy_resource_content(NetworkResourceManager* mgr,
                                              ResourcePriority priority,
                                              size_t* out_size);
 // Read an already-completed request without admitting a new blocking transfer.
+// out_pending distinguishes an in-flight request from an absent or failed one.
+char* resource_manager_copy_ready_resource_path(NetworkResourceManager* mgr,
+                                                const char* url, bool* out_pending);
 char* resource_manager_copy_ready_resource_content(NetworkResourceManager* mgr,
                                                    const char* url,
                                                    size_t* out_size);
