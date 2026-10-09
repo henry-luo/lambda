@@ -149,9 +149,12 @@ let accents = {
     tilde: "̃", widetilde: "̃",
     bar: "̄", overline: "‾",
     vec: "⃗", dot: "̇", ddot: "̈",
+    // the direct parser also emits higher derivatives and below-arrow accents.
+    dddot: "\u20DB", ddddot: "\u20DC",
     acute: "́", grave: "̀", breve: "̆",
     check: "̌", mathring: "̊",
-    overleftarrow: "⃖", overrightarrow: "⃗", overleftrightarrow: "⃡"
+    overleftarrow: "⃖", overrightarrow: "⃗", overleftrightarrow: "⃡",
+    underleftarrow: "\u20EE", underrightarrow: "\u20EF", underleftrightarrow: "\u034D"
 }
 
 // ============================================================

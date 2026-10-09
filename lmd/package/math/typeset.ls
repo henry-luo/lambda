@@ -333,7 +333,9 @@ fn accent(n, c) {
         let g = font.glyph(c.profile, ord(ch))^
         let mark = stretch.glyph(g, base.width, false, scale(c), "mord")^
         let x = base.accent - mark.accent
-        let y = 0.0 - max(0.0, base.height - metric(c, "accent_base_height"));
+        // below-arrow accents must clear the base's descent instead of its top.
+        let y = if (starts_with(key, "under")) base.depth + metric(c, "underbar_vertical_gap") + mark.height
+            else 0.0 - max(0.0, base.height - metric(c, "accent_base_height"));
         bx.compose([{box: base, x: 0.0, y: 0.0}, {box: mark, x: x, y: y}], base.width, base.type)
         }
     }

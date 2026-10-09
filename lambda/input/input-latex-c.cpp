@@ -51,6 +51,7 @@ static bool is_text_command(const char* name) {
 
 static bool is_style_command(const char* name) {
     return strcmp(name, "mathrm") == 0 || strcmp(name, "mathbf") == 0 ||
+        strcmp(name, "boldsymbol") == 0 ||
         strcmp(name, "mathit") == 0 || strcmp(name, "mathsf") == 0 ||
         strcmp(name, "mathtt") == 0 || strcmp(name, "mathcal") == 0 ||
         strcmp(name, "mathbb") == 0 || strcmp(name, "mathfrak") == 0 ||
@@ -536,6 +537,15 @@ private:
             // Color syntax is CSS-like data, so preserve punctuation and spaces
             // separately from its parsed math subtree.
             if (has_color_source) elem.attr("color_raw", builder_.createStringItem(source_ + color_begin, color_end - color_begin));
+            if (item_present(content)) elem.attr("content", content);
+            return elem.final();
+        }
+        if (strcmp(name, "phantom") == 0 || strcmp(name, "hphantom") == 0 ||
+            strcmp(name, "vphantom") == 0 || strcmp(name, "smash") == 0) {
+            // these commands change box dimensions and cannot use literal-command fallback.
+            Item content = parse_script_arg();
+            ElementBuilder elem = builder_.element("phantom_command");
+            elem.attr("cmd", builder_.createStringItem(full));
             if (item_present(content)) elem.attr("content", content);
             return elem.final();
         }
