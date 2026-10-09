@@ -1,0 +1,3750 @@
+{
+  "revision": "438d2e17fb9f75fa3dbc54e1d21a3bc088ad009d",
+  "images": {
+    "assets/flats/CEIL3_1.png": {
+      "width": 64,
+      "height": 64
+    },
+    "assets/flats/CEIL3_2.png": {
+      "width": 64,
+      "height": 64
+    },
+    "assets/flats/CEIL3_5.png": {
+      "width": 64,
+      "height": 64
+    },
+    "assets/flats/CEIL4_2.png": {
+      "width": 64,
+      "height": 64
+    },
+    "assets/flats/CEIL4_3.png": {
+      "width": 64,
+      "height": 64
+    },
+    "assets/flats/CEIL5_1.png": {
+      "width": 64,
+      "height": 64
+    },
+    "assets/flats/CEIL5_2.png": {
+      "width": 64,
+      "height": 64
+    },
+    "assets/flats/CONS1_1.png": {
+      "width": 64,
+      "height": 64
+    },
+    "assets/flats/CONS1_5.png": {
+      "width": 64,
+      "height": 64
+    },
+    "assets/flats/CONS1_7.png": {
+      "width": 64,
+      "height": 64
+    },
+    "assets/flats/DEM1_1.png": {
+      "width": 64,
+      "height": 64
+    },
+    "assets/flats/DEM1_2.png": {
+      "width": 64,
+      "height": 64
+    },
+    "assets/flats/DEM1_3.png": {
+      "width": 64,
+      "height": 64
+    },
+    "assets/flats/DEM1_4.png": {
+      "width": 64,
+      "height": 64
+    },
+    "assets/flats/FLAT1.png": {
+      "width": 64,
+      "height": 64
+    },
+    "assets/flats/FLAT10.png": {
+      "width": 64,
+      "height": 64
+    },
+    "assets/flats/FLAT14.png": {
+      "width": 64,
+      "height": 64
+    },
+    "assets/flats/FLAT18.png": {
+      "width": 64,
+      "height": 64
+    },
+    "assets/flats/FLAT2.png": {
+      "width": 64,
+      "height": 64
+    },
+    "assets/flats/FLAT20.png": {
+      "width": 64,
+      "height": 64
+    },
+    "assets/flats/FLAT22.png": {
+      "width": 64,
+      "height": 64
+    },
+    "assets/flats/FLAT23.png": {
+      "width": 64,
+      "height": 64
+    },
+    "assets/flats/FLAT5.png": {
+      "width": 64,
+      "height": 64
+    },
+    "assets/flats/FLAT5_4.png": {
+      "width": 64,
+      "height": 64
+    },
+    "assets/flats/FLAT5_5.png": {
+      "width": 64,
+      "height": 64
+    },
+    "assets/flats/FLOOR0_1.png": {
+      "width": 64,
+      "height": 64
+    },
+    "assets/flats/FLOOR0_3.png": {
+      "width": 64,
+      "height": 64
+    },
+    "assets/flats/FLOOR0_6.png": {
+      "width": 64,
+      "height": 64
+    },
+    "assets/flats/FLOOR1_1.png": {
+      "width": 64,
+      "height": 64
+    },
+    "assets/flats/FLOOR1_7.png": {
+      "width": 64,
+      "height": 64
+    },
+    "assets/flats/FLOOR3_3.png": {
+      "width": 64,
+      "height": 64
+    },
+    "assets/flats/FLOOR4_1.png": {
+      "width": 64,
+      "height": 64
+    },
+    "assets/flats/FLOOR4_5.png": {
+      "width": 64,
+      "height": 64
+    },
+    "assets/flats/FLOOR4_6.png": {
+      "width": 64,
+      "height": 64
+    },
+    "assets/flats/FLOOR4_8.png": {
+      "width": 64,
+      "height": 64
+    },
+    "assets/flats/FLOOR5_1.png": {
+      "width": 64,
+      "height": 64
+    },
+    "assets/flats/FLOOR5_2.png": {
+      "width": 64,
+      "height": 64
+    },
+    "assets/flats/FLOOR5_3.png": {
+      "width": 64,
+      "height": 64
+    },
+    "assets/flats/FLOOR5_4.png": {
+      "width": 64,
+      "height": 64
+    },
+    "assets/flats/FLOOR6_1.png": {
+      "width": 64,
+      "height": 64
+    },
+    "assets/flats/FLOOR6_2.png": {
+      "width": 64,
+      "height": 64
+    },
+    "assets/flats/FLOOR7_1.png": {
+      "width": 64,
+      "height": 64
+    },
+    "assets/flats/FLOOR7_2.png": {
+      "width": 64,
+      "height": 64
+    },
+    "assets/flats/F_SKY1.png": {
+      "width": 64,
+      "height": 64
+    },
+    "assets/flats/MFLR8_1.png": {
+      "width": 64,
+      "height": 64
+    },
+    "assets/flats/NUKAGE1.png": {
+      "width": 64,
+      "height": 64
+    },
+    "assets/flats/NUKAGE2.png": {
+      "width": 64,
+      "height": 64
+    },
+    "assets/flats/NUKAGE3.png": {
+      "width": 64,
+      "height": 64
+    },
+    "assets/flats/STEP1.png": {
+      "width": 64,
+      "height": 64
+    },
+    "assets/flats/STEP2.png": {
+      "width": 64,
+      "height": 64
+    },
+    "assets/flats/TLITE6_1.png": {
+      "width": 64,
+      "height": 64
+    },
+    "assets/flats/TLITE6_4.png": {
+      "width": 64,
+      "height": 64
+    },
+    "assets/flats/TLITE6_5.png": {
+      "width": 64,
+      "height": 64
+    },
+    "assets/flats/TLITE6_6.png": {
+      "width": 64,
+      "height": 64
+    },
+    "assets/hud/DIGITS_SHEET.png": {
+      "width": 168,
+      "height": 16
+    },
+    "assets/hud/FACE_SHEET.png": {
+      "width": 72,
+      "height": 155
+    },
+    "assets/hud/SMALL_DIGITS_SHEET.png": {
+      "width": 40,
+      "height": 6
+    },
+    "assets/hud/STARMS.png": {
+      "width": 40,
+      "height": 32
+    },
+    "assets/hud/STBAR.png": {
+      "width": 320,
+      "height": 32
+    },
+    "assets/hud/STFB0.png": {
+      "width": 35,
+      "height": 31
+    },
+    "assets/hud/STFB1.png": {
+      "width": 35,
+      "height": 31
+    },
+    "assets/hud/STFB2.png": {
+      "width": 35,
+      "height": 31
+    },
+    "assets/hud/STFB3.png": {
+      "width": 35,
+      "height": 31
+    },
+    "assets/hud/STFDEAD0.png": {
+      "width": 24,
+      "height": 31
+    },
+    "assets/hud/STFEVL0.png": {
+      "width": 24,
+      "height": 30
+    },
+    "assets/hud/STFEVL1.png": {
+      "width": 24,
+      "height": 30
+    },
+    "assets/hud/STFEVL2.png": {
+      "width": 24,
+      "height": 30
+    },
+    "assets/hud/STFEVL3.png": {
+      "width": 24,
+      "height": 30
+    },
+    "assets/hud/STFEVL4.png": {
+      "width": 24,
+      "height": 30
+    },
+    "assets/hud/STFGOD0.png": {
+      "width": 24,
+      "height": 29
+    },
+    "assets/hud/STFKILL0.png": {
+      "width": 24,
+      "height": 30
+    },
+    "assets/hud/STFKILL1.png": {
+      "width": 24,
+      "height": 30
+    },
+    "assets/hud/STFKILL2.png": {
+      "width": 24,
+      "height": 30
+    },
+    "assets/hud/STFKILL3.png": {
+      "width": 24,
+      "height": 30
+    },
+    "assets/hud/STFKILL4.png": {
+      "width": 24,
+      "height": 30
+    },
+    "assets/hud/STFOUCH0.png": {
+      "width": 24,
+      "height": 31
+    },
+    "assets/hud/STFOUCH1.png": {
+      "width": 24,
+      "height": 31
+    },
+    "assets/hud/STFOUCH2.png": {
+      "width": 24,
+      "height": 31
+    },
+    "assets/hud/STFOUCH3.png": {
+      "width": 24,
+      "height": 31
+    },
+    "assets/hud/STFOUCH4.png": {
+      "width": 24,
+      "height": 31
+    },
+    "assets/hud/STFST00.png": {
+      "width": 24,
+      "height": 29
+    },
+    "assets/hud/STFST01.png": {
+      "width": 24,
+      "height": 29
+    },
+    "assets/hud/STFST02.png": {
+      "width": 24,
+      "height": 29
+    },
+    "assets/hud/STFST10.png": {
+      "width": 24,
+      "height": 29
+    },
+    "assets/hud/STFST11.png": {
+      "width": 24,
+      "height": 29
+    },
+    "assets/hud/STFST12.png": {
+      "width": 24,
+      "height": 29
+    },
+    "assets/hud/STFST20.png": {
+      "width": 24,
+      "height": 30
+    },
+    "assets/hud/STFST21.png": {
+      "width": 24,
+      "height": 30
+    },
+    "assets/hud/STFST22.png": {
+      "width": 24,
+      "height": 30
+    },
+    "assets/hud/STFST30.png": {
+      "width": 24,
+      "height": 31
+    },
+    "assets/hud/STFST31.png": {
+      "width": 24,
+      "height": 31
+    },
+    "assets/hud/STFST32.png": {
+      "width": 24,
+      "height": 31
+    },
+    "assets/hud/STFST40.png": {
+      "width": 24,
+      "height": 31
+    },
+    "assets/hud/STFST41.png": {
+      "width": 24,
+      "height": 31
+    },
+    "assets/hud/STFST42.png": {
+      "width": 24,
+      "height": 31
+    },
+    "assets/hud/STFTL00.png": {
+      "width": 26,
+      "height": 30
+    },
+    "assets/hud/STFTL10.png": {
+      "width": 26,
+      "height": 30
+    },
+    "assets/hud/STFTL20.png": {
+      "width": 27,
+      "height": 30
+    },
+    "assets/hud/STFTL30.png": {
+      "width": 29,
+      "height": 31
+    },
+    "assets/hud/STFTL40.png": {
+      "width": 30,
+      "height": 31
+    },
+    "assets/hud/STFTR00.png": {
+      "width": 26,
+      "height": 30
+    },
+    "assets/hud/STFTR10.png": {
+      "width": 26,
+      "height": 30
+    },
+    "assets/hud/STFTR20.png": {
+      "width": 27,
+      "height": 30
+    },
+    "assets/hud/STFTR30.png": {
+      "width": 28,
+      "height": 30
+    },
+    "assets/hud/STFTR40.png": {
+      "width": 28,
+      "height": 30
+    },
+    "assets/hud/STGNUM0.png": {
+      "width": 4,
+      "height": 6
+    },
+    "assets/hud/STGNUM1.png": {
+      "width": 4,
+      "height": 6
+    },
+    "assets/hud/STGNUM2.png": {
+      "width": 4,
+      "height": 6
+    },
+    "assets/hud/STGNUM3.png": {
+      "width": 4,
+      "height": 6
+    },
+    "assets/hud/STGNUM4.png": {
+      "width": 4,
+      "height": 6
+    },
+    "assets/hud/STGNUM5.png": {
+      "width": 4,
+      "height": 6
+    },
+    "assets/hud/STGNUM6.png": {
+      "width": 4,
+      "height": 6
+    },
+    "assets/hud/STGNUM7.png": {
+      "width": 4,
+      "height": 6
+    },
+    "assets/hud/STGNUM8.png": {
+      "width": 4,
+      "height": 6
+    },
+    "assets/hud/STGNUM9.png": {
+      "width": 4,
+      "height": 6
+    },
+    "assets/hud/STKEYS0.png": {
+      "width": 7,
+      "height": 5
+    },
+    "assets/hud/STKEYS1.png": {
+      "width": 7,
+      "height": 5
+    },
+    "assets/hud/STKEYS2.png": {
+      "width": 7,
+      "height": 5
+    },
+    "assets/hud/STKEYS3.png": {
+      "width": 7,
+      "height": 7
+    },
+    "assets/hud/STKEYS4.png": {
+      "width": 7,
+      "height": 7
+    },
+    "assets/hud/STKEYS5.png": {
+      "width": 7,
+      "height": 7
+    },
+    "assets/hud/STTMINUS.png": {
+      "width": 8,
+      "height": 6
+    },
+    "assets/hud/STTNUM0.png": {
+      "width": 14,
+      "height": 16
+    },
+    "assets/hud/STTNUM1.png": {
+      "width": 11,
+      "height": 16
+    },
+    "assets/hud/STTNUM2.png": {
+      "width": 14,
+      "height": 16
+    },
+    "assets/hud/STTNUM3.png": {
+      "width": 14,
+      "height": 16
+    },
+    "assets/hud/STTNUM4.png": {
+      "width": 14,
+      "height": 16
+    },
+    "assets/hud/STTNUM5.png": {
+      "width": 14,
+      "height": 16
+    },
+    "assets/hud/STTNUM6.png": {
+      "width": 14,
+      "height": 16
+    },
+    "assets/hud/STTNUM7.png": {
+      "width": 14,
+      "height": 16
+    },
+    "assets/hud/STTNUM8.png": {
+      "width": 14,
+      "height": 16
+    },
+    "assets/hud/STTNUM9.png": {
+      "width": 14,
+      "height": 16
+    },
+    "assets/hud/STTPRCNT.png": {
+      "width": 14,
+      "height": 16
+    },
+    "assets/hud/STYSNUM0.png": {
+      "width": 4,
+      "height": 6
+    },
+    "assets/hud/STYSNUM1.png": {
+      "width": 4,
+      "height": 6
+    },
+    "assets/hud/STYSNUM2.png": {
+      "width": 4,
+      "height": 6
+    },
+    "assets/hud/STYSNUM3.png": {
+      "width": 4,
+      "height": 6
+    },
+    "assets/hud/STYSNUM4.png": {
+      "width": 4,
+      "height": 6
+    },
+    "assets/hud/STYSNUM5.png": {
+      "width": 4,
+      "height": 6
+    },
+    "assets/hud/STYSNUM6.png": {
+      "width": 4,
+      "height": 6
+    },
+    "assets/hud/STYSNUM7.png": {
+      "width": 4,
+      "height": 6
+    },
+    "assets/hud/STYSNUM8.png": {
+      "width": 4,
+      "height": 6
+    },
+    "assets/hud/STYSNUM9.png": {
+      "width": 4,
+      "height": 6
+    },
+    "assets/intermission/WIA00000.png": {
+      "width": 8,
+      "height": 8
+    },
+    "assets/intermission/WIA00001.png": {
+      "width": 8,
+      "height": 8
+    },
+    "assets/intermission/WIA00002.png": {
+      "width": 8,
+      "height": 8
+    },
+    "assets/intermission/WIA00100.png": {
+      "width": 24,
+      "height": 8
+    },
+    "assets/intermission/WIA00101.png": {
+      "width": 24,
+      "height": 8
+    },
+    "assets/intermission/WIA00102.png": {
+      "width": 24,
+      "height": 8
+    },
+    "assets/intermission/WIA00200.png": {
+      "width": 8,
+      "height": 16
+    },
+    "assets/intermission/WIA00201.png": {
+      "width": 8,
+      "height": 16
+    },
+    "assets/intermission/WIA00202.png": {
+      "width": 8,
+      "height": 16
+    },
+    "assets/intermission/WIA00300.png": {
+      "width": 8,
+      "height": 16
+    },
+    "assets/intermission/WIA00301.png": {
+      "width": 8,
+      "height": 16
+    },
+    "assets/intermission/WIA00302.png": {
+      "width": 8,
+      "height": 16
+    },
+    "assets/intermission/WIA00400.png": {
+      "width": 8,
+      "height": 8
+    },
+    "assets/intermission/WIA00401.png": {
+      "width": 8,
+      "height": 8
+    },
+    "assets/intermission/WIA00402.png": {
+      "width": 8,
+      "height": 8
+    },
+    "assets/intermission/WIA00500.png": {
+      "width": 8,
+      "height": 8
+    },
+    "assets/intermission/WIA00501.png": {
+      "width": 8,
+      "height": 8
+    },
+    "assets/intermission/WIA00502.png": {
+      "width": 8,
+      "height": 8
+    },
+    "assets/intermission/WIA00600.png": {
+      "width": 8,
+      "height": 8
+    },
+    "assets/intermission/WIA00601.png": {
+      "width": 8,
+      "height": 8
+    },
+    "assets/intermission/WIA00602.png": {
+      "width": 8,
+      "height": 8
+    },
+    "assets/intermission/WIA00700.png": {
+      "width": 8,
+      "height": 16
+    },
+    "assets/intermission/WIA00701.png": {
+      "width": 8,
+      "height": 16
+    },
+    "assets/intermission/WIA00702.png": {
+      "width": 8,
+      "height": 16
+    },
+    "assets/intermission/WIA00800.png": {
+      "width": 8,
+      "height": 16
+    },
+    "assets/intermission/WIA00801.png": {
+      "width": 8,
+      "height": 16
+    },
+    "assets/intermission/WIA00802.png": {
+      "width": 8,
+      "height": 16
+    },
+    "assets/intermission/WIA00900.png": {
+      "width": 8,
+      "height": 8
+    },
+    "assets/intermission/WIA00901.png": {
+      "width": 8,
+      "height": 8
+    },
+    "assets/intermission/WIA00902.png": {
+      "width": 8,
+      "height": 8
+    },
+    "assets/intermission/WICOLON.png": {
+      "width": 5,
+      "height": 10
+    },
+    "assets/intermission/WIENTER.png": {
+      "width": 102,
+      "height": 12
+    },
+    "assets/intermission/WIF.png": {
+      "width": 92,
+      "height": 12
+    },
+    "assets/intermission/WIMAP0.png": {
+      "width": 320,
+      "height": 200
+    },
+    "assets/intermission/WIMINUS.png": {
+      "width": 6,
+      "height": 3
+    },
+    "assets/intermission/WIMSTAR.png": {
+      "width": 47,
+      "height": 12
+    },
+    "assets/intermission/WIMSTT.png": {
+      "width": 62,
+      "height": 12
+    },
+    "assets/intermission/WINUM0.png": {
+      "width": 11,
+      "height": 12
+    },
+    "assets/intermission/WINUM1.png": {
+      "width": 7,
+      "height": 12
+    },
+    "assets/intermission/WINUM2.png": {
+      "width": 11,
+      "height": 12
+    },
+    "assets/intermission/WINUM3.png": {
+      "width": 11,
+      "height": 12
+    },
+    "assets/intermission/WINUM4.png": {
+      "width": 11,
+      "height": 12
+    },
+    "assets/intermission/WINUM5.png": {
+      "width": 11,
+      "height": 12
+    },
+    "assets/intermission/WINUM6.png": {
+      "width": 11,
+      "height": 12
+    },
+    "assets/intermission/WINUM7.png": {
+      "width": 11,
+      "height": 12
+    },
+    "assets/intermission/WINUM8.png": {
+      "width": 11,
+      "height": 12
+    },
+    "assets/intermission/WINUM9.png": {
+      "width": 11,
+      "height": 12
+    },
+    "assets/intermission/WIOSTI.png": {
+      "width": 59,
+      "height": 12
+    },
+    "assets/intermission/WIOSTK.png": {
+      "width": 55,
+      "height": 12
+    },
+    "assets/intermission/WIOSTS.png": {
+      "width": 54,
+      "height": 12
+    },
+    "assets/intermission/WIP1.png": {
+      "width": 23,
+      "height": 12
+    },
+    "assets/intermission/WIP2.png": {
+      "width": 27,
+      "height": 12
+    },
+    "assets/intermission/WIP3.png": {
+      "width": 27,
+      "height": 12
+    },
+    "assets/intermission/WIP4.png": {
+      "width": 27,
+      "height": 12
+    },
+    "assets/intermission/WIPAR.png": {
+      "width": 41,
+      "height": 12
+    },
+    "assets/intermission/WIPCNT.png": {
+      "width": 13,
+      "height": 12
+    },
+    "assets/intermission/WISUCKS.png": {
+      "width": 72,
+      "height": 12
+    },
+    "assets/intermission/WITIME.png": {
+      "width": 45,
+      "height": 12
+    },
+    "assets/menu/CREDIT.png": {
+      "width": 320,
+      "height": 200
+    },
+    "assets/menu/HELP1.png": {
+      "width": 320,
+      "height": 200
+    },
+    "assets/menu/HELP2.png": {
+      "width": 320,
+      "height": 200
+    },
+    "assets/menu/M_DETAIL.png": {
+      "width": 174,
+      "height": 15
+    },
+    "assets/menu/M_DISOPT.png": {
+      "width": 212,
+      "height": 15
+    },
+    "assets/menu/M_DOOM.png": {
+      "width": 123,
+      "height": 60
+    },
+    "assets/menu/M_ENDGAM.png": {
+      "width": 113,
+      "height": 15
+    },
+    "assets/menu/M_EPI1.png": {
+      "width": 263,
+      "height": 15
+    },
+    "assets/menu/M_EPI2.png": {
+      "width": 228,
+      "height": 15
+    },
+    "assets/menu/M_EPI3.png": {
+      "width": 90,
+      "height": 15
+    },
+    "assets/menu/M_EPISOD.png": {
+      "width": 173,
+      "height": 15
+    },
+    "assets/menu/M_HURT.png": {
+      "width": 184,
+      "height": 15
+    },
+    "assets/menu/M_JKILL.png": {
+      "width": 246,
+      "height": 15
+    },
+    "assets/menu/M_LGTTL.png": {
+      "width": 137,
+      "height": 15
+    },
+    "assets/menu/M_LOADG.png": {
+      "width": 125,
+      "height": 15
+    },
+    "assets/menu/M_LSCNTR.png": {
+      "width": 8,
+      "height": 14
+    },
+    "assets/menu/M_LSLEFT.png": {
+      "width": 8,
+      "height": 14
+    },
+    "assets/menu/M_LSRGHT.png": {
+      "width": 8,
+      "height": 14
+    },
+    "assets/menu/M_MESSG.png": {
+      "width": 118,
+      "height": 15
+    },
+    "assets/menu/M_MSENS.png": {
+      "width": 206,
+      "height": 15
+    },
+    "assets/menu/M_MSGOFF.png": {
+      "width": 39,
+      "height": 12
+    },
+    "assets/menu/M_MSGON.png": {
+      "width": 32,
+      "height": 12
+    },
+    "assets/menu/M_MUSVOL.png": {
+      "width": 156,
+      "height": 15
+    },
+    "assets/menu/M_NEWG.png": {
+      "width": 121,
+      "height": 15
+    },
+    "assets/menu/M_NGAME.png": {
+      "width": 110,
+      "height": 15
+    },
+    "assets/menu/M_NMARE.png": {
+      "width": 124,
+      "height": 19
+    },
+    "assets/menu/M_OPTION.png": {
+      "width": 92,
+      "height": 15
+    },
+    "assets/menu/M_PAUSE.png": {
+      "width": 69,
+      "height": 15
+    },
+    "assets/menu/M_QUITG.png": {
+      "width": 116,
+      "height": 17
+    },
+    "assets/menu/M_ROUGH.png": {
+      "width": 248,
+      "height": 16
+    },
+    "assets/menu/M_SAVEG.png": {
+      "width": 125,
+      "height": 15
+    },
+    "assets/menu/M_SFXVOL.png": {
+      "width": 133,
+      "height": 15
+    },
+    "assets/menu/M_SGTTL.png": {
+      "width": 137,
+      "height": 15
+    },
+    "assets/menu/M_SKILL.png": {
+      "width": 236,
+      "height": 15
+    },
+    "assets/menu/M_SKULL1.png": {
+      "width": 20,
+      "height": 19
+    },
+    "assets/menu/M_SKULL2.png": {
+      "width": 20,
+      "height": 19
+    },
+    "assets/menu/M_SVOL.png": {
+      "width": 168,
+      "height": 15
+    },
+    "assets/menu/M_THERML.png": {
+      "width": 6,
+      "height": 13
+    },
+    "assets/menu/M_THERMM.png": {
+      "width": 9,
+      "height": 13
+    },
+    "assets/menu/M_THERMO.png": {
+      "width": 5,
+      "height": 11
+    },
+    "assets/menu/M_THERMR.png": {
+      "width": 6,
+      "height": 13
+    },
+    "assets/menu/M_ULTRA.png": {
+      "width": 199,
+      "height": 15
+    },
+    "assets/menu/TITLEPIC.png": {
+      "width": 320,
+      "height": 200
+    },
+    "assets/sprites/AMMOA0.png": {
+      "width": 28,
+      "height": 16
+    },
+    "assets/sprites/APBXA0.png": {
+      "width": 23,
+      "height": 23
+    },
+    "assets/sprites/APBXB0.png": {
+      "width": 37,
+      "height": 33
+    },
+    "assets/sprites/APBXC0.png": {
+      "width": 29,
+      "height": 29
+    },
+    "assets/sprites/APBXD0.png": {
+      "width": 20,
+      "height": 20
+    },
+    "assets/sprites/APBXE0.png": {
+      "width": 7,
+      "height": 7
+    },
+    "assets/sprites/APLSA0.png": {
+      "width": 15,
+      "height": 15
+    },
+    "assets/sprites/APLSB0.png": {
+      "width": 13,
+      "height": 13
+    },
+    "assets/sprites/ARM1A0.png": {
+      "width": 31,
+      "height": 17
+    },
+    "assets/sprites/ARM1B0.png": {
+      "width": 31,
+      "height": 17
+    },
+    "assets/sprites/ARM2A0.png": {
+      "width": 31,
+      "height": 17
+    },
+    "assets/sprites/ARM2B0.png": {
+      "width": 31,
+      "height": 17
+    },
+    "assets/sprites/BAL1A0.png": {
+      "width": 15,
+      "height": 15
+    },
+    "assets/sprites/BAL1B0.png": {
+      "width": 15,
+      "height": 15
+    },
+    "assets/sprites/BAL1C0.png": {
+      "width": 37,
+      "height": 35
+    },
+    "assets/sprites/BAL1D0.png": {
+      "width": 43,
+      "height": 39
+    },
+    "assets/sprites/BAL1E0.png": {
+      "width": 50,
+      "height": 44
+    },
+    "assets/sprites/BAL2A0.png": {
+      "width": 16,
+      "height": 16
+    },
+    "assets/sprites/BAL2B0.png": {
+      "width": 15,
+      "height": 15
+    },
+    "assets/sprites/BAL2C0.png": {
+      "width": 45,
+      "height": 48
+    },
+    "assets/sprites/BAL2D0.png": {
+      "width": 50,
+      "height": 42
+    },
+    "assets/sprites/BAL2E0.png": {
+      "width": 53,
+      "height": 47
+    },
+    "assets/sprites/BAL7A1A5.png": {
+      "width": 19,
+      "height": 16
+    },
+    "assets/sprites/BAL7A2A8.png": {
+      "width": 33,
+      "height": 13
+    },
+    "assets/sprites/BAL7A3A7.png": {
+      "width": 48,
+      "height": 12
+    },
+    "assets/sprites/BAL7A4A6.png": {
+      "width": 35,
+      "height": 10
+    },
+    "assets/sprites/BAL7B1B5.png": {
+      "width": 20,
+      "height": 16
+    },
+    "assets/sprites/BAL7B2B8.png": {
+      "width": 35,
+      "height": 13
+    },
+    "assets/sprites/BAL7B3B7.png": {
+      "width": 49,
+      "height": 12
+    },
+    "assets/sprites/BAL7B4B6.png": {
+      "width": 33,
+      "height": 10
+    },
+    "assets/sprites/BAL7C0.png": {
+      "width": 33,
+      "height": 33
+    },
+    "assets/sprites/BAL7D0.png": {
+      "width": 41,
+      "height": 36
+    },
+    "assets/sprites/BAL7E0.png": {
+      "width": 45,
+      "height": 40
+    },
+    "assets/sprites/BAR1A0.png": {
+      "width": 23,
+      "height": 32
+    },
+    "assets/sprites/BAR1B0.png": {
+      "width": 23,
+      "height": 32
+    },
+    "assets/sprites/BEXPA0.png": {
+      "width": 23,
+      "height": 32
+    },
+    "assets/sprites/BEXPB0.png": {
+      "width": 23,
+      "height": 31
+    },
+    "assets/sprites/BEXPC0.png": {
+      "width": 40,
+      "height": 36
+    },
+    "assets/sprites/BEXPD0.png": {
+      "width": 56,
+      "height": 50
+    },
+    "assets/sprites/BEXPE0.png": {
+      "width": 60,
+      "height": 53
+    },
+    "assets/sprites/BKEYA0.png": {
+      "width": 14,
+      "height": 16
+    },
+    "assets/sprites/BKEYB0.png": {
+      "width": 14,
+      "height": 16
+    },
+    "assets/sprites/BLUDA0.png": {
+      "width": 5,
+      "height": 6
+    },
+    "assets/sprites/BLUDB0.png": {
+      "width": 8,
+      "height": 8
+    },
+    "assets/sprites/BLUDC0.png": {
+      "width": 12,
+      "height": 11
+    },
+    "assets/sprites/BON1A0.png": {
+      "width": 14,
+      "height": 18
+    },
+    "assets/sprites/BON1B0.png": {
+      "width": 14,
+      "height": 18
+    },
+    "assets/sprites/BON1C0.png": {
+      "width": 14,
+      "height": 18
+    },
+    "assets/sprites/BON1D0.png": {
+      "width": 14,
+      "height": 18
+    },
+    "assets/sprites/BON2A0.png": {
+      "width": 16,
+      "height": 15
+    },
+    "assets/sprites/BON2B0.png": {
+      "width": 16,
+      "height": 15
+    },
+    "assets/sprites/BON2C0.png": {
+      "width": 16,
+      "height": 15
+    },
+    "assets/sprites/BON2D0.png": {
+      "width": 16,
+      "height": 15
+    },
+    "assets/sprites/BOSFA0.png": {
+      "width": 33,
+      "height": 33
+    },
+    "assets/sprites/BOSFB0.png": {
+      "width": 37,
+      "height": 36
+    },
+    "assets/sprites/BOSFC0.png": {
+      "width": 35,
+      "height": 36
+    },
+    "assets/sprites/BOSFD0.png": {
+      "width": 35,
+      "height": 36
+    },
+    "assets/sprites/BOSSA1.png": {
+      "width": 41,
+      "height": 73
+    },
+    "assets/sprites/BOSSA2A8.png": {
+      "width": 42,
+      "height": 71
+    },
+    "assets/sprites/BOSSA3A7.png": {
+      "width": 52,
+      "height": 69
+    },
+    "assets/sprites/BOSSA4A6.png": {
+      "width": 45,
+      "height": 67
+    },
+    "assets/sprites/BOSSA5.png": {
+      "width": 41,
+      "height": 67
+    },
+    "assets/sprites/BOSSB1.png": {
+      "width": 49,
+      "height": 74
+    },
+    "assets/sprites/BOSSB2B8.png": {
+      "width": 41,
+      "height": 72
+    },
+    "assets/sprites/BOSSB3B7.png": {
+      "width": 44,
+      "height": 70
+    },
+    "assets/sprites/BOSSB4B6.png": {
+      "width": 44,
+      "height": 68
+    },
+    "assets/sprites/BOSSB5.png": {
+      "width": 47,
+      "height": 67
+    },
+    "assets/sprites/BOSSC1.png": {
+      "width": 41,
+      "height": 73
+    },
+    "assets/sprites/BOSSC2C8.png": {
+      "width": 52,
+      "height": 74
+    },
+    "assets/sprites/BOSSC3C7.png": {
+      "width": 50,
+      "height": 69
+    },
+    "assets/sprites/BOSSC4C6.png": {
+      "width": 41,
+      "height": 67
+    },
+    "assets/sprites/BOSSC5.png": {
+      "width": 41,
+      "height": 67
+    },
+    "assets/sprites/BOSSD1.png": {
+      "width": 49,
+      "height": 74
+    },
+    "assets/sprites/BOSSD2D8.png": {
+      "width": 48,
+      "height": 74
+    },
+    "assets/sprites/BOSSD3D7.png": {
+      "width": 44,
+      "height": 72
+    },
+    "assets/sprites/BOSSD4D6.png": {
+      "width": 38,
+      "height": 68
+    },
+    "assets/sprites/BOSSD5.png": {
+      "width": 47,
+      "height": 67
+    },
+    "assets/sprites/BOSSE1.png": {
+      "width": 65,
+      "height": 70
+    },
+    "assets/sprites/BOSSE2.png": {
+      "width": 34,
+      "height": 72
+    },
+    "assets/sprites/BOSSE3.png": {
+      "width": 56,
+      "height": 66
+    },
+    "assets/sprites/BOSSE4.png": {
+      "width": 59,
+      "height": 66
+    },
+    "assets/sprites/BOSSE5.png": {
+      "width": 64,
+      "height": 71
+    },
+    "assets/sprites/BOSSE6.png": {
+      "width": 49,
+      "height": 76
+    },
+    "assets/sprites/BOSSE7.png": {
+      "width": 43,
+      "height": 77
+    },
+    "assets/sprites/BOSSE8.png": {
+      "width": 62,
+      "height": 79
+    },
+    "assets/sprites/BOSSF1.png": {
+      "width": 69,
+      "height": 70
+    },
+    "assets/sprites/BOSSF2.png": {
+      "width": 60,
+      "height": 70
+    },
+    "assets/sprites/BOSSF3.png": {
+      "width": 51,
+      "height": 68
+    },
+    "assets/sprites/BOSSF4.png": {
+      "width": 54,
+      "height": 67
+    },
+    "assets/sprites/BOSSF5.png": {
+      "width": 59,
+      "height": 64
+    },
+    "assets/sprites/BOSSF6.png": {
+      "width": 61,
+      "height": 66
+    },
+    "assets/sprites/BOSSF7.png": {
+      "width": 44,
+      "height": 68
+    },
+    "assets/sprites/BOSSF8.png": {
+      "width": 54,
+      "height": 70
+    },
+    "assets/sprites/BOSSG1.png": {
+      "width": 53,
+      "height": 64
+    },
+    "assets/sprites/BOSSG2.png": {
+      "width": 61,
+      "height": 64
+    },
+    "assets/sprites/BOSSG3.png": {
+      "width": 49,
+      "height": 62
+    },
+    "assets/sprites/BOSSG4.png": {
+      "width": 49,
+      "height": 59
+    },
+    "assets/sprites/BOSSG5.png": {
+      "width": 61,
+      "height": 57
+    },
+    "assets/sprites/BOSSG6.png": {
+      "width": 52,
+      "height": 58
+    },
+    "assets/sprites/BOSSG7.png": {
+      "width": 46,
+      "height": 61
+    },
+    "assets/sprites/BOSSG8.png": {
+      "width": 56,
+      "height": 60
+    },
+    "assets/sprites/BOSSH1.png": {
+      "width": 50,
+      "height": 72
+    },
+    "assets/sprites/BOSSH2.png": {
+      "width": 51,
+      "height": 73
+    },
+    "assets/sprites/BOSSH3.png": {
+      "width": 47,
+      "height": 71
+    },
+    "assets/sprites/BOSSH4.png": {
+      "width": 49,
+      "height": 67
+    },
+    "assets/sprites/BOSSH5.png": {
+      "width": 47,
+      "height": 65
+    },
+    "assets/sprites/BOSSH6.png": {
+      "width": 40,
+      "height": 66
+    },
+    "assets/sprites/BOSSH7.png": {
+      "width": 44,
+      "height": 70
+    },
+    "assets/sprites/BOSSH8.png": {
+      "width": 44,
+      "height": 72
+    },
+    "assets/sprites/BOSSI0.png": {
+      "width": 48,
+      "height": 73
+    },
+    "assets/sprites/BOSSJ0.png": {
+      "width": 55,
+      "height": 64
+    },
+    "assets/sprites/BOSSK0.png": {
+      "width": 56,
+      "height": 54
+    },
+    "assets/sprites/BOSSL0.png": {
+      "width": 59,
+      "height": 36
+    },
+    "assets/sprites/BOSSM0.png": {
+      "width": 60,
+      "height": 30
+    },
+    "assets/sprites/BOSSN0.png": {
+      "width": 60,
+      "height": 31
+    },
+    "assets/sprites/BOSSO0.png": {
+      "width": 60,
+      "height": 31
+    },
+    "assets/sprites/BPAKA0.png": {
+      "width": 22,
+      "height": 29
+    },
+    "assets/sprites/BROKA0.png": {
+      "width": 54,
+      "height": 21
+    },
+    "assets/sprites/CANDA0.png": {
+      "width": 16,
+      "height": 15
+    },
+    "assets/sprites/CBRAA0.png": {
+      "width": 29,
+      "height": 61
+    },
+    "assets/sprites/CHGFA0.png": {
+      "width": 86,
+      "height": 46
+    },
+    "assets/sprites/CHGFB0.png": {
+      "width": 85,
+      "height": 47
+    },
+    "assets/sprites/CHGGA0.png": {
+      "width": 114,
+      "height": 83
+    },
+    "assets/sprites/CHGGB0.png": {
+      "width": 114,
+      "height": 81
+    },
+    "assets/sprites/CLIPA0.png": {
+      "width": 9,
+      "height": 11
+    },
+    "assets/sprites/COLUA0.png": {
+      "width": 23,
+      "height": 48
+    },
+    "assets/sprites/CSAWA0.png": {
+      "width": 62,
+      "height": 24
+    },
+    "assets/sprites/ELECA0.png": {
+      "width": 38,
+      "height": 128
+    },
+    "assets/sprites/IFOGA0.png": {
+      "width": 40,
+      "height": 37
+    },
+    "assets/sprites/IFOGB0.png": {
+      "width": 34,
+      "height": 30
+    },
+    "assets/sprites/IFOGC0.png": {
+      "width": 17,
+      "height": 16
+    },
+    "assets/sprites/IFOGD0.png": {
+      "width": 9,
+      "height": 8
+    },
+    "assets/sprites/IFOGE0.png": {
+      "width": 3,
+      "height": 4
+    },
+    "assets/sprites/LAUNA0.png": {
+      "width": 62,
+      "height": 16
+    },
+    "assets/sprites/MANFA1.png": {
+      "width": 34,
+      "height": 34
+    },
+    "assets/sprites/MANFA5.png": {
+      "width": 29,
+      "height": 30
+    },
+    "assets/sprites/MANFA6A4.png": {
+      "width": 54,
+      "height": 30
+    },
+    "assets/sprites/MANFA7A3.png": {
+      "width": 67,
+      "height": 25
+    },
+    "assets/sprites/MANFA8A2.png": {
+      "width": 56,
+      "height": 28
+    },
+    "assets/sprites/MANFB1.png": {
+      "width": 34,
+      "height": 34
+    },
+    "assets/sprites/MANFB5.png": {
+      "width": 25,
+      "height": 26
+    },
+    "assets/sprites/MANFB6B4.png": {
+      "width": 46,
+      "height": 30
+    },
+    "assets/sprites/MANFB7B3.png": {
+      "width": 63,
+      "height": 27
+    },
+    "assets/sprites/MANFB8B2.png": {
+      "width": 51,
+      "height": 28
+    },
+    "assets/sprites/MEDIA0.png": {
+      "width": 28,
+      "height": 19
+    },
+    "assets/sprites/MGUNA0.png": {
+      "width": 54,
+      "height": 16
+    },
+    "assets/sprites/MISFA0.png": {
+      "width": 53,
+      "height": 31
+    },
+    "assets/sprites/MISFB0.png": {
+      "width": 73,
+      "height": 51
+    },
+    "assets/sprites/MISFC0.png": {
+      "width": 88,
+      "height": 58
+    },
+    "assets/sprites/MISFD0.png": {
+      "width": 105,
+      "height": 79
+    },
+    "assets/sprites/MISGA0.png": {
+      "width": 87,
+      "height": 79
+    },
+    "assets/sprites/MISGB0.png": {
+      "width": 102,
+      "height": 75
+    },
+    "assets/sprites/MISLA1.png": {
+      "width": 15,
+      "height": 14
+    },
+    "assets/sprites/MISLA5.png": {
+      "width": 15,
+      "height": 14
+    },
+    "assets/sprites/MISLA6A4.png": {
+      "width": 26,
+      "height": 14
+    },
+    "assets/sprites/MISLA7A3.png": {
+      "width": 49,
+      "height": 14
+    },
+    "assets/sprites/MISLA8A2.png": {
+      "width": 32,
+      "height": 14
+    },
+    "assets/sprites/MISLB0.png": {
+      "width": 73,
+      "height": 60
+    },
+    "assets/sprites/MISLC0.png": {
+      "width": 88,
+      "height": 72
+    },
+    "assets/sprites/MISLD0.png": {
+      "width": 103,
+      "height": 86
+    },
+    "assets/sprites/PINSA0.png": {
+      "width": 25,
+      "height": 25
+    },
+    "assets/sprites/PINSB0.png": {
+      "width": 25,
+      "height": 25
+    },
+    "assets/sprites/PINSC0.png": {
+      "width": 25,
+      "height": 25
+    },
+    "assets/sprites/PINSD0.png": {
+      "width": 25,
+      "height": 25
+    },
+    "assets/sprites/PISFA0.png": {
+      "width": 41,
+      "height": 38
+    },
+    "assets/sprites/PISGA0.png": {
+      "width": 57,
+      "height": 62
+    },
+    "assets/sprites/PISGB0.png": {
+      "width": 79,
+      "height": 82
+    },
+    "assets/sprites/PISGC0.png": {
+      "width": 66,
+      "height": 81
+    },
+    "assets/sprites/PISGD0.png": {
+      "width": 61,
+      "height": 81
+    },
+    "assets/sprites/PISGE0.png": {
+      "width": 78,
+      "height": 103
+    },
+    "assets/sprites/PLAYA1.png": {
+      "width": 41,
+      "height": 56
+    },
+    "assets/sprites/PLAYA2A8.png": {
+      "width": 35,
+      "height": 54
+    },
+    "assets/sprites/PLAYA3A7.png": {
+      "width": 42,
+      "height": 53
+    },
+    "assets/sprites/PLAYA4A6.png": {
+      "width": 45,
+      "height": 51
+    },
+    "assets/sprites/PLAYA5.png": {
+      "width": 36,
+      "height": 50
+    },
+    "assets/sprites/PLAYB1.png": {
+      "width": 37,
+      "height": 56
+    },
+    "assets/sprites/PLAYB2B8.png": {
+      "width": 35,
+      "height": 55
+    },
+    "assets/sprites/PLAYB3B7.png": {
+      "width": 36,
+      "height": 55
+    },
+    "assets/sprites/PLAYB4B6.png": {
+      "width": 41,
+      "height": 54
+    },
+    "assets/sprites/PLAYB5.png": {
+      "width": 35,
+      "height": 54
+    },
+    "assets/sprites/PLAYC1.png": {
+      "width": 38,
+      "height": 56
+    },
+    "assets/sprites/PLAYC2C8.png": {
+      "width": 37,
+      "height": 55
+    },
+    "assets/sprites/PLAYC3C7.png": {
+      "width": 38,
+      "height": 54
+    },
+    "assets/sprites/PLAYC4C6.png": {
+      "width": 41,
+      "height": 55
+    },
+    "assets/sprites/PLAYC5.png": {
+      "width": 34,
+      "height": 54
+    },
+    "assets/sprites/PLAYD1.png": {
+      "width": 40,
+      "height": 55
+    },
+    "assets/sprites/PLAYD2D8.png": {
+      "width": 35,
+      "height": 55
+    },
+    "assets/sprites/PLAYD3D7.png": {
+      "width": 34,
+      "height": 54
+    },
+    "assets/sprites/PLAYD4D6.png": {
+      "width": 40,
+      "height": 54
+    },
+    "assets/sprites/PLAYD5.png": {
+      "width": 35,
+      "height": 54
+    },
+    "assets/sprites/PLAYE1.png": {
+      "width": 26,
+      "height": 56
+    },
+    "assets/sprites/PLAYE2E8.png": {
+      "width": 43,
+      "height": 55
+    },
+    "assets/sprites/PLAYE3E7.png": {
+      "width": 51,
+      "height": 53
+    },
+    "assets/sprites/PLAYE4E6.png": {
+      "width": 38,
+      "height": 52
+    },
+    "assets/sprites/PLAYE5.png": {
+      "width": 26,
+      "height": 51
+    },
+    "assets/sprites/PLAYF1.png": {
+      "width": 26,
+      "height": 56
+    },
+    "assets/sprites/PLAYF2F8.png": {
+      "width": 45,
+      "height": 55
+    },
+    "assets/sprites/PLAYF3F7.png": {
+      "width": 52,
+      "height": 53
+    },
+    "assets/sprites/PLAYF4F6.png": {
+      "width": 41,
+      "height": 52
+    },
+    "assets/sprites/PLAYF5.png": {
+      "width": 24,
+      "height": 51
+    },
+    "assets/sprites/PLAYG1.png": {
+      "width": 39,
+      "height": 55
+    },
+    "assets/sprites/PLAYG2G8.png": {
+      "width": 36,
+      "height": 56
+    },
+    "assets/sprites/PLAYG3G7.png": {
+      "width": 43,
+      "height": 55
+    },
+    "assets/sprites/PLAYG4G6.png": {
+      "width": 43,
+      "height": 52
+    },
+    "assets/sprites/PLAYG5.png": {
+      "width": 34,
+      "height": 54
+    },
+    "assets/sprites/PLAYH0.png": {
+      "width": 44,
+      "height": 50
+    },
+    "assets/sprites/PLAYI0.png": {
+      "width": 35,
+      "height": 43
+    },
+    "assets/sprites/PLAYJ0.png": {
+      "width": 36,
+      "height": 46
+    },
+    "assets/sprites/PLAYK0.png": {
+      "width": 41,
+      "height": 38
+    },
+    "assets/sprites/PLAYL0.png": {
+      "width": 51,
+      "height": 14
+    },
+    "assets/sprites/PLAYM0.png": {
+      "width": 51,
+      "height": 14
+    },
+    "assets/sprites/PLAYN0.png": {
+      "width": 51,
+      "height": 14
+    },
+    "assets/sprites/PLAYO0.png": {
+      "width": 38,
+      "height": 56
+    },
+    "assets/sprites/PLAYP0.png": {
+      "width": 44,
+      "height": 59
+    },
+    "assets/sprites/PLAYQ0.png": {
+      "width": 48,
+      "height": 57
+    },
+    "assets/sprites/PLAYR0.png": {
+      "width": 53,
+      "height": 52
+    },
+    "assets/sprites/PLAYS0.png": {
+      "width": 55,
+      "height": 47
+    },
+    "assets/sprites/PLAYT0.png": {
+      "width": 57,
+      "height": 40
+    },
+    "assets/sprites/PLAYU0.png": {
+      "width": 57,
+      "height": 33
+    },
+    "assets/sprites/PLAYV0.png": {
+      "width": 57,
+      "height": 23
+    },
+    "assets/sprites/PLAYW0.png": {
+      "width": 57,
+      "height": 22
+    },
+    "assets/sprites/PMAPA0.png": {
+      "width": 28,
+      "height": 27
+    },
+    "assets/sprites/PMAPB0.png": {
+      "width": 28,
+      "height": 27
+    },
+    "assets/sprites/PMAPC0.png": {
+      "width": 28,
+      "height": 27
+    },
+    "assets/sprites/PMAPD0.png": {
+      "width": 28,
+      "height": 27
+    },
+    "assets/sprites/POL5A0.png": {
+      "width": 55,
+      "height": 10
+    },
+    "assets/sprites/POSSA1.png": {
+      "width": 41,
+      "height": 55
+    },
+    "assets/sprites/POSSA2A8.png": {
+      "width": 36,
+      "height": 54
+    },
+    "assets/sprites/POSSA3A7.png": {
+      "width": 43,
+      "height": 53
+    },
+    "assets/sprites/POSSA4A6.png": {
+      "width": 45,
+      "height": 50
+    },
+    "assets/sprites/POSSA5.png": {
+      "width": 36,
+      "height": 51
+    },
+    "assets/sprites/POSSB1.png": {
+      "width": 37,
+      "height": 55
+    },
+    "assets/sprites/POSSB2B8.png": {
+      "width": 35,
+      "height": 54
+    },
+    "assets/sprites/POSSB3B7.png": {
+      "width": 36,
+      "height": 55
+    },
+    "assets/sprites/POSSB4B6.png": {
+      "width": 40,
+      "height": 54
+    },
+    "assets/sprites/POSSB5.png": {
+      "width": 35,
+      "height": 54
+    },
+    "assets/sprites/POSSC1.png": {
+      "width": 38,
+      "height": 55
+    },
+    "assets/sprites/POSSC2C8.png": {
+      "width": 37,
+      "height": 54
+    },
+    "assets/sprites/POSSC3C7.png": {
+      "width": 37,
+      "height": 55
+    },
+    "assets/sprites/POSSC4C6.png": {
+      "width": 41,
+      "height": 55
+    },
+    "assets/sprites/POSSC5.png": {
+      "width": 34,
+      "height": 55
+    },
+    "assets/sprites/POSSD1.png": {
+      "width": 40,
+      "height": 55
+    },
+    "assets/sprites/POSSD2D8.png": {
+      "width": 35,
+      "height": 54
+    },
+    "assets/sprites/POSSD3D7.png": {
+      "width": 34,
+      "height": 54
+    },
+    "assets/sprites/POSSD4D6.png": {
+      "width": 41,
+      "height": 54
+    },
+    "assets/sprites/POSSD5.png": {
+      "width": 35,
+      "height": 54
+    },
+    "assets/sprites/POSSE1.png": {
+      "width": 26,
+      "height": 55
+    },
+    "assets/sprites/POSSE2E8.png": {
+      "width": 43,
+      "height": 54
+    },
+    "assets/sprites/POSSE3E7.png": {
+      "width": 51,
+      "height": 53
+    },
+    "assets/sprites/POSSE4E6.png": {
+      "width": 39,
+      "height": 52
+    },
+    "assets/sprites/POSSE5.png": {
+      "width": 26,
+      "height": 51
+    },
+    "assets/sprites/POSSF1.png": {
+      "width": 27,
+      "height": 55
+    },
+    "assets/sprites/POSSF2F8.png": {
+      "width": 45,
+      "height": 54
+    },
+    "assets/sprites/POSSF3F7.png": {
+      "width": 52,
+      "height": 53
+    },
+    "assets/sprites/POSSF4F6.png": {
+      "width": 42,
+      "height": 52
+    },
+    "assets/sprites/POSSF5.png": {
+      "width": 24,
+      "height": 51
+    },
+    "assets/sprites/POSSG1.png": {
+      "width": 39,
+      "height": 55
+    },
+    "assets/sprites/POSSG2G8.png": {
+      "width": 36,
+      "height": 55
+    },
+    "assets/sprites/POSSG3G7.png": {
+      "width": 43,
+      "height": 54
+    },
+    "assets/sprites/POSSG4G6.png": {
+      "width": 43,
+      "height": 53
+    },
+    "assets/sprites/POSSG5.png": {
+      "width": 34,
+      "height": 53
+    },
+    "assets/sprites/POSSH0.png": {
+      "width": 39,
+      "height": 55
+    },
+    "assets/sprites/POSSI0.png": {
+      "width": 35,
+      "height": 46
+    },
+    "assets/sprites/POSSJ0.png": {
+      "width": 43,
+      "height": 34
+    },
+    "assets/sprites/POSSK0.png": {
+      "width": 48,
+      "height": 27
+    },
+    "assets/sprites/POSSL0.png": {
+      "width": 47,
+      "height": 17
+    },
+    "assets/sprites/POSSM0.png": {
+      "width": 41,
+      "height": 59
+    },
+    "assets/sprites/POSSN0.png": {
+      "width": 43,
+      "height": 62
+    },
+    "assets/sprites/POSSO0.png": {
+      "width": 48,
+      "height": 61
+    },
+    "assets/sprites/POSSP0.png": {
+      "width": 53,
+      "height": 55
+    },
+    "assets/sprites/POSSQ0.png": {
+      "width": 55,
+      "height": 51
+    },
+    "assets/sprites/POSSR0.png": {
+      "width": 57,
+      "height": 43
+    },
+    "assets/sprites/POSSS0.png": {
+      "width": 57,
+      "height": 36
+    },
+    "assets/sprites/POSST0.png": {
+      "width": 57,
+      "height": 26
+    },
+    "assets/sprites/POSSU0.png": {
+      "width": 57,
+      "height": 21
+    },
+    "assets/sprites/PUFFA0.png": {
+      "width": 5,
+      "height": 5
+    },
+    "assets/sprites/PUFFB0.png": {
+      "width": 9,
+      "height": 8
+    },
+    "assets/sprites/PUFFC0.png": {
+      "width": 12,
+      "height": 11
+    },
+    "assets/sprites/PUFFD0.png": {
+      "width": 15,
+      "height": 15
+    },
+    "assets/sprites/PUFF_SHEET.png": {
+      "width": 60,
+      "height": 15
+    },
+    "assets/sprites/PUNGA0.png": {
+      "width": 113,
+      "height": 42
+    },
+    "assets/sprites/PUNGB0.png": {
+      "width": 80,
+      "height": 41
+    },
+    "assets/sprites/PUNGC0.png": {
+      "width": 107,
+      "height": 52
+    },
+    "assets/sprites/PUNGD0.png": {
+      "width": 147,
+      "height": 76
+    },
+    "assets/sprites/PVISA0.png": {
+      "width": 28,
+      "height": 13
+    },
+    "assets/sprites/PVISB0.png": {
+      "width": 28,
+      "height": 13
+    },
+    "assets/sprites/RKEYA0.png": {
+      "width": 14,
+      "height": 16
+    },
+    "assets/sprites/RKEYB0.png": {
+      "width": 14,
+      "height": 16
+    },
+    "assets/sprites/ROCKA0.png": {
+      "width": 12,
+      "height": 27
+    },
+    "assets/sprites/SARGA1.png": {
+      "width": 40,
+      "height": 56
+    },
+    "assets/sprites/SARGA2A8.png": {
+      "width": 59,
+      "height": 55
+    },
+    "assets/sprites/SARGA3A7.png": {
+      "width": 60,
+      "height": 53
+    },
+    "assets/sprites/SARGA4A6.png": {
+      "width": 56,
+      "height": 53
+    },
+    "assets/sprites/SARGA5.png": {
+      "width": 35,
+      "height": 54
+    },
+    "assets/sprites/SARGB1.png": {
+      "width": 43,
+      "height": 58
+    },
+    "assets/sprites/SARGB2B8.png": {
+      "width": 50,
+      "height": 59
+    },
+    "assets/sprites/SARGB3B7.png": {
+      "width": 58,
+      "height": 56
+    },
+    "assets/sprites/SARGB4B6.png": {
+      "width": 53,
+      "height": 53
+    },
+    "assets/sprites/SARGB5.png": {
+      "width": 39,
+      "height": 53
+    },
+    "assets/sprites/SARGC1.png": {
+      "width": 40,
+      "height": 55
+    },
+    "assets/sprites/SARGC2C8.png": {
+      "width": 58,
+      "height": 52
+    },
+    "assets/sprites/SARGC3C7.png": {
+      "width": 60,
+      "height": 53
+    },
+    "assets/sprites/SARGC4C6.png": {
+      "width": 50,
+      "height": 53
+    },
+    "assets/sprites/SARGC5.png": {
+      "width": 35,
+      "height": 54
+    },
+    "assets/sprites/SARGD1.png": {
+      "width": 43,
+      "height": 58
+    },
+    "assets/sprites/SARGD2D8.png": {
+      "width": 55,
+      "height": 56
+    },
+    "assets/sprites/SARGD3D7.png": {
+      "width": 59,
+      "height": 56
+    },
+    "assets/sprites/SARGD4D6.png": {
+      "width": 46,
+      "height": 54
+    },
+    "assets/sprites/SARGD5.png": {
+      "width": 39,
+      "height": 53
+    },
+    "assets/sprites/SARGE1.png": {
+      "width": 44,
+      "height": 55
+    },
+    "assets/sprites/SARGE2.png": {
+      "width": 48,
+      "height": 55
+    },
+    "assets/sprites/SARGE3.png": {
+      "width": 60,
+      "height": 51
+    },
+    "assets/sprites/SARGE4.png": {
+      "width": 54,
+      "height": 50
+    },
+    "assets/sprites/SARGE5.png": {
+      "width": 42,
+      "height": 51
+    },
+    "assets/sprites/SARGE6.png": {
+      "width": 49,
+      "height": 50
+    },
+    "assets/sprites/SARGE7.png": {
+      "width": 58,
+      "height": 50
+    },
+    "assets/sprites/SARGE8.png": {
+      "width": 53,
+      "height": 54
+    },
+    "assets/sprites/SARGF1.png": {
+      "width": 44,
+      "height": 55
+    },
+    "assets/sprites/SARGF2.png": {
+      "width": 50,
+      "height": 55
+    },
+    "assets/sprites/SARGF3.png": {
+      "width": 67,
+      "height": 51
+    },
+    "assets/sprites/SARGF4.png": {
+      "width": 57,
+      "height": 51
+    },
+    "assets/sprites/SARGF5.png": {
+      "width": 42,
+      "height": 52
+    },
+    "assets/sprites/SARGF6.png": {
+      "width": 52,
+      "height": 50
+    },
+    "assets/sprites/SARGF7.png": {
+      "width": 63,
+      "height": 51
+    },
+    "assets/sprites/SARGF8.png": {
+      "width": 55,
+      "height": 54
+    },
+    "assets/sprites/SARGG1.png": {
+      "width": 44,
+      "height": 55
+    },
+    "assets/sprites/SARGG2.png": {
+      "width": 52,
+      "height": 58
+    },
+    "assets/sprites/SARGG3.png": {
+      "width": 70,
+      "height": 53
+    },
+    "assets/sprites/SARGG4.png": {
+      "width": 57,
+      "height": 52
+    },
+    "assets/sprites/SARGG5.png": {
+      "width": 42,
+      "height": 54
+    },
+    "assets/sprites/SARGG6.png": {
+      "width": 54,
+      "height": 50
+    },
+    "assets/sprites/SARGG7.png": {
+      "width": 66,
+      "height": 52
+    },
+    "assets/sprites/SARGG8.png": {
+      "width": 57,
+      "height": 55
+    },
+    "assets/sprites/SARGH1.png": {
+      "width": 39,
+      "height": 55
+    },
+    "assets/sprites/SARGH2.png": {
+      "width": 50,
+      "height": 53
+    },
+    "assets/sprites/SARGH3.png": {
+      "width": 59,
+      "height": 51
+    },
+    "assets/sprites/SARGH4.png": {
+      "width": 52,
+      "height": 49
+    },
+    "assets/sprites/SARGH5.png": {
+      "width": 35,
+      "height": 48
+    },
+    "assets/sprites/SARGH6.png": {
+      "width": 44,
+      "height": 48
+    },
+    "assets/sprites/SARGH7.png": {
+      "width": 57,
+      "height": 50
+    },
+    "assets/sprites/SARGH8.png": {
+      "width": 54,
+      "height": 52
+    },
+    "assets/sprites/SARGI0.png": {
+      "width": 54,
+      "height": 56
+    },
+    "assets/sprites/SARGJ0.png": {
+      "width": 60,
+      "height": 56
+    },
+    "assets/sprites/SARGK0.png": {
+      "width": 52,
+      "height": 53
+    },
+    "assets/sprites/SARGL0.png": {
+      "width": 62,
+      "height": 57
+    },
+    "assets/sprites/SARGM0.png": {
+      "width": 64,
+      "height": 46
+    },
+    "assets/sprites/SARGN0.png": {
+      "width": 64,
+      "height": 32
+    },
+    "assets/sprites/SAWGA0.png": {
+      "width": 140,
+      "height": 55
+    },
+    "assets/sprites/SAWGB0.png": {
+      "width": 140,
+      "height": 55
+    },
+    "assets/sprites/SAWGC0.png": {
+      "width": 153,
+      "height": 89
+    },
+    "assets/sprites/SAWGD0.png": {
+      "width": 154,
+      "height": 89
+    },
+    "assets/sprites/SBOXA0.png": {
+      "width": 32,
+      "height": 12
+    },
+    "assets/sprites/SHELA0.png": {
+      "width": 15,
+      "height": 7
+    },
+    "assets/sprites/SHOTA0.png": {
+      "width": 63,
+      "height": 12
+    },
+    "assets/sprites/SHTFA0.png": {
+      "width": 44,
+      "height": 31
+    },
+    "assets/sprites/SHTFB0.png": {
+      "width": 54,
+      "height": 44
+    },
+    "assets/sprites/SHTGA0.png": {
+      "width": 79,
+      "height": 60
+    },
+    "assets/sprites/SHTGB0.png": {
+      "width": 119,
+      "height": 121
+    },
+    "assets/sprites/SHTGC0.png": {
+      "width": 87,
+      "height": 151
+    },
+    "assets/sprites/SHTGD0.png": {
+      "width": 113,
+      "height": 131
+    },
+    "assets/sprites/SOULA0.png": {
+      "width": 25,
+      "height": 25
+    },
+    "assets/sprites/SOULB0.png": {
+      "width": 25,
+      "height": 25
+    },
+    "assets/sprites/SOULC0.png": {
+      "width": 25,
+      "height": 25
+    },
+    "assets/sprites/SOULD0.png": {
+      "width": 25,
+      "height": 25
+    },
+    "assets/sprites/SPOSA1.png": {
+      "width": 36,
+      "height": 55
+    },
+    "assets/sprites/SPOSA2A8.png": {
+      "width": 32,
+      "height": 54
+    },
+    "assets/sprites/SPOSA3A7.png": {
+      "width": 40,
+      "height": 53
+    },
+    "assets/sprites/SPOSA4A6.png": {
+      "width": 45,
+      "height": 50
+    },
+    "assets/sprites/SPOSA5.png": {
+      "width": 35,
+      "height": 51
+    },
+    "assets/sprites/SPOSB1.png": {
+      "width": 35,
+      "height": 55
+    },
+    "assets/sprites/SPOSB2B8.png": {
+      "width": 27,
+      "height": 54
+    },
+    "assets/sprites/SPOSB3B7.png": {
+      "width": 32,
+      "height": 56
+    },
+    "assets/sprites/SPOSB4B6.png": {
+      "width": 40,
+      "height": 54
+    },
+    "assets/sprites/SPOSB5.png": {
+      "width": 34,
+      "height": 54
+    },
+    "assets/sprites/SPOSC1.png": {
+      "width": 32,
+      "height": 55
+    },
+    "assets/sprites/SPOSC2C8.png": {
+      "width": 29,
+      "height": 54
+    },
+    "assets/sprites/SPOSC3C7.png": {
+      "width": 38,
+      "height": 55
+    },
+    "assets/sprites/SPOSC4C6.png": {
+      "width": 39,
+      "height": 55
+    },
+    "assets/sprites/SPOSC5.png": {
+      "width": 34,
+      "height": 55
+    },
+    "assets/sprites/SPOSD1.png": {
+      "width": 34,
+      "height": 55
+    },
+    "assets/sprites/SPOSD2D8.png": {
+      "width": 28,
+      "height": 55
+    },
+    "assets/sprites/SPOSD3D7.png": {
+      "width": 30,
+      "height": 55
+    },
+    "assets/sprites/SPOSD4D6.png": {
+      "width": 38,
+      "height": 55
+    },
+    "assets/sprites/SPOSD5.png": {
+      "width": 35,
+      "height": 55
+    },
+    "assets/sprites/SPOSE1.png": {
+      "width": 26,
+      "height": 55
+    },
+    "assets/sprites/SPOSE2E8.png": {
+      "width": 39,
+      "height": 54
+    },
+    "assets/sprites/SPOSE3E7.png": {
+      "width": 44,
+      "height": 53
+    },
+    "assets/sprites/SPOSE4E6.png": {
+      "width": 34,
+      "height": 52
+    },
+    "assets/sprites/SPOSE5.png": {
+      "width": 26,
+      "height": 51
+    },
+    "assets/sprites/SPOSF1.png": {
+      "width": 27,
+      "height": 55
+    },
+    "assets/sprites/SPOSF2F8.png": {
+      "width": 43,
+      "height": 54
+    },
+    "assets/sprites/SPOSF3F7.png": {
+      "width": 49,
+      "height": 53
+    },
+    "assets/sprites/SPOSF4F6.png": {
+      "width": 41,
+      "height": 52
+    },
+    "assets/sprites/SPOSF5.png": {
+      "width": 24,
+      "height": 51
+    },
+    "assets/sprites/SPOSG1.png": {
+      "width": 31,
+      "height": 55
+    },
+    "assets/sprites/SPOSG2G8.png": {
+      "width": 33,
+      "height": 54
+    },
+    "assets/sprites/SPOSG3G7.png": {
+      "width": 43,
+      "height": 53
+    },
+    "assets/sprites/SPOSG4G6.png": {
+      "width": 43,
+      "height": 52
+    },
+    "assets/sprites/SPOSG5.png": {
+      "width": 31,
+      "height": 53
+    },
+    "assets/sprites/SPOSH0.png": {
+      "width": 33,
+      "height": 60
+    },
+    "assets/sprites/SPOSI0.png": {
+      "width": 35,
+      "height": 50
+    },
+    "assets/sprites/SPOSJ0.png": {
+      "width": 42,
+      "height": 35
+    },
+    "assets/sprites/SPOSK0.png": {
+      "width": 48,
+      "height": 27
+    },
+    "assets/sprites/SPOSL0.png": {
+      "width": 52,
+      "height": 17
+    },
+    "assets/sprites/SPOSM0.png": {
+      "width": 36,
+      "height": 59
+    },
+    "assets/sprites/SPOSN0.png": {
+      "width": 43,
+      "height": 62
+    },
+    "assets/sprites/SPOSO0.png": {
+      "width": 48,
+      "height": 61
+    },
+    "assets/sprites/SPOSP0.png": {
+      "width": 53,
+      "height": 55
+    },
+    "assets/sprites/SPOSQ0.png": {
+      "width": 55,
+      "height": 51
+    },
+    "assets/sprites/SPOSR0.png": {
+      "width": 57,
+      "height": 43
+    },
+    "assets/sprites/SPOSS0.png": {
+      "width": 57,
+      "height": 36
+    },
+    "assets/sprites/SPOST0.png": {
+      "width": 57,
+      "height": 26
+    },
+    "assets/sprites/SPOSU0.png": {
+      "width": 57,
+      "height": 21
+    },
+    "assets/sprites/STIMA0.png": {
+      "width": 14,
+      "height": 15
+    },
+    "assets/sprites/SUITA0.png": {
+      "width": 24,
+      "height": 47
+    },
+    "assets/sprites/TFOGA0.png": {
+      "width": 41,
+      "height": 56
+    },
+    "assets/sprites/TFOGB0.png": {
+      "width": 42,
+      "height": 45
+    },
+    "assets/sprites/TFOGC0.png": {
+      "width": 40,
+      "height": 37
+    },
+    "assets/sprites/TFOGD0.png": {
+      "width": 30,
+      "height": 34
+    },
+    "assets/sprites/TFOGE0.png": {
+      "width": 17,
+      "height": 16
+    },
+    "assets/sprites/TFOGF0.png": {
+      "width": 9,
+      "height": 8
+    },
+    "assets/sprites/TFOGG0.png": {
+      "width": 3,
+      "height": 3
+    },
+    "assets/sprites/TFOGH0.png": {
+      "width": 7,
+      "height": 7
+    },
+    "assets/sprites/TFOGI0.png": {
+      "width": 13,
+      "height": 13
+    },
+    "assets/sprites/TFOGJ0.png": {
+      "width": 17,
+      "height": 17
+    },
+    "assets/sprites/TREDA0.png": {
+      "width": 26,
+      "height": 96
+    },
+    "assets/sprites/TREDB0.png": {
+      "width": 26,
+      "height": 91
+    },
+    "assets/sprites/TREDC0.png": {
+      "width": 26,
+      "height": 91
+    },
+    "assets/sprites/TREDD0.png": {
+      "width": 26,
+      "height": 97
+    },
+    "assets/sprites/TROOA1.png": {
+      "width": 41,
+      "height": 57
+    },
+    "assets/sprites/TROOA2A8.png": {
+      "width": 40,
+      "height": 55
+    },
+    "assets/sprites/TROOA3A7.png": {
+      "width": 36,
+      "height": 49
+    },
+    "assets/sprites/TROOA4A6.png": {
+      "width": 30,
+      "height": 47
+    },
+    "assets/sprites/TROOA5.png": {
+      "width": 35,
+      "height": 49
+    },
+    "assets/sprites/TROOB1.png": {
+      "width": 39,
+      "height": 56
+    },
+    "assets/sprites/TROOB2B8.png": {
+      "width": 38,
+      "height": 57
+    },
+    "assets/sprites/TROOB3B7.png": {
+      "width": 38,
+      "height": 51
+    },
+    "assets/sprites/TROOB4B6.png": {
+      "width": 33,
+      "height": 47
+    },
+    "assets/sprites/TROOB5.png": {
+      "width": 33,
+      "height": 46
+    },
+    "assets/sprites/TROOC1.png": {
+      "width": 39,
+      "height": 60
+    },
+    "assets/sprites/TROOC2C8.png": {
+      "width": 41,
+      "height": 58
+    },
+    "assets/sprites/TROOC3C7.png": {
+      "width": 31,
+      "height": 53
+    },
+    "assets/sprites/TROOC4C6.png": {
+      "width": 28,
+      "height": 51
+    },
+    "assets/sprites/TROOC5.png": {
+      "width": 35,
+      "height": 49
+    },
+    "assets/sprites/TROOD1.png": {
+      "width": 37,
+      "height": 57
+    },
+    "assets/sprites/TROOD2D8.png": {
+      "width": 45,
+      "height": 55
+    },
+    "assets/sprites/TROOD3D7.png": {
+      "width": 39,
+      "height": 48
+    },
+    "assets/sprites/TROOD4D6.png": {
+      "width": 30,
+      "height": 46
+    },
+    "assets/sprites/TROOD5.png": {
+      "width": 33,
+      "height": 46
+    },
+    "assets/sprites/TROOE1.png": {
+      "width": 49,
+      "height": 60
+    },
+    "assets/sprites/TROOE2E8.png": {
+      "width": 32,
+      "height": 56
+    },
+    "assets/sprites/TROOE3E7.png": {
+      "width": 39,
+      "height": 49
+    },
+    "assets/sprites/TROOE4E6.png": {
+      "width": 34,
+      "height": 47
+    },
+    "assets/sprites/TROOE5.png": {
+      "width": 38,
+      "height": 48
+    },
+    "assets/sprites/TROOF1.png": {
+      "width": 44,
+      "height": 55
+    },
+    "assets/sprites/TROOF2F8.png": {
+      "width": 45,
+      "height": 54
+    },
+    "assets/sprites/TROOF3F7.png": {
+      "width": 42,
+      "height": 49
+    },
+    "assets/sprites/TROOF4F6.png": {
+      "width": 36,
+      "height": 47
+    },
+    "assets/sprites/TROOF5.png": {
+      "width": 33,
+      "height": 46
+    },
+    "assets/sprites/TROOG1.png": {
+      "width": 32,
+      "height": 55
+    },
+    "assets/sprites/TROOG2G8.png": {
+      "width": 55,
+      "height": 55
+    },
+    "assets/sprites/TROOG3G7.png": {
+      "width": 59,
+      "height": 51
+    },
+    "assets/sprites/TROOG4G6.png": {
+      "width": 46,
+      "height": 47
+    },
+    "assets/sprites/TROOG5.png": {
+      "width": 31,
+      "height": 49
+    },
+    "assets/sprites/TROOH1.png": {
+      "width": 41,
+      "height": 55
+    },
+    "assets/sprites/TROOH2H8.png": {
+      "width": 31,
+      "height": 56
+    },
+    "assets/sprites/TROOH3H7.png": {
+      "width": 34,
+      "height": 57
+    },
+    "assets/sprites/TROOH4H6.png": {
+      "width": 34,
+      "height": 56
+    },
+    "assets/sprites/TROOH5.png": {
+      "width": 39,
+      "height": 57
+    },
+    "assets/sprites/TROOI0.png": {
+      "width": 42,
+      "height": 62
+    },
+    "assets/sprites/TROOJ0.png": {
+      "width": 41,
+      "height": 59
+    },
+    "assets/sprites/TROOK0.png": {
+      "width": 40,
+      "height": 54
+    },
+    "assets/sprites/TROOL0.png": {
+      "width": 48,
+      "height": 46
+    },
+    "assets/sprites/TROOM0.png": {
+      "width": 58,
+      "height": 22
+    },
+    "assets/sprites/TROON0.png": {
+      "width": 46,
+      "height": 59
+    },
+    "assets/sprites/TROOO0.png": {
+      "width": 49,
+      "height": 61
+    },
+    "assets/sprites/TROOP0.png": {
+      "width": 55,
+      "height": 61
+    },
+    "assets/sprites/TROOQ0.png": {
+      "width": 57,
+      "height": 61
+    },
+    "assets/sprites/TROOR0.png": {
+      "width": 57,
+      "height": 44
+    },
+    "assets/sprites/TROOS0.png": {
+      "width": 57,
+      "height": 34
+    },
+    "assets/sprites/TROOT0.png": {
+      "width": 56,
+      "height": 31
+    },
+    "assets/sprites/TROOU0.png": {
+      "width": 56,
+      "height": 18
+    },
+    "assets/sprites/YKEYA0.png": {
+      "width": 14,
+      "height": 16
+    },
+    "assets/sprites/YKEYB0.png": {
+      "width": 14,
+      "height": 16
+    },
+    "assets/sprites/sheets/ARM1.png": {
+      "width": 62,
+      "height": 17
+    },
+    "assets/sprites/sheets/ARM2.png": {
+      "width": 62,
+      "height": 17
+    },
+    "assets/sprites/sheets/BAR1.png": {
+      "width": 300,
+      "height": 106
+    },
+    "assets/sprites/sheets/BON1.png": {
+      "width": 56,
+      "height": 18
+    },
+    "assets/sprites/sheets/BON2.png": {
+      "width": 64,
+      "height": 15
+    },
+    "assets/sprites/sheets/BOSS.png": {
+      "width": 483,
+      "height": 518
+    },
+    "assets/sprites/sheets/PINS.png": {
+      "width": 100,
+      "height": 25
+    },
+    "assets/sprites/sheets/PLAY.png": {
+      "width": 180,
+      "height": 280
+    },
+    "assets/sprites/sheets/POSS.png": {
+      "width": 240,
+      "height": 385
+    },
+    "assets/sprites/sheets/SARG.png": {
+      "width": 384,
+      "height": 413
+    },
+    "assets/sprites/sheets/SOUL.png": {
+      "width": 100,
+      "height": 25
+    },
+    "assets/sprites/sheets/SPOS.png": {
+      "width": 260,
+      "height": 420
+    },
+    "assets/sprites/sheets/TRED.png": {
+      "width": 104,
+      "height": 97
+    },
+    "assets/sprites/sheets/TROO.png": {
+      "width": 290,
+      "height": 434
+    },
+    "assets/textures/AASTINKY.png": {
+      "width": 24,
+      "height": 72
+    },
+    "assets/textures/BIGDOOR1.png": {
+      "width": 128,
+      "height": 96
+    },
+    "assets/textures/BIGDOOR2.png": {
+      "width": 128,
+      "height": 128
+    },
+    "assets/textures/BIGDOOR4.png": {
+      "width": 128,
+      "height": 128
+    },
+    "assets/textures/BRNBIGC.png": {
+      "width": 128,
+      "height": 128
+    },
+    "assets/textures/BRNBIGL.png": {
+      "width": 32,
+      "height": 128
+    },
+    "assets/textures/BRNBIGR.png": {
+      "width": 32,
+      "height": 128
+    },
+    "assets/textures/BRNPOIS.png": {
+      "width": 64,
+      "height": 128
+    },
+    "assets/textures/BRNPOIS2.png": {
+      "width": 64,
+      "height": 128
+    },
+    "assets/textures/BRNSMAL1.png": {
+      "width": 64,
+      "height": 64
+    },
+    "assets/textures/BRNSMAL2.png": {
+      "width": 64,
+      "height": 64
+    },
+    "assets/textures/BRNSMALC.png": {
+      "width": 64,
+      "height": 64
+    },
+    "assets/textures/BRNSMALL.png": {
+      "width": 32,
+      "height": 64
+    },
+    "assets/textures/BRNSMALR.png": {
+      "width": 32,
+      "height": 64
+    },
+    "assets/textures/BROWN1.png": {
+      "width": 128,
+      "height": 128
+    },
+    "assets/textures/BROWN144.png": {
+      "width": 128,
+      "height": 128
+    },
+    "assets/textures/BROWN96.png": {
+      "width": 128,
+      "height": 128
+    },
+    "assets/textures/BROWNGRN.png": {
+      "width": 64,
+      "height": 128
+    },
+    "assets/textures/BROWNHUG.png": {
+      "width": 64,
+      "height": 128
+    },
+    "assets/textures/BROWNPIP.png": {
+      "width": 128,
+      "height": 128
+    },
+    "assets/textures/COMP2.png": {
+      "width": 256,
+      "height": 128
+    },
+    "assets/textures/COMPSPAN.png": {
+      "width": 32,
+      "height": 128
+    },
+    "assets/textures/COMPSTA1.png": {
+      "width": 128,
+      "height": 128
+    },
+    "assets/textures/COMPSTA2.png": {
+      "width": 128,
+      "height": 128
+    },
+    "assets/textures/COMPTALL.png": {
+      "width": 256,
+      "height": 128
+    },
+    "assets/textures/COMPTILE.png": {
+      "width": 128,
+      "height": 128
+    },
+    "assets/textures/COMPUTE1.png": {
+      "width": 128,
+      "height": 128
+    },
+    "assets/textures/COMPUTE2.png": {
+      "width": 256,
+      "height": 56
+    },
+    "assets/textures/COMPUTE3.png": {
+      "width": 128,
+      "height": 128
+    },
+    "assets/textures/DOOR1.png": {
+      "width": 64,
+      "height": 72
+    },
+    "assets/textures/DOOR3.png": {
+      "width": 64,
+      "height": 72
+    },
+    "assets/textures/DOORBLU.png": {
+      "width": 8,
+      "height": 128
+    },
+    "assets/textures/DOORRED.png": {
+      "width": 8,
+      "height": 128
+    },
+    "assets/textures/DOORSTOP.png": {
+      "width": 8,
+      "height": 128
+    },
+    "assets/textures/DOORTRAK.png": {
+      "width": 8,
+      "height": 128
+    },
+    "assets/textures/DOORYEL.png": {
+      "width": 8,
+      "height": 128
+    },
+    "assets/textures/EXITDOOR.png": {
+      "width": 128,
+      "height": 72
+    },
+    "assets/textures/EXITSIGN.png": {
+      "width": 64,
+      "height": 16
+    },
+    "assets/textures/GRAY4.png": {
+      "width": 64,
+      "height": 128
+    },
+    "assets/textures/GRAY5.png": {
+      "width": 64,
+      "height": 128
+    },
+    "assets/textures/GRAY7.png": {
+      "width": 256,
+      "height": 128
+    },
+    "assets/textures/GRAYTALL.png": {
+      "width": 128,
+      "height": 128
+    },
+    "assets/textures/LITE2.png": {
+      "width": 64,
+      "height": 128
+    },
+    "assets/textures/LITE3.png": {
+      "width": 32,
+      "height": 128
+    },
+    "assets/textures/LITE4.png": {
+      "width": 16,
+      "height": 128
+    },
+    "assets/textures/LITE5.png": {
+      "width": 16,
+      "height": 128
+    },
+    "assets/textures/LITEBLU1.png": {
+      "width": 8,
+      "height": 128
+    },
+    "assets/textures/LITEBLU2.png": {
+      "width": 16,
+      "height": 72
+    },
+    "assets/textures/LITEBLU3.png": {
+      "width": 16,
+      "height": 128
+    },
+    "assets/textures/LITEBLU4.png": {
+      "width": 16,
+      "height": 128
+    },
+    "assets/textures/METAL1.png": {
+      "width": 64,
+      "height": 128
+    },
+    "assets/textures/NUKE24.png": {
+      "width": 64,
+      "height": 24
+    },
+    "assets/textures/NUKEDGE1.png": {
+      "width": 128,
+      "height": 128
+    },
+    "assets/textures/NUKESLAD.png": {
+      "width": 64,
+      "height": 128
+    },
+    "assets/textures/PIPE2.png": {
+      "width": 256,
+      "height": 128
+    },
+    "assets/textures/PLANET1.png": {
+      "width": 256,
+      "height": 128
+    },
+    "assets/textures/PLAT1.png": {
+      "width": 128,
+      "height": 128
+    },
+    "assets/textures/REDWALL1.png": {
+      "width": 128,
+      "height": 128
+    },
+    "assets/textures/SHAWN2.png": {
+      "width": 64,
+      "height": 128
+    },
+    "assets/textures/SKY1.png": {
+      "width": 256,
+      "height": 128
+    },
+    "assets/textures/SLADPOIS.png": {
+      "width": 64,
+      "height": 128
+    },
+    "assets/textures/SLADRIP1.png": {
+      "width": 64,
+      "height": 128
+    },
+    "assets/textures/SLADRIP2.png": {
+      "width": 64,
+      "height": 128
+    },
+    "assets/textures/SLADRIP3.png": {
+      "width": 64,
+      "height": 128
+    },
+    "assets/textures/SLADWALL.png": {
+      "width": 64,
+      "height": 128
+    },
+    "assets/textures/STARG1.png": {
+      "width": 64,
+      "height": 128
+    },
+    "assets/textures/STARG3.png": {
+      "width": 128,
+      "height": 128
+    },
+    "assets/textures/STARGR1.png": {
+      "width": 64,
+      "height": 128
+    },
+    "assets/textures/STARTAN1.png": {
+      "width": 64,
+      "height": 128
+    },
+    "assets/textures/STARTAN2.png": {
+      "width": 128,
+      "height": 128
+    },
+    "assets/textures/STARTAN3.png": {
+      "width": 128,
+      "height": 128
+    },
+    "assets/textures/STEP1.png": {
+      "width": 32,
+      "height": 8
+    },
+    "assets/textures/STEP2.png": {
+      "width": 32,
+      "height": 8
+    },
+    "assets/textures/STEP3.png": {
+      "width": 32,
+      "height": 8
+    },
+    "assets/textures/STEP4.png": {
+      "width": 32,
+      "height": 16
+    },
+    "assets/textures/STEP5.png": {
+      "width": 32,
+      "height": 16
+    },
+    "assets/textures/STEP6.png": {
+      "width": 32,
+      "height": 16
+    },
+    "assets/textures/STONE.png": {
+      "width": 256,
+      "height": 128
+    },
+    "assets/textures/STONE2.png": {
+      "width": 128,
+      "height": 128
+    },
+    "assets/textures/STONE3.png": {
+      "width": 128,
+      "height": 128
+    },
+    "assets/textures/STONPOIS.png": {
+      "width": 64,
+      "height": 128
+    },
+    "assets/textures/SUPPORT2.png": {
+      "width": 64,
+      "height": 128
+    },
+    "assets/textures/SW1BRCOM.png": {
+      "width": 128,
+      "height": 128
+    },
+    "assets/textures/SW1BRN1.png": {
+      "width": 64,
+      "height": 128
+    },
+    "assets/textures/SW1BRN2.png": {
+      "width": 64,
+      "height": 128
+    },
+    "assets/textures/SW1BRNGN.png": {
+      "width": 64,
+      "height": 128
+    },
+    "assets/textures/SW1BROWN.png": {
+      "width": 128,
+      "height": 128
+    },
+    "assets/textures/SW1COMM.png": {
+      "width": 64,
+      "height": 72
+    },
+    "assets/textures/SW1COMP.png": {
+      "width": 64,
+      "height": 128
+    },
+    "assets/textures/SW1DIRT.png": {
+      "width": 64,
+      "height": 128
+    },
+    "assets/textures/SW1EXIT.png": {
+      "width": 32,
+      "height": 72
+    },
+    "assets/textures/SW1GRAY.png": {
+      "width": 64,
+      "height": 128
+    },
+    "assets/textures/SW1GRAY1.png": {
+      "width": 64,
+      "height": 128
+    },
+    "assets/textures/SW1METAL.png": {
+      "width": 64,
+      "height": 128
+    },
+    "assets/textures/SW1PIPE.png": {
+      "width": 128,
+      "height": 128
+    },
+    "assets/textures/SW1SLAD.png": {
+      "width": 64,
+      "height": 128
+    },
+    "assets/textures/SW1STARG.png": {
+      "width": 128,
+      "height": 128
+    },
+    "assets/textures/SW1STON1.png": {
+      "width": 64,
+      "height": 128
+    },
+    "assets/textures/SW1STON2.png": {
+      "width": 64,
+      "height": 128
+    },
+    "assets/textures/SW1STONE.png": {
+      "width": 64,
+      "height": 128
+    },
+    "assets/textures/SW1STRTN.png": {
+      "width": 64,
+      "height": 128
+    },
+    "assets/textures/SW2BRCOM.png": {
+      "width": 128,
+      "height": 128
+    },
+    "assets/textures/SW2BRN1.png": {
+      "width": 64,
+      "height": 128
+    },
+    "assets/textures/SW2BRN2.png": {
+      "width": 64,
+      "height": 128
+    },
+    "assets/textures/SW2BRNGN.png": {
+      "width": 64,
+      "height": 128
+    },
+    "assets/textures/SW2BROWN.png": {
+      "width": 128,
+      "height": 128
+    },
+    "assets/textures/SW2COMM.png": {
+      "width": 64,
+      "height": 72
+    },
+    "assets/textures/SW2COMP.png": {
+      "width": 64,
+      "height": 128
+    },
+    "assets/textures/SW2DIRT.png": {
+      "width": 64,
+      "height": 128
+    },
+    "assets/textures/SW2EXIT.png": {
+      "width": 32,
+      "height": 72
+    },
+    "assets/textures/SW2GRAY.png": {
+      "width": 64,
+      "height": 128
+    },
+    "assets/textures/SW2GRAY1.png": {
+      "width": 64,
+      "height": 128
+    },
+    "assets/textures/SW2METAL.png": {
+      "width": 64,
+      "height": 128
+    },
+    "assets/textures/SW2PIPE.png": {
+      "width": 128,
+      "height": 128
+    },
+    "assets/textures/SW2SLAD.png": {
+      "width": 64,
+      "height": 128
+    },
+    "assets/textures/SW2STARG.png": {
+      "width": 128,
+      "height": 128
+    },
+    "assets/textures/SW2STON1.png": {
+      "width": 64,
+      "height": 128
+    },
+    "assets/textures/SW2STON2.png": {
+      "width": 64,
+      "height": 128
+    },
+    "assets/textures/SW2STONE.png": {
+      "width": 64,
+      "height": 128
+    },
+    "assets/textures/SW2STRTN.png": {
+      "width": 64,
+      "height": 128
+    },
+    "assets/textures/TEKWALL1.png": {
+      "width": 128,
+      "height": 128
+    },
+    "assets/textures/TEKWALL2.png": {
+      "width": 128,
+      "height": 128
+    },
+    "assets/textures/TEKWALL3.png": {
+      "width": 128,
+      "height": 112
+    },
+    "assets/textures/TEKWALL4.png": {
+      "width": 128,
+      "height": 128
+    },
+    "assets/textures/TEKWALL5.png": {
+      "width": 128,
+      "height": 128
+    },
+    "assets/weapons/CHAINGUN.png": {
+      "width": 342,
+      "height": 103
+    },
+    "assets/weapons/CHAINSAW.png": {
+      "width": 616,
+      "height": 89
+    },
+    "assets/weapons/FIST.png": {
+      "width": 588,
+      "height": 76
+    },
+    "assets/weapons/PISTOL.png": {
+      "width": 395,
+      "height": 103
+    },
+    "assets/weapons/ROCKET.png": {
+      "width": 525,
+      "height": 119
+    },
+    "assets/weapons/SHOTGUN.png": {
+      "width": 714,
+      "height": 151
+    }
+  },
+  "sheets": {
+    "zombieman": {
+      "w": 48,
+      "h": 55,
+      "cols": 5,
+      "frames": 2,
+      "rows": 7,
+      "path": "assets/sprites/sheets/POSS.png"
+    },
+    "shotgun-guy": {
+      "w": 52,
+      "h": 60,
+      "cols": 5,
+      "frames": 2,
+      "rows": 7,
+      "path": "assets/sprites/sheets/SPOS.png"
+    },
+    "imp": {
+      "w": 58,
+      "h": 62,
+      "cols": 5,
+      "frames": 2,
+      "rows": 7,
+      "path": "assets/sprites/sheets/TROO.png"
+    },
+    "demon": {
+      "w": 64,
+      "h": 59,
+      "cols": 6,
+      "frames": 2,
+      "rows": 7,
+      "path": "assets/sprites/sheets/SARG.png"
+    },
+    "spectre": {
+      "w": 64,
+      "h": 59,
+      "cols": 6,
+      "frames": 2,
+      "rows": 7,
+      "path": "assets/sprites/sheets/SARG.png"
+    },
+    "baron": {
+      "w": 69,
+      "h": 74,
+      "cols": 7,
+      "frames": 2,
+      "rows": 7,
+      "path": "assets/sprites/sheets/BOSS.png"
+    },
+    "barrel": {
+      "w": 60,
+      "h": 53,
+      "cols": 5,
+      "frames": 2,
+      "rows": 2,
+      "path": "assets/sprites/sheets/BAR1.png"
+    },
+    "red-torch": {
+      "w": 26,
+      "h": 97,
+      "frames": 4,
+      "path": "assets/sprites/sheets/TRED.png",
+      "rows": 1,
+      "cols": 4
+    },
+    "soulsphere": {
+      "w": 25,
+      "h": 25,
+      "frames": 4,
+      "path": "assets/sprites/sheets/SOUL.png",
+      "rows": 1,
+      "cols": 4
+    },
+    "health-bonus": {
+      "w": 14,
+      "h": 18,
+      "frames": 4,
+      "path": "assets/sprites/sheets/BON1.png",
+      "rows": 1,
+      "cols": 4
+    },
+    "armor-bonus": {
+      "w": 16,
+      "h": 15,
+      "frames": 4,
+      "path": "assets/sprites/sheets/BON2.png",
+      "rows": 1,
+      "cols": 4
+    },
+    "green-armor": {
+      "w": 31,
+      "h": 17,
+      "frames": 2,
+      "path": "assets/sprites/sheets/ARM1.png",
+      "rows": 1,
+      "cols": 2
+    },
+    "blue-armor": {
+      "w": 31,
+      "h": 17,
+      "frames": 2,
+      "path": "assets/sprites/sheets/ARM2.png",
+      "rows": 1,
+      "cols": 2
+    },
+    "invisibility": {
+      "w": 25,
+      "h": 25,
+      "frames": 4,
+      "path": "assets/sprites/sheets/PINS.png",
+      "rows": 1,
+      "cols": 4
+    },
+    "player": {
+      "w": 45,
+      "h": 56,
+      "frames": 4,
+      "rows": 5,
+      "path": "assets/sprites/sheets/PLAY.png",
+      "cols": 4
+    }
+  },
+  "weapons": {
+    "FIST": {
+      "w": 147,
+      "h": 76,
+      "frames": 4,
+      "path": "assets/weapons/FIST.png",
+      "rows": 1,
+      "cols": 4
+    },
+    "PISTOL": {
+      "w": 79,
+      "h": 103,
+      "frames": 5,
+      "path": "assets/weapons/PISTOL.png",
+      "rows": 1,
+      "cols": 5
+    },
+    "SHOTGUN": {
+      "w": 119,
+      "h": 151,
+      "frames": 6,
+      "path": "assets/weapons/SHOTGUN.png",
+      "rows": 1,
+      "cols": 6
+    },
+    "CHAINGUN": {
+      "w": 114,
+      "h": 103,
+      "frames": 3,
+      "path": "assets/weapons/CHAINGUN.png",
+      "rows": 1,
+      "cols": 3
+    },
+    "ROCKET": {
+      "w": 105,
+      "h": 119,
+      "frames": 5,
+      "path": "assets/weapons/ROCKET.png",
+      "rows": 1,
+      "cols": 5
+    },
+    "CHAINSAW": {
+      "w": 154,
+      "h": 89,
+      "frames": 4,
+      "path": "assets/weapons/CHAINSAW.png",
+      "rows": 1,
+      "cols": 4
+    }
+  },
+  "sources": [
+    {
+      "path": "src/renderer/scene/entities/sprites.css",
+      "sha256": "db1cb83e51134738591f84cf6b7d9e2f3ec22d364e967ace211da08224ec2a44"
+    },
+    {
+      "path": "src/renderer/scene/entities/enemies.css",
+      "sha256": "c74cd54818bf9f973c80d68785ef38924a9062394d5c0d7b34806757cca7cdae"
+    },
+    {
+      "path": "src/renderer/scene/entities/decorations.css",
+      "sha256": "7f19b8d348aaa814277da86e2c4c6cb41a662230c207192cf590ee60f281743b"
+    },
+    {
+      "path": "src/renderer/scene/entities/things.css",
+      "sha256": "9efa0bfda8bd6c35af0d2993d6e89cd13b4e1ed3a8fcb23983966b951682e6a3"
+    },
+    {
+      "path": "src/ui/weapons.css",
+      "sha256": "e39614a01659fb31d3e8053af42929976ea5da0cbbb8c7e78a3aa62a5f7baa06"
+    },
+    {
+      "path": "src/ui/spectator.css",
+      "sha256": "b205c463f63e65ae61ea875ccbd368908a5240a56c1ca4b0a69eed0a93439985"
+    },
+    {
+      "path": "src/renderer/scene/entities/sprites.js",
+      "sha256": "46a1a2c6d697b0a3b0c7fdaf6ac0c722fa90fb960d45d87086de8c1ac86f5851"
+    }
+  ],
+  "layouts": {
+    "3004": {
+      "atkRow": 5,
+      "atkFrames": 2,
+      "dieRow": 6,
+      "dieFrames": 5,
+      "walkFrames": 2
+    },
+    "9": {
+      "atkRow": 5,
+      "atkFrames": 2,
+      "dieRow": 6,
+      "dieFrames": 5,
+      "walkFrames": 2
+    },
+    "3001": {
+      "atkRow": 5,
+      "atkFrames": 3,
+      "dieRow": 6,
+      "dieFrames": 5,
+      "walkFrames": 2
+    },
+    "3002": {
+      "atkRow": 5,
+      "atkFrames": 3,
+      "dieRow": 6,
+      "dieFrames": 6,
+      "walkFrames": 2
+    },
+    "58": {
+      "atkRow": 5,
+      "atkFrames": 3,
+      "dieRow": 6,
+      "dieFrames": 6,
+      "walkFrames": 2
+    },
+    "3003": {
+      "atkRow": 5,
+      "atkFrames": 3,
+      "dieRow": 6,
+      "dieFrames": 7,
+      "walkFrames": 2
+    },
+    "2035": {
+      "atkRow": -1,
+      "atkFrames": 0,
+      "dieRow": 1,
+      "dieFrames": 5,
+      "walkFrames": 2
+    }
+  }
+}

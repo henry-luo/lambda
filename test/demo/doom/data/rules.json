@@ -1,0 +1,424 @@
+{
+  "BARREL_EXPLOSION_DAMAGE": 128,
+  "BARREL_EXPLOSION_RADIUS": 128,
+  "BARREL_RADIUS": 16,
+  "DOOR_CLOSE_DELAY": 4000,
+  "ENEMIES": [
+    9,
+    58,
+    3001,
+    3002,
+    3003,
+    3004
+  ],
+  "ENEMY_AI_STATS": {
+    "9": {
+      "speed": 93,
+      "chaseTics": 3,
+      "radius": 20,
+      "attackRange": 1500,
+      "damage": 0,
+      "cooldown": 2,
+      "sightRange": 3000,
+      "melee": false,
+      "alertSound": "DSPOSIT2",
+      "pellets": 3,
+      "hitscanSound": "DSSHOTGN",
+      "painChance": 170,
+      "reactionTime": 0.22857142857142856,
+      "attackDuration": 0.457,
+      "painDuration": 0.171
+    },
+    "58": {
+      "speed": 175,
+      "chaseTics": 2,
+      "radius": 30,
+      "attackRange": 64,
+      "damage": 0,
+      "cooldown": 1,
+      "sightRange": 3000,
+      "melee": true,
+      "meleeRange": 64,
+      "alertSound": "DSSGTSIT",
+      "painChance": 180,
+      "reactionTime": 0.22857142857142856,
+      "attackDuration": 0.343,
+      "painDuration": 0.171
+    },
+    "3001": {
+      "speed": 93,
+      "chaseTics": 3,
+      "radius": 20,
+      "attackRange": 1500,
+      "damage": 15,
+      "cooldown": 2,
+      "sightRange": 3000,
+      "melee": false,
+      "meleeRange": 64,
+      "alertSound": "DSBGSIT1",
+      "painChance": 200,
+      "reactionTime": 0.22857142857142856,
+      "attackDuration": 0.457,
+      "painDuration": 0.171
+    },
+    "3002": {
+      "speed": 175,
+      "chaseTics": 2,
+      "radius": 30,
+      "attackRange": 64,
+      "damage": 0,
+      "cooldown": 1,
+      "sightRange": 3000,
+      "melee": true,
+      "meleeRange": 64,
+      "alertSound": "DSSGTSIT",
+      "painChance": 180,
+      "reactionTime": 0.22857142857142856,
+      "attackDuration": 0.343,
+      "painDuration": 0.171
+    },
+    "3003": {
+      "speed": 93,
+      "chaseTics": 3,
+      "radius": 24,
+      "attackRange": 1500,
+      "damage": 60,
+      "cooldown": 2.5,
+      "sightRange": 3000,
+      "melee": false,
+      "meleeRange": 64,
+      "alertSound": "DSPOSIT3",
+      "painChance": 50,
+      "reactionTime": 0.22857142857142856,
+      "attackDuration": 0.571,
+      "painDuration": 0.171
+    },
+    "3004": {
+      "speed": 70,
+      "chaseTics": 4,
+      "radius": 20,
+      "attackRange": 1500,
+      "damage": 0,
+      "cooldown": 1.5,
+      "sightRange": 3000,
+      "melee": false,
+      "alertSound": "DSPOSIT1",
+      "pellets": 1,
+      "hitscanSound": "DSPISTOL",
+      "painChance": 200,
+      "reactionTime": 0.22857142857142856,
+      "attackDuration": 0.457,
+      "painDuration": 0.171
+    }
+  },
+  "ENEMY_PROJECTILES": {
+    "3001": {
+      "sprite": "BAL1A0",
+      "speed": 350,
+      "sound": "DSFIRSHT",
+      "hitSound": "DSFIRXPL",
+      "size": 15,
+      "missileDamage": 3
+    },
+    "3003": {
+      "sprite": "BAL7A1A5",
+      "speed": 525,
+      "sound": "DSFIRSHT",
+      "hitSound": "DSFIRXPL",
+      "size": 16,
+      "missileDamage": 8
+    }
+  },
+  "ENEMY_RADIUS": 20,
+  "EXIT_SPECIAL": 11,
+  "EYE_HEIGHT": 41,
+  "INFIGHTING_THRESHOLD": 2.86,
+  "KEY_TYPES": {
+    "5": "blue",
+    "6": "yellow",
+    "13": "red",
+    "38": "red",
+    "39": "yellow",
+    "40": "blue"
+  },
+  "LIFT_RAISE_DELAY": 3000,
+  "LIFT_USE_SPECIAL": 62,
+  "LINE_OF_SIGHT_CHECK_INTERVAL": 0.2,
+  "MAX_AMMO": {
+    "bullets": 200,
+    "shells": 50,
+    "rockets": 50,
+    "cells": 300
+  },
+  "MAX_ARMOR": 200,
+  "MAX_FRAME_DELTA_TIME": 0.05,
+  "MAX_HEALTH": 100,
+  "MAX_RENDER_DISTANCE": 2250,
+  "MAX_STEP_HEIGHT": 24,
+  "MELEE_RANGE": 80,
+  "MOVE_SPEED": 300,
+  "PICKUPS": [
+    2001,
+    2002,
+    2003,
+    2004,
+    2005,
+    2006,
+    8,
+    2007,
+    2008,
+    2010,
+    2046,
+    2048,
+    2049,
+    2011,
+    2012,
+    2013,
+    2014,
+    2015,
+    2018,
+    2019,
+    2022,
+    2023,
+    2024,
+    2025,
+    2026,
+    2045,
+    5,
+    6,
+    13,
+    38,
+    39,
+    40
+  ],
+  "PICKUP_EFFECTS": {
+    "2007": {
+      "statType": "ammo",
+      "ammoType": "bullets",
+      "amount": 10
+    },
+    "2008": {
+      "statType": "ammo",
+      "ammoType": "shells",
+      "amount": 4
+    },
+    "2010": {
+      "statType": "ammo",
+      "ammoType": "rockets",
+      "amount": 1
+    },
+    "2011": {
+      "statType": "health",
+      "amount": 10
+    },
+    "2012": {
+      "statType": "health",
+      "amount": 25
+    },
+    "2013": {
+      "statType": "health",
+      "amount": 100
+    },
+    "2014": {
+      "statType": "health",
+      "amount": 1
+    },
+    "2015": {
+      "statType": "armor",
+      "amount": 1
+    },
+    "2018": {
+      "statType": "armor",
+      "amount": 100,
+      "armorClass": 1
+    },
+    "2019": {
+      "statType": "armor",
+      "amount": 200,
+      "armorClass": 2
+    },
+    "2022": {
+      "statType": "powerup",
+      "powerup": "invulnerability"
+    },
+    "2023": {
+      "statType": "powerup",
+      "powerup": "berserk"
+    },
+    "2024": {
+      "statType": "powerup",
+      "powerup": "invisibility"
+    },
+    "2025": {
+      "statType": "powerup",
+      "powerup": "radsuit"
+    },
+    "2045": {
+      "statType": "powerup",
+      "powerup": "lightamp"
+    },
+    "2046": {
+      "statType": "ammo",
+      "ammoType": "rockets",
+      "amount": 5
+    },
+    "2048": {
+      "statType": "ammo",
+      "ammoType": "bullets",
+      "amount": 50
+    },
+    "2049": {
+      "statType": "ammo",
+      "ammoType": "shells",
+      "amount": 20
+    }
+  },
+  "PICKUP_RANGE": 40,
+  "PLAYER_HEIGHT": 56,
+  "PLAYER_RADIUS": 16,
+  "PLAYER_ROCKET_RADIUS": 11,
+  "PLAYER_ROCKET_SPEED": 700,
+  "POWERUP_DURATION": {
+    "invulnerability": 30,
+    "invisibility": 60,
+    "radsuit": 60,
+    "lightamp": 120,
+    "berserk": "infinite"
+  },
+  "ROCKET_SPLASH_DAMAGE": 128,
+  "ROCKET_SPLASH_RADIUS": 128,
+  "RUN_MULTIPLIER": 2,
+  "SECRET_EXIT_SPECIAL": 51,
+  "SECTOR_DAMAGE": {
+    "4": 20,
+    "5": 10,
+    "7": 5,
+    "16": 20
+  },
+  "SHOOTABLE": [
+    9,
+    58,
+    3001,
+    3002,
+    3003,
+    3004,
+    2035
+  ],
+  "SOLID_THING_RADIUS": {
+    "25": 16,
+    "26": 16,
+    "27": 16,
+    "28": 16,
+    "29": 16,
+    "35": 16,
+    "43": 16,
+    "44": 16,
+    "45": 16,
+    "46": 16,
+    "47": 16,
+    "48": 16,
+    "54": 32,
+    "55": 16,
+    "56": 16,
+    "57": 16,
+    "70": 16,
+    "2028": 16
+  },
+  "SWITCH_OFF_PREFIX": "SW2",
+  "SWITCH_ON_PREFIX": "SW1",
+  "THING_HEALTH": {
+    "9": 30,
+    "58": 150,
+    "2035": 20,
+    "3001": 60,
+    "3002": 150,
+    "3003": 1000,
+    "3004": 20
+  },
+  "TURN_SPEED": 3.141592653589793,
+  "USE_RANGE": 64,
+  "WALK_TRIGGER_RANGE": 32,
+  "WEAPONS": {
+    "1": {
+      "name": "FIST",
+      "ammoType": null,
+      "ammoPerShot": 0,
+      "fireRate": 629,
+      "sound": "DSPUNCH",
+      "damageType": "melee",
+      "range": 80
+    },
+    "2": {
+      "name": "PISTOL",
+      "ammoType": "bullets",
+      "ammoPerShot": 1,
+      "fireRate": 543,
+      "sound": "DSPISTOL",
+      "damageType": "hitscan",
+      "range": 2048,
+      "hitscan": true
+    },
+    "3": {
+      "name": "SHOTGUN",
+      "ammoType": "shells",
+      "ammoPerShot": 1,
+      "fireRate": 1257,
+      "sound": "DSSHOTGN",
+      "damageType": "pellets",
+      "range": 2048,
+      "hitscan": true,
+      "pellets": 7
+    },
+    "4": {
+      "name": "CHAINGUN",
+      "ammoType": "bullets",
+      "ammoPerShot": 1,
+      "fireRate": 114,
+      "sound": "DSPISTOL",
+      "damageType": "hitscan",
+      "range": 2048,
+      "hitscan": true,
+      "continuous": true
+    },
+    "5": {
+      "name": "ROCKET",
+      "ammoType": "rockets",
+      "ammoPerShot": 1,
+      "fireRate": 571,
+      "sound": "DSRLAUNC",
+      "damageType": "rocket",
+      "range": 2048
+    },
+    "6": {
+      "name": "CHAINSAW",
+      "ammoType": null,
+      "ammoPerShot": 0,
+      "fireRate": 229,
+      "sound": "DSSAWHIT",
+      "damageType": "melee",
+      "range": 80
+    }
+  },
+  "WEAPON_PICKUPS": {
+    "2001": {
+      "slot": 3,
+      "ammoType": "shells",
+      "amount": 8
+    },
+    "2002": {
+      "slot": 4,
+      "ammoType": "bullets",
+      "amount": 20
+    },
+    "2003": {
+      "slot": 5,
+      "ammoType": "rockets",
+      "amount": 2
+    },
+    "2005": {
+      "slot": 6,
+      "ammoType": null,
+      "amount": 0
+    }
+  }
+}

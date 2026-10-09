@@ -1,0 +1,150 @@
+{
+  "name": "Lambda DOOM E1M1 frame, keyboard, pause and restart",
+  "html": "test/demo/doom/doom.ls",
+  "viewport": {
+    "width": 660,
+    "height": 500
+  },
+  "events": [
+    {
+      "type": "advance_time",
+      "ms": 40,
+      "steps": 2
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "ready"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-ticks",
+      "equals": "0"
+    },
+    {
+      "type": "snapshot_state_store",
+      "target": {
+        "selector": "#scene"
+      },
+      "name": "scene"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#start"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "key_down",
+      "key": "w"
+    },
+    {
+      "type": "advance_time",
+      "ms": 240,
+      "steps": 8
+    },
+    {
+      "type": "key_up",
+      "key": "w"
+    },
+    {
+      "type": "key_down",
+      "key": "P"
+    },
+    {
+      "type": "key_down",
+      "key": "P"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "paused"
+    },
+    {
+      "type": "key_up",
+      "key": "P"
+    },
+    {
+      "type": "advance_time",
+      "ms": 1000,
+      "steps": 10
+    },
+    {
+      "type": "assert_state_store_snapshot",
+      "target": {
+        "selector": "#scene"
+      },
+      "name": "scene"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#start"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "key_press",
+      "key": "R"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-ticks",
+      "equals": "0"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-health",
+      "equals": "100"
+    },
+    {
+      "type": "assert_state_store_snapshot",
+      "target": {
+        "selector": "#scene"
+      },
+      "name": "scene"
+    },
+    {
+      "type": "key_press",
+      "key": "P"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "paused"
+    }
+  ]
+}

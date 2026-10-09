@@ -657,14 +657,15 @@ static void pdf_finish_effect_raster_fallback(PdfRenderContext* ctx) {
 }
 
 static bool pdf_push_clip_path(PdfRenderContext* ctx, RdtPath* path,
-                               const RdtMatrix* transform) {
+                               const RdtMatrix* transform, RdtFillRule rule = RDT_FILL_WINDING) {
     if (!ctx || !path) return false;
     if (HPDF_Page_GSave(ctx->current_page) != HPDF_OK) return false;
     if (!pdf_render_path(ctx, path, transform)) {
         HPDF_Page_GRestore(ctx->current_page);
         return false;
     }
-    if (HPDF_Page_Clip(ctx->current_page) != HPDF_OK) {
+    if ((rule == RDT_FILL_EVEN_ODD ? HPDF_Page_Eoclip(ctx->current_page) :
+        HPDF_Page_Clip(ctx->current_page)) != HPDF_OK) {
         HPDF_Page_GRestore(ctx->current_page);
         return false;
     }
@@ -1055,7 +1056,7 @@ static void pdf_lower_paint_list(PdfRenderContext* ctx, PaintList* commands) {
                     return true;
                 }
                 if (pdf_push_clip_path(ctx, p->clip_path,
-                                       effective_transform)) {
+                                       effective_transform, p->rule)) {
                     active_clip_depth++;
                 } else {
                     skipped_clip_depth++;

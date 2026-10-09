@@ -1,0 +1,59 @@
+<!doctype html>
+<meta charset="utf-8">
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { width: 880px; height: 660px; overflow: hidden; background: white; }
+.camera { position: absolute; width: 220px; height: 220px; perspective: 500px; overflow: hidden; }
+.scene { position: absolute; width: 220px; height: 220px; transform-style: preserve-3d; }
+.plane { position: absolute; left: 30px; top: 30px; width: 160px; height: 160px; }
+.red { background: red; } .blue { background: blue; }
+.cross-red { transform: rotateY(45deg); } .cross-blue { transform: rotateY(-45deg); }
+.near { transform: translateZ(80px); } .far { transform: translateZ(-80px); }
+.group { position: absolute; width: 220px; height: 220px; transform: translateZ(100px); }
+.inner { transform: translateZ(-200px); }
+.nested { transform-style: preserve-3d; }
+.hidden { transform: translateZ(80px) rotateY(180deg); backface-visibility: hidden; }
+.behind { transform: translateZ(600px); }
+.cross-viewer { transform: translateZ(450px) rotateY(75deg); }
+.texture { background: url(uv-grid.png) 0 0 / 160px 160px; }
+.hole { transform: translateZ(80px) rotateY(15deg); clip-path: shape(evenodd from 0% 0%,
+  line to 100% 0%, line to 100% 100%, line to 0% 100%, close,
+  move to 30% 30%, line to 70% 30%, line to 70% 70%, line to 30% 70%, close); }
+</style>
+<div class="camera"><div class="scene">
+  <div class="plane red cross-red"></div><div class="plane blue cross-blue"></div>
+</div></div>
+<div class="camera" style="left:220px"><div class="scene">
+  <div class="plane blue cross-blue"></div><div class="plane red cross-red"></div>
+</div></div>
+<div class="camera" style="left:440px"><div class="scene">
+  <div class="plane red near" style="background:rgba(255,0,0,.5)"></div><div class="plane blue far"></div>
+</div></div>
+<div class="camera" style="left:660px"><div class="scene">
+  <div class="group"><div class="plane red inner"></div></div><div class="plane blue" style="transform:translateZ(50px)"></div>
+</div></div>
+<div class="camera" style="top:220px"><div class="scene">
+  <div class="plane blue far"></div><div class="plane red hidden"></div><div class="plane red behind"></div>
+</div></div>
+<div class="camera" style="left:220px;top:220px"><div class="scene">
+  <div class="group nested"><div class="plane red" style="transform:translateZ(100px)"></div></div>
+  <div class="plane blue" style="transform:translateZ(150px)"></div>
+</div></div>
+<div class="camera" style="left:440px;top:220px"><div class="scene">
+  <div class="plane blue far"></div><div class="plane red cross-viewer"></div>
+</div></div>
+<div class="camera" style="left:660px;top:220px"><div class="scene">
+  <div class="plane blue far"></div><div class="plane red hole"></div>
+</div></div>
+<div class="camera" style="top:440px"><div class="scene">
+  <div class="plane texture cross-red"></div><div class="plane red cross-blue"></div>
+</div></div>
+<div class="camera" style="left:220px;top:440px"><div class="scene">
+  <div class="plane red cross-blue"></div><div class="plane texture cross-red"></div>
+</div></div>
+<div class="camera" style="left:440px;top:440px"><div class="scene">
+  <div class="plane blue far"></div><div class="plane texture cross-viewer"></div>
+</div></div>
+<div class="camera" style="left:660px;top:440px"><div class="scene">
+  <div class="plane blue far"></div><div class="plane texture hole"></div>
+</div></div>

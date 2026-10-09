@@ -12,6 +12,7 @@
 #include "../../../radiant/render.hpp"
 #include "../../../radiant/event.hpp"
 #include "../../../radiant/radiant.hpp"
+#include "../../../radiant/audio.hpp"
 #include "../../../lib/log.h"
 #include "../../../lib/mem.h"
 #include "../../../lib/mem_context.h"
@@ -1653,6 +1654,9 @@ RADIANT_C_API Item fn_radiant_get_state(Item node_item, Item name_item) {
         return ItemNull;
     }
     if (kind == RSTATE_TEXT) {
+        // Select values derive from option selectedness, not the text buffer.
+        if (elem->tag_name && str_icmp_cstr(elem->tag_name, "select") == 0)
+            return radiant_host_api->dom_catalog->select_value_bridge(elem);
         // range/number values live outside the text buffer; use the same live
         // projection as DOM .value instead of exposing the default attribute.
         if (elem->tag_name && (str_icmp_cstr(elem->tag_name, "input") == 0 ||
@@ -2392,6 +2396,48 @@ RADIANT_C_API Item fn_radiant_finish_model_edit(Item surface_item,
 static DomDocument* radiant_window_document_from_item(Item node_item, const char* op) {
     DomNode* node = radiant_dom_node_from_item(node_item, op);
     return node ? radiant_dom_document_from_node(node) : nullptr;
+}
+
+RADIANT_C_API Item fn_radiant_audio_open(Item node_item, Item bytes) {
+    DomDocument* doc = radiant_window_document_from_item(node_item, "AUDIO_OPEN");
+    if (!doc || get_type_id(bytes) != LMD_TYPE_BINARY) return ItemNull;
+    uint64_t token = radiant_audio_open(doc, binary_data(bytes.get_binary()), bytes.get_binary()->len);
+    return token ? radiant_int_item((int64_t)token) : ItemNull;
+}
+
+enum RadiantAudioOperation { AUDIO_PLAY, AUDIO_PAUSE, AUDIO_CLOSE, AUDIO_STATE };
+static Item radiant_audio_operation(Item node_item, Item token_item,
+    RadiantAudioOperation operation, Item volume_item = ItemNull) {
+    DomDocument* doc = radiant_window_document_from_item(node_item, "AUDIO_CONTROL");
+    TypeId type = get_type_id(token_item);
+    int64_t token = type == LMD_TYPE_INT || type == LMD_TYPE_INT64 ? it2l(token_item) : 0;
+    if (operation == AUDIO_STATE) return radiant_string_item(doc && token > 0
+        ? radiant_audio_state(doc, (uint64_t)token) : nullptr);
+    if (!doc || token <= 0) return radiant_bool_item(false);
+    switch (operation) {
+        case AUDIO_PLAY: {
+            float volume = 0;
+            return radiant_bool_item(radiant_item_to_float(volume_item, &volume) &&
+                radiant_audio_play(doc, (uint64_t)token, volume));
+        }
+        case AUDIO_PAUSE: return radiant_bool_item(radiant_audio_pause(doc, (uint64_t)token));
+        case AUDIO_CLOSE: return radiant_bool_item(radiant_audio_close(doc, (uint64_t)token));
+        default: return radiant_bool_item(false);
+    }
+}
+RADIANT_C_API Item fn_radiant_audio_play(Item node, Item token, Item volume) { return radiant_audio_operation(node, token, AUDIO_PLAY, volume); }
+RADIANT_C_API Item fn_radiant_audio_pause(Item node, Item token) { return radiant_audio_operation(node, token, AUDIO_PAUSE); }
+RADIANT_C_API Item fn_radiant_audio_close(Item node, Item token) { return radiant_audio_operation(node, token, AUDIO_CLOSE); }
+RADIANT_C_API Item fn_radiant_audio_state(Item node, Item token) { return radiant_audio_operation(node, token, AUDIO_STATE); }
+
+RADIANT_C_API Item fn_radiant_set_relative_mouse(Item node, Item enabled) {
+    DomElement* owner = radiant_dom_element_from_item(node, "SET_RELATIVE_MOUSE");
+    return radiant_bool_item(get_type_id(enabled) == LMD_TYPE_BOOL &&
+        radiant_window_set_relative_mouse(owner, it2b(enabled)));
+}
+RADIANT_C_API Item fn_radiant_relative_mouse_active(Item node) {
+    DomElement* owner = radiant_dom_element_from_item(node, "RELATIVE_MOUSE_ACTIVE");
+    return radiant_bool_item(radiant_window_relative_mouse_active(owner));
 }
 
 RADIANT_C_API Item fn_radiant_set_close_guard(Item node_item, Item armed_item) {
@@ -4503,6 +4549,13 @@ RADIANT_PROVIDE_ENGINE_1(form_url, fn_radiant_form_url)
 RADIANT_PROVIDE_ENGINE_1(hover_index, fn_radiant_hover_index)
 RADIANT_PROVIDE_ENGINE_1(option_count, fn_radiant_option_count)
 RADIANT_PROVIDE_ENGINE_1(capture_pointer, fn_radiant_capture_pointer)
+RADIANT_PROVIDE_ENGINE_2(audio_open, fn_radiant_audio_open)
+RADIANT_PROVIDE_ENGINE_3(audio_play, fn_radiant_audio_play)
+RADIANT_PROVIDE_ENGINE_2(audio_pause, fn_radiant_audio_pause)
+RADIANT_PROVIDE_ENGINE_2(audio_close, fn_radiant_audio_close)
+RADIANT_PROVIDE_ENGINE_2(audio_state, fn_radiant_audio_state)
+RADIANT_PROVIDE_ENGINE_2(set_relative_mouse, fn_radiant_set_relative_mouse)
+RADIANT_PROVIDE_ENGINE_1(relative_mouse_active, fn_radiant_relative_mouse_active)
 RADIANT_PROVIDE_ENGINE_2(input_operation, fn_radiant_input_operation)
 RADIANT_PROVIDE_ENGINE_3(set_range_from_point, fn_radiant_set_range_from_point)
 RADIANT_PROVIDE_ENGINE_1(range_max, fn_radiant_range_max)

@@ -23,7 +23,7 @@ static DisplayItem* dl_alloc_int_rect_effect_item(DisplayList* dl, DisplayOp op,
 // ---------------------------------------------------------------------------
 
 void dl_composite_opacity(DisplayList* dl, int x0, int y0, int w, int h,
-                          float opacity, bool premultiplied_source) {
+                          float opacity, bool premultiplied_source, const RadialMaskPaint* mask) {
     DisplayItem* item = dl_alloc_int_rect_effect_item(dl, DL_COMPOSITE_OPACITY,
                                                       x0, y0, w, h);
     item->composite_opacity.x0 = x0;
@@ -32,6 +32,7 @@ void dl_composite_opacity(DisplayList* dl, int x0, int y0, int w, int h,
     item->composite_opacity.h = h;
     item->composite_opacity.opacity = opacity;
     item->composite_opacity.premultiplied_source = premultiplied_source;
+    item->composite_opacity.mask = mask ? *mask : RadialMaskPaint{};
 }
 
 void dl_save_backdrop(DisplayList* dl, int x0, int y0, int w, int h) {

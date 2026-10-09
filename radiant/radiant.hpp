@@ -342,6 +342,10 @@ int edit_doc_in_window_with_events(const char* document_file, bool source_surfac
 bool radiant_window_set_close_guard(DomDocument* doc, bool armed);
 bool radiant_window_approve_close(DomDocument* doc);
 bool radiant_window_set_title(DomDocument* doc, const char* title);
+bool radiant_window_set_relative_mouse(DomElement* owner, bool enabled);
+DomElement* radiant_relative_mouse_target(UiContext* uicon);
+bool radiant_window_relative_mouse_active(DomElement* owner);
+void radiant_window_focus_changed(UiContext* uicon, bool focused);
 // A platform close request (close button, application quit, simulator).
 // Returns true when the window may close now, false while an armed edit
 // session decides (it received a `closerequest` event).

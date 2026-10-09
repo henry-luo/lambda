@@ -8,9 +8,9 @@ RenderTransformScope render_state_push_transform(RasterRenderContext* rdcon, Vie
         lam::up(rdcon),
         rdcon->transform,
         rdcon->has_transform,
-        rdcon->perspective_distance,
-        rdcon->perspective_origin_x,
-        rdcon->perspective_origin_y,
+        rdcon->transform_3d,
+        rdcon->children_transform_3d,
+        rdcon->has_transform_3d,
         false
     };
     float scale = rdcon->raster_scale > 0.0f ? rdcon->raster_scale : 1.0f;
@@ -18,44 +18,43 @@ RenderTransformScope render_state_push_transform(RasterRenderContext* rdcon, Vie
     // layout pixels, then conjugated into the paint coordinate space below.
     float elem_x = parent_block->x / scale + block->x;
     float elem_y = parent_block->y / scale + block->y;
-    if (block->transform && block->transformp()->perspective > 0.0f) {
-        float origin_x = radiant::transform_perspective_origin_offset(
-            block->transformp(), block->width, true);
-        float origin_y = radiant::transform_perspective_origin_offset(
-            block->transformp(), block->height, false);
-        rdcon->perspective_distance = block->transformp()->perspective;
-        rdcon->perspective_origin_x = elem_x + origin_x;
-        rdcon->perspective_origin_y = elem_y + origin_y;
-        scope.active = true;
-        log_debug("[TRANSFORM] Element %s: perspective active, distance=%.1f",
-            block->node_name(), rdcon->perspective_distance);
-    }
-
-    if (!transform_has_functions(block->transform)) {
-        return scope;
-    }
-
     RdtLogicalPoint origin = radiant::transform_origin(
         block->transformp(), elem_x, elem_y, block->width, block->height);
-
-    RdtMatrix next_transform = radiant::compute_transform_matrix(
-        block->transformp(), block->width, block->height, origin.x, origin.y,
-        rdcon->perspective_distance, rdcon->perspective_origin_x, rdcon->perspective_origin_y);
+    RdtMatrix4 local = radiant::compute_transform_matrix_3d(block->transformp(),
+        block->width, block->height, origin.x, origin.y,
+        block->transform ? block->transformp()->origin_z : 0.0f);
+    RdtMatrix4 parent = scope.previous_has_transform_3d
+        ? scope.previous_children_transform_3d : rdt_matrix4_identity();
+    if (!scope.previous_has_transform_3d && scope.previous_has_transform) {
+        // an external planar paint basis is already in device coordinates.
+        const RdtMatrix& basis = scope.previous_transform;
+        parent.values[0] = basis.e11; parent.values[1] = basis.e12;
+        parent.values[3] = basis.e13 / scale;
+        parent.values[4] = basis.e21; parent.values[5] = basis.e22;
+        parent.values[7] = basis.e23 / scale;
+        parent.values[12] = basis.e31 * scale;
+        parent.values[13] = basis.e32 * scale; parent.values[15] = basis.e33;
+    }
+    // Retain depth through the whole context; composing projected 3x3 matrices
+    // here loses nested translations/rotations and applies perspective twice.
+    rdcon->transform_3d = rdt_matrix4_multiply(&parent, &local);
+    RdtMatrix4 boundary = radiant::compute_child_projection_matrix_3d(block->transformp(),
+        block->width, block->height, elem_x, elem_y, radiant::transform_preserves_3d(block));
+    rdcon->children_transform_3d = rdt_matrix4_multiply(&rdcon->transform_3d, &boundary);
+    rdcon->has_transform_3d = true;
+    RdtMatrix next_transform = radiant::matrix4_project_to_2d(&rdcon->transform_3d);
     next_transform.e13 *= scale;
     next_transform.e23 *= scale;
     next_transform.e31 /= scale;
     next_transform.e32 /= scale;
 
-    if (scope.previous_has_transform) {
-        rdcon->transform = rdt_matrix_multiply(&scope.previous_transform, &next_transform);
-    } else {
-        rdcon->transform = next_transform;
-    }
-    rdcon->has_transform = true;
+    rdcon->transform = next_transform;
+    rdcon->has_transform = scope.previous_has_transform || transform_has_functions(block->transform) ||
+        next_transform.e11 != 1.0f || next_transform.e22 != 1.0f || next_transform.e33 != 1.0f ||
+        next_transform.e12 != 0.0f || next_transform.e13 != 0.0f || next_transform.e21 != 0.0f ||
+        next_transform.e23 != 0.0f || next_transform.e31 != 0.0f || next_transform.e32 != 0.0f;
     scope.active = true;
 
-    log_debug("[TRANSFORM] Element %s: transform active, origin=(%.1f,%.1f)",
-        block->node_name(), origin.x, origin.y);
     return scope;
 }
 
@@ -65,9 +64,9 @@ void render_state_pop_transform(RenderTransformScope* scope) {
     }
     scope->context->transform = scope->previous_transform;
     scope->context->has_transform = scope->previous_has_transform;
-    scope->context->perspective_distance = scope->previous_perspective_distance;
-    scope->context->perspective_origin_x = scope->previous_perspective_origin_x;
-    scope->context->perspective_origin_y = scope->previous_perspective_origin_y;
+    scope->context->transform_3d = scope->previous_transform_3d;
+    scope->context->children_transform_3d = scope->previous_children_transform_3d;
+    scope->context->has_transform_3d = scope->previous_has_transform_3d;
     scope->active = false;
 }
 

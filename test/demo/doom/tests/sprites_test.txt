@@ -1,0 +1,38 @@
+{
+  rotations: [{
+      row: 0,
+      mirror: 1
+    }, {
+      row: 1,
+      mirror: 1
+    }, {
+      row: 2,
+      mirror: 1
+    }, {
+      row: 3,
+      mirror: 1
+    }, {
+      row: 4,
+      mirror: 1
+    }, {
+      row: 3,
+      mirror: -1
+    }, {
+      row: 2,
+      mirror: -1
+    }, {
+      row: 1,
+      mirror: -1
+    }],
+  negative_angle: {
+    row: 0,
+    mirror: 1
+  },
+  attack: [5, 1, 2, 0.6, -48],
+  death: [6, 1, 5, 0.5, -192, true],
+  barrel: [true, false],
+  pickup: [14, 18, 4, 4],
+  player_sheet: [45, 56, 5],
+  fuzz: [0, 1, 5, 9, 0, 5],
+  static_sprite: 1
+}

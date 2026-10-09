@@ -105,7 +105,7 @@ static void render_clip_parse_center(const char*& s, float elem_w, float elem_h,
 }
 
 static bool render_clip_parse_polygon_len(const char*& s, float ref, float* out_value) {
-    while (*s == ' ' || *s == ',') s++;
+    while (isspace((unsigned char)*s) || *s == ',') s++;
     const char* start = s;
     char* end = nullptr;
     float val = strtof(s, &end);
@@ -113,7 +113,7 @@ static bool render_clip_parse_polygon_len(const char*& s, float ref, float* out_
         return false;
     }
     s = end;
-    while (*s == ' ') s++;
+    while (isspace((unsigned char)*s)) s++;
     if (*s == '%') {
         s++;
         *out_value = val / 100.0f * ref;
@@ -129,6 +129,68 @@ static bool render_clip_parse_polygon_len(const char*& s, float ref, float* out_
     }
     *out_value = val;
     return true;
+}
+
+static bool render_clip_take_word(const char*& s, const char* word) {
+    const char* start = s;
+    while (isspace((unsigned char)*start)) start++;
+    size_t length = strlen(word);
+    if (strncmp(start, word, length) != 0 ||
+        isalnum((unsigned char)start[length]) || start[length] == '-') return false;
+    s = start + length;
+    return true;
+}
+
+static void render_clip_parse_rule(const char*& s, RdtFillRule* rule) {
+    *rule = render_clip_take_word(s, "evenodd") ? RDT_FILL_EVEN_ODD : RDT_FILL_WINDING;
+    if (*rule == RDT_FILL_WINDING) render_clip_take_word(s, "nonzero");
+}
+
+static RdtPath* render_clip_parse_shape_function(const char* value,
+    float width, float height, float abs_x, float abs_y, RdtFillRule* rule) {
+    if (!value || strncmp(value, "shape(", 6) != 0) return nullptr;
+    const char* s = value + 6;
+    render_clip_parse_rule(s, rule);
+    float x, y, start_x, start_y;
+    if (!render_clip_take_word(s, "from") ||
+        !render_clip_parse_polygon_len(s, width, &x) ||
+        !render_clip_parse_polygon_len(s, height, &y)) return nullptr;
+    start_x = x; start_y = y;
+    RdtPath* path = rdt_path_new();
+    if (!path) return nullptr;
+    rdt_path_move_to(path, abs_x + x, abs_y + y);
+    bool drawn = false;
+    while (true) {
+        while (isspace((unsigned char)*s)) s++;
+        if (*s == ')') {
+            if (drawn) return path;
+            break;
+        }
+        if (*s++ != ',') break;
+        if (render_clip_take_word(s, "close")) {
+            rdt_path_close(path); x = start_x; y = start_y; drawn = true;
+            continue;
+        }
+        bool move = render_clip_take_word(s, "move");
+        bool horizontal = false, vertical = false;
+        if (!move && !render_clip_take_word(s, "line")) {
+            horizontal = render_clip_take_word(s, "hline");
+            if (!horizontal) vertical = render_clip_take_word(s, "vline");
+            if (!horizontal && !vertical) break;
+        }
+        bool relative = render_clip_take_word(s, "by");
+        if (!relative && !render_clip_take_word(s, "to")) break;
+        float next_x = 0.0f, next_y = 0.0f;
+        if (!vertical && !render_clip_parse_polygon_len(s, width, &next_x)) break;
+        if (!horizontal && !render_clip_parse_polygon_len(s, height, &next_y)) break;
+        x = vertical ? x : next_x + (relative ? x : 0.0f);
+        y = horizontal ? y : next_y + (relative ? y : 0.0f);
+        if (move) {
+            rdt_path_move_to(path, abs_x + x, abs_y + y); start_x = x; start_y = y;
+        } else { rdt_path_line_to(path, abs_x + x, abs_y + y); drawn = true; }
+    }
+    rdt_path_free(path);
+    return nullptr;
 }
 
 static bool render_clip_peek_number(const char* s) {
@@ -149,9 +211,13 @@ static float render_clip_parse_number(const char** s) {
 }
 
 static RdtPath* render_clip_parse_path_function(const char* value,
-                                                float abs_x, float abs_y) {
+    float width, float height, float abs_x, float abs_y, RdtFillRule* rule) {
+    RdtPath* shape = render_clip_parse_shape_function(value, width, height, abs_x, abs_y, rule);
+    if (shape) return shape;
     if (!value || strncmp(value, "path(", 5) != 0) return nullptr;
     const char* s = value + 5;
+    render_clip_parse_rule(s, rule);
+    while (isspace((unsigned char)*s) || *s == ',') s++;
     while (*s && isspace((unsigned char)*s)) s++;
     if (*s != '"' && *s != '\'') return nullptr;
     char quote = *s++;
@@ -437,9 +503,10 @@ RenderClipScope render_clip_push_css_scope(RasterRenderContext* rdcon, ViewBlock
     float elem_h = block->height * scale;
     float abs_x = parent_x + block->x * scale;
     float abs_y = parent_y + block->y * scale;
-    RdtPath* css_path = render_clip_parse_path_function(clip_str, abs_x, abs_y);
+    RdtFillRule rule = RDT_FILL_WINDING;
+    RdtPath* css_path = render_clip_parse_path_function(clip_str, elem_w, elem_h, abs_x, abs_y, &rule);
     if (css_path) {
-        rc_push_clip(rdcon, css_path, render_state_current_transform(rdcon));
+        rc_push_clip(rdcon, css_path, render_state_current_transform(rdcon), rule);
         rdt_path_free(css_path);
         scope.active = true;
         log_debug("[CLIP] CSS clip-path path(): %s on element %s", clip_str, block->node_name());
@@ -465,7 +532,8 @@ bool render_clip_push_vector_css(PaintList* paint, ViewElement* element,
     const char* value = render_clip_css_value(element);
     if (!paint || !value || strncmp(value, "none", 4) == 0) return false;
 
-    RdtPath* path = render_clip_parse_path_function(value, abs_x, abs_y);
+    RdtFillRule rule = RDT_FILL_WINDING;
+    RdtPath* path = render_clip_parse_path_function(value, element->width, element->height, abs_x, abs_y, &rule);
     if (!path) {
         Arena* backing = arena_create_default();
         if (!backing) return false;
@@ -481,7 +549,7 @@ bool render_clip_push_vector_css(PaintList* paint, ViewElement* element,
     }
     if (!path) return false;
     int before = paint_list_count(paint);
-    paint_push_clip(paint, path, nullptr);
+    paint_push_clip(paint, path, nullptr, rule);
     rdt_path_free(path);
     return paint_list_count(paint) > before;
 }

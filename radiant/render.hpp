@@ -42,6 +42,17 @@ struct RadiantGradientLine {
     float y2;
 };
 
+struct RadiantRadialGeometry { float cx, cy, rx, ry; };
+RadiantRadialGeometry radiant_radial_gradient_geometry(const RadialGradient* gradient, Rect rect);
+
+// frame-local native style facts; retained lists reject this borrowed payload (D4.5.1v4).
+struct RadialMaskPaint {
+    lam::Up<RadialGradient> gradient;
+    Rect rect;
+    RdtMatrix inverse;
+    bool invertible;
+};
+
 
 inline float radiant_linear_gradient_used_angle(const LinearGradient* gradient,
                                                 Rect rect) {
@@ -291,6 +302,8 @@ bool rdt_path_visit(const RdtPath* p, RdtPathVisitFn fn, void* context);
 // append affine-transformed contours, expanding compact primitives into curves.
 bool render_path_append_transformed(RdtPath* destination, const RdtPath* source,
                                      const RdtMatrix* transform);
+bool render_path_project_to_viewport(RdtPath* destination, const RdtPath* source,
+    const RdtMatrix* transform, Rect viewport, bool fill, ScratchScope* scratch);
 void render_path_append_quadratic(RdtPath* path, float sx, float sy,
     float qx, float qy, float x, float y);
 
@@ -489,7 +502,8 @@ void rdt_fill_radial_gradient(RdtVector* vec, RdtPath* p,
 
 // clip_path filled black(255 alpha) = visible region; outside = clipped.
 // clips nest (push multiple, pop in reverse).
-void rdt_push_clip(RdtVector* vec, RdtPath* clip_path, const RdtMatrix* transform);
+void rdt_push_clip(RdtVector* vec, RdtPath* clip_path, const RdtMatrix* transform,
+    RdtFillRule rule = RDT_FILL_WINDING);
 void rdt_pop_clip(RdtVector* vec);
 
 // Save and restore clip stack depth for isolated rendering contexts.
@@ -507,7 +521,8 @@ void rdt_clip_restore_depth(int saved_depth);
 void rdt_draw_image(RdtVector* vec, const uint32_t* pixels, int src_w, int src_h,
                     int src_stride, float dst_x, float dst_y, float dst_w, float dst_h,
                     uint8_t opacity, const RdtMatrix* transform,
-                    uint64_t resource_generation = 0, bool straight_alpha = false, uint64_t resource_identity = 0);
+                    uint64_t resource_generation = 0, bool straight_alpha = false, uint64_t resource_identity = 0,
+                    ScaleMode scale_mode = SCALE_MODE_LINEAR);
 
 // ---------------------------------------------------------------------------
 // SVG picture (load from file/data, render at given rect)
@@ -712,6 +727,7 @@ typedef struct {
     bool straight_alpha;
     bool has_transform;
     RdtMatrix transform;
+    ScaleMode scale_mode;
 } DlDrawImage;
 
 typedef struct {
@@ -736,6 +752,7 @@ typedef struct {
     lam::Own<RdtPath> path;       // cloned path, owned by display list
     bool has_transform;
     RdtMatrix transform;
+    RdtFillRule rule;
 } DlPushClip;
 
 typedef struct {
@@ -774,6 +791,7 @@ typedef struct {
     int x0, y0, w, h;       // physical pixel region
     float opacity;
     bool premultiplied_source;
+    RadialMaskPaint mask;
 } DlCompositeOpacity;
 
 // Save backdrop pixels before element with mix-blend-mode renders.
@@ -1006,6 +1024,11 @@ void dl_clear(DisplayList* dl);
 // Free the items array (arena memory is managed by the caller).
 void dl_destroy(DisplayList* dl);
 
+// clone a command range with its owned payloads and remapped element markers.
+bool dl_copy_range(DisplayList* dst, const DisplayList* src, int start, int end);
+void dl_truncate(DisplayList* dl, int target_count);
+bool dl_replace_tail(DisplayList* dst, int start, const DisplayList* src, int first, int last);
+
 // ---------------------------------------------------------------------------
 // Recording API — mirrors rdt_* functions
 // ---------------------------------------------------------------------------
@@ -1058,7 +1081,7 @@ void dl_draw_image(DisplayList* dl, const uint32_t* pixels,
                    uint8_t opacity, const RdtMatrix* transform,
                    ImageSurface* resource_owner = nullptr,
                    uint64_t resource_generation = 0, bool copy_pixels = false,
-                   bool straight_alpha = false);
+                   bool straight_alpha = false, ScaleMode scale_mode = SCALE_MODE_LINEAR);
 
 // Record a glyph draw command.  bitmap buffer is borrowed (must outlive display list).
 void dl_draw_glyph(DisplayList* dl, GlyphBitmap* bitmap, int x, int y,
@@ -1069,7 +1092,8 @@ void dl_draw_glyph(DisplayList* dl, GlyphBitmap* bitmap, int x, int y,
 void dl_draw_picture(DisplayList* dl, RdtPicture* picture,
                      uint8_t opacity, const RdtMatrix* transform);
 
-void dl_push_clip(DisplayList* dl, RdtPath* clip_path, const RdtMatrix* transform);
+void dl_push_clip(DisplayList* dl, RdtPath* clip_path, const RdtMatrix* transform,
+    RdtFillRule rule = RDT_FILL_WINDING);
 void dl_pop_clip(DisplayList* dl);
 
 // Direct-pixel operations
@@ -1086,7 +1110,7 @@ void dl_blit_surface_scaled(DisplayList* dl, ImageSurface* src_surface,
 
 // Post-processing operations (coordinates already in physical pixels)
 void dl_composite_opacity(DisplayList* dl, int x0, int y0, int w, int h,
-                          float opacity, bool premultiplied_source = false);
+                          float opacity, bool premultiplied_source = false, const RadialMaskPaint* mask = nullptr);
 
 void dl_save_backdrop(DisplayList* dl, int x0, int y0, int w, int h);
 
@@ -1399,6 +1423,7 @@ typedef struct {
     bool has_transform;
     RdtMatrix transform;
     lam::Up<ImageSurface> resource_owner;   // optional owner for generation checks
+    ScaleMode scale_mode;
 } PaintDrawImage;
 
 typedef struct {
@@ -1451,6 +1476,7 @@ typedef struct {
     lam::Own<RdtPath> clip_path;    // owned clone for deferred lowering
     bool has_transform;
     RdtMatrix transform;
+    RdtFillRule rule;
 } PaintPushClip;
 
 typedef struct {
@@ -1467,6 +1493,7 @@ typedef struct {
     int x0, y0, w, h;       // physical pixel region
     float opacity;
     bool premultiplied_source;
+    RadialMaskPaint mask;
 } PaintCompositeOpacity;
 
 typedef struct {
@@ -1742,7 +1769,7 @@ void paint_draw_image(PaintList* pl, const uint32_t* pixels,
                       int src_w, int src_h, int src_stride,
                       float dst_x, float dst_y, float dst_w, float dst_h,
                       uint8_t opacity, const RdtMatrix* transform,
-                      ImageSurface* resource_owner);
+                      ImageSurface* resource_owner, ScaleMode scale_mode = SCALE_MODE_LINEAR);
 void paint_draw_image_resource(PaintList* pl, ImageSurface* image,
                                float dst_x, float dst_y,
                                float dst_w, float dst_h,
@@ -1764,7 +1791,8 @@ void paint_webview_layer_placeholder(PaintList* pl, ImageSurface* surface,
                                      float dst_x, float dst_y, float dst_w, float dst_h,
                                      const Bound* clip,
                                      uint64_t surface_generation);
-void paint_push_clip(PaintList* pl, RdtPath* clip_path, const RdtMatrix* transform);
+void paint_push_clip(PaintList* pl, RdtPath* clip_path, const RdtMatrix* transform,
+    RdtFillRule rule = RDT_FILL_WINDING);
 void paint_pop_clip(PaintList* pl);
 void paint_push_transform(PaintList* pl, const RdtMatrix* transform);
 void paint_pop_transform(PaintList* pl);
@@ -1772,7 +1800,7 @@ void paint_pop_transform(PaintList* pl);
 // Raster-lowering tier (pixel-domain effect ops; see enum comment).
 void paint_save_backdrop(PaintList* pl, int x0, int y0, int w, int h);
 void paint_composite_opacity(PaintList* pl, int x0, int y0, int w, int h,
-                             float opacity, bool premultiplied_source);
+                             float opacity, bool premultiplied_source, const RadialMaskPaint* mask = nullptr);
 void paint_apply_blend_mode(PaintList* pl, int x0, int y0, int w, int h, int blend_mode);
 void paint_apply_filter(PaintList* pl, float x, float y, float w, float h,
                         FilterProp* filter, const Bound* clip);
@@ -1941,6 +1969,7 @@ struct RenderContext {
     lam::Up<UiContext> ui_context;
 };
 
+struct Css3dPaintContext;
 typedef struct RasterRenderContext : RenderContext {
     ListBlot list;
     RdtVector vec;      // platform-agnostic vector renderer
@@ -1957,9 +1986,11 @@ typedef struct RasterRenderContext : RenderContext {
     // Transform state
     RdtMatrix transform;           // Current combined transform matrix
     bool has_transform;            // True if non-identity transform is active
-    float perspective_distance;    // Active CSS perspective from ancestor, 0 = none
-    float perspective_origin_x;
-    float perspective_origin_y;
+    RdtMatrix4 transform_3d;        // current box plane, before flattening its children
+    RdtMatrix4 children_transform_3d;
+    bool has_transform_3d;
+    bool paint_failed;             // abort replay when preserved-context composition fails
+    lam::Up<Css3dPaintContext> css3d_context; // borrowed only during a preserved-context walk
 
     // Derived logical-paint -> destination-surface scale (RSC7).
     float raster_scale;
@@ -1982,6 +2013,8 @@ typedef struct RasterRenderContext : RenderContext {
     // Vector clip shape stack for overflow:hidden with border-radius and CSS clip-path
     ClipShape* clip_shapes[RDT_MAX_CLIP_SHAPES];  // fixed stack of borrowed clip shapes
     int clip_shape_depth;
+    int vector_clip_depth; // path clips also constrain raster image paint
+    Bound vector_clip_bounds[RDT_MAX_CLIP_SHAPES]; // conservative projected intersections
 
     // Suppresses automatic per-block display-list markers while a caller records
     // a wider element subtree marker around replaced/layer content.
@@ -2413,7 +2446,8 @@ void dl_replay_backdrop_discard(DisplayReplayBackdropStack* stack,
 void dl_replay_backdrop_composite_opacity(DisplayReplayBackdropStack* stack,
                                           ImageSurface* surface,
                                           ScratchArena* scratch,
-                                          const DlCompositeOpacity* opacity);
+                                          const DlCompositeOpacity* opacity,
+                                          float offset_x = 0, float offset_y = 0);
 void dl_replay_backdrop_apply_blend_mode(DisplayReplayBackdropStack* stack,
                                          ImageSurface* surface,
                                          ScratchArena* scratch,
@@ -2572,6 +2606,8 @@ typedef struct TileJob {
     lam::Up<DisplayList> display_list;  // shared, read-only
     float raster_scale;
     uint32_t bg_color;          // tile background clear color (ABGR8888)
+    void (*work)(void*);        // optional pure pixel job, without a vector canvas
+    void* work_context;         // borrowed until synchronous dispatch completes
 } TileJob;
 
 // Per-worker state (thread-local resources created once, reused across frames)
@@ -2590,7 +2626,7 @@ typedef struct RenderPool {
     int thread_count;
 
     // job queue (simple array — all jobs submitted before workers start)
-    lam::OwnArr<TileJob> jobs;
+    lam::Up<TileJob> jobs;
     int job_count;
 
     // synchronisation: barrier-style — main thread signals start, waits for all done
@@ -2617,6 +2653,8 @@ void render_pool_destroy(RenderPool* pool);
 // Submit a batch of tile jobs and wait for all to complete.
 // The display list must be fully recorded and immutable.
 void render_pool_dispatch(RenderPool* pool, TileJob* jobs, int count);
+bool render_pool_is_worker_thread();
+int render_output_dispatch_jobs(TileJob* jobs, int count);
 
 // ---------------------------------------------------------------------------
 // Tile-aware replay — replays display list items intersecting a tile
@@ -3078,14 +3116,14 @@ static inline void paint_record_draw_image(PaintRecordTarget* target, const char
                                            int src_w, int src_h, int src_stride,
                                            float dst_x, float dst_y, float dst_w, float dst_h,
                                            uint8_t opacity, const RdtMatrix* transform,
-                                           ImageSurface* resource_owner) {
+                                           ImageSurface* resource_owner, ScaleMode scale_mode = SCALE_MODE_LINEAR) {
     if (!paint_record_ready(target)) {
         paint_record_missing(target, op);
         return;
     }
     paint_draw_image(target->paint_list, pixels, src_w, src_h, src_stride,
                      dst_x, dst_y, dst_w, dst_h, opacity, transform,
-                     resource_owner);
+                     resource_owner, scale_mode);
     paint_record_lower_pending(target);
 }
 
@@ -3145,12 +3183,13 @@ static inline void paint_record_webview_layer_placeholder(PaintRecordTarget* tar
 }
 
 static inline void paint_record_push_clip(PaintRecordTarget* target, const char* op,
-                                          RdtPath* path, const RdtMatrix* transform) {
+                                          RdtPath* path, const RdtMatrix* transform,
+                                          RdtFillRule rule = RDT_FILL_WINDING) {
     if (!paint_record_ready(target)) {
         paint_record_missing(target, op);
         return;
     }
-    paint_push_clip(target->paint_list, path, transform);
+    paint_push_clip(target->paint_list, path, transform, rule);
     paint_record_lower_pending(target);
 }
 
@@ -3189,13 +3228,13 @@ static inline void paint_record_save_backdrop(PaintRecordTarget* target, const c
 static inline void paint_record_composite_opacity(PaintRecordTarget* target, const char* op,
                                                   int x0, int y0, int w, int h,
                                                   float opacity,
-                                                  bool premultiplied_source) {
+                                                  bool premultiplied_source, const RadialMaskPaint* mask = nullptr) {
     if (!paint_record_ready(target)) {
         paint_record_missing(target, op);
         return;
     }
     paint_composite_opacity(target->paint_list, x0, y0, w, h,
-                            opacity, premultiplied_source);
+                            opacity, premultiplied_source, mask);
     paint_record_lower_pending(target);
 }
 
@@ -3361,7 +3400,7 @@ void rc_draw_image(RasterRenderContext* rdcon, const uint32_t* pixels,
                    int src_w, int src_h, int src_stride,
                    float dst_x, float dst_y, float dst_w, float dst_h,
                    uint8_t opacity, const RdtMatrix* transform,
-                   ImageSurface* resource_owner = nullptr);
+                   ImageSurface* resource_owner = nullptr, ScaleMode scale_mode = SCALE_MODE_LINEAR);
 void rc_draw_glyph(RasterRenderContext* rdcon, GlyphBitmap* bitmap, int x, int y,
                    Color color, bool is_color_emoji, const Bound* clip,
                    const RdtMatrix* transform, uint64_t resource_generation);
@@ -3375,11 +3414,13 @@ void rc_webview_layer_placeholder(RasterRenderContext* rdcon, ImageSurface* surf
                                   float dst_x, float dst_y, float dst_w, float dst_h,
                                   const Bound* clip,
                                   uint64_t surface_generation);
-void rc_push_clip(RasterRenderContext* rdcon, RdtPath* clip_path, const RdtMatrix* transform);
+void rc_push_clip(RasterRenderContext* rdcon, RdtPath* clip_path, const RdtMatrix* transform,
+                  RdtFillRule rule = RDT_FILL_WINDING);
+Rect render_painter_projection_viewport(RasterRenderContext* rdcon);
 void rc_pop_clip(RasterRenderContext* rdcon);
 void rc_save_backdrop(RasterRenderContext* rdcon, int x0, int y0, int w, int h);
 void rc_composite_opacity(RasterRenderContext* rdcon, int x0, int y0, int w, int h,
-                          float opacity, bool premultiplied_source = false);
+                          float opacity, bool premultiplied_source = false, const RadialMaskPaint* mask = nullptr);
 void rc_apply_blend_mode(RasterRenderContext* rdcon, int x0, int y0, int w, int h,
                          int blend_mode);
 void rc_apply_filter(RasterRenderContext* rdcon, float x, float y, float w, float h,
@@ -3417,7 +3458,7 @@ void render_painter_draw_pixels_rect(RasterRenderContext* rdcon, const uint32_t*
                                      int src_w, int src_h, int src_stride,
                                      Rect* dst_rect, Bound* clip,
                                      uint8_t opacity,
-                                     ImageSurface* resource_owner = nullptr);
+                                     ImageSurface* resource_owner = nullptr, ScaleMode scale_mode = SCALE_MODE_LINEAR);
 void render_painter_fill_surface_rect(RasterRenderContext* rdcon, ImageSurface* surface,
                                       Rect* rect, uint32_t color, Bound* clip,
                                       ClipShape** clip_shapes, int clip_depth);
@@ -3484,6 +3525,8 @@ typedef struct RenderProfiler {
     double block_self_time;
     double children_time;
     double overflow_clip_time;
+    double css3d_compose_time;
+    size_t css3d_plane_count, css3d_fragment_count;
     int64_t overflow_clip_count;
     double font_metrics_time;
     int64_t font_metrics_count;
@@ -3567,9 +3610,9 @@ typedef struct RenderTransformScope {
     lam::Up<RasterRenderContext> context;
     RdtMatrix previous_transform;
     bool previous_has_transform;
-    float previous_perspective_distance;
-    float previous_perspective_origin_x;
-    float previous_perspective_origin_y;
+    RdtMatrix4 previous_transform_3d;
+    RdtMatrix4 previous_children_transform_3d;
+    bool previous_has_transform_3d;
     bool active;
 } RenderTransformScope;
 
@@ -3628,7 +3671,9 @@ void render_composite_apply_region(ImageSurface* surface, const uint32_t* backdr
                                    RenderCompositeRegionMode mode,
                                    CssEnum blend_mode, uint8_t opacity,
                                    const ClipShape* exclude_shape = nullptr,
-                                   const ClipShape* include_shape = nullptr);
+                                   const ClipShape* include_shape = nullptr,
+                                   const RadialMaskPaint* mask = nullptr,
+                                   float offset_x = 0, float offset_y = 0);
 void render_composite_blend_surface(ImageSurface* surface, const uint32_t* backdrop,
                                     int x0, int y0, int width, int height,
                                     CssEnum blend_mode);
@@ -3651,10 +3696,14 @@ uint32_t render_pixel_destination_over_premultiplied(uint32_t destination, uint3
 ScaleMode render_image_scale_mode(const ViewSpan* view, bool repeating);
 uint32_t render_pixel_sample_bilinear(const uint8_t* pixels, int width, int height,
                                       int pitch, float x, float y, bool wrap,
-                                      bool round_channels);
+                                      bool round_channels, bool premultiply_samples = false);
+// Caller owns the returned premultiplied pixels; an empty projection returns null.
+bool render_image_project_pixels(const uint32_t* pixels, int width, int height, int stride,
+    Rect destination, const RdtMatrix* transform, Rect viewport, ScaleMode mode,
+    bool straight_alpha, uint32_t** output, Rect* output_rect, const Rect* repeated_tile = nullptr);
 uint32_t render_pixel_bilinear_mix(const uint8_t* p11, const uint8_t* p21,
                                   const uint8_t* p12, const uint8_t* p22,
-                                  float fx, float fy, bool round_channels);
+                                  float fx, float fy, bool round_channels, bool premultiply_samples = false);
 void render_pixel_source_over_coverage(uint8_t* destination, Color color,
                                        uint32_t coverage);
 void render_pixel_source_over_opaque_bytes(uint8_t* destination, uint32_t source,
@@ -3765,6 +3814,21 @@ struct RdtSvgFilterRun {
     // resource font facts are resolved during the synchronous run; viewport/geometry still belong to the target.
     void (*resolve_lengths)(RdtSvgFilterHost* host, Element* resource, SvgLengthContext* lengths);
 };
+struct CssSvgFilter {
+    lam::Up<RdtSvgFilterProgram> program; // one acquired reference; released with the filter chain
+    SvgLengthContext lengths;
+    lam::Up<MemContext> memory;
+    Bound geometry;
+    RdtMatrix frame;
+    float density, paint_x, paint_y;
+};
+RdtSvgFilterProgram* render_css_svg_filter_compile(DomDocument* document, const char* url,
+    ScratchArena* scratch);
+void render_filter_prepare_urls(RasterRenderContext* context, FilterProp* filter);
+bool render_filter_is_color_only(const FilterFunction* functions);
+float render_filter_reference_box(FilterProp* filter, Rect border, const RdtMatrix* transform = nullptr);
+bool render_css_svg_filter_apply(ScratchArena* scratch, ImageSurface* surface,
+    const CssSvgFilter* filter, const Rect* rect, const Bound* clip);
 RdtSvgFilterProgram* render_svg_filter_program_acquire(DomDocument* document, Element* element);
 void render_svg_filter_program_release(RdtSvgFilterProgram* program);
 int render_svg_filter_input(const RdtSvgFilterProgram* program, size_t before, const char* name);
@@ -3866,6 +3930,7 @@ typedef struct RenderEffectGroup {
     bool has_filter_backdrop;
     bool has_filter;
     bool has_backdrop_filter;
+    RadialMaskPaint mask;
 } RenderEffectGroup;
 
 RenderEffectGroup render_effect_group_begin(RasterRenderContext* rdcon,

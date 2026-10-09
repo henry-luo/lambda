@@ -889,16 +889,31 @@ void dom_element_clear(DomElement* element) {
     // The pool will handle cleanup
 }
 
+enum CssCustomSelection { CSS_CUSTOM_INLINE, CSS_CUSTOM_CASCADED,
+    CSS_CUSTOM_PRESENTATION, CSS_CUSTOM_ANIMATION, CSS_CUSTOM_ALL };
+
+static bool dom_element_custom_property_selected(const CssCustomProp* prop,
+    CssCustomSelection selection, const char* name = nullptr, const void* effect = nullptr) {
+    const CssDeclaration* declaration = prop->declaration;
+    if (name && !css_custom_property_name_matches(prop->name, name)) return false;
+    if (selection == CSS_CUSTOM_ALL) return true;
+    if (selection == CSS_CUSTOM_ANIMATION) return prop->animation_owner == effect;
+    if (prop->animation_owner) return false;
+    bool presentation = declaration && declaration->presentation_value;
+    if (selection == CSS_CUSTOM_PRESENTATION) return presentation;
+    bool is_inline = declaration && declaration->specificity.inline_style != 0;
+    return !presentation && is_inline == (selection == CSS_CUSTOM_INLINE);
+}
+
 static bool dom_element_clear_custom_properties(DomElement* element,
-                                                bool remove_inline) {
+    CssCustomSelection selection, const char* name = nullptr,
+    const CssDeclaration* keep = nullptr, const void* effect = nullptr) {
     if (!element || !element->doc) return false;
     bool removed = false;
     lam::Own<CssCustomProp>* slot = &element->css_variables;
     while (*slot) {
         CssCustomProp* prop = *slot;
-        bool is_inline = prop->declaration &&
-            prop->declaration->specificity.inline_style != 0;
-        if (is_inline != remove_inline) {
+        if (prop->declaration == keep || !dom_element_custom_property_selected(prop, selection, name, effect)) {
             slot = &prop->next;
             continue;
         }
@@ -921,7 +936,7 @@ void dom_element_clear_cascaded_styles(DomElement* element) {
         return;
     }
 
-    bool changed = dom_element_clear_custom_properties(element, false);
+    bool changed = dom_element_clear_custom_properties(element, CSS_CUSTOM_CASCADED);
     if (element->specified_style_shared()) {
         // Canonical trees never contain inline declarations, so detaching is
         // sufficient and avoids materializing declarations that are discarded.
@@ -1127,8 +1142,7 @@ void dom_element_release_retired_storage(DomElement* element) {
     dom_element_release_cached_id(element);
     dom_element_release_cached_classes(element);
     dom_element_clear_synthetic_attributes(element);
-    dom_element_clear_custom_properties(element, true);
-    dom_element_clear_custom_properties(element, false);
+    dom_element_clear_custom_properties(element, CSS_CUSTOM_ALL);
     style_epoch_selection_clear_element(element);
     // retirement releases both the authored pool and its document resource registration (D4.5.1v4).
     if (element->ext && element->ext->inline_declarations)
@@ -1259,7 +1273,7 @@ static bool dom_element_clear_inline_style_declarations(DomElement* element) {
     }
     if (!style_epoch_ensure_owned(element)) return false;
     bool removed = style_tree_remove_inline_declarations(element->specified_style);
-    return dom_element_clear_custom_properties(element, true) || removed;
+    return dom_element_clear_custom_properties(element, CSS_CUSTOM_INLINE) || removed;
 }
 
 static void dom_element_attribute_did_set(DomElement* element,
@@ -1917,6 +1931,45 @@ static bool dom_element_uses_quirks_css(const DomElement* element) {
         is_quirks_mode((HtmlVersion)element->doc->html_version);
 }
 
+static bool dom_element_apply_transient_custom(DomElement* element, CssDeclaration* owned,
+                                               const void* effect, bool* changed) {
+    if (!dom_element_apply_declaration(element, owned)) {
+        css_declaration_destroy_owned(owned, element->storage_pool());
+        return false;
+    }
+    element->css_variables->animation_owner = effect;
+    dom_element_clear_custom_properties(element, effect ? CSS_CUSTOM_ANIMATION : CSS_CUSTOM_PRESENTATION,
+        owned->property_name, owned, effect);
+    element->set_styles_resolved(false);
+    if (changed) *changed = true;
+    return true;
+}
+
+bool dom_element_set_animation_custom_property(DomElement* element,
+    const CssDeclaration* sample, const void* effect, bool* changed) {
+    if (changed) *changed = false;
+    if (!element || !element->doc || !sample || !effect) return false;
+    for (const CssCustomProp* prop = element->css_variables; prop; prop = prop->next) {
+        if (dom_element_custom_property_selected(prop, CSS_CUSTOM_ANIMATION, sample->property_name, effect) &&
+            prop->value_text && sample->value_text && prop->value_text_len == sample->value_text_len &&
+            memcmp(prop->value_text, sample->value_text, sample->value_text_len) == 0) return true;
+    }
+    CssDeclaration* owned = css_declaration_clone_owned(sample, {}, CSS_ORIGIN_ANIMATION, element->storage_pool());
+    if (!owned) return false;
+    owned->presentation_value = true;
+    return dom_element_apply_transient_custom(element, owned, effect, changed);
+}
+
+bool dom_element_clear_animation_custom_properties(DomElement* element, const void* effect, const char* name) {
+    bool changed = effect && dom_element_clear_custom_properties(element, CSS_CUSTOM_ANIMATION, name, nullptr, effect);
+    if (changed) {
+        element->advance_style_version();
+        element->set_needs_style_recompute(true);
+        element->set_styles_resolved(false);
+    }
+    return changed;
+}
+
 bool dom_element_set_presentation_style(DomElement* element, const char* property,
                                         const char* value, bool* changed) {
     if (changed) *changed = false;
@@ -1925,8 +1978,17 @@ bool dom_element_set_presentation_style(DomElement* element, const char* propert
 #else
     if (!element || !element->doc || !property || !value) return false;
     CssPropertyCode code = css_property_code_from_name(property);
-    if (code <= 0 || code >= CSS_PROPERTY_CUSTOM) return false;
-    CssDeclaration* old = style_tree_get_presentation_declaration(element->specified_style, code);
+    bool custom = property[0] == '-' && property[1] == '-' && property[2];
+    if (!custom && (code <= 0 || code >= CSS_PROPERTY_CUSTOM)) return false;
+    CssDeclaration* old = nullptr;
+    if (custom) {
+        for (CssCustomProp* prop = element->css_variables; prop; prop = prop->next) {
+            if (dom_element_custom_property_selected(prop, CSS_CUSTOM_PRESENTATION, property)) {
+                old = prop->declaration;
+                break;
+            }
+        }
+    } else old = style_tree_get_presentation_declaration(element->specified_style, code);
     if (old && old->value_text && old->value_text_len == strlen(value) &&
         memcmp(old->value_text, value, old->value_text_len) == 0) return true;
     Pool* scratch = mem_pool_create((MemContext*)element->doc->services.mem_ctx,
@@ -1935,7 +1997,7 @@ bool dom_element_set_presentation_style(DomElement* element, const char* propert
     CssDeclaration* parsed = css_parse_property_declaration(property, strlen(property),
         value, strlen(value), scratch);
     bool accepted = parsed && parsed->property_code == code && !parsed->important &&
-        css_property_validate_value(code, parsed->value) &&
+        (custom || css_property_validate_value(code, parsed->value)) &&
         css_declaration_can_clone_owned(parsed);
     CssDeclaration* owned = accepted ? css_declaration_clone_owned(parsed, {},
         CSS_ORIGIN_ANIMATION, element->storage_pool()) : nullptr;
@@ -1946,6 +2008,11 @@ bool dom_element_set_presentation_style(DomElement* element, const char* propert
         return false;
     }
     owned->presentation_value = true;
+    if (custom) {
+        // Custom samples share normal var() cascade/inheritance and retain
+        // authored fallbacks across recascade, replacement and clear.
+        return dom_element_apply_transient_custom(element, owned, nullptr, changed);
+    }
     // A sample replaces its own layer without discarding authored fallbacks.
     style_tree_remove_presentation_declarations(element->specified_style, code);
     if (!style_tree_apply_declaration(element->specified_style, owned)) {
@@ -1964,6 +2031,7 @@ bool dom_element_clear_presentation_style(DomElement* element) {
     if (!element || !element->specified_style || element->specified_style_shared()) return false;
     bool changed = style_tree_remove_presentation_declarations(element->specified_style,
         CSS_PROPERTY_UNKNOWN);
+    changed = dom_element_clear_custom_properties(element, CSS_CUSTOM_PRESENTATION) || changed;
     if (changed) {
         element->advance_style_version();
         element->set_needs_style_recompute(true);
@@ -2053,9 +2121,11 @@ bool dom_element_remove_inline_styles(DomElement* element) {
 
 static CssCustomProp* css_custom_property_winner(CssCustomProp* variables,
     const char* name, const CssDeclaration* ceiling = nullptr,
-    const CssRollbackFilter* filters = nullptr, size_t name_length = (size_t)-1) {
+    const CssRollbackFilter* filters = nullptr, size_t name_length = (size_t)-1,
+    bool exclude_animations = false) {
     CssCustomProp* winner = nullptr;
     for (CssCustomProp* variable = variables; variable; variable = variable->next) {
+        if (exclude_animations && variable->animation_owner) continue;
         StrView stored = variable->declaration ? css_declaration_name(variable->declaration)
             : strview_from_cstr(variable->name);
         if (!css_custom_property_name_matches(stored.str, name, stored.length, name_length)) continue;
@@ -2068,16 +2138,16 @@ static CssCustomProp* css_custom_property_winner(CssCustomProp* variables,
     }
     if (winner && css_declaration_is_rollback(winner->declaration)) {
         CssRollbackFilter filter = {winner->declaration, filters};
-        return css_custom_property_winner(variables, name, winner->declaration, &filter, name_length);
+        return css_custom_property_winner(variables, name, winner->declaration, &filter, name_length, exclude_animations);
     }
     return winner;
 }
 
 // typed computation and authored serialization use the same rollback winner.
 const CssCustomProp* dom_element_lookup_own_custom_property_entry(DomElement* element,
-    const char* name, size_t name_length) {
+    const char* name, size_t name_length, bool exclude_animations) {
     return element ? css_custom_property_winner(element->css_variables,
-        name, nullptr, nullptr, name_length) : nullptr;
+        name, nullptr, nullptr, name_length, exclude_animations) : nullptr;
 }
 
 const CssValue* dom_element_lookup_own_custom_property(DomElement* element, const char* name,

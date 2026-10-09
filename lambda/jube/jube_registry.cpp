@@ -525,6 +525,7 @@ extern "C" void dom_after_default_selected_set(void* elem, bool selected);
 extern "C" void dom_after_select_multiple_removed(void* elem);
 extern "C" void dom_set_checked_dirty(void* elem, bool checked);
 extern "C" void dom_select_set_value_bridge(void* elem, const char* value);
+extern "C" Item dom_select_value_bridge(void* elem);
 extern "C" void dom_select_set_selected_index_bridge(void* elem, Item value);
 extern "C" void dom_select_set_length_bridge(void* elem, Item value);
 extern "C" void dom_set_option_selected_dirty(void* elem, bool selected);

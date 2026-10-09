@@ -45,6 +45,7 @@ extern "C" void js_globals_batch_reset(void);
 extern __thread EvalContext* context;
 extern __thread Context* input_context;
 extern UiContext ui_context;
+static void window_release_relative_mouse(UiContext* uicon);
 
 static void window_cleanup_load_failure(Pool* pool, Url* cwd, UiContext* uicon,
                                         EnhancedFileCache* file_cache,
@@ -466,6 +467,7 @@ DomDocument* show_loaded_html_doc(DomDocument* doc, const char* doc_url) {
     // BrowsingSession owns replacement of the previously presented document;
     // this presentation helper only publishes the newly loaded document.
     if (ui_context.document != doc) {
+        window_release_relative_mouse(&ui_context);
         // navigation retires the old document's registry-owned edition.
         ui_context.paged_view = nullptr;
         ui_context.paged_scroll_x = ui_context.paged_scroll_y = 0.0f;
@@ -540,7 +542,85 @@ static void window_request_document_satellite_cancel(void) {
     runtime_request_satellite_cancel(runtime);
 }
 
+static void window_release_relative_mouse(UiContext* uicon) {
+    if (!uicon) return;
+    bool was_active = uicon->relative_mouse_owner.address != nullptr;
+    uicon->relative_mouse_owner = {};
+    uicon->mouse_state.has_position = false;
+    if (was_active && uicon->window) {
+        if (glfwRawMouseMotionSupported()) glfwSetInputMode(uicon->window, GLFW_RAW_MOUSE_MOTION, GLFW_FALSE);
+        glfwSetInputMode(uicon->window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
+    }
+}
+
+struct RelativeMouseResource : DomDocumentResourceData { DomDocument* document; };
+static void window_destroy_relative_mouse(DomDocumentResourceData* resource) {
+    auto* owned = (RelativeMouseResource*)resource;
+    if (ui_context.document == owned->document) window_release_relative_mouse(&ui_context);
+    mem_free(owned);
+}
+
+DomElement* radiant_relative_mouse_target(UiContext* uicon) {
+    if (!uicon || !uicon->relative_mouse_owner.address) return nullptr;
+    DomNode* node = dom_node_ref_validate(uicon->document, uicon->relative_mouse_owner);
+    if (node && node->node_type == DOM_NODE_ELEMENT && dom_is_connected(node)) return (DomElement*)node;
+    window_release_relative_mouse(uicon);
+    return nullptr;
+}
+
+bool radiant_window_set_relative_mouse(DomElement* owner, bool enabled) {
+    if (!owner || !owner->doc || ui_context.document != owner->doc) return false;
+    if (!enabled) {
+        DomElement* captured = radiant_relative_mouse_target(&ui_context);
+        if (captured && captured != owner) return false;
+        window_release_relative_mouse(&ui_context);
+        return true;
+    }
+    if (!dom_is_connected(owner)) return false;
+    bool registered = false;
+    for (auto* entry = owner->doc->resources.get(); entry; entry = entry->next.get()) {
+        if (entry->destroy == window_destroy_relative_mouse) { registered = true; break; }
+    }
+    if (!registered) {
+        auto* resource = (RelativeMouseResource*)mem_calloc(1, sizeof(RelativeMouseResource), MEM_CAT_RENDER);
+        if (!resource) return false;
+        resource->document = owner->doc;
+        if (!dom_document_add_resource(owner->doc, resource, window_destroy_relative_mouse)) {
+            mem_free(resource);
+            return false;
+        }
+    }
+    ui_context.relative_mouse_owner = dom_node_ref(owner);
+    ui_context.mouse_state.has_position = false;
+    if (ui_context.window) {
+        glfwSetInputMode(ui_context.window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+        if (glfwRawMouseMotionSupported()) glfwSetInputMode(ui_context.window, GLFW_RAW_MOUSE_MOTION, GLFW_TRUE);
+        double x = 0, y = 0;
+        glfwGetCursorPos(ui_context.window, &x, &y);
+        ui_context.mouse_state.last_x = (float)x;
+        ui_context.mouse_state.last_y = (float)y;
+        ui_context.mouse_state.has_position = true;
+    }
+    return true;
+}
+
+bool radiant_window_relative_mouse_active(DomElement* owner) {
+    return owner && radiant_relative_mouse_target(&ui_context) == owner;
+}
+
+void radiant_window_focus_changed(UiContext* uicon, bool focused) {
+    if (!uicon) return;
+    if (!focused) window_release_relative_mouse(uicon);
+    radiant_dispatch_window_event(uicon, uicon->document, focused ? "focus" : "blur");
+    do_redraw = 1;
+}
+
+static void window_focus_callback(GLFWwindow*, int focused) {
+    radiant_window_focus_changed(&ui_context, focused != 0);
+}
+
 static void window_request_close(GLFWwindow* window) {
+    window_release_relative_mouse(&ui_context);
     window_request_document_satellite_cancel();
     glfwSetWindowShouldClose(window, GLFW_TRUE);
 }
@@ -574,9 +654,10 @@ bool radiant_window_set_title(DomDocument* doc, const char* title) {
 
 bool radiant_window_platform_close(UiContext* uicon) {
     uicon->close_request_count++;
-    if (uicon->close_approved) return true;
+    if (uicon->close_approved) { window_release_relative_mouse(uicon); return true; }
     if (uicon->app_mode != UI_APP_MODE_EDIT || !uicon->close_guard_armed || !uicon->document) {
         uicon->close_approved = true;
+        window_release_relative_mouse(uicon);
         return true;
     }
     // Unsaved edits: the document decides Save / Discard / Cancel and approves
@@ -605,7 +686,7 @@ static void key_callback(GLFWwindow* window, int key, int scancode, int action, 
     // The viewer closes on Escape; the edit application gives Escape to the
     // active dialog, composition, or gesture instead (Radiant_Design_Edit_Mode §7).
     if (key == GLFW_KEY_ESCAPE && action == GLFW_PRESS &&
-            ui_context.app_mode != UI_APP_MODE_EDIT) {
+            ui_context.app_mode != UI_APP_MODE_EDIT && !radiant_relative_mouse_target(&ui_context)) {
         window_request_close(window);
         return;
     }
@@ -664,6 +745,7 @@ static void key_callback(GLFWwindow* window, int key, int scancode, int action, 
 
     // Handle key events
     handle_event(&ui_context, ui_context.document, &event);
+    if (key == GLFW_KEY_ESCAPE && action == GLFW_PRESS) window_release_relative_mouse(&ui_context);
     // Always repaint after a key event so caret motion, character
     // insertion/deletion, selection changes, and context-menu open/close
     // become visible immediately.
@@ -1309,6 +1391,7 @@ static int view_doc_in_window_with_events_internal(const char* doc_file,
         glfwSetWindowContentScaleCallback(window, window_content_scale_callback);
         glfwSetWindowRefreshCallback(window, window_refresh_callback);
         glfwSetWindowCloseCallback(window, window_close_callback);
+        glfwSetWindowFocusCallback(window, window_focus_callback);
 
         glClearColor(0.8f, 0.8f, 0.8f, 1.0f); // Light grey color
 
@@ -1646,7 +1729,7 @@ static int view_doc_in_window_with_events_internal(const char* doc_file,
         uint64_t event_loop_start = time_now_ns();
         if (sim_ctx && sim_ctx->is_running) {
             double current_time = 0.0;
-            while (sim_ctx->is_running) {
+            while (sim_ctx->is_running && !ui_context.render_failed) {
                 SimEvent* next_ev = (sim_ctx->current_index >= 0 &&
                     sim_ctx->current_index < sim_ctx->events->length)
                     ? (SimEvent*)sim_ctx->events->data[sim_ctx->current_index]
@@ -1698,12 +1781,13 @@ static int view_doc_in_window_with_events_internal(const char* doc_file,
             }
         }
         int sim_fail_count = window_finish_event_sim(sim_ctx);
+        bool render_failed = ui_context.render_failed;
         phase_timing.event_loop_ms = view_phase_elapsed_ms(event_loop_start, time_now_ns());
         log_info("End of headless document viewer");
         uint64_t cleanup_start = time_now_ns();
         window_cleanup_view_runtime(thread_pool, file_cache, true, &phase_timing);
         phase_timing.cleanup_ms = view_phase_elapsed_ms(cleanup_start, time_now_ns());
-        int exit_code = sim_fail_count > 0 ? 1 : 0;
+        int exit_code = sim_fail_count > 0 || render_failed ? 1 : 0;
         window_write_phase_timing(&phase_timing, exit_code);
         return exit_code;
     }
@@ -1738,7 +1822,7 @@ static int view_doc_in_window_with_events_internal(const char* doc_file,
     double sim_start_delay = sim_ctx ? 0.5 : 0.0;  // 500ms delay before starting simulation
     double sim_start_time = radiant_frame_clock_now(&frame_clock) + sim_start_delay;
 
-    while (!glfwWindowShouldClose(window)) {
+    while (!glfwWindowShouldClose(window) && !ui_context.render_failed) {
         double currentTime = radiant_frame_clock_now(&frame_clock);
         bool frame_driven = false;
 
@@ -1862,12 +1946,13 @@ static int view_doc_in_window_with_events_internal(const char* doc_file,
 
     // Get simulation results before cleanup
     int sim_fail_count = window_finish_event_sim(sim_ctx);
+    bool render_failed = ui_context.render_failed;
 
     log_info("End of document viewer");
     window_cleanup_view_runtime(thread_pool, file_cache, false, nullptr);
 
     // Return non-zero if simulation had failures
-    return sim_fail_count > 0 ? 1 : 0;
+    return sim_fail_count > 0 || render_failed ? 1 : 0;
 }
 
 int view_doc_in_window_with_events(const char* doc_file, const char* event_file, bool headless,

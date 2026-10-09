@@ -1,4 +1,5 @@
 #include "render.hpp"
+#include "render_css3d.hpp"
 #include "event.hpp"
 #include "layout.hpp"
 
@@ -118,7 +119,8 @@ static bool render_retained_dirty_source_inside(void* userdata, uint32_t source_
 
 bool render_block_try_retained_fragment(RasterRenderContext* rdcon, ViewBlock* block) {
     if (!rdcon || !block || !rdcon->dl || !rdcon->retained_dl_cache ||
-        !rdcon->has_dirty_union || rdcon->element_marker_suppression_depth > 0) {
+        !rdcon->has_dirty_union || rdcon->element_marker_suppression_depth > 0 ||
+        rdcon->css3d_context) {
         return false;
     }
     if (render_block_has_visible_child_overflow(rdcon, block)) return false;
@@ -208,23 +210,6 @@ void render_bound(RasterRenderContext* rdcon, ViewBlock* view) {
         render_box_shadow(rdcon, view, rect);
     }
 
-    RdtPath* mask_clip_path = nullptr;
-    bool mask_clip_active = false;
-    if (view->boundary_mut()->mask && view->boundary_mut()->mask->has_radial_gradient) {
-        MaskProp* mask = view->boundary()->mask;
-        float radius = mask->radius_is_percent
-            ? mask->radius * (rect.width < rect.height ? rect.width : rect.height)
-            : mask->radius * s;
-        if (radius > 0.0f) {
-            float cx = rect.x + mask->cx * rect.width;
-            float cy = rect.y + mask->cy * rect.height;
-            mask_clip_path = rdt_path_new();
-            rdt_path_add_circle(mask_clip_path, cx, cy, radius, radius);
-            rc_push_clip(rdcon, mask_clip_path, nullptr);
-            mask_clip_active = true;
-        }
-    }
-
     // Render background (gradient, solid color, and background-image) using new rendering system
     if (view->boundary()->background) {
         render_background(rdcon, view, rect);
@@ -300,12 +285,7 @@ void render_bound(RasterRenderContext* rdcon, ViewBlock* view) {
         }
     }
 
-    if (mask_clip_active) {
-        rc_pop_clip(rdcon);
-    }
-    if (mask_clip_path) {
-        rdt_path_free(mask_clip_path);
-    }
+
 }
 
 void render_outline_deferred(RasterRenderContext* rdcon, ViewBlock* view) {
@@ -623,6 +603,7 @@ static bool raster_block_paint_begin(RenderPaintBlockDriver* ctx, ViewBlock* blo
     if (!driver || !driver->rdcon || !block || !phase) return false;
     render_block_log_begin(driver->rdcon, block);
     driver->phase = render_block_begin_phase(driver->rdcon, block);
+    if (driver->rdcon->css3d_context) driver->rdcon->css3d_context->geometry(block);
     *phase = &driver->phase;
     return true;
 }
@@ -696,6 +677,29 @@ void render_block_view_content(RasterRenderContext* rdcon, ViewBlock* block,
 
     if (render_block_skip_paint(rdcon, block)) return;
 
-    RenderBlockPaintResult result = render_block_run_paint_pipeline(rdcon, block, content);
+    RenderBlockPaintResult result = {};
+    Css3dPaintContext* enclosing = rdcon->css3d_context;
+    bool preserve = radiant::transform_preserves_3d(block);
+    if (rdcon->dl && !enclosing && preserve) {
+        Css3dPaintContext context(rdcon, block);
+        rdcon->css3d_context = lam::up(&context);
+        result = render_block_run_paint_pipeline(rdcon, block, content);
+        rdcon->css3d_context = nullptr;
+        if (!context.compose()) {
+            // The original DOM-order stream is owned for cleanup, never a fallback.
+            rdcon->paint_failed = true;
+            log_error("[CSS3D_COMPOSE] failed to compose context view=%u", static_cast<View*>(block)->id);
+        }
+    } else if (enclosing) {
+        Css3dPaintPlane parent = enclosing->enter(block);
+        // A flat child paints as one plane. Its nested preserved contexts may
+        // compose internally, without joining the enclosing context.
+        if (!preserve) rdcon->css3d_context = nullptr;
+        result = render_block_run_paint_pipeline(rdcon, block, content);
+        rdcon->css3d_context = lam::up(enclosing);
+        enclosing->restore(parent);
+    } else {
+        result = render_block_run_paint_pipeline(rdcon, block, content);
+    }
     render_block_finish_profile(rdcon, &result, rbv_start);
 }

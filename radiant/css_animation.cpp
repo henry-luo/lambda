@@ -1,6 +1,7 @@
 #include "view.hpp"
 #include "layout.hpp"
 #include "event.hpp"
+#include "render.hpp"
 
 extern "C" {
 #include "../lib/log.h"
@@ -63,6 +64,10 @@ static const char* skip_css_balanced_block(const char* source) {
 static CssAnimValueType property_value_type(CssPropertyCode id) {
     const CssPropertyRuntimeMetadata* metadata = css_property_runtime_metadata(id);
     return metadata ? metadata->animation_type : ANIM_VAL_NONE;
+}
+
+static int animation_transform_slot(CssPropertyCode property) {
+    return property == CSS_PROPERTY_TRANSFORM ? 0 : css_individual_transform_index(property) + 1;
 }
 
 static bool transform_value_is_context_free(const CssValue* value) {
@@ -190,9 +195,18 @@ static bool parse_property_value(CssPropertyCode prop_id, const char* val,
             }
             return true;
         }
+        case ANIM_VAL_BACKGROUND_POSITION:
+        case ANIM_VAL_IMAGE:
+        case ANIM_VAL_FILTER:
+            out->expression = declaration->value;
+            return true;
         case ANIM_VAL_ASPECT_RATIO:
             return parse_aspect_ratio_value(val, out);
         case ANIM_VAL_TRANSFORM: {
+            if (prop_id != CSS_PROPERTY_TRANSFORM) {
+                out->expression = declaration->value;
+                return true;
+            }
             if (declaration->value->type == CSS_VALUE_TYPE_KEYWORD &&
                 declaration->value->data.keyword == CSS_VALUE_NONE) {
                 out->value.transform = nullptr;
@@ -235,9 +249,14 @@ static bool parse_animation_composition(const char* value, Pool* pool,
     return true;
 }
 
-static CssAnimatedProp* find_prop_in_stop(CssKeyframeStop* stop, CssPropertyCode id) {
+static bool animation_property_matches(const CssAnimatedProp* property, CssPropertyCode id, const char* name) {
+    return property->property_code == id && (id != CSS_PROPERTY_CUSTOM ||
+        (property->custom_name && name && strcmp(property->custom_name, name) == 0));
+}
+
+static CssAnimatedProp* find_prop_in_stop(CssKeyframeStop* stop, CssPropertyCode id, const char* name = nullptr) {
     for (int i = 0; i < stop->property_count; i++) {
-        if (stop->properties[i].property_code == id) return &stop->properties[i];
+        if (animation_property_matches(&stop->properties[i], id, name)) return &stop->properties[i];
     }
     return nullptr;
 }
@@ -274,41 +293,51 @@ static CssKeyframes* parse_keyframes_content(const char* content, Pool* pool) {
     const char* p = brace + 1;
 
     // parse keyframe stops — temporary storage
-    CssKeyframeStop temp_stops[64];
-    int stop_count = 0;
+    lam::OwnArr<CssKeyframeStop> temp_stops = {};
+    int stop_count = 0, stop_capacity = 0;
 
     // temporary property storage per stop
-    CssAnimatedProp temp_props[32];
+    lam::OwnArr<CssAnimatedProp> temp_props = {};
+    int prop_capacity = 0;
+    lam::OwnArr<float> offsets = {};
+    int offset_capacity = 0;
 
-    while (*p && stop_count < 64) {
+    while (*p) {
         p = str_skip_ascii_space(p);
         if (*p == '}') break; // end of @keyframes
 
-        // parse keyframe selector: "from", "to", or "N%"
-        float offset = -1.0f;
-        if (strncmp(p, "from", 4) == 0 && !isalnum((unsigned char)p[4])) {
-            offset = 0.0f;
-            p += 4;
-        } else if (strncmp(p, "to", 2) == 0 && !isalnum((unsigned char)p[2])) {
-            offset = 1.0f;
-            p += 2;
-        } else if (isdigit((unsigned char)*p) || *p == '.') {
-            offset = strtof(p, (char**)&p) / 100.0f;
-            if (*p == '%') p++;
-        } else {
-            // skip unknown content
+        // one declaration block contributes to every selector in its comma list.
+        int offset_count = 0;
+        bool valid_selectors = true;
+        do {
+            p = str_skip_ascii_space(p);
+            float offset = -1.0f;
+            if (str_icmp(p, 4, "from", 4) == 0 && !isalnum((unsigned char)p[4])) {
+                offset = 0.0f;
+                p += 4;
+            } else if (str_icmp(p, 2, "to", 2) == 0 && !isalnum((unsigned char)p[2])) {
+                offset = 1.0f;
+                p += 2;
+            } else if (isdigit((unsigned char)*p) || *p == '.' || *p == '+' || *p == '-') {
+                char* end = nullptr;
+                offset = strtof(p, &end) / 100.0f;
+                valid_selectors = end != p && *end == '%';
+                p = valid_selectors ? end + 1 : p;
+            } else valid_selectors = false;
+            if (!valid_selectors || !isfinite(offset) || offset < 0.0f || offset > 1.0f) {
+                valid_selectors = false;
+                break;
+            }
+            if (!lam::pool_grow_array(pool, &offsets, &offset_capacity, offset_count + 1, 4)) return nullptr;
+            offsets[offset_count++] = offset;
+            p = str_skip_ascii_space(p);
+            if (*p != ',') break;
+            p++;
+        } while (*p);
+        if (!valid_selectors || !offset_count || *p != '{') {
             p = skip_css_balanced_block(p);
             continue;
         }
-
-        if (offset < 0.0f || offset > 1.0f) {
-            // invalid offset, skip this stop
-            p = skip_css_balanced_block(p);
-            continue;
-        }
-
-        p = str_skip_ascii_space(p);
-        if (*p != '{') continue;
         p++; // skip '{'
 
         // parse declarations inside keyframe stop
@@ -329,10 +358,9 @@ static CssKeyframes* parse_keyframes_content(const char* content, Pool* pool) {
             const char* prop_end = p;
             while (prop_end > prop_start && isspace((unsigned char)*(prop_end - 1))) prop_end--;
 
-            char prop_name[64];
             size_t plen = prop_end - prop_start;
-            if (plen >= sizeof(prop_name)) plen = sizeof(prop_name) - 1;
-            str_copy(prop_name, sizeof(prop_name), prop_start, plen);
+            const char* prop_name = pool_dup_n(pool, prop_start, plen);
+            if (!prop_name) return nullptr;
 
             p++; // skip ':'
             p = str_skip_ascii_space(p);
@@ -344,10 +372,9 @@ static CssKeyframes* parse_keyframes_content(const char* content, Pool* pool) {
             str_rtrim(&val_start, &val_len);
             const char* val_end = val_start + val_len;
 
-            char val_buf[256];
             size_t vlen = val_end - val_start;
-            if (vlen >= sizeof(val_buf)) vlen = sizeof(val_buf) - 1;
-            str_copy(val_buf, sizeof(val_buf), val_start, vlen);
+            const char* val_buf = pool_dup_n(pool, val_start, vlen);
+            if (!val_buf) return nullptr;
 
             if (*p == ';') p++;
 
@@ -366,26 +393,40 @@ static CssKeyframes* parse_keyframes_content(const char* content, Pool* pool) {
 
             // resolve property and parse value
             CssPropertyCode prop_id = (CssPropertyCode)css_property_code_from_name(prop_name);
-            if (prop_id != (CssPropertyCode)0) {
+            bool custom = prop_name[0] == '-' && prop_name[1] == '-' && prop_name[2];
+            if (custom || prop_id != (CssPropertyCode)0) {
                 CssAnimatedProp parsed = {};
-                if (parse_property_value(prop_id, val_buf, &parsed, pool)) {
+                CssDeclaration* custom_decl = custom ? css_parse_property_declaration(prop_name, plen, val_buf, vlen, pool) : nullptr;
+                bool accepted = custom ? custom_decl && custom_decl->value && !custom_decl->important
+                    : parse_property_value(prop_id, val_buf, &parsed, pool);
+                if (custom && accepted) {
+                    parsed.property_code = CSS_PROPERTY_CUSTOM;
+                    parsed.custom_name = prop_name;
+                    parsed.value_type = ANIM_VAL_CUSTOM;
+                    parsed.expression = custom_decl->value;
+                }
+                if (accepted) {
                     // invalid later declarations leave the preceding valid endpoint eligible.
-                    CssKeyframeStop pending = {offset, lam::own_arr(temp_props), prop_count, nullptr};
-                    CssAnimatedProp* previous = find_prop_in_stop(&pending, prop_id);
+                    CssKeyframeStop pending = {offsets[0], temp_props, prop_count, nullptr};
+                    CssAnimatedProp* previous = find_prop_in_stop(&pending, parsed.property_code, parsed.custom_name);
                     if (previous) *previous = parsed;
-                    else if (prop_count < 32) temp_props[prop_count++] = parsed;
+                    else {
+                        if (!lam::pool_grow_array(pool, &temp_props, &prop_capacity, prop_count + 1, 8)) return nullptr;
+                        temp_props[prop_count++] = parsed;
+                    }
                 }
             }
         }
 
         if (*p == '}') p++; // skip closing brace of keyframe stop
 
-        if (prop_count > 0 || has_timing) {
+        for (int selector = 0; selector < offset_count && (prop_count > 0 || has_timing); selector++) {
+            if (!lam::pool_grow_array(pool, &temp_stops, &stop_capacity, stop_count + 1, 8)) return nullptr;
             for (int i = 0; i < prop_count; i++) {
                 temp_props[i].composite = stop_composite;
             }
             CssKeyframeStop* stop = &temp_stops[stop_count];
-            stop->offset = offset;
+            stop->offset = offsets[selector];
             stop->timing = has_timing ? (TimingFunction*)pool_alloc(pool, sizeof(TimingFunction)) : nullptr;
             if (stop->timing) *stop->timing = stop_timing;
             stop->property_count = prop_count;
@@ -395,8 +436,11 @@ static CssKeyframes* parse_keyframes_content(const char* content, Pool* pool) {
             stop_count++;
         }
     }
+    if (offsets) pool_free(pool, offsets);
 
     if (stop_count == 0) {
+        if (temp_props) pool_free(pool, temp_props);
+        if (temp_stops) pool_free(pool, temp_stops);
         log_debug("css-anim: @keyframes '%s' has no valid stops", name);
         return NULL;
     }
@@ -413,10 +457,11 @@ static CssKeyframes* parse_keyframes_content(const char* content, Pool* pool) {
     }
 
     CssKeyframes* kf = (CssKeyframes*)pool_calloc(pool, sizeof(CssKeyframes));
+    if (!kf) return nullptr;
     kf->name = lam::up(name);
     kf->stop_count = stop_count;
-    kf->stops = lam::own_arr((CssKeyframeStop*)pool_alloc(pool, sizeof(CssKeyframeStop) * stop_count));
-    memcpy(kf->stops, temp_stops, sizeof(CssKeyframeStop) * stop_count);
+    kf->stops = temp_stops;
+    if (temp_props) pool_free(pool, temp_props);
 
     log_debug("css-anim: parsed @keyframes '%s' with %d stops", name, stop_count);
     return kf;
@@ -438,6 +483,8 @@ static void keyframe_registry_scan(KeyframeRegistry* registry,
                 !rule->data.generic_rule.content) continue;
             CssKeyframes* keyframes = parse_keyframes_content(
                 rule->data.generic_rule.content, pool);
+            const char* source_file = sheet->origin_url ? sheet->origin_url : sheet->href;
+            if (keyframes && source_file) keyframes->source_file = pool_strdup(pool, source_file);
             if (!keyframes || !lam::pool_grow_array(pool, &registry->entries,
                     &registry->capacity, registry->count + 1, 16)) continue;
             registry->entries[registry->count++] = keyframes;
@@ -480,10 +527,10 @@ CssKeyframes* keyframe_registry_find(KeyframeRegistry* registry, const char* nam
 // CSS Animation Tick
 // ============================================================================
 
-static CssAnimatedProp* find_underlying_prop(CssAnimState* state, CssPropertyCode id) {
+static CssAnimatedProp* find_underlying_prop(CssAnimState* state, CssPropertyCode id, const char* name = nullptr) {
     if (!state) return NULL;
     for (int i = 0; i < state->underlying_count; i++) {
-        if (state->underlying[i].property_code == id) return &state->underlying[i];
+        if (animation_property_matches(&state->underlying[i], id, name)) return &state->underlying[i];
     }
     return NULL;
 }
@@ -505,6 +552,7 @@ static void css_animation_refresh_priority(CssAnimState* state) {
         CssKeyframeStop* stop = &state->keyframes->stops[stop_index];
         for (int index = 0; index < stop->property_count; index++) {
             CssPropertyCode property = stop->properties[index].property_code;
+            if (property == CSS_PROPERTY_CUSTOM) continue;
             if (css_animation_property_is_important(state, property)) continue;
             CssDeclaration* winner = layout_cascaded_physical_declaration(state->element, property);
             if (!winner || !(winner->important || winner->specificity.important)) continue;
@@ -522,13 +570,73 @@ static bool capture_underlying_value(DomElement* element, CssPropertyCode proper
                                      CssAnimatedProp* out);
 
 
+static FilterFunction filter_identity(FilterFunctionType type) {
+    FilterFunction result = {};
+    result.type = type;
+    if (type == FILTER_BRIGHTNESS || type == FILTER_CONTRAST ||
+        type == FILTER_OPACITY || type == FILTER_SATURATE) result.params.amount = 1.0f;
+    return result;
+}
+
+static FilterFunction* interpolate_filter_list(Pool* pool, const FilterFunction* from,
+                                               const FilterFunction* to, float progress) {
+    // Filter Effects 1 §14.1: mismatched lists are discrete; missing tails use identity filters.
+    for (const FilterFunction *a = from, *b = to; a || b;
+         a = a ? a->next.get() : nullptr, b = b ? b->next.get() : nullptr) {
+        if ((a && a->type == FILTER_URL) || (b && b->type == FILTER_URL) ||
+            (a && b && a->type != b->type)) return radiant::clone_filter_list(pool, progress < .5f ? from : to);
+    }
+    FilterFunction* result = radiant::clone_filter_list(pool, from ? from : to);
+    FilterFunction* tail = result;
+    while (tail && tail->next) tail = tail->next;
+    const FilterFunction* a = from;
+    const FilterFunction* b = to;
+    FilterFunction* node = result;
+    while (a || b) {
+        FilterFunction identity = filter_identity(a ? a->type : b->type);
+        const FilterFunction* left = a ? a : &identity;
+        const FilterFunction* right = b ? b : &identity;
+        if (!node) {
+            node = (FilterFunction*)pool_calloc(pool, sizeof(FilterFunction));
+            if (!node) { auto owned = lam::own(result); lam::free_owned_list(pool, owned); return nullptr; }
+            if (tail) tail->next = lam::own(node);
+            else result = node;
+            tail = node;
+        }
+        node->type = left->type;
+        if (left->type == FILTER_DROP_SHADOW) {
+            node->params.drop_shadow.offset_x = css_interpolate_float(left->params.drop_shadow.offset_x, right->params.drop_shadow.offset_x, progress);
+            node->params.drop_shadow.offset_y = css_interpolate_float(left->params.drop_shadow.offset_y, right->params.drop_shadow.offset_y, progress);
+            node->params.drop_shadow.blur_radius = max(0.0f, css_interpolate_float(left->params.drop_shadow.blur_radius, right->params.drop_shadow.blur_radius, progress));
+            node->params.drop_shadow.color = css_interpolate_color(left->params.drop_shadow.color, right->params.drop_shadow.color, progress);
+        } else {
+            // all single-component functions share their scalar union storage; hue angles stay unbounded.
+            float value = css_interpolate_float(left->params.amount, right->params.amount, progress);
+            node->params.amount = left->type == FILTER_HUE_ROTATE ? value : max(0.0f, value);
+        }
+        a = a ? a->next.get() : nullptr;
+        b = b ? b->next.get() : nullptr;
+        node = node->next;
+    }
+    return result;
+}
+
+
 static void css_animation_clear_value_samples(CssAnimState* state) {
     for (int index = 0; index < state->value_sample_count; index++) {
         CssAnimValueSample* sample = &state->value_samples[index];
         if (sample->computed.value_type == ANIM_VAL_TRANSFORM)
             radiant::destroy_transform_list(state->pool, sample->computed.value.transform);
+        else if (sample->computed.value_type == ANIM_VAL_IMAGE && sample->computed.value.image)
+            pool_free(state->pool, sample->computed.value.image);
+        else if (sample->computed.value_type == ANIM_VAL_FILTER) {
+            radiant::destroy_filter_list(state->pool, sample->computed.value.filter);
+            sample->computed.value.filter = nullptr;
+        }
     }
     state->value_sample_count = 0;
+    if (state->custom_value_pool) mem_pool_destroy(state->custom_value_pool);
+    state->custom_value_pool = nullptr;
 }
 
 static bool css_animation_compute_property(CssAnimState* state, LayoutContext* lycon,
@@ -536,6 +644,13 @@ static bool css_animation_compute_property(CssAnimState* state, LayoutContext* l
                                            CssAnimatedProp* computed) {
     *computed = *property;
     computed->expression = nullptr;
+    if (property->value_type == ANIM_VAL_CUSTOM) {
+        if (!state->custom_value_pool) state->custom_value_pool = mem_pool_create(nullptr, MEM_ROLE_CSS, "css.animation.custom-values");
+        if (!state->custom_value_pool) return false;
+        computed->value.custom = css_compute_custom_property_value(state->custom_value_pool,
+            state->element, property->custom_name, property->expression);
+        return true;
+    }
     const CssValue* value = resolve_var_function(lycon, property->expression);
     const CssEnumInfo* keyword = value && value->type == CSS_VALUE_TYPE_KEYWORD
         ? css_enum_info(value->data.keyword) : nullptr;
@@ -553,6 +668,10 @@ static bool css_animation_compute_property(CssAnimState* state, LayoutContext* l
             if (property->value_type == ANIM_VAL_TRANSFORM)
                 computed->value.transform = radiant::clone_transform_list(
                     state->pool, inherited.value.transform);
+            else if (property->value_type == ANIM_VAL_IMAGE)
+                computed->value.image = inherited.value.image ? pool_strdup(state->pool, inherited.value.image) : nullptr;
+            else if (property->value_type == ANIM_VAL_FILTER)
+                computed->value.filter = radiant::clone_filter_list(state->pool, inherited.value.filter);
             return true;
         }
         // invalid substitution defaults just like unset; noninherited values use initial.
@@ -572,7 +691,17 @@ static bool css_animation_compute_property(CssAnimState* state, LayoutContext* l
                 ? resolve_text_color_value(lycon, value) : resolve_color_value(lycon, value);
             return true;
         case ANIM_VAL_TRANSFORM:
-            computed->value.transform = resolve_transform_value(lycon, value, state->pool);
+            if (property->property_code == CSS_PROPERTY_TRANSFORM)
+                computed->value.transform = resolve_transform_value(lycon, value, state->pool);
+            else {
+                computed->value.transform = nullptr;
+                if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_NONE) return true;
+                TransformFunction function = {};
+                if (!resolve_individual_transform_value(lycon, property->property_code, value, &function)) return false;
+                computed->value.transform = (TransformFunction*)pool_calloc(state->pool, sizeof(TransformFunction));
+                if (!computed->value.transform) return false;
+                *computed->value.transform = function;
+            }
             return true;
         case ANIM_VAL_LENGTH:
             computed->value.length.is_percent = false;
@@ -586,6 +715,29 @@ static bool css_animation_compute_property(CssAnimState* state, LayoutContext* l
             }
             computed->value.length.value = resolve_length_value(lycon, property->property_code, value);
             return isfinite(computed->value.length.value);
+        case ANIM_VAL_BACKGROUND_POSITION:
+            computed->value.background_position = {};
+            if (value->type == CSS_VALUE_TYPE_PERCENTAGE)
+                computed->value.background_position.percent = (float)value->data.percentage.value;
+            else computed->value.background_position.pixels = resolve_length_value(
+                lycon, property->property_code, value);
+            return isfinite(computed->value.background_position.pixels) &&
+                isfinite(computed->value.background_position.percent);
+        case ANIM_VAL_IMAGE: {
+            computed->value.image = nullptr;
+            if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_NONE) return true;
+            const char* url = css_background_url_value(value);
+            CssDeclaration declaration = {};
+            declaration.source_file = state->keyframes ? state->keyframes->source_file : nullptr;
+            char* path = url ? resolve_css_resource_url(lycon, &declaration, url) : nullptr;
+            if (!path) return false;
+            computed->value.image = pool_strdup(state->pool, path);
+            pool_free(layout_prop_pool(lycon), path);
+            return computed->value.image != nullptr;
+        }
+        case ANIM_VAL_FILTER:
+            computed->value.filter = resolve_filter_value(lycon, property->property_code, value, state->pool);
+            return true;
         default: return false;
     }
 }
@@ -621,7 +773,10 @@ static bool css_animation_resolved_property(CssAnimState* state,
                                             const CssAnimatedProp* source,
                                             CssAnimatedProp* resolved) {
     // CSS and Web effects share animation-origin priority; transitions sample separately.
-    if (css_animation_property_is_important(state, source->property_code)) return false;
+    if (source->custom_name) {
+        const CssCustomProp* winner = dom_element_lookup_own_custom_property_entry(state->element, source->custom_name);
+        if (winner && winner->declaration && (winner->declaration->important || winner->declaration->specificity.important)) return false;
+    } else if (css_animation_property_is_important(state, source->property_code)) return false;
     if (source->expression) {
         for (int index = 0; index < state->value_sample_count; index++) {
             if (state->value_samples[index].source == source) {
@@ -1122,8 +1277,33 @@ static bool capture_underlying_value(DomElement* element, CssPropertyCode proper
         case ANIM_VAL_FLOAT:
             out->value.f = element->in_line ? element->in_line->opacity : 1.0f;
             return true;
+        case ANIM_VAL_BACKGROUND_POSITION: {
+            BackgroundProp* background = element->bound ? element->bound->background.get() : nullptr;
+            out->value.background_position = {};
+            if (background) {
+                bool horizontal = property == CSS_PROPERTY_BACKGROUND_POSITION_X;
+                float value = horizontal ? background->bg_position_x : background->bg_position_y;
+                bool percent = horizontal ? background->bg_position_x_is_percent : background->bg_position_y_is_percent;
+                out->value.background_position.pixels = horizontal ? background->bg_position_x_length : background->bg_position_y_length;
+                if (percent) out->value.background_position.percent = value;
+                else out->value.background_position.pixels += value;
+            }
+            return true;
+        }
+        case ANIM_VAL_IMAGE:
+            out->value.image = element->bound && element->bound->background ? element->bound->background->image : nullptr;
+            return true;
+        case ANIM_VAL_FILTER:
+            out->value.filter = element->filter_prop() ? element->filter_prop()->functions.get() : nullptr;
+            return true;
         case ANIM_VAL_TRANSFORM:
-            out->value.transform = element->transform ? element->transform->functions.get() : nullptr;
+            out->value.transform = nullptr;
+            if (element->transform) {
+                int slot = animation_transform_slot(property);
+                if (slot == 0) out->value.transform = element->transform->functions.get();
+                else if (element->transform->individual[slot - 1].type != TRANSFORM_NONE)
+                    out->value.transform = &element->transform->individual[slot - 1];
+            }
             return true;
         case ANIM_VAL_COLOR: {
             CssAnimationColorSlot slot = css_animation_color_slot(element, property);
@@ -1202,6 +1382,48 @@ static bool apply_animated_value(DomElement* element, CssAnimatedProp* prop) {
         if (slot.present) *slot.present = true;
         return false;
     }
+    if (prop->value_type == ANIM_VAL_BACKGROUND_POSITION) {
+        LayoutContext layout = {};
+        layout.doc = element->doc;
+        layout.pool = lam::up(element->doc && element->doc->view_tree
+            ? element->doc->view_tree->prop_pool.get() : nullptr);
+        layout_ensure_background(&layout, span);
+        BackgroundProp* background = span->boundary()->background;
+        bool horizontal = prop->property_code == CSS_PROPERTY_BACKGROUND_POSITION_X;
+        if (horizontal) {
+            background->bg_position_x = prop->value.background_position.percent;
+            background->bg_position_x_length = prop->value.background_position.pixels;
+            background->bg_position_x_is_percent = true;
+        } else {
+            background->bg_position_y = prop->value.background_position.percent;
+            background->bg_position_y_length = prop->value.background_position.pixels;
+            background->bg_position_y_is_percent = true;
+        }
+        background->bg_position_set = true;
+        return false;
+    }
+    if (prop->value_type == ANIM_VAL_IMAGE) {
+        LayoutContext layout = {};
+        layout.doc = element->doc;
+        layout.pool = lam::up(element->doc && element->doc->view_tree ? element->doc->view_tree->prop_pool.get() : nullptr);
+        BackgroundProp* background = layout_ensure_background(&layout, span);
+        if (prop->value.image) radiant_retain_background_image(background, lam::PoolPtr<char>(prop->value.image));
+        else radiant_clear_background_image(background);
+        return false;
+    }
+    if (prop->value_type == ANIM_VAL_FILTER) {
+        FilterProp* filter = element->filter_prop();
+        if (!filter && element->doc && element->doc->view_tree) filter = element->ensure_filter(element->doc->view_tree);
+        if (filter) {
+            if (!filter->functions_borrowed && element->doc && element->doc->view_tree) {
+                radiant::destroy_filter_list(element->doc->view_tree->prop_pool.get(), filter->functions);
+                filter->functions = nullptr;
+            }
+            filter->functions = lam::own(prop->value.filter);
+            filter->functions_borrowed = true;
+        }
+        return false;
+    }
 
     switch (prop->property_code) {
         case CSS_PROPERTY_DISPLAY: {
@@ -1224,12 +1446,21 @@ static bool apply_animated_value(DomElement* element, CssAnimatedProp* prop) {
             if (il) il->opacity = clamp_unit(prop->value.f);
             break;
         }
-        case CSS_PROPERTY_TRANSFORM: {
+        case CSS_PROPERTY_TRANSFORM:
+        case CSS_PROPERTY_TRANSLATE:
+        case CSS_PROPERTY_ROTATE:
+        case CSS_PROPERTY_SCALE: {
             if (!span->transform) {
                 if (element->doc && element->doc->view_tree)
                     span->ensure_transform(element->doc->view_tree);
             }
             if (span->transform) {
+                int slot = animation_transform_slot(prop->property_code);
+                if (slot > 0) {
+                    span->transform->individual[slot - 1] = prop->value.transform ? *prop->value.transform : TransformFunction{};
+                    span->transform->individual_sample[slot - 1] = prop->value.transform;
+                    break;
+                }
                 if (span->transform->functions_owner == TRANSFORM_FUNCTIONS_VIEW_POOL &&
                     element->doc && element->doc->view_tree) {
                     radiant::destroy_transform_list(element->doc->view_tree->prop_pool,
@@ -1343,9 +1574,9 @@ static void css_animation_append_endpoint(CssAnimationPropertyEndpoint endpoint,
     *has_previous = true;
 }
 
-static bool css_animation_property_pair(CssAnimState* state, CssPropertyCode property,
+static bool css_animation_property_pair(CssAnimState* state, const CssAnimatedProp* key,
                                          float progress, CssAnimationPropertyPair* pair) {
-    CssAnimatedProp* underlying = find_underlying_prop(state, property);
+    CssAnimatedProp* underlying = find_underlying_prop(state, key->property_code, key->custom_name);
     CssAnimationPropertyEndpoint previous = {};
     bool has_previous = false, has_pair = false;
     for (int index = 0; index < state->keyframes->stop_count; ) {
@@ -1356,7 +1587,7 @@ static bool css_animation_property_pair(CssAnimState* state, CssPropertyCode pro
         // equal-offset blocks cascade in source order, including their timing descriptor.
         do {
             stop = &state->keyframes->stops[index++];
-            CssAnimatedProp* source = find_prop_in_stop(stop, property);
+            CssAnimatedProp* source = find_prop_in_stop(stop, key->property_code, key->custom_name);
             CssAnimatedProp resolved = {};
             if (source && css_animation_resolved_property(state, source, &resolved)) {
                 endpoint.property = resolved;
@@ -1405,6 +1636,22 @@ static void css_animation_interpolate_property(CssAnimState* state,
         case ANIM_VAL_COLOR:
             result->value.color = css_interpolate_color(from->value.color, to->value.color, progress);
             break;
+        case ANIM_VAL_BACKGROUND_POSITION:
+            result->value.background_position.pixels = css_interpolate_float(
+                from->value.background_position.pixels, to->value.background_position.pixels, progress);
+            result->value.background_position.percent = css_interpolate_float(
+                from->value.background_position.percent, to->value.background_position.percent, progress);
+            break;
+        case ANIM_VAL_IMAGE:
+            result->value.image = progress < 0.5f ? from->value.image : to->value.image;
+            break;
+        case ANIM_VAL_FILTER:
+            result->value.filter = interpolate_filter_list(state->pool, from->value.filter, to->value.filter, progress);
+            break;
+        case ANIM_VAL_CUSTOM:
+            result->value.custom = css_interpolate_custom_property_value(state->custom_tick_pool,
+                state->element, result->custom_name, from->value.custom, to->value.custom, progress);
+            break;
         case ANIM_VAL_LENGTH:
             css_animation_interpolate_length(from, to, progress, result);
             break;
@@ -1443,9 +1690,97 @@ static void css_animation_dispatch_start(AnimationInstance* anim, CssAnimState* 
     }
 }
 
+struct CssCustomPaintTarget { DomElement* element; CssPropertyCode property; };
+struct CssCustomPaintUpdate {
+    DomElement* owner;
+    DomElement* consumer;
+    const char* name;
+    Pool* scratch;
+    CssCustomPaintTarget* targets;
+    int target_count;
+    int target_capacity;
+    bool valid;
+};
+
+static bool css_custom_paint_consumer(StyleNode* node, void* opaque) {
+    auto* update = (CssCustomPaintUpdate*)opaque;
+    const CssDeclaration* declaration = node->winning_decl;
+    if (!update->valid || !declaration || node->property_code == CSS_PROPERTY_CUSTOM ||
+        !css_value_contains_var_reference(declaration->value)) return true;
+    pool_reset(update->scratch);
+    if (!css_value_depends_on_custom_property(update->scratch, update->consumer,
+            declaration->value, update->owner, update->name)) return true;
+    DomElement* element = update->consumer;
+    CssPropertyCode property = node->property_code;
+    bool color_filter = property == CSS_PROPERTY_FILTER;
+    bool background_position = property == CSS_PROPERTY_BACKGROUND_POSITION_X ||
+        property == CSS_PROPERTY_BACKGROUND_POSITION_Y || property == CSS_PROPERTY_BACKGROUND_POSITION;
+    if ((!color_filter && !background_position) || element->view_type == RDT_VIEW_NONE ||
+        css_animation_needs_computed_sample(element, property) ||
+        (color_filter && (element->first_child || !element->filter_prop() ||
+            !render_filter_is_color_only(element->filterp()->functions)))) {
+        update->valid = false;
+        return true;
+    }
+    if (color_filter) {
+        LayoutContext context = {};
+        context.doc = element->doc; context.view = lam::up(static_cast<View*>(element));
+        context.elmt = lam::up(element); context.pool = lam::up(update->scratch);
+        context.css_value_scratch = lam::up(update->scratch);
+        const CssValue* value = css_resolve_element_var_value(update->scratch, element,
+            declaration->value, property);
+        FilterFunction* functions = resolve_filter_value(&context, property, value, update->scratch);
+        update->valid = render_filter_is_color_only(functions);
+        radiant::destroy_filter_list(update->scratch, functions);
+    }
+    if (update->valid) {
+        update->valid = lam::mem_grow_array(&update->targets, &update->target_capacity,
+            update->target_count + 1, 8, MEM_CAT_STYLE);
+        if (update->valid) update->targets[update->target_count++] = {element, property};
+    }
+    return true;
+}
+
+static bool css_custom_paint_element(DomNode* node, void* opaque) {
+    auto* update = (CssCustomPaintUpdate*)opaque;
+    if (!node->is_element()) return true;
+    DomElement* element = node->as_element();
+    // Generated content and spatial effects keep the ordinary cascade/layout
+    // path; existing color filters and background positions need paint only.
+    for (unsigned kind = 0; kind < PSEUDO_STYLE_COUNT; kind++)
+        if (element->pseudo_style((PseudoStyleKind)kind)) return false;
+    update->consumer = element;
+    style_tree_foreach(element->specified_style, css_custom_paint_consumer, update);
+    return update->valid;
+}
+
+static bool css_animation_update_custom_paint(DomElement* owner, const char* name) {
+    if (!owner->doc || !owner->doc->view_tree || !name) return false;
+    Pool* scratch = pool_create_sized(0);
+    if (!scratch) return false;
+    CssCustomPaintUpdate update = {owner, nullptr, name, scratch, nullptr, 0, 0, true};
+    bool valid = view_geometry_walk_dom_tree(owner, css_custom_paint_element, &update) && update.target_count > 0;
+    if (valid) {
+        LayoutContext context = {};
+        context.doc = owner->doc;
+        context.pool = lam::up(owner->doc->view_tree->prop_pool);
+        for (int index = 0; index < update.target_count; index++) {
+            DomElement* element = update.targets[index].element;
+            CssPropertyCode property = update.targets[index].property;
+            context.view = lam::up(static_cast<View*>(element)); context.elmt = lam::up(element);
+            resolve_css_property(property,
+                style_tree_get_declaration(element->specified_style, property), &context);
+        }
+    }
+    mem_free(update.targets);
+    pool_destroy(scratch);
+    return valid;
+}
+
 void css_animation_tick(AnimationInstance* anim, float t) {
     CssAnimState* state = (CssAnimState*)anim->state;
     if (!state || !state->keyframes || !state->element) return;
+    if (state->custom_tick_pool) pool_reset(state->custom_tick_pool);
     bool started = state->event_started;
     css_animation_dispatch_start(anim, state);
     if (started && !state->suppress_events &&
@@ -1461,12 +1796,22 @@ void css_animation_tick(AnimationInstance* anim, float t) {
     for (int stop_index = 0; stop_index < state->keyframes->stop_count; stop_index++) {
         CssKeyframeStop* stop = &state->keyframes->stops[stop_index];
         for (int index = 0; index < stop->property_count; index++) {
-            CssPropertyCode property = stop->properties[index].property_code;
-            if (property >= CSS_PROPERTY_COUNT || visited[property]) continue;
-            visited[property] = true;
+            CssAnimatedProp* key = &stop->properties[index];
+            CssPropertyCode property = key->property_code;
+            if (key->custom_name) {
+                bool seen = false;
+                for (int prior = 0; prior < stop_index && !seen; prior++)
+                    seen = find_prop_in_stop(&state->keyframes->stops[prior], property, key->custom_name) != nullptr;
+                if (seen) continue;
+                if (!state->custom_tick_pool) state->custom_tick_pool = mem_pool_create(nullptr, MEM_ROLE_CSS, "css.animation.custom-tick");
+                if (!state->custom_tick_pool) continue;
+            } else {
+                if (property >= CSS_PROPERTY_COUNT || visited[property]) continue;
+                visited[property] = true;
+            }
             if (css_animation_property_is_important(state, property)) continue;
             CssAnimationPropertyPair pair = {};
-            if (!css_animation_property_pair(state, property, t, &pair)) continue;
+            if (!css_animation_property_pair(state, key, t, &pair)) continue;
             float local_t = (t - pair.from.offset) / (pair.to.offset - pair.from.offset);
             const TimingFunction* timing = pair.from.timing ? pair.from.timing : &anim->timing;
             local_t = timing_function_eval(timing, local_t, animation_easing_before(anim));
@@ -1475,11 +1820,40 @@ void css_animation_tick(AnimationInstance* anim, float t) {
             CssAnimatedProp result = pair.to.property;
             css_animation_interpolate_property(state, &pair.from.property,
                 &pair.to.property, local_t, &result);
-            anim->layout_changed |= apply_animated_value(state->element, &result);
+            if (result.custom_name) {
+                bool changed = false;
+                if (!result.value.custom) changed = dom_element_clear_animation_custom_properties(state->element, state, result.custom_name);
+                else {
+                    CssFormatter* formatter = css_formatter_create(state->custom_tick_pool, CSS_FORMAT_COMPACT);
+                    if (!formatter) continue;
+                    css_format_value(formatter, const_cast<CssValue*>(result.value.custom));
+                    String* text = stringbuf_to_string(formatter->output);
+                    if (!text) continue;
+                    CssDeclaration sample = {};
+                    sample.property_code = CSS_PROPERTY_CUSTOM;
+                    sample.property_name = result.custom_name;
+                    sample.property_name_length = strlen(result.custom_name);
+                    sample.value = const_cast<CssValue*>(result.value.custom);
+                    sample.value_text = text->chars;
+                    sample.value_text_len = text->len;
+                    dom_element_set_animation_custom_property(state->element, &sample, state, &changed);
+                }
+                if (changed && !css_animation_update_custom_paint(state->element, result.custom_name)) {
+                    dom_invalidate_layout_subtree(state->element);
+                    anim->layout_changed = true;
+                }
+            } else anim->layout_changed |= apply_animated_value(state->element, &result);
+            if (result.value_type == ANIM_VAL_IMAGE) { state->sampled_image = result.value.image; state->image_applied = true; }
+            if (result.value_type == ANIM_VAL_FILTER) {
+                radiant::destroy_filter_list(state->pool, state->sampled_filter); state->sampled_filter = nullptr;
+                state->sampled_filter = lam::own(result.value.filter);
+                state->filter_applied = true;
+            }
             if (result.value_type == ANIM_VAL_TRANSFORM) {
                 // D4.5.1v4: replace the live borrow before reclaiming the preceding sample.
-                radiant::destroy_transform_list(state->pool, state->sampled_transform);
-                state->sampled_transform = lam::own(result.value.transform);
+                int slot = animation_transform_slot(property);
+                radiant::destroy_transform_list(state->pool, state->sampled_transform[slot]);
+                state->sampled_transform[slot] = lam::own(result.value.transform);
             }
         }
     }
@@ -1492,6 +1866,8 @@ void css_animation_tick(AnimationInstance* anim, float t) {
 void css_animation_finish(AnimationInstance* anim) {
     CssAnimState* state = (CssAnimState*)anim->state;
     if (state) {
+        if (anim->fill_mode != ANIM_FILL_FORWARDS && anim->fill_mode != ANIM_FILL_BOTH &&
+            dom_element_clear_animation_custom_properties(state->element, state)) dom_invalidate_layout_subtree(state->element);
         // zero-duration and no-fill effects can finish without a painted active sample.
         css_animation_dispatch_start(anim, state);
         double elapsed = anim->iteration_count >= 0
@@ -1511,6 +1887,11 @@ void css_animation_finish(AnimationInstance* anim) {
 static void css_animation_cancel(AnimationInstance* anim) {
     CssAnimState* state = (CssAnimState*)anim->state;
     if (!state) return;
+    if (dom_element_clear_animation_custom_properties(state->element, state)) {
+        dom_invalidate_layout_subtree(state->element);
+        if (!anim->suppress_cancel_event && state->element && state->element->doc)
+            doc_state_request_reflow(state->element->doc->state);
+    }
     if (!anim->suppress_cancel_event && !state->suppress_events && !anim->finish_notified) {
         double now = anim->play_state == ANIM_PLAY_PAUSED ? anim->pause_time : anim->sample_time;
         if (anim->play_state != ANIM_PLAY_PAUSED && state->ui_context &&
@@ -1524,18 +1905,53 @@ static void css_animation_cancel(AnimationInstance* anim) {
         radiant_dispatch_css_event(state->ui_context, state->element,
             "animationcancel", "animationName", state->keyframes->name, elapsed);
     }
+    if (state->image_applied && state->element && state->element->bound && state->element->bound->background &&
+        state->element->bound->background->image == state->sampled_image) {
+        CssAnimatedProp* underlying = find_underlying_prop(state, CSS_PROPERTY_BACKGROUND_IMAGE);
+        if (underlying) {
+            ViewTree* tree = state->element->doc ? state->element->doc->view_tree.get() : nullptr;
+            state->element->bound->background->image = underlying->value.image
+                ? pool_strdup(tree ? tree->prop_pool.get() : state->pool, underlying->value.image) : nullptr;
+        }
+    }
+    FilterProp* filter = state->element ? state->element->filter_prop() : nullptr;
+    if (state->filter_applied && filter && filter->functions_borrowed &&
+        filter->functions.get() == state->sampled_filter.get()) {
+        ViewTree* tree = state->element->doc ? state->element->doc->view_tree.get() : nullptr;
+        filter->functions = lam::own(radiant::clone_filter_list(tree ? tree->prop_pool.get() : state->pool, state->underlying_filter));
+        filter->functions_borrowed = false;
+    }
+    radiant::destroy_filter_list(state->pool, state->sampled_filter); state->sampled_filter = nullptr;
+    radiant::destroy_filter_list(state->pool, state->underlying_filter); state->underlying_filter = nullptr;
+    for (int i = 0; i < state->underlying_count; i++) {
+        if (state->underlying[i].value_type == ANIM_VAL_IMAGE && state->underlying[i].value.image)
+            pool_free(state->pool, state->underlying[i].value.image);
+    }
     if (state->underlying) pool_free(state->pool, state->underlying);
     if (state->element && state->element->transform &&
-        state->element->transform->functions.get() == state->sampled_transform.get()) {
+        state->sampled_transform[0] &&
+        state->element->transform->functions.get() == state->sampled_transform[0].get()) {
         ViewTree* tree = state->element->doc ? state->element->doc->view_tree.get() : nullptr;
         Pool* target_pool = tree ? tree->prop_pool : state->pool;
         state->element->transform->functions = lam::shared(
-            radiant::clone_transform_list(target_pool, state->underlying_transform));
+            radiant::clone_transform_list(target_pool, state->underlying_transform[0]));
         state->element->transform->functions_owner = TRANSFORM_FUNCTIONS_VIEW_POOL;
     }
-    radiant::destroy_transform_list(state->pool, state->sampled_transform);
-    radiant::destroy_transform_list(state->pool, state->underlying_transform);
+    for (int slot = 0; slot < 4; slot++) {
+        if (slot > 0 && state->element && state->element->transform && state->sampled_transform[slot] &&
+            state->element->transform->individual_sample[slot - 1] == state->sampled_transform[slot].get()) {
+            ViewTree* tree = state->element->doc ? state->element->doc->view_tree.get() : nullptr;
+            Pool* target_pool = tree ? tree->prop_pool.get() : state->pool;
+            TransformFunction* restored = radiant::clone_transform_list(target_pool, state->underlying_transform[slot]);
+            state->element->transform->individual[slot - 1] = restored ? *restored : TransformFunction{};
+            state->element->transform->individual_sample[slot - 1] = nullptr;
+        }
+        radiant::destroy_transform_list(state->pool, state->sampled_transform[slot]);
+        radiant::destroy_transform_list(state->pool, state->underlying_transform[slot]);
+    }
     css_animation_clear_value_samples(state);
+    if (state->custom_underlying_pool) mem_pool_destroy(state->custom_underlying_pool);
+    if (state->custom_tick_pool) mem_pool_destroy(state->custom_tick_pool);
     if (state->value_samples) pool_free(state->pool, state->value_samples);
     if (state->important_properties) pool_free(state->pool, state->important_properties);
     pool_free(state->pool, state);
@@ -1548,31 +1964,55 @@ static void css_animation_cancel(AnimationInstance* anim) {
 
 static void capture_animation_underlying(CssAnimState* state) {
     if (!state || !state->element || !state->keyframes) return;
+    CssAnimatedProp* previous_image = find_underlying_prop(state, CSS_PROPERTY_BACKGROUND_IMAGE);
+    char* retired_image = previous_image ? previous_image->value.image : nullptr;
+    auto retired_filter = state->underlying_filter;
+    state->underlying_filter = nullptr;
     state->underlying_count = 0;
+    if (state->custom_underlying_pool) pool_reset(state->custom_underlying_pool);
     for (int i = 0; i < state->keyframes->stop_count; i++) {
         CssKeyframeStop* stop = &state->keyframes->stops[i];
         for (int j = 0; j < stop->property_count; j++) {
-            CssPropertyCode id = stop->properties[j].property_code;
-            if (find_underlying_prop(state, id)) continue;
+            CssAnimatedProp* key = &stop->properties[j];
+            CssPropertyCode id = key->property_code;
+            if (find_underlying_prop(state, id, key->custom_name)) continue;
             CssAnimatedProp captured = {};
-            if (!capture_underlying_value(state->element, id, &captured)) continue;
+            if (key->custom_name) {
+                captured = *key;
+                captured.expression = nullptr;
+                if (!state->custom_underlying_pool) state->custom_underlying_pool = mem_pool_create(nullptr, MEM_ROLE_CSS, "css.animation.custom-base");
+                if (!state->custom_underlying_pool) continue;
+                captured.value.custom = css_compute_custom_property_base(state->custom_underlying_pool, state->element, key->custom_name);
+            } else if (!capture_underlying_value(state->element, id, &captured)) continue;
+            // reserve before cloning so allocation failure cannot orphan an owned snapshot.
+            if (!lam::pool_grow_array(state->pool, &state->underlying,
+                    &state->underlying_capacity, state->underlying_count + 1, 8)) {
+                log_error("css-anim: underlying value cache allocation failed");
+                if (retired_image) pool_free(state->pool, retired_image);
+                radiant::destroy_filter_list(state->pool, retired_filter); retired_filter = nullptr;
+                return;
+            }
+            if (captured.value_type == ANIM_VAL_IMAGE && captured.value.image)
+                captured.value.image = pool_strdup(state->pool, captured.value.image);
+            if (captured.value_type == ANIM_VAL_FILTER) {
+                state->underlying_filter = lam::own(radiant::clone_filter_list(state->pool, captured.value.filter));
+                captured.value.filter = state->underlying_filter;
+            }
             if (captured.value_type == ANIM_VAL_TRANSFORM) {
                 // D4.5.1v4: snapshots cannot borrow a relayout-owned function list.
                 TransformFunction* copy = radiant::clone_transform_list(
                     state->pool, captured.value.transform);
                 if (captured.value.transform && !copy) continue;
-                radiant::destroy_transform_list(state->pool, state->underlying_transform);
-                state->underlying_transform = lam::own(copy);
+                int slot = animation_transform_slot(id);
+                radiant::destroy_transform_list(state->pool, state->underlying_transform[slot]);
+                state->underlying_transform[slot] = lam::own(copy);
                 captured.value.transform = copy;
-            }
-            if (!lam::pool_grow_array(state->pool, &state->underlying,
-                    &state->underlying_capacity, state->underlying_count + 1, 8)) {
-                log_error("css-anim: underlying value cache allocation failed");
-                return;
             }
             state->underlying[state->underlying_count++] = captured;
         }
     }
+    if (retired_image) pool_free(state->pool, retired_image);
+    radiant::destroy_filter_list(state->pool, retired_filter); retired_filter = nullptr;
 }
 
 AnimationInstance* css_animation_create(AnimationScheduler* scheduler,
@@ -1596,8 +2036,13 @@ AnimationInstance* css_animation_create(AnimationScheduler* scheduler,
 
     AnimationInstance* inst = animation_instance_create(scheduler);
     if (!inst) {
+        if (state->custom_underlying_pool) mem_pool_destroy(state->custom_underlying_pool);
+        for (int i = 0; i < state->underlying_count; i++)
+            if (state->underlying[i].value_type == ANIM_VAL_IMAGE && state->underlying[i].value.image)
+                pool_free(pool, state->underlying[i].value.image);
+        radiant::destroy_filter_list(pool, state->underlying_filter); state->underlying_filter = nullptr;
         if (state->underlying) pool_free(pool, state->underlying);
-        radiant::destroy_transform_list(pool, state->underlying_transform);
+        for (int slot = 0; slot < 4; slot++) radiant::destroy_transform_list(pool, state->underlying_transform[slot]);
         pool_free(pool, state);
         return NULL;
     }
@@ -1998,6 +2443,7 @@ void css_animation_resolve(DomElement* element, LayoutContext* lycon) {
     DocState* state = (DocState*)doc->state;
     AnimationScheduler* scheduler = state ? state->animation_scheduler : nullptr;
     if (!scheduler) return;
+    uint32_t sample_style_version = element->style_version;
 
     static const CssPropertyCode properties[] = {
         CSS_PROPERTY_ANIMATION_NAME, CSS_PROPERTY_ANIMATION_DURATION,
@@ -2124,6 +2570,18 @@ void css_animation_resolve(DomElement* element, LayoutContext* lycon) {
     for (int index = 0; index < count; index++) {
         if (instances[index]) {
             animation_scheduler_move_before(scheduler, instances[index], before);
+            animation_scheduler_tick(scheduler, now, nullptr, true, instances[index]);
+        }
+    }
+    if (element->style_version != sample_style_version && lycon->doc && element->specified_style &&
+        lycon->view == static_cast<View*>(element)) {
+        // custom samples change computed var() consumers on this element too;
+        // re-resolve before overlaying ordinary animation values in list order.
+        resolve_css_styles(element, lycon);
+        for (int index = 0; index < count; index++) {
+            if (!instances[index]) continue;
+            CssAnimState* sample = (CssAnimState*)instances[index]->state;
+            css_animation_refresh_value_samples(sample, lycon);
             animation_scheduler_tick(scheduler, now, nullptr, true, instances[index]);
         }
     }

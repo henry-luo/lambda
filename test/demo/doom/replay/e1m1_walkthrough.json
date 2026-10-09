@@ -1,0 +1,409 @@
+{
+  "name": "E1M1 authored wall, slide, door, stairs and restart walkthrough",
+  "html": "test/demo/doom/doom.ls",
+  "viewport": {
+    "width": 660,
+    "height": 500
+  },
+  "events": [
+    {
+      "type": "advance_time",
+      "ms": 40,
+      "steps": 2
+    },
+    {
+      "type": "snapshot_state_store",
+      "target": {
+        "selector": "#scene"
+      },
+      "name": "scene"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#start"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "advance_time",
+      "ms": 1,
+      "steps": 1
+    },
+    {
+      "type": "key_down",
+      "key": "w"
+    },
+    {
+      "type": "advance_time",
+      "ms": 2715,
+      "steps": 95
+    },
+    {
+      "type": "key_up",
+      "key": "w"
+    },
+    {
+      "type": "key_press",
+      "key": "P"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-x",
+      "equals": "1056"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-y",
+      "equals": "-2896"
+    },
+    {
+      "type": "assert_state_store_snapshot",
+      "target": {
+        "selector": "#scene"
+      },
+      "name": "scene"
+    },
+    {
+      "type": "key_press",
+      "key": "P"
+    },
+    {
+      "type": "advance_time",
+      "ms": 1,
+      "steps": 1
+    },
+    {
+      "type": "key_down",
+      "key": "w"
+    },
+    {
+      "type": "key_down",
+      "key": "d"
+    },
+    {
+      "type": "advance_time",
+      "ms": 200,
+      "steps": 7
+    },
+    {
+      "type": "key_up",
+      "key": "w"
+    },
+    {
+      "type": "key_up",
+      "key": "d"
+    },
+    {
+      "type": "key_down",
+      "key": "s"
+    },
+    {
+      "type": "advance_time",
+      "ms": 229,
+      "steps": 8
+    },
+    {
+      "type": "key_up",
+      "key": "s"
+    },
+    {
+      "type": "key_down",
+      "key": "d"
+    },
+    {
+      "type": "advance_time",
+      "ms": 572,
+      "steps": 20
+    },
+    {
+      "type": "key_up",
+      "key": "d"
+    },
+    {
+      "type": "key_down",
+      "key": "w"
+    },
+    {
+      "type": "advance_time",
+      "ms": 1372,
+      "steps": 48
+    },
+    {
+      "type": "key_up",
+      "key": "w"
+    },
+    {
+      "type": "key_down",
+      "key": "d"
+    },
+    {
+      "type": "advance_time",
+      "ms": 572,
+      "steps": 20
+    },
+    {
+      "type": "key_up",
+      "key": "d"
+    },
+    {
+      "type": "key_down",
+      "key": "w"
+    },
+    {
+      "type": "advance_time",
+      "ms": 200,
+      "steps": 7
+    },
+    {
+      "type": "key_up",
+      "key": "w"
+    },
+    {
+      "type": "key_down",
+      "key": "d"
+    },
+    {
+      "type": "advance_time",
+      "ms": 286,
+      "steps": 10
+    },
+    {
+      "type": "key_up",
+      "key": "d"
+    },
+    {
+      "type": "key_down",
+      "key": "ArrowRight"
+    },
+    {
+      "type": "advance_time",
+      "ms": 515,
+      "steps": 18
+    },
+    {
+      "type": "key_up",
+      "key": "ArrowRight"
+    },
+    {
+      "type": "key_down",
+      "key": "e"
+    },
+    {
+      "type": "advance_time",
+      "ms": 29,
+      "steps": 1
+    },
+    {
+      "type": "key_up",
+      "key": "e"
+    },
+    {
+      "type": "advance_time",
+      "ms": 1000,
+      "steps": 35
+    },
+    {
+      "type": "key_press",
+      "key": "P"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-doors-open",
+      "equals": "1"
+    },
+    {
+      "type": "assert_state_store_snapshot",
+      "target": {
+        "selector": "#scene"
+      },
+      "name": "scene"
+    },
+    {
+      "type": "key_press",
+      "key": "P"
+    },
+    {
+      "type": "advance_time",
+      "ms": 1,
+      "steps": 1
+    },
+    {
+      "type": "key_down",
+      "key": "w"
+    },
+    {
+      "type": "advance_time",
+      "ms": 572,
+      "steps": 20
+    },
+    {
+      "type": "key_up",
+      "key": "w"
+    },
+    {
+      "type": "key_press",
+      "key": "P"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-x",
+      "equals": "1690"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-y",
+      "equals": "-2501"
+    },
+    {
+      "type": "assert_state_store_snapshot",
+      "target": {
+        "selector": "#scene"
+      },
+      "name": "scene"
+    },
+    {
+      "type": "key_press",
+      "key": "P"
+    },
+    {
+      "type": "advance_time",
+      "ms": 1,
+      "steps": 1
+    },
+    {
+      "type": "key_down",
+      "key": "w"
+    },
+    {
+      "type": "advance_time",
+      "ms": 1429,
+      "steps": 50
+    },
+    {
+      "type": "key_up",
+      "key": "w"
+    },
+    {
+      "type": "key_down",
+      "key": "d"
+    },
+    {
+      "type": "advance_time",
+      "ms": 858,
+      "steps": 30
+    },
+    {
+      "type": "key_up",
+      "key": "d"
+    },
+    {
+      "type": "key_down",
+      "key": "a"
+    },
+    {
+      "type": "advance_time",
+      "ms": 343,
+      "steps": 12
+    },
+    {
+      "type": "key_up",
+      "key": "a"
+    },
+    {
+      "type": "key_down",
+      "key": "w"
+    },
+    {
+      "type": "advance_time",
+      "ms": 572,
+      "steps": 20
+    },
+    {
+      "type": "key_up",
+      "key": "w"
+    },
+    {
+      "type": "key_press",
+      "key": "P"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-floor",
+      "equals": "24"
+    },
+    {
+      "type": "assert_state_store_snapshot",
+      "target": {
+        "selector": "#scene"
+      },
+      "name": "scene"
+    },
+    {
+      "type": "key_press",
+      "key": "P"
+    },
+    {
+      "type": "advance_time",
+      "ms": 1,
+      "steps": 1
+    },
+    {
+      "type": "key_press",
+      "key": "R"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-ticks",
+      "equals": "0"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-health",
+      "equals": "100"
+    },
+    {
+      "type": "assert_state_store_snapshot",
+      "target": {
+        "selector": "#scene"
+      },
+      "name": "scene"
+    },
+    {
+      "type": "key_press",
+      "key": "P"
+    }
+  ],
+  "default_timeout": 1
+}

@@ -1,0 +1,183 @@
+{
+  "pose": {
+    "name": "e1m1-top",
+    "map": "E1M1",
+    "skill": 1,
+    "time": 0,
+    "camera": "top",
+    "landmarks": [
+      {
+        "name": "sky texture",
+        "rect": [
+          92,
+          22,
+          16,
+          16
+        ],
+        "rgb_min": [
+          180,
+          180,
+          180
+        ],
+        "rgb_max": [
+          200,
+          200,
+          200
+        ],
+        "max_mean_channel_delta": 8
+      },
+      {
+        "name": "courtyard grass",
+        "rect": [
+          397,
+          252,
+          16,
+          16
+        ],
+        "rgb_min": [
+          15,
+          35,
+          8
+        ],
+        "rgb_max": [
+          30,
+          60,
+          22
+        ],
+        "max_mean_channel_delta": 8
+      },
+      {
+        "name": "courtyard floor",
+        "rect": [
+          442,
+          282,
+          16,
+          16
+        ],
+        "rgb_min": [
+          55,
+          40,
+          18
+        ],
+        "rgb_max": [
+          75,
+          60,
+          35
+        ],
+        "max_mean_channel_delta": 8
+      },
+      {
+        "name": "recessed pool",
+        "rect": [
+          307,
+          242,
+          16,
+          16
+        ],
+        "rgb_min": [
+          4,
+          4,
+          40
+        ],
+        "rgb_max": [
+          18,
+          18,
+          60
+        ],
+        "max_mean_channel_delta": 8
+      }
+    ]
+  },
+  "viewport": {
+    "width": 660,
+    "height": 500,
+    "scale": 1
+  },
+  "browser": "HeadlessChrome/154.0.8037.57",
+  "source": "fixtures/_pose.ls and the shared scene/presenter; authored declarations exported without computed geometry.",
+  "html_sha256": "335f92aa18011e192e3693158a0844ba2c3e9731739be863c9071244362d59c8",
+  "browser_sha256": "e2fb25640b4472f557af1b4735f81a5e8261041a5a1b4cc137bda8da77ad3203",
+  "native_sha256": "8e5dd7eac6ee8a2ba1e66dcd06a42d894d4577050e1b91a126dfcbcbbf1a325e",
+  "native_binary_sha256": "ccf436fbdc9e5d700a7b65d8592a4a64b2c6ef57124c71f725f3e531033423df",
+  "validation": {
+    "landmarks": [
+      {
+        "name": "sky texture",
+        "rect": [
+          92,
+          22,
+          16,
+          16
+        ],
+        "native_rgb": [
+          188.234375,
+          188.234375,
+          188.234375
+        ],
+        "browser_rgb": [
+          188.421875,
+          188.421875,
+          188.421875
+        ]
+      },
+      {
+        "name": "courtyard grass",
+        "rect": [
+          397,
+          252,
+          16,
+          16
+        ],
+        "native_rgb": [
+          22.8671875,
+          48.44921875,
+          14.80078125
+        ],
+        "browser_rgb": [
+          21.18359375,
+          44.421875,
+          13.484375
+        ]
+      },
+      {
+        "name": "courtyard floor",
+        "rect": [
+          442,
+          282,
+          16,
+          16
+        ],
+        "native_rgb": [
+          65.16015625,
+          49.12890625,
+          24.59765625
+        ],
+        "browser_rgb": [
+          66.85546875,
+          50.25,
+          25.609375
+        ]
+      },
+      {
+        "name": "recessed pool",
+        "rect": [
+          307,
+          242,
+          16,
+          16
+        ],
+        "native_rgb": [
+          9.39453125,
+          9.15625,
+          49.51953125
+        ],
+        "browser_rgb": [
+          10.328125,
+          9.8359375,
+          49.734375
+        ]
+      }
+    ],
+    "passed": true
+  }
+}

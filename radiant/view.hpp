@@ -304,6 +304,10 @@ typedef struct {
     float values[16];
 } RdtMatrix4;
 
+// context_only stops before the enclosing flat box; shared by backfaces and
+// the preserved-context painter so both classify the same plane orientation.
+RdtMatrix4 view_accumulated_transform_3d(View* view, bool context_only);
+
 static inline RdtMatrix4 rdt_matrix4_identity(void) {
     RdtMatrix4 m = {};
     m.values[0] = m.values[5] = m.values[10] = m.values[15] = 1.0f;
@@ -472,6 +476,11 @@ static inline bool rdt_matrix_project_rect_bounds(
     if (!matrix || !out_left || !out_top || !out_right || !out_bottom) {
         return false;
     }
+    float min_w = matrix->e33 + fminf(matrix->e31 * left, matrix->e31 * right) +
+        fminf(matrix->e32 * top, matrix->e32 * bottom);
+    // A rectangle crossing w=0 has no finite four-corner projected bound.
+    // Recording callers retain it as unbounded until viewport clipping.
+    if (min_w <= 0.00001f) return false;
     float x0 = 0.0f, y0 = 0.0f, x1 = 0.0f, y1 = 0.0f;
     float x2 = 0.0f, y2 = 0.0f, x3 = 0.0f, y3 = 0.0f;
     if (!rdt_matrix_project_point(matrix, left, top, &x0, &y0) ||
@@ -1440,6 +1449,8 @@ typedef struct {
     // Background-position: <length> | <percentage> | left | center | right | top | bottom
     float bg_position_x;   // x offset (px or %)
     float bg_position_y;   // y offset (px or %)
+    float bg_position_x_length; // additional px component of an animated length-percentage
+    float bg_position_y_length;
     uint8_t bg_position_x_is_percent : 1;
     uint8_t bg_position_y_is_percent : 1;
     uint8_t bg_position_set : 1;  // true if position was explicitly set
@@ -1463,12 +1474,17 @@ typedef struct {
     CssEnum blend_mode;  // CSS background-blend-mode (CSS_VALUE_NORMAL default, CSS_VALUE_MULTIPLY, etc.)
 } BackgroundProp;
 
+inline float background_position_offset(const BackgroundProp* background, bool horizontal,
+                                         float available, float raster_scale = 1.0f) {
+    float value = horizontal ? background->bg_position_x : background->bg_position_y;
+    bool percent = horizontal ? background->bg_position_x_is_percent : background->bg_position_y_is_percent;
+    float length = horizontal ? background->bg_position_x_length : background->bg_position_y_length;
+    return (percent ? available * value / 100.0f : value * raster_scale) + length * raster_scale;
+}
+
 // tier-2: view-pool, rebuilt each relayout
 typedef struct MaskProp {
-    bool has_radial_gradient;
-    float cx, cy;           // 0.0-1.0 relative to border box
-    float radius;           // CSS px unless radius_is_percent is true
-    bool radius_is_percent;
+    lam::Own<RadialGradient> radial_gradient;
 } MaskProp;
 
 /**
@@ -1569,6 +1585,7 @@ typedef struct TransformProp {
     lam::Shared<TransformFunction> functions;    // Linked list of transform functions (applied in order)
     // inline values survive transform-list replacement without borrowing another view's pool nodes.
     TransformFunction individual[3];           // translate, rotate, scale; TRANSFORM_NONE means none
+    const TransformFunction* individual_sample[3]; // animation-pool borrow, cleared by authored resolution
     // Keyframe samples borrow their immutable list from the document pool;
     // resolved CSS functions are owned by the mutable view-property pool.
     TransformFunctionOwner functions_owner;
@@ -1626,8 +1643,11 @@ typedef struct FilterFunction {
             float blur_radius;
             Color color;
         } drop_shadow;
-        lam::Up<const char> url;             // url() - SVG filter reference
+        lam::Own<const char> url;             // copied into the function's pool
     } params;
+    lam::Up<DomDocument> source_document;
+    DomNodeRef source_owner;
+    lam::Own<struct CssSvgFilter> svg; // native snapshot prepared before display replay
     lam::Own<struct FilterFunction> next;     // Next filter in chain
 } FilterFunction;
 
@@ -1637,6 +1657,7 @@ typedef struct FilterFunction {
 // tier-2: view-pool, rebuilt each relayout
 typedef struct FilterProp {
     lam::Own<FilterFunction> functions;       // Linked list of filter functions (applied in order)
+    bool functions_borrowed; // animation-owned samples survive view-pool resets
 } FilterProp;
 
 /**
@@ -2889,7 +2910,7 @@ struct ViewTree {
     size_t canonical_prop_cap_bytes;
     CanonicalPropStats canonical_stats;
     // Distinct computed font-family lists; strings live in prop_pool until tree teardown.
-    lam::Own<struct CanonicalFontFamilies> canonical_font_families;
+    lam::Own<struct CanonicalStrings> canonical_strings;
     lam::Own<TextRect> free_text_rects; // Reusable retained text fragments owned by prop_pool.
     lam::Up<View> root;
     HtmlVersion html_version;
@@ -2951,6 +2972,8 @@ void view_tree_commit_inline_prop(ViewTree* tree, DomElement* element,
 // pseudo/temporary fonts and text views all borrow family strings without
 // owning them, so a computed list must outlive every restyle: equal lists share
 // one tree-lifetime string instead of allocating per resolution.
+const char* view_tree_canonical_string(ViewTree* tree, const char* chars,
+                                       size_t length, bool* inserted = nullptr);
 const char* view_tree_canonical_font_family(ViewTree* tree, const char* chars,
                                             size_t length);
 
@@ -3573,6 +3596,10 @@ typedef enum CssAnimValueType {
     ANIM_VAL_ASPECT_RATIO,  // aspect-ratio (positive ratios interpolate multiplicatively)
     ANIM_VAL_TRANSFORM,     // transform function list
     ANIM_VAL_DISPLAY,       // display's discrete outer/inner box type
+    ANIM_VAL_BACKGROUND_POSITION, // independent px and percentage components
+    ANIM_VAL_IMAGE,          // discrete computed background-image URL or none
+    ANIM_VAL_FILTER,         // ordered filter functions, padded with identity values
+    ANIM_VAL_CUSTOM,         // computed registered value or discrete unregistered tokens
 } CssAnimValueType;
 
 typedef struct CssPropertyRuntimeMetadata {
@@ -3602,6 +3629,7 @@ typedef enum CssAnimComposite {
 // keyframe-owner pool; sampled copies hold computed values.
 typedef struct CssAnimatedProp {
     CssPropertyCode property_code;
+    const char* custom_name; // custom properties retain their full, case-sensitive identity
     CssAnimValueType value_type;
     CssAnimComposite composite;
     const CssValue* expression; // borrowed from the keyframe-owner pool until computed
@@ -3618,6 +3646,13 @@ typedef struct CssAnimatedProp {
             bool is_auto;
         } aspect_ratio;         // ANIM_VAL_ASPECT_RATIO
         TransformFunction* transform;  // ANIM_VAL_TRANSFORM (linked list)
+        FilterFunction* filter;
+        const CssValue* custom;
+        char* image;
+        struct {
+            float pixels;
+            float percent;
+        } background_position;
         struct {
             CssValue* value;       // parsed keyframe value
             DisplayValue used;     // captured underlying used value
@@ -3643,6 +3678,7 @@ typedef struct CssKeyframes {
     lam::Up<const char> name;           // animation name (e.g., "fadeIn")
     lam::OwnArr<CssKeyframeStop> stops;     // sorted by offset ascending
     int stop_count;
+    const char* source_file; // owning stylesheet URL for keyframe image references
 } CssKeyframes;
 
 // ============================================================================
@@ -3729,8 +3765,16 @@ typedef struct CssAnimState {
     lam::OwnArr<CssAnimatedProp> underlying;
     int underlying_count;
     int underlying_capacity;
-    lam::Own<TransformFunction> underlying_transform;
-    lam::Own<TransformFunction> sampled_transform;
+    lam::Own<TransformFunction> underlying_transform[4]; // transform, translate, rotate, scale
+    lam::Own<TransformFunction> sampled_transform[4];
+    const char* sampled_image;
+    bool image_applied;
+    lam::Own<FilterFunction> underlying_filter;
+    lam::Own<FilterFunction> sampled_filter;
+    bool filter_applied;
+    Pool* custom_value_pool; // replaceable computation epoch, independent of live DOM samples
+    Pool* custom_underlying_pool;
+    Pool* custom_tick_pool;
     lam::OwnArr<CssAnimValueSample> value_samples;
     int value_sample_count;
     int value_sample_capacity;
@@ -3909,11 +3953,19 @@ void set_multi_value(LayoutContext* lycon, MultiValue* parts, const CssValue* va
 float resolve_css_angle_value(const CssValue* value);
 float layout_effective_zoom(View* view);
 char* resolve_css_resource_url(LayoutContext* lycon, const CssDeclaration* decl,
-                               const char* url);
+    const char* url, bool canonical = false);
+const char* css_background_url_value(const CssValue* value);
 const CssValue* css_resolve_element_var_value(Pool* pool, DomElement* element,
     const CssValue* value, CssPropertyCode property = CSS_PROPERTY_UNKNOWN);
+bool css_value_depends_on_custom_property(Pool* pool, DomElement* element,
+    const CssValue* value, DomElement* owner, const char* name);
 const CssValue* css_compute_element_custom_property(Pool* pool, DomElement* element,
     const char* name, size_t name_length = (size_t)-1, bool preserve_tokens = false);
+const CssValue* css_compute_custom_property_value(Pool* pool, DomElement* element,
+    const char* name, const CssValue* specified);
+const CssValue* css_compute_custom_property_base(Pool* pool, DomElement* element, const char* name);
+const CssValue* css_interpolate_custom_property_value(Pool* pool, DomElement* element,
+    const char* name, const CssValue* from, const CssValue* to, float progress);
 const CssValue* css_compute_element_custom_property_text(Pool* pool, DomElement* element,
     const char* name, size_t name_length, StrView* text);
 bool css_compute_cascaded_font_size(DomElement* element, float* font_size);
@@ -3929,6 +3981,8 @@ const char* css_select_font_shorthand_family(LayoutContext* lycon,
                                              size_t family_start_index);
 void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon);
 void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, LayoutContext* lycon);
+FilterFunction* resolve_filter_value(LayoutContext* context, CssPropertyCode property,
+                                     const CssValue* value, Pool* target_pool);
 void layout_reset_color_background_style_cache(LayoutContext* lycon, ViewSpan* view);
 DisplayValue resolve_display_value(void* child);
 DisplayValue css_default_display_for_element(DomElement* element, DomNode* node);
@@ -4053,6 +4107,9 @@ bool interpolate_transform_matrix(const RdtMatrix4* from, const RdtMatrix4* to,
 float normalize_transform_vector3(float vector[3]);
 TransformFunction* clone_transform_function(Pool* pool, const TransformFunction* source);
 TransformFunction* clone_transform_list(Pool* pool, const TransformFunction* source);
+FilterFunction* clone_filter_list(Pool* pool, const FilterFunction* source);
+void destroy_filter_list(Pool* pool, FilterFunction* functions);
+void release_filter_snapshots(FilterFunction* functions);
 void destroy_transform_list(Pool* pool, TransformFunction* functions);
 void destroy_transform_function_payload(Pool* pool, TransformFunction* function);
 TransformLengthTerm* clone_transform_length_terms(Pool* pool, const TransformLengthTerm* source,
@@ -4072,6 +4129,9 @@ extern RdtMatrix4 compute_transform_matrix_3d(const TransformProp* transform,
                                               float origin_z = 0.0f);
 extern RdtMatrix4 compute_parent_perspective_matrix_3d(float distance,
                                                         float origin_x, float origin_y);
+RdtMatrix matrix4_project_to_2d(const RdtMatrix4* matrix);
+RdtMatrix4 compute_child_projection_matrix_3d(const TransformProp* transform,
+    float width, float height, float x, float y, bool preserve_depth);
 
 inline float transform_perspective_origin_offset(const TransformProp* transform,
                                                  float extent, bool horizontal) {
@@ -4103,6 +4163,8 @@ bool resolve_transform_function_value(const CssValue* value, TransformFunction* 
     TransformNumericResolver resolve_numeric = nullptr);
 TransformFunction* resolve_transform_value(LayoutContext* context, const CssValue* value,
     Pool* document_pool = nullptr);
+bool resolve_individual_transform_value(LayoutContext* context, CssPropertyCode property,
+    const CssValue* value, TransformFunction* out);
 void resolve_transform_origin_value(const CssValue* value, TransformProp* transform,
     TransformLengthResolver resolve_length, void* context);
 
@@ -4112,6 +4174,8 @@ void resolve_transform_origin_value(const CssValue* value, TransformProp* transf
 typedef struct {
     bool is_mouse_down;
     float down_x, down_y;  // mouse position when mouse down
+    float last_x, last_y;
+    bool has_position;
     int cursor;  // current cursor style (CssEnum value)
     GLFWcursor* sys_cursor;
 } MouseState;
@@ -4132,6 +4196,7 @@ typedef struct UiContext {
     float viewport_height; // intended viewport height (CSS logical pixels, for vh/vw units)
     lam::Up<ImageSurface> surface;  // the current render target: window_surface, or one an export pass swaps in
     lam::Own<ImageSurface> window_surface;  // the surface create_surface made; destroy releases it
+    bool render_failed;             // sticky host failure; never present an invalid paint stream
 
     // font handling
     lam::Up<struct FontContext> font_ctx; // the font context in use: owned_font_ctx, or the host's for an isolated UI
@@ -4168,6 +4233,7 @@ typedef struct UiContext {
     // thread.  Recursive layout may construct short-lived LayoutContexts.
     int iframe_depth;
     MouseState mouse_state; // current mouse state
+    DomNodeRef relative_mouse_owner; // validated against the presented document
     // Native click-series tracking is window/UI state. Keeping it here avoids
     // sharing double/triple-click semantics across independent UI contexts.
     double last_click_time;

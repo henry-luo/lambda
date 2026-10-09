@@ -365,6 +365,8 @@ HPDF_STATUS HPDF_Page_ClosePathFillStroke(HPDF_Page page);
  * @return      HPDF_OK on success
  */
 HPDF_STATUS HPDF_Page_Clip(HPDF_Page page);
+// intersect with the current path using the even-odd rule, then end the path.
+HPDF_STATUS HPDF_Page_Eoclip(HPDF_Page page);
 
 /**
  * Draw an ABGR8888 image as an inline RGB image using the supplied PDF

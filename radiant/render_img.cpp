@@ -186,6 +186,7 @@ static int render_export_session_to_png(RenderExportSession* session, const char
         if (v > 0) PNG_TILE_THRESHOLD = (int64_t)v;
     }
 
+    ui_context->render_failed = false;
     bool rendered = false;
 
     int content_max_x = 0, content_max_y = 0;
@@ -327,7 +328,8 @@ int render_uicontext_to_png(UiContext* uicon, const char* png_file) {
     RenderOutputTarget target;
     render_output_target_init(&target, RENDER_OUTPUT_PNG, png_file);
     target.surface = lam::up(uicon->surface);
-    render_output_render_view_tree_to_target(uicon, uicon->document->view_tree, &target);
+    int status = render_output_render_view_tree_to_target(uicon, uicon->document->view_tree, &target);
+    if (status != 0) return status;
 
     log_info("render_uicontext_to_png: completed successfully");
     return 0;
@@ -484,8 +486,9 @@ static bool render_batch_single(
         }
     }
 
+    bool success = !ui_context->render_failed;
     render_batch_cleanup_doc(ui_context);
-    return true;
+    return success;
 }
 
 int cmd_render_batch(int argc, char** argv) {

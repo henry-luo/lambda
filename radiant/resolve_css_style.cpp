@@ -27,6 +27,7 @@ Color resolve_color_value(LayoutContext* lycon, const CssValue* value);
 static Color get_current_color(LayoutContext* lycon);
 static void resolve_text_emphasis_longhands(DomElement* element, LayoutContext* lycon);
 static bool css_value_is_background_color_candidate(const CssValue* value);
+const char* css_background_url_value(const CssValue* value);
 static CssEnum find_inherited_block_keyword(DomElement* element,
                                             CssPropertyCode property,
                                             bool check_specified,
@@ -82,17 +83,20 @@ const CssValue* css_value_at(const CssValue* value, int index) {
         ? value->data.list.values[index] : index == 0 ? value : nullptr;
 }
 
-static float resolve_filter_amount(const CssValue* value, bool clamp_unit_interval) {
+static float resolve_filter_amount(LayoutContext* context, const CssValue* value, bool clamp_unit_interval) {
     float amount = 1.0f;
     if (value && value->type == CSS_VALUE_TYPE_PERCENTAGE) {
         amount = (float)value->data.percentage.value / 100.0f;
     } else if (value && value->type == CSS_VALUE_TYPE_NUMBER) {
         amount = (float)value->data.number.value;
+    } else if (value) {
+        // reuse unitless math and percentage computation without opacity's upper clamp.
+        amount = resolve_length_value(context, CSS_PROPERTY_OPACITY, value);
     }
     if (clamp_unit_interval) {
         amount = clamp_unit(amount);
     }
-    return amount;
+    return max(0.0f, amount);
 }
 
 static bool resolve_css_angle_degrees(const CssValue* value, float* degrees) {
@@ -119,19 +123,19 @@ static float resolve_filter_hue_angle(const CssValue* value) {
 
 static FilterFunction* resolve_filter_function(LayoutContext* lycon,
                                                CssPropertyCode prop_id,
-                                               CssFunction* func) {
-    if (!func || !func->name || func->arg_count == 0) return nullptr;
-    FilterFunction* filter = (FilterFunction*)alloc_prop(lycon, sizeof(FilterFunction));
-    memset(filter, 0, sizeof(FilterFunction));
+                                               CssFunction* func, Pool* target_pool) {
+    if (!func || !func->name) return nullptr;
+    FilterFunction* filter = (FilterFunction*)pool_calloc(target_pool, sizeof(FilterFunction));
+    if (!filter) return nullptr;
     const char* name = func->name;
-    const CssValue* arg = func->args[0];
+    const CssValue* arg = func->arg_count > 0 ? func->args[0] : nullptr;
     if (strcmp(name, "blur") == 0) {
         filter->type = FILTER_BLUR;
         filter->params.blur_radius = arg && arg->type == CSS_VALUE_TYPE_LENGTH
             ? resolve_length_value(lycon, prop_id, arg) : 0.0f;
     } else if (const FilterAmountSpec* spec = find_filter_amount_spec(name)) {
         filter->type = spec->type;
-        filter->params.amount = resolve_filter_amount(arg, spec->clamp_unit_interval);
+        filter->params.amount = resolve_filter_amount(lycon, arg, spec->clamp_unit_interval);
     } else if (strcmp(name, "hue-rotate") == 0) {
         filter->type = FILTER_HUE_ROTATE;
         filter->params.angle = resolve_filter_hue_angle(arg);
@@ -162,6 +166,7 @@ static FilterFunction* resolve_filter_function(LayoutContext* lycon,
             }
         }
     } else {
+        pool_free(target_pool, filter);
         return nullptr;
     }
     return filter;
@@ -420,7 +425,7 @@ float radiant::resolve_computed_length_percentage(const CssValue* value, float r
     return resolve_length_value(&context, CSS_PROPERTY_TRANSFORM, value);
 }
 
-static bool resolve_individual_transform_value(LayoutContext* lycon,
+bool resolve_individual_transform_value(LayoutContext* lycon,
     CssPropertyCode property, const CssValue* value, TransformFunction* out) {
     if (!value || !out || !css_property_validate_value(property, value)) return false;
     CssValue* args[4] = {};
@@ -537,6 +542,25 @@ TransformFunction* resolve_transform_value(LayoutContext* context, const CssValu
     return resolve_css_function_list<TransformFunction>(value,
         [&](const CssValue* item) { return resolve_transform_function(context, item, document_pool); },
         append_transform_function);
+}
+
+FilterFunction* resolve_filter_value(LayoutContext* context, CssPropertyCode property,
+                                     const CssValue* value, Pool* target_pool) {
+    return resolve_css_function_list<FilterFunction>(value,
+        [&](const CssValue* item) {
+            if (const char* url = css_background_url_value(item)) {
+                auto* filter = (FilterFunction*)pool_calloc(target_pool, sizeof(FilterFunction));
+                if (!filter) return (FilterFunction*)nullptr;
+                filter->type = FILTER_URL;
+                filter->params.url = lam::own(pool_strdup(target_pool, url));
+                if (!filter->params.url) { pool_free(target_pool, filter); return (FilterFunction*)nullptr; }
+                filter->source_document = lam::up(context ? context->doc : nullptr);
+                filter->source_owner = dom_node_ref(context ? context->view : nullptr);
+                return filter;
+            }
+            return item && item->type == CSS_VALUE_TYPE_FUNCTION
+                ? resolve_filter_function(context, property, item->data.function, target_pool) : nullptr;
+        }, append_filter_function);
 }
 
 static void resolve_origin_keyword(CssEnum keyword, int index,
@@ -739,9 +763,11 @@ static void resolve_background_position_axis(LayoutContext* lycon,
     if (horizontal) {
         background->bg_position_x = result.value;
         background->bg_position_x_is_percent = result.is_percent;
+        background->bg_position_x_length = 0.0f;
     } else {
         background->bg_position_y = result.value;
         background->bg_position_y_is_percent = result.is_percent;
+        background->bg_position_y_length = 0.0f;
     }
     background->bg_position_set = true;
 }
@@ -1938,6 +1964,18 @@ static void resolve_gradient_center(LayoutContext* lycon, const CssValue* prelud
     }
 }
 
+static bool resolve_radial_gradient_keyword(RadialGradient* gradient, const char* name) {
+    if (!name) return false;
+    if (strcmp(name, "circle") == 0) gradient->shape = RADIAL_SHAPE_CIRCLE;
+    else if (strcmp(name, "ellipse") == 0) gradient->shape = RADIAL_SHAPE_ELLIPSE;
+    else if (strcmp(name, "closest-side") == 0) gradient->size = RADIAL_SIZE_CLOSEST_SIDE;
+    else if (strcmp(name, "farthest-side") == 0) gradient->size = RADIAL_SIZE_FARTHEST_SIDE;
+    else if (strcmp(name, "closest-corner") == 0) gradient->size = RADIAL_SIZE_CLOSEST_CORNER;
+    else if (strcmp(name, "farthest-corner") == 0) gradient->size = RADIAL_SIZE_FARTHEST_CORNER;
+    else return false;
+    return true;
+}
+
 static bool resolve_radial_gradient_value(LayoutContext* lycon, const CssValue* value,
                                           RadialGradient** out_gradient) {
     if (out_gradient) *out_gradient = nullptr;
@@ -1965,11 +2003,7 @@ static bool resolve_radial_gradient_value(LayoutContext* lycon, const CssValue* 
     if (first && first->type == CSS_VALUE_TYPE_KEYWORD) {
         const CssEnumInfo* info = css_enum_info(first->data.keyword);
         const char* name = info ? info->name : nullptr;
-        if (name && (strcmp(name, "circle") == 0 || strcmp(name, "ellipse") == 0)) {
-            gradient->shape = strcmp(name, "circle") == 0
-                ? RADIAL_SHAPE_CIRCLE : RADIAL_SHAPE_ELLIPSE;
-            first_stop = 1;
-        }
+        if (resolve_radial_gradient_keyword(gradient, name)) first_stop = 1;
     } else if (first && first->type == CSS_VALUE_TYPE_LIST) {
         int at_index = -1;
         bool has_prelude = false;
@@ -1978,13 +2012,8 @@ static bool resolve_radial_gradient_value(LayoutContext* lycon, const CssValue* 
             if (!item) continue;
             const char* name = css_gradient_component_name(item);
             if (!name) continue;
-            if (strcmp(name, "circle") == 0) {
-                gradient->shape = RADIAL_SHAPE_CIRCLE;
-                has_prelude = true;
-            } else if (strcmp(name, "ellipse") == 0) {
-                gradient->shape = RADIAL_SHAPE_ELLIPSE;
-                has_prelude = true;
-            } else if (strcmp(name, "at") == 0) {
+            if (resolve_radial_gradient_keyword(gradient, name)) has_prelude = true;
+            else if (strcmp(name, "at") == 0) {
                 at_index = i;
                 has_prelude = true;
             }
@@ -1997,13 +2026,14 @@ static bool resolve_radial_gradient_value(LayoutContext* lycon, const CssValue* 
         }
     }
 
-    int capacity = func->arg_count - first_stop;
+    // a color with two positions contributes two stops, including mask plateaus.
+    int capacity = (func->arg_count - first_stop) * 2;
     if (capacity < 2) capacity = 2;
     gradient->stops = lam::own_arr((GradientStop*)alloc_prop(
         lycon, sizeof(GradientStop) * capacity));
     if (!gradient->stops) return false;
     gradient->stop_count = resolve_gradient_stops(
-        lycon, func, first_stop, gradient->stops, capacity, false, false, false, nullptr);
+        lycon, func, first_stop, gradient->stops, capacity, true, true, false, nullptr);
     css_normalize_gradient_stops(gradient->stops, gradient->stop_count, true);
     *out_gradient = gradient;
     return true;
@@ -2438,7 +2468,7 @@ static bool css_text_has_top_level_comma(const char* text, size_t len) {
     return text && strn_scan_top_level(text, text + len, ",", '(', ')', "\"'", true) < text + len;
 }
 
-static const char* css_background_url_value(const CssValue* value);
+const char* css_background_url_value(const CssValue* value);
 
 static bool resolve_background_url_value(LayoutContext* lycon, const CssDeclaration* decl, const CssValue* value) {
     if (!css_background_url_value(value)) return false;
@@ -2538,7 +2568,7 @@ static bool resolve_background_gradient_value(LayoutContext* lycon, ViewSpan* sp
     return true;
 }
 
-static const char* css_background_url_value(const CssValue* value) {
+const char* css_background_url_value(const CssValue* value) {
     if (!value) return nullptr;
     if (value->type == CSS_VALUE_TYPE_URL || value->type == CSS_VALUE_TYPE_STRING) {
         return value->type == CSS_VALUE_TYPE_URL ? value->data.url : value->data.string;
@@ -2552,123 +2582,23 @@ static const char* css_background_url_value(const CssValue* value) {
         ? (arg->type == CSS_VALUE_TYPE_URL ? arg->data.url : arg->data.string) : nullptr;
 }
 
-static bool css_mask_value_length(const CssValue* value, float* out, bool* is_percent) {
-    if (!value || !out || !is_percent) return false;
-    if (value->type == CSS_VALUE_TYPE_LENGTH) {
-        *out = (float)value->data.length.value;
-        *is_percent = false;
-        return true;
-    }
-    if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
-        *out = (float)(value->data.percentage.value / 100.0);
-        *is_percent = true;
-        return true;
-    }
-    if (value->type == CSS_VALUE_TYPE_NUMBER) {
-        *out = (float)value->data.number.value;
-        *is_percent = false;
-        return true;
-    }
-    return false;
-}
-
-static bool css_mask_stop_radius(const CssValue* value, float* out, bool* is_percent) {
-    if (!value || !out || !is_percent) return false;
-    if (value->type == CSS_VALUE_TYPE_LIST) {
-        for (int i = value->data.list.count - 1; i >= 1; i--) {
-            if (css_mask_value_length(value->data.list.values[i], out, is_percent)) {
-                return true;
-            }
-        }
-        return false;
-    }
-    return css_mask_value_length(value, out, is_percent);
-}
-
 static void resolve_css_mask_image(LayoutContext* lycon, ViewSpan* span,
                                    const CssValue* value) {
     if (!lycon || !span || !value) return;
     span->ensure_boundary(lycon);
-    if (!span->boundary()->mask) {
+    if (!span->boundary()->mask)
         span->bound->mask = lam::own((MaskProp*)alloc_prop(lycon, sizeof(MaskProp)));
-    }
     MaskProp* mask = span->boundary()->mask;
-    memset(mask, 0, sizeof(MaskProp));
-    if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_NONE) {
-        return;
+    if (!mask) return;
+    // style replacement reclaims the previous gradient rather than retaining a stale mask.
+    if (mask->radial_gradient) {
+        pool_free(layout_prop_pool(lycon), mask->radial_gradient->stops);
+        pool_free(layout_prop_pool(lycon), mask->radial_gradient);
     }
-    if (value->type != CSS_VALUE_TYPE_FUNCTION || !value->data.function ||
-        !value->data.function->name ||
-        strcmp(value->data.function->name, "radial-gradient") != 0) {
-        return;
-    }
-    CssFunction* func = value->data.function;
-    mask->has_radial_gradient = true;
-    mask->cx = 0.5f;
-    mask->cy = 0.5f;
-    mask->radius = 0.5f;
-    mask->radius_is_percent = true;
-    int arg_idx = 0;
-    if (func->arg_count > 0 && func->args[0] &&
-        func->args[0]->type == CSS_VALUE_TYPE_LIST) {
-        CssValue* first = func->args[0];
-        int at_idx = -1;
-        for (int i = 0; i < first->data.list.count; i++) {
-            CssValue* item = first->data.list.values[i];
-            if (!item) continue;
-            if (item->type == CSS_VALUE_TYPE_KEYWORD) {
-                if (item->data.keyword == CSS_VALUE_LEFT) mask->cx = 0.0f;
-                else if (item->data.keyword == CSS_VALUE_RIGHT) mask->cx = 1.0f;
-                else if (item->data.keyword == CSS_VALUE_TOP) mask->cy = 0.0f;
-                else if (item->data.keyword == CSS_VALUE_BOTTOM) mask->cy = 1.0f;
-                const CssEnumInfo* info = css_enum_info(item->data.keyword);
-                if (info && info->name && strcmp(info->name, "at") == 0) {
-                    at_idx = i;
-                }
-            } else if (at_idx >= 0 && item->type == CSS_VALUE_TYPE_PERCENTAGE) {
-                if (i == at_idx + 1) mask->cx = (float)(item->data.percentage.value / 100.0);
-                else if (i == at_idx + 2) mask->cy = (float)(item->data.percentage.value / 100.0);
-            }
-        }
-        arg_idx = 1;
-    }
-    float last_opaque = -1.0f;
-    float first_transparent = -1.0f;
-    bool last_opaque_pct = false;
-    bool first_transparent_pct = false;
-    for (int i = arg_idx; i < func->arg_count; i++) {
-        CssValue* arg = func->args[i];
-        if (!arg) continue;
-        Color c = Color{};
-        bool has_color = false;
-        if (arg->type == CSS_VALUE_TYPE_LIST && arg->data.list.count > 0) {
-            c = resolve_color_value(lycon, arg->data.list.values[0]);
-            has_color = true;
-        } else if (arg->type == CSS_VALUE_TYPE_COLOR || arg->type == CSS_VALUE_TYPE_KEYWORD ||
-                   arg->type == CSS_VALUE_TYPE_FUNCTION) {
-            c = resolve_color_value(lycon, arg);
-            has_color = true;
-        }
-        if (!has_color) continue;
-        float pos = 0.0f;
-        bool pos_pct = false;
-        if (!css_mask_stop_radius(arg, &pos, &pos_pct)) continue;
-        if (c.a > 0) {
-            last_opaque = pos;
-            last_opaque_pct = pos_pct;
-        } else if (first_transparent < 0.0f) {
-            first_transparent = pos;
-            first_transparent_pct = pos_pct;
-        }
-    }
-    if (last_opaque >= 0.0f && first_transparent >= 0.0f &&
-        last_opaque_pct == first_transparent_pct) {
-        mask->radius = (last_opaque + first_transparent) * 0.5f;
-        mask->radius_is_percent = last_opaque_pct;
-    } else if (last_opaque >= 0.0f) {
-        mask->radius = last_opaque;
-        mask->radius_is_percent = last_opaque_pct;
-    }
+    mask->radial_gradient = nullptr;
+    RadialGradient* gradient = nullptr;
+    if (resolve_radial_gradient_value(lycon, value, &gradient))
+        mask->radial_gradient = lam::own(gradient);
 }
 
 static bool css_value_is_background_color_candidate(const CssValue* value) {
@@ -2689,14 +2619,19 @@ static bool css_value_is_background_position_candidate(const CssValue* value) {
            keyword == CSS_VALUE_BOTTOM || keyword == CSS_VALUE_CENTER;
 }
 
-char* resolve_css_resource_url(LayoutContext* lycon, const CssDeclaration* decl, const char* url) {
+char* resolve_css_resource_url(LayoutContext* lycon, const CssDeclaration* decl, const char* url, bool canonical) {
     if (!lycon || !url) return nullptr;
     size_t url_len = strlen(url);
+    ViewTree* tree = lycon->selected_view_tree ? lycon->selected_view_tree.get()
+        : (lycon->doc ? lycon->doc->view_tree.get() : nullptr);
     const char* source_file = decl ? decl->source_file : nullptr;
     bool has_stylesheet_base = source_file && source_file[0] && strcmp(source_file, "<inline-style>") != 0;
     const char* base_path = has_stylesheet_base ? source_file : nullptr;
     if (!base_path && (url[0] == '/' || strncmp(url, "data:", 5) == 0 ||
                        url_is_absolute_url(url))) {
+        // background URLs are immutable and shared by inheritance; intern per view tree.
+        if (canonical && tree)
+            return (char*)view_tree_canonical_string(tree, url, url_len);
         char* copy = (char*)alloc_prop(lycon, url_len + 1);
         if (!copy) return nullptr;
         str_copy(copy, url_len + 1, url, url_len);
@@ -2708,6 +2643,8 @@ char* resolve_css_resource_url(LayoutContext* lycon, const CssDeclaration* decl,
         url, base_path, false, MEM_CAT_TEMP));
     if (!resolved) return nullptr;
     size_t resolved_len = strlen(resolved.get());
+    if (canonical && tree)
+        return (char*)view_tree_canonical_string(tree, resolved.get(), resolved_len);
     char* copy = (char*)alloc_prop(lycon, resolved_len + 1);
     if (!copy) return nullptr;
     str_copy(copy, resolved_len + 1, resolved.get(), resolved_len);
@@ -2719,6 +2656,11 @@ static void resolve_background_layer_component(LayoutContext* lycon,
                                                CssValue* item) {
     if (!lycon || !decl || !item) return;
     if (resolve_background_url_value(lycon, decl, item)) return;
+    if (css_value_identifier_is(item, "repeat-x") || css_value_identifier_is(item, "repeat-y")) {
+        lam::CssTempDecl repeat_decl(decl, CSS_PROPERTY_BACKGROUND_REPEAT, item);
+        repeat_decl.resolve(lycon);
+        return;
+    }
     if (item->type == CSS_VALUE_TYPE_FUNCTION && item->data.function &&
         item->data.function->name) {
         if (css_background_gradient_type(item) != GRADIENT_NONE) {
@@ -2999,11 +2941,53 @@ static bool apply_corner_radius_value(LayoutContext* lycon, int prop_id, Corner*
     return true;
 }
 
+// These consumers store numbers or independently owned native payloads. Deferred
+// font/text/scroll expressions continue to use their retained value owner.
+static bool css_property_consumes_substitution(CssPropertyCode property) {
+    switch (property) {
+        case CSS_PROPERTY_WIDTH: case CSS_PROPERTY_HEIGHT:
+        case CSS_PROPERTY_MIN_WIDTH: case CSS_PROPERTY_MIN_HEIGHT:
+        case CSS_PROPERTY_MAX_WIDTH: case CSS_PROPERTY_MAX_HEIGHT:
+        case CSS_PROPERTY_TRANSFORM: case CSS_PROPERTY_TRANSLATE:
+        case CSS_PROPERTY_ROTATE: case CSS_PROPERTY_SCALE:
+        case CSS_PROPERTY_TRANSFORM_ORIGIN: case CSS_PROPERTY_PERSPECTIVE_ORIGIN:
+        case CSS_PROPERTY_FILTER: case CSS_PROPERTY_BACKDROP_FILTER:
+        case CSS_PROPERTY_OPACITY: case CSS_PROPERTY_VISIBILITY:
+        case CSS_PROPERTY_BACKGROUND_IMAGE: case CSS_PROPERTY_BACKGROUND_SIZE:
+        case CSS_PROPERTY_BACKGROUND_COLOR: case CSS_PROPERTY_BACKGROUND_REPEAT:
+        case CSS_PROPERTY_MASK_IMAGE:
+        case CSS_PROPERTY_BACKGROUND_POSITION:
+        case CSS_PROPERTY_BACKGROUND_POSITION_X: case CSS_PROPERTY_BACKGROUND_POSITION_Y:
+            return true;
+        default: return false;
+    }
+}
+
+struct CssComputedValueScratch {
+    LayoutContext* context;
+    Pool* previous;
+    Pool* owned;
+    CssComputedValueScratch(LayoutContext* context, CssPropertyCode property, const CssValue* value)
+        : context(context), previous(context->css_value_scratch), owned(nullptr) {
+        if (!css_property_consumes_substitution(property)) context->css_value_scratch = nullptr;
+        else if (!previous && (value->type == CSS_VALUE_TYPE_TOKEN_SEQUENCE ||
+                css_value_contains_pending_substitution(value))) {
+            owned = pool_create_sized(0);
+            context->css_value_scratch = lam::up(owned);
+        }
+    }
+    ~CssComputedValueScratch() {
+        context->css_value_scratch = lam::up(previous);
+        if (owned) pool_destroy(owned);
+    }
+};
+
 const CssValue* resolve_var_function(LayoutContext* lycon, const CssValue* value) {
     if (!lycon || !lycon->pool) return nullptr;
     DomElement* context = lycon && lycon->view
         ? view_geometry_nearest_dom_element(lycon->view, 0) : nullptr;
-    return css_resolve_element_var_value(lycon->pool, context, value);
+    return css_resolve_element_var_value(lycon->css_value_scratch
+        ? lycon->css_value_scratch.get() : lycon->pool.get(), context, value);
 }
 
 Color resolve_color_value(LayoutContext* lycon, const CssValue* value) {
@@ -6847,6 +6831,13 @@ static bool css_background_repeat_keyword(CssEnum keyword) {
 static void resolve_background_repeat_property(ViewSpan* span, const CssValue* value) {
     if (!span || !value) return;
     BackgroundProp* background = span->boundary()->background;
+    // Axis aliases are identifiers rather than members of the common repeat enum.
+    bool repeat_x = css_value_identifier_is(value, "repeat-x");
+    if (repeat_x || css_value_identifier_is(value, "repeat-y")) {
+        background->bg_repeat_x = repeat_x ? CSS_VALUE_REPEAT : CSS_VALUE_NO_REPEAT;
+        background->bg_repeat_y = repeat_x ? CSS_VALUE_NO_REPEAT : CSS_VALUE_REPEAT;
+        return;
+    }
     if (value->type == CSS_VALUE_TYPE_KEYWORD) {
         if (css_background_repeat_keyword(value->data.keyword)) {
             background->bg_repeat_x = background->bg_repeat_y = value->data.keyword;
@@ -8043,9 +8034,11 @@ static void css_store_background_axis(BackgroundProp* background, bool horizonta
     } else if (horizontal) {
         background->bg_position_x = component.value;
         background->bg_position_x_is_percent = component.is_percent;
+        background->bg_position_x_length = 0.0f;
     } else {
         background->bg_position_y = component.value;
         background->bg_position_y_is_percent = component.is_percent;
+        background->bg_position_y_length = 0.0f;
     }
 }
 
@@ -8088,6 +8081,7 @@ static void resolve_background_position(LayoutContext* lycon, ViewSpan* span,
     layout_ensure_background(lycon, span);
     BackgroundProp* background = span->boundary()->background;
     background->bg_position_set = true;
+    background->bg_position_x_length = background->bg_position_y_length = 0.0f;
     if (css_value_count(value, 2) >= 2) {
         CssBackgroundComponent x = resolve_background_position_component(
             lycon, property, css_value_at(value, 0), background->bg_position_x,
@@ -8719,12 +8713,14 @@ void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, L
     WritingMode current_writing_mode = layout_element_writing_mode(current_element);
     bool vertical_block_start_is_right = current_writing_mode == WM_VERTICAL_RL;
     prop_id = css_physical_size_alias(prop_id, inline_axis_is_vertical);
-    const CssValue* substituted = css_resolve_element_var_value(lycon->pool, current_element, value, prop_id);
+    CssComputedValueScratch value_scope(lycon, prop_id, value);
+    Pool* value_pool = lycon->css_value_scratch ? lycon->css_value_scratch.get() : lycon->pool.get();
+    const CssValue* substituted = css_resolve_element_var_value(value_pool, current_element, value, prop_id);
     if (substituted != value) {
         if (!substituted || !css_property_validate_value(prop_id, substituted)) {
             // Invalid substitution happens at computed-value time. Keep the
-            // fallback in the view pool because some consumers retain values.
-            CssValue* fallback = (CssValue*)pool_calloc(lycon->pool,
+            // fallback in its consumer owner because deferred consumers retain values.
+            CssValue* fallback = (CssValue*)pool_calloc(value_pool,
                                                         sizeof(CssValue));
             if (!fallback) return;
             fallback->type = CSS_VALUE_TYPE_KEYWORD;
@@ -9278,7 +9274,7 @@ void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, L
             if (gradient) {
                 resolve_css_property(CSS_PROPERTY_BACKGROUND, decl, lycon);
             } else if (url) {
-                char* image_path = resolve_css_resource_url(lycon, decl, url);
+                char* image_path = resolve_css_resource_url(lycon, decl, url, true);
                 if (image_path) {
                     radiant_retain_background_image(
                         span->boundary()->background, lam::PoolPtr<char>(image_path));
@@ -9348,6 +9344,7 @@ void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, L
             if (!transform) break;
             int index = css_individual_transform_index(prop_id);
             TransformFunction& target = transform->individual[index];
+            transform->individual_sample[index] = nullptr;
             target = {};
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 if (value->data.keyword == CSS_VALUE_INHERIT) {
@@ -9422,26 +9419,27 @@ void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, L
         case CSS_PROPERTY_FILTER:
         case CSS_PROPERTY_BACKDROP_FILTER: {
             bool is_backdrop_filter = prop_id == CSS_PROPERTY_BACKDROP_FILTER;
+            FilterProp* previous = is_backdrop_filter ? span->backdrop_filter_prop() : span->filter_prop();
+            if (previous && !previous->functions_borrowed) {
+                radiant::destroy_filter_list(layout_prop_pool(lycon), previous->functions);
+                previous->functions = nullptr;
+            }
             auto set_target = [&](FilterProp* filter) {
                 if (is_backdrop_filter) span->set_backdrop_filter_prop(filter);
                 else span->set_filter_prop(filter);
             };
             if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_NONE) {
+                if (previous) pool_free(layout_prop_pool(lycon), previous);
                 set_target(nullptr);
                 break;
             }
             FilterProp* target_filter = is_backdrop_filter
-                ? (FilterProp*)alloc_prop(lycon, sizeof(FilterProp))
+                ? (previous ? previous : (FilterProp*)alloc_prop(lycon, sizeof(FilterProp)))
                 : span->ensure_filter(lycon);
             set_target(target_filter);
             if (!target_filter) break;
-            target_filter->functions = lam::own(resolve_css_function_list<FilterFunction>(
-                value,
-                [&](const CssValue* item) {
-                    return item && item->type == CSS_VALUE_TYPE_FUNCTION
-                        ? resolve_filter_function(lycon, prop_id, item->data.function)
-                        : nullptr;
-                }, append_filter_function));
+            target_filter->functions = lam::own(resolve_filter_value(lycon, prop_id, value, layout_prop_pool(lycon)));
+            target_filter->functions_borrowed = false;
             break;
         }
         case CSS_PROPERTY_COLUMN_COUNT:

@@ -6,6 +6,7 @@
  */
 #include "js_runtime_internal.hpp"
 #include "js_object_meta.h"
+#include "../input/input.hpp"
 #include "js_host_hooks.h"
 #include "js_regex_generated_properties.h"
 #include "js_regex_router_scanner.h"
@@ -1114,12 +1115,17 @@ static int js_typemap_storage_capacity(TypeMap* tm) {
     return data_size < 64 ? 64 : data_size;
 }
 
+extern "C" TypeMap* js_empty_object_type_map(void) {
+    return type_tree_map_root(js_input, js_class_meta_for_id(JS_CLASS_OBJECT));
+}
+
 extern "C" Item js_new_object() {
-    js_object_metadata_initialize();
+    TypeMap* root = js_empty_object_type_map();
+    if (!root) return ItemNull;
     Map* m = (Map*)heap_calloc_class(sizeof(Map), LMD_TYPE_MAP, JS_MAP_SIZE_CLASS);
     if (!m) return ItemNull;
     m->type_id = LMD_TYPE_MAP;
-    m->type = &EmptyMap;
+    m->type = root;
     return (Item){.map = m};
 }
 
@@ -1226,7 +1232,6 @@ extern "C" Item js_static_literal_from_recipe(const JsStaticLiteralRecipe* recip
 }
 
 static TypeMap* js_object_type_for_class_impl(int class_id) {
-    js_object_metadata_initialize();
     if (!js_input || !js_input->pool || class_id <= JS_CLASS_NONE ||
             class_id >= JS_CLASS__COUNT) return NULL;
     TypeMap* tm = (TypeMap*)pool_calloc(js_input->pool, sizeof(TypeMap));
@@ -1391,7 +1396,7 @@ extern "C" Item js_proxy_new(Item target, Item handler) {
     m->type_id = LMD_TYPE_MAP;
     m->map_kind = MAP_KIND_PROXY;
     m->type = js_object_type_for_class(JS_CLASS_PROXY);
-    if (!m->type) m->type = &EmptyMap;
+    if (!m->type) m->type = js_empty_object_type_map();
     m->data = NULL;
     m->data_cap = 0;
     proxy_root.set((Item){.map = m});
@@ -6266,7 +6271,7 @@ static SparseArrayMap* js_array_ensure_sparse_map(Array* arr) {
         *base = *existing;
     } else {
         base->type_id = LMD_TYPE_MAP;
-        base->type = &EmptyMap;
+        base->type = js_empty_object_type_map();
     }
     base->map_kind = MAP_KIND_ARRAY_SPARSE;
     sm->sparse_indices = NULL;
@@ -20678,7 +20683,7 @@ static Item js_collection_create(int type, JsClass class_id) {
     collection->base.type_id = LMD_TYPE_MAP;
     collection->base.map_kind = MAP_KIND_COLLECTION;
     collection->base.type = js_object_type_for_class(class_id);
-    if (!collection->base.type) collection->base.type = &EmptyMap;
+    if (!collection->base.type) collection->base.type = js_empty_object_type_map();
     // D6.2.2v2: observable properties and internal capability/state are
     // independent. A string-keyed backing pointer leaked through OwnPropertyKeys
     // and generic clones copied it, aliasing distinct collection instances.
@@ -29506,7 +29511,7 @@ static Item js_create_fixed_iterator(Item source, JsClass class_id, int64_t leng
     m->type_id = LMD_TYPE_MAP;
     m->map_kind = MAP_KIND_ITERATOR;
     m->type = js_object_type_for_class(class_id);
-    if (!m->type) m->type = &EmptyMap;
+    if (!m->type) m->type = js_empty_object_type_map();
     JsIterData* data = &carrier->payload;
     data->source = source_root.get();
     data->index = 0;

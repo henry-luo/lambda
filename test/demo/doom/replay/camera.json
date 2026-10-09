@@ -1,0 +1,242 @@
+{
+  "name": "Native DOOM cameras; waits include the harness 1/60-second input turns",
+  "html": "test/demo/doom/doom.ls",
+  "viewport": {
+    "width": 660,
+    "height": 500
+  },
+  "default_timeout": 1,
+  "events": [
+    {
+      "type": "advance_time",
+      "ms": 40,
+      "steps": 2
+    },
+    {
+      "type": "snapshot_state_store",
+      "target": {
+        "selector": "#scene"
+      },
+      "name": "scene"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#start"
+      }
+    },
+    {
+      "type": "advance_time",
+      "ms": 1,
+      "steps": 1
+    },
+    {
+      "type": "key_press",
+      "key": "Tab"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-spectator",
+      "equals": "follow"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-camera-height",
+      "equals": "300"
+    },
+    {
+      "type": "key_press",
+      "key": "Tab"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-spectator",
+      "equals": "top"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-camera-height",
+      "equals": "3000"
+    },
+    {
+      "type": "key_down",
+      "key": "w"
+    },
+    {
+      "type": "advance_time",
+      "ms": 229,
+      "steps": 8
+    },
+    {
+      "type": "key_up",
+      "key": "w"
+    },
+    {
+      "type": "key_down",
+      "key": "e"
+    },
+    {
+      "type": "advance_time",
+      "ms": 115,
+      "steps": 4
+    },
+    {
+      "type": "key_up",
+      "key": "e"
+    },
+    {
+      "type": "key_down",
+      "key": "r"
+    },
+    {
+      "type": "advance_time",
+      "ms": 115,
+      "steps": 4
+    },
+    {
+      "type": "key_up",
+      "key": "r"
+    },
+    {
+      "type": "key_press",
+      "key": "P"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "paused"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-generation",
+      "equals": "1"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-x",
+      "equals": "1056"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-y",
+      "equals": "-3616"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-camera-pan-y",
+      "equals": "926"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-camera-angle",
+      "equals": "0.25714"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-camera-height",
+      "equals": "2523"
+    },
+    {
+      "type": "scroll",
+      "target": {
+        "selector": "#viewport"
+      },
+      "dy": 1
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-camera-height",
+      "equals": "2323"
+    },
+    {
+      "type": "key_press",
+      "key": "Tab"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-spectator",
+      "equals": "player"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-camera-pan-y",
+      "equals": "0"
+    },
+    {
+      "type": "assert_state_store_snapshot",
+      "target": {
+        "selector": "#scene"
+      },
+      "name": "scene"
+    },
+    {
+      "type": "key_press",
+      "key": "P"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "window_focus",
+      "focused": false
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "paused"
+    },
+    {
+      "type": "window_close"
+    }
+  ]
+}

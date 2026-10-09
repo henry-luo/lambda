@@ -901,36 +901,30 @@ HPDF_STATUS HPDF_Page_ClosePath(HPDF_Page page) {
 /*  Path Painting Functions                                                  */
 /*---------------------------------------------------------------------------*/
 
-HPDF_STATUS HPDF_Page_Fill(HPDF_Page page) {
+static HPDF_STATUS pdf_page_paint_operator(HPDF_Page page, const char* operation) {
     if (!page) return HPDF_ERROR_INVALID_PARAM;
-    
-    strbuf_append_str(page->content, "f\n");
-    
+    strbuf_append_str(page->content, operation);
     return HPDF_OK;
+}
+
+HPDF_STATUS HPDF_Page_Fill(HPDF_Page page) {
+    return pdf_page_paint_operator(page, "f\n");
 }
 
 HPDF_STATUS HPDF_Page_Stroke(HPDF_Page page) {
-    if (!page) return HPDF_ERROR_INVALID_PARAM;
-    
-    strbuf_append_str(page->content, "S\n");
-    
-    return HPDF_OK;
+    return pdf_page_paint_operator(page, "S\n");
 }
 
 HPDF_STATUS HPDF_Page_ClosePathFillStroke(HPDF_Page page) {
-    if (!page) return HPDF_ERROR_INVALID_PARAM;
-    
-    strbuf_append_str(page->content, "b\n");
-    
-    return HPDF_OK;
+    return pdf_page_paint_operator(page, "b\n");
 }
 
 HPDF_STATUS HPDF_Page_Clip(HPDF_Page page) {
-    if (!page) return HPDF_ERROR_INVALID_PARAM;
+    return pdf_page_paint_operator(page, "W\nn\n");
+}
 
-    strbuf_append_str(page->content, "W\nn\n");
-
-    return HPDF_OK;
+HPDF_STATUS HPDF_Page_Eoclip(HPDF_Page page) {
+    return pdf_page_paint_operator(page, "W*\nn\n");
 }
 
 HPDF_STATUS HPDF_Page_DrawABGRImage(HPDF_Page page, const uint32_t* pixels,

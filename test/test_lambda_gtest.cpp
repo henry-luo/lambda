@@ -9,6 +9,7 @@
 #include "test_lambda_tier_helpers.hpp"
 #include "test_ast_tune_capture.hpp"
 #include "../lib/shell.h"
+#include "../lib/strbuf.h"
 #include <string.h>
 
 //==============================================================================
@@ -26,12 +27,41 @@ static const char* FUNCTIONAL_TEST_DIRECTORIES[] = {
     "test/lambda/edit",
     "test/lambda/slide",
     "test/lambda/scene3d",
+    "test/demo/doom/tests",
     "test/lambda/graph/mermaid",
     "test/lambda/graph/graphviz",
     "test/lambda/graph/structurizr",
     // Add more functional test directories here as needed
 };
 static const size_t NUM_FUNCTIONAL_TEST_DIRECTORIES = sizeof(FUNCTIONAL_TEST_DIRECTORIES) / sizeof(FUNCTIONAL_TEST_DIRECTORIES[0]);
+
+TEST(DoomDemoTests, GeometryInputAndResourceContractsAgreeAcrossTiers) {
+    const char* tiers[] = {"interp", "auto", "jit"};
+    const char* fixtures[] = {"test/demo/doom/tests/core_test",
+        "test/demo/doom/tests/physics_test", "test/demo/doom/tests/mechanics_test",
+        "test/demo/doom/tests/combat_test", "test/demo/doom/tests/pickups_test",
+        "test/demo/doom/tests/ai_test", "test/demo/doom/tests/clock_test",
+        "test/demo/doom/tests/sprites_test",
+        "test/demo/doom/tests/effects_test",
+        "test/demo/doom/tests/weapons_test",
+        "test/demo/doom/tests/camera_test",
+        "test/demo/doom/tests/audio_test",
+        "test/demo/doom/tests/oracle_test",
+        "test/demo/doom/tools/verify_maps"};
+    for (const char* tier : tiers) {
+        SCOPED_TRACE(tier);
+        // Resource loading reads the actual CLI entry path, so run directly
+        // instead of test-batch, whose argv identifies the batch driver.
+        for (const char* fixture : fixtures) {
+            StrBuf* script = strbuf_new();
+            StrBuf* golden = strbuf_new();
+            strbuf_append_str(script, fixture); strbuf_append_str(script, ".ls");
+            strbuf_append_str(golden, fixture); strbuf_append_str(golden, ".txt");
+            test_lambda_script_against_file(script->str, golden->str, false, tier);
+            strbuf_free(script); strbuf_free(golden);
+        }
+    }
+}
 
 // Procedural scripts (executed with ./lambda.exe run <script>)
 static const char* PROCEDURAL_TEST_DIRECTORIES[] = {

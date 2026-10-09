@@ -1,0 +1,15 @@
+{
+  "name": "viewer-concave",
+  "width": 1280,
+  "height": 336,
+  "reference_limitation": "Chromium 154 loses the near-clipped roof in reversed DOM order. The two panels have identical geometry; native assertions use the visible roof required by CSS Transforms 2 sections 4.1.2 and 4.2 in both panels.",
+  "scale": 1,
+  "browser": "HeadlessChrome/154.0.8037.57",
+  "spec": "https://drafts.csswg.org/css-transforms-2/",
+  "revision": "2025-11-30",
+  "shapes": {
+    "spec": "https://drafts.csswg.org/css-shapes/#shape-function",
+    "revision": "2026-05-07"
+  },
+  "sha256": "5e42990feeadec74875cfdaf0af2f6d938aea6e231c9a478c9441642bb962be8"
+}

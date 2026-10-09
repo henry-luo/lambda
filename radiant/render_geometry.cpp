@@ -1,5 +1,31 @@
 #include "render.hpp"
 
+RadiantRadialGeometry radiant_radial_gradient_geometry(const RadialGradient* gradient, Rect rect) {
+    float x = gradient->cx_is_px ? gradient->cx : rect.width * gradient->cx;
+    float y = gradient->cy_is_px ? gradient->cy : rect.height * gradient->cy;
+    float dx[] = {fabsf(x), fabsf(rect.width - x)};
+    float dy[] = {fabsf(y), fabsf(rect.height - y)};
+    bool closest = gradient->size == RADIAL_SIZE_CLOSEST_SIDE || gradient->size == RADIAL_SIZE_CLOSEST_CORNER;
+    bool corner = gradient->size == RADIAL_SIZE_CLOSEST_CORNER || gradient->size == RADIAL_SIZE_FARTHEST_CORNER;
+    float rx = closest ? fminf(dx[0], dx[1]) : fmaxf(dx[0], dx[1]);
+    float ry = closest ? fminf(dy[0], dy[1]) : fmaxf(dy[0], dy[1]);
+    if (gradient->shape == RADIAL_SHAPE_CIRCLE) {
+        rx = closest ? fminf(rx, ry) : fmaxf(rx, ry);
+        if (corner) rx = hypotf(closest ? fminf(dx[0], dx[1]) : fmaxf(dx[0], dx[1]),
+            closest ? fminf(dy[0], dy[1]) : fmaxf(dy[0], dy[1]));
+        ry = rx;
+    } else if (corner && rx > 0 && ry > 0) {
+        // corner extents preserve the aspect ratio of the corresponding side ellipse.
+        float factor = closest ? INFINITY : 0.0f;
+        for (float horizontal : dx) for (float vertical : dy) {
+            float distance = hypotf(horizontal / rx, vertical / ry);
+            factor = closest ? fminf(factor, distance) : fmaxf(factor, distance);
+        }
+        rx *= factor; ry *= factor;
+    }
+    return {rect.x + x, rect.y + y, rx, ry};
+}
+
 static int render_geometry_pixel_coord(float value) {
     return (int)value; // INT_CAST_OK: raster surfaces are indexed with integer pixel coordinates.
 }

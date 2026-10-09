@@ -1,0 +1,21 @@
+<!doctype html><meta charset="utf-8">
+<style>
+html,body{margin:0;background:white}
+.tile{position:absolute;width:32px;height:32px;background:url(uv-grid.png) no-repeat;
+background-size:64px 64px;image-rendering:pixelated}
+#affine{left:20px;top:20px;transform:translateY(0)}
+#perspective{left:120px;top:20px;transform:perspective(200px) rotateY(20deg)}
+svg{display:block}
+#marker{width:10px;height:10px;background:lime}
+#filtered{position:absolute;left:20px;top:60px;width:60px;height:30px;filter:brightness(.5)}
+#filtered div{width:20px;height:20px;background:white}
+.repeat{position:absolute;top:60px;width:32px;height:32px;background-color:white;
+background-image:url(uv-grid.png);background-size:16px 16px;image-rendering:pixelated}
+#repeat-x{left:100px;background-repeat:repeat-x}
+#repeat-y{left:150px;background:url(uv-grid.png) repeat-y white;background-size:16px 16px}
+</style>
+<svg id="zero" width="0" height="0"><defs></defs></svg>
+<div id="marker"></div>
+<div id="affine" class="tile"></div><div id="perspective" class="tile"></div>
+<div id="filtered"><div></div></div>
+<div id="repeat-x" class="repeat"></div><div id="repeat-y" class="repeat"></div>

@@ -166,8 +166,13 @@ void WorkerState::init(Tile* tile) {
     log_debug("[WORKER] thread-local ThorVG canvas + scratch arena initialised");
 }
 
+static thread_local bool render_worker_thread = false;
+
+bool render_pool_is_worker_thread() { return render_worker_thread; }
+
 static void* worker_thread_fn(void* arg) {
     RenderPool* pool = (RenderPool*)arg;
+    render_worker_thread = true;
     image_surface_mark_render_worker_thread();
 
     while (true) {
@@ -190,6 +195,10 @@ static void* worker_thread_fn(void* arg) {
         if (job_idx >= pool->job_count) continue;
 
         TileJob* job = &pool->jobs[job_idx];
+        if (job->work) {
+            // Pure pixel jobs touch disjoint rows and need no ThorVG lock.
+            job->work(job->work_context);
+        } else {
         Tile* tile = job->tile;
 
         // ThorVG rasterization uses shared internal state even with separate canvases.
@@ -217,6 +226,7 @@ static void* worker_thread_fn(void* arg) {
                        tile->x, tile->y, tile->w, tile->h,
                        job->raster_scale);
         pthread_mutex_unlock(&s_thorvg_tile_mutex);
+        }
 
         // signal completion
         pthread_mutex_lock(&pool->mutex);
@@ -296,7 +306,7 @@ void RenderPool::destroy() {
 
 void RenderPool::dispatch(TileJob* jobs, int count) {
     pthread_mutex_lock(&mutex);
-    this->jobs = lam::own_arr(jobs);
+    this->jobs = lam::up(jobs);
     job_count = count;
     next_job = 0;
     completed_jobs = 0;
@@ -306,6 +316,7 @@ void RenderPool::dispatch(TileJob* jobs, int count) {
     while (completed_jobs < job_count) {
         pthread_cond_wait(&all_done, &mutex);
     }
+    this->jobs = nullptr;
     pthread_mutex_unlock(&mutex);
 }
 
@@ -444,7 +455,7 @@ void dl_replay_tile(DisplayList* dl, RdtVector* vec,
         case DL_COMPOSITE_OPACITY: {
             rdt_vector_flush_batch(vec);
             DlCompositeOpacity* r = &item->composite_opacity;
-            dl_replay_backdrop_composite_opacity(&backdrop_stack, tile_surface, scratch, r);
+            dl_replay_backdrop_composite_opacity(&backdrop_stack, tile_surface, scratch, r, tile_x, tile_y);
             break;
         }
 

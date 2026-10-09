@@ -6353,8 +6353,12 @@ static void svg_draw_foreign_object_html(SvgInlineRenderContext* ctx, Element*, 
     SvgForeignObjectPaint* content = (SvgForeignObjectPaint*)data;
     RasterRenderContext html = *content->context;
     html.transform = rdt_matrix_identity(); html.has_transform = false;
+    html.has_transform_3d = false;
     html.block = {}; html.block.clip = content->clip;
     html.clip_shape_depth = 0; html.has_dirty_union = false; html.dirty_tracker = nullptr;
+    // foreignObject records in local coordinates; outer projected clip bounds
+    // belong to the host surface and cannot constrain this capture.
+    html.vector_clip_depth = 0;
     html.retained_dl_cache = nullptr; html.element_marker_suppression_depth++;
     html.dl = ctx->dl; html.paint_list = ctx->paint_list; html.raster_scale = content->scale;
     ScratchMark mark = scratch_mark(&html.scratch);
@@ -6901,6 +6905,28 @@ static RdtSvgFilterProgram* svg_filter_compile(SvgInlineRenderContext* ctx, cons
     }
     if (!program->valid) log_error("SVG_FILTER_COMPILE: filter contains an unavailable primitive or exceeds graph limits");
     return program;
+}
+
+RdtSvgFilterProgram* render_css_svg_filter_compile(DomDocument* document, const char* url,
+    ScratchArena* scratch) {
+    SvgPaintHostStyle* host = svg_host_style(document);
+    if (!host || !url || !scratch) return nullptr;
+    if (!host->animation_prepared) {
+        svg_animation_prepare(document->root);
+        host->animation_prepared = true;
+    }
+    SvgInlineRenderContext context = {};
+    context.svg_root = context.id_scope = lam::up(dom_element_render_source(document->root));
+    context.style_context = lam::up(&host->style);
+    context.resource_scratch = lam::up(scratch);
+    context.current_viewport_w = document->viewport.width;
+    context.current_viewport_h = document->viewport.height;
+    context.raster_scale = 1.0f;
+    lam::Temp<char> base(radiant_document_resource_base(document, MEM_CAT_RENDER));
+    context.source_path = lam::up(base.get());
+    SvgResourceReference reference = svg_resolve_reference(&context, url);
+    if (!reference.element || !svg_effect_resource_is(&reference, "filter")) return nullptr;
+    return svg_filter_compile(&context, &reference);
 }
 
 struct SvgFilterImageContext : RdtSvgFilterHost {
@@ -7575,11 +7601,11 @@ bool render_svg_subscene_with_paint(const PaintSvgSubscene* subscene,
             image->alpha_mode = resolved.straight_alpha ? IMAGE_ALPHA_STRAIGHT : IMAGE_ALPHA_PREMULTIPLIED;
             paint_draw_image(&paint, resolved.pixels, resolved.width, resolved.height, resolved.stride,
                 p.dst_x, p.dst_y, p.dst_w, p.dst_h, p.opacity,
-                p.has_transform ? &p.transform : nullptr, image); break;
+                p.has_transform ? &p.transform : nullptr, image, p.scale_mode); break;
         }
         case DL_PUSH_CLIP: {
             const DlPushClip& p = item.push_clip;
-            paint_push_clip(&paint, p.path, p.has_transform ? &p.transform : nullptr); break;
+            paint_push_clip(&paint, p.path, p.has_transform ? &p.transform : nullptr, p.rule); break;
         }
         case DL_POP_CLIP: paint_pop_clip(&paint); break;
         case DL_BEGIN_ELEMENT:
@@ -7921,6 +7947,9 @@ static bool svg_layer_render_pass(RasterRenderContext* rdcon, Element* svg_elem,
     DisplayList* saved_dl = rdcon->dl;
     PaintList* saved_paint_list = rdcon->paint_list;
     Bound saved_clip = rdcon->block.clip;
+    int saved_vector_clip_depth = rdcon->vector_clip_depth;
+    Bound saved_vector_clip_bounds[RDT_MAX_CLIP_SHAPES];
+    memcpy(saved_vector_clip_bounds, rdcon->vector_clip_bounds, sizeof(saved_vector_clip_bounds));
     RdtMatrix saved_transform = rdcon->transform;
     bool saved_has_transform = rdcon->has_transform;
     DirtyTracker* saved_dirty_tracker = rdcon->dirty_tracker;
@@ -7928,6 +7957,8 @@ static bool svg_layer_render_pass(RasterRenderContext* rdcon, Element* svg_elem,
     rdcon->dl = lam::up(&dl);
     rdcon->paint_list = lam::up(&paint_list);
     rdcon->block.clip = {0.0f, 0.0f, (float)width, (float)height};
+    // the isolated layer starts a new clip coordinate space.
+    rdcon->vector_clip_depth = 0;
     rdcon->has_transform = false;
     rdcon->dirty_tracker = nullptr;
     rdcon->has_dirty_union = false;
@@ -7946,6 +7977,8 @@ static bool svg_layer_render_pass(RasterRenderContext* rdcon, Element* svg_elem,
     rdcon->dl = lam::up(saved_dl);
     rdcon->paint_list = lam::up(saved_paint_list);
     rdcon->block.clip = saved_clip;
+    rdcon->vector_clip_depth = saved_vector_clip_depth;
+    memcpy(rdcon->vector_clip_bounds, saved_vector_clip_bounds, sizeof(saved_vector_clip_bounds));
     rdcon->transform = saved_transform;
     rdcon->has_transform = saved_has_transform;
     rdcon->dirty_tracker = lam::up(saved_dirty_tracker);

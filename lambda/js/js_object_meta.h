@@ -92,7 +92,7 @@ extern "C" {
 
 const JsClassMeta* js_class_meta_for_id(JsClassId id);
 LAMBDA_RT_API JsClassId js_class_id_from_meta(const JsClassMeta* meta);
-void js_object_metadata_initialize(void);
+TypeMap* js_empty_object_type_map(void);
 LAMBDA_RT_API const JsClassMeta* js_object_meta(Item value);
 bool js_object_has_class(Item value, JsClassId id);
 bool js_object_uses_ordinary_shape(Item value);

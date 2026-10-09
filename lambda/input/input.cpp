@@ -1118,21 +1118,19 @@ static TypeMap* map_transition_target_for_add(TypeMap* parent, String* key,
 // object mints a private TypeMap and the object never rejoins the graph. The
 // root is per-Input so its transitions and their targets share one pool
 // lifetime; the global EmptyMap could not hold them safely.
-static TypeMap* map_shape_transition_root(Input* input,
+TypeMap* type_tree_map_root(Input* input,
         const struct JsClassMeta* js_meta) {
     if (!input || !input->pool) return NULL;
-    if (input->shape_transition_root) {
-        // js_meta is part of shape identity and every child inherits the
-        // root's, so a differently classified blueprint may not share it.
-        return input->shape_transition_root->js_meta == js_meta
-            ? input->shape_transition_root : NULL;
-    }
+    // D3.4.7: JS bootstrap must never brand the neutral Lambda root.
+    TypeMap** slot = js_meta ? &input->branded_shape_transition_root
+        : &input->shape_transition_root;
+    if (*slot) return (*slot)->js_meta == js_meta ? *slot : NULL;
     TypeMap* root = (TypeMap*)alloc_type_in(input_tree_alloc(input), LMD_TYPE_MAP,
         sizeof(TypeMap));
     if (!root) return NULL;
     root->is_transition_shared_shape = true;
     root->js_meta = js_meta;
-    input->shape_transition_root = root;
+    *slot = root;
     return root;
 }
 
@@ -1143,9 +1141,10 @@ static TypeMap* map_shape_transition_root(Input* input,
 // keyed by the parent's address, and the parent is never written.
 static TypeMap* type_tree_step(Input* input, TypeMap* parent, const TransitionKey* k,
         TypeId type_id, ShapeEntry** out_entry) {
-    if (!parent) parent = map_shape_transition_root(input, NULL);
+    if (!parent) parent = type_tree_map_root(input, NULL);
     if (!parent) return NULL;
-    if (parent == input->shape_transition_root || type_tree_owns(input, parent)) {
+    if (parent == input->shape_transition_root ||
+            parent == input->branded_shape_transition_root || type_tree_owns(input, parent)) {
         return transition_target_for_key(parent, k, type_id, input, out_entry);
     }
     if (!external_parent_admissible(parent)) return NULL;
@@ -1196,8 +1195,8 @@ static const uint8_t TYPE_TREE_RETYPE_EDGE = 0x80;
 // its own adds then follow its edges like any node's. NULL when the tree
 // declines (an inadmissible parent, the fan-out cap, the budget).
 static TypeMap* type_tree_retype_target(Input* input, TypeMap* parent, const ShapeEntry* field,
-        TypeId value_type) {
-    if (!input || !input->keeps_external_edges || !parent || !field ||
+        Type* contract) {
+    if (!input || !input->keeps_external_edges || !parent || !field || !contract ||
             !input->pool || !input->type_list) return NULL;
     if (!external_parent_admissible(parent)) return NULL;
     int64_t position = 0;
@@ -1207,7 +1206,8 @@ static TypeMap* type_tree_retype_target(Input* input, TypeMap* parent, const Sha
         position++;
     }
     if (!found) return NULL;
-    const Type* retyped_to = type_info[value_type].type;
+    TypeId value_type = contract->type_id;
+    const Type* retyped_to = contract;
     uint8_t op[sizeof(int64_t) + 2] = {TYPE_TREE_RETYPE_EDGE, value_type};
     memcpy(op + 2, &position, sizeof(position));
     uint64_t fingerprint = fingerprint_mix(external_parent_fingerprint(parent), op, sizeof(op));
@@ -1303,7 +1303,7 @@ TypeMap* type_tree_retype_field(Input* input, TypeMap* parent, const ShapeEntry*
             return plan->target;
         }
     }
-    TypeMap* target = type_tree_retype_target(input, parent, field, value_type);
+    TypeMap* target = type_tree_retype_target(input, parent, field, type_info[value_type].type);
     if (!target || !owned || count >= shape_tree_fanout_cap(parent)) return target;
     TypeMapRetypePlan* plan = (TypeMapRetypePlan*)type_alloc_zeroed(input_tree_alloc(input), sizeof(TypeMapRetypePlan));
     if (!plan) return target;
@@ -1323,6 +1323,12 @@ TypeMap* type_tree_retype_field(Input* input, TypeMap* parent, const ShapeEntry*
     plan->next = parent->retype_plans; parent->retype_plans = plan;
     if (out_plan) *out_plan = plan;
     return target;
+}
+
+TypeMap* type_tree_retype_contract(Input* input, TypeMap* parent, const ShapeEntry* field,
+        Type* contract) {
+    // Admission retains the complete contract, including number/union/nullable lanes.
+    return type_tree_retype_target(input, parent, field, contract);
 }
 
 TypeMap* type_tree_delete_field(Input* input, Map* container, const ShapeEntry* field,
@@ -1404,16 +1410,12 @@ void map_put_with_data_growth(Map* mp, String* key, Item value, Input *input,
         map_key_is_array_index_name(key);
     if (map_type == &EmptyMap) {
         const struct JsClassMeta* js_meta = map_type->js_meta;
-        // An ordinary map starts at the shared root, so all objects built by
-        // the same sequence of adds end up on one TypeMap. The root carries the
-        // blueprint's own js_meta — EmptyMap's is JS_CLASS_OBJECT once the JS
-        // metadata is initialized — because children inherit it and it is part
-        // of shape identity; gating on `!js_meta` instead made this path dead
-        // for every JS object and silently dropped their class brand.
+        // Neutral Lambda maps start at their Input's neutral root; JS maps
+        // already carry their separately owned branded root (D3.4.7).
         // Every key kind may take an edge (D3.4.4v4, NI18): a JS Symbol or
         // private name is matched by its record, never by its description.
         if (!array_index_shape && key && mp->map_kind == MAP_KIND_PLAIN) {
-            TypeMap* root = map_shape_transition_root(input, js_meta);
+            TypeMap* root = type_tree_map_root(input, js_meta);
             if (root && map_put_via_shape_transition(&mp, root, key, value,
                     type_id, input, 64, grow, grow_context)) {
                 return;
@@ -1755,7 +1757,7 @@ TypeMap* type_tree_root_like(Input* input, Map* container) {
             ((TypeElmt*)type)->ns);
     }
     if (container->type_id == LMD_TYPE_MAP && (container->map_kind == MAP_KIND_PLAIN || container->map_kind == MAP_KIND_ORDERED)) {
-        if (!type->nominal) return map_shape_transition_root(input, type->js_meta);
+        if (!type->nominal) return type_tree_map_root(input, type->js_meta);
         // deletion/replay must retain the nominal family even when its last field is removed.
         TypeMap empty = {};
         empty.type_id = LMD_TYPE_MAP; empty.nominal = type->nominal; empty.is_nominal = type->is_nominal;
@@ -2575,6 +2577,7 @@ Input* Input::create_with_name_parent(Pool* pool, Url* abs_url, Input* parent,
     // Input is pool_alloc'd, not pool_calloc'd: every field must be set here.
     // Leaving this one uninitialized made map_put dereference pool garbage.
     input->shape_transition_root = nullptr;
+    input->branded_shape_transition_root = nullptr;
     input->shape_transition_shapes = 0;
     input->shape_graph_budget = 0;
     input->element_roots = nullptr;
@@ -2642,6 +2645,7 @@ void input_release_document_resources(Input* input) {
         input->element_root_count = 0;
     }
     input->shape_transition_root = nullptr;
+    input->branded_shape_transition_root = nullptr;
 }
 
 // D4.2.6: runs when the Input's pool releases its blocks. Releasing is

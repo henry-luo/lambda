@@ -168,7 +168,12 @@ void render_pool_shutdown() {
     pthread_mutex_unlock(&g_render_pool_lock);
 }
 
-static int render_output_dispatch_tiles(TileJob* jobs, int count, int threads) {
+static int render_output_thread_count();
+
+int render_output_dispatch_jobs(TileJob* jobs, int count) {
+    // A tile worker cannot recursively dispatch while its host owns the pool.
+    int threads = render_output_thread_count();
+    if (threads == 1 || render_pool_is_worker_thread()) return 0;
     pthread_mutex_lock(&g_render_pool_lock);
     // UI teardown retires the workers; a later UI must create a fresh pool.
     if (!g_render_pool) init_render_pool(threads);
@@ -1070,7 +1075,7 @@ static RenderOutputReplayResult render_output_replay_display_list(RasterRenderCo
             jobs[i].bg_color = canvas_bg;
         }
 
-        result.thread_count=render_output_dispatch_tiles(jobs,grid.total,render_threads);
+        result.thread_count=render_output_dispatch_jobs(jobs,grid.total);
         if (!result.thread_count) { tile_grid_destroy(&grid);return result; }
         tile_grid_composite(&grid, surface);
 
@@ -1126,6 +1131,11 @@ static int render_output_render_raster_target(UiContext* uicon, ViewTree* view_t
     uint64_t t_init = time_now_ns();
 
     render_output_render_view_tree(&rdcon, view_tree);
+
+    if (rdcon.paint_failed) {
+        uicon->render_failed = true;
+        return 1;
+    }
 
     uint64_t t_render = time_now_ns();
     log_info("[TIMING] render_block_view (record): %.1fms, %d display list items",
@@ -1444,7 +1454,8 @@ static void render_output_render_html_doc(UiContext* uicon, ViewTree* view_tree,
         log_error("render_output_render_html_doc: PDF/SVG require render_output_render_html_file_to_target");
         return;
     }
-    render_output_render_view_tree_to_target(uicon, view_tree, &target);
+    if (render_output_render_view_tree_to_target(uicon, view_tree, &target) != 0 && uicon)
+        uicon->render_failed = true;
 }
 
 /**
@@ -1534,7 +1545,8 @@ static void render_output_render_tiled_png(UiContext* uicon, ViewTree* view_tree
     log_info("[TIMING] render_output_render_tiled_png record: %.1fms, %d display list items",
         time_elapsed_ms_f(t_record_start, t_record_end),
         dl_item_count(&display_list));
-    if (!dl_validate_or_log(&display_list, "render_output_tiled_png")) {
+    if (rdcon.paint_failed || !dl_validate_or_log(&display_list, "render_output_tiled_png")) {
+        uicon->render_failed = true;
         image_surface_destroy(rec_surf);
         uicon->surface = lam::up(saved_surface);
         uicon->window_height = saved_window_height;

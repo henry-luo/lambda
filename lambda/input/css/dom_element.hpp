@@ -637,6 +637,7 @@ struct CssCustomProp {
     lam::Up<const char> value_text; // Raw value text for faithful CSSOM serialization
     size_t value_text_len;          // Length of value_text
     lam::Up<CssDeclaration> declaration; // cascade metadata and source-owner record
+    const void* animation_owner; // effect identity; cancellation removes only its samples
     lam::Own<CssCustomProp> next;   // Linked list for simple storage
 };
 
@@ -648,7 +649,7 @@ bool css_custom_property_name_matches(const char* stored_name,
 DomElement* dom_parent_element(DomElement* element);
 DomNode* dom_source_parent(DomNode* node);
 const CssCustomProp* dom_element_lookup_own_custom_property_entry(DomElement* element,
-    const char* name, size_t name_length = (size_t)-1);
+    const char* name, size_t name_length = (size_t)-1, bool exclude_animations = false);
 const CssValue* dom_element_lookup_own_custom_property(DomElement* element,
     const char* name, size_t name_length = (size_t)-1,
     StrView* token_text = nullptr);
@@ -1597,6 +1598,10 @@ bool dom_element_commit_inline_declarations(DomElement* element, CssRule* rule, 
 bool dom_element_set_presentation_style(DomElement* element, const char* property,
                                         const char* value, bool* changed);
 bool dom_element_clear_presentation_style(DomElement* element);
+bool dom_element_set_animation_custom_property(DomElement* element,
+    const CssDeclaration* sample, const void* effect, bool* changed);
+bool dom_element_clear_animation_custom_properties(DomElement* element, const void* effect,
+    const char* name = nullptr);
 const char* dom_inline_style_declaration_end(const char* text);
 
 /**

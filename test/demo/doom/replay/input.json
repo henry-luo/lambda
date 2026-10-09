@@ -1,0 +1,175 @@
+{
+  "name": "DOOM shared modifier keys, relative mouse deltas and captured drag",
+  "html": "test/demo/doom/fixtures/_input.ls",
+  "viewport": {
+    "width": 640,
+    "height": 200
+  },
+  "events": [
+    {
+      "type": "click",
+      "target": {
+        "selector": "#lock"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#input-probe"
+      },
+      "attribute": "data-accepted",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#input-probe"
+      },
+      "attribute": "data-relative",
+      "equals": "true"
+    },
+    {
+      "type": "key_press",
+      "key": "Control"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#input-probe"
+      },
+      "attribute": "data-key",
+      "equals": "Control/ControlLeft"
+    },
+    {
+      "type": "key_press",
+      "key": "Shift"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#input-probe"
+      },
+      "attribute": "data-key",
+      "equals": "Shift/ShiftLeft"
+    },
+    {
+      "type": "mouse_move",
+      "x": 10,
+      "y": 20
+    },
+    {
+      "type": "mouse_move",
+      "x": 25,
+      "y": 13
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#input-probe"
+      },
+      "attribute": "data-delta",
+      "equals": "15/-7"
+    },
+    {
+      "type": "key_press",
+      "key": "P"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#input-probe"
+      },
+      "attribute": "data-relative",
+      "equals": "false"
+    },
+    {
+      "type": "mouse_down",
+      "target": {
+        "selector": "#drag"
+      },
+      "button": 0
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#drag"
+      },
+      "attribute": "data-capture",
+      "equals": "true"
+    },
+    {
+      "type": "mouse_move",
+      "x": 900,
+      "y": 250
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#drag"
+      },
+      "attribute": "data-x",
+      "equals": "900"
+    },
+    {
+      "type": "mouse_up",
+      "x": 900,
+      "y": 250,
+      "button": 0
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#drag"
+      },
+      "attribute": "data-capture",
+      "equals": "false"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#lock"
+      }
+    },
+    {
+      "type": "window_focus",
+      "focused": false
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#input-probe"
+      },
+      "attribute": "data-relative",
+      "equals": "false"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#input-probe"
+      },
+      "attribute": "data-blurred",
+      "equals": "true"
+    },
+    {
+      "type": "window_focus",
+      "focused": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#lock"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#input-probe"
+      },
+      "attribute": "data-relative",
+      "equals": "true"
+    },
+    {
+      "type": "window_close"
+    }
+  ]
+}

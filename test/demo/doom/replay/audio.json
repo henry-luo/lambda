@@ -1,0 +1,24 @@
+{
+  "name": "DOOM native byte decode, playback, pause and stale handles",
+  "html": "test/demo/doom/fixtures/_audio.ls",
+  "viewport": {"width": 640, "height": 160},
+  "events": [
+    {"type": "click", "target": {"selector": "#open"}},
+    {"type": "assert_attribute", "target": {"selector": "#audio-probe"}, "attribute": "data-fresh", "equals": "true"},
+    {"type": "assert_attribute", "target": {"selector": "#audio-probe"}, "attribute": "data-state", "equals": "ready"},
+    {"type": "click", "target": {"selector": "#play"}},
+    {"type": "assert_attribute", "target": {"selector": "#audio-probe"}, "attribute": "data-accepted", "equals": "true"},
+    {"type": "assert_attribute", "target": {"selector": "#audio-probe"}, "attribute": "data-state", "equals": "playing"},
+    {"type": "click", "target": {"selector": "#pause"}},
+    {"type": "assert_attribute", "target": {"selector": "#audio-probe"}, "attribute": "data-state", "equals": "paused"},
+    {"type": "click", "target": {"selector": "#play"}},
+    {"type": "assert_attribute", "target": {"selector": "#audio-probe"}, "attribute": "data-state", "equals": "playing"},
+    {"type": "click", "target": {"selector": "#close"}},
+    {"type": "assert_attribute", "target": {"selector": "#audio-probe"}, "attribute": "data-state", "equals": "closed"},
+    {"type": "click", "target": {"selector": "#open"}},
+    {"type": "assert_attribute", "target": {"selector": "#audio-probe"}, "attribute": "data-fresh", "equals": "true"},
+    {"type": "click", "target": {"selector": "#stale"}},
+    {"type": "assert_attribute", "target": {"selector": "#audio-probe"}, "attribute": "data-stale", "equals": "false"},
+    {"type": "click", "target": {"selector": "#play"}}
+  ]
+}

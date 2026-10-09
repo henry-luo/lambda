@@ -218,7 +218,8 @@ static FontHandle* resolve_exact_fallback_family(FontContext* ctx,
                                                   uint32_t codepoint) {
     if (!ctx || !style || !family) return NULL;
 
-    char* key = font_cache_make_key(ctx->arena, family, style->weight,
+    char key_storage[256];
+    char* key = font_cache_make_key(key_storage, sizeof(key_storage), family, style->weight,
                                     style->slant, style->size_px);
     FontHandle* cached = font_cache_lookup(ctx, key, false, NULL);
     if (cached) {

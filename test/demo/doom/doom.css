@@ -1,0 +1,138 @@
+/* Translated CSS scene geometry from cssDOOM; GPL-2.0, see ATTRIBUTION.md. */
+* { box-sizing: border-box; }
+html, body { margin: 0; background: #111; color: #ddd; font-family: monospace; }
+#doom { width: 640px; margin: 16px auto; outline: none; }
+#stage { position: relative; width: 640px; height: 400px; background: #000; }
+#viewport { position: relative; width: 640px; height: 336px; overflow: hidden; perspective: 320px; background-color: #1a1a3a; background-repeat: repeat-x; background-size: auto 70%; image-rendering: pixelated; }
+#scene { position: absolute; left: 50%; top: 50%; width: 0; height: 0; transform-style: preserve-3d; transform-origin: 0 0; pointer-events: none; }
+#scene * { position: absolute; transform-style: preserve-3d; backface-visibility: hidden; image-rendering: pixelated; }
+.sector, .thing { left: 0; top: 0; width: 0; height: 0; }
+.wall {
+    width: calc(hypot(calc(var(--end-x) - var(--start-x)), calc(var(--end-y) - var(--start-y))) * 1px);
+    height: calc((var(--ceiling-z) - var(--floor-z)) * 1px);
+    background-repeat: repeat;
+    background-position: calc(var(--texture-offset-x, 0) * -1px) calc(var(--texture-offset-y, 0) * -1px);
+    transform-origin: 0 0;
+    transform: translateY(var(--motion, 0px)) translate3d(calc(var(--start-x) * 1px), calc(var(--ceiling-z) * -1px), calc(var(--start-y) * -1px)) rotateY(atan2(calc(var(--end-y) - var(--start-y)), calc(var(--end-x) - var(--start-x))));
+    filter: brightness(var(--light, 1));
+}
+.floor, .ceiling {
+    width: calc((var(--max-x) - var(--min-x)) * 1px);
+    height: calc((var(--max-y) - var(--min-y)) * 1px);
+    background-repeat: repeat; background-size: 64px 64px;
+    background-position: calc(var(--min-x) * -1px) calc(var(--max-y) * 1px);
+    transform-origin: 50% 50%;
+    transform: translate3d(calc(var(--min-x) * 1px), calc((var(--surface-z) + (var(--max-y) - var(--min-y)) / 2) * -1px), calc((var(--min-y) + var(--max-y)) / 2 * -1px)) rotateX(90deg);
+    filter: brightness(var(--light, 1));
+}
+.ceiling { backface-visibility: visible !important; }
+#doom[data-spectator="follow"] .ceiling, #doom[data-spectator="top"] .ceiling { display:none; }
+.thing { transform: translate3d(calc(var(--x) * 1px), calc(var(--floor-z) * -1px), calc(var(--y) * -1px)); }
+.sprite { background-repeat: no-repeat; transform-origin: 50% 100%; filter: brightness(var(--light, 1)); }
+@property --light { syntax: "<number>"; inherits: true; initial-value: 1; }
+@property --scroll-offset { syntax: "<length>"; inherits: false; initial-value: 0px; }
+@keyframes light-glow { 0%, 100% { --light:.75; } 50% { --light:1; } }
+@keyframes light-blink { 0%, 49% { --light:1; } 50%, 100% { --light:.5; } }
+@keyframes light-fire-flicker {
+    0%, 7% { --light:1; } 8%, 15% { --light:.6; } 16%, 23% { --light:.9; }
+    24%, 31% { --light:.5; } 32%, 47% { --light:1; } 48%, 55% { --light:.7; }
+    56%, 63% { --light:.85; } 64%, 71% { --light:.55; } 72%, 79% { --light:1; }
+    80%, 87% { --light:.65; } 88%, 100% { --light:.9; }
+}
+@keyframes light-flicker {
+    0%, 4% { --light:1; } 5%, 8% { --light:.5; } 9%, 50% { --light:1; }
+    51%, 54% { --light:.5; } 55%, 70% { --light:1; } 71%, 73% { --light:.5; } 74%, 100% { --light:1; }
+}
+.light-glow { animation:light-glow 1s ease-in-out infinite paused; }
+.light-blink { animation:light-blink 1s steps(1) infinite paused; }
+.light-blink-fast { animation:light-blink .5s steps(1) infinite paused; }
+.light-flicker { animation:light-flicker 2s steps(1) infinite paused; }
+.light-fire-flicker { animation:light-fire-flicker 1.5s steps(1) infinite paused; }
+@keyframes doom-scroll { from { --scroll-offset:0px; } to { --scroll-offset:-128px; } }
+.scroll-texture { animation:doom-scroll 3.66s linear infinite paused; background-position-x:calc(var(--texture-offset-x, 0) * -1px + var(--scroll-offset)); }
+.unpegged { background-position-y:calc(100% + var(--texture-offset-y, 0) * -1px); }
+@keyframes doom-nukage {
+    0%, 33% { background-image:url('assets/flats/NUKAGE1.png'); }
+    33%, 66% { background-image:url('assets/flats/NUKAGE2.png'); }
+    66%, 100% { background-image:url('assets/flats/NUKAGE3.png'); }
+}
+.nukage { animation:doom-nukage 1s steps(1) infinite paused; }
+#doom[data-mode="playing"] .sector, #doom[data-mode="playing"] .scroll-texture,
+#doom[data-mode="playing"] .nukage { animation-play-state:running; }
+#scene { --camera-forward-x:calc(sin(calc(var(--camera-angle) * 1rad)) * -1); --camera-forward-y:cos(calc(var(--camera-angle) * 1rad)); }
+.wall, .floor, .ceiling, .thing {
+    --view-depth:calc((var(--x) - var(--camera-x)) * var(--camera-forward-x) + (var(--y) - var(--camera-y)) * var(--camera-forward-y));
+    --light-falloff:clamp(.15, calc(1 - var(--view-depth) / 1500), 1);
+}
+.wall, .floor, .ceiling, .sprite { filter:brightness(calc(var(--light, 1) * var(--light-falloff, 1))); }
+#doom[data-spectator="follow"] .wall, #doom[data-spectator="top"] .wall,
+#doom[data-spectator="follow"] .floor, #doom[data-spectator="top"] .floor,
+#doom[data-spectator="follow"] .sprite, #doom[data-spectator="top"] .sprite { filter:brightness(var(--light, 1)); backface-visibility:visible; }
+.player-shadow { width:32px; height:32px; left:-16px; top:-16px; background:rgba(0,0,0,.5); border-radius:50%; transform:rotateX(90deg); filter:blur(4px); backface-visibility:visible !important; }
+#doom .sprite[data-type="spectre"] { filter:url(#fuzz); opacity:.35; }
+#doom .sprite[data-type="spectre"][data-state="dead"] { filter:none; }
+.player-fov { width:80px; height:80px; left:-40px; top:-40px; opacity:.4; border-radius:50%; background:conic-gradient(from -45deg, white 0deg, white 90deg, transparent 90deg); mask-image:radial-gradient(circle, transparent 60%, black 63%); transform:translateY(-10px) rotateX(90deg); backface-visibility:visible !important; }
+@keyframes doom-sprite-cycle { from { background-position-x: 0px; } to { background-position-x: var(--frame-end); } }
+@keyframes doom-sprite-stop { from { background-position-x: 0px; } to { background-position-x: var(--frame-end); } }
+#doom[data-mode="ready"] .sprite, #doom[data-mode="paused"] .sprite,
+#doom[data-mode="dead"] .sprite, #doom[data-mode="won"] .sprite { animation-play-state: paused; }
+.transient { background-repeat: no-repeat; transform-origin: 50% 50%; }
+.transient.fog { transform-origin: 50% 100%; }
+.transient.projectile { filter: brightness(1.8); }
+#doom[data-mode="ready"] .transient, #doom[data-mode="paused"] .transient,
+#doom[data-mode="dead"] .transient, #doom[data-mode="won"] .transient { animation-play-state: paused; }
+@keyframes doom-projectile-glow { from { filter: brightness(1.8); } to { filter: brightness(2.5); } }
+@keyframes doom-projectile-move {
+    from { translate: var(--start-x) var(--start-y) var(--start-z); }
+    to { translate: var(--end-x) var(--end-y) var(--end-z); }
+}
+@keyframes doom-puff { from { background-position-x: 0px; } to { background-position-x: -45px; } }
+@keyframes doom-explosion {
+    0% { background-image: url('assets/sprites/BAL1C0.png'); }
+    33% { background-image: url('assets/sprites/BAL1D0.png'); }
+    66%, 100% { background-image: url('assets/sprites/BAL1E0.png'); }
+}
+@keyframes doom-fog {
+    0% { background-image: url('assets/sprites/TFOGA0.png'); }
+    10% { background-image: url('assets/sprites/TFOGB0.png'); }
+    20% { background-image: url('assets/sprites/TFOGC0.png'); }
+    30% { background-image: url('assets/sprites/TFOGD0.png'); }
+    40% { background-image: url('assets/sprites/TFOGE0.png'); }
+    50% { background-image: url('assets/sprites/TFOGF0.png'); }
+    60% { background-image: url('assets/sprites/TFOGG0.png'); }
+    70% { background-image: url('assets/sprites/TFOGH0.png'); }
+    80% { background-image: url('assets/sprites/TFOGI0.png'); }
+    90% { background-image: url('assets/sprites/TFOGJ0.png'); }
+    100% { background-image: none; }
+}
+#weapon { position: absolute; bottom: -28px; left: 50%; background-repeat: no-repeat; image-rendering: pixelated; pointer-events: none; }
+@keyframes doom-weapon-fire { from { background-position-x: var(--weapon-frame-start); } to { background-position-x: var(--weapon-frame-end); } }
+@keyframes doom-weapon-switch {
+    0%, 100% { transform: translateY(0); }
+    40%, 60% { transform: translateY(110%); }
+}
+@keyframes doom-weapon-bob {
+    0%, 100% { transform: translate(40px, -24px); }
+    12.5%, 87.5% { transform: translate(28px, 0); }
+    25%, 75% { transform: translate(0, -24px); }
+    37.5%, 62.5% { transform: translate(-28px, 0); }
+    50% { transform: translate(-40px, -24px); }
+}
+#crosshair { position: absolute; top: 50%; left: 50%; color: #ddd; font-size: 16px; transform: translate(-50%,-50%); }
+#hurt-flash { position: absolute; inset: 0; background: #f00; opacity: 0; pointer-events: none; }
+#status-bar { display: flex; align-items: center; justify-content: space-around; height: 64px; background: #555; border-top: 3px solid #888; }
+#status-bar div { text-align: center; min-width: 80px; }
+#status-bar span { display: block; font-size: 11px; color: #bbb; }
+#status-bar strong { display: block; color: #f44; font-size: 26px; text-shadow: 2px 2px #211; }
+#status-bar #face { width: 48px; min-width: 48px; height: 62px; background-repeat: no-repeat; background-size: 144px 310px; image-rendering: pixelated; animation: doom-face-idle 1.5s steps(1) infinite paused; }
+@keyframes doom-face-idle {
+    0%, 100% { background-position-x: 0; }
+    33% { background-position-x: -48px; }
+    66% { background-position-x: -96px; }
+}
+#overlay { position: absolute; inset: 0; background: rgba(0,0,0,.7); text-align: center; padding-top: 80px; }
+#overlay h1 { font-size: 64px; margin: 0; color: #ba3924; text-shadow: 3px 3px #642; }
+button, select { font: inherit; padding: 6px 10px; background: #333; color: #ddd; border: 1px solid #666; }
+button:hover { background: #555; }
+nav { display: flex; gap: 6px; margin-top: 12px; }
+#doom-status { font-size: 11px; line-height: 1.6; min-height: 36px; }

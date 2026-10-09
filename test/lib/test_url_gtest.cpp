@@ -412,6 +412,30 @@ TEST_F(UrlTest, RelativeUrlDotSegmentsBeyondRoot) {
     url_destroy(base);
 }
 
+TEST_F(UrlTest, DirectoryReferencesRetainSlashesForSubsequentResolution) {
+    const char* bases[] = {"https://example.com/a/b/entry.ls", "file:///a/b/entry.ls"};
+    const char* references[] = {".", "./", "..", "../", "dir/..", "dir/../", "dir/", "a//b"};
+    const char* paths[] = {"/a/b/", "/a/b/", "/a/", "/a/", "/a/b/", "/a/b/", "/a/b/dir/", "/a/b/a//b"};
+    for (const char* base_text : bases) {
+        Url* base = url_parse(base_text);
+        ASSERT_NE(base, nullptr);
+        for (size_t i = 0; i < sizeof(references) / sizeof(references[0]); i++) {
+            SCOPED_TRACE(references[i]);
+            Url* directory = url_parse_with_base(references[i], base);
+            ASSERT_NE(directory, nullptr);
+            EXPECT_STREQ(url_get_pathname(directory), paths[i]);
+            if (i < 6) {
+                Url* asset = url_parse_with_base("texture.png", directory);
+                ASSERT_NE(asset, nullptr);
+                EXPECT_STREQ(url_get_pathname(asset), i == 2 || i == 3 ? "/a/texture.png" : "/a/b/texture.png");
+                url_destroy(asset);
+            }
+            url_destroy(directory);
+        }
+        url_destroy(base);
+    }
+}
+
 TEST_F(UrlTest, RelativeUrlComplexPathResolution) {
     // Test complex path resolution scenarios
     Url* base = url_parse("https://example.com/a/b/c");

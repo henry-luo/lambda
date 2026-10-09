@@ -7564,19 +7564,23 @@ static void _select_sync_native_selected_index(DomElement* sel,
 // optgroup descendants contribute options, but nested option/hr/select/optgroup
 // subtrees are not part of the owning select's option list.
 static void _collect_options_impl(DomNode* node, Item arr, bool allow_optgroup) {
+    // Wrapping an option may collect before the array push or recursive visit.
+    RootFrame roots(2);
+    Rooted<Item> options(roots, arr), wrapped(roots, ItemNull);
     while (node) {
         if (node->is_element()) {
             DomElement* ce = (DomElement*)node;
             if (ce->tag_name) {
                 if (str_icmp_cstr(ce->tag_name, "option") == 0) {
-                    js_array_push(arr, dom_wrap_element(ce));
+                    wrapped.set(dom_wrap_element(ce));
+                    js_array_push(options.get(), wrapped.get());
                 } else if (str_icmp_cstr(ce->tag_name, "select") == 0 ||
                            str_icmp_cstr(ce->tag_name, "hr") == 0) {
                     // skip nested select/hr subtrees
                 } else if (str_icmp_cstr(ce->tag_name, "optgroup") == 0) {
-                    if (allow_optgroup) _collect_options_impl(ce->first_child, arr, false);
+                    if (allow_optgroup) _collect_options_impl(ce->first_child, options.get(), false);
                 } else {
-                    _collect_options_impl(ce->first_child, arr, allow_optgroup);
+                    _collect_options_impl(ce->first_child, options.get(), allow_optgroup);
                 }
             }
         }
@@ -7837,11 +7841,12 @@ static int _select_index_from_item(Item value) {
 
 static void _select_set_selected_index(DomElement* sel, int idx) {
     if (!sel) return;
-    Item arr = js_array_new(0);
-    _collect_options(sel->first_child, arr);
-    int64_t n = js_array_length(arr);
+    RootFrame roots(1);
+    Rooted<Item> arr(roots, js_array_new(0));
+    _collect_options(sel->first_child, arr.get());
+    int64_t n = js_array_length(arr.get());
     for (int64_t i = 0; i < n; i++) {
-        DomElement* opt = (DomElement*)dom_unwrap_element(js_elements_get_int(arr, i));
+        DomElement* opt = (DomElement*)dom_unwrap_element(js_elements_get_int(arr.get(), i));
         if (!opt) continue;
         _set_selectedness(opt, (int)i == idx); // INT_CAST_OK: option index
     }
@@ -8084,13 +8089,14 @@ static char* _select_value(DomElement* elem) {
     if (!elem || !_is_tag(elem, "select")) {
         return mem_strdup("", MEM_CAT_JS_RUNTIME);
     }
-    Item options = js_array_new(0);
-    _collect_options(elem->first_child, options);
-    int64_t count = js_array_length(options);
+    RootFrame roots(1);
+    Rooted<Item> options(roots, js_array_new(0));
+    _collect_options(elem->first_child, options.get());
+    int64_t count = js_array_length(options.get());
     DomElement* first_non_disabled = nullptr;
     for (int64_t i = 0; i < count; i++) {
         DomElement* option = (DomElement*)dom_unwrap_element(
-            js_elements_get_int(options, i));
+            js_elements_get_int(options.get(), i));
         if (!option) continue;
         if (_get_selectedness(option)) return _option_value(option);
         if (!first_non_disabled &&
@@ -8113,6 +8119,13 @@ static char* _select_value(DomElement* elem) {
         return _option_value(first_non_disabled);
     }
     return mem_strdup("", MEM_CAT_JS_RUNTIME);
+}
+
+extern "C" Item dom_select_value_bridge(void* element) {
+    char* value = _select_value((DomElement*)element);
+    String* result = heap_create_name(value ? value : "");
+    if (value) mem_free(value);
+    return (Item){.item = s2it(result)};
 }
 
 static void _select_sync_native_selected_index(DomElement* sel,
@@ -10301,10 +10314,7 @@ extern "C" Item dom_get_property_impl(Item elem_item, Item prop_name) {
                 _select_effective_selected_index_native(elem))};
         }
         if (prop_id == JS_DOM_PROP_VALUE) {
-            char* value = _select_value(elem);
-            String* result = heap_create_name(value ? value : "");
-            if (value) mem_free(value);
-            return (Item){.item = s2it(result)};
+            return dom_select_value_bridge(elem);
         }
         if (prop_id == JS_DOM_PROP_TYPE) {
             const char* t = elem->has_attribute("multiple")
@@ -11721,8 +11731,10 @@ extern "C" Item dom_set_style_property(Item elem_item, Item prop_name, Item valu
     RootFrame roots(4);
     Rooted<Item> receiver_root(roots, elem_item), property_root(roots, prop_name),
         value_root(roots, value), style_root(roots, dom_style_object(receiver_root.get()));
-    // Lambda-only callers use the same declaration core without entering a JS realm.
-    if (!dom_realm_active())
+    // Native declarations use CSSOM directly: JS indexed assignment treats
+    // custom names as expandos, which never updates the authored style/paint.
+    if (dom_is_rule_style_decl(style_root.get()) || dom_is_inline_style_item(style_root.get()) ||
+        dom_is_computed_style_item(style_root.get()) || !dom_realm_active())
         return dom_cssom_rule_decl_set_property(style_root.get(), property_root.get(), value_root.get());
     return dom_realm_set(style_root.get(), property_root.get(), value_root.get());
 }
@@ -11757,7 +11769,8 @@ extern "C" Item dom_get_style_property(Item elem_item, Item prop_name) {
     RootFrame roots(3);
     Rooted<Item> receiver_root(roots, elem_item), property_root(roots, prop_name),
         style_root(roots, dom_style_object(receiver_root.get()));
-    if (!dom_realm_active())
+    if (dom_is_rule_style_decl(style_root.get()) || dom_is_inline_style_item(style_root.get()) ||
+        dom_is_computed_style_item(style_root.get()) || !dom_realm_active())
         return dom_cssom_rule_decl_get_property(style_root.get(), property_root.get());
     return dom_realm_get(style_root.get(), property_root.get());
 }

@@ -592,7 +592,7 @@ void                font_cache_evict_lru(FontContext* ctx);
 void                font_cache_adopt_handle_alias(FontHandle* handle);
 void                font_cache_pin_handle(FontHandle* handle);
 void                font_cache_unpin_handle(FontHandle* handle);
-char*               font_cache_make_key(Arena* arena, const char* family,
+char*               font_cache_make_key(char* buffer, size_t capacity, const char* family,
                                          FontWeight weight, FontSlant slant, float size_px);
 FontHandle*         font_resolve_authored_for_codepoint(FontContext* ctx,
                                                         const FontStyleDesc* style,

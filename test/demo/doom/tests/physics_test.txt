@@ -1,0 +1,11 @@
+{
+  buckets: 1,
+  floors: [0, 32, 24, 0],
+  slide: {
+    x: 80,
+    y: 100
+  },
+  door: [false, true],
+  step: [false, true],
+  ray: [48, null]
+}

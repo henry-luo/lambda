@@ -176,6 +176,13 @@ The native context menu (`event.hpp`) is a fixed 5-item popup — Cut/Copy/Paste
 
 **Action vocabulary** (`SimEventType`, `event_sim.hpp:83`): primitives (`mouse_move/down/up/drag`, `key_press/down/up/combo`, `scroll`), high-level actions (`click`, `dblclick`, `type`, `focus`, `check`, `select_option`, `resize`, `drag_and_drop`, `editing_text_drag_drop`, `paste_text`, `ime_compose`, `set_editing_selection/value`), navigation (`navigate`, `navigate_back`, `switch_frame`), and utilities (`log`, `render`, `dump_caret`, `advance_time`, webview eval/wait).
 
+Each input primitive normally advances the virtual clock by 1/60 second after
+its enclosing JSON task. Fixtures with an explicit fixed-step time budget may
+set the root `input_turn_ms` to `0`; callbacks still drain at the task boundary,
+and `advance_time` then supplies all elapsed time. Omitted values preserve the
+historical input latency. `wait` also advances virtual time, so real-time frame
+measurements use the native window loop without either time-advancing action.
+
 **Assertion vocabulary** — the reason the file is huge. Roughly forty `assert_*` kinds cover caret, selection, form-selection, preedit, target, text, value, checked, visible, focus, pseudo-state, scroll, rect, style, position, element-at, attribute, count, state-store (and snapshot), event-log, editing-event, editing-selection/value, pixel color channels, Mark state-dump against a fixture, reconcile-mode, and browser-reference pixel snapshot (`event_sim.hpp:117-162`).
 
 **Fuzzing.** `event_sim_fuzz_schema` (`event_sim.cpp:3542`), driven by `SIM_EVENT_FUZZ_SCHEMA` with a `steps`/`seed`, synthesizes deterministic legal input sequences and asserts schema invariants hold. Results are tallied and printed by `event_sim_print_results` (which uses `fprintf(stderr,...)` — acceptable for a scoped test harness but a deviation from the general no-`fprintf` guidance).

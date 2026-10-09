@@ -7358,6 +7358,7 @@ static void* interp_large_stack_entry(void* opaque) {
 
 Item interp_run_on_large_stack(EvalContext* eval,
         InterpLargeStackCall call, void* opaque) {
+    uintptr_t caller_stack_limit = eval ? eval->stack_limit : 0;
     if (!eval || !call || !eval_context_shutdown(eval)) return ItemError;
     InterpLargeStackArgs args = {eval, call, opaque, ItemError, false};
     pthread_attr_t attr;
@@ -7384,6 +7385,9 @@ Item interp_run_on_large_stack(EvalContext* eval,
         return ItemError;
     }
     pthread_join(worker, NULL);
+    // the retained context returns to the caller's stack; a retired worker's
+    // limit makes later promoted callbacks report a false stack overflow.
+    eval->stack_limit = caller_stack_limit;
     if (!eval_context_init(eval)) {
         log_error("interp-worker: failed to restore evaluator context");
         return ItemError;
@@ -8147,16 +8151,9 @@ static bool interp_promote_function(Function* fn, bool count_entry) {
 
     FnPromotionCell* cell = interp_promotion_cell(script, def);
     if (!cell) return false;
-    if (st->runtime->ui_mode) {
-        // UI output can retain result-arena DOM nodes while nested calls run;
-        // keep their ownership on T0 rather than handing it to a satellite.
-        if (cell->state != FN_PROMOTION_PINNED_INTERP) {
-            cell->state = FN_PROMOTION_PINNED_INTERP;
-            log_debug("interp-tier: pinned UI function='%s' reason=arena-output",
-                def->name ? def->name->chars : "<anonymous>");
-        }
-        return false;
-    }
+    // D4.5.2: MIR uses the same UI-aware element allocator and content-copy
+    // helpers as T0. Promotion preserves the active runtime/result Input;
+    // pinning every UI call predates the shared arena-content ownership fix.
 
     // A completed worker image is published only between interpreter calls;
     // the current activation keeps its T0 frame and never performs OSR.

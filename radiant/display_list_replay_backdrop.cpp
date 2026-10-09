@@ -87,7 +87,7 @@ void dl_replay_backdrop_discard(DisplayReplayBackdropStack* stack,
 void dl_replay_backdrop_composite_opacity(DisplayReplayBackdropStack* stack,
                                           ImageSurface* surface,
                                           ScratchArena* scratch,
-                                          const DlCompositeOpacity* opacity) {
+                                          const DlCompositeOpacity* opacity, float offset_x, float offset_y) {
     if (!stack || !surface || !surface->pixels || !opacity || stack->sp <= 0) return;
     IRect region = {};
     uint32_t* backdrop = dl_replay_backdrop_pop(stack, &region);
@@ -97,13 +97,10 @@ void dl_replay_backdrop_composite_opacity(DisplayReplayBackdropStack* stack,
     int by = region.y;
     int bw = region.w;
     int bh = region.h;
-    if (opacity->premultiplied_source) {
-        render_composite_source_over_premul(surface, backdrop, bx, by, bw, bh,
-            clamp_byte_round(clamp_unit(opacity->opacity) * 255.0f));
-    } else {
-        render_composite_opacity(surface, backdrop, bx, by, bw, bh,
-                                 opacity->opacity);
-    }
+    render_composite_apply_region(surface, backdrop, bx, by, bw, bh,
+        opacity->premultiplied_source ? RENDER_COMPOSITE_REGION_PREMULTIPLIED : RENDER_COMPOSITE_REGION_OPACITY,
+        CSS_VALUE_NORMAL, clamp_byte_round(clamp_unit(opacity->opacity) * 255.0f),
+        nullptr, nullptr, &opacity->mask, offset_x, offset_y);
     dl_replay_backdrop_release(stack, scratch, backdrop);
 }
 

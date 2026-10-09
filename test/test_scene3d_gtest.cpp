@@ -7,6 +7,7 @@
 #include "../radiant/radiant.hpp"
 #include "../radiant/layout.hpp"
 #include "../radiant/render.hpp"
+#include "../radiant/render_css3d.hpp"
 #include "../radiant/event.hpp"
 #include "../lambda/js/js_runtime.h"
 #include "../lambda/js/js_event_loop.h"
@@ -19,14 +20,18 @@
 #include "../lambda/runtime/gc/gc_heap.h"
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lambda/input/css/dom_lifecycle.hpp"
+#include "../lambda/input/css/css_parser.hpp"
 #include "../lambda/io/mark_builder.hpp"
 #include "../lambda/module/radiant/radiant_dom_bridge.hpp"
 #include "../lambda/module/radiant/radiant_webgl_bridge.hpp"
 #include "../lib/mem.h"
+#include "../lib/mem_factory.h"
+#include "../lib/tagged.hpp"
 #include "../lib/mem_context.h"
 #include "../lib/log.h"
 #include "../lib/strbuf.h"
 #include "../lib/image.h"
+#include "../lib/font/font_internal.h"
 #include <time.h>
 
 static void scene3d_test_capture(const char* name,ImageSurface* image) {
@@ -34,6 +39,86 @@ static void scene3d_test_capture(const char* name,ImageSurface* image) {
     StrBuf* path=strbuf_new();strbuf_append_format(path,"%s/%s-native.png",directory,name);
     EXPECT_EQ(image_save_png(path->str,(const unsigned char*)image->pixels,image->width,image->height,4),1);
     strbuf_free(path);
+}
+
+TEST(Css3dProjection, RepeatedTextureMatchesExpandedImageAcrossViewerClipping) {
+    const uint32_t tile_pixels[] = {0xff0000ff, 0xff00ff00, 0xffff0000, 0x80808080};
+    uint32_t expanded[16 * 16];
+    for (unsigned y = 0; y < 16; y++) for (unsigned x = 0; x < 16; x++)
+        expanded[y * 16 + x] = tile_pixels[(y % 2) * 2 + x % 2];
+    Rect tile = {-3, -5, 8, 6}, coverage = {-3, -5, 64, 48};
+    Rect viewport = {0, 0, 48, 48};
+    for (float perspective : {0.012f, -0.04f}) for (ScaleMode mode : {SCALE_MODE_NEAREST, SCALE_MODE_LINEAR_WRAP}) {
+        SCOPED_TRACE(perspective);
+        SCOPED_TRACE(mode);
+        RdtMatrix transform = {1, 0, 12, 0, 1, 12, perspective, -0.007f, 1};
+        uint32_t *repeated = nullptr, *reference = nullptr;
+        Rect repeated_rect, reference_rect;
+        ASSERT_TRUE(render_image_project_pixels(tile_pixels, 2, 2, 2, coverage,
+            &transform, viewport, mode, true, &repeated, &repeated_rect, &tile));
+        lam::Temp<uint32_t> owned_repeated(repeated);
+        ASSERT_TRUE(render_image_project_pixels(expanded, 16, 16, 16, coverage,
+            &transform, viewport, mode, true, &reference, &reference_rect));
+        lam::Temp<uint32_t> owned_reference(reference);
+        ASSERT_NE(repeated, nullptr); ASSERT_NE(reference, nullptr);
+        ASSERT_FLOAT_EQ(repeated_rect.x, reference_rect.x); ASSERT_FLOAT_EQ(repeated_rect.y, reference_rect.y);
+        ASSERT_FLOAT_EQ(repeated_rect.width, reference_rect.width); ASSERT_FLOAT_EQ(repeated_rect.height, reference_rect.height);
+        size_t count = (size_t)repeated_rect.width * (size_t)repeated_rect.height;
+        size_t visible = 0;
+        for (size_t i = 0; i < count; i++) {
+            if (reference[i] >> 24) visible++;
+            for (unsigned channel = 0; channel < 4; channel++)
+                EXPECT_NEAR((repeated[i] >> (channel * 8)) & 255,
+                    (reference[i] >> (channel * 8)) & 255, mode == SCALE_MODE_NEAREST ? 0 : 1);
+        }
+        EXPECT_GT(visible, 400u);
+    }
+}
+
+TEST(Css3dProjection, ParallelRowsMatchSerialViewportSampling) {
+    const uint32_t pixels[] = {0xff0000ff, 0xff00ff00, 0xffff0000, 0x80808080};
+    RdtMatrix transform = {1, 0, 110, 0, 1, 130, -.004f, .001f, 1};
+    Rect destination = {-200, -150, 800, 700}, tile = {-3, -5, 8, 6};
+    for (ScaleMode mode : {SCALE_MODE_NEAREST, SCALE_MODE_LINEAR_WRAP, SCALE_MODE_PIXELATED}) {
+        uint32_t *parallel = nullptr, *serial = nullptr;
+        Rect full, crop;
+        ASSERT_TRUE(render_image_project_pixels(pixels, 2, 2, 2, destination, &transform,
+            {0, 0, 440, 400}, mode, true, &parallel, &full, &tile));
+        lam::Temp<uint32_t> owned_parallel(parallel);
+        ASSERT_TRUE(render_image_project_pixels(pixels, 2, 2, 2, destination, &transform,
+            {110, 100, 120, 90}, mode, true, &serial, &crop, &tile));
+        lam::Temp<uint32_t> owned_serial(serial);
+        ASSERT_NE(parallel, nullptr); ASSERT_NE(serial, nullptr);
+        for (unsigned y = 0; y < (unsigned)crop.height; y++)
+            for (unsigned x = 0; x < (unsigned)crop.width; x++) {
+                size_t offset = (size_t)(crop.y - full.y + y) * (size_t)full.width +
+                    (size_t)(crop.x - full.x + x);
+                ASSERT_EQ(parallel[offset], serial[y * (size_t)crop.width + x]);
+            }
+    }
+    render_pool_shutdown();
+}
+
+TEST(Css3dProjection, PreparedAlphaMatchesPerSampleConversionWithoutChangingSource) {
+    uint32_t pixels[100 * 100];
+    for (unsigned i = 0; i < 100 * 100; i++) pixels[i] = i * 2654435761u;
+    RdtMatrix transform = {1, .01f, 0, 0, 1, 0, .001f, -.001f, 1};
+    for (ScaleMode mode : {SCALE_MODE_NEAREST, SCALE_MODE_LINEAR_WRAP, SCALE_MODE_PIXELATED}) {
+        uint32_t *prepared = nullptr, *per_sample = nullptr;
+        Rect full, crop;
+        ASSERT_TRUE(render_image_project_pixels(pixels, 100, 100, 100, {0, 0, 100, 100},
+            &transform, {0, 0, 100, 100}, mode, true, &prepared, &full));
+        lam::Temp<uint32_t> owned_prepared(prepared);
+        ASSERT_TRUE(render_image_project_pixels(pixels, 100, 100, 100, {0, 0, 100, 100},
+            &transform, {30, 30, 20, 20}, mode, true, &per_sample, &crop));
+        lam::Temp<uint32_t> owned_per_sample(per_sample);
+        ASSERT_NE(prepared, nullptr); ASSERT_NE(per_sample, nullptr);
+        for (unsigned y = 0; y < (unsigned)crop.height; y++)
+            for (unsigned x = 0; x < (unsigned)crop.width; x++)
+                EXPECT_EQ(prepared[(size_t)(crop.y - full.y + y) * (size_t)full.width +
+                    (size_t)(crop.x - full.x + x)], per_sample[y * (size_t)crop.width + x]);
+    }
+    for (unsigned i = 0; i < 100 * 100; i++) ASSERT_EQ(pixels[i], i * 2654435761u);
 }
 
 struct AnimationOracleTrack {
@@ -582,6 +667,246 @@ TEST_F(Scene3dTest, BufferIndexAttributeInstanceAndStaleDependencyRangesAreRejec
     attribute.offset=sizeof(positions);EXPECT_EQ(native_gl_vertices(graphics,&attribute,1,{}).id,0u);
     native_gl_destroy(graphics);
 }
+TEST_F(Scene3dTest, CssPreservedPlanesUseDepthInsteadOfDomOrder) {
+    ASSERT_NE(load_page("test/demo/doom/tests/render/depth-order.html", 440, 200), nullptr);
+    render_html_doc(&ui, page->view_tree, nullptr);
+    pixel(ui.surface, 100, 100, 255, 0, 0);
+    pixel(ui.surface, 320, 100, 255, 0, 0);
+}
+
+TEST_F(Scene3dTest, TransformedBackgroundsClipToTheirPaintBoxAndSvgZeroAxesStayZero) {
+    ASSERT_NE(load_page("test/demo/doom/tests/render/background-clip.html", 220, 100), nullptr);
+    for (const char* id : {"repeat-x", "repeat-y"}) {
+        DomElement* repeated = dom_find_element_by_id(page->root->as_element(), id);
+        ASSERT_NE(repeated, nullptr);
+        ASSERT_NE(repeated->boundary()->background, nullptr);
+        bool horizontal = strcmp(id, "repeat-x") == 0;
+        EXPECT_EQ(repeated->boundary()->background->bg_repeat_x,
+            horizontal ? CSS_VALUE_REPEAT : CSS_VALUE_NO_REPEAT);
+        EXPECT_EQ(repeated->boundary()->background->bg_repeat_y,
+            horizontal ? CSS_VALUE_NO_REPEAT : CSS_VALUE_REPEAT);
+    }
+    DomElement* svg = dom_find_element_by_id(page->root->as_element(), "zero");
+    ASSERT_NE(svg, nullptr);
+    EXPECT_FLOAT_EQ(svg->width, 0.0f);
+    EXPECT_FLOAT_EQ(svg->height, 0.0f);
+    for (unsigned density : {1u, 2u}) {
+        ui_context_set_device_scale(&ui, density, density);
+        ui.create_surface(220 * density, 100 * density);
+        render_html_doc(&ui, page->view_tree, nullptr);
+        pixel(ui.surface, 124 * density, 84 * density, 255, 255, 255);
+        pixel(ui.surface, 174 * density, 84 * density, 255, 255, 255);
+        pixel(ui.surface, 5 * density, 5 * density, 0, 255, 0);
+        pixel(ui.surface, 30 * density, 30 * density, 255, 0, 0);
+        pixel(ui.surface, 60 * density, 30 * density, 255, 255, 255);
+        pixel(ui.surface, 130 * density, 30 * density, 255, 0, 0);
+        pixel(ui.surface, 165 * density, 30 * density, 255, 255, 255);
+        pixel(ui.surface, 25 * density, 65 * density, 128, 128, 128);
+        pixel(ui.surface, 60 * density, 65 * density, 255, 255, 255);
+    }
+}
+
+TEST_F(Scene3dTest, RecomputedVariablesAndBackgroundUrlsKeepRetainedStorageBounded) {
+    ASSERT_NE(load_page("test/demo/doom/tests/render/background-clip.html", 220, 100), nullptr);
+    DomElement* element = dom_find_element_by_id(page->root->as_element(), "affine");
+    ASSERT_NE(element, nullptr);
+    LayoutContext layout = {};
+    layout.doc = lam::up(page);
+    layout.ui_context = lam::up(&ui);
+    layout.pool = lam::up(page->view_tree->prop_pool.get());
+    layout.view = lam::up(static_cast<View*>(element));
+    layout.elmt = lam::up(element);
+    const char* sources[] = {"--measured:12px", "width:calc(var(--measured) * 2)",
+        "background-image:url('uv-grid.png')", "background-size:var(--measured) 24px"};
+    CssDeclaration* declarations[4] = {};
+    for (size_t i = 0; i < 4; i++) {
+        declarations[i] = css_parse_declaration_text(sources[i], strlen(sources[i]), page->document_pool);
+        ASSERT_NE(declarations[i], nullptr);
+        resolve_css_property(declarations[i]->property_code, declarations[i], &layout);
+    }
+    const char* image = element->boundary()->background->image;
+    ASSERT_NE(image, nullptr);
+    size_t bytes_before = 0, count_before = 0;
+    pool_get_stats(layout.pool, &bytes_before, &count_before);
+    for (size_t repeat = 0; repeat < 32; repeat++) {
+        for (size_t i = 1; i < 4; i++)
+            resolve_css_property(declarations[i]->property_code, declarations[i], &layout);
+        EXPECT_EQ(element->boundary()->background->image, image);
+    }
+    size_t bytes_after = 0, count_after = 0;
+    pool_get_stats(layout.pool, &bytes_after, &count_after);
+    // D4.5.1v4: temporary substitution trees cannot become retained view storage.
+    EXPECT_EQ(bytes_after, bytes_before);
+    EXPECT_EQ(count_after, count_before);
+}
+
+TEST_F(Scene3dTest, RepeatedFontResolutionDoesNotRetainLookupKeys) {
+    FontContext* ctx = ui.font_ctx;
+    ASSERT_NE(ctx, nullptr);
+    FontStyleDesc style = {};
+    style.family = "monospace, serif";
+    style.size_px = 12;
+    style.weight = FONT_WEIGHT_NORMAL;
+    style.slant = FONT_SLANT_NORMAL;
+    FontHandle* first = font_resolve(ctx, &style);
+    ASSERT_NE(first, nullptr);
+    font_handle_release(first);
+    size_t warm = arena_total_used(ctx->arena);
+    for (int i = 0; i < 4096; i++) {
+        FontHandle* next = font_resolve(ctx, &style);
+        EXPECT_EQ(next, first);
+        if (next) font_handle_release(next);
+    }
+    EXPECT_EQ(arena_total_used(ctx->arena), warm);
+}
+
+TEST_F(Scene3dTest, ViewerClippedConcavePlanesRemainIndependentOfDomOrder) {
+    ASSERT_NE(load_page("test/demo/doom/tests/render/viewer-concave.html", 1280, 336), nullptr);
+    for (unsigned density : {1u, 2u}) {
+        ui_context_set_device_scale(&ui, density, density);
+        ui.create_surface(1280 * density, 336 * density);
+        render_html_doc(&ui, page->view_tree, nullptr);
+        for (unsigned offset : {0u, 640u}) {
+            pixel(ui.surface, (100 + offset) * density, 30 * density, 0, 128, 0);
+            pixel(ui.surface, (120 + offset) * density, 140 * density, 0, 0, 255);
+            pixel(ui.surface, (320 + offset) * density, 200 * density, 26, 26, 58);
+        }
+    }
+}
+
+TEST_F(Scene3dTest, ConcaveFloorRemainsVisibleBesideNonoverlappingWallInEitherDomOrder) {
+    ASSERT_NE(load_page("test/demo/doom/tests/render/concave-floor-order.html", 1280, 336), nullptr);
+    for (unsigned density : {1u, 2u}) {
+        ui_context_set_device_scale(&ui, density, density);
+        ui.create_surface(1280 * density, 336 * density);
+        render_html_doc(&ui, page->view_tree, nullptr);
+        pixel(ui.surface, 320 * density, 104 * density, 0, 128, 0, 255, 2);
+        pixel(ui.surface, 960 * density, 104 * density, 0, 128, 0, 255, 2);
+    }
+}
+
+TEST_F(Scene3dTest, AnimatedCustomFiltersUpdateWithoutLayoutAndKeepOverridesAndGeometryDependencies) {
+    ASSERT_NE(load_page("test/demo/doom/tests/render/custom-lighting.html", 320, 100), nullptr);
+    DomElement* paint = dom_find_element_by_id(page->root->as_element(), "paint");
+    DomElement* geometry = dom_find_element_by_id(page->root->as_element(), "geometry");
+    DomElement* scroll = dom_find_element_by_id(page->root->as_element(), "scroll");
+    DomElement* tile = dom_find_element_by_id(page->root->as_element(), "tile");
+    ASSERT_NE(paint, nullptr); ASSERT_NE(geometry, nullptr);
+    ASSERT_NE(scroll, nullptr); ASSERT_NE(tile, nullptr);
+    ASSERT_NE(state_store_create(page), nullptr);
+    LayoutContext context = {};
+    context.doc = lam::up(page); context.pool = lam::up(page->view_tree->prop_pool);
+    context.ui_context = lam::up(&ui);
+    for (DomElement* element : {paint, geometry, scroll}) {
+        context.view = lam::up(static_cast<View*>(element)); context.elmt = lam::up(element);
+        css_animation_resolve(element, &context);
+    }
+    AnimationScheduler* scheduler = page->state->animation_scheduler;
+    ASSERT_NE(scheduler, nullptr);
+    AnimationInstance *paint_animation = nullptr, *geometry_animation = nullptr, *scroll_animation = nullptr;
+    for (AnimationInstance* instance = scheduler->first; instance; instance = instance->next) {
+        if (instance->target == paint) paint_animation = instance;
+        if (instance->target == geometry) geometry_animation = instance;
+        if (instance->target == scroll) scroll_animation = instance;
+    }
+    ASSERT_NE(paint_animation, nullptr); ASSERT_NE(geometry_animation, nullptr);
+    ASSERT_NE(scroll_animation, nullptr);
+    for (float time : {.5f, .75f}) {
+        paint_animation->layout_changed = false;
+        geometry_animation->layout_changed = false;
+        scroll_animation->layout_changed = false;
+        css_animation_tick(paint_animation, time);
+        css_animation_tick(geometry_animation, time);
+        css_animation_tick(scroll_animation, time);
+        EXPECT_FALSE(paint_animation->layout_changed);
+        EXPECT_TRUE(geometry_animation->layout_changed);
+        EXPECT_FALSE(scroll_animation->layout_changed);
+        EXPECT_FALSE(tile->boundary()->background->bg_position_x_is_percent);
+        EXPECT_NEAR(tile->boundary()->background->bg_position_x, time * 32, .001f);
+        render_html_doc(&ui, page->view_tree, nullptr);
+        unsigned intensity = time == .5f ? 127u : 191u;
+        pixel(ui.surface, 40, 40, intensity, intensity, intensity, 255, 2);
+        pixel(ui.surface, 140, 40, 64, 64, 64, 255, 2);
+        pixel(ui.surface, 244, 20, 0, 255, 0);
+        pixel(ui.surface, 280, 20, 255, 0, 0);
+    }
+}
+
+TEST_F(Scene3dTest, CssCompositionAllocationFailurePreservesOwnershipAndRejectsPaint) {
+    ASSERT_NE(load_page("test/demo/doom/tests/render/depth-order.html", 440, 200), nullptr);
+    RenderProfiler profiler = {};
+    RasterRenderContext context;
+    RenderFrameScope frame(&context, &ui, page->view_tree, &profiler);
+    Css3dPaintContext composition(&context, lam::view_require_block(page->view_tree->root));
+    dl_fill_rect(frame.list(), 0.0f, 0.0f, 20.0f, 20.0f, Color{0xffffffff});
+    composition.flush();
+    int original_count = dl_item_count(frame.list());
+    memtrack_fault_inject(0);
+    bool success = composition.compose();
+    memtrack_fault_clear();
+    EXPECT_FALSE(success);
+    EXPECT_EQ(dl_item_count(frame.list()), original_count);
+    EXPECT_TRUE(dl_validate_or_log(frame.list(), "css3d rejected allocation"));
+}
+
+TEST_F(Scene3dTest, ProjectedClipBoundsLimitSamplingAndRestoreNestedScopes) {
+    ASSERT_NE(load_page("test/demo/doom/tests/render/depth-order.html", 440, 200), nullptr);
+    RenderProfiler profiler = {};
+    RasterRenderContext context;
+    RenderFrameScope frame(&context, &ui, page->view_tree, &profiler);
+    Rect original = render_painter_projection_viewport(&context);
+    RdtPath* rectangle = rdt_path_new();
+    rdt_path_add_rect(rectangle, 20, 40, 100, 50, 0, 0);
+    rc_push_clip(&context, rectangle, nullptr);
+    Rect outer = render_painter_projection_viewport(&context);
+    EXPECT_FLOAT_EQ(outer.x, 19); EXPECT_FLOAT_EQ(outer.y, 39);
+    EXPECT_FLOAT_EQ(outer.width, 102); EXPECT_FLOAT_EQ(outer.height, 52);
+    rc_push_clip(&context, rectangle, nullptr);
+    rc_pop_clip(&context);
+    EXPECT_FLOAT_EQ(render_painter_projection_viewport(&context).width, outer.width);
+    rc_pop_clip(&context);
+    rdt_path_free(rectangle);
+
+    RdtPath* crossing = rdt_path_new();
+    rdt_path_move_to(crossing, -2, 10); rdt_path_line_to(crossing, 2, 10);
+    rdt_path_line_to(crossing, 2, 20); rdt_path_close(crossing);
+    RdtMatrix transform = {1, 0, 0, 0, 1, 0, 1, 0, 1};
+    rc_push_clip(&context, crossing, &transform);
+    Rect clipped = render_painter_projection_viewport(&context);
+    EXPECT_GT(clipped.width, 0); EXPECT_LT(clipped.width, 4);
+    EXPECT_GT(clipped.height, 0); EXPECT_LT(clipped.height, 32);
+    rc_pop_clip(&context);
+    rdt_path_free(crossing);
+    Rect restored = render_painter_projection_viewport(&context);
+    EXPECT_FLOAT_EQ(restored.x, original.x); EXPECT_FLOAT_EQ(restored.y, original.y);
+    EXPECT_FLOAT_EQ(restored.width, original.width); EXPECT_FLOAT_EQ(restored.height, original.height);
+    EXPECT_TRUE(dl_validate_or_log(frame.list(), "projected clip bounds"));
+}
+
+TEST_F(Scene3dTest, CssIntersectingPlanesAlphaFlatteningBackfacesAndViewerClipping) {
+    ASSERT_NE(load_page("test/demo/doom/tests/render/context-planes.html", 880, 660), nullptr);
+    const struct { unsigned x, y, r, g, b; } probes[] = {
+        {80, 110, 255, 0, 0}, {140, 110, 0, 0, 255},
+        {300, 110, 255, 0, 0}, {360, 110, 0, 0, 255},
+        {550, 110, 128, 0, 127}, {770, 110, 255, 0, 0},
+        {110, 330, 0, 0, 255}, {330, 330, 255, 0, 0},
+        {550, 330, 255, 0, 0}, {770, 330, 0, 0, 255}, {705, 330, 255, 0, 0},
+        {80, 500, 255, 0, 0}, {80, 600, 0, 0, 255}, {140, 500, 255, 0, 0},
+        {300, 500, 255, 0, 0}, {300, 600, 0, 0, 255}, {360, 500, 255, 0, 0},
+        {530, 520, 255, 0, 0}, {570, 520, 0, 255, 0}, {530, 580, 0, 0, 255},
+        {570, 580, 255, 255, 0}, {705, 500, 255, 0, 0}, {830, 500, 0, 255, 0},
+        {705, 600, 0, 0, 255}, {830, 600, 255, 255, 0}, {770, 550, 0, 0, 255}
+    };
+    for (unsigned density : {1u, 2u}) {
+        ui_context_set_device_scale(&ui, density, density);
+        ASSERT_FLOAT_EQ(ui_context_raster_scale(&ui), density);
+        ui.create_surface(880 * density, 660 * density);
+        render_html_doc(&ui, page->view_tree, nullptr);
+        for (const auto& probe : probes)
+            pixel(ui.surface, probe.x * density, probe.y * density, probe.r, probe.g, probe.b);
+    }
+}
+
 TEST_F(Scene3dTest, MixedPageClippingTransformOpacitySvgStackingAndSceneMutation) {
     ASSERT_NE(load_page("test/scene3d/mixed.html"),nullptr);
     DomElement* canvas=dom_find_element_by_id(page->root->as_element(),"canvas");ASSERT_NE(canvas,nullptr);

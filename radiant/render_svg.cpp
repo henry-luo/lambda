@@ -734,12 +734,8 @@ static void render_bound_svg(SvgRenderContext* ctx, ViewBlock* view) {
         // Compute image position within origin box
         float pos_x = ox, pos_y = oy;
         if (bg->bg_position_set) {
-            pos_x = bg->bg_position_x_is_percent
-                ? ox + (ow - img_w) * bg->bg_position_x / 100.0f
-                : ox + bg->bg_position_x;
-            pos_y = bg->bg_position_y_is_percent
-                ? oy + (oh - img_h) * bg->bg_position_y / 100.0f
-                : oy + bg->bg_position_y;
+            pos_x = ox + background_position_offset(bg, true, ow - img_w);
+            pos_y = oy + background_position_offset(bg, false, oh - img_h);
         }
 
         bool no_repeat = (bg->bg_repeat_x == CSS_VALUE_NO_REPEAT && bg->bg_repeat_y == CSS_VALUE_NO_REPEAT);

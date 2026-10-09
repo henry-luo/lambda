@@ -1,0 +1,14 @@
+{
+  "name": "background-clip",
+  "width": 220,
+  "height": 100,
+  "scale": 1,
+  "browser": "HeadlessChrome/154.0.8037.57",
+  "spec": "https://drafts.csswg.org/css-transforms-2/",
+  "revision": "2025-11-30",
+  "shapes": {
+    "spec": "https://drafts.csswg.org/css-shapes/#shape-function",
+    "revision": "2026-05-07"
+  },
+  "sha256": "d836bdd8efd4362062ffea9d62a265679892355f7686769216c2223b96d53d70"
+}

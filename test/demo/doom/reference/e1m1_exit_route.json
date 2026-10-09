@@ -1,0 +1,383 @@
+{
+  "map": "E1M1",
+  "tick_hz": 35,
+  "segments": [
+    {
+      "keys": [
+        "w"
+      ],
+      "ticks": 95
+    },
+    {
+      "keys": [
+        "w",
+        "d"
+      ],
+      "ticks": 7
+    },
+    {
+      "keys": [
+        "s"
+      ],
+      "ticks": 8
+    },
+    {
+      "keys": [
+        "d"
+      ],
+      "ticks": 20
+    },
+    {
+      "keys": [
+        "w"
+      ],
+      "ticks": 48
+    },
+    {
+      "keys": [
+        "d"
+      ],
+      "ticks": 20
+    },
+    {
+      "keys": [
+        "w"
+      ],
+      "ticks": 7
+    },
+    {
+      "keys": [
+        "d"
+      ],
+      "ticks": 10
+    },
+    {
+      "keys": [
+        "ArrowRight"
+      ],
+      "ticks": 18
+    },
+    {
+      "keys": [
+        "e"
+      ],
+      "ticks": 1
+    },
+    {
+      "keys": [],
+      "ticks": 35
+    },
+    {
+      "keys": [
+        "w"
+      ],
+      "ticks": 20
+    },
+    {
+      "keys": [
+        "w"
+      ],
+      "ticks": 50
+    },
+    {
+      "keys": [
+        "d"
+      ],
+      "ticks": 30
+    },
+    {
+      "keys": [
+        "Control"
+      ],
+      "ticks": 70
+    },
+    {
+      "keys": [
+        "w"
+      ],
+      "ticks": 56
+    },
+    {
+      "keys": [
+        "d"
+      ],
+      "ticks": 18
+    },
+    {
+      "keys": [
+        "a"
+      ],
+      "ticks": 12
+    },
+    {
+      "keys": [
+        "w"
+      ],
+      "ticks": 62
+    },
+    {
+      "keys": [
+        "ArrowRight"
+      ],
+      "ticks": 29
+    },
+    {
+      "keys": [
+        "Control"
+      ],
+      "ticks": 48
+    },
+    {
+      "keys": [
+        "ArrowLeft"
+      ],
+      "ticks": 29
+    },
+    {
+      "keys": [
+        "d"
+      ],
+      "ticks": 24
+    },
+    {
+      "keys": [
+        "w"
+      ],
+      "ticks": 27
+    },
+    {
+      "keys": [
+        "a"
+      ],
+      "ticks": 20
+    },
+    {
+      "keys": [
+        "w"
+      ],
+      "ticks": 24
+    },
+    {
+      "keys": [
+        "a"
+      ],
+      "ticks": 25
+    },
+    {
+      "keys": [
+        "w"
+      ],
+      "ticks": 36
+    },
+    {
+      "keys": [
+        "d"
+      ],
+      "ticks": 36
+    },
+    {
+      "keys": [
+        "w"
+      ],
+      "ticks": 29
+    },
+    {
+      "keys": [
+        "s"
+      ],
+      "ticks": 23
+    },
+    {
+      "keys": [
+        "d"
+      ],
+      "ticks": 14
+    },
+    {
+      "keys": [
+        "w"
+      ],
+      "ticks": 37
+    },
+    {
+      "keys": [
+        "a"
+      ],
+      "ticks": 22
+    },
+    {
+      "keys": [
+        "w"
+      ],
+      "ticks": 32
+    },
+    {
+      "keys": [
+        "a"
+      ],
+      "ticks": 3
+    },
+    {
+      "keys": [
+        "w"
+      ],
+      "ticks": 26
+    },
+    {
+      "keys": [
+        "d"
+      ],
+      "ticks": 37
+    },
+    {
+      "keys": [
+        "w"
+      ],
+      "ticks": 16
+    },
+    {
+      "keys": [
+        "d"
+      ],
+      "ticks": 12
+    },
+    {
+      "keys": [
+        "w"
+      ],
+      "ticks": 43
+    },
+    {
+      "keys": [
+        "d"
+      ],
+      "ticks": 25
+    },
+    {
+      "keys": [
+        "w"
+      ],
+      "ticks": 20
+    },
+    {
+      "keys": [
+        "d"
+      ],
+      "ticks": 65
+    },
+    {
+      "keys": [
+        "w"
+      ],
+      "ticks": 22
+    },
+    {
+      "keys": [
+        "d"
+      ],
+      "ticks": 70
+    },
+    {
+      "keys": [
+        "d"
+      ],
+      "ticks": 45
+    },
+    {
+      "keys": [
+        "d"
+      ],
+      "ticks": 16
+    },
+    {
+      "keys": [
+        "ArrowRight"
+      ],
+      "ticks": 17
+    },
+    {
+      "keys": [
+        "e"
+      ],
+      "ticks": 1
+    },
+    {
+      "keys": [],
+      "ticks": 35
+    },
+    {
+      "keys": [
+        "w"
+      ],
+      "ticks": 55
+    },
+    {
+      "keys": [
+        "w"
+      ],
+      "ticks": 18
+    },
+    {
+      "keys": [
+        "e"
+      ],
+      "ticks": 1
+    },
+    {
+      "keys": [],
+      "ticks": 35
+    },
+    {
+      "keys": [
+        "w"
+      ],
+      "ticks": 28
+    },
+    {
+      "keys": [
+        "a"
+      ],
+      "ticks": 5
+    },
+    {
+      "keys": [
+        "w"
+      ],
+      "ticks": 9
+    },
+    {
+      "keys": [
+        "e"
+      ],
+      "ticks": 1
+    },
+    {
+      "keys": [],
+      "ticks": 35
+    },
+    {
+      "keys": [
+        "w"
+      ],
+      "ticks": 18
+    },
+    {
+      "keys": [
+        "d"
+      ],
+      "ticks": 8
+    },
+    {
+      "keys": [
+        "ArrowRight"
+      ],
+      "ticks": 17
+    },
+    {
+      "keys": [
+        "e"
+      ],
+      "ticks": 1
+    }
+  ]
+}

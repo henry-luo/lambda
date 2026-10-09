@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "fixture": "../tests/render/depth-order.html",
+  "viewport": {"width": 440, "height": 200, "scale": 1},
+  "reference": "CSS Transforms 2 sections 4.1-4.2",
+  "spec_url": "https://drafts.csswg.org/css-transforms-2/#3d-rendering",
+  "spec_draft_reviewed": "2025-11-30",
+  "probes": [
+    {"x": 100, "y": 100, "rgba": [255, 0, 0, 255]},
+    {"x": 320, "y": 100, "rgba": [255, 0, 0, 255]}
+  ],
+  "native_status": "fails before P1: left center blue, right center red"
+}

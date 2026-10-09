@@ -1,0 +1,12 @@
+{
+  "name": "Lambda CSS custom setters commit authored geometry and serialization",
+  "html": "test/demo/doom/fixtures/_styles.ls",
+  "viewport": {"width": 120, "height": 60},
+  "events": [
+    {"type": "assert_attribute", "target": {"selector": "#box"}, "attribute": "data-motion", "equals": "20px"},
+    {"type": "assert_attribute", "target": {"selector": "#box"}, "attribute": "data-serialized", "equals": "true"},
+    {"type": "assert_style", "target": {"selector": "#box"}, "property": "width", "equals": "60px"},
+    {"type": "assert_pixel", "x": 15, "y": 20, "max_r": 5, "max_g": 5, "max_b": 5},
+    {"type": "assert_pixel", "x": 80, "y": 20, "min_r": 250, "max_g": 5, "max_b": 5}
+  ]
+}

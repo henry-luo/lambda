@@ -1,0 +1,2456 @@
+{
+  "name": "Three complete episode cycles retain bounded native resources",
+  "html": "test/demo/doom/doom.ls",
+  "viewport": {
+    "width": 660,
+    "height": 500
+  },
+  "events": [
+    {
+      "type": "advance_time",
+      "ms": 40,
+      "steps": 2
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "ready"
+    },
+    {
+      "type": "select_option",
+      "target": {
+        "selector": "#map-picker"
+      },
+      "value": "E1M1"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#load-map"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-map",
+      "equals": "E1M1"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#map-picker option[value=\"E1M1\"]"
+      },
+      "attribute": "selected",
+      "present": true
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-generation",
+      "equals": "2"
+    },
+    {
+      "type": "advance_time",
+      "ms": 200,
+      "steps": 7
+    },
+    {
+      "type": "key_down",
+      "key": "w"
+    },
+    {
+      "type": "advance_time",
+      "ms": 240,
+      "steps": 8
+    },
+    {
+      "type": "key_up",
+      "key": "w"
+    },
+    {
+      "type": "key_press",
+      "key": "P"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "paused"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".wall"
+      },
+      "min": 1
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-error",
+      "present": false
+    },
+    {
+      "type": "select_option",
+      "target": {
+        "selector": "#map-picker"
+      },
+      "value": "E1M2"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#load-map"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-map",
+      "equals": "E1M2"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#map-picker option[value=\"E1M2\"]"
+      },
+      "attribute": "selected",
+      "present": true
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-generation",
+      "equals": "3"
+    },
+    {
+      "type": "advance_time",
+      "ms": 200,
+      "steps": 7
+    },
+    {
+      "type": "key_down",
+      "key": "w"
+    },
+    {
+      "type": "advance_time",
+      "ms": 240,
+      "steps": 8
+    },
+    {
+      "type": "key_up",
+      "key": "w"
+    },
+    {
+      "type": "key_press",
+      "key": "P"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "paused"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".wall"
+      },
+      "min": 1
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-error",
+      "present": false
+    },
+    {
+      "type": "select_option",
+      "target": {
+        "selector": "#map-picker"
+      },
+      "value": "E1M3"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#load-map"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-map",
+      "equals": "E1M3"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#map-picker option[value=\"E1M3\"]"
+      },
+      "attribute": "selected",
+      "present": true
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-generation",
+      "equals": "4"
+    },
+    {
+      "type": "advance_time",
+      "ms": 200,
+      "steps": 7
+    },
+    {
+      "type": "key_down",
+      "key": "w"
+    },
+    {
+      "type": "advance_time",
+      "ms": 240,
+      "steps": 8
+    },
+    {
+      "type": "key_up",
+      "key": "w"
+    },
+    {
+      "type": "key_press",
+      "key": "P"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "paused"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".wall"
+      },
+      "min": 1
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-error",
+      "present": false
+    },
+    {
+      "type": "select_option",
+      "target": {
+        "selector": "#map-picker"
+      },
+      "value": "E1M4"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#load-map"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-map",
+      "equals": "E1M4"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#map-picker option[value=\"E1M4\"]"
+      },
+      "attribute": "selected",
+      "present": true
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-generation",
+      "equals": "5"
+    },
+    {
+      "type": "advance_time",
+      "ms": 200,
+      "steps": 7
+    },
+    {
+      "type": "key_down",
+      "key": "w"
+    },
+    {
+      "type": "advance_time",
+      "ms": 240,
+      "steps": 8
+    },
+    {
+      "type": "key_up",
+      "key": "w"
+    },
+    {
+      "type": "key_press",
+      "key": "P"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "paused"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".wall"
+      },
+      "min": 1
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-error",
+      "present": false
+    },
+    {
+      "type": "select_option",
+      "target": {
+        "selector": "#map-picker"
+      },
+      "value": "E1M5"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#load-map"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-map",
+      "equals": "E1M5"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#map-picker option[value=\"E1M5\"]"
+      },
+      "attribute": "selected",
+      "present": true
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-generation",
+      "equals": "6"
+    },
+    {
+      "type": "advance_time",
+      "ms": 200,
+      "steps": 7
+    },
+    {
+      "type": "key_down",
+      "key": "w"
+    },
+    {
+      "type": "advance_time",
+      "ms": 240,
+      "steps": 8
+    },
+    {
+      "type": "key_up",
+      "key": "w"
+    },
+    {
+      "type": "key_press",
+      "key": "P"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "paused"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".wall"
+      },
+      "min": 1
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-error",
+      "present": false
+    },
+    {
+      "type": "select_option",
+      "target": {
+        "selector": "#map-picker"
+      },
+      "value": "E1M6"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#load-map"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-map",
+      "equals": "E1M6"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#map-picker option[value=\"E1M6\"]"
+      },
+      "attribute": "selected",
+      "present": true
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-generation",
+      "equals": "7"
+    },
+    {
+      "type": "advance_time",
+      "ms": 200,
+      "steps": 7
+    },
+    {
+      "type": "key_down",
+      "key": "w"
+    },
+    {
+      "type": "advance_time",
+      "ms": 240,
+      "steps": 8
+    },
+    {
+      "type": "key_up",
+      "key": "w"
+    },
+    {
+      "type": "key_press",
+      "key": "P"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "paused"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".wall"
+      },
+      "min": 1
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-error",
+      "present": false
+    },
+    {
+      "type": "select_option",
+      "target": {
+        "selector": "#map-picker"
+      },
+      "value": "E1M7"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#load-map"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-map",
+      "equals": "E1M7"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#map-picker option[value=\"E1M7\"]"
+      },
+      "attribute": "selected",
+      "present": true
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-generation",
+      "equals": "8"
+    },
+    {
+      "type": "advance_time",
+      "ms": 200,
+      "steps": 7
+    },
+    {
+      "type": "key_down",
+      "key": "w"
+    },
+    {
+      "type": "advance_time",
+      "ms": 240,
+      "steps": 8
+    },
+    {
+      "type": "key_up",
+      "key": "w"
+    },
+    {
+      "type": "key_press",
+      "key": "P"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "paused"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".wall"
+      },
+      "min": 1
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-error",
+      "present": false
+    },
+    {
+      "type": "select_option",
+      "target": {
+        "selector": "#map-picker"
+      },
+      "value": "E1M8"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#load-map"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-map",
+      "equals": "E1M8"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#map-picker option[value=\"E1M8\"]"
+      },
+      "attribute": "selected",
+      "present": true
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-generation",
+      "equals": "9"
+    },
+    {
+      "type": "advance_time",
+      "ms": 200,
+      "steps": 7
+    },
+    {
+      "type": "key_down",
+      "key": "w"
+    },
+    {
+      "type": "advance_time",
+      "ms": 240,
+      "steps": 8
+    },
+    {
+      "type": "key_up",
+      "key": "w"
+    },
+    {
+      "type": "key_press",
+      "key": "P"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "paused"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".wall"
+      },
+      "min": 1
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-error",
+      "present": false
+    },
+    {
+      "type": "select_option",
+      "target": {
+        "selector": "#map-picker"
+      },
+      "value": "E1M9"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#load-map"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-map",
+      "equals": "E1M9"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#map-picker option[value=\"E1M9\"]"
+      },
+      "attribute": "selected",
+      "present": true
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-generation",
+      "equals": "10"
+    },
+    {
+      "type": "advance_time",
+      "ms": 200,
+      "steps": 7
+    },
+    {
+      "type": "key_down",
+      "key": "w"
+    },
+    {
+      "type": "advance_time",
+      "ms": 240,
+      "steps": 8
+    },
+    {
+      "type": "key_up",
+      "key": "w"
+    },
+    {
+      "type": "key_press",
+      "key": "P"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "paused"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".wall"
+      },
+      "min": 1
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-error",
+      "present": false
+    },
+    {
+      "type": "select_option",
+      "target": {
+        "selector": "#map-picker"
+      },
+      "value": "E1M1"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#load-map"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-map",
+      "equals": "E1M1"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#map-picker option[value=\"E1M1\"]"
+      },
+      "attribute": "selected",
+      "present": true
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-generation",
+      "equals": "11"
+    },
+    {
+      "type": "advance_time",
+      "ms": 200,
+      "steps": 7
+    },
+    {
+      "type": "key_down",
+      "key": "w"
+    },
+    {
+      "type": "advance_time",
+      "ms": 240,
+      "steps": 8
+    },
+    {
+      "type": "key_up",
+      "key": "w"
+    },
+    {
+      "type": "key_press",
+      "key": "P"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "paused"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".wall"
+      },
+      "min": 1
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-error",
+      "present": false
+    },
+    {
+      "type": "select_option",
+      "target": {
+        "selector": "#map-picker"
+      },
+      "value": "E1M2"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#load-map"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-map",
+      "equals": "E1M2"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#map-picker option[value=\"E1M2\"]"
+      },
+      "attribute": "selected",
+      "present": true
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-generation",
+      "equals": "12"
+    },
+    {
+      "type": "advance_time",
+      "ms": 200,
+      "steps": 7
+    },
+    {
+      "type": "key_down",
+      "key": "w"
+    },
+    {
+      "type": "advance_time",
+      "ms": 240,
+      "steps": 8
+    },
+    {
+      "type": "key_up",
+      "key": "w"
+    },
+    {
+      "type": "key_press",
+      "key": "P"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "paused"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".wall"
+      },
+      "min": 1
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-error",
+      "present": false
+    },
+    {
+      "type": "select_option",
+      "target": {
+        "selector": "#map-picker"
+      },
+      "value": "E1M3"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#load-map"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-map",
+      "equals": "E1M3"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#map-picker option[value=\"E1M3\"]"
+      },
+      "attribute": "selected",
+      "present": true
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-generation",
+      "equals": "13"
+    },
+    {
+      "type": "advance_time",
+      "ms": 200,
+      "steps": 7
+    },
+    {
+      "type": "key_down",
+      "key": "w"
+    },
+    {
+      "type": "advance_time",
+      "ms": 240,
+      "steps": 8
+    },
+    {
+      "type": "key_up",
+      "key": "w"
+    },
+    {
+      "type": "key_press",
+      "key": "P"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "paused"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".wall"
+      },
+      "min": 1
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-error",
+      "present": false
+    },
+    {
+      "type": "select_option",
+      "target": {
+        "selector": "#map-picker"
+      },
+      "value": "E1M4"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#load-map"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-map",
+      "equals": "E1M4"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#map-picker option[value=\"E1M4\"]"
+      },
+      "attribute": "selected",
+      "present": true
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-generation",
+      "equals": "14"
+    },
+    {
+      "type": "advance_time",
+      "ms": 200,
+      "steps": 7
+    },
+    {
+      "type": "key_down",
+      "key": "w"
+    },
+    {
+      "type": "advance_time",
+      "ms": 240,
+      "steps": 8
+    },
+    {
+      "type": "key_up",
+      "key": "w"
+    },
+    {
+      "type": "key_press",
+      "key": "P"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "paused"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".wall"
+      },
+      "min": 1
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-error",
+      "present": false
+    },
+    {
+      "type": "select_option",
+      "target": {
+        "selector": "#map-picker"
+      },
+      "value": "E1M5"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#load-map"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-map",
+      "equals": "E1M5"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#map-picker option[value=\"E1M5\"]"
+      },
+      "attribute": "selected",
+      "present": true
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-generation",
+      "equals": "15"
+    },
+    {
+      "type": "advance_time",
+      "ms": 200,
+      "steps": 7
+    },
+    {
+      "type": "key_down",
+      "key": "w"
+    },
+    {
+      "type": "advance_time",
+      "ms": 240,
+      "steps": 8
+    },
+    {
+      "type": "key_up",
+      "key": "w"
+    },
+    {
+      "type": "key_press",
+      "key": "P"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "paused"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".wall"
+      },
+      "min": 1
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-error",
+      "present": false
+    },
+    {
+      "type": "select_option",
+      "target": {
+        "selector": "#map-picker"
+      },
+      "value": "E1M6"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#load-map"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-map",
+      "equals": "E1M6"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#map-picker option[value=\"E1M6\"]"
+      },
+      "attribute": "selected",
+      "present": true
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-generation",
+      "equals": "16"
+    },
+    {
+      "type": "advance_time",
+      "ms": 200,
+      "steps": 7
+    },
+    {
+      "type": "key_down",
+      "key": "w"
+    },
+    {
+      "type": "advance_time",
+      "ms": 240,
+      "steps": 8
+    },
+    {
+      "type": "key_up",
+      "key": "w"
+    },
+    {
+      "type": "key_press",
+      "key": "P"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "paused"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".wall"
+      },
+      "min": 1
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-error",
+      "present": false
+    },
+    {
+      "type": "select_option",
+      "target": {
+        "selector": "#map-picker"
+      },
+      "value": "E1M7"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#load-map"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-map",
+      "equals": "E1M7"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#map-picker option[value=\"E1M7\"]"
+      },
+      "attribute": "selected",
+      "present": true
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-generation",
+      "equals": "17"
+    },
+    {
+      "type": "advance_time",
+      "ms": 200,
+      "steps": 7
+    },
+    {
+      "type": "key_down",
+      "key": "w"
+    },
+    {
+      "type": "advance_time",
+      "ms": 240,
+      "steps": 8
+    },
+    {
+      "type": "key_up",
+      "key": "w"
+    },
+    {
+      "type": "key_press",
+      "key": "P"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "paused"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".wall"
+      },
+      "min": 1
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-error",
+      "present": false
+    },
+    {
+      "type": "select_option",
+      "target": {
+        "selector": "#map-picker"
+      },
+      "value": "E1M8"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#load-map"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-map",
+      "equals": "E1M8"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#map-picker option[value=\"E1M8\"]"
+      },
+      "attribute": "selected",
+      "present": true
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-generation",
+      "equals": "18"
+    },
+    {
+      "type": "advance_time",
+      "ms": 200,
+      "steps": 7
+    },
+    {
+      "type": "key_down",
+      "key": "w"
+    },
+    {
+      "type": "advance_time",
+      "ms": 240,
+      "steps": 8
+    },
+    {
+      "type": "key_up",
+      "key": "w"
+    },
+    {
+      "type": "key_press",
+      "key": "P"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "paused"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".wall"
+      },
+      "min": 1
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-error",
+      "present": false
+    },
+    {
+      "type": "select_option",
+      "target": {
+        "selector": "#map-picker"
+      },
+      "value": "E1M9"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#load-map"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-map",
+      "equals": "E1M9"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#map-picker option[value=\"E1M9\"]"
+      },
+      "attribute": "selected",
+      "present": true
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-generation",
+      "equals": "19"
+    },
+    {
+      "type": "advance_time",
+      "ms": 200,
+      "steps": 7
+    },
+    {
+      "type": "key_down",
+      "key": "w"
+    },
+    {
+      "type": "advance_time",
+      "ms": 240,
+      "steps": 8
+    },
+    {
+      "type": "key_up",
+      "key": "w"
+    },
+    {
+      "type": "key_press",
+      "key": "P"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "paused"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".wall"
+      },
+      "min": 1
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-error",
+      "present": false
+    },
+    {
+      "type": "select_option",
+      "target": {
+        "selector": "#map-picker"
+      },
+      "value": "E1M1"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#load-map"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-map",
+      "equals": "E1M1"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#map-picker option[value=\"E1M1\"]"
+      },
+      "attribute": "selected",
+      "present": true
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-generation",
+      "equals": "20"
+    },
+    {
+      "type": "advance_time",
+      "ms": 200,
+      "steps": 7
+    },
+    {
+      "type": "key_down",
+      "key": "w"
+    },
+    {
+      "type": "advance_time",
+      "ms": 240,
+      "steps": 8
+    },
+    {
+      "type": "key_up",
+      "key": "w"
+    },
+    {
+      "type": "key_press",
+      "key": "P"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "paused"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".wall"
+      },
+      "min": 1
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-error",
+      "present": false
+    },
+    {
+      "type": "select_option",
+      "target": {
+        "selector": "#map-picker"
+      },
+      "value": "E1M2"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#load-map"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-map",
+      "equals": "E1M2"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#map-picker option[value=\"E1M2\"]"
+      },
+      "attribute": "selected",
+      "present": true
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-generation",
+      "equals": "21"
+    },
+    {
+      "type": "advance_time",
+      "ms": 200,
+      "steps": 7
+    },
+    {
+      "type": "key_down",
+      "key": "w"
+    },
+    {
+      "type": "advance_time",
+      "ms": 240,
+      "steps": 8
+    },
+    {
+      "type": "key_up",
+      "key": "w"
+    },
+    {
+      "type": "key_press",
+      "key": "P"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "paused"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".wall"
+      },
+      "min": 1
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-error",
+      "present": false
+    },
+    {
+      "type": "select_option",
+      "target": {
+        "selector": "#map-picker"
+      },
+      "value": "E1M3"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#load-map"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-map",
+      "equals": "E1M3"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#map-picker option[value=\"E1M3\"]"
+      },
+      "attribute": "selected",
+      "present": true
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-generation",
+      "equals": "22"
+    },
+    {
+      "type": "advance_time",
+      "ms": 200,
+      "steps": 7
+    },
+    {
+      "type": "key_down",
+      "key": "w"
+    },
+    {
+      "type": "advance_time",
+      "ms": 240,
+      "steps": 8
+    },
+    {
+      "type": "key_up",
+      "key": "w"
+    },
+    {
+      "type": "key_press",
+      "key": "P"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "paused"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".wall"
+      },
+      "min": 1
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-error",
+      "present": false
+    },
+    {
+      "type": "select_option",
+      "target": {
+        "selector": "#map-picker"
+      },
+      "value": "E1M4"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#load-map"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-map",
+      "equals": "E1M4"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#map-picker option[value=\"E1M4\"]"
+      },
+      "attribute": "selected",
+      "present": true
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-generation",
+      "equals": "23"
+    },
+    {
+      "type": "advance_time",
+      "ms": 200,
+      "steps": 7
+    },
+    {
+      "type": "key_down",
+      "key": "w"
+    },
+    {
+      "type": "advance_time",
+      "ms": 240,
+      "steps": 8
+    },
+    {
+      "type": "key_up",
+      "key": "w"
+    },
+    {
+      "type": "key_press",
+      "key": "P"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "paused"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".wall"
+      },
+      "min": 1
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-error",
+      "present": false
+    },
+    {
+      "type": "select_option",
+      "target": {
+        "selector": "#map-picker"
+      },
+      "value": "E1M5"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#load-map"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-map",
+      "equals": "E1M5"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#map-picker option[value=\"E1M5\"]"
+      },
+      "attribute": "selected",
+      "present": true
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-generation",
+      "equals": "24"
+    },
+    {
+      "type": "advance_time",
+      "ms": 200,
+      "steps": 7
+    },
+    {
+      "type": "key_down",
+      "key": "w"
+    },
+    {
+      "type": "advance_time",
+      "ms": 240,
+      "steps": 8
+    },
+    {
+      "type": "key_up",
+      "key": "w"
+    },
+    {
+      "type": "key_press",
+      "key": "P"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "paused"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".wall"
+      },
+      "min": 1
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-error",
+      "present": false
+    },
+    {
+      "type": "select_option",
+      "target": {
+        "selector": "#map-picker"
+      },
+      "value": "E1M6"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#load-map"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-map",
+      "equals": "E1M6"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#map-picker option[value=\"E1M6\"]"
+      },
+      "attribute": "selected",
+      "present": true
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-generation",
+      "equals": "25"
+    },
+    {
+      "type": "advance_time",
+      "ms": 200,
+      "steps": 7
+    },
+    {
+      "type": "key_down",
+      "key": "w"
+    },
+    {
+      "type": "advance_time",
+      "ms": 240,
+      "steps": 8
+    },
+    {
+      "type": "key_up",
+      "key": "w"
+    },
+    {
+      "type": "key_press",
+      "key": "P"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "paused"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".wall"
+      },
+      "min": 1
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-error",
+      "present": false
+    },
+    {
+      "type": "select_option",
+      "target": {
+        "selector": "#map-picker"
+      },
+      "value": "E1M7"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#load-map"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-map",
+      "equals": "E1M7"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#map-picker option[value=\"E1M7\"]"
+      },
+      "attribute": "selected",
+      "present": true
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-generation",
+      "equals": "26"
+    },
+    {
+      "type": "advance_time",
+      "ms": 200,
+      "steps": 7
+    },
+    {
+      "type": "key_down",
+      "key": "w"
+    },
+    {
+      "type": "advance_time",
+      "ms": 240,
+      "steps": 8
+    },
+    {
+      "type": "key_up",
+      "key": "w"
+    },
+    {
+      "type": "key_press",
+      "key": "P"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "paused"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".wall"
+      },
+      "min": 1
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-error",
+      "present": false
+    },
+    {
+      "type": "select_option",
+      "target": {
+        "selector": "#map-picker"
+      },
+      "value": "E1M8"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#load-map"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-map",
+      "equals": "E1M8"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#map-picker option[value=\"E1M8\"]"
+      },
+      "attribute": "selected",
+      "present": true
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-generation",
+      "equals": "27"
+    },
+    {
+      "type": "advance_time",
+      "ms": 200,
+      "steps": 7
+    },
+    {
+      "type": "key_down",
+      "key": "w"
+    },
+    {
+      "type": "advance_time",
+      "ms": 240,
+      "steps": 8
+    },
+    {
+      "type": "key_up",
+      "key": "w"
+    },
+    {
+      "type": "key_press",
+      "key": "P"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "paused"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".wall"
+      },
+      "min": 1
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-error",
+      "present": false
+    },
+    {
+      "type": "select_option",
+      "target": {
+        "selector": "#map-picker"
+      },
+      "value": "E1M9"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#load-map"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-map",
+      "equals": "E1M9"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#map-picker option[value=\"E1M9\"]"
+      },
+      "attribute": "selected",
+      "present": true
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-generation",
+      "equals": "28"
+    },
+    {
+      "type": "advance_time",
+      "ms": 200,
+      "steps": 7
+    },
+    {
+      "type": "key_down",
+      "key": "w"
+    },
+    {
+      "type": "advance_time",
+      "ms": 240,
+      "steps": 8
+    },
+    {
+      "type": "key_up",
+      "key": "w"
+    },
+    {
+      "type": "key_press",
+      "key": "P"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "paused"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".wall"
+      },
+      "min": 1
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-error",
+      "present": false
+    },
+    {
+      "type": "window_close"
+    }
+  ]
+}

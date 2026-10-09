@@ -347,8 +347,16 @@ int UiContext::init(bool next_headless, float requested_device_scale) {
 
     ui_context_init_default_fonts(this);
 
-    // init vector rendering engine
-    rdt_engine_init(1);
+    // Immediate vector batches can run synchronously; expose worker count for
+    // profiling without changing raster quality or the separate render pool.
+    int vector_threads = 1;
+    if (const char* setting = getenv("RADIANT_VECTOR_THREADS")) {
+        char* end = nullptr;
+        long requested = strtol(setting, &end, 10);
+        if (end != setting && !*end && requested >= 0 && requested <= 64)
+            vector_threads = (int)requested; // INT_CAST_OK: validated worker count
+    }
+    rdt_engine_init(vector_threads);
     // init animation timing presets (cubic-bezier ease, ease-in, ease-out, ease-in-out)
     timing_init_presets();
     // share font context with the vector backend so that picture-mode SVG

@@ -781,7 +781,7 @@ void paint_draw_image(PaintList* pl, const uint32_t* pixels,
                       int src_w, int src_h, int src_stride,
                       float dst_x, float dst_y, float dst_w, float dst_h,
                       uint8_t opacity, const RdtMatrix* transform,
-                      ImageSurface* resource_owner) {
+                      ImageSurface* resource_owner, ScaleMode scale_mode) {
     PaintCmd* cmd = paint_alloc_cmd(pl, PAINT_DRAW_IMAGE);
     if (!cmd) return;
     cmd->draw_image.pixels = lam::up(pixels);
@@ -796,6 +796,7 @@ void paint_draw_image(PaintList* pl, const uint32_t* pixels,
     paint_assign_optional_transform(&cmd->draw_image.has_transform,
                                     &cmd->draw_image.transform, transform);
     cmd->draw_image.resource_owner = lam::up(resource_owner);
+    cmd->draw_image.scale_mode = scale_mode;
 }
 
 void paint_draw_image_resource(PaintList* pl, ImageSurface* image,
@@ -880,12 +881,13 @@ void paint_webview_layer_placeholder(PaintList* pl, ImageSurface* surface,
     cmd->webview_layer_placeholder.surface_generation = surface_generation;
 }
 
-void paint_push_clip(PaintList* pl, RdtPath* clip_path, const RdtMatrix* transform) {
+void paint_push_clip(PaintList* pl, RdtPath* clip_path, const RdtMatrix* transform, RdtFillRule rule) {
     RdtPath* owned = rdt_path_clone(clip_path);
     if (!owned) return;
     PaintCmd* cmd = paint_alloc_cmd(pl, PAINT_PUSH_CLIP);
     if (!cmd) { rdt_path_free(owned); return; }
     cmd->push_clip.clip_path = lam::own(owned);
+    cmd->push_clip.rule = rule;
     paint_assign_optional_transform(&cmd->push_clip.has_transform,
                                     &cmd->push_clip.transform, transform);
 }
@@ -912,10 +914,10 @@ void paint_save_backdrop(PaintList* pl, int x0, int y0, int w, int h) {
 }
 
 void paint_composite_opacity(PaintList* pl, int x0, int y0, int w, int h,
-                             float opacity, bool premultiplied_source) {
+                             float opacity, bool premultiplied_source, const RadialMaskPaint* mask) {
     PaintCmd* cmd = paint_alloc_cmd(pl, PAINT_COMPOSITE_OPACITY);
     if (!cmd) return;
-    cmd->composite_opacity = { x0, y0, w, h, opacity, premultiplied_source };
+    cmd->composite_opacity = { x0, y0, w, h, opacity, premultiplied_source, mask ? *mask : RadialMaskPaint{} };
 }
 
 void paint_apply_blend_mode(PaintList* pl, int x0, int y0, int w, int h, int blend_mode) {
@@ -1327,7 +1329,7 @@ static void paint_ir_lower_raster_internal(const PaintList* pl, DisplayList* dl)
                           p->dst_x, p->dst_y, p->dst_w, p->dst_h, p->opacity,
                           paint_optional_transform(p->has_transform, &p->transform),
                           owner, owner ? owner->generation : 0, false,
-                          owner && owner->alpha_mode == IMAGE_ALPHA_STRAIGHT);
+                          owner && owner->alpha_mode == IMAGE_ALPHA_STRAIGHT, p->scale_mode);
             break;
         }
         case PAINT_DRAW_IMAGE_RESOURCE: {
@@ -1382,7 +1384,7 @@ static void paint_ir_lower_raster_internal(const PaintList* pl, DisplayList* dl)
         case PAINT_PUSH_CLIP: {
             const PaintPushClip* p = &cmd->push_clip;
             dl_push_clip(dl, p->clip_path,
-                         paint_optional_transform(p->has_transform, &p->transform));
+                         paint_optional_transform(p->has_transform, &p->transform), p->rule);
             break;
         }
         case PAINT_POP_CLIP:
@@ -1396,7 +1398,7 @@ static void paint_ir_lower_raster_internal(const PaintList* pl, DisplayList* dl)
         case PAINT_COMPOSITE_OPACITY: {
             const PaintCompositeOpacity* p = &cmd->composite_opacity;
             dl_composite_opacity(dl, p->x0, p->y0, p->w, p->h,
-                                 p->opacity, p->premultiplied_source);
+                                 p->opacity, p->premultiplied_source, &p->mask);
             break;
         }
         case PAINT_APPLY_BLEND_MODE: {
@@ -2125,6 +2127,7 @@ static void paint_ir_lower_svg_unchecked(const PaintList* pl, StrBuf* out,
             strbuf_append_format(out,
                 "<defs><clipPath id=\"paint-ir-clip-%d\"><path d=\"%s\"",
                 clip_id, path_data->str);
+            if (p->rule == RDT_FILL_EVEN_ODD) strbuf_append_str(out, " clip-rule=\"evenodd\"");
             paint_svg_append_matrix_attr(out,
                                          paint_optional_transform(p->has_transform, &p->transform));
             strbuf_append_str(out, " /></clipPath></defs>\n");

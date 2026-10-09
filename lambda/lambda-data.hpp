@@ -1660,6 +1660,8 @@ typedef struct Input {
     Array* embedded_diagrams;
     // the caller's parse options, valid only while its parser runs (nullable)
     const struct InputParseOptions* parse_options;
+    // D3.4.7: an explicit JS boundary owns its branded root separately.
+    TypeMap* branded_shape_transition_root;
     // StringBuf* sb;
 
     // member functions

@@ -549,7 +549,9 @@ MapBuilder::MapBuilder(MarkBuilder* builder)
     map_ = (Map*)arena_calloc(builder_->arena(), sizeof(Map));
     map_->type_id = LMD_TYPE_MAP;
     map_->is_immortal = 1;
-    map_->type = &EmptyMap;  // Will be replaced by map_put on first insert
+    // D3.4.7: only an explicitly JS-bound Input supplies a branded root.
+    map_->type = builder_->input()->branded_shape_transition_root
+        ? builder_->input()->branded_shape_transition_root : &EmptyMap;
     map_->data = nullptr;
     map_->data_cap = 0;
 }

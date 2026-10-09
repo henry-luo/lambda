@@ -1,0 +1,17 @@
+{
+  "name": "DOOM registered light, length and filter animation pixels",
+  "html": "test/demo/doom/fixtures/_lighting.ls",
+  "viewport": {"width": 320, "height": 180},
+  "events": [
+    {"type": "assert_pixel", "x": 40, "y": 40, "min_r": 221, "max_r": 225, "min_g": 221, "max_g": 225, "min_b": 221, "max_b": 225},
+    {"type": "assert_pixel", "x": 110, "y": 40, "min_r": 250, "max_g": 5, "max_b": 5},
+    {"type": "assert_pixel", "x": 130, "y": 40, "max_r": 5, "max_g": 5, "max_b": 5},
+    {"type": "assert_pixel", "x": 240, "y": 40, "min_r": 84, "max_r": 88, "min_g": 84, "max_g": 88, "min_b": 84, "max_b": 88},
+    {"type": "click", "target": {"selector": "#half"}},
+    {"type": "assert_pixel", "x": 40, "y": 40, "min_r": 250, "min_g": 250, "min_b": 250},
+    {"type": "advance_time", "ms": 500, "steps": 5},
+    {"type": "assert_pixel", "x": 40, "y": 40, "min_r": 250, "min_g": 250, "min_b": 250},
+    {"type": "click", "target": {"selector": "#cancel"}},
+    {"type": "assert_pixel", "x": 40, "y": 40, "min_r": 100, "max_r": 104, "min_g": 100, "max_g": 104, "min_b": 100, "max_b": 104}
+  ]
+}

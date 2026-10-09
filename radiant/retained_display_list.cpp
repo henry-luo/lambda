@@ -160,7 +160,7 @@ static bool retained_dl_clone_item_payload(DisplayList* dst,
     return true;
 }
 
-static void retained_dl_rollback(DisplayList* dl, int target_count) {
+void dl_truncate(DisplayList* dl, int target_count) {
     if (!dl || target_count < 0 || target_count > dl->item_count()) return;
     int current_count = dl->item_count();
     for (int i = target_count; i < current_count; i++) {
@@ -169,7 +169,7 @@ static void retained_dl_rollback(DisplayList* dl, int target_count) {
     dl->remove_range((size_t)target_count, (size_t)(current_count - target_count));
 }
 
-static bool retained_dl_copy_range(DisplayList* dst, const DisplayList* src,
+bool dl_copy_range(DisplayList* dst, const DisplayList* src,
                                    int start, int end) {
     if (!dst || !src || start < 0 || end < start || end >= src->item_count()) return false;
 
@@ -177,16 +177,37 @@ static bool retained_dl_copy_range(DisplayList* dst, const DisplayList* src,
     for (int i = start; i <= end; i++) {
         DisplayItem* out = dl_alloc_item(dst);
         if (!out) {
-            retained_dl_rollback(dst, dest_start);
+            dl_truncate(dst, dest_start);
             return false;
         }
         DisplayItem copy = src->data()[i];
         *out = copy;
         if (!retained_dl_clone_item_payload(dst, out, &src->data()[i], start, dest_start)) {
-            retained_dl_rollback(dst, dest_start);
+            dl_truncate(dst, dest_start);
             return false;
         }
     }
+    return true;
+}
+
+bool dl_replace_tail(DisplayList* dst, int start, const DisplayList* src, int first, int last) {
+    if (!dst || start < 0 || start > dst->item_count()) return false;
+    int old_count = dst->item_count();
+    // Clone before retiring the old tail: allocation failure preserves the
+    // original stream, including its owned paths, pictures and image leases.
+    if (!dl_copy_range(dst, src, first, last)) return false;
+    int copied = dst->item_count() - old_count;
+    for (int i = start; i < old_count; i++) dl_item_free_owned_payload(&dst->data()[i]);
+    for (int i = old_count; i < old_count + copied; i++) {
+        DisplayItem* item = &dst->data()[i];
+        if ((item->op == DL_BEGIN_ELEMENT || item->op == DL_END_ELEMENT) &&
+            item->element_marker.matching_index >= old_count)
+            item->element_marker.matching_index += start - old_count;
+    }
+    memmove(dst->data() + start, dst->data() + old_count, (size_t)copied * sizeof(DisplayItem));
+    // payload ownership moved with the commands; discarded trailing slots are
+    // stale aliases and must not be passed through dl_truncate's payload free.
+    dst->remove_range((size_t)(start + copied), (size_t)(old_count - start));
     return true;
 }
 
@@ -356,7 +377,7 @@ static void retained_dl_cache_store_marker(RetainedDisplayListCache* cache,
         log_debug("[RETAINED_DL] skipped non-retainable view %u", view_id);
         return;
     }
-    if (!retained_dl_copy_range(&fragment->list, source, begin_index, end_index)) {
+    if (!dl_copy_range(&fragment->list, source, begin_index, end_index)) {
         cache->stats.copy_failed++;
         dl_clear(&fragment->list);
         return;
@@ -536,5 +557,5 @@ bool retained_dl_append_fragment_for_dirty(DisplayList* dst,
 bool retained_dl_append_fragment(DisplayList* dst,
                                  const RetainedDisplayListFragment* fragment) {
     if (!dst || !fragment || fragment->list.item_count() <= 0) return false;
-    return retained_dl_copy_range(dst, &fragment->list, 0, fragment->list.item_count() - 1);
+    return dl_copy_range(dst, &fragment->list, 0, fragment->list.item_count() - 1);
 }

@@ -149,6 +149,7 @@ typedef struct Event {
 typedef struct MousePositionEvent : Event {
     float x;    // logical X coordinate, relative to the top-level viewport
     float y;    // logical Y coordinate, relative to the top-level viewport
+    float movement_x, movement_y; // native cursor deltas, also under relative capture
 } MousePositionEvent;
 
 // mouse click events
@@ -189,6 +190,14 @@ typedef enum {
     RDT_KEY_TAB = 258,
     RDT_KEY_ESCAPE = 256,
     RDT_KEY_SPACE = 32,
+    RDT_KEY_LEFT_SHIFT = 340,
+    RDT_KEY_LEFT_CONTROL = 341,
+    RDT_KEY_LEFT_ALT = 342,
+    RDT_KEY_LEFT_SUPER = 343,
+    RDT_KEY_RIGHT_SHIFT = 344,
+    RDT_KEY_RIGHT_CONTROL = 345,
+    RDT_KEY_RIGHT_ALT = 346,
+    RDT_KEY_RIGHT_SUPER = 347,
     // Clipboard/editing shortcut keys (A, B, C, I, U, V, X, Z) and Y for redo on Win/Linux
     RDT_KEY_A = 65,
     RDT_KEY_B = 66,

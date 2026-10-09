@@ -2418,6 +2418,37 @@ TEST(TransitionTreeRetypeTest, RetypedParentsShareOneTarget) {
     EXPECT_EQ(grown->length, target->length + 1);
 }
 
+TEST(TransitionTreeRetypeTest, FullAdmissionContractsShareBoundedLayoutsWithoutAliasingTheirTypeId) {
+    ExternalParentFixture f("test.tree.contract");
+    ASSERT_NE(f.tree, nullptr);
+    MarkBuilder builder(f.doc);
+    Item made = builder.map().put("x", (int64_t)1).put("extra", "kept").final();
+    TypeMap* parent = (TypeMap*)made.map->type;
+    ShapeEntry* field = typemap_first_field(parent);
+    Type* original_contract = field->type;
+    TypeMap* number = type_tree_retype_contract(f.tree, parent, field, &TYPE_NUMBER);
+    ASSERT_NE(number, nullptr);
+    EXPECT_EQ(typemap_first_field(number)->type, &TYPE_NUMBER);
+    EXPECT_EQ(typemap_next_field(number, typemap_first_field(number))->type,
+        typemap_next_field(parent, field)->type);
+    EXPECT_EQ(field->type, original_contract);
+    TypeMap* any = type_tree_retype_contract(f.tree, parent, field, &TYPE_ANY);
+    ASSERT_NE(any, nullptr);
+    EXPECT_NE(number, any);
+    EXPECT_EQ(typemap_first_field(any)->type, &TYPE_ANY);
+    size_t bytes = arena_total_used(f.tree->arena);
+    int count = f.tree->type_list->length;
+    for (int i = 0; i < 4096; i++) {
+        EXPECT_EQ(type_tree_retype_contract(f.tree, parent, field, &TYPE_NUMBER), number);
+        EXPECT_EQ(type_tree_retype_contract(f.tree, parent, field, &TYPE_ANY), any);
+    }
+    EXPECT_EQ(arena_total_used(f.tree->arena), bytes);
+    EXPECT_EQ(f.tree->type_list->length, count);
+    f.release_doc();
+    EXPECT_TRUE(field_named(typemap_first_field(number), "x"));
+    EXPECT_TRUE(field_named(typemap_next_field(number, typemap_first_field(number)), "extra"));
+}
+
 TEST(TransitionTreeRetypeTest, EqualShapesFromTwoDocumentsShareATarget) {
     ExternalParentFixture f("test.tree.retype.structural");
     ASSERT_NE(f.tree, nullptr);

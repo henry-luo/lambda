@@ -1,0 +1,187 @@
+{
+  "pose": {
+    "name": "e1m8-spectre",
+    "map": "E1M8",
+    "skill": 4,
+    "time": 0.6,
+    "camera": "player",
+    "player": {
+      "x": -128,
+      "y": 3100,
+      "angle": 0
+    },
+    "landmarks": [
+      {
+        "name": "lava floor",
+        "rect": [
+          492,
+          292,
+          16,
+          16
+        ],
+        "rgb_min": [
+          30,
+          0,
+          0
+        ],
+        "rgb_max": [
+          48,
+          2,
+          2
+        ],
+        "max_mean_channel_delta": 8
+      },
+      {
+        "name": "opaque room wall",
+        "rect": [
+          492,
+          172,
+          16,
+          16
+        ],
+        "rgb_min": [
+          15,
+          10,
+          5
+        ],
+        "rgb_max": [
+          30,
+          25,
+          16
+        ],
+        "max_mean_channel_delta": 8
+      },
+      {
+        "name": "filtered actor center",
+        "rect": [
+          322,
+          192,
+          16,
+          16
+        ],
+        "rgb_min": [
+          6,
+          4,
+          2
+        ],
+        "rgb_max": [
+          17,
+          14,
+          10
+        ],
+        "max_mean_channel_delta": 8
+      }
+    ],
+    "filtered_actor": {
+      "id": 77,
+      "selector": "#sprite-77",
+      "min_changed_pixels": 1000,
+      "min_peak_channel_change": 8
+    }
+  },
+  "viewport": {
+    "width": 660,
+    "height": 500,
+    "scale": 1
+  },
+  "browser": "HeadlessChrome/154.0.8037.57",
+  "source": "fixtures/_pose.ls and the shared scene/presenter; authored declarations exported without computed geometry.",
+  "html_sha256": "b6ebfcbc8db5b67b95a38812904e26db23e5213455277af85c0fdd61cd4e2115",
+  "browser_sha256": "69419e2ae33f5a82ea4709ad171b4474bcb9c62cef2b17bddc2ff48474599dce",
+  "native_sha256": "2edda2c8f8e8ad9231b864c8a42f0d8974c037c3ad4d42098dfc5ab75e0d6fda",
+  "native_binary_sha256": "ccf436fbdc9e5d700a7b65d8592a4a64b2c6ef57124c71f725f3e531033423df",
+  "validation": {
+    "landmarks": [
+      {
+        "name": "lava floor",
+        "rect": [
+          492,
+          292,
+          16,
+          16
+        ],
+        "native_rgb": [
+          40.4921875,
+          0,
+          0
+        ],
+        "browser_rgb": [
+          35.77734375,
+          0,
+          0
+        ]
+      },
+      {
+        "name": "opaque room wall",
+        "rect": [
+          492,
+          172,
+          16,
+          16
+        ],
+        "native_rgb": [
+          19.05078125,
+          15.0546875,
+          8.7578125
+        ],
+        "browser_rgb": [
+          24.90234375,
+          19.73828125,
+          11.625
+        ]
+      },
+      {
+        "name": "filtered actor center",
+        "rect": [
+          322,
+          192,
+          16,
+          16
+        ],
+        "native_rgb": [
+          11.13671875,
+          8.796875,
+          5.22265625
+        ],
+        "browser_rgb": [
+          11.0546875,
+          8.6640625,
+          5.16796875
+        ]
+      }
+    ],
+    "filtered_actor": {
+      "native": {
+        "rect": {
+          "x": 227.60000610351562,
+          "y": 126.4000015258789,
+          "width": 204.79998779296875,
+          "height": 188.80001831054688,
+          "top": 126.4000015258789,
+          "right": 432.3999938964844,
+          "bottom": 315.2000198364258,
+          "left": 227.60000610351562
+        },
+        "changed_pixels": 18116,
+        "peak_channel_change": 31,
+        "hidden_sha256": "0f04214aeb3c70f9b97b23a15cb0c480b587cc5a8218205c06c23598b15f840e"
+      },
+      "browser": {
+        "rect": {
+          "x": 227.60000610351562,
+          "y": 126.4000015258789,
+          "width": 204.79998779296875,
+          "height": 188.80001831054688,
+          "top": 126.4000015258789,
+          "right": 432.3999938964844,
+          "bottom": 315.2000198364258,
+          "left": 227.60000610351562
+        },
+        "changed_pixels": 15780,
+        "peak_channel_change": 29,
+        "hidden_sha256": "046793a8338c28402f941c1aa09515ab08f760992dbf0de078d28cbefbe0b4c7"
+      }
+    },
+    "passed": true
+  }
+}

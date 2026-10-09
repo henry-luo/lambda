@@ -13785,11 +13785,19 @@ static bool runtime_type_admit_map_env(Item value, Type* expected, Type** env,
             // the stored field's observable tag satisfies the named contract.
             // The nullable case also changes its physical carrier even though
             // the source int already satisfies the optional semantic contract.
-            map_rebuild_for_type_change((void**)&candidate_map->type,
-                &candidate_map->data, &candidate_map->data_cap, LMD_TYPE_MAP,
-                (Container*)candidate_map, candidate_field,
-                expected_field->type,
-                rooted_converted.get());
+            // Repeated structural admission must reuse a layout, rather than
+            // retain a private field chain in the runtime pool on every call.
+            Input* tree = runtime_shape_tree();
+            TypeMap* target = tree ? type_tree_retype_contract(tree, candidate_type,
+                candidate_field, expected_field->type) : NULL;
+            bool moved = target ? container_move_to_type((void**)&candidate_map->type,
+                &candidate_map->data, &candidate_map->data_cap, (Container*)candidate_map,
+                candidate_type, target, candidate_field, rooted_converted.get(), 0)
+                : map_rebuild_for_type_change((void**)&candidate_map->type,
+                    &candidate_map->data, &candidate_map->data_cap, LMD_TYPE_MAP,
+                    (Container*)candidate_map, candidate_field, expected_field->type,
+                    rooted_converted.get());
+            if (!moved) return false;
         } else {
             String* field_name = heap_create_name(expected_field->name->str,
                 expected_field->name->length);

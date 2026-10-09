@@ -145,6 +145,13 @@ extern "C" __attribute__((weak)) void dom_engine_bind_host(const void* host_api)
         (void)a; (void)b; (void)c; return ItemNull; }
 
 DOM_ENGINE_SEAM_2(get_state)
+DOM_ENGINE_SEAM_2(audio_open)
+DOM_ENGINE_SEAM_3(audio_play)
+DOM_ENGINE_SEAM_2(audio_pause)
+DOM_ENGINE_SEAM_2(audio_close)
+DOM_ENGINE_SEAM_2(audio_state)
+DOM_ENGINE_SEAM_2(set_relative_mouse)
+DOM_ENGINE_SEAM_1(relative_mouse_active)
 DOM_ENGINE_SEAM_3(set_state)
 DOM_ENGINE_SEAM_1(request_change)
 DOM_ENGINE_SEAM_1(focused)
@@ -512,6 +519,19 @@ extern "C" Item dom_core_dispatch(Item n, Item event) {
 
 
 // --- text controls
+// Lambda's integer IDs share the native stream and capture ownership with JS.
+static Item dom_core_pointer_capture(Item node, Item pointer, unsigned operation) {
+    auto* element = (DomElement*)dom_unwrap_element(node);
+    TypeId type = get_type_id(pointer);
+    int64_t id = type == LMD_TYPE_INT || type == LMD_TYPE_INT64 ? it2l(pointer) : 0;
+    bool accepted = element && id >= INT32_MIN && id <= INT32_MAX &&
+        dom_engine_pointer_capture(element, (int32_t)id, operation) > 0;
+    return Item{.item = b2it(accepted)};
+}
+extern "C" Item dom_core_set_pointer_capture(Item node, Item id) { return dom_core_pointer_capture(node, id, 0); }
+extern "C" Item dom_core_release_pointer_capture(Item node, Item id) { return dom_core_pointer_capture(node, id, 1); }
+extern "C" Item dom_core_has_pointer_capture(Item node, Item id) { return dom_core_pointer_capture(node, id, 2); }
+
 // These two bodies already existed in the core; only the catalog's uniform
 // shape was missing, so each is a two-line adapter rather than an engine seam.
 // tc_set_selection carries the direction the DOM's setSelectionRange takes --

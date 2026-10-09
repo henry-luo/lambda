@@ -3363,6 +3363,7 @@ typedef struct LayoutContext {
     float transform_percentage_base;
     float dpi;           // dots per inch
     lam::Up<Pool> pool;  // memory pool for view allocation
+    lam::Up<Pool> css_value_scratch; // scoped substitution trees for eager computed-value consumers
     // Available space constraints for current layout
     // This enables layout code to distinguish between:
     // - Normal layout (definite width/height)

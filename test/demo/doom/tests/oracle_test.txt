@@ -1,0 +1,6 @@
+{
+  geometry: [true, true, true, true, true, true, true, true, true, true, true, true, true],
+  damage: [true, true, true, true, true, true, true, true],
+  hazards: [true, true, true, true, true, true],
+  doors: [true, true, true, true, true, true, true, true]
+}
