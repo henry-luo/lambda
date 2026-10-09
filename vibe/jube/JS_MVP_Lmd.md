@@ -1134,3 +1134,36 @@ pass **58/58** normally and with forced GC/poisoning, Lambda/input **6,468/6,468
 and the final Test262 run **40,261/40,261** with zero retries. Exact evidence,
 earlier gate instability and remaining scope are in
 [method and field specialization](../impl/JS_MVP_Lmd_Specialization.md).
+
+## 25. Guarded numeric regions
+
+Reduce CD's repeated generic coercions and call/root boundaries by guarding
+receiver/argument layouts once around a pure numeric body. Reuse Lambda shape
+identity and packed lanes (**D3.4.3v5**), numeric emitters and precise root analysis
+(**D5.2**, **D5.3.1–D5.3.2**). Ordinary execution populates shared property caches;
+layout or numeric-type mismatches select the original body before any effects.
+Preloaded fields remain native within the region. Small scalar methods can inline
+transitively beyond loop sites after checking the captured callee and arguments.
+
+Include guarded Boolean lanes, transitive scalar comparators and reusable
+constructor inlining. Extend scalar-object analysis across simple direct factory
+returns; observable instances retain ordinary allocation and identity. Mutable
+closure cells retain Lambda's existing representation (**D6.2.3v2–D6.2.4**).
+Infer GC effects from emitted operations; never suppress rooting on the strength
+of a method name or benchmark-specific assumption.
+
+The disclosed compiler helpers are `numeric_region_path`, `numeric_region_read`,
+`plan_numeric_region`, `guard_property_cache`, `guard_numeric_region` and
+`scalar_factory_plan`; no runtime helper or runtime data layout is added. Proven
+plain-object mutations call Lambda’s existing shape functions directly. Acceptance
+requires unchanged benchmark sources/oracles,
+balanced release comparisons with pinned native MIR and self-reported times,
+all 60 workloads, cold compilation costs, forced-GC checks and baseline gates.
+Measured result: CD **369.3 → 244.0 ms** (33.9% faster, **6.84× Node**),
+Richards **86.5 → 80.5 ms** (6.9% faster), with NBody workload and cold time
+unchanged. CD frame entries fall 56% and root reloads 35%. All 60 workload
+oracles, 64 focused/forced-GC tests, 6,484 Lambda baseline tests and the clean
+40,261-test Test262 baseline pass. Longer paired checks still show small
+regressions in map iteration (0.81%), nqueens (0.86%) and Storage (1.95%);
+performance acceptance remains open for those rows.
+Detailed scope and evidence: [guarded numeric regions](../impl/JS_MVP_Lmd_Numeric_Regions.md).
