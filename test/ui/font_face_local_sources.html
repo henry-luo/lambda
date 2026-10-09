@@ -1,0 +1,16 @@
+<!doctype html>
+<style>
+@font-face { font-family: LocalOnly; src: local('LiberationMono'); }
+@font-face { font-family: LocalFirst; src: local('Liberation Mono'), url('../layout/data/font/Ahem.ttf'); }
+@font-face { font-family: UrlFirst; src: url('../layout/data/font/Ahem.ttf'), local('LiberationMono'); }
+@font-face { font-family: MissingFirst; src: local('Missing Local Source Test Face'), local('LiberationMono'); }
+span { display: inline-block; font-size: 20px; }
+#local { font-family: LocalOnly, Ahem; }
+#local-first { font-family: LocalFirst, Ahem; }
+#url-first { font-family: UrlFirst, Ahem; }
+#missing-first { font-family: MissingFirst, Ahem; }
+</style>
+<div><span id="local">AAAA</span></div>
+<div><span id="local-first">AAAA</span></div>
+<div><span id="url-first">AAAA</span></div>
+<div><span id="missing-first">AAAA</span></div>

@@ -355,9 +355,16 @@ struct JsDomPlatformState {
 };
 
 enum { JS_ASCII_SUBSTRING_CACHE_CAPACITY = 1024 };
+enum { JS_UTF16_POSITION_CACHE_CAPACITY = 4 };
 
-// All realm-owned string fast paths share one contiguous Item range. The
-// finite byte/code-point tables cache value domains; they are not registries.
+struct JsUtf16StringPosition {
+    int64_t length = 0;
+    int64_t unit_offset = 0;
+    int byte_offset = 0;
+};
+
+// Realm-owned character tables and bounded substring/index caches share
+// one contiguous Item range for precise rooting.
 struct JsStringCacheState : RootVector {
     Item last_four_byte_escape = {};
     Item percent_prefixes[16] = {};
@@ -372,6 +379,8 @@ struct JsStringCacheState : RootVector {
     // Bounded value cache: entries own only short ASCII result values, never
     // source strings or object identity.
     Item ascii_substrings[JS_ASCII_SUBSTRING_CACHE_CAPACITY] = {};
+    // immutable sources are precise roots; offsets remain valid when GC moves them.
+    Item utf16_sources[JS_UTF16_POSITION_CACHE_CAPACITY] = {};
     uint32_t last_four_byte_cp = 0;
     uint64_t last_four_byte_epoch = 0;
     uint32_t test262_percent_byte0 = 0;
@@ -385,6 +394,7 @@ struct JsStringCacheState : RootVector {
     uint64_t decode_uri_component_error_epoch = 0;
     uint64_t decode_uri_error_epoch = 0;
     uint32_t ascii_substring_hashes[JS_ASCII_SUBSTRING_CACHE_CAPACITY] = {};
+    JsUtf16StringPosition utf16_positions[JS_UTF16_POSITION_CACHE_CAPACITY] = {};
 };
 
 // One global-environment row represents either a declarative lexical binding,

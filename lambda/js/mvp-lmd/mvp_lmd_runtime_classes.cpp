@@ -52,11 +52,14 @@ static void mvp_lmd_cache_property(MvpLmdPropertyCache* cache, TypeMap* shape,
     TypeId type = entry->storage;
     entry->pointer_lane = type == LMD_TYPE_STRING ? 1 : type == LMD_TYPE_FUNC ||
         type == LMD_TYPE_MAP || type == LMD_TYPE_ARRAY || type == LMD_TYPE_ARRAY_NUM ? 2 : 0;
-    entry->pointer_tag = type == LMD_TYPE_FUNC || type == LMD_TYPE_STRING ? (uint64_t)type << 56 : 0;
+    // function Items are direct pointers, like Maps; tagging them changes strict identity.
+    entry->pointer_tag = type == LMD_TYPE_STRING ? (uint64_t)type << 56 : 0;
 }
 
 extern "C" Item mvp_lmd_class_property(Item owner, Item name, Item value, int64_t operation,
         MvpLmdPropertyCache* cache) {
+    bool initializing = operation == LMD_PROP_INITIALIZE;
+    if (initializing) operation = LMD_PROP_SET;
     MvpLmdClass* cls = mvp_lmd_class_record(owner);
     if (cls) {
         bool constructor = get_type_id(owner) == LMD_TYPE_FUNC;
@@ -88,11 +91,15 @@ extern "C" Item mvp_lmd_class_property(Item owner, Item name, Item value, int64_
             if (operation == LMD_PROP_OWN) return Item{.item = b2it(found)};
             if (found) return operation == LMD_PROP_HAS ? Item{.item = ITEM_TRUE} : result;
         }
-        if (cache && operation == LMD_PROP_SET && !metadata && typemap_is_shared_shape((TypeMap*)map->type)) {
+        if (operation == LMD_PROP_SET) {
             ShapeEntry* field = typemap_hash_lookup((TypeMap*)map->type, name.get_string()->chars, name.get_string()->len);
-            if (field) {
+            if (field && cache && !metadata && typemap_is_shared_shape((TypeMap*)map->type)) {
                 mvp_lmd_cache_property(cache, (TypeMap*)map->type, field, ItemNull, true);
             }
+            // Lambda's Map pointer lane already represents null; preserve its immutable shape as fn_map_set does.
+            if (field && !initializing && field->type == &TYPE_MAP && get_type_id(value) == LMD_TYPE_NULL)
+                return map_field_store((char*)map->data + field->byte_offset, value, LMD_TYPE_NULL)
+                    ? value : mvp_lmd_fail(LMD_MVP_MEMORY, 0);
         }
         owner = Item{.map = map};
     }

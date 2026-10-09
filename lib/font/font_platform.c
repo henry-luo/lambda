@@ -190,6 +190,13 @@ static char* find_font_path_macos(const char* font_name, int* out_face_index) {
         if (r.location == 0 && r.length == CFStringGetLength(cf_name)) name_matches = true;
     }
     if (!name_matches) {
+        CFStringRef full_name = CTFontCopyFullName(ct_font);
+        if (full_name && CFStringCompare(full_name, cf_name, kCFCompareCaseInsensitive) == kCFCompareEqualTo) {
+            name_matches = true;
+        }
+        if (full_name) CFRelease(full_name);
+    }
+    if (!name_matches) {
         CFStringRef ps_name = CTFontCopyPostScriptName(ct_font);
         if (ps_name && CFStringCompare(ps_name, cf_name, kCFCompareCaseInsensitive) == kCFCompareEqualTo) {
             name_matches = true;

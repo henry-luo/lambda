@@ -134,6 +134,7 @@ typedef struct FvarTable {
 typedef struct NameTable {
     char* family_name;                  // nameID 1
     char* subfamily_name;              // nameID 2
+    char* full_name;                   // nameID 4
     char* postscript_name;             // nameID 6
 } NameTable;
 

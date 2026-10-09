@@ -1,4 +1,5 @@
 #include "layout.hpp"
+#include "../lambda/dom/dom_engine.h"
 
 #include "../lib/log.h"
 
@@ -34,6 +35,28 @@ LayoutContentBox layout_content_box(ViewBlock* block) {
     content.offset_x = layout_axis_decoration_start(block->bound, LAYOUT_AXIS_X);
     content.offset_y = layout_axis_decoration_start(block->bound, LAYOUT_AXIS_Y);
     return content;
+}
+
+extern "C" bool dom_engine_element_css_boxes(DomElement* element, DomCssBoxSizes* sizes) {
+    if (!element || !sizes) return false;
+    *sizes = {};
+    if (!dom_element_is_connected(element) || element->display.inner == CSS_VALUE_NONE ||
+        element->display.outer == CSS_VALUE_CONTENTS) return true;
+    if (element->view_type < RDT_VIEW_BLOCK) return false;
+    ViewBlock* block = static_cast<ViewBlock*>(element);
+    LayoutContentBox content = layout_content_box(block);
+    BoxMetrics metrics = layout_box_metrics(block);
+    float zoom = layout_effective_zoom(block);
+    if (zoom <= 0.0f) zoom = 1.0f;
+    // resize observations use CSS layout boxes; transforms affect visual bounds only.
+    sizes->content_width = content.width / zoom;
+    sizes->content_height = content.height / zoom;
+    sizes->border_width = block->width / zoom;
+    sizes->border_height = block->height / zoom;
+    sizes->padding_left = metrics.padding.left / zoom;
+    sizes->padding_top = metrics.padding.top / zoom;
+    sizes->vertical = layout_block_inline_axis_is_vertical(block);
+    return true;
 }
 
 void layout_store_given_axis(LayoutContext* lycon, ViewBlock* block, float size,

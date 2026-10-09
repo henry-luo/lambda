@@ -1665,7 +1665,13 @@ static StrView cssom_decl_name(StrView property, bool named, char* buffer, size_
     return strview_init(buffer, property.length);
 }
 
-static bool cssom_decl_store(CssRule* rule, StrView name, CssDeclaration* replacement) {
+static String* cssom_decl_text(CssRule* rule, Pool* output);
+
+static bool cssom_decl_store(CssRule* rule, StrView name, CssDeclaration* replacement,
+                             Pool* comparison_pool) {
+    // CSSOM property setters notify only when the declaration serialization
+    // changes; repeated writes otherwise keep observers and layout running.
+    String* before = cssom_decl_text(rule, comparison_pool);
     CssPropertyCode requested = css_property_code_from_name(name.str);
     bool identity = css_property_is_identity_shorthand(requested);
     // replacing one member preserves its siblings and replaces their inherited priority independently.
@@ -1691,7 +1697,10 @@ static bool cssom_decl_store(CssRule* rule, StrView name, CssDeclaration* replac
         rule->data.style_rule.declarations = grown;
     }
     rule->data.style_rule.declaration_count = retained;
-    return found || replacement;
+    if (!found && !replacement) return false;
+    String* after = cssom_decl_text(rule, comparison_pool);
+    return !before || !after || before->len != after->len ||
+        memcmp(before->chars, after->chars, before->len) != 0;
 }
 
 struct CssomDeclarationView {
@@ -1937,7 +1946,7 @@ static Item cssom_decl_set(Item receiver, Item property, Item value, Item priori
     if (!cssom_decl_supports(rule, name)) return make_js_undefined();
     // CSSOM checks empty values before priority, including an invalid priority string.
     if (!source->len) {
-        if (cssom_decl_store(rule, name, nullptr)) cssom_decl_commit(&view, name);
+        if (cssom_decl_store(rule, name, nullptr, view.serialization_pool())) cssom_decl_commit(&view, name);
         return make_js_undefined();
     }
     String* requested_priority = it2s(priority_root.get());
@@ -1954,7 +1963,7 @@ static Item cssom_decl_set(Item receiver, Item property, Item value, Item priori
         declaration->value_text_len = strlen(canonical);
     }
     declaration->important = important;
-    if (cssom_decl_store(rule, name, declaration)) cssom_decl_commit(&view, name);
+    if (cssom_decl_store(rule, name, declaration, view.serialization_pool())) cssom_decl_commit(&view, name);
     return make_js_undefined();
 }
 
@@ -1983,7 +1992,7 @@ extern "C" Item dom_cssom_rule_decl_remove_property(Item receiver, Item property
     StrView name = cssom_decl_name(cssom_property_name(property_root.get()), false, name_buffer, sizeof(name_buffer));
     bool supported = cssom_decl_supports(rule, name);
     previous_root.set(make_string_item(supported ? cssom_decl_value(rule, name, view.serialization_pool()) : ""));
-    if (supported && cssom_decl_store(rule, name, nullptr)) cssom_decl_commit(&view, name);
+    if (supported && cssom_decl_store(rule, name, nullptr, view.serialization_pool())) cssom_decl_commit(&view, name);
     return previous_root.get();
 }
 

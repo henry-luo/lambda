@@ -904,17 +904,42 @@ TEST_F(CssParserUnitTest, FontFace_LocalSourcesAreNotTreatedAsRemoteUrls) {
 
     ASSERT_NE(local_only, nullptr);
     EXPECT_STREQ(local_only->src_local, "System Sans");
-    EXPECT_EQ(local_only->src_count, 0);
+    ASSERT_EQ(local_only->src_count, 2);
+    EXPECT_TRUE(local_only->src_urls[0].is_local);
+    EXPECT_STREQ(local_only->src_urls[0].url, "System Sans");
+    EXPECT_TRUE(local_only->src_urls[1].is_local);
+    EXPECT_STREQ(local_only->src_urls[1].url, "Arial");
     EXPECT_EQ(local_only->src_url, nullptr);
 
     ASSERT_NE(mixed, nullptr);
     EXPECT_STREQ(mixed->src_local, "System Sans");
-    ASSERT_EQ(mixed->src_count, 1);
-    EXPECT_STREQ(mixed->src_urls[0].url, "remote.woff2");
+    ASSERT_EQ(mixed->src_count, 2);
+    EXPECT_TRUE(mixed->src_urls[0].is_local);
+    EXPECT_STREQ(mixed->src_urls[0].url, "System Sans");
+    EXPECT_FALSE(mixed->src_urls[1].is_local);
+    EXPECT_STREQ(mixed->src_urls[1].url, "remote.woff2");
     EXPECT_STREQ(mixed->src_url, "remote.woff2");
 
     css_font_face_descriptor_free(local_only);
     css_font_face_descriptor_free(mixed);
+}
+
+TEST_F(CssParserUnitTest, FontFace_ResolutionKeepsLocalNamesAndSourceOrder) {
+    CssFontFaceDescriptor* descriptor = css_parse_font_face_content(
+        "{ font-family: Ordered; src: url(first.ttf), local('Unique Face'), "
+        "url(second.woff2) format('woff2'); }", nullptr);
+    ASSERT_NE(descriptor, nullptr);
+    ASSERT_EQ(descriptor->src_count, 3);
+    css_font_face_resolve_sources(descriptor, "https://example.test/fonts/main.css", nullptr);
+    EXPECT_FALSE(descriptor->src_urls[0].is_local);
+    EXPECT_STREQ(descriptor->src_urls[0].url, "https://example.test/fonts/first.ttf");
+    EXPECT_TRUE(descriptor->src_urls[1].is_local);
+    EXPECT_STREQ(descriptor->src_urls[1].url, "Unique Face");
+    EXPECT_FALSE(descriptor->src_urls[2].is_local);
+    EXPECT_STREQ(descriptor->src_urls[2].url, "https://example.test/fonts/second.woff2");
+    EXPECT_STREQ(descriptor->src_urls[2].format, "woff2");
+    EXPECT_STREQ(descriptor->src_url, "https://example.test/fonts/first.ttf");
+    css_font_face_descriptor_free(descriptor);
 }
 
 TEST_F(CssParserUnitTest, FontFace_ParsesUnicodeRangeList) {

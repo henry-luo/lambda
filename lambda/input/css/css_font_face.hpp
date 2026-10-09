@@ -16,6 +16,7 @@
 typedef struct CssFontFaceSrc {
     char* url;                   // URL from url(...)
     char* format;                // Format string from format(...), e.g. "woff", "truetype"
+    bool is_local;              // url stores a unique font name for local(...)
 } CssFontFaceSrc;
 
 typedef struct CssFontFaceUnicodeRange {
@@ -28,7 +29,7 @@ typedef struct CssFontFaceDescriptor {
     char* family_name;           // font-family value
     char* src_url;               // URL from src: url(...) - first/fallback URL for backwards compat
     char* src_local;             // local font name from src: local(...)
-    CssFontFaceSrc* src_urls;    // Array of all src URL entries with formats
+    CssFontFaceSrc* src_urls;    // ordered local()/url() sources with formats
     int src_count;               // Number of entries in src_urls array
     CssEnum font_style;          // normal, italic, oblique
     CssEnum font_weight;         // normal, bold, or numeric 100-900
@@ -36,6 +37,8 @@ typedef struct CssFontFaceDescriptor {
     CssFontFaceUnicodeRange* unicode_ranges; // CSS unicode-range descriptor
     int unicode_range_count;
 } CssFontFaceDescriptor;
+
+void css_font_face_resolve_sources(CssFontFaceDescriptor* descriptor, const char* base_path, Pool* pool);
 
 /**
  * Parse @font-face rule content and extract font descriptor

@@ -489,7 +489,7 @@ DomDocument* show_loaded_html_doc(DomDocument* doc, const char* doc_url) {
     // gated on paint — the render below may be skipped, the init may not be.
     radiant_run_behavior_init(doc);
     // ES30: package policy selects autofocus; native commits the focus state.
-    radiant_run_autofocus(doc);
+    radiant_run_autofocus(&ui_context, doc);
     // render html doc
     if (doc && doc->view_tree) {
         log_debug("html version: %d", doc->view_tree->html_version);
@@ -1084,7 +1084,7 @@ void render(GLFWwindow* window) {
         // reflow that produced no dirty region still owes its `init` turn.
         if (!ui_context.paged_options) {
             radiant_run_behavior_init(ui_context.document);
-            radiant_run_autofocus(ui_context.document);
+            radiant_run_autofocus(&ui_context, ui_context.document);
         }
         // rerender if the document is dirty or needs repaint (e.g., caret changed)
         if (ui_context.document->state &&
@@ -1691,7 +1691,7 @@ static int view_doc_in_window_with_events_internal(const char* doc_file,
         if (!paged_options) radiant_run_behavior_init(doc, &phase_timing.behavior);   // ES19: layout -> init -> render
         phase_timing.behavior_init_ms = view_phase_elapsed_ms(behavior_init_start, time_now_ns());
         uint64_t autofocus_start = time_now_ns();
-        if (!paged_options) radiant_run_autofocus(doc);       // ES30: package policy -> native focus
+        if (!paged_options) radiant_run_autofocus(&ui_context, doc); // ES30: package policy -> native focus
         phase_timing.autofocus_ms = view_phase_elapsed_ms(autofocus_start, time_now_ns());
         if (doc && (doc->view_tree || ui_context.paged_view)) {
             log_mem_stage("before-render");

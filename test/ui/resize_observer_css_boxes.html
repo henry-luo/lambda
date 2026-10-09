@@ -1,0 +1,28 @@
+<!doctype html>
+<style>
+#parent { transform: scale(2); transform-origin: top left; }
+#target { width: 40px; height: 30px; padding: 5px; border: 3px solid; }
+</style>
+<button id="observe">observe</button><button id="transform">transform</button>
+<button id="resize">resize</button><button id="vertical">vertical</button><div id="report"></div>
+<div id="parent"><div id="target"></div></div>
+<script>
+var target = document.getElementById('target');
+var report = document.getElementById('report');
+var calls = 0;
+var observer = new ResizeObserver(function (entries) {
+    calls++;
+    var entry = entries[0];
+    report.setAttribute('data-calls', String(calls));
+    report.setAttribute('data-content', entry.contentRect.width + ',' + entry.contentRect.height);
+    report.setAttribute('data-origin', entry.contentRect.x + ',' + entry.contentRect.y);
+    report.setAttribute('data-logical', entry.contentBoxSize[0].inlineSize + ',' + entry.contentBoxSize[0].blockSize);
+    report.setAttribute('data-border', entry.borderBoxSize[0].inlineSize + ',' + entry.borderBoxSize[0].blockSize);
+});
+document.getElementById('observe').onclick = function () { observer.observe(target); };
+document.getElementById('transform').onclick = function () {
+    document.getElementById('parent').style.transform = 'scale(3)';
+};
+document.getElementById('resize').onclick = function () { target.style.width = '60px'; };
+document.getElementById('vertical').onclick = function () { target.style.writingMode = 'vertical-rl'; };
+</script>

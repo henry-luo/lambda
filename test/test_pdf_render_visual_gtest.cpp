@@ -3443,6 +3443,91 @@ TEST(RenderOutputParity, LogicalCornerRadiiMapAndCompeteWithPhysicalCorners) {
         "<rect x=\"0.00\" y=\"0.00\" width=\"40.00\" height=\"20.00\" fill=\"rgb(0,0,255)\""));
 }
 
+TEST(RenderOutputParity, InsetShadowUsesConstrainedCornerRadii) {
+    if (!file_exists(LAMBDA_EXE) || access(LAMBDA_EXE, X_OK) != 0) {
+        GTEST_SKIP() << "lambda.exe is unavailable";
+    }
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
+    struct RadiusCase { const char* name; const char* authored; const char* used; };
+    const RadiusCase cases[] = {
+        {"pill", "50px", "20px"},
+        {"unequal", "50px 25px 75px 50px", "20px 10px 30px 20px"}
+    };
+    // CSS overlap reduction makes these authored and used radii paint identically.
+    for (const RadiusCase& c : cases) {
+        for (int scale = 1; scale <= 2; scale++) {
+            SCOPED_TRACE(c.name);
+            SCOPED_TRACE(scale);
+            char png_paths[2][PATH_MAX];
+            const char* radii[] = {c.authored, c.used};
+            for (size_t i = 0; i < 2; i++) {
+                char html_path[PATH_MAX], html[1024], options[96];
+                snprintf(html_path, sizeof(html_path),
+                    "temp/render_output_parity/inset_radius_%s_%d_%zu.html", c.name, scale, i);
+                snprintf(png_paths[i], sizeof(png_paths[i]),
+                    "temp/render_output_parity/inset_radius_%s_%d_%zu.png", c.name, scale, i);
+                snprintf(html, sizeof(html),
+                    "<!doctype html><style>html,body{margin:0;background:#f5f5f7}"
+                    "div{margin:8px;width:100px;height:40px;background:#f37329;"
+                    "border-radius:%s;box-shadow:inset 0 1px 1px rgba(255,255,255,.41)}"
+                    "</style><div></div>", radii[i]);
+                snprintf(options, sizeof(options), "-vw 128 -vh 64 --pixel-ratio %d", scale);
+                ASSERT_TRUE(render_html_fixture(html_path, png_paths[i], html, options));
+            }
+            expect_pngs_exactly_equal(png_paths[1], png_paths[0]);
+        }
+    }
+}
+
+TEST(RenderOutputParity, ClippedInsetShadowMatchesFullViewportPixels) {
+    if (!file_exists(LAMBDA_EXE) || access(LAMBDA_EXE, X_OK) != 0) {
+        GTEST_SKIP() << "lambda.exe is unavailable";
+    }
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
+    const char* html_path = "temp/render_output_parity/inset_viewport.html";
+    const char* full_path = "temp/render_output_parity/inset_viewport_full.png";
+    const char* clipped_path = "temp/render_output_parity/inset_viewport_clipped.png";
+    const char* html =
+        "<!doctype html><style>html,body{margin:0;width:128px;height:64px;overflow:hidden}"
+        "div{margin:8px;width:100px;height:40px;border-radius:50px;"
+        "background:linear-gradient(90deg,red,blue);"
+        "box-shadow:inset 3px 5px 15px rgba(0,0,0,.6)}</style><div></div>";
+    ASSERT_TRUE(render_html_fixture(html_path, full_path, html, "-vw 128 -vh 64"));
+    ASSERT_TRUE(render_document_fixture(html_path, clipped_path, "-vw 64 -vh 32"));
+    ImageData full = {}, clipped = {};
+    ASSERT_TRUE(load_png_rgba(full_path, &full));
+    ASSERT_TRUE(load_png_rgba(clipped_path, &clipped));
+    ASSERT_EQ(full.width, 128); ASSERT_EQ(full.height, 64);
+    ASSERT_EQ(clipped.width, 64); ASSERT_EQ(clipped.height, 32);
+    for (int row = 0; row < clipped.height; row++) {
+        EXPECT_EQ(memcmp(full.pixels + (size_t)row * (size_t)full.width * 4,
+            clipped.pixels + (size_t)row * (size_t)clipped.width * 4,
+            (size_t)clipped.width * 4), 0) << "clipped shadow differs on row " << row;
+    }
+    image_free(full.pixels); image_free(clipped.pixels);
+}
+
+TEST(RenderOutputParity, TransparentInsetShadowPreservesBackground) {
+    if (!file_exists(LAMBDA_EXE) || access(LAMBDA_EXE, X_OK) != 0) {
+        GTEST_SKIP() << "lambda.exe is unavailable";
+    }
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
+    const char* html_path = "temp/render_output_parity/inset_background.html";
+    const char* actual = "temp/render_output_parity/inset_background.png";
+    const char* reference = "temp/render_output_parity/inset_background_reference.png";
+    const char* html =
+        "<!doctype html><style>html,body{margin:0}div{width:100px;height:40px;"
+        "background:linear-gradient(90deg,red 50%,blue 50%);"
+        "box-shadow:inset 0 0 15px transparent}</style><div></div>";
+    ASSERT_TRUE(render_html_fixture(html_path, actual, html));
+    const char* no_shadow =
+        "<!doctype html><style>html,body{margin:0}div{width:100px;height:40px;"
+        "background:linear-gradient(90deg,red 50%,blue 50%)}"
+        "</style><div></div>";
+    ASSERT_TRUE(render_html_fixture(html_path, reference, no_shadow));
+    expect_pngs_exactly_equal(reference, actual);
+}
+
 TEST(RenderOutputParity, CornerMathUsesFinalBoxAndComputedInheritedLengths) {
     if (!file_exists(LAMBDA_EXE) || access(LAMBDA_EXE, X_OK) != 0) {
         GTEST_SKIP() << "lambda.exe is unavailable";

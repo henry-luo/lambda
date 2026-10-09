@@ -1,0 +1,22 @@
+{
+  "name": "Media query construction and resize callbacks retain their values",
+  "html": "test/ui/dom/match_media_gc_ownership.html",
+  "viewport": {"width": 800, "height": 400},
+  "events": [
+    {"type": "assert_attribute", "target": {"selector": "#result"}, "attribute": "data-initial", "equals": "true"},
+    {"type": "resize", "width": 400, "height": 400},
+    {"type": "assert_attribute", "target": {"selector": "#result"}, "attribute": "data-legacy", "equals": "1"},
+    {"type": "assert_attribute", "target": {"selector": "#result"}, "attribute": "data-legacy-event", "equals": "true:(max-width: 500px):legacy"},
+    {"type": "assert_attribute", "target": {"selector": "#result"}, "attribute": "data-change", "equals": "1"},
+    {"type": "assert_attribute", "target": {"selector": "#result"}, "attribute": "data-change-event", "equals": "true:(max-width: 500px):change"},
+    {"type": "assert_attribute", "target": {"selector": "#result"}, "attribute": "data-live", "equals": "true"},
+    {"type": "assert_attribute", "target": {"selector": "#result"}, "attribute": "data-removed", "equals": "0"},
+    {"type": "click", "target": {"selector": "#remove"}},
+    {"type": "resize", "width": 800, "height": 400},
+    {"type": "assert_attribute", "target": {"selector": "#result"}, "attribute": "data-legacy", "equals": "1"},
+    {"type": "assert_attribute", "target": {"selector": "#result"}, "attribute": "data-change", "equals": "2"},
+    {"type": "assert_attribute", "target": {"selector": "#result"}, "attribute": "data-change-event", "equals": "false:(max-width: 500px):change"},
+    {"type": "assert_attribute", "target": {"selector": "#result"}, "attribute": "data-live", "equals": "true"},
+    {"type": "assert_attribute", "target": {"selector": "#result"}, "attribute": "data-removed", "equals": "0"}
+  ]
+}

@@ -64,7 +64,8 @@ void cookie_jar_store(CookieJar* jar, const char* request_url,
 // Commits queued worker-side cookie mutations on the profile owner thread.
 bool cookie_jar_flush(CookieJar* jar);
 
-// Imports matching jar entries into a libcurl easy handle's cookie engine.
+// Enables redirect cookies and imports jar entries when a session jar is supplied.
+// Without a jar, cookies remain owned by this request and die with the easy handle.
 // `curl_handle` is a CURL* supplied as void* to avoid exposing libcurl here.
 void cookie_jar_import_curl(CookieJar* jar, void* curl_handle);
 

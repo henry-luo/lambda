@@ -1,0 +1,27 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>History interface</title></head>
+<body><div id="result">pending</div><script>
+    const result = document.getElementById('result');
+    function check(name, value) {result.setAttribute('data-' + name, String(value));}
+    check('prototype', Object.getPrototypeOf(history) === History.prototype);
+    check('instance', history instanceof History);
+    check('tag', Object.prototype.toString.call(history) === '[object History]');
+    check('methods', ['pushState', 'replaceState', 'back', 'forward', 'go'].every(function (name) {
+        return !Object.prototype.hasOwnProperty.call(history, name) &&
+            history[name] === History.prototype[name] && history[name].name === name;
+    }));
+    check('lengths', History.prototype.pushState.length === 2 &&
+        History.prototype.replaceState.length === 2 && History.prototype.go.length === 0);
+    let illegalConstructor = false;
+    try {new History();} catch (error) {illegalConstructor = error instanceof TypeError;}
+    check('constructor', illegalConstructor);
+    let illegalReceiver = false;
+    try {History.prototype.replaceState.call({}, null, '', '#wrong');}
+    catch (error) {illegalReceiver = error instanceof TypeError;}
+    check('receiver', illegalReceiver);
+    const replace = History.prototype.replaceState;
+    replace.call(history, {value: 42}, '', '#interface');
+    check('captured', history.state.value === 42 && location.hash === '#interface');
+    check('go', typeof History.prototype.go.call(history, 0) === 'undefined');
+    result.textContent = 'complete';
+</script></body></html>

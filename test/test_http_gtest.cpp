@@ -95,6 +95,18 @@ static bool http_header_capture_server_start(HttpHeaderCaptureServer* server,
     return true;
 }
 
+static void http_header_capture_server_finish(HttpHeaderCaptureServer* server,
+                                              char* request, size_t request_capacity) {
+    ssize_t request_size = read(server->request_fd, request, request_capacity - 1);
+    close(server->request_fd);
+    int status = 0;
+    ASSERT_EQ(server->pid, waitpid(server->pid, &status, 0));
+    EXPECT_TRUE(WIFEXITED(status));
+    EXPECT_EQ(0, WEXITSTATUS(status));
+    ASSERT_GT(request_size, 0);
+    request[request_size] = '\0';
+}
+
 class HttpInputTest : public ::testing::Test {
 protected:
     Pool* pool;
@@ -128,17 +140,11 @@ TEST_F(HttpInputTest, SendsBrowserNavigationHeadersForDocumentDownloads) {
     char* content = download_http_content(url, &content_size, NULL);
 
     char request[8192] = {};
-    ssize_t request_size = read(server.request_fd, request, sizeof(request) - 1);
-    close(server.request_fd);
-    int status = 0;
-    ASSERT_EQ(server.pid, waitpid(server.pid, &status, 0));
+    http_header_capture_server_finish(&server, request, sizeof(request));
 
     ASSERT_NE(nullptr, content);
     EXPECT_EQ(2u, content_size);
     EXPECT_STREQ("ok", content);
-    EXPECT_TRUE(WIFEXITED(status));
-    EXPECT_EQ(0, WEXITSTATUS(status));
-    ASSERT_GT(request_size, 0);
     EXPECT_NE(nullptr, strstr(request, "User-Agent: " RADIANT_HTTP_CLIENT_USER_AGENT));
     EXPECT_NE(nullptr, strstr(request, RADIANT_HTTP_DOCUMENT_ACCEPT_HEADER));
     EXPECT_NE(nullptr, strstr(request, RADIANT_HTTP_DOCUMENT_LANGUAGE_HEADER));
@@ -148,6 +154,35 @@ TEST_F(HttpInputTest, SendsBrowserNavigationHeadersForDocumentDownloads) {
     EXPECT_NE(nullptr, strstr(request, RADIANT_HTTP_DOCUMENT_FETCH_USER_HEADER));
     EXPECT_NE(nullptr, strstr(request, RADIANT_HTTP_DOCUMENT_UPGRADE_HEADER));
     EXPECT_EQ(nullptr, strstr(request, "Radiant/1.0"));
+    mem_free(content);
+}
+
+TEST_F(HttpInputTest, KeepsRedirectCookiesWithoutSessionJar) {
+    HttpHeaderCaptureServer destination;
+    ASSERT_TRUE(http_header_capture_server_start(&destination));
+    char redirect_response[512];
+    int response_size = snprintf(redirect_response, sizeof(redirect_response),
+        "HTTP/1.1 302 Found\r\nLocation: http://127.0.0.1:%d/document\r\n"
+        "Set-Cookie: navigation=allowed; Path=/\r\nContent-Length: 0\r\n\r\n",
+        destination.port);
+    ASSERT_GT(response_size, 0);
+    ASSERT_LT((size_t)response_size, sizeof(redirect_response));
+    HttpHeaderCaptureServer source;
+    ASSERT_TRUE(http_header_capture_server_start(
+        &source, 0, redirect_response, (size_t)response_size));
+    char url[128];
+    int url_size = snprintf(url, sizeof(url), "http://127.0.0.1:%d/start", source.port);
+    ASSERT_GT(url_size, 0);
+    ASSERT_LT((size_t)url_size, sizeof(url));
+    size_t content_size = 0;
+    char* content = download_http_content_with_cookie_jar(url, &content_size, NULL);
+    char request[8192] = {};
+    http_header_capture_server_finish(&source, request, sizeof(request));
+    http_header_capture_server_finish(&destination, request, sizeof(request));
+    ASSERT_NE(content, nullptr);
+    EXPECT_EQ(2u, content_size);
+    EXPECT_STREQ(content, "ok");
+    EXPECT_NE(strstr(request, "Cookie: navigation=allowed"), nullptr) << request;
     mem_free(content);
 }
 
@@ -171,17 +206,11 @@ TEST_F(HttpInputTest, DecodesBrotliDocumentResponses) {
     char* content = download_http_content(url, &content_size, NULL);
 
     char request[8192] = {};
-    ssize_t request_size = read(server.request_fd, request, sizeof(request) - 1);
-    close(server.request_fd);
-    int status = 0;
-    ASSERT_EQ(server.pid, waitpid(server.pid, &status, 0));
+    http_header_capture_server_finish(&server, request, sizeof(request));
 
     ASSERT_NE(nullptr, content);
     EXPECT_EQ(strlen("brotli-response-body"), content_size);
     EXPECT_STREQ("brotli-response-body", content);
-    EXPECT_TRUE(WIFEXITED(status));
-    EXPECT_EQ(0, WEXITSTATUS(status));
-    ASSERT_GT(request_size, 0);
     EXPECT_NE(nullptr, strstr(request, "Accept-Encoding:"));
     EXPECT_NE(nullptr, strstr(request, "br"));
     mem_free(content);
@@ -202,17 +231,11 @@ TEST_F(HttpInputTest, TopLevelNavigationUsesPageLoadTimeout) {
     char* content = download_http_content_with_cookie_jar(url, &content_size, NULL);
 
     char request[8192] = {};
-    ssize_t request_size = read(server.request_fd, request, sizeof(request) - 1);
-    close(server.request_fd);
-    int status = 0;
-    ASSERT_EQ(server.pid, waitpid(server.pid, &status, 0));
+    http_header_capture_server_finish(&server, request, sizeof(request));
 
     ASSERT_NE(nullptr, content);
     EXPECT_EQ(2u, content_size);
     EXPECT_STREQ("ok", content);
-    EXPECT_TRUE(WIFEXITED(status));
-    EXPECT_EQ(0, WEXITSTATUS(status));
-    EXPECT_GT(request_size, 0);
     mem_free(content);
 }
 

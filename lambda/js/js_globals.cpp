@@ -3297,77 +3297,97 @@ static Item structured_clone_transfer_impl(Item value, Item transfer_list, int d
         tid == LMD_TYPE_FLOAT || tid == LMD_TYPE_STRING) {
         return value;
     }
+    JS_ROOTS(roots, value_root, value, transfer_root, transfer_list,
+        result_root, ItemNull, keys_root, ItemNull, key_root, ItemNull,
+        element_root, ItemNull);
 
     // arrays: deep clone each element
-    if (js_is_js_array(value)) {
-        int64_t len = js_array_length(value);
-        Item result = js_array_new((int)len);
+    if (js_is_js_array(value_root.get())) {
+        int64_t len = js_array_length(value_root.get());
+        // append into an empty array; js_array_new(len) would prepend len holes.
+        result_root.set(js_array_new(0));
         for (int64_t i = 0; i < len; i++) {
-            Item elem = js_elements_get_int(value, i);
-            js_array_push(result, structured_clone_transfer_impl(elem, transfer_list, depth + 1));
+            element_root.set(js_elements_get_int(value_root.get(), i));
+            JS_RETURN_IF_ERROR(element_root.get());
+            element_root.set(structured_clone_transfer_impl(element_root.get(),
+                transfer_root.get(), depth + 1));
+            JS_RETURN_IF_ERROR(element_root.get());
+            JS_RETURN_IF_ERROR(js_array_push(result_root.get(), element_root.get()));
         }
-        return result;
+        return result_root.get();
     }
 
     // ArrayBuffer: clone bytes, or clone as the transferred backing store.
-    if (js_is_arraybuffer(value) && !js_is_sharedarraybuffer(value)) {
-        JsArrayBuffer* ab = js_get_arraybuffer_ptr_item(value);
-        if (!ab || js_arraybuffer_detached(ab)) return value;
+    if (js_is_arraybuffer(value_root.get()) && !js_is_sharedarraybuffer(value_root.get())) {
+        JsArrayBuffer* ab = js_get_arraybuffer_ptr_item(value_root.get());
+        if (!ab || js_arraybuffer_detached(ab)) return value_root.get();
         int byte_length = js_arraybuffer_length(ab);
-        Item clone = js_arraybuffer_new(byte_length);
-        JsArrayBuffer* cab = js_get_arraybuffer_ptr_item(clone);
+        result_root.set(js_arraybuffer_new(byte_length));
+        ab = js_get_arraybuffer_ptr_item(value_root.get());
+        JsArrayBuffer* cab = js_get_arraybuffer_ptr_item(result_root.get());
         const uint8_t* source = js_arraybuffer_data_const(ab);
         uint8_t* destination = js_arraybuffer_prepare_write(cab);
         if (source && destination && byte_length > 0) {
             memcpy(destination, source, (size_t)byte_length);
         }
-        return clone;
+        return result_root.get();
     }
 
     // MessagePort: a listed port is moved to a fresh endpoint that is wired to
     // the original peer; unlisted ports cannot be meaningfully cloned.
-    if (js_message_port_is_port(value)) {
-        if (js_message_port_transfer_list_has(transfer_list, value)) {
-            return js_message_port_clone_for_transfer(value);
+    if (js_message_port_is_port(value_root.get())) {
+        if (js_message_port_transfer_list_has(transfer_root.get(), value_root.get())) {
+            return js_message_port_clone_for_transfer(value_root.get());
         }
-        return value;
+        return value_root.get();
     }
 
     // typed array: copy buffer
-    if (js_is_typed_array(value)) {
-        Map* m = value.map;
+    if (js_is_typed_array(value_root.get())) {
+        Map* m = value_root.get().map;
         JsTypedArray* ta = js_get_typed_array_ptr(m);
-        int len = js_typed_array_length(value);
-        int byte_length = js_typed_array_byte_length(value);
-        const void* src_data = js_typed_array_current_data_ptr(value);
+        int len = js_typed_array_length(value_root.get());
+        int byte_length = js_typed_array_byte_length(value_root.get());
+        const void* src_data = js_typed_array_current_data_ptr(value_root.get());
         if (ta && src_data && byte_length > 0) {
-            Item clone = js_typed_array_new(ta->element_type, len);
-            void* dst_data = js_typed_array_prepare_write_ptr(clone);
+            result_root.set(js_typed_array_new(ta->element_type, len));
+            src_data = js_typed_array_current_data_ptr(value_root.get());
+            void* dst_data = js_typed_array_prepare_write_ptr(result_root.get());
             if (dst_data) memcpy(dst_data, src_data, (size_t)byte_length);
-            return clone;
+            return result_root.get();
         }
-        return value;
+        return value_root.get();
     }
 
     // maps/objects: clone properties
     if (tid == LMD_TYPE_MAP || tid == LMD_TYPE_ELEMENT) {
-        Item result = js_new_object();
-        Item keys = js_object_keys(value);
-        JS_ARRAY_FOREACH(key, keys) {
-            Item val = js_get_key_default(value, key);
-            js_set_key_default(result, key, structured_clone_transfer_impl(val, transfer_list, depth + 1));
+        // key enumeration, getters and recursive child clones can collect;
+        // unpublished destinations need exact roots until stored (D5.4.1).
+        result_root.set(js_new_object());
+        keys_root.set(js_object_keys(value_root.get()));
+        JS_RETURN_IF_ERROR(keys_root.get());
+        int64_t count = js_array_length(keys_root.get());
+        for (int64_t index = 0; index < count; index++) {
+            key_root.set(js_elements_get_int(keys_root.get(), index));
+            element_root.set(js_get_key_default(value_root.get(), key_root.get()));
+            JS_RETURN_IF_ERROR(element_root.get());
+            element_root.set(structured_clone_transfer_impl(element_root.get(),
+                transfer_root.get(), depth + 1));
+            JS_RETURN_IF_ERROR(element_root.get());
+            JS_RETURN_IF_ERROR(js_set_key_default(result_root.get(),
+                key_root.get(), element_root.get()));
         }
-        return result;
+        return result_root.get();
     }
 
     // Callable exotics carry runtime capability state just like functions;
     // treating a callable Proxy as a plain MAP would clone away [[Call]]
     // (D6.2.2v2).
-    if (js_is_callable(value)) {
-        return value;
+    if (js_is_callable(value_root.get())) {
+        return value_root.get();
     }
 
-    return value;
+    return value_root.get();
 }
 JS_FORWARD_STATIC_ITEM(structured_clone_impl, (Item value, int depth), structured_clone_transfer_impl, (value, ItemNull, depth))
 JS_FORWARD_ITEM(js_structuredClone, (Item value), structured_clone_impl, (value, 0))
@@ -5660,37 +5680,6 @@ extern "C" Item js_get_prototype_of(Item object) {
 
 // js_array_push already declared above as extern "C" Item js_array_push(Item, Item)
 
-static Item js_reflect_create_list_from_array_like(Item array_like, Item** out_args, int* out_argc) {
-    *out_args = NULL;
-    *out_argc = 0;
-    if (!js_is_object_value(array_like)) {
-        return js_throw_type_error("CreateListFromArrayLike requires an object");
-    }
-    JS_ASSIGN_OR_RETURN(length_value, js_get_name_key(array_like, "length", 6));
-    JS_ASSIGN_OR_RETURN(length_number, js_to_number(length_value));
-    double length_double = js_get_number(length_number);
-    int64_t length = 0;
-    if (length_double > 0.0 && length_double == length_double) {
-        if (isinf(length_double) || length_double > 1000000.0) {
-            return js_throw_type_error("argument list is too large");
-        }
-        length = (int64_t)floor(length_double);
-    }
-    if (length <= 0) return ItemNull;
-    Item* args = (Item*)mem_alloc(sizeof(Item) * (size_t)length, MEM_CAT_JS_RUNTIME);
-    for (int64_t i = 0; i < length; i++) {
-        Item index_key = js_property_index_key(i);
-        args[i] = js_get_key_default(array_like, index_key);
-        if (item_is_error(args[i])) {
-            mem_free(args);
-            return args[i];
-        }
-    }
-    *out_args = args;
-    *out_argc = (int)length;
-    return ItemNull;
-}
-
 // Check if a function value is a constructor (has [[Construct]] internal method).
 // Arrow functions, generators, and built-in prototype methods are NOT constructors.
 
@@ -5704,18 +5693,10 @@ extern "C" Item js_reflect_construct(Item target, Item args_array, Item new_targ
     if (!js_func_is_constructor(new_target)) {
         return js_throw_type_error("newTarget is not a constructor");
     }
-    int argc = 0;
-    Item* args = NULL;
-    JS_ASSIGN_OR_RETURN(args_status,
-        js_reflect_create_list_from_array_like(args_array, &args, &argc));
-    struct ReflectArgsGuard {
-        Item* ptr;
-        ~ReflectArgsGuard() { if (ptr) mem_free(ptr); }
-    } args_guard = {args};
     // D6.2.2v2: Reflect.construct is only an operand producer. Proxy, bound,
     // class-map, intrinsic validation, prototype selection, and new.target
     // substitution all belong to the target's stored construct capability.
-    return js_construct_value(target, args, argc, new_target, NULL, false);
+    return js_construct_array_like(target, args_array, new_target);
 }
 // Forward declaration; defined later in this file.
 static int64_t js_parse_array_index(const char* s, int len);
@@ -6646,14 +6627,12 @@ extern "C" Item js_reflect_apply(Item target, Item this_arg, Item args_array) {
         Item em = js_name_item("Reflect.apply requires a function");
         return js_throw_value(js_new_error_with_name(tn, em));
     }
-    int argc = 0;
-    Item* args = NULL;
-    JS_ASSIGN_OR_RETURN(args_status, js_reflect_create_list_from_array_like(args_array, &args, &argc));
+    if (!js_is_object_value(args_array)) {
+        return js_throw_type_error("CreateListFromArrayLike requires an object");
+    }
     // D6.2.2v2: Reflect.apply owns only list creation; the common kernel owns
     // ordinary and Proxy [[Call]] capability dispatch and precise arg rooting.
-    Item result = js_call_function(target, this_arg, args, argc);
-    if (args) mem_free(args);
-    return result;
+    return js_apply_function(target, this_arg, args_array);
 }
 
 // =============================================================================
@@ -7040,9 +7019,7 @@ extern "C" Item js_object_get_own_property_descriptor(Item obj, Item name) {
             if (primitive_found && get_type_id(primitive) == LMD_TYPE_STRING) {
                 String* primitive_string = it2s(primitive);
                 int string_length = primitive_string
-                    ? js_utf16_len(primitive_string->chars,
-                        (int)primitive_string->len,
-                        (bool)primitive_string->is_ascii) : 0;
+                    ? js_string_utf16_length(primitive_string) : 0;
                 return js_make_data_descriptor(
                     (Item){.item = i2it(string_length)}, false, false, false);
             }
@@ -7427,8 +7404,7 @@ static bool js_string_exotic_index_in_range(Item obj, String* key) {
     if (!primitive_found || get_type_id(primitive) != LMD_TYPE_STRING) return false;
     String* primitive_string = it2s(primitive);
     int64_t length = primitive_string
-        ? js_utf16_len(primitive_string->chars, (int)primitive_string->len,
-            (bool)primitive_string->is_ascii) : 0;
+        ? js_string_utf16_length(primitive_string) : 0;
     return index >= 0 && index < length;
 }
 
@@ -13968,16 +13944,11 @@ extern "C" Item js_get_global_this() {
         dom_install_storage_globals(js_global_this_obj);
         js_install_native_method(js_global_this_obj, "matchMedia",
             dom_match_media);
-        js_install_native_constructor(js_global_this_obj, "MutationObserver",
-            dom_mutation_observer_new);
+        dom_install_observer_globals(js_global_this_obj);
         // Editor sanitizers use the standard NodeFilter mask with a detached
         // document TreeWalker; expose the shared DOM constants rather than
         // giving an editor-specific traversal path.
         js_set_key_cstr(js_global_this_obj, "NodeFilter", js_node_filter_new());
-        js_install_native_constructor(js_global_this_obj, "ResizeObserver",
-            dom_resize_observer_new);
-        js_install_native_constructor(js_global_this_obj, "IntersectionObserver",
-            dom_intersection_observer_new);
         js_install_native_constructor(js_global_this_obj, "IntersectionObserverEntry",
             js_intersection_observer_entry_new);
 

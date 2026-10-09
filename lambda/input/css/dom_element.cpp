@@ -1346,9 +1346,11 @@ static const char* dom_element_stored_attribute(DomElement* element, const char*
 static const char* dom_element_attr_key(DomElement* element, const char* name,
                                         char* lower, size_t lower_size) {
     lowercase_attr_name(name, lower, lower_size);
+    // an unchanged name needs no namespace walk; layout queries these keys
+    // repeatedly on every descendant of large HTML and foreign-content trees.
+    if (strcmp(lower, name) == 0) return name;
     if ((element->doc && element->doc->xml_document) ||
         strcmp(dom_element_namespace_uri(element), "http://www.w3.org/1999/xhtml") != 0) return name;
-    if (strcmp(lower, name) == 0) return lower;
     bool stored_exact = element->is_synthetic()
         ? dom_element_find_synthetic_attribute(element, name) >= 0
         : ElementReader(dom_element_to_element(element)).has_attr(name);

@@ -1,0 +1,33 @@
+{
+  "name": "Animation cancellation restores cascade and permits later seeks",
+  "html": "test/ui/dom/animation_cancel.html",
+  "events": [
+    {"type": "click", "target": {"selector": "#start"}},
+    {"type": "assert_rect", "target": {"selector": "#target"}, "x": 50, "y": 0, "width": 60, "height": 10, "tolerance": 0.1},
+    {"type": "click", "target": {"selector": "#cancel"}},
+    {"type": "assert_rect", "target": {"selector": "#target"}, "x": 0, "y": 0, "width": 40, "height": 10, "tolerance": 0.1},
+    {"type": "click", "target": {"selector": "#seek"}},
+    {"type": "click", "target": {"selector": "#cancel-zero"}},
+    {"type": "click", "target": {"selector": "#seek-zero"}},
+    {"type": "click", "target": {"selector": "#convert"}},
+    {"type": "click", "target": {"selector": "#neutral-before"}},
+    {"type": "click", "target": {"selector": "#neutral-resume"}},
+    {"type": "click", "target": {"selector": "#finish"}},
+    {"type": "click", "target": {"selector": "#check"}},
+    {"type": "assert_attribute", "target": {"selector": "#result"}, "attribute": "data-sample", "equals": "true"},
+    {"type": "assert_attribute", "target": {"selector": "#result"}, "attribute": "data-prototype", "equals": "true"},
+    {"type": "assert_attribute", "target": {"selector": "#result"}, "attribute": "data-return", "equals": "true"},
+    {"type": "assert_attribute", "target": {"selector": "#result"}, "attribute": "data-unresolved", "equals": "true"},
+    {"type": "assert_attribute", "target": {"selector": "#result"}, "attribute": "data-restore", "equals": "true"},
+    {"type": "assert_attribute", "target": {"selector": "#result"}, "attribute": "data-repeat", "equals": "true"},
+    {"type": "assert_attribute", "target": {"selector": "#result"}, "attribute": "data-seek", "equals": "true"},
+    {"type": "assert_attribute", "target": {"selector": "#result"}, "attribute": "data-same-time", "equals": "true"},
+    {"type": "assert_attribute", "target": {"selector": "#result"}, "attribute": "data-conversion", "equals": "true"},
+    {"type": "assert_attribute", "target": {"selector": "#result"}, "attribute": "data-receiver", "equals": "true"},
+    {"type": "assert_attribute", "target": {"selector": "#result"}, "attribute": "data-neutral-before", "equals": "true"},
+    {"type": "assert_attribute", "target": {"selector": "#result"}, "attribute": "data-neutral-after", "equals": "true"},
+    {"type": "assert_attribute", "target": {"selector": "#result"}, "attribute": "data-final", "equals": "true"},
+    {"type": "assert_rect", "target": {"selector": "#target"}, "x": 0, "y": 0, "width": 80, "height": 10, "tolerance": 0.1},
+    {"type": "assert_text", "target": {"selector": "#result"}, "equals": "complete"}
+  ]
+}

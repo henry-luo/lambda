@@ -168,10 +168,10 @@ char* download_http_content(const char* url, size_t* content_size, const HttpCon
     curl_easy_setopt(curl, CURLOPT_URL, url);
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_response_callback);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response);
+    cookie_jar_import_curl(response.cookie_jar, curl);
     if (response.cookie_jar) {
         // Feed the jar into curl's cookie engine so redirect hops are matched
         // against each hop's URL instead of forwarding one raw Cookie header.
-        cookie_jar_import_curl(response.cookie_jar, curl);
         curl_easy_setopt(curl, CURLOPT_HEADERFUNCTION, write_cookie_header_callback);
         curl_easy_setopt(curl, CURLOPT_HEADERDATA, &response);
     }
@@ -544,7 +544,7 @@ FetchResponse* http_fetch(const char* url, const FetchConfig* config) {
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, response);
     curl_easy_setopt(curl, CURLOPT_HEADERFUNCTION, header_callback);
     curl_easy_setopt(curl, CURLOPT_HEADERDATA, &header_context);
-    if (header_context.cookie_jar) cookie_jar_import_curl(header_context.cookie_jar, curl);
+    cookie_jar_import_curl(header_context.cookie_jar, curl);
 
     // Prefer HTTP/2 over HTTPS (falls back to HTTP/1.1 if unsupported)
     curl_easy_setopt(curl, CURLOPT_HTTP_VERSION, CURL_HTTP_VERSION_2TLS);

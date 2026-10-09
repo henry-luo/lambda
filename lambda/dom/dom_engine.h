@@ -83,6 +83,15 @@ bool dom_engine_hit_test_skips_subtree(DomElement* element);
 void dom_engine_svg_timing_event(DomElement* target, const char* type, bool bubbles, double detail);
 void dom_engine_svg_timing_key(DomElement* target, const char* key);
 bool dom_engine_layout_active(DomDocument* doc);
+
+struct DomCssBoxSizes {
+    float content_width, content_height;
+    float border_width, border_height;
+    float padding_left, padding_top;
+    bool vertical;
+};
+bool dom_engine_element_css_boxes(DomElement* element, DomCssBoxSizes* sizes);
+bool dom_engine_attribute_has_relational_css_dependency(DomDocument* document, const char* name);
 void dom_engine_sync_pseudo_state(void* view, uint32_t pseudo_flag, bool set);
 
 // selected native pointer stream: 0/1 success, -1 inactive ID, -2 detached target.

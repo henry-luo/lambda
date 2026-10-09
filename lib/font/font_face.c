@@ -11,8 +11,10 @@
  */
 
 #include "font_internal.h"
+#include "font_tables.h"
 #include "../str.h"
 #include "../generation.h"
+#include "../memtrack.h"
 
 // ============================================================================
 // Register
@@ -57,6 +59,9 @@ bool font_face_register(FontContext* ctx, const FontFaceDesc* desc) {
 
         entry->source_count = desc->source_count;
         for (int i = 0; i < desc->source_count; i++) {
+            if (desc->sources[i].local_name) {
+                entry->sources[i].local_name = arena_strdup(ctx->arena, desc->sources[i].local_name);
+            }
             if (desc->sources[i].path) {
                 entry->sources[i].path = arena_strdup(ctx->arena, desc->sources[i].path);
             }
@@ -241,6 +246,34 @@ int font_face_list(FontContext* ctx, const char* family,
 // Load a font from a registered descriptor (tries sources in order)
 // ============================================================================
 
+static FontHandle* font_face_load_local(FontContext* ctx, const char* name,
+        const FontFaceEntry* entry, float size_px, float physical_size) {
+    FontEntry* local = font_database_get_by_postscript_name_internal(ctx->database, name);
+    int face_index = local && local->is_collection ? local->collection_index : 0;
+    char* owned_path = local ? NULL : font_platform_find_fallback(name, &face_index);
+    const char* path = local ? local->file_path : owned_path;
+    if (!path) {
+        local = font_database_find_local_name_internal(ctx->database, name);
+        if (local) {
+            path = local->file_path;
+            face_index = local->is_collection ? local->collection_index : 0;
+        }
+    }
+    FontHandle* handle = path ? font_load_face_internal(ctx, path, face_index,
+        size_px, physical_size, entry->weight, entry->slant) : NULL;
+    if (owned_path) mem_free(owned_path);
+    if (!handle) return NULL;
+    NameTable* names = font_tables_get_name(handle->tables);
+    // platform font lookup can substitute families; local() accepts only the
+    // font's own unique full/PostScript name, then tries the next source.
+    if (!names || ((!names->full_name || str_icmp_cstr(names->full_name, name)) &&
+            (!names->postscript_name || str_icmp_cstr(names->postscript_name, name)))) {
+        font_handle_release(handle);
+        return NULL;
+    }
+    return handle;
+}
+
 static FontHandle* font_face_load_entry(FontContext* ctx, const FontFaceEntry* entry,
                                         float size_px) {
     if (!ctx || !entry) return NULL;
@@ -261,12 +294,14 @@ static FontHandle* font_face_load_entry(FontContext* ctx, const FontFaceEntry* e
     for (int i = 0; i < entry->source_count; i++) {
         const char* src_path = entry->sources[i].path;
         const FontFaceSource* source = &entry->sources[i];
-        if (!src_path && !source->data) continue;
+        if (!src_path && !source->data && !source->local_name) continue;
 
         FontHandle* handle = NULL;
 
         // check if it's a data URI
-        if (source->data || strncmp(src_path, "data:", 5) == 0) {
+        if (source->local_name) {
+            handle = font_face_load_local(ctx, source->local_name, entry, size_px, physical_size);
+        } else if (source->data || strncmp(src_path, "data:", 5) == 0) {
             FontStyleDesc style = {
                 .family = entry->family,
                 .size_px = size_px,
@@ -309,7 +344,8 @@ static FontHandle* font_face_load_entry(FontContext* ctx, const FontFaceEntry* e
                 font_handle_retain(handle); // entry holds a ref too
             }
             log_info("font_face: loaded '%s' from source %d: %s",
-                     entry->family, i, src_path ? src_path : "memory snapshot");
+                     entry->family, i, source->local_name ? source->local_name :
+                     (src_path ? src_path : "memory snapshot"));
             return handle;
         }
 

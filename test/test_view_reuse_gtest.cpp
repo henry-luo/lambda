@@ -239,14 +239,94 @@ TEST_F(ViewReuseTest, IntrinsicGridUsesResolvedTracksInsteadOfAuthoredLineNames)
     LayoutContext context = {};
     context.pool = lam::up(tree.prop_pool.get());
     context.selected_view_tree = lam::up(&tree);
+    context.profiler.enabled = true;
     Arena* scratch = arena_create_default();
     ASSERT_NE(scratch, nullptr);
     scratch_init(&context.scratch, scratch);
     IntrinsicSizes sizes = measure_element_intrinsic_widths(&context, grid_element);
     EXPECT_FLOAT_EQ(sizes.min_content, 80.0f);
     EXPECT_FLOAT_EQ(sizes.max_content, 80.0f);
+    IntrinsicSizes repeated = measure_element_intrinsic_widths(&context, grid_element);
+    EXPECT_FLOAT_EQ(repeated.min_content, sizes.min_content);
+    EXPECT_FLOAT_EQ(repeated.max_content, sizes.max_content);
+    EXPECT_EQ(context.profiler.intrinsic_cache_hits, 1u);
     scratch_release(&context.scratch);
     arena_destroy(scratch);
+}
+
+TEST_F(ViewReuseTest, ProvisionalIntrinsicQueriesReuseAndInvalidateAuthoredSizes) {
+    DomElement* block = element();
+    block->tag_id = MARKUP_NAME_DIV;
+    block->view_type = RDT_VIEW_BLOCK;
+    block->specified_style = lam::shared(style_tree_create(tree.prop_pool));
+    ASSERT_NE(block->specified_style, nullptr);
+    DomDocument doc;
+    doc.view_tree = lam::own(&tree);
+    block->doc = lam::up(&doc);
+    LayoutContext context = {};
+    context.doc = lam::up(&doc);
+    context.pool = lam::up(tree.prop_pool.get());
+    context.selected_view_tree = lam::up(&tree);
+    context.profiler.enabled = true;
+    FontProp font = FONT_PROP_DEFAULT;
+    context.font.style = lam::up(&font);
+    context.font.current_font_size = 16.0f;
+    Arena* scratch = arena_create_default();
+    ASSERT_NE(scratch, nullptr);
+    scratch_init(&context.scratch, scratch);
+
+    auto set_property = [&](const char* name, const char* value) {
+        CssDeclaration* declaration = css_parse_property_declaration(
+            name, strlen(name), value, strlen(value), tree.prop_pool);
+        EXPECT_NE(declaration, nullptr);
+        if (declaration) EXPECT_TRUE(style_tree_apply_declaration(
+            block->specified_style, declaration));
+        block->set_needs_style_recompute(true);
+    };
+    set_property("width", "40px");
+    IntrinsicSizes first = measure_element_intrinsic_widths(&context, block);
+    EXPECT_FLOAT_EQ(first.min_content, 40.0f);
+    EXPECT_FALSE(block->styles_resolved());
+    IntrinsicSizes repeated = measure_element_intrinsic_widths(&context, block);
+    EXPECT_FLOAT_EQ(repeated.max_content, 40.0f);
+    EXPECT_EQ(context.profiler.intrinsic_cache_hits, 1u);
+
+    // flex sizing alternates width and height queries before committing styles.
+    calculate_max_content_height(&context, block, 40.0f);
+    repeated = measure_element_intrinsic_widths(&context, block);
+    EXPECT_FLOAT_EQ(repeated.max_content, 40.0f);
+    EXPECT_EQ(context.profiler.intrinsic_cache_hits, 2u);
+
+    set_property("width", "80px");
+    IntrinsicSizes changed = measure_element_intrinsic_widths(&context, block);
+    EXPECT_FLOAT_EQ(changed.min_content, 80.0f);
+    EXPECT_FLOAT_EQ(changed.max_content, 80.0f);
+    uint64_t misses = context.profiler.intrinsic_cache_misses;
+    advance_measurement_cache_generation(&tree);
+    changed = measure_element_intrinsic_widths(&context, block);
+    EXPECT_FLOAT_EQ(changed.max_content, 80.0f);
+    EXPECT_GT(context.profiler.intrinsic_cache_misses, misses);
+
+    // percentage terms depend on the containing width within the same pass.
+    set_property("width", "calc(20px + 50%)");
+    context.width = 100.0f;
+    context.block.content_width = 100.0f;
+    context.available_space.width = AvailableSize::make_definite(100.0f);
+    changed = measure_element_intrinsic_widths(&context, block);
+    EXPECT_FLOAT_EQ(changed.max_content, 70.0f);
+    context.width = 200.0f;
+    context.block.content_width = 200.0f;
+    context.available_space.width = AvailableSize::make_definite(200.0f);
+    changed = measure_element_intrinsic_widths(&context, block);
+    EXPECT_FLOAT_EQ(changed.max_content, 120.0f);
+    uint64_t hits = context.profiler.intrinsic_cache_hits;
+    repeated = measure_element_intrinsic_widths(&context, block);
+    EXPECT_FLOAT_EQ(repeated.max_content, 120.0f);
+    EXPECT_EQ(context.profiler.intrinsic_cache_hits, hits + 1u);
+
+    scratch_release(&context.scratch);
+    arena_destroy(scratch);
+    doc.view_tree = nullptr;
 }
 
 TEST_F(ViewReuseTest, TableTraversalResumesAcrossTransparentWrappersWithinItsOwner) {
@@ -1396,6 +1476,7 @@ protected:
     Input input = {};
     DomDocument doc;
     CssEngine engine = {};
+    CssEngine* stylesheet_engine = nullptr;
     DomElement* document_root = nullptr;
 
     void SetUp() override {
@@ -1409,6 +1490,8 @@ protected:
     }
 
     void TearDown() override {
+        doc.services.cached_css_engine = nullptr;
+        if (stylesheet_engine) css_engine_destroy(stylesheet_engine);
         doc.destroy();
     }
 
@@ -1417,6 +1500,29 @@ protected:
         EXPECT_NE(child, nullptr);
         EXPECT_TRUE(document_root->append_child(child));
         return child;
+    }
+
+    void install_stylesheet(const char* css) {
+        stylesheet_engine = css_engine_create(doc.document_pool);
+        ASSERT_NE(stylesheet_engine, nullptr);
+        doc.services.cached_css_engine = stylesheet_engine;
+        CssStylesheet* sheet = css_parse_stylesheet(stylesheet_engine, css, nullptr);
+        ASSERT_NE(sheet, nullptr);
+        doc.stylesheets = lam::own_arr((CssStylesheet**)pool_alloc(
+            doc.document_pool, sizeof(CssStylesheet*)));
+        ASSERT_NE(doc.stylesheets, nullptr);
+        doc.stylesheets[0] = sheet;
+        doc.stylesheet_count = 1;
+    }
+
+    bool cascade_mutation(DomJsMutationKind kind, DomNode* target, DomNode* parent) {
+        // raw DOM edits need the same cache invalidation as the JS notifier.
+        doc.mutation_epoch++;
+        doc.style_content_epoch++;
+        doc.js.mutation_records[0] = {1, kind, target, parent, 0, 0,
+            DOM_JS_MUTATION_ATTRIBUTE_UNKNOWN, CSS_PROPERTY_UNKNOWN, true};
+        doc.js.mutation_record_count = doc.js.mutation_count = 1;
+        return radiant_apply_load_mutation_cascade(&doc, nullptr);
     }
 
     CssRule* rule(CssPropertyCode property, CssValue* value,
@@ -1757,28 +1863,16 @@ TEST_F(StyleEpochTest, OverlappingMutationRootsCascadeTheFinalTreeOnce) {
     DomElement* grandchild = DomElement::create(&doc, "grandchild", nullptr);
     ASSERT_NE(grandchild, nullptr);
     ASSERT_TRUE(child->append_child(grandchild));
-    CssEngine* css_engine = css_engine_create(doc.document_pool);
-    ASSERT_NE(css_engine, nullptr);
-    doc.services.cached_css_engine = css_engine;
-    CssStylesheet* sheet = css_parse_stylesheet(css_engine, "* { width: 10px; }", nullptr);
-    ASSERT_NE(sheet, nullptr);
-    doc.stylesheets = lam::own_arr((CssStylesheet**)pool_alloc(
-        doc.document_pool, sizeof(CssStylesheet*)));
-    ASSERT_NE(doc.stylesheets, nullptr);
-    doc.stylesheets[0] = sheet;
-    doc.stylesheet_count = 1;
-    doc.js.mutation_records[0] = {1, DOM_JS_MUTATION_CHILD_INSERT, child,
-        document_root, 0, 0, DOM_JS_MUTATION_ATTRIBUTE_UNKNOWN, CSS_PROPERTY_UNKNOWN, true};
-    doc.js.mutation_record_count = doc.js.mutation_count = 1;
-    ASSERT_TRUE(radiant_apply_load_mutation_cascade(&doc, nullptr));
+    install_stylesheet("* { width: 10px; }");
+    ASSERT_TRUE(cascade_mutation(DOM_JS_MUTATION_ATTRIBUTE, child, document_root));
     StyleEpochStats first = {};
     style_epoch_get_stats(&doc, &first);
     ASSERT_GT(first.lookup_count, 0u);
 
     for (int i = 0; i < 16; i++) {
-        // The enclosing root arrives after the nested root and repeats later.
+        // attribute roots overlap independently of child-list selector dependencies.
         doc.js.mutation_records[i] = {static_cast<uint32_t>(i + 1),
-            DOM_JS_MUTATION_CHILD_INSERT, grandchild,
+            DOM_JS_MUTATION_ATTRIBUTE, i % 2 ? child : grandchild,
             i % 2 ? document_root : child, 0, 0,
             DOM_JS_MUTATION_ATTRIBUTE_UNKNOWN, CSS_PROPERTY_UNKNOWN, true};
     }
@@ -1790,8 +1884,91 @@ TEST_F(StyleEpochTest, OverlappingMutationRootsCascadeTheFinalTreeOnce) {
     CssDeclaration* width = dom_element_get_specified_value(grandchild, CSS_PROPERTY_WIDTH);
     ASSERT_NE(width, nullptr);
     EXPECT_DOUBLE_EQ(width->value->data.length.value, 10.0);
-    doc.services.cached_css_engine = nullptr;
-    css_engine_destroy(css_engine);
+}
+
+TEST_F(StyleEpochTest, ChildListOutsideStructuralAnchorsPreservesExistingCascade) {
+    DomElement* sibling = append("sibling");
+    install_stylesheet("* { width: 10px; } .component > :not(:last-child) { width: 20px; } "
+        ".component > * + * { height: 25px; } .component:empty { height: 30px; }");
+    ASSERT_TRUE(cascade_mutation(DOM_JS_MUTATION_ATTRIBUTE, document_root, nullptr));
+    StyleTree* retained_style = sibling->specified_style;
+    StyleEpochStats before = {};
+    style_epoch_get_stats(&doc, &before);
+
+    DomElement* inserted = append("inserted");
+    DomElement* nested = DomElement::create(&doc, "nested", nullptr);
+    ASSERT_NE(nested, nullptr);
+    ASSERT_TRUE(inserted->append_child(nested));
+    ASSERT_TRUE(cascade_mutation(DOM_JS_MUTATION_CHILD_INSERT, inserted, document_root));
+    StyleEpochStats after_insert = {};
+    style_epoch_get_stats(&doc, &after_insert);
+    EXPECT_EQ(after_insert.lookup_count - before.lookup_count, 2u);
+    EXPECT_EQ(sibling->specified_style, retained_style);
+    CssDeclaration* width = dom_element_get_specified_value(nested, CSS_PROPERTY_WIDTH);
+    ASSERT_NE(width, nullptr);
+    EXPECT_DOUBLE_EQ(width->value->data.length.value, 10.0);
+
+    ASSERT_TRUE(document_root->remove_child(inserted));
+    ASSERT_TRUE(cascade_mutation(DOM_JS_MUTATION_CHILD_REMOVE, inserted, document_root));
+    StyleEpochStats after_remove = {};
+    style_epoch_get_stats(&doc, &after_remove);
+    EXPECT_EQ(after_remove.lookup_count, after_insert.lookup_count);
+    EXPECT_EQ(sibling->specified_style, retained_style);
+}
+
+TEST_F(StyleEpochTest, PositionAndEmptySelectorsRecascadeChangedParent) {
+    DomElement* list = append("ul");
+    install_stylesheet("li { width: 10px; } li:nth-child(2) { width: 20px; } "
+        "ul:empty { height: 30px; }");
+    ASSERT_TRUE(cascade_mutation(DOM_JS_MUTATION_ATTRIBUTE, document_root, nullptr));
+    ASSERT_NE(dom_element_get_specified_value(list, CSS_PROPERTY_HEIGHT), nullptr);
+
+    // CSS position/empty selectors exclude synthetic layout nodes.
+    Element* backing = elmt_arena(doc.node_arena);
+    ASSERT_NE(backing, nullptr);
+    DomElement* first = DomElement::create(&doc, "li", backing);
+    DomElement* second = DomElement::create(&doc, "li", backing);
+    ASSERT_NE(first, nullptr);
+    ASSERT_NE(second, nullptr);
+    ASSERT_TRUE(list->append_child(first));
+    ASSERT_TRUE(list->append_child(second));
+    ASSERT_TRUE(cascade_mutation(DOM_JS_MUTATION_CHILD_INSERT, second, list));
+    EXPECT_EQ(dom_element_get_specified_value(list, CSS_PROPERTY_HEIGHT), nullptr);
+    CssDeclaration* second_width = dom_element_get_specified_value(second, CSS_PROPERTY_WIDTH);
+    ASSERT_NE(second_width, nullptr);
+    EXPECT_DOUBLE_EQ(second_width->value->data.length.value, 20.0);
+
+    ASSERT_TRUE(list->remove_child(first));
+    ASSERT_TRUE(cascade_mutation(DOM_JS_MUTATION_CHILD_REMOVE, first, list));
+    second_width = dom_element_get_specified_value(second, CSS_PROPERTY_WIDTH);
+    ASSERT_NE(second_width, nullptr);
+    EXPECT_DOUBLE_EQ(second_width->value->data.length.value, 10.0);
+    ASSERT_TRUE(list->remove_child(second));
+    ASSERT_TRUE(cascade_mutation(DOM_JS_MUTATION_CHILD_REMOVE, second, list));
+    EXPECT_NE(dom_element_get_specified_value(list, CSS_PROPERTY_HEIGHT), nullptr);
+}
+
+TEST_F(StyleEpochTest, SiblingRemovalRecascadesWhenPreviousAnchorIsDetached) {
+    DomElement* parent = append("div");
+    ASSERT_TRUE(parent->set_attribute("class", "component"));
+    DomElement* before = DomElement::create(&doc, "div", nullptr);
+    DomElement* after = DomElement::create(&doc, "div", nullptr);
+    ASSERT_NE(before, nullptr);
+    ASSERT_NE(after, nullptr);
+    ASSERT_TRUE(before->set_attribute("class", "before"));
+    ASSERT_TRUE(after->set_attribute("class", "after"));
+    ASSERT_TRUE(parent->append_child(before));
+    ASSERT_TRUE(parent->append_child(after));
+    install_stylesheet("* { width: 10px; } .component > .before + .after { width: 20px; }");
+    ASSERT_TRUE(cascade_mutation(DOM_JS_MUTATION_ATTRIBUTE, document_root, nullptr));
+    CssDeclaration* width = dom_element_get_specified_value(after, CSS_PROPERTY_WIDTH);
+    ASSERT_NE(width, nullptr);
+    EXPECT_DOUBLE_EQ(width->value->data.length.value, 20.0);
+    ASSERT_TRUE(parent->remove_child(before));
+    ASSERT_TRUE(cascade_mutation(DOM_JS_MUTATION_CHILD_REMOVE, before, parent));
+    width = dom_element_get_specified_value(after, CSS_PROPERTY_WIDTH);
+    ASSERT_NE(width, nullptr);
+    EXPECT_DOUBLE_EQ(width->value->data.length.value, 10.0);
 }
 
 TEST_F(StyleEpochTest, RecascadeReclaimsExclusiveOwnedStyleTrees) {

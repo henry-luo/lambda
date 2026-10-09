@@ -2035,12 +2035,10 @@ static bool execute_script_task_queue(Runtime* runtime, ArrayList* queue,
         Item result;
         DocumentCurrentScriptScope current_script(runtime, task);
         if (task->kind == JS_SCRIPT_TASK_MODULE) {
-            // An inline module's URL is the containing document, while its
-            // task label remains only a diagnostic identity.
-            const char* module_reference = !task->external && runtime->js_document_base_url
-                ? runtime->js_document_base_url : filename;
+            // each inline module owns a distinct record; URL resolution and
+            // import.meta use the document snapshot behind its task label.
             result = execute_js_module_source(
-                runtime, source, task->source_len, module_reference);
+                runtime, source, task->source_len, filename);
         } else if (task->external && s_js_mir_lease_session && !s_retain_js_state &&
                    !runtime->js_ast_backend) {
             result = execute_cached_external_classic(
@@ -2508,8 +2506,12 @@ extern "C" void execute_document_scripts_profiled(Element* html_root, DomDocumen
     runtime->dom_doc = (void*)dom_doc;
     runtime->resource_policy = dom_doc->resource_policy;
     runtime->dom_ui_context = dom_doc->js.host_ui_context;
-    runtime->js_document_base_url = dom_doc->url ? url_get_href(dom_doc->url) :
+    const char* document_base_url = dom_doc->url ? url_get_href(dom_doc->url) :
         (base_url ? url_get_href(base_url) : nullptr);
+    // history updates replace Url storage; module resolution retains the
+    // document's original base in its document-lifetime pool (D4.5.1v4).
+    runtime->js_document_base_url = document_base_url
+        ? pool_strdup(dom_doc->document_pool, document_base_url) : nullptr;
     // Browser documents use the AST executor throughout one DOM realm. This
     // avoids a throwaway parse merely to select a backend and keeps callbacks
     // on one closure ABI.

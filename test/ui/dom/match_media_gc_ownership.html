@@ -1,0 +1,30 @@
+<!doctype html>
+<div id="result"></div>
+<button id="remove">remove legacy listener</button>
+<script>
+var result = document.getElementById('result');
+var query = matchMedia({ toString: function () { return '(max-width: 500px)'; } });
+var legacyCount = 0, removedCount = 0, changeCount = 0;
+function legacy(event) {
+    var allocation = { text: event.media + ':legacy' };
+    legacyCount++;
+    result.setAttribute('data-legacy', String(legacyCount));
+    result.setAttribute('data-legacy-event', String(event.matches) + ':' + allocation.text);
+}
+function removed() { removedCount++; }
+query.addListener(legacy);
+query.addListener(removed);
+query.removeListener(removed);
+query.onchange = function (event) {
+    var allocation = { text: event.media + ':change' };
+    changeCount++;
+    result.setAttribute('data-change', String(changeCount));
+    result.setAttribute('data-change-event', String(event.matches) + ':' + allocation.text);
+    result.setAttribute('data-removed', String(removedCount));
+    result.setAttribute('data-live', String(query.matches === event.matches));
+};
+result.setAttribute('data-initial', String(!query.matches && query.media === '(max-width: 500px)'));
+document.getElementById('remove').addEventListener('click', function () {
+    query.removeListener(legacy);
+});
+</script>

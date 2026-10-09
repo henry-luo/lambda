@@ -165,6 +165,7 @@ typedef struct FontEntry {
     char*       family_name;            // "Arial", "Times New Roman"
     char*       subfamily_name;         // "Regular", "Bold Italic"
     char*       postscript_name;        // "Arial-BoldMT"
+    char*       full_name;              // unique name used by CSS local()
     char*       file_path;              // full path to font file
 
     int         weight;                 // 100-900 (CSS weight scale)
@@ -186,6 +187,7 @@ typedef struct FontEntry {
 
     // lazy loading flag
     bool        is_placeholder;         // true if needs full parsing
+    bool        collection_expanded;    // inventory entry has emitted its real TTC faces
 } FontEntry;
 
 typedef struct FontFamily {
@@ -456,6 +458,7 @@ bool                font_database_scan_internal(FontDatabase* db);
 FontDatabaseResult  font_database_find_best_match_internal(FontDatabase* db, FontDatabaseCriteria* criteria);
 ArrayList*          font_database_find_all_matches_internal(FontDatabase* db, const char* family_name);
 FontEntry*          font_database_get_by_postscript_name_internal(FontDatabase* db, const char* ps_name);
+FontEntry*          font_database_find_local_name_internal(FontDatabase* db, const char* name);
 bool                font_database_save_cache_internal(FontDatabase* db, const char* path);
 bool                font_database_load_cache_internal(FontDatabase* db, const char* path);
 

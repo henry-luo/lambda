@@ -1,0 +1,30 @@
+<!doctype html>
+<html><head><title>Inline module identity and document URL ownership</title></head>
+<body><div id="result"></div>
+<script>
+window.moduleDocumentUrl = document.URL;
+history.replaceState(null, '', '#prepared');
+</script>
+<script type="module">
+import { moduleMessage } from './js_postdom_module_dependency_phase4_value.js';
+const local = 'first';
+const result = document.getElementById('result');
+result.setAttribute('data-first', local);
+result.setAttribute('data-static', moduleMessage);
+result.setAttribute('data-meta', String(import.meta.url === window.moduleDocumentUrl));
+history.replaceState(null, '', '#between-modules');
+</script>
+<script type="module">
+const local = 'second';
+document.getElementById('result').setAttribute('data-second', local);
+import('./js_postdom_module_dependency_phase4_value.js').then(function (namespace) {
+    document.getElementById('result').setAttribute('data-dynamic', namespace.moduleMessage);
+});
+</script>
+<script type="module">
+const local = 'third';
+document.getElementById('result').setAttribute('data-third', local);
+document.getElementById('result').setAttribute('data-final-meta',
+    String(import.meta.url === window.moduleDocumentUrl));
+</script>
+</body></html>

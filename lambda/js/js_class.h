@@ -134,6 +134,7 @@ enum JsClass : uint8_t {
     JS_CLASS_HEADERS,
     JS_CLASS_HEADERS_ITERATOR,
     JS_CLASS_WEBGL_CONTEXT_EVENT,
+    JS_CLASS_TREE_WALKER,
     JS_CLASS__COUNT  // sentinel
 };
 
@@ -299,6 +300,7 @@ static inline JsClass js_class_from_name(const char* nm, int nl) {
 // literal and is never consulted to classify an object.
 static inline const char* js_class_to_name(JsClass cls) {
     switch (cls) {
+        case JS_CLASS_TREE_WALKER: return "TreeWalker";
         case JS_CLASS_OBJECT: return "Object";
         case JS_CLASS_FUNCTION: return "Function";
         case JS_CLASS_BOOLEAN: return "Boolean";

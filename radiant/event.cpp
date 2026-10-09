@@ -4111,7 +4111,7 @@ bool radiant_document_has_autofocus(DomElement* root) {
     return false;
 }
 
-void radiant_run_autofocus(DomDocument* doc) {
+void radiant_run_autofocus(UiContext* uicon, DomDocument* doc) {
     if (!doc || !doc->state || !doc->root || focus_has_current((DocState*)doc->state)) {
         return;
     }
@@ -4120,6 +4120,9 @@ void radiant_run_autofocus(DomDocument* doc) {
     // `focusinit` is behavior-only; its resulting native focus transition
     // still emits the public focus/focusin pair after the package selects it.
     EventContext evcon = {};
+    // autofocus listeners can mutate layout; borrow the host of the enclosing
+    // layout pass so their recascade uses the same viewport and document.
+    evcon.ui_context = uicon;
     evcon.target_document = doc;
     View* previous_focus = focus_get((DocState*)doc->state);
     dispatch_behavior_handler(&evcon, static_cast<View*>(doc->root),
@@ -6408,6 +6411,8 @@ static void dom_js_mutation_reset_records(DomDocument* doc) {
 
 static bool dom_js_document_has_structural_css_dependency(DomDocument* doc);
 static bool dom_js_document_has_broad_structural_css_dependency(DomDocument* doc);
+static bool dom_js_document_has_child_list_dependency(DomDocument* doc, DomNode* parent,
+    bool include_structural = false);
 
 struct FrameCommitProfile {
     double cascade_ms, layout_ms, repaint_ms;
@@ -6537,16 +6542,26 @@ static DomElement* dom_js_record_cascade_root(DomDocument* doc,
     DomNode* node = nullptr;
     if (record->kind == DOM_JS_MUTATION_CHILD_INSERT ||
         record->kind == DOM_JS_MUTATION_CHILD_REMOVE) {
-        // Structural selectors are affected by a parent's child list, not
-        // just by the inserted node. Re-cascading this subtree contains the
-        // invalidation without discarding the document's retained layout.
-        node = record->parent;
+        bool affects_existing_styles =
+            dom_js_document_has_child_list_dependency(doc, record->parent, true);
+        if (!affects_existing_styles) {
+            // unchanged siblings retain their cascade; detached removals have
+            // no styles to resolve, while insertions still inherit at their new parent.
+            if (record->kind == DOM_JS_MUTATION_CHILD_REMOVE ||
+                !record->target || !record->target->is_element() ||
+                !dom_js_is_connected_to_document(doc, record->target)) return nullptr;
+            node = record->target;
+        } else {
+            node = record->parent;
+        }
     } else if ((record->kind == DOM_JS_MUTATION_ATTRIBUTE ||
                 record->kind == DOM_JS_MUTATION_TEXT) &&
                dom_js_document_has_structural_css_dependency(doc)) {
         // A class/attribute change can alter a sibling selector's result. A
         // text change can flip :empty. Their parent contains that local closure.
-        node = record->parent;
+        // root edits have no containing element, so retain the root as their closure.
+        node = record->parent && record->parent->is_element() ?
+            record->parent : record->target;
     } else {
         node = record->target ? record->target : record->parent;
     }
@@ -6598,12 +6613,17 @@ static DomJsStructuralDependency dom_js_structural_dependency_merge(
 
 static DomJsStructuralDependency dom_js_selector_structural_dependency(CssSelector* selector);
 
-static DomJsStructuralDependency dom_js_simple_selector_structural_dependency(
-        CssSimpleSelector* simple) {
-    if (!simple) return DOM_JS_STRUCTURAL_DEPENDENCY_NONE;
+enum DomJsStructuralTarget {
+    DOM_JS_STRUCTURAL_TARGET_NONE,
+    DOM_JS_STRUCTURAL_TARGET_SELF,
+    DOM_JS_STRUCTURAL_TARGET_CHILD,
+    DOM_JS_STRUCTURAL_TARGET_ANCESTOR,
+};
 
-    switch (simple->type) {
+static DomJsStructuralTarget dom_js_structural_target(CssSelectorType type) {
+    switch (type) {
         case CSS_SELECTOR_PSEUDO_EMPTY:
+            return DOM_JS_STRUCTURAL_TARGET_SELF;
         case CSS_SELECTOR_PSEUDO_FIRST_CHILD:
         case CSS_SELECTOR_PSEUDO_LAST_CHILD:
         case CSS_SELECTOR_PSEUDO_ONLY_CHILD:
@@ -6614,14 +6634,22 @@ static DomJsStructuralDependency dom_js_simple_selector_structural_dependency(
         case CSS_SELECTOR_PSEUDO_NTH_LAST_CHILD:
         case CSS_SELECTOR_PSEUDO_NTH_OF_TYPE:
         case CSS_SELECTOR_PSEUDO_NTH_LAST_OF_TYPE:
-            return DOM_JS_STRUCTURAL_DEPENDENCY_LOCAL;
+            return DOM_JS_STRUCTURAL_TARGET_CHILD;
         case CSS_SELECTOR_PSEUDO_HAS:
-            // Descendant insertion can change an ancestor's match. A subtree
-            // pass cannot prove every affected ancestor has been revisited.
-            return DOM_JS_STRUCTURAL_DEPENDENCY_BROAD;
+            return DOM_JS_STRUCTURAL_TARGET_ANCESTOR;
         default:
-            break;
+            return DOM_JS_STRUCTURAL_TARGET_NONE;
     }
+}
+
+static DomJsStructuralDependency dom_js_simple_selector_structural_dependency(
+        CssSimpleSelector* simple) {
+    if (!simple) return DOM_JS_STRUCTURAL_DEPENDENCY_NONE;
+    DomJsStructuralTarget target = dom_js_structural_target(simple->type);
+    if (target == DOM_JS_STRUCTURAL_TARGET_ANCESTOR)
+        return DOM_JS_STRUCTURAL_DEPENDENCY_BROAD;
+    if (target != DOM_JS_STRUCTURAL_TARGET_NONE)
+        return DOM_JS_STRUCTURAL_DEPENDENCY_LOCAL;
 
     DomJsStructuralDependency dependency = DOM_JS_STRUCTURAL_DEPENDENCY_NONE;
     if (simple->function_selectors && simple->function_selector_count > 0) {
@@ -6739,10 +6767,12 @@ static bool dom_js_document_has_broad_structural_css_dependency(DomDocument* doc
     return false;
 }
 
-static bool dom_js_selector_has_column_dependency(CssSelector* selector) {
+static bool dom_js_selector_has_combinator_dependency(CssSelector* selector,
+        CssCombinator minimum = CSS_COMBINATOR_COLUMN) {
     if (!selector) return false;
+    if (selector->leading_combinator >= minimum) return true;
     for (size_t i = 0; i + 1 < selector->compound_selector_count; i++) {
-        if (selector->combinators[i] == CSS_COMBINATOR_COLUMN) return true;
+        if (selector->combinators[i] >= minimum) return true;
     }
     for (size_t i = 0; i < selector->compound_selector_count; i++) {
         CssCompoundSelector* compound = selector->compound_selectors[i];
@@ -6751,7 +6781,7 @@ static bool dom_js_selector_has_column_dependency(CssSelector* selector) {
             CssSimpleSelector* simple = compound->simple_selectors[s];
             if (!simple) continue;
             for (size_t f = 0; f < simple->function_selector_count; f++) {
-                if (dom_js_selector_has_column_dependency(simple->function_selectors[f]))
+                if (dom_js_selector_has_combinator_dependency(simple->function_selectors[f], minimum))
                     return true;
             }
         }
@@ -6760,10 +6790,10 @@ static bool dom_js_selector_has_column_dependency(CssSelector* selector) {
 }
 
 static bool dom_js_simple_selector_mentions_mutation_attribute(
-        CssSimpleSelector* simple, DomJsMutationAttribute attribute);
+        CssSimpleSelector* simple, const char* attribute);
 
 static bool dom_js_selector_mentions_mutation_attribute(
-        CssSelector* selector, DomJsMutationAttribute attribute) {
+        CssSelector* selector, const char* attribute) {
     if (!selector) return false;
     for (size_t i = 0; i < selector->compound_selector_count; i++) {
         CssCompoundSelector* compound = selector->compound_selectors[i];
@@ -6779,16 +6809,13 @@ static bool dom_js_selector_mentions_mutation_attribute(
 }
 
 static bool dom_js_simple_selector_mentions_mutation_attribute(
-        CssSimpleSelector* simple, DomJsMutationAttribute attribute) {
+        CssSimpleSelector* simple, const char* attribute) {
     if (!simple) return false;
-    if (attribute == DOM_JS_MUTATION_ATTRIBUTE_CLASS &&
-        (simple->type == CSS_SELECTOR_TYPE_CLASS ||
-         ((simple->type >= CSS_SELECTOR_ATTR_EXACT &&
-           simple->type <= CSS_SELECTOR_ATTR_CASE_SENSITIVE) &&
-          simple->attribute.name &&
-          str_icmp_cstr(simple->attribute.name, "class") == 0))) {
-        return true;
-    }
+    const char* selected_attribute = simple->type == CSS_SELECTOR_TYPE_CLASS ? "class" :
+        simple->type == CSS_SELECTOR_TYPE_ID ? "id" :
+        (simple->type >= CSS_SELECTOR_ATTR_EXACT && simple->type <= CSS_SELECTOR_ATTR_CASE_SENSITIVE)
+            ? simple->attribute.name : nullptr;
+    if (attribute && selected_attribute && str_icmp_cstr(selected_attribute, attribute) == 0) return true;
     for (size_t i = 0; i < simple->function_selector_count; i++) {
         if (dom_js_selector_mentions_mutation_attribute(
                 simple->function_selectors[i], attribute)) {
@@ -6799,10 +6826,10 @@ static bool dom_js_simple_selector_mentions_mutation_attribute(
 }
 
 static bool dom_js_selector_has_relational_mutation_attribute_dependency(
-        CssSelector* selector, DomJsMutationAttribute attribute);
+        CssSelector* selector, const char* attribute);
 
 static bool dom_js_simple_selector_has_relational_mutation_attribute_dependency(
-        CssSimpleSelector* simple, DomJsMutationAttribute attribute) {
+        CssSimpleSelector* simple, const char* attribute) {
     if (!simple) return false;
     if (simple->type == CSS_SELECTOR_PSEUDO_HAS) {
         for (size_t i = 0; i < simple->function_selector_count; i++) {
@@ -6822,7 +6849,7 @@ static bool dom_js_simple_selector_has_relational_mutation_attribute_dependency(
 }
 
 static bool dom_js_selector_has_relational_mutation_attribute_dependency(
-        CssSelector* selector, DomJsMutationAttribute attribute) {
+        CssSelector* selector, const char* attribute) {
     if (!selector) return false;
     for (size_t i = 0; i < selector->compound_selector_count; i++) {
         CssCompoundSelector* compound = selector->compound_selectors[i];
@@ -6886,17 +6913,27 @@ static bool dom_js_stylesheet_tree_has_match(CssStylesheet* stylesheet,
     return false;
 }
 
-static bool dom_js_rule_has_column_dependency(CssRule* rule, void*) {
-    if (!rule || (rule->type != CSS_RULE_STYLE &&
-                  rule->type != CSS_RULE_NESTING &&
-                  rule->type != CSS_RULE_NESTED_DECLARATIONS)) return false;
+typedef bool (*DomJsSelectorPredicate)(CssSelector* selector, void* context);
+
+static bool dom_js_rule_selector_has_match(CssRule* rule,
+        DomJsSelectorPredicate predicate, void* context) {
+    if (!rule || (rule->type != CSS_RULE_STYLE && rule->type != CSS_RULE_NESTING &&
+            rule->type != CSS_RULE_NESTED_DECLARATIONS)) return false;
     CssSelectorGroup* group = rule->data.style_rule.selector_group;
     if (group) {
         for (size_t i = 0; i < group->selector_count; i++) {
-            if (dom_js_selector_has_column_dependency(group->selectors[i])) return true;
+            if (predicate(group->selectors[i], context)) return true;
         }
     }
-    return dom_js_selector_has_column_dependency(rule->data.style_rule.selector);
+    return predicate(rule->data.style_rule.selector, context);
+}
+
+static bool dom_js_selector_has_column_dependency(CssSelector* selector, void*) {
+    return dom_js_selector_has_combinator_dependency(selector);
+}
+
+static bool dom_js_rule_has_column_dependency(CssRule* rule, void* context) {
+    return dom_js_rule_selector_has_match(rule, dom_js_selector_has_column_dependency, context);
 }
 
 static bool dom_js_document_rule_tree_has_match(DomDocument* doc,
@@ -6917,30 +6954,25 @@ static bool dom_js_rule_is_scope(CssRule* rule, void*) {
     return rule && rule->type == CSS_RULE_SCOPE;
 }
 
+static bool dom_js_selector_has_attribute_dependency(CssSelector* selector, void* context) {
+    return dom_js_selector_has_relational_mutation_attribute_dependency(
+        selector, *(const char**)context);
+}
+
 static bool dom_js_rule_has_relational_mutation_attribute_dependency(
         CssRule* rule, void* context) {
-    DomJsMutationAttribute attribute = *(DomJsMutationAttribute*)context;
-    if (!rule || (rule->type != CSS_RULE_STYLE &&
-                  rule->type != CSS_RULE_NESTING &&
-                  rule->type != CSS_RULE_NESTED_DECLARATIONS)) {
-        return false;
-    }
-    if (rule->data.style_rule.selector_group) {
-        for (size_t i = 0; i < rule->data.style_rule.selector_group->selector_count; i++) {
-            if (dom_js_selector_has_relational_mutation_attribute_dependency(
-                    rule->data.style_rule.selector_group->selectors[i], attribute)) {
-                return true;
-            }
-        }
-    }
-    return dom_js_selector_has_relational_mutation_attribute_dependency(
-        rule->data.style_rule.selector, attribute);
+    return dom_js_rule_selector_has_match(rule, dom_js_selector_has_attribute_dependency, context);
 }
 
 static bool dom_js_document_has_relational_mutation_attribute_dependency(
-        DomDocument* doc, DomJsMutationAttribute attribute) {
+        DomDocument* doc, const char* attribute) {
     return dom_js_document_rule_tree_has_match(doc,
         dom_js_rule_has_relational_mutation_attribute_dependency, &attribute);
+}
+
+extern "C" bool dom_engine_attribute_has_relational_css_dependency(DomDocument* doc, const char* name) {
+    if (!doc || !name || !doc->stylesheets || doc->stylesheet_count <= 0) return true;
+    return dom_js_document_has_relational_mutation_attribute_dependency(doc, name);
 }
 
 static bool dom_js_selector_can_match_mutated_element(CssSelector* selector,
@@ -6998,24 +7030,12 @@ static bool dom_js_selector_has_relational_mutation_target_dependency(
     return false;
 }
 
-static bool dom_js_rule_has_relational_mutation_target_dependency(CssRule* rule,
-                                                                   void* context) {
-    DomElement* target = (DomElement*)context;
-    if (!rule || !target || (rule->type != CSS_RULE_STYLE &&
-                             rule->type != CSS_RULE_NESTING &&
-                             rule->type != CSS_RULE_NESTED_DECLARATIONS)) {
-        return false;
-    }
-    if (rule->data.style_rule.selector_group) {
-        for (size_t i = 0; i < rule->data.style_rule.selector_group->selector_count; i++) {
-            if (dom_js_selector_has_relational_mutation_target_dependency(
-                    rule->data.style_rule.selector_group->selectors[i], target)) {
-                return true;
-            }
-        }
-    }
-    return dom_js_selector_has_relational_mutation_target_dependency(
-        rule->data.style_rule.selector, target);
+static bool dom_js_selector_has_target_dependency(CssSelector* selector, void* context) {
+    return dom_js_selector_has_relational_mutation_target_dependency(selector, (DomElement*)context);
+}
+
+static bool dom_js_rule_has_relational_mutation_target_dependency(CssRule* rule, void* context) {
+    return dom_js_rule_selector_has_match(rule, dom_js_selector_has_target_dependency, context);
 }
 
 static bool dom_js_document_has_relational_mutation_target_dependency(
@@ -7023,6 +7043,150 @@ static bool dom_js_document_has_relational_mutation_target_dependency(
     if (!doc || !target || !doc->stylesheets || doc->stylesheet_count <= 0) return true;
     return dom_js_document_rule_tree_has_match(doc,
         dom_js_rule_has_relational_mutation_target_dependency, target);
+}
+
+struct DomJsChildListDependency {
+    DomNode* parent;
+    SelectorMatcher matcher;
+    bool include_structural;
+};
+
+static bool dom_js_compound_can_match_anchor(CssCompoundSelector* compound,
+        DomElement* element, SelectorMatcher* matcher) {
+    for (size_t i = 0; i < compound->simple_selector_count; i++) {
+        CssSimpleSelector* simple = compound->simple_selectors[i];
+        if (!simple) continue;
+        bool stable = simple->type == CSS_SELECTOR_TYPE_ELEMENT ||
+            simple->type == CSS_SELECTOR_TYPE_CLASS || simple->type == CSS_SELECTOR_TYPE_ID ||
+            (simple->type >= CSS_SELECTOR_ATTR_EXACT && simple->type <= CSS_SELECTOR_ATTR_CASE_SENSITIVE);
+        if (stable && !selector_matcher_matches_simple(matcher, simple, element)) return false;
+    }
+    return true;
+}
+
+static bool dom_js_selector_prefix_can_match_anchor(CssSelector* selector, size_t index,
+        DomElement* element, SelectorMatcher* matcher, bool unknown_sibling = false) {
+    if (!element) return false;
+    CssCompoundSelector* compound = selector->compound_selectors[index];
+    if (!unknown_sibling && compound &&
+        !dom_js_compound_can_match_anchor(compound, element, matcher)) return false;
+    if (!index) return true;
+    CssCombinator combinator = selector->combinators[index - 1];
+    if (combinator == CSS_COMBINATOR_NEXT_SIBLING ||
+        combinator == CSS_COMBINATOR_SUBSEQUENT_SIBLING) {
+        // the former sibling may be detached; its ancestry still shares this
+        // child's parent, while its own static selector conditions are unknown.
+        return dom_js_selector_prefix_can_match_anchor(selector, index - 1,
+            element, matcher, true);
+    }
+    if (combinator != CSS_COMBINATOR_CHILD && combinator != CSS_COMBINATOR_DESCENDANT)
+        return true;
+    for (DomNode* parent = element->parent; parent; parent = parent->parent) {
+        if (parent->is_element() && dom_js_selector_prefix_can_match_anchor(selector,
+                index - 1, parent->as_element(), matcher)) return true;
+        if (combinator == CSS_COMBINATOR_CHILD) break;
+    }
+    return false;
+}
+
+static bool dom_js_child_list_has_anchor(CssSelector* selector, size_t index,
+        DomJsChildListDependency* dependency, bool self) {
+    DomNode* parent = dependency->parent;
+    if (!parent || !parent->is_element()) return true;
+    if (self) return dom_js_selector_prefix_can_match_anchor(selector, index,
+        parent->as_element(), &dependency->matcher);
+    for (DomNode* child = parent->as_element()->first_child; child; child = child->next_sibling) {
+        if (child->is_element() && dom_js_selector_prefix_can_match_anchor(selector,
+                index, child->as_element(), &dependency->matcher)) return true;
+    }
+    return false;
+}
+
+static bool dom_js_selector_has_direct_child_list_dependency(CssSelector* selector,
+    DomJsChildListDependency* dependency);
+
+static bool dom_js_simple_has_direct_child_list_dependency(CssSimpleSelector* simple,
+        CssSelector* selector, size_t index, DomJsChildListDependency* dependency) {
+    if (!simple) return false;
+    DomJsStructuralTarget target = dom_js_structural_target(simple->type);
+    if (target == DOM_JS_STRUCTURAL_TARGET_ANCESTOR) return false;
+    if (target != DOM_JS_STRUCTURAL_TARGET_NONE)
+        return dom_js_child_list_has_anchor(selector, index, dependency,
+            target == DOM_JS_STRUCTURAL_TARGET_SELF);
+    for (size_t f = 0; f < simple->function_selector_count; f++) {
+        CssSelector* nested = simple->function_selectors[f];
+        if (!nested) continue;
+        if (nested->compound_selector_count != 1) {
+            // complex functional arguments may put the structural condition
+            // on an ancestor of the outer subject; check their own anchors.
+            if (dom_js_selector_has_direct_child_list_dependency(nested, dependency)) return true;
+            continue;
+        }
+        CssCompoundSelector* compound = nested->compound_selectors[0];
+        if (!compound) continue;
+        for (size_t s = 0; s < compound->simple_selector_count; s++) {
+            if (dom_js_simple_has_direct_child_list_dependency(compound->simple_selectors[s],
+                    selector, index, dependency)) return true;
+        }
+    }
+    return false;
+}
+
+static bool dom_js_selector_has_direct_child_list_dependency(CssSelector* selector,
+        DomJsChildListDependency* dependency) {
+    if (!selector) return false;
+    for (size_t c = 0; c < selector->compound_selector_count; c++) {
+        if (c && selector->combinators[c - 1] >= CSS_COMBINATOR_NEXT_SIBLING &&
+            dom_js_child_list_has_anchor(selector, c, dependency, false)) return true;
+        CssCompoundSelector* compound = selector->compound_selectors[c];
+        if (!compound) continue;
+        for (size_t s = 0; s < compound->simple_selector_count; s++) {
+            if (dom_js_simple_has_direct_child_list_dependency(compound->simple_selectors[s],
+                    selector, c, dependency)) return true;
+        }
+    }
+    return false;
+}
+
+static bool dom_js_selector_has_child_list_dependency(CssSelector* selector, void* context) {
+    if (!selector) return false;
+    DomJsChildListDependency* dependency = (DomJsChildListDependency*)context;
+    if (dependency->include_structural &&
+        dom_js_selector_has_direct_child_list_dependency(selector, dependency)) return true;
+    for (size_t c = 0; c < selector->compound_selector_count; c++) {
+        CssCompoundSelector* compound = selector->compound_selectors[c];
+        if (!compound) continue;
+        for (size_t i = 0; i < compound->simple_selector_count; i++) {
+            CssSimpleSelector* simple = compound->simple_selectors[i];
+            if (!dom_js_simple_selector_has_relational_mutation_target_dependency(simple, nullptr)) continue;
+            // sibling/column arguments can reach anchors outside the parent's
+            // ancestry. Descendant/child arguments require an enclosing anchor.
+            for (size_t f = 0; f < simple->function_selector_count; f++) {
+                if (dom_js_selector_has_combinator_dependency(
+                        simple->function_selectors[f], CSS_COMBINATOR_NEXT_SIBLING)) return true;
+            }
+            for (DomNode* node = dependency->parent; node; node = node->parent) {
+                if (node->is_element() && dom_js_compound_can_match_anchor(
+                        compound, node->as_element(), &dependency->matcher)) return true;
+            }
+        }
+    }
+    return false;
+}
+
+static bool dom_js_rule_has_child_list_dependency(CssRule* rule, void* context) {
+    return dom_js_rule_selector_has_match(rule, dom_js_selector_has_child_list_dependency, context);
+}
+
+static bool dom_js_document_has_child_list_dependency(DomDocument* doc, DomNode* parent,
+        bool include_structural) {
+    if (!doc || !parent) return true;
+    if (dom_js_document_has_column_css_dependency(doc)) return true;
+    DomJsChildListDependency dependency = {};
+    dependency.parent = parent;
+    dependency.include_structural = include_structural;
+    selector_matcher_init(&dependency.matcher, doc->document_pool);
+    return dom_js_document_rule_tree_has_match(doc, dom_js_rule_has_child_list_dependency, &dependency);
 }
 
 static bool dom_js_document_has_structural_css_dependency(DomDocument* doc) {
@@ -7123,7 +7287,8 @@ static bool dom_js_mutation_can_incremental(DomDocument* doc,
                     dom_js_document_has_broad_structural_css_dependency(doc);
                 checked_broad_structural_css = true;
             }
-            if (!has_broad_structural_css) continue;
+            if (!has_broad_structural_css ||
+                !dom_js_document_has_child_list_dependency(doc, record->parent)) continue;
             // :has() can change matching ancestors outside the child-list
             // subtree. Local sibling and position selectors use the parent as
             // their cascade root above, so they retain incremental layout.
@@ -7131,11 +7296,17 @@ static bool dom_js_mutation_can_incremental(DomDocument* doc,
             return false;
         }
         if (record->kind == DOM_JS_MUTATION_ATTRIBUTE &&
+            record->attribute == DOM_JS_MUTATION_ATTRIBUTE_LOCAL) {
+            // The notifier proved no :has() argument mentions this data/ARIA
+            // name. A later stylesheet mutation still forces the broad path.
+            continue;
+        }
+        if (record->kind == DOM_JS_MUTATION_ATTRIBUTE &&
             record->attribute == DOM_JS_MUTATION_ATTRIBUTE_CLASS) {
             if (!checked_class_relational_css) {
                 has_class_relational_css =
                     dom_js_document_has_relational_mutation_attribute_dependency(
-                        doc, DOM_JS_MUTATION_ATTRIBUTE_CLASS);
+                        doc, "class");
                 checked_class_relational_css = true;
             }
             if (!has_class_relational_css) continue;

@@ -86,6 +86,14 @@ The switch cases delegate the actual unit/color/`var()` work to a small set of p
 - `resolve_var_function(lycon, value)` (`resolve_css_style.cpp:1127`, inner `resolve_var_function_inner` at `:1062`) — resolves `var(--name, fallback)` against the element's stored custom properties, with its own recursion stack.
 - Spacing/box specialisms: `resolve_spacing_prop` (`resolve_css_style.cpp:3045`), `resolve_margin_with_inherit` (`:2905`), plus shorthand helpers like border-radius (`apply_border_radius_shorthand` at `:956`), gradients (`resolve_linear_gradient_value` at `:354`), and `resolve_display_value` (`:1765`).
 
+**Substitution ownership verified 2026-10-09:** `radiant/css_variable.cpp`
+keeps temporary tokens, computed names, formatter buffers and expanded spelling
+in the substitution context's pool. Typed results stay in the caller's pool;
+public computed-text reads copy temporary spelling before the context ends.
+This follows **D4.5.1v4** and prevents repeated computed-style reads from
+retaining parser work in the view-property pool. `CssVariableSubstitutionTest`
+checks invalid-result storage and the returned text's lifetime.
+
 ### 4.3 Shorthand expansion and `CssTempDecl`
 
 Many shorthands (~18 of them) expand by copying the parsed `CssDeclaration`, rewriting `property_id`, and re-pointing `value` at a synthesized longhand component before calling `resolve_css_property`. Doing that by hand with a stack-local `CssValue` list is a stack-use-after-scope hazard: the scratch list can outlive or under-live the resolve call. `view.hpp` fixes this structurally. `lam::CssTempDecl` (`view.hpp`) copies the base declaration and routes one component; `lam::CssTempListDecl<N>` (`view.hpp`) owns both the scratch `CssValue` list and its backing pointer array with compile-time capacity `N`, so they are guaranteed to outlive the `resolve()` call (`view.hpp`). The contract (documented in `vibe/Memory_Safety_Template.md` §8.2) is that `resolve_css_property` may *read* `decl->value` during the call but must never *retain* a pointer from a resolve-only declaration; persistent values go through the `PersistentField`/`render.hpp` path instead.

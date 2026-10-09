@@ -1,0 +1,28 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>TreeWalker interface</title></head>
+<body><div id="root"><span id="first"><i id="nested"></i></span><span id="second"></span></div><div id="other"><b id="other-child"></b></div><div id="result">pending</div><script>
+    const result = document.getElementById('result');
+    function check(name, value) {result.setAttribute('data-' + name, String(value));}
+    const root = document.getElementById('root');
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT);
+    const next = TreeWalker.prototype.nextNode;
+    check('prototype', Object.getPrototypeOf(walker) === TreeWalker.prototype);
+    check('instance', walker instanceof TreeWalker);
+    check('tag', Object.prototype.toString.call(walker) === '[object TreeWalker]');
+    check('method', walker.nextNode === next && !Object.prototype.hasOwnProperty.call(walker, 'nextNode'));
+    check('traversal', [next.call(walker).id, next.call(walker).id, next.call(walker).id].join('|') ===
+        'first|nested|second' && next.call(walker) === null);
+    const other = document.createTreeWalker(document.getElementById('other'), NodeFilter.SHOW_ELEMENT);
+    check('receiver', next.call(other).id === 'other-child');
+    walker.currentNode = root;
+    check('child', TreeWalker.prototype.firstChild.call(walker).id === 'first');
+    check('sibling', TreeWalker.prototype.nextSibling.call(walker).id === 'second');
+    let forged = false;
+    try {next.call(Object.create(TreeWalker.prototype));}
+    catch (error) {forged = error instanceof TypeError;}
+    check('forged', forged);
+    let illegal = false;
+    try {new TreeWalker();} catch (error) {illegal = error instanceof TypeError;}
+    check('constructor', illegal);
+    result.textContent = 'complete';
+</script></body></html>

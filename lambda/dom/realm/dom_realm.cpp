@@ -6,6 +6,7 @@
 
 #include "dom_realm.h"
 #include "../../js/js_runtime.h"
+#include "../../js/js_object_meta.h"
 #include "../../js/js_property_attrs.h"
 #include "../../js/js_event_loop.h"
 
@@ -39,6 +40,7 @@ Item dom_realm_new_error_named_cstr(const char* name, const char* m) { return js
 Item dom_realm_new_dom_exception(Item name, Item message) { return js_domexception_new(message, name); }
 
 Item dom_realm_new_object_of_class(int c) { return js_new_object_with_class(c); }
+bool dom_realm_object_has_class(Item o, int c) { return js_object_has_class(o, (JsClass)c); }
 Item dom_realm_new_array_of_class(int len, int c) { return js_array_new_with_class(len, c); }
 Item dom_realm_define_property(Item o, Item n, Item d) { return js_object_define_property(o, n, d); }
 void dom_realm_install_accessor(Item o, Item n, Item g, Item s, uint8_t a) {

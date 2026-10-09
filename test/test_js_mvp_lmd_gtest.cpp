@@ -61,6 +61,143 @@ TEST_F(JsMvpLmd, ScalarNumbers) {
     Item negative = run("-0"); EXPECT_TRUE(signbit(negative.get_double()));
     numeric("function tiny(){return 5e-324} tiny()", 5e-324);
 }
+TEST_F(JsMvpLmd, NumericRegionLayoutsAndFallback) {
+    boolean(R"JS(
+        class Point { constructor(x,y) { this.x=x; this.y=y; } }
+        class Motion { constructor(first,last) { this.first=first; this.last=last; } }
+        function kernel(p,m) {
+            if (p.x < 0) return -1;
+            const a=m.first; const b=m.last;
+            let dx=b.x-a.x; let dy=b.y-a.y;
+            let lo=(p.x-a.x)/dx; let hi=(p.y-a.y)/dy;
+            if (dx<0) { const t=lo; lo=hi; hi=t; }
+            if (dy<0) { const t=lo; lo=hi; hi=t; }
+            return lo+hi;
+        }
+        let p=new Point(2,3);
+        let m=new Motion(new Point(0,0),new Point(4,6));
+        let ok=kernel(p,m)===1 && kernel(p,m)===1;
+        p.x=1.5; ok=ok && kernel(p,m)===0.875;
+        p.x='2'; ok=ok && kernel(p,m)===1;
+        p.x=2; p.extra=8; ok=ok && kernel(p,m)===1;
+        delete p.y; ok=ok && kernel(p,m)!==kernel(p,m);
+        p.x=-1; m.first=null; ok && kernel(p,m)===-1;
+    )JS");
+}
+TEST_F(JsMvpLmd, NumericMethodGuardsAndSpecialNumbers) {
+    boolean(R"JS(
+        class Compare {
+            order(a,b) { if(a===b)return 0; if(a<b)return -1;
+                if(a>b)return 1; if(a===a)return 1; return -1; }
+            twice(a,b) { const x=this.order(a,b); if(x)return x; return this.order(b,a); }
+        }
+        let c=new Compare();
+        c.twice(1,2)===-1 && c.twice(2,1)===1 && c.twice(-0,0)===0 &&
+        c.twice(NaN,NaN)===-1 && c.twice(5e-324,0)===1 &&
+        c.twice('10','2')===-1 && c.twice(undefined,1)===1;
+    )JS");
+    boolean(R"JS(
+        class Compare { order(a,b) { if(a===b)return 0; if(a<b)return -1; return 1; } }
+        let c=new Compare(); let sum=0;
+        for(let i=0;i<4;i++)sum+=c.order(i,2);
+        function change() { c.order=function(a,b){return 7;}; return 1; }
+        sum===-1 && c.order(change(),2)===-1 && c.order(1,2)===7;
+    )JS");
+}
+TEST_F(JsMvpLmd, NumericRegionEffectsStayOrdered) {
+    numeric(R"JS(
+        class Point { constructor(x,y) { this.x=x; this.y=y; } }
+        function kernel(p) {
+            const a=p.x; p.x=9; const b=p.x;
+            let dx=b-a; let dy=p.y-a;
+            if(dx<0) { const t=dx; dx=dy; dy=t; }
+            if(dy<0) { const t=dx; dx=dy; dy=t; }
+            return a+b+dx+dy+p.x+p.y;
+        }
+        let p=new Point(1,2); kernel(p)+kernel(p);
+    )JS", 52);
+    boolean(R"JS(
+        class Point {
+            constructor(x,y) { this.x=x; this.y=y; }
+            order(a,b) { if(a===b)return 0; if(a<b)return -1; return 1; }
+            compare(other) { const x=this.order(this.x,other.x);
+                if(x)return x; return this.order(this.y,other.y); }
+        }
+        let a=new Point(1,2), b=new Point(1,3); let ok=true;
+        for(let i=0;i<4;i++)ok=ok && a.compare(b)===-1;
+        a.order=function(x,y) { a.y=7; a.order=function(x,y){return x-y;}; return 0; };
+        ok && a.compare(b)===4 && a.y===7;
+    )JS");
+}
+TEST_F(JsMvpLmd, NumericConstructorRegionsKeepIdentityAndLanes) {
+    boolean(R"JS(
+        class Point {
+            constructor(x,y) { this.x=x; this.y=y; }
+            plus(other) { return new Point(this.x+other.x,this.y+other.y); }
+        }
+        let p=new Point(1,-0), q=new Point(2,-0);
+        let a=p.plus(q), b=p.plus(q);
+        let ok=a!==b && a.x===3 && b.x===3 && 1/b.y===-Infinity;
+        p.x='x'; let c=p.plus(q); ok=ok && c.x==='x2' && a.x===3;
+        p.x=5e-324; q.x=0; let tiny=p.plus(q);
+        p.x=2; let later=p.plus(q);
+        ok && tiny.x===5e-324 && later.x===2 && tiny instanceof Point;
+    )JS");
+    boolean(R"JS(
+        class Flag { constructor() { this.value=true; } get() { return this.value; } }
+        let f=new Flag(); let ok=true;
+        for(let i=0;i<4;i++)ok=ok && f.get()===true;
+        f.value=1; ok=ok && f.get()===1 && f.get()!==true;
+        f.value=false; ok && f.get()===false;
+    )JS");
+}
+TEST_F(JsMvpLmd, ScalarFactoryReturnsPreserveEffectsAndEscape) {
+    boolean("const f=()=>3;const o={f:f};o.f===f && o.f()===3 && o.f===f");
+    numeric(R"JS(
+        class Pair { constructor(x,y) { this.x=x; this.y=y; } }
+        function pair(a,b) { return new Pair(b,a); }
+        let effect=0;
+        function sum() { const p=pair(++effect,++effect,++effect); p.x+=p.y; return p.x; }
+        sum()+effect;
+    )JS", 6);
+    char* mir = dump("temp/mvp_scalar_factory.mir");
+    ASSERT_NE(mir, nullptr);
+    char* consumer = strstr(mir, "mvp_lmd_f3:\tfunc");
+    ASSERT_NE(consumer, nullptr);
+    char* end = strstr(consumer, "\tendfunc");
+    ASSERT_NE(end, nullptr); *end = 0;
+    EXPECT_EQ(strstr(consumer, "mvp_lmd_class_invoke"), nullptr);
+    EXPECT_EQ(strstr(consumer, "mvp_lmd_object_new"), nullptr);
+    mem_free(mir);
+    boolean(R"JS(
+        class Pair { constructor(x,y) { this.x=x; this.y=y; } }
+        function pair(x) { return new Pair(x,5e-324); }
+        function local() { const p=pair(1e-323); let old=p.y; p.y=1; return old===5e-324 && p.x===1e-323; }
+        function escape() { const p=pair(2); return p; }
+        let a=escape(), b=escape();
+        local() && a!==b && a instanceof Pair && a.x===2 && a.y===5e-324;
+    )JS");
+    error(R"JS(
+        function pair(x) { return new Pair(x); }
+        function use() { const p=pair(1); return p.x; }
+        use(); class Pair { constructor(x) { this.x=x; } }
+    )JS", "ReferenceError");
+}
+TEST_F(JsMvpLmd, PlainMutationsUseLambdaShapes) {
+    numeric(R"JS(
+        function work() {
+            let o={x:5e-324,y:2}; let saved=o.x;
+            delete o.y; o.z=3; o.x=1;
+            return saved;
+        }
+        work();
+    )JS", 5e-324);
+    char* mir = dump("temp/mvp_plain_shape_mutation.mir");
+    ASSERT_NE(mir, nullptr);
+    EXPECT_NE(strstr(mir, "call\tmap_shape_set"), nullptr);
+    EXPECT_NE(strstr(mir, "call\tmap_shape_delete"), nullptr);
+    mem_free(mir);
+}
 TEST_F(JsMvpLmd, IntegerRuntimeSubtype) {
     Item result = run("function id(x){return x} var f=id; [1, f(2), f(1/1), f(0/1), -0, 1.5, NaN, Infinity]");
     ASSERT_EQ(get_type_id(result), LMD_TYPE_ARRAY);
@@ -883,6 +1020,27 @@ TEST_F(JsMvpLmd, ClassCachedScalarLanesAndRetyping) {
         "let a=new A([]);let ok=true;for(let v of [[],{n:1},()=>3,'s']){"
         "a.set(v);a.set(v);ok=ok && a.get()===v && a.get()===v}ok");
 }
+TEST_F(JsMvpLmd, GuardedMethodParametersAndReturns) {
+    boolean("class A{constructor(){this.x=1}set(v){this.x=v}sum(v){return this.x+v}}"
+        "let a=new A();let n=0;a.set(4,++n);a.sum(2)===6 && a.set()===undefined && "
+        "a.x===undefined && n===1");
+    boolean("class A{f(x){x+=1;let y=x*2;if(y>8)return y;return x}"
+        "g(x){return this.f(x)+this.f(1)}}let a=new A();a.g(4)===12 && a.f(0)===1");
+    boolean("class A{constructor(x){this.x=x}f(v){return this.x+v}"
+        "g(other){return other.f(2)+this.x}}let a=new A(1);let b=new A(10);"
+        "a.g(b)===13 && b.g(a)===13 && ({x:4,f:a.f}).f(3)===7");
+    boolean("class A{f(x){return x+1}}let a=new A();"
+        "a.f((a.f=x=>x+10,3))===4 && a.f(3)===13");
+    boolean("class A{f(x){if(x===0)return 1;return this.f(x-1)+1}}new A().f(8)===9");
+    boolean("class A{f(x){if(x)this.x=2}target(v){return new.target}}let a=new A();"
+        "a.f(false)===undefined && a.f(true)===undefined && a.x===2 && a.target(1)===undefined");
+    boolean("class A{f(x){const a=x;if(a)return a;return 0}g(x){return this.f(x)}}"
+        "let a=new A();let p=[1,2];a.g(p)===p && a.g(5e-324)===5e-324");
+    boolean("class A{constructor(){this.x=0}f(v){this.x+=v;if(v>2)return this.x;return v}}"
+        "let a=new A();let total=0;for(let i=0;i<5;i++)total+=a.f(i);total===19 && a.x===10");
+    error("class A{f(x){const a=x;a=3;return a}}new A().f(1)", "TypeError");
+    error("class A{f(x){let y=z;let z=x;return y}}new A().f(1)", "ReferenceError");
+}
 TEST_F(JsMvpLmd, ConstructorLayoutReuseAndObservation) {
     boolean("class A{constructor(x,y){this.x=x;this.y=y;this.z=null}}let ok=true;"
         "for(let v of [1,2,1.5,'s',true,null,5e-324,{n:1}]){let a=new A(v,[v]);"
@@ -896,6 +1054,80 @@ TEST_F(JsMvpLmd, ConstructorLayoutReuseAndObservation) {
     boolean("class A{constructor(x){this.x=x;if(x)this.y=2}}new A(true);"
         "Object.keys(new A(false)).join(',')==='x'");
     boolean("class A{constructor(){this.x='y' in this;this.y=1}}new A().x===false && new A().x===false");
+}
+TEST_F(JsMvpLmd, ScalarClassLocals) {
+    numeric("class P{constructor(x,y){this.x=x;this.y=y}}function f(n){let total=0;"
+        "for(let i=0;i<n;i++){let p=new P(i,2);p.x+=p.y;total+=p.x}return total}f(10)", 65);
+    boolean("class P{constructor(x,y){this.x=x;this.y=y}}let n=0;"
+        "let p=new P(++n,++n,++n);p.x===1 && p.y===2 && n===3");
+    boolean("class P{constructor(x){this.x=x}}let p=new P(5e-324);let q=new P();"
+        "p.x===5e-324 && q.x===undefined");
+    numeric("class P{constructor(x){this.x=x*2+1}}let p=new P(3);p.x", 7);
+    boolean("let seen;class P{constructor(x){this.x=x;seen=this}}let p=new P(4);p===seen");
+    boolean("class P{constructor(x){this.x=x}}let p=new P(4);let q=p;p.x=5;q.x===5 && p instanceof P");
+    boolean("class P{constructor(x){this.x=x}}class Q{constructor(x){this.x=x+10}}"
+        "P=Q;let p=new P(1);p.x===11");
+    error("function f(){let p=new P(1);return p.x}f();class P{constructor(x){this.x=x}}", "ReferenceError");
+    boolean("class P{constructor(x){this.x=x}}let p=new P(-0);1/p.x===-Infinity");
+    boolean("class P{constructor(x){this.x=x}f(){return this.x+1}}let p=new P(4);p.f()===5");
+    numeric("class P{constructor(x){this.x=x}}function f(x){let p=new P(x);return p.x+1}f(2)", 3);
+    char* mir = dump("temp/mvp_scalar_class.mir");
+    ASSERT_NE(mir, nullptr);
+    EXPECT_EQ(strstr(mir, "mvp_lmd_class_invoke"), nullptr);
+    mem_free(mir);
+}
+TEST_F(JsMvpLmd, GuardedCallbackCellsAndReceiver) {
+    numeric("function outer(){let x=1;let f=v=>{x+=v;return x};return f(2)+f(3)+x}outer()", 15);
+    boolean("function outer(){let x=5e-324;let f=()=>x;let a=f();x=1e-323;"
+        "return a===5e-324 && f()===1e-323}outer()");
+    numeric("function outer(){let x=1;let f=v=>{x+=v;return x};"
+        "let a=f((f=v=>v+10,2));return a+f(2)}outer()", 15);
+    numeric("class A{constructor(x){this.x=x}f(v){let g=n=>this.x+n;return g(v)}}"
+        "let a=new A(4);let b=new A(10);a.f(2)+b.f(3)", 19);
+    boolean("class A{constructor(){const f=()=>new.target;this.same=f()===A}}new A().same");
+    numeric("function allocate(n){return new Array(n).length}"
+        "class A{constructor(){this.x=7}f(){const g=n=>allocate(n)+this.x;return g(3)}}new A().f()", 10);
+    error("class A{}class B extends A{constructor(){const f=()=>this;f();super()}}new B()", "ReferenceError");
+    numeric("function outer(){let x=1;const f=v=>{let y=x+v;if(v>0)return y;return x};"
+        "x=4;return f(2)+f(0)}outer()", 10);
+    numeric("function outer(){let x=0;const f=v=>{x+=v;if(v>2)return x;return v};"
+        "let total=0;for(let i=0;i<5;i++)total+=f(i);return total+x}outer()", 29);
+}
+TEST_F(JsMvpLmd, StableNullableClassFields) {
+    boolean("class A{constructor(){this.x=null;this.y=5e-324}get(){return this.x}set(v){this.x=v}}"
+        "let a=new A();let b=new A();let p={n:3};let ok=true;"
+        "for(let i=0;i<30;i++){a.set(p);ok=ok && a.get()===p;a.set(null);ok=ok && a.get()===null}"
+        "for(let v of [5e-324,1e-323,-0,1.5,3,'s',undefined,true,[],()=>4,p,null]){"
+        "a.set(v);ok=ok && a.get()===v}"
+        "ok && a.y===5e-324 && b.x===null && b.y===5e-324 && "
+        "Object.keys(a).join(',')==='x,y' && a instanceof A");
+    boolean("class A{constructor(){this.x=null}set(v){this.x=v}get(){return this.x}}let a=new A();"
+        "a.set({});a.set(()=>5);a.get()()===5 && a.set(-0)===undefined && 1/a.get()===-Infinity");
+    Item result = run("class A{constructor(){this.x=null;this.y=1}}let a=new A();"
+        "a.x={n:2};a.x=null;let b=new A();b.x={};b.x=null;b.x={n:3};[a,b]");
+    ASSERT_EQ(get_type_id(result), LMD_TYPE_ARRAY);
+    Map* a = result.array->items[0].map;
+    Map* b = result.array->items[1].map;
+    ASSERT_EQ(a->type, b->type);
+    ShapeEntry* field = typemap_hash_lookup((TypeMap*)a->type, "x", 1);
+    ASSERT_NE(field, nullptr);
+    EXPECT_EQ(field->type, &TYPE_MAP);
+    EXPECT_EQ(map_shape_field_to_item(a->data, field).item, ITEM_NULL);
+    EXPECT_EQ(get_type_id(map_shape_field_to_item(b->data, field)), LMD_TYPE_MAP);
+    result = run("class N{constructor(next){this.next=next}}let leaf=new N(null);"
+        "let root=new N(leaf);let tail=new N(null);[root,tail]");
+    ASSERT_EQ(get_type_id(result), LMD_TYPE_ARRAY);
+    a = result.array->items[0].map; b = result.array->items[1].map;
+    // constructor reuse must not turn immutable links into dynamic lanes across separate instances.
+    EXPECT_EQ(typemap_hash_lookup((TypeMap*)a->type, "next", 4)->type->type_id, LMD_TYPE_MAP);
+    EXPECT_EQ(typemap_hash_lookup((TypeMap*)b->type, "next", 4)->type->type_id, LMD_TYPE_NULL);
+    result = run("class N{constructor(){this.next=null}}let leaf=new N();"
+        "let root=new N();root.next=leaf;[root,leaf]");
+    ASSERT_EQ(get_type_id(result), LMD_TYPE_ARRAY);
+    a = result.array->items[0].map; b = result.array->items[1].map;
+    // factory initialization after new must retain the same packed pointer lane as constructor writes.
+    EXPECT_EQ(typemap_hash_lookup((TypeMap*)a->type, "next", 4)->type->type_id, LMD_TYPE_MAP);
+    EXPECT_EQ(typemap_hash_lookup((TypeMap*)b->type, "next", 4)->type->type_id, LMD_TYPE_NULL);
 }
 TEST_F(JsMvpLmd, ClosureEnvironmentUsesSharedTracing) {
     Item result = run("function f(){let value=[5e-324,'alive'];return ()=>value}f()");

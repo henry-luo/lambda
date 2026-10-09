@@ -96,6 +96,29 @@ static FontFaceDescriptor* font_face_descriptor_from_css(CssFontFaceDescriptor* 
         }
         descriptor->unicode_range_count = css_desc->unicode_range_count;
     }
+    // keep installed names and URLs in their declared fallback order.
+    if (css_desc->src_urls && css_desc->src_count > 0) {
+        int loadable_src_count = 0;
+        for (int j = 0; j < css_desc->src_count; j++) {
+            if (css_desc->src_urls[j].url) loadable_src_count++;
+        }
+        descriptor->src_entries = lam::own_arr(loadable_src_count > 0
+            ? (FontFaceSrc*)mem_calloc(loadable_src_count, sizeof(FontFaceSrc), MEM_CAT_LAYOUT)
+            : nullptr);
+        if (descriptor->src_entries) {
+            descriptor->src_count = loadable_src_count;
+            int dst = 0;
+            for (int j = 0; j < css_desc->src_count; j++) {
+                if (!css_desc->src_urls[j].url) continue;
+                descriptor->src_entries[dst].path = lam::own(mem_strdup(css_desc->src_urls[j].url, MEM_CAT_LAYOUT));
+                descriptor->src_entries[dst].format = lam::own(css_desc->src_urls[j].format ? mem_strdup(css_desc->src_urls[j].format, MEM_CAT_LAYOUT) : nullptr);
+                descriptor->src_entries[dst].is_local = css_desc->src_urls[j].is_local;
+                dst++;
+            }
+            clog_debug(font_log, "Copied %d src entries for @font-face '%s'",
+                descriptor->src_count, css_desc->family_name);
+        }
+    }
     descriptor->family_name = lam::own(family_name.release());
     descriptor->src_local_path = lam::own(src_local_path.release());
     return descriptor.release();
@@ -129,14 +152,7 @@ void parse_font_face_rule(LayoutContext* lycon, void* rule) {
     CssFontFaceDescriptor* css_desc = css_parse_font_face_content(content, nullptr);
     if (!css_desc) return;
 
-    // Resolve URL
-    if (css_desc->src_url && base_path) {
-        char* resolved = css_resolve_font_url(css_desc->src_url, base_path, nullptr);
-        if (resolved) {
-            lam::Temp<char> previous(css_desc->src_url);  // the resolved URL takes the slot
-            css_desc->src_url = resolved;
-        }
-    }
+    css_font_face_resolve_sources(css_desc, base_path, nullptr);
 
     // Convert to FontFaceDescriptor and register
     FontFaceDescriptor* descriptor = font_face_descriptor_from_css(css_desc);
@@ -175,7 +191,8 @@ void process_font_face_rules_from_stylesheet(UiContext* uicon, CssStylesheet* st
         resolve_missing_font_source_path(&css_desc->src_url, base_path);
         if (css_desc->src_urls) {
             for (int j = 0; j < css_desc->src_count; j++) {
-                resolve_missing_font_source_path(&css_desc->src_urls[j].url, base_path);
+                if (!css_desc->src_urls[j].is_local)
+                    resolve_missing_font_source_path(&css_desc->src_urls[j].url, base_path);
             }
         }
 
@@ -184,7 +201,7 @@ void process_font_face_rules_from_stylesheet(UiContext* uicon, CssStylesheet* st
         // every @font-face source here blocks large docs before layout starts.
         if (css_desc->src_urls) {
             for (int j = 0; j < css_desc->src_count; j++) {
-                if (radiant_url_is_http(css_desc->src_urls[j].url)) {
+                if (!css_desc->src_urls[j].is_local && radiant_url_is_http(css_desc->src_urls[j].url)) {
                     if (!radiant_is_supported_web_font_source(
                             css_desc->src_urls[j].url, css_desc->src_urls[j].format)) {
                         clog_debug(font_log, "Skipping unsupported remote font source: %s (format: %s)",
@@ -209,7 +226,9 @@ void process_font_face_rules_from_stylesheet(UiContext* uicon, CssStylesheet* st
             }
             for (int j = 0; css_desc->src_urls && j < css_desc->src_count; j++) {
                 char*& source = css_desc->src_urls[j].url;
-                if (source && strncmp(source, "data:", 5) != 0) { lam::Temp<char> dropped(source); source = nullptr; }
+                if (source && !css_desc->src_urls[j].is_local && strncmp(source, "data:", 5) != 0) {
+                    lam::Temp<char> dropped(source); source = nullptr;
+                }
             }
         }
 
@@ -236,28 +255,7 @@ void process_font_face_rules_from_stylesheet(UiContext* uicon, CssStylesheet* st
         if (descriptor) {
             descriptor->is_loaded = false;
 
-            // Copy src_urls array for multi-format fallback
-            if (css_desc->src_urls && css_desc->src_count > 0) {
-                int loadable_src_count = 0;
-                for (int j = 0; j < css_desc->src_count; j++) {
-                    if (css_desc->src_urls[j].url) loadable_src_count++;
-                }
-                descriptor->src_entries = lam::own_arr(loadable_src_count > 0
-                    ? (FontFaceSrc*)mem_calloc(loadable_src_count, sizeof(FontFaceSrc), MEM_CAT_LAYOUT)
-                    : nullptr);
-                if (descriptor->src_entries) {
-                    descriptor->src_count = loadable_src_count;
-                    int dst = 0;
-                    for (int j = 0; j < css_desc->src_count; j++) {
-                        if (!css_desc->src_urls[j].url) continue;
-                        descriptor->src_entries[dst].path = lam::own(mem_strdup(css_desc->src_urls[j].url, MEM_CAT_LAYOUT));
-                        descriptor->src_entries[dst].format = lam::own(css_desc->src_urls[j].format ? mem_strdup(css_desc->src_urls[j].format, MEM_CAT_LAYOUT) : nullptr);
-                        dst++;
-                    }
-                    clog_debug(font_log, "Copied %d src entries for @font-face '%s'",
-                        descriptor->src_count, descriptor->family_name);
-                }
-            }
+
 
             register_font_face(uicon, descriptor);
         }
@@ -356,7 +354,9 @@ void register_font_face(UiContext* uicon, FontFaceDescriptor* descriptor) {
 
             if (descriptor->src_entries && descriptor->src_count > 0) {
                 for (int i = 0; i < descriptor->src_count; i++) {
-                    sources[i].path   = descriptor->src_entries[i].path;
+                    if (descriptor->src_entries[i].is_local)
+                        sources[i].local_name = descriptor->src_entries[i].path;
+                    else sources[i].path = descriptor->src_entries[i].path;
                     sources[i].format = descriptor->src_entries[i].format;
                 }
             } else if (descriptor->src_local_path) {
