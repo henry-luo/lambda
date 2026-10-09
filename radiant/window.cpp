@@ -1427,6 +1427,7 @@ static int view_doc_in_window_with_events_internal(const char* doc_file,
             false
         };
         if (paged_options) {
+            js_host_config.paged_media = paged_options;
             js_host_config.disable_css_animations = true;
             js_host_config.resource_policy = paged_options->block_remote_resources
                 ? INPUT_RESOURCE_LOCAL_ONLY : INPUT_RESOURCE_ALLOW_NETWORK;

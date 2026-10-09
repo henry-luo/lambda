@@ -1,4 +1,5 @@
 #include "layout_paged.hpp"
+#include "page_document.hpp"
 #include "layout.hpp"
 #include "layout_table.hpp"
 #include "render.hpp"
@@ -20,22 +21,27 @@
 enum PagedFlowKind : uint8_t {
     PAGED_FLOW_BLOCK, PAGED_FLOW_PARAGRAPH, PAGED_FLOW_TABLE_ROW, PAGED_FLOW_TABLE_COLUMN, PAGED_FLOW_TABLE_WRAPPER
 };
+enum PagedFlowStepKind : uint8_t { PAGED_STEP_BEFORE, PAGED_STEP_OPEN, PAGED_STEP_LINE, PAGED_STEP_TABLE_ROW, PAGED_STEP_CLOSE };
 enum PagedTableGroup : uint8_t { PAGED_TABLE_BODY, PAGED_TABLE_HEADER, PAGED_TABLE_FOOTER };
 enum PagedRelaxation : uint32_t { PAGED_RELAX_MINIMA = 1, PAGED_RELAX_AVOIDANCE = 2 };
 enum PagedRegionKind : uint8_t { PAGED_REGION_NOTE, PAGED_REGION_TOP, PAGED_REGION_BOTTOM, PAGED_REGION_COUNT };
+enum PagedCellAnchor : uint8_t { PAGED_CELL_BASELINE, PAGED_CELL_BEFORE, PAGED_CELL_UNALIGNED };
+struct PagedTableAlignment { float anchors[PAGED_CELL_UNALIGNED]; };
 struct PagedRegionRecord;
 struct PagedImagePaint;
+struct PagedCellLeaf;
 struct PagedIntrinsic { float minimum, maximum; bool generated; };
 struct PagedTableRows {
     PagedTableRows* next;
     float containing_height;
     float* heights;
-    float* baselines;
+    PagedTableAlignment* alignments;
     bool forced;
 };
 struct PagedTableTracks {
     PagedTableTracks* next;
     float width;
+    float label_gap;
     float* columns;
     PagedTableRows* rows;
 };
@@ -56,7 +62,8 @@ struct PagedFlowNode {
     TypesetItem* items;
     size_t item_capacity, block_note_item;
     PagedImagePaint* image;
-    bool has_images;
+    bool has_dynamic_items;
+    bool has_line_keeps;
     bool table_cell;
     bool group_first, group_last;
     PagedTableGroup table_group;
@@ -67,7 +74,7 @@ struct PagedFlowNode {
     PagedFlowNode* span_first;
     PagedFlowNode* span_last;
     bool has_rowspans;
-    bool table_fixed;
+    bool table_fixed, table_proportional;
     float table_spacing_h, table_spacing_v;
     LayoutTableColumnWidths table_measures;
     float table_minimum, table_maximum, table_percent;
@@ -75,14 +82,35 @@ struct PagedFlowNode {
     PagedTableContinuation* table_continuations;
     PagedFlowNode* column_sources;
     PagedFlowNode* last_column_source;
-    size_t declared_columns;
+    size_t declared_columns, next_declared_column;
     PagedFlowNode* captions;
     PagedFlowNode* last_caption;
     PagedFlowNode* table_grid;
+    PagedCellLeaf* cell_leaves;
+    size_t cell_leaf_count, cell_leaf_capacity, cell_begin, cell_end;
 };
+
+struct PagedCellLeaf { PagedFlowNode* flow; size_t begin, end; };
 
 static bool paged_is_table_grid(const PagedFlowNode* flow) {
     return flow->kind != PAGED_FLOW_TABLE_WRAPPER && flow->style->display.inner == CSS_VALUE_TABLE;
+}
+
+static bool paged_is_label_body_grid(const PagedFlowNode* flow) {
+    return flow->style->label_body && flow->style->label_body->grid;
+}
+
+template<typename Fn>
+static TypesetStatus paged_flow_walk(PagedFlowNode* flow, size_t depth, size_t max_depth, Fn& visit) {
+    if (depth > max_depth) return TYPESET_BUDGET_EXHAUSTED;
+    if (flow->kind == PAGED_FLOW_PARAGRAPH) return visit(PAGED_STEP_LINE, flow);
+    TypesetStatus status = visit(PAGED_STEP_BEFORE, flow);
+    if (flow->kind == PAGED_FLOW_TABLE_ROW)
+        return status == TYPESET_OK ? visit(PAGED_STEP_TABLE_ROW, flow) : status;
+    if (status == TYPESET_OK) status = visit(PAGED_STEP_OPEN, flow);
+    for (PagedFlowNode* child = flow->first_child; status == TYPESET_OK && child; child = child->next)
+        status = paged_flow_walk(child, depth + 1, max_depth, visit);
+    return status == TYPESET_OK ? visit(PAGED_STEP_CLOSE, flow) : status;
 }
 
 static bool paged_is_wrapped_grid(const PagedFlowNode* flow) {
@@ -109,6 +137,12 @@ struct PagedTextPaint : PagedPaint {
     bool leader;
     PagedFlowNode* marker_owner;
     float marker_width;
+    bool current_folio;
+    const RadiantPageSequence* query_sequence;
+    uint32_t query_folio;
+    TypesetMetrics query_metrics;
+    PagedTextPaint* query_variants;
+    PagedTextPaint* query_next;
 };
 struct PagedRunningRecord : TypesetRecord { PagedFlowNode* flow; };
 struct PagedMarkSource {
@@ -117,6 +151,9 @@ struct PagedMarkSource {
     size_t assigned_at;
     PagedRunningRecord* running;
     uint32_t target_page;
+    uint32_t last_target_page;
+    uint32_t generated_pages[3][2];
+    PagedFlowNode* static_flow;
 };
 struct PagedTargetValue : TypesetRecord {
     DomNodeRef source;
@@ -125,6 +162,8 @@ struct PagedTargetValue : TypesetRecord {
     const char* text;
     const char* before;
     const char* after;
+    uint32_t pages[3][2];
+    const char* labels[3][2];
 };
 struct PagedReferenceSession {
     Pool* pool;
@@ -132,6 +171,8 @@ struct PagedReferenceSession {
     TypesetConvergence convergence;
     size_t page_count;
     uint32_t pass;
+    const char** page_labels;
+    size_t page_label_count;
     ~PagedReferenceSession() {
         typeset_targets_dispose(&targets);
         if (pool) mem_pool_destroy(pool);
@@ -152,6 +193,7 @@ struct PagedRegionLine {
     PagedFlowNode* flow;
     TypesetLineCandidate line;
     float atomic_height, containing_height;
+    float replaced_content_width, replaced_content_height;
     float x, width, y;
 };
 struct PagedRegionPaint : TypesetRecord {
@@ -161,10 +203,13 @@ struct PagedRegionPaint : TypesetRecord {
 HASHMAP_DEFINE_PTRKEY(paged_mark_sources, PagedMarkSource, source)
 struct PagedComposition {
     Pool* pool;
+    DomDocument* document;
     PagedFlowNode* root;
     PagedLayoutOptions options;
     PagedLayoutDiagnostic diagnostic;
     size_t nodes, items, generated_glyphs, block_trials, table_continuations;
+    // query caches survive trials in the composition pool; their glyph budget must not rewind.
+    size_t query_glyphs;
     lam::Own<HashMap> mark_sources;
     TypesetMarkStore marks;
     TypesetRegionQueue queues[PAGED_REGION_COUNT];
@@ -177,19 +222,17 @@ struct PagedComposition {
     Pool* reference_pool;
     TypesetTargetStore targets;
 };
-struct PagedBoxEdges {
-    float edges[4], padding[4];
-    BorderProp border;
-    BackgroundProp background;
-};
+using PagedBoxEdges = ViewCssBoxEdges;
 struct PagedFrame {
     PagedFlowNode* flow;
     LayoutViewNode* fragment;
     float x, content_x, width, content_width, content_height, replaced_height;
+    float reference_x, reference_width;
+    float replaced_content_width, replaced_content_height;
     float page_start, consumed_content;
     PagedBoxEdges box;
     size_t occurrence;
-    bool table_started;
+    bool table_started, table_terminal;
     float table_footer_height;
 };
 struct PagedRegionState {
@@ -210,14 +253,31 @@ struct PagedComposer {
     ViewPageStyle page_style;
     RdtLogicalRect initial_containing_block;
     float y, bottom, page_start, pending_margin;
-    bool pending_break, page_has_content, closure_failure;
+    bool pending_break, page_has_content, closure_failure, body_aligned;
     ViewFragmentRole role;
     ViewBreak requested_break;
     const char* page_name;
+    const RadiantPageSequence* sequence;
+    uint32_t terminal_page;
     size_t committed_lines;
     bool atomic_fragment;
+    bool retain_aux_tail;
     PagedRegionState regions[PAGED_REGION_COUNT];
+    RadiantSpaceSpec* spaces;
+    size_t space_count, space_capacity, space_depth;
+    LayoutViewNode** space_anchors;
+    size_t space_anchor_count, space_anchor_capacity;
+    bool space_start;
+    float space_ratio, space_optimum_extra;
 };
+
+static bool paged_table_omits(const PagedFlowNode* table, bool footer) {
+    return table->style->flow_traits && table->style->flow_traits->table_omit[footer];
+}
+
+static bool paged_table_header_visible(const PagedFrame* frame) {
+    return !paged_table_omits(frame->flow, false) || !frame->fragment || frame->fragment->first_fragment;
+}
 
 static void* paged_checkpoint_copy(Pool* pool, const void* source, size_t size) {
     if (!size) return nullptr;
@@ -232,6 +292,8 @@ struct PagedCheckpoint {
     Pool* pool = nullptr;
     ViewModelCheckpoint* view = nullptr;
     PagedFrame* frames = nullptr;
+    RadiantSpaceSpec* spaces = nullptr;
+    LayoutViewNode** space_anchors = nullptr;
     const TypesetRegionMaterial** anchors[PAGED_REGION_COUNT] = {};
     TypesetRegionPlan plans[PAGED_REGION_COUNT] = {};
     TypesetRegionCheckpoint queues[PAGED_REGION_COUNT] = {};
@@ -256,6 +318,10 @@ struct PagedCheckpoint {
         if (!pool) return TYPESET_OUT_OF_MEMORY;
         frames = (PagedFrame*)paged_checkpoint_copy(pool, target->frames, target->depth * sizeof(PagedFrame));
         if (target->depth && !frames) return TYPESET_OUT_OF_MEMORY;
+        spaces = (RadiantSpaceSpec*)paged_checkpoint_copy(pool, target->spaces, target->space_count * sizeof(RadiantSpaceSpec));
+        space_anchors = (LayoutViewNode**)paged_checkpoint_copy(pool, target->space_anchors,
+            target->space_anchor_count * sizeof(LayoutViewNode*));
+        if ((target->space_count && !spaces) || (target->space_anchor_count && !space_anchors)) return TYPESET_OUT_OF_MEMORY;
         for (size_t i = 0; i < PAGED_REGION_COUNT; i++) {
             const PagedRegionState& region = target->regions[i];
             anchors[i] = (const TypesetRegionMaterial**)paged_checkpoint_copy(pool, region.anchors,
@@ -277,6 +343,8 @@ struct PagedCheckpoint {
         TypesetStatus status = TYPESET_OK;
         PagedFrame* current_frames = composer->frames;
         size_t frame_capacity = composer->frame_capacity;
+        RadiantSpaceSpec* current_spaces = composer->spaces; size_t space_capacity = composer->space_capacity;
+        LayoutViewNode** current_space_anchors = composer->space_anchors; size_t space_anchor_capacity = composer->space_anchor_capacity;
         PagedRegionState current[PAGED_REGION_COUNT];
         for (size_t i = 0; i < PAGED_REGION_COUNT; i++) {
             current[i] = composer->regions[i];
@@ -287,6 +355,10 @@ struct PagedCheckpoint {
         *composer = saved;
         composer->frames = current_frames; composer->frame_capacity = frame_capacity;
         if (saved.depth) memcpy(current_frames, frames, saved.depth * sizeof(PagedFrame));
+        composer->spaces = current_spaces; composer->space_capacity = space_capacity;
+        composer->space_anchors = current_space_anchors; composer->space_anchor_capacity = space_anchor_capacity;
+        if (saved.space_count) memcpy(current_spaces, spaces, saved.space_count * sizeof(RadiantSpaceSpec));
+        if (saved.space_anchor_count) memcpy(current_space_anchors, space_anchors, saved.space_anchor_count * sizeof(LayoutViewNode*));
         for (size_t i = 0; i < PAGED_REGION_COUNT; i++) {
             PagedRegionState& region = composer->regions[i];
             region.anchors = current[i].anchors; region.anchor_capacity = current[i].anchor_capacity;
@@ -325,11 +397,12 @@ struct PagedCheckpoint {
 
 static TypesetStatus paged_regions_prepare(PagedComposer* composer);
 static TypesetStatus paged_regions_close(PagedComposer* composer);
+static TypesetStatus paged_regions_drain(PagedComposer* composer);
 static TypesetStatus paged_region_measure(void* context, const TypesetResume* start,
     const TypesetRegionConstraints* constraints, bool split, Pool* scratch, TypesetRegionSlice* slice);
 static TypesetStatus paged_flow_height(PagedComposer* composer, PagedFlowNode* flow,
         float parent_width, float parent_height, bool leading, float* result, bool* forced,
-        bool allow_overflow = false, float* baseline = nullptr);
+        bool allow_overflow = false, float* baseline = nullptr, float* before = nullptr);
 static TypesetStatus paged_fixed_flow(PagedComposer* composer, PagedFlowNode* flow, float* natural_height = nullptr);
 static TypesetStatus paged_table_build(ViewTree* tree, PagedComposition* composition,
     PagedFlowNode* table, size_t depth);
@@ -378,7 +451,45 @@ static TypesetStatus paged_failure(PagedComposition* composition, TypesetStatus 
     composition->diagnostic.source = source ? dom_node_ref(source) : DomNodeRef{};
     composition->diagnostic.page_number = page;
     composition->diagnostic.reason = reason;
+    composition->diagnostic.origin = radiant_page_source_origin(composition->document, source);
     return status;
+}
+
+static RadiantSpaceSpec paged_space_range(const PagedComposer* composer, bool end) {
+    return radiant_spaces_resolve(composer->spaces, composer->space_count, composer->space_start, end);
+}
+
+static TypesetStatus paged_space_append(PagedComposer* composer, const RadiantSpaceSpec& space) {
+    if (!space.specified) return TYPESET_OK;
+    if (composer->space_count >= composer->composition->options.max_items) return TYPESET_BUDGET_EXHAUSTED;
+    if (!lam::pool_grow_array(composer->composition->pool, &composer->spaces, &composer->space_capacity,
+        composer->space_count + 1, 8)) return TYPESET_OUT_OF_MEMORY;
+    if (!composer->space_count) {
+        composer->space_depth = composer->depth;
+        float start = composer->page_style.content_rect.y + composer->regions[PAGED_REGION_TOP].plan.reserved_height;
+        composer->space_start = !composer->page_has_content && composer->y == start;
+    }
+    composer->spaces[composer->space_count++] = space;
+    return TYPESET_OK;
+}
+
+static TypesetStatus paged_space_flush(PagedComposer* composer, bool end = false) {
+    if (!composer->space_count) return TYPESET_OK;
+    RadiantSpaceSpec space = paged_space_range(composer, end);
+    bool fixed = composer->atomic_fragment || composer->role != VIEW_FRAGMENT_BODY ||
+        composer->tree->model->environment.presentation == VIEW_PRESENTATION_CONTINUOUS;
+    float used = fixed ? space.optimum : space.minimum + (space.optimum - space.minimum) * composer->space_ratio;
+    if (!isfinite(used) || !isfinite(composer->space_optimum_extra + space.optimum - space.minimum)) return TYPESET_INVALID;
+    // opened empty ancestors move with the resolved stack; their own before-space stays outside their boxes.
+    for (size_t i = 0; i < composer->space_anchor_count; i++) {
+        LayoutViewNode* node = composer->space_anchors[i];
+        if (!view_tree_model_touch_node(composer->tree, node)) return TYPESET_OUT_OF_MEMORY;
+        node->rect.y += used;
+    }
+    for (size_t i = composer->space_depth; i < composer->depth; i++) composer->frames[i].page_start += used;
+    composer->y += used; composer->space_optimum_extra += space.optimum - space.minimum;
+    composer->space_count = composer->space_anchor_count = 0;
+    return TYPESET_OK;
 }
 
 static bool paged_list_attribute(DomElement* source, const char* name, int64_t* result) {
@@ -508,6 +619,11 @@ static void paged_flow_link(PagedFlowNode* parent, PagedFlowNode* child) {
     child->parent = parent;
 }
 
+static const ViewCssStyle* paged_item_style(const TypesetItem& item) {
+    return item.paint ? ((const PagedPaint*)item.paint.get())->style :
+        item.source.native ? ((const PagedSourceRecord*)item.source.native.get())->style : nullptr;
+}
+
 static bool paged_atomic_boundary_allows(const TypesetItem& left, const TypesetItem& right) {
     if (left.kind == TYPESET_PENALTY || right.kind == TYPESET_PENALTY) return false;
     const PagedPaint* a = (const PagedPaint*)left.paint.get();
@@ -515,11 +631,8 @@ static bool paged_atomic_boundary_allows(const TypesetItem& left, const TypesetI
     bool a_image = a && a->kind == PAGED_PAINT_IMAGE, b_image = b && b->kind == PAGED_PAINT_IMAGE;
     if (!a_image && !b_image) return false;
     if ((a_image && ((const PagedImagePaint*)a)->framed) || (b_image && ((const PagedImagePaint*)b)->framed)) return false;
-    auto item_style = [](const TypesetItem& item, const PagedPaint* paint) -> const ViewCssStyle* {
-        return paint ? paint->style : item.source.native ? ((const PagedSourceRecord*)item.source.native.get())->style : nullptr;
-    };
-    const ViewCssStyle* common = view_css_common_ancestor(item_style(left, a), item_style(right, b));
-    if (!common || common->white_space == CSS_VALUE_NOWRAP || common->white_space == CSS_VALUE_PRE) return false;
+    const ViewCssStyle* common = view_css_common_ancestor(paged_item_style(left), paged_item_style(right));
+    if (!common || !radiant_whitespace_spec(common).wrap) return false;
     const PagedPaint* paints[] = {a, b};
     for (size_t side = 0; side < 2; side++) {
         if (!paints[side] || paints[side]->kind == PAGED_PAINT_IMAGE) continue;
@@ -536,6 +649,13 @@ static bool paged_atomic_boundary_allows(const TypesetItem& left, const TypesetI
     return true;
 }
 
+static size_t paged_previous_styled_item(PagedFlowNode* paragraph, size_t count) {
+    while (count && paragraph->items[count - 1].kind == TYPESET_GLUE && !paragraph->items[count - 1].paint &&
+           !paragraph->items[count - 1].length && paragraph->items[count - 1].glue.natural == 0.0f &&
+           paragraph->items[count - 1].boundary.legality == TYPESET_BREAK_FORBIDDEN) count--;
+    return count;
+}
+
 static TypesetStatus paged_item_append(PagedComposition* composition, PagedFlowNode* paragraph,
                                       const TypesetItem& item) {
     if (++composition->items > composition->options.max_items) return TYPESET_BUDGET_EXHAUSTED;
@@ -544,10 +664,15 @@ static TypesetStatus paged_item_append(PagedComposition* composition, PagedFlowN
     TypesetItem next = item;
     size_t previous = paragraph->paragraph.count;
     bool styled_item = item.paint || (item.source.native && ((const PagedSourceRecord*)item.source.native.get())->style);
+    const ViewCssStyle* item_style = paged_item_style(item);
+    for (const ViewCssStyle* owner = item_style; owner && !paragraph->has_line_keeps; owner = owner->parent) {
+        if (owner->display.outer == CSS_VALUE_BLOCK) break;
+        const RadiantFlowTraits* traits = owner->flow_traits;
+        if (traits && (traits->together.scope[0].kind != RADIANT_KEEP_AUTO || traits->next.scope[0].kind != RADIANT_KEEP_AUTO ||
+            traits->previous.scope[0].kind != RADIANT_KEEP_AUTO)) paragraph->has_line_keeps = true;
+    }
     // source-only anchors retain order but do not interrupt an adjacent atomic wrap boundary.
-    while (styled_item && previous && paragraph->items[previous - 1].kind == TYPESET_GLUE && !paragraph->items[previous - 1].paint &&
-           !paragraph->items[previous - 1].length && paragraph->items[previous - 1].glue.natural == 0.0f &&
-           paragraph->items[previous - 1].boundary.legality == TYPESET_BREAK_FORBIDDEN) previous--;
+    if (styled_item) previous = paged_previous_styled_item(paragraph, previous);
     if (styled_item && previous && paged_atomic_boundary_allows(paragraph->items[previous - 1], item)) {
         next.has_before = true;
         next.before = {TYPESET_BREAK_ALLOWED, TYPESET_BREAK_LINE, 0, 0};
@@ -558,6 +683,12 @@ static TypesetStatus paged_item_append(PagedComposition* composition, PagedFlowN
 }
 
 static bool paged_white(uint32_t cp) { return cp == ' ' || cp == '\t' || cp == '\n' || cp == '\r' || cp == '\f'; }
+
+static bool paged_control_whitespace(DomElement* owner, DomText* text) {
+    if (!radiant_page_element(owner, "page-document") && !radiant_page_element(owner, "page-sequence") &&
+        !radiant_page_element(owner, "flow") && !radiant_page_element(owner, "static-content")) return false;
+    return radiant_page_whitespace(text);
+}
 
 static TypesetSource paged_source_identity(ViewTree* tree, PagedComposition* composition,
         DomNode* source, TypesetOffsetUnit unit, ViewCssStyle* style = nullptr) {
@@ -610,7 +741,9 @@ static TypesetStatus paged_text_payload(ViewTree* tree, PagedComposition* compos
     paint->run.glyph_ids = lam::up(glyphs);
     paint->run.xs = lam::up(xs); paint->run.ys = lam::up(ys);
     paint->run.count = (int)count; // INT_CAST_OK: bounded glyph count for PaintGlyphRun.
-    item->metrics = {advance, metrics->ascender, -metrics->descender, metrics->ascender, {}, nullptr};
+    float altitude, depth;
+    if (!radiant_text_metrics(style, &altitude, &depth)) return TYPESET_UNPLACEABLE;
+    item->metrics = {advance, altitude, depth, altitude, {}, nullptr};
     item->paint = lam::up((const TypesetRecord*)paint);
     return TYPESET_OK;
 }
@@ -622,9 +755,7 @@ static TypesetStatus paged_text_items(ViewTree* tree, PagedComposition* composit
     if (!handle) return TYPESET_UNPLACEABLE;
     const FontMetrics* metrics = font_get_metrics(handle);
     if (!metrics) return TYPESET_UNPLACEABLE;
-    bool preserve = style->white_space == CSS_VALUE_PRE || style->white_space == CSS_VALUE_PRE_WRAP ||
-        style->white_space == CSS_VALUE_BREAK_SPACES;
-    bool nowrap = style->white_space == CSS_VALUE_NOWRAP || style->white_space == CSS_VALUE_PRE;
+    RadiantWhitespaceSpec policy = radiant_whitespace_spec(style);
     TypesetSource identity = paged_source_identity(tree, composition, source,
         generated ? TYPESET_PROVIDER_OFFSETS : TYPESET_UTF8_BYTES, style);
     if (!identity.native) return TYPESET_OUT_OF_MEMORY;
@@ -634,36 +765,58 @@ static TypesetStatus paged_text_items(ViewTree* tree, PagedComposition* composit
         int bytes = utf8_decode(text + end, length - end, &cp);
         if (bytes < 0) return TYPESET_INVALID;
         bool whitespace = paged_white(cp);
-        bool newline = preserve && (cp == '\n' || cp == '\r');
+        bool linefeed = cp == '\n' || (cp == '\r' && !style->whitespace);
+        bool newline = linefeed && policy.linefeed == RADIANT_LINEFEED_PRESERVE;
+        bool zero_width = cp == 0x200B || (linefeed && policy.linefeed == RADIANT_LINEFEED_ZERO_WIDTH);
         end += (size_t)bytes;
-        while (end < length && !preserve) {
+        while (end < length && policy.collapse && !newline && !zero_width &&
+               (!linefeed || policy.linefeed == RADIANT_LINEFEED_SPACE)) {
             uint32_t next = 0;
             bytes = utf8_decode(text + end, length - end, &next);
             if (bytes < 0) return TYPESET_INVALID;
-            if (paged_white(next) != whitespace) break;
+            if (paged_white(next) != whitespace || next == 0x200B ||
+                ((next == '\n' || (next == '\r' && !style->whitespace)) && policy.linefeed != RADIANT_LINEFEED_SPACE)) break;
             end += (size_t)bytes;
         }
-        if (!whitespace && preserve) {
+        if (!whitespace && !policy.collapse && !zero_width) {
             while (end < length) {
                 uint32_t next = 0;
                 bytes = utf8_decode(text + end, length - end, &next);
                 if (bytes < 0) return TYPESET_INVALID;
-                if (paged_white(next)) break;
+                if (paged_white(next) || next == 0x200B) break;
                 end += (size_t)bytes;
             }
         }
         TypesetItem item = {};
         item.source = identity;
         item.start = start; item.length = end - start;
-        item.boundary = {nowrap ? TYPESET_BREAK_FORBIDDEN : TYPESET_BREAK_ALLOWED, TYPESET_BREAK_LINE, 0, 0};
+        item.boundary = {policy.wrap ? TYPESET_BREAK_ALLOWED : TYPESET_BREAK_FORBIDDEN, TYPESET_BREAK_LINE, 0, 0};
+        if ((linefeed && policy.linefeed == RADIANT_LINEFEED_IGNORE) || (whitespace && !newline && !zero_width && policy.ignore)) {
+            start = end; continue;
+        }
         if (newline) {
             item.kind = TYPESET_PENALTY;
             item.boundary.legality = TYPESET_BREAK_FORCED;
+            // collapsed XML whitespace adjacent to a retained linefeed generates no area, across inline sources too.
+            for (size_t cursor = paragraph->paragraph.count; cursor;) {
+                cursor = paged_previous_styled_item(paragraph, cursor); if (!cursor) break;
+                TypesetItem& previous = paragraph->items[--cursor];
+                if (previous.kind != TYPESET_GLUE || previous.paint || !previous.length) break;
+                const ViewCssStyle* previous_style = paged_item_style(previous);
+                if (previous_style && radiant_whitespace_spec(previous_style).collapse)
+                    previous.glue.natural = previous.glue.stretch = previous.glue.shrink = 0.0f;
+            }
+        } else if (zero_width) {
+            item.kind = TYPESET_PENALTY;
         } else if (whitespace) {
             item.kind = TYPESET_GLUE;
             float space = font_measure_char(handle, ' ') + style->font.word_spacing;
-            bool repeated = paragraph->paragraph.count && paragraph->items[paragraph->paragraph.count - 1].kind == TYPESET_GLUE;
-            item.glue = {repeated && !preserve ? 0.0f : space, space * 0.5f, space * 0.333333f, 0, 0, !preserve, !preserve};
+            size_t previous_count = paged_previous_styled_item(paragraph, paragraph->paragraph.count);
+            const TypesetItem* previous = previous_count ? &paragraph->items[previous_count - 1] : nullptr;
+            bool repeated = previous && ((previous->kind == TYPESET_GLUE && !previous->paint && previous->length) ||
+                (previous->kind == TYPESET_PENALTY && previous->boundary.legality == TYPESET_BREAK_FORCED));
+            if (repeated && policy.collapse) space = 0.0f;
+            item.glue = {space, space * 0.5f, space * 0.333333f, 0, 0, policy.discard_start, policy.discard_end};
         } else {
             item.kind = TYPESET_BOX;
             TypesetStatus status = paged_text_payload(tree, composition, source, text + start, end - start, style, &item);
@@ -698,7 +851,7 @@ static const char* paged_running_name(ViewCssStyle* style) {
 static TypesetStatus paged_mark_register(PagedComposition* composition, ViewCssStyle* style) {
     if ((!style->string_set || css_value_is_none(style->string_set)) &&
         (style->display.outer == CSS_VALUE_NONE || !paged_running_name(style)) &&
-        (!style->source->id || !*style->source->id)) return TYPESET_OK;
+        (!style->source->id || !*style->source->id) && !style->page_query) return TYPESET_OK;
     PagedMarkSource mark = {style->source, style, SIZE_MAX, nullptr};
     hashmap_set(composition->mark_sources, &mark);
     return hashmap_oom(composition->mark_sources) ? TYPESET_OUT_OF_MEMORY : TYPESET_OK;
@@ -741,20 +894,16 @@ static TypesetStatus paged_hidden_marks(ViewTree* tree, PagedComposition* compos
 
 static TypesetStatus paged_region_parts(PagedComposition* composition, PagedRegionRecord* record,
         PagedFlowNode* flow, size_t depth) {
-    if (depth > composition->options.max_depth) return TYPESET_BUDGET_EXHAUSTED;
-    if (!lam::pool_grow_array(composition->pool, &record->parts, &record->capacity, record->count + 1, 16))
-        return TYPESET_OUT_OF_MEMORY;
-    record->parts[record->count++] = {flow->kind == PAGED_FLOW_PARAGRAPH ? PAGED_REGION_PARAGRAPH : PAGED_REGION_OPEN, flow};
-    for (PagedFlowNode* child = flow->first_child; child; child = child->next) {
-        TypesetStatus status = paged_region_parts(composition, record, child, depth + 1);
-        if (status != TYPESET_OK) return status;
-    }
-    if (flow->kind == PAGED_FLOW_BLOCK) {
+    auto visit = [&](PagedFlowStepKind kind, PagedFlowNode* source) {
+        if (kind == PAGED_STEP_BEFORE) return TYPESET_OK;
+        if (kind == PAGED_STEP_TABLE_ROW) return TYPESET_INVALID;
         if (!lam::pool_grow_array(composition->pool, &record->parts, &record->capacity, record->count + 1, 16))
             return TYPESET_OUT_OF_MEMORY;
-        record->parts[record->count++] = {PAGED_REGION_CLOSE, flow};
-    }
-    return TYPESET_OK;
+        PagedRegionPartKind part = kind == PAGED_STEP_LINE ? PAGED_REGION_PARAGRAPH :
+            kind == PAGED_STEP_OPEN ? PAGED_REGION_OPEN : PAGED_REGION_CLOSE;
+        record->parts[record->count++] = {part, source}; return TYPESET_OK;
+    };
+    return paged_flow_walk(flow, depth, composition->options.max_depth, visit);
 }
 
 static TypesetStatus paged_build_children(ViewTree* tree, PagedComposition* composition,
@@ -799,11 +948,130 @@ static TypesetStatus paged_note_text(ViewTree* tree, PagedComposition* compositi
     return paged_content_text(tree, composition, *style, nullptr, content, number, text, length);
 }
 
+static TypesetStatus paged_note_build(ViewTree* tree, PagedComposition* composition, DomElement* child_element,
+        ViewCssStyle* style, PagedFlowNode* parent, PagedFlowNode** paragraph, size_t depth) {
+    RadiantNoteBinding* binding = style->note_binding;
+    if (binding && binding->status != VIEW_MODEL_OK)
+        return paged_failure(composition, TYPESET_INVALID, child_element, 0, binding->reason);
+    PagedRegionRecord* record = (PagedRegionRecord*)pool_calloc(composition->pool, sizeof(PagedRegionRecord));
+    if (!record) return TYPESET_OUT_OF_MEMORY;
+    TypesetStatus status = paged_paragraph_ensure(composition, parent, paragraph);
+    if (status != TYPESET_OK) return status;
+    size_t call_first = (*paragraph)->paragraph.count;
+    if (binding) {
+        DomElement* call = binding->call.address->as_element();
+        ViewCssStyle* call_style = view_css_resolve(tree, call);
+        if (!call_style) return TYPESET_OUT_OF_MEMORY;
+        PagedFlowNode* call_flow = nullptr;
+        {
+            PagedCounterScope call_scope(tree, composition, call_style);
+            status = call_scope.status;
+            if (status == TYPESET_OK) status = paged_mark_register(composition, call_style);
+            if (status == TYPESET_OK) status = paged_extracted_flow(tree, composition, call, call_style, depth, nullptr, 0, &call_flow);
+        }
+        if (status != TYPESET_OK) return status;
+        PagedFlowNode* content = call_flow->first_child;
+        if (content && (content->kind != PAGED_FLOW_PARAGRAPH || content->next))
+            return paged_failure(composition, TYPESET_INVALID, call, 0, "note call requires inline material");
+        // authored call items retain their own sources and styles; no generated number or marker is inserted.
+        for (size_t i = 0; content && status == TYPESET_OK && i < content->paragraph.count; i++)
+            status = paged_item_append(composition, *paragraph, content->items[i]);
+        if (content) (*paragraph)->has_dynamic_items |= content->has_dynamic_items;
+        if (status != TYPESET_OK) return status;
+        DomElement* body = binding->body.address->as_element();
+        ViewCssStyle* body_style = view_css_resolve(tree, body);
+        if (!body_style) return TYPESET_OUT_OF_MEMORY;
+        PagedCounterScope body_scope(tree, composition, body_style);
+        status = body_scope.status;
+        if (status == TYPESET_OK) status = paged_mark_register(composition, body_style);
+        if (status == TYPESET_OK) status = paged_extracted_flow(tree, composition, body, body_style, depth, nullptr, 0, &record->flow);
+    } else {
+        uint64_t number = ++composition->note_counter;
+        if (number > INT_MAX) return TYPESET_BUDGET_EXHAUSTED;
+        char marker[32] = {};
+        int marker_length = counter_format_value((int)number, CSS_VALUE_DECIMAL, marker, sizeof(marker)); // INT_CAST_OK: bounded source-order footnote counter.
+        if (marker_length <= 0 || (size_t)marker_length >= sizeof(marker) - 1) return TYPESET_INVALID;
+        marker[marker_length++] = ' '; marker[marker_length] = '\0';
+        ViewCssStyle* marker_style = nullptr; char* note_marker = nullptr; size_t note_length = 0;
+        status = paged_note_text(tree, composition, child_element, PSEUDO_ELEMENT_FOOTNOTE_MARKER,
+            number, marker, (size_t)marker_length, &marker_style, &note_marker, &note_length);
+        if (status == TYPESET_OK) status = paged_extracted_flow(tree, composition, child_element, style,
+            depth, note_marker, note_length, &record->flow, marker_style);
+        if (status != TYPESET_OK) return status;
+        ViewCssStyle* call_style = nullptr; char* call = nullptr; size_t call_length = 0;
+        status = paged_note_text(tree, composition, child_element, PSEUDO_ELEMENT_FOOTNOTE_CALL,
+            number, marker, (size_t)marker_length - 1, &call_style, &call, &call_length);
+        if (status == TYPESET_OK) status = paged_text_items(tree, composition, *paragraph, child_element, call, call_length, call_style, true);
+        if (status != TYPESET_OK) return status;
+    }
+    if (status == TYPESET_OK) status = paged_region_parts(composition, record, record->flow, 0);
+    if (status != TYPESET_OK) return status;
+    paged_region_bind(tree, record, PAGED_REGION_NOTE);
+    const char* policy = css_value_identifier_name(style->footnote_policy);
+    record->block_policy = policy && str_ieq_cstr(policy, "block");
+    record->material.split = !record->block_policy && (!policy || !str_ieq_cstr(policy, "line"));
+    record->material.defer_anchor = !policy || str_ieq_cstr(policy, "auto");
+    if (!binding && call_first == (*paragraph)->paragraph.count) {
+        status = paged_anchor_append(tree, composition, child_element, parent, paragraph);
+        if (status != TYPESET_OK) return status;
+    }
+    size_t anchor = call_first;
+    if (binding) {
+        // an authored call anchors the note at its last generated area, including a wrapped call.
+        size_t end = (*paragraph)->paragraph.count;
+        while (end > call_first) {
+            const TypesetItem& item = (*paragraph)->items[end - 1];
+            if (item.paint || (item.kind == TYPESET_GLUE && !item.glue.discard_end && item.glue.natural > 0.0f)) break;
+            end--;
+        }
+        if (end > call_first) anchor = end - 1;
+        else {
+            status = paged_anchor_append(tree, composition, child_element, parent, paragraph);
+            if (status != TYPESET_OK) return status;
+            anchor = (*paragraph)->paragraph.count - 1;
+        }
+    }
+    TypesetItem& anchor_item = (*paragraph)->items[anchor];
+    PagedSourceRecord* call_source = (PagedSourceRecord*)pool_alloc(composition->pool, sizeof(PagedSourceRecord));
+    if (!call_source) return TYPESET_OUT_OF_MEMORY;
+    // text runs share source records; only the chosen item may admit this insertion.
+    *call_source = *(const PagedSourceRecord*)anchor_item.source.native.get();
+    call_source->insertion = record;
+    anchor_item.source.native = lam::up((const TypesetRecord*)call_source);
+    if (record->block_policy) (*paragraph)->block_note_item = anchor + 1;
+    return TYPESET_OK;
+}
+
+static TypesetStatus paged_style_traits_admit(PagedComposition* composition, const ViewCssStyle* style) {
+    if (style->flow_traits && style->flow_traits->status != VIEW_MODEL_OK)
+        return paged_failure(composition, TYPESET_INVALID, style->source, 0, style->flow_traits->reason);
+    if (style->whitespace && style->whitespace->status != VIEW_MODEL_OK)
+        return paged_failure(composition, TYPESET_INVALID, style->source, 0, style->whitespace->reason);
+    if (style->image_spec && style->image_spec->status != VIEW_MODEL_OK)
+        return paged_failure(composition, TYPESET_INVALID, style->source, 0, style->image_spec->reason);
+    if (style->label_body && style->label_body->status != VIEW_MODEL_OK)
+        return paged_failure(composition, TYPESET_INVALID, style->source, 0, style->label_body->reason);
+    return TYPESET_OK;
+}
+
 static TypesetStatus paged_context_admit(ViewTree* tree, PagedComposition* composition, ViewCssStyle* style,
         bool table_cell = false) {
-    // A flow producer must not silently serialize a different formatting context into block text.
+    // a flow producer must not silently serialize a different formatting context into block text.
+    TypesetStatus admitted = paged_style_traits_admit(composition, style);
+    if (admitted != TYPESET_OK) return admitted;
     const char* reason = nullptr;
+    if (style->note_binding && style->float_value != CSS_VALUE_FOOTNOTE)
+        return paged_failure(composition, TYPESET_INVALID, style->source, 0, "note binding requires footnote placement");
+    if ((radiant_page_element(style->source, "note-call") || radiant_page_element(style->source, "note-body")) &&
+        !radiant_page_element(style->source->parent_element(), "note"))
+        return paged_failure(composition, TYPESET_INVALID, style->source, 0, "note call and body require a note parent");
     bool image = style->source->tag() == MARKUP_NAME_IMG && !style->pseudo_element;
+    if (image && style->image_spec) {
+        const CssValue* overflow = view_css_property(tree, style, "overflow");
+        if (overflow && !css_value_keyword_equals(overflow, CSS_VALUE_VISIBLE) && !css_value_keyword_equals(overflow, CSS_VALUE_HIDDEN) &&
+            !css_value_keyword_equals(overflow, CSS_VALUE_CLIP))
+            return paged_failure(composition, TYPESET_INVALID, style->source, 0, "image viewport overflow requires visible, hidden or clip");
+    }
     if ((!image && style->display.inner == RDT_DISPLAY_REPLACED) || css_is_mathml_element(style->source) ||
         css_content_value_has_image_url(view_css_property(tree, style, "content")))
         reason = "replaced content requires a paged fragment producer";
@@ -840,8 +1108,11 @@ static TypesetStatus paged_image_append(ViewTree* tree, PagedComposition* compos
         tree->model->css->engine, &density, &dimensions));
     if (!isfinite(density) || density <= 0.0f)
         return paged_failure(composition, TYPESET_UNPLACEABLE, style->source, 0, "image source density requires finite positive natural dimensions");
-    ImageSurface* image = source ? load_document_image_resource(tree->model->document,
-        &tree->model->image_resources, source.get()) : nullptr;
+    const char* selected = source.get();
+    if (selected && style->image_spec) selected = radiant_page_resource_url(style->source, selected,
+        composition->pool, composition->options.max_depth);
+    ImageSurface* image = selected ? load_document_image_resource(tree->model->document,
+        &tree->model->image_resources, selected) : nullptr;
     if (!image || (image->format == IMAGE_FORMAT_UNKNOWN && !image->pixels && !image->source_data && !image->source_path))
         return paged_failure(composition, TYPESET_UNPLACEABLE, style->source, 0, "image source is unavailable or requires a sampled media producer");
     PagedImagePaint* payload = (PagedImagePaint*)pool_calloc(composition->pool, sizeof(PagedImagePaint));
@@ -849,7 +1120,7 @@ static TypesetStatus paged_image_append(ViewTree* tree, PagedComposition* compos
     payload->provider = tree->model->tree_id; payload->kind = PAGED_PAINT_IMAGE;
     payload->source = style->source; payload->style = style; payload->image = image;
     payload->dimension_source = dimensions;
-    payload->selected_source = pool_dup_n(composition->pool, source.get(), strlen(source.get()));
+    payload->selected_source = pool_dup_n(composition->pool, selected, strlen(selected));
     if (!payload->selected_source) return TYPESET_OUT_OF_MEMORY;
     payload->object.content_image_resolution = density;
     const CssValue* orientation = nullptr;
@@ -882,7 +1153,7 @@ static TypesetStatus paged_image_append(ViewTree* tree, PagedComposition* compos
     if (payload->framed) parent->image = payload;
     TypesetStatus status = paged_paragraph_ensure(composition, parent, paragraph);
     if (status != TYPESET_OK) return status;
-    (*paragraph)->has_images = true;
+    (*paragraph)->has_dynamic_items = true;
     if (payload->framed) (*paragraph)->paragraph.minimum_line_height = 0.0f;
     TypesetItem item = {}; item.kind = TYPESET_BOX;
     item.boundary.legality = TYPESET_BREAK_FORBIDDEN;
@@ -903,6 +1174,7 @@ static TypesetStatus paged_pseudo_append(ViewTree* tree, PagedComposition* compo
         return paged_failure(composition, TYPESET_INVALID, source, 0, "block generated content requires nested fragment producers");
     TypesetStatus admitted = paged_context_admit(tree, composition, style);
     if (admitted != TYPESET_OK) return admitted;
+
     PagedCounterScope scope(tree, composition, style, true);
     if (scope.status != TYPESET_OK) return scope.status;
     char* text = nullptr; size_t length = 0;
@@ -989,6 +1261,38 @@ static TypesetStatus paged_build_children(ViewTree* tree, PagedComposition* comp
     TypesetStatus admitted = paged_context_admit(tree, composition, source_style,
         parent->source == element && (parent->table_cell || source_style->display.inner == CSS_VALUE_TABLE_CAPTION));
     if (admitted != TYPESET_OK) return admitted;
+    if (source_style->page_query) {
+        const RadiantPageQuery* query = source_style->page_query;
+        if (tree->model->environment.presentation != VIEW_PRESENTATION_PAGED)
+            return paged_failure(composition, TYPESET_INVALID, element, 0, "folio queries require paged presentation");
+        if (query->status != VIEW_MODEL_OK) return paged_failure(composition, TYPESET_INVALID, element, 0, query->reason);
+        composition->reference_used = true; composition->reference_source = dom_node_ref(element);
+        const char* text = nullptr;
+        if (query->edge == RADIANT_QUERY_CURRENT) {
+            TypesetStatus status = paged_paragraph_ensure(composition, parent, paragraph);
+            if (status != TYPESET_OK) return status;
+            TypesetItem item = {}; item.kind = TYPESET_BOX;
+            status = paged_text_payload(tree, composition, element, "0", 1, source_style, &item);
+            if (status != TYPESET_OK) return status;
+            ((PagedTextPaint*)item.paint.get())->current_folio = true;
+            item.source = paged_source_identity(tree, composition, element, TYPESET_PROVIDER_OFFSETS, source_style);
+            if (!item.source.native) return TYPESET_OUT_OF_MEMORY;
+            (*paragraph)->has_dynamic_items = true;
+            return paged_item_append(composition, *paragraph, item);
+        } else {
+            const TypesetTarget* target = typeset_target_find(&composition->references->targets, query->target);
+            if (!target) return paged_failure(composition, TYPESET_INVALID, element, 0, "folio reference has no matching source ID");
+            const PagedTargetValue* value = (const PagedTargetValue*)target->value.get();
+            text = value->labels[query->area][query->edge == RADIANT_QUERY_LAST];
+        }
+        if (!text && composition->references->pass > 1)
+            return paged_failure(composition, TYPESET_UNPLACEABLE, element, 0, "folio query has no qualifying placed area");
+        if (!text) text = "0"; // unresolved values are measured in their actual font and revisited by convergence.
+        text = pool_strdup(composition->pool, text);
+        if (!text) return TYPESET_OUT_OF_MEMORY;
+        TypesetStatus status = paged_paragraph_ensure(composition, parent, paragraph);
+        return status == TYPESET_OK ? paged_text_items(tree, composition, *paragraph, element, text, strlen(text), source_style, true) : status;
+    }
     if (element->tag() == MARKUP_NAME_IMG) return paged_image_append(tree, composition, parent, paragraph, source_style);
     TypesetItem marker = {}; bool outside = false;
     if (source_style->display.list_item) {
@@ -1009,6 +1313,25 @@ static TypesetStatus paged_build_children(ViewTree* tree, PagedComposition* comp
         ViewCssStyle* style = parent->style;
         if (child->is_element()) {
             DomElement* child_element = child->as_element();
+            if (radiant_page_element(child_element, "fixed-pages") || radiant_page_element(child_element, "fixed-page"))
+                return paged_failure(composition, TYPESET_INVALID, child, 0, "fixed page controls cannot occur inside flowing content");
+            if (radiant_page_control_hidden(child_element)) continue;
+            if (radiant_page_element(child_element, "static-content")) {
+                if (furniture) return paged_failure(composition, TYPESET_INVALID, child, 0, "static content cannot contain another static binding");
+                ViewCssStyle* static_style = view_css_resolve(tree, child_element);
+                if (!static_style) return TYPESET_OUT_OF_MEMORY;
+                PagedCounterScope scope(tree, composition, static_style);
+                if (scope.status != TYPESET_OK) return scope.status;
+                PagedFlowNode* flow = paged_flow_new(composition, PAGED_FLOW_BLOCK, child_element, static_style);
+                if (!flow) return TYPESET_OUT_OF_MEMORY;
+                PagedFlowNode* content = nullptr;
+                TypesetStatus status = paged_build_children(tree, composition, child_element, flow, &content, depth + 1, true);
+                if (status != TYPESET_OK) return status;
+                PagedMarkSource mark = {}; mark.source = child; mark.style = static_style; mark.assigned_at = SIZE_MAX; mark.static_flow = flow;
+                hashmap_set(composition->mark_sources, &mark);
+                if (hashmap_oom(composition->mark_sources)) return TYPESET_OUT_OF_MEMORY;
+                continue;
+            }
             style = view_css_resolve(tree, child_element);
             if (!style) return TYPESET_OUT_OF_MEMORY;
             TypesetStatus mark_status = paged_mark_register(composition, style);
@@ -1025,41 +1348,8 @@ static TypesetStatus paged_build_children(ViewTree* tree, PagedComposition* comp
             if (style->float_value == CSS_VALUE_FOOTNOTE) {
                 if (furniture || tree->model->environment.presentation != VIEW_PRESENTATION_PAGED)
                     return paged_failure(composition, TYPESET_INVALID, child, 0, "footnotes require the paged body flow");
-                const char* policy = css_value_identifier_name(style->footnote_policy);
-                PagedRegionRecord* record = (PagedRegionRecord*)pool_calloc(composition->pool, sizeof(PagedRegionRecord));
-                if (!record) return TYPESET_OUT_OF_MEMORY;
-                uint64_t number = ++composition->note_counter;
-                if (number > INT_MAX) return TYPESET_BUDGET_EXHAUSTED;
-                char marker[32] = {};
-                int marker_length = counter_format_value((int)number, CSS_VALUE_DECIMAL, marker, sizeof(marker)); // INT_CAST_OK: bounded source-order footnote counter.
-                if (marker_length <= 0 || (size_t)marker_length >= sizeof(marker) - 1) return TYPESET_INVALID;
-                marker[marker_length++] = ' '; marker[marker_length] = '\0';
-                ViewCssStyle* marker_style = nullptr; char* note_marker = nullptr; size_t note_length = 0;
-                TypesetStatus status = paged_note_text(tree, composition, child_element, PSEUDO_ELEMENT_FOOTNOTE_MARKER,
-                    number, marker, (size_t)marker_length, &marker_style, &note_marker, &note_length);
-                if (status == TYPESET_OK) status = paged_extracted_flow(tree, composition, child_element, style,
-                    depth, note_marker, note_length, &record->flow, marker_style);
-                if (status == TYPESET_OK) status = paged_region_parts(composition, record, record->flow, 0);
+                TypesetStatus status = paged_note_build(tree, composition, child_element, style, parent, paragraph, depth);
                 if (status != TYPESET_OK) return status;
-                paged_region_bind(tree, record, PAGED_REGION_NOTE);
-                record->block_policy = policy && str_ieq_cstr(policy, "block");
-                record->material.split = !record->block_policy && (!policy || !str_ieq_cstr(policy, "line"));
-                record->material.defer_anchor = !policy || str_ieq_cstr(policy, "auto");
-                status = paged_paragraph_ensure(composition, parent, paragraph);
-                if (status != TYPESET_OK) return status;
-                size_t call_first = (*paragraph)->paragraph.count;
-                ViewCssStyle* call_style = nullptr; char* call = nullptr; size_t call_length = 0;
-                status = paged_note_text(tree, composition, child_element, PSEUDO_ELEMENT_FOOTNOTE_CALL,
-                    number, marker, (size_t)marker_length - 1, &call_style, &call, &call_length);
-                if (status == TYPESET_OK) status = paged_text_items(tree, composition, *paragraph, child, call, call_length, call_style, true);
-                if (status != TYPESET_OK) return status;
-                if (call_first == (*paragraph)->paragraph.count) {
-                    status = paged_anchor_append(tree, composition, child_element, parent, paragraph);
-                    if (status != TYPESET_OK) return status;
-                }
-                PagedSourceRecord* call_source = (PagedSourceRecord*)(*paragraph)->items[call_first].source.native.get();
-                call_source->insertion = record;
-                if (record->block_policy) (*paragraph)->block_note_item = call_first + 1;
                 continue;
             }
             if (style->float_value == CSS_VALUE_TOP || style->float_value == CSS_VALUE_BOTTOM) {
@@ -1132,6 +1422,8 @@ static TypesetStatus paged_build_children(ViewTree* tree, PagedComposition* comp
                 if (status != TYPESET_OK) return status;
             }
         } else if (child->is_text()) {
+            // XML indentation between page-control bindings is structural, outside the HTML content subtree.
+            if (paged_control_whitespace(element, child->as_text())) continue;
             TypesetStatus ensured = paged_paragraph_ensure(composition, parent, paragraph);
             if (ensured != TYPESET_OK) return ensured;
             ViewCssStyle* text_style = child->parent && child->parent->is_element()
@@ -1180,6 +1472,8 @@ static TypesetStatus paged_size_keywords_admit(PagedComposition* composition, Vi
 }
 
 static TypesetStatus paged_table_structure_admit(ViewTree* tree, PagedComposition* composition, ViewCssStyle* style) {
+    TypesetStatus admitted = paged_style_traits_admit(composition, style);
+    if (admitted != TYPESET_OK) return admitted;
     if (style->position != CSS_VALUE_STATIC || style->float_value != CSS_VALUE_NONE)
         return paged_failure(composition, TYPESET_INVALID, style->source, 0, "out-of-flow table boxes require a table containing-block policy");
     const uint8_t pseudos[] = {PSEUDO_ELEMENT_BEFORE, PSEUDO_ELEMENT_AFTER};
@@ -1208,7 +1502,12 @@ static TypesetStatus paged_table_column_collect(ViewTree* tree, PagedComposition
             "collapsed columns require a table grid visibility policy");
     PagedFlowNode* column = paged_flow_new(composition, PAGED_FLOW_TABLE_COLUMN, style->source, style);
     if (!column) return composition->diagnostic.status == TYPESET_OK ? TYPESET_OUT_OF_MEMORY : composition->diagnostic.status;
-    column->column = table->declared_columns;
+    const RadiantFlowTraits* traits = style->flow_traits.get();
+    column->column = traits && traits->column_number ? traits->column_number - 1 : table->next_declared_column;
+    if (column->column >= composition->options.max_items)
+        return paged_failure(composition, TYPESET_BUDGET_EXHAUSTED, style->source, 0, "table grid exceeds its track budget");
+    if (traits && traits->column_number && style->display.inner == CSS_VALUE_TABLE_COLUMN_GROUP)
+        return paged_failure(composition, TYPESET_INVALID, style->source, 0, "column numbers apply to leaf columns and cells");
     if (group) paged_flow_link(group, column);
     else {
         if (table->last_column_source) table->last_column_source->next = column;
@@ -1230,12 +1529,27 @@ static TypesetStatus paged_table_column_collect(ViewTree* tree, PagedComposition
             if (status != TYPESET_OK) return status;
         }
     }
-    column->column_span = table->declared_columns - column->column;
-    if (!column->first_child) {
+    if (style->flow_traits && style->flow_traits->column_proportion > 0.0f) {
+        if (!table->table_fixed || paged_is_label_body_grid(table))
+            return paged_failure(composition, TYPESET_INVALID, style->source, 0,
+                "proportional columns require a fixed table with a definite inline extent");
+        if (!column->first_child) table->table_proportional = true;
+    }
+    if (column->first_child) {
+        size_t end = 0;
+        column->column = column->first_child->column;
+        for (PagedFlowNode* child = column->first_child; child; child = child->next) {
+            if (child->column < column->column) column->column = child->column;
+            if (child->column + child->column_span > end) end = child->column + child->column_span;
+        }
+        column->column_span = end - column->column;
+    } else {
         column->column_span = layout_table_column_span(style->source);
-        if (column->column_span > composition->options.max_items - table->declared_columns)
+        if (column->column_span > composition->options.max_items - column->column)
             return paged_failure(composition, TYPESET_BUDGET_EXHAUSTED, style->source, 0, "table grid exceeds its track budget");
-        table->declared_columns += column->column_span;
+        // source order sets the next implicit position; the grid bound retains the greatest explicit endpoint.
+        table->next_declared_column = column->column + column->column_span;
+        if (table->next_declared_column > table->declared_columns) table->declared_columns = table->next_declared_column;
     }
     return TYPESET_OK;
 }
@@ -1317,6 +1631,11 @@ static TypesetStatus paged_table_collect(ViewTree* tree, PagedComposition* compo
                 size_t span = layout_table_cell_colspan(cell);
                 if (cell_style->display.inner != CSS_VALUE_TABLE_CELL)
                     return paged_failure(composition, TYPESET_INVALID, cell, 0, "anonymous cells require a table grid producer");
+                const RadiantFlowTraits* traits = cell_style->flow_traits.get();
+                size_t specified = traits && traits->column_number ? traits->column_number - 1 : 0;
+                if (specified > composition->options.max_items)
+                    return paged_failure(composition, TYPESET_BUDGET_EXHAUSTED, cell, 0, "table grid exceeds its track budget");
+                if (specified > row->columns) row->columns = specified;
                 if (span > composition->options.max_items - row->columns)
                     return paged_failure(composition, TYPESET_BUDGET_EXHAUSTED, cell, 0, "table grid exceeds its track budget");
                 for (const CssValue* padding : cell_style->padding)
@@ -1341,6 +1660,20 @@ static TypesetStatus paged_table_collect(ViewTree* tree, PagedComposition* compo
     return TYPESET_OK;
 }
 
+template <typename Fn>
+static TypesetStatus paged_table_columns_visit(PagedFlowNode* table, Fn fn) {
+    for (PagedFlowNode* source = table->column_sources; source; source = source->next) {
+        TypesetStatus status = fn(source);
+        if (status != TYPESET_OK) return status;
+        for (PagedFlowNode* child = source->first_child; child; child = child->next) {
+            status = fn(child);
+            if (status != TYPESET_OK) return status;
+        }
+    }
+    return TYPESET_OK;
+}
+
+
 static TypesetStatus paged_table_grid(ViewTree* tree, PagedComposition* composition, PagedFlowNode* table) {
     size_t capacity = 0, work = 0;
     for (PagedFlowNode* row = table->first_child; row; row = row->next) {
@@ -1358,7 +1691,17 @@ static TypesetStatus paged_table_grid(ViewTree* tree, PagedComposition* composit
     size_t* ends = (size_t*)pool_calloc(pool, capacity * sizeof(size_t));
     size_t* covered = (size_t*)pool_calloc(pool, table->row_count * sizeof(size_t));
     if (!table->table_rows || !ends || !covered) return TYPESET_OUT_OF_MEMORY;
-    TypesetStatus status = TYPESET_OK;
+    // leaf declarations may arrive out of order, but their physical track ranges must be disjoint.
+    TypesetStatus status = paged_table_columns_visit(table, [&](PagedFlowNode* column) {
+        if (column->first_child) return TYPESET_OK;
+        for (size_t c = column->column; c < column->column + column->column_span; c++) {
+            if (ends[c]) return paged_failure(composition, TYPESET_INVALID, column->source, 0,
+                "overlapping table column declarations require a column property conflict policy");
+            ends[c] = 1;
+        }
+        return TYPESET_OK;
+    });
+    memset(ends, 0, capacity * sizeof(size_t));
     PagedFlowNode* group_end = nullptr;
     for (PagedFlowNode* row = table->first_child; status == TYPESET_OK && row; row = row->next) {
         table->table_rows[row->row_index] = row;
@@ -1377,9 +1720,12 @@ static TypesetStatus paged_table_grid(ViewTree* tree, PagedComposition* composit
             }
             work += cell->row_span * cell->column_span;
             bool overlap = false;
+            const RadiantFlowTraits* traits = cell->style->flow_traits.get();
+            bool explicit_column = traits && traits->column_number;
+            if (explicit_column) column = traits->column_number - 1;
             column = layout_table_place_span(table->row_count, capacity, row->row_index, column,
                 cell->row_span, cell->column_span,
-                [&](size_t r, size_t c) { return ends[c] > r; },
+                [&](size_t r, size_t c) { return !explicit_column && ends[c] > r; },
                 [&](size_t r, size_t c) {
                     if (r == row->row_index && ends[c] > r) overlap = true;
                     ends[c] = r + 1; covered[r]++;
@@ -1483,6 +1829,7 @@ static TypesetStatus paged_table_build(ViewTree* tree, PagedComposition* composi
     // fixed layout with an automatic width uses the automatic algorithm (CSS 2.2 §17.5.2).
     table->table_fixed = css_value_keyword_equals(view_css_property(tree, style, "table-layout"), CSS_VALUE_FIXED) &&
         style->width && !css_value_is_auto(style->width);
+    if (paged_is_label_body_grid(table)) table->table_fixed = true;
     const CssValue* collapse = view_css_property(tree, style, "border-collapse");
     if (collapse && !css_value_keyword_equals(collapse, CSS_VALUE_SEPARATE))
         return paged_failure(composition, TYPESET_INVALID, table->source, 0, "collapsed table borders require fragment conflict resolution");
@@ -1496,6 +1843,20 @@ static TypesetStatus paged_table_build(ViewTree* tree, PagedComposition* composi
     if (status != TYPESET_OK) return status;
     status = paged_table_grid(tree, composition, table);
     if (status != TYPESET_OK) return status;
+    if (paged_is_label_body_grid(table)) {
+        if (table->row_count != 1 || table->columns != 2 || table->declared_columns || table->captions ||
+            table->table_spacing_h != 0.0f || table->table_spacing_v != 0.0f)
+            return paged_failure(composition, TYPESET_INVALID, table->source, 0,
+                "label/body grid requires one two-cell row without columns, captions or grid spacing");
+        PagedFlowNode* row = table->table_rows[0];
+        if (row->table_group != PAGED_TABLE_BODY || row->cell_count != 2)
+            return paged_failure(composition, TYPESET_INVALID, row->source, 0, "label/body grid requires two explicit body cells");
+        for (PagedFlowNode* cell = row->first_child; cell; cell = cell->next)
+            if (!cell->source)
+                return paged_failure(composition, TYPESET_INVALID, row->source, 0, "label/body grid requires two explicit body cells");
+            else if (cell->column_span != 1 || cell->row_span != 1)
+                return paged_failure(composition, TYPESET_INVALID, cell->source, 0, "label/body cells cannot span tracks or rows");
+    }
     for (PagedFlowNode* row = table->first_child; row; row = row->next)
         if (row->table_group == PAGED_TABLE_BODY) return paged_table_wrap(composition, table);
     return paged_failure(composition, TYPESET_INVALID, table->source, 0, "header-only tables require an atomic table producer");
@@ -1527,53 +1888,17 @@ static float paged_root_height(const PagedComposer* composer) {
 }
 
 static TypesetStatus paged_box_edges(PagedComposer* composer, const ViewCssStyle* source,
-        const ViewPageAreaStyle* declarations, float width, PagedBoxEdges* box) {
-    *box = {};
-    ViewCssStyle style = *source;
-    LayoutContext context = {}; context.doc = composer->tree->model->document;
-    context.pool = lam::up(composer->tree->model->css->pool.get());
-    context.selected_view_tree = lam::up(composer->tree); context.selected_style = lam::up(&style);
-    auto query = [&](const CssDeclaration* declaration, const char* name) {
-        return declarations ? view_css_declaration_value(composer->tree, &style, declaration, name)
-            : view_css_property(composer->tree, &style, name);
-    };
-    const CssValue* value = query(declarations ? declarations->color : nullptr, "color");
-    if (value) style.color = resolve_color_value(&context, value);
-    value = query(declarations ? declarations->background : nullptr, "background-color");
-    if (value) box->background.color = resolve_color_value(&context, value);
-    for (size_t i = 0; i < 4; i++) {
-        CssBoxSide side = static_cast<CssBoxSide>(i);
-        CssPropertyCode width_property = radiant_border_width_property(side);
-        const char* width_name = css_property_get_by_code(width_property)->name;
-        const char* style_name = css_property_get_by_code(radiant_box_side_property(CSS_PROPERTY_BORDER_STYLE, side))->name;
-        const char* color_name = css_property_get_by_code(radiant_box_side_property(CSS_PROPERTY_BORDER_COLOR, side))->name;
-        CssPropertyCode padding_property = radiant_box_side_property(CSS_PROPERTY_PADDING, side);
-        value = declarations ? query(declarations->padding[i], css_property_get_by_code(padding_property)->name) : source->padding[i].get();
-        box->padding[i] = paged_used_length(composer, &style, value, padding_property, width);
-        value = query(declarations ? declarations->border_style[i] : nullptr, style_name);
-        CssEnum border_style = value && value->type == CSS_VALUE_TYPE_KEYWORD ? value->data.keyword : CSS_VALUE_NONE;
-        if (border_style != CSS_VALUE_NONE && border_style != CSS_VALUE_HIDDEN && border_style != CSS_VALUE_SOLID) return TYPESET_INVALID;
-        box->border.styles[i] = border_style;
-        value = query(declarations ? declarations->border_width[i] : nullptr, width_name);
-        if (border_style != CSS_VALUE_NONE && border_style != CSS_VALUE_HIDDEN) {
-            box->border.width.values[i] = !value || value->type == CSS_VALUE_TYPE_KEYWORD
-                ? layout_css_border_width_keyword(value ? value->data.keyword : CSS_VALUE_MEDIUM)
-                : paged_used_length(composer, &style, value, width_property, width);
-        }
-        box->edges[i] = box->padding[i] + box->border.width.values[i];
-        if (!isfinite(box->edges[i]) || box->edges[i] < 0.0f) return TYPESET_INVALID;
-        value = query(declarations ? declarations->border_color[i] : nullptr, color_name);
-        box->border.colors[i] = value ? resolve_color_value(&context, value) : style.color;
-    }
-    // Simple boundary lowering shares one color across visible border sides.
-    Color border_color = {}; bool visible = false;
-    for (size_t i = 0; i < 4; i++) if (box->border.width.values[i] > 0.0f && box->border.colors[i].a) {
-        if (visible && border_color.c != box->border.colors[i].c) return TYPESET_INVALID;
-        visible = true; border_color = box->border.colors[i];
-    }
-    return TYPESET_OK;
+        float width, PagedBoxEdges* box) {
+    return view_css_box_edges(composer->tree, source, width, box) == VIEW_MODEL_OK
+        ? TYPESET_OK : TYPESET_INVALID;
 }
 
+
+static float paged_fragment_edge(const ViewCssStyle* style, const PagedBoxEdges& box, size_t edge, bool terminal) {
+    // border and padding conditionality are independent; layout and published paint use the same policies.
+    return (terminal || radiant_decoration_retain(style, false, edge == 2) ? box.border.width.values[edge] : 0.0f) +
+        (terminal || radiant_decoration_retain(style, true, edge == 2) ? box.padding[edge] : 0.0f);
+}
 
 static TypesetStatus paged_boundary_publish(ViewTree* tree, LayoutViewNode* node,
         const PagedBoxEdges& box, bool top, bool bottom) {
@@ -1586,8 +1911,10 @@ static TypesetStatus paged_boundary_publish(ViewTree* tree, LayoutViewNode* node
     storage->boundary.background = lam::own(&storage->background);
     for (size_t i = 0; i < 4; i++) storage->boundary.padding.values[i] = box.padding[i];
     // Fragment edges belong to the occurrence, not its source's computed style (D4.5.1v4).
-    if (!top) { storage->border.width.top = 0.0f; storage->boundary.padding.top = 0.0f; }
-    if (!bottom) { storage->border.width.bottom = 0.0f; storage->boundary.padding.bottom = 0.0f; }
+    for (size_t side = 0; side < 2; side++) if (!(side ? bottom : top)) {
+        if (!radiant_decoration_retain(node->computed_style, false, side != 0)) storage->border.width.values[side * 2] = 0.0f;
+        if (!radiant_decoration_retain(node->computed_style, true, side != 0)) storage->boundary.padding.values[side * 2] = 0.0f;
+    }
     node->computed_boundary = lam::up(&storage->boundary);
     return TYPESET_OK;
 }
@@ -1600,17 +1927,15 @@ static TypesetStatus paged_frame_finish(PagedComposer* composer, PagedFrame* fra
         TypesetStatus status = paged_table_columns_finish(composer->tree, frame->fragment);
         if (status != TYPESET_OK) return status;
     }
-    bool clone = frame->flow->style->decoration_clone;
-    return paged_boundary_publish(composer->tree, frame->fragment, frame->box,
-        frame->fragment->first_fragment || clone, last || clone);
+    return paged_boundary_publish(composer->tree, frame->fragment, frame->box, frame->fragment->first_fragment, last);
 }
 
-struct PagedImageMeasure { PagedBoxEdges box; float margin[4], width, height; };
+struct PagedImageMeasure { PagedBoxEdges box; float margin[4], width, height, content_width, content_height; };
 static TypesetStatus paged_image_measure(PagedComposer* composer, const PagedImagePaint* image,
         float available_width, float parent_height, PagedImageMeasure* result) {
     *result = {};
     ViewCssStyle* style = image->style;
-    TypesetStatus status = paged_box_edges(composer, style, nullptr, available_width, &result->box);
+    TypesetStatus status = paged_box_edges(composer, style, available_width, &result->box);
     if (status != TYPESET_OK) return status;
     float edges_x = result->box.edges[3] + result->box.edges[1];
     float edges_y = result->box.edges[0] + result->box.edges[2];
@@ -1645,17 +1970,48 @@ static TypesetStatus paged_image_measure(PagedComposer* composer, const PagedIma
     constraints.horizontal_edges = edges_x; constraints.vertical_edges = edges_y;
     for (size_t i = 0; i < 4; i++) result->margin[i] = paged_used_length(composer, style,
         style->margin[i], radiant_box_side_property(CSS_PROPERTY_MARGIN, static_cast<CssBoxSide>(i)), available_width);
+    if (style->image_spec) {
+        float natural_width, natural_height;
+        layout_replaced_default_object_size(&image->facts, available_width, isfinite(parent_height) ? parent_height : 150.0f,
+            &natural_width, &natural_height);
+        auto constrain = [](float value, float minimum, float maximum) { return isnan(value) ? value : fmaxf(minimum, fminf(value, maximum)); };
+        result->width = constrain(constraints.width, constraints.min_width, constraints.max_width);
+        result->height = constrain(constraints.height, constraints.min_height, constraints.max_height);
+        if (!radiant_image_size(style->image_spec, natural_width, natural_height,
+            &result->width, &result->height, &result->content_width, &result->content_height)) return TYPESET_UNPLACEABLE;
+        float width = constrain(result->width, constraints.min_width, constraints.max_width);
+        float height = constrain(result->height, constraints.min_height, constraints.max_height);
+        if (width != result->width || height != result->height) {
+            result->width = width; result->height = height;
+            if (!radiant_image_size(style->image_spec, natural_width, natural_height,
+                &result->width, &result->height, &result->content_width, &result->content_height)) return TYPESET_UNPLACEABLE;
+        }
+        return TYPESET_OK;
+    }
     if (!layout_replaced_content_size(&image->facts, &constraints,
         fmaxf(0.0f, available_width - edges_x - result->margin[3] - result->margin[1]), &result->width, &result->height))
         return TYPESET_UNPLACEABLE;
     return TYPESET_OK;
 }
 
+static void paged_reference_geometry(const PagedComposer* composer, size_t depth, float* x, float* width) {
+    const PagedFrame* parent = depth ? &composer->frames[depth - 1] : nullptr;
+    *x = parent ? parent->reference_width > 0.0f ? parent->reference_x : parent->content_x : composer->page_style.content_rect.x;
+    *width = parent ? parent->reference_width > 0.0f ? parent->reference_width : parent->content_width : composer->page_style.content_rect.width;
+}
+
 static TypesetStatus paged_frame_measure(PagedComposer* composer, PagedFrame* frame,
-        float parent_x, float parent_width, float parent_height, bool table_outer = false) {
+        float parent_x, float parent_width, float parent_height, bool table_outer = false,
+        float reference_x = NAN, float reference_width = NAN) {
+    if (!isfinite(reference_width)) {
+        size_t depth = composer->depth;
+        if (depth && frame == &composer->frames[depth - 1]) depth--;
+        paged_reference_geometry(composer, depth, &reference_x, &reference_width);
+    }
+    frame->reference_x = reference_x; frame->reference_width = reference_width;
     if (frame->flow->kind == PAGED_FLOW_TABLE_WRAPPER) {
         PagedFrame grid = {}; grid.flow = frame->flow->table_grid;
-        TypesetStatus status = paged_frame_measure(composer, &grid, parent_x, parent_width, parent_height, true);
+        TypesetStatus status = paged_frame_measure(composer, &grid, parent_x, parent_width, parent_height, true, reference_x, reference_width);
         if (status != TYPESET_OK) return status;
         frame->x = frame->content_x = grid.x;
         frame->width = frame->content_width = grid.width;
@@ -1670,14 +2026,28 @@ static TypesetStatus paged_frame_measure(PagedComposer* composer, PagedFrame* fr
     };
     float left = margin(3), right = margin(1);
     frame->x = parent_x + left;
-    TypesetStatus status = paged_box_edges(composer, style, nullptr, parent_width, &frame->box);
+    TypesetStatus status = paged_box_edges(composer, style, parent_width, &frame->box);
     if (status != TYPESET_OK) return paged_failure(composer->composition, status, frame->flow->source, 0,
         "block decoration requires supported padding and solid border styles");
     float edges = frame->box.edges[3] + frame->box.edges[1];
+    bool reference = style->flow_traits && style->flow_traits->reference_inline;
+    if (style->label_body && (style->label_body->grid || (style->label_body->context && !reference)) && edges != 0.0f)
+        return paged_failure(composer->composition, TYPESET_INVALID, frame->flow->source, 0,
+            "label/body grid horizontal decoration requires reference-relative indent geometry");
     frame->content_height = paged_used_length(composer, style, style->height,
         CSS_PROPERTY_HEIGHT, parent_width, NAN, parent_height);
     if (isfinite(frame->content_height)) frame->content_height = fmaxf(0.0f, frame->content_height -
         (style->box_sizing == CSS_VALUE_BORDER_BOX ? frame->box.edges[0] + frame->box.edges[2] : 0.0f));
+    if (reference) {
+        if ((style->width && !css_value_is_auto(style->width)) || style->min_width || style->max_width || left || right)
+            return paged_failure(composer->composition, TYPESET_INVALID, frame->flow->source, 0,
+                "reference block geometry requires automatic inline sizing and zero horizontal margins");
+        // indents are measured from the reference content edges; decoration extends outside them.
+        frame->content_x = reference_x + style->flow_traits->indents[0];
+        frame->content_width = reference_width - style->flow_traits->indents[0] - style->flow_traits->indents[1];
+        frame->x = frame->content_x - frame->box.edges[3]; frame->width = frame->content_width + edges;
+        return isfinite(frame->content_width) && frame->content_width > 0.0f ? TYPESET_OK : TYPESET_UNPLACEABLE;
+    }
     if (wrapped && !table_outer) {
         // percentages and auto margins were resolved against the wrapper's containing block, exactly once.
         frame->width = parent_width; frame->content_x = frame->x + frame->box.edges[3];
@@ -1690,6 +2060,8 @@ static TypesetStatus paged_frame_measure(PagedComposer* composer, PagedFrame* fr
         if (status != TYPESET_OK) return status;
         frame->width = measured.width + edges; frame->content_width = measured.width;
         frame->replaced_height = measured.height;
+        frame->replaced_content_width = measured.content_width;
+        frame->replaced_content_height = measured.content_height;
         frame->content_height = measured.height;
         float free = parent_width - frame->width - left - right;
         bool auto_left = css_value_is_auto(style->margin[3]), auto_right = css_value_is_auto(style->margin[1]);
@@ -1735,11 +2107,26 @@ static TypesetStatus paged_frame_measure(PagedComposer* composer, PagedFrame* fr
     }
     frame->content_x = frame->x + frame->box.edges[3];
     frame->content_width = frame->width - frame->box.edges[3] - frame->box.edges[1];
+    if (frame->flow->table_cell) {
+        frame->reference_x = frame->content_x; frame->reference_width = frame->content_width;
+    }
     if (!isfinite(frame->content_width) || frame->content_width <= 0.0f) return TYPESET_UNPLACEABLE;
     if (table && frame->width > parent_width)
         return paged_failure(composer->composition, TYPESET_UNPLACEABLE, frame->flow->source,
             composer->page ? composer->page->page_number : 0, "table width exceeds its page region");
     return table ? paged_table_dimensions(composer, frame) : TYPESET_OK;
+}
+
+static TypesetStatus paged_frame_descend(PagedComposer* composer, PagedFrame* frame,
+        float* x, float* width, float* height, float* reference_x = nullptr, float* reference_width = nullptr) {
+    TypesetStatus status = paged_frame_measure(composer, frame, *x, *width, *height, false,
+        reference_x ? *reference_x : NAN, reference_width ? *reference_width : NAN);
+    if (status == TYPESET_OK) {
+        *x = frame->content_x; *width = frame->content_width; *height = frame->content_height;
+        if (reference_x) *reference_x = frame->reference_x;
+        if (reference_width) *reference_width = frame->reference_width;
+    }
+    return status;
 }
 
 static TypesetStatus paged_frame_open(PagedComposer* composer, size_t index, bool first) {
@@ -1748,22 +2135,35 @@ static TypesetStatus paged_frame_open(PagedComposer* composer, size_t index, boo
     float parent_x = index ? composer->frames[index - 1].content_x : composer->page_style.content_rect.x;
     float parent_width = index ? composer->frames[index - 1].content_width : composer->page_style.content_rect.width;
     float parent_height = index ? composer->frames[index - 1].content_height : paged_root_height(composer);
-    TypesetStatus status = paged_frame_measure(composer, frame, parent_x, parent_width, parent_height);
+    // ancestors reopen from the new page outward; deeper saved frames still belong to the previous page.
+    float reference_x, reference_width;
+    paged_reference_geometry(composer, index, &reference_x, &reference_width);
+    TypesetStatus status = paged_frame_measure(composer, frame, parent_x, parent_width, parent_height, false, reference_x, reference_width);
     if (status != TYPESET_OK) return status;
+    float top = paged_fragment_edge(style, frame->box, 0, first);
+    if (top != 0.0f || ((first || style->decoration_clone) && paged_is_table_grid(frame->flow))) {
+        status = paged_space_flush(composer);
+        if (status != TYPESET_OK) return status;
+    }
     LayoutViewNode* parent = index ? composer->frames[index - 1].fragment :
         composer->page ? &composer->page->node : composer->tree->model->root.get();
     frame->page_start = composer->y;
-    frame->table_started = false;
+    frame->table_started = frame->table_terminal = false;
     frame->fragment = view_tree_fragment_append(composer->tree, parent, frame->flow->source,
                                                {frame->x, composer->y, frame->width, 0.0f});
     if (!frame->fragment) return TYPESET_OUT_OF_MEMORY;
+    if (composer->space_count) {
+        if (!lam::pool_grow_array(composer->composition->pool, &composer->space_anchors, &composer->space_anchor_capacity,
+            composer->space_anchor_count + 1, 8)) return TYPESET_OUT_OF_MEMORY;
+        composer->space_anchors[composer->space_anchor_count++] = frame->fragment;
+    }
     frame->fragment->first_fragment = first;
     frame->fragment->paint_box = frame->flow->kind != PAGED_FLOW_TABLE_WRAPPER;
     frame->fragment->role = composer->role;
     frame->fragment->generated = !frame->flow->source || composer->role != VIEW_FRAGMENT_BODY;
     frame->fragment->computed_style = lam::up(style);
     frame->occurrence++;
-    if (first || style->decoration_clone) composer->y += frame->box.edges[0];
+    composer->y += top;
     return frame->flow->column_sources ? paged_table_columns_open(composer, frame) : TYPESET_OK;
 }
 
@@ -1771,9 +2171,8 @@ static TypesetStatus paged_frames_close(PagedComposer* composer) {
     for (size_t i = composer->depth; i > 0; i--) {
         PagedFrame& frame = composer->frames[i - 1];
         bool blank = composer->page && composer->page->blank;
-        bool clone = frame.flow->style->decoration_clone;
-        float top = frame.fragment->first_fragment || clone ? frame.box.edges[0] : 0.0f;
-        float bottom = clone && !blank ? frame.box.edges[2] : 0.0f;
+        float top = paged_fragment_edge(frame.flow->style, frame.box, 0, frame.fragment->first_fragment);
+        float bottom = blank ? 0.0f : paged_fragment_edge(frame.flow->style, frame.box, 2, false);
         TypesetStatus furniture = paged_table_furniture(composer, &frame, true);
         if (furniture != TYPESET_OK) return furniture;
         composer->y += bottom;
@@ -1800,16 +2199,91 @@ static bool paged_requested_side(const PagedComposer* composer, ViewBreak reques
     return true;
 }
 
+struct PagedPageSpec {
+    const char* name;
+    const RadiantPageSequence* sequence;
+    uint32_t ordinal, folio;
+};
+
+static TypesetStatus paged_page_spec(PagedComposer* composer, size_t index, bool blank, PagedPageSpec* spec) {
+    *spec = {composer->page_name, composer->sequence, static_cast<uint32_t>(index + 1), static_cast<uint32_t>(index + 1)};
+    if (!spec->sequence) return TYPESET_OK;
+    const ViewPageBox* previous = index ? composer->tree->model->pages.get()[index - 1] : nullptr;
+    bool continuing = previous && previous->sequence.get() == spec->sequence;
+    spec->ordinal = continuing ? previous->sequence_page + 1 : 1;
+    spec->folio = continuing || spec->sequence->initial != RADIANT_FOLIO_NUMBER ?
+        (previous ? previous->folio + 1 : 1) : spec->sequence->initial_folio;
+    if (!continuing && ((spec->sequence->initial == RADIANT_FOLIO_ODD && !(spec->folio % 2)) ||
+        (spec->sequence->initial == RADIANT_FOLIO_EVEN && spec->folio % 2))) spec->folio++;
+    if (spec->folio > INT32_MAX) return paged_failure(composer->composition, TYPESET_BUDGET_EXHAUSTED,
+        spec->sequence->source.address, static_cast<uint32_t>(index + 1), "sequence folio exceeds the counter range");
+    spec->name = spec->sequence->master_reference;
+    if (!spec->sequence->master_program) return TYPESET_OK;
+    if (spec->sequence->master_program->terminal) {
+        composer->composition->reference_used = true;
+        composer->composition->reference_source = spec->sequence->source;
+    }
+    const RadiantPageRule* master = radiant_page_master_select(spec->sequence, spec->ordinal, spec->folio, blank,
+        composer->terminal_page == index + 1);
+    // the first pass has no terminal extent; a terminal-only alternative can provisionally seed it.
+    if (!master && composer->terminal_page != index + 1) master = radiant_page_master_select(spec->sequence, spec->ordinal, spec->folio, blank, true);
+    if (!master) return paged_failure(composer->composition, TYPESET_INVALID, spec->sequence->source.address,
+        static_cast<uint32_t>(index + 1), "sequence master has no eligible page alternative or exhausted its repeat limit");
+    bool bound = false;
+    for (const RadiantPageFlowBinding* flow = spec->sequence->flows; flow; flow = flow->next)
+        bound |= !strcmp(flow->region_name, master->body ? master->body->name : "body");
+    if (!bound) return paged_failure(composer->composition, TYPESET_INVALID, spec->sequence->source.address,
+        static_cast<uint32_t>(index + 1), "selected page master has no bound body flow");
+    spec->name = master->name;
+    return TYPESET_OK;
+}
+
+static void paged_page_bind(ViewPageBox* page, const PagedPageSpec& spec) {
+    page->sequence = lam::up(spec.sequence); page->sequence_page = spec.ordinal; page->folio = spec.folio;
+    page->name = lam::up(spec.name);
+}
+
+static TypesetStatus paged_page_style(PagedComposer* composer, const PagedPageSpec& spec,
+        uint32_t number, ViewPageSide side, bool blank, ViewPageStyle* style) {
+    ViewModelStatus resolved = view_css_page_style(composer->tree, spec.name, number, side, blank, style);
+    if (resolved != VIEW_MODEL_OK) return resolved == VIEW_MODEL_OUT_OF_MEMORY ? TYPESET_OUT_OF_MEMORY : TYPESET_INVALID;
+    for (size_t i = 0; i <= RADIANT_REGION_EDGE_COUNT; i++) {
+        bool body = i == RADIANT_REGION_EDGE_COUNT;
+        const RadiantPageRegion* region = body ? style->body_region.get() : style->edge_regions[i].get();
+        if (!region) continue;
+        ViewCssStyle* computed = body ? style->body_style.get() : style->edge_style[i].get();
+        ViewCssBoxEdges* box = body ? &style->body_box : &style->edge_boxes[i];
+        if (!body && view_css_box_edges(composer->tree, computed, style->edge_rects[i].width, box) != VIEW_MODEL_OK)
+            return paged_failure(composer->composition, TYPESET_INVALID, region->source.address, number,
+                "region decoration requires supported padding and solid border styles");
+        if (region->zero_box) for (float edge : box->edges) if (edge != 0.0f)
+            return paged_failure(composer->composition, TYPESET_INVALID, region->source.address, number,
+                "region box policy requires zero border and padding");
+        const CssValue* overflow = view_css_property(composer->tree, computed, "overflow");
+        if (overflow && !css_value_keyword_equals(overflow, CSS_VALUE_VISIBLE) &&
+            !css_value_keyword_equals(overflow, CSS_VALUE_HIDDEN) && !css_value_keyword_equals(overflow, CSS_VALUE_CLIP))
+            return paged_failure(composer->composition, TYPESET_INVALID, region->source.address, number,
+                body ? "body region overflow requires visible, hidden or clip" : "static region overflow requires visible, hidden or clip");
+        (body ? style->body_clip : style->edge_clip[i]) = overflow && !css_value_keyword_equals(overflow, CSS_VALUE_VISIBLE);
+    }
+    return TYPESET_OK;
+}
+
 static TypesetStatus paged_empty_page_restyle(PagedComposer* composer, bool blank) {
     ViewPageBox* page = composer->page;
     if (!page || composer->page_has_content) return TYPESET_INVALID;
     if (!view_tree_model_touch_node(composer->tree, &page->node)) return TYPESET_OUT_OF_MEMORY;
     ViewPageStyle* style = (ViewPageStyle*)pool_alloc(composer->composition->pool, sizeof(ViewPageStyle));
     if (!style) return TYPESET_OUT_OF_MEMORY;
-    if (view_css_page_style(composer->tree, composer->page_name, page->page_number, page->side, blank, style) != VIEW_MODEL_OK) return TYPESET_INVALID;
-    page->style = lam::up(style); page->name = lam::up(composer->page_name); page->blank = blank;
+    PagedPageSpec spec = {};
+    TypesetStatus selected = paged_page_spec(composer, page->page_number - 1, blank, &spec);
+    if (selected != TYPESET_OK) return selected;
+    selected = paged_page_style(composer, spec, page->page_number, page->side, blank, style);
+    if (selected != TYPESET_OK) return selected;
+    page->style = lam::up(style); paged_page_bind(page, spec); page->blank = blank;
     page->node.rect.width = style->width; page->node.rect.height = style->height; page->content_rect = style->content_rect;
     composer->page_style = *style;
+    composer->body_aligned = false;
     if (page->page_number == 1) composer->initial_containing_block = style->content_rect;
     composer->y = composer->page_start = style->content_rect.y;
     composer->bottom = style->content_rect.y + style->content_rect.height;
@@ -1821,10 +2295,15 @@ static TypesetStatus paged_empty_page_restyle(PagedComposer* composer, bool blan
         frame->page_start = composer->y;
         if (!view_tree_model_touch_node(composer->tree, frame->fragment)) return TYPESET_OUT_OF_MEMORY;
         frame->fragment->rect = {frame->x, composer->y, frame->width, 0.0f};
-        if (frame->fragment->first_fragment || frame->flow->style->decoration_clone) composer->y += frame->box.edges[0];
+        composer->y += paged_fragment_edge(frame->flow->style, frame->box, 0, frame->fragment->first_fragment);
         x = frame->content_x; width = frame->content_width; height = frame->content_height;
     }
-    return TYPESET_OK;
+    // queued insertions must be measured again when the selected master's region geometry changes.
+    for (size_t i = 0; i < PAGED_REGION_COUNT; i++) {
+        typeset_region_plan_dispose(&composer->regions[i].plan);
+        composer->regions[i].anchor_count = 0;
+    }
+    return paged_regions_prepare(composer);
 }
 
 static TypesetStatus paged_page_create(PagedComposer* composer, bool blank) {
@@ -1840,8 +2319,11 @@ static TypesetStatus paged_page_create(PagedComposer* composer, bool blank) {
     size_t count = tree->model->page_count;
     if (count >= composer->composition->options.max_pages) return TYPESET_BUDGET_EXHAUSTED;
     ViewPageSide side = paged_side(composer, count);
-    if (view_css_page_style(tree, composer->page_name, static_cast<uint32_t>(count + 1), side,
-                            blank, &composer->page_style) != VIEW_MODEL_OK) return TYPESET_INVALID;
+    PagedPageSpec spec = {};
+    TypesetStatus selected = paged_page_spec(composer, count, blank, &spec);
+    if (selected != TYPESET_OK) return selected;
+    selected = paged_page_style(composer, spec, static_cast<uint32_t>(count + 1), side, blank, &composer->page_style);
+    if (selected != TYPESET_OK) return selected;
     ViewPageStyle* style = (ViewPageStyle*)pool_alloc(composer->composition->pool, sizeof(ViewPageStyle));
     if (!style) return TYPESET_OUT_OF_MEMORY;
     *style = composer->page_style;
@@ -1849,11 +2331,45 @@ static TypesetStatus paged_page_create(PagedComposer* composer, bool blank) {
     if (!composer->page) return TYPESET_OUT_OF_MEMORY;
     composer->page->style = lam::up(style);
     if (!count) composer->initial_containing_block = style->content_rect;
-    composer->page->name = lam::up(composer->page_name);
+    paged_page_bind(composer->page, spec);
     composer->y = composer->page_start = style->content_rect.y;
     composer->page_has_content = false;
+    composer->body_aligned = false;
+    composer->retain_aux_tail = false;
+    composer->space_count = composer->space_anchor_count = 0;
+    composer->space_optimum_extra = 0.0f;
     composer->bottom = style->content_rect.y + style->content_rect.height;
     return TYPESET_OK;
+}
+
+static bool paged_sequence_padding(const ViewPageBox* page, const RadiantPageSequence* following) {
+    const RadiantPageSequence* sequence = page ? page->sequence.get() : nullptr;
+    if (!sequence) return false;
+    RadiantSequenceEnd end = sequence->end;
+    if (end == RADIANT_END_AUTO && following && following->initial != RADIANT_FOLIO_AUTO) {
+        bool odd = following->initial == RADIANT_FOLIO_ODD ||
+            (following->initial == RADIANT_FOLIO_NUMBER && following->initial_folio % 2);
+        end = odd ? RADIANT_END_ON_EVEN : RADIANT_END_ON_ODD;
+    }
+    return (end == RADIANT_END_EVEN && page->sequence_page % 2) ||
+        (end == RADIANT_END_ODD && !(page->sequence_page % 2)) ||
+        (end == RADIANT_END_ON_EVEN && page->folio % 2) || (end == RADIANT_END_ON_ODD && !(page->folio % 2));
+}
+
+static TypesetStatus paged_sequence_end(PagedComposer* composer, const RadiantPageSequence* following) {
+    ViewPageBox* page = composer->page;
+    if (!paged_sequence_padding(page, following)) return TYPESET_OK;
+    const RadiantPageSequence* sequence = page->sequence;
+    // end padding belongs to the completed sequence and participates in its terminal master selection.
+    const RadiantPageSequence* pending = composer->sequence;
+    const char* name = composer->page_name;
+    uint32_t terminal = composer->terminal_page;
+    composer->sequence = sequence; composer->page_name = sequence->master_reference;
+    composer->terminal_page = static_cast<uint32_t>(composer->tree->model->page_count + 1);
+    TypesetStatus status = paged_page_create(composer, true);
+    composer->sequence = pending; composer->page_name = name;
+    composer->terminal_page = terminal;
+    return status;
 }
 
 static TypesetStatus paged_next_page(PagedComposer* composer) {
@@ -1862,11 +2378,16 @@ static TypesetStatus paged_next_page(PagedComposer* composer) {
     }
     bool previous_blank = composer->page && composer->page->blank;
     if (composer->page) {
-        TypesetStatus status = paged_frames_close(composer);
+        bool changed_sequence = composer->page->sequence.get() != composer->sequence;
+        TypesetStatus status = paged_space_flush(composer, true);
+        if (status == TYPESET_OK) status = paged_frames_close(composer);
         if (status == TYPESET_OK) status = paged_regions_close(composer);
+        if (status == TYPESET_OK && changed_sequence) status = paged_regions_drain(composer);
+        if (status == TYPESET_OK && changed_sequence) status = paged_sequence_end(composer, composer->sequence);
         if (status != TYPESET_OK) return status;
     }
     ViewBreak request = composer->requested_break;
+    composer->terminal_page = 0;
     ViewPageSide wanted = VIEW_PAGE_RIGHT;
     bool side_request = paged_requested_side(composer, request, &wanted);
     if (side_request && paged_side(composer, composer->tree->model->page_count) != wanted) {
@@ -2207,21 +2728,33 @@ static TypesetStatus paged_mark_group(PagedComposer* composer, PagedMarkSource* 
     return typeset_mark_append(&composer->composition->marks, &mark);
 }
 
-static TypesetStatus paged_mark_enter(PagedComposer* composer, DomNode* source, size_t depth = 0) {
+static bool paged_source_has_own_area(const ViewCssStyle* style) {
+    if (style && style->pseudo_element) style = style->parent.get();
+    return !style || !style->flow_traits || !style->flow_traits->descendant_areas;
+}
+
+static TypesetStatus paged_mark_enter(PagedComposer* composer, DomNode* source, size_t depth = 0, bool area = true) {
     if (!composer->page || !source) return TYPESET_OK;
     if (depth > composer->composition->options.max_depth) return TYPESET_BUDGET_EXHAUSTED;
+    if (!depth && source->is_element()) {
+        ViewNodeState* state = view_tree_node_state(composer->tree, source, false);
+        area = paged_source_has_own_area(state ? state->computed_style.get() : nullptr);
+    }
     if (source->parent) {
-        TypesetStatus status = paged_mark_enter(composer, source->parent, depth + 1);
+        TypesetStatus status = paged_mark_enter(composer, source->parent, depth + 1, area);
         if (status != TYPESET_OK) return status;
     }
     PagedMarkSource key = {}; key.source = source;
     PagedMarkSource* owner = (PagedMarkSource*)hashmap_get(composer->composition->mark_sources, &key);
     if (!owner) return TYPESET_OK;
     if (!view_tree_model_record(composer->tree, owner, sizeof(*owner))) return TYPESET_OUT_OF_MEMORY;
-    if (!owner->target_page && owner->style->display.outer != CSS_VALUE_NONE &&
+    if (area && owner->style->display.outer != CSS_VALUE_NONE &&
         owner->style->float_value != CSS_VALUE_FOOTNOTE && owner->style->float_value != CSS_VALUE_TOP &&
         owner->style->float_value != CSS_VALUE_BOTTOM && !paged_running_name(owner->style))
-        owner->target_page = composer->page->page_number;
+    {
+        if (!owner->target_page) owner->target_page = composer->page->page_number;
+        owner->last_target_page = composer->page->page_number;
+    }
     TypesetMarkStore* marks = &composer->composition->marks;
     uint32_t source_id = dom_node_ref(source).expected_id;
     // Count restoration also invalidates the adapter's assignment cursor.
@@ -2301,9 +2834,7 @@ static float paged_vertical_top(PagedComposer* composer, ViewCssStyle* parent, V
     LayoutContext context = {}; context.doc = composer->tree->model->document;
     context.line.parent_font_style = lam::up(&parent->font);
     context.line.parent_font_size = parent->font.font_size;
-    const FontMetrics* metrics = font_get_metrics(parent->font.font_handle);
-    context.line.parent_font_ascender = metrics->ascender;
-    context.line.parent_font_descender = -metrics->descender;
+    if (!radiant_text_metrics(parent, &context.line.parent_font_ascender, &context.line.parent_font_descender)) return NAN;
     const CssValue* align = paged_inline_vertical_align(parent, style);
     CssEnum keyword = align && align->type == CSS_VALUE_TYPE_KEYWORD ? align->data.keyword : CSS_VALUE_BASELINE;
     float offset = !align ? 0.0f : align->type == CSS_VALUE_TYPE_PERCENTAGE
@@ -2313,6 +2844,94 @@ static float paged_vertical_top(PagedComposer* composer, ViewCssStyle* parent, V
 }
 
 struct PagedLineMeasurement { PagedComposer* composer; PagedFlowNode* flow; float containing_height, atomic_height; };
+
+static RadiantLineStacking paged_line_stacking(const ViewCssStyle* style) {
+    return style->flow_traits ? style->flow_traits->line_stacking : RADIANT_LINE_STACK_CSS;
+}
+
+static size_t paged_stacked_line_alternatives(const TypesetParagraph* paragraph, size_t first,
+        float width, TypesetLineCandidate* candidates, size_t capacity, void* context) {
+    size_t count = typeset_line_alternatives(paragraph, first, width, candidates, capacity, context);
+    ViewCssStyle* style = ((PagedLineMeasurement*)context)->flow->style;
+    float altitude, depth;
+    if (!radiant_text_metrics(style, &altitude, &depth)) return 0;
+    float half_leading = (style->line_height - altitude - depth) * 0.5f;
+    for (size_t i = 0; i < count && i < capacity; i++) {
+        TypesetLineCandidate& line = candidates[i];
+        if (line.paint_first == line.paint_end) continue;
+        if (paged_line_stacking(style) == RADIANT_LINE_STACK_FONT) {
+            line.height = style->line_height; line.baseline = altitude + half_leading;
+        } else {
+            // max-height adds block leading after enclosing the raw inline allocation rectangles.
+            line.height += 2.0f * half_leading; line.baseline += half_leading;
+        }
+        line.depth = fmaxf(0.0f, line.height - line.baseline);
+    }
+    return count;
+}
+
+static TypesetStatus paged_current_folio_payload(PagedComposer* composer, const PagedTextPaint* payload,
+        const PagedTextPaint** result) {
+    *result = payload;
+    if (!payload->current_folio || !composer->page) return TYPESET_OK;
+    const RadiantPageSequence* sequence = composer->page->sequence;
+    uint32_t folio = composer->page->folio;
+    PagedTextPaint* owner = const_cast<PagedTextPaint*>(payload);
+    for (PagedTextPaint* variant = owner->query_variants; variant; variant = variant->query_next)
+        if (variant->query_sequence == sequence && variant->query_folio == folio) { *result = variant; return TYPESET_OK; }
+    StrBuf* label = strbuf_new();
+    if (!label) return TYPESET_OUT_OF_MEMORY;
+    PagedReferenceSession* references = composer->composition->references;
+    bool formatted = true;
+    if (!sequence && references && composer->page->page_number <= references->page_label_count)
+        strbuf_append_str(label, references->page_labels[composer->page->page_number - 1]);
+    else formatted = radiant_folio_append(sequence ? &sequence->format : nullptr, folio, label);
+    char* owned = formatted ? pool_dup_n(composer->composition->pool, label->str, label->length) : nullptr;
+    size_t length = label->length; strbuf_free(label);
+    if (!owned) return TYPESET_OUT_OF_MEMORY;
+    size_t glyphs = utf8_count(owned, length);
+    if (glyphs > composer->composition->options.max_items - composer->composition->query_glyphs) return TYPESET_BUDGET_EXHAUSTED;
+    TypesetItem item = {};
+    TypesetStatus status = paged_text_payload(composer->tree, composer->composition, payload->source, owned, length, payload->style, &item);
+    if (status != TYPESET_OK) return status;
+    composer->composition->query_glyphs += glyphs;
+    PagedTextPaint* variant = (PagedTextPaint*)item.paint.get();
+    variant->query_sequence = sequence; variant->query_folio = folio; variant->query_metrics = item.metrics;
+    variant->query_next = owner->query_variants; owner->query_variants = variant;
+    *result = variant;
+    return TYPESET_OK;
+}
+
+static RadiantKeepStrength paged_inline_keep(PagedFlowNode* flow, size_t first, size_t end, size_t next, size_t scope) {
+    if (next == flow->paragraph.count) return {};
+    const ViewCssStyle* left = nullptr; const ViewCssStyle* right = nullptr;
+    for (size_t i = end; i > first && !left; i--) left = paged_item_style(flow->items[i - 1]);
+    for (size_t i = next; i < flow->paragraph.count && !right; i++) right = paged_item_style(flow->items[i]);
+    const ViewCssStyle* common = view_css_common_ancestor(left, right);
+    RadiantKeepStrength keep = {};
+    // block keeps constrain their block areas; inline keeps constrain material inside a line/page.
+    for (const ViewCssStyle* owner = common; owner && owner->display.outer != CSS_VALUE_BLOCK; owner = owner->parent)
+        if (owner->flow_traits) keep = radiant_keep_max(keep, owner->flow_traits->together.scope[scope]);
+    for (const ViewCssStyle* owner = left; owner && owner != common; owner = owner->parent)
+        if (owner->flow_traits) keep = radiant_keep_max(keep, owner->flow_traits->next.scope[scope]);
+    for (const ViewCssStyle* owner = right; owner && owner != common; owner = owner->parent)
+        if (owner->flow_traits) keep = radiant_keep_max(keep, owner->flow_traits->previous.scope[scope]);
+    return keep;
+}
+
+static size_t paged_choose_kept_line(const TypesetLineCandidate* candidates, size_t count, void* context) {
+    PagedFlowNode* flow = ((PagedLineMeasurement*)context)->flow;
+    size_t selected = SIZE_MAX; RadiantKeepStrength weakest = {};
+    for (size_t i = 0; i < count; i++) {
+        if (candidates[i].overflow) continue;
+        if (candidates[i].forced) return i;
+        const TypesetLineCandidate& line = candidates[i];
+        RadiantKeepStrength keep = paged_inline_keep(flow, line.paint_first, line.paint_end, line.next, 0);
+        if (keep.kind == RADIANT_KEEP_ALWAYS) continue;
+        if (selected == SIZE_MAX || radiant_keep_compare(keep, weakest) <= 0) { selected = i; weakest = keep; }
+    }
+    return selected;
+}
 static bool paged_line_item_metrics(const TypesetParagraph* paragraph, size_t index, float width,
         TypesetMetrics* metrics, void* context) {
     PagedLineMeasurement* measurement = (PagedLineMeasurement*)context;
@@ -2332,19 +2951,30 @@ static bool paged_line_item_metrics(const TypesetParagraph* paragraph, size_t in
             *metrics = {advance, height, 0.0f, height, {}, nullptr};
         }
         if (image->framed) return true;
+    } else if (((const PagedTextPaint*)payload)->current_folio) {
+        const PagedTextPaint* resolved = nullptr;
+        TypesetStatus status = paged_current_folio_payload(measurement->composer, (const PagedTextPaint*)payload, &resolved);
+        if (status != TYPESET_OK) {
+            paged_failure(measurement->composer->composition, status, payload->source,
+                measurement->composer->page ? measurement->composer->page->page_number : 0, "current folio could not be shaped");
+            return false;
+        }
+        if (resolved != payload) *metrics = resolved->query_metrics;
     }
     ViewCssStyle* parent = measurement->flow->style;
-    const FontMetrics* font = font_get_metrics(parent->font.font_handle);
-    if (!font) return false;
-    float baseline = font->ascender + (parent->line_height - font->ascender + font->descender) * 0.5f;
+    float altitude, depth;
+    if (!radiant_text_metrics(parent, &altitude, &depth)) return false;
+    float parent_height = paged_line_stacking(parent) == RADIANT_LINE_STACK_CSS
+        ? parent->line_height : altitude + depth;
+    float baseline = altitude + (parent_height - altitude - depth) * 0.5f;
     float extent = metrics->height + metrics->depth;
     const CssValue* align = paged_inline_vertical_align(parent, payload->style);
     CssEnum keyword = align && align->type == CSS_VALUE_TYPE_KEYWORD ? align->data.keyword : CSS_VALUE_BASELINE;
     float top = paged_vertical_top(measurement->composer, parent, payload->style,
-        extent, metrics->baseline, parent->line_height, baseline, width);
+        extent, metrics->baseline, parent_height, baseline, width);
     if (keyword == CSS_VALUE_TOP || keyword == CSS_VALUE_BOTTOM) {
         // top/bottom align to the completed line; they require height without moving its strut.
-        metrics->depth = fmaxf(0.0f, parent->line_height - baseline);
+        metrics->depth = fmaxf(0.0f, parent_height - baseline);
         metrics->height = fmaxf(0.0f, extent - metrics->depth);
     } else {
         metrics->height = fmaxf(0.0f, baseline - top);
@@ -2357,12 +2987,23 @@ static TypesetStatus paged_next_line(PagedComposer* composer, PagedFlowNode* flo
         float atomic_height = NAN) {
     TypesetParagraph paragraph = flow->paragraph;
     PagedLineMeasurement measurement = {composer, flow, containing_height, atomic_height};
-    if (flow->has_images) {
+    if (flow->has_line_keeps) { paragraph.context = &measurement; paragraph.choose = paged_choose_kept_line; }
+    bool atomic = flow->parent && flow->parent->image && flow->parent->image->framed;
+    bool stacked = !atomic && paged_line_stacking(flow->style) != RADIANT_LINE_STACK_CSS;
+    const RadiantFlowTraits* traits = flow->style->flow_traits.get();
+    bool nominal = traits && (traits->text_metrics_set[0] || traits->text_metrics_set[1]);
+    if (flow->has_dynamic_items || stacked || nominal) {
         paragraph.context = &measurement; paragraph.measure = paged_line_item_metrics;
-        if (paragraph.minimum_line_height > 0.0f) {
-            const FontMetrics* font = font_get_metrics(flow->style->font.font_handle);
-            if (!font) return TYPESET_UNPLACEABLE;
-            paragraph.minimum_baseline = font->ascender + (flow->style->line_height - font->ascender + font->descender) * 0.5f;
+        if (!atomic && (paragraph.minimum_line_height > 0.0f || stacked || nominal)) {
+            float altitude, depth;
+            if (!radiant_text_metrics(flow->style, &altitude, &depth)) return TYPESET_UNPLACEABLE;
+            paragraph.minimum_baseline = altitude + (flow->style->line_height - altitude - depth) * 0.5f;
+            paragraph.baseline_aware = true;
+            if (stacked) {
+                paragraph.minimum_line_height = altitude + depth;
+                paragraph.minimum_baseline = altitude;
+                paragraph.alternatives = paged_stacked_line_alternatives;
+            }
         }
     }
     return typeset_next_line(&paragraph, first, width, scratch, capacity, result);
@@ -2370,8 +3011,8 @@ static TypesetStatus paged_next_line(PagedComposer* composer, PagedFlowNode* flo
 
 static float paged_line_baseline(PagedFlowNode* flow, const TypesetLineCandidate& line) {
     if (line.baseline > 0.0f) return line.baseline;
-    const FontMetrics* metrics = font_get_metrics(flow->style->font.font_handle);
-    return (line.height - metrics->ascender + metrics->descender) * 0.5f + metrics->ascender;
+    float altitude, depth;
+    return radiant_text_metrics(flow->style, &altitude, &depth) ? (line.height - altitude - depth) * 0.5f + altitude : NAN;
 }
 
 static TypesetStatus paged_commit_line(PagedComposer* composer, PagedFlowNode* flow,
@@ -2400,7 +3041,7 @@ static TypesetStatus paged_commit_line(PagedComposer* composer, PagedFlowNode* f
         bool painted = i >= line.paint_first && i < line.paint_end;
         TypesetMetrics item_metrics = item.metrics;
         PagedLineMeasurement measurement = {composer, flow, frame->content_height, frame->replaced_height};
-        if (flow->has_images && !paged_line_item_metrics(&flow->paragraph, i, frame->content_width, &item_metrics, &measurement)) return TYPESET_UNPLACEABLE;
+        if (flow->has_dynamic_items && !paged_line_item_metrics(&flow->paragraph, i, frame->content_width, &item_metrics, &measurement)) return TYPESET_UNPLACEABLE;
         if (painted) width = item.kind == TYPESET_BOX ? item_metrics.advance :
             item.kind == TYPESET_GLUE ? (justify || expand ? typeset_glue_advance(&item.glue, &line.packing) : item.glue.natural) : 0.0f;
         LayoutViewNode* text = view_tree_fragment_append(composer->tree, paragraph, source,
@@ -2412,7 +3053,12 @@ static TypesetStatus paged_commit_line(PagedComposer* composer, PagedFlowNode* f
             if (paint_payload->kind == PAGED_PAINT_IMAGE) {
                 const PagedImagePaint* image = (const PagedImagePaint*)paint_payload;
                 PagedImageMeasure measured = {};
-                if (image->framed) { measured.width = frame->content_width; measured.height = frame->replaced_height; }
+                if (image->framed) {
+                    measured.width = frame->content_width; measured.height = frame->replaced_height;
+                    // framed images retain the content measured against the original containing block.
+                    measured.content_width = frame->replaced_content_width;
+                    measured.content_height = frame->replaced_content_height;
+                }
                 else {
                     TypesetStatus status = paged_image_measure(composer, image, frame->content_width, frame->content_height, &measured);
                     if (status != TYPESET_OK) return status;
@@ -2420,7 +3066,7 @@ static TypesetStatus paged_commit_line(PagedComposer* composer, PagedFlowNode* f
                 float box_width = measured.width + measured.box.edges[3] + measured.box.edges[1];
                 float box_height = measured.height + measured.box.edges[0] + measured.box.edges[2];
                 float extent = box_height + measured.margin[0] + measured.margin[2];
-                float baseline = line.baseline > 0.0f ? line.baseline : line.height;
+                float baseline = image->framed ? line.height : paged_line_baseline(flow, line);
                 float top = image->framed ? 0.0f : paged_vertical_top(composer, flow->style, image->style,
                     extent, extent, line.height, baseline, frame->content_width);
                 text->rect = {x + measured.margin[3], composer->y + top + measured.margin[0], box_width, box_height};
@@ -2436,11 +3082,22 @@ static TypesetStatus paged_commit_line(PagedComposer* composer, PagedFlowNode* f
                 box->raster_scale = composer->tree->model->environment.device_scale; box->opacity = image->opacity;
                 box->content_rect = {text->rect.x + measured.box.edges[3], text->rect.y + measured.box.edges[0], measured.width, measured.height};
                 box->image_rect = render_media_object_rect(&image->object, image->image, box->content_rect, 1.0f);
+                if (image->style->image_spec) {
+                    box->image_rect = render_media_positioned_rect(&image->object, box->content_rect,
+                        measured.content_width, measured.content_height, 1.0f);
+                    const CssValue* overflow = view_css_property(composer->tree, image->style, "overflow");
+                    box->overflow_visible = !overflow || css_value_keyword_equals(overflow, CSS_VALUE_VISIBLE);
+                }
                 text->image_box = lam::up(box);
                 x += width;
                 continue;
             }
             const PagedTextPaint* payload = (const PagedTextPaint*)item.paint.get();
+            if (payload->current_folio) {
+                TypesetStatus status = paged_current_folio_payload(composer, payload, &payload);
+                if (status != TYPESET_OK) return status;
+                text->text_length = static_cast<size_t>(payload->run.text_len);
+            }
             if (payload->leader) {
                 bool adjacent = false;
                 for (size_t j = line.paint_first; j < line.paint_end; j++) if (flow->items[j].kind == TYPESET_BOX) { adjacent = true; break; }
@@ -2451,8 +3108,9 @@ static TypesetStatus paged_commit_line(PagedComposer* composer, PagedFlowNode* f
             PaintGlyphRun* run = (PaintGlyphRun*)arena_alloc(composer->tree->model->arena, sizeof(PaintGlyphRun));
             if (!run) return TYPESET_OUT_OF_MEMORY;
             *run = payload->run;
-            const FontMetrics* metrics = font_get_metrics(payload->style->font.font_handle);
-            float font_height = metrics->ascender - metrics->descender;
+            float altitude, depth;
+            if (!radiant_text_metrics(payload->style, &altitude, &depth)) return TYPESET_UNPLACEABLE;
+            float font_height = altitude + depth;
             run->x = x;
             if (payload->marker_owner) {
                 float anchor = frame->content_x;
@@ -2463,8 +3121,8 @@ static TypesetStatus paged_commit_line(PagedComposer* composer, PagedFlowNode* f
             }
             float baseline = paged_line_baseline(flow, line);
             float top = paged_vertical_top(composer, style, payload->style, font_height,
-                metrics->ascender, line.height, baseline, frame->content_width);
-            run->baseline_y = composer->y + top + metrics->ascender;
+                altitude, line.height, baseline, frame->content_width);
+            run->baseline_y = composer->y + top + altitude;
             if (payload->leader) {
                 TypesetStatus status = paged_leader_run(composer, payload, x, width,
                     frame->content_x + frame->content_width, item.metrics.advance, run);
@@ -2502,7 +3160,10 @@ static TypesetStatus paged_measure_lines(PagedComposer* composer, PagedFlowNode*
 
 static TypesetStatus paged_following_style(PagedComposer* composer, ViewPageStyle* style) {
     size_t index = composer->tree->model->page_count;
-    return view_css_page_style(composer->tree, composer->page_name, static_cast<uint32_t>(index + 1),
+    PagedPageSpec spec = {};
+    TypesetStatus status = paged_page_spec(composer, index, false, &spec);
+    if (status != TYPESET_OK) return status;
+    return view_css_page_style(composer->tree, spec.name, static_cast<uint32_t>(index + 1),
         paged_side(composer, index), false, style) == VIEW_MODEL_OK ? TYPESET_OK : TYPESET_INVALID;
 }
 
@@ -2513,13 +3174,13 @@ static TypesetStatus paged_next_constraints(PagedComposer* composer, float* widt
     *width = trial.page_style.content_rect.width;
     *height = trial.page_style.content_rect.height;
     *containing_height = paged_root_height(&trial);
+    float reference_x = x, reference_width = *width;
     for (size_t i = 0; i < composer->depth; i++) {
         PagedFrame frame = {}; frame.flow = composer->frames[i].flow;
-        TypesetStatus status = paged_frame_measure(&trial, &frame, x, *width, *containing_height);
+        TypesetStatus status = paged_frame_descend(&trial, &frame, &x, width, containing_height, &reference_x, &reference_width);
         if (status != TYPESET_OK) return status;
-        x = frame.content_x; *width = frame.content_width;
-        *containing_height = frame.content_height;
-        if (frame.flow->style->decoration_clone) *height -= frame.box.edges[0] + frame.box.edges[2];
+        *height -= paged_fragment_edge(frame.flow->style, frame.box, 0, false) +
+            paged_fragment_edge(frame.flow->style, frame.box, 2, false);
     }
     return TYPESET_OK;
 }
@@ -2532,11 +3193,11 @@ static TypesetStatus paged_region_frame(PagedComposer* composer, PagedFlowNode* 
         ancestors[count++] = owner;
     }
     float x = 0.0f, width = composer->page_style.content_rect.width, height = paged_root_height(composer);
+    float reference_x = x, reference_width = width;
     for (size_t i = count; i > 0; i--) {
         *result = {}; result->flow = ancestors[i - 1]; *parent_width = width;
-        TypesetStatus status = paged_frame_measure(composer, result, x, width, height);
+        TypesetStatus status = paged_frame_descend(composer, result, &x, &width, &height, &reference_x, &reference_width);
         if (status != TYPESET_OK) return status;
-        x = result->content_x; width = result->content_width; height = result->content_height;
     }
     return count ? TYPESET_OK : TYPESET_INVALID;
 }
@@ -2546,7 +3207,11 @@ static TypesetStatus paged_region_measure(void* context, const TypesetResume* st
     PagedRegionRecord* record = (PagedRegionRecord*)context;
     PagedComposition* composition = record->tree->model->composition;
     if (record->kind != PAGED_REGION_NOTE) {
+        if (constraints->retain_tail) return TYPESET_UNPLACEABLE;
         PagedComposer measure = {}; measure.tree = record->tree; measure.composition = composition;
+        measure.page = constraints->page_number && constraints->page_number <= record->tree->model->page_count
+            ? record->tree->model->pages.get()[constraints->page_number - 1] : nullptr;
+        measure.role = VIEW_FRAGMENT_FLOAT;
         measure.page_style.content_rect = {0.0f, 0.0f, constraints->inline_size,
             constraints->reference_height > 0.0f ? constraints->reference_height : constraints->available_height};
         PagedFrame frame = {}; frame.flow = record->flow;
@@ -2574,8 +3239,14 @@ static TypesetStatus paged_region_measure(void* context, const TypesetResume* st
     if (!paint || !ancestors) return TYPESET_OUT_OF_MEMORY;
     paint->provider = record->provider;
     PagedComposer measure = {}; measure.tree = record->tree; measure.composition = composition;
+    measure.page = constraints->page_number && constraints->page_number <= record->tree->model->page_count
+        ? record->tree->model->pages.get()[constraints->page_number - 1] : nullptr;
+    measure.role = VIEW_FRAGMENT_NOTE;
     measure.page_style.content_rect = {0.0f, 0.0f, constraints->inline_size, constraints->available_height};
     TypesetResume end = *start;
+    TypesetResume before_last = *start;
+    float before_last_height = 0.0f;
+    size_t before_last_count = 0;
     float height = 0.0f;
     while (end.state[0] < record->count) {
         const PagedRegionPart& part = record->parts[end.state[0]];
@@ -2602,10 +3273,17 @@ static TypesetStatus paged_region_measure(void* context, const TypesetResume* st
         if (line.overflow) return TYPESET_UNPLACEABLE;
         if (height + line.height > constraints->available_height) break;
         if (!lam::pool_grow_array(scratch, &paint->lines, &paint->capacity, paint->count + 1, 16)) return TYPESET_OUT_OF_MEMORY;
-        paint->lines[paint->count++] = {part.flow, line, frame.replaced_height, frame.content_height, frame.content_x, frame.content_width, height};
+        before_last = end; before_last_height = height; before_last_count = paint->count;
+        paint->lines[paint->count++] = {part.flow, line, frame.replaced_height, frame.content_height,
+            frame.replaced_content_width, frame.replaced_content_height, frame.content_x, frame.content_width, height};
         height += line.height; end.state[1] = line.next; end.serial++;
     }
     bool complete = end.state[0] == record->count;
+    if (complete && constraints->retain_tail) {
+        if (!split || !before_last_count) return TYPESET_UNPLACEABLE;
+        // restore the last actual line and its closing edges to the owned continuation.
+        end = before_last; height = before_last_height; paint->count = before_last_count; complete = false;
+    }
     if ((!split && !complete) || height <= 0.0f || (!paint->count && !start->serial)) return TYPESET_UNPLACEABLE;
     *slice = {}; slice->end = end; slice->complete = complete;
     slice->metrics.height = height; slice->paint = lam::up((const TypesetRecord*)paint);
@@ -2626,7 +3304,7 @@ static TypesetStatus paged_note_area(PagedComposer* composer, PagedNoteArea* are
     ViewCssStyle* style = declarations.computed_style;
     if (!style) return TYPESET_INVALID;
     float width = composer->page_style.content_rect.width;
-    TypesetStatus status = paged_box_edges(composer, style, &declarations, width, area);
+    TypesetStatus status = paged_box_edges(composer, style, width, area);
     if (status != TYPESET_OK) return status;
     const CssValue* value = view_css_declaration_value(composer->tree, style, declarations.float_value, "float");
     if (value && !css_value_keyword_equals(value, CSS_VALUE_BOTTOM)) return TYPESET_INVALID;
@@ -2673,14 +3351,23 @@ static bool paged_regions_placed(const PagedComposer* composer) {
     return false;
 }
 
+static bool paged_region_plans_pending(const PagedComposer* composer) {
+    for (const PagedRegionState& region : composer->regions) if (region.plan.pending_count) return true;
+    return false;
+}
+
 static TypesetStatus paged_regions_trial(PagedComposer* composer, float body_height, PagedRegionTrial* trial, bool limit_notes = false) {
     float reserved = 0.0f;
+    size_t tail_region = PAGED_REGION_COUNT;
+    for (size_t i = 0; i < PAGED_REGION_COUNT; i++)
+        if (composer->composition->queues[i].count || trial->anchor_counts[i]) tail_region = i;
     for (size_t i = 0; i < PAGED_REGION_COUNT; i++) {
         TypesetRegionQueue* queue = &composer->composition->queues[i];
         if (!queue->count && !trial->anchor_counts[i]) continue;
         TypesetRegionConstraints constraints = {composer->page_style.content_rect.width,
             composer->page_style.content_rect.height, composer->page->page_number, nullptr, false,
             i != PAGED_REGION_NOTE, i == PAGED_REGION_TOP, composer->page_style.content_rect.height};
+        constraints.retain_tail = composer->retain_aux_tail && i == tail_region;
         float occupied = body_height + reserved, separator = 0.0f;
         PagedNoteArea area = {};
         if (i == PAGED_REGION_NOTE) {
@@ -2728,7 +3415,8 @@ static TypesetStatus paged_fragments_translate(ViewTree* tree, LayoutViewNode* n
             node->image_box->content_rect.y += dy;
             node->image_box->image_rect.y += dy;
         }
-        TypesetStatus status = paged_fragments_translate(tree, node->first_child, dy, body_only);
+        // select body roots once; repeated table furniture remains part of the moved subtree.
+        TypesetStatus status = paged_fragments_translate(tree, node->first_child, dy, false);
         if (status != TYPESET_OK) return status;
     }
     return TYPESET_OK;
@@ -2790,6 +3478,8 @@ static TypesetStatus paged_region_emit(PagedComposer* composer, LayoutViewNode* 
         const PagedRegionLine& line = paint->lines[j];
         frame.flow = line.flow; frame.content_x = rect.x + line.x; frame.content_width = line.width;
         frame.replaced_height = line.atomic_height;
+        frame.replaced_content_width = line.replaced_content_width;
+        frame.replaced_content_height = line.replaced_content_height;
         frame.content_height = line.containing_height;
         region.y = rect.y + line.y;
         TypesetStatus status = paged_commit_line(&region, line.flow, line.line);
@@ -2825,17 +3515,26 @@ static TypesetStatus paged_regions_close_trial(PagedComposer* composer) {
         trial.anchor_counts[i] = composer->regions[i].anchor_count;
         active |= composer->regions[i].plan.scratch != nullptr;
     }
-    if (!active) return TYPESET_OK;
     // Declared block extents and closing decorations participate in the final reservation.
     float body_height = composer->y - composer->page_style.content_rect.y - composer->regions[PAGED_REGION_TOP].plan.reserved_height;
-    TypesetStatus status = paged_regions_trial(composer, body_height, &trial);
+    TypesetStatus status = active ? paged_regions_trial(composer, body_height, &trial) : TYPESET_OK;
     if (status != TYPESET_OK) {
         composer->closure_failure = status == TYPESET_UNPLACEABLE;
         return paged_failure(composer->composition, status, nullptr,
             composer->page->page_number, "closing body extents exceed the reserved page regions");
     }
-    status = paged_regions_accept(composer, &trial);
+    if (active) status = paged_regions_accept(composer, &trial);
     if (status != TYPESET_OK) return status;
+    const RadiantPageRegion* body = composer->page_style.body_region;
+    if (!composer->body_aligned && composer->page && body && body->align != RADIANT_REGION_ALIGN_BEFORE) {
+        float free_height = composer->page_style.content_rect.height - body_height - paged_region_reserved(composer) -
+            composer->regions[PAGED_REGION_TOP].plan.reserved_height;
+        float offset = free_height * (body->align == RADIANT_REGION_ALIGN_CENTER ? 0.5f : 1.0f);
+        // alignment is final placement; pagination extents and insertion reservations stay authoritative.
+        if (offset != 0.0f) status = paged_fragments_translate(composer->tree, composer->page->node.first_child, offset, true);
+        if (status != TYPESET_OK) return status;
+    }
+    composer->body_aligned = true;
     for (size_t i = 0; i < PAGED_REGION_COUNT; i++) {
         PagedRegionState* region = &composer->regions[i];
         TypesetRegionPlan* plan = &region->plan;
@@ -2857,12 +3556,47 @@ static TypesetStatus paged_regions_close(PagedComposer* composer) {
     return status == TYPESET_OK ? checkpoint.accept() : checkpoint.fail(status);
 }
 
+static TypesetStatus paged_regions_drain(PagedComposer* composer) {
+    const RadiantPageSequence* pending_sequence = composer->sequence;
+    const char* pending_name = composer->page_name;
+    size_t depth = composer->depth;
+    // auxiliary-only pages belong to the sequence that produced the queue, before any following body.
+    const RadiantPageSequence* sequence = composer->page ? composer->page->sequence.get() : nullptr;
+    composer->sequence = sequence;
+    if (sequence) composer->page_name = sequence->master_reference;
+    composer->depth = 0;
+    TypesetStatus status = TYPESET_OK;
+    while (status == TYPESET_OK && paged_regions_pending(composer)) {
+        composer->terminal_page = 0;
+        status = paged_page_create(composer, false);
+        if (status != TYPESET_OK) break;
+        status = paged_regions_prepare(composer);
+        bool ordinary_finished = status == TYPESET_OK && !paged_region_plans_pending(composer);
+        if (sequence && sequence->master_program && sequence->master_program->terminal &&
+            (status == TYPESET_OK || status == TYPESET_UNPLACEABLE) && !paged_sequence_padding(composer->page, sequence->next)) {
+            composer->terminal_page = composer->page->page_number;
+            status = paged_empty_page_restyle(composer, false);
+            if (status == TYPESET_UNPLACEABLE || (status == TYPESET_OK && paged_region_plans_pending(composer))) {
+                composer->terminal_page = 0;
+                composer->retain_aux_tail = ordinary_finished;
+                status = paged_empty_page_restyle(composer, false);
+            }
+        }
+        if (status == TYPESET_OK) status = paged_regions_close(composer);
+    }
+    composer->depth = depth;
+    composer->sequence = pending_sequence; composer->page_name = pending_name;
+    composer->terminal_page = 0; composer->retain_aux_tail = false;
+    return status;
+}
+
 static float paged_tail_edges(const PagedComposer* composer, bool closes) {
     float extent = 0.0f;
     for (size_t i = composer->depth; i > 0; i--) {
         const PagedFrame& frame = composer->frames[i - 1];
-        extent += frame.table_footer_height;
-        if (closes || frame.flow->style->decoration_clone) extent += frame.box.edges[2];
+        extent += frame.table_footer_height > 0.0f && paged_table_omits(frame.flow, true) && !closes && !frame.table_terminal
+            ? frame.flow->table_spacing_v : frame.table_footer_height;
+        extent += paged_fragment_edge(frame.flow->style, frame.box, 2, closes);
         closes = closes && !frame.flow->next;
     }
     return extent;
@@ -2893,9 +3627,6 @@ static TypesetStatus paged_regions_for_lines(PagedComposer* composer, PagedFlowN
 static TypesetStatus paged_flow_cursor_copy(void*, const TypesetResume* cursor, TypesetResume* copied) {
     *copied = *cursor; return TYPESET_OK;
 }
-static size_t paged_choose_last(void*, const TypesetPageCandidate*, size_t count) { return count - 1; }
-static TypesetAssemblyAction paged_finalize(void*, const TypesetPageCandidate*) { return TYPESET_ASSEMBLY_FINALIZE; }
-
 static size_t paged_block_note_prefix(PagedFlowNode* flow, const TypesetLineCandidate* lines, size_t count) {
     size_t prefix = 0;
     for (size_t i = 0; i < count; i++) for (size_t j = lines[i].first; j < lines[i].next; j++) {
@@ -2905,13 +3636,20 @@ static size_t paged_block_note_prefix(PagedFlowNode* flow, const TypesetLineCand
     return prefix;
 }
 
-static TypesetStatus paged_flow_height(PagedComposer* composer, PagedFlowNode* flow,
-        float parent_width, float parent_height, bool leading, float* result, bool* forced,
-        bool allow_overflow, float* baseline) {
-    *result = 0.0f;
-    if (baseline) *baseline = -1.0f;
-    if (paged_is_table_grid(flow))
-        return paged_table_height(composer, flow, parent_width, parent_height, leading, result, forced);
+struct PagedHeightMeasurement {
+    PagedComposer composer = {};
+    float baseline = -1.0f;
+    float before = -1.0f;
+    ~PagedHeightMeasurement() {
+        Pool* pool = composer.composition->pool;
+        if (composer.frames) pool_free(pool, composer.frames);
+        if (composer.spaces) pool_free(pool, composer.spaces);
+    }
+};
+
+static TypesetStatus paged_flow_height_inner(PagedHeightMeasurement* measurement, PagedFlowNode* flow,
+        float parent_width, float parent_height, bool leading, bool* forced, bool allow_overflow) {
+    PagedComposer* composer = &measurement->composer;
     if (flow->kind == PAGED_FLOW_PARAGRAPH) {
         size_t capacity = flow->paragraph.count;
         if (!capacity) return TYPESET_OK;
@@ -2924,39 +3662,85 @@ static TypesetStatus paged_flow_height(PagedComposer* composer, PagedFlowNode* f
             TypesetLineCandidate line = {};
             status = paged_next_line(composer, flow, first, parent_width, parent_height, scratch, capacity, &line);
             if (status != TYPESET_OK || (line.overflow && !allow_overflow)) { if (status == TYPESET_OK) status = TYPESET_UNPLACEABLE; break; }
-            if (baseline && *baseline < 0.0f && line.height > 0.0f)
-                *baseline = *result + paged_line_baseline(flow, line);
-            *result += line.height; first = line.next; count++;
+            if (line.height > 0.0f) status = paged_space_flush(composer);
+            if (status != TYPESET_OK) break;
+            if (measurement->baseline < 0.0f && line.height > 0.0f)
+                measurement->baseline = composer->y + paged_line_baseline(flow, line);
+            if (measurement->before < 0.0f && composer->depth == 1 && line.height > 0.0f)
+                measurement->before = composer->y;
+            composer->y += line.height; first = line.next; count++;
+            if (line.height > 0.0f) composer->page_has_content = true;
         }
         pool_free(pool, scratch);
         return status;
     }
     PagedFrame frame = {}; frame.flow = flow;
-    TypesetStatus status = paged_frame_measure(composer, &frame, 0.0f, parent_width, parent_height);
+    TypesetStatus status = flow->style->flow_traits ? paged_space_append(composer, flow->style->flow_traits->before) : TYPESET_OK;
+    if (status == TYPESET_OK) status = paged_frame_measure(composer, &frame, 0.0f, parent_width, parent_height);
     if (status != TYPESET_OK) return status;
-    if (flow->image) {
-        *result = frame.box.edges[0] + frame.replaced_height + frame.box.edges[2];
-        return TYPESET_OK;
-    }
-    float height = frame.box.edges[0], pending = 0.0f;
-    for (PagedFlowNode* child = flow->first_child; child; child = child->next) {
-        if (child->style->break_before >= VIEW_BREAK_PAGE || child->style->break_after >= VIEW_BREAK_PAGE) *forced = true;
-        float top = paged_flow_margin(composer, child, 0, frame.content_width);
-        height += layout_collapse_margins(pending, top);
-        float child_height = 0.0f, child_baseline = -1.0f;
-        status = paged_flow_height(composer, child, frame.content_width, frame.content_height, leading,
-            &child_height, forced, allow_overflow, baseline && *baseline < 0.0f ? &child_baseline : nullptr);
+    if (frame.box.edges[0] != 0.0f || paged_is_table_grid(flow) || flow->image) status = paged_space_flush(composer);
+    if (status != TYPESET_OK) return status;
+    if (paged_is_table_grid(flow) || flow->image) {
+        if (measurement->before < 0.0f && composer->depth == 1)
+            measurement->before = composer->y + frame.box.edges[0];
+        float height = frame.box.edges[0] + frame.replaced_height + frame.box.edges[2];
+        if (paged_is_table_grid(flow)) status = paged_table_height(composer, flow, parent_width, parent_height, leading, &height, forced);
         if (status != TYPESET_OK) return status;
-        if (baseline && *baseline < 0.0f && child_baseline >= 0.0f) *baseline = height + child_baseline;
-        height += child_height;
-        pending = paged_flow_margin(composer, child, 2, frame.content_width);
-        if (leading && child_height > 0.0f) break;
+        composer->y += height;
+        if (height > 0.0f) composer->page_has_content = true;
+    } else {
+        if (!lam::pool_grow_array(composer->composition->pool, &composer->frames, &composer->frame_capacity,
+            composer->depth + 1, 16)) return TYPESET_OUT_OF_MEMORY;
+        size_t index = composer->depth++; frame.page_start = composer->y; composer->frames[index] = frame;
+        composer->y += frame.box.edges[0];
+        float pending = 0.0f;
+        for (PagedFlowNode* child = flow->first_child; child; child = child->next) {
+            if (child->style->break_before >= VIEW_BREAK_PAGE || child->style->break_after >= VIEW_BREAK_PAGE) *forced = true;
+            float top = paged_flow_margin(composer, child, 0, frame.content_width);
+            if (top || pending) status = paged_space_flush(composer);
+            if (status != TYPESET_OK) return status;
+            composer->y += layout_collapse_margins(pending, top);
+            float start = composer->y;
+            status = paged_flow_height_inner(measurement, child, frame.content_width, frame.content_height, leading, forced, allow_overflow);
+            if (status != TYPESET_OK) return status;
+            pending = paged_flow_margin(composer, child, 2, frame.content_width);
+            if (leading && composer->y > start) break;
+        }
+        if (flow->kind == PAGED_FLOW_TABLE_WRAPPER) composer->y += pending;
+        if (frame.box.edges[2] != 0.0f || frame.content_height > 0.0f) status = paged_space_flush(composer);
+        if (status != TYPESET_OK) return status;
+        float start = composer->frames[index].page_start;
+        // relative-before aligns the first child's content edge, including that child's decoration.
+        if (measurement->before < 0.0f && index == 1) measurement->before = start + frame.box.edges[0];
+        composer->y = start + frame.box.edges[0] + fmaxf(composer->y - start - frame.box.edges[0], frame.content_height) + frame.box.edges[2];
+        if (measurement->baseline < 0.0f && flow->table_cell) measurement->baseline = composer->y - frame.box.edges[2];
+        composer->depth--;
+        if (composer->space_count && composer->space_depth > composer->depth) composer->space_depth = composer->depth;
     }
-    if (flow->kind == PAGED_FLOW_TABLE_WRAPPER) height += pending;
-    *result = frame.box.edges[0] + fmaxf(height - frame.box.edges[0], frame.content_height) + frame.box.edges[2];
-    // a cell without an in-flow line uses its bottom content edge, including specified height.
-    if (baseline && *baseline < 0.0f && flow->table_cell) *baseline = *result - frame.box.edges[2];
-    return TYPESET_OK;
+    return flow->style->flow_traits ? paged_space_append(composer, flow->style->flow_traits->after) : TYPESET_OK;
+}
+
+static TypesetStatus paged_flow_height(PagedComposer* composer, PagedFlowNode* flow,
+        float parent_width, float parent_height, bool leading, float* result, bool* forced,
+        bool allow_overflow, float* baseline, float* before) {
+    // pure measurement shares space resolution and font/box metrics with replay, without publishing occurrences.
+    PagedHeightMeasurement measurement;
+    measurement.composer.tree = composer->tree; measurement.composer.composition = composer->composition;
+    measurement.composer.page = composer->page; measurement.composer.page_style = composer->page_style;
+    measurement.composer.role = composer->role;
+    measurement.composer.page_style.content_rect.x = measurement.composer.page_style.content_rect.y = 0.0f;
+    if (composer->depth) {
+        float reference_x;
+        paged_reference_geometry(composer, composer->depth, &reference_x, &measurement.composer.page_style.content_rect.width);
+    }
+    measurement.composer.initial_containing_block = composer->initial_containing_block;
+    measurement.composer.atomic_fragment = true;
+    TypesetStatus status = paged_flow_height_inner(&measurement, flow, parent_width, parent_height, leading, forced, allow_overflow);
+    if (status == TYPESET_OK) status = paged_space_flush(&measurement.composer, true);
+    *result = measurement.composer.y;
+    if (baseline) *baseline = measurement.baseline;
+    if (before) *before = measurement.before;
+    return status;
 }
 
 static TypesetStatus paged_intrinsic_admit(PagedComposer* composer, ViewCssStyle* style, bool cell) {
@@ -3001,7 +3785,7 @@ static TypesetStatus paged_flow_intrinsic(PagedComposer* composer, PagedFlowNode
         if (!scratch) return TYPESET_OUT_OF_MEMORY;
         TypesetParagraph paragraph = flow->paragraph;
         PagedIntrinsicMeasurement measurement = {{composer, flow, NAN, NAN}, basis};
-        if (flow->has_images) { paragraph.context = &measurement; paragraph.measure = paged_intrinsic_item_metrics; }
+        if (flow->has_dynamic_items) { paragraph.context = &measurement; paragraph.measure = paged_intrinsic_item_metrics; }
         // use the producer's legal boundaries and glue trimming for both intrinsic extremes.
         const float widths[] = {FLT_MIN, FLT_MAX};
         float* results[] = {&result->minimum, &result->maximum};
@@ -3041,7 +3825,7 @@ static TypesetStatus paged_flow_intrinsic(PagedComposer* composer, PagedFlowNode
         result->maximum = fmaxf(result->maximum, widths.maximum);
     }
     PagedBoxEdges box = {};
-    TypesetStatus status = paged_box_edges(composer, style, nullptr, isfinite(basis) ? basis : 0.0f, &box);
+    TypesetStatus status = paged_box_edges(composer, style, isfinite(basis) ? basis : 0.0f, &box);
     if (status != TYPESET_OK) return status;
     float edges = box.edges[3] + box.edges[1];
     auto outer = [&](const CssValue* value, CssPropertyCode property, float fallback) {
@@ -3071,18 +3855,6 @@ static TypesetStatus paged_flow_intrinsic(PagedComposer* composer, PagedFlowNode
 
 struct PagedTableSpanMeasure { size_t column, span, order; PagedIntrinsic widths; };
 
-template <typename Fn>
-static TypesetStatus paged_table_columns_visit(PagedFlowNode* table, Fn fn) {
-    for (PagedFlowNode* source = table->column_sources; source; source = source->next) {
-        TypesetStatus status = fn(source);
-        if (status != TYPESET_OK) return status;
-        for (PagedFlowNode* child = source->first_child; child; child = child->next) {
-            status = fn(child);
-            if (status != TYPESET_OK) return status;
-        }
-    }
-    return TYPESET_OK;
-}
 
 static ViewCssStyle* paged_table_column_width_style(PagedFlowNode* column, bool fixed) {
     ViewCssStyle* style = column->style;
@@ -3183,13 +3955,19 @@ static TypesetStatus paged_table_tracks(PagedComposer* composer, PagedFlowNode* 
     Pool* pool = composer->composition->pool;
     PagedTableTracks* tracks = (PagedTableTracks*)pool_calloc(pool, sizeof(PagedTableTracks));
     float* columns = (float*)pool_calloc(pool, table->columns * sizeof(float));
-    if (!tracks || !columns) return TYPESET_OUT_OF_MEMORY;
+    float* proportions = table->table_proportional ? (float*)pool_calloc(pool, table->columns * sizeof(float)) : nullptr;
+    if (!tracks || !columns || (table->table_proportional && !proportions)) return TYPESET_OUT_OF_MEMORY;
     // spacing belongs to the grid, so percentages and column distribution share the remaining track width.
     float available = width - paged_table_spacing_width(table);
     if (!isfinite(available) || available <= 0.0f) return paged_failure(composer->composition,
         TYPESET_UNPLACEABLE, table->source, composer->page ? composer->page->page_number : 0,
         "table spacing leaves no room for its tracks");
-    if (table->table_fixed) {
+    if (paged_is_label_body_grid(table)) {
+        // the gap is outside both decorated cells, rather than padding or outer table spacing.
+        if (!radiant_label_body_size(radiant_label_body_geometry(table->style), available, &columns[0], &tracks->label_gap, &columns[1]))
+            return paged_failure(composer->composition, TYPESET_INVALID, table->source, 0,
+                "label/body geometry overlaps or leaves a nonpositive part width");
+    } else if (table->table_fixed) {
         PagedFlowNode* first = nullptr;
         for (PagedFlowNode* row = table->first_child; row; row = row->next) {
             if (row->table_group == PAGED_TABLE_HEADER) { first = row; break; }
@@ -3198,10 +3976,12 @@ static TypesetStatus paged_table_tracks(PagedComposer* composer, PagedFlowNode* 
         TypesetStatus status = paged_table_columns_visit(table, [&](PagedFlowNode* column) {
             if (column->first_child) return TYPESET_OK;
             ViewCssStyle* style = paged_table_column_width_style(column, true);
+            float proportion = style->flow_traits ? style->flow_traits->column_proportion : 0.0f;
+            if (proportions) for (size_t i = column->column; i < column->column + column->column_span; i++) proportions[i] = proportion;
             float value = paged_used_length(composer, style, style->width, CSS_PROPERTY_WIDTH, available, NAN);
             if (!isfinite(value)) return !style->width || css_value_is_auto(style->width) ? TYPESET_OK :
                 paged_failure(composer->composition, TYPESET_INVALID, column->source, 0, "column width must resolve in its table track budget");
-            if (value <= 0.0f) return paged_failure(composer->composition, TYPESET_INVALID, column->source, 0,
+            if (value < 0.0f || (value == 0.0f && proportion == 0.0f)) return paged_failure(composer->composition, TYPESET_INVALID, column->source, 0,
                 "zero-width fixed columns require a zero-track continuation policy");
             for (size_t i = column->column; i < column->column + column->column_span; i++) columns[i] = value;
             return TYPESET_OK;
@@ -3213,27 +3993,30 @@ static TypesetStatus paged_table_tracks(PagedComposer* composer, PagedFlowNode* 
             float value = paged_used_length(composer, style, style->width, CSS_PROPERTY_WIDTH, available, NAN);
             if (isfinite(value)) {
                 PagedBoxEdges box = {};
-                TypesetStatus status = paged_box_edges(composer, style, nullptr, width, &box);
+                TypesetStatus status = paged_box_edges(composer, style, width, &box);
                 if (status != TYPESET_OK) return status;
                 float outer = value + (style->box_sizing == CSS_VALUE_BORDER_BOX ? 0.0f : box.edges[3] + box.edges[1]);
                 float each = fmaxf(0.0f, outer - (cell->column_span - 1) * table->table_spacing_h) / cell->column_span;
                 // first-row widths only fill tracks without an explicit column width.
                 for (size_t i = cell->column; i < cell->column + cell->column_span; i++)
-                    if (columns[i] == 0.0f) columns[i] = each;
+                    if (columns[i] == 0.0f && (!proportions || proportions[i] == 0.0f)) columns[i] = each;
             }
         }
         for (size_t i = 0; i < table->columns; i++) {
             specified += columns[i];
-            if (columns[i] == 0.0f) unspecified++;
+            if (columns[i] == 0.0f) {
+                unspecified++;
+                if (proportions && proportions[i] == 0.0f) proportions[i] = 1.0f;
+            }
         }
         float used = available;
-        layout_table_distribute_fixed_columns(columns, table->columns, &used, specified, unspecified);
+        layout_table_distribute_fixed_columns(columns, table->columns, &used, specified, unspecified, proportions);
         float sum = 0.0f;
         for (size_t i = 0; i < table->columns; i++) sum += columns[i];
         if (used > available) return paged_failure(composer->composition, TYPESET_UNPLACEABLE, table->source,
             composer->page ? composer->page->page_number : 0, "fixed table tracks exceed their page region");
         // all-definite tracks share excess width; retain the author's table extent.
-        if (!unspecified && sum < available)
+        if (!proportions && !unspecified && sum < available)
             for (size_t i = 0; i < table->columns; i++) columns[i] += (available - sum) / table->columns;
     } else {
         TypesetStatus status = paged_table_measure(composer, table);
@@ -3248,7 +4031,7 @@ static TypesetStatus paged_table_tracks(PagedComposer* composer, PagedFlowNode* 
         if (!isfinite(columns[i]) || columns[i] <= 0.0f) return TYPESET_UNPLACEABLE;
         total += columns[i];
     }
-    if (total > available + 0.01f) return paged_failure(composer->composition, TYPESET_UNPLACEABLE, table->source,
+    if (total + tracks->label_gap > available + 0.01f) return paged_failure(composer->composition, TYPESET_UNPLACEABLE, table->source,
         composer->page ? composer->page->page_number : 0, "table tracks exceed their page region");
     tracks->width = width; tracks->columns = columns; tracks->next = table->table_tracks;
     table->table_tracks = tracks; *result = tracks;
@@ -3271,7 +4054,7 @@ static float paged_table_column_x(const PagedFrame* frame, size_t column, PagedT
     float preceding = layout_table_span_width(tracks->columns, frame->flow->columns, 0,
         column, frame->flow->table_spacing_h);
     return frame->content_x + frame->flow->table_spacing_h + preceding +
-        (column ? frame->flow->table_spacing_h : 0.0f);
+        (column ? frame->flow->table_spacing_h + tracks->label_gap : 0.0f);
 }
 
 static TypesetStatus paged_table_column_open(PagedComposer* composer, PagedFrame* frame,
@@ -3357,32 +4140,50 @@ static ViewBreak paged_flow_break(PagedFlowNode* flow, bool before) {
     return own == VIEW_BREAK_AVOID || group == VIEW_BREAK_AVOID ? VIEW_BREAK_AVOID : own;
 }
 
-static bool paged_table_cell_baseline(PagedFlowNode* cell) {
+static PagedCellAnchor paged_table_cell_anchor(PagedFlowNode* cell) {
+    if (cell->style->flow_traits && cell->style->flow_traits->relative_cell_before) return PAGED_CELL_BEFORE;
     // CSS 2.2 maps every cell alignment other than top/middle/bottom to baseline.
     const CssValue* align = cell->style->vertical_align;
     return !css_value_keyword_equals(align, CSS_VALUE_TOP) &&
-        !css_value_keyword_equals(align, CSS_VALUE_MIDDLE) && !css_value_keyword_equals(align, CSS_VALUE_BOTTOM);
+        !css_value_keyword_equals(align, CSS_VALUE_MIDDLE) && !css_value_keyword_equals(align, CSS_VALUE_BOTTOM) ?
+        PAGED_CELL_BASELINE : PAGED_CELL_UNALIGNED;
+}
+
+static TypesetStatus paged_table_cell_measure(PagedComposer* composer, PagedFlowNode* cell,
+        float width, float containing_height, float* height, bool* forced, float* anchor) {
+    PagedCellAnchor kind = paged_table_cell_anchor(cell);
+    *anchor = -1.0f;
+    TypesetStatus status = paged_flow_height(composer, cell, width, containing_height,
+        false, height, forced, false, kind == PAGED_CELL_BASELINE ? anchor : nullptr,
+        kind == PAGED_CELL_BEFORE ? anchor : nullptr);
+    if (status == TYPESET_OK && kind == PAGED_CELL_BEFORE && *anchor < 0.0f) {
+        PagedBoxEdges box = {};
+        status = paged_box_edges(composer, cell->style, width, &box);
+        *anchor = box.edges[0];
+    }
+    return status;
 }
 
 static TypesetStatus paged_table_row_minimum(PagedComposer* composer, PagedFlowNode* row,
-        PagedTableTracks* tracks, float containing_height, float* height, bool* forced, float* baseline = nullptr) {
+        PagedTableTracks* tracks, float containing_height, float* height, bool* forced, PagedTableAlignment* alignment = nullptr) {
     *height = fmaxf(0.0f, paged_used_length(composer, row->style, row->style->height,
         CSS_PROPERTY_HEIGHT, tracks->width, 0.0f, containing_height));
-    float ascent = 0.0f, descent = 0.0f;
+    PagedTableAlignment ascent = {}, descent = {};
     for (PagedFlowNode* cell = row->first_child; cell; cell = cell->next) {
-        float extent = 0.0f, cell_baseline = -1.0f;
-        TypesetStatus status = paged_flow_height(composer, cell, paged_table_cell_width(cell, tracks),
-            containing_height, false, &extent, forced, false, paged_table_cell_baseline(cell) ? &cell_baseline : nullptr);
+        float extent = 0.0f, cell_anchor = -1.0f;
+        TypesetStatus status = paged_table_cell_measure(composer, cell, paged_table_cell_width(cell, tracks),
+            containing_height, &extent, forced, &cell_anchor);
         if (status != TYPESET_OK) return status;
         // spanning cells supply their first-row baseline, but defer their height to the span.
         if (cell->row_span == 1) *height = fmaxf(*height, extent);
-        if (cell_baseline >= 0.0f) {
-            ascent = fmaxf(ascent, cell_baseline);
-            if (cell->row_span == 1) descent = fmaxf(descent, extent - cell_baseline);
+        if (cell_anchor >= 0.0f) {
+            PagedCellAnchor kind = paged_table_cell_anchor(cell);
+            ascent.anchors[kind] = fmaxf(ascent.anchors[kind], cell_anchor);
+            if (cell->row_span == 1) descent.anchors[kind] = fmaxf(descent.anchors[kind], extent - cell_anchor);
         }
     }
-    *height = fmaxf(*height, ascent + descent);
-    if (baseline) *baseline = ascent;
+    for (size_t i = 0; i < PAGED_CELL_UNALIGNED; i++) *height = fmaxf(*height, ascent.anchors[i] + descent.anchors[i]);
+    if (alignment) *alignment = ascent;
     return TYPESET_OK;
 }
 
@@ -3397,22 +4198,22 @@ static TypesetStatus paged_table_rows_measure(PagedComposer* composer, PagedFlow
         if (!rows) return TYPESET_OUT_OF_MEMORY;
         rows->containing_height = containing_height;
         rows->heights = (float*)pool_calloc(pool, table->row_count * sizeof(float));
-        rows->baselines = (float*)pool_calloc(pool, table->row_count * sizeof(float));
-        if (!rows->heights || !rows->baselines) return TYPESET_OUT_OF_MEMORY;
+        rows->alignments = (PagedTableAlignment*)pool_calloc(pool, table->row_count * sizeof(PagedTableAlignment));
+        if (!rows->heights || !rows->alignments) return TYPESET_OUT_OF_MEMORY;
         for (size_t i = 0; i < table->row_count; i++) {
             TypesetStatus status = paged_table_row_minimum(composer, table->table_rows[i], tracks,
-                containing_height, &rows->heights[i], &rows->forced, &rows->baselines[i]);
+                containing_height, &rows->heights[i], &rows->forced, &rows->alignments[i]);
             if (status != TYPESET_OK) return status;
         }
         for (size_t i = 0; i < table->row_count; i++)
             for (PagedFlowNode* cell = table->table_rows[i]->first_child; cell; cell = cell->next) {
                 if (cell->row_span <= 1) continue;
-                float extent = 0.0f, cell_baseline = -1.0f;
-                TypesetStatus status = paged_flow_height(composer, cell, paged_table_cell_width(cell, tracks),
-                    containing_height, false, &extent, &rows->forced, false,
-                    paged_table_cell_baseline(cell) ? &cell_baseline : nullptr);
+                float extent = 0.0f, cell_anchor = -1.0f;
+                TypesetStatus status = paged_table_cell_measure(composer, cell, paged_table_cell_width(cell, tracks),
+                    containing_height, &extent, &rows->forced, &cell_anchor);
                 if (status != TYPESET_OK) return status;
-                if (cell_baseline >= 0.0f) extent += fmaxf(0.0f, rows->baselines[i] - cell_baseline);
+                if (cell_anchor >= 0.0f)
+                    extent += fmaxf(0.0f, rows->alignments[i].anchors[paged_table_cell_anchor(cell)] - cell_anchor);
                 layout_table_distribute_rowspan_height(rows->heights, table->row_count, i, cell->row_span,
                     extent, table->table_spacing_v, i + cell->row_span - 1);
             }
@@ -3424,14 +4225,14 @@ static TypesetStatus paged_table_rows_measure(PagedComposer* composer, PagedFlow
 }
 
 static TypesetStatus paged_table_row_height(PagedComposer* composer, PagedFlowNode* row,
-        PagedTableTracks* tracks, float containing_height, float* height, bool* forced, float* baseline = nullptr) {
+        PagedTableTracks* tracks, float containing_height, float* height, bool* forced, PagedTableAlignment* alignment = nullptr) {
     if (!row->parent->has_rowspans)
-        return paged_table_row_minimum(composer, row, tracks, containing_height, height, forced, baseline);
+        return paged_table_row_minimum(composer, row, tracks, containing_height, height, forced, alignment);
     PagedTableRows* rows = nullptr;
     TypesetStatus status = paged_table_rows_measure(composer, row->parent, tracks, containing_height, &rows);
     if (status != TYPESET_OK) return status;
     *height = rows->heights[row->row_index]; *forced |= rows->forced;
-    if (baseline) *baseline = rows->baselines[row->row_index];
+    if (alignment) *alignment = rows->alignments[row->row_index];
     return TYPESET_OK;
 }
 
@@ -3486,8 +4287,10 @@ static LayoutViewNode* paged_table_row_box(PagedComposer* composer, PagedFrame* 
 }
 
 static float paged_table_cell_offset(PagedFlowNode* cell, float height, float natural_height,
-        float row_baseline = 0.0f, float cell_baseline = -1.0f) {
-    if (paged_table_cell_baseline(cell)) return cell_baseline >= 0.0f ? fmaxf(0.0f, row_baseline - cell_baseline) : 0.0f;
+        const PagedTableAlignment& alignment, float cell_anchor = -1.0f) {
+    PagedCellAnchor kind = paged_table_cell_anchor(cell);
+    if (kind != PAGED_CELL_UNALIGNED)
+        return cell_anchor >= 0.0f ? fmaxf(0.0f, alignment.anchors[kind] - cell_anchor) : 0.0f;
     const CssValue* align = cell->style->vertical_align;
     auto valign = css_value_keyword_equals(align, CSS_VALUE_MIDDLE) ? TableCellProp::CELL_VALIGN_MIDDLE :
         css_value_keyword_equals(align, CSS_VALUE_BOTTOM) ? TableCellProp::CELL_VALIGN_BOTTOM : TableCellProp::CELL_VALIGN_TOP;
@@ -3495,7 +4298,7 @@ static float paged_table_cell_offset(PagedFlowNode* cell, float height, float na
 }
 
 static TypesetStatus paged_table_row_emit(PagedComposer* composer, PagedFrame* frame,
-        PagedFlowNode* row, PagedTableTracks* tracks, float height, float row_baseline, ViewFragmentRole role) {
+        PagedFlowNode* row, PagedTableTracks* tracks, float height, const PagedTableAlignment& alignment, ViewFragmentRole role) {
     LayoutViewNode* box = paged_table_row_box(composer, frame, row, height, role);
     if (!box) return TYPESET_OUT_OF_MEMORY;
     TypesetStatus status = paged_mark_enter(composer, row->source);
@@ -3511,9 +4314,10 @@ static TypesetStatus paged_table_row_emit(PagedComposer* composer, PagedFrame* f
         if (!lam::pool_grow_array(composer->composition->pool, &nested.frames, &nested.frame_capacity, 1, 16))
             return TYPESET_OUT_OF_MEMORY;
         nested.depth = 1; nested.frames[0] = containing;
-        float natural_height = 0.0f, cell_baseline = -1.0f, measured_height = 0.0f; bool forced = false;
-        if (paged_table_cell_baseline(cell)) status = paged_flow_height(composer, cell, containing.content_width,
-            containing.content_height, false, &measured_height, &forced, false, &cell_baseline);
+        float natural_height = 0.0f, cell_anchor = -1.0f, measured_height = 0.0f; bool forced = false;
+        if (paged_table_cell_anchor(cell) != PAGED_CELL_UNALIGNED)
+            status = paged_table_cell_measure(composer, cell, containing.content_width,
+                containing.content_height, &measured_height, &forced, &cell_anchor);
         if (status == TYPESET_OK) status = paged_fixed_flow(&nested, cell, &natural_height);
         if (status == TYPESET_OK) {
             LayoutViewNode* occurrence = box->last_child;
@@ -3530,7 +4334,7 @@ static TypesetStatus paged_table_row_emit(PagedComposer* composer, PagedFrame* f
                 }
                 occurrence->rect.height = cell_height;
                 if (!cell->source || frame->flow->column_sources) status = paged_table_range_publish(composer->tree, occurrence, cell);
-                float offset = paged_table_cell_offset(cell, cell_height, natural_height, row_baseline, cell_baseline);
+                float offset = paged_table_cell_offset(cell, cell_height, natural_height, alignment, cell_anchor);
                 if (status == TYPESET_OK && offset != 0.0f) status = paged_fragments_translate(composer->tree, occurrence->first_child, offset, false);
             }
         }
@@ -3540,128 +4344,313 @@ static TypesetStatus paged_table_row_emit(PagedComposer* composer, PagedFrame* f
     return status;
 }
 
+struct PagedCellChunk {
+    PagedCellChunk* next_chunk;
+    const PagedCellLeaf* leaf;
+    PagedFrame* frames;
+    TypesetLineCandidate* lines;
+    size_t depth, count, first, next;
+};
 struct PagedTableCellSlice {
     PagedFlowNode* cell;
-    PagedFlowNode* paragraph;
-    PagedFrame frame;
-    TypesetLineCandidate* lines;
-    size_t count, next;
-    float height, baseline, offset;
+    PagedCellChunk* chunks;
+    PagedCellChunk* last_chunk;
+    PagedFrame outer;
+    size_t first, next;
+    float height, anchor, offset;
+    bool active;
 };
+static void paged_cell_chunk_free(Pool* pool, PagedCellChunk* chunk) {
+    if (chunk->lines) pool_free(pool, chunk->lines);
+    if (chunk->frames) pool_free(pool, chunk->frames);
+    pool_free(pool, chunk);
+}
 struct PagedTableSlice {
     Pool* pool;
     PagedTableCellSlice* cells;
     size_t count;
-    float baseline;
-    ~PagedTableSlice() {
-        if (cells) {
-            for (size_t i = 0; i < count; i++) if (cells[i].lines) pool_free(pool, cells[i].lines);
-            pool_free(pool, cells);
+    PagedTableAlignment alignment;
+    ~PagedTableSlice() { clear(); }
+    void clear() {
+        if (!cells) return;
+        for (size_t i = 0; i < count; i++) for (PagedCellChunk* chunk = cells[i].chunks; chunk;) {
+            PagedCellChunk* next = chunk->next_chunk; paged_cell_chunk_free(pool, chunk); chunk = next;
         }
+        pool_free(pool, cells); cells = nullptr; count = 0; alignment = {};
     }
 };
 
-static TypesetStatus paged_table_split(PagedComposer* composer, PagedFrame* frame,
-        PagedFlowNode* row, PagedTableTracks* tracks, uint64_t identity, float available,
-        PagedTableSlice* slice, bool* complete, uint32_t* relaxation, float* height) {
-    PagedTableContinuation* start = row->table_continuations;
-    while (start && start->identity != identity) start = start->next;
-    if (identity && !start) return TYPESET_STALE;
+static TypesetStatus paged_cell_sources(PagedComposer* composer, PagedFlowNode* cell) {
+    if (cell->cell_leaf_count) return TYPESET_OK;
+    size_t cursor = 0;
+    auto leaf = [&](PagedFlowNode* flow, size_t items) {
+        if (items >= SIZE_MAX - cursor || cell->cell_leaf_count >= composer->composition->options.max_nodes)
+            return TYPESET_BUDGET_EXHAUSTED;
+        if (!lam::pool_grow_array(composer->composition->pool, &cell->cell_leaves, &cell->cell_leaf_capacity,
+            cell->cell_leaf_count + 1, 8)) return TYPESET_OUT_OF_MEMORY;
+        // the closing position distinguishes empty blocks and adjoining paragraph ends.
+        size_t begin = cursor; cursor += items + 1;
+        cell->cell_leaves[cell->cell_leaf_count++] = {flow, begin, cursor}; return TYPESET_OK;
+    };
+    auto visit = [&](PagedFlowStepKind kind, PagedFlowNode* flow) {
+        if (kind == PAGED_STEP_BEFORE && (flow->kind != PAGED_FLOW_BLOCK || paged_is_table_grid(flow)))
+            return paged_failure(composer->composition, TYPESET_INVALID, flow->source, composer->page->page_number,
+                "split cells with nested formatting contexts require a nested subflow producer");
+        if (kind == PAGED_STEP_OPEN) {
+            flow->cell_begin = cursor;
+            if (!flow->first_child) return leaf(flow, 0);
+        } else if (kind == PAGED_STEP_LINE) {
+            flow->cell_begin = cursor;
+            TypesetStatus status = leaf(flow, flow->paragraph.count); flow->cell_end = cursor; return status;
+        } else if (kind == PAGED_STEP_CLOSE) flow->cell_end = cursor;
+        return TYPESET_OK;
+    };
+    TypesetStatus status = paged_flow_walk(cell, 0, composer->composition->options.max_depth, visit);
+    if (status != TYPESET_OK) cell->cell_leaf_count = 0;
+    return status;
+}
+
+static const PagedCellLeaf* paged_cell_leaf(PagedFlowNode* cell, size_t cursor) {
+    size_t first = 0, last = cell->cell_leaf_count;
+    while (first < last) {
+        size_t middle = first + (last - first) / 2;
+        if (cell->cell_leaves[middle].end <= cursor) first = middle + 1; else last = middle;
+    }
+    return first < cell->cell_leaf_count ? &cell->cell_leaves[first] : nullptr;
+}
+
+static TypesetStatus paged_cell_frames(PagedComposer* composer, PagedFlowNode* cell, PagedCellChunk* chunk,
+        float width, float containing_height) {
+    PagedFlowNode* owner = chunk->leaf->flow;
+    if (owner->kind == PAGED_FLOW_PARAGRAPH) owner = owner->parent;
+    for (PagedFlowNode* flow = owner; flow; flow = flow->parent) {
+        if (chunk->depth++ >= composer->composition->options.max_depth) return TYPESET_BUDGET_EXHAUSTED;
+        if (flow == cell) break;
+    }
+    chunk->frames = (PagedFrame*)pool_calloc(composer->composition->pool, chunk->depth * sizeof(PagedFrame));
+    if (!chunk->frames) return TYPESET_OUT_OF_MEMORY;
+    for (size_t i = chunk->depth; i > 0; i--, owner = owner->parent) chunk->frames[i - 1].flow = owner;
+    float x = 0.0f, reference_x = x, reference_width = width;
+    for (size_t i = 0; i < chunk->depth; i++) {
+        PagedFrame* frame = &chunk->frames[i]; PagedFlowNode* flow = frame->flow; ViewCssStyle* style = flow->style;
+        if (style->height || style->min_height || style->max_height)
+            return paged_failure(composer->composition, TYPESET_INVALID, flow->source, composer->page->page_number,
+                "split cells currently require inline flow with automatic height");
+        if (i) {
+            for (size_t edge = 0; edge < 4; edge++) if (style->margin[edge] &&
+                paged_used_length(composer, style, style->margin[edge], radiant_box_side_property(CSS_PROPERTY_MARGIN,
+                    static_cast<CssBoxSide>(edge)), width) != 0.0f)
+                return paged_failure(composer->composition, TYPESET_INVALID, flow->source, composer->page->page_number,
+                    "split cell block margins require a block-flow spacing policy");
+            const RadiantFlowTraits* traits = style->flow_traits;
+            if (traits && (traits->before.specified || traits->after.specified))
+                return paged_failure(composer->composition, TYPESET_INVALID, flow->source, composer->page->page_number,
+                    "split cell block spaces require a block-flow spacing policy");
+            if (traits) for (size_t scope = 1; scope < 3; scope++)
+                if (traits->together.scope[scope].kind != RADIANT_KEEP_AUTO || traits->next.scope[scope].kind != RADIANT_KEEP_AUTO ||
+                    traits->previous.scope[scope].kind != RADIANT_KEEP_AUTO)
+                    return paged_failure(composer->composition, TYPESET_INVALID, flow->source, composer->page->page_number,
+                        "split cell block keeps require joint subflow boundary selection");
+        }
+        TypesetStatus status = paged_frame_descend(composer, frame, &x, &width, &containing_height, &reference_x, &reference_width);
+        if (status != TYPESET_OK) return status;
+    }
+    return TYPESET_OK;
+}
+
+static TypesetStatus paged_cell_chunk_new(PagedComposer* composer, PagedTableCellSlice* part, const PagedCellLeaf* leaf,
+        size_t first, float width, float containing_height, PagedCellChunk** result) {
+    PagedCellChunk* chunk = (PagedCellChunk*)pool_calloc(composer->composition->pool, sizeof(PagedCellChunk));
+    if (!chunk) return TYPESET_OUT_OF_MEMORY;
+    chunk->leaf = leaf; chunk->first = chunk->next = first;
+    TypesetStatus status = paged_cell_frames(composer, part->cell, chunk, width, containing_height);
+    size_t items = leaf->flow->kind == PAGED_FLOW_PARAGRAPH ? leaf->flow->paragraph.count : 0;
+    if (status == TYPESET_OK && items) {
+        chunk->lines = (TypesetLineCandidate*)pool_alloc(composer->composition->pool, items * sizeof(TypesetLineCandidate));
+        if (!chunk->lines) status = TYPESET_OUT_OF_MEMORY;
+    }
+    if (status != TYPESET_OK) { paged_cell_chunk_free(composer->composition->pool, chunk); return status; }
+    if (part->last_chunk) part->last_chunk->next_chunk = chunk; else part->chunks = chunk;
+    part->last_chunk = chunk; *result = chunk; return TYPESET_OK;
+}
+
+static size_t paged_cell_common_path(const PagedCellChunk* left, const PagedCellChunk* right) {
+    size_t common = 1;
+    if (left) while (common < left->depth && common < right->depth &&
+        left->frames[common].flow == right->frames[common].flow) common++;
+    return common;
+}
+
+static float paged_cell_opening(const PagedCellChunk* chunk, const PagedCellChunk* previous) {
+    float height = 0.0f;
+    for (size_t i = paged_cell_common_path(previous, chunk); i < chunk->depth; i++) {
+        const PagedFrame& frame = chunk->frames[i];
+        height += paged_fragment_edge(frame.flow->style, frame.box, 0, chunk->first == frame.flow->cell_begin);
+    }
+    return height;
+}
+
+static float paged_cell_closing(const PagedCellChunk* chunk) {
+    float height = 0.0f;
+    for (size_t i = 1; i < chunk->depth; i++)
+        if (chunk->frames[i].flow->cell_end == chunk->leaf->end) height += chunk->frames[i].box.edges[2];
+    return height;
+}
+
+static float paged_cell_candidate_tail(const PagedCellChunk* chunk, size_t cursor) {
+    float height = 0.0f;
+    for (size_t i = 0; i < chunk->depth; i++) {
+        const PagedFrame& frame = chunk->frames[i];
+        height += paged_fragment_edge(frame.flow->style, frame.box, 2, cursor == frame.flow->cell_end);
+    }
+    return height;
+}
+
+static float paged_table_cell_tail(const PagedTableCellSlice& part, bool complete) {
+    float height = paged_fragment_edge(part.cell->style, part.outer.box, 2, complete);
+    const PagedCellChunk* chunk = part.last_chunk;
+    if (chunk) for (size_t i = 1; i < chunk->depth; i++)
+        if (chunk->frames[i].flow->cell_end > part.next)
+            height += paged_fragment_edge(chunk->frames[i].flow->style, chunk->frames[i].box, 2, false);
+    return height;
+}
+
+static TypesetStatus paged_table_split(PagedComposer* composer, PagedFrame* frame, PagedFlowNode* row,
+        PagedTableTracks* tracks, uint64_t identity, float available, PagedTableSlice* slice,
+        bool* complete, uint32_t* relaxation, float* height) {
     slice->pool = composer->composition->pool; slice->count = row->cell_count;
     slice->cells = (PagedTableCellSlice*)pool_calloc(slice->pool, slice->count * sizeof(PagedTableCellSlice));
     if (!slice->cells) return TYPESET_OUT_OF_MEMORY;
-    *complete = true; *height = 0.0f;
-    if (row->style->height) return paged_failure(composer->composition, TYPESET_INVALID, row->source,
-        composer->page->page_number, "split row heights require distributed minimum-height continuations");
-    PagedTableTracks* following_tracks = nullptr;
-    float following_height = NAN;
+    PagedTableContinuation* start = row->table_continuations;
+    while (start && start->identity != identity) start = start->next;
+    if (identity && !start) return TYPESET_STALE;
+    if (row->style->height || (row->row_group && (row->row_group->height || row->row_group->min_height || row->row_group->max_height)))
+        return paged_failure(composer->composition, TYPESET_INVALID, row->source,
+            composer->page->page_number, "split row heights require distributed minimum-height continuations");
+    PagedTableTracks* following_tracks = nullptr; float following_height = NAN;
     size_t column = 0;
     for (PagedFlowNode* cell = row->first_child; cell; cell = cell->next, column++) {
-        PagedTableCellSlice* part = &slice->cells[column]; part->cell = cell; part->frame.flow = cell;
-        if (cell->style->height || cell->style->min_height || cell->style->max_height ||
-            (cell->first_child && (cell->first_child->kind != PAGED_FLOW_PARAGRAPH || cell->first_child->next)))
-            return paged_failure(composer->composition, TYPESET_INVALID, cell->source, composer->page->page_number,
-                "split cells currently require inline flow with automatic height");
-        TypesetStatus status = paged_frame_measure(composer, &part->frame, 0.0f, paged_table_cell_width(cell, tracks), frame->content_height);
+        PagedTableCellSlice* part = &slice->cells[column]; part->cell = cell;
+        TypesetStatus status = paged_cell_sources(composer, cell);
         if (status != TYPESET_OK) return status;
-        part->paragraph = cell->first_child;
-        size_t first = start ? start->first[column] : 0;
-        part->next = first;
-        part->height = !identity || cell->style->decoration_clone ? part->frame.box.edges[0] : 0.0f;
-        part->baseline = -1.0f;
-        size_t items = part->paragraph ? part->paragraph->paragraph.count : 0;
-        if (items) {
-            part->lines = (TypesetLineCandidate*)pool_alloc(slice->pool, items * sizeof(TypesetLineCandidate));
-            if (!part->lines) return TYPESET_OUT_OF_MEMORY;
-        }
-        if (!paged_table_cell_baseline(cell)) continue;
-        // establish the slice baseline before fitting any cell; completed cursors do not re-enter it.
-        for (size_t probe = first; probe < items;) {
-            TypesetLineCandidate line = {};
-            status = paged_next_line(composer, part->paragraph, probe, part->frame.content_width,
-                part->frame.content_height, part->lines, items, &line, part->frame.replaced_height);
-            if (status != TYPESET_OK) return status;
-            if (line.height > 0.0f) {
-                part->baseline = part->height + paged_line_baseline(part->paragraph, line); break;
+        part->first = part->next = start ? start->first[column] : 0;
+        if (part->next > cell->cell_end) return TYPESET_STALE;
+        part->active = part->next < cell->cell_end; part->anchor = -1.0f;
+        float width = paged_table_cell_width(cell, tracks);
+        part->outer.flow = cell;
+        status = paged_frame_measure(composer, &part->outer, 0.0f, width, frame->content_height);
+        if (status != TYPESET_OK) return status;
+        part->height = paged_fragment_edge(cell->style, part->outer.box, 0, !identity);
+        if (!part->active) continue;
+        PagedCellChunk* chunk = nullptr;
+        status = paged_cell_chunk_new(composer, part, paged_cell_leaf(cell, part->next), part->next, width, frame->content_height, &chunk);
+        if (status != TYPESET_OK) return status;
+        PagedCellAnchor anchor = paged_table_cell_anchor(cell);
+        if (anchor == PAGED_CELL_UNALIGNED) continue;
+        if (!identity) {
+            float extent = 0.0f; bool forced = false;
+            status = paged_table_cell_measure(composer, cell, width, frame->content_height, &extent, &forced, &part->anchor);
+        } else if (anchor == PAGED_CELL_BEFORE) {
+            part->anchor = part->height;
+            if (chunk->depth > 1) part->anchor += paged_fragment_edge(chunk->frames[1].flow->style,
+                chunk->frames[1].box, 0, part->next == chunk->frames[1].flow->cell_begin);
+        } else if (chunk->leaf->flow->kind == PAGED_FLOW_PARAGRAPH) {
+            PagedFlowNode* paragraph = chunk->leaf->flow; const PagedFrame& inner = chunk->frames[chunk->depth - 1];
+            for (size_t probe = part->next - chunk->leaf->begin; probe < paragraph->paragraph.count;) {
+                TypesetLineCandidate line = {};
+                status = paged_next_line(composer, paragraph, probe, inner.content_width, inner.content_height,
+                    chunk->lines, paragraph->paragraph.count, &line, inner.replaced_height);
+                if (status != TYPESET_OK) break;
+                if (line.height > 0.0f) { part->anchor = part->height + paged_cell_opening(chunk, nullptr) + paged_line_baseline(paragraph, line); break; }
+                probe = line.next;
             }
-            probe = line.next;
         }
-        if (!identity && part->baseline < 0.0f) part->baseline = part->height;
-        slice->baseline = fmaxf(slice->baseline, part->baseline);
+        if (status != TYPESET_OK) return status;
+        if (!identity && part->anchor < 0.0f) part->anchor = part->height;
+        slice->alignment.anchors[anchor] = fmaxf(slice->alignment.anchors[anchor], part->anchor);
     }
-    for (size_t column = 0; column < slice->count; column++) {
-        PagedTableCellSlice* part = &slice->cells[column]; PagedFlowNode* cell = part->cell;
-        size_t first = part->next, items = part->paragraph ? part->paragraph->paragraph.count : 0;
-        // reserve baseline padding before consuming lines, so aligned content cannot cross the page edge.
-        part->offset = paged_table_cell_offset(cell, 0.0f, 0.0f, slice->baseline, part->baseline);
-        part->height += part->offset;
-        float bottom = cell->style->decoration_clone ? part->frame.box.edges[2] : 0.0f;
-        if (part->height + bottom > available) return TYPESET_UNPLACEABLE;
-        if (!items) { *height = fmaxf(*height, part->height + bottom); continue; }
-        TypesetLineCandidate* scratch = (TypesetLineCandidate*)pool_alloc(slice->pool, items * sizeof(TypesetLineCandidate));
-        if (!scratch) return TYPESET_OUT_OF_MEMORY;
-        TypesetStatus status = TYPESET_OK;
-        while (part->next < items) {
-            TypesetLineCandidate line = {};
-            status = paged_next_line(composer, part->paragraph, part->next, part->frame.content_width,
-                part->frame.content_height, scratch, items, &line, part->frame.replaced_height);
-            if (status != TYPESET_OK || line.overflow) { if (status == TYPESET_OK) status = TYPESET_UNPLACEABLE; break; }
-            float edge = line.next == items ? part->frame.box.edges[2] : bottom;
-            if (part->height + line.height + edge > available) break;
-            part->lines[part->count++] = line; part->height += line.height; part->next = line.next;
-        }
-        if (status == TYPESET_OK && first < items && !part->count) status = TYPESET_UNPLACEABLE;
-        if (status == TYPESET_OK && part->next < items) {
-            *complete = false;
-            if (!following_tracks) {
-                float width = 0.0f, height = 0.0f;
-                status = paged_next_constraints(composer, &width, &height, &following_height);
-                if (status == TYPESET_OK) status = paged_table_tracks(composer, frame->flow, width, &following_tracks);
+    *height = 0.0f; *complete = true;
+    for (size_t index = 0; index < slice->count; index++) {
+        PagedTableCellSlice* part = &slice->cells[index]; PagedFlowNode* cell = part->cell;
+        part->offset = paged_table_cell_offset(cell, 0.0f, 0.0f, slice->alignment, part->anchor); part->height += part->offset;
+        PagedCellChunk* previous = nullptr;
+        while (part->next < cell->cell_end) {
+            PagedCellChunk* chunk = previous ? previous->next_chunk : part->chunks;
+            if (!chunk) {
+                TypesetStatus status = paged_cell_chunk_new(composer, part, paged_cell_leaf(cell, part->next), part->next,
+                    paged_table_cell_width(cell, tracks), frame->content_height, &chunk);
+                if (status != TYPESET_OK) return status;
             }
-            PagedFrame following = {}; following.flow = cell;
-            if (status == TYPESET_OK) status = paged_frame_measure(composer, &following, 0.0f,
-                paged_table_cell_width(cell, following_tracks), following_height);
-            size_t remaining = 0; float tail = 0.0f;
-            while (status == TYPESET_OK) {
-                status = paged_measure_lines(composer, part->paragraph, part->next, following.content_width,
-                    following.content_height, scratch, nullptr, items, &remaining, &tail, false, SIZE_MAX, cell->style->widows);
-                if (status != TYPESET_OK || remaining >= cell->style->widows || part->count <= cell->style->orphans) break;
-                // keep an earlier legal cell boundary instead of unnecessarily relaxing widows.
-                const TypesetLineCandidate& removed = part->lines[--part->count];
-                part->next = removed.first; part->height -= removed.height;
+            float before = part->height; part->height += paged_cell_opening(chunk, previous);
+            PagedFlowNode* paragraph = chunk->leaf->flow->kind == PAGED_FLOW_PARAGRAPH ? chunk->leaf->flow : nullptr;
+            size_t items = paragraph ? paragraph->paragraph.count : 0;
+            const PagedFrame& inner = chunk->frames[chunk->depth - 1];
+            TypesetLineCandidate* scratch = items ? (TypesetLineCandidate*)pool_alloc(slice->pool, items * sizeof(TypesetLineCandidate)) : nullptr;
+            if (items && !scratch) return TYPESET_OUT_OF_MEMORY;
+            TypesetStatus status = TYPESET_OK;
+            size_t local = chunk->next - chunk->leaf->begin;
+            while (local < items) {
+                TypesetLineCandidate line = {};
+                status = paged_next_line(composer, paragraph, local, inner.content_width, inner.content_height, scratch, items, &line, inner.replaced_height);
+                if (status != TYPESET_OK || line.overflow) { if (status == TYPESET_OK) status = TYPESET_UNPLACEABLE; break; }
+                size_t next = line.next == items ? chunk->leaf->end : chunk->leaf->begin + line.next;
+                if (part->height + line.height + paged_cell_candidate_tail(chunk, next) > available) break;
+                chunk->lines[chunk->count++] = line; part->height += line.height; local = line.next; chunk->next = next;
             }
-            if (part->count < cell->style->orphans || remaining < cell->style->widows) *relaxation |= PAGED_RELAX_MINIMA;
+            if (status == TYPESET_OK && local == items) {
+                if (part->height + paged_cell_candidate_tail(chunk, chunk->leaf->end) <= available) chunk->next = chunk->leaf->end;
+            }
+            if (status == TYPESET_OK && chunk->next > chunk->first && chunk->next < chunk->leaf->end && paragraph) {
+                if (!following_tracks) {
+                    float width = 0.0f, height = 0.0f;
+                    status = paged_next_constraints(composer, &width, &height, &following_height);
+                    if (status == TYPESET_OK) status = paged_table_tracks(composer, frame->flow, width, &following_tracks);
+                }
+                PagedCellChunk following = {}; following.leaf = chunk->leaf;
+                if (status == TYPESET_OK) status = paged_cell_frames(composer, cell, &following,
+                    paged_table_cell_width(cell, following_tracks), following_height);
+                size_t remaining = 0; float tail = 0.0f;
+                while (status == TYPESET_OK) {
+                    const PagedFrame& next_inner = following.frames[following.depth - 1];
+                    status = paged_measure_lines(composer, paragraph, chunk->next - chunk->leaf->begin, next_inner.content_width,
+                        next_inner.content_height, scratch, nullptr, items, &remaining, &tail, false, SIZE_MAX, paragraph->style->widows);
+                    if (status != TYPESET_OK || remaining >= paragraph->style->widows || chunk->count <= paragraph->style->orphans) break;
+                    const TypesetLineCandidate& removed = chunk->lines[--chunk->count];
+                    chunk->next = chunk->leaf->begin + removed.first; part->height -= removed.height;
+                }
+                if (following.frames) pool_free(slice->pool, following.frames);
+                if (chunk->count < paragraph->style->orphans || remaining < paragraph->style->widows) {
+                    if (part->next > part->first) {
+                        // an earlier sibling boundary preserves minima without publishing this block's opening edge.
+                        chunk->next = chunk->first; chunk->count = 0;
+                    } else *relaxation |= PAGED_RELAX_MINIMA;
+                }
+            }
+            if (scratch) pool_free(slice->pool, scratch);
+            if (status != TYPESET_OK) return status;
+            if (chunk->next == chunk->first) {
+                part->height = before;
+                if (previous) previous->next_chunk = nullptr; else part->chunks = nullptr;
+                part->last_chunk = previous; paged_cell_chunk_free(slice->pool, chunk);
+                if (part->next == part->first) return TYPESET_UNPLACEABLE;
+                break;
+            }
+            part->next = chunk->next;
+            if (part->next == chunk->leaf->end) part->height += paged_cell_closing(chunk);
+            else break;
+            previous = chunk;
         }
-        pool_free(slice->pool, scratch);
-        if (status != TYPESET_OK) return status;
-        *height = fmaxf(*height, part->height + bottom);
+        if (part->next < cell->cell_end) *complete = false;
+        *height = fmaxf(*height, part->height + paged_table_cell_tail(*part, false));
     }
     if (*complete) for (size_t i = 0; i < slice->count; i++)
-        *height = fmaxf(*height, slice->cells[i].height + slice->cells[i].frame.box.edges[2]);
+        *height = fmaxf(*height, slice->cells[i].height + paged_table_cell_tail(slice->cells[i], true));
     if (*height <= 0.0f || *height > available) return TYPESET_UNPLACEABLE;
     if (!*complete && row->style->break_inside == VIEW_BREAK_AVOID) *relaxation |= PAGED_RELAX_AVOIDANCE;
     if (!*complete) for (size_t i = 0; i < slice->count; i++)
-        if (slice->cells[i].cell->style->break_inside == VIEW_BREAK_AVOID) *relaxation |= PAGED_RELAX_AVOIDANCE;
+        for (PagedCellChunk* chunk = slice->cells[i].chunks; chunk; chunk = chunk->next_chunk)
+            for (size_t j = 0; j < chunk->depth; j++)
+                if (chunk->frames[j].flow->style->break_inside == VIEW_BREAK_AVOID) *relaxation |= PAGED_RELAX_AVOIDANCE;
     return TYPESET_OK;
 }
 
@@ -3693,31 +4682,62 @@ static TypesetStatus paged_table_slice_emit(PagedComposer* composer, PagedFrame*
     box->first_fragment = first; box->last_fragment = complete;
     TypesetStatus status = paged_mark_enter(composer, row->source);
     for (size_t i = 0; status == TYPESET_OK && i < slice.count; i++) {
-        const PagedTableCellSlice& part = slice.cells[i];
+        const PagedTableCellSlice& part = slice.cells[i]; const PagedFrame& outer = part.outer;
         float x = paged_table_column_x(frame, part.cell->column, tracks);
-        LayoutViewNode* cell = view_tree_fragment_append(composer->tree, box, part.cell->source,
-            {x, composer->y, part.frame.width, height});
+        LayoutViewNode* cell = view_tree_fragment_append(composer->tree, box, part.cell->source, {x, composer->y, outer.width, height});
         if (!cell) return TYPESET_OUT_OF_MEMORY;
-        cell->computed_style = lam::up(part.cell->style); cell->paint_box = true;
-        cell->generated = !part.cell->source;
+        cell->computed_style = lam::up(part.cell->style); cell->paint_box = true; cell->generated = !part.cell->source;
         cell->first_fragment = first; cell->last_fragment = complete;
-        bool clone = part.cell->style->decoration_clone;
-        status = paged_boundary_publish(composer->tree, cell, part.frame.box, first || clone, complete || clone);
+        status = paged_boundary_publish(composer->tree, cell, outer.box, first, complete);
         if (status == TYPESET_OK && (!part.cell->source || frame->flow->column_sources))
             status = paged_table_range_publish(composer->tree, cell, part.cell);
         PagedComposer nested = {}; nested.tree = composer->tree; nested.composition = composer->composition;
         nested.page = composer->page; nested.page_style = composer->page_style;
+        nested.initial_containing_block = composer->initial_containing_block;
         nested.role = VIEW_FRAGMENT_BODY; nested.atomic_fragment = true;
-        PagedFrame containing = part.frame; containing.fragment = cell;
-        containing.content_x = x + part.frame.box.edges[3];
-        nested.frames = &containing; nested.depth = 1;
-        // align only this slice's consumed material, including its visible decoration edges.
-        float natural_height = part.height + (complete || clone ? part.frame.box.edges[2] : 0.0f);
-        nested.y = composer->y + (first || clone ? part.frame.box.edges[0] : 0.0f) +
-            paged_table_cell_offset(part.cell, height, natural_height, slice.baseline, part.baseline);
-        if (status == TYPESET_OK) status = paged_mark_enter(&nested, part.cell->source);
-        for (size_t j = 0; status == TYPESET_OK && j < part.count; j++)
-            status = paged_commit_line(&nested, part.paragraph, part.lines[j]);
+        float natural_height = part.height + paged_table_cell_tail(part, complete);
+        nested.y = composer->y + paged_table_cell_offset(part.cell, height, natural_height, slice.alignment, part.anchor);
+        nested.y += paged_fragment_edge(part.cell->style, outer.box, 0, first);
+        status = paged_mark_enter(&nested, part.cell->source);
+        LayoutViewNode** nodes = (LayoutViewNode**)pool_calloc(slice.pool,
+            composer->composition->options.max_depth * sizeof(LayoutViewNode*));
+        if (!nodes) return TYPESET_OUT_OF_MEMORY;
+        nodes[0] = cell; size_t open = 1;
+        const PagedCellChunk* previous = nullptr;
+        for (const PagedCellChunk* chunk = part.chunks; status == TYPESET_OK && chunk; chunk = chunk->next_chunk) {
+            for (size_t j = open; status == TYPESET_OK && j < chunk->depth; j++) {
+                const PagedFrame& measured = chunk->frames[j];
+                bool beginning = chunk->first == measured.flow->cell_begin;
+                bool ending = part.next >= measured.flow->cell_end;
+                LayoutViewNode* block = view_tree_fragment_append(composer->tree, nodes[j - 1], measured.flow->source,
+                    {x + measured.x, nested.y, measured.width, 0.0f});
+                if (!block) { status = TYPESET_OUT_OF_MEMORY; break; }
+                nodes[j] = block; block->computed_style = lam::up(measured.flow->style); block->paint_box = true;
+                block->first_fragment = beginning; block->last_fragment = ending;
+                status = paged_boundary_publish(composer->tree, block, measured.box, beginning, ending);
+                if (status == TYPESET_OK) status = paged_mark_enter(&nested, measured.flow->source);
+                nested.y += paged_fragment_edge(measured.flow->style, measured.box, 0, beginning);
+            }
+            open = chunk->depth;
+            PagedFrame containing = chunk->frames[chunk->depth - 1]; containing.fragment = nodes[chunk->depth - 1];
+            containing.content_x += x; nested.frames = &containing; nested.depth = 1;
+            PagedFlowNode* paragraph = chunk->leaf->flow;
+            for (size_t j = 0; status == TYPESET_OK && j < chunk->count; j++)
+                status = paged_commit_line(&nested, paragraph, chunk->lines[j]);
+            if (chunk->next == chunk->leaf->end) {
+                while (open > 1 && chunk->frames[open - 1].flow->cell_end <= chunk->next) {
+                    const PagedFrame& closing = chunk->frames[--open]; nested.y += closing.box.edges[2];
+                    nodes[open]->rect.height = nested.y - nodes[open]->rect.y;
+                }
+            }
+            previous = chunk;
+        }
+        while (status == TYPESET_OK && previous && open > 1) {
+            const PagedFrame& closing = previous->frames[--open];
+            nested.y += paged_fragment_edge(closing.flow->style, closing.box, 2, false);
+            nodes[open]->rect.height = nested.y - nodes[open]->rect.y;
+        }
+        pool_free(slice.pool, nodes);
     }
     if (status == TYPESET_OK) composer->y += height;
     return status;
@@ -3733,13 +4753,14 @@ static TypesetStatus paged_table_furniture(PagedComposer* composer, PagedFrame* 
     if (status != TYPESET_OK) return status;
     for (PagedFlowNode* row = frame->flow->first_child; status == TYPESET_OK && row; row = row->next) {
         if (row->table_group != (footer ? PAGED_TABLE_FOOTER : PAGED_TABLE_HEADER)) continue;
-        float height = 0.0f, baseline = 0.0f; bool forced = false;
-        status = paged_table_row_height(composer, row, tracks, frame->content_height, &height, &forced, &baseline);
+        if (footer ? paged_table_omits(frame->flow, true) && !frame->table_terminal : !paged_table_header_visible(frame)) continue;
+        float height = 0.0f; bool forced = false; PagedTableAlignment alignment = {};
+        status = paged_table_row_height(composer, row, tracks, frame->content_height, &height, &forced, &alignment);
         ViewNodeState* state = view_tree_node_state(composer->tree, row->source, false);
         ViewFragmentRole role = state && state->occurrence_count ? VIEW_FRAGMENT_REPEATED_TABLE : VIEW_FRAGMENT_BODY;
         if (status == TYPESET_OK) {
             composer->y += frame->flow->table_spacing_v;
-            status = paged_table_row_emit(composer, frame, row, tracks, height, baseline, role);
+            status = paged_table_row_emit(composer, frame, row, tracks, height, alignment, role);
         }
     }
     if (footer && status == TYPESET_OK) {
@@ -3754,8 +4775,8 @@ static TypesetStatus paged_table_row(PagedComposer* composer, PagedFlowNode* row
     PagedFrame* frame = &composer->frames[composer->depth - 1];
     PagedTableTracks* tracks = nullptr;
     TypesetStatus status = paged_table_tracks(composer, frame->flow, frame->content_width, &tracks);
-    float height = 0.0f, baseline = 0.0f, headers = 0.0f, gap = frame->flow->table_spacing_v; bool forced = false;
-    if (status == TYPESET_OK) status = paged_table_row_height(composer, row, tracks, frame->content_height, &height, &forced, &baseline);
+    float height = 0.0f, headers = 0.0f, gap = frame->flow->table_spacing_v; bool forced = false;
+    if (status == TYPESET_OK) status = paged_table_row_height(composer, row, tracks, frame->content_height, &height, &forced);
     PagedFlowNode* last = row->span_last ? row->span_last : row;
     for (PagedFlowNode* following_row = row->next; status == TYPESET_OK && row != last && following_row; following_row = following_row->next) {
         float size = 0.0f;
@@ -3764,7 +4785,7 @@ static TypesetStatus paged_table_row(PagedComposer* composer, PagedFlowNode* row
         if (following_row == last) break;
     }
     for (PagedFlowNode* header = frame->flow->first_child; status == TYPESET_OK && !frame->table_started && header; header = header->next) {
-        if (header->table_group != PAGED_TABLE_HEADER) continue;
+        if (header->table_group != PAGED_TABLE_HEADER || !paged_table_header_visible(frame)) continue;
         float size = 0.0f;
         status = paged_table_row_height(composer, header, tracks, frame->content_height, &size, &forced);
         headers += gap + size;
@@ -3773,14 +4794,25 @@ static TypesetStatus paged_table_row(PagedComposer* composer, PagedFlowNode* row
     if (forced) return paged_failure(composer->composition, TYPESET_INVALID, row->source, composer->page->page_number,
         "forced breaks inside table cells require cell continuations");
     float available = composer->bottom - composer->y - headers - gap - paged_tail_edges(composer, false) - paged_region_reserved(composer);
+    bool terminal_row = !paged_table_next_body_row(row);
+    float terminal_footer = terminal_row && paged_table_omits(frame->flow, true)
+        ? frame->table_footer_height - gap : 0.0f;
     PagedTableSlice slice = {}; *complete = true;
-    bool split = continuation || height > available;
+    bool split = continuation || height + terminal_footer > available;
     if (split && row->span_last) return TYPESET_UNPLACEABLE;
     if (split) {
         float fresh = composer->page_style.content_rect.height - headers - gap - paged_tail_edges(composer, false);
-        if (!continuation && height <= fresh && composer->page_has_content) return TYPESET_UNPLACEABLE;
+        if (!continuation && height + terminal_footer <= fresh && composer->page_has_content) return TYPESET_UNPLACEABLE;
         status = paged_table_split(composer, frame, row, tracks, continuation, available, &slice, complete, relaxation, &height);
         if (status != TYPESET_OK) return status;
+        if (*complete && height + terminal_footer > available) {
+            // keep a legal real tail when completing the row would require a footer that cannot fit.
+            float prefix = nextafterf(height, -INFINITY);
+            slice.clear(); *relaxation = 0;
+            status = paged_table_split(composer, frame, row, tracks, continuation, prefix, &slice, complete, relaxation, &height);
+            if (status != TYPESET_OK) return status;
+            if (*complete) return TYPESET_NO_PROGRESS;
+        }
         if (!*complete) {
             status = paged_table_continuation(composer, row, slice, following);
             if (status != TYPESET_OK) return status;
@@ -3791,14 +4823,15 @@ static TypesetStatus paged_table_row(PagedComposer* composer, PagedFlowNode* row
     if (status == TYPESET_OK && split) status = paged_table_slice_emit(composer, frame, row, tracks, slice,
         height, !continuation, *complete);
     else for (PagedFlowNode* emitted = row; status == TYPESET_OK && emitted; emitted = emitted->next) {
-        float size = 0.0f, row_baseline = 0.0f;
-        status = paged_table_row_height(composer, emitted, tracks, frame->content_height, &size, &forced, &row_baseline);
-        if (status == TYPESET_OK) status = paged_table_row_emit(composer, frame, emitted, tracks, size, row_baseline, VIEW_FRAGMENT_BODY);
+        float size = 0.0f; PagedTableAlignment alignment = {};
+        status = paged_table_row_height(composer, emitted, tracks, frame->content_height, &size, &forced, &alignment);
+        if (status == TYPESET_OK) status = paged_table_row_emit(composer, frame, emitted, tracks, size, alignment, VIEW_FRAGMENT_BODY);
         if (emitted == last) break;
         composer->y += gap;
     }
     if (status == TYPESET_OK) {
-        frame->table_started = true; composer->page_has_content = true; *extent = headers + gap + height;
+        frame->table_started = true; frame->table_terminal = terminal_row && *complete;
+        composer->page_has_content = true; *extent = headers + gap + height;
         ViewBreak after = paged_flow_break(row, false);
         if (*complete && after >= VIEW_BREAK_PAGE) {
             composer->pending_break = true; composer->requested_break = after;
@@ -3820,8 +4853,16 @@ static TypesetStatus paged_block_trial_begin(PagedComposer* composer, PagedFlowN
 static TypesetStatus paged_block_enter(PagedComposer* composer, PagedFlowNode* flow) {
     float parent_width = composer->depth ? composer->frames[composer->depth - 1].content_width : composer->page_style.content_rect.width;
     float top = paged_flow_margin(composer, flow, 0, parent_width);
+    if (top || composer->pending_margin) {
+        TypesetStatus status = paged_space_flush(composer);
+        if (status != TYPESET_OK) return status;
+    }
     composer->y += layout_collapse_margins(composer->pending_margin, top);
     composer->pending_margin = 0.0f;
+    if (flow->style->flow_traits) {
+        TypesetStatus status = paged_space_append(composer, flow->style->flow_traits->before);
+        if (status != TYPESET_OK) return status;
+    }
     if (!lam::pool_grow_array(composer->composition->pool, &composer->frames, &composer->frame_capacity,
                               composer->depth + 1, 16)) return TYPESET_OUT_OF_MEMORY;
     size_t index = composer->depth++;
@@ -3831,8 +4872,7 @@ static TypesetStatus paged_block_enter(PagedComposer* composer, PagedFlowNode* f
 
 static float paged_block_remaining(PagedComposer* composer) {
     PagedFrame* frame = &composer->frames[composer->depth - 1];
-    ViewCssStyle* style = frame->flow->style;
-    float top_edge = frame->fragment->first_fragment || style->decoration_clone ? frame->box.edges[0] : 0.0f;
+    float top_edge = paged_fragment_edge(frame->flow->style, frame->box, 0, frame->fragment->first_fragment);
     float consumed = frame->consumed_content + composer->y - frame->page_start - top_edge;
     return fmaxf(0.0f, frame->content_height - consumed);
 }
@@ -3841,6 +4881,10 @@ static TypesetStatus paged_block_finish(PagedComposer* composer, float parent_wi
     PagedFrame* frame = &composer->frames[composer->depth - 1];
     PagedFlowNode* flow = frame->flow;
     ViewCssStyle* style = flow->style;
+    if (frame->box.edges[2] != 0.0f) {
+        TypesetStatus status = paged_space_flush(composer);
+        if (status != TYPESET_OK) return status;
+    }
     TypesetStatus status = paged_table_furniture(composer, frame, true);
     if (status != TYPESET_OK) return status;
     if (flow->kind == PAGED_FLOW_TABLE_WRAPPER) {
@@ -3870,7 +4914,12 @@ static TypesetStatus paged_block_finish(PagedComposer* composer, float parent_wi
     status = paged_frame_finish(composer, frame, true);
     if (status != TYPESET_OK) return status;
     composer->depth--;
+    if (composer->space_count) composer->space_depth = composer->space_depth < composer->depth ? composer->space_depth : composer->depth;
     composer->pending_margin = paged_flow_margin(composer, flow, 2, parent_width);
+    if (style->flow_traits) {
+        status = paged_space_append(composer, style->flow_traits->after);
+        if (status != TYPESET_OK) return status;
+    }
     if (composer->role == VIEW_FRAGMENT_BODY && !paged_is_wrapped_grid(flow) && style->break_after >= VIEW_BREAK_PAGE) {
         composer->pending_break = true; composer->requested_break = style->break_after;
     }
@@ -3881,6 +4930,9 @@ static TypesetStatus paged_block_before(PagedComposer* composer, PagedFlowNode* 
     if (forced) *forced = false;
     ViewCssStyle* style = flow->style;
     bool has_content = composer->page && composer->page_has_content;
+    const RadiantPageSequence* sequence = radiant_page_sequence_for(composer->tree->model->css->page_document, flow->source);
+    bool changed_sequence = sequence && sequence != composer->sequence;
+    if (changed_sequence) composer->sequence = sequence;
     const char* name = nullptr;
     for (ViewCssStyle* owner = style; owner; owner = owner->parent) {
         if (owner->page_name) { name = owner->page_name; break; }
@@ -3895,12 +4947,12 @@ static TypesetStatus paged_block_before(PagedComposer* composer, PagedFlowNode* 
     if (!composer->page && composer->tree->model->environment.presentation == VIEW_PRESENTATION_PAGED) {
         TypesetStatus status = paged_next_page(composer);
         if (status != TYPESET_OK) return status;
-    } else if ((composer->pending_break || changed_name) && has_content) {
+    } else if ((composer->pending_break || changed_name || changed_sequence) && has_content) {
         if (forced) { *forced = true; return TYPESET_OK; }
         TypesetStatus status = paged_next_page(composer);
         if (status != TYPESET_OK) return status;
-    } else if (composer->page && !has_content && (composer->pending_break || changed_name)) {
-        TypesetStatus status = changed_name ? paged_empty_page_restyle(composer, false) : TYPESET_OK;
+    } else if (composer->page && !has_content && (composer->pending_break || changed_name || changed_sequence)) {
+        TypesetStatus status = changed_name || changed_sequence ? paged_empty_page_restyle(composer, false) : TYPESET_OK;
         if (status != TYPESET_OK) return status;
         ViewPageSide wanted = VIEW_PAGE_RIGHT;
         if (paged_requested_side(composer, composer->requested_break, &wanted) && composer->page->side != wanted) {
@@ -3913,8 +4965,13 @@ static TypesetStatus paged_block_before(PagedComposer* composer, PagedFlowNode* 
     return TYPESET_OK;
 }
 
-enum PagedFlowStepKind : uint8_t { PAGED_STEP_BEFORE, PAGED_STEP_OPEN, PAGED_STEP_LINE, PAGED_STEP_TABLE_ROW, PAGED_STEP_CLOSE };
 struct PagedFlowStep { PagedFlowStepKind kind; PagedFlowNode* flow; };
+struct PagedCandidateInfo {
+    RadiantKeepStrength keep;
+    float space_capacity;
+    const RadiantPageSequence* sequence;
+    bool pending_aux;
+};
 
 struct PagedPageProvider {
     PagedComposer* composer;
@@ -3930,6 +4987,10 @@ struct PagedPageProvider {
     const char* failed_reason = nullptr;
     PagedLayoutDiagnostic hard_failure = {};
     bool relax_minima = false, relax_avoidance = false;
+    RadiantKeepStrength boundary_keep = {};
+    float space_ratio = 0.0f;
+    Pool* candidate_pool = nullptr;
+    bool reject_terminal = false;
 
     ~PagedPageProvider() {
         Pool* pool = composer->composition->pool;
@@ -3946,17 +5007,12 @@ struct PagedPageProvider {
     }
 
     TypesetStatus flatten(PagedFlowNode* flow) {
-        if (flow->kind == PAGED_FLOW_PARAGRAPH) return append(PAGED_STEP_LINE, flow);
-        if (flow->kind == PAGED_FLOW_TABLE_ROW) {
-            if (flow->table_group != PAGED_TABLE_BODY || (flow->span_first && flow->span_first != flow)) return TYPESET_OK;
-            TypesetStatus status = append(PAGED_STEP_BEFORE, flow);
-            return status == TYPESET_OK ? append(PAGED_STEP_TABLE_ROW, flow) : status;
-        }
-        TypesetStatus status = append(PAGED_STEP_BEFORE, flow);
-        if (status == TYPESET_OK) status = append(PAGED_STEP_OPEN, flow);
-        for (PagedFlowNode* child = flow->first_child; status == TYPESET_OK && child; child = child->next)
-            status = flatten(child);
-        return status == TYPESET_OK ? append(PAGED_STEP_CLOSE, flow) : status;
+        auto visit = [&](PagedFlowStepKind kind, PagedFlowNode* source) {
+            if (source->kind == PAGED_FLOW_TABLE_ROW && (source->table_group != PAGED_TABLE_BODY ||
+                (source->span_first && source->span_first != source))) return TYPESET_OK;
+            return append(kind, source);
+        };
+        return paged_flow_walk(flow, 0, composer->composition->options.max_depth, visit);
     }
 
     TypesetStatus line_storage(PagedFlowNode* flow) {
@@ -3986,7 +5042,75 @@ struct PagedPageProvider {
         }
         return index;
     }
+
+    const RadiantPageSequence* source_sequence(DomElement* source) const {
+        for (; source; source = source->parent_element()) {
+            const RadiantPageSequence* sequence = radiant_page_sequence_for(composer->tree->model->css->page_document, source);
+            if (sequence) return sequence;
+        }
+        return nullptr;
+    }
+
+    bool finishes_sequence(const TypesetResume& end, const RadiantPageSequence* sequence) const {
+        if (!sequence) return false;
+        size_t index = following_material(end.state[0]);
+        if (index == count) return true;
+        const RadiantPageSequence* following = source_sequence(steps[index].flow->source);
+        return following && following != sequence;
+    }
+
+    bool finishes_page(const TypesetPageCandidate& candidate, const RadiantPageSequence* sequence) const {
+        const PagedCandidateInfo* info = (const PagedCandidateInfo*)candidate.trial;
+        return finishes_sequence(candidate.end, sequence) && (!info || !info->pending_aux);
+    }
 };
+
+static RadiantKeepStrength paged_context_keep(const RadiantKeepSpec& spec) {
+    // the current body fragmentainer is one column; a page boundary crosses both domains.
+    return radiant_keep_max(spec.scope[1], spec.scope[2]);
+}
+
+static RadiantKeepStrength paged_boundary_keep(PagedComposer* composer, PagedFlowNode* flow, bool complete) {
+    RadiantKeepStrength result = {};
+    for (size_t i = 0; i < composer->depth; i++) {
+        PagedFlowNode* owner = composer->frames[i].flow;
+        bool finishes = false;
+        if (complete) for (PagedFlowNode* end = flow; end; end = end->parent) {
+            if (end == owner) { finishes = true; break; }
+            if (end->next) break;
+        }
+        if (!finishes && owner->style->flow_traits)
+            result = radiant_keep_max(result, paged_context_keep(owner->style->flow_traits->together));
+    }
+    if (!complete) return result;
+    for (PagedFlowNode* end = flow; end; end = end->parent) {
+        PagedFlowNode* next = end->kind == PAGED_FLOW_TABLE_ROW ? paged_table_next_body_row(end) : end->next;
+        if (!next) continue;
+        if (end->style->flow_traits) result = radiant_keep_max(result, paged_context_keep(end->style->flow_traits->next));
+        if (next->style->flow_traits) result = radiant_keep_max(result, paged_context_keep(next->style->flow_traits->previous));
+        break;
+    }
+    return result;
+}
+
+static size_t paged_choose_page(void*, const TypesetPageCandidate* candidates, size_t count) {
+    size_t selected = 0; RadiantKeepStrength weakest = {};
+    if (candidates[0].trial) weakest = ((const PagedCandidateInfo*)candidates[0].trial)->keep;
+    for (size_t i = 0; i < count; i++) {
+        if (candidates[i].boundary.legality == TYPESET_BREAK_FORCED) return i;
+        RadiantKeepStrength keep = candidates[i].trial ? ((const PagedCandidateInfo*)candidates[i].trial)->keep : RadiantKeepStrength{};
+        if (radiant_keep_compare(keep, weakest) <= 0) { selected = i; weakest = keep; }
+    }
+    return selected;
+}
+
+static TypesetAssemblyAction paged_pack_page(void* context, const TypesetPageCandidate* candidate) {
+    PagedPageProvider* provider = (PagedPageProvider*)context;
+    const PagedCandidateInfo* info = (const PagedCandidateInfo*)candidate->trial;
+    float free = candidate->available_height - candidate->body_height - candidate->note_height - candidate->float_height;
+    provider->space_ratio = info && info->space_capacity > 0.0f ? fminf(1.0f, fmaxf(0.0f, free / info->space_capacity)) : 1.0f;
+    return TYPESET_ASSEMBLY_FINALIZE;
+}
 
 static bool paged_sibling_avoidance(PagedFlowNode* flow) {
     PagedFlowNode* next = flow->kind == PAGED_FLOW_TABLE_ROW ? paged_table_next_body_row(flow) : flow->next;
@@ -3999,7 +5123,8 @@ static TypesetStatus paged_page_line(PagedPageProvider* provider, PagedFlowNode*
     PagedComposer* composer = provider->composer;
     size_t first = cursor->state[1];
     if (first == flow->paragraph.count) { next->state[0]++; next->state[1] = next->state[2] = 0; return TYPESET_OK; }
-    TypesetStatus status = provider->line_storage(flow);
+    TypesetStatus status = paged_space_flush(composer);
+    if (status == TYPESET_OK) status = provider->line_storage(flow);
     if (status != TYPESET_OK) return status;
     float width = composer->frames[composer->depth - 1].content_width;
     float containing_height = composer->frames[composer->depth - 1].content_height;
@@ -4063,6 +5188,8 @@ static TypesetStatus paged_page_next(void* context, const TypesetResume* cursor,
     }
     const PagedFlowStep& step = provider->steps[cursor->state[0]];
     PagedFlowNode* flow = step.flow;
+    composer->space_ratio = provider->space_ratio;
+    provider->boundary_keep = {};
     *next = *cursor; next->serial++; next->state[0]++;
     *contribution = {}; contribution->kind = TYPESET_CONTRIBUTION_BOUNDARY;
     contribution->payload = &step;
@@ -4087,7 +5214,8 @@ static TypesetStatus paged_page_next(void* context, const TypesetResume* cursor,
             break;
         case PAGED_STEP_TABLE_ROW: {
             bool complete = false; uint64_t continuation = 0;
-            status = cursor->state[3] == composer->page->page_number ? TYPESET_UNPLACEABLE :
+            status = paged_space_flush(composer);
+            if (status == TYPESET_OK) status = cursor->state[3] == composer->page->page_number ? TYPESET_UNPLACEABLE :
                 paged_table_row(composer, flow, cursor->state[1], &continuation, &complete,
                     &contribution->boundary.reason, &contribution->metrics.height);
             contribution->kind = TYPESET_CONTRIBUTION_BOX;
@@ -4106,6 +5234,10 @@ static TypesetStatus paged_page_next(void* context, const TypesetResume* cursor,
         }
         case PAGED_STEP_CLOSE: {
             float parent_width = composer->depth > 1 ? composer->frames[composer->depth - 2].content_width : composer->page_style.content_rect.width;
+            if (paged_block_remaining(composer) > 0.0f) {
+                status = paged_space_flush(composer);
+                if (status != TYPESET_OK) break;
+            }
             float remaining = paged_block_remaining(composer);
             float available = composer->bottom - composer->y - paged_region_reserved(composer) - paged_tail_edges(composer, true);
             if (remaining > 0.0f) {
@@ -4146,6 +5278,13 @@ static TypesetStatus paged_page_next(void* context, const TypesetResume* cursor,
         // forced boundaries override soft keeps; they do not constitute avoidance relaxation.
         contribution->boundary.reason = 0;
     } else {
+        bool complete = step.kind == PAGED_STEP_CLOSE || (step.kind == PAGED_STEP_LINE && next->state[0] != cursor->state[0]) ||
+            (step.kind == PAGED_STEP_TABLE_ROW && next->state[0] != cursor->state[0]);
+        provider->boundary_keep = paged_boundary_keep(composer, flow, complete);
+        if (step.kind == PAGED_STEP_LINE && !complete && status == TYPESET_OK)
+            for (size_t scope = 1; scope < 3; scope++) provider->boundary_keep = radiant_keep_max(provider->boundary_keep,
+                paged_inline_keep(flow, cursor->state[1], next->state[1], next->state[1], scope));
+        if (provider->boundary_keep.kind == RADIANT_KEEP_ALWAYS) contribution->boundary.legality = TYPESET_BREAK_FORBIDDEN;
         for (size_t i = 0; i < composer->depth; i++)
             if (composer->frames[i].flow->style->break_inside == VIEW_BREAK_AVOID)
                 contribution->boundary.reason |= PAGED_RELAX_AVOIDANCE;
@@ -4181,6 +5320,8 @@ static TypesetStatus paged_page_probe(void* context, const TypesetContribution* 
     if (provider->blocked != TYPESET_OK) { *stop = true; return provider->blocked; }
     float body = composer->y - composer->page_style.content_rect.y - composer->regions[PAGED_REGION_TOP].plan.reserved_height;
     body += paged_tail_edges(composer, false);
+    RadiantSpaceSpec tail = paged_space_range(composer, true);
+    body += tail.minimum + (tail.optimum - tail.minimum) * provider->space_ratio;
     PagedRegionTrial trial = {};
     for (size_t i = 0; i < PAGED_REGION_COUNT; i++) trial.anchor_counts[i] = composer->regions[i].anchor_count;
     TypesetStatus status = paged_regions_trial(composer, body, &trial);
@@ -4189,6 +5330,18 @@ static TypesetStatus paged_page_probe(void* context, const TypesetContribution* 
         candidate->note_height = trial.plans[PAGED_REGION_NOTE].reserved_height;
         candidate->float_height = trial.plans[PAGED_REGION_TOP].reserved_height + trial.plans[PAGED_REGION_BOTTOM].reserved_height;
         candidate->available_height = composer->page_style.content_rect.height;
+        float capacity = composer->space_optimum_extra + tail.optimum - tail.minimum;
+        const RadiantPageSequence* sequence = composer->page->sequence;
+        bool pending = false;
+        for (const TypesetRegionPlan& plan : trial.plans) pending |= plan.pending_count != 0;
+        if (provider->reject_terminal && provider->finishes_sequence(candidate->end, sequence) && !pending)
+            candidate->boundary.legality = TYPESET_BREAK_FORBIDDEN;
+        if (candidate->boundary.legality != TYPESET_BREAK_FORBIDDEN &&
+            (provider->boundary_keep.kind != RADIANT_KEEP_AUTO || capacity > 0.0f || (sequence && sequence->master_program))) {
+            PagedCandidateInfo* info = (PagedCandidateInfo*)pool_alloc(provider->candidate_pool, sizeof(PagedCandidateInfo));
+            if (!info) status = TYPESET_OUT_OF_MEMORY;
+            else { *info = {provider->boundary_keep, capacity, sequence, pending}; candidate->trial = info; }
+        }
     }
     paged_region_trial_dispose(&trial);
     if (status == TYPESET_UNPLACEABLE || body > composer->page_style.content_rect.height) {
@@ -4208,7 +5361,26 @@ static TypesetStatus paged_page_committed(void* context, const TypesetPageCandid
     PagedPageProvider* provider = (PagedPageProvider*)context;
     if (candidate->boundary.reason & PAGED_RELAX_MINIMA) provider->composer->composition->diagnostic.relaxed_line_minima++;
     if (candidate->boundary.reason & PAGED_RELAX_AVOIDANCE) provider->composer->composition->diagnostic.relaxed_avoidance++;
-    return provider->checkpoint.accept();
+    TypesetStatus status = paged_space_flush(provider->composer, true);
+    return status == TYPESET_OK ? provider->checkpoint.accept() : status;
+}
+
+static TypesetStatus paged_page_plan_try(PagedPageProvider* context, const TypesetFlowProvider* provider,
+        const TypesetResume* cursor, const TypesetPageConstraints* constraints, const TypesetPageProbe* probe,
+        const TypesetPagePolicy* policy, Pool* scratch, TypesetPagePlan* plan) {
+    context->relax_minima = context->relax_avoidance = false;
+    context->hard_failure = {}; context->failed_source = nullptr; context->failed_reason = nullptr;
+    context->space_ratio = 0.0f;
+    TypesetStatus status = typeset_page_plan(provider, cursor, constraints, probe, policy, scratch, plan);
+    if (status == TYPESET_UNPLACEABLE && !paged_regions_placed(context->composer)) {
+        context->relax_minima = true; context->space_ratio = 0.0f;
+        status = typeset_page_plan(provider, cursor, constraints, probe, policy, scratch, plan);
+        if (status == TYPESET_UNPLACEABLE) {
+            context->relax_avoidance = true; context->space_ratio = 0.0f;
+            status = typeset_page_plan(provider, cursor, constraints, probe, policy, scratch, plan);
+        }
+    }
+    return status;
 }
 
 static TypesetStatus paged_layout_pages(PagedComposer* composer, PagedFlowNode* root) {
@@ -4221,27 +5393,46 @@ static TypesetStatus paged_layout_pages(PagedComposer* composer, PagedFlowNode* 
     TypesetFlowProvider provider = {composer->tree->model->tree_id, composer->tree->layout_generation,
         &context, paged_page_next, paged_flow_cursor_copy, paged_page_restore};
     TypesetResume cursor = {provider.identity, provider.generation, 0, {}}, next = {};
-    TypesetPagePolicy policy = {&context, paged_choose_last, paged_finalize, paged_page_committed};
+    TypesetPagePolicy policy = {&context, paged_choose_page, paged_pack_page, paged_page_committed};
     TypesetPageProbe probe = {&context, paged_page_probe};
     TypesetPageConstraints constraints = {INFINITY, composer->composition->options.max_items,
         composer->composition->options.max_items};
     while (status == TYPESET_OK && cursor.state[0] < context.count) {
-        context.start = context.active = cursor; context.blocked = TYPESET_OK;
-        context.hard_failure = {};
-        context.failed_source = nullptr; context.failed_reason = nullptr;
-        context.relax_minima = context.relax_avoidance = false;
+        context.start = context.active = cursor; context.blocked = TYPESET_OK; context.reject_terminal = false;
         Pool* scratch = mem_pool_create((MemContext*)composer->tree->model->document->services.mem_ctx,
             MEM_ROLE_LAYOUT, "typeset.html.whole-page");
         if (!scratch) { status = TYPESET_OUT_OF_MEMORY; break; }
+        context.candidate_pool = scratch;
         TypesetPagePlan plan = {};
-        status = typeset_page_plan(&provider, &cursor, &constraints, &probe, &policy, scratch, &plan);
-        if (status == TYPESET_UNPLACEABLE && !paged_regions_placed(composer)) {
-            context.relax_minima = true;
-            status = typeset_page_plan(&provider, &cursor, &constraints, &probe, &policy, scratch, &plan);
-            if (status == TYPESET_UNPLACEABLE) {
-                context.relax_avoidance = true;
-                status = typeset_page_plan(&provider, &cursor, &constraints, &probe, &policy, scratch, &plan);
-            }
+        status = paged_page_plan_try(&context, &provider, &cursor, &constraints, &probe, &policy, scratch, &plan);
+        const PagedCandidateInfo* info = status == TYPESET_OK ? (const PagedCandidateInfo*)plan.candidate.trial : nullptr;
+        const RadiantPageSequence* sequence = info ? info->sequence :
+            status == TYPESET_UNPLACEABLE ? context.source_sequence(context.failed_source) : nullptr;
+        if (sequence && sequence->master_program && sequence->master_program->terminal) {
+            TypesetStatus ordinary_status = status;
+            bool normal_finished = status == TYPESET_OK && context.finishes_page(plan.candidate, sequence);
+            composer->sequence = sequence; composer->page_name = sequence->master_reference;
+            status = paged_empty_page_restyle(composer, false);
+            bool pad = status == TYPESET_OK && paged_sequence_padding(composer->page, sequence->next);
+            if (status == TYPESET_OK && !pad) {
+                // terminal geometry is provisional: remeasure before publishing any fragment or mark.
+                composer->terminal_page = composer->page->page_number;
+                status = paged_empty_page_restyle(composer, false);
+                if (status == TYPESET_OK) {
+                    plan = {};
+                    status = paged_page_plan_try(&context, &provider, &cursor, &constraints, &probe, &policy, scratch, &plan);
+                }
+                if (status == TYPESET_UNPLACEABLE || (status == TYPESET_OK && !context.finishes_page(plan.candidate, sequence))) {
+                    composer->terminal_page = 0;
+                    composer->retain_aux_tail = normal_finished;
+                    status = paged_empty_page_restyle(composer, false);
+                    if (status == TYPESET_OK) {
+                        // keep material for a following terminal page instead of oscillating page counts.
+                        context.reject_terminal = normal_finished; plan = {};
+                        status = paged_page_plan_try(&context, &provider, &cursor, &constraints, &probe, &policy, scratch, &plan);
+                    }
+                }
+            } else if (status == TYPESET_OK) status = ordinary_status;
         }
         if (status == TYPESET_OK) status = typeset_page_commit(&plan, &next);
         mem_pool_destroy(scratch);
@@ -4283,7 +5474,7 @@ static TypesetStatus paged_fixed_flow(PagedComposer* composer, PagedFlowNode* fl
         TypesetLineCandidate* scratch = (TypesetLineCandidate*)pool_alloc(composer->composition->pool,
             capacity * sizeof(TypesetLineCandidate));
         if (!scratch) return TYPESET_OUT_OF_MEMORY;
-        TypesetStatus status = TYPESET_OK;
+        TypesetStatus status = paged_space_flush(composer);
         for (size_t first = 0; status == TYPESET_OK && first < capacity;) {
             TypesetLineCandidate line = {};
             status = paged_next_line(composer, flow, first,
@@ -4310,6 +5501,10 @@ static TypesetStatus paged_fixed_flow(PagedComposer* composer, PagedFlowNode* fl
         // specified cell heights expand the row, while alignment uses the actual content extent.
         *natural_height = composer->y - frame.page_start + frame.box.edges[2];
     }
+    if (paged_block_remaining(composer) > 0.0f) {
+        status = paged_space_flush(composer);
+        if (status != TYPESET_OK) return status;
+    }
     composer->y += paged_block_remaining(composer);
     return paged_block_finish(composer, parent_width);
 }
@@ -4318,6 +5513,7 @@ static TypesetStatus paged_layout_continuous(PagedComposer* composer, PagedFlowN
     PagedCheckpoint checkpoint;
     TypesetStatus status = checkpoint.begin(composer);
     if (status == TYPESET_OK) status = paged_fixed_flow(composer, root);
+    if (status == TYPESET_OK) status = paged_space_flush(composer, true);
     return status == TYPESET_OK ? checkpoint.accept() : checkpoint.fail(status);
 }
 
@@ -4462,19 +5658,70 @@ static TypesetStatus paged_margin_layout(PagedComposer* composer, ViewPageBox* p
         if (rect.width <= 0.0f) continue;
         Pool* pool = composer->composition->pool;
         float content_height = 0.0f; bool forced = false;
-        TypesetStatus status = paged_flow_height(composer, flow, rect.width, rect.height, false, &content_height, &forced, true);
         PagedComposer margin = {}; margin.tree = composer->tree; margin.composition = composer->composition;
         margin.page_style = *page_style; margin.page = page;
+        margin.page_style.content_rect = rect;
         margin.role = flow->kind == PAGED_FLOW_BLOCK ? VIEW_FRAGMENT_RUNNING : VIEW_FRAGMENT_MARGIN;
         margin.depth = 1;
         if (!lam::pool_grow_array(pool, &margin.frames, &margin.frame_capacity, 1, 16)) return TYPESET_OUT_OF_MEMORY;
         margin.frames[0] = {}; margin.frames[0].flow = flow; margin.frames[0].fragment = box;
         margin.frames[0].content_x = rect.x; margin.frames[0].content_width = rect.width;
         margin.frames[0].content_height = rect.height;
+        TypesetStatus status = paged_flow_height(&margin, flow, rect.width, rect.height, false, &content_height, &forced, true);
         margin.y = rect.y + (rect.height - content_height) * 0.5f;
         if (status == TYPESET_OK) status = paged_fixed_flow(&margin, flow);
         pool_free(pool, margin.frames);
         if (status != TYPESET_OK) return status;
+    }
+    return TYPESET_OK;
+}
+
+static TypesetStatus paged_static_layout(PagedComposer* composer, ViewPageBox* page) {
+    const RadiantPageSequence* sequence = page->sequence;
+    for (size_t i = 0; i < RADIANT_REGION_EDGE_COUNT; i++) {
+        const RadiantPageRegion* region = page->style->edge_regions[i];
+        if (!region) continue;
+        RdtLogicalRect rect = page->style->edge_rects[i];
+        if (rect.width <= 0.0f || rect.height <= 0.0f) continue;
+        ViewCssStyle* style = page->style->edge_style[i];
+        LayoutViewNode* box = view_tree_fragment_append(composer->tree, &page->node, region->source.address, rect);
+        if (!box) return TYPESET_OUT_OF_MEMORY;
+        box->role = VIEW_FRAGMENT_STATIC; box->generated = box->paint_box = true; box->computed_style = lam::up(style);
+        box->clip_content = page->style->edge_clip[i];
+        page->static_boxes[i] = lam::up(box);
+        PagedComposer furniture = {}; furniture.tree = composer->tree; furniture.composition = composer->composition;
+        furniture.page = page; furniture.page_style = *page->style; furniture.role = VIEW_FRAGMENT_STATIC;
+        const PagedBoxEdges& edges = page->style->edge_boxes[i];
+        for (size_t j = 0; j < 4; j++) box->clip_inset[j] = edges.border.width.values[j];
+        TypesetStatus status = paged_boundary_publish(composer->tree, box, edges, true, true);
+        if (status != TYPESET_OK) return status;
+        const RadiantPageFlowBinding* binding = sequence ? sequence->static_content : nullptr;
+        while (binding && strcmp(binding->region_name, region->name)) binding = binding->next;
+        if (!binding) continue;
+        PagedMarkSource key = {}; key.source = binding->source.address;
+        const PagedMarkSource* record = (const PagedMarkSource*)hashmap_get(composer->composition->mark_sources, &key);
+        if (!record || !record->static_flow) return paged_failure(composer->composition, TYPESET_INVALID,
+            binding->source.address, page->page_number, "static region has no prepared content flow");
+        PagedFlowNode* flow = record->static_flow;
+        float width = rect.width - edges.edges[1] - edges.edges[3];
+        float height = rect.height - edges.edges[0] - edges.edges[2];
+        if (width <= 0.0f || height < 0.0f) return TYPESET_UNPLACEABLE;
+        Pool* pool = composer->composition->pool;
+        if (!lam::pool_grow_array(pool, &furniture.frames, &furniture.frame_capacity, 1, 16)) return TYPESET_OUT_OF_MEMORY;
+        furniture.depth = 1; furniture.frames[0] = {};
+        furniture.frames[0].flow = flow; furniture.frames[0].fragment = box;
+        furniture.frames[0].content_x = rect.x + edges.edges[3]; furniture.frames[0].content_width = width;
+        furniture.frames[0].content_height = height;
+        float used = 0.0f; bool forced = false;
+        status = paged_flow_height(&furniture, flow, width, height, false, &used, &forced, true);
+        furniture.y = rect.y + edges.edges[0];
+        if (region->align != RADIANT_REGION_ALIGN_BEFORE)
+            furniture.y += (height - used) * (region->align == RADIANT_REGION_ALIGN_CENTER ? 0.5f : 1.0f);
+        if (status == TYPESET_OK) status = paged_fixed_flow(&furniture, flow);
+        if (status == TYPESET_OK) status = paged_space_flush(&furniture, true);
+        pool_free(pool, furniture.frames); pool_free(pool, furniture.spaces); pool_free(pool, furniture.space_anchors);
+        if (status != TYPESET_OK) return paged_failure(composer->composition, status, binding->source.address,
+            page->page_number, "static region content could not be composed");
     }
     return TYPESET_OK;
 }
@@ -4488,7 +5735,8 @@ static TypesetStatus paged_page_counters(ViewTree* tree, PagedComposition* compo
     char total[64]; snprintf(total, sizeof(total), "pages %zu", tree->model->page_count);
     // Evaluate only finalized sheets: speculative page creation/restyling cannot advance these scopes.
     for (size_t page_index = 0; page_index < tree->model->page_count; page_index++) {
-        ViewPageStyle* page = tree->model->pages.get()[page_index]->style;
+        ViewPageBox* sheet = tree->model->pages.get()[page_index];
+        ViewPageStyle* page = sheet->style;
         for (size_t i = 0; i < 1 + CSS_PAGE_MARGIN_BOX_COUNT; i++) {
             ViewCssStyle* style = i ? page->margin_style[i - 1].get() : page->computed_style.get();
             if (!style) continue;
@@ -4503,13 +5751,97 @@ static TypesetStatus paged_page_counters(ViewTree* tree, PagedComposition* compo
                 TypesetStatus status = paged_counter_property(tree, composition, style, context, values[operation], operation, true);
                 if (status != TYPESET_OK) return status;
             }
+            if (!i && sheet->sequence) {
+                char folio[64]; snprintf(folio, sizeof(folio), "page %u", sheet->folio);
+                counter_set(context, folio);
+            }
             // CSS Paged Media 3 section 6.1 makes pages read-only, including in margin scopes.
             counter_set(context, total);
             style->counters = lam::up(counter_snapshot_create(context, tree->model->css->pool));
             if (!style->counters) return TYPESET_OUT_OF_MEMORY;
         }
+        StrBuf* label = strbuf_new();
+        if (!label) return TYPESET_OUT_OF_MEMORY;
+        bool formatted = sheet->sequence ? radiant_folio_append(&sheet->sequence->format, sheet->folio, label) :
+            counter_snapshot_append(page->computed_style->counters, "page", nullptr, CSS_VALUE_DECIMAL, label);
+        sheet->label = lam::up(formatted ? pool_dup_n(composition->pool, label->str, label->length) : nullptr);
+        strbuf_free(label);
+        if (!sheet->label) return TYPESET_OUT_OF_MEMORY;
     }
     return TYPESET_OK;
+}
+
+static TypesetStatus paged_fixed_document_admit(ViewTree* tree, PagedComposition* composition,
+        DomElement* source, DomNode* container, size_t depth) {
+    if (source == container) return TYPESET_OK;
+    if (depth > composition->options.max_depth) return TYPESET_BUDGET_EXHAUSTED;
+    if (radiant_page_control_hidden(source)) return TYPESET_OK;
+    ViewCssStyle* style = view_css_resolve(tree, source);
+    if (!style) return TYPESET_OUT_OF_MEMORY;
+    if (style->display.outer == CSS_VALUE_NONE) return TYPESET_OK;
+    bool ancestor = false;
+    for (DomNode* parent = container->parent; parent; parent = parent->parent) if (parent == source) { ancestor = true; break; }
+    if (!ancestor) return paged_failure(composition, TYPESET_INVALID, source, 0, "fixed pages cannot mix with visible flowing content");
+    for (DomNode* child = source->first_child; child; child = child->next_sibling) {
+        if (child->is_element()) {
+            TypesetStatus status = paged_fixed_document_admit(tree, composition, child->as_element(), container, depth + 1);
+            if (status != TYPESET_OK) return status;
+        } else if (child->is_text() && !radiant_page_whitespace(child->as_text()))
+            return paged_failure(composition, TYPESET_INVALID, child, 0, "fixed pages cannot mix with visible flowing text");
+    }
+    return TYPESET_OK;
+}
+
+static TypesetStatus paged_layout_fixed_pages(ViewTree* tree, PagedComposition* composition, ViewCssStyle* root_style) {
+    const RadiantPageDocument* program = tree->model->css->page_document;
+    if (tree->model->environment.presentation != VIEW_PRESENTATION_PAGED)
+        return paged_failure(composition, TYPESET_INVALID, program->fixed_source.address, 0, "fixed page controls require paged presentation");
+    if (program->fixed_count > composition->options.max_pages)
+        return paged_failure(composition, TYPESET_BUDGET_EXHAUSTED, program->fixed_source.address, 0, "fixed page sequence exceeds its page budget");
+    TypesetStatus status = paged_fixed_document_admit(tree, composition, tree->model->document->root, program->fixed_source.address, 0);
+    if (status != TYPESET_OK) return status;
+    composition->root = paged_flow_new(composition, PAGED_FLOW_BLOCK, tree->model->document->root, root_style);
+    if (!composition->root) return TYPESET_OUT_OF_MEMORY;
+    PagedComposer edition_composer = {}; edition_composer.tree = tree; edition_composer.composition = composition;
+    PagedCheckpoint edition;
+    status = edition.begin(&edition_composer);
+    for (const RadiantFixedPage* fixed = program->fixed_pages; status == TYPESET_OK && fixed; fixed = fixed->next) {
+        DomElement* source = fixed->source.address->as_element();
+        ViewCssStyle* style = view_css_resolve(tree, source);
+        if (!style) { status = TYPESET_OUT_OF_MEMORY; break; }
+        PagedCounterScope scope(tree, composition, style);
+        status = scope.status;
+        if (status == TYPESET_OK) status = paged_mark_register(composition, style);
+        PagedFlowNode* flow = status == TYPESET_OK ? paged_flow_new(composition, PAGED_FLOW_BLOCK, source, style) : nullptr;
+        if (status == TYPESET_OK && !flow) status = TYPESET_OUT_OF_MEMORY;
+        if (status != TYPESET_OK) break;
+        paged_flow_link(composition->root, flow);
+        PagedFlowNode* paragraph = nullptr;
+        // fixed pages use common atomic producers; insertions and nested page programs are inadmissible.
+        status = paged_build_children(tree, composition, source, flow, &paragraph, 0, true);
+        if (status != TYPESET_OK) break;
+        PagedComposer composer = {}; composer.tree = tree; composer.composition = composition; composer.atomic_fragment = true;
+        composer.page_style.width = fixed->viewport.width; composer.page_style.height = fixed->viewport.height;
+        composer.page_style.content_rect = fixed->viewport;
+        composer.initial_containing_block = fixed->viewport; composer.bottom = INFINITY;
+        composer.page = view_tree_page_append(tree, fixed->viewport.width, fixed->viewport.height, fixed->viewport,
+            paged_side(&composer, tree->model->page_count));
+        if (!composer.page) { status = TYPESET_OUT_OF_MEMORY; break; }
+        composer.page->fixed = lam::up(fixed);
+        composer.page->folio = fixed->geometry.source_page;
+        composer.page->sequence_page = composer.page->page_number;
+        if (fixed->label) composer.page->label = lam::up(fixed->label);
+        else {
+            char label[32]; snprintf(label, sizeof(label), "%u", fixed->geometry.source_page);
+            composer.page->label = lam::up(pool_strdup(composition->pool, label));
+        }
+        if (!composer.page->label) { status = TYPESET_OUT_OF_MEMORY; break; }
+        status = paged_fixed_flow(&composer, flow);
+        if (status == TYPESET_OK) status = paged_space_flush(&composer, true);
+    }
+    if (status != TYPESET_OK && composition->diagnostic.status == TYPESET_OK)
+        paged_failure(composition, status, program->fixed_source.address, 0, "fixed page content could not be composed");
+    return status == TYPESET_OK ? edition.accept() : edition.view ? edition.fail(status) : status;
 }
 
 static TypesetStatus paged_layout_pass(ViewTree* tree, const PagedLayoutOptions* options,
@@ -4517,6 +5849,7 @@ static TypesetStatus paged_layout_pass(ViewTree* tree, const PagedLayoutOptions*
     PagedComposition* composition = (PagedComposition*)pool_calloc(tree->prop_pool, sizeof(PagedComposition));
     if (!composition) return TYPESET_OUT_OF_MEMORY;
     tree->model->composition = lam::own(composition);
+    composition->document = tree->model->document;
     composition->options = *options;
     composition->references = references;
     composition->pool = mem_pool_create((MemContext*)tree->model->document->services.mem_ctx,
@@ -4530,30 +5863,47 @@ static TypesetStatus paged_layout_pass(ViewTree* tree, const PagedLayoutOptions*
     DomElement* root = tree->model->document->root;
     ViewCssStyle* style = view_css_resolve(tree, root);
     if (!style) return TYPESET_OUT_OF_MEMORY;
+    const RadiantPageDiagnostic& page_diagnostic = tree->model->css->page_document->diagnostic;
+    if (page_diagnostic.status != VIEW_MODEL_OK) return paged_failure(composition,
+        page_diagnostic.status == VIEW_MODEL_OUT_OF_MEMORY ? TYPESET_OUT_OF_MEMORY : TYPESET_INVALID,
+        page_diagnostic.source.address, 0, page_diagnostic.reason);
     composition->counters = counter_context_create(tree->layout_pass_arena);
     if (!composition->counters) return TYPESET_OUT_OF_MEMORY;
     PagedCounterScope root_scope(tree, composition, style);
     if (root_scope.status != TYPESET_OK) return root_scope.status;
     TypesetStatus mark_status = paged_mark_register(composition, style);
     if (mark_status != TYPESET_OK) return mark_status;
+    if (tree->model->css->page_document->fixed_count) return paged_layout_fixed_pages(tree, composition, style);
     composition->root = paged_flow_new(composition, PAGED_FLOW_BLOCK, root, style);
     if (!composition->root) return TYPESET_OUT_OF_MEMORY;
     PagedFlowNode* paragraph = nullptr;
     TypesetStatus status = paged_build_children(tree, composition, root, composition->root, &paragraph, 0);
     PagedComposer composer = {}; composer.tree = tree; composer.composition = composition;
+    PagedCheckpoint edition;
+    if (status == TYPESET_OK) status = edition.begin(&composer);
     if (status == TYPESET_OK && tree->model->environment.presentation == VIEW_PRESENTATION_CONTINUOUS) status = paged_page_create(&composer, false);
     if (status == TYPESET_OK) status = tree->model->environment.presentation == VIEW_PRESENTATION_PAGED ?
         paged_layout_pages(&composer, composition->root) : paged_layout_continuous(&composer, composition->root);
     if (status == TYPESET_OK && !composer.page && tree->model->environment.presentation == VIEW_PRESENTATION_PAGED) status = paged_next_page(&composer);
     if (status == TYPESET_OK) status = paged_regions_close(&composer);
-    while (status == TYPESET_OK && paged_regions_pending(&composer)) {
-        status = paged_next_page(&composer);
-        if (status == TYPESET_OK) status = paged_regions_close(&composer);
+    if (status == TYPESET_OK) status = paged_regions_drain(&composer);
+    if (status == TYPESET_OK) status = paged_sequence_end(&composer, nullptr);
+    for (size_t i = 0; status == TYPESET_OK && i < tree->model->page_count; i++) {
+        const ViewPageBox* page = tree->model->pages.get()[i];
+        const RadiantPageSequence* sequence = page->sequence;
+        if (!sequence || !sequence->master_program) continue;
+        bool terminal = i + 1 == tree->model->page_count || tree->model->pages.get()[i + 1]->sequence.get() != sequence;
+        const RadiantPageRule* selected = radiant_page_master_select(sequence, page->sequence_page, page->folio, page->blank, terminal);
+        // provisional last/only fallback may seed measurement, but never publish an ineligible page.
+        if (!selected || strcmp(selected->name, page->name)) status = paged_failure(composition, TYPESET_UNPLACEABLE,
+            sequence->source.address, page->page_number, "sequence material cannot satisfy its terminal master alternatives");
     }
     for (size_t i = 0; i < PAGED_REGION_COUNT; i++) typeset_region_plan_dispose(&composer.regions[i].plan);
     if (status == TYPESET_OK) status = paged_page_counters(tree, composition);
-    for (size_t i = 0; status == TYPESET_OK && i < tree->model->page_count; i++)
+    for (size_t i = 0; status == TYPESET_OK && i < tree->model->page_count; i++) {
         status = paged_margin_layout(&composer, tree->model->pages.get()[i]);
+        if (status == TYPESET_OK) status = paged_static_layout(&composer, tree->model->pages.get()[i]);
+    }
     if (status == TYPESET_OK) {
         if (tree->model->environment.presentation == VIEW_PRESENTATION_CONTINUOUS) {
             tree->model->root->rect = {0.0f, 0.0f, tree->model->environment.viewport_width, composer.y};
@@ -4561,27 +5911,75 @@ static TypesetStatus paged_layout_pass(ViewTree* tree, const PagedLayoutOptions*
     }
     if (status != TYPESET_OK && composition->diagnostic.status == TYPESET_OK) paged_failure(composition, status, root,
         composer.page ? composer.page->page_number : 0, "secondary flow could not be composed");
-    return status;
+    // source admission can fail before the edition checkpoint exists.
+    return status == TYPESET_OK ? edition.accept() : edition.view ? edition.fail(status) : status;
 }
 
-static uint32_t paged_target_page(ViewTree* tree, DomElement* source) {
+static uint32_t paged_target_page(ViewTree* tree, DomElement* source, bool last = false) {
     PagedMarkSource key = {}; key.source = source;
     PagedMarkSource* mark = (PagedMarkSource*)hashmap_get(tree->model->composition->mark_sources, &key);
-    if (mark && mark->target_page) return mark->target_page;
+    if (mark && mark->target_page) return last ? mark->last_target_page : mark->target_page;
     ViewNodeState* state = view_tree_node_state(tree, source, false);
     // Extracted notes/floats bind to their placed region, not their body anchor.
     ViewCssStyle* style = state ? state->computed_style.get() : nullptr;
     ViewFragmentRole role = style && style->float_value == CSS_VALUE_FOOTNOTE ? VIEW_FRAGMENT_NOTE : VIEW_FRAGMENT_FLOAT;
+    uint32_t result = 0;
     for (LayoutViewNode* node = state ? state->first_occurrence.get() : nullptr; node; node = node->next_occurrence) {
         if (node->role != role || !node->paint_box) continue;
         LayoutViewNode* page = node->parent;
         while (page && page->kind != LAYOUT_VIEW_PAGE) page = page->parent;
-        if (page) return ((ViewPageBox*)page)->page_number;
+        if (page) { result = ((ViewPageBox*)page)->page_number; if (!last) break; }
     }
-    return 0;
+    return result;
+}
+
+static void paged_target_area_enter(PagedComposition* composition, DomNode* source,
+        uint32_t page, bool normal, bool blank) {
+    for (DomNode* node = source; node; node = node->parent) {
+        PagedMarkSource key = {}; key.source = node;
+        PagedMarkSource* mark = (PagedMarkSource*)hashmap_get(composition->mark_sources, &key);
+        if (!mark) continue;
+        for (size_t area = 0; area < 3; area++) {
+            if ((area == RADIANT_QUERY_NORMAL && !normal) || (area == RADIANT_QUERY_NON_BLANK && blank)) continue;
+            uint32_t* pages = mark->generated_pages[area];
+            if (!pages[0] || page < pages[0]) pages[0] = page;
+            if (page > pages[1]) pages[1] = page;
+        }
+    }
+}
+
+static void paged_target_areas_capture(ViewTree* tree) {
+    PagedComposition* composition = tree->model->composition;
+    // aggregate committed occurrences once; descendants and repeated/out-of-line areas retain their source ancestry.
+    for (size_t i = 0; i < tree->model->node_id_count; i++) {
+        LayoutViewNode* node = tree->model->nodes.get()[i];
+        if (!node || node->kind != LAYOUT_VIEW_FRAGMENT || (!node->paint_box && !node->glyph_run && !node->image_box)) continue;
+        if (!paged_source_has_own_area(node->computed_style.get())) continue;
+        LayoutViewNode* parent = node->parent;
+        while (parent && parent->kind != LAYOUT_VIEW_PAGE) parent = parent->parent;
+        if (!parent) continue;
+        bool viewport = node->source.address && node->source.address->is_element() &&
+            radiant_page_element(node->source.address->as_element(), "region");
+        bool normal = node->role == VIEW_FRAGMENT_BODY || node->role == VIEW_FRAGMENT_REPEATED_TABLE ||
+            (node->role == VIEW_FRAGMENT_STATIC && !viewport);
+        paged_target_area_enter(composition, node->source.address, ((ViewPageBox*)parent)->page_number, normal, false);
+    }
+    for (size_t i = 0; i < tree->model->page_count; i++) {
+        const ViewPageBox* page = tree->model->pages.get()[i];
+        if (page->blank && page->sequence)
+            paged_target_area_enter(composition, page->sequence->source.address, page->page_number, false, true);
+    }
 }
 
 static TypesetStatus paged_targets_capture(ViewTree* tree, PagedReferenceSession* session) {
+    paged_target_areas_capture(tree);
+    session->page_label_count = tree->model->page_count;
+    session->page_labels = (const char**)pool_calloc(session->pool, session->page_label_count * sizeof(const char*));
+    if (session->page_label_count && !session->page_labels) return TYPESET_OUT_OF_MEMORY;
+    for (size_t i = 0; i < session->page_label_count; i++) {
+        session->page_labels[i] = pool_strdup(session->pool, tree->model->pages.get()[i]->label);
+        if (!session->page_labels[i]) return TYPESET_OUT_OF_MEMORY;
+    }
     TypesetTargetStore next = {tree->model->tree_id, tree->layout_generation, session->pool,
         nullptr, 0, 0, session->targets.limit, nullptr};
     TypesetStatus status = TYPESET_OK;
@@ -4609,6 +6007,18 @@ static TypesetStatus paged_targets_capture(ViewTree* tree, PagedReferenceSession
         TypesetTarget target = {previous.name, {tree->model->tree_id, tree->layout_generation,
             value->source.expected_id, TYPESET_PROVIDER_OFFSETS, nullptr}, paged_target_page(tree, source),
             lam::up((const TypesetRecord*)value)};
+        target.last_page_number = paged_target_page(tree, source, true);
+        PagedMarkSource key = {}; key.source = source;
+        const PagedMarkSource* mark = (const PagedMarkSource*)hashmap_get(tree->model->composition->mark_sources, &key);
+        for (size_t area = 0; area < 3; area++) for (size_t edge = 0; edge < 2; edge++) {
+            uint32_t number = mark ? mark->generated_pages[area][edge] : 0;
+            value->pages[area][edge] = number;
+            if (number) {
+                value->labels[area][edge] = pool_strdup(session->pool, tree->model->pages.get()[number - 1]->label);
+                if (!value->labels[area][edge]) { status = TYPESET_OUT_OF_MEMORY; break; }
+            }
+        }
+        if (status != TYPESET_OK) break;
         const ViewPageBox* page = target.page_number ? tree->model->pages.get()[target.page_number - 1] : nullptr;
         value->page_counters = counter_snapshot_copy(page ? page->style->computed_style->counters.get() : nullptr, session->pool);
         if (!value->page_counters) { status = TYPESET_OUT_OF_MEMORY; break; }
@@ -4651,6 +6061,8 @@ static TypesetStatus paged_reference_observe(ViewTree* tree, PagedReferenceSessi
         ViewPageBox* page = tree->model->pages.get()[i];
         paged_signature_rect(signature, page->content_rect);
         paged_signature_value(signature, page->side); paged_signature_value(signature, page->blank);
+        paged_signature_value(signature, page->sequence ? page->sequence->source.expected_id : 0);
+        paged_signature_value(signature, page->sequence_page); paged_signature_value(signature, page->folio);
         paged_signature_text(signature, page->name);
         paged_signature_counters(signature, page->style->computed_style->counters);
     }
@@ -4679,6 +6091,10 @@ static TypesetStatus paged_reference_observe(ViewTree* tree, PagedReferenceSessi
         paged_signature_text(signature, value->after);
         paged_signature_counters(signature, value->counters);
         paged_signature_counters(signature, value->page_counters);
+        for (size_t area = 0; area < 3; area++) for (size_t edge = 0; edge < 2; edge++) {
+            paged_signature_value(signature, value->pages[area][edge]);
+            paged_signature_text(signature, value->labels[area][edge]);
+        }
     }
     TypesetStatus status = typeset_convergence_observe(&session->convergence, signature->str, signature->length, settled);
     strbuf_free(signature);
@@ -4766,16 +6182,20 @@ static void paged_paint_column_backgrounds(LayoutViewNode* table, LayoutViewNode
     }
 }
 
+static bool paged_paint_clip(PaintList* paint, const RdtLogicalRect& rect, const float* inset = nullptr) {
+    RdtPath* clip = rdt_path_new();
+    if (!clip) return false;
+    float top = inset ? inset[0] : 0.0f, right = inset ? inset[1] : 0.0f;
+    float bottom = inset ? inset[2] : 0.0f, left = inset ? inset[3] : 0.0f;
+    rdt_path_add_rect(clip, rect.x + left, rect.y + top, fmaxf(0.0f, rect.width - left - right),
+        fmaxf(0.0f, rect.height - top - bottom), 0.0f, 0.0f);
+    paint_push_clip(paint, clip, nullptr); rdt_path_free(clip);
+    return true;
+}
+
 static bool paged_paint_node(LayoutViewNode* node, PaintList* paint) {
     if (node->table_range && node->table_range->missing) return true;
-    if (node->clip_content) {
-        RdtPath* clip = rdt_path_new();
-        if (!clip) return false;
-        rdt_path_add_rect(clip, node->rect.x, node->rect.y, node->rect.width, node->rect.height, 0.0f, 0.0f);
-        paint_push_clip(paint, clip, nullptr); rdt_path_free(clip);
-    }
-    if (node->glyph_run) paint_glyph_run(paint, node->glyph_run);
-    else if (node->paint_box && node->computed_boundary) {
+    if (node->paint_box && node->computed_boundary) {
         if (!render_paint_boundary_emit_box(paint, node->computed_boundary,
             {node->rect.x, node->rect.y, node->rect.width, node->rect.height})) return false;
     }
@@ -4793,6 +6213,9 @@ static bool paged_paint_node(LayoutViewNode* node, PaintList* paint) {
         paged_paint_column_backgrounds(node, node, paint, true);
         paged_paint_column_backgrounds(node, node, paint, false);
     }
+    // overflow clips the padding box's content; it never cuts the region's own border/background.
+    if (node->clip_content && !paged_paint_clip(paint, node->rect, node->clip_inset)) return false;
+    if (node->glyph_run) paint_glyph_run(paint, node->glyph_run);
     if (node->image_box && !render_paint_image_box(paint, node->image_box)) return false;
     for (LayoutViewNode* child = node->first_child; child; child = child->next_sibling)
         if (!paged_paint_node(child, paint)) return false;
@@ -4806,13 +6229,22 @@ bool layout_secondary_paint_page(ViewTree* tree, const ViewPageBox* page, PaintL
     if (!page) return false;
     Color white = {.r = 255, .g = 255, .b = 255, .a = 255};
     paint_fill_rect(paint, 0.0f, 0.0f, page->node.rect.width, page->node.rect.height, page->style ? page->style->background : white);
-    RdtPath* clip = rdt_path_new();
-    if (!clip) return false;
-    rdt_path_add_rect(clip, 0.0f, 0.0f, page->node.rect.width, page->node.rect.height, 0.0f, 0.0f);
-    paint_push_clip(paint, clip, nullptr);
-    rdt_path_free(clip);
-    for (LayoutViewNode* child = page->node.first_child; child; child = child->next_sibling)
-        if ((!page->blank || child->role == VIEW_FRAGMENT_MARGIN) && !paged_paint_node(child, paint)) return false;
+    if (!paged_paint_clip(paint, page->node.rect)) return false;
+    if (!page->blank && page->style && page->style->body_style) {
+        // the boundary painter may normalize radii; keep immutable edition geometry untouched.
+        ViewCssBoxEdges box = page->style->body_box;
+        BoundaryProp boundary = {}; boundary.border = lam::own(&box.border); boundary.background = lam::own(&box.background);
+        const RdtLogicalRect& rect = page->style->body_rect;
+        if (!render_paint_boundary_emit_box(paint, &boundary, {rect.x, rect.y, rect.width, rect.height})) return false;
+    }
+    for (LayoutViewNode* child = page->node.first_child; child; child = child->next_sibling) {
+        if (page->blank && child->role != VIEW_FRAGMENT_MARGIN && child->role != VIEW_FRAGMENT_STATIC) continue;
+        bool body_clip = page->style && page->style->body_clip &&
+            (child->role == VIEW_FRAGMENT_BODY || child->role == VIEW_FRAGMENT_NOTE || child->role == VIEW_FRAGMENT_FLOAT);
+        if (body_clip && !paged_paint_clip(paint, page->style->body_rect, page->style->body_box.border.width.values)) return false;
+        if (!paged_paint_node(child, paint)) return false;
+        if (body_clip) paint_pop_clip(paint);
+    }
     paint_pop_clip(paint);
     return true;
 }

@@ -27,6 +27,14 @@ void parse_properties(Input* input, const char* prop_string);
 void parse_toml(Input* input, const char* toml_string);
 void parse_yaml(Input* input, const char* yaml_str);
 void parse_xml(Input* input, const char* xml_string);
+struct XmlParseOptions {
+    bool preserve_whitespace;
+    bool require_well_formed; // strict XML 1.0/UTF-8 syntax; DTDs need an explicit entity policy.
+    void* context;
+    void (*element_span)(void* context, Element* element, size_t start, size_t end);
+    bool require_namespaces = false;
+};
+void parse_xml_with_options(Input* input, const char* xml_string, const XmlParseOptions* options);
 void parse_css(Input* input, const char* css_string);
 
 // ── Relational database (C++ linkage) ──────────────────────────────

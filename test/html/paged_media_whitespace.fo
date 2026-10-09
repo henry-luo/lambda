@@ -1,0 +1,26 @@
+<?xml version="1.0"?>
+<fo:root xmlns:fo="http://www.w3.org/1999/XSL/Format" font-family="Arial" font-size="7.5pt" line-height="9pt">
+  <fo:layout-master-set>
+    <fo:simple-page-master master-name="sheet" page-width="225pt" page-height="120pt" margin="7.5pt"><fo:region-body region-name="main"/></fo:simple-page-master>
+    <fo:simple-page-master master-name="narrow" page-width="15pt" page-height="60pt"><fo:region-body region-name="main"/></fo:simple-page-master>
+  </fo:layout-master-set>
+  <fo:page-sequence master-reference="sheet" force-page-count="no-force">
+    <fo:flow flow-name="main">
+      <fo:block linefeed-treatment="preserve" white-space-treatment="preserve" white-space-collapse="false">  Preserved leading and trailing spaces&#x20;&#x20;
+  Second preserved line  </fo:block>
+      <fo:block linefeed-treatment="preserve" white-space-treatment="preserve">Collapsed across <fo:inline>&#x20;&#x20;
+  inline sources </fo:inline><fo:inline> and followers.</fo:inline></fo:block>
+      <fo:block linefeed-treatment="ignore">Linefeed
+ignored.</fo:block>
+      <fo:block white-space-treatment="ignore">All spaces disappear.</fo:block>
+      <fo:block linefeed-treatment="preserve" white-space-collapse="false" white-space-treatment="ignore-if-before-linefeed">  Leading stays&#x20;&#x20;
+  Trailing disappears  </fo:block>
+      <fo:block linefeed-treatment="preserve" white-space-collapse="false" white-space-treatment="ignore-if-after-linefeed">  Leading disappears&#x20;&#x20;
+  Trailing stays  </fo:block>
+    </fo:flow>
+  </fo:page-sequence>
+  <fo:page-sequence master-reference="narrow" force-page-count="no-force">
+    <fo:flow flow-name="main"><fo:block linefeed-treatment="treat-as-zero-width-space">WW
+WW</fo:block></fo:flow>
+  </fo:page-sequence>
+</fo:root>

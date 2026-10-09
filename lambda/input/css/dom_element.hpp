@@ -1563,6 +1563,7 @@ bool dom_document_finalize_loader_pool(DomDocument* document, Pool* pool);
  * @return New DomElement or NULL on failure
  */
 DomElement* dom_element_create(DomDocument* doc, const char* tag_name, Element* native_element);
+DomElement* build_dom_tree_from_element(Element* element, DomDocument* document, DomElement* parent);
 
 /**
  * Destroy a DomElement

@@ -51,25 +51,36 @@ DomElement* dom_parent_element(DomElement* element) {
 
 static const char* dom_element_stored_attribute(DomElement* element, const char* key);
 
-const char* dom_element_lookup_namespace_uri(DomElement* element, const char* prefix) {
+static const char* dom_element_namespace_binding(DomElement* element, const char* prefix, size_t length) {
     if (!element) return nullptr;
-    if (prefix && strcmp(prefix, "xml") == 0) return "http://www.w3.org/XML/1998/namespace";
-    if (prefix && strcmp(prefix, "xmlns") == 0) return "http://www.w3.org/2000/xmlns/";
+    if (length == 3 && !memcmp(prefix, "xml", 3)) return "http://www.w3.org/XML/1998/namespace";
+    if (length == 5 && !memcmp(prefix, "xmlns", 5)) return "http://www.w3.org/2000/xmlns/";
     char declaration[128] = "xmlns";
-    if (prefix && *prefix) {
-        size_t length = strlen(prefix);
-        if (length + 7 > sizeof(declaration)) return nullptr;
-        declaration[5] = ':';
-        memcpy(declaration + 6, prefix, length);
-        declaration[6 + length] = '\0';
+    StrBuf* extended = nullptr;
+    const char* key = declaration;
+    if (length) {
+        if (length <= sizeof(declaration) - 7) {
+            declaration[5] = ':'; memcpy(declaration + 6, prefix, length); declaration[6 + length] = '\0';
+        } else {
+            extended = strbuf_new();
+            if (!extended) return nullptr;
+            strbuf_append_str(extended, "xmlns:"); strbuf_append_str_n(extended, prefix, length); key = extended->str;
+        }
     }
-    // XML namespace declarations inherit independently of HTML integration points.
+    // preserve an explicit default-namespace reset separately from an absent declaration.
+    const char* result = nullptr;
     for (DomNode* node = element; node; node = node->parent) {
         if (!node->is_element()) continue;
-        const char* uri = dom_element_stored_attribute(node->as_element(), declaration);
-        if (uri) return *uri ? uri : nullptr;
+        result = dom_element_stored_attribute(node->as_element(), key);
+        if (result) break;
     }
-    return nullptr;
+    if (extended) strbuf_free(extended);
+    return result;
+}
+
+const char* dom_element_lookup_namespace_uri(DomElement* element, const char* prefix) {
+    const char* uri = dom_element_namespace_binding(element, prefix, prefix ? strlen(prefix) : 0);
+    return uri && *uri ? uri : nullptr;
 }
 
 const char* dom_element_namespace_uri(DomElement* element) {
@@ -77,13 +88,8 @@ const char* dom_element_namespace_uri(DomElement* element) {
     const char* uri = dom_element_stored_attribute(element, "__lambda_ns_uri");
     if (uri) return uri;
     const char* colon = strchr(element->tag_name, ':');
-    char prefix[128] = {};
-    if (colon) {
-        size_t length = (size_t)(colon - element->tag_name);
-        if (!length || length >= sizeof(prefix)) return "";
-        memcpy(prefix, element->tag_name, length);
-    }
-    uri = dom_element_lookup_namespace_uri(element, prefix);
+    if (colon && colon == element->tag_name.get()) return "";
+    uri = dom_element_namespace_binding(element, element->tag_name, colon ? (size_t)(colon - element->tag_name) : 0);
     if (uri) return uri;
     if (colon) return "";
     for (DomNode* node = element; node; node = node->parent) {
@@ -184,19 +190,8 @@ const char* dom_element_attribute_namespace_uri(DomElement* element,
     }
     *local_name = colon + 1;
     size_t prefix_len = (size_t)(colon - qualified_name);
-    if (prefix_len == 3 && strncmp(qualified_name, "xml", 3) == 0)
-        return "http://www.w3.org/XML/1998/namespace";
-    if (prefix_len == 5 && strncmp(qualified_name, "xmlns", 5) == 0)
-        return "http://www.w3.org/2000/xmlns/";
-    if (prefix_len >= 120) return nullptr;
-    char declaration[128] = "xmlns:";
-    memcpy(declaration + 6, qualified_name, prefix_len);
-    declaration[6 + prefix_len] = '\0';
-    for (DomElement* current = element; current;
-         current = current->parent_element()) {
-        const char* uri = current->get_attribute(declaration);
-        if (uri) return uri;
-    }
+    const char* uri = dom_element_namespace_binding(element, qualified_name, prefix_len);
+    if (uri) return uri;
     // HTML parsing maps XLink names on SVG even without an xmlns attribute.
     if (prefix_len == 5 && strncmp(qualified_name, "xlink", 5) == 0 &&
         strcmp(dom_element_namespace_uri(element),
@@ -2688,23 +2683,29 @@ const char* dom_element_get_pseudo_element_content_with_counters(
 // ============================================================================
 
 DomElement* DomElement::parent_element() const {
-    return static_cast<DomElement*>(parent);
+    return parent && parent->is_element() ? parent->as_element() : nullptr;
+}
+
+static DomElement* dom_element_in_sibling_direction(DomNode* node, bool forward) {
+    // text and comment nodes share these chains; never reinterpret them as elements.
+    while (node && !node->is_element()) node = forward ? node->next_sibling.get() : node->prev_sibling.get();
+    return node ? node->as_element() : nullptr;
 }
 
 DomElement* DomElement::first_child_element() const {
-    return static_cast<DomElement*>(first_child);
+    return dom_element_in_sibling_direction(first_child, true);
 }
 
 DomElement* DomElement::last_child_element() const {
-    return static_cast<DomElement*>(last_child);
+    return dom_element_in_sibling_direction(last_child, false);
 }
 
 DomElement* DomElement::next_sibling_element() const {
-    return static_cast<DomElement*>(next_sibling);
+    return dom_element_in_sibling_direction(next_sibling, true);
 }
 
 DomElement* DomElement::prev_sibling_element() const {
-    return static_cast<DomElement*>(prev_sibling);
+    return dom_element_in_sibling_direction(prev_sibling, false);
 }
 
 /**

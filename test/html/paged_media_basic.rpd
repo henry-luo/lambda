@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<r:page-document r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" r:line-stacking-strategy="max-height" xmlns:r="urn:lambda:radiant:page"
+                 style="margin:0; font-family:Arial; font-size:12pt; line-height:18pt; color:#18223a; white-space:normal">
+  <r:master-set r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics">
+    <r:page-master r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" name="report" style="size:300pt 420pt; margin:24pt">
+      <r:region r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" name="report-body" role="body" style="margin:6pt; background-color:#f8f9ff; overflow:hidden"/>
+    </r:page-master>
+  </r:master-set>
+  <r:page-sequence r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" master-reference="report">
+    <r:flow r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" region-name="report-body">
+      <div r:block-inline-geometry="reference" r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" style="font-size:20pt; line-height:26pt; padding-bottom:12pt">Radiant paged media</div>
+      <div r:block-inline-geometry="reference" r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics">This FO document translates to native Radiant page controls and ordinary HTML/CSS. Its text uses the shared <span r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" style="font-weight:bold">Radiant layout and typesetting</span> pipeline.</div>
+      <div r:block-inline-geometry="reference" r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" style="padding-top:12pt">The sheet and body region have separate geometry. Both preview and PDF export consume the same retained pages.</div>
+      <div r:block-inline-geometry="reference" r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" style="break-before:page; font-size:20pt; line-height:26pt; padding-bottom:12pt">A second physical page</div>
+      <div r:block-inline-geometry="reference" r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics">A forced page break preserves the source flow. This page is composed by the same page planner used for CSS paged media.</div>
+    </r:flow>
+  </r:page-sequence>
+</r:page-document>

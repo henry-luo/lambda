@@ -19,6 +19,7 @@ import html:    .html
 import resolve: .resolve
 import interp:  .interp
 import font:    .font
+import fixed:   .fixed
 
 // ============================================================
 // Phase 2 page rendering
@@ -183,6 +184,26 @@ pub fn pdf_to_html(pdf, opts) {
     }
 }
 
+// native loaders select the page model explicitly; existing continuous HTML callers retain their API.
+pub fn pdf_to_document(pdf, opts) element^ {
+    if (opts and opts.paged == true) pdf_to_fixed_pages(pdf, opts)^
+    else pdf_to_html(pdf, opts)
+}
+
+pub fn pdf_to_fixed_pages(pdf, opts) element^ {
+    let indices = fixed.selected_pages(pdf, opts)^
+    let pages = [for (i in indices)
+        (let page = resolve.page_at(pdf, i),
+         let geometry = fixed.source_geometry(pdf, page)^,
+         fixed.page(_render_page_parts(pdf, page, i, opts), geometry, i + 1, page.label)^)]
+    let faces = _collect_font_face_loop(pdf, indices, 0, [], []) |> join("")
+    let title = if (opts and opts.title) opts.title else "PDF Document";
+    <html 'xmlns:r': "urn:lambda:radiant:page",
+        <head <meta charset: "utf-8"> <title title> <style "html,body{margin:0;padding:0}" ++ faces>>
+        <body <'r:fixed-pages' *pages>>
+    >
+}
+
 // Number of pages in the document.
 pub fn pdf_page_count(pdf) {
     resolve.page_count(pdf)
@@ -244,19 +265,19 @@ fn _collect_one_page(pdf, page, seen_families, rules) {
     _collect_one_page_loop(pdf, page, _page_font_names(pdf, page), 0, seen_families, rules)
 }
 
-fn _collect_font_face_loop(pdf, i, n, seen, rules) {
-    if (i >= n) { rules }
+fn _collect_font_face_loop(pdf, indices, i, seen, rules) {
+    if (i >= len(indices)) { rules }
     else {
-        let page = resolve.page_at(pdf, i)
+        let page = resolve.page_at(pdf, indices[i])
         let r = _collect_one_page(pdf, page, seen, rules)
-        _collect_font_face_loop(pdf, i + 1, n, r.seen, r.rules)
+        _collect_font_face_loop(pdf, indices, i + 1, r.seen, r.rules)
     }
 }
 
 fn _collect_font_face_rules(pdf, limit) {
     let total = resolve.page_count(pdf)
     let n = _bounded_count(total, limit)
-    _collect_font_face_loop(pdf, 0, n, [], []) |> join("")
+    _collect_font_face_loop(pdf, [for (i in 0 to n - 1) i], 0, [], []) |> join("")
 }
 
 fn _bounded_count(total, limit) {

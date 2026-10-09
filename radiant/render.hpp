@@ -3583,6 +3583,8 @@ struct RasterRenderContext;
 typedef struct RasterRenderContext RasterRenderContext;
 
 RdtPath* render_path_create_rounded_rect(Rect rect, const Corner* radius);
+bool render_path_border_side_points(Rect rect, size_t side, float width, float before, float after, float points[8]);
+RdtPath* render_path_create_border_side(Rect rect, size_t side, float width, float before, float after);
 void render_path_append_rounded_rect(RdtPath* path, Rect rect,
                                      const Corner* radius, bool clockwise);
 Corner render_path_uniform_corner(float top_left, float top_right,
@@ -3971,11 +3973,13 @@ struct PaintImageBox {
     Rect content_rect, image_rect;
     float raster_scale;
     uint8_t opacity;
+    bool overflow_visible;
 };
 bool render_paint_image_box(PaintList* paint, const PaintImageBox* box);
 
 Rect render_media_image_rect(ViewBlock* view, ImageSurface* image, Rect content_rect, float raster_scale);
 Rect render_media_object_rect(const EmbedProp* embed, ImageSurface* image, Rect content_rect, float raster_scale);
+Rect render_media_positioned_rect(const EmbedProp* embed, Rect viewport, float width, float height, float raster_scale);
 bool render_media_paint_svg_image(PaintList* paint, ImageSurface* image, Rect image_rect,
     const Rect* content_rect, float raster_scale, FontContext* fonts, UiContext* ui = nullptr, uint8_t opacity = 255);
 bool render_media_paint_svg_picture(PaintList* paint, UiContext* ui, ViewBlock* view,
@@ -4008,8 +4012,11 @@ struct RenderPagedOptions {
     lam::Up<const char> preview_pages, export_pages;
     uint32_t thumbnail_page;
     bool block_remote_resources;
+    lam::Up<const char> import_pages;
+    uint32_t import_page_limit;
 };
 RenderPagedOptions render_paged_options_default();
+bool render_paged_input_supported(const char* path);
 // window presentation borrows a registry-owned edition and rasterizes only its viewport.
 bool render_paged_window_compose(UiContext* ui);
 void render_paged_window_scroll(UiContext* ui, float x, float y);

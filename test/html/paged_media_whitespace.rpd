@@ -1,0 +1,26 @@
+<?xml version="1.0"?>
+<r:page-document r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" r:line-stacking-strategy="max-height" xmlns:r="urn:lambda:radiant:page" style="margin:0; font-family:Arial; font-size:7.5pt; line-height:9pt; color:black; white-space:normal" r:linefeed-treatment="treat-as-space" r:white-space-treatment="ignore-if-surrounding-linefeed" r:white-space-collapse="true" r:wrap-option="wrap">
+  <r:master-set r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics">
+    <r:page-master r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" name="sheet" style="size:225pt 120pt; margin:7.5pt"><r:region r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" role="body" name="main" style="overflow:hidden"/></r:page-master>
+    <r:page-master r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" name="narrow" style="size:15pt 60pt"><r:region r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" role="body" name="main" style="overflow:hidden"/></r:page-master>
+  </r:master-set>
+  <r:page-sequence r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" master-reference="sheet" force-page-count="no-force">
+    <r:flow r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" region-name="main">
+      <div r:block-inline-geometry="reference" r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" r:linefeed-treatment="preserve" r:white-space-treatment="preserve" r:white-space-collapse="false">  Preserved leading and trailing spaces&#x20;&#x20;
+  Second preserved line  </div>
+      <div r:block-inline-geometry="reference" r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" r:linefeed-treatment="preserve" r:white-space-treatment="preserve">Collapsed across <span r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics">&#x20;&#x20;
+  inline sources </span><span r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics"> and followers.</span></div>
+      <div r:block-inline-geometry="reference" r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" r:linefeed-treatment="ignore">Linefeed
+ignored.</div>
+      <div r:block-inline-geometry="reference" r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" r:white-space-treatment="ignore">All spaces disappear.</div>
+      <div r:block-inline-geometry="reference" r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" r:linefeed-treatment="preserve" r:white-space-collapse="false" r:white-space-treatment="ignore-if-before-linefeed">  Leading stays&#x20;&#x20;
+  Trailing disappears  </div>
+      <div r:block-inline-geometry="reference" r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" r:linefeed-treatment="preserve" r:white-space-collapse="false" r:white-space-treatment="ignore-if-after-linefeed">  Leading disappears&#x20;&#x20;
+  Trailing stays  </div>
+    </r:flow>
+  </r:page-sequence>
+  <r:page-sequence r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" master-reference="narrow" force-page-count="no-force">
+    <r:flow r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" region-name="main"><div r:block-inline-geometry="reference" r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" r:linefeed-treatment="treat-as-zero-width-space">WW
+WW</div></r:flow>
+  </r:page-sequence>
+</r:page-document>

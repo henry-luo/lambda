@@ -835,12 +835,16 @@ pn main() {
 |----------|-------------|
 | `pdf_to_svg(pdf, page_index, opts)` | Renders one page (0-based) as an `<svg>` element; a missing page renders a placeholder |
 | `pdf_to_html(pdf, opts)` | Renders the document as an `<html>` element whose body holds one `<div class: "pdf-page">` per page |
+| `pdf_to_document(pdf, opts)` | Configured native loader entry point: selects fixed pages when `opts.paged` is `true`, otherwise continuous HTML; returns an error on failed paged intake |
+| `pdf_to_fixed_pages(pdf, opts)` | Returns native `r:fixed-pages` with HTML/SVG image content, source geometry and complete/ranged imports; returns an error for unsupported geometry/resources or exhausted page budgets |
 | `pdf_page_count(pdf)` | The number of pages |
 | `pdf_metadata(pdf)` | The document information dictionary (`Title`, `Author`, `Subject`, `Keywords`, `Creator`, `Producer`, `CreationDate`, `ModDate`) as a map, best effort |
 
+Fixed intake accepts `import_pages` (`"all"` or positive source ordinals/ranges such as `"2,49-53"`) and `max_pages` (a positive admitted-page budget, default 10,000). It validates original media/crop/bleed/trim/art boxes and signed quarter-turn rotation, retains the original one-based source ordinal, and embeds self-contained SVG vector resources. Native commands use `lambda view file.pdf --paged` and `lambda render file.pdf --paged -o result.pdf`; `--import-pages` and `--import-page-limit` select source pages and set the import budget. Preview `--pages` and output `--export-pages` address the resulting physical sequence independently. Failed imports preserve an existing output file. This adapter uses the configured package bridge under **D7.5.3**, dependency policy under **D7.1.2v2**, and the common selected-page lifetime under **D4.5.1v4 / D4.1.4v5**. Reversed/empty boxes, non-default `UserUnit` and unresolved image/form handles currently receive explicit profile errors. PDF page-label number trees retain decimal/Roman/repeated-letter styles, prefixes, starts, Unicode and empty labels through source selection and PDF export. Invalid label trees fail paged intake. Text selection and complete content-stream conformance remain outstanding.
+
 `opts` may be `null`. Options: `title` (the HTML title, default `"PDF Document"`), `css` (replaces the default page stylesheet), `background` (the page colour, default `"white"`), `show_label` (draws a "Page n" label on each page), `max_pages` (how many pages `pdf_to_html` renders, default 48), and `id_prefix` (the generated SVG resource namespace, default `"pdf"`; use distinct prefixes when embedding multiple PDFs in one DOM tree). Each page extends this namespace with its zero-based page index, so its clipping paths, patterns and shading resources cannot collide with other pages' definitions.
 
-> **Experimental.** Rendering fidelity varies from file to file. `lambda view`, `lambda layout` and `lambda render` pass no options, so they show at most the first 48 pages of a document.
+> **Experimental.** Rendering fidelity varies from file to file. Continuous PDF presentation shows at most 48 pages by default; `view --paged` and `render --paged` use complete or explicitly ranged fixed-page intake.
 
 ---
 

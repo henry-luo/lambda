@@ -38,6 +38,7 @@
 #include "../lambda/core/mark_reader.hpp"
 #include "../lib/log.h"
 #include "../lib/url.h"
+#include "../lib/strbuf.h"
 
 extern "C" {
 #include "../lib/pdf_writer.h"
@@ -341,6 +342,60 @@ TEST_F(InputPdfTest, FlattenedPageCarriesType) {
     const char* ty = page0.get("type").cstring();
     ASSERT_NE(ty, nullptr);
     EXPECT_STREQ(ty, "page");
+}
+
+static Input* parse_page_label_fixture(const char* labels, const char* nodes = "") {
+    StrBuf* pdf = strbuf_new(); if (!pdf) return nullptr;
+    strbuf_append_format(pdf, "%%PDF-1.7\n1 0 obj\n<< /Type /Catalog /Pages 2 0 R /PageLabels %s >>\nendobj\n", labels);
+    strbuf_append_str(pdf, "2 0 obj\n<< /Type /Pages /Count 6 /Kids [3 0 R 4 0 R 5 0 R 6 0 R 7 0 R 8 0 R] >>\nendobj\n");
+    for (int i = 3; i <= 8; i++) strbuf_append_format(pdf,
+        "%d 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 100 60] >>\nendobj\n", i);
+    strbuf_append_str(pdf, nodes);
+    strbuf_append_str(pdf, "trailer\n<< /Root 1 0 R /Size 30 >>\n%%EOF\n");
+    Input* input = InputManager::create_input(nullptr);
+    if (input) parse_pdf(input, pdf->str, pdf->length);
+    strbuf_free(pdf); return input;
+}
+
+TEST_F(InputPdfTest, PageLabelNumberTreesResolvePrefixesStylesAndUnicodeWithoutChangingOrdinals) {
+    Input* input = parse_page_label_fixture("<< /Kids [20 0 R 21 0 R] >>",
+        "20 0 obj\n<< /Limits [0 2] /Nums [0 << /S /r /St 4 >> 2 << /S /D /P (Part\\050x\\051\\040) /St 8 >>] >>\nendobj\n"
+        "21 0 obj\n<< /Limits [4 5] /Nums [4 << /S /A /St 27 >> 5 << /P <FEFF4E2DD83DDE00> >>] >>\nendobj\n");
+    ASSERT_NE(input, nullptr); MapReader root = MapReader::fromItem(input->root);
+    EXPECT_FALSE(root.has("page_labels_error")); ArrayReader pages = root.get("pages").asArray(); ASSERT_EQ(pages.length(), 6);
+    const char* expected[] = {"iv", "v", "Part(x) 8", "Part(x) 9", "AA", "中😀"};
+    for (int i = 0; i < 6; i++) EXPECT_STREQ(pages.get(i).asMap().get("label").cstring(), expected[i]);
+    input = parse_page_label_fixture("<< /Nums [0 << /S /R /St 3999 >> 2 << /S /a /St 52 >> 4 << /P <8093A0> >> 5 << >>] >>");
+    ASSERT_NE(input, nullptr); root = MapReader::fromItem(input->root); EXPECT_FALSE(root.has("page_labels_error"));
+    pages = root.get("pages").asArray();
+    const char* more[] = {"MMMCMXCIX", "MMMM", "zz", "aaa", "•ﬁ€", ""};
+    for (int i = 0; i < 6; i++) EXPECT_STREQ(pages.get(i).asMap().get("label").cstring(), more[i]);
+}
+
+TEST_F(InputPdfTest, InvalidPageLabelTreesDiagnoseBeforePublishingAnyLabelSet) {
+    struct Invalid { const char* labels; const char* nodes; const char* reason; };
+    const Invalid cases[] = {
+        {"<< /Nums [1 << /S /D >>] >>", "", "index zero"},
+        {"<< /Nums [0 << >> 0 << >>] >>", "", "ordered, unique"},
+        {"<< /Nums [0 << >> 6 << >>] >>", "", "within the page"},
+        {"<< /Nums [0 << >> 1] >>", "", "key/dictionary pairs"},
+        {"<< /Nums [0 << /S /bad >>] >>", "", "style"},
+        {"<< /Nums [0 << /St 1.5 >>] >>", "", "positive integer"},
+        {"<< /Nums [0 << /St 0 >>] >>", "", "positive integer"},
+        {"<< /Nums [0 << /P <FEFFD800> >>] >>", "", "encoding"},
+        {"<< /Nums [0 << /P <7F> >>] >>", "", "encoding"},
+        {"<< /Nums [0 << /S /A /St 2147483647 >>] >>", "", "byte budget"},
+        {"<< /Kids [20 0 R] >>", "20 0 obj\n<< /Kids [20 0 R] /Limits [0 0] >>\nendobj\n", "cycle"},
+        {"<< /Kids [20 0 R] >>", "20 0 obj\n<< /Nums [0 << >>] /Limits [0 1] >>\nendobj\n", "Limits"},
+        {"<< /Kids [20 0 R] >>", "20 0 obj\n<< /Nums [0 << >>] >>\nendobj\n", "Limits"}
+    };
+    for (const Invalid& item : cases) {
+        SCOPED_TRACE(item.labels); Input* input = parse_page_label_fixture(item.labels, item.nodes); ASSERT_NE(input, nullptr);
+        MapReader root = MapReader::fromItem(input->root); const char* error = root.get("page_labels_error").cstring();
+        ASSERT_NE(error, nullptr); EXPECT_NE(strstr(error, item.reason), nullptr) << error;
+        ArrayReader pages = root.get("pages").asArray(); ASSERT_EQ(pages.length(), 6);
+        for (int i = 0; i < 6; i++) EXPECT_FALSE(pages.get(i).asMap().has("label"));
+    }
 }
 
 TEST_F(InputPdfTest, FlattenedPageInheritsMediaBox) {

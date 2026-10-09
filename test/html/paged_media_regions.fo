@@ -1,0 +1,18 @@
+<?xml version="1.0"?>
+<fo:root xmlns:fo="http://www.w3.org/1999/XSL/Format" font-family="Arial" font-size="7.5pt" line-height="9pt">
+  <fo:layout-master-set>
+    <fo:simple-page-master master-name="sheet" page-width="180pt" page-height="135pt" margin="7.5pt">
+      <fo:region-body region-name="main" margin="22.5pt 15pt 22.5pt 22.5pt"/>
+      <fo:region-before region-name="head" extent="15pt" precedence="true" background-color="blue"/>
+      <fo:region-after region-name="foot" extent="11.25pt" display-align="after" background-color="yellow"/>
+      <fo:region-start region-name="side" extent="22.5pt" background-color="red"/>
+      <fo:region-end extent="15pt" background-color="green"/>
+    </fo:simple-page-master>
+  </fo:layout-master-set>
+  <fo:page-sequence master-reference="sheet" initial-page-number="9" force-page-count="even" format="I">
+    <fo:static-content flow-name="head"><fo:block color="white">Page <fo:page-number/></fo:block></fo:static-content>
+    <fo:static-content flow-name="foot"><fo:block>Footer <fo:page-number/></fo:block></fo:static-content>
+    <fo:static-content flow-name="side"><fo:block>Sidebar</fo:block></fo:static-content>
+    <fo:flow flow-name="main"><fo:block>Body</fo:block></fo:flow>
+  </fo:page-sequence>
+</fo:root>

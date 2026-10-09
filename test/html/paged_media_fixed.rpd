@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<r:page-document xmlns:r="urn:lambda:radiant:page" style="margin:0;padding:0;font:7pt/9pt Arial">
+    <style>
+      .fixed-page { width: 100%; height: 100%; }
+      .sheet { height: 100%; box-sizing: border-box; padding: 8pt; }
+      .one { background: #cce6ff; }
+      .two { background: #ddffdd; }
+      .three { background: #fff0cc; }
+      .four { background: #eedcff; }
+      h1 { margin: 0; font: bold 8pt/10pt Arial; }
+      p { margin: 4pt 0 0; }
+      @page { size: 1in 1in; margin: 20pt; }
+    </style>
+    <r:fixed-pages>
+      <r:fixed-page class="fixed-page" width="90pt" height="60pt" source-media-box="-10 -20 100 80"
+          source-crop-box="0 -10 90 50" source-rotation="0" source-page="49" source-label="XLIX">
+        <div class="sheet one"><h1>Fixed page 49</h1><p>Original origin and crop. CSS page size does not alter this sheet.</p></div>
+      </r:fixed-page>
+      <r:fixed-page class="fixed-page" width="90pt" height="100pt" source-media-box="-10 -20 100 80"
+          source-crop-box="-15 -10 90 90" source-rotation="90" source-page="50">
+        <div class="sheet two"><h1>Quarter turn</h1><p>The viewport uses the rotated media/crop intersection. PDF export retains both original boxes.</p></div>
+      </r:fixed-page>
+      <r:fixed-page class="fixed-page" width="130pt" height="70pt" source-media-box="10 20 160 120"
+          source-crop-box="20 30 150 100" source-trim-box="21 31 149 99" source-rotation="180" source-page="51">
+        <div class="sheet three"><h1>Half turn</h1><p>Preview stays upright. Export restores the source coordinate system and rotation.</p></div>
+      </r:fixed-page>
+      <r:fixed-page class="fixed-page" width="60pt" height="160pt" source-media-box="-50 10 130 90"
+          source-crop-box="-40 20 120 80" source-rotation="-90" source-page="52">
+        <div class="sheet four"><h1>Signed rotation</h1><p>Fixed page order, geometry, clipping and resources use the shared retained-page model.</p></div>
+      </r:fixed-page>
+    </r:fixed-pages>
+</r:page-document>

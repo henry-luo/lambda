@@ -930,7 +930,7 @@ static bool parse_doc_window_launch_options(int argc, char** argv, bool is_view,
         return false;
     }
     if (out->paged && (!out->filename || out->graph_view_key)) {
-        fputs("Error: view --paged requires an HTML or Lambda document and no --view-key\n", stderr);
+        fputs("Error: view --paged requires a document and no --view-key\n", stderr);
         return false;
     }
     return true;
@@ -3533,7 +3533,9 @@ static int lambda_main_impl(int argc, char *argv[]) {
             printf("  -vh, --viewport-height   Viewport height in CSS pixels (default: auto-size to content)\n");
             printf("  -s, --scale              Raster export density (default: 1.0; does not change layout)\n");
             printf("  --pixel-ratio            Device scale for HiDPI/Retina (default: 1.0; legacy option spelling)\n");
-            printf("  --paged                  Experimental HTML/Lambda pages; CSS @page size or A4 fallback\n");
+            fputs("  --paged                  Paginate HTML/FO/native input or preserve fixed PDF pages\n", stdout);
+            fputs("  --import-pages <sel>     Import source PDF pages: all or 1,3-5 (default: all)\n"
+                  "  --import-page-limit <N> Fail if the PDF import exceeds N pages\n", stdout);
             fputs("  --block-remote-resources  Use local document dependencies for paged export\n", stdout);
             printf("  --pages <selection>      Preview physical pages: all, none, or 1,3-5 (default: all)\n");
             printf("  --export-pages <sel>     Explicit PDF page selection; preview filtering does not filter PDF\n");
@@ -3741,14 +3743,13 @@ static int lambda_main_impl(int argc, char *argv[]) {
             fputs("Error: paged preview/export options require --paged\n", stderr);
             return lambda_main_finish(1);
         }
-        if (paged && (!input_ext || (strcmp(input_ext, ".html") != 0 && strcmp(input_ext, ".htm") != 0 &&
-                               strcmp(input_ext, ".ls") != 0))) {
-            log_error("[EXPORT_PAGED] --paged currently requires HTML or Lambda input");
-            fputs("Error: --paged currently requires HTML or Lambda input\n", stderr);
+        if (paged && !render_paged_input_supported(html_file)) {
+            log_error("[EXPORT_PAGED] --paged requires HTML, Lambda, FO, Radiant page or PDF input");
+            fputs("Error: --paged requires HTML, Lambda, FO, Radiant page or PDF input\n", stderr);
             return lambda_main_finish(1);
         }
         if (input_ext && strcmp(input_ext, ".pdf") == 0) {
-            if (output_ext && strcmp(output_ext, ".pdf") == 0) {
+            if (!paged && output_ext && strcmp(output_ext, ".pdf") == 0) {
                 FileCopyOptions copy_opts = { true, false };
                 int copy_status = file_copy(html_file, output_file, &copy_opts);
                 if (copy_status == 0) {
@@ -3968,7 +3969,9 @@ static int lambda_main_impl(int argc, char *argv[]) {
             printf("\nOptions:\n");
             printf("  --event-file <file.json>   Load simulated events from JSON file for testing\n");
             printf("  --event-result <file.json> Write a machine-readable event result\n");
-            fputs("  --paged                   Preview HTML/Lambda as print-media pages\n"
+            fputs("  --paged                   Preview paginated documents or fixed PDF pages\n"
+                  "  --import-pages <1,3-5>    Select source PDF pages before import\n"
+                  "  --import-page-limit <N>  Fail if PDF import exceeds N pages\n"
                   "  --pages <1,3-5>           Select physical pages (default: all)\n"
                   "  --page-grid <rows>x<cols> Arrange pages in groups\n"
                   "  --page-scale <number>     Preview zoom (default: 1)\n"
@@ -4037,10 +4040,8 @@ static int lambda_main_impl(int argc, char *argv[]) {
         }
 
         if (launch.paged) {
-            const char* extension = file_path_ext(filename);
-            if (!is_http_url && (!extension || (strcmp(extension, ".html") &&
-                    strcmp(extension, ".htm") && strcmp(extension, ".ls")))) {
-                fputs("Error: view --paged supports HTML and Lambda documents\n", stderr);
+            if (!is_http_url && !render_paged_input_supported(filename)) {
+                fputs("Error: view --paged supports HTML, Lambda, FO, Radiant page and PDF documents\n", stderr);
                 return lambda_main_finish(1);
             }
             int result = view_doc_in_window_with_events(filename, event_file, headless,

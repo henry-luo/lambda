@@ -1,0 +1,41 @@
+<?xml version="1.0"?>
+<r:page-document r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" r:line-stacking-strategy="max-height" xmlns:r="urn:lambda:radiant:page" style="margin:0; font-family:Arial; font-size:7.5pt; line-height:9pt; color:black; white-space:normal; border-collapse:separate" r:linefeed-treatment="treat-as-space" r:white-space-treatment="ignore-if-surrounding-linefeed" r:white-space-collapse="true" r:wrap-option="wrap">
+  <r:master-set r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics"><r:page-master r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" name="sheet" style="size:225pt 120pt; margin:7.5pt"><r:region r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" role="body" name="main" style="overflow:hidden"/></r:page-master></r:master-set>
+  <r:page-sequence r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" master-reference="sheet" force-page-count="no-force">
+    <r:flow r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" region-name="main">
+      <table r:table-omit-header-at-break="true" r:table-omit-footer-at-break="true" r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" style="table-layout:fixed; width:100%; border-collapse:separate; border-spacing:0">
+        <col r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" style="width:30pt; background-color:#ccffff"/>
+        <col r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" r:column-proportion="1" style="background-color:#ffe0cc"/>
+        <col r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" r:column-proportion="2" style="background-color:#e0ccff"/>
+        <thead r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" style="background-color:#cce0ff"><tr r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics"><td r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" colspan="3" style="padding:0; vertical-align:top"><div r:block-inline-geometry="reference" r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics">Repeated header</div></td></tr></thead>
+        <tfoot r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" style="background-color:#ddffdd"><tr r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics"><td r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" colspan="3" style="padding:0; vertical-align:top"><div r:block-inline-geometry="reference" r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics">Repeated footer</div></td></tr></tfoot>
+        <tbody r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics">
+          <tr r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics"><td r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" rowspan="2" style="padding:0; vertical-align:middle; background-color:#ffdddd"><div r:block-inline-geometry="reference" r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics">Both</div></td><td r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" style="padding:0; vertical-align:top"><div r:block-inline-geometry="reference" r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics">First</div></td><td r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" style="padding:0; vertical-align:top"><div r:block-inline-geometry="reference" r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics">One</div></td></tr>
+          <tr r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics"><td r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" colspan="2" style="padding:0; vertical-align:top"><div r:block-inline-geometry="reference" r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics">Second row spans two columns</div></td></tr>
+          <tr r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics"><td r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" style="padding:0; vertical-align:top"><div r:block-inline-geometry="reference" r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" r:linefeed-treatment="preserve" r:white-space-treatment="preserve">A
+B
+C
+D
+E
+F
+G
+H
+I
+J
+K
+L
+M
+N
+O
+P
+Q
+R
+S
+T
+U
+V</div></td><td r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" style="padding:0; vertical-align:top"><div r:block-inline-geometry="reference" r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics">Middle</div></td><td r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" style="padding:0; vertical-align:top"><div r:block-inline-geometry="reference" r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics">Side</div></td></tr>
+        </tbody>
+      </table>
+    </r:flow>
+  </r:page-sequence>
+</r:page-document>

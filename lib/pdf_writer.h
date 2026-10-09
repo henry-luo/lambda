@@ -152,6 +152,15 @@ HPDF_STATUS HPDF_Page_SetWidth(HPDF_Page page, float width);
  */
 HPDF_STATUS HPDF_Page_SetHeight(HPDF_Page page, float height);
 
+typedef enum { HPDF_PAGE_BOX_MEDIA, HPDF_PAGE_BOX_CROP, HPDF_PAGE_BOX_BLEED,
+    HPDF_PAGE_BOX_TRIM, HPDF_PAGE_BOX_ART, HPDF_PAGE_BOX_COUNT } HPDF_PageBox;
+// retain original default-user-space page boundaries independently of normalized paint dimensions.
+HPDF_STATUS HPDF_Page_SetBox(HPDF_Page page, HPDF_PageBox kind,
+                            float left, float bottom, float right, float top);
+HPDF_STATUS HPDF_Page_SetRotate(HPDF_Page page, int32_t degrees);
+// copy a complete UTF-8 label; empty labels are distinct from default decimal labels.
+HPDF_STATUS HPDF_Page_SetLabel(HPDF_Page page, const char* label);
+
 /* Coordinates are PDF points with a bottom-left origin. A target beginning
  * with '#' resolves against a destination registered on this document. */
 HPDF_STATUS HPDF_Page_AddLink(HPDF_Page page, float left, float bottom,

@@ -4256,6 +4256,7 @@ typedef struct DocumentJsHostConfig {
     bool redirect_stdout_to_stderr;
     bool disable_css_animations;
     InputResourcePolicy resource_policy;
+    const struct RenderPagedOptions* paged_media;
 } DocumentJsHostConfig;
 DocumentJsHostConfig document_js_host_config_inherit(UiContext* uicon,
                                                      const struct DomDocument* source);

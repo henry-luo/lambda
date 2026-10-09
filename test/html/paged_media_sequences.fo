@@ -1,0 +1,35 @@
+<?xml version="1.0"?>
+<fo:root xmlns:fo="http://www.w3.org/1999/XSL/Format" font-family="Arial" font-size="7.5pt" line-height="15pt">
+  <fo:layout-master-set>
+    <fo:page-sequence-master master-name="chapter">
+      <fo:repeatable-page-master-reference master-reference="normal" maximum-repeats="0"/>
+      <fo:repeatable-page-master-alternatives>
+        <fo:conditional-page-master-reference master-reference="blank" page-position="last" blank-or-not-blank="blank"/>
+        <fo:conditional-page-master-reference master-reference="last" page-position="last" blank-or-not-blank="not-blank"/>
+        <fo:conditional-page-master-reference master-reference="normal"/>
+      </fo:repeatable-page-master-alternatives>
+    </fo:page-sequence-master>
+    <fo:simple-page-master master-name="normal" page-width="150pt" page-height="60pt" margin="7.5pt">
+      <fo:region-body region-name="main" background-color="#e8f0ff"/>
+    </fo:simple-page-master>
+    <fo:simple-page-master master-name="last" page-width="60pt" page-height="60pt" margin="7.5pt">
+      <fo:region-body region-name="main" background-color="#e8ffe8"/>
+    </fo:simple-page-master>
+    <fo:simple-page-master master-name="blank" page-width="165pt" page-height="60pt" margin="7.5pt">
+      <fo:region-body region-name="main"/>
+    </fo:simple-page-master>
+  </fo:layout-master-set>
+  <fo:page-sequence master-reference="chapter" initial-page-number="1" force-page-count="no-force">
+    <fo:flow flow-name="main">
+      <fo:block>Alpha Beta Gamma Delta</fo:block>
+      <fo:block>Alpha Beta Gamma Delta</fo:block>
+      <fo:block>Alpha Beta Gamma Delta</fo:block>
+      <fo:block>Alpha Beta Gamma Delta</fo:block>
+      <fo:block>Alpha Beta Gamma Delta</fo:block>
+      <fo:block>Alpha Beta Gamma Delta</fo:block>
+    </fo:flow>
+  </fo:page-sequence>
+  <fo:page-sequence master-reference="chapter" initial-page-number="8" force-page-count="even">
+    <fo:flow flow-name="main"><fo:block>Reset folio</fo:block></fo:flow>
+  </fo:page-sequence>
+</fo:root>

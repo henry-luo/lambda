@@ -3430,6 +3430,9 @@ inline bool layout_context_is_measuring(LayoutContext* lycon) {
 bool layout_resolve_percentage_value(const CssValue* value, float percentage_base, float* out);
 bool layout_css_value_has_nonzero_percentage(const CssValue* value);
 bool layout_css_value_has_percentage(const CssValue* value);
+// compute length terms at their owner while retaining percentage terms for the used box.
+void layout_compute_math_lengths(LayoutContext* context, CssValue* value,
+    CssPropertyCode property = CSS_PROPERTY_TRANSFORM);
 bool layout_resolve_deferred_percentage(float percent, float percentage_base, float* out);
 bool layout_apply_deferred_percentage(float percent, float percentage_base, float* target, float* resolved);
 float layout_block_used_content_size(ViewBlock* block, bool horizontal, bool require_positive);

@@ -394,8 +394,8 @@ static float resolve_layout_transform_numeric(void* context, const CssValue* val
     return angle ? math_degrees_to_radians(result) : result;
 }
 
-static void normalize_layout_math_lengths(LayoutContext* context, CssValue* value,
-    CssPropertyCode property = CSS_PROPERTY_TRANSFORM) {
+void layout_compute_math_lengths(LayoutContext* context, CssValue* value,
+    CssPropertyCode property) {
     if (!value) return;
     if (value->type == CSS_VALUE_TYPE_LENGTH) {
         float degrees;
@@ -406,10 +406,10 @@ static void normalize_layout_math_lengths(LayoutContext* context, CssValue* valu
         }
     } else if (value->type == CSS_VALUE_TYPE_LIST) {
         for (int index = 0; index < value->data.list.count; index++)
-            normalize_layout_math_lengths(context, value->data.list.values[index], property);
+            layout_compute_math_lengths(context, value->data.list.values[index], property);
     } else if (value->type == CSS_VALUE_TYPE_FUNCTION && value->data.function) {
         for (int index = 0; index < value->data.function->arg_count; index++)
-            normalize_layout_math_lengths(context, value->data.function->args[index], property);
+            layout_compute_math_lengths(context, value->data.function->args[index], property);
     }
 }
 
@@ -495,7 +495,7 @@ static TransformFunction* resolve_transform_function(LayoutContext* lycon,
         term->expression = lam::own(css_value_clone_owned(argument, pool));
         if (!term->expression) { radiant::destroy_transform_function_payload(pool, &function); return nullptr; }
         // D4.5.1v4: copied computed trees cannot retain variable-substitution scratch values.
-        normalize_layout_math_lengths(lycon, term->expression);
+        layout_compute_math_lengths(lycon, term->expression);
     }
     TransformFunction* stored = document_pool
         ? (TransformFunction*)pool_calloc(document_pool, sizeof(TransformFunction))
@@ -2826,7 +2826,7 @@ static bool parse_border_radius_component(LayoutContext* lycon, int prop_id, con
             CssValue* computed = css_value_clone_owned(value, layout_prop_pool(lycon));
             if (!computed) return false;
             // computed font/viewport lengths inherit unchanged; percentages use the recipient's box.
-            normalize_layout_math_lengths(lycon, computed, (CssPropertyCode)prop_id);
+            layout_compute_math_lengths(lycon, computed, (CssPropertyCode)prop_id);
             *out_expression = computed;
             *out_radius = 0.0f;
         } else {
@@ -3715,7 +3715,9 @@ static bool css_percentage_uses_containing_inline_size(uintptr_t property) {
 }
 
 static float css_containing_inline_percentage_base(LayoutContext* lycon) {
-    if (!lycon || !lycon->block.parent) return -1.0f;
+    if (!lycon) return -1.0f;
+    // independent views supply their containing extent without a mutable default-view parent.
+    if (!lycon->block.parent) return lycon->selected_view_tree ? lycon->width : -1.0f;
     DomElement* current = lycon->elmt && lycon->elmt->is_element()
         ? lam::dom_require_element(lycon->elmt) : nullptr;
     DomElement* parent_element = current ? dom_parent_element(current) : nullptr;

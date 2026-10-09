@@ -46,6 +46,16 @@ static float render_media_object_position_offset(float box_size, float rendered_
     return position * scale;
 }
 
+Rect render_media_positioned_rect(const EmbedProp* embed, Rect viewport, float width, float height, float scale) {
+    bool set = embed && embed->object_position_set;
+    float x = set ? embed->object_position_x : 50.0f;
+    float y = set ? embed->object_position_y : 50.0f;
+    return {viewport.x + render_media_object_position_offset(viewport.width, width, x,
+                !set || embed->object_position_x_is_percent, scale),
+            viewport.y + render_media_object_position_offset(viewport.height, height, y,
+                !set || embed->object_position_y_is_percent, scale), width, height};
+}
+
 bool render_media_rasterize_svg_picture(ImageSurface* surface, int target_width,
                                         int target_height) {
     if (!surface || !surface->pic || target_width <= 0 || target_height <= 0) {
@@ -117,22 +127,7 @@ Rect render_media_object_rect(const EmbedProp* embed, ImageSurface* img, Rect re
         } else if (object_fit != CSS_VALUE_NONE) {
             return rect;
         }
-        float pos_x = 50.0f;
-        float pos_y = 50.0f;
-        bool pos_x_is_percent = true;
-        bool pos_y_is_percent = true;
-        if (embed->object_position_set) {
-            pos_x = embed->object_position_x;
-            pos_y = embed->object_position_y;
-            pos_x_is_percent = embed->object_position_x_is_percent;
-            pos_y_is_percent = embed->object_position_y_is_percent;
-        }
-        img_rect.x = rect.x + render_media_object_position_offset(
-            box_w, rendered_w, pos_x, pos_x_is_percent, s);
-        img_rect.y = rect.y + render_media_object_position_offset(
-            box_h, rendered_h, pos_y, pos_y_is_percent, s);
-        img_rect.width = rendered_w;
-        img_rect.height = rendered_h;
+        img_rect = render_media_positioned_rect(embed, rect, rendered_w, rendered_h, s);
     }
     return img_rect;
 }
@@ -180,19 +175,21 @@ bool render_media_paint_svg_picture(PaintList* paint, UiContext* ui, ViewBlock* 
 
 bool render_paint_image_box(PaintList* paint, const PaintImageBox* box) {
     if (!paint || !box || !box->image) return false;
-    if (box->content_rect.width <= 0.0f || box->content_rect.height <= 0.0f) return true;
+    if (!box->overflow_visible && (box->content_rect.width <= 0.0f || box->content_rect.height <= 0.0f)) return true;
     if (box->image->format == IMAGE_FORMAT_SVG) {
         return render_media_paint_svg_image(paint, box->image, box->image_rect,
-            &box->content_rect, box->raster_scale, box->fonts, nullptr, box->opacity);
+            box->overflow_visible ? &box->image_rect : &box->content_rect, box->raster_scale, box->fonts, nullptr, box->opacity);
     }
-    RdtPath* clip = rdt_path_new();
-    if (!clip) return false;
-    rdt_path_add_rect(clip, box->content_rect.x, box->content_rect.y,
-        box->content_rect.width, box->content_rect.height, 0.0f, 0.0f);
-    paint_push_clip(paint, clip, nullptr); rdt_path_free(clip);
+    if (!box->overflow_visible) {
+        RdtPath* clip = rdt_path_new();
+        if (!clip) return false;
+        rdt_path_add_rect(clip, box->content_rect.x, box->content_rect.y,
+            box->content_rect.width, box->content_rect.height, 0.0f, 0.0f);
+        paint_push_clip(paint, clip, nullptr); rdt_path_free(clip);
+    }
     paint_draw_image_resource(paint, box->image, box->image_rect.x, box->image_rect.y,
         box->image_rect.width, box->image_rect.height, box->opacity, nullptr);
-    paint_pop_clip(paint);
+    if (!box->overflow_visible) paint_pop_clip(paint);
     return true;
 }
 

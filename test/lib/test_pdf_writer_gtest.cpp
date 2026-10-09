@@ -811,3 +811,45 @@ TEST_F(PdfWriterTest, ComplexDocument) {
     // keep this file for manual inspection
     // remove(filename);
 }
+
+
+TEST_F(PdfWriterTest, SourcePageBoxesAndSignedRotationSerializeIndependentlyOfPaintSize) {
+    HPDF_Doc doc = HPDF_New(nullptr, nullptr); ASSERT_NE(doc, nullptr);
+    HPDF_Page page = HPDF_AddPage(doc); ASSERT_NE(page, nullptr);
+    EXPECT_EQ(HPDF_Page_SetWidth(page, 60.0f), HPDF_OK); EXPECT_EQ(HPDF_Page_SetHeight(page, 90.0f), HPDF_OK);
+    EXPECT_EQ(HPDF_Page_SetBox(page, HPDF_PAGE_BOX_MEDIA, -10.25f, -20.5f, 100.75f, 80.125f), HPDF_OK);
+    EXPECT_EQ(HPDF_Page_SetBox(page, HPDF_PAGE_BOX_CROP, 0.0f, -10.0f, 90.0f, 50.0f), HPDF_OK);
+    EXPECT_EQ(HPDF_Page_SetBox(page, HPDF_PAGE_BOX_BLEED, -1.0f, -11.0f, 91.0f, 51.0f), HPDF_OK);
+    EXPECT_EQ(HPDF_Page_SetBox(page, HPDF_PAGE_BOX_TRIM, 1.0f, -9.0f, 89.0f, 49.0f), HPDF_OK);
+    EXPECT_EQ(HPDF_Page_SetBox(page, HPDF_PAGE_BOX_ART, 2.0f, -8.0f, 88.0f, 48.0f), HPDF_OK);
+    EXPECT_EQ(HPDF_Page_SetRotate(page, -270), HPDF_OK);
+    EXPECT_EQ(HPDF_Page_SetRotate(page, 45), HPDF_ERROR_INVALID_PARAM);
+    EXPECT_EQ(HPDF_Page_SetBox(page, HPDF_PAGE_BOX_CROP, 0.0f, 0.0f, 0.0f, 1.0f), HPDF_ERROR_INVALID_PARAM);
+    EXPECT_EQ(HPDF_Page_SetBox(page, HPDF_PAGE_BOX_MEDIA, NAN, 0.0f, 1.0f, 1.0f), HPDF_ERROR_INVALID_PARAM);
+    EXPECT_EQ(HPDF_Page_SetBox(page, HPDF_PAGE_BOX_COUNT, 0.0f, 0.0f, 1.0f, 1.0f), HPDF_ERROR_INVALID_PARAM);
+    const char* path = "temp/pdf_source_page_geometry.pdf";
+    EXPECT_EQ(HPDF_SaveToFile(doc, path), HPDF_OK); HPDF_Free(doc);
+    EXPECT_TRUE(file_contains(path, "/MediaBox [-10.25 -20.5 100.75 80.125]"));
+    EXPECT_TRUE(file_contains(path, "/CropBox [0 -10 90 50]"));
+    EXPECT_TRUE(file_contains(path, "/BleedBox [-1 -11 91 51]"));
+    EXPECT_TRUE(file_contains(path, "/TrimBox [1 -9 89 49]"));
+    EXPECT_TRUE(file_contains(path, "/ArtBox [2 -8 88 48]")); EXPECT_TRUE(file_contains(path, "/Rotate -270"));
+    EXPECT_FALSE(file_contains(path, "/MediaBox [0 0 60.00 90.00]"));
+}
+
+TEST_F(PdfWriterTest, PageLabelsOwnUnicodeEmptyAndDefaultLabelsInSelectedOrder) {
+    HPDF_Doc doc = HPDF_New(nullptr, nullptr); ASSERT_NE(doc, nullptr);
+    HPDF_Page first = HPDF_AddPage(doc), second = HPDF_AddPage(doc), third = HPDF_AddPage(doc);
+    ASSERT_NE(first, nullptr); ASSERT_NE(second, nullptr); ASSERT_NE(third, nullptr);
+    char label[] = "Front(α)";
+    EXPECT_EQ(HPDF_Page_SetLabel(first, label), HPDF_OK); label[0] = 'X';
+    EXPECT_EQ(HPDF_Page_SetLabel(first, "\xFF"), HPDF_ERROR_INVALID_PARAM);
+    EXPECT_EQ(HPDF_Page_SetLabel(third, ""), HPDF_OK);
+    const char* path = "temp/pdf_writer_page_labels.pdf";
+    ASSERT_EQ(HPDF_SaveToFile(doc, path), HPDF_OK);
+    EXPECT_TRUE(file_contains(path, "/PageLabels << /Nums ["));
+    EXPECT_TRUE(file_contains(path, "0 << /P <FEFF00460072006F006E0074002803B10029>"));
+    EXPECT_TRUE(file_contains(path, "1 << /S /D /St 2"));
+    EXPECT_TRUE(file_contains(path, "2 << /P ()"));
+    HPDF_Free(doc);
+}

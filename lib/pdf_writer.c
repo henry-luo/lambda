@@ -144,6 +144,12 @@ struct HPDF_Page_Rec {
     
     float width;
     float height;
+
+    float boxes[HPDF_PAGE_BOX_COUNT][4];
+    uint8_t box_mask;
+    int32_t rotation;
+    bool has_rotation;
+    char* label;
     
     // Content stream buffer
     StrBuf* content;
@@ -560,6 +566,31 @@ HPDF_STATUS HPDF_Page_SetWidth(HPDF_Page page, float width) {
 HPDF_STATUS HPDF_Page_SetHeight(HPDF_Page page, float height) {
     if (!page) return HPDF_ERROR_INVALID_PARAM;
     page->height = height;
+    return HPDF_OK;
+}
+
+HPDF_STATUS HPDF_Page_SetBox(HPDF_Page page, HPDF_PageBox kind,
+                            float left, float bottom, float right, float top) {
+    if (!page || kind < HPDF_PAGE_BOX_MEDIA || kind >= HPDF_PAGE_BOX_COUNT ||
+        !isfinite(left) || !isfinite(bottom) || !isfinite(right) || !isfinite(top) || right <= left || top <= bottom)
+        return HPDF_ERROR_INVALID_PARAM;
+    float* box = page->boxes[kind];
+    box[0] = left; box[1] = bottom; box[2] = right; box[3] = top;
+    page->box_mask |= 1u << kind;
+    return HPDF_OK;
+}
+
+HPDF_STATUS HPDF_Page_SetRotate(HPDF_Page page, int32_t degrees) {
+    if (!page || degrees % 90) return HPDF_ERROR_INVALID_PARAM;
+    page->rotation = degrees; page->has_rotation = true;
+    return HPDF_OK;
+}
+
+HPDF_STATUS HPDF_Page_SetLabel(HPDF_Page page, const char* label) {
+    if (!page || !label || !utf8_valid(label, strlen(label))) return HPDF_ERROR_INVALID_PARAM;
+    char* owned = arena_strdup(page->doc->arena, label);
+    if (!owned) return HPDF_ERROR_OUT_OF_MEMORY;
+    page->label = owned;
     return HPDF_OK;
 }
 
@@ -1309,7 +1340,14 @@ HPDF_STATUS HPDF_SaveToFile(HPDF_Doc doc, const char* filename) {
         fprintf(file, "%d 0 obj\n<<\n", page->obj_id);
         fprintf(file, "/Type /Page\n");
         fprintf(file, "/Parent %d 0 R\n", doc->pages_id);
-        fprintf(file, "/MediaBox [0 0 %.2f %.2f]\n", page->width, page->height);
+        if (!(page->box_mask & (1u << HPDF_PAGE_BOX_MEDIA)))
+            fprintf(file, "/MediaBox [0 0 %.2f %.2f]\n", page->width, page->height);
+        static const char* box_names[] = {"MediaBox", "CropBox", "BleedBox", "TrimBox", "ArtBox"};
+        for (int box_index = 0; box_index < HPDF_PAGE_BOX_COUNT; box_index++) if (page->box_mask & (1u << box_index)) {
+            const float* box = page->boxes[box_index];
+            fprintf(file, "/%s [%.9g %.9g %.9g %.9g]\n", box_names[box_index], box[0], box[1], box[2], box[3]);
+        }
+        if (page->has_rotation) fprintf(file, "/Rotate %d\n", page->rotation);
         fprintf(file, "/Contents %d 0 R\n", page->contents_id);
         bool has_annotations = false;
         for (PdfLinkAnnotation* link = page->first_annotation; link; link = link->next) {
@@ -1403,6 +1441,22 @@ HPDF_STATUS HPDF_SaveToFile(HPDF_Doc doc, const char* filename) {
     fprintf(file, "%d 0 obj\n<<\n", doc->catalog_id);
     fprintf(file, "/Type /Catalog\n");
     fprintf(file, "/Pages %d 0 R\n", doc->pages_id);
+    bool has_labels = false;
+    for (int i = 0; i < doc->pages->length; i++)
+        if (((HPDF_Page)doc->pages->data[i])->label) has_labels = true;
+    if (has_labels) {
+        fprintf(file, "/PageLabels << /Nums [\n");
+        for (int i = 0; i < doc->pages->length; i++) {
+            HPDF_Page page = (HPDF_Page)doc->pages->data[i];
+            // Explicit per-page prefixes preserve labels after arbitrary page selection.
+            fprintf(file, "%d << ", i);
+            if (page->label) {
+                if (!pdf_write_info_entry(file, "P", page->label)) { fclose(file); return HPDF_ERROR_FILE_IO; }
+            } else fprintf(file, "/S /D /St %d\n", i + 1);
+            fprintf(file, ">>\n");
+        }
+        fprintf(file, "] >>\n");
+    }
     if (doc->first_outline) fprintf(file, "/Outlines %d 0 R\n", doc->outline_root->obj_id);
     fprintf(file, ">>\nendobj\n\n");
     

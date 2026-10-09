@@ -8,6 +8,14 @@ struct SelectorMatcher;
 struct ViewCssVariable;
 struct CounterSnapshot;
 struct ViewCssPageContext;
+struct RadiantPageDocument;
+struct RadiantPageRegion;
+struct RadiantFlowTraits;
+struct RadiantPageQuery;
+struct RadiantNoteBinding;
+struct RadiantWhitespaceSpec;
+struct RadiantImageSpec;
+struct RadiantLabelBodySpec;
 
 enum ViewBreak : uint8_t {
     VIEW_BREAK_AUTO, VIEW_BREAK_AVOID, VIEW_BREAK_PAGE,
@@ -29,6 +37,7 @@ struct ViewCssStyle {
     Color color, background;
     lam::Up<const CssValue> width, height, min_width, max_width, min_height, max_height;
     lam::Up<const CssValue> margin[4], padding[4], border_width[4];
+    CssEnum border_style[4];
     Color border_color[4];
     float line_height;
     lam::Up<const CssValue> line_height_value;
@@ -49,6 +58,12 @@ struct ViewCssStyle {
     lam::Up<const CssValue> vertical_align;
     lam::Up<const CssValue> running_position, float_reference, float_defer, footnote_policy;
     lam::Up<const CssValue> float_spec;
+    lam::Up<RadiantFlowTraits> flow_traits;
+    lam::Up<RadiantPageQuery> page_query;
+    lam::Up<RadiantNoteBinding> note_binding;
+    lam::Up<RadiantWhitespaceSpec> whitespace;
+    lam::Up<RadiantImageSpec> image_spec;
+    lam::Up<RadiantLabelBodySpec> label_body;
 };
 
 struct ViewCssContext {
@@ -60,6 +75,7 @@ struct ViewCssContext {
     lam::Up<CssStylesheet*> stylesheets;
     size_t stylesheet_count;
     float root_font_size;
+    lam::Up<RadiantPageDocument> page_document;
 };
 
 struct ViewPageAreaStyle {
@@ -80,6 +96,11 @@ struct ViewPageAreaStyle {
     const CssDeclaration* box_sizing;
     const CssDeclaration* float_value;
 };
+struct ViewCssBoxEdges {
+    float edges[4], padding[4];
+    BorderProp border;
+    BackgroundProp background;
+};
 struct ViewPageStyle {
     lam::Up<ViewCssStyle> computed_style;
     lam::Up<ViewCssStyle> margin_style[CSS_PAGE_MARGIN_BOX_COUNT];
@@ -87,6 +108,16 @@ struct ViewPageStyle {
     float margin[4], padding[4], border_width[4];
     Color background;
     RdtLogicalRect content_rect;
+    lam::Up<const RadiantPageRegion> body_region;
+    lam::Up<ViewCssStyle> body_style;
+    RdtLogicalRect body_rect;
+    ViewCssBoxEdges body_box;
+    bool body_clip;
+    lam::Up<const RadiantPageRegion> edge_regions[4];
+    lam::Up<ViewCssStyle> edge_style[4];
+    RdtLogicalRect edge_rects[4];
+    ViewCssBoxEdges edge_boxes[4];
+    bool edge_clip[4];
     const CssDeclaration* margin_content[CSS_PAGE_MARGIN_BOX_COUNT];
     const CssDeclaration* margin_font_size[CSS_PAGE_MARGIN_BOX_COUNT];
     const CssDeclaration* margin_color[CSS_PAGE_MARGIN_BOX_COUNT];
@@ -116,3 +147,6 @@ bool view_css_border_spacing(ViewTree* tree, ViewCssStyle* style, float* horizon
 ViewBreak view_css_break(const CssValue* value);
 ViewModelStatus view_css_page_style(ViewTree* tree, const char* name, uint32_t page_number,
                                   ViewPageSide side, bool blank, ViewPageStyle* result);
+
+ViewModelStatus view_css_box_edges(ViewTree* tree, const ViewCssStyle* source,
+    float width, ViewCssBoxEdges* box);
