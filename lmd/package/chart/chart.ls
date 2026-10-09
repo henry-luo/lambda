@@ -817,7 +817,8 @@ fn fit_coordinate(spec,layers,theme,paints,guides,reserved={left:0.0,right:0.0,t
     if (failure is error) failure else if (max([for (key,value in overflow) value])>0.25)
         fit_coordinate({*:spec,padding:map([for (key,value in spec.padding) for (part in [string(key),value+overflow[string(key)]]) part])},
             layers,theme,paints,guides,map([for (key,value in reserved) for (part in [string(key),value+overflow[string(key)]]) part]))
-    else assemble_svg(spec,lay,image,null,null,null,leg.render_plans(guides,lay),theme)
+    // guide overflow grows plot margins without moving the title from its authored padding.
+    else assemble_svg(spec,{*:lay,title_y:lay.title_y-reserved.top},image,null,null,null,leg.render_plans(guides,lay),theme)
 }
 
 fn coordinate_layer(spec, model, lay, theme, paints) {

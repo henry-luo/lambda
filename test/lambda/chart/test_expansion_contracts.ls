@@ -30,6 +30,7 @@ let vector=chart.render_spec({width:240,height:160,padding:0,data:[{id:"v",lon:0
     encoding:{longitude:{field:"lon"},latitude:{field:"lat"},key:{field:"id"}}})
 let vector_path=(elements(vector) |: name(~)=='path')[0]
 let vector_points=paths.sample(vector_path.d)[0].points
+let vector_tip=paths.parse((elements(vector) |: name(~)=='path')[1].d)[0].end
 let pm=projection.configure(240,160,{type:"equirectangular"})
 let story={*:base,timeline:{keyframes:[{at:0,spec:{params:[{name:"count",value:0}],interaction:{count_clicks:{param:"count",on:"click",
     handler:(event,data,values,coordinate)=>{updates:{count:values.count+1}}}}}},{at:1000,spec:{data:reverse(rows)}}]}}
@@ -65,7 +66,8 @@ let reduced={*:base,timeline:{keyframes:[{at:0,spec:{data:rows}},{at:500,spec:{d
  check("tree polar root",abs(paths.distance([circles[0].cx,circles[0].cy],[100,100])-20)<0.00001),
  check("tree polar leaf",abs(paths.distance([circles[1].cx,circles[1].cy],[100,100])-60)<0.00001),
  check("projected vector origin",paths.distance(vector_points[0],projection.project([0,0],pm))<0.00001),
- check("projected vector endpoint",paths.distance(vector_points[len(vector_points)-1],projection.project([20,0],pm))<0.001),
+ check("projected vector endpoint",paths.distance(vector_tip,projection.project([20,0],pm))<0.001 and
+    paths.distance(vector_points[len(vector_points)-1],vector_tip)>0),
  check("keyframe parameter catalogue",len(story_defs)==1 and story_defs[0].name=="count"),
  check("disabled timeline key",disabled is element),
  check("update fade",any(elements(fade) |> ~.class=="chart-crossfade")),

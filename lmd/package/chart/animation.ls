@@ -10,9 +10,11 @@ import easing: lambda.slide.easing
 import colors: lambda.slide.color
 import affine: .svg_transform
 import picking: .picking
+import axis: .axis
 
 let phases = ["enter", "update", "exit"]
 let kinds = ["fade", "grow_x", "grow_y", "scale", "path_reveal", "wave", "morph"]
+let axis_classes = ["axis x-axis", "axis y-axis"]
 pub fn merge(parent, own) => if (own == false) false else if (own == null) if (parent == true) {enter: {type: "fade", duration: 300}} else parent
     else if (own == true) {enter: {type: "fade", duration: 300}} else {*:parse.attributes(parent), *:parse.attributes(own)}
 fn policy(options, phase) => if (options == false or options == null or options[phase] == false) null
@@ -108,12 +110,20 @@ pub fn validate(spec) {
 }
 
 fn metadata(node) => if (node["data-chart-animation"] == null) null else parse(node["data-chart-animation"], 'json') ^ {~}
-fn identity(node, index) => if (node is element and node["data-chart-key"] != null)
+// guide roles keep titles separate from ticks when domain or tick counts change.
+fn identity(node, index, parent) => if (node is element and node["data-chart-key"] != null)
     "key:" ++ node["data-chart-view"] ++ ":" ++ string(node["data-chart-part"]) ++ ":" ++ node["data-chart-key"]
     else if (node is element and node["data-chart-row"] != null) "row:" ++ node["data-chart-row"]
-    else if (node is element and node.id != null) "id:" ++ node.id else "slot:" ++ string(index)
-fn keyed(children) => [for (i, child in children) {node: child, id: identity(child, i),
-    role: len([for (j, earlier in children where j < i and identity(earlier, j) == identity(child, i)) true])}]
+    else if (node is element and node.id != null) "id:" ++ node.id
+    else if (node is element and contains(axis_classes, node.class)) "guide:" ++ node.class
+    else if (node is element and (contains(axis_classes, parent.class) or parent.class == "tick"))
+        "guide-child:" ++ (if (node.class != null) node.class else string(name(node)))
+    else "slot:" ++ string(index)
+fn keyed(parent) {
+    let children = content(parent);
+    [for (i, child in children) {node: child, id: identity(child, i, parent),
+        role: len([for (j, earlier in children where j < i and identity(earlier, j, parent) == identity(child, i, parent)) true])}]
+}
 fn decorative(node) => if (not (node is element)) node else svg.rebuild(name(node),
     {*:map([for (key, value in map(node) where not starts_with(string(key), "data-chart-") and not contains(["tabindex","data-focus-key"],string(key)))
         for (part in [string(key), value]) part]), 'pointer-events': "none"}, content(node) |> decorative(~))
@@ -202,7 +212,8 @@ fn progress(config, elapsed) => if (config.progress!=null) config.progress else
 fn group_identity(node) => if (node["data-chart-group-key"]==null) null else
     format([node["data-chart-view"],node["data-chart-part"],node["data-chart-group-key"]],{type:"json",compact:true})
 fn children_between(a,b,elapsed,default_config,overall) {
-    let aa=keyed(content(a)); let bb=keyed(content(b));
+    let aa=keyed(a); let bb=keyed(b);
+    let child_config=if (a.class=="tick" or b.class=="tick") {*:default_config,_tick_label:true} else default_config;
     [for (entry in bb,let matches=aa |: ~.id==entry.id and ~.role==entry.role,
         let groups=if (len(matches)==0 and entry.node["data-chart-group-key"]!=null)
             aa |: group_identity(~.node)==group_identity(entry.node) else [],
@@ -213,14 +224,14 @@ fn children_between(a,b,elapsed,default_config,overall) {
         where not ambiguous or entry==targets[0])
         if (ambiguous) if (default_config.fallback=="error") error("chart: ambiguous many-to-many correspondence") else
             crossfade(<g for (group in groups) group.node>,<g for (target in targets) target.node>,overall)
-        else sample_node(source,entry.node,elapsed,default_config,overall),
+        else sample_node(source,entry.node,elapsed,child_config,overall),
      for (entry in aa,
         let group=group_identity(entry.node),
         let sources=aa |: group_identity(~.node)==group,
         let targets=bb |: group_identity(~.node)==group
         where not any([for (target in bb) target.id==entry.id and target.role==entry.role]) and
             not (group!=null and len(targets)>0))
-        for (exiting in [sample_node(entry.node,null,elapsed,default_config,overall)] where exiting!=null) exiting]
+        for (exiting in [sample_node(entry.node,null,elapsed,child_config,overall)] where exiting!=null) exiting]
 }
 fn sample_node(a,b,elapsed,default_config,overall) {
     let phase=if (a==null) "enter" else if (b==null) "exit" else "update";
@@ -229,6 +240,8 @@ fn sample_node(a,b,elapsed,default_config,overall) {
     let t=if (default_config.timeline == true and own==null) overall else if (config!=null) progress(config,elapsed) else overall;
     let container=b is element and contains(['svg','g','defs','clipPath','linearGradient','radialGradient','pattern'],name(b));
     let disabled=metadata(if (b!=null) b else a).disabled==true;
+    let tick_label=default_config._tick_label==true and name(a)=='text' and name(b)=='text';
+    let boundary=if (config.boundary!=null) config.boundary else 0.5;
     if (disabled) b
     else if (t is error) t
     else if (container and (a==null or a is element and name(a)==name(b))) (
@@ -243,18 +256,19 @@ fn sample_node(a,b,elapsed,default_config,overall) {
         *:map([for (key,value in map(b) where starts_with(string(key),"data-chart-") or string(key)=="data-focus-key")
             for (part in [string(key),value]) part])},content(a)) else a else if (t>=1) b
     else if (not (a is element and b is element)) if (a==b or t>=0.5) b else a
-    else if (config.type=="fade" or name(a)=='text' and content(a)!=content(b)) crossfade(a,b,t)
-    else if (config.type!="morph") crossfade(a,transition(b,config,"enter",t),t)
+    else if (not tick_label and (config.type=="fade" or name(a)=='text' and content(a)!=content(b))) crossfade(a,b,t)
+    else if (not tick_label and config.type!="morph") crossfade(a,transition(b,config,"enter",t),t)
     else {
         let geometric=contains(['path','rect','circle','ellipse','line'],name(a)) and contains(['path','rect','circle','ellipse','line'],name(b));
         let path=if (config.type=="morph" and geometric and (name(a)=='path' or name(a)!=name(b))) morph(a,b,t,config.fallback) else null;
-        let attrs=attributes_between(a,b,t,if (config.boundary!=null) config.boundary else 0.5,default_config);
+        let attrs=attributes_between(a,b,t,boundary,default_config);
         let paints=[for (key in ["fill","stroke"],let aa=resource(default_config.source_resources,a[key]),
             let bb=resource(default_config.target_resources,b[key]) where a[key]!=b[key] and compatible_paint(aa,bb))
             svg.rebuild(name(bb),{*:attributes_between(aa,bb,t,0.5),id:paint_id(aa,bb,t)},
                 [for (i,stop in content(bb)) <stop *:attributes_between(content(aa)[i],stop,t,0.5)>])];
         let incompatible_paint=any([for (key in ["fill","stroke","stop-color"] where b[key]!=null and a[key]!=null and a[key]!=b[key]) attrs[key]==null]);
-        let children=children_between(a,b,elapsed,default_config,overall);
+        // tick strings switch atomically; overlaying old/new digits makes guides unreadable.
+        let children=if (tick_label) (if (t<boundary) content(a) else content(b)) else children_between(a,b,elapsed,default_config,overall);
         let failure=util.first_error([path,*children]);
         if (failure is error) failure
         else if (incompatible_paint or name(a)!=name(b) and path==null or config.type=="morph" and geometric and name(a)=='path' and path==null)
@@ -280,9 +294,15 @@ pub fn sample(previous, target, elapsed, options = {}) {
     }
 }
 
-fn refine_states(node) => if (not (node is element)) node else svg.rebuild(name(node),
-    {*:map(node), *:(if (node["data-chart-state"]!=null) parse(node["data-chart-state"], 'json') ^ {~} else {})},
-    content(node) |> refine_states(~))
+fn refine_states(node) {
+    if (not (node is element)) node else {
+        let children=content(node) |> refine_states(~);
+        let failure=util.first_error(children);
+        let image=svg.rebuild(name(node),
+            {*:map(node), *:(if (node["data-chart-state"]!=null) parse(node["data-chart-state"], 'json') ^ {~} else {})},children);
+        if (failure is error) failure else if (contains(axis_classes,node.class)) axis.fit_frame_labels(image) else image
+    }
+}
 pub fn duration(image) => if (not (image is element)) 0.0 else max([0.0,
     for (phase in phases,let config=metadata(image)[phase] where config!=null) config.delay+config.duration,
     for (child in content(image)) duration(child)])

@@ -4,6 +4,8 @@ import parse: .parse
 import mark: .mark
 import svg: .svg
 import color: .color
+import text: .text
+import axis: .axis
 
 fn value(row, ctx, options) => parse.channel_value(ctx.encoding.y, row,
     row[if (options.value_field != null) options.value_field else "value"])
@@ -55,6 +57,43 @@ fn threshold_color(options, value, fallback) {
     if (len(candidates) > 0) candidates[len(candidates) - 1] else fallback
 }
 
+fn dial_scale(options, cx, cy, radius, thickness, start, end, theme) {
+    let count = int(if (options.tick_count != null) options.tick_count else 4);
+    let minor = int(if (options.minor_tick_count != null) options.minor_tick_count else 4);
+    let font = text.style(options, "tick", 9);
+    let inner = radius - thickness;
+    let nodes = [for (i in 0 to (count * minor), let t = float(i) / float(count * minor),
+        let angle = util.lerp(start, end, t), let major = i % minor == 0,
+        let label_radius = max(0.0, inner - font.font_size - 8.0))
+        <g class: if (major) "tick" else "gauge-minor-tick",
+            <line x1: cx + (inner - 3.0) * math.cos(angle), y1: cy + (inner - 3.0) * math.sin(angle),
+                x2: cx + (inner - (if (major) 8.0 else 5.0)) * math.cos(angle),
+                y2: cy + (inner - (if (major) 8.0 else 5.0)) * math.sin(angle),
+                stroke: if (options.tick_color != null) options.tick_color else theme.axis_tick_color,
+                'stroke-width': if (major) 1.2 else 0.7, opacity: if (major) 0.8 else 0.45>;
+            if (major) <text x: cx + label_radius * math.cos(angle), y: cy + label_radius * math.sin(angle),
+                'text-anchor': "middle", 'dominant-baseline': "middle", *:text.attributes(font),
+                fill: if (options.tick_label_color != null) options.tick_label_color else theme.axis_label_color,
+                util.format_value(util.lerp(options.domain[0], options.domain[1], t), options.tick_format)>>];
+    axis.fit_frame_labels(svg.group_class("gauge-scale", nodes))
+}
+
+fn gauge_pointer(ctx, options, appearance, cx, cy, length, angle, thickness) {
+    let needle = options.pointer_shape == "needle";
+    let ux = math.cos(angle); let uy = math.sin(angle);
+    let hub = if (options.pointer_hub_radius != null) options.pointer_hub_radius else max(3.0, thickness * 0.45);
+    let half_width = hub * 0.45;
+    // needle and pivot share one part so state and animation are applied once.
+    svg.group_class("gauge-pointer", [<g *:appearance,
+        if (needle) <path d: svg.line_path([[cx - uy * half_width, cy + ux * half_width],
+            [cx + ux * length, cy + uy * length], [cx + uy * half_width, cy - ux * half_width]]) ++ " Z">
+        else <line x1: cx, y1: cy, x2: cx + ux * length, y2: cy + uy * length, 'stroke-linecap': "round">;
+        if (options.pointer_hub == true) <g 'pointer-events': "none",
+            <circle cx: cx, cy: cy, r: hub, fill: ctx._theme.background,
+                stroke: if (needle) appearance.fill else appearance.stroke, 'stroke-width': 1.3>;
+            <circle cx: cx, cy: cy, r: hub * 0.45, fill: if (needle) appearance.fill else appearance.stroke, stroke: "none">>>])
+}
+
 pub fn render(data, ctx, options) {
     let row = if (len(data) > 0) data[0] else {};
     let parts=map([for (part in ["value","track","pointer","target","label"]) for (value in [part,
@@ -64,7 +103,14 @@ pub fn render(data, ctx, options) {
     let settings = {*:options, domain: domain};
     let t = fraction(actual, settings);
     let target = if (options.target != null) fraction(options.target, settings) else null;
-    let invalid = util.first_error([t, target, mark.part_error([for (key,part in parts) part]),for (threshold in options.thresholds)
+    let tick_count = if (options.tick_count != null) options.tick_count else 4;
+    let minor_count = if (options.minor_tick_count != null) options.minor_tick_count else 4;
+    let invalid = util.first_error([t, target, mark.part_error([for (key,part in parts) part]),
+        if (options.ticks == true and (not util.finite_number(tick_count) or tick_count < 1 or floor(tick_count) != tick_count or
+            not util.finite_number(minor_count) or minor_count < 1 or floor(minor_count) != minor_count)) error("chart: gauge tick counts must be positive integers"),
+        if (options.pointer_shape != null and not contains(["line", "needle"], options.pointer_shape)) error("chart: unknown gauge pointer shape"),
+        if (options.pointer_hub_radius != null and (not util.finite_number(options.pointer_hub_radius) or options.pointer_hub_radius <= 0)) error("chart: gauge hub radius must be positive"),
+        for (threshold in options.thresholds)
         if (not util.finite_number(threshold.value) or threshold.color == null) error("chart: indicator thresholds require finite values and colors")]);
     let cx = ctx.plot_w / 2.0; let cy = ctx.plot_h / 2.0;
     let radius = min(ctx.plot_w, ctx.plot_h) / 2.0;
@@ -74,9 +120,20 @@ pub fn render(data, ctx, options) {
     let fill = threshold_color(options, actual, mark.appearance(ctx, "color", row, color.default_color));
     let appearance = mark.style(parts.value, row, mark.part_options(options,"value"), {fill: fill, opacity: 1.0});
     let track=mark.style(parts.track,row,mark.part_options(options,"track"),{fill:"#eee",opacity:1.0});
-    let pointer=mark.style(parts.pointer,row,mark.part_options(options,"pointer"),{fill:"none",stroke:"#222",'stroke-width':2,opacity:1.0},true);
+    let needle = options.pointer_shape == "needle";
+    let pointer=mark.style(parts.pointer,row,mark.part_options(options,"pointer"),
+        {fill:if (needle) "#222" else "none",stroke:if (needle) "none" else "#222",'stroke-width':2,opacity:1.0},not needle);
     let target_style=mark.style(parts.target,row,mark.part_options(options,"target"),{fill:"none",stroke:"#222",'stroke-width':1,opacity:1.0},true);
-    if (invalid is error) invalid
+    let label_options = mark.part_options(options, "label");
+    let label_font = text.style(label_options, "label", 18);
+    let unit = if (options.label_unit != null) string(options.label_unit) else "";
+    let label = util.format_value(actual, options.format) ++ unit;
+    let label_metric = text.measure([label], label_font);
+    let label_y = cy + (if (options.kind != "gauge") 0.0 else max(20.0, label_metric[0].height / 2.0 + 12.0));
+    let target_font = text.style(label_options, "target_label", 11);
+    let target_y = label_y + label_metric[0].height / 2.0 + target_font.font_size / 2.0 + 8.0;
+    let failure = util.first_error([invalid, label_metric]);
+    if (failure is error) failure
     else if (not util.finite_number(thickness) or thickness <= 0 or thickness > radius or
         not util.finite_number(start) or not util.finite_number(end) or start == end or abs(end - start) > util.TAU)
         error("chart: invalid indicator thickness or angle range")
@@ -87,18 +144,24 @@ pub fn render(data, ctx, options) {
             if (mark.part_selected(parts.value,row)) <rect class: "gauge-value", x: 0, y: cy - thickness / 2.0, width: ctx.plot_w * t, height: thickness, *:appearance, mark.tooltip(parts.value, row)>
             if (target != null and mark.part_selected(parts.target,row)) <line class:"gauge-target",x1: ctx.plot_w * target, x2: ctx.plot_w * target, y1: cy - thickness, y2: cy + thickness, *:target_style>>
         else <g class: "gauge-arc",
-            if (mark.part_selected(parts.track,row)) <path class: "gauge-track", d: svg.arc_path(cx, cy, radius - thickness, radius, start, end), *:track>
-            if (mark.part_selected(parts.value,row)) <path class: "gauge-value", d: svg.arc_path(cx, cy, radius - thickness, radius, start, util.lerp(start, end, t)), *:appearance, mark.tooltip(parts.value, row)>
-            if (options.pointer != false and mark.part_selected(parts.pointer,row)) <line class: "gauge-pointer", x1: cx, y1: cy,
-                x2: cx + (radius - thickness) * math.cos(util.lerp(start, end, t)),
-                y2: cy + (radius - thickness) * math.sin(util.lerp(start, end, t)), *:pointer>
+            if (mark.part_selected(parts.track,row)) <path class: "gauge-track", d: svg.arc_path(cx, cy, radius - thickness, radius, start, end, options.rounded == true), *:track>
+            if (options.ticks == true and mark.part_selected(parts.track,row)) dial_scale(settings, cx, cy, radius, thickness, start, end, ctx._theme)
+            if (mark.part_selected(parts.value,row)) <path class: "gauge-value", d: svg.arc_path(cx, cy, radius - thickness, radius, start, util.lerp(start, end, t), options.rounded == true), *:appearance, mark.tooltip(parts.value, row)>
+            if (options.pointer != false and mark.part_selected(parts.pointer,row)) gauge_pointer(ctx, options, pointer, cx, cy,
+                max(0.0, radius - thickness - (if (options.ticks == true) 26.0 else 0.0)), util.lerp(start, end, t), thickness)
             if (target != null and mark.part_selected(parts.target,row)) <line class: "gauge-target",
                 x1: cx + (radius - thickness * 1.5) * math.cos(util.lerp(start, end, target)),
                 y1: cy + (radius - thickness * 1.5) * math.sin(util.lerp(start, end, target)),
-                x2: cx + radius * math.cos(util.lerp(start, end, target)), y2: cy + radius * math.sin(util.lerp(start, end, target)), *:target_style>>,
-        if (options.labels != false and mark.part_selected(parts.label,row)) <text class: "indicator-label", x: cx, y: cy + (if (options.kind == "gauge") 20 else 0),
-            'text-anchor': "middle", 'dominant-baseline': "middle", 'font-size': 18,
-            *:mark.style(parts.label,row,mark.part_options(options,"label"),{fill:"#222",opacity:1.0}),util.format_value(actual, options.format)>])
+                x2: cx + radius * math.cos(util.lerp(start, end, target)), y2: cy + radius * math.sin(util.lerp(start, end, target)),
+                'stroke-linecap': "round", *:target_style>>,
+        if (options.labels != false and mark.part_selected(parts.label,row)) <g class: "indicator-readout",
+            *:mark.style(parts.label,row,label_options,{fill:"#222",opacity:1.0}),
+            <text class: "indicator-label", x: cx, y: label_y,
+                'text-anchor': "middle", 'dominant-baseline': "middle", *:text.attributes(label_font), label>;
+            if (options.kind == "gauge" and options.target_label == true and target != null)
+                <text class: "gauge-target-label", x: cx, y: target_y, 'text-anchor': "middle", 'dominant-baseline': "middle",
+                    *:text.attributes(target_font), fill: if (options.target_label_color != null) options.target_label_color else ctx._theme.axis_label_color,
+                    "Target " ++ util.format_value(options.target, options.format) ++ unit>>])
 }
 
 fn liquid(row, ctx, track_ctx, options, t, appearance, track, radius) {

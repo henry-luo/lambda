@@ -146,10 +146,12 @@ fn polylines(segments, project, precision, intervals, index = 0, result = []) {
             else sample_curve((t) => project(point(segment, t)), precision, intervals);
         if (points is error) points else {
             let previous = result[len(result) - 1];
+            // an already closed curve needs the Z flag without another zero-length edge.
+            let tail = if (segment.kind == "Z" and segment.begin == segment.end) [] else slice(points, 1, len(points));
             let next = if (segment.kind == "M" or previous.closed==true) [*result, {points: if (segment.kind=="M") points else
-                [project(segment.begin),*slice(points,1,len(points))], closed: segment.kind=="Z"}]
+                [project(segment.begin),*tail], closed: segment.kind=="Z"}]
                 else [*slice(result, 0, len(result) - 1), {*:previous,
-                    points: [*previous.points, *slice(points, 1, len(points))], closed: segment.kind == "Z"}];
+                    points: [*previous.points, *tail], closed: segment.kind == "Z"}];
             polylines(segments, project, precision, intervals, index + 1, next)
         }
     }
@@ -161,3 +163,92 @@ pub fn sample(source, project = (point) => point, precision = 0.75, intervals = 
 }
 
 pub fn path(polylines) => join([for (line in polylines) svg.line_path(line.points) ++ (if (line.closed) " Z" else "")], " ")
+
+fn segment_length(segment, end = 1.0) {
+    let points = sample_curve((t) => point(segment, t * end), 0.1);
+    if (points is error) points else sum([for (i in 1 to (len(points) - 1)) distance(points[i - 1], points[i])])
+}
+
+fn length_parameter(segment, length, lo = 0.0, hi = 1.0, remaining = 20) {
+    let mid = (lo + hi) / 2.0;
+    let measured = segment_length(segment, mid);
+    if (measured is error) measured else if (remaining == 0) mid
+    else if (measured < length) length_parameter(segment, length, mid, hi, remaining - 1)
+    else length_parameter(segment, length, lo, mid, remaining - 1)
+}
+
+// de Casteljau subdivision retains the original cubic rather than replacing it with a polyline.
+fn segment_path(segment, end = 1.0) {
+    let destination = point(segment, end);
+    if (segment.kind == "M") svg.M(destination[0], destination[1])
+    else if (segment.kind == "Z" and end == 1.0) "Z"
+    else if (segment.kind == "C") (
+        let a = geometry.interpolate(segment.begin, segment.a, end),
+        let b = geometry.interpolate(a, geometry.interpolate(segment.a, segment.b, end), end),
+        svg.C(a[0], a[1], b[0], b[1], destination[0], destination[1]))
+    else if (segment.kind == "A" and segment.radius[0] > 0 and segment.radius[1] > 0 and segment.begin != segment.end) (
+        let model = arc(segment),
+        svg.A(model.radius[0], model.radius[1], segment.rotation * 180.0 / util.PI,
+            if (abs(model.delta * end) > util.PI) 1 else 0, segment.sweep, destination[0], destination[1]))
+    else svg.L(destination[0], destination[1])
+}
+
+fn end_direction(segment) {
+    if (segment.kind == "C") (
+        let controls = [segment.b, segment.a, segment.begin] |: ~ != segment.end,
+        if (len(controls) == 0) [0.0, 0.0] else [for (axis in [0, 1]) segment.end[axis] - controls[0][axis]])
+    else if (segment.kind == "A" and segment.radius[0] > 0 and segment.radius[1] > 0 and segment.begin != segment.end) (
+        let model = arc(segment), let angle = model.start + model.delta,
+        let x = -model.radius[0] * math.sin(angle), let y = model.radius[1] * math.cos(angle),
+        [(model.cp * x - model.sp * y) * model.delta, (model.sp * x + model.cp * y) * model.delta])
+    else [for (axis in [0, 1]) segment.end[axis] - segment.begin[axis]]
+}
+
+fn path_cut(entries, segments, remaining) {
+    let cuts = [for (i, entry in entries,
+        let after = sum(slice(entries, i + 1, len(entries)) |> ~.length)
+        where entry.length > 0 and after < remaining and after + entry.length >= remaining)
+        {index: entry.index, t: if (entry.length + after == remaining) 0.0 else
+            length_parameter(segments[entry.index], entry.length + after - remaining)}];
+    cuts[0]
+}
+
+// Arrow tips remain at the true endpoint; the head follows the tail of the original curve.
+pub fn arrow_geometry(source, length, width = 0.0) {
+    let segments = parse(source);
+    if (segments is error) segments
+    else if (not util.finite_number(length) or length < 0 or not util.finite_number(width) or width < 0)
+        error("chart: arrow size and stroke width must be finite and nonnegative")
+    else if (length == 0 or len(segments) == 0) {body: source, length: 0.0}
+    else {
+        let start = max([for (index, segment in segments where segment.kind == "M") index]);
+        let entries = [for (index, segment in segments where index > start)
+            {index: index, length: segment_length(segment)}];
+        let failure = util.first_error(entries |> ~.length);
+        if (failure is error) failure else {
+            let positive = entries |: ~.length > 0;
+            let total = sum(entries |> ~.length);
+            if (total == 0) {body: source, length: 0.0} else {
+                let actual = min(length, total);
+                let head_cut = path_cut(entries, segments, actual);
+                let cut = path_cut(entries, segments, actual * 0.85);
+                let body = join([for (index, segment in segments where index < start or
+                    (actual < total and index <= cut.index)) segment_path(segment, if (index == cut.index) cut.t else 1.0)], " ");
+                let terminal = segments[positive[len(positive) - 1].index];
+                let direction = end_direction(terminal);
+                let pieces = [for (entry in positive where entry.index >= head_cut.index,
+                    let segment = segments[entry.index], let begin = if (entry.index == head_cut.index) head_cut.t else 0.0)
+                    // offset flanks need finer sampling than the centerline near a tight terminal bend.
+                    sample_curve((t) => point(segment, util.lerp(begin, 1.0, t)), 0.01)];
+                let failure = util.first_error([cut.t, head_cut.t, *pieces]);
+                let centers = [for (i, piece in pieces) for (j, point in piece where i == 0 or j > 0) point];
+                let from = [for (axis in [0, 1]) terminal.end[axis] - direction[axis]];
+                let half_width = max(actual * 0.375, if (actual < total) width * 0.9 else 0.0);
+                if (failure is error) failure else {body: body, to: terminal.end, from: from,
+                    length: actual, half_width: half_width,
+                    head: svg.arrow_head(from[0], from[1], terminal.end[0], terminal.end[1], null,
+                        actual, false, half_width, centers).d}
+            }
+        }
+    }
+}

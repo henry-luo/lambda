@@ -20,6 +20,27 @@ pub fn link_path(a, b, options = {}) {
 pub fn vector_endpoint(a, direction, magnitude, y_sign = -1.0) =>
     [a[0]+magnitude*math.cos(direction),a[1]+y_sign*magnitude*math.sin(direction)]
 
+pub fn path_mark(d, appearance, options, children = [], class_name = null) {
+    let arrow = options.kind == "vector" or options.arrow == true;
+    let length = if (options.arrow_size != null) options.arrow_size else max(8.0, 2.0 * appearance["stroke-width"]);
+    let shape = if (arrow) paths.arrow_geometry(d, length, appearance["stroke-width"]) else {body: d, length: 0.0};
+    let states = if (arrow and appearance["data-chart-state"] != null) parse(appearance["data-chart-state"], 'json')^ else {};
+    let body_state = map([for (key, value in states where string(key) != "opacity") for (part in [string(key), value]) part]);
+    let head_state = {*:body_state, fill: appearance.stroke, stroke: "none", 'stroke-width': 0.0, 'stroke-dasharray': null};
+    // the head shares hit/animation identity without adding a second keyboard stop.
+    let head_attrs = map([for (key, value in appearance where not contains(["tabindex", "data-focus-key"], string(key)))
+        for (part in [string(key), value]) part]);
+    if (shape is error) shape else <g class: if (class_name != null) class_name else options.kind,
+        // group opacity keeps the overlapping shaft and head at one uniform opacity.
+        *:if (arrow) {opacity: appearance.opacity,
+            *:if (states.opacity != null) {'data-chart-state': format({opacity: states.opacity}, 'json')} else {}} else {},
+        <path d: shape.body, *:appearance, *:if (arrow) {opacity: 1.0,
+            *:if (len(states) > 0) {'data-chart-state': format(body_state, 'json')} else {}} else {}, *children>;
+        if (shape.length > 0) svg.rebuild('path', {*:head_attrs, d: shape.head, fill: appearance.stroke, stroke: "none",
+            'stroke-width': 0.0, 'stroke-dasharray': null, opacity: 1.0,
+            *:if (len(states) > 0) {'data-chart-state': format(head_state, 'json')} else {}}, [])>
+}
+
 pub fn render(data, ctx, options) {
     let kind = options.kind;
     let items = if (kind == "polygon") [for (group in mark.series(data, ctx, color.default_color),
@@ -47,9 +68,7 @@ pub fn render(data, ctx, options) {
         else if (kind=="path" and paths.sample(d) is error) error("chart: invalid authored SVG path geometry")
         else if (kind != "path" and (not all(a |> util.finite_number(~)) or not all(b |> util.finite_number(~))))
             error("chart: link/vector requires finite endpoint positions")
-        else <g class: kind, <path d: d, *:appearance, mark.tooltip(ctx, row)>
-            if (kind == "vector" or options.arrow == true) svg.arrow_head(a[0], a[1], b[0], b[1], appearance.stroke,
-                if (options.arrow_size != null) options.arrow_size else 8.0)>)];
+        else path_mark(d, appearance, options, [mark.tooltip(ctx, row)]))];
     let failure = util.first_error(items);
     if (failure is error) failure else svg.group_class("marks " ++ kind, items)
 }

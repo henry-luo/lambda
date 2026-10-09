@@ -609,6 +609,35 @@ TEST_F(Scene3dTest, MixedPageClippingTransformOpacitySvgStackingAndSceneMutation
     pixel(ui.surface,240,168,128,255,128,255,4);
     pixel(ui.surface,400,60,128,128,255,255,4);
 }
+TEST_F(Scene3dTest, ResponsiveSvgConstrainsAuthoredWidthBeforeDerivingAutoHeight) {
+    ASSERT_NE(load_page("test/html/svg_responsive_limits.html", 386, 360), nullptr);
+    const struct { const char* id; float width; float height; } cases[] = {
+        {"responsive", 326.0f, 326.0f * 270.0f / 350.0f},
+        {"css-width", 326.0f, 326.0f * 270.0f / 350.0f},
+        {"percent-width", 326.0f, 326.0f * 270.0f / 350.0f},
+        {"both-auto", 326.0f, 326.0f * 270.0f / 350.0f},
+        {"fixed-height", 326.0f, 270.0f},
+        {"min-wins", 360.0f, 360.0f * 270.0f / 350.0f},
+        {"unconstrained", 350.0f, 270.0f},
+        {"content-box", 224.0f, 200.0f * 270.0f / 350.0f + 24.0f},
+        {"border-box", 200.0f, 176.0f * 270.0f / 350.0f + 24.0f},
+        {"zero", 0.0f, 0.0f},
+        {"intrinsic-min-wins", 100.0f, 100.0f},
+    };
+    for (const auto& entry : cases) {
+        SCOPED_TRACE(entry.id);
+        DomElement* svg = dom_find_element_by_id(page->root->as_element(), entry.id);
+        ASSERT_NE(svg, nullptr);
+        EXPECT_NEAR(svg->width, entry.width, 0.02f);
+        EXPECT_NEAR(svg->height, entry.height, 0.02f);
+    }
+    render_html_doc(&ui, page->view_tree, nullptr);
+    ASSERT_NE(ui.surface, nullptr);
+    // the final stripe stays visible while the card's right padding stays white.
+    pixel(ui.surface, 350, 60, 0, 0, 255);
+    pixel(ui.surface, 365, 60, 255, 255, 255);
+}
+
 TEST_F(Scene3dTest, SvgSizingParityCoversRatioAttributesPercentLimitsFlexGridAndFallbacks) {
     ASSERT_NE(load_page("test/scene3d/sizing.html"),nullptr);
     const char* cases[]={"ratio","attributes","percent","limits","absent","invalid","zero","only","auto","flex","grid"};

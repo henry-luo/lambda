@@ -3203,19 +3203,124 @@
           "thresholds": [
             {
               "value": 0,
-              "color": "#e15759"
+              "color": {
+                "gradient": "linear",
+                "x1": 0,
+                "y1": 0,
+                "x2": 1,
+                "y2": 0,
+                "stops": [
+                  {
+                    "offset": 0.0,
+                    "color": "#fb7185"
+                  },
+                  {
+                    "offset": 1.0,
+                    "color": "#e11d48"
+                  }
+                ]
+              }
             },
             {
               "value": 50,
-              "color": "#f28e2b"
+              "color": {
+                "gradient": "linear",
+                "x1": 0,
+                "y1": 0,
+                "x2": 1,
+                "y2": 0,
+                "stops": [
+                  {
+                    "offset": 0.0,
+                    "color": "#facc15"
+                  },
+                  {
+                    "offset": 0.5,
+                    "color": "#f59e0b"
+                  },
+                  {
+                    "offset": 1.0,
+                    "color": "#f97316"
+                  }
+                ]
+              }
             },
             {
               "value": 75,
-              "color": "#59a14f"
+              "color": {
+                "gradient": "linear",
+                "x1": 0,
+                "y1": 0,
+                "x2": 1,
+                "y2": 0,
+                "stops": [
+                  {
+                    "offset": 0.0,
+                    "color": "#2dd4bf"
+                  },
+                  {
+                    "offset": 1.0,
+                    "color": "#0d9488"
+                  }
+                ]
+              }
             }
-          ]
+          ],
+          "rounded": true,
+          "thickness": 12,
+          "ticks": true,
+          "tick_count": 4,
+          "minor_tick_count": 5,
+          "tick_font_size": 8.5,
+          "tick_color": "#a4afbf",
+          "tick_label_color": "#8390a3",
+          "pointer_shape": "needle",
+          "pointer_hub": true,
+          "pointer_hub_radius": 5,
+          "label_unit": "%",
+          "label_font_size": 32,
+          "label_font_weight": 600,
+          "label_letter_spacing": -0.8,
+          "target_label": true,
+          "target_label_font_size": 10,
+          "target_label_color": "#7c899d",
+          "parts": {
+            "track": {
+              "fill": {
+                "gradient": "linear",
+                "x1": 0,
+                "y1": 0,
+                "x2": 1,
+                "y2": 0,
+                "stops": [
+                  {
+                    "offset": 0.0,
+                    "color": "#eff3f8"
+                  },
+                  {
+                    "offset": 1.0,
+                    "color": "#e5ebf3"
+                  }
+                ]
+              }
+            },
+            "pointer": {
+              "fill": "#334155",
+              "stroke": "none"
+            },
+            "target": {
+              "stroke": "#ad782d",
+              "stroke_width": 2.2
+            },
+            "label": {
+              "fill": "#1e293b"
+            }
+          }
         },
-        "encoding": {}
+        "encoding": {},
+        "config": {
+          "title_color": "#273449"
+        }
       }
     },
     {
@@ -4001,6 +4106,160 @@
             "lat": -15,
             "direction": 1,
             "magnitude": 20
+          },
+          {
+            "id": "north-1",
+            "lon": -145,
+            "lat": 55,
+            "direction": 0.15,
+            "magnitude": 24
+          },
+          {
+            "id": "north-2",
+            "lon": -85,
+            "lat": 55,
+            "direction": 0.4,
+            "magnitude": 28
+          },
+          {
+            "id": "north-3",
+            "lon": -25,
+            "lat": 55,
+            "direction": 0.8,
+            "magnitude": 24
+          },
+          {
+            "id": "north-4",
+            "lon": 35,
+            "lat": 55,
+            "direction": 1.2,
+            "magnitude": 22
+          },
+          {
+            "id": "north-5",
+            "lon": 95,
+            "lat": 55,
+            "direction": 1.8,
+            "magnitude": 24
+          },
+          {
+            "id": "north-6",
+            "lon": 145,
+            "lat": 55,
+            "direction": 2.4,
+            "magnitude": 26
+          },
+          {
+            "id": "upper-1",
+            "lon": -145,
+            "lat": 20,
+            "direction": -0.35,
+            "magnitude": 26
+          },
+          {
+            "id": "upper-2",
+            "lon": -100,
+            "lat": 15,
+            "direction": 0.1,
+            "magnitude": 24
+          },
+          {
+            "id": "upper-3",
+            "lon": -5,
+            "lat": 15,
+            "direction": 0.8,
+            "magnitude": 28
+          },
+          {
+            "id": "upper-4",
+            "lon": 80,
+            "lat": 20,
+            "direction": 2.6,
+            "magnitude": 26
+          },
+          {
+            "id": "upper-5",
+            "lon": 140,
+            "lat": 20,
+            "direction": 2.95,
+            "magnitude": 24
+          },
+          {
+            "id": "lower-1",
+            "lon": -145,
+            "lat": -20,
+            "direction": -0.7,
+            "magnitude": 24
+          },
+          {
+            "id": "lower-2",
+            "lon": -95,
+            "lat": -25,
+            "direction": -0.25,
+            "magnitude": 28
+          },
+          {
+            "id": "lower-3",
+            "lon": -20,
+            "lat": -20,
+            "direction": 0.4,
+            "magnitude": 26
+          },
+          {
+            "id": "lower-4",
+            "lon": 85,
+            "lat": -20,
+            "direction": 2.3,
+            "magnitude": 24
+          },
+          {
+            "id": "lower-5",
+            "lon": 140,
+            "lat": -20,
+            "direction": 2.8,
+            "magnitude": 26
+          },
+          {
+            "id": "south-1",
+            "lon": -140,
+            "lat": -55,
+            "direction": -1.1,
+            "magnitude": 22
+          },
+          {
+            "id": "south-2",
+            "lon": -85,
+            "lat": -55,
+            "direction": -0.65,
+            "magnitude": 24
+          },
+          {
+            "id": "south-3",
+            "lon": -25,
+            "lat": -55,
+            "direction": -0.2,
+            "magnitude": 28
+          },
+          {
+            "id": "south-4",
+            "lon": 35,
+            "lat": -55,
+            "direction": 0.3,
+            "magnitude": 26
+          },
+          {
+            "id": "south-5",
+            "lon": 95,
+            "lat": -55,
+            "direction": 0.85,
+            "magnitude": 24
+          },
+          {
+            "id": "south-6",
+            "lon": 145,
+            "lat": -55,
+            "direction": 1.45,
+            "magnitude": 22
           }
         ],
         "mark": {

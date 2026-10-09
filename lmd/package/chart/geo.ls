@@ -159,9 +159,8 @@ pub fn vectors(data,ctx,options) {
         let appearance=mark.style(ctx,row,options,{fill:"none",stroke:color.default_color,'stroke-width':1.5,opacity:1.0},true))
         if (not projection.valid_position(origin) or not projection.valid_position(destination) or
             not util.finite_number(direction) or not util.finite_number(magnitude)) error("chart: geographic vector requires finite valid endpoints")
-        else <g class:"geo-vector",<path d:line_path([origin,destination],model),*:appearance,mark.tooltip(ctx,row)>;
-            if (a!=null and b!=null) svg.arrow_head(a[0],a[1],b[0],b[1],appearance.stroke,
-                if (options.arrow_size!=null) options.arrow_size else 8.0)>];
+        else primitive.path_mark(line_path([origin,destination],model),appearance,
+            {*:options,kind:"path",arrow:a!=null and b!=null},[mark.tooltip(ctx,row)],"geo-vector")];
     let failure=util.first_error([model,*items]);
     if (failure is error) failure else svg.group_class("marks vector",items)
 }

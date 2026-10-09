@@ -541,6 +541,16 @@ controls out-of-domain values. Density inputs require finite x/y values,
 positive bandwidth, and positive integer grid dimensions. These failures
 use chart value errors (S7.4.1).
 
+Gauge presentation supports `rounded` arc caps, `ticks`, `pointer_shape:
+"needle"`, and an optional `pointer_hub`. `tick_count` sets the major scale
+divisions and `minor_tick_count` the subdivisions within each division. Scale
+labels use the declared domain and measured collision selection. Value,
+track, pointer, target, and label parts accept the shared paints and styles,
+including gradient threshold colors. `label_unit` adds an explicit display
+unit, `target_label` shows the target below the value, and the `label_`,
+`tick_`, and `target_label_` font controls style those readouts. Readout spacing
+adjusts to the chosen value font.
+
 Density cells and contour levels expose derived records with `density` or
 `level`, stable `id` values (`cell:i:j` or `level:value`), and `source_rows`.
 Positional fields on cells contain their centers; source data determines the
@@ -550,6 +560,10 @@ arbitrary input sample. Vector direction is in radians; magnitude is in plot
 pixels for ordinary coordinates and longitude/latitude units for geographic
 vectors. Polygon holes are finite plot-space rings. Authored paths are
 validated SVG path text, including curves, arcs, and subpaths.
+Arrowheads taper along the final path curvature and meet the shaft centrally.
+Their default proportions follow the encoded stroke width; `arrow_size`
+requests a head length in plot pixels, limited by the available path length.
+The tip stays at the declared endpoint.
 
 Layout is a pure function of data, options, viewport, and an explicit seed
 (S12.1.1v2). Force layout uses a declared iteration bound, never elapsed
@@ -1597,8 +1611,18 @@ axes, grid lines, and annotations all use the same coordinate definition.
 Curved boundaries respect a declared pixel `precision`, including at the
 angular seam. Explicit clipping applies to the coordinate's plot boundary.
 
+Helix guides keep tick lengths and text spacing in screen pixels. Progression
+labels follow the outer spiral; the compact track range places its endpoints
+on opposite sides. Titles clear the plot, and measured label selection shares
+one collision space across both axes, retaining endpoints when they fit.
+Labels use the chart background as a halo to keep spiral gridlines distinct
+from the digits.
+`label_overlap: false` retains explicitly requested labels.
+
 Parallel and radar coordinates generate their own field axes and labels from
-the same scales as the marks. Facets/repeats reuse coordinate options while
+the same scales as the marks. Field titles stay upright and clear plotted
+lines and tick labels with measured spacing, including after coordinate
+transforms. Facets/repeats reuse coordinate options while
 resolving each cell's viewport. Shared data domains do not force shared pixel
 positions across differently sized views. Geographic projection retains its
 longitude/latitude units, clipping, and supported projection families.
@@ -1697,11 +1721,14 @@ view/part identity scope these keys; moving a record on screen never creates
 a new identity.
 
 Numeric geometry, opacity, compatible transforms, and colors interpolate.
-Discrete values switch at a declared boundary. Text content crossfades while
-retaining font measurement; compatible paints interpolate their parameters,
-and incompatible paint kinds crossfade. Scales, guides, labels, clipping,
-and annotations sample the same frame as the marks, preventing a target-state
-axis from being drawn over source-state geometry.
+Discrete values switch at a declared boundary. Tick label text switches as a
+single string at that boundary, keeping numbers readable as tick positions
+move. Animated tick labels use measured glyph bounds to omit labels that
+temporarily collide, retaining endpoints when they fit. Other text content
+crossfades while retaining font measurement; compatible paints interpolate
+their parameters, and incompatible paint kinds crossfade. Scales, guides,
+labels, clipping, and annotations sample the same frame as the marks,
+preventing a target-state axis from being drawn over source-state geometry.
 
 Path morphing matches corresponding keyed shapes and preserves closed/open
 path status, subpaths, winding, and holes. Compatible paths may have different

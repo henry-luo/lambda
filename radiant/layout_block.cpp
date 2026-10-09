@@ -5057,6 +5057,8 @@ void layout_inline_svg(LayoutContext* lycon, ViewBlock* block) {
     bool width_is_specified = width >= 0.0f;
     bool height_is_specified = height >= 0.0f;
     if (width_is_specified) {
+        // constrain the authored viewport before transferring its size to an auto height.
+        width = layout_apply_min_max_axis(block, width, true, false);
         content_width = layout_content_size_if_border_box(block, width, true);
     }
     if (height_is_specified) {
@@ -9284,10 +9286,12 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
     if (layout_is_svg_viewport(block->tag()) && block->blk) {
         bool is_border_box = layout_uses_border_box(block);
         if (block->block()->given_width >= 0.0f) {
+            // descendant-bound recomputation must not restore an unconstrained SVG viewport.
+            float used_width = layout_apply_min_max_axis(block, block->block()->given_width, true, false);
             block->content_width = layout_content_size_if_border_box(
-                block, block->block()->given_width, true);
+                block, used_width, true);
             block->width = is_border_box
-                ? layout_floor_border_box_axis(block, block->block()->given_width, true)
+                ? layout_floor_border_box_axis(block, used_width, true)
                 : layout_border_size_from_content_box(block, block->content_width, true);
         }
         if (block->block()->given_height >= 0.0f) {
