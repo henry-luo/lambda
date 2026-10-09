@@ -2331,6 +2331,83 @@ TEST_F(SvgAnimationLifetimeTest, EmptyNonPaintSubstitutionDoesNotReadPaintListHe
     EXPECT_TRUE(!result || !*result);
 }
 
+TEST_F(SvgAnimationLifetimeTest, TextHitGeometryRefreshesInheritedStyleAndPosition) {
+    struct MetadataOwner {~MetadataOwner() {css_property_system_cleanup();}} metadata;
+    ASSERT_TRUE(css_property_system_init(doc.document_pool));
+    struct FontOwner {
+        FontContext* fonts = font_context_create(nullptr);
+        ~FontOwner() {font_context_destroy(fonts);}
+    } fonts;
+    ASSERT_NE(fonts.fonts, nullptr);
+    ui.font_ctx = lam::up(fonts.fonts);
+    Input* owner = authored_input(); ASSERT_NE(owner, nullptr);
+    doc.input = lam::up(owner);
+    MarkBuilder builder(owner);
+    Item source = builder.element("svg").attr("xmlns", "http://www.w3.org/2000/svg")
+        .attr("width", "200").attr("height", "200")
+        .child(builder.element("g").attr("style", "font:20px Arial")
+            .child(builder.element("text").attr("x", "10").attr("y", "60").text("W").final()).final()).final();
+    svg = build_dom_tree_from_element(source.element, &doc, nullptr); ASSERT_NE(svg, nullptr);
+    doc.root = lam::up(svg);
+    DomElement* group = svg->first_child->as_element(); ASSERT_NE(group, nullptr);
+    DomElement* text = group->first_child->as_element(); ASSERT_NE(text, nullptr);
+    SvgLengthContext lengths = {200.0f, 200.0f, 20.0f, 10.0f};
+    auto bounds = [&]() {
+        Bound result = {};
+        RdtPath* path = svg_text_geometry_path(text, &lengths, fonts.fonts);
+        EXPECT_NE(path, nullptr);
+        EXPECT_TRUE(rdt_path_get_bounds(path, &result.left, &result.top, &result.right, &result.bottom));
+        rdt_path_free(path);
+        return result;
+    };
+    Bound initial = bounds();
+    EXPECT_GT(initial.right - initial.left, 0.0f);
+    RdtPath* retained = svg_text_geometry_path(text, &lengths, fonts.fonts);
+    ASSERT_NE(retained, nullptr);
+    for (size_t i = 0; i < 3; i++) {
+        Bound repeated = bounds();
+        EXPECT_FLOAT_EQ(repeated.left, initial.left);
+        EXPECT_FLOAT_EQ(repeated.right, initial.right);
+    }
+    ASSERT_TRUE(group->set_attribute("style", "font:40px Arial"));
+    ASSERT_TRUE(text->set_attribute("x", "30"));
+    Bound changed = bounds();
+    EXPECT_NEAR(changed.left - initial.left, 20.0f, .01f);
+    EXPECT_NEAR(changed.right - changed.left, 2.0f * (initial.right - initial.left), .1f);
+    Bound original = {};
+    ASSERT_TRUE(rdt_path_get_bounds(retained, &original.left, &original.top, &original.right, &original.bottom));
+    EXPECT_FLOAT_EQ(original.left, initial.left);
+    EXPECT_FLOAT_EQ(original.right, initial.right);
+    rdt_path_free(retained);
+    ui.font_ctx = nullptr;
+}
+
+TEST_F(SvgAnimationLifetimeTest, SelectorStateDependencyIncludesFailedHoverQueries) {
+    struct MetadataOwner {~MetadataOwner() {css_property_system_cleanup();}} metadata;
+    ASSERT_TRUE(css_property_system_init(doc.document_pool));
+    CssEngine* engine = css_engine_create(doc.document_pool); ASSERT_NE(engine, nullptr);
+    SelectorMatcher* matcher = selector_matcher_create(doc.document_pool); ASSERT_NE(matcher, nullptr);
+    ASSERT_TRUE(svg->set_attribute("id", "scene"));
+    DomElement* rect = element("rect", svg); ASSERT_NE(rect, nullptr);
+    CssStylesheet* sheets[] = {css_parse_stylesheet(engine,
+        "#scene { color:red; & rect { fill:blue; } } rect { font:italic 20px Arial; }", nullptr)};
+    ASSERT_NE(sheets[0], nullptr);
+    CssDeclaration selected = {};
+    ASSERT_TRUE(css_select_element_declaration(engine, matcher, rect, sheets, 1,
+        nullptr, 0, "fill", &selected));
+    EXPECT_STREQ(selected.value_text, "blue");
+    ASSERT_TRUE(css_select_element_declaration(engine, matcher, rect, sheets, 1,
+        nullptr, 0, "font-size", &selected));
+    EXPECT_STREQ(selected.property_name, "font");
+    EXPECT_FALSE(matcher->depends_on_state);
+    CssSelectorGroup* hover = css_parse_selector_group_text("rect:hover", 10, doc.document_pool);
+    ASSERT_NE(hover, nullptr);
+    EXPECT_FALSE(selector_matcher_matches_group(matcher, hover, rect, nullptr));
+    EXPECT_TRUE(matcher->depends_on_state);
+    selector_matcher_destroy(matcher);
+    css_engine_destroy(engine);
+}
+
 TEST(FontContextTest, PlatformFallbackHandlesStayWithTheirOwningContext) {
     FontContextConfig config = {};
     config.pixel_ratio = 1.0f;

@@ -685,6 +685,39 @@ baseline checks, 128 SVG fixtures, 96 native vector checks and 81 CSS checks.
 The broader visual gate retains the unchanged `pp_btn_shapes_01` threshold
 mismatch; its earlier and updated renderings are pixel-identical.
 
+Follow-up for `view test/input/math_intensive_test.tex` (2026-10-09): native
+text hit queries still rebuilt the entire host cascade per glyph, and native
+text measurement searched for unused ThorVG font files. Geometry queries now
+share the document cascade and retain logical character-cell paths, while
+ThorVG file resolution happens only for a backend that needs it. Selector
+matchers record dynamic state dependencies, including failed `:hover` tests,
+so scrolling preserves state-independent SVG styles without suppressing hover
+updates. DOM/style/layout changes, font resources and animation generations
+still expire the relevant results. The document owns retained paths and callers
+receive independent copies (**D4.2.6**); these native rendering caches preserve
+the package boundary (**D7.1.1 / D7.1.2v2**).
+
+Release validation for this TeX input: two control runs had median wheel latency
+4.37–4.57 seconds; the exact installed release had 151–152 milliseconds in two
+confirmation runs (about 30× lower). All twelve wheel events together fell from
+92.6–117.3 seconds to 8.83–8.91 seconds, excluding document startup. The controls
+and candidate use identical frozen objects except the SVG renderer and selector
+matcher. Control medians varied 4.7%; optimized medians varied 0.3%. All hit-target
+sequences match, and five viewport PNGs are byte-identical. Cold blank-area hits
+still reach about four seconds when the geometry cache for SVGs with visible
+overflow must be populated.
+
+The new wheel fixture passes 16 assertions and exits with zero tracked live
+allocations; the new hover fixture passes eight pixel/target/scroll assertions.
+The native vector suite passes 110 tests, UI baseline 400 fixtures, view UI 11,
+DOM UI 136, and the render baseline passes. `make test-radiant-baseline` records
+4,135 passes, 350 partial passes and eight failures: the same CSS list-layout
+and CSS-memory regressions in both control and final releases, plus six INFO-log
+assertions whose messages are compiled out in release. All six log-dependent
+checks pass against an isolated debug host. Timing, binary/source hashes, object
+inventory and pixel comparisons are retained in
+`temp/math-scroll/performance-comparison.json`; debug runs are validation only.
+
 ## 7. Risk Register
 
 | ID | Severity | Risk | Mitigation |

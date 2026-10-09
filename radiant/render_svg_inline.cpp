@@ -483,6 +483,10 @@ struct SvgStyleEntry {
     bool inline_parsed;
     SvgStyleProperty* properties;
     SvgStyleProperty* computed_properties;
+    RdtPath* text_hit_path;
+    FontContext* text_hit_context;
+    SvgLengthContext text_hit_lengths;
+    uint64_t text_hit_animation, text_hit_fonts;
 };
 
 typedef TypedHashMap<SvgStyleEntry,
@@ -576,6 +580,9 @@ static void svg_style_destroy(SvgStyleContext* style) {
         resource = next;
     }
     if (style->matcher) selector_matcher_destroy(style->matcher);
+    size_t cursor = 0; SvgStyleEntry* entry = nullptr;
+    while (SvgStyleMap::next(style->entries, &cursor, &entry))
+        if (entry->text_hit_path) rdt_path_free(entry->text_hit_path);
     SvgStyleMap::destroy(style->entries);
     if (style->isolated_document) {
         // D4.2.6: layout payloads release borrowed fonts/images before their private document owner.
@@ -704,7 +711,8 @@ static SvgPaintHostStyle* svg_host_style(DomDocument* host) {
     // expire at paint boundaries, before any traversal borrows their values.
     if (!shared->valid || (new_pass && (shared->animation_generation != animation_generation ||
         shared->font_generation != font_generation || shared->style.resources)) ||
-        shared->mutation_epoch != host->mutation_epoch || shared->state_version != state_version ||
+        shared->mutation_epoch != host->mutation_epoch ||
+        (shared->state_version != state_version && shared->style.matcher && shared->style.matcher->depends_on_state) ||
         shared->style_epoch != host->style_content_epoch || shared->query_epoch != host->style_query_epoch ||
         shared->layout_generation != layout_generation) {
         svg_style_destroy(&shared->style);
@@ -720,6 +728,9 @@ static SvgPaintHostStyle* svg_host_style(DomDocument* host) {
         if (!shared->valid) return nullptr;
     }
     if (new_pass) shared->animation_prepared = false;
+    // state-independent values remain valid; any newly queried pseudo-class
+    // observes this state and makes the next interaction expire the snapshot.
+    shared->state_version = state_version;
     shared->pass = g_svg_paint_pass;
     return shared;
 }
@@ -4783,7 +4794,16 @@ static void svg_text_trim_end(SvgTextLayout* layout) {
     if (run->len == 0) layout->run_count--;
 }
 
-// Resolves each distinct family/weight/slant once per text element.
+static bool svg_text_font_path(SvgInlineRenderContext* ctx, SvgTextFont* font,
+    const SvgTextStyle* style, bool allow_embedded_font) {
+    const char* family = style->font_family[0] ? style->font_family : SVG_DEFAULT_FONT_FAMILY;
+    if (!font->path) font->path = lam::own(resolve_svg_font_path(family,
+        font->name, sizeof(font->name), ctx->font_ctx, style->font_weight,
+        style->font_slant, allow_embedded_font));
+    return font->path != nullptr;
+}
+
+// resolve each distinct family/weight/slant once per text element.
 static SvgTextFont* svg_text_font(SvgTextLayout* layout, int style_index, bool allow_embedded_font) {
     const SvgTextStyle* style = &layout->styles[style_index];
     for (int i = 0; i < layout->style_count; i++) {
@@ -4802,9 +4822,10 @@ static SvgTextFont* svg_text_font(SvgTextLayout* layout, int style_index, bool a
     // Name the default family itself: the ThorVG face key found for it (e.g.
     // "Arial Bold") is a file name that font_resolve does not know as a family.
     const char* family = style->font_family[0] ? style->font_family : SVG_DEFAULT_FONT_FAMILY;
-    font->path = lam::own(resolve_svg_font_path(family, font->name, sizeof(font->name),
-        ctx->font_ctx, style->font_weight, style->font_slant, allow_embedded_font));
-    if (!font->path && (!ctx->font_ctx || allow_embedded_font)) return nullptr;
+    // native measurement and glyph painting use FontContext's cached family resolution;
+    // search for a ThorVG font file only when that backend actually needs one.
+    if ((!ctx->font_ctx || allow_embedded_font) &&
+        !svg_text_font_path(ctx, font, style, allow_embedded_font)) return nullptr;
 
     // Radiant resolves the full authored family list, including collection and fallback faces.
     font->family = ctx->font_ctx && !allow_embedded_font ? family
@@ -5125,8 +5146,9 @@ static void svg_text_place(SvgTextLayout* layout) {
 // ThorVG fallback for runs the glyph path cannot draw (no active raster
 // context, e.g. SVG pictures). ThorVG places text by its top edge.
 static void svg_text_draw_tvg_run(SvgInlineRenderContext* ctx, const RdtMatrix* m,
-                                  const SvgTextFont* font, const SvgTextStyle* style,
+                                  SvgTextFont* font, const SvgTextStyle* style,
                                   const char* text, float x, float y, float fit_width) {
+    if (!svg_text_font_path(ctx, font, style, false)) return;
     Tvg_Paint paint = create_text_segment(text, x, y, font->path,
                                           font->name[0] ? font->name : nullptr,
                                           style->font_size, style->fill);
@@ -5688,16 +5710,19 @@ static bool svg_text_geometry_scope_open(SvgTextGeometryScope* scope, DomElement
     scope->arena = mem_arena_create(nullptr, MEM_ROLE_RENDER, "render.svg.text_geometry");
     mem_scratch_init(nullptr, &scope->scratch, scope->arena, MEM_ROLE_RENDER, "render.svg.text_geometry.scratch");
     Element* source = dom_element_to_element(svg);
-    if (!svg_style_init(&scope->style, source, lengths->viewport_width,
-        lengths->viewport_height, svg->doc)) return false;
+    // a live DOM query shares the document cascade; indexing the entire host
+    // for each glyph made pointer targeting quadratic in document size.
+    SvgPaintHostStyle* shared = svg_host_style(svg->doc);
+    SvgStyleContext* style = shared ? &shared->style : &scope->style;
+    if (!shared && !svg_style_init_host(style, svg->doc)) return false;
     scope->source_path = radiant_document_resource_base(svg->doc, MEM_CAT_FONT);
-    if (scope->owns_fonts) scope->fonts = svg_style_font_context(&scope->style,
+    if (scope->owns_fonts) scope->fonts = svg_style_font_context(style,
         scope->source_path, 1.0f, false, nullptr);
     if (!scope->fonts) return false;
     SvgInlineRenderContext* ctx = &scope->context;
     ctx->svg_root = lam::up(source); ctx->id_scope = lam::up(render_svg_reference_scope(svg));
     ctx->source_path = lam::up(scope->source_path); ctx->resource_scratch = lam::up(&scope->scratch);
-    ctx->font_ctx = lam::up(scope->fonts); ctx->style_context = lam::up(&scope->style);
+    ctx->font_ctx = lam::up(scope->fonts); ctx->style_context = lam::up(style);
     ctx->transform = rdt_matrix_identity();
     ctx->current_viewport_w = lengths->viewport_width; ctx->current_viewport_h = lengths->viewport_height;
     ctx->inherited_font_size = 16.0f; ctx->inherited_font_weight = 400;
@@ -5773,6 +5798,23 @@ static RdtPath* svg_text_geometry_collect(SvgTextGeometryScope* scope, DomElemen
 RdtPath* svg_text_geometry_path(DomElement* target, const SvgLengthContext* lengths,
     FontContext* font_context) {
     if (!target || !target->doc || !lengths) return nullptr;
+    UiContext* ui = (UiContext*)target->doc->js.host_ui_context;
+    SvgPaintHostStyle* shared = font_context && ui && font_context == ui->font_ctx &&
+        !svg_animation_is_sampling(target->doc) ? svg_host_style(target->doc) : nullptr;
+    SvgStyleEntry* entry = shared ? svg_style_entry(&shared->style, dom_element_to_element(target)) : nullptr;
+    uint64_t animation = entry ? svg_animation_source_generation(target->doc,
+        dom_element_to_element(target), target) : 0;
+    // logical text cells survive scrolling. The document snapshot owns them;
+    // callers receive a clone and can free it independently of later mutations.
+    if (entry && entry->text_hit_path && entry->text_hit_context == font_context && entry->text_hit_animation == animation &&
+        entry->text_hit_fonts == font_context_resource_generation(font_context) &&
+        entry->text_hit_lengths.viewport_width == lengths->viewport_width &&
+        entry->text_hit_lengths.viewport_height == lengths->viewport_height &&
+        entry->text_hit_lengths.font_size == lengths->font_size &&
+        entry->text_hit_lengths.x_height == lengths->x_height) {
+        RdtPath* cached = rdt_path_clone(entry->text_hit_path);
+        if (cached) return cached;
+    }
     DomElement* text = target;
     for (DomNode* node = target; node && node->is_element(); node = node->parent) {
         DomElement* element = node->as_element();
@@ -5786,6 +5828,14 @@ RdtPath* svg_text_geometry_path(DomElement* target, const SvgLengthContext* leng
     bool ready = svg_text_geometry_scope_open(&scope, svg, lengths, font_context);
     RdtPath* path = ready ? svg_text_geometry_collect(&scope, target, text, nullptr) : nullptr;
     svg_text_geometry_scope_close(&scope);
+    if (entry && path) {
+        if (entry->text_hit_path) rdt_path_free(entry->text_hit_path);
+        entry->text_hit_path = rdt_path_clone(path);
+        entry->text_hit_context = font_context;
+        entry->text_hit_lengths = *lengths;
+        entry->text_hit_animation = animation;
+        entry->text_hit_fonts = font_context_resource_generation(font_context);
+    }
     return path;
 }
 

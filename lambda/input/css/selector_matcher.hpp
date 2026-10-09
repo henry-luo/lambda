@@ -122,6 +122,7 @@ typedef struct SelectorMatcher {
     // Dynamic pseudo-state resolution
     SelectorPseudoStateResolver pseudo_state_resolver;
     void* pseudo_state_context;
+    bool depends_on_state;          // a queried dynamic pseudo-class can change without DOM mutation
 
     // Bloom filter (for quick filtering)
     uint8_t* bloom_filter;           // Bloom filter for element properties
