@@ -6,7 +6,7 @@ TypesetStatus typeset_mark_append(TypesetMarkStore* store, const TypesetMark* ma
     if (!store || !store->pool || !store->provider || !store->generation || !mark ||
         !mark->name || !*mark->name || !mark->page_number || mark->kind > TYPESET_MARK_NATIVE)
         return TYPESET_INVALID;
-    if (mark->source.provider != store->provider || mark->source.generation != store->generation)
+    if (!typeset_source_in_scope(mark->source, store->provider, store->generation, store->sources))
         return TYPESET_STALE;
     if (store->count && store->entries[store->count - 1].page_number > mark->page_number)
         return TYPESET_INVALID;

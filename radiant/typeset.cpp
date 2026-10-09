@@ -7,10 +7,24 @@
 struct TypesetTargetIndex { const char* name; size_t offset; };
 HASHMAP_DEFINE_STRKEY(typeset_target_index, TypesetTargetIndex, name)
 
+bool typeset_source_in_scope(const TypesetSource& source, uint64_t provider, uint64_t generation,
+        const TypesetSourceScope& scope) {
+    if (source.provider == provider && source.generation == generation) return true;
+    for (size_t i = 0; scope.namespaces && i < scope.count; i++)
+        if (source.provider == scope.namespaces[i].provider && source.generation == scope.namespaces[i].generation)
+            return true;
+    return false;
+}
+
+bool typeset_source_same_identity(const TypesetSource& left, const TypesetSource& right) {
+    return left.provider == right.provider && left.generation == right.generation && left.node == right.node &&
+        left.offset_unit == right.offset_unit;
+}
+
 TypesetStatus typeset_target_append(TypesetTargetStore* store, const TypesetTarget* target) {
     if (!store || !store->pool || !store->provider || !store->generation || !target ||
         !target->name || !*target->name || !store->limit) return TYPESET_INVALID;
-    if (target->source.provider != store->provider || target->source.generation != store->generation)
+    if (!typeset_source_in_scope(target->source, store->provider, store->generation, store->sources))
         return TYPESET_STALE;
     if (store->count >= store->limit) return TYPESET_BUDGET_EXHAUSTED;
     if (!store->index) store->index = typeset_target_index_new(16);
@@ -238,6 +252,17 @@ TypesetStatus typeset_flow_next(const TypesetFlowProvider* provider, const Types
     return next->serial > cursor->serial ? TYPESET_OK : TYPESET_NO_PROGRESS;
 }
 
+TypesetStatus typeset_policy_checkpoint(const TypesetPagePolicy* policy, TypesetPolicyCheckpoint* saved) {
+    if (!saved || (policy && (!!policy->checkpoint != !!policy->restore))) return TYPESET_INVALID;
+    *saved = {};
+    return policy && policy->checkpoint ? policy->checkpoint(policy->context, saved) : TYPESET_OK;
+}
+
+TypesetStatus typeset_policy_restore(const TypesetPagePolicy* policy, const TypesetPolicyCheckpoint* saved) {
+    if (!saved || (policy && (!!policy->checkpoint != !!policy->restore))) return TYPESET_INVALID;
+    return policy && policy->restore ? policy->restore(policy->context, saved) : TYPESET_OK;
+}
+
 TypesetStatus typeset_page_select(const TypesetPagePolicy* policy,
         const TypesetPageCandidate* candidates, size_t count, size_t* selected, TypesetAssemblyAction* action) {
     if (!policy || !policy->choose || !policy->assemble || !candidates || !count || !selected || !action) return TYPESET_INVALID;
@@ -363,4 +388,53 @@ TypesetStatus typeset_page_commit(TypesetPagePlan* plan, TypesetResume* next) {
     }
     *next = restored; plan->committed = true;
     return TYPESET_OK;
+}
+
+static bool assembly_checkpoint_equal(const TypesetAssemblyCheckpoint& first, const TypesetAssemblyCheckpoint& second) {
+    return first.action == second.action && !memcmp(&first.policy, &second.policy, sizeof(first.policy)) &&
+        !memcmp(&first.end, &second.end, sizeof(first.end));
+}
+
+static TypesetStatus assembly_observe(TypesetPageAssembly* assembly, const TypesetAssemblyCheckpoint& checkpoint,
+        bool continuing) {
+    if (continuing && assembly->count && assembly_checkpoint_equal(assembly->history[assembly->count - 1], checkpoint))
+        return TYPESET_OK;
+    for (size_t i = 0; i < assembly->count; i++)
+        if (assembly_checkpoint_equal(assembly->history[i], checkpoint)) return TYPESET_NO_PROGRESS;
+    if (!lam::pool_grow_array(assembly->pool, &assembly->history, &assembly->capacity, assembly->count + 1, 8))
+        return TYPESET_OUT_OF_MEMORY;
+    assembly->history[assembly->count++] = checkpoint;
+    return TYPESET_OK;
+}
+
+TypesetStatus typeset_page_transition(TypesetPagePlan* plan, TypesetPageAssembly* assembly, bool* reinsert) {
+    if (!plan || !plan->scratch || plan->committed || !assembly || !assembly->pool || !reinsert || !plan->policy ||
+        !plan->policy->transition || !plan->policy->checkpoint || !plan->policy->restore ||
+        plan->action == TYPESET_ASSEMBLY_FINALIZE || plan->action > TYPESET_ASSEMBLY_REINSERT) return TYPESET_INVALID;
+    *reinsert = false;
+    if (assembly->transitions >= assembly->limit) return TYPESET_BUDGET_EXHAUSTED;
+    const TypesetPagePolicy* policy = plan->policy;
+    TypesetAssemblyCheckpoint before = {{}, plan->candidate.end, plan->action}, after = before;
+    TypesetStatus status = typeset_policy_checkpoint(policy, &before.policy);
+    if (status != TYPESET_OK) return status;
+    if (status == TYPESET_OK) status = assembly_observe(assembly, before, true);
+    if (status == TYPESET_OK) {
+        assembly->transitions++;
+        status = policy->transition(policy->context, plan->action, plan);
+    }
+    if (status == TYPESET_OK) status = typeset_policy_checkpoint(policy, &after.policy);
+    if (status == TYPESET_OK && !memcmp(&before.policy, &after.policy, sizeof(before.policy))) status = TYPESET_NO_PROGRESS;
+    if (status == TYPESET_OK) status = assembly_observe(assembly, after, false);
+    if (status == TYPESET_OK) {
+        if (plan->action == TYPESET_ASSEMBLY_REINSERT) *reinsert = true;
+        else {
+            plan->action = policy->assemble(policy->context, &plan->candidate);
+            if (plan->action > TYPESET_ASSEMBLY_REINSERT) status = TYPESET_INVALID;
+        }
+    }
+    if (status != TYPESET_OK) {
+        TypesetStatus restored = typeset_policy_restore(policy, &before.policy);
+        if (restored != TYPESET_OK) status = restored;
+    }
+    return status;
 }

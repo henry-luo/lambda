@@ -27,10 +27,6 @@ extern "C" {
 // Property Interpolation
 // ============================================================================
 
-float css_interpolate_float(float a, float b, float t) {
-    return a + (b - a) * t;
-}
-
 static inline uint8_t lerp_u8(uint8_t a, uint8_t b, float t) {
     float v = (float)a + ((float)b - (float)a) * t;
     return clamp_byte_round(v);

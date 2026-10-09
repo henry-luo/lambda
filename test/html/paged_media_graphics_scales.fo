@@ -1,0 +1,59 @@
+<?xml version='1.0' encoding='utf-8'?>
+<fo:root xmlns:fo="http://www.w3.org/1999/XSL/Format" xmlns:ns1="http://www.w3.org/2000/svg" font-family="Arial" font-size="7.5pt" line-height="9pt" allowed-width-scale="any 50% 150% 300%" allowed-height-scale="any 100% 150%">
+  <fo:layout-master-set>
+    <fo:simple-page-master master-name="sheet" page-width="180pt" page-height="135pt" margin="7.5pt">
+      <fo:region-body />
+    </fo:simple-page-master>
+  </fo:layout-master-set>
+  <fo:page-sequence master-reference="sheet" force-page-count="no-force">
+    <fo:flow flow-name="xsl-region-body">
+      <fo:block>
+        <fo:external-graphic width="60pt" height="30pt" content-width="scale-to-fit" content-height="scale-to-fit" scaling="uniform" text-align="start" display-align="before" overflow="hidden" background-color="#e8f0ff" src="url('paged_media_graphics.svg')" />
+      </fo:block>
+      <fo:block>
+        <fo:external-graphic width="60pt" height="30pt" content-width="scale-to-fit" content-height="scale-to-fit" scaling="uniform" text-align="start" display-align="before" overflow="hidden" background-color="#e8ffe8" src="url('paged_media_graphics.svg')" allowed-width-scale="300% any" allowed-height-scale="any" />
+      </fo:block>
+      <fo:block>
+        <fo:external-graphic width="60pt" height="30pt" content-width="150%" content-height="auto" scaling="uniform" text-align="center" display-align="after" overflow="hidden" background-color="#fff0d0" src="url('paged_media_graphics.svg')" allowed-width-scale="150%" allowed-height-scale="any" />
+      </fo:block>
+    </fo:flow>
+  </fo:page-sequence>
+  <fo:page-sequence master-reference="sheet" force-page-count="no-force">
+    <fo:flow flow-name="xsl-region-body">
+      <fo:block>
+        <fo:external-graphic width="60pt" height="30pt" content-width="scale-to-fit" content-height="scale-to-fit" scaling="non-uniform" text-align="start" display-align="center" overflow="hidden" background-color="#e8f0ff" src="url('paged_media_graphics.svg')" allowed-width-scale="50% 150%" allowed-height-scale="100%" />
+      </fo:block>
+      <fo:block>
+        <fo:external-graphic width="60pt" height="30pt" content-width="scale-to-fit" content-height="auto" scaling="non-uniform" text-align="center" display-align="after" overflow="visible" background-color="#e8ffe8" src="url('paged_media_graphics.svg')" allowed-width-scale="50% 150%" allowed-height-scale="150%" />
+      </fo:block>
+      <fo:block>
+        <fo:external-graphic width="60pt" height="30pt" content-width="scale-to-fit" content-height="scale-to-fit" scaling="uniform" text-align="end" display-align="after" overflow="hidden" background-color="#fff0d0" src="url('paged_media_graphics.svg')" allowed-width-scale="300% any" allowed-height-scale="300% any" />
+      </fo:block>
+    </fo:flow>
+  </fo:page-sequence>
+  <fo:page-sequence master-reference="sheet" force-page-count="no-force">
+    <fo:flow flow-name="xsl-region-body">
+      <fo:block>
+        <fo:instream-foreign-object width="60pt" height="30pt" content-width="scale-down-to-fit" content-height="auto" scaling="uniform" text-align="center" display-align="center" overflow="hidden" background-color="#e8f0ff" allowed-width-scale="100% 150%" allowed-height-scale="any">
+          <ns1:svg width="30pt" height="15pt" viewBox="0 0 40 20" preserveAspectRatio="none">
+            <ns1:rect width="40" height="20" fill="#d04020" />
+          </ns1:svg>
+        </fo:instream-foreign-object>
+      </fo:block>
+      <fo:block>
+        <fo:instream-foreign-object width="60pt" height="30pt" content-width="scale-up-to-fit" content-height="auto" scaling="uniform" text-align="end" display-align="after" overflow="hidden" background-color="#e8ffe8" allowed-width-scale="50% 150%" allowed-height-scale="any">
+          <ns1:svg width="30pt" height="15pt" viewBox="0 0 40 20" preserveAspectRatio="none">
+            <ns1:rect width="40" height="20" fill="#d04020" />
+          </ns1:svg>
+        </fo:instream-foreign-object>
+      </fo:block>
+      <fo:block>
+        <fo:instream-foreign-object width="60pt" height="30pt" content-width="scale-to-fit" content-height="scale-to-fit" scaling="uniform" text-align="start" display-align="before" overflow="hidden" background-color="#fff0d0" allowed-width-scale="any 25% * 2 75% * 2" allowed-height-scale="min(200%, 150%) any">
+          <ns1:svg width="30pt" height="15pt" viewBox="0 0 40 20" preserveAspectRatio="none">
+            <ns1:rect width="40" height="20" fill="#d04020" />
+          </ns1:svg>
+        </fo:instream-foreign-object>
+      </fo:block>
+    </fo:flow>
+  </fo:page-sequence>
+</fo:root>

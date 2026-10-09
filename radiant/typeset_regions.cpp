@@ -102,7 +102,8 @@ TypesetStatus typeset_region_plan(const TypesetRegionQueue* queue,
         bool eligible = constraints->page_number >= earliest;
         for (size_t j = 0; j < i; j++) {
             const TypesetRegionMaterial* prior = j < queue->count ? queue->entries[j].material : anchors[j - queue->count];
-            if (prior->identity == material->identity) { status = TYPESET_INVALID; break; }
+            if (prior->identity == material->identity && prior->source.provider == material->source.provider &&
+                prior->source.generation == material->source.generation) { status = TYPESET_INVALID; break; }
         }
         if (status != TYPESET_OK) break;
         float available = constraints->minimum_height > constraints->available_height - body_height ? 0.0f :

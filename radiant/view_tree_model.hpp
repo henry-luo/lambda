@@ -1,6 +1,7 @@
 #pragma once
 
 #include "scale.hpp"
+#include "typeset.hpp"
 #include "../lambda/input/css/dom_lifecycle.hpp"
 #include "../lambda/input/css/css_paged_media.hpp"
 #include "../lib/ownership.hpp"
@@ -23,6 +24,7 @@ struct PaintGlyphRun;
 struct PaintImageBox;
 struct ViewModelCheckpoint;
 struct ViewPageGeneration;
+struct ViewNativeLease;
 struct RadiantPageSequence;
 struct RadiantFixedPage;
 struct Arena;
@@ -62,6 +64,21 @@ enum ViewFragmentRole : uint8_t {
     VIEW_FRAGMENT_RUNNING, VIEW_FRAGMENT_REPEATED_TABLE, VIEW_FRAGMENT_STATIC,
 };
 struct ViewTableRange { size_t column, span; bool missing; };
+// the immutable owner covers every borrowed native record, glyph/font and image resource.
+struct ViewNativeOwner {
+    void* context;
+    bool (*retain)(void* context);
+    void (*release)(void* context);
+};
+struct ViewNativeMaterial {
+    TypesetSource source;
+    TypesetMetrics metrics;
+    size_t start, length;
+    lam::Up<const PaintGlyphRun> glyph_run;
+    lam::Up<const PaintImageBox> image_box;
+    ViewNativeOwner owner;
+    lam::Up<const TypesetRecord> solution;
+};
 struct LayoutViewNode {
     LayoutViewRef ref;
     LayoutViewKind kind;
@@ -79,6 +96,7 @@ struct LayoutViewNode {
     lam::Up<ViewCssStyle> computed_style;
     lam::Up<BoundaryProp> computed_boundary;
     lam::Up<const ViewTableRange> table_range;
+    lam::Up<const ViewNativeMaterial> native_material;
     ViewFragmentRole role;
     bool generated;
     bool clip_content;
@@ -89,6 +107,7 @@ struct LayoutViewNode {
 
 struct ViewNodeState {
     DomNodeRef source;
+    TypesetSource native_source; // provider identity is independent of a DOM mapping and layout generation
     lam::Up<ViewCssStyle> computed_style;
     lam::Up<StyleTree> specified_style;
     lam::Up<FontProp> font;
@@ -178,6 +197,7 @@ struct ViewTreeModel {
     lam::Own<ViewCssContext> css;
     lam::Own<PagedComposition> composition;
     lam::Own<hashmap> image_resources; // generation owns assets independently of browsing and other editions
+    lam::Up<ViewNativeLease> native_leases;
     lam::Up<LayoutViewNode> root;
     lam::Up<LayoutViewNode*> nodes;
     size_t node_count, node_id_count, node_capacity; // live count; issued IDs include rollback tombstones
@@ -210,8 +230,13 @@ bool view_tree_model_destroy(ViewTree* tree);
 bool view_tree_model_reset(ViewTree* tree);
 bool view_tree_model_source_valid(const ViewTree* tree);
 ViewNodeState* view_tree_node_state(ViewTree* tree, DomNode* source, bool create);
+// lookup borrows retained source identity only; ranges and repeated occurrences use the shared chain.
+const ViewNodeState* view_tree_native_state(ViewTree* tree, const TypesetSource* source);
 LayoutViewNode* view_tree_fragment_append(ViewTree* tree, LayoutViewNode* parent,
     DomNode* source, RdtLogicalRect rect, size_t text_start = 0, size_t text_length = 0);
+// copies the descriptor/paint geometry and retains its immutable owner until rollback or generation release.
+LayoutViewNode* view_tree_native_fragment_append(ViewTree* tree, LayoutViewNode* parent,
+    const ViewNativeMaterial* material, RdtLogicalRect rect, ViewModelStatus* status = nullptr);
 ViewPageBox* view_tree_page_append(ViewTree* tree, float width, float height,
     RdtLogicalRect content_rect, ViewPageSide side, bool blank = false);
 LayoutViewNode* view_tree_node_resolve(ViewTree* tree, LayoutViewRef ref);

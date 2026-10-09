@@ -28,6 +28,8 @@ struct RadiantSpaceSpec {
     int32_t precedence;
     bool force, retain, specified;
 };
+// component zero selects the compound short form; positive components follow the shared native grammar.
+bool radiant_flow_trait_key(const char* name, bool* space, size_t* index, size_t* component, const char** base = nullptr);
 enum RadiantKeepKind : uint8_t { RADIANT_KEEP_AUTO, RADIANT_KEEP_NUMBER, RADIANT_KEEP_ALWAYS };
 struct RadiantKeepStrength { int32_t value; RadiantKeepKind kind; };
 struct RadiantKeepSpec { RadiantKeepStrength scope[3]; }; // line, column, page
@@ -74,13 +76,17 @@ RadiantWhitespaceSpec radiant_whitespace_spec(const ViewCssStyle* style);
 enum RadiantImageAxisKind : uint8_t { RADIANT_IMAGE_AUTO, RADIANT_IMAGE_LENGTH, RADIANT_IMAGE_PERCENT,
     RADIANT_IMAGE_FIT, RADIANT_IMAGE_FIT_DOWN, RADIANT_IMAGE_FIT_UP };
 struct RadiantImageAxis { RadiantImageAxisKind kind; float value; };
+// CSS-generation-owned, sorted scale factors; an empty set is the initial unrestricted value.
+struct RadiantImageScales { const float* values; size_t count; bool any; };
 struct RadiantImageSpec {
     RadiantImageAxis axes[2];
+    RadiantImageScales allowed[2];
     bool non_uniform;
     ViewModelStatus status;
     const char* reason;
 };
 bool radiant_image_trait_name(const char* name);
+CssValue* radiant_image_computed_trait(Pool* pool, const RadiantImageSpec* spec, const char* name);
 bool radiant_image_traits_resolve(ViewTree* tree, ViewCssStyle* style);
 bool radiant_image_size(const RadiantImageSpec* spec, float natural_width, float natural_height,
     float* viewport_width, float* viewport_height, float* content_width, float* content_height);

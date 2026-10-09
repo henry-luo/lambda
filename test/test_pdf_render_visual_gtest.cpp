@@ -1351,6 +1351,9 @@ TEST(RenderOutputParity, FoAndNativePageControlsSharePreviewAndPhysicalPdfPages)
         {"alignment", 3, "/MediaBox [0 0 165.00 105.00]"},
         {"display_alignment", 3, "/MediaBox [0 0 165.00 105.00]"},
         {"graphics", 3, "/MediaBox [0 0 180.00 135.00]"},
+        {"graphics_namespaces", 3, "/MediaBox [0 0 180.00 135.00]"},
+        {"graphics_scales", 3, "/MediaBox [0 0 180.00 135.00]"},
+        {"graphics_bindings", 3, "/MediaBox [0 0 180.00 135.00]"},
         {"lists", 3, "/MediaBox [0 0 180.00 120.00]"},
         {"lists_context", 3, "/MediaBox [0 0 180.00 120.00]"},
         {"cell_flow", 3, "/MediaBox [0 0 150.00 120.00]"},
@@ -1369,7 +1372,17 @@ TEST(RenderOutputParity, FoAndNativePageControlsSharePreviewAndPhysicalPdfPages)
         {"property_bindings", 3, "/MediaBox [0 0 150.00 120.00]"},
         {"nearest_values", 3, "/MediaBox [0 0 150.00 120.00]"},
         {"percentage_indents", 3, "/MediaBox [0 0 150.00 120.00]"},
-        {"percentage_indents_fractional", 3, "/MediaBox [0 0 150.00 120.00]"}};
+        {"percentage_indents_fractional", 3, "/MediaBox [0 0 150.00 120.00]"},
+        {"proportions_mixed", 3, "/MediaBox [0 0 225.00 120.00]"},
+        {"proportions_affine", 3, "/MediaBox [0 0 225.00 120.00]"},
+        {"decoration_bindings", 3, "/MediaBox [0 0 150.00 120.00]"},
+        {"direct_cells", 3, "/MediaBox [0 0 225.00 120.00]"},
+        {"dimensional_arithmetic", 3, "/MediaBox [0 0 150.00 120.00]"},
+        {"space_bindings", 3, "/MediaBox [0 0 150.00 120.00]"},
+        {"rgb_expressions", 3, "/MediaBox [0 0 150.00 120.00]"},
+        {"rgb_percentages", 3, "/MediaBox [0 0 150.00 120.00]"},
+        {"decoration_expressions", 3, "/MediaBox [0 0 150.00 120.00]"},
+        {"policy_bindings", 3, "/MediaBox [0 0 300.00 180.00]"}};
     const char* extensions[] = {"fo", "rpd"};
     for (const Fixture& fixture : fixtures) {
         SCOPED_TRACE(fixture.name);
@@ -3386,6 +3399,15 @@ TEST(RenderOutputParity, LogicalBorderPairsMapByDirectionAndWritingMode) {
     EXPECT_TRUE(file_contains_text(svg_path,
         "points=\"0.00,0.00 3.00,5.00 3.00,25.00 0.00,25.00\" fill=\"rgb(0,255,0)\""));
     EXPECT_FALSE(file_contains_text(svg_path, "points=\"33.00,5.00"));
+}
+
+TEST(RenderOutputParity, ComputedBorderShorthandWidthsMatchLiteralWidthsAcrossOutputs) {
+    expect_html_pair_output_parity("border_math_widths",
+        "<!doctype html><style>html,body{margin:0}div{margin:8px;width:80px;height:30px;font-size:10px;"
+        "border:calc(.5em - 1px) solid rgb(75,0,0);border-right:min(5px,.3em) solid blue}"
+        "</style><div></div>",
+        "<!doctype html><style>html,body{margin:0}div{margin:8px;width:80px;height:30px;font-size:10px;"
+        "border:4px solid rgb(75,0,0);border-right:3px solid blue}</style><div></div>");
 }
 
 TEST(RenderOutputParity, LogicalAndPhysicalBordersRespectLayerOrder) {
@@ -7612,6 +7634,55 @@ TEST(RenderOutputParity, SvgReferencesAndColorSpacesReachExistingPaintConsumers)
     // canonical CSS tokens, invalid substitution fallback and root inheritance must reach real paint.
     expect_html_pair_output_parity("svg_references", html[0]->str, html[1]->str);
     for (StrBuf* source : html) strbuf_free(source);
+}
+
+TEST(RenderOutputParity, QualifiedSvgImagesResolveStylesAndResourcesInTheirOwningNamespaces) {
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity")); ASSERT_TRUE(command_exists("pdftoppm"));
+    const struct { const char* path; const char* xml; } resources[] = {
+        {"temp/render_output_parity/namespace_servers.svg",
+         "<a:svg xmlns:a='http://www.w3.org/2000/svg' xmlns:h='http://www.w3.org/1999/xlink'><a:defs>"
+         "<a:linearGradient id='g' h:href='#base'/><a:linearGradient id='base'>"
+         "<a:stop offset='0' stop-color='green'/><a:stop offset='1' stop-color='green'/>"
+         "</a:linearGradient><a:g id='shape'><a:use h:href='#box'/></a:g>"
+         "<a:rect id='box' width='30' height='30' fill='blue'/></a:defs></a:svg>"},
+        {"temp/render_output_parity/namespace_image.svg",
+         "<s:svg xmlns:s='http://www.w3.org/2000/svg' xmlns:xlink='http://www.w3.org/1999/xlink' width='90' height='30'>"
+         "<s:style>.shape{fill:url(#g)}</s:style>"
+         "<s:defs><s:linearGradient id='g'><s:stop offset='0' stop-color='green'/><s:stop offset='1' stop-color='green'/></s:linearGradient>"
+         "<s:rect id='shape' width='30' height='30' fill='blue'/><s:pattern id='p' width='1' height='1'><s:rect width='90' height='30' fill='red'/></s:pattern></s:defs>"
+         "<s:rect class='shape' width='30' height='30'/><s:rect x='30' width='30' height='30' fill='url(#p)'/>"
+         "<s:use x='60' xlink:href='#shape'/>"
+         "<s:rect xmlns:s='urn:foreign' width='90' height='30' fill='yellow'/>"
+         "<x:style xmlns:x='urn:foreign'>.shape{fill:yellow}</x:style></s:svg>"}
+    };
+    for (const auto& resource : resources) ASSERT_TRUE(write_file_all(resource.path, resource.xml, strlen(resource.xml)));
+    const char* sources[] = {
+        "<!doctype html><style>body{margin:0}img{display:block}</style><img src='namespace_image.svg'>",
+        "<!doctype html><style>body{margin:0}svg{display:block}</style><svg width='90' height='30'>"
+        "<rect width='30' height='30' fill='url(namespace_servers.svg#g)'/>"
+        "<rect x='30' width='30' height='30' fill='red'/><use x='60' href='namespace_servers.svg#shape'/></svg>",
+        "<!doctype html><style>body{margin:0}svg{display:block}</style><svg width='90' height='30'>"
+        "<rect width='30' height='30' fill='green'/><rect x='30' width='30' height='30' fill='red'/>"
+        "<rect x='60' width='30' height='30' fill='blue'/></svg>"
+    };
+    char pngs[3][PATH_MAX], pdf_pngs[3][PATH_MAX], svg_pngs[3][PATH_MAX];
+    for (size_t i = 0; i < 3; i++) {
+        char html[PATH_MAX], pdf[PATH_MAX], svg[PATH_MAX];
+        snprintf(html, sizeof(html), "temp/render_output_parity/svg_namespaces_%zu.html", i);
+        snprintf(pdf, sizeof(pdf), "temp/render_output_parity/svg_namespaces_%zu.pdf", i);
+        snprintf(svg, sizeof(svg), "temp/render_output_parity/svg_namespaces_%zu.svg", i);
+        snprintf(pngs[i], sizeof(pngs[i]), "temp/render_output_parity/svg_namespaces_%zu.png", i);
+        snprintf(pdf_pngs[i], sizeof(pdf_pngs[i]), "temp/render_output_parity/svg_namespaces_%zu_pdf.png", i);
+        snprintf(svg_pngs[i], sizeof(svg_pngs[i]), "temp/render_output_parity/svg_namespaces_%zu_svg.png", i);
+        ASSERT_TRUE(render_html_fixture(html, pngs[i], sources[i]));
+        ASSERT_TRUE(render_document_fixture(html, pdf)); ASSERT_TRUE(rasterize_fixture_pdf(pdf, pdf_pngs[i]));
+        ASSERT_TRUE(render_document_fixture(html, svg)); ASSERT_TRUE(render_document_fixture(svg, svg_pngs[i]));
+    }
+    // a literal three-color reference catches namespace rebinding and cross-document ownership errors.
+    for (size_t i = 0; i < 2; i++) {
+        expect_pngs_exactly_equal(pngs[2], pngs[i]); expect_pngs_exactly_equal(pdf_pngs[2], pdf_pngs[i]);
+        expect_pngs_exactly_equal(svg_pngs[2], svg_pngs[i]);
+    }
 }
 
 TEST(RenderOutputParity, SvgPaintResourceUrlsUseStylesheetAndVariableConsumerBases) {

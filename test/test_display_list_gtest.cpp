@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include "../radiant/render.hpp"
+#include "../lambda/input/css/css_parser.hpp"
 #include "../lib/mem.h"
 #include "../lib/mempool.h"
 #include "../lib/arena.h"
@@ -859,9 +860,21 @@ static void expect_item_eq(const DisplayItem& a, const DisplayItem& b) {
     case DL_SAVE_BACKDROP:
         EXPECT_EQ(memcmp(&a.save_backdrop, &b.save_backdrop, sizeof(DlSaveBackdrop)), 0);
         break;
-    case DL_COMPOSITE_OPACITY:
-        EXPECT_EQ(memcmp(&a.composite_opacity, &b.composite_opacity, sizeof(DlCompositeOpacity)), 0);
+    case DL_COMPOSITE_OPACITY: {
+        const DlCompositeOpacity& left = a.composite_opacity;
+        const DlCompositeOpacity& right = b.composite_opacity;
+        // bool/pointer alignment leaves unspecified padding; compare every payload field.
+        EXPECT_EQ(left.x0, right.x0); EXPECT_EQ(left.y0, right.y0);
+        EXPECT_EQ(left.w, right.w); EXPECT_EQ(left.h, right.h);
+        EXPECT_FLOAT_EQ(left.opacity, right.opacity);
+        EXPECT_EQ(left.premultiplied_source, right.premultiplied_source);
+        EXPECT_EQ(left.mask.gradient, right.mask.gradient);
+        EXPECT_FLOAT_EQ(left.mask.rect.x, right.mask.rect.x); EXPECT_FLOAT_EQ(left.mask.rect.y, right.mask.rect.y);
+        EXPECT_FLOAT_EQ(left.mask.rect.width, right.mask.rect.width); EXPECT_FLOAT_EQ(left.mask.rect.height, right.mask.rect.height);
+        expect_matrix_eq(left.mask.inverse, right.mask.inverse);
+        EXPECT_EQ(left.mask.invertible, right.mask.invertible);
         break;
+    }
     case DL_APPLY_BLEND_MODE:
         EXPECT_EQ(memcmp(&a.apply_blend_mode, &b.apply_blend_mode, sizeof(DlApplyBlendMode)), 0);
         break;
@@ -1072,9 +1085,12 @@ TEST_F(PaintIrParityTest, ClipPushPopMatchesDirect) {
 TEST_F(PaintIrParityTest, RasterEffectOpsMatchDirect) {
     char filter_token = 0;
     Bound clip = {1, 2, 30, 40};
+    RadialGradient gradient = {};
+    RadialMaskPaint mask = {lam::up(&gradient), {2.5f, 3.25f, 20.0f, 30.0f}, rdt_matrix_identity(), true};
+    mask.inverse.e13 = 7.0f;
 
     paint_save_backdrop(&pl, 2, 3, 20, 30);
-    paint_composite_opacity(&pl, 2, 3, 20, 30, 0.5f, true);
+    paint_composite_opacity(&pl, 2, 3, 20, 30, 0.5f, true, &mask);
     paint_save_backdrop(&pl, 2, 3, 20, 30);
     paint_apply_blend_mode(&pl, 2, 3, 20, 30, 7);
     paint_apply_filter(&pl, 4.0f, 5.0f, 40.0f, 50.0f, (FilterProp*)&filter_token, &clip);
@@ -1082,7 +1098,7 @@ TEST_F(PaintIrParityTest, RasterEffectOpsMatchDirect) {
     lower();
 
     dl_save_backdrop(&direct, 2, 3, 20, 30);
-    dl_composite_opacity(&direct, 2, 3, 20, 30, 0.5f, true);
+    dl_composite_opacity(&direct, 2, 3, 20, 30, 0.5f, true, &mask);
     dl_save_backdrop(&direct, 2, 3, 20, 30);
     dl_apply_blend_mode(&direct, 2, 3, 20, 30, 7);
     dl_apply_filter(&direct, 4.0f, 5.0f, 40.0f, 50.0f, (FilterProp*)&filter_token, &clip);
@@ -2331,4 +2347,27 @@ TEST_F(PaintIrParityTest, SvgLoweringEmitsRadialGradientPath) {
 
     strbuf_free(out);
     rdt_path_free(path);
+}
+
+TEST_F(DisplayListTest, ComputedCornerExpressionsResolveAgainstEachPaintBoxWithoutLayoutState) {
+    const char* text = "min(60%, 45px)";
+    const char* property = "border-top-left-radius";
+    CssDeclaration* declaration = css_parse_property_value_declaration(property, strlen(property),
+        text, strlen(text), pool);
+    ASSERT_NE(declaration, nullptr);
+    CornerExpressions expressions = {};
+    for (size_t i = 0; i < 4; i++) {
+        expressions.horizontal[i] = lam::up((const CssValue*)declaration->value);
+        expressions.vertical[i] = lam::up((const CssValue*)declaration->value);
+    }
+    Corner radius = {}; radius.expressions = lam::up(&expressions);
+    resolve_border_radius_percentages(&radius, 100.0f, 40.0f);
+    EXPECT_FLOAT_EQ(radius.horizontal[0], 45.0f); EXPECT_FLOAT_EQ(radius.vertical[0], 24.0f);
+    constrain_corner_radii(&radius, 100.0f, 40.0f);
+    EXPECT_FLOAT_EQ(radius.horizontal[0], 37.5f); EXPECT_FLOAT_EQ(radius.vertical[0], 20.0f);
+    resolve_border_radius_percentages(&radius, 50.0f, 100.0f);
+    EXPECT_FLOAT_EQ(radius.horizontal[0], 30.0f); EXPECT_FLOAT_EQ(radius.vertical[0], 45.0f);
+    constrain_corner_radii(&radius, 50.0f, 100.0f);
+    EXPECT_FLOAT_EQ(radius.horizontal[0], 25.0f); EXPECT_FLOAT_EQ(radius.vertical[0], 37.5f);
+    EXPECT_EQ(radius.expressions.get(), &expressions);
 }

@@ -132,6 +132,7 @@ struct ViewPageStyle {
 };
 
 bool view_css_context_begin(ViewTree* tree);
+double view_css_number(const CssValue* value, ViewTree* tree = nullptr, const ViewCssStyle* style = nullptr);
 void view_css_context_destroy(ViewTree* tree);
 ViewCssStyle* view_css_resolve(ViewTree* tree, DomElement* element);
 ViewCssStyle* view_css_resolve_pseudo(ViewTree* tree, DomElement* element, uint8_t pseudo_element);

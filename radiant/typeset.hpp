@@ -12,6 +12,11 @@ struct TypesetSource {
     TypesetOffsetUnit offset_unit;
     lam::Up<const TypesetRecord> native;
 };
+struct TypesetSourceNamespace { uint64_t provider, generation; };
+struct TypesetSourceScope { const TypesetSourceNamespace* namespaces; size_t count; };
+bool typeset_source_in_scope(const TypesetSource& source, uint64_t provider, uint64_t generation,
+    const TypesetSourceScope& scope);
+bool typeset_source_same_identity(const TypesetSource& left, const TypesetSource& right);
 
 struct TypesetMetrics {
     float advance, height, depth, baseline;
@@ -85,6 +90,7 @@ struct TypesetParagraph {
     TypesetItemMeasureFn measure; // pure width-specific metrics; source items stay immutable through retries
     float minimum_baseline;
     bool baseline_aware; // zero is a valid producer baseline; older positive struts remain compatible
+    size_t max_alternatives; // optional producer bound; zero uses the item count
 };
 
 enum TypesetStatus : uint8_t {
@@ -109,10 +115,15 @@ enum TypesetContributionKind : uint8_t {
     TYPESET_CONTRIBUTION_GLUE, TYPESET_CONTRIBUTION_BOUNDARY,
     TYPESET_CONTRIBUTION_INSERTION, TYPESET_CONTRIBUTION_FLOAT,
     TYPESET_CONTRIBUTION_MARK, TYPESET_CONTRIBUTION_TARGET,
+    TYPESET_CONTRIBUTION_FLUSH_DEFERRED,
     TYPESET_CONTRIBUTION_NESTED,
 };
 enum TypesetRegionKind : uint8_t { TYPESET_REGION_BODY, TYPESET_REGION_NOTE, TYPESET_REGION_FLOAT, TYPESET_REGION_MARGIN };
+enum TypesetRegionEdge : uint8_t { TYPESET_REGION_START, TYPESET_REGION_END };
 struct TypesetFlowProvider;
+struct TypesetMark;
+struct TypesetTarget;
+struct TypesetRegionMaterial;
 struct TypesetContribution {
     TypesetContributionKind kind;
     TypesetSource source;
@@ -124,6 +135,12 @@ struct TypesetContribution {
     TypesetRegionKind region;
     uint64_t identity;
     const void* payload;
+    union {
+        const TypesetMark* mark;
+        const TypesetTarget* target;
+        const TypesetRegionMaterial* region_material;
+    };
+    TypesetRegionEdge region_edge;
 };
 struct TypesetFlowProvider {
     uint64_t identity, generation;
@@ -135,19 +152,31 @@ struct TypesetFlowProvider {
 };
 
 enum TypesetAssemblyAction : uint8_t { TYPESET_ASSEMBLY_FINALIZE, TYPESET_ASSEMBLY_HOLD, TYPESET_ASSEMBLY_REINSERT };
+enum TypesetPageKind : uint8_t { TYPESET_PAGE_FLOW, TYPESET_PAGE_REGION, TYPESET_PAGE_BLANK, TYPESET_PAGE_FIXED, TYPESET_PAGE_EMPTY };
 struct TypesetPageCandidate {
     TypesetResume start, end;
     float body_height, note_height, float_height, available_height;
     TypesetBreak boundary;
     double cost;
     const void* trial;
+    TypesetPageKind kind;
+    uint32_t page_number;
 };
+struct TypesetPolicyCheckpoint { uint64_t state[4]; }; // policy-owned stable values, never rewound scratch pointers
+struct TypesetPagePlan;
 struct TypesetPagePolicy {
     void* context;
     size_t (*choose)(void* context, const TypesetPageCandidate* candidates, size_t count);
     TypesetAssemblyAction (*assemble)(void* context, const TypesetPageCandidate* candidate);
     TypesetStatus (*committed)(void* context, const TypesetPageCandidate* candidate);
+    // provisional page effects participate in the compositor's nested and edition journals.
+    TypesetStatus (*checkpoint)(void* context, TypesetPolicyCheckpoint* saved);
+    TypesetStatus (*restore)(void* context, const TypesetPolicyCheckpoint* saved);
+    // the held plan remains borrowed and immutable through this journaled policy transition.
+    TypesetStatus (*transition)(void* context, TypesetAssemblyAction action, const TypesetPagePlan* plan);
 };
+TypesetStatus typeset_policy_checkpoint(const TypesetPagePolicy* policy, TypesetPolicyCheckpoint* saved);
+TypesetStatus typeset_policy_restore(const TypesetPagePolicy* policy, const TypesetPolicyCheckpoint* saved);
 TypesetStatus typeset_flow_checkpoint(const TypesetFlowProvider* provider,
                                       const TypesetResume* cursor, TypesetResume* saved);
 TypesetStatus typeset_flow_restore(const TypesetFlowProvider* provider,
@@ -171,7 +200,7 @@ struct TypesetPageProbe {
 };
 struct TypesetPagePlan {
     Pool* scratch; // borrowed; the caller retains scratch, provider and policy until commitment or abandonment
-    const TypesetFlowProvider* provider;
+    const TypesetFlowProvider* provider; // null for an already selected physical-page plan; its host owns replay
     const TypesetPagePolicy* policy;
     TypesetPageCandidate candidate;
     TypesetContribution* contributions;
@@ -186,12 +215,26 @@ TypesetStatus typeset_page_plan(const TypesetFlowProvider* provider, const Types
     const TypesetPagePolicy* policy, Pool* scratch, TypesetPagePlan* result);
 TypesetStatus typeset_page_commit(TypesetPagePlan* plan, TypesetResume* next);
 
+struct TypesetAssemblyCheckpoint {
+    TypesetPolicyCheckpoint policy;
+    TypesetResume end;
+    TypesetAssemblyAction action;
+};
+struct TypesetPageAssembly {
+    Pool* pool;
+    TypesetAssemblyCheckpoint* history;
+    size_t count, capacity, transitions, limit;
+};
+// hold keeps the selected plan; reinsert asks the host to restore its input and replan without shipout.
+TypesetStatus typeset_page_transition(TypesetPagePlan* plan, TypesetPageAssembly* assembly, bool* reinsert);
+
 struct TypesetTarget {
     const char* name;
     TypesetSource source;
     uint32_t page_number;
     lam::Up<const TypesetRecord> value;
     uint32_t last_page_number;
+    lam::Up<const TypesetRecord> binding; // compositor-owned reference metadata; value remains the producer payload
 };
 struct TypesetTargetStore {
     uint64_t provider, generation;
@@ -199,6 +242,7 @@ struct TypesetTargetStore {
     TypesetTarget* entries;
     size_t count, capacity, limit;
     hashmap* index;
+    TypesetSourceScope sources;
 };
 // Binding payloads must outlive the provisional layout that produced them.
 TypesetStatus typeset_target_append(TypesetTargetStore* store, const TypesetTarget* target);

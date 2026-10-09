@@ -586,6 +586,32 @@ static CssProperty property_definitions[] = {
 
 #define PROPERTY_DEFINITION_COUNT (sizeof(property_definitions) / sizeof(property_definitions[0]))
 
+// products retain canonical dimension powers until the final property boundary.
+struct CssMathCalculation {
+    CssMathType type;
+    double value;
+    double percentage;
+    bool resolved;
+    int powers[4] = {};
+};
+static const CssMathType css_math_dimensions[] = {
+    CSS_MATH_LENGTH, CSS_MATH_ANGLE, CSS_MATH_TIME, CSS_MATH_RESOLUTION
+};
+static CssMathCalculation css_math_calculate(const CssValue* value,
+    const CssMathEvaluationContext* context, int depth = 0);
+
+static int css_math_power(const CssMathCalculation& result, int axis) {
+    return result.type == CSS_MATH_COMPOUND ? result.powers[axis]
+        : result.type == css_math_dimensions[axis] ? 1 : 0;
+}
+
+static bool css_math_dimensions_equal(const CssMathCalculation& left,
+    const CssMathCalculation& right) {
+    for (int axis = 0; axis < 4; axis++)
+        if (css_math_power(left, axis) != css_math_power(right, axis)) return false;
+    return true;
+}
+
 static CssMathType css_math_common_type(CssMathType left,
                                          CssMathType right) {
     if (left == CSS_MATH_INVALID || right == CSS_MATH_INVALID)
@@ -601,76 +627,105 @@ static CssMathType css_math_common_type(CssMathType left,
         : CSS_MATH_INVALID;
 }
 
+static CssMathCalculation css_math_common_result(CssMathCalculation left,
+    const CssMathCalculation& right) {
+    if ((left.type == CSS_MATH_COMPOUND || right.type == CSS_MATH_COMPOUND) &&
+        left.type != CSS_MATH_DEFERRED && right.type != CSS_MATH_DEFERRED) {
+        if (left.type != right.type || !css_math_dimensions_equal(left, right)) left.type = CSS_MATH_INVALID;
+    } else left.type = css_math_common_type(left.type, right.type);
+    return left;
+}
+
 // One expression walk validates types and evaluates operands supplied by each consumer.
-static CssMathResult css_math_invalid() {
+static CssMathCalculation css_math_invalid() {
     return {CSS_MATH_INVALID, 0.0, 0.0, false};
 }
 
-static CssMathResult css_math_parse_sum(CssValue* const* items, int count,
+static CssMathCalculation css_math_parse_sum(CssValue* const* items, int count,
     int* pos, const CssMathEvaluationContext* context, int depth);
 
-static CssMathResult css_math_parse_atom(CssValue* const* items, int count,
+static CssMathCalculation css_math_parse_atom(CssValue* const* items, int count,
     int* pos, const CssMathEvaluationContext* context, int depth) {
     if (!items || !pos || *pos >= count || depth > 32) return css_math_invalid();
     const char* token = css_math_token_name(items[*pos]);
     if (token && (strcmp(token, "+") == 0 || strcmp(token, "-") == 0)) {
         (*pos)++;
-        CssMathResult result = css_math_parse_atom(items, count, pos, context, depth + 1);
+        CssMathCalculation result = css_math_parse_atom(items, count, pos, context, depth + 1);
         if (*token == '-') {result.value = -result.value; result.percentage = -result.percentage;}
         return result;
     }
     if (token && strcmp(token, "(") == 0) {
         (*pos)++;
-        CssMathResult inner = css_math_parse_sum(items, count, pos, context, depth + 1);
+        CssMathCalculation inner = css_math_parse_sum(items, count, pos, context, depth + 1);
         const char* closing = *pos < count ? css_math_token_name(items[*pos]) : nullptr;
         if (!closing || strcmp(closing, ")") != 0) return css_math_invalid();
         (*pos)++;
         return inner;
     }
     if (token && strcmp(token, ")") == 0) return css_math_invalid();
-    return css_math_evaluate(items[(*pos)++], context, depth + 1);
+    return css_math_calculate(items[(*pos)++], context, depth + 1);
 }
 
-static CssMathResult css_math_parse_product(CssValue* const* items, int count,
+static CssMathCalculation css_math_parse_product(CssValue* const* items, int count,
     int* pos, const CssMathEvaluationContext* context, int depth) {
-    CssMathResult result = css_math_parse_atom(items, count, pos, context, depth);
+    CssMathCalculation result = css_math_parse_atom(items, count, pos, context, depth);
     while (*pos < count) {
         const char* op = css_math_token_name(items[*pos]);
         if (!op || (strcmp(op, "*") != 0 && strcmp(op, "/") != 0)) break;
         bool divide = *op == '/';
         (*pos)++;
-        CssMathResult right = css_math_parse_atom(items, count, pos, context, depth);
+        CssMathCalculation right = css_math_parse_atom(items, count, pos, context, depth);
         if (result.type == CSS_MATH_INVALID || right.type == CSS_MATH_INVALID) return css_math_invalid();
-        CssMathType type = result.type;
-        if (type == CSS_MATH_DEFERRED || right.type == CSS_MATH_DEFERRED) type = CSS_MATH_DEFERRED;
-        else if (divide) {
-            if (right.type != CSS_MATH_NUMBER) return css_math_invalid();
-        } else if (type == CSS_MATH_NUMBER) type = right.type;
-        else if (right.type != CSS_MATH_NUMBER) return css_math_invalid();
+        CssMathCalculation shape = result;
+        if (result.type == CSS_MATH_DEFERRED || right.type == CSS_MATH_DEFERRED) shape.type = CSS_MATH_DEFERRED;
+        else if (right.type == CSS_MATH_NUMBER || (!divide && result.type == CSS_MATH_NUMBER)) {
+            if (!divide && result.type == CSS_MATH_NUMBER) shape = right;
+        } else {
+            // nonlinear percentage expressions need a contextual representation beyond affine terms.
+            if (result.type == CSS_MATH_PERCENT || result.type == CSS_MATH_LENGTH_PERCENT ||
+                right.type == CSS_MATH_PERCENT || right.type == CSS_MATH_LENGTH_PERCENT) return css_math_invalid();
+            shape.type = CSS_MATH_COMPOUND;
+            bool number = true;
+            for (int axis = 0; axis < 4; axis++) {
+                int64_t power = (int64_t)css_math_power(result, axis) +
+                    (divide ? -(int64_t)css_math_power(right, axis) : css_math_power(right, axis));
+                if (power < INT_MIN || power > INT_MAX) return css_math_invalid();
+                shape.powers[axis] = (int)power;
+                number &= power == 0;
+            }
+            if (number) shape.type = CSS_MATH_NUMBER;
+            else for (int axis = 0; axis < 4; axis++) {
+                bool single = shape.powers[axis] == 1;
+                for (int other = 0; other < 4; other++)
+                    if (other != axis) single &= shape.powers[other] == 0;
+                if (single) {shape.type = css_math_dimensions[axis]; break;}
+            }
+        }
         bool resolved = result.resolved && right.resolved;
         if (resolved) {
             if (divide) {result.value /= right.value; result.percentage /= right.value;}
             else if (result.type == CSS_MATH_NUMBER) {
-                right.value *= result.value;
-                right.percentage *= result.value;
-                result = right;
+                double factor = result.value;
+                result.value = right.value * factor;
+                result.percentage = right.percentage * factor;
             } else {result.value *= right.value; result.percentage *= right.value;}
         }
-        result.type = type;
+        result.type = shape.type;
+        memcpy(result.powers, shape.powers, sizeof(result.powers));
         result.resolved = resolved;
     }
     return result;
 }
 
-static CssMathResult css_math_parse_sum(CssValue* const* items, int count,
+static CssMathCalculation css_math_parse_sum(CssValue* const* items, int count,
     int* pos, const CssMathEvaluationContext* context, int depth) {
-    CssMathResult result = css_math_parse_product(items, count, pos, context, depth);
+    CssMathCalculation result = css_math_parse_product(items, count, pos, context, depth);
     while (*pos < count) {
         const char* op = css_math_token_name(items[*pos]);
         if (!op || (strcmp(op, "+") != 0 && strcmp(op, "-") != 0)) break;
         (*pos)++;
-        CssMathResult right = css_math_parse_product(items, count, pos, context, depth);
-        result.type = css_math_common_type(result.type, right.type);
+        CssMathCalculation right = css_math_parse_product(items, count, pos, context, depth);
+        result = css_math_common_result(result, right);
         result.resolved = result.resolved && right.resolved;
         double sign = *op == '-' ? -1.0 : 1.0;
         result.value += sign * right.value;
@@ -679,16 +734,17 @@ static CssMathResult css_math_parse_sum(CssValue* const* items, int count,
     return result;
 }
 
-static double css_math_scalar(const CssMathResult& result,
+static double css_math_scalar(const CssMathCalculation& result,
     const CssMathEvaluationContext* context) {
     return context && context->preserve_percentages && result.type == CSS_MATH_PERCENT
         ? result.percentage : result.value;
 }
 
-static CssMathResult css_math_scalar_result(CssMathType type, double value,
+static CssMathCalculation css_math_scalar_result(CssMathCalculation shape, double value,
     const CssMathEvaluationContext* context, bool resolved) {
-    bool percent = context && context->preserve_percentages && type == CSS_MATH_PERCENT;
-    return {type, percent ? 0.0 : value, percent ? value : 0.0, resolved};
+    bool percent = context && context->preserve_percentages && shape.type == CSS_MATH_PERCENT;
+    shape.value = percent ? 0.0 : value; shape.percentage = percent ? value : 0.0; shape.resolved = resolved;
+    return shape;
 }
 
 static bool css_math_scalar_type(CssMathType type, const CssMathEvaluationContext* context) {
@@ -700,26 +756,27 @@ static bool css_math_round_strategy(const char* name) {
         strcmp(name, "down") == 0 || strcmp(name, "to-zero") == 0 || strcmp(name, "line-width") == 0);
 }
 
-static CssMathResult css_math_function_result(const CssFunction* function,
+static CssMathCalculation css_math_function_result(const CssFunction* function,
     const CssMathEvaluationContext* context, int depth) {
     if (!function || !function->name || !function->args || function->arg_count < 1 || depth > 32)
         return css_math_invalid();
     const char* name = function->name;
     int count = function->arg_count;
     if (strcmp(name, "calc") == 0)
-        return count == 1 ? css_math_evaluate(function->args[0], context, depth + 1) : css_math_invalid();
+        return count == 1 ? css_math_calculate(function->args[0], context, depth + 1) : css_math_invalid();
     const char* strategy = strcmp(name, "round") == 0 ? css_math_token_name(function->args[0]) : nullptr;
     int offset = css_math_round_strategy(strategy) ? 1 : 0;
     if (count <= offset) return css_math_invalid();
-    CssMathResult first = css_math_evaluate(function->args[offset], context, depth + 1);
-    CssMathResult second = count > offset + 1
-        ? css_math_evaluate(function->args[offset + 1], context, depth + 1)
-        : CssMathResult{CSS_MATH_NUMBER, 1.0, 0.0, context != nullptr};
+    CssMathCalculation first = css_math_calculate(function->args[offset], context, depth + 1);
+    CssMathCalculation second = count > offset + 1
+        ? css_math_calculate(function->args[offset + 1], context, depth + 1)
+        : CssMathCalculation{CSS_MATH_NUMBER, 1.0, 0.0, context != nullptr};
     if (first.type == CSS_MATH_INVALID) return css_math_invalid();
     double a = css_math_scalar(first, context), b = css_math_scalar(second, context);
     bool scalar = css_math_scalar_type(first.type, context);
     bool resolved = first.resolved && scalar;
-    CssMathType type = first.type;
+    CssMathCalculation shape = first;
+    CssMathType& type = shape.type;
     double result = 0.0;
     if (strcmp(name, "abs") == 0 || strcmp(name, "sign") == 0) {
         if (count != 1) return css_math_invalid();
@@ -743,8 +800,8 @@ static CssMathResult css_math_function_result(const CssFunction* function,
             (strcmp(name, "log") == 0 && count > 2) ||
             ((strcmp(name, "sqrt") == 0 || strcmp(name, "exp") == 0) && count != 1)) return css_math_invalid();
         for (int i = 0; i < count; i++) {
-            CssMathResult argument = i == 0 ? first : i == 1 ? second
-                : css_math_evaluate(function->args[i], context, depth + 1);
+            CssMathCalculation argument = i == 0 ? first : i == 1 ? second
+                : css_math_calculate(function->args[i], context, depth + 1);
             if (argument.type != CSS_MATH_NUMBER && argument.type != CSS_MATH_DEFERRED) return css_math_invalid();
             resolved = resolved && argument.resolved;
         }
@@ -752,8 +809,8 @@ static CssMathResult css_math_function_result(const CssFunction* function,
         result = strcmp(name, "pow") == 0 ? pow(a, b) : strcmp(name, "sqrt") == 0 ? sqrt(a)
             : strcmp(name, "exp") == 0 ? exp(a) : log(a) / (count == 2 ? log(b) : 1.0);
     } else if (strcmp(name, "atan2") == 0 || strcmp(name, "mod") == 0 || strcmp(name, "rem") == 0) {
-        if (count != 2 || css_math_common_type(type, second.type) == CSS_MATH_INVALID) return css_math_invalid();
-        type = css_math_common_type(type, second.type);
+        if (count != 2 || css_math_common_result(shape, second).type == CSS_MATH_INVALID) return css_math_invalid();
+        shape = css_math_common_result(shape, second);
         resolved = resolved && second.resolved && css_math_scalar_type(type, context);
         if (strcmp(name, "atan2") == 0) {type = CSS_MATH_ANGLE; result = atan2(a, b) * 180.0 / acos(-1.0);}
         else result = b == 0.0 ? NAN : strcmp(name, "mod") == 0 ? a - floor(a / b) * b : fmod(a, b);
@@ -763,9 +820,9 @@ static CssMathResult css_math_function_result(const CssFunction* function,
         result = strcmp(name, "hypot") == 0 ? 0.0 : a;
         double middle = b;
         for (int i = 0; i < count; i++) {
-            CssMathResult argument = i == 0 ? first : i == 1 ? second
-                : css_math_evaluate(function->args[i], context, depth + 1);
-            type = css_math_common_type(type, argument.type);
+            CssMathCalculation argument = i == 0 ? first : i == 1 ? second
+                : css_math_calculate(function->args[i], context, depth + 1);
+            shape = css_math_common_result(shape, argument);
             if (type == CSS_MATH_INVALID) return css_math_invalid();
             resolved = resolved && argument.resolved && css_math_scalar_type(type, context);
             double part = css_math_scalar(argument, context);
@@ -785,7 +842,7 @@ static CssMathResult css_math_function_result(const CssFunction* function,
             if (type != CSS_MATH_NUMBER && type != CSS_MATH_DEFERRED && !line_width) return css_math_invalid();
             b = line_width && context ? context->line_width_step : 1.0;
         } else {
-            type = css_math_common_type(type, second.type);
+            shape = css_math_common_result(shape, second);
             if (type == CSS_MATH_INVALID) return css_math_invalid();
             resolved = resolved && second.resolved && css_math_scalar_type(type, context);
         }
@@ -806,10 +863,10 @@ static CssMathResult css_math_function_result(const CssFunction* function,
             if (line_width && result == 0.0 && a != 0.0) result = a > 0.0 ? upper : lower;
         }
     } else return css_math_invalid();
-    return css_math_scalar_result(type, result, context, resolved);
+    return css_math_scalar_result(shape, result, context, resolved);
 }
 
-CssMathResult css_math_evaluate(const CssValue* value,
+static CssMathCalculation css_math_calculate(const CssValue* value,
     const CssMathEvaluationContext* context, int depth) {
     if (!value || depth > 32) return css_math_invalid();
     const char* constant = css_math_token_name(value);
@@ -846,13 +903,13 @@ CssMathResult css_math_evaluate(const CssValue* value,
         case CSS_VALUE_TYPE_LIST: {
             int pos = 0;
             if (value->data.list.comma_separated) return css_math_invalid();
-            CssMathResult result = css_math_parse_sum(value->data.list.values,
+            CssMathCalculation result = css_math_parse_sum(value->data.list.values,
                 value->data.list.count, &pos, context, depth + 1);
             return pos == value->data.list.count ? result : css_math_invalid();
         }
         default: return css_math_invalid();
     }
-    CssMathResult result = {type, 0.0, 0.0, false};
+    CssMathCalculation result = {type, 0.0, 0.0, false};
     if (!context || type == CSS_MATH_INVALID) return result;
     if (context->resolve_leaf)
         result.resolved = context->resolve_leaf(context->context, value, &result.value);
@@ -863,6 +920,13 @@ CssMathResult css_math_evaluate(const CssValue* value,
             value->data.length.value, &canonical, &result.value);
     }
     return result;
+}
+
+CssMathResult css_math_evaluate(const CssValue* value,
+    const CssMathEvaluationContext* context, int depth) {
+    CssMathCalculation result = css_math_calculate(value, context, depth);
+    if (result.type == CSS_MATH_COMPOUND) return {CSS_MATH_INVALID, 0.0, 0.0, false};
+    return {result.type, result.value, result.percentage, result.resolved};
 }
 
 CssMathType css_math_value_type(const CssValue* value, int depth) {
@@ -1476,6 +1540,8 @@ static bool css_value_is_border_components(CssPropertyCode property,
     CssBorderPart part = CSS_BORDER_PART_WIDTH;
     size_t max_values = 1;
     switch (property) {
+        // reject invalid width tokens before shorthand projection or FO expression lowering.
+        case CSS_PROPERTY_BORDER_WIDTH: max_values = 4; break;
         case CSS_PROPERTY_BORDER_STYLE: max_values = 4; part = CSS_BORDER_PART_STYLE; break;
         case CSS_PROPERTY_BORDER_TOP_STYLE:
         case CSS_PROPERTY_BORDER_RIGHT_STYLE:
@@ -2548,6 +2614,7 @@ bool css_property_validate_value_mode(CssPropertyCode id,
                 keyword == CSS_VALUE_LOCAL ||
                 (info && info->group == CSS_VALUE_GROUP_GLOBAL);
         }
+        case CSS_PROPERTY_BORDER_WIDTH:
         case CSS_PROPERTY_BORDER_STYLE:
         case CSS_PROPERTY_BORDER_COLOR:
         case CSS_PROPERTY_BORDER_TOP_STYLE:
@@ -2796,17 +2863,6 @@ bool css_property_validate_value_mode(CssPropertyCode id,
             }
             break;
         }
-
-        case CSS_PROPERTY_BORDER_WIDTH:
-            // border-width shorthand accepts 1-4 values (LIST ok), but not percentages
-            if (value->type == CSS_VALUE_TYPE_PERCENTAGE) return false;
-            if (value->type == CSS_VALUE_TYPE_LIST) {
-                for (int i = 0; i < value->data.list.count; i++) {
-                    CssValue* v = value->data.list.values[i];
-                    if (v && v->type == CSS_VALUE_TYPE_PERCENTAGE) return false;
-                }
-            }
-            break;
 
         case CSS_PROPERTY_BORDER_TOP_WIDTH:
         case CSS_PROPERTY_BORDER_RIGHT_WIDTH:

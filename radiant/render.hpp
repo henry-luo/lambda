@@ -374,7 +374,7 @@ float svg_resolve_length_unit(float number, CssUnit unit, const SvgLengthContext
 float svg_resolve_length(const char* value, const SvgLengthContext* context,
     SvgLengthAxis axis, float fallback);
 float svg_resolve_angle(const char* value, float fallback);
-bool svg_append_basic_shape_path(Element* element, RdtPath* path,
+bool svg_append_basic_shape_path(DomElement* element, RdtPath* path,
     const SvgLengthContext* lengths, SvgBasicShapeGeometry* geometry = nullptr);
 int svg_resolve_dash_array(const char* value, const SvgLengthContext* lengths,
     float* dashes, int capacity);
