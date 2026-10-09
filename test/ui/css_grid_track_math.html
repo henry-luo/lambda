@@ -1,0 +1,66 @@
+<!doctype html><meta charset="utf-8">
+<style>html,body{margin:0}#fixtures{position:absolute;top:40px;left:0}#fixtures>div{margin-bottom:2px}</style>
+<button id="check">Check grid track math</button><button id="after">Check changed tracks</button><output id="report"></output><div id="fixtures"></div>
+<script>
+(function(){
+    var fixtures=document.getElementById('fixtures'),report=document.getElementById('report');
+    function grid(columns,extra){
+        var element=document.createElement('div');
+        element.style.cssText='display:grid;width:200px;height:100px;font:10px monospace;grid-template-columns:'+columns+';grid-template-rows:20px;justify-content:start;align-content:start;'+(extra||'');
+        for(var index=0;index<3;index++){var child=document.createElement('div');child.style.minWidth='0';child.style.minHeight='0';element.appendChild(child);}
+        fixtures.appendChild(element);return element;
+    }
+    function width(element,index){return element.children[index||0].getBoundingClientRect().width;}
+    function height(element,index){return element.children[index||0].getBoundingClientRect().height;}
+    function near(actual,expected){return Math.abs(actual-expected)<0.1;}
+    var checks=[];
+    function check(name,element,fn){checks.push(function(){try{report.setAttribute('data-'+name,String(fn(element)));}catch(error){report.setAttribute('data-'+name,error.name);}});}
+    check('mixed-column',grid('calc(10px + 25%) 1fr'),function(element){return near(width(element),60);});
+    check('gap-reference',grid('calc(10px + 25%) 1fr','column-gap:20px'),function(element){return near(width(element),60)&&near(width(element,1),120);});
+    check('plain-percent-gap',grid('25% 1fr','column-gap:20px'),function(element){return near(width(element),50);});
+    check('overflowing-gap-basis',grid('calc(10px + 50%) 1fr','width:20px;column-gap:50px'),function(element){return near(width(element),20);});
+    check('repeat',grid('repeat(2,calc(5px + 25%)) 1fr','column-gap:20px'),function(element){return near(width(element),55)&&near(width(element,1),55)&&near(width(element,2),50);});
+    function wraps(element,index){return element.children[index].getBoundingClientRect().top>element.firstElementChild.getBoundingClientRect().top;}
+    check('auto-repeat-math',grid('repeat(auto-fill,calc(10px + 25%))','column-gap:20px'),function(element){return near(width(element),60)&&wraps(element,2);});
+    check('auto-repeat-maximum',grid('repeat(auto-fill,minmax(10px,80px))','column-gap:20px'),function(element){return near(width(element),80)&&wraps(element,2);});
+    var neighbor=grid('calc(10px + 25%) repeat(auto-fill,40px)','column-gap:10px');neighbor.appendChild(document.createElement('div'));
+    check('auto-repeat-neighbor',neighbor,function(element){return near(width(element),60)&&wraps(element,3);});
+    check('minmax',grid('minmax(calc(10px + 10%),calc(10px + 40%)) 1fr'),function(element){return near(width(element),90);});
+    check('minimum-with-flex',grid('minmax(calc(10px + 25%),1fr) 1fr'),function(element){return near(width(element),100);});
+    var fit=grid('fit-content(calc(10px + 25%)) 1fr');fit.firstElementChild.textContent='xx xx xx xx xx xx xx xx xx xx xx xx';
+    check('fit-content',fit,function(element){return near(width(element),60);});
+    check('minimum-function',grid('min(80px,calc(10px + 50%)) 1fr'),function(element){return near(width(element),80);});
+    check('maximum-function',grid('max(20px,calc(10px + 25%)) 1fr'),function(element){return near(width(element),60);});
+    check('clamp-function',grid('clamp(20px,calc(10px + 10%),40px) 1fr'),function(element){return near(width(element),30);});
+    check('negative-result',grid('calc(5px - 10%) 1fr'),function(element){return near(width(element),0);});
+    check('negative-length-result',grid('calc(-5px) 1fr'),function(element){return near(width(element),0);});
+    var rows=grid('100px','grid-template-rows:calc(10px + 25%) 1fr;row-gap:10px');rows.removeChild(rows.lastElementChild);
+    check('row-reference',rows,function(element){return near(height(element),35)&&near(height(element,1),55);});
+    var zeroHeight=grid('100px','height:0;grid-template-rows:25% 1fr');zeroHeight.firstElementChild.style.height='20px';
+    check('zero-height-percentage',zeroHeight,function(element){return near(element.children[1].getBoundingClientRect().top,element.firstElementChild.getBoundingClientRect().top);});
+    var cyclicRows=grid('100px','height:auto;grid-template-rows:minmax(calc(10px + 25%),40px) calc(10px + 50%);row-gap:10px');cyclicRows.removeChild(cyclicRows.lastElementChild);
+    // used grid tracks round to device pixels; Chromium retains the 22.5px minimum.
+    check('cyclic-row-minmax',cyclicRows,function(element){return near(element.getBoundingClientRect().height,50)&&Math.abs(height(element)-22.5)<=0.51&&near(height(element,1),35);});
+    check('implicit-columns',grid('none','grid-auto-flow:column;grid-auto-columns:calc(5px + 25%)'),function(element){return near(width(element),55)&&near(width(element,1),55);});
+    check('implicit-rows',grid('100px','grid-template-rows:none;grid-auto-rows:calc(5px + 20%);row-gap:10px'),function(element){return near(height(element),25)&&near(height(element,1),25);});
+    var resized=grid('min(80px,calc(10px + 50%)) 1fr'),font=grid('calc(1em + 25%) 1fr'),variable=grid('calc(var(--fixed) + 25%) 1fr','--fixed:10px'),removed=grid('calc(10px + 25%) 1fr');
+    var parent=grid('calc(1em + 25%) 1fr'),child=parent.firstElementChild;
+    child.style.cssText='display:grid;width:100px;font-size:20px;grid-template-columns:inherit';
+    child.appendChild(document.createElement('div'));child.appendChild(document.createElement('div'));
+    check('inherit-computed-length',child,function(element){return near(width(element),35);});
+    document.getElementById('check').addEventListener('click',function(){
+        for(var index=0;index<checks.length;index++)checks[index]();
+        report.setAttribute('data-resize-before',String(near(width(resized),80)));
+        report.setAttribute('data-font-before',String(near(width(font),60)));
+        report.setAttribute('data-variable-before',String(near(width(variable),60)));
+        report.setAttribute('data-removal-before',String(near(width(removed),60)));
+        resized.style.width='80px';font.style.fontSize='20px';variable.style.setProperty('--fixed','30px');removed.style.gridTemplateColumns='40px 1fr';
+    });
+    document.getElementById('after').addEventListener('click',function(){
+        report.setAttribute('data-resize',String(near(width(resized),50)));
+        report.setAttribute('data-font-change',String(near(width(font),70)));
+        report.setAttribute('data-variable-change',String(near(width(variable),80)));
+        report.setAttribute('data-rule-removal',String(near(width(removed),40)));
+    });
+})();
+</script>

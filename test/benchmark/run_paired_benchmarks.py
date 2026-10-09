@@ -68,24 +68,27 @@ def median(values):
 
 
 def run_once(binary, script, timeout_s, language="lambda", tier="jit",
-             expected_stdout_text=None, js_runtime="legacy"):
+             expected_stdout_text=None, js_runtime="legacy", command=None,
+             environment=None, strict_timing=False, exact_stdout=False, capture_output=False):
     """Run one script and return a serializable timing/observable record."""
-    command = [binary, "js" if language == "js" else "run", script]
-    if language == "js" and js_runtime != "legacy":
-        command.insert(2, "--runtime=" + js_runtime)
-    environment = os.environ.copy()
+    if command is None:
+        command = [binary, "js" if language == "js" else "run", script]
+        if language == "js" and js_runtime != "legacy":
+            command.insert(2, "--runtime=" + js_runtime)
+    environment = os.environ.copy() if environment is None else environment.copy()
     if language == "lambda":
         environment["LAMBDA_EXEC_BACKEND"] = tier
         # pre-2026-10-03 name, still read by the archived binaries this compares
         environment["LAMBDA_TIER"] = tier
     started = time.perf_counter_ns()
     process = None
+    timed_out = False
     try:
         process = subprocess.Popen(
             command,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            text=True,
+            text=not exact_stdout,
             start_new_session=(os.name != "nt"),
             env=environment,
         )
@@ -96,16 +99,8 @@ def run_once(binary, script, timeout_s, language="lambda", tier="jit",
                 os.killpg(os.getpgid(process.pid), signal.SIGKILL)
             else:
                 process.kill()
-            process.wait()
-            return {
-                "status": "timeout",
-                "wall_ms": float(timeout_s * 1000),
-                "exec_ms": None,
-                "returncode": process.returncode,
-                "stdout_sha256": None,
-                "stderr_sha256": None,
-                "stdout_contains_expected": None,
-            }
+            stdout, stderr = process.communicate()
+            timed_out = True
     except OSError as error:
         return {
             "status": "launch_error",
@@ -119,18 +114,32 @@ def run_once(binary, script, timeout_s, language="lambda", tier="jit",
         }
 
     wall_ms = (time.perf_counter_ns() - started) / 1_000_000.0
-    stable_stdout = normalized_stdout(stdout)
+    invalid_output = False
+    if exact_stdout:
+        try:
+            stdout = stdout.decode('utf-8')
+        except UnicodeDecodeError:
+            stdout = stdout.decode('utf-8', errors='replace')
+            invalid_output = True
+        stderr = stderr.decode('utf-8', errors='replace')
+    stable_stdout = ''.join(line for line in stdout.splitlines(keepends=True)
+                            if not line.startswith('__TIMING__:')) if exact_stdout else normalized_stdout(stdout)
     stdout_hash = hashlib.sha256(stable_stdout.encode("utf-8")).hexdigest()
     stderr_hash = hashlib.sha256((stderr or "").encode("utf-8")).hexdigest()
-    if process.returncode != 0:
+    if timed_out:
+        status = 'timeout'
+    elif invalid_output:
+        status = 'invalid_output'
+    elif process.returncode != 0:
         status = f"exit_{process.returncode}"
     else:
-        exec_ms = parse_timing(stdout)
-        status = "ok" if exec_ms is not None else "wall_fallback"
-    return {
+        exec_ms = parse_timing(stdout, strict=strict_timing)
+        status = "ok" if exec_ms is not None else "invalid_timing" if strict_timing else "wall_fallback"
+    result = {
         "status": status,
         "wall_ms": wall_ms,
-        "exec_ms": parse_timing(stdout) if process.returncode == 0 else None,
+        "exec_ms": parse_timing(stdout, strict=strict_timing)
+            if process.returncode == 0 and not invalid_output and not timed_out else None,
         "returncode": process.returncode,
         "stdout_sha256": stdout_hash,
         "stderr_sha256": stderr_hash,
@@ -139,6 +148,9 @@ def run_once(binary, script, timeout_s, language="lambda", tier="jit",
             if expected_stdout_text is not None else None
         ),
     }
+    if capture_output:
+        result.update(stdout=stdout, stderr=stderr, stable_stdout=stable_stdout)
+    return result
 
 
 def status_counts(samples):

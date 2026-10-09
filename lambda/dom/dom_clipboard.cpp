@@ -28,6 +28,8 @@
 #include "../js/js_runtime_state.hpp"
 #include "../js/js_typed_array.h"
 #include "../js/js_class.h"
+#include "../js/js_function.hpp"
+#include "../core/name_pool.hpp"
 #include "dom_events.h"
 #include "dom.h"
 #include "../lambda-data.hpp"
@@ -1797,6 +1799,55 @@ static Item js_clipboard_install_interface(Item global, const char* name,
     return ctor_root.get();
 }
 
+static const char* navigator_properties[] = {
+    "clipboard", "permissions", "serviceWorker", "platform", "userAgent",
+    "appName", "appVersion", "vendor", "language", "languages", "maxTouchPoints"
+};
+
+static Item navigator_getter(Item callee, Item receiver, Item*, int, uint64_t*) {
+    JS_ASSIGN_OR_RETURN(state, dom_realm_native_private_array_state(receiver,
+        JS_CLASS_NAVIGATOR, sizeof(navigator_properties) / sizeof(navigator_properties[0]),
+        "Illegal Navigator receiver"));
+    int slot = (int)js_fn_native((JsFunction*)callee.function)->target.bits;
+    return js_elements_get_int(state, slot);
+}
+
+static Item navigator_create(Item global, Item clipboard, Item permissions, Item service_worker) {
+    RootFrame roots(10);
+    Rooted<Item> global_root(roots, global), clipboard_root(roots, clipboard);
+    Rooted<Item> permissions_root(roots, permissions), service_root(roots, service_worker);
+    Rooted<Item> constructor(roots, ItemNull), prototype(roots, ItemNull);
+    Rooted<Item> state(roots, js_array_new(0)), languages(roots, js_array_new(0));
+    Rooted<Item> object(roots, dom_realm_new_object_of_class(JS_CLASS_NAVIGATOR));
+    Rooted<Item> getter(roots, ItemNull);
+    dom_realm_install_interface(global_root.get(), "Navigator");
+    constructor.set(dom_realm_get_cstr(global_root.get(), "Navigator"));
+    prototype.set(dom_realm_get_cstr(constructor.get(), "prototype"));
+    JS_RETURN_IF_ERROR(js_array_push(languages.get(), make_str("en-US")));
+    JS_RETURN_IF_ERROR(js_array_push(languages.get(), make_str("en")));
+    JS_RETURN_IF_ERROR(js_object_freeze(languages.get()));
+    // retain the host's existing preferences privately; captured getters ignore public shadows.
+    JS_RETURN_IF_ERROR(js_array_push(state.get(), clipboard_root.get()));
+    JS_RETURN_IF_ERROR(js_array_push(state.get(), permissions_root.get()));
+    JS_RETURN_IF_ERROR(js_array_push(state.get(), service_root.get()));
+    static const char* identity[] = {"MacIntel", "Lambda/Headless (Macintosh)", "Netscape",
+        "5.0 (Macintosh) Lambda/Headless", "", "en-US"};
+    for (const char* value : identity) JS_RETURN_IF_ERROR(js_array_push(state.get(), make_str(value)));
+    JS_RETURN_IF_ERROR(js_array_push(state.get(), languages.get()));
+    JS_RETURN_IF_ERROR(js_array_push(state.get(), (Item){.item = i2it(1)}));
+    NameRef private_key = name_pool_create_unique_private(context->name_pool, {"Navigator", 9});
+    if (!private_key) return ItemError;
+    JS_RETURN_IF_ERROR(js_private_field_define(object.get(), (Item){.item = s2it(private_key)}, state.get()));
+    dom_realm_set_prototype(object.get(), prototype.get());
+    for (size_t slot = 0; slot < sizeof(navigator_properties) / sizeof(navigator_properties[0]); slot++) {
+        getter.set(js_new_native_payload_function(navigator_getter, slot, 0));
+        js_set_function_name(getter.get(), make_str(navigator_properties[slot]));
+        dom_realm_install_accessor(prototype.get(), make_str(navigator_properties[slot]),
+            getter.get(), ItemNull, 0);
+    }
+    return object.get();
+}
+
 extern "C" void js_register_clipboard_globals(Item global_this) {
     if (!clipboard_ensure_roots()) return;
 #define JS_CLIPBOARD_BLOB_METHODS(M) \
@@ -1938,25 +1989,9 @@ extern "C" void js_register_clipboard_globals(Item global_this) {
         js_clipboard_set_method(service_worker_root.get(), "register",
             js_service_worker_register);
 
-        navigator_root.set(js_new_object());
-        dom_realm_set_cstr(navigator_root.get(), "clipboard", clipboard_root.get());
-        dom_realm_set_cstr(navigator_root.get(), "permissions", permissions_root.get());
-        dom_realm_set_cstr(navigator_root.get(), "serviceWorker", service_worker_root.get());
-        dom_realm_set_cstr(navigator_root.get(), "platform", make_str("MacIntel"));
-        dom_realm_set_cstr(navigator_root.get(), "userAgent", make_str("Lambda/Headless (Macintosh)"));
-        // Browser capability probes call appName before inspecting SVG support;
-        // leaving this legacy Navigator string absent makes ordinary method
-        // access throw before the probe can select its rendering path.
-        dom_realm_set_cstr(navigator_root.get(), "appName", make_str("Netscape"));
-        // Legacy UA-sniffing libraries still call string methods on
-        // Navigator.appVersion; keep it present and consistent with this host.
-        dom_realm_set_cstr(navigator_root.get(), "appVersion", make_str("5.0 (Macintosh) Lambda/Headless"));
-        dom_realm_set_cstr(navigator_root.get(), "vendor", make_str(""));
-        dom_realm_set_cstr(navigator_root.get(), "language", make_str("en-US"));
-        // Radiant exposes PointerEvent input in both interactive and headless
-        // hosts, so feature detection must advertise at least one touch-capable
-        // pointer; otherwise libraries never register their pointer handlers.
-        dom_realm_set_cstr(navigator_root.get(), "maxTouchPoints", (Item){.item = i2it(1)});
+        navigator_root.set(navigator_create(global_root.get(), clipboard_root.get(),
+            permissions_root.get(), service_worker_root.get()));
+        if (item_is_error(navigator_root.get())) return;
         dom_realm_set_cstr(global_root.get(), "navigator", navigator_root.get());
     }
 #undef JS_CLIPBOARD_INSTALL_PROTO_METHOD

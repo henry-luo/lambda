@@ -6064,6 +6064,13 @@ void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block) {
                     if (block_only_flow && lycon->doc && lycon->doc->incremental_layout) {
                         for (DomNode* flow_child = child; flow_child;
                              flow_child = flow_child->next_sibling) {
+                            // only rendered inline content can leave line state;
+                            // use the same whitespace decision as layout_flow_node.
+                            if (flow_child->is_text() &&
+                                should_collapse_inter_element_whitespace(flow_child)) continue;
+                            if (!flow_child->is_element() && !flow_child->is_text()) continue;
+                            if (flow_child->is_element() &&
+                                resolve_display_value(flow_child).outer == CSS_VALUE_NONE) continue;
                             // Any inline-level or text sibling can leave line state
                             // that a retained block's height cannot reconstruct.
                             if (!flow_child->is_element() ||

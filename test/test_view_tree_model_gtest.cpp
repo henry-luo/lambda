@@ -9,6 +9,7 @@
 #include "../radiant/layout_paged.hpp"
 #include "../radiant/page_document.hpp"
 #include "../radiant/page_fo.hpp"
+#include "../radiant/page_fo_expression.hpp"
 #include "../radiant/layout.hpp"
 #include "../radiant/render.hpp"
 #include "../lambda/input/css/css_paged_media.hpp"
@@ -1013,6 +1014,7 @@ static LayoutViewNode* source_glyph_text(ViewTree* tree, DomNode* source, const 
 static uint32_t occurrence_page(LayoutViewNode* occurrence);
 static void append_fragment_text(const LayoutViewNode* node, StrBuf* text);
 static uint32_t snapshot_pixel(const ImageSurface* surface, size_t x, size_t y);
+static void expect_same_page_pixels(ViewTree* left, ViewTree* right, uint32_t number);
 
 static const char* paged_split_png = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABQAAAAKCAYAAAC0VX7mAAAAKUlEQVR4Aa3BMQEAAAiAMKR/Z63gwTYLy8OwfEhMYhKTmMQkJjGJSewAawgDEgrHt2EAAAAASUVORK5CYII=";
 
@@ -1286,8 +1288,8 @@ TEST_F(SecondaryViewTest, FoListsLowerToCommonNativeGridsAndKeepOriginalPartDiag
     DomElement* fo = formatting_root("<f:root xmlns:f='http://www.w3.org/1999/XSL/Format' font-family='Arial' font-size='7.5pt' line-height='9pt'>"
         "<f:layout-master-set><f:simple-page-master master-name='sheet' page-width='150pt' page-height='90pt'><f:region-body/></f:simple-page-master></f:layout-master-set>"
         "<f:page-sequence master-reference='sheet' force-page-count='no-force'><f:flow flow-name='xsl-region-body'>"
-        "<f:list-block provisional-distance-between-starts='30pt' provisional-label-separation='6pt'><f:list-item>"
-        "<f:list-item-label end-indent='label-end()'><f:block>A.</f:block></f:list-item-label>"
+        "<f:list-block provisional-distance-between-starts='30pt' provisional-label-separation='6pt'><f:list-item padding-top='3pt'>"
+        "<f:list-item-label end-indent='label-end()' padding-top='from-parent(padding-top)'><f:block>A.</f:block></f:list-item-label>"
         "<f:list-item-body start-indent='body-start()'><f:block>Body</f:block></f:list-item-body>"
         "</f:list-item></f:list-block></f:flow></f:page-sequence></f:root>"); ASSERT_NE(fo, nullptr);
     DomElement* original_item = fo->last_child_element()->last_child_element()->first_child_element()->first_child_element(); ASSERT_NE(original_item, nullptr);
@@ -1302,6 +1304,10 @@ TEST_F(SecondaryViewTest, FoListsLowerToCommonNativeGridsAndKeepOriginalPartDiag
     ASSERT_NE(label, nullptr); ASSERT_NE(body, nullptr); EXPECT_STREQ(label->tag_name, "td");
     ViewTree* tree = secondary(); PagedLayoutOptions paged = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
     ASSERT_EQ(layout_secondary_view(tree, &paged, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    EXPECT_STREQ(row->get_attribute("r:style-transparent"), "true");
+    const ViewCssStyle* label_style = view_css_resolve(tree, label); ASSERT_NE(label_style, nullptr);
+    EXPECT_EQ(label_style->parent.get(), view_css_resolve(tree, item));
+    ASSERT_NE(label_style->padding[0], nullptr); EXPECT_DOUBLE_EQ(label_style->padding[0]->data.length.value, 4);
     EXPECT_FLOAT_EQ(source_fragment(tree, label, VIEW_FRAGMENT_BODY, true)->rect.width, 32.0f);
     EXPECT_FLOAT_EQ(source_fragment(tree, body, VIEW_FRAGMENT_BODY, true)->rect.x, 40.0f);
     options.max_nodes = translated->node_count - 1; translated = radiant_fo_translate(&doc, fo, &options); ASSERT_NE(translated, nullptr);
@@ -3772,8 +3778,8 @@ TEST_F(SecondaryViewTest, FoProportionalColumnsLowerToCommonWeightedTracksAndRej
     DomElement* fo = formatting_root("<f:root xmlns:f='http://www.w3.org/1999/XSL/Format' font-family='Arial' font-size='7.5pt' line-height='9pt' border-collapse='separate'>"
         "<f:layout-master-set><f:simple-page-master master-name='sheet' page-width='150pt' page-height='120pt'><f:region-body/>"
         "</f:simple-page-master></f:layout-master-set><f:page-sequence master-reference='sheet' force-page-count='no-force'><f:flow flow-name='xsl-region-body'>"
-        "<f:table table-layout='fixed' width='100%'><f:table-column column-width='30pt'/><f:table-column column-width='proportional-column-width(1)'/>"
-        "<f:table-column column-width='proportional-column-width(3)'/><f:table-body><f:table-row>"
+        "<f:table table-layout='fixed' width='100%'><f:table-column column-width='30pt'/><f:table-column column-width='proportional-column-width(4 div 2 - 1)'/>"
+        "<f:table-column column-width='proportional-column-width(max(1, 6 div 2))'/><f:table-body><f:table-row>"
         "<f:table-cell><f:block>F</f:block></f:table-cell><f:table-cell><f:block>A</f:block></f:table-cell>"
         "<f:table-cell><f:block>B</f:block></f:table-cell></f:table-row></f:table-body></f:table></f:flow></f:page-sequence></f:root>"); ASSERT_NE(fo, nullptr);
     RadiantFoOptions fo_options = radiant_fo_options_default(); RadiantFoTranslation* translated = radiant_fo_translate(&doc, fo, &fo_options);
@@ -3957,8 +3963,8 @@ TEST_F(SecondaryViewTest, FoNumberedColumnsAndCellsLowerRoundedPositionsWithoutR
     DomElement* fo = formatting_root("<f:root xmlns:f='http://www.w3.org/1999/XSL/Format' font-family='Arial' font-size='7.5pt' line-height='9pt' border-collapse='separate'>"
         "<f:layout-master-set><f:simple-page-master master-name='sheet' page-width='150pt' page-height='120pt'><f:region-body/>"
         "</f:simple-page-master></f:layout-master-set><f:page-sequence master-reference='sheet' force-page-count='no-force'><f:flow flow-name='xsl-region-body'>"
-        "<f:table table-layout='fixed' width='100%'><f:table-column column-number='2.6' column-width='30pt'/><f:table-column column-number='0' column-width='30pt'/>"
-        "<f:table-column column-width='30pt'/><f:table-body><f:table-row><f:table-cell column-number='3.1'><f:block>Third</f:block></f:table-cell>"
+        "<f:table table-layout='fixed' width='100%'><f:table-column column-number='1.3 * 2' column-width='30pt'/><f:table-column column-number='-7 mod 3' column-width='30pt'/>"
+        "<f:table-column column-width='30pt'/><f:table-body><f:table-row><f:table-cell column-number='floor(6.8 div 2)'><f:block>Third</f:block></f:table-cell>"
         "<f:table-cell column-number='-1'><f:block>First</f:block></f:table-cell><f:table-cell><f:block>Second</f:block></f:table-cell>"
         "</f:table-row></f:table-body></f:table></f:flow></f:page-sequence></f:root>"); ASSERT_NE(fo, nullptr);
     RadiantFoOptions fo_options = radiant_fo_options_default(); RadiantFoTranslation* translated = radiant_fo_translate(&doc, fo, &fo_options);
@@ -6921,6 +6927,63 @@ TEST_F(SecondaryViewTest, VariablesAndLineHeightInheritComputedOwnerValues) {
     EXPECT_FLOAT_EQ(view_css_length(tree, style, style->padding[3], CSS_PROPERTY_PADDING_LEFT, 100.0f, 100.0f), 4.0f);
 }
 
+TEST_F(SecondaryViewTest, ComputedPropertyBindingsUseTheSemanticParentAndRetainTheirOwnerValues) {
+    rdt_engine_init(0); vector_engine = true;
+    stylesheet("@page{size:180px 120px;margin:10px}p,div{margin:0;font:10px/12px Arial}");
+    ASSERT_TRUE(source->set_attribute("xmlns:r", RADIANT_PAGE_NAMESPACE));
+    DomElement* parent = block(nullptr, "padding-top:2em;color:red", "div"); ASSERT_NE(parent, nullptr);
+    ASSERT_TRUE(parent->set_attribute("r:start-indent", "6px"));
+    DomElement* wrapper = block(nullptr, "font-size:80px;padding-top:0;color:blue", "div", parent); ASSERT_NE(wrapper, nullptr);
+    ASSERT_TRUE(wrapper->set_attribute("r:style-transparent", "true"));
+    DomElement* child = block("Child", "--size:99px;font-size:calc(var(--size) + 2px);padding-top:var(--edge);color:var(--ink);background-color:var(--ink)", "div", wrapper);
+    ASSERT_NE(child, nullptr);
+    ASSERT_TRUE(child->set_attribute("r:property-bindings", "--\\73 ize:parent(font-\\73 ize);--edge:parent(padding-top);--ink:parent(color);--indent:parent(start-indent);--initial:ancestor(99,font-size)"));
+    ASSERT_TRUE(child->set_attribute("r:start-indent", "calc(var(--indent) + var(--size))"));
+    DomElement* grandchild = block("Grandchild", "font-size:calc(var(--initial) + 14px);padding-top:var(--size)", "div", child); ASSERT_NE(grandchild, nullptr);
+    ViewTree* tree = secondary(); PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
+    ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    const ViewCssStyle* style = view_css_resolve(tree, child); ASSERT_NE(style, nullptr);
+    EXPECT_EQ(style->parent->source, parent); EXPECT_FLOAT_EQ(style->font.font_size, 12);
+    ASSERT_NE(style->padding[0], nullptr); EXPECT_DOUBLE_EQ(style->padding[0]->data.length.value, 20);
+    EXPECT_EQ(style->color.r, 255); EXPECT_EQ(style->color.b, 0); EXPECT_FLOAT_EQ(style->flow_traits->indents[0], 16);
+    style = view_css_resolve(tree, grandchild); ASSERT_NE(style, nullptr);
+    EXPECT_FLOAT_EQ(style->font.font_size, 30); ASSERT_NE(style->padding[0], nullptr); EXPECT_DOUBLE_EQ(style->padding[0]->data.length.value, 10);
+    ViewPreviewOptions preview_options = view_preview_options_default();
+    ViewTree* retained = view_tree_page_instances_create(tree, nullptr, &preview_options); ASSERT_NE(retained, nullptr);
+    LayoutViewNode* occurrence = source_fragment(tree, child, VIEW_FRAGMENT_BODY, true); ASSERT_NE(occurrence, nullptr);
+    size_t sample_x = static_cast<size_t>(occurrence->rect.x + 80.0f), sample_y = static_cast<size_t>(occurrence->rect.y + 5.0f);
+    ASSERT_TRUE(parent->set_attribute("style", "font:20px Arial;padding-top:1px;color:green"));
+    ASSERT_TRUE(view_tree_model_reset(tree));
+    ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    style = view_css_resolve(tree, child); EXPECT_FLOAT_EQ(style->font.font_size, 22);
+    EXPECT_DOUBLE_EQ(style->padding[0]->data.length.value, 1); EXPECT_EQ(style->color.g, 128);
+    ASSERT_TRUE(view_tree_secondary_release(&doc, tree));
+    ImageSurface* surface = render_secondary_page_snapshot(retained, 1, 1.0f); ASSERT_NE(surface, nullptr);
+    EXPECT_EQ(snapshot_pixel(surface, sample_x, sample_y), 0xff0000ffu); image_surface_destroy(surface);
+}
+
+TEST_F(SecondaryViewTest, InvalidComputedBindingsAndTypedConsumersRejectTheWholeEdition) {
+    stylesheet("@page{size:180px 120px;margin:10px}p,div{margin:0;font:10px/12px Arial}");
+    ASSERT_TRUE(source->set_attribute("xmlns:r", RADIANT_PAGE_NAMESPACE));
+    DomElement* parent = block(nullptr, "color:red;padding-top:10%", "div"); ASSERT_NE(parent, nullptr);
+    DomElement* child = block("Child", nullptr, "div", parent); ASSERT_NE(child, nullptr);
+    const char* invalid[] = {"--n:parent(width)", "--n:parent(font-size);--n:parent(color)", "--n:parent(font-size) garbage",
+        "--n:parent(font-size,color)", "--n:parent(padding-top)", "ordinary:parent(font-size)", "--n:parent(font-size",
+        "--n:ancestor(0,font-size)", "--n:ancestor(1.5,font-size)", "--n:ancestor(-2,font-size)", "--n:ancestor(2 font-size)"};
+    ViewTree* tree = secondary(); PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
+    for (const char* binding : invalid) {
+        SCOPED_TRACE(binding); ASSERT_TRUE(child->set_attribute("r:property-bindings", binding)); ASSERT_TRUE(view_tree_model_reset(tree));
+        EXPECT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_INVALID); EXPECT_EQ(tree->model->page_count, 0u);
+        EXPECT_EQ(diagnostic.source.address, child); EXPECT_NE(diagnostic.reason, nullptr);
+    }
+    ASSERT_TRUE(child->set_attribute("r:property-bindings", "--ink:parent(color);--size:parent(font-size)"));
+    for (const char* css : {"font-size:var(--ink)", "font-size:calc(var(--size) / 0)", "padding-top:var(--missing)"}) {
+        SCOPED_TRACE(css); ASSERT_TRUE(child->set_attribute("style", css)); ASSERT_TRUE(view_tree_model_reset(tree));
+        EXPECT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_INVALID); EXPECT_EQ(tree->model->page_count, 0u);
+        EXPECT_EQ(diagnostic.source.address, child);
+    }
+}
+
 TEST_F(SecondaryViewTest, ElementNavigationSkipsTextNodesInMixedContent) {
     DomText* leading = DomText::create_copy(" leading ", 9, source); ASSERT_NE(leading, nullptr);
     ASSERT_TRUE(source->DomNode::append_child(leading));
@@ -7267,12 +7330,173 @@ TEST_F(SecondaryViewTest, NativeReferenceIndentsInheritComputedLengthsAndRetainN
         float width = tree->model->pages.get()[occurrence_page(part) - 1]->content_rect.width;
         EXPECT_FLOAT_EQ(part->rect.x, 27.0f); EXPECT_FLOAT_EQ(part->rect.width, width - 9.0f);
     }
-    for (const char* invalid : {"10%", "auto", "nan", "calc(3px + 2px)"}) {
+    for (const char* invalid : {"auto", "nan", "calc(3px + 2deg)", "calc(3% / 0)"}) {
         SCOPED_TRACE(invalid); ASSERT_TRUE(child->set_attribute("r:start-indent", invalid)); ASSERT_TRUE(view_tree_model_reset(tree));
         EXPECT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_INVALID);
         EXPECT_EQ(diagnostic.source.address, child); EXPECT_EQ(tree->model->page_count, 0u);
         ASSERT_NE(diagnostic.reason, nullptr); EXPECT_NE(strstr(diagnostic.reason, "indents"), nullptr);
     }
+}
+
+TEST_F(SecondaryViewTest, PercentageIndentsRetainTheirDeclaringFontAndFirstPageAcrossContinuations) {
+    rdt_engine_init(0); vector_engine = true;
+    stylesheet("@page{size:160px 80px;margin:10px}@page :left{size:140px 80px}"
+        "p,div{margin:0;font:10px/12px Arial;white-space:pre;orphans:1;widows:1}");
+    ASSERT_TRUE(source->set_attribute("xmlns:r", RADIANT_PAGE_NAMESPACE));
+    DomElement* parent = block(nullptr, nullptr, "div"); ASSERT_NE(parent, nullptr);
+    ASSERT_TRUE(parent->set_attribute("r:block-inline-geometry", "reference"));
+    ASSERT_TRUE(parent->set_attribute("r:start-indent", "calc(10% + 1em)"));
+    ASSERT_TRUE(parent->set_attribute("r:end-indent", "-5%"));
+    DomElement* child = block("A\nB\nC\nD\nE\nF\nG\nH\nI", "font-size:20px;padding:2px;border:1px solid red;background-color:blue", "div", parent);
+    ASSERT_NE(child, nullptr); ASSERT_TRUE(child->set_attribute("r:block-inline-geometry", "reference"));
+    ASSERT_TRUE(child->set_attribute("r:start-indent", "inherit"));
+    ViewTree* tree = secondary(); PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
+    ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    ASSERT_GE(tree->model->page_count, 2u);
+    const RadiantFlowTraits* traits = view_css_resolve(tree, child)->flow_traits; ASSERT_NE(traits, nullptr);
+    EXPECT_EQ(traits->indent_owners[0], view_css_resolve(tree, parent)); ASSERT_NE(traits->indent_expressions[0], nullptr);
+    ViewNodeState* state = view_tree_node_state(tree, child, false); ASSERT_NE(state, nullptr);
+    for (LayoutViewNode* part = state->first_occurrence; part; part = part->next_occurrence) if (part->paint_box) {
+        float width = tree->model->pages.get()[occurrence_page(part) - 1]->content_rect.width;
+        EXPECT_FLOAT_EQ(part->rect.x, 31.0f); EXPECT_FLOAT_EQ(part->rect.width, width - 11.0f);
+    }
+    ViewPreviewOptions preview = view_preview_options_default();
+    ViewTree* retained = view_tree_page_instances_create(tree, nullptr, &preview); ASSERT_NE(retained, nullptr);
+    ViewTree* control = view_tree_page_instances_create(tree, nullptr, &preview); ASSERT_NE(control, nullptr);
+    ASSERT_TRUE(parent->set_attribute("r:start-indent", "calc(10% / 0)")); ASSERT_TRUE(view_tree_model_reset(tree));
+    EXPECT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_INVALID); EXPECT_EQ(tree->model->page_count, 0u);
+    ASSERT_TRUE(view_tree_secondary_release(&doc, tree));
+    for (uint32_t page = 1; page <= retained->model->page_count; page++) expect_same_page_pixels(retained, control, page);
+}
+
+TEST_F(SecondaryViewTest, DeferredPercentageDeclarationsUseTheirFirstSelectedAreaAndResetWithTheEdition) {
+    stylesheet("@page{size:160px 80px;margin:10px}@page :left{size:140px 80px}"
+        "p,div{margin:0;font:10px/12px Arial;white-space:pre;orphans:1;widows:1}");
+    ASSERT_TRUE(source->set_attribute("xmlns:r", RADIANT_PAGE_NAMESPACE));
+    ASSERT_NE(block("Lead\nTwo\nThree\nFour"), nullptr);
+    DomElement* target = block("A\nB", "break-before:page", "div"); ASSERT_NE(target, nullptr);
+    ASSERT_TRUE(target->set_attribute("r:block-inline-geometry", "reference"));
+    ASSERT_TRUE(target->set_attribute("r:start-indent", "max(10%, 1px)"));
+    ViewTree* tree = secondary(); PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
+    for (const char* mode : {"break-before:page", "break-inside:avoid", "break-before:auto"}) {
+        SCOPED_TRACE(mode); bool deferred = strcmp(mode, "break-before:auto") != 0;
+        ASSERT_TRUE(target->set_attribute("style", mode));
+        ASSERT_TRUE(view_tree_model_reset(tree));
+        ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+        ViewNodeState* state = view_tree_node_state(tree, target, false); ASSERT_NE(state, nullptr);
+        EXPECT_EQ(occurrence_page(state->first_occurrence), deferred ? 2u : 1u);
+        for (LayoutViewNode* part = state->first_occurrence; part; part = part->next_occurrence) if (part->paint_box) {
+            float width = tree->model->pages.get()[occurrence_page(part) - 1]->content_rect.width;
+            float indent = deferred ? 12.0f : 14.0f;
+            EXPECT_FLOAT_EQ(part->rect.x, 10.0f + indent); EXPECT_FLOAT_EQ(part->rect.width, width - indent);
+        }
+    }
+}
+
+TEST_F(SecondaryViewTest, PercentageIndentsRebindWhenAnEmptySheetSelectsItsOnlyMaster) {
+    stylesheet("p,div{margin:0;font:10px/12px Arial;orphans:1;widows:1}");
+    ASSERT_NE(page_master("normal", "size:160px 100px;margin:10px"), nullptr);
+    ASSERT_NE(page_master("only", "size:180px 100px;margin:10px"), nullptr);
+    DomElement* master = page_control("r:sequence-master"); ASSERT_NE(master, nullptr); ASSERT_TRUE(master->set_attribute("name", "chapter"));
+    DomElement* run = page_control("r:master-run", master); ASSERT_NE(run, nullptr);
+    ASSERT_NE(master_choice(run, "only", "only"), nullptr); ASSERT_NE(master_choice(run, "normal"), nullptr);
+    DomElement* sequence = page_sequence("chapter", "1", "no-force"); ASSERT_NE(sequence, nullptr);
+    DomElement* child = block("Only", nullptr, "div", sequence); ASSERT_NE(child, nullptr);
+    ASSERT_TRUE(child->set_attribute("r:block-inline-geometry", "reference")); ASSERT_TRUE(child->set_attribute("r:start-indent", "10%"));
+    ViewTree* tree = secondary(); PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
+    ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason; ASSERT_EQ(tree->model->page_count, 1u);
+    EXPECT_STREQ(tree->model->pages.get()[0]->name, "only");
+    LayoutViewNode* box = source_fragment(tree, child, VIEW_FRAGMENT_BODY, true); ASSERT_NE(box, nullptr);
+    EXPECT_FLOAT_EQ(box->rect.x, 26.0f); EXPECT_FLOAT_EQ(box->rect.width, 144.0f);
+}
+
+TEST_F(SecondaryViewTest, PercentageIndentsComputeAtTheirFirstCellAreaAndCoverEverySourceByte) {
+    stylesheet("@page{size:160px 80px;margin:10px}@page :left{size:140px 80px}"
+        "p,div{margin:0;font:10px/12px Arial;white-space:pre;orphans:1;widows:1}"
+        "table{table-layout:fixed;width:100%;border-spacing:0}td{padding:0;vertical-align:top}");
+    ASSERT_TRUE(source->set_attribute("xmlns:r", RADIANT_PAGE_NAMESPACE));
+    DomElement* table = block(nullptr, nullptr, "table"); ASSERT_NE(table, nullptr);
+    DomElement* row = block(nullptr, nullptr, "tr", table); ASSERT_NE(row, nullptr);
+    DomElement* cell = block(nullptr, nullptr, "td", row); ASSERT_NE(cell, nullptr);
+    DomElement* parent = block(nullptr, nullptr, "div", cell); ASSERT_NE(parent, nullptr);
+    ASSERT_TRUE(parent->set_attribute("r:block-inline-geometry", "reference"));
+    ASSERT_TRUE(parent->set_attribute("r:start-indent", "calc(10% + 1em)"));
+    DomElement* child = block("A\nB\nC\nD\nE\nF\nG\nH\nI\nJ\nK\nL", "font-size:20px", "div", parent);
+    ASSERT_NE(child, nullptr); ASSERT_TRUE(child->set_attribute("r:block-inline-geometry", "reference"));
+    ASSERT_NE(block("X", nullptr, "td", row), nullptr);
+    ViewTree* tree = secondary(); PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
+    ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason; ASSERT_GE(tree->model->page_count, 2u);
+    ViewNodeState* state = view_tree_node_state(tree, child, false); ASSERT_NE(state, nullptr);
+    for (LayoutViewNode* part = state->first_occurrence; part; part = part->next_occurrence) if (part->paint_box) {
+        float width = tree->model->pages.get()[occurrence_page(part) - 1]->content_rect.width * 0.5f;
+        EXPECT_FLOAT_EQ(part->rect.x, 27.0f); EXPECT_FLOAT_EQ(part->rect.width, width - 17.0f);
+    }
+    DomText* text = child->first_child->as_text(); ASSERT_NE(text, nullptr); size_t bytes = 0;
+    state = view_tree_node_state(tree, text, false); ASSERT_NE(state, nullptr);
+    for (LayoutViewNode* part = state->first_occurrence; part; part = part->next_occurrence) {
+        EXPECT_EQ(part->text_start, bytes); bytes += part->text_length;
+    }
+    EXPECT_EQ(bytes, text->length);
+}
+
+TEST_F(SecondaryViewTest, PercentageIndentsUseTheStaticRegionsContentReferenceArea) {
+    stylesheet("p,div{margin:0;font:10px/12px Arial;white-space:pre;orphans:1;widows:1}");
+    DomElement* master = page_master("sheet", "size:160px 100px;margin:10px"); ASSERT_NE(master, nullptr);
+    ASSERT_NE(page_region(master, "body", "main"), nullptr);
+    ASSERT_NE(page_region(master, "before", "head", "20px", "padding:3px;border:1px solid green"), nullptr);
+    DomElement* sequence = page_sequence("sheet"); ASSERT_NE(sequence, nullptr);
+    DomElement* binding = static_content(sequence, "head"); ASSERT_NE(binding, nullptr);
+    DomElement* furniture = block("Head", "padding:2px;border:1px solid red", "div", binding); ASSERT_NE(furniture, nullptr);
+    ASSERT_TRUE(furniture->set_attribute("r:block-inline-geometry", "reference")); ASSERT_TRUE(furniture->set_attribute("r:start-indent", "10%"));
+    ASSERT_NE(block("A\nB\nC\nD\nE\nF\nG\nH\nI\nJ", nullptr, "div", sequence), nullptr);
+    ViewTree* tree = secondary(); PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
+    ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason; ASSERT_GE(tree->model->page_count, 2u);
+    ViewNodeState* state = view_tree_node_state(tree, furniture, false); ASSERT_NE(state, nullptr);
+    for (LayoutViewNode* part = state->first_occurrence; part; part = part->next_occurrence) if (part->paint_box) {
+        EXPECT_NEAR(part->rect.x, 24.2f, 0.0001f); EXPECT_NEAR(part->rect.width, 124.8f, 0.0001f);
+    }
+}
+
+TEST_F(SecondaryViewTest, PercentageIndentBindingsRespectBudgetsAndDiagnoseUnsupportedDeclarationContexts) {
+    stylesheet("@page{size:160px 80px;margin:10px}p,div{margin:0;font:10px/12px Arial}");
+    ASSERT_TRUE(source->set_attribute("xmlns:r", RADIANT_PAGE_NAMESPACE));
+    DomElement* first = block(nullptr, "padding-top:1px", "div"); ASSERT_NE(first, nullptr);
+    DomElement* second = block(nullptr, "padding-top:1px", "div"); ASSERT_NE(second, nullptr);
+    for (DomElement* item : {first, second}) {
+        ASSERT_TRUE(item->set_attribute("r:block-inline-geometry", "reference")); ASSERT_TRUE(item->set_attribute("r:start-indent", "10%"));
+    }
+    ViewTree* tree = secondary(); PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
+    ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    ASSERT_TRUE(view_tree_model_reset(tree)); options.max_items = 1;
+    EXPECT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_BUDGET_EXHAUSTED); EXPECT_EQ(tree->model->page_count, 0u);
+    options = paged_layout_options_default();
+    ASSERT_TRUE(second->set_attribute("style", "display:inline")); ASSERT_TRUE(view_tree_model_reset(tree));
+    EXPECT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_INVALID); EXPECT_EQ(diagnostic.source.address, second);
+    ASSERT_NE(diagnostic.reason, nullptr); EXPECT_NE(strstr(diagnostic.reason, "ordinary block"), nullptr);
+    ASSERT_TRUE(second->set_attribute("style", "display:block"));
+    ASSERT_TRUE(second->set_attribute("r:property-bindings", "--n:parent(start-indent)"));
+    ASSERT_TRUE(source->set_attribute("r:start-indent", "10%")); ASSERT_TRUE(view_tree_model_reset(tree));
+    EXPECT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_INVALID); EXPECT_EQ(diagnostic.source.address, second);
+    ASSERT_NE(diagnostic.reason, nullptr); EXPECT_NE(strstr(diagnostic.reason, "definite"), nullptr);
+}
+
+TEST_F(SecondaryViewTest, PercentageIndentsRetainTheFirstNoteReferenceAreaAcrossAuxiliaryOnlyPages) {
+    stylesheet("@page{size:160px 80px;margin:10px;@footnote{max-height:24px}}@page :left{size:140px 80px}"
+        "p,div,span{margin:0;font:10px/12px Arial;orphans:1;widows:1}span::footnote-marker{content:''}");
+    ASSERT_TRUE(source->set_attribute("xmlns:r", RADIANT_PAGE_NAMESPACE));
+    DomElement* call = block("Body", nullptr, "div"); ASSERT_NE(call, nullptr);
+    DomElement* note = block(nullptr, "float:footnote", "span", call); ASSERT_NE(note, nullptr);
+    DomElement* child = block("A\nB\nC\nD\nE\nF\nG\nH", "white-space:pre", "div", note); ASSERT_NE(child, nullptr);
+    ASSERT_TRUE(child->set_attribute("r:block-inline-geometry", "reference")); ASSERT_TRUE(child->set_attribute("r:start-indent", "10%"));
+    ViewTree* tree = secondary(); PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
+    ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason; ASSERT_GE(tree->model->page_count, 2u);
+    DomText* text = child->first_child->as_text(); ASSERT_NE(text, nullptr); size_t bytes = 0;
+    ViewNodeState* state = view_tree_node_state(tree, text, false); ASSERT_NE(state, nullptr);
+    for (LayoutViewNode* part = state->first_occurrence; part; part = part->next_occurrence) {
+        EXPECT_EQ(part->text_start, bytes); bytes += part->text_length;
+        if (part->glyph_run) EXPECT_FLOAT_EQ(part->rect.x, 24.0f);
+    }
+    EXPECT_EQ(bytes, text->length);
 }
 
 TEST_F(SecondaryViewTest, FoReferenceIndentsRetainTheirAncestryAndDiagnoseUnsupportedGridRefinement) {
@@ -7298,12 +7522,287 @@ TEST_F(SecondaryViewTest, FoReferenceIndentsRetainTheirAncestryAndDiagnoseUnsupp
     translated = radiant_fo_translate(&doc, fo, &fo_options); ASSERT_NE(translated, nullptr); ASSERT_EQ(translated->diagnostic.status, TYPESET_OK);
     generated = build_dom_tree_from_element(translated->root, &doc, nullptr); ASSERT_NE(generated, nullptr); doc.root = lam::up(generated);
     ASSERT_TRUE(radiant_page_set_origins(&doc, translated->origins));
-    tree = secondary(); EXPECT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_INVALID);
-    ASSERT_NE(diagnostic.origin, nullptr); EXPECT_EQ(diagnostic.origin->source.address, original); EXPECT_EQ(tree->model->page_count, 0u);
+    tree = secondary(); ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    child = generated->last_child_element()->last_child_element()->first_child_element()->first_child_element();
+    box = source_fragment(tree, child, VIEW_FRAGMENT_BODY, true); ASSERT_NE(box, nullptr);
+    EXPECT_FLOAT_EQ(box->rect.x, 20.0f); EXPECT_FLOAT_EQ(box->rect.width, 184.0f);
     DomElement* unsupported = block(nullptr, nullptr, "f:table", original); ASSERT_NE(unsupported, nullptr);
     translated = radiant_fo_translate(&doc, fo, &fo_options); ASSERT_NE(translated, nullptr);
     EXPECT_EQ(translated->diagnostic.status, TYPESET_INVALID); EXPECT_EQ(translated->diagnostic.source.address, unsupported);
     EXPECT_STREQ(translated->diagnostic.property, "start-indent");
+}
+
+TEST(FoExpressions, ArithmeticUsesCommonTypedMathWithXslPrecedenceRoundingAndRemainders) {
+    Pool* pool = mem_pool_create(nullptr, MEM_ROLE_RENDER, "test.fo.expressions"); ASSERT_NE(pool, nullptr);
+    struct Case { const char* source; CssMathType type; double value; };
+    const Case cases[] = {
+        {"2 + 3 * 4", CSS_MATH_NUMBER, 14}, {"(2 + 3) * 4", CSS_MATH_NUMBER, 20},
+        {"20 div 2 div 5", CSS_MATH_NUMBER, 2}, {"2+3", CSS_MATH_NUMBER, 5},
+        {"2 -3", CSS_MATH_NUMBER, -1}, {"-(2 + 3)", CSS_MATH_NUMBER, -5},
+        {"-7 mod 3", CSS_MATH_NUMBER, -1}, {"7 mod -3", CSS_MATH_NUMBER, 1},
+        {"floor(-2.1)", CSS_MATH_NUMBER, -3}, {"ceiling(-2.1)", CSS_MATH_NUMBER, -2},
+        {"round(-2.5)", CSS_MATH_NUMBER, -2}, {"round(2.5)", CSS_MATH_NUMBER, 3},
+        {"max(2, min(6, 3))", CSS_MATH_NUMBER, 3}, {"abs(-2pt) * 3", CSS_MATH_LENGTH, 8},
+        {"1in - 6pt * 2", CSS_MATH_LENGTH, 80}, {"20% * 2 + 10%", CSS_MATH_PERCENT, 50},
+        {"7pt mod 2pt", CSS_MATH_LENGTH, 4.0 / 3.0}
+    };
+    CssMathEvaluationContext context = {}; context.preserve_percentages = true;
+    for (const auto& item : cases) {
+        SCOPED_TRACE(item.source);
+        RadiantFoExpression expression = radiant_fo_expression(pool, item.source, 1000, 32);
+        ASSERT_EQ(expression.status, TYPESET_OK) << expression.reason; ASSERT_NE(expression.value, nullptr);
+        CssMathResult value = css_math_evaluate(expression.value, &context);
+        EXPECT_EQ(value.type, item.type); ASSERT_TRUE(value.resolved);
+        EXPECT_NEAR(item.type == CSS_MATH_PERCENT ? value.percentage : value.value, item.value, 1e-9);
+    }
+    const char* invalid[] = {"", "2 3", "1 / 2", "2 +", "2 + pi", "1 div 0", "1 mod 0", "2 + 1pt",
+        "min(1)", "max(1,2,3)", "floor(1pt)", "ceiling(1%)", "round(1,2)", "floor(2", "Floor(2)",
+        "min(1,2) garbage", "sqrt(4)", "1pt * 2pt", "10pt-2pt", "1deg + 2deg", "/*comment*/ 2"};
+    for (const char* text : invalid) {
+        SCOPED_TRACE(text); RadiantFoExpression expression = radiant_fo_expression(pool, text, 1000, 32);
+        EXPECT_EQ(expression.status, TYPESET_INVALID); EXPECT_EQ(expression.value, nullptr); EXPECT_NE(expression.reason, nullptr);
+    }
+    EXPECT_EQ(radiant_fo_expression(pool, "1 + 2 + 3", 3, 32).status, TYPESET_BUDGET_EXHAUSTED);
+    EXPECT_EQ(radiant_fo_expression(pool, "(((1)))", 100, 2).status, TYPESET_BUDGET_EXHAUSTED);
+    StrBuf* long_sum = strbuf_new(); ASSERT_NE(long_sum, nullptr);
+    strbuf_append_str(long_sum, "1");
+    for (size_t i = 1; i < 1024; i++) strbuf_append_str(long_sum, " + 1");
+    RadiantFoExpression expression = radiant_fo_expression(pool, long_sum->str, 4096, 32);
+    ASSERT_EQ(expression.status, TYPESET_OK) << expression.reason;
+    EXPECT_DOUBLE_EQ(css_math_evaluate(expression.value, &context).value, 1024);
+    strbuf_free(long_sum);
+    mem_pool_destroy(pool);
+}
+
+TEST_F(SecondaryViewTest, NativeMathIndentsUseTheirDeclaringFontAndRemainComputedOnInheritance) {
+    stylesheet("@page{size:160px 80px;margin:10px}p,div{margin:0;font:10px/12px Arial;orphans:1;widows:1}");
+    ASSERT_TRUE(source->set_attribute("xmlns:r", RADIANT_PAGE_NAMESPACE));
+    DomElement* parent = block(nullptr, nullptr, "div"); ASSERT_NE(parent, nullptr);
+    ASSERT_TRUE(parent->set_attribute("r:block-inline-geometry", "reference"));
+    ASSERT_TRUE(parent->set_attribute("r:start-indent", "calc(2em + 3px)"));
+    ASSERT_TRUE(parent->set_attribute("r:end-indent", "calc(-3px * 2)"));
+    DomElement* child = block("Child", "font-size:20px", "div", parent); ASSERT_NE(child, nullptr);
+    ASSERT_TRUE(child->set_attribute("r:text-altitude", "calc(50% + 25%)"));
+    ASSERT_TRUE(child->set_attribute("r:text-depth", "calc(10% * 2)"));
+    ViewTree* tree = secondary(); PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
+    ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    const RadiantFlowTraits* traits = view_css_resolve(tree, child)->flow_traits.get(); ASSERT_NE(traits, nullptr);
+    EXPECT_FLOAT_EQ(traits->indents[0], 23); EXPECT_FLOAT_EQ(traits->indents[1], -6);
+    EXPECT_FLOAT_EQ(traits->text_metrics[0], 15); EXPECT_FLOAT_EQ(traits->text_metrics[1], 4);
+    LayoutViewNode* box = source_fragment(tree, child, VIEW_FRAGMENT_BODY, true); ASSERT_NE(box, nullptr);
+    EXPECT_FLOAT_EQ(box->rect.x, 33); EXPECT_FLOAT_EQ(box->rect.width, 123);
+    ASSERT_TRUE(child->set_attribute("r:start-indent", "calc(1em + 3px)"));
+    ASSERT_TRUE(view_tree_model_reset(tree));
+    ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    EXPECT_FLOAT_EQ(view_css_resolve(tree, child)->flow_traits->indents[0], 23);
+    ASSERT_TRUE(child->set_attribute("r:start-indent", "calc(1em / 0)"));
+    ASSERT_TRUE(view_tree_model_reset(tree));
+    EXPECT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_INVALID); EXPECT_EQ(tree->model->page_count, 0u);
+    EXPECT_EQ(diagnostic.source.address, child);
+    ASSERT_TRUE(view_tree_secondary_release(&doc, tree));
+}
+
+TEST_F(SecondaryViewTest, StructuralStyleWrappersPreserveDomSelectorsAndComputedParentInheritance) {
+    stylesheet("@page{size:240px 160px;margin:10px}p,div{margin:0}.wrapper > .nested > p{color:red}");
+    ASSERT_TRUE(source->set_attribute("xmlns:page", RADIANT_PAGE_NAMESPACE));
+    ASSERT_TRUE(source->set_attribute("page:style-transparent", "true"));
+    DomElement* outer = block(nullptr, "font:10px/12px Arial;padding-left:5px", "div"); ASSERT_NE(outer, nullptr);
+    DomElement* wrapper = block(nullptr, "font-size:30px;padding-left:17px", "div", outer); ASSERT_NE(wrapper, nullptr);
+    DomElement* nested = block(nullptr, "font-size:40px;padding-left:23px", "div", wrapper); ASSERT_NE(nested, nullptr);
+    ASSERT_TRUE(wrapper->set_attribute("class", "wrapper")); ASSERT_TRUE(nested->set_attribute("class", "nested"));
+    DomElement* child = block("Child", "font-size:inherit;padding-left:inherit", "p", nested); ASSERT_NE(child, nullptr);
+    ASSERT_TRUE(wrapper->set_attribute("page:style-transparent", "true"));
+    ASSERT_TRUE(nested->set_attribute("page:style-transparent", "true"));
+    ViewTree* tree = secondary(); ViewCssStyle* style = view_css_resolve(tree, child); ASSERT_NE(style, nullptr);
+    EXPECT_EQ(style->parent.get(), view_css_resolve(tree, outer));
+    EXPECT_EQ(view_css_resolve(tree, outer)->parent.get(), view_css_resolve(tree, source));
+    EXPECT_FLOAT_EQ(style->font.font_size, 10); ASSERT_NE(style->padding[3], nullptr);
+    EXPECT_DOUBLE_EQ(style->padding[3]->data.length.value, 5);
+    EXPECT_EQ(style->color.r, 255); EXPECT_EQ(style->color.g, 0); EXPECT_EQ(style->color.b, 0);
+    EXPECT_EQ(child->parent_element(), nested); EXPECT_EQ(nested->parent_element(), wrapper);
+    ASSERT_TRUE(nested->set_attribute("page:style-transparent", "false")); ASSERT_TRUE(view_tree_model_reset(tree));
+    style = view_css_resolve(tree, child); ASSERT_NE(style, nullptr);
+    EXPECT_EQ(style->parent.get(), view_css_resolve(tree, nested)); EXPECT_FLOAT_EQ(style->font.font_size, 40);
+    ASSERT_NE(style->padding[3], nullptr); EXPECT_DOUBLE_EQ(style->padding[3]->data.length.value, 23);
+    ASSERT_TRUE(nested->set_attribute("page:style-transparent", "maybe")); ASSERT_TRUE(view_tree_model_reset(tree));
+    PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
+    EXPECT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_INVALID);
+    EXPECT_EQ(diagnostic.source.address, nested); EXPECT_STREQ(diagnostic.reason, "style transparency requires true or false");
+    EXPECT_EQ(tree->model->page_count, 0u); ASSERT_TRUE(view_tree_secondary_release(&doc, tree));
+}
+
+TEST_F(SecondaryViewTest, FoNumericRefinementReachesNativeTraitsAndKeepsOriginalPropertyDiagnostics) {
+    DomElement* fo = formatting_root("<f:root xmlns:f='http://www.w3.org/1999/XSL/Format' font-family='Arial' font-size='7.5pt' line-height='9pt'>"
+        "<f:layout-master-set><f:simple-page-master master-name='sheet' page-width='75pt * 2' page-height='30pt + 60pt'><f:region-body/>"
+        "</f:simple-page-master></f:layout-master-set><f:page-sequence master-reference='sheet' force-page-count='no-force'>"
+        "<f:flow flow-name='xsl-region-body'><f:block start-indent='2em + 3pt' end-indent='-3pt * 2' padding-start='1pt + 2pt' space-before='3pt * 2'>"
+        "<f:block font-size='7.5pt * 2' start-indent='inherit' background-color='red'>Child</f:block>"
+        "</f:block></f:flow></f:page-sequence></f:root>"); ASSERT_NE(fo, nullptr);
+    RadiantFoOptions fo_options = radiant_fo_options_default();
+    RadiantFoTranslation* translated = radiant_fo_translate(&doc, fo, &fo_options); ASSERT_NE(translated, nullptr);
+    ASSERT_EQ(translated->diagnostic.status, TYPESET_OK) << translated->diagnostic.reason;
+    DomElement* generated = build_dom_tree_from_element(translated->root, &doc, nullptr); ASSERT_NE(generated, nullptr); doc.root = lam::up(generated);
+    DomElement* child = generated->last_child_element()->last_child_element()->first_child_element()->first_child_element(); ASSERT_NE(child, nullptr);
+    ViewTree* tree = secondary(); PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
+    ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    const RadiantFlowTraits* traits = view_css_resolve(tree, child)->flow_traits.get(); ASSERT_NE(traits, nullptr);
+    EXPECT_FLOAT_EQ(traits->indents[0], 24); EXPECT_FLOAT_EQ(traits->indents[1], -8);
+    EXPECT_FLOAT_EQ(view_css_resolve(tree, child)->font.font_size, 20);
+    EXPECT_FLOAT_EQ(tree->model->pages.get()[0]->node.rect.width, 200);
+    DomElement* original = fo->last_child_element()->last_child_element()->first_child_element(); ASSERT_NE(original, nullptr);
+    for (const char* invalid : {"floor(1pt)", "1pt + 2", "max(1pt)", "1pt div 0"}) {
+        SCOPED_TRACE(invalid); ASSERT_TRUE(original->set_attribute("padding-start", invalid));
+        translated = radiant_fo_translate(&doc, fo, &fo_options); ASSERT_NE(translated, nullptr);
+        EXPECT_EQ(translated->diagnostic.status, TYPESET_INVALID); EXPECT_EQ(translated->root, nullptr);
+        EXPECT_EQ(translated->diagnostic.source.address, original); EXPECT_STREQ(translated->diagnostic.property, "padding-start");
+    }
+    ASSERT_TRUE(original->set_attribute("padding-start", "1pt + 2pt"));
+    fo_options.max_nodes = 16;
+    translated = radiant_fo_translate(&doc, fo, &fo_options); ASSERT_NE(translated, nullptr);
+    EXPECT_EQ(translated->diagnostic.status, TYPESET_BUDGET_EXHAUSTED); EXPECT_EQ(translated->root, nullptr);
+}
+
+TEST_F(SecondaryViewTest, FoWholeParentReferencesReuseComputedInheritanceAndCompoundComponents) {
+    DomElement* fo = formatting_root("<f:root xmlns:f='http://www.w3.org/1999/XSL/Format' font-family='Arial' font-size='7.5pt' line-height='9pt' "
+        "line-stacking-strategy='from-parent()' text-altitude='from-parent(text-altitude)' white-space-collapse='inherited-property-value()'>"
+        "<f:layout-master-set><f:simple-page-master master-name='sheet' page-width='150pt' page-height='120pt'><f:region-body/>"
+        "</f:simple-page-master></f:layout-master-set><f:page-sequence master-reference='sheet' force-page-count='no-force'><f:flow flow-name='xsl-region-body'>"
+        "<f:block font-size='10pt' color='red' padding-top='3pt' start-indent='6pt' space-before='3pt' space-before.conditionality='retain' "
+        "border-before-width='2pt' border-before-style='solid' border-before-width.conditionality='retain'>"
+        "<f:block font-size='from-parent(font-size)' color='inherited-property-value(color)' padding-top='from-parent()' "
+        "start-indent='from-parent(start-indent)' space-before='from-parent(space-before)' "
+        "border-before-width='from-parent(border-before-width)' border-before-style='from-parent()'>Child</f:block>"
+        "</f:block></f:flow></f:page-sequence></f:root>"); ASSERT_NE(fo, nullptr);
+    RadiantFoOptions fo_options = radiant_fo_options_default();
+    RadiantFoTranslation* translated = radiant_fo_translate(&doc, fo, &fo_options); ASSERT_NE(translated, nullptr);
+    ASSERT_EQ(translated->diagnostic.status, TYPESET_OK) << translated->diagnostic.reason;
+    DomElement* generated = build_dom_tree_from_element(translated->root, &doc, nullptr); ASSERT_NE(generated, nullptr); doc.root = lam::up(generated);
+    DomElement* child = generated->last_child_element()->last_child_element()->first_child_element()->first_child_element(); ASSERT_NE(child, nullptr);
+    ViewTree* tree = secondary(); PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
+    ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    const ViewCssStyle* style = view_css_resolve(tree, child); ASSERT_NE(style, nullptr); ASSERT_NE(style->flow_traits, nullptr);
+    EXPECT_NEAR(style->font.font_size, 40.0f / 3.0f, 0.0001f);
+    EXPECT_EQ(style->color.r, 255); EXPECT_EQ(style->color.g, 0);
+    ASSERT_NE(style->padding[0], nullptr); EXPECT_DOUBLE_EQ(style->padding[0]->data.length.value, 4);
+    EXPECT_FLOAT_EQ(style->flow_traits->indents[0], 8); EXPECT_FLOAT_EQ(style->flow_traits->before.optimum, 4);
+    EXPECT_TRUE(style->flow_traits->before.retain);
+    EXPECT_EQ(style->flow_traits->decoration[0][0], RADIANT_DECORATION_RETAIN);
+    EXPECT_EQ(view_css_resolve(tree, generated)->flow_traits->line_stacking, RADIANT_LINE_STACK_MAX);
+    DomElement* original = fo->last_child_element()->last_child_element()->first_child_element()->first_child_element(); ASSERT_NE(original, nullptr);
+    for (const char* invalid : {"from-parent(width)", "from-parent(font-size,font-size)", "from-parent(",
+        "from-table-column(font-size) + 1pt", "inherited-property-value(width)"}) {
+        SCOPED_TRACE(invalid); ASSERT_TRUE(original->set_attribute("font-size", invalid));
+        translated = radiant_fo_translate(&doc, fo, &fo_options); ASSERT_NE(translated, nullptr);
+        EXPECT_EQ(translated->diagnostic.status, TYPESET_INVALID); EXPECT_EQ(translated->root, nullptr);
+        EXPECT_EQ(translated->diagnostic.source.address, original); EXPECT_STREQ(translated->diagnostic.property, "font-size");
+    }
+    ASSERT_TRUE(original->set_attribute("font-size", " inherited-property-value( font-size ) "));
+    ASSERT_TRUE(original->set_attribute("padding-top", "inherited-property-value()"));
+    translated = radiant_fo_translate(&doc, fo, &fo_options); ASSERT_NE(translated, nullptr);
+    EXPECT_EQ(translated->diagnostic.status, TYPESET_INVALID); EXPECT_STREQ(translated->diagnostic.property, "padding-top");
+    ASSERT_TRUE(original->set_attribute("padding-top", "from-parent(padding-top)"));
+    translated = radiant_fo_translate(&doc, fo, &fo_options); ASSERT_NE(translated, nullptr);
+    EXPECT_EQ(translated->diagnostic.status, TYPESET_OK) << translated->diagnostic.reason;
+    ASSERT_TRUE(fo->set_attribute("font-size", "from-parent(font-size)"));
+    translated = radiant_fo_translate(&doc, fo, &fo_options); ASSERT_NE(translated, nullptr);
+    ASSERT_EQ(translated->diagnostic.status, TYPESET_OK) << translated->diagnostic.reason;
+    generated = build_dom_tree_from_element(translated->root, &doc, nullptr); ASSERT_NE(generated, nullptr); doc.root = lam::up(generated);
+    tree = secondary(); ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    EXPECT_FLOAT_EQ(view_css_resolve(tree, generated)->font.font_size, 16.0f);
+}
+
+TEST_F(SecondaryViewTest, FoNumericAndCrossPropertyReferencesLowerToCommonComputedBindings) {
+    DomElement* fo = formatting_root("<f:root xmlns:f='http://www.w3.org/1999/XSL/Format' font-family='Arial' font-size='7.5pt' line-height='9pt'>"
+        "<f:layout-master-set><f:simple-page-master master-name='sheet' page-width='150pt' page-height='120pt'><f:region-body/>"
+        "</f:simple-page-master></f:layout-master-set><f:page-sequence master-reference='sheet' force-page-count='no-force'><f:flow flow-name='xsl-region-body'>"
+        "<f:block font-size='10pt' color='red' start-indent='6pt'><f:block font-size='from-parent(font-size) + 2pt' "
+        "font-weight='round(from-parent(font-weight) div 100) * 100' "
+        "padding-before='inherited-property-value(font-size) div 4' background-color='from-parent(color)' "
+        "start-indent='from-parent(start-indent) + from-parent(font-size) div 2' "
+        "space-before='from-parent(font-size) div 2'>Child</f:block></f:block></f:flow></f:page-sequence></f:root>"); ASSERT_NE(fo, nullptr);
+    RadiantFoOptions fo_options = radiant_fo_options_default();
+    RadiantFoTranslation* translated = radiant_fo_translate(&doc, fo, &fo_options); ASSERT_NE(translated, nullptr);
+    ASSERT_EQ(translated->diagnostic.status, TYPESET_OK) << translated->diagnostic.reason;
+    DomElement* generated = build_dom_tree_from_element(translated->root, &doc, nullptr); ASSERT_NE(generated, nullptr); doc.root = lam::up(generated);
+    ASSERT_TRUE(radiant_page_set_origins(&doc, translated->origins));
+    DomElement* child = generated->last_child_element()->last_child_element()->first_child_element()->first_child_element(); ASSERT_NE(child, nullptr);
+    ViewTree* tree = secondary(); PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
+    ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    const ViewCssStyle* style = view_css_resolve(tree, child); ASSERT_NE(style, nullptr);
+    EXPECT_FLOAT_EQ(style->font.font_size, 16); EXPECT_EQ(style->background.r, 255); EXPECT_EQ(style->background.b, 0);
+    EXPECT_EQ(style->font.font_weight_numeric, 400);
+    ASSERT_NE(style->padding[0], nullptr); EXPECT_NEAR(style->padding[0]->data.length.value, 10.0 / 3.0, 0.0001);
+    ASSERT_NE(style->flow_traits, nullptr); EXPECT_NEAR(style->flow_traits->indents[0], 44.0f / 3.0f, 0.0001f);
+    EXPECT_NEAR(style->flow_traits->before.optimum, 20.0f / 3.0f, 0.0001f);
+    DomElement* original = fo->last_child_element()->last_child_element()->first_child_element()->first_child_element(); ASSERT_NE(original, nullptr);
+    for (const char* invalid : {"from-parent(color)", "floor(from-parent(font-size))"}) {
+        SCOPED_TRACE(invalid); ASSERT_TRUE(original->set_attribute("font-size", invalid));
+        translated = radiant_fo_translate(&doc, fo, &fo_options); ASSERT_NE(translated, nullptr);
+        ASSERT_EQ(translated->diagnostic.status, TYPESET_OK) << translated->diagnostic.reason;
+        generated = build_dom_tree_from_element(translated->root, &doc, nullptr); ASSERT_NE(generated, nullptr); doc.root = lam::up(generated);
+        ASSERT_TRUE(radiant_page_set_origins(&doc, translated->origins)); tree = secondary();
+        EXPECT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_INVALID); EXPECT_EQ(tree->model->page_count, 0u);
+        ASSERT_NE(diagnostic.origin, nullptr); EXPECT_EQ(diagnostic.origin->source.address, original);
+    }
+}
+
+TEST_F(SecondaryViewTest, NearestSpecifiedFoReferencesSelectComputedAncestorValuesAndInitials) {
+    DomElement* fo = formatting_root("<f:root xmlns:f='http://www.w3.org/1999/XSL/Format' font-family='Arial' font-size='7.5pt' line-height='9pt'>"
+        "<f:layout-master-set><f:simple-page-master master-name='sheet' page-width='150pt' page-height='120pt'><f:region-body/>"
+        "</f:simple-page-master></f:layout-master-set><f:page-sequence master-reference='sheet' force-page-count='no-force'><f:flow flow-name='xsl-region-body'>"
+        "<f:block padding='3pt' font-size='10pt' color='red'><f:block font-size='20pt' color='blue'>"
+        "<f:block font-size='from-nearest-specified-value() div 2' padding-top='from-nearest-specified-value()' "
+        "start-indent='from-nearest-specified-value(padding-top) + from-parent(font-size)' "
+        "end-indent='from-nearest-specified-value(end-indent)' background-color='from-nearest-specified-value(color)'>Child"
+        "</f:block></f:block></f:block></f:flow></f:page-sequence></f:root>"); ASSERT_NE(fo, nullptr);
+    RadiantFoOptions fo_options = radiant_fo_options_default();
+    RadiantFoTranslation* translated = radiant_fo_translate(&doc, fo, &fo_options); ASSERT_NE(translated, nullptr);
+    ASSERT_EQ(translated->diagnostic.status, TYPESET_OK) << translated->diagnostic.reason;
+    DomElement* generated = build_dom_tree_from_element(translated->root, &doc, nullptr); ASSERT_NE(generated, nullptr); doc.root = lam::up(generated);
+    DomElement* child = generated->last_child_element()->last_child_element()->first_child_element()->first_child_element()->first_child_element(); ASSERT_NE(child, nullptr);
+    ViewTree* tree = secondary(); PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
+    ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    const ViewCssStyle* style = view_css_resolve(tree, child); ASSERT_NE(style, nullptr);
+    EXPECT_NEAR(style->font.font_size, 40.0f / 3.0f, 0.0001f); ASSERT_NE(style->padding[0], nullptr);
+    EXPECT_DOUBLE_EQ(style->padding[0]->data.length.value, 4); EXPECT_EQ(style->background.b, 255); EXPECT_EQ(style->background.r, 0);
+    ASSERT_NE(style->flow_traits, nullptr); EXPECT_NEAR(style->flow_traits->indents[0], 92.0f / 3.0f, 0.0001f);
+    EXPECT_FLOAT_EQ(style->flow_traits->indents[1], 0);
+    const CssValue* ancestor = view_css_computed_property(tree, style->parent->parent, "padding-top"); ASSERT_NE(ancestor, nullptr);
+    EXPECT_DOUBLE_EQ(ancestor->data.length.value, 4);
+    DomElement* owner = fo->last_child_element()->last_child_element()->first_child_element(); ASSERT_NE(owner, nullptr);
+    ASSERT_TRUE(owner->remove_attribute("padding")); ASSERT_TRUE(owner->set_attribute("padding-before.length", "3pt"));
+    translated = radiant_fo_translate(&doc, fo, &fo_options); ASSERT_NE(translated, nullptr); ASSERT_EQ(translated->diagnostic.status, TYPESET_OK);
+    generated = build_dom_tree_from_element(translated->root, &doc, nullptr); ASSERT_NE(generated, nullptr); doc.root = lam::up(generated);
+    child = generated->last_child_element()->last_child_element()->first_child_element()->first_child_element()->first_child_element();
+    tree = secondary(); ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    EXPECT_DOUBLE_EQ(view_css_resolve(tree, child)->padding[0]->data.length.value, 4);
+}
+
+TEST_F(SecondaryViewTest, FoInheritedNominalMetricKeywordsUseTheSelectedChildFont) {
+    DomElement* fo = formatting_root("<f:root xmlns:f='http://www.w3.org/1999/XSL/Format' font-family='Arial' font-size='7.5pt'>"
+        "<f:layout-master-set><f:simple-page-master master-name='sheet' page-width='150pt' page-height='120pt'><f:region-body/>"
+        "</f:simple-page-master></f:layout-master-set><f:page-sequence master-reference='sheet' force-page-count='no-force'><f:flow flow-name='xsl-region-body'>"
+        "<f:block font-size='10pt' text-altitude='use-font-metrics'><f:block font-size='20pt' text-altitude='from-parent()' "
+        "text-depth='inherit'>Keyword</f:block></f:block>"
+        "<f:block font-size='10pt' text-altitude='50%' text-depth='0.2em'><f:block text-altitude='inherit' text-depth='from-parent()'>"
+        "<f:block font-size='20pt' text-altitude='from-parent(text-altitude)' text-depth='inherit'>Length</f:block>"
+        "</f:block></f:block></f:flow></f:page-sequence></f:root>"); ASSERT_NE(fo, nullptr);
+    RadiantFoOptions fo_options = radiant_fo_options_default();
+    RadiantFoTranslation* translated = radiant_fo_translate(&doc, fo, &fo_options); ASSERT_NE(translated, nullptr);
+    ASSERT_EQ(translated->diagnostic.status, TYPESET_OK) << translated->diagnostic.reason;
+    DomElement* generated = build_dom_tree_from_element(translated->root, &doc, nullptr); ASSERT_NE(generated, nullptr); doc.root = lam::up(generated);
+    DomElement* flow = generated->last_child_element()->last_child_element(); ASSERT_NE(flow, nullptr);
+    DomElement* keyword = flow->first_child_element()->first_child_element(); ASSERT_NE(keyword, nullptr);
+    DomElement* length = flow->last_child_element()->first_child_element()->first_child_element(); ASSERT_NE(length, nullptr);
+    ViewTree* tree = secondary(); PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
+    ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    const ViewCssStyle* style = view_css_resolve(tree, keyword); ASSERT_NE(style, nullptr); ASSERT_NE(style->flow_traits, nullptr);
+    const FontMetrics* metrics = font_get_metrics(style->font.font_handle); ASSERT_NE(metrics, nullptr);
+    EXPECT_FLOAT_EQ(style->flow_traits->text_metrics[0], metrics->typo_ascender);
+    EXPECT_FLOAT_EQ(style->flow_traits->text_metrics[1], metrics->typo_descender);
+    style = view_css_resolve(tree, length); ASSERT_NE(style, nullptr); ASSERT_NE(style->flow_traits, nullptr);
+    EXPECT_NEAR(style->flow_traits->text_metrics[0], 20.0f / 3.0f, 0.0001f);
+    EXPECT_NEAR(style->flow_traits->text_metrics[1], 8.0f / 3.0f, 0.0001f);
 }
 
 TEST_F(SecondaryViewTest, FoCorrespondingDecorationRefinesExplicitPropertiesBeforeCommonLayout) {

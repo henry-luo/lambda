@@ -1,0 +1,23 @@
+<!doctype html><html><head><title>captured</title></head><body><div id="result">pending</div><script id="active-script">
+const result = document.getElementById('result');
+const expected = {implementation: document.implementation, defaultView: window,
+  currentScript: document.getElementById('active-script'), documentElement: document.documentElement,
+  doctype: document.doctype, body: document.body, head: document.head, title: 'captured',
+  URL: document.URL, readyState: document.readyState};
+let valid = true;
+for (const key of Object.keys(expected)) {
+  const descriptor = Object.getOwnPropertyDescriptor(Document.prototype, key);
+  valid = valid && typeof descriptor.get === 'function' && descriptor.get.call(document) === expected[key];
+}
+result.setAttribute('data-captured', String(valid));
+const getHead = Object.getOwnPropertyDescriptor(Document.prototype, 'head').get;
+const other = document.implementation.createHTMLDocument('foreign');
+result.setAttribute('data-foreign', String(getHead.call(other) === other.head && other.head !== document.head));
+const head = document.head;
+Object.setPrototypeOf(document, null);
+result.setAttribute('data-native', String(getHead.call(document) === head));
+let rejected = false;
+try { getHead.call({}); } catch (error) { rejected = error instanceof TypeError; }
+result.setAttribute('data-receiver', String(rejected));
+result.textContent = 'complete';
+</script></body></html>

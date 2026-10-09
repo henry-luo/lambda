@@ -11,6 +11,7 @@ Basic classes and single inheritance are implemented in source (§21);
 class-phase validation and performance evidence are tracked separately there.
 Closures, callbacks and array growth are implemented and validated in §22.
 Class property access and constructor allocation are tuned in §23.
+The next benchmark coverage phase is planned in §29.
 
 **Performance history:** [MVP_Result3–8](../../test/benchmark/js_mvp_lmd/README.md)
 retains one representative comparison per major tuning phase.
@@ -1260,3 +1261,52 @@ full rerun after a LaTeX corpus timeout, and **40,261/40,261** Test262 cases
 with zero retries. The restored release matches the measured binary.
 The 60-workload snapshot and separate confirmations are published as
 [MVP_Result8](../../test/benchmark/js_mvp_lmd/MVP_Result8.md).
+
+## 29. Benchmark expansion and script self-timing
+
+**Implemented:** add **16 standard benchmarks**: the original eight proposed
+targets plus eight more. Release validation executes **76 workloads**, covering
+**59 of 71 standard benchmarks**, plus the existing 17 microbenchmarks. The
+aggregate-gate limitation below still prevents full phase acceptance.
+
+| Group | Targets | Main additions |
+|---|---|---|
+| AWFY | `deltablue`, `json`, `havlak` | Public static fields, UTF-16 substring; Havlak admission/runtime audit |
+| Text | `text_search`, `three_way_merge`, `log_pipeline` | Array callbacks, literal splitting, string search/slicing, primitive conversions |
+| Julia | `parse_integers`, `iteration_pi_sum`, `matrix_statistics`, `formatted_output` | Correct warmup/timing boundaries; actual synchronous formatted writes |
+| BENG | `fasta`, `revcomp`, `knucleotide` | Arguments, UTF-8 file reads/output, reverse, Map-entry spread, comparator sort and formatting |
+| JetStream | `cube3d`, `navier_stokes`, `splay` | Ordinary constructors/receivers, prototype data properties, named array properties, numeric builtins |
+
+Expose script `performance.now()` through Lambda's existing clock, with a
+per-execution origin and fractional milliseconds. Preserve each benchmark's
+setup, warmup, timed work and oracle; accept exactly one workload timing record.
+Keep CLI whole-entry and process times separate. Host I/O uses an explicitly
+supplied benchmark environment within the module boundary (**D7.3.1–D7.3.4**).
+
+Reuse Lambda functions first, adding a semantic option only where needed.
+Keep objects on nominal Lambda Maps and shared shapes (**D2.6.9v3**,
+**D3.4.3v5**, **D3.4.5**), and calls/closures on the existing precisely traced
+Function machinery (**D5.3**, **D6.2.2v2–D6.2.4**). Ordinary prototype data
+writes must remain visible to existing instances. Use compile-predicted guards
+and shared fallback dispatch (**D8.4.1v2**). No VMap, `__proto__`, prototype-link
+reassignment, accessors, proxies or general Node compatibility is added.
+
+Acceptance requires all 16 correctness/timing contracts and paired release,
+pinned-MIR checks of the prior 60 workloads, with no confirmed regression.
+Dependencies, proposed helpers, open design checks and validation commands:
+[implementation plan](../impl/JS_MVP_Lmd_Benchmark_Expansion.md).
+
+
+**Latest validation (2026-10-10):** all **76/76** workload oracles pass, including
+exact output and script timing for the new 16. Normal and forced-GC focused
+checks pass **77/77** each; the shared LambdaJS Test262 baseline passes
+**40,261/40,261** with zero retries. The prior-60 release, pinned-MIR comparison
+has no statistically confirmed slowdown against Result8; its descriptive
+execution-time geometric mean is **1.3% lower**. Small differences remain
+possible within the intervals. See the [final evidence](../../temp/mvp_expansion/final-stage25.md).
+
+The Lambda baseline remains **6,534/6,535**: `edit_view_only` also fails on the
+unmodified committed build. Windows clock validation remains open. The
+implementation plan records these limits and the pre-existing class-cache
+discrepancy under **D8.4.1v2**. Results3–8 are preserved; the published population
+remains Result8's 60 until aggregate acceptance is resolved.

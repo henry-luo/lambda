@@ -2166,7 +2166,7 @@ extern "C" void* dom_get_or_create_doc_node(void* doc_v) {
     // documents have <!DOCTYPE> + html as their two top-level children.
     DomComment* dt = nullptr;
     if (doc->js.implicit_doctype) {
-        Item dt_item = builder.element("!DOCTYPE").final();
+        Item dt_item = builder.element("!DOCTYPE").text("html").final();
         dt = dom_comment_create_detached(dt_item.element, doc);
     }
     DomNode* head_node = nullptr;
@@ -2243,19 +2243,27 @@ struct JsDomHtmlInterfaceEntry {
 
 static const JsDomHtmlInterfaceEntry s_dom_html_interfaces[] = {
     {"a", "HTMLAnchorElement"},
+    {"area", "HTMLAreaElement"},
     {"audio", "HTMLAudioElement"},
+    {"base", "HTMLBaseElement"},
     {"button", "HTMLButtonElement"},
     {"canvas", "HTMLCanvasElement"},
+    {"embed", "HTMLEmbedElement"},
     {"form", "HTMLFormElement"},
+    {"frame", "HTMLFrameElement"},
     {"iframe", "HTMLIFrameElement"},
     {"img", "HTMLImageElement"},
     {"input", "HTMLInputElement"},
     {"link", "HTMLLinkElement"},
+    {"object", "HTMLObjectElement"},
     {"option", "HTMLOptionElement"},
+    {"picture", "HTMLPictureElement"},
     {"select", "HTMLSelectElement"},
     {"script", "HTMLScriptElement"},
+    {"source", "HTMLSourceElement"},
     {"style", "HTMLStyleElement"},
     {"textarea", "HTMLTextAreaElement"},
+    {"track", "HTMLTrackElement"},
     {"video", "HTMLVideoElement"},
 };
 
@@ -2565,6 +2573,13 @@ static int64_t dom_token_list_count(const DomCollectionVArray* collection) {
     return count;
 }
 
+static bool dom_collection_element_has_name(DomElement* elem, const char* name) {
+    const char* id = elem->get_attribute("id");
+    const char* attr_name = elem->get_attribute("name");
+    return (id && strcmp(id, name) == 0) ||
+        (attr_name && strcmp(attr_name, name) == 0);
+}
+
 static bool dom_collection_varray_matches(DomElement* elem,
                                            DomCollectionVArray* collection) {
     if (!elem || !collection) return false;
@@ -2578,7 +2593,8 @@ static bool dom_collection_varray_matches(DomElement* elem,
         return elem->has_attribute("href") &&
             (_is_tag(elem, "a") || _is_tag(elem, "area"));
     case DOM_VARRAY_FORM_ELEMENTS:
-        return _is_listed_form_control(elem);
+        return _is_listed_form_control(elem) &&
+            (!query[0] || dom_collection_element_has_name(elem, query));
     case DOM_VARRAY_LOOKUP_TAG:
         return elem->tag_name && query &&
             ((query[0] == '*' && query[1] == '\0') ||
@@ -2927,11 +2943,21 @@ extern "C" Item dom_static_rect_list_from_array(Item items) {
         items, radiant_dom_rect_list_host_type());
 }
 
+static Item dom_collection_varray_new(Item owner,
+    DomCollectionVArrayKind kind, Item query, bool include_root,
+    const void* host_type);
+
 extern "C" int dom_child_collection_named_get(Item receiver, Item key, Item* out) {
     if (!out || get_type_id(receiver) != LMD_TYPE_VARRAY) return 0;
-    const char* name = fn_to_cstr(key);
+    RootFrame roots(4);
+    Rooted<Item> receiver_root(roots, receiver);
+    Rooted<Item> key_root(roots, key);
+    Rooted<Item> candidate_root(roots, ItemNull);
+    Rooted<Item> first_root(roots, ItemNull);
+    const char* name = fn_to_cstr(key_root.get());
     if (!name || !name[0]) return 0;
-    DomCollectionVArray* collection = (DomCollectionVArray*)receiver.varray->data;
+    DomCollectionVArray* collection = receiver.varray->vtable == &dom_child_collection_varray_vtable
+        ? (DomCollectionVArray*)receiver.varray->data : nullptr;
     if (collection && collection->kind == DOM_VARRAY_ATTRIBUTES) {
         DomElement* owner = dom_collection_varray_owner(collection);
         int64_t count = dom_collection_attribute_count(owner);
@@ -2944,21 +2970,26 @@ extern "C" int dom_child_collection_named_get(Item receiver, Item key, Item* out
         }
         return 0;
     }
-    int64_t count = varray_count(receiver.varray);
+    bool form_controls = collection && collection->kind == DOM_VARRAY_FORM_ELEMENTS;
+    int64_t count = varray_count(receiver_root.get().varray);
     for (int64_t index = 0; index < count; index++) {
-        Item candidate = varray_get(receiver.varray, index);
-        DomNode* node = (DomNode*)dom_unwrap_element(candidate);
+        candidate_root.set(varray_get(receiver_root.get().varray, index));
+        DomNode* node = (DomNode*)dom_unwrap_element(candidate_root.get());
         if (!node || !node->is_element()) continue;
         DomElement* elem = node->as_element();
-        const char* id = elem->get_attribute("id");
-        const char* attr_name = elem->get_attribute("name");
-        if ((id && strcmp(id, name) == 0) ||
-                (attr_name && strcmp(attr_name, name) == 0)) {
-            *out = candidate;
-            return 1;
-        }
+        if (!dom_collection_element_has_name(elem, name)) continue;
+        if (!form_controls) { *out = candidate_root.get(); return 1; }
+        if (first_root.get().item == ITEM_NULL) { first_root.set(candidate_root.get()); continue; }
+        // multiple named controls require a live NodeList, not the first match.
+        key_root.set(js_name_item(name));
+        *out = dom_collection_varray_new(collection->owner,
+            DOM_VARRAY_FORM_ELEMENTS, key_root.get(), false,
+            radiant_dom_radio_node_list_host_type());
+        return 1;
     }
-    return 0;
+    if (first_root.get().item == ITEM_NULL) return 0;
+    *out = first_root.get();
+    return 1;
 }
 
 extern "C" int dom_child_collection_named_has(Item receiver, Item key, Item* out) {
@@ -4333,12 +4364,12 @@ extern "C" Item dom_create_doctype_node(const char* name,
     DomDocument* doc = _js_current_document;
     if (!doc) return ItemNull;
     MarkBuilder builder(doc->input);
-    Item item = builder.element("!DOCTYPE").text(name ? name : "").final();
+    Item item = builder.element("!DOCTYPE").text(name ? name : "")
+        .attr("publicId", public_id ? public_id : "")
+        .attr("systemId", system_id ? system_id : "").final();
     Element* e = item.element;
     DomComment* dt = dom_comment_create_detached(e, doc);
     if (!dt) return ItemNull;
-    (void)public_id;
-    (void)system_id;
     return dom_wrap_element(dt);
 }
 
@@ -4390,13 +4421,27 @@ static Item dom_impl_has_feature_method(Item feature, Item version) {
     return (Item){.item = ITEM_TRUE};
 }
 
-template <typename Target>
-static void dom_set_implementation_method(Item implementation,
-        const char* name, Target target, int adapter_arity) {
-    Item key = js_name_item(name);
-    dom_realm_set(implementation, key,
-        dom_realm_new_function(target, adapter_arity));
-    js_mark_non_enumerable(implementation, key);
+// prototype captures validate the receiver before entering the shared document operations.
+template <auto Target, typename... Args>
+static Item dom_impl_receiver_method(Args... args) {
+    if (!dom_is_implementation(dom_realm_receiver())) {
+        return dom_realm_throw_type_error("DOMImplementation method called on incompatible receiver");
+    }
+    return Target(args...);
+}
+
+extern "C" void dom_implementation_install_interface(Item prototype) {
+    RootFrame roots(1);
+    Rooted<Item> prototype_root(roots, prototype);
+    if (!roots.valid()) return;
+    dom_realm_install_method(prototype_root.get(), "createHTMLDocument",
+        static_cast<DomRealmFn1>(dom_impl_receiver_method<dom_impl_create_html_document_method>));
+    dom_realm_install_method(prototype_root.get(), "createDocument",
+        static_cast<DomRealmFn3>(dom_impl_receiver_method<dom_impl_create_document_method>));
+    dom_realm_install_method(prototype_root.get(), "createDocumentType",
+        static_cast<DomRealmFn3>(dom_impl_receiver_method<dom_impl_create_document_type_method>));
+    dom_realm_install_method(prototype_root.get(), "hasFeature",
+        static_cast<DomRealmFn2>(dom_impl_receiver_method<dom_impl_has_feature_method>));
 }
 
 extern "C" Item dom_get_implementation(void) {
@@ -4411,16 +4456,8 @@ extern "C" Item dom_get_implementation(void) {
     // dereference a null data pointer. Use a normal JS object and identify the
     // context-owned singleton by its cache identity instead.
     dom_implementation_item = js_new_object();
-    // DOMImplementation is a plain sentinel map, so property reads cannot
-    // reach the native method-call dispatcher unless callable members exist.
-    dom_set_implementation_method(dom_implementation_item, "createHTMLDocument",
-        dom_impl_create_html_document_method, 1);
-    dom_set_implementation_method(dom_implementation_item, "createDocument",
-        dom_impl_create_document_method, 3);
-    dom_set_implementation_method(dom_implementation_item, "createDocumentType",
-        dom_impl_create_document_type_method, 3);
-    dom_set_implementation_method(dom_implementation_item, "hasFeature",
-        dom_impl_has_feature_method, 2);
+    // captured WebIDL prototype methods must share the singleton's callable surface.
+    dom_bind_interface_prototype(dom_realm_global(), dom_implementation_item, "DOMImplementation");
     return dom_implementation_item;
 }
 
@@ -6586,6 +6623,34 @@ static JsDomPropId dom_prop_id(const char* prop) {
 // this makes that node able to answer as a Document too (ESO101), which needs
 // the query to say *which* document -- a Lambda-only document never sets the
 // global, and a node knows its own.
+static Item dom_document_base_uri(DomDocument* doc) {
+    const char* fallback = doc && doc->url ? url_get_href(doc->url) : nullptr;
+    if (!fallback) fallback = "about:blank";
+    if (doc && doc->root) {
+        SelectorQueryScratch query;
+        if (query.parse_list("base[href]")) {
+            query.matcher = dom_create_selector_matcher(doc, query.pool);
+            DomElement* base = dom_selector_group_find_first(
+                query.matcher, query.group, doc->root, true);
+            if (base) {
+                // only the first connected base applies; an invalid href falls back to the document URL.
+                Url* resolved = doc->url
+                    ? url_parse_with_base(base->get_attribute("href"), doc->url)
+                    : url_parse(base->get_attribute("href"));
+                if (resolved && url_is_valid(resolved) &&
+                        resolved->scheme != URL_SCHEME_DATA &&
+                        resolved->scheme != URL_SCHEME_JAVASCRIPT) {
+                    Item result = js_name_item(url_get_href(resolved));
+                    url_destroy(resolved);
+                    return result;
+                }
+                if (resolved) url_destroy(resolved);
+            }
+        }
+    }
+    return js_name_item(fallback);
+}
+
 static Item dom_document_get_property_for(DomDocument* doc_arg, Item prop_name) {
     if (!doc_arg) {
         log_debug("dom_document_get_property: no document");
@@ -6598,6 +6663,8 @@ static Item dom_document_get_property_for(DomDocument* doc_arg, Item prop_name) 
 
     DomDocument* doc = doc_arg;
     DomElement* root = doc->root;  // may be NULL for foreign docs created via createDocument
+
+    if (strcmp(prop, "baseURI") == 0) return dom_document_base_uri(doc);
 
     // documentElement — the root <html> element
     if (prop_id == JS_DOM_PROP_DOCUMENT_ELEMENT) {
@@ -9347,15 +9414,6 @@ static void _collect_form_related_rec(DomNode* node, Item arr, bool controls) {
 }
 JS_FORWARD_STATIC_VOID( _collect_form_controls_rec, (DomNode* node, Item arr), _collect_form_related_rec, (node, arr, true))
 
-// Return the lowercased name/id key used to look up a form control by name.
-// Returns nullptr if the element has neither.
-static const char* _form_control_name_or_id(DomElement* e) {
-    const char* n = e->get_attribute("name");
-    if (n && *n) return n;
-    if (e->id && *e->id) return e->id;
-    return nullptr;
-}
-
 extern "C" int radiant_dom_m4b_href_get(Item receiver, Item* out);
 extern "C" int radiant_dom_anchor_hash_get(Item receiver, Item* out);
 
@@ -9390,24 +9448,6 @@ static Item dom_template_content(DomElement* template_elem) {
     Item fragment_item = dom_wrap_element(fragment);
     expando_set_property((DomNode*)template_elem, content_key, fragment_item);
     return fragment_item;
-}
-
-// form[name] named getter: collect every listed control whose name or id
-// matches.
-typedef struct FormNamedGetterCtx {
-    const char* name;
-    Item matches;
-} FormNamedGetterCtx;
-
-static bool _form_named_getter_visit(DomElement* elem, void* ctx) {
-    FormNamedGetterCtx* state = (FormNamedGetterCtx*)ctx;
-    if (_is_listed_form_control(elem)) {
-        const char* key = _form_control_name_or_id(elem);
-        if (key && strcmp(key, state->name) == 0) {
-            js_array_push(state->matches, dom_wrap_element(elem));
-        }
-    }
-    return true;
 }
 
 static bool dom_get_textlike_property(DomNode* node, Item elem_item,
@@ -9544,11 +9584,19 @@ extern "C" Item dom_core_node_type(Item n) {
     return (Item){.item = i2it((int64_t)node->node_type)};
 }
 
+static Item dom_doctype_property(DomComment* doctype, const char* property) {
+    ElementReader reader(doctype->native_element);
+    const char* value = reader.get_attr_string(property);
+    if (!value && strcmp(property, "name") == 0) value = doctype->content;
+    return js_name_item(value ? value : "");
+}
+
 extern "C" Item dom_core_node_name(Item n) {
     DomNode* node = (DomNode*)dom_unwrap_element(n);
     if (!node) return ItemNull;
     if (DomAttr* attribute = node->as_attribute()) return js_name_item(attribute->qualified_name);
     if (node->is_text()) return js_name_item("#text");
+    if (node->node_type == DOM_NODE_DOCTYPE) return dom_doctype_property(node->as_comment(), "name");
     if (!node->is_element()) return js_name_item("#comment");
     DomElement* elem = node->as_element();
     // "#document", "#document-fragment" and friends are spec-fixed names, not
@@ -9561,6 +9609,7 @@ extern "C" Item dom_core_node_name(Item n) {
 extern "C" Item dom_core_node_value(Item n) {
     DomNode* node = (DomNode*)dom_unwrap_element(n);
     if (!node) return ItemNull;
+    if (node->node_type == DOM_NODE_DOCTYPE) return ItemNull;
     if (DomAttr* attribute = node->as_attribute()) return js_name_item(attribute->value);
     if (node->is_text()) {
         const char* text = node->as_text()->text;
@@ -9679,6 +9728,7 @@ static Item dom_serialized_item(StrBuf* sb) {
 extern "C" Item dom_fp_text_content(Item n) {
     DomNode* node = (DomNode*)dom_unwrap_element(n);
     if (!node) return ItemNull;
+    if (node->node_type == DOM_NODE_DOCTYPE) return ItemNull;
     if (DomAttr* attribute = node->as_attribute()) return js_name_item(attribute->value);
     // CharacterData.textContent is its own data verbatim -- including for a
     // generated pseudo node, which the descendant walk below skips.
@@ -9804,6 +9854,11 @@ extern "C" Item dom_get_property_impl(Item elem_item, Item prop_name) {
 
     if (!prop) return ItemNull;
 
+    if (strcmp(prop, "baseURI") == 0) {
+        // detached CharacterData/Attr ownership is retained by the native document registry.
+        return dom_document_base_uri(dom_node_owner_document(node));
+    }
+
     if (DomAttr* attribute = node->as_attribute()) {
         if (strcmp(prop, "name") == 0 || prop_id == JS_DOM_PROP_NODE_NAME)
             return js_name_item(attribute->qualified_name);
@@ -9870,6 +9925,13 @@ extern "C" Item dom_get_property_impl(Item elem_item, Item prop_name) {
 
     if (node->is_comment()) {
         DomComment* comment_node = node->as_comment();
+        if (node->node_type == DOM_NODE_DOCTYPE) {
+            // a doctype shares comment storage, but its name/identifiers are not CharacterData.
+            if (strcmp(prop, "name") == 0 || strcmp(prop, "publicId") == 0 ||
+                strcmp(prop, "systemId") == 0) return dom_doctype_property(comment_node, prop);
+            if (prop_id == JS_DOM_PROP_NODE_NAME) return dom_doctype_property(comment_node, "name");
+            if (prop_id == JS_DOM_PROP_NODE_VALUE || prop_id == JS_DOM_PROP_TEXT_CONTENT) return ItemNull;
+        }
         Item result = ItemNull;
         if (dom_get_textlike_property(node, elem_item, prop_name, prop,
                 comment_node->content, comment_node->length,
@@ -10146,6 +10208,21 @@ extern "C" Item dom_get_property_impl(Item elem_item, Item prop_name) {
     // they are 0 (which matches current browser behaviour for scripts that
     // run before first paint).
     // =========================================================================
+
+    // detached elements have no CSS box, including after retaining an old layout.
+    if (!dom_is_connected(elem)) {
+        switch (prop_id) {
+            case JS_DOM_PROP_OFFSET_PARENT: return ItemNull;
+            case JS_DOM_PROP_OFFSET_WIDTH: case JS_DOM_PROP_OFFSET_HEIGHT:
+            case JS_DOM_PROP_OFFSET_TOP: case JS_DOM_PROP_OFFSET_LEFT:
+            case JS_DOM_PROP_CLIENT_WIDTH: case JS_DOM_PROP_CLIENT_HEIGHT:
+            case JS_DOM_PROP_CLIENT_TOP: case JS_DOM_PROP_CLIENT_LEFT:
+            case JS_DOM_PROP_SCROLL_WIDTH: case JS_DOM_PROP_SCROLL_HEIGHT:
+            case JS_DOM_PROP_SCROLL_TOP: case JS_DOM_PROP_SCROLL_LEFT:
+                return (Item){.item = i2it(0)};
+            default: break;
+        }
+    }
 
     // offsetWidth / offsetHeight — border box dimensions
     if (prop_id == JS_DOM_PROP_OFFSET_WIDTH) {
@@ -10843,25 +10920,19 @@ extern "C" Item dom_get_property_impl(Item elem_item, Item prop_name) {
     // ------------------------------------------------------------------
     // F-1: HTMLFormElement named getter — `form["name"]` returns the
     // listed control whose name or id matches. If multiple controls match,
-    // returns a snapshot array (RadioNodeList placeholder). If none match,
+    // returns a live RadioNodeList. If none match,
     // falls through to expando / attribute lookup.
     // ------------------------------------------------------------------
     if (_is_tag(elem, "form") && prop && *prop) {
         // Skip standard IDL props (already handled above) and known DOM methods
         // to avoid shadowing them.
         if (!dom_form_named_getter_reserved_name(prop)) {
-            Item matches = js_array_new(0);
-            FormNamedGetterCtx named_ctx = { prop, matches };
-            dom_walk_elements(elem->first_child, _form_named_getter_visit, &named_ctx);
-            int64_t mlen = js_array_length(matches);
-            if (mlen == 1) {
-                // single match — return the element itself
-                Array* a = matches.array;
-                return a->items[0];
-            }
-            if (mlen > 1) {
-                return dom_static_radio_node_list_from_array(matches);
-            }
+            RootFrame named_roots(2);
+            Rooted<Item> named_key(named_roots, prop_name);
+            Rooted<Item> controls(named_roots, dom_live_form_elements_bridge(elem));
+            Item match = ItemNull;
+            if (dom_child_collection_named_get(controls.get(), named_key.get(), &match))
+                return match;
         }
     }
 
@@ -14340,7 +14411,7 @@ static bool dom_remove_backed_element_item(DomElement* parent,
     // drag libraries may detach a wrapper before reinsertion; remove its stale
     // Mark slot first so a later relink cannot restore the previous order.
     Element* parent_backing = dom_element_to_element(parent);
-    MarkEditor editor(parent->doc->input, EDIT_MODE_INLINE);
+    MarkEditor editor(parent->doc, EDIT_MODE_INLINE);
     Item result = editor.dom_delete_child({.element = parent_backing},
                                             (int)child_index);
     if (get_type_id(result) != LMD_TYPE_ELEMENT || result.element != parent_backing) {
@@ -14440,7 +14511,7 @@ static bool dom_insert_backed_element(DomElement* parent, DomNode* child,
     int64_t insert_index = dom_backed_insertion_index(parent, ref_child);
     if (insert_index < 0) return false;
 
-    MarkEditor editor(parent->doc->input, EDIT_MODE_INLINE);
+    MarkEditor editor(parent->doc, EDIT_MODE_INLINE);
     Element* parent_backing = dom_element_to_element(parent);
     Item result = editor.dom_insert_child({.element = parent_backing},
                                             (int)insert_index,
@@ -14523,7 +14594,7 @@ static bool dom_insert_backed_text(DomElement* parent, DomText* text,
         }
     }
 
-    MarkEditor editor(parent->doc->input, EDIT_MODE_INLINE);
+    MarkEditor editor(parent->doc, EDIT_MODE_INLINE);
     Element* parent_backing = dom_element_to_element(parent);
     Item result = editor.dom_insert_child(
         {.element = parent_backing},
@@ -14664,7 +14735,7 @@ static bool dom_insert_text_before_child(DomElement* parent, Item text_item,
 
     int64_t insert_index = dom_backed_insertion_index(parent, ref_child);
     if (insert_index < 0) return false;
-    MarkEditor editor(parent->doc->input, EDIT_MODE_INLINE);
+    MarkEditor editor(parent->doc, EDIT_MODE_INLINE);
     Element* parent_backing = dom_element_to_element(parent);
     Item result = editor.dom_insert_child({.element = parent_backing},
                                             (int)insert_index, text_item);
@@ -14800,7 +14871,7 @@ static bool dom_replace_document_element(DomElement* old_root,
 
     dom_pre_remove((DomNode*)old_root, false);
     if (input_is_document) {
-        MarkEditor editor(doc->input, EDIT_MODE_INLINE);
+        MarkEditor editor(doc, EDIT_MODE_INLINE);
         Item result = editor.dom_replace_child(
             {.element = input_root}, (int)old_index,
             {.element = replacement_backing});
@@ -15093,7 +15164,9 @@ extern "C" Item dom_adopt_node_bridge(Item node_arg) {
     }
     // adoptNode detaches through remove() bookkeeping so live ranges/focus see the original parent.
     dom_remove_bridge((void*)node);
-    return node_arg;
+    // adoption must transfer detached node ownership, just as cross-document insertion does.
+    DomElement* document_node = (DomElement*)dom_get_or_create_doc_node(_js_current_document);
+    return dom_prepare_cross_document_insertion(node, document_node) ? node_arg : ItemError;
 }
 
 extern "C" Item dom_location_navigate_bridge(void* doc_ptr, Item next_url_item,
@@ -15327,7 +15400,7 @@ extern "C" Item dom_replace_child_bridge(void* parent_ptr, Item new_child_arg,
             }
             dom_pre_remove(old_child);
             if (!dom_node_replace_in_parent(elem, old_child, new_child)) return ItemNull;
-            MarkEditor editor(elem->doc->input, EDIT_MODE_INLINE);
+            MarkEditor editor(elem->doc, EDIT_MODE_INLINE);
             Item result = editor.dom_replace_child(
                 {.element = dom_element_to_element(elem)}, (int)old_index,
                 {.element = dom_element_to_element(new_elem)});
@@ -15364,7 +15437,7 @@ extern "C" Item dom_replace_child_bridge(void* parent_ptr, Item new_child_arg,
             if (!new_text->native_string) new_text->native_string = lam::up(replacement_string);
             dom_pre_remove(old_child);
             if (!dom_node_replace_in_parent(elem, old_child, new_child)) return ItemNull;
-            MarkEditor editor(elem->doc->input, EDIT_MODE_INLINE);
+            MarkEditor editor(elem->doc, EDIT_MODE_INLINE);
             Item result = editor.dom_replace_child(
                 {.element = dom_element_to_element(elem)}, (int)old_index,
                 {.item = s2it(replacement_string)});
@@ -15395,7 +15468,7 @@ extern "C" Item dom_replace_child_bridge(void* parent_ptr, Item new_child_arg,
             }
             dom_pre_remove(old_child);
             if (!dom_node_replace_in_parent(elem, old_child, new_child)) return ItemNull;
-            MarkEditor editor(elem->doc->input, EDIT_MODE_INLINE);
+            MarkEditor editor(elem->doc, EDIT_MODE_INLINE);
             Item result = editor.dom_replace_child({.element = dom_element_to_element(elem)},
                 old_index, {.element = dom_element_to_element(new_elem)});
             if (get_type_id(result) != LMD_TYPE_ELEMENT ||

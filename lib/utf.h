@@ -53,6 +53,8 @@ size_t utf8_encode_z(uint32_t codepoint, char buf[5]);
  *         NULL-safe: returns -1 for NULL s or len==0.
  */
 int utf8_decode(const char* s, size_t len, uint32_t* out);
+/** Decode one scalar, replacing one maximal invalid subsequence with U+FFFD. */
+int utf8_decode_replacement(const char* s, size_t len, uint32_t* out);
 
 /** Byte length of a UTF-8 sequence given its lead byte (1–4), or 0 if invalid. */
 size_t utf8_char_len(unsigned char lead);
@@ -125,6 +127,9 @@ LAMBDA_LIB_API void utf8_wtf8_encode(const char* chars, int byte_len, uint8_t* o
 // canonical UTF-8/WTF-8: combine surrogate pairs, preserve lone units; no Unicode normalization.
 bool utf8_key_is_canonical(const char* chars, size_t length);
 size_t utf8_canonical_key(const char* chars, size_t length, char* out);
+// select UTF-16 units and canonicalize their WTF-8 encoding, preserving boundary surrogates.
+size_t utf8_canonical_slice(const char* chars, size_t length, size_t start, size_t count, char* out);
+int64_t utf16_find(const char* chars, size_t length, const char* needle, size_t needle_length, size_t start);
 
 /* ── Codepoint Classification ─────────────────────────────────────── */
 

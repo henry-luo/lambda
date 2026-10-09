@@ -2208,7 +2208,7 @@ TEST(TransitionTreeExternalParentTest, LiteralLikeParentIsSharedAndNeverWritten)
     TypeMapTransition* parent_edges = parent->transitions;
     ShapeEntry* parent_tail_link = parent->last ? parent->last->chain_next : nullptr;
     ShapeEntry** parent_table = parent->field_index;
-    uint16_t parent_table_count = parent->field_count;
+    uint32_t parent_table_count = parent->field_count;
 
     MarkBuilder tree_builder(f.tree);
     ShapeEntry* added = nullptr;

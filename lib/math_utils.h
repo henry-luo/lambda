@@ -13,6 +13,16 @@
 #include <math.h>
 #include <stdint.h>
 
+// shared SplitMix64 step; callers own the state and choose pure or mutable semantics.
+static inline double math_splitmix64(uint64_t* state) {
+    *state += UINT64_C(0x9e3779b97f4a7c15);
+    uint64_t z = *state;
+    z = (z ^ (z >> 30)) * UINT64_C(0xbf58476d1ce4e5b9);
+    z = (z ^ (z >> 27)) * UINT64_C(0x94d049bb133111eb);
+    z ^= z >> 31;
+    return (double)(z >> 11) * 0x1.0p-53;
+}
+
 #ifdef __cplusplus
 
 namespace lib_math {

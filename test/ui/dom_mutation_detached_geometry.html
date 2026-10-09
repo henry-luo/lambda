@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>Detached mutations preserve document geometry</title>
+<style>#container { width: 240px; } button { display: block; }</style></head>
+<body>
+<button id="prepare">Prepare detached element</button>
+<button id="attach">Attach element</button>
+<button id="remove">Remove element</button>
+<div id="container"></div><div id="result"></div>
+<script>
+const container = document.getElementById('container');
+const result = document.getElementById('result');
+let detached;
+let geometryStable = true;
+let observed = 0;
+document.getElementById('prepare').addEventListener('click', () => {
+  detached = document.createElement('div');
+  const observer = new MutationObserver(records => { observed += records.length; });
+  observer.observe(detached, { attributes: true });
+  const width = container.offsetWidth;
+  for (let i = 0; i < 8; i++) {
+    detached.style.width = (100 + i) + 'px';
+    detached.style.height = (20 + i) + 'px';
+    geometryStable = geometryStable && container.offsetWidth === width;
+    geometryStable = geometryStable && detached.offsetWidth === 0;
+  }
+});
+document.getElementById('attach').addEventListener('click', () => {
+  detached.style.height = '35px';
+  container.appendChild(detached);
+  result.setAttribute('data-height', String(detached.offsetHeight));
+  result.setAttribute('data-stable', String(geometryStable));
+  result.setAttribute('data-observed', String(observed > 0));
+});
+document.getElementById('remove').addEventListener('click', () => {
+  container.removeChild(detached);
+  result.setAttribute('data-removed-height', String(container.offsetHeight));
+  result.setAttribute('data-detached-height', String(detached.offsetHeight));
+  result.setAttribute('data-detached-parent', String(detached.offsetParent));
+});
+</script></body></html>

@@ -109,6 +109,7 @@ void dom_engine_animation_frame_prepare(void* document, double timestamp_ms);
 uint64_t dom_engine_frame_request(void* owner, const char* event_name);
 bool dom_engine_frame_cancel(void* owner, uint64_t token);
 bool dom_engine_frame_tick(DomDocument* document, double timestamp_ms);
+bool dom_engine_window_is_closed(void* ui_context);
 
 #ifdef __cplusplus
 }

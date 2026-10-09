@@ -1865,6 +1865,12 @@ extern "C" void* lambda_shape_entry_accessor(const void* shape_entry) {
     return entry ? entry->accessor : NULL;
 }
 
+extern "C" uint64_t lambda_shape_nominal_owner(const void* type_map) {
+    const TypeNominal* nominal = ((const TypeMap*)type_map)->nominal;
+    return nominal && nominal->extension && nominal->extension->owner
+        ? nominal->extension->owner(nominal->extension_data).item : ITEM_NULL;
+}
+
 bool shape_entry_uses_native_lane(const ShapeEntry* field,
         LaneStorageDesc* out) {
     if (!field || !field->type || !out) return false;

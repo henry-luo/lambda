@@ -1,0 +1,19 @@
+{
+  "name": "Detached mutations skip document layout and retain observers and insertion layout",
+  "html": "test/ui/dom_mutation_detached_geometry.html",
+  "viewport": {"width": 560, "height": 280},
+  "events": [
+    {"type": "click", "target": {"selector": "#prepare"}},
+    {"type": "assert_reconcile_mode", "mode": "incremental", "reason": "detached-only"},
+    {"type": "click", "target": {"selector": "#attach"}},
+    {"type": "assert_attribute", "target": {"selector": "#result"}, "attribute": "data-height", "equals": "35"},
+    {"type": "assert_attribute", "target": {"selector": "#result"}, "attribute": "data-stable", "equals": "true"},
+    {"type": "assert_attribute", "target": {"selector": "#result"}, "attribute": "data-observed", "equals": "true"},
+    {"type": "assert_reconcile_mode", "mode": "incremental", "reason": "eligible"},
+    {"type": "click", "target": {"selector": "#remove"}},
+    {"type": "assert_attribute", "target": {"selector": "#result"}, "attribute": "data-removed-height", "equals": "0"},
+    {"type": "assert_attribute", "target": {"selector": "#result"}, "attribute": "data-detached-height", "equals": "0"},
+    {"type": "assert_attribute", "target": {"selector": "#result"}, "attribute": "data-detached-parent", "equals": "null"},
+    {"type": "assert_reconcile_mode", "mode": "incremental", "reason": "eligible"}
+  ]
+}

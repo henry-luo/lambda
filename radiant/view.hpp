@@ -3165,10 +3165,13 @@ void parse_font_face_rule(struct LayoutContext* lycon, void* rule);
 bool radiant_is_supported_web_font_source(const char* url, const char* format);
 
 // Register a font face descriptor with UiContext (and bridge to unified FontContext)
-void register_font_face(UiContext* uicon, FontFaceDescriptor* descriptor);
+void register_font_face(UiContext* uicon, FontFaceDescriptor* descriptor,
+    bool has_pending_sources = false);
 
 // Process all @font-face rules from a stylesheet
-void process_font_face_rules_from_stylesheet(UiContext* uicon, struct CssStylesheet* stylesheet, const char* base_path, bool data_only = false);
+void process_font_face_rules_from_stylesheet(UiContext* uicon, struct CssStylesheet* stylesheet,
+    const char* base_path, bool data_only = false,
+    struct NetworkResourceManager* resource_manager = nullptr);
 
 // Process all @font-face rules from all stylesheets in a document
 void process_document_font_faces(UiContext* uicon, struct DomDocument* doc);

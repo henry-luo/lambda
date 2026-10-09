@@ -2,6 +2,8 @@
 #include "page_document.hpp"
 #include "layout.hpp"
 #include "../lambda/input/css/selector_matcher.hpp"
+#include "../lambda/input/css/css_parser.hpp"
+#include "../lambda/dom/dom.h"
 #include "../lib/font/font.h"
 #include "../lib/mem_factory.h"
 #include "../lib/str.h"
@@ -93,6 +95,123 @@ static bool view_css_select(ViewTree* tree, ViewCssStyle* style, const char* nam
     return css_select_element_declaration(css->engine, css->matcher, style->source,
         css->stylesheets, css->stylesheet_count,
         style->inline_declarations, style->inline_count, name, result, style->pseudo_element);
+}
+
+enum ViewComputedPropertyKind { VIEW_COMPUTED_FONT_SIZE, VIEW_COMPUTED_FONT_WEIGHT, VIEW_COMPUTED_COLOR,
+    VIEW_COMPUTED_LINE_HEIGHT, VIEW_COMPUTED_INDENT, VIEW_COMPUTED_MARGIN, VIEW_COMPUTED_PADDING, VIEW_COMPUTED_BORDER };
+static const struct { const char* name; ViewComputedPropertyKind kind; size_t index; } view_computed_properties[] = {
+    {"font-size", VIEW_COMPUTED_FONT_SIZE, 0}, {"font-weight", VIEW_COMPUTED_FONT_WEIGHT, 0},
+    {"color", VIEW_COMPUTED_COLOR, 0}, {"line-height", VIEW_COMPUTED_LINE_HEIGHT, 0},
+    {"start-indent", VIEW_COMPUTED_INDENT, 0}, {"end-indent", VIEW_COMPUTED_INDENT, 1},
+    {"margin-top", VIEW_COMPUTED_MARGIN, 0}, {"margin-right", VIEW_COMPUTED_MARGIN, 1},
+    {"margin-bottom", VIEW_COMPUTED_MARGIN, 2}, {"margin-left", VIEW_COMPUTED_MARGIN, 3},
+    {"padding-top", VIEW_COMPUTED_PADDING, 0}, {"padding-right", VIEW_COMPUTED_PADDING, 1},
+    {"padding-bottom", VIEW_COMPUTED_PADDING, 2}, {"padding-left", VIEW_COMPUTED_PADDING, 3},
+    {"border-top-width", VIEW_COMPUTED_BORDER, 0}, {"border-right-width", VIEW_COMPUTED_BORDER, 1},
+    {"border-bottom-width", VIEW_COMPUTED_BORDER, 2}, {"border-left-width", VIEW_COMPUTED_BORDER, 3}
+};
+
+bool view_css_computed_property_supported(const char* name) {
+    if (!name) return false;
+    for (const auto& property : view_computed_properties) if (!strcmp(name, property.name)) return true;
+    return false;
+}
+
+const CssValue* view_css_computed_property(ViewTree* tree, const ViewCssStyle* style, const char* name) {
+    if (!name || !view_tree_model_source_valid(tree) || !tree->model->css) return nullptr;
+    Pool* pool = tree->model->css->pool;
+    for (const auto& property : view_computed_properties) if (!strcmp(name, property.name)) {
+        float pixels = 0.0f;
+        switch (property.kind) {
+            case VIEW_COMPUTED_FONT_SIZE: pixels = style ? style->font.font_size : 16.0f; break;
+            case VIEW_COMPUTED_FONT_WEIGHT:
+                return css_value_create_number(pool, style ? style->font.font_weight_numeric : 400);
+            case VIEW_COMPUTED_COLOR: {
+                Color color = style ? style->color : Color{.r = 0, .g = 0, .b = 0, .a = 255};
+                CssComputedColor computed = {CSS_COLOR_RGB, {color.r / 255.0, color.g / 255.0, color.b / 255.0, color.a / 255.0}, 0, true};
+                return css_value_create_computed_color(pool, &computed);
+            }
+            case VIEW_COMPUTED_LINE_HEIGHT:
+                return style && style->line_height_value ? style->line_height_value.get() : css_value_create_keyword(pool, "normal");
+            case VIEW_COMPUTED_INDENT:
+                if (style && style->flow_traits && style->flow_traits->indent_expressions[property.index]) return nullptr;
+                pixels = style && style->flow_traits ? style->flow_traits->indents[property.index] : 0.0f; break;
+            default: {
+                const CssValue* value = !style ? nullptr : property.kind == VIEW_COMPUTED_MARGIN ? style->margin[property.index].get() :
+                    property.kind == VIEW_COMPUTED_PADDING ? style->padding[property.index].get() : style->border_width[property.index].get();
+                if (value) {
+                    // reference-relative values need the declaration's reference area, absent from a computed style alone.
+                    if (css_math_value_type(value) != CSS_MATH_LENGTH && value->type != CSS_VALUE_TYPE_NUMBER) return nullptr;
+                    pixels = view_css_length(tree, style, value, css_property_code_from_name(name), 0.0f, 0.0f);
+                }
+                break;
+            }
+        }
+        return isfinite(pixels) ? css_value_create_length(pool, pixels, CSS_UNIT_PX) : nullptr;
+    }
+    return nullptr;
+}
+
+static bool view_css_binding_failure(ViewCssStyle* style, const char* reason, ViewModelStatus status = VIEW_MODEL_INVALID_ARGUMENT) {
+    if (style->binding_status == VIEW_MODEL_OK) { style->binding_status = status; style->binding_reason = reason; }
+    return false;
+}
+
+static void view_css_bind_properties(ViewTree* tree, ViewCssStyle* style) {
+    style->computed_bindings = style->parent && style->parent->computed_bindings;
+    const char* text = style->source && !style->pseudo_element
+        ? dom_element_attribute_ns(style->source, RADIANT_PAGE_NAMESPACE, "property-bindings") : nullptr;
+    if (!text) return;
+    style->computed_bindings = true;
+    Pool* pool = tree->model->css->pool;
+    size_t count = 0, cursor = 0, bindings = 0;
+    CssToken* tokens = css_tokenize(text, strlen(text), pool, &count);
+    if (!tokens) { view_css_binding_failure(style, "computed-property binding allocation failed", VIEW_MODEL_OUT_OF_MEMORY); return; }
+    auto next = [&]() -> const CssToken* {
+        while (cursor < count && tokens[cursor].type == CSS_TOKEN_WHITESPACE) cursor++;
+        return cursor < count ? tokens + cursor++ : nullptr;
+    };
+    auto parse = [&]() -> bool {
+        for (const CssToken* token = next(); token && token->type != CSS_TOKEN_EOF; token = next()) {
+            if (++bindings > 256 || (token->type != CSS_TOKEN_IDENT && token->type != CSS_TOKEN_CUSTOM_PROPERTY) ||
+                token->length < 3 || strncmp(token->start, "--", 2))
+                return view_css_binding_failure(style, "computed-property bindings require at most 256 custom-property declarations");
+            const char* name = css_token_value_dup(token, pool);
+            token = next(); if (!token || token->type != CSS_TOKEN_COLON) return false;
+            token = next(); if (!token || token->type != CSS_TOKEN_FUNCTION) return false;
+            bool ancestor = token->value && !strcmp(token->value, "ancestor(");
+            if (!ancestor && (!token->value || strcmp(token->value, "parent("))) return false;
+            size_t levels = 1;
+            if (ancestor) {
+                token = next();
+                if (!token || token->type != CSS_TOKEN_NUMBER || !isfinite(token->data.number_value) ||
+                    token->data.number_value < 1 || token->data.number_value > UINT32_MAX || floor(token->data.number_value) != token->data.number_value)
+                    return view_css_binding_failure(style, "computed-property ancestor depth requires a positive integer");
+                levels = static_cast<size_t>(token->data.number_value);
+                token = next(); if (!token || token->type != CSS_TOKEN_COMMA) return false;
+            }
+            token = next(); if (!token || token->type != CSS_TOKEN_IDENT) return false;
+            const char* property = css_token_value_dup(token, pool);
+            token = next(); if (!token || token->type != CSS_TOKEN_RIGHT_PAREN) return false;
+            token = next(); if (!token || (token->type != CSS_TOKEN_SEMICOLON && token->type != CSS_TOKEN_EOF)) return false;
+            if (!name || !property) return view_css_binding_failure(style, "computed-property binding allocation failed", VIEW_MODEL_OUT_OF_MEMORY);
+            for (ViewCssVariable* variable = style->variables; variable; variable = variable->next)
+                if (!strcmp(variable->name, name)) return view_css_binding_failure(style, "computed-property binding names must be unique");
+            if (!view_css_computed_property_supported(property)) return view_css_binding_failure(style, "unsupported computed-property binding query");
+            const ViewCssStyle* selected = style;
+            for (size_t level = 0; selected && level < levels; level++) selected = selected->parent;
+            const CssValue* value = view_css_computed_property(tree, selected, property);
+            if (!value) return view_css_binding_failure(style, "computed-property binding requires a definite computed value");
+            ViewCssVariable* variable = (ViewCssVariable*)pool_calloc(pool, sizeof(ViewCssVariable));
+            if (!variable) return view_css_binding_failure(style, "computed-property binding allocation failed", VIEW_MODEL_OUT_OF_MEMORY);
+            variable->name = name; variable->value = value; variable->status = 2;
+            variable->next = style->variables; style->variables = lam::up(variable);
+            if (token->type == CSS_TOKEN_EOF) break;
+        }
+        return true;
+    };
+    if (!parse()) view_css_binding_failure(style, "computed-property binding syntax requires --name:parent(property) or ancestor(depth,property)");
+    css_token_array_release(pool, tokens, count);
 }
 
 static const CssValue* view_css_variable(void* context, DomElement*, const char* name, DomElement** owner) {
@@ -197,6 +316,15 @@ const CssValue* view_css_declaration_value(ViewTree* tree, ViewCssStyle* style,
     if (!declaration || !style) return nullptr;
     CssDeclaration computed = *declaration;
     computed.value = const_cast<CssValue*>(view_css_resolve_value(tree, style, declaration->value));
+    if (style->computed_bindings && css_value_contains_var_reference(declaration->value)) {
+        CssMathEvaluationContext context = {}; context.preserve_percentages = true;
+        CssMathResult number = css_math_evaluate(computed.value, &context);
+        if (!computed.value || !css_declaration_is_supported(&computed) ||
+            (number.resolved && (!isfinite(number.value) || !isfinite(number.percentage)))) {
+            view_css_binding_failure(style, "computed-property substitution has an invalid type or nonfinite value");
+            return nullptr;
+        }
+    }
     return view_css_project(tree, computed, property, style);
 }
 
@@ -269,12 +397,18 @@ static CssEnum view_css_keyword(ViewTree* tree, ViewCssStyle* style, const char*
         ? value->data.keyword : initial;
 }
 
+static double view_css_number(const CssValue* value) {
+    CssMathEvaluationContext context = {};
+    CssMathResult result = css_math_evaluate(value, &context);
+    return result.type == CSS_MATH_NUMBER && result.resolved ? result.value : NAN;
+}
+
 static uint32_t view_css_line_limit(ViewTree* tree, ViewCssStyle* style, const char* name,
                                     uint32_t inherited) {
     const CssValue* value = view_css_property(tree, style, name);
     if (value && css_value_is_initial(value)) return 2;
     if (!value || css_value_is_inherit(value) || css_value_is_unset(value)) return inherited;
-    double number = value->type == CSS_VALUE_TYPE_NUMBER ? value->data.number.value : 0.0;
+    double number = view_css_number(value);
     return isfinite(number) && number >= 1.0 && number <= UINT32_MAX
         ? static_cast<uint32_t>(number) : inherited;
 }
@@ -367,8 +501,9 @@ static bool view_css_font_style(ViewTree* tree, ViewCssStyle* style, ViewCssStyl
     style->font.font_style = view_css_keyword(tree, style, "font-style", CSS_VALUE_NORMAL,
         parent ? parent->font.font_style : CSS_VALUE_NORMAL, true);
     value = view_css_property(tree, style, "font-weight");
-    if (value && value->type == CSS_VALUE_TYPE_NUMBER && value->data.number.value >= 1 && value->data.number.value <= 1000) {
-        style->font.font_weight_numeric = static_cast<int16_t>(value->data.number.value);
+    double weight = view_css_number(value);
+    if (isfinite(weight) && weight >= 1 && weight <= 1000) {
+        style->font.font_weight_numeric = static_cast<int16_t>(weight);
     } else if (value && value->type == CSS_VALUE_TYPE_KEYWORD) {
         if (value->data.keyword == CSS_VALUE_BOLD) style->font.font_weight_numeric = 700;
         else if (value->data.keyword == CSS_VALUE_NORMAL || css_value_is_initial(value)) style->font.font_weight_numeric = 400;
@@ -405,7 +540,7 @@ static void view_css_counter_style(ViewTree* tree, ViewCssStyle* style, ViewCssS
     }
 }
 
-static const CssValue* view_css_box_length(ViewTree* tree, ViewCssStyle* style,
+const CssValue* view_css_compute_length(ViewTree* tree, ViewCssStyle* style,
         CssPropertyCode property, const CssValue* value, const CssValue* inherited) {
     if (css_value_is_inherit(value)) return inherited;
     if (css_value_is_initial(value) || css_value_is_unset(value)) return nullptr;
@@ -434,17 +569,17 @@ static void view_css_box_style(ViewTree* tree, ViewCssStyle* style) {
     for (size_t i = 0; i < 4; i++) {
         CssBoxSide side = static_cast<CssBoxSide>(i);
         CssPropertyCode property = radiant_box_side_property(CSS_PROPERTY_MARGIN, side);
-        style->margin[i] = lam::up(view_css_box_length(tree, style, property,
+        style->margin[i] = lam::up(view_css_compute_length(tree, style, property,
             view_css_property(tree, style, css_property_get_by_code(property)->name), parent ? parent->margin[i].get() : nullptr));
         property = radiant_box_side_property(CSS_PROPERTY_PADDING, side);
-        style->padding[i] = lam::up(view_css_box_length(tree, style, property,
+        style->padding[i] = lam::up(view_css_compute_length(tree, style, property,
             view_css_property(tree, style, css_property_get_by_code(property)->name), parent ? parent->padding[i].get() : nullptr));
         property = radiant_box_side_property(CSS_PROPERTY_BORDER_STYLE, side);
         style->border_style[i] = view_css_keyword(tree, style, css_property_get_by_code(property)->name,
             CSS_VALUE_NONE, parent ? parent->border_style[i] : CSS_VALUE_NONE);
         property = radiant_border_width_property(side);
         value = view_css_property(tree, style, css_property_get_by_code(property)->name);
-        const CssValue* width = view_css_box_length(tree, style, property, value, parent ? parent->border_width[i].get() : nullptr);
+        const CssValue* width = view_css_compute_length(tree, style, property, value, parent ? parent->border_width[i].get() : nullptr);
         if (style->border_style[i] == CSS_VALUE_NONE || style->border_style[i] == CSS_VALUE_HIDDEN)
             width = css_value_create_length(tree->model->css->pool, 0.0, CSS_UNIT_PX);
         else if (!width || width->type == CSS_VALUE_TYPE_KEYWORD)
@@ -485,6 +620,7 @@ static ViewCssStyle* view_css_build_style(ViewTree* tree, DomElement* element,
         style->inline_declarations = lam::up(css_parse_declaration_list_text(inline_text,
             strlen(inline_text), css->pool, &style->inline_count));
     }
+    view_css_bind_properties(tree, style);
     style->display = pseudo_element || !element ? DisplayValue{CSS_VALUE_INLINE, CSS_VALUE_FLOW} : css_default_display_for_element(element, element);
     if (!pseudo_element && element) {
         if (radiant_page_control_hidden(element)) style->display = {CSS_VALUE_NONE, CSS_VALUE_FLOW};
@@ -629,8 +765,9 @@ ViewCssStyle* view_css_resolve(ViewTree* tree, DomElement* element) {
     ViewNodeState* state = view_tree_node_state(tree, element, true);
     if (!state) return nullptr;
     if (state->computed_style) return state->computed_style;
-    ViewCssStyle* parent = element->parent_element() ? view_css_resolve(tree, element->parent_element()) : nullptr;
-    if (element->parent_element() && !parent) return nullptr;
+    DomElement* parent_element = radiant_page_style_parent(element);
+    ViewCssStyle* parent = parent_element ? view_css_resolve(tree, parent_element) : nullptr;
+    if (parent_element && !parent) return nullptr;
     ViewCssStyle* style = view_css_build_style(tree, element, parent, PSEUDO_ELEMENT_NONE);
     state->computed_style = lam::up(style);
     return style;

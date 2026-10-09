@@ -303,6 +303,7 @@ Item dom_core_css_escape(Item text);
 Item dom_core_css_register_property(Item definition);
 Item dom_core_css_color_valid(Item value);
 Item dom_core_set_data(Item n, Item name, Item value);
+Item dom_core_get_data(Item n, Item name);
 Item dom_core_set_event_handler(Item n, Item name, Item handler);
 Item dom_parser_parse_from_string(Item markup, Item mime);
 Item dom_cssom_stylesheet_get_css_rules(Item sheet_item);

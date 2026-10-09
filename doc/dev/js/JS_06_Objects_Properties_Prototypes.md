@@ -34,7 +34,18 @@ NamePool identity rather than spelling prefixes.
 - **`ShapeEntry`** (`lambda-data.hpp`) — a physical field has a non-negative `byte_offset` into `Map.data`. A JS accessor has `byte_offset == -1`, `JSPD_IS_ACCESSOR`, and an `accessor` pointer instead. That entry is virtual and its `TypeMap` is private to the one owner object.
 - **`JsAccessorCell`** (`lambda-data.hpp`) — a `GC_TYPE_JS_ACCESSOR` object containing getter/setter `Item` edges. The collector follows `Map → TypeMap → ShapeEntry → cell`; the cell is never encoded as an `Item`, never stored in `Map.data`, and never reaches the Function tracer. Setup holds it in an exact temporary object root only until the shape publishes that edge. `JsAccessorPair` remains the property-layer compatibility alias.
 
-The hash table is last-writer-wins and linear-probe (`lambda-data.hpp:280`). Small or stack-only maps use the inline 32-slot table; pool-owned builders call `typemap_hash_build` / `typemap_hash_insert_owned` to grow the active table for larger shapes. The shape chain remains authoritative when a table is unpopulated or saturated.
+The hash table is last-writer-wins and uses linear probing
+(`typemap_hash_lookup_by_hash` in `lambda-data.hpp`). It is allocated out of
+line by `typemap_hash_build` / `typemap_hash_insert_owned`; 32-bit capacity and
+occupancy fields allow large property caches to keep growing beyond 32,768
+slots. The capacity remains a representable power of two, and allocation
+failure, an absent index, or saturation uses the authoritative field chain.
+Shared-table lookups reject descendant entries outside the current shape's
+length (**D3.4.3v5**). An indexed spelling miss also proves the absence of an
+Input-owned id-less entry; when a runtime entry shadows that spelling, the
+id-less compatibility lookup still walks the chain for the prior Input entry
+(**D3.4.4v4**). Plain JS map misses skip spread-link scanning when the shape's
+`has_spread` certificate is clear.
 
 ---
 

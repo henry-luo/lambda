@@ -41,6 +41,36 @@ GridTrackList* create_grid_track_list(Pool* pool, int initial_capacity) {
     return track_list;
 }
 
+// clone retained computed definitions independently of their source pool.
+GridTrackList* clone_grid_track_list(Pool* pool, const GridTrackList* source) {
+    if (!pool || !source) return nullptr;
+    GridTrackList* copy = create_grid_track_list(pool, source->allocated_tracks);
+    if (!copy || !copy->tracks || !copy->line_names) {
+        destroy_grid_track_list(pool, copy);
+        return nullptr;
+    }
+    copy->is_repeat = source->is_repeat;
+    copy->repeat_count = source->repeat_count;
+    for (int index = 0; index < source->track_count; index++) {
+        copy->tracks[index] = clone_grid_track_size(pool, source->tracks[index]);
+        if (!copy->tracks[index]) {
+            destroy_grid_track_list(pool, copy);
+            return nullptr;
+        }
+        copy->track_count++;
+    }
+    for (int index = 0; source->line_names && index <= source->allocated_tracks; index++) {
+        if (!source->line_names[index]) continue;
+        copy->line_names[index] = pool_strdup(pool, source->line_names[index]);
+        if (!copy->line_names[index]) {
+            destroy_grid_track_list(pool, copy);
+            return nullptr;
+        }
+        copy->line_name_count++;
+    }
+    return copy;
+}
+
 // Destroy a grid track list
 void destroy_grid_track_list(Pool* pool, GridTrackList* track_list) {
     if (!track_list || !pool) return;
@@ -84,6 +114,12 @@ GridTrackSize* clone_grid_track_size(Pool* pool, const GridTrackSize* track_size
     if (!copy) return nullptr;
 
     *copy = *track_size;
+    copy->expression_owner = lam::own(css_value_clone_owned(track_size->expression, pool));
+    copy->expression = lam::up((const CssValue*)copy->expression_owner.get());
+    if (track_size->expression && !copy->expression_owner) {
+        pool_free(pool, copy);
+        return nullptr;
+    }
     copy->min_size = lam::own(clone_grid_track_size(pool, track_size->min_size));
     copy->max_size = lam::own(clone_grid_track_size(pool, track_size->max_size));
     copy->repeat_tracks = nullptr;
@@ -110,6 +146,7 @@ GridTrackSize* clone_grid_track_size(Pool* pool, const GridTrackSize* track_size
 void destroy_grid_track_size(Pool* pool, GridTrackSize* track_size) {
     if (!track_size || !pool) return;
 
+    css_value_destroy_owned(track_size->expression_owner, pool);
     if (track_size->min_size) destroy_grid_track_size(pool, track_size->min_size);
     if (track_size->max_size) destroy_grid_track_size(pool, track_size->max_size);
     if (track_size->repeat_tracks) {

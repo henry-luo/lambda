@@ -357,6 +357,11 @@ extern "C" bool vmap_set_owner(VMap* vm, Item owner) {
     return true;
 }
 
+extern "C" Item vmap_get_owner(VMap* vm) {
+    if (!vm || vm->vtable != &hashmap_vtable || !vm->data) return ItemNull;
+    return ((HashMapData*)vm->data)->owner;
+}
+
 // DOM3 raw backing-store access: bypasses host-object routing so the generic
 // expando store (jube_interface.cpp) cannot recurse back into member dispatch.
 extern "C" Item vmap_backing_get(VMap* vm, Item key) {

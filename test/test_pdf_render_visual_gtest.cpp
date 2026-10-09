@@ -1363,7 +1363,13 @@ TEST(RenderOutputParity, FoAndNativePageControlsSharePreviewAndPhysicalPdfPages)
         {"proportions", 3, "/MediaBox [0 0 225.00 120.00]"},
         {"proportions_columns", 3, "/MediaBox [0 0 225.00 120.00]"},
         {"numbered_columns", 3, "/MediaBox [0 0 225.00 120.00]"},
-        {"table_furniture", 3, "/MediaBox [0 0 225.00 120.00]"}};
+        {"table_furniture", 3, "/MediaBox [0 0 225.00 120.00]"},
+        {"expressions", 3, "/MediaBox [0 0 225.00 120.00]"},
+        {"parent_values", 3, "/MediaBox [0 0 150.00 120.00]"},
+        {"property_bindings", 3, "/MediaBox [0 0 150.00 120.00]"},
+        {"nearest_values", 3, "/MediaBox [0 0 150.00 120.00]"},
+        {"percentage_indents", 3, "/MediaBox [0 0 150.00 120.00]"},
+        {"percentage_indents_fractional", 3, "/MediaBox [0 0 150.00 120.00]"}};
     const char* extensions[] = {"fo", "rpd"};
     for (const Fixture& fixture : fixtures) {
         SCOPED_TRACE(fixture.name);
@@ -4499,6 +4505,49 @@ TEST(RenderOutputParity, GridTracksResolveFontUnitsAndLengthCalc) {
         "x=\"13.00\" y=\"0.00\" width=\"20.00\" height=\"20.00\" fill=\"rgb(0,0,255)\""));
     EXPECT_TRUE(file_contains_text(svg_path,
         "x=\"0.00\" y=\"20.00\" width=\"13.00\" height=\"20.00\" fill=\"rgb(255,165,0)\""));
+}
+
+TEST(RenderOutputParity, GridTrackMathMatchesLiteralSizesAcrossOutputs) {
+    struct GridMathCase { const char* name; const char* actual; const char* reference; };
+    const GridMathCase cases[] = {
+        {"grid_math_gap", "grid-template-columns:calc(10px + 25%) 1fr;column-gap:20px",
+            "grid-template-columns:60px 1fr;column-gap:20px"},
+        {"grid_math_repeat", "grid-template-columns:repeat(2,calc(5px + 25%)) 1fr;column-gap:20px",
+            "grid-template-columns:55px 55px 1fr;column-gap:20px"},
+        {"grid_math_auto_repeat", "grid-template-columns:repeat(auto-fill,calc(10px + 25%));column-gap:20px",
+            "grid-template-columns:60px 60px;column-gap:20px"},
+        {"grid_math_auto_repeat_maximum", "grid-template-columns:repeat(auto-fill,minmax(10px,80px));column-gap:20px",
+            "grid-template-columns:80px 80px;column-gap:20px"},
+        {"grid_math_auto_repeat_neighbor", "grid-template-columns:calc(10px + 25%) repeat(auto-fill,40px);column-gap:10px",
+            "grid-template-columns:60px 40px 40px;column-gap:10px"},
+        {"grid_math_minmax", "grid-template-columns:minmax(calc(10px + 10%),calc(10px + 40%)) 1fr",
+            "grid-template-columns:minmax(30px,90px) 1fr"},
+        {"grid_math_comparison", "grid-template-columns:min(80px,calc(10px + 50%)) max(20px,calc(10px + 25%)) clamp(20px,calc(10px + 10%),40px)",
+            "grid-template-columns:80px 60px 30px"},
+        {"grid_math_row", "grid-template-columns:100px;grid-template-rows:calc(10px + 25%) 1fr;row-gap:10px",
+            "grid-template-columns:100px;grid-template-rows:30px 1fr;row-gap:10px"},
+        {"grid_math_implicit", "grid-template-columns:100px;grid-template-rows:none;grid-auto-rows:calc(5px + 20%)",
+            "grid-template-columns:100px;grid-template-rows:none;grid-auto-rows:21px"},
+        {"grid_math_negative", "grid-template-columns:calc(5px - 10%) 1fr;column-gap:20px",
+            "grid-template-columns:0px 1fr;column-gap:20px"},
+        {"grid_math_invalid", "grid-template-columns:60px 1fr;grid-template-columns:calc(1px + 1) 1fr",
+            "grid-template-columns:60px 1fr"},
+        {"grid_math_variable_invalid", "grid-template-columns:60px 1fr;grid-template-columns:var(--tracks);--tracks:calc(1px + 1) 1fr",
+            "grid-template-columns:none"}
+    };
+    for (const GridMathCase& test : cases) {
+        SCOPED_TRACE(test.name);
+        char actual[4096], reference[4096];
+        const char* format = "<!doctype html><style>html,body{margin:0}"
+            "#grid{display:grid;width:200px;height:80px;font:10px monospace;"
+            "grid-template-rows:20px;align-content:start;justify-content:start;%s}"
+            "#grid>div{min-width:0;min-height:0}#grid>div:nth-child(3n+1){background:red}"
+            "#grid>div:nth-child(3n+2){background:blue}#grid>div:nth-child(3n){background:lime}"
+            "</style><div id='grid'><div></div><div></div><div></div><div></div><div></div><div></div></div>";
+        snprintf(actual, sizeof(actual), format, test.actual);
+        snprintf(reference, sizeof(reference), format, test.reference);
+        expect_html_pair_output_parity(test.name, actual, reference);
+    }
 }
 
 TEST(RenderOutputParity, FocusedCaretPaintsAuthoredAndInheritedColors) {

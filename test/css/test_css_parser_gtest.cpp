@@ -1155,6 +1155,40 @@ TEST_F(CssEngineParserTest, GridAutoFlowDenseValidatesPair) {
     }
 }
 
+TEST_F(CssEngineParserTest, GridTrackListsValidateCompleteGrammarAndMathDomains) {
+    const char* valid[] = {
+        "grid-template-columns: calc(10px + 25%) 1fr",
+        "grid-template-rows: min(80px,calc(10px + 50%)) max(0px,10%)",
+        "grid-auto-columns: clamp(20px,calc(10px + 10%),40px)",
+        "grid-auto-rows: calc(-5px) 0 auto",
+        "grid-template-columns: [start middle] repeat(2,[inner] minmax(0,1fr)) [end]",
+        "grid-template-columns: 20px repeat(auto-fill,minmax(10px,1fr)) 30px",
+        "grid-template-columns: repeat(auto-fit,minmax(auto,calc(10px + 25%)))",
+        "grid-template-columns: fit-content(calc(1em + 25%)) minmax(10%,2fr)",
+        "grid-template-columns: none", "grid-template-columns: inherit",
+        "grid-auto-rows: var(--tracks)", "grid-template-rows: calc(var(--size) + 25%)"
+    };
+    for (const char* text : valid)
+        EXPECT_NE(css_parse_declaration_text(text, strlen(text), pool), nullptr) << text;
+    const char* invalid[] = {
+        "grid-template-columns: calc(1px + 1)", "grid-template-columns: calc(1s)",
+        "grid-template-columns: calc(1em * 1em)", "grid-template-columns: bogus(10px)",
+        "grid-template-columns: 10px 2", "grid-template-columns: -10px 1fr",
+        "grid-template-columns: 10px,20px", "grid-template-columns: 10bogus 1fr",
+        "grid-template-columns: minmax(1fr,20px)", "grid-template-columns: minmax(10px)",
+        "grid-template-columns: minmax(10px,20px,30px)", "grid-template-columns: fit-content(1fr)",
+        "grid-template-columns: fit-content(10px,20px)", "grid-template-columns: repeat(1.5,10px)",
+        "grid-template-columns: repeat(0,10px)", "grid-template-columns: repeat(2,repeat(2,10px))",
+        "grid-template-columns: repeat(auto-fill,1fr)", "grid-template-columns: auto repeat(auto-fit,10px)",
+        "grid-template-columns: repeat(auto-fill,10px) repeat(auto-fit,20px)",
+        "grid-template-columns: [auto] 10px", "grid-template-columns: [span] 10px",
+        "grid-auto-columns: [start] 10px", "grid-auto-rows: repeat(2,10px)",
+        "grid-auto-columns: none", "grid-template-columns: 10px inherit"
+    };
+    for (const char* text : invalid)
+        EXPECT_EQ(css_parse_declaration_text(text, strlen(text), pool), nullptr) << text;
+}
+
 TEST_F(CssEngineParserTest, TextAlignmentLonghandsValidateTheirOwnKeywords) {
     const char* valid[] = {
         "text-align: justify-all", "text-align: -webkit-center",

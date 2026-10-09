@@ -169,6 +169,8 @@ RADIANT_C_API bool radiant_dom_event_propagation_stopped(Item item);
 RADIANT_C_API bool radiant_dom_event_prevent_default(Item item);
 RADIANT_C_API void radiant_dom_event_set_trusted(Item item, bool trusted);
 RADIANT_C_API void radiant_dom_event_set_time_values(Item event, Item view, Item detail);
+RADIANT_C_API bool radiant_dom_event_set_payload(Item event, Item payload);
+RADIANT_C_API Item radiant_dom_event_payload(Item event, int class_id);
 RADIANT_C_API void radiant_dom_event_set_prototype_override(Item item,
                                                              Item prototype);
 RADIANT_C_API void radiant_dom_event_destroy(void* native);
@@ -183,7 +185,8 @@ RADIANT_C_API int radiant_dom_event_named_set(Item receiver, Item key,
 // An event's target, currentTarget and propagation path are native. Every entry
 // is a DOM node the tree owns (or the window / document / a plain EventTarget
 // container), so the record holds raw pointers exactly as a node wrapper's
-// host_data does, and nothing here needs the collector. The wrapper Item is
+// host_data does. GC-owned container targets also have a traced backing-owner
+// edge; native DOM keys stay borrowed. The wrapper Item is
 // made on read, through the wrapper cache, so identity still holds.
 typedef enum RadiantEvtKeyKind {
     RADIANT_EVT_KEY_NONE = 0,

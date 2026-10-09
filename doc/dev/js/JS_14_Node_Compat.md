@@ -120,6 +120,19 @@ The table records each module's **actual** backing and the notable gaps verified
 | `string_decoder` | `js_string_decoder.cpp` / `js_get_string_decoder_namespace` | native | `StringDecoder` with `write`/`end`; buffers incomplete multi-byte sequences in `__pending__` (`:56`). utf8 primary. |
 | `assert` | `js_assert.cpp` / `js_get_assert_namespace` | native | `ok`/`equal`/`strictEqual`/`deepStrictEqual`/`throws`/`rejects`/`match`/`ifError` and friends; throws `AssertionError` with Node-shaped properties (`:36`). `assert/strict` aliases the same namespace (always strict). |
 
+Browser globals and the Node URL namespace share the `URLSearchParams`
+implementation in `lambda/module/node_core/node_url.cpp` (**D1.3v3**).
+Its `keys`, `values`, and `entries` methods use one live pair-iterator factory;
+`Symbol.iterator` aliases `entries`. Each step reads the current parameter list,
+so `set`, `delete`, and append after exhaustion remain visible, and yielded pairs
+are fresh arrays. The per-session prototype inherits the host iterator prototype.
+Jube's script table supplies intrinsic symbols and that prototype without
+consulting replaceable globals. Iterator targets, newly built pairs, replacement
+lists, and the cached prototype have precise roots (**D5.3.3**).
+The behavior follows [Web IDL pair iteration](https://webidl.spec.whatwg.org/#es-iterators).
+`url_search_params_iterator.js` covers it in both tiers and under forced GC
+(verified 2026-10-09).
+
 **Stub-only modules** (built inline in `js_module_get`, providing just enough surface to import without crashing): `timers`/`timers/promises`, `module` (`builtinModules`, `isBuiltin`, `createRequire`), `worker_threads` (`isMainThread: true`), `cluster`, `perf_hooks`, `tty`, `v8`, `async_hooks`, `diagnostics_channel`, `domain`, `punycode`, `repl`, `console` (alias to the global), `node:test`, and `internal/test/binding` (which exposes `internalBinding('uv')` UV error codes and `internalBinding('config')`, `js_runtime.cpp:31491`).
 
 ### 6.1 Test-harness shims

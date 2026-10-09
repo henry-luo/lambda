@@ -340,8 +340,14 @@ AWFY_PY_CLASSNAME = {
 # Utility helpers
 # ============================================================
 
-def parse_timing(stdout):
+def parse_timing(stdout, strict=False):
     """Extract __TIMING__:NNN from stdout, return ms or None."""
+    if strict:
+        records = [line.strip() for line in stdout.splitlines() if '__TIMING__' in line]
+        if len(records) != 1 or not re.fullmatch(r'__TIMING__:(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?', records[0]):
+            return None
+        value = float(records[0].split(':', 1)[1])
+        return value if math.isfinite(value) and value > 0 else None
     for line in stdout.strip().split("\n"):
         m = TIMING_RE.search(line.strip())
         if m:

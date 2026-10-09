@@ -1,0 +1,5 @@
+{"value":[1],"done":false}
+{"a":[1],"b":"text","c":42}
+{"first":{"nested":[7],"last":"kept"},"second":"kept"}
+{"nested":{"allocated":[2],"tail":3},"tail":4}
+{"nested":[1],"tail":2}

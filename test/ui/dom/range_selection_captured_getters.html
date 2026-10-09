@@ -1,0 +1,58 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Range and Selection captured getters</title></head>
+<body><div id="box"><span id="left">left</span><span id="right">right</span></div>
+<div id="result">pending</div><script>
+const result = document.getElementById('result');
+function check(name, value) { result.setAttribute('data-' + name, String(value)); }
+const range = document.createRange();
+const box = document.getElementById('box');
+const left = document.getElementById('left').firstChild;
+const right = document.getElementById('right').firstChild;
+const prototype = Range.prototype;
+const fields = ['commonAncestorContainer'];
+const getters = fields.map(name => Object.getOwnPropertyDescriptor(prototype, name).get);
+check('descriptors', fields.every(name => {
+    const d = Object.getOwnPropertyDescriptor(prototype, name);
+    return typeof d.get === 'function' && d.set === undefined && d.enumerable && d.configurable;
+}));
+range.setStart(left, 1);
+range.setEnd(right, 2);
+check('boundary', range.startContainer === left && range.startOffset === 1 &&
+    range.endContainer === right && range.endOffset === 2 &&
+    range.collapsed === false && getters[0].call(range) === box);
+check('inherited', fields.every(name => !Object.prototype.hasOwnProperty.call(range, name)));
+const selection = getSelection();
+selection.removeAllRanges();
+selection.addRange(range);
+const names = ['anchorNode', 'anchorOffset', 'focusNode', 'focusOffset', 'isCollapsed', 'rangeCount', 'type', 'direction'];
+const selectionGetters = names.map(name => Object.getOwnPropertyDescriptor(Selection.prototype, name).get);
+check('selection', selectionGetters[0].call(selection) === left &&
+    selectionGetters[1].call(selection) === 1 && selectionGetters[2].call(selection) === right &&
+    selectionGetters[3].call(selection) === 2 && selectionGetters[4].call(selection) === false &&
+    selectionGetters[5].call(selection) === 1 && selectionGetters[6].call(selection) === 'Range');
+left.insertData(0, 'new');
+check('live', range.startOffset === 4 && selectionGetters[1].call(selection) === 4);
+range.collapse(true);
+check('collapse', range.collapsed === true && getters[0].call(range) === left &&
+    selectionGetters[4].call(selection) === true);
+let preserved = true;
+for (const direction of ['forward', 'backward']) {
+    const backwards = direction === 'backward';
+    selection.setBaseAndExtent(backwards ? right : left, 1, backwards ? left : right, 2);
+    const selected = selection.getRangeAt(0);
+    preserved = preserved && selectionGetters[7].call(selection) === direction;
+    selected.collapse(true);
+    preserved = preserved && selectionGetters[7].call(selection) === direction && selection.isCollapsed;
+}
+check('direction', preserved);
+
+let forged = 0;
+for (const getter of getters) {
+    try { getter.call(Object.create(prototype)); } catch (error) { if (error instanceof TypeError) forged++; }
+}
+for (const getter of selectionGetters) {
+    try { getter.call(Object.create(Selection.prototype)); } catch (error) { if (error instanceof TypeError) forged++; }
+}
+check('forged', forged === getters.length + selectionGetters.length);
+result.textContent = 'complete';
+</script></body></html>

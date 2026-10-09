@@ -35,7 +35,7 @@ The user-visible Promise object is that carrier itself: `js_promise_to_item` box
 
 Reactions never run inline. `js_promise_settle` builds a bound thunk per reaction and routes it through `js_enqueue_promise_job` (job queue → microtask queue). The thunk is `js_promise_microtask_run(handler, result, next_promise_item)` (`:28387`): it calls `handler(result)`, then drives the chained `next_promise` through the resolution procedure (so a returned thenable is assimilated), or settles it REJECTED on a thrown exception. Missing-handler reactions use `js_promise_enqueue_passthrough` (`:28486`) to forward state unchanged; `finally` uses `js_promise_finally_microtask_run` (`:28411`) which runs the cleanup, awaits its result, and only then replays the original settlement via `js_promise_finally_continue` (`:28433`).
 
-`js_promise_then` (`:29415`) allocates the chained promise, registers the reaction pair (or, if already settled, immediately enqueues a microtask per spec), and honours `Symbol.species`: a non-builtin species constructor routes the result through a new-capability promise (`js_promise_new_capability`, `:28756`) forwarded by `js_promise_forward_native_to_capability` (`:28861`). `catch`/`finally` are thin wrappers (`:29468`/`:29473`).
+`js_promise_then` allocates the chained promise, registers the reaction pair (or, if already settled, immediately enqueues a microtask per spec), and honours `Symbol.species`: a non-builtin species constructor routes the result through a new-capability promise (`js_promise_new_capability`) forwarded by `js_promise_forward_native_to_capability`. The internal forwarding uses `js_promise_attach_reaction` directly: calling the public species-aware `then` again recursively constructs capabilities when the intrinsic constructor's species getter is replaced. User constructor identity remains authoritative (**D6.2.2v2**), and the shared attachment helper roots the source, handlers, destination and domain before allocating or inspecting a moved carrier (**D5.3.3**). The regression `promise_species_internal_forwarding.js` checks a single observable species read and settlement in both tiers under forced GC. `catch`/`finally` are thin wrappers.
 
 ### Combinators
 
@@ -80,6 +80,8 @@ that a queued callback waits during startup and executes after load.
 ---
 
 ## 5. Async functions & await
+
+**Suspended-body lexical captures (verified 2026-10-09).** Interpreted async and generator setup captures the body environment when hoisting function declarations, matching ordinary activations. The function environment still receives the hoisted binding; the resulting closure retains the body's `let`/`const` cells across `await`/`yield` and after completion (**D5.1.1v3, D5.3.3**). `suspended_body_lexical_closure.js` checks captured destructured functions and mutable lexicals before and after suspension in both tiers under forced collection.
 
 <img alt="Async park/resume cycle" src="diagram/d09_async_await.svg" width="720">
 

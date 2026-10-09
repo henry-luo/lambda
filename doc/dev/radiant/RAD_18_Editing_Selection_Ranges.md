@@ -7,6 +7,8 @@
 > **Primary sources:** `radiant/event.hpp` / `dom_range.cpp` (`DomBoundary`/`DomRange`/`DomSelection`, mutation envelopes, `Selection.modify`, extract/clone/surround, stringification), `radiant/editing.cpp` (surface classification), `radiant/event.cpp` (the snapshotted contenteditable action gate, source projection, and model completion), `radiant/editing_dom_waist.cpp` (checked DOM edit capabilities), `radiant/state_store.cpp` (selection revision/origin), `radiant/editing_host.cpp` (canonical host recognition), and `radiant/editing_target_range.cpp` (immutable `InputEvent` target ranges).
 > **Audience:** engine developers. **Convention:** `file:line` references drift; confirm against the symbol name. The historical design docs `vibe/radiant/Radiant_Design_Editing*.md` and `Radiant_Design_Selection.md` are rationale only and are explicitly marked phased-out.
 
+Selected Range mutations preserve `DomSelection::direction`, including collapse. Native Selection getters report the stored direction rather than deriving it from endpoint equality; state validation checks valid direction values and equal collapsed endpoints without requiring directionless state. This follows the [Selection API §2](https://www.w3.org/TR/selection-api/#dfn-direction) through the shared DOM owner (**D1.3v3**, **D7.4.4**).
+
 ---
 
 ## 1. Scope and the central decision

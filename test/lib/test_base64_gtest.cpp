@@ -5,6 +5,7 @@
 extern "C" {
 #include "../../lib/base64.h"
 #include "../../lib/log.h"
+#include "../../lib/memtrack.h"
 }
 
 class Base64Test : public ::testing::Test {
@@ -149,4 +150,33 @@ TEST_F(Base64Test, EncodeReturnLength) {
     size_t n = base64_encode("foobar", 6, out, BASE64_STD);
     EXPECT_EQ(n, base64_encoded_len(6, BASE64_STD));
     EXPECT_EQ(out[n], '\0');
+}
+
+TEST_F(Base64Test, DataUriDecodesPayloadWithoutFormOrFragmentSemantics) {
+    size_t length = 0;
+    uint8_t* decoded = parse_data_uri("DATA:text/plain,a%2Bb+c%23d%00e#ignored", nullptr, 0, &length);
+    ASSERT_NE(decoded, nullptr);
+    const char expected[] = {'a', '+', 'b', '+', 'c', '#', 'd', '\0', 'e'};
+    EXPECT_EQ(length, sizeof(expected));
+    EXPECT_EQ(memcmp(decoded, expected, sizeof(expected)), 0);
+    EXPECT_EQ(decoded[length], '\0');
+    mem_free(decoded);
+}
+
+TEST_F(Base64Test, DataUriPercentDecodesBeforeBase64) {
+    size_t length = 0;
+    uint8_t* decoded = parse_data_uri("data:text/plain;base64,%5AT0%3D#ignored", nullptr, 0, &length);
+    ASSERT_NE(decoded, nullptr);
+    EXPECT_EQ(length, 2u);
+    EXPECT_EQ(memcmp(decoded, "e=", 2), 0);
+    mem_free(decoded);
+}
+
+TEST_F(Base64Test, DataUriEmptyBodyIsAnOwnedEmptyBuffer) {
+    size_t length = 99;
+    uint8_t* decoded = parse_data_uri("data:text/javascript;base64,#ignored", nullptr, 0, &length);
+    ASSERT_NE(decoded, nullptr);
+    EXPECT_EQ(length, 0u);
+    EXPECT_EQ(decoded[0], '\0');
+    mem_free(decoded);
 }

@@ -1773,6 +1773,8 @@ static void gc_trace_shape_field(gc_heap_t* gc, const void* shape_entry,
 // lambda.h; the collector must not re-declare either C++ layout locally.
 static void gc_trace_shape_fields(gc_heap_t* gc, void* type_ptr, void* data_ptr,
                                   int64_t byte_size) {
+    // nominal metadata can own a guest constructor/prototype environment (D5.3).
+    gc_mark_item(gc, lambda_shape_nominal_owner(type_ptr));
     uint8_t* shape = (uint8_t*)*(void**)((uint8_t*)type_ptr + LAMBDA_GC_OFF_TYPE_MAP_SHAPE);
     // D3.4.3v3: a tree node's chain continues past its last field into a
     // descendant's, whose offsets lie outside this map's data.

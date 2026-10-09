@@ -1048,9 +1048,8 @@ JS_SELECTION_GETTER(js_selection_get_type, make_str(dom_selection_type(s)))
 extern "C" Item js_selection_get_direction(Item self_v) {
     DomSelection* s = selection_from(self_v);
     if (!s) return ItemNull;
-    // Selection.direction returns 'none' | 'forward' | 'backward' per the
-    // Selection API spec (proposed). 'none' for collapsed or empty selections.
-    if (s->range_count == 0 || dom_selection_is_collapsed(s)) return make_str("none");
+    // collapsing the selected range preserves its direction (Selection API §2).
+    if (s->range_count == 0) return make_str("none");
     switch (s->direction) {
         case DOM_SEL_DIR_FORWARD:  return make_str("forward");
         case DOM_SEL_DIR_BACKWARD: return make_str("backward");
