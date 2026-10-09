@@ -73,7 +73,7 @@ Focused targets agents commonly need (`make help` lists ~113; the Makefile has ~
 - **UI and DOM:** `test-ui-automation` (`ARGS=`), `dom-ui test=`, `test-page-load`, `test-reactive-ui`, `test-editable`, `test-wpt-contenteditable`, `test-css-cascade-memory`, `test-pdf-render`, `test-svg-export`, `test-svg-paint`, `test-svg-smil`.
 - **Lambda tiers and GC:** `test-lambda-interp`, `interp-sweep`, `test-gc-rooting`, `test-mir-gc-stress`, `check-error-recovery`, `test-grammar-s16`.
 - **JS and Node:** `test-js262-prelim`, `test262-baseline` (`VERBOSE=1`), `test262-full`, `test262-update-baseline`, `test-js-parity` (`SUITE=js|test262`, `MODE=mir|ast`), `test-js-opt`, `test-js-parser-diff`, `node-baseline`, `node-regression-gate`, `node-full`, `node-update-baseline`.
-- **Packages and data:** `test-math-baseline`, `test-math-corpus`, `test-graph-mermaid`, `test-graph-graphviz`, `test-graph-structurizr`, `test-rdb-drivers-local`.
+- **Packages and data:** `test-math-baseline`, `test-math-corpus`, `test-mathcmp` (Lambda PNG versus pdfLaTeX; `ARGS='--case Functions'`, see [math comparison instructions](lambda/math/README.md)), `test-graph-mermaid`, `test-graph-graphviz`, `test-graph-structurizr`, `test-rdb-drivers-local`.
 - **Other:** `test-wasm`, `test-coverage`, `lint`, `check-tutorial`, `check-doc-code`.
 
 ## 4. Script-driven harnesses
