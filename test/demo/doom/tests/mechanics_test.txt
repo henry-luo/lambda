@@ -1,0 +1,12 @@
+{
+  key: ["closed", "DSOOF"],
+  door: [false, true, 128, 7, "closing", "closed", 0],
+  lift: [32, 0, "raising", 64],
+  crush: [32, 10, -1],
+  trigger: ["lowering", ["lift:0"]],
+  teleport: [64, 64, 0, 10000, ["teleport:0"]],
+  exit: {
+    map: "E1M2",
+    at: 1
+  }
+}

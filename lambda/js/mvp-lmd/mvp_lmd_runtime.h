@@ -15,6 +15,9 @@ struct MvpLmdClass {
     uint32_t slot;
     int64_t constructor_id;
     TypeMap* allocation_shape;
+    String** nullable_initializers;
+    int nullable_initializer_count;
+    uint64_t allocation_epoch;
     bool reusable_layout;
 };
 // extended only for receiver-aware units; existing MVP function allocation stays unchanged.
@@ -35,6 +38,7 @@ struct MvpLmdPropertyCacheEntry {
     TypeId storage;
     uint8_t pointer_lane;
     bool writable;
+    bool nullable_initializer;
 };
 enum { MVP_LMD_PROPERTY_CACHE_SIZE = 4 };
 struct MvpLmdPropertyCache {

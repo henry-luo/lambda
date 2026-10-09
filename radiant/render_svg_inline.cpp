@@ -470,6 +470,8 @@ struct SvgStyleProperty {
     const char* value;
     uint64_t animation_generation;
     bool from_css;
+    bool inherits;
+    DomElement* declaring_element;
     SvgStyleProperty* next;
 };
 
@@ -480,6 +482,11 @@ struct SvgStyleEntry {
     size_t inline_count;
     bool inline_parsed;
     SvgStyleProperty* properties;
+    SvgStyleProperty* computed_properties;
+    RdtPath* text_hit_path;
+    FontContext* text_hit_context;
+    SvgLengthContext text_hit_lengths;
+    uint64_t text_hit_animation, text_hit_fonts;
 };
 
 typedef TypedHashMap<SvgStyleEntry,
@@ -573,6 +580,9 @@ static void svg_style_destroy(SvgStyleContext* style) {
         resource = next;
     }
     if (style->matcher) selector_matcher_destroy(style->matcher);
+    size_t cursor = 0; SvgStyleEntry* entry = nullptr;
+    while (SvgStyleMap::next(style->entries, &cursor, &entry))
+        if (entry->text_hit_path) rdt_path_free(entry->text_hit_path);
     SvgStyleMap::destroy(style->entries);
     if (style->isolated_document) {
         // D4.2.6: layout payloads release borrowed fonts/images before their private document owner.
@@ -648,14 +658,18 @@ static bool svg_style_init(SvgStyleContext* style, Element* root,
     return svg_style_finish(style, nullptr);
 }
 
-// One paint pass reads a fixed host document, so its inline SVGs share one host
-// style context: building it per SVG walked the whole host document (index,
-// SMIL preparation, root lookups) once more for every inline SVG on the page.
-// It is rebuilt for each pass and whenever the DOM or interaction state moved.
+// painting and DOM geometry queries share the host cascade. Rebuilding a
+// matcher and reparsing inline CSS per glyph property made SVG hit testing
+// dominate scrolling. Invalidation also covers queries between paint passes.
 struct SvgPaintHostStyle : DomDocumentResourceData {
     uint64_t pass;
     uint64_t mutation_epoch;
     uint64_t state_version;
+    uint64_t style_epoch;
+    uint64_t query_epoch;
+    uint64_t animation_generation;
+    uint64_t font_generation;
+    uint32_t layout_generation;
     bool valid;
     bool animation_prepared;
     SvgStyleContext style;
@@ -671,12 +685,8 @@ static void svg_paint_host_style_destroy(DomDocumentResourceData* data) {
     mem_free(shared);
 }
 
-// The shared context for an inline SVG painted in the active pass, or null when
-// the caller must style it on its own (outside paint, or not in the host index).
-static SvgStyleContext* svg_paint_host_style(Element* svg_element) {
-    DomDocument* host = g_svg_paint_pass && g_svg_active_rdcon && g_svg_active_rdcon->ui_context
-        ? g_svg_active_rdcon->ui_context->document : nullptr;
-    if (!host || !host->root || !svg_element) return nullptr;
+static SvgPaintHostStyle* svg_host_style(DomDocument* host) {
+    if (!host || !host->root) return nullptr;
     SvgPaintHostStyle* shared = nullptr;
     for (DomDocumentResource* resource = host->resources; resource; resource = resource->next)
         if (resource->destroy == svg_paint_host_style_destroy) {
@@ -691,17 +701,45 @@ static SvgStyleContext* svg_paint_host_style(Element* svg_element) {
             return nullptr;
         }
     }
-    uint64_t state_version = host->state ? ((DocState*)host->state)->version : 0;
-    if (!shared->valid || shared->pass != g_svg_paint_pass ||
-        shared->mutation_epoch != host->mutation_epoch || shared->state_version != state_version) {
+    uint64_t state_version = doc_state_selector_version((DocState*)host->state);
+    uint64_t animation_generation = svg_animation_generation(host);
+    UiContext* ui = (UiContext*)host->js.host_ui_context;
+    uint64_t font_generation = ui ? font_context_resource_generation(ui->font_ctx) : 0;
+    bool new_pass = shared->pass != g_svg_paint_pass;
+    uint32_t layout_generation = host->view_tree ? host->view_tree->layout_generation : 0;
+    // scroll/repaint flags do not change CSS. Animation/resource snapshots still
+    // expire at paint boundaries, before any traversal borrows their values.
+    if (!shared->valid || (new_pass && (shared->animation_generation != animation_generation ||
+        shared->font_generation != font_generation || shared->style.resources)) ||
+        shared->mutation_epoch != host->mutation_epoch ||
+        (shared->state_version != state_version && shared->style.matcher && shared->style.matcher->depends_on_state) ||
+        shared->style_epoch != host->style_content_epoch || shared->query_epoch != host->style_query_epoch ||
+        shared->layout_generation != layout_generation) {
         svg_style_destroy(&shared->style);
         shared->valid = svg_style_init_host(&shared->style, host);
-        shared->pass = g_svg_paint_pass;
         shared->mutation_epoch = host->mutation_epoch;
         shared->state_version = state_version;
+        shared->style_epoch = host->style_content_epoch;
+        shared->query_epoch = host->style_query_epoch;
+        shared->layout_generation = layout_generation;
+        shared->animation_generation = animation_generation;
+        shared->font_generation = font_generation;
         shared->animation_prepared = false;
         if (!shared->valid) return nullptr;
     }
+    if (new_pass) shared->animation_prepared = false;
+    // state-independent values remain valid; any newly queried pseudo-class
+    // observes this state and makes the next interaction expire the snapshot.
+    shared->state_version = state_version;
+    shared->pass = g_svg_paint_pass;
+    return shared;
+}
+
+static SvgStyleContext* svg_paint_host_style(Element* svg_element) {
+    DomDocument* host = g_svg_paint_pass && g_svg_active_rdcon && g_svg_active_rdcon->ui_context
+        ? g_svg_active_rdcon->ui_context->document : nullptr;
+    SvgPaintHostStyle* shared = svg_element ? svg_host_style(host) : nullptr;
+    if (!shared) return nullptr;
     SvgStyleEntry query = {};
     query.element = svg_element;
     if (!SvgStyleMap::get(shared->style.entries, query)) return nullptr;
@@ -990,34 +1028,23 @@ DomNode* svg_dom_style_parent(DomNode* node, const SvgDomStyleScope* scope) {
     return node ? node->parent : nullptr;
 }
 
-const char* svg_get_dom_presentation_property(DomElement* element, const char* name,
-    bool inherits, char* buffer, size_t buffer_size, bool* from_css,
-    char** owned_value, DomElement** declaring_element, const SvgDomStyleScope* scope) {
-    if (from_css) *from_css = false;
-    if (owned_value) *owned_value = nullptr;
-    if (declaring_element) *declaring_element = nullptr;
-    if (!element || !element->doc || !name || (!owned_value && (!buffer || !buffer_size))) return nullptr;
-    Pool* pool = mem_pool_create(nullptr, MEM_ROLE_RENDER, "render.svg.property_query");
-    if (!pool) return nullptr;
-    SelectorMatcher* matcher = selector_matcher_create(pool);
+static const char* svg_dom_resolve_property(SvgStyleContext* query, DomElement* element,
+    const char* name, bool inherits, bool* from_css, DomElement** declaring_element,
+    const SvgDomStyleScope* scope) {
     DomDocument* doc = element->doc;
-    if (matcher) state_configure_selector_matcher((DocState*)doc->state, matcher);
-    SvgStyleContext query = {};
-    query.pool = pool; query.document = doc; query.matcher = matcher;
-    query.engine = (CssEngine*)doc->services.cached_css_engine;
-    bool found = false;
-    for (DomNode* node = element; matcher && node && node->is_element(); node = svg_dom_style_parent(node, scope)) {
+    for (DomNode* node = element; query->matcher && node && node->is_element(); node = svg_dom_style_parent(node, scope)) {
         DomElement* current = node->as_element();
-        const char* inline_text = current->get_attribute("style");
-        size_t inline_count = 0;
-        CssDeclaration** inline_declarations = inline_text
-            ? css_parse_declaration_list_text(inline_text, strlen(inline_text), pool, &inline_count)
+        SvgStyleEntry* entry = svg_style_entry(query, dom_element_to_element(current));
+        const char* inline_text = entry ? nullptr : current->get_attribute("style");
+        size_t inline_count = entry ? entry->inline_count : 0;
+        CssDeclaration** inline_declarations = entry ? entry->inline_declarations : inline_text
+            ? css_parse_declaration_list_text(inline_text, strlen(inline_text), query->pool, &inline_count)
             : nullptr;
         CssDeclaration declaration = {};
         bool selected = css_select_element_declaration((CssEngine*)doc->services.cached_css_engine,
-            matcher, current, doc->stylesheets, (size_t)doc->stylesheet_count,
+            query->matcher, current, doc->stylesheets, (size_t)doc->stylesheet_count,
             inline_declarations, inline_count, name, &declaration);
-        const char* value = selected ? svg_resolve_property_declaration(&query, current, name, &declaration, scope)
+        const char* value = selected ? svg_resolve_property_declaration(query, current, name, &declaration, scope)
             : dom_element_is_svg(current) &&
                 !css_property_is_identity_shorthand(css_property_code_from_name(name))
                 ? svg_animation_attribute(current, name) : nullptr;
@@ -1029,7 +1056,7 @@ const char* svg_get_dom_presentation_property(DomElement* element, const char* n
                 svg_transform_sample = strcmp(name, "transform") == 0;
             }
         }
-        if (!selected) value = svg_resolve_attribute_variables(&query, current, name, value, scope);
+        if (!selected) value = svg_resolve_attribute_variables(query, current, name, value, scope);
         bool inherit = value && (str_icmp_cstr(value, "inherit") == 0 ||
             (inherits && str_icmp_cstr(value, "unset") == 0) ||
             (strcmp(name, "color") == 0 && str_icmp_cstr(value, "currentColor") == 0));
@@ -1038,18 +1065,68 @@ const char* svg_get_dom_presentation_property(DomElement* element, const char* n
             if (!inherit) value = svg_property_initial(name, &property_inherits);
         }
         if (value && !inherit) {
-            if (owned_value) *owned_value = mem_strdup(value, MEM_CAT_RENDER);
-            else str_copy(buffer, buffer_size, value, strlen(value));
-            found = !owned_value || *owned_value;
             // animateTransform emits SVG transform syntax even when targeting the CSS property.
             if (from_css) *from_css = selected && !svg_transform_sample;
             if (declaring_element) *declaring_element = current;
-            break;
+            return value;
         }
         if (!inherits && !inherit) break;
     }
-    if (matcher) selector_matcher_destroy(matcher);
-    mem_pool_destroy(pool);
+    return nullptr;
+}
+
+const char* svg_get_dom_presentation_property(DomElement* element, const char* name,
+    bool inherits, char* buffer, size_t buffer_size, bool* from_css,
+    char** owned_value, DomElement** declaring_element, const SvgDomStyleScope* scope) {
+    if (from_css) *from_css = false;
+    if (owned_value) *owned_value = nullptr;
+    if (declaring_element) *declaring_element = nullptr;
+    if (!element || !element->doc || !name || (!owned_value && (!buffer || !buffer_size))) return nullptr;
+    // use instances have a different inheritance chain; do not retain their computed values.
+    SvgPaintHostStyle* shared = !scope ? svg_host_style(element->doc) : nullptr;
+    SvgStyleContext local = {};
+    SvgStyleContext* query = shared ? &shared->style : &local;
+    if (!shared) {
+        if (!svg_style_begin(query)) return nullptr;
+        query->document = element->doc;
+        query->engine = (CssEngine*)element->doc->services.cached_css_engine;
+        query->matcher = selector_matcher_create(query->pool);
+        if (query->matcher) state_configure_selector_matcher((DocState*)element->doc->state, query->matcher);
+    }
+    // SMIL queries base values while assembling a sample; they must neither
+    // read nor populate the cache of completed animated presentation values.
+    SvgStyleEntry* entry = shared && !svg_animation_is_sampling(element->doc)
+        ? svg_style_entry(query, dom_element_to_element(element)) : nullptr;
+    uint64_t generation = svg_animation_source_generation(element->doc, dom_element_to_element(element), element);
+    SvgStyleProperty* property = entry ? entry->computed_properties : nullptr;
+    while (property && (property->inherits != inherits || property->animation_generation != generation ||
+        strcmp(property->name, name) != 0)) property = property->next;
+    bool css = false;
+    DomElement* owner = nullptr;
+    const char* value = property ? property->value
+        : svg_dom_resolve_property(query, element, name, inherits, &css, &owner, scope);
+    if (!property && entry) {
+        property = (SvgStyleProperty*)pool_calloc(query->pool, sizeof(SvgStyleProperty));
+        if (property) {
+            property->name = pool_strdup(query->pool, name);
+            // animation samples are borrowed from a pool that can change between queries.
+            property->value = value ? pool_strdup(query->pool, value) : nullptr;
+            property->animation_generation = generation;
+            property->inherits = inherits;
+            property->from_css = css;
+            property->declaring_element = owner;
+            property->next = entry->computed_properties;
+            entry->computed_properties = property;
+        }
+    }
+    if (from_css) *from_css = property ? property->from_css : css;
+    if (declaring_element) *declaring_element = property ? property->declaring_element : owner;
+    bool found = value != nullptr;
+    if (value) {
+        if (owned_value) { *owned_value = mem_strdup(value, MEM_CAT_RENDER); found = *owned_value != nullptr; }
+        else str_copy(buffer, buffer_size, value, strlen(value));
+    }
+    if (!shared) svg_style_destroy(&local);
     return found ? owned_value ? *owned_value : buffer : nullptr;
 }
 
@@ -2092,8 +2169,9 @@ RdtMatrix svg_resolve_local_transform(const char* value, bool from_css,
     const char* origin, const Bound* reference_box, const SvgLengthContext* lengths) {
     RdtMatrix result = rdt_matrix_identity();
     if (!value || !reference_box || !lengths) return result;
-    Pool* pool = mem_pool_create(nullptr, MEM_ROLE_RENDER, "render.svg.transform");
-    if (!pool) return result;
+    // SVG transform attributes parse directly; only CSS syntax/origins need a parser pool.
+    Pool* pool = from_css || origin ? mem_pool_create(nullptr, MEM_ROLE_RENDER, "render.svg.transform") : nullptr;
+    if ((from_css || origin) && !pool) return result;
     TransformProp transform = {};
     if (origin) {
         // a supplied origin's omitted axis is center; SVG's unsupplied origin is zero.
@@ -2133,7 +2211,7 @@ RdtMatrix svg_resolve_local_transform(const char* value, bool from_css,
             result = rdt_matrix_multiply(&result, &from);
         }
     }
-    mem_pool_destroy(pool);
+    if (pool) mem_pool_destroy(pool);
     return result;
 }
 
@@ -4716,7 +4794,16 @@ static void svg_text_trim_end(SvgTextLayout* layout) {
     if (run->len == 0) layout->run_count--;
 }
 
-// Resolves each distinct family/weight/slant once per text element.
+static bool svg_text_font_path(SvgInlineRenderContext* ctx, SvgTextFont* font,
+    const SvgTextStyle* style, bool allow_embedded_font) {
+    const char* family = style->font_family[0] ? style->font_family : SVG_DEFAULT_FONT_FAMILY;
+    if (!font->path) font->path = lam::own(resolve_svg_font_path(family,
+        font->name, sizeof(font->name), ctx->font_ctx, style->font_weight,
+        style->font_slant, allow_embedded_font));
+    return font->path != nullptr;
+}
+
+// resolve each distinct family/weight/slant once per text element.
 static SvgTextFont* svg_text_font(SvgTextLayout* layout, int style_index, bool allow_embedded_font) {
     const SvgTextStyle* style = &layout->styles[style_index];
     for (int i = 0; i < layout->style_count; i++) {
@@ -4735,9 +4822,10 @@ static SvgTextFont* svg_text_font(SvgTextLayout* layout, int style_index, bool a
     // Name the default family itself: the ThorVG face key found for it (e.g.
     // "Arial Bold") is a file name that font_resolve does not know as a family.
     const char* family = style->font_family[0] ? style->font_family : SVG_DEFAULT_FONT_FAMILY;
-    font->path = lam::own(resolve_svg_font_path(family, font->name, sizeof(font->name),
-        ctx->font_ctx, style->font_weight, style->font_slant, allow_embedded_font));
-    if (!font->path && (!ctx->font_ctx || allow_embedded_font)) return nullptr;
+    // native measurement and glyph painting use FontContext's cached family resolution;
+    // search for a ThorVG font file only when that backend actually needs one.
+    if ((!ctx->font_ctx || allow_embedded_font) &&
+        !svg_text_font_path(ctx, font, style, allow_embedded_font)) return nullptr;
 
     // Radiant resolves the full authored family list, including collection and fallback faces.
     font->family = ctx->font_ctx && !allow_embedded_font ? family
@@ -5058,8 +5146,9 @@ static void svg_text_place(SvgTextLayout* layout) {
 // ThorVG fallback for runs the glyph path cannot draw (no active raster
 // context, e.g. SVG pictures). ThorVG places text by its top edge.
 static void svg_text_draw_tvg_run(SvgInlineRenderContext* ctx, const RdtMatrix* m,
-                                  const SvgTextFont* font, const SvgTextStyle* style,
+                                  SvgTextFont* font, const SvgTextStyle* style,
                                   const char* text, float x, float y, float fit_width) {
+    if (!svg_text_font_path(ctx, font, style, false)) return;
     Tvg_Paint paint = create_text_segment(text, x, y, font->path,
                                           font->name[0] ? font->name : nullptr,
                                           style->font_size, style->fill);
@@ -5280,24 +5369,40 @@ static uint32_t svg_text_sample_color_warp(void* data, float x, float y) {
         sample->bitmap->height, sample->bitmap->pitch, px - .5f, py - .5f, false, true);
 }
 
-static void svg_text_draw_color_glyph(SvgTextLayout* layout, SvgTextRun* run,
-    const RdtMatrix* matrix) {
+static bool svg_text_draw_bitmap_glyph(SvgTextLayout* layout, SvgTextRun* run,
+    const RdtMatrix* matrix, bool native_text = false) {
     SvgInlineRenderContext* ctx = layout->ctx;
-    if (ctx->fill_none || !ctx->paint_list) return;
+    if (ctx->fill_none || !ctx->paint_list) return false;
     const SvgTextStyle* style = &layout->styles[run->style];
     FontStyleDesc descriptor = svg_text_font_descriptor(style, run->font->family);
     FontHandle* primary = font_resolve(ctx->font_ctx, &descriptor);
+    if (native_text && primary) {
+        // SVG images may share a host font context with a different device ratio.
+        float ratio = font_handle_get_physical_size_px(primary) / font_handle_get_size_px(primary);
+        descriptor.size_px *= matrix->e22 / ratio;
+        font_handle_release(primary);
+        primary = font_resolve(ctx->font_ctx, &descriptor);
+    }
     FontHandle* fallback = svg_text_fallback_face(layout, primary, &descriptor, run->codepoint);
     FontHandle* font = fallback ? fallback : primary;
     if (fallback && primary) font_handle_release(primary);
-    if (!font) return;
+    if (!font) return false;
     const GlyphBitmap* bitmap = font_render_glyph(font, run->codepoint, GLYPH_RENDER_NORMAL);
-    if (!bitmap || bitmap->pixel_mode != GLYPH_PIXEL_BGRA || !bitmap->buffer) {
-        font_handle_release(font); return;
+    if (!bitmap || (!native_text && bitmap->pixel_mode != GLYPH_PIXEL_BGRA) || !bitmap->buffer ||
+        (native_text && bitmap->bitmap_scale > 0.0f && fabsf(bitmap->bitmap_scale - 1.0f) > 0.00001f)) {
+        font_handle_release(font); return false;
     }
     ImageSurface* image = image_surface_create(bitmap->width, bitmap->height);
-    if (!image) { font_handle_release(font); return; }
-    for (int row = 0; row < bitmap->height; row++) {
+    if (!image) { font_handle_release(font); return false; }
+    if (native_text) {
+        // isolated SVG font contexts die after recording; keep owned pixels for retained replay.
+        memset(image->pixels, 0, (size_t)image->pitch * image->height);
+        DlDrawGlyph glyph = {};
+        glyph.bitmap = *bitmap; glyph.color = ctx->fill_color;
+        glyph.is_color_emoji = bitmap->pixel_mode == GLYPH_PIXEL_BGRA;
+        glyph.clip = {0.0f, 0.0f, (float)image->width, (float)image->height};
+        dl_replay_draw_glyph(image, &glyph);
+    } else for (int row = 0; row < bitmap->height; row++) {
         const uint8_t* source = bitmap->buffer + (ptrdiff_t)row * bitmap->pitch;
         uint32_t* pixels = (uint32_t*)((uint8_t*)image->pixels + (size_t)row * image->pitch);
         for (int column = 0; column < bitmap->width; column++) {
@@ -5311,6 +5416,11 @@ static void svg_text_draw_color_glyph(SvgTextLayout* layout, SvgTextRun* run,
     RdtMatrix placement = {scale * run->glyph_scale_x, 0.0f,
         run->x + (float)bitmap->bearing_x * scale * run->glyph_scale_x,
         0.0f, scale, run->y - (float)bitmap->bearing_y * scale, 0.0f, 0.0f, 1.0f};
+    if (native_text) {
+        placement = rdt_matrix_translate(
+            lroundf(matrix->e11 * run->x + matrix->e13 + (float)bitmap->bearing_x),
+            lroundf(matrix->e22 * run->y + matrix->e23 - (float)bitmap->bearing_y));
+    }
     const SvgTextPathData* stretch_data = svg_text_stretch_data(layout, run);
     if (run->paint_warped && stretch_data && run->paint_path) {
         SvgTextColorWarpSample sample = {};
@@ -5339,14 +5449,28 @@ static void svg_text_draw_color_glyph(SvgTextLayout* layout, SvgTextRun* run,
                 ctx->fill_opacity * ctx->opacity, nullptr, svg_text_sample_color_warp, &sample, "svg_color_glyph_warp");
         image_surface_destroy(image);
     } else {
-        placement = rdt_matrix_multiply(matrix, &placement);
+        if (!native_text) placement = rdt_matrix_multiply(matrix, &placement);
         // glyph-cache storage is borrowed; the retained image owns its converted pixels.
         PaintRecordTarget destination = svg_record_target(ctx);
-        paint_record_draw_image_resource(&destination, "svg_color_glyph_image", image, 0.0f, 0.0f,
+        paint_record_draw_image_resource(&destination, "svg_glyph_image", image, 0.0f, 0.0f,
             (float)image->width, (float)image->height,
             clamp_byte_round(255.0f * ctx->fill_opacity * ctx->opacity), &placement, image_surface_destroy);
     }
     font_handle_release(font);
+    return true;
+}
+
+static bool svg_text_can_paint_native(const SvgTextLayout* layout, const SvgTextRun* run,
+    const RdtMatrix* matrix) {
+    const SvgInlineRenderContext* ctx = layout->ctx;
+    // retain vector geometry for exports, paint servers, strokes, and transformed glyphs.
+    return g_svg_active_rdcon && !ctx->semantic_target && ctx->font_ctx &&
+        (ctx->fill_paint.kind == SVG_PAINT_COLOR || ctx->fill_paint.kind == SVG_PAINT_CURRENT_COLOR) && ctx->stroke_none &&
+        !run->on_path && !run->paint_warped &&
+        fabsf(run->glyph_scale_x - 1.0f) < 0.00001f &&
+        matrix->e11 > 0.0f && matrix->e22 > 0.0f &&
+        fabsf(matrix->e12) < 0.00001f && fabsf(matrix->e21) < 0.00001f &&
+        fabsf(matrix->e11 - matrix->e22) <= matrix->e22 * 0.00001f;
 }
 
 static void svg_text_draw_decoration(SvgTextLayout* layout, int style_index, bool after_glyphs) {
@@ -5462,10 +5586,16 @@ static void svg_text_draw_style_content(SvgTextLayout* layout, int style_index,
         if (style->hidden || run->path_hidden || !run->font || run->glyph_scale_x <= 0.0f || str_all(text, run->len, str_is_space)) continue;
         RdtMatrix matrix = run->paint_warped ? ctx->transform : svg_text_run_transform(run, &ctx->transform);
         RdtPath* path = run->paint_path;
+        if (svg_text_can_paint_native(layout, run, &matrix) &&
+            svg_text_draw_bitmap_glyph(layout, run, &matrix, true)) {
+            if (path) rdt_path_free(path);
+            run->paint_path = nullptr;
+            continue;
+        }
         if (path) {
             float left, top, right, bottom;
             if (rdt_path_get_bounds(path, &left, &top, &right, &bottom)) {
-                if (run->color_bitmap) svg_text_draw_color_glyph(layout, run, &matrix);
+                if (run->color_bitmap) svg_text_draw_bitmap_glyph(layout, run, &matrix);
                 draw_svg_fill_stroke(ctx, path, style->element, &matrix,
                     layout->paint_box.left, layout->paint_box.top,
                     layout->paint_box.right - layout->paint_box.left,
@@ -5580,16 +5710,19 @@ static bool svg_text_geometry_scope_open(SvgTextGeometryScope* scope, DomElement
     scope->arena = mem_arena_create(nullptr, MEM_ROLE_RENDER, "render.svg.text_geometry");
     mem_scratch_init(nullptr, &scope->scratch, scope->arena, MEM_ROLE_RENDER, "render.svg.text_geometry.scratch");
     Element* source = dom_element_to_element(svg);
-    if (!svg_style_init(&scope->style, source, lengths->viewport_width,
-        lengths->viewport_height, svg->doc)) return false;
+    // a live DOM query shares the document cascade; indexing the entire host
+    // for each glyph made pointer targeting quadratic in document size.
+    SvgPaintHostStyle* shared = svg_host_style(svg->doc);
+    SvgStyleContext* style = shared ? &shared->style : &scope->style;
+    if (!shared && !svg_style_init_host(style, svg->doc)) return false;
     scope->source_path = radiant_document_resource_base(svg->doc, MEM_CAT_FONT);
-    if (scope->owns_fonts) scope->fonts = svg_style_font_context(&scope->style,
+    if (scope->owns_fonts) scope->fonts = svg_style_font_context(style,
         scope->source_path, 1.0f, false, nullptr);
     if (!scope->fonts) return false;
     SvgInlineRenderContext* ctx = &scope->context;
     ctx->svg_root = lam::up(source); ctx->id_scope = lam::up(render_svg_reference_scope(svg));
     ctx->source_path = lam::up(scope->source_path); ctx->resource_scratch = lam::up(&scope->scratch);
-    ctx->font_ctx = lam::up(scope->fonts); ctx->style_context = lam::up(&scope->style);
+    ctx->font_ctx = lam::up(scope->fonts); ctx->style_context = lam::up(style);
     ctx->transform = rdt_matrix_identity();
     ctx->current_viewport_w = lengths->viewport_width; ctx->current_viewport_h = lengths->viewport_height;
     ctx->inherited_font_size = 16.0f; ctx->inherited_font_weight = 400;
@@ -5665,6 +5798,23 @@ static RdtPath* svg_text_geometry_collect(SvgTextGeometryScope* scope, DomElemen
 RdtPath* svg_text_geometry_path(DomElement* target, const SvgLengthContext* lengths,
     FontContext* font_context) {
     if (!target || !target->doc || !lengths) return nullptr;
+    UiContext* ui = (UiContext*)target->doc->js.host_ui_context;
+    SvgPaintHostStyle* shared = font_context && ui && font_context == ui->font_ctx &&
+        !svg_animation_is_sampling(target->doc) ? svg_host_style(target->doc) : nullptr;
+    SvgStyleEntry* entry = shared ? svg_style_entry(&shared->style, dom_element_to_element(target)) : nullptr;
+    uint64_t animation = entry ? svg_animation_source_generation(target->doc,
+        dom_element_to_element(target), target) : 0;
+    // logical text cells survive scrolling. The document snapshot owns them;
+    // callers receive a clone and can free it independently of later mutations.
+    if (entry && entry->text_hit_path && entry->text_hit_context == font_context && entry->text_hit_animation == animation &&
+        entry->text_hit_fonts == font_context_resource_generation(font_context) &&
+        entry->text_hit_lengths.viewport_width == lengths->viewport_width &&
+        entry->text_hit_lengths.viewport_height == lengths->viewport_height &&
+        entry->text_hit_lengths.font_size == lengths->font_size &&
+        entry->text_hit_lengths.x_height == lengths->x_height) {
+        RdtPath* cached = rdt_path_clone(entry->text_hit_path);
+        if (cached) return cached;
+    }
     DomElement* text = target;
     for (DomNode* node = target; node && node->is_element(); node = node->parent) {
         DomElement* element = node->as_element();
@@ -5678,6 +5828,14 @@ RdtPath* svg_text_geometry_path(DomElement* target, const SvgLengthContext* leng
     bool ready = svg_text_geometry_scope_open(&scope, svg, lengths, font_context);
     RdtPath* path = ready ? svg_text_geometry_collect(&scope, target, text, nullptr) : nullptr;
     svg_text_geometry_scope_close(&scope);
+    if (entry && path) {
+        if (entry->text_hit_path) rdt_path_free(entry->text_hit_path);
+        entry->text_hit_path = rdt_path_clone(path);
+        entry->text_hit_context = font_context;
+        entry->text_hit_lengths = *lengths;
+        entry->text_hit_animation = animation;
+        entry->text_hit_fonts = font_context_resource_generation(font_context);
+    }
     return path;
 }
 
@@ -6286,8 +6444,12 @@ static void svg_draw_foreign_object_html(SvgInlineRenderContext* ctx, Element*, 
     SvgForeignObjectPaint* content = (SvgForeignObjectPaint*)data;
     RasterRenderContext html = *content->context;
     html.transform = rdt_matrix_identity(); html.has_transform = false;
+    html.has_transform_3d = false;
     html.block = {}; html.block.clip = content->clip;
     html.clip_shape_depth = 0; html.has_dirty_union = false; html.dirty_tracker = nullptr;
+    // foreignObject records in local coordinates; outer projected clip bounds
+    // belong to the host surface and cannot constrain this capture.
+    html.vector_clip_depth = 0;
     html.retained_dl_cache = nullptr; html.element_marker_suppression_depth++;
     html.dl = ctx->dl; html.paint_list = ctx->paint_list; html.raster_scale = content->scale;
     ScratchMark mark = scratch_mark(&html.scratch);
@@ -6834,6 +6996,28 @@ static RdtSvgFilterProgram* svg_filter_compile(SvgInlineRenderContext* ctx, cons
     }
     if (!program->valid) log_error("SVG_FILTER_COMPILE: filter contains an unavailable primitive or exceeds graph limits");
     return program;
+}
+
+RdtSvgFilterProgram* render_css_svg_filter_compile(DomDocument* document, const char* url,
+    ScratchArena* scratch) {
+    SvgPaintHostStyle* host = svg_host_style(document);
+    if (!host || !url || !scratch) return nullptr;
+    if (!host->animation_prepared) {
+        svg_animation_prepare(document->root);
+        host->animation_prepared = true;
+    }
+    SvgInlineRenderContext context = {};
+    context.svg_root = context.id_scope = lam::up(dom_element_render_source(document->root));
+    context.style_context = lam::up(&host->style);
+    context.resource_scratch = lam::up(scratch);
+    context.current_viewport_w = document->viewport.width;
+    context.current_viewport_h = document->viewport.height;
+    context.raster_scale = 1.0f;
+    lam::Temp<char> base(radiant_document_resource_base(document, MEM_CAT_RENDER));
+    context.source_path = lam::up(base.get());
+    SvgResourceReference reference = svg_resolve_reference(&context, url);
+    if (!reference.element || !svg_effect_resource_is(&reference, "filter")) return nullptr;
+    return svg_filter_compile(&context, &reference);
 }
 
 struct SvgFilterImageContext : RdtSvgFilterHost {
@@ -7508,11 +7692,11 @@ bool render_svg_subscene_with_paint(const PaintSvgSubscene* subscene,
             image->alpha_mode = resolved.straight_alpha ? IMAGE_ALPHA_STRAIGHT : IMAGE_ALPHA_PREMULTIPLIED;
             paint_draw_image(&paint, resolved.pixels, resolved.width, resolved.height, resolved.stride,
                 p.dst_x, p.dst_y, p.dst_w, p.dst_h, p.opacity,
-                p.has_transform ? &p.transform : nullptr, image); break;
+                p.has_transform ? &p.transform : nullptr, image, p.scale_mode); break;
         }
         case DL_PUSH_CLIP: {
             const DlPushClip& p = item.push_clip;
-            paint_push_clip(&paint, p.path, p.has_transform ? &p.transform : nullptr); break;
+            paint_push_clip(&paint, p.path, p.has_transform ? &p.transform : nullptr, p.rule); break;
         }
         case DL_POP_CLIP: paint_pop_clip(&paint); break;
         case DL_BEGIN_ELEMENT:
@@ -7854,6 +8038,9 @@ static bool svg_layer_render_pass(RasterRenderContext* rdcon, Element* svg_elem,
     DisplayList* saved_dl = rdcon->dl;
     PaintList* saved_paint_list = rdcon->paint_list;
     Bound saved_clip = rdcon->block.clip;
+    int saved_vector_clip_depth = rdcon->vector_clip_depth;
+    Bound saved_vector_clip_bounds[RDT_MAX_CLIP_SHAPES];
+    memcpy(saved_vector_clip_bounds, rdcon->vector_clip_bounds, sizeof(saved_vector_clip_bounds));
     RdtMatrix saved_transform = rdcon->transform;
     bool saved_has_transform = rdcon->has_transform;
     DirtyTracker* saved_dirty_tracker = rdcon->dirty_tracker;
@@ -7861,6 +8048,8 @@ static bool svg_layer_render_pass(RasterRenderContext* rdcon, Element* svg_elem,
     rdcon->dl = lam::up(&dl);
     rdcon->paint_list = lam::up(&paint_list);
     rdcon->block.clip = {0.0f, 0.0f, (float)width, (float)height};
+    // the isolated layer starts a new clip coordinate space.
+    rdcon->vector_clip_depth = 0;
     rdcon->has_transform = false;
     rdcon->dirty_tracker = nullptr;
     rdcon->has_dirty_union = false;
@@ -7879,6 +8068,8 @@ static bool svg_layer_render_pass(RasterRenderContext* rdcon, Element* svg_elem,
     rdcon->dl = lam::up(saved_dl);
     rdcon->paint_list = lam::up(saved_paint_list);
     rdcon->block.clip = saved_clip;
+    rdcon->vector_clip_depth = saved_vector_clip_depth;
+    memcpy(rdcon->vector_clip_bounds, saved_vector_clip_bounds, sizeof(saved_vector_clip_bounds));
     rdcon->transform = saved_transform;
     rdcon->has_transform = saved_has_transform;
     rdcon->dirty_tracker = lam::up(saved_dirty_tracker);
@@ -8063,9 +8254,14 @@ static bool svg_layer_paint(RasterRenderContext* rdcon, DomElement* dom_elem, El
                  roundf(content_rect->y * device_scale + offset_y),
                  (float)surface->width, (float)surface->height };
     Bound clip = view_geometry_intersect_bound_rect(rdcon->block.clip, dst);
+    // the cached layer already includes the device transform; vector-backed
+    // blits must not apply the ancestor translation/scale a second time.
+    bool saved_has_transform = rdcon->has_transform;
+    rdcon->has_transform = false;
     render_painter_blit_surface_scaled(rdcon, surface, nullptr, rdcon->ui_context->surface,
                                        &dst, &clip, SCALE_MODE_NEAREST, rdcon->clip_shapes,
                                        rdcon->clip_shape_depth, 255);
+    rdcon->has_transform = saved_has_transform;
     return true;
 }
 

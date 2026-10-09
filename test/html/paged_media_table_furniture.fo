@@ -1,0 +1,41 @@
+<?xml version="1.0"?>
+<fo:root xmlns:fo="http://www.w3.org/1999/XSL/Format" font-family="Arial" font-size="7.5pt" line-height="9pt" border-collapse="separate">
+  <fo:layout-master-set><fo:simple-page-master master-name="sheet" page-width="225pt" page-height="120pt" margin="7.5pt"><fo:region-body region-name="main"/></fo:simple-page-master></fo:layout-master-set>
+  <fo:page-sequence master-reference="sheet" force-page-count="no-force">
+    <fo:flow flow-name="main">
+      <fo:table table-omit-header-at-break="true" table-omit-footer-at-break="true" table-layout="fixed" width="100%" border-collapse="inherit">
+        <fo:table-column column-width="30pt" background-color="#ccffff"/>
+        <fo:table-column column-width="proportional-column-width(1)" background-color="#ffe0cc"/>
+        <fo:table-column column-width="proportional-column-width(2)" background-color="#e0ccff"/>
+        <fo:table-header background-color="#cce0ff"><fo:table-row><fo:table-cell number-columns-spanned="3"><fo:block>Repeated header</fo:block></fo:table-cell></fo:table-row></fo:table-header>
+        <fo:table-footer background-color="#ddffdd"><fo:table-row><fo:table-cell number-columns-spanned="3"><fo:block>Repeated footer</fo:block></fo:table-cell></fo:table-row></fo:table-footer>
+        <fo:table-body>
+          <fo:table-row><fo:table-cell number-rows-spanned="2" background-color="#ffdddd" display-align="center"><fo:block>Both</fo:block></fo:table-cell><fo:table-cell><fo:block>First</fo:block></fo:table-cell><fo:table-cell><fo:block>One</fo:block></fo:table-cell></fo:table-row>
+          <fo:table-row><fo:table-cell number-columns-spanned="2"><fo:block>Second row spans two columns</fo:block></fo:table-cell></fo:table-row>
+          <fo:table-row><fo:table-cell><fo:block linefeed-treatment="preserve" white-space-treatment="preserve">A
+B
+C
+D
+E
+F
+G
+H
+I
+J
+K
+L
+M
+N
+O
+P
+Q
+R
+S
+T
+U
+V</fo:block></fo:table-cell><fo:table-cell><fo:block>Middle</fo:block></fo:table-cell><fo:table-cell><fo:block>Side</fo:block></fo:table-cell></fo:table-row>
+        </fo:table-body>
+      </fo:table>
+    </fo:flow>
+  </fo:page-sequence>
+</fo:root>

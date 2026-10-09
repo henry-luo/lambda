@@ -4,18 +4,18 @@
 // A pattern value prints as its canonical source (printing one crashed), and
 // `...` is any string, newlines included (S16.8.6v3).
 
-type Code = \(a{3})
-type Digits = \(d+)
-type Ident = \symbol(a w*)
+type Code = \("\a"{3})
+type Digits = \("\d"+)
+type Ident = \('\a' '\w'*)
 
 fn shout(s: Digits) => s ++ "!"
-fn width(s: \(a+)) => len(s)
+fn width(s: \("\a"+)) => len(s)
 fn sym(s: Ident) => s
 fn pass(s: Digits) => s
 fn admit(s) { let code: Code = s; code }
 
 '1. declarations and parameters'
-let code: \(a{3}) = "abc"
+let code: \("\a"{3}) = "abc"
 let named: Code = "xyz"
 "1.1"; [code]
 "1.2"; [named]
@@ -27,17 +27,17 @@ let named: Code = "xyz"
 "1.8"; [admit("ab1")]
 
 '2. a pattern as a type value'
-let t: type = \(d+)
+let t: type = \("\d"+)
 let u: type = Digits
 "2.1"; ("12" is t)
 "2.2"; ("12" is u)
-"2.3"; [\(d+), Digits, \symbol(a w*)]
+"2.3"; [\("\d"+), Digits, \('\a' '\w'*)]
 
 '3. `...` is any string'
-"3.1"; ("a\nb" is \(...))
+"3.1"; ("a\nb" is \("" ...))
 "3.2"; ("<a\nb>" is \("<" ... ">"))
 
 '4. counts take the type spellings, blanks allowed'
-"4.1"; ("12345" is \(d{2, 5}))
-"4.2"; ("123456" is \(d{2, 5}))
-"4.3"; ("11" is \(d{ 2+ }))
+"4.1"; ("12345" is \("\d"{2, 5}))
+"4.2"; ("123456" is \("\d"{2, 5}))
+"4.3"; ("11" is \("\d"{ 2+ }))

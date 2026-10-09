@@ -12,6 +12,7 @@ struct TypesetRegionConstraints {
     float reference_height; // containing region height remains stable as the reservation budget shrinks
     bool occupied; // body material outside this region may leave it with a zero budget
     float minimum_height; // reserve this extent only when material actually occupies the region
+    bool retain_tail; // leave real material for a later region; producers choose a legal nonterminal prefix
 };
 struct TypesetRegionSlice {
     TypesetResume end;

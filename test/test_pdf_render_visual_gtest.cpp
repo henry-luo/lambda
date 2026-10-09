@@ -508,7 +508,8 @@ static int pdf_page_count(const char* pdf_path) {
     return atoi(pages);
 }
 
-static bool render_reference_page(const PdfFileInfo* pdf, int page, char* out_png, size_t out_size) {
+static bool render_reference_page(const PdfFileInfo* pdf, int page, char* out_png, size_t out_size,
+        bool crop_box = false, bool natural_96dpi = false) {
     char prefix[PATH_MAX];
     char qpdf[PATH_MAX + 8];
     char qprefix[PATH_MAX + 8];
@@ -520,9 +521,11 @@ static bool render_reference_page(const PdfFileInfo* pdf, int page, char* out_pn
 
     shell_quote(pdf->path, qpdf, sizeof(qpdf));
     shell_quote(prefix, qprefix, sizeof(qprefix));
-    snprintf(cmd, sizeof(cmd),
-             "pdftoppm -png -f %d -l %d -singlefile -scale-to-x %d -scale-to-y -1 %s %s 2>&1",
-             page, page, RENDER_WIDTH, qpdf, qprefix);
+    char resolution[64];
+    if (natural_96dpi) snprintf(resolution, sizeof(resolution), "-r 96");
+    else snprintf(resolution, sizeof(resolution), "-scale-to-x %d -scale-to-y -1", RENDER_WIDTH);
+    snprintf(cmd, sizeof(cmd), "pdftoppm -png -f %d -l %d -singlefile %s %s %s %s 2>&1",
+        page, page, crop_box ? "-cropbox" : "", resolution, qpdf, qprefix);
     CommandResult result = run_command_capture(cmd);
     if (result.exit_code != 0 || !file_exists(out_png)) {
         fprintf(stderr, "Reference render failed for %s page %d:\n%s\n", pdf->path, page, result.output);
@@ -531,9 +534,13 @@ static bool render_reference_page(const PdfFileInfo* pdf, int page, char* out_pn
     return true;
 }
 
-static bool write_lambda_page_script(const PdfFileInfo* pdf, int page_index, int height, const char* script_path) {
+static bool write_lambda_page_script(const PdfFileInfo* pdf, int page_index, int height, const char* script_path,
+        bool natural_aspect = false) {
     char pdf_path_escaped[PATH_MAX * 2];
     char script[4096];
+    char svg_height[32];
+    if (natural_aspect) snprintf(svg_height, sizeof(svg_height), "auto");
+    else snprintf(svg_height, sizeof(svg_height), "%dpx", height);
 
     lambda_string_escape(pdf->path, pdf_path_escaped, sizeof(pdf_path_escaped));
     snprintf(script, sizeof(script),
@@ -544,16 +551,17 @@ static bool write_lambda_page_script(const PdfFileInfo* pdf, int page_index, int
              "<html\n"
              "  <head\n"
              "    <meta charset: \"utf-8\">\n"
-             "    <style \"html,body{margin:0;padding:0;background:white;overflow:hidden;}svg{display:block;width:%dpx;height:%dpx;}\">\n"
+             "    <style \"html,body{margin:0;padding:0;background:white;overflow:hidden;}svg{display:block;width:%dpx;height:%s;}\">\n"
              "  >\n"
              "  <body page>\n"
              ">\n",
-             pdf_path_escaped, page_index, RENDER_WIDTH, height);
+             pdf_path_escaped, page_index, RENDER_WIDTH, svg_height);
 
     return write_file_all(script_path, script, strlen(script));
 }
 
-static bool render_lambda_png_page(const PdfFileInfo* pdf, int page_index, int height, char* out_png, size_t out_size) {
+static bool render_lambda_png_page(const PdfFileInfo* pdf, int page_index, int height, char* out_png, size_t out_size,
+        bool natural_aspect = false) {
     char script_path[PATH_MAX];
     char qscript[PATH_MAX + 8];
     char qpng[PATH_MAX + 8];
@@ -563,7 +571,7 @@ static bool render_lambda_png_page(const PdfFileInfo* pdf, int page_index, int h
     snprintf(out_png, out_size, "%s/%s_page_%02d_lambda.png", PDF_TEMP_DIR, pdf->base, page_index + 1);
     unlink(out_png);
 
-    if (!write_lambda_page_script(pdf, page_index, height, script_path)) return false;
+    if (!write_lambda_page_script(pdf, page_index, height, script_path, natural_aspect)) return false;
 
     shell_quote(script_path, qscript, sizeof(qscript));
     shell_quote(out_png, qpng, sizeof(qpng));
@@ -634,8 +642,23 @@ static bool write_png_rgba(const char* path, const unsigned char* pixels, int wi
     return true;
 }
 
+static int sample_png_component(const ImageData& image, int x, int y, int channel, int radius) {
+    int total = 0, count = 0;
+    for (int dy = -radius; dy <= radius; dy++) {
+        for (int dx = -radius; dx <= radius; dx++) {
+            int px = x + dx, py = y + dy;
+            if (px < 0 || py < 0 || px >= image.width || py >= image.height) continue;
+            size_t offset = ((size_t)py * image.width + px) * 4;
+            total += composite_over_white(image.pixels[offset + channel], image.pixels[offset + 3]);
+            count++;
+        }
+    }
+    return total / count;
+}
+
 static void compare_pngs(const char* reference_path, const char* lambda_path,
-                         const char* diff_path, double* mismatch_percent, double* mean_abs_delta) {
+                         const char* diff_path, double* mismatch_percent, double* mean_abs_delta,
+                         int sample_radius = 0) {
     ImageData ref;
     ImageData got;
     ASSERT_TRUE(load_png_rgba(reference_path, &ref)) << "failed to load reference PNG: " << reference_path;
@@ -655,8 +678,8 @@ static void compare_pngs(const char* reference_path, const char* lambda_path,
         int ref_rgb[3];
         int got_rgb[3];
         for (int c = 0; c < 3; c++) {
-            ref_rgb[c] = composite_over_white(ref.pixels[off + c], ref.pixels[off + 3]);
-            got_rgb[c] = composite_over_white(got.pixels[off + c], got.pixels[off + 3]);
+            ref_rgb[c] = sample_png_component(ref, (int)(i % ref.width), (int)(i / ref.width), c, sample_radius);
+            got_rgb[c] = sample_png_component(got, (int)(i % got.width), (int)(i / got.width), c, sample_radius);
             int delta = abs(ref_rgb[c] - got_rgb[c]);
             if (delta > max_delta) max_delta = delta;
             total_delta += (uint64_t)delta;
@@ -1178,6 +1201,183 @@ TEST(RenderOutputParity, PagedRowSpansMatchExplicitStackedCellsAcrossRepeatedFur
             strbuf_free(html); ASSERT_TRUE(rendered);
         }
         expect_paged_pair_output_parity(previews, pdfs, 5, 5);
+    }
+}
+
+// hand-authored page dictionaries and streams keep the PDF import oracle independent of our writer.
+static bool write_fixed_pdf_fixture(const char* path, int count, bool labels = false) {
+    StrBuf* pdf = strbuf_new(); StrBuf* stream = strbuf_new();
+    int objects = 3 + 2 * count + (labels ? 3 : 0);
+    size_t* offsets = (size_t*)calloc((size_t)objects, sizeof(size_t));
+    if (!pdf || !stream || !offsets) { strbuf_free(pdf); strbuf_free(stream); free(offsets); return false; }
+    strbuf_append_str(pdf, "%PDF-1.4\n");
+    offsets[1] = pdf->length; strbuf_append_str(pdf, "1 0 obj\n<< /Type /Catalog /Pages 2 0 R ");
+    if (labels) strbuf_append_format(pdf, "/PageLabels %d 0 R ", 3 + 2 * count);
+    strbuf_append_str(pdf, ">>\nendobj\n");
+    offsets[2] = pdf->length; strbuf_append_format(pdf, "2 0 obj\n<< /Type /Pages /Count %d /Kids [", count);
+    for (int i = 0; i < count; i++) strbuf_append_format(pdf, "%d 0 R ", 3 + 2 * i);
+    strbuf_append_str(pdf, "] >>\nendobj\n");
+    struct Geometry { float media[4], crop[4]; int rotation; };
+    const Geometry geometries[] = {{{-10, -20, 100, 80}, {0, -10, 90, 50}, 0},
+        {{-10, -20, 100, 80}, {-15, -10, 90, 90}, 90},
+        {{10, 20, 160, 120}, {20, 30, 150, 100}, 180},
+        {{-50, 10, 130, 90}, {-40, 20, 120, 80}, -90}};
+    for (int i = 0; i < count; i++) {
+        const Geometry& g = geometries[i % 4];
+        offsets[3 + 2 * i] = pdf->length;
+        strbuf_append_format(pdf, "%d 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [%g %g %g %g] ",
+            3 + 2 * i, g.media[0], g.media[1], g.media[2], g.media[3]);
+        for (const char* box : {"CropBox", "BleedBox", "TrimBox", "ArtBox"})
+            strbuf_append_format(pdf, "/%s [%g %g %g %g] ", box, g.crop[0], g.crop[1], g.crop[2], g.crop[3]);
+        strbuf_append_format(pdf, "/Rotate %d /Resources << >> /Contents %d 0 R >>\nendobj\n", g.rotation, 4 + 2 * i);
+        strbuf_reset(stream);
+        strbuf_append_format(stream, "0.8 0.9 1 rg %g %g %g %g re f\n1 0 0 rg %g %g 25 20 re f\n"
+            "0 0.6 0 rg %g %g 25 20 re f\n0 0 1 rg %g %g 25 20 re f\n",
+            g.media[0], g.media[1], g.media[2] - g.media[0], g.media[3] - g.media[1],
+            g.media[0] + 15.0f, g.media[1] + 15.0f, g.media[2] - 40.0f, g.media[3] - 35.0f,
+            g.media[0] + 30.0f, g.media[1] + 30.0f);
+        offsets[4 + 2 * i] = pdf->length;
+        strbuf_append_format(pdf, "%d 0 obj\n<< /Length %zu >>\nstream\n", 4 + 2 * i, stream->length);
+        strbuf_append_str_n(pdf, stream->str, stream->length); strbuf_append_str(pdf, "endstream\nendobj\n");
+    }
+    if (labels) {
+        int first = 3 + 2 * count;
+        offsets[first] = pdf->length;
+        strbuf_append_format(pdf, "%d 0 obj\n<< /Kids [%d 0 R %d 0 R] >>\nendobj\n", first, first + 1, first + 2);
+        offsets[first + 1] = pdf->length;
+        strbuf_append_format(pdf, "%d 0 obj\n<< /Limits [0 2] /Nums [0 << /S /r /St 4 >> 2 << /S /D /P (Section-) /St 8 >>] >>\nendobj\n", first + 1);
+        offsets[first + 2] = pdf->length;
+        strbuf_append_format(pdf, "%d 0 obj\n<< /Limits [4 5] /Nums [4 << /S /A /St 27 >> 5 << /P <FEFF4E2DD83DDE00> >>] >>\nendobj\n", first + 2);
+    }
+    size_t xref = pdf->length;
+    strbuf_append_format(pdf, "xref\n0 %d\n0000000000 65535 f \n", objects);
+    for (int i = 1; i < objects; i++) strbuf_append_format(pdf, "%010zu 00000 n \n", offsets[i]);
+    strbuf_append_format(pdf, "trailer\n<< /Size %d /Root 1 0 R >>\nstartxref\n%zu\n%%%%EOF\n", objects, xref);
+    bool written = write_file_all(path, pdf->str, pdf->length);
+    strbuf_free(pdf); strbuf_free(stream); free(offsets); return written;
+}
+
+// PDF paths and CSS colors pass through 8-bit channels; page-boundary antialiasing differs across rasterizers.
+static void expect_fixed_pdf_interior_parity(const char* reference, const char* actual) {
+    ImageData expected = {}, got = {}; ASSERT_TRUE(load_png_rgba(reference, &expected)); ASSERT_TRUE(load_png_rgba(actual, &got));
+    ASSERT_EQ(expected.width, got.width); ASSERT_EQ(expected.height, got.height);
+    size_t compared = 0, mismatched = 0;
+    for (int y = 1; y + 1 < expected.height; y++) for (int x = 1; x + 1 < expected.width; x++) {
+        size_t center = ((size_t)y * expected.width + x) * 4; bool uniform = true;
+        for (int dy = -1; dy <= 1; dy++) for (int dx = -1; dx <= 1; dx++) {
+            size_t neighbor = ((size_t)(y + dy) * expected.width + x + dx) * 4;
+            if (memcmp(expected.pixels + center, expected.pixels + neighbor, 4)) uniform = false;
+        }
+        if (!uniform) continue;
+        compared++;
+        for (int channel = 0; channel < 3; channel++) if (abs((int)expected.pixels[center + channel] - (int)got.pixels[center + channel]) > 1) {
+            mismatched++; break;
+        }
+    }
+    EXPECT_GT(compared, 100u); EXPECT_EQ(mismatched, 0u) << actual;
+    image_free(expected.pixels); image_free(got.pixels);
+}
+
+TEST(RenderOutputParity, FixedPdfPagesPreserveSourceBoxesQuarterTurnsAndCommonVectorPaint) {
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity")); ASSERT_TRUE(ensure_dir(PDF_REF_DIR)); ASSERT_TRUE(command_exists("pdftoppm"));
+    PdfFileInfo source = {}, exported = {};
+    snprintf(source.path, sizeof(source.path), "temp/render_output_parity/fixed_pdf_source.pdf");
+    snprintf(source.base, sizeof(source.base), "fixed_pdf_source");
+    snprintf(exported.path, sizeof(exported.path), "temp/render_output_parity/fixed_pdf_export.pdf");
+    snprintf(exported.base, sizeof(exported.base), "fixed_pdf_export");
+    ASSERT_TRUE(write_fixed_pdf_fixture(source.path, 4));
+    ASSERT_TRUE(render_document_fixture(source.path, exported.path, "--paged --pages 1 --block-remote-resources"));
+    EXPECT_EQ(pdf_page_count(exported.path), 4); EXPECT_TRUE(file_contains_text(exported.path, "/Rotate -90"));
+    EXPECT_TRUE(file_contains_text(exported.path, "/MediaBox [-10 -20 100 80]"));
+    EXPECT_TRUE(file_contains_text(exported.path, "/CropBox [-15 -10 90 90]"));
+    EXPECT_TRUE(file_contains_text(exported.path, "/BleedBox [20 30 150 100]"));
+    EXPECT_TRUE(file_contains_text(exported.path, "/TrimBox [20 30 150 100]"));
+    EXPECT_TRUE(file_contains_text(exported.path, "/ArtBox [-40 20 120 80]"));
+    EXPECT_FALSE(file_contains_text(exported.path, "/Subtype /Image"));
+    for (int page = 1; page <= 4; page++) {
+        SCOPED_TRACE(page); char reference[PATH_MAX], result[PATH_MAX], preview[PATH_MAX], args[128];
+        ASSERT_TRUE(render_reference_page(&source, page, reference, sizeof(reference), true, true));
+        ASSERT_TRUE(render_reference_page(&exported, page, result, sizeof(result), true, true));
+        expect_fixed_pdf_interior_parity(reference, result);
+        snprintf(preview, sizeof(preview), "temp/render_output_parity/fixed_pdf_preview_%d.png", page);
+        snprintf(args, sizeof(args), "--paged --thumbnail-page %d --block-remote-resources", page);
+        ASSERT_TRUE(render_document_fixture(source.path, preview, args)); expect_fixed_pdf_interior_parity(reference, preview);
+    }
+}
+
+TEST(RenderOutputParity, FixedPdfImportsCompleteSequencesRangesAndFailWithoutTruncatingOutputs) {
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity")); ASSERT_TRUE(command_exists("pdfinfo"));
+    const char* source = "temp/render_output_parity/fixed_pdf_53.pdf";
+    const char* complete = "temp/render_output_parity/fixed_pdf_complete.pdf";
+    const char* selected = "temp/render_output_parity/fixed_pdf_selected.pdf";
+    const char* failure = "temp/render_output_parity/fixed_pdf_budget_failure.pdf";
+    ASSERT_TRUE(write_fixed_pdf_fixture(source, 53));
+    ASSERT_TRUE(render_document_fixture(source, complete, "--paged --block-remote-resources")); EXPECT_EQ(pdf_page_count(complete), 53);
+    ASSERT_TRUE(render_document_fixture(source, selected, "--paged --import-pages 53,2-3,2 --import-page-limit 3 --export-pages 1,3"));
+    EXPECT_EQ(pdf_page_count(selected), 2); EXPECT_TRUE(file_contains_text(selected, "/Rotate 90")); EXPECT_TRUE(file_contains_text(selected, "/Rotate 0"));
+    ASSERT_TRUE(write_file_all(failure, "existing-output", strlen("existing-output")));
+    EXPECT_FALSE(render_document_fixture(source, failure, "--paged --import-page-limit 52")); EXPECT_TRUE(file_contains_text(failure, "existing-output"));
+    EXPECT_FALSE(render_document_fixture(source, failure, "--paged --import-pages 54")); EXPECT_TRUE(file_contains_text(failure, "existing-output"));
+    EXPECT_FALSE(render_document_fixture(source, failure, "--paged --import-pages 1-3 --import-page-limit 2")); EXPECT_TRUE(file_contains_text(failure, "existing-output"));
+}
+
+TEST(RenderOutputParity, FixedPdfSourceLabelsSurviveImportAndExportSelections) {
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity")); ASSERT_TRUE(command_exists("pdfinfo"));
+    const char* source = "temp/render_output_parity/fixed_pdf_labels.pdf";
+    const char* complete = "temp/render_output_parity/fixed_pdf_labels_complete.pdf";
+    const char* selected = "temp/render_output_parity/fixed_pdf_labels_selected.pdf";
+    ASSERT_TRUE(write_fixed_pdf_fixture(source, 6, true));
+    ASSERT_TRUE(render_document_fixture(source, complete, "--paged")); EXPECT_EQ(pdf_page_count(complete), 6);
+    EXPECT_TRUE(file_contains_text(complete, "0 << /P (iv)")); EXPECT_TRUE(file_contains_text(complete, "2 << /P (Section-8)"));
+    EXPECT_TRUE(file_contains_text(complete, "4 << /P (AA)")); EXPECT_TRUE(file_contains_text(complete, "5 << /P <FEFF4E2DD83DDE00>"));
+    ASSERT_TRUE(render_document_fixture(source, selected, "--paged --import-pages 2,5-6 --export-pages 1,3"));
+    EXPECT_EQ(pdf_page_count(selected), 2);
+    EXPECT_TRUE(file_contains_text(selected, "0 << /P (v)")); EXPECT_TRUE(file_contains_text(selected, "1 << /P <FEFF4E2DD83DDE00>"));
+    EXPECT_FALSE(file_contains_text(selected, "/P (AA)"));
+}
+
+TEST(RenderOutputParity, FoAndNativePageControlsSharePreviewAndPhysicalPdfPages) {
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
+    ASSERT_TRUE(ensure_dir(PDF_REF_DIR)); ASSERT_TRUE(command_exists("pdftoppm"));
+    struct Fixture { const char* name; int pages; const char* media_box; };
+    const Fixture fixtures[] = {{"basic", 2, "/MediaBox [0 0 300.00 420.00]"},
+        {"flow_traits", 3, "/MediaBox [0 0 300.00 180.00]"},
+        {"sequences", 5, "/MediaBox [0 0 150.00 60.00]"},
+        {"folios", 6, "/MediaBox [0 0 225.00 75.00]"},
+        {"regions", 2, "/MediaBox [0 0 180.00 135.00]"},
+        {"notes", 3, "/MediaBox [0 0 150.00 75.00]"},
+        {"whitespace", 2, "/MediaBox [0 0 225.00 120.00]"},
+        {"tables", 3, "/MediaBox [0 0 225.00 120.00]"},
+        {"alignment", 3, "/MediaBox [0 0 165.00 105.00]"},
+        {"display_alignment", 3, "/MediaBox [0 0 165.00 105.00]"},
+        {"graphics", 3, "/MediaBox [0 0 180.00 135.00]"},
+        {"lists", 3, "/MediaBox [0 0 180.00 120.00]"},
+        {"lists_context", 3, "/MediaBox [0 0 180.00 120.00]"},
+        {"cell_flow", 3, "/MediaBox [0 0 150.00 120.00]"},
+        {"indents", 3, "/MediaBox [0 0 150.00 120.00]"},
+        {"indents_auto", 3, "/MediaBox [0 0 150.00 120.00]"},
+        {"corresponding", 3, "/MediaBox [0 0 150.00 120.00]"},
+        {"conditional", 3, "/MediaBox [0 0 150.00 120.00]"},
+        {"conditional_components", 3, "/MediaBox [0 0 150.00 120.00]"},
+        {"conditional_visible", 3, "/MediaBox [0 0 150.00 120.00]"},
+        {"proportions", 3, "/MediaBox [0 0 225.00 120.00]"},
+        {"proportions_columns", 3, "/MediaBox [0 0 225.00 120.00]"},
+        {"numbered_columns", 3, "/MediaBox [0 0 225.00 120.00]"},
+        {"table_furniture", 3, "/MediaBox [0 0 225.00 120.00]"}};
+    const char* extensions[] = {"fo", "rpd"};
+    for (const Fixture& fixture : fixtures) {
+        SCOPED_TRACE(fixture.name);
+        char previews[2][PATH_MAX]; PdfFileInfo pdfs[2] = {};
+        for (size_t i = 0; i < 2; i++) {
+            char source[PATH_MAX]; snprintf(source, sizeof(source), "test/html/paged_media_%s.%s", fixture.name, extensions[i]);
+            snprintf(previews[i], sizeof(previews[i]), "temp/render_output_parity/fo_native_%s_%zu.png", fixture.name, i);
+            snprintf(pdfs[i].path, sizeof(pdfs[i].path), "temp/render_output_parity/fo_native_%s_%zu.pdf", fixture.name, i);
+            snprintf(pdfs[i].base, sizeof(pdfs[i].base), "fo_native_%s_%zu", fixture.name, i);
+            ASSERT_TRUE(render_document_fixture(source, previews[i], "--paged --block-remote-resources --page-grid 1x3"));
+            ASSERT_TRUE(render_document_fixture(source, pdfs[i].path, "--paged --block-remote-resources"));
+            EXPECT_TRUE(file_contains_text(pdfs[i].path, fixture.media_box));
+        }
+        expect_paged_pair_output_parity(previews, pdfs, 2, fixture.pages);
     }
 }
 
@@ -8235,6 +8435,37 @@ static void parse_pdf_render_args(int* argc, char** argv) {
     }
     argv[out] = NULL;
     *argc = out;
+}
+
+TEST(PdfRenderVisual, EmbeddedType1MathMatchesPoppler) {
+    if (!command_exists("pdftoppm")) GTEST_SKIP() << "Poppler is required for the PDF reference";
+    ASSERT_TRUE(ensure_dir("temp"));
+    ASSERT_TRUE(ensure_dir(PDF_TEMP_DIR));
+    ASSERT_TRUE(ensure_dir(PDF_REF_DIR));
+    ASSERT_TRUE(ensure_dir(PDF_DIFF_DIR));
+    PdfFileInfo pdf = {};
+    snprintf(pdf.path, sizeof(pdf.path), "test/input/math_intensive_test.pdf");
+    snprintf(pdf.base, sizeof(pdf.base), "math_intensive_type1");
+    const int pages = pdf_page_count(pdf.path);
+    ASSERT_GT(pages, 1);
+    // page 2 exercises display sums/integrals, size-specific delimiters, accents and braces.
+    for (int page = 1; page <= pages; page++) {
+        char reference[PATH_MAX], actual[PATH_MAX], diff[PATH_MAX];
+        ASSERT_TRUE(render_reference_page(&pdf, page, reference, sizeof(reference)));
+        ImageData ref = {};
+        ASSERT_TRUE(load_png_rgba(reference, &ref));
+        int height = ref.height;
+        image_free(ref.pixels);
+        // Poppler rounds up the bitmap height; keep the SVG's intrinsic ratio to avoid a subpixel y inset.
+        ASSERT_TRUE(render_lambda_png_page(&pdf, page - 1, height, actual, sizeof(actual), true));
+        snprintf(diff, sizeof(diff), "%s/type1_math_page_%d.png", PDF_DIFF_DIR, page);
+        double mismatch = 100.0, delta = 255.0;
+        // compare ink geometry with one-pixel antialias smoothing: Poppler hints text, SVG paints outlines.
+        compare_pngs(reference, actual, diff, &mismatch, &delta, 1);
+        char property[64]; snprintf(property, sizeof(property), "page_%d_mismatch_percent", page);
+        RecordProperty(property, mismatch);
+        EXPECT_LT(mismatch, 0.75) << "page " << page << "; inspect " << diff;
+    }
 }
 
 TEST(PdfRenderVisual, CompareLambdaPagesAgainstPopplerReference) {

@@ -1402,14 +1402,61 @@ TEST_F(NegativeScriptTest, OldBareStringPatternSyntaxIsRejected) {
         "Unexpected syntax near");
 }
 
-TEST_F(NegativeScriptTest, SymbolLiteralInsidePatternReportsDomainDiagnostic) {
-    ExpectErrorMessage("test/lambda/negative/semantic/string_pattern_symbol_literal.ls",
-        "pattern bodies are content-only; use \\symbol(...) for the symbol domain");
+// S11.1.2v4: inferred domains are checked on every execution tier.
+
+TEST_F(NegativeScriptTest, PatternDomainlessChar) {
+    ExpectRejectedOnEveryTier("test/lambda/negative/semantic/pattern_domainless_char.ls", false,
+        "a pattern needs a string or symbol domain");
 }
 
-TEST_F(NegativeScriptTest, PatternClassBindingCollisionReportsReservedName) {
+TEST_F(NegativeScriptTest, PatternDomainlessSequence) {
+    ExpectRejectedOnEveryTier("test/lambda/negative/semantic/pattern_domainless_sequence.ls", false,
+        "a pattern needs a string or symbol domain");
+}
+
+TEST_F(NegativeScriptTest, PatternDomainlessGroup) {
+    ExpectRejectedOnEveryTier("test/lambda/negative/semantic/pattern_domainless_group.ls", false,
+        "a pattern needs a string or symbol domain");
+}
+
+TEST_F(NegativeScriptTest, PatternMixedUnion) {
+    ExpectRejectedOnEveryTier("test/lambda/negative/semantic/pattern_mixed_union.ls", false,
+        "a pattern cannot mix string and symbol domains");
+}
+
+TEST_F(NegativeScriptTest, PatternMixedReference) {
+    ExpectRejectedOnEveryTier("test/lambda/negative/semantic/pattern_mixed_reference.ls", false,
+        "a pattern cannot mix string and symbol domains");
+}
+
+TEST_F(NegativeScriptTest, PatternMixedRange) {
+    ExpectRejectedOnEveryTier("test/lambda/negative/semantic/pattern_mixed_range.ls", false,
+        "a pattern cannot mix string and symbol domains");
+}
+
+TEST_F(NegativeScriptTest, PatternRetiredTag) {
+    ExpectRejectedOnEveryTier("test/lambda/negative/semantic/pattern_retired_tag.ls", false,
+        "Unexpected syntax near");
+}
+
+TEST_F(NegativeScriptTest, PatternEscapeOutside) {
+    ExpectRejectedOnEveryTier("test/lambda/negative/semantic/pattern_escape_outside.ls", false,
+        "Unexpected syntax near");
+}
+
+TEST_F(NegativeScriptTest, PatternBareClass) {
+    ExpectRejectedOnEveryTier("test/lambda/negative/semantic/pattern_bare_class.ls", false,
+        "`d` is not defined before this pattern");
+}
+
+TEST_F(NegativeScriptTest, MixedQuotedPatternDomainsAreRejected) {
+    ExpectErrorMessage("test/lambda/negative/semantic/string_pattern_symbol_literal.ls",
+        "a pattern cannot mix string and symbol domains");
+}
+
+TEST_F(NegativeScriptTest, BarePatternClassLetterResolvesAsAName) {
     ExpectErrorMessage("test/lambda/negative/semantic/string_pattern_reserved_class.ls",
-        "pattern class 'd' is reserved inside pattern islands");
+        "`d` is not a pattern");
 }
 
 // S11.1.2v3: island `!` complements a single-character set; any other operand
@@ -1434,9 +1481,9 @@ TEST_F(NegativeScriptTest, PatternIntersectionNamesWholePatternForm) {
 
 // A name a pattern cannot use had compiled to nothing, so the pattern silently
 // matched only "". Each is now a compile error at the name.
-TEST_F(NegativeScriptTest, PatternUnknownNameHintsJoinedClasses) {
+TEST_F(NegativeScriptTest, PatternUnknownNameIsUndefined) {
     ExpectErrorMessage("test/lambda/negative/semantic/string_pattern_unknown_name.ls",
-        "`dw` is not defined before this pattern; separate classes with a space");
+        "`dw` is not defined before this pattern");
 }
 
 TEST_F(NegativeScriptTest, PatternForwardReferenceIsUndefined) {

@@ -3,6 +3,7 @@
 #include "view_tree_css.hpp"
 
 struct PaintList;
+struct RadiantSourceOrigin;
 struct PagedLayoutOptions {
     uint32_t max_pages, max_depth;
     size_t max_nodes, max_items;
@@ -18,6 +19,7 @@ struct PagedLayoutDiagnostic {
     const char* reason;
     uint32_t relaxed_line_minima, relaxed_avoidance;
     uint32_t reference_passes;
+    const RadiantSourceOrigin* origin;
 };
 PagedLayoutOptions paged_layout_options_default();
 TypesetStatus layout_secondary_view(ViewTree* tree, const PagedLayoutOptions* options,

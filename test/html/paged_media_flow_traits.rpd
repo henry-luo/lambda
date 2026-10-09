@@ -1,0 +1,26 @@
+<?xml version="1.0"?>
+<r:page-document r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" r:line-stacking-strategy="max-height" xmlns:r="urn:lambda:radiant:page" style="margin:0; font-family:Arial; font-size:12pt; line-height:20pt; color:#16304a; white-space:normal">
+  <r:master-set r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics">
+    <r:page-master r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" name="report" style="size:300pt 180pt; margin:18pt">
+      <r:region r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" role="body" name="body" style="background-color:#f3f1ff; overflow:hidden"/>
+    </r:page-master>
+  </r:master-set>
+  <r:page-sequence r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" master-reference="report">
+    <r:flow r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" region-name="body">
+      <div r:block-inline-geometry="reference" r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" style="line-height:40pt" r:keep-with-next.within-page="90">A: stronger keep</div>
+      <div r:block-inline-geometry="reference" r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" style="line-height:40pt" r:keep-with-next.within-page="10">B: weaker keep</div>
+      <div r:block-inline-geometry="reference" r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" style="line-height:40pt" r:keep-with-next.within-column="100">C: keep with D</div>
+      <div r:block-inline-geometry="reference" r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" style="line-height:40pt">D: same page as C</div>
+    </r:flow>
+  </r:page-sequence>
+  <r:page-sequence r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" master-reference="report">
+    <r:flow r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" region-name="body">
+      <div r:block-inline-geometry="reference" r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" r:space-after.minimum="10pt" r:space-after.optimum="30pt" r:space-after.maximum="40pt">Flexible space below</div>
+      <div r:block-inline-geometry="reference" r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics">First line</div>
+      <div r:block-inline-geometry="reference" r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics">Second line</div>
+      <div r:block-inline-geometry="reference" r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics">Third line</div>
+      <div r:block-inline-geometry="reference" r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics">Fourth line</div>
+      <div r:block-inline-geometry="reference" r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics">Fifth line</div>
+    </r:flow>
+  </r:page-sequence>
+</r:page-document>

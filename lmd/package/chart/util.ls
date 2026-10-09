@@ -197,3 +197,11 @@ pub fn field_extent(arr, field: string) {
 pub fn field_values(arr, field: string) {
     unique_vals(arr |> ~[field])
 }
+
+// Reversible value identity avoids collisions across independent SVG resources and generated views.
+pub fn resource_key(value) {
+    let serialized=format(value,{type:"json",compact:true});
+    let encoded=if (serialized is error) serialized else format(binary(serialized),'json');
+    if (encoded is error) encoded else replace(replace(replace(slice(encoded,1,len(encoded)-1),"+","-"),"/","_"),"=","")
+}
+pub fn binding_key(value) => replace(replace(resource_key(value),"_","_u"),"-","_h")

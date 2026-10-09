@@ -1,5 +1,6 @@
 #include "render.hpp"
 #include "../lib/mem_grow.h"
+#include <string.h>
 
 
 RdtMatrix rdt_matrix_scale(float sx, float sy) {
@@ -7,6 +8,29 @@ RdtMatrix rdt_matrix_scale(float sx, float sy) {
     return m;
 }
 #define RENDER_PATH_KAPPA 0.5522847498f
+
+bool render_path_border_side_points(Rect rect, size_t side, float width, float before, float after, float points[8]) {
+    float right = rect.x + rect.width, bottom = rect.y + rect.height;
+    // adjacent sides share the diagonal from each outer corner to its inner corner.
+    const float corners[4][8] = {
+        {rect.x, rect.y, right, rect.y, right - after, rect.y + width, rect.x + before, rect.y + width},
+        {right - width, rect.y + before, right, rect.y, right, bottom, right - width, bottom - after},
+        {rect.x + before, bottom - width, right - after, bottom - width, right, bottom, rect.x, bottom},
+        {rect.x, rect.y, rect.x + width, rect.y + before, rect.x + width, bottom - after, rect.x, bottom}
+    };
+    if (side >= 4 || !points) return false;
+    memcpy(points, corners[side], sizeof(corners[side])); return true;
+}
+
+RdtPath* render_path_create_border_side(Rect rect, size_t side, float width, float before, float after) {
+    float points[8];
+    if (!render_path_border_side_points(rect, side, width, before, after, points)) return nullptr;
+    RdtPath* path = rdt_path_new();
+    if (!path) return nullptr;
+    rdt_path_move_to(path, points[0], points[1]);
+    for (size_t i = 2; i < 8; i += 2) rdt_path_line_to(path, points[i], points[i + 1]);
+    rdt_path_close(path); return path;
+}
 
 typedef struct {
     RdtPath* destination;

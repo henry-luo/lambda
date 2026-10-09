@@ -1,0 +1,127 @@
+{
+  "map": "E1M1",
+  "tick_hz": 35,
+  "segments": [
+    {
+      "keys": [
+        "w"
+      ],
+      "ticks": 95
+    },
+    {
+      "keys": [
+        "w",
+        "d"
+      ],
+      "ticks": 7
+    },
+    {
+      "keys": [
+        "s"
+      ],
+      "ticks": 8
+    },
+    {
+      "keys": [
+        "d"
+      ],
+      "ticks": 20
+    },
+    {
+      "keys": [
+        "w"
+      ],
+      "ticks": 48
+    },
+    {
+      "keys": [
+        "d"
+      ],
+      "ticks": 20
+    },
+    {
+      "keys": [
+        "w"
+      ],
+      "ticks": 7
+    },
+    {
+      "keys": [
+        "d"
+      ],
+      "ticks": 10
+    },
+    {
+      "keys": [
+        "ArrowRight"
+      ],
+      "ticks": 18
+    },
+    {
+      "keys": [
+        "e"
+      ],
+      "ticks": 1
+    },
+    {
+      "keys": [],
+      "ticks": 35
+    },
+    {
+      "keys": [
+        "w"
+      ],
+      "ticks": 20
+    },
+    {
+      "keys": [
+        "w"
+      ],
+      "ticks": 50
+    },
+    {
+      "keys": [
+        "d"
+      ],
+      "ticks": 30
+    },
+    {
+      "keys": [
+        "Control"
+      ],
+      "ticks": 70
+    },
+    {
+      "keys": [
+        "w"
+      ],
+      "ticks": 56
+    },
+    {
+      "keys": [
+        "d"
+      ],
+      "ticks": 18
+    },
+    {
+      "keys": [
+        "a"
+      ],
+      "ticks": 12
+    },
+    {
+      "keys": [],
+      "ticks": 1400
+    },
+    {
+      "keys": [
+        "s"
+      ],
+      "ticks": 9
+    },
+    {
+      "keys": [],
+      "ticks": 800
+    }
+  ]
+}

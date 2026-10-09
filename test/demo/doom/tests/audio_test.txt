@@ -1,0 +1,19 @@
+{
+  initial: {
+    generation: 3,
+    seen_id: -1,
+    voices: []
+  },
+  ordered: [{
+      id: 21,
+      sound: "DSPISTOL",
+      volume: 1
+    }, {
+      id: 22,
+      sound: "DSPISTOL",
+      volume: 1
+    }],
+  consumed: [],
+  pause: [true, false, true, false, false],
+  budget: 32
+}

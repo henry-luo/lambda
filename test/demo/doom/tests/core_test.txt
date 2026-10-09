@@ -1,0 +1,19 @@
+{
+  polygon: [true, false, false, false, true],
+  segment: [true, false, 25],
+  ray: [5, null, null],
+  coordinates: {
+    x: 10,
+    y: -41,
+    z: -20
+  },
+  bounds: {
+    min_x: -10,
+    max_x: 30,
+    min_y: -40,
+    max_y: 20
+  },
+  lighting: ["brightness(calc(var(--light, 1) * 1))", "brightness(calc(var(--light, 1) * 0.5))", "brightness(calc(var(--light, 1) * 0.15))"],
+  spectator_light: "brightness(calc(var(--light, 1) * 1))",
+  input: [2, 0, 1, 0, "use", "", 1]
+}

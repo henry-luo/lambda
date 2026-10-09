@@ -645,8 +645,9 @@ static void note_listener_type(const char* type, int delta) {
     }
 }
 
-static bool has_listener_type(const char* type) {
-    if (!_type_counts || !type) return false;
+bool dom_event_type_has_js_listeners(const char* type) {
+    // Lambda-only documents need not have initialized the JS listener registry.
+    if (!dom_event_rt_state || !_type_counts || !type) return false;
     EventTypeCountEntry lookup = {type, 0};
     const EventTypeCountEntry* found = EventTypeCountMap::get(_type_counts, lookup);
     return found && found->count > 0;
@@ -2010,6 +2011,12 @@ extern "C" Item js_create_native_mouse_event(const char* type,
     return js_create_trusted_native_event(type, init, js_ctor_mouse_event_fn);
 }
 JS_FORWARD_VOID( js_event_set_timestamp, (Item event, double timestamp_ms), event_set_double, (event, "timeStamp", timestamp_ms))
+extern "C" void dom_event_set_movement(Item event, double movement_x, double movement_y) {
+    RootFrame roots(1);
+    Rooted<Item> retained(roots, event);
+    event_set_double(retained.get(), "movementX", movement_x);
+    event_set_double(retained.get(), "movementY", movement_y);
+}
 
 extern "C" Item js_create_native_pointer_event(const char* type,
     double client_x, double client_y,
@@ -2566,7 +2573,7 @@ Item dom_dispatch_event(Item elem_item, Item event_item) {
     #define _STOP_IMM event_flag_get(event_item, "__stop_imm")
     // F18: masks are captured once for this cascade. A miss means the
     // corresponding store cannot contribute at any path node this dispatch.
-    bool js_live = has_listener_type(type);
+    bool js_live = dom_event_type_has_js_listeners(type);
     bool author_live = dom_engine_author_template_event_live(type);
     bool author_cascade = author_live &&
         radiant_author_template_dispatch_begin(event_item);

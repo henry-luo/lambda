@@ -789,11 +789,15 @@ void render_svg_filter_resample_source(const RdtSvgFilterRun* run, const ImageSu
     for (int row = 0; row < output->height; row++) for (int column = 0; column < output->width; column++) {
         float x = (grid.left + (float)column + .5f) / run->density;
         float y = (grid.top + (float)row + .5f) / run->density;
-        rdt_matrix_transform_point(&run->frame, x, y, &x, &y);
+        if (!rdt_matrix_project_point(&run->frame, x, y, &x, &y)) {
+            pixels[(size_t)row * (size_t)output->width + (size_t)column] = 0;
+            continue;
+        }
         x -= source_bounds.left + .5f; y -= source_bounds.top + .5f;
         pixels[(size_t)row * (size_t)output->width + (size_t)column] = !source || x < -.5f || y < -.5f ||
             x >= (float)source->width - .5f || y >= (float)source->height - .5f ? 0 :
-            render_pixel_sample_bilinear((uint8_t*)source->pixels, source->width, source->height, source->pitch, x, y, false, true);
+            render_pixel_sample_bilinear((uint8_t*)source->pixels, source->width, source->height, source->pitch,
+                x, y, false, true, source->alpha_mode == IMAGE_ALPHA_STRAIGHT);
     }
 }
 

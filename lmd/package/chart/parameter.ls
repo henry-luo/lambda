@@ -7,12 +7,15 @@ import streams: .event_stream
 
 pub fn selection(definition) => if (definition.select is string) {type: definition.select} else definition.select
 pub fn definitions(spec, inherited_encoding = null) {
+    if (spec._compiled_definitions != null) spec._compiled_definitions else {
     let node = if (spec is element) parse.parse_top(spec) else spec;
     let encoding = {*:parse.attributes(inherited_encoding), *:parse.attributes(node.encoding)};
-    [*[for (definition in node.params) {*:parse.attributes(definition), _encoding: encoding}],
-        for (child in [*(if (node.children != null) node.children else []),
-            *(if (node.layer != null) node.layer else []), if (node.template != null) node.template] where child != null)
+    [*[for (definition in node.params) {*:parse.attributes(definition), _encoding: if (definition._encoding != null) definition._encoding else encoding}],
+        for (child in [*(if (node.children != null and node._factory_catalogue==null) node.children else []),
+            *(if (node.layer != null and node._factory_catalogue==null) node.layer else []), if (node.template != null and node._factory_catalogue==null) node.template,
+            for (frame in node.timeline.keyframes) frame.spec,*node._factory_catalogue] where child != null)
             for (definition in definitions(child, encoding)) definition]
+    }
 }
 
 pub fn validate(definitions) {
@@ -26,7 +29,7 @@ pub fn validate(definitions) {
                 error("chart: selection type must be point or interval")
             else if (select.resolve != null and not contains(["global", "union", "intersect"], select.resolve))
                 error("chart: selection resolve must be global, union or intersect")
-            else if (select.type == "interval" and select.fields != null)
+            else if (select.type == "interval" and select.fields != null and definition._axis != true)
                 error("chart: interval selection projects encodings, not fields")
             else if (definition.bind == "scales" and select.type != "interval")
                 error("chart: scale binding requires an interval selection")
@@ -82,6 +85,11 @@ pub fn initial(definitions) {
                         if (definition._encoding[key].field != null) definition._encoding[key].field else string(key),
                         [for (bound in extent) initial_bound(bound)]]) part])}}]) part])}
 }
+pub fn reconcile(definitions,st) {
+    let defaults=initial(definitions);
+    if (defaults is error) defaults else if (st==null) defaults else {*:st,values:{*:defaults.values,
+        *:map([for (key,value in st.values where contains(definitions |> ~.name,string(key))) for (part in [string(key),value]) part])}}
+}
 
 fn computed(definitions, values, pending, remaining) {
     if (len(pending) == 0) values
@@ -108,6 +116,7 @@ fn store_matches(value, store, row) => if (value.kind == "point") any([for (tupl
     else all([for (field, extent in store, let actual = if (extent.kind == "discrete" or row[field] is number) row[field]
         else calendar.timestamp(row[field])) row[field] != null and not (actual is error) and
         (if (extent.kind == "discrete") contains(extent.values, row[field])
+         else if (extent.kind == "wrapped") actual >= extent.start or actual <= extent.end
          else actual >= min(extent) and actual <= max(extent))])
 pub fn empty(value) => value == null or len([for (view_key, store in value.stores where len(store) > 0) store]) == 0
 
@@ -146,6 +155,8 @@ pub fn extent(value, field) {
     let extents = [for (view_key, store in value.stores where store[field] != null) store[field]];
     if (len(extents) == 0) null
     else if (extents[0].kind == "discrete") util.unique_vals([for (item in extents) for (v in item.values) v])
+    else if (any(extents |> ~.kind=="wrapped")) if (len(extents)==1) extents[0]
+        else {kind:"resolved",resolve:value.resolve,extents:extents}
     else if (value.resolve == "intersect") [max(extents |> min(~)), min(extents |> max(~))]
     else [min(extents |> min(~)), max(extents |> max(~))]
 }
@@ -180,9 +191,12 @@ pub fn encoding(encoding, values, definitions, st, view_key, interactive) {
             else bind_channel(channel, values, encoding, definitions, st, view_key, interactive, string(key))]) part])
 }
 
-fn bind_channel(channel, values, encoding, definitions, st, view_key, interactive, key) {
+fn bind_channel(raw, values, encoding, definitions, st, view_key, interactive, key) {
+    let channel = if (key=="position" and raw is string) {field:raw,dtype:"quantitative"} else raw;
     let bound = map([for (key, value in parse.attributes(channel)) for (part in [string(key),
         if (string(key) == "condition") (if (value is array) [for (condition in value) predicate(condition, values)] else predicate(value, values))
+        // Internal event metadata already contains bound parameter definitions.
+        else if (starts_with(string(key),"_")) value
         else option(value, values, encoding)]) part]);
     let scaled = [for (definition in definitions,
         let selected = st.values[definition.name],
@@ -205,5 +219,45 @@ pub fn transforms(steps, values) {
         else step]
 }
 
-pub fn target_attributes(ctx, row) => if (ctx._interactive != true) {} else
-    {'data-chart-row': format(parse.attributes(row), 'json'), 'data-chart-view': ctx._view_path}
+pub fn target_attributes(ctx, row) => if (ctx._interactive != true and ctx._animate == null and ctx._requires_key!=true) {} else
+    {'data-chart-row': format(parse.attributes(row), 'json'), 'data-chart-view': ctx._view_path,
+        *:(if (ctx._part != null) {'data-chart-part': ctx._part} else {}),
+        *:(if (ctx.encoding.key != null) {'data-chart-key': format(parse.channel_value(ctx.encoding.key,row), 'json'),
+            'data-focus-key': format([ctx._view_path, ctx._part, parse.channel_value(ctx.encoding.key,row)], 'json')} else {}),
+        *:(if (ctx._interactive == true and len(ctx._behaviors) > 0) {tabindex: "0"} else {})}
+
+// Commands, controls and custom behaviors share one validated write boundary.
+pub fn update_value(st, definitions, key, raw, view_key = "chart", command = "set") {
+    let matches = definitions |: ~.name == key;
+    let definition = matches[0];
+    let select = selection(definition);
+    let current = st.values[key];
+    let value = if (command == "reset") initial([definition]).values[key]
+        else if (command == "clear" and select != null) {*:current, stores: {}}
+        else if (select == null) if (definition._scoped==true) {views:{*:parse.attributes(current.views),*:map([view_key,raw])}} else raw
+        else if (raw.kind == select.type and raw.stores != null) raw
+        else if (select.type == "point") (
+            let tuples = if (raw is array) raw else [raw],
+            let old = if (current.resolve=="global") [for (owner, entries in current.stores) for (entry in entries) entry]
+                else if (current.stores[view_key]!=null) current.stores[view_key] else [],
+            let toggled = [*(old |: not contains(tuples, ~)), for (tuple in tuples where not contains(old, tuple)) tuple],
+            {*:current, stores: if (current.resolve == "global") map([view_key, if (command == "toggle") toggled else tuples])
+                else {*:current.stores, *:map([view_key, if (command == "toggle") toggled else tuples])}})
+        else {*:current, stores: if (current.resolve == "global") map([view_key, raw]) else {*:current.stores, *:map([view_key, raw])}};
+    let invalid = util.first_error([
+        if (len(matches) != 1) error("chart: command names an unknown parameter"),
+        if (definition.expr != null) error("chart: computed parameters are read-only"),
+        if (not contains(["set", "toggle", "clear", "reset"], command)) error("chart: unsupported parameter command"),
+        if (command == "toggle" and select.type != "point") error("chart: toggle requires a point parameter"),
+        if (select.type == "point") for (owner, tuples in value.stores)
+            if (not (tuples is array) or any([for (tuple in tuples) not (tuple is map or tuple is element)]))
+                error("chart: point update requires projected records"),
+        if (select.type == "interval") for (owner, extent in value.stores)
+            if (not (extent is map) or any([for (field, bounds in extent)
+                if (bounds.kind == "discrete") not (bounds.values is array)
+                else if (bounds.kind == "wrapped") not util.finite_number(bounds.start) or not util.finite_number(bounds.end)
+                else not (bounds is array) or len(bounds) != 2 or any(bounds |> not util.finite_number(~))]))
+                error("chart: interval update requires finite extents")]);
+    if (invalid is error) invalid else {*:st, values: {*:st.values, *:map([key, value])},
+        gesture: if (contains(["reset", "clear"], command)) null else st.gesture}
+}

@@ -1,8 +1,9 @@
-// AMS glyphs use the existing Lambda-script math symbol and font tables.
+// AMS commands share the selected-font math renderer, including symbol fallback.
 import symbols: lambda.doc.math.symbols
+import math: lambda.doc.math.math
 
 pub fn render_symbol(command) {
     let glyph = symbols.lookup_symbol(command)
     if (glyph == null) null
-    else <span class: symbols.font_class_of(command), glyph>
+    else math.render_inline(parse("\\" ++ command, 'math')^)
 }

@@ -21,6 +21,7 @@
 
 #include "input.hpp"
 #include "input-parsers.h"
+#include "input-pdf-type1.hpp"
 #include "../io/mark_builder.hpp"
 #include "../core/mark_reader.hpp"
 #include "lib/log.h"
@@ -28,10 +29,13 @@
 #include "lib/base64.h"
 #include "lib/byte_builder.h"
 #include "lib/str.h"
+#include "lib/strbuf.h"
+#include "lib/utf.h"
 #include "lib/string.h"
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+#include <math.h>
 #include <zlib.h>
 
 extern "C" {
@@ -368,6 +372,197 @@ static void flatten_page_tree(Input* input, MarkBuilder& builder,
     log_info("pdf_postprocess: flattened page tree into %d pages", out->length);
 }
 
+struct PdfLabelRange {
+    int64_t index, start;
+    char style;
+    String* prefix;
+    PdfLabelRange* next;
+};
+
+struct PdfLabelTree {
+    Input* input;
+    MarkBuilder* builder;
+    ObjTable* objects;
+    Array* pages;
+    PdfLabelRange* first;
+    PdfLabelRange* last;
+    Map* ancestors[64];
+    size_t nodes;
+    const char* error;
+};
+
+static bool pdf_label_fail(PdfLabelTree* tree, const char* reason) {
+    tree->error = reason; return false;
+}
+
+static bool pdf_label_integer(Item item, int64_t* value) {
+    TypeId type = get_type_id(item);
+    if (type == LMD_TYPE_INT) *value = lambda_int_item_to_i64(item);
+    else if (type == LMD_TYPE_FLOAT) {
+        // The PDF parser stores numeric objects as floats; the PDF integer domain is exact here.
+        double number = item.get_double();
+        if (!isfinite(number) || floor(number) != number || number < INT32_MIN || number > INT32_MAX) return false;
+        *value = (int64_t)number;
+    } else return false;
+    return *value >= INT32_MIN && *value <= INT32_MAX;
+}
+
+// PDF text strings use PDFDocEncoding or a Unicode BOM, unlike content-stream glyph strings.
+static String* pdf_label_prefix(PdfLabelTree* tree, Item item) {
+    if (item.item == ITEM_NULL) return tree->builder->createString("");
+    String* raw = item_as_string(item);
+    if (!raw) { pdf_label_fail(tree, "page label prefix must be a text string"); return nullptr; }
+    const uint8_t* bytes = (const uint8_t*)raw->chars;
+    StrBuf* text = strbuf_new(); if (!text) return nullptr;
+    bool valid = true;
+    if (raw->len >= 2 && bytes[0] == 0xFE && bytes[1] == 0xFF) {
+        valid = raw->len % 2 == 0;
+        for (size_t i = 2; valid && i + 1 < raw->len; i += 2) {
+            uint32_t cp = ((uint32_t)bytes[i] << 8) | bytes[i + 1];
+            if (cp >= 0xD800 && cp <= 0xDBFF) {
+                if (i + 3 >= raw->len) { valid = false; break; }
+                uint16_t low = ((uint16_t)bytes[i + 2] << 8) | bytes[i + 3];
+                if (low < 0xDC00 || low > 0xDFFF) { valid = false; break; }
+                cp = utf16_decode_pair((uint16_t)cp, low); i += 2;
+            }
+            if (!cp || !strbuf_append_utf8(text, cp)) valid = false;
+        }
+    } else if (raw->len >= 3 && !memcmp(bytes, "\xEF\xBB\xBF", 3)) {
+        valid = utf8_valid(raw->chars + 3, raw->len - 3) && !memchr(bytes + 3, 0, raw->len - 3);
+        if (valid) strbuf_append_str_n(text, raw->chars + 3, raw->len - 3);
+    } else {
+        static const uint16_t accents[] = {0x02D8, 0x02C7, 0x02C6, 0x02D9, 0x02DD, 0x02DB, 0x02DA, 0x02DC};
+        static const uint16_t specials[] = {0x2022, 0x2020, 0x2021, 0x2026, 0x2014, 0x2013, 0x0192, 0x2044,
+            0x2039, 0x203A, 0x2212, 0x2030, 0x201E, 0x201C, 0x201D, 0x2018,
+            0x2019, 0x201A, 0x2122, 0xFB01, 0xFB02, 0x0141, 0x0152, 0x0160,
+            0x0178, 0x017D, 0x0131, 0x0142, 0x0153, 0x0161, 0x017E};
+        for (size_t i = 0; valid && i < raw->len; i++) {
+            uint32_t cp = bytes[i];
+            if (!cp || cp == 0x7F || cp == 0x9F || cp == 0xAD) { valid = false; break; }
+            if (cp >= 0x18 && cp <= 0x1F) cp = accents[cp - 0x18];
+            else if (cp >= 0x80 && cp <= 0x9E) cp = specials[cp - 0x80];
+            else if (cp == 0xA0) cp = 0x20AC;
+            valid = strbuf_append_utf8(text, cp);
+        }
+    }
+    String* result = valid && text->length <= 65536 ? tree->builder->createString(text->str, text->length) : nullptr;
+    strbuf_free(text);
+    if (!result) pdf_label_fail(tree, "page label prefix has invalid encoding, NUL or exceeds its byte budget");
+    return result;
+}
+
+static bool pdf_label_range(PdfLabelTree* tree, Item key, Item value) {
+    int64_t index = -1;
+    if (!pdf_label_integer(key, &index) || index < 0 || index >= tree->pages->length ||
+        (tree->last && index <= tree->last->index))
+        return pdf_label_fail(tree, "page label indices must be ordered, unique and within the page sequence");
+    Map* dict = item_as_map(resolve_ref_deep(value, tree->objects));
+    if (!dict || map_has_type(dict, "indirect_ref")) return pdf_label_fail(tree, "page label requires a resolved dictionary");
+    Item kind = map_lookup(dict, "Type");
+    if (kind.item != ITEM_NULL && !str_eq(item_as_pdf_name(kind), "PageLabel"))
+        return pdf_label_fail(tree, "page label dictionary has an invalid Type");
+    Item raw_style = map_lookup(dict, "S"); String* style = item_as_pdf_name(raw_style);
+    if (raw_style.item != ITEM_NULL && (!style || style->len != 1 || !strchr("DRrAa", style->chars[0])))
+        return pdf_label_fail(tree, "page label numbering style is unsupported");
+    int64_t start = 1; Item raw_start = resolve_ref_deep(map_lookup(dict, "St"), tree->objects);
+    if (raw_start.item != ITEM_NULL && (!pdf_label_integer(raw_start, &start) || start < 1))
+        return pdf_label_fail(tree, "page label start must be a positive integer");
+    String* prefix = pdf_label_prefix(tree, resolve_ref_deep(map_lookup(dict, "P"), tree->objects));
+    if (!prefix) return false;
+    PdfLabelRange* range = (PdfLabelRange*)pool_alloc(tree->input->pool, sizeof(PdfLabelRange));
+    if (!range) return pdf_label_fail(tree, "page label allocation failed");
+    *range = {index, start, style ? style->chars[0] : '\0', prefix, nullptr};
+    if (tree->last) tree->last->next = range; else tree->first = range;
+    tree->last = range; return true;
+}
+
+static bool pdf_label_tree(PdfLabelTree* tree, Item item, size_t depth) {
+    if (depth >= 64 || ++tree->nodes > (size_t)tree->pages->length * 2 + 64)
+        return pdf_label_fail(tree, "page label number tree exceeds its traversal budget");
+    Map* node = item_as_map(resolve_ref_deep(item, tree->objects));
+    if (!node || map_has_type(node, "indirect_ref")) return pdf_label_fail(tree, "page label number tree requires resolved nodes");
+    for (size_t i = 0; i < depth; i++) if (tree->ancestors[i] == node)
+        return pdf_label_fail(tree, "page label number tree contains a cycle");
+    tree->ancestors[depth] = node;
+    Item nums_item = map_lookup(node, "Nums"), kids_item = map_lookup(node, "Kids");
+    if ((nums_item.item == ITEM_NULL) == (kids_item.item == ITEM_NULL))
+        return pdf_label_fail(tree, "page label number tree requires either Nums or Kids");
+    PdfLabelRange* previous = tree->last;
+    if (nums_item.item != ITEM_NULL) {
+        Array* nums = item_as_array(resolve_ref_deep(nums_item, tree->objects));
+        if (!nums || !nums->length || nums->length % 2) return pdf_label_fail(tree, "page label Nums requires key/dictionary pairs");
+        for (int i = 0; i < nums->length; i += 2)
+            if (!pdf_label_range(tree, nums->items[i], nums->items[i + 1])) return false;
+    } else {
+        Array* kids = item_as_array(resolve_ref_deep(kids_item, tree->objects));
+        if (!kids || !kids->length) return pdf_label_fail(tree, "page label Kids requires a nonempty node array");
+        for (int i = 0; i < kids->length; i++) if (!pdf_label_tree(tree, kids->items[i], depth + 1)) return false;
+    }
+    Item limits_item = map_lookup(node, "Limits");
+    if (depth || limits_item.item != ITEM_NULL) {
+        Array* limits = item_as_array(resolve_ref_deep(limits_item, tree->objects));
+        int64_t low = -1, high = -1;
+        PdfLabelRange* first = previous ? previous->next : tree->first;
+        if (!limits || limits->length != 2 || !pdf_label_integer(limits->items[0], &low) ||
+            !pdf_label_integer(limits->items[1], &high) || !first || low != first->index || high != tree->last->index)
+            return pdf_label_fail(tree, "page label number tree Limits must match its descendant keys");
+    }
+    return true;
+}
+
+static String* pdf_label_text(PdfLabelTree* tree, const PdfLabelRange* range, int64_t index) {
+    uint64_t number = (uint64_t)range->start + (uint64_t)(index - range->index);
+    size_t digits = range->style == 'A' || range->style == 'a' ? (number - 1) / 26 + 1 :
+        range->style == 'R' || range->style == 'r' ? number / 1000 + 16 : 24;
+    size_t available = 65536 - range->prefix->len;
+    if ((range->style == 'A' || range->style == 'a') && digits > available) {
+        pdf_label_fail(tree, "page label exceeds its byte budget"); return nullptr;
+    }
+    if (digits > available) digits = available;
+    StrBuf* text = strbuf_new_cap(range->prefix->len + digits + 1);
+    if (!text) return nullptr;
+    strbuf_append_str_n(text, range->prefix->chars, range->prefix->len);
+    if (range->style == 'D') strbuf_append_uint64(text, number);
+    else if (range->style == 'A' || range->style == 'a')
+        strbuf_append_char_n(text, (range->style == 'A' ? 'A' : 'a') + (number - 1) % 26, digits);
+    else if (range->style == 'R' || range->style == 'r') {
+        size_t length = str_format_roman(number, text->str + text->length,
+            text->capacity - text->length, range->style == 'R');
+        if (!length) { strbuf_free(text); pdf_label_fail(tree, "page label exceeds its byte budget"); return nullptr; }
+        text->length += length;
+    }
+    String* result = text->length <= 65536 ? tree->builder->createString(text->str, text->length) : nullptr;
+    if (!result) pdf_label_fail(tree, "page label exceeds its byte budget or allocation failed");
+    strbuf_free(text); return result;
+}
+
+static void resolve_page_labels(Input* input, MarkBuilder& builder, Map* pdf_info, ObjTable* objects) {
+    Map* catalog = find_catalog(builder, pdf_info, objects);
+    Item labels = map_lookup(catalog, "PageLabels");
+    if (labels.item == ITEM_NULL) return;
+    Array* pages = item_as_array(map_lookup(pdf_info, "pages"));
+    if (!pages) return;
+    PdfLabelTree tree = {input, &builder, objects, pages, nullptr, nullptr, {}, 0, nullptr};
+    bool valid = pdf_label_tree(&tree, labels, 0);
+    if (valid && (!tree.first || tree.first->index != 0)) valid = pdf_label_fail(&tree, "page label number tree must begin at page index zero");
+    Array* texts = array_pooled(input->pool);
+    for (const PdfLabelRange* range = tree.first; valid && range; range = range->next) {
+        int64_t end = range->next ? range->next->index : pages->length;
+        for (int64_t i = range->index; valid && i < end; i++) {
+            String* text = pdf_label_text(&tree, range, i);
+            if (!text || !texts) valid = pdf_label_fail(&tree, tree.error ? tree.error : "page label allocation failed");
+            else array_append(texts, {.item = s2it(text)}, input->pool, input->arena);
+        }
+    }
+    if (!valid) {
+        builder.putToMap(lam::gc_borrow(pdf_info), builder.createString("page_labels_error"), builder.createStringItem(tree.error));
+        log_warn("pdf_postprocess: invalid page labels: %s", tree.error); return;
+    }
+    // Publish only a complete label set; continuous consumers can retain their tolerant intake.
+    for (int i = 0; i < pages->length; i++)
+        builder.putToMap(lam::gc_borrow(item_as_map(pages->items[i])), builder.createString("label"), texts->items[i]);
+}
+
 }  // anonymous namespace
 
 // ---------------------------------------------------------------------------
@@ -680,6 +875,18 @@ static void process_font_dict(Input* input, MarkBuilder& builder, Map* font,
     Item ty = map_lookup(font, "Type");
     String* ts = item_as_string(ty);
     if (!ts || !str_eq(ts, "Font")) return;
+
+    // Type 1 encodings address outlines, not Unicode; keep the embedded shapes for SVG painting.
+    if (str_eq(item_as_string(map_lookup(font, "Subtype")), "Type1")) {
+        Map* descriptor = item_as_map(resolve_ref_deep(map_lookup(font, "FontDescriptor"), table));
+        Map* program = descriptor ? item_as_map(resolve_ref_deep(map_lookup(descriptor, "FontFile"), table)) : nullptr;
+        if (program && map_has_type(program, "stream")) {
+            Map* dict = item_as_map(map_lookup(program, "dictionary"));
+            Item paths = pdf_type1_glyph_paths(input, item_as_string(map_lookup(program, "data")),
+                item_as_int(map_lookup(dict, "Length1"), 0), resolve_ref_deep(map_lookup(font, "Encoding"), table));
+            if (paths.item != ITEM_NULL) builder.putToMap(lam::gc_borrow(font), builder.createString("glyph_paths"), paths);
+        }
+    }
 
     Item tu = map_lookup(font, "ToUnicode");
     if (tu.item == ITEM_NULL) return;
@@ -1723,6 +1930,7 @@ void pdf_postprocess(Input* input) {
 
     // Pass 3: page-tree flattening
     flatten_page_tree(input, builder, pdf_info, &expanded_table);
+    resolve_page_labels(input, builder, pdf_info, &expanded_table);
 
     // Pass 4: ToUnicode CMap parsing
     walk_fonts(input, builder, objects, &expanded_table);

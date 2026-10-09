@@ -8,8 +8,13 @@ import text: .text
 import axis: .axis
 import color: .color
 import util: .util
+import coordinate:.coordinate
 
 fn polar(cx, cy, radius, angle) => [cx + radius * math.cos(angle - util.PI / 2.0), cy + radius * math.sin(angle - util.PI / 2.0)]
+
+fn radar_position(ctx,cx,cy,radius,angle,outer) => if (ctx._coordinate.type=="radar")
+    coordinate.project({*:ctx._coordinate,type:"polar",direct_polar:true},[angle/util.TAU,radius/outer])
+    else polar(cx,cy,radius,angle)
 
 pub fn radar(data, ctx, options) {
     let angular = scale.angular_scale(ctx.encoding.theta, data);
@@ -45,25 +50,28 @@ pub fn radar(data, ctx, options) {
         if (tick_metrics is error) tick_metrics else svg.group_class("marks radar", [
             if (options.grid != false and guide.grid != false) <g class: "radar-grid",
                 for (tick in ticks, let radius = scale.scale_apply(mapping, tick) where radius > 0)
-                    <circle cx: cx, cy: cy, r: radius, fill: "none", stroke: if (guide.grid_color != null) guide.grid_color else "#ddd">
-                for (category in categories, let point = polar(cx, cy, outer, scale.scale_apply(angular, category)))
+                    if (ctx._coordinate.type=="radar") <path d:svg.line_path([for (i in 0 to 63)
+                        radar_position(ctx,cx,cy,radius,util.TAU*float(i)/64.0,outer)])++" Z",fill:"none",
+                        stroke:if (guide.grid_color!=null) guide.grid_color else "#ddd">
+                    else <circle cx: cx, cy: cy, r: radius, fill: "none", stroke: if (guide.grid_color != null) guide.grid_color else "#ddd">
+                for (category in categories, let point = radar_position(ctx,cx,cy,outer,scale.scale_apply(angular,category),outer))
                     <line x1: cx, y1: cy, x2: point[0], y2: point[1], stroke: if (guide.domain_color != null) guide.domain_color else "#aaa">>,
             for (group in groups) (
                 let points = [for (category in categories,
                     let row = (group.items |: parse.channel_value(ctx.encoding.theta, ~) == category)[0])
-                    polar(cx, cy, scale.scale_apply(mapping, parse.channel_value(ctx.encoding.radius, row)), scale.scale_apply(angular, category))],
+                    radar_position(ctx,cx,cy,scale.scale_apply(mapping,parse.channel_value(ctx.encoding.radius,row)),scale.scale_apply(angular,category),outer)],
                 <path class: "radar-series", d: svg.line_path(points) ++ " Z",
                     *:mark.style(ctx, group.items[0], options,
                         {fill: if (options.filled == true) group.color else "none", stroke: group.color, 'stroke-width': 2, opacity: 1.0}, options.filled != true),
                     'fill-opacity': if (options.fill_opacity != null) options.fill_opacity else 0.2, mark.tooltip(ctx, group.items[0])>),
             if (options.labels != false) <g class: "radar-labels",
                 for (index, category in categories,
-                    let point = polar(cx, cy, outer + 6.0, scale.scale_apply(angular, category)),
+                    let point = radar_position(ctx,cx,cy,outer+6.0,scale.scale_apply(angular,category),outer),
                     let cosine = math.cos(scale.scale_apply(angular, category) - util.PI / 2.0))
                     <text x: point[0], y: point[1] - (labels[index].top + labels[index].bottom) / 2.0,
                         'text-anchor': if (abs(cosine) < 0.0000000001) "middle" else if (cosine > 0) "start" else "end",
                         *:text.attributes(font), fill: if (guide.label_color != null) guide.label_color else "#333", string(category)>
-                for (index, tick in ticks, let point = polar(cx, cy, scale.scale_apply(mapping, tick), tick_angle))
+                for (index, tick in ticks, let point = radar_position(ctx,cx,cy,scale.scale_apply(mapping,tick),tick_angle,outer))
                     <text x: point[0] + 3.0, y: point[1] - (tick_metrics[index].top + tick_metrics[index].bottom) / 2.0,
                         *:text.attributes(font), fill: if (guide.label_color != null) guide.label_color else "#333", tick_labels[index]>>])
     }

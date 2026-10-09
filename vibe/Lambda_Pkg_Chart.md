@@ -1,11 +1,9 @@
 # Lambda Chart Package — Design
 
-**Status:** Consolidated working design, 2026-10-08. Includes the adopted
-AntV G2-inspired expansion for additional chart families, reusable coordinates,
-configurable interaction behaviors, and animation. Sections marked **design
-addition** specify accepted scope that is not yet implemented. The existing
-chart, wordcloud, and parameter-interaction contracts remain the implemented
-baseline; the final section identifies outstanding work.
+**Status:** Consolidated working design, 2026-10-09. The adopted AntV
+G2-inspired expansion is implemented: additional chart families, reusable
+coordinates, configurable interaction behaviors, and data-driven animation.
+The final section records optional compatibility work and scope boundaries.
 
 **Scope:** Declarative statistical, hierarchical, flow, network, and geographic
 charts, weighted word/tag clouds, composable coordinates, and animated
@@ -20,8 +18,8 @@ cover source packages and the shipped namespace;
 covers pure functions;
 [S6.2.2v3–S6.2.3](../doc/Lambda_Formal_Semantics.md#s62-the-lambda-total-order)
 cover exact ordering and stability;
-[S7.4.2](../doc/Lambda_Formal_Semantics.md#s74-the-three-failure-channels)
-covers raised validation errors.
+[S7.4.1](../doc/Lambda_Formal_Semantics.md#s74-the-three-failure-channels)
+covers value errors returned for invalid chart specifications.
 [S9.1.4](../doc/Lambda_Formal_Semantics.md#s91-the-model),
 [S12.1.3](../doc/Lambda_Formal_Semantics.md#s121-the-one-bit-effect-system), and
 [D6.2.3v2](../doc/Lambda_Formal_Design.md#d62-function-values-and-closures) govern
@@ -233,20 +231,20 @@ Its primary interfaces are:
 |---|---|
 | `lambda.chart.chart` → `render(chart_el, viewport = null)` | Render a native `<chart>`, `<hconcat>`, `<vconcat>`, or `<repeat>` specification to an SVG element; optional viewport supplies container dimensions |
 | `lambda.chart.chart` → `render_spec(spec, viewport = null, st = null)` | Render a specification map or native element; optional parameter-state snapshot derives an interactive SVG presentation |
-| `lambda.chart.chart` → `model(spec, viewport = null)` | Return a chart source element to retain and `apply` across parent rerenders |
-| `lambda.chart.chart` → `interactive(spec, viewport = null)` | Apply a Lambda view template with independent chart interaction state and generated input controls |
+| `lambda.chart.chart` → `model(spec, viewport = null, options = {})` | Return a chart source element to retain and `apply` across parent rerenders |
+| `lambda.chart.chart` → `interactive(spec, viewport = null, options = {})` | Apply a Lambda view template with independent chart interaction state and generated input controls |
 | `lambda.chart.vega` → `convert(vl)` | Adapt a parsed Vega-Lite map to a chart specification map |
 | `lambda.chart.wordcloud` → `layout(words, opts = null)` | Return resolved cloud options, placed words, and unplaced words; raised-error return `map^` |
 | `lambda.chart.wordcloud` → `render(words, opts = null)` | Return a cloud SVG element; raised-error return `element^` |
 
-**Design addition:** `chart.render_frame(spec, frame, viewport = null, st = null)`
+`chart.render_frame(spec, frame, viewport = null, st = null)`
 returns a pure SVG sample of an animated specification (§12). A frame supplies
 elapsed `time` in milliseconds and, for a data-update transition, a `previous`
 snapshot containing its specification and parameter state, plus the sampled
 presentation when interrupting an earlier transition. No wall-clock read
 or live playback is implied by this function (S12.1.1v2). The existing `model`
-and `interactive` interfaces also host the proposed behavior and playback
-contracts; their signatures remain unchanged.
+and `interactive` interfaces host behavior and playback state. Their optional
+`options` map accepts `reduced_motion: true`; existing calls remain valid.
 
 The user-facing API and examples are in
 [Lambda Packages §4](../doc/Lambda_Packages.md#4-chart--charts).
@@ -293,7 +291,7 @@ throughout a specification.
 | `<annotation>` | Explanatory labels and reference lines |
 | `params` or `<params>` | Named variables and point/interval selections (§10) |
 
-The following properties are **design additions**:
+The following properties configure interaction, coordinates, and animation:
 
 | Chart property or child | Meaning |
 |---|---|
@@ -498,9 +496,9 @@ scales provide choropleths; source boundaries support strokes, and opacity,
 tooltips, clipping, and composition remain available. Invalid geometry and
 projection options return value errors (S7.4.1). TopoJSON, inverse projection,
 and map tiles are outside the implemented contract. Projection-parameter
-navigation is a design addition in §11.
+navigation is available through `pan_zoom` (§11).
 
-### Additional chart families — design addition
+### Additional chart families
 
 The expanded vocabulary takes inspiration from G2's
 [composable marks](https://g2.antv.antgroup.com/en/manual/core/mark/overview)
@@ -543,6 +541,30 @@ controls out-of-domain values. Density inputs require finite x/y values,
 positive bandwidth, and positive integer grid dimensions. These failures
 use chart value errors (S7.4.1).
 
+Gauge presentation supports `rounded` arc caps, `ticks`, `pointer_shape:
+"needle"`, and an optional `pointer_hub`. `tick_count` sets the major scale
+divisions and `minor_tick_count` the subdivisions within each division. Scale
+labels use the declared domain and measured collision selection. Value,
+track, pointer, target, and label parts accept the shared paints and styles,
+including gradient threshold colors. `label_unit` adds an explicit display
+unit, `target_label` shows the target below the value, and the `label_`,
+`tick_`, and `target_label_` font controls style those readouts. Readout spacing
+adjusts to the chosen value font.
+
+Density cells and contour levels expose derived records with `density` or
+`level`, stable `id` values (`cell:i:j` or `level:value`), and `source_rows`.
+Positional fields on cells contain their centers; source data determines the
+positional domains. A key field on a density mark identifies these derived
+glyphs, allowing selection and animation without assigning every cell to an
+arbitrary input sample. Vector direction is in radians; magnitude is in plot
+pixels for ordinary coordinates and longitude/latitude units for geographic
+vectors. Polygon holes are finite plot-space rings. Authored paths are
+validated SVG path text, including curves, arcs, and subpaths.
+Arrowheads taper along the final path curvature and meet the shaft centrally.
+Their default proportions follow the encoded stroke width; `arrow_size`
+requests a head length in plot pixels, limited by the available path length.
+The tip stays at the declared endpoint.
+
 Layout is a pure function of data, options, viewport, and an explicit seed
 (S12.1.1v2). Force layout uses a declared iteration bound, never elapsed
 wall-clock time as a stopping rule. Authored order breaks equal-weight ties
@@ -551,7 +573,7 @@ reproducible output. Animated rearrangement uses §12; static rendering does
 not start a simulation loop. Density contours expand the previous scope
 boundary; Voronoi transforms and general simulation APIs remain excluded.
 
-### Reusable composite marks — design addition
+### Reusable composite marks
 
 A reusable composite is an ordinary pure Lambda function returning a chart
 or mark composition (S12.1.1v2). It can be imported and called with data and
@@ -1374,7 +1396,7 @@ accepts `param`, `value`, and an optional projected `field` to update a paramete
 (either directly or in a custom event’s `detail`). Computed parameters
 remain read-only. Native SVG titles are the implemented tooltip presentation.
 
-### Configurable behaviors — design addition
+### Configurable behaviors
 
 G2's [interaction behaviors and events](https://g2.antv.antgroup.com/en/manual/core/interaction/overview)
 and [element states](https://g2.antv.antgroup.com/en/manual/core/state)
@@ -1445,7 +1467,7 @@ node can include its incident links when an explicit relationship is declared.
 Wordclouds participate in point/legend behaviors through their source rows;
 they do not acquire fictitious positional axes for interval brushing.
 
-### Visual states, filtering, and linking — design addition
+### Visual states, filtering, and linking
 
 `state` defines `default`, `active`, `inactive`, `selected`, and `unselected`
 style maps on charts, marks, or composite parts. Theme/mark appearance and
@@ -1480,18 +1502,22 @@ the brush from moving its own measurement frame while it is being dragged.
 Targets use unique authored view IDs within one chart model. Generated facet
 and repeat instances qualify those IDs with partition values or repeated
 field names. A bare authored ID addresses its generated instances together;
-a qualified ID addresses one instance. Compositions can share an explicit
+a qualified ID addresses one instance. The qualified form appends a compact
+JSON partition key: `detail["Europe"]` for a single-field facet,
+`detail[["Europe",2026]]` for a row/column facet, and
+`detail[["sales","profit"]]` for a repeated field pair. Generated instances
+retain their identity when the input partition order changes. Compositions can share an explicit
 parameter while applying different appearance or
 filter effects in each view. Independent chart instances remain isolated;
 an enclosing Lambda template links them through chart events and parameter
 updates. No module-global selection state or implicit global event bus is
 introduced (S9.1.4, D6.2.3v2).
 
-### Interaction events and custom behaviors — design addition
+### Interaction events and custom behaviors
 
 The existing `chart_change` and `chart_parameter` contracts remain available.
 `chart_interaction` additionally reports a behavior's start, update, end, or
-clear phase, including its ID/type, view ID, element key, composite part,
+clear phase, including its ID/type, view ID and qualified instance ID, element key, composite part,
 source datum, parameter name, previous/current values, and input origin.
 Positions include both displayed coordinates and data coordinates where an
 inverse is defined. Native input details are normalized as values rather
@@ -1514,7 +1540,7 @@ they cannot retain hidden mutable closure or module state (S9.1.4,
 D6.2.3v2). Unsupported streams and invalid commands produce diagnostics
 instead of silently falling back.
 
-## 11. Reusable coordinate grammar — design addition
+## 11. Reusable coordinate grammar
 
 The coordinate grammar follows G2's separation of
 [scales and coordinate transformations](https://g2.antv.antgroup.com/en/manual/core/coordinate/overview).
@@ -1585,8 +1611,18 @@ axes, grid lines, and annotations all use the same coordinate definition.
 Curved boundaries respect a declared pixel `precision`, including at the
 angular seam. Explicit clipping applies to the coordinate's plot boundary.
 
+Helix guides keep tick lengths and text spacing in screen pixels. Progression
+labels follow the outer spiral; the compact track range places its endpoints
+on opposite sides. Titles clear the plot, and measured label selection shares
+one collision space across both axes, retaining endpoints when they fit.
+Labels use the chart background as a halo to keep spiral gridlines distinct
+from the digits.
+`label_overlap: false` retains explicitly requested labels.
+
 Parallel and radar coordinates generate their own field axes and labels from
-the same scales as the marks. Facets/repeats reuse coordinate options while
+the same scales as the marks. Field titles stay upright and clear plotted
+lines and tick labels with measured spacing, including after coordinate
+transforms. Facets/repeats reuse coordinate options while
 resolving each cell's viewport. Shared data domains do not force shared pixel
 positions across differently sized views. Geographic projection retains its
 longitude/latitude units, clipping, and supported projection families.
@@ -1627,7 +1663,7 @@ navigation changes declared projection center/scale parameters; it does not
 reinterpret longitude/latitude as ordinary Cartesian scale domains. General
 geographic region brushing remains outside the adopted contract.
 
-## 12. Animation and timelines — design addition
+## 12. Animation and timelines
 
 The animation design takes G2's
 [enter/update/exit transitions](https://g2.antv.antgroup.com/en/manual/core/animate/overview),
@@ -1685,11 +1721,14 @@ view/part identity scope these keys; moving a record on screen never creates
 a new identity.
 
 Numeric geometry, opacity, compatible transforms, and colors interpolate.
-Discrete values switch at a declared boundary. Text content crossfades while
-retaining font measurement; compatible paints interpolate their parameters,
-and incompatible paint kinds crossfade. Scales, guides, labels, clipping,
-and annotations sample the same frame as the marks, preventing a target-state
-axis from being drawn over source-state geometry.
+Discrete values switch at a declared boundary. Tick label text switches as a
+single string at that boundary, keeping numbers readable as tick positions
+move. Animated tick labels use measured glyph bounds to omit labels that
+temporarily collide, retaining endpoints when they fit. Other text content
+crossfades while retaining font measurement; compatible paints interpolate
+their parameters, and incompatible paint kinds crossfade. Scales, guides,
+labels, clipping, and annotations sample the same frame as the marks,
+preventing a target-state axis from being drawn over source-state geometry.
 
 Path morphing matches corresponding keyed shapes and preserves closed/open
 path status, subpaths, winding, and holes. Compatible paths may have different
@@ -1763,25 +1802,11 @@ No browser animation runtime or ambient wall clock is required for export.
 
 ## 13. Outstanding capabilities and scope boundaries
 
-As of 2026-10-08, the implemented baseline includes the original §4 mark
-table, statistical data transforms, scale/guide/dataflow resolution,
-composition, measured typography, gradients/hatches, responsive sizing,
-calendar/time-zone support, wordcloud integration, and the parameter,
-selection, binding, and chart-change contracts in §10. The expanded design
-does not claim runtime support for the additions below.
-
-### Adopted expansion not yet implemented
-
-| Area | Outstanding design capability |
-|---|---|
-| Additional chart families (§4) | Link/polygon/path/vector marks; Sankey and chord flows; tree and circle packing; bounded seeded force graphs; funnels, gauges, liquid levels, beeswarms, and two-dimensional density/contour displays |
-| Reusable composite marks (§4) | Pure composite factories, named parts, and consistent part-level encoding, state, interaction, and animation contracts |
-| Coordinate grammar (§11) | Shared scale-to-coordinate mapping; coordinate inheritance and validation; polar/theta/radial/parallel/radar/helix families; ordered transforms; projected ranges, paths, and guides; existing specialized marks retain their baseline behavior |
-| Coordinate-aware interaction (§11) | Polar and per-axis brushes, supported coordinate inverses, projection-parameter navigation, and picking of projected/composite geometry |
-| Configurable behaviors (§10) | Named behavior presets and overrides, derived visual-state styling, target-view filtering/linking, relationship highlighting, and custom pure behaviors; existing parameter-driven selection/filtering already works |
-| Interaction events (§10) | Normalized `chart_interaction` notifications, `chart_action` commands, stable element/part identity, and keyboard/focus integration for the new behaviors |
-| Transitions and morphing (§12) | Keyed enter/update/exit transitions, data-driven timing, compatible geometry/paint interpolation, split/merge correspondence, and defined crossfade/error fallbacks |
-| Group animations and keyframes (§12) | Ordered/staggered groups, timeline views, playback controls/events, interruption, reduced-motion behavior, synchronized child views, and pure `render_frame` sampling/export |
+The adopted expansion in §§4 and 10–12 is implemented. No capability from
+that proposal remains deferred. Static SVG export, live Lambda view state,
+wordcloud, and the original chart grammar share the same public chart entry
+points. Optional work below extends compatibility or presentation beyond the
+adopted contract.
 
 ### Optional compatibility expansion
 
@@ -1796,5 +1821,5 @@ These charts retain declarative input and SVG output. Full Vega/Vega-Lite or
 G2 specification conformance, a Vega signal runtime, G2 JavaScript plugins,
 alternate Canvas/WebGL chart backends, 3D scenes, general simulation APIs,
 and Voronoi transforms remain outside the adopted chart scope. The bounded
-force-graph and density-contour chart families above are now adopted design
-additions; they supersede the earlier exclusion of force and contour charts.
+force-graph and density-contour chart families above supersede the earlier
+exclusion of force and contour charts.

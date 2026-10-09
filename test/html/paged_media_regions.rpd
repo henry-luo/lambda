@@ -1,0 +1,18 @@
+<?xml version="1.0"?>
+<r:page-document r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" r:line-stacking-strategy="max-height" xmlns:r="urn:lambda:radiant:page" style="margin:0; font-family:Arial; font-size:7.5pt; line-height:9pt; color:black; white-space:normal">
+  <r:master-set r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics">
+    <r:page-master r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" name="sheet" style="size:180pt 135pt; margin:7.5pt">
+      <r:region r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" role="body" name="main" style="margin:22.5pt 15pt 22.5pt 22.5pt; overflow:hidden"/>
+      <r:region r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" role="before" name="head" extent="15pt" precedence="true" style="background-color:blue; overflow:hidden"/>
+      <r:region r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" role="after" name="foot" extent="11.25pt" display-align="after" style="background-color:yellow; overflow:hidden"/>
+      <r:region r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" role="start" name="side" extent="22.5pt" style="background-color:red; overflow:hidden"/>
+      <r:region r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" role="end" name="xsl-region-end" extent="15pt" style="background-color:green; overflow:hidden"/>
+    </r:page-master>
+  </r:master-set>
+  <r:page-sequence r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" master-reference="sheet" initial-page-number="9" force-page-count="even" format="I">
+    <r:static-content r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" region-name="head"><div r:block-inline-geometry="reference" r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" style="color:white">Page <r:folio r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics"/></div></r:static-content>
+    <r:static-content r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" region-name="foot"><div r:block-inline-geometry="reference" r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics">Footer <r:folio r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics"/></div></r:static-content>
+    <r:static-content r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" region-name="side"><div r:block-inline-geometry="reference" r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics">Sidebar</div></r:static-content>
+    <r:flow r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" region-name="main"><div r:block-inline-geometry="reference" r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics">Body</div></r:flow>
+  </r:page-sequence>
+</r:page-document>

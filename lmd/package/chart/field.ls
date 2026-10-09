@@ -5,6 +5,7 @@ import geometry: .geometry
 import mark: .mark
 import color: .color
 import svg: .svg
+import scale: .scale
 
 fn positive(value) => util.finite_number(value) and value > 0
 fn grid_count(value) => positive(value) and floor(value) == value
@@ -13,7 +14,9 @@ pub fn density(data, options = {}) {
     let xf = if (options.x != null) options.x else "x";
     let yf = if (options.y != null) options.y else "y";
     let extent = if (options.extent != null) options.extent else
-        [[min(data |> ~[xf]), max(data |> ~[xf])], [min(data |> ~[yf]), max(data |> ~[yf])]];
+        [for (field in [xf, yf], let values = data |> ~[field])
+            if (len(values) == 0) [0.0, 1.0] else if (min(values) == max(values)) util.nice_domain(min(values), max(values))
+            else [min(values), max(values)]];
     let count = if (options.resolution is array) options.resolution else
         [if (options.resolution != null) options.resolution else 32, if (options.resolution != null) options.resolution else 32];
     let bandwidth = if (options.bandwidth is array) options.bandwidth else
@@ -99,21 +102,35 @@ pub fn render_swarm(data, ctx, options) {
             *:mark.style(ctx, point.row, options, {fill: color.default_color, opacity: 1.0}), mark.tooltip(ctx, point.row)>])
 }
 
+// Density glyphs expose derived records and stable grid/level identities, never an arbitrary input row.
+pub fn prepare(spec) {
+    let options=spec.mark;
+    let grid=density(spec.data,{*:options,x:spec.encoding.x.field,y:spec.encoding.y.field});
+    let levels=if (grid is error) grid else if (options.contours==true or options.mode=="contour") contours(grid,options.levels) else null;
+    let failure=util.first_error([grid,levels]);
+    let rows=if (levels!=null) levels else grid.cells;
+    let derived=[for (row in rows,
+        let key=if (levels!=null) "level:"++string(row.level) else "cell:"++string(row.i)++":"++string(row.j))
+        {*:row,id:key,source_rows:spec.data,*:map([for (field in [spec.encoding.key.field] where field!=null) for (part in [field,key]) part]),
+            *:if (levels==null) map([spec.encoding.x.field,row.x,spec.encoding.y.field,row.y]) else {}}];
+    {*:spec,data:if (failure is error) failure else derived,_domain_data:spec.data,_density:grid,_density_contours:levels!=null}
+}
 pub fn render_density(data, ctx, options) {
-    let grid = density(data, {*:options, x: ctx.encoding.x.field, y: ctx.encoding.y.field});
-    let maximum = if (grid is error) 0.0 else max([0.0, for (cell in grid.cells) cell.density]);
-    let cells = if (grid is error) grid else if (options.contours == true or options.mode == "contour") contours(grid, options.levels) else null;
-    let failure = util.first_error([grid, cells]);
-    let appearance = mark.style(ctx, data[0], options, {opacity: 1.0});
-    if (failure is error) failure else svg.group_class("marks density", [
-        if (cells != null) for (level in cells) <path class: "density-contour", 'data-density': level.level,
-            d: join([for (polygon in level.polygons) svg.line_path([for (point in polygon)
-                [ctx.plot_w * util.inv_lerp(grid.extent[0][0], grid.extent[0][1], point[0]),
-                    ctx.plot_h * (1.0 - util.inv_lerp(grid.extent[1][0], grid.extent[1][1], point[1]))]]) ++ " Z"], " "),
-            *:appearance, fill: color.sequential_color(color.get_scheme("blues"), if (maximum > 0) level.level / maximum else 0.0), stroke: "none">
-        else for (cell in grid.cells) <rect class: "density-cell", x: float(cell.i) / grid.resolution[0] * ctx.plot_w,
-            y: ctx.plot_h - float(cell.j + 1) / grid.resolution[1] * ctx.plot_h,
-            width: ctx.plot_w / grid.resolution[0], height: ctx.plot_h / grid.resolution[1],
-            *:appearance, fill: color.sequential_color(color.get_scheme("blues"), if (maximum > 0) cell.density / maximum else 0.0),
-            <title string(cell.density)>>])
+    let prepared=if (ctx._density!=null) {data:data,_density:ctx._density,_density_contours:ctx._density_contours}
+        else prepare({data:data,encoding:ctx.encoding,mark:options});
+    let grid=prepared._density;
+    let maximum=if (grid is error) 0.0 else max([0.0,for (cell in grid.cells) cell.density]);
+    let context={*:ctx,data:prepared.data};
+    if (prepared.data is error) prepared.data else svg.group_class("marks density", [for (row in prepared.data,
+        let fill=color.sequential_color(color.get_scheme("blues"),if (maximum>0) (if (prepared._density_contours) row.level else row.density)/maximum else 0.0),
+        let appearance=mark.style(context,row,options,{fill:fill,stroke:"none",opacity:1.0}))
+        if (prepared._density_contours) <path class:"density-contour",'data-density':row.level,
+            d:join([for (polygon in row.polygons) svg.line_path([for (point in polygon)
+                [scale.scale_apply(ctx.x_scale,point[0]),scale.scale_apply(ctx.y_scale,point[1])]])++" Z"]," "),
+            *:appearance,mark.tooltip(context,row)>
+        else (
+            let xs=[scale.scale_apply(ctx.x_scale,row.x0),scale.scale_apply(ctx.x_scale,row.x1)],
+            let ys=[scale.scale_apply(ctx.y_scale,row.y0),scale.scale_apply(ctx.y_scale,row.y1)],
+            <rect class:"density-cell",x:min(xs),y:min(ys),width:abs(xs[1]-xs[0]),height:abs(ys[1]-ys[0]),
+                *:appearance,mark.tooltip(context,row)>)])
 }

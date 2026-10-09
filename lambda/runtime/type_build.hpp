@@ -67,14 +67,9 @@ bool ast_static_literal_item(Transpiler* tp, AstNode* node, Item* out);
 // kinds each caller admits differ.
 AstNode* ast_signed_literal_operand(AstNode* node, bool* negated);
 
-// True when a pattern body is nothing but literals (and unions of them). Such
-// an island is an ordinary literal union rather than a compiled pattern.
-bool pattern_ast_literal_set(AstNode* node);
-
-// True when a pattern body contains a symbol literal. Pattern bodies are
-// content-only (S11.1.2): the domain comes from the island's tag, not from the
-// quoting inside it.
-bool pattern_ast_has_symbol_literal(AstNode* node);
+// a literal-only island is an ordinary literal union rather than a compiled
+// pattern; return that union without redundant groups, or NULL for other bodies.
+AstNode* normalize_pattern_literal_set(AstNode* node);
 
 // Conceptual base-type spellings (int64, float32, ...) map to the defined
 // canonical name; NULL when the name is not such a spelling.

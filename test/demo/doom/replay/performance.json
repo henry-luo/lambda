@@ -1,0 +1,1978 @@
+{
+  "name": "E1M1 real native timer release performance sample",
+  "html": "test/demo/doom/doom.ls",
+  "viewport": {
+    "width": 660,
+    "height": 500
+  },
+  "events": [
+    {
+      "type": "resize",
+      "width": 660,
+      "height": 500
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "ready"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#start"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "key_down",
+      "key": "ArrowRight"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "key_up",
+      "key": "ArrowRight"
+    },
+    {
+      "type": "key_press",
+      "key": "P"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "paused"
+    }
+  ],
+  "default_timeout": 1
+}

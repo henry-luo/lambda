@@ -1,9 +1,11 @@
 #include "render.hpp"
+#include "geomap.hpp"
 #include "render_effect_raster_fallback.hpp"
 #include "render_glyph_run_raster_lower.hpp"
 #include "view.hpp"
 #include "layout.hpp"
 #include "layout_paged.hpp"
+#include "page_document.hpp"
 #include "radiant.hpp"
 
 #include "../lib/tagged.hpp"
@@ -227,6 +229,14 @@ static void pdf_set_color(PdfRenderContext* ctx, Color color) {
 
     HPDF_Page_SetRGBFill(ctx->current_page, r, g, b);
     HPDF_Page_SetRGBStroke(ctx->current_page, r, g, b);
+    // primitive alpha composes with the enclosing effect opacity and must reset for the next paint.
+    HPDF_ExtGState alpha = HPDF_CreateExtGState(ctx->pdf_doc);
+    if (alpha) {
+        float opacity = color.a / 255.0f * ctx->paint_state.current_opacity;
+        HPDF_ExtGState_SetAlphaFill(alpha, opacity);
+        HPDF_ExtGState_SetAlphaStroke(alpha, opacity);
+        HPDF_Page_SetExtGState(ctx->current_page, alpha);
+    }
 }
 
 // Render a rectangle (for backgrounds and borders)
@@ -656,14 +666,15 @@ static void pdf_finish_effect_raster_fallback(PdfRenderContext* ctx) {
 }
 
 static bool pdf_push_clip_path(PdfRenderContext* ctx, RdtPath* path,
-                               const RdtMatrix* transform) {
+                               const RdtMatrix* transform, RdtFillRule rule = RDT_FILL_WINDING) {
     if (!ctx || !path) return false;
     if (HPDF_Page_GSave(ctx->current_page) != HPDF_OK) return false;
     if (!pdf_render_path(ctx, path, transform)) {
         HPDF_Page_GRestore(ctx->current_page);
         return false;
     }
-    if (HPDF_Page_Clip(ctx->current_page) != HPDF_OK) {
+    if ((rule == RDT_FILL_EVEN_ODD ? HPDF_Page_Eoclip(ctx->current_page) :
+        HPDF_Page_Clip(ctx->current_page)) != HPDF_OK) {
         HPDF_Page_GRestore(ctx->current_page);
         return false;
     }
@@ -858,7 +869,7 @@ static bool pdf_export_paint_consume(PaintList* paint, void* context) {
         case PAINT_FILL_RECT: if (cmd.fill_rect.color.a != 255) return false; break;
         case PAINT_FILL_ROUNDED_RECT: if (cmd.fill_rounded_rect.color.a != 255) return false; break;
         case PAINT_FILL_PATH:
-            if (cmd.fill_path.color.a != 255 || cmd.fill_path.rule != RDT_FILL_WINDING) return false;
+            if (cmd.fill_path.color.a != 255) return false;
             break;
         case PAINT_PUSH_CLIP: case PAINT_POP_CLIP:
         case PAINT_BEGIN_SEMANTIC_GROUP: case PAINT_END_SEMANTIC_GROUP: break;
@@ -869,6 +880,9 @@ static bool pdf_export_paint_consume(PaintList* paint, void* context) {
     local.pdf_doc = source->pdf_doc; local.current_page = source->current_page;
     local.ui_context = source->ui_context; local.page_width = source->page_width;
     local.page_height = source->page_height;
+    // SVG's local lowerer shares the page graphics state and inherits its enclosing opacity.
+    pdf_paint_lowering_state_init(&local.paint_state);
+    local.paint_state.current_opacity = source->paint_state.current_opacity;
     pdf_lower_paint_list(&local, paint);
     source->paint_state.emitted_count += local.paint_state.emitted_count;
     return true;
@@ -1054,7 +1068,7 @@ static void pdf_lower_paint_list(PdfRenderContext* ctx, PaintList* commands) {
                     return true;
                 }
                 if (pdf_push_clip_path(ctx, p->clip_path,
-                                       effective_transform)) {
+                                       effective_transform, p->rule)) {
                     active_clip_depth++;
                 } else {
                     skipped_clip_depth++;
@@ -1106,11 +1120,13 @@ static void pdf_lower_paint_list(PdfRenderContext* ctx, PaintList* commands) {
         case PAINT_FILL_PATH: {
             if (!caps || !caps->paths) break;
             PaintFillPath* p = &cmd->fill_path;
-            if (p->color.a == 0 || p->rule != RDT_FILL_WINDING) break;
+            if (p->color.a == 0) break;
             if (!resolve_command_transform(p->has_transform, &p->transform)) break;
             pdf_set_color(ctx, p->color);
             if (pdf_render_path(ctx, p->path, effective_transform)) {
-                HPDF_Page_Fill(ctx->current_page);
+                // PaintIR fill rules apply to all compound paths, including geographic holes.
+                if (p->rule == RDT_FILL_EVEN_ODD) HPDF_Page_Eofill(ctx->current_page);
+                else HPDF_Page_Fill(ctx->current_page);
                 state->emitted_count++;
             }
             break;
@@ -1122,6 +1138,9 @@ static void pdf_lower_paint_list(PdfRenderContext* ctx, PaintList* commands) {
             if (!resolve_command_transform(p->has_transform, &p->transform)) break;
             pdf_set_color(ctx, p->color);
             HPDF_Page_SetLineWidth(ctx->current_page, p->width);
+            HPDF_Page_SetLineCap(ctx->current_page, p->cap);
+            HPDF_Page_SetLineJoin(ctx->current_page, p->join);
+            HPDF_Page_SetMiterLimit(ctx->current_page, p->miter_limit);
             if (pdf_render_path(ctx, p->path, effective_transform)) {
                 HPDF_Page_Stroke(ctx->current_page);
                 state->emitted_count++;
@@ -1534,6 +1553,15 @@ static void pdf_cb_visit_element(RenderContext* vctx, ViewElement* view,
     }
 }
 
+static void pdf_cb_render_geomap(RenderContext* vctx, ViewBlock* block, float abs_x, float abs_y) {
+    auto* ctx = (PdfRenderContext*)vctx;
+    BlockBlot parent = {};
+    parent.x = abs_x - block->x; parent.y = abs_y - block->y;
+    geomap_paint(pdf_active_paint_list(ctx), block->as_element(),
+        render_geometry_block_content_rect(&parent, block, 1.0f));
+    pdf_lower_paint_list(ctx);
+}
+
 static void pdf_cb_render_inline_svg(RenderContext* vctx, ViewBlock* block, float abs_x, float abs_y,
                                      FontBox* font, Color color) {
     PdfRenderContext* ctx = (PdfRenderContext*)vctx;
@@ -1773,6 +1801,7 @@ static RenderBackend pdf_make_backend(PdfRenderContext* ctx) {
     b.render_text      = pdf_cb_render_text;
     b.render_image     = pdf_cb_render_image;
     b.render_inline_svg = pdf_cb_render_inline_svg;
+    b.render_geomap = pdf_cb_render_geomap;
     b.render_svg_subscene = pdf_cb_render_svg_subscene;
     b.visit_element     = pdf_cb_visit_element;
     b.begin_block_children  = NULL;
@@ -1937,8 +1966,22 @@ static bool pdf_secondary_page(ViewTree* tree, const ViewPageBox* page,
         const ViewPagePlacement*, void* context) {
     PdfRenderContext* ctx = (PdfRenderContext*)context;
     // CSS reference pixels are 1/96 inch; PDF points are 1/72 inch.
-    if (!pdf_page_begin(ctx, page->node.rect.width, page->node.rect.height, 72.0f / 96.0f) ||
-        !layout_secondary_paint_page(tree, page, &ctx->paint_list) ||
+    if (!pdf_page_begin(ctx, page->node.rect.width, page->node.rect.height, 72.0f / 96.0f)) return false;
+    if (page->fixed && page->fixed->label &&
+        HPDF_Page_SetLabel(ctx->current_page, page->fixed->label) != HPDF_OK) return false;
+    if (page->fixed && page->fixed->geometry.box_mask) {
+        const RadiantFixedGeometry& geometry = page->fixed->geometry;
+        static const HPDF_PageBox kinds[] = {HPDF_PAGE_BOX_MEDIA, HPDF_PAGE_BOX_CROP,
+            HPDF_PAGE_BOX_BLEED, HPDF_PAGE_BOX_TRIM, HPDF_PAGE_BOX_ART};
+        for (size_t i = 0; i < RADIANT_SOURCE_BOX_COUNT; i++) if (geometry.box_mask & (1u << i)) {
+            const RdtLogicalRect& box = geometry.boxes[i];
+            if (HPDF_Page_SetBox(ctx->current_page, kinds[i], box.x, box.y, box.x + box.width, box.y + box.height) != HPDF_OK) return false;
+        }
+        RdtMatrix matrix = radiant_fixed_page_source_transform(&geometry);
+        if (HPDF_Page_SetRotate(ctx->current_page, geometry.rotation) != HPDF_OK ||
+            HPDF_Page_Concat(ctx->current_page, matrix.e11, matrix.e21, matrix.e12, matrix.e22, matrix.e13, matrix.e23) != HPDF_OK) return false;
+    }
+    if (!layout_secondary_paint_page(tree, page, &ctx->paint_list) ||
         !paint_ir_validate_or_log(&ctx->paint_list, "pdf secondary page")) return false;
     for (LayoutViewNode* child = page->node.first_child; child; child = child->next_sibling)
         pdf_record_fragment_semantics(ctx, tree->model->document, child);

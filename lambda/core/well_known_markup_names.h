@@ -609,6 +609,7 @@ enum MarkupNameId {
     MARKUP_NAME_CSS_COLOR_INTERPOLATION_FILTERS = 0x0000025Cu,
     MARKUP_NAME_CSS_TEXT_ANCHOR = 0x0000025Du,
     MARKUP_NAME_SCENE3D = 0x0000025Eu,
+    MARKUP_NAME_GEOMAP = 0x0000025Fu,
 };
 
 extern const WellKnownNameRecord g_well_known_markup_names[];

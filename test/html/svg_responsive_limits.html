@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { background: #f0f2f5; }
+.card { width: 354px; margin: 16px; padding: 14px; background: white; border-radius: 12px; }
+svg { display: block; max-width: 100%; height: auto; margin: 0 auto; }
+.framed { padding: 10px; border: 2px solid black; max-width: 200px; }
+</style></head><body>
+<!-- A constrained SVG must shrink its viewport, rather than clipping away the right-hand ink. -->
+<div class="card" id="card"><svg id="responsive" width="350" height="270" viewBox="0 0 350 270"><rect width="350" height="270" fill="#ff00ff"/><rect x="330" width="20" height="270" fill="#0000ff"/></svg></div>
+<div class="card"><svg id="css-width" width="350" height="270" viewBox="0 0 350 270" style="width:350px"></svg></div>
+<div class="card"><svg id="percent-width" width="350" height="270" viewBox="0 0 350 270" style="width:100%"></svg></div>
+<div class="card"><svg id="both-auto" width="350" height="270" viewBox="0 0 350 270" style="width:auto"></svg></div>
+<div class="card"><svg id="fixed-height" width="350" height="270" viewBox="0 0 350 270" style="height:270px"></svg></div>
+<div class="card"><svg id="min-wins" width="350" height="270" viewBox="0 0 350 270" style="min-width:360px"></svg></div>
+<div class="card"><svg id="unconstrained" width="350" height="270" viewBox="0 0 350 270" style="max-width:none"></svg></div>
+<div class="card"><svg id="content-box" class="framed" width="350" height="270" viewBox="0 0 350 270" style="box-sizing:content-box"></svg></div>
+<div class="card"><svg id="border-box" class="framed" width="350" height="270" viewBox="0 0 350 270"></svg></div>
+<div class="card"><svg id="zero" width="350" height="270" viewBox="0 0 350 270" style="max-width:0"></svg></div>
+<div class="card" style="height:128px"><svg id="intrinsic-min-wins" viewBox="0 0 1 1" style="height:100%;min-width:max-content;max-width:50px"></svg></div>
+</body></html>

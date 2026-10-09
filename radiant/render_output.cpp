@@ -3,6 +3,7 @@
 #include "../lib/base64.h"
 #include "layout.hpp"
 #include "layout_paged.hpp"
+#include "page_document.hpp"
 #include "view_tree_css.hpp"
 #include "render_glyph_run_raster_lower.hpp"
 #include "event.hpp"
@@ -26,6 +27,15 @@
 
 static RenderPool* g_render_pool = nullptr;
 static pthread_mutex_t g_render_pool_lock = PTHREAD_MUTEX_INITIALIZER;
+
+static void render_paged_origin_error(const PagedLayoutDiagnostic& diagnostic) {
+    const RadiantSourceOrigin* origin = diagnostic.origin;
+    if (!origin) return;
+    fprintf(stderr, "  source <%s>, node %llu", origin->qname, // PRINTF_OK: original source diagnostic.
+        (unsigned long long)origin->source.expected_id);
+    if (origin->has_range) fprintf(stderr, ", bytes %zu..%zu", origin->start, origin->end); // PRINTF_OK: source range.
+    fputc('\n', stderr);
+}
 
 typedef struct RenderOutputClearResult {
     bool selective;
@@ -75,6 +85,8 @@ typedef DomDocument* (*RenderExportDocumentLoader)(RenderExportSession* session,
 typedef struct RenderExportHtmlRequest {
     const char* html_file;
     InputResourcePolicy resource_policy;
+    bool paged;
+    const RenderPagedOptions* paged_options;
 } RenderExportHtmlRequest;
 
 typedef struct RenderExportTransformRequest {
@@ -91,6 +103,8 @@ static DomDocument* render_export_load_html_document(RenderExportSession* sessio
     DocumentJsHostConfig config = {};
     config.ui_context = session->ui_context;
     config.resource_policy = html_request ? html_request->resource_policy : INPUT_RESOURCE_ALLOW_NETWORK;
+    RenderPagedOptions paged_defaults = render_paged_options_default();
+    if (html_request && html_request->paged) config.paged_media = html_request->paged_options ? html_request->paged_options : &paged_defaults;
     return html_request && html_request->html_file
         ? load_html_doc(session->base_url, (char*)html_request->html_file,
             layout_width, layout_height, &config, nullptr, false,
@@ -154,7 +168,12 @@ void render_pool_shutdown() {
     pthread_mutex_unlock(&g_render_pool_lock);
 }
 
-static int render_output_dispatch_tiles(TileJob* jobs, int count, int threads) {
+static int render_output_thread_count();
+
+int render_output_dispatch_jobs(TileJob* jobs, int count) {
+    // A tile worker cannot recursively dispatch while its host owns the pool.
+    int threads = render_output_thread_count();
+    if (threads == 1 || render_pool_is_worker_thread()) return 0;
     pthread_mutex_lock(&g_render_pool_lock);
     // UI teardown retires the workers; a later UI must create a fresh pool.
     if (!g_render_pool) init_render_pool(threads);
@@ -223,6 +242,7 @@ enum RenderPagedOptionCode : uint8_t {
     PAGED_OPT_PAGES, PAGED_OPT_EXPORT, PAGED_OPT_THUMBNAIL, PAGED_OPT_GRID, PAGED_OPT_FILL,
     PAGED_OPT_GROUPS, PAGED_OPT_SCALE, PAGED_OPT_PADDING, PAGED_OPT_COLUMN_GAP, PAGED_OPT_ROW_GAP,
     PAGED_OPT_GROUP_GAP, PAGED_OPT_BOOK, PAGED_OPT_BOOK_PAGE, PAGED_OPT_RIGHT_BINDING, PAGED_OPT_LOCAL_RESOURCES,
+    PAGED_OPT_IMPORT, PAGED_OPT_IMPORT_LIMIT,
 };
 struct RenderPagedOptionInfo { const char* name; RenderPagedOptionCode code; bool value; };
 static const RenderPagedOptionInfo paged_option_info[] = {
@@ -235,12 +255,23 @@ static const RenderPagedOptionInfo paged_option_info[] = {
     {"--book", PAGED_OPT_BOOK, false}, {"--book-page", PAGED_OPT_BOOK_PAGE, true},
     {"--right-binding", PAGED_OPT_RIGHT_BINDING, false},
     {"--block-remote-resources", PAGED_OPT_LOCAL_RESOURCES, false},
+    {"--import-pages", PAGED_OPT_IMPORT, true}, {"--import-page-limit", PAGED_OPT_IMPORT_LIMIT, true},
 };
 
 static const RenderPagedOptionInfo* paged_option_find(const char* name) {
     if (name) for (const RenderPagedOptionInfo& info : paged_option_info)
         if (strcmp(info.name, name) == 0) return &info;
     return nullptr;
+}
+
+bool render_paged_input_supported(const char* path) {
+    const char* extension = path ? file_path_ext(path) : nullptr;
+    if (!extension) return false;
+    size_t length = strcspn(extension, "?#");
+    static const char* formats[] = {".html", ".htm", ".ls", ".fo", ".xslfo", ".rpd", ".pdf"};
+    for (const char* format : formats)
+        if (strlen(format) == length && strncmp(extension, format, length) == 0) return true;
+    return false;
 }
 
 RenderPagedOptions render_paged_options_default() {
@@ -278,6 +309,14 @@ bool render_paged_option_apply(RenderPagedOptions* options, const char* name, co
     if (info->value && !value) return failed("option requires a value");
     ViewPreviewOptions& preview = options->preview;
     switch (info->code) {
+        case PAGED_OPT_IMPORT:
+            if (!view_page_selection_text_valid(value) || !strcmp(value, "none"))
+                return failed("expected all or positive source PDF page numbers/ranges such as 1,3-5");
+            options->import_pages = lam::up(value); return true;
+        case PAGED_OPT_IMPORT_LIMIT: {
+            uint32_t limit = 0; if (!paged_option_index(value, &limit)) return failed("expected a positive source page budget");
+            options->import_page_limit = limit; return true;
+        }
         case PAGED_OPT_PAGES: case PAGED_OPT_EXPORT:
             if (!view_page_selection_text_valid(value)) return failed("expected all, none, or positive page numbers/ranges such as 1,3-5");
             (info->code == PAGED_OPT_PAGES ? options->preview_pages : options->export_pages) = lam::up(value); return true;
@@ -413,6 +452,7 @@ static bool render_export_session_begin_internal(
                 reason);
             // Export errors are user output and remain visible when diagnostic logging is disabled.
             fputs("Error: paged layout: ", stderr); fputs(reason, stderr); fputc('\n', stderr);
+            render_paged_origin_error(diagnostic);
             render_export_session_end(session);
             return false;
         }
@@ -477,7 +517,7 @@ bool render_export_session_begin(RenderExportSession* session, const char* html_
                                  int viewport_width, int viewport_height,
                                  int fallback_width, int fallback_height, float output_scale,
                                  bool print_media, bool paged) {
-    RenderExportHtmlRequest request = {html_file};
+    RenderExportHtmlRequest request = {html_file, INPUT_RESOURCE_ALLOW_NETWORK, paged};
     return render_export_session_begin_internal(session,
         viewport_width, viewport_height, fallback_width, fallback_height,
         output_scale, 1.0f, false, print_media, paged,
@@ -740,6 +780,7 @@ bool render_paged_window_compose(UiContext* ui) {
             : "invalid page selection, preview geometry, or allocation failure";
         log_error("paged window: composition failed: %s", reason);
         fprintf(stderr, "view --paged: %s\n", reason); // PRINTF_OK: user-facing layout diagnostic.
+        render_paged_origin_error(diagnostic);
         if (tree) view_tree_secondary_release(doc, tree);
         return false;
     }
@@ -1034,7 +1075,7 @@ static RenderOutputReplayResult render_output_replay_display_list(RasterRenderCo
             jobs[i].bg_color = canvas_bg;
         }
 
-        result.thread_count=render_output_dispatch_tiles(jobs,grid.total,render_threads);
+        result.thread_count=render_output_dispatch_jobs(jobs,grid.total);
         if (!result.thread_count) { tile_grid_destroy(&grid);return result; }
         tile_grid_composite(&grid, surface);
 
@@ -1090,6 +1131,11 @@ static int render_output_render_raster_target(UiContext* uicon, ViewTree* view_t
     uint64_t t_init = time_now_ns();
 
     render_output_render_view_tree(&rdcon, view_tree);
+
+    if (rdcon.paint_failed) {
+        uicon->render_failed = true;
+        return 1;
+    }
 
     uint64_t t_render = time_now_ns();
     log_info("[TIMING] render_block_view (record): %.1fms, %d display list items",
@@ -1270,7 +1316,7 @@ static int render_output_render_html_file_to_target(const char* html_file,
     }
     if (target->paged) {
         RenderExportHtmlRequest request = {html_file, target->paged_options && target->paged_options->block_remote_resources
-            ? INPUT_RESOURCE_LOCAL_ONLY : INPUT_RESOURCE_ALLOW_NETWORK};
+            ? INPUT_RESOURCE_LOCAL_ONLY : INPUT_RESOURCE_ALLOW_NETWORK, true, target->paged_options};
         return render_output_paged_file(target, render_export_load_html_document, &request);
     }
 
@@ -1408,7 +1454,8 @@ static void render_output_render_html_doc(UiContext* uicon, ViewTree* view_tree,
         log_error("render_output_render_html_doc: PDF/SVG require render_output_render_html_file_to_target");
         return;
     }
-    render_output_render_view_tree_to_target(uicon, view_tree, &target);
+    if (render_output_render_view_tree_to_target(uicon, view_tree, &target) != 0 && uicon)
+        uicon->render_failed = true;
 }
 
 /**
@@ -1498,7 +1545,8 @@ static void render_output_render_tiled_png(UiContext* uicon, ViewTree* view_tree
     log_info("[TIMING] render_output_render_tiled_png record: %.1fms, %d display list items",
         time_elapsed_ms_f(t_record_start, t_record_end),
         dl_item_count(&display_list));
-    if (!dl_validate_or_log(&display_list, "render_output_tiled_png")) {
+    if (rdcon.paint_failed || !dl_validate_or_log(&display_list, "render_output_tiled_png")) {
+        uicon->render_failed = true;
         image_surface_destroy(rec_surf);
         uicon->surface = lam::up(saved_surface);
         uicon->window_height = saved_window_height;

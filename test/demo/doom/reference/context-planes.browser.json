@@ -1,0 +1,14 @@
+{
+  "name": "context-planes",
+  "width": 880,
+  "height": 660,
+  "scale": 1,
+  "browser": "HeadlessChrome/154.0.8037.57",
+  "spec": "https://drafts.csswg.org/css-transforms-2/",
+  "revision": "2025-11-30",
+  "shapes": {
+    "spec": "https://drafts.csswg.org/css-shapes/#shape-function",
+    "revision": "2026-05-07"
+  },
+  "sha256": "4672a3ea8ae688e067d11082727383425729ff39bbb98d3339f709df1b78df71"
+}

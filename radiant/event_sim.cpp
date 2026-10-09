@@ -50,11 +50,11 @@ static void sim_input_turn_mark_pending() {
     if (g_pending_input_turns < 256) g_pending_input_turns++;
 }
 
-static void sim_input_turn_drain(UiContext* uicon) {
+static void sim_input_turn_drain(EventSimContext* ctx, UiContext* uicon) {
     if (g_pending_input_turns <= 0) return;
     int turns = g_pending_input_turns;
     g_pending_input_turns = 0;
-    radiant_advance_js_event_loop(uicon, (1000.0 / 60.0) * turns, turns);
+    radiant_advance_js_event_loop(uicon, ctx->input_turn_ms * turns, turns);
 }
 
 // Forward declarations for callbacks (defined in window.cpp)
@@ -407,6 +407,7 @@ static EventSimContext* event_sim_create_context() {
     ctx->result_path = g_event_result_path ? mem_strdup(g_event_result_path, MEM_CAT_LAYOUT) : NULL;
     ctx->device_scale = 1.0f;
     ctx->default_timeout = 2000;
+    ctx->input_turn_ms = 1000.0 / 60.0;
     ctx->replay_assert_state = g_replay_assert_state;
     ctx->replay_expected_focus_id = -1;
     ctx->replay_expected_caret_id = -1;
@@ -1903,6 +1904,10 @@ static SimEvent* parse_sim_event(EventSimContext* ctx, MapReader& reader) {
     else if (strcmp(type_str, "window_close") == 0) {
         ev->type = SIM_EVENT_WINDOW_CLOSE;
     }
+    else if (strcmp(type_str, "window_focus") == 0) {
+        ev->type = SIM_EVENT_WINDOW_FOCUS;
+        ev->window_focused = reader.get("focused").asBool();
+    }
     else if (strcmp(type_str, "write_file") == 0) {
         ev->type = SIM_EVENT_WRITE_FILE;
         const char* file = reader.get("path").cstring();
@@ -2106,6 +2111,19 @@ EventSimContext* event_sim_load(const char* json_file) {
         ctx->default_timeout = 2000;
     }
     log_info("event_sim: default_timeout %dms", ctx->default_timeout);
+
+    // Fixed-step fixtures can budget all elapsed time through advance_time;
+    // omitted input latency retains the historical 60 Hz task duration.
+    if (root_map.has("input_turn_ms")) {
+        ItemReader latency = root_map.get("input_turn_ms");
+        if ((!latency.isInt() && !latency.isFloat()) ||
+            !isfinite(sim_number_as_float(latency)) || sim_number_as_float(latency) < 0.0f) {
+            log_error("event_sim: input_turn_ms must be a finite nonnegative number");
+            event_sim_free(ctx);
+            return NULL;
+        }
+        ctx->input_turn_ms = sim_number_as_float(latency);
+    }
 
     // Parse each event
     int count = (int)events_arr.length();
@@ -3601,7 +3619,7 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
                 // Browser drag libraries schedule hit-testing intervals during
                 // the gesture; pumping only after mouseup makes every move look
                 // like one indivisible host task and prevents reordering.
-                sim_input_turn_drain(uicon);
+                sim_input_turn_drain(ctx, uicon);
             }
             sim_mouse_button(uicon, drag_to_x, drag_to_y, ev->button, ev->mods, false);
             break;
@@ -3631,7 +3649,7 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
                     float x = drag_x + (drag_to_x - drag_x) * step / (float)steps;
                     float y = drag_y + (drag_to_y - drag_y) * step / (float)steps;
                     sim_mouse_move(uicon, x, y);
-                    sim_input_turn_drain(uicon);
+                    sim_input_turn_drain(ctx, uicon);
                 }
                 sim_mouse_button(uicon, drag_to_x, drag_to_y,
                                  ev->button, ev->mods, false);
@@ -3654,7 +3672,7 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
                 radiant_dispatch_event_sim_touch(uicon, target, "touchmove",
                     x, y, ev->mods, true,
                     gesture_timestamp_ms + touch_step_ms * (double)step);
-                sim_input_turn_drain(uicon);
+                sim_input_turn_drain(ctx, uicon);
             }
             radiant_dispatch_event_sim_pointer(uicon, target, "pointerup",
                 drag_to_x, drag_to_y, ev->button, 0, ev->mods, pointer_type);
@@ -4051,6 +4069,9 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
             // Resize viewport and trigger full relayout
             int new_css_w = (int)lroundf(ev->x); // INT_CAST_OK: viewport API is discrete CSS pixels
             int new_css_h = (int)lroundf(ev->y); // INT_CAST_OK: viewport API is discrete CSS pixels
+            // Keep the real window and the synthetic viewport in agreement;
+            // its next framebuffer callback must not restore the old size.
+            if (window) glfwSetWindowSize(window, new_css_w, new_css_h);
             float pr = uicon->device_scale > 0 ? uicon->device_scale : 1.0f;
             int new_phys_w = (int)lroundf(new_css_w * pr); // INT_CAST_OK: physical surface width
             int new_phys_h = (int)lroundf(new_css_h * pr); // INT_CAST_OK: physical surface height
@@ -5351,13 +5372,15 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
         case SIM_EVENT_RENDER:
             {
                 log_info("event_sim: render to %s", ev->file_path);
+                // Captures must observe the same committed layout as screen paint.
+                render_pending_surface(uicon);
                 // Determine format from extension
                 const char* ext = file_path_ext(ev->file_path);
                 if (ext && (strcmp(ext, ".svg") == 0 || strcmp(ext, ".SVG") == 0)) {
-                    render_uicontext_to_svg(uicon, ev->file_path);
+                    if (render_uicontext_to_svg(uicon, ev->file_path) != 0) ctx->fail_count++;
                 } else {
                     // Default to PNG
-                    render_uicontext_to_png(uicon, ev->file_path);
+                    if (render_uicontext_to_png(uicon, ev->file_path) != 0) ctx->fail_count++;
                 }
             }
             break;
@@ -5392,6 +5415,10 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
             if (closing && window) glfwSetWindowShouldClose(window, GLFW_TRUE);
             break;
         }
+
+        case SIM_EVENT_WINDOW_FOCUS:
+            radiant_window_focus_changed(uicon, ev->window_focused);
+            break;
 
         case SIM_EVENT_WRITE_FILE: {
             if (!sim_create_parent_dirs(ev->file_path) ||
@@ -5490,7 +5517,7 @@ static bool process_sim_event_with_retry(EventSimContext* ctx, SimEvent* ev, UiC
         process_sim_event(ctx, ev, uicon, window);
         // A JSON event is one browser task. Timers and animation callbacks run
         // only after all of its native input primitives have been dispatched.
-        sim_input_turn_drain(uicon);
+        sim_input_turn_drain(ctx, uicon);
         return true;
     }
 

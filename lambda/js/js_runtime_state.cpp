@@ -1,4 +1,5 @@
 #include "js_runtime_internal.hpp"
+#include "js_object_meta.h"
 #include "js_well_known_names.h"
 #include "js_exec_profile.h"
 #include "../runtime/lambda-error.h"
@@ -1993,6 +1994,8 @@ extern "C" Item js_error_captureStackTrace(Item target, Item ctor) {
 
 extern "C" void js_runtime_set_input(void* input) {
     js_input = (Input*)input;
+    // Establish the explicit JS Input boundary before JSON/Mark construction.
+    if (js_input) js_empty_object_type_map();
     if (!js_execution_state_prepare(js_active_runtime_state,
             (EvalContext*)context)) {
         log_error("js-call-activation: failed to bind base roots to current heap");

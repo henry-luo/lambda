@@ -77,11 +77,11 @@ void rc_draw_image(RasterRenderContext* rdcon, const uint32_t* pixels,
                    int src_w, int src_h, int src_stride,
                    float dst_x, float dst_y, float dst_w, float dst_h,
                    uint8_t opacity, const RdtMatrix* transform,
-                   ImageSurface* resource_owner) {
+                   ImageSurface* resource_owner, ScaleMode scale_mode) {
     PaintRecordTarget target = rc_record_target(rdcon);
     paint_record_draw_image(&target, "rc_draw_image", pixels, src_w, src_h,
                             src_stride, dst_x, dst_y, dst_w, dst_h,
-                            opacity, transform, resource_owner);
+                            opacity, transform, resource_owner, scale_mode);
 }
 
 void rc_draw_glyph(RasterRenderContext* rdcon, GlyphBitmap* bitmap, int x, int y,
@@ -128,14 +128,62 @@ void rc_webview_layer_placeholder(RasterRenderContext* rdcon, ImageSurface* surf
                                            clip, surface_generation);
 }
 
-void rc_push_clip(RasterRenderContext* rdcon, RdtPath* clip_path, const RdtMatrix* transform) {
+Rect render_painter_projection_viewport(RasterRenderContext* rdcon) {
+    Bound bound = rdcon->block.clip;
+    if (rdcon->vector_clip_depth > 0) {
+        const Bound& clip = rdcon->vector_clip_bounds[min(rdcon->vector_clip_depth,
+            RDT_MAX_CLIP_SHAPES) - 1];
+        bound = view_geometry_intersect_bound_rect(bound,
+            {clip.left, clip.top, clip.right - clip.left, clip.bottom - clip.top});
+    }
+    return {bound.left, bound.top, max(0.0f, bound.right - bound.left),
+        max(0.0f, bound.bottom - bound.top)};
+}
+
+void rc_push_clip(RasterRenderContext* rdcon, RdtPath* clip_path, const RdtMatrix* transform, RdtFillRule rule) {
+    RdtPath* projected = nullptr;
+    Rect viewport = {};
+    float left, top, right, bottom;
+    bool bounded = false;
+    if (rdcon) {
+        viewport = render_painter_projection_viewport(rdcon);
+        bounded = rdt_path_get_bounds(clip_path, &left, &top, &right, &bottom);
+        if (bounded && transform && !rdt_matrix_project_rect_bounds(transform,
+            left, top, right, bottom, &left, &top, &right, &bottom)) {
+            // Clip viewer crossings once while recording. Both projection work
+            // and image sampling then follow the actual visible contour bounds.
+            ScratchScope scratch(&rdcon->scratch);
+            projected = rdt_path_new();
+            if (projected && render_path_project_to_viewport(projected, clip_path,
+                transform, viewport, true, &scratch)) {
+                clip_path = projected;
+                transform = nullptr;
+                bounded = rdt_path_get_bounds(projected, &left, &top, &right, &bottom);
+                if (!bounded) { left = top = right = bottom = 0; bounded = true; }
+            } else {
+                bounded = false;
+            }
+        }
+    }
     PaintRecordTarget target = rc_record_target(rdcon);
-    paint_record_push_clip(&target, "rc_push_clip", clip_path, transform);
+    paint_record_push_clip(&target, "rc_push_clip", clip_path, transform, rule);
+    rdt_path_free(projected);
+    if (rdcon) {
+        if (rdcon->vector_clip_depth < RDT_MAX_CLIP_SHAPES) {
+            Bound bound = {viewport.x, viewport.y, viewport.x + viewport.width, viewport.y + viewport.height};
+            // Retain antialias coverage around the conservative geometry bound.
+            if (bounded) bound = view_geometry_intersect_bound_rect(bound,
+                {left - 1, top - 1, right - left + 2, bottom - top + 2});
+            rdcon->vector_clip_bounds[rdcon->vector_clip_depth] = bound;
+        }
+        rdcon->vector_clip_depth++;
+    }
 }
 
 void rc_pop_clip(RasterRenderContext* rdcon) {
     PaintRecordTarget target = rc_record_target(rdcon);
     paint_record_pop_clip(&target, "rc_pop_clip");
+    if (rdcon && rdcon->vector_clip_depth > 0) rdcon->vector_clip_depth--;
 }
 
 void rc_save_backdrop(RasterRenderContext* rdcon, int x0, int y0, int w, int h) {
@@ -144,10 +192,10 @@ void rc_save_backdrop(RasterRenderContext* rdcon, int x0, int y0, int w, int h) 
 }
 
 void rc_composite_opacity(RasterRenderContext* rdcon, int x0, int y0, int w, int h,
-                          float opacity, bool premultiplied_source) {
+                          float opacity, bool premultiplied_source, const RadialMaskPaint* mask) {
     PaintRecordTarget target = rc_record_target(rdcon);
     paint_record_composite_opacity(&target, "rc_composite_opacity", x0, y0, w, h,
-                                   opacity, premultiplied_source);
+                                   opacity, premultiplied_source, mask);
 }
 
 void rc_apply_blend_mode(RasterRenderContext* rdcon, int x0, int y0, int w, int h,
@@ -159,6 +207,11 @@ void rc_apply_blend_mode(RasterRenderContext* rdcon, int x0, int y0, int w, int 
 
 void rc_apply_filter(RasterRenderContext* rdcon, float x, float y, float w, float h,
                      FilterProp* filter, const Bound* clip) {
+    // DOM/cascade reads finish on the recording thread; replay reads native graph facts.
+    render_filter_prepare_urls(rdcon, filter);
+    for (FilterFunction* function = filter ? filter->functions.get() : nullptr; function; function = function->next) {
+        if (function->svg) { function->svg->paint_x = x; function->svg->paint_y = y; }
+    }
     PaintRecordTarget target = rc_record_target(rdcon);
     paint_record_apply_filter(&target, "rc_apply_filter", x, y, w, h, filter, clip);
 }
@@ -247,7 +300,7 @@ void render_painter_draw_pixels_rect(RasterRenderContext* rdcon, const uint32_t*
                                      int src_w, int src_h, int src_stride,
                                      Rect* dst_rect, Bound* clip,
                                      uint8_t opacity,
-                                     ImageSurface* resource_owner) {
+                                     ImageSurface* resource_owner, ScaleMode scale_mode) {
     if (!pixels || !dst_rect) return;
     if (clip) {
         RdtPath* clip_path = rdt_path_new();
@@ -259,7 +312,7 @@ void render_painter_draw_pixels_rect(RasterRenderContext* rdcon, const uint32_t*
 
     rc_draw_image(rdcon, pixels, src_w, src_h, src_stride,
                   dst_rect->x, dst_rect->y, dst_rect->width, dst_rect->height,
-                  opacity, render_state_current_transform(rdcon), resource_owner);
+                  opacity, render_state_current_transform(rdcon), resource_owner, scale_mode);
 
     if (clip) rc_pop_clip(rdcon);
 }
@@ -282,6 +335,17 @@ void render_painter_blit_surface_scaled(RasterRenderContext* rdcon,
                                         uint8_t opacity) {
     (void)src_rect;
     (void)dst;
+    if (!src || !dst_rect) return;
+    if (rdcon->has_transform || rdcon->css3d_context || rdcon->vector_clip_depth > 0) {
+        // CPU blits have no homography or vector clip stack. Record images
+        // through the same transformed, resource-owned path as replaced media.
+        ImageSurfaceReadScope read_scope;
+        int width = src->decoded_width > 0 ? src->decoded_width : src->width;
+        int height = src->decoded_height > 0 ? src->decoded_height : src->height;
+        render_painter_draw_pixels_rect(rdcon, (const uint32_t*)src->pixels,
+            width, height, src->pitch / 4, dst_rect, clip, opacity, src, scale_mode);
+        return;
+    }
     PaintRecordTarget target = rc_record_target(rdcon);
     paint_record_blit_surface_scaled(&target, "render_painter_blit_surface_scaled",
                                      src, dst_rect->x, dst_rect->y,

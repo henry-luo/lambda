@@ -2949,7 +2949,7 @@ static void intrinsic_record_first_inline_break(
 static float intrinsic_store_ratio_width_from_height(
         LayoutContext* lycon, DomElement* element, ViewBlock* view,
         float aspect_ratio, float height, bool minimum_height,
-        bool height_is_border_box, bool is_scroll_container,
+        bool height_is_border_box, bool is_scroll_container, bool content_only,
         IntrinsicSizes* sizes) {
     bool ratio_uses_border_box = !layout_aspect_ratio_uses_content_box(view) &&
         layout_uses_border_box(view);
@@ -2961,8 +2961,12 @@ static float intrinsic_store_ratio_width_from_height(
                layout_aspect_ratio_uses_content_box(view)) {
         ratio_height = layout_content_size_from_border_box(view, ratio_height, false);
     }
-    float aspect_width = layout_apply_min_max_axis(
-        view, ratio_height * aspect_ratio, true, layout_uses_border_box(view));
+    // an intrinsic inline limit must not constrain the content width used to resolve itself.
+    float aspect_width = ratio_height * aspect_ratio;
+    if (!content_only) {
+        aspect_width = layout_apply_min_max_axis(
+            view, aspect_width, true, layout_uses_border_box(view));
+    }
     bool width_is_border_box = ratio_uses_border_box ||
         (!layout_aspect_ratio_uses_content_box(view) &&
          intrinsic_view_uses_border_box(view, element));
@@ -3590,22 +3594,10 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
         layout_ensure_replaced_image_surface(lycon, view_block_for_aspect, element);
     }
     float aspect_ratio = layout_used_preferred_aspect_ratio(view_block_for_aspect);
-    if (aspect_ratio <= 0.0f && element->tag() == MARKUP_NAME_IMG) {
-        ImageSurface* image = layout_ensure_replaced_image_surface(
-            lycon, view_block_for_aspect, element);
-        if (image && image->width > 0 && image->height > 0) {
-            // An intrinsic preferred width stays symbolic until a definite height
-            // can transfer through the image's natural ratio.
-            aspect_ratio = (float)image->width / (float)image->height;
-        }
-    }
-    if (aspect_ratio <= 0.0f && element->tag() == MARKUP_NAME_CANVAS) {
-        float natural_width = 0.0f;
-        float natural_height = 0.0f;
-        if (layout_canvas_intrinsic_size(nullptr, view_block_for_aspect,
-                                         &natural_width, &natural_height)) {
-            aspect_ratio = natural_width / natural_height;
-        }
+    if (aspect_ratio <= 0.0f) {
+        // natural ratios, including a viewBox-only SVG, transfer a definite height into intrinsic width.
+        ReplacedIntrinsicFacts facts = layout_replaced_intrinsic_facts(lycon, view_block_for_aspect);
+        if (facts.has_natural_aspect_ratio) aspect_ratio = facts.natural_aspect_ratio;
     }
     float aspect_ratio_min_width = 0.0f;
     bool aspect_ratio_width_uses_border_box = false;
@@ -3748,7 +3740,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
             float aspect_width = intrinsic_store_ratio_width_from_height(
                 lycon, element, view_block_for_aspect, aspect_ratio, ratio_height,
                 false, layout_uses_border_box(view_block_for_aspect),
-                is_scroll_container, &sizes);
+                is_scroll_container, content_only, &sizes);
             if (!is_scroll_container && !layout_element_is_replaced(element) &&
                 element_has_in_flow_intrinsic_content(element)) {
                 // A non-replaced preferred ratio is an intrinsic-width floor;
@@ -3766,7 +3758,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                 // but its definite min-height still transfers through the ratio.
                 float aspect_width = intrinsic_store_ratio_width_from_height(
                     lycon, element, view_block_for_aspect, aspect_ratio, min_height,
-                    true, false, is_scroll_container, &sizes);
+                    true, false, is_scroll_container, content_only, &sizes);
                 if (!is_scroll_container && !layout_element_is_replaced(element) &&
                     element_has_in_flow_intrinsic_content(element)) {
                     aspect_ratio_min_width = aspect_width;

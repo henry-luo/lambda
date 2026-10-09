@@ -54,8 +54,4 @@ let el1 = <span class: "test", style: "color:red">
 "29. text_of string:"; util.text_of("hello")
 "30. text_of element:"; util.text_of(<span "content">)
 
-// ---- constants ----
-"31. PT_PER_EM:"; util.PT_PER_EM
-"32. SCRIPT_SPACE:"; util.SCRIPT_SPACE
-
 "===== ALL UTIL TESTS DONE ====="

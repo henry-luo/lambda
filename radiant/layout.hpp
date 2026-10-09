@@ -21,7 +21,7 @@ typedef struct LayoutContext LayoutContext;
 
 // native scene viewports share SVG intrinsic sizing without adopting its DOM namespace.
 inline bool layout_is_svg_viewport(NameId tag) {
-    return tag == MARKUP_NAME_SVG || tag == MARKUP_NAME_SCENE3D;
+    return tag == MARKUP_NAME_SVG || tag == MARKUP_NAME_SCENE3D || tag == MARKUP_NAME_GEOMAP;
 }
 
 
@@ -3367,6 +3367,7 @@ typedef struct LayoutContext {
     float transform_percentage_base;
     float dpi;           // dots per inch
     lam::Up<Pool> pool;  // memory pool for view allocation
+    lam::Up<Pool> css_value_scratch; // scoped substitution trees for eager computed-value consumers
     // Available space constraints for current layout
     // This enables layout code to distinguish between:
     // - Normal layout (definite width/height)
@@ -3432,6 +3433,9 @@ inline bool layout_context_is_measuring(LayoutContext* lycon) {
 bool layout_resolve_percentage_value(const CssValue* value, float percentage_base, float* out);
 bool layout_css_value_has_nonzero_percentage(const CssValue* value);
 bool layout_css_value_has_percentage(const CssValue* value);
+// compute length terms at their owner while retaining percentage terms for the used box.
+void layout_compute_math_lengths(LayoutContext* context, CssValue* value,
+    CssPropertyCode property = CSS_PROPERTY_TRANSFORM);
 bool layout_resolve_deferred_percentage(float percent, float percentage_base, float* out);
 bool layout_apply_deferred_percentage(float percent, float percentage_base, float* target, float* resolved);
 float layout_block_used_content_size(ViewBlock* block, bool horizontal, bool require_positive);

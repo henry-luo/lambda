@@ -1,3 +1,174 @@
+# Lambda String and Symbol Pattern Syntax — Design
+
+**Revision:** 6 (2026-10-09)
+**Status:** SP24 implemented (production parser, reference grammar, all three execution tiers).
+**Formal linkage:** [S11.1.2v4](../doc/Lambda_Formal_Semantics.md#s111-types-compose-like-values)
+defines the surface and domains; S11.1.6v3 distinguishes value runs from text
+repetition; S10.1.1v3 governs whole-pattern type operations.
+**Scope:** quoted character classes, one delimiter for both text domains,
+domain-preserving references and rejection of domainless wildcard islands.
+The prior design and its arguments are preserved in Appendix S.
+
+## 1. SP24 — Quoted classes and one domain per island
+
+**Decision (USER, 2026-10-09):** retain `\(...)` and retire `\symbol(...)`.
+Inside an island:
+
+- `"\d"`, `"\w"`, `"\s"`, `"\a"` are string-domain character classes;
+  `'\d'`, `'\w'`, `'\s'`, `'\a'` are their symbol-domain counterparts.
+  The class meanings are unchanged. Bare `d`, `w`, `s`, `a` become ordinary
+  named-pattern references rather than reserved class names.
+- Ordinary quoted characters and escapes stay literal. Operators remain
+  outside quotes: `"\d+"` matches a digit followed by a literal plus,
+  `"\d"+` repeats a digit, and `"a\s"*` repeats the whole quoted fragment.
+  `"\\d"` matches literal backslash-plus-d; `"\n"` matches a newline.
+  The four new class escapes are legal only inside an island.
+- Quotes and named patterns contribute their domains. All contributions
+  must agree, including across union branches. Mixed quote styles or
+  mixed-domain references are compile errors, with no coercion and no
+  first-quote-wins rule. A union of string and symbol patterns belongs
+  outside the islands.
+- Named patterns retain their domain when composed or referenced alone.
+  Implicit reuse of one domain's pattern as the other domain's content
+  is retired; this decision introduces no conversion spelling.
+- Bare `.` and `...` keep their character/sequence matching behavior and
+  inherit the domain established elsewhere in the island. An island with
+  no domain-bearing literal or reference is rejected: `\(.)` and `\(...)`,
+  as well as grouped, repeated or combined wildcard-only forms. They
+  neither default to strings nor admit both strings and symbols.
+  Quoted `"."` and `"..."` remain literal punctuation.
+- Precedence, grouping, counts, single-character complement and
+  whole-pattern type operations retain S11.1.2's existing separation.
+  Inside: atom, prefix `!`, suffix, concatenation, `|`, tightest first.
+  Outside: occurrence counts values (S11.1.6v3), and `&`/`!` operate on
+  whole types (S10.1.1v3).
+
+SP24 replaces SP2/SP3's bare reserved classes, SP13's ban on symbol
+literals, SP14's tagged symbol delimiter and SP15's domain-erasing
+references. It supersedes SP16's string-default and symbol-tag examples;
+no additional tagged form is introduced. SP17–SP20's operator rulings
+remain, with quoted class spellings. Literal-only islands still equal
+their same-domain literal unions.
+
+## 2. Why retain the delimiter and infer the domain?
+
+The attempted delimiter-free design collided with value occurrences:
+`type A = "a"*` is a run of separate string values, whereas
+`type B = \("a"*)` is one string whose contents repeat. Keeping the island
+preserves that distinction and the boundary between character complement
+and whole-type complement (S11.1.6v3, S11.1.2v4).
+
+Quoted class escapes make the two domains symmetric without spending a
+second delimiter. Unlike the old B1 candidate (Appendix S), `'a'` remains
+the literal letter; only `'\a'` denotes a class. Class-only patterns now
+establish a domain through their quotes, so no literal prefix or empty
+symbol is needed. The ban on `''` remains unchanged (S2.2.2v2).
+
+The tradeoff is explicit: references preserve their domain instead of
+silently extracting domain-free content. Domainless wildcard islands
+are rejected rather than adding a third, dual-domain kind of pattern.
+A domain mismatch remains an error even in a branch that would not match.
+
+## 3. Examples
+
+These examples use the implemented syntax.
+
+```lambda no-run
+type StringIdent = \("\a" "\w"*)
+type SymbolIdent = \('\a' '\w'*)
+type StringCode = \("ID-" "\d"{4})
+type SymbolCode = \('ID-' '\d'{4})
+
+type Digits = \("\d"+)
+type Code = \("ID-" Digits)
+type Copy = \(Digits)                  // string domain is retained
+type Either = \("\d"+) | \('\d'+)      // ordinary union of two domains
+
+type StringTail = \("prefix" ...)      // wildcards inherit string domain
+type SymbolTail = \('prefix' ...)      // wildcards inherit symbol domain
+```
+
+Rejected forms:
+
+```lambda no-run
+type NoDomain = \(.)
+type NoDomainSequence = \(...)
+type NoDomainGrouped = \((.)*)
+type MixedConcat = \("a" 'b')
+type MixedUnion = \("a" | 'b')
+type MixedReference = \('ID-' Digits)
+type RetiredTag = \symbol("abc")
+```
+
+## 4. Implementation and validation
+
+SP24 is implemented on 2026-10-09. The production lexer keeps class escapes
+local to islands and rejects the retired tag. `parse_type_pattern.cpp` splits
+quoted fragments into literal/class parts while keeping each fragment one
+operand; ordinary escapes decode once. Its resolver combines all quote and
+reference domain contributions, including alternatives, and rejects mixed or
+absent domains before lowering.
+
+`re2_wrapper.cpp` shares domain inference and text views for the different
+string/symbol payload layouts. It lowers symbol literals and sets, prints the
+shared delimiter with domain-bearing quotes, and keeps string search from
+accepting symbol literal unions. Literal-only islands retain their ordinary
+literal-union representation, including redundant groups; the old literal-set
+predicate had left grouped literal-only islands as compiled patterns, changing
+their type identity (S11.1.2v4). The validator now retains literal operand values
+inside occurrence types, fixing the pre-existing tag-only check that let
+`"aa"` satisfy `"a"*` (S11.1.6v3).
+
+The reference grammar, executable examples, package patterns and user docs are
+migrated. `pattern_quoted_classes.ls` is checked against its golden on interp,
+jit and auto, and the negative fixtures check mixed domains, missing domains,
+retired spellings and out-of-island class escapes on all three tiers. The syntax
+harnesses pass C 411/411 and Tree-sitter 397/397.
+
+Validation on 2026-10-09:
+
+| Gate | Result |
+|---|---|
+| New positive regression | 75 checks pass on interp, jit and auto through `LambdaTierParityTests.Tune27FixturesHonorTierSupport`; the final release executable also matches the golden |
+| Negative/error suite | 231/231, including nine new cases checked on all three tiers |
+| Lambda + input baseline | 6520/6521; the remaining `edit_view_only` math round-trip failure also reproduces with the saved pre-change executable |
+| Interpreter walker | 41/43; numeric N-D writes and task-alias expectations fail with both current and saved pre-change executables; the named/inline pattern case passes |
+| Full interpreter sweep | Incomplete: stopped at the slow `math_test_math_html_output` fixture; no full-sweep conformance is claimed |
+| Validator path reporting | 18/18 |
+| Native validator / AST validator | Cannot start: the test host's export list hides `_LIT_BOOL`, required by the shared runtime; these suites are not claimed as validated |
+| User pattern documentation | 14 code units compile cleanly |
+| Types tutorial | 11 output checks pass |
+| Test262 baseline | 40261/40261 fully passing with `--jobs=2`, zero retries and zero non-fully-passing results |
+| Formal ruling index | Current |
+
+`make test262-baseline` built the release executable and completed with no
+semantic failures. Its default seven-worker run classified one Unicode
+identifier test as slow (4.59 seconds against the existing three-second limit)
+and passed it in an isolated retry (2.6 seconds), so that run is not claimed as
+a clean gate. The full baseline was then rerun with the same limits and two
+workers to reduce contention, passing all 40261 tests with no retries:
+
+```sh
+./test/test_js_test262_gtest.exe --baseline-only --batch-only --run-async \
+  --async-list=test/js262/test262_baseline.txt --jobs=2
+```
+
+Logs are under `temp/pattern-syntax-v4/`, including
+`lambda-baseline-final.log`, `test262-baseline.log`,
+`test262-baseline-jobs2.log` and `interp-focused.log`.
+
+The existing class sets, wildcard newline behavior, full-match/search distinction
+and matching engine are unchanged. Appendix S retains historical syntax.
+
+## Appendix S — Superseded design and rulings
+
+The archived revision below preserves the original deliberations, ledgers
+and implementation history. Its superseded class/domain rulings are struck
+through and replaced by SP24 above; its examples are historical syntax.
+
+<details>
+<summary>Revisions 1–5 and the SP1–SP23 decision record (historical)</summary>
+
 # Lambda String Pattern Syntax — Delimited Form — Design
 
 **Date:** 2026-08-07
@@ -255,8 +426,8 @@ type Phone = \(d[3] "-" d[3] "-" d[4])
 | ID | Decision |
 |----|----------|
 | **SP1** | **String patterns are always delimited: `\( pattern )`.** The bare form is retired. `\...\` is **rejected** (A1–A5, §4.1). |
-| **SP2** | **Bare char classes inside the delimiter.** `d` (digit), `w` (word), `s` (whitespace), `a` (alpha), `.` (any char), `...` (any string). The `\d \w \s \a \.` spellings are retired everywhere. |
-| **SP3** | **Class names are reserved words in pattern scope.** Inside `\(...)`, `d w s a` (plus `to`, and future class names per SPO1) cannot be referenced as user pattern names. Outside the delimiter they remain ordinary identifiers. A named pattern whose name collides is still definable, just not referenceable inside a pattern. |
+| **SP2** | ~~**Bare char classes inside the delimiter.** `d` (digit), `w` (word), `s` (whitespace), `a` (alpha), `.` (any char), `...` (any string). The `\d \w \s \a \.` spellings are retired everywhere.~~ **Superseded by SP24 (2026-10-09).** |
+| **SP3** | ~~**Class names are reserved words in pattern scope.** Inside `\(...)`, `d w s a` (plus `to`, and future class names per SPO1) cannot be referenced as user pattern names. Outside the delimiter they remain ordinary identifiers. A named pattern whose name collides is still definable, just not referenceable inside a pattern.~~ **Superseded by SP24 (2026-10-09).** |
 | **SP4** | **Interior grammar otherwise unchanged.** Quoted literals, whitespace concat, `\|` union / `&` intersection / `!` negation (S10.1.1), `"a" to "z"` ranges, `? + *` and `[n] [n+] [n, m]` occurrence, `(...)` grouping, references to named patterns (`HexDigit[3]`). Full-match `is`/`match` vs partial-match `find`/`replace`/`split` semantics untouched. |
 | **SP4 note (2026-09-22)** | Counted occurrence respelled to the regex form — `{n}`, `{n,m}`, `{n,}` — inside islands as everywhere else (S11.1.6v2, `Lambda_Type_Pattern.md` §1.3): `\(d{3} "-" d{4})`, `HexDigit{3}`. The `[n]`/`[n+]`/`[n, m]` spellings above are superseded and not yet migrated in the parser. |
 | **SP5** | **(rev 4a, corrected)** **Char classes are delimited-only; ranges are NOT.** `\d`-style class tokens disappear from the general type grammar and live only inside `\(...)`. **`X to Y` stays purposely overloaded across all three contexts** — the overload is coherent because the denotation is one set: expr syntax = shorthand for the literal array of consecutive values (`Range` container, S4.8 successor guard); type syntax = range type, matched by membership (annotations, match arms `case 90 to 100:` per S11.2.1); pattern interior = the same set compiled as an RE2 char class (`"a" to "z"` → `[a-z]`). No grammar split; only the compilation strategy differs per context. (The pre-existing runtime gap — `fn_to` implements integer operands only, so expr-space `"a" to "z"` errors "unknown range type" — is **folded into the impl plan as P5**: single-codepoint operands, codepoint stepping, membership shared with the char-class set.) |
@@ -267,10 +438,10 @@ type Phone = \(d[3] "-" d[3] "-" d[4])
 | **SP10** | **Pattern definitions become syntactically self-evident.** `type X = \(...)` needs no content-analysis heuristic; the `type_stam` detection logic reduces to "delimiter present". The `string X = ...` / `symbol X = ...` prefix definition forms are **retired** — the delimiter (plus the `symbol(...)` lift, SP14) carries all the information the prefixes carried (rev 2, with SP13). |
 | **SP11** | **Occurrence applies to a whole delimited pattern.** `\( ... )?`, `\( ... )[2]` compose like any grouped term when a pattern appears inside a larger pattern; at the top of a general type expression a delimited pattern takes no occurrence suffix (occurrence is pattern-interior structure). |
 | **SP12** | **ADOPTED.** The formal semantics now record the delimited surface and domain rulings as **S11.1.2** and **S11.1.3** (per rule 17); `doc/Lambda_Type.md` §String Patterns is synchronized with the implementation. |
-| **SP13** | **Symbols are out of the pattern *interior*** (resolves SPO2). The pattern language has one domain: content. Literals inside any delimiter are `"..."` strings only; `'...'` symbol literals are illegal inside. The `symbol X = pattern` and `string X = pattern` prefix definition forms are retired (SP10). The dominant symbol use — enumeration — never needed patterns: `type Keyword = 'if' \| 'else'` is a bare literal union of symbol singletons, symmetric with SP6's string literal unions. |
-| **SP14** | **(rev 3, replaces the rev-2 `symbol(\(...))` lift)** **Structural symbol patterns use a tagged delimiter: `\symbol( pattern )`** — a type matching any symbol whose character content full-matches the pattern. `\symbol(` lexes as a single opening token, sibling of `\(`; the pattern literal is self-contained (its domain travels with it as a first-class type value, D3.1.1v2). `symbol()` remains purely the value-level conversion function — untouched. Five candidate spellings were evaluated; see §4.4. |
-| **SP15** | **The tag governs domain only; the interior is one content language.** A named pattern referenced inside any delimiter contributes **content structure only**, regardless of the domain of the delimiter it was defined in — `\symbol(P)` means "symbols whose content matches P" even when `P` was defined as plain `\(...)`. (Semantically the tag is `symbol ∧ content(P)`, but no user writes an intersection.) One `HexDigit` serves every pattern; the cross-domain-reference error class does not exist. |
-| **SP16** | **`\tag(...)` is an open tagged-delimiter family** (the shape Perl migrated to with `m{...}`, §2.1). Bare `\(...)` = string (the common case pays nothing); `\symbol(...)` = symbol; the namespace stays open for future variants (e.g. a case-insensitivity flag, a full-regex escape hatch) without touching the grammar shape again. Tag words follow S10.3.1 (words over sigils); no new tag ships without its own ruling. |
+| **SP13** | ~~**Symbols are out of the pattern *interior*** (resolves SPO2). The pattern language has one domain: content. Literals inside any delimiter are `"..."` strings only; `'...'` symbol literals are illegal inside. The `symbol X = pattern` and `string X = pattern` prefix definition forms are retired (SP10). The dominant symbol use — enumeration — never needed patterns: `type Keyword = 'if' \| 'else'` is a bare literal union of symbol singletons, symmetric with SP6's string literal unions.~~ **Superseded by SP24 (2026-10-09).** |
+| **SP14** | ~~**(rev 3, replaces the rev-2 `symbol(\(...))` lift)** **Structural symbol patterns use a tagged delimiter: `\symbol( pattern )`** — a type matching any symbol whose character content full-matches the pattern. `\symbol(` lexes as a single opening token, sibling of `\(`; the pattern literal is self-contained (its domain travels with it as a first-class type value, D3.1.1v2). `symbol()` remains purely the value-level conversion function — untouched. Five candidate spellings were evaluated; see §4.4.~~ **Superseded by SP24 (2026-10-09).** |
+| **SP15** | ~~**The tag governs domain only; the interior is one content language.** A named pattern referenced inside any delimiter contributes **content structure only**, regardless of the domain of the delimiter it was defined in — `\symbol(P)` means "symbols whose content matches P" even when `P` was defined as plain `\(...)`. (Semantically the tag is `symbol ∧ content(P)`, but no user writes an intersection.) One `HexDigit` serves every pattern; the cross-domain-reference error class does not exist.~~ **Superseded by SP24 (2026-10-09).** |
+| **SP16** | ~~**`\tag(...)` is an open tagged-delimiter family** (the shape Perl migrated to with `m{...}`, §2.1). Bare `\(...)` = string (the common case pays nothing); `\symbol(...)` = symbol; the namespace stays open for future variants (e.g. a case-insensitivity flag, a full-regex escape hatch) without touching the grammar shape again. Tag words follow S10.3.1 (words over sigils); no new tag ships without its own ruling.~~ **Superseded by SP24 (2026-10-09).** |
 | **SP17** | **(2026-09-27, USER) Island `!` negates a single-character set.** The operand must be a class, a range, a one-character string, or a union, group, negation or named pattern built only from these; `\(!("a" \| "b" \| "c"))` is regex `[^abc]`, and any other operand is a compile error. Reasons: it is the negation regular expressions have, so an existing regex engine (RE2) compiles it without a matcher of Lambda's own; complementing a longer pattern needs a deterministic automaton; the natural reading of "not X" is usually "does not contain X", not the complement; and whole-pattern complement already works through the type operators. Formal text S11.1.2v3; resolves SPO9. Full argument: [Lambda_Expr_String_Pattern.md §10](Lambda_Expr_String_Pattern.md#10-sp17--negates-single-character-sets-ruled-2026-09-27). |
 | **SP18** | **(2026-09-27, USER) No binary `!` inside a pattern.** Inside a string or symbol pattern `!` is prefix-only (SP17); `\(w ! d)` is a word character followed by a non-digit. Excluding one pattern from another is the type operator between whole patterns, `\(A) ! \(B)`. Reasons: a binary `!` would collide with concatenation, since whitespace joins atoms; between longer patterns it is pattern difference, which needs a complementing engine (SP17); the whole-pattern case already works at the type level; and regex offers only character-set difference, in some dialects and not in RE2. Formal text S10.1.1v3 and S11.1.2v3. Full argument: [Lambda_Expr_String_Pattern.md §11](Lambda_Expr_String_Pattern.md#11-sp18-no-binary--inside-a-pattern-ruled-2026-09-27). |
 | **SP19** | **(2026-09-27, USER) The island's tiers.** Inside a string or symbol pattern the tiers are, tightest first: atom (a range `"a" to "z"` is one atom), prefix `!`, suffix, concatenation, alternation `\|`. So `\(!d+)` is `(!d)+`, `\("a" "b"+)` repeats only the `"b"`, and `\("a" \| "b" "c")` matches `a` or `bc`. Reasons: these are regex's tiers wherever the two share one; a range is one atom as regex's `[a-z]` is; prefix-before-suffix reproduces regex's negated classes (`\D+`, `[^>]*`), and the other reading of `!d+` is a multi-character complement SP17 rejects. Formal text S11.1.2v3; resolves SPO8 and the island half of SPO7. Full argument: [Lambda_Expr_String_Pattern.md §12](Lambda_Expr_String_Pattern.md#12-sp19-and-sp20-the-islands-operator-tiers-ruled-2026-09-27). |
@@ -378,3 +549,43 @@ type NonEmpty = string that (len(~) > 0)
 | **SPO5** | **Enforcement interaction.** Constrained-type predicate *enforcement* is still open (SO9); nothing in this doc (least of all SP9, which now changes no spelling at all) may be read as closing SO9. |
 | **SPO6** | **DISSOLVED (rev 3).** Asked what `symbol(P)` applied to a type value means (conversion fn vs AST-recognized constructor). The rev-3 tagged delimiter `\symbol(...)` (SP14/B5) needs no answer: `symbol()` stays purely the value-level conversion, and the domain is carried by the pattern literal's own opening token. |
 | **SPO7–SPO14** | **Opened 2026-09-27 by the regex-compatibility audit. RESOLVED the same day: SPO9 → SP17, SPO8 and SPO7's island half → SP19, SPO13 → SP20, SPO11 → SP21, SPO12's folding half → SP22; the rest open. SPO14 (an empty literal needle, formal SO47) was opened with SP21 and kept open by the user.** SPO7 type-operator precedence tiers (value expressions and islands), SPO8 prefix `!` against a suffix (`!d+`), SPO9 what island `!` may negate, SPO10 `.`/`...`/`s` and line terminators, SPO11 `replace` semantics, SPO12 case folding, SPO13 `&` inside an island. Full text and recommendations: [Lambda_Expr_String_Pattern.md §8](Lambda_Expr_String_Pattern.md#8-open-questions-spo7spo14). |
+
+</details>
+
+<details>
+<summary>S11.1.2v3 before replacement by v4 (historical)</summary>
+
+- **S11.1.2v3** String structural patterns are delimited islands: `\( ... )`
+  denotes a string-domain pattern and `\symbol( ... )` denotes a
+  symbol-domain pattern. Inside an island, quoted literals are strings, `d`,
+  `w`, `s`, `a`, `.`, and `...` are the reserved pattern atoms, whitespace is
+  concatenation, and the existing union, grouping, occurrence (`? + *
+  {n,m}`, S11.1.6v3), and `to` rules apply. **An island binds, tightest
+  first: an atom (a range `"a" to "z"` is one atom), then prefix `!`, then a
+  suffix, then concatenation, then `|`**, so `\(!d+)` is `(!d)+`,
+  `\("a" "b"+)` repeats only the `"b"`, and `\("a" | "b" "c")` matches `a`
+  or `bc`. **`|` is the island's only binary operator.** **Prefix `!`
+  complements a single-character set** and matches one character outside it.
+  The set may be a class, a range, a one-character string, or a union, group,
+  negation or named pattern built only from these, so `\(!("a" | "b" | "c"))`
+  is regex `[^abc]`. Any other operand is a compile error. **Inside an island
+  `!` has no binary form and `&` has none at all**: `\(w ! d)` is a word
+  character followed by a non-digit, and `\(a & w)` is a compile error. To
+  intersect or exclude whole patterns, use the type operators between them,
+  as in `\(A) & \(B)`, `\(A) ! \(B)` or `!\(P)` (S10.1.1v3). A pattern's tag
+  is part of its type value: matching checks the value domain before content,
+  so a string never satisfies a symbol pattern or vice versa. A literal-only
+  island is representationally identical to the corresponding ordinary
+  literal union; named structural patterns may be reused as content inside
+  either tagged domain. *Why: the tiers are regular expressions' own wherever
+  the two share one, and prefix-before-suffix gives `!d+` the reading of regex
+  `[^0-9]+`, the only one the single-character rule leaves legal. `!` stops at
+  one character and `&` stays outside the island because regex engines negate
+  only single characters (`[^…]`) and cannot intersect: complementing or
+  intersecting longer patterns needs a deterministic automaton or a matcher
+  of Lambda's own. A binary `!` would also collide with concatenation, since
+  whitespace joins atoms. Between whole patterns, `&` and `!` combine two full
+  matches and need no regex support.* [S10.1.1v3, D3.1.1v2, D3.1.2;
+  SP17–SP20]
+
+</details>

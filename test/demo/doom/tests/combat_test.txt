@@ -1,0 +1,9 @@
+{
+  shot: [49, 10, 5, true, true],
+  blocked: [20, false],
+  armor: [80, 20, 1, 90, 25, 100],
+  death: ["dead", 0, 0, "DSPLDETH"],
+  barrels: [true, true, true],
+  infighting: [12, 2.86],
+  rocket: [1, 1, 0, true]
+}

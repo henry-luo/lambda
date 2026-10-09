@@ -1,23 +1,63 @@
 #include "input.hpp"
+#include "input-parsers.h"
 #include "../io/mark_builder.hpp"
 #include "input-context.hpp"
 #include "source_tracker.hpp"
 #include "../../lib/html_entities.h"
 #include "../../lib/str.h"
 #include "../../lib/arraylist.h"
+#include "../../lib/hashmap_helpers.h"
 #include "input-utils.h"
 
 using namespace lambda;
 
 static const int XML_MAX_DEPTH = 512;
 
-static Item parse_element(InputContext& ctx, const char **xml, int depth = 0);
-static Item parse_comment(InputContext& ctx, const char **xml);
-static Item parse_cdata(InputContext& ctx, const char **xml);
-static Item parse_entity(InputContext& ctx, const char **xml);
-static Item parse_doctype(InputContext& ctx, const char **xml, int depth = 0);
-static Item parse_dtd_declaration(InputContext& ctx, const char **xml);
-static String* parse_string_content(InputContext& ctx, const char **xml, char end_char);
+struct XmlNamespaceFrame;
+struct XmlInputContext : InputContext {
+    const XmlParseOptions* options;
+    const char* begin;
+    const char* end;
+    const char* document_start;
+    XmlNamespaceFrame* namespaces = nullptr;
+    XmlInputContext(Input* input, const char* source, const XmlParseOptions* opts)
+        : InputContext(input, source), options(opts), begin(source), end(source + strlen(source)), document_start(source) {}
+    bool preserving() const { return options && options->preserve_whitespace; }
+    bool strict() const { return options && (options->require_well_formed || options->require_namespaces); }
+    bool namespaced() const { return options && options->require_namespaces; }
+};
+
+static bool xml_error(XmlInputContext& ctx, const char* at, const char* code, const char* message) {
+    ctx.syncTo(at); ctx.addErrorCode(ctx.tracker.location(), code, "%s", message); return false;
+}
+
+static bool xml_character(uint32_t cp) {
+    return cp == 9 || cp == 10 || cp == 13 || (cp >= 0x20 && cp <= 0xD7FF) ||
+        (cp >= 0xE000 && cp <= 0xFFFD) || (cp >= 0x10000 && cp <= 0x10FFFF);
+}
+
+static void xml_append_literal(XmlInputContext& ctx, StringBuf* buffer, const char* start,
+        const char* end, bool attribute = false) {
+    if (!ctx.strict()) { stringbuf_append_str_n(buffer, start, (size_t)(end - start)); return; }
+    // normalize physical line ends before XML attribute whitespace; character references bypass this step.
+    while (start < end) {
+        const char* run = start;
+        while (start < end && *start != '\r' && (!attribute || (*start != '\n' && *start != '\t'))) start++;
+        stringbuf_append_str_n(buffer, run, (size_t)(start - run));
+        if (start < end) {
+            if (*start++ == '\r' && start < end && *start == '\n') start++;
+            stringbuf_append_char(buffer, attribute ? ' ' : '\n');
+        }
+    }
+}
+
+static Item parse_element(XmlInputContext& ctx, const char **xml, int depth = 0);
+static Item parse_comment(XmlInputContext& ctx, const char **xml);
+static Item parse_cdata(XmlInputContext& ctx, const char **xml);
+static Item parse_entity(XmlInputContext& ctx, const char **xml);
+static Item parse_doctype(XmlInputContext& ctx, const char **xml, int depth = 0);
+static Item parse_dtd_declaration(XmlInputContext& ctx, const char **xml);
+static String* parse_string_content(XmlInputContext& ctx, const char **xml, char end_char);
 
 static inline bool xml_ref_at_limit(const char* xml, const char* limit) {
     return !xml || !*xml || (limit && xml >= limit);
@@ -29,32 +69,41 @@ static bool xml_ref_is_entity_name_char(char ch, bool stop_on_xml_delims) {
     return true;
 }
 
-static bool append_xml_numeric_reference(StringBuf* sb, const char** xml, const char* limit) {
+static bool append_xml_numeric_reference(XmlInputContext& ctx, StringBuf* sb, const char** xml, const char* limit) {
     if (xml_ref_at_limit(*xml, limit) || **xml != '#') return false;
-
+    const char* start = *xml;
     (*xml)++; // skip #
     uint32_t value = 0;
     bool is_hex = false;
-    if (!xml_ref_at_limit(*xml, limit) && (**xml == 'x' || **xml == 'X')) {
+    if (!xml_ref_at_limit(*xml, limit) && (**xml == 'x' || (!ctx.strict() && **xml == 'X'))) {
         is_hex = true;
         (*xml)++; // skip x
     }
 
+    size_t digits = 0; bool overflow = false;
     while (!xml_ref_at_limit(*xml, limit) && **xml != ';') {
+        uint32_t digit = 0;
         if (is_hex) {
             if (**xml >= '0' && **xml <= '9') {
-                value = value * 16 + (**xml - '0');
+                digit = **xml - '0';
             } else if (**xml >= 'a' && **xml <= 'f') {
-                value = value * 16 + (**xml - 'a' + 10);
+                digit = **xml - 'a' + 10;
             } else if (**xml >= 'A' && **xml <= 'F') {
-                value = value * 16 + (**xml - 'A' + 10);
+                digit = **xml - 'A' + 10;
             } else break;
         } else {
             if (**xml >= '0' && **xml <= '9') {
-                value = value * 10 + (**xml - '0');
+                digit = **xml - '0';
             } else break;
         }
-        (*xml)++;
+        uint32_t radix = is_hex ? 16 : 10;
+        overflow |= value > (0x10FFFFu - digit) / radix;
+        value = value * radix + digit;
+        (*xml)++; digits++;
+    }
+
+    if (ctx.strict() && (!digits || overflow || !xml_character(value) || xml_ref_at_limit(*xml, limit) || **xml != ';')) {
+        xml_error(ctx, start, "XML_CHARACTER_REFERENCE", "Invalid XML character reference"); return true;
     }
 
     if (!xml_ref_at_limit(*xml, limit) && **xml == ';') {
@@ -73,12 +122,13 @@ static bool append_xml_numeric_reference(StringBuf* sb, const char** xml, const 
     return true;
 }
 
-static void append_xml_reference(StringBuf* sb, const char** xml, const char* limit,
+static void append_xml_reference(XmlInputContext& ctx, StringBuf* sb, const char** xml, const char* limit,
                                  bool stop_on_xml_delims) {
     if (xml_ref_at_limit(*xml, limit) || **xml != '&') return;
+    const char* reference_start = *xml;
     (*xml)++; // skip &
 
-    if (append_xml_numeric_reference(sb, xml, limit)) return;
+    if (append_xml_numeric_reference(ctx, sb, xml, limit)) return;
 
     const char* entity_start = *xml;
     while (!xml_ref_at_limit(*xml, limit) &&
@@ -88,8 +138,18 @@ static void append_xml_reference(StringBuf* sb, const char** xml, const char* li
 
     if (!xml_ref_at_limit(*xml, limit) && **xml == ';') {
         size_t entity_len = (size_t)(*xml - entity_start);
-        const char* replacement = html_entity_lookup(entity_start, entity_len);
+        const char* replacement = nullptr;
+        if (ctx.strict()) {
+            const char* names[] = {"lt", "gt", "amp", "apos", "quot"};
+            const char* values[] = {"<", ">", "&", "'", "\""};
+            for (size_t i = 0; i < 5; i++)
+                if (strlen(names[i]) == entity_len && !memcmp(names[i], entity_start, entity_len)) replacement = values[i];
+        } else replacement = html_entity_lookup(entity_start, entity_len);
         (*xml)++; // skip ;
+
+        if (ctx.strict() && !replacement) {
+            xml_error(ctx, reference_start, "XML_ENTITY_REFERENCE", "XML entity is not declared or predefined"); return;
+        }
 
         if (replacement) {
             stringbuf_append_str(sb, replacement);
@@ -99,6 +159,7 @@ static void append_xml_reference(StringBuf* sb, const char** xml, const char* li
             stringbuf_append_str_n(sb, entity_start, (size_t)(*xml - entity_start));
         }
     } else {
+        if (ctx.strict()) { xml_error(ctx, reference_start, "XML_ENTITY_REFERENCE", "Unterminated XML entity reference"); return; }
         stringbuf_append_char(sb, '&');
         *xml = entity_start;
     }
@@ -116,34 +177,53 @@ static const char* xml_find_terminator(const char* p, const char* term) {
     }
 }
 
-static String* parse_string_content(InputContext& ctx, const char **xml, char end_char) {
+static String* parse_string_content(XmlInputContext& ctx, const char **xml, char end_char) {
     MarkBuilder& builder = ctx.builder;
     StringBuf* sb = ctx.sb;
     stringbuf_reset(sb);
 
     while (**xml && **xml != end_char) {
         if (**xml == '&') {
-            append_xml_reference(sb, xml, nullptr, true);
+            append_xml_reference(ctx, sb, xml, nullptr, true);
+            if (ctx.strict() && ctx.hasErrors()) return nullptr;
             continue;
         }
         // append the plain run up to the quote, '&' or NUL in one call
         const char* run = *xml;
-        while (*run && *run != end_char && *run != '&') run++;
-        stringbuf_append_str_n(sb, *xml, (size_t)(run - *xml));
+        while (*run && *run != end_char && *run != '&' && (!ctx.strict() || *run != '<')) run++;
+        if (ctx.strict() && *run == '<') {
+            xml_error(ctx, run, "XML_ATTRIBUTE_VALUE", "Literal '<' is forbidden in an XML attribute value"); return nullptr;
+        }
+        xml_append_literal(ctx, sb, *xml, run, true);
         *xml = run;
     }
 
     return builder.createString(sb->str->chars, sb->length);
 }
 
-static String* parse_tag_name(InputContext& ctx, const char **xml) {
+static bool xml_name_start(uint32_t cp) {
+    // XML 1.0 fifth edition productions [4]/[4a]; ASCII punctuation is handled separately.
+    return cp == ':' || cp == '_' || (cp >= 'A' && cp <= 'Z') || (cp >= 'a' && cp <= 'z') ||
+        (cp >= 0xC0 && cp <= 0xD6) || (cp >= 0xD8 && cp <= 0xF6) || (cp >= 0xF8 && cp <= 0x2FF) ||
+        (cp >= 0x370 && cp <= 0x37D) || (cp >= 0x37F && cp <= 0x1FFF) || (cp >= 0x200C && cp <= 0x200D) ||
+        (cp >= 0x2070 && cp <= 0x218F) || (cp >= 0x2C00 && cp <= 0x2FEF) || (cp >= 0x3001 && cp <= 0xD7FF) ||
+        (cp >= 0xF900 && cp <= 0xFDCF) || (cp >= 0xFDF0 && cp <= 0xFFFD) || (cp >= 0x10000 && cp <= 0xEFFFF);
+}
+
+static String* parse_tag_name(XmlInputContext& ctx, const char **xml) {
     MarkBuilder& builder = ctx.builder;
     StringBuf* sb = ctx.sb;
     stringbuf_reset(sb);
 
-    while (**xml && (str_char_is_alnum(**xml) || **xml == '_' || **xml == '-' || **xml == ':')) {
-        stringbuf_append_char(sb, **xml);
-        (*xml)++;
+    while (**xml) {
+        uint32_t cp = (uint8_t)**xml;
+        int bytes = cp < 0x80 ? 1 : str_utf8_decode(*xml, (size_t)(ctx.end - *xml), &cp);
+        if (bytes <= 0) break;
+        bool admitted = xml_name_start(cp) || (sb->length && (cp == '-' || cp == '.' || (cp >= '0' && cp <= '9') ||
+            cp == 0xB7 || (cp >= 0x300 && cp <= 0x36F) || (cp >= 0x203F && cp <= 0x2040)));
+        if (!admitted) break;
+        stringbuf_append_str_n(sb, *xml, (size_t)bytes);
+        *xml += bytes;
     }
 
     if (sb->length == 0) return NULL; // empty tag name
@@ -162,21 +242,68 @@ static bool xml_closing_tag_matches(const char* xml, const char* tag_name, uint3
     return *p == '>' || *p == ' ' || *p == '\t' || *p == '\n' || *p == '\r';
 }
 
-static void xml_skip_closing_tag(const char** xml) {
-    if (!xml || !*xml) return;
+static bool xml_skip_closing_tag(XmlInputContext& ctx, const char** xml, const String* name) {
+    if (ctx.strict()) {
+        if (!xml_closing_tag_matches(*xml, name->chars, name->len))
+            return xml_error(ctx, *xml, "XML_CLOSING_TAG", "Invalid XML closing tag");
+        const char* end = *xml + 2;
+        if (strncmp(end, name->chars, name->len))
+            return xml_error(ctx, *xml, "XML_CLOSING_TAG", "Invalid XML closing tag");
+        end += name->len;
+        while (*end == ' ' || *end == '\t' || *end == '\n' || *end == '\r') end++;
+        if (*end != '>') return xml_error(ctx, end, "XML_CLOSING_TAG", "Invalid XML closing tag terminator");
+        *xml = end + 1; return true;
+    }
+    if (!xml || !*xml) return false;
     if (**xml == '<' && *(*xml + 1) == '/') {
         *xml += 2;
         while (**xml && **xml != '>') (*xml)++;
         if (**xml == '>') (*xml)++;
     }
+    return true;
 }
 
-static bool parse_attributes(InputContext& ctx, ElementBuilder& element, const char **xml) {
+struct XmlAttributeName { const char* name; const char* value; };
+HASHMAP_DEFINE_STRKEY(xml_attribute_names, XmlAttributeName, name)
+struct XmlAttributeSet {
+    HashMap* names = nullptr;
+    ~XmlAttributeSet() { if (names) hashmap_free(names); }
+};
+
+struct XmlNamespaceFrame {
+    XmlInputContext& context;
+    XmlNamespaceFrame* parent;
+    XmlAttributeSet attributes;
+    explicit XmlNamespaceFrame(XmlInputContext& ctx) : context(ctx), parent(ctx.namespaces) {
+        if (ctx.namespaced()) ctx.namespaces = this;
+    }
+    ~XmlNamespaceFrame() { if (context.namespaced()) context.namespaces = parent; }
+};
+
+static bool parse_attributes(XmlInputContext& ctx, ElementBuilder& element, const char **xml,
+        bool declaration = false, XmlNamespaceFrame* frame = nullptr) {
+    XmlAttributeSet local_attributes;
+    XmlAttributeSet& attributes = frame ? frame->attributes : local_attributes;
+    if (ctx.strict()) {
+        attributes.names = xml_attribute_names_new(0);
+        if (!attributes.names) return xml_error(ctx, *xml, "XML_ALLOCATION", "XML attribute allocation failed");
+    }
+    size_t count = 0; bool standalone = false;
+    const char* separator = *xml;
     skip_whitespace(xml);
     while (**xml && **xml != '>' && **xml != '/' && **xml != '?') {
+        if (ctx.strict() && *xml == separator)
+            return xml_error(ctx, *xml, "XML_ATTRIBUTE_SEPARATOR", "XML attributes require separating whitespace");
         // parse attribute name
         String* attr_name = parse_tag_name(ctx, xml);
         if (!attr_name) return false;
+        if (ctx.strict()) {
+            XmlAttributeName key = {attr_name->chars, nullptr};
+            if (hashmap_get(attributes.names, &key))
+                return xml_error(ctx, *xml, "XML_DUPLICATE_ATTRIBUTE", "Duplicate XML attribute name");
+            hashmap_set(attributes.names, &key);
+            if (hashmap_oom(attributes.names)) return xml_error(ctx, *xml, "XML_ALLOCATION", "XML attribute allocation failed");
+        }
 
         skip_whitespace(xml);
         if (**xml != '=') return false;
@@ -187,21 +314,108 @@ static bool parse_attributes(InputContext& ctx, ElementBuilder& element, const c
 
         char quote_char = **xml;
         (*xml)++; // skip opening quote
-
+        const char* value_start = *xml;
         String* attr_value = parse_string_content(ctx, xml, quote_char);
         if (!attr_value) return false;
-
+        if (ctx.strict() && **xml != quote_char)
+            return xml_error(ctx, *xml, "XML_ATTRIBUTE_VALUE", "Unterminated XML attribute value");
+        if (frame) {
+            XmlAttributeName key = {attr_name->chars, attr_value->chars}; hashmap_set(attributes.names, &key);
+            if (hashmap_oom(attributes.names)) return xml_error(ctx, *xml, "XML_ALLOCATION", "XML attribute allocation failed");
+        }
+        if (declaration) {
+            bool valid = !memchr(value_start, '&', (size_t)(*xml - value_start));
+            if (!count) valid &= !strcmp(attr_name->chars, "version") && !strcmp(attr_value->chars, "1.0");
+            else if (!strcmp(attr_name->chars, "encoding")) valid &= count == 1 && str_ieq_cstr(attr_value->chars, "UTF-8");
+            else if (!strcmp(attr_name->chars, "standalone")) {
+                valid &= !standalone && (!strcmp(attr_value->chars, "yes") || !strcmp(attr_value->chars, "no")); standalone = true;
+            } else valid = false;
+            if (!valid) return xml_error(ctx, value_start, "XML_DECLARATION", "Invalid or unsupported XML 1.0 UTF-8 declaration");
+        }
         if (**xml == quote_char) { (*xml)++; } // skip closing quote
 
         // Add attribute to element (wrap String* in Item)
         element.attr(attr_name->chars, Item{.item = s2it(attr_value)});
 
-        skip_whitespace(xml);
+        count++; separator = *xml; skip_whitespace(xml);
+    }
+    if (declaration && !count) return xml_error(ctx, *xml, "XML_DECLARATION", "XML declaration requires a version");
+    return true;
+}
+
+static const char* xml_namespace_uri(XmlInputContext& ctx, const char* prefix, size_t length) {
+    if (length == 3 && !memcmp(prefix, "xml", 3)) return "http://www.w3.org/XML/1998/namespace";
+    stringbuf_reset(ctx.sb); stringbuf_append_str(ctx.sb, "xmlns");
+    if (length) { stringbuf_append_char(ctx.sb, ':'); stringbuf_append_str_n(ctx.sb, prefix, length); }
+    XmlAttributeName key = {ctx.sb->str->chars, nullptr};
+    for (XmlNamespaceFrame* frame = ctx.namespaces; frame; frame = frame->parent) {
+        const XmlAttributeName* binding = (const XmlAttributeName*)hashmap_get(frame->attributes.names, &key);
+        if (binding) return binding->value;
+    }
+    return nullptr;
+}
+
+struct XmlExpandedAttribute { const char* uri; const char* local; };
+static uint64_t xml_expanded_hash(const void* item, uint64_t seed0, uint64_t seed1) {
+    const XmlExpandedAttribute* key = (const XmlExpandedAttribute*)item;
+    return hashmap_sip(key->uri, strlen(key->uri), seed0, seed1) ^ hashmap_sip(key->local, strlen(key->local), seed0, seed1);
+}
+static int xml_expanded_compare(const void* left, const void* right, void*) {
+    const XmlExpandedAttribute* a = (const XmlExpandedAttribute*)left;
+    const XmlExpandedAttribute* b = (const XmlExpandedAttribute*)right;
+    int result = strcmp(a->uri, b->uri); return result ? result : strcmp(a->local, b->local);
+}
+
+static bool xml_resolve_qname(XmlInputContext& ctx, const char* name, bool attribute,
+        const char* at, XmlExpandedAttribute* result) {
+    const char* colon = strchr(name, ':'); result->local = colon ? colon + 1 : name;
+    uint32_t cp = 0;
+    if ((colon && (colon == name || strchr(colon + 1, ':'))) ||
+        str_utf8_decode(result->local, strlen(result->local), &cp) <= 0 || !xml_name_start(cp) || cp == ':')
+        return xml_error(ctx, at, "XML_QNAME", "Invalid namespace-qualified XML name");
+    if (colon && (size_t)(colon - name) == 5 && !memcmp(name, "xmlns", 5))
+        return xml_error(ctx, at, "XML_NAMESPACE", "The xmlns prefix is reserved for namespace declarations");
+    result->uri = !colon && attribute ? "" : xml_namespace_uri(ctx, name, colon ? (size_t)(colon - name) : 0);
+    if (colon && (!result->uri || !*result->uri)) return xml_error(ctx, at, "XML_NAMESPACE", "XML namespace prefix has no binding");
+    if (!result->uri) result->uri = "";
+    return true;
+}
+
+static bool xml_validate_namespaces(XmlInputContext& ctx, XmlNamespaceFrame& frame, const char* name, const char* at) {
+    size_t cursor = 0; void* item = nullptr;
+    while (hashmap_iter(frame.attributes.names, &cursor, &item)) {
+        const XmlAttributeName* attribute = (const XmlAttributeName*)item;
+        bool default_binding = !strcmp(attribute->name, "xmlns");
+        if (!default_binding && strncmp(attribute->name, "xmlns:", 6)) continue;
+        const char* prefix = default_binding ? "" : attribute->name + 6;
+        uint32_t cp = 0;
+        bool invalid_prefix = !default_binding && (!*prefix || strchr(prefix, ':') ||
+            str_utf8_decode(prefix, strlen(prefix), &cp) <= 0 || !xml_name_start(cp));
+        bool xml_prefix = !strcmp(prefix, "xml");
+        bool xml_uri = !strcmp(attribute->value, "http://www.w3.org/XML/1998/namespace");
+        if (invalid_prefix || !strcmp(prefix, "xmlns") || xml_prefix != xml_uri ||
+            !strcmp(attribute->value, "http://www.w3.org/2000/xmlns/") || (!default_binding && !*attribute->value))
+            return xml_error(ctx, at, "XML_NAMESPACE", "Invalid or reserved XML namespace binding");
+    }
+    XmlExpandedAttribute expanded = {};
+    if (!xml_resolve_qname(ctx, name, false, at, &expanded)) return false;
+    XmlAttributeSet expanded_names;
+    expanded_names.names = hashmap_new(sizeof(XmlExpandedAttribute), 0, 0, 0, xml_expanded_hash, xml_expanded_compare, nullptr, nullptr);
+    if (!expanded_names.names) return xml_error(ctx, at, "XML_ALLOCATION", "XML namespace allocation failed");
+    cursor = 0;
+    while (hashmap_iter(frame.attributes.names, &cursor, &item)) {
+        const XmlAttributeName* attribute = (const XmlAttributeName*)item;
+        if (!strcmp(attribute->name, "xmlns") || !strncmp(attribute->name, "xmlns:", 6)) continue;
+        if (!xml_resolve_qname(ctx, attribute->name, true, at, &expanded)) return false;
+        if (hashmap_get(expanded_names.names, &expanded))
+            return xml_error(ctx, at, "XML_DUPLICATE_ATTRIBUTE", "Duplicate expanded XML attribute name");
+        hashmap_set(expanded_names.names, &expanded);
+        if (hashmap_oom(expanded_names.names)) return xml_error(ctx, at, "XML_ALLOCATION", "XML namespace allocation failed");
     }
     return true;
 }
 
-static Item parse_comment(InputContext& ctx, const char **xml) {
+static Item parse_comment(XmlInputContext& ctx, const char **xml) {
     MarkBuilder& builder = ctx.builder;
     // Skip past the "!--" part (already consumed by caller)
 
@@ -210,6 +424,10 @@ static Item parse_comment(InputContext& ctx, const char **xml) {
     const char* comment_end = comment_start;
 
     comment_end = xml_find_terminator(comment_start, "-->");
+    if (ctx.strict() && (!*comment_end || strstr(comment_start, "--") != comment_end)) {
+        xml_error(ctx, comment_start, "XML_COMMENT", "Unterminated XML comment or forbidden '--' in comment text");
+        return {.item = ITEM_ERROR};
+    }
 
     // Create comment element
     ElementBuilder element = builder.element("!--");
@@ -218,7 +436,7 @@ static Item parse_comment(InputContext& ctx, const char **xml) {
     if (comment_end > comment_start) {
         StringBuf* sb = ctx.sb;
         stringbuf_reset(sb);
-        stringbuf_append_str_n(sb, comment_start, (size_t)(comment_end - comment_start));
+        xml_append_literal(ctx, sb, comment_start, comment_end);
         String* comment_text = builder.createString(sb->str->chars, sb->length);
         if (comment_text && comment_text->len > 0) {
             element.child(Item{.item = s2it(comment_text)});
@@ -234,7 +452,7 @@ static Item parse_comment(InputContext& ctx, const char **xml) {
     return element.final();
 }
 
-static Item parse_cdata(InputContext& ctx, const char **xml) {
+static Item parse_cdata(XmlInputContext& ctx, const char **xml) {
     MarkBuilder& builder = ctx.builder;
     // Skip past the "![CDATA[" part (already consumed by caller)
 
@@ -242,11 +460,14 @@ static Item parse_cdata(InputContext& ctx, const char **xml) {
 
     // Find CDATA end
     *xml = xml_find_terminator(*xml, "]]>");
+    if (ctx.strict() && !**xml) {
+        xml_error(ctx, cdata_start, "XML_CDATA", "Unterminated XML CDATA section"); return {.item = ITEM_ERROR};
+    }
 
     // Create CDATA content string
     StringBuf* sb = ctx.sb;
     stringbuf_reset(sb);
-    stringbuf_append_str_n(sb, cdata_start, (size_t)(*xml - cdata_start));
+    xml_append_literal(ctx, sb, cdata_start, *xml);
 
     if (**xml && strncmp(*xml, "]]>", 3) == 0) {
         *xml += 3; // skip ]]>
@@ -256,7 +477,7 @@ static Item parse_cdata(InputContext& ctx, const char **xml) {
     return Item{.item = s2it(cdata_text)};
 }
 
-static Item parse_entity(InputContext& ctx, const char **xml) {
+static Item parse_entity(XmlInputContext& ctx, const char **xml) {
     MarkBuilder& builder = ctx.builder;
     // Skip past the "!ENTITY" part (already consumed by caller)
     skip_whitespace(xml);
@@ -336,7 +557,7 @@ static Item parse_entity(InputContext& ctx, const char **xml) {
     return element.final();
 }
 
-static Item parse_dtd_declaration(InputContext& ctx, const char **xml) {
+static Item parse_dtd_declaration(XmlInputContext& ctx, const char **xml) {
     MarkBuilder& builder = ctx.builder;
     // Parse DTD declarations like ELEMENT, ATTLIST, NOTATION
     const char* decl_start = *xml;
@@ -390,7 +611,7 @@ static Item parse_dtd_declaration(InputContext& ctx, const char **xml) {
     return element.final();
 }
 
-static Item parse_doctype(InputContext& ctx, const char **xml, int depth) {
+static Item parse_doctype(XmlInputContext& ctx, const char **xml, int depth) {
     MarkBuilder& builder = ctx.builder;
     // Skip past the "!DOCTYPE" part (already consumed by caller)
     skip_whitespace(xml);
@@ -488,19 +709,26 @@ static bool xml_text_is_space(const char* chars, size_t len) {
 }
 
 // Character data between markup, with entity and character references decoded.
-static String* xml_decode_text(InputContext& ctx, const char* start, const char* end) {
+static String* xml_decode_text(XmlInputContext& ctx, const char* start, const char* end) {
     if (end <= start) return nullptr;
+    if (ctx.strict()) {
+        const char* forbidden = strstr(start, "]]>");
+        if (forbidden && forbidden < end) {
+            xml_error(ctx, forbidden, "XML_CHARACTER_DATA", "']]>' is forbidden in XML character data"); return nullptr;
+        }
+    }
     StringBuf* sb = ctx.sb;
     stringbuf_reset(sb);
     while (start < end) {
         if (*start == '&') {
-            append_xml_reference(sb, &start, end, false);
+            append_xml_reference(ctx, sb, &start, end, false);
+            if (ctx.strict() && ctx.hasErrors()) return nullptr;
             continue;
         }
         // one append per run between entity references
         const char* amp = (const char*)memchr(start, '&', (size_t)(end - start));
         const char* run_end = amp ? amp : end;
-        stringbuf_append_str_n(sb, start, (size_t)(run_end - start));
+        xml_append_literal(ctx, sb, start, run_end);
         start = run_end;
     }
     return ctx.builder.createString(sb->str->chars, sb->length);
@@ -522,9 +750,10 @@ static bool xml_is_markup_declaration(Item child) {
         (type->name.str[0] == '!' || type->name.str[0] == '?');
 }
 
-static Item parse_element(InputContext& ctx, const char **xml, int depth) {
+static Item parse_element(XmlInputContext& ctx, const char **xml, int depth) {
     MarkBuilder& builder = ctx.builder;
     skip_whitespace(xml);
+    const char* element_start = *xml;
 
     if (depth >= XML_MAX_DEPTH) {
         ctx.addError(ctx.tracker.location(), "Maximum XML nesting depth (%d) exceeded", XML_MAX_DEPTH);
@@ -542,8 +771,16 @@ static Item parse_element(InputContext& ctx, const char **xml, int depth) {
 
     // Handle CDATA sections
     if (strncmp(*xml, "![CDATA[", 8) == 0) {
+        if (ctx.strict() && !depth) {
+            xml_error(ctx, element_start, "XML_DOCUMENT_CONTENT", "CDATA requires a document element"); return {.item = ITEM_ERROR};
+        }
         *xml += 8;
         return parse_cdata(ctx, xml);
+    }
+
+    if (ctx.strict() && **xml == '!') {
+        xml_error(ctx, element_start, "XML_DECLARATION_PROFILE", "DTD declarations require an explicit XML entity policy");
+        return {.item = ITEM_ERROR};
     }
 
     // Handle ENTITY declarations - create element with name "!ENTITY"
@@ -574,6 +811,24 @@ static Item parse_element(InputContext& ctx, const char **xml, int depth) {
         // Parse target name
         String* target_name = parse_tag_name(ctx, xml);
         if (!target_name) return {.item = ITEM_ERROR};
+        bool declaration = ctx.strict() && str_ieq_cstr(target_name->chars, "xml");
+        if (declaration && (strcmp(target_name->chars, "xml") || depth || element_start != ctx.document_start)) {
+            xml_error(ctx, element_start, "XML_DECLARATION", "XML declaration must occur once at the beginning of the document");
+            return {.item = ITEM_ERROR};
+        }
+        if (ctx.strict() && **xml && **xml != ' ' && **xml != '\t' && **xml != '\n' && **xml != '\r' &&
+            !(**xml == '?' && *(*xml + 1) == '>')) {
+            xml_error(ctx, *xml, "XML_PROCESSING_INSTRUCTION", "Processing instruction data requires separating whitespace");
+            return {.item = ITEM_ERROR};
+        }
+        if (declaration) {
+            const char* attributes = *xml;
+            ElementBuilder values = builder.element("xml-declaration");
+            if (!parse_attributes(ctx, values, &attributes, true) || attributes[0] != '?' || attributes[1] != '>') {
+                if (!ctx.hasErrors()) xml_error(ctx, attributes, "XML_DECLARATION", "Invalid XML declaration terminator");
+                return {.item = ITEM_ERROR};
+            }
+        }
 
         // Create processing instruction element name "?target"
         StringBuf* sb = ctx.sb;
@@ -588,6 +843,10 @@ static Item parse_element(InputContext& ctx, const char **xml, int depth) {
             (*xml)++;
         }
         const char* pi_data_end = *xml;
+        if (ctx.strict() && !**xml) {
+            xml_error(ctx, element_start, "XML_PROCESSING_INSTRUCTION", "Unterminated XML processing instruction");
+            return {.item = ITEM_ERROR};
+        }
 
         // Extract stylesheet href if this is xml-stylesheet processing instruction
         if (strcmp(target_name->chars, "xml-stylesheet") == 0) {
@@ -626,8 +885,7 @@ static Item parse_element(InputContext& ctx, const char **xml, int depth) {
         // Add PI data as text content
         if (pi_data_end > pi_data_start) {
             stringbuf_reset(sb);
-            stringbuf_append_str_n(sb, pi_data_start,
-                                   (size_t)(pi_data_end - pi_data_start));
+            xml_append_literal(ctx, sb, pi_data_start, pi_data_end);
             String* pi_data = builder.createString(sb->str->chars, sb->length);
             if (pi_data && pi_data->len > 0) {
                 element.child(Item{.item = s2it(pi_data)});
@@ -642,9 +900,11 @@ static Item parse_element(InputContext& ctx, const char **xml, int depth) {
 
     // Create element
     ElementBuilder element = builder.element(tag_name->chars);
+    XmlNamespaceFrame namespaces(ctx);
 
     // parse attributes
-    if (!parse_attributes(ctx, element, xml)) return {.item = ITEM_ERROR};
+    if (!parse_attributes(ctx, element, xml, false, ctx.namespaced() ? &namespaces : nullptr) ||
+        (ctx.namespaced() && !xml_validate_namespaces(ctx, namespaces, tag_name->chars, element_start))) return {.item = ITEM_ERROR};
 
     skip_whitespace(xml);
 
@@ -675,12 +935,19 @@ static Item parse_element(InputContext& ctx, const char **xml, int depth) {
         while (**xml && !xml_closing_tag_matches(*xml, tag_name->chars, tag_name->len)) {
             if (**xml == '<') {
                 if (*(*xml + 1) == '/') {
+                    ctx.syncTo(*xml);
+                    if (ctx.strict()) ctx.addErrorCode(ctx.tracker.location(), "XML_MISMATCHED_TAG",
+                        "Mismatched XML closing tag while parsing <%s>", tag_name->chars);
                     ctx.addWarning(ctx.tracker.location(), "Mismatched XML closing tag while parsing <%s>", tag_name->chars);
                     break;
                 }
                 // Child element (could be regular element, comment, PI, or CDATA)
                 Item child = parse_element(ctx, xml, depth + 1);
-                if (child.item == ITEM_ERROR) continue;
+                if (child.item == ITEM_ERROR) {
+                    // strict formatting input cannot recover by accepting a partial subtree.
+                    if (ctx.strict()) { arraylist_free(trimmable); arraylist_free(children); return child; }
+                    continue;
+                }
                 if (get_type_id(child) == LMD_TYPE_STRING) {
                     // CDATA is character data, never trimmed
                     has_text = true;
@@ -695,6 +962,9 @@ static Item parse_element(InputContext& ctx, const char **xml, int depth) {
                 const char* next_tag = strchr(*xml, '<');
                 *xml = next_tag ? next_tag : *xml + strlen(*xml);
                 String* text = xml_decode_text(ctx, text_start, *xml);
+                if (ctx.strict() && ctx.hasErrors()) {
+                    arraylist_free(trimmable); arraylist_free(children); return {.item = ITEM_ERROR};
+                }
                 if (text && text->len > 0) {
                     if (!xml_text_is_space(text->chars, text->len)) has_text = true;
                     arraylist_append(children, (ArrayListValue)s2it(text));
@@ -706,7 +976,7 @@ static Item parse_element(InputContext& ctx, const char **xml, int depth) {
         bool mixed = has_element_child && has_text;
         for (int i = 0; i < arraylist_size(children); i++) {
             Item child = {.item = (uint64_t)arraylist_get(children, i)};
-            if (!mixed && arraylist_get(trimmable, i)) {
+            if (!ctx.preserving() && !mixed && arraylist_get(trimmable, i)) {
                 String* text = child.get_string();
                 if (xml_text_is_space(text->chars, text->len)) continue;
                 child = Item{.item = s2it(xml_trim_text(builder, text))};
@@ -717,26 +987,50 @@ static Item parse_element(InputContext& ctx, const char **xml, int depth) {
         arraylist_free(children);
 
         // Skip matching closing tag
-        xml_skip_closing_tag(xml);
+        if (ctx.strict() && !xml_closing_tag_matches(*xml, tag_name->chars, tag_name->len)) {
+            ctx.syncTo(*xml);
+            ctx.addErrorCode(ctx.tracker.location(), "XML_MISSING_TAG", "Missing XML closing tag for <%s>", tag_name->chars);
+        }
+        if (!xml_skip_closing_tag(ctx, xml, tag_name) && ctx.strict()) return {.item = ITEM_ERROR};
     }
-    return element.final();
+    Item result = element.final();
+    if (ctx.options && ctx.options->element_span && get_type_id(result) == LMD_TYPE_ELEMENT)
+        ctx.options->element_span(ctx.options->context, result.element,
+            (size_t)(element_start - ctx.begin), (size_t)(*xml - ctx.begin));
+    return result;
 }
 
-void parse_xml(Input* input, const char* xml_string) {
+void parse_xml_with_options(Input* input, const char* xml_string, const XmlParseOptions* options) {
     if (!xml_string || !*xml_string) {
         input->root = {.item = ITEM_NULL};
+        if (options && (options->require_well_formed || options->require_namespaces)) {
+            XmlInputContext ctx(input, xml_string ? xml_string : "", options);
+            xml_error(ctx, ctx.begin, "XML_DOCUMENT_ELEMENT", "XML requires exactly one document element"); ctx.logErrors();
+        }
         return;
     }
-    InputContext ctx(input, xml_string, strlen(xml_string));
+    XmlInputContext ctx(input, xml_string, options);
     MarkBuilder& builder = ctx.builder;
 
+    if (ctx.strict()) for (const char* ch = ctx.begin; ch < ctx.end;) {
+        uint32_t cp = 0;
+        int count = str_utf8_decode(ch, (size_t)(ctx.end - ch), &cp);
+        if (count <= 0 || !xml_character(cp)) {
+            xml_error(ctx, ch, "XML_CHARACTER", "Invalid UTF-8 or forbidden XML character");
+            ctx.logErrors(); input->root = {.item = ITEM_ERROR}; return;
+        }
+        ch += count;
+    }
+
     const char* xml = xml_string;
+    if (ctx.strict() && (size_t)(ctx.end - xml) >= 3 && !memcmp(xml, "\xef\xbb\xbf", 3)) xml += 3;
+    ctx.document_start = xml;
     skip_whitespace(&xml);
 
     // Create a document root element to contain all top-level elements
     ElementBuilder doc_element = builder.element("document");
 
-    Item actual_root_element = {.item = ITEM_ERROR};
+    size_t document_elements = 0;
 
     // Parse all top-level elements (including XML declaration, comments, PIs, and the main element)
     while (*xml) {
@@ -747,11 +1041,15 @@ void parse_xml(Input* input, const char* xml_string) {
 
         if (*xml == '<') {
             Item element = parse_element(ctx, &xml, 0);
+            if (ctx.strict() && (element.item == ITEM_ERROR || ctx.hasErrors())) {
+                if (!ctx.hasErrors()) xml_error(ctx, xml, "XML_ELEMENT_SYNTAX", "Invalid XML element syntax");
+                break;
+            }
             if (element.item != ITEM_ERROR) {
                 doc_element.child(element);
 
                 // Check if this is an actual XML element (not processing instruction, comment, DTD, etc.)
-                Element* elem = (Element*)element.item;
+                Element* elem = get_type_id(element) == LMD_TYPE_ELEMENT ? element.element : nullptr;
                 if (elem && elem->type) {
                     TypeElmt* elmt_type = (TypeElmt*)elem->type;
                     // Count as actual element if it doesn't start with ?, !, or --
@@ -759,11 +1057,17 @@ void parse_xml(Input* input, const char* xml_string) {
                         elmt_type->name.str[0] != '?' &&
                         elmt_type->name.str[0] != '!' &&
                         !(elmt_type->name.length >= 3 && strncmp(elmt_type->name.str, "!--", 3) == 0)) {
-                        actual_root_element = element;
+                        document_elements++;
+                        if (ctx.strict() && document_elements > 1) {
+                            xml_error(ctx, old_xml, "XML_DOCUMENT_ELEMENT", "XML requires exactly one document element"); break;
+                        }
                     }
                 }
             }
         } else {
+            if (ctx.strict()) {
+                xml_error(ctx, xml, "XML_DOCUMENT_CONTENT", "Character content outside the XML document element"); break;
+            }
             // Skip any stray text content at document level
             while (*xml && *xml != '<') {
                 xml++;
@@ -777,6 +1081,9 @@ void parse_xml(Input* input, const char* xml_string) {
         }
     }
 
+    if (ctx.strict() && !ctx.hasErrors() && document_elements != 1)
+        xml_error(ctx, xml, "XML_DOCUMENT_ELEMENT", "XML requires exactly one document element");
+
     // Report errors if any
     if (ctx.hasErrors()) {
         ctx.logErrors();
@@ -784,7 +1091,11 @@ void parse_xml(Input* input, const char* xml_string) {
 
     // Always return the document wrapper to maintain consistent structure
     // This ensures all XML content is wrapped in a <document> element
-    input->root = doc_element.final();
+    input->root = ctx.strict() && ctx.hasErrors() ? Item{.item = ITEM_ERROR} : doc_element.final();
+}
+
+void parse_xml(Input* input, const char* xml_string) {
+    parse_xml_with_options(input, xml_string, nullptr);
 }
 
 Element* parse_svg_document(Input* input, const char* svg_source) {

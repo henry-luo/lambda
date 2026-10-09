@@ -106,14 +106,19 @@ size_t typeset_line_alternatives(const TypesetParagraph* paragraph, size_t first
     float advance = 0.0f, height = paragraph->minimum_line_height, depth = 0.0f;
     float ascent = paragraph->minimum_baseline;
     float descent = fmaxf(0.0f, paragraph->minimum_line_height - ascent);
+    bool baseline_aware = paragraph->baseline_aware || paragraph->minimum_baseline > 0.0f;
     size_t last_next = SIZE_MAX;
     auto append_candidate = [&](size_t next, size_t paint_end, float natural, const TypesetBreak& boundary) {
+        // trim the complete conditional run, including whitespace before an unpainted forced break.
+        while (paint_end > paint_first && paragraph->items[paint_end - 1].kind == TYPESET_GLUE &&
+               paragraph->items[paint_end - 1].glue.discard_end)
+            natural -= paragraph->items[--paint_end].glue.natural;
         TypesetLineCandidate candidate = {};
         candidate.first = first; candidate.next = next;
         candidate.paint_first = paint_first; candidate.paint_end = paint_end;
         candidate.width = natural; candidate.height = height;
-        candidate.depth = paragraph->minimum_baseline > 0.0f ? descent : depth;
-        candidate.baseline = paragraph->minimum_baseline > 0.0f ? ascent : 0.0f;
+        candidate.depth = baseline_aware ? descent : depth;
+        candidate.baseline = baseline_aware ? ascent : 0.0f;
         candidate.penalty = boundary.penalty;
         candidate.forced = boundary.legality == TYPESET_BREAK_FORCED && boundary.scope == TYPESET_BREAK_LINE;
         candidate.overflow = natural > width;
@@ -136,19 +141,14 @@ size_t typeset_line_alternatives(const TypesetParagraph* paragraph, size_t first
             // an unconsumed atomic item must not contribute height to the preceding line.
             size_t paint_end = i;
             float natural = advance;
-            while (paint_end > paint_first && paragraph->items[paint_end - 1].kind == TYPESET_GLUE &&
-                   paragraph->items[paint_end - 1].glue.discard_end) {
-                natural -= paragraph->items[--paint_end].glue.natural;
-            }
             if (append_candidate(i, paint_end, natural, item.before)) break;
         }
-        float before = advance;
         TypesetMetrics metrics = item.metrics;
         if (paragraph->measure && !paragraph->measure(paragraph, i, width, &metrics, paragraph->context)) return 0;
         if (!isfinite(metrics.advance) || !isfinite(metrics.height) || !isfinite(metrics.depth)) return 0;
         // baseline-aware producers retain the tallest ascent and descent independently.
         ascent = fmaxf(ascent, metrics.height); descent = fmaxf(descent, metrics.depth);
-        height = paragraph->minimum_baseline > 0.0f ? ascent + descent
+        height = baseline_aware ? ascent + descent
             : fmaxf(height, metrics.height + metrics.depth);
         depth = fmaxf(depth, metrics.depth);
         if (item.kind == TYPESET_BOX) {
@@ -159,9 +159,8 @@ size_t typeset_line_alternatives(const TypesetParagraph* paragraph, size_t first
         bool allowed = (item.kind == TYPESET_GLUE || item.kind == TYPESET_PENALTY) &&
             item.boundary.legality != TYPESET_BREAK_FORBIDDEN && item.boundary.scope == TYPESET_BREAK_LINE;
         if (!ending && !allowed && !forced) continue;
-        size_t paint_end = item.kind == TYPESET_GLUE && item.glue.discard_end ? i : i + 1;
-        float natural = paint_end == i ? before : advance;
-        if (append_candidate(i + 1, paint_end, natural, item.boundary)) break;
+        size_t paint_end = item.kind == TYPESET_PENALTY && !item.paint ? i : i + 1;
+        if (append_candidate(i + 1, paint_end, advance, item.boundary)) break;
     }
     return count;
 }

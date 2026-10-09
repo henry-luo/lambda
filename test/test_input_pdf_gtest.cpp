@@ -35,9 +35,12 @@
 
 #include "../lambda/input/input.hpp"
 #include "../lambda/input/input-parsers.h"
+#include "../lambda/input/input-pdf-type1.hpp"
+#include "../lambda/io/mark_builder.hpp"
 #include "../lambda/core/mark_reader.hpp"
 #include "../lib/log.h"
 #include "../lib/url.h"
+#include "../lib/strbuf.h"
 
 extern "C" {
 #include "../lib/pdf_writer.h"
@@ -343,6 +346,60 @@ TEST_F(InputPdfTest, FlattenedPageCarriesType) {
     EXPECT_STREQ(ty, "page");
 }
 
+static Input* parse_page_label_fixture(const char* labels, const char* nodes = "") {
+    StrBuf* pdf = strbuf_new(); if (!pdf) return nullptr;
+    strbuf_append_format(pdf, "%%PDF-1.7\n1 0 obj\n<< /Type /Catalog /Pages 2 0 R /PageLabels %s >>\nendobj\n", labels);
+    strbuf_append_str(pdf, "2 0 obj\n<< /Type /Pages /Count 6 /Kids [3 0 R 4 0 R 5 0 R 6 0 R 7 0 R 8 0 R] >>\nendobj\n");
+    for (int i = 3; i <= 8; i++) strbuf_append_format(pdf,
+        "%d 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 100 60] >>\nendobj\n", i);
+    strbuf_append_str(pdf, nodes);
+    strbuf_append_str(pdf, "trailer\n<< /Root 1 0 R /Size 30 >>\n%%EOF\n");
+    Input* input = InputManager::create_input(nullptr);
+    if (input) parse_pdf(input, pdf->str, pdf->length);
+    strbuf_free(pdf); return input;
+}
+
+TEST_F(InputPdfTest, PageLabelNumberTreesResolvePrefixesStylesAndUnicodeWithoutChangingOrdinals) {
+    Input* input = parse_page_label_fixture("<< /Kids [20 0 R 21 0 R] >>",
+        "20 0 obj\n<< /Limits [0 2] /Nums [0 << /S /r /St 4 >> 2 << /S /D /P (Part\\050x\\051\\040) /St 8 >>] >>\nendobj\n"
+        "21 0 obj\n<< /Limits [4 5] /Nums [4 << /S /A /St 27 >> 5 << /P <FEFF4E2DD83DDE00> >>] >>\nendobj\n");
+    ASSERT_NE(input, nullptr); MapReader root = MapReader::fromItem(input->root);
+    EXPECT_FALSE(root.has("page_labels_error")); ArrayReader pages = root.get("pages").asArray(); ASSERT_EQ(pages.length(), 6);
+    const char* expected[] = {"iv", "v", "Part(x) 8", "Part(x) 9", "AA", "中😀"};
+    for (int i = 0; i < 6; i++) EXPECT_STREQ(pages.get(i).asMap().get("label").cstring(), expected[i]);
+    input = parse_page_label_fixture("<< /Nums [0 << /S /R /St 3999 >> 2 << /S /a /St 52 >> 4 << /P <8093A0> >> 5 << >>] >>");
+    ASSERT_NE(input, nullptr); root = MapReader::fromItem(input->root); EXPECT_FALSE(root.has("page_labels_error"));
+    pages = root.get("pages").asArray();
+    const char* more[] = {"MMMCMXCIX", "MMMM", "zz", "aaa", "•ﬁ€", ""};
+    for (int i = 0; i < 6; i++) EXPECT_STREQ(pages.get(i).asMap().get("label").cstring(), more[i]);
+}
+
+TEST_F(InputPdfTest, InvalidPageLabelTreesDiagnoseBeforePublishingAnyLabelSet) {
+    struct Invalid { const char* labels; const char* nodes; const char* reason; };
+    const Invalid cases[] = {
+        {"<< /Nums [1 << /S /D >>] >>", "", "index zero"},
+        {"<< /Nums [0 << >> 0 << >>] >>", "", "ordered, unique"},
+        {"<< /Nums [0 << >> 6 << >>] >>", "", "within the page"},
+        {"<< /Nums [0 << >> 1] >>", "", "key/dictionary pairs"},
+        {"<< /Nums [0 << /S /bad >>] >>", "", "style"},
+        {"<< /Nums [0 << /St 1.5 >>] >>", "", "positive integer"},
+        {"<< /Nums [0 << /St 0 >>] >>", "", "positive integer"},
+        {"<< /Nums [0 << /P <FEFFD800> >>] >>", "", "encoding"},
+        {"<< /Nums [0 << /P <7F> >>] >>", "", "encoding"},
+        {"<< /Nums [0 << /S /A /St 2147483647 >>] >>", "", "byte budget"},
+        {"<< /Kids [20 0 R] >>", "20 0 obj\n<< /Kids [20 0 R] /Limits [0 0] >>\nendobj\n", "cycle"},
+        {"<< /Kids [20 0 R] >>", "20 0 obj\n<< /Nums [0 << >>] /Limits [0 1] >>\nendobj\n", "Limits"},
+        {"<< /Kids [20 0 R] >>", "20 0 obj\n<< /Nums [0 << >>] >>\nendobj\n", "Limits"}
+    };
+    for (const Invalid& item : cases) {
+        SCOPED_TRACE(item.labels); Input* input = parse_page_label_fixture(item.labels, item.nodes); ASSERT_NE(input, nullptr);
+        MapReader root = MapReader::fromItem(input->root); const char* error = root.get("page_labels_error").cstring();
+        ASSERT_NE(error, nullptr); EXPECT_NE(strstr(error, item.reason), nullptr) << error;
+        ArrayReader pages = root.get("pages").asArray(); ASSERT_EQ(pages.length(), 6);
+        for (int i = 0; i < 6; i++) EXPECT_FALSE(pages.get(i).asMap().has("label"));
+    }
+}
+
 TEST_F(InputPdfTest, FlattenedPageInheritsMediaBox) {
     Input* input = parse_pdf_file(PDF_GEN_3PAGE);
     ASSERT_NE(input, nullptr);
@@ -423,6 +480,102 @@ TEST_F(InputPdfTest, FontsAreReachableViaIndirectObjects) {
     }
     // advanced_test.pdf has 10 fonts processed by the postprocess.
     EXPECT_GE(font_objects, 1);
+}
+
+TEST_F(InputPdfTest, EmbeddedMathType1FontsRetainTheirEncodedOutlines) {
+    Input* input = parse_pdf_file("test/input/math_intensive_test.pdf");
+    ASSERT_NE(input, nullptr);
+    ArrayReader objects = MapReader::fromItem(input->root).get("objects").asArray();
+    int outlined_fonts = 0;
+    for (int64_t i = 0; i < objects.length(); i++) {
+        MapReader font = objects.get(i).asMap().get("content").asMap();
+        const char* subtype = font.get("Subtype").cstring();
+        if (!subtype || strcmp(subtype, "Type1")) continue;
+        EXPECT_TRUE(font.get("glyph_paths").isMap()) << font.get("BaseFont").cstring();
+        if (font.get("glyph_paths").isMap()) outlined_fonts++;
+    }
+    EXPECT_EQ(outlined_fonts, 21);
+    // CMEX's display sum is byte 88, whose ToUnicode fallback misleadingly says "X".
+    MapReader extension = find_indirect_object(objects, 14);
+    const char* sum_path = extension.get("glyph_paths").asMap().get("88").cstring();
+    ASSERT_NE(sum_path, nullptr);
+    EXPECT_NE(strchr(sum_path, 'L'), nullptr);
+    EXPECT_GT(strlen(sum_path), 100u);
+}
+
+static String* type1_test_program(MarkBuilder& builder, const char* outline, size_t length,
+        bool encrypted, int* clear_length, const char* subr = nullptr, size_t subr_length = 0) {
+    StrBuf* clear = strbuf_create("%!PS-AdobeFont-1.0: OutlineTest 1.0\n"
+        "/FontMatrix [0.002 0 0 0.003 0.01 0.02] def\n"
+        "/Encoding 256 array dup 65 /A put readonly def\n");
+    if (encrypted) strbuf_append_str(clear, "currentfile eexec\n");
+    *clear_length = (int)clear->length;
+    StrBuf* priv = strbuf_new();
+    if (encrypted) strbuf_append_char_n(priv, 0, 4);
+    strbuf_append_format(priv, "/lenIV %d def\n/Subrs %d array\n", encrypted ? 4 : -1, subr ? 1 : 0);
+    const char* programs[] = {subr, outline};
+    size_t lengths[] = {subr_length, length};
+    for (int i = 0; i < 2; i++) {
+        if (!programs[i]) continue;
+        if (i == 0) strbuf_append_format(priv, "dup 0 %zu RD ", lengths[i] + (encrypted ? 4 : 0));
+        else strbuf_append_format(priv, "/CharStrings 1 dict dup begin\n/A %zu RD ", lengths[i] + (encrypted ? 4 : 0));
+        uint16_t key = 4330;
+        for (size_t j = 0; j < lengths[i] + (encrypted ? 4 : 0); j++) {
+            uint8_t plain = encrypted && j < 4 ? 0 : (uint8_t)programs[i][j - (encrypted ? 4 : 0)];
+            uint8_t cipher = encrypted ? plain ^ (key >> 8) : plain;
+            strbuf_append_char(priv, (char)cipher);
+            key = (uint16_t)((cipher + key) * 52845u + 22719u);
+        }
+        strbuf_append_str(priv, i == 0 ? " NP\n" : " ND\nend\n");
+    }
+    uint16_t key = 55665;
+    for (size_t i = 0; i < priv->length; i++) {
+        uint8_t cipher = encrypted ? (uint8_t)priv->str[i] ^ (key >> 8) : (uint8_t)priv->str[i];
+        strbuf_append_char(clear, (char)cipher);
+        key = (uint16_t)((cipher + key) * 52845u + 22719u);
+    }
+    String* result = builder.createString(clear->str, clear->length);
+    strbuf_free(priv); strbuf_free(clear);
+    return result;
+}
+
+TEST_F(InputPdfTest, Type1PathsRespectFontMatrixEncryptionSubroutinesAndEncodingDifferences) {
+    Input* input = InputManager::create_input(nullptr);
+    ASSERT_NE(input, nullptr);
+    MarkBuilder builder(input);
+    // hsbw; rmoveto; rlineto twice; closepath; endchar.
+    const char direct[] = "\x8b\xf8\x88\x0d\x8b\x8b\x15\xef\x8b\x05\x8b\xef\x05\x09\x0e";
+    const char subr[] = "\xef\x8b\x05\x8b\xef\x05\x0b";
+    const char indirect[] = "\x8b\xf8\x88\x0d\x8b\x8b\x15\x8b\x0a\x09\x0e";
+    int clear_length;
+    String* plain = type1_test_program(builder, direct, sizeof(direct) - 1, false, &clear_length);
+    Item plain_paths = pdf_type1_glyph_paths(input, plain, clear_length, ItemNull);
+    const char* path = MapReader::fromItem(plain_paths).get("65").cstring();
+    ASSERT_NE(path, nullptr);
+    EXPECT_STREQ(path, "M10 20 L210 20 L210 320 Z ");
+
+    String* encrypted = type1_test_program(builder, indirect, sizeof(indirect) - 1, true,
+                                          &clear_length, subr, sizeof(subr) - 1);
+    Item differences = builder.array().append(90).append("A").final();
+    Item encoding = builder.map().put("Differences", differences).final();
+    Item encrypted_paths = pdf_type1_glyph_paths(input, encrypted, clear_length, encoding);
+    EXPECT_STREQ(MapReader::fromItem(encrypted_paths).get("90").cstring(), path);
+    EXPECT_STREQ(MapReader::fromItem(encrypted_paths).get("65").cstring(), path);
+}
+
+TEST_F(InputPdfTest, Type1DecoderRejectsTruncatedProgramsAndRecursiveSubroutines) {
+    Input* input = InputManager::create_input(nullptr);
+    ASSERT_NE(input, nullptr);
+    MarkBuilder builder(input);
+    const char outline[] = "\x8b\xf8\x88\x0d\x8b\x0a\x0e";
+    const char recursive[] = "\x8b\x0a\x0b";
+    int clear_length;
+    String* program = type1_test_program(builder, outline, sizeof(outline) - 1, true,
+                                         &clear_length, recursive, sizeof(recursive) - 1);
+    EXPECT_EQ(pdf_type1_glyph_paths(input, program, clear_length, ItemNull).item, ITEM_NULL);
+    String* truncated = builder.createString("/lenIV -1 def /CharStrings 1 dict /A 99 RD abc");
+    EXPECT_EQ(pdf_type1_glyph_paths(input, truncated, 0, ItemNull).item, ITEM_NULL);
+    EXPECT_EQ(pdf_type1_glyph_paths(input, program, (int)program->len + 1, ItemNull).item, ITEM_NULL);
 }
 
 /* ══════════════════════════════════════════════════════════════════════

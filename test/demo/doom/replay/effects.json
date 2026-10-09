@@ -1,0 +1,100 @@
+{
+  "name": "DOOM native transient identity, animation and teardown",
+  "html": "test/demo/doom/fixtures/_effects.ls",
+  "viewport": {
+    "width": 660,
+    "height": 440
+  },
+  "events": [
+    {
+      "type": "click",
+      "target": {
+        "selector": "#spawn"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#scene > .transient"
+      },
+      "equals": 4
+    },
+    {
+      "type": "snapshot_state_store",
+      "name": "projectile",
+      "target": {
+        "selector": "#projectile-7"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#spawn"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#scene > .transient"
+      },
+      "equals": 4
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#turn"
+      }
+    },
+    {
+      "type": "assert_state_store_snapshot",
+      "name": "projectile",
+      "target": {
+        "selector": "#projectile-7"
+      }
+    },
+    {
+      "type": "assert_reconcile_mode",
+      "mode": "incremental",
+      "reason": "paint-only"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#clear"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#scene > .transient"
+      },
+      "equals": 0
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#spawn"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#scene > .transient"
+      },
+      "equals": 4
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#clear"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#scene > .transient"
+      },
+      "equals": 0
+    }
+  ]
+}

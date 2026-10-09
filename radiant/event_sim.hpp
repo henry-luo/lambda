@@ -170,6 +170,7 @@ enum SimEventType {
     SIM_EVENT_RENDER_PENDING,  // render only if current document already has pending visual work
     SIM_EVENT_DUMP_CARET,      // dump caret state to file
     SIM_EVENT_WINDOW_CLOSE,    // platform close request (close button / application quit)
+    SIM_EVENT_WINDOW_FOCUS,    // native focus/blur delivery, including capture release
     SIM_EVENT_WRITE_FILE,      // write a ./temp/ file, e.g. an external change to an edited file
     // Webview commands
     SIM_EVENT_WEBVIEW_EVAL_JS,      // execute JS in a webview element
@@ -185,6 +186,7 @@ struct SimEvent {
     bool has_drag_delta;         // true if drag_dx/drag_dy were provided
     int button;                  // mouse button (0=left, 1=right, 2=middle)
     int mods;                    // modifier keys (RDT_MOD_*)
+    bool window_focused;         // native window_focus event state
     int key;                     // GLFW key code
     int wait_ms;                 // wait duration in milliseconds
     int expected_view_type;      // for assertions
@@ -413,6 +415,7 @@ struct EventSimContext {
     int viewport_height;         // 0 = use default (800)
     float device_scale;          // device pixels per logical pixel; default 1
     int default_timeout;         // default assertion timeout in ms (0 = no retry)
+    double input_turn_ms;        // virtual latency per input primitive; zero uses explicit waits only
     double current_time;         // deterministic host clock in seconds
     // Assertion retries must yield to the host loop so queued JS and layout work
     // can make the condition true instead of sleeping inside event_sim_update().

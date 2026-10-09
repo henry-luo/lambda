@@ -453,19 +453,8 @@ static int format_roman_counter(int value, char* buffer, size_t buffer_size,
         return snprintf(buffer, buffer_size, "%d", value);
     }
 
-    const char* ones[] = {"", "i", "ii", "iii", "iv", "v", "vi", "vii", "viii", "ix"};
-    const char* tens[] = {"", "x", "xx", "xxx", "xl", "l", "lx", "lxx", "lxxx", "xc"};
-    const char* hundreds[] = {"", "c", "cc", "ccc", "cd", "d", "dc", "dcc", "dccc", "cm"};
-    const char* thousands[] = {"", "m", "mm", "mmm"};
-
-    int len = 0;
-    len += snprintf(buffer + len, buffer_size - len, "%s", thousands[value / 1000]);
-    len += snprintf(buffer + len, buffer_size - len, "%s", hundreds[(value % 1000) / 100]);
-    len += snprintf(buffer + len, buffer_size - len, "%s", tens[(value % 100) / 10]);
-    len += snprintf(buffer + len, buffer_size - len, "%s", ones[value % 10]);
-
-    if (uppercase) str_upper_inplace(buffer, len);
-    return len;
+    // PDF labels share numeral spelling; CSS retains its own fallback range above.
+    return static_cast<int>(str_format_roman(static_cast<uint64_t>(value), buffer, buffer_size, uppercase)); // INT_CAST_OK: at most 15 numeral bytes.
 }
 
 static int format_latin_counter(int value, char* buffer, size_t buffer_size,

@@ -144,6 +144,12 @@ struct HPDF_Page_Rec {
     
     float width;
     float height;
+
+    float boxes[HPDF_PAGE_BOX_COUNT][4];
+    uint8_t box_mask;
+    int32_t rotation;
+    bool has_rotation;
+    char* label;
     
     // Content stream buffer
     StrBuf* content;
@@ -563,6 +569,31 @@ HPDF_STATUS HPDF_Page_SetHeight(HPDF_Page page, float height) {
     return HPDF_OK;
 }
 
+HPDF_STATUS HPDF_Page_SetBox(HPDF_Page page, HPDF_PageBox kind,
+                            float left, float bottom, float right, float top) {
+    if (!page || kind < HPDF_PAGE_BOX_MEDIA || kind >= HPDF_PAGE_BOX_COUNT ||
+        !isfinite(left) || !isfinite(bottom) || !isfinite(right) || !isfinite(top) || right <= left || top <= bottom)
+        return HPDF_ERROR_INVALID_PARAM;
+    float* box = page->boxes[kind];
+    box[0] = left; box[1] = bottom; box[2] = right; box[3] = top;
+    page->box_mask |= 1u << kind;
+    return HPDF_OK;
+}
+
+HPDF_STATUS HPDF_Page_SetRotate(HPDF_Page page, int32_t degrees) {
+    if (!page || degrees % 90) return HPDF_ERROR_INVALID_PARAM;
+    page->rotation = degrees; page->has_rotation = true;
+    return HPDF_OK;
+}
+
+HPDF_STATUS HPDF_Page_SetLabel(HPDF_Page page, const char* label) {
+    if (!page || !label || !utf8_valid(label, strlen(label))) return HPDF_ERROR_INVALID_PARAM;
+    char* owned = arena_strdup(page->doc->arena, label);
+    if (!owned) return HPDF_ERROR_OUT_OF_MEMORY;
+    page->label = owned;
+    return HPDF_OK;
+}
+
 HPDF_STATUS HPDF_Page_AddLink(HPDF_Page page, float left, float bottom,
                              float right, float top, const char* target) {
     if (!page || !target || !*target || !isfinite(left) || !isfinite(bottom) ||
@@ -736,15 +767,25 @@ HPDF_STATUS HPDF_Page_SetRGBStroke(HPDF_Page page, float r, float g, float b) {
     return HPDF_OK;
 }
 
-HPDF_STATUS HPDF_Page_SetLineWidth(HPDF_Page page, float width) {
-    if (!page) return HPDF_ERROR_INVALID_PARAM;
-    
-    page->line_width = width;
-    
-    pdf_format_float(page->content, width);
-    strbuf_append_str(page->content, " w\n");
-    
+static HPDF_STATUS pdf_page_scalar_operator(HPDF_Page page, float value, const char* operation) {
+    if (!page || !isfinite(value)) return HPDF_ERROR_INVALID_PARAM;
+    pdf_format_float(page->content, value);
+    strbuf_append_str(page->content, operation);
     return HPDF_OK;
+}
+HPDF_STATUS HPDF_Page_SetLineWidth(HPDF_Page page, float width) {
+    if (width < 0 || pdf_page_scalar_operator(page, width, " w\n") != HPDF_OK) return HPDF_ERROR_INVALID_PARAM;
+    page->line_width = width;
+    return HPDF_OK;
+}
+HPDF_STATUS HPDF_Page_SetLineCap(HPDF_Page page, int cap) {
+    return cap < 0 || cap > 2 ? HPDF_ERROR_INVALID_PARAM : pdf_page_scalar_operator(page, (float)cap, " J\n");
+}
+HPDF_STATUS HPDF_Page_SetLineJoin(HPDF_Page page, int join) {
+    return join < 0 || join > 2 ? HPDF_ERROR_INVALID_PARAM : pdf_page_scalar_operator(page, (float)join, " j\n");
+}
+HPDF_STATUS HPDF_Page_SetMiterLimit(HPDF_Page page, float limit) {
+    return limit < 1 ? HPDF_ERROR_INVALID_PARAM : pdf_page_scalar_operator(page, limit, " M\n");
 }
 
 HPDF_ExtGState HPDF_CreateExtGState(HPDF_Doc doc) {
@@ -870,36 +911,33 @@ HPDF_STATUS HPDF_Page_ClosePath(HPDF_Page page) {
 /*  Path Painting Functions                                                  */
 /*---------------------------------------------------------------------------*/
 
-HPDF_STATUS HPDF_Page_Fill(HPDF_Page page) {
+static HPDF_STATUS pdf_page_paint_operator(HPDF_Page page, const char* operation) {
     if (!page) return HPDF_ERROR_INVALID_PARAM;
-    
-    strbuf_append_str(page->content, "f\n");
-    
+    strbuf_append_str(page->content, operation);
     return HPDF_OK;
+}
+
+HPDF_STATUS HPDF_Page_Fill(HPDF_Page page) {
+    return pdf_page_paint_operator(page, "f\n");
+}
+HPDF_STATUS HPDF_Page_Eofill(HPDF_Page page) {
+    return pdf_page_paint_operator(page, "f*\n");
 }
 
 HPDF_STATUS HPDF_Page_Stroke(HPDF_Page page) {
-    if (!page) return HPDF_ERROR_INVALID_PARAM;
-    
-    strbuf_append_str(page->content, "S\n");
-    
-    return HPDF_OK;
+    return pdf_page_paint_operator(page, "S\n");
 }
 
 HPDF_STATUS HPDF_Page_ClosePathFillStroke(HPDF_Page page) {
-    if (!page) return HPDF_ERROR_INVALID_PARAM;
-    
-    strbuf_append_str(page->content, "b\n");
-    
-    return HPDF_OK;
+    return pdf_page_paint_operator(page, "b\n");
 }
 
 HPDF_STATUS HPDF_Page_Clip(HPDF_Page page) {
-    if (!page) return HPDF_ERROR_INVALID_PARAM;
+    return pdf_page_paint_operator(page, "W\nn\n");
+}
 
-    strbuf_append_str(page->content, "W\nn\n");
-
-    return HPDF_OK;
+HPDF_STATUS HPDF_Page_Eoclip(HPDF_Page page) {
+    return pdf_page_paint_operator(page, "W*\nn\n");
 }
 
 HPDF_STATUS HPDF_Page_DrawABGRImage(HPDF_Page page, const uint32_t* pixels,
@@ -1309,7 +1347,14 @@ HPDF_STATUS HPDF_SaveToFile(HPDF_Doc doc, const char* filename) {
         fprintf(file, "%d 0 obj\n<<\n", page->obj_id);
         fprintf(file, "/Type /Page\n");
         fprintf(file, "/Parent %d 0 R\n", doc->pages_id);
-        fprintf(file, "/MediaBox [0 0 %.2f %.2f]\n", page->width, page->height);
+        if (!(page->box_mask & (1u << HPDF_PAGE_BOX_MEDIA)))
+            fprintf(file, "/MediaBox [0 0 %.2f %.2f]\n", page->width, page->height);
+        static const char* box_names[] = {"MediaBox", "CropBox", "BleedBox", "TrimBox", "ArtBox"};
+        for (int box_index = 0; box_index < HPDF_PAGE_BOX_COUNT; box_index++) if (page->box_mask & (1u << box_index)) {
+            const float* box = page->boxes[box_index];
+            fprintf(file, "/%s [%.9g %.9g %.9g %.9g]\n", box_names[box_index], box[0], box[1], box[2], box[3]);
+        }
+        if (page->has_rotation) fprintf(file, "/Rotate %d\n", page->rotation);
         fprintf(file, "/Contents %d 0 R\n", page->contents_id);
         bool has_annotations = false;
         for (PdfLinkAnnotation* link = page->first_annotation; link; link = link->next) {
@@ -1403,6 +1448,22 @@ HPDF_STATUS HPDF_SaveToFile(HPDF_Doc doc, const char* filename) {
     fprintf(file, "%d 0 obj\n<<\n", doc->catalog_id);
     fprintf(file, "/Type /Catalog\n");
     fprintf(file, "/Pages %d 0 R\n", doc->pages_id);
+    bool has_labels = false;
+    for (int i = 0; i < doc->pages->length; i++)
+        if (((HPDF_Page)doc->pages->data[i])->label) has_labels = true;
+    if (has_labels) {
+        fprintf(file, "/PageLabels << /Nums [\n");
+        for (int i = 0; i < doc->pages->length; i++) {
+            HPDF_Page page = (HPDF_Page)doc->pages->data[i];
+            // Explicit per-page prefixes preserve labels after arbitrary page selection.
+            fprintf(file, "%d << ", i);
+            if (page->label) {
+                if (!pdf_write_info_entry(file, "P", page->label)) { fclose(file); return HPDF_ERROR_FILE_IO; }
+            } else fprintf(file, "/S /D /St %d\n", i + 1);
+            fprintf(file, ">>\n");
+        }
+        fprintf(file, "] >>\n");
+    }
     if (doc->first_outline) fprintf(file, "/Outlines %d 0 R\n", doc->outline_root->obj_id);
     fprintf(file, ">>\nendobj\n\n");
     

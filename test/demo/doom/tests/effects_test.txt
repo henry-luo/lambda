@@ -1,0 +1,7 @@
+{
+  identities: [0, 1, 2, 3],
+  next_id: 4,
+  lifetimes: [3, 2, 1, 0],
+  transient_keys: ["effect-0", "effect-1", "effect-2"],
+  wall_impact: [25, 0, 0]
+}

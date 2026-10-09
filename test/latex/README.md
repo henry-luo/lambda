@@ -1,5 +1,11 @@
 # LaTeX Math Test Framework
 
+> The current math package emits outlined SVG. Its regression gates are
+> `make test-math-corpus` and the `test/lambda/math/` font/layout goldens.
+> This directory retains historical AST/HTML/DVI reference tools; DOM/class
+> comparison scores against MathLive do not establish SVG visual equivalence.
+
+
 Static HTML comparison framework for LaTeX math typesetting in Lambda.
 
 ## Overview

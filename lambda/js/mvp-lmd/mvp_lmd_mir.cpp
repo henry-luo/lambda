@@ -112,6 +112,10 @@ struct LmdObjectPlan { AstNode* literal; TypeMap* blueprint; TypeMap* shape;
     LmdBinding* scalar_binding; LmdScalarField* scalar_fields;
     LmdFunction* constructor; AstNode* initializers[4]; };
 struct LmdScalarFactoryPlan { LmdObjectPlan object; LmdFunction* function; AstNode* value; };
+struct LmdDeletedShapePlan { LmdObjectPlan object; LmdObjectPlan* source; ShapeEntry* removed; };
+struct LmdAllocationSite { TypeMap* shape; uint64_t epoch; };
+struct LmdAllocationVariant { LmdAllocationSite site; uint64_t key; };
+struct LmdAllocationVariants { LmdAllocationVariant entries[4]; uint64_t next; };
 struct MvpLmdProgram {
     JsTranspiler* frontend;
     MIR_context_t mir;
@@ -135,6 +139,7 @@ struct MvpLmdProgram {
     bool array_holes;
     ArrayList* classes;
     bool receiver_abi;
+    bool deletes_properties;
 };
 struct MvpLmdExecution {
     MvpLmdProgram program;
@@ -164,6 +169,7 @@ struct LmdCompiler {
     MIR_reg_t argument_span;
     MIR_insn_t argument_fixup;
     int argument_count;
+    unsigned allocating_inline_nodes;
     MIR_label_t tail_entry;
     LmdControl* control;
     bool strict;
@@ -182,7 +188,8 @@ struct LmdInlineFrame { LmdInlineFrame* parent; LmdFunction* function; int count
     LmdObjectPlan* plans[32]; bool guarded[32]; MIR_reg_t receiver;
     MIR_label_t exit; MIR_reg_t result; LmdObjectPlan* scalar_receiver;
     MIR_reg_t self; MIR_reg_t receiver_cell;
-    LmdNumericRegion* region; LmdValue region_values[16]; LmdObjectPlan* scalar_return; };
+    LmdNumericRegion* region; LmdValue region_values[16]; LmdObjectPlan* scalar_return;
+    unsigned result_kind; };
 struct LmdReference { LmdBinding* binding; LmdValue owner; MIR_reg_t key;
     bool key_known = false; int64_t index = 0; MIR_reg_t name = 0; LmdObjectPlan* plan = NULL; ShapeEntry* field = NULL; int method = 0; LmdShapeSet shapes = {}; String* spelling = NULL; bool guarded = false;
     unsigned lanes = 0; bool numeric_key = false; bool in_bounds = false; LmdRange elements;
@@ -563,7 +570,8 @@ static void walk(AstNode* n, LmdWalk* state) {
         }
         break;
     case AST_NODE_UNARY:
-        if (((AstUnaryNode*)n)->op == OPERATOR_JS_DELETE) p->array_holes = true;
+        if (((AstUnaryNode*)n)->op == OPERATOR_JS_DELETE)
+            p->array_holes = p->deletes_properties = true;
         if (!state->facts && (((AstUnaryNode*)n)->op == OPERATOR_JS_INCREMENT ||
                 ((AstUnaryNode*)n)->op == OPERATOR_JS_DECREMENT) &&
                 ((AstUnaryNode*)n)->operand->node_type == AST_NODE_IDENT) {
@@ -1325,6 +1333,8 @@ static MIR_reg_t truth(LmdCompiler* c, LmdValue value);
 static MIR_reg_t tag(LmdCompiler* c, LmdValue value);
 static void branch_condition(LmdCompiler* c, AstNode* node, MIR_label_t target, bool yes = true);
 static void statement(LmdCompiler* c, AstNode* n);
+static LmdObjectPlan* scalar_constructor_plan(MvpLmdProgram* p, AstNode* node,
+    const LmdValue* native_values = NULL);
 static MIR_reg_t scalar_reg(LmdCompiler* c, LmdValue value, unsigned kind, bool integral = false) {
     if (integral) {
         bool optional = kind == (K_NUMBER | K_UNDEFINED);
@@ -2228,7 +2238,8 @@ static bool field_write(LmdCompiler* c, LmdReference ref, LmdValue value, MIR_la
     if (!fresh) em_guard_map_shape(&c->em, ref.owner.reg, planned_shape(c, ref.plan), miss,
         semantic(ref.owner) == K_OBJECT || semantic(ref.owner) == K_MAP);
     MIR_reg_t data = em_load_at(&c->em, ref.owner.reg, LAMBDA_GC_OFF_MAP_DATA, MIR_T_I64, "field_data");
-    if ((type == LMD_TYPE_INT || type == LMD_TYPE_FLOAT) && !value.integer) {
+    // an unboxed double already proves the float lane; only boxed values need a physical-tag check.
+    if (!value.integer && (type == LMD_TYPE_INT || (type == LMD_TYPE_FLOAT && is_boxed(value)))) {
         MIR_reg_t raw = op(c, MIR_URSH, reg(c, box(c, value).reg), integer(c, 56));
         branch(c, type == LMD_TYPE_INT ? MIR_BNE : MIR_BEQ, miss, reg(c, raw), integer(c, LMD_TYPE_INT));
     } else if (type == LMD_TYPE_FLOAT && value.integer) jump(c, miss);
@@ -2240,9 +2251,11 @@ static bool field_write(LmdCompiler* c, LmdReference ref, LmdValue value, MIR_la
     return true;
 }
 static MIR_reg_t guard_property_cache(LmdCompiler* c, MIR_reg_t owner,
-        MvpLmdPropertyCache* cache, MIR_label_t miss) {
-    MIR_reg_t pointer = em_guard_container(&c->em, owner, LMD_TYPE_MAP, miss);
-    MIR_reg_t shape = em_load_at(&c->em, pointer, LAMBDA_GC_OFF_MAP_TYPE, MIR_T_I64, "property_shape");
+        MvpLmdPropertyCache* cache, MIR_label_t miss, MIR_reg_t shape = 0) {
+    if (!shape) {
+        MIR_reg_t pointer = em_guard_container(&c->em, owner, LMD_TYPE_MAP, miss);
+        shape = em_load_at(&c->em, pointer, LAMBDA_GC_OFF_MAP_TYPE, MIR_T_I64, "property_shape");
+    }
     MIR_reg_t address = em_new_reg(&c->em, "cache_entry", MIR_T_I64);
     MIR_label_t matched = label(c);
     for (int i = 0; i < MVP_LMD_PROPERTY_CACHE_SIZE; i++) {
@@ -2255,14 +2268,20 @@ static MIR_reg_t guard_property_cache(LmdCompiler* c, MIR_reg_t owner,
 }
 static MIR_reg_t property_access(LmdCompiler* c, int operation, MIR_reg_t owner,
         MIR_reg_t name = 0, MIR_reg_t value = 0, String* spelling = NULL, bool numeric = false,
-        const LmdValue* native_value = NULL, MvpLmdPropertyCache* shared_cache = NULL, bool plain = false) {
+        const LmdValue* native_value = NULL, MvpLmdPropertyCache* shared_cache = NULL, bool plain = false,
+        bool nullable_value = true) {
     if (c->program->receiver_abi) {
+        LmdFunction* active = c->inlining ? c->inlining->function : c->function;
+        bool initializing = operation == LMD_PROP_SET && active->home &&
+            active->id == active->home->constructor_id;
         MvpLmdPropertyCache* cache = shared_cache ? shared_cache : spelling && operation <= LMD_PROP_SET
             ? (MvpLmdPropertyCache*)pool_calloc(c->program->frontend->pool, sizeof(MvpLmdPropertyCache)) : NULL;
         MIR_reg_t joined = 0;
         MIR_label_t done = NULL;
         if (cache) {
             MIR_label_t miss = label(c), inherited = label(c); done = label(c);
+            MIR_label_t nullable_store = operation == LMD_PROP_SET && !native_value && nullable_value ? label(c) : NULL;
+            MIR_reg_t actual = 0;
             joined = em_new_reg(&c->em, "cached_property", numeric ? MIR_T_D : MIR_T_I64);
             MIR_reg_t address = guard_property_cache(c, owner, cache, miss);
             MIR_reg_t field = em_load_at(&c->em, address, offsetof(MvpLmdPropertyCacheEntry, field), MIR_T_I64, "cached_field");
@@ -2286,7 +2305,6 @@ static MIR_reg_t property_access(LmdCompiler* c, int operation, MIR_reg_t owner,
                     {LMD_TYPE_FLOAT, MIR_T_D, K_NUMBER}, {LMD_TYPE_INT, MIR_T_I64, K_NUMBER},
                     {LMD_TYPE_BOOL, MIR_T_U8, K_BOOL}};
                 MIR_label_t lanes[3] = {label(c), label(c), label(c)}, shared = label(c);
-                MIR_reg_t actual = 0;
                 if (operation == LMD_PROP_SET) {
                     branch(c, MIR_BEQ, miss, reg(c, em_load_at(&c->em, address,
                         offsetof(MvpLmdPropertyCacheEntry, writable), MIR_T_U8, "cached_writable")), integer(c, 0));
@@ -2294,7 +2312,7 @@ static MIR_reg_t property_access(LmdCompiler* c, int operation, MIR_reg_t owner,
                     MIR_label_t tagged = label(c);
                     branch(c, MIR_BNE, tagged, reg(c, op(c, MIR_URSH, reg(c, value), integer(c, 56))), integer(c, LMD_TYPE_INT));
                     move(c, actual, integer(c, LMD_TYPE_INT)); put_label(c, tagged);
-                    branch(c, MIR_BNE, miss, reg(c, actual), reg(c, storage));
+                    branch(c, MIR_BNE, nullable_store ? nullable_store : miss, reg(c, actual), reg(c, storage));
                 }
                 MIR_label_t scalar = label(c);
                 MIR_reg_t pointer_lane = em_load_at(&c->em, address,
@@ -2357,13 +2375,20 @@ static MIR_reg_t property_access(LmdCompiler* c, int operation, MIR_reg_t owner,
                     move(c, joined, reg(c, numeric ? to_number(c, boxed(c, loaded)) : loaded), numeric); jump(c, done);
                 }
             }
+            if (nullable_store) {
+                // keep the nullable exception off matching numeric/pointer stores' hot path.
+                put_label(c, nullable_store);
+                branch(c, MIR_BNE, miss, reg(c, actual), integer(c, LMD_TYPE_NULL));
+                branch(c, MIR_BNE, miss, reg(c, storage), integer(c, LMD_TYPE_MAP));
+                if (initializing) branch(c, MIR_BEQ, miss, reg(c, em_load_at(&c->em, address,
+                    offsetof(MvpLmdPropertyCacheEntry, nullable_initializer), MIR_T_U8, "nullable_initializer")), integer(c, 0));
+                // Lambda's packed Map lane uses zero for null, without a shape transition.
+                em_store_at(&c->em, slot, 0, MIR_T_I64, constant(c, 0));
+                move(c, joined, reg(c, value)); jump(c, done);
+            }
             put_label(c, miss);
         }
         if (native_value) value = box(c, *native_value).reg;
-        LmdFunction* active = c->inlining ? c->inlining->function : c->function;
-        // constructor writes describe fresh instances; later mutation may select a stable widened lane.
-        bool initializing = operation == LMD_PROP_SET && active->home &&
-            active->id == active->home->constructor_id;
         MIR_reg_t result = em_call_5(&c->em, "mvp_lmd_class_property", MIR_T_I64,
             MIR_T_I64, reg(c, owner), MIR_T_I64, name ? reg(c, name) : integer(c, ITEM_JS_UNDEFINED),
             MIR_T_I64, value ? reg(c, value) : integer(c, ITEM_JS_UNDEFINED),
@@ -2783,6 +2808,18 @@ static LmdValue read_reference(LmdCompiler* c, LmdReference ref, AstNode* site, 
         put_label(c, miss);
     }
     LmdShapeSet shapes = ref.shapes.count ? ref.shapes : LmdShapeSet{ref.plan ? 1 : 0, {ref.plan}};
+    if (c->program->deletes_properties && shapes.count && !callee && site &&
+            enclosing_loop(c->program, site, active, true)) {
+        // predicted successors are fixed before execution; every field load still guards shape identity.
+        int originals = shapes.count;
+        for (int i = 0; i < c->program->objects->length && shapes.count < 4; i++) {
+            LmdObjectPlan* plan = (LmdObjectPlan*)c->program->objects->data[i];
+            if (plan->literal->node_type != AST_NODE_UNARY) continue;
+            for (int j = 0; j < originals; j++)
+                if (((LmdDeletedShapePlan*)plan)->source == shapes.plans[j])
+                    shape_union(&shapes, {1, {plan}});
+        }
+    }
     for (int i = 0; i < shapes.count; i++) {
         LmdReference candidate = ref; candidate.plan = shapes.plans[i];
         if (ref.spelling) candidate.field = typemap_hash_lookup(candidate.plan->blueprint,
@@ -2879,9 +2916,10 @@ static void write_reference(LmdCompiler* c, LmdReference ref, LmdValue value, As
     bool native = c->program->receiver_abi && !is_boxed(value) && !value.number_present &&
         !(value.literal && value.range.state == 1 && !value.integer) &&
         (semantic(value) == K_NUMBER || semantic(value) == K_BOOL);
+    // retain RHS nullability even when an arithmetic result remains boxed.
     MIR_reg_t stored = property_access(c, LMD_PROP_SET, ref.owner.reg,
         reference_name(c, ref), native ? 0 : box(c, value).reg, ref.spelling, false,
-        native ? &value : NULL, NULL, k == K_OBJECT);
+        native ? &value : NULL, NULL, k == K_OBJECT, (semantic(value) & K_NULL) != 0);
     check_error(c, stored); put_label(c, done);
 }
 
@@ -3327,14 +3365,29 @@ static void guard_numeric_region(LmdCompiler* c, LmdInlineFrame& frame, LmdValue
         values[i] = {to_number(c, semantic(values[i]) == K_NUMBER ? values[i] :
             boxed(c, values[i].reg, K_NUMBER)), K_NUMBER};
     }
+    MIR_reg_t shapes[16] = {}, data_slots[16] = {};
     for (int i = 0; i < region->count; i++) {
         LmdRegionRead* read = &region->reads[i];
         MIR_reg_t owner = read->parent >= 0 ? frame.region_values[read->parent].reg :
             read->parent == -2 ? frame.receiver : box(c, values[-3 - read->parent]).reg;
         if (!owner) { jump(c, miss); return; }
-        MIR_reg_t entry = guard_property_cache(c, owner, &read->cache, miss);
+        // the region proof excludes mutation and these guards contain no GC safepoints.
+        // siblings can share a receiver check and data base, while each retains its own field guard.
+        bool siblings = false;
+        for (int j = 0; j < region->count; j++) if (j != i && region->reads[j].parent == read->parent) {
+            siblings = true;
+            if (j < i) { shapes[i] = shapes[j]; data_slots[i] = data_slots[j]; break; }
+        }
+        if (siblings && !shapes[i]) {
+            // a path can name a guarded method as well as an object; prove the receiver kind here.
+            em_guard_container(&c->em, owner, LMD_TYPE_MAP, miss);
+            shapes[i] = em_load_at(&c->em, owner, LAMBDA_GC_OFF_MAP_TYPE, MIR_T_I64, "region_shape");
+            data_slots[i] = em_load_at(&c->em, owner, LAMBDA_GC_OFF_MAP_DATA, MIR_T_I64, "region_data");
+        }
+        MIR_reg_t entry = guard_property_cache(c, owner, &read->cache, miss, shapes[i]);
         MIR_reg_t storage = em_load_at(&c->em, entry, offsetof(MvpLmdPropertyCacheEntry, storage), MIR_T_U8, "region_storage");
-        MIR_reg_t data = em_load_at(&c->em, owner, LAMBDA_GC_OFF_MAP_DATA, MIR_T_I64, "region_data");
+        MIR_reg_t data = data_slots[i] ? data_slots[i] :
+            em_load_at(&c->em, owner, LAMBDA_GC_OFF_MAP_DATA, MIR_T_I64, "region_data");
         MIR_reg_t offset = em_load_at(&c->em, entry, offsetof(MvpLmdPropertyCacheEntry, offset), MIR_T_I64, "region_offset");
         MIR_reg_t slot = op(c, MIR_ADD, reg(c, data), reg(c, offset));
         if (read->target) {
@@ -3375,7 +3428,7 @@ static void guard_numeric_region(LmdCompiler* c, LmdInlineFrame& frame, LmdValue
     }
 }
 static bool inline_body(LmdCompiler* c, LmdFunction* f, LmdInlineBody* body,
-        bool guarded_method = false, bool constructor = false) {
+        bool guarded_method = false, bool constructor = false, bool numeric = false) {
     MvpLmdProgram* p = c->program;
     if (!f || (!f->closed_calls && !guarded_method) ||
             ast_linked_node_count(f->ast->params) > LAMBDA_MAX_FUNCTION_ARGS) return false;
@@ -3393,6 +3446,7 @@ static bool inline_body(LmdCompiler* c, LmdFunction* f, LmdInlineBody* body,
         if (b->owner == f && (b->external || ++locals > 32)) return false;
     }
     body->value = f->ast->body;
+    numeric = numeric && f->numeric_region;
     LmdInlineBudget budget = {0, true, p, f, false, guarded_method, false};
     if (body->value->node_type == AST_NODE_BLOCK) {
         AstNode* first = ((AstBlockNode*)body->value)->statements;
@@ -3403,11 +3457,13 @@ static bool inline_body(LmdCompiler* c, LmdFunction* f, LmdInlineBody* body,
         body->end = returned ? last : NULL;
         body->prefix = first == body->end ? NULL : first;
         budget.statements = body->prefix != NULL;
-        for (AstNode* node = body->prefix; node && node != body->end; node = node->next)
+        if (!numeric) for (AstNode* node = body->prefix; node && node != body->end; node = node->next)
             inline_budget(node, &budget);
-        body->early_returns = budget.returns;
+        body->early_returns = numeric ? body->prefix != NULL : budget.returns;
         body->value = returned ? ((AstReturnNode*)last)->value : NULL;
     }
+    // the region proof already bounds pure arithmetic and fresh constructor allocations.
+    if (numeric) return true;
     if (body->value) inline_budget(body->value, &budget);
     // constructor expansion also duplicates allocation and fallback entries; reserve their code budget.
     return budget.allowed && (!constructor || budget.nodes <= 48);
@@ -3468,7 +3524,10 @@ static LmdValue inline_call_body(LmdCompiler* c, LmdInlineFrame& frame, const Lm
         }
     }
     if (body.early_returns) {
-        frame.exit = label(c); frame.result = em_new_reg(&c->em, "inline_return", MIR_T_I64);
+        frame.result_kind = frame.region && (f->returns == K_NUMBER || f->returns == K_BOOL)
+            ? f->returns : K_ANY;
+        frame.exit = label(c); frame.result = em_new_reg(&c->em, "inline_return",
+            frame.result_kind == K_NUMBER ? MIR_T_D : MIR_T_I64);
     }
     bool caller_strict = c->strict;
     c->strict = f->home || f->ast->has_use_strict_directive || (f->ast->vars && f->ast->vars->strict);
@@ -3476,8 +3535,11 @@ static LmdValue inline_call_body(LmdCompiler* c, LmdInlineFrame& frame, const Lm
     if (body.prefix) for (AstNode* node = body.prefix; node && node != body.end; node = node->next) statement(c, node);
     LmdValue result = expression(c, body.value);
     if (frame.exit) {
-        move(c, frame.result, reg(c, box(c, result).reg)); put_label(c, frame.exit);
-        result = boxed(c, frame.result);
+        bool native = frame.result_kind != K_ANY;
+        move(c, frame.result, reg(c, native ? scalar_reg(c, result, frame.result_kind) : box(c, result).reg),
+            frame.result_kind == K_NUMBER);
+        put_label(c, frame.exit);
+        result = native ? LmdValue{frame.result, frame.result_kind} : boxed(c, frame.result);
     }
     c->inlining = frame.parent; c->strict = caller_strict;
     return result;
@@ -3577,9 +3639,13 @@ static LmdValue call(LmdCompiler* c, AstCallNode* n, LmdCallCapture* captured = 
         put_label(c, done); mem_free(values); return result;
     }
     LmdInlineBody body = {};
-    bool expand = !captured && inline_body(c, direct, &body);
+    bool numeric_region = c->function->id && direct && direct->numeric_region &&
+        direct->numeric_region->count >= 2 && direct->numeric_region->nodes >= 64 &&
+        !direct->numeric_region->allocates &&
+        ast_linked_node_count(n->arguments) <= LAMBDA_MAX_FUNCTION_ARGS;
+    bool expand = !captured && inline_body(c, direct, &body, false, false, numeric_region);
     // reserve direct statement-body expansion for loop call sites.
-    if (body.prefix && !enclosing_loop(c->program, (AstNode*)n, c->function, true)) expand = false;
+    if (body.prefix && !numeric_region && !enclosing_loop(c->program, (AstNode*)n, c->function, true)) expand = false;
     if (expand) {
         // snapshot all arguments, including extras, before substituting immutable parameter reads.
         LmdValue* values = call_arguments(c, n, false);
@@ -3587,7 +3653,15 @@ static LmdValue call(LmdCompiler* c, AstCallNode* n, LmdCallCapture* captured = 
         LmdInlineFrame frame = {}; frame.parent = c->inlining; frame.function = direct;
         MIR_label_t fallback = label(c), done = label(c);
         bool guarded = false;
-        LmdValue result = inline_call_body(c, frame, body, n->arguments, values, count, fallback, &guarded);
+        LmdValue region_values[LAMBDA_MAX_FUNCTION_ARGS];
+        if (numeric_region) {
+            memcpy(region_values, values, count * sizeof(LmdValue));
+            frame.region = direct->numeric_region;
+            guard_numeric_region(c, frame, region_values, count, fallback);
+            guarded = true;
+        }
+        LmdValue result = inline_call_body(c, frame, body, n->arguments,
+            numeric_region ? region_values : values, count, fallback, &guarded);
         if (guarded) {
             MIR_reg_t joined = em_new_reg(&c->em, "inline_result", MIR_T_I64);
             move(c, joined, reg(c, box(c, result).reg)); jump(c, done);
@@ -3609,7 +3683,36 @@ static LmdValue call(LmdCompiler* c, AstCallNode* n, LmdCallCapture* captured = 
     unsigned receiver = semantic(method.owner);
     int sequence_method = member && method.spelling && (receiver == K_ARRAY || receiver == K_STRING)
         ? mvp_lmd_builtin_method(method.spelling, receiver == K_ARRAY ? LMD_TYPE_ARRAY : LMD_TYPE_STRING) : 0;
-    LmdValue* values = captured ? captured->values : call_arguments(c, n, !direct_args && !typed_fill && !sequence_method);
+    LmdRegionRead* region_call = member && c->inlining
+        ? numeric_region_read(c->program, c->inlining->region, (AstNode*)n) : NULL;
+    LmdInlineBody region_body = {};
+    bool region_inline = region_call && region_call->target && count <= LAMBDA_MAX_FUNCTION_ARGS &&
+        (region_call->target->returns == K_NUMBER || region_call->target->returns == K_BOOL) &&
+        inline_body(c, region_call->target, &region_body, true);
+    LmdValue* values = captured ? captured->values : call_arguments(c, n,
+        !direct_args && !typed_fill && !sequence_method && !region_inline);
+    if (region_inline) {
+        // the enclosing pure region already guarded this captured method's identity.
+        LmdFunction* target = region_call->target;
+        LmdInlineFrame frame = {}; frame.parent = c->inlining; frame.function = target;
+        frame.region = target->numeric_region; frame.self = callee.reg; frame.receiver = method.owner.reg;
+        LmdValue guarded_values[LAMBDA_MAX_FUNCTION_ARGS];
+        memcpy(guarded_values, values, count * sizeof(LmdValue));
+        MIR_label_t slow = label(c), done = label(c);
+        guard_numeric_region(c, frame, guarded_values, count, slow);
+        bool guarded = false;
+        LmdValue result = inline_call_body(c, frame, region_body, n->arguments, guarded_values, count, slow, &guarded);
+        MIR_reg_t joined = em_new_reg(&c->em, "region_call_result", target->returns == K_NUMBER ? MIR_T_D : MIR_T_I64);
+        move(c, joined, reg(c, scalar_reg(c, result, target->returns)), target->returns == K_NUMBER);
+        jump(c, done); put_label(c, slow);
+        for (int i = 0; i < count; i++) values[i] = box(c, values[i]);
+        LmdCallCapture capture = {callee, values, NULL, true}; capture.receiver = method.owner;
+        result = call(c, n, &capture);
+        move(c, joined, reg(c, scalar_reg(c, boxed(c, result.reg, target->returns), target->returns)),
+            target->returns == K_NUMBER);
+        put_label(c, done); mem_free(values);
+        return {joined, target->returns};
+    }
     if (typed_fill) {
         LmdValue result = array_fill_call(c, method.owner, values, count, method.lanes);
         mem_free(values); return result;
@@ -3641,18 +3744,29 @@ static LmdValue call(LmdCompiler* c, AstCallNode* n, LmdCallCapture* captured = 
         fail(c, LMD_MVP_CAPABILITY, (AstNode*)n); put_label(c, valid);
         target = em_load_at(&c->em, callee.reg, offsetof(Function, ptr), MIR_T_I64, "entry");
         if ((member && method.spelling) || callback) {
+            bool allocating_inlined = false;
             for (int fi = 0; fi < c->program->functions->length; fi++) {
                 LmdFunction* candidate = (LmdFunction*)c->program->functions->data[fi];
                 if (candidate != callback && (!member || !method.spelling || !candidate->home ||
                         !named(((AstIdentNode*)((AstMethodNode*)candidate->ast)->key)->name,
                             method.spelling->chars))) continue;
                 LmdInlineBody body = {};
-                if (!inline_body(c, candidate, &body, true)) continue;
+                // one allocating target per site; other classes keep the guarded call fallback.
+                // also bound total caller expansion to three ordinary statement-body budgets.
+                bool native_allocation = c->function->id && !c->function->home && candidate->numeric_region &&
+                    candidate->numeric_region->allocates && !candidate->numeric_region->calls &&
+                    !allocating_inlined && candidate->numeric_region->nodes <= 48 &&
+                    c->allocating_inline_nodes + candidate->numeric_region->nodes <= 192;
+                if (!inline_body(c, candidate, &body, true, false, native_allocation)) continue;
                 // statement expansion must amortize its guards and extra live values in a loop.
                 bool numeric_region = candidate->numeric_region != NULL;
                 bool ordinary_inline = !body.prefix || enclosing_loop(c->program, (AstNode*)n,
                     c->inlining ? c->inlining->function : c->function, true);
                 if (!numeric_region && !ordinary_inline) continue;
+                if (native_allocation) {
+                    c->allocating_inline_nodes += candidate->numeric_region->nodes;
+                    allocating_inlined = true;
+                }
                 MIR_label_t other = label(c);
                 // guard the captured callee, not its spelling: argument effects may replace the method.
                 branch(c, MIR_BNE, other, reg(c, target), MIR_new_ref_op(c->em.ctx, candidate->forward));
@@ -4231,10 +4345,80 @@ static LmdValue expression(LmdCompiler* c, AstNode* n, bool borrow_scalar, bool 
             if (initializer && inline_body(c, initializer, &body, true, true)) {
                 LmdValue* values = call_arguments(c, call, false);
                 int count = ast_linked_node_count(call->arguments);
+                LmdObjectPlan* native_plan = c->inlining && c->inlining->region && count
+                    ? scalar_constructor_plan(c->program, n, values) : NULL;
+                if (native_plan) {
+                    arraylist_append(c->program->objects, native_plan);
+                    MIR_label_t slow = label(c), done = label(c);
+                    MIR_reg_t joined = em_new_reg(&c->em, "native_constructed", MIR_T_I64);
+                    MIR_reg_t class_values = em_load_at(&c->em, constant(c, (uint64_t)&cls->values),
+                        0, MIR_T_I64, "class_values");
+                    branch(c, MIR_BNE, slow, reg(c, constructor.reg), reg(c, em_load_at(&c->em,
+                        class_values, 0, MIR_T_I64, "class_constructor")));
+                    MIR_reg_t instance = em_call_2(&c->em, "mvp_lmd_object_new", MIR_T_I64,
+                        MIR_T_P, reg(c, planned_shape(c, native_plan)), MIR_T_I64, integer(c, 0), true);
+                    check_error(c, instance); LmdValue owner = boxed(c, instance, K_OBJECT);
+                    int field_index = 0;
+                    FOR_EACH_MAP_FIELD(native_plan->blueprint, field) {
+                        AstNode* seed = native_plan->initializers[field_index++];
+                        LmdValue value = {};
+                        int ai = 0;
+                        for (AstNode* argument = call->arguments; argument; argument = argument->next, ai++)
+                            if (argument == seed) { value = values[ai]; break; }
+                        if (!value.reg) value = expression(c, seed);
+                        LmdReference ref = {}; ref.owner = owner; ref.plan = native_plan; ref.field = field;
+                        // forwarding constructors cannot observe the fresh receiver before these stores.
+                        if (!field_write(c, ref, value, slow, true))
+                            diagnostic(c->program, n, "native constructor field mismatch");
+                    }
+                    move(c, joined, reg(c, instance)); jump(c, done); put_label(c, slow);
+                    for (int i = 0; i < count; i++) values[i] = box(c, values[i]);
+                    LmdCallCapture capture = {constructor, values}; capture.new_target = constructor;
+                    move(c, joined, reg(c, ::call(c, call, &capture).reg)); put_label(c, done);
+                    return boxed(c, joined, K_OBJECT);
+                }
+                // recursive records amortize a small variant lookup over their link initialization.
+                bool variants = cls->nullable_initializer_count && count > 0 && count <= 8;
+                void* site = pool_calloc(c->program->frontend->pool,
+                    variants ? sizeof(LmdAllocationVariants) : sizeof(LmdAllocationSite));
+                if (!site) { mem_free(values); diagnostic(c->program, n, "allocation site cache"); return expression(c, NULL); }
                 MIR_label_t slow = label(c), done = label(c), unchanged = label(c);
                 MIR_reg_t joined = em_new_reg(&c->em, "constructed", MIR_T_I64);
                 MIR_reg_t shape_slot = constant(c, (uint64_t)&cls->allocation_shape);
                 MIR_reg_t shape = em_load_at(&c->em, shape_slot, 0, MIR_T_I64, "allocation_shape");
+                MIR_reg_t epoch = em_load_at(&c->em, constant(c, (uint64_t)&cls->allocation_epoch), 0, MIR_T_I64, "allocation_epoch");
+                MIR_reg_t site_address = constant(c, (uint64_t)site);
+                MIR_reg_t variant_key = 0;
+                if (variants) {
+                    variant_key = constant(c, 0);
+                    for (int i = 0; i < count; i++) {
+                        MIR_reg_t type = tag(c, values[i]);
+                        move(c, variant_key, reg(c, op(c, MIR_OR, reg(c, variant_key),
+                            reg(c, op(c, MIR_LSH, reg(c, type), integer(c, i * 8))))));
+                    }
+                    MIR_label_t found = label(c);
+                    for (int i = 0; i < 4; i++) {
+                        move(c, site_address, integer(c, (uint64_t)&((LmdAllocationVariants*)site)->entries[i]));
+                        branch(c, MIR_BEQ, found, reg(c, variant_key), reg(c, em_load_at(&c->em,
+                            site_address, offsetof(LmdAllocationVariant, key), MIR_T_I64, "allocation_key")));
+                    }
+                    MIR_reg_t table = constant(c, (uint64_t)site);
+                    MIR_reg_t next = em_load_at(&c->em, table, offsetof(LmdAllocationVariants, next), MIR_T_I64, "allocation_next");
+                    move(c, site_address, reg(c, op(c, MIR_ADD, reg(c, table), reg(c,
+                        op(c, MIR_MUL, reg(c, op(c, MIR_AND, reg(c, next), integer(c, 3))),
+                            integer(c, sizeof(LmdAllocationVariant)))))));
+                    em_store_at(&c->em, table, offsetof(LmdAllocationVariants, next), MIR_T_I64,
+                        op(c, MIR_ADD, reg(c, next), integer(c, 1)));
+                    // a miss may reuse another layout, but normal stores still prove every field lane.
+                    put_label(c, found);
+                }
+                MIR_reg_t cached = em_load_at(&c->em, site_address, offsetof(LmdAllocationSite, shape), MIR_T_I64, "site_shape");
+                MIR_label_t selected = label(c);
+                // sites retain their argument layouts; learned nullable links invalidate stale templates.
+                branch(c, MIR_BEQ, selected, reg(c, cached), integer(c, 0));
+                branch(c, MIR_BNE, selected, reg(c, epoch), reg(c, em_load_at(&c->em,
+                    site_address, offsetof(LmdAllocationSite, epoch), MIR_T_I64, "site_epoch")));
+                move(c, shape, reg(c, cached)); put_label(c, selected);
                 // the first ordinary construction supplies a completed, shared layout.
                 branch(c, MIR_BEQ, slow, reg(c, shape), integer(c, 0));
                 // program slots are installed at execution entry, after MIR generation.
@@ -4257,6 +4441,9 @@ static LmdValue expression(LmdCompiler* c, AstNode* n, bool borrow_scalar, bool 
                         MIR_T_U8, "transition_shape")));
                 branch_truth(c, unchanged, shared, false);
                 em_store_at(&c->em, shape_slot, 0, MIR_T_I64, completed);
+                em_store_at(&c->em, site_address, offsetof(LmdAllocationSite, shape), MIR_T_I64, completed);
+                em_store_at(&c->em, site_address, offsetof(LmdAllocationSite, epoch), MIR_T_I64, epoch);
+                if (variants) em_store_at(&c->em, site_address, offsetof(LmdAllocationVariant, key), MIR_T_I64, variant_key);
                 put_label(c, unchanged); move(c, joined, reg(c, instance)); jump(c, done);
                 put_label(c, slow);
                 for (int i = 0; i < count; i++) values[i] = box(c, values[i]);
@@ -4748,8 +4935,11 @@ static void statement(LmdCompiler* c, AstNode* n) {
             LmdInlineFrame* frame = c->inlining;
             while (frame && !frame->exit) frame = frame->parent;
             if (frame) {
-                LmdValue result = box(c, expression(c, ((AstReturnNode*)n)->value));
-                move(c, frame->result, reg(c, result.reg)); jump(c, frame->exit); break;
+                LmdValue result = expression(c, ((AstReturnNode*)n)->value);
+                move(c, frame->result, reg(c, frame->result_kind != K_ANY
+                    ? scalar_reg(c, result, frame->result_kind) : box(c, result).reg),
+                    frame->result_kind == K_NUMBER);
+                jump(c, frame->exit); break;
             }
         }
         if (!tail_call(c, ((AstReturnNode*)n)->value))
@@ -5401,12 +5591,63 @@ static void shape_walk(AstNode* node, void* opaque) {
     }
     js_ast_visit_children(node, shape_walk, state);
 }
+static void plan_deleted_shapes(MvpLmdProgram* p) {
+    if (!p->deletes_properties) return;
+    Pool* pool = p->frontend->pool;
+    for (AstNodeId id = 0; id < p->frontend->ast_index.count; id++) {
+        AstNode* node = p->frontend->ast_index.nodes[id];
+        if (node->node_type != AST_NODE_UNARY || ((AstUnaryNode*)node)->op != OPERATOR_JS_DELETE) continue;
+        AstFieldNode* member = (AstFieldNode*)((AstUnaryNode*)node)->operand;
+        String* key = member_spelling(member);
+        if (!key) continue;
+        LmdShapeSet sources = object_shapes(p, member->object);
+        for (int i = 0; i < sources.count; i++) {
+            LmdObjectPlan* source = sources.plans[i];
+            if (source->constructor || source->literal->node_type == AST_NODE_UNARY) continue;
+            ShapeEntry* removed = typemap_hash_lookup(source->blueprint, key->chars, key->len);
+            if (!removed || source->blueprint->length <= 1) continue;
+            int variants = 0;
+            bool planned = false;
+            for (int j = 0; j < p->objects->length; j++) {
+                LmdObjectPlan* other = (LmdObjectPlan*)p->objects->data[j];
+                if (other->literal->node_type != AST_NODE_UNARY) continue;
+                LmdDeletedShapePlan* prior = (LmdDeletedShapePlan*)other;
+                if (prior->source != source) continue;
+                variants++; planned |= prior->removed == removed;
+            }
+            if (planned) continue;
+            // predict removal and reinsertion with the original lane, within the existing four-shape budget.
+            for (int reinsert = 0; reinsert < 2 && variants < 3; reinsert++) {
+                if (reinsert && removed == source->blueprint->last) continue;
+                TypeMap* shape = (TypeMap*)alloc_type(pool, LMD_TYPE_MAP, sizeof(TypeMap));
+                LmdDeletedShapePlan* plan = (LmdDeletedShapePlan*)pool_calloc(pool, sizeof(LmdDeletedShapePlan));
+                if (!shape || !plan) { diagnostic(p, node, "deleted shape allocation"); return; }
+                shape->nominal = source->blueprint->nominal; shape->is_nominal = true; shape->type_index = -1;
+                FOR_EACH_MAP_FIELD(source->blueprint, field) {
+                    if (field == removed) continue;
+                    String* name = name_pool_create_len(p->frontend->name_pool, field->name->str, field->name->length);
+                    if (!plan_shape_field(p, shape, name, field->type->type_id, field->flags)) {
+                        diagnostic(p, node, "deleted field allocation"); return;
+                    }
+                }
+                if (reinsert && !plan_shape_field(p, shape, key, removed->type->type_id, removed->flags)) {
+                    diagnostic(p, node, "reinserted field allocation"); return;
+                }
+                typemap_hash_build(shape, pool);
+                plan->object = {node, shape, shape}; plan->source = source; plan->removed = removed;
+                arraylist_append(p->objects, plan); variants++;
+            }
+        }
+    }
+}
 // only a fixed, receiver-unobserving constructor can initialize existing scalar-field slots.
-static LmdObjectPlan* scalar_constructor_plan(MvpLmdProgram* p, AstNode* node) {
+static LmdObjectPlan* scalar_constructor_plan(MvpLmdProgram* p, AstNode* node,
+        const LmdValue* native_values) {
     if (!node) return NULL;
     AstNode* original = node;
     LmdFunction* factory = NULL;
     if (node->node_type == AST_NODE_CALL_EXPR) {
+        if (native_values) return NULL;
         factory = direct_target(p, (AstCallNode*)node);
         if (!factory || !factory->closed_calls || factory->owns_captures ||
                 ast_linked_node_count(factory->ast->params) > 32 ||
@@ -5444,6 +5685,10 @@ static LmdObjectPlan* scalar_constructor_plan(MvpLmdProgram* p, AstNode* node) {
     TypeMap* shape = (TypeMap*)alloc_type(pool, LMD_TYPE_MAP, sizeof(TypeMap));
     if (!plan || !shape) { diagnostic(p, node, "scalar constructor plan allocation"); return NULL; }
     *plan = {original, shape, shape}; plan->constructor = constructor;
+    if (native_values) {
+        shape->nominal = &cls->nominal; shape->is_nominal = true;
+        shape->is_shared_constructor_shape = true;
+    }
     if (LmdScalarFactoryPlan* extra = scalar_factory_plan(plan)) {
         extra->function = factory; extra->value = node;
     }
@@ -5452,20 +5697,38 @@ static LmdObjectPlan* scalar_constructor_plan(MvpLmdProgram* p, AstNode* node) {
         AstAssignNode* assign = (AstAssignNode*)(statement->node_type == AST_NODE_EXPR_STMT
             ? ((AstExprStmtNode*)statement)->expression : statement);
         String* key = member_spelling((AstFieldNode*)assign->left);
-        if (!key || typemap_shape_lookup_last(shape, key->chars, key->len) ||
-                !plan_shape_field(p, shape, key, LMD_TYPE_ANY, 0)) return NULL;
+        if (!key || typemap_shape_lookup_last(shape, key->chars, key->len)) return NULL;
         AstNode* value = assign->right;
+        const LmdValue* native_value = NULL;
         // only an actual expression or literal may seed caller-side inference; formal ASTs cannot.
         if (value->node_type == AST_NODE_LITERAL) plan->initializers[index] = value;
         else if (value->node_type == AST_NODE_IDENT) {
             LmdBinding* parameter = identifier_binding(p, (AstIdentNode*)value);
             AstNode* actual = call->arguments;
+            int ai = 0;
             for (AstNode* formal = constructor->ast->params; formal; formal = formal->next) {
-                if (parameter && parameter->entry == js_ast_parameter_binding_identifier(formal)->entry)
+                if (parameter && parameter->entry == js_ast_parameter_binding_identifier(formal)->entry) {
                     plan->initializers[index] = actual;
-                if (actual) actual = actual->next;
+                    if (native_values && actual) native_value = &native_values[ai];
+                }
+                if (actual) { actual = actual->next; ai++; }
             }
         }
+        TypeId type = LMD_TYPE_ANY;
+        if (native_values) {
+            // only concrete scalar lanes are admitted; unknown values keep ordinary construction.
+            if (native_value && !is_boxed(*native_value) && !native_value->number_present) {
+                unsigned k = semantic(*native_value);
+                type = k == K_NUMBER ? (native_value->integer ? LMD_TYPE_INT : LMD_TYPE_FLOAT) :
+                    k == K_BOOL ? LMD_TYPE_BOOL : LMD_TYPE_ANY;
+            } else if (value->node_type == AST_NODE_LITERAL) {
+                unsigned k = kind(p, value);
+                type = k == K_NUMBER ? (range(p, value).state == 1 ? LMD_TYPE_INT : LMD_TYPE_FLOAT) :
+                    k == K_BOOL ? LMD_TYPE_BOOL : LMD_TYPE_ANY;
+            }
+            if (type == LMD_TYPE_ANY) return NULL;
+        }
+        if (!plan_shape_field(p, shape, key, type, 0)) return NULL;
         AstNode* seed = plan->initializers[index];
         if (factory && seed && seed->node_type == AST_NODE_IDENT) {
             AstNode* actual = ((AstCallNode*)original)->arguments;
@@ -5623,6 +5886,27 @@ static int lower_pass(void* opaque) {
         if (cls->constructor_id >= 0 && !cls->ast->superclass) {
             LmdFunction* constructor = (LmdFunction*)p->functions->data[cls->constructor_id];
             cls->reusable_layout = constructor_layout_reusable(constructor->ast->body);
+            if (cls->reusable_layout) {
+                AstNode* first = ((AstBlockNode*)constructor->ast->body)->statements;
+                cls->nullable_initializers = (String**)pool_calloc(p->frontend->pool,
+                    ast_linked_node_count(first) * sizeof(String*));
+                if (first && !cls->nullable_initializers) {
+                    diagnostic(p, (AstNode*)constructor->ast, "nullable initializer allocation"); return false;
+                }
+                for (AstNode* n = first; n; n = n->next) {
+                    AstAssignNode* assign = (AstAssignNode*)((AstExprStmtNode*)n)->expression;
+                    String* name = member_spelling((AstFieldNode*)assign->left);
+                    // the last assignment determines whether this field has a literal-null initializer.
+                    for (int j = 0; j < cls->nullable_initializer_count; j++)
+                        if (named(cls->nullable_initializers[j], name->chars)) {
+                            cls->nullable_initializers[j] = cls->nullable_initializers[--cls->nullable_initializer_count];
+                            break;
+                        }
+                    if (assign->right->node_type == AST_NODE_LITERAL &&
+                            ((AstLiteralNode*)assign->right)->literal_type == AST_LITERAL_NULL)
+                        cls->nullable_initializers[cls->nullable_initializer_count++] = name;
+                }
+            }
         }
         bool ok = plan_shape_field(p, &cls->prototype_shape,
             name_pool_create_len(p->frontend->name_pool, "constructor", 11), LMD_TYPE_FUNC, JSPD_NON_ENUMERABLE);
@@ -5647,6 +5931,8 @@ static int lower_pass(void* opaque) {
     if (p->diagnostic[0]) return false;
     LmdShapes shapes = {p, NULL, true};
     while (shapes.changed) { shapes.changed = false; shape_walk(p->frontend->ast_root, &shapes); }
+    plan_deleted_shapes(p);
+    if (p->diagnostic[0]) return false;
     plan_scalar_objects(p);
     // proven unobservable fields feed the existing type/range solver, including accumulator lanes.
     for (int i = 0; i < p->bindings->length; i++) {
@@ -5785,7 +6071,7 @@ MvpLmdExecution* mvp_lmd_execute(const char* source, size_t length, double* exec
     e->context.pool = e->context.heap->pool;
     for (int i = 0; e->program.objects && i < e->program.objects->length; i++) {
         LmdObjectPlan* plan = (LmdObjectPlan*)e->program.objects->data[i];
-        TypeMap* shape = e->program.roots[0];
+        TypeMap* shape = plan->constructor ? &plan->constructor->home->shape : e->program.roots[0];
         Input* tree = runtime_shape_tree();
         FOR_EACH_MAP_FIELD(plan->blueprint, field) {
             shape = shape && tree ? type_tree_add_map_field_chars(tree, shape,

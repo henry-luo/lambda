@@ -1,0 +1,16 @@
+{
+  "name": "Lambda DOOM E1M1 pistol presentation and native audio",
+  "html": "test/demo/doom/doom.ls",
+  "viewport": {"width": 660, "height": 500},
+  "events": [
+    {"type": "advance_time", "ms": 40, "steps": 2},
+    {"type": "click", "target": {"selector": "#start"}},
+    {"type": "key_down", "key": "Control"},
+    {"type": "advance_time", "ms": 240, "steps": 8},
+    {"type": "key_up", "key": "Control"},
+    {"type": "assert_text", "target": {"selector": "#ammo"}, "equals": "49"},
+    {"type": "key_press", "key": "P"},
+    {"type": "assert_attribute", "target": {"selector": "#doom"}, "attribute": "data-mode", "equals": "paused"},
+    {"type": "assert_attribute", "target": {"selector": "#doom"}, "attribute": "data-error", "present": false}
+  ]
+}

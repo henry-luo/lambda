@@ -10,6 +10,17 @@ pub fn overlaps(a, b, separation = 0.0) => a != null and b != null and
     a.left < b.right + separation and b.left < a.right + separation and
     a.top < b.bottom + separation and b.top < a.bottom + separation
 
+fn projection(box, direction) {
+    let corners = [for (x in [box.left, box.right], y in [box.top, box.bottom]) x * direction[0] + y * direction[1]];
+    {lo: min(corners), hi: max(corners)}
+}
+
+// move a measured box beyond all obstacles along a unit outward direction.
+pub fn outward_shift(box, obstacles, direction, gap = 0.0) {
+    let nearest = projection(box, direction).lo;
+    max([0.0, for (obstacle in obstacles) projection(obstacle, direction).hi + gap - nearest])
+}
+
 fn select_round(pending, occupied, index) {
     if (index >= len(pending)) [] else {
         let candidate = pending[index];

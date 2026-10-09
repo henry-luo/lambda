@@ -1277,6 +1277,11 @@ bool selector_matcher_matches_pseudo_class(SelectorMatcher* matcher,
         return false;
     }
 
+    // record failed state queries too: a later interaction can make them match.
+    if (!(pseudo_type >= CSS_SELECTOR_PSEUDO_ROOT && pseudo_type <= CSS_SELECTOR_PSEUDO_NTH_LAST_OF_TYPE) &&
+        pseudo_type != CSS_SELECTOR_PSEUDO_LANG)
+        matcher->depends_on_state = true;
+
     switch (pseudo_type) {
         // User interaction pseudo-classes
         case CSS_SELECTOR_PSEUDO_HOVER:

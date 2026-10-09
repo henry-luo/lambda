@@ -145,6 +145,13 @@ extern "C" __attribute__((weak)) void dom_engine_bind_host(const void* host_api)
         (void)a; (void)b; (void)c; return ItemNull; }
 
 DOM_ENGINE_SEAM_2(get_state)
+DOM_ENGINE_SEAM_2(audio_open)
+DOM_ENGINE_SEAM_3(audio_play)
+DOM_ENGINE_SEAM_2(audio_pause)
+DOM_ENGINE_SEAM_2(audio_close)
+DOM_ENGINE_SEAM_2(audio_state)
+DOM_ENGINE_SEAM_2(set_relative_mouse)
+DOM_ENGINE_SEAM_1(relative_mouse_active)
 DOM_ENGINE_SEAM_3(set_state)
 DOM_ENGINE_SEAM_1(request_change)
 DOM_ENGINE_SEAM_1(focused)
@@ -455,6 +462,10 @@ extern "C" Item radiant_dom_event_create(const char* type, bool bubbles,
                                          bool cancelable, bool composed, int class_id);
 
 extern "C" Item dom_core_dispatch(Item n, Item event) {
+    RootFrame roots(3);
+    Rooted<Item> node_root(roots, n);
+    Rooted<Item> descriptor_root(roots, event);
+    Rooted<Item> built_root(roots, ItemNull);
     // A live event goes straight through: it already carries the propagation
     // state a listener mutates, and dom_dispatch_event's F19/ES25 bridge enters
     // the engine's cascade with it.
@@ -474,7 +485,8 @@ extern "C" Item dom_core_dispatch(Item n, Item event) {
     // case work for the first time. The factory is native (a VMap over a
     // RadiantDomEventRecord), so no realm is needed to build or read one.
     const char* type = nullptr;
-    bool bubbles = true, cancelable = false;
+    bool bubbles = true, cancelable = false, composed = false, has_detail = false;
+    Item detail = ItemNull;
     if (get_type_id(event) == LMD_TYPE_STRING) {
         type = fn_to_cstr(event);
     } else {
@@ -483,8 +495,18 @@ extern "C" Item dom_core_dispatch(Item n, Item event) {
         type = fn_to_cstr(type_item);
         bubbles = dom_event_flag(event, "bubbles", true);
         cancelable = dom_event_flag(event, "cancelable", false);
+        composed = dom_event_flag(event, "composed", false);
+        if (get_type_id(event) == LMD_TYPE_MAP && event.map) {
+            has_detail = descriptor_root.get().map->has_field("detail");
+            detail = dom_map_field(descriptor_root.get(), "detail");
+        }
     }
     if (!type || !type[0]) return ItemNull;
+    if (has_detail) {
+        // custom descriptors must retain their payload when joining an active cascade.
+        built_root.set(js_create_custom_event_init(type, bubbles, cancelable, composed, detail));
+        return dom_absent_to_null(dom_dispatch_event_bridge(node_root.get(), built_root.get()));
+    }
     if (dom_engine_event_cascade_active()) {
         // Inside a handler the engine's entry is the right implementation: it
         // continues the cascade in progress, so an `input` raised while handling
@@ -495,13 +517,26 @@ extern "C" Item dom_core_dispatch(Item n, Item event) {
         Item b = { .item = b2it(bubbles) }, c = { .item = b2it(cancelable) };
         return dom_engine_dispatch_event(n, type_item, b, c);
     }
-    Item built = radiant_dom_event_create(type, bubbles, cancelable, false, 0);
-    if (get_type_id(built) != LMD_TYPE_VMAP) return ItemNull;
-    return dom_absent_to_null(dom_dispatch_event_bridge(n, built));
+    built_root.set(radiant_dom_event_create(type, bubbles, cancelable, composed, 0));
+    if (get_type_id(built_root.get()) != LMD_TYPE_VMAP) return ItemNull;
+    return dom_absent_to_null(dom_dispatch_event_bridge(node_root.get(), built_root.get()));
 }
 
 
 // --- text controls
+// Lambda's integer IDs share the native stream and capture ownership with JS.
+static Item dom_core_pointer_capture(Item node, Item pointer, unsigned operation) {
+    auto* element = (DomElement*)dom_unwrap_element(node);
+    TypeId type = get_type_id(pointer);
+    int64_t id = type == LMD_TYPE_INT || type == LMD_TYPE_INT64 ? it2l(pointer) : 0;
+    bool accepted = element && id >= INT32_MIN && id <= INT32_MAX &&
+        dom_engine_pointer_capture(element, (int32_t)id, operation) > 0;
+    return Item{.item = b2it(accepted)};
+}
+extern "C" Item dom_core_set_pointer_capture(Item node, Item id) { return dom_core_pointer_capture(node, id, 0); }
+extern "C" Item dom_core_release_pointer_capture(Item node, Item id) { return dom_core_pointer_capture(node, id, 1); }
+extern "C" Item dom_core_has_pointer_capture(Item node, Item id) { return dom_core_pointer_capture(node, id, 2); }
+
 // These two bodies already existed in the core; only the catalog's uniform
 // shape was missing, so each is a two-line adapter rather than an engine seam.
 // tc_set_selection carries the direction the DOM's setSelectionRange takes --

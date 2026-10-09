@@ -113,6 +113,9 @@ extern "C" Item mvp_lmd_string_concat(Item left, Item right) {
 extern "C" int64_t mvp_lmd_string_compare(Item left, Item right) {
     String* l = left.get_string();
     String* r = right.get_string();
+    if (l == r) return 0;
+    // ASCII byte order is UTF-16 order; retain the shared decoder for all other strings.
+    if (l->is_ascii && r->is_ascii) return str_cmp(l->chars, l->len, r->chars, r->len);
     return utf16_compare(l->chars, l->len, r->chars, r->len);
 }
 

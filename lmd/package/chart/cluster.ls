@@ -95,9 +95,15 @@ pub fn layout(data, width, height, options = {}) {
 }
 
 pub fn render(data, ctx, options) {
-    let nodes = layout(data, ctx.plot_w, ctx.plot_h, options);
-    if (nodes is error) nodes else svg.group_class("marks " ++ options.kind, [
-        if (options.kind == "tree") for (node in nodes where node.parent != null,
+    let polar=ctx._coordinate!=null and ctx._coordinate.type!="cartesian";
+    let laid_out = layout(data, ctx.plot_w, ctx.plot_h, if (polar) {*:options,orientation:"vertical"} else options);
+    let nodes=if (polar) [for (node in laid_out) {*:node,y:ctx.plot_h-node.y}] else laid_out;
+    let nc = mark.part_context(ctx, options, "node", nodes |> ~.row);
+    let lc = mark.part_context(ctx, options, "link", nodes |> ~.row);
+    let label_ctx = mark.part_context(ctx, options, "label", nodes |> ~.row);
+    let invalid=util.first_error([nodes,mark.part_error([nc,lc,label_ctx])]);
+    if (invalid is error) invalid else svg.group_class("marks " ++ options.kind, [
+        if (options.kind == "tree") for (node in nodes where node.parent != null and mark.part_selected(lc,node.row),
             let parent = (nodes |: ~.id == node.parent)[0],
             let horizontal = options.orientation == "horizontal",
             let mid = if (horizontal) (parent.x + node.x) / 2.0 else (parent.y + node.y) / 2.0)
@@ -108,15 +114,16 @@ pub fn render(data, ctx, options) {
                         if (horizontal) [mid, node.y] else [node.x, mid], [node.x, node.y]])
                     else svg.M(parent.x, parent.y) ++ " " ++ (if (horizontal) svg.C(mid, parent.y, mid, node.y, node.x, node.y)
                         else svg.C(parent.x, mid, node.x, mid, node.x, node.y)),
-                *:mark.style({*:ctx, _part: "link"}, node.row, {*:options, *:parse.attributes(options.parts.link)},
+                *:mark.style(lc, node.row, mark.part_options(options, "link"),
                     {fill: "none", stroke: "#aaa", 'stroke-width': 1, opacity: 1.0}, true)>,
-        for (node in nodes) <circle class: options.kind ++ "-node", 'data-node': string(node.id), cx: node.x, cy: node.y,
+        for (node in nodes where mark.part_selected(nc,node.row)) <circle class: options.kind ++ "-node", 'data-node': string(node.id), cx: node.x, cy: node.y,
             r: if (options.kind == "pack") node.r else if (options.node_radius != null) options.node_radius else 4.0,
-            *:mark.style({*:ctx, _part: "node"}, node.row, {*:options, *:parse.attributes(options.parts.node)},
+            *:mark.style(nc, node.row, mark.part_options(options, "node"),
                 {fill: color.category10[node.depth % 10], stroke: "white", 'stroke-width': 1, opacity: if (options.kind == "pack") 0.5 else 1.0}),
-            mark.tooltip(ctx, node.row)>,
-        if (options.labels != false) for (node in nodes where options.kind != "pack" or len(node.children) == 0)
+            mark.tooltip(nc, node.row)>,
+        if (options.labels != false) for (node in nodes where (options.kind != "pack" or len(node.children) == 0) and mark.part_selected(label_ctx,node.row))
             <text class: "cluster-label", x: node.x + (if (options.kind == "tree") 6 else 0), y: node.y,
                 'text-anchor': if (options.kind == "tree") "start" else "middle", 'dominant-baseline': "middle", 'font-size': 11,
-                fill: "#222", string(node.row[if (options.label_field != null) options.label_field else if (options.node_field != null) options.node_field else "id"])>])
+                *:mark.style(label_ctx, node.row, mark.part_options(options, "label"), {fill: "#222", opacity: 1.0}),
+                string(node.row[if (options.label_field != null) options.label_field else if (options.node_field != null) options.node_field else "id"])>])
 }

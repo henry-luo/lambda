@@ -154,43 +154,11 @@ static void render_per_side_borders(RasterRenderContext* rdcon, Rect rect, Borde
             const RdtMatrix* xform = render_state_current_transform(rdcon);
             RdtPath* clip = render_path_create_clip_path(rdcon);
             rc_push_clip(rdcon, clip, NULL);
-            RdtPath* p = rdt_path_new();
-            float right = rect.x + rect.width;
-            float bottom = rect.y + rect.height;
-            switch (side) {
-                case 0:
-                    rdt_path_move_to(p, rect.x, rect.y);
-                    rdt_path_line_to(p, right, rect.y);
-                    rdt_path_line_to(p, right - after, rect.y + width);
-                    rdt_path_line_to(p, rect.x + before, rect.y + width);
-                    break;
-                case 1:
-                    rdt_path_move_to(p, right - width, rect.y + before);
-                    rdt_path_line_to(p, right, rect.y);
-                    rdt_path_line_to(p, right, bottom);
-                    rdt_path_line_to(p, right - width, bottom - after);
-                    break;
-                case 2:
-                    rdt_path_move_to(p, rect.x + before, bottom - width);
-                    rdt_path_line_to(p, right - after, bottom - width);
-                    rdt_path_line_to(p, right, bottom);
-                    rdt_path_line_to(p, rect.x, bottom);
-                    break;
-                case 3:
-                    rdt_path_move_to(p, rect.x, rect.y);
-                    rdt_path_line_to(p, rect.x + width, rect.y + before);
-                    rdt_path_line_to(p, rect.x + width, bottom - after);
-                    rdt_path_line_to(p, rect.x, bottom);
-                    break;
-                default:
-                    rdt_path_free(p);
-                    rc_pop_clip(rdcon);
-                    rdt_path_free(clip);
-                    return;
+            RdtPath* p = render_path_create_border_side(rect, side, width, before, after);
+            if (p) {
+                rc_fill_path(rdcon, p, c, RDT_FILL_WINDING, xform);
+                rdt_path_free(p);
             }
-            rdt_path_close(p);
-            rc_fill_path(rdcon, p, c, RDT_FILL_WINDING, xform);
-            rdt_path_free(p);
             rc_pop_clip(rdcon);
             rdt_path_free(clip);
         }

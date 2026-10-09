@@ -5,7 +5,7 @@
 '1. a literal folds as a pattern does'
 "1.1"; (find("École", "é", {ignore_case: true}) |> ~.value)
 "1.2"; (find("École", \("é"), {ignore_case: true}) |> ~.value)
-"1.3"; (find("É1", \("é" d), {ignore_case: true}) |> ~.value)
+"1.3"; (find("É1", \("é" "\d"), {ignore_case: true}) |> ~.value)
 "1.4"; (find("STRASSE ẞ", "ß", {ignore_case: true}) |> ~.index)
 
 '2. simple folding: one code point to one'

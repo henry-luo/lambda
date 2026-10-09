@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<fo:root xmlns:fo="http://www.w3.org/1999/XSL/Format"
+         font-family="Arial" font-size="12pt" line-height="18pt" color="#18223a">
+  <fo:layout-master-set>
+    <fo:simple-page-master master-name="report" page-width="300pt" page-height="420pt" margin="24pt">
+      <fo:region-body region-name="report-body" margin="6pt" background-color="#f8f9ff"/>
+    </fo:simple-page-master>
+  </fo:layout-master-set>
+  <fo:page-sequence master-reference="report">
+    <fo:flow flow-name="report-body">
+      <fo:block font-size="20pt" line-height="26pt" padding-bottom="12pt">Radiant paged media</fo:block>
+      <fo:block>This FO document translates to native Radiant page controls and ordinary HTML/CSS. Its text uses the shared <fo:inline font-weight="bold">Radiant layout and typesetting</fo:inline> pipeline.</fo:block>
+      <fo:block padding-top="12pt">The sheet and body region have separate geometry. Both preview and PDF export consume the same retained pages.</fo:block>
+      <fo:block break-before="page" font-size="20pt" line-height="26pt" padding-bottom="12pt">A second physical page</fo:block>
+      <fo:block>A forced page break preserves the source flow. This page is composed by the same page planner used for CSS paged media.</fo:block>
+    </fo:flow>
+  </fo:page-sequence>
+</fo:root>

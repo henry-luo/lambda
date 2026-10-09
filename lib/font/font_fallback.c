@@ -218,7 +218,8 @@ static FontHandle* resolve_exact_fallback_family(FontContext* ctx,
                                                   uint32_t codepoint) {
     if (!ctx || !style || !family) return NULL;
 
-    char* key = font_cache_make_key(ctx->arena, family, style->weight,
+    char key_storage[256];
+    char* key = font_cache_make_key(key_storage, sizeof(key_storage), family, style->weight,
                                     style->slant, style->size_px);
     FontHandle* cached = font_cache_lookup(ctx, key, false, NULL);
     if (cached) {
@@ -334,37 +335,24 @@ static struct hashmap* ensure_codepoint_cache(FontContext* ctx) {
 // small path-based cache of recently-resolved platform fallback handles,
 // keyed by (file_path, face_index, size_px). Avoids expensive
 // font_load_face_internal for each codepoint when most map to the same fonts.
-#define PLATFORM_FB_CACHE_SIZE 32
-typedef struct {
-    const char* path;       // borrowed from handle->file_data_path
-    int         face_index;
-    float       size_px;
-    FontHandle* handle;
-} PlatformFbEntry;
-
-static PlatformFbEntry s_platform_fb[PLATFORM_FB_CACHE_SIZE];
-static int             s_platform_fb_count = 0;
-
-void font_fallback_reset_platform_cache(void) {
-    for (int i = 0; i < s_platform_fb_count; i++) {
-        if (s_platform_fb[i].handle) {
-            font_handle_release(s_platform_fb[i].handle);
+void font_fallback_reset_platform_cache(FontContext* ctx) {
+    for (int i = 0; i < ctx->platform_fallback_count; i++) {
+        if (ctx->platform_fallback_cache[i].handle) {
+            font_handle_release(ctx->platform_fallback_cache[i].handle);
         }
-        memset(&s_platform_fb[i], 0, sizeof(PlatformFbEntry));
+        memset(&ctx->platform_fallback_cache[i], 0, sizeof(FontPlatformFallbackEntry));
     }
-    s_platform_fb_count = 0;
+    ctx->platform_fallback_count = 0;
 }
 
-static FontHandle* platform_fb_lookup(const char* path, int face_index,
+static FontHandle* platform_fb_lookup(FontContext* ctx, const char* path, int face_index,
                                        float size_px, uint32_t codepoint) {
-    for (int i = 0; i < s_platform_fb_count; i++) {
-        if (s_platform_fb[i].handle &&
-            s_platform_fb[i].face_index == face_index &&
-            s_platform_fb[i].size_px == size_px &&
-            s_platform_fb[i].path &&
-            strcmp(s_platform_fb[i].path, path) == 0 &&
-            font_has_codepoint(s_platform_fb[i].handle, codepoint)) {
-            return s_platform_fb[i].handle;
+    for (int i = 0; i < ctx->platform_fallback_count; i++) {
+        FontPlatformFallbackEntry* entry = &ctx->platform_fallback_cache[i];
+        if (entry->handle && entry->face_index == face_index &&
+            entry->size_px == size_px && entry->path &&
+            strcmp(entry->path, path) == 0 && font_has_codepoint(entry->handle, codepoint)) {
+            return entry->handle;
         }
     }
     return NULL;
@@ -372,19 +360,19 @@ static FontHandle* platform_fb_lookup(const char* path, int face_index,
 
 static void platform_fb_insert(FontHandle* handle, int face_index, float size_px) {
     if (!handle || !handle->file_data_path) return;
+    FontContext* ctx = handle->ctx;
     // check for duplicate
-    for (int i = 0; i < s_platform_fb_count; i++) {
-        if (s_platform_fb[i].handle == handle) return;
+    for (int i = 0; i < ctx->platform_fallback_count; i++) {
+        if (ctx->platform_fallback_cache[i].handle == handle) return;
     }
-    if (s_platform_fb_count < PLATFORM_FB_CACHE_SIZE) {
-        // The static platform cache outlives individual lookup callers, so it
-        // owns a retained handle until reset during document/context cleanup.
+    if (ctx->platform_fallback_count < FONT_PLATFORM_FALLBACK_CACHE_SIZE) {
+        // a retained handle cannot outlive the context pool that owns its storage.
         font_handle_retain(handle);
-        s_platform_fb[s_platform_fb_count].path = handle->file_data_path;
-        s_platform_fb[s_platform_fb_count].face_index = face_index;
-        s_platform_fb[s_platform_fb_count].size_px = size_px;
-        s_platform_fb[s_platform_fb_count].handle = handle;
-        s_platform_fb_count++;
+        FontPlatformFallbackEntry* entry = &ctx->platform_fallback_cache[ctx->platform_fallback_count++];
+        entry->path = handle->file_data_path;
+        entry->face_index = face_index;
+        entry->size_px = size_px;
+        entry->handle = handle;
     }
 }
 
@@ -461,7 +449,7 @@ FontHandle* font_find_codepoint_fallback(FontContext* ctx, const FontStyleDesc* 
             // discover the usable table face by coverage below.
             face_index = 0;
             // fast path: reuse an existing handle for this font file
-            FontHandle* reused = platform_fb_lookup(font_path, face_index, style->size_px, codepoint);
+            FontHandle* reused = platform_fb_lookup(ctx, font_path, face_index, style->size_px, codepoint);
             if (reused) {
 #ifdef __APPLE__
                 // a cached file can expose different CoreText fallback faces per codepoint;

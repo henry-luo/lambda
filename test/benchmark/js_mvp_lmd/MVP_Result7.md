@@ -2,7 +2,7 @@
 
 **Basic classes and class workload tuning** — [MVP §21](../../../vibe/jube/JS_MVP_Lmd.md#21-classes-and-inheritance-aligned-with-lambda).
 
-[Series index and comparison](README.md) · [Raw JSON](MVP_Result7.json) · [Previous phase](MVP_Result6.md)
+[Series index and comparison](README.md) · [Raw JSON](MVP_Result7.json) · [Previous phase](MVP_Result6.md) · [Next phase](MVP_Result8.md)
 
 ## Summary
 

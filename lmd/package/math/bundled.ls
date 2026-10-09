@@ -13,6 +13,7 @@ let resources = [
     {family: VARIANT_FAMILIES.sans, file: "latex/fonts/Sans/cmunss.woff2"},
     {family: VARIANT_FAMILIES.mono, file: "latex/fonts/Typewriter/cmuntt.woff2"},
     {family: "KaTeX_Size1", file: "math/fonts/KaTeX_Size1-Regular.woff2"},
+    {family: "KaTeX_Size2", file: "math/fonts/KaTeX_Size2-Regular.woff2"},
     {family: "KaTeX_AMS", file: "math/fonts/KaTeX_AMS-Regular.woff2"},
     {family: VARIANT_FAMILIES.script, file: "math/fonts/KaTeX_Script-Regular.woff2"},
     {family: VARIANT_FAMILIES.cal, file: "math/fonts/KaTeX_Caligraphic-Regular.woff2"},

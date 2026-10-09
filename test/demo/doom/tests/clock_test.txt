@@ -1,0 +1,8 @@
+{
+  steps: [0, 3, 7],
+  movement: [26, []],
+  stall: [346, true],
+  pause: ["paused", 0, true, true, "playing"],
+  restart: [0, 0, 100, 2, true],
+  backwards: 0
+}

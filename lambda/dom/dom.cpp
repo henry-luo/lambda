@@ -7639,19 +7639,23 @@ static void _select_sync_native_selected_index(DomElement* sel,
 // optgroup descendants contribute options, but nested option/hr/select/optgroup
 // subtrees are not part of the owning select's option list.
 static void _collect_options_impl(DomNode* node, Item arr, bool allow_optgroup) {
+    // Wrapping an option may collect before the array push or recursive visit.
+    RootFrame roots(2);
+    Rooted<Item> options(roots, arr), wrapped(roots, ItemNull);
     while (node) {
         if (node->is_element()) {
             DomElement* ce = (DomElement*)node;
             if (ce->tag_name) {
                 if (str_icmp_cstr(ce->tag_name, "option") == 0) {
-                    js_array_push(arr, dom_wrap_element(ce));
+                    wrapped.set(dom_wrap_element(ce));
+                    js_array_push(options.get(), wrapped.get());
                 } else if (str_icmp_cstr(ce->tag_name, "select") == 0 ||
                            str_icmp_cstr(ce->tag_name, "hr") == 0) {
                     // skip nested select/hr subtrees
                 } else if (str_icmp_cstr(ce->tag_name, "optgroup") == 0) {
-                    if (allow_optgroup) _collect_options_impl(ce->first_child, arr, false);
+                    if (allow_optgroup) _collect_options_impl(ce->first_child, options.get(), false);
                 } else {
-                    _collect_options_impl(ce->first_child, arr, allow_optgroup);
+                    _collect_options_impl(ce->first_child, options.get(), allow_optgroup);
                 }
             }
         }
@@ -7912,11 +7916,12 @@ static int _select_index_from_item(Item value) {
 
 static void _select_set_selected_index(DomElement* sel, int idx) {
     if (!sel) return;
-    Item arr = js_array_new(0);
-    _collect_options(sel->first_child, arr);
-    int64_t n = js_array_length(arr);
+    RootFrame roots(1);
+    Rooted<Item> arr(roots, js_array_new(0));
+    _collect_options(sel->first_child, arr.get());
+    int64_t n = js_array_length(arr.get());
     for (int64_t i = 0; i < n; i++) {
-        DomElement* opt = (DomElement*)dom_unwrap_element(js_elements_get_int(arr, i));
+        DomElement* opt = (DomElement*)dom_unwrap_element(js_elements_get_int(arr.get(), i));
         if (!opt) continue;
         _set_selectedness(opt, (int)i == idx); // INT_CAST_OK: option index
     }
@@ -8159,13 +8164,14 @@ static char* _select_value(DomElement* elem) {
     if (!elem || !_is_tag(elem, "select")) {
         return mem_strdup("", MEM_CAT_JS_RUNTIME);
     }
-    Item options = js_array_new(0);
-    _collect_options(elem->first_child, options);
-    int64_t count = js_array_length(options);
+    RootFrame roots(1);
+    Rooted<Item> options(roots, js_array_new(0));
+    _collect_options(elem->first_child, options.get());
+    int64_t count = js_array_length(options.get());
     DomElement* first_non_disabled = nullptr;
     for (int64_t i = 0; i < count; i++) {
         DomElement* option = (DomElement*)dom_unwrap_element(
-            js_elements_get_int(options, i));
+            js_elements_get_int(options.get(), i));
         if (!option) continue;
         if (_get_selectedness(option)) return _option_value(option);
         if (!first_non_disabled &&
@@ -8188,6 +8194,13 @@ static char* _select_value(DomElement* elem) {
         return _option_value(first_non_disabled);
     }
     return mem_strdup("", MEM_CAT_JS_RUNTIME);
+}
+
+extern "C" Item dom_select_value_bridge(void* element) {
+    char* value = _select_value((DomElement*)element);
+    String* result = heap_create_name(value ? value : "");
+    if (value) mem_free(value);
+    return (Item){.item = s2it(result)};
 }
 
 static void _select_sync_native_selected_index(DomElement* sel,
@@ -10386,10 +10399,7 @@ extern "C" Item dom_get_property_impl(Item elem_item, Item prop_name) {
                 _select_effective_selected_index_native(elem))};
         }
         if (prop_id == JS_DOM_PROP_VALUE) {
-            char* value = _select_value(elem);
-            String* result = heap_create_name(value ? value : "");
-            if (value) mem_free(value);
-            return (Item){.item = s2it(result)};
+            return dom_select_value_bridge(elem);
         }
         if (prop_id == JS_DOM_PROP_TYPE) {
             const char* t = elem->has_attribute("multiple")
@@ -11800,8 +11810,10 @@ extern "C" Item dom_set_style_property(Item elem_item, Item prop_name, Item valu
     RootFrame roots(4);
     Rooted<Item> receiver_root(roots, elem_item), property_root(roots, prop_name),
         value_root(roots, value), style_root(roots, dom_style_object(receiver_root.get()));
-    // Lambda-only callers use the same declaration core without entering a JS realm.
-    if (!dom_realm_active())
+    // Native declarations use CSSOM directly: JS indexed assignment treats
+    // custom names as expandos, which never updates the authored style/paint.
+    if (dom_is_rule_style_decl(style_root.get()) || dom_is_inline_style_item(style_root.get()) ||
+        dom_is_computed_style_item(style_root.get()) || !dom_realm_active())
         return dom_cssom_rule_decl_set_property(style_root.get(), property_root.get(), value_root.get());
     return dom_realm_set(style_root.get(), property_root.get(), value_root.get());
 }
@@ -11836,7 +11848,8 @@ extern "C" Item dom_get_style_property(Item elem_item, Item prop_name) {
     RootFrame roots(3);
     Rooted<Item> receiver_root(roots, elem_item), property_root(roots, prop_name),
         style_root(roots, dom_style_object(receiver_root.get()));
-    if (!dom_realm_active())
+    if (dom_is_rule_style_decl(style_root.get()) || dom_is_inline_style_item(style_root.get()) ||
+        dom_is_computed_style_item(style_root.get()) || !dom_realm_active())
         return dom_cssom_rule_decl_get_property(style_root.get(), property_root.get());
     return dom_realm_get(style_root.get(), property_root.get());
 }
@@ -12275,9 +12288,62 @@ static void dom_svg_apply_css_viewport_size(DomElement* elem, float* width, floa
 // the synchronous SVG hit walk borrows a linked stack of instance style scopes.
 static thread_local const SvgDomStyleScope* g_dom_svg_style_scope = nullptr;
 
+// a hit walk reads fixed geometry; sibling glyphs must not rebuild their shared
+// ancestors' font contexts and transforms. The scope expires before event handlers run.
+struct DomSvgHitGeometry {
+    DomElement* element;
+    SvgLengthContext lengths;
+    RdtMatrix local;
+    RdtMatrix screen;
+    RdtMatrix viewport;
+    bool has_lengths, has_local, has_screen, has_viewport;
+};
+using DomSvgHitGeometryMap = TypedHashMap<DomSvgHitGeometry,
+    HashMapPointerMemberKeyOps<DomSvgHitGeometry, &DomSvgHitGeometry::element>>;
+
+struct DomSvgHitGeometryScope;
+static thread_local DomSvgHitGeometryScope* g_dom_svg_hit_geometry = nullptr;
+struct DomSvgHitGeometryScope {
+    DomDocument* document;
+    HashMap* entries;
+    DomSvgHitGeometryScope* previous;
+    bool owner;
+
+    explicit DomSvgHitGeometryScope(DomElement* element) :
+        document(element ? element->doc : nullptr), entries(nullptr),
+        previous(g_dom_svg_hit_geometry), owner(document && (!previous || previous->document != document)) {
+        if (owner) {
+            entries = DomSvgHitGeometryMap::create(64);
+            g_dom_svg_hit_geometry = this;
+        }
+    }
+    ~DomSvgHitGeometryScope() {
+        if (owner) {
+            g_dom_svg_hit_geometry = previous;
+            DomSvgHitGeometryMap::destroy(entries);
+        }
+    }
+};
+
+static DomSvgHitGeometry* dom_svg_hit_geometry(DomElement* element, bool create = false) {
+    auto* scope = g_dom_svg_hit_geometry;
+    // a use instance supplies a different font/viewport ancestry for the same source.
+    if (!element || !scope || !scope->entries || scope->document != element->doc ||
+        g_dom_svg_style_scope || svg_animation_is_sampling(element->doc)) return nullptr;
+    DomSvgHitGeometry key = {}; key.element = element;
+    DomSvgHitGeometry* entry = DomSvgHitGeometryMap::get(scope->entries, key);
+    if (!entry && create) {
+        DomSvgHitGeometryMap::set(scope->entries, key);
+        entry = DomSvgHitGeometryMap::get(scope->entries, key);
+    }
+    return entry;
+}
+
 SvgLengthContext dom_svg_length_context(DomElement* elem) {
     SvgLengthContext lengths = {0.0f, 0.0f, 16.0f, 8.0f};
     if (!elem) return lengths;
+    DomSvgHitGeometry* cached = dom_svg_hit_geometry(elem);
+    if (cached && cached->has_lengths) return cached->lengths;
     DomElement* chain[64];
     int count = 0;
     for (DomNode* node = elem; node && count < 64; node = svg_dom_style_parent(node, g_dom_svg_style_scope)) {
@@ -12336,6 +12402,8 @@ SvgLengthContext dom_svg_length_context(DomElement* elem) {
         }
     }
     lengths.x_height = svg_font_x_height(fonts, &font);
+    cached = dom_svg_hit_geometry(elem, true);
+    if (cached) { cached->lengths = lengths; cached->has_lengths = true; }
     return lengths;
 }
 
@@ -12385,6 +12453,16 @@ extern "C" bool dom_svg_foreign_object_clips(void* element) {
 static RdtMatrix dom_svg_transform_from_element(DomElement* elem) {
     RdtMatrix transform = rdt_matrix_identity();
     if (!elem) return transform;
+    DomSvgHitGeometry* cached = dom_svg_hit_geometry(elem);
+    if (cached && cached->has_local) return cached->local;
+    char value_buffer[512];
+    bool from_css = false;
+    const char* value = svg_get_dom_presentation_property(elem, "transform", false,
+        value_buffer, sizeof(value_buffer), &from_css, nullptr, nullptr, g_dom_svg_style_scope);
+    bool nested_viewport = elem->tag_name && str_icmp_cstr(elem->tag_name, "svg") == 0 &&
+        elem->parent && elem->parent->is_element() && dom_element_is_svg(elem->parent->as_element());
+    // absent transforms do not depend on font metrics, origin or reference box.
+    if ((!value || strcmp(value, "none") == 0) && !nested_viewport) return transform;
     SvgLengthContext lengths = dom_svg_length_context(elem);
     Bound box = {0.0f, 0.0f, lengths.viewport_width, lengths.viewport_height};
     for (DomNode* node = svg_dom_style_parent(elem, g_dom_svg_style_scope); node && node->is_element(); node = svg_dom_style_parent(node, g_dom_svg_style_scope)) {
@@ -12405,20 +12483,17 @@ static RdtMatrix dom_svg_transform_from_element(DomElement* elem) {
     if (reference && (strcmp(reference, "fill-box") == 0 || strcmp(reference, "stroke-box") == 0)) {
         dom_svg_element_geometry_bounds(elem, &box.left, &box.top, &box.right, &box.bottom);
     }
-    char value_buffer[512];
-    bool from_css = false;
-    const char* value = svg_get_dom_presentation_property(elem, "transform", false,
-        value_buffer, sizeof(value_buffer), &from_css, nullptr, nullptr, g_dom_svg_style_scope);
     char origin_buffer[128];
     const char* origin = svg_get_dom_presentation_property(elem, "transform-origin", false,
         origin_buffer, sizeof(origin_buffer), nullptr, nullptr, nullptr, g_dom_svg_style_scope);
     transform = svg_resolve_local_transform(value, from_css, origin, &box, &lengths);
-    if (elem->tag_name && str_icmp_cstr(elem->tag_name, "svg") == 0 && elem->parent &&
-        elem->parent->is_element() && dom_element_is_svg(elem->parent->as_element())) {
+    if (nested_viewport) {
         RdtMatrix viewport_offset = rdt_matrix_translate(
             dom_svg_attribute_number(elem, "x", 0.0f), dom_svg_attribute_number(elem, "y", 0.0f));
         transform = rdt_matrix_multiply(&transform, &viewport_offset);
     }
+    cached = dom_svg_hit_geometry(elem, true);
+    if (cached) { cached->local = transform; cached->has_local = true; }
     return transform;
 }
 
@@ -12554,6 +12629,9 @@ static RdtMatrix dom_svg_viewbox_transform(DomElement* elem) {
 static RdtMatrix dom_svg_ctm(DomElement* elem, bool screen_space) {
     RdtMatrix matrix = rdt_matrix_identity();
     if (!elem) return matrix;
+    DomSvgHitGeometry* cached = dom_svg_hit_geometry(elem);
+    if (cached && (screen_space ? cached->has_screen : cached->has_viewport))
+        return screen_space ? cached->screen : cached->viewport;
     DomElement* chain[64];
     int count = 0;
     DomElement* outermost_svg = nullptr;
@@ -12590,6 +12668,11 @@ static RdtMatrix dom_svg_ctm(DomElement* elem, bool screen_space) {
             layout_transform = rdt_matrix_translate(origin.x, origin.y);
         }
         matrix = rdt_matrix_multiply(&layout_transform, &matrix);
+    }
+    cached = dom_svg_hit_geometry(elem, true);
+    if (cached) {
+        if (screen_space) { cached->screen = matrix; cached->has_screen = true; }
+        else { cached->viewport = matrix; cached->has_viewport = true; }
     }
     return matrix;
 }
@@ -13171,7 +13254,8 @@ static JsDomSvgShapeHit dom_svg_basic_shape_hit_local_point(DomElement* elem,
                                                                float local_x,
                                                                float local_y,
                                                                float min_scale,
-                                                               const RdtMatrix* stroke_frame = nullptr) {
+                                                               const RdtMatrix* stroke_frame = nullptr,
+                                                               bool check_stroke = true) {
     JsDomSvgShapeHit result = {};
     if (!elem) return result;
     // Every basic SVG primitive is lowered to the same contour visitor.  Its
@@ -13179,22 +13263,26 @@ static JsDomSvgShapeHit dom_svg_basic_shape_hit_local_point(DomElement* elem,
     bool text = dom_svg_is_text(elem);
     RdtPath* path = text ? dom_svg_text_geometry_path(elem) : dom_svg_basic_shape_path(elem);
     if (!path) return result;
-    JsDomSvgPathHitContext context = {};
-    context.point_x = local_x;
-    context.point_y = local_y;
-    context.curve_flatness = 0.5f / min_scale;
-    char effect_buffer[64];
-    const char* effect = dom_svg_presentation_value(elem, "vector-effect", false, effect_buffer, sizeof(effect_buffer));
-    bool non_scaling = !text && stroke_frame && effect && strcmp(effect, "non-scaling-stroke") == 0;
-    if (!non_scaling) dom_svg_configure_stroke_hit(elem, &context);
-    bool visited = rdt_path_visit(path, dom_svg_path_hit_visit, &context);
-    if (visited) dom_svg_path_hit_finish_subpath(&context);
     float left = 0.0f;
     float top = 0.0f;
     float right = 0.0f;
     float bottom = 0.0f;
     result.bounding_box = rdt_path_get_bounds(path, &left, &top, &right, &bottom) &&
         local_x >= left && local_x <= right && local_y >= top && local_y <= bottom;
+    // fill-only hits cannot reach beyond the contour bounds; a box miss avoids
+    // flattening curves and resolving the unused stroke/dash cascade.
+    if (!check_stroke && !result.bounding_box) { rdt_path_free(path); return result; }
+    JsDomSvgPathHitContext context = {};
+    context.point_x = local_x;
+    context.point_y = local_y;
+    context.curve_flatness = 0.5f / min_scale;
+    char effect_buffer[64];
+    const char* effect = check_stroke
+        ? dom_svg_presentation_value(elem, "vector-effect", false, effect_buffer, sizeof(effect_buffer)) : nullptr;
+    bool non_scaling = !text && stroke_frame && effect && strcmp(effect, "non-scaling-stroke") == 0;
+    if (check_stroke && !non_scaling) dom_svg_configure_stroke_hit(elem, &context);
+    bool visited = rdt_path_visit(path, dom_svg_path_hit_visit, &context);
+    if (visited) dom_svg_path_hit_finish_subpath(&context);
     if (!visited) { mem_free(context.stroke_dash); rdt_path_free(path); return result; }
     {
         char fill_rule_buffer[64] = {};
@@ -13231,7 +13319,7 @@ static JsDomSvgShapeHit dom_svg_basic_shape_hit_local_point(DomElement* elem,
 
 static JsDomSvgShapeHit dom_svg_basic_shape_hit_viewport_point(DomElement* elem,
                                                                   float viewport_x,
-                                                                  float viewport_y) {
+                                                                  float viewport_y, bool check_stroke) {
     JsDomSvgShapeHit result = {};
     if (!elem) return result;
     RdtMatrix screen_ctm = dom_svg_ctm(elem, true);
@@ -13245,7 +13333,7 @@ static JsDomSvgShapeHit dom_svg_basic_shape_hit_viewport_point(DomElement* elem,
     float scale_y = hypotf(screen_ctm.e12, screen_ctm.e22);
     float min_scale = LMB_MIN(scale_x, scale_y);
     if (min_scale < 0.0001f) min_scale = 0.0001f;
-    return dom_svg_basic_shape_hit_local_point(elem, local_x, local_y, min_scale, &screen_ctm);
+    return dom_svg_basic_shape_hit_local_point(elem, local_x, local_y, min_scale, &screen_ctm, check_stroke);
 }
 JS_FORWARD_STATIC_EXPRESSION(bool, dom_svg_tag_is, (DomElement* elem, const char* tag), (elem && elem->tag_name && tag && str_icmp_cstr(elem->tag_name, tag) == 0))
 
@@ -13345,6 +13433,9 @@ static bool dom_svg_clip_contains(DomElement* elem, const RdtMatrix* frame, floa
     char buffer[512];
     const char* clip = dom_svg_presentation_value(elem, "clip-path", false, buffer, sizeof(buffer));
     if (!clip || strcmp(clip, "none") == 0) return true;
+    // resolve ancestor transforms only when there is an actual clipping path.
+    RdtMatrix computed_frame;
+    if (!frame) { computed_frame = dom_svg_ctm(elem, true); frame = &computed_frame; }
     SvgLengthContext lengths = dom_svg_length_context(elem);
     UiContext* ui = elem->doc ? (UiContext*)elem->doc->js.host_ui_context : nullptr;
     RdtLogicalPoint point = {x, y};
@@ -13579,8 +13670,7 @@ static bool dom_svg_point_is_within_clips(DomElement* elem, float x, float y) {
     for (DomNode* node = elem; node && node->is_element(); node = node->parent) {
         DomElement* current = node->as_element();
         if (!dom_element_is_svg(current)) break;
-        RdtMatrix frame = dom_svg_ctm(current, true);
-        if (!dom_svg_clip_contains(current, &frame, x, y)) return false;
+        if (!dom_svg_clip_contains(current, nullptr, x, y)) return false;
     }
     return true;
 }
@@ -13596,9 +13686,14 @@ static bool dom_svg_element_contains_viewport_point(DomElement* elem,
     bool fill_painted = false;
     bool stroke_painted = false;
     if (dom_svg_is_basic_shape(elem) || dom_svg_is_text(elem)) {
-        hit = dom_svg_basic_shape_hit_viewport_point(elem, x, y);
         fill_painted = dom_svg_paint_is_present(elem, "fill", true);
         stroke_painted = dom_svg_paint_is_present(elem, "stroke", false);
+        bool check_stroke = pointer_events != JS_DOM_SVG_POINTER_EVENTS_FILL &&
+            pointer_events != JS_DOM_SVG_POINTER_EVENTS_VISIBLE_FILL &&
+            pointer_events != JS_DOM_SVG_POINTER_EVENTS_BOUNDING_BOX &&
+            (stroke_painted || (pointer_events != JS_DOM_SVG_POINTER_EVENTS_PAINTED &&
+                pointer_events != JS_DOM_SVG_POINTER_EVENTS_VISIBLE_PAINTED));
+        hit = dom_svg_basic_shape_hit_viewport_point(elem, x, y, check_stroke);
     } else if (dom_svg_tag_is(elem, "use")) {
         hit = dom_svg_use_hit_viewport_point(elem, x, y);
         fill_painted = hit.fill_painted;
@@ -13625,6 +13720,7 @@ static bool dom_svg_element_contains_viewport_point(DomElement* elem,
 
 static DomElement* dom_svg_element_from_point_walk(DomElement* elem,
                                                        float x, float y) {
+    DomSvgHitGeometryScope geometry(elem);
     SvgAnimationSourceScope animation_sources(elem ? elem->doc : nullptr);
     if (!elem || dom_svg_element_skips_hit_test(elem) ||
         !dom_svg_point_is_within_viewports(elem, x, y)) return nullptr;

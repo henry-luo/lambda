@@ -12,6 +12,7 @@
 #import <objc/runtime.h>
 
 #include "rdt_video.h"
+#include "rdt_audio.h"
 #include "../lib/log.h"
 #include "../lib/mem.h"
 #include "../lib/ownership.hpp"
@@ -21,6 +22,77 @@
 #include <string.h>
 
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
+
+struct RdtAudio {
+    AVAudioPlayer* player;
+    id observer;
+    atomic_int state;
+};
+@interface RdtAudioObserver : NSObject <AVAudioPlayerDelegate> {
+@public RdtAudio* owner;
+}
+@end
+@implementation RdtAudioObserver
+- (void)audioPlayerDidFinishPlaying:(AVAudioPlayer*)player successfully:(BOOL)success {
+    (void)player;
+    if (owner) atomic_store(&owner->state, success ? RDT_AUDIO_ENDED : RDT_AUDIO_ERROR);
+}
+- (void)audioPlayerDecodeErrorDidOccur:(AVAudioPlayer*)player error:(NSError*)error {
+    (void)player;
+    if (owner) atomic_store(&owner->state, RDT_AUDIO_ERROR);
+    log_error("audio-native: decode failed: %s", error.localizedDescription.UTF8String);
+}
+@end
+
+extern "C" RdtAudio* rdt_audio_open_bytes(const void* bytes, size_t length) {
+    if (!bytes || !length) return nullptr;
+    @autoreleasepool {
+        NSData* data = [[NSData alloc] initWithBytes:bytes length:length];
+        NSError* error = nil;
+        AVAudioPlayer* player = [[AVAudioPlayer alloc] initWithData:data error:&error];
+        [data release];
+        if (!player || ![player prepareToPlay]) {
+            log_error("audio-native: cannot decode source: %s", error.localizedDescription.UTF8String);
+            [player release];
+            return nullptr;
+        }
+        auto* audio = (RdtAudio*)mem_calloc(1, sizeof(RdtAudio), MEM_CAT_RENDER);
+        if (!audio) { [player release]; return nullptr; }
+        audio->player = player;
+        atomic_store(&audio->state, RDT_AUDIO_READY);
+        RdtAudioObserver* observer = [[RdtAudioObserver alloc] init];
+        observer->owner = audio;
+        audio->observer = observer;
+        player.delegate = observer;
+        return audio;
+    }
+}
+extern "C" void rdt_audio_destroy(RdtAudio* audio) {
+    if (!audio) return;
+    RdtAudioObserver* observer = (RdtAudioObserver*)audio->observer;
+    observer->owner = nullptr;
+    audio->player.delegate = nil;
+    [audio->player stop];
+    [audio->player release];
+    [observer release];
+    mem_free(audio);
+}
+extern "C" bool rdt_audio_play(RdtAudio* audio, float volume) {
+    if (!audio || !isfinite(volume) || volume < 0 || volume > 1) return false;
+    if (atomic_load(&audio->state) == RDT_AUDIO_ENDED) audio->player.currentTime = 0;
+    audio->player.volume = volume;
+    bool accepted = [audio->player play];
+    atomic_store(&audio->state, accepted ? RDT_AUDIO_PLAYING : RDT_AUDIO_ERROR);
+    return accepted;
+}
+extern "C" void rdt_audio_pause(RdtAudio* audio) {
+    if (!audio || atomic_load(&audio->state) != RDT_AUDIO_PLAYING) return;
+    [audio->player pause];
+    atomic_store(&audio->state, RDT_AUDIO_PAUSED);
+}
+extern "C" RdtAudioState rdt_audio_state(RdtAudio* audio) {
+    return audio ? (RdtAudioState)atomic_load(&audio->state) : RDT_AUDIO_ERROR;
+}
 
 static bool media_mime_token(unichar ch) {
     return (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') ||

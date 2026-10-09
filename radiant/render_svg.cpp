@@ -1,4 +1,5 @@
 #include "render.hpp"
+#include "geomap.hpp"
 #include "view.hpp"
 #include "layout.hpp"
 #include "render_effect_raster_fallback.hpp"
@@ -468,25 +469,14 @@ static bool svg_get_uniform_border_radius(BorderProp* border, float* radius) {
 static void svg_border_poly(char* buf, int buf_size, int side,
     float x, float y, float W, float H,
     float bwt, float bwr, float bwb, float bwl) {
-    switch (side) {
-        case 0: // top outer-edge TL→TR → inner-edge (TR-bwr,bwt)→(TL+bwl,bwt)
-            str_fmt(buf, buf_size, "%.2f,%.2f %.2f,%.2f %.2f,%.2f %.2f,%.2f",
-                x, y, x+W, y, x+W-bwr, y+bwt, x+bwl, y+bwt);
-            break;
-        case 1: // right
-            str_fmt(buf, buf_size, "%.2f,%.2f %.2f,%.2f %.2f,%.2f %.2f,%.2f",
-                x+W-bwr, y+bwt, x+W, y, x+W, y+H, x+W-bwr, y+H-bwb);
-            break;
-        case 2: // bottom
-            str_fmt(buf, buf_size, "%.2f,%.2f %.2f,%.2f %.2f,%.2f %.2f,%.2f",
-                x+bwl, y+H-bwb, x+W-bwr, y+H-bwb, x+W, y+H, x, y+H);
-            break;
-        case 3: // left
-            str_fmt(buf, buf_size, "%.2f,%.2f %.2f,%.2f %.2f,%.2f %.2f,%.2f",
-                x, y, x+bwl, y+bwt, x+bwl, y+H-bwb, x, y+H);
-            break;
-        default: buf[0] = '\0'; break;
+    const float widths[] = {bwt, bwr, bwb, bwl};
+    float points[8];
+    if (side < 0 || side >= 4 || !render_path_border_side_points({x, y, W, H}, side, widths[side],
+        side == 0 || side == 2 ? bwl : bwt, side == 0 || side == 2 ? bwr : bwb, points)) {
+        buf[0] = '\0'; return;
     }
+    str_fmt(buf, buf_size, "%.2f,%.2f %.2f,%.2f %.2f,%.2f %.2f,%.2f",
+        points[0], points[1], points[2], points[3], points[4], points[5], points[6], points[7]);
 }
 
 static Color svg_darken(Color c, float f) {
@@ -745,12 +735,8 @@ static void render_bound_svg(SvgRenderContext* ctx, ViewBlock* view) {
         // Compute image position within origin box
         float pos_x = ox, pos_y = oy;
         if (bg->bg_position_set) {
-            pos_x = bg->bg_position_x_is_percent
-                ? ox + (ow - img_w) * bg->bg_position_x / 100.0f
-                : ox + bg->bg_position_x;
-            pos_y = bg->bg_position_y_is_percent
-                ? oy + (oh - img_h) * bg->bg_position_y / 100.0f
-                : oy + bg->bg_position_y;
+            pos_x = ox + background_position_offset(bg, true, ow - img_w);
+            pos_y = oy + background_position_offset(bg, false, oh - img_h);
         }
 
         bool no_repeat = (bg->bg_repeat_x == CSS_VALUE_NO_REPEAT && bg->bg_repeat_y == CSS_VALUE_NO_REPEAT);
@@ -1018,6 +1004,15 @@ static void svg_cb_render_image(RenderContext* vctx, ViewBlock* block, float abs
             image_rect.width, image_rect.height, 255, nullptr);
         svg_lower_paint_list(ctx);
     }
+}
+
+static void svg_cb_render_geomap(RenderContext* vctx, ViewBlock* block, float abs_x, float abs_y) {
+    auto* ctx = (SvgRenderContext*)vctx;
+    BlockBlot parent = {};
+    parent.x = abs_x - block->x; parent.y = abs_y - block->y;
+    geomap_paint(svg_active_paint_list(ctx), block->as_element(),
+        render_geometry_block_content_rect(&parent, block, 1.0f));
+    svg_lower_paint_list(ctx);
 }
 
 static void svg_cb_render_inline_svg(RenderContext* vctx, ViewBlock* block, float abs_x, float abs_y,
@@ -1353,6 +1348,7 @@ static RenderBackend svg_make_backend(SvgRenderContext* ctx) {
     b.render_text           = svg_cb_render_text;
     b.render_image          = svg_cb_render_image;
     b.render_inline_svg     = svg_cb_render_inline_svg;
+    b.render_geomap         = svg_cb_render_geomap;
     b.render_svg_subscene   = svg_cb_render_svg_subscene;
     b.begin_block_children  = svg_cb_begin_block_children;
     b.end_block_children    = svg_cb_end_block_children;

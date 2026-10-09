@@ -402,7 +402,7 @@ build_thorvg_v1_0_pre34_for_mac() {
         # The GL engine includes GLAD which defines GL functions as global variables,
         # causing bus errors at runtime when system OpenGL tries to use them.
         if meson setup build-mac \
-            --buildtype=plain \
+            --buildtype=release \
             --default-library=static \
             -Dengines=sw \
             -Dloaders=svg,ttf,png,jpg,lottie \

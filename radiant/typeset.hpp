@@ -84,6 +84,7 @@ struct TypesetParagraph {
     void* context;
     TypesetItemMeasureFn measure; // pure width-specific metrics; source items stay immutable through retries
     float minimum_baseline;
+    bool baseline_aware; // zero is a valid producer baseline; older positive struts remain compatible
 };
 
 enum TypesetStatus : uint8_t {
@@ -190,6 +191,7 @@ struct TypesetTarget {
     TypesetSource source;
     uint32_t page_number;
     lam::Up<const TypesetRecord> value;
+    uint32_t last_page_number;
 };
 struct TypesetTargetStore {
     uint64_t provider, generation;

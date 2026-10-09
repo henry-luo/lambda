@@ -134,7 +134,20 @@ uint32_t render_pixel_destination_over_premultiplied(uint32_t destination, uint3
 
 uint32_t render_pixel_bilinear_mix(const uint8_t* p11, const uint8_t* p21,
                                   const uint8_t* p12, const uint8_t* p22,
-                                  float fx, float fy, bool round_channels) {
+                                  float fx, float fy, bool round_channels, bool premultiply_samples) {
+    if (premultiply_samples) {
+        // Interpolate alpha-weighted colors so transparent texels do not
+        // contribute invisible RGB to transformed sprite edges.
+        const uint8_t* samples[] = {p11, p21, p12, p22};
+        uint32_t premul[4];
+        for (size_t i = 0; i < 4; i++) {
+            uint32_t packed;
+            memcpy(&packed, samples[i], sizeof(packed));
+            premul[i] = render_pixel_premultiply_abgr(packed);
+        }
+        return render_pixel_bilinear_mix((uint8_t*)&premul[0], (uint8_t*)&premul[1],
+            (uint8_t*)&premul[2], (uint8_t*)&premul[3], fx, fy, round_channels, false);
+    }
     float w11 = (1.0f - fx) * (1.0f - fy);
     float w21 = fx * (1.0f - fy);
     float w12 = (1.0f - fx) * fy;
@@ -150,7 +163,7 @@ uint32_t render_pixel_bilinear_mix(const uint8_t* p11, const uint8_t* p21,
 
 uint32_t render_pixel_sample_bilinear(const uint8_t* pixels, int width, int height,
                                       int pitch, float x, float y, bool wrap,
-                                      bool round_channels) {
+                                      bool round_channels, bool premultiply_samples) {
     if (!pixels || width <= 0 || height <= 0 || pitch <= 0) return 0;
     int x1 = (int)floorf(x);
     int y1 = (int)floorf(y);
@@ -174,7 +187,7 @@ uint32_t render_pixel_sample_bilinear(const uint8_t* pixels, int width, int heig
     const uint8_t* p12 = pixels + y2 * pitch + x1 * 4;
     const uint8_t* p22 = pixels + y2 * pitch + x2 * 4;
     return render_pixel_bilinear_mix(p11, p21, p12, p22, fx, fy,
-                                     round_channels);
+                                     round_channels, premultiply_samples);
 }
 
 void render_pixel_source_over_coverage(uint8_t* destination, Color color,

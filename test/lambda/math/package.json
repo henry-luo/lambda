@@ -1,0 +1,13 @@
+{
+  "name": "lambda-math-reference-tests",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test texcmp_pixels.test.mjs",
+    "texcmp": "node run_texcmp.mjs"
+  },
+  "dependencies": {
+    "js-yaml": "4.1.1",
+    "pngjs": "7.0.0"
+  }
+}

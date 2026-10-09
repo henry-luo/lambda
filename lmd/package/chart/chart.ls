@@ -30,6 +30,10 @@ import cluster: .cluster
 import field: .field
 import indicator: .indicator
 import primitive: .primitive
+import coordinate: .coordinate
+import behavior: .behavior
+import animation: .animation
+import timeline: .timeline
 
 // ============================================================
 // Public API: render a <chart> element into an SVG element
@@ -39,31 +43,68 @@ pub fn render(chart_el, viewport = null) => render_spec(chart_el, viewport)
 
 // render from a pre-parsed spec map (no element tree needed)
 pub fn render_spec(spec, viewport = null, st = null) {
-    if (spec is element and name(spec) == 'svg') spec else render_chart(spec, viewport, st)
+    if (spec is element and name(spec) == 'svg') spec else {
+        let target = timeline.target(spec);
+        if (target is error) target else render_chart(target, viewport, st)
+    }
 }
 
-fn render_chart(spec, viewport, st) {
+// Exports and live templates use this same explicit-time sampling entry point.
+pub fn render_frame(raw, frame, viewport = null, st = null) {
+    let spec = if (raw is element) parse.parse_top(raw) else raw;
+    let elapsed = if (frame is number) frame else if (frame.time_ms != null) frame.time_ms
+        else if (frame.elapsed != null) frame.elapsed else frame.time;
+    let reduced = frame.reduced_motion == true;
+    if (not util.finite_number(elapsed) or elapsed < 0) error("chart: frame time must be finite and nonnegative")
+    else if (spec.timeline != null) {
+        let segment = timeline.segment(spec, elapsed, frame.exact == true);
+        // reduced motion freezes the terminal target instead of an intermediate keyframe.
+        if (segment is error) segment else if (reduced) render_spec(spec, viewport, st) else {
+            let source = render_chart({*:segment.source,_requires_key:segment.duration>0, _time: segment.elapsed, _timing_values: if (frame.timing_state != null) frame.timing_state.values else null}, viewport, if (frame.previous_state != null) frame.previous_state else st);
+            let target = render_chart({*:segment.target,_requires_key:segment.duration>0, _time: segment.elapsed, _timing_values: if (frame.timing_state != null) frame.timing_state.values else null}, viewport, st);
+            let image=if (source is error) source else if (target is error) target else
+                animation.sample(source,target,segment.elapsed,{duration:segment.duration,timeline:true,progress:segment.progress});
+            let duration=max([300.0,animation.duration(source),animation.duration(target)]);
+            if (image is error) image else if (frame.previous!=null and frame.interrupted==true and elapsed<duration) {
+                let visible=if (frame.previous.presentation!=null) frame.previous.presentation else frame.previous;
+                animation.sample(visible,image,elapsed,{duration:duration})
+            } else image
+        }
+    } else {
+        let previous = if (frame.previous != null) frame.previous else null;
+        let source = if (previous is element and name(previous) == 'svg') previous
+            else if (previous.presentation != null) previous.presentation
+            else if (previous != null) render_chart({*:if (previous.spec != null) previous.spec else previous, _requires_key:true, _time: elapsed, _timing_values: if (frame.timing_state != null) frame.timing_state.values else null}, viewport,
+                if (frame.previous_state != null) frame.previous_state else if (previous.state!=null) previous.state else st) else null;
+        let target = render_chart({*:spec,_requires_key:previous!=null and spec.animate!=false, _time: elapsed, _timing_values: if (frame.timing_state != null) frame.timing_state.values else null}, viewport, st);
+        if (target is error) target else if (source is error) source else if (reduced) render_spec(spec, viewport, st)
+        else animation.sample(source, target, elapsed, {duration: if (frame.duration != null) frame.duration else max([300.0, animation.duration(source), animation.duration(target)])})
+    }
+}
+
+fn render_chart(raw, viewport, st) {
+    let spec = behavior.prepare(raw,st);
     let context = sizing.viewport(viewport);
     let definitions = parameter.definitions(spec);
-    let initial = if (st != null) st else parameter.initial(definitions);
+    let initial = parameter.reconcile(definitions,st);
     let values = if (initial is error) initial else parameter.values(definitions, initial);
-    if (context is error) context else if (values is error) values else {
+    if (spec is error) spec else if (context is error) context else if (values is error) values else {
         let parsed = if (spec is element) parse.parse_top(spec) else spec;
         let prepared = composition.resolve(composition.prepare({*:parsed,
-            _parameter_state: initial, _parameter_values: values, _interactive: st != null}, prepare_mark_data));
+            _parameters: definitions, _parameter_state: initial, _parameter_values: values, _interactive: st != null}, prepare_mark_data));
         if (prepared is error) prepared else render_spec_scoped({*:prepared, _viewport: context}, "chart")
     }
 }
 
 // State belongs to this chart instance, never a module global or a closure (S9.1.4).
-pub fn model(spec, viewport = null) => <chart_view spec: spec, viewport: viewport>
-pub fn interactive(spec, viewport = null) => apply(model(spec, viewport))
+pub fn model(spec, viewport = null, options = {}) => <chart_view spec: spec, viewport: viewport, options: options>
+pub fn interactive(spec, viewport = null, options = {}) => apply(model(spec, viewport, options))
 
-view <chart_view> state interaction_state: null {
-    let definitions = parameter.definitions(~.spec);
-    let st = if (interaction_state == null) parameter.initial(definitions) else interaction_state;
-    let image = if (st is error) st else render_spec(~.spec, ~.viewport, st);
-    if (image is error) image else <div class: "lambda-chart", tabindex: "0",
+view <chart_view> state interaction_state: null, playback_state: null {
+    let definitions = parameter.definitions(behavior.prepare(~.spec,interaction_state));
+    let st = parameter.reconcile(definitions,interaction_state);
+    let image = if (st is error) st else playback_image(~, st, playback_state);
+    if (image is error) image else <div class: "lambda-chart", tabindex: "0", 'data-chart-playback': if (playback_state != null) playback_state.phase else "idle",
         image;
         events.controls(definitions, st)
     >
@@ -99,19 +140,105 @@ on input(evt)  { interaction_state = chart_event(~, interaction_state, evt) }
 on change(evt) { interaction_state = chart_event(~, interaction_state, evt) }
 on keydown(evt) { interaction_state = chart_event(~, interaction_state, evt) }
 on keyup(evt)   { interaction_state = chart_event(~, interaction_state, evt) }
+on focusin(evt) { interaction_state = chart_event(~, interaction_state, evt) }
+on focusout(evt) { interaction_state = chart_event(~, interaction_state, evt) }
 on chart_parameter(evt) {
-    let definitions = parameter.definitions(~.spec);
-    let current = if (interaction_state == null) parameter.initial(definitions) else interaction_state;
+    let definitions = parameter.definitions(behavior.prepare(~.spec,interaction_state));
+    let current = parameter.reconcile(definitions,interaction_state);
     let payload = if (evt.detail != null) evt.detail else evt;
     interaction_state = interaction.update(current, {*:payload, frame: {view: "chart", params: definitions}})
-    emit("chart_change", parameter.expression_values(parameter.values(definitions, interaction_state)))
+    if (interaction_state.values != current.values) { emit("chart_change", parameter.expression_values(parameter.values(definitions, interaction_state))) }
+}
+
+on chart_action(evt) {
+    let compiled = behavior.prepare(~.spec,interaction_state);
+    let definitions = parameter.definitions(compiled);
+    let current = parameter.reconcile(definitions,interaction_state);
+    let action = if (evt.detail != null) evt.detail else evt;
+    if (contains(["play", "pause", "resume", "seek", "reverse", "cancel"], action.command)) {
+        let previous = if (playback_state != null) playback_state else playback_initial(~, current);
+        let plan = playback_plan(~.spec, previous.duration);
+        let next = timeline.command(previous, action, evt.time_stamp, plan);
+        if (next is error) { return next }
+        playback_state = {*:next, presentation: playback_image(~, current, next)}
+        if (next.notification != null) { emit("chart_animation", {phase: next.notification, elapsed: next.elapsed, position: next.position}) }
+    } else {
+        interaction_state = interaction.update(current, {*:action, type: "chart_action",
+            frame: {view: "chart", params: definitions, behaviors: compiled._all_behaviors}})
+        if (interaction_state.values != current.values) { emit("chart_change", parameter.expression_values(parameter.values(definitions, interaction_state))) }
+        for (notice in interaction_state._notifications) { emit("chart_interaction", notice) }
+        for (notice in interaction_state._custom_notifications) { emit(notice.name, notice.detail) }
+    }
+}
+
+// A presentation commit queues this native frame event; an idle handler schedules no more work.
+on render(evt) {
+    if (evt.event_phase != 2) { return 'pass' }
+    let definitions = parameter.definitions(behavior.prepare(~.spec,interaction_state));
+    let current = parameter.reconcile(definitions,interaction_state);
+    let previous = if (playback_state == null) playback_initial(~, current) else playback_state;
+    let changed_input=previous.spec!=~.spec or previous.parameter_values!=current.values;
+    let changed=previous.spec!=~.spec or changed_input and previous.target_signature!=animation.geometry_signature(render_spec(~.spec,~.viewport,current));
+    let started = if (changed) playback_initial(~, current, previous.presentation) else previous;
+    let plan = playback_plan(~.spec, started.duration);
+    let next = if (started.phase == "playing") timeline.command(started, {command: "frame"}, evt.time_stamp, plan) else started;
+    if (next is error) { return next }
+    let newly_started = playback_state == null or changed;
+    if (newly_started or previous.phase == "playing" or changed_input) {
+        playback_state = {*:next, spec: ~.spec,parameter_values:current.values, presentation: playback_image(~, current, next)}
+        if (newly_started and next.phase == "playing") { emit("chart_animation", {phase: "start", elapsed: 0.0}) }
+        if (next.notification == "end") { emit("chart_animation", {phase: "end", elapsed: next.elapsed}) }
+    }
+    return 'handled'
+}
+fn has_animation(spec, phase = "enter") {
+    let node = if (spec is element) parse.parse_top(spec) else spec;
+    let options = animation.merge(node.animate, node.mark.animate);
+    options != false and options[phase] != null and options[phase] != false or
+        any([for (child in [*node.children, *node.layer, node.template] where child != null) has_animation(child, phase)])
+}
+fn playback_plan(raw, duration) {
+    let spec=if (raw is element) parse.parse_top(raw) else raw;
+    if (spec.timeline != null) timeline.configure(spec) else
+        {duration: duration, length: duration, repeat: 1, direction: "normal", fill: "forwards"}
+}
+fn playback_initial(model, st, previous = null) {
+    let spec=if (model.spec is element) parse.parse_top(model.spec) else model.spec;
+    let target = render_spec(model.spec, model.viewport, st);
+    let duration = max(animation.duration(target),animation.duration(previous));
+    let has_timeline = spec.timeline != null;
+    let plan = if (has_timeline) timeline.configure(model.spec) else null;
+    let running = if (has_timeline) plan.autoplay else has_animation(model.spec, if (previous != null) "update" else "enter");
+    {spec: model.spec, previous: previous, timing_state: st,parameter_values:st.values,target_signature:animation.geometry_signature(target),duration: duration, elapsed: 0.0, anchor: null,
+        phase: if (running and model.options.reduced_motion != true) "playing" else if (has_timeline) "paused" else "ended",
+        position: if (has_timeline and not running) 0.0 else null, reversed: false, generation: 0, presentation: previous}
+}
+fn playback_image(model, st, playback) {
+    let clock = if (playback != null) playback else playback_initial(model, st);
+    let spec=if (model.spec is element) parse.parse_top(model.spec) else model.spec;
+    let changed=clock.spec!=model.spec or clock.parameter_values!=st.values and
+        clock.target_signature!=animation.geometry_signature(render_spec(model.spec,model.viewport,st));
+    let frame = {time_ms: if (clock.position != null) clock.position else clock.elapsed, exact: clock.position != null,
+        previous: if (changed) clock.presentation else clock.previous, interrupted:changed or clock.previous!=null and spec.timeline!=null,
+        previous_state: clock.timing_state, timing_state: clock.timing_state, reduced_motion: model.options.reduced_motion == true};
+    if (changed and spec.timeline==null and not has_animation(spec,"update")) render_spec(model.spec,model.viewport,st)
+    else if (changed) render_frame(model.spec, {*:frame, time_ms: 0.0}, model.viewport, st)
+    else if (spec.timeline != null) render_frame(model.spec,if (clock.phase=="idle") {*:frame,previous:null,interrupted:false,time_ms:0.0} else frame,model.viewport,st)
+    else if (clock.position!=null) render_frame(model.spec,frame,model.viewport,st)
+    else if (clock.phase == "idle") if (clock.previous != null) clock.previous else render_frame(model.spec, {*:frame, time_ms: 0.0}, model.viewport, st)
+    else if (clock.phase == "ended") if (clock.reversed and clock.elapsed==0) render_frame(model.spec,frame,model.viewport,st)
+        else render_spec(model.spec,model.viewport,st)
+    else render_frame(model.spec, frame, model.viewport, st)
 }
 
 pn chart_event(model, st, evt) {
-    let definitions = parameter.definitions(model.spec);
-    let current = if (st == null) parameter.initial(definitions) else st;
-    let next = events.dispatch(current, evt, definitions);
+    let compiled = behavior.prepare(model.spec,st);
+    let definitions = parameter.definitions(compiled);
+    let current = parameter.reconcile(definitions,st);
+    let next = events.dispatch(current, evt, definitions, compiled._all_behaviors);
     if (next.values != current.values) { emit("chart_change", parameter.expression_values(parameter.values(definitions, next))) }
+    for (notice in next._notifications) { emit("chart_interaction", notice) }
+    for (notice in next._custom_notifications) { emit(notice.name, notice.detail) }
     next
 }
 
@@ -139,6 +266,7 @@ fn dispatch_prepared(resolved_spec) {
         let spec = {*:resolved_spec, _paints: paints};
         // reject invalid paints before measuring guides or laying out marks (S7.4.1).
         if (paints._error is error) paints._error
+        else if (coordinate.enabled(spec.coordinate)) render_coordinate(spec)
         else if (spec.mark and spec.mark.kind == "arc") render_arc(spec)
         else if (spec.mark and spec.mark.kind == "wordcloud") render_wordcloud(spec)
         else render_single(spec)
@@ -158,6 +286,15 @@ fn view_paints(spec) {
     let options = cfg.mark_config(theme, spec.mark);
     let context = mark_context(spec.data, spec.encoding, null, null, {}, null);
     [options.fill, options.color, options.stroke, theme.background, theme.title_color,
+        for (threshold in options.thresholds) threshold.color,
+        for (key,part in spec.mark.parts,
+            let rows=if (string(key)=="link" and spec._graph!=null) spec._graph.links else spec.data,
+            let visual=mark.part_context(context,options,string(key),rows)) (
+            part.fill,part.color,part.stroke,
+            for (row in rows) for (channel in ["color","stroke"]) mark.appearance(visual,channel,row,null),
+            for (value in visual.color_scale.range) value),
+        for (states in [spec.state,options.state,for (key,part in spec.mark.parts) part.state])
+            for (key,style in states) for (value in [style.fill,style.color,style.stroke]) value,
         for (row in spec.data) for (key in ["color", "stroke"]) mark.appearance(context, key, row,
             if (options.kind == "wordcloud" and key == "color") row.color else null),
         for (value in context.color_scale.range) value,
@@ -198,7 +335,7 @@ fn render_wordcloud(spec) {
     let lay = layout.compute_layout(spec, null, null, false, null);
     let image = if (paints._error is error) paints._error else
         cloud_marks(data, spec.encoding, cfg.mark_config(theme, spec.mark), lay.plot_w, lay.plot_h,
-            {_interactive: spec._interactive, _view_path: spec._view_path}, paints);
+            {*:behavior.context(spec), _interactive: spec._interactive, _view_path: spec._view_path}, paints);
     if (image is error) image
     else {
         let result = assemble_svg(spec, lay, interaction.decorate(image, spec, lay), null, null, null, null, theme);
@@ -291,7 +428,7 @@ fn render_single(spec) {
 
     // The same context resolves every visual encoding in single and layered views.
     let mark_ctx = {*:mark_context(data, enc, x_scale, y_scale, lay, stack_mode), _paints: paints, _theme: theme, _projection: spec.projection,
-        _interactive: spec._interactive, _view_path: spec._view_path, _graph: spec._graph};
+        *:behavior.context(spec), _interactive: spec._interactive, _view_path: spec._view_path, _graph: spec._graph};
     let marks_el = interaction.decorate(render_mark(mark_type, data, mark_ctx, mark_spec), spec, lay, x_scale, y_scale);
 
     // render axes
@@ -333,6 +470,7 @@ fn render_single(spec) {
 // ============================================================
 
 fn render_layered(spec) {
+    if (coordinate.enabled(spec.coordinate)) render_coordinate(spec) else {
     let layers = composition.leaves(spec);
     let data_error = util.first_error([for (layer in layers)
         if (layer.data is error) layer.data else mapping_error(layer)]);
@@ -359,7 +497,7 @@ fn render_layered(spec) {
             let options = cfg.mark_config(cfg.resolve_theme(layer.config), layer.mark),
             let base = mark_context(layer.data, layer.encoding, mappings[index].x, mappings[index].y, lay, layer.stack_mode),
             let context = {*:base, _paints: paints, _theme: cfg.resolve_theme(layer.config),
-                _interactive: layer._interactive, _view_path: layer._view_path, _graph: layer._graph,
+                *:behavior.context(layer), _interactive: layer._interactive, _view_path: layer._view_path, _graph: layer._graph,
                 _projection: if (layer.projection != null) layer.projection else spec.projection},
             let image = interaction.decorate(if (options.kind == "wordcloud") cloud_marks(layer.data, layer.encoding, options, lay.plot_w, lay.plot_h, context, paints)
                 else render_mark(options.kind, layer.data, context, options), layer, lay, mappings[index].x, mappings[index].y, index == 0),
@@ -383,6 +521,7 @@ fn render_layered(spec) {
             if (len(grids) > 0) svg.group_class("grids", grids) else null, leg.render_plans(guide_plans, lay), theme)
         }
         }
+    }
     }
 }
 
@@ -456,7 +595,7 @@ fn render_arc(spec) {
     // layout
     let lay = layout.compute_arc_layout(spec, has_legend, color_categories, guides);
     let arc_ctx0 = arc_context(data, enc, mark_spec, lay.plot_w, lay.plot_h, paints, lay.cx, lay.cy);
-    let arc_ctx = if (arc_ctx0 is error) arc_ctx0 else {*:arc_ctx0, _interactive: spec._interactive, _view_path: spec._view_path};
+    let arc_ctx = if (arc_ctx0 is error) arc_ctx0 else {*:arc_ctx0, *:behavior.context(spec), _interactive: spec._interactive, _view_path: spec._view_path};
     let arcs_el = if (arc_ctx is error) arc_ctx else interaction.decorate(mark.arc_mark(data, arc_ctx, mark_spec), spec,
         {*:lay, plot_x: 0.0, plot_y: 0.0, plot_w: lay.total_w, plot_h: lay.total_h});
 
@@ -525,7 +664,7 @@ fn build_stacked_y_scale(data, rlo, rhi, mode, channel = null) {
 
 // Ordering and stacking must be identical in single views and layer leaves.
 fn prepare_mark_data(spec) {
-    if (spec._mark_prepared) spec else {
+    if (spec._mark_prepared) spec else if (spec.mark.kind=="density") field.prepare(spec) else {
     let enc = spec.encoding;
     let horizontal = spec.mark.kind == "bar" and enc.x.dtype == "quantitative" and
         (enc.y.dtype == "nominal" or enc.y.dtype == "ordinal");
@@ -564,7 +703,7 @@ fn mark_context(data, encoding, x_scale, y_scale, lay, stack_mode) {
     let stroke_ch = encoding.stroke;
     let shape_ch = encoding.shape;
     let offset_field = encoding.x_offset.field;
-    {encoding: encoding, x_scale: x_scale, y_scale: y_scale,
+    {data: data, encoding: encoding, x_scale: x_scale, y_scale: y_scale,
         x_type: encoding.x.dtype, y_type: encoding.y.dtype,
         x_field: encoding.x.field, y_field: encoding.y.field,
         x2_field: encoding.x2.field, y2_field: encoding.y2.field,
@@ -653,9 +792,103 @@ fn render_mark_raw(mark_type, data, ctx, mark_spec) {
         mark.errorband_mark(data, ctx, mark_spec)
     else if (mark_type == "rect")
         mark.rect_mark(data, ctx, mark_spec)
-    else
-        // default: point
-        mark.point_mark(data, ctx, mark_spec)
+    else error("chart: unsupported mark " ++ string(mark_type))
+}
+
+// A coordinate view resolves all layers against one plot, with independent data scales.
+fn render_coordinate(spec) {
+    let layers = if (spec.layer != null) composition.leaves(spec) else [spec];
+    let sized = sizing.resolve_view(spec);
+    let paints = paint.plan([for (layer in layers) for (value in view_paints(layer)) value], spec._paint_scope);
+    let theme = {*:cfg.resolve_theme(spec.config), _paints: paints};
+    let guides = layer_guide_plans(layers, paints);
+    let failure=util.first_error([sized,paints._error]);
+    if (failure is error) failure else fit_coordinate(sized,layers,theme,paints,guides)
+}
+fn fit_coordinate(spec,layers,theme,paints,guides,reserved={left:0.0,right:0.0,top:0.0,bottom:0.0}) {
+    let lay=layout.compute_layout(spec,null,null,false,null,guides);
+    let model=coordinate.configure(spec.coordinate,lay.plot_w,lay.plot_h);
+    let images=[for (layer in layers) coordinate_layer(layer,model,lay,theme,paints)];
+    let image=svg.group_class("coordinate-layers",images);
+    let bounds=text.svg_bounds(image,text.style({font_family:theme.font}));
+    let failure=util.first_error([lay._error,model,*images,bounds]);
+    let overflow={left:max([0.0,for (row in bounds) -row.left-reserved.left]),right:max([0.0,for (row in bounds) row.right-lay.plot_w-reserved.right]),
+        top:max([0.0,for (row in bounds) -row.top-reserved.top]),bottom:max([0.0,for (row in bounds) row.bottom-lay.plot_h-reserved.bottom])};
+    if (failure is error) failure else if (max([for (key,value in overflow) value])>0.25)
+        fit_coordinate({*:spec,padding:map([for (key,value in spec.padding) for (part in [string(key),value+overflow[string(key)]]) part])},
+            layers,theme,paints,guides,map([for (key,value in reserved) for (part in [string(key),value+overflow[string(key)]]) part]))
+    // guide overflow grows plot margins without moving the title from its authored padding.
+    else assemble_svg(spec,{*:lay,title_y:lay.title_y-reserved.top},image,null,null,null,leg.render_plans(guides,lay),theme)
+}
+
+fn coordinate_layer(spec, model, lay, theme, paints) {
+    let enc = spec.encoding;
+    let direct = enc.theta != null or enc.radius != null;
+    let encoding = if (direct) {*:enc, x: enc.theta, x2: enc.theta2, y: enc.radius, y2: enc.radius2} else enc;
+    let options = cfg.mark_config(theme, spec.mark);
+    let x = coordinate.channel(encoding.x, lay.plot_w);
+    let y = coordinate.channel(encoding.y, lay.plot_h, true);
+    let xs = scale.position_scale(x, spec.data, 0.0, lay.plot_w, options.kind, true, encoding.x2);
+    let ys = scale.position_scale(y, spec.data, lay.plot_h, 0.0, options.kind, false, encoding.y2);
+    let spatial = {*:model, direct_polar: direct};
+    let axes = if (contains(["parallel", "radar"], model.type) and (enc.position != null or model.type == "parallel"))
+        coordinate.vector_axes(spec.data, if (enc.position != null) enc.position else options.fields, spatial) else null;
+    let context = {*:mark_context(spec.data, encoding, xs, ys, lay, spec.stack_mode), _paints: paints, _theme: theme,
+        *:behavior.context(spec), _interactive: spec._interactive, _view_path: spec._view_path, _graph: spec._graph,
+        _projection: if (spec.projection != null) spec.projection else model.projection, _coordinate: spatial};
+    let invalid = util.first_error([coordinate.compatible(options.kind, model), xs, ys,
+        if (direct and (enc.x != null or enc.y != null)) error("chart: coordinate positions use x/y or theta/radius, not both")]);
+    if (invalid is error) invalid else {
+        let image = if (model.type == "parallel") coordinate.vector_marks(spec.data, {*:context, encoding: {*:encoding,
+            position: if (enc.position != null) enc.position else options.fields}}, options, spatial)
+            else if (model.type == "radar" and enc.position != null) coordinate.vector_marks(spec.data, context, options, spatial)
+            else if (model.type == "radar" and enc.theta != null) specialized.radar(spec.data, context, options)
+            else if (model.type=="geo" and options.kind=="vector") geo.vectors(spec.data,context,options)
+            else if (options.kind == "arc") coordinate_arcs(spec.data, context, options, spatial)
+            else if (options.kind == "wordcloud") cloud_marks(spec.data, encoding, options, lay.plot_w, lay.plot_h, context, paints)
+            else render_mark(options.kind, spec.data, context, {*:options,clip:false});
+        let projected = if (image is error) image else if (contains(["parallel", "radar", "geo"], model.type) or
+            options.kind == "arc" or (options.kind == "path" and options.space != "coordinate")) image
+            else coordinate.warp(image, spatial);
+        let notes = if (spec.annotation == null) null else ann.render_plan(ann.prepare(spec.annotation, xs, ys,
+            lay.plot_w, lay.plot_h, theme, spec.clip));
+        let projected_notes = if (notes == null or notes is error) notes else coordinate.warp(notes, spatial);
+        let guides=if (not contains(["parallel","radar","geo"],model.type)) coordinate.guides(spatial,encoding,xs,ys,theme) else null;
+        let failure = util.first_error([projected, projected_notes,guides]);
+        if (failure is error) failure else svg.group_class("coordinate-view", [guides,
+            interaction.decorate(if (spec.clip or options.clip or theme.view_clip) coordinate.clip(projected, spatial, spec._paint_scope) else projected, {*:spec, encoding: encoding, _coordinate: spatial, _axis_models: axes}, lay, xs, ys), projected_notes])
+    }
+}
+
+fn coordinate_arcs(data, ctx, options, model) {
+    let weights = [for (row in data) parse.channel_value(ctx.encoding.theta, row)];
+    let ranged = ctx.encoding.theta2 != null;
+    let total = if (all(weights |> util.finite_number(~))) sum(weights) else null;
+    let radii = scale.radius_scale(ctx.encoding.radius, data, model.inner_radius, model.outer_radius, ctx.encoding.radius2);
+    let angles = scale.angular_scale(ctx.encoding.theta, data, ctx.encoding.theta2);
+    let half=min(model.width,model.height)/2.0;
+    let gap=if (options.pad_angle!=null) options.pad_angle/abs(model.end_angle-model.start_angle) else 0.0;
+    let invalid = util.first_error([radii, angles,
+        if (not util.finite_number(gap) or gap<0) error("chart: arc padding must be finite and nonnegative"),
+        if (not ranged and (not util.finite_number(total) or any(weights |> ~ < 0))) error("chart: pie weights must be finite and nonnegative")]);
+    if (invalid is error) invalid else svg.group_class("marks arcs", [for (i, row in data where ranged or (total > 0 and weights[i] > 0),
+        let divisor=if (ctx.encoding.theta.scale.range!=null and parse.option_enabled(ctx.encoding.theta,"scale")) 1.0 else util.TAU,
+        let first = if (ranged) scale.scale_apply(angles, parse.channel_value(ctx.encoding.theta, row)) / divisor else sum(slice(weights, 0, i)) / total,
+        let end_fraction = if (ranged) scale.scale_apply(angles, parse.channel_value(ctx.encoding.theta2, row)) / divisor else first + weights[i] / total,
+        let a=first+min(gap,end_fraction-first)/2.0,let b=end_fraction-min(gap,end_fraction-first)/2.0,
+        let radial_divisor=if (parse.option_enabled(ctx.encoding.radius,"scale")) 1.0 else half,
+        let inner = if (ctx.encoding.radius2 != null) scale.scale_apply(radii, parse.channel_value(ctx.encoding.radius2, row))/radial_divisor
+            else if (options.inner_radius!=null) options.inner_radius/half else model.inner_radius,
+        let outer = if (ctx.encoding.radius != null) scale.scale_apply(radii, parse.channel_value(ctx.encoding.radius, row))/radial_divisor
+            else if (options.outer_radius!=null) options.outer_radius/half else model.outer_radius,
+        let neutral = {*:model, inner_radius: 0.0, outer_radius: 1.0, direct_polar: true},
+        let points = coordinate.line(neutral, [[a * model.width, (1.0 - inner) * model.height],
+            [a * model.width, (1.0 - outer) * model.height], [b * model.width, (1.0 - outer) * model.height],
+            [b * model.width, (1.0 - inner) * model.height]], true))
+        if (not all([first,end_fraction,inner,outer] |> util.finite_number(~)) or first>end_fraction or inner<0 or inner>outer)
+            error("chart: arc requires increasing finite angles and nonnegative ordered radii")
+        else if (points is error) points else <path d: svg.line_path(points) ++ " Z",
+            *:mark.style(ctx, row, options, {fill: color.category10[i % 10], opacity: 1.0, stroke: "white", 'stroke-width': 1}), mark.tooltip(ctx, row)>])
 }
 
 // ============================================================
@@ -673,7 +906,7 @@ fn assemble_svg(spec, lay, marks_el, x_axis_el, y_axis_el, grid_el, legend_el, t
     let bg = <rect width: width, height: height, fill: paint.value(theme.background, theme._paints)>;
 
     // plot group contents
-    let plot_children0 = [if (spec.clip or theme.view_clip) clip_marks(marks_el, lay.plot_w, lay.plot_h) else marks_el];
+    let plot_children0 = [if ((spec.clip or theme.view_clip) and not coordinate.enabled(spec.coordinate)) clip_marks(marks_el, lay.plot_w, lay.plot_h) else marks_el];
     let plot_children1 = if (grid_el) [grid_el, *plot_children0] else plot_children0;
     let plot_children2 = if (x_axis_el) [*plot_children1, x_axis_el] else plot_children1;
     let plot_children = if (y_axis_el) [*plot_children2, y_axis_el] else plot_children2;

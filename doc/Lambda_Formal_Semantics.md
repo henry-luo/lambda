@@ -1,6 +1,6 @@
 # Lambda Formal Semantics — Specification
 
-**Spec version:** 59.0.1 (2026-10-08)
+**Spec version:** 60.0.1 (2026-10-09)
 
 **Status:** normative — the single source of truth for Lambda language semantics.
 This document records what Lambda's semantics **is by decision**, not what any
@@ -1340,7 +1340,7 @@ Not a ruling; see [C4.2e](../vibe/Lambda_Semantics_Formal.md) and
 
 ### S10.1 Union, pipe, and filter
 
-- **S10.1.1v3*** **`|`, `&` and `!` are the type operators, and only that — everywhere**: type expressions, match or-patterns, string patterns and value expressions alike (types are first-class); `|>` is the pipe. Inside a string pattern (S11.1.2v3) `|` is the only binary operator, as alternation, and `!` is prefix-only and complements a set of single characters. Intersecting or excluding patterns is `&` or `!` between whole patterns, `\(A) & \(B)` or `\(A) ! \(B)`. In a value expression a type operand is itself and any other operand reads as its literal type — a scalar as the singleton of its value, a container as the pattern its literal spells in type position (a range as its range type, S11.1.3) — and the result is always a type: `1 | 2` is the type admitting 1 or 2 (an enum), `1 | 1` is a type too, `int | null` is `int?`, and `1 & 2` is the **empty type** `none` (S11.1.7), which admits nothing — distinct from the null type, which admits `null`. A type operation never collapses to a value, so its result has the same meaning wherever it is written: `type t = 1 & 2`, `let v: 1 & 2` and `let x = 1 & 2` denote the same type, and so do `type T = [1, 2] | 3` and `let t = [1, 2] | 3`. Set algebra on containers is not an operator: it is the functions `unique(a, b, ...)` (≡ `unique(a ++ b ++ ...)`), `intersect(a, b, ...)` (the first operand's items held by every other) and `except(a, b)` (its items not held by the second), in first-operand order without duplicates, membership by `in` (S8.1.1), returning an array (S2.5.7v4) — text keeps its kind (S2.5.8). *Why: union is the concept Lambda needs everywhere; letting a container turn `|` into a merge made one operator mean "either" or "both" by operand kind, which C6 ruled out.* [C6, C6.4; SP17, SP18, SP20]
+- **S10.1.1v3*** **`|`, `&` and `!` are the type operators, and only that — everywhere**: type expressions, match or-patterns, string patterns and value expressions alike (types are first-class); `|>` is the pipe. Inside a string or symbol pattern (S11.1.2v4) `|` is the only binary operator, as alternation, and `!` is prefix-only and complements a set of single characters. Intersecting or excluding patterns is `&` or `!` between whole patterns, `\(A) & \(B)` or `\(A) ! \(B)`. In a value expression a type operand is itself and any other operand reads as its literal type — a scalar as the singleton of its value, a container as the pattern its literal spells in type position (a range as its range type, S11.1.3) — and the result is always a type: `1 | 2` is the type admitting 1 or 2 (an enum), `1 | 1` is a type too, `int | null` is `int?`, and `1 & 2` is the **empty type** `none` (S11.1.7), which admits nothing — distinct from the null type, which admits `null`. A type operation never collapses to a value, so its result has the same meaning wherever it is written: `type t = 1 & 2`, `let v: 1 & 2` and `let x = 1 & 2` denote the same type, and so do `type T = [1, 2] | 3` and `let t = [1, 2] | 3`. Set algebra on containers is not an operator: it is the functions `unique(a, b, ...)` (≡ `unique(a ++ b ++ ...)`), `intersect(a, b, ...)` (the first operand's items held by every other) and `except(a, b)` (its items not held by the second), in first-operand order without duplicates, membership by `in` (S8.1.1), returning an array (S2.5.7v4) — text keeps its kind (S2.5.8). *Why: union is the concept Lambda needs everywhere; letting a container turn `|` into a merge made one operator mean "either" or "both" by operand kind, which C6 ruled out.* [C6, C6.4; SP17, SP18, SP20]
 - **S10.1.2v4** The pipe is dual-mode on a parse-time syntactic test: a body
   with a **free `~`** is a mapping pipe (binds `~` per item; `~#` is the
   current key/index); with no free `~` it is whole-value application
@@ -1531,38 +1531,41 @@ Not a ruling; see [C4.2e](../vibe/Lambda_Semantics_Formal.md) and
   leaf array; `int[2][3]` is three arrays of two). Counts on a *run* are the
   occurrence family (S11.1.6v2): a counted array is spelled `[T{n,m}]`, never
   `T[n,m]`. A lint applies to bare `[T]` in annotation position only. [C7]
-- **S11.1.2v3** String structural patterns are delimited islands: `\( ... )`
-  denotes a string-domain pattern and `\symbol( ... )` denotes a
-  symbol-domain pattern. Inside an island, quoted literals are strings, `d`,
-  `w`, `s`, `a`, `.`, and `...` are the reserved pattern atoms, whitespace is
-  concatenation, and the existing union, grouping, occurrence (`? + *
-  {n,m}`, S11.1.6v3), and `to` rules apply. **An island binds, tightest
-  first: an atom (a range `"a" to "z"` is one atom), then prefix `!`, then a
-  suffix, then concatenation, then `|`**, so `\(!d+)` is `(!d)+`,
-  `\("a" "b"+)` repeats only the `"b"`, and `\("a" | "b" "c")` matches `a`
-  or `bc`. **`|` is the island's only binary operator.** **Prefix `!`
-  complements a single-character set** and matches one character outside it.
-  The set may be a class, a range, a one-character string, or a union, group,
-  negation or named pattern built only from these, so `\(!("a" | "b" | "c"))`
-  is regex `[^abc]`. Any other operand is a compile error. **Inside an island
-  `!` has no binary form and `&` has none at all**: `\(w ! d)` is a word
-  character followed by a non-digit, and `\(a & w)` is a compile error. To
-  intersect or exclude whole patterns, use the type operators between them,
-  as in `\(A) & \(B)`, `\(A) ! \(B)` or `!\(P)` (S10.1.1v3). A pattern's tag
-  is part of its type value: matching checks the value domain before content,
-  so a string never satisfies a symbol pattern or vice versa. A literal-only
-  island is representationally identical to the corresponding ordinary
-  literal union; named structural patterns may be reused as content inside
-  either tagged domain. *Why: the tiers are regular expressions' own wherever
-  the two share one, and prefix-before-suffix gives `!d+` the reading of regex
-  `[^0-9]+`, the only one the single-character rule leaves legal. `!` stops at
-  one character and `&` stays outside the island because regex engines negate
-  only single characters (`[^…]`) and cannot intersect: complementing or
-  intersecting longer patterns needs a deterministic automaton or a matcher
-  of Lambda's own. A binary `!` would also collide with concatenation, since
-  whitespace joins atoms. Between whole patterns, `&` and `!` combine two full
-  matches and need no regex support.* [S10.1.1v3, D3.1.1v2, D3.1.2;
-  SP17–SP20]
+- **S11.1.2v4** **String and symbol structural patterns share the delimiter
+  `\( ... )`; quotes and named patterns determine one domain per island.**
+  Double quotes select strings, single quotes select symbols; named patterns
+  preserve their domain. Conflicting domains are a compile error, even across
+  alternatives; a mixed-domain union is written between whole islands.
+  `\symbol(...)` is retired. **Only inside an island**, quoted `\d`, `\w`,
+  `\s`, `\a` denote the digit, word, whitespace and alphabetic classes;
+  ordinary escapes retain their literal meaning, and `\\d` is literal
+  backslash-plus-d. Bare `d`, `w`, `s`, `a` are ordinary pattern references.
+  Operators stay outside quotes: `"\d+"` is a digit then a literal plus;
+  `"\d"+` repeats a digit. One quoted fragment is one repetition operand,
+  so `\("a\s"*)` repeats the whole letter-plus-whitespace fragment.
+  Bare `.` and `...` inherit the island's domain. **An island with no
+  domain-bearing literal or named pattern is a compile error**: `\(.)`,
+  `\(...)` and grouped or repeated wildcard-only variants are rejected,
+  never defaulted to strings or made dual-domain. `"."` and `"..."` remain
+  literal punctuation. Matching checks the domain before content.
+  Whitespace concatenates within one text value; occurrence outside the
+  island still counts separate values (S11.1.6v3). **Binding order, tightest
+  first: atom (a range is one), prefix `!`, suffix, concatenation, `|`.**
+  Grouping, `to` and the occurrence spellings `? + * {n} {n+} {n,m}` remain;
+  `\(!"\d"+)` is `(!"\d")+`, and `\("a" | "b" "c")` matches a or bc.
+  **`|` is the only binary operator inside an island. Prefix `!` complements
+  a single-character set in that island's domain.** Its operand is a class,
+  range, one-character literal, or a union, group, negation or named pattern
+  built only from these; any other operand is a compile error.
+  `\("\w" !"\d")` is a word character followed by a non-digit. Binary `!`
+  and `&` remain outside islands, combining whole-pattern full matches:
+  `\(A) ! \(B)`, `\(A) & \(B)`, `!\(P)` (S10.1.1v3).
+  A literal-only island is representationally identical to its same-domain
+  ordinary literal union. There is no implicit cross-domain reuse of named
+  patterns. *Why: the delimiter distinguishes text repetition from value
+  runs; quotes make string and symbol syntax symmetric without changing
+  literal letters into classes or guessing a wildcard-only domain.*
+  [S10.1.1v3, S11.1.6v3, D3.1.1v4, D3.1.2; SP17–SP20, SP24]
 - **S11.1.3** A range type `X to Y` denotes inclusive membership in the
   consecutive values between its bounds. Integer ranges admit exact integer
   values; string ranges require single Unicode-codepoint strings and admit
@@ -2621,7 +2624,7 @@ governs how an under-determined case here is resolved.
   precomposed `é` and `e` with a combining accent stay different. *Why: it is
   the folding regex engines implement; full folding (`ß` ↔ `ss`) changes
   lengths, which no regex engine supports and which would leave a match's
-  span undefined.* [S17.4.1, S11.1.2v3; SP22]
+  span undefined.* [S17.4.1, S11.1.2v4; SP22]
 - **S17.7.2** **`lower` and `upper` map by Unicode full case mapping**, the
   same in every locale, as ECMAScript's `toLowerCase` and `toUpperCase` do. A
   mapping may change the length (`upper("straße")` is `"STRASSE"`,
@@ -2658,6 +2661,7 @@ Status of `*`-marked rulings as of 2026-08-24. Conformance plans:
 
 | Ruling | Status |
 |---|---|
+| S11.1.2v4 | **Implemented 2026-10-09 on interp, jit and auto.** The production lexer recognizes quoted class escapes only inside the shared island; the type-pattern resolver checks every quoted fragment and resolved reference for one consistent domain, rejecting mixed and wildcard-only islands. Literal-only string and symbol islands retain ordinary literal-union identity. Lowering and canonical printing preserve quotes and domains, including named symbol literal unions; string search refuses symbol-domain operands. The reference grammar and executable corpus use the new surface. Fixtures `pattern_quoted_classes.ls` and `negative/semantic/pattern_*.ls` cover fragment repetition, one-pass ordinary escapes, references, ranges, complement, wildcards, contracts and value-run separation. Syntax gates: C 411/411, Tree-sitter 397/397. Design and validation: [String Pattern SP24](../vibe/Lambda_Design_String_Pattern.md#4-implementation-and-validation). |
 | S2.4.1v2, S2.4.2v5, S2.4.3v3–S2.4.4, S2.4.5v2, S10.4.1–S10.4.3, S10.5.1–S10.5.3 | Implemented for the current path/name scope on 2026-08-19, with the S2.4.3v3 spelling re-verified on 2026-08-28: maximal namespace-qualified element/attribute names, the undelimited relative-path element child `<svg \.rect>` (no `;`, no comma), logical `/.a`, relative `\.a`, absolute `file./.a`/`file.host.a`/`http.host.a`, root `./`, parent `.~~`, contextual `~~`, typed key operations, and interpreter/MIR Direct occurrence carriers. **S2.4.2v5 conformant as of 2026-09-21** (JIT and interpreter identical): the bare roots `/` and `\`, and `\` prints as the empty relative path; integer first keys `\.1` and `/.1`; index steps (`/[1]` ≡ `/.1`, `\[1]` ≡ `\.1`, `p[k]` ≡ `p.k`, numeric keys normalized through S8.2.1v4); key steps throughout a path literal (`\[1].name` is `\.1.name`, `\.a['name']` is `\.a.name`); integer steps after `.`, `\`, `./`, `~~` and `.*` (`\.1.2`, `file./.1`). `\.` alone and `.[` anywhere are E100. Broken path lines were checked against S16.1.1. That day's probe defect, `\.1.x` evaluating to `file./`, is fixed ([Type_Path §10.1](../vibe/Lambda_Type_Path.md)). Fixtures: `path_roots_steps.ls`, `path_line_continuation.ls`, `path_index_capture.ls`, `member_int_steps.ls`, `proc/return_relative_path.ls`, and four negative syntax fixtures. S16 harnesses: C parser 197/197, reference grammar 180/180. Lambda baseline 3632/3633; the one failure is an unrelated JS trace-parser test. Still deferred: the default resolver qualifies logical roots to local `file./`, and generalized immutable mount tables, remote transport, network hostname discovery, and S8.2.1v4 key normalization outside path subscripts are not built. |
 | S4.8.1 | Float printer is not yet shortest-round-trip (`0.1 + 0.2` prints `0.3`). |
 | S5.3.1 | `ArrayNum ==` is representation-sensitive in known cases — ruled a bug; also gates the data-processing engines (P0/FC8). |
@@ -2818,7 +2822,7 @@ findings B1–B13 cited as `[B#]`, and from the `OI-#` ledger in
 - **SO32** Match extensions: pipe-context shorthand, string-pattern capture binding in arms, range patterns.
 - **SO33** A10 residue: the aspirational generics text, `as` assertion semantics, and open-vs-closed map matching in assignment position — document or delete.
 - **SO34** `emit()` vs `send()` — two event vocabularies coexist; state the boundary explicitly.
-- **SO47** Whether an empty literal needle matches at every code-point boundary. `replace("abc", "", "-")` is `"abc"` and `find("abc", "")` is `[]`, and `\("")` is the same value (SP7), where ECMAScript and Python give `"-a-b-c-"`, `split("abc", "")` already splits at every boundary (S17.1.1), and an empty-matching pattern such as `\(d*)` already replaces there (S17.6.1). [SP21; [Lambda_Expr_String_Pattern.md SPO14](../vibe/Lambda_Expr_String_Pattern.md#8-open-questions-spo7spo14)]
+- **SO47** Whether an empty literal needle matches at every code-point boundary. `replace("abc", "", "-")` is `"abc"` and `find("abc", "")` is `[]`, and `\("")` is the same value (SP7), where ECMAScript and Python give `"-a-b-c-"`, `split("abc", "")` already splits at every boundary (S17.1.1), and an empty-matching pattern such as `\("\d"*)` already replaces there (S17.6.1). [SP21; [Lambda_Expr_String_Pattern.md SPO14](../vibe/Lambda_Expr_String_Pattern.md#8-open-questions-spo7spo14)]
 
 **Surface syntax**
 - **SO35** A dedicated formal syntax document: S16 parks the surface-syntax rulings here because syntax and semantics are argued together, and one source beats two. If the grammar surface outgrows a section, extract S16 into a formal syntax spec and leave pointers — not a second, competing statement. [Design_Syntax]

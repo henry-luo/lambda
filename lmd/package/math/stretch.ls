@@ -9,6 +9,14 @@ fn expanded(parts, repeats) => [
 fn overlaps(parts) => [for (i in 1 to (len(parts) - 1))
     min(parts[i - 1].end_connector, parts[i].start_connector)]
 
+// TeX accents use the largest designed variant that fits over the nucleus.
+pub fn accent(g, target, scale) map | error {
+    let variants = [for (v in g.horizontal.variants where v.extent * scale <= target) v];
+    if (len(variants) > 0) bx.glyph(variants[len(variants) - 1], scale)
+    else if (len(g.horizontal.variants) > 0) bx.glyph(g, scale)
+    else glyph(g, target, false, scale, "mord")^
+}
+
 fn recipe(construction, target, repeats) map | error {
     let parts = expanded(construction.parts, repeats)
     let joins = overlaps(parts)

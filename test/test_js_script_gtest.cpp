@@ -9,6 +9,10 @@
 #include "../lambda/js/js_interp.hpp"
 #include "../lambda/js/js_function.hpp"
 #include "../lambda/js/js_property_attrs.h"
+#include "../lambda/js/js_object_meta.h"
+#include "../lambda/input/input.hpp"
+#include "../lambda/io/mark_builder.hpp"
+#include "../lib/mem_factory.h"
 #include "../lambda/js/js_runtime.h"
 #include "../lambda/js/js_runtime_state.hpp"
 #include "../lambda/js/js_event_loop.h"
@@ -148,6 +152,47 @@ TEST(JsDomEvents, NativeFocusConstructionRetainsUncachedRelatedTarget) {
             EXPECT_EQ(js_get_name_key(event.get(), "isTrusted").item, b2it(true));
         }
         gc_set_force_collect_interval(gc, 0);
+    }
+    runtime_cleanup(&runtime);
+}
+
+TEST(JsObjectMetadata, LambdaInputShapesRemainNeutralAfterJsBootstrap) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+    const char source[] =
+        "var parsed = JSON.parse('{\"empty\":{},\"point\":{\"x\":1,\"y\":2}}');"
+        "Object.getPrototypeOf(parsed) === Object.prototype && "
+        "Object.getPrototypeOf(parsed.empty) === Object.prototype && "
+        "Object.getPrototypeOf(parsed.point) === Object.prototype;";
+    Item warmup = js_interp_execute_source(&runtime, source, sizeof(source) - 1,
+        "separate-shape-roots.js", NULL);
+    EXPECT_EQ(warmup.item, b2it(true));
+    EXPECT_EQ(EmptyMap.js_meta, nullptr);
+    if (!item_is_error(warmup)) {
+        RootFrame roots(1);
+        Rooted<Item> object(roots, js_new_object());
+        EXPECT_TRUE(js_object_has_class(object.get(), JS_CLASS_OBJECT));
+        Pool* pool = mem_pool_create(NULL, MEM_ROLE_INPUT, "test.js.neutral.input");
+        Input* input = pool ? Input::create(pool) : nullptr;
+        EXPECT_NE(input, nullptr);
+        if (input) {
+            MarkBuilder builder(input);
+            Item empty = builder.map().final();
+            Item point = builder.map().put("x", (int64_t)1)
+                .put("y", (int64_t)2).final();
+            EXPECT_EQ(((TypeMap*)empty.map->type)->js_meta, nullptr);
+            TypeMap* parent = (TypeMap*)point.map->type;
+            EXPECT_EQ(parent->js_meta, nullptr);
+            // Loading Lambda data after JS bootstrap must still take the
+            // bounded contract edge, rather than clone every call (D3.4.7).
+            Input* tree = runtime_shape_tree();
+            ShapeEntry* x = typemap_first_field(parent);
+            TypeMap* number = type_tree_retype_contract(tree, parent, x, &TYPE_NUMBER);
+            EXPECT_NE(number, nullptr);
+            EXPECT_EQ(type_tree_retype_contract(tree, parent, x, &TYPE_NUMBER), number);
+            if (number) EXPECT_EQ(number->js_meta, nullptr);
+        }
+        if (pool) mem_pool_destroy(pool);
     }
     runtime_cleanup(&runtime);
 }

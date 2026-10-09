@@ -5,9 +5,10 @@
 //   ./lambda.exe      test/lambda/chart/chart_dashboard.ls     # print HTML to stdout
 //
 // The dashboard layout and all chart specs are defined in dashboard_data.json
-// (Vega-Lite compatible JSON, including Lambda's specialized mark extensions).
+// (Vega-Lite JSON or entries with native: true and a Lambda spec map).
 // The showcase includes statistical, radial, hierarchical, geographic and
-// wordcloud charts. Each chart entry may contain:
+// wordcloud charts, flow/network families, coordinates and explicit animation samples.
+// Each chart entry may contain:
 //   label   — title text shown above the card in the HTML page
 //   title   — chart title rendered inside the SVG
 //   width / height — SVG dimensions
@@ -23,8 +24,9 @@ let dashboard = input(dashboard_file)^
 
 // ── Render one chart entry to an inline SVG string ─────────────────────────
 fn render_svg(c) {
-    let spec = vega.convert(c)
-    let svg  = chart.render_spec(spec)
+    let spec = if (c.native == true) c.spec else vega.convert(c)
+    let svg = if (c.sample_time != null) chart.render_frame(spec,{time_ms:c.sample_time,previous:c.previous})
+        else chart.render_spec(spec)
     format(svg, 'xml')
 }
 

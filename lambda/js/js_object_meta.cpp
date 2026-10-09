@@ -146,7 +146,6 @@ static const JsClassMeta js_promise_vmap_meta = {
 };
 
 extern "C" TypeMap* js_error_carrier_type_map(void) {
-    js_object_metadata_initialize();
     if (!js_error_carrier_type.js_meta) {
         js_error_carrier_type.type_id = LMD_TYPE_MAP;
         js_error_carrier_type.js_meta = js_class_meta_for_id(JS_CLASS_ERROR);
@@ -159,12 +158,6 @@ const JsClassMeta* js_class_meta_for_id(JsClassId id) {
     return &js_class_meta_table[id];
 }
 
-void js_object_metadata_initialize(void) {
-    // EmptyMap is the shared zero-shape blueprint used by JS allocation and
-    // the explicit Input boundary. Giving it ordinary metadata makes a newly
-    // published object classifiable without changing map_put's shape sentinel.
-    if (!EmptyMap.js_meta) EmptyMap.js_meta = js_class_meta_for_id(JS_CLASS_OBJECT);
-}
 
 JsClassId js_class_id_from_meta(const JsClassMeta* meta) {
     return meta ? meta->id : JS_CLASS_NONE;

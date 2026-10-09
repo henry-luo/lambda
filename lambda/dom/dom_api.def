@@ -748,6 +748,22 @@ DOM_OP(CORE, remove_named_attribute, attr, 4, "pn(n: any, namespace: any, name: 
 DOM_OP(CORE, get_data, attr, 2, "fn(n: any, name: string) -> any", dom_core_get_data, DOM_F_NEUTRAL, "", none, "", "")
 DOM_RAW(window_is_closed, window, bool, (void* ui_context), dom_engine_window_is_closed, DOM_F_NATIVE)
 
+// Byte-backed audio appends to the engine seam; resource acquisition stays in lambda-io.
+DOM_OP(CORE, audio_open, media, 2, "pn(n: any, data: binary) -> int|null", dom_engine_audio_open, DOM_F_ENGINE | DOM_F_NEUTRAL | DOM_F_MUTATES, "", none, "", "")
+DOM_OP(CORE, audio_play, media, 3, "pn(n: any, token: int, volume: float) -> bool", dom_engine_audio_play, DOM_F_ENGINE | DOM_F_NEUTRAL | DOM_F_MUTATES, "", none, "", "")
+DOM_OP(CORE, audio_pause, media, 2, "pn(n: any, token: int) -> bool", dom_engine_audio_pause, DOM_F_ENGINE | DOM_F_NEUTRAL | DOM_F_MUTATES, "", none, "", "")
+DOM_OP(CORE, audio_close, media, 2, "pn(n: any, token: int) -> bool", dom_engine_audio_close, DOM_F_ENGINE | DOM_F_NEUTRAL | DOM_F_MUTATES, "", none, "", "")
+DOM_OP(CORE, audio_state, media, 2, "fn(n: any, token: int) -> string|null", dom_engine_audio_state, DOM_F_ENGINE | DOM_F_NEUTRAL, "", none, "", "")
+
+DOM_OP(CORE, set_pointer_capture, input, 2, "pn(n: any, pointer_id: int) -> bool", dom_core_set_pointer_capture, DOM_F_NEUTRAL | DOM_F_MUTATES, "", none, "", "")
+DOM_OP(CORE, release_pointer_capture, input, 2, "pn(n: any, pointer_id: int) -> bool", dom_core_release_pointer_capture, DOM_F_NEUTRAL | DOM_F_MUTATES, "", none, "", "")
+DOM_OP(CORE, has_pointer_capture, input, 2, "fn(n: any, pointer_id: int) -> bool", dom_core_has_pointer_capture, DOM_F_NEUTRAL, "", none, "", "")
+DOM_OP(CORE, set_relative_mouse, input, 2, "pn(n: any, enabled: bool) -> bool", dom_engine_set_relative_mouse, DOM_F_ENGINE | DOM_F_NEUTRAL | DOM_F_MUTATES, "", none, "", "")
+DOM_OP(CORE, relative_mouse_active, input, 1, "fn(n: any) -> bool", dom_engine_relative_mouse_active, DOM_F_ENGINE | DOM_F_NEUTRAL, "", none, "", "")
+
+// append the shared select value reader without changing published catalog slots.
+DOM_RAW(select_value_bridge, select, Item, (void* elem), dom_select_value_bridge, DOM_F_NATIVE)
+
 #ifdef DOM_API_DEF_CLEAR_OP
 #undef DOM_OP
 #undef DOM_API_DEF_CLEAR_OP

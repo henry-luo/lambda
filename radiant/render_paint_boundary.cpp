@@ -74,6 +74,10 @@ static bool boundary_border_simple(const BorderProp* border) {
                                          border->colors[i])) return false;
     }
 
+    return true;
+}
+
+static bool boundary_border_uniform_color(const BorderProp* border) {
     bool have_color = false;
     Color color = {};
     for (int i = 0; i < 4; i++) {
@@ -109,6 +113,8 @@ static void boundary_emit_border_side(PaintList* paint_list, float x, float y,
 bool render_paint_boundary_emit_simple(PaintList* paint_list, ViewBlock* view,
                                        float x, float y) {
     if (!paint_list || !view || !view->bound) return false;
+    // continuous SVG/PDF retain their direct per-side painter beyond the uniform-color fast path.
+    if (view->bound->border && !boundary_border_uniform_color(view->bound->border)) return false;
     return render_paint_boundary_emit_box(paint_list, view->bound, {x, y, view->width, view->height});
 }
 
@@ -176,10 +182,23 @@ bool render_paint_boundary_emit_box(PaintList* paint_list, BoundaryProp* bound, 
     const float side_y[4] = {y, y, y + height - widths[2], y};
     const float side_w[4] = {width, widths[1], width, widths[3]};
     const float side_h[4] = {widths[0], height, widths[2], height};
+    bool uniform_color = boundary_border_uniform_color(border);
     for (int i = 0; i < 4; i++) {
         if (boundary_border_side_visible(widths[i], border->styles[i], border->colors[i])) {
-            boundary_emit_border_side(paint_list, side_x[i], side_y[i],
-                                      side_w[i], side_h[i], border->colors[i]);
+            if (uniform_color) boundary_emit_border_side(paint_list, side_x[i], side_y[i],
+                side_w[i], side_h[i], border->colors[i]);
+            else {
+                float before = i == 0 || i == 2 ? widths[3] : widths[0];
+                float after = i == 0 || i == 2 ? widths[1] : widths[2];
+                RdtPath* path = render_path_create_border_side(rect, i, widths[i], before, after);
+                if (!path) return false;
+                int index = paint_list_count(paint_list);
+                paint_fill_path(paint_list, path, border->colors[i], RDT_FILL_WINDING, nullptr);
+                // boundary commands survive this call and retain their paths (D4.5.1v4).
+                if (!paint_list_take_path_payload(paint_list, index, PAINT_FILL_PATH)) {
+                    rdt_path_free(path); return false;
+                }
+            }
         }
     }
     return true;

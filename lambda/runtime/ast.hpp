@@ -824,10 +824,10 @@ typedef struct AstPatternDefNode : AstNamedNode {
     bool is_symbol;     // true for symbol pattern, false for string pattern
 } AstPatternDefNode;
 
-// Inline delimited pattern type, including the domain tag carried by its opener.
+// Inline delimited text pattern; its resolved contents establish the domain.
 typedef struct AstPatternIslandNode : AstNode {
     AstNode* pattern;   // parsed content-language AST
-    bool is_symbol;     // true only for the tagged \\symbol(...) opener
+    bool is_symbol;     // inferred from quotes and resolved named patterns
     int pattern_index;  // module-local compiled TypePattern index
 } AstPatternIslandNode;
 
@@ -840,6 +840,7 @@ typedef struct AstPatternRangeNode : AstNode {
 // Pattern character class node (\d, \w, \s, \a, .)
 typedef struct AstPatternCharClassNode : AstNode {
     PatternCharClass char_class;
+    TypeId domain;     // quoted class domain; LMD_TYPE_NULL for bare wildcards
 } AstPatternCharClassNode;
 
 // Pattern sequence node (concatenation of patterns)

@@ -3,6 +3,7 @@ import dom
 import interaction: .interaction
 import parameter: .parameter
 import util: .util
+import behavior: .behavior
 
 pn dom_element(node) { if (node == null or dom.node_type(node) == 1) node else dom.parent_element(node) }
 pn closest(node, selector) { if (node == null) null else dom.closest(dom_element(node), selector) }
@@ -13,14 +14,23 @@ pn metadata(node, key) {
     if (text == null) null else parse(text, 'json') ^ {null}
 }
 
-pub pn dispatch(st, evt, definitions) {
+pub pn dispatch(st, evt, definitions, behaviors = []) {
     let host = closest(evt.target, ".lambda-chart");
     let legend = metadata(evt.target, "data-chart-legend");
     let active = if (st.gesture != null) st.gesture[0].frame else null;
-    let found = if (legend != null) {view: legend.view, params: legend.params, encoding: map([legend.channel, {field: legend.field}])}
+    let found = if (legend != null) {view: legend.view, id:legend.id,params: legend.params,behaviors:legend.behaviors,encoding: map([legend.channel, {field: legend.field}])}
         else metadata(evt.target, "data-chart-frame");
-    let frame = if (active != null) active else if (found != null) found
+    let raw_frame = if (active != null) active else if (found != null) found
         else if (evt.type == "keydown") {view: "chart", params: definitions} else null;
+    let part = attribute(closest(evt.target, "[data-chart-part]"), "data-chart-part");
+    let named=raw_frame.behaviors |: ~.part!=null;
+    let applicable = if (raw_frame == null) [] else raw_frame.behaviors |:
+        if (part!=null and len(named)>0) ~.part==part else ~.part==null;
+    let allowed = applicable |> ~.param;
+    let frame = if (raw_frame == null) null else {*:raw_frame,
+        params: raw_frame.params |: ~._behavior != true or contains(allowed, ~.name),
+        behaviors: [for (item in applicable) (let candidates = behaviors |: ~.scope == item.scope and ~.id == item.id,
+            if (len(candidates) > 0) {*:candidates[0], part: item.part} else item)]};
     let control = closest(evt.target, "[data-chart-input]");
     if (control != null and (evt.type == "input" or evt.type == "change")) {
         let name = attribute(control, "data-chart-input");
@@ -40,6 +50,8 @@ pub pn dispatch(st, evt, definitions) {
         let cx = if (evt.clientX != null) evt.clientX else evt.x;
         let cy = if (evt.clientY != null) evt.clientY else evt.y;
         let event = {type: evt.type, frame: frame, row: if (legend != null) legend.row else metadata(evt.target, "data-chart-row"),
+            element_key: metadata(evt.target, "data-chart-key"), part: attribute(closest(evt.target, "[data-chart-part]"), "data-chart-part"),
+            axis: attribute(closest(evt.target, "[data-chart-axis]"), "data-chart-axis"),
             legend: legend != null, key: evt.key, code: evt.code, repeat: evt.repeat,
             button: evt.button, buttons: evt.buttons, pointerId: evt.pointerId, clientX: cx, clientY: cy,
             shiftKey: evt.shiftKey == true, ctrlKey: evt.ctrlKey == true, altKey: evt.altKey == true, metaKey: evt.metaKey == true,

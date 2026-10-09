@@ -86,6 +86,20 @@ pub fn configure(width, height, options = {}) {
 
 pub fn span(a, b) => abs(a[0] - b[0]) + abs(a[1] - b[1])
 
+// Navigation adjusts projection parameters using local angular sensitivity, never x/y data scales.
+pub fn navigate(model,dx,dy,factor=1.0) {
+    let origin=raw(model.center,model);
+    let east=raw([model.center[0]+0.01,model.center[1]],model);
+    let north=raw([model.center[0],model.center[1]+0.01],model);
+    let sx=(east[0]-origin[0])/0.01;let sy=(north[1]-origin[1])/0.01;
+    let longitude=model.center[0]-dx/(model.scale*sx);
+    let latitude=model.center[1]+dy/(model.scale*sy);
+    let center=[longitude-360.0*floor((longitude+180.0)/360.0),util.clamp_val(latitude,-model.latitude_limit,model.latitude_limit)];
+    if (not all([sx,sy,factor] |> util.finite_number(~)) or sx==0 or sy==0 or factor<=0)
+        error("chart: projection navigation is singular at this center")
+    else {type:model.type,center:center,scale:model.scale/factor,translate:model.translate,parallels:model.parallels,precision:model.precision}
+}
+
 // GeoJSON edges interpolate in longitude/latitude (RFC 7946 §3.1.1), not on great circles.
 pub fn segment(a, b, model) {
     let middle = geometry.interpolate(a, b, 0.5);

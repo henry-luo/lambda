@@ -1,0 +1,13 @@
+{
+  "name": "Lambda select live value shares option selectedness with DOM value",
+  "html": "test/lambda/ui/_select_live_value.ls",
+  "events": [
+    {"type":"click","target":{"selector":"#read"}},
+    {"type":"assert_attribute","target":{"selector":"#probe"},"attribute":"data-value","equals":"a"},
+    {"type":"select_option","target":{"selector":"#choice"},"label":"Beta"},
+    {"type":"click","target":{"selector":"#read"}},
+    {"type":"assert_attribute","target":{"selector":"#probe"},"attribute":"data-value","equals":"Beta"},
+    {"type":"click","target":{"selector":"#empty"}},
+    {"type":"assert_attribute","target":{"selector":"#probe"},"attribute":"data-value","equals":""}
+  ]
+}

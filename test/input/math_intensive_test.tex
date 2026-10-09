@@ -1,5 +1,11 @@
 \documentclass[12pt]{article}
-\usepackage{amsmath,amsfonts}
+\usepackage{amsmath,amsfonts,amssymb,mathrsfs,xcolor}
+
+% keep formulas explicit so each parser and layout feature remains visible.
+\newcommand{\vect}[1]{\mathbf{#1}}
+\newcommand{\inner}[2]{\left\langle #1,#2\right\rangle}
+\newcommand{\deriv}[2][x]{\frac{d #2}{d #1}}
+\DeclareMathOperator{\rank}{rank}
 
 \title{Mathematical Document Test}
 \author{Enhanced LaTeX System}
@@ -160,5 +166,714 @@ h(t) = \begin{cases}
 0 & \text{for a false proposition}
 \end{cases}
 \end{equation}
+
+\section{Math Entry Modes and Token Boundaries}
+
+Dollar-delimited $x+1$, parenthesis-delimited \(x+1\), adjacent $a$$b$,
+and punctuation after inline formulas: $x_i$, $y^2$; $z=0$.
+An escaped dollar outside math costs \$5; a following formula is $5+2=7$.
+
+\[
+x+1=2
+\]
+
+$$
+x+1=2
+$$
+
+\begin{equation*}
+x+1=2
+\end{equation*}
+
+% unbraced arguments consume one token, even when the next token is a digit.
+Token boundaries: $x^12$, $x^{12}$, $a_12$, $a_{12}$,
+$\frac12$, $\frac{12}{34}$, $\sqrt2$, and $\sqrt{23}$.
+
+\[
+a + % this comment must not contribute math atoms
+b = c
+\]
+
+\section{Fraction Styles and Continued Fractions}
+
+Inline fraction sizes: $\frac{a}{b}$, $\dfrac{a}{b}$, $\tfrac{a}{b}$.
+Inline binomial sizes: $\binom{n}{k}$, $\dbinom{n}{k}$, $\tbinom{n}{k}$.
+
+\[
+\frac{a+b}{c+d} \qquad \dfrac{a+b}{c+d} \qquad \tfrac{a+b}{c+d}
+\]
+
+\[
+\binom{n+1}{k+1} \qquad \dbinom{n+1}{k+1} \qquad \tbinom{n+1}{k+1}
+\]
+
+\[
+\cfrac{1}{1+\cfrac{1}{2+\cfrac{1}{3+x}}}
+\]
+
+\[
+\frac{\frac{a}{b}+\frac{c}{d}}{\frac{e}{f}-\frac{g}{h}}
+\qquad \frac{1}{\frac{1}{\frac{1}{x}}}
+\]
+
+\[
+\genfrac{(}{)}{0pt}{0}{n}{k}
+\qquad \genfrac{[}{]}{0.8pt}{1}{a+b}{c+d}
+\]
+
+\[
+\genfrac{}{}{0pt}{2}{a}{b}
+\qquad \genfrac{}{}{0.4pt}{3}{a}{b}
+\]
+
+Plain TeX fractions stay inside their own groups:
+
+\[
+{a+b \over c+d} \qquad {n \choose k} \qquad {a \atop b}
+\]
+
+\[
+{a \above 1pt b} \qquad {a \brace b} \qquad {a \brack b}
+\]
+
+\section{Indexed and Nested Radicals}
+
+Inline roots: $\sqrt{x}$, $\sqrt[3]{x}$, $\sqrt[n+1]{x^n+y^n}$.
+
+\[
+\sqrt{\sqrt{x}} \qquad \sqrt[3]{\sqrt[4]{x}}
+\qquad \sqrt{1+\sqrt{1+\sqrt{1+x}}}
+\]
+
+\[
+\sqrt{\frac{a^2+b^2}{c^2+d^2}}
+\qquad \frac{\sqrt[3]{x^2}}{\sqrt{1+x^2}}
+\]
+
+\[
+\sqrt[\frac{n+1}{2}]{\left(\frac{a}{b}\right)^{n+1}}
+\]
+
+\section{Scripts, Primes, and Empty Groups}
+
+Script order: $a_i^n$, $a^n_i$, $a_{ij}^{n+1}$, $a^{n+1}_{ij}$.
+Primes: $f'(x)$, $f''(x)$, $f'''(x)$, $f^{\prime}(x)$.
+Empty bases and groups: ${}_i^j X$, ${}^{14}_{6}\mathrm{C}$, $a{}b$, $x^{}$.
+
+\[
+x_{i_j}^{2^k} \qquad x_{i_{j_k}}^{a^{b^c}}
+\qquad \left(x_i^2\right)_{j}^{n+1}
+\]
+
+\[
+\frac{x_i^2+y_j^3}{z_{k+1}^{n-1}}
+\qquad \sqrt{x_{i_j}^{2^k}+y^2}
+\]
+
+\[
+\left(\frac{a}{b}\right)_{i,j}^{n+1}
+\qquad \sum_{i=1}^{n^2} x_{i_j}^{k+1}
+\]
+
+\section{Complete Greek Alphabet and Variants}
+
+\[
+\alpha,\beta,\gamma,\delta,\epsilon,\zeta,\eta,\theta
+\]
+\[
+\iota,\kappa,\lambda,\mu,\nu,\xi,\pi,\rho
+\]
+\[
+\sigma,\tau,\upsilon,\phi,\chi,\psi,\omega
+\]
+\[
+\varepsilon,\vartheta,\varpi,\varrho,\varsigma,\varphi
+\]
+\[
+\Gamma,\Delta,\Theta,\Lambda,\Xi,\Pi,\Sigma,\Upsilon,\Phi,\Psi,\Omega
+\]
+
+\section{Binary Operators and Unary Spacing}
+
+\[
+a\pm b,\quad a\mp b,\quad a\times b,\quad a\div b,\quad a\cdot b
+\]
+\[
+a\ast b,\quad a\star b,\quad a\circ b,\quad a\bullet b
+\]
+\[
+a\oplus b,\quad a\ominus b,\quad a\otimes b,\quad a\oslash b,\quad a\odot b
+\]
+\[
+A\cap B,\quad A\cup B,\quad A\sqcap B,\quad A\sqcup B,\quad A\setminus B
+\]
+\[
+p\vee q,\quad p\wedge q,\quad p\lor q,\quad p\land q,\quad A\wr B,\quad A\amalg B
+\]
+\[
+a\dagger b,\quad a\ddagger b,\quad a\boxplus b,\quad a\boxminus b
+\]
+\[
+a\boxtimes b,\quad a\boxdot b
+\]
+
+% the same sign changes spacing at boundaries and after relations or fences.
+\[
+-x,\quad +x,\quad a+-b,\quad a-(-b),\quad a=(-b),\quad (-a)+b
+\]
+\[
+a+b=c,\quad a{+}b=c,\quad a(+b)=c,\quad a,b;c:d
+\]
+
+\section{Relations, Logic, and Negation}
+
+\[
+a\le b,\quad a\ge b,\quad a\ne b,\quad a\equiv b,\quad a\approx b
+\]
+\[
+a\sim b,\quad a\simeq b,\quad a\cong b,\quad a\asymp b,\quad a\doteq b
+\]
+\[
+a\prec b,\quad a\succ b,\quad a\preceq b,\quad a\succeq b
+\]
+\[
+A\subset B,\quad A\supset B,\quad A\subseteq B,\quad A\supseteq B
+\]
+\[
+A\sqsubseteq B,\quad A\sqsupseteq B,\quad x\in A,\quad A\ni x,\quad x\notin B
+\]
+\[
+p\vdash q,\quad p\dashv q,\quad p\models q,\quad a\mid b,\quad a\nmid b
+\]
+\[
+a\parallel b,\quad a\perp b,\quad a\propto b,\quad a\bowtie b,\quad a\ll b,\quad a\gg b
+\]
+\[
+A\trianglelefteq B,\quad A\trianglerighteq B,\quad a\nleq b,\quad a\ngeq b
+\]
+\[
+a\nleqslant b,\quad A\nshortparallel B
+\]
+\[
+a\not=b,\quad a\not<b,\quad a\not>b,\quad A\not\subset B
+\]
+\[
+\forall x\in A,\quad \exists y\in B,\quad \nexists z\in\emptyset,
+\quad \neg p\iff\lnot p
+\]
+
+\section{Arrows and Labeled Relations}
+
+\[
+A\leftarrow B,\quad A\rightarrow B,\quad A\leftrightarrow B
+\]
+\[
+A\Leftarrow B,\quad A\Rightarrow B,\quad A\Leftrightarrow B
+\]
+\[
+A\longleftarrow B,\quad A\longrightarrow B,\quad A\longleftrightarrow B
+\]
+\[
+A\Longleftarrow B,\quad A\Longrightarrow B,\quad A\Longleftrightarrow B
+\]
+\[
+\uparrow,\downarrow,\updownarrow,\Uparrow,\Downarrow,\Updownarrow,
+\nearrow,\nwarrow,\searrow,\swarrow
+\]
+\[
+A\hookrightarrow B,\quad A\hookleftarrow B,\quad x\mapsto x^2,\quad x\longmapsto x^3
+\]
+\[
+A\twoheadrightarrow B,\quad A\twoheadleftarrow B,
+\quad A\leftrightarrows B,\quad A\rightleftarrows B
+\]
+\[
+A\leftharpoonup B,\quad A\rightharpoonup B,
+\quad A\leftharpoondown B,\quad A\rightharpoondown B
+\]
+\[
+A\looparrowright B,\quad A\curvearrowleft B,\quad A\rightsquigarrow B
+\]
+\[
+A\looparrowleft B,\quad A\curvearrowright B,\quad A\leftrightsquigarrow B
+\]
+\[
+A\leftleftarrows B,\quad A\rightrightarrows B,
+\quad A\Lleftarrow B,\quad A\Rrightarrow B
+\]
+\[
+\upuparrows,\quad \downdownarrows,\quad A\gets B,\quad p\implies q
+\]
+\[
+A\xrightarrow{f}B \qquad A\xleftarrow{g}B
+\]
+\[
+A\xrightarrow[h]{\frac{f+g}{2}}B
+\qquad A\xleftarrow[n\to\infty]{\text{inverse}}B
+\]
+
+\section{Large Operators and Explicit Limits}
+
+Inline limits: $\sum_{i=1}^{n}x_i$, $\sum\limits_{i=1}^{n}x_i$,
+$\int\limits_0^1 f(x)\,dx$, and $\int\nolimits_0^1 f(x)\,dx$.
+
+\[
+\sum_{i=1}^{n}x_i \qquad \sum\nolimits_{i=1}^{n}x_i
+\qquad \prod_{i=1}^{n}x_i \qquad \coprod_{i=1}^{n}X_i
+\]
+\[
+\bigcup_{i=1}^{n}A_i \qquad \bigcap_{i=1}^{n}A_i
+\qquad \bigsqcup_{i=1}^{n}A_i \qquad \biguplus_{i=1}^{n}A_i
+\]
+\[
+\bigvee_{i=1}^{n}p_i \qquad \bigwedge_{i=1}^{n}p_i
+\qquad \bigoplus_{i=1}^{n}V_i
+\]
+\[
+\bigotimes_{i=1}^{n}V_i \qquad \bigodot_{i=1}^{n}V_i
+\]
+\[
+\int_0^1 f(x)\,dx \qquad \iint_D f\,dA
+\qquad \iiint_V f\,dV \qquad \oint_C f\,ds
+\]
+\[
+\liminf_{n\to\infty}a_n \leq \limsup_{n\to\infty}a_n
+\]
+\[
+\sup_{x\in A}f(x) \qquad \inf_{x\in A}f(x)
+\qquad \max_{1\leq i\leq n}x_i \qquad \min_{1\leq i\leq n}x_i
+\]
+\[
+\mathop{\mathrm{Res}}\limits_{z=0}\frac{e^z}{z}
+\qquad \mathop{\mathrm{Res}}\nolimits_{z=0}\frac{e^z}{z}
+\]
+
+\section{Named and Custom Functions}
+
+\[
+\arcsin x,\quad \arccos x,\quad \arctan x,
+\quad \sec x,\quad \csc x,\quad \cot x
+\]
+\[
+\sinh x,\quad \cosh x,\quad \tanh x,\quad \coth x
+\]
+\[
+\arg z,\quad \deg p,\quad \dim V,\quad \ker T,\quad \hom(A,B)
+\]
+\[
+\gcd(a,b),\quad \lg n,\quad \Pr(A\mid B),\quad \log_2 n
+\]
+\[
+\operatorname{rank}(A)=\operatorname{tr}(P)
+\qquad \operatorname{sgn}(x)\,|x|=x
+\]
+
+\section{Math Alphabets and Text Styles}
+
+\[
+\mathrm{Abc123} \quad \mathbf{Abc123} \quad \mathit{Abc123}
+\]
+\[
+\mathsf{Abc123} \quad \mathtt{Abc123} \quad \mathbb{RNCQZ}
+\]
+\[
+\mathcal{ABEFHILMR} \quad \mathscr{ABEFHILMR} \quad \mathfrak{CHIRZabc}
+\]
+\[
+\mathbf{x}_{\mathrm{max}} \in \mathbb{R}^{n\times m}
+\qquad \mathcal{L}\{f\}(s)=\int_0^\infty e^{-st}f(t)\,dt
+\]
+\[
+\mathrm{e}^{\mathrm{i}\pi}+1=0
+\qquad \mathbf{\alpha}+\boldsymbol{\beta}=\boldsymbol{\gamma}
+\]
+\[
+\mathbf{A\mathit{b}C} \qquad \mathsf{A\mathrm{b}C}
+\qquad \mathbb{R}\times\mathbb{C}\times\mathbb{Z}
+\]
+
+Text spacing: $\text{a b}$ versus $\text{ab}$, and $\text{  a  b  }$.
+
+\[
+\text{plain words} \quad \textrm{roman words} \quad \textbf{bold words}
+\]
+\[
+\textit{italic words} \quad \textsf{sans words} \quad \texttt{mono words}
+\]
+\[
+\mbox{boxed text} \qquad x_{\text{initial value}}^{\text{final value}}
+\]
+\[
+\text{price: \$5; rate: 50\%; key: a\_b; A\&B}
+\]
+
+\section{Display, Text, and Script Styles}
+
+Inline comparison: $\sum_{i=1}^{n}\frac{1}{i}$ versus
+$\displaystyle\sum_{i=1}^{n}\frac{1}{i}$.
+
+\[
+{\displaystyle\frac{a}{b}} \qquad {\textstyle\frac{a}{b}}
+\qquad {\scriptstyle\frac{a}{b}} \qquad {\scriptscriptstyle\frac{a}{b}}
+\]
+\[
+{\displaystyle\sum_{i=1}^{n}x_i} \quad {\textstyle\sum_{i=1}^{n}x_i}
+\quad {\scriptstyle\sum_{i=1}^{n}x_i} \quad {\scriptscriptstyle\sum_{i=1}^{n}x_i}
+\]
+\[
+\frac{1+{\displaystyle\frac{a}{b}}}{1+{\textstyle\frac{c}{d}}}
+\qquad {\scriptstyle x_i^2}+x_i^2
+\]
+
+\section{Delimiter Families, Sizing, and Middles}
+
+\[
+\left\{\frac{a}{b}\right\} \quad \left|\frac{a}{b}\right|
+\quad \left\|\frac{a}{b}\right\|
+\]
+\[
+\left\lfloor\frac{a}{b}\right\rfloor
+\quad \left\lceil\frac{a}{b}\right\rceil
+\quad \left\langle\frac{a}{b}\right\rangle
+\]
+\[
+\left.\frac{d}{dx}x^n\right|_{x=1}
+\qquad \left\{\frac{a}{b}\right.
+\]
+\[
+\left\{x\in\mathbb{R}\middle|\frac{x}{1+x^2}>0\right\}
+\]
+\[
+\left(\frac{a}{b}\middle|\frac{c}{d}\middle|\frac{e}{f}\right)
+\]
+\[
+\left[\left(\frac{1}{1+\left|\frac{x}{y}\right|}\right)^2\right]^{1/2}
+\]
+\[
+(x)\quad \bigl(x\bigr)\quad \Bigl(x\Bigr)
+\quad \biggl(x\biggr)\quad \Biggl(x\Biggr)
+\]
+\[
+\big[x\big]\quad \Big[x\Big]\quad \bigg[x\bigg]\quad \Bigg[x\Bigg]
+\]
+\[
+\bigl\{a\bigm|b\bigr\}\quad \Bigl\{a\Bigm|b\Bigr\}
+\quad \biggl\{a\biggm|b\biggr\}\quad \Biggl\{a\Biggm|b\Biggr\}
+\]
+\[
+\left\lvert\frac{x}{y}\right\rvert
+\qquad \left\lVert\frac{x}{y}\right\rVert
+\qquad \left(0,\frac{1}{2}\right]
+\]
+\[
+\left\uparrow\frac{a}{b}\right\downarrow
+\qquad \left/\frac{a}{b}\right\backslash
+\]
+
+\section{Accents and Stacked Annotations}
+
+\[
+\hat{x},\quad \check{x},\quad \tilde{x},\quad \acute{x},\quad \grave{x},\quad \breve{x}
+\]
+\[
+\bar{x},\quad \vec{x},\quad \dot{x},\quad \ddot{x},\quad \dddot{x},\quad \ddddot{x},\quad \mathring{x}
+\]
+\[
+\widehat{ABC} \qquad \widetilde{abcdefgh} \qquad \overline{a+b} \qquad \underline{a+b}
+\]
+\[
+\hat{\bar{x}} \qquad \dot{\hat{x}} \qquad \overline{\frac{a}{b}}
+\qquad \widehat{x_i^2+y_j^2}
+\]
+\[
+\overrightarrow{AB} \quad \overleftarrow{AB} \quad \overleftrightarrow{AB}
+\]
+\[
+\underrightarrow{AB} \quad \underleftarrow{AB} \quad \underleftrightarrow{AB}
+\]
+\[
+\overbrace{a+b+\cdots+z}^{n\text{ terms}}
+\qquad \underbrace{a+b+\cdots+z}_{n\text{ terms}}
+\]
+\[
+\overbrace{\underbrace{a+b}_{2}+c+d}^{4}
+\]
+\[
+\overset{\text{def}}{=} \qquad \underset{n\to\infty}{\lim}
+\qquad \stackrel{f}{\longrightarrow}
+\]
+\[
+\overset{\alpha}{\underset{\beta}{X}}
+\qquad \overset{\frac{1}{n}}{\longrightarrow}
+\]
+
+\section{Additional Matrices and Arrays}
+
+\[
+\begin{matrix}a&b\\c&d\end{matrix}
+\qquad \begin{Bmatrix}a&b\\c&d\end{Bmatrix}
+\qquad \begin{Vmatrix}a&b\\c&d\end{Vmatrix}
+\]
+
+Compact inline matrix: $\left(\begin{smallmatrix}a&b\\c&d\end{smallmatrix}\right)$.
+
+\[
+\begin{pmatrix}x\end{pmatrix}
+\qquad \begin{bmatrix}a&b&c\end{bmatrix}
+\qquad \begin{pmatrix}a\\b\\c\end{pmatrix}
+\]
+\[
+\begin{array}{lcr}
+1 & 22 & 333 \\
+4444 & 55 & 6 \\
+-x & \frac{1}{2} & \sqrt{y}
+\end{array}
+\]
+\[
+\begin{matrix}
+a & & c \\
+& b & \\
+c & & a
+\end{matrix}
+\qquad \begin{matrix}a&b\\c\end{matrix}
+\]
+\[
+\begin{bmatrix}
+a_{11} & \cdots & a_{1n} \\
+\vdots & \ddots & \vdots \\
+a_{n1} & \cdots & a_{nn}
+\end{bmatrix}
+\]
+\[
+\begin{pmatrix}
+\begin{matrix}a&b\\c&d\end{matrix} & 0 \\
+0 & \begin{matrix}e&f\\g&h\end{matrix}
+\end{pmatrix}
+\]
+\[
+\frac{\det\begin{pmatrix}a&b\\c&d\end{pmatrix}}{\sqrt{a^2+b^2}}
+\qquad \begin{pmatrix}a&b\\c&d\end{pmatrix}_{ij}^{2}
+\]
+
+\section{Nested Cases and Aligned Groups}
+
+\[
+g(x)=\begin{cases}
+\begin{cases}x&\text{if }x<0\\x^2&\text{if }x\geq0\end{cases}&\text{if }|x|<1\\
+\frac{1}{1+x^2}&\text{otherwise}
+\end{cases}
+\]
+\[
+\begin{bmatrix}
+\begin{cases}0&x<0\\1&x\geq0\end{cases} & \frac{1}{2} \\
+\sqrt{x^2+1} & \sum_{i=1}^{n}i
+\end{bmatrix}
+\]
+\begin{equation}
+\begin{aligned}
+(a+b)^2 &= a^2+2ab+b^2 \\
+(a-b)^2 &= a^2-2ab+b^2
+\end{aligned}
+\end{equation}
+\begin{equation}
+\begin{split}
+(a+b+c)^2 &= a^2+b^2+c^2 \\
+&\quad +2ab+2ac+2bc
+\end{split}
+\end{equation}
+
+\section{Multiline Document Environments}
+
+\begin{align}
+x+y &= 3 \\
+2x-y &= 0
+\end{align}
+
+\begin{align*}
+f(x) &= x^2 & f'(x) &= 2x \\
+g(x) &= e^x & g'(x) &= e^x
+\end{align*}
+
+\begin{alignat}{2}
+x &= 1, &\qquad y &= 2 \\
+u &= 3, &\qquad v &= 4
+\end{alignat}
+
+\begin{alignat*}{2}
+a+b &= c, &\qquad a-b &= d \\
+2a &= c+d, &\qquad 2b &= c-d
+\end{alignat*}
+
+\begin{gather}
+a+b=b+a \\
+(a+b)+c=a+(b+c)
+\end{gather}
+
+\begin{gather*}
+\sin^2x+\cos^2x=1 \\
+\cosh^2x-\sinh^2x=1
+\end{gather*}
+
+\begin{multline}
+a+b+c+d+e \\
+{}+f+g+h+i+j \\
+{}+k+l+m+n=0
+\end{multline}
+
+\begin{multline*}
+\frac{1}{1+x}+\frac{1}{1-x} \\
+=\frac{2}{1-x^2}
+\end{multline*}
+
+\section{Equation Tags, Labels, and References}
+
+\begin{align}
+a+b &= b+a \label{eq:math-commute} \\
+a+0 &= a \notag \\
+a\cdot1 &= a \tag{Identity}\label{eq:math-identity}
+\end{align}
+
+\begin{align*}
+x-x &= 0 \tag*{Zero} \\
+x+x &= 2x
+\end{align*}
+
+The commutative law is equation~\eqref{eq:math-commute}.
+
+The identity law is equation~\ref{eq:math-identity}.
+
+\section{Explicit Spaces, Kerns, and Rules}
+
+\[
+ab,\quad a\,b,\quad a\:b,\quad a\;b,\quad a\!b
+\]
+\[
+a\thinspace b,\quad a\enspace b,\quad a\quad b,\quad a\qquad b
+\]
+\[
+a\hspace{0.5em}b \quad a\hspace{1ex}b \quad a\hspace{6pt}b
+\]
+\[
+a\hspace{0.5pc}b \quad a\hspace{0.1in}b
+\quad a\hspace{0.2cm}b \quad a\hspace{2mm}b
+\]
+\[
+a\hspace{-0.2em}b \quad a\hskip 6pt b \quad a\kern 3pt b \quad a\mkern 3mu b
+\]
+\[
+\int_0^1 f(x)\,dx \qquad \int_0^1 f(x)dx
+\qquad \mathrm{d}x \qquad \mathrm{d}\!x
+\]
+\[
+\rule{1em}{0.4pt}\quad \rule{0.4pt}{1em}\quad \rule{0.5em}{0.5em}
+\]
+
+\section{Invisible Boxes and Overlap}
+
+% paired formulas expose reserved width, vertical extent, and zero-width overlap.
+\[
+a+\phantom{b}+c \qquad a+b+c
+\]
+\[
+\frac{1}{\hphantom{+}2} \qquad \frac{1}{+2}
+\]
+\[
+\sqrt{\vphantom{\frac{a}{b}}x} \qquad \sqrt{x}
+\]
+\[
+\sqrt{\smash{y}} \qquad \sqrt{y}
+\]
+\[
+\llap{A}B \qquad A\rlap{B} \qquad \mathop{\mathrm{lim}}\limits_{n\to\infty}
+\]
+
+\section{Boxes and Scoped Colors}
+
+\[
+\boxed{E=mc^2} \qquad \boxed{\frac{a+b}{c+d}}
+\qquad \boxed{\boxed{x}+y}
+\]
+\[
+\textcolor{red}{x+y}+z \qquad x+{\color{blue}y+z}+w
+\]
+\[
+\textcolor{red}{a+\textcolor{blue}{b}+c}+d
+\]
+\[
+\textcolor{green}{\frac{\sqrt{x}}{1+x^2}}
+\qquad \colorbox{yellow}{$x^2+y^2$}
+\]
+\[
+\begin{pmatrix}\textcolor{red}{a}&b\\c&\textcolor{blue}{d}\end{pmatrix}
+\qquad \boxed{\textcolor{blue}{\sum_{i=1}^{n}i}}
+\]
+
+\section{Miscellaneous Symbols and Ellipses}
+
+\[
+\ell,\wp,\Re,\Im,\aleph,\beth,\gimel,\hbar,\imath,\jmath
+\]
+\[
+\emptyset,\varnothing,\top,\bot,\angle,\measuredangle,\triangle,\surd
+\]
+\[
+\flat,\natural,\sharp,\clubsuit,\diamondsuit,\heartsuit,\spadesuit
+\]
+\[
+\checkmark,\maltese,\blacktriangle,\blacksquare,\blacklozenge
+\]
+\[
+\Finv,\quad \Bbbk,\quad x\colon A\to B,\quad x\in\lbrace a,b\rbrace
+\]
+\[
+\vert x\vert,\quad \Vert x\Vert,\quad 1,2,\dots,n
+\]
+\[
+a_1,\ldots,a_n \qquad a_1+\cdots+a_n \qquad \vdots \qquad \ddots
+\]
+\[
+\{\,x\mid x>0\,\},\quad \#1,\quad 50\%,\quad \$5,\quad a\_b,\quad A\&B
+\]
+
+\section{Document Macros in Math}
+
+\[
+\vect{u}+\vect{v}=\vect{w}
+\qquad \inner{\vect{u}}{\vect{v}}=\sum_{i=1}^{n}u_i v_i
+\]
+\[
+\deriv{x^n}=nx^{n-1} \qquad \deriv[t]{t^3}=3t^2
+\]
+\begin{align*}
+\rank(A) &= \dim\operatorname{im}(A) \\
+\rank(A)+\dim\ker(A) &= n
+\end{align*}
+
+\section{Deeply Nested Mixed Structures}
+
+\[
+\left\{\frac{\displaystyle\sum_{i=1}^{n}x_{i_j}^{2^k}}
+{\sqrt[3]{1+\left(\frac{a+b}{c+d}\right)^2}}\right\}_{m}^{p+1}
+\]
+\[
+\widehat{\left\langle\frac{\mathbf{u}}{\sqrt{1+u_i^2}},
+\frac{\mathbf{v}}{\sqrt[3]{1+v_j^3}}\right\rangle}
+\]
+\[
+\boxed{\textcolor{blue}{\frac{\overbrace{a_1+\cdots+a_n}^{n\text{ terms}}}
+{\underbrace{\sqrt{x_1^2+\cdots+x_n^2}}_{\text{norm}}}}}
+\]
+\[
+\left[\begin{array}{cc}
+\frac{\sum_{i=1}^{n}i}{\sqrt{1+x^2}} & \overset{\alpha}{\longrightarrow} \\
+\begin{cases}\mathbf{x}&x\geq0\\-\mathbf{x}&x<0\end{cases} &
+\sqrt[3]{\frac{1}{1+\frac{1}{1+x}}}
+\end{array}\right]^2
+\]
+\[
+\frac{\left|\begin{matrix}a&b\\c&d\end{matrix}\right|}
+{\left\|\begin{matrix}x\\y\end{matrix}\right\|}
+\xrightarrow[n\to\infty]{\text{normalized}}\mathbb{R}
+\]
 
 \end{document}

@@ -152,6 +152,15 @@ HPDF_STATUS HPDF_Page_SetWidth(HPDF_Page page, float width);
  */
 HPDF_STATUS HPDF_Page_SetHeight(HPDF_Page page, float height);
 
+typedef enum { HPDF_PAGE_BOX_MEDIA, HPDF_PAGE_BOX_CROP, HPDF_PAGE_BOX_BLEED,
+    HPDF_PAGE_BOX_TRIM, HPDF_PAGE_BOX_ART, HPDF_PAGE_BOX_COUNT } HPDF_PageBox;
+// retain original default-user-space page boundaries independently of normalized paint dimensions.
+HPDF_STATUS HPDF_Page_SetBox(HPDF_Page page, HPDF_PageBox kind,
+                            float left, float bottom, float right, float top);
+HPDF_STATUS HPDF_Page_SetRotate(HPDF_Page page, int32_t degrees);
+// copy a complete UTF-8 label; empty labels are distinct from default decimal labels.
+HPDF_STATUS HPDF_Page_SetLabel(HPDF_Page page, const char* label);
+
 /* Coordinates are PDF points with a bottom-left origin. A target beginning
  * with '#' resolves against a destination registered on this document. */
 HPDF_STATUS HPDF_Page_AddLink(HPDF_Page page, float left, float bottom,
@@ -221,6 +230,9 @@ HPDF_STATUS HPDF_Page_SetRGBStroke(HPDF_Page page, float r, float g, float b);
  * @return      HPDF_OK on success
  */
 HPDF_STATUS HPDF_Page_SetLineWidth(HPDF_Page page, float width);
+HPDF_STATUS HPDF_Page_SetLineCap(HPDF_Page page, int cap);
+HPDF_STATUS HPDF_Page_SetLineJoin(HPDF_Page page, int join);
+HPDF_STATUS HPDF_Page_SetMiterLimit(HPDF_Page page, float limit);
 
 /**
  * Create an extended graphics state resource.
@@ -331,6 +343,8 @@ HPDF_STATUS HPDF_Page_ClosePath(HPDF_Page page);
  * @return      HPDF_OK on success
  */
 HPDF_STATUS HPDF_Page_Fill(HPDF_Page page);
+// fill a compound path using the even-odd rule (PDF f* operator).
+HPDF_STATUS HPDF_Page_Eofill(HPDF_Page page);
 
 /**
  * Stroke the current path.
@@ -356,6 +370,8 @@ HPDF_STATUS HPDF_Page_ClosePathFillStroke(HPDF_Page page);
  * @return      HPDF_OK on success
  */
 HPDF_STATUS HPDF_Page_Clip(HPDF_Page page);
+// intersect with the current path using the even-odd rule, then end the path.
+HPDF_STATUS HPDF_Page_Eoclip(HPDF_Page page);
 
 /**
  * Draw an ABGR8888 image as an inline RGB image using the supplied PDF

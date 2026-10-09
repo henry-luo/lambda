@@ -10055,6 +10055,11 @@ Item fn_array_set(Array* arr, int64_t index, Item value) {
     return ItemNull;
 }
 
+// compatible packed writes share the lossless conversion; callers prove an integer and a valid float slot.
+void map_field_store_int_as_float(void* field_ptr, Item value) {
+    *(double*)field_ptr = lambda_int_item_value(value);
+}
+
 // helper: store a value at a field pointer, according to its storage type
 bool map_field_store(void* field_ptr, Item value, TypeId value_type) {
     if (!field_ptr) return false;
@@ -13785,11 +13790,19 @@ static bool runtime_type_admit_map_env(Item value, Type* expected, Type** env,
             // the stored field's observable tag satisfies the named contract.
             // The nullable case also changes its physical carrier even though
             // the source int already satisfies the optional semantic contract.
-            map_rebuild_for_type_change((void**)&candidate_map->type,
-                &candidate_map->data, &candidate_map->data_cap, LMD_TYPE_MAP,
-                (Container*)candidate_map, candidate_field,
-                expected_field->type,
-                rooted_converted.get());
+            // Repeated structural admission must reuse a layout, rather than
+            // retain a private field chain in the runtime pool on every call.
+            Input* tree = runtime_shape_tree();
+            TypeMap* target = tree ? type_tree_retype_contract(tree, candidate_type,
+                candidate_field, expected_field->type) : NULL;
+            bool moved = target ? container_move_to_type((void**)&candidate_map->type,
+                &candidate_map->data, &candidate_map->data_cap, (Container*)candidate_map,
+                candidate_type, target, candidate_field, rooted_converted.get(), 0)
+                : map_rebuild_for_type_change((void**)&candidate_map->type,
+                    &candidate_map->data, &candidate_map->data_cap, LMD_TYPE_MAP,
+                    (Container*)candidate_map, candidate_field, expected_field->type,
+                    rooted_converted.get());
+            if (!moved) return false;
         } else {
             String* field_name = heap_create_name(expected_field->name->str,
                 expected_field->name->length);
@@ -14763,7 +14776,7 @@ Item fn_map_set(Item map_item, Item key, Item value) {
 
             // FLOAT field + INT value → widen int to double (lossless, no reshape)
             if (field_type == LMD_TYPE_FLOAT && value_type == LMD_TYPE_INT) {
-                *(double*)field_ptr = lambda_int_item_value(value);
+                map_field_store_int_as_float(field_ptr, value);
                 return ItemNull;
             }
 

@@ -57,8 +57,13 @@ static void dl_record_set_rect_bounds(DisplayItem* item,
         return;
     }
 
-    rdt_matrix_transform_rect_bounds(transform, left, top, right, bottom,
-                                     &left, &top, &right, &bottom);
+    // Tile culling must use the same homogeneous projection as painting.
+    // Viewer-plane crossings stay unbounded until replay clips the contour.
+    if (!rdt_matrix_project_rect_bounds(transform, left, top, right, bottom,
+        &left, &top, &right, &bottom)) {
+        dl_record_set_unbounded(item);
+        return;
+    }
     dl_record_set_bounds_xyxy(item, left, top, right, bottom, pad);
 }
 
@@ -204,7 +209,8 @@ void dl_draw_image(DisplayList* dl, const uint32_t* pixels,
                    int src_w, int src_h, int src_stride,
                    float dst_x, float dst_y, float dst_w, float dst_h,
                    uint8_t opacity, const RdtMatrix* transform,
-                   ImageSurface* resource_owner, uint64_t resource_generation, bool copy_pixels, bool straight_alpha) {
+                   ImageSurface* resource_owner, uint64_t resource_generation, bool copy_pixels, bool straight_alpha,
+                   ScaleMode scale_mode) {
     if (copy_pixels) {
         // standalone decoders can expire before replay; the recording owns this copy.
         size_t size = (size_t)src_stride * (size_t)src_h * sizeof(uint32_t);
@@ -242,6 +248,7 @@ void dl_draw_image(DisplayList* dl, const uint32_t* pixels,
     item->draw_image.src_w = src_w;
     item->draw_image.src_h = src_h;
     item->draw_image.src_stride = src_stride;
+    item->draw_image.scale_mode = scale_mode;
     item->draw_image.dst_x = dst_x;
     item->draw_image.dst_y = dst_y;
     item->draw_image.dst_w = dst_w;
@@ -303,11 +310,12 @@ void dl_draw_picture(DisplayList* dl, RdtPicture* picture,
     if (transform) item->draw_picture.transform = *transform;
 }
 
-void dl_push_clip(DisplayList* dl, RdtPath* clip_path, const RdtMatrix* transform) {
+void dl_push_clip(DisplayList* dl, RdtPath* clip_path, const RdtMatrix* transform, RdtFillRule rule) {
     DisplayItem* item = dl_alloc_item(dl);
     item->op = DL_PUSH_CLIP;
     dl_record_set_path_bounds(item, clip_path, transform, 1.0f);
     item->push_clip.path = lam::own(rdt_path_clone(clip_path));
+    item->push_clip.rule = rule;
     item->push_clip.has_transform = (transform != nullptr);
     if (transform) item->push_clip.transform = *transform;
 }

@@ -12,6 +12,7 @@
 #include "../io/mark_builder.hpp"
 #include "../../lib/log.h"
 #include "../../lib/str.h"
+#include "../../lib/strbuf.h"
 #include "../../lib/shell.h"
 #include "../../lib/url.h"
 #include "../../lib/memtrack.h"
@@ -49,8 +50,13 @@ static bool is_text_command(const char* name) {
         strcmp(name, "textsc") == 0 || strcmp(name, "emph") == 0;
 }
 
+static bool is_literal_text_escape(const char* name) {
+    return name[0] && name[1] == '\0' && strchr("$%#&_{}", name[0]) != nullptr;
+}
+
 static bool is_style_command(const char* name) {
     return strcmp(name, "mathrm") == 0 || strcmp(name, "mathbf") == 0 ||
+        strcmp(name, "boldsymbol") == 0 ||
         strcmp(name, "mathit") == 0 || strcmp(name, "mathsf") == 0 ||
         strcmp(name, "mathtt") == 0 || strcmp(name, "mathcal") == 0 ||
         strcmp(name, "mathbb") == 0 || strcmp(name, "mathfrak") == 0 ||
@@ -539,6 +545,15 @@ private:
             if (item_present(content)) elem.attr("content", content);
             return elem.final();
         }
+        if (strcmp(name, "phantom") == 0 || strcmp(name, "hphantom") == 0 ||
+            strcmp(name, "vphantom") == 0 || strcmp(name, "smash") == 0) {
+            // these commands change box dimensions and cannot use literal-command fallback.
+            Item content = parse_script_arg();
+            ElementBuilder elem = builder_.element("phantom_command");
+            elem.attr("cmd", builder_.createStringItem(full));
+            if (item_present(content)) elem.attr("content", content);
+            return elem.final();
+        }
         if (is_box_command(name)) {
             Item options = ItemNull;
             skip_space();
@@ -611,11 +626,11 @@ private:
                 return builder_.element("not_empty").final();
             }
             if (position_ < length_ && source_[position_] == '\\') {
-                char target_name[96];
-                char target_full[104];
-                if (read_command(target_name, sizeof(target_name), target_full, sizeof(target_full))) {
+                // negation wraps the parsed atom, so named relations retain their glyph and spacing.
+                Item target = parse_command();
+                if (item_present(target)) {
                     ElementBuilder elem = builder_.element("not_overlay");
-                    elem.attr("target", builder_.createStringItem(target_full));
+                    elem.attr("target", target);
                     return elem.final();
                 }
             }
@@ -673,7 +688,32 @@ private:
         ElementBuilder elem = builder_.element("text_command");
         elem.attr("cmd", builder_.createStringItem(full));
         if (consume_group_span('{', '}', &begin, &end)) {
-            elem.attr("content", builder_.createStringItem(source_ + begin, end - begin));
+            if (!memchr(source_ + begin, '\\', end - begin)) {
+                elem.attr("content", builder_.createStringItem(source_ + begin, end - begin));
+            } else {
+                StrBuf* content = strbuf_new_cap(end - begin + 1);
+                if (!content) {
+                    error("failed to allocate text command content");
+                    return ItemNull;
+                }
+                for (size_t cursor = begin; cursor < end;) {
+                    if (source_[cursor] != '\\') {
+                        strbuf_append_char(content, source_[cursor++]);
+                        continue;
+                    }
+                    char name[96], command[104];
+                    size_t next = latex_scan_command(source_, end, cursor, name,
+                        sizeof(name), command, sizeof(command));
+                    if (is_literal_text_escape(name)) strbuf_append_char(content, name[0]);
+                    else strbuf_append_str_n(content, source_ + cursor, next - cursor);
+                    cursor = next;
+                }
+                // paint literal punctuation, retaining its TeX escapes for serialization.
+                if (content->length != end - begin)
+                    elem.attr("content_raw", builder_.createStringItem(source_ + begin, end - begin));
+                elem.attr("content", builder_.createStringItem(content->str, content->length));
+                strbuf_free(content);
+            }
         }
         return elem.final();
     }
@@ -1500,7 +1540,7 @@ private:
             return elem.final();
         }
         if (strcmp(name, "\\") == 0) return builder_.createSymbolItem("row_sep");
-        if (strlen(name) == 1 && strchr("$%#&_{}", name[0])) return builder_.createStringItem(name, 1);
+        if (is_literal_text_escape(name)) return builder_.createStringItem(name, 1);
         if (strlen(name) == 1 && strchr("'`^\"~=.uvHcdbtk", name[0])) {
             // A text accent takes one token or one balanced group, never the following word.
             ElementBuilder accent = builder_.element("accent");

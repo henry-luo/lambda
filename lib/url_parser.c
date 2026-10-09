@@ -649,68 +649,40 @@ void url_normalize_path(char* path, size_t cap) {
     if (!path || !*path || cap == 0) return;
 
     size_t original_len = strlen(path);
-    bool is_absolute = path[0] == '/';
-    bool had_trailing_slash = original_len > 1 && path[original_len - 1] == '/';
-
     char* path_copy = (char*)mem_alloc(original_len + 1, MEM_CAT_TEMP);
     if (!path_copy) return;
     memcpy(path_copy, path, original_len + 1);
 
-    char* segments[256];
-    int segment_count = 0;
-    char* saveptr = NULL;
-    char* token = strtok_r(path_copy, "/", &saveptr);
-
-    while (token && segment_count < 256) {
-        if (strcmp(token, ".") == 0) {
-            // skip current directory references
-        } else if (strcmp(token, "..") == 0) {
-            if (segment_count > 0) {
-                segment_count--;
-            }
-        } else if (strlen(token) > 0) {
-            segments[segment_count++] = token;
-        }
-
-        token = strtok_r(NULL, "/", &saveptr);
-    }
-
-    // rebuild path safely without dropping long but valid URL path segments
+    // RFC 3986 §5.2.4 preserves empty segments and the slash left by a final
+    // dot segment; tokenizing on '/' loses both directory semantics.
+    char* read = path_copy;
+    size_t written = 0;
     path[0] = '\0';
-    if (segment_count == 0) {
-        if (is_absolute && cap >= 2) {
-            path[0] = '/';
-            path[1] = '\0';
+    while (*read) {
+        if (strncmp(read, "../", 3) == 0) { read += 3; }
+        else if (strncmp(read, "./", 2) == 0) { read += 2; }
+        else if (strncmp(read, "/./", 3) == 0) { read += 2; }
+        else if (strcmp(read, "/.") == 0) { read[1] = '\0'; }
+        else if (strncmp(read, "/../", 4) == 0 || strcmp(read, "/..") == 0) {
+            bool terminal = read[3] == '\0';
+            read += terminal ? 0 : 3;
+            if (terminal) read[1] = '\0';
+            while (written > 0 && path[written - 1] != '/') written--;
+            if (written > 0) written--;
+            path[written] = '\0';
+        } else if (strcmp(read, ".") == 0 || strcmp(read, "..") == 0) {
+            *read = '\0';
+        } else {
+            char* next = strchr(read + (*read == '/' ? 1 : 0), '/');
+            size_t segment_len = next ? (size_t)(next - read) : strlen(read);
+            size_t available = cap - written - 1;
+            size_t copy_len = segment_len < available ? segment_len : available;
+            memcpy(path + written, read, copy_len);
+            written += copy_len;
+            path[written] = '\0';
+            if (copy_len < segment_len) break;
+            read += segment_len;
         }
-        mem_free(path_copy);
-        return;
-    }
-
-    size_t current_len = 0;
-    if (is_absolute && current_len + 1 < cap) {
-        path[current_len++] = '/';
-        path[current_len] = '\0';
-    }
-
-    for (int i = 0; i < segment_count && current_len + 1 < cap; i++) {
-        if (current_len > 0 && path[current_len - 1] != '/' && current_len + 1 < cap) {
-            path[current_len++] = '/';
-            path[current_len] = '\0';
-        }
-        size_t segment_len = strlen(segments[i]);
-        size_t available = cap - current_len - 1;
-        size_t copy_len = segment_len < available ? segment_len : available;
-        if (copy_len > 0) {
-            memcpy(path + current_len, segments[i], copy_len);
-            current_len += copy_len;
-            path[current_len] = '\0';
-        }
-        if (copy_len < segment_len) break;
-    }
-
-    if (had_trailing_slash && current_len > 0 && path[current_len - 1] != '/' && current_len + 1 < cap) {
-        path[current_len++] = '/';
-        path[current_len] = '\0';
     }
 
     mem_free(path_copy);
@@ -720,108 +692,18 @@ void url_normalize_path(char* path, size_t cap) {
 char* url_resolve_path(const char* base_path, const char* relative_path) {
     if (!base_path || !relative_path) return NULL;
 
-    char* result = mem_alloc(2048, MEM_CAT_TEMP);
+    // Merge the base directory and reference, then use the same dot-segment
+    // normalization as absolute-path references.
+    const char* last_slash = strrchr(base_path, '/');
+    size_t prefix_len = relative_path[0] == '/' ? 0 :
+        (last_slash ? (size_t)(last_slash - base_path) + 1 : 0);
+    size_t relative_len = strlen(relative_path);
+    size_t capacity = prefix_len + relative_len + 1;
+    char* result = mem_alloc(capacity, MEM_CAT_TEMP);
     if (!result) return NULL;
-
-    if (relative_path[0] == '/') {
-        // Absolute path - use as-is, but normalize it
-        strncpy(result, relative_path, 2047);
-        result[2047] = '\0';
-        url_normalize_path(result, 2048);   // result = mem_alloc(2048)
-        return result;
-    }
-
-    // RFC 3986 Section 5.2.3 - Relative path resolution
-    // The base path segments are parsed, excluding the last segment (filename)
-    char* segments[128];
-    int segment_count = 0;
-
-    // Parse base path segments, excluding the last one only if it's not a directory
-    if (base_path && strlen(base_path) > 1) {
-        char base_copy[2048];
-        size_t base_len = strlen(base_path + 1);
-        if (base_len >= sizeof(base_copy)) {
-            log_error("URL path too long: %zu chars (max: %zu)", base_len, sizeof(base_copy) - 1);
-            return NULL;  // Graceful failure for oversized paths
-        }
-        strncpy(base_copy, base_path + 1, sizeof(base_copy) - 1); // Safe copy
-        base_copy[sizeof(base_copy) - 1] = '\0';  // Ensure null termination
-
-        // Check if base path ends with '/' (indicating it's a directory)
-        bool is_directory = (base_path[strlen(base_path) - 1] == '/');
-
-        // Split into segments
-        char* temp_segments[128];
-        int temp_count = 0;
-        // URL resolution runs on worker threads; strtok's process-global cursor
-        // lets concurrent relative paths splice tokens into one another.
-        char* saveptr = NULL;
-        char* token = strtok_r(base_copy, "/", &saveptr);
-        while (token && temp_count < 127) {
-            temp_segments[temp_count] = mem_alloc(strlen(token) + 1, MEM_CAT_TEMP);
-            if (temp_segments[temp_count]) {
-                size_t token_len = strlen(token);
-                str_copy(temp_segments[temp_count], token_len + 1, token, token_len);
-                temp_count++;
-            }
-            token = strtok_r(NULL, "/", &saveptr);
-        }
-
-        // Copy segments: if directory, keep all; if file, exclude last (RFC 3986)
-        int segments_to_copy = is_directory ? temp_count : (temp_count > 0 ? temp_count - 1 : 0);
-        for (int i = 0; i < segments_to_copy && i < 127; i++) {
-            segments[segment_count] = temp_segments[i];
-            segment_count++;
-        }
-
-        // Free unused segments
-        for (int i = segments_to_copy; i < temp_count; i++) {
-            mem_free(temp_segments[i]);
-        }
-    }
-
-    // Process relative path segments according to RFC 3986 Section 5.2.4
-    char path_copy[1024];
-    strncpy(path_copy, relative_path, sizeof(path_copy) - 1);
-    path_copy[sizeof(path_copy) - 1] = '\0';
-
-    char* path_saveptr = NULL;
-    char* token = strtok_r(path_copy, "/", &path_saveptr);
-    while (token && segment_count < 127) {
-        if (strcmp(token, ".") == 0) {
-            // Current directory - skip (RFC 3986)
-        } else if (strcmp(token, "..") == 0) {
-            // Parent directory - remove last segment if possible (RFC 3986)
-            if (segment_count > 0) {
-                mem_free(segments[segment_count - 1]);
-                segment_count--;
-            }
-            // If segment_count == 0, ".." has no effect (can't go above root)
-        } else if (strlen(token) > 0) {
-            // Regular segment - add it
-            segments[segment_count] = mem_alloc(strlen(token) + 1, MEM_CAT_TEMP);
-            if (segments[segment_count]) {
-                size_t token_len = strlen(token);
-                str_copy(segments[segment_count], token_len + 1, token, token_len);
-                segment_count++;
-            }
-        }
-        token = strtok_r(NULL, "/", &path_saveptr);
-    }
-
-    // Rebuild path from segments
-    str_copy(result, 2048, "/", 1);
-    size_t result_len = 1;
-    for (int i = 0; i < segment_count; i++) {
-        if (segments[i]) {
-            if (result_len > 1) {
-                result_len = str_cat(result, result_len, 2048, "/", 1);
-            }
-            result_len = str_cat(result, result_len, 2048, segments[i], strlen(segments[i]));
-            mem_free(segments[i]);
-        }
-    }
-
+    memcpy(result, base_path, prefix_len);
+    memcpy(result + prefix_len, relative_path, relative_len + 1);
+    url_normalize_path(result, capacity);
     return result;
 }
 

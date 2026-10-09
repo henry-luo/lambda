@@ -227,6 +227,49 @@ static bool compact_entries(OrderedMap* map) {
     hashmap_free(map->index); map->index = index; map->entries = entries.get();
     return true;
 }
+// keep allocation/root ownership off the read and immediate-update stack frame.
+static Item map_call_owned(Item owner, Item method_item, Item key, Item value,
+        int64_t slot, uint64_t hash, int64_t head) {
+    RootFrame roots(3);
+    if (!roots.valid()) return ItemError;
+    uint64_t key_home = 0, value_home = 0;
+    Rooted<Item> object(roots, owner), k(roots, lambda_item_adopt_scalar_home(key, &key_home)),
+        v(roots, lambda_item_adopt_scalar_home(value, &value_home));
+    Item canonical = canonical_string(k.get());
+    if (get_type_id(canonical) == LMD_TYPE_ERROR) return canonical;
+    if (canonical.item != k.get().item)
+        return mvp_lmd_map_call(object.get(), method_item, canonical, v.get());
+    OrderedMap* map = (OrderedMap*)object.get().map;
+    int64_t previous = -1;
+    if (slot >= 0) {
+        Item stored = store(map->entries, slot + 1, v.get());
+        return get_type_id(stored) == LMD_TYPE_ERROR ? stored : object.get();
+    }
+    Array* old_entries = map->entries;
+    if (!compact_entries(map)) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
+    if (old_entries != map->entries) slot = entry_find(map, k.get(), hash, &previous, &head);
+    slot = map->entries->length;
+    if (slot > UINT32_MAX - 4 || !array_reserve_append_slots(map->entries, 8))
+        return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
+    // publish the index only after every owned slot is installed successfully.
+    Item stored_key = is_number(k.get()) && it2d(k.get()) == 0 ? Item{.item = i2it(0)} : k.get();
+    Item row[4] = {stored_key, v.get(), Item{.item = i2it(head)}, Item{.item = ITEM_TRUE}};
+    for (int i = 0; i < 4; i++) {
+        Item written = store(map->entries, slot + i, i == 0 ? stored_key : i == 1 ? v.get() : row[i]);
+        if (get_type_id(written) == LMD_TYPE_ERROR) {
+            for (int64_t j = slot; j < map->entries->length; j++) map->entries->items[j] = ItemNull;
+            map->entries->length = slot; return written;
+        }
+    }
+    MapBucket added = {hash, slot};
+    hashmap_set(map->index, &added);
+    if (hashmap_oom(map->index)) {
+        for (int i = 0; i < 4; i++) map->entries->items[slot + i] = ItemNull;
+        map->entries->length = slot; return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
+    }
+    // learn only existing-entry hits: unique insertions do not benefit from a last-key probe.
+    map->size++; return object.get();
+}
 extern "C" Item mvp_lmd_map_call(Item owner, Item method_item, Item key, Item value) {
     int64_t method = (method_item.item & 0xffff) >> 8;
     Map* face = object_face(owner);
@@ -242,16 +285,8 @@ extern "C" Item mvp_lmd_map_call(Item owner, Item method_item, Item key, Item va
     if (method < 1 || method > 4) return mvp_lmd_fail(LMD_MVP_CAPABILITY, 0);
     // canonical keys, immediate updates and read/delete hits need no GC-capable setup.
     if (get_type_id(key) == LMD_TYPE_STRING &&
-            !utf8_key_is_canonical(key.get_string()->chars, key.get_string()->len)) {
-        RootFrame roots(3);
-        if (!roots.valid()) return ItemError;
-        uint64_t home = 0;
-        Rooted<Item> object(roots, owner), name(roots, key),
-            held(roots, lambda_item_adopt_scalar_home(value, &home));
-        Item canonical = canonical_string(name.get());
-        if (get_type_id(canonical) == LMD_TYPE_ERROR) return canonical;
-        return mvp_lmd_map_call(object.get(), method_item, canonical, held.get());
-    }
+            !utf8_key_is_canonical(key.get_string()->chars, key.get_string()->len))
+        return map_call_owned(owner, method_item, key, value, -1, 0, -1);
     uint64_t hash = 0;
     int64_t previous = -1, head = -1, slot = map->last_entry - 1;
     // ordinals retain no GC edges; validate the live key after deletion, clear or compaction.
@@ -283,39 +318,7 @@ extern "C" Item mvp_lmd_map_call(Item owner, Item method_item, Item key, Item va
         map->entries->items[slot + 1] = value;
         return owner;
     }
-    RootFrame roots(3);
-    if (!roots.valid()) return ItemError;
-    uint64_t key_home = 0, value_home = 0;
-    Rooted<Item> object(roots, owner), k(roots, lambda_item_adopt_scalar_home(key, &key_home)),
-        v(roots, lambda_item_adopt_scalar_home(value, &value_home));
-    if (slot >= 0) {
-        Item stored = store(map->entries, slot + 1, v.get());
-        return get_type_id(stored) == LMD_TYPE_ERROR ? stored : object.get();
-    }
-    Array* old_entries = map->entries;
-    if (!compact_entries(map)) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
-    if (old_entries != map->entries) slot = entry_find(map, k.get(), hash, &previous, &head);
-    slot = map->entries->length;
-    if (slot > UINT32_MAX - 4 || !array_reserve_append_slots(map->entries, 8))
-        return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
-    // publish the index only after every owned slot is installed successfully.
-    Item stored_key = is_number(k.get()) && it2d(k.get()) == 0 ? Item{.item = i2it(0)} : k.get();
-    Item row[4] = {stored_key, v.get(), Item{.item = i2it(head)}, Item{.item = ITEM_TRUE}};
-    for (int i = 0; i < 4; i++) {
-        Item written = store(map->entries, slot + i, i == 0 ? stored_key : i == 1 ? v.get() : row[i]);
-        if (get_type_id(written) == LMD_TYPE_ERROR) {
-            for (int64_t j = slot; j < map->entries->length; j++) map->entries->items[j] = ItemNull;
-            map->entries->length = slot; return written;
-        }
-    }
-    MapBucket added = {hash, slot};
-    hashmap_set(map->index, &added);
-    if (hashmap_oom(map->index)) {
-        for (int i = 0; i < 4; i++) map->entries->items[slot + i] = ItemNull;
-        map->entries->length = slot; return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
-    }
-    // learn only existing-entry hits: unique insertions do not benefit from a last-key probe.
-    map->size++; return object.get();
+    return map_call_owned(owner, method_item, key, value, slot, hash, head);
 }
 extern "C" int64_t mvp_lmd_map_next(Item owner, int64_t cursor) {
     OrderedMap* map = (OrderedMap*)owner.map;

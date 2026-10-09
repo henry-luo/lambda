@@ -124,21 +124,30 @@ let sans = math.render_math(ast, {display: true, font_family: "FormulaSans",
 ### 2.3 Output Format
 
 The output is an `<svg class="lambda-math" role="math">` whose viewBox and
-baseline alignment derive from the measured box. Paths include glyph variants
-and connector-based assemblies; a `<title>` retains canonical LaTeX for
-accessibility. Painting needs no installed copy of the font. The default
+baseline alignment derive from the measured box. Ordinary glyphs use `<text>`
+with their measured family, weight, style and size (**RAD07-L3**). Each SVG
+embeds the used bundled/supplied fonts as `@font-face` data URLs. Unencoded
+OpenType variants and connector-based assembly pieces retain paths; a `<title>`
+retains canonical LaTeX for accessibility. Explicit installed fonts must be
+available to the viewer. The default
 reuses the existing CMU Serif faces and small KaTeX symbol and alphabet fonts.
 No additional production font is bundled. Noto Sans Math is a test fixture
 under `test/lambda/math/fonts`, with its own SIL OFL notice.
 
-OpenType MATH is optional. Without it, layout uses measured advances/outlines,
+OpenType MATH is optional. The default bundled CMU profile uses the original
+Computer Modern symbol/extension TFM parameters as an explicit math companion,
+with TeX 10/7/5 script sizes and display/text/cramped placement.
+[Resource provenance and hashes](../lmd/package/math/fonts/tex/PROVENANCE.md)
+record the upstream files; actual glyph advances and ink bounds still come
+from the painted CMU/KaTeX faces. Explicit supplied or installed fonts do not
+inherit this companion. Without MATH, those fonts use measured advances/outlines,
 x-height, underline thickness and OS/2 script offsets, with shared
 [MathML Core fallback constants](https://w3c.github.io/mathml-core/#layout-constants-mathconstants).
 Ordinary italic/bold faces provide letters when the Unicode math alphabet is
 absent. Missing symbols use normal font fallback with that glyph's own metrics
-and outline; an unresolvable glyph or invalid font remains an error (**S7.4.1**).
-When an ordinary font has no stretch construction, SVG scales the measured
-outline and box together; zero-advance accents use their ink bounds. Stroke
+and resolved text face; an unresolvable glyph or invalid font remains an error (**S7.4.1**).
+When an ordinary font has no stretch construction, SVG scales the glyph
+and box together; zero-advance accents use their ink bounds. Stroke
 weights can differ from a designed assembly.
 MATH fonts retain their supplied variants and assemblies. An explicit
 `font_family` without `fonts` resolves installed fonts without loading the
@@ -147,9 +156,8 @@ without adding complex-script shaping. For absolute TeX lengths, pass
 `font_size` to provide the CSS-pixel/em conversion; otherwise that conversion
 uses 16px. Resource acquisition stays in Lambda IO (**D7.1.2v2**).
 
-The previous MathLive-compatible spans and stylesheet are available through
-the explicit `lambda.doc.math.mathlive` import. Its fixed font tables serve
-compatibility fixtures and are not imported by the default renderer.
+The legacy MathLive renderer, its stylesheet and fixed metrics tables have
+been removed. Use `lambda.doc.math.math` for all rendering.
 
 ---
 

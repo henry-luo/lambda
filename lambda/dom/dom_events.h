@@ -19,6 +19,9 @@ extern "C" {
 // Event Listener Management
 // ============================================================================
 
+/** Conservative per-realm interest index, including EventTarget IDL handlers. */
+bool dom_event_type_has_js_listeners(const char* type);
+
 /**
  * addEventListener(elem, type, callback, capture)
  * @param elem_item   Wrapped DOM element or document proxy
@@ -146,6 +149,7 @@ Item js_create_native_mouse_event(const char* type,
 
 /** Override the timestamp for deterministic native-event simulation. */
 void js_event_set_timestamp(Item event, double timestamp_ms);
+void dom_event_set_movement(Item event, double movement_x, double movement_y);
 
 Item js_create_native_pointer_event(const char* type,
     double client_x, double client_y,

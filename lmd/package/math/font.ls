@@ -4,6 +4,7 @@ import sym: .symbols
 import util: .util
 import fallback: .fallback
 import bundled: .bundled
+import tex_metrics: .tex_metrics
 
 pub let UNITS = 1000.0
 
@@ -76,6 +77,14 @@ fn collect(node) {
     } else ""
 }
 
+// Keep the CSS alias and style alongside measured geometry so SVG text selects the same face.
+fn text_facts(facts, family) {
+    if (facts == null) null
+    else {*:facts, glyphs: [for (g in facts.glyphs) if (g == null) null else
+        {*:g, text_family: family or g.font_family, text_weight: g.font_weight, text_style: g.font_style,
+            text_size: facts.font_size}]}
+}
+
 pub fn prepare(ast, options) map | error {
     let use_bundled = options.font_family == null and options.fonts == null
     let family = options.font_family or bundled.FAMILY
@@ -87,7 +96,8 @@ pub fn prepare(ast, options) map | error {
     let chars = unique(split(source ++ "()[]{}|‖⌈⌉⌊⌋⟨⟩√̂̃̄⃗̇̈⏞⏟←→↔− /", ""))
     let styles = ["normal", "auto", "italic", "bold", "bolditalic", "script", "fraktur", "double", "sans", "mono"]
     let points = unique([for (ch in chars, style in styles) variant(ch, style)])
-    let native = radiant.math_metrics({font_family: family, font_size: UNITS}, points, faces)
+    let large_points = [for (ch in sym.large_symbols() where contains(chars, ch)) ord(ch)]
+    let native = text_facts(radiant.math_metrics({font_family: family, font_size: UNITS}, points, faces), family)
     if (native == null) error("math: cannot read selected font: " ++ family)
     else {
     let facts = {*:native, constants: if (native.has_math) native.constants else fallback.constants(native.font_metrics)}
@@ -98,21 +108,45 @@ pub fn prepare(ast, options) map | error {
             {cmd: "\\emph", style: "italic"}, {cmd: "\\textsf", style: "sans"}, {cmd: "\\texttt", style: "mono"}]
             where contains(source, entry.cmd)) entry.style]])
     let style_faces = if (native.has_math) [] else [for (style in needed_styles where style != "normal")
-        {style: style, facts: radiant.math_metrics({font_family: variant_families[style] or family, font_size: UNITS,
-            font_weight: if (style == "bold" or style == "bolditalic") 700 else 400,
-            font_style: if (style == "italic" or style == "bolditalic") "italic" else "normal"}, points, faces)}]
+        (let weight = if (style == "bold" or style == "bolditalic") 700 else 400,
+         let slant = if (style == "italic" or style == "bolditalic") "italic" else "normal",
+         let style_family = variant_families[style] or family,
+         {style: style, facts: text_facts(radiant.math_metrics({font_family: style_family, font_size: UNITS,
+            font_weight: weight, font_style: slant}, points, faces), style_family)})]
     // Resolve only absent source characters; never replace a Latin variable with
     // a different font's mathematical-alphabet glyph just to obtain italics.
     let fallback_points = [for (ch in chars where lookup({points: points}, native, ord(ch)) == null) ord(ch)]
     let fallback_facts = if (len(fallback_points) == 0) null else
-        radiant.math_metrics({font_family: if (use_bundled) bundled.SYMBOL_FAMILIES else family,
-            font_size: UNITS, fallback: true}, fallback_points, faces)
+        text_facts(radiant.math_metrics({font_family: if (use_bundled) bundled.SYMBOL_FAMILIES else family,
+            font_size: UNITS, fallback: true}, fallback_points, faces), null)
     if (facts.constants.script_percent_scale_down <= 0 or facts.constants.script_script_percent_scale_down <= 0)
         error("math: selected font has invalid script scale constants")
     else {facts: facts, points: points, family: facts.font_family,
         font_metrics: facts.font_metrics, style_faces: style_faces,
-        fallback_points: fallback_points, fallback_facts: fallback_facts}
+        fallback_points: fallback_points, fallback_facts: fallback_facts, faces: faces,
+        tex: if (use_bundled) tex_metrics.load()^ else null,
+        large_points: large_points,
+        large_facts: if (use_bundled and len(large_points) > 0)
+            text_facts(radiant.math_metrics({font_family:"KaTeX_Size2", font_size:UNITS}, large_points, faces), "KaTeX_Size2") else null}
     }
+}
+
+fn text_faces(body) {
+    if (not (body is element)) []
+    else [*if (name(body) == 'text') [{family: body["font-family"], weight: body["font-weight"], style: body["font-style"]}] else [],
+        *[for (child in content(body), face in text_faces(child)) face]]
+}
+
+pub fn stylesheet(profile, body) {
+    let used = unique(text_faces(body))
+    let rules = [for (face in profile.faces where len([for (use in used where
+        use.family == face.font_family and use.weight == (face.font_weight or 400) and
+        use.style == (face.font_style or "normal")) use]) > 0) (
+        let encoded = format(face.data, 'json')^,
+        "@font-face{font-family:" ++ format(face.font_family, 'json')^ ++
+            ";font-weight:" ++ string(face.font_weight or 400) ++ ";font-style:" ++ (face.font_style or "normal") ++
+            ";src:url(data:application/octet-stream;base64," ++ slice(encoded, 1, len(encoded) - 1) ++ ")}")];
+    util.str_join(rules, "\n")
 }
 
 fn lookup(profile, facts, cp) {
@@ -138,8 +172,15 @@ pub fn character(profile, ch, style) map | error {
     else glyph(profile, ord(ch))^
 }
 
+pub fn large_operator(profile, cp) map | error {
+    let base = glyph(profile, cp)^
+    let larger = lookup({points:profile.large_points}, profile.large_facts, cp);
+    if (larger != null and larger.ink.bottom - larger.ink.top > base.ink.bottom - base.ink.top) larger else base
+}
+
 pub fn scale(profile, style) {
-    if (style == "script") profile.facts.constants.script_percent_scale_down / 100.0
+    if (profile.tex != null and profile.tex.scales[style] != null) profile.tex.scales[style]
+    else if (style == "script") profile.facts.constants.script_percent_scale_down / 100.0
     else if (style == "scriptscript") profile.facts.constants.script_script_percent_scale_down / 100.0
     else 1.0
 }

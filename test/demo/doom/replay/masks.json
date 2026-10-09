@@ -1,0 +1,137 @@
+{
+  "name": "Radial gradient masks preserve alpha ramps, descendants and transforms",
+  "html": "test/demo/doom/fixtures/_masks.ls",
+  "viewport": {
+    "width": 440,
+    "height": 180
+  },
+  "events": [
+    {
+      "type": "assert_pixel",
+      "x": 60,
+      "y": 60,
+      "min_r": 254,
+      "max_r": 255,
+      "min_g": 254,
+      "max_g": 255,
+      "min_b": 254,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "x": 96,
+      "y": 60,
+      "min_r": 253,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 2,
+      "min_b": 0,
+      "max_b": 2
+    },
+    {
+      "type": "assert_pixel",
+      "x": 94,
+      "y": 60,
+      "min_r": 254,
+      "max_r": 255,
+      "min_g": 140,
+      "max_g": 210,
+      "min_b": 140,
+      "max_b": 210
+    },
+    {
+      "type": "assert_pixel",
+      "x": 160,
+      "y": 60,
+      "min_r": 0,
+      "max_r": 2,
+      "min_g": 0,
+      "max_g": 2,
+      "min_b": 253,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "x": 195,
+      "y": 60,
+      "min_r": 253,
+      "max_r": 255,
+      "min_g": 253,
+      "max_g": 255,
+      "min_b": 253,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "x": 280,
+      "y": 60,
+      "min_r": 253,
+      "max_r": 255,
+      "min_g": 253,
+      "max_g": 255,
+      "min_b": 253,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "x": 334,
+      "y": 60,
+      "min_r": 253,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 2,
+      "min_b": 0,
+      "max_b": 2
+    },
+    {
+      "type": "assert_pixel",
+      "x": 325,
+      "y": 60,
+      "min_r": 253,
+      "max_r": 255,
+      "min_g": 253,
+      "max_g": 255,
+      "min_b": 253,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "x": 390,
+      "y": 60,
+      "min_r": 253,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 2,
+      "min_b": 0,
+      "max_b": 2
+    },
+    {
+      "type": "assert_pixel",
+      "x": 400,
+      "y": 60,
+      "min_r": 253,
+      "max_r": 255,
+      "min_g": 253,
+      "max_g": 255,
+      "min_b": 253,
+      "max_b": 255
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#clear"
+      }
+    },
+    {
+      "type": "assert_pixel",
+      "x": 60,
+      "y": 60,
+      "min_r": 253,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 2,
+      "min_b": 0,
+      "max_b": 2
+    }
+  ]
+}

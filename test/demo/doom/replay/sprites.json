@@ -1,0 +1,16 @@
+{
+  "name": "DOOM intrinsic sprite sizing, floor anchoring and sheet cropping",
+  "html": "test/demo/doom/fixtures/_sprites.ls",
+  "viewport": {"width": 360, "height": 180},
+  "events": [
+    {"type": "assert_count", "target": {"selector": ".thing > img.sprite"}, "equals": 2},
+    {"type": "assert_count", "target": {"selector": ".thing > div.sprite"}, "equals": 2},
+    {"type": "assert_count", "target": {"selector": "img.sprite[width], img.sprite[height]"}, "equals": 0},
+    {"type": "assert_rect", "target": {"selector": "#sprite-0"}, "x": 68.5, "y": 72, "width": 23, "height": 48, "tolerance": 0.1},
+    {"type": "assert_rect", "target": {"selector": "#sprite-1"}, "x": 128.5, "y": 108, "width": 63, "height": 12, "tolerance": 0.1},
+    {"type": "assert_rect", "target": {"selector": "#sprite-2"}, "x": 216, "y": 65, "width": 48, "height": 55, "tolerance": 0.1},
+    {"type": "assert_rect", "target": {"selector": "#sprite-3"}, "x": 313, "y": 102, "width": 14, "height": 18, "tolerance": 0.1},
+    {"type": "assert_pixel", "x": 80, "y": 96, "min_r": 51, "max_r": 53, "min_g": 51, "max_g": 53, "min_b": 51, "max_b": 53},
+    {"type": "assert_pixel", "x": 80, "y": 121, "max_r": 18, "max_g": 18, "max_b": 18}
+  ]
+}

@@ -1,0 +1,10 @@
+{
+  maps: 9,
+  walls: [697, 1473, 1434, 1214, 1153, 1793, 1343, 543, 948],
+  start: [1056, -3616, 41, 0],
+  inventory: [100, 0, 50, 2],
+  doors: 4,
+  lifts: 2,
+  deterministic: true,
+  malformed: "DOOM data: missing map array"
+}

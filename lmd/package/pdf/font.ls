@@ -427,7 +427,8 @@ pub fn resolve_font(pdf, page, name: string) {
         // browser matches our @font-face declaration.
         let emb = _embedded_font_info(pdf, dict)
         if (emb == null) {
-            _make_descriptor(name, info0, to_uni, enc, widths, first_char, last_char, cid_widths, default_width)
+            { *: _make_descriptor(name, info0, to_uni, enc, widths, first_char, last_char, cid_widths, default_width),
+              glyph_paths: dict.glyph_paths }
         }
         else {
             let info1 = _info_with_embedded(info0, stripped)

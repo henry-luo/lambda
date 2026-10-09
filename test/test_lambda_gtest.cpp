@@ -9,6 +9,7 @@
 #include "test_lambda_tier_helpers.hpp"
 #include "test_ast_tune_capture.hpp"
 #include "../lib/shell.h"
+#include "../lib/strbuf.h"
 #include <string.h>
 
 //==============================================================================
@@ -26,12 +27,80 @@ static const char* FUNCTIONAL_TEST_DIRECTORIES[] = {
     "test/lambda/edit",
     "test/lambda/slide",
     "test/lambda/scene3d",
+    "test/lambda/ui_dtna",
+    "test/lambda/map",
+    "test/demo/doom/tests",
     "test/lambda/graph/mermaid",
     "test/lambda/graph/graphviz",
     "test/lambda/graph/structurizr",
     // Add more functional test directories here as needed
 };
 static const size_t NUM_FUNCTIONAL_TEST_DIRECTORIES = sizeof(FUNCTIONAL_TEST_DIRECTORIES) / sizeof(FUNCTIONAL_TEST_DIRECTORIES[0]);
+
+TEST(UiDtnaTests, PackageContractsAgreeAcrossTiers) {
+    const char* tiers[] = {"interp", "auto", "jit"};
+    const char* names[] = {"dtna_attribute_union", "dtna_collections",
+        "dtna_contracts", "dtna_display", "dtna_tokens"};
+    for (const char* tier : tiers) {
+        SCOPED_TRACE(tier);
+        for (const char* name : names) {
+            StrBuf* script = strbuf_new();
+            StrBuf* golden = strbuf_new();
+            strbuf_append_format(script, "test/lambda/ui_dtna/%s.ls", name);
+            strbuf_append_format(golden, "test/lambda/ui_dtna/%s.txt", name);
+            test_lambda_script_against_file(script->str, golden->str, false, tier);
+            strbuf_free(script);
+            strbuf_free(golden);
+        }
+    }
+}
+
+TEST(UiDtnaTests, RejectedDocumentReleasesItsErrorBeforeTheHeap) {
+    const char* tiers[] = {"interp", "jit"};
+    for (const char* tier : tiers) {
+        SCOPED_TRACE(tier);
+        const ShellEnvEntry env[] = {{"LAMBDA_EXEC_BACKEND", tier}, {NULL, NULL}};
+        const char* args[] = {LAMBDA_EXE, "--no-log", "render",
+            "test/ui/dtna_error_document.ls", "-o", "temp/dtna_rejected.png", NULL};
+        ShellOptions options = {};
+        options.env = env;
+        options.timeout_ms = 30000;
+        options.merge_stderr = true;
+        ShellResult result = shell_exec(LAMBDA_EXE, args, &options);
+        EXPECT_FALSE(result.timed_out);
+        // Render load rejection returns 1; a signal must not masquerade as rejection.
+        EXPECT_EQ(result.exit_code, 1) << (result.stdout_buf ? result.stdout_buf : "");
+        shell_result_free(&result);
+    }
+}
+
+TEST(DoomDemoTests, GeometryInputAndResourceContractsAgreeAcrossTiers) {
+    const char* tiers[] = {"interp", "auto", "jit"};
+    const char* fixtures[] = {"test/demo/doom/tests/core_test",
+        "test/demo/doom/tests/physics_test", "test/demo/doom/tests/mechanics_test",
+        "test/demo/doom/tests/combat_test", "test/demo/doom/tests/pickups_test",
+        "test/demo/doom/tests/ai_test", "test/demo/doom/tests/clock_test",
+        "test/demo/doom/tests/sprites_test",
+        "test/demo/doom/tests/effects_test",
+        "test/demo/doom/tests/weapons_test",
+        "test/demo/doom/tests/camera_test",
+        "test/demo/doom/tests/audio_test",
+        "test/demo/doom/tests/oracle_test",
+        "test/demo/doom/tools/verify_maps"};
+    for (const char* tier : tiers) {
+        SCOPED_TRACE(tier);
+        // Resource loading reads the actual CLI entry path, so run directly
+        // instead of test-batch, whose argv identifies the batch driver.
+        for (const char* fixture : fixtures) {
+            StrBuf* script = strbuf_new();
+            StrBuf* golden = strbuf_new();
+            strbuf_append_str(script, fixture); strbuf_append_str(script, ".ls");
+            strbuf_append_str(golden, fixture); strbuf_append_str(golden, ".txt");
+            test_lambda_script_against_file(script->str, golden->str, false, tier);
+            strbuf_free(script); strbuf_free(golden);
+        }
+    }
+}
 
 // Procedural scripts (executed with ./lambda.exe run <script>)
 static const char* PROCEDURAL_TEST_DIRECTORIES[] = {
@@ -468,6 +537,8 @@ static const TierParityFixture kTune27TierParity[] = {
     // S11.4.6 (LR03-26): an inline pattern island admits as a constrained
     // base, a union arm or a field; the JIT's `case \(d+):` never matched.
     {"test/lambda/pattern_island_type.ls", "test/lambda/pattern_island_type.txt"},
+    // S11.1.2v4: quoted classes and domain inference must agree on every tier.
+    {"test/lambda/pattern_quoted_classes.ls", "test/lambda/pattern_quoted_classes.txt"},
     // S2.5.1v2: `is` against `type(x)` tests the kind; `type((1, 2))` crashed.
     {"test/lambda/type_of_kind_is.ls", "test/lambda/type_of_kind_is.txt"},
     // S12.3.2 (LR07-19): a method's named arguments bind by name, as a direct

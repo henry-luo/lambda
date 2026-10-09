@@ -67,6 +67,10 @@ struct CssVarContext {
     Pool* measure_pool = nullptr;
     CssFormatter* scalar_formatter = nullptr;
     bool allocation_failed = false;
+    DomElement* exclude_animation_element = nullptr;
+    DomElement* dependency_owner = nullptr;
+    const char* dependency_name = nullptr;
+    bool dependency_found = false;
 
     static void* allocate(size_t size) {return mem_alloc(size, MEM_CAT_STYLE);}
     static void* reallocate(void* pointer, size_t size) {return mem_realloc(pointer, size, MEM_CAT_STYLE);}
@@ -110,9 +114,9 @@ struct CssVarContextScope {
     CssVarContext local;
     CssVarContext* previous;
     CssVarContextScope(Pool* pool, DomElement* element, CssVariableLookupFn lookup = nullptr,
-        void* context = nullptr) : local(pool, element, lookup, context), previous(css_active_var_context) {
+        void* context = nullptr, bool isolate = false) : local(pool, element, lookup, context), previous(css_active_var_context) {
         // nested font computation may destroy a different scratch pool before this call returns.
-        css_active_var_context = previous && previous->pool == pool && previous->lookup == lookup &&
+        css_active_var_context = !isolate && previous && previous->pool == pool && previous->lookup == lookup &&
             previous->lookup_context == context ? previous : &local;
     }
     ~CssVarContextScope() {css_active_var_context = previous;}
@@ -365,13 +369,15 @@ static StrView css_substitute_custom_text(Pool* pool, DomElement* element,
     StrView source, const CssVarStack* stack, bool trim_boundary_comments = false);
 
 static const CssValue* css_compute_custom_property_uncached(Pool* pool, DomElement* element,
-    const char* name, const CssVarStack* stack, size_t name_length, StrView* text) {
+    const char* name, const CssVarStack* stack, size_t name_length, StrView* text,
+    const CssCustomProp* specified_entry = nullptr) {
     if (!element) return nullptr;
     if (name_length == (size_t)-1) name_length = strlen(name);
     const CssPropertyRegistration* registration = element->doc
         ? css_find_document_property_registration(element->doc, name, name_length) : nullptr;
     const CssValue* initial = registration ? registration->initial_value : nullptr;
-    const CssCustomProp* entry = dom_element_lookup_own_custom_property_entry(element, name, name_length);
+    const CssCustomProp* entry = specified_entry ? specified_entry : dom_element_lookup_own_custom_property_entry(element,
+        name, name_length, css_active_var_context->exclude_animation_element == element);
     const CssValue* value = entry ? entry->value : nullptr;
     bool inherit = registration ? registration->inherits : true;
     if (value && css_value_is_global_keyword(value)) {
@@ -434,6 +440,12 @@ static const CssValue* css_compute_custom_property(Pool* pool, DomElement* eleme
     if (!element || !name || !css_active_var_context || css_active_var_context->allocation_failed) return nullptr;
     if (name_length == (size_t)-1) name_length = strlen(name);
     if (css_var_stack_contains(stack, element, name, name_length)) return nullptr;
+    // Observe the same inheritance and indirection walk used by substitution;
+    // a descendant's own override must stop an ancestor dependency.
+    CssVarContext* context = css_active_var_context;
+    if (context->dependency_owner == element && context->dependency_name &&
+        strlen(context->dependency_name) == name_length &&
+        memcmp(context->dependency_name, name, name_length) == 0) context->dependency_found = true;
     CssVarCacheEntry key = {};
     key.owner = element;
     key.name = name;
@@ -885,6 +897,15 @@ const CssValue* css_resolve_element_var_value(Pool* pool, DomElement* element,
     return invalid ? nullptr : css_value_unwrap(resolved);
 }
 
+bool css_value_depends_on_custom_property(Pool* pool, DomElement* element,
+    const CssValue* value, DomElement* owner, const char* name) {
+    CssVarContextScope scope(pool, element, nullptr, nullptr, true);
+    scope.local.dependency_owner = owner;
+    scope.local.dependency_name = name;
+    const CssValue* resolved = resolve_var_function_inner(pool, value, element, nullptr, nullptr, nullptr);
+    return !resolved || scope.local.allocation_failed || scope.local.dependency_found;
+}
+
 const CssValue* css_compute_element_custom_property(Pool* pool, DomElement* element,
     const char* name, size_t name_length, bool preserve_tokens) {
     CssVarContextScope context(pool, element);
@@ -910,4 +931,81 @@ const CssValue* css_compute_element_custom_property_text(Pool* pool, DomElement*
         if (!text->str) return nullptr;
     }
     return resolved;
+}
+
+const CssValue* css_compute_custom_property_value(Pool* pool, DomElement* element,
+    const char* name, const CssValue* specified) {
+    CssVarContextScope context(pool, element);
+    CssCustomProp entry = {};
+    entry.name = lam::up(name);
+    entry.value = lam::up(specified);
+    return css_value_unwrap(css_compute_custom_property_uncached(pool, element, name,
+        css_active_var_stack, strlen(name), nullptr, &entry));
+}
+
+const CssValue* css_compute_custom_property_base(Pool* pool, DomElement* element, const char* name) {
+    // an underlying-value lookup must not reuse animated entries from an outer cache.
+    CssVarContextScope context(pool, element, nullptr, nullptr, true);
+    context.local.exclude_animation_element = element;
+    return css_value_unwrap(css_compute_custom_property_uncached(pool, element, name,
+        css_active_var_stack, strlen(name), nullptr));
+}
+
+static const CssValue* css_interpolate_registered_value(Pool* pool, const CssPropertySyntaxComponent* syntax,
+    const CssValue* from, const CssValue* to, float progress) {
+    if (!from || !to) return progress < .5f ? from : to;
+    if (from->type == CSS_VALUE_TYPE_LIST && to->type == CSS_VALUE_TYPE_LIST) {
+        if (from->data.list.count != to->data.list.count ||
+            from->data.list.comma_separated != to->data.list.comma_separated) return progress < .5f ? from : to;
+        int count = from->data.list.count;
+        CssValue** values = (CssValue**)pool_alloc(pool, sizeof(CssValue*) * count);
+        if (!values) return nullptr;
+        for (int i = 0; i < count; i++) values[i] = const_cast<CssValue*>(css_interpolate_registered_value(
+            pool, syntax, from->data.list.values[i], to->data.list.values[i], progress));
+        CssValue* list = css_value_create_list(pool, values, count);
+        if (list) list->data.list.comma_separated = from->data.list.comma_separated;
+        return list;
+    }
+    if (syntax->type == CSS_SYNTAX_COLOR) {
+        CssComputedColor a = {}, b = {};
+        Color left = {}, right = {};
+        if (css_color_compute(from, &a) && css_color_compute(to, &b) &&
+            css_color_to_rgba(&a, &left.r, &left.g, &left.b, &left.a) &&
+            css_color_to_rgba(&b, &right.r, &right.g, &right.b, &right.a)) {
+            Color mixed = css_interpolate_color(left, right, progress);
+            CssComputedColor color = {};
+            color.type = CSS_COLOR_RGB;
+            color.components[0] = mixed.r / 255.0;
+            color.components[1] = mixed.g / 255.0;
+            color.components[2] = mixed.b / 255.0;
+            color.components[3] = mixed.a / 255.0;
+            return css_value_create_computed_color(pool, &color);
+        }
+    }
+    CssMathEvaluationContext context = {};
+    context.preserve_percentages = true;
+    CssMathResult a = css_math_evaluate(from, &context), b = css_math_evaluate(to, &context);
+    bool compatible = a.type == b.type && a.type != CSS_MATH_INVALID && a.type != CSS_MATH_DEFERRED;
+    bool length_percentage = syntax->type == CSS_SYNTAX_LENGTH_PERCENTAGE &&
+        (a.type == CSS_MATH_LENGTH || a.type == CSS_MATH_PERCENT || a.type == CSS_MATH_LENGTH_PERCENT) &&
+        (b.type == CSS_MATH_LENGTH || b.type == CSS_MATH_PERCENT || b.type == CSS_MATH_LENGTH_PERCENT);
+    if (compatible || length_percentage) {
+        CssMathResult result = {};
+        result.type = length_percentage ? CSS_MATH_LENGTH_PERCENT : a.type;
+        result.value = a.value + (b.value - a.value) * progress;
+        result.percentage = a.percentage + (b.percentage - a.percentage) * progress;
+        result.resolved = true;
+        return css_registered_math_value(pool, result, syntax->type == CSS_SYNTAX_INTEGER);
+    }
+    return progress < .5f ? from : to;
+}
+
+const CssValue* css_interpolate_custom_property_value(Pool* pool, DomElement* element,
+    const char* name, const CssValue* from, const CssValue* to, float progress) {
+    const CssPropertyRegistration* registration = element && element->doc
+        ? css_find_document_property_registration(element->doc, name) : nullptr;
+    const CssPropertySyntaxComponent* left = registration ? css_match_property_syntax(registration, from) : nullptr;
+    const CssPropertySyntaxComponent* right = registration ? css_match_property_syntax(registration, to) : nullptr;
+    return left && right && left == right ? css_interpolate_registered_value(pool, left, from, to, progress)
+        : progress < .5f ? from : to;
 }

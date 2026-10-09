@@ -150,6 +150,15 @@ void render_background(RasterRenderContext* rdcon, ViewBlock* view, Rect rect) {
         swapped_radius = true;
     }
 
+    // The paint box clips background tiles even when their transformed size
+    // exceeds the element; the viewport bound alone cannot enforce that box.
+    bool transformed_clip = rdcon->has_transform || rdcon->css3d_context;
+    if (transformed_clip) {
+        RdtPath* path = background_rounded_rect_path(view, paint_rect);
+        rc_push_clip(rdcon, path, render_state_current_transform(rdcon));
+        rdt_path_free(path);
+    }
+
     // Render base color first (if any), clipped to paint area
     if (bg->color.a > 0) {
         render_background_color(rdcon, view, bg->color, paint_rect);
@@ -221,6 +230,7 @@ void render_background(RasterRenderContext* rdcon, ViewBlock* view, Rect rect) {
     }
 
     // Restore original clip
+    if (transformed_clip) rc_pop_clip(rdcon);
     if (swapped_radius) {
         border->radius = orig_radius;
     }
@@ -353,46 +363,6 @@ static void render_linear_gradient(RasterRenderContext* rdcon, ViewBlock* view, 
 }
 
 /**
- * Calculate radial gradient radius based on CSS size keyword
- */
-static float calc_radial_radius(RadialGradient* gradient, Rect rect, float cx, float cy) {
-    float w = rect.width;
-    float h = rect.height;
-
-    // Distance to each corner
-    float d_tl = sqrtf(cx * cx + cy * cy);
-    float d_tr = sqrtf((w - cx) * (w - cx) + cy * cy);
-    float d_bl = sqrtf(cx * cx + (h - cy) * (h - cy));
-    float d_br = sqrtf((w - cx) * (w - cx) + (h - cy) * (h - cy));
-
-    // Distance to each side
-    float d_top = cy;
-    float d_bottom = h - cy;
-    float d_left = cx;
-    float d_right = w - cx;
-
-    float radius = 0;
-
-    switch (gradient->size) {
-        case RADIAL_SIZE_CLOSEST_SIDE:
-            radius = fminf(fminf(d_top, d_bottom), fminf(d_left, d_right));
-            break;
-        case RADIAL_SIZE_FARTHEST_SIDE:
-            radius = fmaxf(fmaxf(d_top, d_bottom), fmaxf(d_left, d_right));
-            break;
-        case RADIAL_SIZE_CLOSEST_CORNER:
-            radius = fminf(fminf(d_tl, d_tr), fminf(d_bl, d_br));
-            break;
-        case RADIAL_SIZE_FARTHEST_CORNER:
-        default:
-            radius = fmaxf(fmaxf(d_tl, d_tr), fmaxf(d_bl, d_br));
-            break;
-    }
-
-    return radius;
-}
-
-/**
  * Render radial gradient
  */
 static void render_radial_gradient(RasterRenderContext* rdcon, ViewBlock* view, RadialGradient* gradient, Rect rect) {
@@ -404,7 +374,7 @@ static void render_radial_gradient(RasterRenderContext* rdcon, ViewBlock* view, 
     float local_cy = gradient->cy_is_px ? gradient->cy : rect.height * gradient->cy;
     float cx = rect.x + local_cx;
     float cy = rect.y + local_cy;
-    float radius = calc_radial_radius(gradient, rect, local_cx, local_cy);
+    float radius = radiant_radial_gradient_geometry(gradient, rect).rx;
 
     if (gradient->shape == RADIAL_SHAPE_ELLIPSE) {
         radius = fmaxf(rect.width, rect.height) * 0.5f;
@@ -1397,7 +1367,7 @@ void render_box_shadow_inset(RasterRenderContext* rdcon, ViewBlock* view, Rect r
 static bool background_size_unspecified(BackgroundProp* bg);
 
 static void compute_bg_image_size(BackgroundProp* bg, float img_w, float img_h,
-                                   float box_w, float box_h, float* out_w, float* out_h) {
+                                   float box_w, float box_h, float* out_w, float* out_h, float raster_scale) {
     float aspect = (img_h > 0) ? img_w / img_h : 1.0f;
 
     if (background_size_unspecified(bg)) {
@@ -1432,10 +1402,10 @@ static void compute_bg_image_size(BackgroundProp* bg, float img_w, float img_h,
         bool h_auto = bg->bg_size_height_auto;
 
         if (!w_auto) {
-            w = bg->bg_size_width_is_percent ? (bg->bg_size_width / 100.0f) * box_w : bg->bg_size_width;
+            w = bg->bg_size_width_is_percent ? (bg->bg_size_width / 100.0f) * box_w : bg->bg_size_width * raster_scale;
         }
         if (!h_auto) {
-            h = bg->bg_size_height_is_percent ? (bg->bg_size_height / 100.0f) * box_h : bg->bg_size_height;
+            h = bg->bg_size_height_is_percent ? (bg->bg_size_height / 100.0f) * box_h : bg->bg_size_height * raster_scale;
         }
 
         if (w_auto && !h_auto) {
@@ -1459,7 +1429,7 @@ static void compute_bg_image_size(BackgroundProp* bg, float img_w, float img_h,
  * Per CSS spec: percentage position = (container_size - image_size) * percentage / 100
  */
 static void compute_bg_image_position(BackgroundProp* bg, float img_w, float img_h,
-                                       float box_w, float box_h, float* out_x, float* out_y) {
+                                       float box_w, float box_h, float* out_x, float* out_y, float raster_scale) {
     if (!bg->bg_position_set) {
         // Default: 0% 0% (top-left)
         *out_x = 0.0f;
@@ -1467,17 +1437,8 @@ static void compute_bg_image_position(BackgroundProp* bg, float img_w, float img
         return;
     }
 
-    if (bg->bg_position_x_is_percent) {
-        *out_x = (box_w - img_w) * bg->bg_position_x / 100.0f;
-    } else {
-        *out_x = bg->bg_position_x;
-    }
-
-    if (bg->bg_position_y_is_percent) {
-        *out_y = (box_h - img_h) * bg->bg_position_y / 100.0f;
-    } else {
-        *out_y = bg->bg_position_y;
-    }
+    *out_x = background_position_offset(bg, true, box_w - img_w, raster_scale);
+    *out_y = background_position_offset(bg, false, box_h - img_h, raster_scale);
 }
 
 static bool background_size_unspecified(BackgroundProp* bg) {
@@ -1507,7 +1468,7 @@ typedef struct {
 
 static bool compute_background_tile_plan(BackgroundProp* bg, Rect position_rect, Rect coverage_rect,
                                          float intrinsic_w, float intrinsic_h,
-                                         BackgroundTilePlan* plan) {
+                                         BackgroundTilePlan* plan, float raster_scale) {
     if (!bg || !plan ||
         position_rect.width <= 0.0f || position_rect.height <= 0.0f ||
         coverage_rect.width <= 0.0f || coverage_rect.height <= 0.0f) {
@@ -1516,13 +1477,13 @@ static bool compute_background_tile_plan(BackgroundProp* bg, Rect position_rect,
 
     compute_bg_image_size(bg, intrinsic_w, intrinsic_h,
                           position_rect.width, position_rect.height,
-                          &plan->tile_w, &plan->tile_h);
+                          &plan->tile_w, &plan->tile_h, raster_scale);
     if (plan->tile_w <= 0.0f || plan->tile_h <= 0.0f) return false;
 
     float pos_x = 0.0f;
     float pos_y = 0.0f;
     compute_bg_image_position(bg, plan->tile_w, plan->tile_h,
-                              position_rect.width, position_rect.height, &pos_x, &pos_y);
+                              position_rect.width, position_rect.height, &pos_x, &pos_y, raster_scale);
 
     plan->repeat_x = bg->bg_repeat_x ? bg->bg_repeat_x : CSS_VALUE_REPEAT;
     plan->repeat_y = bg->bg_repeat_y ? bg->bg_repeat_y : CSS_VALUE_REPEAT;
@@ -1645,7 +1606,7 @@ static void render_linear_gradient_layer(RasterRenderContext* rdcon, ViewBlock* 
     Rect tile_basis_rect = gradient->is_repeating ? position_rect : paint_rect;
     BackgroundTilePlan plan = {};
     if (!compute_background_tile_plan(bg, tile_basis_rect, paint_rect,
-                                      tile_basis_rect.width, tile_basis_rect.height, &plan)) {
+                                      tile_basis_rect.width, tile_basis_rect.height, &plan, rdcon->raster_scale)) {
         return;
     }
 
@@ -1661,7 +1622,7 @@ static void render_radial_gradient_layer(RasterRenderContext* rdcon, ViewBlock* 
     (void)position_rect;
     BackgroundTilePlan plan = {};
     if (!compute_background_tile_plan(bg, paint_rect, paint_rect,
-                                      paint_rect.width, paint_rect.height, &plan)) {
+                                      paint_rect.width, paint_rect.height, &plan, rdcon->raster_scale)) {
         return;
     }
 
@@ -1793,7 +1754,7 @@ static void render_background_image(RasterRenderContext* rdcon, ViewBlock* view,
     float s = rdcon->raster_scale;
 
     BackgroundTilePlan plan = {};
-    if (!compute_background_tile_plan(bg, rect, rect, img_w * s, img_h * s, &plan)) {
+    if (!compute_background_tile_plan(bg, rect, rect, img_w * s, img_h * s, &plan, s)) {
         return;
     }
 
@@ -1805,7 +1766,7 @@ static void render_background_image(RasterRenderContext* rdcon, ViewBlock* view,
     // Render tiles
     bool is_svg = (img->format == IMAGE_FORMAT_SVG);
     if (!is_svg) {
-        if (tile_scale_mode == SCALE_MODE_NEAREST ||
+        if (rdcon->has_transform || rdcon->css3d_context || tile_scale_mode == SCALE_MODE_NEAREST ||
             tile_scale_mode == SCALE_MODE_PIXELATED) {
             image_surface_ensure_decoded(img, img->width, img->height);
         } else {
@@ -1817,6 +1778,36 @@ static void render_background_image(RasterRenderContext* rdcon, ViewBlock* view,
     }
     if (is_svg && tile_scale_mode == SCALE_MODE_LINEAR_WRAP)
         tile_scale_mode = SCALE_MODE_LINEAR;
+    if (!is_svg && rdcon->dl && rdcon->has_transform &&
+        (plan.repeat_x == CSS_VALUE_REPEAT || plan.repeat_x == CSS_VALUE_ROUND) &&
+        (plan.repeat_y == CSS_VALUE_REPEAT || plan.repeat_y == CSS_VALUE_ROUND)) {
+        ImageSurfaceReadScope read_scope;
+        Rect tile = {plan.origin_x, plan.origin_y, plan.tile_w, plan.tile_h};
+        uint32_t* projected = nullptr;
+        Rect bounds;
+        bool ok = render_image_project_pixels((const uint32_t*)img->pixels,
+            img->decoded_width > 0 ? img->decoded_width : img->width,
+            img->decoded_height > 0 ? img->decoded_height : img->height, img->pitch / 4,
+            rect, &rdcon->transform,
+            render_painter_projection_viewport(rdcon),
+            tile_scale_mode, img->alpha_mode == IMAGE_ALPHA_STRAIGHT, &projected, &bounds, &tile);
+        lam::Temp<uint32_t> owned_projection(projected);
+        if (!ok) {
+            rdcon->paint_failed = true;
+            log_error("[BG_PATTERN_PROJECT] cannot project repeated background");
+        } else if (projected) {
+            int width = 0, height = 0;
+            uint32_t* pixels = background_gradient_pixel_buffer(rdcon, bounds, &width, &height);
+            if (!pixels) rdcon->paint_failed = true;
+            else {
+                // Unowned PaintIR pixels are premultiplied and belong to the recording.
+                memcpy(pixels, projected, (size_t)width * height * sizeof(uint32_t));
+                rc_draw_image(rdcon, pixels, width, height, width, bounds.x, bounds.y,
+                    bounds.width, bounds.height, 255, nullptr, nullptr, SCALE_MODE_LINEAR);
+            }
+        }
+        return;
+    }
     ClipShape rounded_clip_shape = {};
     ClipShape* clip_shape_stack[RDT_MAX_CLIP_SHAPES];
     int clip_shape_depth = background_image_clip_shapes(rdcon, view, &rounded_clip_shape, clip_shape_stack);

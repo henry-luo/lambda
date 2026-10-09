@@ -2540,6 +2540,34 @@ static bool view_state_is_text_control(View* view) {
     return elem && form_control_is_text_editable(elem->form);
 }
 
+static bool view_state_text_default_unchanged(View* old_view, View* new_view) {
+    DomElement* old_elem = lam::dom_require_element(old_view);
+    DomElement* new_elem = lam::dom_require_element(new_view);
+    if (!old_elem || !new_elem ||
+        strcmp(old_elem->id ? old_elem->id.get() : "",
+               new_elem->id ? new_elem->id.get() : "") != 0) return false;
+    if (old_elem->tag() == MARKUP_NAME_INPUT) {
+        if (form_input_kind(old_elem->get_attribute("type")) !=
+            form_input_kind(new_elem->get_attribute("type"))) return false;
+        const char* before = old_elem->get_attribute("value");
+        const char* after = new_elem->get_attribute("value");
+        return strcmp(before ? before : "", after ? after : "") == 0;
+    }
+    // textarea defaults are text children; native edits change ViewState only.
+    DomNode* before = old_elem->first_child;
+    DomNode* after = new_elem->first_child;
+    while (before && after) {
+        if (!before->is_text() || !after->is_text()) return false;
+        DomText* left = before->as_text();
+        DomText* right = after->as_text();
+        if (left->length != right->length ||
+            (left->length && memcmp(left->text, right->text, left->length))) return false;
+        before = before->next_sibling;
+        after = after->next_sibling;
+    }
+    return !before && !after;
+}
+
 static void view_state_rekey_node(DocState* state, View* old_view, View* new_view) {
     if (!state || !state->view_state_map || !old_view || !new_view) return;
 
@@ -2553,9 +2581,10 @@ static void view_state_rekey_node(DocState* state, View* old_view, View* new_vie
     new_view->view_state_ref = NULL;
     for (int kind_int = VIEW_STATE_BASE; kind_int <= VIEW_STATE_CUSTOM; kind_int++) {
         ViewStateKind kind = (ViewStateKind)kind_int;
-        // A reactive text template owns its rendered value. Carrying the old
-        // text buffer into the replacement would mask the handler's new model.
-        if (kind == VIEW_STATE_FORM_CONTROL && view_state_is_text_control(old_view)) {
+        // An unchanged authored default keeps native edits/history; a changed
+        // template value remains authoritative over the old control buffer.
+        if (kind == VIEW_STATE_FORM_CONTROL && view_state_is_text_control(old_view) &&
+            !view_state_text_default_unchanged(old_view, new_view)) {
             continue;
         }
         ViewStateEntry old_query = { .view_id = old_id, .kind = kind, .state = NULL };
@@ -4448,6 +4477,7 @@ void scroll_state_set_position_for_view(DocState* state, View* view, void* pane_
             state->scroll_y = v_pos;
         }
         state->version++;
+        state->scroll_position_bumps++;
         sm_guard.commit();
         state_assert_after_mutation(state, "scroll_state_set_position_for_view");
     }
@@ -7961,8 +7991,8 @@ void focus_set(DocState* state, View* view, bool from_keyboard) {
     focus_set_internal(state, view, from_keyboard, false);
 }
 
-void focus_set_programmatic(DocState* state, View* view) {
-    focus_set_internal(state, view, false, true);
+void focus_set_programmatic(DocState* state, View* view, bool from_keyboard) {
+    focus_set_internal(state, view, from_keyboard, true);
 }
 
 static void focus_clear_internal(DocState* state, bool preserve_selection) {

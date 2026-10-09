@@ -1,0 +1,1 @@
+['geomap', 2, 640, 2, true, true, true, true, true, true, true]

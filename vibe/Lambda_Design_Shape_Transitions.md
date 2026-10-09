@@ -25,7 +25,7 @@ The case is memory, not speed (Tune10 §9.9). The clearest measurement is indire
 
 ## 3. The transition tree
 
-Each `Input` owns one empty root shape, created on first use. A new map starts on the global `EmptyMap`, and its first add moves it into the tree at that root.
+Each `Input` owns a neutral empty root shape, created on first use. A Lambda map starts on the neutral global `EmptyMap`, and its first add moves it into that tree. An explicit JavaScript Input boundary separately owns a branded empty root, selected before publishing JS objects or parsing `JSON.parse` maps (**D3.4.7**). JS bootstrap never mutates `EmptyMap`.
 
 Adding a field to a map whose type is in the tree follows the edge keyed by:
 - the field's identity: its `name_id` (D3.4.4v2), or, for an id-less `Input` name, its bytes — a pooled key never matches through the bytes;
@@ -39,7 +39,7 @@ root ──id:int──► {id} ──name:string──► {id, name}
 ```
 
 Every map built as `id` then `name`, with those value types, lands on the last node. Consequences:
-- **Identity is the path.** Field order is significant (D3.4.2): `{a, b}` and `{b, a}` get different types, as do `{id: 1}` and `{id: "x"}`. JavaScript class metadata is part of identity too (D3.4.7): a root serves one `js_meta`, and a map whose blueprint carries different metadata keeps a private type.
+- **Identity is the path.** Field order is significant (D3.4.2): `{a, b}` and `{b, a}` get different types, as do `{id: 1}` and `{id: "x"}`. JavaScript class metadata is part of identity too (D3.4.7): neutral and branded roots are distinct. The branded root serves one `js_meta`; another metadata family keeps a private type.
 - **No semantic effect.** Map equality is key-unordered (S5.4.1), `is` matches fields by name, and a map prints in its own insertion order (S2.3.1), whichever type it lands on.
 - **Metadata, not a cache.** The edge list is shape metadata keyed on immutable inputs and attached to a shape, never to a call site, so D8.4.1v2 holds.
 
@@ -94,7 +94,7 @@ A **retype edge** serves a type-changing write the same way (§4): the target is
 
 Nothing edits a shared type's fields in place:
 - An add with no usable edge — a bound reached (§5), or a key that may not enter the tree — first detaches the map onto a private clone (`map_clone_typemap_for_mutation`), then appends to the clone.
-- At runtime, adding a field (`map_extend_open_shape`, the miss path of `fn_map_set`) moves the map onto a child of its type in the runtime tree, and a write that changes a field's type (D3.4.5) onto a retype target (§3, *External parents*); either is a shared node, and only a declined step builds a private type (`map_rebuild_for_type_change` keeps the private rebuild and contract reification).
+- At runtime, adding a field (`map_extend_open_shape`, the miss path of `fn_map_set`) moves the map onto a child of its type in the runtime tree, and a write that changes a field's type (D3.4.5) onto a retype target (§3, *External parents*); either is a shared node, and only a declined step builds a private type (`map_rebuild_for_type_change` keeps the private fallback). Structural admission also uses a retype edge with the full field contract pointer (`type_tree_retype_contract`), so contracts with the same coarse TypeId remain distinct; repeated admission shares one bounded layout (D3.4.3v5, D3.4.5; completed 2026-10-09).
 - A type-compatible write (D3.4.5) touches only the map's data buffer.
 - The one write a shared type's records ever see is its tail's link, set once by the first child that extends the chain (§3, *Sharing the prefix*). It lies past the type's `last`, so no walk or lookup of that type reaches it.
 
@@ -167,11 +167,11 @@ Phases and gates: [Impl_Element_Type_Sharing](impl/Lambda_Impl_Element_Type_Shar
 
 A code survey of what still builds a map or element without the tree, taken while scoping the D3.4.3v4 residue (§8).
 
-**Status after D3.4.3v5 (2026-10-06, [Impl_Map_Transition_Coverage](impl/Lambda_Impl_Map_Transition_Coverage.md) P0–P3).** Now through the tree: the growth copy path from a literal's, a parsed document's, a contract's, a nominal type's, a private type or an element's type (external parents); unqualified Lambda `Symbol` keys and therefore spread literals; JavaScript identity keys in `map_put`, `elmt_put_tree` and editor rebuilds; type-changing writes on plain Lambda maps and elements (retype edges); regex and `io.grep` result records; group-by groups and join tuples. Unpooled spellings share edges with pooled ones (D3.4.4v4). Still outside, as surveyed below: declined adds (fan-out, budget), JavaScript shapes and their descriptor clones, array-index and non-plain map kinds, spread link-slot types, qualified keys (LR03-40), contract reification, the empty `TypeElmt` an element edit transaction mints per edit, VMap/Velmt/VArray, and the parser-side fallbacks of B.1. The survey is kept as taken. "Private" means a type owned by one container: a fresh pool type, whether or not it carries `is_private_clone`. Peak RSS figures are debug builds, 16 builds of a 1,024-key map: 34 MB when the map starts from `{}`.
+**Status after D3.4.3v5 (2026-10-06, [Impl_Map_Transition_Coverage](impl/Lambda_Impl_Map_Transition_Coverage.md) P0–P3).** Now through the tree: the growth copy path from a literal's, a parsed document's, a contract's, a nominal type's, a private type or an element's type (external parents); unqualified Lambda `Symbol` keys and therefore spread literals; JavaScript identity keys in `map_put`, `elmt_put_tree` and editor rebuilds; type-changing writes on plain Lambda maps and elements (retype edges); regex and `io.grep` result records; group-by groups and join tuples. Unpooled spellings share edges with pooled ones (D3.4.4v4). Still outside, as surveyed below: declined adds (fan-out, budget), JavaScript shapes and their descriptor clones, array-index and non-plain map kinds, spread link-slot types, qualified keys (LR03-40), the empty `TypeElmt` an element edit transaction mints per edit, VMap/Velmt/VArray, and the parser-side fallbacks of B.1. The survey is kept as taken. "Private" means a type owned by one container: a fresh pool type, whether or not it carries `is_private_clone`. Peak RSS figures are debug builds, 16 builds of a 1,024-key map: 34 MB when the map starts from `{}`.
 
 ### B.1 Input parsing paths that do not build through the tree
 
-Every parser that produces Lambda maps builds them through `MarkBuilder`: `MapBuilder::put` and `putToMap` reach `map_put`, whose `map_put_with_data_growth` starts each map on `EmptyMap` at the parser `Input`'s root. That covers JSON, YAML, TOML, XML, CSV, KV/INI, Mark, Markdown and the markup family, MDX, JSX, LaTeX and math, RTF, PDF, EML, VCF, ICS, the graph formats and sysinfo. Parsers that create a map with `map_pooled` (VCF, KV, ICS) still start on `EmptyMap` and fill it through the builder. Elements start on their tag's root (`elmt_tree_root`) and add attributes through `elmt_put_tree`. Database rows (`input-rdb.cpp`, one `MapBuilder` per row), JavaScript's `JSON.parse`, npm metadata and Jube Python dicts (`map_put_heap`) take the same route. What follows does not.
+Every parser that produces Lambda maps builds them through `MarkBuilder`: `MapBuilder::put` and `putToMap` reach `map_put`, whose `map_put_with_data_growth` starts a neutral map on `EmptyMap` at the parser `Input`'s root. Explicit JS-bound Inputs instead start maps on their separate branded root (**D3.4.7**). That covers JSON, YAML, TOML, XML, CSV, KV/INI, Mark, Markdown and the markup family, MDX, JSX, LaTeX and math, RTF, PDF, EML, VCF, ICS, the graph formats and sysinfo. Parsers that create a map with `map_pooled` (VCF, KV, ICS) still start on `EmptyMap` and fill it through the builder. Elements start on their tag's root (`elmt_tree_root`) and add attributes through `elmt_put_tree`. Database rows (`input-rdb.cpp`, one `MapBuilder` per row), JavaScript's `JSON.parse`, npm metadata and Jube Python dicts (`map_put_heap`) take the same route. What follows does not.
 - **Produce no Lambda maps.**
   - CSS (`input-css.cpp`) returns a native `CssStylesheet` behind a `0xCC`-tagged root pointer.
   - Directory input (`input-dir.cpp`) returns a list of `Path` items.
@@ -188,7 +188,7 @@ Every parser that produces Lambda maps builds them through `MarkBuilder`: `MapBu
   - no edge is available (caps or budget).
 - **The map tree declines** (`map_put_with_data_growth`, `transition_target_for_key`):
   - **Key and kind:** a NULL key, a key that needs identity (Symbol or private), an array-index key on an array-property map, or a map kind other than `MAP_KIND_PLAIN`.
-  - **A `js_meta` mismatch at the root.** An `Input` has one root, and it serves one class metadata. `EmptyMap.js_meta` is set lazily, when JavaScript first initializes, so an `Input` whose root predates that sends every later map private.
+  - **A `js_meta` mismatch at the branded root.** An `Input` separately owns neutral and branded roots (**D3.4.7**); a different branded family declines sharing. JS bootstrap previously mutated `EmptyMap`, contaminating later Lambda inputs and defeating their bounded contract-admission cache. The mixed-runtime regression now verifies neutral inputs and cached admission after JS initialization.
   - **Bounds.** 256 edges from the root, 16 from any other node, and 1,024 map types per `Input` (`shape_graph_budget`). Every edge counts against the fan-out, including variants of one key by value type and by pooled or unpooled spelling.
   - **No rejoining.** A map whose first add was declined keeps the private type it got. A map on a node with no usable edge detaches through `map_clone_typemap_for_mutation`, and every later add copies again.
 - **Editor rebuilds during parsing.** The HTML5 tree builder merges attributes onto `<html>` and `<body>` with `MarkEditor::elmt_update_attr`, so they follow the editor's rules in B.2.

@@ -6,10 +6,10 @@ type bare_literal_union = "a" | "b"
 type nested = \(("a" | "b")+)
 type escaped = \("a\n" | "b\n")
 type parens = \("(" ")")
-type wild = \(...)
-type not_digit = \(!d)
+type wild = \("" ...)
+type not_digit = \(!"\d")
 type ascii_range = \("a" to "z")
-type first_digit = \(d+), second_word = \(w+)
+type first_digit = \("\d"+), second_word = \("\w"+)
 
 'Test 1: Literal and structural islands'
 1; "a" is literal_union
@@ -29,8 +29,8 @@ type first_digit = \(d+), second_word = \(w+)
 13; "b" is literal_union
 
 'Test 3: Inline and multi-declare islands'
-14; "123" is \(d+)
-15; "hello" is \(w+)
+14; "123" is \("\d"+)
+15; "hello" is \("\w"+)
 16; "123" is first_digit
 17; "hello" is second_word
 

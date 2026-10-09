@@ -107,10 +107,15 @@ TypeMap* type_tree_add_map_field_chars(Input* input, TypeMap* parent,
                                        TypeId type_id, ShapeEntry** out_entry);
 // Whether `type` is a node of `input`'s transition tree.
 bool type_tree_owns(const Input* input, const TypeMap* type);
+// D3.4.7: neutral and JS-branded maps have distinct Input-owned roots.
+TypeMap* type_tree_map_root(Input* input, const JsClassMeta* js_meta = nullptr);
 // Impl_Map_Transition_Coverage P2: the shared type for `parent` with `field`
 // laid out for `value_type` (D3.4.5 through the tree); NULL when declined.
 TypeMap* type_tree_retype_field(Input* input, TypeMap* parent, const ShapeEntry* field,
                                 TypeId value_type, const TypeMapRetypePlan** plan = NULL);
+// Boundary admission uses the same bounded tree with the full field contract (D3.4.5).
+TypeMap* type_tree_retype_contract(Input* input, TypeMap* parent, const ShapeEntry* field,
+                                  Type* contract);
 TypeMap* type_tree_delete_field(Input* input, Map* container, const ShapeEntry* field,
                                 const TypeMapRetypePlan** plan = NULL);
 // Impl_Map_Transition_Coverage P1.5: a runtime add that copied a whole shape

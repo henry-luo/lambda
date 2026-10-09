@@ -2178,6 +2178,17 @@ TEST_F(StrSpanTest, HtmlSpaceExcludesVerticalTab) {
 
 class StrFmtTest : public ::testing::Test {};
 
+TEST_F(StrFmtTest, RomanNumeralsShareSpellingAndFailWithoutPartialWrites) {
+    char buffer[32] = "retained";
+    EXPECT_EQ(str_format_roman(3999, buffer, sizeof(buffer), true), 9u); EXPECT_STREQ(buffer, "MMMCMXCIX");
+    EXPECT_EQ(str_format_roman(4000, buffer, sizeof(buffer), false), 4u); EXPECT_STREQ(buffer, "mmmm");
+    EXPECT_EQ(str_format_roman(4, buffer, 2, false), 0u); EXPECT_STREQ(buffer, "mmmm");
+    EXPECT_EQ(str_format_roman(UINT64_MAX, buffer, sizeof(buffer), true), 0u); EXPECT_STREQ(buffer, "mmmm");
+    EXPECT_EQ(str_format_roman(0, buffer, sizeof(buffer), true), 0u); EXPECT_STREQ(buffer, "mmmm");
+    EXPECT_EQ(str_format_roman(1, nullptr, 2, true), 0u);
+    EXPECT_EQ(str_format_roman(9, buffer, 3, true), 2u); EXPECT_STREQ(buffer, "IX");
+}
+
 TEST_F(StrFmtTest, FmtBasic) {
     char buf[64];
     int n = str_fmt(buf, 64, "hello %s %d", "world", 42);
