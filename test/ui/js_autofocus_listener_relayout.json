@@ -1,0 +1,9 @@
+{
+  "name": "Autofocus listeners can recascade styles and read the resulting geometry",
+  "html": "test/ui/js_autofocus_listener_relayout.html",
+  "events": [
+    {"type": "assert_text", "target": {"selector": "#report"}, "equals": "focused"},
+    {"type": "assert_attribute", "target": {"selector": "#report"}, "attribute": "data-active", "equals": "true"},
+    {"type": "assert_attribute", "target": {"selector": "#report"}, "attribute": "data-width", "equals": "120"}
+  ]
+}

@@ -403,6 +403,7 @@ typedef struct FontFaceSource {
     const char* format;         // "truetype", "opentype", "woff", "woff2", or NULL
     const uint8_t* data;        // optional immutable font bytes, copied at registration
     size_t data_length;
+    const char* local_name;     // exact full or PostScript name for CSS local()
 } FontFaceSource;
 
 typedef struct FontFaceUnicodeRange {

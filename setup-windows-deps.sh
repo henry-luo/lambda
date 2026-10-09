@@ -516,12 +516,18 @@ download_extract() {
     fi
 }
 
+curl_supports_cookies_for_windows() {
+    # Older archives disabled the cookie engine needed by navigation redirects.
+    [ -f "$DEPS_DIR/lib/libcurl.a" ] && \
+        nm "$DEPS_DIR/lib/libcurl.a" 2>/dev/null | grep -q 'Curl_cookie_init'
+}
+
 # Function to build minimal static libcurl for Windows (HTTP/HTTPS only)
 build_minimal_static_libcurl() {
     echo "Building minimal static libcurl for Windows native (HTTP/HTTPS only)..."
 
     # Check if already built
-    if [ -f "$DEPS_DIR/lib/libcurl.a" ]; then
+    if curl_supports_cookies_for_windows; then
         echo "Minimal static libcurl already built"
         return 0
     fi
@@ -688,7 +694,7 @@ build_minimal_static_libcurl() {
         --disable-ntlm \
         --disable-tls-srp \
         --disable-unix-sockets \
-        --disable-cookies \
+        --enable-cookies \
         --disable-socketpair \
         --disable-http-auth \
         --disable-doh \
@@ -974,7 +980,7 @@ build_thorvg() {
 
 # Build libcurl with minimal static build for Windows
 echo "Setting up minimal static libcurl..."
-if [ -f "$DEPS_DIR/lib/libcurl.a" ]; then
+if curl_supports_cookies_for_windows; then
     echo "Minimal static libcurl already available"
 else
     if ! build_minimal_static_libcurl; then

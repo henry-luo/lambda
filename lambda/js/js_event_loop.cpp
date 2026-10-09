@@ -327,7 +327,7 @@ extern "C" int js_animation_frame_drain(int max_frames) {
     }
     animation_frame_drain_active = false;
     if (runtime_job_queue_size(&animation_frame_queue) > 0) {
-        log_error("event_loop: animation frame drain stopped with %d callback(s) pending",
+        log_debug("event_loop: animation frame drain yielded with %d callback(s) pending",
             (int)runtime_job_queue_size(&animation_frame_queue));
     }
     return called;
@@ -1883,9 +1883,11 @@ extern "C" void js_event_loop_drain_script_turn(bool has_dom_document,
         if (has_dom_document) dom_commit_headless_layout();
         js_event_loop_drain();
     }
-    if (has_dom_document) {
+    if (has_dom_document && !(auto_close_mode && !auto_close_after_load)) {
         // headless documents have no native frame clock; flush queued rAF work
-        // before the transient script realm is torn down.
+        // before the transient script realm is torn down. Page-load batches
+        // share the timer drain's load boundary so startup scripts can settle
+        // before recurring animations consume rendering opportunities.
         js_animation_frame_drain(64);
     }
 }

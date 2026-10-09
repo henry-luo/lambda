@@ -1959,7 +1959,12 @@ void dom_node_resolve_style(DomNode* node, LayoutContext* lycon) {
 
             // Measurement refreshes used values in the current context, but
             // must not discard a clean subtree's keyed intrinsic cache.
-            if (dom_elem->layout_cache && !styles_current) {
+            // A width query can resolve speculative styles before a height
+            // query. Mutations clear the intrinsic flag; an uncommitted style
+            // alone does not make that pass-local contribution stale.
+            bool retain_intrinsic_cache = layout_context_is_measuring(lycon) &&
+                dom_elem->has_cached_intrinsic_widths();
+            if (dom_elem->layout_cache && !styles_current && !retain_intrinsic_cache) {
                 radiant::layout_cache_clear(dom_elem->layout_cache);
             }
 

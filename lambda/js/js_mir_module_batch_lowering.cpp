@@ -1046,14 +1046,23 @@ static bool jm_resolve_import_map(Runtime* runtime,const char* importer,const ch
     }
     return false;
 }
+const char* jm_document_script_base_url(Runtime* runtime, const char* script_reference) {
+    // inline modules retain private registry identities while their host URL
+    // remains the document's prepared base, including across history updates.
+    return runtime && runtime->js_document_base_url && script_reference &&
+        script_reference[0] == '<' ? runtime->js_document_base_url : script_reference;
+}
+
 void jm_resolve_module_path(const char* base_file,const char* specifier,int length,char* out,int capacity) {
+    base_file = jm_document_script_base_url(js_current_runtime(), base_file);
     if(jm_resolve_import_map(js_current_runtime(),base_file,specifier,length,out,capacity)) return;
     jm_resolve_module_path_unmapped(base_file,specifier,length,out,capacity);
 }
 
 bool jm_resolve_document_module_path(Runtime* runtime, const char* script_reference,
         const char* specifier, int spec_len, char* out, int out_size) {
-    if (jm_resolve_import_map(runtime,script_reference,specifier,spec_len,out,out_size)) return true;
+    const char* base_url = jm_document_script_base_url(runtime, script_reference);
+    if (jm_resolve_import_map(runtime,base_url,specifier,spec_len,out,out_size)) return true;
     if (!runtime || !runtime->js_document_base_url || !runtime->js_document_base_url[0] ||
             (script_reference && script_reference[0] != '<')) {
         return false;

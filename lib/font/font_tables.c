@@ -146,9 +146,11 @@ void font_tables_close(FontTables* tables, void* pool_ptr) {
     if (tables->kern)  pool_free(pool, tables->kern);
     if (tables->name) {
         // name strings are pool-allocated
-        if (tables->name->family_name)    pool_free(pool, tables->name->family_name);
-        if (tables->name->subfamily_name) pool_free(pool, tables->name->subfamily_name);
-        if (tables->name->postscript_name) pool_free(pool, tables->name->postscript_name);
+        char* names[] = {tables->name->family_name, tables->name->subfamily_name,
+            tables->name->full_name, tables->name->postscript_name};
+        for (unsigned index = 0; index < sizeof(names) / sizeof(names[0]); index++) {
+            if (names[index]) pool_free(pool, names[index]);
+        }
         pool_free(pool, tables->name);
     }
     if (tables->fvar) {
@@ -877,8 +879,8 @@ NameTable* font_tables_get_name(FontTables* tables) {
         uint16_t str_length  = rd16(rec + 8);
         uint16_t str_offset  = rd16(rec + 10);
 
-        // only interested in nameIDs 1, 2, 6
-        if (name_id != 1 && name_id != 2 && name_id != 6) continue;
+        // local() requires the unique full name as well as the PostScript name.
+        if (name_id != 1 && name_id != 2 && name_id != 4 && name_id != 6) continue;
 
         size_t abs_offset = (size_t)string_offset + str_offset;
         if (abs_offset + str_length > len) continue;
@@ -907,21 +909,14 @@ NameTable* font_tables_get_name(FontTables* tables) {
         }
     }
 
-    // decode best matches
-    if (best_data[1]) {
-        n->family_name = best_is_utf16[1]
-            ? decode_utf16be(best_data[1], best_len[1], pool)
-            : copy_mac_string(best_data[1], best_len[1], pool);
-    }
-    if (best_data[2]) {
-        n->subfamily_name = best_is_utf16[2]
-            ? decode_utf16be(best_data[2], best_len[2], pool)
-            : copy_mac_string(best_data[2], best_len[2], pool);
-    }
-    if (best_data[6]) {
-        n->postscript_name = best_is_utf16[6]
-            ? decode_utf16be(best_data[6], best_len[6], pool)
-            : copy_mac_string(best_data[6], best_len[6], pool);
+    unsigned name_ids[] = {1, 2, 4, 6};
+    char** names[] = {&n->family_name, &n->subfamily_name, &n->full_name, &n->postscript_name};
+    for (unsigned index = 0; index < sizeof(name_ids) / sizeof(name_ids[0]); index++) {
+        unsigned id = name_ids[index];
+        if (!best_data[id]) continue;
+        *names[index] = best_is_utf16[id]
+            ? decode_utf16be(best_data[id], best_len[id], pool)
+            : copy_mac_string(best_data[id], best_len[id], pool);
     }
 
     tables->name = n;

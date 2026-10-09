@@ -547,12 +547,15 @@ static Item js_media_query_set_listener(Item callback, bool add) {
     JsMediaQueryState* state = media_query_from_this();
     if (state) {
         JsDomPlatformState* platform = dom_platform_state_if_present();
-        Item type = js_make_string("change");
+        RootFrame roots(2);
+        Rooted<Item> object_root(roots, media_query_object(platform, state));
+        Rooted<Item> callback_root(roots, callback);
+        Item type = js_name_item("change");
         if (add) {
-            dom_add_event_listener(media_query_object(platform, state), type, callback,
+            dom_add_event_listener(object_root.get(), type, callback_root.get(),
                 (Item){.item = ITEM_FALSE});
         } else {
-            dom_remove_event_listener(media_query_object(platform, state), type, callback,
+            dom_remove_event_listener(object_root.get(), type, callback_root.get(),
                 (Item){.item = ITEM_FALSE});
         }
     }
@@ -562,6 +565,8 @@ JS_FORWARD_STATIC_ITEM(js_media_query_add_listener, (Item callback), js_media_qu
 JS_FORWARD_STATIC_ITEM(js_media_query_remove_listener, (Item callback), js_media_query_set_listener, (callback, false))
 
 extern "C" Item dom_match_media(Item query_item) {
+    RootFrame roots(2);
+    Rooted<Item> query_root(roots, query_item);
     JsDomPlatformState* platform = dom_platform_state();
     if (!platform) return ItemNull;
     if (!dom_media_query_records) dom_media_query_records = arraylist_new(8);
@@ -572,7 +577,7 @@ extern "C" Item dom_match_media(Item query_item) {
         mem_free(state);
         return ItemNull;
     }
-    state->query = mem_strdup(platform_string(query_item), MEM_CAT_JS_RUNTIME);
+    state->query = mem_strdup(platform_string(query_root.get()), MEM_CAT_JS_RUNTIME);
     if (!state->query) {
         arraylist_remove(dom_media_query_records, media_query_count(platform) - 1);
         mem_free(state);
@@ -588,7 +593,6 @@ extern "C" Item dom_match_media(Item query_item) {
         return ItemError;
     }
 
-    RootFrame roots(1);
     Rooted<Item> object_root(roots, js_create_event_target());
     state->object_slot = (int64_t)root_vector_count(&dom_media_query_objects);
     if (!root_vector_push(&dom_media_query_objects, object_root.get())) {
@@ -599,24 +603,16 @@ extern "C" Item dom_match_media(Item query_item) {
     }
     Item object = media_query_object(platform, state);
 
-    Rooted<Item> descriptor_root(roots, ItemNull);
-    dom_realm_set(object, js_make_string("media"),
+    // interned field names survive allocating values and functions before Set takes ownership.
+    dom_realm_set_name(object, "media",
         js_make_string(state->query));
-    dom_realm_set(object, js_make_string("onchange"), ItemNull);
-    dom_realm_set(object, js_make_string("addListener"),
+    dom_realm_set_name(object, "onchange", ItemNull);
+    dom_realm_set_name(object, "addListener",
         dom_realm_new_function(js_media_query_add_listener));
-    dom_realm_set(object, js_make_string("removeListener"),
+    dom_realm_set_name(object, "removeListener",
         dom_realm_new_function(js_media_query_remove_listener));
-
-    Item descriptor = js_new_object();
-    descriptor_root.set(descriptor);
-    dom_realm_set(descriptor, js_make_string("get"),
-        dom_realm_new_function(js_media_query_matches));
-    dom_realm_set(descriptor, js_make_string("enumerable"),
-        (Item){.item = ITEM_TRUE});
-    dom_realm_set(descriptor, js_make_string("configurable"),
-        (Item){.item = ITEM_TRUE});
-    dom_realm_define_property(object, js_make_string("matches"), descriptor);
+    dom_realm_install_accessor(object, js_name_item("matches"),
+        dom_realm_new_function(js_media_query_matches), ItemNull, 0);
     return object;
 }
 
@@ -628,15 +624,15 @@ extern "C" void dom_match_media_notify_resize(void) {
         bool next = dom_evaluate_media_query(state->query);
         if (next == state->matches) continue;
         state->matches = next;
-        Item event = js_create_event("change", false, false);
-        dom_realm_set(event, js_make_string("matches"),
+        RootFrame roots(2);
+        Rooted<Item> object_root(roots, media_query_object(platform, state));
+        Rooted<Item> event_root(roots, js_create_event("change", false, false));
+        dom_realm_set_name(event_root.get(), "matches",
             (Item){.item = b2it(next)});
-        dom_realm_set(event, js_make_string("media"),
+        dom_realm_set_name(event_root.get(), "media",
             js_make_string(state->query));
-        Item object = media_query_object(platform, state);
-        dom_dispatch_event(object, event);
-        Item onchange = dom_realm_get(object, js_make_string("onchange"));
-        if (dom_realm_is_callable(onchange)) dom_realm_call(onchange, object, &event, 1);
+        // EventTarget dispatch already invokes the IDL onchange handler once.
+        dom_dispatch_event(object_root.get(), event_root.get());
     }
 }
 

@@ -563,10 +563,15 @@ static bool dom_mutation_node_was_connected(DomDocument* doc, DomNode* node) {
     return false;
 }
 
-static DomJsMutationAttribute dom_mutation_attribute_from_name(const char* name) {
+static DomJsMutationAttribute dom_mutation_attribute_from_name(DomDocument* doc, const char* name) {
     if (name && str_icmp_cstr(name, "class") == 0) {
         return DOM_JS_MUTATION_ATTRIBUTE_CLASS;
     }
+    // data/ARIA writes cannot change native pseudo states; only an attribute
+    // reference inside :has() can make their cascade escape the local subtree.
+    if (name && (strncmp(name, "data-", 5) == 0 || strncmp(name, "aria-", 5) == 0) &&
+        !dom_engine_attribute_has_relational_css_dependency(doc, name))
+        return DOM_JS_MUTATION_ATTRIBUTE_LOCAL;
     return DOM_JS_MUTATION_ATTRIBUTE_UNKNOWN;
 }
 
@@ -605,7 +610,7 @@ static inline void dom_record_mutation_detail(DomJsMutationKind kind,
         record->target_id = target_ref.expected_id;
         record->parent_id = parent_ref.expected_id;
         record->attribute = kind == DOM_JS_MUTATION_ATTRIBUTE
-            ? dom_mutation_attribute_from_name(attribute_name)
+            ? dom_mutation_attribute_from_name(doc, attribute_name)
             : DOM_JS_MUTATION_ATTRIBUTE_UNKNOWN;
         record->presentation_property = presentation_property;
         record->was_connected =
@@ -2406,7 +2411,9 @@ extern "C" Item dom_get_prototype_value(Item obj) {
     const char* ctor_name = "Node";
     if (node && node->as_attribute()) ctor_name = "Attr";
     if (node && node->is_comment()) {
-        ctor_name = "Comment";
+        // doctypes share native comment storage but expose their own IDL
+        // interface; physical storage does not determine branding (D3.4.7).
+        ctor_name = node->node_type == DOM_NODE_DOCTYPE ? "DocumentType" : "Comment";
     }
     if (node && node->is_element()) {
         DomElement* elem = node->as_element();
@@ -6116,15 +6123,21 @@ static DomNode* dom_tree_walker_next_matching(DomNode* root,
 }
 
 static Item dom_tree_walker_advance(Item walker_item, JsDomTreeWalkerStep step) {
-    JS_ROOTS(roots, walker_root, walker_item, node_root, ItemNull, result_root, ItemNull);
-    Item root_item = dom_realm_get(walker_root.get(), js_string_key(JS_TREE_WALKER_ROOT));
-    Item current_item = dom_realm_get(walker_root.get(), js_string_key(JS_TREE_WALKER_CURRENT));
-    DomNode* root = (DomNode*)dom_unwrap_element(root_item);
-    DomNode* current = (DomNode*)dom_unwrap_element(current_item);
+    if (!dom_realm_object_has_class(walker_item, JS_CLASS_TREE_WALKER)) {
+        return dom_realm_throw_type_error("Illegal TreeWalker receiver");
+    }
+    JS_ROOTS(roots, walker_root, walker_item, root_root, ItemNull,
+        current_root, ItemNull, node_root, ItemNull);
+    // node wrappers lease their native owners and may move while another
+    // property getter collects; retain both until traversal finishes (D5.3.5).
+    root_root.set(dom_realm_get_name(walker_root.get(), JS_TREE_WALKER_ROOT));
+    current_root.set(dom_realm_get_name(walker_root.get(), JS_TREE_WALKER_CURRENT));
+    DomNode* root = (DomNode*)dom_unwrap_element(root_root.get());
+    DomNode* current = (DomNode*)dom_unwrap_element(current_root.get());
     if (!root || !current) return ItemNull;
 
     uint32_t what_to_show = dom_to_u32(
-        dom_realm_get(walker_root.get(), js_string_key(JS_TREE_WALKER_WHAT_TO_SHOW)));
+        dom_realm_get_name(walker_root.get(), JS_TREE_WALKER_WHAT_TO_SHOW));
     DomNode* next = nullptr;
     if (step == JS_TREE_WALKER_STEP_FIRST_CHILD) {
         for (DomNode* node = dom_tree_walker_first_child_raw(current);
@@ -6154,15 +6167,14 @@ static Item dom_tree_walker_advance(Item walker_item, JsDomTreeWalkerStep step) 
     // walker pointing at the pre-move wrapper during the next traversal step.
     node_root.set(dom_wrap_element(next));
     if (node_root.get().item == ItemNull.item) return ItemNull;
-    dom_realm_set(walker_root.get(), js_string_key(JS_TREE_WALKER_CURRENT),
+    dom_realm_set_name(walker_root.get(), JS_TREE_WALKER_CURRENT,
                     node_root.get());
-    result_root.set(node_root.get());
-    return result_root.get();
+    return node_root.get();
 }
 
 #define JS_DOM_TREE_WALKER_METHOD(name, step) \
-static Item name(Item walker_item) { \
-    return dom_tree_walker_advance(walker_item, step); \
+static Item name(void) { \
+    return dom_tree_walker_advance(dom_realm_receiver(), step); \
 }
 JS_DOM_TREE_WALKER_METHOD(dom_tree_walker_next_node_method,
     JS_TREE_WALKER_STEP_NEXT_NODE)
@@ -6172,33 +6184,29 @@ JS_DOM_TREE_WALKER_METHOD(dom_tree_walker_next_sibling_method,
     JS_TREE_WALKER_STEP_NEXT_SIBLING)
 #undef JS_DOM_TREE_WALKER_METHOD
 
+extern "C" void dom_tree_walker_install_interface(Item prototype) {
+    RootFrame roots(1);
+    Rooted<Item> prototype_root(roots, prototype);
+    if (!roots.valid()) return;
+    dom_realm_install_method(prototype_root.get(), "nextNode", dom_tree_walker_next_node_method);
+    dom_realm_install_method(prototype_root.get(), "firstChild", dom_tree_walker_first_child_method);
+    dom_realm_install_method(prototype_root.get(), "nextSibling", dom_tree_walker_next_sibling_method);
+}
+
 extern "C" Item dom_create_tree_walker_bridge(Item root_item, Item what_to_show_item) {
     if (!dom_unwrap_element(root_item)) return ItemNull;
     RootFrame roots(4);
     Rooted<Item> root_root(roots, root_item);
-    Rooted<Item> walker_root(roots, js_new_object());
-    Rooted<Item> method_root(roots, ItemNull);
+    Rooted<Item> walker_root(roots, dom_realm_new_object_of_class(JS_CLASS_TREE_WALKER));
     if (walker_root.get().item == ItemNull.item) return ItemNull;
     uint32_t what_to_show = dom_to_u32(what_to_show_item);
-    dom_realm_set(walker_root.get(), js_string_key(JS_TREE_WALKER_ROOT), root_root.get());
-    dom_realm_set(walker_root.get(), js_string_key(JS_TREE_WALKER_CURRENT), root_root.get());
-    dom_realm_set(walker_root.get(), js_string_key(JS_TREE_WALKER_WHAT_TO_SHOW),
+    dom_realm_set_name(walker_root.get(), JS_TREE_WALKER_ROOT, root_root.get());
+    dom_realm_set_name(walker_root.get(), JS_TREE_WALKER_CURRENT, root_root.get());
+    dom_realm_set_name(walker_root.get(), JS_TREE_WALKER_WHAT_TO_SHOW,
                     (Item){.item = i2it((int64_t)what_to_show)});
-    Item bound_args[1] = {walker_root.get()};
-    method_root.set(js_bind_function(
-        dom_realm_new_function(dom_tree_walker_next_node_method),
-        make_js_undefined(), bound_args, 1));
-    dom_realm_set_cstr(walker_root.get(), "nextNode", method_root.get());
-    bound_args[0] = walker_root.get();
-    method_root.set(js_bind_function(
-        dom_realm_new_function(dom_tree_walker_first_child_method),
-        make_js_undefined(), bound_args, 1));
-    dom_realm_set_cstr(walker_root.get(), "firstChild", method_root.get());
-    bound_args[0] = walker_root.get();
-    method_root.set(js_bind_function(
-        dom_realm_new_function(dom_tree_walker_next_sibling_method),
-        make_js_undefined(), bound_args, 1));
-    dom_realm_set_cstr(walker_root.get(), "nextSibling", method_root.get());
+    // captured prototype methods operate on the actual native walker receiver;
+    // per-instance bound callbacks hid the WebIDL surface (D3.4.7, D6.2.2v2).
+    dom_bind_interface_prototype(dom_realm_global(), walker_root.get(), "TreeWalker");
     return walker_root.get();
 }
 
@@ -18047,14 +18055,25 @@ static Item js_web_animation_reverse(void) {
 
 static Item js_web_animation_current_time_get(void) {
     JsWebAnimationHost* host = js_web_animation_host(dom_realm_receiver());
-    return host && host->state ? js_make_number(host->state->current_time_ms)
-                               : ItemNull;
+    return host && host->state && host->state->current_time_resolved
+        ? js_make_number(host->state->current_time_ms) : ItemNull;
 }
 
 static Item js_web_animation_current_time_set(Item value) {
-    JsWebAnimationHost* host = js_web_animation_host(dom_realm_receiver());
+    RootFrame roots(3);
+    Rooted<Item> receiver_root(roots, dom_realm_receiver());
+    Rooted<Item> value_root(roots, value);
+    Rooted<Item> numeric_root(roots, ItemNull);
+    JsWebAnimationHost* host = js_web_animation_host(receiver_root.get());
     if (host && host->state) {
-        Item numeric = js_to_number(value);
+        if (value_root.get().item == ITEM_NULL) {
+            if (host->state->current_time_resolved)
+                return dom_realm_throw_type_error("cannot unset a resolved animation currentTime");
+            return ItemNull;
+        }
+        numeric_root.set(js_to_number(value_root.get()));
+        if (item_is_error(numeric_root.get())) return numeric_root.get();
+        Item numeric = numeric_root.get();
         TypeId type = get_type_id(numeric);
         double current_time = 0.0;
         if (type == LMD_TYPE_FLOAT) current_time = it2d(numeric);
@@ -18064,7 +18083,17 @@ static Item js_web_animation_current_time_set(Item value) {
         css_web_animation_set_current_time(host->state, current_time);
         log_debug("web-anim: currentTime set to %.1fms", current_time);
     }
-    return value;
+    return value_root.get();
+}
+
+extern "C" Item dom_web_animation_cancel(void) {
+    RootFrame roots(1);
+    Rooted<Item> receiver_root(roots, dom_realm_receiver());
+    JsWebAnimationHost* host = js_web_animation_host(receiver_root.get());
+    if (!host || !host->state)
+        return dom_realm_throw_type_error("Animation.cancel requires an Animation receiver");
+    css_web_animation_cancel(host->state);
+    return make_js_undefined();
 }
 
 static Item js_web_animation_parse_timing_options(Item options,

@@ -559,11 +559,12 @@ stage_brotli_for_curl() {
     fi
 }
 
-curl_supports_brotli() {
+curl_supports_web_features() {
     local curl_config="mac-deps/curl-8.10.1/lib/curl_config.h"
     [ -f "mac-deps/curl-8.10.1/lib/libcurl.a" ] && \
         [ -f "$curl_config" ] && \
         grep -q '^#define HAVE_BROTLI 1$' "$curl_config" && \
+        ! grep -q '^#define CURL_DISABLE_COOKIES 1$' "$curl_config" && \
         nm "mac-deps/curl-8.10.1/lib/libcurl.a" 2>/dev/null | \
             grep -q 'BrotliDecoderDecompress'
 }
@@ -831,14 +832,14 @@ build_curl_with_http2_for_mac() {
     echo "Building libcurl with HTTP/2 and mbedTLS support for Mac..."
     cd "$SCRIPT_DIR"
 
-    # Rebuild legacy archives so content decoding matches modern web servers.
-    if curl_supports_brotli; then
-        echo "libcurl with HTTP/2 and Brotli already built"
+    # Redirect cookies and compressed documents both require enabled curl features.
+    if curl_supports_web_features; then
+        echo "libcurl with HTTP/2, Brotli and cookies already built"
         return 0
     fi
 
     if [ -f "mac-deps/curl-8.10.1/lib/libcurl.a" ]; then
-        echo "Existing libcurl lacks Brotli support, rebuilding..."
+        echo "Existing libcurl lacks required web features, rebuilding..."
     fi
 
     if ! build_brotli_for_mac || ! stage_brotli_for_curl; then
@@ -895,7 +896,7 @@ build_curl_with_http2_for_mac() {
         --disable-imap --disable-smb --disable-smtp --disable-gopher \
         --disable-mqtt --disable-manual --disable-libcurl-option \
         --disable-sspi --disable-ntlm --disable-tls-srp \
-        --disable-unix-sockets --disable-cookies --disable-socketpair \
+        --disable-unix-sockets --enable-cookies --disable-socketpair \
         --disable-http-auth --disable-doh --disable-mime \
         --disable-dateparse --disable-netrc --disable-progress-meter \
         --disable-alt-svc --disable-headers-api --disable-hsts \
@@ -1086,7 +1087,7 @@ fi
 
 # Build libcurl with HTTP/2 and Brotli support for Mac (Lambda dependency)
 echo "Setting up libcurl with HTTP/2 and Brotli support..."
-if curl_supports_brotli; then
+if curl_supports_web_features; then
     echo "libcurl with HTTP/2 and Brotli already available"
 else
     if ! build_curl_with_http2_for_mac; then

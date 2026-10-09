@@ -3095,6 +3095,7 @@ struct UiContext;
 typedef struct FontFaceSrc {
     lam::Own<char> path;                  // Resolved local path
     lam::Own<char> format;                // Format string: "woff", "truetype", "opentype", etc.
+    bool is_local;                       // path is a local font's unique name
 } FontFaceSrc;
 
 // Font face descriptor for @font-face support
@@ -3751,6 +3752,7 @@ typedef struct CssWebAnimationState {
     double duration_ms;
     double current_time_ms;
     TimingFunction timing;
+    bool current_time_resolved;
     bool underlying_captured;
 } CssWebAnimationState;
 
@@ -3761,6 +3763,7 @@ CssWebAnimationState* css_web_animation_create(DomElement* element,
                                                 Pool* pool);
 void css_web_animation_set_current_time(CssWebAnimationState* state,
                                          double current_time_ms);
+void css_web_animation_cancel(CssWebAnimationState* state);
 void css_web_animation_resolve(DomElement* element, LayoutContext* lycon);
 
 // ============================================================================

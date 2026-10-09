@@ -61,6 +61,22 @@ Document declared operations cover `getElementById`, `getElementsByClassName`/`T
 
 The native interface tables also publish `Document.cookie`, `Document.write`, and `Element.innerHTML` on their canonical prototypes. Libraries can inspect and wrap the same accessors and methods used by instance reads, rather than encountering an absent descriptor.
 
+**DocumentType and ChildNode prototypes (verified 2026-10-09).** `DocumentType` is a non-constructible Node-derived interface. Doctype wrappers select it by native node kind even though their allocation shares comment storage (**D3.4.7**). The existing Jube `dom_node` bindings publish `before`, `after`, `replaceWith`, and `remove` on Element, CharacterData, and DocumentType prototypes; receiver checks and operation bodies remain shared (**D7.4.4, D6.2.2v2**). `test/ui/dom/document_type_interface` checks doctype branding, captured mutations on elements/text/comments, detached doctypes, and forged receivers, including forced-collection runs. This follows the [DOM ChildNode mixin](https://dom.spec.whatwg.org/#interface-childnode).
+
+**History interface (verified 2026-10-09).** `dom_install_history_interface` uses the existing realm interface installer to publish the non-constructible `History` interface and link the native `history` object to `History.prototype`. The prototype owns `pushState`, `replaceState`, `back`, `forward`, and `go`; their observable names and WebIDL lengths are independent of their native adapter arities (**D6.2.2v2**). `dom_history.cpp` retains the receiver identity in its realm-lifetime context capsule, rejects forged receivers, and releases its exact root before heap replacement (**D5.3.5, D5.4.2**). Captured prototype methods share the existing Radiant history operations. `test/ui/dom/history_interface` checks the prototype, branding, illegal construction, receiver validation, and captured calls; the existing hash and popstate fixtures check traversal delivery. The interface follows the [HTML History surface](https://html.spec.whatwg.org/multipage/nav-history-apis.html#the-history-interface); cross-document reload remains outside the existing traversal implementation.
+
+**TreeWalker interface (verified 2026-10-09).** The realm publishes `TreeWalker` with an illegal constructor and the existing `nextNode`, `firstChild`, and `nextSibling` traversal operations on its prototype. `dom_create_tree_walker_bridge` creates a metadata-branded walker and binds that prototype; captured methods use their current receiver instead of a per-instance bound argument. Forging the prototype or string tag does not satisfy the native receiver check (**D3.4.7, D6.2.2v2**). Interface-member installation and instance prototype binding are shared with Storage and History. `test/ui/dom/tree_walker_interface` checks traversal, captured calls on different walkers, and forged-receiver rejection.
+
+**Observer interfaces (verified 2026-10-09).** The realm installs distinct MutationObserver, ResizeObserver, and IntersectionObserver constructors with shared prototype operations, string tags, names, and WebIDL lengths. The adapter rejects construction without `new`; captured methods validate the native receiver's observer kind (**D6.2.2v2**). `takeRecords` retains the drained array while allocating its replacement, and observer fields use interned keys so allocating a value cannot collect a temporary property key (**D5.3.5, D5.4.1**). `test/ui/dom/observer_interfaces` checks captured observation, draining, disconnection, and forged/cross-kind receivers in normal and forced-collection runs. The published operations follow the [MutationObserver](https://dom.spec.whatwg.org/#interface-mutationobserver), [ResizeObserver](https://drafts.csswg.org/resize-observer/#resize-observer-interface), and [IntersectionObserver](https://w3c.github.io/IntersectionObserver/#intersection-observer-interface) interface definitions.
+
+**Media-query ownership and delivery (verified 2026-10-09).** `dom_match_media` retains its query input and EventTarget object through construction; interned field names survive allocations of their values/functions. The existing accessor installer publishes `matches` without a second descriptor-building path. Resize notification roots the target and change event through field population and dispatch (**D5.3.3, D5.3.5**). The canonical EventTarget dispatcher owns `onchange` delivery, so the notifier no longer invokes that handler twice. `test/ui/dom/match_media_gc_ownership` checks initial values, allocating legacy/onchange callbacks, listener removal, live matching, and exactly one delivery per resize. All 12 assertions pass under forced collection and poisoned frees; both resize states agree with Chromium and the [CSSOM View MediaQueryList interface](https://drafts.csswg.org/cssom-view/#the-mediaquerylist-interface).
+
+**History state cloning (verified 2026-10-09).** Recursive `structuredClone` destinations, enumerated keys, and child values stay precisely rooted until publication (**D5.3.5, D5.4.1**). Array clones append into an empty destination rather than creating leading holes. `JsStructuredClone.RetainsRecursiveDestinationsAcrossEveryAllocation` checks distinct nested objects and array contents under forced collection and poisoned frees in both AST and MIR; the History interface fixture verifies state after `replaceState` under the same stress.
+
+**Autofocus dispatch (verified 2026-10-09).** The existing package policy selects the candidate (**ES30**), then `radiant_run_autofocus` receives the enclosing host's `UiContext` for the public focus/focusin dispatch. An author listener can insert a stylesheet and trigger retained layout through that same context; a document-only event context cannot supply its viewport or layout services. Window and document-rebuild callers pass their current host explicitly. `test/ui/js_autofocus_listener_relayout` reproduces the former null-context crash and checks focused identity and geometry after the listener's full recascade.
+
+**Web Animation cancellation (verified 2026-10-09).** `Animation.prototype.cancel` operates on the receiver's native effect through an ordinary shared method (**D6.2.2v2**). Cancellation makes `currentTime` unresolved, excludes the effect from sampling/computed-style queries, and requests layout without a DOM mutation. The existing CSS-animation transform-restoration helper also clears a retained sample when the cascade has no transform declaration. Effect state remains document-owned (**D4.5.1v4**); a later numeric seek reactivates it, including the preceding timestamp, and recaptures underlying values after intervening style changes. Current-time conversion keeps its receiver/input rooted and preserves thrown values (**D5.3.5, D5.4.1**). `test/ui/dom/animation_cancel` checks sizing, opacity, transforms, repeat cancellation, shared-method metadata, receiver rejection, and neutral-keyframe resampling across host event commits; its 13 script checks agree with Chromium, and all 17 native UI assertions pass under forced collection. This implements cancellation of the existing explicitly sampled effects following [Web Animations cancellation](https://www.w3.org/TR/web-animations-1/#canceling-an-animation); automatic playback, finished promises, and playback-event dispatch remain incomplete.
+
 ---
 
 ## 4. CSS selector queries & lazy layout
@@ -113,6 +129,47 @@ checkbox/radio/popover policy is the shared UA-tier claim protocol instead.
 CSSOM wrappers are branded native VMaps with host data pointing at the stylesheet, rule, or declaration state. `dom_cssom_wrap_stylesheet` stores a `CssStylesheet*`; `dom_cssom_wrap_rule` stores a `CssRule*` and associated serialization state. The VMap host gate routes by CSSOM predicate: `js_is_stylesheet` -> stylesheet getter/`insertRule`/`deleteRule`; `js_is_css_rule` -> rule `selectorText`/`style`/`cssText`; else the declaration getter/setter.
 
 `CSSStyleDeclaration` access is camelCase-aware: `dom_cssom_rule_decl_set_property` re-parses the value as CSS and replaces/adds the declaration (`dom_cssom.h:110`). Font-face rules expose declarations via a synthesized **shadow `CssRule`** of type `CSS_RULE_STYLE` cached in the rule's repurposed legacy fields (`:456`). This CSSOM property model — camelCase ↔ hyphenated, per-declaration storage — mirrors the property machinery in [JS_06](JS_06_Objects_Properties_Prototypes.md).
+
+**Declaration-write comparison verified 2026-10-09:** property setters and
+removal compare the declaration block's serialization before and after the
+edit, as required by [CSSOM's declaration-setting contract](https://drafts.csswg.org/cssom/#set-a-css-declaration).
+An unchanged block does not publish an attribute mutation or invalidate layout;
+`cssText` retains its unconditional attribute-update behavior. Comparison
+strings belong to the declaration view's scratch pool (**D4.5.1v4**) rather
+than the stylesheet's persistent pool. The
+`cssom_idempotent_declaration_writes` UI fixture covers ordinary, important,
+custom, shorthand and named writes, removal, `cssText`, and an observer that
+writes its observed value back before reading geometry.
+
+**Resize sampling verified 2026-10-09:** ResizeObserver's CSS-box path uses
+the engine seam's untransformed content and border sizes, with logical axes
+and a padding-relative content rectangle. A transform on the target or an
+ancestor does not publish a resize; IntersectionObserver continues to use
+visual rectangles. This follows the [Resize Observer box-size algorithm](https://drafts.csswg.org/resize-observer/#calculate-box-size).
+The DOM's engine call remains native-data-only under **ES40**;
+`resize_observer_css_boxes` checks content and border sizes, transform-only
+changes, and a real width change.
+
+**Relational invalidation verified 2026-10-09:** the notifier marks a data/ARIA
+attribute as local only when the active stylesheet rules have no `:has()`
+argument referencing that name. The shared selector walk handles nested
+functional selectors and imported rules. Direction, scope, column and
+stylesheet-mutation guards still apply; a stylesheet edit later in the same
+batch forces a broad recascade. The native provider follows **ES40**;
+`dom_mutation_attribute_relational_scope` checks both local writes and
+ancestor styling through existing and newly inserted dependencies.
+Child-list edits also check whether a descendant/child `:has()` selector has
+a possible anchor in the edited parent's ancestry. Unrelated insertions and
+removals keep the local recascade; sibling/column relations and possible
+ancestor anchors retain the broad path. Static anchor tests reuse the selector
+matcher, and journal ownership remains document-scoped (**D4.5.1v4**).
+When neither structural selectors nor relational anchors depend on a child-list
+edit, the cascade visits only the inserted subtree; removals retain existing
+styles. Layout still processes the dirty ancestry. Position and `:empty`
+selectors recascade the parent when its children or the parent can match
+their static selector ancestry, verified by `StyleEpochTest`.
+`dom_mutation_child_relational_scope` covers unrelated probes, nested `:not()`,
+ancestor changes, stylesheet insertion, and a sibling dependency.
 
 `insertRule`/`deleteRule` mutate the **live** `CssStylesheet` in place: `insertRule` range-checks the index, re-tokenizes and re-parses the rule text into a `CssRule`, and splices it into the sheet's rule array (`dom_cssom.cpp:690`); `deleteRule` range-checks and removes (`:743`). Because wrappers hold the underlying pointer (not a copy), subsequent `cssRules` reads observe the change.
 

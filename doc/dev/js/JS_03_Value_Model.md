@@ -139,6 +139,17 @@ Top-level `var`/`let`/`const`/function bindings of a module are stored by **inde
 
 All mutable engine globals are gathered into one `JsRuntimeState` struct (`js_runtime_state.hpp`), instantiated once (`js_runtime_state.cpp`); legacy free-global names such as `js_strict_mode`, `js_current_this`, and `js_module_vars` are `#define` aliases onto its fields, an explicit migration-away-from-scattered-globals device. The capsule holds the strict-mode flag, active input, module-var table and count, heap epoch, `current_this`/`new_target`/`proxy_receiver`, super-this stacks, pending call-arg state, and caches (`cached_object_proto`, regexp last-match, trace counters). Per D8.4.3v2, it deliberately has no pending-exception value or message buffer: a failure is the ERROR-tagged Item returned by the fallible helper.
 
+`JsStringCacheState` retains up to four recently used immutable Unicode sources,
+their UTF-16 lengths, and their last codepoint-boundary byte/unit offsets.
+`js_string_utf16_length` and `js_utf16_seek` reuse those positions for nearby
+forward or backward reads, avoiding repeated whole-string and prefix scans in
+syntax highlighters. Surrogate halves still resolve independently. Mutable
+string-builder storage bypasses the cache. The private JS indexing rule stays
+inside its guest core (**D1.3v3**); source Items join the existing epoch-guarded
+`RootVector` range (**D5.3.5**), and a heap change clears those keys before reuse.
+The metadata retains no raw GC pointer. Verified with AST/MIR Unicode boundary
+tests and forced-collection string-cache tests on 2026-10-09.
+
 The **batch reset** path supports the test262 runner, which reuses one process across thousands of scripts. `js_batch_reset` is the heavy crash-recovery reset: it bumps `js_heap_epoch` (invalidating epoch-cached objects), zeroes the module-var table, tears down the module registry and JS module cache, resets transient call state and heap-bound state, and then fans out to dozens of per-subsystem resets (Math/JSON/console/Reflect global objects, constructor prototypes, DOM, event loop, RegExp statics, and every Node-compat module). `js_batch_reset_to(checkpoint)` is the lighter preamble-mode path: it restores module vars to a checkpoint and clears test-local state but leaves the heap and cached builtins intact, so the harness need not re-initialize between tests. `js_assert_batch_runtime_state_clear` audits that a reset left no dangling `this`/new-target/arg state, logging `js-batch-state` leaks. The batch/preamble mechanism itself is detailed in [JS_16 — Testing & Conformance](JS_16_Testing.md).
 
 ---

@@ -243,10 +243,10 @@ bool network_download_resource(NetworkResource* res) {
     HeaderCallbackCtx header_ctx = {NULL, NULL, NULL};
     CookieJar* jar = (res->manager) ? res->manager->cookie_jar : NULL;
     
+    cookie_jar_import_curl(jar, curl);
     if (jar) {
         // Use curl's cookie engine so each redirect re-evaluates the jar for
         // its own URL instead of forwarding an origin's raw Cookie header.
-        cookie_jar_import_curl(jar, curl);
         header_ctx.jar = jar;
         header_ctx.curl = curl;
         header_ctx.request_url = res->url;

@@ -3308,7 +3308,7 @@ View* focus_get_visible(DocState* state);
 // ES30: package-owned autofocus selection. Native retains the focus write,
 // focus-event emission point, queued scroll geometry, and paint invalidation.
 bool radiant_document_has_autofocus(struct DomElement* root);
-void radiant_run_autofocus(struct DomDocument* doc);
+void radiant_run_autofocus(struct UiContext* uicon, struct DomDocument* doc);
 
 // ============================================================================
 // Doc-Level Interaction Target API

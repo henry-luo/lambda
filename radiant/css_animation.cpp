@@ -1508,6 +1508,17 @@ void css_animation_finish(AnimationInstance* anim) {
     }
 }
 
+static void css_animation_restore_underlying_transform(CssAnimState* state) {
+    if (state->element && state->element->transform &&
+        state->element->transform->functions.get() == state->sampled_transform.get()) {
+        ViewTree* tree = state->element->doc ? state->element->doc->view_tree.get() : nullptr;
+        Pool* target_pool = tree ? tree->prop_pool : state->pool;
+        state->element->transform->functions = lam::shared(
+            radiant::clone_transform_list(target_pool, state->underlying_transform));
+        state->element->transform->functions_owner = TRANSFORM_FUNCTIONS_VIEW_POOL;
+    }
+}
+
 static void css_animation_cancel(AnimationInstance* anim) {
     CssAnimState* state = (CssAnimState*)anim->state;
     if (!state) return;
@@ -1525,14 +1536,7 @@ static void css_animation_cancel(AnimationInstance* anim) {
             "animationcancel", "animationName", state->keyframes->name, elapsed);
     }
     if (state->underlying) pool_free(state->pool, state->underlying);
-    if (state->element && state->element->transform &&
-        state->element->transform->functions.get() == state->sampled_transform.get()) {
-        ViewTree* tree = state->element->doc ? state->element->doc->view_tree.get() : nullptr;
-        Pool* target_pool = tree ? tree->prop_pool : state->pool;
-        state->element->transform->functions = lam::shared(
-            radiant::clone_transform_list(target_pool, state->underlying_transform));
-        state->element->transform->functions_owner = TRANSFORM_FUNCTIONS_VIEW_POOL;
-    }
+    css_animation_restore_underlying_transform(state);
     radiant::destroy_transform_list(state->pool, state->sampled_transform);
     radiant::destroy_transform_list(state->pool, state->underlying_transform);
     css_animation_clear_value_samples(state);
@@ -1657,6 +1661,7 @@ CssWebAnimationState* css_web_animation_create(DomElement* element,
     state->element = element;
     state->duration_ms = duration_ms >= 0.0 ? duration_ms : 0.0;
     state->current_time_ms = 0.0;
+    state->current_time_resolved = true;
     if (timing) state->timing = *timing;
     else state->timing.type = TIMING_LINEAR;
     state->sample.keyframes = keyframes;
@@ -1680,8 +1685,19 @@ void css_web_animation_set_current_time(CssWebAnimationState* state,
     if (!isfinite(current_time_ms) || current_time_ms < 0.0) {
         current_time_ms = 0.0;
     }
-    if (state->current_time_ms == current_time_ms) return;
+    if (state->current_time_resolved && state->current_time_ms == current_time_ms) return;
     state->current_time_ms = current_time_ms;
+    state->current_time_resolved = true;
+    css_web_animation_request_sampling(state);
+}
+
+void css_web_animation_cancel(CssWebAnimationState* state) {
+    if (!state || !state->current_time_resolved) return;
+    // unresolved time removes the effect; retain its document-owned state for later seeks.
+    state->current_time_resolved = false;
+    state->underlying_captured = false;
+    // absent transform declarations leave the sampled borrow in the retained view.
+    css_animation_restore_underlying_transform(&state->sample);
     css_web_animation_request_sampling(state);
 }
 
@@ -1695,6 +1711,10 @@ void css_web_animation_resolve(DomElement* element, LayoutContext* lycon) {
     CssWebAnimationState* state =
         (CssWebAnimationState*)element->web_animation_state();
     while (state) {
+        if (!state->current_time_resolved) {
+            state = state->next;
+            continue;
+        }
         css_animation_refresh_priority(&state->sample);
         css_animation_refresh_value_samples(&state->sample, lycon);
         if (!state->underlying_captured) {
@@ -1960,7 +1980,8 @@ bool css_animation_needs_computed_sample(DomElement* element, CssPropertyCode pr
     DomDocument* doc = element->doc;
     if (doc->disable_css_animations) return false;
     for (CssWebAnimationState* effect = element->web_animation_state(); effect; effect = effect->next) {
-        if (css_keyframes_animates_property(effect->sample.keyframes, property)) return true;
+        if (effect->current_time_resolved &&
+            css_keyframes_animates_property(effect->sample.keyframes, property)) return true;
     }
     DocState* state = (DocState*)doc->state;
     AnimationScheduler* scheduler = state ? state->animation_scheduler : nullptr;

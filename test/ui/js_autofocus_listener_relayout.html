@@ -1,0 +1,17 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><style>#box {width:40px;height:20px}</style></head>
+<body><input id="field" autofocus><div id="box"></div><div id="report">pending</div><script>
+    const field = document.getElementById('field');
+    const report = document.getElementById('report');
+    field.addEventListener('focus', function () {
+        // stylesheet insertion requires a full recascade after native autofocus.
+        const sheet = document.createElement('style');
+        sheet.textContent = '#box {width:120px}';
+        document.head.appendChild(sheet);
+        report.textContent = 'focused';
+        report.setAttribute('data-active', String(document.activeElement === field));
+    });
+    field.addEventListener('focusin', function () {
+        report.setAttribute('data-width', String(document.getElementById('box').offsetWidth));
+    });
+</script></body></html>

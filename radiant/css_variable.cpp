@@ -83,6 +83,13 @@ struct CssVarContext {
         if (cache) hashmap_free(cache);
         if (measure_pool) pool_destroy(measure_pool);
     }
+    Pool* temporary_pool() {
+        // tokenization and serialization work must not accumulate in retained
+        // view pools across computed-style reads (D4.5.1v4).
+        if (!measure_pool) measure_pool = pool_create();
+        if (!measure_pool) allocation_failed = true;
+        return measure_pool;
+    }
     const CssVarCacheEntry* get(const CssVarCacheEntry& key) {
         return cache ? (const CssVarCacheEntry*)hashmap_get(cache, &key) : nullptr;
     }
@@ -168,8 +175,7 @@ static bool css_var_measure_value(const CssValue* value, CssVarSize* size) {
             css_var_size_add(size, {punctuation, 0});
         else if (value->type != CSS_VALUE_TYPE_VAR) {
             if (!context->scalar_formatter) {
-                context->measure_pool = pool_create();
-                context->scalar_formatter = css_formatter_create(context->measure_pool, CSS_FORMAT_COMPACT);
+                context->scalar_formatter = css_formatter_create(context->temporary_pool(), CSS_FORMAT_COMPACT);
             }
             if (context->scalar_formatter) {
                 stringbuf_reset(context->scalar_formatter->output);
@@ -515,8 +521,10 @@ static bool css_append_custom_token(Pool* pool, CssCustomTextOutput* output, con
     return true;
 }
 
-static const char* css_var_name_from_text(Pool* pool, StrView source) {
+static const char* css_var_name_from_text(StrView source) {
     if (!source.str) return nullptr;
+    Pool* pool = css_active_var_context->temporary_pool();
+    if (!pool) return nullptr;
     size_t count = 0;
     CssToken* tokens = css_tokenize(source.str, source.length, pool, &count);
     if (!tokens) return nullptr;
@@ -534,8 +542,10 @@ static const char* css_var_name_from_text(Pool* pool, StrView source) {
 
 static bool css_append_custom_text(Pool* pool, DomElement* element, StrView source,
     const CssVarStack* stack, CssCustomTextOutput* output, bool trim_boundary_comments) {
+    Pool* temporary_pool = css_active_var_context->temporary_pool();
+    if (!temporary_pool) return false;
     size_t count = 0;
-    CssToken* tokens = css_tokenize(source.str, source.length, pool, &count);
+    CssToken* tokens = css_tokenize(source.str, source.length, temporary_pool, &count);
     if (!tokens) return false;
     auto append_fragment = [&](size_t first, size_t end) {
         // CSSOM retains authored comments; owned token normalization discards boundary comments only.
@@ -553,7 +563,7 @@ static bool css_append_custom_text(Pool* pool, DomElement* element, StrView sour
             output->trailing_comments = false;
         }
         for (; first < end; first++)
-            if (!css_append_custom_token(pool, output, tokens[first])) return false;
+            if (!css_append_custom_token(temporary_pool, output, tokens[first])) return false;
         return true;
     };
     size_t fragment = 0;
@@ -577,12 +587,12 @@ static bool css_append_custom_text(Pool* pool, DomElement* element, StrView sour
         // CSS Variables 1 §3 substitutes the complete first argument before parsing its name.
         StrView computed_name = css_substitute_custom_text(pool, element,
             {begin, (size_t)(finish - begin)}, stack, trim_boundary_comments);
-        const char* name = css_var_name_from_text(pool, computed_name);
+        const char* name = css_var_name_from_text(computed_name);
         StrView replacement = {};
         const CssValue* value = name ? css_lookup_custom_value(pool, element, name, stack, &replacement) : nullptr;
         if (value) {
             if (!replacement.str) {
-                CssFormatter* formatter = css_formatter_create(pool, CSS_FORMAT_COMPACT);
+                CssFormatter* formatter = css_formatter_create(temporary_pool, CSS_FORMAT_COMPACT);
                 if (!formatter) return false;
                 // registered values substitute computed spelling; owned unregistered tokens retain their source.
                 formatter->options.computed_colors = true;
@@ -613,8 +623,11 @@ static StrView css_substitute_custom_text(Pool* pool, DomElement* element,
     if (!buffer) return {};
     CssCustomTextOutput output = {buffer, {}, false, 0};
     bool valid = css_append_custom_text(pool, element, source, stack, &output, trim_boundary_comments);
-    // D4.5.1v4: only the caller's pool retains output; the builder dies at return.
-    StrView result = valid ? StrView{pool_dup_n(pool, buffer->str, buffer->length), buffer->length}
+    // typed values and public text results copy this temporary spelling before
+    // the substitution context ends (D4.5.1v4).
+    Pool* temporary_pool = css_active_var_context->temporary_pool();
+    StrView result = valid && temporary_pool ?
+        StrView{pool_dup_n(temporary_pool, buffer->str, buffer->length), buffer->length}
         : StrView{};
     strbuf_free(buffer);
     return result;
@@ -889,5 +902,12 @@ const CssValue* css_compute_element_custom_property_text(Pool* pool, DomElement*
     const char* name, size_t name_length, StrView* text) {
     CssVarContextScope context(pool, element);
     if (text) *text = {};
-    return css_compute_custom_property(pool, element, name, css_active_var_stack, name_length, text);
+    const CssValue* resolved = css_compute_custom_property(pool, element, name,
+        css_active_var_stack, name_length, text);
+    Pool* temporary_pool = css_active_var_context->measure_pool;
+    if (resolved && text && text->str && temporary_pool && pool_owns(temporary_pool, text->str)) {
+        text->str = pool_dup_n(pool, text->str, text->length);
+        if (!text->str) return nullptr;
+    }
+    return resolved;
 }

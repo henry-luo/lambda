@@ -4581,7 +4581,7 @@ void rebuild_lambda_doc(UiContext* uicon) {
     restore_lambda_focus(doc, state, had_focus, &focus_restore);
 
     if (state && !focus_has_current(state) && doc->view_tree && doc->view_tree->root) {
-        radiant_run_autofocus(doc);
+        radiant_run_autofocus(uicon, doc);
     }
 
     if (state) {
@@ -4788,7 +4788,7 @@ void rebuild_lambda_doc_incremental(UiContext* uicon, RetransformResult* results
     restore_lambda_focus(doc, state, had_focus, &focus_restore);
 
     if (state && !focus_has_current(state)) {
-        radiant_run_autofocus(doc);
+        radiant_run_autofocus(uicon, doc);
     }
 
     if (state) {

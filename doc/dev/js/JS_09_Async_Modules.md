@@ -65,6 +65,15 @@ Timers are libuv handles. `js_setTimeout`/`setInterval` (and `_args` variants) a
 
 Two invariants in the entry point (and mirrored in the module entry) make the drain safe:
 
+**Headless load boundary verified 2026-10-09:** auto-close document batches
+leave animation-frame callbacks queued until the same post-`load` boundary
+used by timers. A per-script drain must not advance a recurring ticker while
+later startup scripts are still being dispatched. The bounded frame drain
+keeps callbacks queued at its limit; a recurring animation is ordinary pending
+work. Callback ownership still follows **D5.4.1**, and script timeouts still
+use **D8.4.3v2**. `JsEventLoop.BrowserFrameDrainWaitsForLoadBoundary` checks
+that a queued callback waits during startup and executes after load.
+
 - **Drain runs before `MIR_finish`.** The core pipeline calls `js_event_loop_drain` (and, in document mode, the animation-frame drain) *before* tearing down the MIR module, because microtask and timer callbacks are JIT'd code whose machine code must remain mapped (`JS_01_Compilation_Pipeline.md` §2 step 13). For modules the MIR context is not even finished — `jm_finish_module_transpile` hands it to `jm_defer_mir_cleanup` (`js_mir_module_batch_lowering.cpp:3756`) so module function pointers stay valid for the main program.
 - **Only the entry module drains, and module state is restored after the drain.** One `RuntimeExecutionScope` spans the whole module graph: `transpile_js_module_to_mir` opens it before the imports load, and only the outermost scope initializes the event loop (`:4131`), so a nested module no longer re-initializes the loop and clears queued jobs. A nested module never drains — draining there would resume a parked module carrier before its siblings evaluate (ECMA-262 InnerModuleEvaluation) — and the entry module flushes promise jobs and then drains (`:4338`). The module's current-file, module-state and namespace scopes (`RuntimeCurrentFileScope`, `RuntimeModuleStateScope`, `JsModuleNamespaceScope`) are destroyed at function exit, after the drain, so callbacks run inside it still see the module's slab and namespace.
 
@@ -101,6 +110,17 @@ An `await` with no activation to park — a script's top level, the MIR entry mo
 **Namespace object & live bindings.** Exported bindings are written onto the namespace object (`mt->namespace_reg`); `export default <expr>` writes the `default` key (`:3353`). Import *bindings* are recorded in `module_consts` as `JsModuleConstEntry` (`js_mir_context.hpp:69`) mapping each imported name to a `js_module_vars[]` slot; for a **self-import default** the entry is flagged `is_live_default_binding` with a `live_binding_specifier`, so reads emit `js_get_live_binding_default(specifier)` (`js_runtime.cpp:32498`) — which reads `namespace.default` live and throws ReferenceError while still in TDZ — instead of a snapshot `js_get_module_var`. General named imports are otherwise resolved as module-var snapshots (see [§9](#9-known-issues--future-improvements)).
 
 Module variables live in a per-context module state slab, never at code-baked addresses (**D7.2.1**): the module entry calls `lambda_module_state_reserve_and_activate(mt->module_var_count)` (`runtime-state.cpp:499`) to reserve the module's own slab and make it active, and an `MCONST_MODVAR` binding names a slot in it (`jm_load_module_var`); §9 covers its lifecycle.
+
+**Inline browser modules verified 2026-10-09:** each task retains a distinct
+synthetic module identity, while relative imports, import-map scopes, and
+`import.meta.url` use the document URL snapshot. The snapshot is copied into
+the document pool because `history.replaceState` replaces the original URL's
+string storage (**D4.5.1v4**); module records and execution remain separate
+from cached source artifacts (**D8.5.1v7**). This follows HTML's
+[inline module graph creation](https://html.spec.whatwg.org/multipage/webappapis.html#fetch-an-inline-module-script-graph).
+`js_inline_module_document_lifetime` covers three independent module scopes,
+static and dynamic relative imports, metadata, and history updates under
+forced GC with freed storage poisoned.
 
 ---
 

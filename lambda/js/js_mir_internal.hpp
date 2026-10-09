@@ -801,6 +801,7 @@ bool jm_retain_p2_mir_context(MIR_context_t ctx);
 void jm_destroy_p2_mir_contexts(JsRuntimeState* runtime_state);
 void jm_resolve_module_path(const char* base_file, const char* specifier, int spec_len,
                                    char* out, int out_size);
+const char* jm_document_script_base_url(Runtime* runtime, const char* script_reference);
 // Resolve an inline document script through the page URL rather than its
 // synthetic diagnostic label. Returns false for ordinary file/URL scripts.
 bool jm_resolve_document_module_path(Runtime* runtime, const char* script_reference,

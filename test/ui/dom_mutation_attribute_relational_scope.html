@@ -1,0 +1,19 @@
+<!doctype html>
+<style id="rules">
+#ancestor { width: 40px; height: 20px; }
+#ancestor:has(.selected) { height: 30px; }
+#ancestor:has([data-selected=yes]) { width: 60px; }
+</style>
+<button id="local">local data</button><button id="aria">local ARIA</button>
+<button id="related">related data</button><button id="stylesheet">new dependency</button>
+<div id="ancestor"><span id="target"></span></div>
+<script>
+var target = document.getElementById('target');
+document.getElementById('local').onclick = function () { target.dataset.progress = 'done'; };
+document.getElementById('aria').onclick = function () { target.setAttribute('aria-label', 'ready'); };
+document.getElementById('related').onclick = function () { target.dataset.selected = 'yes'; };
+document.getElementById('stylesheet').onclick = function () {
+    target.dataset.progress = 'finished';
+    document.getElementById('rules').sheet.insertRule('#ancestor:has([data-progress=finished]) { width: 80px; }', 3);
+};
+</script>

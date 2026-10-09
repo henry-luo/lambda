@@ -128,6 +128,8 @@ inline DomJsMutationKind dom_style_mutation_kind(CssPropertyCode prop_id) {
 typedef enum DomJsMutationAttribute {
     DOM_JS_MUTATION_ATTRIBUTE_UNKNOWN,
     DOM_JS_MUTATION_ATTRIBUTE_CLASS,
+    // a data/ARIA attribute absent from relational selector dependencies
+    DOM_JS_MUTATION_ATTRIBUTE_LOCAL,
 } DomJsMutationAttribute;
 
 // tier-1: document-owned journal, survives relayout

@@ -806,7 +806,7 @@ static void js_runtime_state_visit_root_vectors(JsRuntimeState* state,
     if (state->string_caches) {
         visit(state->string_caches,
             &state->string_caches->last_four_byte_escape,
-            662 + JS_ASCII_SUBSTRING_CACHE_CAPACITY,
+            662 + JS_ASCII_SUBSTRING_CACHE_CAPACITY + JS_UTF16_POSITION_CACHE_CAPACITY,
             "realm string caches", data);
     }
     if (state->test262_agent) {

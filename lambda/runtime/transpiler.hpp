@@ -124,7 +124,7 @@ struct Runtime {
     void* dom_doc;       // DomDocument* for JS DOM API (NULL when no document loaded)
     InputResourcePolicy resource_policy; // copied from the document before executing or linking its scripts
     void* dom_ui_context; // UiContext* borrowed by the document execution realm (NULL outside DOM sessions)
-    // Borrowed canonical document URL. Synthetic inline script labels resolve
+    // Document-owned canonical URL snapshot. Synthetic inline script labels resolve
     // browser module specifiers against this URL while the document is alive.
     const char* js_document_base_url;
     Item js_import_maps; // immutable Input-owned document maps; released with the document

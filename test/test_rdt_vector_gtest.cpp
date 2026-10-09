@@ -4,9 +4,10 @@
 #include "../radiant/event.hpp"
 #include "../radiant/svg_animation.hpp"
 #include "../radiant/radiant.hpp"
-#ifdef __APPLE__
 #include "../lib/font/font_internal.h"
-#endif
+#include "../lib/font/font_tables.h"
+#include "../lib/endian.h"
+#include "../lib/str.h"
 #include "../lambda/input/css/css_engine.hpp"
 #include "../lambda/input/css/css_formatter.hpp"
 #include "../lambda/input/css/dom_element.hpp"
@@ -1864,6 +1865,54 @@ static const CssValue* css_token_test_lookup(void* context, DomElement*, const c
     return strcmp(name, "--t1") == 0 ? (const CssValue*)context : nullptr;
 }
 
+TEST(CssVariableSubstitutionTest, InvalidOwnedTokensDoNotRetainTemporaryStorage) {
+    Pool* source = pool_create();
+    Pool* retained = pool_create();
+    ASSERT_NE(source, nullptr);
+    ASSERT_NE(retained, nullptr);
+    const char* expression = "var(--missing)";
+    const char* declaration_text = "--value:var(--missing)";
+    CssDeclaration* declaration = css_parse_declaration_text(declaration_text,
+        strlen(declaration_text), source);
+    ASSERT_NE(declaration, nullptr);
+    CssValue* value = css_value_create_token_sequence(source, declaration->value,
+        strview_from_cstr(expression));
+    ASSERT_NE(value, nullptr);
+    PoolStats before = {};
+    pool_get_detailed_stats(retained, &before);
+    for (size_t i = 0; i < 128; i++) {
+        EXPECT_EQ(css_resolve_var_value(retained, value, nullptr, nullptr), nullptr);
+    }
+    PoolStats after = {};
+    pool_get_detailed_stats(retained, &after);
+    EXPECT_EQ(after.live_bytes, before.live_bytes);
+    pool_destroy(retained);
+    pool_destroy(source);
+}
+
+TEST(CssVariableSubstitutionTest, PublicComputedTextRetainsSubstitutedSpelling) {
+    Input input = {};
+    DomDocument document;
+    ASSERT_TRUE(document.init(&input));
+    DomElement* element = DomElement::create(&document, "div", nullptr);
+    ASSERT_NE(element, nullptr);
+    document.root = lam::up(element);
+    ASSERT_TRUE(element->set_attribute("style", "--base:12px;--result:var(--base)"));
+    Pool* retained = pool_create();
+    ASSERT_NE(retained, nullptr);
+    StrView text = {};
+    const CssValue* value = css_compute_element_custom_property_text(retained,
+        element, "--result", 8, &text);
+    ASSERT_NE(value, nullptr);
+    ASSERT_NE(text.str, nullptr);
+    EXPECT_EQ(text.length, 4u);
+    EXPECT_STREQ(text.str, "12px");
+    EXPECT_TRUE(pool_owns(retained, text.str));
+    document.destroy();
+    EXPECT_STREQ(text.str, "12px");
+    pool_destroy(retained);
+}
+
 TEST(CssVariableSubstitutionTest, OwnedTokenSpellingSurvivesSubstitutionBoundaries) {
     struct Case {const char* variable; const char* expression; const char* expected;};
     const Case cases[] = {
@@ -2631,4 +2680,160 @@ TEST(SvgTextTest, ColorGlyphFallsBackToCoverageGeometry) {
     EXPECT_TRUE(rdt_path_get_bounds(path, &left, &top, &right, &bottom));
     EXPECT_GT(right - left, 0.0f); EXPECT_GT(bottom - top, 0.0f);
     rdt_path_free(path); arena_destroy(arena); font_handle_release(emoji); font_context_destroy(context);
+}
+
+class FontLocalSourceTest : public ::testing::Test {
+protected:
+    FontContext* ctx = nullptr;
+
+    void SetUp() override {
+        FontContextConfig config = {};
+        config.pixel_ratio = 1.0f;
+        ctx = font_context_create(&config);
+        ASSERT_NE(ctx, nullptr);
+        arraylist_remove_range(ctx->database->scan_directories, 0,
+            ctx->database->scan_directories->length);
+        font_context_add_scan_directory(ctx, "test/ui/svg_font_assets");
+    }
+
+    void TearDown() override {
+        if (ctx) font_context_destroy(ctx);
+    }
+
+    FontHandle* load(FontFaceSource* sources, int count) {
+        FontFaceDesc descriptor = {};
+        descriptor.family = "Local Source Alias";
+        descriptor.weight = FONT_WEIGHT_NORMAL;
+        descriptor.slant = FONT_SLANT_NORMAL;
+        descriptor.sources = sources;
+        descriptor.source_count = count;
+        if (!font_face_register(ctx, &descriptor)) return nullptr;
+        FontStyleDesc style = {};
+        style.family = descriptor.family;
+        style.size_px = 20.0f;
+        style.weight = descriptor.weight;
+        const FontFaceDesc* registered = font_face_find(ctx, &style);
+        return registered ? font_face_load(ctx, registered, style.size_px) : nullptr;
+    }
+
+    void expect_name(FontHandle* handle, const char* name) {
+        ASSERT_NE(handle, nullptr);
+        NameTable* names = font_tables_get_name(handle->tables);
+        ASSERT_NE(names, nullptr);
+        EXPECT_STREQ(names->postscript_name, name);
+        font_handle_release(handle);
+        font_context_reset_document_fonts(ctx);
+        EXPECT_EQ(ctx->face_descriptor_count, 0);
+    }
+};
+
+TEST_F(FontLocalSourceTest, UniqueNamesTakePrecedenceOverLaterUrls) {
+    const char* names[] = {"SVG Test Rectangle Regular", "SVGTestRectangle-Regular",
+        "svgtestrectangle-regular"};
+    for (const char* name : names) {
+        FontFaceSource sources[2] = {};
+        sources[0].local_name = name;
+        sources[1].path = "test/lambda/math/fonts/NotoSansMath-Regular.ttf";
+        expect_name(load(sources, 2), "SVGTestRectangle-Regular");
+    }
+}
+
+TEST_F(FontLocalSourceTest, FamilyNamesFallThroughToTheNextSource) {
+    FontFaceSource sources[2] = {};
+    sources[0].local_name = "SVG Test Rectangle";
+    sources[1].path = "test/lambda/math/fonts/NotoSansMath-Regular.ttf";
+    expect_name(load(sources, 2), "NotoSansMath-Regular");
+}
+
+TEST_F(FontLocalSourceTest, RegistrationOwnsLocalNames) {
+    char name[] = "SVGTestRectangle-Regular";
+    FontFaceSource sources[2] = {};
+    sources[0].local_name = "Missing Local Source Test Face";
+    sources[1].local_name = name;
+    FontHandle* handle = load(sources, 2);
+    name[0] = 'X';
+    const FontFaceDesc* descriptors[1] = {};
+    ASSERT_EQ(font_face_list(ctx, "Local Source Alias", descriptors, 1), 1);
+    EXPECT_STREQ(descriptors[0]->sources[1].local_name, "SVGTestRectangle-Regular");
+    expect_name(handle, "SVGTestRectangle-Regular");
+}
+
+TEST_F(FontLocalSourceTest, DiskCachePreservesFullNames) {
+    ASSERT_NE(font_database_find_local_name_internal(ctx->database,
+        "SVG Test Rectangle Regular"), nullptr);
+    const char* path = "temp/font_local_source_cache.bin";
+    ASSERT_TRUE(font_database_save_cache_internal(ctx->database, path));
+    Pool* pool = pool_create();
+    Arena* arena = arena_create_default();
+    ASSERT_NE(pool, nullptr);
+    ASSERT_NE(arena, nullptr);
+    FontDatabase* database = font_database_create_internal(pool, arena);
+    ASSERT_NE(database, nullptr);
+    ASSERT_TRUE(font_database_load_cache_internal(database, path));
+    FontEntry* entry = font_database_find_local_name_internal(database,
+        "SVG Test Rectangle Regular");
+    ASSERT_NE(entry, nullptr);
+    EXPECT_STREQ(entry->postscript_name, "SVGTestRectangle-Regular");
+    font_database_destroy_internal(database);
+    arena_destroy(arena);
+    pool_destroy(pool);
+    EXPECT_EQ(remove(path), 0);
+}
+
+TEST_F(FontLocalSourceTest, CollectionInventoryCannotWinFaceMatchingOrExpandTwice) {
+    const char* paths[] = {"test/ui/svg_font_assets/rectangle.ttf",
+        "test/lambda/math/fonts/NotoSansMath-Regular.ttf"};
+    lam::Temp<char> fonts[2];
+    size_t sizes[2] = {};
+    size_t offsets[2] = {20, 0};
+    for (int i = 0; i < 2; i++) {
+        char* bytes = nullptr;
+        ASSERT_TRUE(file_read_all(paths[i], MEM_CAT_TEMP, &bytes, &sizes[i]));
+        fonts[i].reset(bytes);
+    }
+    offsets[1] = (offsets[0] + sizes[0] + 3) & ~(size_t)3;
+    size_t length = offsets[1] + sizes[1];
+    lam::Temp<uint8_t> collection((uint8_t*)mem_calloc(1, length, MEM_CAT_TEMP));
+    ASSERT_TRUE(collection);
+    write_be32(collection.get(), FONT_TAG('t', 't', 'c', 'f'));
+    write_be32(collection.get() + 4, 0x00010000);
+    write_be32(collection.get() + 8, 2);
+    for (int i = 0; i < 2; i++) {
+        write_be32(collection.get() + 12 + i * 4, (uint32_t)offsets[i]);
+        uint8_t* face = collection.get() + offsets[i];
+        memcpy(face, fonts[i].get(), sizes[i]);
+        uint16_t tables = read_be16(face + 4);
+        for (uint16_t t = 0; t < tables; t++) {
+            uint8_t* record = face + 12 + t * 16;
+            write_be32(record + 8, read_be32(record + 8) + (uint32_t)offsets[i]);
+        }
+    }
+    const char* path = "temp/font_local_source_collection.ttc";
+    ASSERT_EQ(write_binary_file_atomic(path, collection.get(), length), 0);
+    FontEntry* inventory = (FontEntry*)pool_calloc(ctx->pool, sizeof(FontEntry));
+    ASSERT_NE(inventory, nullptr);
+    inventory->family_name = arena_strdup(ctx->arena, "Noto Sans Math");
+    inventory->file_path = arena_strdup(ctx->arena, path);
+    inventory->format = FONT_FORMAT_TTC;
+    inventory->weight = FONT_WEIGHT_NORMAL;
+    inventory->is_placeholder = true;
+    arraylist_append(ctx->database->all_fonts, inventory);
+    ctx->database->scanned = true;
+    FontDatabaseCriteria criteria = {};
+    str_copy(criteria.family_name, sizeof(criteria.family_name), "Noto Sans Math", 14);
+    criteria.weight = FONT_WEIGHT_NORMAL;
+    for (int attempt = 0; attempt < 3; attempt++) {
+        FontDatabaseResult match = font_database_find_best_match_internal(ctx->database, &criteria);
+        ASSERT_NE(match.font, nullptr);
+        EXPECT_TRUE(match.font->is_collection);
+        EXPECT_EQ(match.font->collection_index, 1);
+        EXPECT_NE(match.font, inventory);
+        EXPECT_EQ(ctx->database->all_fonts->length, 3);
+    }
+    FontEntry* local = font_database_find_local_name_internal(ctx->database, "Noto Sans Math Regular");
+    ASSERT_NE(local, nullptr);
+    EXPECT_EQ(local->collection_index, 1);
+    EXPECT_TRUE(inventory->is_placeholder);
+    EXPECT_TRUE(inventory->collection_expanded);
+    EXPECT_EQ(remove(path), 0);
 }

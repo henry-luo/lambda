@@ -397,8 +397,8 @@ float compute_text_height_at_width(LayoutContext* lycon,
 
 IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement* element,
                                                  bool content_only = false);
-IntrinsicSizes flex_measure_display_contents_intrinsic_widths(
-    LayoutContext* lycon, ViewBlock* container, DomElement* contents,
+IntrinsicSizes flex_measure_intrinsic_item_widths(
+    LayoutContext* lycon, ViewBlock* container,
     bool row_flex, bool wrapping, int* item_count);
 void layout_resolve_intrinsic_horizontal_margins(LayoutContext* lycon,
                                                   DomElement* element,
@@ -641,16 +641,21 @@ struct CacheEntry {
     SizeF computed_size;
     bool valid;
 };
+// tier-3: layout-transient, valid within one measurement generation
+struct IntrinsicWidthCacheEntry {
+    IntrinsicSizes sizes;
+    CacheEntry context;
+    SizeF block_size;
+    SizeF parent_size;
+    uint32_t generation;
+};
 // tier-3: layout-transient, valid within pass
 struct LayoutCache {
     CacheEntry final_layout;
     CacheEntry measure_entries[LAYOUT_CACHE_SIZE];
     // Percentage terms and content-only requests each need a distinct result;
     // retain all four contributions within the current layout pass.
-    float intrinsic_min_content_width[4];
-    float intrinsic_max_content_width[4];
-    uint32_t intrinsic_measurement_generation[4];
-    uint8_t intrinsic_measurement_valid_mask;
+    IntrinsicWidthCacheEntry intrinsic_widths[4];
     bool is_empty;
     uint32_t generation;
 };
@@ -661,9 +666,9 @@ inline void layout_cache_init(LayoutCache* cache, uint32_t generation = 0) {
         cache->measure_entries[i].valid = false;
     }
     for (int i = 0; i < 4; i++) {
-        cache->intrinsic_measurement_generation[i] = 0;
+        cache->intrinsic_widths[i].context.valid = false;
+        cache->intrinsic_widths[i].generation = 0;
     }
-    cache->intrinsic_measurement_valid_mask = 0;
     cache->is_empty = true;
     cache->generation = generation;
 }
