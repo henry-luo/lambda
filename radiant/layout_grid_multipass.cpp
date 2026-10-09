@@ -240,20 +240,16 @@ static bool layout_grid_anonymous_text_content(
 
 void layout_grid_content(LayoutContext* lycon, ViewBlock* grid_container) {
     if (!grid_container) return;
-    // guard against stack overflow from deeply nested grid containers (fuzzer-found).
-    // nested grid items recurse here via layout_grid_item_final_content_multipass
-    // without passing through layout_flow_node, so they bypass that depth guard.
-    // uses a dedicated, small limit because each grid multipass frame is very large
-    // and overflows the stack at far shallower nesting than MAX_LAYOUT_DEPTH.
-    if (lycon->grid_depth >= MAX_GRID_DEPTH) {
-        log_error("layout_grid_content: grid_depth=%d at limit (%d), skipping nested grid %s",
-                  lycon->grid_depth, MAX_GRID_DEPTH, grid_container->node_name());
+    // grid scratch is pass-owned now; count direct grid recursion in the shared DOM stack guard.
+    if (lycon->depth >= MAX_LAYOUT_DEPTH) {
+        log_error("layout_grid_content: max depth %d exceeded, skipping nested grid %s",
+                  MAX_LAYOUT_DEPTH, grid_container->node_name());
         return;
     }
     struct GridDepthGuard {
         LayoutContext* lycon;
-        GridDepthGuard(LayoutContext* lycon) : lycon(lycon) { lycon->grid_depth++; }
-        ~GridDepthGuard() { lycon->grid_depth--; }
+        GridDepthGuard(LayoutContext* lycon) : lycon(lycon) { lycon->depth++; }
+        ~GridDepthGuard() { lycon->depth--; }
     } depth_guard(lycon);
 
     log_enter();

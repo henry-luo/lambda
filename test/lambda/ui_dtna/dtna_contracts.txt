@@ -1,0 +1,6 @@
+['button', "ok", "dtna-button dtna-variant-primary", "Save", "Save", true, true, "", true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, {
+    component: "button",
+    id: "a",
+    action: 'click',
+    value: null
+  }]

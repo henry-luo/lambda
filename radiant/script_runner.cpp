@@ -1249,15 +1249,7 @@ static void append_browser_document_preamble(StrBuf* script_buf, const DomDocume
         // installs clipboard and permissions before this preamble runs, and
         // third-party scripts also feature-detect serviceWorker on that same
         // object.
-        "var navigator = window.navigator || {};\n"
-        "navigator.userAgent = navigator.userAgent || 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:139.0) Gecko/20100101 Firefox/139.0';\n"
-        "navigator.appName = navigator.appName || 'Netscape';\n"
-        "navigator.appVersion = navigator.appVersion || '5.0 (Macintosh; Intel Mac OS X 10.15; rv:139.0) Gecko/20100101 Firefox/139.0';\n"
-        "navigator.vendor = navigator.vendor || '';\n"
-        "navigator.platform = navigator.platform || 'MacIntel';\n"
-        "navigator.language = navigator.language || 'en-US';\n"
-        "navigator.languages = navigator.languages || ['en-US', 'en'];\n"
-        "navigator.maxTouchPoints = navigator.maxTouchPoints || 1;\n"
+        "var navigator = window.navigator;\n"
         "navigator.sendBeacon = navigator.sendBeacon || function(){ return false; };\n"
         // Java applets are unavailable in the embedded browser surface, but
         // the legacy Navigator API must still be callable for feature probes.

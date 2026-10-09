@@ -1,0 +1,77 @@
+{
+  "name": "Range and Selection captured getters read live native boundaries",
+  "html": "test/ui/dom/range_selection_captured_getters.html",
+  "events": [
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#result"
+      },
+      "attribute": "data-descriptors",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#result"
+      },
+      "attribute": "data-boundary",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#result"
+      },
+      "attribute": "data-inherited",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#result"
+      },
+      "attribute": "data-selection",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#result"
+      },
+      "attribute": "data-live",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#result"
+      },
+      "attribute": "data-collapse",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#result"
+      },
+      "attribute": "data-forged",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#result"
+      },
+      "attribute": "data-direction",
+      "equals": "true"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#result"
+      },
+      "equals": "complete"
+    }
+  ]
+}

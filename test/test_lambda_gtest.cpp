@@ -27,6 +27,8 @@ static const char* FUNCTIONAL_TEST_DIRECTORIES[] = {
     "test/lambda/edit",
     "test/lambda/slide",
     "test/lambda/scene3d",
+    "test/lambda/ui_dtna",
+    "test/lambda/map",
     "test/demo/doom/tests",
     "test/lambda/graph/mermaid",
     "test/lambda/graph/graphviz",
@@ -34,6 +36,43 @@ static const char* FUNCTIONAL_TEST_DIRECTORIES[] = {
     // Add more functional test directories here as needed
 };
 static const size_t NUM_FUNCTIONAL_TEST_DIRECTORIES = sizeof(FUNCTIONAL_TEST_DIRECTORIES) / sizeof(FUNCTIONAL_TEST_DIRECTORIES[0]);
+
+TEST(UiDtnaTests, PackageContractsAgreeAcrossTiers) {
+    const char* tiers[] = {"interp", "auto", "jit"};
+    const char* names[] = {"dtna_attribute_union", "dtna_collections",
+        "dtna_contracts", "dtna_display", "dtna_tokens"};
+    for (const char* tier : tiers) {
+        SCOPED_TRACE(tier);
+        for (const char* name : names) {
+            StrBuf* script = strbuf_new();
+            StrBuf* golden = strbuf_new();
+            strbuf_append_format(script, "test/lambda/ui_dtna/%s.ls", name);
+            strbuf_append_format(golden, "test/lambda/ui_dtna/%s.txt", name);
+            test_lambda_script_against_file(script->str, golden->str, false, tier);
+            strbuf_free(script);
+            strbuf_free(golden);
+        }
+    }
+}
+
+TEST(UiDtnaTests, RejectedDocumentReleasesItsErrorBeforeTheHeap) {
+    const char* tiers[] = {"interp", "jit"};
+    for (const char* tier : tiers) {
+        SCOPED_TRACE(tier);
+        const ShellEnvEntry env[] = {{"LAMBDA_EXEC_BACKEND", tier}, {NULL, NULL}};
+        const char* args[] = {LAMBDA_EXE, "--no-log", "render",
+            "test/ui/dtna_error_document.ls", "-o", "temp/dtna_rejected.png", NULL};
+        ShellOptions options = {};
+        options.env = env;
+        options.timeout_ms = 30000;
+        options.merge_stderr = true;
+        ShellResult result = shell_exec(LAMBDA_EXE, args, &options);
+        EXPECT_FALSE(result.timed_out);
+        // Render load rejection returns 1; a signal must not masquerade as rejection.
+        EXPECT_EQ(result.exit_code, 1) << (result.stdout_buf ? result.stdout_buf : "");
+        shell_result_free(&result);
+    }
+}
 
 TEST(DoomDemoTests, GeometryInputAndResourceContractsAgreeAcrossTiers) {
     const char* tiers[] = {"interp", "auto", "jit"};

@@ -367,6 +367,13 @@ bool template_registry_may_have_behavior_handler(TemplateRegistry* registry,
 // requires presence — and `is_literal` alone cannot tell them apart, since it is
 // set on both, so the type id must be checked before the payload is read.
 static bool template_is_value_predicate(const Type* t) {
+    t = type_field_unwrap_simple_decl((Type*)t);
+    if (lambda_type_is_union(t)) {
+        const TypeBinary* either = (const TypeBinary*)t;
+        // S10.1.1v3: a union of singleton attributes still pins their values.
+        return template_is_value_predicate(either->left) &&
+            template_is_value_predicate(either->right);
+    }
     return t && t->is_literal &&
         (t->type_id == LMD_TYPE_STRING || t->type_id == LMD_TYPE_SYMBOL);
 }
@@ -413,6 +420,21 @@ static bool template_text_payload(TypeId tid, const void* payload,
     return false;
 }
 
+static bool template_text_predicate_matches(const Type* want,
+                                             const char* text, size_t length) {
+    want = type_field_unwrap_simple_decl((Type*)want);
+    if (lambda_type_is_union(want)) {
+        const TypeBinary* either = (const TypeBinary*)want;
+        return template_text_predicate_matches(either->left, text, length) ||
+            template_text_predicate_matches(either->right, text, length);
+    }
+    const char* expected = NULL;
+    size_t expected_length = 0;
+    return template_text_payload(want->type_id, ((const TypeString*)want)->string,
+        &expected, &expected_length) && expected_length == length &&
+        memcmp(expected, text, length) == 0;
+}
+
 // Evaluate the element pattern's attribute predicates against a target element.
 // A shape entry whose type is a literal (`type:'checkbox'`) pins the value; any
 // other type (`href`, `type: string`) only requires the attribute to be present.
@@ -435,15 +457,6 @@ static bool template_attrs_match(const TypeElmt* pattern, Item target) {
             if (!elem.has_attr(key)) return false;
             continue;
         }
-        const char* want_text = NULL;  size_t want_len = 0;
-        if (!template_text_payload(want->type_id, ((TypeString*)want)->string,
-                                   &want_text, &want_len)) {
-            // conservative: an unsupported literal kind must not produce a false
-            // match. Extend here when non-text predicates are needed.
-            log_debug("template_attrs_match: unsupported literal predicate on '%s' (type %d)",
-                      key, (int)want->type_id);
-            return false;
-        }
         // compare by text across string and symbol alike: a parsed HTML
         // attribute is a string while a Lambda literal like 'checkbox' is a
         // symbol, and the predicate must match either spelling.
@@ -455,7 +468,7 @@ static bool template_attrs_match(const TypeElmt* pattern, Item target) {
             template_text_payload(LMD_TYPE_SYMBOL, actual.asSymbol(), &got_text, &got_len);
         }
         if (!got_text) return false;
-        if (want_len != got_len || memcmp(want_text, got_text, want_len) != 0) return false;
+        if (!template_text_predicate_matches(want, got_text, got_len)) return false;
     }
     return true;
 }

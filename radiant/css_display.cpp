@@ -33,6 +33,7 @@ bool css_display_contents_suppresses_element(DomElement* element) {
     case MARKUP_NAME_PROGRESS:
     case MARKUP_NAME_CANVAS:
     case MARKUP_NAME_SCENE3D:
+    case MARKUP_NAME_GEOMAP:
     case MARKUP_NAME_EMBED:
     case MARKUP_NAME_OBJECT:
     case MARKUP_NAME_AUDIO:

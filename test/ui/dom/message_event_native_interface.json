@@ -1,0 +1,141 @@
+{
+  "name": "MessageEvent owns branded, traced payloads and captured prototype getters",
+  "html": "test/ui/dom/message_event_native_interface.html",
+  "events": [
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#result"
+      },
+      "attribute": "data-defaults",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#result"
+      },
+      "attribute": "data-prototype",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#result"
+      },
+      "attribute": "data-descriptors",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#result"
+      },
+      "attribute": "data-constructor",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#result"
+      },
+      "attribute": "data-forged",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#result"
+      },
+      "attribute": "data-values",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#result"
+      },
+      "attribute": "data-ports",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#result"
+      },
+      "attribute": "data-readonly",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#result"
+      },
+      "attribute": "data-captured",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#result"
+      },
+      "attribute": "data-dictionary",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#result"
+      },
+      "attribute": "data-iterator",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#result"
+      },
+      "attribute": "data-legacy",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#result"
+      },
+      "attribute": "data-dispatch",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#result"
+      },
+      "attribute": "data-subclass",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#result"
+      },
+      "attribute": "data-extensible",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#result"
+      },
+      "attribute": "data-locked",
+      "equals": "true"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#result"
+      },
+      "equals": "complete"
+    }
+  ]
+}

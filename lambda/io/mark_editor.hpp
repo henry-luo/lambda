@@ -9,6 +9,7 @@
 
 // Forward declarations
 class MarkEditor;
+struct DomDocument;
 
 /**
  * Edit mode for operations
@@ -77,6 +78,9 @@ public:
      * Construct editor from Input
      */
     explicit MarkEditor(Input* input, EditMode mode = EDIT_MODE_INLINE);
+
+    // DOM edits also retain nodes allocated in the document's separate node arena.
+    explicit MarkEditor(DomDocument* document, EditMode mode = EDIT_MODE_INLINE);
 
     /**
      * Register the arena that holds the UI tree this editor edits when it is not
@@ -368,7 +372,7 @@ private:
     Item container_delete_attr(Item container, String* key);
 
     // Element-only helpers (the content face has no map counterpart)
-    Item import_child(Item child);
+    Item import_child(Item child, bool preserve_ui_nodes = false);
     bool prepare_child_edit(Item element, int64_t index, int64_t delete_count,
                             int64_t count, Item* children, Array* edited);
     Item publish_child_edit(Element* old_elmt, const Array* edited);

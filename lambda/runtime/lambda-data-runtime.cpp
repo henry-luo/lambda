@@ -2953,7 +2953,7 @@ static Item map_get_by_name_id_keyed(Container* owner, TypeMap* map_type,
         name_id);
     if (key && map_type->is_trusted_contract && !map_type->has_spread &&
             typemap_hash_slots(map_type) &&
-            map_type->field_count < (uint16_t)typemap_hash_capacity(map_type)) {
+            map_type->field_count < (uint32_t)typemap_hash_capacity(map_type)) {
         // The builder indexes closed string-only declared shapes. Spreads and
         // unindexed or saturated shapes keep their declaration-order walk.
         int key_len = (int)key->len;  // INT_CAST_OK: pooled field-name length

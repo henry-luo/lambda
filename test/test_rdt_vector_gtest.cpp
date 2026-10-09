@@ -15,6 +15,8 @@
 #include "../lambda/dom/dom.h"
 #include "../lambda/dom/dom_engine.h"
 #include "../lambda/io/mark_builder.hpp"
+#include "../lambda/network/network_resource_manager.h"
+#include "../lambda/network/enhanced_file_cache.h"
 
 #include "../lib/image.h"
 #include "../lib/file.h"
@@ -2951,13 +2953,14 @@ protected:
         if (ctx) font_context_destroy(ctx);
     }
 
-    FontHandle* load(FontFaceSource* sources, int count) {
+    FontHandle* load(FontFaceSource* sources, int count, bool has_pending_sources = false) {
         FontFaceDesc descriptor = {};
         descriptor.family = "Local Source Alias";
         descriptor.weight = FONT_WEIGHT_NORMAL;
         descriptor.slant = FONT_SLANT_NORMAL;
         descriptor.sources = sources;
         descriptor.source_count = count;
+        descriptor.has_pending_sources = has_pending_sources;
         if (!font_face_register(ctx, &descriptor)) return nullptr;
         FontStyleDesc style = {};
         style.family = descriptor.family;
@@ -2994,6 +2997,82 @@ TEST_F(FontLocalSourceTest, FamilyNamesFallThroughToTheNextSource) {
     sources[0].local_name = "SVG Test Rectangle";
     sources[1].path = "test/lambda/math/fonts/NotoSansMath-Regular.ttf";
     expect_name(load(sources, 2), "NotoSansMath-Regular");
+}
+
+TEST_F(FontLocalSourceTest, PendingDownloadUsesFallbackUntilTheHostPublishesItsSource) {
+    FontFaceSource source = {};
+    source.local_name = "Missing Pending Download Regression Face";
+    EXPECT_EQ(load(&source, 1, true), nullptr);
+    const FontFaceEntry* pending = font_face_find_internal(ctx, "Local Source Alias",
+        FONT_WEIGHT_NORMAL, FONT_SLANT_NORMAL);
+    ASSERT_NE(pending, nullptr);
+    EXPECT_EQ(pending->load_state, FONT_FACE_PENDING);
+    uint64_t generation = ctx->resource_generation;
+    FontStyleDesc style = {};
+    style.family = "Local Source Alias";
+    style.weight = FONT_WEIGHT_NORMAL;
+    const FontFaceDesc* descriptor = font_face_find(ctx, &style);
+    ASSERT_NE(descriptor, nullptr);
+    EXPECT_TRUE(descriptor->has_pending_sources);
+    EXPECT_EQ(font_face_load(ctx, descriptor, 20.0f), nullptr);
+    EXPECT_EQ(ctx->resource_generation, generation);
+
+    // resource completion publishes a usable rule and invalidates fallback cache entries.
+    source.local_name = nullptr;
+    source.path = "test/ui/svg_font_assets/rectangle.ttf";
+    FontHandle* loaded = load(&source, 1);
+    EXPECT_GT(ctx->resource_generation, generation);
+    expect_name(loaded, "SVGTestRectangle-Regular");
+}
+
+TEST_F(FontLocalSourceTest, CompletedDownloadStaysAfterLocalNamesInTheOriginalRule) {
+    const char* url = "https://example.test/fonts/online-font.ttf";
+    size_t font_length = 0;
+    lam::Temp<char> font_bytes(read_binary_file(
+        "test/ui/svg_font_assets/rectangle.ttf", &font_length));
+    ASSERT_TRUE(font_bytes);
+    const char* cache_directory = "./temp/test_font_completed_source";
+    ASSERT_TRUE(create_dir(cache_directory));
+    EnhancedFileCache* cache = enhanced_cache_create(cache_directory, 1024 * 1024, 10);
+    ASSERT_NE(cache, nullptr);
+    lam::Temp<char> cached_path(enhanced_cache_store(cache, url,
+        font_bytes.get(), font_length, nullptr));
+    ASSERT_TRUE(cached_path);
+    DomDocument document = {};
+    NetworkResourceManager* manager = resource_manager_create(&document, nullptr, cache);
+    ASSERT_NE(manager, nullptr);
+    ASSERT_NE(resource_manager_prefetch(manager, url, PRIORITY_HIGH), nullptr);
+
+    ASSERT_TRUE(css_property_system_init(ctx->pool));
+    CssEngine* engine = css_engine_create(ctx->pool);
+    ASSERT_NE(engine, nullptr);
+    CssStylesheet* sheet = css_parse_stylesheet(engine,
+        "@font-face { font-family: 'Downloaded Rule'; "
+        "src: local('Missing Online Regression Face'), "
+        "url('https://example.test/fonts/online-font.ttf') format('truetype'); }", nullptr);
+    ASSERT_NE(sheet, nullptr);
+    UiContext ui = {};
+    ui.font_ctx = lam::up(ctx);
+    process_font_face_rules_from_stylesheet(&ui, sheet, "https://example.test/style.css",
+        false, manager);
+
+    FontStyleDesc style = {};
+    style.family = "Downloaded Rule";
+    style.weight = FONT_WEIGHT_NORMAL;
+    const FontFaceDesc* registered = font_face_find(ctx, &style);
+    ASSERT_NE(registered, nullptr);
+    ASSERT_EQ(registered->source_count, 2);
+    EXPECT_FALSE(registered->has_pending_sources);
+    EXPECT_STREQ(registered->sources[0].local_name, "Missing Online Regression Face");
+    EXPECT_STREQ(registered->sources[1].path, cached_path.get());
+    // the registry owns its source paths after the layout descriptor is released (D4.5.1v4).
+    fontface_cleanup(&ui);
+    expect_name(font_face_load(ctx, registered, 20.0f), "SVGTestRectangle-Regular");
+
+    css_engine_destroy(engine);
+    css_property_system_cleanup();
+    resource_manager_destroy(manager);
+    enhanced_cache_destroy(cache);
 }
 
 TEST_F(FontLocalSourceTest, RegistrationOwnsLocalNames) {

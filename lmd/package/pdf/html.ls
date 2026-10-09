@@ -90,7 +90,7 @@ pub fn text_layer(texts, width, height, transform) {
         base ++ "transform:" ++ transform ++ ";transform-origin:0 0;overflow:visible;"
         else base;
     <div class: "pdf-text-layer", style: style,
-        for (t in texts) _text_span(t)
+        for (t in texts where name(t) == 'text') _text_span(t)
     >
 }
 

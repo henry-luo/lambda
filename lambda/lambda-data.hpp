@@ -14,6 +14,7 @@ extern "C" {
 #include <ctype.h>
 #include <cstdint>  // C++
 #include <inttypes.h>  // for cross-platform integer formatting
+#include <limits.h>
 #include <math.h>
 
 // mpdecimal's value layout is embedded by Decimal, while contexts remain
@@ -421,7 +422,8 @@ static inline bool shape_field_name_equals(const ShapeEntry* entry,
 // amortize but every private type pays again -- each element of a parsed
 // document has one (320K of them on a 13 MiB HTML page).
 #define TYPEMAP_HASH_MIN_CAPACITY 8
-#define TYPEMAP_HASH_MAX_CAPACITY 32768
+// Capacity is an int power of two; counters must retain it beyond 16 bits.
+#define TYPEMAP_HASH_MAX_CAPACITY (INT_MAX / 2 + 1)
 
 // JS adds an immutable semantic refinement without coupling core shapes to
 // the JS runtime's metadata and operation-table definitions.
@@ -447,8 +449,8 @@ typedef struct TypeMap : Type {
     // copy shares it, so a copied TypeMap rebuilds its own (typemap_hash_prepare)
     // before inserting.
     ShapeEntry** field_index;  // field_capacity slots (NULL = empty slot)
-    uint16_t field_count;  // number of hash slots used (0 = not populated)
-    uint16_t field_capacity;  // slots in field_index (0 while it is NULL)
+    uint32_t field_count;  // number of hash slots used (0 = not populated)
+    uint32_t field_capacity;  // slots in field_index (0 while it is NULL)
     // Optional fixed-slot index used by ordinary transition shapes.
     ShapeEntry** slot_entries;  // NULL if not populated; else array of slot_count pointers
     int slot_count;             // number of slot_entries (0 = not populated)
@@ -773,8 +775,8 @@ static inline int typemap_hash_capacity(TypeMap* tm) {
 // a power of two at least twice the fields, so probes stay short; 0 for none
 static inline int typemap_hash_recommended_capacity(int64_t expected_fields) {
     if (expected_fields <= 0) return 0;
-    int64_t target = expected_fields * 2;
-    if (target < expected_fields) target = TYPEMAP_HASH_MAX_CAPACITY;
+    int64_t target = expected_fields > TYPEMAP_HASH_MAX_CAPACITY / 2
+        ? TYPEMAP_HASH_MAX_CAPACITY : expected_fields * 2;
     int capacity = TYPEMAP_HASH_MIN_CAPACITY;
     while ((int64_t)capacity < target && capacity < TYPEMAP_HASH_MAX_CAPACITY) {
         capacity <<= 1;
@@ -814,7 +816,7 @@ static inline void typemap_hash_prepare_in(TypeMap* tm, TypeAlloc alloc, int64_t
             (size_t)capacity * sizeof(ShapeEntry*));
         if (slots) {
             tm->field_index = slots;
-            tm->field_capacity = (uint16_t)capacity;
+            tm->field_capacity = (uint32_t)capacity;
         }
     }
 }
@@ -926,7 +928,7 @@ static inline ShapeEntry* typemap_hash_lookup_by_name_id(TypeMap* tm,
     ShapeEntry** slots = typemap_hash_slots(tm);
     int capacity = typemap_hash_capacity(tm);
     if (!slots || capacity <= 0 || tm->field_count == 0 ||
-            tm->field_count >= (uint16_t)capacity || key_hash == 0) {
+            tm->field_count >= (uint32_t)capacity || key_hash == 0) {
         return typemap_shape_lookup_last_by_name_id(tm, name_id);
     }
     uint32_t idx = key_hash & ((uint32_t)capacity - 1);
@@ -966,7 +968,7 @@ static inline void typemap_hash_insert(TypeMap* tm, ShapeEntry* entry) {
     if (slot < 0) return;
     ShapeEntry** slots = typemap_hash_slots(tm);
     if (!slots[slot]) {
-        if (tm->field_count >= (uint16_t)typemap_hash_capacity(tm)) return;
+        if (tm->field_count >= (uint32_t)typemap_hash_capacity(tm)) return;
         tm->field_count++;
     }
     slots[slot] = entry;
@@ -1009,7 +1011,7 @@ static inline void typemap_hash_insert_owned(TypeMap* tm, ShapeEntry* entry, Poo
 static inline bool typemap_hash_is_usable(TypeMap* tm) {
     if (!tm || !typemap_hash_slots(tm)) return false;
     int capacity = typemap_hash_capacity(tm);
-    return capacity > 0 && tm->field_count > 0 && tm->field_count < (uint16_t)capacity;
+    return capacity > 0 && tm->field_count > 0 && tm->field_count < (uint32_t)capacity;
 }
 
 // A1: Lookup a ShapeEntry by name through the hash table.
@@ -1022,7 +1024,7 @@ static inline ShapeEntry* typemap_hash_lookup_by_hash(TypeMap* tm, const char* k
     if (key_hash == 0) key_hash = typemap_name_hash(key, key_len);
     int capacity = typemap_hash_capacity(tm);
     ShapeEntry** slots = typemap_hash_slots(tm);
-    if (!slots || capacity <= 0 || tm->field_count == 0 || tm->field_count >= (uint16_t)capacity) {
+    if (!slots || capacity <= 0 || tm->field_count == 0 || tm->field_count >= (uint32_t)capacity) {
         return typemap_shape_lookup_last_by_hash(tm, key, key_len, key_hash);
     }
     uint32_t idx = key_hash & ((uint32_t)capacity - 1);
@@ -1043,6 +1045,12 @@ static inline ShapeEntry* typemap_hash_lookup(TypeMap* tm, const char* key, int 
 
 static inline ShapeEntry* typemap_hash_lookup_idless(TypeMap* tm,
         const char* key, int key_len) {
+    // A complete table proves a missing spelling has no id-less entry either;
+    // walking the whole chain on every JS property miss made large indexes quadratic.
+    if (typemap_hash_is_usable(tm)) {
+        ShapeEntry* entry = typemap_hash_lookup(tm, key, key_len);
+        if (!entry || entry->name_id == NAME_ID_NONE) return entry;
+    }
     return typemap_shape_lookup_last_idless_by_hash(tm, key, key_len,
         typemap_name_hash(key, key_len));
 }

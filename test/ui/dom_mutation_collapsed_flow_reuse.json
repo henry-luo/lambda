@@ -1,0 +1,10 @@
+{
+  "name": "Collapsed whitespace and hidden script siblings permit clean block reuse",
+  "html": "test/ui/dom_mutation_collapsed_flow_reuse.html",
+  "events": [
+    {"type": "assert_rect", "target": {"selector": "#stable"}, "y": 40, "height": 20},
+    {"type": "click", "target": {"selector": "#resize"}},
+    {"type": "assert_rect", "target": {"selector": "#stable"}, "y": 55, "height": 20},
+    {"type": "assert_reconcile_mode", "mode": "incremental", "reason": "eligible"}
+  ]
+}

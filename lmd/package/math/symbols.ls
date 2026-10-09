@@ -200,6 +200,8 @@ pub fn lookup_symbol(cmd) {
     big_operators[name] or null
 }
 
+pub fn large_symbols() => [for (key, value at big_operators) value]
+
 // classify a symbol command into atom type
 pub fn classify_symbol(cmd) {
     let name = if (len(cmd) > 0 and slice(cmd, 0, 1) == "\\") slice(cmd, 1, len(cmd)) else cmd

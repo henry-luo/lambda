@@ -2,6 +2,7 @@
 #include "memtrack.h"
 #include "log.h"
 #include "str.h"
+#include "url.h"
 #include "math_checked.hpp"
 #include <stdlib.h>
 #include <string.h>
@@ -239,7 +240,7 @@ uint8_t* base64_decode(const char* input, size_t input_len, size_t* output_len) 
 
 bool is_data_uri(const char* uri) {
     if (!uri) return false;
-    return strncmp(uri, "data:", 5) == 0;
+    return strlen(uri) >= 5 && str_ieq(uri, 5, "data:", 5);
 }
 
 uint8_t* parse_data_uri(const char* uri, char* mime_type, size_t mime_type_size, size_t* output_len) {
@@ -248,7 +249,7 @@ uint8_t* parse_data_uri(const char* uri, char* mime_type, size_t mime_type_size,
     }
 
     // check for data: prefix
-    if (strncmp(uri, "data:", 5) != 0) {
+    if (!is_data_uri(uri)) {
         log_error("parse_data_uri: not a data URI");
         *output_len = 0;
         return NULL;
@@ -262,7 +263,8 @@ uint8_t* parse_data_uri(const char* uri, char* mime_type, size_t mime_type_size,
 
     // find the comma separator
     const char* comma = strchr(ptr, ',');
-    if (!comma) {
+    const char* fragment = strchr(ptr, '#');
+    if (!comma || (fragment && fragment < comma)) {
         log_error("parse_data_uri: missing comma separator");
         *output_len = 0;
         return NULL;
@@ -302,22 +304,20 @@ uint8_t* parse_data_uri(const char* uri, char* mime_type, size_t mime_type_size,
     // get the data portion
     const char* data = comma + 1;
 
-    if (is_base64) {
-        // decode base64 data
-        log_debug("parse_data_uri: decoding base64 data");
-        return base64_decode(data, 0, output_len);
-    } else {
-        // raw data (possibly URL-encoded) - just return as-is for now
-        // note: proper implementation should URL-decode
-        size_t data_len = strlen(data);
-        uint8_t* output = (uint8_t*)mem_alloc(data_len + 1, MEM_CAT_TEMP);
-        if (!output) {
-            *output_len = 0;
-            return NULL;
-        }
-        memcpy(output, data, data_len);
-        output[data_len] = '\0';
-        *output_len = data_len;
-        return output;
+    size_t data_len = fragment ? (size_t)(fragment - data) : strlen(data);
+    uint8_t* output = (uint8_t*)mem_alloc(data_len + 1, MEM_CAT_TEMP);
+    if (!output) {
+        *output_len = 0;
+        return NULL;
     }
+    // data URL bodies percent-decode before base64; '+' is payload, and fragments are excluded.
+    size_t decoded_len = url_decode_lenient_write(data, data_len, false, (char*)output);
+    output[decoded_len] = '\0';
+    if (is_base64 && decoded_len) {
+        uint8_t* decoded = base64_decode((const char*)output, decoded_len, output_len);
+        mem_free(output);
+        return decoded;
+    }
+    *output_len = decoded_len;
+    return output;
 }

@@ -26,6 +26,7 @@ Last verified against tree: 2026-10-07
 |---|---|---|
 | Lambda core: `lambda/runtime/`, `lambda/core/`, parser, MIR JIT | **`make test-lambda-baseline`** | `./test/test_lambda_gtest.exe --gtest_filter='AutoDiscovered/*<name>*'`; `./test/test_mir_emission_gtest.exe --gtest_filter='Fixtures/*<name>*'`; `./test/test_lambda_errors_gtest.exe --gtest_filter='NegativeScriptTest.*'` |
 | Lambda packages: `lmd/package/**/*.ls` | **`make test-lambda-baseline`** | `./test/test_lambda_gtest.exe --gtest_filter='AutoDiscovered/*scene3d_*'` (also `chart_`, `latex_`, `math_`, `mermaid_`, `graphviz_`, `structurizr_`, `slide_`, `editor_`, `edit_`); `make test-math-corpus` |
+| Native geographic maps: `radiant/geomap*`, `lmd/package/map*` | **`make test-lambda-baseline`** + **`make test-radiant-baseline`** | `make test-map`, `make test-map-export`, `make test-map-reference` (first `npm ci --prefix test/map`); fixtures and pinned expression corpus in `test/map/`, functional goldens in `test/lambda/map/` |
 | Input parsers / formatters: `lambda/input/`, `lambda/format/`, `lambda/io/` | `make test-input-baseline` (5 corpora, also run by test-lambda-baseline) + `make test-input` (70-binary input suite) | `./test/test_input_model_gtest.exe`; `./test/test_markdown_gtest.exe --baseline`; `./test/test_input_roundtrip_gtest.exe --gtest_filter='JsonTests.*'`; `./test/test_html_gtest.exe` |
 | CSS engine: `lambda/input/css/` | **`make test-radiant-baseline`** + `make test-input` (`test_css_*` binaries) | `./test/test_css_parser_gtest.exe`; `make layout test=<file>` |
 | Radiant layout / render / events: `radiant/` | **`make test-radiant-baseline`** + `node test/test_run.js --target=radiant --category=baseline` (the gate does not run the radiant suite's own gtests) | `make layout test=baseline_301_simple_margin`; `make layout suite=<dir>`; `./test/test_ui_automation_gtest.exe --suite baseline --test <id>`; `make test-render test=<name>` |
@@ -61,7 +62,7 @@ A test is killed only after it produces no output for the idle timeout. With `--
 | `make test-lambda-baseline` | `test-input-baseline`, then `lambda` suite baseline (excludes `test_node_prelim_gtest`, `test_lambda_concurrency_gtest`), one merged report |
 | `make test-lambda-full` | the above plus concurrency, `test_lambda_extended_gtest`, `test_lambda_domnode_gtest`, `test_validator_input_gtest` |
 | `make test-input-baseline` | `test_wpt_html_parser_gtest --baseline`, `test_markdown_gtest --baseline`, `test_yaml_suite_gtest`, `test_math_ascii_gtest`, `test_math_gtest` |
-| `make test-radiant-baseline` | native `test_scene3d_gtest`, filtered `test_view_reuse_gtest`, then `run-radiant-baseline`: layout baselines (`LAYOUT_BASELINE_SUITES` in the Makefile), page-suite snapshot, UI automation `--suite baseline` and `--suite view`, `test_radiant_view_gtest` excluding `RadiantViewTest.Doom*` (extended), `test_rdt_vector_gtest`, `test_page_load_gtest`, `test_css_cascade_memory_gtest`, `test_layout_fuzzy_gtest`, render visual `--baseline`, `dom-ui-run`, WPT css-syntax and input-events |
+| `make test-radiant-baseline` | native `test_scene3d_gtest`, filtered `test_view_reuse_gtest`, then `run-radiant-baseline`: layout baselines (`LAYOUT_BASELINE_SUITES` in the Makefile), page-suite snapshot, UI automation `--suite baseline,dtna` and `--suite view`, `test_radiant_view_gtest` excluding `RadiantViewTest.Doom*` (extended), `test_rdt_vector_gtest`, `test_page_load_gtest`, `test_css_cascade_memory_gtest`, `test_layout_fuzzy_gtest`, render visual `--baseline`, `dom-ui-run`, WPT css-syntax and input-events |
 | `make run-radiant-baseline` | the same Radiant checks with no rebuild |
 | `make test-layout-baseline` | layout baseline suites only |
 
@@ -73,14 +74,14 @@ Focused targets agents commonly need (`make help` lists ~113; the Makefile has ~
 - **UI and DOM:** `test-ui-automation` (`ARGS=`), `dom-ui test=`, `test-page-load`, `test-reactive-ui`, `test-editable`, `test-wpt-contenteditable`, `test-css-cascade-memory`, `test-pdf-render`, `test-svg-export`, `test-svg-paint`, `test-svg-smil`.
 - **Lambda tiers and GC:** `test-lambda-interp`, `interp-sweep`, `test-gc-rooting`, `test-mir-gc-stress`, `check-error-recovery`, `test-grammar-s16`.
 - **JS and Node:** `test-js262-prelim`, `test262-baseline` (`VERBOSE=1`), `test262-full`, `test262-update-baseline`, `test-js-parity` (`SUITE=js|test262`, `MODE=mir|ast`), `test-js-opt`, `test-js-parser-diff`, `node-baseline`, `node-regression-gate`, `node-full`, `node-update-baseline`.
-- **Packages and data:** `test-math-baseline`, `test-math-corpus`, `test-graph-mermaid`, `test-graph-graphviz`, `test-graph-structurizr`, `test-rdb-drivers-local`.
+- **Packages and data:** `test-math-baseline`, `test-math-corpus`, `test-mathcmp` (Lambda PNG versus pdfLaTeX; `ARGS='--case Functions'`, see [math comparison instructions](lambda/math/README.md)), `test-graph-mermaid`, `test-graph-graphviz`, `test-graph-structurizr`, `test-rdb-drivers-local`.
 - **Other:** `test-wasm`, `test-coverage`, `lint`, `check-tutorial`, `check-doc-code`.
 
 ## 4. Script-driven harnesses
 
 | Harness | Fixture dirs | Discovery | Expected output | Adding a test |
 |---|---|---|---|---|
-| `test_lambda_gtest` | Functional (`lambda.exe <f>`): `test/lambda`, `test/lambda/{chart,latex,math,editor,editing,edit,slide}`, `test/lambda/graph/{mermaid,graphviz,structurizr}`, `test/demo/doom/tests`. Procedural (`lambda.exe run <f>`): `test/lambda/{proc,conc,pdf}`, `test/benchmark/{awfy,r7rs,beng,kostya,larceny}` | Non-recursive. Every `*.ls` is a case; one without its golden **fails** ("No expected output") unless named `_*`, `mod_*` or `schema_*` (helper / module / playground, see `test/test_script_discovery.hpp`). Name is `<parentdir>_<stem>`, with no prefix in `test/lambda` itself. `SLOW_BENCHMARK_TESTS` in `test_lambda_helpers.hpp` are never instantiated. | Sibling `<stem>.txt`. `<stem>.mac.txt` / `.linux.txt` / `.win.txt` wins on that OS. Compared after the `##### Script` marker, with trailing whitespace and `__TIMING__:` lines stripped. | Add `foo.ls` + `foo.txt` in a listed dir (rule 8). A new dir goes into `FUNCTIONAL_`/`PROCEDURAL_TEST_DIRECTORIES` at the top of `test/test_lambda_gtest.cpp`. That file also holds hand-written `TEST`s: tier parity over interp/jit/auto, typed paths on `test/mir/lambda/*.ls` + `.txt`, and error-without-crash checks. |
+| `test_lambda_gtest` | Functional (`lambda.exe <f>`): `test/lambda`, `test/lambda/{chart,map,latex,math,editor,editing,edit,slide,scene3d,ui_dtna}`, `test/lambda/graph/{mermaid,graphviz,structurizr}`, `test/demo/doom/tests`. Procedural (`lambda.exe run <f>`): `test/lambda/{proc,conc,pdf}`, `test/benchmark/{awfy,r7rs,beng,kostya,larceny}` | Non-recursive. Every `*.ls` is a case; one without its golden **fails** ("No expected output") unless named `_*`, `mod_*` or `schema_*` (helper / module / playground, see `test/test_script_discovery.hpp`). Name is `<parentdir>_<stem>`, with no prefix in `test/lambda` itself. `SLOW_BENCHMARK_TESTS` in `test_lambda_helpers.hpp` are never instantiated. | Sibling `<stem>.txt`. `<stem>.mac.txt` / `.linux.txt` / `.win.txt` wins on that OS. Compared after the `##### Script` marker, with trailing whitespace and `__TIMING__:` lines stripped. | Add `foo.ls` + `foo.txt` in a listed dir (rule 8). A new dir goes into `FUNCTIONAL_`/`PROCEDURAL_TEST_DIRECTORIES` at the top of `test/test_lambda_gtest.cpp`. That file also holds hand-written `TEST`s: tier parity over interp/jit/auto, typed paths on `test/mir/lambda/*.ls` + `.txt`, and error-without-crash checks. |
 | `test_lambda_extended_gtest` | `test/lambda/ext`, `test/lambda/proc-ext` (procedural) | Same helper. Names are `ext_<stem>` and `proc_ext_<stem>`. | `.txt` (+ platform override) | Same as above |
 | `test_lambda_std_gtest` | `test/std/**` (recursive) | Every `*.ls`; one without its `.expected` fails unless named `_*`/`mod_*`/`schema_*`. `// Mode: procedural` in the first 5 lines means `run`. Name is the relative path with `/` → `_`. | `<stem>.expected` (+ `.mac/.linux/.win.expected`) | Write the `.expected` by hand. `bash test/std/generate_expected.sh` rewrites every passing file, so review the diff. |
 | `test_lambda_errors_gtest` | `test/lambda/negative/{syntax,semantic,runtime,io,fuzzy_crashes}` | None. Each script has an explicit `TEST_F(NegativeScriptTest, …)`. | C++ assertions: non-zero exit plus a message substring (`ExpectErrorMessage`, `ExpectRuntimeErrorMessage`, `ExpectRejectedOnEveryTier`). No harness reads the `.txt` files in `negative/`. | Add the `.ls` plus a `TEST_F` |
@@ -159,3 +160,18 @@ Gotchas:
 - The `LAMBDA_BASELINE_TEST_PROJECTS`, `RADIANT_BASELINE_TEST_PROJECTS` and `INPUT_BASELINE_TEST_PROJECTS` lists at the top of the Makefile must match what the gates run. Update them when you add a baseline binary.
 
 WebAssembly build and tests: `make build-wasm`, `make test-wasm`, and [`doc/dev/Lambda_WASM_Build.md`](../doc/dev/Lambda_WASM_Build.md).
+
+### Lambda UI dtna
+
+`make test-ui-dtna ARGS='--jobs 1'` checks the 73-entry feature manifest,
+package goldens on T0/automatic/MIR tiers (**D8.1.1v17**), state-store regressions,
+and the manifest-owned `dtna` native UI suite on forced interpreter/JIT paths.
+The shared Radiant baseline also
+includes this suite. The gallery is `test/ui/dtna_gallery.ls`; the JSON-formatted
+coverage inventory uses `.manifest` because every `.json` under `test/ui/` must
+be an executable fixture with exactly one owner.
+
+Pure/API goldens: `test/lambda/ui_dtna/`. Native click/type/keyboard/style checks:
+`test/ui/dtna/`. Coverage and remaining scope:
+`test/ui/dtna_reference/catalog.manifest`. The gallery capture is a native
+inspection artifact, not an AntD visual-equivalence baseline.

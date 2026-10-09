@@ -3,9 +3,8 @@
  *
  * Async HTTP reuses fetch()'s libuv transport; explicit synchronous XHR uses
  * http_fetch() because the web API requires send() to block in that mode.
- * Each XHR instance stores its C-level state (method, url, headers,
- * response data) in a flat array indexed by an ID property on the
- * JS object. Methods use dom_realm_receiver() to resolve the current XHR.
+ * Each XHR instance privately identifies its C-level request state; public
+ * prototype accessors and methods resolve the same native receiver.
  */
 
 #include "dom_xhr.h"
@@ -13,7 +12,13 @@
 #include "realm/dom_realm.h"
 #include "../js/js_event_loop.h"
 #include "../js/js_runtime.h"
+#include "../js/js_typed_array.h"
 #include "../js/js_runtime_state.hpp"
+#include "../js/js_runtime_internal.hpp"
+#include "../js/js_function.hpp"
+#include "../js/js_object_meta.h"
+#include "../js/js_property_attrs.h"
+#include "../core/name_pool.hpp"
 #include "../lambda-data.hpp"
 #include "../lambda.hpp"
 #include "../input/input.hpp"
@@ -81,10 +86,11 @@ struct XhrState {
 // JSCUO5: the pool grows on demand. It was 64 records of 1,136 B — 72,720 B in
 // every realm that merely loaded the XHR binding.
 struct JsXhrRuntimeState {
-    XhrState* pool = nullptr;
+    XhrState** pool = nullptr; // callbacks can grow the table; native records must not move
     int count = 0;
     int capacity = 0;
     char* base_url = nullptr;
+    NameRef private_key = nullptr; // one pool-owned identity per realm, outside GC
 };
 
 extern __thread EvalContext* context;
@@ -99,8 +105,12 @@ JS_FORWARD_STATIC_EXPRESSION(JsXhrRuntimeState*, js_xhr_runtime_state_get, (),
 
 static bool js_xhr_runtime_state_ensure() {
     if (!js_active_runtime_state) return false;
-    return context_capsule_ensure(context, CONTEXT_CAPSULE_DOM_XHR,
-                                  &js_xhr_capsule_ops) != nullptr;
+    JsXhrRuntimeState* state = (JsXhrRuntimeState*)context_capsule_ensure(context,
+        CONTEXT_CAPSULE_DOM_XHR, &js_xhr_capsule_ops);
+    if (state && !state->private_key)
+        state->private_key = name_pool_create_unique_private(context->name_pool,
+            {"XMLHttpRequest", 14});
+    return state && state->private_key;
 }
 
 #define js_xhr_state ((JsXhrRuntimeState*)context_capsule(context, CONTEXT_CAPSULE_DOM_XHR))
@@ -210,53 +220,162 @@ static void xhr_copy_fetch_response_headers(XhrState* xhr, Item response) {
 // Helpers
 // ============================================================================
 
+enum XhrProperty {
+    XHR_READY_STATE, XHR_STATUS, XHR_STATUS_TEXT, XHR_RESPONSE_TEXT, XHR_RESPONSE,
+    XHR_RESPONSE_TYPE, XHR_WITH_CREDENTIALS, XHR_TIMEOUT, XHR_RESPONSE_URL, XHR_UPLOAD,
+    XHR_PROPERTY_COUNT
+};
+
+static const struct { const char* name; bool writable; } xhr_properties[] = {
+    {"readyState", false}, {"status", false}, {"statusText", false},
+    {"responseText", false}, {"response", false}, {"responseType", true},
+    {"withCredentials", true}, {"timeout", true}, {"responseURL", false}, {"upload", false}
+};
+
+static int xhr_property_index(const char* name) {
+    for (int i = 0; i < XHR_PROPERTY_COUNT; i++)
+        if (strcmp(name, xhr_properties[i].name) == 0) return i;
+    return -1;
+}
+
+static Item xhr_private_state(Item object) {
+    return js_native_private_array_state(object, JS_CLASS_XML_HTTP_REQUEST, 2,
+        "Illegal XMLHttpRequest receiver");
+}
+
+static Item xhr_fields(Item object) {
+    Item state = xhr_private_state(object);
+    return item_is_error(state) ? state : js_elements_get_int(state, 1);
+}
+
+static void xhr_set_value(Item object, const char* key, Item value) {
+    RootFrame roots(3);
+    Rooted<Item> target(roots, object), val(roots, value), fields(roots, ItemNull);
+    if (xhr_property_index(key) >= 0) {
+        fields.set(xhr_fields(target.get()));
+        if (item_is_error(fields.get())) return;
+        target.set(fields.get());
+    }
+    dom_realm_set_cstr(target.get(), key, val.get());
+}
+
 static void xhr_set_str(Item obj, const char* key, const char* value) {
-    Item k = js_name_item(key);
     Item v = value ? js_name_item(value) : ItemNull;
-    dom_realm_set(obj, k, v);
+    xhr_set_value(obj, key, v);
 }
 
 static void xhr_set_int(Item obj, const char* key, int value) {
-    Item k = js_name_item(key);
     Item v = (Item){.item = i2it(value)};
-    dom_realm_set(obj, k, v);
-}
-
-static Item js_xhr_get_status(void) {
-    XhrState* xhr = xhr_state_from_this();
-    return xhr ? (Item){.item = i2it((int64_t)xhr->status)} : (Item){.item = i2it(0)};
-}
-
-static void xhr_define_status_accessor(Item obj) {
-    Item descriptor = js_new_object();
-    dom_realm_set_cstr(descriptor, "get", dom_realm_new_function(js_xhr_get_status));
-    dom_realm_set_cstr(descriptor, "enumerable", (Item){.item = ITEM_TRUE});
-    dom_realm_set_cstr(descriptor, "configurable", (Item){.item = ITEM_TRUE});
-    dom_realm_define_property(obj, js_name_item("status"), descriptor);
+    xhr_set_value(obj, key, v);
 }
 
 static Item xhr_get_prop(Item obj, const char* key) {
+    if (xhr_property_index(key) >= 0) {
+        RootFrame roots(1);
+        Rooted<Item> fields(roots, xhr_fields(obj));
+        return item_is_error(fields.get()) ? fields.get() : dom_realm_get_cstr(fields.get(), key);
+    }
     return dom_realm_get_name(obj, key);
 }
 
-static int xhr_id_from_this() {
-    Item self = dom_realm_receiver();
-    Item id_val = xhr_get_prop(self, "__xhr_id");
+static int xhr_id_from_receiver(Item receiver) {
+    Item state = xhr_private_state(receiver);
+    if (item_is_error(state)) return -1;
+    Item id_val = js_elements_get_int(state, 0);
     TypeId tid = get_type_id(id_val);
     if (tid == LMD_TYPE_INT) {
         return (int)it2i(id_val);
     }
-    log_error("xhr: cannot resolve __xhr_id from this");
+    log_error("xhr-native-identity: receiver has no request index");
     return -1;
 }
 
-static XhrState* xhr_state_from_this() {
-    int id = xhr_id_from_this();
-    if (id < 0 || id >= _xhr_count || !_xhr_pool[id].in_use) {
+static XhrState* xhr_state_from_receiver(Item receiver) {
+    int id = xhr_id_from_receiver(receiver);
+    if (id < 0 || !js_xhr_runtime_state_get() || id >= _xhr_count || !_xhr_pool[id] ||
+            !_xhr_pool[id]->in_use || _xhr_pool[id]->js_object.item != receiver.item) {
         log_error("xhr: invalid XHR id %d", id);
         return nullptr;
     }
-    return &_xhr_pool[id];
+    return _xhr_pool[id];
+}
+
+JS_FORWARD_STATIC_EXPRESSION(XhrState*, xhr_state_from_this, (void),
+    xhr_state_from_receiver(dom_realm_receiver()))
+
+static Item xhr_state_exception(const char* name, const char* message) {
+    RootFrame roots(1);
+    Rooted<Item> error(roots, js_domexception_new(js_name_item(message), js_name_item(name)));
+    return js_throw_value(error.get());
+}
+
+static Item xhr_property_getter(Item callee, Item receiver, Item* /*args*/,
+        int /*argc*/, uint64_t* /*result_home*/) {
+    RootFrame roots(3);
+    Rooted<Item> object(roots, receiver), fields(roots, xhr_fields(object.get()));
+    JS_RETURN_IF_ERROR(fields.get());
+    Rooted<Item> response_type(roots, dom_realm_get_cstr(fields.get(), "responseType"));
+    XhrState* xhr = xhr_state_from_receiver(object.get());
+    if (!xhr) return js_throw_type_error("Illegal XMLHttpRequest receiver");
+    int slot = (int)js_fn_native((JsFunction*)callee.function)->target.bits;
+    if (slot == XHR_READY_STATE) return (Item){.item = i2it(xhr->ready_state)};
+    if (slot == XHR_STATUS) return (Item){.item = i2it((int64_t)xhr->status)};
+    if (slot == XHR_STATUS_TEXT) return js_name_item(xhr->status_text ? xhr->status_text : "");
+    const char* type = fn_to_cstr(response_type.get());
+    if (slot == XHR_RESPONSE_TEXT && type && *type && strcmp(type, "text"))
+        return xhr_state_exception("InvalidStateError", "responseText requires a text responseType");
+    if (slot == XHR_RESPONSE && type && *type && strcmp(type, "text") && xhr->ready_state != 4)
+        return ItemNull;
+    return dom_realm_get_cstr(fields.get(), xhr_properties[slot].name);
+}
+
+static Item xhr_property_setter(Item callee, Item receiver, Item* args,
+        int argc, uint64_t* /*result_home*/) {
+    RootFrame roots(3);
+    Rooted<Item> object(roots, receiver), value(roots, argc ? args[0] : make_js_undef());
+    Rooted<Item> fields(roots, xhr_fields(object.get()));
+    JS_RETURN_IF_ERROR(fields.get());
+    XhrState* xhr = xhr_state_from_receiver(object.get());
+    if (!xhr) return js_throw_type_error("Illegal XMLHttpRequest receiver");
+    int slot = (int)js_fn_native((JsFunction*)callee.function)->target.bits;
+    if (slot == XHR_WITH_CREDENTIALS) {
+        value.set(js_to_boolean(value.get()));
+        if (xhr->ready_state > 1 || xhr->send_pending)
+            return xhr_state_exception("InvalidStateError", "withCredentials cannot change during send");
+    } else if (slot == XHR_RESPONSE_TYPE) {
+        value.set(js_to_string(value.get()));
+        JS_RETURN_IF_ERROR(value.get());
+        const char* type = fn_to_cstr(value.get());
+        if (*type && strcmp(type, "text") && strcmp(type, "json") && strcmp(type, "document") &&
+                strcmp(type, "arraybuffer") && strcmp(type, "blob")) return make_js_undef();
+        // conversion can invoke author code; resolve the native record again afterwards.
+        xhr = xhr_state_from_receiver(object.get());
+        if (xhr->ready_state >= 3)
+            return xhr_state_exception("InvalidStateError", "responseType cannot change while loading");
+    } else {
+        value.set(js_to_number(value.get()));
+        JS_RETURN_IF_ERROR(value.get());
+        value.set((Item){.item = i2it((uint32_t)js_to_int32(js_get_number(value.get())))});
+    }
+    JS_RETURN_IF_ERROR(dom_realm_set_cstr(fields.get(), xhr_properties[slot].name, value.get()));
+    return make_js_undef();
+}
+
+extern "C" void dom_xhr_install_interface(Item prototype) {
+    RootFrame roots(4);
+    Rooted<Item> object(roots, prototype), key(roots, ItemNull);
+    Rooted<Item> getter(roots, ItemNull), setter(roots, ItemNull);
+    for (int slot = 0; slot < XHR_PROPERTY_COUNT; slot++) {
+        key.set(js_name_item(xhr_properties[slot].name));
+        getter.set(js_new_native_payload_function(xhr_property_getter, slot, 0));
+        js_set_function_name_from_property_key(getter.get(), key.get(), 1);
+        setter.set(ItemNull);
+        if (xhr_properties[slot].writable) {
+            setter.set(js_new_native_payload_function(xhr_property_setter, slot, 1));
+            js_set_function_name_from_property_key(setter.get(), key.get(), 2);
+        }
+        dom_realm_install_accessor(object.get(), key.get(), getter.get(), setter.get(), 0);
+    }
 }
 
 static void xhr_fire_readystatechange(XhrState* xhr) {
@@ -291,6 +410,17 @@ static void xhr_free_state(XhrState* xhr) {
         xhr->req_header_capacity = 0;
     }
     xhr->in_use = false;
+}
+
+static void xhr_release_records(JsXhrRuntimeState* state) {
+    for (int i = 0; i < state->count; i++) {
+        XhrState* xhr = state->pool[i];
+        if (!xhr) continue;
+        xhr_free_state(xhr);
+        mem_free(xhr);
+        state->pool[i] = nullptr;
+    }
+    state->count = 0;
 }
 
 static void xhr_free_request_header_lines(char** lines, int count) {
@@ -469,10 +599,16 @@ static Item js_xhr_async_fetch_body(Item token_arg, Item status_arg, Item body_a
     uint32_t token = (uint32_t)it2i(token_arg);
     if (!xhr_async_request_is_current(xhr, token)) return make_js_undef();
 
-    String* body = get_type_id(body_arg) == LMD_TYPE_STRING ? it2s(body_arg) : nullptr;
+    const char* body = nullptr;
+    int body_length = 0;
+    if (!js_item_bytes(body_arg, &body, &body_length)) {
+        xhr->send_pending = false;
+        xhr_complete_network_error(xhr);
+        return make_js_undef();
+    }
     xhr->send_pending = false;
     xhr_complete_response(xhr, (long)it2i(status_arg),
-                          body ? body->chars : nullptr, body ? body->len : 0);
+                          body, (size_t)body_length);
     log_debug("xhr: async done status=%ld, %zu bytes", xhr->status, xhr->response_size);
     return make_js_undef();
 }
@@ -483,19 +619,19 @@ static Item js_xhr_async_fetch_response(Item token_arg, Item response_arg) {
     uint32_t token = (uint32_t)it2i(token_arg);
     if (!xhr_async_request_is_current(xhr, token)) return make_js_undef();
 
-    Item status = dom_realm_get_cstr(response_arg, "status");
-    Item text = dom_realm_get_cstr(response_arg, "text");
-    if (get_type_id(status) != LMD_TYPE_INT || !dom_realm_is_callable(text)) {
+    RootFrame roots(6);
+    Rooted<Item> response_root(roots, response_arg);
+    Item status = dom_realm_get_cstr(response_root.get(), "status");
+    // xhr consumes transport bytes before response text decoding.
+    Rooted<Item> body_method_root(roots, dom_realm_get_cstr(response_root.get(), "arrayBuffer"));
+    if (get_type_id(status) != LMD_TYPE_INT || !dom_realm_is_callable(body_method_root.get())) {
         xhr->send_pending = false;
         xhr_complete_network_error(xhr);
         return make_js_undef();
     }
-    xhr_copy_fetch_response_headers(xhr, response_arg);
+    xhr_copy_fetch_response_headers(xhr, response_root.get());
 
-    RootFrame roots(6);
-    Rooted<Item> response_root(roots, response_arg);
-    Rooted<Item> text_root(roots, text);
-    Rooted<Item> body_promise_root(roots, dom_realm_call(text_root.get(),
+    Rooted<Item> body_promise_root(roots, dom_realm_call(body_method_root.get(),
         response_root.get(), nullptr, 0));
     Rooted<Item> body_handler_root(roots, ItemNull);
     Rooted<Item> error_handler_root(roots, ItemNull);
@@ -579,37 +715,44 @@ extern "C" Item js_xhr_new(void) {
             !lam::mem_grow_array(&_xhr_pool, &_xhr_capacity,
                                  _xhr_count + 1, 8, MEM_CAT_JS_RUNTIME)) return ItemNull;
 
+    XhrState* xhr = (XhrState*)mem_calloc(1, sizeof(XhrState), MEM_CAT_JS_RUNTIME);
+    if (!xhr) return ItemError;
     int id = _xhr_count++;
-    XhrState* xhr = &_xhr_pool[id];
-    memset(xhr, 0, sizeof(XhrState));
+    _xhr_pool[id] = xhr;
     xhr->in_use = true;
 
-    Item obj = js_new_object();
-    xhr->js_object = obj;
+    // the capsule's back-reference is not a GC root during construction.
+    RootFrame roots(5);
+    Rooted<Item> object(roots, js_new_object_with_class(JS_CLASS_XML_HTTP_REQUEST));
+    Rooted<Item> noop(roots, ItemNull), upload(roots, ItemNull);
+    Rooted<Item> fields(roots, js_new_object()), state(roots, js_array_new(0));
+    xhr->js_object = object.get();
 
-    // hidden id
-    xhr_set_int(obj, "__xhr_id", id);
+    // private state stays traced and cannot be redirected by public ID shadows.
+    JS_RETURN_IF_ERROR(js_array_push(state.get(), (Item){.item = i2it(id)}));
+    JS_RETURN_IF_ERROR(js_array_push(state.get(), fields.get()));
+    JS_RETURN_IF_ERROR(js_private_field_define(object.get(),
+        (Item){.item = s2it(js_xhr_state->private_key)}, state.get()));
 
     // initial properties
-    xhr_set_int(obj, "readyState", 0);
-    // Status is native state. A data-slot update can be bypassed by compiled
-    // fixed-shape reads, so expose one stable accessor for every ready state.
-    xhr_define_status_accessor(obj);
-    xhr_set_str(obj, "statusText", "");
-    xhr_set_str(obj, "responseText", "");
-    xhr_set_str(obj, "response", "");
-    xhr_set_str(obj, "responseType", "");
-    xhr_set_int(obj, "timeout", 0);
-    xhr_set_int(obj, "withCredentials", 0);
+    xhr_set_int(object.get(), "readyState", 0);
+    xhr_set_int(object.get(), "status", 0);
+    xhr_set_str(object.get(), "statusText", "");
+    xhr_set_str(object.get(), "responseText", "");
+    xhr_set_str(object.get(), "response", "");
+    xhr_set_str(object.get(), "responseType", "");
+    xhr_set_int(object.get(), "timeout", 0);
+    xhr_set_value(object.get(), "withCredentials", (Item){.item = ITEM_FALSE});
+    xhr_set_str(object.get(), "responseURL", "");
 
     // DONE constant
-    xhr_set_int(obj, "DONE", 4);
-    xhr_set_int(obj, "HEADERS_RECEIVED", 2);
-    xhr_set_int(obj, "LOADING", 3);
-    xhr_set_int(obj, "OPENED", 1);
-    xhr_set_int(obj, "UNSENT", 0);
+    xhr_set_int(object.get(), "DONE", 4);
+    xhr_set_int(object.get(), "HEADERS_RECEIVED", 2);
+    xhr_set_int(object.get(), "LOADING", 3);
+    xhr_set_int(object.get(), "OPENED", 1);
+    xhr_set_int(object.get(), "UNSENT", 0);
 
-    xhr_set_str(obj, "", ""); // dummy to avoid collision
+    xhr_set_str(object.get(), "", ""); // dummy to avoid collision
     // attach the stable XHR surface from one method catalog.
 #define JS_XHR_METHODS(M) \
     M("open", js_xhr_open) M("send", js_xhr_send) \
@@ -618,35 +761,35 @@ extern "C" Item js_xhr_new(void) {
     M("getAllResponseHeaders", js_xhr_get_all_response_headers) \
     M("overrideMimeType", js_xhr_override_mime_type)
 #define JS_XHR_INSTALL_METHOD(name, target) \
-    dom_realm_set(obj, make_string_item(name), dom_realm_new_function(target));
+    dom_realm_install_method(object.get(), name, target);
     JS_XHR_METHODS(JS_XHR_INSTALL_METHOD)
 #undef JS_XHR_INSTALL_METHOD
 #undef JS_XHR_METHODS
 
     // addEventListener / removeEventListener stubs (jQuery sets onreadystatechange directly)
-    Item noop_fn = dom_realm_new_function(js_xhr_noop);
-    dom_realm_set(obj, make_string_item("addEventListener"), noop_fn);
-    dom_realm_set(obj, make_string_item("removeEventListener"), noop_fn);
+    noop.set(dom_realm_new_function(js_xhr_noop));
+    dom_realm_set_cstr(object.get(), "addEventListener", noop.get());
+    dom_realm_set_cstr(object.get(), "removeEventListener", noop.get());
 
-    Item upload = js_new_object();
+    upload.set(js_new_object());
     // XMLHttpRequestUpload is a distinct EventTarget; request libraries
     // register progress listeners on both targets before send().
-    dom_realm_set(upload, make_string_item("addEventListener"), noop_fn);
-    dom_realm_set(upload, make_string_item("removeEventListener"), noop_fn);
-    dom_realm_set(obj, make_string_item("upload"), upload);
+    dom_realm_set_cstr(upload.get(), "addEventListener", noop.get());
+    dom_realm_set_cstr(upload.get(), "removeEventListener", noop.get());
+    xhr_set_value(object.get(), "upload", upload.get());
 
     // callback slots (initially null)
-    dom_realm_set_cstr(obj, "onreadystatechange", ItemNull);
-    dom_realm_set_cstr(obj, "onload", ItemNull);
-    dom_realm_set_cstr(obj, "onerror", ItemNull);
-    dom_realm_set_cstr(obj, "ontimeout", ItemNull);
-    dom_realm_set_cstr(obj, "onabort", ItemNull);
-    dom_realm_set_cstr(obj, "onloadend", ItemNull);
-    dom_realm_set_cstr(obj, "onloadstart", ItemNull);
-    dom_realm_set_cstr(obj, "onprogress", ItemNull);
+    dom_realm_set_cstr(object.get(), "onreadystatechange", ItemNull);
+    dom_realm_set_cstr(object.get(), "onload", ItemNull);
+    dom_realm_set_cstr(object.get(), "onerror", ItemNull);
+    dom_realm_set_cstr(object.get(), "ontimeout", ItemNull);
+    dom_realm_set_cstr(object.get(), "onabort", ItemNull);
+    dom_realm_set_cstr(object.get(), "onloadend", ItemNull);
+    dom_realm_set_cstr(object.get(), "onloadstart", ItemNull);
+    dom_realm_set_cstr(object.get(), "onprogress", ItemNull);
 
     log_debug("xhr: created XHR id=%d", id);
-    return obj;
+    return object.get();
 }
 
 // ============================================================================
@@ -962,12 +1105,7 @@ extern "C" Item js_xhr_get_all_response_headers(void) {
 
 extern "C" void js_xhr_reset(void) {
     if (!js_xhr_runtime_state_get()) return;
-    for (int i = 0; i < _xhr_count; i++) {
-        if (_xhr_pool[i].in_use) {
-            xhr_free_state(&_xhr_pool[i]);
-        }
-    }
-    _xhr_count = 0;
+    xhr_release_records(js_xhr_state);
     if (_xhr_base_url) {
         mem_free(_xhr_base_url);
         _xhr_base_url = nullptr;
@@ -986,6 +1124,8 @@ static void js_xhr_capsule_destroy(void* capsule) {
     // before heap teardown; only the empty capsule may remain at this point.
     if (state->count || state->base_url) {
         log_error("xhr: context destroyed before request state was reset");
+        xhr_release_records(state);
+        if (state->base_url) mem_free(state->base_url);
     }
     // JSCUO5: the pool is a separate allocation now
     if (state->pool) mem_free(state->pool);

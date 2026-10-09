@@ -122,7 +122,7 @@ const char radiant_dom_interface_decl[] =
 #undef CSS_RULE_SHAPE_property
 #undef CSS_RULE_SHAPE_namespace
     "type dom_node {\n"
-    "    node_name: string, node_type: int,\n"
+    "    node_name: string, node_type: int, base_uri: string,\n"
     "    parent_node: dom_node, parent_element: dom_node, is_connected: bool,\n"
     "    owner_document: document, first_child: dom_node, last_child: dom_node,\n"
     "    next_sibling: dom_node, previous_sibling: dom_node, child_nodes: any,\n"
@@ -148,7 +148,7 @@ const char radiant_dom_interface_decl[] =
     "    tag_name: string, local_name: string, namespace_uri: string, prefix: any,\n"
     "    id: string, class_name: string, child_element_count: int, children: any,\n"
     "    attributes: any, first_element_child: dom_node, last_element_child: dom_node,\n"
-    "    inner_html: string,\n"
+    "    inner_html: string, dataset: any,\n"
     "    next_element_sibling: dom_node, previous_element_sibling: dom_node,\n"
     "    disabled: bool, required: bool,\n"
     "    no_validate: bool, form_no_validate: bool, open: bool, autofocus: bool,\n"
@@ -209,6 +209,7 @@ const char radiant_dom_interface_decl[] =
     "    owner_element: any, specified: bool, value: string, node_value: string, text_content: string\n"
     "}\n"
     "type svg_element : html_element {\n"
+    "    dataset: any,\n"
     "    create_svg_point: fn() any, create_svg_matrix: fn() any,\n"
     "    create_svg_transform: fn() any,\n"
     "    create_svg_transform_from_matrix: fn(a0: any) any, get_bbox: fn() any,\n"
@@ -283,6 +284,7 @@ const char radiant_dom_interface_decl[] =
     "    document: any,\n"
     "    to_string: fn() string,\n"
     "    ready_state: string,\n"
+    "    current_script: any,\n"
     "    fonts: any,\n"
     "    compat_mode: string,\n"
     "    character_set: string,\n"
@@ -368,10 +370,8 @@ const char radiant_dom_interface_decl[] =
     "    length: int,\n"
     "    item: fn(index: int) any\n"
     "}\n"
-    "type radio_node_list {\n"
-    "    length: int,\n"
-    "    item: fn(index: int) any\n"
-    "}\n"
+    // declared bases preserve captured-accessor brands across collection subtypes.
+    "type radio_node_list : node_list {}\n"
     "type dom_rect_list {\n"
     "    length: int,\n"
     "    item: fn(index: int) any\n"
@@ -389,16 +389,14 @@ const char radiant_dom_interface_decl[] =
     "    item: fn(index: int) any,\n"
     "    named_item: fn(name: string) any\n"
     "}\n"
-    "type html_options_collection {\n"
+    "type html_options_collection : html_collection {\n"
     "    length: int,\n"
     "    selected_index: int,\n"
     "    item: fn(index: int) any,\n"
     "    named_item: fn(name: string) any,\n"
     "    add: fn(element: any, before: any) any\n"
     "}\n"
-    "type html_form_controls_collection {\n"
-    "    length: int,\n"
-    "    item: fn(index: int) any,\n"
+    "type html_form_controls_collection : html_collection {\n"
     "    named_item: fn(name: string) any\n"
     "}\n"
     "type named_node_map {\n"
@@ -532,9 +530,12 @@ static Item radiant_selection_prototype_seed(void) {
     return radiant_host_api->realm->selection_get_prototype_value();
 }
 
-#define BIND_GET(n, fn)      {n, NULL, fn, NULL, NULL, NULL, 0}
+#define BIND_READ(n, fn, flags) {n, NULL, fn, NULL, NULL, NULL, flags}
+#define BIND_GET(n, fn) BIND_READ(n, fn, 0)
 #define BIND_GET_HIDDEN(n, fn) \
-    {n, NULL, fn, NULL, NULL, NULL, JUBE_MEMBER_NON_ENUMERABLE}
+    BIND_READ(n, fn, JUBE_MEMBER_NON_ENUMERABLE)
+// publish attributes on their declaring interface's native prototype.
+#define BIND_GET_PROTO(n, fn) BIND_READ(n, fn, JUBE_MEMBER_PROTOTYPE)
 #define BIND_CALL(n, fn)     {n, NULL, NULL, NULL, fn, NULL, 0}
 #define BIND_CALL_JS(n, js, fn) {n, js, NULL, NULL, fn, NULL, 0}
 
@@ -613,7 +614,7 @@ static const JubeMemberBind radiant_range_members[] = {
     BIND_GET("end_container", r_end_container),
     BIND_GET("end_offset", r_end_offset),
     BIND_GET("collapsed", r_collapsed),
-    BIND_GET("common_ancestor_container", r_common_ancestor),
+    BIND_GET_PROTO("common_ancestor_container", r_common_ancestor),
     BIND_CALL("set_start", r_set_start),
     BIND_CALL("set_end", r_set_end),
     BIND_CALL("set_start_before", r_set_start_before),
@@ -640,14 +641,14 @@ static const JubeMemberBind radiant_range_members[] = {
 };
 
 static const JubeMemberBind radiant_selection_members[] = {
-    BIND_GET("anchor_node", s_anchor_node),
-    BIND_GET("anchor_offset", s_anchor_offset),
-    BIND_GET("focus_node", s_focus_node),
-    BIND_GET("focus_offset", s_focus_offset),
-    BIND_GET("is_collapsed", s_is_collapsed),
-    BIND_GET("range_count", s_range_count),
-    BIND_GET("type", s_type),
-    BIND_GET("direction", s_direction),
+    BIND_GET_PROTO("anchor_node", s_anchor_node),
+    BIND_GET_PROTO("anchor_offset", s_anchor_offset),
+    BIND_GET_PROTO("focus_node", s_focus_node),
+    BIND_GET_PROTO("focus_offset", s_focus_offset),
+    BIND_GET_PROTO("is_collapsed", s_is_collapsed),
+    BIND_GET_PROTO("range_count", s_range_count),
+    BIND_GET_PROTO("type", s_type),
+    BIND_GET_PROTO("direction", s_direction),
     // legacy aliases shadow the anchor/focus members and stay out of own-keys
     BIND_GET_HIDDEN("base_node", s_anchor_node),
     BIND_GET_HIDDEN("base_offset", s_anchor_offset),
@@ -890,6 +891,7 @@ extern "C" int radiant_dom_member_node_value(Item receiver, Item* out);
 extern "C" int radiant_dom_member_text_content(Item receiver, Item* out);
 extern "C" int radiant_dom_member_tag_name(Item receiver, Item* out);
 extern "C" int radiant_dom_member_node_name(Item receiver, Item* out);
+extern "C" int radiant_dom_member_base_uri(Item receiver, Item* out);
 extern "C" int radiant_dom_member_local_name(Item receiver, Item* out);
 extern "C" int radiant_dom_member_namespace_uri(Item receiver, Item* out);
 extern "C" int radiant_dom_member_prefix(Item receiver, Item* out);
@@ -1047,6 +1049,7 @@ static int radiant_node_property_set(Item receiver, const char* name, Item value
     static int fn(Item receiver, Item value, Item* out) { return radiant_node_property_set(receiver, name, value, out); }
 NATIVE_PROPERTY_GET(radiant_element_inner_html, "innerHTML")
 NATIVE_PROPERTY_SET(radiant_element_inner_html_set, "innerHTML")
+NATIVE_PROPERTY_GET(radiant_element_dataset, "dataset")
 // ---------------------------------------------------------------------------
 // DS1: member binds are generated from dom_api.def, not written here. A row
 // whose `iface` names this table expands to a BIND_ROW; every other row expands
@@ -1161,6 +1164,7 @@ static const JubeMemberBind radiant_dom_node_members[] = {
 #undef DOM_ROW_BIND_html_element
 #undef DOM_ROW_BIND_select_element
     BIND_FIELD_JS("node_name", "nodeName", radiant_dom_member_node_name),
+    BIND_FIELD_JS("base_uri", "baseURI", radiant_dom_member_base_uri),
     BIND_FIELD_JS("node_type", "nodeType", radiant_dom_member_node_type_any),
     BIND_FIELD_JS("parent_node", "parentNode", radiant_dom_member_parent_node_any),
     BIND_FIELD_JS("parent_element", "parentElement", radiant_dom_member_parent_element_any),
@@ -1219,6 +1223,7 @@ static const JubeMemberBind radiant_dom_html_element_members[] = {
     BIND_FIELD("children", radiant_dom_member_children),
     BIND_FIELD("attributes", radiant_dom_member_attributes),
     BIND_FIELD_SET_JS("inner_html", "innerHTML", radiant_element_inner_html, radiant_element_inner_html_set),
+    BIND_GET_PROTO("dataset", radiant_element_dataset),
     BIND_FIELD("first_element_child", radiant_dom_member_first_element_child),
     BIND_FIELD("last_element_child", radiant_dom_member_last_element_child),
     BIND_FIELD("next_element_sibling", radiant_dom_member_next_element_sibling),
@@ -1296,6 +1301,7 @@ static int radiant_dom_svg_target_element_get(Item receiver, Item* out) {
 }
 
 static const JubeMemberBind radiant_dom_svg_element_members[] = {
+    BIND_GET_PROTO("dataset", radiant_element_dataset),
     BIND_CALL_JS("create_svg_point", "createSVGPoint", radiant_dom_m4d_create_svg_point),
     BIND_CALL_JS("create_svg_matrix", "createSVGMatrix", radiant_dom_m4d_create_svg_matrix),
     BIND_CALL_JS("create_svg_transform", "createSVGTransform", radiant_dom_m4d_create_svg_transform),
@@ -1419,6 +1425,7 @@ RADIANT_DOC_GET_FN(radiant_doc_get_title, "title")
 RADIANT_DOC_GET_FN(radiant_doc_get_cookie, "cookie")
 RADIANT_DOC_SET_FN(radiant_doc_set_cookie, "cookie")
 RADIANT_DOC_GET_FN(radiant_doc_get_url, "URL")
+RADIANT_DOC_GET_FN(radiant_doc_get_current_script, "currentScript")
 RADIANT_DOC_GET_FN(radiant_doc_get_href, "href")
 RADIANT_DOC_GET_FN(radiant_doc_get_protocol, "protocol")
 RADIANT_DOC_GET_FN(radiant_doc_get_hostname, "hostname")
@@ -1541,6 +1548,7 @@ static const JubeMemberBind radiant_document_members[] = {
     DOC_FIELD("document", NULL, radiant_doc_get_document),
     DOC_METHOD("to_string", "toString", radiant_doc_call_to_string),
     DOC_FIELD("ready_state", "readyState", radiant_doc_get_ready_state),
+    DOC_FIELD("current_script", "currentScript", radiant_doc_get_current_script),
     DOC_FIELD("fonts", NULL, radiant_doc_get_fonts),
     DOC_FIELD("compat_mode", "compatMode", radiant_doc_get_compat_mode),
     DOC_FIELD("character_set", "characterSet", radiant_doc_get_character_set),
@@ -1799,13 +1807,13 @@ static int radiant_options_add(
 }
 
 static const JubeMemberBind radiant_node_list_members[] = {
-    BIND_FIELD("length", radiant_collection_length_get),
+    BIND_GET_PROTO("length", radiant_collection_length_get),
     {"item", NULL, NULL, NULL, radiant_collection_item, NULL,
      JUBE_MEMBER_NON_ENUMERABLE},
 };
 
 static const JubeMemberBind radiant_html_collection_members[] = {
-    BIND_FIELD("length", radiant_collection_length_get),
+    BIND_GET_PROTO("length", radiant_collection_length_get),
     {"item", NULL, NULL, NULL, radiant_collection_item, NULL,
      JUBE_MEMBER_NON_ENUMERABLE},
     {"named_item", "namedItem", NULL, NULL, radiant_collection_named_item, NULL,

@@ -954,7 +954,7 @@ static bool parent_preserves_inter_element_whitespace(DomNode* text_node) {
  *
  * This function returns true if the text node should be skipped during layout.
  */
-static bool should_collapse_inter_element_whitespace(DomNode* text_node) {
+bool should_collapse_inter_element_whitespace(DomNode* text_node) {
     if (!text_node || !text_node->parent) return false;
 
     if (!text_node->parent->is_block()) return false;

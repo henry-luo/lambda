@@ -1,0 +1,35 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>DOMImplementation interface</title></head>
+<body><div id="result">pending</div><script>
+    const result = document.getElementById('result');
+    function check(name, value) {result.setAttribute('data-' + name, String(value));}
+    const implementation = document.implementation;
+    const prototype = DOMImplementation.prototype;
+    check('prototype', Object.getPrototypeOf(implementation) === prototype);
+    check('instance', implementation instanceof DOMImplementation);
+    check('tag', Object.prototype.toString.call(implementation) === '[object DOMImplementation]');
+    check('method', implementation.createHTMLDocument === prototype.createHTMLDocument &&
+        !Object.prototype.hasOwnProperty.call(implementation, 'createHTMLDocument'));
+    check('metadata', prototype.createHTMLDocument.length === 0 && prototype.createDocument.length === 2 &&
+        prototype.createDocumentType.length === 3 && prototype.hasFeature.length === 0);
+    const {createHTMLDocument, createDocument, createDocumentType, hasFeature} = prototype;
+    const foreign = createHTMLDocument.call(implementation, 'Detached title');
+    check('html', foreign !== document && foreign.title === 'Detached title' && !!foreign.body);
+    const xml = createDocument.call(implementation, null, 'root', null);
+    check('xml', xml.documentElement.localName === 'root');
+    const doctype = createDocumentType.call(implementation, 'html', 'public-id', 'system-id');
+    check('doctype', doctype.nodeType === Node.DOCUMENT_TYPE_NODE && doctype.name === 'html' &&
+        doctype.nodeName === 'html' && doctype.publicId === 'public-id' && doctype.systemId === 'system-id' &&
+        doctype.nodeValue === null && doctype.textContent === null);
+    check('feature', hasFeature.call(implementation));
+    let forged = 0;
+    for (const method of [createHTMLDocument, createDocument, createDocumentType, hasFeature]) {
+        try {method.call(Object.create(prototype), 'html', '', '');}
+        catch (error) {if (error instanceof TypeError) forged++;}
+    }
+    check('forged', forged === 4);
+    let illegal = false;
+    try {new DOMImplementation();} catch (error) {illegal = error instanceof TypeError;}
+    check('constructor', illegal);
+    result.textContent = 'complete';
+</script></body></html>

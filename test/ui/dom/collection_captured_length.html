@@ -1,0 +1,60 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Captured collection length getters</title></head>
+<body><div id="result">pending</div><main id="root"><span class="item" id="one"></span></main>
+<form id="form"><input name="value"></form>
+<form id="radios"><input type="radio" name="choice"><input type="radio" name="choice"></form>
+<select id="select"><option>one</option><option>two</option></select><script>
+const result = document.getElementById('result');
+function check(name, value) { result.setAttribute('data-' + name, String(value)); }
+const htmlDescriptor = Object.getOwnPropertyDescriptor(HTMLCollection.prototype, 'length');
+const nodeDescriptor = Object.getOwnPropertyDescriptor(NodeList.prototype, 'length');
+check('cold', typeof htmlDescriptor.get === 'function' && typeof nodeDescriptor.get === 'function');
+const htmlLength = htmlDescriptor.get;
+const nodeLength = nodeDescriptor.get;
+const root = document.getElementById('root');
+const live = root.getElementsByClassName('item');
+const fixed = root.querySelectorAll('.item');
+const nodes = root.childNodes;
+const controls = document.getElementById('form').elements;
+const radios = document.getElementById('radios').elements.namedItem('choice');
+const options = document.getElementById('select').options;
+check('descriptors', htmlDescriptor.set === undefined && htmlDescriptor.enumerable && htmlDescriptor.configurable &&
+    nodeDescriptor.set === undefined && nodeDescriptor.enumerable && nodeDescriptor.configurable &&
+    !Object.hasOwn(live, 'length') && !Object.hasOwn(fixed, 'length'));
+check('values', htmlLength.call(live) === 1 && nodeLength.call(fixed) === 1 &&
+    nodeLength.call(nodes) === 1 && htmlLength.call(controls) === 1);
+check('subtypes', nodeLength.call(radios) === 2 && htmlLength.call(options) === 2 &&
+    Object.getPrototypeOf(RadioNodeList.prototype) === NodeList.prototype &&
+    Object.getPrototypeOf(HTMLFormControlsCollection.prototype) === HTMLCollection.prototype &&
+    Object.getPrototypeOf(HTMLOptionsCollection.prototype) === HTMLCollection.prototype &&
+    !Object.hasOwn(RadioNodeList.prototype, 'length') &&
+    !Object.hasOwn(HTMLFormControlsCollection.prototype, 'length'));
+const namedRadios = document.getElementById('radios').choice;
+const thirdRadio = document.createElement('input');
+thirdRadio.type = 'radio';
+thirdRadio.name = 'choice';
+document.getElementById('radios').appendChild(thirdRadio);
+check('named-live', nodeLength.call(radios) === 3 && nodeLength.call(namedRadios) === 3 &&
+    radios.item(2) === thirdRadio);
+thirdRadio.remove();
+check('named-removed', nodeLength.call(radios) === 2 && nodeLength.call(namedRadios) === 2);
+const next = document.createElement('span');
+next.className = 'item';
+root.appendChild(next);
+check('mutation', htmlLength.call(live) === 2 && nodeLength.call(fixed) === 1 && nodeLength.call(nodes) === 2);
+live.length = 99;
+fixed.length = 99;
+check('readonly', live.length === 2 && fixed.length === 1);
+let forged = 0;
+for (const [getter, receiver] of [[htmlLength, {}], [nodeLength, {}], [htmlLength, fixed], [nodeLength, live]]) {
+    try { getter.call(receiver); } catch (error) { if (error instanceof TypeError) forged++; }
+}
+check('forged', forged === 4);
+Object.setPrototypeOf(live, null);
+Object.setPrototypeOf(fixed, null);
+check('captured', Object.getPrototypeOf(live) === null && Object.getPrototypeOf(fixed) === null &&
+    htmlLength.call(live) === 2 && nodeLength.call(fixed) === 1);
+root.removeChild(next);
+check('removed', htmlLength.call(live) === 1 && nodeLength.call(nodes) === 1);
+result.textContent = 'complete';
+</script></body></html>

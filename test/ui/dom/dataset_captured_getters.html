@@ -1,0 +1,48 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Captured HTML and SVG dataset getters</title></head>
+<body><div id="result">pending</div><div id="html" data-user-id="html"></div>
+<svg id="svg" data-user-id="svg"></svg><script>
+const result = document.getElementById('result');
+function check(name, value) { result.setAttribute('data-' + name, String(value)); }
+const hd = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'dataset');
+const sd = Object.getOwnPropertyDescriptor(SVGElement.prototype, 'dataset');
+check('cold', typeof hd.get === 'function' && typeof sd.get === 'function');
+check('descriptors', hd.set === undefined && hd.enumerable && hd.configurable &&
+    sd.set === undefined && sd.enumerable && sd.configurable);
+const html = document.getElementById('html');
+const svg = document.getElementById('svg');
+const hg = hd.get, sg = sd.get;
+check('values', hg.call(html).userId === 'html' && sg.call(svg).userId === 'svg' &&
+    !Object.hasOwn(html, 'dataset') && !Object.hasOwn(svg, 'dataset'));
+let forged = 0;
+for (const [getter, receiver] of [[hg, {}], [sg, {}], [hg, svg], [sg, html],
+        [hg, document.createTextNode('x')], [sg, document]]) {
+    try { getter.call(receiver); } catch (error) { if (error instanceof TypeError) forged++; }
+}
+check('forged', forged === 6);
+const htmlData = hg.call(html), svgData = sg.call(svg);
+htmlData.userId = 'changed-html';
+svgData.userId = 'changed-svg';
+check('writes', html.getAttribute('data-user-id') === 'changed-html' &&
+    svg.getAttribute('data-user-id') === 'changed-svg');
+html.setAttribute('data-fresh-key', 'added');
+check('added', htmlData.freshKey === 'added' && Reflect.get(htmlData, 'freshKey') === 'added');
+html.removeAttribute('data-fresh-key');
+check('removed', htmlData.freshKey === undefined);
+check('reflect-write', Reflect.set(svgData, 'userId', 'changed-svg') && svgData.userId === 'changed-svg');
+Object.defineProperty(html, 'dataset', {value: {userId: 'public-shadow'}, configurable: true});
+check('shadow', html.dataset.userId === 'public-shadow' && hg.call(html).userId === 'changed-html');
+Object.setPrototypeOf(html, null);
+Object.setPrototypeOf(svg, null);
+check('captured', hg.call(html).userId === 'changed-html' && sg.call(svg).userId === 'changed-svg');
+function retainedDataset() {
+    const owner = document.createElement('div');
+    owner.setAttribute('data-value', 'before');
+    return hg.call(owner);
+}
+const retained = retainedDataset();
+for (let i = 0; i < 300; i++) Array.from({length: 8}, (_, j) => ({i, j}));
+retained.value = 'after';
+check('retained', retained.value === 'after');
+result.textContent = 'complete';
+</script></body></html>

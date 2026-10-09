@@ -1,4 +1,5 @@
 #include "render.hpp"
+#include "geomap.hpp"
 #include "view.hpp"
 #include "layout.hpp"
 #include "render_effect_raster_fallback.hpp"
@@ -1005,6 +1006,15 @@ static void svg_cb_render_image(RenderContext* vctx, ViewBlock* block, float abs
     }
 }
 
+static void svg_cb_render_geomap(RenderContext* vctx, ViewBlock* block, float abs_x, float abs_y) {
+    auto* ctx = (SvgRenderContext*)vctx;
+    BlockBlot parent = {};
+    parent.x = abs_x - block->x; parent.y = abs_y - block->y;
+    geomap_paint(svg_active_paint_list(ctx), block->as_element(),
+        render_geometry_block_content_rect(&parent, block, 1.0f));
+    svg_lower_paint_list(ctx);
+}
+
 static void svg_cb_render_inline_svg(RenderContext* vctx, ViewBlock* block, float abs_x, float abs_y,
                                      FontBox* font, Color color) {
     SvgRenderContext* ctx = (SvgRenderContext*)vctx;
@@ -1338,6 +1348,7 @@ static RenderBackend svg_make_backend(SvgRenderContext* ctx) {
     b.render_text           = svg_cb_render_text;
     b.render_image          = svg_cb_render_image;
     b.render_inline_svg     = svg_cb_render_inline_svg;
+    b.render_geomap         = svg_cb_render_geomap;
     b.render_svg_subscene   = svg_cb_render_svg_subscene;
     b.begin_block_children  = svg_cb_begin_block_children;
     b.end_block_children    = svg_cb_end_block_children;

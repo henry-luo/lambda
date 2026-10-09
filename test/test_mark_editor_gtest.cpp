@@ -449,6 +449,36 @@ TEST_F(MarkEditorTest, DomNodeEditsKeepTextSlotsDistinct) {
     EXPECT_STREQ(edited.element->items[0].get_string()->chars, "leftrighttailend");
 }
 
+TEST_F(MarkEditorTest, DomNodeEditsValidateNodeArenaOwnership) {
+    for (int registered = 0; registered < 2; registered++) {
+        Pool* source_pool = pool_create();
+        ASSERT_NE(source_pool, nullptr);
+        Input* source_input = Input::create(source_pool);
+        ASSERT_NE(source_input, nullptr);
+        source_input->ui_mode = true;
+        MarkBuilder source_builder(source_input);
+        Item source_parent = source_builder.element("span").text("external text").final();
+        Item source = source_parent.element->items[0];
+        MarkBuilder builder(input);
+        Item parent = builder.element("p").final();
+        MarkEditor editor(input, EDIT_MODE_INLINE);
+        if (registered) editor.set_ui_node_arena(source_input->arena);
+
+        Item edited = editor.dom_insert_child(parent, -1, source);
+        ASSERT_EQ(get_type_id(edited), LMD_TYPE_ELEMENT);
+        ASSERT_EQ(edited.element->length, 1);
+        String* inserted = edited.element->items[0].get_string();
+        if (registered) {
+            EXPECT_EQ(inserted, source.get_string());
+        } else {
+            EXPECT_NE(inserted, source.get_string());
+            EXPECT_TRUE(arena_owns(input->arena, inserted));
+        }
+        pool_destroy(source_pool);
+        if (!registered) EXPECT_STREQ(inserted->chars, "external text");
+    }
+}
+
 //==============================================================================
 // ARRAY OPERATIONS
 //==============================================================================

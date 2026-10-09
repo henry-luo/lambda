@@ -27,6 +27,7 @@ static GridTrackSize* grid_scratch_clone_track(ScratchArena* scratch,
     GridTrackSize* copy = (GridTrackSize*)scratch_calloc(scratch, sizeof(GridTrackSize));
     if (!copy) return NULL;
     *copy = *source;
+    copy->expression_owner = nullptr;
     copy->min_size = NULL;
     copy->max_size = NULL;
     copy->repeat_tracks = NULL;
@@ -440,8 +441,8 @@ void layout_grid_container(LayoutContext* lycon, ViewBlock* container) {
                         definite_row_height += ts->value;
                     } else if (ts->type == GRID_TRACK_SIZE_PERCENTAGE &&
                                grid_layout->content_height > 0) {
-                        definite_row_height += grid_layout->content_height *
-                                               ts->value / 100.0f;
+                        definite_row_height += radiant::grid_adapter::convert_to_track_sizing(ts)
+                            .min.resolve(grid_layout->content_height);
                     } else {
                         all_definite = false;
                         break;
@@ -683,28 +684,22 @@ void determine_grid_size(GridContainerLayout* grid_layout) {
     grid_layout->computed_column_count = max_column;
 
 }
-// Calculate minimum size of a track pattern for auto-fill/auto-fit expansion
-static int calculate_track_pattern_min_size(GridTrackSize** tracks, int track_count) {
-    int pattern_size = 0;
-    for (int i = 0; i < track_count; i++) {
-        GridTrackSize* ts = tracks[i];
-        if (!ts) continue;
+static float auto_repeat_track_size(GridTrackSize* track, float percentage_base) {
+    auto sizing = radiant::grid_adapter::convert_to_track_sizing(track);
+    float minimum = sizing.min.resolve(percentage_base);
+    float maximum = sizing.max.resolve(percentage_base);
+    // CSS Grid §7.2.3.2 prefers a definite maximum, floored by a definite minimum.
+    return maximum >= 0.0f ? fmaxf(maximum, minimum) : minimum;
+}
 
-        if (ts->type == GRID_TRACK_SIZE_LENGTH) {
-            pattern_size += ts->value;
-        } else if (ts->type == GRID_TRACK_SIZE_MINMAX && ts->min_size) {
-            // Use the min value from minmax()
-            if (ts->min_size->type == GRID_TRACK_SIZE_LENGTH) {
-                pattern_size += ts->min_size->value;
-            } else {
-                pattern_size += 100; // Default for auto/min-content/max-content
-            }
-        } else if (ts->type == GRID_TRACK_SIZE_FR ||
-                   ts->type == GRID_TRACK_SIZE_AUTO) {
-            pattern_size += 100; // Default minimum for flexible/auto tracks
-        } else {
-            pattern_size += 50; // Fallback
-        }
+static float calculate_track_pattern_size(GridTrackSize** tracks, int track_count,
+                                           float percentage_base) {
+    float pattern_size = 0.0f;
+    for (int i = 0; i < track_count; i++) {
+        float size = auto_repeat_track_size(tracks[i], percentage_base);
+        if (size < 0.0f || !isfinite(size)) return -1.0f;
+        // the spec permits a UA floor to prevent division by zero, and suggests 1px.
+        pattern_size += fmaxf(1.0f, size);
     }
     return pattern_size;
 }
@@ -758,33 +753,38 @@ static bool expand_auto_repeat_axis(GridContainerLayout* grid_layout, bool is_co
 
     float available_size = is_column ? grid_layout->content_width : grid_layout->content_height;
     float gap = is_column ? grid_layout->column_gap : grid_layout->row_gap;
+    bool definite_size = is_column
+        ? !grid_layout->is_shrink_to_fit_width && !grid_layout->is_min_content_width && !grid_layout->is_max_content_width
+        : grid_layout->has_explicit_height;
+    float percentage_base = definite_size ? available_size : -1.0f;
+    if (is_column ? grid_layout->column_gap_is_percent : grid_layout->row_gap_is_percent) gap = 0.0f;
 
     for (int repeat_index = 0; repeat_index < tracks->track_count; repeat_index++) {
         GridTrackSize* repeat = tracks->tracks[repeat_index];
         if (!repeat || repeat->type != GRID_TRACK_SIZE_REPEAT ||
             (!repeat->is_auto_fill && !repeat->is_auto_fit)) continue;
 
-        int pattern_size = calculate_track_pattern_min_size(
-            repeat->repeat_tracks, repeat->repeat_track_count);
-        if (pattern_size <= 0) pattern_size = 100;
+        float pattern_size = calculate_track_pattern_size(
+            repeat->repeat_tracks, repeat->repeat_track_count, percentage_base);
 
-        int fixed_track_space = 0;
+        float fixed_track_space = 0.0f;
         int fixed_track_count = 0;
         for (int i = 0; i < tracks->track_count; i++) {
             if (i == repeat_index) continue;
             GridTrackSize* other = tracks->tracks[i];
-            if (other && other->type == GRID_TRACK_SIZE_LENGTH) {
-                fixed_track_space += other->value;
-                fixed_track_count++;
-            }
+            float size = auto_repeat_track_size(other, percentage_base);
+            if (size < 0.0f || !isfinite(size)) definite_size = false;
+            else fixed_track_space += fmaxf(1.0f, size);
+            fixed_track_count++;
         }
-        int gap_for_fixed = fixed_track_count > 0
-            ? (int)(fixed_track_count * gap) : 0; // INT_CAST_OK: grid track count needs an integral gap budget.
-        int available = (int)available_size - fixed_track_space - gap_for_fixed; // INT_CAST_OK: auto-repeat count is discrete.
+        float available = available_size - fixed_track_space - fixed_track_count * gap;
         int repeat_count = 1;
-        if (pattern_size + gap > 0.0f) {
-            repeat_count = (int)((available + gap) / (pattern_size + gap)); // INT_CAST_OK: CSS repeat count is integral.
-            if (repeat_count < 1) repeat_count = 1;
+        if (definite_size && pattern_size > 0.0f) {
+            float repetitions = floorf((available + gap) /
+                (pattern_size + repeat->repeat_track_count * gap));
+            // expanded definitions cannot exceed the canonical track storage bound.
+            float capacity = fmaxf(1.0f, (MAX_GRID_TRACKS - fixed_track_count) / (float)repeat->repeat_track_count);
+            repeat_count = (int)fmaxf(1.0f, fminf(repetitions, capacity)); // INT_CAST_OK: CSS repeat count is integral and bounded by track capacity.
         }
         // Preserve the existing column-only cap until empty auto-fit gutters collapse fully.
         if (is_column && repeat->is_auto_fit && grid_layout->item_count > 0 &&

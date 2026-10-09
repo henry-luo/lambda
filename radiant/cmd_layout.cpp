@@ -4394,6 +4394,7 @@ static bool apply_initial_autofocus(DomDocument* doc, DocState* state) {
 
 struct LambdaFocusRestore {
     bool valid;
+    bool from_keyboard;
     bool has_text_selection;
     RenderMapLookup lookup;
     int path[64];
@@ -4467,6 +4468,7 @@ static bool capture_lambda_focus_restore(DocState* state,
     View* focused = focus_get(state);
     if (!focused || !focused->is_element()) return false;
     DomElement* focused_elem = lam::dom_require_element(focused);
+    out->from_keyboard = focus_get_visible(state) == focused;
     const char* focus_key = focused_elem->get_attribute("data-focus-key");
     if (focus_key) out->focus_key = strdup(focus_key);
     if (focused_elem->form_control() &&
@@ -4637,7 +4639,8 @@ static View* restore_lambda_focus(DomDocument* doc, DocState* state, bool had_fo
         }
     }
     if (focused) {
-        focus_set(state, focused, false);
+        // rebuilding preserves programmatic-only targets and their keyboard ring.
+        focus_set_programmatic(state, focused, restore->from_keyboard);
         if (restore->has_text_selection) {
             // The fresh template value is authoritative, but its form prop
             // starts with a default caret. Keep the live selection state and

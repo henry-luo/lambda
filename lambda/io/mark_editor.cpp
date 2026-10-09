@@ -228,6 +228,11 @@ MarkEditor::MarkEditor(Input* input, EditMode mode)
         mode == EDIT_MODE_INLINE ? "inline" : "immutable");
 }
 
+MarkEditor::MarkEditor(DomDocument* document, EditMode mode)
+    : MarkEditor(document->input, mode) {
+    set_ui_node_arena(document->node_arena);
+}
+
 MarkEditor::~MarkEditor() {
     if (draft_arena_) arena_destroy(draft_arena_);
     // Clean up version history
@@ -1238,12 +1243,13 @@ bool MarkEditor::owns_ui_node_storage(const void* storage) const {
         (ui_node_arena_ && arena_owns(ui_node_arena_, storage)));
 }
 
-Item MarkEditor::import_child(Item child) {
+Item MarkEditor::import_child(Item child, bool preserve_ui_nodes) {
     if (builder_->is_in_arena(child)) return child;
     // keep a live UI node by identity only when its storage is one this editor
     // vouches for; reading a node header in front of a GC object would read
     // garbage and could leave a GC pointer in the document (D4.5.2)
-    if (ui_mode_ && owns_ui_node_storage(mark_editor_ui_node_storage(child)) &&
+    if ((ui_mode_ || preserve_ui_nodes) &&
+        owns_ui_node_storage(mark_editor_ui_node_storage(child)) &&
         mark_editor_is_ui_dom_node(child)) return child;
     return builder_->deep_copy(child);
 }
@@ -1353,11 +1359,9 @@ Item MarkEditor::elmt_replace_child(Item element, int index, Item child) {
 Item MarkEditor::dom_edit_child(Item element, int64_t index, int64_t delete_count, Item* child) {
     Item imported;
     if (child) {
-        // detached documents still own live wrappers even when their Input is non-UI.
-        // DOM callers pass a DomElement's backing element or a DomText's string,
-        // so the node header in front of the child is genuine.
-        imported = builder_->is_in_arena(*child) || mark_editor_is_ui_dom_node(*child)
-            ? *child : import_child(*child);
+        // DOM string arguments may be plain GC strings; prove node storage ownership
+        // before reading a prefix, while preserving detached document node identity.
+        imported = import_child(*child, true);
     }
     Array edited = {};
     if (!prepare_child_edit(element, index, delete_count, child ? 1 : 0,
