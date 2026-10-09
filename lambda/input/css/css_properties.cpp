@@ -1011,6 +1011,20 @@ static bool css_value_is_length_expression(const CssValue* value,
                               type == CSS_MATH_LENGTH_PERCENT));
 }
 
+static bool css_value_is_nonnegative_length_percentage(const CssValue* value) {
+    if (!value) return false;
+    if (value->type == CSS_VALUE_TYPE_LENGTH) {
+        return value->data.length.value >= 0.0 &&
+            css_unit_is_length(value->data.length.unit);
+    }
+    if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
+        return value->data.percentage.value >= 0.0;
+    }
+    return (value->type == CSS_VALUE_TYPE_NUMBER && value->data.number.value == 0.0) ||
+        css_value_is_length_expression(value, true, false);
+}
+
+
 static bool css_value_is_text_indent_amount(const CssValue* value) {
     if (!value) return false;
     return value->type == CSS_VALUE_TYPE_PERCENTAGE ||
@@ -1037,16 +1051,7 @@ uint8_t css_text_decoration_line_flag(CssEnum keyword) {
 
 static bool css_value_is_text_decoration_thickness(const CssValue* value) {
     if (!value) return false;
-    if (value->type == CSS_VALUE_TYPE_LENGTH) {
-        return value->data.length.value >= 0.0 &&
-            css_unit_is_length(value->data.length.unit);
-    }
-    if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
-        return value->data.percentage.value >= 0.0;
-    }
-    if (value->type == CSS_VALUE_TYPE_NUMBER) {
-        return value->data.number.value == 0.0;
-    }
+    if (css_value_is_nonnegative_length_percentage(value)) return true;
     if (value->type == CSS_VALUE_TYPE_KEYWORD) {
         CssEnum keyword = value->data.keyword;
         const CssEnumInfo* info = css_enum_info(keyword);
@@ -1059,7 +1064,7 @@ static bool css_value_is_text_decoration_thickness(const CssValue* value) {
         return value->data.custom_property.name &&
             strcmp(value->data.custom_property.name, "from-font") == 0;
     }
-    return css_value_is_length_expression(value, true, false);
+    return false;
 }
 
 static bool css_value_is_supported_color(const CssValue* value) {
@@ -1516,18 +1521,6 @@ static bool css_value_is_border_components(CssPropertyCode property,
     return true;
 }
 
-static bool css_value_is_corner_radius_component(const CssValue* value) {
-    if (!value) return false;
-    if (value->type == CSS_VALUE_TYPE_LENGTH) {
-        return value->data.length.value >= 0.0 &&
-            css_unit_is_length(value->data.length.unit);
-    }
-    if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
-        return value->data.percentage.value >= 0.0;
-    }
-    return (value->type == CSS_VALUE_TYPE_NUMBER && value->data.number.value == 0.0) ||
-        css_value_is_length_expression(value, true, false);
-}
 
 static bool css_value_is_corner_radius(const CssValue* value) {
     if (!value) return false;
@@ -1540,11 +1533,11 @@ static bool css_value_is_corner_radius(const CssValue* value) {
          value->data.function->name &&
          strcmp(value->data.function->name, "var") == 0)) return true;
     if (value->type != CSS_VALUE_TYPE_LIST) {
-        return css_value_is_corner_radius_component(value);
+        return css_value_is_nonnegative_length_percentage(value);
     }
     if (!value->data.list.values || value->data.list.comma_separated || value->data.list.count != 2) return false;
-    return css_value_is_corner_radius_component(value->data.list.values[0]) &&
-        css_value_is_corner_radius_component(value->data.list.values[1]);
+    return css_value_is_nonnegative_length_percentage(value->data.list.values[0]) &&
+        css_value_is_nonnegative_length_percentage(value->data.list.values[1]);
 }
 
 static bool css_value_is_box_spacing_item(const CssValue* value,
@@ -2124,10 +2117,105 @@ static bool css_value_is_individual_transform(CssPropertyCode property, const Cs
                    (count == 4 && numbers == 3)));
 }
 
+enum CssGridBreadthKind { CSS_GRID_INVALID, CSS_GRID_FIXED, CSS_GRID_FLEX, CSS_GRID_INTRINSIC };
+
+static CssGridBreadthKind css_grid_breadth_kind(const CssValue* value) {
+    if (!value) return CSS_GRID_INVALID;
+    if (css_value_is_nonnegative_length_percentage(value)) return CSS_GRID_FIXED;
+    if (value->type == CSS_VALUE_TYPE_LENGTH && value->data.length.unit == CSS_UNIT_FR &&
+        isfinite(value->data.length.value) && value->data.length.value >= 0.0) return CSS_GRID_FLEX;
+    if (value->type == CSS_VALUE_TYPE_KEYWORD &&
+        (value->data.keyword == CSS_VALUE_AUTO || value->data.keyword == CSS_VALUE_MIN_CONTENT ||
+         value->data.keyword == CSS_VALUE_MAX_CONTENT)) return CSS_GRID_INTRINSIC;
+    return CSS_GRID_INVALID;
+}
+
+static bool css_grid_track_size_valid(const CssValue* value, bool fixed_required) {
+    CssGridBreadthKind breadth = css_grid_breadth_kind(value);
+    if (breadth != CSS_GRID_INVALID) return !fixed_required || breadth == CSS_GRID_FIXED;
+    const CssFunction* function = value && value->type == CSS_VALUE_TYPE_FUNCTION ? value->data.function : nullptr;
+    if (!function || !function->name || !function->args) return false;
+    if (strcmp(function->name, "fit-content") == 0)
+        return !fixed_required && function->arg_count == 1 &&
+            css_grid_breadth_kind(function->args[0]) == CSS_GRID_FIXED;
+    if (strcmp(function->name, "minmax") != 0 || function->arg_count != 2) return false;
+    CssGridBreadthKind minimum = css_grid_breadth_kind(function->args[0]);
+    CssGridBreadthKind maximum = css_grid_breadth_kind(function->args[1]);
+    return minimum != CSS_GRID_INVALID && minimum != CSS_GRID_FLEX && maximum != CSS_GRID_INVALID &&
+        (!fixed_required || minimum == CSS_GRID_FIXED || maximum == CSS_GRID_FIXED);
+}
+
+static const CssFunction* css_grid_repeat_function(const CssValue* value) {
+    const CssFunction* function = value && value->type == CSS_VALUE_TYPE_FUNCTION ? value->data.function : nullptr;
+    return function && function->name && strcmp(function->name, "repeat") == 0 ? function : nullptr;
+}
+
+static bool css_grid_repeat_is_auto(const CssFunction* function) {
+    const CssValue* count = function && function->args && function->arg_count == 2 ? function->args[0] : nullptr;
+    return count && count->type == CSS_VALUE_TYPE_KEYWORD &&
+        (count->data.keyword == CSS_VALUE_AUTO_FILL || count->data.keyword == CSS_VALUE_AUTO_FIT);
+}
+
+static bool css_grid_track_list_valid(const CssValue* value, bool line_names,
+                                       bool repeats, bool fixed_required = false) {
+    if (!value) return false;
+    int count = value->type == CSS_VALUE_TYPE_LIST ? value->data.list.count : 1;
+    if (count <= 0 || (value->type == CSS_VALUE_TYPE_LIST &&
+        (!value->data.list.values || value->data.list.comma_separated))) return false;
+    int auto_repeats = 0;
+    if (repeats) for (int index = 0; index < count; index++) {
+        const CssValue* item = value->type == CSS_VALUE_TYPE_LIST ? value->data.list.values[index] : value;
+        if (css_grid_repeat_is_auto(css_grid_repeat_function(item))) auto_repeats++;
+    }
+    if (auto_repeats > 1) return false;
+    fixed_required = fixed_required || auto_repeats > 0;
+    bool inside_names = false;
+    int tracks = 0;
+    for (int index = 0; index < count; index++) {
+        const CssValue* item = value->type == CSS_VALUE_TYPE_LIST ? value->data.list.values[index] : value;
+        const char* name = css_value_identifier_name(item);
+        if (name && strcmp(name, "[") == 0) {
+            if (!line_names || inside_names) return false;
+            inside_names = true;
+            continue;
+        }
+        if (name && strcmp(name, "]") == 0) {
+            if (!inside_names) return false;
+            inside_names = false;
+            continue;
+        }
+        if (inside_names) {
+            if (!css_value_is_custom_ident(item) || !name ||
+                str_ieq_cstr(name, "auto") || str_ieq_cstr(name, "span")) return false;
+            continue;
+        }
+        const CssFunction* repeat = css_grid_repeat_function(item);
+        if (repeat) {
+            if (!repeats || repeat->arg_count != 2 || !repeat->args) return false;
+            const CssValue* amount = repeat->args[0];
+            if (!css_grid_repeat_is_auto(repeat) && (!amount || amount->type != CSS_VALUE_TYPE_NUMBER ||
+                !isfinite(amount->data.number.value) || amount->data.number.value <= 0.0 ||
+                floor(amount->data.number.value) != amount->data.number.value)) return false;
+            // repeat() patterns share the track grammar, but cannot contain another repeat().
+            if (!css_grid_track_list_valid(repeat->args[1], true, false, fixed_required)) return false;
+        } else if (!css_grid_track_size_valid(item, fixed_required)) return false;
+        tracks++;
+    }
+    return !inside_names && tracks > 0;
+}
+
 bool css_property_validate_value_mode(CssPropertyCode id,
                                       const CssValue* value,
                                       bool quirks_mode) {
     if (!value) return false;
+
+    if (id == CSS_PROPERTY_GRID_TEMPLATE_COLUMNS || id == CSS_PROPERTY_GRID_TEMPLATE_ROWS ||
+        id == CSS_PROPERTY_GRID_AUTO_COLUMNS || id == CSS_PROPERTY_GRID_AUTO_ROWS) {
+        if (css_value_is_global_keyword(value) || css_value_contains_pending_substitution(value)) return true;
+        bool explicit_tracks = id == CSS_PROPERTY_GRID_TEMPLATE_COLUMNS || id == CSS_PROPERTY_GRID_TEMPLATE_ROWS;
+        if (explicit_tracks && value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_NONE) return true;
+        return css_grid_track_list_valid(value, explicit_tracks, explicit_tracks);
+    }
 
     if (id == CSS_PROPERTY_FILL || id == CSS_PROPERTY_STROKE) return css_value_is_svg_paint(value);
     if (id >= CSS_PROPERTY_MARKER_START && id <= CSS_PROPERTY_MARKER)

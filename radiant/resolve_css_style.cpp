@@ -4135,23 +4135,68 @@ void resolve_spacing_prop(LayoutContext* lycon, uintptr_t property,
 static GridTrackSize* parse_css_value_to_track_size(LayoutContext* lycon,
                                                     const CssValue* val);
 
-static bool grid_track_value_has_percentage(const CssValue* value, int depth = 0) {
-    if (!value || depth >= 32) return true;
-    if (value->type == CSS_VALUE_TYPE_PERCENTAGE) return true;
-    if (value->type == CSS_VALUE_TYPE_LIST) {
-        for (int index = 0; index < value->data.list.count; index++) {
-            if (grid_track_value_has_percentage(
-                    value->data.list.values[index], depth + 1)) return true;
-        }
-    } else if (value->type == CSS_VALUE_TYPE_FUNCTION && value->data.function) {
-        if (value->data.function->arg_count > 0 &&
-            !value->data.function->args) return true;
-        for (int index = 0; index < value->data.function->arg_count; index++) {
-            if (grid_track_value_has_percentage(
-                    value->data.function->args[index], depth + 1)) return true;
-        }
+static lam::Own<GridTrackList>* grid_property_tracks(GridProp* grid, CssPropertyCode property) {
+    if (!grid) return nullptr;
+    switch (property) {
+        case CSS_PROPERTY_GRID_TEMPLATE_COLUMNS: return &grid->grid_template_columns;
+        case CSS_PROPERTY_GRID_TEMPLATE_ROWS: return &grid->grid_template_rows;
+        case CSS_PROPERTY_GRID_AUTO_COLUMNS: return &grid->grid_auto_columns;
+        case CSS_PROPERTY_GRID_AUTO_ROWS: return &grid->grid_auto_rows;
+        default: return nullptr;
     }
-    return false;
+}
+
+static bool resolve_grid_track_default(LayoutContext* lycon, GridProp* grid,
+                                        const CssValue* value, CssPropertyCode property) {
+    if (value->type != CSS_VALUE_TYPE_KEYWORD ||
+        (value->data.keyword != CSS_VALUE_INHERIT && value->data.keyword != CSS_VALUE_INITIAL &&
+         value->data.keyword != CSS_VALUE_UNSET)) return false;
+    lam::Own<GridTrackList>* target = grid_property_tracks(grid, property);
+    if (!target) return false;
+    Pool* pool = layout_prop_pool(lycon);
+    GridTrackList* inherited = nullptr;
+    if (value->data.keyword == CSS_VALUE_INHERIT) {
+        DomElement* current = lycon->view->as_element();
+        DomElement* parent = current ? dom_parent_element(current) : nullptr;
+        GridProp* parent_grid = parent && parent->embed ? parent->embedp()->grid.get() : nullptr;
+        lam::Own<GridTrackList>* source = grid_property_tracks(parent_grid, property);
+        // inherited computed lengths keep the parent's font; percentages use the child's grid box.
+        if (source && *source) inherited = clone_grid_track_list(pool, *source);
+    }
+    destroy_grid_track_list(pool, *target);
+    *target = lam::own(inherited);
+    return true;
+}
+
+static GridTrackSize* parse_grid_length_percentage(LayoutContext* lycon,
+                                                   const CssValue* value,
+                                                   bool fit_content) {
+    CssMathType domain = css_math_value_type(value);
+    bool zero = value && value->type == CSS_VALUE_TYPE_NUMBER && value->data.number.value == 0.0;
+    if (!zero && domain != CSS_MATH_LENGTH && domain != CSS_MATH_PERCENT &&
+        domain != CSS_MATH_LENGTH_PERCENT) return nullptr;
+    bool percentage = layout_css_value_has_percentage(value);
+    float amount = percentage ? 0.0f : resolve_length_value(
+        lycon, CSS_PROPERTY_GRID_TEMPLATE_COLUMNS, value);
+    if (!percentage && isnan(amount)) return nullptr;
+    Pool* pool = layout_prop_pool(lycon);
+    GridTrackSize* track = create_grid_track_size(pool,
+        fit_content ? GRID_TRACK_SIZE_FIT_CONTENT : percentage ? GRID_TRACK_SIZE_PERCENTAGE
+        : GRID_TRACK_SIZE_LENGTH, fmaxf(0.0f, amount));
+    if (!track) return nullptr;
+    track->is_percentage = percentage;
+    track->fit_content_limit = track->value;
+    if (percentage) {
+        // D4.5.1v4: substituted trees can be scratch-owned; retain computed lengths before inheritance.
+        track->expression_owner = lam::own(css_value_clone_owned(value, pool));
+        if (!track->expression_owner) {
+            destroy_grid_track_size(pool, track);
+            return nullptr;
+        }
+        layout_compute_math_lengths(lycon, track->expression_owner, CSS_PROPERTY_GRID_TEMPLATE_COLUMNS);
+        track->expression = lam::up((const CssValue*)track->expression_owner.get());
+    }
+    return track;
 }
 
 static GridTrackSize* parse_minmax_function(LayoutContext* lycon, const CssValue* val) {
@@ -4294,27 +4339,10 @@ static GridTrackSize* parse_css_value_to_track_size(LayoutContext* lycon,
             } else if (strcmp(func_name, "repeat") == 0) {
                 track_size = parse_repeat_function(lycon, val);
             } else if (strcmp(func_name, "fit-content") == 0) {
-                track_size = create_grid_track_size(pool, GRID_TRACK_SIZE_FIT_CONTENT, 0);
-                if (track_size && val->data.function->arg_count > 0 &&
-                    val->data.function->args) {
-                    CssValue* arg = val->data.function->args[0];
-                    if (arg && (arg->type == CSS_VALUE_TYPE_LENGTH ||
-                        (arg->type == CSS_VALUE_TYPE_FUNCTION &&
-                         !grid_track_value_has_percentage(arg)))) {
-                        track_size->fit_content_limit = resolve_length_value(
-                            lycon, CSS_PROPERTY_GRID_TEMPLATE_COLUMNS, arg);
-                        track_size->is_percentage = false;
-                    } else if (arg && arg->type == CSS_VALUE_TYPE_PERCENTAGE) {
-                        track_size->fit_content_limit = (float)arg->data.percentage.value;
-                        track_size->is_percentage = true;
-                    }
-                }
-            } else if (strcmp(func_name, "calc") == 0 &&
-                       !grid_track_value_has_percentage(val)) {
-                float pixels = resolve_length_value(lycon,
-                    CSS_PROPERTY_GRID_TEMPLATE_COLUMNS, val);
-                if (!isnan(pixels) && pixels >= 0.0f)
-                    track_size = create_grid_track_size(pool, GRID_TRACK_SIZE_LENGTH, pixels);
+                if (val->data.function->arg_count == 1 && val->data.function->args)
+                    track_size = parse_grid_length_percentage(lycon, val->data.function->args[0], true);
+            } else {
+                track_size = parse_grid_length_percentage(lycon, val, false);
             }
         }
     }
@@ -4554,6 +4582,7 @@ static void apply_grid_template_track_value(LayoutContext* lycon,
     if (value->type != CSS_VALUE_TYPE_KEYWORD &&
         value->type != CSS_VALUE_TYPE_FUNCTION &&
         value->type != CSS_VALUE_TYPE_LENGTH &&
+        value->type != CSS_VALUE_TYPE_NUMBER &&
         value->type != CSS_VALUE_TYPE_PERCENTAGE) {
         return;
     }
@@ -6704,6 +6733,8 @@ static void resolve_grid_auto_track(LayoutContext* lycon, ViewBlock* block,
     Pool* pool = layout_prop_pool(lycon);
     GridProp* grid = resolve_grid_prop(lycon, block);
     if (!grid) return;
+    CssPropertyCode property = rows ? CSS_PROPERTY_GRID_AUTO_ROWS : CSS_PROPERTY_GRID_AUTO_COLUMNS;
+    if (resolve_grid_track_default(lycon, grid, value, property)) return;
     lam::Own<GridTrackList>* tracks = rows ? &grid->grid_auto_rows : &grid->grid_auto_columns;
     if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_AUTO) {
         if (*tracks) {
@@ -6714,6 +6745,7 @@ static void resolve_grid_auto_track(LayoutContext* lycon, ViewBlock* block,
     }
     if (value->type == CSS_VALUE_TYPE_LENGTH ||
         value->type == CSS_VALUE_TYPE_PERCENTAGE ||
+        value->type == CSS_VALUE_TYPE_NUMBER ||
         value->type == CSS_VALUE_TYPE_FUNCTION ||
         value->type == CSS_VALUE_TYPE_KEYWORD) {
         GridTrackSize* track = parse_css_value_to_track_size(lycon, value);
@@ -9943,6 +9975,7 @@ void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, L
                 "grid-template-columns" : "grid-template-rows";
             GridProp* grid = resolve_grid_prop(lycon, block);
             if (!grid) break;
+            if (resolve_grid_track_default(lycon, grid, value, prop_id)) break;
             lam::Own<GridTrackList>* track_list_ptr = columns ?
                 &grid->grid_template_columns : &grid->grid_template_rows;
             apply_grid_template_track_value(lycon, value, track_list_ptr, property_name);

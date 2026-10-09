@@ -99,7 +99,8 @@ void resolve_track_sizes_enhanced(GridContainerLayout* grid_layout, ViewBlock* c
         grid_layout->grid_items,
         grid_layout->item_count,
         sizing_width,
-        static_cast<float>(grid_layout->content_height),
+        grid_layout->has_explicit_height || grid_layout->content_height > 0.0f
+            ? grid_layout->content_height : -1.0f,
         &col_intrinsic_width,
         &row_intrinsic_height,
         grid_layout->is_min_content_width,
