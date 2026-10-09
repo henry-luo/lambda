@@ -985,7 +985,8 @@ comes from `package/math/`. These application resources belong to the shipped
 native Radiant `<geomap>` viewport. The initial implementation accepts inline,
 typed GeoJSON and a bounded subset of MapLibre Style Specification version 8:
 ordered `background`, `fill`, `line` and `circle` layers with hex/transparent
-colors, opacity, line width, circle radius, visibility and zoom limits.
+colors, opacity, line width/caps/joins, fill outlines, circle radius/strokes,
+visibility and zoom limits.
 Paint expressions and boolean feature filters use the shared native evaluator.
 
 ```lambda
@@ -1003,8 +1004,9 @@ maps.interactive(spec)
 ```
 
 Use `spec` directly for a static viewport. `interactive(spec)` applies a reactive
-view with independent camera state, captured pointer dragging, wheel zoom, and
-arrow/plus/minus keyboard navigation. Retain `model(spec)` and `apply` it to
+view with independent camera/selection state, captured pointer dragging, wheel
+and double-click zoom, and arrow/plus/minus/Home/Escape navigation. Retain
+`model(spec, options)` and `apply` it to
 preserve that view's state across parent rerenders (S12.1.1v2, S12.1.3).
 
 | Function | Result |
@@ -1014,8 +1016,10 @@ preserve that view's state across parent rerenders (S12.1.1v2, S12.1.3).
 | `from_style(style, options = {})` | Convert the supported version 8 style subset into `<geomap>` |
 | `project(camera, position)`, `unproject(camera, point)` | Convert longitude/latitude degrees and viewport CSS pixels |
 | `fit_bounds(camera, bounds, padding = 0.0)`, `update(camera, event)` | Return a new camera; bounds may cross the dateline |
-| `query_source(model, source_id)`, `query_rendered(model, point, options = {})` | Source features / painted hits from the current model; rendered queries scan in reverse paint order |
-| `model(spec)`, `interactive(spec)` | A reactive view model / its applied native viewport |
+| `query_source(model, source_id)`, `query_rendered(model_or_frame, point_or_box, options = {})` | Source features / indexed painted hits, in reverse paint order |
+| `plan(model, viewport = null)`, `render_frame(frame)` | Immutable camera/path/feature/index snapshot / its SVG element |
+| `snapshot(node)`, `query_displayed(node, point_or_box, options = {})` | Procedures reading the last painted native frame (S12.1.3) |
+| `model(spec, options = {})`, `interactive(spec, options = {})` | A reactive view model / its applied native viewport |
 | `to_svg(model, viewport = null)` | An SVG element from the same native paint compiler (D7.5.3) |
 
 The camera uses Web Mercator, fractional zoom from −2 to 22, bearing, zero pitch
@@ -1032,10 +1036,21 @@ use integer zoom. Invalid runtime property values use property defaults and
 produce diagnostics. Static type errors return ordinary errors (S7.4.1).
 The [supported manifest](../test/map/README.md) records limits and reference tests.
 
-URL/tile sources, MVT, symbols and labels remain open. Rendered queries use a linear scan of the current model;
-they do not expose a retained frame or spatial index. Interaction supports
-axis-aligned CSS scaling/translation; arbitrary rotated/skewed/perspective
-input mapping remains open. JavaScript support is Phase 2. See the
+Query coordinates are viewport CSS pixels: `[x,y]` or a rectangle
+`[[left,top],[right,bottom]]`. Options select `layers` and a `radius` tolerance.
+Historical frame values retain their geometry and feature metadata across
+resize/removal (D4.5.2, D5.3.3). Input coordinates use shared inverse CSS-plane
+mapping, including rotation/skew/perspective.
+
+Optional interaction options include `controls:true`, `feature_list:true`,
+`label`, fit `bounds:[west,south,east,north]` and `padding`. Procedural
+`on_select`/`on_hover` callbacks receive `{node,features,point,lnglat}`;
+`on_camera` receives `{node,camera}` after input changes the camera.
+Controls and selected-feature text use ordinary HTML.
+
+URL/tile sources, MVT, symbols, labels, autonomous resize notifications and
+camera animation remain open. Compiled-style reuse across different cameras
+also remains open. JavaScript support is Phase 2. See the
 [implementation record](../vibe/impl/Lambda_Impl_Map.md) for coverage, limits,
 engine prerequisites and validation evidence.
 

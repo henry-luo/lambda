@@ -12662,6 +12662,8 @@ typedef struct JsDomSvgPathHitContext {
     float point_x;
     float point_y;
     float curve_flatness;
+    bool rectangle_query, rectangle_fill_hit, subpath_rectangle_fill_hit;
+    float query_left, query_top, query_right, query_bottom;
     float stroke_radius;
     float* stroke_dash;          // query-owned computed lengths; released after contour inspection
     float stroke_dash_total;
@@ -12690,7 +12692,7 @@ typedef struct JsDomSvgPathHitContext {
     bool has_last_stroke_segment;
     bool stroke_enabled;
     bool stroke_hit;
-    float subpath_area_twice;
+    bool subpath_has_fill_area;
     float current_x;
     float current_y;
     float subpath_start_x;
@@ -12699,14 +12701,32 @@ typedef struct JsDomSvgPathHitContext {
 
 
 
-static bool dom_svg_point_in_triangle(float point_x, float point_y,
-                                         float ax, float ay, float bx, float by,
-                                         float cx, float cy) {
-    float ab = (point_x - ax) * (by - ay) - (point_y - ay) * (bx - ax);
-    float bc = (point_x - bx) * (cy - by) - (point_y - by) * (cx - bx);
-    float ca = (point_x - cx) * (ay - cy) - (point_y - cy) * (ax - cx);
-    return (ab >= 0.0f && bc >= 0.0f && ca >= 0.0f) ||
-        (ab <= 0.0f && bc <= 0.0f && ca <= 0.0f);
+// separating axes cover both a point and an axis-aligned rectangle query.
+static bool dom_svg_query_polygon(const JsDomSvgPathHitContext* query, const float* xy, unsigned count) {
+    float left=query->rectangle_query?query->query_left:query->point_x;
+    float top=query->rectangle_query?query->query_top:query->point_y;
+    float right=query->rectangle_query?query->query_right:left;
+    float bottom=query->rectangle_query?query->query_bottom:top;
+    for (unsigned axis=0;axis<count+2;axis++) {
+        unsigned next=(axis+1)%count;
+        float nx=axis==count?1:axis==count+1?0:xy[next*2+1]-xy[axis*2+1];
+        float ny=axis==count?0:axis==count+1?1:xy[axis*2]-xy[next*2];
+        float low=INFINITY,high=-INFINITY;
+        for (unsigned i=0;i<count;i++) { float value=nx*xy[i*2]+ny*xy[i*2+1]; low=fminf(low,value);high=fmaxf(high,value); }
+        float qlow=fminf(nx*left,nx*right)+fminf(ny*top,ny*bottom);
+        float qhigh=fmaxf(nx*left,nx*right)+fmaxf(ny*top,ny*bottom);
+        if (high<qlow || low>qhigh) return false;
+    }
+    return true;
+}
+static bool dom_svg_query_triangle(const JsDomSvgPathHitContext* query,
+    float ax,float ay,float bx,float by,float cx,float cy) {
+    float xy[]={ax,ay,bx,by,cx,cy}; return dom_svg_query_polygon(query,xy,3);
+}
+static bool dom_svg_query_circle(const JsDomSvgPathHitContext* query,float x,float y,float radius) {
+    float px=query->rectangle_query?fmaxf(query->query_left,fminf(query->query_right,x)):query->point_x;
+    float py=query->rectangle_query?fmaxf(query->query_top,fminf(query->query_bottom,y)):query->point_y;
+    return (px-x)*(px-x)+(py-y)*(py-y)<=radius*radius;
 }
 
 static bool dom_svg_stroke_segment_contains(const JsDomSvgPathHitContext* context,
@@ -12719,6 +12739,11 @@ static bool dom_svg_stroke_segment_contains(const JsDomSvgPathHitContext* contex
     float length = hypotf(dx, dy);
     if (length <= 0.000001f) {
         if (context->stroke_cap == RDT_CAP_BUTT || (!start_cap && !end_cap)) return false;
+        if (context->rectangle_query) {
+            if (context->stroke_cap==RDT_CAP_ROUND) return dom_svg_query_circle(context,start_x,start_y,context->stroke_radius);
+            float r=context->stroke_radius,quad[]={start_x-r,start_y-r,start_x+r,start_y-r,start_x+r,start_y+r,start_x-r,start_y+r};
+            return dom_svg_query_polygon(context,quad,4);
+        }
         float px = context->point_x - start_x;
         float py = context->point_y - start_y;
         if (context->stroke_cap == RDT_CAP_SQUARE)
@@ -12727,6 +12752,17 @@ static bool dom_svg_stroke_segment_contains(const JsDomSvgPathHitContext* contex
     }
     float ux = dx / length;
     float uy = dy / length;
+    if (context->rectangle_query) {
+        float before=context->stroke_cap==RDT_CAP_SQUARE && start_cap?context->stroke_radius:0;
+        float after=context->stroke_cap==RDT_CAP_SQUARE && end_cap?context->stroke_radius:0;
+        float sx=start_x-ux*before,sy=start_y-uy*before,ex=end_x+ux*after,ey=end_y+uy*after;
+        float nx=-uy*context->stroke_radius,ny=ux*context->stroke_radius;
+        float quad[]={sx+nx,sy+ny,ex+nx,ey+ny,ex-nx,ey-ny,sx-nx,sy-ny};
+        if (dom_svg_query_polygon(context,quad,4)) return true;
+        return context->stroke_cap==RDT_CAP_ROUND &&
+            ((start_cap && dom_svg_query_circle(context,start_x,start_y,context->stroke_radius)) ||
+             (end_cap && dom_svg_query_circle(context,end_x,end_y,context->stroke_radius)));
+    }
     float point_dx = context->point_x - start_x;
     float point_dy = context->point_y - start_y;
     float along = point_dx * ux + point_dy * uy;
@@ -12785,11 +12821,8 @@ static void dom_svg_path_hit_add_join(JsDomSvgPathHitContext* context,
     float prev_length = hypotf(prev_dx, prev_dy);
     float next_length = hypotf(next_dx, next_dy);
     if (prev_length <= 0.000001f || next_length <= 0.000001f) return;
-    float vertex_dx = context->point_x - vertex_x;
-    float vertex_dy = context->point_y - vertex_y;
     if (context->stroke_join == RDT_JOIN_ROUND &&
-        vertex_dx * vertex_dx + vertex_dy * vertex_dy <=
-            context->stroke_radius * context->stroke_radius) {
+        dom_svg_query_circle(context,vertex_x,vertex_y,context->stroke_radius)) {
         context->stroke_hit = true;
         return;
     }
@@ -12809,7 +12842,7 @@ static void dom_svg_path_hit_add_join(JsDomSvgPathHitContext* context,
     float outer_next_x = vertex_x + next_normal_x * context->stroke_radius;
     float outer_next_y = vertex_y + next_normal_y * context->stroke_radius;
     // segment strips already cover the inner corner; the outer bevel triangle is common to bevel and miter joins.
-    context->stroke_hit = dom_svg_point_in_triangle(context->point_x, context->point_y,
+    context->stroke_hit = dom_svg_query_triangle(context,
         vertex_x, vertex_y, outer_prev_x, outer_prev_y, outer_next_x, outer_next_y);
     if (context->stroke_hit || context->stroke_join != RDT_JOIN_MITER) return;
     float determinant = prev_x * -next_y - prev_y * -next_x;
@@ -12821,11 +12854,11 @@ static void dom_svg_path_hit_add_join(JsDomSvgPathHitContext* context,
     float miter_y = outer_prev_y + prev_y * prev_distance;
     float miter_length = hypotf(miter_x - vertex_x, miter_y - vertex_y);
     if (miter_length > context->stroke_miter_limit * context->stroke_radius) {
-        context->stroke_hit = dom_svg_point_in_triangle(context->point_x, context->point_y,
+        context->stroke_hit = dom_svg_query_triangle(context,
             vertex_x, vertex_y, outer_prev_x, outer_prev_y, outer_next_x, outer_next_y);
         return;
     }
-    context->stroke_hit = dom_svg_point_in_triangle(context->point_x, context->point_y,
+    context->stroke_hit = dom_svg_query_triangle(context,
         outer_prev_x, outer_prev_y, outer_next_x, outer_next_y, miter_x, miter_y);
 }
 
@@ -12923,7 +12956,12 @@ static void dom_svg_path_hit_add_stroke_segment(JsDomSvgPathHitContext* context,
 static void dom_svg_path_hit_add_fill_edge(JsDomSvgPathHitContext* context,
                                               float start_x, float start_y,
                                               float end_x, float end_y) {
-    if (!context || fabsf(end_y - start_y) <= 0.000001f) return;
+    if (!context) return;
+    if (context->rectangle_query) {
+        float edge[]={start_x,start_y,end_x,end_y};
+        context->subpath_rectangle_fill_hit|=dom_svg_query_polygon(context,edge,2);
+    }
+    if (fabsf(end_y - start_y) <= 0.000001f) return;
     bool upward = start_y <= context->point_y && end_y > context->point_y;
     bool downward = start_y > context->point_y && end_y <= context->point_y;
     if (!upward && !downward) return;
@@ -12947,7 +12985,10 @@ static void dom_svg_path_hit_add_segment(JsDomSvgPathHitContext* context,
                                             float end_x, float end_y,
                                             bool include_stroke) {
     if (!context) return;
-    context->subpath_area_twice += start_x * end_y - end_x * start_y;
+    // self-crossing contours can cancel their signed area while still enclosing filled lobes.
+    float ax=start_x-context->subpath_start_x,ay=start_y-context->subpath_start_y;
+    float bx=end_x-context->subpath_start_x,by=end_y-context->subpath_start_y;
+    context->subpath_has_fill_area |= fabsf(ax*by-ay*bx)>0.000001f;
     if (include_stroke) {
         dom_svg_path_hit_add_stroke_segment(context, start_x, start_y, end_x, end_y);
     }
@@ -12956,9 +12997,9 @@ static void dom_svg_path_hit_add_segment(JsDomSvgPathHitContext* context,
 
 static void dom_svg_path_hit_commit_subpath_fill_edge(JsDomSvgPathHitContext* context) {
     if (!context) return;
-    if (fabsf(context->subpath_area_twice) > 0.000001f &&
-        context->subpath_fill_on_edge) {
-        context->fill_on_edge = true;
+    if (context->subpath_has_fill_area) {
+        context->fill_on_edge |= context->subpath_fill_on_edge;
+        context->rectangle_fill_hit |= context->subpath_rectangle_fill_hit;
     }
 }
 
@@ -13035,8 +13076,9 @@ static bool dom_svg_path_hit_visit(void* userdata, RdtPathCommand command,
         context->subpath_stroke_length = 0.0f;
         context->has_first_stroke_segment = false;
         context->has_last_stroke_segment = false;
-        context->subpath_area_twice = 0.0f;
+        context->subpath_has_fill_area = false;
         context->subpath_fill_on_edge = false;
+        context->subpath_rectangle_fill_hit = false;
         return true;
     case RDT_PATH_LINE:
         if (arg_count < 2 || !context->has_current) return false;
@@ -13093,6 +13135,25 @@ static bool dom_svg_path_hit_visit(void* userdata, RdtPathCommand command,
         return false;
     }
     return false;
+}
+
+extern "C" bool dom_geometry_path_query(const void* opaque_path, float left,float top,float right,float bottom,
+    bool rectangle, int fill_rule,float stroke_width,int cap,int join) {
+    const RdtPath* path=(const RdtPath*)opaque_path;
+    RdtPath* contour=rdt_path_new(); RdtMatrix identity=rdt_matrix_identity();
+    if (!contour || !render_path_append_transformed(contour,path,&identity)) {
+        if (contour) rdt_path_free(contour); return false;
+    }
+    JsDomSvgPathHitContext query={};
+    query.point_x=(left+right)/2;query.point_y=(top+bottom)/2;query.curve_flatness=.01f;
+    query.rectangle_query=rectangle;query.query_left=left;query.query_top=top;query.query_right=right;query.query_bottom=bottom;
+    query.stroke_enabled=stroke_width>0;query.stroke_radius=stroke_width/2;
+    query.stroke_cap=(RdtStrokeCap)cap;query.stroke_join=(RdtStrokeJoin)join;query.stroke_miter_limit=4;
+    bool valid=rdt_path_visit(contour,dom_svg_path_hit_visit,&query);
+    if (valid) dom_svg_path_hit_finish_subpath(&query);
+    bool fill=fill_rule>=0 && (query.rectangle_fill_hit || query.fill_on_edge ||
+        (fill_rule==RDT_FILL_EVEN_ODD?(query.fill_crossings&1)!=0:query.fill_winding!=0));
+    rdt_path_free(contour);return valid && (fill || query.stroke_hit);
 }
 
 static const char* dom_svg_presentation_value(DomElement* elem, const char* name,

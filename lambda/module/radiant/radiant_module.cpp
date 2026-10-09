@@ -31,6 +31,7 @@
 #include "../../runtime/gc/gc_heap.h"
 #include "../../../lib/url.h"
 #include <limits.h>
+#include <stdlib.h>
 #include <math.h>
 #include <string.h>
 #include <stdio.h>
@@ -3422,6 +3423,273 @@ RADIANT_C_API Item fn_radiant_geomap_eval_features(Item layer, Item features, It
     return radiant_geomap_evaluate(layer, features, zoom, true);
 }
 
+static Item radiant_geomap_field(Item value,const char* key) {
+    if (get_type_id(value)==LMD_TYPE_VMAP) return vmap_get_by_str(value.vmap,key);
+    ItemReader reader(value.to_const());
+    return reader.isMap()?reader.asMap().get(key).item():ItemNull;
+}
+// snapshot metadata must leave the frame's Input before its final lease is released.
+static Item radiant_geomap_copy(ItemReader reader,unsigned depth,unsigned* budget) {
+    if (depth>64 || ++*budget>262144) return ItemError;
+    double number;
+    if (reader.isNull() || reader.isBool()) return reader.item();
+    if (reader.isInt()) return radiant_int_item(reader.asInt());
+    if (reader.isUInt64()) return box_uint64_value(reader.asUInt64());
+    if (reader.isString()) return radiant_string_item_n(reader.asString()->chars,reader.asString()->len);
+    if (item_try_to_double(reader.item(),&number)) return radiant_float_item(number);
+    RootFrame roots(2);Rooted<Item> out(roots,ItemNull),child(roots,ItemNull);
+    if (reader.isArray()) {
+        int64_t count=reader.asArray().length();if (count>262144) return ItemError;
+        out.set(radiant_array_new_item((int)count));
+        for(int64_t i=0;i<count;i++) {
+            child.set(radiant_geomap_copy(reader.asArray().get(i),depth+1,budget));
+            if (get_type_id(child.get())==LMD_TYPE_ERROR) return child.get();
+            radiant_array_push_item(out.get(),child.get());
+        }
+    } else if(reader.isMap()) {
+        out.set(radiant_obj_new());MapReader map=reader.asMap();auto entries=map.entries();const char* key;ItemReader item;
+        while(entries.next(&key,&item)) {
+            child.set(radiant_geomap_copy(item,depth+1,budget));
+            if(get_type_id(child.get())==LMD_TYPE_ERROR) return child.get();
+            radiant_rooted_obj_set(out,key,child.get());
+        }
+    } else return ItemError;
+    return out.get();
+}
+static Item radiant_geomap_record(const GeoMapShape* shape) {
+    RootFrame roots(3);Rooted<Item> record(roots,radiant_obj_new()),feature(roots,ItemNull);
+    unsigned budget=0;feature.set(radiant_geomap_copy(ItemReader(shape->feature.to_const()),0,&budget));
+    if(get_type_id(feature.get())==LMD_TYPE_ERROR) return radiant_string_item("map feature metadata exceeds the JSON snapshot limits");
+    radiant_rooted_obj_set(record,"source",radiant_string_item(shape->source));
+    radiant_rooted_obj_set(record,"layer",radiant_string_item(shape->layer));
+    Item type=radiant_geomap_field(feature.get(),"type");ItemReader tag(type.to_const());
+    if (!tag.isString() || strcmp(tag.asString()->chars,"Feature")) {
+        Rooted<Item> wrapper(roots,radiant_obj_new());
+        radiant_rooted_obj_set(wrapper,"type",radiant_string_item("Feature"));
+        radiant_rooted_obj_set(wrapper,"geometry",feature.get());
+        radiant_rooted_obj_set(wrapper,"properties",radiant_obj_new());feature.set(wrapper.get());
+    }
+    radiant_rooted_obj_set(record,"feature",feature.get());
+    Item id=radiant_geomap_field(feature.get(),"id");
+    radiant_rooted_obj_set(record,"feature_id",id.item==ItemNull.item?radiant_int_item(shape->feature_index):id);
+    radiant_rooted_obj_set(record,"geometry",radiant_geomap_field(feature.get(),"geometry"));
+    return record.get();
+}
+static Item radiant_geomap_frame_value(const GeoMapFrame* frame) {
+    if (!frame) return ItemNull;
+    RootFrame roots(7);Rooted<Item> result(roots,radiant_obj_new()),paths(roots,ItemNull),index(roots,ItemNull),record(roots,ItemNull),node(roots,ItemNull),metadata(roots,ItemNull),camera(roots,radiant_obj_new());
+    radiant_rooted_obj_set(result,"type",radiant_string_item("geomap-frame"));
+    radiant_rooted_obj_set(result,"width",radiant_float_item(frame->camera.width));
+    radiant_rooted_obj_set(result,"height",radiant_float_item(frame->camera.height));
+    radiant_rooted_obj_set(result,"revision",radiant_int_item(frame->revision));
+    node.set(radiant_array_new_item(2));
+    radiant_array_push_item(node.get(),radiant_float_item(frame->camera.longitude));
+    radiant_array_push_item(node.get(),radiant_float_item(frame->camera.latitude));
+    radiant_rooted_obj_set(camera,"center",node.get());
+    radiant_rooted_obj_set(camera,"zoom",radiant_float_item(frame->camera.zoom));
+    radiant_rooted_obj_set(camera,"bearing",radiant_float_item(frame->camera.bearing));
+    radiant_rooted_obj_set(camera,"width",radiant_float_item(frame->camera.width));
+    radiant_rooted_obj_set(camera,"height",radiant_float_item(frame->camera.height));
+    radiant_rooted_obj_set(result,"camera",camera.get());
+    StrBuf* svg=geomap_frame_svg(frame);if (!svg) return ItemNull;
+    radiant_rooted_obj_set(result,"svg",radiant_string_item(svg->str));strbuf_free(svg);
+    paths.set(radiant_array_new_item(frame->shapes->length));
+    int64_t previous_record=-1;
+    for (int i=0;i<frame->shapes->length;i++) {
+        const auto* shape=(const GeoMapShape*)frame->shapes->data[i];
+        record.set(radiant_obj_new());
+        if(shape->source) {
+            if(shape->record!=previous_record) {
+                metadata.set(radiant_geomap_record(shape));previous_record=shape->record;
+                if(get_type_id(metadata.get())!=LMD_TYPE_VMAP) return metadata.get();
+            }
+            const char* keys[]={"source","layer","feature","feature_id","geometry"};
+            for(const char* key:keys) radiant_rooted_obj_set(record,key,radiant_geomap_field(metadata.get(),key));
+        }
+        StrBuf* path=strbuf_new();if (!path) return ItemNull;
+        RdtPath* expanded=rdt_path_new();RdtMatrix identity=rdt_matrix_identity();
+        bool valid=expanded && render_path_append_transformed(expanded,shape->path,&identity) && render_path_append_svg(path,expanded,9);
+        if(expanded) rdt_path_free(expanded);
+        radiant_rooted_obj_set(record,"d",valid?radiant_string_item(path->str):ItemNull);strbuf_free(path);
+        if(!valid) return ItemNull;
+        radiant_rooted_obj_set(record,"stroke_width",radiant_float_item(shape->stroke_width));
+        radiant_rooted_obj_set(record,"fill_rule",radiant_int_item(shape->rule));
+        radiant_rooted_obj_set(record,"cap",radiant_int_item(shape->cap));
+        radiant_rooted_obj_set(record,"join",radiant_int_item(shape->join));
+        radiant_rooted_obj_set(record,"alpha",radiant_int_item(shape->color.a));
+        radiant_rooted_obj_set(record,"record",radiant_int_item(shape->record));
+        radiant_array_push_item(paths.get(),record.get());
+    }
+    radiant_rooted_obj_set(result,"paths",paths.get());
+    index.set(radiant_array_new_item((int)frame->index_count));
+    for(unsigned i=0;i<frame->index_count;i++) {
+        const auto& entry=frame->index[i];node.set(radiant_array_new_item(7));
+        double values[]={entry.left,entry.top,entry.right,entry.bottom,(double)entry.first,(double)entry.second,(double)entry.shape};
+        for(double value:values) radiant_array_push_item(node.get(),radiant_float_item(value));
+        radiant_array_push_item(index.get(),node.get());
+    }
+    radiant_rooted_obj_set(result,"index",index.get());return result.get();
+}
+RADIANT_C_API Item fn_radiant_geomap_plan(Item model_item,Item width_item,Item height_item) {
+    RootFrame roots(1);Rooted<Item> model(roots,model_item);double width,height;
+    if(get_type_id(model.get())!=LMD_TYPE_ELEMENT || !item_try_to_double(width_item,&width) || !item_try_to_double(height_item,&height)) return ItemNull;
+    char diagnostic[256];GeoMapFrame* frame=geomap_plan(model.get().element,(float)width,(float)height,diagnostic,sizeof(diagnostic));
+    if (!frame) return radiant_string_item(*diagnostic?diagnostic:"invalid frame viewport");
+    Item result=radiant_geomap_frame_value(frame);geomap_frame_release(frame);return result;
+}
+RADIANT_C_API Item fn_radiant_local_point(Item node_item,Item x_item,Item y_item) {
+    RootFrame roots(2);Rooted<Item> owner(roots,node_item),result(roots,ItemNull);
+    DomNode* node=radiant_dom_node_from_item(owner.get(),"LOCAL_POINT");double x,y;float local_x,local_y;
+    if(!node || !item_try_to_double(x_item,&x) || !item_try_to_double(y_item,&y) ||
+        !view_client_to_local(static_cast<View*>(node),(float)x,(float)y,&local_x,&local_y)) return ItemNull;
+    result.set(radiant_array_new_item(2));
+    radiant_array_push_item(result.get(),radiant_float_item(local_x));radiant_array_push_item(result.get(),radiant_float_item(local_y));return result.get();
+}
+RADIANT_C_API Item fn_radiant_geomap_snapshot(Item node_item) {
+    RootFrame roots(1);Rooted<Item> owner(roots,node_item);
+    DomNode* node=radiant_dom_node_from_item(owner.get(),"GEOMAP_SNAPSHOT");
+    GeoMapFrame* frame=node && node->is_element()?geomap_displayed_frame(node->as_element()):nullptr;
+    geomap_frame_retain(frame);Item result=radiant_geomap_frame_value(frame);geomap_frame_release(frame);return result;
+}
+struct RadiantMapQuery {Rect box;bool rectangle;float radius;Item layers;};
+static bool radiant_geomap_query_input(Item position,Item options,double width,double height,RadiantMapQuery* query) {
+    *query={};query->layers=radiant_geomap_field(options,"layers");
+    Item radius=radiant_geomap_field(options,"radius");double tolerance=0;
+    if(radius.item!=ItemNull.item && (!item_try_to_double(radius,&tolerance) || !isfinite(tolerance) || tolerance<0 || tolerance>4096)) return false;
+    query->radius=(float)tolerance;
+    if(query->layers.item!=ItemNull.item && !ItemReader(query->layers.to_const()).isArray()) return false;
+    ItemReader point(position.to_const());if(!point.isArray() || point.asArray().length()!=2) return false;
+    double values[4];query->rectangle=point.asArray().get(0).isArray();
+    if(query->rectangle) for(unsigned i=0;i<2;i++) {
+        ItemReader corner=point.asArray().get(i);
+        if(!corner.isArray() || corner.asArray().length()!=2) return false;
+    }
+    for(unsigned i=0;i<(query->rectangle?4u:2u);i++) {
+        ItemReader value=query->rectangle?point.asArray().get(i/2).asArray().get(i%2):point.asArray().get(i);
+        if(!item_try_to_double(value.item(),&values[i]) || !isfinite(values[i]) || fabs(values[i])>1048576) return false;
+    }
+    if(query->rectangle && (values[2]<values[0] || values[3]<values[1])) return false;
+    float left=(float)values[0],top=(float)values[1],right=query->rectangle?(float)values[2]:left,bottom=query->rectangle?(float)values[3]:top;
+    if(query->rectangle) {left=fmaxf(0,left);top=fmaxf(0,top);right=fminf((float)width,right);bottom=fminf((float)height,bottom);}
+    query->box={left,top,right-left,bottom-top};return true;
+}
+static bool radiant_geomap_query_layer(Item layers,const char* layer) {
+    if(layers.item==ItemNull.item) return true;
+    ItemReader list(layers.to_const());
+    for(int64_t i=0;i<list.asArray().length();i++) {
+        ItemReader value=list.asArray().get(i);
+        if(value.isString() && !strcmp(value.asString()->chars,layer)) return true;
+    }
+    return false;
+}
+static bool radiant_geomap_index_candidates(const GeoMapIndexNode* nodes,Item packed,unsigned count,int index,Rect query,
+    ArrayList* candidates,unsigned shapes,unsigned* budget,unsigned depth=0) {
+    if(depth>32 || index<0 || (unsigned)index>=count || ++*budget>count) return false;
+    GeoMapIndexNode decoded={};
+    if(!nodes) {
+        ItemReader entry=ItemReader(packed.to_const()).asArray().get(index);
+        if(!entry.isArray() || entry.asArray().length()!=7) return false;
+        double values[7];
+        for(unsigned j=0;j<7;j++) if(!item_try_to_double(entry.asArray().get(j).item(),&values[j]) || !isfinite(values[j]) ||
+            fabs(values[j])>1e16 || (j>=4 && (values[j]!=floor(values[j]) || values[j]<-1 || values[j]>count))) return false;
+        decoded={(float)values[0],(float)values[1],(float)values[2],(float)values[3],(int)values[4],(int)values[5],(int)values[6]};
+    }
+    const auto& node=nodes?nodes[index]:decoded;
+    if(node.right<query.x || node.bottom<query.y || node.left>query.x+query.width || node.top>query.y+query.height) return true;
+    if(node.shape>=0) return (unsigned)node.shape<shapes && arraylist_append(candidates,(void*)(uintptr_t)(node.shape+1));
+    return radiant_geomap_index_candidates(nodes,packed,count,node.first,query,candidates,shapes,budget,depth+1) &&
+        radiant_geomap_index_candidates(nodes,packed,count,node.second,query,candidates,shapes,budget,depth+1);
+}
+static int radiant_geomap_candidate_order(const void* a,const void* b) {
+    uintptr_t first=(uintptr_t)*(void* const*)a,second=(uintptr_t)*(void* const*)b;
+    return first>second?-1:first<second?1:0;
+}
+static Item radiant_geomap_query(Item frame_item,Item position,Item options,const GeoMapFrame* native) {
+    RootFrame roots(5);Rooted<Item> frame(roots,frame_item),point(roots,position),settings(roots,options),result(roots,ItemNull),hit(roots,ItemNull);
+    double width,height;Item paths=ItemNull,index=ItemNull;
+    if(native) {width=native->camera.width;height=native->camera.height;}
+    else {
+        Item kind=radiant_geomap_field(frame.get(),"type");ItemReader tag(kind.to_const());
+        if(!tag.isString() || strcmp(tag.asString()->chars,"geomap-frame") ||
+            !item_try_to_double(radiant_geomap_field(frame.get(),"width"),&width) ||
+            !item_try_to_double(radiant_geomap_field(frame.get(),"height"),&height)) return radiant_string_item("expected a map frame");
+        paths=radiant_geomap_field(frame.get(),"paths");index=radiant_geomap_field(frame.get(),"index");
+        if(!ItemReader(paths.to_const()).isArray() || !ItemReader(index.to_const()).isArray()) return radiant_string_item("invalid frame paths/index");
+    }
+    RadiantMapQuery query;
+    if(!isfinite(width) || !isfinite(height) || width<=0 || height<=0 || width>1048576 || height>1048576 || !radiant_geomap_query_input(point.get(),settings.get(),width,height,&query)) return radiant_string_item("invalid map query point/rectangle or options");
+    int64_t shape_length=native?native->shapes->length:ItemReader(paths.to_const()).asArray().length();
+    int64_t index_length=native?native->index_count:ItemReader(index.to_const()).asArray().length();
+    if(shape_length<0 || shape_length>262144 || index_length!=(shape_length?shape_length*2-1:0)) return radiant_string_item("frame query quota exceeded");
+    unsigned shape_count=(unsigned)shape_length,index_count=(unsigned)index_length;
+    result.set(radiant_array_new_item(0));
+    if(!shape_count || query.box.width<0 || query.box.height<0 || query.box.x>width || query.box.y>height ||
+        query.box.x+query.box.width<0 || query.box.y+query.box.height<0) return result.get();
+    ArrayList* candidates=arraylist_new(16);bool valid=candidates!=nullptr;
+    Rect broad={query.box.x-query.radius,query.box.y-query.radius,query.box.width+query.radius*2,query.box.height+query.radius*2};
+    unsigned budget=0;int root=shape_count==1?0:(int)shape_count;
+    if(valid) valid=radiant_geomap_index_candidates(native?native->index:nullptr,index,index_count,root,broad,candidates,shape_count,&budget);
+    if(valid) {
+        qsort(candidates->data,candidates->length,sizeof(void*),radiant_geomap_candidate_order);
+        result.set(radiant_array_new_item(candidates->length));
+    }
+    int64_t last_record=-1;size_t path_bytes=0;
+    for(int offset=0;valid && offset<candidates->length;offset++) {
+        unsigned i=(unsigned)((uintptr_t)candidates->data[offset]-1);
+        GeoMapShape decoded_shape={};const GeoMapShape* shape=native?(const GeoMapShape*)native->shapes->data[i]:&decoded_shape;
+        Item record=native?ItemNull:ItemReader(paths.to_const()).asArray().get(i).item();
+        if(!native) {
+            Item source=radiant_geomap_field(record,"source"),layer=radiant_geomap_field(record,"layer"),d=radiant_geomap_field(record,"d");
+            ItemReader sr(source.to_const()),lr(layer.to_const()),dr(d.to_const());
+            if(!sr.isString()) continue;
+            if(!lr.isString() || !dr.isString()) {valid=false;break;}
+            // forged frame values cannot make a single indexed query parse unbounded path text.
+            path_bytes+=dr.asString()->len;
+            if(path_bytes>64u*1024u*1024u) {valid=false;break;}
+            decoded_shape.source=sr.asString()->chars;decoded_shape.layer=lr.asString()->chars;
+            double values[6];const char* keys[]={"stroke_width","fill_rule","cap","join","alpha","record"};
+            for(unsigned j=0;j<6;j++) if(!item_try_to_double(radiant_geomap_field(record,keys[j]),&values[j]) || !isfinite(values[j])) {valid=false;break;}
+            if(!valid) break;
+            if(values[0]<-1 || values[0]>4096 || values[1]<0 || values[1]>1 || values[2]<0 || values[2]>2 ||
+                values[3]<0 || values[3]>2 || values[4]<0 || values[4]>255 || values[5]<0 || values[5]>1048576 ||
+                values[1]!=floor(values[1]) || values[2]!=floor(values[2]) || values[3]!=floor(values[3]) ||
+                values[4]!=floor(values[4]) || values[5]!=floor(values[5])) {valid=false;break;}
+            decoded_shape.stroke_width=(float)values[0];decoded_shape.rule=(RdtFillRule)(int)values[1];
+            decoded_shape.cap=(RdtStrokeCap)(int)values[2];decoded_shape.join=(RdtStrokeJoin)(int)values[3];
+            decoded_shape.color.a=(uint8_t)values[4];decoded_shape.record=(int64_t)values[5];
+            decoded_shape.path=svg_parse_path_d(dr.asString()->chars);
+            if(!decoded_shape.path) {valid=false;break;}
+        }
+        if(shape->source && shape->record!=last_record && radiant_geomap_query_layer(query.layers,shape->layer) &&
+            geomap_shape_hit(shape,query.box,query.rectangle,query.radius)) {
+            hit.set(native?radiant_geomap_record(shape):radiant_obj_new());
+            if(!native) {
+                const char* keys[]={"source","layer","feature","feature_id","geometry"};
+                for(const char* key:keys) radiant_rooted_obj_set(hit,key,radiant_geomap_field(record,key));
+            }
+            if(get_type_id(hit.get())!=LMD_TYPE_VMAP) {
+                if(decoded_shape.path) rdt_path_free(decoded_shape.path);
+                if(candidates) arraylist_free(candidates);return hit.get();
+            }
+            radiant_array_push_item(result.get(),hit.get());last_record=shape->record;
+        }
+        if(decoded_shape.path) rdt_path_free(decoded_shape.path);
+    }
+    if(candidates) arraylist_free(candidates);
+    return valid?result.get():radiant_string_item("invalid frame query index/path");
+}
+RADIANT_C_API Item fn_radiant_geomap_query_frame(Item frame,Item point,Item options) {
+    return radiant_geomap_query(frame,point,options,nullptr);
+}
+RADIANT_C_API Item fn_radiant_geomap_query_displayed(Item node_item,Item point,Item options) {
+    RootFrame roots(1);Rooted<Item> owner(roots,node_item);
+    DomNode* node=radiant_dom_node_from_item(owner.get(),"GEOMAP_QUERY");
+    GeoMapFrame* frame=node && node->is_element()?geomap_displayed_frame(node->as_element()):nullptr;
+    if(!frame) return radiant_string_item("map viewport has no displayed frame");
+    // result allocation can dispatch GC, but the lease owns all native source storage.
+    geomap_frame_retain(frame);Item result=radiant_geomap_query(ItemNull,point,options,frame);geomap_frame_release(frame);return result;
+}
+
 RADIANT_C_API Item fn_radiant_geomap_svg(Item model_item, Item width_item, Item height_item) {
     RootFrame roots(1); Rooted<Item> model(roots, model_item);
     double width, height;
@@ -4524,6 +4792,16 @@ static const JubeFuncDef radiant_functions[] = {
      "Item fn_radiant_geomap_eval_layer(Item layer, Item feature, Item zoom)", (fn_ptr)fn_radiant_geomap_eval_layer},
     {"geomap_eval_features", "fn(layer: element, features: array, zoom: number) -> array|string", (fn_ptr)fn_radiant_geomap_eval_features, JUBE_FN_NONE,
      "Item fn_radiant_geomap_eval_features(Item layer, Item features, Item zoom)", (fn_ptr)fn_radiant_geomap_eval_features},
+    {"local_point", "pn(node: any, x: number, y: number) -> array|null", (fn_ptr)fn_radiant_local_point, JUBE_FN_NONE,
+     "Item fn_radiant_local_point(Item node, Item x, Item y)", (fn_ptr)fn_radiant_local_point},
+    {"geomap_plan", "fn(model: element, width: number, height: number) -> any", (fn_ptr)fn_radiant_geomap_plan, JUBE_FN_NONE,
+     "Item fn_radiant_geomap_plan(Item model, Item width, Item height)", (fn_ptr)fn_radiant_geomap_plan},
+    {"geomap_snapshot", "pn(node: any) -> any", (fn_ptr)fn_radiant_geomap_snapshot, JUBE_FN_NONE,
+     "Item fn_radiant_geomap_snapshot(Item node)", (fn_ptr)fn_radiant_geomap_snapshot},
+    {"geomap_query_frame", "fn(frame: any, point: array, options: map) -> any", (fn_ptr)fn_radiant_geomap_query_frame, JUBE_FN_NONE,
+     "Item fn_radiant_geomap_query_frame(Item frame, Item point, Item options)", (fn_ptr)fn_radiant_geomap_query_frame},
+    {"geomap_query_displayed", "pn(node: any, point: array, options: map) -> any", (fn_ptr)fn_radiant_geomap_query_displayed, JUBE_FN_NONE,
+     "Item fn_radiant_geomap_query_displayed(Item node, Item point, Item options)", (fn_ptr)fn_radiant_geomap_query_displayed},
     {"geomap_svg", "fn(model: element, width: number, height: number) -> string|null", (fn_ptr)fn_radiant_geomap_svg, JUBE_FN_NONE,
      "Item fn_radiant_geomap_svg(Item model, Item width, Item height)", (fn_ptr)fn_radiant_geomap_svg},
     {"measure_svg_text", "fn(html: string, width: int, height: int) -> array|null", (fn_ptr)fn_radiant_measure_svg_text, JUBE_FN_NONE,

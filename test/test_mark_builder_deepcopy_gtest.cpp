@@ -786,3 +786,46 @@ TEST_F(MarkBuilderDeepCopyTest, DeepCopyNowRecognizesContainerOwnership) {
     EXPECT_NE(different.element, elmt.element);  // Different pointer (copied)
     EXPECT_TRUE(builder2.is_in_arena(different));  // Now owned by input2
 }
+
+TEST_F(MarkBuilderDeepCopyTest, NumericCopyOwnsCompactStridedShapeAndClearsBorrowedFlags) {
+    int16_t lanes[]={1,2,3,4,5,6};
+    alignas(ArrayNumShape) unsigned char shape_storage[sizeof(ArrayNumShape)+4*sizeof(int64_t)]={};
+    auto* shape=(ArrayNumShape*)shape_storage;
+    shape->ndim=2;shape->is_f_contig=1;shape->backing_kind=ARRAY_NUM_BACKING_EXTERNAL_BORROWED;
+    shape->data[0]=3;shape->data[1]=2;shape->data[2]=1;shape->data[3]=3;
+    ArrayNum source={};source.type_id=LMD_TYPE_ARRAY_NUM;source.set_elem_type(ELEM_INT16);
+    source.data=lanes;source.length=source.capacity=6;source.is_ndim=source.is_view=1;
+    source.extra=(int64_t)(uintptr_t)shape;
+    MarkBuilder builder(input2);Item copied=builder.deep_copy((Item){.array_num=&source});
+    ASSERT_EQ(get_type_id(copied),LMD_TYPE_ARRAY_NUM);
+    EXPECT_TRUE(builder.is_in_arena(copied));EXPECT_FALSE(copied.array_num->is_view);
+    EXPECT_EQ(copied.array_num->get_elem_type(),ELEM_INT16);
+    EXPECT_TRUE(copied.array_num->is_ndim);EXPECT_EQ(copied.array_num->rep_cert,nullptr);
+    auto* owned=(ArrayNumShape*)(uintptr_t)copied.array_num->extra;
+    ASSERT_NE(owned,nullptr);EXPECT_NE(owned,shape);EXPECT_EQ(owned->base,nullptr);EXPECT_EQ(owned->backing,nullptr);
+    EXPECT_TRUE(owned->is_c_contig);EXPECT_EQ(owned->data[2],2);EXPECT_EQ(owned->data[3],1);
+    memset(lanes,0,sizeof(lanes));
+    ArrayReader rows=ItemReader(copied.to_const()).asArray();ASSERT_EQ(rows.length(),3);
+    for(int64_t i=0;i<3;i++) {
+        ArrayReader row=rows.get(i).asArray();ASSERT_EQ(row.length(),2);
+        EXPECT_EQ(row.get(0).asInt(),i+1);EXPECT_EQ(row.get(1).asInt(),i+4);
+    }
+}
+
+TEST_F(MarkBuilderDeepCopyTest, NumericCopyMaterializesNegativeStrides) {
+    float lanes[]={1.5f,2.5f,3.5f};
+    alignas(ArrayNumShape) unsigned char storage[sizeof(ArrayNumShape)+2*sizeof(int64_t)]={};
+    auto* shape=(ArrayNumShape*)storage;
+    shape->ndim=1;shape->data[0]=3;shape->data[1]=-1;
+    shape->backing_kind=ARRAY_NUM_BACKING_EXTERNAL_BORROWED;
+    ArrayNum source={};source.type_id=LMD_TYPE_ARRAY_NUM;source.set_elem_type(ELEM_FLOAT32);
+    source.data=lanes+2;source.length=source.capacity=3;source.is_ndim=source.is_view=1;
+    source.extra=(int64_t)(uintptr_t)shape;
+    MarkBuilder builder(input2);Item copied=builder.deep_copy((Item){.array_num=&source});
+    ASSERT_EQ(get_type_id(copied),LMD_TYPE_ARRAY_NUM);
+    memset(lanes,0,sizeof(lanes));
+    auto* owned=(ArrayNumShape*)(uintptr_t)copied.array_num->extra;
+    ASSERT_NE(owned,nullptr);EXPECT_EQ(array_num_shape_strides(owned)[0],1);
+    auto* values=(float*)copied.array_num->data;
+    EXPECT_FLOAT_EQ(values[0],3.5f);EXPECT_FLOAT_EQ(values[1],2.5f);EXPECT_FLOAT_EQ(values[2],1.5f);
+}

@@ -7,6 +7,12 @@ implementation has started; verified coverage and remaining work are tracked in
 [the implementation record](impl/Lambda_Impl_Map.md). This proposal does not
 claim completion of a phase or MapLibre compatibility.
 
+The current offline increment includes retained native frames, ordinary Lambda
+frame snapshots, indexed point/rectangle picking, circle strokes/fill outlines,
+line caps/joins and native selection/navigation controls. The exact delivered
+API is in the [supported manifest](../test/map/README.md); the broader compile,
+resource and animation APIs below remain targets.
+
 **Scope:** A geographic map package for Lambda: declarative map styles,
 GeoJSON overlays, camera navigation, tiled basemaps, feature queries,
 interactive Radiant views, and document export. This concerns geographic maps,
@@ -617,8 +623,10 @@ upstream bundle must not be reported as that workload passing.
 
 **Source audit: 2026-10-09, checkout HEAD `074431240`.** The findings below
 distinguish missing native integration from new mapping algorithms. They are
-source evidence, not executed map tests or a claim of a fundamental compiler
-limitation. No geographic viewport exists to validate yet.
+source evidence from the proposal baseline, not a claim of a fundamental
+compiler limitation. The viewport, camera, historical frame queries and shared
+CSS-plane input unprojection have since been implemented and tested; current
+evidence and the remaining tiled/symbol gaps are in the implementation record.
 
 | Requirement and priority | Current evidence | Work needed |
 |---|---|---|
