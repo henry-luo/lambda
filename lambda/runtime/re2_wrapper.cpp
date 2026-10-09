@@ -94,7 +94,84 @@ static Type* literal_type_unwrap(Type* type) {
     return type;
 }
 
-// --- single-character sets (S11.1.2v3) --------------------------------------
+// strings and symbols have different payload layouts; all pattern consumers
+// use this view so symbol content is never read through String::chars.
+static StrView pattern_literal_text(Type* type) {
+    TypeString* literal = (TypeString*)type;
+    if (type->type_id == LMD_TYPE_SYMBOL) {
+        Symbol* value = (Symbol*)literal->string;
+        return value ? strview_init(value->chars, value->len) : strview_init("", 0);
+    }
+    String* value = literal->string;
+    return value ? strview_init(value->chars, value->len) : strview_init("", 0);
+}
+
+// named patterns may chain; a self-reference must not recurse forever.
+static const int PATTERN_MAX_DEPTH = 256;
+
+static unsigned pattern_type_domains(Type* type, int depth) {
+    type = literal_type_unwrap(type);
+    if (!type || depth > PATTERN_MAX_DEPTH) return PATTERN_DOMAIN_NONE;
+    if (type->type_id == LMD_TYPE_STRING) return PATTERN_DOMAIN_STRING;
+    if (type->type_id == LMD_TYPE_SYMBOL) return PATTERN_DOMAIN_SYMBOL;
+    if (type->type_id != LMD_TYPE_TYPE) return PATTERN_DOMAIN_NONE;
+    if (type->kind == TYPE_KIND_PATTERN) {
+        return ((TypePattern*)type)->is_symbol ? PATTERN_DOMAIN_SYMBOL : PATTERN_DOMAIN_STRING;
+    }
+    if (type->kind == TYPE_KIND_RANGE) {
+        return ((TypeRange*)type)->is_char ? PATTERN_DOMAIN_STRING : PATTERN_DOMAIN_NONE;
+    }
+    if (type->kind == TYPE_KIND_BINARY) {
+        TypeBinary* binary = (TypeBinary*)type;
+        return pattern_type_domains(binary->left, depth + 1) |
+            pattern_type_domains(binary->right, depth + 1);
+    }
+    return PATTERN_DOMAIN_NONE;
+}
+
+unsigned pattern_ast_domains(AstNode* node) {
+    if (!node) return PATTERN_DOMAIN_NONE;
+    switch (node->node_type) {
+    case AST_NODE_PRIMARY:
+        return pattern_type_domains(node->type, 0);
+    case AST_NODE_PATTERN_CHAR_CLASS: {
+        TypeId domain = ((AstPatternCharClassNode*)node)->domain;
+        return domain == LMD_TYPE_STRING ? PATTERN_DOMAIN_STRING :
+            domain == LMD_TYPE_SYMBOL ? PATTERN_DOMAIN_SYMBOL : PATTERN_DOMAIN_NONE;
+    }
+    case AST_NODE_IDENT: {
+        NameEntry* entry = ((AstIdentNode*)node)->entry;
+        return pattern_type_domains(entry && entry->node ? entry->node->type : NULL, 0);
+    }
+    case AST_NODE_UNARY:
+    case AST_NODE_UNARY_TYPE:
+        return pattern_ast_domains(((AstUnaryNode*)node)->operand);
+    case AST_NODE_BINARY:
+    case AST_NODE_BINARY_TYPE: {
+        AstBinaryNode* binary = (AstBinaryNode*)node;
+        return pattern_ast_domains(binary->left) | pattern_ast_domains(binary->right);
+    }
+    case AST_NODE_PATTERN_RANGE: {
+        AstPatternRangeNode* range = (AstPatternRangeNode*)node;
+        return pattern_ast_domains(range->start) | pattern_ast_domains(range->end);
+    }
+    case AST_NODE_PATTERN_ISLAND:
+        return pattern_ast_domains(((AstPatternIslandNode*)node)->pattern);
+    case AST_NODE_PATTERN_SEQ:
+    case AST_NODE_LIST_TYPE:
+    case AST_NODE_ARRAY_TYPE: {
+        AstNode* first = node->node_type == AST_NODE_PATTERN_SEQ ?
+            ((AstPatternSeqNode*)node)->first : ((AstArrayNode*)node)->item;
+        unsigned domains = PATTERN_DOMAIN_NONE;
+        for (AstNode* child = first; child; child = child->next) domains |= pattern_ast_domains(child);
+        return domains;
+    }
+    default:
+        return PATTERN_DOMAIN_NONE;
+    }
+}
+
+// --- single-character sets (S11.1.2v4) --------------------------------------
 //
 // Island `!` complements a set of single characters: the one negation a regex
 // engine compiles, as `[^…]`. A set is kept as code-point intervals so that
@@ -113,8 +190,6 @@ typedef struct PatternCharSet {
 } PatternCharSet;
 
 static const uint32_t PATTERN_MAX_CODEPOINT = 0x10FFFF;
-// named patterns may chain; a self-reference must not recurse forever
-static const int PATTERN_MAX_DEPTH = 256;
 
 static void char_set_free(PatternCharSet* set) {
     if (set->ranges) mem_free(set->ranges);
@@ -202,16 +277,16 @@ static bool char_set_add_class(PatternCharSet* set, PatternCharClass char_class)
     return false;
 }
 
-static bool string_single_codepoint(String* str, uint32_t* codepoint) {
-    if (!str || !str->len) return false;
-    int used = str_utf8_decode(str->chars, str->len, codepoint);
-    return used > 0 && (size_t)used == str->len;
+// both quoted domains use the same Unicode character-set rules.
+static bool pattern_literal_codepoint(Type* type, uint32_t* codepoint) {
+    if (!type || (type->type_id != LMD_TYPE_STRING && type->type_id != LMD_TYPE_SYMBOL)) return false;
+    StrView text = pattern_literal_text(type);
+    int used = str_utf8_decode(text.str, text.length, codepoint);
+    return used > 0 && (size_t)used == text.length;
 }
 
-// the one character a string-literal node spells
 static bool node_single_codepoint(AstNode* node, uint32_t* codepoint) {
-    return node && node->type && node->type->type_id == LMD_TYPE_STRING &&
-        string_single_codepoint(((TypeString*)node->type)->string, codepoint);
+    return node && pattern_literal_codepoint(node->type, codepoint);
 }
 
 // S11.1.3: a range runs between two single characters
@@ -239,10 +314,9 @@ static bool char_set_add_literal_type(PatternCharSet* set, Type* type) {
     if (!type) return false;
     uint32_t lo, hi;
     if (char_range_type_bounds(type, &lo, &hi)) return char_set_add(set, lo, hi);
-    if (type->type_id == LMD_TYPE_STRING && type->is_literal) {
+    if ((type->type_id == LMD_TYPE_STRING || type->type_id == LMD_TYPE_SYMBOL) && type->is_literal) {
         uint32_t codepoint;
-        return string_single_codepoint(((TypeString*)type)->string, &codepoint) &&
-            char_set_add(set, codepoint, codepoint);
+        return pattern_literal_codepoint(type, &codepoint) && char_set_add(set, codepoint, codepoint);
     }
     if (type->type_id == LMD_TYPE_TYPE && type->kind == TYPE_KIND_BINARY) {
         TypeBinary* binary = (TypeBinary*)type;
@@ -264,7 +338,8 @@ static bool char_set_add_node(PatternCharSet* set, AstNode* node, int depth) {
     case AST_NODE_PRIMARY: {
         AstPrimaryNode* primary = (AstPrimaryNode*)node;
         uint32_t codepoint;
-        if (primary->type && primary->type->type_id == LMD_TYPE_STRING) {
+        if (primary->type && (primary->type->type_id == LMD_TYPE_STRING ||
+                primary->type->type_id == LMD_TYPE_SYMBOL)) {
             return node_single_codepoint(node, &codepoint) &&
                 char_set_add(set, codepoint, codepoint);
         }
@@ -399,8 +474,8 @@ static bool pattern_lowering_failed(StrBuf* error, const char* reason) {
     return false;
 }
 
-// S11.1.2v3: an island may name a pattern definition, or a literal type that
-// is a set of strings: a literal union (SP7) or a character range (SP5).
+// S11.1.2v4: an island may name a pattern definition, or a literal type that
+// is a set of strings or symbols: a literal union (SP7) or a character range (SP5).
 bool pattern_can_name(AstNode* declared) {
     if (!declared) return false;
     if (declared->node_type == AST_NODE_STRING_PATTERN ||
@@ -435,9 +510,10 @@ static bool lower_pattern(StrBuf* regex, AstNode* node, StrBuf* error, int depth
     switch (node->node_type) {
     case AST_NODE_PRIMARY: {
         AstPrimaryNode* pri = (AstPrimaryNode*)node;
-        if (pri->type && pri->type->type_id == LMD_TYPE_STRING) {
-            TypeString* str_type = (TypeString*)pri->type;
-            if (str_type->string) escape_regex_literal(regex, str_type->string);
+        if (pri->type && (pri->type->type_id == LMD_TYPE_STRING ||
+                pri->type->type_id == LMD_TYPE_SYMBOL)) {
+            StrView text = pattern_literal_text(pri->type);
+            escape_regex_chars(regex, text.str, text.length);
             return true;
         }
         if (pri->expr) return lower_pattern(regex, pri->expr, error, depth);
@@ -457,7 +533,7 @@ static bool lower_pattern(StrBuf* regex, AstNode* node, StrBuf* error, int depth
     case AST_NODE_BINARY_TYPE: {
         AstBinaryNode* bin = (AstBinaryNode*)node;
         if (bin->op == OPERATOR_UNION) {
-            // a | b -> (?:a|b); `|` is the island's only binary operator (S11.1.2v3)
+            // a | b -> (?:a|b); `|` is the island's only binary operator (S11.1.2v4)
             strbuf_append_str(regex, "(?:");
             if (!lower_pattern(regex, bin->left, error, depth)) return false;
             strbuf_append_char(regex, '|');
@@ -489,7 +565,7 @@ static bool lower_pattern(StrBuf* regex, AstNode* node, StrBuf* error, int depth
             return convert_occurrence_to_regex(regex, &unary->op_str) ||
                 pattern_lowering_failed(error, "a count is `{n}`, `{n,m}` or `{n+}`");
         case OPERATOR_NOT:
-            // S11.1.2v3: `!` complements a single-character set, lowered to one
+            // S11.1.2v4: `!` complements a single-character set, lowered to one
             // `[^…]`-style class; RE2 has no string complement or look-around
             return compile_char_set(regex, unary->operand, true) ||
                 pattern_lowering_failed(error, "`!` in a pattern negates a single character");
@@ -499,7 +575,7 @@ static bool lower_pattern(StrBuf* regex, AstNode* node, StrBuf* error, int depth
     }
 
     case AST_NODE_PATTERN_SEQ:
-        // whitespace concatenation (S11.1.2v3)
+        // whitespace concatenation (S11.1.2v4)
         for (AstNode* child = ((AstPatternSeqNode*)node)->first; child; child = child->next) {
             if (!lower_pattern(regex, child, error, depth)) return false;
         }
@@ -542,10 +618,11 @@ static bool lower_pattern(StrBuf* regex, AstNode* node, StrBuf* error, int depth
     }
 }
 
-static void render_pattern_literal(StrBuf* source, String* value) {
-    strbuf_append_char(source, '"');
-    if (value) escape_append_js_quoted(source, value->chars, value->len, '"');
-    strbuf_append_char(source, '"');
+static void render_pattern_literal(StrBuf* source, StrView value, bool is_symbol = false) {
+    char quote = is_symbol ? '\'' : '"';
+    strbuf_append_char(source, quote);
+    escape_append_js_quoted(source, value.str, value.length, quote);
+    strbuf_append_char(source, quote);
 }
 
 static void render_pattern_surface(StrBuf* source, AstNode* node) {
@@ -553,8 +630,10 @@ static void render_pattern_surface(StrBuf* source, AstNode* node) {
     switch (node->node_type) {
     case AST_NODE_PRIMARY: {
         AstPrimaryNode* primary = (AstPrimaryNode*)node;
-        if (primary->type && primary->type->type_id == LMD_TYPE_STRING) {
-            render_pattern_literal(source, ((TypeString*)primary->type)->string);
+        if (primary->type && (primary->type->type_id == LMD_TYPE_STRING ||
+                primary->type->type_id == LMD_TYPE_SYMBOL)) {
+            render_pattern_literal(source, pattern_literal_text(primary->type),
+                primary->type->type_id == LMD_TYPE_SYMBOL);
         } else {
             render_pattern_surface(source, primary->expr);
         }
@@ -562,13 +641,15 @@ static void render_pattern_surface(StrBuf* source, AstNode* node) {
     }
     case AST_NODE_PATTERN_CHAR_CLASS: {
         AstPatternCharClassNode* cc = (AstPatternCharClassNode*)node;
-        switch (cc->char_class) {
-        case PATTERN_DIGIT: strbuf_append_char(source, 'd'); break;
-        case PATTERN_WORD: strbuf_append_char(source, 'w'); break;
-        case PATTERN_SPACE: strbuf_append_char(source, 's'); break;
-        case PATTERN_ALPHA: strbuf_append_char(source, 'a'); break;
-        case PATTERN_ANY: strbuf_append_char(source, '.'); break;
-        case PATTERN_ANY_STRING: strbuf_append_str(source, "..."); break;
+        const char* classes = "dwsa";
+        if (cc->char_class <= PATTERN_ALPHA) {
+            char quote = cc->domain == LMD_TYPE_SYMBOL ? '\'' : '"';
+            strbuf_append_char(source, quote);
+            strbuf_append_char(source, '\\');
+            strbuf_append_char(source, classes[cc->char_class]);
+            strbuf_append_char(source, quote);
+        } else {
+            strbuf_append_str(source, cc->char_class == PATTERN_ANY ? "." : "...");
         }
         break;
     }
@@ -648,7 +729,7 @@ static void render_pattern_surface(StrBuf* source, AstNode* node) {
     }
     case AST_NODE_PATTERN_ISLAND: {
         AstPatternIslandNode* island = (AstPatternIslandNode*)node;
-        strbuf_append_str(source, island->is_symbol ? "\\symbol(" : "\\(");
+        strbuf_append_str(source, "\\(");
         render_pattern_surface(source, island->pattern);
         strbuf_append_char(source, ')');
         break;
@@ -689,7 +770,7 @@ TypePattern* compile_pattern_ast(Pool* pool, AstNode* pattern_ast, bool is_symbo
     strbuf_free(lowering_error);
 
     StrBuf* surface = strbuf_new_cap(256);
-    strbuf_append_str(surface, is_symbol ? "\\symbol(" : "\\(");
+    strbuf_append_str(surface, "\\(");
     render_pattern_surface(surface, pattern_ast);
     strbuf_append_char(surface, ')');
 
@@ -832,9 +913,11 @@ static bool append_literal_type(StrBuf* output, Type* type, LiteralTypeRender re
     if (char_range_type_bounds(type, &lo, &hi)) {
         TypeRange* range = (TypeRange*)type;
         if (render == LITERAL_TYPE_SURFACE) {
-            render_pattern_literal(output, range->start.get_safe_string());
+            String* start = range->start.get_safe_string();
+            String* end = range->end.get_safe_string();
+            render_pattern_literal(output, strview_init(start->chars, start->len));
             strbuf_append_str(output, " to ");
-            render_pattern_literal(output, range->end.get_safe_string());
+            render_pattern_literal(output, strview_init(end->chars, end->len));
             return true;
         }
         PatternCharSet set = {};
@@ -843,11 +926,10 @@ static bool append_literal_type(StrBuf* output, Type* type, LiteralTypeRender re
         char_set_free(&set);
         return ok;
     }
-    if (type->type_id == LMD_TYPE_STRING && type->is_literal) {
-        String* literal = ((TypeString*)type)->string;
-        if (!literal) return false;
-        if (render == LITERAL_TYPE_REGEX) escape_regex_literal(output, literal);
-        else render_pattern_literal(output, literal);
+    if ((type->type_id == LMD_TYPE_STRING || type->type_id == LMD_TYPE_SYMBOL) && type->is_literal) {
+        StrView literal = pattern_literal_text(type);
+        if (render == LITERAL_TYPE_REGEX) escape_regex_chars(output, literal.str, literal.length);
+        else render_pattern_literal(output, literal, type->type_id == LMD_TYPE_SYMBOL);
         return true;
     }
     if (type->type_id == LMD_TYPE_TYPE && type->kind == TYPE_KIND_BINARY) {
@@ -870,6 +952,15 @@ TypePattern* compile_literal_type_pattern(Pool* pool, Type* type, bool is_symbol
         return nullptr;
     }
 
+    // literal-only symbol islands share ordinary literal types, but string
+    // search operations must still reject their domain (S11.1.2v4).
+    unsigned domains = pattern_type_domains(type, 0);
+    unsigned expected = is_symbol ? PATTERN_DOMAIN_SYMBOL : PATTERN_DOMAIN_STRING;
+    if (domains != expected) {
+        if (error_msg) *error_msg = "literal pattern has an incompatible text domain";
+        return nullptr;
+    }
+
     StrBuf* regex = strbuf_new_cap(128);
     strbuf_append_char(regex, '^');
     if (!append_literal_type(regex, type, LITERAL_TYPE_REGEX)) {
@@ -880,7 +971,7 @@ TypePattern* compile_literal_type_pattern(Pool* pool, Type* type, bool is_symbol
     strbuf_append_char(regex, '$');
 
     StrBuf* surface = strbuf_new_cap(128);
-    strbuf_append_str(surface, is_symbol ? "\\symbol(" : "\\(");
+    strbuf_append_str(surface, "\\(");
     if (!append_literal_type(surface, type, LITERAL_TYPE_SURFACE)) {
         if (error_msg) *error_msg = "type is not a literal string union";
         strbuf_free(regex);

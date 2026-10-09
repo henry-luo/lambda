@@ -11376,17 +11376,8 @@
     "_char_pattern_tag": {
       "type": "TOKEN",
       "content": {
-        "type": "CHOICE",
-        "members": [
-          {
-            "type": "STRING",
-            "value": "\\symbol("
-          },
-          {
-            "type": "STRING",
-            "value": "\\("
-          }
-        ]
+        "type": "STRING",
+        "value": "\\("
       }
     },
     "char_pattern_island": {
@@ -11414,28 +11405,132 @@
         }
       ]
     },
+    "pattern_string": {
+      "type": "TOKEN",
+      "content": {
+        "type": "SEQ",
+        "members": [
+          {
+            "type": "STRING",
+            "value": "\""
+          },
+          {
+            "type": "REPEAT",
+            "content": {
+              "type": "CHOICE",
+              "members": [
+                {
+                  "type": "PATTERN",
+                  "value": "[^\"\\\\]+"
+                },
+                {
+                  "type": "PATTERN",
+                  "value": "\\\\[\"'\\\\\\/bfnrtdwsa]"
+                },
+                {
+                  "type": "PATTERN",
+                  "value": "\\\\u[0-9a-fA-F]{4}"
+                },
+                {
+                  "type": "PATTERN",
+                  "value": "\\\\u\\{[0-9a-fA-F]+\\}"
+                }
+              ]
+            }
+          },
+          {
+            "type": "STRING",
+            "value": "\""
+          }
+        ]
+      }
+    },
+    "pattern_symbol": {
+      "type": "TOKEN",
+      "content": {
+        "type": "SEQ",
+        "members": [
+          {
+            "type": "STRING",
+            "value": "'"
+          },
+          {
+            "type": "REPEAT1",
+            "content": {
+              "type": "CHOICE",
+              "members": [
+                {
+                  "type": "PATTERN",
+                  "value": "[^'\\\\\\n]+"
+                },
+                {
+                  "type": "PATTERN",
+                  "value": "\\\\['\"\\\\\\/bfnrtdwsa]"
+                },
+                {
+                  "type": "PATTERN",
+                  "value": "\\\\u[0-9a-fA-F]{4}"
+                },
+                {
+                  "type": "PATTERN",
+                  "value": "\\\\u\\{[0-9a-fA-F]+\\}"
+                }
+              ]
+            }
+          },
+          {
+            "type": "STRING",
+            "value": "'"
+          }
+        ]
+      }
+    },
+    "_char_literal": {
+      "type": "CHOICE",
+      "members": [
+        {
+          "type": "ALIAS",
+          "content": {
+            "type": "SYMBOL",
+            "name": "pattern_string"
+          },
+          "named": true,
+          "value": "string"
+        },
+        {
+          "type": "ALIAS",
+          "content": {
+            "type": "SYMBOL",
+            "name": "pattern_symbol"
+          },
+          "named": true,
+          "value": "symbol"
+        }
+      ]
+    },
+    "char_range_type": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "SYMBOL",
+          "name": "_char_literal"
+        },
+        {
+          "type": "STRING",
+          "value": "to"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "_char_literal"
+        }
+      ]
+    },
     "char_class": {
       "type": "CHOICE",
       "members": [
         {
           "type": "STRING",
           "value": "..."
-        },
-        {
-          "type": "STRING",
-          "value": "d"
-        },
-        {
-          "type": "STRING",
-          "value": "w"
-        },
-        {
-          "type": "STRING",
-          "value": "s"
-        },
-        {
-          "type": "STRING",
-          "value": "a"
         },
         {
           "type": "STRING",
@@ -11447,12 +11542,17 @@
       "type": "CHOICE",
       "members": [
         {
-          "type": "SYMBOL",
-          "name": "range_type"
+          "type": "ALIAS",
+          "content": {
+            "type": "SYMBOL",
+            "name": "char_range_type"
+          },
+          "named": true,
+          "value": "range_type"
         },
         {
           "type": "SYMBOL",
-          "name": "_non_null_literal"
+          "name": "_char_literal"
         },
         {
           "type": "SYMBOL",

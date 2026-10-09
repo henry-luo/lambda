@@ -498,6 +498,8 @@ static const TierParityFixture kTune27TierParity[] = {
     // S11.4.6 (LR03-26): an inline pattern island admits as a constrained
     // base, a union arm or a field; the JIT's `case \(d+):` never matched.
     {"test/lambda/pattern_island_type.ls", "test/lambda/pattern_island_type.txt"},
+    // S11.1.2v4: quoted classes and domain inference must agree on every tier.
+    {"test/lambda/pattern_quoted_classes.ls", "test/lambda/pattern_quoted_classes.txt"},
     // S2.5.1v2: `is` against `type(x)` tests the kind; `type((1, 2))` crashed.
     {"test/lambda/type_of_kind_is.ls", "test/lambda/type_of_kind_is.txt"},
     // S12.3.2 (LR07-19): a method's named arguments bind by name, as a direct

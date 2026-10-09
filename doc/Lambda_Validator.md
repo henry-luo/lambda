@@ -102,7 +102,7 @@ A `that` clause attaches a runtime predicate, with `~` the value being checked; 
 
 ```lambda
 type Age = int that (~ >= 0 and ~ <= 150)
-type Email = \(w+ "@" w+ "." a{2,6})
+type Email = \("\w"+ "@" "\w"+ "." "\a"{2,6})
 type User = {name: string, age: Age, email: Email}
 
 30 is Age            // true
@@ -110,7 +110,7 @@ type User = {name: string, age: Age, email: Email}
 "a@b.com" is Email   // true
 ```
 
-> **Not yet implemented.** The `is` checks above work, but `lambda validate` does not yet apply the same rules to a schema: a constrained type such as `Age` checks only its base type (S11.4.6), and a string pattern used through a **name** (`email: Email`) rejects every string. Until this is fixed, write a pattern inline in the field — `email: \(w+ "@" w+ "." a{2,6})` — which the validator does check.
+> **Not yet implemented.** The `is` checks above work, but `lambda validate` does not yet apply the same rules to a schema: a constrained type such as `Age` checks only its base type (S11.4.6), and a string pattern used through a **name** (`email: Email`) rejects every string. Until this is fixed, write a pattern inline in the field — `email: \("\w"+ "@" "\w"+ "." "\a"{2,6})` — which the validator does check.
 
 ### Element Schemas
 

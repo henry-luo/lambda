@@ -1,0 +1,20 @@
+'classes and domains'
+[true, true, true, true, true, true, true, true, true, true, true, true, true, true]
+'quoted fragments'
+[true, true, true, true, true, true, true, true, true]
+'ordinary escapes are decoded once'
+[true, true, true, true, true, true, true, true, true]
+'names, literals and character sets'
+[true, true, true, true, true, true, true, true, true, true, true, true]
+'wildcards inherit the whole island domain'
+[true, true, true, true, true, true, true]
+'contracts, operators and matching'
+[true, true, true, true, true, true, true, true, true, true, true, true, true]
+'search operations'
+[true, true, true]
+'symbol literal unions cannot search strings'
+[true, true, true]
+'comments do not select domains or close islands'
+[true, true]
+'literal-only islands retain ordinary type identity'
+[true, true, true]

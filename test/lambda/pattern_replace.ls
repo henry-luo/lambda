@@ -7,18 +7,18 @@
 '1. empty matches'
 "1.1"; [replace("aab", \("a"*), "-")]
 "1.2"; [replace("aab", \("a"*), "-", {limit: 9})]
-"1.3"; [replace("ab", \(d*), "-")]
-"1.4"; [replace("", \(d*), "-")]
+"1.3"; [replace("ab", \("\d"*), "-")]
+"1.4"; [replace("", \("\d"*), "-")]
 "1.5"; (find("aab", \("a"*)) |> ~.index)
 
 '2. the replacement is literal text'
-"2.1"; [replace("a1b", \(d), "<\\0>")]
-"2.2"; [replace("a1b", \(d), "$&")]
-"2.3"; [replace("a1b2", \(d), "\\1", {limit: 1})]
+"2.1"; [replace("a1b", \("\d"), "<\\0>")]
+"2.2"; [replace("a1b", \("\d"), "$&")]
+"2.3"; [replace("a1b2", \("\d"), "\\1", {limit: 1})]
 
 '3. options select among the same matches'
-"3.1"; [replace("a1b2c3", \(d), "#", {limit: 2})]
-"3.2"; [replace("a1b2c3", \(d), "#", {last: 1})]
+"3.1"; [replace("a1b2c3", \("\d"), "#", {limit: 2})]
+"3.2"; [replace("a1b2c3", \("\d"), "#", {last: 1})]
 "3.3"; [replace("aAa", \("a"), "-", {ignore_case: true})]
 
 '4. an empty options map'

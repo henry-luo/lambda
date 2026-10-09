@@ -421,11 +421,11 @@ TEST(InterpWalker, NamedAndInlinePatterns) {
     // Pattern values have no slab binding: both tiers must materialize their
     // module-local TypePattern before `is`, match, or a partial text operation.
     expect_tiers_agree("patterns",
-        "type digits = \\(d+)\n"
-        "type symbol_digits = \\symbol(d+)\n"
+        "type digits = \\(\"\\d\"+)\n"
+        "type symbol_digits = \\('\\d'+)\n"
         "\"123\" is digits\n"
         "'123' is symbol_digits\n"
-        "\"123\" is \\(d+)\n"
+        "\"123\" is \\(\"\\d\"+)\n"
         "match \"42\" { case digits: \"number\" default: \"other\" }\n"
         "replace(\"a1b2\", digits, \"x\")\n");
 }

@@ -1,0 +1,1 @@
+error: a pattern needs a string or symbol domain

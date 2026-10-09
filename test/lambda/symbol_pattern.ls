@@ -2,16 +2,16 @@
 // symbol-only domain at `is`/match boundaries.
 '===== SYMBOL PATTERN TESTS ====='
 
-type string_digits = \(d+)
-type symbol_digits = \symbol(d+)
-type symbol_digits_from_string = \symbol(string_digits)
+type string_digits = \("\d"+)
+type symbol_digits = \('\d'+)
+type symbol_digits_copy = \(symbol_digits)
 
 'Test 1: Domain and content'
 1; "123" is string_digits
 2; '123' is string_digits
 3; '123' is symbol_digits
 4; "123" is symbol_digits
-5; '123' is symbol_digits_from_string
+5; '123' is symbol_digits_copy
 6; 'abc' is symbol_digits
 
 'Test 2: Symbol match arm'

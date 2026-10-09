@@ -6,10 +6,10 @@
 // resume point, so a zero-length match stepped over a character that then
 // appeared in no segment at all.
 // Every row below is the value Node reports for the same call.
-type digit = \(d)
-type digits = \(d+)
-type ws = \(s+)
-type anydigits = \(d*)
+type digit = \("\d")
+type digits = \("\d"+)
+type ws = \("\s"+)
+type anydigits = \("\d"*)
 
 let out = {
     // pattern delimiter — doc/Lambda_Sys_Func.md examples

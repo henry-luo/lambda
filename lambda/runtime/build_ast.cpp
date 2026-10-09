@@ -5096,62 +5096,28 @@ static void resolve_decompose(Transpiler* tp, AstDecomposeNode* ast_node) {
 
 }
 
-bool pattern_ast_literal_set(AstNode* node) {
-    if (!node) return false;
+AstNode* normalize_pattern_literal_set(AstNode* node) {
+    if (!node) return NULL;
     if (node->node_type == AST_NODE_PRIMARY) {
         Type* type = node->type;
-        return type && type->type_id == LMD_TYPE_STRING && type->is_literal;
+        return type && (type->type_id == LMD_TYPE_STRING ||
+            type->type_id == LMD_TYPE_SYMBOL) && type->is_literal ? node : NULL;
+    }
+    // grouping must not change a literal-only island's type identity (S11.1.2v4).
+    if (node->node_type == AST_NODE_LIST_TYPE) {
+        return normalize_pattern_literal_set(((AstListNode*)node)->item);
     }
     if (node->node_type == AST_NODE_BINARY_TYPE || node->node_type == AST_NODE_BINARY) {
         AstBinaryNode* binary = (AstBinaryNode*)node;
-        return binary->op == OPERATOR_UNION &&
-            pattern_ast_literal_set(binary->left) && pattern_ast_literal_set(binary->right);
+        if (binary->op != OPERATOR_UNION) return NULL;
+        AstNode* left = normalize_pattern_literal_set(binary->left);
+        AstNode* right = normalize_pattern_literal_set(binary->right);
+        if (!left || !right) return NULL;
+        binary->left = left;
+        binary->right = right;
+        return node;
     }
-    return false;
-}
-
-bool pattern_ast_has_symbol_literal(AstNode* node) {
-    if (!node) return false;
-    switch (node->node_type) {
-    case AST_NODE_PRIMARY:
-        return node->type && node->type->type_id == LMD_TYPE_SYMBOL;
-    case AST_NODE_BINARY:
-    case AST_NODE_BINARY_TYPE: {
-        AstBinaryNode* binary = (AstBinaryNode*)node;
-        return pattern_ast_has_symbol_literal(binary->left) ||
-            pattern_ast_has_symbol_literal(binary->right);
-    }
-    case AST_NODE_UNARY:
-    case AST_NODE_UNARY_TYPE:
-        return pattern_ast_has_symbol_literal(((AstUnaryNode*)node)->operand);
-    case AST_NODE_PATTERN_RANGE: {
-        // a range's bounds are content too: `'a' to 'z'` is a symbol literal
-        AstPatternRangeNode* range = (AstPatternRangeNode*)node;
-        return pattern_ast_has_symbol_literal(range->start) ||
-            pattern_ast_has_symbol_literal(range->end);
-    }
-    case AST_NODE_PATTERN_SEQ: {
-        AstNode* child = ((AstPatternSeqNode*)node)->first;
-        while (child) {
-            if (pattern_ast_has_symbol_literal(child)) return true;
-            child = child->next;
-        }
-        return false;
-    }
-    case AST_NODE_LIST_TYPE:
-    case AST_NODE_ARRAY_TYPE: {
-        AstNode* child = ((AstListNode*)node)->item;
-        while (child) {
-            if (pattern_ast_has_symbol_literal(child)) return true;
-            child = child->next;
-        }
-        return false;
-    }
-    case AST_NODE_PATTERN_ISLAND:
-        return pattern_ast_has_symbol_literal(((AstPatternIslandNode*)node)->pattern);
-    default:
-        return false;
-    }
+    return NULL;
 }
 
 // ==================== Namespace Attribute Desugaring ====================
@@ -15858,6 +15824,9 @@ static void resolve_pattern_def(Transpiler* tp, AstPatternDefNode* pattern) {
     void** tail = syntax_tail((AstNode*)pattern, sizeof(AstPatternDefNode));
     AstPatternIslandNode* source = (AstPatternIslandNode*)tail[LSF_PATTERN_ISLAND];
     AstDeclaratorNode* pre_bound = (AstDeclaratorNode*)tail[LSF_PATTERN_PREBOUND];
+    // domain inference completes after named references resolve.
+    pattern->is_symbol = source->is_symbol;
+    pattern->node_type = source->is_symbol ? AST_NODE_SYMBOL_PATTERN : AST_NODE_STRING_PATTERN;
     pattern->as = source->type == &TYPE_ERROR ? NULL : source->pattern;
     if (!pattern->as) {
         pattern->type = &TYPE_ERROR;

@@ -11,9 +11,18 @@
 #include "../../lib/arraylist.h"
 #include "../../lib/strbuf.h"
 
+// domain contributions combine across every part, including alternatives.
+enum PatternDomain {
+    PATTERN_DOMAIN_NONE = 0,
+    PATTERN_DOMAIN_STRING = 1,
+    PATTERN_DOMAIN_SYMBOL = 2
+};
+
 // Forward declarations
 struct AstNode;
 struct Pool;
+
+unsigned pattern_ast_domains(AstNode* node);
 
 /**
  * Compile a Lambda pattern AST node to a RE2 regex.

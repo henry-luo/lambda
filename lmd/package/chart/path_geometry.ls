@@ -3,8 +3,8 @@ import util: .util
 import geometry: .geometry
 import svg: .svg
 
-type token = \(a | ("+" | "-")? (d+ ("." d*)? | "." d+) (("e" | "E") ("+" | "-")? d+)?)
-type separator = \((s | ",")*)
+type token = \("\a" | ("+" | "-")? ("\d"+ ("." "\d"*)? | "." "\d"+) (("e" | "E") ("+" | "-")? "\d"+)?)
+type separator = \(("\s" | ",")*)
 let sizes = {M: 2, L: 2, H: 1, V: 1, C: 6, S: 4, Q: 4, T: 2, A: 7, Z: 0}
 
 fn endpoint(values, offset, current, relative) => [for (axis in [0, 1]) values[offset + axis] + (if (relative) current[axis] else 0.0)]
@@ -32,7 +32,7 @@ fn segment(command, values, current, start, previous) {
         large: if (kind == "A") values[3] else null, sweep: if (kind == "A") values[4] else null}
 }
 
-fn command_token(value) => value is string and len(value)==1 and value is \(a)
+fn command_token(value) => value is string and len(value)==1 and value is \("\a")
 fn operands(tokens,count,arc,index=0,result=[]) {
     if (index>=count) {values:result,rest:tokens} else if (len(tokens)==0 or command_token(tokens[0])) error("chart: missing SVG path operand")
     else {

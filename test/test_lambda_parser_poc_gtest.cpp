@@ -163,7 +163,7 @@ TEST(LambdaRdLexerPoc, RecognizesOpaquePatternAndPathBuildingBlocks) {
         LAMBDA_TOK_PARENT, LAMBDA_TOK_TILDE_KEY, LAMBDA_TOK_ELLIPSIS,
         LAMBDA_TOK_STAR_STAR, LAMBDA_TOK_PIPE_FORWARD, LAMBDA_TOK_EOF,
     };
-    expect_kinds("b'AA==' t'2026-08-19T01:02Z' \"x\\n\" 'y' \\(d[3]) .? ~~ ~key ... ** |>",
+    expect_kinds("b'AA==' t'2026-08-19T01:02Z' \"x\\n\" 'y' \\(\"\\d\"{3}) .? ~~ ~key ... ** |>",
         expected, (int)(sizeof(expected) / sizeof(expected[0])));
 }
 

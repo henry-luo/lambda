@@ -14,7 +14,7 @@ pn main() {
     print("\n")
 
     // a string pattern; text is the whole line, without a "\r\n" terminator
-    print("T3:", io.grep(\.test.input.grep_tree.'crlf.txt', \("TODO:" s* w+), {text: true})^)
+    print("T3:", io.grep(\.test.input.grep_tree.'crlf.txt', \("TODO:" "\s"* "\w"+), {text: true})^)
     print("\n")
 
     // ignore_case folds as in-memory find does (S17.7.1)
@@ -66,7 +66,7 @@ pn main() {
 
     // several sources and several patterns; word matches whole words only
     print("T17:", io.grep(["test/input/grep_tree/notes.txt", "test/input/grep_tree/code"],
-        ["beta", \(d+)], {line: true})^)
+        ["beta", \("\d"+)], {line: true})^)
     print("\n")
     print("T18:", io.grep("test/input/grep_tree/code/main.ls", "x", {word: true})^)
     print("\n")

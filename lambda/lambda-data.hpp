@@ -1361,8 +1361,8 @@ static inline Type* lambda_range_type_domain(const Type* type) {
     return ((const TypeRange*)type)->is_char ? &TYPE_STRING : &TYPE_INT;
 }
 
-// S11.1.2v3: a pattern admits text of its tag's domain, `string` for `\(...)`
-// and `symbol` for `\symbol(...)`, and decides membership by matching. Like a
+// S11.1.2v4: a pattern admits text of the domain established by its quotes
+// and named references, and decides membership by matching. Like a
 // range's domain it serves static carrier checks only: the pattern's own
 // LMD_TYPE_TYPE tag is the type of type values, never its members' carrier.
 static inline Type* lambda_pattern_type_domain(const Type* type) {
@@ -1539,7 +1539,7 @@ extern TypeType LIT_TYPE_SYMBOL;
 extern TypeType LIT_TYPE_PATH;
 // PTH30: `reference` is the type ALIAS `symbol | path` (URI = URN | URL), not a
 // nominal supertype — a supertype would force every symbol operation
-// (indexing, slicing, `\symbol(…)` islands) to rule on paths, whereas the alias
+// (indexing, slicing, `\('…')` islands) to rule on paths, whereas the alias
 // dissolves at each use site into the two evaluation contracts S2.4.3v3 keeps
 // distinct.
 extern TypeBinary TYPE_REFERENCE;

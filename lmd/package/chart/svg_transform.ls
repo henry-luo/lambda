@@ -1,8 +1,8 @@
 // SVG affine transforms are shared by coordinate projection and transition interpolation.
 import util: .util
-type operation = \(a+ s* "(" (d | s | "," | "." | "+" | "-" | "e" | "E")* ")")
-type number_token = \(("+" | "-")? (d+ ("." d*)? | "." d+) (("e" | "E") ("+" | "-")? d+)?)
-type separators = \((s | ",")*)
+type operation = \("\a"+ "\s"* "(" ("\d" | "\s" | "," | "." | "+" | "-" | "e" | "E")* ")")
+type number_token = \(("+" | "-")? ("\d"+ ("." "\d"*)? | "." "\d"+) (("e" | "E") ("+" | "-")? "\d"+)?)
+type separators = \(("\s" | ",")*)
 pub let identity = [1.0, 0.0, 0.0, 1.0, 0.0, 0.0]
 pub fn project(matrix, point) => [matrix[0] * point[0] + matrix[2] * point[1] + matrix[4],
     matrix[1] * point[0] + matrix[3] * point[1] + matrix[5]]
