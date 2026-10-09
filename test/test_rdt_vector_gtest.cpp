@@ -2331,6 +2331,36 @@ TEST_F(SvgAnimationLifetimeTest, EmptyNonPaintSubstitutionDoesNotReadPaintListHe
     EXPECT_TRUE(!result || !*result);
 }
 
+TEST(FontContextTest, PlatformFallbackHandlesStayWithTheirOwningContext) {
+    FontContextConfig config = {};
+    config.pixel_ratio = 1.0f;
+    FontContext* first = font_context_create(&config);
+    FontContext* second = font_context_create(&config);
+    ASSERT_NE(first, nullptr);
+    ASSERT_NE(second, nullptr);
+    FontStyleDesc style = {};
+    style.family = "sans-serif";
+    style.size_px = 16.0f;
+    style.weight = FONT_WEIGHT_NORMAL;
+    FontHandle* a = font_find_codepoint_fallback(first, &style, 0x2211, nullptr);
+    FontHandle* b = font_find_codepoint_fallback(second, &style, 0x2211, nullptr);
+    ASSERT_NE(a, nullptr);
+    ASSERT_NE(b, nullptr);
+    EXPECT_EQ(a->ctx, first);
+    EXPECT_EQ(b->ctx, second);
+    EXPECT_NE(a, b);
+    font_handle_release(a);
+    font_handle_release(b);
+    // retiring either pool must leave the other's cached fallback usable.
+    font_context_destroy(first);
+    FontHandle* retained = font_find_codepoint_fallback(second, &style, 0x2211, nullptr);
+    ASSERT_NE(retained, nullptr);
+    EXPECT_EQ(retained->ctx, second);
+    EXPECT_GT(font_get_metrics(retained)->line_height, 0.0f);
+    font_handle_release(retained);
+    font_context_destroy(second);
+}
+
 TEST(SvgCascadeTest, FontDescriptorChangesAdvancePaintResourceGeneration) {
     FontContext* context = font_context_create(nullptr);
     ASSERT_NE(context, nullptr);

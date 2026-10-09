@@ -524,7 +524,53 @@ Limits: direct text measurement shares the current SVG placement/shaping
 capabilities; it adds no shaping engine. MATH accents with a finite variant set
 stop at the largest supplied variant. Ordinary faces without constructions
 use geometric outline stretching, which can change stroke weights.
-Font caches are query-local. **RAD07-L3** (2026-10-09) changes ordinary math
+Explicit font queries reuse one native snapshot per `EvalContext` (2026-10-09).
+The capsule owns its font contexts and complete byte/style identity independently
+of GC values, replaces the entry only after successful validation, and releases
+it at context teardown (**D5.4.2–D5.4.4**). Identity includes resource order,
+family, size, weight, slant and every font byte; a family name or GC address is
+insufficient. The key is capped at 8 MiB; larger snapshots and queries without
+explicit faces retain query-local contexts. `math_metrics`, `font_metrics` and
+`measure_text` share this path, avoiding repeated WOFF2 decompression for every
+formula while keeping resource acquisition in Lambda IO (**D7.1.2v2**).
+Platform fallback handles are also cached inside their owning `FontContext`,
+not a process-global table (**D5.4.3**). A handle retains pool-owned storage;
+sharing it between concurrent query/view contexts made iframe teardown release
+a handle after its original pool had gone. The native two-context regression
+`PlatformFallbackHandlesStayWithTheirOwningContext` and the existing LaTeX
+iframe navigation fixture cover this ownership boundary.
+`test_font_snapshot_reuse.ls` covers equivalent snapshots, changed bytes/styles,
+corrupt input, size changes, shared measurements and missing glyphs, including
+forced collection with freed-memory poisoning. Before/after release viewer
+artifacts for `test/input/math_intensive_test.tex` are retained under
+`temp/math-load/`; viewport PNGs at four distinct scroll positions are
+byte-identical.
+Three interleaved fresh-process runs per release binary (original/final/final/
+original/original/final, with
+`LAMBDA_AUTO_CLOSE=1`) measured median process time **20.28 s → 5.11 s**
+(3.97× faster, 75% lower). This includes startup, initial rendering and teardown;
+it excludes user dwell time. Each process starts with an empty native query
+cache; filesystem/platform caches are warm. No build or test from this task
+ran concurrently; ambient machine activity is recorded with the timing artifacts.
+These numbers are macOS measurements, not cross-platform gates.
+
+Cache validation: the snapshot regression passes with every-allocation GC and
+freed-memory poisoning; all 15 font unit tests, 108 vector tests and five focused
+viewer regressions pass. Three final-release iframe navigation replays and the
+four-position math render comparison finish with zero tracked live allocations.
+The Test262 baseline passes all 40,261 cases with no retries. The final Lambda
+baseline is 6,509/6,511: `edit_view_only` and the batched
+`math_test_math_html_output` mismatch also reproduce with the original release;
+the short math batch produces byte-identical HTML in both releases. The full
+Radiant gate retains existing CSS-list and CSS-memory mismatches; its iframe
+teardown failure was fixed and verified by the focused final-release runs.
+An optional native sweep remains incomplete because four standalone runners
+have unrelated geometry/boundary link failures. An extra every-allocation-GC
+iframe replay is also not a passing gate: the original crashes, while the final
+release misses the timed URL assertions. Logs and exact artifacts remain under
+`temp/math-load/`.
+
+**RAD07-L3** (2026-10-09) changes ordinary math
 glyphs to SVG `<text>` with explicit resolved family, weight, style and size.
 Used bundled/supplied faces accompany each SVG as embedded `@font-face` rules;
 installed-font options require the same fonts in the viewer. Unencoded MATH

@@ -270,6 +270,14 @@ typedef struct FontFaceEntry {
 // FontContext — internal layout (public API sees opaque pointer)
 // ============================================================================
 
+#define FONT_PLATFORM_FALLBACK_CACHE_SIZE 32
+typedef struct {
+    const char* path; // borrowed from handle->file_data_path
+    int face_index;
+    float size_px;
+    FontHandle* handle;
+} FontPlatformFallbackEntry;
+
 struct FontContext {
     // memory management
     Pool*           pool;               // owned (or borrowed if caller supplied)
@@ -305,6 +313,10 @@ struct FontContext {
 
     // codepoint → fallback handle cache (for font_find_codepoint_fallback)
     struct hashmap*  codepoint_fallback_cache;
+
+    // fallback handles belong to this pool and cannot be shared across contexts.
+    FontPlatformFallbackEntry platform_fallback_cache[FONT_PLATFORM_FALLBACK_CACHE_SIZE];
+    int platform_fallback_count;
 
     // cached emoji font handle (reused across font_load_glyph_emoji calls)
     FontHandle*     cached_emoji_handle;
@@ -612,7 +624,7 @@ FontHandle*         font_resolve_fallback(FontContext* ctx, const FontStyleDesc*
 FontHandle*         font_find_codepoint_fallback(FontContext* ctx, const FontStyleDesc* style,
                                                   uint32_t codepoint,
                                                   FontHandle* source_handle);
-void                font_fallback_reset_platform_cache(void);
+void                font_fallback_reset_platform_cache(FontContext* ctx);
 
 // font_face.c
 const FontFaceEntry* font_face_find_internal(FontContext* ctx, const char* family,

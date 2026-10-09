@@ -58,7 +58,8 @@ static const RadiantViewCase g_radiant_view_cases[] = {
     {"RadiantViewTest.LoadsMarkdownMathAsHeadlessView", "markdown_math", "test/input/simple_math_test.md"},
     {"RadiantViewTest.LoadsWikiAsHeadlessView", "wiki", "test/input/test.wiki"},
     {"RadiantViewTest.LoadsLatexShowcaseAsHeadlessView", "latex_showcase", "test/input/latex-showcase.tex"},
-    {"RadiantViewTest.LoadsMathIntensiveLatexAsHeadlessView", "latex_math_intensive", "test/input/math_intensive_test.tex"},
+    // font-query snapshots must be released with their evaluation context.
+    {"RadiantViewTest.LoadsMathIntensiveLatexAsHeadlessView", "latex_math_intensive", "test/input/math_intensive_test.tex", nullptr, true},
     {"RadiantViewTest.LoadsYamlAsHeadlessView", "yaml", "test/input/more_test.yaml"},
     {"RadiantViewTest.LoadsLambdaReportAsHeadlessView", "lambda_report", "test/lambda/complex_iot_report_html.ls"},
     {"RadiantViewTest.LoadsLambdaChartDashboardAsHeadlessView", "lambda_chart_dashboard", "test/lambda/chart/chart_dashboard.ls"},

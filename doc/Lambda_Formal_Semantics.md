@@ -1,6 +1,6 @@
 # Lambda Formal Semantics — Specification
 
-**Spec version:** 59.0.1 (2026-10-08)
+**Spec version:** 60.0.0 (2026-10-09)
 
 **Status:** normative — the single source of truth for Lambda language semantics.
 This document records what Lambda's semantics **is by decision**, not what any
@@ -1531,38 +1531,41 @@ Not a ruling; see [C4.2e](../vibe/Lambda_Semantics_Formal.md) and
   leaf array; `int[2][3]` is three arrays of two). Counts on a *run* are the
   occurrence family (S11.1.6v2): a counted array is spelled `[T{n,m}]`, never
   `T[n,m]`. A lint applies to bare `[T]` in annotation position only. [C7]
-- **S11.1.2v3** String structural patterns are delimited islands: `\( ... )`
-  denotes a string-domain pattern and `\symbol( ... )` denotes a
-  symbol-domain pattern. Inside an island, quoted literals are strings, `d`,
-  `w`, `s`, `a`, `.`, and `...` are the reserved pattern atoms, whitespace is
-  concatenation, and the existing union, grouping, occurrence (`? + *
-  {n,m}`, S11.1.6v3), and `to` rules apply. **An island binds, tightest
-  first: an atom (a range `"a" to "z"` is one atom), then prefix `!`, then a
-  suffix, then concatenation, then `|`**, so `\(!d+)` is `(!d)+`,
-  `\("a" "b"+)` repeats only the `"b"`, and `\("a" | "b" "c")` matches `a`
-  or `bc`. **`|` is the island's only binary operator.** **Prefix `!`
-  complements a single-character set** and matches one character outside it.
-  The set may be a class, a range, a one-character string, or a union, group,
-  negation or named pattern built only from these, so `\(!("a" | "b" | "c"))`
-  is regex `[^abc]`. Any other operand is a compile error. **Inside an island
-  `!` has no binary form and `&` has none at all**: `\(w ! d)` is a word
-  character followed by a non-digit, and `\(a & w)` is a compile error. To
-  intersect or exclude whole patterns, use the type operators between them,
-  as in `\(A) & \(B)`, `\(A) ! \(B)` or `!\(P)` (S10.1.1v3). A pattern's tag
-  is part of its type value: matching checks the value domain before content,
-  so a string never satisfies a symbol pattern or vice versa. A literal-only
-  island is representationally identical to the corresponding ordinary
-  literal union; named structural patterns may be reused as content inside
-  either tagged domain. *Why: the tiers are regular expressions' own wherever
-  the two share one, and prefix-before-suffix gives `!d+` the reading of regex
-  `[^0-9]+`, the only one the single-character rule leaves legal. `!` stops at
-  one character and `&` stays outside the island because regex engines negate
-  only single characters (`[^…]`) and cannot intersect: complementing or
-  intersecting longer patterns needs a deterministic automaton or a matcher
-  of Lambda's own. A binary `!` would also collide with concatenation, since
-  whitespace joins atoms. Between whole patterns, `&` and `!` combine two full
-  matches and need no regex support.* [S10.1.1v3, D3.1.1v2, D3.1.2;
-  SP17–SP20]
+- **S11.1.2v4*** **String and symbol structural patterns share the delimiter
+  `\( ... )`; quotes and named patterns determine one domain per island.**
+  Double quotes select strings, single quotes select symbols; named patterns
+  preserve their domain. Conflicting domains are a compile error, even across
+  alternatives; a mixed-domain union is written between whole islands.
+  `\symbol(...)` is retired. **Only inside an island**, quoted `\d`, `\w`,
+  `\s`, `\a` denote the digit, word, whitespace and alphabetic classes;
+  ordinary escapes retain their literal meaning, and `\\d` is literal
+  backslash-plus-d. Bare `d`, `w`, `s`, `a` are ordinary pattern references.
+  Operators stay outside quotes: `"\d+"` is a digit then a literal plus;
+  `"\d"+` repeats a digit. One quoted fragment is one repetition operand,
+  so `\("a\s"*)` repeats the whole letter-plus-whitespace fragment.
+  Bare `.` and `...` inherit the island's domain. **An island with no
+  domain-bearing literal or named pattern is a compile error**: `\(.)`,
+  `\(...)` and grouped or repeated wildcard-only variants are rejected,
+  never defaulted to strings or made dual-domain. `"."` and `"..."` remain
+  literal punctuation. Matching checks the domain before content.
+  Whitespace concatenates within one text value; occurrence outside the
+  island still counts separate values (S11.1.6v3). **Binding order, tightest
+  first: atom (a range is one), prefix `!`, suffix, concatenation, `|`.**
+  Grouping, `to` and the occurrence spellings `? + * {n} {n+} {n,m}` remain;
+  `\(!"\d"+)` is `(!"\d")+`, and `\("a" | "b" "c")` matches a or bc.
+  **`|` is the only binary operator inside an island. Prefix `!` complements
+  a single-character set in that island's domain.** Its operand is a class,
+  range, one-character literal, or a union, group, negation or named pattern
+  built only from these; any other operand is a compile error.
+  `\("\w" !"\d")` is a word character followed by a non-digit. Binary `!`
+  and `&` remain outside islands, combining whole-pattern full matches:
+  `\(A) ! \(B)`, `\(A) & \(B)`, `!\(P)` (S10.1.1v3).
+  A literal-only island is representationally identical to its same-domain
+  ordinary literal union. There is no implicit cross-domain reuse of named
+  patterns. *Why: the delimiter distinguishes text repetition from value
+  runs; quotes make string and symbol syntax symmetric without changing
+  literal letters into classes or guessing a wildcard-only domain.*
+  [S10.1.1v3, S11.1.6v3, D3.1.1v4, D3.1.2; SP17–SP20, SP24]
 - **S11.1.3** A range type `X to Y` denotes inclusive membership in the
   consecutive values between its bounds. Integer ranges admit exact integer
   values; string ranges require single Unicode-codepoint strings and admit
@@ -2658,6 +2661,7 @@ Status of `*`-marked rulings as of 2026-08-24. Conformance plans:
 
 | Ruling | Status |
 |---|---|
+| S11.1.2v4 | **Ruled 2026-10-09 (USER); implementation pending.** Quoted class escapes, one shared delimiter, consistent quote/reference domains, rejection of wildcard-only islands and retirement of implicit cross-domain reuse are not implemented. The parser and corpus still use the v3 surface. This documentation change runs no runtime conformance gate. Design and migration examples: [String Pattern SP24](../vibe/Lambda_Design_String_Pattern.md#1-sp24--quoted-classes-and-one-domain-per-island). |
 | S2.4.1v2, S2.4.2v5, S2.4.3v3–S2.4.4, S2.4.5v2, S10.4.1–S10.4.3, S10.5.1–S10.5.3 | Implemented for the current path/name scope on 2026-08-19, with the S2.4.3v3 spelling re-verified on 2026-08-28: maximal namespace-qualified element/attribute names, the undelimited relative-path element child `<svg \.rect>` (no `;`, no comma), logical `/.a`, relative `\.a`, absolute `file./.a`/`file.host.a`/`http.host.a`, root `./`, parent `.~~`, contextual `~~`, typed key operations, and interpreter/MIR Direct occurrence carriers. **S2.4.2v5 conformant as of 2026-09-21** (JIT and interpreter identical): the bare roots `/` and `\`, and `\` prints as the empty relative path; integer first keys `\.1` and `/.1`; index steps (`/[1]` ≡ `/.1`, `\[1]` ≡ `\.1`, `p[k]` ≡ `p.k`, numeric keys normalized through S8.2.1v4); key steps throughout a path literal (`\[1].name` is `\.1.name`, `\.a['name']` is `\.a.name`); integer steps after `.`, `\`, `./`, `~~` and `.*` (`\.1.2`, `file./.1`). `\.` alone and `.[` anywhere are E100. Broken path lines were checked against S16.1.1. That day's probe defect, `\.1.x` evaluating to `file./`, is fixed ([Type_Path §10.1](../vibe/Lambda_Type_Path.md)). Fixtures: `path_roots_steps.ls`, `path_line_continuation.ls`, `path_index_capture.ls`, `member_int_steps.ls`, `proc/return_relative_path.ls`, and four negative syntax fixtures. S16 harnesses: C parser 197/197, reference grammar 180/180. Lambda baseline 3632/3633; the one failure is an unrelated JS trace-parser test. Still deferred: the default resolver qualifies logical roots to local `file./`, and generalized immutable mount tables, remote transport, network hostname discovery, and S8.2.1v4 key normalization outside path subscripts are not built. |
 | S4.8.1 | Float printer is not yet shortest-round-trip (`0.1 + 0.2` prints `0.3`). |
 | S5.3.1 | `ArrayNum ==` is representation-sensitive in known cases — ruled a bug; also gates the data-processing engines (P0/FC8). |

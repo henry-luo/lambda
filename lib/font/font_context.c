@@ -223,7 +223,7 @@ void font_context_destroy(FontContext* ctx) {
 
     // Platform fallback cache keeps retained handles outside the per-context
     // hashmaps; release it before tearing down the file-data cache it references.
-    font_fallback_reset_platform_cache();
+    font_fallback_reset_platform_cache(ctx);
 
     // release cached emoji handle before face cache teardown
     if (ctx->cached_emoji_handle) {
@@ -309,7 +309,7 @@ bool font_context_set_pixel_ratio(FontContext* ctx, float pixel_ratio) {
     // Every object below contains or retains scale-dependent physical output.
     // FontProp aliases keep old handles alive until setup_font replaces them.
     font_context_reset_glyph_caches(ctx);
-    font_fallback_reset_platform_cache();
+    font_fallback_reset_platform_cache(ctx);
     if (ctx->codepoint_fallback_cache) {
         hashmap_clear(ctx->codepoint_fallback_cache, true);
     }
@@ -363,10 +363,10 @@ void font_context_reset_document_fonts(FontContext* ctx) {
     // producing wrong line-height metrics. Clearing all entries is safe
     // because glyph caches are also cleared between documents.
     //
-    // IMPORTANT: clear the static platform-fallback handle cache FIRST. It
+    // clear this context's platform-fallback handle cache first. It
     // retains handles and borrows their path strings, so release it before
     // clearing the codepoint cache and font file-data cache.
-    font_fallback_reset_platform_cache();
+    font_fallback_reset_platform_cache(ctx);
     if (ctx->codepoint_fallback_cache) {
         hashmap_clear(ctx->codepoint_fallback_cache, true);
     }
