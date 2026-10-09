@@ -30,6 +30,9 @@ struct ViewCssStyle {
     lam::Up<CssDeclaration*> inline_declarations;
     size_t inline_count;
     lam::Up<ViewCssVariable> variables;
+    bool computed_bindings;
+    ViewModelStatus binding_status;
+    const char* binding_reason;
     lam::Up<ViewCssPageContext> page_context;
     DisplayValue display;
     FontProp font;
@@ -137,10 +140,14 @@ const ViewCssStyle* view_css_common_ancestor(const ViewCssStyle* left, const Vie
 const CssValue* view_css_property(ViewTree* tree, ViewCssStyle* style, const char* name,
                                  CssDeclaration* winning = nullptr);
 const CssValue* view_css_resolve_value(ViewTree* tree, ViewCssStyle* style, const CssValue* value);
+bool view_css_computed_property_supported(const char* name);
+const CssValue* view_css_computed_property(ViewTree* tree, const ViewCssStyle* style, const char* name);
 const CssValue* view_css_declaration_value(ViewTree* tree, ViewCssStyle* style,
     const CssDeclaration* declaration, const char* property);
 ViewCssStyle* view_css_generated_style(ViewTree* tree, ViewCssStyle* base,
     const CssValue* font_size, const CssValue* color, CssEnum align);
+const CssValue* view_css_compute_length(ViewTree* tree, ViewCssStyle* style,
+    CssPropertyCode property, const CssValue* value, const CssValue* inherited);
 float view_css_length(ViewTree* tree, const ViewCssStyle* style, const CssValue* value,
                      CssPropertyCode property, float inline_size, float block_size);
 bool view_css_border_spacing(ViewTree* tree, ViewCssStyle* style, float* horizontal, float* vertical);

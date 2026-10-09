@@ -1343,7 +1343,13 @@ TEST(RenderOutputParity, FoAndNativePageControlsSharePreviewAndPhysicalPdfPages)
         {"proportions", 3, "/MediaBox [0 0 225.00 120.00]"},
         {"proportions_columns", 3, "/MediaBox [0 0 225.00 120.00]"},
         {"numbered_columns", 3, "/MediaBox [0 0 225.00 120.00]"},
-        {"table_furniture", 3, "/MediaBox [0 0 225.00 120.00]"}};
+        {"table_furniture", 3, "/MediaBox [0 0 225.00 120.00]"},
+        {"expressions", 3, "/MediaBox [0 0 225.00 120.00]"},
+        {"parent_values", 3, "/MediaBox [0 0 150.00 120.00]"},
+        {"property_bindings", 3, "/MediaBox [0 0 150.00 120.00]"},
+        {"nearest_values", 3, "/MediaBox [0 0 150.00 120.00]"},
+        {"percentage_indents", 3, "/MediaBox [0 0 150.00 120.00]"},
+        {"percentage_indents_fractional", 3, "/MediaBox [0 0 150.00 120.00]"}};
     const char* extensions[] = {"fo", "rpd"};
     for (const Fixture& fixture : fixtures) {
         SCOPED_TRACE(fixture.name);

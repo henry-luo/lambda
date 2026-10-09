@@ -2,6 +2,7 @@
 #include "view_tree_css.hpp"
 #include "layout.hpp"
 #include "../lambda/input/css/css_engine.hpp"
+#include "../lambda/dom/dom.h"
 #include "../lib/memtrack.h"
 #include "../lib/hashmap_helpers.h"
 #include "../lib/str.h"
@@ -54,6 +55,18 @@ static bool page_native_values(DomElement* source, const char* const* names, siz
     });
 }
 
+DomElement* radiant_page_style_parent(DomElement* source) {
+    DomElement* parent = source ? source->parent_element() : nullptr;
+    // structural wrappers may own layout boxes without becoming a new computed inheritance context.
+    // the document root remains the initial font and inheritance anchor.
+    while (parent && parent->parent_element()) {
+        const char* transparent = dom_element_attribute_ns(parent, RADIANT_PAGE_NAMESPACE, "style-transparent");
+        if (!transparent || strcmp(transparent, "true")) break;
+        parent = parent->parent_element();
+    }
+    return parent;
+}
+
 static const char* whitespace_names[] = {"linefeed-treatment", "white-space-treatment", "white-space-collapse", "wrap-option"};
 
 static const char* image_trait_names[] = {"content-width", "content-height", "scaling"};
@@ -61,12 +74,18 @@ static const char* image_trait_names[] = {"content-width", "content-height", "sc
 static bool page_computed_dimension(ViewTree* tree, ViewCssStyle* style, const char* text,
         RadiantLengthPercentage* result) {
     CssDeclaration* declaration = css_parse_property_value_declaration("margin-top", 10, text, strlen(text), tree->model->css->pool);
-    const CssValue* value = declaration ? declaration->value : nullptr;
+    const CssValue* value = declaration ? view_css_resolve_value(tree, style, declaration->value) : nullptr;
     if (!value) return false;
-    result->percentage = value->type == CSS_VALUE_TYPE_PERCENTAGE;
-    if (result->percentage) result->value = (float)value->data.percentage.value;
+    CssMathType type = css_math_value_type(value);
+    result->percentage = type == CSS_MATH_PERCENT;
+    if (result->percentage) {
+        CssMathEvaluationContext context = {}; context.preserve_percentages = true;
+        CssMathResult evaluated = css_math_evaluate(value, &context);
+        if (!evaluated.resolved) return false;
+        result->value = (float)evaluated.percentage;
+    }
     else {
-        if (value->type != CSS_VALUE_TYPE_LENGTH &&
+        if (type != CSS_MATH_LENGTH &&
             !(value->type == CSS_VALUE_TYPE_NUMBER && !value->data.number.value)) return false;
         result->value = view_css_length(tree, style, value, CSS_PROPERTY_MARGIN_TOP, 0.0f, 0.0f);
     }
@@ -340,6 +359,7 @@ bool radiant_flow_trait_name(const char* name) {
     return name && (!strcmp(name, "line-stacking-strategy") || !strcmp(name, "text-altitude") ||
         !strcmp(name, "text-depth") || !strcmp(name, "area-source") || !strcmp(name, "block-inline-geometry") ||
         !strcmp(name, "start-indent") || !strcmp(name, "end-indent") || !strcmp(name, "column-proportion") || !strcmp(name, "column-number") ||
+        !strcmp(name, "style-transparent") ||
         !strcmp(name, flow_table_omit_names[0]) || !strcmp(name, flow_table_omit_names[1]) ||
         flow_decoration_key(name, &index, &component) || flow_trait_key(name, &space, &index, &component));
 }
@@ -409,12 +429,14 @@ bool radiant_flow_traits_resolve(ViewTree* tree, ViewCssStyle* style) {
     const char* inline_geometry = nullptr; const char* column_proportion = nullptr; const char* column_number = nullptr;
     const char* indents[2] = {}; const char* table_omit[2] = {};
     const char* nominal[2] = {};
+    const char* style_transparent = nullptr;
     bool any = page_native_attributes(style->source, [&](const char* local, const char* value) {
         bool space; size_t index, component;
         if (!strcmp(local, "cell-alignment")) {
             cell_alignment = value; return true;
         }
         if (!strcmp(local, "line-stacking-strategy")) { line_stacking = value; return true; }
+        if (!strcmp(local, "style-transparent")) { style_transparent = value; return true; }
         if (!strcmp(local, "column-proportion")) { column_proportion = value; return true; }
         if (!strcmp(local, "column-number")) { column_number = value; return true; }
         for (size_t i = 0; i < 2; i++) if (!strcmp(local, flow_table_omit_names[i])) { table_omit[i] = value; return true; }
@@ -430,15 +452,22 @@ bool radiant_flow_traits_resolve(ViewTree* tree, ViewCssStyle* style) {
     });
     const RadiantFlowTraits* inherited_traits = style->parent ? style->parent->flow_traits.get() : nullptr;
     if (!any && (!inherited_traits || (inherited_traits->line_stacking == RADIANT_LINE_STACK_CSS &&
-        inherited_traits->indents[0] == 0.0f && inherited_traits->indents[1] == 0.0f))) return true;
+        inherited_traits->indents[0] == 0.0f && inherited_traits->indents[1] == 0.0f &&
+        !inherited_traits->indent_expressions[0] && !inherited_traits->indent_expressions[1]))) return true;
     RadiantFlowTraits* traits = (RadiantFlowTraits*)pool_calloc(tree->model->css->pool, sizeof(RadiantFlowTraits));
     if (!traits) return false;
     style->flow_traits = lam::up(traits);
     RadiantFlowTraits empty = {};
     const RadiantFlowTraits* parent = style->parent && style->parent->flow_traits ? style->parent->flow_traits.get() : &empty;
     traits->line_stacking = parent->line_stacking;
-    for (size_t i = 0; i < 2; i++) traits->indents[i] = parent->indents[i];
+    for (size_t i = 0; i < 2; i++) {
+        traits->indents[i] = parent->indents[i];
+        traits->indent_expressions[i] = parent->indent_expressions[i];
+        traits->indent_owners[i] = parent->indent_owners[i];
+    }
     auto fail = [&](const char* reason) { traits->status = VIEW_MODEL_INVALID_ARGUMENT; traits->reason = reason; return true; };
+    if (style_transparent && strcmp(style_transparent, "true") && strcmp(style_transparent, "false"))
+        return fail("style transparency requires true or false");
     for (size_t i = 0; i < 2; i++) if (table_omit[i] &&
         !radiant_page_boolean(table_omit[i], parent->table_omit[i], &traits->table_omit[i]))
         return fail("table furniture omission requires true, false or inherit");
@@ -468,8 +497,25 @@ bool radiant_flow_traits_resolve(ViewTree* tree, ViewCssStyle* style) {
         else if (strcmp(value, "css")) return fail("decoration conditionality requires css, discard or retain");
     }
     for (size_t i = 0; i < 2; i++) if (const char* value = indents[i]) {
-        if (strcmp(value, "inherit") && !flow_length(tree, style, value, &traits->indents[i]))
-            return fail("reference indents require finite lengths; percentages require declaration-reference inheritance");
+        if (!strcmp(value, "inherit")) continue;
+        CssDeclaration* declaration = css_parse_property_value_declaration("margin-left", 11, value, strlen(value), tree->model->css->pool);
+        const CssValue* resolved = declaration ? view_css_resolve_value(tree, style, declaration->value) : nullptr;
+        CssMathType type = resolved ? css_math_value_type(resolved) : CSS_MATH_INVALID;
+        if (type != CSS_MATH_LENGTH && type != CSS_MATH_PERCENT && type != CSS_MATH_LENGTH_PERCENT &&
+            !(resolved && resolved->type == CSS_VALUE_TYPE_NUMBER && !resolved->data.number.value))
+            return fail("reference indents require a finite length or length-percentage expression");
+        const CssValue* computed = view_css_compute_length(tree, style, CSS_PROPERTY_MARGIN_LEFT, resolved, nullptr);
+        if (!computed) return false;
+        traits->indent_expressions[i] = nullptr; traits->indent_owners[i] = nullptr;
+        if (layout_css_value_has_percentage(computed)) {
+            if (style->display.outer != CSS_VALUE_BLOCK || style->display.inner != CSS_VALUE_FLOW)
+                return fail("percentage indents require an ordinary block declaration context");
+            // font terms compute at the owner; percentages await its first selected reference area.
+            traits->indents[i] = 0.0f; traits->indent_expressions[i] = lam::up(computed); traits->indent_owners[i] = lam::up(style);
+        } else {
+            traits->indents[i] = view_css_length(tree, style, computed, CSS_PROPERTY_MARGIN_LEFT, 0.0f, 0.0f);
+            if (!isfinite(traits->indents[i])) return fail("reference indents require finite computed lengths");
+        }
     }
     if (area_source) {
         if (!strcmp(area_source, "descendants")) traits->descendant_areas = true;
@@ -501,11 +547,10 @@ bool radiant_flow_traits_resolve(ViewTree* tree, ViewCssStyle* style) {
                 return fail("nominal text geometry requires resolved parent font metrics");
             used = i ? depth : altitude;
         } else {
-            CssDeclaration* parsed = css_parse_property_value_declaration("font-size", 9, value, strlen(value), tree->model->css->pool);
-            const CssValue* size = parsed ? parsed->value : nullptr;
-            if (size && size->type == CSS_VALUE_TYPE_PERCENTAGE)
-                used = (float)(size->data.percentage.value * 0.01) * style->font.font_size;
-            else if (!flow_length(tree, style, value, &used)) return fail("nominal text geometry requires a font metric, length or font-em percentage");
+            RadiantLengthPercentage size = {};
+            if (!page_computed_dimension(tree, style, value, &size))
+                return fail("nominal text geometry requires a font metric, length or font-em percentage");
+            used = size.percentage ? size.value * 0.01f * style->font.font_size : size.value;
         }
         if (!isfinite(used) || used < 0.0f) return fail("nominal text geometry requires finite nonnegative values");
     }
@@ -957,6 +1002,11 @@ static const char* page_inherited_attribute(DomElement* source, const char* name
 bool radiant_page_rounded_count(const char* text, uint32_t minimum, uint32_t* result) {
     double value = 0.0; const char* end = nullptr;
     if (!text || !result || !str_to_double(text, strlen(text), &value, &end) || *end || !isfinite(value)) return false;
+    return radiant_page_rounded_count(value, minimum, result);
+}
+
+bool radiant_page_rounded_count(double value, uint32_t minimum, uint32_t* result) {
+    if (!result || !isfinite(value)) return false;
     value = fmax((double)minimum, floor(value + 0.5));
     if (value > INT32_MAX) return false;
     *result = static_cast<uint32_t>(value); return true;

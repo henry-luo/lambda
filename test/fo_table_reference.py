@@ -77,7 +77,7 @@ def main():
     parser.add_argument("--fop-home", type=Path, required=True,
                         help="directory containing build/ and lib/")
     parser.add_argument("--fop-config", type=Path, required=True)
-    parser.add_argument("--fixture", choices=("tables", "alignment", "display_alignment", "graphics", "lists", "lists_context", "cell_flow", "indents", "indents_auto", "corresponding", "conditional", "conditional_components", "conditional_visible", "proportions", "proportions_columns", "numbered_columns", "table_furniture"), default="tables")
+    parser.add_argument("--fixture", choices=("tables", "alignment", "display_alignment", "graphics", "lists", "lists_context", "cell_flow", "indents", "indents_auto", "corresponding", "conditional", "conditional_components", "conditional_visible", "proportions", "proportions_columns", "numbered_columns", "table_furniture", "expressions", "parent_values", "property_bindings", "nearest_values", "percentage_indents", "percentage_indents_fractional"), default="tables")
     parser.add_argument("--output-dir", type=Path, default=Path("temp/fo_table_reference"))
     args = parser.parse_args()
     root = Path(__file__).resolve().parent.parent
@@ -92,8 +92,17 @@ def main():
     color_properties = ("background-color", "fill") if args.fixture == "graphics" else (
         ("background-color", "border-before-color", "border-after-color", "border-start-color", "border-end-color")
         if args.fixture in ("corresponding", "conditional", "conditional_components", "conditional_visible") else ("background-color",))
-    colors = sorted({node.attrib[prop] for node in source.iter() for prop in color_properties
-                     if prop in node.attrib})
+    colors, unresolved_colors = set(), set()
+    for node in source.iter():
+        for prop in color_properties:
+            if prop not in node.attrib:
+                continue
+            value = node.attrib[prop]
+            try:
+                ImageColor.getrgb(value)
+                colors.add(value)
+            except ValueError:
+                unresolved_colors.add(value)
     repeated_colors = {node.attrib["background-color"] for node in source.iter()
                        if node.tag.rsplit("}", 1)[-1] in ("table-header", "table-footer", "table-column")
                        and "background-color" in node.attrib}
@@ -110,7 +119,7 @@ def main():
                     color = node.attrib["background-color"]
                     repeated_colors.discard(color)
                     terminal_colors[color] = page
-    if not colors:
+    if not colors and not unresolved_colors:
         raise RuntimeError("The fixture must contain observable colored regions")
     java_args = [str(java), "-XX:-UsePerfData", "-Djava.awt.headless=true", "-Djava.io.tmpdir=" + str(scratch),
                  "-cp", str(home / "build/*") + os.pathsep + str(home / "lib/*"),
@@ -126,6 +135,17 @@ def main():
         root, output / "fop.log")
     run(java_args + ["-c", str(config), "-fo", str(fixture), "-at", "application/pdf", str(output / "fop-area-tree.xml")],
         root, output / "fop-area-tree.log")
+    if unresolved_colors:
+        # computed FO backgrounds are observed from the independent reference, never the candidate.
+        resolved_colors = {match.group(1) for node in ET.parse(output / "fop-area-tree.xml").iter()
+                           for match in [re.search(r"(?:^|\s)color=(#[0-9a-fA-F]{6,8})(?:\s|$)", node.attrib.get("background", ""))]
+                           if match}
+        if not resolved_colors:
+            raise RuntimeError("FOP supplied no resolved backgrounds for the authored color expressions")
+        colors.update(resolved_colors)
+    colors = sorted(colors)
+    report["observed_colors"] = colors
+    report["source_color_expressions"] = sorted(unresolved_colors)
     run([str(binary), "render", str(fixture), "--paged", "--block-remote-resources",
          "-o", str(candidate)], binary.parent, output / "radiant.log")
     for host, pdf in (("fop", reference), ("radiant", candidate)):

@@ -781,7 +781,8 @@ static CssMathResult css_math_function_result(const CssFunction* function,
         bool line_width = offset && strcmp(strategy, "line-width") == 0;
         if (line_width && type != CSS_MATH_LENGTH) return css_math_invalid();
         if (count == offset + 1) {
-            if (type != CSS_MATH_NUMBER && !line_width) return css_math_invalid();
+            // an unresolved custom property is checked again after substitution supplies its type.
+            if (type != CSS_MATH_NUMBER && type != CSS_MATH_DEFERRED && !line_width) return css_math_invalid();
             b = line_width && context ? context->line_width_step : 1.0;
         } else {
             type = css_math_common_type(type, second.type);
