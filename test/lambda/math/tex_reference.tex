@@ -1,0 +1,22 @@
+% Independent oracle: tex -interaction=nonstopmode -output-directory=temp test/lambda/math/tex_reference.tex
+% showbox reports ! OK and a nonzero exit status; inspect the dimensions in the log.
+\showboxbreadth=1000 \showboxdepth=100 \tracingonline=1
+\def\audit#1#2{\setbox0=\hbox{$#2$}\immediate\write16{CASE:#1 WIDTH:\the\wd0 HEIGHT:\the\ht0 DEPTH:\the\dp0}\showbox0}
+\audit{char}{b^2}
+\audit{group}{{b}^2}
+\audit{display-char}{\displaystyle b^2}
+\audit{cramped}{\displaystyle\sqrt{b^2}}
+\audit{explicit-style}{\sqrt{\textstyle b^2}}
+\audit{mixed-style}{\scriptstyle a+b+\displaystyle c+d}
+\audit{double-unary}{++b}
+\audit{spaced-binary}{a\,+b}
+\audit{fraction-atoms}{a{b\over c}d}
+\audit{underline}{\underline{b^2}}
+\audit{accent-sup}{\hat b^2}
+\audit{accent-nucleus-sup}{\hat{b^2}}
+\audit{paired-scripts}{b_M^g}
+\audit{nested}{x^{y^2}}
+\audit{subscript}{b_2}
+\audit{sum}{\displaystyle\sum_{i=1}^n i^2}
+\audit{quad}{\scriptstyle a\quad b}
+\bye

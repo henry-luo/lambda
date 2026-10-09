@@ -478,8 +478,9 @@ Work, in dependency order:
    normal glyph metrics and shared layout defaults. Noto Sans Math supplies
    test-only coverage for the enhanced path.
 3. Carry the resolved font context through math boxes and emission. Replace
-   character-count widths, per-character heuristics, Computer Modern sigma
-   constants and KaTeX Size1–4 recipes with the selected font's data. Keep
+   character-count widths, per-character heuristics and KaTeX Size1–4 recipes
+   with the selected font's data. The later Phase 14 user revision adds an
+   explicit, provenance-tracked CM math companion for bundled CMU only. Keep
    layout algorithms in Lambda and font parsing in `lib/font`. Emit the same
    font resources/glyphs that were measured; retire `metrics_data` after its
    consumers migrate.
@@ -603,7 +604,7 @@ Font audit and revision (2026-10-08, user): **MATH is an optional enhancement.**
 The 8 existing KaTeX WOFF2 faces and 12 CMU WOFF2 faces have no MATH table;
 their glyph advances, bounds and outlines remain usable. `math_metrics` now
 returns normal glyph facts and `has_math: false` / `constants: null` for these
-faces. `fallback.ls` applies [MathML Core §5.1 defaults](https://w3c.github.io/mathml-core/#layout-constants-mathconstants)
+faces. For explicit supplied/installed fonts, `fallback.ls` applies [MathML Core §5.1 defaults](https://w3c.github.io/mathml-core/#layout-constants-mathconstants)
 using the selected font's x-height, post underline thickness and OS/2 script
 offsets. The normal font API exposes those facts; Lambda retains layout policy
 (**D7.1.1 / D7.1.2v2**). No metrics from a different font are copied onto a glyph.
@@ -757,3 +758,92 @@ text limits, and script radicals are all places where the right answer is not
 another scalar field. The right answer is the same one MathLive uses: build the
 right box tree, keep the box's layout dimensions full precision, and let
 emission stringify once.
+
+
+### Phase 14 — TeX Math Rules and the CMU Companion (2026-10-09)
+
+User decision: add provenance-tracked Computer Modern math parameters matched
+to the bundled CMU profile. The original `cmsy10`, `cmsy7`, `cmsy5` and `cmex10`
+TFM files are read in Lambda, with source, license and SHA-256 provenance beside
+the resources. This supersedes the default-CMU fallback policy from Phase 11;
+explicit supplied/installed fonts still use their own MATH data or ordinary
+MathML fallback. Actual glyph geometry remains owned by the painted face.
+This changes package layout policy, without changing the formal layering or
+IO rulings (**D7.1.1 / D7.1.2v2**); no formal language ruling changes.
+
+The audit uses Knuth's [TeX82 source](https://tug.ctan.org/systems/knuth/dist/tex/tex.web),
+Appendix G's math-list conversion algorithms, and independent TeX `showbox`
+output in `test/lambda/math/tex_reference.tex`. Fixes cover:
+
+- Rule 18's single-character exception, script-sized compound-nucleus drops,
+  display/text/cramped minima, and coupled sup/sub clearance adjustment;
+- explicit style commands resetting cramped style; radical and accent nuclei
+  using cramped style, with underline preserving its surrounding style;
+- sequential binary-atom normalization across explicit glue, the complete
+  inter-atom spacing table, and glue using the current style's math quad;
+- ordinary fraction/group classification, explicit thick fraction-bar clearance,
+  fraction null delimiters and TeX's delimiter factor/shortfall;
+- character-accent script attachment, natural narrow accents, designed wide
+  accent variants, default display limits and larger display operator glyphs.
+
+Bundled CM parameters select 70% and 50% script sizes. The first superscript
+rise is 0.412892 em in display, 0.362892 em in text, and 0.288889 em in cramped
+style, before TeX's depth/clearance adjustments. A radical in the display
+quadratic formula therefore uses the cramped minimum, not the base letter's
+full height. Parameters for scripts come from the corresponding CMSY size;
+plain TeX's fixed tenex extension parameters do not shrink with script style.
+
+Scope: this package implements supported parsed math constructs, not the TeX
+macro language or arbitrary LaTeX packages. CMU text outlines, missing glyph
+italic/skew information, and geometrically scaled ordinary-font delimiters can
+still differ from original CM math fonts. Matrix environments retain Lambda's
+bounded layout rather than implementing arbitrary TeX alignment registers.
+MathLive is a visual comparison, not the normative oracle: its standalone
+cramped display radical currently differs from TeX.
+
+Validation (2026-10-09):
+
+- Final focused run: **71/71** math/LaTeX checks, including the new painted
+  baseline/size regressions and original-MATH/ordinary-font checks. The two
+  slow LaTeX cases were checked separately: `phase4_expl3` passes on replay;
+  `phase3_corpus` still exceeds the harness's 60-second limit. The same
+  `phase3_corpus` timeout reproduces with the original HEAD math package on
+  the identical executable. Initial unpartitioned run: 71/73, two timeouts;
+  this is not presented as a clean 73/73 aggregate gate.
+- Final SVG smoke corpus: **921/921**, finite boxes and self-contained SVG.
+  This is rendering/geometry coverage, not pixel identity with TeX.
+- An independent installed TeX run confirms the text/display/cramped script
+  shifts and the grouping, accent, underline and mixed-style behavior. The
+  four shipped TFM files are byte-identical to the recorded originals.
+- Chromium verifies the default quadratic's 70% exponent and approximately
+  0.288889 em cramped rise. Eight native PNG/pdfLaTeX comparisons render
+  successfully, with visible font/spacing differences; no pixel-equality
+  acceptance is claimed. Existing document goldens were refreshed only after
+  checking titles and painted glyphs; narrow vector accents now use the
+  natural glyph instead of a stretched variant.
+- Full `make test-lambda-baseline` attempt: **3994/5621**, with **2112/2112**
+  input tests passing. Concurrent builds repeatedly removed/replaced the
+  shared `lambda.exe`, causing missing-host failures, so this is not an
+  authoritative aggregate result. Focused and corpus checks use a private
+  executable copy, SHA-256
+  `a492748642e6d3654f07fdb6eb3c0360aa81ee37ff504882665f60e0f3663daa`.
+- Scoped `git diff --check` passes. No runtime, native layout, build-system or
+  vendor code was changed for this phase.
+
+Artifacts under `temp/`: `math_tex_final_tests.log`, `math_tex_corpus.json`,
+`tex_reference.log`, `math_tex_corpus_recheck.log`,
+`math_tex_original_corpus.log`, `math_tex_lambda_baseline.log`, and
+`math_quadratic_corrected.png`. Independent native comparisons are under
+`math_tex_focus_comparison/run-tGfYBP/`.
+
+Reproduce with a stable host and no concurrent rebuild:
+
+```sh
+./test/test_lambda_gtest.exe --gtest_filter='AutoDiscovered/*math_*:AutoDiscovered/*latex_*'
+node test/lambda/math/run_corpus.mjs --fixture-source all --jobs 4 --report temp/math_tex_corpus.json
+tex -interaction=nonstopmode -output-directory=temp test/lambda/math/tex_reference.tex
+```
+
+The TeX `showbox` oracle intentionally emits `! OK` diagnostics and exits
+nonzero; inspect its logged dimensions. Production rendering needs no TeX
+installation.
