@@ -1449,7 +1449,8 @@ RADIANT_C_API Item fn_radiant_focus_set(Item node_item, Item from_keyboard_item)
     if (!state || !is_view_programmatically_focusable((View*)elem)) {
         return radiant_bool_item(false);
     }
-    focus_set(state, (View*)elem, is_truthy(from_keyboard_item));
+    // explicit focus includes negative tabindex targets used by roving widgets.
+    focus_set_programmatic(state, (View*)elem, is_truthy(from_keyboard_item));
     return radiant_bool_item(true);
 }
 

@@ -61,7 +61,7 @@ A test is killed only after it produces no output for the idle timeout. With `--
 | `make test-lambda-baseline` | `test-input-baseline`, then `lambda` suite baseline (excludes `test_node_prelim_gtest`, `test_lambda_concurrency_gtest`), one merged report |
 | `make test-lambda-full` | the above plus concurrency, `test_lambda_extended_gtest`, `test_lambda_domnode_gtest`, `test_validator_input_gtest` |
 | `make test-input-baseline` | `test_wpt_html_parser_gtest --baseline`, `test_markdown_gtest --baseline`, `test_yaml_suite_gtest`, `test_math_ascii_gtest`, `test_math_gtest` |
-| `make test-radiant-baseline` | native `test_scene3d_gtest`, filtered `test_view_reuse_gtest`, then `run-radiant-baseline`: layout baselines (`LAYOUT_BASELINE_SUITES` in the Makefile), page-suite snapshot, UI automation `--suite baseline` and `--suite view`, `test_radiant_view_gtest`, `test_rdt_vector_gtest`, `test_page_load_gtest`, `test_css_cascade_memory_gtest`, `test_layout_fuzzy_gtest`, render visual `--baseline`, `dom-ui-run`, WPT css-syntax and input-events |
+| `make test-radiant-baseline` | native `test_scene3d_gtest`, filtered `test_view_reuse_gtest`, then `run-radiant-baseline`: layout baselines (`LAYOUT_BASELINE_SUITES` in the Makefile), page-suite snapshot, UI automation `--suite baseline,dtna` and `--suite view`, `test_radiant_view_gtest`, `test_rdt_vector_gtest`, `test_page_load_gtest`, `test_css_cascade_memory_gtest`, `test_layout_fuzzy_gtest`, render visual `--baseline`, `dom-ui-run`, WPT css-syntax and input-events |
 | `make run-radiant-baseline` | the same Radiant checks with no rebuild |
 | `make test-layout-baseline` | layout baseline suites only |
 
@@ -80,7 +80,7 @@ Focused targets agents commonly need (`make help` lists ~113; the Makefile has ~
 
 | Harness | Fixture dirs | Discovery | Expected output | Adding a test |
 |---|---|---|---|---|
-| `test_lambda_gtest` | Functional (`lambda.exe <f>`): `test/lambda`, `test/lambda/{chart,latex,math,editor,editing,edit,slide}`, `test/lambda/graph/{mermaid,graphviz,structurizr}`, `test/demo/doom/tests`. Procedural (`lambda.exe run <f>`): `test/lambda/{proc,conc,pdf}`, `test/benchmark/{awfy,r7rs,beng,kostya,larceny}` | Non-recursive. Every `*.ls` is a case; one without its golden **fails** ("No expected output") unless named `_*`, `mod_*` or `schema_*` (helper / module / playground, see `test/test_script_discovery.hpp`). Name is `<parentdir>_<stem>`, with no prefix in `test/lambda` itself. `SLOW_BENCHMARK_TESTS` in `test_lambda_helpers.hpp` are never instantiated. | Sibling `<stem>.txt`. `<stem>.mac.txt` / `.linux.txt` / `.win.txt` wins on that OS. Compared after the `##### Script` marker, with trailing whitespace and `__TIMING__:` lines stripped. | Add `foo.ls` + `foo.txt` in a listed dir (rule 8). A new dir goes into `FUNCTIONAL_`/`PROCEDURAL_TEST_DIRECTORIES` at the top of `test/test_lambda_gtest.cpp`. That file also holds hand-written `TEST`s: tier parity over interp/jit/auto, typed paths on `test/mir/lambda/*.ls` + `.txt`, and error-without-crash checks. |
+| `test_lambda_gtest` | Functional (`lambda.exe <f>`): `test/lambda`, `test/lambda/{chart,latex,math,editor,editing,edit,slide,scene3d,ui_dtna}`, `test/lambda/graph/{mermaid,graphviz,structurizr}`, `test/demo/doom/tests`. Procedural (`lambda.exe run <f>`): `test/lambda/{proc,conc,pdf}`, `test/benchmark/{awfy,r7rs,beng,kostya,larceny}` | Non-recursive. Every `*.ls` is a case; one without its golden **fails** ("No expected output") unless named `_*`, `mod_*` or `schema_*` (helper / module / playground, see `test/test_script_discovery.hpp`). Name is `<parentdir>_<stem>`, with no prefix in `test/lambda` itself. `SLOW_BENCHMARK_TESTS` in `test_lambda_helpers.hpp` are never instantiated. | Sibling `<stem>.txt`. `<stem>.mac.txt` / `.linux.txt` / `.win.txt` wins on that OS. Compared after the `##### Script` marker, with trailing whitespace and `__TIMING__:` lines stripped. | Add `foo.ls` + `foo.txt` in a listed dir (rule 8). A new dir goes into `FUNCTIONAL_`/`PROCEDURAL_TEST_DIRECTORIES` at the top of `test/test_lambda_gtest.cpp`. That file also holds hand-written `TEST`s: tier parity over interp/jit/auto, typed paths on `test/mir/lambda/*.ls` + `.txt`, and error-without-crash checks. |
 | `test_lambda_extended_gtest` | `test/lambda/ext`, `test/lambda/proc-ext` (procedural) | Same helper. Names are `ext_<stem>` and `proc_ext_<stem>`. | `.txt` (+ platform override) | Same as above |
 | `test_lambda_std_gtest` | `test/std/**` (recursive) | Every `*.ls`; one without its `.expected` fails unless named `_*`/`mod_*`/`schema_*`. `// Mode: procedural` in the first 5 lines means `run`. Name is the relative path with `/` → `_`. | `<stem>.expected` (+ `.mac/.linux/.win.expected`) | Write the `.expected` by hand. `bash test/std/generate_expected.sh` rewrites every passing file, so review the diff. |
 | `test_lambda_errors_gtest` | `test/lambda/negative/{syntax,semantic,runtime,io,fuzzy_crashes}` | None. Each script has an explicit `TEST_F(NegativeScriptTest, …)`. | C++ assertions: non-zero exit plus a message substring (`ExpectErrorMessage`, `ExpectRuntimeErrorMessage`, `ExpectRejectedOnEveryTier`). No harness reads the `.txt` files in `negative/`. | Add the `.ls` plus a `TEST_F` |
@@ -159,3 +159,18 @@ Gotchas:
 - The `LAMBDA_BASELINE_TEST_PROJECTS`, `RADIANT_BASELINE_TEST_PROJECTS` and `INPUT_BASELINE_TEST_PROJECTS` lists at the top of the Makefile must match what the gates run. Update them when you add a baseline binary.
 
 WebAssembly build and tests: `make build-wasm`, `make test-wasm`, and [`doc/dev/Lambda_WASM_Build.md`](../doc/dev/Lambda_WASM_Build.md).
+
+### Lambda UI dtna
+
+`make test-ui-dtna ARGS='--jobs 1'` checks the 73-entry feature manifest,
+package goldens on T0/automatic/MIR tiers (**D8.1.1v17**), state-store regressions,
+and the manifest-owned `dtna` native UI suite on forced interpreter/JIT paths.
+The shared Radiant baseline also
+includes this suite. The gallery is `test/ui/dtna_gallery.ls`; the JSON-formatted
+coverage inventory uses `.manifest` because every `.json` under `test/ui/` must
+be an executable fixture with exactly one owner.
+
+Pure/API goldens: `test/lambda/ui_dtna/`. Native click/type/keyboard/style checks:
+`test/ui/dtna/`. Coverage and remaining scope:
+`test/ui/dtna_reference/catalog.manifest`. The gallery capture is a native
+inspection artifact, not an AntD visual-equivalence baseline.

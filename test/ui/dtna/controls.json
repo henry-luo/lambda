@@ -1,0 +1,317 @@
+{
+  "name": "dtna native controls preserve edits through parent updates and emit typed actions",
+  "html": "test/ui/dtna/controls.ls",
+  "viewport": {
+    "width": 900,
+    "height": 800
+  },
+  "events": [
+    {
+      "type": "assert_checked",
+      "target": {
+        "selector": "#accepted"
+      },
+      "checked": false
+    },
+    {
+      "type": "assert_checked",
+      "target": {
+        "selector": "#enabled"
+      },
+      "checked": false
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#name"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#name"
+      },
+      "text": "Ada"
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#name"
+      },
+      "equals": "Ada"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#last"
+      },
+      "equals": "name"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#notes"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#notes"
+      },
+      "text": "Retained notes"
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#notes"
+      },
+      "equals": "Retained notes"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#increment"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#count"
+      },
+      "equals": "1"
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#name"
+      },
+      "equals": "Ada"
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#notes"
+      },
+      "equals": "Retained notes"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#disabled"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#loading"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#count"
+      },
+      "equals": "1"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#accepted"
+      }
+    },
+    {
+      "type": "assert_checked",
+      "target": {
+        "selector": "#accepted"
+      },
+      "checked": true
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#value"
+      },
+      "equals": "true"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#enabled"
+      }
+    },
+    {
+      "type": "assert_checked",
+      "target": {
+        "selector": "#enabled"
+      },
+      "checked": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#inherited"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#inherited"
+      },
+      "text": "x"
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#inherited"
+      },
+      "equals": "locked"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#controlled"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#controlled"
+      },
+      "text": "edited"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#reset"
+      }
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#controlled"
+      },
+      "equals": "new"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#pick"
+      }
+    },
+    {
+      "type": "assert_state_store",
+      "target": {
+        "selector": "#pick"
+      },
+      "open_dropdown": true
+    },
+    {
+      "type": "key_press",
+      "key": "ArrowDown"
+    },
+    {
+      "type": "key_press",
+      "key": "Enter"
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#pick"
+      },
+      "equals": "20"
+    },
+    {
+      "type": "assert_state_store",
+      "target": {
+        "selector": "#pick"
+      },
+      "open_dropdown": false
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#last"
+      },
+      "equals": "pick"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#value"
+      },
+      "equals": "20"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#increment"
+      }
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#pick"
+      },
+      "equals": "20"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#pick"
+      }
+    },
+    {
+      "type": "key_press",
+      "key": "Escape"
+    },
+    {
+      "type": "assert_state_store",
+      "target": {
+        "selector": "#pick"
+      },
+      "open_dropdown": false
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#value-type"
+      },
+      "equals": "int"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#increment"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#count"
+      },
+      "equals": "3"
+    },
+    {
+      "type": "key_press",
+      "key": "space"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#count"
+      },
+      "equals": "4"
+    },
+    {
+      "type": "key_press",
+      "key": "enter"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#count"
+      },
+      "equals": "5"
+    }
+  ]
+}

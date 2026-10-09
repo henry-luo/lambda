@@ -26,6 +26,11 @@
       "tags": ["baseline"]
     },
     {
+      "name": "dtna",
+      "globs": ["test/ui/dtna/*.json"],
+      "tags": ["dtna", "baseline"]
+    },
+    {
       "name": "dom",
       "globs": [
         "test/ui/dom/*.json",

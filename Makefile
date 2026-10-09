@@ -677,6 +677,7 @@ help:
 	@echo "  test-math-corpus - Run the font-driven SVG math formula corpus"
 	@echo "  test-mathcmp     - Compare Lambda math PNGs against pdfLaTeX (ARGS='--case Functions')"
 	@echo "  test-radiant-baseline - Run shared layout baselines ($(LAYOUT_BASELINE_SUITES)) + render visual + other checks"
+	@echo "  test-ui-dtna        - Run dtna catalog, tier contracts and native interaction tests"
 	@echo "  test-svg-export     - Verify portable SVG/PDF fixture exports at 1x and 2x"
 	@echo "  test-svg-paint      - Verify P7/P10 raster fixtures at 1x and 2x (ARGS=--browser --references)"
 	@echo "  test-svg-smil       - Verify controlled-time SMIL UI fixtures at 1x and 2x"
@@ -2165,6 +2166,17 @@ test-radiant-baseline: build-radiant-baseline
 test-scene3d: build-radiant-baseline
 	@./test/test_scene3d_gtest.exe
 
+# Shipped dtna source contracts plus native pointer/keyboard interaction.
+.PHONY: test-ui-dtna
+test-ui-dtna: build
+	@python3 test/ui/dtna_reference/check_catalog.py
+	@$(MAKE) -C build/premake config=debug_native test_lambda_gtest test_ui_automation_gtest test_state_store_gtest -j$(TEST_JOBS) CC="$(CC)" CXX="$(CXX)" AR="$(AR)" RANLIB="$(RANLIB)"
+	@./test/test_lambda_gtest.exe --gtest_filter='UiDtnaTests.*:AutoDiscovered/*dtna_*'
+	@./test/test_state_store_gtest.exe
+	@for tier in interp jit; do \
+		LAMBDA_EXEC_BACKEND=$$tier ./test/test_ui_automation_gtest.exe --suite dtna $(ARGS) || exit $$?; \
+	done
+
 # Requires test/render Node dependencies, Chromium and Poppler's pdftocairo/pdfimages.
 test-svg-export: build
 	@node test/svg/test_svg_export.cjs $(ARGS)
@@ -2246,7 +2258,7 @@ run-radiant-baseline:
 	echo "📦 UI Automation Tests:"; \
 	if [ -f "test/test_ui_automation_gtest.exe" ]; then \
 		ui_exit=0; \
-		run_logged "temp/_radiant_ui_automation.log" ./test/test_ui_automation_gtest.exe --suite baseline $(ARGS) || ui_exit=$$?; \
+		run_logged "temp/_radiant_ui_automation.log" ./test/test_ui_automation_gtest.exe --suite baseline,dtna $(ARGS) || ui_exit=$$?; \
 		ui_elapsed=$$run_logged_elapsed; \
 		output=$$(cat "temp/_radiant_ui_automation.log"); \
 		echo "$$output" | grep -E "^\[|tests executed" | tail -5; \

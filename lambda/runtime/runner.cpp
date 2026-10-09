@@ -3684,6 +3684,9 @@ void runtime_cleanup(Runtime* runtime) {
         // DOM and JS cleanup can dispose callbacks that still activate their
         // defining module slab; destroy those slabs only after that cleanup.
         lambda_module_state_destroy();
+        // The diagnostic mirror may point into this heap; clear it before
+        // teardown so final context cleanup never inspects a retired error.
+        eval_context_set_last_error(cleanup_context, NULL);
         heap_destroy();
         runtime_set_heap(runtime, NULL);
         cleanup_context->heap = NULL;
