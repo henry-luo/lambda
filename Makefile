@@ -2184,6 +2184,7 @@ test-svg-smil: build
 # reuse the shared temp directory and may remove earlier runner artifacts.
 # A crashed layout category must fail the gate instead of disappearing from its totals.
 # Raw CSS Syntax failures also fail the gate above its passing-file floor.
+# Doom gameplay and forced-GC replays remain in the extended Radiant View runner.
 run-radiant-baseline:
 	@ui_passed=0; ui_failed=0; ui_status="⏭️  SKIP"; \
 	ui_elapsed=0; \
@@ -2262,7 +2263,7 @@ run-radiant-baseline:
 	echo ""; \
 	echo "📦 Radiant View Command Tests:"; \
 	if [ -f "test/test_radiant_view_gtest.exe" ]; then \
-		run_logged "temp/_radiant_view_cmd.log" ./test/test_radiant_view_gtest.exe || true; \
+		run_logged "temp/_radiant_view_cmd.log" ./test/test_radiant_view_gtest.exe --gtest_filter='*-RadiantViewTest.Doom*' || true; \
 		radiant_view_elapsed=$$run_logged_elapsed; \
 		output=$$(cat "temp/_radiant_view_cmd.log"); \
 		echo "$$output" | grep -E "^\[|tests executed" | tail -5; \
