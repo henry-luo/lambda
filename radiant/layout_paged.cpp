@@ -209,7 +209,7 @@ struct PagedReferenceWidth {
     bool valid;
 };
 HASHMAP_DEFINE_PTRKEY(paged_reference_widths, PagedReferenceWidth, owner)
-struct PagedReferenceUndo { PagedReferenceWidth previous; bool present; };
+struct PagedReferenceUndo { PagedReferenceWidth previous; bool present; uint64_t revision; };
 
 struct PagedComposition {
     Pool* pool;
@@ -234,7 +234,7 @@ struct PagedComposition {
     lam::Own<HashMap> reference_widths;
     PagedReferenceUndo* reference_undo;
     size_t reference_count, reference_capacity;
-    uint64_t reference_revision;
+    uint64_t reference_revision, reference_serial;
 };
 
 static void paged_reference_restore(PagedComposition* composition, size_t count) {
@@ -244,7 +244,7 @@ static void paged_reference_restore(PagedComposition* composition, size_t count)
         if (!undo.present) previous.valid = false;
         // retain slots so restoring an invalidated declaration never allocates.
         hashmap_set(composition->reference_widths, &previous);
-        composition->reference_revision++;
+        composition->reference_revision = undo.revision;
     }
 }
 
@@ -262,7 +262,7 @@ static TypesetStatus paged_reference_change(PagedComposition* composition, Paged
     }
     const PagedReferenceWidth* prior = (const PagedReferenceWidth*)hashmap_get(composition->reference_widths, &value);
     if (!prior && hashmap_count(composition->reference_widths) >= composition->options.max_nodes) return TYPESET_BUDGET_EXHAUSTED;
-    PagedReferenceUndo undo = {prior ? *prior : value, prior != nullptr};
+    PagedReferenceUndo undo = {prior ? *prior : value, prior != nullptr, composition->reference_revision};
     if (composition->reference_count >= composition->options.max_items) return TYPESET_BUDGET_EXHAUSTED;
     if (!lam::pool_grow_array(composition->pool, &composition->reference_undo, &composition->reference_capacity,
         composition->reference_count + 1, 16)) return TYPESET_OUT_OF_MEMORY;
@@ -270,7 +270,8 @@ static TypesetStatus paged_reference_change(PagedComposition* composition, Paged
     hashmap_set(composition->reference_widths, &value);
     if (hashmap_oom(composition->reference_widths)) return TYPESET_OUT_OF_MEMORY;
     composition->reference_undo[composition->reference_count++] = undo;
-    composition->reference_revision++;
+    // rollback restores the old identity; never reuse identities for different selected contexts.
+    composition->reference_revision = ++composition->reference_serial;
     return TYPESET_OK;
 }
 
