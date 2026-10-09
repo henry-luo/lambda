@@ -2285,14 +2285,17 @@ static DomDocument* load_lambda_html_doc_profiled(Url* html_url, const char* css
     char* html_content = nullptr;
     size_t html_length = 0;
     bool html_content_owned = false;
+    lam::Temp<char> protocol_language;
     if (html_source) {
         html_content = const_cast<char*>(html_source);
         html_length = strlen(html_source);
     } else if (html_url->scheme == URL_SCHEME_HTTP || html_url->scheme == URL_SCHEME_HTTPS) {
         const char* url_str = url_get_href(html_url);
         char* eff_url = nullptr;
-        html_content = download_http_content_with_cookie_jar(url_str, &html_length,
-            top_level_cookie_jar, &eff_url);
+        char* response_language = nullptr;
+        html_content = download_http_document_with_cookie_jar(url_str, &html_length,
+            top_level_cookie_jar, &eff_url, &response_language);
+        protocol_language = lam::Temp<char>(response_language);
         // Update document URL if redirected (e.g. google.com → www.google.com)
         if (eff_url) {
             Url* redirected_url = url_parse(eff_url);
@@ -2408,6 +2411,11 @@ static DomDocument* load_lambda_html_doc_profiled(Url* html_url, const char* css
     DomDocument* dom_doc = dom_document_create(input);
     if (!dom_doc) {
         log_error("Failed to create DomDocument");
+        return nullptr;
+    }
+    if (!dom_document_set_content_language(dom_doc, protocol_language.get())) {
+        log_error("[document-language] failed to retain HTTP language metadata");
+        dom_document_destroy(dom_doc);
         return nullptr;
     }
     // parsed HTML: the only page kind that may host a JS DOM script realm.
@@ -2565,6 +2573,7 @@ static DomDocument* load_lambda_html_doc_profiled(Url* html_url, const char* css
     auto t_inline_style = timing ? time_now_ns() : t_stylesheet_setup;
 
     dom_doc->root = lam::up(dom_root);  // set root for CSSOM and JS DOM API access
+    dom_document_process_metadata_insertion(dom_doc, dom_root);
 
     // Scripts read computed styles during load, so the initial cascade is the
     // single ordering invariant; the retired pre-cascade mode made that state

@@ -57,7 +57,8 @@ static DomElement* mark_editor_lookup_ui_element_child(DomElement* parent,
                                                         Element* child_element) {
     if (!parent || !parent->doc || !child_element) return nullptr;
     DomElement* embedded = element_to_dom_element(child_element);
-    if (dom_document_owns_node_storage(parent->doc, embedded) &&
+    // adopted nodes retain source arenas; their registry identity still belongs to this document.
+    if (dom_node_registry_owns(parent->doc, embedded) &&
         embedded->node_type == DOM_NODE_ELEMENT && embedded->doc == parent->doc &&
         dom_element_to_element(embedded) == child_element) {
         return embedded;
@@ -217,6 +218,7 @@ MarkEditor::MarkEditor(Input* input, EditMode mode)
     , mode_(mode)
     , ui_mode_(input->ui_mode)
     , ui_node_arena_(nullptr)
+    , ui_document_(nullptr)
     , current_version_(nullptr)
     , version_head_(nullptr)
     , next_version_num_(0)
@@ -231,6 +233,7 @@ MarkEditor::MarkEditor(Input* input, EditMode mode)
 MarkEditor::MarkEditor(DomDocument* document, EditMode mode)
     : MarkEditor(document->input, mode) {
     set_ui_node_arena(document->node_arena);
+    ui_document_ = document;
 }
 
 MarkEditor::~MarkEditor() {
@@ -1248,8 +1251,11 @@ Item MarkEditor::import_child(Item child, bool preserve_ui_nodes) {
     // keep a live UI node by identity only when its storage is one this editor
     // vouches for; reading a node header in front of a GC object would read
     // garbage and could leave a GC pointer in the document (D4.5.2)
+    const void* storage = mark_editor_ui_node_storage(child);
+    bool registered = ui_document_ && dom_node_registry_owns(ui_document_, (DomNode*)storage);
+    // adoption retains the source document; copying its registered node would duplicate DOM identity.
     if ((ui_mode_ || preserve_ui_nodes) &&
-        owns_ui_node_storage(mark_editor_ui_node_storage(child)) &&
+        (registered || owns_ui_node_storage(storage)) &&
         mark_editor_is_ui_dom_node(child)) return child;
     return builder_->deep_copy(child);
 }

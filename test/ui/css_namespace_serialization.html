@@ -1,0 +1,110 @@
+<!doctype html><html lang="fr"><meta charset="utf-8"><style>
+body{margin:0;background:white}button{position:absolute;left:300px;top:0}#finish{top:40px}
+#paint{position:absolute;left:0;top:40px;width:20px;height:20px;background:red}
+#paint:lang(he){width:90px;background:green}
+</style><button id="check">check</button><button id="finish">finish</button><div id="report"></div><div id="paint"></div>
+<script>
+(function(){
+var H='http://www.w3.org/1999/xhtml',X='http://www.w3.org/XML/1998/namespace',N='http://www.w3.org/2000/xmlns/',L='http://www.w3.org/1999/xlink',S='http://www.w3.org/2000/svg',A='urn:a',B='urn:b',report=document.getElementById('report'),paint=document.getElementById('paint'),serializer=new XMLSerializer();
+function check(name,fn){try{report.setAttribute('data-'+name,String(fn()));}catch(error){report.setAttribute('data-'+name,error.name);}}
+function parse(text){return new DOMParser().parseFromString(text,'application/xml').documentElement;}
+function round(node){return parse(serializer.serializeToString(node));}
+function element(uri,name){return document.createElementNS(uri,name);}
+document.getElementById('check').addEventListener('click',function(){
+    var ordinary=document.createElement('svg'),nullNode=element(null,'root');
+    check('ordinary-factory-html-namespace',function(){return ordinary.namespaceURI===H;});
+    check('null-factory-keeps-null-namespace',function(){return nullNode.namespaceURI===null&&nullNode.localName==='root';});
+    var parent=element(S,'svg');parent.appendChild(ordinary);parent.appendChild(nullNode);
+    check('factory-namespace-survives-reparent',function(){return ordinary.namespaceURI===H&&nullNode.namespaceURI===null;});
+    var literal=document.createElement('h:span'),qualified=element(H,'h:span');
+    check('factory-local-prefix-identity',function(){return literal.localName==='h:span'&&literal.prefix===null&&qualified.localName==='span'&&qualified.prefix==='h';});
+    check('clone-keeps-null-and-literal-identity',function(){return nullNode.cloneNode(false).namespaceURI===null&&literal.cloneNode(false).localName==='h:span'&&qualified.cloneNode(false).prefix==='h';});
+    var xmlDoc=new DOMParser().parseFromString('<root/>','application/xml');
+    check('parsed-xml-root-has-null-namespace',function(){return xmlDoc.documentElement.namespaceURI===null;});
+    var xmlChild=xmlDoc.createElement('SVG');
+    check('xml-ordinary-factory-keeps-case-and-null-namespace',function(){return xmlChild.localName==='SVG'&&xmlChild.namespaceURI===null;});
+    var span=element(H,'span');span.setAttributeNS(A,'lang','de');span.setAttributeNS(null,'lang','ja');
+    var wrap=document.createElement('div');wrap.appendChild(span);
+    check('html-keeps-duplicate-attribute-values',function(){return wrap.innerHTML==='<span lang="de" lang="ja"></span>';});
+    var xmlSpan=round(span);
+    check('xml-distinguishes-duplicate-qualified-names',function(){return xmlSpan.namespaceURI===H&&xmlSpan.getAttributeNS(A,'lang')==='de'&&xmlSpan.getAttributeNS(null,'lang')==='ja';});
+    check('xml-roundtrip-language-consumer',function(){return xmlSpan.matches(':lang(ja)')&&!xmlSpan.matches(':lang(de)');});
+    var conflict=element(null,'root');conflict.setAttributeNS(A,'p:lang','de');conflict.setAttributeNS(B,'p:lang','ja');
+    var parsed=round(conflict);
+    check('xml-prefix-conflict-keeps-expanded-values',function(){return parsed.localName==='root'&&parsed.getAttributeNS(A,'lang')==='de'&&parsed.getAttributeNS(B,'lang')==='ja';});
+    conflict.setAttributeNS(N,'xmlns:p',B);parsed=round(conflict);
+    check('xml-local-declaration-conflict-keeps-expanded-values',function(){return parsed.getAttributeNS(A,'lang')==='de'&&parsed.getAttributeNS(B,'lang')==='ja';});
+    var xmlLang=element(H,'span');xmlLang.setAttributeNS(X,'z:lang','he');xmlLang.setAttributeNS(null,'lang','ja');
+    parsed=round(xmlLang);
+    check('xml-reserved-prefix-language',function(){return parsed.getAttributeNS(X,'lang')==='he'&&parsed.matches(':lang(he)');});
+    check('html-canonical-xml-attribute-prefix',function(){return xmlLang.outerHTML==='<span xml:lang="he" lang="ja"></span>';});
+    var link=element(S,'use');link.setAttributeNS(L,'custom:href','#one');link.setAttributeNS(null,'href','#two');
+    parsed=round(link);
+    check('xml-xlink-null-attributes-stay-independent',function(){return parsed.getAttributeNS(L,'href')==='#one'&&parsed.getAttributeNS(null,'href')==='#two';});
+    check('html-canonical-xlink-prefix',function(){return link.outerHTML==='<use xlink:href="#one" href="#two"></use>';});
+    var named=element(A,'p:root');named.setAttributeNS(N,'xmlns:p',B);parsed=round(named);
+    check('xml-element-prefix-conflict-preserves-namespace',function(){return parsed.namespaceURI===A&&parsed.localName==='root';});
+    var defaultRoot=element(A,'root'),plain=element(null,'plain'),nested=element(A,'nested');defaultRoot.appendChild(plain);plain.appendChild(nested);parsed=round(defaultRoot);
+    check('xml-default-namespace-reset-and-reentry',function(){return parsed.namespaceURI===A&&parsed.firstChild.namespaceURI===null&&parsed.firstChild.firstChild.namespaceURI===A;});
+    var inherited=element(A,'p:root');inherited.setAttributeNS(N,'xmlns:q',B);var sibling=element(B,'child');sibling.setAttributeNS(B,'value','yes');inherited.appendChild(sibling);parsed=round(inherited);
+    check('xml-inherited-prefix-reused',function(){return parsed.firstChild.namespaceURI===B&&parsed.firstChild.getAttributeNS(B,'value')==='yes';});
+    var collision=element(null,'root');collision.setAttributeNS(N,'xmlns:ns1',A);collision.setAttributeNS(B,'value','yes');parsed=round(collision);
+    check('xml-generated-prefix-avoids-declared-name',function(){return parsed.localName==='root'&&parsed.getAttributeNS(B,'value')==='yes';});
+    var siblings=element(null,'root'),one=element(A,'p:one'),two=element(B,'p:two');siblings.appendChild(one);siblings.appendChild(two);parsed=round(siblings);
+    check('xml-sibling-prefix-scopes-stay-independent',function(){return parsed.firstChild.namespaceURI===A&&parsed.lastChild.namespaceURI===B;});
+    var escaped=element(null,'root');escaped.setAttributeNS(A,'value','&"<>\t\n\r');parsed=round(escaped);
+    check('xml-attribute-escaping-roundtrip',function(){return parsed.getAttributeNS(A,'value')==='&"<>\t\n\r';});
+    var prefixWrap=document.createElement('div');prefixWrap.appendChild(qualified);
+    check('html-qualified-html-tag-uses-local-name',function(){return prefixWrap.innerHTML==='<span></span>';});
+    check('xml-empty-html-nonvoid-has-end-tag',function(){return serializer.serializeToString(element(H,'span'))==='<span xmlns="'+H+'"></span>';});
+    check('xml-empty-html-void-has-space-slash',function(){return serializer.serializeToString(element(H,'input'))==='<input xmlns="'+H+'" />';});
+    var source=parse('<root xmlns:p="urn:a"><p:child xml:lang="he"/></root>');
+    source.removeAttributeNS(N,'p');parsed=round(source);
+    check('parsed-element-namespace-stable-after-declaration-removal',function(){return source.firstChild.namespaceURI===A&&parsed.firstChild.namespaceURI===A&&parsed.firstChild.getAttributeNS(X,'lang')==='he';});
+    var fragment=document.createDocumentFragment();fragment.appendChild(element(A,'p:one'));fragment.appendChild(element(B,'p:two'));
+    var fragmentText=serializer.serializeToString(fragment);
+    check('xml-fragment-children-have-independent-scope',function(){return fragmentText.indexOf('urn:a')>=0&&fragmentText.indexOf('urn:b')>=0;});
+    var nullRoot=element(null,'root');nullRoot.setAttributeNS(N,'xmlns',A);parsed=round(nullRoot);
+    check('xml-inconsistent-default-on-null-element-omitted',function(){return parsed.namespaceURI===null;});
+    var defaultConflict=element(A,'root');defaultConflict.setAttributeNS(N,'xmlns',B);parsed=round(defaultConflict);
+    check('xml-inconsistent-default-on-namespaced-element-replaced',function(){return parsed.namespaceURI===A;});
+    var alias=element(A,'p:root');alias.setAttributeNS(N,'xmlns:q',A);alias.setAttributeNS(A,'p:value','yes');parsed=round(alias);
+    check('xml-existing-prefix-used-without-changing-dom',function(){return parsed.namespaceURI===A&&parsed.getAttributeNS(A,'value')==='yes'&&alias.prefix==='p'&&alias.getAttributeNodeNS(A,'value').prefix==='p';});
+    var ancestor=element(A,'p:root'),rebound=element(B,'p:child');ancestor.appendChild(rebound);parsed=round(ancestor);
+    check('xml-inherited-prefix-can-be-rebound',function(){return parsed.namespaceURI===A&&parsed.firstChild.namespaceURI===B;});
+    var protectedPrefix=element(A,'p:root'),protectedChild=element(A,'p:child');protectedChild.setAttributeNS(B,'p:value','yes');protectedPrefix.appendChild(protectedChild);parsed=round(protectedPrefix);
+    check('xml-attribute-cannot-rebind-element-prefix',function(){return parsed.firstChild.namespaceURI===A&&parsed.firstChild.getAttributeNS(B,'value')==='yes';});
+    var reserved=element(X,'z:root');reserved.setAttributeNS(N,'xmlns:z',X);parsed=round(reserved);
+    check('xml-reserved-element-prefix-canonicalized',function(){return parsed.namespaceURI===X&&parsed.prefix==='xml'&&reserved.prefix==='z';});
+    var declarationOrder=element(null,'root');declarationOrder.setAttributeNS(B,'value','yes');declarationOrder.setAttributeNS(N,'xmlns:ns1',A);parsed=round(declarationOrder);
+    check('xml-declarations-recorded-before-earlier-attributes',function(){return parsed.getAttributeNS(B,'value')==='yes';});
+    var stable=serializer.serializeToString(declarationOrder);
+    check('xml-repeated-serialization-is-stable',function(){return serializer.serializeToString(declarationOrder)===stable;});
+    check('xml-attribute-node-serializes-empty',function(){return serializer.serializeToString(declarationOrder.getAttributeNodeNS(B,'value'))==='';});
+    var foreignInput=element(B,'input');
+    check('html-foreign-input-keeps-end-tag',function(){return foreignInput.outerHTML==='<input></input>';});
+    var htmlVoid=element(H,'input');htmlVoid.appendChild(document.createTextNode('hidden'));
+    check('html-void-does-not-serialize-children',function(){return htmlVoid.outerHTML==='<input>';});
+    var copiedConflict=conflict.cloneNode(false);parsed=round(copiedConflict);
+    check('xml-clone-keeps-both-expanded-attributes',function(){return parsed.getAttributeNS(A,'lang')==='de'&&parsed.getAttributeNS(B,'lang')==='ja';});
+    var imported=document.importNode(conflict,false);parsed=round(imported);
+    check('xml-import-keeps-both-expanded-attributes',function(){return parsed.getAttributeNS(A,'lang')==='de'&&parsed.getAttributeNS(B,'lang')==='ja';});
+    var textRoot=element(null,'root');textRoot.appendChild(document.createTextNode('&<>\r'));parsed=round(textRoot);
+    check('xml-text-carriage-return-follows-serialization-algorithm',function(){return serializer.serializeToString(textRoot)==='<root>&amp;&lt;&gt;\r</root>';});
+    var scopeRoot=element(A,'root');scopeRoot.setAttributeNS(N,'xmlns',A);scopeRoot.appendChild(element(A,'child'));
+    check('xml-redundant-default-declaration-not-repeated',function(){return serializer.serializeToString(scopeRoot)==='<root xmlns="'+A+'"><child/></root>';});
+    var deep=element(null,'root'),cursor=deep;for(var d=0;d<1000;d++){var next=element(A,'p:child');cursor.appendChild(next);cursor=next;}cursor.setAttributeNS(X,'xml:lang','he');var deepText=serializer.serializeToString(deep);
+    check('xml-deep-tree-serialized-with-one-prefix-declaration',function(){return deepText.indexOf('xml:lang="he"')>=0&&deepText.split('xmlns:p=').length===2&&deepText.slice(-7)==='</root>';});
+    check('xml-internal-identity-storage-not-exposed',function(){return qualified.getAttributeNames().length===0&&qualified.attributes.length===0&&serializer.serializeToString(qualified).indexOf('__lambda_')<0;});
+    var upper=document.createElement('SVG');
+    check('html-ordinary-factory-lowercases-local-name',function(){return upper.localName==='svg'&&upper.namespaceURI===H;});
+    paint.setAttributeNS(X,'z:lang','he');paint.setAttributeNS(A,'lang','de');var serializedPaint=serializer.serializeToString(paint),copy=round(paint);document.body.removeChild(paint);document.body.appendChild(copy);paint=copy;
+    check('serialized-import-has-one-backing-and-dom-child',function(){return document.querySelectorAll('#paint').length===1&&paint.parentNode===document.body;});
+    check('serialized-import-language-query',function(){return document.querySelector('#paint:lang(he)')===paint&&paint.getAttributeNS(A,'lang')==='de';});
+});
+document.getElementById('finish').addEventListener('click',function(){
+    check('final-geometry',function(){return paint.getBoundingClientRect().width===90;});
+    check('final-cascade',function(){return getComputedStyle(paint).backgroundColor==='rgb(0, 128, 0)';});
+});
+})();
+</script>

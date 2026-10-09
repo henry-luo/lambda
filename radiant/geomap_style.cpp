@@ -370,21 +370,52 @@ bool geomap_style_compile(ElementReader layer, GeoMapStyle* style, char* diagnos
     ItemReader paint=layer.get_attr("paint"),layout=layer.get_attr("layout");
     if ((!paint.isNull() && !paint.isMap()) || (!layout.isNull() && !layout.isMap())) compiler.error="paint and layout must be maps";
     if (!layer.get_attr("source-layer").isNull()) compiler.error="vector source layers are not yet supported";
-    static const char* colors[]={"background-color","fill-color","line-color","circle-color"};
-    static const char* opacities[]={"background-opacity","fill-opacity","line-opacity","circle-opacity"};
-    const char* color_key=colors[style->kind],*opacity_key=opacities[style->kind];
-    const char* size_key=style->kind==GEOMAP_CIRCLE ? "circle-radius" : "line-width";
+    // one table owns property admission, compilation and dependency traversal.
+    struct Property { const char* key; GeoMapLayerKind kind; size_t offset; unsigned type; double maximum; };
+    static const Property properties[]={
+        {"background-color",GEOMAP_BACKGROUND,offsetof(GeoMapStyle,color),EX_STRING,INFINITY},
+        {"background-opacity",GEOMAP_BACKGROUND,offsetof(GeoMapStyle,opacity),EX_NUMBER,1},
+        {"fill-color",GEOMAP_FILL,offsetof(GeoMapStyle,color),EX_STRING,INFINITY},
+        {"fill-opacity",GEOMAP_FILL,offsetof(GeoMapStyle,opacity),EX_NUMBER,1},
+        {"fill-outline-color",GEOMAP_FILL,offsetof(GeoMapStyle,outline),EX_STRING,INFINITY},
+        {"line-color",GEOMAP_LINE,offsetof(GeoMapStyle,color),EX_STRING,INFINITY},
+        {"line-opacity",GEOMAP_LINE,offsetof(GeoMapStyle,opacity),EX_NUMBER,1},
+        {"line-width",GEOMAP_LINE,offsetof(GeoMapStyle,size),EX_NUMBER,4096},
+        {"circle-color",GEOMAP_CIRCLE,offsetof(GeoMapStyle,color),EX_STRING,INFINITY},
+        {"circle-opacity",GEOMAP_CIRCLE,offsetof(GeoMapStyle,opacity),EX_NUMBER,1},
+        {"circle-radius",GEOMAP_CIRCLE,offsetof(GeoMapStyle,size),EX_NUMBER,4096},
+        {"circle-stroke-color",GEOMAP_CIRCLE,offsetof(GeoMapStyle,stroke_color),EX_STRING,INFINITY},
+        {"circle-stroke-width",GEOMAP_CIRCLE,offsetof(GeoMapStyle,stroke_width),EX_NUMBER,4096},
+        {"circle-stroke-opacity",GEOMAP_CIRCLE,offsetof(GeoMapStyle,stroke_opacity),EX_NUMBER,1}
+    };
     if (!compiler.error && paint.isMap()) {
-        // iterators borrow their reader, so retain it through the complete traversal.
-        MapReader properties=paint.asMap();
-        auto entries=properties.entries(); const char* key; ItemReader value;
-        while (entries.next(&key,&value)) if (strcmp(key,color_key) && strcmp(key,opacity_key) &&
-            !((style->kind==GEOMAP_CIRCLE || style->kind==GEOMAP_LINE) && !strcmp(key,size_key))) compiler.error="unsupported paint property";
+        MapReader reader=paint.asMap();
+        auto entries=reader.entries(); const char* key; ItemReader value;
+        while (entries.next(&key,&value)) {
+            bool supported=false;
+            for (const auto& property:properties)
+                if (property.kind==style->kind && !strcmp(key,property.key)) supported=true;
+            if (!supported) compiler.error="unsupported paint property";
+        }
     }
+    style->cap=RDT_CAP_BUTT; style->join=RDT_JOIN_ROUND;
     if (!compiler.error && layout.isMap()) {
-        MapReader properties=layout.asMap();
-        auto keys=properties.keys(); const char* key;
-        while (keys.next(&key)) if (strcmp(key,"visibility")) compiler.error="unsupported layout property";
+        MapReader reader=layout.asMap(); auto keys=reader.keys(); const char* key;
+        while (keys.next(&key)) if (strcmp(key,"visibility") &&
+            !(style->kind==GEOMAP_LINE && (!strcmp(key,"line-cap") || !strcmp(key,"line-join"))))
+                compiler.error="unsupported layout property";
+        const char* cap=expr_text(reader.get("line-cap"));
+        const char* join=expr_text(reader.get("line-join"));
+        if (!reader.get("line-cap").isNull()) {
+            if (cap && !strcmp(cap,"round")) style->cap=RDT_CAP_ROUND;
+            else if (cap && !strcmp(cap,"square")) style->cap=RDT_CAP_SQUARE;
+            else if (!cap || strcmp(cap,"butt")) compiler.error="invalid line-cap";
+        }
+        if (!reader.get("line-join").isNull()) {
+            if (join && !strcmp(join,"miter")) style->join=RDT_JOIN_MITER;
+            else if (join && !strcmp(join,"bevel")) style->join=RDT_JOIN_BEVEL;
+            else if (!join || strcmp(join,"round")) compiler.error="invalid line-join";
+        }
     }
     ItemReader visibility=layout.isMap()?layout.asMap().get("visibility"):ItemReader();
     if (!visibility.isNull() && !expr_is(visibility,"none") && !expr_is(visibility,"visible")) compiler.error="invalid layer visibility";
@@ -392,17 +423,21 @@ bool geomap_style_compile(ElementReader layer, GeoMapStyle* style, char* diagnos
     if (!style_number(layer.get_attr("minzoom"),-2,&style->minzoom) ||
         !style_number(layer.get_attr("maxzoom"),23,&style->maxzoom) || style->maxzoom<=style->minzoom) compiler.error="invalid layer zoom range";
     if (!compiler.error) {
-        style->color=style_property(&compiler,paint,color_key,EX_STRING);
-        style->opacity=style_property(&compiler,paint,opacity_key,EX_NUMBER,1);
-        if (style->kind==GEOMAP_CIRCLE || style->kind==GEOMAP_LINE) style->size=style_property(&compiler,paint,size_key,EX_NUMBER,4096);
+        for (const auto& property:properties) if (property.kind==style->kind) {
+            auto** program=(GeoMapExpression**)((char*)style+property.offset);
+            *program=style_property(&compiler,paint,property.key,property.type,property.maximum);
+        }
         ItemReader filter=layer.get_attr("filter");
         if (!filter.isNull()) {
             if (style->kind==GEOMAP_BACKGROUND) compiler.error="background layers cannot have filters";
             else { compiler.filter=true; style->filter=expr_compile(&compiler,filter,0,false,EX_BOOL); }
         }
     }
-    GeoMapExpression* programs[]={style->color,style->opacity,style->size,style->filter};
-    for (auto* program:programs) if (program) style->dependencies|=program->dependencies;
+    for (const auto& property:properties) if (property.kind==style->kind) {
+        auto* program=*(GeoMapExpression**)((char*)style+property.offset);
+        if (program) style->dependencies|=program->dependencies;
+    }
+    if (style->filter) style->dependencies|=style->filter->dependencies;
     if (style->kind==GEOMAP_BACKGROUND && (style->dependencies&GEOMAP_STYLE_FEATURE))
         compiler.error="background paint cannot depend on feature properties";
     if (compiler.error) {
@@ -411,8 +446,22 @@ bool geomap_style_compile(ElementReader layer, GeoMapStyle* style, char* diagnos
     }
     return true;
 }
+static double style_evaluate_number(const GeoMapExpression* program, ItemReader feature, double zoom,
+    double fallback, double maximum, unsigned bit, unsigned* warnings) {
+    if (!program) return fallback;
+    ExprValue value=expr_eval(program,feature,zoom);
+    if (value.type==EX_NUMBER && value.number>=0 && value.number<=maximum) return value.number;
+    *warnings|=bit; return fallback;
+}
+static Color style_evaluate_color(const GeoMapExpression* program, ItemReader feature, double zoom,
+    unsigned bit, unsigned* warnings) {
+    Color color={}; color.a=255;
+    if (program && !style_color(expr_eval(program,feature,zoom),&color)) *warnings|=bit;
+    return color;
+}
 void geomap_style_evaluate(const GeoMapStyle* style, ItemReader feature, double zoom, GeoMapStyleResult* result) {
     *result={}; result->color.a=255; result->size=style->kind==GEOMAP_CIRCLE?5:1;
+    result->cap=style->cap; result->join=style->join;
     result->visible=!style->hidden && zoom>=style->minzoom && zoom<style->maxzoom;
     if (!result->visible) return;
     if (style->filter) {
@@ -420,19 +469,17 @@ void geomap_style_evaluate(const GeoMapStyle* style, ItemReader feature, double 
         if (filter.type!=EX_BOOL) result->warnings|=8;
         if (filter.type!=EX_BOOL || !filter.boolean) { result->visible=false; return; }
     }
-    if (style->color && !style_color(expr_eval(style->color,feature,zoom),&result->color)) result->warnings|=1;
-    double opacity=1;
-    if (style->opacity) {
-        ExprValue value=expr_eval(style->opacity,feature,zoom);
-        if (value.type==EX_NUMBER && value.number>=0 && value.number<=1) opacity=value.number;
-        else result->warnings|=2;
-    }
-    if (style->size) {
-        ExprValue value=expr_eval(style->size,feature,zoom);
-        if (value.type==EX_NUMBER && value.number>=0 && value.number<=4096) result->size=(float)value.number;
-        else result->warnings|=4;
-    }
+    result->color=style_evaluate_color(style->color,feature,zoom,1,&result->warnings);
+    double opacity=style_evaluate_number(style->opacity,feature,zoom,1,1,2,&result->warnings);
     result->color.a=(uint8_t)round(result->color.a*opacity);
+    result->size=(float)style_evaluate_number(style->size,feature,zoom,result->size,4096,4,&result->warnings);
+    result->has_outline=style->outline!=nullptr;
+    result->outline=style_evaluate_color(style->outline,feature,zoom,16,&result->warnings);
+    result->outline.a=(uint8_t)round(result->outline.a*opacity);
+    result->stroke_width=(float)style_evaluate_number(style->stroke_width,feature,zoom,0,4096,32,&result->warnings);
+    result->stroke_color=style_evaluate_color(style->stroke_color,feature,zoom,64,&result->warnings);
+    double stroke_opacity=style_evaluate_number(style->stroke_opacity,feature,zoom,1,1,128,&result->warnings);
+    result->stroke_color.a=(uint8_t)round(result->stroke_color.a*stroke_opacity);
 }
 void geomap_style_destroy(GeoMapStyle* style) {
     if (style && style->arena) arena_destroy(style->arena);

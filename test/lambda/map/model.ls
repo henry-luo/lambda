@@ -10,7 +10,7 @@ let normalized = maps.normalize(good);
     maps.validate(maps.geomap([maps.layer("bad","raster","points")])) is error,
     maps.validate(maps.geomap([source,maps.layer("bad","fill","absent")])) is error,
     maps.validate(maps.geomap([source,maps.layer("bad","circle","points",{'circle-radius':["feature-state","radius"]})])) is error,
-    maps.validate(maps.geomap([source,maps.layer("bad","circle","points",{'circle-stroke-color':"#000"})])) is error,
+    maps.validate(maps.geomap([source,maps.layer("bad","circle","points",{'circle-blur':1})])) is error,
     maps.validate(maps.geomap([maps.source("bad",{type:"Point",coordinates:[200,0]})])) is error,
     maps.validate(maps.geomap([maps.source("bad",{type:"Polygon",coordinates:[[[0,0],[1,0],[1,1],[0,1]]]})])) is error,
     maps.validate(maps.geomap([<source *:source,cluster:true>,dots])) is error,

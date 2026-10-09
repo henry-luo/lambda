@@ -11,8 +11,9 @@
 MvpLmdClass* mvp_lmd_class_record(Item owner) {
     if (get_type_id(owner) == LMD_TYPE_FUNC) {
         Function* fn = owner.function;
-        return fn->entry_abi == FN_ENTRY_ABI_MVP_LMD && fn->requires_runtime_context &&
-            ((MvpLmdCallable*)fn)->constructor ? ((MvpLmdCallable*)fn)->home : NULL;
+        if (fn->entry_abi != FN_ENTRY_ABI_MVP_LMD || !fn->requires_runtime_context) return NULL;
+        MvpLmdCallable* callable = (MvpLmdCallable*)fn;
+        return callable->constructor ? callable->home : callable->properties;
     }
     if (get_type_id(owner) != LMD_TYPE_MAP) return NULL;
     TypeNominal* nominal = ((TypeMap*)owner.map->type)->nominal;
@@ -23,19 +24,23 @@ static Item mvp_lmd_inherited_member(Item owner, const char* key, size_t length,
     *found = false;
     MvpLmdClass* cls = mvp_lmd_class_record(owner);
     if (!cls) return Item{.item = ITEM_JS_UNDEFINED};
-    bool statics = get_type_id(owner) == LMD_TYPE_FUNC || owner.map == cls->values[2].map;
+    bool statics = get_type_id(owner) == LMD_TYPE_FUNC || owner.map == mvp_lmd_class_values(cls)[2].map;
     TypeNominal* nominal = &cls->nominal;
-    if (statics || owner.map == cls->values[1].map) nominal = nominal->base;
+    if (statics || owner.map == mvp_lmd_class_values(cls)[1].map) nominal = nominal->base;
     for (; nominal; nominal = nominal->base) {
         if (nominal->extension != &mvp_lmd_class_extension) return mvp_lmd_fail(LMD_MVP_CAPABILITY, 0);
         MvpLmdClass* current = (MvpLmdClass*)nominal->extension_data;
-        Map* properties = current->values[statics ? 2 : 1].map;
+        Map* properties = mvp_lmd_class_values(current)[statics ? 2 : 1].map;
         ShapeEntry* field = typemap_hash_lookup((TypeMap*)properties->type, key, (int)length);
         if (field) { *found = true; return map_shape_field_to_item(properties->data, field); }
     }
     return Item{.item = ITEM_JS_UNDEFINED};
 }
-const TypeNominalExtension mvp_lmd_class_extension = {mvp_lmd_inherited_member};
+static Item mvp_lmd_nominal_owner(const void* data) {
+    const MvpLmdClass* cls = (const MvpLmdClass*)data;
+    return cls->owner ? Item{.function = cls->owner} : ItemNull;
+}
+const TypeNominalExtension mvp_lmd_class_extension = {mvp_lmd_inherited_member, mvp_lmd_nominal_owner};
 
 static void mvp_lmd_cache_property(MvpLmdPropertyCache* cache, TypeMap* shape,
         ShapeEntry* field, Item inherited, bool writable, bool nullable_initializer = false) {
@@ -82,17 +87,24 @@ extern "C" Item mvp_lmd_class_property(Item owner, Item name, Item value, int64_
         MvpLmdPropertyCache* cache) {
     bool initializing = operation == LMD_PROP_INITIALIZE;
     if (initializing) operation = LMD_PROP_SET;
+    if (get_type_id(owner) == LMD_TYPE_FUNC && !mvp_lmd_class_record(owner)) {
+        Item prepared = mvp_lmd_function_prepare(owner);
+        if (item_is_error(prepared)) return prepared;
+    }
     MvpLmdClass* cls = mvp_lmd_class_record(owner);
     if (cls) {
         bool constructor = get_type_id(owner) == LMD_TYPE_FUNC;
-        Map* map = constructor ? cls->values[2].map : owner.map;
-        bool metadata = constructor || map == cls->values[1].map || map == cls->values[2].map;
-        if (metadata && (operation == LMD_PROP_SET || operation == LMD_PROP_DELETE))
-            return mvp_lmd_fail(LMD_MVP_CAPABILITY, 0);
+        Map* map = constructor ? mvp_lmd_class_values(cls)[2].map : owner.map;
+        bool metadata = constructor || map == mvp_lmd_class_values(cls)[1].map || map == mvp_lmd_class_values(cls)[2].map;
+        if (metadata && (operation == LMD_PROP_SET || operation == LMD_PROP_DELETE)) {
+            String* key = name.get_string();
+            ShapeEntry* field = typemap_hash_lookup((TypeMap*)map->type, key->chars, key->len);
+            if ((!constructor && !cls->owner) ||
+                    (constructor && field && (field->flags & JSPD_NON_ENUMERABLE)))
+                return mvp_lmd_fail(LMD_MVP_CAPABILITY, 0);
+        }
         if (metadata && operation >= LMD_PROP_KEYS) {
-            // class metadata has only nonenumerable properties in this bounded phase.
-            Array* empty = array();
-            return empty ? Item{.array = empty} : mvp_lmd_fail(LMD_MVP_MEMORY, 0);
+            return mvp_lmd_object_project(Item{.map = map}, operation - LMD_PROP_KEYS);
         }
         if (operation == LMD_PROP_GET || operation == LMD_PROP_CALLEE ||
                 operation == LMD_PROP_OWN || operation == LMD_PROP_HAS) {
@@ -105,7 +117,7 @@ extern "C" Item mvp_lmd_class_property(Item owner, Item name, Item value, int64_
             if (item_is_error(result)) return result;
             // immutable shapes invalidate on shadowing/retyping; methods remain program-rooted.
             TypeMap* shape = (TypeMap*)map->type;
-            if (cache && !constructor && found &&
+            if (cache && !cls->owner && !constructor && found &&
                     (typemap_is_shared_shape(shape) || shape == &cls->shape) &&
                     (field || get_type_id(result) == LMD_TYPE_FUNC)) {
                 mvp_lmd_cache_property(cache, shape, field, result, !metadata);
@@ -118,7 +130,8 @@ extern "C" Item mvp_lmd_class_property(Item owner, Item name, Item value, int64_
             // classes without nullable initializers need no extra value classification.
             bool nullable_initializer = !metadata && cls->nullable_initializer_count &&
                 mvp_lmd_class_widen_allocation(cls, name.get_string(), get_type_id(value));
-            if (field && cache && !metadata && typemap_is_shared_shape((TypeMap*)map->type)) {
+            // ordinary prototype data stays on shared dispatch; it must never populate legacy site state.
+            if (field && cache && !cls->owner && !metadata && typemap_is_shared_shape((TypeMap*)map->type)) {
                 mvp_lmd_cache_property(cache, (TypeMap*)map->type, field, ItemNull, true, nullable_initializer);
             }
             // Lambda's Map pointer lane already represents null; preserve its immutable shape as fn_map_set does.
@@ -151,7 +164,7 @@ extern "C" Item mvp_lmd_class_super(Item function, int64_t constructor) {
     MvpLmdCallable* fn = (MvpLmdCallable*)function.function;
     if (!fn->home || !fn->home->nominal.base) return mvp_lmd_fail(LMD_MVP_CAPABILITY, 0);
     MvpLmdClass* base = (MvpLmdClass*)fn->home->nominal.base->extension_data;
-    return base->values[constructor ? 0 : fn->static_method ? 2 : 1];
+    return mvp_lmd_class_values(base)[constructor ? 0 : fn->static_method ? 2 : 1];
 }
 extern "C" Item mvp_lmd_constructor_result(Item value, Item receiver, int64_t derived) {
     TypeId type = get_type_id(value);
@@ -176,7 +189,7 @@ extern "C" Item mvp_lmd_class_invoke(Item callee, Item receiver, Item* arguments
         MvpLmdClass* cls = fn->home;
         while (cls->constructor_id < 0 && cls->nominal.base) {
             cls = (MvpLmdClass*)cls->nominal.base->extension_data;
-            held.set(cls->values[0]); fn = (MvpLmdCallable*)held.get().function;
+            held.set(mvp_lmd_class_values(cls)[0]); fn = (MvpLmdCallable*)held.get().function;
         }
         MvpLmdClass* actual = mvp_lmd_class_record(new_target);
         if (!actual || get_type_id(new_target) != LMD_TYPE_FUNC) return mvp_lmd_fail(LMD_MVP_TYPE, 0);
@@ -190,13 +203,23 @@ extern "C" Item mvp_lmd_class_invoke(Item callee, Item receiver, Item* arguments
         }
     } else if (new_target.item != ITEM_JS_UNDEFINED) {
         const AstFuncNode* ast = (const AstFuncNode*)fn->def;
-        return mvp_lmd_fail(ast && (ast->node_type == AST_NODE_FUNC_EXPR || ast->node_type == AST_NODE_FUNC)
-            ? LMD_MVP_CAPABILITY : LMD_MVP_TYPE, 0);
+        if (!ast || (ast->node_type != AST_NODE_FUNC_EXPR && ast->node_type != AST_NODE_FUNC))
+            return mvp_lmd_fail(LMD_MVP_TYPE, 0);
+        Item prepared = mvp_lmd_function_prepare(held.get());
+        if (item_is_error(prepared)) return prepared;
+        fn = (MvpLmdCallable*)held.get().function;
+        if (new_target.item != held.get().item) return mvp_lmd_fail(LMD_MVP_CAPABILITY, 0);
+        self.set(mvp_lmd_object_new(&fn->properties->shape, 0));
+        if (item_is_error(self.get())) return self.get();
     }
     // the caller roots the borrowed argument span; each MIR activation owns its receiver roots.
     typedef Item (*Entry)(Context*, MvpLmdProgram*, Item*, uint64_t, Item, Item, Item);
     Item result = ((Entry)fn->ptr)(context, fn->program, arguments, (uint64_t)argc,
         held.get(), self.get(), target.get());
+    result = lambda_item_resolve_pending_slot(result);
+    if (item_is_error(result)) return result;
+    if (!fn->constructor && target.get().item != ITEM_JS_UNDEFINED)
+        result = mvp_lmd_constructor_result(result, self.get(), false);
     // admitted initializers cannot observe these fields until every store has completed.
     if (reusable && result.item == self.get().item && get_type_id(result) == LMD_TYPE_MAP &&
             typemap_is_shared_shape((TypeMap*)result.map->type))
@@ -204,15 +227,23 @@ extern "C" Item mvp_lmd_class_invoke(Item callee, Item receiver, Item* arguments
     return result;
 }
 extern "C" Item mvp_lmd_instanceof(Item value, Item constructor) {
+    if (get_type_id(constructor) == LMD_TYPE_FUNC && !mvp_lmd_class_record(constructor)) {
+        RootFrame roots(2);
+        if (!roots.valid()) return ItemError;
+        Rooted<Item> held_value(roots, value), held_constructor(roots, constructor);
+        Item prepared = mvp_lmd_function_prepare(held_constructor.get());
+        if (item_is_error(prepared)) return prepared;
+        return mvp_lmd_instanceof(held_value.get(), held_constructor.get());
+    }
     MvpLmdClass* cls = mvp_lmd_class_record(constructor);
     if (!cls || get_type_id(constructor) != LMD_TYPE_FUNC)
         return mvp_lmd_fail(get_type_id(constructor) == LMD_TYPE_FUNC ? LMD_MVP_CAPABILITY : LMD_MVP_TYPE, 0);
     // fixed class-created links make the shared ancestry predicate exact for admitted instances.
     MvpLmdClass* actual = mvp_lmd_class_record(value);
     bool result = actual && get_type_id(value) == LMD_TYPE_MAP &&
-        value.map != actual->values[1].map && value.map != actual->values[2].map &&
+        value.map != mvp_lmd_class_values(actual)[1].map && value.map != mvp_lmd_class_values(actual)[2].map &&
         lambda_nominal_derives_from(&actual->nominal, &cls->nominal);
-    if (actual && get_type_id(value) == LMD_TYPE_MAP && value.map == actual->values[1].map)
+    if (actual && get_type_id(value) == LMD_TYPE_MAP && value.map == mvp_lmd_class_values(actual)[1].map)
         result = lambda_nominal_derives_from(actual->nominal.base, &cls->nominal);
     return Item{.item = b2it(result)};
 }

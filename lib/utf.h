@@ -127,6 +127,9 @@ LAMBDA_LIB_API void utf8_wtf8_encode(const char* chars, int byte_len, uint8_t* o
 // canonical UTF-8/WTF-8: combine surrogate pairs, preserve lone units; no Unicode normalization.
 bool utf8_key_is_canonical(const char* chars, size_t length);
 size_t utf8_canonical_key(const char* chars, size_t length, char* out);
+// select UTF-16 units and canonicalize their WTF-8 encoding, preserving boundary surrogates.
+size_t utf8_canonical_slice(const char* chars, size_t length, size_t start, size_t count, char* out);
+int64_t utf16_find(const char* chars, size_t length, const char* needle, size_t needle_length, size_t start);
 
 /* ── Codepoint Classification ─────────────────────────────────────── */
 

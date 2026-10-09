@@ -39,6 +39,19 @@ TEST(MapCamera, DatelinePolesHighZoomAndInvalidNumbers) {
     EXPECT_FALSE(geomap_project(camera, 181, 0, &x, &y));
     camera.zoom = INFINITY; EXPECT_FALSE(geomap_camera_valid(camera));
 }
+TEST(MapGeometry, SelfCrossingFillBoundariesAndRectanglesDoNotDependOnSignedArea) {
+    RdtPath* path=rdt_path_new();ASSERT_NE(path,nullptr);
+    rdt_path_move_to(path,32,32);rdt_path_line_to(path,224,160);rdt_path_line_to(path,32,160);
+    rdt_path_line_to(path,224,32);rdt_path_close(path);
+    EXPECT_TRUE(dom_geometry_path_query(path,128,48,128,48,false,RDT_FILL_EVEN_ODD,-1,0,0));
+    EXPECT_TRUE(dom_geometry_path_query(path,80,64,80,64,false,RDT_FILL_EVEN_ODD,-1,0,0));
+    EXPECT_TRUE(dom_geometry_path_query(path,75,62,81,64,true,RDT_FILL_EVEN_ODD,-1,0,0));
+    EXPECT_FALSE(dom_geometry_path_query(path,32,80,40,88,true,RDT_FILL_EVEN_ODD,-1,0,0));
+    rdt_path_free(path);path=rdt_path_new();ASSERT_NE(path,nullptr);
+    rdt_path_move_to(path,32,32);rdt_path_line_to(path,96,96);rdt_path_line_to(path,160,160);rdt_path_close(path);
+    EXPECT_FALSE(dom_geometry_path_query(path,90,90,100,100,true,RDT_FILL_EVEN_ODD,-1,0,0));
+    rdt_path_free(path);
+}
 
 class MapRender : public ::testing::Test {
 protected:
@@ -74,6 +87,41 @@ protected:
             unsigned difference = p[channel] > expected[channel] ? p[channel] - expected[channel] : expected[channel] - p[channel];
             EXPECT_LE(difference, tolerance) << "pixel " << x << "," << y << " channel " << channel;
         }
+    }
+    void click(DomElement* target) {
+        ASSERT_NE(target,nullptr);
+        float x,y,width,height;view_get_visual_bounds(target,&x,&y,&width,&height);
+        ASSERT_GT(width,0);ASSERT_GT(height,0);
+        RdtEvent press={};press.type=RDT_EVENT_MOUSE_DOWN;press.mouse_button.x=x+width/2;
+        press.mouse_button.y=y+height/2;press.mouse_button.button=0;press.mouse_button.clicks=1;
+        handle_event(&ui,document,&press);
+        RdtEvent release=press;release.type=RDT_EVENT_MOUSE_UP;handle_event(&ui,document,&release);
+        layout_html_doc(&ui,document,false);render_html_doc(&ui,document->view_tree,nullptr);
+        viewport=dom_find_element_by_id(document->root->as_element(),"viewport");ASSERT_NE(viewport,nullptr);
+    }
+    void drag(float x,float y,float end_x,float end_y) {
+        RdtEvent press={};press.type=RDT_EVENT_MOUSE_DOWN;
+        press.mouse_button.x=x;press.mouse_button.y=y;press.mouse_button.button=0;press.mouse_button.clicks=1;
+        handle_event(&ui,document,&press);
+        RdtEvent move={};move.type=RDT_EVENT_MOUSE_MOVE;move.mouse_position.x=end_x;move.mouse_position.y=end_y;
+        handle_event(&ui,document,&move);
+        RdtEvent release=press;release.type=RDT_EVENT_MOUSE_UP;release.mouse_button.x=end_x;release.mouse_button.y=end_y;
+        handle_event(&ui,document,&release);
+        layout_html_doc(&ui,document,false);render_html_doc(&ui,document->view_tree,nullptr);
+        viewport=dom_find_element_by_id(document->root->as_element(),"viewport");ASSERT_NE(viewport,nullptr);
+    }
+    DomElement* control(const char* action) {
+        DomNode* group=viewport->next_sibling;
+        if(!group || !group->is_element()) return nullptr;
+        for(DomNode* child=group->as_element()->first_child;child;child=child->next_sibling) if(child->is_element()) {
+            DomElement* element=child->as_element();const char* value=element->get_attribute("data-map-action");
+            if(value && !strcmp(value,action)) return element;
+        }
+        return nullptr;
+    }
+    double zoom() {
+        double value=NAN;item_try_to_double(ElementReader(dom_element_backing(viewport)).get_attr("zoom").item(),&value);
+        return value;
     }
 };
 TEST_F(MapRender, NativeViewportPaintsOrderedLayersHolesAndCssChrome) {
@@ -177,16 +225,7 @@ TEST_F(MapRender, RemovingADataLayerChangesNativePixelsWithoutLayoutChildren) {
 TEST_F(MapRender, RealPointerCaptureDragWheelAndKeyboardUpdateTheNativeViewport) {
     load("test/map/interactive.ls"); ASSERT_NE(viewport, nullptr);
     render_html_doc(&ui, document->view_tree, nullptr); pixel(144,112,255,0,0);
-    RdtEvent press = {}; press.type = RDT_EVENT_MOUSE_DOWN;
-    press.mouse_button.x = 144; press.mouse_button.y = 112;
-    press.mouse_button.button = 0; press.mouse_button.clicks = 1;
-    handle_event(&ui, document, &press);
-    RdtEvent move = {}; move.type = RDT_EVENT_MOUSE_MOVE;
-    move.mouse_position.x = 184; move.mouse_position.y = 112;
-    handle_event(&ui, document, &move);
-    RdtEvent release = press; release.type = RDT_EVENT_MOUSE_UP;
-    release.mouse_button.x = 184; handle_event(&ui, document, &release);
-    layout_html_doc(&ui, document, false); render_html_doc(&ui, document->view_tree, nullptr);
+    drag(144,112,184,112);
     pixel(184,112,255,0,0); pixel(144,112,238,243,246);
     RdtEvent wheel = {}; wheel.type = RDT_EVENT_SCROLL;
     wheel.scroll.x = 184; wheel.scroll.y = 112; wheel.scroll.yoffset = 1;
@@ -205,16 +244,7 @@ TEST_F(MapRender, TwoInteractiveViewportsKeepTheirCamerasAndPaintIndependent) {
     load("test/map/two_maps.ls"); ASSERT_NE(viewport, nullptr);
     render_html_doc(&ui, document->view_tree, nullptr);
     pixel(80,64,255,0,0); pixel(240,64,255,0,0);
-    RdtEvent press = {}; press.type = RDT_EVENT_MOUSE_DOWN;
-    press.mouse_button.x = 80; press.mouse_button.y = 64;
-    press.mouse_button.button = 0; press.mouse_button.clicks = 1;
-    handle_event(&ui, document, &press);
-    RdtEvent move = {}; move.type = RDT_EVENT_MOUSE_MOVE;
-    move.mouse_position.x = 104; move.mouse_position.y = 64;
-    handle_event(&ui, document, &move);
-    RdtEvent release = press; release.type = RDT_EVENT_MOUSE_UP;
-    release.mouse_button.x = 104; handle_event(&ui, document, &release);
-    layout_html_doc(&ui, document, false); render_html_doc(&ui, document->view_tree, nullptr);
+    drag(80,64,104,64);
     pixel(104,64,255,0,0); pixel(80,64,238,243,246);
     pixel(240,64,255,0,0); pixel(264,64,238,243,246);
     // inspect committed models as well as pixels: the sibling must retain its initial center.
@@ -228,4 +258,102 @@ TEST_F(MapRender, TwoInteractiveViewportsKeepTheirCamerasAndPaintIndependent) {
     ASSERT_TRUE(item_try_to_double(first_center.asArray().get(0).item(), &first_lon));
     ASSERT_TRUE(item_try_to_double(second_center.asArray().get(0).item(), &second_lon));
     EXPECT_LT(first_lon, 0); EXPECT_DOUBLE_EQ(second_lon, 0);
+}
+
+TEST_F(MapRender, RetainedFrameReplaysAndHistoricalPathsSurviveResizeAndRemoval) {
+    load("test/map/interactive.ls");ASSERT_NE(viewport,nullptr);
+    render_html_doc(&ui,document->view_tree,nullptr);
+    GeoMapFrame* old=geomap_displayed_frame(viewport);ASSERT_NE(old,nullptr);
+    geomap_frame_retain(old);uint64_t revision=old->revision;
+    render_html_doc(&ui,document->view_tree,nullptr);
+    EXPECT_EQ(geomap_displayed_frame(viewport),old);EXPECT_EQ(old->revision,revision);
+    EXPECT_EQ(old->index_count,(unsigned)old->shapes->length*2-1);
+    auto* marker=(GeoMapShape*)old->shapes->data[old->shapes->length-1];
+    EXPECT_TRUE(geomap_shape_hit(marker,{128,96,0,0},false));
+    ASSERT_TRUE(viewport->set_attribute("style","display:block;position:absolute;left:16px;top:16px;width:128px;height:96px"));
+    layout_html_doc(&ui,document,false);render_html_doc(&ui,document->view_tree,nullptr);
+    GeoMapFrame* resized=geomap_displayed_frame(viewport);ASSERT_NE(resized,nullptr);
+    EXPECT_NE(resized,old);EXPECT_GT(resized->revision,revision);EXPECT_DOUBLE_EQ(resized->camera.width,128);
+    EXPECT_DOUBLE_EQ(old->camera.width,256);EXPECT_TRUE(geomap_shape_hit(marker,{128,96,0,0},false));
+    Item removed=dom_remove_child_bridge(viewport->parent->as_element(),dom_wrap_element(viewport));
+    EXPECT_NE(get_type_id(removed),LMD_TYPE_ERROR);EXPECT_EQ(geomap_displayed_frame(viewport),nullptr);
+    EXPECT_TRUE(geomap_shape_hit(marker,{128,96,0,0},false));
+    ui.document=nullptr;free_document(document);document=nullptr;
+    EXPECT_TRUE(geomap_shape_hit(marker,{128,96,0,0},false));geomap_frame_release(old);
+}
+TEST_F(MapRender, RotatedViewportUsesTheInversePaintedPlaneForActualPointerInput) {
+    load("test/map/transformed.ls");ASSERT_NE(viewport,nullptr);
+    render_html_doc(&ui,document->view_tree,nullptr);pixel(160,144,255,0,0);
+    float x,y;ASSERT_TRUE(view_client_to_local(viewport,160,144,&x,&y));EXPECT_NEAR(x,128,.001);EXPECT_NEAR(y,96,.001);
+    drag(160,144,160,184);
+    pixel(160,184,255,0,0);pixel(160,144,238,243,246);
+}
+TEST_F(MapRender, PerspectivePlaneRoundTripUsesHomogeneousCoordinates) {
+    load("test/map/interactive.ls");ASSERT_NE(viewport,nullptr);
+    ASSERT_TRUE(viewport->set_attribute("style","display:block;position:absolute;left:16px;top:16px;transform:perspective(500px) rotateY(35deg);transform-origin:0 0"));
+    layout_html_doc(&ui,document,false);
+    float angle=35*3.14159265358979323846f/180,w=1+sinf(angle)*128/500;
+    float x,y;ASSERT_TRUE(view_client_to_local(viewport,16+cosf(angle)*128/w,16+96/w,&x,&y));
+    EXPECT_NEAR(x,128,.002);EXPECT_NEAR(y,96,.002);
+    ASSERT_TRUE(viewport->set_attribute("style","display:block;transform:scale(0)"));layout_html_doc(&ui,document,false);
+    EXPECT_FALSE(view_client_to_local(viewport,16,16,&x,&y));
+}
+TEST_F(MapRender, HoverClickDragThresholdCallbacksAndDoubleClickUseDisplayedFeatures) {
+    load("test/map/selection.ls");ASSERT_NE(viewport,nullptr);
+    render_html_doc(&ui,document->view_tree,nullptr);pixel(128,96,255,0,0);
+    RdtEvent move={};move.type=RDT_EVENT_MOUSE_MOVE;move.mouse_position.x=128;move.mouse_position.y=96;handle_event(&ui,document,&move);
+    layout_html_doc(&ui,document,false);render_html_doc(&ui,document->view_tree,nullptr);
+    viewport=dom_find_element_by_id(document->root->as_element(),"viewport");ASSERT_NE(viewport,nullptr);
+    EXPECT_STREQ(viewport->get_attribute("data-map-hover"),"[\n  42\n]");
+    RdtEvent press={};press.type=RDT_EVENT_MOUSE_DOWN;press.mouse_button.x=128;press.mouse_button.y=96;press.mouse_button.button=0;press.mouse_button.clicks=1;
+    handle_event(&ui,document,&press);
+    move.mouse_position.x=129;handle_event(&ui,document,&move);
+    RdtEvent release=press;release.type=RDT_EVENT_MOUSE_UP;release.mouse_button.x=129;handle_event(&ui,document,&release);
+    layout_html_doc(&ui,document,false);render_html_doc(&ui,document->view_tree,nullptr);
+    viewport=dom_find_element_by_id(document->root->as_element(),"viewport");ASSERT_NE(viewport,nullptr);
+    EXPECT_STREQ(viewport->get_attribute("data-map-selection"),"[\n  42\n]");
+    DomElement* output=dom_find_element_by_id(document->root->as_element(),"selection");ASSERT_NE(output,nullptr);
+    EXPECT_STREQ(output->get_attribute("data-selected"),"[\n  42\n]");pixel(128,96,255,0,0);
+    EXPECT_STREQ(output->get_attribute("data-snapshot"),"[\n  42\n]");
+    EXPECT_STREQ(output->get_attribute("data-parity"),"true");
+    press.mouse_button.clicks=2;release=press;release.type=RDT_EVENT_MOUSE_UP;
+    handle_event(&ui,document,&press);handle_event(&ui,document,&release);
+    layout_html_doc(&ui,document,false);render_html_doc(&ui,document->view_tree,nullptr);
+    viewport=dom_find_element_by_id(document->root->as_element(),"viewport");ASSERT_NE(viewport,nullptr);
+    double zoom;ASSERT_TRUE(item_try_to_double(ElementReader(dom_element_backing(viewport)).get_attr("zoom").item(),&zoom));EXPECT_DOUBLE_EQ(zoom,2);
+}
+TEST_F(MapRender, HtmlControlsFitResetAndKeyboardSelectionClearUseRealInput) {
+    load("test/map/selection.ls");ASSERT_NE(viewport,nullptr);
+    render_html_doc(&ui,document->view_tree,nullptr);
+    EXPECT_STREQ(viewport->get_attribute("aria-label"),"Interactive map");
+    click(control("zoom-in"));EXPECT_DOUBLE_EQ(zoom(),2);
+    DomElement* output=dom_find_element_by_id(document->root->as_element(),"selection");ASSERT_NE(output,nullptr);
+    EXPECT_STREQ(output->get_attribute("data-zoom"),"2");
+    click(control("zoom-out"));EXPECT_DOUBLE_EQ(zoom(),1);
+    click(control("fit"));EXPECT_GT(zoom(),1);
+    click(control("reset"));EXPECT_DOUBLE_EQ(zoom(),1);
+    click(viewport);EXPECT_STREQ(viewport->get_attribute("data-map-selection"),"[\n  42\n]");
+    RdtEvent key={};key.type=RDT_EVENT_KEY_DOWN;key.key.key=RDT_KEY_ESCAPE;handle_event(&ui,document,&key);
+    layout_html_doc(&ui,document,false);render_html_doc(&ui,document->view_tree,nullptr);
+    viewport=dom_find_element_by_id(document->root->as_element(),"viewport");ASSERT_NE(viewport,nullptr);
+    EXPECT_STREQ(viewport->get_attribute("data-map-selection"),"[]");
+    key.key.key='=';handle_event(&ui,document,&key);
+    key.key.key=RDT_KEY_HOME;handle_event(&ui,document,&key);
+    layout_html_doc(&ui,document,false);render_html_doc(&ui,document->view_tree,nullptr);
+    viewport=dom_find_element_by_id(document->root->as_element(),"viewport");ASSERT_NE(viewport,nullptr);EXPECT_DOUBLE_EQ(zoom(),1);
+}
+TEST_F(MapRender, DragSuppressesSyntheticClickAndPreservesSelectionCallback) {
+    load("test/map/selection.ls");ASSERT_NE(viewport,nullptr);render_html_doc(&ui,document->view_tree,nullptr);
+    drag(128,96,168,96);
+    EXPECT_STREQ(viewport->get_attribute("data-map-selection"),"[]");
+    DomElement* output=dom_find_element_by_id(document->root->as_element(),"selection");ASSERT_NE(output,nullptr);
+    EXPECT_EQ(output->get_attribute("data-selected"),nullptr);pixel(168,96,255,0,0);
+}
+
+TEST_F(MapRender, PointerInputAtDoubleDensityUsesCssCoordinates) {
+    load("test/map/interactive.ls",2);ASSERT_NE(viewport,nullptr);
+    render_html_doc(&ui,document->view_tree,nullptr);pixel(288,224,255,0,0);
+    drag(144,112,184,112);
+    pixel(368,224,255,0,0);pixel(288,224,238,243,246);
+    EXPECT_DOUBLE_EQ(zoom(),1);
 }

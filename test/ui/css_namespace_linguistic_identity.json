@@ -1,0 +1,486 @@
+{
+  "name": "Linguistic selectors use namespace and local identity for elements and attributes",
+  "html": "test/ui/css_namespace_linguistic_identity.html",
+  "viewport": {
+    "width": 640,
+    "height": 480
+  },
+  "events": [
+    {
+      "type": "click",
+      "target": {
+        "selector": "#check"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-prefixed-bdi-auto",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-prefixed-bdi-isolation",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-prefixed-script-excluded",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-prefixed-style-excluded",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-prefixed-textarea-excluded",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-prefixed-textarea-value",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-prefixed-tel-default",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-prefixed-input-value",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-ordinary-colon-name-is-literal",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-uppercase-local-not-bdi",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-uppercase-bare-not-bdi",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-mixed-local-not-input",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-prefixed-slot-assignment",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-foreign-dir-ignored",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-foreign-lang-ignored",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-qualified-getter-still-returns-value",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-foreign-idl-ignored",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-null-ns-absent",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-same-qualified-distinct-namespaces",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-null-ns-language-selected",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-foreign-update-does-not-change-host-hints",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-null-ns-removal-preserves-foreign",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-null-ns-removal-restores-inheritance",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-idl-setter-creates-null-namespace",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-idl-reflects-null-namespace",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-xml-language-priority",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-xml-removal-restores-null-lang",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-null-attribute-first-retains-value",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-null-attribute-first-hints",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-ordinary-write-keeps-first-namespace",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-empty-null-lang-stops-inheritance",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-svg-foreign-lang-ignored",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-svg-null-lang-selected",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-foreign-dir-does-not-isolate-descendant",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-attribute-node-independent-identity",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-attribute-order-includes-duplicate-qnames",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-attribute-qname-selects-first-node",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-attribute-node-value-targets-own-namespace",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-ordinary-selector-uses-null-namespace-value",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-clone-preserves-expanded-attributes",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-import-preserves-expanded-attributes",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-clone-mutations-do-not-change-source",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-remove-plain-node-preserves-foreign",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-reinserted-attribute-appends-in-order",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-remove-foreign-node-exposes-plain-mirror",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-replacement-node-changes-prefix-in-place",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-replacement-node-language-consumer",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-namespace-value-write-keeps-existing-prefix",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-parsed-html-colon-attribute-has-null-namespace",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-canonicalizing-literal-does-not-invent-namespace",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-parsed-svg-xml-language-keeps-namespace",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-foreign-slot-attributes-do-not-change-assignment",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-query-host-hints",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-cascade-host-hints",
+      "equals": "true"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#finish"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-final-geometry",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-final-cascade",
+      "equals": "true"
+    },
+    {
+      "type": "assert_pixel",
+      "x": 80,
+      "y": 50,
+      "min_g": 115,
+      "max_r": 20,
+      "max_b": 20
+    },
+    {
+      "type": "assert_pixel",
+      "x": 100,
+      "y": 50,
+      "min_r": 240,
+      "min_g": 240,
+      "min_b": 240
+    }
+  ]
+}

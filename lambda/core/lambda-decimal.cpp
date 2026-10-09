@@ -68,6 +68,31 @@ mpd_context_t* decimal_unlimited_context() {
     return &g_unlimited_ctx;
 }
 
+bool lambda_finite_double_to_fixed(double value, int digits, bool half_up, char* out, int out_size) {
+    if (!isfinite(value) || digits < 0 || digits > 100 || !out || out_size <= 0) return false;
+    bool negative = value < 0;
+    double magnitude = fabs(value);
+    int length = snprintf(out, out_size, "%s%.*f", negative ? "-" : "", digits, magnitude);
+    if (length < 0 || length >= out_size) return false;
+    if (!half_up || !magnitude) return true;
+    // x = odd * 2^e: x*10^digits is an exact half only when e+digits == -1.
+    // 5^digits == 1 (mod 4), so odd == 1 (mod 4) identifies ties rounded down to even.
+    int exponent;
+    uint64_t odd = (uint64_t)ldexp(frexp(magnitude, &exponent), 53);
+    exponent -= 53;
+    while (!(odd & 1)) { odd >>= 1; exponent++; }
+    if (exponent + digits != -1 || (odd & 3) != 1) return true;
+    for (int i = length - 1; i >= (int)negative; i--) {
+        if (out[i] == '.') continue;
+        if (out[i] != '9') { out[i]++; return true; }
+        out[i] = '0';
+    }
+    if (length + 1 >= out_size) return false;
+    memmove(out + negative + 1, out + negative, length - negative + 1);
+    out[negative] = '1';
+    return true;
+}
+
 void lambda_finite_double_to_shortest(double d, char* out, int out_size) {
     if (!out || out_size <= 0) return;
     if (d == 0.0) {

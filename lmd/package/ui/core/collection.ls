@@ -1,6 +1,20 @@
 import c: .component
 
 pub fn enabled(items: array) => [for (item in items where item.disabled != true) item]
+pub fn require_id(props, owner) bool^ => if (props.id is string and props.id != "") true else raise c.fail(owner,"a nonempty id is required")
+pub fn validate_keys(items, keys, owner) bool^ {
+    if (not (keys is array)) raise c.fail(owner,"keys must be an array")
+    else if (len(unique(keys)) != len(keys)) raise c.fail(owner,"keys must be unique")
+    else if (not all([for (key in keys) any([for (item in items) item.key == key])])) raise c.fail(owner,"unknown key")
+    else true
+}
+pub fn key_props(items, props, name, default_name, owner) bool^ {
+    let current = validate_keys(items,c.option(props,name,[]),owner)^
+    let initial = validate_keys(items,c.option(props,default_name,[]),owner)^;
+    if (c.has(props,name) and c.has(props,default_name)) raise c.fail(owner,name ++ " and " ++ default_name ++ " are mutually exclusive") else true
+}
+pub fn toggle(keys, key, multiple = true) => if (contains(keys,key)) [for (old in keys where old != key) old] else if (multiple) [*keys,key] else [key]
+pub fn set_keys(keys, candidates, checked) => if (checked) unique([*keys,*candidates]) else [for (key in keys where not contains(candidates,key)) key]
 pub fn validate(items, owner) bool^ {
     if (not (items is array)) raise c.fail(owner, "items must be an array")
     else (

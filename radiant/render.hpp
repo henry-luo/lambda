@@ -337,7 +337,7 @@ bool render_path_append_font_glyph(RdtPath* path, FontHandle* font, uint32_t cod
     float x, float y, float scale_x, Arena* arena, bool* color_bitmap = nullptr);
 bool render_path_append_font_glyph_index(RdtPath* path, FontHandle* font, uint32_t glyph,
     float x, float y, float scale_x, Arena* arena);
-bool render_path_append_svg(StrBuf* out, const RdtPath* path);
+bool render_path_append_svg(StrBuf* out, const RdtPath* path, int precision = 2);
 
 // Shared SVG geometry parsing for rendering and DOM geometry queries. The
 // returned path is caller-owned; transform coefficients are [a,b,c,d,e,f].

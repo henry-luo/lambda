@@ -1,0 +1,19 @@
+[[['root', 1, null], [1, 2, 'root'], [2, 2, 'root'], ['disabled', 2, 'root'], ['isolated', 3, 'disabled'], ['tail', 1, null]], ['root', 1, 2, 'disabled', 'tail'], {
+    checked_keys: ['root', 1, 2],
+    half_checked_keys: []
+  }, {
+    checked_keys: [2],
+    half_checked_keys: ['root']
+  }, {
+    checked_keys: ['root', 1, 2],
+    half_checked_keys: []
+  }, {
+    checked_keys: ['root'],
+    half_checked_keys: []
+  }, {
+    checked_keys: ['root', 1, 2],
+    half_checked_keys: []
+  }, {
+    checked_keys: ['isolated'],
+    half_checked_keys: []
+  }, true, true, true, true, true, true]

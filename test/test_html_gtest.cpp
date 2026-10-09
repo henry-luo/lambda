@@ -519,6 +519,25 @@ TEST_F(HtmlParserTest, AttributeMultiple) {
     EXPECT_EQ(getAttr(div, "data-index"), "5");
 }
 
+TEST_F(HtmlParserTest, EmptyAttributeValuesRemainStrings) {
+    Element* element = findElementByTag(parseHtml5Document(
+        "<!doctype html><span lang='' data-empty=\"\" hidden></span>"), "span");
+    ASSERT_NE(element, nullptr);
+    ElementReader reader(element);
+    const char* attributes[] = {"lang", "data-empty", "hidden"};
+    for (const char* name : attributes) {
+        ASSERT_TRUE(reader.has_attr(name));
+        ItemReader value = reader.get_attr(name);
+        ASSERT_TRUE(value.isString()) << name;
+        ASSERT_NE(value.asString(), nullptr);
+        EXPECT_EQ(value.asString()->len, 0u);
+        EXPECT_STREQ(reader.get_attr_string(name), "");
+    }
+    EXPECT_FALSE(reader.has_attr("missing"));
+    EXPECT_TRUE(reader.get_attr("missing").isNull());
+    EXPECT_EQ(element->length, 0);
+}
+
 TEST_F(HtmlParserTest, AttributeWithSpecialChars) {
     Item result = parseHtml(R"(<div title="A &amp; B"></div>)");
 

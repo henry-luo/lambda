@@ -604,6 +604,7 @@ static bool fo_style(FoTranslationContext* context, DomElement* source, StrBuf* 
 }
 
 static bool fo_attribute_admitted(FoTranslationContext* context, DomElement* source, const char* name) {
+    if (dom_attribute_is_internal(name)) return true;
     if (!strncmp(name, "xmlns", 5) && (!name[5] || name[5] == ':')) return true;
     for (const auto& property : fo_corresponding_properties) if (!strcmp(name, property.relative)) return true;
     if (fo_length_component_name(name)) return true;

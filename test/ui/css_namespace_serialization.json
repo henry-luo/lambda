@@ -1,0 +1,430 @@
+{
+  "name": "Expanded attribute identity survives HTML and XML serialization and element factories",
+  "html": "test/ui/css_namespace_serialization.html",
+  "viewport": {
+    "width": 640,
+    "height": 480
+  },
+  "events": [
+    {
+      "type": "click",
+      "target": {
+        "selector": "#check"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-ordinary-factory-html-namespace",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-null-factory-keeps-null-namespace",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-factory-namespace-survives-reparent",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-factory-local-prefix-identity",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-clone-keeps-null-and-literal-identity",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-parsed-xml-root-has-null-namespace",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-xml-ordinary-factory-keeps-case-and-null-namespace",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-html-keeps-duplicate-attribute-values",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-xml-distinguishes-duplicate-qualified-names",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-xml-roundtrip-language-consumer",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-xml-prefix-conflict-keeps-expanded-values",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-xml-local-declaration-conflict-keeps-expanded-values",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-xml-reserved-prefix-language",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-html-canonical-xml-attribute-prefix",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-xml-xlink-null-attributes-stay-independent",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-html-canonical-xlink-prefix",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-xml-element-prefix-conflict-preserves-namespace",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-xml-default-namespace-reset-and-reentry",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-xml-inherited-prefix-reused",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-xml-generated-prefix-avoids-declared-name",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-xml-sibling-prefix-scopes-stay-independent",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-xml-attribute-escaping-roundtrip",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-html-qualified-html-tag-uses-local-name",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-xml-empty-html-nonvoid-has-end-tag",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-xml-empty-html-void-has-space-slash",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-parsed-element-namespace-stable-after-declaration-removal",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-xml-fragment-children-have-independent-scope",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-xml-inconsistent-default-on-null-element-omitted",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-xml-inconsistent-default-on-namespaced-element-replaced",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-xml-existing-prefix-used-without-changing-dom",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-xml-inherited-prefix-can-be-rebound",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-xml-attribute-cannot-rebind-element-prefix",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-xml-reserved-element-prefix-canonicalized",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-xml-declarations-recorded-before-earlier-attributes",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-xml-repeated-serialization-is-stable",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-xml-attribute-node-serializes-empty",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-html-foreign-input-keeps-end-tag",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-html-void-does-not-serialize-children",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-xml-clone-keeps-both-expanded-attributes",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-xml-import-keeps-both-expanded-attributes",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-xml-text-carriage-return-follows-serialization-algorithm",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-xml-redundant-default-declaration-not-repeated",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-xml-deep-tree-serialized-with-one-prefix-declaration",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-xml-internal-identity-storage-not-exposed",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-html-ordinary-factory-lowercases-local-name",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-serialized-import-has-one-backing-and-dom-child",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-serialized-import-language-query",
+      "equals": "true"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#finish"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-final-geometry",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-final-cascade",
+      "equals": "true"
+    },
+    {
+      "type": "assert_pixel",
+      "x": 80,
+      "y": 50,
+      "min_g": 115,
+      "max_r": 20,
+      "max_b": 20
+    },
+    {
+      "type": "assert_pixel",
+      "x": 100,
+      "y": 50,
+      "min_r": 240,
+      "min_g": 240,
+      "min_b": 240
+    }
+  ]
+}

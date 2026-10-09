@@ -1,0 +1,13 @@
+% STIX supplies genuine slanted closed double/triple integrals, including large variants.
+% Its public LS2 font definitions and slots 98/99 avoid replacing the CM math profile.
+\DeclareFontEncoding{LS2}{}{}
+\DeclareFontSubstitution{LS2}{stixcal}{m}{n}
+\DeclareSymbolFont{referenceIntegrals}{LS2}{stixcal}{m}{n}
+\SetSymbolFont{referenceIntegrals}{bold}{LS2}{stixcal}{b}{n}
+\DeclareMathSymbol{\ReferenceOiint}{\mathop}{referenceIntegrals}{"98}
+\DeclareMathSymbol{\ReferenceOiiint}{\mathop}{referenceIntegrals}{"99}
+\makeatletter
+\newcommand{\oiint}{\DOTSI\ReferenceOiint\ilimits@}
+\newcommand{\oiiint}{\DOTSI\ReferenceOiiint\ilimits@}
+\makeatother
+\pdfmapfile{+stix.map}

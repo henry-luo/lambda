@@ -1,0 +1,366 @@
+{
+  "name": "Shadow and slot direction follows HTML directionality and named assignment",
+  "html": "test/ui/css_shadow_direction.html",
+  "viewport": {
+    "width": 640,
+    "height": 480
+  },
+  "events": [
+    {
+      "type": "click",
+      "target": {
+        "selector": "#check"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-shadow-host",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-shadow-nested",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-shadow-query",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-shadow-live-host",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-shadow-explicit-child",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-detached-shadow-host",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-slot-assigned-element",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-slot-query",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-slot-excludes-dir-root",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-slot-includes-invalid-dir",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-slot-neutral-assignment-ignores-fallback",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-first-duplicate-assigned",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-later-duplicate-fallback",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-duplicate-removal-reassigns",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-named-slot-miss-fallback",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-slot-name-mutation",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-removed-assignment-fallback",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-text-not-named",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-assigned-text",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-live-assigned-text",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-comments-not-assigned",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-assigned-bdi-excluded",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-assigned-descendant-isolation",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-assigned-script-excluded",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-assigned-textarea-excluded",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-nested-slot-host-barrier",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-nested-slot-live-host-barrier",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-nested-slot-explicit-isolation",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-ordinary-slot-contents",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-foreign-slot-does-not-steal-assignment",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-foreign-script-contributes",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-foreign-script-cssom",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-foreign-style-contributes",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-foreign-textarea-contributes",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-foreign-bdi-contributes",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-html-script-excluded",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-foreign-final-query",
+      "equals": "true"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#finish"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-foreign-final-cssom",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-foreign-final-geometry",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-slot-after-layout",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-nested-after-layout",
+      "equals": "true"
+    },
+    {
+      "type": "assert_pixel",
+      "x": 80,
+      "y": 50,
+      "min_g": 115,
+      "max_r": 20,
+      "max_b": 20
+    },
+    {
+      "type": "assert_pixel",
+      "x": 100,
+      "y": 50,
+      "min_r": 240,
+      "min_g": 240,
+      "min_b": 240
+    }
+  ]
+}

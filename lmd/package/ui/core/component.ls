@@ -2,13 +2,16 @@
 pub let common_props = ["id", "class", "style", "label", "title", "role", "tabindex"]
 
 pub fn fail(kind, detail) error => error("dtna: " ++ string(kind) ++ ": " ++ detail)
-pub fn option(props, key, fallback) => if (contains(props, symbol(key))) props[key] else fallback
+// key membership preserves an explicitly authored null (S8.2.2v4).
+pub fn has(props, key) => key at props
+pub fn option(props, key, fallback) => if (has(props,key)) props[key] else fallback
 pub fn text(value) string => if (value == null) "" else string(value)
 pub fn px(value) => string(value) ++ "px"
 pub fn boolean_attr(key, enabled) => if (enabled == true) {[key]:""} else {}
 pub fn aria(value) => if (value == true) "true" else "false"
 pub fn children(value) => if (value is array) value else if (value == null) [] else [value]
-pub fn render(value) => if (value is array) [for (child in value) render(child)] else if (value is element) apply(value) else value
+pub fn render(value) => if (value is array) [for (child in value) render(child)] else if (value is element) apply(value)
+    else if (value is number or value is bool or value is symbol) text(value) else value
 pub fn contents(node) => [for (child in content(node)) render(child)]
 
 pub fn properties(props, allowed: array, kind, attributes = false) bool^ {
@@ -37,14 +40,17 @@ pub fn action(node, action, value = null) => {component:string(node.kind), id:no
 
 pub fn enum_valid(value, choices: array) bool^ => value == null or contains(choices, text(value))^
 pub fn finite(value) => value is number and not (value is nan) and not (value is inf) and value != -inf
+pub fn boolean_props(props, keys, owner) bool^ {
+    let bad = [for (key in keys where has(props,key) and not (props[key] is bool)) key];
+    if (len(bad) > 0) raise fail(owner, bad[0] ++ " must be bool") else true
+}
 pub fn validate(kind, props) bool^ {
     let booleans = ["disabled", "loading", "readonly", "required", "checked", "default_checked", "wrap", "closable", "dot", "show_info", "danger", "block"]
-    let bad_bool = [for (key in booleans where contains(props, symbol(key)) and not (props[key] is bool)) key];
-    if (len(bad_bool) > 0) raise fail(kind, bad_bool[0] ++ " must be bool")
-    else if (not enum_valid(props.size, ["small", "middle", "large"])^) raise fail(kind, "invalid size")
+    let valid = boolean_props(props, booleans, kind)^;
+    if (not enum_valid(props.size, ["small", "middle", "large"])^) raise fail(kind, "invalid size")
     else if (not enum_valid(props.status, ["success", "warning", "error", "info"])^) raise fail(kind, "invalid status")
     else if (not enum_valid(props.variant, ["primary", "default", "dashed", "text", "link"])^) raise fail(kind, "invalid variant")
-    else if (contains(props, 'value') and contains(props, 'default_value')) raise fail(kind, "value and default_value are mutually exclusive")
-    else if (contains(props, 'checked') and contains(props, 'default_checked')) raise fail(kind, "checked and default_checked are mutually exclusive")
+    else if (has(props,'value') and has(props,'default_value')) raise fail(kind, "value and default_value are mutually exclusive")
+    else if (has(props,'checked') and has(props,'default_checked')) raise fail(kind, "checked and default_checked are mutually exclusive")
     else true
 }

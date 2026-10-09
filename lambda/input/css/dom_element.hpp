@@ -45,10 +45,17 @@ typedef struct DocState DocState;  // From radiant/state_store.h
 typedef struct StateStore StateStore;  // From radiant/state_store.hpp
 typedef struct Url Url;  // From lib/url.h
 
+// shared named-slot assignment for HTML directionality and the renderer.
+DomElement* dom_shadow_root(DomNode* node);
+DomElement* dom_shadow_first_matching_slot(DomNode* root, const char* name);
+bool dom_slot_assignment_matches(DomElement* slot, DomNode* child);
+DomElement* dom_slot_assignment_host(DomElement* slot);
+
+typedef const char* (*DomDirectionValueResolver)(DomElement*, void*);
 // Shared HTML first-strong scan used by dir=auto layout and :dir() matching.
 int dom_find_strong_direction(DomNode* node, bool skip_explicit_dir, bool first,
-                              bool raw_content = false);
-typedef const char* (*DomDirectionValueResolver)(DomElement*, void*);
+    bool raw_content = false, DomDirectionValueResolver resolve_value = nullptr,
+    void* context = nullptr);
 int dom_element_directionality(DomElement* element,
     DomDirectionValueResolver resolve_value = nullptr, void* context = nullptr);
 bool dom_element_has_directionality_hint(DomElement* element);
@@ -69,6 +76,7 @@ typedef struct CustomLayoutPaintState CustomLayoutPaintState;  // From radiant/l
 typedef struct Runtime Runtime;  // From lambda/lambda.h
 struct DomElement;
 const char* dom_element_namespace_uri(struct DomElement* element);
+NameId dom_element_html_tag(struct DomElement* element);
 const char* dom_element_lookup_namespace_uri(struct DomElement* element, const char* prefix);
 const char* dom_element_attribute_namespace_uri(struct DomElement* element,
     const char* qualified_name, const char** local_name);
@@ -262,13 +270,15 @@ struct DomDocumentServices {
     void* svg_animation_registry; // document-owned SMIL clocks and sampled values
     void* svg_use_resource_cache; // retained external-use DOM/style owners
     char* preferred_languages; // document-owned UI preference snapshot, refreshed by the host setter
+    lam::Own<char> pragma_language;    // document-owned default retained after a meta insertion
+    lam::Own<char> protocol_language;  // document-owned single Content-Language response value
     bool svg_image_document; // SVG image processing forbids external subordinate resources
 
     DomDocumentServices() : mem_ctx(nullptr), cached_css_engine(nullptr),
         keyframe_registry(nullptr), registered_property_set(nullptr), element_count(0), ext_allocations(0),
         layout_cache_allocations(0), node_registry(nullptr),
         style_epoch_manager(nullptr), scene3d_registry(nullptr), canvas_registry(nullptr),
-        svg_layer_registry(nullptr), svg_filter_registry(nullptr), svg_animation_registry(nullptr), svg_use_resource_cache(nullptr), preferred_languages(nullptr), svg_image_document(false) {}
+        svg_layer_registry(nullptr), svg_filter_registry(nullptr), svg_animation_registry(nullptr), svg_use_resource_cache(nullptr), preferred_languages(nullptr), pragma_language(nullptr), protocol_language(nullptr), svg_image_document(false) {}
 };
 
 static inline const char* dom_reconcile_mode_name(DomReconcileMode mode) {
@@ -496,7 +506,7 @@ struct DomDocument : DomDocumentResourceData {
     // Constructor
     DomDocument() : input(nullptr), document_pool(nullptr), node_arena(nullptr),
                     url(nullptr), html_root(nullptr), root(nullptr), html_version(0),
-                    html_scripting_enabled(false),
+                    html_scripting_enabled(false), xml_document(false),
                     next_node_id(1),
                     stylesheets(nullptr), stylesheet_count(0), stylesheet_capacity(0),
                     font_faces_processed(false),
@@ -572,6 +582,12 @@ typedef struct DomDocumentResource {
 bool dom_document_add_resource(DomDocument* document, struct DomDocumentResourceData* data,
                                DomDocumentResourceDestroyFn destroy);
 bool dom_document_release_resource(DomDocument* document, DomDocumentResourceData* data);
+
+const char* dom_document_default_language(const DomDocument* document);
+const char* dom_element_language(DomElement* element);
+bool dom_document_set_content_language(DomDocument* document, const char* header);
+bool dom_document_process_metadata_insertion(DomDocument* document, DomNode* subtree);
+extern "C" void dom_css_document_language_changed(void* document);
 
 // The parent iframe owns the embedded document's bounded upward edge. The
 // document keeps a generation-checked reference rather than a raw node pointer.
@@ -770,10 +786,34 @@ struct DomNamespacedAttribute {
     lam::Own<const char> namespace_uri;   // document-pool copies
     lam::Own<const char> local_name;
     lam::Own<const char> qualified_name;
-    lam::Own<const char> value;
+    lam::Own<const char> value; // null preserves a native Mark null attribute (S2.2.3)
     bool active;
     lam::Own<DomNamespacedAttribute> next;
 };
+
+static inline bool dom_attribute_is_internal(const char* name) {
+    return name && strncmp(name, "__lambda_", 9) == 0;
+}
+
+// borrowed attribute fields; iteration preserves expanded identity and native null values.
+struct DomAttributeView {
+    const char* namespace_uri;
+    const char* qualified_name;
+    const char* local_name;
+    const char* value;
+};
+struct DomAttributeIterator {
+    DomElement* element;
+    const char** names;
+    int count;
+    int index;
+    DomNamespacedAttribute* next;
+    bool recorded;
+};
+DomAttributeIterator dom_element_attribute_iterator(DomElement* element);
+bool dom_element_next_attribute(DomAttributeIterator* iterator, DomAttributeView* attribute);
+bool dom_element_set_namespace_identity(DomElement* element,
+    const char* namespace_uri, const char* local_name);
 
 DomNamespacedAttribute* dom_element_namespaced_attributes(DomElement* element);
 bool dom_element_record_namespaced_attribute(DomElement* element,
@@ -782,10 +822,20 @@ void dom_element_remove_namespaced_attribute(DomElement* element,
     const char* namespace_uri, const char* local_name);
 const char* dom_element_get_namespaced_attribute(DomElement* element,
     const char* namespace_uri, const char* local_name);
+const char* dom_element_attribute_value_ns(DomElement* element,
+    const char* namespace_uri, const char* local_name);
+const char* dom_element_find_qualified_attribute(DomElement* element,
+    const char* namespace_uri, const char* local_name);
+bool dom_element_set_attribute_ns(DomElement* element,
+    const char* namespace_uri, const char* qualified_name, const char* value, bool replace_name = false);
+bool dom_element_remove_attribute_ns(DomElement* element,
+    const char* namespace_uri, const char* local_name);
 
 DomAttr* dom_attribute_node_create(DomDocument* document, const char* namespace_uri,
     const char* qualified_name, const char* value);
 DomAttr* dom_element_attribute_node(DomElement* element, const char* name);
+DomAttr* dom_element_attribute_node_ns(DomElement* element,
+    const char* namespace_uri, const char* local_name);
 bool dom_attribute_node_set_value(DomAttr* attribute, const char* value);
 void dom_attribute_node_attach(DomElement* element, DomAttr* attribute);
 void dom_attribute_node_detach(DomAttr* attribute);
@@ -856,6 +906,7 @@ struct DomElementExt {
     // Deferred text-control events are DOM task state, so their queue links
     // outlive layout-property teardown while a control is detached.
     uint8_t selectionchange_event_pending;
+    bool attributes_are_recorded; // ordered expanded names become authoritative after namespace mutation
     lam::Up<DomElement> selectionchange_event_next;
     // ::marker layout state; markers have no BlockProp
     lam::ViewProp<MarkerProp, DomViewSlot::marker> marker;

@@ -120,7 +120,11 @@ static bool test_radiant_view_send_all(int client, const char* data, size_t size
     return true;
 }
 
-struct RadiantViewHttpResource { const char* request; const char* type; const char* body; size_t size; };
+struct RadiantViewHttpResource {
+    const char* request; const char* type; const char* body; size_t size;
+    const char* headers = "";
+    int status = 200;
+};
 
 static bool test_radiant_view_unsupported_image_server_start(RadiantViewImageServer* server,
         const RadiantViewHttpResource* resources = nullptr, size_t resource_count = 0,
@@ -150,6 +154,7 @@ static bool test_radiant_view_unsupported_image_server_start(RadiantViewImageSer
         return false;
     }
 
+    pid_t owner_pid = getpid();
     pid_t pid = fork();
     if (pid < 0) {
         close(listener);
@@ -173,6 +178,8 @@ static bool test_radiant_view_unsupported_image_server_start(RadiantViewImageSer
             FD_SET(listener, &ready);
             struct timeval timeout = {.tv_sec = 10, .tv_usec = 0};
             int select_result = select(listener + 1, &ready, nullptr, nullptr, &timeout);
+            // resource-table fixtures live until their parent scope closes, including slow ASan clients.
+            if (select_result == 0 && resources && getppid() == owner_pid) continue;
             if (select_result <= 0) break;
             int client = accept(listener, nullptr, nullptr);
             if (client < 0) continue;
@@ -191,10 +198,13 @@ static bool test_radiant_view_unsupported_image_server_start(RadiantViewImageSer
             size_t body_size = is_image_request ? sizeof(avif) :
                 (is_prime_request ? sizeof(prime_document) - 1 : sizeof(page_document) - 1);
             const char* type = is_image_request ? "image/avif" : "text/html";
+            const char* response_headers = "";
+            int status = 200;
             if (resources) {
                 body = "missing fixture resource"; body_size = strlen(body); type = "text/plain";
                 for (size_t i = 0; i < resource_count; i++) if (strstr(request, resources[i].request)) {
-                    body = resources[i].body; body_size = resources[i].size; type = resources[i].type; break;
+                    body = resources[i].body; body_size = resources[i].size; type = resources[i].type;
+                    response_headers = resources[i].headers; status = resources[i].status; break;
                 }
             }
             if (audit_path) {
@@ -203,9 +213,9 @@ static bool test_radiant_view_unsupported_image_server_start(RadiantViewImageSer
             }
             char header[256];
             int header_size = snprintf(header, sizeof(header),
-                "HTTP/1.1 200 OK\r\nContent-Type: %s\r\nContent-Length: %zu\r\n"
-                "Connection: close\r\n\r\n",
-                type, body_size);
+                "HTTP/1.1 %d Fixture\r\nContent-Type: %s\r\nContent-Length: %zu\r\n"
+                "%sConnection: close\r\n\r\n",
+                status, type, body_size, response_headers);
             bool sent = header_size > 0 && header_size < (int)sizeof(header) &&
                 test_radiant_view_send_all(client, header, (size_t)header_size);
             if (sent) {
@@ -306,10 +316,11 @@ static ShellResult test_radiant_view_run_logged_headless(const char* page,
                                                          const ShellEnvEntry* env,
                                                          const char* optimization = nullptr,
                                                          const char* const* preview_options = nullptr,
-                                                         int timeout_ms = 0) {
+                                                         int timeout_ms = 0,
+                                                         const char* executable = "./lambda.exe") {
     const char* args[32] = {};
     int arg_count = 0;
-    args[arg_count++] = "./lambda.exe";
+    args[arg_count++] = executable;
     args[arg_count++] = "view";
     args[arg_count++] = page;
     if (event_path) {
@@ -324,7 +335,101 @@ static ShellResult test_radiant_view_run_logged_headless(const char* page,
     options.env = env;
     options.merge_stderr = true;
     options.timeout_ms = timeout_ms;
-    return shell_exec("./lambda.exe", args, &options);
+    return shell_exec(executable, args, &options);
+}
+
+TEST(RadiantViewTest, DocumentLanguageUsesOnlyFinalHttpResponseAndMetadataPrecedence) {
+#ifdef _WIN32
+    GTEST_SKIP() << "local HTTP fixture uses POSIX sockets";
+#else
+    test_radiant_view_ensure_temp_dir();
+    const struct {
+        const char* path; const char* headers; int status; const char* markup;
+        const char* language; const char* color; unsigned width;
+    } rows[] = {
+        {"single", "Content-Language: iw-IL\r\n", 200, "", "he", "0, 0, 255", 80},
+        {"list", "Content-Language: fr,en\r\n", 200, "", "", "255, 0, 0", 20},
+        {"duplicate", "Content-Language: fr\r\nContent-Language: de\r\n", 200, "", "", "255, 0, 0", 20},
+        {"none", "", 200, "", "", "255, 0, 0", 20},
+        {"redirect-none", "Content-Language: fr\r\nLocation: /none.html\r\n", 302, "", "", "255, 0, 0", 20},
+        {"redirect-single", "Content-Language: fr\r\nLocation: /single.html\r\n", 302, "", "he", "0, 0, 255", 80},
+        {"meta", "Content-Language: iw-IL\r\n", 200,
+            "<meta http-equiv='content-language' content='fr'>", "fr", "0, 128, 0", 60},
+        {"meta-list", "Content-Language: iw-IL\r\n", 200,
+            "<meta http-equiv='content-language' content='fr,en'>", "he", "0, 0, 255", 80},
+        {"root", "Content-Language: iw-IL\r\n", 200, "<html lang='fr'>", "fr", "0, 128, 0", 60},
+        {"empty", "Content-Language: iw-IL\r\n", 200, "<html lang=''>", "", "255, 0, 0", 20},
+        {"whitespace", "Content-Language: \t fr \t\r\n", 200, "", "fr", "0, 128, 0", 60},
+        {"empty-header", "Content-Language: \r\n", 200, "", "", "255, 0, 0", 20},
+    };
+    constexpr size_t count = sizeof(rows) / sizeof(rows[0]);
+    StrBuf* pages[count] = {};
+    StrBuf* requests[count] = {};
+    RadiantViewHttpResource resources[count] = {};
+    struct SourcesScope {
+        StrBuf** pages; StrBuf** requests;
+        ~SourcesScope() { for (size_t i = 0; i < count; i++) { strbuf_free(pages[i]); strbuf_free(requests[i]); } }
+    } sources_scope = {pages, requests};
+    for (size_t i = 0; i < count; i++) {
+        pages[i] = strbuf_new(); requests[i] = strbuf_new();
+        ASSERT_NE(pages[i], nullptr); ASSERT_NE(requests[i], nullptr);
+        strbuf_append_format(requests[i], "GET /%s.html ", rows[i].path);
+        strbuf_append_format(pages[i], "<!doctype html>%s<style>"
+            "#child{width:20px;height:12px;background:red}"
+            "#child:lang(fr){width:60px;background:green}#child:lang(he){width:80px;background:blue}"
+            "</style><button id='check'>check</button><div id='report'></div><div id='child'></div>"
+            "<script>document.getElementById('check').onclick=function(){"
+            "var c=document.getElementById('child'),r=document.getElementById('report');"
+            "r.setAttribute('data-query',String(c.matches(':lang(\"%s\")')));"
+            "r.setAttribute('data-cssom',String(getComputedStyle(c).backgroundColor==='rgb(%s)'));"
+            "r.setAttribute('data-geometry',String(c.getBoundingClientRect().width===%u));"
+            "r.setAttribute('data-detached',String(document.createElement('span').matches(':lang(\"%s\")')));"
+            "};</script>", rows[i].markup, rows[i].language, rows[i].color, rows[i].width,
+            // detached nodes inherit the protocol default rather than an explicit root lang.
+            strcmp(rows[i].path, "root") == 0 || strcmp(rows[i].path, "empty") == 0 ? "he" : rows[i].language);
+        resources[i] = {requests[i]->str, "text/html", pages[i]->str, pages[i]->length,
+            rows[i].headers, rows[i].status};
+    }
+    RadiantViewImageServer server = {};
+    ASSERT_TRUE(test_radiant_view_unsupported_image_server_start(&server, resources, count));
+    struct ServerScope {
+        pid_t pid;
+        ~ServerScope() { kill(pid, SIGTERM); waitpid(pid, nullptr, 0); }
+    } server_scope = {server.pid};
+    // control and sanitizer processes need independent event fixtures.
+    char events[128];
+    ASSERT_GT(snprintf(events, sizeof(events), "temp/test_document_http_language_%ld_events.json",
+        (long)getpid()), 0);
+    StrBuf* event_source = strbuf_new(); ASSERT_NE(event_source, nullptr);
+    strbuf_append_str(event_source, "{\"events\":[{\"type\":\"click\",\"target\":{\"selector\":\"#check\"}}");
+    const char* assertions[] = {"query", "cssom", "geometry", "detached"};
+    for (const char* name : assertions)
+        strbuf_append_format(event_source, ",{\"type\":\"assert_attribute\",\"target\":{\"selector\":\"#report\"},"
+            "\"attribute\":\"data-%s\",\"equals\":\"true\"}", name);
+    strbuf_append_str(event_source, "]}");
+    ASSERT_EQ(write_binary_file(events, event_source->str, event_source->length), 0);
+    strbuf_free(event_source);
+    const ShellEnvEntry env[] = {
+        {"MEMTRACK_MODE", "STATS"}, {"VIEW_MEM_STAGES", "1"},
+        {"LAMBDA_GC_FORCE_EVERY", "1"}, {"LAMBDA_GC_POISON_FREED", "1"}, {nullptr, nullptr},
+    };
+    const char* executable = getenv("RADIANT_TEST_EXECUTABLE");
+    if (!executable) executable = "./lambda.exe";
+    for (const auto& row : rows) {
+        SCOPED_TRACE(row.path);
+        char remote[160];
+        ASSERT_GT(snprintf(remote, sizeof(remote), "http://127.0.0.1:%d/%s.html", server.port, row.path), 0);
+        ShellResult result = test_radiant_view_run_logged_headless(remote, events, env,
+            nullptr, nullptr, 0, executable);
+        const char* output = result.stdout_buf ? result.stdout_buf : "";
+        EXPECT_EQ(result.exit_code, 0) << output;
+        EXPECT_NE(strstr(output, "Result: PASS"), nullptr) << output;
+        EXPECT_NE(strstr(output, "Assertions: 4 passed, 0 failed"), nullptr) << output;
+        EXPECT_NE(strstr(output, "[MEMTRACK_LIVE] bytes=0 count=0"), nullptr) << output;
+        shell_result_free(&result);
+    }
+    remove(events);
+#endif
 }
 
 TEST(RadiantViewTest, PagedWindowScrollResizeAndDensity) {

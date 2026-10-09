@@ -25,6 +25,8 @@ typedef struct {
     CookieJar* cookie_jar;
     CURL* curl;
     const char* request_url;
+    char* content_language;
+    bool capture_language;
 } HttpResponse;
 
 // HttpConfig is now defined in input.h
@@ -92,9 +94,35 @@ static size_t write_response_callback(void* contents, size_t size, size_t nmemb,
     return total_size;
 }
 
-static size_t write_cookie_header_callback(char* buffer, size_t size, size_t nmemb,
+static size_t write_document_header_callback(char* buffer, size_t size, size_t nmemb,
                                            HttpResponse* response) {
+    if (nmemb && size > SIZE_MAX / nmemb) return 0;
     size_t header_size = size * nmemb;
+    if (response && response->capture_language) {
+        if (str_istarts_with_const(buffer, header_size, "HTTP/")) {
+            // redirect and informational headers must not leak into the final document.
+            mem_free(response->content_language);
+            response->content_language = NULL;
+        } else if (str_istarts_with_const(buffer, header_size, "content-language:")) {
+            const char* value = buffer + sizeof("content-language:") - 1;
+            const char* end = buffer + header_size;
+            while (value < end && str_char_is_ascii_space(*value)) value++;
+            while (end > value && str_char_is_ascii_space(end[-1])) end--;
+            size_t length = (size_t)(end - value);
+            size_t previous = response->content_language ? strlen(response->content_language) : 0;
+            if (length > SIZE_MAX - 2 || previous > SIZE_MAX - length - 2) return 0;
+            char* combined = (char*)mem_alloc(previous + length + 2, MEM_CAT_NETWORK);
+            if (!combined) return 0;
+            if (previous) {
+                memcpy(combined, response->content_language, previous);
+                combined[previous++] = ',';
+            }
+            memcpy(combined + previous, value, length);
+            combined[previous + length] = '\0';
+            mem_free(response->content_language);
+            response->content_language = combined;
+        }
+    }
     if (!response || !response->cookie_jar || !response->request_url ||
         !str_istarts_with_const(buffer, header_size, "set-cookie:")) {
         return header_size;
@@ -136,7 +164,9 @@ const char* content_type_to_extension(const char* content_type) {
 }
 
 // Download HTTP/HTTPS resource and return content in memory
-char* download_http_content(const char* url, size_t* content_size, const HttpConfig* config, char** effective_url) {
+static char* download_http_content_impl(const char* url, size_t* content_size,
+    const HttpConfig* config, char** effective_url, char** content_language) {
+    if (content_language) *content_language = NULL;
     if (!init_curl()) {
         return NULL;
     }
@@ -155,6 +185,7 @@ char* download_http_content(const char* url, size_t* content_size, const HttpCon
     response.cookie_jar = config ? config->cookie_jar : NULL;
     response.curl = curl;
     response.request_url = url;
+    response.capture_language = content_language != NULL;
     struct curl_slist* document_headers = http_document_navigation_headers();
     if (!document_headers) {
         log_error("HTTP: Failed to allocate document request headers");
@@ -169,10 +200,10 @@ char* download_http_content(const char* url, size_t* content_size, const HttpCon
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_response_callback);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response);
     cookie_jar_import_curl(response.cookie_jar, curl);
-    if (response.cookie_jar) {
+    if (response.cookie_jar || response.capture_language) {
         // Feed the jar into curl's cookie engine so redirect hops are matched
         // against each hop's URL instead of forwarding one raw Cookie header.
-        curl_easy_setopt(curl, CURLOPT_HEADERFUNCTION, write_cookie_header_callback);
+        curl_easy_setopt(curl, CURLOPT_HEADERFUNCTION, write_document_header_callback);
         curl_easy_setopt(curl, CURLOPT_HEADERDATA, &response);
     }
     curl_easy_setopt(curl, CURLOPT_TIMEOUT, config ? config->timeout_seconds : default_http_config.timeout_seconds);
@@ -235,6 +266,7 @@ char* download_http_content(const char* url, size_t* content_size, const HttpCon
             log_error("HTTP: failed to persist response cookies");
         }
         byte_builder_destroy(&response.body);
+        mem_free(response.content_language);
         curl_slist_free_all(document_headers);
         curl_easy_cleanup(curl);
         return NULL;
@@ -250,6 +282,7 @@ char* download_http_content(const char* url, size_t* content_size, const HttpCon
             log_error("HTTP: failed to persist response cookies");
         }
         byte_builder_destroy(&response.body);
+        mem_free(response.content_language);
         curl_slist_free_all(document_headers);
         curl_easy_cleanup(curl);
         return NULL;
@@ -279,7 +312,13 @@ char* download_http_content(const char* url, size_t* content_size, const HttpCon
     }
     curl_slist_free_all(document_headers);
     curl_easy_cleanup(curl);
+    if (content_language) *content_language = response.content_language;
     return (char*)byte_builder_take(&response.body, NULL);
+}
+
+char* download_http_content(const char* url, size_t* content_size,
+    const HttpConfig* config, char** effective_url) {
+    return download_http_content_impl(url, content_size, config, effective_url, NULL);
 }
 
 // Keep synchronous consumers on the same durable SHA-256 cache format as the
@@ -340,12 +379,17 @@ static char* download_http_content_with_enhanced_cache(const char* url,
 char* download_http_content_with_cookie_jar(const char* url, size_t* content_size,
                                             CookieJar* cookie_jar,
                                             char** effective_url) {
+    return download_http_document_with_cookie_jar(url, content_size, cookie_jar, effective_url, NULL);
+}
+
+char* download_http_document_with_cookie_jar(const char* url, size_t* content_size,
+    CookieJar* cookie_jar, char** effective_url, char** content_language) {
     HttpConfig config = default_http_config;
     // A document navigation owns the resource manager's 60-second page-load
     // budget, rather than the 30-second limit intended for each subresource.
     config.timeout_seconds = 60;
     config.cookie_jar = cookie_jar;
-    return download_http_content(url, content_size, &config, effective_url);
+    return download_http_content_impl(url, content_size, &config, effective_url, content_language);
 }
 
 // Download HTTP/HTTPS resource to the native cache and optionally return its path.

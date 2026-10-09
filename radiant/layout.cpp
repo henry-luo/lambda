@@ -3724,17 +3724,6 @@ void line_align(LayoutContext* lycon) {
     }
 }
 
-static bool layout_shadow_tree_contains(DomNode* root, DomNode* target) {
-    if (!root || !target) return false;
-    if (root == target) return true;
-    if (!root->is_element()) return false;
-    for (DomNode* child = root->as_element()->first_child; child;
-         child = child->next_sibling) {
-        if (layout_shadow_tree_contains(child, target)) return true;
-    }
-    return false;
-}
-
 DomElement* layout_shadow_formatting_parent(DomNode* node) {
     if (!node) return nullptr;
     if (node->parent && node->parent->is_element()) {
@@ -3768,7 +3757,7 @@ static DomElement* layout_shadow_tree_host(DomNode* node) {
             return element->shadow_host_element();
         }
         if (element->shadow_root_element() &&
-            layout_shadow_tree_contains(element->shadow_root_element(), node)) {
+            dom_subtree_contains_node(element->shadow_root_element(), node)) {
             return element;
         }
     }
@@ -3791,41 +3780,8 @@ DomNode* layout_rendered_first_child_node(DomElement* element) {
 }
 
 bool layout_is_shadow_slot(DomNode* node) {
-    return node && node->is_element() && node->tag() == MARKUP_NAME_SLOT &&
+    return node && node->is_element() && dom_element_html_tag(node->as_element()) == MARKUP_NAME_SLOT &&
         layout_shadow_tree_host(node) != nullptr;
-}
-
-static bool layout_slot_assignment_matches(DomElement* slot, DomNode* child) {
-    if (!slot || !child) return false;
-    const char* slot_name = slot->get_attribute("name");
-    if (!slot_name) slot_name = "";
-    if (child->is_text()) {
-        // Shadow DOM slot assignment includes text nodes; filtering them out
-        // loses whitespace that remains in the flattened inline sequence.
-        return slot_name[0] == '\0';
-    }
-    if (!child->is_element()) return false;
-    const char* assigned_name = child->as_element()->get_attribute("slot");
-    if (!assigned_name) assigned_name = "";
-    return strcmp(slot_name, assigned_name) == 0;
-}
-
-static DomElement* layout_shadow_find_first_matching_slot(DomNode* node,
-                                                           const char* slot_name) {
-    if (!node || !node->is_element()) return nullptr;
-    DomElement* element = node->as_element();
-    if (element->tag() == MARKUP_NAME_SLOT) {
-        const char* candidate_name = element->get_attribute("name");
-        if (!candidate_name) candidate_name = "";
-        if (strcmp(candidate_name, slot_name ? slot_name : "") == 0) {
-            return element;
-        }
-    }
-    for (DomNode* child = element->first_child; child; child = child->next_sibling) {
-        DomElement* matching_slot = layout_shadow_find_first_matching_slot(child, slot_name);
-        if (matching_slot) return matching_slot;
-    }
-    return nullptr;
 }
 
 static DomNode* layout_slot_assigned_sibling(DomElement* slot, DomNode* child,
@@ -3836,14 +3792,14 @@ static DomNode* layout_slot_assigned_sibling(DomElement* slot, DomNode* child,
     if (forward) {
         for (DomNode* candidate = child->next_sibling; candidate;
              candidate = candidate->next_sibling) {
-            if (layout_slot_assignment_matches(slot, candidate)) return candidate;
+            if (dom_slot_assignment_matches(slot, candidate)) return candidate;
         }
         return nullptr;
     }
     DomNode* previous = nullptr;
     for (DomNode* candidate = host->first_child; candidate && candidate != child;
          candidate = candidate->next_sibling) {
-        if (layout_slot_assignment_matches(slot, candidate)) previous = candidate;
+        if (dom_slot_assignment_matches(slot, candidate)) previous = candidate;
     }
     return previous;
 }
@@ -3853,16 +3809,16 @@ void layout_shadow_slot_children(LayoutContext* lycon, DomElement* slot) {
     DomElement* host = layout_shadow_tree_host((DomNode*)slot);
     if (!host) return;
 
-    const char* slot_name = slot->get_attribute("name");
+    const char* slot_name = dom_element_attribute_value_ns(slot, "", "name");
     if (!slot_name) slot_name = "";
     // Shadow DOM: each slotable is assigned to the first matching slot in
     // shadow-tree order; later same-name slots render only their fallback.
-    DomElement* first_matching_slot = layout_shadow_find_first_matching_slot(
+    DomElement* first_matching_slot = dom_shadow_first_matching_slot(
         host->shadow_root_element(), slot_name);
     bool is_assignment_target = first_matching_slot == slot;
     bool has_assigned_nodes = false;
     for (DomNode* child = host->first_child; child; child = child->next_sibling) {
-        if (is_assignment_target && layout_slot_assignment_matches(slot, child)) {
+        if (is_assignment_target && dom_slot_assignment_matches(slot, child)) {
             has_assigned_nodes = true;
             DomNode* dom_parent = child->parent;
             DomNode* dom_prev = child->prev_sibling;

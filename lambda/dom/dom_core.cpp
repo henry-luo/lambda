@@ -28,6 +28,7 @@
 #include "../input/css/css_style.hpp"
 #include "../io/mark_builder.hpp"
 #include "../js/js_runtime.h"
+#include "../../lib/memtrack.h"
 #include <climits>
 #include <cstring>
 
@@ -309,13 +310,38 @@ extern "C" Item dom_core_create_node(Item doc, Item type, Item name, Item data) 
     }
 }
 
-extern "C" void* dom_create_backed_element_bridge(void* document_ptr,
-                                                    const char* tag) {
-    DomDocument* document = (DomDocument*)document_ptr;
+static DomElement* dom_create_backed_element_identity(DomDocument* document,
+        const char* tag, const char* namespace_uri, bool qualified) {
     if (!document || !document->input || !tag || !tag[0]) return nullptr;
+    bool html = !document->xml_document;
+    char* normalized = nullptr;
+    if (!qualified && html) {
+        size_t length = strlen(tag);
+        normalized = (char*)mem_alloc(length + 1, MEM_CAT_DOM);
+        if (!normalized) return nullptr;
+        for (size_t i = 0; i <= length; i++)
+            normalized[i] = tag[i] >= 'A' && tag[i] <= 'Z' ? tag[i] + ('a' - 'A') : tag[i];
+        tag = normalized;
+    }
+    const char* uri = qualified ? (namespace_uri ? namespace_uri : "")
+        : html ? "http://www.w3.org/1999/xhtml" : "";
+    const char* colon = qualified ? strchr(tag, ':') : nullptr;
+    const char* local = colon ? colon + 1 : tag;
     MarkBuilder builder(document->input);
     Item backing = builder.element(tag).final();
-    return backing.element ? dom_element_create(document, tag, backing.element) : nullptr;
+    DomElement* element = backing.element ? dom_element_create(document, tag, backing.element) : nullptr;
+    if (element && !dom_element_set_namespace_identity(element, uri, local)) element = nullptr;
+    if (normalized) mem_free(normalized);
+    return element;
+}
+
+extern "C" void* dom_create_backed_element_bridge(void* document_ptr, const char* tag) {
+    return dom_create_backed_element_identity((DomDocument*)document_ptr, tag, nullptr, false);
+}
+
+extern "C" void* dom_create_backed_element_ns_bridge(void* document_ptr,
+        const char* tag, const char* namespace_uri) {
+    return dom_create_backed_element_identity((DomDocument*)document_ptr, tag, namespace_uri, true);
 }
 // Property WRITES through the realm-shared protocol (D7.4.4). These were kept
 // out of the Lambda face because they faulted with no JS realm (ESO81); the

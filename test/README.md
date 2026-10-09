@@ -26,7 +26,7 @@ Last verified against tree: 2026-10-07
 |---|---|---|
 | Lambda core: `lambda/runtime/`, `lambda/core/`, parser, MIR JIT | **`make test-lambda-baseline`** | `./test/test_lambda_gtest.exe --gtest_filter='AutoDiscovered/*<name>*'`; `./test/test_mir_emission_gtest.exe --gtest_filter='Fixtures/*<name>*'`; `./test/test_lambda_errors_gtest.exe --gtest_filter='NegativeScriptTest.*'` |
 | Lambda packages: `lmd/package/**/*.ls` | **`make test-lambda-baseline`** | `./test/test_lambda_gtest.exe --gtest_filter='AutoDiscovered/*scene3d_*'` (also `chart_`, `latex_`, `math_`, `mermaid_`, `graphviz_`, `structurizr_`, `slide_`, `editor_`, `edit_`); `make test-math-corpus` |
-| Native geographic maps: `radiant/geomap*`, `lmd/package/map*` | **`make test-lambda-baseline`** + **`make test-radiant-baseline`** | `make test-map`, `make test-map-export`, `make test-map-reference` (first `npm ci --prefix test/map`); fixtures and pinned expression corpus in `test/map/`, functional goldens in `test/lambda/map/` |
+| Native geographic maps: `radiant/geomap*`, `lmd/package/map*` | **`make test-lambda-baseline`** + **`make test-radiant-baseline`** | `make test-map` (frames, indexed picking, native pointer/control input), `make test-map-export`, `make test-map-reference` (first `npm ci --prefix test/map`); fixtures and pinned expression corpus in `test/map/`, functional goldens in `test/lambda/map/` |
 | Input parsers / formatters: `lambda/input/`, `lambda/format/`, `lambda/io/` | `make test-input-baseline` (5 corpora, also run by test-lambda-baseline) + `make test-input` (70-binary input suite) | `./test/test_input_model_gtest.exe`; `./test/test_markdown_gtest.exe --baseline`; `./test/test_input_roundtrip_gtest.exe --gtest_filter='JsonTests.*'`; `./test/test_html_gtest.exe` |
 | CSS engine: `lambda/input/css/` | **`make test-radiant-baseline`** + `make test-input` (`test_css_*` binaries) | `./test/test_css_parser_gtest.exe`; `make layout test=<file>` |
 | Radiant layout / render / events: `radiant/` | **`make test-radiant-baseline`** + `node test/test_run.js --target=radiant --category=baseline` (the gate does not run the radiant suite's own gtests) | `make layout test=baseline_301_simple_margin`; `make layout suite=<dir>`; `./test/test_ui_automation_gtest.exe --suite baseline --test <id>`; `make test-render test=<name>` |
@@ -172,7 +172,7 @@ WebAssembly build and tests: `make build-wasm`, `make test-wasm`, and [`doc/dev/
 package goldens on T0/automatic/MIR tiers (**D8.1.1v17**), state-store regressions,
 and the manifest-owned `dtna` native UI suite on forced interpreter/JIT paths.
 The shared Radiant baseline also
-includes this suite. The gallery is `test/ui/dtna_gallery.ls`; the JSON-formatted
+includes this suite. The galleries are `test/ui/dtna_gallery.ls` and `test/ui/dtna_data_gallery.ls`; the JSON-formatted
 coverage inventory uses `.manifest` because every `.json` under `test/ui/` must
 be an executable fixture with exactly one owner.
 

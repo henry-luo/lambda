@@ -4,7 +4,8 @@ import model: .model
 
 fn attr(value, key, fallback = null) {
   let found = if (value == null) null else value[key];
-  if (found != null) found else fallback
+  // HTML/SVG optional metadata uses empty attribute strings where Mark uses null.
+  if (found != null and found != "") found else fallback
 }
 
 fn number_attr(value, key, fallback = 0.0) {

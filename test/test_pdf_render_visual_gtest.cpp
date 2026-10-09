@@ -7599,6 +7599,139 @@ TEST(RenderOutputParity, LinguisticSelectorsAndFirstStrongDirectionReachPaintAnd
     for (StrBuf* source : html) strbuf_free(source);
 }
 
+TEST(RenderOutputParity, NamespacedAutoDirectionMatchesExplicitDirectionAcrossOutputs) {
+    if (!file_exists(LAMBDA_EXE) || access(LAMBDA_EXE, X_OK) != 0) {
+        GTEST_SKIP() << "lambda.exe is unavailable";
+    }
+    StrBuf* html[2] = {strbuf_new(), strbuf_new()};
+    for (size_t index = 0; index < 2; index++) {
+        strbuf_append_str(html[index],
+            "<!doctype html><meta charset=utf-8><style>body{margin:0;background:white}"
+            ".row{position:absolute;left:0;width:100px;height:18px;background:red}"
+            ".row:dir(rtl){background:green}</style><body><script>"
+            "var tags=['script','style','textarea','bdi'];"
+            "for(var i=0;i<8;i++){var row=document.createElement('div');"
+            "row.className='row';row.style.top=(i*20)+'px';row.dir=");
+        strbuf_append_str(html[index], index ? "i<4?'rtl':'ltr';" : "'auto';");
+        strbuf_append_str(html[index],
+            "var child=document.createElementNS(i<4?'urn:test':'http://www.w3.org/1999/xhtml',tags[i%4]);"
+            "child.setAttribute('style','display:none');child.setAttribute('type','text/plain');"
+            "child.textContent='\xD7\x90';row.appendChild(child);document.body.appendChild(row);}</script>");
+    }
+    // compare selector-driven paint with explicit host directions in all three painters.
+    expect_html_pair_output_parity("namespaced_auto_direction", html[0]->str, html[1]->str);
+    for (StrBuf* source : html) strbuf_free(source);
+}
+
+TEST(RenderOutputParity, SerializedLinguisticAttributesRetainNamespacesAcrossOutputs) {
+    if (!file_exists(LAMBDA_EXE) || access(LAMBDA_EXE, X_OK) != 0)
+        GTEST_SKIP() << "lambda.exe is unavailable";
+    StrBuf* html[2] = {strbuf_new(), strbuf_new()};
+    ASSERT_NE(html[0], nullptr); ASSERT_NE(html[1], nullptr);
+    for (size_t index = 0; index < 2; index++) {
+        strbuf_append_str(html[index], "<!doctype html><meta charset=utf-8><style>body{margin:0;background:white}"
+            ".row{position:absolute;left:0;width:20px;height:18px;background:red}");
+        strbuf_append_str(html[index], index ? ".row{width:90px;background:green}" :
+            ".case-he:lang(he):dir(rtl),.case-ja:lang(ja):dir(rtl),.case-fr:lang(fr):dir(rtl){width:90px;background:green}");
+        strbuf_append_str(html[index], "</style><body lang='fr' dir='rtl'><script>"
+            "var H='http://www.w3.org/1999/xhtml',X='http://www.w3.org/XML/1998/namespace';"
+            "for(var i=0;i<4;i++){var row=document.createElementNS(H,'h:div');"
+            "row.className='row '+(i<2?'case-he':i===2?'case-fr':'case-ja');row.style.top=(i*20)+'px';row.setAttributeNS('urn:test','lang','de');"
+            "row.setAttributeNS('urn:test','dir','ltr');");
+        strbuf_append_str(html[index], index ?
+            "row.lang=i<2?'he':i===2?'fr':'ja';row.dir='rtl';" :
+            "if(i===0)row.lang='he';"
+            "if(i===1){row.lang='ja';row.setAttributeNS(X,'z:lang','he');}"
+            "if(i===3){row.lang='ja';row.dir='rtl';}"
+            "row=new DOMParser().parseFromString(new XMLSerializer().serializeToString(row),'application/xml').documentElement;");
+        strbuf_append_str(html[index], "document.body.appendChild(row);}</script>");
+    }
+    // serialized expanded names must drive the same cascade and painters as explicit hints.
+    expect_html_pair_output_parity("serialized_linguistic_attributes", html[0]->str, html[1]->str);
+    for (StrBuf* source : html) strbuf_free(source);
+}
+
+TEST(RenderOutputParity, NamespacedLinguisticAttributesMatchExplicitHintsAcrossOutputs) {
+    if (!file_exists(LAMBDA_EXE) || access(LAMBDA_EXE, X_OK) != 0)
+        GTEST_SKIP() << "lambda.exe is unavailable";
+    StrBuf* html[2] = {strbuf_new(), strbuf_new()};
+    ASSERT_NE(html[0], nullptr); ASSERT_NE(html[1], nullptr);
+    for (size_t index = 0; index < 2; index++) {
+        strbuf_append_str(html[index], "<!doctype html><meta charset=utf-8><style>body{margin:0;background:white}"
+            ".row{position:absolute;left:0;width:20px;height:18px;background:red}");
+        strbuf_append_str(html[index], index ? ".row{width:90px;background:green}" :
+            ".row:lang(fr):dir(rtl),.row:lang(ja):dir(ltr),.row:lang(he):dir(rtl){width:90px;background:green}");
+        strbuf_append_str(html[index], "</style><body lang='fr' dir='rtl'><script>"
+            "var ns='urn:test',xml='http://www.w3.org/XML/1998/namespace';"
+            "for(var i=0;i<4;i++){var row=document.createElementNS('http://www.w3.org/1999/xhtml','h:div');"
+            "row.className='row';row.style.top=(i*20)+'px';row.setAttributeNS(ns,'lang','de');"
+            "row.setAttributeNS(ns,'dir','ltr');");
+        strbuf_append_str(html[index], index ?
+            "row.lang=i===1?'ja':i===2?'he':'fr';row.dir=i===1?'ltr':'rtl';" :
+            "if(i===1){row.lang='ja';row.dir='ltr';}"
+            "if(i===2){row.setAttributeNS(xml,'x:lang','he');}"
+            "if(i===3){row.lang='ja';row.removeAttributeNS(null,'lang');}");
+        strbuf_append_str(html[index], "document.body.appendChild(row);}</script>");
+    }
+    // compare expanded-name selector and direction hints in PNG, SVG and PDF consumers.
+    expect_html_pair_output_parity("namespaced_linguistic_attributes", html[0]->str, html[1]->str);
+    for (StrBuf* source : html) strbuf_free(source);
+}
+
+TEST(RenderOutputParity, CanonicalLanguageSelectorsReachEveryOutputPainter) {
+    if (!file_exists(LAMBDA_EXE) || access(LAMBDA_EXE, X_OK) != 0) {
+        GTEST_SKIP() << "lambda.exe is unavailable";
+    }
+    const struct { const char* language; const char* selector; bool matches; } rows[] = {
+        {"iw-IL", ":lang(he)", true}, {"he-IL", ":lang(iw)", true},
+        {"en-BU", ":lang(en-MM)", true}, {"ja-Latn-heploc", ":lang(ja-alalc97)", true},
+        {"i-klingon", ":lang(tlh)", true}, {"en-GB-oed", ":lang(en-GB-oxendict)", true},
+        {"cmn-Hans-CN", ":lang(zh)", true}, {"zh-cmn-Hans-CN", ":lang(cmn)", true},
+        {"sgn-BE-FR", ":lang(sgn)", true}, {"arb", ":lang(ar)", true},
+        {"ar-ajp", ":lang(apc)", true},
+        {"en-b-bbb-a-aaa", ":lang(\"en-a-aaa-b-bbb\")", true},
+        {"en-a", ":lang(en)", false}, {"de-1901-1901", ":lang(\"*\")", false},
+    };
+    StrBuf* html[2] = {strbuf_new(), strbuf_new()};
+    ASSERT_NE(html[0], nullptr); ASSERT_NE(html[1], nullptr);
+    for (size_t side = 0; side < 2; side++) {
+        strbuf_append_str(html[side], "<!doctype html><style>body{margin:0;background:white}"
+            "div{width:20px;height:10px;background:red}");
+        for (size_t row = 0; row < sizeof(rows) / sizeof(rows[0]); row++) {
+            if (side && !rows[row].matches) continue;
+            strbuf_append_format(html[side], "#box%zu", row);
+            if (!side) strbuf_append_str(html[side], rows[row].selector);
+            strbuf_append_str(html[side], "{width:60px;background:green}");
+        }
+        strbuf_append_str(html[side], "</style>");
+        for (size_t row = 0; row < sizeof(rows) / sizeof(rows[0]); row++)
+            strbuf_append_format(html[side], "<div id='box%zu' lang='%s'></div>", row, rows[row].language);
+    }
+    // selector conversion determines both geometry and color in PNG, SVG and PDF consumers.
+    expect_html_pair_output_parity("canonical_languages", html[0]->str, html[1]->str);
+    for (StrBuf* source : html) strbuf_free(source);
+}
+
+TEST(RenderOutputParity, DocumentLanguageMetadataMatchesExplicitLanguageAcrossOutputs) {
+    if (!file_exists(LAMBDA_EXE) || access(LAMBDA_EXE, X_OK) != 0)
+        GTEST_SKIP() << "lambda.exe is unavailable";
+    const char* prefix = "<!doctype html><style>body{margin:0;background:white}"
+        "div{width:20px;height:12px;background:red}"
+        "div:lang(he){width:80px;background:blue}</style>";
+    StrBuf* html[2] = {strbuf_new(), strbuf_new()};
+    ASSERT_NE(html[0], nullptr); ASSERT_NE(html[1], nullptr);
+    for (size_t side = 0; side < 2; side++) {
+        strbuf_append_str(html[side], prefix);
+        strbuf_append_str(html[side], side ? "<body lang='iw-IL'>" :
+            "<meta http-equiv='content-language' content='fr'><meta http-equiv='content-language' content=' iw-IL extra'>"
+            "<meta http-equiv='content-language' content='fr,en'><body>");
+        strbuf_append_str(html[side], "<div></div><div lang=''></div><div lang='fr'></div><div><div></div></div></body>");
+    }
+    // metadata fallback affects used geometry and color in every export consumer.
+    expect_html_pair_output_parity("document_languages", html[0]->str, html[1]->str);
+    for (StrBuf* source : html) strbuf_free(source);
+}
+
 TEST(RenderOutputParity, SvgReferencesAndColorSpacesReachExistingPaintConsumers) {
     if (!file_exists(LAMBDA_EXE) || access(LAMBDA_EXE, X_OK) != 0) {
         GTEST_SKIP() << "lambda.exe is unavailable";

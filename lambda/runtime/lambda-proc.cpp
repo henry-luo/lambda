@@ -8,6 +8,7 @@
 #include "../../lib/file.h"
 #include "../../lib/shell.h"
 #include "../../lib/str.h"
+#include "../../lib/time_util.h"
 #include "../core/utf_string.h"
 #include "../format/format.h"
 #include "radiant_event_hook.h"
@@ -93,16 +94,8 @@ Item pn_emit(Item event_name, Item event_data) {
 #endif
 
 double pn_clock() {
-    struct timespec ts;
-#ifdef __APPLE__
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-#elif defined(_WIN32)
-    // Windows: use QueryPerformanceCounter via timespec_get
-    timespec_get(&ts, TIME_UTC);
-#else
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-#endif
-    return (double)ts.tv_sec + (double)ts.tv_nsec / 1e9;
+    // elapsed-time APIs share the monotonic clock on every platform.
+    return time_now_seconds();
 }
 
 // Helper: Create parent directories recursively for a file path

@@ -2531,6 +2531,7 @@ void lambda_shape_entry_lane(const void* shape_entry, uint8_t* kind,
 // JS accessor cells are ShapeEntry-owned virtual edges. The collector uses
 // this bridge instead of duplicating the trailing C++ ShapeEntry layout.
 void* lambda_shape_entry_accessor(const void* shape_entry);
+uint64_t lambda_shape_nominal_owner(const void* type_map);
 #ifdef __cplusplus
 }
 #endif
@@ -3176,6 +3177,7 @@ extern "C" {
 
     // vector manipulation functions
     Item fn_reverse(Item a);
+    void array_reverse_in_place(Array* array);
     Item fn_sort1(Item a);
     Item fn_sort2(Item a, Item dir);
     void fn_sort_by_keys(Item values, Item keys, int64_t descending);

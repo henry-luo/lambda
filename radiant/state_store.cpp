@@ -2568,6 +2568,12 @@ static bool view_state_text_default_unchanged(View* old_view, View* new_view) {
     return !before && !after;
 }
 
+static void form_view_state_seed_constraints(ViewState* view_state, View* view) {
+    view_state->data.form.disabled = view_element_has_attr(view, "disabled") ? 1 : 0;
+    view_state->data.form.readonly = view_element_has_attr(view, "readonly") ? 1 : 0;
+    view_state->data.form.required = view_element_has_attr(view, "required") ? 1 : 0;
+}
+
 static void view_state_rekey_node(DocState* state, View* old_view, View* new_view) {
     if (!state || !state->view_state_map || !old_view || !new_view) return;
 
@@ -2608,6 +2614,10 @@ static void view_state_rekey_node(DocState* state, View* old_view, View* new_vie
         moved.owner_address = static_cast<DomNode*>(new_view);
         moved.owner_id = new_id;
         moved.state->view_id = new_id;
+        // constraints belong to the regenerated markup, unlike native edits.
+        if (kind == VIEW_STATE_FORM_CONTROL) {
+            form_view_state_seed_constraints(moved.state, new_view);
+        }
         hashmap_set(state->view_state_map, &moved);
         view_state_primary_cache(new_view, moved.state);
     }
@@ -3755,9 +3765,7 @@ static ViewState* form_view_state_get_or_create(DocState* state, View* view, For
     }
 
     if (should_seed_from_form) {
-        view_state->data.form.disabled = view_element_has_attr(view, "disabled") ? 1 : 0;
-        view_state->data.form.readonly = view_element_has_attr(view, "readonly") ? 1 : 0;
-        view_state->data.form.required = view_element_has_attr(view, "required") ? 1 : 0;
+        form_view_state_seed_constraints(view_state, view);
         view_state->data.form.checked = view_element_has_attr(view, "checked") ? 1 : 0;
         view_state->data.form.dropdown_open = 0;
         view_state->data.form.selected_index = form_default_selected_index_from_tree(view);

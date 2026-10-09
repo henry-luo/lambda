@@ -1,0 +1,1 @@
+["multiple", true, false, "yes", true, "caught", "ready", true, null, true, ["0", "false", "ready"]]

@@ -272,7 +272,7 @@ static String* dom_fragment_text(Item item) {
 // "__lambda_ns_uri") and must not leak through JS-facing attribute
 // enumeration, getAttribute lookup, or serialization.
 JS_FORWARD_STATIC_EXPRESSION(bool, dom_is_internal_attr, (const char* name),
-    name && strncmp(name, "__lambda_", 9) == 0)
+    dom_attribute_is_internal(name))
 // ============================================================================
 // Unique type markers for DOM-adjacent Maps
 // ============================================================================
@@ -1235,6 +1235,8 @@ static inline void dom_post_insert(DomNode* parent, DomNode* node,
                                    bool record_mutation = true) {
     DocState* st = dom_state_for_nodes(node, parent);
     if (st && parent && node) dom_mutation_post_insert(st, parent, node);
+    DomDocument* document = dom_mutation_document(node, parent);
+    if (document) dom_document_process_metadata_insertion(document, node);
     if (js_active_runtime_state && node && node->is_element() &&
         node->as_element()->doc == _js_main_document) {
         // Named Window properties follow insertion, not later script entry.
@@ -2294,27 +2296,7 @@ extern "C" const char* dom_element_lookup_namespace_uri(void* element, const cha
 }
 
 extern "C" const char* dom_element_attribute_ns(void* element, const char* namespace_uri, const char* local_name) {
-    DomElement* elem = (DomElement*)element;
-    if (!elem || !local_name) return nullptr;
-    const char* wanted_uri = namespace_uri ? namespace_uri : "";
-    const char* recorded = dom_element_get_namespaced_attribute(elem, wanted_uri, local_name);
-    if (recorded) return recorded;
-    char mirror_name[128];
-    if (strcmp(wanted_uri, "http://www.w3.org/1999/xlink") == 0) {
-        snprintf(mirror_name, sizeof(mirror_name), "__lambda_xlink_%s", local_name);
-        const char* mirror = elem->get_attribute(mirror_name);
-        if (mirror) return mirror;
-    }
-    int count = 0;
-    const char** names = elem->attribute_names(&count);
-    for (int i = 0; names && i < count; i++) {
-        if (dom_is_internal_attr(names[i])) continue;
-        const char* candidate_local = nullptr;
-        const char* uri = dom_element_attribute_namespace_uri(elem, names[i], &candidate_local);
-        if (uri && candidate_local && strcmp(uri, wanted_uri) == 0 &&
-            strcmp(candidate_local, local_name) == 0) return elem->get_attribute(names[i]);
-    }
-    return nullptr;
+    return dom_element_attribute_value_ns((DomElement*)element, namespace_uri, local_name);
 }
 
 extern "C" const char* dom_element_namespace_uri(void* element) {
@@ -2333,6 +2315,18 @@ extern "C" const char* dom_document_preferred_languages(void* document) {
     return doc->services.preferred_languages ? doc->services.preferred_languages : "";
 }
 
+static void dom_document_configuration_changed(DomDocument* doc) {
+    // document configuration changes selector matches without changing an observable DOM attribute.
+    if (doc->root) dom_mutation_notify(DOM_JS_MUTATION_UNKNOWN, doc->root);
+    else { doc->mutation_epoch++; doc->style_content_epoch++; }
+    if (doc->state) doc_state_request_repaint(doc->state);
+}
+
+extern "C" void dom_css_document_language_changed(void* document) {
+    DomDocument* doc = (DomDocument*)document;
+    if (doc) dom_document_configuration_changed(doc);
+}
+
 extern "C" bool dom_document_set_preferred_languages(void* document, const char* languages) {
     DomDocument* doc = (DomDocument*)document; if (!doc) return false;
     char* replacement = languages ? mem_strdup(languages, MEM_CAT_LAYOUT) : dom_platform_preferred_languages();
@@ -2341,9 +2335,7 @@ extern "C" bool dom_document_set_preferred_languages(void* document, const char*
     if (strcmp(previous, replacement) == 0) { mem_free(replacement); return true; }
     mem_free(doc->services.preferred_languages); doc->services.preferred_languages = replacement;
     // preference changes invalidate the same paint/resource generations as authored SVG mutations.
-    if (doc->root) dom_notify_mutation(DOM_JS_MUTATION_STYLE, doc->root, nullptr);
-    else { doc->mutation_epoch++; doc->style_content_epoch++; }
-    if (doc->state) doc_state_request_repaint(doc->state);
+    dom_document_configuration_changed(doc);
     return true;
 }
 
@@ -2703,6 +2695,21 @@ static Item dom_collection_attribute_item(DomElement* owner, const char* name) {
     return dom_wrap_element(attribute);
 }
 
+static Item dom_collection_attribute_item_at(DomElement* owner, int64_t index) {
+    if (index < 0) return ItemNull;
+    DomAttributeIterator iterator = dom_element_attribute_iterator(owner);
+    DomAttributeView attribute;
+    int64_t seen = 0;
+    while (dom_element_next_attribute(&iterator, &attribute)) {
+        if (dom_is_internal_attr(attribute.qualified_name) || seen++ != index) continue;
+        DomAttr* node = dom_element_attribute_node_ns(owner, attribute.namespace_uri, attribute.local_name);
+        if (!node) return ItemNull;
+        node->owner_changed = dom_attribute_node_owner_changed;
+        return dom_wrap_element(node);
+    }
+    return ItemNull;
+}
+
 static DomElement* dom_collection_direct_rows_at(DomElement* parent,
         int64_t target, int64_t* seen) {
     if (!parent || !seen) return nullptr;
@@ -2814,7 +2821,7 @@ static VirtualOpStatus dom_collection_varray_get(void* data, int64_t index,
         DomElement* owner = dom_collection_varray_owner(data);
         const char* name = dom_collection_attribute_name_at(owner, index);
         if (!name) return VIRTUAL_OP_MISSING;
-        *out = dom_collection_attribute_item(owner, name);
+        *out = dom_collection_attribute_item_at(owner, index);
         // attribute entries now carry native Attr identity, including indexed reads.
         return get_type_id(*out) == LMD_TYPE_VELMT
             ? VIRTUAL_OP_OK : VIRTUAL_OP_ERROR;
@@ -3747,6 +3754,7 @@ static DomDocument* create_foreign_html_doc(const char* title) {
     }
     DomDocument* fd = dom_document_create(input);
     if (!fd) return nullptr;
+    fd->page_kind = DOM_PAGE_KIND_HTML;
     // This document borrows its creator's Input and must not release it.
     dom_document_borrow_input_resources(fd);
 
@@ -5562,6 +5570,14 @@ static void collect_html_text_value(const char* value, size_t length,
     }
 }
 
+static bool dom_serializes_html_void(DomElement* element) {
+    if (strcmp(dom_element_namespace_uri(element), "http://www.w3.org/1999/xhtml")) return false;
+    const char* local = element->local_name();
+    static const char* const names[] = {"area", "base", "basefont", "bgsound", "br", "col", "embed", "frame", "hr", "img", "input", "keygen", "link", "meta", "param", "source", "track", "wbr"};
+    for (const char* name : names) if (!strcmp(local, name)) return true;
+    return false;
+}
+
 static void collect_inner_html(DomNode* node, StrBuf* sb) {
     if (!node) return;
     if (dom_is_generated_pseudo_node(node)) return;
@@ -5586,42 +5602,38 @@ static void collect_inner_html(DomNode* node, StrBuf* sb) {
 
     if (node->is_element()) {
         DomElement* elem = node->as_element();
-        // opening tag
-        strbuf_append_all(sb, 2, "<", elem->tag_name ? elem->tag_name : "unknown");
-
-        int attr_count = 0;
-        const char** attr_names = elem->attribute_names(&attr_count);
-        if (attr_names) {
-            for (int i = 0; i < attr_count; i++) {
-                const char* name = attr_names[i];
-                const char* value = elem->get_attribute(name);
-                if (!name) continue;
-                if (dom_is_internal_attr(name)) continue;
-                strbuf_append_char(sb, ' ');
-                strbuf_append_all(sb, 2, name, "=\"");
-                // A present valueless HTML attribute serializes with an empty
-                // value; null here represents presence, not attribute absence.
-                if (value) collect_html_attr_value(value, sb);
-                strbuf_append_char(sb, '"');
+        const char* uri = dom_element_namespace_uri(elem);
+        bool local_tag = !strcmp(uri, "http://www.w3.org/1999/xhtml") ||
+            !strcmp(uri, "http://www.w3.org/2000/svg") || !strcmp(uri, "http://www.w3.org/1998/Math/MathML");
+        const char* tag = local_tag ? elem->local_name() : elem->tag_name.get();
+        strbuf_append_all(sb, 2, "<", tag);
+        DomAttributeIterator iterator = dom_element_attribute_iterator(elem);
+        DomAttributeView attribute;
+        while (dom_element_next_attribute(&iterator, &attribute)) {
+            if (dom_is_internal_attr(attribute.qualified_name)) continue;
+            strbuf_append_char(sb, ' ');
+            const char* prefix = nullptr;
+            const char* name = attribute.qualified_name;
+            if (!*attribute.namespace_uri) name = attribute.local_name;
+            else if (!strcmp(attribute.namespace_uri, "http://www.w3.org/XML/1998/namespace")) {
+                prefix = "xml:"; name = attribute.local_name;
+            } else if (!strcmp(attribute.namespace_uri, "http://www.w3.org/2000/xmlns/")) {
+                prefix = strcmp(attribute.local_name, "xmlns") ? "xmlns:" : nullptr;
+                name = attribute.local_name;
+            } else if (!strcmp(attribute.namespace_uri, "http://www.w3.org/1999/xlink")) {
+                prefix = "xlink:"; name = attribute.local_name;
             }
+            if (prefix) strbuf_append_str(sb, prefix);
+            strbuf_append_all(sb, 2, name, "=\"");
+            collect_html_attr_value(attribute.value, sb);
+            strbuf_append_char(sb, '"');
         }
         strbuf_append_char(sb, '>');
-
-        // children
-        DomNode* child = dom_first_script_visible_child(elem);
-        while (child) {
-            collect_inner_html(child, sb);
-            child = dom_next_script_visible_sibling(child);
-        }
-
-        // closing tag (skip void elements)
-        const char* tag = elem->tag_name;
-        if (tag && strcmp(tag, "br") != 0 && strcmp(tag, "hr") != 0 &&
-            strcmp(tag, "img") != 0 && strcmp(tag, "input") != 0 &&
-            strcmp(tag, "meta") != 0 && strcmp(tag, "link") != 0) {
-            strbuf_append_all(sb, 2, "</", tag);
-            strbuf_append_char(sb, '>');
-        }
+        if (dom_serializes_html_void(elem)) return;
+        for (DomNode* child = dom_first_script_visible_child(elem); child;
+             child = dom_next_script_visible_sibling(child)) collect_inner_html(child, sb);
+        strbuf_append_all(sb, 2, "</", tag);
+        strbuf_append_char(sb, '>');
     }
 }
 
@@ -5631,7 +5643,9 @@ static void collect_xml_attr_value(const char* value, StrBuf* sb) {
         if (*p == '&') strbuf_append_str(sb, "&amp;");
         else if (*p == '<') strbuf_append_str(sb, "&lt;");
         else if (*p == '"') strbuf_append_str(sb, "&quot;");
-        else if (*p == '\r') strbuf_append_str(sb, "&#13;");
+        else if (*p == '\t') strbuf_append_str(sb, "&#9;");
+        else if (*p == '\n') strbuf_append_str(sb, "&#xA;");
+        else if (*p == '\r') strbuf_append_str(sb, "&#xD;");
         else strbuf_append_char(sb, *p);
     }
 }
@@ -5640,85 +5654,234 @@ static void collect_xml_text_value(const char* value, size_t length, StrBuf* sb)
     escape_append_html_text(sb, value, length);
 }
 
-static void collect_xml_node(DomNode* node, StrBuf* sb) {
-    if (!node || !sb || dom_is_generated_pseudo_node(node)) return;
-    if (node->is_text()) {
-        DomText* text = node->as_text();
-        if (text && text->text && text->length > 0) {
-            collect_xml_text_value(text->text, text->length, sb);
-        }
-        return;
-    }
-    if (node->is_comment()) {
-        DomComment* comment = node->as_comment();
-        strbuf_append_str(sb, "<!--");
-        if (comment && comment->content && comment->length > 0) {
-            strbuf_append_str_n(sb, comment->content, (int)comment->length);
-        }
-        strbuf_append_str(sb, "-->");
-        return;
-    }
-    if (!node->is_element()) return;
+static const char* const DOM_XML_NAMESPACE = "http://www.w3.org/XML/1998/namespace";
+static const char* const DOM_XMLNS_NAMESPACE = "http://www.w3.org/2000/xmlns/";
 
-    DomElement* elem = node->as_element();
-    const char* tag = elem && elem->tag_name ? elem->tag_name : "";
-    if (strcmp(tag, "#document-fragment") == 0) {
-        for (DomNode* child = dom_first_script_visible_child(elem); child;
-             child = dom_next_script_visible_sibling(child)) {
-            collect_xml_node(child, sb);
-        }
-        return;
-    }
+struct DomXmlPrefixBinding {
+    StrView prefix;
+    const char* uri;
+    DomXmlPrefixBinding* next;
+};
+struct DomXmlSerialization {
+    Pool* pool;
+    DomXmlPrefixBinding* bindings;
+    uint64_t prefix_index;
+    StrBuf* output;
+};
+struct DomXmlFrame {
+    DomElement* element;
+    DomNode* child;
+    const char* default_namespace;
+    StrView prefix;
+    DomXmlPrefixBinding* inherited_bindings;
+    DomXmlFrame* parent;
+    bool fragment;
+};
 
-    strbuf_append_all(sb, 2, "<", tag);
-    int attr_count = 0;
-    const char** attr_names = elem->attribute_names(&attr_count);
-    bool has_xlink_attr = false;
-    for (int i = 0; attr_names && i < attr_count; i++) {
-        const char* name = attr_names[i];
-        if (!name || dom_is_internal_attr(name)) continue;
-        if (strncmp(name, "xlink:", 6) == 0) {
-            has_xlink_attr = true;
-            break;
-        }
-        char xlink_name[128];
-        snprintf(xlink_name, sizeof(xlink_name), "__lambda_xlink_%s", name);
-        if (elem->get_attribute(xlink_name)) {
-            has_xlink_attr = true;
-            break;
-        }
-    }
-    if (has_xlink_attr && !elem->get_attribute("xmlns:xlink")) {
-        // A qualified XLink attribute needs its namespace declaration in XML.
-        strbuf_append_str(sb, " xmlns:xlink=\"http://www.w3.org/1999/xlink\"");
-    }
-    for (int i = 0; attr_names && i < attr_count; i++) {
-        const char* name = attr_names[i];
-        if (!name || dom_is_internal_attr(name)) continue;
-        char xlink_name[128];
-        snprintf(xlink_name, sizeof(xlink_name), "__lambda_xlink_%s", name);
-        bool is_xlink_attr = elem->get_attribute(xlink_name) != nullptr;
-        strbuf_append_char(sb, ' ');
-        if (is_xlink_attr && strncmp(name, "xlink:", 6) != 0)
-            strbuf_append_str(sb, "xlink:");
-        strbuf_append_all(sb, 2, name, "=\"");
-        const char* value = elem->get_attribute(name);
-        if (value) collect_xml_attr_value(value, sb);
-        strbuf_append_char(sb, '"');
-    }
+static bool dom_xml_prefix_equal(StrView a, StrView b) {
+    return a.length == b.length && (!a.length || !memcmp(a.str, b.str, a.length));
+}
 
-    DomNode* child = dom_first_script_visible_child(elem);
-    if (!child) {
-        strbuf_append_str(sb, "/>");
-        return;
+static StrView dom_xml_name_prefix(const char* name, const char* local) {
+    const char* colon = name ? strchr(name, ':') : nullptr;
+    return colon && !strcmp(colon + 1, local) ? StrView{name, (size_t)(colon - name)} : StrView{};
+}
+
+static DomXmlPrefixBinding* dom_xml_prefix_binding(DomXmlSerialization* context, StrView prefix) {
+    for (DomXmlPrefixBinding* binding = context->bindings; binding; binding = binding->next)
+        if (dom_xml_prefix_equal(binding->prefix, prefix)) return binding;
+    return nullptr;
+}
+
+static void dom_xml_bind_prefix(DomXmlSerialization* context, StrView prefix, const char* uri) {
+    DomXmlPrefixBinding* binding = (DomXmlPrefixBinding*)pool_calloc(context->pool, sizeof(DomXmlPrefixBinding));
+    binding->prefix = prefix; binding->uri = uri; binding->next = context->bindings;
+    context->bindings = binding;
+}
+
+static void dom_xml_append_name(StrBuf* output, StrView prefix, const char* local) {
+    if (prefix.length) { strbuf_append_str_n(output, prefix.str, prefix.length); strbuf_append_char(output, ':'); }
+    strbuf_append_str(output, local);
+}
+
+static void dom_xml_append_declaration(DomXmlSerialization* context, StrView prefix, const char* uri) {
+    strbuf_append_str(context->output, " xmlns");
+    if (prefix.length) { strbuf_append_char(context->output, ':'); strbuf_append_str_n(context->output, prefix.str, prefix.length); }
+    strbuf_append_str(context->output, "=\"");
+    collect_xml_attr_value(uri, context->output);
+    strbuf_append_char(context->output, '"');
+}
+
+static StrView dom_xml_choose_prefix(DomXmlSerialization* context, const char* uri,
+        StrView preferred, DomXmlPrefixBinding* inherited) {
+    DomXmlPrefixBinding* wanted = preferred.length ? dom_xml_prefix_binding(context, preferred) : nullptr;
+    if (wanted && !strcmp(wanted->uri, uri)) return preferred;
+    for (DomXmlPrefixBinding* binding = context->bindings; binding; binding = binding->next)
+        if (!strcmp(binding->uri, uri) && dom_xml_prefix_binding(context, binding->prefix) == binding)
+            return binding->prefix;
+    // inherited names can be rebound; names used by this element or its attributes cannot.
+    bool local_conflict = false;
+    for (DomXmlPrefixBinding* binding = context->bindings; binding != inherited; binding = binding->next)
+        if (dom_xml_prefix_equal(binding->prefix, preferred)) { local_conflict = true; break; }
+    StrView prefix = preferred;
+    if (!prefix.length || local_conflict) {
+        char generated[32];
+        do {
+            snprintf(generated, sizeof(generated), "ns%llu", (unsigned long long)context->prefix_index++);
+            prefix = {generated, strlen(generated)};
+        } while (dom_xml_prefix_binding(context, prefix));
+        char* owned = pool_strdup(context->pool, generated);
+        prefix = {owned, strlen(owned)};
     }
-    strbuf_append_char(sb, '>');
-    while (child) {
-        collect_xml_node(child, sb);
-        child = dom_next_script_visible_sibling(child);
+    dom_xml_bind_prefix(context, prefix, uri);
+    dom_xml_append_declaration(context, prefix, uri);
+    return prefix;
+}
+
+static void collect_xml_node(DomNode* node, StrBuf* output) {
+    if (!node || !output) return;
+    Pool* pool = mem_pool_create(nullptr, MEM_ROLE_CSS, "dom.xml_serialization");
+    if (!pool) return;
+    DomXmlSerialization context = {pool, nullptr, 1, output};
+    dom_xml_bind_prefix(&context, {"xml", 3}, DOM_XML_NAMESPACE);
+    DomXmlFrame* frame = nullptr;
+    DomNode* current = node;
+    while (current || frame) {
+        if (!current) {
+            if (frame->child) {
+                current = frame->child;
+                frame->child = dom_next_script_visible_sibling(current);
+                continue;
+            }
+            if (!frame->fragment) {
+                strbuf_append_str(output, "</");
+                dom_xml_append_name(output, frame->prefix, frame->element->local_name());
+                strbuf_append_char(output, '>');
+            }
+            context.bindings = frame->inherited_bindings;
+            DomXmlFrame* parent = frame->parent;
+            pool_free(pool, frame);
+            frame = parent;
+            continue;
+        }
+        DomNode* next = current;
+        current = nullptr;
+        if (dom_is_generated_pseudo_node(next)) continue;
+        if (next->is_text()) {
+            DomText* text = next->as_text();
+            collect_xml_text_value(text->text, text->length, output);
+            continue;
+        }
+        if (next->is_comment()) {
+            DomComment* comment = next->as_comment();
+            strbuf_append_str(output, "<!--");
+            if (comment->content) strbuf_append_str_n(output, comment->content, comment->length);
+            strbuf_append_str(output, "-->");
+            continue;
+        }
+        if (!next->is_element()) continue;
+        DomElement* element = next->as_element();
+        DomXmlFrame* opened = (DomXmlFrame*)pool_calloc(pool, sizeof(DomXmlFrame));
+        opened->element = element;
+        opened->parent = frame;
+        opened->inherited_bindings = context.bindings;
+        opened->default_namespace = frame ? frame->default_namespace : "";
+        opened->child = dom_first_script_visible_child(element);
+        opened->fragment = !strcmp(element->tag_name, "#document-fragment");
+        if (opened->fragment) { frame = opened; continue; }
+
+        // declarations are recorded before choosing names, without changing the DOM.
+        const char* declared_default = nullptr;
+        DomAttributeIterator iterator = dom_element_attribute_iterator(element);
+        DomAttributeView attribute;
+        while (dom_element_next_attribute(&iterator, &attribute)) {
+            if (strcmp(attribute.namespace_uri, DOM_XMLNS_NAMESPACE)) continue;
+            const char* value = attribute.value ? attribute.value : "";
+            if (!strcmp(attribute.local_name, "xmlns")) declared_default = value;
+            else if (strcmp(value, DOM_XML_NAMESPACE))
+                dom_xml_bind_prefix(&context, {attribute.local_name, strlen(attribute.local_name)}, value);
+        }
+        const char* uri = dom_element_namespace_uri(element);
+        bool omit_default = false;
+        bool append_default = false;
+        StrView preferred = dom_xml_name_prefix(element->tag_name, element->local_name());
+        if (!strcmp(uri, opened->default_namespace)) {
+            omit_default = true;
+        } else if (!strcmp(uri, DOM_XML_NAMESPACE)) {
+            opened->prefix = {"xml", 3};
+            if (declared_default) opened->default_namespace = declared_default;
+        } else {
+            DomXmlPrefixBinding* candidate = nullptr;
+            if (*uri) {
+                candidate = preferred.length ? dom_xml_prefix_binding(&context, preferred) : nullptr;
+                if (candidate && strcmp(candidate->uri, uri)) candidate = nullptr;
+                if (!candidate) for (DomXmlPrefixBinding* binding = context.bindings; binding; binding = binding->next)
+                    if (!strcmp(binding->uri, uri) && dom_xml_prefix_binding(&context, binding->prefix) == binding) { candidate = binding; break; }
+            }
+            if (candidate) opened->prefix = candidate->prefix;
+            else if (*uri && preferred.length) opened->prefix = preferred; // chosen after the opening name below
+            else {
+                opened->default_namespace = uri;
+                omit_default = !declared_default || strcmp(declared_default, uri);
+                append_default = omit_default;
+            }
+            if (opened->prefix.length && declared_default) opened->default_namespace = declared_default;
+        }
+        // prefix generation emits declarations, so reserve output for the name first.
+        StrBuf* declarations = strbuf_new();
+        context.output = declarations;
+        if (opened->prefix.length) {
+            opened->prefix = dom_xml_choose_prefix(&context, uri, opened->prefix, opened->inherited_bindings);
+            // reserve a reused ancestor prefix against later attribute rebindings.
+            dom_xml_bind_prefix(&context, opened->prefix, uri);
+        }
+        context.output = output;
+        strbuf_append_char(output, '<');
+        dom_xml_append_name(output, opened->prefix, element->local_name());
+        strbuf_append_str_n(output, declarations->str, declarations->length);
+        strbuf_free(declarations);
+        if (append_default) dom_xml_append_declaration(&context, {}, uri);
+
+        iterator = dom_element_attribute_iterator(element);
+        while (dom_element_next_attribute(&iterator, &attribute)) {
+            if (dom_is_internal_attr(attribute.qualified_name)) continue;
+            StrView prefix = {};
+            if (!strcmp(attribute.namespace_uri, DOM_XMLNS_NAMESPACE)) {
+                if (!strcmp(attribute.local_name, "xmlns")) {
+                    if (!omit_default) dom_xml_append_declaration(&context, {}, attribute.value);
+                } else {
+                    StrView declared = {attribute.local_name, strlen(attribute.local_name)};
+                    DomXmlPrefixBinding* ancestor = nullptr;
+                    for (DomXmlPrefixBinding* binding = opened->inherited_bindings; binding; binding = binding->next)
+                        if (dom_xml_prefix_equal(binding->prefix, declared)) { ancestor = binding; break; }
+                    const char* value = attribute.value ? attribute.value : "";
+                    if (strcmp(value, DOM_XML_NAMESPACE) && (!ancestor || strcmp(ancestor->uri, value)))
+                        dom_xml_append_declaration(&context, declared, value);
+                }
+                continue;
+            }
+            if (!*attribute.namespace_uri) {
+                if (omit_default && !strcmp(attribute.local_name, "xmlns")) continue;
+            } else if (!strcmp(attribute.namespace_uri, DOM_XML_NAMESPACE)) prefix = {"xml", 3};
+            else prefix = dom_xml_choose_prefix(&context, attribute.namespace_uri,
+                dom_xml_name_prefix(attribute.qualified_name, attribute.local_name), opened->inherited_bindings);
+            if (prefix.length) dom_xml_bind_prefix(&context, prefix, attribute.namespace_uri);
+            strbuf_append_char(output, ' ');
+            dom_xml_append_name(output, prefix, attribute.local_name);
+            strbuf_append_str(output, "=\"");
+            collect_xml_attr_value(attribute.value, output);
+            strbuf_append_char(output, '"');
+        }
+        if (!opened->child && (strcmp(uri, "http://www.w3.org/1999/xhtml") || dom_serializes_html_void(element))) {
+            strbuf_append_str(output, dom_serializes_html_void(element) ? " />" : "/>");
+            context.bindings = opened->inherited_bindings;
+            pool_free(pool, opened);
+        } else {
+            strbuf_append_char(output, '>');
+            frame = opened;
+        }
     }
-    strbuf_append_all(sb, 2, "</", tag);
-    strbuf_append_char(sb, '>');
+    pool_destroy(pool);
 }
 JS_FORWARD_ITEM(dom_xml_serializer_constructor, (void), make_js_undefined, ())
 
@@ -6146,10 +6309,7 @@ static DomNode* dom_tree_walker_next_raw(DomNode* root, DomNode* current) {
     if (!root || !current) return nullptr;
     DomNode* child = dom_tree_walker_first_child_raw(current);
     if (child) return child;
-    for (DomNode* node = current; node && node != root; node = node->parent) {
-        if (node->next_sibling) return node->next_sibling;
-    }
-    return nullptr;
+    return dom_next_after_subtree(root, current);
 }
 
 static DomNode* dom_tree_walker_next_matching(DomNode* root,
@@ -9163,7 +9323,7 @@ extern "C" bool dom_focus_first_invalid_form_control(void* form_ptr) {
     X(CANVAS, "canvas") X(IMG, "img") X(SCRIPT, "script") X(IFRAME, "iframe") \
     X(EMBED, "embed") X(SOURCE, "source") X(TRACK, "track") X(AUDIO, "audio") \
     X(VIDEO, "video") X(A, "a") X(AREA, "area") X(LINK, "link") \
-    X(BASE, "base") X(LABEL, "label") X(OUTPUT, "output")
+    X(BASE, "base") X(LABEL, "label") X(OUTPUT, "output") X(META, "meta")
 
 enum {
 #define JS_DOM_TAG_BIT_ENUM(name, text) DOM_TAG_##name##_INDEX,
@@ -9260,6 +9420,8 @@ typedef enum JsDomReflectKind {
     X("lang", "lang", STR, 0, DOM_TAG_ANY) \
     X("width", "width", STR, 0, DOM_TAG_IFRAME) \
     X("height", "height", STR, 0, DOM_TAG_IFRAME) \
+    X("httpEquiv", "http-equiv", STR, 0, DOM_TAG_META) \
+    X("content", "content", STR, 0, DOM_TAG_META) \
     X("acceptCharset", "accept-charset", STR, 0, DOM_TAG_FORM) \
     X("htmlFor", "for", STR, 0, DOM_TAG_LABEL | DOM_TAG_OUTPUT) \
     X("formTarget", "formtarget", STR, 0, DOM_TAG_INPUT | DOM_TAG_BUTTON) \
@@ -10019,9 +10181,11 @@ extern "C" Item dom_get_property_impl(Item elem_item, Item prop_name) {
         return ItemNull;
     }
 
-    // prefix — HTML elements have null prefix.
     if (prop_id == JS_DOM_PROP_PREFIX) {
-        return ItemNull;
+        const char* local = elem->local_name();
+        const char* colon = strchr(elem->tag_name, ':');
+        return colon && !strcmp(local, colon + 1)
+            ? (Item){.item = s2it(heap_create_name(elem->tag_name, colon - elem->tag_name.get()))} : ItemNull;
     }
 
     // iframe.contentDocument / contentWindow — lazy-create a foreign HTML
@@ -10734,7 +10898,7 @@ extern "C" Item dom_get_property_impl(Item elem_item, Item prop_name) {
     }
     const char* string_attr = nullptr;
     if (_is_string_reflected(elem, prop, &string_attr)) {
-        const char* v = elem->get_attribute(string_attr);
+        const char* v = dom_element_attribute_value_ns(elem, "", string_attr);
         return js_name_item(v ? v : "");
     }
 
@@ -11040,11 +11204,9 @@ extern "C" Item dom_set_property_impl(Item elem_item, Item prop_name, Item value
             Rooted<Item> namespace_root(roots, js_name_item(attribute->namespace_uri));
             const char* next_value = fn_to_cstr(value_root.get());
             if (attribute->owner_element) {
-                // Attr.value shares ordinary mutation notification and reflected-attribute behavior.
-                if (*attribute->namespace_uri) return dom_core_set_attribute_ns(
-                    dom_wrap_element(attribute->owner_element), namespace_root.get(), name_root.get(), value_root.get());
-                return dom_core_set_attribute(dom_wrap_element(attribute->owner_element),
-                    name_root.get(), value_root.get());
+                // Attr.value targets its expanded name even when a different attribute has the same QName.
+                return dom_core_set_attribute_ns(dom_wrap_element(attribute->owner_element),
+                    namespace_root.get(), name_root.get(), value_root.get());
             }
             return dom_attribute_node_set_value(attribute, next_value) ? value_root.get() : ItemError;
         }
@@ -11759,7 +11921,7 @@ extern "C" Item dom_set_property_impl(Item elem_item, Item prop_name, Item value
         const char* string_attr = nullptr;
         if (_is_string_reflected(elem, prop, &string_attr) ||
             _is_write_reflected(elem, prop, &string_attr)) {
-            elem->set_attribute(string_attr, dom_to_attr_cstr(value));
+            dom_element_set_attribute_ns(elem, "", string_attr, dom_to_attr_cstr(value));
             dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent);
             return value;
         }
@@ -12736,6 +12898,8 @@ typedef struct JsDomSvgPathHitContext {
     float point_x;
     float point_y;
     float curve_flatness;
+    bool rectangle_query, rectangle_fill_hit, subpath_rectangle_fill_hit;
+    float query_left, query_top, query_right, query_bottom;
     float stroke_radius;
     float* stroke_dash;          // query-owned computed lengths; released after contour inspection
     float stroke_dash_total;
@@ -12764,7 +12928,7 @@ typedef struct JsDomSvgPathHitContext {
     bool has_last_stroke_segment;
     bool stroke_enabled;
     bool stroke_hit;
-    float subpath_area_twice;
+    bool subpath_has_fill_area;
     float current_x;
     float current_y;
     float subpath_start_x;
@@ -12773,14 +12937,32 @@ typedef struct JsDomSvgPathHitContext {
 
 
 
-static bool dom_svg_point_in_triangle(float point_x, float point_y,
-                                         float ax, float ay, float bx, float by,
-                                         float cx, float cy) {
-    float ab = (point_x - ax) * (by - ay) - (point_y - ay) * (bx - ax);
-    float bc = (point_x - bx) * (cy - by) - (point_y - by) * (cx - bx);
-    float ca = (point_x - cx) * (ay - cy) - (point_y - cy) * (ax - cx);
-    return (ab >= 0.0f && bc >= 0.0f && ca >= 0.0f) ||
-        (ab <= 0.0f && bc <= 0.0f && ca <= 0.0f);
+// separating axes cover both a point and an axis-aligned rectangle query.
+static bool dom_svg_query_polygon(const JsDomSvgPathHitContext* query, const float* xy, unsigned count) {
+    float left=query->rectangle_query?query->query_left:query->point_x;
+    float top=query->rectangle_query?query->query_top:query->point_y;
+    float right=query->rectangle_query?query->query_right:left;
+    float bottom=query->rectangle_query?query->query_bottom:top;
+    for (unsigned axis=0;axis<count+2;axis++) {
+        unsigned next=(axis+1)%count;
+        float nx=axis==count?1:axis==count+1?0:xy[next*2+1]-xy[axis*2+1];
+        float ny=axis==count?0:axis==count+1?1:xy[axis*2]-xy[next*2];
+        float low=INFINITY,high=-INFINITY;
+        for (unsigned i=0;i<count;i++) { float value=nx*xy[i*2]+ny*xy[i*2+1]; low=fminf(low,value);high=fmaxf(high,value); }
+        float qlow=fminf(nx*left,nx*right)+fminf(ny*top,ny*bottom);
+        float qhigh=fmaxf(nx*left,nx*right)+fmaxf(ny*top,ny*bottom);
+        if (high<qlow || low>qhigh) return false;
+    }
+    return true;
+}
+static bool dom_svg_query_triangle(const JsDomSvgPathHitContext* query,
+    float ax,float ay,float bx,float by,float cx,float cy) {
+    float xy[]={ax,ay,bx,by,cx,cy}; return dom_svg_query_polygon(query,xy,3);
+}
+static bool dom_svg_query_circle(const JsDomSvgPathHitContext* query,float x,float y,float radius) {
+    float px=query->rectangle_query?fmaxf(query->query_left,fminf(query->query_right,x)):query->point_x;
+    float py=query->rectangle_query?fmaxf(query->query_top,fminf(query->query_bottom,y)):query->point_y;
+    return (px-x)*(px-x)+(py-y)*(py-y)<=radius*radius;
 }
 
 static bool dom_svg_stroke_segment_contains(const JsDomSvgPathHitContext* context,
@@ -12793,6 +12975,11 @@ static bool dom_svg_stroke_segment_contains(const JsDomSvgPathHitContext* contex
     float length = hypotf(dx, dy);
     if (length <= 0.000001f) {
         if (context->stroke_cap == RDT_CAP_BUTT || (!start_cap && !end_cap)) return false;
+        if (context->rectangle_query) {
+            if (context->stroke_cap==RDT_CAP_ROUND) return dom_svg_query_circle(context,start_x,start_y,context->stroke_radius);
+            float r=context->stroke_radius,quad[]={start_x-r,start_y-r,start_x+r,start_y-r,start_x+r,start_y+r,start_x-r,start_y+r};
+            return dom_svg_query_polygon(context,quad,4);
+        }
         float px = context->point_x - start_x;
         float py = context->point_y - start_y;
         if (context->stroke_cap == RDT_CAP_SQUARE)
@@ -12801,6 +12988,17 @@ static bool dom_svg_stroke_segment_contains(const JsDomSvgPathHitContext* contex
     }
     float ux = dx / length;
     float uy = dy / length;
+    if (context->rectangle_query) {
+        float before=context->stroke_cap==RDT_CAP_SQUARE && start_cap?context->stroke_radius:0;
+        float after=context->stroke_cap==RDT_CAP_SQUARE && end_cap?context->stroke_radius:0;
+        float sx=start_x-ux*before,sy=start_y-uy*before,ex=end_x+ux*after,ey=end_y+uy*after;
+        float nx=-uy*context->stroke_radius,ny=ux*context->stroke_radius;
+        float quad[]={sx+nx,sy+ny,ex+nx,ey+ny,ex-nx,ey-ny,sx-nx,sy-ny};
+        if (dom_svg_query_polygon(context,quad,4)) return true;
+        return context->stroke_cap==RDT_CAP_ROUND &&
+            ((start_cap && dom_svg_query_circle(context,start_x,start_y,context->stroke_radius)) ||
+             (end_cap && dom_svg_query_circle(context,end_x,end_y,context->stroke_radius)));
+    }
     float point_dx = context->point_x - start_x;
     float point_dy = context->point_y - start_y;
     float along = point_dx * ux + point_dy * uy;
@@ -12859,11 +13057,8 @@ static void dom_svg_path_hit_add_join(JsDomSvgPathHitContext* context,
     float prev_length = hypotf(prev_dx, prev_dy);
     float next_length = hypotf(next_dx, next_dy);
     if (prev_length <= 0.000001f || next_length <= 0.000001f) return;
-    float vertex_dx = context->point_x - vertex_x;
-    float vertex_dy = context->point_y - vertex_y;
     if (context->stroke_join == RDT_JOIN_ROUND &&
-        vertex_dx * vertex_dx + vertex_dy * vertex_dy <=
-            context->stroke_radius * context->stroke_radius) {
+        dom_svg_query_circle(context,vertex_x,vertex_y,context->stroke_radius)) {
         context->stroke_hit = true;
         return;
     }
@@ -12883,7 +13078,7 @@ static void dom_svg_path_hit_add_join(JsDomSvgPathHitContext* context,
     float outer_next_x = vertex_x + next_normal_x * context->stroke_radius;
     float outer_next_y = vertex_y + next_normal_y * context->stroke_radius;
     // segment strips already cover the inner corner; the outer bevel triangle is common to bevel and miter joins.
-    context->stroke_hit = dom_svg_point_in_triangle(context->point_x, context->point_y,
+    context->stroke_hit = dom_svg_query_triangle(context,
         vertex_x, vertex_y, outer_prev_x, outer_prev_y, outer_next_x, outer_next_y);
     if (context->stroke_hit || context->stroke_join != RDT_JOIN_MITER) return;
     float determinant = prev_x * -next_y - prev_y * -next_x;
@@ -12895,11 +13090,11 @@ static void dom_svg_path_hit_add_join(JsDomSvgPathHitContext* context,
     float miter_y = outer_prev_y + prev_y * prev_distance;
     float miter_length = hypotf(miter_x - vertex_x, miter_y - vertex_y);
     if (miter_length > context->stroke_miter_limit * context->stroke_radius) {
-        context->stroke_hit = dom_svg_point_in_triangle(context->point_x, context->point_y,
+        context->stroke_hit = dom_svg_query_triangle(context,
             vertex_x, vertex_y, outer_prev_x, outer_prev_y, outer_next_x, outer_next_y);
         return;
     }
-    context->stroke_hit = dom_svg_point_in_triangle(context->point_x, context->point_y,
+    context->stroke_hit = dom_svg_query_triangle(context,
         outer_prev_x, outer_prev_y, outer_next_x, outer_next_y, miter_x, miter_y);
 }
 
@@ -12997,7 +13192,12 @@ static void dom_svg_path_hit_add_stroke_segment(JsDomSvgPathHitContext* context,
 static void dom_svg_path_hit_add_fill_edge(JsDomSvgPathHitContext* context,
                                               float start_x, float start_y,
                                               float end_x, float end_y) {
-    if (!context || fabsf(end_y - start_y) <= 0.000001f) return;
+    if (!context) return;
+    if (context->rectangle_query) {
+        float edge[]={start_x,start_y,end_x,end_y};
+        context->subpath_rectangle_fill_hit|=dom_svg_query_polygon(context,edge,2);
+    }
+    if (fabsf(end_y - start_y) <= 0.000001f) return;
     bool upward = start_y <= context->point_y && end_y > context->point_y;
     bool downward = start_y > context->point_y && end_y <= context->point_y;
     if (!upward && !downward) return;
@@ -13021,7 +13221,10 @@ static void dom_svg_path_hit_add_segment(JsDomSvgPathHitContext* context,
                                             float end_x, float end_y,
                                             bool include_stroke) {
     if (!context) return;
-    context->subpath_area_twice += start_x * end_y - end_x * start_y;
+    // self-crossing contours can cancel their signed area while still enclosing filled lobes.
+    float ax=start_x-context->subpath_start_x,ay=start_y-context->subpath_start_y;
+    float bx=end_x-context->subpath_start_x,by=end_y-context->subpath_start_y;
+    context->subpath_has_fill_area |= fabsf(ax*by-ay*bx)>0.000001f;
     if (include_stroke) {
         dom_svg_path_hit_add_stroke_segment(context, start_x, start_y, end_x, end_y);
     }
@@ -13030,9 +13233,9 @@ static void dom_svg_path_hit_add_segment(JsDomSvgPathHitContext* context,
 
 static void dom_svg_path_hit_commit_subpath_fill_edge(JsDomSvgPathHitContext* context) {
     if (!context) return;
-    if (fabsf(context->subpath_area_twice) > 0.000001f &&
-        context->subpath_fill_on_edge) {
-        context->fill_on_edge = true;
+    if (context->subpath_has_fill_area) {
+        context->fill_on_edge |= context->subpath_fill_on_edge;
+        context->rectangle_fill_hit |= context->subpath_rectangle_fill_hit;
     }
 }
 
@@ -13109,8 +13312,9 @@ static bool dom_svg_path_hit_visit(void* userdata, RdtPathCommand command,
         context->subpath_stroke_length = 0.0f;
         context->has_first_stroke_segment = false;
         context->has_last_stroke_segment = false;
-        context->subpath_area_twice = 0.0f;
+        context->subpath_has_fill_area = false;
         context->subpath_fill_on_edge = false;
+        context->subpath_rectangle_fill_hit = false;
         return true;
     case RDT_PATH_LINE:
         if (arg_count < 2 || !context->has_current) return false;
@@ -13167,6 +13371,25 @@ static bool dom_svg_path_hit_visit(void* userdata, RdtPathCommand command,
         return false;
     }
     return false;
+}
+
+extern "C" bool dom_geometry_path_query(const void* opaque_path, float left,float top,float right,float bottom,
+    bool rectangle, int fill_rule,float stroke_width,int cap,int join) {
+    const RdtPath* path=(const RdtPath*)opaque_path;
+    RdtPath* contour=rdt_path_new(); RdtMatrix identity=rdt_matrix_identity();
+    if (!contour || !render_path_append_transformed(contour,path,&identity)) {
+        if (contour) rdt_path_free(contour); return false;
+    }
+    JsDomSvgPathHitContext query={};
+    query.point_x=(left+right)/2;query.point_y=(top+bottom)/2;query.curve_flatness=.01f;
+    query.rectangle_query=rectangle;query.query_left=left;query.query_top=top;query.query_right=right;query.query_bottom=bottom;
+    query.stroke_enabled=stroke_width>0;query.stroke_radius=stroke_width/2;
+    query.stroke_cap=(RdtStrokeCap)cap;query.stroke_join=(RdtStrokeJoin)join;query.stroke_miter_limit=4;
+    bool valid=rdt_path_visit(contour,dom_svg_path_hit_visit,&query);
+    if (valid) dom_svg_path_hit_finish_subpath(&query);
+    bool fill=fill_rule>=0 && (query.rectangle_fill_hit || query.fill_on_edge ||
+        (fill_rule==RDT_FILL_EVEN_ODD?(query.fill_crossings&1)!=0:query.fill_winding!=0));
+    rdt_path_free(contour);return valid && (fill || query.stroke_hit);
 }
 
 static const char* dom_svg_presentation_value(DomElement* elem, const char* name,
@@ -15194,17 +15417,12 @@ extern "C" Item dom_normalize_bridge(void* elem_ptr) {
 static void dom_clone_content_attributes(DomElement* source, DomElement* clone) {
     if (!source || !clone || source->is_synthetic()) return;
 
-    int attr_count = 0;
-    const char** attr_names = source->attribute_names(&attr_count);
-    for (int attr_index = 0; attr_index < attr_count; attr_index++) {
-        const char* name = attr_names[attr_index];
-        const char* value = source->get_attribute(name);
-        if (value) {
-            clone->set_attribute(name, value);
-        } else if (source->has_attribute(name)) {
-            // Boolean markup attributes have presence but no string payload.
-            clone->set_attribute(name, "");
-        }
+    dom_element_set_namespace_identity(clone, dom_element_namespace_uri(source), source->local_name());
+    DomAttributeIterator iterator = dom_element_attribute_iterator(source);
+    DomAttributeView attribute;
+    while (dom_element_next_attribute(&iterator, &attribute)) {
+        if (dom_is_internal_attr(attribute.qualified_name)) continue;
+        dom_element_set_attribute_ns(clone, attribute.namespace_uri, attribute.qualified_name, attribute.value);
     }
 }
 
@@ -15926,9 +16144,6 @@ extern "C" Item dom_core_remove_attribute(Item n, Item name) {
     if (!attr_name) return ItemNull;
     const char* old_value = elem->get_attribute(attr_name);
     elem->remove_attribute(attr_name);
-    if (strchr(attr_name, ':')) {
-        dom_element_remove_namespaced_attribute(elem, "", attr_name);
-    }
     dom_aria_clear_direct_ref(elem, attr_name);
     dom_clear_event_attr_expando(elem, attr_name);
     dom_reinit_behavior_if_constraint_attr(elem, attr_name);
@@ -16132,22 +16347,6 @@ extern "C" Item dom_core_split_text(Item n, Item offset) {
 // Namespaced-attribute and predicate rows.
 // ---------------------------------------------------------------------------
 
-static const char* dom_find_qualified_attribute(DomElement* elem,
-    const char* namespace_uri, const char* local_name) {
-    if (!elem || !namespace_uri || !local_name) return nullptr;
-    int count = 0;
-    const char** names = elem->attribute_names(&count);
-    for (int i = 0; names && i < count; i++) {
-        if (dom_is_internal_attr(names[i])) continue;
-        const char* candidate_local = nullptr;
-        const char* candidate_uri = dom_element_attribute_namespace_uri(
-            elem, names[i], &candidate_local);
-        if (candidate_uri && candidate_local &&
-            strcmp(candidate_uri, namespace_uri) == 0 &&
-            strcmp(candidate_local, local_name) == 0) return names[i];
-    }
-    return nullptr;
-}
 
 extern "C" Item dom_core_get_attribute_ns(Item n, Item ns, Item local) {
     DomElement* elem = dom_op_element(n);
@@ -16164,7 +16363,8 @@ static DomAttr* dom_attribute_from_item(Item item) {
     return node ? node->as_attribute() : nullptr;
 }
 
-static Item dom_set_attribute_ns_value(Item n, Item ns, Item qname, Item value_arg, const char* replaced_value);
+static Item dom_set_attribute_ns_value(Item n, Item ns, Item qname, Item value_arg,
+    const char* replaced_value, bool replace_name = false);
 
 extern "C" Item dom_core_get_attribute_node(Item n, Item name) {
     DomElement* element = dom_op_element(n);
@@ -16187,8 +16387,10 @@ extern "C" Item dom_core_get_attribute_node_ns(Item n, Item ns, Item name) {
     name_root.set(js_to_string(name_root.get()));
     JS_RETURN_IF_ERROR(name_root.get());
     const char* uri = fn_to_cstr(namespace_root.get());
-    const char* qualified = dom_find_qualified_attribute(element, uri ? uri : "", fn_to_cstr(name_root.get()));
-    return qualified ? dom_collection_attribute_item(element, qualified) : ItemNull;
+    DomAttr* attribute = dom_element_attribute_node_ns(element, uri ? uri : "", fn_to_cstr(name_root.get()));
+    if (!attribute) return ItemNull;
+    attribute->owner_changed = dom_attribute_node_owner_changed;
+    return dom_wrap_element(attribute);
 }
 
 extern "C" Item dom_core_set_attribute_node(Item n, Item attr_item) {
@@ -16208,11 +16410,8 @@ extern "C" Item dom_core_set_attribute_node(Item n, Item attr_item) {
     Rooted<Item> value_root(roots, js_name_item(attribute->value));
     // detach before writing so the replaced Attr keeps its original value and identity.
     if (previous) dom_attribute_node_detach(previous);
-    if (previous && strcmp(previous->qualified_name, attribute->qualified_name) != 0) {
-        element->remove_attribute(previous->qualified_name);
-        dom_element_remove_namespaced_attribute(element, previous->namespace_uri, previous->local_name);
-    }
-    dom_set_attribute_ns_value(n, namespace_root.get(), name_root.get(), value_root.get(), previous ? previous->value.get() : nullptr);
+    dom_set_attribute_ns_value(n, namespace_root.get(), name_root.get(), value_root.get(),
+        previous ? previous->value.get() : nullptr, true);
     attribute->owner_changed = dom_attribute_node_owner_changed;
     dom_attribute_node_attach(element, attribute);
     return previous_root.get();
@@ -16225,10 +16424,9 @@ extern "C" Item dom_core_remove_attribute_node(Item n, Item attr_item) {
     if (attribute->owner_element != element)
         return dom_raise_exception("NotFoundError", "The attribute does not belong to this element");
     RootFrame roots(2);
-    Rooted<Item> name_root(roots, js_name_item(*attribute->namespace_uri ? attribute->local_name : attribute->qualified_name));
+    Rooted<Item> name_root(roots, js_name_item(attribute->local_name));
     Rooted<Item> namespace_root(roots, js_name_item(attribute->namespace_uri));
-    if (*attribute->namespace_uri) dom_core_remove_attribute_ns(n, namespace_root.get(), name_root.get());
-    else dom_core_remove_attribute(n, name_root.get());
+    dom_core_remove_attribute_ns(n, namespace_root.get(), name_root.get());
     return attr_item;
 }
 
@@ -16300,7 +16498,8 @@ extern "C" Item dom_core_remove_named_attribute(Item n, Item ns, Item name, Item
     return dom_core_remove_attribute_node(n, attribute.get());
 }
 
-static Item dom_set_attribute_ns_value(Item n, Item ns, Item qname, Item value_arg, const char* replaced_value) {
+static Item dom_set_attribute_ns_value(Item n, Item ns, Item qname, Item value_arg,
+        const char* replaced_value, bool replace_name) {
     DomElement* elem = dom_op_element(n);
     if (!elem) return ItemNull;
     const char* namespace_uri = fn_to_cstr(ns);
@@ -16309,12 +16508,13 @@ static Item dom_set_attribute_ns_value(Item n, Item ns, Item qname, Item value_a
     if (!qualified_name || !value) return ItemNull;
     if (!namespace_uri) namespace_uri = "";
     const char* colon = *namespace_uri ? strchr(qualified_name, ':') : nullptr;
-    const char* stored_name = dom_find_qualified_attribute(elem, namespace_uri, colon ? colon + 1 : qualified_name);
+    const char* stored_name = dom_element_find_qualified_attribute(elem, namespace_uri, colon ? colon + 1 : qualified_name);
     // setAttributeNS preserves the existing Attr's prefix and identity for an expanded name.
-    if (!stored_name) stored_name = qualified_name;
-    const char* old_value = replaced_value ? replaced_value : elem->get_attribute(stored_name);
-    if (!elem->set_attribute(stored_name, value, true) ||
-        !dom_element_record_namespaced_attribute(elem, namespace_uri, stored_name, value)) return ItemNull;
+    if (!stored_name || replace_name) stored_name = qualified_name;
+    const char* local_name = colon ? colon + 1 : qualified_name;
+    const char* old_value = replaced_value ? replaced_value :
+        dom_element_attribute_value_ns(elem, namespace_uri, local_name);
+    if (!dom_element_set_attribute_ns(elem, namespace_uri, stored_name, value, replace_name)) return ItemNull;
     if (!*namespace_uri) dom_attribute_value_did_set(elem, stored_name, value, old_value);
     else dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem,
         elem->parent, stored_name, old_value);
@@ -16331,35 +16531,11 @@ extern "C" Item dom_core_remove_attribute_ns(Item n, Item ns, Item local) {
     const char* namespace_uri = fn_to_cstr(ns);
     const char* local_name = fn_to_cstr(local);
     if (!local_name) return ItemNull;
-    const char* qualified_name = nullptr;
-    for (DomNamespacedAttribute* attr = dom_element_namespaced_attributes(elem);
-         attr; attr = attr->next) {
-        if (attr->active && namespace_uri &&
-            strcmp(attr->namespace_uri, namespace_uri) == 0 &&
-            strcmp(attr->local_name, local_name) == 0) {
-            qualified_name = attr->qualified_name;
-            break;
-        }
-    }
-    const char* stored_name = qualified_name ? qualified_name :
-        dom_find_qualified_attribute(
-            elem, namespace_uri ? namespace_uri : "", local_name);
-    if (!stored_name) return ItemNull;
-    char xlink_name[128];
-    if (namespace_uri && strcmp(namespace_uri, "http://www.w3.org/1999/xlink") == 0) {
-        // Older documents may carry the retired internal mirror key.
-        snprintf(xlink_name, sizeof(xlink_name), "__lambda_xlink_%s", local_name);
-        elem->remove_attribute(xlink_name);
-        if (!qualified_name) {
-            snprintf(xlink_name, sizeof(xlink_name), "xlink:%s", local_name);
-            stored_name = xlink_name;
-        }
-    }
-    const char* old_value = elem->get_attribute(stored_name);
-    elem->remove_attribute(stored_name);
-    dom_element_remove_namespaced_attribute(elem, namespace_uri, local_name);
-    dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem,
-                           elem->parent, stored_name, old_value);
+    if (!namespace_uri) namespace_uri = "";
+    const char* name = dom_element_find_qualified_attribute(elem, namespace_uri, local_name);
+    const char* old_value = dom_element_attribute_value_ns(elem, namespace_uri, local_name);
+    if (name && dom_element_remove_attribute_ns(elem, namespace_uri, local_name))
+        dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent, name, old_value);
     return ItemNull;
 }
 
@@ -16507,15 +16683,19 @@ extern "C" Item dom_core_insert_adjacent_text(Item n, Item where, Item text) {
 // need a stable root object that supports appendChild/activeElement while the
 // light DOM stays addressable.
 extern "C" Item dom_core_attach_shadow(Item n, Item init) {
+    // D5.3.3: wrapper decoration allocates; keep the root and its borrowed mode string alive.
+    RootFrame roots(5);
+    Rooted<Item> receiver_root(roots, n), init_root(roots, init), mode_root(roots, ItemNull),
+        shadow_root(roots, ItemNull), expando_root(roots, ItemNull);
     DomElement* elem = dom_op_element(n);
     if (!elem) return ItemNull;
     const char* mode = "open";
     bool delegates_focus = false;
-    if (get_type_id(init) == LMD_TYPE_MAP) {
-        Item mode_item = dom_realm_get_cstr(init, "mode");
-        const char* mode_text = fn_to_cstr(mode_item);
+    if (get_type_id(init_root.get()) == LMD_TYPE_MAP) {
+        mode_root.set(dom_realm_get_cstr(init_root.get(), "mode"));
+        const char* mode_text = fn_to_cstr(mode_root.get());
         if (mode_text && mode_text[0]) mode = mode_text;
-        delegates_focus = js_is_truthy(dom_realm_get_cstr(init, "delegatesFocus"));
+        delegates_focus = js_is_truthy(dom_realm_get_cstr(init_root.get(), "delegatesFocus"));
     }
 
     MarkBuilder builder(elem->doc ? elem->doc->input : nullptr);
@@ -16523,19 +16703,19 @@ extern "C" Item dom_core_attach_shadow(Item n, Item init) {
     DomElement* frag = dom_element_create(elem->doc, "#document-fragment", frag_item.element);
     frag->set_shadow_host_element(elem);
     elem->set_shadow_root_element(frag);
-    Item root = dom_wrap_element(frag);
+    shadow_root.set(dom_wrap_element(frag));
 
-    dom_realm_set_cstr(root, "host", n);
-    dom_realm_set_cstr(root, "mode", js_name_item(mode));
-    dom_realm_set_cstr(root, "delegatesFocus", (Item){.item = b2it(delegates_focus)});
+    dom_realm_set_cstr(shadow_root.get(), "host", receiver_root.get());
+    dom_realm_set_cstr(shadow_root.get(), "mode", js_name_item(mode));
+    dom_realm_set_cstr(shadow_root.get(), "delegatesFocus", (Item){.item = b2it(delegates_focus)});
 
-    Item exp_map = expando_get_or_create_map((DomNode*)elem);
-    if (exp_map.item != ITEM_NULL) {
-        Item visible_root = (str_icmp_cstr(mode, "closed") == 0) ? ItemNull : root;
-        dom_realm_set_cstr(exp_map, "shadowRoot", visible_root);
-        dom_realm_set_cstr(exp_map, "__shadowRootInternal", root);
+    expando_root.set(expando_get_or_create_map((DomNode*)elem));
+    if (expando_root.get().item != ITEM_NULL) {
+        Item visible_root = (str_icmp_cstr(mode, "closed") == 0) ? ItemNull : shadow_root.get();
+        dom_realm_set_cstr(expando_root.get(), "shadowRoot", visible_root);
+        dom_realm_set_cstr(expando_root.get(), "__shadowRootInternal", shadow_root.get());
     }
-    return root;
+    return shadow_root.get();
 }
 
 // compareDocumentPosition(other) -> bitmask per DOM §4.4. This was implemented

@@ -2631,14 +2631,7 @@ Item fn_sign(Item item) {
 Item fn_math_random(Item seed_item) {
     GUARD_ERROR1(seed_item);
     uint64_t state = (uint64_t)it2i(seed_item);
-    // SplitMix64 algorithm
-    state += 0x9e3779b97f4a7c15ULL;
-    uint64_t z = state;
-    z = (z ^ (z >> 30)) * 0xbf58476d1ce4e5b9ULL;
-    z = (z ^ (z >> 27)) * 0x94d049bb133111ebULL;
-    z = z ^ (z >> 31);
-    // convert to double in [0.0, 1.0)
-    double value = (double)(z >> 11) * 0x1.0p-53;
+    double value = math_splitmix64(&state);
     List* result = list();
     array_push((Array*)result, push_d(value));
     array_push((Array*)result, box_int64_value((int64_t)state));
@@ -2664,6 +2657,13 @@ static Item vector_select_items(Item source, int64_t start, int64_t end, bool re
     }
     array_transform_copy_cert(rooted_source.get(), rooted_result.get());
     return {.array = rooted_result.get()};
+}
+
+void array_reverse_in_place(Array* values) {
+    // scalar homes belong to the backing allocation, so swapping slots preserves ownership.
+    for (int64_t i = 0, j = values->length - 1; i < j; i++, j--) {
+        Item saved = values->items[i]; values->items[i] = values->items[j]; values->items[j] = saved;
+    }
 }
 
 Item fn_reverse(Item item) {

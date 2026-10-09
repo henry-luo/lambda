@@ -210,6 +210,14 @@ struct DomAttr : DomNode {
 void dom_append_to_sibling_chain(struct DomElement* parent, DomNode* child);
 void dom_move_generated_after_to_end(struct DomElement* parent);
 
+// advance after a subtree while keeping traversal inside its supplied root.
+inline DomNode* dom_next_after_subtree(DomNode* root, DomNode* current) {
+    for (DomNode* node = current; node && node != root; node = node->parent) {
+        if (node->next_sibling) return node->next_sibling;
+    }
+    return nullptr;
+}
+
 // ============================================================================
 // DOM Text Node API
 // ============================================================================

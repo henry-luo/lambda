@@ -1,0 +1,40 @@
+% Reference setup follows KaTeX/test/screenshotter/test.tex:
+% https://github.com/KaTeX/KaTeX/blob/main/test/screenshotter/test.tex
+% Supplementary packages supply the corpus's actual LaTeX commands.
+\usepackage{amsmath,amssymb,mathtools,amscd,textcomp,gensymb,xcolor,graphicx,bm}
+\usepackage[mathscr]{eucal}
+\usepackage{eufrak,cancel,etoolbox,braket,arydshln,steinmetz,actuarialangle}
+% extpfeil requests these St Mary options; include the other symbols used by the corpus.
+\usepackage[only,shortleftarrow,shortrightarrow,mapsfrom,minuso]{stmaryrd}
+\usepackage{extpfeil}
+\usepackage[normalem]{ulem}
+\usepackage{unicode-math-input}
+\setlength{\parindent}{0pt}
+\pagestyle{empty}
+% Missing glyphs must fail instead of producing an incomplete reference image.
+\tracinglostchars=3
+
+\newcommand*{\ReferenceDefineColor}[1]{\csdef{#1}##1{\textcolor{#1}{##1}}}
+\forcsvlist{\ReferenceDefineColor}{blue,red,green}
+\DeclareMathAlphabet{\mathsfit}{OT1}{cmss}{m}{sl}
+\makeatletter
+% Graphicx reflects text boxes; mathpalette preserves the surrounding math style.
+\newcommand{\mathreflectbox}[1]{\mathpalette\ReferenceReflect{#1}}
+\newcommand{\ReferenceReflect}[2]{\reflectbox{$\m@th#1#2$}}
+\makeatother
+
+% Logo and math-mode sizing definitions from KaTeX's reference template.
+\DeclareRobustCommand{\KaTeX}{\mbox{%
+K\kern-.17em%
+{\sbox0 T\vbox to\ht0{\hbox%
+  {\fontsize{.75em}{1em}\selectfont A}%
+\vss}}%
+\kern-.15em%
+\TeX}}
+\newtoks\kasizetoks
+\def\kasizecollect#1{\afterassignment\kasizeapply\kasizetoks=\bgroup#1$}
+\def\kasizeapply{\mbox{\the\kasizetoks$\egroup}}
+\def\kasize#1{\csletcs{ka#1}{#1}%
+\csdef{#1}{\ifmmode\expandafter\kasizecollect\csname ka#1\endcsname%
+\else\csname ka#1\endcsname\fi}}
+\forcsvlist{\kasize}{tiny,scriptsize,footnotesize,small,normalsize,large,Large,LARGE,huge,Huge}

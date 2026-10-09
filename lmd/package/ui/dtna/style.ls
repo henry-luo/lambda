@@ -48,7 +48,8 @@ pub let css = "
 .dtna-layout-header{background:#001529;color:#fff}
 .dtna-layout-content{padding:24px;flex:1;min-width:0}
 .dtna-layout-sider{background:#001529;color:#fff;width:200px;flex-shrink:0;padding:16px}
-.dtna-row{width:100%}.dtna-col{min-width:0}
+.dtna-row{display:flex;flex-wrap:wrap;width:calc(100% + var(--dtna-gutter,0px));margin-left:calc(var(--dtna-gutter,0px)*-0.5);margin-right:calc(var(--dtna-gutter,0px)*-0.5)}
+.dtna-col{min-width:0;padding-left:calc(var(--dtna-gutter,0px)*0.5);padding-right:calc(var(--dtna-gutter,0px)*0.5)}
 .dtna-avatar{display:inline-flex;align-items:center;justify-content:center;width:32px;height:32px;background:#bfbfbf;color:#fff;border-radius:50%;overflow:hidden}
 .dtna-avatar img{width:100%;height:100%;object-fit:cover}
 .dtna-badge{display:inline-block;position:relative}
@@ -102,4 +103,30 @@ pub let css = "
 .dtna-tag{white-space:nowrap}.dtna-alert{padding-right:36px}.dtna-alert>.dtna-close{position:absolute;right:12px;top:10px}
 .dtna-statistic-suffix{font-size:14px;margin-left:4px}.dtna-timeline-label{margin-bottom:4px;font-weight:600}
 .dtna-vertical>.dtna-choice-list{flex-direction:column;align-items:stretch}
+.dtna-collapse{border:1px solid var(--dtna-border);border-radius:var(--dtna-radius);overflow:hidden}
+.dtna-collapse-item+.dtna-collapse-item{border-top:1px solid var(--dtna-border)}
+.dtna-collapse-header{display:flex;align-items:center;background:var(--dtna-surface);padding:0 16px;gap:16px}
+.dtna-collapse-header>button{display:flex;align-items:center;gap:12px;flex:1;text-align:left;font:inherit;border:0;background:transparent;padding:12px 0;cursor:pointer;color:inherit}
+.dtna-collapse-header>button:disabled{color:var(--dtna-disabled-text);cursor:default}
+.dtna-collapse-header>button:focus-visible{outline:2px solid var(--dtna-primary)}
+.dtna-collapse-panel{padding:16px;border-top:1px solid var(--dtna-border)}
+.dtna-tree-node{display:flex;align-items:center;min-height:32px;gap:4px;cursor:pointer;border-radius:4px}
+.dtna-tree-node:hover{background:var(--dtna-surface)}.dtna-tree-selected{background:var(--dtna-primary-background);color:var(--dtna-primary)}
+.dtna-tree-node:focus-visible{outline:2px solid var(--dtna-primary)}.dtna-tree-node[aria-disabled=true]{color:var(--dtna-disabled-text);cursor:default}
+.dtna-tree-expander,.dtna-tree-spacer{display:inline-flex;width:24px;height:24px;align-items:center;justify-content:center;flex-shrink:0}
+.dtna-tree-expander{font:inherit;border:0;background:transparent;color:inherit;cursor:pointer}
+.dtna-check{display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border:1px solid var(--dtna-border);border-radius:3px;background:var(--dtna-background);color:var(--dtna-primary);font-size:12px;flex-shrink:0}
+.dtna-tree-label{padding:2px 4px}
+.dtna-table-scroll{overflow:auto}.dtna-table table{width:100%;border-collapse:collapse;text-align:left}
+.dtna-table caption{padding:12px 0;text-align:left;font-weight:600;font-size:16px}
+.dtna-table th,.dtna-table td{padding:12px 16px;border-bottom:1px solid var(--dtna-border)}
+.dtna-table th{background:var(--dtna-surface);font-weight:600}.dtna-table-bordered th,.dtna-table-bordered td{border:1px solid var(--dtna-border)}
+.dtna-table-selected{background:var(--dtna-primary-background)}.dtna-table-detail{background:var(--dtna-surface)}
+.dtna-table .dtna-pagination{justify-content:flex-end;margin-top:16px}
+.dtna-table-sort{display:inline-flex;align-items:center;gap:6px;font:inherit;font-weight:600;border:0;padding:0;background:transparent;color:inherit;cursor:pointer}
+.dtna-table-filters{display:flex;gap:4px;margin-top:6px}.dtna-table-filters button{font:inherit;font-size:12px;border:0;border-radius:3px;padding:2px 6px;background:transparent;color:var(--dtna-text-secondary);cursor:pointer}
+.dtna-table-filters button[aria-pressed=true]{color:var(--dtna-primary);background:var(--dtna-primary-background)}
+.dtna-table-expand{font:inherit;border:1px solid var(--dtna-border);border-radius:3px;background:var(--dtna-background);width:22px;height:22px;cursor:pointer}
+.dtna-table button:disabled{color:var(--dtna-disabled-text);cursor:default}.dtna-table button:focus-visible{outline:2px solid var(--dtna-primary)}
+.dtna-table-loading{padding:12px;color:var(--dtna-primary)}.dtna-table.dtna-size-small th,.dtna-table.dtna-size-small td{padding:6px 8px}
 "

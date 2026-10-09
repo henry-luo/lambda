@@ -18,6 +18,7 @@ extern "C" const char* __lsan_default_options() { return "exitcode=0"; }
 #include "../../lambda/input/css/css_parser.hpp"
 #include "../../lambda/input/css/css_engine.hpp"
 #include "../../lambda/io/mark_builder.hpp"
+#include "../../lambda/core/well_known_markup_names.h"
 #include "../../lambda/input/input.hpp"
 #include "helpers/css_test_helpers.hpp"
 
@@ -1220,11 +1221,294 @@ TEST_F(DomIntegrationTest, LangUsesExtendedRangesAndExplicitUnknownStopsInherita
     ASSERT_TRUE(child->set_attribute("lang", ""));
     EXPECT_FALSE(selector_matcher_matches_group(matcher, group, child, nullptr));
     child->remove_attribute("lang");
-    ASSERT_TRUE(child->set_attribute("xml:lang", "fr"));
+    // ordinary DOM colon attributes have a null namespace; native Mark QNames can carry XML bindings.
+    ASSERT_TRUE(dom_element_set_attribute_ns(child, "", "xml:lang", "fr"));
     EXPECT_TRUE(selector_matcher_matches_group(matcher, group, child, nullptr));
     ASSERT_TRUE(dom_element_record_namespaced_attribute(child,
         "http://www.w3.org/XML/1998/namespace", "xml:lang", "fr"));
     EXPECT_FALSE(selector_matcher_matches_group(matcher, group, child, nullptr));
+}
+
+TEST_F(DomIntegrationTest, LangCanonicalizesBothOperandsBeforeExtendedFiltering) {
+    DomElement* element = create_element_with_backing("span");
+    struct Case { const char* language; const char* selector; bool matches; };
+    const Case cases[] = {
+        {"iw-IL", ":lang(he)", true}, {"he-IL", ":lang(iw)", true},
+        {"in-ID", ":lang(id)", true}, {"ji", ":lang(yi)", true},
+        {"en-BU", ":lang(en-MM)", true}, {"en-MM", ":lang(en-BU)", true},
+        {"ja-Latn-heploc", ":lang(ja-alalc97)", true},
+        {"i-klingon", ":lang(tlh)", true}, {"tlh", ":lang(i-klingon)", true},
+        {"en-GB-oed", ":lang(en-GB-oxendict)", true},
+        {"cmn-Hans-CN", ":lang(zh)", true}, {"cmn-Hans-CN", ":lang(zh-cmn)", true},
+        {"zh-cmn-Hans-CN", ":lang(cmn)", true},
+        {"zh-hakka", ":lang(hak)", true}, {"hak-CN", ":lang(zh)", true},
+        {"sgn-BE-FR", ":lang(sfb)", true}, {"sfb", ":lang(sgn)", true},
+        {"arb-EG", ":lang(ar)", true}, {"ar", ":lang(arb)", false},
+        {"cmn", ":lang(yue)", false}, {"he-x-iw", ":lang(he-x-he)", false},
+        {"qq-Latn-ZZ", ":lang(qq)", true}, {"x-private", ":lang(\"x-private\")", true},
+        {"i-default", ":lang(i-default)", true},
+        {"en-b-bbb-a-aaa", ":lang(\"en-a-aaa-b-bbb\")", true},
+        {"en-a-aaa-b-bbb", ":lang(\"en-b-bbb-a-aaa\")", true},
+        {"iw-Latn-IL", ":lang(\"*-IL\")", true},
+        {"iw-Latn-IL", ":lang(\"iw-*-IL\")", true},
+        {"e", ":lang(e)", false}, {"en-US-US", ":lang(en)", false},
+        {"en-a", ":lang(en)", false}, {"en-x", ":lang(en)", false},
+        {"de-1901-1901", ":lang(de)", false},
+        {"en-a-aaa-a-bbb", ":lang(en)", false},
+        {"en", ":lang(e)", false}, {"en", ":lang(\"*-a\")", false},
+        {"en-a-aaa", ":lang(\"en-a\")", false},
+        {"en-cmn", ":lang(en)", false},
+        {"de-1901-1901", ":lang(\"de-*-1901-1901\")", false},
+        {"de-1901-1901", ":lang(\"*\")", false},
+        {"cmn-Hans", ":lang(\"cmn-*\")", true},
+        {"ar-ajp", ":lang(apc)", true}, {"apc", ":lang(ar-ajp)", true},
+        {"he-x-iw", ":lang(\"iw-x-iw\")", true},
+        {"en-x-a-b-c-d-e-f-g-h-i-j-k-l-m-n-o-p-q-r-s-t", ":lang(en)", true},
+        {"en-x-a-b-c-d-e-f-g-h-i-j-k-l-m-n-o-p-q-r-s-t", ":lang(\"en-x-a-b-c-d-e-f-g-h-i-j-k-l-m-n-o-p-q-r-s-t\")", true},
+    };
+    for (const Case& entry : cases) {
+        SCOPED_TRACE(entry.language);
+        SCOPED_TRACE(entry.selector);
+        ASSERT_TRUE(element->set_attribute("lang", entry.language));
+        CssSelectorGroup* group = css_parse_selector_group_text(
+            entry.selector, strlen(entry.selector), pool);
+        ASSERT_NE(group, nullptr);
+        EXPECT_EQ(selector_matcher_matches_group(matcher, group, element, nullptr), entry.matches);
+    }
+}
+
+TEST_F(DomIntegrationTest, LangUsesRetainedMetadataAndSingleProtocolDefault) {
+    DomElement* root = create_element_with_backing("html");
+    DomElement* child = create_element_with_backing("span");
+    DomElement* detached = create_element_with_backing("span");
+    doc->root = lam::up(root);
+    ASSERT_TRUE(root->append_child(child));
+    ASSERT_TRUE(dom_document_set_content_language(doc, " \t iw-IL \r\n"));
+    EXPECT_STREQ(dom_element_language(child), "iw-IL");
+    EXPECT_STREQ(dom_element_language(detached), "iw-IL");
+    EXPECT_TRUE(selector_matcher_matches_pseudo_class(matcher, CSS_SELECTOR_PSEUDO_LANG, "he", child));
+    ASSERT_TRUE(dom_document_set_content_language(doc, "fr, en"));
+    EXPECT_EQ(dom_element_language(child), nullptr);
+    ASSERT_TRUE(dom_document_set_content_language(doc, "de"));
+
+    DomElement* meta = create_element_with_backing("meta");
+    ASSERT_TRUE(meta->set_attribute("http-equiv", "Content-Language"));
+    ASSERT_TRUE(meta->set_attribute("content", " \t fr ignored-tokens"));
+    EXPECT_STREQ(dom_element_language(child), "de");
+    ASSERT_TRUE(root->append_child(meta));
+    EXPECT_STREQ(dom_element_language(child), "fr");
+    ASSERT_TRUE(meta->set_attribute("content", "en"));
+    EXPECT_STREQ(dom_element_language(child), "fr");
+    ASSERT_TRUE(root->remove_child(meta));
+    EXPECT_STREQ(dom_element_language(child), "fr");
+    ASSERT_TRUE(root->insert_before(meta, child));
+    EXPECT_STREQ(dom_element_language(child), "en");
+    ASSERT_TRUE(dom_document_set_content_language(doc, "ja"));
+    EXPECT_STREQ(dom_element_language(detached), "en");
+    ASSERT_TRUE(child->set_attribute("lang", ""));
+    EXPECT_STREQ(dom_element_language(child), "");
+    ASSERT_TRUE(child->remove_attribute("lang"));
+    ASSERT_TRUE(dom_element_record_namespaced_attribute(child,
+        "http://www.w3.org/XML/1998/namespace", "xml:lang", "ar"));
+    EXPECT_STREQ(dom_element_language(child), "ar");
+}
+
+TEST_F(DomIntegrationTest, LangMetadataProcessesInsertedSubtreeInOrder) {
+    DomElement* root = create_element_with_backing("html");
+    doc->root = lam::up(root);
+    DomElement* wrapper = create_element_with_backing("div");
+    const char* values[] = {"fr", "", "en,de", "   ", "ja extras"};
+    for (const char* value : values) {
+        DomElement* meta = create_element_with_backing("meta");
+        ASSERT_TRUE(meta->set_attribute("http-equiv", "content-language"));
+        ASSERT_TRUE(meta->set_attribute("content", value));
+        ASSERT_TRUE(wrapper->append_child(meta));
+    }
+    DomElement* template_element = create_element_with_backing("template");
+    DomElement* inert_meta = create_element_with_backing("meta");
+    ASSERT_TRUE(inert_meta->set_attribute("http-equiv", "content-language"));
+    ASSERT_TRUE(inert_meta->set_attribute("content", "de"));
+    ASSERT_TRUE(template_element->append_child(inert_meta));
+    ASSERT_TRUE(wrapper->append_child(template_element));
+    EXPECT_EQ(dom_document_default_language(doc), nullptr);
+    ASSERT_TRUE(root->append_child(wrapper));
+    EXPECT_STREQ(dom_element_language(root), "ja");
+    ASSERT_TRUE(root->remove_child(wrapper));
+    EXPECT_STREQ(dom_element_language(root), "ja");
+    DomElement* ignored = create_element_with_backing("meta");
+    ASSERT_TRUE(ignored->set_attribute("http-equiv", "content-language"));
+    ASSERT_TRUE(ignored->set_attribute("content", "en,de"));
+    ASSERT_TRUE(root->append_child(ignored));
+    EXPECT_STREQ(dom_element_language(root), "ja");
+    doc->xml_document = true;
+    ASSERT_TRUE(ignored->set_attribute("content", "en"));
+    ASSERT_TRUE(root->remove_child(ignored));
+    ASSERT_TRUE(root->append_child(ignored));
+    EXPECT_STREQ(dom_element_language(root), "ja");
+}
+
+TEST_F(DomIntegrationTest, NativeAttributeStringsAndNullsKeepTheirDistinctValues) {
+    MarkBuilder builder(input);
+    Element* backing = builder.element("span").attr("lang", "").attr("null-value", ItemNull).final().element;
+    DomElement* element = dom_element_create(doc, "span", backing);
+    ASSERT_NE(element, nullptr);
+    ASSERT_TRUE(dom_document_set_content_language(doc, "fr"));
+    EXPECT_TRUE(element->has_attribute("lang"));
+    EXPECT_STREQ(element->get_attribute("lang"), "");
+    EXPECT_TRUE(element->has_attribute("null-value"));
+    EXPECT_EQ(element->get_attribute("null-value"), nullptr);
+    EXPECT_EQ(element->get_attribute("absent"), nullptr);
+    EXPECT_STREQ(dom_element_language(element), "");
+    EXPECT_TRUE(selector_matcher_matches_pseudo_class(matcher, CSS_SELECTOR_PSEUDO_LANG, "\"\"", element));
+    EXPECT_FALSE(selector_matcher_matches_pseudo_class(matcher, CSS_SELECTOR_PSEUDO_LANG, "fr", element));
+}
+
+TEST_F(DomIntegrationTest, ExpandedAttributesKeepNativeNullsOrderingAndIndependentNodes) {
+    MarkBuilder builder(input);
+    DomElement* element = dom_element_create(doc, "span",
+        builder.element("span").attr("lang", "ja").attr("null-value", ItemNull).final().element);
+    ASSERT_NE(element, nullptr);
+    ASSERT_TRUE(dom_element_set_attribute_ns(element, "urn:test", "lang", "de"));
+    ASSERT_TRUE(element->ext->attributes_are_recorded);
+    EXPECT_TRUE(element->has_attribute("null-value"));
+    EXPECT_EQ(element->get_attribute("null-value"), nullptr);
+    EXPECT_EQ(dom_element_attribute_value_ns(element, "", "null-value"), nullptr);
+    EXPECT_NE(dom_element_find_qualified_attribute(element, "", "null-value"), nullptr);
+    EXPECT_STREQ(element->get_attribute("lang"), "ja");
+    EXPECT_STREQ(dom_element_attribute_value_ns(element, "urn:test", "lang"), "de");
+    DomAttr* plain = dom_element_attribute_node_ns(element, "", "lang");
+    DomAttr* foreign = dom_element_attribute_node_ns(element, "urn:test", "lang");
+    ASSERT_NE(plain, nullptr); ASSERT_NE(foreign, nullptr); EXPECT_NE(plain, foreign);
+    ASSERT_TRUE(dom_element_set_attribute_ns(element, "", "lang", "he"));
+    EXPECT_STREQ(plain->value, "he"); EXPECT_STREQ(foreign->value, "de");
+    EXPECT_STREQ(dom_element_language(element), "he");
+    ASSERT_TRUE(dom_element_remove_attribute_ns(element, "", "lang"));
+    EXPECT_EQ(plain->owner_element, nullptr); EXPECT_EQ(foreign->owner_element, element);
+    EXPECT_STREQ(element->get_attribute("lang"), "de");
+    ASSERT_TRUE(dom_element_set_attribute_ns(element, "", "lang", "fr"));
+    int count = 0; const char** names = element->attribute_names(&count);
+    ASSERT_EQ(count, 3); EXPECT_STREQ(names[0], "null-value"); EXPECT_STREQ(names[1], "lang");
+    EXPECT_STREQ(names[2], "lang");
+    ASSERT_TRUE(element->remove_attribute("lang"));
+    EXPECT_EQ(foreign->owner_element, nullptr);
+    EXPECT_STREQ(element->get_attribute("lang"), "fr");
+    EXPECT_STREQ(dom_element_language(element), "fr");
+}
+
+TEST_F(DomIntegrationTest, AdoptedNodesKeepOneBackingIdentityAcrossUiRelinking) {
+    Input* foreign_input = Input::create(pool, nullptr, input);
+    ASSERT_NE(foreign_input, nullptr);
+    DomDocument* foreign = dom_document_create(foreign_input);
+    ASSERT_NE(foreign, nullptr);
+    MarkBuilder foreign_builder(foreign_input);
+    DomElement* child = dom_element_create(foreign, "span", foreign_builder.element("span").final().element);
+    DomElement* parent = create_element_with_backing("div");
+    ASSERT_NE(child, nullptr); ASSERT_NE(parent, nullptr);
+    uint32_t destination_id = dom_document_alloc_node_id(doc);
+    ASSERT_TRUE(dom_node_registry_transfer(foreign, doc, child, &destination_id));
+    static_cast<DomNode*>(child)->id = destination_id; child->doc = lam::up(doc);
+    ASSERT_TRUE(dom_document_add_resource(doc, foreign, [](DomDocumentResourceData* owner) {
+        dom_document_destroy(static_cast<DomDocument*>(owner));
+    }));
+    bool original_ui_mode = input->ui_mode; input->ui_mode = true;
+    bool appended = parent->append_child(child);
+    input->ui_mode = original_ui_mode;
+    ASSERT_TRUE(appended);
+    EXPECT_EQ(parent->first_child.get(), child); EXPECT_EQ(parent->last_child.get(), child);
+    EXPECT_EQ(child->next_sibling, nullptr); EXPECT_EQ(child->parent.get(), parent);
+    Element* backing = dom_element_to_element(parent);
+    ASSERT_EQ(backing->length, 1); EXPECT_EQ(backing->items[0].element, dom_element_to_element(child));
+
+}
+
+TEST_F(DomIntegrationTest, AttributeIterationKeepsExpandedValuesWithoutRecordingReads) {
+    MarkBuilder builder(input);
+    DomElement* element = dom_element_create(doc, "span", builder.element("span")
+        .attr("lang", "ja").attr("empty", "").attr("null-value", ItemNull).final().element);
+    ASSERT_NE(element, nullptr);
+    DomAttributeIterator iterator = dom_element_attribute_iterator(element);
+    DomAttributeView attribute;
+    ASSERT_TRUE(dom_element_next_attribute(&iterator, &attribute));
+    EXPECT_STREQ(attribute.namespace_uri, ""); EXPECT_STREQ(attribute.value, "ja");
+    ASSERT_TRUE(dom_element_next_attribute(&iterator, &attribute)); EXPECT_STREQ(attribute.value, "");
+    ASSERT_TRUE(dom_element_next_attribute(&iterator, &attribute)); EXPECT_EQ(attribute.value, nullptr);
+    EXPECT_FALSE(dom_element_next_attribute(&iterator, &attribute));
+    EXPECT_FALSE(element->ext->attributes_are_recorded);
+    ASSERT_TRUE(dom_element_set_attribute_ns(element, "urn:test", "lang", "de"));
+    iterator = dom_element_attribute_iterator(element);
+    int count = 0;
+    while (dom_element_next_attribute(&iterator, &attribute)) {
+        if (!strcmp(attribute.qualified_name, "lang"))
+            EXPECT_STREQ(attribute.value, *attribute.namespace_uri ? "de" : "ja");
+        count++;
+    }
+    EXPECT_EQ(count, 4);
+}
+
+TEST_F(DomIntegrationTest, ExplicitElementIdentitySeparatesLiteralAndQualifiedNames) {
+    doc->page_kind = DOM_PAGE_KIND_HTML;
+    DomElement* qualified = create_element_with_backing("h:span");
+    ASSERT_TRUE(dom_element_set_namespace_identity(qualified, "http://www.w3.org/1999/xhtml", "span"));
+    EXPECT_STREQ(qualified->get_attribute("__lambda_ns_local_name"), "span");
+    EXPECT_STREQ(qualified->local_name(), "span");
+    DomElement* literal = create_element_with_backing("h:span");
+    ASSERT_TRUE(dom_element_set_namespace_identity(literal, "http://www.w3.org/1999/xhtml", "h:span"));
+    EXPECT_STREQ(literal->local_name(), "h:span");
+    DomElement* plain = create_element_with_backing("svg");
+    ASSERT_TRUE(dom_element_set_namespace_identity(plain, "", "svg"));
+    ASSERT_TRUE(qualified->append_child(plain));
+    EXPECT_STREQ(dom_element_namespace_uri(plain), ""); EXPECT_STREQ(plain->local_name(), "svg");
+}
+
+TEST_F(DomIntegrationTest, ParsedXmlExpandedNamesSurviveDeclarationMutation) {
+    doc->xml_document = true;
+    MarkBuilder builder(input);
+    Item source = builder.element("root").attr("xmlns:p", "urn:test")
+        .child(builder.element("p:child").attr("p:lang", "he").final()).final();
+    DomElement* root = build_dom_tree_from_element(source.element, doc, nullptr);
+    ASSERT_NE(root, nullptr); ASSERT_NE(root->first_child, nullptr);
+    DomElement* child = root->first_child->as_element();
+    EXPECT_STREQ(dom_element_namespace_uri(root), "");
+    EXPECT_STREQ(dom_element_namespace_uri(child), "urn:test"); EXPECT_STREQ(child->local_name(), "child");
+    ASSERT_TRUE(dom_element_remove_attribute_ns(root, "http://www.w3.org/2000/xmlns/", "p"));
+    EXPECT_STREQ(dom_element_namespace_uri(child), "urn:test");
+    EXPECT_STREQ(dom_element_attribute_value_ns(child, "urn:test", "lang"), "he");
+    EXPECT_STREQ(dom_element_attribute_node_ns(child, "urn:test", "lang")->local_name, "lang");
+}
+
+TEST_F(DomIntegrationTest, ParsedHtmlAndXmlAttributeNamespacesKeepTheirSourceIdentity) {
+    doc->page_kind = DOM_PAGE_KIND_HTML;
+    MarkBuilder builder(input);
+    DomElement* element = dom_element_create(doc, "h:bdi",
+        builder.element("h:bdi").attr("xmlns:h", "http://www.w3.org/1999/xhtml")
+            .attr("xml:lang", "he").final().element);
+    ASSERT_NE(element, nullptr);
+    EXPECT_STREQ(dom_element_namespace_uri(element), "http://www.w3.org/1999/xhtml");
+    EXPECT_STREQ(element->local_name(), "h:bdi"); EXPECT_EQ(dom_element_html_tag(element), 0);
+    EXPECT_EQ(dom_element_attribute_value_ns(element, "http://www.w3.org/XML/1998/namespace", "lang"), nullptr);
+    EXPECT_STREQ(dom_element_attribute_value_ns(element, "", "xml:lang"), "he");
+    ASSERT_TRUE(dom_element_set_attribute_ns(element, "", "lang", "ja"));
+    EXPECT_STREQ(dom_element_language(element), "ja");
+    EXPECT_EQ(dom_element_attribute_value_ns(element, "http://www.w3.org/XML/1998/namespace", "lang"), nullptr);
+    doc->xml_document = true;
+    DomElement* xml_element = dom_element_create(doc, "h:bdi",
+        builder.element("h:bdi").attr("xmlns:h", "http://www.w3.org/1999/xhtml")
+            .attr("xml:lang", "he").final().element);
+    EXPECT_STREQ(xml_element->local_name(), "bdi"); EXPECT_EQ(dom_element_html_tag(xml_element), MARKUP_NAME_BDI);
+    EXPECT_STREQ(dom_element_language(xml_element), "he");
+}
+
+TEST_F(DomIntegrationTest, QualifiedMetadataUsesOnlyNullNamespacePragmaAttributes) {
+    DomElement* root = create_element_with_backing("html"); doc->root = lam::up(root);
+    DomElement* meta = create_element_with_backing("h:meta");
+    ASSERT_TRUE(meta->set_attribute("__lambda_ns_uri", "http://www.w3.org/1999/xhtml"));
+    ASSERT_TRUE(dom_element_set_attribute_ns(meta, "urn:test", "http-equiv", "content-language"));
+    ASSERT_TRUE(dom_element_set_attribute_ns(meta, "urn:test", "content", "de"));
+    ASSERT_TRUE(root->append_child(meta)); EXPECT_EQ(dom_document_default_language(doc), nullptr);
+    ASSERT_TRUE(root->remove_child(meta));
+    ASSERT_TRUE(dom_element_set_attribute_ns(meta, "", "http-equiv", "content-language"));
+    ASSERT_TRUE(dom_element_set_attribute_ns(meta, "", "content", "ja"));
+    ASSERT_TRUE(root->append_child(meta)); EXPECT_STREQ(dom_document_default_language(doc), "ja");
 }
 
 TEST_F(DomIntegrationTest, DirExcludesIsolatedDescendantsAndUsesInputDefaults) {
@@ -1255,6 +1539,113 @@ TEST_F(DomIntegrationTest, DirExcludesIsolatedDescendantsAndUsesInputDefaults) {
     EXPECT_EQ(dom_element_directionality(input_control), 1);
     ASSERT_TRUE(input_control->set_attribute("value", "\xD9\xA1"));
     EXPECT_EQ(dom_element_directionality(input_control), -1);
+}
+
+TEST_F(DomIntegrationTest, DirUsesShadowHostAndNamedSlotAssignments) {
+    DomElement* host = create_element_with_backing("div");
+    DomElement* root = create_element_with_backing("#document-fragment");
+    root->set_shadow_host_element(host);
+    host->set_shadow_root_element(root);
+    ASSERT_TRUE(host->set_attribute("dir", "rtl"));
+    DomElement* leaf = create_element_with_backing("span");
+    ASSERT_TRUE(root->append_child(leaf));
+    EXPECT_EQ(dom_element_directionality(leaf), 1);
+    EXPECT_TRUE(selector_matcher_matches_pseudo_class(matcher, CSS_SELECTOR_PSEUDO_DIR, "rtl", leaf));
+    ASSERT_TRUE(host->set_attribute("dir", "ltr"));
+    EXPECT_EQ(dom_element_directionality(leaf), -1);
+
+    DomElement* slot = create_element_with_backing("slot");
+    ASSERT_TRUE(slot->set_attribute("dir", "auto"));
+    ASSERT_TRUE(root->append_child(slot));
+    ASSERT_NE(slot->append_text("abc"), nullptr);
+    DomElement* child = create_element_with_backing("span");
+    ASSERT_NE(child->append_text("\xD7\x90"), nullptr);
+    ASSERT_TRUE(host->append_child(child));
+    EXPECT_EQ(dom_slot_assignment_host(slot), host);
+    EXPECT_EQ(dom_element_directionality(slot), 1);
+    ASSERT_TRUE(child->set_attribute("dir", "ltr"));
+    EXPECT_EQ(dom_element_directionality(slot), -1);
+    ASSERT_TRUE(child->set_attribute("dir", "invalid"));
+    EXPECT_EQ(dom_element_directionality(slot), 1);
+
+    DomElement* duplicate = create_element_with_backing("slot");
+    ASSERT_TRUE(duplicate->set_attribute("dir", "auto"));
+    ASSERT_NE(duplicate->append_text("abc"), nullptr);
+    ASSERT_TRUE(root->insert_before(duplicate, slot));
+    EXPECT_EQ(dom_slot_assignment_host(slot), nullptr);
+    EXPECT_EQ(dom_element_directionality(slot), -1);
+    EXPECT_EQ(dom_element_directionality(duplicate), 1);
+    ASSERT_TRUE(root->remove_child(duplicate));
+    EXPECT_EQ(dom_element_directionality(slot), 1);
+    ASSERT_TRUE(child->set_attribute("slot", "named"));
+    EXPECT_EQ(dom_element_directionality(slot), -1);
+    ASSERT_TRUE(slot->set_attribute("name", "named"));
+    EXPECT_EQ(dom_element_directionality(slot), 1);
+    ASSERT_TRUE(host->remove_child(child));
+    EXPECT_EQ(dom_element_directionality(slot), -1);
+    ASSERT_TRUE(slot->remove_attribute("name"));
+    ASSERT_NE(host->append_text("\xD7\x90"), nullptr);
+    EXPECT_EQ(dom_element_directionality(slot), 1);
+}
+
+TEST_F(DomIntegrationTest, DirQualifiesExcludedDescendantsAndSlotBarriers) {
+    DomElement* scan = create_element_with_backing("div");
+    ASSERT_TRUE(scan->set_attribute("dir", "auto"));
+    const char* tags[] = {"script", "style", "textarea", "bdi"};
+    for (const char* tag : tags) {
+        DomElement* foreign = create_element_with_backing(tag);
+        ASSERT_TRUE(foreign->set_attribute("__lambda_ns_uri", "urn:test"));
+        ASSERT_NE(foreign->append_text("\xD7\x90"), nullptr);
+        ASSERT_TRUE(scan->append_child(foreign));
+        EXPECT_EQ(dom_element_directionality(scan), 1) << tag;
+        ASSERT_TRUE(scan->remove_child(foreign));
+    }
+    DomElement* host = create_element_with_backing("div");
+    DomElement* root = create_element_with_backing("#document-fragment");
+    root->set_shadow_host_element(host);
+    host->set_shadow_root_element(root);
+    ASSERT_TRUE(root->append_child(scan));
+    ASSERT_TRUE(host->set_attribute("dir", "rtl"));
+    DomElement* slot = create_element_with_backing("slot");
+    ASSERT_TRUE(scan->append_child(slot));
+    ASSERT_NE(slot->append_text("abc"), nullptr);
+    EXPECT_EQ(dom_element_directionality(scan), 1);
+    ASSERT_TRUE(host->set_attribute("dir", "ltr"));
+    EXPECT_EQ(dom_element_directionality(scan), -1);
+    ASSERT_TRUE(slot->set_attribute("dir", "rtl"));
+    EXPECT_EQ(dom_element_directionality(scan), -1);
+    ASSERT_TRUE(slot->remove_attribute("dir"));
+    ASSERT_TRUE(slot->set_attribute("__lambda_ns_uri", "urn:test"));
+    EXPECT_EQ(dom_shadow_first_matching_slot(root, ""), nullptr);
+    EXPECT_EQ(dom_slot_assignment_host(slot), nullptr);
+}
+
+TEST_F(DomIntegrationTest, SlotSearchAndDirectionWalkDeepSourceTrees) {
+    DomElement* host = create_element_with_backing("div");
+    DomElement* root = create_element_with_backing("#document-fragment");
+    root->set_shadow_host_element(host);
+    host->set_shadow_root_element(root);
+    DomElement* current = root;
+    for (size_t level = 0; level < 1024; level++) {
+        DomElement* child = create_element_with_backing("span");
+        ASSERT_TRUE(current->append_child(child));
+        current = child;
+    }
+    DomElement* slot = create_element_with_backing("slot");
+    ASSERT_TRUE(current->append_child(slot));
+    EXPECT_EQ(dom_shadow_first_matching_slot(root, ""), slot);
+    ASSERT_TRUE(host->set_attribute("dir", "rtl"));
+    EXPECT_EQ(dom_element_directionality(current), 1);
+    ASSERT_TRUE(host->set_attribute("dir", "auto"));
+    DomElement* light = create_element_with_backing("span");
+    ASSERT_TRUE(host->append_child(light));
+    for (size_t level = 0; level < 1024; level++) {
+        DomElement* child = create_element_with_backing("span");
+        ASSERT_TRUE(light->append_child(child));
+        light = child;
+    }
+    ASSERT_NE(light->append_text("\xD7\x90"), nullptr);
+    EXPECT_EQ(dom_element_directionality(host), 1);
 }
 
 TEST_F(DomIntegrationTest, ModalAndPopoverSelectorsUseElementState) {

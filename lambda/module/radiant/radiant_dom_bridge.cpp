@@ -1476,8 +1476,9 @@ static int radiant_dom_member_property(Item receiver, const char* property, Item
 
 RADIANT_MEMBER_GET(radiant_dom_member_tag_name,
     (Item){.item = s2it(radiant_dom_uppercase_name(elem->tag_name))})
-RADIANT_MEMBER_GET(radiant_dom_member_local_name,
-    radiant_dom_string_item(elem->tag_name))
+RADIANT_C_API int radiant_dom_member_local_name(Item receiver, Item* out) {
+    return radiant_dom_member_property(receiver, "localName", out);
+}
 RADIANT_C_API int radiant_dom_member_namespace_uri(Item receiver, Item* out) {
     DomElement* elem = radiant_dom_member_elem(receiver);
     if (!elem || !out) return 0;
@@ -1485,7 +1486,9 @@ RADIANT_C_API int radiant_dom_member_namespace_uri(Item receiver, Item* out) {
     // canonical resolver so namespace inheritance matches generic DOM reads.
     return radiant_dom_member_property(receiver, "namespaceURI", out);
 }
-RADIANT_MEMBER_GET(radiant_dom_member_prefix, ItemNull)
+RADIANT_C_API int radiant_dom_member_prefix(Item receiver, Item* out) {
+    return radiant_dom_member_property(receiver, "prefix", out);
+}
 RADIANT_MEMBER_GET(radiant_dom_member_id, radiant_dom_string_item(elem->id))
 RADIANT_C_API int radiant_dom_member_class_name(Item receiver, Item* out) {
     DomElement* elem = radiant_dom_member_elem(receiver);
@@ -2877,12 +2880,11 @@ RADIANT_C_API int radiant_dom_document_prototype(Item object, Item* out) {
 }
 
 static Item radiant_dom_create_element_item(DomDocument* doc, const char* tag,
-                                             const char* namespace_uri) {
+                                             const char* namespace_uri, bool qualified) {
     if (!doc || !tag) return ItemNull;
-    DomElement* elem = (DomElement*)dom_create_backed_element_bridge(doc, tag);
-    if (elem && namespace_uri && namespace_uri[0]) {
-        elem->set_attribute("__lambda_ns_uri", namespace_uri);
-    }
+    DomElement* elem = (DomElement*)(qualified
+        ? dom_create_backed_element_ns_bridge(doc, tag, namespace_uri)
+        : dom_create_backed_element_bridge(doc, tag));
     return radiant_dom_node_item((DomNode*)elem);
 }
 
@@ -3109,13 +3111,13 @@ static int radiant_dom_document_operation_active(RadiantDocumentOperation operat
 
     if (operation == RADIANT_DOCUMENT_CREATE_ELEMENT) {
         *out = argc >= 1 ? radiant_dom_create_element_item(
-            doc, fn_to_cstr(args[0]), nullptr) : ItemNull;
+            doc, fn_to_cstr(args[0]), nullptr, false) : ItemNull;
         return 1;
     }
 
     if (operation == RADIANT_DOCUMENT_CREATE_ELEMENT_NS) {
         *out = argc >= 2 ? radiant_dom_create_element_item(
-            doc, fn_to_cstr(args[1]), fn_to_cstr(args[0])) : ItemNull;
+            doc, fn_to_cstr(args[1]), fn_to_cstr(args[0]), true) : ItemNull;
         return 1;
     }
 
