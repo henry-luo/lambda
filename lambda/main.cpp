@@ -2629,6 +2629,10 @@ static int lambda_main_impl(int argc, char *argv[]) {
             bool print = false;
             bool timing = false;
             bool invalid = false;
+            const char** script_arguments = (const char**)mem_calloc((size_t)argc + 2, sizeof(char*), MEM_CAT_JS_RUNTIME);
+            if (!script_arguments) { runtime_cleanup(&runtime); return lambda_main_finish(1); }
+            int script_argc = 2;
+            script_arguments[0] = argv[0];
             for (int arg = 2; arg < argc; arg++) {
                 if (arg == selector || strcmp(argv[arg], "--no-log") == 0) continue;
                 if (strcmp(argv[arg], "--timing") == 0) { timing = true; continue; }
@@ -2636,17 +2640,20 @@ static int lambda_main_impl(int argc, char *argv[]) {
                      !strcmp(argv[arg], "-p") || !strcmp(argv[arg], "--print")) && arg + 1 < argc) {
                     print = !strcmp(argv[arg], "-p") || !strcmp(argv[arg], "--print");
                     source = argv[++arg]; length = strlen(source);
-                } else if (argv[arg][0] == '-' || filename) invalid = true;
+                } else if (filename) script_arguments[script_argc++] = argv[arg];
+                else if (argv[arg][0] == '-') invalid = true;
                 else filename = argv[arg];
             }
             if (!source && filename && !invalid &&
                     file_read_all(filename, MEM_CAT_JS_RUNTIME, &loaded, &length)) source = loaded;
             if (invalid || !source || (filename && !loaded)) {
                 fputs("MVP-Lmd accepts a script file, -e source, or -p source\n", stderr);
-                mem_free(loaded); runtime_cleanup(&runtime); return lambda_main_finish(1);
+                mem_free(script_arguments); mem_free(loaded); runtime_cleanup(&runtime); return lambda_main_finish(1);
             }
             double execution_ms = 0;
-            MvpLmdExecution* execution = mvp_lmd_execute(source, length, timing ? &execution_ms : NULL);
+            script_arguments[1] = filename ? filename : "[eval]";
+            MvpLmdHost host = {script_argc, script_arguments, stdout};
+            MvpLmdExecution* execution = mvp_lmd_execute(source, length, timing ? &execution_ms : NULL, &host);
             const char* error = mvp_lmd_diagnostic(execution);
             if (error) { fputs(error, stderr); fputc('\n', stderr); }
             else if (print) {
@@ -2661,7 +2668,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
                 snprintf(report, sizeof(report), "__TIMING__:%.6f\n", execution_ms);
                 fputs(report, stdout);
             }
-            mvp_lmd_destroy(execution); mem_free(loaded);
+            mvp_lmd_destroy(execution); mem_free(script_arguments); mem_free(loaded);
             runtime_cleanup(&runtime); return lambda_main_finish(status);
         }
 

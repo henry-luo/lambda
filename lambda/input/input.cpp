@@ -1345,10 +1345,14 @@ TypeMap* type_tree_delete_field(Input* input, Map* container, const ShapeEntry* 
             return plan->target;
         }
     }
+    // replay edges encode plain fields; descriptor flags/contracts require the preserving clone.
+    if (!external_parent_admissible(parent)) return NULL;
     TypeMap* target = type_tree_root_like(input, container);
     FOR_EACH_MAP_FIELD(parent, entry) {
-        if (entry != field && target) target = type_tree_add_map_field_chars(input, target,
-            entry->name->str, entry->name->length, entry->type->type_id, NULL);
+        if (entry == field) continue;
+        if (entry->type != type_info[entry->type->type_id].type || entry->default_value) return NULL;
+        TypeTreeStep step = {entry, NULL, entry->type->type_id};
+        if (target) target = type_tree_follow(input, target, &step, 1);
     }
     if (!target || !owned || count >= shape_tree_fanout_cap(parent)) return target;
     TypeMapRetypePlan* plan = (TypeMapRetypePlan*)type_alloc_zeroed(input_tree_alloc(input), sizeof(TypeMapRetypePlan));
@@ -1793,7 +1797,8 @@ TypeMap* type_tree_follow(Input* input, TypeMap* start, const TypeTreeStep* step
             if (!step->key) return NULL;
             k = transition_key_of_string(step->key);
         }
-        node = transition_target_for_key(node, &k, step->type_id, input, NULL);
+        // nominal replay roots are external: use the same edge table as ordinary adds.
+        node = type_tree_step(input, node, &k, step->type_id, NULL);
     }
     return node;
 }
