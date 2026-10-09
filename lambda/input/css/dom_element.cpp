@@ -88,10 +88,14 @@ const char* dom_element_namespace_uri(DomElement* element) {
     const char* uri = dom_element_stored_attribute(element, "__lambda_ns_uri");
     if (uri) return uri;
     const char* colon = strchr(element->tag_name, ':');
-    if (colon && colon == element->tag_name.get()) return "";
-    uri = dom_element_namespace_binding(element, element->tag_name, colon ? (size_t)(colon - element->tag_name) : 0);
-    if (uri) return uri;
-    if (colon) return "";
+    bool parsed_html = element->doc && !element->doc->xml_document &&
+        element->doc->page_kind == DOM_PAGE_KIND_HTML;
+    if (!parsed_html) {
+        if (colon && colon == element->tag_name.get()) return "";
+        uri = dom_element_namespace_binding(element, element->tag_name, colon ? (size_t)(colon - element->tag_name) : 0);
+        if (uri) return uri;
+        if (colon || (element->doc && element->doc->xml_document)) return "";
+    }
     for (DomNode* node = element; node; node = node->parent) {
         if (!node->is_element()) continue;
         DomElement* ancestor = node->as_element();
@@ -109,6 +113,13 @@ const char* dom_element_namespace_uri(DomElement* element) {
     return "http://www.w3.org/1999/xhtml";
 }
 
+NameId dom_element_html_tag(DomElement* element) {
+    if (!element || strcmp(dom_element_namespace_uri(element), "http://www.w3.org/1999/xhtml")) return 0;
+    // HTML element types use the case-sensitive local name, independent of an XML prefix.
+    const char* local = element->local_name();
+    return well_known_name_id({local, strlen(local)});
+}
+
 DomNamespacedAttribute* dom_element_namespaced_attributes(DomElement* element) {
     return element && element->ext ? element->ext->namespaced_attributes : nullptr;
 }
@@ -116,7 +127,7 @@ DomNamespacedAttribute* dom_element_namespaced_attributes(DomElement* element) {
 bool dom_element_record_namespaced_attribute(DomElement* element,
     const char* namespace_uri, const char* qualified_name, const char* value) {
     if (!element || !element->doc || !namespace_uri ||
-        !qualified_name || !*qualified_name || !value) return false;
+        !qualified_name || !*qualified_name) return false;
     const char* colon = strrchr(qualified_name, ':');
     const char* local = *namespace_uri && colon
         ? colon + 1 : qualified_name;
@@ -125,11 +136,16 @@ bool dom_element_record_namespaced_attribute(DomElement* element,
     Pool* pool = element->storage_pool();
     for (DomNamespacedAttribute* attr = ext->namespaced_attributes;
          attr; attr = attr->next) {
-        if (strcmp(attr->namespace_uri, namespace_uri) == 0 &&
+        if (attr->active && strcmp(attr->namespace_uri, namespace_uri) == 0 &&
             strcmp(attr->local_name, local) == 0) {
-            attr->qualified_name = lam::own(pool_strdup(pool, qualified_name));
-            attr->value = lam::own(pool_strdup(pool, value));
-            attr->active = attr->qualified_name && attr->value;
+            if (strcmp(attr->qualified_name, qualified_name) == 0 &&
+                ((!attr->value && !value) || (attr->value && value && strcmp(attr->value, value) == 0))) return true;
+            char* name_copy = pool_strdup(pool, qualified_name);
+            char* value_copy = value ? pool_strdup(pool, value) : nullptr;
+            if (!name_copy || (value && !value_copy)) return false;
+            attr->qualified_name = lam::own(name_copy);
+            attr->value = lam::own(value_copy);
+            attr->active = true;
             return attr->active;
         }
     }
@@ -139,12 +155,13 @@ bool dom_element_record_namespaced_attribute(DomElement* element,
     attr->namespace_uri = lam::own(pool_strdup(pool, namespace_uri));
     attr->local_name = lam::own(pool_strdup(pool, local));
     attr->qualified_name = lam::own(pool_strdup(pool, qualified_name));
-    attr->value = lam::own(pool_strdup(pool, value));
+    attr->value = lam::own(value ? pool_strdup(pool, value) : nullptr);
     if (!attr->namespace_uri || !attr->local_name ||
-        !attr->qualified_name || !attr->value) return false;
+        !attr->qualified_name || (value && !attr->value)) return false;
     attr->active = true;
-    attr->next = ext->namespaced_attributes;
-    ext->namespaced_attributes = lam::own(attr);
+    lam::Own<DomNamespacedAttribute>* tail = &ext->namespaced_attributes;
+    while (*tail) tail = &(*tail)->next;
+    *tail = lam::own(attr);
     return true;
 }
 
@@ -183,21 +200,29 @@ const char* dom_element_attribute_namespace_uri(DomElement* element,
         }
     }
     const char* colon = strchr(qualified_name, ':');
-    if (!colon) {
-        *local_name = qualified_name;
-        return strcmp(qualified_name, "xmlns") == 0
+    *local_name = qualified_name;
+    if (!element->doc || element->doc->xml_document || element->doc->page_kind != DOM_PAGE_KIND_HTML) {
+        if (!colon) return strcmp(qualified_name, "xmlns") == 0
             ? "http://www.w3.org/2000/xmlns/" : "";
+        *local_name = colon + 1;
+        return dom_element_namespace_binding(element, qualified_name, (size_t)(colon - qualified_name));
     }
-    *local_name = colon + 1;
-    size_t prefix_len = (size_t)(colon - qualified_name);
-    const char* uri = dom_element_namespace_binding(element, qualified_name, prefix_len);
-    if (uri) return uri;
-    // HTML parsing maps XLink names on SVG even without an xmlns attribute.
-    if (prefix_len == 5 && strncmp(qualified_name, "xlink", 5) == 0 &&
-        strcmp(dom_element_namespace_uri(element),
-               "http://www.w3.org/2000/svg") == 0)
-        return "http://www.w3.org/1999/xlink";
-    return nullptr;
+    // HTML parsing assigns namespaces only to the foreign-attribute adjustment table.
+    const char* element_uri = dom_element_namespace_uri(element);
+    if (strcmp(element_uri, "http://www.w3.org/2000/svg") == 0 ||
+        strcmp(element_uri, "http://www.w3.org/1998/Math/MathML") == 0) {
+        const char* uri = nullptr;
+        if (strcmp(qualified_name, "xml:lang") == 0 || strcmp(qualified_name, "xml:base") == 0 ||
+            strcmp(qualified_name, "xml:space") == 0) uri = "http://www.w3.org/XML/1998/namespace";
+        else if (strcmp(qualified_name, "xlink:actuate") == 0 || strcmp(qualified_name, "xlink:arcrole") == 0 ||
+            strcmp(qualified_name, "xlink:href") == 0 || strcmp(qualified_name, "xlink:role") == 0 ||
+            strcmp(qualified_name, "xlink:show") == 0 || strcmp(qualified_name, "xlink:title") == 0 ||
+            strcmp(qualified_name, "xlink:type") == 0) uri = "http://www.w3.org/1999/xlink";
+        else if (strcmp(qualified_name, "xmlns") == 0 || strcmp(qualified_name, "xmlns:xlink") == 0)
+            uri = "http://www.w3.org/2000/xmlns/";
+        if (uri) { if (colon) *local_name = colon + 1; return uri; }
+    }
+    return "";
 }
 
 // DOM bridge diagnostics are emitted per node during document construction.
@@ -228,10 +253,54 @@ bool dom_subtree_contains_node(DomNode* root, DomNode* target) {
     return false;
 }
 
+DomElement* dom_shadow_root(DomNode* node) {
+    if (!node) return nullptr;
+    while (node->parent) node = node->parent;
+    DomElement* root = node->as_element();
+    return root && root->shadow_host_element() ? root : nullptr;
+}
+
+static bool dom_is_html_slot(DomElement* element) {
+    return dom_element_html_tag(element) == MARKUP_NAME_SLOT;
+}
+
+bool dom_slot_assignment_matches(DomElement* slot, DomNode* child) {
+    if (!dom_is_html_slot(slot) || !child) return false;
+    const char* name = dom_element_attribute_value_ns(slot, "", "name");
+    if (!name) name = "";
+    if (child->is_text()) return !*name;
+    if (!child->is_element() || child->as_element()->is_synthetic()) return false;
+    const char* assigned = dom_element_attribute_value_ns(child->as_element(), "", "slot");
+    return strcmp(name, assigned ? assigned : "") == 0;
+}
+
+DomElement* dom_shadow_first_matching_slot(DomNode* root, const char* name) {
+    // named assignment uses source tree order, excluding inert template contents and generated boxes.
+    for (DomNode* node = root; node;) {
+        DomElement* element = node->as_element();
+        if (dom_is_html_slot(element)) {
+            const char* candidate = dom_element_attribute_value_ns(element, "", "name");
+            if (strcmp(candidate ? candidate : "", name ? name : "") == 0) return element;
+        }
+        bool inert = element && (element->is_synthetic() ||
+            dom_element_html_tag(element) == MARKUP_NAME_TEMPLATE);
+        node = element && !inert && element->first_child ? element->first_child :
+            dom_next_after_subtree(root, node);
+    }
+    return nullptr;
+}
+
+DomElement* dom_slot_assignment_host(DomElement* slot) {
+    if (!dom_is_html_slot(slot)) return nullptr;
+    DomElement* root = dom_shadow_root(slot);
+    return root && dom_shadow_first_matching_slot(root, dom_element_attribute_value_ns(slot, "", "name")) == slot
+        ? root->shadow_host_element() : nullptr;
+}
+
 static CssEnum dom_html_direction_state(DomElement* element) {
     if (!element || strcmp(dom_element_namespace_uri(element), "http://www.w3.org/1999/xhtml"))
         return CSS_VALUE__UNDEF;
-    const char* value = element->get_attribute("dir");
+    const char* value = dom_element_attribute_value_ns(element, "", "dir");
     if (!value) return CSS_VALUE__UNDEF;
     if (str_ieq_cstr(value, "ltr")) return CSS_VALUE_LTR;
     if (str_ieq_cstr(value, "rtl")) return CSS_VALUE_RTL;
@@ -241,71 +310,88 @@ static CssEnum dom_html_direction_state(DomElement* element) {
 bool dom_element_has_directionality_hint(DomElement* element) {
     if (!element || strcmp(dom_element_namespace_uri(element), "http://www.w3.org/1999/xhtml")) return false;
     return dom_html_direction_state(element) != CSS_VALUE__UNDEF ||
-        (element->tag_name && str_ieq_cstr(element->tag_name, "bdi")) ||
-        (element->tag_id == MARKUP_NAME_INPUT &&
-         form_input_kind(element->get_attribute("type")) == FORM_INPUT_KIND_TEL);
+        dom_element_html_tag(element) == MARKUP_NAME_BDI ||
+        (dom_element_html_tag(element) == MARKUP_NAME_INPUT &&
+         form_input_kind(dom_element_attribute_value_ns(element, "", "type")) == FORM_INPUT_KIND_TEL);
 }
 
 int dom_find_strong_direction(DomNode* node, bool skip_explicit_dir,
-                              bool first, bool raw_content) {
-    if (!node) return 0;
-    if (node->is_text()) {
-        DomText* text = node->as_text();
-        if (!text->text || text->length == 0) return 0;
-        return utf8_bidi_strong_direction(text->text, text->length, first);
-    }
-    if (!node->is_element()) return 0;
-    DomElement* element = node->as_element();
-    if ((raw_content || skip_explicit_dir) && element->is_synthetic()) return 0;
-    if (!raw_content && (element->tag_id == MARKUP_NAME_SCRIPT ||
-        element->tag_id == MARKUP_NAME_STYLE ||
-        (element->tag_name && strcmp(element->tag_name, "::marker") == 0) ||
-        element->tag_id == MARKUP_NAME_TEXTAREA ||
-        (skip_explicit_dir && (dom_html_direction_state(element) != CSS_VALUE__UNDEF ||
-            (strcmp(dom_element_namespace_uri(element), "http://www.w3.org/1999/xhtml") == 0 &&
-             element->tag_name && str_ieq_cstr(element->tag_name, "bdi")))))) {
-        return 0;
-    }
+        bool first, bool raw_content, DomDirectionValueResolver resolve_value, void* context) {
     int last_strong = 0;
-    for (DomNode* child = element->first_child; child;
-         child = child->next_sibling) {
-        int strong_class = dom_find_strong_direction(
-            child, skip_explicit_dir, first, raw_content);
-        if (strong_class != 0) {
-            if (first) return strong_class;
-            last_strong = strong_class;
+    // walk source descendants without one native stack frame per DOM level.
+    for (DomNode* current = node; current;) {
+        DomElement* element = current->as_element();
+        bool excluded = false;
+        int strong = 0;
+        if (current->is_text()) {
+            DomText* text = current->as_text();
+            if (text->text && text->length)
+                strong = utf8_bidi_strong_direction(text->text, text->length, first);
+        } else if (element) {
+            NameId html_tag = dom_element_html_tag(element);
+            excluded = ((raw_content || skip_explicit_dir) && element->is_synthetic()) ||
+                (!raw_content && ((html_tag == MARKUP_NAME_SCRIPT || html_tag == MARKUP_NAME_STYLE ||
+                    html_tag == MARKUP_NAME_TEXTAREA) ||
+                    (element->tag_name && strcmp(element->tag_name, "::marker") == 0) ||
+                    (skip_explicit_dir && (dom_html_direction_state(element) != CSS_VALUE__UNDEF ||
+                        html_tag == MARKUP_NAME_BDI))));
+            if (!excluded && !raw_content && skip_explicit_dir && dom_is_html_slot(element)) {
+                DomElement* root = dom_shadow_root(element);
+                // HTML contained-text auto direction treats a shadow slot as its host's direction.
+                if (root) {
+                    strong = dom_element_directionality(root->shadow_host_element(), resolve_value, context);
+                    excluded = true;
+                }
+            }
         }
+        if (strong) {
+            if (first) return strong;
+            last_strong = strong;
+        }
+        current = element && !excluded && element->first_child ? element->first_child :
+            dom_next_after_subtree(node, current);
     }
     return last_strong;
 }
 
 int dom_element_directionality(DomElement* element,
         DomDirectionValueResolver resolve_value, void* context) {
-    for (DomElement* current = element; current; current = current->parent_element()) {
+    for (DomElement* current = element; current; current = dom_parent_element(current)) {
         CssEnum state = dom_html_direction_state(current);
         if (state == CSS_VALUE_LTR) return -1;
         if (state == CSS_VALUE_RTL) return 1;
-        bool html = strcmp(dom_element_namespace_uri(current), "http://www.w3.org/1999/xhtml") == 0;
-        bool input = html && current->tag_id == MARKUP_NAME_INPUT;
-        bool textarea = html && current->tag_id == MARKUP_NAME_TEXTAREA;
-        bool bdi = html && current->tag_name && str_ieq_cstr(current->tag_name, "bdi");
+        NameId html_tag = dom_element_html_tag(current);
+        bool input = html_tag == MARKUP_NAME_INPUT;
+        bool textarea = html_tag == MARKUP_NAME_TEXTAREA;
+        bool bdi = html_tag == MARKUP_NAME_BDI;
         if (state == CSS_VALUE_AUTO || bdi) {
-            bool control = textarea || (input && html_input_has_auto_direction_value(current->get_attribute("type")));
+            bool control = textarea || (input && html_input_has_auto_direction_value(dom_element_attribute_value_ns(current, "", "type")));
             const char* value = control && resolve_value ? resolve_value(current, context) : nullptr;
             if (!value && control && input) {
-                value = current->get_attribute("value");
+                value = dom_element_attribute_value_ns(current, "", "value");
                 if (!value) value = ""; // void input descendants never contribute to its value.
             }
             if (value) return utf8_bidi_strong_direction(value, strlen(value), true) > 0 ? 1 : -1;
+            DomElement* assignment_host = dom_slot_assignment_host(current);
+            bool assigned = false;
+            for (DomNode* child = assignment_host ? assignment_host->first_child.get() : nullptr;
+                 child; child = child->next_sibling) {
+                if (!dom_slot_assignment_matches(current, child)) continue;
+                assigned = true;
+                int strong = dom_find_strong_direction(child, true, true, false, resolve_value, context);
+                if (strong) return strong;
+            }
+            // a nonempty neutral assignment suppresses fallback content as well.
+            if (assigned) return -1;
             // raw textarea value includes every text descendant; isolated subtrees are excluded elsewhere.
             for (DomNode* child = current->first_child; child; child = child->next_sibling) {
-                int strong = dom_find_strong_direction(child, !control, true, control);
+                int strong = dom_find_strong_direction(child, !control, true, control, resolve_value, context);
                 if (strong) return strong;
             }
             return -1;
         }
         // telephone controls default to LTR even when their parent is RTL.
-        if (input && form_input_kind(current->get_attribute("type")) == FORM_INPUT_KIND_TEL) return -1;
+        if (input && form_input_kind(dom_element_attribute_value_ns(current, "", "type")) == FORM_INPUT_KIND_TEL) return -1;
     }
     return -1;
 }
@@ -523,9 +609,89 @@ bool dom_document_replace_url(DomDocument* document, Url* replacement) {
     return true;
 }
 
+extern "C" __attribute__((weak)) void dom_css_document_language_changed(void* document) {
+    DomDocument* doc = (DomDocument*)document;
+    if (doc) { doc->mutation_epoch++; doc->style_content_epoch++; }
+}
+
+static bool dom_document_replace_language(DomDocument* document, lam::Own<char>* slot, StrView value) {
+    if (!document || !slot) return false;
+    if ((!*slot && !value.length) || (*slot && str_eq(*slot, strlen(*slot), value.str, value.length)))
+        return true;
+    char* replacement = value.length ? mem_dup_n(value.str, value.length, MEM_CAT_DOM) : nullptr;
+    if (value.length && !replacement) return false;
+    lam::free_owned(*slot);
+    *slot = lam::own(replacement);
+    dom_css_document_language_changed(document);
+    return true;
+}
+
+const char* dom_document_default_language(const DomDocument* document) {
+    if (!document) return nullptr;
+    return document->services.pragma_language ? document->services.pragma_language :
+        document->services.protocol_language;
+}
+
+bool dom_document_set_content_language(DomDocument* document, const char* header) {
+    if (!document) return false;
+    StrView value = {nullptr, 0};
+    // HTTP lists describe an audience; only one language is a node-language fallback.
+    if (header && !strchr(header, ',')) {
+        const char* end = header + strlen(header);
+        while (header < end && str_char_is_ascii_space(*header)) header++;
+        while (end > header && str_char_is_ascii_space(end[-1])) end--;
+        value = {header, (size_t)(end - header)};
+    }
+    return dom_document_replace_language(document, &document->services.protocol_language, value);
+}
+
+bool dom_document_process_metadata_insertion(DomDocument* document, DomNode* subtree) {
+    if (!document || document->xml_document || !subtree || !subtree->is_element() ||
+        subtree->as_element()->doc != document ||
+        !dom_element_is_connected(subtree->as_element())) return false;
+    StrView candidate = {nullptr, 0};
+    for (DomNode* node = subtree; node;) {
+        DomElement* element = node->as_element();
+        if (dom_element_html_tag(element) == MARKUP_NAME_META) {
+            const char* equiv = dom_element_attribute_value_ns(element, "", "http-equiv");
+            const char* content = dom_element_attribute_value_ns(element, "", "content");
+            if (equiv && str_ieq_cstr(equiv, "content-language") && content && !strchr(content, ',')) {
+                while (*content && str_char_is_ascii_space(*content)) content++;
+                const char* end = content;
+                while (*end && !str_char_is_ascii_space(*end)) end++;
+                if (end != content) candidate = {content, (size_t)(end - content)};
+            }
+        }
+        // parser-backed template contents are inert until their detached fragment is materialized.
+        bool inert_template = dom_element_html_tag(element) == MARKUP_NAME_TEMPLATE;
+        node = element && !inert_template && element->first_child ? element->first_child :
+            dom_next_after_subtree(subtree, node);
+    }
+    // an unsuccessful pragma and later removal never erase a successfully processed default.
+    return candidate.length && dom_document_replace_language(document,
+        &document->services.pragma_language, candidate);
+}
+
+const char* dom_element_language(DomElement* element) {
+    if (!element) return nullptr;
+    for (DomElement* current = element; current;) {
+        const char* language = dom_element_attribute_value_ns(current,
+            "http://www.w3.org/XML/1998/namespace", "lang");
+        const char* namespace_uri = dom_element_namespace_uri(current);
+        bool html = strcmp(namespace_uri, "http://www.w3.org/1999/xhtml") == 0;
+        if (!language && (html || strcmp(namespace_uri, "http://www.w3.org/2000/svg") == 0))
+            language = dom_element_attribute_value_ns(current, "", "lang");
+        if (language) return language;
+        current = dom_parent_element(current);
+    }
+    return dom_document_default_language(element->doc);
+}
+
 void DomDocument::destroy() {
     dom_retire_begin_destroy(this);
     mem_free(services.preferred_languages); services.preferred_languages = nullptr;
+    lam::free_owned(services.pragma_language);
+    lam::free_owned(services.protocol_language);
     float ext_rate = services.element_count
         ? 100.0f * (float)services.ext_allocations / (float)services.element_count
         : 0.0f;
@@ -1282,7 +1448,7 @@ static void dom_element_attribute_did_set(DomElement* element,
     if (!element || !element->doc || !lower_name || !value) return;
     if (strcmp(lower_name, "id") == 0) {
         dom_element_release_cached_id(element);
-        const char* id_attr = element->get_attribute("id");
+        const char* id_attr = dom_element_attribute_value_ns(element, "", "id");
         if (id_attr) {
             dom_element_retain_id(element, lam::promote_to_pool(
                 element->storage_pool(), id_attr));
@@ -1355,6 +1521,79 @@ static const char* dom_element_attr_key(DomElement* element, const char* name,
         ? dom_element_find_synthetic_attribute(element, name) >= 0
         : ElementReader(dom_element_to_element(element)).has_attr(name);
     return stored_exact ? name : lower;
+}
+
+static DomNamespacedAttribute* dom_first_recorded_attribute(DomElement* element, const char* name) {
+    for (DomNamespacedAttribute* attr = dom_element_namespaced_attributes(element); attr; attr = attr->next)
+        if (attr->active && strcmp(attr->qualified_name, name) == 0) return attr;
+    return nullptr;
+}
+
+static bool dom_element_record_all_attributes(DomElement* element) {
+    if (!element) return false;
+    DomElementExt* ext = element->ensure_ext();
+    if (!ext) return false;
+    if (ext->attributes_are_recorded) return true;
+    int count = 0;
+    const char** names = element->attribute_names(&count);
+    // D4.5.1v4: the ordered list owns distinct expanded names; Mark mirrors only the first QName.
+    lam::Own<DomNamespacedAttribute> remainder = ext->namespaced_attributes;
+    ext->namespaced_attributes = nullptr;
+    lam::Own<DomNamespacedAttribute>* tail = &ext->namespaced_attributes;
+    for (int index = 0; names && index < count; index++) {
+        lam::Own<DomNamespacedAttribute>* link = &remainder;
+        while (*link && (!(*link)->active || strcmp((*link)->qualified_name, names[index])))
+            link = &(*link)->next;
+        if (*link) {
+            DomNamespacedAttribute* attr = link->get();
+            *link = attr->next;
+            attr->next = nullptr;
+            *tail = lam::own(attr);
+            tail = &attr->next;
+        } else {
+            const char* local = nullptr;
+            const char* uri = dom_element_attribute_namespace_uri(element, names[index], &local);
+            const char* value = dom_element_stored_attribute(element, names[index]);
+            if (!dom_element_record_namespaced_attribute(element, uri ? uri : "", names[index], value)) {
+                *tail = remainder;
+                return false;
+            }
+            while (*tail) tail = &(*tail)->next;
+        }
+    }
+    *tail = remainder;
+    ext->attributes_are_recorded = true;
+    return true;
+}
+
+const char* dom_element_find_qualified_attribute(DomElement* element,
+        const char* namespace_uri, const char* local_name) {
+    if (!element || !local_name) return nullptr;
+    const char* wanted = namespace_uri ? namespace_uri : "";
+    for (DomNamespacedAttribute* attr = dom_element_namespaced_attributes(element); attr; attr = attr->next)
+        if (attr->active && strcmp(attr->namespace_uri, wanted) == 0 &&
+            strcmp(attr->local_name, local_name) == 0) return attr->qualified_name;
+    if (element->ext && element->ext->attributes_are_recorded) return nullptr;
+    int count = 0;
+    const char** names = element->attribute_names(&count);
+    for (int index = 0; names && index < count; index++) {
+        const char* local = nullptr;
+        const char* uri = dom_element_attribute_namespace_uri(element, names[index], &local);
+        if (uri && local && strcmp(uri, wanted) == 0 && strcmp(local, local_name) == 0) return names[index];
+    }
+    return nullptr;
+}
+
+const char* dom_element_attribute_value_ns(DomElement* element,
+        const char* namespace_uri, const char* local_name) {
+    if (!element || !local_name) return nullptr;
+    const char* wanted = namespace_uri ? namespace_uri : "";
+    const char* value = dom_element_get_namespaced_attribute(element, wanted, local_name);
+    if (value || (element->ext && element->ext->attributes_are_recorded)) return value;
+    if (!*wanted && !dom_element_namespaced_attributes(element) && !strchr(local_name, ':'))
+        return dom_element_stored_attribute(element, local_name);
+    const char* qualified = dom_element_find_qualified_attribute(element, wanted, local_name);
+    return qualified ? element->get_attribute(qualified) : nullptr;
 }
 
 static bool dom_attribute_name_present(const char* name) {
@@ -1441,35 +1680,54 @@ void dom_attribute_node_attach(DomElement* element, DomAttr* attribute) {
     if (attribute->owner_changed) attribute->owner_changed(attribute);
 }
 
+static DomAttr* dom_element_attribute_node_value(DomElement* element, const char* namespace_uri,
+        const char* qualified_name, const char* local_name, const char* value) {
+    const char* uri = namespace_uri ? namespace_uri : "";
+    for (DomAttr* attribute = element->ext ? element->ext->attribute_nodes.get() : nullptr;
+         attribute; attribute = attribute->attribute_next) {
+        if (strcmp(attribute->namespace_uri, uri) == 0 && strcmp(attribute->local_name, local_name) == 0)
+            return attribute;
+    }
+    DomAttr* attribute = dom_attribute_node_create(element->doc, uri, qualified_name, value ? value : "");
+    if (attribute) dom_attribute_node_attach(element, attribute);
+    return attribute;
+}
+
 DomAttr* dom_element_attribute_node(DomElement* element, const char* name) {
     if (!element || !name) return nullptr;
     char lower[128];
     const char* key = dom_element_attr_key(element, name, lower, sizeof(lower));
     const char* value = element->get_attribute(key);
-    // parsed valueless attributes have a null Mark value but still own an Attr.
     if (!value && !element->has_attribute(key)) return nullptr;
-    for (DomAttr* attribute = element->ext ? element->ext->attribute_nodes.get() : nullptr;
-         attribute; attribute = attribute->attribute_next) {
-        if (strcmp(attribute->qualified_name, key) == 0) return attribute;
-    }
-    const char* local_name = nullptr;
-    const char* uri = dom_element_attribute_namespace_uri(element, key, &local_name);
-    DomAttr* attribute = dom_attribute_node_create(element->doc, uri, key, value ? value : "");
-    if (attribute) dom_attribute_node_attach(element, attribute);
-    return attribute;
+    const char* local = nullptr;
+    const char* uri = dom_element_attribute_namespace_uri(element, key, &local);
+    return dom_element_attribute_node_value(element, uri, key, local ? local : key, value);
 }
 
-static void dom_attribute_nodes_did_set(DomElement* element, const char* key, const char* value) {
+DomAttr* dom_element_attribute_node_ns(DomElement* element,
+        const char* namespace_uri, const char* local_name) {
+    const char* qualified = dom_element_find_qualified_attribute(element, namespace_uri, local_name);
+    return qualified ? dom_element_attribute_node_value(element, namespace_uri, qualified, local_name,
+        dom_element_attribute_value_ns(element, namespace_uri, local_name)) : nullptr;
+}
+
+static void dom_attribute_nodes_did_set(DomElement* element, const char* key, const char* value,
+        const char* namespace_uri = nullptr) {
     for (DomAttr* attribute = element->ext ? element->ext->attribute_nodes.get() : nullptr;
          attribute; attribute = attribute->attribute_next) {
-        if (strcmp(attribute->qualified_name, key) == 0) dom_attribute_node_set_value(attribute, value);
+        if (strcmp(attribute->qualified_name, key) == 0 &&
+            (!namespace_uri || strcmp(attribute->namespace_uri, namespace_uri) == 0))
+            dom_attribute_node_set_value(attribute, value);
     }
 }
 
-static void dom_attribute_nodes_did_remove(DomElement* element, const char* key) {
+static void dom_attribute_nodes_did_remove(DomElement* element, const char* key,
+        const char* namespace_uri = nullptr) {
     for (DomAttr* attribute = element->ext ? element->ext->attribute_nodes.get() : nullptr; attribute;) {
         DomAttr* next = attribute->attribute_next;
-        if (strcmp(attribute->qualified_name, key) == 0) dom_attribute_node_detach(attribute);
+        if (strcmp(attribute->qualified_name, key) == 0 &&
+            (!namespace_uri || strcmp(attribute->namespace_uri, namespace_uri) == 0))
+            dom_attribute_node_detach(attribute);
         attribute = next;
     }
 }
@@ -1521,66 +1779,133 @@ static String* dom_attribute_value(DomDocument* doc, MarkBuilder* builder,
     return cache->values.oom() ? nullptr : string;
 }
 
-bool DomElement::set_attribute(const char* name, const char* value, bool preserve_case) {
-    DomElement* element = this;
-    if (!dom_attribute_name_present(name) || !value) {
-        log_debug("dom_element_set_attribute: invalid parameters");
+static bool dom_element_store_attribute(DomElement* element, const char* key,
+        const char* value, bool remove) {
+    if (element->is_synthetic()) return remove
+        ? dom_element_remove_synthetic_attribute(element, key)
+        : dom_element_set_synthetic_attribute(element, key, value ? value : "");
+    if (!element->doc) return false;
+    Element* backing = dom_element_to_element(element);
+    MarkEditor editor(element->doc, EDIT_MODE_INLINE);
+    Item value_item = ItemNull;
+    if (!remove && value) {
+        String* stored = dom_attribute_value(element->doc, editor.builder(), value);
+        if (!stored) return false;
+        value_item.item = s2it(stored);
+    }
+    Item result = remove ? editor.elmt_delete_attr({.element = backing}, key)
+        : editor.elmt_update_attr({.element = backing}, key, value_item);
+    // inline editing preserves the embedded identity; ITEM_ERROR is not a backing pointer.
+    if (get_type_id(result) != LMD_TYPE_ELEMENT || result.element != backing) {
+        log_error("dom_element_store_attribute: inline edit failed or changed backing identity");
         return false;
     }
+    return true;
+}
 
-    // HTML5: attribute names are case-insensitive, stored lowercased; an
-    // attribute already stored in its own case is updated in place
+static bool dom_element_sync_attribute_mirror(DomElement* element, const char* name) {
+    DomNamespacedAttribute* first = dom_first_recorded_attribute(element, name);
+    return dom_element_store_attribute(element, name, first ? first->value.get() : nullptr, !first);
+}
+
+bool DomElement::set_attribute(const char* name, const char* value, bool preserve_case) {
+    DomElement* element = this;
+    if (!dom_attribute_name_present(name) || !value) return false;
     char lower_name[128];
     const char* key = dom_element_attr_key(element, name, lower_name, sizeof(lower_name));
     if (preserve_case) key = name;
+    DomNamespacedAttribute* recorded = dom_first_recorded_attribute(element, key);
+    const char* uri = recorded ? recorded->namespace_uri.get() : "";
+    const char* previous = element->get_attribute(key);
+    bool same = previous && strcmp(previous, value) == 0;
+    if (!dom_element_store_attribute(element, key, value, false)) return false;
+    if ((recorded || (element->ext && element->ext->attributes_are_recorded)) &&
+        !dom_element_record_namespaced_attribute(element, uri, key, value)) return false;
+    dom_attribute_nodes_did_set(element, key, value, uri);
+    if (!*uri) dom_element_attribute_did_set(element, key, value, same);
+    else { element->advance_style_version(); element->set_needs_style_recompute(true); }
+    return true;
+}
 
-    const char* previous_value = strcmp(lower_name, "style") == 0 ? element->get_attribute(key) : nullptr;
-    bool same_value = previous_value && strcmp(previous_value, value) == 0;
+bool dom_element_set_namespace_identity(DomElement* element,
+        const char* namespace_uri, const char* local_name) {
+    if (!element || !local_name) return false;
+    // identity belongs to the element, independent of later ancestry or xmlns edits.
+    return dom_element_store_attribute(element, "__lambda_ns_uri", namespace_uri ? namespace_uri : "", false) &&
+        dom_element_store_attribute(element, "__lambda_ns_local_name", local_name, false);
+}
 
-    if (!element->is_synthetic() && element->doc) {
-        Element* backing = dom_element_to_element(element);
-        MarkEditor editor(element->doc, EDIT_MODE_INLINE);
+DomAttributeIterator dom_element_attribute_iterator(DomElement* element) {
+    DomAttributeIterator iterator = {};
+    iterator.element = element;
+    iterator.recorded = element && element->ext && element->ext->attributes_are_recorded;
+    if (iterator.recorded) iterator.next = dom_element_namespaced_attributes(element);
+    else if (element) iterator.names = element->attribute_names(&iterator.count);
+    return iterator;
+}
 
-        String* stored_value = dom_attribute_value(element->doc, editor.builder(), value);
-        if (!stored_value) return false;
-        Item value_item = {.item = s2it(stored_value)};
-
-        // Update attribute via MarkEditor
-        Item result = editor.elmt_update_attr(
-            {.element = backing},
-            key,
-            value_item
-        );
-
-        // NOTE: a failed update returns ITEM_ERROR, whose raw bits are non-null
-        // (0x19<<56), so a bare `if (result.element)` would treat the error as a
-        // valid pointer and corrupt the DOM backing identity.
-        // Guard on the actual runtime type, mirroring the delete path below.
-        if (get_type_id(result) == LMD_TYPE_ELEMENT && result.element) {
-            // Inline editing must preserve the embedded Element address; storing a
-            // returned pointer would reintroduce a second, divergent identity.
-            if (result.element != backing) {
-                log_error("dom_element_set_attribute: inline editor changed backing identity");
-                return false;
-            }
-
-            dom_attribute_nodes_did_set(element, key, value);
-            dom_element_attribute_did_set(element, lower_name, value, same_value);
+bool dom_element_next_attribute(DomAttributeIterator* iterator, DomAttributeView* attribute) {
+    if (!iterator || !iterator->element || !attribute) return false;
+    if (iterator->recorded) {
+        while (iterator->next) {
+            DomNamespacedAttribute* record = iterator->next;
+            iterator->next = record->next;
+            if (!record->active) continue;
+            *attribute = {record->namespace_uri, record->qualified_name, record->local_name, record->value};
             return true;
         }
-
-        log_error("dom_element_set_attribute: MarkEditor failed to update attribute");
         return false;
     }
-
-    if (element->is_synthetic() &&
-        dom_element_set_synthetic_attribute(element, key, value)) {
-        dom_attribute_nodes_did_set(element, key, value);
-        dom_element_attribute_did_set(element, lower_name, value, same_value);
+    while (iterator->names && iterator->index < iterator->count) {
+        const char* name = iterator->names[iterator->index++];
+        if (!name) continue;
+        const char* local = name;
+        const char* uri = dom_element_attribute_namespace_uri(iterator->element, name, &local);
+        *attribute = {uri ? uri : "", name, local, dom_element_stored_attribute(iterator->element, name)};
+        // partial metadata can override a legacy QName mirror before full recording.
+        for (DomNamespacedAttribute* record = dom_element_namespaced_attributes(iterator->element); record; record = record->next) {
+            if (record->active && !strcmp(record->qualified_name, name)) {
+                attribute->value = record->value;
+                break;
+            }
+        }
         return true;
     }
-    log_warn("dom_element_set_attribute: element has no mutable attribute storage");
     return false;
+}
+
+bool dom_element_set_attribute_ns(DomElement* element,
+        const char* namespace_uri, const char* qualified_name, const char* value, bool replace_name) {
+    if (!qualified_name || !*qualified_name || !dom_element_record_all_attributes(element)) return false;
+    const char* uri = namespace_uri ? namespace_uri : "";
+    const char* colon = *uri ? strchr(qualified_name, ':') : nullptr;
+    const char* local = colon ? colon + 1 : qualified_name;
+    const char* existing = dom_element_find_qualified_attribute(element, uri, local);
+    const char* name = existing && !replace_name ? existing : qualified_name;
+    const char* previous = dom_element_attribute_value_ns(element, uri, local);
+    bool same = previous && value && strcmp(previous, value) == 0;
+    if (!dom_element_record_namespaced_attribute(element, uri, name, value)) return false;
+    // a replaced Attr keeps its list position while the two QName mirrors are rebuilt independently.
+    if (existing && strcmp(existing, name) && !dom_element_sync_attribute_mirror(element, existing)) return false;
+    if (!dom_element_sync_attribute_mirror(element, name)) return false;
+    dom_attribute_nodes_did_set(element, name, value ? value : "", uri);
+    if (!*uri) dom_element_attribute_did_set(element, name, value ? value : "", same);
+    else { element->advance_style_version(); element->set_needs_style_recompute(true); }
+    return true;
+}
+
+bool dom_element_remove_attribute_ns(DomElement* element,
+        const char* namespace_uri, const char* local_name) {
+    if (!local_name || !dom_element_record_all_attributes(element)) return false;
+    const char* uri = namespace_uri ? namespace_uri : "";
+    const char* name = dom_element_find_qualified_attribute(element, uri, local_name);
+    if (!name) return false;
+    dom_element_remove_namespaced_attribute(element, uri, local_name);
+    dom_attribute_nodes_did_remove(element, name, uri);
+    if (!dom_element_sync_attribute_mirror(element, name)) return false;
+    if (!*uri) dom_element_attribute_did_remove(element, name);
+    else { element->advance_style_version(); element->set_needs_style_recompute(true); }
+    return true;
 }
 
 bool DomElement::set_attribute(NameId name_id, const char* value) {
@@ -1592,8 +1917,13 @@ bool DomElement::set_attribute(NameId name_id, const char* value) {
 
 const char* DomElement::local_name() const {
     if (!tag_name) return "";
+    const char* stored = dom_element_stored_attribute(const_cast<DomElement*>(this), "__lambda_ns_local_name");
+    if (stored) return stored;
     const char* prefix = strchr(tag_name, ':');
-    return prefix ? prefix + 1 : tag_name;
+    // a colon in an HTML local name is literal unless a namespace factory recorded a qualified name.
+    bool literal_html = doc && !doc->xml_document && doc->page_kind == DOM_PAGE_KIND_HTML &&
+        !dom_element_stored_attribute(const_cast<DomElement*>(this), "__lambda_ns_uri");
+    return prefix && !literal_html ? prefix + 1 : tag_name;
 }
 
 const char* DomElement::get_attribute(const char* name) {
@@ -1627,36 +1957,15 @@ bool DomElement::remove_attribute(const char* name) {
     char lower_name[128];
     const char* key = dom_element_attr_key(element, name, lower_name, sizeof(lower_name));
 
-    if (!element->is_synthetic() && element->doc) {
-        Element* backing = dom_element_to_element(element);
-        MarkEditor editor(element->doc, EDIT_MODE_INLINE);
-
-        // Delete attribute via MarkEditor
-        Item result = editor.elmt_delete_attr(
-            {.element = backing},
-            key
-        );
-
-        if (get_type_id(result) == LMD_TYPE_ELEMENT && result.element) {
-            if (result.element != backing) {
-                log_error("dom_element_remove_attribute: inline editor changed backing identity");
-                return false;
-            }
-
-            dom_attribute_nodes_did_remove(element, key);
-            dom_element_attribute_did_remove(element, lower_name);
-            return true;
-        }
+    if (element->ext && element->ext->attributes_are_recorded) {
+        DomNamespacedAttribute* recorded = dom_first_recorded_attribute(element, key);
+        if (recorded) return dom_element_remove_attribute_ns(element, recorded->namespace_uri, recorded->local_name);
     }
 
-    if (element->is_synthetic() &&
-        dom_element_remove_synthetic_attribute(element, key)) {
-        dom_attribute_nodes_did_remove(element, key);
-        dom_element_attribute_did_remove(element, lower_name);
-        return true;
-    }
-
-    return false;
+    if (!dom_element_store_attribute(element, key, nullptr, true)) return false;
+    dom_attribute_nodes_did_remove(element, key);
+    dom_element_attribute_did_remove(element, key);
+    return true;
 }
 
 bool DomElement::remove_attribute(NameId name_id) {
@@ -1694,6 +2003,19 @@ const char** DomElement::attribute_names(int* count) {
     }
 
     *count = 0;
+    if (element->ext && element->ext->attributes_are_recorded) {
+        DomElementExt* ext = element->ext;
+        int size = 0;
+        for (DomNamespacedAttribute* attr = ext->namespaced_attributes; attr; attr = attr->next)
+            if (attr->active) size++;
+        if (!size) return nullptr;
+        if (!lam::pool_grow_array(element->storage_pool(), &ext->attribute_names_cache,
+                &ext->attribute_names_capacity, size, 16)) return nullptr;
+        for (DomNamespacedAttribute* attr = ext->namespaced_attributes; attr; attr = attr->next)
+            if (attr->active) ext->attribute_names_cache[(*count)++] = attr->qualified_name;
+        return ext->attribute_names_cache;
+    }
+
     if (element->is_synthetic()) {
         DomElementExt* data = element->ext;
         int attr_count = data ? data->synthetic_attribute_count : 0;
@@ -2870,7 +3192,7 @@ bool DomElement::append_child(DomElement* child) {
         dom_append_to_sibling_chain(parent, child);
     }
     dom_move_generated_after_to_end(parent);
-
+    dom_document_process_metadata_insertion(parent->doc, child);
     log_debug("dom_element_append_child: appended element to parent (both Lambda tree and DOM chain updated)");
 
     return true;
@@ -2919,8 +3241,7 @@ bool DomElement::insert_before(DomElement* new_child, DomElement* reference_chil
         parent->last_child = lam::up(new_child);
     }
 
-    // Invalidate new child's computed values
-    // dom_element_invalidate_computed_values(new_child, true);
+    dom_document_process_metadata_insertion(parent->doc, new_child);
 
     return true;
 }
@@ -2964,6 +3285,7 @@ bool dom_node_replace_in_parent(DomElement* parent, DomNode* old_child, DomNode*
     old_child->prev_sibling = nullptr;
     old_child->next_sibling = nullptr;
     dom_node_schedule_detached(parent->doc, old_child);
+    dom_document_process_metadata_insertion(parent->doc, new_child);
     return true;
 }
 
@@ -4232,6 +4554,11 @@ DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElem
     // (we're building DOM wrappers from existing Lambda structure)
     if (parent) {
         parent->link_child(dom_elem);
+    }
+    if (doc->xml_document && !dom_element_stored_attribute(dom_elem, "__lambda_ns_uri")) {
+        // capture XML expanded names while the parser's declaration ancestry is intact.
+        dom_element_set_namespace_identity(dom_elem, dom_element_namespace_uri(dom_elem), dom_elem->local_name());
+        dom_element_record_all_attributes(dom_elem);
     }
 
     // Process all children - including text nodes, comments, and elements

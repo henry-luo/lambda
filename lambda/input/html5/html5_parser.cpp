@@ -1089,7 +1089,7 @@ Element* html5_create_element_for_token(Html5Parser* parser, Html5Token* token) 
     ElementBuilder eb = builder.element(tag_name);
 
     // Copy attributes from token to element: the element interns each key and
-    // keeps the value Item (ITEM_NULL for empty attribute values, e.g. content="")
+    // keeps the string value Item, including empty attribute values.
     for (uint32_t i = 0; i < token->attr_count; i++) {
         const char* attr_name = token->attrs[i].name->chars;
         // Apply SVG attribute name correction if in SVG namespace

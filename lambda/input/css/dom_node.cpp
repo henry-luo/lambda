@@ -188,7 +188,7 @@ bool DomNode::append_child(DomNode* child) {
     // Cast to DomElement to access first_child
     DomElement* element = static_cast<DomElement*>(this);
     dom_append_to_sibling_chain(element, child);
-
+    dom_document_process_metadata_insertion(doc, child);
     return true;
 }
 
@@ -297,7 +297,7 @@ bool DomNode::insert_before(DomNode* new_node, DomNode* ref_node) {
     }
 
     ref_node->prev_sibling = lam::up(new_node);
-
+    dom_document_process_metadata_insertion(element->doc, new_node);
     return true;
 }
 

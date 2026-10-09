@@ -189,6 +189,7 @@ Item dom_insert_before_bridge(void* parent, Item new_child, Item reference_child
 // Create a detached element with a real Mark backing. Editing and bridge
 // clients must not use a synthetic layout-only element for persisted DOM work.
 void* dom_create_backed_element_bridge(void* document, const char* tag);
+void* dom_create_backed_element_ns_bridge(void* document, const char* tag, const char* namespace_uri);
 // Document behind a node wrapper or the document proxy (ESO93). Returns DomDocument*.
 void* dom_document_from_item(Item item);
 

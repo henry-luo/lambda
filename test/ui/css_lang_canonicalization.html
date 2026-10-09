@@ -1,0 +1,61 @@
+<!doctype html>
+<meta charset="utf-8">
+<style>
+body{background:white}button{position:absolute;left:200px}#after{top:40px}#override{top:80px}
+.probe{display:block;width:20px;height:12px;background:red}
+#he,#cmn,#hak,#sign,#variant,#extension,#inherited{position:absolute;left:0}
+#he{top:20px}#cmn{top:35px}#hak{top:50px}#sign{top:65px}#variant{top:80px}#extension{top:95px}#inherited{top:130px}
+#he:lang(he),#cmn:lang(zh),#hak:lang(zh-hak),#sign:lang(sgn),#variant:lang(ja-alalc97),#extension:lang("en-a-aaa-b-bbb"){width:60px;background:green}
+#inherited:lang(he){width:60px;background:green}
+#inherited:lang(zh){width:80px;background:blue}
+</style>
+<button id="check">check</button><button id="after">after</button><button id="override">override</button>
+<div id="report"></div>
+<div class="probe" id="he" lang="iw-IL"></div><div class="probe" id="cmn" lang="cmn-Hans-CN"></div>
+<div class="probe" id="hak" lang="zh-hakka"></div><div class="probe" id="sign" lang="sgn-BE-FR"></div>
+<div class="probe" id="variant" lang="ja-Latn-heploc"></div><div class="probe" id="extension" lang="en-b-bbb-a-aaa"></div>
+<div id="parent" lang="iw"><div class="probe" id="inherited"></div></div>
+<script>
+(function(){
+    var report=document.getElementById('report'),parent=document.getElementById('parent'),child=document.getElementById('inherited');
+    function check(name,fn){try{report.setAttribute('data-'+name,String(fn()));}catch(error){report.setAttribute('data-'+name,error.name);}}
+    function box(element,width,color){return element.getBoundingClientRect().width===width&&getComputedStyle(element).backgroundColor===color;}
+    document.getElementById('check').addEventListener('click',function(){
+        var cases=[['iw-IL',':lang(he)'],['he-IL',':lang(iw)'],['in-ID',':lang(id)'],['ji',':lang(yi)'],
+            ['en-BU',':lang(en-MM)'],['en-MM',':lang(en-BU)'],['ja-Latn-heploc',':lang(ja-alalc97)'],
+            ['i-klingon',':lang(tlh)'],['tlh',':lang(i-klingon)'],['en-GB-oed',':lang(en-GB-oxendict)'],
+            ['cmn-Hans-CN',':lang(zh)'],['cmn-Hans-CN',':lang(zh-cmn)'],['zh-cmn-Hans-CN',':lang(cmn)'],
+            ['zh-hakka',':lang(hak)'],['hak-CN',':lang(zh)'],['sgn-BE-FR',':lang(sfb)'],['sfb',':lang(sgn)'],
+            ['arb-EG',':lang(ar)'],['qq-Latn-ZZ',':lang(qq)'],['i-default',':lang(i-default)'],
+            ['en-b-bbb-a-aaa',':lang("en-a-aaa-b-bbb")'],['iw-Latn-IL',':lang("iw-*-IL")'],
+            ['ar-ajp',':lang(apc)'],['apc',':lang(ar-ajp)']];
+        var probe=document.createElement('span');
+        for(var index=0;index<cases.length;index++){
+            probe.lang=cases[index][0];
+            check('alias-'+index,function(){return probe.matches(cases[index][1]);});
+        }
+        var invalid=['e','en-US-US','en-a','en-x','de-1901-1901','en-a-aaa-a-bbb','en-cmn'];
+        for(var bad=0;bad<invalid.length;bad++){
+            probe.lang=invalid[bad];
+            check('invalid-'+bad,function(){return !probe.matches(':lang("*")');});
+        }
+        var ids=['he','cmn','hak','sign','variant','extension'];
+        for(var style=0;style<ids.length;style++)check('style-'+ids[style],function(){return box(document.getElementById(ids[style]),60,'rgb(0, 128, 0)');});
+        check('inherited-before',function(){return child.matches(':lang(he)')&&document.querySelector('#inherited:lang(iw)')===child&&box(child,60,'rgb(0, 128, 0)');});
+        parent.lang='cmn-Hans';
+        check('mutation-query',function(){return child.matches(':lang(zh)')&&!child.matches(':lang(he)')&&document.querySelector('#inherited:lang(cmn)')===child;});
+        check('mutation-cssom',function(){return getComputedStyle(child).backgroundColor==='rgb(0, 0, 255)';});
+    });
+    document.getElementById('after').addEventListener('click',function(){
+        check('inherited-after',function(){return box(child,80,'rgb(0, 0, 255)');});
+        child.lang='';
+        check('empty-override',function(){return child.matches(':lang("")')&&!child.matches(':lang(zh)');});
+        check('empty-cssom',function(){return getComputedStyle(child).backgroundColor==='rgb(255, 0, 0)';});
+    });
+    document.getElementById('override').addEventListener('click',function(){
+        check('empty-layout',function(){return box(child,20,'rgb(255, 0, 0)');});
+        child.removeAttribute('lang');
+        check('inherit-restored',function(){return child.matches(':lang(zh)')&&getComputedStyle(child).backgroundColor==='rgb(0, 0, 255)';});
+    });
+})();
+</script>

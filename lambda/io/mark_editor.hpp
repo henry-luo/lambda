@@ -58,6 +58,7 @@ private:
     EditMode mode_;             // Current edit mode
     bool ui_mode_;              // true = auto-sync DOM linked list after child mutations
     Arena* ui_node_arena_;      // arena holding the UI tree's nodes when it is not arena_
+    DomDocument* ui_document_;  // borrowed owner for adopted-node registry validation
     EditVersion* current_version_; // Current version (immutable mode)
     EditVersion* version_head_;    // Head of version list
     int next_version_num_;         // Next version number

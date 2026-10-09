@@ -460,17 +460,9 @@ static void html5_commit_attribute(Html5Parser* parser) {
     String* attr_name = string_from_strview_arena(
         strview_init(parser->current_attr_name, parser->current_attr_name_len), parser->token_arena);
 
-    // Create Item for attribute value (ITEM_NULL for empty, tagged string otherwise)
-    Item attr_value;
-    if (parser->temp_buffer_len > 0) {
-        parser->temp_buffer[parser->temp_buffer_len] = '\0';
-        String* val_str = builder.createString(parser->temp_buffer, parser->temp_buffer_len);
-        attr_value = Item{.item = s2it(val_str)};
-    } else {
-        // Empty attribute value (e.g., content="" or boolean <input disabled>)
-        // Use ITEM_NULL to match Lambda's semantics where "" literal compiles to ITEM_NULL
-        attr_value = Item{.item = ITEM_NULL};
-    }
+    // S2.2.3 normalizes empty element content, not attributes; HTML empty values stay strings.
+    Item attr_value = builder.createStringItem(
+        parser->temp_buffer_len ? parser->temp_buffer : "", parser->temp_buffer_len);
 
     // Add attribute to token
     html5_token_add_attribute(parser->current_token, attr_name, attr_value);

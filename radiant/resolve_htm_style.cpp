@@ -1002,7 +1002,7 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         }
         CssEnum direction = layout_specified_keyword(
             elmt->as_element(), CSS_PROPERTY_DIRECTION, CSS_VALUE__UNDEF);
-        const char* dir_attr = elmt->get_attribute("dir");
+        const char* dir_attr = dom_element_attribute_value_ns(elmt->as_element(), "", "dir");
         if (dir_attr && str_ieq_cstr(dir_attr, "rtl")) {
             // HTML §3.2.6: dir=rtl maps to direction before the UA list
             // padding-inline-start rule is applied.
@@ -1801,7 +1801,7 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
     DomElement* direction_element = elmt->as_element();
     bool recognized_dir = dir_attr && (str_ieq_cstr(dir_attr, "rtl") ||
         str_ieq_cstr(dir_attr, "ltr") || str_ieq_cstr(dir_attr, "auto"));
-    bool bdi = direction_element->tag_name && str_ieq_cstr(direction_element->tag_name, "bdi");
+    bool bdi = dom_element_html_tag(direction_element) == MARKUP_NAME_BDI;
     if (dom_element_has_directionality_hint(direction_element)) {
         block->ensure_block(lycon);
         block->blk->direction = dom_css_element_directionality(elmt) > 0 ? CSS_VALUE_RTL : CSS_VALUE_LTR;
@@ -1809,7 +1809,8 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
             // isolation follows recognized dir states and bdi's default auto state.
             block->blk->unicode_bidi = CSS_VALUE_ISOLATE;
             if (dir_attr && str_ieq_cstr(dir_attr, "auto") &&
-                (elmt->tag() == MARKUP_NAME_PRE || elmt->tag() == MARKUP_NAME_TEXTAREA)) {
+                (dom_element_html_tag(direction_element) == MARKUP_NAME_PRE ||
+                 dom_element_html_tag(direction_element) == MARKUP_NAME_TEXTAREA)) {
                 // html rendering maps pre/textarea dir=auto to plaintext bidi.
                 block->blk->unicode_bidi = CSS_VALUE_PLAINTEXT;
             }

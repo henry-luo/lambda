@@ -1,4 +1,5 @@
 #include "selector_matcher.hpp"
+#include "css_language_data.h"
 #include "../../core/well_known_markup_names.h"
 #include "../../../lib/hashmap.h"
 #include "../../../lib/arraylist.h"
@@ -763,16 +764,21 @@ static bool selector_matcher_matches_namespaced_attribute(
     const char* wanted_uri = selector->namespace_url;
     if (selector->namespace_prefix && selector->namespace_prefix[0] &&
         strcmp(selector->namespace_prefix, "*") != 0 && !wanted_uri) return false;
+    bool html = strcmp(dom_element_namespace_uri(element), "http://www.w3.org/1999/xhtml") == 0 &&
+        (!element->doc || !element->doc->xml_document);
     for (DomNamespacedAttribute* attr = dom_element_namespaced_attributes(element);
          attr; attr = attr->next) {
         if (!attr->active ||
             (wanted_uri && strcmp(attr->namespace_uri, wanted_uri) != 0) ||
-            strcmp(attr->local_name, selector->attribute.name) != 0) continue;
+            (html ? str_icmp_cstr(attr->local_name, selector->attribute.name) != 0
+                  : strcmp(attr->local_name, selector->attribute.name) != 0)) continue;
         if (selector_matcher_matches_attribute_value(matcher, attr->value, true,
                 selector->attribute.value, selector->type,
                 selector->attribute.case_insensitive,
                 selector->attribute.case_sensitive)) return true;
     }
+    // recorded expanded names are authoritative; a QName mirror cannot represent every namespace value.
+    if (element->ext && element->ext->attributes_are_recorded) return false;
     if (wanted_uri && !*wanted_uri &&
         !dom_element_namespaced_attributes(element)) {
         const char* name = selector->attribute.name;
@@ -785,8 +791,6 @@ static bool selector_matcher_matches_namespaced_attribute(
     int count = 0;
     const char** names = element->attribute_names(&count);
     if (!names) return false;
-    bool html = strcmp(dom_element_namespace_uri(element),
-        "http://www.w3.org/1999/xhtml") == 0;
     for (int i = 0; i < count; i++) {
         const char* local = nullptr;
         const char* uri = dom_element_attribute_namespace_uri(element, names[i], &local);
@@ -1153,42 +1157,192 @@ static StrView selector_language_subtag(const char** cursor) {
     return {start, (size_t)(end - start)};
 }
 
-static bool selector_language_subtags_valid(const char* text, bool wildcards) {
-    if (!text || !*text) return false;
-    bool first = true;
-    while (*text) {
-        StrView subtag = selector_language_subtag(&text);
-        if (!subtag.length || subtag.length > 8) return false;
-        if (!(wildcards && subtag.length == 1 && subtag.str[0] == '*')) {
-            for (size_t i = 0; i < subtag.length; i++) {
-                char c = subtag.str[i];
-                bool alpha = (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z');
-                if (!alpha && (first || c < '0' || c > '9')) return false;
-            }
-        }
-        if (!*text && subtag.str[subtag.length] == '-') return false;
-        first = false;
+static const CssLanguageAlias* selector_language_alias(unsigned char kind, StrView value) {
+    size_t first = 0, last = sizeof(css_language_aliases) / sizeof(css_language_aliases[0]);
+    while (first < last) {
+        size_t middle = first + (last - first) / 2;
+        const CssLanguageAlias* entry = &css_language_aliases[middle];
+        int order = kind == entry->kind ?
+            str_icmp(value.str, value.length, entry->name, strlen(entry->name)) :
+            (kind < entry->kind ? -1 : 1);
+        if (!order) return entry;
+        if (order < 0) last = middle;
+        else first = middle + 1;
+    }
+    return nullptr;
+}
+
+static const CssLanguageExtlang* selector_language_extlang(StrView value) {
+    size_t first = 0, last = sizeof(css_language_extlangs) / sizeof(css_language_extlangs[0]);
+    while (first < last) {
+        size_t middle = first + (last - first) / 2;
+        const CssLanguageExtlang* entry = &css_language_extlangs[middle];
+        int order = str_icmp(value.str, value.length, entry->name, strlen(entry->name));
+        if (!order) return entry;
+        if (order < 0) last = middle;
+        else first = middle + 1;
+    }
+    return nullptr;
+}
+
+static StrView selector_language_preferred(unsigned char kind, StrView value) {
+    const CssLanguageAlias* alias;
+    // registry updates can introduce chains of deprecated subtags.
+    while ((alias = selector_language_alias(kind, value)) && alias->preferred)
+        value = {alias->preferred, strlen(alias->preferred)};
+    return value;
+}
+
+static bool selector_language_chars(StrView value, bool digits_only = false) {
+    for (size_t i = 0; i < value.length; i++) {
+        char c = value.str[i];
+        if (digits_only ? (c < '0' || c > '9') :
+            !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z'))) return false;
     }
     return true;
 }
 
-static bool selector_language_range_matches(const char* range, const char* language) {
-    if (!selector_language_subtags_valid(range, true) ||
-        !selector_language_subtags_valid(language, false)) return false;
+// subtag views borrow input/registry strings; only overflow storage is owned by this scope.
+struct SelectorLanguageTag {
+    struct Part { StrView value; unsigned char kind; } local[16];
+    Part* parts = local;
+    size_t count = 0;
+    ~SelectorLanguageTag() { if (parts != local) mem_free(parts); }
+    SelectorLanguageTag() = default;
+    SelectorLanguageTag(const SelectorLanguageTag&) = delete;
+    SelectorLanguageTag& operator=(const SelectorLanguageTag&) = delete;
+
+    bool is(size_t index, const char* text) const {
+        return index < count && str_ieq(parts[index].value.str, parts[index].value.length,
+                                       text, strlen(text));
+    }
+    bool alpha(size_t index, size_t length) const {
+        return index < count && parts[index].value.length == length &&
+            selector_language_chars(parts[index].value);
+    }
+    bool variant(size_t index) const {
+        if (index >= count) return false;
+        StrView value = parts[index].value;
+        return value.length >= 5 || (value.length == 4 && value.str[0] >= '0' && value.str[0] <= '9');
+    }
+
+    bool parse(const char* text, bool range) {
+        if (!text || !*text) return false;
+        const CssLanguageAlias* tag_alias = selector_language_alias(5, {text, strlen(text)});
+        if (tag_alias && tag_alias->preferred) text = tag_alias->preferred;
+        size_t capacity = 2;
+        for (const char* c = text; *c; c++) if (*c == '-') capacity++;
+        if (capacity > sizeof(local) / sizeof(local[0])) {
+            if (capacity > SIZE_MAX / sizeof(Part)) return false;
+            parts = (Part*)mem_alloc(capacity * sizeof(Part), MEM_CAT_INPUT_CSS);
+            if (!parts) { parts = local; return false; }
+        }
+        while (*text) {
+            StrView value = selector_language_subtag(&text);
+            if (!value.length || value.length > 8 ||
+                (!*text && value.str[value.length] == '-')) return false;
+            bool wildcard = range && value.length == 1 && value.str[0] == '*';
+            if (!wildcard) {
+                for (size_t i = 0; i < value.length; i++) {
+                    char c = value.str[i];
+                    if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+                          (c >= '0' && c <= '9'))) return false;
+                }
+            }
+            // interior wildcards are ignored by RFC 4647 extended filtering.
+            if (!wildcard || !count) parts[count++] = {value, 0};
+        }
+        if (tag_alias && !tag_alias->preferred) return true; // grandfathered without replacement
+        if (is(0, "x")) {
+            if (count < 2) return false;
+            return true; // private use is opaque, including alias-shaped subtags
+        }
+        bool initial_wildcard = is(0, "*");
+        if (!initial_wildcard && (parts[0].value.length < 2 ||
+            !selector_language_chars(parts[0].value))) return false;
+        parts[0].kind = 1;
+        size_t index = 1;
+        if (initial_wildcard || parts[0].value.length <= 3) {
+            size_t extlang_end = index + 3;
+            while (index < extlang_end && alpha(index, 3)) parts[index++].kind = 6;
+        }
+        if (alpha(index, 4)) parts[index++].kind = 2;
+        if (alpha(index, 2) || (index < count && parts[index].value.length == 3 &&
+            selector_language_chars(parts[index].value, true))) parts[index++].kind = 3;
+        size_t variants_start = index;
+        while (variant(index)) {
+            for (size_t prior = variants_start; prior < index; prior++)
+                if (str_ieq(parts[prior].value.str, parts[prior].value.length,
+                            parts[index].value.str, parts[index].value.length)) return false;
+            parts[index++].kind = 4;
+        }
+        size_t extensions_start = index;
+        while (index < count && parts[index].value.length == 1 && !is(index, "x")) {
+            size_t start = index++;
+            parts[start].kind = 7;
+            for (size_t prior = extensions_start; prior < start; prior++)
+                if (parts[prior].kind == 7 && str_ieq(parts[prior].value.str, 1,
+                    parts[start].value.str, 1)) return false;
+            while (index < count && parts[index].value.length >= 2) parts[index++].kind = 8;
+            if (index == start + 1) return false;
+            // insert each complete extension sequence in singleton order, preserving its payload.
+            size_t insert = start;
+            for (size_t prior = extensions_start; prior < start; prior++) {
+                if (parts[prior].kind == 7 && str_icmp(parts[start].value.str, 1,
+                    parts[prior].value.str, 1) < 0) { insert = prior; break; }
+            }
+            for (size_t part = start; part < index; part++, insert++) {
+                Part saved = parts[part];
+                memmove(parts + insert + 1, parts + insert, (part - insert) * sizeof(Part));
+                parts[insert] = saved;
+            }
+        }
+        if (is(index, "x")) {
+            if (++index == count) return false;
+            index = count;
+        }
+        if (index != count) return false;
+        for (size_t part = 0; part < count; part++) {
+            unsigned char kind = parts[part].kind;
+            if (kind < 1 || kind > 4) continue;
+            parts[part].value = selector_language_preferred(kind, parts[part].value);
+        }
+        if (!initial_wildcard && count > 1 && parts[1].kind == 6) {
+            const CssLanguageExtlang* extlang = selector_language_extlang(parts[1].value);
+            if (extlang) {
+                if (!is(0, extlang->prefix)) return false;
+                parts[1].kind = 1;
+                memmove(parts, parts + 1, --count * sizeof(Part));
+                // a promoted extlang can itself be a deprecated primary-language alias.
+                parts[0].value = selector_language_preferred(1, parts[0].value);
+            }
+        }
+        // Selectors 4 requires canonical form followed by extlang form on both operands.
+        if (!initial_wildcard) {
+            const CssLanguageExtlang* extlang = selector_language_extlang(parts[0].value);
+            if (extlang) {
+                memmove(parts + 1, parts, count++ * sizeof(Part));
+                parts[0] = {{extlang->prefix, strlen(extlang->prefix)}, 1};
+            }
+        }
+        return true;
+    }
+};
+
+static bool selector_language_range_matches(const char* range, const SelectorLanguageTag& language) {
+    SelectorLanguageTag wanted_tag;
+    if (!wanted_tag.parse(range, true)) return false;
     // extended filtering under RFC 4647 skips intermediate subtags but never crosses a singleton.
-    const char* range_cursor = range;
-    const char* language_cursor = language;
-    StrView wanted = selector_language_subtag(&range_cursor);
-    StrView actual = selector_language_subtag(&language_cursor);
-    if (!(wanted.length == 1 && wanted.str[0] == '*') &&
+    StrView wanted = wanted_tag.parts[0].value;
+    StrView actual = language.parts[0].value;
+    if (!wanted_tag.is(0, "*") &&
         !str_ieq(wanted.str, wanted.length, actual.str, actual.length)) return false;
-    while (*range_cursor) {
-        wanted = selector_language_subtag(&range_cursor);
-        if (!wanted.length) return false;
-        if (wanted.length == 1 && wanted.str[0] == '*') continue;
+    size_t language_index = 1;
+    for (size_t range_index = 1; range_index < wanted_tag.count; range_index++) {
+        wanted = wanted_tag.parts[range_index].value;
         for (;;) {
-            if (!*language_cursor) return false;
-            actual = selector_language_subtag(&language_cursor);
+            if (language_index == language.count) return false;
+            actual = language.parts[language_index++].value;
             if (str_ieq(wanted.str, wanted.length, actual.str, actual.length)) break;
             if (actual.length == 1) return false;
         }
@@ -1199,27 +1353,13 @@ static bool selector_language_range_matches(const char* range, const char* langu
 static bool selector_matcher_matches_language_ranges(const CssSimpleSelector* selector,
                                                      DomElement* element) {
     if (!selector || !element) return false;
-    const char* language = nullptr;
-    for (DomElement* current = element; current; current = current->parent_element()) {
-        language = dom_element_get_namespaced_attribute(current,
-            "http://www.w3.org/XML/1998/namespace", "lang");
-        const char* namespace_uri = dom_element_namespace_uri(current);
-        bool html = strcmp(namespace_uri, "http://www.w3.org/1999/xhtml") == 0;
-        if (!language && !html) {
-            const char* local_name = nullptr;
-            const char* attribute_namespace = dom_element_attribute_namespace_uri(
-                current, "xml:lang", &local_name);
-            if (attribute_namespace && strcmp(attribute_namespace, "http://www.w3.org/XML/1998/namespace") == 0)
-                language = current->get_attribute("xml:lang");
-        }
-        if (!language && (html || strcmp(namespace_uri, "http://www.w3.org/2000/svg") == 0))
-            language = current->get_attribute("lang");
-        if (language) break;
-    }
+    const char* language = dom_element_language(element);
+    SelectorLanguageTag language_tag;
+    if (language && *language && !language_tag.parse(language, false)) return false;
     for (size_t i = 0; i < selector->language_range_count; i++) {
         const char* range = selector->language_ranges[i];
         // an empty range matches explicitly unknown and untagged content languages.
-        if ((!language || !*language) ? !*range : selector_language_range_matches(range, language))
+        if ((!language || !*language) ? !*range : selector_language_range_matches(range, language_tag))
             return true;
     }
     return false;

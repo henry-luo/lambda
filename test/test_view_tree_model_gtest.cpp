@@ -7778,6 +7778,22 @@ TEST_F(SecondaryViewTest, NearestSpecifiedFoReferencesSelectComputedAncestorValu
     EXPECT_DOUBLE_EQ(view_css_resolve(tree, child)->padding[0]->data.length.value, 4);
 }
 
+TEST_F(SecondaryViewTest, XmlNamespaceIdentityStorageRemainsInternalToFoTranslation) {
+    doc.xml_document = true;
+    DomElement* fo = formatting_root("<f:root xmlns:f='http://www.w3.org/1999/XSL/Format'>"
+        "<f:layout-master-set><f:simple-page-master master-name='sheet' page-width='150pt' page-height='120pt'>"
+        "<f:region-body/></f:simple-page-master></f:layout-master-set>"
+        "<f:page-sequence master-reference='sheet' force-page-count='no-force'>"
+        "<f:flow flow-name='xsl-region-body'><f:block>Hello</f:block></f:flow></f:page-sequence></f:root>");
+    ASSERT_NE(fo, nullptr);
+    ASSERT_STREQ(dom_element_namespace_uri(fo), RADIANT_FO_NAMESPACE);
+    ASSERT_NE(fo->get_attribute("__lambda_ns_uri"), nullptr);
+    RadiantFoOptions options = radiant_fo_options_default();
+    RadiantFoTranslation* translated = radiant_fo_translate(&doc, fo, &options);
+    ASSERT_NE(translated, nullptr);
+    EXPECT_EQ(translated->diagnostic.status, TYPESET_OK) << translated->diagnostic.reason;
+}
+
 TEST_F(SecondaryViewTest, FoInheritedNominalMetricKeywordsUseTheSelectedChildFont) {
     DomElement* fo = formatting_root("<f:root xmlns:f='http://www.w3.org/1999/XSL/Format' font-family='Arial' font-size='7.5pt'>"
         "<f:layout-master-set><f:simple-page-master master-name='sheet' page-width='150pt' page-height='120pt'><f:region-body/>"
