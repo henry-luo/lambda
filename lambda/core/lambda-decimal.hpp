@@ -61,6 +61,9 @@ void lambda_double_to_shortest(double d, char* out, int out_size);
 // Convert a finite double to its shortest round-trip decimal spelling.
 void lambda_finite_double_to_shortest(double d, char* out, int out_size);
 
+// fixed fractional digits; ties choose the larger magnitude when half_up is true.
+bool lambda_finite_double_to_fixed(double value, int digits, bool half_up, char* out, int out_size);
+
 // Convert numeric Items to the canonical decimal spelling used for hash keys.
 bool lambda_numeric_to_canonical_string(Item item, char* out, int out_size);
 

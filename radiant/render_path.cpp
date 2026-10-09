@@ -213,9 +213,12 @@ Corner render_path_uniform_corner(float top_left, float top_right,
     return radius;
 }
 
+struct RenderPathSvgWriter {StrBuf* out;int precision;};
 static bool render_path_svg_visit(void* context, RdtPathCommand command,
                                   const float* args, int arg_count) {
-    StrBuf* out = (StrBuf*)context;
+    auto* writer = (RenderPathSvgWriter*)context;
+    StrBuf* out = writer->out;
+    int precision = writer->precision;
     if (!out) return false;
     if (command == RDT_PATH_CLOSE) {
         strbuf_append_str(out, " Z");
@@ -227,22 +230,22 @@ static bool render_path_svg_visit(void* context, RdtPathCommand command,
             return true;
         case RDT_PATH_MOVE:
             if (arg_count < 2) return false;
-            strbuf_append_format(out, "M%.2f,%.2f", args[0], args[1]);
+            strbuf_append_format(out, "M%.*f,%.*f", precision, args[0], precision, args[1]);
             return true;
         case RDT_PATH_LINE:
             if (arg_count < 2) return false;
-            strbuf_append_format(out, " L%.2f,%.2f", args[0], args[1]);
+            strbuf_append_format(out, " L%.*f,%.*f", precision, args[0], precision, args[1]);
             return true;
         case RDT_PATH_CUBIC:
             if (arg_count < 6) return false;
-            strbuf_append_format(out, " C%.2f,%.2f %.2f,%.2f %.2f,%.2f",
-                args[0], args[1], args[2], args[3], args[4], args[5]);
+            strbuf_append_format(out, " C%.*f,%.*f %.*f,%.*f %.*f,%.*f",
+                precision, args[0], precision, args[1], precision, args[2], precision, args[3], precision, args[4], precision, args[5]);
             return true;
         case RDT_PATH_RECT:
             if (arg_count < 4) return false;
-            strbuf_append_format(out, "M%.2f,%.2f L%.2f,%.2f L%.2f,%.2f L%.2f,%.2f Z",
-                args[0], args[1], args[0] + args[2], args[1],
-                args[0] + args[2], args[1] + args[3], args[0], args[1] + args[3]);
+            strbuf_append_format(out, "M%.*f,%.*f L%.*f,%.*f L%.*f,%.*f L%.*f,%.*f Z",
+                precision, args[0], precision, args[1], precision, args[0] + args[2], precision, args[1],
+                precision, args[0] + args[2], precision, args[1] + args[3], precision, args[0], precision, args[1] + args[3]);
             return true;
         case RDT_PATH_QUAD:
         case RDT_PATH_CIRCLE:
@@ -251,8 +254,9 @@ static bool render_path_svg_visit(void* context, RdtPathCommand command,
     return false;
 }
 
-bool render_path_append_svg(StrBuf* out, const RdtPath* path) {
-    return out && path && rdt_path_visit(path, render_path_svg_visit, out);
+bool render_path_append_svg(StrBuf* out, const RdtPath* path, int precision) {
+    RenderPathSvgWriter writer={out,precision};
+    return out && path && precision>=0 && precision<=9 && rdt_path_visit(path, render_path_svg_visit, &writer);
 }
 
 void render_path_append_svg_rounded_rect(StrBuf* out, Rect rect,

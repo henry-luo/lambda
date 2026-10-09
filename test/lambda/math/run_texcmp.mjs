@@ -8,6 +8,8 @@ import { fileURLToPath } from 'node:url';
 import yaml from 'js-yaml';
 import { render_lambda_math } from './lambda_math_renderer.mjs';
 import { read_ink, compare_ink, write_ink, write_overlay } from './texcmp_pixels.mjs';
+import { reference_environment, reference_preamble, reference_tex, stage_reference_assets } from './texcmp_reference.mjs';
+import { prepare_reference } from './texcmp_dialect.mjs';
 
 const ROOT = fileURLToPath(new URL('../../../', import.meta.url));
 const TEMP = path.join(ROOT, 'temp');
@@ -39,7 +41,7 @@ function arguments_for(argv) {
   --pixel-tolerance N  Grayscale delta for mismatch counts (default: 16)
   --max-ink-error N    Optional [0,1] error threshold; differences then fail
   --timeout MS         Timeout for each external command (default: 60000)
-  --preamble PATH      Additional LaTeX preamble, after amsmath/amssymb/xcolor
+  --preamble PATH      Additional LaTeX preamble, after texcmp_preamble.tex
 
 Without --max-ink-error, visual differences are reported for review.
 Rendering errors exit 1; upstream nolatex cases are explicit skips.`);
@@ -91,8 +93,7 @@ function read_cases(opts) {
 function command(executable, args, cwd, opts, log) {
   const result = spawnSync(executable, args, {
     cwd, encoding: 'utf8', timeout: opts.timeout, maxBuffer: 64 * 1024 * 1024,
-    env: { ...process.env, TMPDIR: opts.scratch, TMP: opts.scratch, TEMP: opts.scratch,
-      TEXMFOUTPUT: opts.scratch },
+    env: opts.env,
   });
   if (log) fs.writeFileSync(log, `$ ${[executable, ...args].join(' ')}\n${result.stdout || ''}${result.stderr || ''}`);
   if (result.error) throw new Error(`${path.basename(executable)}: ${result.error.message}`);
@@ -113,30 +114,8 @@ function macro_definitions(macros = {}) {
   }).join('\n');
 }
 
-function reference_tex(item, definitions, preamble) {
-  // Display environments provide their own delimiters; ordinary display cases need \[...\].
-  const ownDisplay = /^\s*\\begin\{(?:equation|align|alignat|flalign|gather|multline)\*?\}/.test(item.tex);
-  const content = ownDisplay ? item.tex : item.display ? `\\[${item.tex}\\]` : `$${item.tex}$`;
-  const box = item.display || ownDisplay
-    ? `\\vbox{\\hsize=1200pt\\linewidth=\\hsize\\textwidth=\\hsize\n${content}\n}`
-    : `\\hbox{${content}}`;
-  return `\\documentclass[10pt]{article}
-\\usepackage{amsmath,amssymb,xcolor}
-${preamble}
-\\pagestyle{empty}
-\\begin{document}
-${definitions}
-\\setbox0=${box}
-\\pdfpagewidth=\\wd0 \\advance\\pdfpagewidth by 4pt
-\\pdfpageheight=\\ht0 \\advance\\pdfpageheight by \\dp0 \\advance\\pdfpageheight by 4pt
-\\pdfhorigin=0pt \\pdfvorigin=0pt
-\\shipout\\vbox{\\kern2pt\\hbox{\\kern2pt\\box0\\kern2pt}\\kern2pt}
-\\end{document}
-`;
-}
-
 function render_case(item, opts) {
-  const dir = path.join(opts.run, item.name);
+  const dir = path.join(opts.run, 'cases', item.name);
   fs.mkdirSync(dir);
   fs.writeFileSync(path.join(dir, 'case.json'), JSON.stringify(item, null, 2) + '\n');
   const result = { name: item.name, formula: item.tex, display: !!item.display,
@@ -164,7 +143,9 @@ function render_case(item, opts) {
       path.join(dir, 'lambda.raw.png'), '-vw', String(size[0]), '-vh', String(size[1])],
     ROOT, opts, path.join(dir, 'lambda-render.log'));
     stage = 'pdflatex';
-    fs.writeFileSync(path.join(dir, 'reference.tex'), reference_tex(item, definitions, opts.preambleText));
+    result.reference = prepare_reference(item.tex, definitions);
+    fs.writeFileSync(path.join(dir, 'reference.formula.tex'), result.reference.tex);
+    fs.writeFileSync(path.join(dir, 'reference.tex'), reference_tex(item, definitions, opts.preambleText, result.reference));
     command('pdflatex', ['-no-shell-escape', '-halt-on-error', '-interaction=nonstopmode', 'reference.tex'],
       dir, opts, path.join(dir, 'pdflatex.log'));
     const info = command('pdfinfo', ['reference.pdf'], dir, opts, path.join(dir, 'pdfinfo.log'));
@@ -182,7 +163,7 @@ function render_case(item, opts) {
     Object.assign(result, comparison.metrics, {
       status: opts.maxInkError != null && comparison.metrics.ink_error > opts.maxInkError ? 'mismatch' : 'compared',
       artifacts: Object.fromEntries(['lambda.png', 'pdflatex.png', 'diff.png', 'reference.pdf', 'lambda.svg']
-        .map((name) => [name, `${item.name}/${name}`])),
+        .map((name) => [name, `cases/${item.name}/${name}`])),
     });
   } catch (error) { Object.assign(result, { status: 'error', stage, error: error.message }); }
   return result;
@@ -200,6 +181,8 @@ function html_report(report) {
 Equal em scales; white margins cropped; translation only. Black: overlap. Red: Lambda only. Green: pdfLaTeX only.
 Ink error measures grayscale difference divided by union ink mass; it is not a semantic correctness score.</p>
 ${report.results.map((r) => `<article><h2>${escape_html(r.name)}: ${r.status}</h2><pre>${escape_html(r.formula)}</pre>
+${r.reference?.features.length ? `<p>Supplementary reference features: ${escape_html(r.reference.features.join(', '))}.</p>` : ''}
+${r.reference?.changes.length ? `<details><summary>pdfLaTeX syntax translations (${r.reference.changes.length})</summary><pre>${escape_html(JSON.stringify(r.reference.changes, null, 2))}</pre></details>` : ''}
 ${r.artifacts ? `<p>Ink error ${(r.ink_error * 100).toFixed(2)}%; mismatched ink pixels ${(r.mismatch_fraction * 100).toFixed(2)}%; offset (${r.offset.x}, ${r.offset.y})${r.alignment_at_boundary ? '; alignment reached search boundary' : ''}.</p>
 <div class="images">${['lambda.png', 'pdflatex.png', 'diff.png'].map((name) => `<figure><figcaption>${escape_html(name)}</figcaption><img src="${escape_html(r.artifacts[name])}" alt="${escape_html(r.name + ' ' + name)}"></figure>`).join('')}</div>`
     : `<pre>${escape_html(r.error || r.reason)}</pre>`}</article>`).join('\n')}
@@ -223,8 +206,10 @@ function main() {
   if (relative.startsWith('..') || path.isAbsolute(relative)) throw new Error('--out must be beneath ./temp');
   fs.mkdirSync(opts.out, { recursive: true });
   opts.run = fs.mkdtempSync(path.join(opts.out, 'run-'));
+  stage_reference_assets(opts.run);
   opts.scratch = path.join(opts.run, '.work');
   fs.mkdirSync(opts.scratch);
+  opts.env = reference_environment(opts.scratch);
   opts.preambleText = opts.preamble ? fs.readFileSync(opts.preamble, 'utf8') : '';
   const tools = Object.fromEntries(['pdflatex', 'pdftoppm', 'pdfinfo'].map((name) =>
     [name, command(name, [name === 'pdflatex' ? '--version' : '-v'], ROOT, opts).split('\n')[0]]));
@@ -235,7 +220,8 @@ function main() {
     comparison: { scope: 'formula only', font_pixels: opts.pixels, reference_font_pt: 10,
       reference_dpi: opts.pixels * 72.27 / 10, alignment_radius: opts.radius,
       pixel_tolerance: opts.tolerance, max_ink_error: opts.maxInkError,
-      preamble: opts.preambleText, grayscale: true },
+      reference_preamble, preamble: opts.preambleText, texmf_home: opts.env.TEXMFHOME,
+      grayscale: true },
     results: [],
   };
   for (const item of corpus.cases) {

@@ -1101,6 +1101,8 @@ typedef uint8_t (*ConstraintFn)(uint64_t value);
 // D2.6.9v3: guest member semantics are explicit beside the shared nominal identity.
 struct TypeNominalExtension {
     Item (*member)(Item receiver, const char* key, size_t length, bool* found);
+    // an instance retains guest metadata through a precisely traced, nonmoving owner.
+    Item (*owner)(const void* extension_data) = nullptr;
 };
 typedef struct TypeNominal {
     StrView type_name;            // "Point", "Circle"

@@ -1,4 +1,5 @@
 #include "scene3d.hpp"
+#include "geomap.hpp"
 #include "layout.hpp"
 #include "view.hpp"
 #include "render.hpp"
@@ -1097,6 +1098,7 @@ void view_tree_release_detached_embedded_documents(ViewTree*, DomNode* root) {
 void view_tree_prepare_detached_subtree(DomNode* root) {
     // release private contexts while their document and native subtree identities are live.
     scene3d_release_subtree(root);
+    geomap_release_subtree(root);
     if (root && root->is_element()) {
         layout_unwrap_all_anonymous_table_fixups_for_dom_mutation(root->as_element());
     }
@@ -1662,6 +1664,29 @@ bool view_get_foreign_object_matrix(View* view, RdtMatrix* out_matrix, bool incl
     RdtMatrix position = rdt_matrix_translate(x, y);
     *out_matrix = rdt_matrix_multiply(&frame, &position);
     return true;
+}
+
+bool view_client_to_local(View* view, float x, float y, float* local_x, float* local_y) {
+    if (!view || !local_x || !local_y || !isfinite(x) || !isfinite(y) ||
+        view_backface_is_hidden(view, BACKFACE_HIT_TEST)) return false;
+    RdtMatrix frame;
+    if (!view_get_foreign_object_matrix(view, &frame)) {
+        float origin_x, origin_y;
+        view_get_layout_position(view, nullptr, &origin_x, &origin_y);
+        RdtMatrix4 accumulated = view_accumulated_transform_3d(view, false);
+        const float* m = accumulated.values;
+        RdtMatrix plane = {m[0],m[1],m[3],m[4],m[5],m[7],m[12],m[13],m[15]};
+        RdtMatrix position = rdt_matrix_translate(origin_x, origin_y);
+        frame = rdt_matrix_multiply(&plane, &position);
+    }
+    RdtMatrix inverse;
+    if (!rdt_matrix_inverse(&frame, &inverse)) return false;
+    float w = inverse.e31*x + inverse.e32*y + inverse.e33;
+    if (!isfinite(w) || fabsf(w)<.000001f) return false;
+    *local_x = (inverse.e11*x + inverse.e12*y + inverse.e13)/w;
+    *local_y = (inverse.e21*x + inverse.e22*y + inverse.e23)/w;
+    float forward_w = frame.e31 * *local_x + frame.e32 * *local_y + frame.e33;
+    return isfinite(*local_x) && isfinite(*local_y) && forward_w>0;
 }
 
 static bool view_foreign_object_bounds(View* view, float* x, float* y, float* width, float* height) {

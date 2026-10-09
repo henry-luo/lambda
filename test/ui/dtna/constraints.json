@@ -1,0 +1,20 @@
+{
+ "name":"dtna authored disabled changes replace stale native control constraints",
+ "html":"test/ui/dtna/constraints.ls",
+ "viewport":{"width":900,"height":500},
+ "events":[
+  {"type":"click","target":{"selector":"#unlock"}},
+  {"type":"click","target":{"selector":"#guarded"}},
+  {"type":"assert_text","target":{"selector":"#count"},"equals":"1"},
+  {"type":"click","target":{"selector":"#inspect"}},
+  {"type":"assert_text","target":{"selector":"#flags"},"equals":"false:false:true"},
+  {"type":"click","target":{"selector":"#field"}},
+  {"type":"type","text":"retained"},
+  {"type":"click","target":{"selector":"#unlock"}},
+  {"type":"click","target":{"selector":"#guarded"}},
+  {"type":"assert_text","target":{"selector":"#count"},"equals":"1"},
+  {"type":"click","target":{"selector":"#inspect"}},
+  {"type":"assert_text","target":{"selector":"#flags"},"equals":"true:true:false"},
+  {"type":"assert_value","target":{"selector":"#field"},"equals":"retained"}
+ ]
+}

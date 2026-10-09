@@ -15,12 +15,13 @@ the larger proposal. It does not change any formal ruling.
   procedural. Interaction state belongs to each reactive view instance.
 - S7.4.1: invalid package input returns an ordinary error value. Unsupported
   layer types, expressions and properties are rejected explicitly.
-- D4.5.2 / D4.5.1v4: the native painter borrows a Mark description only during
-  compilation and publishes owned paths to PaintIR. There is no retained map
-  registry, GC pointer, GPU handle or external resource in this first increment.
-- D7.5.3 / D5.3.3: `map.to_svg` uses the declared `radiant.geomap_svg` function;
-  its native adapter roots its argument and calls the same paint compiler used
-  by the viewport. It does not serialize typed GeoJSON into HTML attributes.
+- D4.5.2 / D4.5.1v4: a native frame owns its copied Input, compiled styles,
+  evaluated paths and spatial index. Document resources retain/release frames;
+  detached viewports release their lease. Frames contain no GC pointers.
+- D7.5.3 / D5.3.3: declared `radiant.geomap_plan`, snapshot/query functions
+  and `radiant.local_point` form the native boundary. Snapshot adapters copy
+  metadata into rooted Lambda values. `map.to_svg` and `render_frame` use the
+  same frame painter as the viewport, without GeoJSON text attributes.
 
 ## Implemented increment
 
@@ -29,14 +30,15 @@ the larger proposal. It does not change any formal ruling.
 | Element and layout | Append `GEOMAP` to the generated name catalog without renumbering existing identities. Share the SVG/scene viewport sizing path, default 300 × 150 dimensions, CSS sizing and replaced-content classification. `<source>` and `<layer>` remain data children with no layout boxes. HTML `<map>` retains its existing identity and behavior. |
 | Camera | Web Mercator, longitude/latitude in degrees, double world calculations, 512 CSS pixels per world at zoom zero, fractional zoom from −2 to 22, bearing, inverse projection, polar clamping, cursor-anchored zoom, pan and bounds fitting across the dateline. Pitch is zero; there is one world copy. |
 | Geometry | Inline typed GeoJSON, Feature/FeatureCollection, GeometryCollection, Point/MultiPoint, LineString/MultiLineString and Polygon/MultiPolygon. Native connected paths unwrap longitude across the dateline and align holes to their exterior ring's world copy. |
-| Paint | Ordered background, fill, line and circle layers; typed paint expressions and feature filters, hex/transparent colors, layer opacity, circle radius, line width, zoom range and visibility. Polygon fill uses even-odd holes; lines use butt caps and round joins. Compilation precedes publication so a rejected raw element cannot publish a valid prefix. |
+| Paint | Ordered background, fill, line and circle layers; typed paint expressions and feature filters, hex/transparent colors, layer opacity, circle radius/strokes, fill outlines, line width/caps/joins, zoom range and visibility. Polygon fill uses even-odd holes. Compilation precedes publication so a rejected raw element cannot publish a valid prefix. |
 | Export | Raster, document SVG and document PDF route through the same native path compiler. `map.to_svg` returns an SVG element through the Radiant module. Paths, clips and colors remain vector output. |
-| Package | `geomap`, `source`, `layer`, `normalize`, `validate`, `from_style`, `project`, `unproject`, `fit_bounds`, `update`, `query_source`, `query_rendered`, `model`, `interactive`, `to_svg`. `from_style` accepts the implemented Style Specification version 8 subset and produces `<geomap>`. |
-| Interaction | Reactive per-instance camera state, pointer capture for dragging, cursor-anchored wheel zoom and arrow/plus/minus keyboard navigation. Events measure the committed content box, including CSS border/padding and device density. |
-| Queries | Source feature queries retain explicit feature IDs, with source-local index fallback. Rendered queries respect layer order, zoom, visibility, opacity, clipping and polygon holes, using shared chart geometry helpers. This increment performs a linear scan and describes the current model rather than a retained historical frame. |
+| Package | `geomap`, `source`, `layer`, `normalize`, `validate`, `from_style`, `project`, `unproject`, `fit_bounds`, `update`, `query_source`, `query_rendered`, `plan`, `render_frame`, `snapshot`, `query_displayed`, `model`, `interactive`, `to_svg`. `from_style` accepts the implemented Style Specification version 8 subset and produces `<geomap>`. |
+| Interaction | Per-instance camera, drag, hover and selection state. Captured drag has a 3 CSS pixel threshold and suppresses its synthetic click. Anchored wheel/double-click zoom; arrows/plus/minus/Home/Escape; optional ordinary HTML controls and a selected-feature list. Input unprojects the committed CSS plane. |
+| Queries | Stable feature IDs with source-local index fallback. Evaluated native paths feed a balanced AABB index; point/rectangle queries use the shared native SVG stroke/fill walker and reverse paint order. Displayed queries read the last painted frame. Ordinary Lambda snapshots retain historical geometry and copied metadata after resize/removal. |
 
 The native compiler limits a map to 1,024 children, 262,144 visited vertices,
-16,384 visited feature records and 32 levels of geometry nesting per paint.
+16,384 visited feature records, 262,144 emitted paths and 32 levels of geometry
+nesting per frame.
 These counters include repeated traversal for different layers. A raw invalid
 element produces a pale red viewport and logs its diagnostic; normalized
 package input returns an error value earlier. Native painting requires typed
@@ -230,32 +232,117 @@ gate or of map causality; their root causes remain unresolved here. The earlier
 Test262 result above is historical and was not rerun for this Radiant/package
 increment, which does not change the JS engine.
 
+## Retained frames, indexed picking and offline interaction
+
+The next increment adds `GeoMapFrame` in `radiant/geomap.hpp`. It owns an Input
+copy of the model, compiled layer programs, evaluated paths and a balanced
+bounding-box tree. The document resource registry keys viewports by generation
+checked DOM references. Unchanged paints replay the frame; invalidation checks
+both DOM mutation and style-query epochs plus content-box dimensions. Direct
+attribute setters can advance the style epoch without the mutation epoch, so
+both are necessary. Failed replacement remains transactional and publishes the
+existing pale-red diagnostic viewport rather than a valid prefix.
+
+`map.plan(model, viewport)` exposes a self-contained ordinary Lambda frame,
+including camera, dimensions, revision, SVG, path records and the index.
+`query_rendered(frame, ...)` accepts points or boxes and traverses the index
+before inspecting candidates in reverse paint order. `snapshot(node)` and
+`query_displayed(node, ...)` are procedures reading the last painted frame;
+they never implicitly paint a newer model. Frame leases survive resize and
+removal. Public snapshots own copied feature metadata, with JSON depth/node
+quotas, and native consumers retain a frame during result allocation. This
+implements D4.5.2/D5.3.3 without a GC-managed native registry.
+
+The map and SVG queries share `dom_geometry_path_query`, extending the existing
+path walker with rectangle intersection for fills, stroke segments, caps and
+joins. The index uses painted stroke extents, including the miter limit. Fill
+outlines and circle fill/stroke paths deduplicate to one feature/layer result.
+Self-crossing contours use non-collinearity to admit fill boundaries: signed
+area alone can cancel despite painted lobes. A regression covers that case and
+a collinear contour. Packed frame queries validate index bounds, recursion,
+path style enums and a 64 MiB path-text budget.
+
+The exact property manifest in `test/map/README.md` now includes
+`fill-outline-color`, circle stroke color/width/opacity, static line caps and
+joins. These use the same compiled expression programs and PaintIR lowering.
+The established profile keeps butt/round defaults; it does not imply every
+MapLibre line property or default. Programs are retained within each frame;
+sharing them across different camera plans is still outstanding.
+
+Native event coordinates use the shared `view_client_to_local` inverse plane
+homography through declared procedural `radiant.local_point` (D7.5.3).
+Rotation, perspective and singular transforms have focused tests. Reactive
+state now includes hover, selection and drag suppression. A 3 CSS pixel
+threshold separates a click from dragging; a completed drag suppresses the
+synthetic click. Double-click zoom is anchored, Shift reverses it, Home resets
+and Escape clears selection. Optional ordinary HTML controls provide zoom,
+reset and fit; an optional live list exposes selected feature names.
+`on_select`/`on_hover` carry feature/point/geographic details and `on_camera`
+carries an input-driven camera change, all through procedural callbacks
+(S12.1.3). Autonomous resize callbacks and animation are still open.
+
+Planning computed numeric coordinate arrays exposed a shared ownership bug in
+`MarkBuilder::deep_copy`: the numeric-array branch assumed 8-byte elements and
+dropped shape/stride metadata. It now copies the actual element width in logical
+C order, owns shape dimensions/strides and clears view/backing/borrowed flags.
+A compact int16 transposed-array regression destroys the borrowed data before
+checking the owned copy; a float32 reversed-view regression covers negative
+strides with signed source offsets. Snapshot string copying also uses the
+stored byte length, preserving embedded NUL bytes in JSON property values.
+This fixes the data boundary rather than changing the map to avoid packed
+numeric arrays.
+
+Current validation artifacts are under `temp/map-next/`. Earlier validation
+tables above remain historical; they are not a clean gate for this increment.
+
+| Check | Current result on macOS, 2026-10-09 |
+|---|---|
+| Native map tests | **20/20 passed** in `native-final.log`: retained frame replay, historical paths after resize/removal/document destruction, point/box fill geometry, rotated input, perspective/singular planes, controls, hover/selection, snapshot/displayed-query parity, drag suppression and 2× density input, alongside earlier paint/camera fixtures. |
+| Owned numeric-array copies | **40/40 passed** in `deepcopy-final.log`, including compact transposed and negative-stride copies. |
+| Package goldens | **8/8** under interpreter and JIT with `LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1`; the automatic-tier broader map selection is **42/42**. `package-gc-{interp,jit}-final.log`, `package-auto-final.log`. Frames also reject cyclic indexes, invalid cap enums and malformed query options, and preserve embedded NUL metadata. |
+| Native ownership under forced GC | **2/2 passed**, `native-gc-final.log`: retained frames and native pointer/selection callbacks with snapshot/query equality. This run preceded the final byte-counted string-copy/signed-offset edits; the final host's forced-GC package run covers those adapters. |
+| PNG/SVG/PDF map exports | **21/21 passed**, `exports-final.log`: seven fixtures through native raster and independent librsvg/Poppler rasterization, including circle strokes, square caps and rotation. Vector outputs contain no raster images. The added paint/control PNGs were visually inspected. |
+| Pinned expression reference | **42/42 passed**, `reference-final.log`, against style-spec 26.4.4. This remains expression coverage rather than a complete independent geographic renderer oracle. |
+| Shared SVG hit tests | **7/7 fixtures, 73/73 assertions passed**, `svg-hit.log`, covering fill rules, caps, joins, dashes, transforms, instances and pointer events. |
+| Radiant dimension lint | **Passed**, `lint.log`. |
+| Lambda + input baseline | **5,484/5,628 passed**, `lambda-baseline.log`: input **2,112/2,112**, functional Lambda **1,311/1,312** (`edit_view_only` fails), 141 standard-library batch launches fail, Test262 preflight fails and the math runner produces no report. Outside-sandbox focused reruns recover **141/141** standard-library cases and **715/715** math corpus cases (`std-unsandbox.log`, `math-corpus.log`). These recoveries do not make the aggregate a clean pass. |
+| Test262 baseline | The summary reports **40,261/40,261**, but `test262-baseline.log` records a killed AST Unicode-identifier batch with **82 lost/recovered tests**, followed by isolated retries. The unmodified named Unicode source passes alone with the pinned host (`unicode-isolated.log`). Batch stability remains unresolved; this is **not a clean gate**. |
+| Radiant baseline | **Failed**, `radiant-baseline-unsandbox.log`: aggregate **4,054 passing, 350 partial and 6 failed / 4,410**. Failures include CSS list/Markdown layout, `doc_editor_indexed_math_arrows`, `dtna_styles`, `radiant_view_math_intensive_scroll` and CSS cascade memory. The view-command runner also fails `UiScriptContentSurvivesForcedGc` and a Doom replay exits **139**; it was stopped after further silence. Its aggregate row incorrectly labels **0/0** as passing and contributes no positive coverage. Shared vector tests pass **110/110** and DOM integration **136/136**; visual results are **206/212 passing, 5 expected failures and 1 skipped**, with the visual baseline gate accepted. |
+
+The final focused host is `temp/map-next/lambda.exe`, SHA-256
+`05f4d2533134755361e59f1e3135cd77743c4a11fd728f4bf2726f4a890650d9`.
+`provenance.json` records the host, runners, reference corpus and source hashes.
+The host was linked directly to that artifact with the generated Makefile's
+`TARGET` override, preserving the root binary during broad tests. Broad gates
+ran in a shared checkout with concurrent non-map edits and preceded the final
+string-copy/signed-offset changes. No release performance claim is made.
+
 ## Remaining scope and engine assessment
 
-Phase 1 is **in progress**, with the offline viewport increment implemented.
-The following proposal requirements are still open:
+Phase 1 is **in progress**. The offline increment now has native historical
+frames, indexed point/rectangle queries, the proposed flat fill/line/circle
+properties, selection callbacks and HTML navigation controls. These proposal
+requirements are still open:
 
-1. Persistent compiled styles/frame snapshots and an indexed query structure;
-   query/render equivalence for all supported topology and historical frames. Pure queries use the supplied model's
-   numeric viewport dimensions; callers must supply the committed dimensions
-   when CSS changes the viewport size.
+1. Persistent compiled source/style sharing across camera plans; dedicated
+   compile/plan/resource APIs. Document-wide epoch invalidation currently
+   rebuilds a viewport even for unrelated mutations. Dense/many-map performance
+   budgets and a fully independent geographic reference corpus remain open.
 2. TileJSON, URL resource adaptation with generation/cancellation and cache
    policy, raster tiles, bounded MVT decoding and tile selection/overscaling.
 3. Symbol layers, font/sprite/glyph resources, collision placement and attribution
    aggregation. Advanced line-following text belongs to the later extension.
-4. Fit/resize notifications, click feature notifications, animation, full
-   keyboard/accessibility control UI, and inverse CSS-transform mapping for
-   interactive viewports under rotation/skew/perspective.
-5. Performance budgets, deterministic independent geographic reference
-   comparisons, Linux/Windows runtime evidence and the Phase 2 JavaScript API.
+4. Autonomous fit/resize notifications, camera animation and broader keyboard/
+   accessibility acceptance. Camera callbacks currently report input-driven
+   changes; DOM size changes become visible on the next layout/paint.
+5. A clean broad release gate, release performance measurements, Linux/Windows
+   runtime evidence and the Phase 2 JavaScript API.
 
 No missing general-purpose parser syntax, rendering backend or GC mechanism
-blocks the offline native map: ordinary typed elements, shared replaced sizing,
-PaintIR, module calls and DOM capture are sufficient after fixing the PDF
-lowering gaps found by the rendered checks. The tiled map milestone
-still needs a map-specific resource lifecycle/cache adapter and an MVT decoder;
-existing network/image services should be reused. Symbol placement still needs
-a map-specific collision index. Precise local input coordinates under arbitrary
-CSS transforms need a shared geometry unprojection interface rather than a
-package approximation. These gaps are prerequisites for the corresponding
-milestones, not claims that the engine has none of their lower-level primitives.
+blocks the offline map. This increment supplies the shared CSS-plane input
+unprojection that the earlier engine assessment identified as missing. The
+tiled milestone still needs a map-specific resource lifecycle/cache adapter and
+an MVT decoder; existing network/image services should be reused. Symbol
+placement still needs a map-specific collision index. These gaps are
+prerequisites for their milestones, not claims that the engine lacks all of
+their lower-level primitives.

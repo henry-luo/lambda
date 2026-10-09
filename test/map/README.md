@@ -2,17 +2,19 @@
 
 The public package is `lambda.map` (D7.2.4). Its pure validation, evaluation,
 queries and export use declared Radiant functions (S12.1.1v2, D7.5.3).
-Compiled expressions borrow precisely rooted input only during one call
-(D4.5.2, D5.3.3); no map registry retains Lambda values.
+Displayed frames own an Input arena, compiled expressions, evaluated paths and
+a balanced bounding-box index (D4.5.2). The document registry retains those
+native owners; public snapshots copy their feature metadata to precisely rooted
+Lambda values (D5.3.3). No native frame retains GC pointers.
 
 ## Implemented properties
 
 | Layer | Paint properties |
 |---|---|
 | `background` | `background-color`, `background-opacity` |
-| `fill` | `fill-color`, `fill-opacity` |
+| `fill` | `fill-color`, `fill-opacity`, `fill-outline-color` |
 | `line` | `line-color`, `line-opacity`, `line-width` |
-| `circle` | `circle-color`, `circle-opacity`, `circle-radius` |
+| `circle` | `circle-color`, `circle-opacity`, `circle-radius`, `circle-stroke-color`, `circle-stroke-width`, `circle-stroke-opacity` |
 
 Each layer accepts `minzoom`, `maxzoom`, and `layout.visibility`. Feature
 filters apply to fill, line and circle; background paint cannot depend on
@@ -20,6 +22,14 @@ features. Colors are hex strings or `transparent`. Opacity is within 0–1;
 size is within 0–4096 CSS pixels. Radius defaults to 5, width to 1, opacity to
 1 and color to black. Unsupported properties and source kinds return ordinary
 errors (S7.4.1). There are no transitions, feature state or legacy filters.
+
+Lines also accept static `layout.line-cap` (`butt`, `round`, `square`) and
+`layout.line-join` (`miter`, `round`, `bevel`). Defaults remain butt/round for
+this bounded profile; miter limit is 4. Fill outlines are optional centered
+1 CSS pixel strokes and share fill opacity. Circle radius is the inner fill
+radius; a stroke extends outward by its width. Circle stroke defaults are
+black, width 0 and opacity 1, independent of fill opacity. Every new paint
+property accepts the same typed expression subset below.
 
 ## Implemented expressions
 
@@ -47,13 +57,46 @@ the direct input of the outermost `step`/`interpolate`. Filter zoom is floored;
 paint zoom remains fractional. Runtime errors use the property's default,
 while invalid filters exclude the feature. Native painting logs each fallback
 kind once per layer; internal evaluation records expose warning bits
-1=color, 2=opacity, 4=size, 8=filter.
+1=color, 2=opacity, 4=size, 8=filter, 16=outline color, 32=circle stroke width,
+64=circle stroke color, 128=circle stroke opacity.
 
 The compiler allows depth 32 and a shared budget of 1,024 expression visits
-and match labels per layer. Painting compiles each layer once. Rendered queries compile one layer
-for a batch of up to 16,384 features, then use its evaluated radius/width,
-visibility and alpha. Queries still scan geometry linearly and describe the
-supplied model, without a retained frame index.
+and match labels per layer. Frame planning compiles each layer once. Unchanged
+displayed frames reuse those programs and paths. Camera/source/style or
+document invalidation rebuilds the frame; sharing compiled styles between
+different cameras is still open.
+
+`map.plan(model, viewport)` returns an ordinary immutable frame value with
+camera, viewport, revision, SVG, evaluated paths, owned feature records and an
+index. `map.query_rendered(frame, point_or_box, options)` traverses its index in
+reverse paint order, then uses the shared native path hit walker. Points use
+`[x,y]`; rectangles use `[[left,top],[right,bottom]]`, clipped to the viewport.
+Options are `layers` and `radius` (0–4096 CSS pixels). Geometry queries cover
+fill holes, outlines, circle strokes, caps and joins and deduplicate paths of
+the same feature/layer. `query_rendered(model, ...)` plans that model first.
+`snapshot(node)` and `query_displayed(node, ...)` are procedures that read the
+last painted frame, without advancing layout. An old frame remains usable
+after camera changes, resize or viewport removal. `render_frame(frame)`
+returns its SVG element.
+
+Native planning limits children to 1,024, visited vertices and emitted paths to
+262,144, feature visits to 16,384 and geometry depth to 32. Snapshot metadata
+must be JSON-shaped, depth ≤64 and at most 262,144 nodes per feature. Packed
+queries additionally bound path parsing to 64 MiB and validate index traversal.
+Viewport dimensions and the absolute magnitude of query coordinates are
+bounded to 1,048,576 CSS pixels.
+
+`interactive(spec, options)` supports a 3 CSS pixel drag threshold, captured
+dragging, click suppression after dragging, hover/selection, anchored wheel
+and double-click zoom (Shift reverses), arrows/plus/minus, Home reset and
+Escape selection clear. The shared `radiant.local_point` unprojects the painted
+CSS plane, including rotation, skew and perspective. Optional `controls:true`
+adds ordinary HTML zoom/reset buttons and a fit button when `bounds` is supplied
+as `[west,south,east,north]`; `padding` controls fit inset. `feature_list:true`
+adds a live selected-feature list. `label` sets the map's accessible label.
+Procedural `on_select`/`on_hover` receive `{node,features,point,lnglat}`;
+`on_camera` receives `{node,camera}` after an input-driven camera change.
+Autonomous resize notifications and camera animation remain open.
 
 ## Frozen reference and execution
 
@@ -80,4 +123,4 @@ fixtures are `.ls` documents in this directory; functional scripts/goldens live
 under `test/lambda/map/`. `expressions.ls` paints filtered features, a matched
 color, an interpolated radius and ID-dependent alpha. `check_exports.cjs`
 checks its pixels through native PNG and independent librsvg/Poppler rendering
-of vector SVG/PDF, alongside four geometry fixtures.
+of vector SVG/PDF, alongside geometry, stroke and rotated-viewport fixtures.

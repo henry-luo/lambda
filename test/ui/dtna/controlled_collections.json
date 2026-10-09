@@ -1,0 +1,27 @@
+{
+ "name":"dtna controlled collections emit requests while author props remain authoritative",
+ "html":"test/ui/dtna/controlled_collections.ls",
+ "viewport":{"width":1000,"height":900},
+ "events":[
+  {"type":"click","target":{"selector":"#controlled-collapse-header-0"}},
+  {"type":"assert_attribute","target":{"selector":"#controlled-collapse-header-0"},"attribute":"aria-expanded","equals":"false"},
+  {"type":"assert_text","target":{"selector":"#request"},"equals":"controlled-collapse:expand"},
+  {"type":"click","target":{"selector":"#controlled-tree-node-1 [data-dtna-tree-check]"}},
+  {"type":"assert_attribute","target":{"selector":"#controlled-tree-node-1"},"attribute":"aria-checked","equals":"false"},
+  {"type":"assert_text","target":{"selector":"#type-name"},"equals":"int"},
+  {"type":"click","target":{"selector":"#controlled-tree-node-1 .dtna-tree-label"}},
+  {"type":"assert_attribute","target":{"selector":"#controlled-tree-node-1"},"attribute":"aria-selected","equals":"false"},
+  {"type":"click","target":{"selector":"#controlled-tree-node-0 [data-dtna-tree-expand]"}},
+  {"type":"assert_attribute","target":{"selector":"#controlled-tree-node-0"},"attribute":"aria-expanded","equals":"true"},
+  {"type":"click","target":{"selector":"#controlled-table [data-dtna-table-select='1']"}},
+  {"type":"assert_attribute","target":{"selector":"#controlled-table [data-dtna-table-select='1']"},"attribute":"aria-checked","equals":"false"},
+  {"type":"assert_text","target":{"selector":"#type-name"},"equals":"int"},
+  {"type":"click","target":{"selector":"#controlled-table [aria-label='Previous page']"}},
+  {"type":"assert_text","target":{"selector":"#type-name"},"equals":"1"},
+  {"type":"assert_text","target":{"selector":"#controlled-table [aria-current=page]"},"equals":"2"},
+  {"type":"click","target":{"selector":"#controlled-table [data-dtna-table-sort='0']"}},
+  {"type":"assert_attribute","target":{"selector":"#controlled-table [aria-sort]"},"attribute":"aria-sort","equals":"none"},
+  {"type":"assert_text","target":{"selector":"#empty-table tbody"},"equals":"Nothing here"},
+  {"type":"assert_count","target":{"selector":"#empty-table .dtna-pagination"},"count":0}
+ ]
+}

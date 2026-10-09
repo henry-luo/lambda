@@ -2,17 +2,39 @@
 
 `run_texcmp.mjs` reads the upstream KaTeX `ss_data.yaml` corpus, renders each
 formula with Lambda's public `lambda.doc.math.math` package (D7.2.4), and uses
-Lambda's native `render` command to produce a PNG. It compiles the same formula
+Lambda's native `render` command to produce a PNG. It compiles a LaTeX equivalent
 with `pdflatex` and rasterizes the PDF with Poppler. All generated scripts,
 documents, images, logs, and reports stay under `./temp/`.
 
-Dependencies: the built `./lambda.exe`, Node.js, `pdflatex` with `amsmath`,
-`amssymb` and `xcolor`, and Poppler's `pdftoppm` and `pdfinfo`. Install the two
-local Node dependencies from the project root:
+Dependencies: the built `./lambda.exe`, Node.js, `pdflatex` with the packages
+listed in `texcmp_preamble.tex` and the supplementary fonts below, and Poppler's
+`pdftoppm` and `pdfinfo`. Install
+the two local Node dependencies from the project root:
 
 ```sh
 npm install --prefix test/lambda/math --ignore-scripts --cache "$PWD/temp/npm-cache"
 ```
+
+Full TeX Live includes the reference packages. For BasicTeX, install the additions
+in a local user tree. This example uses the frozen TeX Live 2025 repository;
+other TeX Live versions need their matching repository:
+
+```sh
+mkdir -p temp/mathcmp-texmf temp/mathcmp-texmf-tmp
+tlmgr --usermode --usertree "$PWD/temp/mathcmp-texmf" init-usertree
+TMPDIR="$PWD/temp/mathcmp-texmf-tmp" \
+TEXMFVAR="$PWD/temp/mathcmp-texmf-var" \
+TEXMFCONFIG="$PWD/temp/mathcmp-texmf-config" \
+tlmgr --usermode --usertree "$PWD/temp/mathcmp-texmf" \
+  --repository https://ftp.math.utah.edu/pub/tex/historic/systems/texlive/2025/tlnet-final \
+  install mathtools gensymb cancel ulem etoolbox braket arydshln stmaryrd extpfeil \
+  steinmetz actuarialangle pict2e unicode-math-input accents mathabx mathabx-type1 \
+  stix mhchem chemgreek cjk nanumtype1 wadalab cyrillic lh lm
+```
+
+The runner discovers `temp/mathcmp-texmf` automatically and retains the existing
+`TEXMFHOME` search path. TeX caches and generated fonts stay inside each run's
+scratch directory. Tests never download or install dependencies automatically.
 
 Run a small selection, list the corpus, or compare every case:
 
@@ -27,14 +49,16 @@ runner can also be invoked directly with `node test/lambda/math/run_texcmp.mjs`.
 
 Each invocation creates a fresh `temp/math_texcmp/run-*/` directory and prints
 its HTML report path. `--out temp/custom-directory` changes the parent directory.
-Each compared case retains:
+Each compared case under `cases/<name>/` retains:
 
 - `formula.ls`, `lambda.json`, `lambda.svg`, `lambda.html`, and `lambda.raw.png`.
-- `reference.tex`, `reference.pdf`, `pdflatex.raw.png`, and command/TeX logs.
+- `reference.formula.tex`, `reference.tex`, `reference.pdf`, `pdflatex.raw.png`,
+  and command/TeX logs.
 - Cropped grayscale `lambda.png`, `pdflatex.png`, and a color overlay `diff.png`.
 
 The run's `report.json` records the corpus and executable SHA-256 hashes, tool
-versions, comparison settings, dimensions, offsets, errors, and source metadata.
+versions, comparison settings, dimensions, offsets, errors, source metadata,
+and every reference syntax translation with its original source span.
 `index.html` displays the three images at their native scale.
 
 ## What the comparison measures
@@ -74,15 +98,48 @@ and fixture macro definitions are passed to both renderers. This is a
 in the report but are not rendered. Upstream browser-specific behavior is not
 claimed as covered.
 
-The reference preamble loads `amsmath`, `amssymb`, and `xcolor`. Some corpus cases
-require additional packages or KaTeX-specific macros; these produce visible
-errors rather than substitutions. `--preamble path/to/additions.tex` appends
-reference package declarations or macro definitions. Unsupported Lambda input
-also remains an error. The whole corpus is not expected to pass merely because
-the comparison pipeline works for the smoke selection.
+The reference setup follows [KaTeX's pdfLaTeX template](https://github.com/KaTeX/KaTeX/blob/main/test/screenshotter/test.tex),
+including its logo and math sizing definitions. Additional standard packages
+provide dashed arrays, commutative diagrams, brackets, cancellations, actuarial
+angles, and Steinmetz phase notation. `unicode-math-input` accepts Unicode math
+symbols without changing the reference math font encoding. The reference box
+preserves verbatim input and uses its own register so formula macros can use TeX's
+scratch boxes. Missing glyphs fail compilation instead of disappearing silently.
 
-The pixel helper's focused checks cover identity, translation in both directions,
-extra ink, overlay colors, transparency, blank images, and tolerance handling:
+The upstream YAML and Lambda input are unchanged. `texcmp_dialect.mjs` translates
+KaTeX syntax into pdfLaTeX equivalents and records each change in JSON and HTML:
+
+- CSS hex colors become explicit xcolor HTML colors.
+- Verbatim input becomes literal monospaced glyphs, preserving visible spaces,
+  special characters, and script sizing even inside arrays.
+- Combining text accents become standard TeX accents. Unicode math alphabets
+  keep their weight and shape, including in text and nested alphabet selectors.
+- Cyrillic text selects T2A/LH fonts; Korean and Japanese text select real CJK
+  fonts (Nanum Myeongjo and Wadalab Mincho).
+- Rules accept `mu` dimensions using the current math style's symbol-font quad;
+  ordinary dimensions such as `em` keep their standard TeX meaning.
+
+Supplementary reference macros preserve symbols outside script/fraktur font
+repertoires. Only the missing MathABX accents and STIX closed-integral glyphs are
+selected from those fonts, retaining Computer Modern for other symbols. AMS
+glyph fills provide extra arrow/segment accents; mhchem supplies the chemistry
+arrows. Feature packages are selected from actual commands, never fixture names.
+These font and macro choices provide a reviewable reference rather than a claim
+that pdfLaTeX and KaTeX use identical glyph designs. Each case's `reference.tex`
+contains its complete reference setup. The upstream image used by `Includegraphics`
+is bundled with its license and mirrored into each run for both renderers.
+
+Unknown commands and missing glyphs remain fatal errors.
+`--preamble path/to/additions.tex` appends reference package declarations or macro
+definitions. Unsupported Lambda input also remains an error; a completed
+comparison does not establish visual equality.
+
+The focused checks cover pixel alignment and overlays, plus actual pdfLaTeX
+compilation and Poppler rasterization of previously failing corpus formulas.
+They also check syntax audit spans, verbatim literals, trailing comments, custom
+definitions, rendered alphabet fallbacks, math-unit widths against native TeX
+kerns, and fatal errors for undefined commands and missing glyphs. Reference checks are
+explicitly skipped if their executables are unavailable; missing packages fail:
 
 ```sh
 npm test --prefix test/lambda/math

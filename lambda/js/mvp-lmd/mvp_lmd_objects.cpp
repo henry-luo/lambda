@@ -2,6 +2,7 @@
 #include "../../runtime/lambda-root-frame.hpp"
 #include "../../runtime/heap_api.h"
 #include "../../runtime/runtime-state.h"
+#include "../../input/input.hpp"
 #include "../../../lib/hashmap.h"
 #include "../../../lib/utf.h"
 #include "../../../lib/mem.h"
@@ -82,6 +83,7 @@ extern "C" Item mvp_lmd_object_new(TypeMap* shape, int64_t collection) {
     return map->index ? Item{.map = map} : mvp_lmd_fail(LMD_MVP_MEMORY, 0);
 }
 static Map* object_face(Item owner) {
+    if (get_type_id(owner) == LMD_TYPE_ARRAY) return (Map*)owner.array;
     if (get_type_id(owner) != LMD_TYPE_MAP) return NULL;
     Map* map = owner.map;
     TypeMap* type = (TypeMap*)map->type;
@@ -99,18 +101,28 @@ int mvp_lmd_builtin_method(String* key, TypeId owner) {
         {"fill", LMD_TYPE_ARRAY, LMD_METHOD_FILL}, {"push", LMD_TYPE_ARRAY, LMD_METHOD_PUSH},
         {"pop", LMD_TYPE_ARRAY, LMD_METHOD_POP}, {"join", LMD_TYPE_ARRAY, LMD_METHOD_JOIN},
         {"slice", LMD_TYPE_ARRAY, LMD_METHOD_SLICE}, {"forEach", LMD_TYPE_ARRAY, LMD_METHOD_FOREACH},
+        {"map", LMD_TYPE_ARRAY, LMD_METHOD_ARRAY_MAP},
+        {"reverse", LMD_TYPE_ARRAY, LMD_METHOD_REVERSE}, {"sort", LMD_TYPE_ARRAY, LMD_METHOD_SORT},
         {"charAt", LMD_TYPE_STRING, LMD_METHOD_CHAR_AT}, {"charCodeAt", LMD_TYPE_STRING, LMD_METHOD_CODE_AT},
-        {"repeat", LMD_TYPE_STRING, LMD_METHOD_REPEAT}};
+        {"repeat", LMD_TYPE_STRING, LMD_METHOD_REPEAT},
+        {"substring", LMD_TYPE_STRING, LMD_METHOD_SUBSTRING}, {"slice", LMD_TYPE_STRING, LMD_METHOD_STRING_SLICE},
+        {"split", LMD_TYPE_STRING, LMD_METHOD_SPLIT}, {"indexOf", LMD_TYPE_STRING, LMD_METHOD_INDEX_OF},
+        {"startsWith", LMD_TYPE_STRING, LMD_METHOD_STARTS_WITH}, {"toUpperCase", LMD_TYPE_STRING, LMD_METHOD_UPPER},
+        {"toFixed", LMD_TYPE_FLOAT, LMD_METHOD_TO_FIXED}};
     for (const auto& method : methods)
         if (method.owner == owner && text_is(key, method.name)) return method.id;
     return 0;
 }
 extern "C" Item mvp_lmd_property_get(Item owner, Item name, int64_t callee) {
     TypeId tid = get_type_id(owner);
-    if (tid == LMD_TYPE_ARRAY || tid == LMD_TYPE_STRING) {
-        int method = mvp_lmd_builtin_method(name.get_string(), tid);
-        return method && callee ? Item{.item = mvp_lmd_method_token(method)}
-            : mvp_lmd_fail(LMD_MVP_CAPABILITY, 0);
+    if (tid == LMD_TYPE_ARRAY && owner.array->type) {
+        ShapeEntry* field = own_field((Map*)owner.array, name.get_string());
+        if (field) return map_shape_field_to_item(owner.array->data, field);
+    }
+    if (tid == LMD_TYPE_ARRAY || tid == LMD_TYPE_STRING || tid == LMD_TYPE_INT || tid == LMD_TYPE_FLOAT) {
+        int method = mvp_lmd_builtin_method(name.get_string(), tid == LMD_TYPE_INT ? LMD_TYPE_FLOAT : tid);
+        if (method) return callee ? Item{.item = mvp_lmd_method_token(method)} : mvp_lmd_fail(LMD_MVP_CAPABILITY, 0);
+        return tid == LMD_TYPE_ARRAY ? Item{.item = ITEM_JS_UNDEFINED} : mvp_lmd_fail(LMD_MVP_CAPABILITY, 0);
     }
     Map* map = object_face(owner);
     if (!map) return mvp_lmd_fail(get_type_id(owner) == LMD_TYPE_NULL ||
@@ -134,6 +146,12 @@ extern "C" Item mvp_lmd_property_set(Item owner, Item name, Item value) {
     // audited MIR callers retain all arguments and scalar homes across this non-reentrant helper.
     Map* map = object_face(owner);
     if (!map) return mvp_lmd_fail(LMD_MVP_CAPABILITY, 0);
+    if (get_type_id(owner) == LMD_TYPE_ARRAY && !map->type) {
+        // D2.6.6v3: the existing array attribute face owns and traces these packed fields.
+        Input* tree = runtime_shape_tree();
+        map->type = tree ? type_tree_map_root(tree) : NULL;
+        if (!map->type) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
+    }
     if (map->map_kind == MAP_KIND_ORDERED && !own_field(map, name.get_string()) &&
             (text_is(name.get_string(), "size") || mvp_lmd_builtin_method(name.get_string())))
         return mvp_lmd_fail(LMD_MVP_CAPABILITY, 0);
@@ -142,7 +160,9 @@ extern "C" Item mvp_lmd_property_set(Item owner, Item name, Item value) {
 extern "C" Item mvp_lmd_property_delete(Item owner, Item name) {
     if (get_type_id(owner) == LMD_TYPE_ARRAY) {
         int64_t index = mvp_lmd_string_key(name.get_string());
-        if (index < 0) return mvp_lmd_fail(LMD_MVP_CAPABILITY, 0);
+        if (index == -1) return mvp_lmd_fail(LMD_MVP_CAPABILITY, 0);
+        if (index < -1) return !owner.array->type || map_shape_delete((Map*)owner.array, name.get_string())
+            ? Item{.item = ITEM_TRUE} : mvp_lmd_fail(LMD_MVP_MEMORY, 0);
         if (index < owner.array->length) owner.array->items[index].item = ITEM_JS_DELETED_SENTINEL;
         return Item{.item = ITEM_TRUE};
     }
@@ -158,9 +178,10 @@ extern "C" Item mvp_lmd_property_has(Item owner, Item name, int64_t inherited) {
         if (index == -1) return Item{.item = ITEM_TRUE};
         if (index >= 0) return Item{.item = b2it(index < owner.array->length &&
             owner.array->items[index].item != ITEM_JS_DELETED_SENTINEL)};
+        if (owner.array->type && own_field((Map*)owner.array, key)) return Item{.item = ITEM_TRUE};
         if (!inherited) return Item{.item = ITEM_FALSE};
         if (mvp_lmd_builtin_method(key, LMD_TYPE_ARRAY)) return Item{.item = ITEM_TRUE};
-        return mvp_lmd_fail(LMD_MVP_CAPABILITY, 0);
+        return Item{.item = ITEM_FALSE};
     }
     Map* map = object_face(owner);
     // typed arrays are JS objects, but their reflection is outside this phase.
@@ -361,9 +382,11 @@ extern "C" Item mvp_lmd_object_project(Item owner, int64_t projection) {
     if (!result.get()) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
     ProjectionField* fields = type ? (ProjectionField*)pool_calloc(context->pool, type->length * sizeof(ProjectionField)) : NULL;
     if (type && !fields && type->length) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
-    int64_t count = indexed ? object.get().array->length : 0;
+    int64_t indexed_count = indexed ? object.get().array->length : 0;
+    int64_t count = 0;
     if (type) {
         FOR_EACH_MAP_FIELD(type, field) {
+            if (field->flags & JSPD_NON_ENUMERABLE) continue;
             String* name = heap_create_name(field->name->str, field->name->length);
             if (!name) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
             int64_t index = mvp_lmd_string_key(name);
@@ -373,16 +396,17 @@ extern "C" Item mvp_lmd_object_project(Item owner, int64_t projection) {
         qsort(fields, (size_t)count, sizeof(ProjectionField), projection_order);
     }
     uint64_t value_home = 0;
-    for (int64_t i = 0; i < count; i++) {
-        if (indexed && object.get().array->items[i].item == ITEM_JS_DELETED_SENTINEL) continue;
-        ShapeEntry* field = indexed ? NULL : fields[i].field;
+    for (int64_t i = 0; i < indexed_count + count; i++) {
+        bool element = i < indexed_count;
+        if (element && object.get().array->items[i].item == ITEM_JS_DELETED_SENTINEL) continue;
+        ShapeEntry* field = element ? NULL : fields[i - indexed_count].field;
         if (projection != 1) {
-            key.set(indexed ? mvp_lmd_number_to_string((double)i) :
+            key.set(element ? mvp_lmd_number_to_string((double)i) :
                 Item{.item = s2it(heap_create_name(field->name->str, field->name->length))});
             if (item_is_error(key.get())) return key.get();
         }
         // snapshots must outlive pair allocation and any subsequent storage growth.
-        value.set(projection == 0 ? key.get() : lambda_item_adopt_scalar_home(indexed
+        value.set(projection == 0 ? key.get() : lambda_item_adopt_scalar_home(element
             ? object.get().array->items[i] : map_shape_field_to_item(object.get().map->data, field), &value_home));
         if (projection == 2) {
             pair.set(array());

@@ -1,6 +1,12 @@
 #include "geomap.hpp"
 #include "geomap_style.hpp"
 #include "../lambda/core/mark_reader.hpp"
+#include "../lambda/io/mark_builder.hpp"
+#include "../lambda/input/input.hpp"
+#include "../lambda/input/css/dom_lifecycle.hpp"
+#include "../lambda/dom/dom.h"
+#include "../lib/mem_factory.h"
+#include <stdlib.h>
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lib/arraylist.h"
 #include "../lib/color.h"
@@ -50,15 +56,15 @@ bool geomap_unproject(const GeoMapCamera& c, double x, double y, double* longitu
     return true;
 }
 
-struct GeoMapShape {
-    RdtPath* path;
-    Color color;
-    float stroke_width;
-    RdtFillRule rule;
-};
 struct GeoMapBuild {
     GeoMapCamera camera;
     ArrayList* shapes;
+    ArrayList* styles;
+    const char *source, *layer;
+    Item feature;
+    int64_t feature_index, record;
+    RdtStrokeCap cap;
+    RdtStrokeJoin join;
     unsigned vertices, features, warnings;
     char style_diagnostic[256];
     const char* diagnostic;
@@ -96,9 +102,11 @@ static bool geomap_position(GeoMapBuild* b, ItemReader item, double* longitude, 
 }
 static bool geomap_add_shape(GeoMapBuild* b, RdtPath* path, Color color, float stroke_width,
     RdtFillRule rule = RDT_FILL_WINDING) {
+    if (b->shapes->length>=262144) {rdt_path_free(path);return geomap_fail(b,"shape quota exceeded");}
     auto* shape = (GeoMapShape*)mem_alloc(sizeof(GeoMapShape), MEM_CAT_RENDER);
     if (!shape) { rdt_path_free(path); return geomap_fail(b, "shape allocation failed"); }
-    *shape = {path, color, stroke_width, rule};
+    *shape = {path, color, stroke_width, rule, b->cap, b->join,
+        b->source, b->layer, b->feature, b->feature_index, b->record};
     if (!arraylist_append(b->shapes, shape)) {
         rdt_path_free(path); mem_free(shape); return geomap_fail(b, "shape quota allocation failed");
     }
@@ -126,7 +134,7 @@ static bool geomap_sequence(GeoMapBuild* b, RdtPath* path, ItemReader coordinate
     return true;
 }
 static bool geomap_geometry(GeoMapBuild* b, ItemReader geometry, const char* layer_type,
-    Color color, float size, unsigned depth = 0) {
+    const GeoMapStyleResult& paint, unsigned depth = 0) {
     if (depth > 32) return geomap_fail(b, "geometry nesting quota exceeded");
     if (!geometry.isMap()) return geomap_fail(b, "geometry must be a GeoJSON map");
     ItemReader type = geomap_field(geometry, "type"), coordinates = geomap_field(geometry, "coordinates");
@@ -134,7 +142,7 @@ static bool geomap_geometry(GeoMapBuild* b, ItemReader geometry, const char* lay
         ItemReader children = geomap_field(geometry, "geometries");
         if (!children.isArray()) return geomap_fail(b, "invalid geometry collection");
         for (int64_t i = 0; i < children.asArray().length(); i++)
-            if (!geomap_geometry(b, children.asArray().get(i), layer_type, color, size, depth + 1)) return false;
+            if (!geomap_geometry(b, children.asArray().get(i), layer_type, paint, depth + 1)) return false;
         return true;
     }
     bool point = geomap_is(type, "Point"), multi_point = geomap_is(type, "MultiPoint");
@@ -144,6 +152,8 @@ static bool geomap_geometry(GeoMapBuild* b, ItemReader geometry, const char* lay
         return geomap_fail(b, "unsupported GeoJSON geometry");
     if (!coordinates.isArray()) return geomap_fail(b, "geometry coordinates must be an array");
     if (!coordinates.asArray().length()) return true;
+    Color color=paint.color;float size=paint.size;
+    b->cap=paint.cap;b->join=paint.join;
     bool circles = !strcmp(layer_type, "circle"), fills = !strcmp(layer_type, "fill");
     if ((circles && !point && !multi_point) || (!circles && (point || multi_point)) || (fills && !polygon && !multi_polygon)) return true;
     RdtPath* path = rdt_path_new();
@@ -156,7 +166,17 @@ static bool geomap_geometry(GeoMapBuild* b, ItemReader geometry, const char* lay
         if (circles) {
             double lon, lat, x, y;
             ok = geomap_position(b, component, &lon, &lat) && geomap_project(b->camera, lon, lat, &x, &y);
-            if (ok) rdt_path_add_circle(path, (float)x, (float)y, size, size);
+            if (ok) {
+                rdt_path_add_circle(path, (float)x, (float)y, size, size);
+                if (paint.stroke_width>0 && paint.stroke_color.a) {
+                    RdtPath* stroke=rdt_path_new();
+                    if (!stroke) {ok=geomap_fail(b,"circle stroke allocation failed");break;}
+                    // circle radius describes the inner fill; the stroke grows outwards.
+                    float radius=size+paint.stroke_width/2;
+                    rdt_path_add_circle(stroke,(float)x,(float)y,radius,radius);
+                    ok=geomap_add_shape(b,stroke,paint.stroke_color,paint.stroke_width);
+                }
+            }
         } else if (line || multi_line) ok = geomap_sequence(b, path, component, false, 0);
         else if (!component.isArray()) ok = geomap_fail(b, "polygon requires an array of rings");
         else if (!component.asArray().length()) continue;
@@ -177,8 +197,15 @@ static bool geomap_geometry(GeoMapBuild* b, ItemReader geometry, const char* lay
     if (!ok) { rdt_path_free(path); return false; }
     // map width zero hides a line; emitting it would request a PDF device hairline.
     if (!circles && !fills && size == 0) { rdt_path_free(path); return true; }
-    return geomap_add_shape(b, path, color, circles || fills ? -1 : size,
-        fills ? RDT_FILL_EVEN_ODD : RDT_FILL_WINDING);
+    RdtPath* outline=fills && paint.has_outline && paint.outline.a?rdt_path_clone(path):nullptr;
+    if (fills && paint.has_outline && paint.outline.a && !outline) {rdt_path_free(path);return geomap_fail(b,"outline allocation failed");}
+    ok=true;
+    if (!color.a || (circles && size==0)) rdt_path_free(path);
+    else ok=geomap_add_shape(b,path,color,circles || fills?-1:size,fills?RDT_FILL_EVEN_ODD:RDT_FILL_WINDING);
+    if (outline) {
+        if (ok) ok=geomap_add_shape(b,outline,paint.outline,1); else rdt_path_free(outline);
+    }
+    return ok;
 }
 static void geomap_evaluate(GeoMapBuild* b, const GeoMapStyle* style, ItemReader feature, GeoMapStyleResult* paint) {
     geomap_style_evaluate(style, feature, b->camera.zoom, paint);
@@ -194,14 +221,15 @@ static bool geomap_data(GeoMapBuild* b, ItemReader data, const char* type, const
         ItemReader features = geomap_field(data, "features");
         if (!features.isArray()) return geomap_fail(b, "invalid feature collection");
         for (int64_t i = 0; i < features.asArray().length(); i++)
-            if (!geomap_data(b, features.asArray().get(i), type, style, depth + 1)) return false;
+            { b->feature_index=i;if (!geomap_data(b, features.asArray().get(i), type, style, depth + 1)) return false; }
         return true;
     }
+    b->feature=data.item();b->record++;
     GeoMapStyleResult paint;
     geomap_evaluate(b, style, data, &paint);
     if (!paint.visible) return true;
     ItemReader geometry = geomap_is(kind, "Feature") ? geomap_field(data, "geometry") : data;
-    return geometry.isNull() || geomap_geometry(b, geometry, type, paint.color, paint.size);
+    return geometry.isNull() || geomap_geometry(b, geometry, type, paint);
 }
 static bool geomap_supported_attributes(GeoMapBuild* b, ElementReader element,
     const char* const* allowed, unsigned count) {
@@ -258,9 +286,14 @@ static bool geomap_compile(GeoMapBuild* b, Element* root) {
         ItemReader layer = map.childAt(i);
         if (strcmp(layer.asElement().tagName(), "layer")) continue;
         const char* type = geomap_text(geomap_field(layer, "type"));
-        GeoMapStyle style;
-        if (!geomap_style_compile(layer.asElement(), &style, b->style_diagnostic, sizeof(b->style_diagnostic)))
-            return geomap_fail(b, b->style_diagnostic);
+        auto* compiled=(GeoMapStyle*)mem_calloc(1,sizeof(GeoMapStyle),MEM_CAT_RENDER);
+        if (!compiled) return geomap_fail(b,"style allocation failed");
+        if (!geomap_style_compile(layer.asElement(),compiled,b->style_diagnostic,sizeof(b->style_diagnostic))) {
+            mem_free(compiled);return geomap_fail(b,b->style_diagnostic);
+        }
+        if (!arraylist_append(b->styles,compiled)) {geomap_style_destroy(compiled);mem_free(compiled);return geomap_fail(b,"style list allocation failed");}
+        const GeoMapStyle& style=*compiled;
+        b->source=nullptr;b->layer=style.id;b->feature=ItemNull;b->feature_index=0;
         b->warnings = 0;
         bool ok = true;
         if (style.kind == GEOMAP_BACKGROUND) {
@@ -282,80 +315,165 @@ static bool geomap_compile(GeoMapBuild* b, Element* root) {
                 if (!strcmp(candidate.asElement().tagName(), "source") && geomap_is(geomap_field(candidate, "id"), reference)) source = candidate;
             }
             if (source.isNull()) ok = geomap_fail(b, "layer source does not exist");
-            else ok = geomap_data(b, geomap_field(source, "data"), type, &style);
+            else {b->source=reference;ok = geomap_data(b, geomap_field(source, "data"), type, &style);}
         }
-        // no compiled expression outlives the rooted model borrowed by this paint call.
-        geomap_style_destroy(&style);
         if (!ok) return false;
     }
     return true;
 }
-static bool geomap_paint_element(PaintList* paint, Element* model, Rect viewport, char* diagnostic, size_t capacity) {
-    if (diagnostic && capacity) diagnostic[0] = 0;
-    if (!paint || !model || !isfinite(viewport.width) || !isfinite(viewport.height) ||
-        viewport.width <= 0 || viewport.height <= 0) return false;
-    GeoMapBuild build = {};
-    build.camera.width = viewport.width; build.camera.height = viewport.height;
-    build.shapes = arraylist_new(16);
-    bool ok = build.shapes && model && geomap_compile(&build, model);
+static GeoMapIndexNode geomap_shape_bounds(const GeoMapShape* shape,int index) {
+    GeoMapIndexNode node={};node.shape=index;node.first=node.second=-1;
+    if (!rdt_path_get_bounds(shape->path,&node.left,&node.top,&node.right,&node.bottom)) return node;
+    float reach=shape->stroke_width<0?0:shape->stroke_width/2*(shape->join==RDT_JOIN_MITER?4:1);
+    node.left-=reach;node.top-=reach;node.right+=reach;node.bottom+=reach;return node;
+}
+static int geomap_index_compare(const void* a,const void* b) {
+    const auto* x=(const GeoMapIndexNode*)a;const auto* y=(const GeoMapIndexNode*)b;
+    float delta=(x->left+x->right)-(y->left+y->right);
+    return delta<0?-1:delta>0?1:x->shape-y->shape;
+}
+static int geomap_index_build(GeoMapFrame* frame,unsigned begin,unsigned end,unsigned* next) {
+    if (end-begin==1) return (int)begin; // INT_CAST_OK: bounded shape index.
+    unsigned middle=begin+(end-begin)/2,position=(*next)++;
+    int first=geomap_index_build(frame,begin,middle,next),second=geomap_index_build(frame,middle,end,next);
+    const auto& a=frame->index[first];const auto& b=frame->index[second];
+    frame->index[position]={fminf(a.left,b.left),fminf(a.top,b.top),fmaxf(a.right,b.right),fmaxf(a.bottom,b.bottom),first,second,-1};
+    return (int)position; // INT_CAST_OK: bounded index node.
+}
+void geomap_frame_retain(GeoMapFrame* frame) {if(frame) frame->references++;}
+void geomap_frame_release(GeoMapFrame* frame) {
+    if (!frame || --frame->references) return;
+    if (frame->shapes) {
+        for (int i=0;i<frame->shapes->length;i++) {auto* shape=(GeoMapShape*)frame->shapes->data[i];rdt_path_free(shape->path);mem_free(shape);}
+        arraylist_free(frame->shapes);
+    }
+    if (frame->styles) {
+        for (int i=0;i<frame->styles->length;i++) {auto* style=(GeoMapStyle*)frame->styles->data[i];geomap_style_destroy(style);mem_free(style);}
+        arraylist_free(frame->styles);
+    }
+    mem_free(frame->index);mem_pool_destroy(frame->pool);mem_free(frame);
+}
+GeoMapFrame* geomap_plan(Element* model,float width,float height,char* diagnostic,size_t capacity) {
+    if (diagnostic && capacity) diagnostic[0]=0;
+    if (!model || !isfinite(width) || !isfinite(height) || width<=0 || height<=0 || width>1048576 || height>1048576) return nullptr;
+    auto* frame=(GeoMapFrame*)mem_calloc(1,sizeof(GeoMapFrame),MEM_CAT_RENDER);
+    if (!frame) return nullptr;
+    frame->references=1;frame->pool=mem_pool_create(nullptr,MEM_ROLE_RENDER,"geomap.frame");
+    frame->input=frame->pool?Input::create(frame->pool,nullptr):nullptr;
+    frame->shapes=arraylist_new(16);frame->styles=arraylist_new(8);
+    GeoMapBuild build={};build.camera.width=width;build.camera.height=height;
+    build.shapes=frame->shapes;build.styles=frame->styles;
+    bool ok=frame->input && frame->shapes && frame->styles;
     if (ok) {
-        RdtMatrix transform = rdt_matrix_translate(viewport.x, viewport.y);
-        RdtPath* clip = rdt_path_new();
-        if (!clip) ok = geomap_fail(&build, "clip allocation failed");
-        else {
-            rdt_path_add_rect(clip, 0, 0, viewport.width, viewport.height, 0, 0);
-            paint_push_clip(paint, clip, &transform);
-            rdt_path_free(clip); // paint_push_clip owns its clone, including deferred export effects.
-            for (int i = 0; i < build.shapes->length; i++) {
-                auto* shape = (GeoMapShape*)build.shapes->data[i];
-                int index = paint_list_count(paint);
-                PaintOp op = shape->stroke_width >= 0 ? PAINT_STROKE_PATH : PAINT_FILL_PATH;
-                if (shape->stroke_width >= 0) paint_stroke_path(paint, shape->path, shape->color, shape->stroke_width,
-                    RDT_CAP_BUTT, RDT_JOIN_ROUND, nullptr, 0, 0, &transform);
-                else paint_fill_path(paint, shape->path, shape->color, shape->rule, &transform);
-                if (paint_list_take_path_payload(paint, index, op)) shape->path = nullptr;
-            }
-            paint_pop_clip(paint);
+        // every retained expression literal, property and feature belongs to this snapshot.
+        MarkBuilder builder(frame->input);frame->input->root=builder.deep_copy((Item){.element=model});
+        ok=get_type_id(frame->input->root)==LMD_TYPE_ELEMENT && geomap_compile(&build,frame->input->root.element);
+    }
+    frame->camera=build.camera;
+    unsigned count=frame->shapes?(unsigned)frame->shapes->length:0;
+    if (ok && count) {
+        frame->index=(GeoMapIndexNode*)mem_calloc(count*2-1,sizeof(GeoMapIndexNode),MEM_CAT_RENDER);
+        ok=frame->index!=nullptr;
+        if (ok) {
+            for (unsigned i=0;i<count;i++) frame->index[i]=geomap_shape_bounds((GeoMapShape*)frame->shapes->data[i],(int)i); // INT_CAST_OK: shape index.
+            qsort(frame->index,count,sizeof(GeoMapIndexNode),geomap_index_compare);
+            frame->index_count=count;geomap_index_build(frame,0,count,&frame->index_count);
         }
     }
     if (!ok) {
-        const char* message = build.diagnostic ? build.diagnostic : "map allocation failed";
-        if (diagnostic && capacity) str_copy(diagnostic, capacity, message, strlen(message));
-        log_error("geomap projection: %s", message);
-        // a rejected raw element has an explicit visible error state instead of a partial map.
-        Color error_color = {}; error_color.r = 255; error_color.g = error_color.b = 224; error_color.a = 255;
-        paint_fill_rect(paint, viewport.x, viewport.y, viewport.width, viewport.height, error_color);
+        const char* message=build.diagnostic?build.diagnostic:"map frame allocation failed";
+        if(diagnostic && capacity) str_copy(diagnostic,capacity,message,strlen(message));
+        geomap_frame_release(frame);return nullptr;
     }
-    if (build.shapes) {
-        for (int i = 0; i < build.shapes->length; i++) {
-            auto* shape = (GeoMapShape*)build.shapes->data[i];
-            if (shape->path) rdt_path_free(shape->path);
-            mem_free(shape);
-        }
-        arraylist_free(build.shapes);
-    }
-    return ok;
+    return frame;
 }
-bool geomap_paint(PaintList* paint, DomElement* root, Rect viewport, char* diagnostic, size_t capacity) {
-    return geomap_paint_element(paint, root ? dom_element_to_element(root) : nullptr, viewport, diagnostic, capacity);
-}
-StrBuf* geomap_svg(Element* model, float width, float height) {
-    Arena* arena = arena_create_default();
-    if (!arena) return nullptr;
-    PaintList paint = {}; paint_list_init(&paint, arena);
-    StrBuf* out = nullptr;
-    if (geomap_paint_element(&paint, model, {0,0,width,height}, nullptr, 0)) {
-        out = strbuf_new();
-        if (out) {
-            strbuf_append_format(out, "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"%.9g\" height=\"%.9g\" viewBox=\"0 0 %.9g %.9g\">\n", width, height, width, height);
-            PaintSvgLoweringOptions options = {};
-            options.caps = lam::up(render_export_target_get_caps(RENDER_EXPORT_TARGET_SVG));
-            paint_ir_lower_svg(&paint, out, &options, nullptr);
-            strbuf_append_str(out, "</svg>");
-        }
+void geomap_frame_paint(PaintList* paint,const GeoMapFrame* frame,Rect viewport) {
+    if (!paint || !frame) return;
+    RdtMatrix transform=rdt_matrix_translate(viewport.x,viewport.y);
+    RdtPath* clip=rdt_path_new();if (!clip) return;
+    rdt_path_add_rect(clip,0,0,viewport.width,viewport.height,0,0);paint_push_clip(paint,clip,&transform);rdt_path_free(clip);
+    for (int i=0;i<frame->shapes->length;i++) {
+        auto* shape=(GeoMapShape*)frame->shapes->data[i];
+        if (shape->stroke_width>=0) paint_stroke_path(paint,shape->path,shape->color,shape->stroke_width,
+            shape->cap,shape->join,nullptr,0,0,&transform);
+        else paint_fill_path(paint,shape->path,shape->color,shape->rule,&transform);
     }
-    paint_list_destroy(&paint); arena_destroy(arena);
-    return out;
+    paint_pop_clip(paint);
+}
+StrBuf* geomap_frame_svg(const GeoMapFrame* frame) {
+    if (!frame) return nullptr;
+    Arena* arena=arena_create_default();if (!arena) return nullptr;
+    PaintList paint={};paint_list_init(&paint,arena);
+    geomap_frame_paint(&paint,frame,{0,0,(float)frame->camera.width,(float)frame->camera.height});
+    StrBuf* out=strbuf_new();
+    if (out) {
+        strbuf_append_format(out,"<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"%.9g\" height=\"%.9g\" viewBox=\"0 0 %.9g %.9g\">\n",frame->camera.width,frame->camera.height,frame->camera.width,frame->camera.height);
+        PaintSvgLoweringOptions options={};options.caps=lam::up(render_export_target_get_caps(RENDER_EXPORT_TARGET_SVG));
+        paint_ir_lower_svg(&paint,out,&options,nullptr);strbuf_append_str(out,"</svg>");
+    }
+    paint_list_destroy(&paint);arena_destroy(arena);return out;
+}
+bool geomap_shape_hit(const GeoMapShape* shape,Rect query,bool rectangle,float tolerance) {
+    if (!shape || !shape->source || !shape->color.a) return false;
+    return dom_geometry_path_query(shape->path,query.x,query.y,query.x+query.width,query.y+query.height,rectangle,
+        shape->stroke_width<0?(int)shape->rule:-1,shape->stroke_width<0?tolerance*2:shape->stroke_width+tolerance*2,shape->cap,shape->join);
+}
+struct GeoMapEntry {GeoMapEntry* next;DomNodeRef root;GeoMapFrame* frame;uint64_t epoch,style_epoch,revision;float width,height;bool valid;char diagnostic[256];};
+struct GeoMapRegistry:DomDocumentResourceData {GeoMapEntry* entries;};
+static void geomap_registry_destroy(DomDocumentResourceData* data) {
+    auto* registry=(GeoMapRegistry*)data;
+    while(registry->entries) {auto* entry=registry->entries;registry->entries=entry->next;geomap_frame_release(entry->frame);mem_free(entry);}
+    mem_free(registry);
+}
+static GeoMapRegistry* geomap_registry(DomDocument* document,bool create) {
+    if (!document) return nullptr;
+    for(DomDocumentResource* resource=document->resources;resource;resource=resource->next)
+        if(resource->destroy==geomap_registry_destroy) return (GeoMapRegistry*)resource->data.get();
+    if (!create) return nullptr;
+    auto* registry=(GeoMapRegistry*)mem_calloc(1,sizeof(GeoMapRegistry),MEM_CAT_RENDER);
+    if (!registry || !dom_document_add_resource(document,registry,geomap_registry_destroy)) {mem_free(registry);return nullptr;}
+    return registry;
+}
+void geomap_release_subtree(DomNode* root) {
+    if(!root || !root->is_element()) return;
+    auto* registry=geomap_registry(root->as_element()->doc,false);if(!registry) return;
+    auto** link=&registry->entries;
+    while(*link) {
+        auto* entry=*link;auto* node=dom_node_ref_validate(root->as_element()->doc,entry->root);bool contained=!node;
+        for(auto* parent=node;parent;parent=parent->parent) if(parent==root) {contained=true;break;}
+        if(contained) {*link=entry->next;geomap_frame_release(entry->frame);mem_free(entry);} else link=&entry->next;
+    }
+}
+static GeoMapEntry* geomap_entry(DomElement* root,bool create) {
+    if(!root || root->tag_id!=MARKUP_NAME_GEOMAP) return nullptr;
+    auto* registry=geomap_registry(root->doc,create);if(!registry) return nullptr;
+    DomNodeRef ref=dom_node_ref(root);
+    for(auto* entry=registry->entries;entry;entry=entry->next)
+        if(entry->root.address==ref.address && entry->root.expected_id==ref.expected_id) return entry;
+    if(!create) return nullptr;
+    auto* entry=(GeoMapEntry*)mem_calloc(1,sizeof(GeoMapEntry),MEM_CAT_RENDER);if(!entry) return nullptr;
+    entry->root=ref;entry->epoch=UINT64_MAX;entry->next=registry->entries;registry->entries=entry;return entry;
+}
+GeoMapFrame* geomap_displayed_frame(DomElement* root) {auto* entry=geomap_entry(root,false);return entry && entry->valid?entry->frame:nullptr;}
+bool geomap_paint(PaintList* paint,DomElement* root,Rect viewport,char* diagnostic,size_t capacity) {
+    auto* entry=geomap_entry(root,true);if(!entry) return false;
+    if(entry->epoch!=root->doc->mutation_epoch || entry->style_epoch!=root->doc->style_query_epoch || entry->width!=viewport.width || entry->height!=viewport.height) {
+        GeoMapFrame* frame=geomap_plan(dom_element_to_element(root),viewport.width,viewport.height,entry->diagnostic,sizeof(entry->diagnostic));
+        geomap_frame_release(entry->frame);entry->frame=frame;entry->valid=frame!=nullptr;
+        entry->epoch=root->doc->mutation_epoch;entry->style_epoch=root->doc->style_query_epoch;entry->width=viewport.width;entry->height=viewport.height;
+        if(frame) frame->revision=++entry->revision;
+    }
+    if(diagnostic && capacity) str_copy(diagnostic,capacity,entry->diagnostic,strlen(entry->diagnostic));
+    if(entry->valid) geomap_frame_paint(paint,entry->frame,viewport);
+    else {
+        Color color={};color.r=255;color.g=color.b=224;color.a=255;
+        paint_fill_rect(paint,viewport.x,viewport.y,viewport.width,viewport.height,color);
+        log_error("geomap projection: %s",entry->diagnostic);
+    }
+    return entry->valid;
+}
+StrBuf* geomap_svg(Element* model,float width,float height) {
+    GeoMapFrame* frame=geomap_plan(model,width,height,nullptr,0);StrBuf* out=geomap_frame_svg(frame);geomap_frame_release(frame);return out;
 }
 void render_geomap_content(RasterRenderContext* context, ViewBlock* view) {
     if (!context || !context->paint_list || !context->dl || !view) return;

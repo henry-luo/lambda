@@ -1,14 +1,16 @@
 import dom
 import c: lambda.ui.core.component
 import collection: lambda.ui.core.collection
+import interaction: lambda.ui.core.interaction
 
 pub fn choice(kind, props) element^ {
-    let valid = collection.validate(props.items, string(kind))^;
-    if (not (props.id is string) or props.id == "") raise c.fail(kind, "a nonempty id is required")
-    else if (not c.enum_valid(props.orientation, ["horizontal", "vertical"])^) raise c.fail(kind, "invalid orientation")
-    else if (contains(props,'value') and not any([for (item in collection.enabled(props.items)) item.key == props.value])) raise c.fail(kind,"value must identify an enabled item")
-    else if (contains(props,'default_value') and not any([for (item in collection.enabled(props.items)) item.key == props.default_value])) raise c.fail(kind,"default_value must identify an enabled item")
-    else c.node(kind, props, null, ["items", "value", "default_value", "orientation", "disabled"])^
+    let valid = collection.validate(props.items, string(kind))^
+    let identity = collection.require_id(props,kind)^
+    let flags = c.boolean_props(props,["keep_mounted"],kind)^;
+    if (not c.enum_valid(props.orientation, ["horizontal", "vertical"])^) raise c.fail(kind, "invalid orientation")
+    else if (c.has(props,'value') and not any([for (item in collection.enabled(props.items)) item.key == props.value])) raise c.fail(kind,"value must identify an enabled item")
+    else if (c.has(props,'default_value') and not any([for (item in collection.enabled(props.items)) item.key == props.default_value])) raise c.fail(kind,"default_value must identify an enabled item")
+    else c.node(kind, props, null, ["items", "value", "default_value", "orientation", "disabled",*(if (kind == 'tabs') ["keep_mounted"] else [])])^
 }
 fn selected(node, current) => c.option(node.props, "value", current)
 fn choice_id(node, index) => node.props.id ++ "-item-" ++ string(index)
@@ -26,20 +28,20 @@ fn choices(node, active) {
                 *:c.boolean_attr("disabled", node.props.disabled or item.disabled),
                 *:(if (tabs) {'aria-selected':c.aria(item.key == active),'aria-controls':panel_id(node,index)}
                     else if (menu) {} else {'aria-checked':c.aria(item.key == active)}), c.render(item.label)>]>,
-        if (tabs) [for (index, item in node.props.items where item.key == active)
+        if (tabs) [for (index, item in node.props.items where item.key == active or node.props.keep_mounted)
             <div id:panel_id(node,index), class:"dtna-tab-panel", role:"tabpanel", tabindex:"0",
+                *:c.boolean_attr("hidden",item.key != active), style:if (item.key != active) "display:none;" else null,
                 ["aria-labelledby"]:choice_id(node,index), c.render(item.children)>] else null]>
 }
 pn clicked(node, evt) {
-    let target = dom.closest(evt.target, "[data-dtna-choice]")
+    let target = interaction.target(node, evt, "[data-dtna-choice]")
     let index = if (target == null) null else (int(dom.get_attribute(target, "data-dtna-choice")) or null);
     if (index == null or node.props.disabled or node.props.items[index].disabled) null else node.props.items[index].key
 }
 pn focus_choice(node, evt, key) {
-    let root = dom.closest(evt.target, ".dtna-" ++ string(node.kind))
     let indices = [for (index, item in node.props.items where item.key == key) index];
-    if (root != null and len(indices) == 1) {
-        dom.focus_set(dom.query_selector(root, "[data-dtna-choice='" ++ string(indices[0]) ++ "']"), true)
+    if (len(indices) == 1) {
+        interaction.focus(node,evt,"[data-dtna-choice='" ++ string(indices[0]) ++ "']")
     }
 }
 view dtna_choices: <dtna kind: 'tabs' | 'segmented' | 'menu'> state current:collection.initial(~.props.items, ~.props) {
@@ -53,7 +55,7 @@ on click(evt) {
     'pass'
 }
 on keydown(evt) {
-    if (~.props.disabled or not contains(["ArrowLeft","ArrowRight","ArrowUp","ArrowDown","Home","End"],evt.key)) { return 'pass' }
+    if (~.props.disabled or interaction.target(~,evt,"[data-dtna-choice]") == null or not contains(["ArrowLeft","ArrowRight","ArrowUp","ArrowDown","Home","End"],evt.key)) { return 'pass' }
     let key = collection.move(~.props.items, selected(~,current), evt.key)
     if (key == null) { return 'pass' }
     current = key
@@ -70,21 +72,24 @@ pub fn pagination(props) element^ {
         raise c.fail("pagination", "total must be nonnegative; page_size and current must be positive ints")
     else c.node('pagination',props,null,["total","page_size","current","default_current","disabled"])^
 }
+pub fn page_controls(page, total, disabled = false) => [
+        <button type:"button", ["data-dtna-page"]:string(page - 1), ["aria-label"]:"Previous page",
+            *:c.boolean_attr("disabled",disabled or page == 1), "‹">,
+        *[for (page_number in 1 to total where page_number == 1 or page_number == total or abs(page_number-page) <= 2)
+            <button type:"button", ["data-dtna-page"]:string(page_number),
+                class:if (page_number == page) "dtna-page-active" else null,
+                ["aria-current"]:if (page_number == page) "page" else null, *:c.boolean_attr("disabled",disabled), string(page_number)>],
+        <button type:"button", ["data-dtna-page"]:string(page + 1), ["aria-label"]:"Next page",
+            *:c.boolean_attr("disabled",disabled or page == total), "›">]
+
 view dtna_pagination: <dtna kind:'pagination'> state current:c.option(~.props,"default_current",1) {
     let total = collection.page_count(c.option(~.props,"total",0),c.option(~.props,"page_size",10))
     let page = min(total,c.option(~.props,"current",current));
     <nav *:c.attrs(~.props), class:c.classes('pagination',~.props), ["aria-label"]:c.option(~.props,"label","Pagination"),
-        *[<button type:"button", ["data-dtna-page"]:string(page - 1), ["aria-label"]:"Previous page",
-            *:c.boolean_attr("disabled",~.props.disabled or page == 1), "‹">,
-        *[for (page_number in 1 to total where page_number == 1 or page_number == total or abs(page_number-page) <= 2)
-            <button type:"button", ["data-dtna-page"]:string(page_number),
-                class:if (page_number == page) "dtna-page-active" else null,
-                ["aria-current"]:if (page_number == page) "page" else null, *:c.boolean_attr("disabled",~.props.disabled), string(page_number)>],
-        <button type:"button", ["data-dtna-page"]:string(page + 1), ["aria-label"]:"Next page",
-            *:c.boolean_attr("disabled",~.props.disabled or page == total), "›">]>
+        *page_controls(page,total,~.props.disabled == true)>
 }
 on click(evt) {
-    let target = dom.closest(evt.target,"[data-dtna-page]")
+    let target = interaction.target(~,evt,"[data-dtna-page]")
     if (target == null or ~.props.disabled or dom.get_state(target,"disabled")) { return 'pass' }
     let page = int(dom.get_attribute(target,"data-dtna-page")) or 1
     current = page

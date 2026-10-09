@@ -95,6 +95,9 @@ bool dom_svg_element_geometry_bounds(void* element, float* left, float* top,
     float* right, float* bottom);
 // SVG2 conditional processing uses user preferences; requiredFeatures is obsolete and ignored.
 bool dom_svg_conditions_match(const char* extensions, const char* languages, const char* preferences);
+// realm-neutral fill/stroke query over the same contour walker used by SVG hit testing.
+bool dom_geometry_path_query(const void* path, float left, float top, float right, float bottom,
+    bool rectangle, int fill_rule, float stroke_width, int cap, int join);
 bool dom_svg_element_is_eligible(void* element);
 void* dom_svg_switch_selected_child(void* element);
 const char* dom_document_preferred_languages(void* document);

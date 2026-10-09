@@ -364,6 +364,8 @@ enum BackfaceCheck { BACKFACE_SELF, BACKFACE_SUBTREE, BACKFACE_HIT_TEST };
 bool view_backface_is_hidden(View* view, BackfaceCheck check = BACKFACE_SELF);
 bool rdt_matrix4_backface_visible(const RdtMatrix4* matrix);
 bool view_get_foreign_object_matrix(View* view, RdtMatrix* out_matrix, bool include_self_transform = true);
+// inverse of the painted CSS plane, including ancestor scroll, transforms and perspective.
+bool view_client_to_local(View* view, float x, float y, float* local_x, float* local_y);
 
 static inline RdtMatrix rdt_matrix_identity(void) {
     RdtMatrix m = { 1, 0, 0,  0, 1, 0,  0, 0, 1 };

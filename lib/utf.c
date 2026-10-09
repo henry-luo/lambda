@@ -19,17 +19,20 @@ bool utf8_key_is_canonical(const char* chars, size_t length) {
     return true;
 }
 
-size_t utf8_canonical_key(const char* chars, size_t length, char* out) {
+size_t utf8_canonical_slice(const char* chars, size_t length, size_t start, size_t count, char* out) {
     Utf16Iterator iter = {(const unsigned char*)chars, (int64_t)length, 0, -1};
     uint16_t unit;
+    for (size_t i = 0; i < start; i++) if (!utf16_iterator_next(&iter, &unit)) return 0;
     int pending = -1;
     size_t size = 0;
-    while (pending >= 0 || utf16_iterator_next(&iter, &unit)) {
+    while (pending >= 0 || (count && utf16_iterator_next(&iter, &unit))) {
         if (pending >= 0) { unit = (uint16_t)pending; pending = -1; }
+        else count--;
         uint32_t cp = unit;
         if (unit >= 0xd800 && unit <= 0xdbff) {
             uint16_t next;
-            if (utf16_iterator_next(&iter, &next)) {
+            if (count && utf16_iterator_next(&iter, &next)) {
+                count--;
                 if (next >= 0xdc00 && next <= 0xdfff) cp = utf16_decode_pair(unit, next);
                 else pending = next;
             }
@@ -40,6 +43,26 @@ size_t utf8_canonical_key(const char* chars, size_t length, char* out) {
         size += count;
     }
     return size;
+}
+
+size_t utf8_canonical_key(const char* chars, size_t length, char* out) {
+    return utf8_canonical_slice(chars, length, 0, SIZE_MAX, out);
+}
+
+int64_t utf16_find(const char* chars, size_t length, const char* needle, size_t needle_length, size_t start) {
+    Utf16Iterator scan = {(const unsigned char*)chars, (int64_t)length, 0, -1};
+    uint16_t unit;
+    for (size_t i = 0; i < start; i++) if (!utf16_iterator_next(&scan, &unit)) return -1;
+    for (size_t at = start;; at++) {
+        Utf16Iterator text = scan, pattern = {(const unsigned char*)needle, (int64_t)needle_length, 0, -1};
+        uint16_t expected;
+        bool match = true;
+        while (utf16_iterator_next(&pattern, &expected)) {
+            if (!utf16_iterator_next(&text, &unit) || unit != expected) { match = false; break; }
+        }
+        if (match) return (int64_t)at;
+        if (!utf16_iterator_next(&scan, &unit)) return -1;
+    }
 }
 
 /* ══════════════════════════════════════════════════════════════════════

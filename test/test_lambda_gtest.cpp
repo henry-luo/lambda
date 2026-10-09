@@ -40,7 +40,7 @@ static const size_t NUM_FUNCTIONAL_TEST_DIRECTORIES = sizeof(FUNCTIONAL_TEST_DIR
 TEST(UiDtnaTests, PackageContractsAgreeAcrossTiers) {
     const char* tiers[] = {"interp", "auto", "jit"};
     const char* names[] = {"dtna_attribute_union", "dtna_collections",
-        "dtna_contracts", "dtna_display", "dtna_tokens"};
+        "dtna_contracts", "dtna_disclosure", "dtna_display", "dtna_imported_outcomes", "dtna_table", "dtna_tokens", "dtna_tree"};
     for (const char* tier : tiers) {
         SCOPED_TRACE(tier);
         for (const char* name : names) {

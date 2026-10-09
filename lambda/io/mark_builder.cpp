@@ -901,16 +901,35 @@ Item MarkBuilder::deep_copy_typed(lam::ItemOf<Tag> typed) {
         return copied;
     } else if constexpr (Tag == LMD_TYPE_ARRAY_NUM) {
         ArrayNum* arr = typed.ptr();
-        size_t elem_size = sizeof(int64_t);  // 8 bytes for all elem types
-        size_t size = sizeof(ArrayNum) + arr->length * elem_size;
-        ArrayNum* new_arr = (ArrayNum*)arena_alloc(arena_, size);
+        size_t elem_size = ELEM_TYPE_SIZE[arr->get_elem_type() >> 4];
+        if (!elem_size || arr->length<0 || (uint64_t)arr->length>(SIZE_MAX-sizeof(ArrayNum))/elem_size) return ItemNull;
+        size_t size = sizeof(ArrayNum) + (size_t)arr->length*elem_size;
+        auto* new_arr = (ArrayNum*)arena_calloc(arena_,size);
         if (!new_arr) return ItemNull;
-
+        // materialize owned C-order storage; copying a view must retain neither its base nor its strides.
         new_arr->type_id = LMD_TYPE_ARRAY_NUM;
-        new_arr->set_elem_type(arr->get_elem_type());  // copy elem_type from map_kind byte
+        new_arr->set_elem_type(arr->get_elem_type());
         new_arr->capacity = new_arr->length = arr->length;
-        new_arr->items = (int64_t*)((char*)new_arr + sizeof(ArrayNum));
-        memcpy(new_arr->items, arr->items, arr->length * elem_size);
+        new_arr->data = (char*)new_arr + sizeof(ArrayNum);
+        for (int64_t i=0;i<arr->length;i++) {
+            int64_t offset=array_num_element_offset(arr,i);
+            memcpy((char*)new_arr->data+(size_t)i*elem_size,(char*)arr->data+offset*(int64_t)elem_size,elem_size);
+        }
+        if (arr->is_ndim && arr->extra) {
+            const auto* source=(const ArrayNumShape*)(uintptr_t)arr->extra;
+            if (!source->ndim || source->ndim>LAMBDA_ARRAY_NUM_MAX_NDIM) return ItemNull;
+            size_t shape_size=sizeof(ArrayNumShape)+2*(size_t)source->ndim*sizeof(int64_t);
+            auto* shape=(ArrayNumShape*)arena_calloc(arena_,shape_size);
+            if (!shape) return ItemNull;
+            shape->ndim=source->ndim;shape->is_c_contig=1;shape->is_f_contig=source->ndim==1;
+            int64_t stride=1;
+            for (int axis=source->ndim-1;axis>=0;axis--) {
+                int64_t dimension=array_num_shape_dims((ArrayNumShape*)source)[axis];
+                array_num_shape_dims(shape)[axis]=dimension;array_num_shape_strides(shape)[axis]=stride;
+                stride*=dimension;
+            }
+            new_arr->is_ndim=1;new_arr->extra=(int64_t)(uintptr_t)shape;
+        }
         return mark_item_from_bits((uint64_t)(uintptr_t)new_arr);
     } else if constexpr (Tag == LMD_TYPE_ARRAY) {
         Array* arr = typed.ptr();

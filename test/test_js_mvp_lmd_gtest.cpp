@@ -16,9 +16,9 @@ class JsMvpLmd : public ::testing::Test {
 protected:
     MvpLmdExecution* execution = NULL;
     void TearDown() override { mvp_lmd_destroy(execution); }
-    Item run(const char* source) {
+    Item run(const char* source, const MvpLmdHost* host = NULL) {
         mvp_lmd_destroy(execution);
-        execution = mvp_lmd_execute(source, strlen(source));
+        execution = mvp_lmd_execute(source, strlen(source), NULL, host);
         const char* diagnostic = mvp_lmd_diagnostic(execution);
         EXPECT_EQ(diagnostic, nullptr) << source << "\n" << (diagnostic ? diagnostic : "");
         return mvp_lmd_result(execution);
@@ -49,6 +49,200 @@ protected:
         return read_text_file(path);
     }
 };
+TEST_F(JsMvpLmd, HostClockOutputAndFiles) {
+    ASSERT_TRUE(create_dir("temp"));
+    FILE* output = file_open_regular_write("temp/mvp_host_output.txt", true);
+    ASSERT_NE(output, nullptr);
+    const char* arguments[] = {"lambda.exe", "host.js", "123"};
+    MvpLmdHost host = {3, arguments, output};
+    Item result = run(R"JS(
+        const first=performance.now(); const clock=performance.now;
+        const fs=require('fs');
+        fs.writeFileSync('temp/mvp_host_file.txt','a\u0000b');
+        console.log('host',123,true,null,undefined);
+        process.stdout.write(fs.readFileSync('temp/mvp_host_file.txt','utf8'));
+        typeof clock==='function' && clock()>=first && first>=0 &&
+          process.argv.length===3 && process.argv[2]==='123';
+    )JS", &host);
+    EXPECT_EQ(result.item, ITEM_TRUE);
+    ASSERT_EQ(fclose(output), 0);
+    char* bytes = NULL; size_t size = 0;
+    ASSERT_TRUE(file_read_all("temp/mvp_host_output.txt", MEM_CAT_TEMP, &bytes, &size));
+    const char expected[] = "host 123 true null undefined\na\0b";
+    EXPECT_EQ(size, sizeof(expected) - 1);
+    if (size == sizeof(expected) - 1) EXPECT_EQ(memcmp(bytes, expected, size), 0);
+    mem_free(bytes);
+}
+TEST_F(JsMvpLmd, PublicStaticFields) {
+    boolean(R"JS(
+        let order='';
+        function mark(v){order+=v;return v;}
+        class A { static first=mark('a'); static second=A.first+mark('b'); static self=this; }
+        class B extends A { static third=B.second+mark('c'); }
+        let ok=order==='abc' && A.second==='ab' && B.third==='abc' && A.self===A;
+        B.first=7; ok=ok && A.first==='a' && B.first===7;
+        delete B.first; ok=ok && B.first==='a';
+        A.first=8; delete A.second; A.second=9;
+        ok && Object.keys(A).join(',')==='first,self,second' && Object.keys(B).join(',')==='third';
+    )JS");
+    error("class A { static x=outside(); } function outside(){return A;} A", "ReferenceError");
+}
+TEST_F(JsMvpLmd, Utf16RangesSearchAndSplit) {
+    boolean(R"JS(
+        let text='a\ud83d\ude00b';
+        text.substring(3,1)==='\ud83d\ude00' && text.slice(-3,-1)==='\ud83d\ude00' &&
+        text.substring(1,2)==='\ud83d' && text.slice(2,3)==='\ude00' &&
+        text.substring(NaN,undefined)===text && text.slice(3,1)==='' &&
+        text.indexOf('\ude00')===2 && text.indexOf('b',Infinity)===-1 &&
+        text.startsWith('\ude00',2) && text.startsWith('',Infinity) &&
+        text.split('').length===4 && text.split('')[1]==='\ud83d' &&
+        'a,b,'.split(',').join('|')==='a|b|' && ',a'.split(',',1)[0]==='' &&
+        'a,b'.split(undefined)[0]==='a,b' && 'anullb'.split(null)[1]==='b' &&
+        ''.split('').length===0 && ''.split(',').length===1 &&
+        'a'.split(',',0).length===0 && 'abc'.toUpperCase()==='ABC' &&
+        Number(' 12.5 ')===12.5 && String(-0)==='0';
+    )JS");
+}
+TEST_F(JsMvpLmd, MapCallbackSharesLiveTraversal) {
+    boolean(R"JS(
+        let values=new Array(4); values[1]=3; values[3]=5; let calls=0;
+        let result=values.map(function(value,index,array){
+            calls++; if(index===1){array[2]=4;array.push(7);} return value*index;
+        });
+        calls===3 && result.length===4 && !(0 in result) &&
+        result[1]===3 && result[2]===8 && result[3]===15 && values.length===5;
+    )JS");
+}
+TEST_F(JsMvpLmd, IntegerParsingAndFixedRounding) {
+    boolean(R"JS(
+        parseInt('  -0x10tail')===-16 && parseInt('11',2)===3 &&
+        parseInt('123xyz',10)===123 && parseInt('11',4294967298)===3 &&
+        parseInt('xyz')!==parseInt('xyz') && 1/parseInt('-0')===-Infinity &&
+        (1.25).toFixed(1)==='1.3' && (1.75).toFixed(1)==='1.8' &&
+        (-1.25).toFixed(1)==='-1.3' && (1.005).toFixed(2)==='1.00' &&
+        (2.55).toFixed(1)==='2.5' && (-0).toFixed(2)==='0.00' &&
+        (-0.001).toFixed(2)==='-0.00' && (Infinity).toFixed(3)==='Infinity' &&
+        (1e21).toFixed(2)==='1e+21' && Math.round(-1.5)===-1 &&
+        Math.round(1.5)===2 && 1/Math.round(-0.1)===-Infinity &&
+        1/Math.round(-0)===-Infinity;
+    )JS");
+    error("(NaN).toFixed(101)", "RangeError");
+}
+TEST_F(JsMvpLmd, ArrayMutationAndEntrySpread) {
+    boolean(R"JS(
+        let a=new Array(5); a[0]=3; a[2]=undefined; a[4]=1;
+        let alias=a; let reverse=a.reverse();
+        let ok=reverse===a && alias[0]===1 && !(1 in a) && (2 in a) && a[4]===3;
+        let sorted=a.sort(function(x,y){return x-y;});
+        ok=ok && sorted===a && a[0]===1 && a[1]===3 && (2 in a) && !(3 in a);
+        let ties=[{k:1,v:'a'},{k:0,v:'b'},{k:1,v:'c'}];
+        ties.sort(function(x,y){return x.k-y.k;});
+        let map=new Map(); map.set('b',2); map.set('a',1); map.delete('b'); map.set('b',3);
+        let pairs=[0,...map.entries(),4]; let keys=[...map.keys()]; let values=[...map.values()];
+        let holes=[...new Array(2)];
+        ok && ties[1].v==='a' && ties[2].v==='c' && pairs.length===4 && pairs[1][0]==='a' &&
+          pairs[2][1]===3 && keys.join(',')==='a,b' && values.join(',')==='1,3' &&
+          (0 in holes) && holes[0]===undefined && [9,80,2].sort().join(',')==='2,80,9';
+    )JS");
+    error("[2,1].sort(function(){throw 'compare failed';})", "compare failed");
+}
+TEST_F(JsMvpLmd, ReorderedArrayScalarHomes) {
+    boolean("let a=[5e-324,1e-323];a.reverse();a[0]=2e-323;a[1]===5e-324");
+    boolean("let a=[5e-324,7,1e-323].slice();a[0]=2e-323;a[2]===1e-323");
+    boolean("let a=Object.values({a:7,b:5e-324,c:1e-323});a[0]=2e-323;a[1]===5e-324 && a[2]===1e-323");
+    boolean("let a=Object.entries({a:5e-324})[0];a[0]=1e-323;a[1]===5e-324");
+    boolean(R"JS(
+        let a=[5e-324,1e-323,7];a.reverse();let saved=a[2];
+        a[0]=a[2];a[1]=2e-323;a[100]=a[2];a[2]=1e-323;
+        a.sort(function(x,y){return x-y;});
+        saved===5e-324 && a[0]===5e-324 && a[1]===5e-324 &&
+          a[2]===1e-323 && a[3]===2e-323 && !(4 in a);
+    )JS");
+    Item result = run(R"JS(
+        let a=new Array(4);a.tag='kept';a[3]=1e-323;
+        for(let i=0;i<200;i++){a[0]=0;a[0]=5e-324;}
+        a.tag==='kept' ? a : [];
+    )JS");
+    ASSERT_EQ(get_type_id(result), LMD_TYPE_ARRAY);
+    ASSERT_EQ(result.array->length, 4);
+    EXPECT_EQ(result.array->items[0].get_double(), 5e-324);
+    EXPECT_EQ(result.array->items[1].item, ITEM_JS_DELETED_SENTINEL);
+    EXPECT_EQ(result.array->items[3].get_double(), 1e-323);
+    EXPECT_LE(result.array->extra, 2 * result.array->length + 1);
+    heap_gc_collect();
+    result = mvp_lmd_result(execution);
+    EXPECT_EQ(result.array->items[0].get_double(), 5e-324);
+    EXPECT_EQ(result.array->items[3].get_double(), 1e-323);
+    boolean("let a=[5e-324,1e-323];a.length=0;a[3]=2e-323;a[3]===2e-323 && !(0 in a)");
+}
+TEST_F(JsMvpLmd, OrdinaryConstructionAndPrototypeData) {
+    boolean(R"JS(
+        function Point(x){this.x=x;}
+        Point.extra=5; Point.prototype.get=function(){return this.x;};
+        const p=new Point(3); let ok=p instanceof Point && p.constructor===Point && p.get()===3;
+        Point.prototype.get=function(){return this.x+Point.extra;};
+        ok=ok && p.get()===8;
+        Point.prototype.tag='base'; p.tag='own'; delete p.tag;
+        function ReturnObject(){this.x=1;return {x:9};}
+        function ReturnNumber(){this.x=2;return 99;}
+        function factory(value){return function(){this.get=function(){return value;};};}
+        let A=factory(7), B=factory(8), a=new A(), b=new B();
+        ok && p.tag==='base' && new ReturnObject().x===9 && new ReturnNumber().x===2 &&
+          a.get()===7 && b.get()===8 && A.prototype!==B.prototype && !(a instanceof B) &&
+          Object.keys(Point).join(',')==='extra';
+    )JS");
+    error("function F(){} F.prototype={};", "capability");
+    error("let f=()=>1;new f();", "TypeError");
+}
+TEST_F(JsMvpLmd, OrdinaryReceiversAndNamedArrays) {
+    boolean("function put(a,k,v){a[k]=v}let a=[1];put(a,0,2);put(a,-1,3);put(a,1.5,4);put(a,NaN,5);put(a,4294967295,6);a.length===1 && a[0]===2 && a[-1]===3 && a[1.5]===4 && a.NaN===5 && a[4294967295]===6");
+    boolean(R"JS(
+        function bare(){this.answer=42;return this;}
+        let global=bare();
+        function strict(){'use strict';return this;}
+        function Box(value){this.value=value;this.read=()=>this.value;}
+        let box=new Box(7); let read=box.read;
+        let a=[]; a.label={value:3}; a[-1]=4; a[2]=5;
+        let alias=a; a.label='changed'; delete a[-1];
+        let ok=alias.label==='changed' && a.length===3 && !(0 in a) && !('-1' in a);
+        a.push=function(v){this.label=v;return 8;};
+        ok && a.push(9)===8 && a.label===9 && a.length===3 &&
+          Object.keys(a).join(',')==='2,label,push' &&
+          global===this && global.answer===42 && strict()===undefined && read()===7 &&
+          Object(box)===box && new Object(null)!==new Object(null) &&
+          Math.random()>=0 && Math.random()<1;
+    )JS");
+    boolean("created=3; this.created===3 && created===3 && typeof created==='number' && typeof absent==='undefined'");
+    boolean("this.created=4; function strict(){'use strict';created=5;} strict();created===5");
+    error("'use strict'; absent=1", "ReferenceError");
+    error("function missing(){return absent;} missing();created=1", "ReferenceError");
+    boolean("function make(){return ()=>this;} let a=make(),b=make();a()===b() && typeof a()==='object'");
+    boolean("[1].map(function(){'use strict';return this;},3)[0]===3");
+    error("[1].map(function(){return this;},3)", "capability");
+    boolean("let a=[2,3], indices=new Int32Array(1); a[indices[9]]===undefined && a[indices[0]]===2");
+    boolean("let a=[2,3], indices=new Int32Array(1); a.undefined=7; a[indices[9]]===7 && a[indices[0]]===2");
+    boolean("let a=[2,3]; a[-1]===undefined && a[NaN]===undefined && a[1.5]===undefined && a[4294967295]===undefined");
+    boolean("let a=[2,3]; a[-1]=7; a[NaN]=8; a[1.5]=9; a[-1]===7 && a[NaN]===8 && a[1.5]===9");
+    boolean("let a=[]; function replace(){a.push=function(){return 9;};return 3;}"
+        "a.push(replace())===1 && a[0]===3 && a.push(4)===9 && a.length===1");
+    boolean("function f(){let a=[];a.push=function(){return 'x';};let value=a.push(1);"
+        "return typeof value==='string' && value==='x';} f()");
+    boolean("function f(){let a=[];let alias=Object(a);alias['join']=function(){return 9;};"
+        "let value=a.join();return typeof value==='number' && value===9;} f()");
+}
+TEST_F(JsMvpLmd, CubeConstructionAndCapturedArrays) {
+    char* source = read_text_file("test/benchmark/jetstream/3d-cube.js");
+    ASSERT_NE(source, nullptr);
+    const char trailer[] = "\nrun(); true;";
+    size_t length = strlen(source);
+    char* program = (char*)mem_alloc(length + sizeof(trailer), MEM_CAT_TEMP);
+    ASSERT_NE(program, nullptr);
+    memcpy(program, source, length);
+    memcpy(program + length, trailer, sizeof(trailer));
+    mem_free(source);
+    boolean(program);
+    mem_free(program);
+}
 TEST_F(JsMvpLmd, ScalarNumbers) {
     numeric("1 + 2 * 3 / 2", 4);
     numeric("2 ** 3 ** 2", 512);
@@ -433,6 +627,13 @@ TEST_F(JsMvpLmd, PowerOfTwoZeroTestsAndScaling) {
     error("function f(x){return x%2===0}f({})", "capability");
 }
 TEST_F(JsMvpLmd, SquareBoundsAndResetCursors) {
+    numeric("function f(){let a=[2,3];a[-1]=9;let s=0;for(let i=0;i<4;i++){if(i<2){s+=a[i]}else{s+=a[i-2]}}return s}f()", 10);
+    char* conditional = dump("temp/mvp_lmd_conditional_bounds.mir");
+    ASSERT_NE(conditional, nullptr);
+    EXPECT_EQ(strstr(conditional, "mvp_lmd_property_get"), nullptr);
+    mem_free(conditional);
+    boolean("function f(){let a=[7];let i=0;while(i<1){if(i<1){i++;return a[i]}}}f()===undefined");
+    boolean("function f(){let a=[7];let i=1;while(i>0){if(i>=1){i--;return a[i-1]}}}f()===undefined");
     numeric("function f(n){let i=0,sum=0;while(i+2<n){sum+=i;i+=3}return sum+i}f(10)", 18);
     numeric("function f(){let i=10,sum=0;while(i-2>0){sum+=i;i-=3}return sum+i}f()", 22);
     numeric("function f(){let i=0;while(i+0.5<3){i++}return i}f()", 3);
@@ -616,9 +817,9 @@ TEST_F(JsMvpLmd, DenseArrayAliasesAndMutation) {
 TEST_F(JsMvpLmd, ArrayCapabilityAndRangeFailures) {
     boolean("var a=[]; a[1]=2; a.length===2 && !(0 in a) && a[0]===undefined");
     boolean("var a=[]; a.length=1; a.length===1 && !(0 in a)");
-    error("var a=[]; a['01']=1", "capability");
-    error("var a=[]; a['-0']=1", "capability");
-    error("var a=[]; a[4294967295]=1", "capability");
+    boolean("var a=[]; a['01']=1; a['01']===1 && a.length===0");
+    boolean("var a=[]; a['-0']=1; a['-0']===1 && a.length===0");
+    boolean("var a=[]; a[4294967295]=1; a[4294967295]===1 && a.length===0");
     error("var a=[]; a.length=-1", "RangeError");
     error("var a=[]; a.length=1.5", "RangeError");
     error("var a=[]; a.length=NaN", "RangeError");
@@ -644,8 +845,8 @@ TEST_F(JsMvpLmd, ClosedParameterKindsAndSnapshots) {
     numeric("function at(a,i){a={'0':3};return a[i]} at([2],0)", 3);
     numeric("function at(a){let old=a[0];a[0]=1e-323;return old} at([5e-324])", 5e-324);
     boolean("function at(a,i){return a[i]} at([2],-0)===2");
-    error("function at(a,i){return a[i]} at([2],'-0')", "capability");
-    error("function at(a,i){return a[i]} at([2],1.5)", "capability");
+    boolean("function at(a,i){return a[i]} at([2],'-0')===undefined");
+    boolean("function at(a,i){return a[i]} at([2],1.5)===undefined");
 }
 TEST_F(JsMvpLmd, GenericElementCoercion) {
     // every read stays generic: the array contains numbers and coercible non-number values.
@@ -751,7 +952,7 @@ TEST_F(JsMvpLmd, RejectsUnsupportedUnitBeforeExecution) {
     boolean("function f(){return ()=>x; var x=1} f()()===undefined");
     numeric("{let x=1; function f(){return x}} f()", 1);
     error("function f(a=1){return a} 1", "scope");
-    error("function f(){return this} 1", "scope");
+    boolean("function f(){return this} f()===f()");
     error("[1,,2]", "scope");
     error("var x=1; with([]){x=2}", "scope");
     error("try{1}catch(e){2}", "scope");
@@ -812,6 +1013,10 @@ TEST_F(JsMvpLmd, PlainObjectDataProperties) {
     boolean("let o={a:5e-324};let old=o.a;o.a='s';o.a=== 's' && old===5e-324");
 }
 TEST_F(JsMvpLmd, PredictedDeletionShapesKeepOwnership) {
+    Item shapes = run("let a={x:1,y:2};let b={y:2};delete a.x;[a,b]");
+    ASSERT_EQ(get_type_id(shapes), LMD_TYPE_ARRAY);
+    // deletion replay must share the same nominal transition graph as literal planning.
+    EXPECT_EQ(shapes.array->items[0].map->type, shapes.array->items[1].map->type);
     boolean(R"JS(
         function check() {
             let object={left:5e-324,right:2}; let alias=object; let ok=true;
@@ -881,6 +1086,12 @@ TEST_F(JsMvpLmd, ObjectProjectionAndCanonicalKeys) {
     numeric("let total=0;for(let [k,v] of Object.entries({a:1,b:2})){total+=v}total", 3);
 }
 TEST_F(JsMvpLmd, MapKeysAndMutation) {
+    numeric("let m=new Map();m['set'](1,2);m.get(1)", 2);
+    char* mir = dump("temp/js_mvp_map_builtin_calls.mir");
+    ASSERT_NE(mir, nullptr);
+    EXPECT_EQ(strstr(mir, "mvp_lmd_property_get"), nullptr);
+    EXPECT_NE(strstr(mir, "mvp_lmd_map_call"), nullptr);
+    mem_free(mir);
     boolean("let m=new Map();m.set('a',1).set('b',undefined);m.size===2 && m.get('a')===1 && m.has('b') && m.get('b')===undefined && !m.has('c') && m.get('c')===undefined");
     boolean("let m=new Map();m.set(1,'int');m.set(1/1,'float');m.set(-0,'zero');m.set(0,'same');m.set(NaN,3);m.set(0/0,4);m.size===3 && m.get(1)==='float' && m.get(0)==='same' && m.get(NaN)===4");
     boolean("let m=new Map();let a={},b={},c=[],f=()=>1;m.set(a,1).set(b,2).set(c,3).set(f,4).set(null,5).set(undefined,6).set(true,7);m.size===7 && m.get(a)===1 && m.get(b)===2 && m.get(c)===3 && m.get(f)===4 && m.get(null)===5 && m.get(undefined)===6 && m.get(true)===7");
@@ -898,6 +1109,7 @@ TEST_F(JsMvpLmd, MapKeysAndMutation) {
         "m.get(clear())===undefined");
 }
 TEST_F(JsMvpLmd, LiveMapIteration) {
+    numeric("function sum(values){let n=0;for(let [k,v] of values)n+=k+v;return n}let m=new Map();m.set(3,4);sum([[1,2]])+sum(m)", 10);
     numeric("let m=new Map();m.set('a',1).set('b',2);let sum=0;for(let [k,v] of m){sum+=v}sum", 3);
     boolean("let m=new Map();m.set('a',1).set('b',2).set('c',3);let s='';for(let [k,v] of m.entries()){s+=k+v;if(k==='a'){m.delete('b');m.set('c',4);m.set('d',5)}}s==='a1c4d5'");
     boolean("let m=new Map();m.set('a',1).set('b',2);let s='';for(let k of m.keys()){s+=k;if(k==='a'){m.delete('b');m.set('b',3)}}s==='ab'");
@@ -919,7 +1131,7 @@ TEST_F(JsMvpLmd, ObjectAndMapScopeBoundary) {
     error("for(let k in {}){}", "scope");
     numeric("let Object={keys:()=>7};Object.keys({})", 7);
     numeric("let Map=()=>7;Map()", 7);
-    error("let Map=()=>7;new Map()", "capability");
+    error("let Map=()=>7;new Map()", "TypeError");
 }
 static void unexpected_js_native_gc(void*, gc_heap_t*) { js_gc_callback_entries++; }
 static void unexpected_js_native_destroy(void*) { js_gc_callback_entries++; }
