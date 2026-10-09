@@ -67,7 +67,11 @@ fixed-step simulation and recorded control routes. These replays set
 Event `wait` and `advance_time` use virtual time; performance measurements use
 the real native timer and `replay/performance.json` instead.
 
-Reimport resources and derive image sizes, sheet layouts and source hashes from
+Static pickups and decorations use intrinsically sized `<img>` elements.
+`data/images.json` retains sprite/weapon frame sizes, sheet grids and animation
+layouts; it does not contain a PNG dimension inventory.
+
+Reimport resources and derive sheet layouts and source hashes from
 a clean checkout of the pinned upstream revision:
 
 ```sh

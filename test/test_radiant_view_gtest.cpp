@@ -2328,7 +2328,7 @@ TEST(RadiantViewTest, UiScriptContentSurvivesForcedGc) {
 
 TEST(RadiantViewTest, DoomCssConsumersAndNativeEffectsSurviveForcedGcAndClose) {
     test_radiant_view_ensure_temp_dir();
-    const char* probes[] = {"lighting", "effects", "input", "filters", "masks", "spectre", "timing", "styles",
+    const char* probes[] = {"lighting", "effects", "input", "filters", "masks", "spectre", "timing", "styles", "sprites",
 #ifdef __APPLE__
         "audio",
 #endif

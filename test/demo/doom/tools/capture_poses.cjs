@@ -7,6 +7,7 @@ const root = path.resolve(__dirname, '../../../..');
 const base = path.resolve(__dirname, '..');
 const temp = path.join(root, 'temp/doom');
 const binary = process.env.LAMBDA_EXECUTABLE || path.join(root, 'lambda.exe');
+const reference = process.env.DOOM_REFERENCE_DIR ? path.resolve(root, process.env.DOOM_REFERENCE_DIR) : path.join(base, 'reference');
 const puppeteer = require(path.join(root, 'node_modules/puppeteer'));
 const { PNG } = require(path.join(root, 'test/render/node_modules/pngjs'));
 const manifest = JSON.parse(fs.readFileSync(path.join(base, 'reference/poses.json')));
@@ -61,6 +62,7 @@ function native(args, log) {
 async function main() {
   if (!process.env.CHROME_HEADLESS_SHELL) throw new Error('Set CHROME_HEADLESS_SHELL.');
   fs.mkdirSync(temp, { recursive: true });
+  fs.mkdirSync(reference, { recursive: true });
   const browser = await puppeteer.launch({ executablePath: process.env.CHROME_HEADLESS_SHELL,
     userDataDir: path.join(temp, 'pose-browser-profile'), headless: true, args: ['--no-sandbox'] });
   try {
@@ -95,7 +97,7 @@ async function main() {
       if (selectedMap !== pose.map) throw new Error(`${pose.name}: map selector says ${selectedMap}`);
       const selectedSkill = await page.$eval('#skill-picker', element => element.value);
       if (selectedSkill !== String(pose.skill)) throw new Error(`${pose.name}: difficulty selector says ${selectedSkill}`);
-      const output = path.join(base, 'reference', pose.name + '.png');
+      const output = path.join(reference, pose.name + '.png');
       await page.screenshot({ path: output });
       const validation = { selected_map: selectedMap, selected_skill: selectedSkill,
         landmarks: validateLandmarks(pose, readPng(nativePng), readPng(output)) };
@@ -115,9 +117,9 @@ async function main() {
           validation.filtered_actor[engine] = { ...difference, hidden_sha256: hash(hidden) };
         }
       }
-      const recordedNative = path.join(base, 'reference', pose.name + '.native.png');
+      const recordedNative = path.join(reference, pose.name + '.native.png');
       fs.copyFileSync(nativePng, recordedNative);
-      fs.writeFileSync(path.join(base, 'reference', pose.name + '.browser.json'), JSON.stringify({
+      fs.writeFileSync(path.join(reference, pose.name + '.browser.json'), JSON.stringify({
         pose, viewport: manifest.viewport, browser: await browser.version(),
         source: 'fixtures/_pose.ls and the shared scene/presenter; authored declarations exported without computed geometry.',
         html_sha256: hash(html), browser_sha256: hash(output), native_sha256: hash(nativePng),

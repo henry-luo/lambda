@@ -47,9 +47,11 @@ those build profiles or removing the host's existing JS capability.
 
 ## 2. Evidence and dependencies
 
-The pinned repository contains 54 JavaScript files (7,919 lines), 27 CSS files
-(2,415 lines), nine preconverted map JSON files, 874 PNG files and 55 WAV files.
-These are inventory counts, not estimates of the resulting Lambda port. E1M1
+The pinned repository contains 54 JavaScript files (7,919 physical lines), 27 CSS
+files (2,415 physical lines), nine preconverted map JSON files, 874 PNG files and
+55 WAV files. These line inventories include comments and blanks; the common
+feature comparison excluding both is recorded in §9. These are inventory counts,
+not estimates of the resulting Lambda port. E1M1
 contains 697 walls, 85 sectors and 138 things before rendering expansion/culling.
 The asset loader already consumes JSON; a WAD parser is unnecessary for this port.
 
@@ -560,3 +562,145 @@ metadata and teleporter destinations remain mechanical markers. Focused AI,
 combat, pickups and mechanics fixtures account for these categories, keyed and
 occupied doors, lift phases, crushers, switches, W1 teleports/telefragging,
 hazards, normal/secret exits, nightmare respawn and E1M8's tag-666 floor.
+
+## 9. Source LOC comparison — 2026-10-09
+
+### Counting method and scope
+
+This snapshot, refreshed after the intrinsic-image refinement, compares the
+application sources in `test/demo/doom/` with cssDOOM
+revision `438d2e17fb9f75fa3dbc54e1d21a3bc088ad009d`. The upstream archive SHA-256 is
+`8291a037e4a2430c9c80170510586c917b4aea75f5f80331dfb222edf9ed7db8`.
+The full Lambda application contains 20 `.ls` files, comprising the entry and 19
+modules: **1,827 source LOC**, or 1,900 physical lines including comments/blanks.
+The common feature selection below contains 1,735 Lambda Script LOC.
+
+Count stored physical lines that retain code, data or configuration after
+removing comments and excluding blank lines. Lines containing only delimiters
+still count; mixed code/comment lines count once. JavaScript comments are
+identified with Babel, HTML comments with parse5, and Lambda/CSS comments with
+string-aware scanning. Files are not reformatted, and JSON/config files loaded
+at runtime count in full, including unused entries and embedded provenance.
+
+The common scope covers world geometry, movement/collision, simulation, enemy
+AI, combat/pickups, episode mechanics, CSS 3D rendering, HUD/effects, keyboard,
+mouse and spectator cameras, menus, map loading and application lifecycle.
+Identifiable non-common sections are excluded: fullscreen, touch, gamepad, help
+and debug interfaces; upstream sky-wall occlusion, extra HUD inventory panels,
+head bob, spectator button grids and loading fades. Audio playback backends are
+outside this gameplay/rendering/control comparison; sound-event policy on mixed
+gameplay lines remains counted. A retained line serving both common and extra
+behavior counts once.
+
+Exclude tests, fixtures, offline development/import/capture tools, dependency
+implementations, browser/Radiant/Lambda engine code and binary/SVG art assets.
+Also exclude hosting-only `wrangler.toml` and the Lambda offline manifests
+`upstream.json`, `data/catalog.json` and `data/resources.json` (7,472 lines
+combined). This is an audited source inventory, not proof of identical behavior
+or complete cssDOOM feature parity. P6's outstanding delivery gates remain open.
+
+### Comparison by module and feature
+
+Lambda paths below are relative to `test/demo/doom/`; bare module names refer to
+their `.ls` files. Rendering and application rows include the relevant CSS/HTML
+and package configuration as well as script source.
+
+| Module / feature | cssDOOM LOC | Lambda DOOM LOC | Lambda modules / data |
+|---|---:|---:|---|
+| World, movement, state and simulation | 605 | 373 | `mod_geometry`, `mod_world`, `mod_player`, `mod_state`, `mod_sim` |
+| Enemy AI | 309 | 165 | `mod_ai` |
+| Combat, projectiles, damage and pickups | 719 | 269 | `mod_combat`, `mod_pickups`, `mod_events` |
+| Doors, lifts, crushers, switches and teleporters | 427 | 150 | `mod_mechanics` |
+| Rendering, HUD, effects and cameras | 2,199 | 642 | `mod_scene`, `mod_present`, `mod_effects`, `mod_sprites`, `mod_weapons`, `mod_camera`, `doom.css` |
+| Input, map loading, menus, application and package config | 549 | 274 | `mod_input`, `mod_data`, `doom.ls` |
+| Rule and visual constant tables | 218 | 513 | `data/rules.json` (424), `data/visuals.json` (89) |
+| Sprite/weapon sheet and animation metadata JSON | 0 | 256 | `data/images.json` |
+| Shared maps and asset metadata JSON | 14 | 14 | Nine maps and five asset metadata files |
+| **Total including runtime JSON/config** | **5,040** | **2,656** | |
+
+The 218 upstream constant-table lines are JavaScript; their Lambda counterparts
+are JSON. Both rule/visual tables were checked against the pinned constants,
+normalizing upstream sets to arrays and infinite values to the stored sentinel.
+Moving constants into JSON does not remove them from the comparison.
+
+### Source and data subtotals
+
+This table regroups the same counted lines by file type; it is not additional LOC.
+
+| File type | cssDOOM LOC | Lambda DOOM LOC |
+|---|---:|---:|
+| JavaScript / Lambda Script | 3,745 | 1,735 |
+| CSS | 1,163 | 138 |
+| HTML | 95 | 0 |
+| **Source subtotal** | **5,003** | **1,873** |
+| JSON, including package config | 37 | 783 |
+| **Total including runtime JSON/config** | **5,040** | **2,656** |
+
+The Lambda HTML element construction is already counted in `.ls` source.
+Lambda uses **62.6% fewer source LOC** on this scope and **47.3% fewer stored lines
+including JSON/config** after removing the redundant PNG dimension inventory.
+The earlier 3,981-JavaScript-LOC estimate covered broader module families; the
+3,745-JavaScript-LOC count here removes further identifiable non-common behavior.
+Neither percentage measures language efficiency: multi-statement source lines,
+CSS formatting and pretty-printed versus minified JSON materially affect LOC.
+
+All 14 shared JSON files are byte-identical between the two implementations and
+occupy one stored line each: **6,183,439 bytes per side**. Formatting them all with
+two-space JSON indentation would produce **552,870 lines per side**. That
+diagnostic expansion is not included in the stored-LOC totals above.
+
+### Generated image metadata
+
+`data/images.json` is counted in full but shown separately. It now retains
+**15 sprite-sheet definitions, six weapon-sheet definitions and seven animation
+layouts**, providing frame sizes, grid dimensions and attack/death frame
+selection. Revision/source hashes remain for import verification. All retained
+values match the pre-refinement metadata exactly.
+
+The removed `images` table inventoried the dimensions of **873 PNGs** and occupied
+**3,494 lines**. Static pickups and decorations now use intrinsically sized
+`<img>` elements in `mod_scene.thing_tree`, centered above the actor's floor anchor
+with CSS. `mod_sprites.definition` returns their path without dimensions, and
+`mod_present.paint` skips sheet-only background/animation writes for these images.
+Animated actors, pickups, weapons and the player marker retain cropped background
+sheets as in original cssDOOM. The generator no longer scans/stores every PNG's
+size; the offline verifier checks each retained sheet grid directly against its
+PNG header. No native image-size API or engine change was needed.
+
+| Lambda DOOM common scope | Before refinement | After refinement |
+|---|---:|---:|
+| Script, CSS and HTML source | 1,871 | 1,873 |
+| JSON/config | 4,277 | 783 |
+| Of which `data/images.json` | 3,750 | 256 |
+| **Total including runtime JSON/config** | **6,148** | **2,656** |
+
+This removes **3,492 net stored lines** without reformatting the application or
+JSON. The new `fixtures/_sprites.ls` and `replay/sprites.json` regression exercises
+the production actor tree: two static `<img>` elements with no width/height
+attributes, two cropped sheets, intrinsic dimensions, horizontal centering,
+floor anchoring and rendered pixels. It is registered with the native DOOM
+forced-GC/close probes. The sprite golden also verifies a static pose without
+any dimension table. Tests and offline tools remain excluded from these totals.
+
+Six fresh browser/native pose comparisons passed against HeadlessChrome
+148.0.7778.97, including the Spectre's paired visible/hidden filter check.
+Captures were directed to
+`temp/doom/refined-reference/` using `DOOM_REFERENCE_DIR`; the checked-in reference
+images were preserved. The deterministic game/resource fixtures passed on
+interpreter, automatic tiering and MIR JIT (42 fixture/tier checks).
+The resource check verifies all 958 imported hashes and the retained sheet grids;
+an all-map/all-difficulty sprite audit resolves all 26 distinct static image paths.
+The rebuilt `RadiantViewTest.Doom*` checks passed all ten native probes and all six
+gameplay/camera/lifecycle replays, including three cycles through the nine maps.
+The probes use collection on every allocation and immediate promotion; gameplay
+uses collection every 5,000 allocations. Both require poisoned freed storage and
+zero tracked live allocations at close. macOS AVAudioPlayer decoding failed in
+the sandbox; the complete native gate passed outside it. These targeted checks do
+not close the remaining P6 release-performance and aggregate-baseline gates.
+
+The local audit used `temp/cssdoom-loc/count_comparable.cjs` and
+`temp/cssdoom-loc/compare_runtime.cjs`; its detailed
+`temp/cssdoom-loc/common-runtime-loc.json` records per-file counts, SHA-256 hashes,
+excluded line ranges and shared-JSON checks. A fresh rerun reproduced both tables
+and reconciled all totals. These are temporary audit artifacts; this section
+retains the measured snapshot independently of their lifetime.

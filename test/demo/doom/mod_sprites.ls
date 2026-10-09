@@ -2,12 +2,8 @@
 pub fn fuzz_seed(elapsed: float) => floor(elapsed * 25) % 10
 pub fn definition(actor_type, visuals, images) {
     let sheet = images.sheets[visuals.THING_NAMES[string(actor_type)]]
-    let path = if (sheet != null) sheet.path else "assets/sprites/" ++ visuals.THING_SPRITES[string(actor_type)] ++ ".png"
-    let size = images.images[path]
-    {path: path, w: if (sheet != null) sheet.w else size.width,
-        h: if (sheet != null) sheet.h else size.height,
-        cols: if (sheet != null) sheet.cols else 1, rows: if (sheet != null) sheet.rows else 1,
-        frames: if (sheet != null) sheet.frames else 1}
+    if (sheet != null) sheet else
+        {path: "assets/sprites/" ++ visuals.THING_SPRITES[string(actor_type)] ++ ".png", frames: 1}
 }
 pub fn heading(actor, camera) {
     let full = 2 * math.pi
@@ -28,7 +24,7 @@ pub fn pose(actor, camera, sheet, images, elapsed) {
         animation: if (frames <= 1) "none" else (if (stop) "doom-sprite-stop" else "doom-sprite-cycle") ++
             " " ++ string(duration) ++ "s steps(" ++ string(max(1, if (stop) frames - 1 else frames)) ++ ") " ++
             (if (stop) "forwards" else "infinite"),
-        end_x: sheet.w * (if (stop) 1 - frames else -frames),
+        end_x: if (sheet.w == null) 0 else sheet.w * (if (stop) 1 - frames else -frames),
         visible: (not actor.collected or dead) and not (actor.type == 2035 and dead and elapsed - actor.dead_at >= duration)}
 }
 

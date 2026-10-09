@@ -97,11 +97,13 @@ pub pn paint(owner, map_data, before, game, handles, previous_visibility, rules,
         }
         if (previous_pose == null or pose.visible != previous_pose.visible)
             write(pair.node, "display", if (pose.visible) "block" else "none")^
-        if (previous_pose == null or pose.row != previous_pose.row)
-            write(pair.sprite, "background-position-y", scene.fmt(-pose.row * sheet.h) ++ "px")^
-        if (previous_pose == null or pose.animation != previous_pose.animation) {
-            write(pair.sprite, "--frame-end", scene.fmt(pose.end_x) ++ "px")^
-            write(pair.sprite, "animation", pose.animation)^
+        if (sheet.w != null) {
+            if (previous_pose == null or pose.row != previous_pose.row)
+                write(pair.sprite, "background-position-y", scene.fmt(-pose.row * sheet.h) ++ "px")^
+            if (previous_pose == null or pose.animation != previous_pose.animation) {
+                write(pair.sprite, "--frame-end", scene.fmt(pose.end_x) ++ "px")^
+                write(pair.sprite, "animation", pose.animation)^
+            }
         }
         if (previous_pose == null or viewpoint.angle != previous_viewpoint.angle or pose.mirror != previous_pose.mirror)
             write(pair.sprite, "transform", "rotateY(" ++ scene.fmt(viewpoint.angle) ++ "rad) scaleX(" ++ scene.fmt(pose.mirror) ++ ")")^

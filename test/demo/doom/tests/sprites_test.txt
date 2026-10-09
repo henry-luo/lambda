@@ -34,5 +34,5 @@
   pickup: [14, 18, 4, 4],
   player_sheet: [45, 56, 5],
   fuzz: [0, 1, 5, 9, 0, 5],
-  static_sprite: 1
+  static_sprite: ["assets/sprites/COLUA0.png", null, null, 1, "none", 0]
 }

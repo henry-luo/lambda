@@ -106,18 +106,22 @@ fn plane_style(plane, base, visible) {
                 "background:#444;" else "background-image:" ++ image_url(base, "assets/flats/" ++ plane.texture ++ ".png") ++ ";")
     }
 }
-fn thing_tree(actor, player, visuals, images, base) {
+pub fn thing_tree(actor, player, visuals, images, base) {
     let sprite = sprites.definition(actor.type, visuals, images)
-    let pose = sprites.pose(actor, player, sprite, images, 0);
+    let pose = sprites.pose(actor, player, sprite, images, 0)
+    let attributes = {id: "sprite-" ++ string(actor.id), class: "sprite",
+        'data-type': visuals.THING_NAMES[string(actor.type)],
+        'data-state': if (actor.dead_at != null) "dead" else actor.ai.state,
+        style: "transform:rotateY(" ++ fmt(player.angle) ++ "rad) scaleX(" ++ fmt(pose.mirror) ++ ");"};
     <div id:("actor-" ++ string(actor.id)), class:"thing", style:(property("x", actor.x) ++ property("y", actor.y) ++
         property("floor-z", actor.floor)),
-        <div id:("sprite-" ++ string(actor.id)), class:"sprite", 'data-type':visuals.THING_NAMES[string(actor.type)],
-            'data-state':(if (actor.dead_at != null) "dead" else actor.ai.state),
-            style:("width:" ++ px(sprite.w) ++ ";height:" ++ px(sprite.h) ++
+        // Static sprites keep their intrinsic image size; sheets still crop background frames.
+        if (sprite.w == null) <img *:attributes, src:url_resolve(base, sprite.path), alt:"", draggable:"false">
+        else <div *:attributes, style:(attributes.style ++ "width:" ++ px(sprite.w) ++ ";height:" ++ px(sprite.h) ++
             ";left:" ++ px(-sprite.w / 2) ++ ";top:" ++ px(-sprite.h) ++ ";background-size:" ++ px(sprite.w * sprite.cols) ++ " " ++
             px(sprite.h * sprite.rows) ++ ";background-image:" ++ image_url(base, sprite.path) ++
             ";background-position-y:" ++ px(-pose.row * sprite.h) ++ ";--frame-end:" ++ px(pose.end_x) ++
-            ";animation:" ++ pose.animation ++ ";transform:rotateY(" ++ fmt(player.angle) ++ "rad) scaleX(" ++ fmt(pose.mirror) ++ ");")>
+            ";animation:" ++ pose.animation ++ ";")>
     >
 }
 pub fn camera_transform(player, perspective = 320, viewport_height = 336) => "translate3d(0px," ++ px((player.offset_y or 0) * viewport_height) ++ "," ++ px(perspective) ++ ") rotateX(" ++

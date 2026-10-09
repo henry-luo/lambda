@@ -29,6 +29,8 @@ html, body { margin: 0; background: #111; color: #ddd; font-family: monospace; }
 #doom[data-spectator="follow"] .ceiling, #doom[data-spectator="top"] .ceiling { display:none; }
 .thing { transform: translate3d(calc(var(--x) * 1px), calc(var(--floor-z) * -1px), calc(var(--y) * -1px)); }
 .sprite { background-repeat: no-repeat; transform-origin: 50% 100%; filter: brightness(var(--light, 1)); }
+/* Intrinsic images stay centered above the actor's floor anchor. */
+.thing > img.sprite { left: 0; bottom: 0; translate: -50% 0; }
 @property --light { syntax: "<number>"; inherits: true; initial-value: 1; }
 @property --scroll-offset { syntax: "<length>"; inherits: false; initial-value: 0px; }
 @keyframes light-glow { 0%, 100% { --light:.75; } 50% { --light:1; } }

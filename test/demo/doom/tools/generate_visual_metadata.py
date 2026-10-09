@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Derive image sizes and sprite-sheet definitions from the pinned resources."""
+"""Derive sprite-sheet and animation definitions from the pinned resources."""
 import argparse
 import hashlib
 import json
@@ -13,13 +13,7 @@ DEMO = Path(__file__).resolve().parents[1]
 
 def generate(source):
     verify_source(source)
-    metadata = {"revision": REVISION, "images": {}, "sheets": {}, "weapons": {}, "sources": []}
-    for path in sorted((DEMO / "assets").rglob("*.png")):
-        payload = path.read_bytes()
-        if payload[:8] != b"\x89PNG\r\n\x1a\n":
-            raise ValueError(f"not PNG: {path}")
-        width, height = struct.unpack(">II", payload[16:24])
-        metadata["images"][path.relative_to(DEMO).as_posix()] = {"width": width, "height": height}
+    metadata = {"revision": REVISION, "sheets": {}, "weapons": {}, "sources": []}
     for relative in ["src/renderer/scene/entities/sprites.css", "src/renderer/scene/entities/enemies.css",
                      "src/renderer/scene/entities/decorations.css", "src/renderer/scene/entities/things.css",
                      "src/ui/weapons.css", "src/ui/spectator.css"]:
@@ -49,14 +43,14 @@ def generate(source):
 def verify_metadata(metadata):
     if metadata["revision"] != REVISION:
         raise ValueError("image metadata revision differs from pinned upstream")
-    for relative, dimensions in metadata["images"].items():
-        width, height = struct.unpack(">II", (DEMO / relative).read_bytes()[16:24])
-        if dimensions != {"width": width, "height": height}:
-            raise ValueError(f"image metadata dimensions disagree: {relative}")
     for category in ["sheets", "weapons"]:
         for name, sheet in metadata[category].items():
-            image = metadata["images"][sheet["path"]]
-            if image != {"width": sheet["w"] * sheet["cols"], "height": sheet["h"] * sheet["rows"]}:
+            # Check the sheet grid against the PNG directly, without retaining image sizes.
+            payload = (DEMO / sheet["path"]).read_bytes()
+            if payload[:8] != b"\x89PNG\r\n\x1a\n":
+                raise ValueError(f"not PNG: {sheet['path']}")
+            dimensions = struct.unpack(">II", payload[16:24])
+            if dimensions != (sheet["w"] * sheet["cols"], sheet["h"] * sheet["rows"]):
                 raise ValueError(f"sheet dimensions disagree: {name}")
     for name in ["soulsphere", "health-bonus", "armor-bonus", "green-armor", "blue-armor", "invisibility", "player"]:
         if name not in metadata["sheets"]:

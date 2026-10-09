@@ -10,7 +10,10 @@ let attack = sprites.pose({*: marine, ai: {state: "attacking"}}, {x: 0, y: -10},
 let dead = sprites.pose({*: marine, dead_at: 1, collected: true}, {x: 0, y: -10}, sheet, images, 1.2)
 let barrel = {*: marine, type: 2035, ai: null, dead_at: 1}
 let barrel_sheet = sprites.definition(2035, visuals, images)
-let pickup = sprites.definition(2014, visuals, images);
+let pickup = sprites.definition(2014, visuals, images)
+// Static sprites need no dimension table, including when deriving their pose.
+let static_sprite = sprites.definition(2028, visuals, {sheets: images.sheets})
+let static_pose = sprites.pose({*: marine, type: 2028, ai: null}, marine, static_sprite, images, 0);
 {
     rotations: directions,
     negative_angle: sprites.heading({*: marine, facing: 2 * math.pi}, {x: 1, y: 0}),
@@ -21,5 +24,6 @@ let pickup = sprites.definition(2014, visuals, images);
     pickup: [pickup.w, pickup.h, pickup.frames, pickup.cols],
     player_sheet: [images.sheets.player.w, images.sheets.player.h, images.sheets.player.rows],
     fuzz: [for (elapsed in [0.0, 0.04, 0.2, 0.39, 0.4, 0.6]) sprites.fuzz_seed(elapsed)],
-    static_sprite: sprites.definition(2028, visuals, images).frames
+    static_sprite: [static_sprite.path, static_sprite.w, static_sprite.h,
+        static_sprite.frames, static_pose.animation, static_pose.end_x]
 }
