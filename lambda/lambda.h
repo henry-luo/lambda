@@ -2700,6 +2700,7 @@ extern "C" {
     Map* map_alloc_for_type(struct TypeMap* map_type, LambdaRegion* region,
         int64_t minimum_capacity);
     bool map_field_store(void* field_ptr, Item value, TypeId value_type);
+    void map_field_store_int_as_float(void* field_ptr, Item value);
     // neutral packed-field mutation; no descriptors, prototype dispatch, or JS hooks.
     bool map_shape_set(Map* map, String* key, Item value);
     bool map_shape_delete(Map* map, String* key);

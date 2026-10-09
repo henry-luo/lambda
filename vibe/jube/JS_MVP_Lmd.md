@@ -1,10 +1,10 @@
 # JS MVP Lmd — JavaScript MIR on the untyped Lambda substrate
 
-**Date:** 2026-10-08
+**Date:** 2026-10-09
 
 **Status:** scalar/dense-array/function MVP, integer tuning, and the map/plain-object
 phase implemented. Ordinary arrays and core strings are implemented (§18);
-the latest tuning measurements and validation status are recorded in §23.
+the latest tuning measurements and validation status are recorded in §28.
 The numeric-library phase is implemented in source (§15); its full feature
 edge matrix remains pending. §§16–17 record the subsequent tuning.
 Basic classes and single inheritance are implemented in source (§21);
@@ -12,7 +12,7 @@ class-phase validation and performance evidence are tracked separately there.
 Closures, callbacks and array growth are implemented and validated in §22.
 Class property access and constructor allocation are tuned in §23.
 
-**Performance history:** [MVP_Result3–7](../../test/benchmark/js_mvp_lmd/README.md)
+**Performance history:** [MVP_Result3–8](../../test/benchmark/js_mvp_lmd/README.md)
 retains one representative comparison per major tuning phase.
 
 **Destination:** `lambda/js/mvp-lmd/`
@@ -1167,3 +1167,96 @@ oracles, 64 focused/forced-GC tests, 6,484 Lambda baseline tests and the clean
 regressions in map iteration (0.81%), nqueens (0.86%) and Storage (1.95%);
 performance acceptance remains open for those rows.
 Detailed scope and evidence: [guarded numeric regions](../impl/JS_MVP_Lmd_Numeric_Regions.md).
+
+## 26. CD allocation and shape stability
+
+Reduce tree-field cache misses and repeated constructor retyping. Reuse Lambda
+shape transitions to retain nullable Map lanes for proven literal-null fields,
+and retain completed allocation shapes per inlined construction site. Invalidate
+site templates when a class learns another nullable link. Preserve constructor
+parameter semantics, object identity, immutable shared shapes and precise roots
+(**D3.4.3v5–D3.4.5**, **D5.2–D5.3**, **D6.2.1**). Extend existing numeric-region
+inlining for bounded allocation-free direct calls inside functions.
+
+The disclosed internal helper is `mvp_lmd_class_widen_allocation`; it calls
+Lambda's existing transition API. Confirm performance with unchanged CD and
+control workloads, pinned native MIR and self-reported release times, then run
+the focused/forced-GC and baseline gates. Detailed evidence:
+[CD allocation and shape stability](../impl/JS_MVP_Lmd_CD_Allocation.md).
+
+**Measured:** CD **243.2 → 195.1 ms** (19.8% faster, **5.47× Node**, 8.4% slower
+than typed Lambda), and Richards **80.6 → 75.2 ms** (6.7% faster). Tree-key
+helper fallbacks fall 99.5% and root reloads 33.8%. All 60 workload oracles and
+65 focused/forced-GC tests pass. Bounce retains a confirmed **0.92%** slowdown;
+its cause remains open despite unchanged hot-loop MIR. Lambda/input passes
+**6,485/6,485** and Test262 **40,261/40,261** with zero retries. Full measurements
+and limitations are in the linked record.
+
+## 27. CD mutation and construction follow-up
+
+Retain bounded construction-site layout variants for recursive records with
+alternating parameter types, using the existing shape transitions and allocation
+epochs (**D3.4.3v5**, **D3.4.5**). Reuse `scalar_constructor_plan` for concrete
+numeric layouts and initialize fresh instances with packed stores. Share receiver
+checks within proven pure numeric regions, reuse their guarded method targets,
+and keep scalar results native. Restrict small allocating-method inlining to
+ordinary function bodies with the cheaper construction path. Reuse `str_cmp` for
+ASCII string comparisons.
+
+Retain precise roots and scalar ownership (**D5.2–D5.3**), constructor identity
+guards and original argument evaluation order (**D6.2.1**). No new helper function
+is added. Validate with paired release MIR measurements, unchanged workloads,
+cold process costs and regression controls. The direct null/undefined cache-path
+experiment was removed after its short screen failed to show a benefit.
+Implementation and evidence:
+[CD native construction and calls](../impl/JS_MVP_Lmd_CD_Native_Construction.md).
+
+**Measured:** CD **195.8 → 171.1 ms** (12.6% faster, **4.78× Node**, 6.0% faster
+than the typed Lambda port). Helper calls fall 14.6% and frame entries 28.6%.
+Richards and Bounce are unchanged in longer paired checks. All 60 workload
+oracles, 65 focused/forced-GC tests, 6,485 Lambda/input tests and 40,261 Test262
+tests pass; Test262 needs zero retries. At this snapshot, performance acceptance remains open:
+`object_delete` is **3.7% slower** in its 60-run confirmation, and CD cold process
+time increases **1.1%**. The previous round's Bounce regression remains a
+separate unresolved comparison against its older control. See §28 for the follow-up.
+
+## 28. Deletion and compilation regression fixes
+
+Predict bounded deletion/reinsertion layouts from known literal shapes before
+execution, then reuse guarded packed-field reads and the shared generic fallback.
+Use Lambda's existing shape construction (**D3.4.3v5**, **D3.4.5**); no mutable
+per-site cache is added (**D8.4.1v2**). The new compiler helper is
+`plan_deleted_shapes`, reusing the existing field planner. Preserve precise
+roots, scalar ownership and property order (**D5.2–D5.3**).
+
+Bound allocating-method expansion per caller and inline one allocating target
+per site; retain captured-callee identity guards and fallback calls for other
+classes (**D6.2.1**). This removes unused polymorphic expansion from CD's
+recursive traversal. Validate unchanged workloads with pinned release MIR,
+self-reported execution times, cold process measurements, identical-control
+peers, forced GC and baseline gates. Evidence and the discarded cache experiment:
+[regression fixes](../impl/JS_MVP_Lmd_Regression_Closure.md).
+
+For Bounce, extract Lambda's existing compatible numeric store from `fn_map_set`
+as `map_field_store_int_as_float`. Both engines reuse it for resolved double
+fields receiving integers (**D3.4.5**); MVP avoids the repeated property lookup
+that regressed Richards. Other value types retain their normal transition.
+
+The broad check also confirmed a Map lookup regression with unchanged MIR and
+relocated native helpers. Factor canonicalization and allocating Map updates
+into the shared `map_call_owned` helper, reusing existing storage and precise
+roots (**D5.2–D5.3**), so reads and immediate writes need a smaller native frame.
+
+**Measured follow-up:** deletion is **25.9% faster**, Bounce **25.8% faster**
+against its older control, and CD execution **12.8% faster** against the
+pre-regression release. Richards improves **2.2%**; Map lookup returns to parity
+in its 90-round confirmation. All 60 workload oracles pass with no statistically
+confirmed slowdown; three shared Lambda checks also pass. Cold CD process time
+is **3.346 → 3.314 s**, with a wide ratio interval (**0.970–1.041**), so a small
+startup difference remains unresolved. Host contention and interrupted runs are
+recorded in the linked implementation report. Validation passes: **67** MVP
+tests normally and under forced GC, **6,487/6,487** Lambda/input tests on the
+full rerun after a LaTeX corpus timeout, and **40,261/40,261** Test262 cases
+with zero retries. The restored release matches the measured binary.
+The 60-workload snapshot and separate confirmations are published as
+[MVP_Result8](../../test/benchmark/js_mvp_lmd/MVP_Result8.md).

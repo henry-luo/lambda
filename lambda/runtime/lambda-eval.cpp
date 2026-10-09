@@ -10055,6 +10055,11 @@ Item fn_array_set(Array* arr, int64_t index, Item value) {
     return ItemNull;
 }
 
+// compatible packed writes share the lossless conversion; callers prove an integer and a valid float slot.
+void map_field_store_int_as_float(void* field_ptr, Item value) {
+    *(double*)field_ptr = lambda_int_item_value(value);
+}
+
 // helper: store a value at a field pointer, according to its storage type
 bool map_field_store(void* field_ptr, Item value, TypeId value_type) {
     if (!field_ptr) return false;
@@ -14763,7 +14768,7 @@ Item fn_map_set(Item map_item, Item key, Item value) {
 
             // FLOAT field + INT value → widen int to double (lossless, no reshape)
             if (field_type == LMD_TYPE_FLOAT && value_type == LMD_TYPE_INT) {
-                *(double*)field_ptr = lambda_int_item_value(value);
+                map_field_store_int_as_float(field_ptr, value);
                 return ItemNull;
             }
 

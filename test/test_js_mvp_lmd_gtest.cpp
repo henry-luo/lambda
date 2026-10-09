@@ -83,6 +83,22 @@ TEST_F(JsMvpLmd, NumericRegionLayoutsAndFallback) {
         delete p.y; ok=ok && kernel(p,m)!==kernel(p,m);
         p.x=-1; m.first=null; ok && kernel(p,m)===-1;
     )JS");
+    boolean(R"JS(
+        class Point { constructor(x,y) { this.x=x; this.y=y; } }
+        function kernel(a,b) {
+            if (a.x<0) return -1;
+            const x=a.x+b.x; const y=a.y+b.y;
+            let lo=x-y; let hi=y-x;
+            if(x<y) { const t=lo; lo=hi; hi=t; }
+            if(y<0) { const t=lo; lo=hi; hi=t; }
+            return lo+hi+x+y+a.x+b.y;
+        }
+        function invoke(a,b) { return kernel(a,b); }
+        let a=new Point(1,2), b=new Point(3,4); let ok=true;
+        for(let i=0;i<5;i++) ok=ok && invoke(a,b)===15;
+        a.x='1'; ok=ok && invoke(a,b)==='013614';
+        a.x=-1; ok && invoke(a,null)===-1;
+    )JS");
 }
 TEST_F(JsMvpLmd, NumericMethodGuardsAndSpecialNumbers) {
     boolean(R"JS(
@@ -103,8 +119,24 @@ TEST_F(JsMvpLmd, NumericMethodGuardsAndSpecialNumbers) {
         function change() { c.order=function(a,b){return 7;}; return 1; }
         sum===-1 && c.order(change(),2)===-1 && c.order(1,2)===7;
     )JS");
+    boolean(R"JS(
+        class Compare {
+            order(a,b) { if(a===b)return 0; if(a<b)return -1; return 1; }
+            choose(a) { const first=this.order(a>0,0); if(first<0)return -1; return this.order(a,2); }
+        }
+        let c=new Compare(); let ok=true;
+        for(let i=0;i<4;i++)ok=ok && c.choose(3)===1 && c.choose(2)===0 && c.choose(1)===-1;
+        c.order=function(a,b){return 8;}; ok && c.choose(3)===8;
+    )JS");
 }
 TEST_F(JsMvpLmd, NumericRegionEffectsStayOrdered) {
+    error(R"JS(
+        class Probe {
+            order(a,b) { if(a===b)return 0; if(a<b)return -1; return 1; }
+            read(a) { const first=this.order(a,2); return first+this.order.x+this.order.y; }
+        }
+        let p=new Probe(); p.read(1);
+    )JS", "capability");
     numeric(R"JS(
         class Point { constructor(x,y) { this.x=x; this.y=y; } }
         function kernel(p) {
@@ -131,6 +163,20 @@ TEST_F(JsMvpLmd, NumericRegionEffectsStayOrdered) {
 }
 TEST_F(JsMvpLmd, NumericConstructorRegionsKeepIdentityAndLanes) {
     boolean(R"JS(
+        class Pair { constructor(x,y){this.x=x;this.y=y}
+            shift(n){return new Pair(this.x+n,this.y+n)} }
+        class Triple { constructor(x,y,z){this.x=x;this.y=y;this.z=z}
+            shift(n){return new Triple(this.x+n,this.y+n,this.z+n)} }
+        function step(p,n){return p.shift(n)}
+        let a=new Pair(1,2), b=new Triple(3,4,5), ok=true;
+        for(let i=0;i<20;i++) {
+            let x=step(a,i), y=step(b,i);
+            ok=ok && x.x===i+1 && x.y===i+2 && x instanceof Pair && x!==a &&
+                y.x===i+3 && y.y===i+4 && y.z===i+5 && y instanceof Triple && y!==b;
+        }
+        ok;
+    )JS");
+    boolean(R"JS(
         class Point {
             constructor(x,y) { this.x=x; this.y=y; }
             plus(other) { return new Point(this.x+other.x,this.y+other.y); }
@@ -142,6 +188,27 @@ TEST_F(JsMvpLmd, NumericConstructorRegionsKeepIdentityAndLanes) {
         p.x=5e-324; q.x=0; let tiny=p.plus(q);
         p.x=2; let later=p.plus(q);
         ok && tiny.x===5e-324 && later.x===2 && tiny instanceof Point;
+    )JS");
+    char* mir = dump("temp/mvp_native_constructor.mir");
+    ASSERT_NE(mir, nullptr);
+    char* method = strstr(mir, "mvp_lmd_f2:\tfunc");
+    ASSERT_NE(method, nullptr);
+    char* allocation = strstr(method, "mvp_lmd_object_new");
+    ASSERT_NE(allocation, nullptr);
+    char* fallback = strstr(allocation, "mvp_lmd_class_invoke");
+    ASSERT_NE(fallback, nullptr); *fallback = 0;
+    EXPECT_EQ(strstr(allocation, "mvp_lmd_class_property"), nullptr);
+    mem_free(mir);
+    boolean(R"JS(
+        class Pair { constructor(a,b) { this.y=b; this.x=a; this.ready=true; } }
+        class Point {
+            constructor(x,y) { this.x=x; this.y=y; }
+            plus(other) { return new Pair(this.x+other.x,this.y+other.y); }
+        }
+        let p=new Point(1,2), q=new Point(3,4), a=p.plus(q), b=p.plus(q);
+        let ok=a!==b && a instanceof Pair && Object.keys(a).join(',')==='y,x,ready';
+        a.x=9; p.x='1'; let c=p.plus(q);
+        ok && b.x===4 && b.y===6 && b.ready===true && c.x==='13' && c.y===6;
     )JS");
     boolean(R"JS(
         class Flag { constructor() { this.value=true; } get() { return this.value; } }
@@ -744,6 +811,46 @@ TEST_F(JsMvpLmd, PlainObjectDataProperties) {
     boolean("let o={f:(x)=>x+1}; o.f(2)===3 && typeof o==='object' && o===o && o!=={}");
     boolean("let o={a:5e-324};let old=o.a;o.a='s';o.a=== 's' && old===5e-324");
 }
+TEST_F(JsMvpLmd, PredictedDeletionShapesKeepOwnership) {
+    boolean(R"JS(
+        function check() {
+            let object={left:5e-324,right:2}; let alias=object; let ok=true;
+            const values=[3,5e-324,-0,'text',true,null,undefined,{value:9},[7],()=>8];
+            for(let i=0;i<30;i++) {
+                delete object.left;
+                ok=ok && object.left===undefined && !Object.hasOwn(object,'left');
+                const value=values[i%values.length]; object.left=value;
+                const first=object.left; const held=object.left;
+                object.left='replacement';
+                ok=ok && first===value && held===value && object.left==='replacement';
+                if(i%values.length===2) ok=ok && 1/held===-Infinity;
+                object.left=value;
+                ok=ok && object.right===2 && Object.keys(object).join(',')==='right,left';
+            }
+            return ok && object===alias;
+        }
+        check();
+    )JS");
+    char* mir = dump("temp/js_mvp_deleted_object_cache.mir");
+    ASSERT_NE(mir, nullptr);
+    EXPECT_EQ(strstr(mir, "mvp_lmd_class_property"), nullptr);
+    EXPECT_NE(strstr(mir, "mvp_lmd_property_get"), nullptr);
+    mem_free(mir);
+    boolean(R"JS(
+        function read(o) {
+            let ok=true;
+            for(let i=0;i<12;i++) {
+                delete o.a; delete o.b;
+                ok=ok && o.c===3 && o.a===undefined && o.b===undefined;
+                o.b=i; o.a='value';
+                ok=ok && o.a==='value' && o.b===i && o.c===3;
+            }
+            return ok && Object.keys(o).join(',')==='c,b,a';
+        }
+        const first={a:1,b:2,c:3}, second={a:4,b:5,c:3};
+        read(first) && read(second) && first!==second;
+    )JS");
+}
 TEST_F(JsMvpLmd, ObjectEvaluationOrderAndImmutableShapes) {
     boolean("function f(x){return {a:1,b:x,c:3}}let a=f(2),b=f(-0),c=f(5e-324);"
         "a.a===1 && a.b===2 && a.c===3 && b.a===1 && 1/b.b===-Infinity && b.c===3 &&"
@@ -1128,6 +1235,89 @@ TEST_F(JsMvpLmd, StableNullableClassFields) {
     // factory initialization after new must retain the same packed pointer lane as constructor writes.
     EXPECT_EQ(typemap_hash_lookup((TypeMap*)a->type, "next", 4)->type->type_id, LMD_TYPE_MAP);
     EXPECT_EQ(typemap_hash_lookup((TypeMap*)b->type, "next", 4)->type->type_id, LMD_TYPE_NULL);
+}
+TEST_F(JsMvpLmd, CompatibleNumericClassStoresKeepShape) {
+    Item result = run(R"JS(
+        class Point { constructor() { this.x=1.5; this.y=2.5; } }
+        let first=new Point(); let second=new Point();
+        first.x=9007199254740991; first.y=0;
+        [first,second];
+    )JS");
+    ASSERT_EQ(get_type_id(result), LMD_TYPE_ARRAY);
+    Map* first = result.array->items[0].map;
+    Map* second = result.array->items[1].map;
+    EXPECT_EQ(first->type, second->type);
+    ShapeEntry* field = typemap_hash_lookup((TypeMap*)first->type, "x", 1);
+    ASSERT_NE(field, nullptr);
+    EXPECT_EQ(field->type, &TYPE_FLOAT);
+    EXPECT_EQ(map_shape_field_to_item(first->data, field).get_double(), 9007199254740991.0);
+    boolean(R"JS(
+        class Point { constructor() { this.x=5e-324; } }
+        let p=new Point(), ok=true;
+        for(let i=0;i<20;i++) {
+            p.x=5e-324; const tiny=p.x; p.x=i;
+            ok=ok && tiny===5e-324 && p.x===i;
+            p.x=-0; ok=ok && 1/p.x===-Infinity;
+            p.x='s'; ok=ok && p.x==='s';
+            delete p.x; ok=ok && !Object.hasOwn(p,'x');
+            p.x=i; ok=ok && p.x===i;
+        }
+        ok;
+    )JS");
+}
+TEST_F(JsMvpLmd, NullableConstructorAllocationShapes) {
+    Item result = run(R"JS(
+        class Link { constructor() { this.left=null; this.right=null; this.parent=null; } }
+        function fresh() { return new Link(); }
+        let seed=fresh(); fresh(); seed.extra=7;
+        seed.left={value:1}; seed.right={value:2}; seed.parent=seed;
+        let empty=fresh(); let full=fresh();
+        full.left=seed.left; full.right=seed.right; full.parent=seed;
+        [empty,full,seed];
+    )JS");
+    ASSERT_EQ(get_type_id(result), LMD_TYPE_ARRAY);
+    Map* empty = result.array->items[0].map;
+    Map* full = result.array->items[1].map;
+    EXPECT_EQ(empty->type, full->type);
+    EXPECT_EQ(((TypeMap*)empty->type)->length, 3);
+    const char* keys[] = {"left", "right", "parent"};
+    for (const char* key : keys) {
+        ShapeEntry* field = typemap_hash_lookup((TypeMap*)empty->type, key, strlen(key));
+        ASSERT_NE(field, nullptr);
+        EXPECT_EQ(field->type, &TYPE_MAP);
+        EXPECT_EQ(map_shape_field_to_item(empty->data, field).item, ITEM_NULL);
+        EXPECT_EQ(get_type_id(map_shape_field_to_item(full->data, field)), LMD_TYPE_MAP);
+    }
+    boolean(R"JS(
+        class Link { constructor() { this.next=null; } }
+        let seed=new Link(); seed.next={value:3};
+        let n=new Link(); let ok=n.next===null && Object.keys(n).join(',')==='next';
+        n.next=seed; n.next=null; ok=ok && n.next===null;
+        n.next='s'; ok=ok && n.next==='s'; delete n.next;
+        ok=ok && !Object.hasOwn(n,'next'); n.next=5e-324;
+        let later=new Link();
+        ok && n.next===5e-324 && later.next===null && later instanceof Link;
+    )JS");
+    boolean(R"JS(
+        class Link { constructor(value) { this.next=null; this.next=value; } }
+        let seed=new Link(null); seed.next={}; let n=new Link('s');
+        n.next==='s' && new Link(null).next===null;
+    )JS");
+    boolean(R"JS(
+        class Link { constructor(value) { this.value=value; this.next=null; } }
+        function create(value) { return new Link(value); }
+        let seed=create(false); seed.next={value:9}; let ok=true;
+        for(let i=0;i<20;i++) {
+            const value=i%2 ? {value:i} : true;
+            const link=create(value);
+            ok=ok && link.value===value && link.next===null;
+            link.next=seed; link.next=null;
+            ok=ok && link.next===null && +link.next===0;
+        }
+        const a=create(undefined), b=create(null), c=create(5e-324), d=create('s');
+        ok && a.value===undefined && +a.value!==+a.value && b.value===null &&
+            c.value===5e-324 && d.value==='s';
+    )JS");
 }
 TEST_F(JsMvpLmd, ClosureEnvironmentUsesSharedTracing) {
     Item result = run("function f(){let value=[5e-324,'alive'];return ()=>value}f()");

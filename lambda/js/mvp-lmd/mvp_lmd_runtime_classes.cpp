@@ -1,5 +1,6 @@
 #include "mvp_lmd_runtime.h"
 #include "../js_ast.hpp"
+#include "../../input/input.hpp"
 #include "../../runtime/lambda-root-frame.hpp"
 #include "../../runtime/heap_api.h"
 #include "../../runtime/runtime-state.h"
@@ -37,13 +38,14 @@ static Item mvp_lmd_inherited_member(Item owner, const char* key, size_t length,
 const TypeNominalExtension mvp_lmd_class_extension = {mvp_lmd_inherited_member};
 
 static void mvp_lmd_cache_property(MvpLmdPropertyCache* cache, TypeMap* shape,
-        ShapeEntry* field, Item inherited, bool writable) {
+        ShapeEntry* field, Item inherited, bool writable, bool nullable_initializer = false) {
     MvpLmdPropertyCacheEntry* entry = NULL;
     for (int i = 0; i < MVP_LMD_PROPERTY_CACHE_SIZE; i++)
         if (cache->entries[i].shape == shape) { entry = &cache->entries[i]; break; }
     if (!entry) entry = &cache->entries[cache->next++ % MVP_LMD_PROPERTY_CACHE_SIZE];
     entry->shape = shape; entry->field = field;
     entry->inherited = field ? ItemNull : inherited; entry->writable = writable;
+    entry->nullable_initializer = nullable_initializer;
     // only ordinary packed fields use the inline cache lane; shared readers own optional layouts.
     entry->offset = field ? field->byte_offset : 0;
     entry->storage = field && field->name && field->byte_offset >= 0 &&
@@ -54,6 +56,26 @@ static void mvp_lmd_cache_property(MvpLmdPropertyCache* cache, TypeMap* shape,
         type == LMD_TYPE_MAP || type == LMD_TYPE_ARRAY || type == LMD_TYPE_ARRAY_NUM ? 2 : 0;
     // function Items are direct pointers, like Maps; tagging them changes strict identity.
     entry->pointer_tag = type == LMD_TYPE_STRING ? (uint64_t)type << 56 : 0;
+}
+
+static bool mvp_lmd_class_widen_allocation(MvpLmdClass* cls, String* key, TypeId value_type) {
+    if (!cls->allocation_shape || !cls->nullable_initializer_count ||
+            (value_type != LMD_TYPE_MAP && value_type != LMD_TYPE_NULL)) return false;
+    for (int i = 0; i < cls->nullable_initializer_count; i++) {
+        String* name = cls->nullable_initializers[i];
+        if (name->len != key->len || memcmp(name->chars, key->chars, key->len)) continue;
+        if (value_type == LMD_TYPE_MAP) {
+            ShapeEntry* field = typemap_hash_lookup(cls->allocation_shape, key->chars, key->len);
+            // widen only this declared null initializer; never copy an instance's extra fields.
+            if (field && field->type == &TYPE_NULL) {
+                TypeMap* shape = type_tree_retype_field(runtime_shape_tree(), cls->allocation_shape,
+                    field, LMD_TYPE_MAP, NULL);
+                if (shape) { cls->allocation_shape = shape; cls->allocation_epoch++; }
+            }
+        }
+        return true;
+    }
+    return false;
 }
 
 extern "C" Item mvp_lmd_class_property(Item owner, Item name, Item value, int64_t operation,
@@ -93,13 +115,21 @@ extern "C" Item mvp_lmd_class_property(Item owner, Item name, Item value, int64_
         }
         if (operation == LMD_PROP_SET) {
             ShapeEntry* field = typemap_hash_lookup((TypeMap*)map->type, name.get_string()->chars, name.get_string()->len);
+            // classes without nullable initializers need no extra value classification.
+            bool nullable_initializer = !metadata && cls->nullable_initializer_count &&
+                mvp_lmd_class_widen_allocation(cls, name.get_string(), get_type_id(value));
             if (field && cache && !metadata && typemap_is_shared_shape((TypeMap*)map->type)) {
-                mvp_lmd_cache_property(cache, (TypeMap*)map->type, field, ItemNull, true);
+                mvp_lmd_cache_property(cache, (TypeMap*)map->type, field, ItemNull, true, nullable_initializer);
             }
             // Lambda's Map pointer lane already represents null; preserve its immutable shape as fn_map_set does.
-            if (field && !initializing && field->type == &TYPE_MAP && get_type_id(value) == LMD_TYPE_NULL)
+            if (field && (!initializing || nullable_initializer) && field->type == &TYPE_MAP && get_type_id(value) == LMD_TYPE_NULL)
                 return map_field_store((char*)map->data + field->byte_offset, value, LMD_TYPE_NULL)
                     ? value : mvp_lmd_fail(LMD_MVP_MEMORY, 0);
+            if (field && field->type == &TYPE_FLOAT && get_type_id(value) == LMD_TYPE_INT) {
+                // Lambda widens compatible integer writes in place instead of alternating numeric shapes.
+                map_field_store_int_as_float((char*)map->data + field->byte_offset, value);
+                return value;
+            }
         }
         owner = Item{.map = map};
     }
