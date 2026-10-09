@@ -1,0 +1,85 @@
+{
+  "name": "Child-list changes respect relational-selector anchor scope",
+  "html": "test/ui/dom_mutation_child_relational_scope.html",
+  "viewport": {
+    "width": 500,
+    "height": 240
+  },
+  "events": [
+    {
+      "type": "click",
+      "target": {
+        "selector": "#local"
+      }
+    },
+    {
+      "type": "assert_reconcile_mode",
+      "mode": "incremental",
+      "reason": "eligible"
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#probe"
+      },
+      "width": 30,
+      "height": 20
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#related"
+      }
+    },
+    {
+      "type": "assert_reconcile_mode",
+      "mode": "retained_full_layout",
+      "reason": "broad-structural-css-risk"
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#anchor"
+      },
+      "width": 60,
+      "height": 25
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#sibling-rule"
+      }
+    },
+    {
+      "type": "assert_reconcile_mode",
+      "mode": "retained_full_layout",
+      "reason": "stylesheet-mutation"
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#probe"
+      },
+      "height": 35
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#relative"
+      }
+    },
+    {
+      "type": "assert_reconcile_mode",
+      "mode": "retained_full_layout",
+      "reason": "broad-structural-css-risk"
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#probe"
+      },
+      "width": 30,
+      "height": 20
+    }
+  ]
+}

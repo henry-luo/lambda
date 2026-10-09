@@ -404,17 +404,7 @@ test/lambda/latex/test_latex_spacing.ls	direct
 test/lambda/latex/test_latex_symbols.ls	direct
 test/lambda/latex/test_latex_to_html.ls	direct
 test/lambda/latex/test_latex_util.ls	direct
-test/lambda/math/test_math_atom_color.ls	direct
-test/lambda/math/test_math_atom_enclose.ls	direct
-test/lambda/math/test_math_atom_spacing.ls	direct
-test/lambda/math/test_math_atom_style.ls	direct
-test/lambda/math/test_math_box.ls	direct
-test/lambda/math/test_math_context.ls	direct
-test/lambda/math/test_math_css.ls	direct
-test/lambda/math/test_math_delimiters.ls	direct
 test/lambda/math/test_math_html_output.ls	direct
-test/lambda/math/test_math_metrics.ls	direct
-test/lambda/math/test_math_optimize.ls	direct
 test/lambda/math/test_math_spacing.ls	direct
 test/lambda/math/test_math_symbols.ls	direct
 test/lambda/math/test_math_util.ls	direct

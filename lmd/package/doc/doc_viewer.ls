@@ -13,7 +13,6 @@ import pdf_html: lambda.pdf.html
 import latex: lambda.latex.latex
 import latex_css: lambda.latex.css
 import math_renderer: lambda.doc.math.math
-import math_css: lambda.doc.math.css
 import graph_doc: lambda.graph.document
 import tikz: lambda.doc.tikz.tikz
 
@@ -1145,10 +1144,9 @@ fn viewer_document(tree_model) {
   <head
     <meta charset:"UTF-8">
     <title "Lambda Document Viewer">
-    for (sheet in math_css.font_stylesheets()) { sheet }
+    latex.font_stylesheet();
     <style pdf_html.DEFAULT_CSS>
     <style latex_css.STYLESHEET>
-    <style math_css.get_stylesheet(null)>
     <style "
       * { box-sizing: border-box; }
       body { margin: 0; height: 100vh; overflow: hidden; background: #eef1f5; color: #20242c;

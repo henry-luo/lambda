@@ -1,0 +1,609 @@
+{
+  "commit": "438d2e17fb9f75fa3dbc54e1d21a3bc088ad009d",
+  "source_files": {
+    "src/game/geometry.js": "53ba535c5eeac0eae95d5d53d6bca2da89ee9169ab5d4ac0c30b993bee7af102",
+    "src/game/player/damage.js": "597c79ad6e7b255197b0827b8ce453bef68fe983a45fc1879b963c9af4ed4684",
+    "src/game/constants.js": "229bf6b7f316b2dbc545b8272a24ed049e773f9c77f21d0f497f3428dffe448f",
+    "src/game/state.js": "63efd57caa02bbdb3c037a368362548f7a6f38680eacde91449041c0f3c67448",
+    "src/game/mechanics/doors.js": "97751f31f9f2ac140fcb046b9f5c4ff52d98c907e1cdb8a8a06e90b7afc94087"
+  },
+  "host": "Virtual monotonic clock; recorded sound effects; explicit random stream; no renderer.",
+  "differences": [
+    "Lambda door height is simulation-owned; open means opening or open.",
+    "Lambda deadlines stop on pause; these inputs advance simulation time explicitly.",
+    "Hazard RNG compares threshold outcomes, not the upstream Math.random bit stream."
+  ],
+  "geometry": [
+    {
+      "kind": "polygon",
+      "point": [
+        0,
+        0
+      ],
+      "polygon": [
+        {
+          "x": -10,
+          "y": -10
+        },
+        {
+          "x": 10,
+          "y": -10
+        },
+        {
+          "x": 10,
+          "y": 10
+        },
+        {
+          "x": -10,
+          "y": 10
+        }
+      ],
+      "expected": true
+    },
+    {
+      "kind": "polygon",
+      "point": [
+        10,
+        0
+      ],
+      "polygon": [
+        {
+          "x": -10,
+          "y": -10
+        },
+        {
+          "x": 10,
+          "y": -10
+        },
+        {
+          "x": 10,
+          "y": 10
+        },
+        {
+          "x": -10,
+          "y": 10
+        }
+      ],
+      "expected": false
+    },
+    {
+      "kind": "polygon",
+      "point": [
+        -10,
+        0
+      ],
+      "polygon": [
+        {
+          "x": -10,
+          "y": -10
+        },
+        {
+          "x": 10,
+          "y": -10
+        },
+        {
+          "x": 10,
+          "y": 10
+        },
+        {
+          "x": -10,
+          "y": 10
+        }
+      ],
+      "expected": true
+    },
+    {
+      "kind": "polygon",
+      "point": [
+        11,
+        0
+      ],
+      "polygon": [
+        {
+          "x": -10,
+          "y": -10
+        },
+        {
+          "x": 10,
+          "y": -10
+        },
+        {
+          "x": 10,
+          "y": 10
+        },
+        {
+          "x": -10,
+          "y": 10
+        }
+      ],
+      "expected": false
+    },
+    {
+      "kind": "circle",
+      "args": [
+        0,
+        0,
+        5,
+        -10,
+        5,
+        10,
+        5
+      ],
+      "expected": false
+    },
+    {
+      "kind": "circle",
+      "args": [
+        0,
+        0,
+        5,
+        -10,
+        4,
+        10,
+        4
+      ],
+      "expected": true
+    },
+    {
+      "kind": "circle",
+      "args": [
+        0,
+        0,
+        5,
+        3,
+        4,
+        3,
+        4
+      ],
+      "expected": false
+    },
+    {
+      "kind": "circle",
+      "args": [
+        0,
+        0,
+        5,
+        2,
+        4,
+        2,
+        4
+      ],
+      "expected": true
+    },
+    {
+      "kind": "ray",
+      "args": [
+        0,
+        0,
+        0,
+        1,
+        -10,
+        5,
+        10,
+        5,
+        10
+      ],
+      "expected": true
+    },
+    {
+      "kind": "ray",
+      "args": [
+        0,
+        0,
+        0,
+        1,
+        -10,
+        5,
+        10,
+        5,
+        5
+      ],
+      "expected": false
+    },
+    {
+      "kind": "ray",
+      "args": [
+        0,
+        0,
+        0,
+        1,
+        -10,
+        0,
+        10,
+        0,
+        10
+      ],
+      "expected": false
+    },
+    {
+      "kind": "ray",
+      "args": [
+        0,
+        0,
+        0,
+        1,
+        0,
+        2,
+        0,
+        8,
+        10
+      ],
+      "expected": false
+    },
+    {
+      "kind": "ray",
+      "args": [
+        0,
+        0,
+        0,
+        1,
+        0,
+        5,
+        10,
+        5,
+        10
+      ],
+      "expected": true
+    }
+  ],
+  "damage": [
+    {
+      "input": {
+        "amount": 30,
+        "health": 100,
+        "armor": 0,
+        "armor_type": 0,
+        "skill": 3,
+        "time": 2
+      },
+      "expected": {
+        "health": 70,
+        "armor": 0,
+        "armor_type": 0,
+        "dead": false,
+        "dead_at": null,
+        "sounds": [
+          "DSPLPAIN"
+        ]
+      }
+    },
+    {
+      "input": {
+        "amount": 30,
+        "health": 100,
+        "armor": 30,
+        "armor_type": 1,
+        "skill": 3,
+        "time": 2
+      },
+      "expected": {
+        "health": 80,
+        "armor": 20,
+        "armor_type": 1,
+        "dead": false,
+        "dead_at": null,
+        "sounds": [
+          "DSPLPAIN"
+        ]
+      }
+    },
+    {
+      "input": {
+        "amount": 30,
+        "health": 100,
+        "armor": 30,
+        "armor_type": 2,
+        "skill": 3,
+        "time": 2
+      },
+      "expected": {
+        "health": 85,
+        "armor": 15,
+        "armor_type": 2,
+        "dead": false,
+        "dead_at": null,
+        "sounds": [
+          "DSPLPAIN"
+        ]
+      }
+    },
+    {
+      "input": {
+        "amount": 30,
+        "health": 100,
+        "armor": 3,
+        "armor_type": 2,
+        "skill": 3,
+        "time": 2
+      },
+      "expected": {
+        "health": 73,
+        "armor": 0,
+        "armor_type": 0,
+        "dead": false,
+        "dead_at": null,
+        "sounds": [
+          "DSPLPAIN"
+        ]
+      }
+    },
+    {
+      "input": {
+        "amount": 31,
+        "health": 100,
+        "armor": 30,
+        "armor_type": 1,
+        "skill": 1,
+        "time": 2
+      },
+      "expected": {
+        "health": 90,
+        "armor": 25,
+        "armor_type": 1,
+        "dead": false,
+        "dead_at": null,
+        "sounds": [
+          "DSPLPAIN"
+        ]
+      }
+    },
+    {
+      "input": {
+        "amount": 1000,
+        "health": 100,
+        "armor": 0,
+        "armor_type": 0,
+        "skill": 3,
+        "time": 2
+      },
+      "expected": {
+        "health": 0,
+        "armor": 0,
+        "armor_type": 0,
+        "dead": true,
+        "dead_at": 2,
+        "sounds": [
+          "DSPLPAIN",
+          "DSPLDETH"
+        ]
+      }
+    },
+    {
+      "input": {
+        "amount": 1000,
+        "health": 100,
+        "armor": 0,
+        "armor_type": 0,
+        "skill": 3,
+        "time": 2,
+        "immune": true
+      },
+      "expected": {
+        "health": 100,
+        "armor": 0,
+        "armor_type": 0,
+        "dead": false,
+        "dead_at": null,
+        "sounds": []
+      }
+    },
+    {
+      "input": {
+        "amount": 10,
+        "health": 0,
+        "armor": 0,
+        "armor_type": 0,
+        "skill": 3,
+        "time": 2,
+        "dead": true
+      },
+      "expected": {
+        "health": 0,
+        "armor": 0,
+        "armor_type": 0,
+        "dead": true,
+        "dead_at": 2,
+        "sounds": []
+      }
+    }
+  ],
+  "hazards": [
+    {
+      "input": {
+        "special": 5,
+        "dt": 0.9
+      },
+      "expected": {
+        "health": 100,
+        "armor": 0,
+        "armor_type": 0,
+        "dead": false,
+        "dead_at": null,
+        "sounds": [],
+        "hazard_time": 0.9
+      }
+    },
+    {
+      "input": {
+        "special": 5,
+        "dt": 0.9142857142857143
+      },
+      "expected": {
+        "health": 90,
+        "armor": 0,
+        "armor_type": 0,
+        "dead": false,
+        "dead_at": null,
+        "sounds": [
+          "DSPLPAIN"
+        ],
+        "hazard_time": 0
+      }
+    },
+    {
+      "input": {
+        "special": 7,
+        "dt": 1
+      },
+      "expected": {
+        "health": 95,
+        "armor": 0,
+        "armor_type": 0,
+        "dead": false,
+        "dead_at": null,
+        "sounds": [
+          "DSPLPAIN"
+        ],
+        "hazard_time": 0.08571428571428574
+      }
+    },
+    {
+      "input": {
+        "special": 5,
+        "dt": 1,
+        "suit": true
+      },
+      "expected": {
+        "health": 100,
+        "armor": 0,
+        "armor_type": 0,
+        "dead": false,
+        "dead_at": null,
+        "sounds": [],
+        "hazard_time": 0
+      }
+    },
+    {
+      "input": {
+        "special": 16,
+        "dt": 1,
+        "suit": true,
+        "random": 0
+      },
+      "expected": {
+        "health": 80,
+        "armor": 0,
+        "armor_type": 0,
+        "dead": false,
+        "dead_at": null,
+        "sounds": [
+          "DSPLPAIN"
+        ],
+        "hazard_time": 0.08571428571428574
+      }
+    },
+    {
+      "input": {
+        "special": 16,
+        "dt": 1,
+        "suit": true,
+        "random": 0.01953125
+      },
+      "expected": {
+        "health": 100,
+        "armor": 0,
+        "armor_type": 0,
+        "dead": false,
+        "dead_at": null,
+        "sounds": [],
+        "hazard_time": 0
+      }
+    }
+  ],
+  "doors": [
+    {
+      "label": "locked",
+      "at": 0,
+      "action": "use",
+      "inside": false,
+      "expected": {
+        "open": false,
+        "passable": false,
+        "sounds": [
+          "DSOOF"
+        ]
+      }
+    },
+    {
+      "label": "unlock",
+      "at": 0,
+      "action": "key",
+      "inside": false,
+      "expected": {
+        "open": true,
+        "passable": false,
+        "sounds": [
+          "DSDOROPN"
+        ]
+      }
+    },
+    {
+      "label": "before-clearance",
+      "at": 0.79,
+      "action": "wait",
+      "inside": false,
+      "expected": {
+        "open": true,
+        "passable": false,
+        "sounds": []
+      }
+    },
+    {
+      "label": "clearance",
+      "at": 0.8,
+      "action": "wait",
+      "inside": false,
+      "expected": {
+        "open": true,
+        "passable": true,
+        "sounds": []
+      }
+    },
+    {
+      "label": "opened",
+      "at": 1,
+      "action": "wait",
+      "inside": false,
+      "expected": {
+        "open": true,
+        "passable": true,
+        "sounds": []
+      }
+    },
+    {
+      "label": "extend",
+      "at": 3,
+      "action": "use",
+      "inside": false,
+      "expected": {
+        "open": true,
+        "passable": true,
+        "sounds": []
+      }
+    },
+    {
+      "label": "occupied",
+      "at": 7,
+      "action": "wait",
+      "inside": true,
+      "expected": {
+        "open": true,
+        "passable": true,
+        "sounds": []
+      }
+    },
+    {
+      "label": "close",
+      "at": 11,
+      "action": "wait",
+      "inside": false,
+      "expected": {
+        "open": false,
+        "passable": false,
+        "sounds": [
+          "DSDORCLS"
+        ]
+      }
+    }
+  ]
+}

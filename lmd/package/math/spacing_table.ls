@@ -10,11 +10,6 @@
 // -1 = thin (display/text only), -2 = medium (display/text only), -3 = thick (display/text only).
 // 99 = impossible combination (should not occur).
 
-// Spacing values in em (mu = 1/18 em)
-let THIN_SPACE = 0.17          // MathLive snapshot value for 3mu
-let MEDIUM_SPACE = 0.23        // MathLive snapshot value for 4mu
-let THICK_SPACE = 0.28         // MathLive snapshot value for 5mu
-
 // atom type name → index
 pub fn atom_type_index(atom_type) {
     if (atom_type == "mord") 0
@@ -96,14 +91,14 @@ fn spacing_code_inner(ri) {
 // Get spacing between two atom types
 // Returns spacing in em, or 0.0 if no spacing needed
 // style: "display" | "text" | "script" | "scriptscript"
-pub fn get_spacing(left_type, right_type, style, exact = false) {
+pub fn get_spacing(left_type, right_type, style) {
     let li = atom_type_index(left_type)
     let ri = atom_type_index(right_type)
     let code = spacing_code_for_indices(li, ri)
-    // Preserve the snapshot adapter's rounding; production uses TeX mu units.
-    let thin = if (exact) 3.0 / 18.0 else THIN_SPACE
-    let medium = if (exact) 4.0 / 18.0 else MEDIUM_SPACE
-    let thick = if (exact) 5.0 / 18.0 else THICK_SPACE
+    // TeX mu units retain full precision until SVG emission.
+    let thin = 3.0 / 18.0
+    let medium = 4.0 / 18.0
+    let thick = 5.0 / 18.0
 
     if (code == 99) 0.0          // impossible combination
     else if (code == 0) 0.0      // no space
@@ -121,14 +116,4 @@ pub fn get_spacing(left_type, right_type, style, exact = false) {
              else if (abs_code == 2) medium
              else if (abs_code == 3) thick
              else 0.0)
-}
-
-// CSS class for a given spacing value
-pub fn spacing_class(spacing_em) {
-    if (spacing_em == 0.0) null
-    else if (spacing_em < 0.0) "lm_negativethinspace"
-    else if (spacing_em <= THIN_SPACE) "lm_thinspace"
-    else if (spacing_em <= MEDIUM_SPACE) "lm_mediumspace"
-    else if (spacing_em <= THICK_SPACE) "lm_thickspace"
-    else null
 }

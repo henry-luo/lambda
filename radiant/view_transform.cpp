@@ -567,7 +567,7 @@ RdtMatrix4 compute_transform_matrix_3d(const TransformProp* transform,
         transform ? transform->individual : nullptr, width, height, origin_x, origin_y, origin_z);
 }
 
-static RdtMatrix matrix4_project_to_2d(const RdtMatrix4* matrix) {
+RdtMatrix matrix4_project_to_2d(const RdtMatrix4* matrix) {
     RdtMatrix result = {};
     result.e11 = matrix->values[0];
     result.e12 = matrix->values[1];
@@ -596,6 +596,22 @@ RdtMatrix4 compute_parent_perspective_matrix_3d(float distance,
     RdtMatrix4 to_origin = rdt_matrix4_translate(-origin_x, -origin_y, 0.0f);
     RdtMatrix4 result = rdt_matrix4_multiply(&from_origin, &perspective);
     return rdt_matrix4_multiply(&result, &to_origin);
+}
+
+RdtMatrix4 compute_child_projection_matrix_3d(const TransformProp* transform,
+    float width, float height, float x, float y, bool preserve_depth) {
+    RdtMatrix4 result = rdt_matrix4_identity();
+    if (transform && transform->perspective > 0.0f) {
+        result = compute_parent_perspective_matrix_3d(transform->perspective,
+            x + transform_perspective_origin_offset(transform, width, true),
+            y + transform_perspective_origin_offset(transform, height, false));
+    }
+    if (!preserve_depth) {
+        // CSS Transforms 2 §4.1.3: flatten after this box's perspective, before
+        // its own transform. Painting, bounds and backfaces share the boundary.
+        for (int column = 0; column < 4; column++) result.values[8 + column] = 0.0f;
+    }
+    return result;
 }
 
 static RdtMatrix project_transform_matrix(RdtMatrix4 matrix, float perspective_distance,
@@ -644,7 +660,7 @@ bool transform_preserves_3d(DomElement* elem) {
         !(inline_prop->opacity >= 0.0f && inline_prop->opacity < 1.0f) &&
         (!inline_prop->mix_blend_mode || inline_prop->mix_blend_mode == CSS_VALUE_NORMAL) &&
         !elem->filterp()->functions &&
-        !(elem->boundary()->mask && elem->boundary()->mask->has_radial_gradient) &&
+        !(elem->boundary()->mask && elem->boundary()->mask->radial_gradient) &&
         !elem->block()->contain_paint && !elem->block()->content_visibility_hidden;
 }
 

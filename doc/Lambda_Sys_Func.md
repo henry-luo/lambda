@@ -385,19 +385,19 @@ Functions for string manipulation. `replace`, `split`, and `find` accept either 
 String patterns are defined in the type system (see [Lambda_String_Pattern.md](Lambda_String_Pattern.md)) and can be used as arguments to string functions, either named or written inline:
 
 ```lambda
-type digits = \(d+)              // one or more digits
-type ws = \(s+)                  // one or more whitespace chars
-type word = \(w+)                // word characters
+type digits = \("\d"+)              // one or more digits
+type ws = \("\s"+)                  // one or more whitespace chars
+type word = \("\w"+)                // word characters
 
 find("a1b22", digits)            // named
-find("a1b22", \(d+))             // inline — same result
+find("a1b22", \("\d"+))             // inline — same result
 ```
 
 These functions operate on strings, so a **symbol-domain pattern**
-(`\symbol(...)`) is a domain error rather than a content match:
+(for example `\('\a'+)`) is a domain error rather than a content match:
 
 ```lambda
-find("abc", \symbol(a+))         // error: symbol-domain patterns cannot search strings
+find("abc", \('\a'+))         // error: symbol-domain patterns cannot search strings
 ```
 
 String-valued system functions use `""` for a successful result with no
@@ -448,13 +448,13 @@ Replace all occurrences of a pattern or substring in a string. Returns a new str
 
 | Function | Description | Example | Result |
 |----------|-------------|---------|--------|
-| `replace(str, pattern, repl)` | Replace all pattern matches | `replace("a1b2", \(d), "X")` | `"aXbX"` |
+| `replace(str, pattern, repl)` | Replace all pattern matches | `replace("a1b2", \("\d"), "X")` | `"aXbX"` |
 | `replace(str, string, repl)` | Replace all substring matches | `replace("abc", "b", "X")` | `"aXc"` |
 
 ```lambda
-type digit = \(d)
-type digits = \(d+)
-type ws = \(s+)
+type digit = \("\d")
+type digits = \("\d"+)
+type ws = \("\s"+)
 
 replace("a1b2c3", digit, "X")         // "aXbXcX"
 replace("a1b22c333", digits, "N")     // "aNbNcN"
@@ -471,8 +471,8 @@ substitutions, since patterns have no captures.
 
 ```lambda
 replace("aab", \("a"*), "-")          // "--b-": "aa", then the empty matches before and after "b"
-replace("", \(d*), "-")               // "-": an empty string holds one empty match
-replace("a1b", \(d), "[$&]")          // "a[$&]b": the replacement is literal
+replace("", \("\d"*), "-")               // "-": an empty string holds one empty match
+replace("a1b", \("\d"), "[$&]")          // "a[$&]b": the replacement is literal
 ```
 
 ### split(str, pattern_or_string, keep_delimiters?)
@@ -481,14 +481,14 @@ Split a string by pattern or substring. Returns an array of substrings.
 
 | Function | Description | Example | Result |
 |----------|-------------|---------|--------|
-| `split(str, pattern)` | Split by pattern | `split("a1b2", \(d))` | `["a", "b", ""]` |
+| `split(str, pattern)` | Split by pattern | `split("a1b2", \("\d"))` | `["a", "b", ""]` |
 | `split(str, string)` | Split by substring | `split("a,b,c", ",")` | `["a", "b", "c"]` |
-| `split(str, sep, true)` | Split, keep delimiters | `split("a1b2", \(d), true)` | `["a","1","b","2",""]` |
+| `split(str, sep, true)` | Split, keep delimiters | `split("a1b2", \("\d"), true)` | `["a","1","b","2",""]` |
 
 ```lambda
-type digit = \(d)
-type digits = \(d+)
-type ws = \(s+)
+type digit = \("\d")
+type digits = \("\d"+)
+type ws = \("\s"+)
 
 split("a1b2c3", digit)                // ["a", "b", "c", ""]
 split("hello   world", ws)            // ["hello", "world"]
@@ -507,15 +507,15 @@ so string and pattern delimiters behave identically at the edges:
 | `split("a1b1", digit)` | `["a", "b", ""]` | trailing delimiter → empty last segment |
 | `split("abc", ",")` | `["abc"]` | no match → whole subject, one element |
 | `split("", ",")` | `[""]` | empty subject, delimiter does not match empty |
-| `split("", \(d*))` | `[]` | empty subject, delimiter matches empty |
+| `split("", \("\d"*))` | `[]` | empty subject, delimiter matches empty |
 | `split("ab", "")` | `["a", "b"]` | empty delimiter → characters |
-| `split("ab", \(d*))` | `["a", "b"]` | zero-width match → no leading/trailing empty |
+| `split("ab", \("\d"*))` | `["a", "b"]` | zero-width match → no leading/trailing empty |
 
 The last row is where ECMAScript and Python differ: a match ending on the
 current segment's start contributes no segment, so a zero-width delimiter
 yields neither a leading nor a trailing empty. Python's `re.split` would give
 `['', 'a', 'b', '']`. Zero-width advances step whole codepoints, so
-`split("日本", \(d*))` is `["日", "本"]`.
+`split("日本", \("\d"*))` is `["日", "本"]`.
 
 `split(str, null)` splits on runs of whitespace with outer whitespace stripped
 (a Python-shaped form with no ECMAScript analogue).
@@ -541,7 +541,7 @@ Find all occurrences of a pattern or substring. Returns an array of match maps `
 
 | Function | Description | Example | Result |
 |----------|-------------|---------|--------|
-| `find(str, pattern)` | Find all pattern matches | `find("a1b22", \(d+))` | `[{value:"1",index:1}, ...]` |
+| `find(str, pattern)` | Find all pattern matches | `find("a1b22", \("\d"+))` | `[{value:"1",index:1}, ...]` |
 | `find(str, string)` | Find all substring matches | `find("abab", "ab")` | `[{value:"ab",index:0}, ...]` |
 
 Each match is a map with:
@@ -553,8 +553,8 @@ For example, `find("éabc", "abc")[0].index` is `1`, so
 `slice("éabc", 1, 4)` returns `"abc"`.
 
 ```lambda
-type digits = \(d+)
-type words = \(w+)
+type digits = \("\d"+)
+type words = \("\w"+)
 
 find("a1b22c333", digits)
 // [{value: "1", index: 1}, {value: "22", index: 3}, {value: "333", index: 6}]
@@ -586,7 +586,7 @@ not match `ss`, because each character folds to exactly one character.
 
 ```lambda
 find("École", "é", {ignore_case: true}) |> ~.value   // ["É"]
-replace("a1b2c3", \(d), "#", {limit: 2})              // "a#b#c3"
+replace("a1b2c3", \("\d"), "#", {limit: 2})              // "a#b#c3"
 replace("aAa", "a", "-", {ignore_case: true})         // "---"
 ```
 
@@ -1470,7 +1470,7 @@ Each match map has `value` (the matched text) and `index` (its offset in code po
 ```lambda
 pn todo_report() {
     // every TODO under src, with line numbers and the line itself
-    let todos = io.grep(/.src, \("TODO" ":" s* w+), {line: true, text: true})^
+    let todos = io.grep(/.src, \("TODO" ":" "\s"* "\w"+), {line: true, text: true})^
     for (t in todos) {
         print(t.file, t.line, t.text, "\n")
     }

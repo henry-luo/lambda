@@ -30,6 +30,7 @@ extern "C" Item dom_option_ctor(Item text_arg, Item value_arg,
 /** Web Animations constructors share Element.animate's native state path. */
 extern "C" Item dom_keyframe_effect_ctor(Item target, Item keyframes, Item options);
 extern "C" Item dom_animation_ctor(Item effect);
+extern "C" Item dom_web_animation_cancel(void);
 
 /** `Image(width?, height?)` — a detached HTMLImageElement. */
 extern "C" Item dom_image_constructor_body(Item callee, Item this_value,
@@ -65,6 +66,9 @@ extern "C" void dom_install_image_constructor(void);
 extern "C" void dom_install_window_dialog_globals(void);
 extern "C" void dom_install_window_computed_style_global(void);
 extern "C" void dom_install_custom_elements_global(void);
+extern "C" void dom_install_history_interface(Item global, Item history);
+extern "C" void dom_tree_walker_install_interface(Item prototype);
+extern "C" void dom_bind_interface_prototype(Item global, Item object, const char* name);
 
 /** The frame windows of the active document, as a fresh array. */
 extern "C" Item dom_collect_frame_windows_array(void);

@@ -1,0 +1,15 @@
+{
+  "name": "concave-floor-order",
+  "width": 1280,
+  "height": 336,
+  "reference_limitation": "Chromium 154 drops a concave floor when a wall outside the probed pixel precedes it. Native assertions require the floor at (320,104) in both DOM orders under CSS Transforms 2 sections 4.1.2 and 4.2.",
+  "scale": 1,
+  "browser": "HeadlessChrome/154.0.8037.57",
+  "spec": "https://drafts.csswg.org/css-transforms-2/",
+  "revision": "2025-11-30",
+  "shapes": {
+    "spec": "https://drafts.csswg.org/css-shapes/#shape-function",
+    "revision": "2026-05-07"
+  },
+  "sha256": "776b0a3473dd581db45f79c3c2666cc38541b43c2ba0cc48ad62df6d25be520a"
+}

@@ -1,6 +1,7 @@
 #include "scene3d.hpp"
 #include "layout.hpp"
 #include "view.hpp"
+#include "render.hpp"
 #include "view_tree_model.hpp"
 #include <assert.h>
 #include "event.hpp"
@@ -318,6 +319,7 @@ static void free_boundary_payload(DomElement* elem, ViewTree* tree) {
         view_pool_free(tree, boundary->border->border_image_url);
     }
     view_pool_free(tree, boundary->border);
+    if (boundary->mask) free_gradient(tree, boundary->mask->radial_gradient);
     view_pool_free(tree, boundary->mask);
     view_pool_free_list(tree, boundary->box_shadow);
     view_pool_free(tree, boundary->outline);
@@ -332,12 +334,20 @@ void view_release_transform_functions(DomElement* elem, ViewTree* tree) {
 }
 
 static void free_filter_chain(ViewTree* tree, FilterProp* filter) {
-    if (!filter) return;
-    view_pool_free_list(tree, filter->functions);
+    if (!filter || filter->functions_borrowed) return;
+    radiant::destroy_filter_list(tree ? tree->prop_pool.get() : nullptr, filter->functions);
+    filter->functions = nullptr;
 }
 
 static void free_filter_payload(DomElement* elem, ViewTree* tree) {
     free_filter_chain(tree, elem ? elem->filter_prop() : nullptr);
+}
+
+static void release_filter_external(DomElement* elem, ViewTree*) {
+    if (elem && elem->filter_prop()) radiant::release_filter_snapshots(elem->filter_prop()->functions);
+}
+static void release_backdrop_filter_external(DomElement* elem, ViewTree*) {
+    if (elem && elem->backdrop_filter_prop()) radiant::release_filter_snapshots(elem->backdrop_filter_prop()->functions);
 }
 
 static void free_backdrop_filter_payload(DomElement* elem, ViewTree* tree) {
@@ -590,8 +600,8 @@ static const ViewPropTeardownEntry VIEW_PROP_TEARDOWN[] = {
     { "embed", release_embed_prop_entry, free_embed_payload, view_prop_get_embed, view_prop_clear_embed, view_prop_free_embed, nullptr, nullptr, &EMBED_PROP_DEFAULT, sizeof(EmbedProp), reset_embed_prop, release_embed_prop_for_reset },
     { "position", nullptr, nullptr, view_prop_get_position, view_prop_clear_position, view_prop_free_position, nullptr, nullptr, &POSITION_PROP_DEFAULT, sizeof(PositionProp), nullptr },
     { "transform", nullptr, view_release_transform_functions, view_prop_get_transform, view_prop_clear_transform, view_prop_free_transform, nullptr, nullptr, &TRANSFORM_PROP_DEFAULT, sizeof(TransformProp), nullptr },
-    { "filter", nullptr, free_filter_payload, view_prop_get_filter, view_prop_clear_filter, view_prop_free_filter, nullptr, nullptr, &FILTER_PROP_DEFAULT, sizeof(FilterProp), nullptr },
-    { "backdrop-filter", nullptr, free_backdrop_filter_payload, view_prop_get_backdrop_filter, view_prop_clear_backdrop_filter, view_prop_free_backdrop_filter, nullptr, nullptr, &FILTER_PROP_DEFAULT, sizeof(FilterProp), nullptr },
+    { "filter", release_filter_external, free_filter_payload, view_prop_get_filter, view_prop_clear_filter, view_prop_free_filter, nullptr, nullptr, &FILTER_PROP_DEFAULT, sizeof(FilterProp), nullptr },
+    { "backdrop-filter", release_backdrop_filter_external, free_backdrop_filter_payload, view_prop_get_backdrop_filter, view_prop_clear_backdrop_filter, view_prop_free_backdrop_filter, nullptr, nullptr, &FILTER_PROP_DEFAULT, sizeof(FilterProp), nullptr },
     { "multicol", nullptr, nullptr, view_prop_get_multicol, view_prop_clear_multicol, view_prop_free_multicol, nullptr, nullptr, &MULTICOL_PROP_DEFAULT, sizeof(MultiColumnProp), nullptr },
     { "form", release_form_prop, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, 0, nullptr },
     { "item", nullptr, nullptr, nullptr, nullptr, nullptr, clear_item_prop, free_item_prop, nullptr, 0, free_item_prop },
@@ -1505,7 +1515,7 @@ static bool view_chain_has_3d_transform(View* view) {
     return false;
 }
 
-static RdtMatrix4 view_accumulated_transform_3d(View* view, bool context_only) {
+RdtMatrix4 view_accumulated_transform_3d(View* view, bool context_only) {
     RdtMatrix4 accumulated = rdt_matrix4_identity();
     int depth = 0;
     for (View* current = view; current && depth < 256;
@@ -1515,31 +1525,15 @@ static RdtMatrix4 view_accumulated_transform_3d(View* view, bool context_only) {
         const TransformProp* transform = block->transform;
 
         if (depth > 0) {
-            if (transform && transform->perspective > 0.0f) {
-                float parent_x = 0.0f;
-                float parent_y = 0.0f;
-                view_get_layout_position(
-                    static_cast<View*>(block), nullptr, &parent_x, &parent_y);
-                float origin_x = parent_x + radiant::transform_perspective_origin_offset(
-                    transform, block->width, true);
-                float origin_y = parent_y + radiant::transform_perspective_origin_offset(
-                    transform, block->height, false);
-                RdtMatrix4 perspective = radiant::compute_parent_perspective_matrix_3d(
-                    transform->perspective, origin_x, origin_y);
-                accumulated = rdt_matrix4_multiply(&perspective, &accumulated);
-            }
-            if (!radiant::transform_preserves_3d(block)) {
-                // backface orientation is relative to this 3D context, before ancestor flattening.
-                if (context_only) break;
-                // CSS Transforms 2 §4.1.3: project descendant depth after the
-                // parent's perspective and before the parent's own transform.
-                RdtMatrix4 flatten = rdt_matrix4_identity();
-                flatten.values[8] = 0.0f;
-                flatten.values[9] = 0.0f;
-                flatten.values[10] = 0.0f;
-                flatten.values[11] = 0.0f;
-                accumulated = rdt_matrix4_multiply(&flatten, &accumulated);
-            }
+            float parent_x = 0.0f;
+            float parent_y = 0.0f;
+            view_get_layout_position(static_cast<View*>(block), nullptr, &parent_x, &parent_y);
+            bool preserve_depth = radiant::transform_preserves_3d(block);
+            RdtMatrix4 boundary = radiant::compute_child_projection_matrix_3d(transform,
+                block->width, block->height, parent_x, parent_y, preserve_depth || context_only);
+            accumulated = rdt_matrix4_multiply(&boundary, &accumulated);
+            // backface orientation stops before the enclosing context flattens it.
+            if (context_only && !preserve_depth) break;
         }
 
         if (transform_has_functions(transform)) {

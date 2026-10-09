@@ -61,37 +61,16 @@ fn serialize_list_rec(lst, i, n, acc) {
 
 fn serialize_element(el) {
     let tag = string(name(el))
-    if (el.math_raw_markup != null) {
-        // SVG arrow boxes retain MathLive's exact markup alongside live elements.
-        string(el.math_raw_markup)
-    } else if (tag == "style") {
+    if (tag == "style") {
         // HTML style is raw text: entity-escaping '>' changes CSS selectors.
         let css = join(content(el), "") ^ { "" }
         "<style" ++ serialize_attrs(el) ++ ">" ++ replace(css, "<", "\\3c ") ++ "</style>"
-    } else if (is_transparent_math_boundary(el)) {
-        serialize_children(el)
     } else if (is_void_element(tag)) {
         "<" ++ tag ++ serialize_attrs(el) ++ ">"
     } else {
-        let children_html = serialize_math_relation_children(el)
-        let close = if (tag == "svg" and el.preserveAspectRatio == "none") " >" else ">"
-        // MathLive's SVG accent serializer leaves a space before `>` for
-        // preserveAspectRatio="none"; keep it so stretchy accent snapshots compare exactly.
-        "<" ++ tag ++ serialize_attrs(el) ++ close ++ children_html ++ "</" ++ tag ++ ">"
+        let children_html = serialize_children(el)
+        "<" ++ tag ++ serialize_attrs(el) ++ ">" ++ children_html ++ "</" ++ tag ++ ">"
     }
-}
-
-// MathLive serializes top-level `<`/`>` relations raw inside lm_cmr spans.
-// Keep that snapshot contract while the element tree retains printable glyphs
-// for the direct Radiant view path.
-fn serialize_math_relation_children(el) {
-    if (el.math_raw_relation == true and el[0] is string and
-            (el[0] == "<" or el[0] == ">")) string(el[0])
-    else serialize_children(el)
-}
-
-fn is_transparent_math_boundary(el) {
-    string(name(el)) == "span" and el.class == "lm_boundary"
 }
 
 fn serialize_children(el) {
@@ -129,11 +108,7 @@ fn serialize_attrs_rec(pairs, i, n, acc) {
 }
 
 fn format_attr(key, val) {
-    if (string(key) == "math_data_attrs") {
-        format_data_attrs(val)
-    }
-    else if (string(key) == "math_raw_relation" or string(key) == "math_raw_markup") { "" }
-    else if (val is bool) {
+    if (val is bool) {
         if (val == true) { " " ++ key }
         else { "" }
     }
@@ -141,38 +116,14 @@ fn format_attr(key, val) {
     else { " " ++ key ++ "=\"" ++ escape_attr(string(val)) ++ "\"" }
 }
 
-fn format_data_attrs(attrs) {
-    if (attrs == null) ""
-    else format_data_attrs_rec(attrs, 0, len(attrs), "")
-}
-
-fn format_data_attrs_rec(attrs, i, n, acc) {
-    if (i >= n) acc
-    else
-        (let attr = attrs[i],
-         let s = if (attr.has_value == true)
-            " " ++ attr.name ++ "=\"" ++ escape_attr(string(attr.value)) ++ "\""
-         else
-            " " ++ attr.name ++ " ",
-         format_data_attrs_rec(attrs, i + 1, n, acc ++ s))
-}
-
 // ============================================================
 // HTML escaping
 // ============================================================
 
 fn escape_html(s) {
-    // Standard text escaping: `&`, `<`, `>` → entities (correct for text-mode
-    // and `\not{...}` overlay targets, which MathLive escapes). The math
-    // relation glyphs `<`/`>` — which MathLive emits RAW inside `lm_cmr`
-    // spans — are carried as private-use sentinels (U+E000/U+E001) by the
-    // relation/operator renderers and mapped back to raw glyphs here, AFTER
-    // the entity escaping, so only true relations stay unescaped.
     let r1 = replace(s, "&", "&amp;")
     let r2 = replace(r1, "<", "&lt;")
-    let r3 = replace(r2, ">", "&gt;")
-    let r4 = replace(r3, "", "<")
-    replace(r4, "", ">")
+    replace(r2, ">", "&gt;")
 }
 
 fn escape_attr(s) {

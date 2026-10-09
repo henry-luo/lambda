@@ -38,6 +38,8 @@ struct RdtVectorImpl {
     uint64_t clip_mask_count;
     float tile_offset_x;  // physical-pixel X start of current tile (0 = full page)
     float tile_offset_y;  // physical-pixel Y start of current tile (0 = full page)
+    lam::Own<Arena> projection_arena;
+    ScratchArena projection_scratch;
 };
 
 // Path stores ThorVG path commands for deferred replay
@@ -1006,7 +1008,31 @@ static void path_replay(RdtPath* p, Tvg_Paint shape) {
     }
 }
 
-static void path_replay_projective(RdtPath* p, Tvg_Paint shape, const RdtMatrix* transform) {
+static void path_replay_projective(RdtVectorImpl* impl, RdtPath* p, Tvg_Paint shape,
+    const RdtMatrix* transform, bool fill = true) {
+    float left, top, right, bottom;
+    if (rdt_path_get_bounds(p, &left, &top, &right, &bottom)) {
+        float min_w = transform->e33 + fminf(transform->e31 * left, transform->e31 * right) +
+            fminf(transform->e32 * top, transform->e32 * bottom);
+        if (min_w <= 0.00001f) {
+            // Divide only after clipping a viewer-plane crossing. Projecting
+            // the original corners produces a mirrored, self-crossing contour.
+            if (!impl->projection_arena) {
+                impl->projection_arena = lam::own(mem_arena_create(mem_context_process(MEM_ROLE_RENDER),
+                    MEM_ROLE_RENDER, "vector.projection"));
+                if (!impl->projection_arena) return;
+                scratch_init(&impl->projection_scratch, impl->projection_arena);
+            }
+            ScratchScope scratch(&impl->projection_scratch);
+            RdtPath* projected = rdt_path_new();
+            Rect viewport = {impl->tile_offset_x, impl->tile_offset_y,
+                (float)impl->width, (float)impl->height};
+            if (projected && render_path_project_to_viewport(projected, p, transform, viewport, fill, &scratch))
+                path_replay(projected, shape);
+            rdt_path_free(projected);
+            return;
+        }
+    }
     for (int i = 0; i < p->count; i++) {
         RdtPath::Entry* e = &p->entries[i];
         float x, y;
@@ -1120,15 +1146,17 @@ static void apply_transform(Tvg_Paint shape, const RdtMatrix* transform) {
 }
 
 // create a filled shape for geometric clipping.
-static Tvg_Paint create_clip_mask(RdtPath* clip_path, const RdtMatrix* transform) {
+static Tvg_Paint create_clip_mask(RdtVectorImpl* impl, RdtPath* clip_path,
+    const RdtMatrix* transform, RdtFillRule rule) {
     Tvg_Paint clip = tvg_shape_new();
     if (matrix_is_projective(transform)) {
-        path_replay_projective(clip_path, clip, transform);
+        path_replay_projective(impl, clip_path, clip, transform);
         transform = nullptr;
     } else {
         path_replay(clip_path, clip);
     }
     tvg_shape_set_fill_color(clip, 0, 0, 0, 255);
+    if (rule == RDT_FILL_EVEN_ODD) tvg_shape_set_fill_rule(clip, TVG_FILL_RULE_EVEN_ODD);
     apply_transform(clip, transform);
     return clip;
 }
@@ -1186,6 +1214,10 @@ void rdt_vector_destroy(RdtVector* vec) {
     RdtVectorImpl* impl = vec->impl;
     tvg_flush_batch_scene(impl);
     if (impl->canvas) tvg_canvas_destroy(impl->canvas);
+    if (impl->projection_arena) {
+        scratch_release(&impl->projection_scratch);
+        mem_arena_destroy(impl->projection_arena);
+    }
     lam::free_owned(vec->impl);
 }
 
@@ -1534,7 +1566,7 @@ void rdt_fill_path(RdtVector* vec, RdtPath* p, Color color,
 
     if (matrix_is_projective(transform)) {
         Tvg_Paint shape = tvg_shape_new();
-        path_replay_projective(p, shape, transform);
+        path_replay_projective(impl, p, shape, transform);
         tvg_shape_set_fill_color(shape, color.r, color.g, color.b, color.a);
         if (rule == RDT_FILL_EVEN_ODD) {
             tvg_shape_set_fill_rule(shape, TVG_FILL_RULE_EVEN_ODD);
@@ -1595,7 +1627,7 @@ void rdt_stroke_path(RdtVector* vec, RdtPath* p, Color color, float width,
 
     if (matrix_is_projective(transform)) {
         Tvg_Paint shape = tvg_shape_new();
-        path_replay_projective(p, shape, transform);
+        path_replay_projective(impl, p, shape, transform, false);
         tvg_shape_apply_stroke_style(shape, color, width, cap, join,
                                      dash_array, dash_count, dash_phase, miter_limit);
         tvg_push_draw_remove_clipped(impl, shape);
@@ -1708,7 +1740,7 @@ static void tvg_draw_gradient(RdtVector* vec, RdtPath* path, bool radial,
         if (tvg_draw_cached_paint(impl, cached, transform)) return;
     }
     Tvg_Paint shape = tvg_shape_new();
-    if (projective) path_replay_projective(path, shape, transform);
+    if (projective) path_replay_projective(impl, path, shape, transform);
     else path_replay(path, shape);
     if (rule == RDT_FILL_EVEN_ODD) tvg_shape_set_fill_rule(shape, TVG_FILL_RULE_EVEN_ODD);
     Tvg_Gradient gradient = radial ? tvg_radial_gradient_new() : tvg_linear_gradient_new();
@@ -1783,6 +1815,7 @@ void rdt_fill_radial_gradient(RdtVector* vec, RdtPath* path,
 
 struct ClipEntry {
     RdtPath* path;
+    RdtFillRule rule;
     RdtMatrix transform;
     bool has_transform;
 };
@@ -1823,7 +1856,7 @@ static void release_heap_clip_stack_if_empty() {
     s_clip_capacity = RDT_INITIAL_CLIP_DEPTH;
 }
 
-void rdt_push_clip(RdtVector* vec, RdtPath* clip_path, const RdtMatrix* transform) {
+void rdt_push_clip(RdtVector* vec, RdtPath* clip_path, const RdtMatrix* transform, RdtFillRule rule) {
     if (!vec || !vec->impl || !clip_path) return;
     if (!ensure_clip_capacity(s_clip_base + s_clip_depth + 1)) {
         return;
@@ -1842,6 +1875,7 @@ void rdt_push_clip(RdtVector* vec, RdtPath* clip_path, const RdtMatrix* transfor
 
     ClipEntry* entry = &s_clip_stack[s_clip_base + s_clip_depth++];
     entry->path = copy;
+    entry->rule = rule;
     entry->has_transform = (transform != nullptr);
     if (transform) entry->transform = *transform;
 }
@@ -1888,14 +1922,15 @@ static void apply_clip_masks(RdtVectorImpl* impl, Tvg_Paint shape) {
 
     // Build a single composed mask from all clip entries.
     // Start from the outermost clip (index 0) and nest inward.
-    Tvg_Paint composed = create_clip_mask(s_clip_stack[s_clip_base].path,
-        s_clip_stack[s_clip_base].has_transform ? &s_clip_stack[s_clip_base].transform : nullptr);
+    Tvg_Paint composed = create_clip_mask(impl, s_clip_stack[s_clip_base].path,
+        s_clip_stack[s_clip_base].has_transform ? &s_clip_stack[s_clip_base].transform : nullptr,
+        s_clip_stack[s_clip_base].rule);
 
     for (int i = 1; i < s_clip_depth; i++) {
         ClipEntry* entry = &s_clip_stack[s_clip_base + i];
         if (!entry->path) continue;
-        Tvg_Paint inner = create_clip_mask(entry->path,
-            entry->has_transform ? &entry->transform : nullptr);
+        Tvg_Paint inner = create_clip_mask(impl, entry->path,
+            entry->has_transform ? &entry->transform : nullptr, entry->rule);
         tvg_paint_set_clip(inner, composed);
         composed = inner;
     }
@@ -1929,9 +1964,36 @@ static void apply_raster_image_placement(Tvg_Paint picture, int source_width, in
 
 void rdt_draw_image(RdtVector* vec, const uint32_t* pixels, int src_w, int src_h,
                     int src_stride, float dst_x, float dst_y, float dst_w, float dst_h,
-                    uint8_t opacity, const RdtMatrix* transform, uint64_t resource_generation, bool straight_alpha, uint64_t resource_identity) {
+                    uint8_t opacity, const RdtMatrix* transform, uint64_t resource_generation, bool straight_alpha,
+                    uint64_t resource_identity, ScaleMode scale_mode) {
     if (!vec || !vec->impl || !pixels) return;
     RdtVectorImpl* impl = vec->impl;
+    if (matrix_is_projective(transform) || scale_mode != SCALE_MODE_LINEAR) {
+        // ThorVG's image matrix is affine. Sample the homography ourselves,
+        // then retain the ordinary vector clip/composite path for the result.
+        uint32_t* projected = nullptr;
+        Rect rect;
+        Rect viewport = {impl->tile_offset_x, impl->tile_offset_y, (float)impl->width, (float)impl->height};
+        if (!render_image_project_pixels(pixels, src_w, src_h, src_stride,
+            {dst_x, dst_y, dst_w, dst_h}, transform, viewport, scale_mode, straight_alpha, &projected, &rect)) {
+            log_error("[IMAGE_PROJECT] Cannot allocate or sample transformed image");
+            return;
+        }
+        lam::Temp<uint32_t> owned_projection(projected);
+        if (!projected) return;
+        Tvg_Paint picture = tvg_picture_new();
+        int width = (int)rect.width, height = (int)rect.height; // INT_CAST_OK: projected buffer pixel dimensions
+        if (!picture || tvg_picture_load_raw(picture, projected, width, height,
+            TVG_COLORSPACE_ABGR8888, true) != TVG_RESULT_SUCCESS) {
+            if (picture) tvg_paint_unref(picture, true);
+            log_error("[IMAGE_PROJECT] Cannot upload sampled image");
+            return;
+        }
+        tvg_paint_translate(picture, rect.x, rect.y);
+        tvg_paint_set_opacity(picture, opacity);
+        tvg_push_draw_remove_clipped(impl, picture);
+        return;
+    }
     if (src_w <= 0 || src_h <= 0 || src_w > INT_MAX / 4 || src_stride < src_w || src_stride > INT_MAX / 4 ||
         (size_t)src_h > SIZE_MAX / sizeof(uint32_t) / (size_t)src_w) return;
     int tight_stride = src_w * 4;

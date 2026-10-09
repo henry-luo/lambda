@@ -1494,17 +1494,30 @@ module.exports = grammar({
 
     // ==================== String / symbol pattern islands =================
 
-    _char_pattern_tag: _ => token(choice('\\symbol(', '\\(')),
+    _char_pattern_tag: _ => token('\\('),
     char_pattern_island: $ => seq(
       field('tag', $._char_pattern_tag), field('body', $._char_pattern_expr), ')',
     ),
 
-    char_class: _ => choice('...', 'd', 'w', 's', 'a', '.'),
-    _char_primary_type: $ => choice(
-      $.range_type, $._non_null_literal, $.identifier, $.char_class,
+    // S11.1.2v4: class escapes exist only in the island's quoted tokens.
+    pattern_string: _ => token(seq('"', repeat(choice(
+      /[^"\\]+/, /\\["'\\\/bfnrtdwsa]/,
+      /\\u[0-9a-fA-F]{4}/, /\\u\{[0-9a-fA-F]+\}/,
+    )), '"')),
+    pattern_symbol: _ => token(seq("'", repeat1(choice(
+      /[^'\\\n]+/, /\\['"\\\/bfnrtdwsa]/,
+      /\\u[0-9a-fA-F]{4}/, /\\u\{[0-9a-fA-F]+\}/,
+    )), "'")),
+    _char_literal: $ => choice(
+      alias($.pattern_string, $.string), alias($.pattern_symbol, $.symbol),
     ),
-    // S11.1.2v3 (SP19): the island binds atom (a range is one), prefix `!`,
-    // suffix, concatenation, `|`, tightest first, so `!d+` is `(!d)+`.
+    char_range_type: $ => seq($._char_literal, 'to', $._char_literal),
+    char_class: _ => choice('...', '.'),
+    _char_primary_type: $ => choice(
+      alias($.char_range_type, $.range_type), $._char_literal, $.identifier, $.char_class,
+    ),
+    // S11.1.2v4 (SP19): the island binds atom (a range is one), prefix `!`,
+    // suffix, concatenation, `|`, tightest first, so `!"\d"+` is `(!"\d")+`.
     char_occurrence_type: $ => prec.right(seq(
       field('operand', choice($._char_primary_type, $.char_negation_type)),
       field('operator', $.occurrence),
@@ -1520,9 +1533,9 @@ module.exports = grammar({
       choice($.char_unary_type, $.char_grouped_type),
       repeat1(choice($.char_unary_type, $.char_grouped_type)),
     )),
-    // S11.1.2v3 (SP18, SP20): `|` is the island's only binary operator. `!` is
-    // only a prefix there, since whitespace joins atoms (`w ! d` is `w` then
-    // `!d`), and `&` or `!` between patterns is written between whole islands.
+    // S11.1.2v4 (SP18, SP20): `|` is the island's only binary operator. `!` is
+    // only a prefix there, since whitespace joins atoms (`"\w" !"\d"` is `"\w"` then
+    // `!"\d"`), and `&` or `!` between patterns is written between whole islands.
     char_binary_type: $ => prec.left('set_union', seq(
       field('left', $._char_pattern_expr),
       field('operator', '|'),

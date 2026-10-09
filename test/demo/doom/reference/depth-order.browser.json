@@ -1,0 +1,14 @@
+{
+  "name": "depth-order",
+  "width": 440,
+  "height": 200,
+  "scale": 1,
+  "browser": "HeadlessChrome/154.0.8037.57",
+  "spec": "https://drafts.csswg.org/css-transforms-2/",
+  "revision": "2025-11-30",
+  "shapes": {
+    "spec": "https://drafts.csswg.org/css-shapes/#shape-function",
+    "revision": "2026-05-07"
+  },
+  "sha256": "c8ee88d10673437a1d05befab03e0edc09141a633bd052e4a69cb3babc7a8866"
+}

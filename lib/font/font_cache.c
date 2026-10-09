@@ -21,20 +21,17 @@
 // Cache key construction
 // ============================================================================
 
-char* font_cache_make_key(Arena* arena, const char* family,
+char* font_cache_make_key(char* buf, size_t capacity, const char* family,
                            FontWeight weight, FontSlant slant, float size_px) {
     // "family:weight:slant:size" — preserve enough digits to round-trip a
     // float; CSS percentages commonly resolve to sizes such as 10.048px.
-    char buf[256];
-    int n = snprintf(buf, sizeof(buf), "%s:%d:%d:%.9g",
+    if (!buf || !capacity) return NULL;
+    int n = snprintf(buf, capacity, "%s:%d:%d:%.9g",
                      family ? family : "",
                      (int)weight,
                      (int)slant,
                      size_px);
-    if (n <= 0 || (size_t)n >= sizeof(buf)) {
-        n = (int)sizeof(buf) - 1;
-    }
-    return arena_strndup(arena, buf, (size_t)n);
+    return n > 0 ? buf : NULL;
 }
 
 static const char* browser_metric_family_alias(const char* requested_family) {
@@ -263,7 +260,9 @@ static FontHandle* font_resolve_single(FontContext* ctx, const FontStyleDesc* st
     if (out_is_global_fallback) *out_is_global_fallback = false;
 
     // 1. build cache key
-    char* key = font_cache_make_key(ctx->arena, style->family,
+    // Cache insertion owns its key; a successful lookup needs no arena allocation.
+    char key_storage[256];
+    char* key = font_cache_make_key(key_storage, sizeof(key_storage), style->family,
                                      style->weight, style->slant,
                                      style->size_px);
     if (!key) return NULL;
@@ -480,7 +479,8 @@ FontHandle* font_resolve(FontContext* ctx, const FontStyleDesc* style) {
         }
     }
 
-    char* list_key = font_cache_make_key(ctx->arena, style->family,
+    char key_storage[256];
+    char* list_key = font_cache_make_key(key_storage, sizeof(key_storage), style->family,
                                          style->weight, style->slant,
                                          style->size_px);
     if (!list_key) return NULL;

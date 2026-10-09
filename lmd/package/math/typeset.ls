@@ -18,7 +18,8 @@ pub fn render(ast, options) map | error {
     let result = node(ast, context)^
     // The title retains searchable, accessible math when painting font-local glyphs.
     let label = if (ast is string) ast else format(ast, {type: "math", flavor: "latex"})^
-    let output_el = bx.emit(result, font.UNITS, options.color, options.font_size, label);
+    let output_el = bx.emit(result, font.UNITS, options.color, options.font_size, label,
+        font.stylesheet(profile, result.body));
     {element: output_el, width: result.width / font.UNITS, height: result.height / font.UNITS,
         depth: result.depth / font.UNITS, type: result.type, italic: result.italic / font.UNITS,
         skew: 0.0, max_font_size: scale(context), font_family: profile.family}
@@ -61,7 +62,7 @@ fn spaced(boxes, c) {
             contains(["mbin", "mop", "mrel", "mopen", "mpunct"], boxes[i - 1].type) or
             contains(["mrel", "mclose", "mpunct"], boxes[i + 1].type))) {*:item, type: "mord"} else item]
     let with_spaces = [for (i, item in normalized) [
-        if (i > 0) bx.empty(spaces.get_spacing(normalized[i - 1].type, item.type, c.style, true) * font.UNITS * scale(c)) else bx.empty(), item]]
+        if (i > 0) bx.empty(spaces.get_spacing(normalized[i - 1].type, item.type, c.style) * font.UNITS * scale(c)) else bx.empty(), item]]
     if (len(normalized) == 1) normalized[0] else bx.row([for (pair in with_spaces, item in pair) item])
 }
 
@@ -101,7 +102,8 @@ fn node(n, c) {
         case 'sized_delimiter': sized_delimiter(n, c)^
         case 'middle_delim': delimiter(value(n), font.UNITS * scale(c), c, "mrel")^
         case 'command': command_node(n, c)^
-        case 'symbol_command': command(value(n), c)^
+        // parsed symbol commands store their spelling in name, like command nodes.
+        case 'symbol_command': command_node(n, c)^
         case 'big_operator': command(value(n), c)^
         case 'operator': text(value(n), {*:c, variant: "normal"})^
         case 'relation': text(value(n), {*:c, variant: "normal"})^
@@ -333,7 +335,9 @@ fn accent(n, c) {
         let g = font.glyph(c.profile, ord(ch))^
         let mark = stretch.glyph(g, base.width, false, scale(c), "mord")^
         let x = base.accent - mark.accent
-        let y = 0.0 - max(0.0, base.height - metric(c, "accent_base_height"));
+        // below-arrow accents must clear the base's descent instead of its top.
+        let y = if (starts_with(key, "under")) base.depth + metric(c, "underbar_vertical_gap") + mark.height
+            else 0.0 - max(0.0, base.height - metric(c, "accent_base_height"));
         bx.compose([{box: base, x: 0.0, y: 0.0}, {box: mark, x: x, y: y}], base.width, base.type)
         }
     }

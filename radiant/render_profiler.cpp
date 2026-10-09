@@ -171,6 +171,9 @@ void render_profiler_emit_event(RenderProfiler* profiler, UiContext* uicon,
         jw_kv_double(&w, "replay_ms", replay_ms);
         jw_kv_double(&w, "total_ms", total_ms);
         jw_kv_int(&w, "display_list_items", item_count);
+        jw_kv_double(&w, "css3d_compose_ms", profiler->css3d_compose_time);
+        jw_kv_int(&w, "css3d_planes", profiler->css3d_plane_count);
+        jw_kv_int(&w, "css3d_fragments", profiler->css3d_fragment_count);
         jw_kv_bool(&w, "selective", selective);
         jw_kv_bool(&w, "tiled", tiled);
         jw_kv_int(&w, "tile_count", tile_count);

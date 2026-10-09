@@ -1257,7 +1257,8 @@ static Item js_interp_read_binding(JsInterpFrame* frame, NameEntry* entry,
         }
         RootFrame roots(2);
         Rooted<Item> meta(roots, js_get_import_meta());
-        Rooted<Item> url(roots, js_make_string(frame->script->reference));
+        Rooted<Item> url(roots, js_make_string(jm_document_script_base_url(
+            context ? context->runtime : NULL, frame->script->reference)));
         Item stored = js_set_key_cstr(meta.get(), "url", url.get());
         return item_is_error(stored) ? stored : meta.get();
     }

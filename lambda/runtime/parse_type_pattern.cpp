@@ -8,6 +8,7 @@
 #include "../../lib/log.h"
 #include "../../lib/str.h"
 #include "../../lib/strview.h"
+#include "../../lib/escape.h"
 
 #include <string.h>
 #include <stdlib.h>
@@ -220,63 +221,106 @@ AstNode* make_binary_node(Lexer* lx, AstNode* left, AstNode* right, Operator op,
 // parsing; the const_list slot the transpiler emits it from is claimed when
 // the literal resolves, never from the node's source span.
 
-AstNode* parse_string_literal(Lexer* lx, char quote) {
-    lx->p++;  // opening quote
-    // two passes: measure the unescaped length, then fill the pooled String
-    const char* scan = lx->p;
-    size_t len = 0;
-    while (scan < lx->end && *scan != quote) {
-        if (*scan == '\\' && scan + 1 < lx->end) { scan++; }
-        scan++;  len++;
-    }
-    if (scan >= lx->end) { fail(lx, "unterminated string literal"); return NULL; }
-
-    // symbols are Symbol (ns field precedes chars), not String — the runtime
-    // reads the payload through that layout, so a String here would shift
-    // every char and break symbol equality
-    // Symbol::chars sits after the ns field, at a different offset than
-    // String::chars — fill through the right struct or the characters land in
-    // the padding and symbol equality reads garbage.
-    String* str;
-    char* dst;
-    if (quote == '\'') {
-        Symbol* sym = (Symbol*)pool_calloc(lx->tp->pool, sizeof(Symbol) + len + 1);
+static AstNode* text_literal_node(Lexer* lx, char quote, StrBuf* text) {
+    TypeId domain = quote == '"' ? LMD_TYPE_STRING : LMD_TYPE_SYMBOL;
+    TypeString* type = (TypeString*)alloc_type(lx->tp->pool, domain, sizeof(TypeString));
+    type->is_const = 1;
+    type->is_literal = 1;
+    if (domain == LMD_TYPE_SYMBOL) {
+        Symbol* sym = (Symbol*)pool_calloc(lx->tp->pool, sizeof(Symbol) + text->length + 1);
         sym->kind = SYMBOL_LAMBDA_NAME;
-        sym->ns = NULL;
-        sym->len = (uint32_t)len;
-        str = (String*)sym;
-        dst = sym->chars;
+        sym->len = (uint32_t)text->length;
+        memcpy(sym->chars, text->str, text->length);
+        type->string = (String*)sym;
     } else {
-        str = (String*)pool_calloc(lx->tp->pool, sizeof(String) + len + 1);
-        str->len = (uint32_t)len;
-        str->flags = 0;
-        dst = str->chars;
+        type->string = string_from_strview(strview_init(text->str, text->length), lx->tp->pool);
     }
-    size_t i = 0;
-    while (lx->p < lx->end && *lx->p != quote) {
-        char c = *lx->p++;
-        if (c == '\\' && lx->p < lx->end) {
-            char e = *lx->p++;
-            switch (e) {
-            case 'n': c = '\n'; break;  case 't': c = '\t'; break;
-            case 'r': c = '\r'; break;  case 'b': c = '\b'; break;
-            case 'f': c = '\f'; break;  default: c = e; break;
-            }
-        }
-        dst[i++] = c;
-    }
-    dst[len] = '\0';
-    if (quote != '\'') { str->is_ascii = str_is_ascii(str->chars, len) ? 1 : 0; }
-    lx->p++;  // closing quote
-
-    TypeString* ts = (TypeString*)alloc_type(lx->tp->pool,
-        quote == '"' ? LMD_TYPE_STRING : LMD_TYPE_SYMBOL, sizeof(TypeString));
-    ts->is_const = 1;  ts->is_literal = 1;
-    ts->string = str;
-    AstNode* node = new_node(lx, AST_NODE_PRIMARY, sizeof(AstPrimaryNode),
-        LSF_TP_LIT_STRING);
-    node->type = (Type*)ts;
+    AstNode* node = new_node(lx, AST_NODE_PRIMARY, sizeof(AstPrimaryNode), LSF_TP_LIT_STRING);
+    node->type = (Type*)type;
     return node;
+}
+
+static bool quoted_class(char c, PatternCharClass* klass) {
+    switch (c) {
+    case 'd': *klass = PATTERN_DIGIT; return true;
+    case 'w': *klass = PATTERN_WORD; return true;
+    case 's': *klass = PATTERN_SPACE; return true;
+    case 'a': *klass = PATTERN_ALPHA; return true;
+    default: return false;
+    }
+}
+
+AstNode* parse_string_literal(Lexer* lx, char quote, bool in_pattern = false) {
+    lx->p++;
+    StrBuf* text = strbuf_new();
+    AstNode* first = NULL;
+    AstNode** tail = &first;
+    while (lx->p < lx->end && *lx->p != quote && !lx->failed) {
+        char c = *lx->p++;
+        if (c != '\\') {
+            strbuf_append_char(text, c);
+            continue;
+        }
+        if (lx->p == lx->end) break;
+        char escaped = *lx->p++;
+        PatternCharClass klass;
+        if (in_pattern && quoted_class(escaped, &klass)) {
+            if (text->length) {
+                *tail = text_literal_node(lx, quote, text);
+                tail = &(*tail)->next;
+                strbuf_reset(text);
+            }
+            AstPatternCharClassNode* cc = (AstPatternCharClassNode*)new_node(lx,
+                AST_NODE_PATTERN_CHAR_CLASS, sizeof(AstPatternCharClassNode), LSF_TP_CHAR_CLASS);
+            cc->char_class = klass;
+            cc->domain = quote == '"' ? LMD_TYPE_STRING : LMD_TYPE_SYMBOL;
+            *tail = (AstNode*)cc;
+            tail = &(*tail)->next;
+        } else if (escaped == 'u') {
+            // decode once: an escaped backslash never becomes a class escape.
+            uint32_t cp = 0;
+            size_t consumed = 0;
+            if (lx->p < lx->end && *lx->p == '{') {
+                lx->p++;
+                const char* start = lx->p;
+                while (lx->p < lx->end && str_hex_val(*lx->p) >= 0 && cp <= 0x10FFFF) {
+                    cp = cp * 16 + (uint32_t)str_hex_val(*lx->p++);
+                }
+                if (lx->p == start || lx->p >= lx->end || *lx->p++ != '}' || cp > 0x10FFFF) {
+                    fail(lx, "invalid Unicode escape");
+                    break;
+                }
+            } else if (escape_decode_utf16_escape(lx->p, (size_t)(lx->end - lx->p),
+                    true, &cp, &consumed)) {
+                lx->p += consumed;
+            } else {
+                fail(lx, "invalid Unicode escape");
+                break;
+            }
+            char utf8[4];
+            size_t length = str_utf8_encode(cp, utf8, sizeof(utf8));
+            strbuf_append_str_n(text, utf8, length);
+        } else if (strchr("\"'\\/bfnrt", escaped)) {
+            strbuf_append_char(text, escape_decode_js_char(escaped));
+        } else {
+            fail(lx, "invalid quoted escape");
+        }
+    }
+    if (!lx->failed && (lx->p == lx->end || *lx->p != quote)) {
+        fail(lx, "unterminated string literal");
+    }
+    if (!lx->failed) {
+        lx->p++;
+        if (text->length || !first) *tail = text_literal_node(lx, quote, text);
+    }
+    strbuf_free(text);
+    if (lx->failed) return NULL;
+    if (!first->next) return first;
+    // the entire quoted fragment is one atom, including all embedded classes.
+    AstPatternSeqNode* sequence = (AstPatternSeqNode*)new_node(lx,
+        AST_NODE_PATTERN_SEQ, sizeof(AstPatternSeqNode), LSF_TP_ISLAND_SEQ);
+    sequence->first = first;
+    return (AstNode*)sequence;
 }
 
 AstNode* parse_number_literal(Lexer* lx) {
@@ -323,39 +367,6 @@ AstNode* parse_number_literal(Lexer* lx) {
 // `compile_pattern_ast`). These build exactly the node kinds
 // `compile_pattern_to_regex` accepts.
 
-// `dw` lexes as one name; the likely intent is the classes `d w`
-static bool name_is_joined_classes(String* name) {
-    if (!name || name->len < 2) return false;
-    for (uint32_t i = 0; i < name->len; i++) {
-        char c = name->chars[i];
-        if (c != 'd' && c != 'w' && c != 's' && c != 'a') return false;
-    }
-    return true;
-}
-
-// `d`, `w`, `s`, `a`, `.`, `...` are the reserved atoms inside an island.
-bool island_char_class(StrView w, PatternCharClass* out) {
-    if (w.length != 1) { return false; }
-    switch (w.str[0]) {
-    case 'd': *out = PATTERN_DIGIT; return true;
-    case 'w': *out = PATTERN_WORD;  return true;
-    case 's': *out = PATTERN_SPACE; return true;
-    case 'a': *out = PATTERN_ALPHA; return true;
-    default: return false;
-    }
-}
-
-// the reserved word a word-spelled class came from; NULL for `.` and `...`
-const char* island_char_class_word(PatternCharClass klass) {
-    switch (klass) {
-    case PATTERN_DIGIT: return "d";
-    case PATTERN_WORD:  return "w";
-    case PATTERN_SPACE: return "s";
-    case PATTERN_ALPHA: return "a";
-    default: return NULL;
-    }
-}
-
 AstNode* parse_island_primary(Lexer* lx) {
     skip_space(lx);
     if (lx->p >= lx->end) { fail(lx, "expected a pattern"); return NULL; }
@@ -382,7 +393,7 @@ AstNode* parse_island_primary(Lexer* lx) {
         return (AstNode*)cc;
     }
     if (c == '"' || c == '\'') {
-        AstNode* left = parse_string_literal(lx, c);
+        AstNode* left = parse_string_literal(lx, c, true);
         if (!left) { return NULL; }
         // `"a" to "z"` — a character range
         StrView w = peek_word(lx);
@@ -392,7 +403,7 @@ AstNode* parse_island_primary(Lexer* lx) {
             if (lx->p >= lx->end || (*lx->p != '"' && *lx->p != '\'')) {
                 fail(lx, "expected a string literal after 'to'"); return NULL;
             }
-            AstNode* upper = parse_string_literal(lx, *lx->p);
+            AstNode* upper = parse_string_literal(lx, *lx->p, true);
             if (!upper) { return NULL; }
             AstPatternRangeNode* range = (AstPatternRangeNode*)new_node(lx,
                 AST_NODE_PATTERN_RANGE, sizeof(AstPatternRangeNode),
@@ -406,14 +417,6 @@ AstNode* parse_island_primary(Lexer* lx) {
 
     StrView w = take_word(lx);
     if (!w.length) { fail(lx, "expected a pattern"); return NULL; }
-    PatternCharClass klass;
-    if (island_char_class(w, &klass)) {
-        AstPatternCharClassNode* cc = (AstPatternCharClassNode*)new_node(lx,
-            AST_NODE_PATTERN_CHAR_CLASS, sizeof(AstPatternCharClassNode),
-            LSF_TP_CHAR_CLASS);
-        cc->char_class = klass;
-        return (AstNode*)cc;
-    }
     // otherwise a reference to a named pattern; the regex compiler follows the
     // NameEntry to the definition's AST
     AstIdentNode* ident = (AstIdentNode*)new_node(lx, AST_NODE_IDENT,
@@ -513,7 +516,7 @@ AstNode* parse_island_body(Lexer* lx) {
         skip_space(lx);
         if (lx->p >= lx->end) { return left; }
         char c = *lx->p;
-        // S11.1.2v3 (SP20): `|` is the island's only binary operator. RE2 cannot
+        // S11.1.2v4 (SP20): `|` is the island's only binary operator. RE2 cannot
         // intersect, so an island `&` had compiled to a lookahead it rejects.
         if (c == '&') {
             fail_code(lx, ERR_INVALID_LITERAL,
@@ -530,34 +533,26 @@ AstNode* parse_island_body(Lexer* lx) {
     }
 }
 
-// `\( … )` / `\symbol( … )`. Returns the island AST node — which must reach the
+// `\( … )`. Returns the island AST node — which must reach the
 // transpiler for the regex to be compiled.
 AstNode* parse_island(Lexer* lx) {
     lx->p++;  // backslash
-    bool is_symbol = false;
-    if (lx->p < lx->end && *lx->p != '(') {
-        StrView tag = take_word(lx);
-        if (!word_is(tag, "symbol")) { fail(lx, "unknown pattern island tag"); return NULL; }
-        is_symbol = true;
-    }
-    if (!eat(lx, '(')) { fail(lx, "expected '(' after a pattern island tag"); return NULL; }
+    if (!eat(lx, '(')) { fail(lx, "expected '(' after a pattern backslash"); return NULL; }
 
     AstPatternIslandNode* node = (AstPatternIslandNode*)new_node(lx,
         AST_NODE_PATTERN_ISLAND, sizeof(AstPatternIslandNode), LSF_TP_ISLAND);
-    node->is_symbol = is_symbol;
+    node->is_symbol = false;
     node->pattern_index = -1;
     node->pattern = parse_island_body(lx);
     if (!node->pattern) { return NULL; }
     if (!eat(lx, ')')) { fail(lx, "expected ')' closing the pattern island"); return NULL; }
 
-    // A body with a symbol literal keeps its island node so resolution can
-    // report it (S11.1.2). Otherwise a literal-only island IS an ordinary
-    // literal union; keeping that representation preserves the existing
-    // matching path by returning the body AST. Literal types are lexical, so
-    // both tests run before resolution.
-    if (!pattern_ast_has_symbol_literal(node->pattern) && !is_symbol &&
-            pattern_ast_literal_set(node->pattern)) {
-        return node->pattern;
+    // preserve the ordinary literal-union representation only after checking
+    // domains; mixed literal alternatives must still reach island validation.
+    unsigned domains = pattern_ast_domains(node->pattern);
+    if (domains == PATTERN_DOMAIN_STRING || domains == PATTERN_DOMAIN_SYMBOL) {
+        AstNode* literals = normalize_pattern_literal_set(node->pattern);
+        if (literals) return literals;
     }
     return (AstNode*)node;
 }
@@ -1460,14 +1455,6 @@ void resolve_type_pattern(Transpiler* tp, AstNode* node) {
         break;
     case LSF_TP_CHAR_CLASS: {
         AstPatternCharClassNode* cc = (AstPatternCharClassNode*)node;
-        const char* word = island_char_class_word(cc->char_class);
-        // the reserved atoms shadow nothing: a surrounding `let d = ...` makes
-        // `d` inside an island ambiguous, which is also invalid
-        if (word && lookup_name(tp, (StrView){word, 1})) {
-            record_semantic_error_span(tp, node->source_span, ERR_SEMANTIC_ERROR,
-                "pattern class '%.*s' is reserved inside pattern islands; rename the surrounding binding",
-                1, word);
-        }
         cc->type = alloc_type_kind(tp->pool, TYPE_KIND_PATTERN, sizeof(TypePattern));
         break;
     }
@@ -1480,10 +1467,8 @@ void resolve_type_pattern(Transpiler* tp, AstNode* node) {
         // what is defined before it, so the name is decidable here.
         if (!ident->entry || !ident->entry->node) {
             record_semantic_error_span(tp, node->source_span, ERR_UNDEFINED_TYPE,
-                "`%.*s` is not defined before this pattern%s",
-                (int)ident->name->len, ident->name->chars,
-                name_is_joined_classes(ident->name) ?
-                    "; separate classes with a space, as in `d w`" : "");
+                "`%.*s` is not defined before this pattern",
+                (int)ident->name->len, ident->name->chars);
         } else if (!pattern_can_name(ident->entry->node)) {
             record_semantic_error_span(tp, node->source_span, ERR_SEMANTIC_ERROR,
                 "`%.*s` is not a pattern: a pattern names only patterns, literal unions and character ranges",
@@ -1496,9 +1481,8 @@ void resolve_type_pattern(Transpiler* tp, AstNode* node) {
         resolve_type_pattern(tp, range->start);
         resolve_type_pattern(tp, range->end);
         // S11.1.3: the bounds are single characters, as in value position;
-        // the regex once took each bound's first byte instead. Symbol bounds
-        // are left to the island's content-only diagnostic.
-        if (!pattern_ast_has_symbol_literal(node) && !pattern_is_char_set(node)) {
+        // the regex once took each bound's first byte instead.
+        if (!pattern_is_char_set(node)) {
             record_semantic_error_span(tp, node->source_span, ERR_SEMANTIC_ERROR,
                 "a range in a pattern runs between two single characters");
         }
@@ -1511,11 +1495,10 @@ void resolve_type_pattern(Transpiler* tp, AstNode* node) {
     case LSF_TP_ISLAND_UNARY: {
         AstUnaryNode* unary = (AstUnaryNode*)node;
         resolve_type_pattern(tp, unary->operand);
-        // S11.1.2v3: island `!` complements a single-character set, the one
+        // S11.1.2v4: island `!` complements a single-character set, the one
         // negation a regex engine compiles (`[^…]`). Any other operand was
-        // silently dropped from the regex. A symbol literal is left to the
-        // island's own content-only diagnostic.
-        if (unary->op == OPERATOR_NOT && !pattern_ast_has_symbol_literal(unary->operand) &&
+        // silently dropped from the regex.
+        if (unary->op == OPERATOR_NOT &&
                 !pattern_is_char_set(unary->operand)) {
             record_semantic_error_span(tp, node->source_span, ERR_SEMANTIC_ERROR,
                 "`!` in a pattern negates a single character: a class, a range, a one-character string, or a union of these");
@@ -1533,14 +1516,17 @@ void resolve_type_pattern(Transpiler* tp, AstNode* node) {
         AstPatternIslandNode* island = (AstPatternIslandNode*)node;
         int errors_before = tp->error_count;
         resolve_type_pattern(tp, island->pattern);
-        // Pattern bodies are content-only: the domain is the island's tag, so a
-        // symbol literal inside one is a mistake (S11.1.2).
-        if (pattern_ast_has_symbol_literal(island->pattern)) {
-            record_semantic_error_span(tp, node->source_span, ERR_INVALID_LITERAL,
-                "pattern bodies are content-only; use \\symbol(...) for the symbol domain and string literals for content");
+        unsigned domains = pattern_ast_domains(island->pattern);
+        if (domains != PATTERN_DOMAIN_STRING && domains != PATTERN_DOMAIN_SYMBOL) {
+            if (tp->error_count == errors_before) {
+                record_semantic_error_span(tp, node->source_span, ERR_SEMANTIC_ERROR,
+                    domains ? "a pattern cannot mix string and symbol domains" :
+                    "a pattern needs a string or symbol domain from quotes or a named pattern");
+            }
             island->type = &TYPE_ERROR;
             break;
         }
+        island->is_symbol = domains == PATTERN_DOMAIN_SYMBOL;
         TypePattern* pattern_type = (TypePattern*)alloc_type_kind(tp->pool,
             TYPE_KIND_PATTERN, sizeof(TypePattern));
         pattern_type->pattern_index = -1;

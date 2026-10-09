@@ -1,0 +1,15 @@
+<!doctype html>
+<meta charset="utf-8">
+<style>
+html, body { margin: 0; background: white; }
+.camera { position: absolute; top: 0; width: 200px; height: 200px; perspective: 500px; }
+#first { left: 0; }
+#second { left: 220px; }
+.scene { position: absolute; left: 0; top: 0; width: 200px; height: 200px; transform-style: preserve-3d; }
+.plane { position: absolute; left: 40px; top: 40px; width: 120px; height: 120px; }
+.near { background: red; transform: translateZ(80px); }
+.far { background: blue; transform: translateZ(-80px); }
+</style>
+<!-- Both centers must be red, independently of DOM order. -->
+<div class="camera" id="first"><div class="scene"><div class="plane near"></div><div class="plane far"></div></div></div>
+<div class="camera" id="second"><div class="scene"><div class="plane far"></div><div class="plane near"></div></div></div>

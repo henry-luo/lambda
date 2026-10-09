@@ -339,6 +339,12 @@ static ValidationResult* validate_against_range_type(SchemaValidator* validator,
 // `type T = int | datetime` does; both reach here.
 static ValidationResult* validate_against_base_payload(SchemaValidator* validator,
         ConstItem item, Type* base_type, ValidationResult* result) {
+    // S11.1.6v3: a run's scalar operand retains its literal value, so
+    // a string like aa cannot satisfy the singleton a by its tag alone.
+    if (base_type->is_literal) {
+        return validate_against_primitive_type(validator, item, base_type);
+    }
+
     // Handle 'any' type — matches everything except error
     if (base_type->type_id == LMD_TYPE_ANY) {
         result->valid = (item.type_id() != LMD_TYPE_ERROR);

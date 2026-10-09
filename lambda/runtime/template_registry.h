@@ -162,6 +162,9 @@ bool template_entry_may_handle_event(TemplateEntry* entry,
                                      const char* event_name);
 bool template_registry_may_have_author_handler(TemplateRegistry* registry,
                                                const char* event_name);
+// Exact observer query: a mask collision must not create unobserved timing tasks.
+bool template_registry_has_author_handler(TemplateRegistry* registry,
+                                          const char* event_name);
 bool template_registry_may_have_behavior_handler(TemplateRegistry* registry,
                                                  const char* event_name);
 

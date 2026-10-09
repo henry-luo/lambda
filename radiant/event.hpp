@@ -149,6 +149,7 @@ typedef struct Event {
 typedef struct MousePositionEvent : Event {
     float x;    // logical X coordinate, relative to the top-level viewport
     float y;    // logical Y coordinate, relative to the top-level viewport
+    float movement_x, movement_y; // native cursor deltas, also under relative capture
 } MousePositionEvent;
 
 // mouse click events
@@ -189,6 +190,14 @@ typedef enum {
     RDT_KEY_TAB = 258,
     RDT_KEY_ESCAPE = 256,
     RDT_KEY_SPACE = 32,
+    RDT_KEY_LEFT_SHIFT = 340,
+    RDT_KEY_LEFT_CONTROL = 341,
+    RDT_KEY_LEFT_ALT = 342,
+    RDT_KEY_LEFT_SUPER = 343,
+    RDT_KEY_RIGHT_SHIFT = 344,
+    RDT_KEY_RIGHT_CONTROL = 345,
+    RDT_KEY_RIGHT_ALT = 346,
+    RDT_KEY_RIGHT_SUPER = 347,
     // Clipboard/editing shortcut keys (A, B, C, I, U, V, X, Z) and Y for redo on Win/Linux
     RDT_KEY_A = 65,
     RDT_KEY_B = 66,
@@ -2655,6 +2664,7 @@ typedef struct DocState {
     DocLifecycleState lifecycle;
     uint64_t version;              // monotonically increasing version number
     uint64_t render_flag_bumps;    // version bumps that were dirty/repaint/reflow bookkeeping
+    uint64_t scroll_position_bumps; // scrolling changes geometry, not selector state
     struct DocState* prev_version;  // previous version (immutable mode only)
 
     // Active event/state log cascade. Set by state_machine.cpp while a
@@ -2834,6 +2844,11 @@ static inline uint64_t doc_state_content_version(const DocState* state) {
     return state ? state->version - state->render_flag_bumps : 0;
 }
 
+// computed SVG styles do not depend on scroll offsets; paint and hit coordinates do.
+static inline uint64_t doc_state_selector_version(const DocState* state) {
+    return state ? doc_state_content_version(state) - state->scroll_position_bumps : 0;
+}
+
 typedef struct ScrollInteractionState {
     bool h_hovered;
     bool v_hovered;
@@ -2942,6 +2957,8 @@ bool view_state_nodes_correspond(const DomNode* old_node, const DomNode* new_nod
 // owners to the corresponding replacement nodes (RAD_16 §8).
 void radiant_frame_requests_follow_rebuild(DomDocument* doc, DomNode* old_root,
                                            DomNode* new_root);
+// queue one deferred render event per template root after a presentation commit.
+void radiant_queue_template_render_events(DomDocument* doc, DomNode* root);
 bool view_state_get_hovered(DocState* state, View* view);
 bool view_state_get_active(DocState* state, View* view);
 bool view_state_get_focused(DocState* state, View* view);
@@ -3308,7 +3325,7 @@ View* focus_get_visible(DocState* state);
 // ES30: package-owned autofocus selection. Native retains the focus write,
 // focus-event emission point, queued scroll geometry, and paint invalidation.
 bool radiant_document_has_autofocus(struct DomElement* root);
-void radiant_run_autofocus(struct DomDocument* doc);
+void radiant_run_autofocus(struct UiContext* uicon, struct DomDocument* doc);
 
 // ============================================================================
 // Doc-Level Interaction Target API

@@ -1,4 +1,4 @@
-// Math5 Phase 11: ordinary faces use their own outlines and normal font metrics.
+// Math5: ordinary faces keep their measured metrics and SVG text font identity.
 import math: lambda.doc.math.math
 import stretch: lambda.doc.math.stretch
 import font: lambda.doc.math.font
@@ -45,12 +45,32 @@ let default_styles = [for (style in ["double", "cal", "script", "fraktur"])
 let bundled_facts = radiant.math_metrics({font_family: bundled.SYMBOL_FAMILIES, font_size: 1000, fallback: true},
     [ord("∑"), ord("↞")], bundled.faces())
 let default_rendered = [for (source in formulas) math.render_box(ast(source))]
+// named symbol atoms must paint their glyphs before script sizing is compared.
+let symbol_cases = [
+    {source: "\\alpha", glyph: "α"}, {source: "\\beta", glyph: "β"},
+    {source: "\\gamma", glyph: "γ"}, {source: "\\theta", glyph: "θ"},
+    {source: "\\phi", glyph: "ϕ"}, {source: "\\psi", glyph: "ψ"},
+    {source: "\\pi", glyph: "π"}, {source: "\\infty", glyph: "∞"},
+    {source: "\\pm", glyph: "±"}, {source: "\\approx", glyph: "≈"}
+]
+let basel_source = "\\sum_{n=1}^{\\infty} \\frac{1}{n^2} = \\frac{\\pi^2}{6}"
+let symbol_profile = font.prepare(ast(basel_source ++ " " ++ join([for (entry in symbol_cases) entry.source], " ")^), null)
+let symbol_results = [for (entry in symbol_cases) {
+    let box = math.render_box(ast(entry.source))
+    let glyph = font.character(symbol_profile, entry.glyph, "auto");
+    {source: entry.source, ok: close(box.width, glyph.advance / 1000.0) and
+        content(descendants(box.element, 'text')[0])[0] == chr(glyph.codepoint) and
+        descendants(box.element, 'text')[0]["font-family"] == glyph.text_family}
+}]
+let basel_text = descendants(math.render_display(ast(basel_source)), 'text')
+let script_size = font.UNITS * font.scale(symbol_profile, "script")
 let checks = [
     {name: "ordinary face has no MATH", ok: native.has_math == false and native.constants == null},
     {name: "normal advances retained", ok: close(plain.width, native.glyphs[0].advance / 1000)},
-    {name: "normal outline retained", ok: descendants(plain.element, 'path')[0].d == native.glyphs[0].path},
-    {name: "math italic uses ordinary italic face", ok: descendants(variable.element, 'path')[0].d == italic.glyphs[0].path and italic.glyphs[0].path != native.glyphs[0].path},
-    {name: "math bold uses ordinary bold face", ok: descendants(heavy.element, 'path')[0].d == bold.glyphs[0].path},
+    {name: "ordinary glyph is text", ok: content(descendants(plain.element, 'text')[0])[0] == "x" and len(descendants(plain.element, 'path')) == 0},
+    {name: "math italic uses ordinary italic face", ok: descendants(variable.element, 'text')[0]["font-style"] == "italic" and
+        descendants(variable.element, 'text')[0]["font-family"] == "OrdinarySerif"},
+    {name: "math bold uses ordinary bold face", ok: descendants(heavy.element, 'text')[0]["font-weight"] == 700},
     {name: "different ordinary font changes width", ok: sans.width != plain.width},
     {name: "fallback rule uses font underline thickness", ok: close(rule.height, native.font_metrics.underline_thickness)},
     {name: "fallback axis uses measured x height", ok: close(rule.y + rule.height / 2, 0 - native.font_metrics.x_height / 2)},
@@ -61,7 +81,8 @@ let checks = [
     {name: "installed ordinary font without snapshots", ok: math.render_box(ast("x^2+\\frac{a}{b}"), {font_family: "sans-serif"}).width > 0},
     {name: "default face needs no MATH table", ok: default_profile.facts.has_math == false and
         default_profile.family == native.font_family},
-    {name: "default variable uses bundled italic outline", ok: descendants(default_x.element, 'path')[0].d == italic.glyphs[0].path},
+    {name: "default variable uses bundled italic text", ok: descendants(default_x.element, 'text')[0]["font-family"] == bundled.FAMILY and
+        descendants(default_x.element, 'text')[0]["font-style"] == "italic" and len(descendants(default_x.element, 'style')) == 1},
     {name: "default rule uses ordinary metrics", ok: close(default_rule.height, native.font_metrics.underline_thickness)},
     {name: "default operators reuse bundled glyphs", ok: default_sum.has_math == false and
         default_sum.path == bundled_facts.glyphs[0].path and default_sum.font_family == "KaTeX_Size1" and
@@ -70,6 +91,11 @@ let checks = [
         len([for (g in default_styles where g.has_math == true or len(g.path) == 0) g]) == 0},
     {name: "default structures render without a MATH font", ok: len([for (box in default_rendered where box is error or
         box.width <= 0 or box.width - box.width != 0 or box.height - box.height != 0) box]) == 0},
+    {name: "parsed named symbols paint measured glyphs", ok: len([for (result in symbol_results where result.ok != true) result]) == 0},
+    {name: "Basel fraction retains full-size pi and six", ok: len([for (text in basel_text where
+        (content(text)[0] == "π" or content(text)[0] == "6") and text["font-size"] == font.UNITS) text]) == 2},
+    {name: "Basel exponents and upper limit retain script size", ok: len([for (text in basel_text where
+        (content(text)[0] == "2" or content(text)[0] == "∞") and text["font-size"] == script_size) text]) == 3},
     {name: "missing requested glyph still errors", ok: math.render_box(chr(0x10FFFF), options) is error}
 ];
 [for (check in checks where check.ok != true) check.name]

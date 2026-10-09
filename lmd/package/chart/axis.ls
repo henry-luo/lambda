@@ -7,6 +7,7 @@ import scale: .scale
 import calendar: .calendar
 import text: .text
 import collision: .collision
+import radiant
 
 // ============================================================
 // Default axis configuration
@@ -80,6 +81,7 @@ pub fn prepare(sc, config, title_text = null) {
             [for (value in values) format_tick_label(sc, value, options)], label_font, options.label_limit);
         let titles = if (title != null) text.measure([string(title)], title_font) else [];
         {*:options, _values: values, _title: title, _labels: if (labels is error) [] else labels,
+            _title_upright: title != null and len(radiant.graphemes(string(title))) == 1,
             _title_metric: if (titles is array and len(titles) > 0) titles[0] else text.empty_metric,
             _label_font: label_font, _title_font: title_font,
             _error: util.first_error([labels, titles])}
@@ -111,7 +113,8 @@ pub fn geometry(sc, pw, ph, config, horizontal) {
     let extent = max([float(tick_extent), for (row in rows)
         if (horizontal) (if (far_side) 0.0 - row.bounds.top else row.bounds.bottom)
         else if (far_side) row.bounds.right else 0.0 - row.bounds.left]);
-    let title_angle = if (horizontal) 0 else if (far_side) 90 else -90;
+    // single graphemes stay upright; measure their unrotated width for axis spacing.
+    let title_angle = if (horizontal or options._title_upright) 0 else if (far_side) 90 else -90;
     let title_bounds = text.bounds(options._title_metric, "middle", title_angle);
     let gap = extent + options.title_padding;
     let title_x = if (horizontal) pw / 2.0 else if (far_side) gap - title_bounds.left else 0.0 - gap - title_bounds.right;
@@ -151,6 +154,29 @@ fn visible_rows(rows, config, horizontal) {
         let keep_last = first_end + gap <= last_start;
         [first.index, *select_rows(ordered, horizontal, gap, 1, first_end, if (keep_last) last_start else inf),
             if (keep_last) endpoint.index]
+    }
+}
+
+fn without_tick_text(node) => if (not (node is element)) node else if (name(node) == 'text') null else
+    svg.rebuild(name(node), map(node), [for (child in content(node))
+        for (retained in [without_tick_text(child)] where retained != null) retained]);
+
+// projected or moving ticks share measured collision space with other guide text.
+pub fn fit_frame_labels(node, obstacles = [], separation = null) {
+    let measured = [for (index, child in content(node) where child.class == "tick")
+        {index: index, boxes: text.svg_bounds(child)}];
+    let failure = util.first_error(measured |> ~.boxes);
+    if (failure is error) failure else {
+        let rows = [for (entry in measured where len(entry.boxes) > 0,
+            let box = {left: min(entry.boxes |> ~.left), right: max(entry.boxes |> ~.right),
+                top: min(entry.boxes |> ~.top), bottom: max(entry.boxes |> ~.bottom)})
+            {index: entry.index, bounds: box}];
+        let gap = collision.gap(separation);
+        let ordered = if (len(rows) < 2) rows else [rows[0], rows[len(rows) - 1], *slice(rows, 1, len(rows) - 1)];
+        let visible = collision.select([for (row in ordered) {*:row, gap: gap, optional: true}],
+            [for (box in obstacles) {bounds: box}]) |> ~.index;
+        if (len(rows) == 0) node else svg.rebuild(name(node), map(node),
+            [for (index, child in content(node)) if (child.class == "tick" and not (index in visible)) without_tick_text(child) else child])
     }
 }
 
@@ -201,9 +227,11 @@ fn render_axis(sc, pw, ph, config, title_text, horizontal) {
             >];
         let title_x = geo.title_x + (if (horizontal) 0.0 else baseline);
         let title_y = geo.title_y + (if (horizontal) baseline else 0.0);
+        // coordinate guides orient titles after projection, retaining source-axis spacing.
+        let title_angle = if (options._title_upright) 0 else if (options._title_angle != null) options._title_angle else geo.title_angle;
         let title = if (options._title != null) <text x: title_x, y: title_y,
             'text-anchor': "middle", *:text.attributes(options._title_font), fill: options.title_color,
-            *:if (geo.title_angle != 0) {transform: svg.rotate(geo.title_angle, title_x, title_y)} else {}, options._title> else null;
+            *:if (title_angle != 0) {transform: svg.rotate(title_angle, title_x, title_y)} else {}, options._title> else null;
         let result = svg.group_class(if (horizontal) "axis x-axis" else "axis y-axis",
             [for (item in [domain_line, *ticks, title] where item != null) item]);
         if (options.offset != null and options.offset != 0)

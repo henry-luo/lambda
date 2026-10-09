@@ -607,7 +607,7 @@ tree-sitter-libs: tree-sitter-jube-libs
 	test-ui-automation test-reactive-ui test-redex-baseline dom-ui dom-ui-run hit-test-ui view-ui native-gui-ui editable-unit editable-ui editable-editor-e2e test-editable test-wpt-contenteditable test-chromium-contenteditable audit-editable-ownership editable-package-disabled test-editable-ua-focused editable-form-regressions test-editable-ua drawing-editor-e2e test-drawing check-error-recovery \
 	    build-graph-mermaid-test test-graph-mermaid build-graph-graphviz-test test-graph-graphviz \
 	    build-graph-structurizr-test test-graph-structurizr \
-	    node-baseline node-regression-gate node-full node-update-baseline node-official-report test-mathlive
+	    node-baseline node-regression-gate node-full node-update-baseline node-official-report test-math-corpus
 
 # Help target - shows available commands
 help:
@@ -674,7 +674,7 @@ help:
 	@echo "  test-gc-rooting - Run exact-root forced-GC JIT/interpreter/root-effect gates"
 	@echo "  test-bash-baseline - Run Bash transpiler baseline test suite"
 	@echo "  test-input-baseline - Run HTML5 WPT, CommonMark, YAML, ASCII Math, and LaTeX Math parser tests"
-	@echo "  test-mathlive - Run the full strict MathLive markup adapter corpus"
+	@echo "  test-math-corpus - Run the font-driven SVG math formula corpus"
 	@echo "  test-radiant-baseline - Run shared layout baselines ($(LAYOUT_BASELINE_SUITES)) + render visual + other checks"
 	@echo "  test-svg-export     - Verify portable SVG/PDF fixture exports at 1x and 2x"
 	@echo "  test-svg-paint      - Verify P7/P10 raster fixtures at 1x and 2x (ARGS=--browser --references)"
@@ -2709,12 +2709,11 @@ test-math: build
 	@echo "=============================================================="
 	@cd test/latex && npm test
 
-# Exact MathLive snapshot compatibility is a separate, strict gate from the
-# document-oriented semantic comparison suite above.
-test-mathlive: build
-	@echo "Running full strict MathLive markup adapter corpus..."
+# The public SVG renderer is checked independently of historical HTML comparisons.
+test-math-corpus: build
+	@echo "Running font-driven SVG math corpus..."
 	@echo "=============================================================="
-	@node test/lambda/mathlive/run_lambda_mathlive_markup.mjs --fixture-source all --strict
+	@node test/lambda/math/run_corpus.mjs --fixture-source all
 
 test-math-baseline: build
 	@echo "Running LaTeX Math BASELINE tests (DVI must pass 100%)..."

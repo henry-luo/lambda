@@ -1,0 +1,410 @@
+{
+  "name": "E1M1 native death route derived from fixed-step simulation",
+  "html": "test/demo/doom/doom.ls",
+  "viewport": {
+    "width": 660,
+    "height": 500
+  },
+  "default_timeout": 1,
+  "input_turn_ms": 0,
+  "events": [
+    {
+      "type": "advance_time",
+      "ms": 40,
+      "steps": 2
+    },
+    {
+      "type": "snapshot_state_store",
+      "target": {
+        "selector": "#scene"
+      },
+      "name": "scene"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#start"
+      }
+    },
+    {
+      "type": "advance_time",
+      "ms": 1,
+      "steps": 1
+    },
+    {
+      "type": "key_down",
+      "key": "w"
+    },
+    {
+      "type": "advance_time",
+      "ms": 2715,
+      "steps": 95
+    },
+    {
+      "type": "key_up",
+      "key": "w"
+    },
+    {
+      "type": "key_down",
+      "key": "w"
+    },
+    {
+      "type": "key_down",
+      "key": "d"
+    },
+    {
+      "type": "advance_time",
+      "ms": 200,
+      "steps": 7
+    },
+    {
+      "type": "key_up",
+      "key": "w"
+    },
+    {
+      "type": "key_up",
+      "key": "d"
+    },
+    {
+      "type": "key_down",
+      "key": "s"
+    },
+    {
+      "type": "advance_time",
+      "ms": 228,
+      "steps": 8
+    },
+    {
+      "type": "key_up",
+      "key": "s"
+    },
+    {
+      "type": "key_down",
+      "key": "d"
+    },
+    {
+      "type": "advance_time",
+      "ms": 572,
+      "steps": 20
+    },
+    {
+      "type": "key_up",
+      "key": "d"
+    },
+    {
+      "type": "key_down",
+      "key": "w"
+    },
+    {
+      "type": "advance_time",
+      "ms": 1371,
+      "steps": 48
+    },
+    {
+      "type": "key_up",
+      "key": "w"
+    },
+    {
+      "type": "key_down",
+      "key": "d"
+    },
+    {
+      "type": "advance_time",
+      "ms": 572,
+      "steps": 20
+    },
+    {
+      "type": "key_up",
+      "key": "d"
+    },
+    {
+      "type": "key_down",
+      "key": "w"
+    },
+    {
+      "type": "advance_time",
+      "ms": 200,
+      "steps": 7
+    },
+    {
+      "type": "key_up",
+      "key": "w"
+    },
+    {
+      "type": "key_down",
+      "key": "d"
+    },
+    {
+      "type": "advance_time",
+      "ms": 285,
+      "steps": 10
+    },
+    {
+      "type": "key_up",
+      "key": "d"
+    },
+    {
+      "type": "key_down",
+      "key": "ArrowRight"
+    },
+    {
+      "type": "advance_time",
+      "ms": 515,
+      "steps": 18
+    },
+    {
+      "type": "key_up",
+      "key": "ArrowRight"
+    },
+    {
+      "type": "key_down",
+      "key": "e"
+    },
+    {
+      "type": "advance_time",
+      "ms": 28,
+      "steps": 1
+    },
+    {
+      "type": "key_up",
+      "key": "e"
+    },
+    {
+      "type": "advance_time",
+      "ms": 1000,
+      "steps": 35
+    },
+    {
+      "type": "key_down",
+      "key": "w"
+    },
+    {
+      "type": "advance_time",
+      "ms": 572,
+      "steps": 20
+    },
+    {
+      "type": "key_up",
+      "key": "w"
+    },
+    {
+      "type": "key_down",
+      "key": "w"
+    },
+    {
+      "type": "advance_time",
+      "ms": 1428,
+      "steps": 50
+    },
+    {
+      "type": "key_up",
+      "key": "w"
+    },
+    {
+      "type": "key_down",
+      "key": "d"
+    },
+    {
+      "type": "advance_time",
+      "ms": 857,
+      "steps": 30
+    },
+    {
+      "type": "key_up",
+      "key": "d"
+    },
+    {
+      "type": "key_down",
+      "key": "Control"
+    },
+    {
+      "type": "advance_time",
+      "ms": 2000,
+      "steps": 70
+    },
+    {
+      "type": "key_up",
+      "key": "Control"
+    },
+    {
+      "type": "key_down",
+      "key": "w"
+    },
+    {
+      "type": "advance_time",
+      "ms": 1600,
+      "steps": 56
+    },
+    {
+      "type": "key_up",
+      "key": "w"
+    },
+    {
+      "type": "key_down",
+      "key": "d"
+    },
+    {
+      "type": "advance_time",
+      "ms": 515,
+      "steps": 18
+    },
+    {
+      "type": "key_up",
+      "key": "d"
+    },
+    {
+      "type": "key_down",
+      "key": "a"
+    },
+    {
+      "type": "advance_time",
+      "ms": 342,
+      "steps": 12
+    },
+    {
+      "type": "key_up",
+      "key": "a"
+    },
+    {
+      "type": "advance_time",
+      "ms": 40000,
+      "steps": 1400
+    },
+    {
+      "type": "key_down",
+      "key": "s"
+    },
+    {
+      "type": "advance_time",
+      "ms": 258,
+      "steps": 9
+    },
+    {
+      "type": "key_up",
+      "key": "s"
+    },
+    {
+      "type": "advance_time",
+      "ms": 22857,
+      "steps": 800
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "dead"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-ticks",
+      "equals": "2633"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-health",
+      "equals": "0"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-kills",
+      "equals": "0"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-pickups",
+      "equals": "0"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-floor",
+      "equals": "0"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-x",
+      "equals": "2070"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-y",
+      "equals": "-2438"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-ammo",
+      "equals": "46"
+    },
+    {
+      "type": "key_press",
+      "key": "R"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-ticks",
+      "equals": "0"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-health",
+      "equals": "100"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-generation",
+      "equals": "2"
+    },
+    {
+      "type": "assert_state_store_snapshot",
+      "target": {
+        "selector": "#scene"
+      },
+      "name": "scene"
+    },
+    {
+      "type": "window_close"
+    }
+  ]
+}

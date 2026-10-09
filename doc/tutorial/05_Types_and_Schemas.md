@@ -177,12 +177,12 @@ Today the condition runs in `is` and `match`. An annotation, a map field and the
 
 ## String Patterns
 
-A **string pattern** is a type that describes text, written `\( … )`. Inside it, `d` is a digit, `w` a word character and `a` a letter; quoted text is literal; and `+`, `*`, `?` and `{2,6}` count repetitions, as in a regular expression. Save this as `patterns.ls`:
+A **string pattern** is a type that describes text, written `\( … )`. Inside it, quoted `"\d"` is a digit, `"\w"` a word character and `"\a"` a letter; other quoted characters are literal. Single quotes select symbol patterns with the same operations (S11.1.2v4). The modifiers `+`, `*`, `?` and `{2,6}` count repetitions of the whole preceding fragment, as in a regular expression. Save this as `patterns.ls`:
 
 ```lambda
 // patterns.ls
-type Digits = \(d+)
-type Email = \(w+ "@" w+ "." a{2,6});
+type Digits = \("\d"+)
+type Email = \("\w"+ "@" "\w"+ "." "\a"{2,6});
 ["2008" is Digits, "20o8" is Digits, "ada@lambda.dev" is Email, "ada@lambda" is Email];
 replace("ISBN 978-0132350884", Digits, "#")
 ```
@@ -303,7 +303,7 @@ Each error carries a path into the document — `[1].tags[1]` is the second tag 
 - `name: Type` annotates a `let` or a parameter, and a type after the parameter list annotates the result; a mismatch Lambda can see in the source is a compile error.
 - `is` tests a value against a type; `|`, `?`, `[]`, `{…}`, `<…>` and literals compose types, and map types are open.
 - `type Name = …` names a type, and `match` takes the first arm whose type admits the value.
-- `that` adds a condition, checked by `is` and `match`; `\(…)` patterns describe text.
+- `that` adds a condition, checked by `is` and `match`; `\(…)` patterns describe text, with quotes selecting strings or symbols.
 - `type Name { … }` declares a nominal object type with fields and methods.
 - A schema is a file of types, and `lambda validate data -s schema.ls` checks a file against its `Document` or last type.
 

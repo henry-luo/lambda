@@ -365,6 +365,8 @@ fn render_element(el, info) {
         // ---- cross references ----
         case 'label': render_label(el, info)
         case 'ref': render_ref(el, info)
+        case 'eqref': if (registry.active(info.packages, "amsmath"))
+            render_number_ref(el, info, true) else render_generic_default(el, info)
         case 'pageref': render_pageref(el, info)
         case 'thepage': <span class: "latex-page-number">
         case 'leftmark': <span class: "latex-chapter-mark">
@@ -1930,18 +1932,14 @@ fn render_pageref(el, info) {
     else <a class: "latex-target-page", href: "#" ++ entry.id>
 }
 
-fn render_number_ref(el, info) {
+fn render_number_ref(el, info, parenthesized = false) {
     let ref_name = trim(util.text_of(el))
     let label_info = util.lookup(info.labels, ref_name)
-    if (label_info != null) {
-        <a class: "latex-ref", href: "#" ++ label_info.id,
-            label_info.number
-        >
-    } else {
-        <a class: "latex-ref latex-unresolved", href: "#" ++ util.slugify(ref_name),
-            "??"
-        >
-    }
+    let value = if (label_info != null) label_info.number else "??";
+    // eqref shares reference resolution, adding parentheses around the displayed tag.
+    <a class: if (label_info != null) "latex-ref" else "latex-ref latex-unresolved",
+        href: "#" ++ (if (label_info != null) label_info.id else util.slugify(ref_name)),
+        if (parenthesized) "(" ++ string(value) ++ ")" else value>
 }
 
 fn render_autoref(el, info) {

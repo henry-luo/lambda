@@ -38,7 +38,7 @@ fn evens(a: int[]) int* => for (x in a where x % 2 == 0) x;
 [evens([1, 3]) == null, evens([2, 3]), type(evens([2, 4]))];
 [evens([2, 4]), 9]
 "-- string islands use the regex count --";
-["123" is \(d{3}), "12" is \(d{3}), "1234" is \(d{2,4}), "12345" is \(d{2,4}), "12" is \(d{2+})]
+["123" is \("\d"{3}), "12" is \("\d"{3}), "1234" is \("\d"{2,4}), "12345" is \("\d"{2,4}), "12" is \("\d"{2+})]
 "-- type relations (an occurrence type in value position is bound first: `int*` there reads as multiplication) --"
 type IntRun = int*
 type IntOpt = int?

@@ -1,0 +1,12 @@
+<?xml version="1.0"?>
+<fo:root xmlns:fo="http://www.w3.org/1999/XSL/Format" font-family="Arial" font-size="7.5pt" line-height="9pt">
+  <fo:layout-master-set>
+    <fo:simple-page-master master-name="sheet" page-width="150pt" page-height="75pt" margin="7.5pt"><fo:region-body region-name="main"/></fo:simple-page-master>
+  </fo:layout-master-set>
+  <fo:page-sequence master-reference="sheet" initial-page-number="4" force-page-count="no-force" format="i">
+    <fo:flow flow-name="main"><fo:block>Statement <fo:footnote><fo:inline color="red" font-size="6pt">[a]</fo:inline><fo:footnote-body id="note" color="blue"><fo:block>[a] First note line</fo:block><fo:block>Second note line</fo:block><fo:block>Third note line</fo:block><fo:block>Fourth note line</fo:block><fo:block>Fifth note line</fo:block><fo:block>Sixth note line</fo:block><fo:block>Seventh note line</fo:block><fo:block>Final note line: <fo:page-number/></fo:block></fo:footnote-body></fo:footnote>.</fo:block></fo:flow>
+  </fo:page-sequence>
+  <fo:page-sequence master-reference="sheet" initial-page-number="20" force-page-count="no-force">
+    <fo:flow flow-name="main"><fo:block>Following sequence. Note finishes on <fo:page-number-citation-last ref-id="note"/>.</fo:block></fo:flow>
+  </fo:page-sequence>
+</fo:root>

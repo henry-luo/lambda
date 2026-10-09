@@ -29,6 +29,14 @@ for (let i = 0; i < 32; i++) {
   if (String.fromCharCode(0xD83D, 0xDE00) !== "😀") {
     throw new Error("four-byte character cache returned a stale Item");
   }
+  // D5.3.5: moving collections must preserve the cached Unicode source itself.
+  const unicode = ("é😀" + i).repeat(4);
+  const length = unicode.length;
+  const churn = new Array(16).fill("temporary" + i);
+  if (unicode.charAt(2) !== "\uDE00" || unicode.substring(1, 3) !== "😀" ||
+      unicode.length !== length || churn.length !== 16) {
+    throw new Error("Unicode position cache lost its rooted source");
+  }
 }
 
 console.log("global-string-cache-roots-ok");

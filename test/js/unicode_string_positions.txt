@@ -1,0 +1,3 @@
+unicode-seeks-ok
+unicode-boundaries-ok
+unicode-source-replacement-ok

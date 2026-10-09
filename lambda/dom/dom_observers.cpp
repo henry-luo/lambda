@@ -2,6 +2,8 @@
 #include "realm/dom_realm.h"
 #include "dom_ops.h"
 #include "dom.h"
+#include "dom_engine.h"
+#include "dom_realm_hooks.h"
 #include "../js/js_runtime.h"
 #include "../js/js_runtime_state.hpp"
 #include "../jube/jube.h"
@@ -21,12 +23,6 @@ extern "C" void heap_register_gc_root(uint64_t* slot);
 extern Item js_make_number(double d);
 
 
-typedef enum JsObserverKind {
-    JS_OBSERVER_MUTATION,
-    JS_OBSERVER_RESIZE,
-    JS_OBSERVER_INTERSECTION
-} JsObserverKind;
-
 typedef struct JsObserverTarget {
     DomNode* node;
     DomDocument* owner_doc;
@@ -42,8 +38,8 @@ typedef struct JsObserverTarget {
     DomNode* transient_roots[8];
     DomNodeRef transient_refs[8];
     int transient_root_count;
-    float last_width;
-    float last_height;
+    float last_inline_size;
+    float last_block_size;
     float last_ratio;
     bool last_intersecting;
     bool sampled;
@@ -151,16 +147,14 @@ static JsObserverTarget* observer_append_target(JsObserverState* observer) {
     memset(target, 0, sizeof(*target));
     return target;
 }
-JS_FORWARD_STATIC_ITEM(observer_key, (const char* name), js_make_string, (name))
-JS_FORWARD_STATIC_ITEM(observer_pending, (JsObserverState* observer), dom_realm_get, (observer->object, observer_key("__lambdaObserverRecords")))
+JS_FORWARD_STATIC_ITEM(observer_pending, (JsObserverState* observer), dom_realm_get_name, (observer->object, "__lambdaObserverRecords"))
 
 static void observer_replace_pending(JsObserverState* observer) {
     if (!observer) return;
-    RootFrame roots(3);
+    RootFrame roots(2);
     Rooted<Item> object_root(roots, observer->object);
-    Rooted<Item> key_root(roots, observer_key("__lambdaObserverRecords"));
     Rooted<Item> pending_root(roots, js_array_new(0));
-    dom_realm_set(object_root.get(), key_root.get(), pending_root.get());
+    dom_realm_set_name(object_root.get(), "__lambdaObserverRecords", pending_root.get());
 }
 
 static JsObserverState* observer_from_this(void) {
@@ -230,7 +224,7 @@ static Item observer_create(JsObserverKind kind, Item callback, JsObserverState*
     observer->object = object_root.get();
     // Native state is indexed by object identity; keeping callback and records
     // on that object makes the GC ownership match the observable lifetime.
-    dom_realm_set(observer->object, observer_key("__lambdaObserverCallback"), callback_root.get());
+    dom_realm_set_name(observer->object, "__lambdaObserverCallback", callback_root.get());
     observer_replace_pending(observer);
     *out_observer = observer;
     return js_status_ok();
@@ -239,7 +233,7 @@ static Item observer_create(JsObserverKind kind, Item callback, JsObserverState*
 static bool observer_option_bool(Item options, const char* name) {
     TypeId type = get_type_id(options);
     if (type != LMD_TYPE_MAP && type != LMD_TYPE_VMAP) return false;
-    return js_is_truthy(dom_realm_get(options, observer_key(name)));
+    return js_is_truthy(dom_realm_get_name(options, name));
 }
 
 static Item observer_option(Item options, const char* name) {
@@ -247,7 +241,7 @@ static Item observer_option(Item options, const char* name) {
     if (type != LMD_TYPE_MAP && type != LMD_TYPE_VMAP) {
         return ItemNull;
     }
-    return dom_realm_get(options, observer_key(name));
+    return dom_realm_get_name(options, name);
 }
 
 static int observer_parse_root_margin(const char* text, float* values,
@@ -339,38 +333,45 @@ static JsObserverTarget* observer_find_target(JsObserverState* observer, DomNode
     return nullptr;
 }
 
+template <JsObserverKind Kind>
 static Item js_observer_disconnect(void) {
     JsObserverState* observer = observer_from_this();
-    if (observer) {
-        for (int i = 0; i < observer->target_count; i++) {
-            observer_release_target(&observer->targets[i]);
-        }
-        observer->target_count = 0;
-        observer_replace_pending(observer);
+    if (!observer || observer->kind != Kind) {
+        return dom_realm_throw_type_error("Illegal Observer receiver");
     }
+    for (int i = 0; i < observer->target_count; i++) {
+        observer_release_target(&observer->targets[i]);
+    }
+    observer->target_count = 0;
+    observer_replace_pending(observer);
     return make_js_undefined();
 }
 
+template <JsObserverKind Kind>
 static Item js_observer_take_records(void) {
     JsObserverState* observer = observer_from_this();
-    if (!observer) return js_array_new(0);
-    Item records = observer_pending(observer);
+    if (!observer || observer->kind != Kind) {
+        return dom_realm_throw_type_error("Illegal Observer receiver");
+    }
+    RootFrame roots(1);
+    Rooted<Item> records_root(roots, observer_pending(observer));
+    if (!roots.valid()) return ItemError;
     observer_replace_pending(observer);
-    return records;
+    return records_root.get();
 }
 
 static Item js_mutation_observer_observe(Item target_item, Item options) {
     JsObserverState* observer = observer_from_this();
     DomNode* node = (DomNode*)dom_unwrap_element(target_item);
     if (!observer || observer->kind != JS_OBSERVER_MUTATION || !node) {
-        return make_js_undefined();
+        return dom_realm_throw_type_error("MutationObserver.observe requires a native observer and Node");
     }
     bool child_list = observer_option_bool(options, "childList");
     bool attributes = observer_option_bool(options, "attributes");
     bool character_data = observer_option_bool(options, "characterData");
     bool attribute_old_value = observer_option_bool(options, "attributeOldValue");
     bool character_data_old_value = observer_option_bool(options, "characterDataOldValue");
-    Item filter = dom_realm_get(options, observer_key("attributeFilter"));
+    Item filter = dom_realm_get_name(options, "attributeFilter");
     if (attribute_old_value) attributes = true;
     // DOM Standard: supplying a filter requests attribute records even when
     // the attributes option itself was omitted.
@@ -416,8 +417,12 @@ static Item js_mutation_observer_observe(Item target_item, Item options) {
     return make_js_undefined();
 }
 
+template <JsObserverKind Kind>
 static Item js_observer_unobserve(Item target_item) {
     JsObserverState* observer = observer_from_this();
+    if (!observer || observer->kind != Kind) {
+        return dom_realm_throw_type_error("Illegal Observer receiver");
+    }
     DomNode* node = (DomNode*)dom_unwrap_element(target_item);
     if (!observer || !node) return make_js_undefined();
     for (int i = 0; i < observer->target_count; i++) {
@@ -433,11 +438,12 @@ static Item js_observer_unobserve(Item target_item) {
     return make_js_undefined();
 }
 
+template <JsObserverKind Kind>
 static Item js_geometry_observer_observe(Item target_item) {
     JsObserverState* observer = observer_from_this();
     DomNode* node = (DomNode*)dom_unwrap_element(target_item);
-    if (!observer || observer->kind == JS_OBSERVER_MUTATION || !node) {
-        return make_js_undefined();
+    if (!observer || observer->kind != Kind || !node) {
+        return dom_realm_throw_type_error("Observer.observe requires a native observer and Element");
     }
     if (observer_find_target(observer, node)) return make_js_undefined();
     JsObserverTarget* target = observer_append_target(observer);
@@ -513,70 +519,84 @@ static void observer_queue_record(JsObserverState* observer, Item record) {
     observer_schedule_delivery();
 }
 
-static void observer_install_common_methods(JsObserverState* observer, bool mutation) {
-    RootFrame roots(3);
-    Rooted<Item> object_root(roots, observer->object);
-    Rooted<Item> key_root(roots, observer_key("disconnect"));
-    Rooted<Item> method_root(roots,
-        dom_realm_new_function(js_observer_disconnect));
-    dom_realm_set(object_root.get(), key_root.get(), method_root.get());
-    if (mutation) {
-        key_root.set(observer_key("observe"));
-        method_root.set(dom_realm_new_function(js_mutation_observer_observe));
-        dom_realm_set(object_root.get(), key_root.get(), method_root.get());
-        key_root.set(observer_key("takeRecords"));
-        method_root.set(dom_realm_new_function(js_observer_take_records));
-        dom_realm_set(object_root.get(), key_root.get(), method_root.get());
+extern "C" const char* dom_observer_interface_name(JsObserverKind kind) {
+    static const char* names[] = {"MutationObserver", "ResizeObserver", "IntersectionObserver"};
+    return names[kind];
+}
+
+template <JsObserverKind Kind>
+static void observer_install_interface_members(Item prototype) {
+    RootFrame roots(1);
+    Rooted<Item> prototype_root(roots, prototype);
+    if (!roots.valid()) return;
+    // shared prototype methods validate their receiver's native observer kind
+    // rather than trusting a forged prototype or mutable string tag (D6.2.2v2).
+    dom_realm_install_method(prototype_root.get(), "disconnect", js_observer_disconnect<Kind>);
+    if (Kind == JS_OBSERVER_MUTATION) {
+        dom_realm_install_method(prototype_root.get(), "observe", js_mutation_observer_observe);
     } else {
-        key_root.set(observer_key("observe"));
-        method_root.set(dom_realm_new_function(js_geometry_observer_observe));
-        dom_realm_set(object_root.get(), key_root.get(), method_root.get());
-        key_root.set(observer_key("unobserve"));
-        method_root.set(dom_realm_new_function(js_observer_unobserve));
-        dom_realm_set(object_root.get(), key_root.get(), method_root.get());
+        dom_realm_install_method(prototype_root.get(), "observe", js_geometry_observer_observe<Kind>);
+        dom_realm_install_method(prototype_root.get(), "unobserve", js_observer_unobserve<Kind>);
+    }
+    if (Kind != JS_OBSERVER_RESIZE) {
+        dom_realm_install_method(prototype_root.get(), "takeRecords", js_observer_take_records<Kind>);
     }
 }
 
-static Item js_observer_new(JsObserverKind kind, Item callback, bool mutation) {
+extern "C" void dom_observer_install_interface(Item prototype, JsObserverKind kind) {
+    switch (kind) {
+        case JS_OBSERVER_MUTATION: observer_install_interface_members<JS_OBSERVER_MUTATION>(prototype); break;
+        case JS_OBSERVER_RESIZE: observer_install_interface_members<JS_OBSERVER_RESIZE>(prototype); break;
+        case JS_OBSERVER_INTERSECTION: observer_install_interface_members<JS_OBSERVER_INTERSECTION>(prototype); break;
+    }
+}
+
+static Item js_observer_new(JsObserverKind kind, Item callback) {
     JsObserverState* observer = nullptr;
     JS_RETURN_IF_ERROR(observer_create(kind, callback, &observer));
     if (!observer) return ItemNull;
-    observer_install_common_methods(observer, mutation);
+    dom_bind_interface_prototype(dom_realm_global(), observer->object,
+        dom_observer_interface_name(kind));
     return observer->object;
 }
 JS_FORWARD_ITEM(dom_mutation_observer_new, (Item callback), js_observer_new,
-    (JS_OBSERVER_MUTATION, callback, true))
+    (JS_OBSERVER_MUTATION, callback))
 JS_FORWARD_ITEM(dom_resize_observer_new, (Item callback), js_observer_new,
-    (JS_OBSERVER_RESIZE, callback, false))
+    (JS_OBSERVER_RESIZE, callback))
 
 extern "C" Item dom_intersection_observer_new(Item callback, Item options) {
+    // option getters may return unpublished values; retain them through
+    // later allocations, and use interned field keys across GC (D5.3.5).
+    JS_ROOTS(roots, options_root, options, root_root, ItemNull,
+        margin_root, ItemNull, thresholds_root, ItemNull);
     JsObserverState* observer = nullptr;
     JS_RETURN_IF_ERROR(observer_create(JS_OBSERVER_INTERSECTION, callback, &observer));
     if (!observer) return ItemNull;
-    observer_install_common_methods(observer, false);
-    Item root_item = observer_option(options, "root");
-    observer->root = (DomElement*)dom_unwrap_element(root_item);
+    dom_bind_interface_prototype(dom_realm_global(), observer->object,
+        dom_observer_interface_name(JS_OBSERVER_INTERSECTION));
+    root_root.set(observer_option(options_root.get(), "root"));
+    observer->root = (DomElement*)dom_unwrap_element(root_root.get());
     if (observer->root) {
         observer_pin_node(observer->root->doc, (DomNode*)observer->root,
                           &observer->root_ref);
     }
-    dom_realm_set(observer->object, observer_key("root"),
-        observer->root ? root_item : ItemNull);
-    Item margin_item = observer_option(options, "rootMargin");
-    const char* margin = fn_to_cstr(margin_item);
+    dom_realm_set_name(observer->object, "root",
+        observer->root ? root_root.get() : ItemNull);
+    margin_root.set(observer_option(options_root.get(), "rootMargin"));
+    const char* margin = fn_to_cstr(margin_root.get());
     if (!observer_parse_root_margin(margin ? margin : "0px", observer->root_margin,
                                     observer->root_margin_percent)) {
         observer_parse_root_margin("0px", observer->root_margin,
                                    observer->root_margin_percent);
         margin = "0px";
     }
-    dom_realm_set(observer->object, observer_key("rootMargin"),
+    dom_realm_set_name(observer->object, "rootMargin",
         js_make_string(margin ? margin : "0px"));
-    observer_parse_thresholds(observer, options);
-    dom_realm_set(observer->object, observer_key("thresholds"), js_array_new(0));
-    Item thresholds = dom_realm_get(observer->object, observer_key("thresholds"));
+    observer_parse_thresholds(observer, options_root.get());
+    thresholds_root.set(js_array_new(0));
+    dom_realm_set_name(observer->object, "thresholds", thresholds_root.get());
     for (int i = 0; i < observer->threshold_count; i++) {
-        js_array_push(thresholds, js_make_number(observer->thresholds[i]));
+        js_array_push(thresholds_root.get(), js_make_number(observer->thresholds[i]));
     }
     return observer->object;
 }
@@ -620,15 +640,15 @@ static bool observer_attribute_filter_matches(JsObserverTarget* registration,
 static void observer_set_record_fields(Item record, Item type, Item target,
                                        Item added, Item removed, Item attribute,
                                        Item old_value) {
-    dom_realm_set(record, observer_key("type"), type);
-    dom_realm_set(record, observer_key("target"), target);
-    dom_realm_set(record, observer_key("addedNodes"), added);
-    dom_realm_set(record, observer_key("removedNodes"), removed);
-    dom_realm_set(record, observer_key("previousSibling"), ItemNull);
-    dom_realm_set(record, observer_key("nextSibling"), ItemNull);
-    dom_realm_set(record, observer_key("attributeName"), attribute);
-    dom_realm_set(record, observer_key("attributeNamespace"), ItemNull);
-    dom_realm_set(record, observer_key("oldValue"), old_value);
+    dom_realm_set_name(record, "type", type);
+    dom_realm_set_name(record, "target", target);
+    dom_realm_set_name(record, "addedNodes", added);
+    dom_realm_set_name(record, "removedNodes", removed);
+    dom_realm_set_name(record, "previousSibling", ItemNull);
+    dom_realm_set_name(record, "nextSibling", ItemNull);
+    dom_realm_set_name(record, "attributeName", attribute);
+    dom_realm_set_name(record, "attributeNamespace", ItemNull);
+    dom_realm_set_name(record, "oldValue", old_value);
 }
 
 static void observer_queue_child_record(JsObserverState* observer,
@@ -750,7 +770,7 @@ extern "C" void dom_observers_child_replace_notify(void* parent_ptr,
 }
 
 static double observer_number_property(Item object, const char* name) {
-    Item number = js_to_number(dom_realm_get(object, observer_key(name)));
+    Item number = js_to_number(dom_realm_get_name(object, name));
     TypeId type = get_type_id(number);
     if (type == LMD_TYPE_INT) return (double)it2i(number);
     if (type == LMD_TYPE_FLOAT) return it2d(number);
@@ -772,6 +792,17 @@ static Item observer_rect(Item target_item, float* x, float* y, float* width, fl
 JS_FORWARD_STATIC_ITEM(observer_make_rect,
     (float x, float y, float width, float height),
     dom_make_rect, ((double)x, (double)y, (double)width, (double)height))
+
+static Item observer_make_box_sizes(float width, float height, bool vertical) {
+    RootFrame roots(2);
+    Rooted<Item> box_root(roots, js_new_object());
+    Rooted<Item> boxes_root(roots, ItemNull);
+    dom_realm_set_name(box_root.get(), "inlineSize", js_make_number(vertical ? height : width));
+    dom_realm_set_name(box_root.get(), "blockSize", js_make_number(vertical ? width : height));
+    boxes_root.set(js_array_new(0));
+    js_array_push(boxes_root.get(), box_root.get());
+    return boxes_root.get();
+}
 
 static float observer_resolve_margin(JsObserverState* observer, int side,
                                      float root_width, float root_height) {
@@ -822,31 +853,36 @@ extern "C" void dom_observers_post_layout(void) {
         if (observer->kind == JS_OBSERVER_MUTATION) continue;
         for (int j = 0; j < observer->target_count; j++) {
             JsObserverTarget* target = &observer->targets[j];
-            RootFrame roots(6);
+            RootFrame roots(5);
             Rooted<Item> target_root(roots, dom_wrap_element(target->node));
             float x = 0.0f, y = 0.0f, width = 0.0f, height = 0.0f;
             Rooted<Item> rect_root(roots, observer_rect(target_root.get(),
                 &x, &y, &width, &height));
             Rooted<Item> entry_root(roots, ItemNull);
-            Rooted<Item> box_root(roots, ItemNull);
             Rooted<Item> boxes_root(roots, ItemNull);
             Rooted<Item> intersection_root(roots, ItemNull);
             if (observer->kind == JS_OBSERVER_RESIZE) {
-                if (target->sampled && fabsf(width - target->last_width) < 0.01f &&
-                    fabsf(height - target->last_height) < 0.01f) continue;
+                DomCssBoxSizes sizes = {width, height, width, height, 0.0f, 0.0f, false};
+                if (target->node->is_element() &&
+                    dom_engine_element_css_boxes(target->node->as_element(), &sizes)) {
+                    width = sizes.content_width;
+                    height = sizes.content_height;
+                    rect_root.set(observer_make_rect(sizes.padding_left, sizes.padding_top, width, height));
+                }
+                float inline_size = sizes.vertical ? height : width;
+                float block_size = sizes.vertical ? width : height;
+                if (target->sampled && fabsf(inline_size - target->last_inline_size) < 0.01f &&
+                    fabsf(block_size - target->last_block_size) < 0.01f) continue;
                 target->sampled = true;
-                target->last_width = width;
-                target->last_height = height;
+                target->last_inline_size = inline_size;
+                target->last_block_size = block_size;
                 entry_root.set(js_new_object());
-                dom_realm_set(entry_root.get(), observer_key("target"), target_root.get());
-                dom_realm_set(entry_root.get(), observer_key("contentRect"), rect_root.get());
-                box_root.set(js_new_object());
-                dom_realm_set(box_root.get(), observer_key("inlineSize"), js_make_number(width));
-                dom_realm_set(box_root.get(), observer_key("blockSize"), js_make_number(height));
-                boxes_root.set(js_array_new(0));
-                js_array_push(boxes_root.get(), box_root.get());
-                dom_realm_set(entry_root.get(), observer_key("contentBoxSize"), boxes_root.get());
-                dom_realm_set(entry_root.get(), observer_key("borderBoxSize"), boxes_root.get());
+                dom_realm_set_name(entry_root.get(), "target", target_root.get());
+                dom_realm_set_name(entry_root.get(), "contentRect", rect_root.get());
+                boxes_root.set(observer_make_box_sizes(width, height, sizes.vertical));
+                dom_realm_set_name(entry_root.get(), "contentBoxSize", boxes_root.get());
+                boxes_root.set(observer_make_box_sizes(sizes.border_width, sizes.border_height, sizes.vertical));
+                dom_realm_set_name(entry_root.get(), "borderBoxSize", boxes_root.get());
                 observer_queue_record(observer, entry_root.get());
                 continue;
             }
@@ -882,16 +918,16 @@ extern "C" void dom_observers_post_layout(void) {
             target->last_intersecting = intersecting;
             target->last_ratio = ratio;
             entry_root.set(observer_new_intersection_entry());
-            dom_realm_set(entry_root.get(), observer_key("target"), target_root.get());
-            dom_realm_set(entry_root.get(), observer_key("boundingClientRect"), rect_root.get());
-            dom_realm_set(entry_root.get(), observer_key("intersectionRatio"), js_make_number(ratio));
-            dom_realm_set(entry_root.get(), observer_key("isIntersecting"), (Item){.item = b2it(intersecting)});
+            dom_realm_set_name(entry_root.get(), "target", target_root.get());
+            dom_realm_set_name(entry_root.get(), "boundingClientRect", rect_root.get());
+            dom_realm_set_name(entry_root.get(), "intersectionRatio", js_make_number(ratio));
+            dom_realm_set_name(entry_root.get(), "isIntersecting", (Item){.item = b2it(intersecting)});
             intersection_root.set(observer_make_rect(left, top,
                 intersection_width, intersection_height));
-            dom_realm_set(entry_root.get(), observer_key("intersectionRect"), intersection_root.get());
-            dom_realm_set(entry_root.get(), observer_key("rootBounds"), observer_make_rect(
+            dom_realm_set_name(entry_root.get(), "intersectionRect", intersection_root.get());
+            dom_realm_set_name(entry_root.get(), "rootBounds", observer_make_rect(
                 root_left, root_top, root_right - root_left, root_bottom - root_top));
-            dom_realm_set(entry_root.get(), observer_key("time"), js_make_number(0.0));
+            dom_realm_set_name(entry_root.get(), "time", js_make_number(0.0));
             observer_queue_record(observer, entry_root.get());
         }
     }

@@ -346,6 +346,16 @@ bool template_registry_may_have_author_handler(TemplateRegistry* registry,
     return registry && bit && (registry->author_event_mask & bit) != 0;
 }
 
+bool template_registry_has_author_handler(TemplateRegistry* registry,
+                                          const char* event_name) {
+    if (!template_registry_may_have_author_handler(registry, event_name)) return false;
+    for (TemplateEntry* entry = registry->first; entry; entry = entry->next) {
+        if (!entry->is_behavior && template_entry_may_handle_event(entry, event_name) &&
+            template_entry_find_handler(entry, event_name)) return true;
+    }
+    return false;
+}
+
 bool template_registry_may_have_behavior_handler(TemplateRegistry* registry,
                                                   const char* event_name) {
     uint64_t bit = template_event_mask_bit(event_name);

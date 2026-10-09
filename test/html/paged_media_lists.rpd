@@ -1,0 +1,35 @@
+<?xml version="1.0"?>
+<r:page-document r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" xmlns:r="urn:lambda:radiant:page" style="margin:0;font-family:Arial;font-size:7.5pt;line-height:9pt;color:black;white-space:normal;orphans:1;widows:1" r:line-stacking-strategy="max-height" r:linefeed-treatment="treat-as-space" r:white-space-treatment="ignore-if-surrounding-linefeed" r:white-space-collapse="true" r:wrap-option="wrap">
+  <r:master-set r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics"><r:page-master r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" name="sheet" style="size:180pt 120pt;margin:7.5pt"><r:region r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" role="body" name="xsl-region-body" style="overflow:hidden"/></r:page-master></r:master-set>
+  <r:page-sequence r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" master-reference="sheet" force-page-count="no-force"><r:flow r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" region-name="xsl-region-body">
+    <div r:block-inline-geometry="reference" r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" r:label-body-context="true" r:provisional-distance-between-starts="20%" r:provisional-label-separation="6pt">
+      <table r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" r:label-body-grid="true" style="table-layout:fixed;width:100%;border-collapse:separate;border-spacing:0"><tr><td r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" r:area-source="descendants" r:cell-alignment="relative-before" style="padding:0;vertical-align:top"><div r:block-inline-geometry="reference" r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" style="background-color:#ffdddd">A.</div></td><td r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" r:area-source="descendants" r:cell-alignment="relative-before" style="padding:0;vertical-align:top"><div r:block-inline-geometry="reference" r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" style="background-color:#ddffdd">Short body</div></td></tr></table>
+      <table r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" r:label-body-grid="true" style="table-layout:fixed;width:100%;border-collapse:separate;border-spacing:0"><tr><td r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" r:area-source="descendants" r:cell-alignment="relative-before" style="padding:0;vertical-align:top"><div r:block-inline-geometry="reference" r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" style="background-color:#ffdddd">B.</div></td><td r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" r:area-source="descendants" r:cell-alignment="relative-before" style="padding:0;vertical-align:top"><div r:block-inline-geometry="reference" r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" r:linefeed-treatment="preserve" r:white-space-treatment="preserve" style="background-color:#ddffdd">First
+Second
+Third</div></td></tr></table>
+      <table r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" r:label-body-grid="true" style="table-layout:fixed;width:100%;border-collapse:separate;border-spacing:0"><tr><td r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" r:area-source="descendants" r:cell-alignment="relative-before" style="padding:0;vertical-align:top"><div r:block-inline-geometry="reference" r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" style="background-color:#ffdddd">C.</div></td><td r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" r:area-source="descendants" r:cell-alignment="relative-before" style="padding:0;vertical-align:top"><div r:block-inline-geometry="reference" r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" r:linefeed-treatment="preserve" r:white-space-treatment="preserve" style="background-color:#dde0ff">A
+B
+C
+D
+E
+F
+G
+H
+I
+J
+K
+L
+M
+N
+O
+P
+Q
+R
+S
+T
+U
+V
+W</div></td></tr></table>
+    </div>
+  </r:flow></r:page-sequence>
+</r:page-document>

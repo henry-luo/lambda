@@ -7,7 +7,8 @@
 
 static void replaced_facts_set_axis(ReplacedIntrinsicFacts* facts, bool horizontal,
                                     float value, bool use_as_current) {
-    if (!facts || value <= 0.0f) return;
+    // A zero SVG viewport axis is an explicit natural size, not missing metadata.
+    if (!facts || !isfinite(value) || value < 0.0f) return;
     if (horizontal) {
         facts->natural_width = value;
         facts->has_natural_width = true;
@@ -24,7 +25,8 @@ static void replaced_facts_set_pair(ReplacedIntrinsicFacts* facts,
                                     bool use_as_current) {
     replaced_facts_set_axis(facts, true, width, use_as_current);
     replaced_facts_set_axis(facts, false, height, use_as_current);
-    if (facts && facts->has_natural_width && facts->has_natural_height) {
+    if (facts && facts->has_natural_width && facts->has_natural_height &&
+        facts->natural_height > 0.0f) {
         facts->natural_aspect_ratio = facts->natural_width / facts->natural_height;
         facts->has_natural_aspect_ratio = facts->natural_aspect_ratio > 0.0f;
     }

@@ -1,0 +1,12 @@
+{
+  "name": "Spectre SVG fuzz seed mutation and corpse filter removal",
+  "html": "test/demo/doom/fixtures/_spectre.ls",
+  "viewport": {"width": 320, "height": 160},
+  "events": [
+    {"type": "assert_pixel", "x": 72, "y": 50, "min_r": 70, "max_r": 100, "min_g": 70, "max_g": 100, "min_b": 70, "max_b": 100},
+    {"type": "click", "target": {"selector": "#seed"}},
+    {"type": "assert_attribute", "target": {"selector": "#fuzz-noise"}, "attribute": "seed", "equals": "1"},
+    {"type": "click", "target": {"selector": "#dead"}},
+    {"type": "assert_attribute", "target": {"selector": "#shadow"}, "attribute": "data-state", "equals": "dead"}
+  ]
+}

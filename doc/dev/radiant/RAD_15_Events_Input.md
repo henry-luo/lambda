@@ -124,6 +124,18 @@ while a handler is still running cannot run the callback and logs
 
 ---
 
+Reactive reconciliation captures a focused element's `data-focus-key` before
+retiring its DOM node and searches within the corresponding replacement
+template result before structural fallback. Keyed chart elements therefore
+retain focus when an earlier sibling disappears or the mark family changes.
+The key is copied across retirement and released after restoration; no retired
+DOM pointer becomes the owner of the new focus (D4.5.1v4).
+
+Lambda `dom.dispatch` descriptors with an explicit `detail` field create a
+rooted custom event, preserving that value through nested dispatch. Ordinary
+nested descriptors retain their name-based author-event routing. Event
+observers and procedural handlers remain the mutation boundary (S12.1.3).
+
 ## 6. Keyboard, IME, and text input
 
 `RDT_EVENT_KEY_DOWN` constructs a shared keyboard record before the package's
@@ -163,6 +175,13 @@ The native context menu (`event.hpp`) is a fixed 5-item popup — Cut/Copy/Paste
 **Ticking.** On each render tick, `event_sim_update` resolves a target by CSS selector, visible text, or index, then runs the corresponding native input or shared event-builder entry before evaluating assertions. Simulator-only selection and inspection actions remain test tooling; they do not bypass author or UA dispatch for user-visible events.
 
 **Action vocabulary** (`SimEventType`, `event_sim.hpp:83`): primitives (`mouse_move/down/up/drag`, `key_press/down/up/combo`, `scroll`), high-level actions (`click`, `dblclick`, `type`, `focus`, `check`, `select_option`, `resize`, `drag_and_drop`, `editing_text_drag_drop`, `paste_text`, `ime_compose`, `set_editing_selection/value`), navigation (`navigate`, `navigate_back`, `switch_frame`), and utilities (`log`, `render`, `dump_caret`, `advance_time`, webview eval/wait).
+
+Each input primitive normally advances the virtual clock by 1/60 second after
+its enclosing JSON task. Fixtures with an explicit fixed-step time budget may
+set the root `input_turn_ms` to `0`; callbacks still drain at the task boundary,
+and `advance_time` then supplies all elapsed time. Omitted values preserve the
+historical input latency. `wait` also advances virtual time, so real-time frame
+measurements use the native window loop without either time-advancing action.
 
 **Assertion vocabulary** — the reason the file is huge. Roughly forty `assert_*` kinds cover caret, selection, form-selection, preedit, target, text, value, checked, visible, focus, pseudo-state, scroll, rect, style, position, element-at, attribute, count, state-store (and snapshot), event-log, editing-event, editing-selection/value, pixel color channels, Mark state-dump against a fixture, reconcile-mode, and browser-reference pixel snapshot (`event_sim.hpp:117-162`).
 

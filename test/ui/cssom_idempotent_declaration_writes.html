@@ -1,0 +1,49 @@
+<!doctype html>
+<button id="check">check repeated style writes</button>
+<div id="target"></div><div id="report"></div>
+<script>
+document.getElementById('check').addEventListener('click', function () {
+    var target = document.getElementById('target');
+    var report = document.getElementById('report');
+    var observer = new MutationObserver(function () {});
+    observer.observe(target, { attributes: true });
+    function check(name, value) { report.setAttribute('data-' + name, String(value)); }
+    function repeated(name, value, priority) {
+        target.style.setProperty(name, value, priority || '');
+        var first = observer.takeRecords().length;
+        target.style.setProperty(name, value, priority || '');
+        return first === 1 && observer.takeRecords().length === 0;
+    }
+    check('length', repeated('height', '75px'));
+    check('priority', repeated('height', '75px', 'important'));
+    check('custom', repeated('--motion-progress', '0.500'));
+    check('shorthand', repeated('margin', '4px'));
+    target.style.height = '80px';
+    observer.takeRecords();
+    target.style.height = '80px';
+    check('named', observer.takeRecords().length === 0);
+    target.style.removeProperty('height');
+    check('remove', observer.takeRecords().length === 1 &&
+        target.style.removeProperty('height') === '' && observer.takeRecords().length === 0);
+    var text = target.style.cssText;
+    target.style.cssText = text;
+    check('text', observer.takeRecords().length === 1);
+    observer.disconnect();
+
+    var calls = 0;
+    var feedback = new MutationObserver(function () {
+        calls++;
+        // cap the regression's feedback so the old runtime fails promptly.
+        if (calls < 4) {
+            target.style.height = '90px';
+            target.getBoundingClientRect();
+        } else feedback.disconnect();
+    });
+    feedback.observe(target, { attributes: true });
+    target.style.height = '90px';
+    setTimeout(function () {
+        feedback.disconnect();
+        check('feedback', calls === 1);
+    }, 0);
+});
+</script>

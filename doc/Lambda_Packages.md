@@ -212,8 +212,9 @@ svg.width                // 400, the default width
 |----------|-------------|
 | `chart.render(chart_el)` | Renders a `<chart>`, `<hconcat>`, `<vconcat>` or `<repeat>` element as an `<svg>` element |
 | `chart.render_spec(spec, viewport = null, st = null)` | Renders a specification map or native element; optional parameter-state snapshot derives an interactive SVG presentation |
-| `chart.model(spec, viewport = null)` | Creates a chart source element; retain and `apply` it to preserve chart state across parent rerenders |
-| `chart.interactive(spec, viewport = null)` | Applies a Lambda view template with independent interaction state, SVG, and bound input controls |
+| `chart.model(spec, viewport = null, options = {})` | Creates a chart source element; retain and `apply` it to preserve chart state across parent rerenders |
+| `chart.interactive(spec, viewport = null, options = {})` | Applies a Lambda view template with independent interaction state, SVG, and bound input controls |
+| `chart.render_frame(spec, frame, viewport = null, st = null)` | Samples SVG at an explicit `time_ms`; a `previous` specification or SVG supplies the source of an update transition (S12.1.1v2) |
 | `vega.convert(vl)` | Converts a parsed Vega-Lite document (a map) into a specification map for `render_spec` |
 
 ### 4.3 Specification elements
@@ -222,8 +223,11 @@ svg.width                // 400, the default width
 |---------|-------------------------|
 | `<chart>` | `width` (default 400), `height` (300), `padding` (a number or a `{top, right, bottom, left}` map, default 20), `title`, `clip`, `projection`, and the children below |
 | `<data>` | Inline `values: [...]` or row children; `name` selects the chart's `datasets` map; `url` and optional `format` use Lambda input loading |
-| `<mark>` | `type` (or `kind`): `bar`, `line`, `area`, `point`, `text`, `rule`, `tick`, `rect`, `arc`, `boxplot`, `errorbar`, `errorband`, `wordcloud`, `violin`, `slope`, `trail`, `image`, `radar`, `parallel`, `treemap`, `sunburst`, `geoshape` (`geo`); an unknown type draws points. Style attributes: `color`, `opacity`, `fill`, `stroke`, `stroke_width`, `stroke_dash`, `interpolate`, `point`, `corner_radius`, `inner_radius`, `outer_radius`, `pad_angle`, `size`, `shape`, `font_size`, `font_family`, `font_weight`, `clip` |
-| `<encoding>` | One child per channel: `<x>`, `<y>`, `<x2>`, `<y2>`, `<color>`, `<size>`, `<opacity>`, `<theta>`, `<theta2>`, `<radius>`, `<radius2>`, `<longitude>`, `<latitude>`, `<text>`, `<stroke>`, `<x_offset>`, `<detail>`, `<tooltip>`, `<shape>`, `<order>`, `<url>`. Each takes `field`, `dtype` (`quantitative`, `nominal`, `ordinal` or `temporal`; `geojson` for a shape field), `value`, `datum`, `title`, `aggregate`, `bin`, `time_unit`, `stack`, `stack_order`, `sort`, `zero`, `scale`, `axis`, `legend`, `format` and `condition` |
+| `<mark>` | `type` (or `kind`): `bar`, `line`, `area`, `point`, `text`, `rule`, `tick`, `rect`, `arc`, `boxplot`, `errorbar`, `errorband`, `wordcloud`, `violin`, `slope`, `trail`, `image`, `radar`, `parallel`, `treemap`, `sunburst`, `geoshape` (`geo`), `link`, `polygon`, `path`, `vector`, `sankey`, `chord`, `tree`, `pack`, `force_graph`, `funnel`, `gauge`, `liquid`, `density`; `point` also supports `beeswarm: true`; an unknown type draws points. Style attributes: `color`, `opacity`, `fill`, `stroke`, `stroke_width`, `stroke_dash`, `interpolate`, `point`, `corner_radius`, `inner_radius`, `outer_radius`, `pad_angle`, `size`, `shape`, `font_size`, `font_family`, `font_weight`, `clip` |
+| `<encoding>` | One child per channel: `<x>`, `<y>`, `<x2>`, `<y2>`, `<color>`, `<size>`, `<opacity>`, `<theta>`, `<theta2>`, `<radius>`, `<radius2>`, `<longitude>`, `<latitude>`, `<text>`, `<stroke>`, `<x_offset>`, `<detail>`, `<tooltip>`, `<shape>`, `<order>`, `<url>`, `<position>`, `<key>`, `<group_key>`, `<path>`, `<direction>`, `<magnitude>`, and phase timing channels such as `<update_duration>`. Each takes `field`, `dtype` (`quantitative`, `nominal`, `ordinal` or `temporal`; `geojson` for a shape field), `value`, `datum`, `title`, `aggregate`, `bin`, `time_unit`, `stack`, `stack_order`, `sort`, `zero`, `scale`, `axis`, `legend`, `format` and `condition` |
+| `<coordinate>` | `type`: `cartesian`, `polar`, `theta`, `radial`, `parallel`, `radar`, `helix`, or `geo`; normalized radii, angular bounds, and an ordered `transform` array |
+| `<interaction>` | Named behavior children such as `<element_select param: "picked">`; false disables inherited behaviors |
+| `<timeline>` | `<keyframe at: ..., spec: ...>` children; `autoplay`, `duration`, `repeat`, `direction`, and `fill` |
 | `<params>` | `<param name: ...>` declarations, or supply a chart `params` array; variables, point/interval selections, and bindings |
 | `<transform>` | Ordered `filter`, `sort`, `aggregate`, `joinaggregate`, `calculate`, `bin`, `timeunit`, `fold`, `flatten`, `pivot`, `impute`, `stack`, `quantile`, `window`, `lookup`, `density`, `regression`, and `loess` steps; analytical options are described below |
 | `<config>` | `theme`: `light`, `dark`, `minimal`, `presentation`, or a custom map; nested `mark`/mark-type/`axis`/`legend` settings or equivalent prefixed attributes; `font`; `axis_grid: true` for horizontal grids |
@@ -232,6 +236,27 @@ svg.width                // 400, the default width
 | `<annotation>` | `<text_note x, y, text, color, font_size, anchor, dx, dy>`, `<rule_note x or y, color, stroke_width, stroke_dash>`, and `<region_note x, x2, y, y2, color, opacity, text>` children |
 | `<hconcat>`, `<vconcat>` | `spacing` (default 20); `<chart>` children placed side by side or stacked |
 | `<repeat>` | A `<row [fields]>` and/or `<column [fields]>` child plus one `<chart>` template whose channels say `field: {repeat: "row"}` or `field: {repeat: "column"}` |
+
+The native map grammar additionally accepts `mark: {kind: "composite", expand:
+factory, parts: {...}}`. A pure factory returns a finite layer composition;
+named parts share encodings, visual states, behaviors, and animation.
+`interaction` presets compile into ordinary chart parameters. `state` supplies
+default, active/inactive, and selected/unselected styles. `animate` supplies
+keyed enter/update/exit transitions and ordered group timing. `timeline`
+provides keyframe views with play, pause, resume, seek, reverse, and cancel
+commands. Live clocks and selection stores belong to the chart view template;
+handlers receive `chart_interaction`, `chart_change`, and `chart_animation`
+notifications (S9.1.4, S12.1.3). Pass `{reduced_motion: true}` as the third
+argument of `model`/`interactive` for immediate target presentation.
+
+See the [consolidated chart design](../vibe/Lambda_Pkg_Chart.md) for graph input,
+coordinate compatibility, behavior options, derived density records, and
+animation identity/fallback contracts. The
+[chart dashboard](../test/lambda/chart/chart_dashboard.ls) showcases the chart
+families, coordinate modes, wordcloud, visual states, and frozen transitions.
+The [live gallery](../test/lambda/chart/_interactive_gallery.ls) demonstrates
+related graph selection, polar/field-axis brushing, geographic navigation,
+and chart-local playback controls.
 
 A `violin` mark mirrors a category's estimated density; `density_field`
 accepts precomputed densities. A `slope` mark connects each detail entity's
@@ -689,9 +714,9 @@ lambda render arch.dsl -o containers.svg --view-key Containers   # one Structuri
 ## 6. `math` — Math Typesetting
 
 The math package typesets a parsed math tree as self-contained inline SVG,
-using the selected font's glyph outlines and optional OpenType MATH data. The default reuses
+using SVG text with the selected font and optional OpenType MATH data (**RAD07-L3**). The default reuses
 bundled CMU Serif and the existing small KaTeX symbol/alphabet faces; geometry
-has no dependency on `metrics_data.mark`. No new font asset is distributed.
+comes directly from those fonts. No new font asset is distributed.
 [Math_Support.md §2](Math_Support.md#2-rendering-math-to-html) documents the API.
 
 ```lambda
@@ -700,7 +725,7 @@ import math: lambda.doc.math.math
 let ast = parse("\\sqrt{x^2 + 1}", 'math')^
 let el = math.render_display(ast)
 el.class                              // "lambda-math"
-contains(format(el, 'html'), "<path") // true
+contains(format(el, 'html'), "<text") // true
 ```
 
 | Function | Description |
@@ -711,27 +736,30 @@ contains(format(el, 'html'), "<path") // true
 | `render_inline(ast)` | Inline (text) style |
 | `render_display(ast)` | Display (block) style |
 | `render_standalone(ast)` | Self-contained display style SVG |
-| `stylesheet(options = null)` | Returns `""`; outlined math requires no external font CSS |
+| `stylesheet(options = null)` | Returns `""`; each SVG embeds its required font declarations |
 
 `fonts` uses the same binary face records as Radiant's metrics API. An explicit
 `font_family` without `fonts` uses installed fonts. MATH is optional: ordinary
 fonts use their measured geometry and MathML Core fallback layout constants;
 italic/bold letters resolve the corresponding ordinary style faces when the
 Unicode math alphabet is absent. Symbols missing from the face use normal
-font fallback, measuring and emitting the resolved glyph's own outline.
+font fallback, retaining the resolved face and style in SVG text. Bundled and
+supplied font bytes are embedded as `@font-face` rules for the faces actually
+used. Unencoded OpenType stretch variants and assembly parts retain paths;
+rules remain rectangles. Explicit installed fonts must also be available to
+the viewer.
 `radiant.math_metrics(font, codepoints, faces)` exposes copied glyph
 metrics/outlines and normal `font_metrics` for every usable face. `has_math`
 reports table availability; `constants` is `null` when absent. When available,
 it additionally exposes MATH constants, italic corrections, accent attachments,
 corner kerns, variants and assembly connectors. `font.fallback: true` enables
-codepoint fallback (off by default), and each glyph reports its actual family.
+codepoint fallback (off by default), and each glyph reports its actual family, weight, style and size.
 Invalid font data returns `null`; a codepoint with no glyph returns a null entry.
 Distances use the requested CSS pixel size; MATH percentages remain percentages.
 Algorithms stay in Lambda and font parsing stays in `lib/font` (**D7.1.1**).
 
-The explicit `lambda.doc.math.mathlive` import retains the previous HTML/CSS
-renderer for font-specific compatibility fixtures. Its `metrics_data` dependency
-is isolated from the production entry point.
+The legacy `lambda.doc.math.mathlive` renderer and its fixed metrics tables
+have been removed; use `lambda.doc.math.math`.
 
 `lambda view`, `lambda layout` and `lambda render` typeset the `$…$` and `$$…$$` math of Markdown documents through this package, and the `latex` package uses it for the math inside LaTeX documents.
 
@@ -774,7 +802,7 @@ name(page)                               // 'html'
 | `render_file_to_html(path)` | Parses a LaTeX file and returns an HTML string |
 | `render_string(source)`, `render_string_to_html(source)` | Meant to render LaTeX source text; see the note below |
 
-`options` may be `null`. `standalone` selects a complete page; `base_uri` resolves relative graphics and bibliography resources; `target: "pdf"` or `target: "svg"` enables output-specific diagnostics. The file entry points derive `base_uri` from the file path. Parsed-document CLI transforms receive a neutral `source_path` option from the host, which the LaTeX package uses as the resource base when `base_uri` is absent (**D7.1.2v2**). The document class comes from `\documentclass` in the source. On the command line, `lambda convert paper.tex -t html -o paper.html` writes the rendered body without the LaTeX stylesheets, `--full-document` writes the standalone page instead, and the legacy `--font-option` switch does not change outlined math; `lambda view`, `layout` and `render` always render the standalone page.
+`options` may be `null`. `standalone` selects a complete page; `base_uri` resolves relative graphics and bibliography resources; `target: "pdf"` or `target: "svg"` enables output-specific diagnostics. The file entry points derive `base_uri` from the file path. Parsed-document CLI transforms receive a neutral `source_path` option from the host, which the LaTeX package uses as the resource base when `base_uri` is absent (**D7.1.2v2**). The document class comes from `\documentclass` in the source. On the command line, `lambda convert paper.tex -t html -o paper.html` writes the rendered body without the LaTeX stylesheets, `--full-document` writes the standalone page instead, and the legacy `--font-option` switch does not change the math package's font selection; `lambda view`, `layout` and `render` always render the standalone page.
 
 `render_string` and `render_string_to_html` parse source text directly. For resources referenced from a source string, parse it and call `render` or `render_result` with an explicit `base_uri`.
 
@@ -811,12 +839,16 @@ pn main() {
 |----------|-------------|
 | `pdf_to_svg(pdf, page_index, opts)` | Renders one page (0-based) as an `<svg>` element; a missing page renders a placeholder |
 | `pdf_to_html(pdf, opts)` | Renders the document as an `<html>` element whose body holds one `<div class: "pdf-page">` per page |
+| `pdf_to_document(pdf, opts)` | Configured native loader entry point: selects fixed pages when `opts.paged` is `true`, otherwise continuous HTML; returns an error on failed paged intake |
+| `pdf_to_fixed_pages(pdf, opts)` | Returns native `r:fixed-pages` with HTML/SVG image content, source geometry and complete/ranged imports; returns an error for unsupported geometry/resources or exhausted page budgets |
 | `pdf_page_count(pdf)` | The number of pages |
 | `pdf_metadata(pdf)` | The document information dictionary (`Title`, `Author`, `Subject`, `Keywords`, `Creator`, `Producer`, `CreationDate`, `ModDate`) as a map, best effort |
 
+Fixed intake accepts `import_pages` (`"all"` or positive source ordinals/ranges such as `"2,49-53"`) and `max_pages` (a positive admitted-page budget, default 10,000). It validates original media/crop/bleed/trim/art boxes and signed quarter-turn rotation, retains the original one-based source ordinal, and embeds self-contained SVG vector resources. Native commands use `lambda view file.pdf --paged` and `lambda render file.pdf --paged -o result.pdf`; `--import-pages` and `--import-page-limit` select source pages and set the import budget. Preview `--pages` and output `--export-pages` address the resulting physical sequence independently. Failed imports preserve an existing output file. This adapter uses the configured package bridge under **D7.5.3**, dependency policy under **D7.1.2v2**, and the common selected-page lifetime under **D4.5.1v4 / D4.1.4v5**. Reversed/empty boxes, non-default `UserUnit` and unresolved image/form handles currently receive explicit profile errors. PDF page-label number trees retain decimal/Roman/repeated-letter styles, prefixes, starts, Unicode and empty labels through source selection and PDF export. Invalid label trees fail paged intake. Text selection and complete content-stream conformance remain outstanding.
+
 `opts` may be `null`. Options: `title` (the HTML title, default `"PDF Document"`), `css` (replaces the default page stylesheet), `background` (the page colour, default `"white"`), `show_label` (draws a "Page n" label on each page), `max_pages` (how many pages `pdf_to_html` renders, default 48), and `id_prefix` (the generated SVG resource namespace, default `"pdf"`; use distinct prefixes when embedding multiple PDFs in one DOM tree). Each page extends this namespace with its zero-based page index, so its clipping paths, patterns and shading resources cannot collide with other pages' definitions.
 
-> **Experimental.** Rendering fidelity varies from file to file. `lambda view`, `lambda layout` and `lambda render` pass no options, so they show at most the first 48 pages of a document.
+> **Experimental.** Rendering fidelity varies from file to file. Continuous PDF presentation shows at most 48 pages by default; `view --paged` and `render --paged` use complete or explicitly ranged fixed-page intake.
 
 ---
 

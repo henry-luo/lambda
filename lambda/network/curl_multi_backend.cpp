@@ -294,9 +294,9 @@ static bool configure_transfer(CurlMultiTransfer* transfer) {
     curl_easy_setopt(easy, CURLOPT_PRIVATE, transfer);
 
     CookieJar* jar = (res->manager) ? res->manager->cookie_jar : NULL;
+    cookie_jar_import_curl(jar, easy);
     if (jar) {
         // Curl's cookie engine computes a fresh domain/path match per redirect.
-        cookie_jar_import_curl(jar, easy);
         transfer->header_ctx =
             (HeaderCallbackCtx*)mem_calloc(1, sizeof(HeaderCallbackCtx), MEM_CAT_NETWORK);
         if (transfer->header_ctx) {

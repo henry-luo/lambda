@@ -180,6 +180,8 @@ static PdfCsReadResult pdf_cs_read_lit_string(MarkBuilder& builder, const char* 
             else if (esc == 't') strbuf_append_char(buf, '\t');
             else if (esc == 'b') strbuf_append_char(buf, '\b');
             else if (esc == 'f') strbuf_append_char(buf, '\f');
+            else if (esc == '\r') { if (q < end && *q == '\n') q++; }
+            else if (esc == '\n') { /* escaped physical line ends contribute no byte */ }
             else strbuf_append_char(buf, esc);
         }
         else if (c == '(') {
@@ -538,8 +540,15 @@ static String* parse_pdf_string(InputContext& ctx, const char **pdf) {
                         case ')': stringbuf_append_char(sb, ')'); break;
                         case '\\': stringbuf_append_char(sb, '\\'); break;
                         case '\n': /* ignore escaped newline */ break;
-                        case '\r': /* ignore escaped carriage return */ break;
-                        default: stringbuf_append_char(sb, **pdf); break;
+                        case '\r': if (*pdf + 1 < ctx.source_end() && (*pdf)[1] == '\n') (*pdf)++; break;
+                        default:
+                            if (pdf_cs_is_octal(**pdf)) {
+                                // Dictionary and content strings share the bounded octal escape reader.
+                                char first = *(*pdf)++;
+                                stringbuf_append_char(sb, pdf_cs_octal_char(pdf, ctx.source_end(), first));
+                                (*pdf)--;
+                            } else stringbuf_append_char(sb, **pdf);
+                            break;
                     }
                     (*pdf)++;
                     char_count++;

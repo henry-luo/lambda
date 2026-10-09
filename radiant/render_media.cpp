@@ -46,6 +46,16 @@ static float render_media_object_position_offset(float box_size, float rendered_
     return position * scale;
 }
 
+Rect render_media_positioned_rect(const EmbedProp* embed, Rect viewport, float width, float height, float scale) {
+    bool set = embed && embed->object_position_set;
+    float x = set ? embed->object_position_x : 50.0f;
+    float y = set ? embed->object_position_y : 50.0f;
+    return {viewport.x + render_media_object_position_offset(viewport.width, width, x,
+                !set || embed->object_position_x_is_percent, scale),
+            viewport.y + render_media_object_position_offset(viewport.height, height, y,
+                !set || embed->object_position_y_is_percent, scale), width, height};
+}
+
 bool render_media_rasterize_svg_picture(ImageSurface* surface, int target_width,
                                         int target_height) {
     if (!surface || !surface->pic || target_width <= 0 || target_height <= 0) {
@@ -117,22 +127,7 @@ Rect render_media_object_rect(const EmbedProp* embed, ImageSurface* img, Rect re
         } else if (object_fit != CSS_VALUE_NONE) {
             return rect;
         }
-        float pos_x = 50.0f;
-        float pos_y = 50.0f;
-        bool pos_x_is_percent = true;
-        bool pos_y_is_percent = true;
-        if (embed->object_position_set) {
-            pos_x = embed->object_position_x;
-            pos_y = embed->object_position_y;
-            pos_x_is_percent = embed->object_position_x_is_percent;
-            pos_y_is_percent = embed->object_position_y_is_percent;
-        }
-        img_rect.x = rect.x + render_media_object_position_offset(
-            box_w, rendered_w, pos_x, pos_x_is_percent, s);
-        img_rect.y = rect.y + render_media_object_position_offset(
-            box_h, rendered_h, pos_y, pos_y_is_percent, s);
-        img_rect.width = rendered_w;
-        img_rect.height = rendered_h;
+        img_rect = render_media_positioned_rect(embed, rect, rendered_w, rendered_h, s);
     }
     return img_rect;
 }
@@ -180,19 +175,21 @@ bool render_media_paint_svg_picture(PaintList* paint, UiContext* ui, ViewBlock* 
 
 bool render_paint_image_box(PaintList* paint, const PaintImageBox* box) {
     if (!paint || !box || !box->image) return false;
-    if (box->content_rect.width <= 0.0f || box->content_rect.height <= 0.0f) return true;
+    if (!box->overflow_visible && (box->content_rect.width <= 0.0f || box->content_rect.height <= 0.0f)) return true;
     if (box->image->format == IMAGE_FORMAT_SVG) {
         return render_media_paint_svg_image(paint, box->image, box->image_rect,
-            &box->content_rect, box->raster_scale, box->fonts, nullptr, box->opacity);
+            box->overflow_visible ? &box->image_rect : &box->content_rect, box->raster_scale, box->fonts, nullptr, box->opacity);
     }
-    RdtPath* clip = rdt_path_new();
-    if (!clip) return false;
-    rdt_path_add_rect(clip, box->content_rect.x, box->content_rect.y,
-        box->content_rect.width, box->content_rect.height, 0.0f, 0.0f);
-    paint_push_clip(paint, clip, nullptr); rdt_path_free(clip);
+    if (!box->overflow_visible) {
+        RdtPath* clip = rdt_path_new();
+        if (!clip) return false;
+        rdt_path_add_rect(clip, box->content_rect.x, box->content_rect.y,
+            box->content_rect.width, box->content_rect.height, 0.0f, 0.0f);
+        paint_push_clip(paint, clip, nullptr); rdt_path_free(clip);
+    }
     paint_draw_image_resource(paint, box->image, box->image_rect.x, box->image_rect.y,
         box->image_rect.width, box->image_rect.height, box->opacity, nullptr);
-    paint_pop_clip(paint);
+    if (!box->overflow_visible) paint_pop_clip(paint);
     return true;
 }
 
@@ -237,27 +234,16 @@ static void render_image_content(RasterRenderContext* rdcon, ViewBlock* view) {
     } else {
         ScaleMode image_scale_mode = render_image_scale_mode(view, false);
         // ensure raster image pixels are decoded (lazy loading) at the displayed size
-        if (image_scale_mode == SCALE_MODE_NEAREST ||
+        if (rdcon->has_transform || rdcon->css3d_context || image_scale_mode == SCALE_MODE_NEAREST ||
             image_scale_mode == SCALE_MODE_PIXELATED) {
             // Pixel-preserving sampling needs source pixels even when shrinking.
             image_surface_ensure_decoded(img, img->width, img->height);
         } else {
             image_surface_ensure_decoded(img, (int)img_rect.width, (int)img_rect.height); // INT_CAST_OK: image decoder target dimensions are integer pixels
         }
-        if (rdcon->has_transform) {
-            // scaled image decodes may replace pixels with a smaller buffer;
-            // display-list image commands store decoded dimensions and uint32_t row stride.
-            int src_w = img->decoded_width > 0 ? img->decoded_width : img->width;
-            int src_h = img->decoded_height > 0 ? img->decoded_height : img->height;
-            render_painter_draw_pixels_rect(rdcon, (uint32_t*)img->pixels,
-                                            src_w, src_h, img->pitch / 4,
-                                            &img_rect, &image_clip,
-                                            content_opacity, img);
-        } else {
-            render_painter_blit_surface_scaled(rdcon, img, NULL, rdcon->ui_context->surface,
-                &img_rect, &image_clip, image_scale_mode,
-                rdcon->clip_shapes, rdcon->clip_shape_depth, content_opacity);
-        }
+        render_painter_blit_surface_scaled(rdcon, img, NULL, rdcon->ui_context->surface,
+            &img_rect, &image_clip, image_scale_mode,
+            rdcon->clip_shapes, rdcon->clip_shape_depth, content_opacity);
     }
     if (pushed_content_clip) {
         rc_pop_clip(rdcon);

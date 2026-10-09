@@ -1,0 +1,1 @@
+{ complete: true, source_order: true, native: true, rotation: true, source_label: true, label_error: true, boxes: true, vector_resource: true, budget: true, selected_budget: true, range: true, empty: true, malformed_box: true, invalid_rotation: true, user_unit: true}

@@ -1,0 +1,33 @@
+<?xml version="1.0"?>
+<r:page-document r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" r:line-stacking-strategy="max-height" xmlns:r="urn:lambda:radiant:page" style="margin:0; font-family:Arial; font-size:7.5pt; line-height:15pt; color:black; white-space:normal">
+  <r:master-set r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics">
+    <r:sequence-master r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" name="chapter">
+      <r:master-run r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" maximum-repeats="0"><r:master-rule r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" master-reference="normal"/></r:master-run>
+      <r:master-run r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics">
+        <r:master-rule r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" master-reference="blank" page-position="last" blank-or-not-blank="blank"/>
+        <r:master-rule r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" master-reference="last" page-position="last" blank-or-not-blank="not-blank"/>
+        <r:master-rule r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" master-reference="normal"/>
+      </r:master-run>
+    </r:sequence-master>
+    <r:page-master r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" name="normal" style="size:150pt 60pt; margin:7.5pt">
+      <r:region r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" role="body" name="main" style="background-color:#e8f0ff; overflow:hidden"/>
+    </r:page-master>
+    <r:page-master r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" name="last" style="size:60pt 60pt; margin:7.5pt">
+      <r:region r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" role="body" name="main" style="background-color:#e8ffe8; overflow:hidden"/>
+    </r:page-master>
+    <r:page-master r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" name="blank" style="size:165pt 60pt; margin:7.5pt"><r:region r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" role="body" name="main" style="overflow:hidden"/></r:page-master>
+  </r:master-set>
+  <r:page-sequence r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" master-reference="chapter" initial-page-number="1" force-page-count="no-force">
+    <r:flow r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" region-name="main">
+      <div r:block-inline-geometry="reference" r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics">Alpha Beta Gamma Delta</div>
+      <div r:block-inline-geometry="reference" r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics">Alpha Beta Gamma Delta</div>
+      <div r:block-inline-geometry="reference" r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics">Alpha Beta Gamma Delta</div>
+      <div r:block-inline-geometry="reference" r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics">Alpha Beta Gamma Delta</div>
+      <div r:block-inline-geometry="reference" r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics">Alpha Beta Gamma Delta</div>
+      <div r:block-inline-geometry="reference" r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics">Alpha Beta Gamma Delta</div>
+    </r:flow>
+  </r:page-sequence>
+  <r:page-sequence r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" master-reference="chapter" initial-page-number="8" force-page-count="even">
+    <r:flow r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" region-name="main"><div r:block-inline-geometry="reference" r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics">Reset folio</div></r:flow>
+  </r:page-sequence>
+</r:page-document>

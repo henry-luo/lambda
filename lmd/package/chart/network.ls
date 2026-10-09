@@ -55,8 +55,10 @@ fn sankey(graph, width, height, options) {
         max(0.0, height - gap * (len(indices) - 1)) / total];
     let unit = if (len(ratios) > 0) min(ratios) else 0.0;
     if (ranks is error) ranks
+    else if (not all(weights |> util.finite_number(~))) error("chart: Sankey weights overflow")
     else if (not util.finite_number(node_width) or node_width <= 0 or node_width > width or
-        not util.finite_number(gap) or gap < 0) error("chart: invalid Sankey node dimensions")
+        not util.finite_number(gap) or gap < 0 or any([for (rank in stages) (len(ranks |: ~==rank)-1)*gap>height]))
+        error("chart: invalid Sankey node dimensions")
     else {
         let nodes = [for (i, node in graph.nodes,
             let peers = [for (j, r in ranks where r == ranks[i]) j],
@@ -84,7 +86,12 @@ fn force_step(graph, nodes, width, height, options, remaining, total) {
         let temperature = min(width, height) * 0.1 * float(remaining) / float(total);
         let next = [for (i, node in nodes,
             let repulsion = [for (j, other in nodes where i != j,
-                let dx = node.x - other.x, let dy = node.y - other.y,
+                let coincident=node.x==other.x and node.y==other.y,
+                // antisymmetric index directions separate coincident nodes without ambient randomness.
+                let angle=util.TAU*float((i+1)*(j+1)%max(1,len(nodes)))/float(max(1,len(nodes))),
+                let sign=if (i<j) -1.0 else 1.0,
+                let dx = if (coincident) sign*math.cos(angle) else node.x - other.x,
+                let dy = if (coincident) sign*math.sin(angle) else node.y - other.y,
                 let squared = max(0.01, dx * dx + dy * dy)) [dx * k * k / squared, dy * k * k / squared]],
             let attraction = [for (edge in graph.links where edge.source == i or edge.target == i,
                 let other = nodes[if (edge.source == i) edge.target else edge.source],
@@ -104,11 +111,12 @@ fn force(graph, width, height, options) {
     let iterations = if (options.iterations != null) options.iterations else 100;
     let seed = if (options.seed != null) options.seed else 1;
     let invalid = util.first_error([
-        if (not util.finite_number(seed) or floor(seed) != seed) error("chart: force seed must be a finite integer"),
+        if (not util.finite_number(seed) or floor(seed) != seed or abs(seed)>2147483646) error("chart: force seed must be an integer within ±2147483646"),
         if (not util.finite_number(iterations) or floor(iterations) != iterations or iterations < 0)
             error("chart: force iterations must be a nonnegative integer"),
         for (node in graph.nodes) for (field in ["x", "y", "fx", "fy"])
-            if (node.row[field] != null and not util.finite_number(node.row[field])) error("chart: force positions must be finite")]);
+            if (node.row[field] != null and (not util.finite_number(node.row[field]) or node.row[field]<0 or
+                node.row[field]>(if (field=="x" or field=="fx") width else height))) error("chart: force positions must be finite and inside the viewport")]);
     if (invalid is error) invalid else {
         let samples = randoms(1 + int(abs(seed)) % 2147483646, len(graph.nodes) * 2);
         let nodes = [for (i, node in graph.nodes) {*:node,
@@ -124,7 +132,8 @@ fn chord(graph, width, height, options) {
         where link.source == node.index or link.target == node.index) link.value *
             (if (link.source == link.target) 2.0 else 1.0)])];
     let total = sum(weights);
-    if (not util.finite_number(gap) or gap < 0 or gap * len(weights) >= util.TAU)
+    if (not util.finite_number(total)) error("chart: chord weights overflow")
+    else if (not util.finite_number(gap) or gap < 0 or gap * len(weights) >= util.TAU)
         error("chart: chord padding must leave positive angular space")
     else {
         let unit = if (total > 0) (util.TAU - gap * len(weights)) / total else 0.0;
@@ -152,10 +161,6 @@ pub fn layout(data, width, height, options = {}) {
     else force(graph, width, height, options)
 }
 
-fn part_context(ctx, options, part) => {*:ctx,
-    encoding: {*:ctx.encoding, *:parse.attributes(options.parts[part].encoding)}, _part: part}
-fn part_options(options, part) => {*:options, *:parse.attributes(options.parts[part])}
-
 fn ribbon(link) {
     let mid = (link.x1 + link.x2) / 2.0;
     svg.M(link.x1, link.y1) ++ " " ++ svg.C(mid, link.y1, mid, link.y2, link.x2, link.y2) ++ " " ++
@@ -175,12 +180,15 @@ fn chord_ribbon(link, radius) {
 
 pub fn render(data, ctx, options) {
     let graph = layout(data, ctx.plot_w, ctx.plot_h, options);
-    let nc = part_context(ctx, options, "node"); let lc = part_context(ctx, options, "link");
-    let no = part_options(options, "node"); let lo = part_options(options, "link");
+    let nc = mark.part_context(ctx, options, "node", graph.nodes |> ~.row);
+    let lc = mark.part_context(ctx, options, "link", graph.links |> ~.row);
+    let label_ctx = mark.part_context(ctx, options, "label", graph.nodes |> ~.row);
+    let no = mark.part_options(options, "node"); let lo = mark.part_options(options, "link");
     let radius = min(ctx.plot_w, ctx.plot_h) / 2.0 - 12.0;
-    if (graph is error) graph else svg.group_class("marks " ++ options.kind, [
+    let invalid=util.first_error([graph,mark.part_error([nc,lc,label_ctx])]);
+    if (invalid is error) invalid else svg.group_class("marks " ++ options.kind, [
         <g class: "links", transform: if (options.kind == "chord") svg.translate(ctx.plot_w / 2.0, ctx.plot_h / 2.0) else null,
-            for (edge in graph.links,
+            for (edge in graph.links where mark.part_selected(lc,edge.row),
                 let a = graph.nodes[edge.source], let b = graph.nodes[edge.target],
                 let linear = options.kind == "force_graph",
                 let appearance = mark.style(lc, edge.row, lo,
@@ -191,12 +199,13 @@ pub fn render(data, ctx, options) {
         for (i, node in graph.nodes,
             let appearance = mark.style(nc, node.row, no, {fill: color.category10[i % 10], stroke: "white", 'stroke-width': 1, opacity: 1.0}))
             <g class: "graph-node", 'data-node': string(node.id),
-                if (options.kind == "sankey") <rect x: node.x, y: node.y, width: node.width, height: node.height, *:appearance, mark.tooltip(nc, node.row)>
-                else if (options.kind == "chord") <path d: svg.arc_path(ctx.plot_w / 2.0, ctx.plot_h / 2.0,
+                if (options.kind == "sankey" and mark.part_selected(nc,node.row)) <rect x: node.x, y: node.y, width: node.width, height: node.height, *:appearance, mark.tooltip(nc, node.row)>
+                else if (options.kind == "chord" and mark.part_selected(nc,node.row)) <path d: svg.arc_path(ctx.plot_w / 2.0, ctx.plot_h / 2.0,
                     radius, radius + 10.0, node.start - util.PI / 2.0, node.end - util.PI / 2.0), *:appearance, mark.tooltip(nc, node.row)>
-                else <circle cx: node.x, cy: node.y, r: math.sqrt(max(0.0, mark.appearance(nc, "size", node.row, 80.0)) / util.PI),
+                else if (options.kind=="force_graph" and mark.part_selected(nc,node.row)) <circle cx: node.x, cy: node.y, r: math.sqrt(max(0.0, mark.appearance(nc, "size", node.row, 80.0)) / util.PI),
                     *:appearance, mark.tooltip(nc, node.row)>
-                if (options.labels != false and options.kind != "chord") <text x: node.x + (if (options.kind == "sankey") node.width + 4 else 7),
+                if (options.labels != false and options.kind != "chord" and mark.part_selected(label_ctx,node.row)) <text x: node.x + (if (options.kind == "sankey") node.width + 4 else 7),
                     y: node.y + (if (options.kind == "sankey") node.height / 2.0 else 0.0), 'dominant-baseline': "middle",
-                    'font-size': 11, fill: "#222", string(node.row[if (options.label_field != null) options.label_field else if (options.node_field != null) options.node_field else "id"])>>])
+                    'font-size': 11, *:mark.style(label_ctx, node.row, mark.part_options(options, "label"), {fill: "#222", opacity: 1.0}),
+                    string(node.row[if (options.label_field != null) options.label_field else if (options.node_field != null) options.node_field else "id"])>>])
 }

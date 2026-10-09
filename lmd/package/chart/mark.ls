@@ -12,6 +12,30 @@ import records: .records
 import paint: .paint
 import statistics: .statistics
 import parameter: .parameter
+import behavior: .behavior
+import animation: .animation
+
+pub fn part_options(options, part) => {*:options, *:parse.attributes(options.parts[part]), parts: null}
+pub fn part_context(ctx, options, part, data) {
+    let compiled = ctx._parts[part];
+    let own = options.parts[part];
+    let encoding = parameter.encoding({*:ctx.encoding, *:parse.attributes(own.encoding)}, ctx._parameter_values,
+        ctx._parameters, ctx._parameter_state, ctx._view_path, ctx._interactive == true);
+    let animate=animation.merge(ctx._animate,own.animate);
+    let part_spec={_all_behaviors:if (compiled!=null) compiled._behaviors else ctx._behaviors,
+        _behavior_scope:compiled._behavior_scope,_parameter_state:ctx._parameter_state,_view_path:ctx._view_path};
+    let filtered=behavior.filter_data(part_spec,data);
+    let scales=map([for (key in ["color", "stroke", "size", "opacity", "shape"])
+        for (value in [key ++ "_scale", scale.visual_mapping(key, encoding[key], if (behavior.retain_domains(part_spec)) data else filtered)]) value]);
+    {*:ctx, data: filtered, encoding: encoding, _part: part, _part_filter:part_spec,
+        _behaviors: if (compiled != null) compiled._behaviors else ctx._behaviors,
+        _tooltip_disabled: if (compiled != null) compiled._tooltip_disabled else ctx._tooltip_disabled,
+        _state_styles: behavior.merge(ctx._state_styles, own.state), _animate: animate, *:scales,
+        _error:util.first_error([for (key,value in scales) value,
+            animation.validate({data:data,encoding:encoding,animate:animate,_requires_key:ctx._requires_key,_parameter_values:ctx._parameter_values})])}
+}
+pub fn part_selected(ctx,row) => len(behavior.filter_data(ctx._part_filter,[row]))>0
+pub fn part_error(contexts) => util.first_error(contexts |> ~._error)
 
 pub fn coordinate(ctx, channel_name, row, fallback = null) float | null | error {
     let channel = parse.channel_definition(parse.get_channel(ctx.encoding, channel_name), row);
@@ -41,7 +65,9 @@ pub fn appearance(ctx, channel_name, row, fallback) {
 }
 
 pub fn tooltip(ctx, row) {
+    let custom = behavior.tooltip(ctx, row);
     let channel = ctx.encoding.tooltip;
+    if (custom == false) null else if (custom != null) <title custom> else {
     if (channel == null and ctx.tooltip_field != null) <title string(row[ctx.tooltip_field])>
     else if (channel == null) null
     else {
@@ -52,6 +78,7 @@ pub fn tooltip(ctx, row) {
                 util.format_value(parse.channel_value(field, row), field.format,
                     if (field._temporal) "temporal" else field.dtype, field.scale.timezone)], "\n")>
     }
+    }
 }
 
 // Composite parts use the same channel/mark cascade as primitive marks.
@@ -61,11 +88,14 @@ pub fn style(ctx, row, options, defaults, linear = false) {
     let stroke_fallback = if (options.stroke != null) options.stroke
         else if (linear) appearance(ctx, "color", row, if (options.color != null) options.color else defaults.stroke)
         else defaults.stroke;
-    cfg.settings({*:defaults, *:parameter.target_attributes(ctx, row), fill: paint.value(fill, ctx._paints),
+    let states=map([for (key,value in behavior.styles(ctx,row,options)) for (part in [string(key),
+        if (contains(["fill","stroke"],string(key))) paint.value(value,ctx._paints) else value]) part]);
+    cfg.settings({*:defaults, *:parameter.target_attributes(ctx, row), *:animation.attributes(ctx, row, options),
+        *:(if (len(states) > 0) {'data-chart-state': format(states, 'json')} else {}), fill: paint.value(fill, ctx._paints),
         opacity: appearance(ctx, "opacity", row, if (options.opacity != null) options.opacity else defaults.opacity),
         stroke: paint.value(appearance(ctx, "stroke", row, stroke_fallback), ctx._paints),
         'stroke-width': if (options.stroke_width != null) options.stroke_width else defaults["stroke-width"],
-        'stroke-dasharray': if (options.stroke_dash != null) options.stroke_dash else defaults["stroke-dasharray"]})
+        'stroke-dasharray': if (options.stroke_dash != null) options.stroke_dash else defaults["stroke-dasharray"], *:states})
 }
 
 pub fn series(data, ctx, fallback) {

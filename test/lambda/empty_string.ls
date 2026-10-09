@@ -46,6 +46,6 @@ parsed.name is string
 len(parsed.name)
 
 '=== string pattern ==='
-type zero_or_more_a = "a"*
+type zero_or_more_a = \("a"*)
 empty is zero_or_more_a
 "aaa" is zero_or_more_a

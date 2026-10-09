@@ -462,8 +462,10 @@ bool cookie_jar_flush(CookieJar* jar) {
 
 void cookie_jar_import_curl(CookieJar* jar, void* curl_handle) {
     CURL* curl = (CURL*)curl_handle;
-    if (!jar || !curl) return;
+    if (!curl) return;
+    // redirects need request-owned cookies even without a persistent session jar.
     curl_easy_setopt(curl, CURLOPT_COOKIEFILE, "");
+    if (!jar) return;
     pthread_mutex_lock(&jar->lock);
     if (jar->closing) {
         pthread_mutex_unlock(&jar->lock);

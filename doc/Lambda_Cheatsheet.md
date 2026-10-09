@@ -420,8 +420,8 @@ match value {
 }
 
 // String pattern arms (full-match semantics)
-type digits = \(d+)
-type alpha = \(a+)
+type digits = \("\d"+)
+type alpha = \("\a"+)
 match input {
     case digits: "number"     // case named pattern
     case alpha: "word"
@@ -491,14 +491,14 @@ Define named patterns for string and symbol validation and matching. Uses regex-
 
 | Form | Meaning |
 |---|---|
-| `type digits = \(d+)` | one or more digits |
-| `type email = \(w+ "@" w+ "." a{2,6})` | email-like |
-| `type ws = \(s+)` | whitespace |
+| `type digits = \("\d"+)` | one or more digits |
+| `type email = \("\w"+ "@" "\w"+ "." "\a"{2,6})` | email-like |
+| `type ws = \("\s"+)` | whitespace |
 | `type keyword = 'if' \| 'else' \| 'for'` | symbol literal union |
-| `type SymIdent = \symbol(a w*)` | symbol pattern |
+| `type SymIdent = \('\a' '\w'*)` | symbol pattern |
 
-`\(...)` matches strings, `\symbol(...)` matches symbols.
-Character classes inside `\(...)`: `d` digit, `w` word, `s` whitespace, `a` alpha, `.` any char, `...` any string.
+Both domains use `\(...)`: double quotes select strings, single quotes select symbols (S11.1.2v4).
+Quoted classes: `"\d"` digit, `"\w"` word, `"\s"` whitespace, `"\a"` alpha, with single-quoted symbol equivalents. Bare `.` and `...` inherit the island domain; wildcard-only islands are rejected.
 Negation: `!` matches one character outside a set of single characters.
 Quantifiers: `?`, `+`, `*`, `{n}`, `{n,m}`, `{n+}`.
 
@@ -510,9 +510,9 @@ Quantifiers: `?`, `+`, `*`, `{n}`, `{n,m}`, `{n+}`.
 | `"123" is digits` | true |
 | `'foo' is SymIdent` | `true` |
 | `"foo" is SymIdent` | `false` — string value, symbol pattern |
-| `"abc" is \(a+)` | `true` |
-| `fn f(x: \(d+)) => x` | Parameter annotation |
-| `match s { case \(d+): "num" default: "other" }` | Match arm |
+| `"abc" is \("\a"+)` | `true` |
+| `fn f(x: \("\d"+)) => x` | Parameter annotation |
+| `match s { case \("\d"+): "num" default: "other" }` | Match arm |
 
 ## Functions
 

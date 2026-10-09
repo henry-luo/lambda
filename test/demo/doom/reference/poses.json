@@ -1,0 +1,466 @@
+{
+  "viewport": {
+    "width": 660,
+    "height": 500,
+    "scale": 1
+  },
+  "poses": [
+    {
+      "name": "e1m1-start",
+      "map": "E1M1",
+      "skill": 1,
+      "time": 0,
+      "camera": "player",
+      "landmarks": [
+        {
+          "name": "near column",
+          "rect": [
+            122,
+            172,
+            16,
+            16
+          ],
+          "rgb_min": [
+            20,
+            15,
+            10
+          ],
+          "rgb_max": [
+            45,
+            40,
+            30
+          ],
+          "max_mean_channel_delta": 8
+        },
+        {
+          "name": "blue pool",
+          "rect": [
+            372,
+            220,
+            16,
+            16
+          ],
+          "rgb_min": [
+            0,
+            0,
+            40
+          ],
+          "rgb_max": [
+            3,
+            3,
+            75
+          ],
+          "max_mean_channel_delta": 8
+        },
+        {
+          "name": "foreground floor",
+          "rect": [
+            202,
+            292,
+            16,
+            16
+          ],
+          "rgb_min": [
+            8,
+            8,
+            8
+          ],
+          "rgb_max": [
+            20,
+            20,
+            20
+          ],
+          "max_mean_channel_delta": 8
+        },
+        {
+          "name": "opaque ceiling",
+          "rect": [
+            392,
+            92,
+            16,
+            16
+          ],
+          "rgb_min": [
+            10,
+            10,
+            10
+          ],
+          "rgb_max": [
+            20,
+            20,
+            20
+          ],
+          "max_mean_channel_delta": 8
+        }
+      ]
+    },
+    {
+      "name": "e1m1-follow",
+      "map": "E1M1",
+      "skill": 1,
+      "time": 0,
+      "camera": "follow",
+      "landmarks": [
+        {
+          "name": "player billboard",
+          "rect": [
+            324,
+            191,
+            16,
+            16
+          ],
+          "rgb_min": [
+            55,
+            90,
+            40
+          ],
+          "rgb_max": [
+            85,
+            125,
+            70
+          ],
+          "max_mean_channel_delta": 8
+        },
+        {
+          "name": "raised wall",
+          "rect": [
+            222,
+            218,
+            16,
+            16
+          ],
+          "rgb_min": [
+            25,
+            20,
+            15
+          ],
+          "rgb_max": [
+            45,
+            40,
+            35
+          ],
+          "max_mean_channel_delta": 8
+        },
+        {
+          "name": "outer void",
+          "rect": [
+            92,
+            292,
+            16,
+            16
+          ],
+          "rgb_min": [
+            25,
+            25,
+            57
+          ],
+          "rgb_max": [
+            27,
+            27,
+            59
+          ],
+          "max_mean_channel_delta": 8
+        }
+      ]
+    },
+    {
+      "name": "e1m1-top",
+      "map": "E1M1",
+      "skill": 1,
+      "time": 0,
+      "camera": "top",
+      "landmarks": [
+        {
+          "name": "sky texture",
+          "rect": [
+            92,
+            22,
+            16,
+            16
+          ],
+          "rgb_min": [
+            180,
+            180,
+            180
+          ],
+          "rgb_max": [
+            200,
+            200,
+            200
+          ],
+          "max_mean_channel_delta": 8
+        },
+        {
+          "name": "courtyard grass",
+          "rect": [
+            397,
+            252,
+            16,
+            16
+          ],
+          "rgb_min": [
+            15,
+            35,
+            8
+          ],
+          "rgb_max": [
+            30,
+            60,
+            22
+          ],
+          "max_mean_channel_delta": 8
+        },
+        {
+          "name": "courtyard floor",
+          "rect": [
+            442,
+            282,
+            16,
+            16
+          ],
+          "rgb_min": [
+            55,
+            40,
+            18
+          ],
+          "rgb_max": [
+            75,
+            60,
+            35
+          ],
+          "max_mean_channel_delta": 8
+        },
+        {
+          "name": "recessed pool",
+          "rect": [
+            307,
+            242,
+            16,
+            16
+          ],
+          "rgb_min": [
+            4,
+            4,
+            40
+          ],
+          "rgb_max": [
+            18,
+            18,
+            60
+          ],
+          "max_mean_channel_delta": 8
+        }
+      ]
+    },
+    {
+      "name": "e1m1-door-open",
+      "map": "E1M1",
+      "skill": 1,
+      "time": 1,
+      "camera": "player",
+      "player": {
+        "x": 1490,
+        "y": -2496,
+        "angle": -1.5707963267948966
+      },
+      "door": 4,
+      "landmarks": [
+        {
+          "name": "visible room through raised door",
+          "rect": [
+            252,
+            172,
+            16,
+            16
+          ],
+          "rgb_min": [
+            9,
+            9,
+            15
+          ],
+          "rgb_max": [
+            22,
+            22,
+            30
+          ],
+          "max_mean_channel_delta": 8
+        },
+        {
+          "name": "door passage floor",
+          "rect": [
+            322,
+            212,
+            16,
+            16
+          ],
+          "rgb_min": [
+            4,
+            4,
+            4
+          ],
+          "rgb_max": [
+            11,
+            11,
+            11
+          ],
+          "max_mean_channel_delta": 8
+        },
+        {
+          "name": "near wall",
+          "rect": [
+            92,
+            192,
+            16,
+            16
+          ],
+          "rgb_min": [
+            40,
+            40,
+            40
+          ],
+          "rgb_max": [
+            60,
+            60,
+            60
+          ],
+          "max_mean_channel_delta": 8
+        },
+        {
+          "name": "opposite wall",
+          "rect": [
+            492,
+            192,
+            16,
+            16
+          ],
+          "rgb_min": [
+            38,
+            38,
+            38
+          ],
+          "rgb_max": [
+            56,
+            56,
+            56
+          ],
+          "max_mean_channel_delta": 8
+        }
+      ]
+    },
+    {
+      "name": "e1m1-lift-lowered",
+      "map": "E1M1",
+      "skill": 1,
+      "time": 1,
+      "camera": "player",
+      "player": {
+        "x": 3472,
+        "y": -3872,
+        "angle": -1.5707963267948966
+      },
+      "lift": 70,
+      "landmarks": [
+        {
+          "name": "lift shaft wall",
+          "rect": [
+            122,
+            192,
+            16,
+            16
+          ],
+          "rgb_min": [
+            20,
+            20,
+            20
+          ],
+          "rgb_max": [
+            35,
+            35,
+            35
+          ],
+          "max_mean_channel_delta": 8
+        }
+      ]
+    },
+    {
+      "name": "e1m8-spectre",
+      "map": "E1M8",
+      "skill": 4,
+      "time": 0.6,
+      "camera": "player",
+      "player": {
+        "x": -128,
+        "y": 3100,
+        "angle": 0
+      },
+      "landmarks": [
+        {
+          "name": "lava floor",
+          "rect": [
+            492,
+            292,
+            16,
+            16
+          ],
+          "rgb_min": [
+            30,
+            0,
+            0
+          ],
+          "rgb_max": [
+            48,
+            2,
+            2
+          ],
+          "max_mean_channel_delta": 8
+        },
+        {
+          "name": "opaque room wall",
+          "rect": [
+            492,
+            172,
+            16,
+            16
+          ],
+          "rgb_min": [
+            15,
+            10,
+            5
+          ],
+          "rgb_max": [
+            30,
+            25,
+            16
+          ],
+          "max_mean_channel_delta": 8
+        },
+        {
+          "name": "filtered actor center",
+          "rect": [
+            322,
+            192,
+            16,
+            16
+          ],
+          "rgb_min": [
+            6,
+            4,
+            2
+          ],
+          "rgb_max": [
+            17,
+            14,
+            10
+          ],
+          "max_mean_channel_delta": 8
+        }
+      ],
+      "filtered_actor": {
+        "id": 77,
+        "selector": "#sprite-77",
+        "min_changed_pixels": 1000,
+        "min_peak_channel_change": 8
+      }
+    }
+  ]
+}

@@ -1,4 +1,5 @@
 #include "js_runtime_internal.hpp"
+#include "js_object_meta.h"
 #include "js_well_known_names.h"
 #include "js_exec_profile.h"
 #include "../runtime/lambda-error.h"
@@ -806,7 +807,7 @@ static void js_runtime_state_visit_root_vectors(JsRuntimeState* state,
     if (state->string_caches) {
         visit(state->string_caches,
             &state->string_caches->last_four_byte_escape,
-            662 + JS_ASCII_SUBSTRING_CACHE_CAPACITY,
+            662 + JS_ASCII_SUBSTRING_CACHE_CAPACITY + JS_UTF16_POSITION_CACHE_CAPACITY,
             "realm string caches", data);
     }
     if (state->test262_agent) {
@@ -1993,6 +1994,8 @@ extern "C" Item js_error_captureStackTrace(Item target, Item ctor) {
 
 extern "C" void js_runtime_set_input(void* input) {
     js_input = (Input*)input;
+    // Establish the explicit JS Input boundary before JSON/Mark construction.
+    if (js_input) js_empty_object_type_map();
     if (!js_execution_state_prepare(js_active_runtime_state,
             (EvalContext*)context)) {
         log_error("js-call-activation: failed to bind base roots to current heap");

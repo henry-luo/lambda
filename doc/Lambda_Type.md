@@ -794,8 +794,8 @@ null is (any ! null)       // false
 3.14 is (number ! float)   // false (float excluded)
 
 // Between whole string patterns: word strings that are not all digits
-"ab12" is (\(w+) ! \(d+))  // true
-"1234" is (\(w+) ! \(d+))  // false
+"ab12" is (\("\w"+) ! \("\d"+))  // true
+"1234" is (\("\w"+) ! \("\d"+))  // false
 
 // In match expressions
 fn classify(x) => match x {
@@ -997,11 +997,11 @@ type User2 {
 
 ## String Patterns
 
-String patterns are delimited type values that describe text: `\(...)` matches strings and `\symbol(...)` matches symbols, with character classes (`d`, `w`, `s`, `a`), quantifiers, ranges and alternation inside the delimiters. Like any type they work with `is`, `match`, annotations and the string functions `find`, `replace` and `split`:
+String and symbol patterns share `\(...)`; double quotes select strings and single quotes select symbols. Character classes are quoted escapes (`"\d"`, `"\w"`, `"\s"`, `"\a"` and their single-quoted counterparts), with quantifiers, ranges and alternation inside the delimiter (S11.1.2v4). Both domains work with `is`, `match` and annotations; string patterns also work with `find`, `replace` and `split`:
 
 ```lambda
-type Digits = \(d+)
-type Email = \(w+ "@" w+ "." a{2,6});
+type Digits = \("\d"+)
+type Email = \("\w"+ "@" "\w"+ "." "\a"{2,6});
 ["123" is Digits, "a@b.com" is Email, replace("a1b22", Digits, "#")]   // [true, true, "a#b#"]
 ```
 

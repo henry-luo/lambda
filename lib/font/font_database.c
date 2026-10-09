@@ -48,7 +48,7 @@
 // ============================================================================
 
 #define FONT_CACHE_MAGIC        0x4C464E54  // 'LFNT'
-#define FONT_CACHE_VERSION      1
+#define FONT_CACHE_VERSION      2
 #define MAX_FONT_FAMILY_NAME    256
 #define MAX_FONT_FILE_PATH      1024
 #define FONT_MATCH_SCORE_THRESHOLD 0.1f
@@ -62,6 +62,7 @@
 // Name ID constants
 #define NAME_ID_FAMILY_NAME           1
 #define NAME_ID_SUBFAMILY_NAME        2
+#define NAME_ID_FULL_NAME             4
 #define NAME_ID_POSTSCRIPT_NAME       6
 #define NAME_ID_PREFERRED_FAMILY      16  // OTF: typographic/preferred family (no style suffix)
 #define NAME_ID_PREFERRED_SUBFAMILY   17  // OTF: typographic/preferred subfamily
@@ -242,12 +243,12 @@ static bool parse_name_table(FILE* file, TTF_Table_Dir* name_table, FontEntry* e
     count  = be16toh_local(count);
     string_offset = be16toh_local(string_offset);
 
-    bool found_family = false;
-    bool found_subfamily = false;
-    bool found_postscript = false;
-    bool found_family_english = false;
-    bool found_subfamily_english = false;
-    bool found_postscript_english = false;
+    const uint16_t name_ids[] = {NAME_ID_FAMILY_NAME, NAME_ID_SUBFAMILY_NAME,
+        NAME_ID_FULL_NAME, NAME_ID_POSTSCRIPT_NAME};
+    char** name_fields[] = {&entry->family_name, &entry->subfamily_name,
+        &entry->full_name, &entry->postscript_name};
+    bool found_names[4] = {false};
+    bool found_english[4] = {false};
     // preferred (typographic) names — Name ID 16/17 override 1/2 when present
     char preferred_family_buf[MAX_FONT_FAMILY_NAME]    = {0};
     char preferred_subfamily_buf[MAX_FONT_FAMILY_NAME] = {0};
@@ -273,14 +274,16 @@ static bool parse_name_table(FILE* file, TTF_Table_Dir* name_table, FontEntry* e
         // process family, subfamily, postscript, and preferred family/subfamily names
         if (name_id != NAME_ID_FAMILY_NAME &&
             name_id != NAME_ID_SUBFAMILY_NAME &&
+            name_id != NAME_ID_FULL_NAME &&
             name_id != NAME_ID_POSTSCRIPT_NAME &&
             name_id != NAME_ID_PREFERRED_FAMILY &&
             name_id != NAME_ID_PREFERRED_SUBFAMILY) continue;
 
-        // skip if already found English name for this name ID
-        if (name_id == NAME_ID_FAMILY_NAME && found_family_english) continue;
-        if (name_id == NAME_ID_SUBFAMILY_NAME && found_subfamily_english) continue;
-        if (name_id == NAME_ID_POSTSCRIPT_NAME && found_postscript_english) continue;
+        int name_slot = -1;
+        for (int j = 0; j < 4; j++) {
+            if (name_id == name_ids[j]) name_slot = j;
+        }
+        if (name_slot >= 0 && found_english[name_slot]) continue;
 
         // Platform 1 (Mac) or Platform 3 (Windows)
         if (platform_id != 1 && platform_id != 3) continue;
@@ -326,19 +329,11 @@ static bool parse_name_table(FILE* file, TTF_Table_Dir* name_table, FontEntry* e
 
         if (name_buf[0] == '\0') continue;
 
-        // assign to appropriate field (prefer English over localized names)
-        if (name_id == NAME_ID_FAMILY_NAME && (!found_family || is_english)) {
-            entry->family_name = arena_strdup(arena, name_buf);
-            found_family = true;
-            if (is_english) found_family_english = true;
-        } else if (name_id == NAME_ID_SUBFAMILY_NAME && (!found_subfamily || is_english)) {
-            entry->subfamily_name = arena_strdup(arena, name_buf);
-            found_subfamily = true;
-            if (is_english) found_subfamily_english = true;
-        } else if (name_id == NAME_ID_POSTSCRIPT_NAME && (!found_postscript || is_english)) {
-            entry->postscript_name = arena_strdup(arena, name_buf);
-            found_postscript = true;
-            if (is_english) found_postscript_english = true;
+        // prefer English for every stored unique or family name.
+        if (name_slot >= 0 && (!found_names[name_slot] || is_english)) {
+            *name_fields[name_slot] = arena_strdup(arena, name_buf);
+            found_names[name_slot] = true;
+            if (is_english) found_english[name_slot] = true;
         } else if (name_id == NAME_ID_PREFERRED_FAMILY && (!found_preferred_family || is_english)) {
             // preferred (typographic) family — does NOT embed style suffix
             strncpy(preferred_family_buf, name_buf, MAX_FONT_FAMILY_NAME - 1);
@@ -356,13 +351,13 @@ static bool parse_name_table(FILE* file, TTF_Table_Dir* name_table, FontEntry* e
     // so weight-based matching works correctly.
     if (found_preferred_family && preferred_family_buf[0]) {
         entry->family_name = arena_strdup(arena, preferred_family_buf);
-        found_family = true;
+        found_names[0] = true;
     }
     if (found_preferred_subfamily && preferred_subfamily_buf[0]) {
         entry->subfamily_name = arena_strdup(arena, preferred_subfamily_buf);
     }
 
-    return found_family;
+    return found_names[0];
 }
 
 static bool parse_os2_table(FILE* file, TTF_Table_Dir* os2_table, FontEntry* entry) {
@@ -523,6 +518,8 @@ static bool parse_ttc_font_metadata(const char* file_path, FontDatabase* db, Are
         entry->format = FONT_FORMAT_TTC;
         entry->is_collection = true;
         entry->collection_index = i;
+        entry->file_mtime = file_stat.st_mtime;
+        entry->file_size = (size_t)file_stat.st_size;
         entry->weight = 400;
         entry->style = FONT_SLANT_NORMAL;
 
@@ -822,6 +819,20 @@ static bool parse_placeholder_font(FontEntry* entry, Arena* arena) {
     return ok;
 }
 
+// expand each collection once; its real faces are appended to the database.
+static void parse_database_placeholder(FontDatabase* db, FontEntry* entry) {
+    if (!entry || !entry->is_placeholder) return;
+    if (entry->format == FONT_FORMAT_TTC) {
+        if (entry->collection_expanded) return;
+        parse_ttc_font_metadata(entry->file_path, db, db->arena);
+        // the inventory entry has guessed metadata, not a selectable face.
+        // keep it excluded from matching after expanding the real faces once.
+        entry->collection_expanded = true;
+    } else {
+        parse_placeholder_font(entry, db->arena);
+    }
+}
+
 // ============================================================================
 // Organize fonts into families
 // ============================================================================
@@ -993,11 +1004,7 @@ FontDatabaseResult font_database_find_best_match_internal(FontDatabase* db, Font
             FontEntry* e = (FontEntry*)db->all_fonts->data[i];
             if (!e || !e->is_placeholder || !e->family_name) continue;
             if (font_family_names_equivalent(e->family_name, criteria->family_name)) {
-                if (e->format == FONT_FORMAT_TTC) {
-                    parse_ttc_font_metadata(e->file_path, db, db->arena);
-                } else {
-                    parse_placeholder_font(e, db->arena);
-                }
+                parse_database_placeholder(db, e);
                 parsed_any = true;
             }
         }
@@ -1028,11 +1035,7 @@ FontDatabaseResult font_database_find_best_match_internal(FontDatabase* db, Font
         for (int i = 0; i < family->fonts->length; i++) {
             FontEntry* e = (FontEntry*)family->fonts->data[i];
             if (!e || !e->is_placeholder) continue;
-            if (e->format == FONT_FORMAT_TTC) {
-                parse_ttc_font_metadata(e->file_path, db, db->arena);
-            } else {
-                parse_placeholder_font(e, db->arena);
-            }
+            parse_database_placeholder(db, e);
             reorganize_needed = true;
         }
         if (reorganize_needed) {
@@ -1084,6 +1087,32 @@ FontEntry* font_database_get_by_postscript_name_internal(FontDatabase* db, const
     return (FontEntry*)hashmap_get(db->postscript_names, &search);
 }
 
+FontEntry* font_database_find_local_name_internal(FontDatabase* db, const char* name) {
+    if (!db || !name || !*name) return NULL;
+    if (!db->scanned) font_database_scan_internal(db);
+    // unique names cannot be inferred from a filename or a family alias.
+    // check parsed entries first, then lazily read the remaining font metadata.
+    for (int pass = 0; pass < 2; pass++) {
+        FontEntry* match = NULL;
+        for (int i = 0; i < db->all_fonts->length; i++) {
+            FontEntry* entry = (FontEntry*)db->all_fonts->data[i];
+            if (!entry) continue;
+            if (entry->is_placeholder) {
+                if (pass == 0) continue;
+                parse_database_placeholder(db, entry);
+            }
+            if ((entry->full_name && str_icmp_cstr(entry->full_name, name) == 0) ||
+                (entry->postscript_name && str_icmp_cstr(entry->postscript_name, name) == 0)) {
+                match = entry;
+                break;
+            }
+        }
+        if (pass == 1) organize_fonts_into_families(db);
+        if (match) return match;
+    }
+    return NULL;
+}
+
 // ============================================================================
 // Database scanning — 3-phase approach
 // ============================================================================
@@ -1117,12 +1146,7 @@ bool font_database_scan_internal(FontDatabase* db) {
         if (!e || !e->is_placeholder || !e->family_name) continue;
 
         if (is_priority_font_family(e->family_name)) {
-            if (e->format == FONT_FORMAT_TTC) {
-                parse_ttc_font_metadata(e->file_path, db, db->arena);
-                e->is_placeholder = false;
-            } else {
-                parse_placeholder_font(e, db->arena);
-            }
+            parse_database_placeholder(db, e);
 #ifndef NDEBUG
             priority_parsed++;
 #endif
@@ -1180,6 +1204,8 @@ const char* font_format_to_str(FontFormat format) {
 //     [subfamily_name] (if len > 0)
 //     [2 bytes] postscript_name length (0 if absent)
 //     [postscript_name] (if len > 0)
+//     [2 bytes] full_name length (0 if absent)
+//     [full_name] (if len > 0)
 //     [2 bytes] file_path length
 //     [file_path]
 //     [4 bytes] weight (int)
@@ -1187,6 +1213,8 @@ const char* font_format_to_str(FontFormat format) {
 //     [1 byte]  format (FontFormat enum)
 //     [1 byte]  is_monospace
 //     [1 byte]  is_collection
+//     [1 byte]  is_placeholder
+//     [1 byte]  collection_expanded
 //     [4 bytes] collection_index
 //     [8 bytes] file_mtime (time_t written as int64)
 //     [8 bytes] file_size
@@ -1253,6 +1281,7 @@ bool font_database_save_cache_internal(FontDatabase* db, const char* path) {
         if (!write_cache_string(f, e->family_name, FONT_CACHE_MAX_NAME_BYTES)) goto fail;
         if (!write_cache_string(f, e->subfamily_name, FONT_CACHE_MAX_NAME_BYTES)) goto fail;
         if (!write_cache_string(f, e->postscript_name, FONT_CACHE_MAX_NAME_BYTES)) goto fail;
+        if (!write_cache_string(f, e->full_name, FONT_CACHE_MAX_NAME_BYTES)) goto fail;
         if (!write_cache_string(f, e->file_path, FONT_CACHE_MAX_PATH_BYTES)) goto fail;
 
         int32_t weight = (int32_t)e->weight;
@@ -1260,6 +1289,8 @@ bool font_database_save_cache_internal(FontDatabase* db, const char* path) {
         uint8_t format = (uint8_t)e->format;
         uint8_t mono   = e->is_monospace ? 1 : 0;
         uint8_t coll   = e->is_collection ? 1 : 0;
+        uint8_t placeholder = e->is_placeholder ? 1 : 0;
+        uint8_t expanded = e->collection_expanded ? 1 : 0;
         int32_t coll_idx = (int32_t)e->collection_index;
         int64_t mtime  = (int64_t)e->file_mtime;
         int64_t fsize  = (int64_t)e->file_size;
@@ -1269,6 +1300,8 @@ bool font_database_save_cache_internal(FontDatabase* db, const char* path) {
         if (fwrite(&format,   1, 1, f) != 1) goto fail;
         if (fwrite(&mono,     1, 1, f) != 1) goto fail;
         if (fwrite(&coll,     1, 1, f) != 1) goto fail;
+        if (fwrite(&placeholder, 1, 1, f) != 1) goto fail;
+        if (fwrite(&expanded, 1, 1, f) != 1) goto fail;
         if (fwrite(&coll_idx, 4, 1, f) != 1) goto fail;
         if (fwrite(&mtime,    8, 1, f) != 1) goto fail;
         if (fwrite(&fsize,    8, 1, f) != 1) goto fail;
@@ -1341,17 +1374,19 @@ bool font_database_load_cache_internal(FontDatabase* db, const char* path) {
         char* family = NULL;
         char* subfamily = NULL;
         char* psname = NULL;
+        char* full_name = NULL;
         char* file_path = NULL;
         if (!read_cache_string(f, arena, FONT_CACHE_MAX_NAME_BYTES, &family) ||
             !read_cache_string(f, arena, FONT_CACHE_MAX_NAME_BYTES, &subfamily) ||
             !read_cache_string(f, arena, FONT_CACHE_MAX_NAME_BYTES, &psname) ||
+            !read_cache_string(f, arena, FONT_CACHE_MAX_NAME_BYTES, &full_name) ||
             !read_cache_string(f, arena, FONT_CACHE_MAX_PATH_BYTES, &file_path)) {
             log_error("FONT-CACHE-STRING: malformed entry at index %u", i);
             fclose(f);
             return false;
         }
 
-        int32_t weight; uint8_t slant, format, mono, coll;
+        int32_t weight; uint8_t slant, format, mono, coll, placeholder, expanded;
         int32_t coll_idx; int64_t mtime, fsize;
 
         if (fread(&weight,   4, 1, f) != 1 ||
@@ -1359,6 +1394,8 @@ bool font_database_load_cache_internal(FontDatabase* db, const char* path) {
             fread(&format,   1, 1, f) != 1 ||
             fread(&mono,     1, 1, f) != 1 ||
             fread(&coll,     1, 1, f) != 1 ||
+            fread(&placeholder, 1, 1, f) != 1 ||
+            fread(&expanded, 1, 1, f) != 1 ||
             fread(&coll_idx, 4, 1, f) != 1 ||
             fread(&mtime,    8, 1, f) != 1 ||
             fread(&fsize,    8, 1, f) != 1) {
@@ -1388,6 +1425,7 @@ bool font_database_load_cache_internal(FontDatabase* db, const char* path) {
         entry->family_name     = family;
         entry->subfamily_name  = subfamily;
         entry->postscript_name = psname;
+        entry->full_name       = full_name;
         entry->file_path       = file_path;
         entry->weight          = weight;
         entry->style           = (FontSlant)slant;
@@ -1397,7 +1435,8 @@ bool font_database_load_cache_internal(FontDatabase* db, const char* path) {
         entry->collection_index = coll_idx;
         entry->file_mtime      = (time_t)mtime;
         entry->file_size       = (size_t)fsize;
-        entry->is_placeholder  = (family == NULL); // no family = needs parsing
+        entry->is_placeholder  = placeholder != 0 || family == NULL;
+        entry->collection_expanded = expanded != 0;
 
         arraylist_append(db->all_fonts, entry);
 

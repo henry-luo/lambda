@@ -1,0 +1,120 @@
+{
+  "name": "HTML CSS URL graphs, authored function order, alpha and cancellation",
+  "html": "test/demo/doom/fixtures/_filters.ls",
+  "viewport": {
+    "width": 520,
+    "height": 160
+  },
+  "events": [
+    {
+      "type": "assert_pixel",
+      "x": 330,
+      "y": 40,
+      "min_r": 35,
+      "max_r": 41,
+      "min_g": 136,
+      "max_g": 142,
+      "min_b": 110,
+      "max_b": 116
+    },
+    {
+      "type": "assert_pixel",
+      "x": 360,
+      "y": 40,
+      "min_r": 35,
+      "max_r": 41,
+      "min_g": 136,
+      "max_g": 142,
+      "min_b": 110,
+      "max_b": 116
+    },
+    {
+      "type": "assert_pixel",
+      "x": 390,
+      "y": 40,
+      "min_r": 35,
+      "max_r": 41,
+      "min_g": 136,
+      "max_g": 142,
+      "min_b": 110,
+      "max_b": 116
+    },
+    {
+      "type": "assert_pixel",
+      "x": 460,
+      "y": 40,
+      "min_r": 22,
+      "max_r": 28,
+      "min_g": 175,
+      "max_g": 181,
+      "min_b": 72,
+      "max_b": 78
+    },
+    {
+      "type": "assert_pixel",
+      "x": 40,
+      "y": 40,
+      "min_r": 23,
+      "max_r": 27,
+      "min_g": 175,
+      "max_g": 179,
+      "min_b": 73,
+      "max_b": 77
+    },
+    {
+      "type": "assert_pixel",
+      "x": 120,
+      "y": 40,
+      "min_r": 23,
+      "max_r": 27,
+      "min_g": 112,
+      "max_g": 116,
+      "min_b": 73,
+      "max_b": 77
+    },
+    {
+      "type": "assert_pixel",
+      "x": 185,
+      "y": 40,
+      "min_r": 48,
+      "max_r": 52,
+      "min_g": 98,
+      "max_g": 102,
+      "min_b": 148,
+      "max_b": 152
+    },
+    {
+      "type": "assert_pixel",
+      "x": 225,
+      "y": 40,
+      "min_r": 250,
+      "max_g": 5,
+      "max_b": 5
+    },
+    {
+      "type": "assert_pixel",
+      "x": 280,
+      "y": 40,
+      "min_r": 150,
+      "max_r": 154,
+      "min_g": 48,
+      "max_g": 52,
+      "min_b": 73,
+      "max_b": 77
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#cancel"
+      }
+    },
+    {
+      "type": "assert_pixel",
+      "x": 40,
+      "y": 40,
+      "min_r": 250,
+      "max_g": 5,
+      "max_b": 5
+    }
+  ]
+}

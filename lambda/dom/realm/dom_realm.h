@@ -70,6 +70,7 @@ Item dom_realm_new_dom_exception(Item error_name, Item message);
 
 // --- the script object model --------------------------------------------
 Item dom_realm_new_object_of_class(int class_id);
+bool dom_realm_object_has_class(Item object, int class_id);
 Item dom_realm_new_array_of_class(int length, int class_id);
 Item dom_realm_define_property(Item object, Item name, Item descriptor);
 void dom_realm_install_accessor(Item object, Item name, Item getter, Item setter,

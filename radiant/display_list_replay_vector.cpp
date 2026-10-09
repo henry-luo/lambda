@@ -66,7 +66,8 @@ DisplayReplayVectorResult dl_replay_vector_item(RdtVector* vec,
                            r->has_transform ? &r->transform : nullptr,
                            image.generation, image.straight_alpha,
                            // snapshot buffers can reuse addresses with the same local generation.
-                           image.owner?((uint64_t)image.owner->self.gen<<32)|image.owner->self.index:0);
+                           image.owner?((uint64_t)image.owner->self.gen<<32)|image.owner->self.index:0,
+                           r->scale_mode);
             return DL_REPLAY_VECTOR_DREW;
         }
 
@@ -94,7 +95,7 @@ bool dl_replay_vector_clip_item(RdtVector* vec, DisplayItem* item) {
         case DL_PUSH_CLIP: {
             DlPushClip* r = &item->push_clip;
             rdt_push_clip(vec, r->path,
-                          r->has_transform ? &r->transform : nullptr);
+                          r->has_transform ? &r->transform : nullptr, r->rule);
             return true;
         }
 

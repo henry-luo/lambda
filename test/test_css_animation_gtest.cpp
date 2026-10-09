@@ -12,6 +12,8 @@
 #include "../radiant/view.hpp"
 #include "../radiant/layout.hpp"
 #include "../radiant/event.hpp"
+#include "../radiant/render.hpp"
+#include "../radiant/render_css3d.hpp"
 #include "../lambda/input/input.hpp"
 #include "../lambda/input/css/css_engine.hpp"
 #include "../lambda/input/css/css_parser.hpp"
@@ -35,6 +37,7 @@ extern "C" {
 #include "../lambda/dom/dom_core.h"
 #include "../lambda/runtime/gc/gc_heap.h"
 #include "../lambda/runtime/lambda-root-frame.hpp"
+#include "../lambda/runtime/template_registry.h"
 
 static struct {
     unsigned starts, ends, iterations, cancels;
@@ -505,6 +508,60 @@ protected:
     }
 };
 
+TEST_F(MotionCascadeTest, ScrollKeepsSelectorCacheValidButHoverInvalidatesIt) {
+    ASSERT_NE(state_store_create(&doc), nullptr);
+    DocState* state = doc.state;
+    ScrollPane pane = {};
+    pane.v_max_scroll = 200.0f;
+    uint64_t content = doc_state_content_version(state);
+    uint64_t selectors = doc_state_selector_version(state);
+    scroll_state_set_position_for_view(state, static_cast<View*>(&element), &pane, 0.0f, 50.0f, false);
+    EXPECT_GT(doc_state_content_version(state), content);
+    EXPECT_EQ(doc_state_selector_version(state), selectors);
+    doc_state_request_repaint(state);
+    EXPECT_EQ(doc_state_selector_version(state), selectors);
+    doc_state_set_hover_target(state, static_cast<View*>(&element));
+    EXPECT_GT(doc_state_selector_version(state), selectors);
+    state_store_destroy(&doc);
+}
+
+TEST_F(MotionCascadeTest, PresentationCustomPropertiesReplaceRetainCascadeAndClear) {
+    ASSERT_EQ(dom_element_apply_inline_style(&element, "--height:20px;--light:0.5"), 2);
+    bool changed = false;
+    ASSERT_TRUE(dom_element_set_presentation_style(&element, "--height", "40px", &changed));
+    EXPECT_TRUE(changed);
+    ASSERT_TRUE(dom_element_set_presentation_style(&element, "--height", "40px", &changed));
+    EXPECT_FALSE(changed);
+    DomElement child = {};
+    child.node_type = DOM_NODE_ELEMENT;
+    child.parent = lam::up(static_cast<DomNode*>(&element));
+    DomElement* owner = nullptr;
+    const CssValue* value = dom_element_lookup_custom_property(&child, "--height", &owner);
+    ASSERT_NE(value, nullptr);
+    EXPECT_EQ(owner, &element);
+    EXPECT_FLOAT_EQ(value->data.length.value, 40.0f);
+    for (unsigned i = 0; i < 200; i++) {
+        ASSERT_TRUE(dom_element_set_presentation_style(&element, "--height", i % 2 ? "41px" : "40px", &changed));
+    }
+    unsigned count = 0;
+    for (CssCustomProp* prop = element.css_variables; prop; prop = prop->next) count++;
+    EXPECT_EQ(count, 3u);
+    dom_element_clear_cascaded_styles(&element);
+    value = dom_element_lookup_custom_property(&child, "--height", &owner);
+    ASSERT_NE(value, nullptr);
+    EXPECT_FLOAT_EQ(value->data.length.value, 41.0f);
+    ASSERT_EQ(dom_element_apply_inline_style(&element, "--height:80px!important"), 1);
+    value = dom_element_lookup_custom_property(&child, "--height", &owner);
+    ASSERT_NE(value, nullptr);
+    EXPECT_FLOAT_EQ(value->data.length.value, 80.0f);
+    EXPECT_FALSE(dom_element_set_presentation_style(&element, "--height", "]", &changed));
+    EXPECT_TRUE(dom_element_clear_presentation_style(&element));
+    value = dom_element_lookup_custom_property(&child, "--height", &owner);
+    ASSERT_NE(value, nullptr);
+    EXPECT_FLOAT_EQ(value->data.length.value, 80.0f);
+    EXPECT_FALSE(dom_element_clear_presentation_style(&element));
+}
+
 TEST_F(MotionCascadeTest, AnimationShorthandProjectsWinningLonghands) {
     const char* declarations[] = {
         "animation-duration: 9s", "animation: fade 2s linear -1s 1.5 alternate both paused, grow 4s",
@@ -836,6 +893,172 @@ TEST(CssTransform, BackfaceNormalUsesInverseTranspose) {
     EXPECT_TRUE(rdt_matrix4_backface_visible(&matrix));
     matrix.values[0] = 4.0f;
     EXPECT_FALSE(rdt_matrix4_backface_visible(&matrix));
+}
+
+TEST(CssTransform, PaintProjectsNestedDepthOnceAndHonorsFlattening) {
+    const bool cases[] = {false, true};
+    for (bool preserve : cases) {
+        ViewBlock camera = {}, scene = {}, plane = {};
+        camera.set_synthetic(true); scene.set_synthetic(true); plane.set_synthetic(true);
+        camera.width = camera.height = scene.width = scene.height = plane.width = plane.height = 100.0f;
+        TransformProp camera_prop = TRANSFORM_PROP_DEFAULT;
+        TransformProp scene_prop = TRANSFORM_PROP_DEFAULT;
+        TransformProp plane_prop = TRANSFORM_PROP_DEFAULT;
+        TransformFunction translation = {};
+        translation.type = TRANSFORM_TRANSLATEZ;
+        translation.params.translate3d.z = 100.0f;
+        camera_prop.perspective = 500.0f;
+        scene_prop.transform_style = preserve ? CSS_VALUE_PRESERVE_3D : CSS_VALUE_FLAT;
+        scene_prop.functions = lam::shared(&translation);
+        plane_prop.functions = lam::shared(&translation);
+        camera.transform = lam::view_prop(&camera_prop);
+        scene.transform = lam::view_prop(&scene_prop);
+        plane.transform = lam::view_prop(&plane_prop);
+        RasterRenderContext context = {};
+        context.raster_scale = 1.0f;
+        BlockBlot parent = {};
+        RenderTransformScope camera_scope = render_state_push_transform(&context, &camera, &parent);
+        RenderTransformScope scene_scope = render_state_push_transform(&context, &scene, &parent);
+        RenderTransformScope plane_scope = render_state_push_transform(&context, &plane, &parent);
+        // Two 100px depths in a 500px camera: scale 500/300 when preserved,
+        // or 500/400 when the middle box flattens its descendants.
+        float expected_scale = preserve ? 500.0f / 300.0f : 500.0f / 400.0f;
+        EXPECT_NEAR(context.transform.e11, expected_scale, 0.00001f);
+        EXPECT_NEAR(context.transform.e22, expected_scale, 0.00001f);
+        EXPECT_NEAR(context.transform.e13, 50.0f * (1.0f - expected_scale), 0.00001f);
+        render_state_pop_transform(&plane_scope);
+        EXPECT_NEAR(context.transform.e11, 1.25f, 0.00001f);
+        render_state_pop_transform(&scene_scope);
+        render_state_pop_transform(&camera_scope);
+        EXPECT_FALSE(context.has_transform);
+        EXPECT_FALSE(context.has_transform_3d);
+    }
+}
+
+class Css3dCompositionTest : public ::testing::Test {
+protected:
+    Arena* arena = nullptr;
+    ScratchArena scratch = {};
+    void SetUp() override {
+        arena = arena_create(16384, 65536);
+        ASSERT_NE(arena, nullptr);
+        scratch_init(&scratch, arena);
+    }
+    void TearDown() override {
+        scratch_release(&scratch);
+        arena_destroy(arena);
+    }
+};
+
+TEST_F(Css3dCompositionTest, ParallelPlanesKeepDepthOrderAndCoplanarPaintTies) {
+    const bool reverse_cases[] = {false, true};
+    for (bool reverse : reverse_cases) {
+        ScratchScope scope(&scratch);
+        Css3dPolygon input[3];
+        const float depths[] = {80.0f, -80.0f, 80.0f};
+        for (size_t i = 0; i < 3; i++) {
+            RdtMatrix4 matrix = rdt_matrix4_translate(0.0f, 0.0f, depths[i]);
+            ASSERT_TRUE(css3d_project_quad(&matrix, {0.0f, 0.0f, 100.0f, 100.0f}, i,
+                reverse ? 2 - i : i, &scope, &input[i]));
+        }
+        lam::ArrayList<Css3dPolygon> ordered(MEM_CAT_RENDER, 0);
+        ASSERT_TRUE(css3d_order_planes(input, 3, &scope, &ordered));
+        ASSERT_EQ(ordered.size(), 3u);
+        EXPECT_EQ(ordered[0].fragment, 1u);
+        EXPECT_EQ(ordered[1].fragment, reverse ? 2u : 0u);
+        EXPECT_EQ(ordered[2].fragment, reverse ? 0u : 2u);
+    }
+}
+
+TEST_F(Css3dCompositionTest, IntersectingPlanesSplitAndKeepProjectiveTextureCoordinates) {
+    const bool reverse_cases[] = {false, true};
+    for (bool reverse : reverse_cases) {
+        ScratchScope scope(&scratch);
+        Css3dPolygon input[2];
+        for (size_t i = 0; i < 2; i++) {
+            RdtMatrix4 matrix = rdt_matrix4_identity();
+            matrix.values[8] = i == 0 ? 1.0f : -1.0f;
+            matrix.values[12] = 0.2f;
+            ASSERT_TRUE(css3d_project_quad(&matrix, {-1.0f, -1.0f, 2.0f, 2.0f}, i, i,
+                &scope, &input[reverse ? 1 - i : i]));
+        }
+        lam::ArrayList<Css3dPolygon> ordered(MEM_CAT_RENDER, 0);
+        ASSERT_TRUE(css3d_order_planes(input, 2, &scope, &ordered));
+        ASSERT_EQ(ordered.size(), 3u);
+        const float probes[] = {-0.5f, 0.5f};
+        for (float probe : probes) {
+            float previous_depth = -INFINITY;
+            size_t covering = 0;
+            for (const Css3dPolygon& polygon : ordered) {
+                float left = INFINITY, right = -INFINITY;
+                for (size_t i = 0; i < polygon.count; i++) {
+                    const Css3dVertex& vertex = polygon.vertices[i];
+                    left = fminf(left, vertex.x / vertex.w);
+                    right = fmaxf(right, vertex.x / vertex.w);
+                    EXPECT_NEAR(vertex.x, vertex.u, 0.00001f);
+                    EXPECT_NEAR(vertex.y, vertex.v, 0.00001f);
+                    EXPECT_NEAR(vertex.w, 1.0f + 0.2f * vertex.u, 0.00001f);
+                }
+                if (probe > left && probe < right) {
+                    float depth = polygon.fragment == 0 ? probe : -probe;
+                    EXPECT_GT(depth, previous_depth);
+                    previous_depth = depth;
+                    covering++;
+                }
+            }
+            EXPECT_EQ(covering, 2u);
+        }
+    }
+}
+
+TEST_F(Css3dCompositionTest, ViewerPlaneCrossingIsClippedBeforeProjection) {
+    ScratchScope scope(&scratch);
+    RdtMatrix4 matrix = rdt_matrix4_identity();
+    matrix.values[12] = -0.5f;
+    Css3dPolygon crossing;
+    ASSERT_TRUE(css3d_project_quad(&matrix, {0.0f, 0.0f, 4.0f, 1.0f}, 0, 0, &scope, &crossing));
+    ASSERT_EQ(crossing.count, 4u);
+    for (size_t i = 0; i < crossing.count; i++) {
+        const Css3dVertex& vertex = crossing.vertices[i];
+        EXPECT_GT(vertex.w, 0.0f);
+        EXPECT_LT(vertex.u, 2.0f);
+        EXPECT_NEAR(vertex.x, vertex.u, 0.00001f);
+    }
+    matrix.values[15] = -1.0f;
+    Css3dPolygon hidden;
+    ASSERT_TRUE(css3d_project_quad(&matrix, {0.0f, 0.0f, 4.0f, 1.0f}, 0, 0, &scope, &hidden));
+    EXPECT_EQ(hidden.count, 0u);
+}
+
+TEST_F(Css3dCompositionTest, ViewerClippingAtPageOffsetKeepsFiniteBoundsAndTerminatesPartition) {
+    ScratchScope scope(&scratch);
+    RdtMatrix4 rotation = rdt_matrix4_identity();
+    float angle = 75.0f * math_pi_f() / 180.0f;
+    rotation.values[0] = rotation.values[10] = cosf(angle);
+    rotation.values[2] = sinf(angle); rotation.values[8] = -sinf(angle);
+    RdtMatrix4 origin = rdt_matrix4_translate(550.0f, 330.0f, 450.0f);
+    RdtMatrix4 offset = rdt_matrix4_translate(-550.0f, -330.0f, 0.0f);
+    RdtMatrix4 local = rdt_matrix4_multiply(&rotation, &offset);
+    local = rdt_matrix4_multiply(&origin, &local);
+    RdtMatrix4 perspective = radiant::compute_parent_perspective_matrix_3d(500.0f, 550.0f, 330.0f);
+    RdtMatrix4 matrix = rdt_matrix4_multiply(&perspective, &local);
+    RdtMatrix paint = radiant::matrix4_project_to_2d(&matrix);
+    Css3dPolygon polygon;
+    ASSERT_TRUE(css3d_project_quad(&matrix, {470.0f, 250.0f, 160.0f, 160.0f}, 0, 0, &scope, &polygon));
+    ASSERT_TRUE(css3d_clip_to_viewport(&polygon, &paint, {440.0f, 220.0f, 220.0f, 220.0f}, &scope));
+    ASSERT_GE(polygon.count, 3u);
+    for (size_t i = 0; i < polygon.count; i++) {
+        float x = polygon.vertices[i].x / polygon.vertices[i].w;
+        float y = polygon.vertices[i].y / polygon.vertices[i].w;
+        EXPECT_GE(x, 439.9f); EXPECT_LE(x, 660.1f);
+        EXPECT_GE(y, 219.9f); EXPECT_LE(y, 440.1f);
+    }
+    lam::ArrayList<Css3dPolygon> ordered(MEM_CAT_RENDER, 0);
+    ASSERT_TRUE(css3d_order_planes(&polygon, 1, &scope, &ordered));
+    EXPECT_EQ(ordered.size(), 1u);
+    float left, top, right, bottom;
+    EXPECT_FALSE(rdt_matrix_project_rect_bounds(&paint, 470.0f, 250.0f, 630.0f, 410.0f,
+        &left, &top, &right, &bottom));
 }
 
 // ============================================================================
@@ -1236,6 +1459,24 @@ protected:
         element->set_needs_style_recompute(false);
     }
 
+    void registerProperty(const char* name, const char* syntax, const char* initial, bool inherits = true) {
+        CssPropertyRegistration registration = {};
+        registration.name = name;
+        registration.inherits = inherits;
+        ASSERT_TRUE(css_parse_property_syntax(syntax, pool, &registration));
+        CssDeclaration* declaration = css_parse_property_declaration(name, strlen(name), initial, strlen(initial), pool);
+        ASSERT_NE(declaration, nullptr);
+        registration.initial_value = declaration->value;
+        ASSERT_TRUE(css_register_document_property(&doc, &registration, strlen(name)));
+    }
+
+    double customNumber(DomElement* element, const char* name) {
+        const CssValue* value = css_compute_element_custom_property(pool, element, name);
+        EXPECT_NE(value, nullptr);
+        EXPECT_EQ(value ? value->type : CSS_VALUE_TYPE_KEYWORD, CSS_VALUE_TYPE_NUMBER);
+        return value && value->type == CSS_VALUE_TYPE_NUMBER ? value->data.number.value : NAN;
+    }
+
     void setPhysicalSideTargets(BoundaryProp* boundary, BorderProp* border,
                                 PositionProp* position, float margin,
                                 float border_width, float padding_inset, Color color) {
@@ -1272,6 +1513,345 @@ TEST_F(AnimationTickTest, PausedEffectSamplesAndResumesFromFrozenTime) {
     animation_instance_resume(instance, 5.0);
     animation_scheduler_tick(scheduler, 5.25, nullptr);
     EXPECT_FLOAT_EQ(mock.in_line.opacity, .75f);
+}
+
+TEST_F(AnimationTickTest, BackgroundPositionStepsPauseAndMixedUnitsReachPaintOffsets) {
+    MockElement mock;
+    DomElement* element = createMockElement(&mock);
+    BoundaryProp boundary = {};
+    BackgroundProp background = {};
+    element->bound = lam::view_prop(&boundary);
+    boundary.background = lam::own(&background);
+    ASSERT_NE(parsedKeyframes("sheet{from{background-position-x:0px;background-position-y:0%}"
+        "to{background-position-x:var(--end);background-position-y:100px}}", "sheet"), nullptr);
+    setAnimationStyle(element, "--end:-120px;animation:sheet 1s steps(4) -.375s both paused");
+    layout.view = lam::up(static_cast<View*>(element));
+    layout.elmt = lam::up(element);
+    css_animation_resolve(element, &layout);
+    EXPECT_FLOAT_EQ(background_position_offset(&background, true, -120.0f), -30.0f);
+    EXPECT_FLOAT_EQ(background_position_offset(&background, false, 80.0f), 25.0f);
+    animation_scheduler_tick(scheduler, 20.0, nullptr, true);
+    EXPECT_FLOAT_EQ(background_position_offset(&background, true, -120.0f), -30.0f);
+    AnimationInstance* instance = scheduler->first;
+    ASSERT_NE(instance, nullptr);
+    animation_instance_resume(instance, 20.0);
+    animation_scheduler_tick(scheduler, 20.25, nullptr);
+    EXPECT_FLOAT_EQ(background_position_offset(&background, true, -120.0f), -60.0f);
+    EXPECT_FALSE(instance->layout_changed);
+    while (scheduler->first) animation_scheduler_cancel(scheduler, scheduler->first);
+
+    ASSERT_NE(parsedKeyframes("mix{from{background-position-x:0%}to{background-position-x:40px}}", "mix"), nullptr);
+    setAnimationStyle(element, "animation:mix 1s linear -.5s both paused");
+    css_animation_resolve(element, &layout);
+    EXPECT_FLOAT_EQ(background_position_offset(&background, true, 200.0f), 20.0f);
+    EXPECT_FLOAT_EQ(background_position_offset(&background, true, 400.0f, 2.0f), 40.0f);
+}
+
+TEST_F(AnimationTickTest, BackgroundPositionPercentageRemainsRelativeToImageFreeSpace) {
+    MockElement mock;
+    DomElement* element = createMockElement(&mock);
+    BoundaryProp boundary = {};
+    BackgroundProp background = {};
+    element->bound = lam::view_prop(&boundary);
+    boundary.background = lam::own(&background);
+    ASSERT_NE(parsedKeyframes("position{from{background-position-x:100%}to{background-position-x:40px}}", "position"), nullptr);
+    setAnimationStyle(element, "animation:position 1s linear -.5s both paused");
+    layout.view = lam::up(static_cast<View*>(element));
+    layout.elmt = lam::up(element);
+    css_animation_resolve(element, &layout);
+    EXPECT_FLOAT_EQ(background_position_offset(&background, true, 200.0f), 120.0f);
+    EXPECT_FLOAT_EQ(background_position_offset(&background, true, -200.0f), -80.0f);
+    EXPECT_FLOAT_EQ(background_position_offset(&background, true, 400.0f, 2.0f), 240.0f);
+}
+
+TEST_F(AnimationTickTest, IndividualTransformsAnimateTogetherAndRetainIndependentSnapshots) {
+    MockElement mock;
+    DomElement* element = createMockElement(&mock);
+    TransformProp transform = {};
+    FontProp font = {};
+    font.font_size = 16.0f;
+    setTransformContext(element, &transform, &font);
+    transform.individual[0].type = TRANSFORM_TRANSLATE;
+    transform.individual[0].params.translate.x = 6.0f;
+    transform.individual[0].translate_x_percent = NAN;
+    transform.individual[0].translate_y_percent = NAN;
+    ASSERT_NE(parsedKeyframes("individual{from{translate:0px 0px;rotate:0deg;scale:1}"
+        "to{translate:100% 20px;rotate:180deg;scale:3 5}}", "individual"), nullptr);
+    setAnimationStyle(element, "animation:individual 1s linear -.5s both paused");
+    css_animation_resolve(element, &layout);
+    EXPECT_EQ(transform.individual[0].type, TRANSFORM_TRANSLATE);
+    EXPECT_FLOAT_EQ(transform_translate_component(transform.individual[0].params.translate.x,
+        transform.individual[0].translate_x_percent, 40.0f), 20.0f);
+    EXPECT_FLOAT_EQ(transform.individual[0].params.translate.y, 10.0f);
+    EXPECT_NEAR(transform.individual[1].params.angle, M_PI / 2, 0.00001);
+    EXPECT_FLOAT_EQ(transform.individual[2].params.scale.x, 2.0f);
+    EXPECT_FLOAT_EQ(transform.individual[2].params.scale.y, 3.0f);
+    ASSERT_NE(scheduler->first, nullptr);
+    for (int i = 0; i < 200; i++) css_animation_tick(scheduler->first, 0.5f);
+    EXPECT_FLOAT_EQ(transform.individual[0].params.translate.y, 10.0f);
+    animation_scheduler_cancel(scheduler, scheduler->first);
+    EXPECT_FLOAT_EQ(transform.individual[0].params.translate.x, 6.0f);
+    EXPECT_EQ(transform.individual[1].type, TRANSFORM_NONE);
+    EXPECT_EQ(transform.individual[2].type, TRANSFORM_NONE);
+}
+
+TEST_F(AnimationTickTest, WebCancellationRestoresAllTransformSlotsBeforeSameTimeSeek) {
+    MockElement mock;
+    DomElement* element = createMockElement(&mock);
+    TransformProp transform = {};
+    FontProp font = {};
+    font.font_size = 16.0f;
+    setTransformContext(element, &transform, &font);
+    TransformFunction underlying = {};
+    underlying.type = TRANSFORM_TRANSLATE;
+    underlying.params.translate.x = 7.0f;
+    transform.functions = lam::shared(&underlying);
+    transform.individual[0].type = TRANSFORM_TRANSLATE;
+    transform.individual[0].params.translate.x = 6.0f;
+    transform.individual[0].translate_x_percent = NAN;
+    transform.individual[0].translate_y_percent = NAN;
+    transform.individual[1].type = TRANSFORM_ROTATE;
+    transform.individual[1].params.angle = .2f;
+    transform.individual[2].type = TRANSFORM_SCALE;
+    transform.individual[2].params.scale = {1.2f, 1.3f};
+    CssWebAnimationState* effect = css_web_animation_create(element,
+        parsedKeyframes("webTransforms{from{transform:translateX(0px);translate:0px;rotate:0deg;scale:1}"
+            "to{transform:translateX(100px);translate:40px;rotate:180deg;scale:3 5}}", "webTransforms"),
+        1000.0, nullptr, pool);
+    ASSERT_NE(effect, nullptr);
+    // the second cycle seeks to the same time after cancel cleared the resolved-time flag.
+    for (int cycle = 0; cycle < 2; cycle++) {
+        SCOPED_TRACE(cycle);
+        css_web_animation_set_current_time(effect, 500.0);
+        css_web_animation_resolve(element, &layout);
+        ASSERT_NE(transform.functions, nullptr);
+        EXPECT_FLOAT_EQ(transform.functions->params.translate.x, 50.0f);
+        EXPECT_FLOAT_EQ(transform.individual[0].params.translate.x, 20.0f);
+        EXPECT_NEAR(transform.individual[1].params.angle, M_PI / 2, .00001);
+        EXPECT_FLOAT_EQ(transform.individual[2].params.scale.x, 2.0f);
+        EXPECT_FLOAT_EQ(transform.individual[2].params.scale.y, 3.0f);
+        css_web_animation_cancel(effect);
+        css_web_animation_cancel(effect);
+        EXPECT_FALSE(effect->current_time_resolved);
+        ASSERT_NE(transform.functions, nullptr);
+        EXPECT_FLOAT_EQ(transform.functions->params.translate.x, 7.0f);
+        EXPECT_FLOAT_EQ(transform.individual[0].params.translate.x, 6.0f);
+        EXPECT_FLOAT_EQ(transform.individual[1].params.angle, .2f);
+        EXPECT_FLOAT_EQ(transform.individual[2].params.scale.x, 1.2f);
+        EXPECT_FLOAT_EQ(transform.individual[2].params.scale.y, 1.3f);
+        for (int slot = 0; slot < 3; slot++) EXPECT_EQ(transform.individual_sample[slot], nullptr);
+    }
+}
+
+TEST_F(AnimationTickTest, DiscreteBackgroundImagesResolveStylesheetUrlsAndRestoreOnCancel) {
+    MockElement mock;
+    DomElement* element = createMockElement(&mock);
+    BoundaryProp boundary = {};
+    BackgroundProp background = {};
+    background.image = pool_strdup(pool, "authored.png");
+    element->bound = lam::view_prop(&boundary);
+    boundary.background = lam::own(&background);
+    CssKeyframes* keyframes = parsedKeyframes("images{0%{background-image:url(red.png)}"
+        "50%{background-image:url(blue.png)}100%{background-image:none}}", "images");
+    ASSERT_NE(keyframes, nullptr);
+    keyframes->source_file = "file:///fixtures/skins/scene.css";
+    setAnimationStyle(element, "animation:images 1s steps(1) -.25s both paused");
+    layout.doc = lam::up(&doc);
+    layout.view = lam::up(static_cast<View*>(element));
+    layout.elmt = lam::up(element);
+    css_animation_resolve(element, &layout);
+    ASSERT_NE(background.image, nullptr);
+    EXPECT_NE(strstr(background.image, "/skins/red.png"), nullptr);
+    AnimationInstance* instance = scheduler->first;
+    ASSERT_NE(instance, nullptr);
+    css_animation_tick(instance, .75f);
+    ASSERT_NE(background.image, nullptr);
+    EXPECT_NE(strstr(background.image, "/skins/blue.png"), nullptr);
+    const char* sample = background.image;
+    for (int i = 0; i < 200; i++) css_animation_tick(instance, .75f);
+    EXPECT_EQ(background.image, sample);
+    css_animation_tick(instance, 1.0f);
+    EXPECT_EQ(background.image, nullptr);
+    animation_scheduler_cancel(scheduler, instance);
+    EXPECT_STREQ(background.image, "authored.png");
+}
+
+TEST_F(AnimationTickTest, FilterListsPadIdentityInterpolateMathAndRestoreOnCancel) {
+    MockElement mock;
+    DomElement* element = createMockElement(&mock);
+    FilterProp filter = {};
+    FilterFunction authored = {};
+    authored.type = FILTER_BRIGHTNESS;
+    authored.params.amount = .8f;
+    filter.functions = lam::own(&authored);
+    element->set_filter_prop(&filter);
+    ASSERT_NE(parsedKeyframes("glow{from{filter:none}to{filter:brightness(calc(2 * 2)) blur(10px)}}", "glow"), nullptr);
+    setAnimationStyle(element, "animation:glow 1s linear -.5s both paused");
+    layout.view = lam::up(static_cast<View*>(element));
+    layout.elmt = lam::up(element);
+    css_animation_resolve(element, &layout);
+    ASSERT_NE(filter.functions, nullptr);
+    EXPECT_EQ(filter.functions->type, FILTER_BRIGHTNESS);
+    EXPECT_FLOAT_EQ(filter.functions->params.amount, 2.5f);
+    ASSERT_NE(filter.functions->next, nullptr);
+    EXPECT_FLOAT_EQ(filter.functions->next->params.blur_radius, 5.0f);
+    ASSERT_NE(scheduler->first, nullptr);
+    for (int i = 0; i < 200; i++) css_animation_tick(scheduler->first, .75f);
+    EXPECT_FLOAT_EQ(filter.functions->params.amount, 3.25f);
+    EXPECT_FLOAT_EQ(filter.functions->next->params.blur_radius, 7.5f);
+    EXPECT_TRUE(filter.functions_borrowed);
+    EXPECT_FALSE(scheduler->first->layout_changed);
+    animation_scheduler_cancel(scheduler, scheduler->first);
+    ASSERT_NE(filter.functions, nullptr);
+    EXPECT_FLOAT_EQ(filter.functions->params.amount, .8f);
+    EXPECT_EQ(filter.functions->next, nullptr);
+    EXPECT_FALSE(filter.functions_borrowed);
+}
+
+TEST_F(AnimationTickTest, FilterListsUseDiscreteMismatchAndIdentityForShorterTail) {
+    MockElement mock;
+    DomElement* element = createMockElement(&mock);
+    FilterProp filter = {};
+    element->set_filter_prop(&filter);
+    ASSERT_NE(parsedKeyframes("filters{0%{filter:brightness(.5)}50%{filter:brightness(1) saturate(3)}"
+        "100%{filter:contrast(2)}}", "filters"), nullptr);
+    setAnimationStyle(element, "animation:filters 1s linear -.25s both paused");
+    layout.view = lam::up(static_cast<View*>(element));
+    layout.elmt = lam::up(element);
+    css_animation_resolve(element, &layout);
+    ASSERT_NE(filter.functions, nullptr);
+    EXPECT_FLOAT_EQ(filter.functions->params.amount, .75f);
+    ASSERT_NE(filter.functions->next, nullptr);
+    EXPECT_EQ(filter.functions->next->type, FILTER_SATURATE);
+    EXPECT_FLOAT_EQ(filter.functions->next->params.amount, 2.0f);
+    css_animation_tick(scheduler->first, .7f);
+    EXPECT_EQ(filter.functions->type, FILTER_BRIGHTNESS);
+    css_animation_tick(scheduler->first, .8f);
+    EXPECT_EQ(filter.functions->type, FILTER_CONTRAST);
+    EXPECT_EQ(filter.functions->next, nullptr);
+    animation_scheduler_cancel(scheduler, scheduler->first);
+    EXPECT_EQ(filter.functions, nullptr);
+}
+
+TEST_F(AnimationTickTest, RegisteredCustomAnimationInheritsReachesFilterAndCancelsWithoutGrowth) {
+    MockElement parent_mock, child_mock;
+    DomElement* parent = createMockElement(&parent_mock);
+    DomElement* child = createMockElement(&child_mock);
+    child->parent = lam::up(static_cast<DomNode*>(parent));
+    registerProperty("--light", "<number>", "1");
+    ASSERT_NE(parsedKeyframes("light{from{--light:calc(.1 * 2)}to{--light:1}}", "light"), nullptr);
+    setAnimationStyle(parent, "--light:.4;animation:light 1s linear -.5s both paused");
+    layout.view = lam::up(static_cast<View*>(parent));
+    layout.elmt = lam::up(parent);
+    css_animation_resolve(parent, &layout);
+    EXPECT_NEAR(customNumber(parent, "--light"), .6, .00001);
+    EXPECT_NEAR(customNumber(child, "--light"), .6, .00001);
+    CssDeclaration* declaration = css_parse_property_declaration("filter", 6, "brightness(var(--light))", 24, pool);
+    ASSERT_NE(declaration, nullptr);
+    layout.view = lam::up(static_cast<View*>(child));
+    layout.elmt = lam::up(child);
+    FilterFunction* filter = resolve_filter_value(&layout, CSS_PROPERTY_FILTER,
+        resolve_var_function(&layout, declaration->value), pool);
+    ASSERT_NE(filter, nullptr);
+    EXPECT_NEAR(filter->params.amount, .6, .00001);
+    AnimationInstance* instance = scheduler->first;
+    ASSERT_NE(instance, nullptr);
+    PoolStats before = {}, after = {};
+    pool_get_detailed_stats(pool, &before);
+    for (int i = 0; i < 200; i++) css_animation_tick(instance, i % 2 ? .25f : .75f);
+    pool_get_detailed_stats(pool, &after);
+    EXPECT_LE(after.live_bytes, before.live_bytes + 1024u);
+    EXPECT_NEAR(customNumber(parent, "--light"), .4, .00001);
+    EXPECT_TRUE(instance->layout_changed);
+    animation_scheduler_cancel(scheduler, instance);
+    EXPECT_NEAR(customNumber(parent, "--light"), .4, .00001);
+}
+
+TEST_F(AnimationTickTest, CustomAnimationKeepsNamesPriorityAndUnregisteredDiscreteValues) {
+    MockElement mock;
+    DomElement* element = createMockElement(&mock);
+    registerProperty("--Pulse", "<number>", "0");
+    registerProperty("--pulse", "<number>", "0");
+    ASSERT_NE(parsedKeyframes("custom{from{--Pulse:0;--pulse:10;--locked:0;--raw:10}"
+        "to{--Pulse:4;--pulse:30;--locked:1;--raw:20}}", "custom"), nullptr);
+    setAnimationStyle(element, "--locked:9!important;animation:custom 1s linear -.25s both paused");
+    layout.view = lam::up(static_cast<View*>(element));
+    layout.elmt = lam::up(element);
+    css_animation_resolve(element, &layout);
+    EXPECT_DOUBLE_EQ(customNumber(element, "--Pulse"), 1);
+    EXPECT_DOUBLE_EQ(customNumber(element, "--pulse"), 15);
+    EXPECT_DOUBLE_EQ(customNumber(element, "--locked"), 9);
+    EXPECT_DOUBLE_EQ(customNumber(element, "--raw"), 10);
+    css_animation_tick(scheduler->first, .75f);
+    EXPECT_DOUBLE_EQ(customNumber(element, "--Pulse"), 3);
+    EXPECT_DOUBLE_EQ(customNumber(element, "--pulse"), 25);
+    EXPECT_DOUBLE_EQ(customNumber(element, "--raw"), 20);
+    EXPECT_DOUBLE_EQ(customNumber(element, "--locked"), 9);
+    animation_scheduler_cancel(scheduler, scheduler->first);
+    EXPECT_DOUBLE_EQ(customNumber(element, "--Pulse"), 0);
+    EXPECT_EQ(css_compute_element_custom_property(pool, element, "--raw"), nullptr);
+}
+
+TEST_F(AnimationTickTest, RegisteredNeutralEndpointRecapturesAuthoredBaseAfterRestyle) {
+    MockElement mock;
+    DomElement* element = createMockElement(&mock);
+    registerProperty("--neutral", "<number>", "3");
+    ASSERT_NE(parsedKeyframes("neutral{to{--neutral:11}}", "neutral"), nullptr);
+    setAnimationStyle(element, "animation:neutral 1s linear -.5s both paused");
+    layout.view = lam::up(static_cast<View*>(element));
+    layout.elmt = lam::up(element);
+    css_animation_resolve(element, &layout);
+    EXPECT_DOUBLE_EQ(customNumber(element, "--neutral"), 7);
+    for (int i = 0; i < 5; i++) css_animation_resolve(element, &layout);
+    EXPECT_DOUBLE_EQ(customNumber(element, "--neutral"), 7);
+    animation_scheduler_cancel(scheduler, scheduler->first);
+    EXPECT_DOUBLE_EQ(customNumber(element, "--neutral"), 3);
+}
+
+TEST_F(AnimationTickTest, CommaKeyframeSelectorsPreserveSourceOrderAndTiming) {
+    MockElement mock;
+    DomElement* element = createMockElement(&mock);
+    CssKeyframes* frames = parsedKeyframes("group{FROM,100%{opacity:.2}"
+        "25%,75%{opacity:.8;animation-timing-function:steps(1)}"
+        "75%{opacity:.6}50{opacity:0}101%,50%{opacity:0}}", "group");
+    ASSERT_NE(frames, nullptr);
+    ASSERT_EQ(frames->stop_count, 5);
+    setAnimationStyle(element, "animation:group 1s linear -.5s both paused");
+    layout.view = lam::up(static_cast<View*>(element));
+    layout.elmt = lam::up(element);
+    css_animation_resolve(element, &layout);
+    EXPECT_FLOAT_EQ(mock.in_line.opacity, .8f);
+    css_animation_tick(scheduler->first, .75f);
+    EXPECT_FLOAT_EQ(mock.in_line.opacity, .6f);
+    css_animation_tick(scheduler->first, 1.0f);
+    EXPECT_FLOAT_EQ(mock.in_line.opacity, .2f);
+}
+
+TEST_F(AnimationTickTest, RegisteredDimensionsInterpolateCanonicalLengthsAndPercentages) {
+    MockElement mock;
+    DomElement* element = createMockElement(&mock);
+    registerProperty("--offset", "<length-percentage>", "0px");
+    registerProperty("--count", "<integer>", "0");
+    CssDeclaration* a = css_parse_property_declaration("--offset", 8, "20px", 4, pool);
+    CssDeclaration* b = css_parse_property_declaration("--offset", 8, "50%", 3, pool);
+    ASSERT_NE(a, nullptr);
+    ASSERT_NE(b, nullptr);
+    const CssValue* left = css_compute_custom_property_value(pool, element, "--offset", a->value);
+    const CssValue* right = css_compute_custom_property_value(pool, element, "--offset", b->value);
+    const CssValue* mixed = css_interpolate_custom_property_value(pool, element, "--offset", left, right, .5f);
+    CssMathEvaluationContext evaluation = {};
+    evaluation.preserve_percentages = true;
+    CssMathResult result = css_math_evaluate(mixed, &evaluation);
+    ASSERT_EQ(result.type, CSS_MATH_LENGTH_PERCENT);
+    EXPECT_DOUBLE_EQ(result.value, 10);
+    EXPECT_DOUBLE_EQ(result.percentage, 25);
+    a = css_parse_property_declaration("--count", 7, "-2", 2, pool);
+    b = css_parse_property_declaration("--count", 7, "3", 1, pool);
+    left = css_compute_custom_property_value(pool, element, "--count", a->value);
+    right = css_compute_custom_property_value(pool, element, "--count", b->value);
+    mixed = css_interpolate_custom_property_value(pool, element, "--count", left, right, .5f);
+    result = css_math_evaluate(mixed, &evaluation);
+    EXPECT_DOUBLE_EQ(result.value, 1);
 }
 
 TEST_F(AnimationTickTest, FractionalIterationEndRestoresFilledEffectAfterRelayout) {
@@ -1660,6 +2240,47 @@ TEST_F(AnimationTickTest, OpacityAnimation) {
     EXPECT_EQ(animation_events.iterations, 0u);
     EXPECT_DOUBLE_EQ(animation_events.elapsed, 0.0);
 
+    for (const char* type : types)
+        dom_remove_event_listener(target.get(), js_name_item(type), callback.get(), ItemNull);
+    event_document->js_has_dom_realm = false;
+    // pointerup collides with animationstart; doom_blur with animationiteration.
+    // A prefilter hit alone must not retain tasks for either unobserved event.
+    TemplateHandlerEntry collision_handlers[2] = {};
+    collision_handlers[0].event_name = "pointerup";
+    collision_handlers[0].next = &collision_handlers[1];
+    collision_handlers[1].event_name = "doom_blur";
+    TemplateEntry collision_entry = {};
+    collision_entry.handlers = collision_handlers;
+    collision_entry.handler_event_mask = UINT64_MAX;
+    TemplateRegistry collision_registry = {};
+    collision_registry.first = &collision_entry;
+    collision_registry.author_event_mask = UINT64_MAX;
+    TemplateRegistry* saved_registry = g_template_registry;
+    struct RestoreRegistry {
+        TemplateRegistry* saved;
+        ~RestoreRegistry() { g_template_registry = saved; }
+    } restore_registry = {saved_registry};
+    g_template_registry = &collision_registry;
+    EXPECT_TRUE(template_registry_has_author_handler(g_template_registry, "pointerup"));
+    EXPECT_FALSE(template_registry_has_author_handler(g_template_registry, "animationstart"));
+    ap.duration = .25f;
+    ap.iteration_count = -1;
+    AnimationInstance* unobserved = css_animation_create(scheduler, element, &ap, &kf, 0.0, pool);
+    ASSERT_NE(unobserved, nullptr);
+    ((CssAnimState*)unobserved->state)->ui_context = &ui;
+    animation_instance_sample(unobserved, 1.0);
+    js_event_loop_drain();
+    size_t before_bytes = 0, before_count = 0;
+    pool_get_stats(context->pool, &before_bytes, &before_count);
+    for (unsigned i = 1; i <= 2048; i++) {
+        animation_instance_sample(unobserved, 1.0 + i * .25);
+        js_event_loop_drain();
+    }
+    size_t after_bytes = 0, after_count = 0;
+    pool_get_stats(context->pool, &after_bytes, &after_count);
+    // D4.5.1v4: unobserved Lambda-document events retain no timer shapes.
+    EXPECT_EQ(after_bytes, before_bytes);
+    EXPECT_EQ(after_count, before_count);
 }
 
 TEST_F(AnimationTickTest, ColorAnimation) {

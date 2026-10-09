@@ -56,7 +56,7 @@ static bool render_effect_backdrop_active(const RenderEffectBackdrop* backdrop) 
 }
 
 static void render_effect_backdrop_finish_opacity(RenderEffectBackdrop* backdrop,
-                                                  float opacity) {
+                                                  float opacity, const RadialMaskPaint* mask = nullptr) {
     if (!render_effect_backdrop_active(backdrop)) {
         return;
     }
@@ -65,7 +65,7 @@ static void render_effect_backdrop_finish_opacity(RenderEffectBackdrop* backdrop
     bool premultiplied = rdcon->ui_context && rdcon->ui_context->surface &&
         rdcon->ui_context->surface->alpha_mode == IMAGE_ALPHA_PREMULTIPLIED;
     rc_composite_opacity(rdcon, backdrop->x, backdrop->y,
-                         backdrop->width, backdrop->height, opacity, premultiplied);
+                         backdrop->width, backdrop->height, opacity, premultiplied, mask);
     backdrop->active = false;
 }
 
@@ -94,7 +94,6 @@ static void render_effect_filter_backdrop_info(const FilterProp* filter,
     }
 
     bool has_drop_shadow = false;
-    bool has_filter_opacity = false;
     float ds_offset_x = 0;
     float ds_offset_y = 0;
     float ds_blur = 0;
@@ -111,18 +110,13 @@ static void render_effect_filter_backdrop_info(const FilterProp* filter,
             if (ff->params.blur_radius > filter_blur_max) {
                 filter_blur_max = ff->params.blur_radius;
             }
-        } else if (ff->type == FILTER_OPACITY) {
-            has_filter_opacity = true;
         }
         ff = ff->next;
     }
 
-    // Backdrop save is needed only for filters that produce alpha which must
-    // composite over the underlying surface.
-    *has_backdrop = has_drop_shadow || has_filter_opacity;
-    if (!*has_backdrop) {
-        return;
-    }
+    // Every filter consumes the isolated subtree, including transparent pixels;
+    // filtering the destination rectangle also changes unrelated backdrop paint.
+    *has_backdrop = true;
 
     float ds_expand = has_drop_shadow ?
         (ceilf(fabsf(ds_offset_x)) +
@@ -130,6 +124,18 @@ static void render_effect_filter_backdrop_info(const FilterProp* filter,
          ceilf(ds_blur) + 2) : 0;
     float blur_expand = ceilf(filter_blur_max * 2.0f);
     *expand = ds_expand > blur_expand ? ds_expand : blur_expand;
+}
+
+static Rect render_effect_project_rect(RasterRenderContext* context, Rect rect) {
+    if (!context->has_transform) return rect;
+    float left, top, right, bottom;
+    if (!rdt_matrix_project_rect_bounds(&context->transform, rect.x, rect.y,
+        rect.x + rect.width, rect.y + rect.height, &left, &top, &right, &bottom)) {
+        // viewer-plane crossings are unbounded until the viewport clips them.
+        const Bound& clip = context->block.clip;
+        return {clip.left, clip.top, clip.right - clip.left, clip.bottom - clip.top};
+    }
+    return {left, top, right - left, bottom - top};
 }
 
 RenderEffectGroup render_effect_group_begin(RasterRenderContext* rdcon,
@@ -147,6 +153,10 @@ RenderEffectGroup render_effect_group_begin(RasterRenderContext* rdcon,
     group.has_opacity_group = block->in_line &&
         block->inl()->opacity < 1.0f && block->inl()->opacity >= 0.0f;
     group.opacity = group.has_opacity_group ? block->inl()->opacity : 1.0f;
+    if (block->bound && block->boundary()->mask && block->boundary()->mask->radial_gradient) {
+        group.mask.gradient = lam::up(block->boundary()->mask->radial_gradient.get());
+        group.has_opacity_group = true;
+    }
     group.has_filter = block->filter_prop() && block->filterp()->functions;
     group.has_backdrop_filter = block->backdrop_filter_prop() && block->backdrop_filter_prop()->functions;
 
@@ -155,11 +165,48 @@ RenderEffectGroup render_effect_group_begin(RasterRenderContext* rdcon,
     float y0 = parent_block->y + block->y * scale;
     float x1 = x0 + block->width * scale;
     float y1 = y0 + block->height * scale;
+    if (group.mask.gradient) {
+        // masks cover the entire flattened subtree, then opacity composites once.
+        group.mask.rect = {x0 / scale, y0 / scale, block->width, block->height};
+        RdtMatrix frame = rdcon->transform;
+        RdtMatrix density = {scale, 0, 0, 0, scale, 0, 0, 0, 1};
+        frame = rdt_matrix_multiply(&frame, &density);
+        group.mask.invertible = rdt_matrix_inverse(&frame, &group.mask.inverse);
+    }
     float visual_overflow = render_geometry_block_visual_overflow(block) * scale;
     float effect_x0 = x0 - visual_overflow;
     float effect_y0 = y0 - visual_overflow;
     float effect_x1 = x1 + visual_overflow;
     float effect_y1 = y1 + visual_overflow;
+    Rect effect_rect = render_effect_project_rect(rdcon,
+        {effect_x0, effect_y0, effect_x1 - effect_x0, effect_y1 - effect_y0});
+    if (group.has_filter) {
+        render_filter_prepare_urls(rdcon, block->filter_prop());
+        float expand = render_geometry_filter_effect_expand(block->filter_prop());
+        Rect border = render_geometry_block_border_rect(parent_block, block, scale);
+        expand = fmaxf(expand, render_filter_reference_box(block->filter_prop(), border,
+            render_state_current_transform(rdcon)));
+        float backdrop_expand = 0;
+        render_effect_filter_backdrop_info(block->filter_prop(), &group.has_filter_backdrop, &backdrop_expand);
+        group.filter_rect = render_effect_project_rect(rdcon,
+            view_geometry_expand_rect(border, fmaxf(expand, backdrop_expand)));
+        float left = fminf(effect_rect.x, group.filter_rect.x), top = fminf(effect_rect.y, group.filter_rect.y);
+        float right = fmaxf(effect_rect.x + effect_rect.width, group.filter_rect.x + group.filter_rect.width);
+        float bottom = fmaxf(effect_rect.y + effect_rect.height, group.filter_rect.y + group.filter_rect.height);
+        effect_rect = {left, top, right - left, bottom - top};
+        if (render_filter_is_color_only(block->filter_prop()->functions)) {
+            // Pointwise filters need no samples beyond the visible clip. Large
+            // viewer-crossing boxes must not isolate a whole viewport per plane.
+            Rect visible = render_painter_projection_viewport(rdcon);
+            Bound bound = view_geometry_intersect_bound_rect(
+                {effect_rect.x, effect_rect.y, right, bottom}, visible);
+            effect_rect = {bound.left, bound.top, max(0.0f, bound.right - bound.left),
+                max(0.0f, bound.bottom - bound.top)};
+            group.filter_rect = effect_rect;
+        }
+    }
+    effect_x0 = effect_rect.x; effect_y0 = effect_rect.y;
+    effect_x1 = effect_rect.x + effect_rect.width; effect_y1 = effect_rect.y + effect_rect.height;
 
     if (group.mix_blend_mode) {
         group.mix_blend_backdrop = render_effect_backdrop_begin(rdcon,
@@ -176,18 +223,9 @@ RenderEffectGroup render_effect_group_begin(RasterRenderContext* rdcon,
     }
 
     if (group.has_filter) {
-        float filter_expand = render_geometry_filter_effect_expand(block->filter_prop());
-        Rect border_rect = render_geometry_block_border_rect(parent_block, block, scale);
-        group.filter_rect = view_geometry_expand_rect(border_rect, filter_expand);
-
-        float backdrop_expand = 0;
-        render_effect_filter_backdrop_info(block->filter_prop(),
-                                           &group.has_filter_backdrop,
-                                           &backdrop_expand);
         if (group.has_filter_backdrop) {
             group.filter_backdrop = render_effect_backdrop_begin(rdcon,
-                x0 - backdrop_expand, y0 - backdrop_expand,
-                x1 + backdrop_expand, y1 + backdrop_expand);
+                effect_x0, effect_y0, effect_x1, effect_y1);
             if (group.filter_backdrop.pixels) {
             }
         }
@@ -219,11 +257,17 @@ static bool render_effect_group_apply_filter(RenderEffectGroup* group,
     }
     RasterRenderContext* rdcon = group->context;
     Rect filter_rect = group->filter_rect;
-
-
+    Bound source_clip = *clip;
+    if (render_effect_backdrop_active(&group->filter_backdrop)) {
+        // spatial filters must not sample or overwrite the saved backdrop
+        // outside their transparent isolated subtree.
+        const auto& source = group->filter_backdrop;
+        source_clip = view_geometry_intersect_bound_rect(source_clip,
+            {(float)source.x, (float)source.y, (float)source.width, (float)source.height});
+    }
     rc_apply_filter(rdcon, filter_rect.x, filter_rect.y,
                     filter_rect.width, filter_rect.height,
-                    block->filter_prop(), clip);
+                    block->filter_prop(), &source_clip);
     return true;
 }
 
@@ -244,7 +288,7 @@ static bool render_effect_group_finish_opacity(RenderEffectGroup* group,
         !render_effect_backdrop_active(&group->opacity_backdrop)) {
         return false;
     }
-    render_effect_backdrop_finish_opacity(&group->opacity_backdrop, group->opacity);
+    render_effect_backdrop_finish_opacity(&group->opacity_backdrop, group->opacity, &group->mask);
     return true;
 }
 

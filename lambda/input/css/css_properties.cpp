@@ -1426,26 +1426,26 @@ static bool css_text_emphasis_position_valid(const CssValue* value) {
     return horizontal_side;
 }
 
-enum CssLogicalBorderPart : uint8_t {
-    CSS_LOGICAL_BORDER_WIDTH,
-    CSS_LOGICAL_BORDER_STYLE,
-    CSS_LOGICAL_BORDER_COLOR,
+enum CssBorderPart : uint8_t {
+    CSS_BORDER_PART_WIDTH,
+    CSS_BORDER_PART_STYLE,
+    CSS_BORDER_PART_COLOR,
 };
 
-static bool css_value_is_logical_border_part(const CssValue* value,
-        CssLogicalBorderPart part, bool allow_global) {
+static bool css_value_is_border_part(const CssValue* value,
+        CssBorderPart part, bool allow_global) {
     if (!value) return false;
     if (value->type == CSS_VALUE_TYPE_KEYWORD) {
         const CssEnumInfo* info = css_enum_info(value->data.keyword);
         if (!info) return false;
         if (info->group == CSS_VALUE_GROUP_GLOBAL) return allow_global;
-        return part == CSS_LOGICAL_BORDER_WIDTH
+        return part == CSS_BORDER_PART_WIDTH
             ? info->group == CSS_VALUE_GROUP_BORDER_WIDTH
-            : part == CSS_LOGICAL_BORDER_STYLE
+            : part == CSS_BORDER_PART_STYLE
                 ? info->group == CSS_VALUE_GROUP_BORDER_STYLE
                 : css_value_is_supported_color(value);
     }
-    if (part == CSS_LOGICAL_BORDER_WIDTH) {
+    if (part == CSS_BORDER_PART_WIDTH) {
         if (value->type == CSS_VALUE_TYPE_LENGTH) {
             return value->data.length.value >= 0.0 &&
                 css_unit_is_length(value->data.length.unit);
@@ -1455,7 +1455,7 @@ static bool css_value_is_logical_border_part(const CssValue* value,
         }
         return css_value_is_length_expression(value, false, false);
     }
-    if (part == CSS_LOGICAL_BORDER_STYLE) {
+    if (part == CSS_BORDER_PART_STYLE) {
         return value->type == CSS_VALUE_TYPE_VAR ||
             (value->type == CSS_VALUE_TYPE_FUNCTION && value->data.function &&
              value->data.function->name &&
@@ -1464,47 +1464,56 @@ static bool css_value_is_logical_border_part(const CssValue* value,
     return css_value_is_supported_color(value);
 }
 
-static bool css_value_is_logical_border(CssPropertyCode property,
+static bool css_value_is_border_components(CssPropertyCode property,
                                         const CssValue* value) {
-    CssLogicalBorderPart part = CSS_LOGICAL_BORDER_WIDTH;
-    bool pair = false;
+    // physical and logical border declarations use the same component grammar.
+    CssBorderPart part = CSS_BORDER_PART_WIDTH;
+    size_t max_values = 1;
     switch (property) {
+        case CSS_PROPERTY_BORDER_STYLE: max_values = 4; part = CSS_BORDER_PART_STYLE; break;
+        case CSS_PROPERTY_BORDER_TOP_STYLE:
+        case CSS_PROPERTY_BORDER_RIGHT_STYLE:
+        case CSS_PROPERTY_BORDER_BOTTOM_STYLE:
+        case CSS_PROPERTY_BORDER_LEFT_STYLE: part = CSS_BORDER_PART_STYLE; break;
+        case CSS_PROPERTY_BORDER_COLOR: max_values = 4; part = CSS_BORDER_PART_COLOR; break;
         case CSS_PROPERTY_BORDER_INLINE_WIDTH:
-        case CSS_PROPERTY_BORDER_BLOCK_WIDTH: pair = true; break;
+        case CSS_PROPERTY_BORDER_BLOCK_WIDTH: max_values = 2; break;
         case CSS_PROPERTY_BORDER_INLINE_START_WIDTH:
         case CSS_PROPERTY_BORDER_INLINE_END_WIDTH:
         case CSS_PROPERTY_BORDER_BLOCK_START_WIDTH:
         case CSS_PROPERTY_BORDER_BLOCK_END_WIDTH: break;
         case CSS_PROPERTY_BORDER_INLINE_STYLE:
         case CSS_PROPERTY_BORDER_BLOCK_STYLE:
-            pair = true;
-            part = CSS_LOGICAL_BORDER_STYLE;
+            max_values = 2;
+            part = CSS_BORDER_PART_STYLE;
             break;
         case CSS_PROPERTY_BORDER_INLINE_START_STYLE:
         case CSS_PROPERTY_BORDER_INLINE_END_STYLE:
         case CSS_PROPERTY_BORDER_BLOCK_START_STYLE:
         case CSS_PROPERTY_BORDER_BLOCK_END_STYLE:
-            part = CSS_LOGICAL_BORDER_STYLE;
+            part = CSS_BORDER_PART_STYLE;
             break;
         case CSS_PROPERTY_BORDER_INLINE_COLOR:
         case CSS_PROPERTY_BORDER_BLOCK_COLOR:
-            pair = true;
-            part = CSS_LOGICAL_BORDER_COLOR;
+            max_values = 2;
+            part = CSS_BORDER_PART_COLOR;
             break;
         case CSS_PROPERTY_BORDER_INLINE_START_COLOR:
         case CSS_PROPERTY_BORDER_INLINE_END_COLOR:
         case CSS_PROPERTY_BORDER_BLOCK_START_COLOR:
         case CSS_PROPERTY_BORDER_BLOCK_END_COLOR:
-            part = CSS_LOGICAL_BORDER_COLOR;
+            part = CSS_BORDER_PART_COLOR;
             break;
         default: return false;
     }
     if (value->type != CSS_VALUE_TYPE_LIST) {
-        return css_value_is_logical_border_part(value, part, true);
+        return css_value_is_border_part(value, part, true);
     }
-    if (!pair || !value->data.list.values || value->data.list.count != 2) return false;
-    return css_value_is_logical_border_part(value->data.list.values[0], part, false) &&
-        css_value_is_logical_border_part(value->data.list.values[1], part, false);
+    if (value->data.list.comma_separated || !value->data.list.values ||
+        value->data.list.count < 1 || (size_t)value->data.list.count > max_values) return false;
+    for (int i = 0; i < value->data.list.count; i++)
+        if (!css_value_is_border_part(value->data.list.values[i], part, false)) return false;
+    return true;
 }
 
 static bool css_value_is_corner_radius_component(const CssValue* value) {
@@ -2450,6 +2459,12 @@ bool css_property_validate_value_mode(CssPropertyCode id,
                 keyword == CSS_VALUE_LOCAL ||
                 (info && info->group == CSS_VALUE_GROUP_GLOBAL);
         }
+        case CSS_PROPERTY_BORDER_STYLE:
+        case CSS_PROPERTY_BORDER_COLOR:
+        case CSS_PROPERTY_BORDER_TOP_STYLE:
+        case CSS_PROPERTY_BORDER_RIGHT_STYLE:
+        case CSS_PROPERTY_BORDER_BOTTOM_STYLE:
+        case CSS_PROPERTY_BORDER_LEFT_STYLE:
         case CSS_PROPERTY_BORDER_INLINE_WIDTH:
         case CSS_PROPERTY_BORDER_INLINE_STYLE:
         case CSS_PROPERTY_BORDER_INLINE_COLOR:
@@ -2468,7 +2483,7 @@ bool css_property_validate_value_mode(CssPropertyCode id,
         case CSS_PROPERTY_BORDER_BLOCK_END_WIDTH:
         case CSS_PROPERTY_BORDER_BLOCK_END_STYLE:
         case CSS_PROPERTY_BORDER_BLOCK_END_COLOR:
-            return css_value_is_logical_border(id, value);
+            return css_value_is_border_components(id, value);
         case CSS_PROPERTY_BORDER_TOP_LEFT_RADIUS:
         case CSS_PROPERTY_BORDER_TOP_RIGHT_RADIUS:
         case CSS_PROPERTY_BORDER_BOTTOM_RIGHT_RADIUS:

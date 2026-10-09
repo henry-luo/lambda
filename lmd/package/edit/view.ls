@@ -3,9 +3,9 @@
 //
 // A part the editor cannot edit reads as it renders, never as editable text:
 // Markdown through the Markdown vocabulary, raw or retained HTML through a
-// sanitizing writer. A projection is display only — no script runs, no style
-// reaches the page, no link navigates, no control acts — and is never read
-// back: a save writes the part's source.
+// sanitizing writer. A projection is display only — no script runs, no
+// authored style reaches the page, no link navigates, no control acts — and
+// a save writes the part's source.
 //
 // Element literals need a static tag, so the writers below build HTML text
 // and parse it back into elements for the surface.
@@ -134,25 +134,25 @@ fn md_attrs(item, tag) {
   (if (start == null) "" else attr_html("start", string(start)))
 }
 
-fn md_children(item) => join([for (c in content(item)) md_html(c)], "")
+fn md_children(item, slots) => join([for (c in content(item)) md_html(c, slots)], "")
 
-fn md_html(item) {
+fn md_html(item, slots) {
   if (type(item) == string) { escape_text(item) }
   else if (type(item) == symbol) { format([item], 'html') }
   else if (type(item) != element) { "" }
   else {
     let tag = string(name(item))
-    if (tag == "span") { md_children(item) }
+    if (tag == "span") { md_children(item, slots) }
     else if (tag == "softbreak") { " " }
     else if (tag == "br") { "<br>" }
     else if (tag == "hr") { "<hr>" }
     else if (tag == "code" and item.type == "block") { "<pre><code>" ++ escape_text(plain_text(item)) ++ "</code></pre>" }
     else if (tag == "code") { "<code>" ++ escape_text(plain_text(item)) ++ "</code>" }
-    else if (tag == "math") { math_html(item) }
+    else if (tag == "math") { math_slot(slots, index_of(slots.formulas, item)) }
     // written as read: markdown_view sanitizes the whole block
     else if (tag == "raw-html" or tag == "html-block") { plain_text(item) }
     else if (tag == "footnote-ref") { "<sup class=\"edit-view-note\">[" ++ escape_text(string(item.ref)) ++ "]</sup>" }
-    else if (tag == "a") { "<a" ++ attr_html("title", string(item.href or "")) ++ ">" ++ md_children(item) ++ "</a>" }
+    else if (tag == "a") { "<a" ++ attr_html("title", string(item.href or "")) ++ ">" ++ md_children(item, slots) ++ "</a>" }
     else if (tag == "img") {
       "<img" ++ attr_html("src", string(item.src or "")) ++ attr_html("alt", string(item.alt or "")) ++
         (if (item.style == null) "" else attr_html("style", string(item.style))) ++ ">"
@@ -160,13 +160,28 @@ fn md_html(item) {
     else if (tag == "input") {
       "<input type=\"checkbox\" disabled=\"disabled\"" ++ (if (item.checked != null) " checked=\"checked\"" else "") ++ ">"
     }
-    else if (member(md_html_tags, tag)) { "<" ++ tag ++ md_attrs(item, tag) ++ ">" ++ md_children(item) ++ "</" ++ tag ++ ">" }
+    else if (member(md_html_tags, tag)) { "<" ++ tag ++ md_attrs(item, tag) ++ ">" ++ md_children(item, slots) ++ "</" ++ tag ++ ">" }
     // an element the vocabulary does not name reads as its content
-    else { md_children(item) }
+    else { md_children(item, slots) }
   }
 }
 
-// The view of one parsed Markdown block. Its raw HTML tags are single
-// tokens, so the block is sanitized whole: a tag it opens around Markdown
-// text closes as the source closes it.
-pub fn markdown_view(item) => html_view(md_html(item))
+fn math_nodes(item) => if (type(item) != element) []
+  else if (name(item) == 'math') [item]
+  else [for (child in content(item), formula in math_nodes(child)) formula]
+
+fn unused_math_marker(source, marker) => if (contains(source, marker)) unused_math_marker(source, marker ++ "-") else marker
+fn math_slot(slots, index) => "<span " ++ slots.marker ++ "=\"" ++ string(index) ++ "\"></span>"
+fn restore_math(markup, slots, index) => if (index >= len(slots.formulas)) markup
+  else restore_math(replace(markup, math_slot(slots, index), math_html(slots.formulas[index])), slots, index + 1)
+
+// Sanitize each complete block so raw opening/closing tags keep their pairing.
+pub fn markdown_view(item) {
+  let formulas = math_nodes(item)
+  // Sanitize authored HTML before inserting generated SVG: its font declarations are required.
+  // A marker absent from the source keeps authored tags from claiming a generated projection.
+  let slots = {formulas: formulas, marker: unused_math_marker(lower(plain_text(item)), "data-edit-math-slot")}
+  let sanitized = safe_html(parsed_body(md_html(item, slots)))
+  let items = parsed_body(restore_math(sanitized, slots, 0))
+  if (shows_something(items)) items else []
+}

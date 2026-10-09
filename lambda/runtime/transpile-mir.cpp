@@ -8201,6 +8201,34 @@ static bool fn_has_parameter_default(AstFuncNode* fn_node) {
     return false;
 }
 
+struct MirDefaultScopeScan {
+    AstFuncNode* function;
+    bool needs_activation;
+};
+
+static bool mir_default_scope_node(AstNode* node, void* opaque) {
+    MirDefaultScopeScan* scan = (MirDefaultScopeScan*)opaque;
+    if (node->node_type == AST_NODE_FUNC_EXPR || node->node_type == AST_NODE_FUNC) {
+        scan->needs_activation = true;
+    } else if (node->node_type == AST_NODE_IDENT) {
+        NameEntry* entry = ((AstIdentNode*)node)->entry;
+        for (AstNamedNode* parameter = scan->function->param; parameter;
+                parameter = (AstNamedNode*)parameter->next) {
+            if (entry && entry->node == (AstNode*)parameter) scan->needs_activation = true;
+        }
+        for (FnCapture* capture = scan->function->captures; capture; capture = capture->next) {
+            if (entry == capture->entry) scan->needs_activation = true;
+        }
+    }
+    return !scan->needs_activation;
+}
+
+static bool mir_default_needs_activation(AstFuncNode* function, AstNode* value) {
+    MirDefaultScopeScan scan = {function, false};
+    walk_lambda_ast(value, mir_default_scope_node, &scan, false);
+    return scan.needs_activation;
+}
+
 // Leaving a function or loop early joins (or, on an error exit, cancels and
 // joins) the children of every task scope opened since `scope_base`.
 static void transpile_task_scope_unwind_to(
@@ -32990,7 +33018,19 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node,
             // call wrapper and performs no extra borrow/COW admission, so
             // forcing the route only stripped the *sibling* scalar arguments of
             // their raw lanes (D3.3.1, D5.2).
-            if ((borrowed_var_call && fn_def && !native_call) ||
+            bool omitted_default = false;
+            int default_index = 0;
+            for (AstNamedNode* parameter = fn_def ? fn_def->param : NULL;
+                    parameter && default_index < LAMBDA_MAX_FUNCTION_ARGS;
+                    parameter = (AstNamedNode*)parameter->next, default_index++) {
+                TypeParam* contract = lambda_type_param(parameter->type);
+                omitted_default |= !resolved_args[default_index] && contract && contract->default_value &&
+                    mir_default_needs_activation(fn_def, contract->default_value);
+            }
+            // scope-dependent defaults need the callee's earlier parameters and captures;
+            // closed expressions keep the existing native call lane.
+            if ((omitted_default && !routed_to_boxed_entry) ||
+                    (borrowed_var_call && fn_def && !native_call) ||
                     (native_call && call_nfi->record_result &&
                      mt->record_call_target != call_node)) {
                 entry_name_buf = strbuf_new_cap(64);
@@ -33692,7 +33732,12 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node,
                     } else {
                         // Check for default value in TypeParam
                         TypeParam* tp = type_param;
-                        if (tp && tp->default_value) {
+                        if (routed_to_boxed_entry && tp && tp->default_value) {
+                            MIR_reg_t missing = new_reg(mt, "default_missing", MIR_T_I64);
+                            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                                MIR_new_reg_op(mt->ctx, missing), MIR_new_uint_op(mt->ctx, ITEM_MISSING_ARGUMENT)));
+                            arg_ops[i] = MIR_new_reg_op(mt->ctx, missing);
+                        } else if (tp && tp->default_value) {
                             MIR_reg_t val = transpile_box_item(mt, tp->default_value);
                             arg_root_slots[i] = create_gc_root_slot(mt, val);
                             arg_ops[i] = MIR_new_reg_op(mt->ctx, val);
@@ -45553,6 +45598,8 @@ static void prepass_forward_declare_one(MirTranspiler* mt, AstNode* node) {
                 }
                 AstFuncNode* saved_enclosing = mt->prepass_enclosing;
                 mt->prepass_enclosing = fn_node;
+                // defaults may create function values before the body runs.
+                if (fn_node->param) prepass_forward_declare(mt, (AstNode*)fn_node->param);
                 if (fn_node->body) prepass_forward_declare(mt, fn_node->body);
                 mt->prepass_enclosing = saved_enclosing;
                 break;
@@ -45713,7 +45760,8 @@ static void prepass_forward_declare_one(MirTranspiler* mt, AstNode* node) {
 
             strbuf_free(name_buf);
 
-            // Recurse into function body to find nested function definitions
+            // default expressions and the body both own nested function definitions.
+            if (fn_node->param) prepass_forward_declare(mt, (AstNode*)fn_node->param);
             if (fn_node->body) prepass_forward_declare(mt, fn_node->body);
             break;
         }
@@ -46161,6 +46209,11 @@ static void prepass_create_interp_module_vars(MirTranspiler* mt,
             continue;
         }
         AstNode* node = entry->node;
+        // compile-time types have no T0 slab value; retain their type-list lowering.
+        if (mir_is_type_definition_binding(node) || (node &&
+                (node->node_type == AST_NODE_STRING_PATTERN ||
+                 node->node_type == AST_NODE_SYMBOL_PATTERN ||
+                 node->node_type == AST_NODE_OBJECT_TYPE))) continue;
         TypeId type_id = node && node->type ? node->type->type_id : LMD_TYPE_ANY;
         if (node && (node->node_type == AST_NODE_FUNC ||
                 node->node_type == AST_NODE_FUNC_EXPR ||
@@ -48782,7 +48835,7 @@ Input* run_script_mir(Runtime *runtime, const char* source, char* script_path,
 
 // Document loaders select this fixed native contract instead of generated code.
 static const LambdaDocumentTransformConfig lambda_document_transforms[] = {
-    {"pdf", "lambda.pdf.pdf", "pdf_to_html", LAMBDA_DOCUMENT_TRANSFORM_SOURCE_PARSED, true},
+    {"pdf", "lambda.pdf.pdf", "pdf_to_document", LAMBDA_DOCUMENT_TRANSFORM_SOURCE_PARSED, true},
     {"latex", "lambda.latex.latex", "render_document", LAMBDA_DOCUMENT_TRANSFORM_SOURCE_PARSED, true},
     {"tikz", "lambda.doc.tikz.tikz", "render_document", LAMBDA_DOCUMENT_TRANSFORM_SOURCE_PARSED, true},
     {"graph", "lambda.graph.document", "to_html", LAMBDA_DOCUMENT_TRANSFORM_SOURCE_PARSED, true},

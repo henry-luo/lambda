@@ -1,0 +1,13 @@
+{
+  "name": "Lambda CSS timing handlers without a JavaScript realm",
+  "html": "test/demo/doom/fixtures/_timing.ls",
+  "viewport": {"width": 200, "height": 120},
+  "events": [
+    {"type": "wait", "ms": 30},
+    {"type": "assert_attribute", "target": {"selector": "#timing"}, "attribute": "data-start", "equals": "1"},
+    {"type": "advance_time", "ms": 150, "steps": 6},
+    {"type": "assert_attribute", "target": {"selector": "#timing"}, "attribute": "data-iteration", "equals": "1"},
+    {"type": "advance_time", "ms": 200, "steps": 8},
+    {"type": "assert_attribute", "target": {"selector": "#timing"}, "attribute": "data-end", "equals": "1"}
+  ]
+}

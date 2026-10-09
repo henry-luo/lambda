@@ -1,0 +1,65 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Observer interfaces</title></head>
+<body><div id="target"></div><div id="result">pending</div><script>
+    const target = document.getElementById('target');
+    const result = document.getElementById('result');
+    function check(name, value) {result.setAttribute('data-' + name, String(value));}
+    const constructors = [MutationObserver, ResizeObserver, IntersectionObserver];
+    const instances = constructors.map(function (Constructor) {return new Constructor(function () {});});
+    check('prototypes', instances.every(function (observer, index) {
+        return Object.getPrototypeOf(observer) === constructors[index].prototype &&
+            observer instanceof constructors[index];
+    }));
+    check('tags', instances.every(function (observer, index) {
+        return Object.prototype.toString.call(observer) === '[object ' + constructors[index].name + ']';
+    }));
+    check('methods', instances.every(function (observer, index) {
+        return ['observe', 'disconnect'].every(function (name) {
+            return !Object.prototype.hasOwnProperty.call(observer, name) &&
+                observer[name] === constructors[index].prototype[name] && observer[name].name === name;
+        });
+    }));
+    check('lengths', constructors.every(function (Constructor) {
+        return Constructor.length === 1 && Constructor.prototype.disconnect.length === 0;
+    }) && MutationObserver.prototype.observe.length === 1 &&
+        ResizeObserver.prototype.observe.length === 1 && IntersectionObserver.prototype.observe.length === 1);
+    check('surface', typeof ResizeObserver.prototype.takeRecords === 'undefined' &&
+        typeof MutationObserver.prototype.unobserve === 'undefined' &&
+        IntersectionObserver.prototype.takeRecords.length === 0 &&
+        ResizeObserver.prototype.unobserve.length === 1 && IntersectionObserver.prototype.unobserve.length === 1);
+    const mutation = instances[0];
+    MutationObserver.prototype.observe.call(mutation, target, {attributes: true});
+    target.setAttribute('data-probe', 'first');
+    const records = MutationObserver.prototype.takeRecords.call(mutation);
+    check('records', records.length === 1 && records[0].type === 'attributes' &&
+        records[0].target === target && records[0].attributeName === 'data-probe');
+    check('drained', mutation.takeRecords().length === 0);
+    MutationObserver.prototype.disconnect.call(mutation);
+    target.setAttribute('data-probe', 'second');
+    check('disconnected', mutation.takeRecords().length === 0);
+    let forged = false;
+    try {MutationObserver.prototype.observe.call(Object.create(MutationObserver.prototype), target, {attributes: true});}
+    catch (error) {forged = error instanceof TypeError;}
+    check('forged', forged);
+    let crossKind = false;
+    try {MutationObserver.prototype.disconnect.call(instances[1]);}
+    catch (error) {crossKind = error instanceof TypeError;}
+    check('kind', crossKind);
+    check('geometry', instances.slice(1).every(function (observer, index) {
+        const prototype = constructors[index + 1].prototype;
+        prototype.observe.call(observer, target);
+        prototype.unobserve.call(observer, target);
+        prototype.disconnect.call(observer);
+        return true;
+    }));
+    let forgedGeometry = false;
+    try {ResizeObserver.prototype.observe.call({}, target);}
+    catch (error) {forgedGeometry = error instanceof TypeError;}
+    check('geometry-receiver', forgedGeometry);
+    check('intersection-records', IntersectionObserver.prototype.takeRecords.call(instances[2]).length === 0);
+    check('construct-only', constructors.every(function (Constructor) {
+        try {Constructor(function () {}); return false;}
+        catch (error) {return error instanceof TypeError;}
+    }));
+    result.textContent = 'complete';
+</script></body></html>

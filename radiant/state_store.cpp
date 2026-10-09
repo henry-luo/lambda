@@ -4448,6 +4448,7 @@ void scroll_state_set_position_for_view(DocState* state, View* view, void* pane_
             state->scroll_y = v_pos;
         }
         state->version++;
+        state->scroll_position_bumps++;
         sm_guard.commit();
         state_assert_after_mutation(state, "scroll_state_set_position_for_view");
     }

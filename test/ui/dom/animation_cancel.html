@@ -1,0 +1,90 @@
+<!doctype html>
+<style>
+body { margin: 0; }
+#target { width: 40px; height: 10px; background: red; opacity: .9; }
+</style>
+<div id="target"></div>
+<button id="start">start</button>
+<button id="cancel">cancel</button>
+<button id="seek">seek</button>
+<button id="cancel-zero">cancel zero</button>
+<button id="seek-zero">seek zero</button>
+<button id="convert">conversion</button>
+<button id="neutral-before">neutral before</button>
+<button id="neutral-resume">neutral resume</button>
+<button id="finish">finish</button>
+<button id="check">check</button>
+<div id="result"></div>
+<script>
+var target = document.getElementById('target');
+var result = document.getElementById('result');
+var animation, neutral;
+function check(name, value) { result.setAttribute('data-' + name, String(value)); }
+function sample(width, x, opacity) {
+    var rect = target.getBoundingClientRect();
+    return Math.abs(rect.width - width) < .01 && Math.abs(rect.x - x) < .01 &&
+        Math.abs(Number(getComputedStyle(target).opacity) - opacity) < .01;
+}
+// host events commit geometry between turns; inspect each sample in the next turn.
+document.getElementById('start').addEventListener('click', function () {
+    animation = target.animate([
+        { width: '20px', opacity: .2, transform: 'translateX(0px)' },
+        { width: '100px', opacity: .8, transform: 'translateX(100px)' }
+    ], { duration: 1000, fill: 'both' });
+    animation.pause();
+    animation.currentTime = 500;
+    check('prototype', animation.cancel === Animation.prototype.cancel &&
+        animation.cancel.name === 'cancel' && animation.cancel.length === 0);
+});
+document.getElementById('cancel').addEventListener('click', function () {
+    check('sample', sample(60, 50, .5));
+    check('return', animation.cancel() === undefined);
+    check('unresolved', animation.currentTime === null);
+});
+document.getElementById('seek').addEventListener('click', function () {
+    check('restore', sample(40, 0, .9));
+    Animation.prototype.cancel.call(animation);
+    animation.currentTime = null;
+    check('repeat', animation.currentTime === null && sample(40, 0, .9));
+    animation.currentTime = 0;
+});
+document.getElementById('cancel-zero').addEventListener('click', function () {
+    check('seek', animation.currentTime === 0 && sample(20, 0, .2));
+    animation.cancel();
+});
+document.getElementById('seek-zero').addEventListener('click', function () {
+    animation.currentTime = 0;
+});
+document.getElementById('convert').addEventListener('click', function () {
+    check('same-time', sample(20, 0, .2));
+    var marker = {};
+    var caught = false;
+    try { animation.currentTime = { valueOf: function () { throw marker; } }; }
+    catch (error) { caught = error === marker; }
+    check('conversion', caught && animation.currentTime === 0);
+    caught = false;
+    try { Animation.prototype.cancel.call(Object.create(Animation.prototype)); }
+    catch (error) { caught = error instanceof TypeError; }
+    check('receiver', caught);
+    animation.cancel();
+    neutral = target.animate([{ width: '100px' }], { duration: 1000, fill: 'both' });
+    neutral.pause();
+    neutral.currentTime = 500;
+});
+document.getElementById('neutral-before').addEventListener('click', function () {
+    check('neutral-before', sample(70, 0, .9));
+    neutral.cancel();
+    target.style.width = '80px';
+});
+document.getElementById('neutral-resume').addEventListener('click', function () {
+    neutral.currentTime = 500;
+});
+document.getElementById('finish').addEventListener('click', function () {
+    check('neutral-after', sample(90, 0, .9));
+    neutral.cancel();
+});
+document.getElementById('check').addEventListener('click', function () {
+    check('final', sample(80, 0, .9));
+    result.textContent = 'complete';
+});
+</script>

@@ -1,0 +1,20 @@
+<!doctype html>
+<html><head><style>
+@property --level { syntax: '<number>'; inherits: true; initial-value: 1; }
+@property --offset { syntax: '<length>'; inherits: true; initial-value: 0px; }
+@keyframes level { from { --level: 0; } to { --level: 1; } }
+@keyframes offset { from { --offset: 0px; } to { --offset: 32px; } }
+html, body { margin: 0; background: black; }
+#paint, #geometry { --size: 80px; animation: level 1s linear both paused; }
+.lit { position: absolute; top: 0; width: var(--size); height: 80px; background: white; }
+#indirect { left: 0; --alias: var(--level); filter: brightness(var(--alias)); }
+#override { left: 100px; --level: .25; filter: brightness(var(--level)); }
+#sized { position: absolute; left: 200px; top: 0; width: calc(var(--level) * 80px); height: 80px; background: red; }
+#scroll { animation: offset 1s linear both paused; }
+#tile { position: absolute; left: 240px; top: 0; width: 80px; height: 80px;
+    background-image: url('uv-grid.png'); background-position-x: var(--offset); }
+</style></head><body>
+<div id="paint"><div class="lit" id="indirect"></div><div class="lit" id="override"></div></div>
+<div id="geometry"><div id="sized"></div></div>
+<div id="scroll"><div id="tile"></div></div>
+</body></html>

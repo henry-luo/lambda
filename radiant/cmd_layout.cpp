@@ -55,6 +55,9 @@ void log_mem_stage(const char* stage);  // defined in radiant/window.cpp
 #include "../lambda/input/css/css_formatter.hpp"
 #include "../lambda/input/input.hpp"
 #include "../lambda/input/input-parsers.h"
+#include "../lambda/core/mark_reader.hpp"
+#include "page_fo.hpp"
+#include "layout_paged.hpp"
 #include "../lambda/input/html5/html5_parser.h"
 #include "../lambda/format/format.h"
 #include "../lambda/runtime/transpiler.hpp"
@@ -2107,6 +2110,7 @@ DocumentJsHostConfig document_js_host_config_inherit(UiContext* uicon,
     if (!source) return config;
     // A child browsing context keeps the host loop and clock policy of its parent.
     config.ui_context = uicon;
+    config.paged_media = uicon ? uicon->paged_options.get() : nullptr;
     config.host_driven_loop = source->js.host_driven_loop;
     config.auto_close_event_loop = source->js.auto_close_event_loop;
     config.virtual_clock_enabled = source->js.virtual_clock_enabled;
@@ -2676,7 +2680,7 @@ DomDocument* load_lambda_document_transform_doc(Url* document_url,
 // The document of the transform configured for `input_type`.
 static DomDocument* load_input_type_transform_doc(const char* input_type, Url* url,
         const LambdaDocumentTransformOption* options, int option_count,
-        int viewport_width, int viewport_height, Pool* pool) {
+        int viewport_width, int viewport_height, Pool* pool, bool print_media = false) {
     const LambdaDocumentTransformConfig* transform =
         lambda_document_transform_for_input_type(input_type);
     if (!transform) {
@@ -2684,11 +2688,21 @@ static DomDocument* load_input_type_transform_doc(const char* input_type, Url* u
         return nullptr;
     }
     return load_lambda_document_transform_doc(url, transform, options, option_count,
-        viewport_width, viewport_height, pool, g_css_resource_policy);
+        viewport_width, viewport_height, pool, g_css_resource_policy, print_media);
 }
 
 static DomDocument* load_pdf_transform_doc(Url* pdf_url, int viewport_width,
-                                            int viewport_height, Pool* pool) {
+        int viewport_height, Pool* pool, const RenderPagedOptions* paged) {
+    if (paged) {
+        char limit[32]; snprintf(limit, sizeof(limit), "%u", paged->import_page_limit ?
+            paged->import_page_limit : paged_layout_options_default().max_pages);
+        LambdaDocumentTransformOption options[] = {
+            {"paged", LAMBDA_DOCUMENT_TRANSFORM_OPTION_BOOL, nullptr, true},
+            {"max_pages", LAMBDA_DOCUMENT_TRANSFORM_OPTION_STRING, limit, false},
+            {"import_pages", LAMBDA_DOCUMENT_TRANSFORM_OPTION_STRING, paged->import_pages ? paged->import_pages.get() : "all", false}
+        };
+        return load_input_type_transform_doc("pdf", pdf_url, options, 3, viewport_width, viewport_height, pool, true);
+    }
     return load_input_type_transform_doc("pdf", pdf_url, nullptr, 0,
                                          viewport_width, viewport_height, pool);
 }
@@ -2712,6 +2726,8 @@ static DomDocument* load_markdown_doc(Url* markdown_url, int viewport_width,
                                       int viewport_height, Pool* pool);
 static DomDocument* load_wiki_doc(Url* wiki_url, int viewport_width,
                                   int viewport_height, Pool* pool);
+static DomDocument* load_fo_doc(Url* url, int width, int height, Pool* pool);
+static DomDocument* load_radiant_page_doc(Url* url, int width, int height, Pool* pool);
 static DomDocument* load_svg_layout_file(Url* url, int width, int height, Pool* pool);
 static DomDocument* load_image_layout_file(Url* url, int width, int height, Pool* pool);
 
@@ -2727,6 +2743,7 @@ static const LayoutFormatRoute layout_format_routes[] = {
     {".pgf", load_tikz_doc},
     {".md", load_markdown_doc}, {".markdown", load_markdown_doc},
     {".wiki", load_wiki_doc}, {".xml", load_xml_doc},
+    {".fo", load_fo_doc}, {".xslfo", load_fo_doc}, {".rpd", load_radiant_page_doc},
     {".svg", load_svg_layout_file}, {".png", load_image_layout_file},
     {".jpg", load_image_layout_file}, {".jpeg", load_image_layout_file},
     {".gif", load_image_layout_file},
@@ -2782,6 +2799,13 @@ static DomDocument* load_layout_special_file(Url* url, const char* path,
                                               bool defer_html_scripts = false) {
     if (handled) *handled = false;
     if (!url || !path || !pool) return nullptr;
+    const RenderPagedOptions* paged = host_config ? host_config->paged_media : nullptr;
+    if (paged && (paged->import_pages || paged->import_page_limit) &&
+        (!file_path_ext(path) || strcmp(file_path_ext(path), ".pdf"))) {
+        if (handled) *handled = true;
+        log_error("[PAGED_IMPORT] source page selection and import budgets require PDF input");
+        return nullptr;
+    }
     // legacy format loaders inherit one request-scoped admission context.
     CssSourceScope source_scope(nullptr, host_config ? host_config->resource_policy : g_css_resource_policy);
 
@@ -2794,7 +2818,7 @@ static DomDocument* load_layout_special_file(Url* url, const char* path,
     if (!ext) return nullptr;
     if (strcmp(ext, ".pdf") == 0) {
         if (handled) *handled = true;
-        return load_pdf_transform_doc(url, width, height, pool);
+        return load_pdf_transform_doc(url, width, height, pool, host_config ? host_config->paged_media : nullptr);
     }
 
     const LayoutFormatRoute* route = layout_find_format_route(ext);
@@ -2845,8 +2869,15 @@ static DomDocument* load_html_doc_no_redirect(Url *base, char* doc_url, int view
 
     DomDocument* doc = nullptr;
 
-    // For HTTP/HTTPS URLs, always route to HTML loader (it handles downloading)
-    if (full_url->scheme == URL_SCHEME_HTTP || full_url->scheme == URL_SCHEME_HTTPS) {
+    const LayoutFormatRoute* page_route = layout_find_format_route(file_path_ext(url_get_pathname(full_url)));
+    bool http_page_input = (page_route && (page_route->loader == load_fo_doc || page_route->loader == load_radiant_page_doc)) ||
+        (file_path_ext(url_get_pathname(full_url)) && !strcmp(file_path_ext(url_get_pathname(full_url)), ".pdf"));
+    if ((full_url->scheme == URL_SCHEME_HTTP || full_url->scheme == URL_SCHEME_HTTPS) && http_page_input) {
+        bool handled = false;
+        doc = load_layout_special_file(full_url, url_get_pathname(full_url), viewport_width,
+            viewport_height, pool, true, &handled, js_host_config, defer_html_scripts);
+        document_apply_js_host_config(doc, js_host_config);
+    } else if (full_url->scheme == URL_SCHEME_HTTP || full_url->scheme == URL_SCHEME_HTTPS) {
         log_info("[load_html_doc] HTTP/HTTPS URL detected, using HTML pipeline: %s", doc_url);
         doc = load_lambda_html_doc_with_host_config(full_url, NULL, viewport_width,
             viewport_height, pool, js_host_config, top_level_cookie_jar, timing, script_timing,
@@ -3689,6 +3720,97 @@ static DomDocument* load_tikz_doc(Url* tikz_url, int viewport_width, int viewpor
                                          viewport_width, viewport_height, pool);
 }
 
+struct PageXmlSourceSpans {
+    Pool* pool;
+    RadiantFoSourceSpan* spans;
+    bool failed;
+};
+
+static void page_xml_source_span(void* context, Element* element, size_t start, size_t end) {
+    PageXmlSourceSpans* source = (PageXmlSourceSpans*)context;
+    RadiantFoSourceSpan* span = (RadiantFoSourceSpan*)pool_alloc(source->pool, sizeof(RadiantFoSourceSpan));
+    if (!span) { source->failed = true; return; }
+    *span = {element, start, end, source->spans}; source->spans = span;
+}
+
+static DomDocument* load_page_xml_doc(Url* url, int width, int height, Pool* pool, bool fo) {
+    if (!url || !pool) return nullptr;
+    bool http = url->scheme == URL_SCHEME_HTTP || url->scheme == URL_SCHEME_HTTPS;
+    LayoutTempPathGuard path = {http ? nullptr : url_to_local_path(url)};
+    CssSourceBuffer source = {};
+    if (!css_load_source(http ? url_get_href(url) : path.path, http, false, &source)) return nullptr;
+    Input* input = Input::create(pool, url);
+    if (!input) { mem_free(source.data); return nullptr; }
+    input->ui_mode = true;
+    PageXmlSourceSpans spans = {pool, nullptr, false};
+    XmlParseOptions parse_options = {true, true, &spans, page_xml_source_span, true};
+    parse_xml_with_options(input, source.data, &parse_options);
+    mem_free(source.data);
+    if (input->parse_failed || spans.failed) return nullptr;
+    ElementReader wrapper(input->root);
+    Element* root = nullptr;
+    for (int64_t i = 0; i < wrapper.childCount(); i++) {
+        ElementReader child = wrapper.childAt(i).asElement();
+        if (!child.isValid()) continue;
+        const Element* element = child.element();
+        const StrView& name = ((TypeElmt*)element->type)->name;
+        if (!name.length || name.str[0] == '?' || name.str[0] == '!') continue;
+        if (root) { log_error("page-input: XML must contain exactly one document element"); return nullptr; }
+        root = const_cast<Element*>(element);
+    }
+    if (!root) { log_error("page-input: XML has no document element"); return nullptr; }
+    DomElement* original = nullptr;
+    DomDocument* document = create_layout_dom(input, root, fo ? "XSL-FO" : "Radiant page",
+        DOM_PAGE_KIND_GENERATED, nullptr, &original);
+    if (!document) return nullptr;
+    if (fo) {
+        RadiantFoOptions options = radiant_fo_options_default(); options.spans = spans.spans;
+        RadiantFoTranslation* translation = radiant_fo_translate(document, original, &options);
+        if (!translation || translation->diagnostic.status != TYPESET_OK) {
+            if (translation) fprintf(stderr, "Error: FO <%s> property=%s bytes=%zu..%zu: %s\n", // PRINTF_OK: source translation diagnostic.
+                translation->diagnostic.qname ? translation->diagnostic.qname : "unknown",
+                translation->diagnostic.property ? translation->diagnostic.property : "",
+                translation->diagnostic.start, translation->diagnostic.end, translation->diagnostic.reason);
+            dom_document_destroy(document); return nullptr;
+        }
+        root = translation->root;
+        if (!radiant_page_set_origins(document, translation->origins)) { dom_document_destroy(document); return nullptr; }
+        original = build_dom_tree_from_element(root, document, nullptr);
+        if (!original) { dom_document_destroy(document); return nullptr; }
+    } else if (!radiant_page_element(original, "page-document")) {
+        log_error("page-input: native document requires page-document in %s", RADIANT_PAGE_NAMESPACE);
+        dom_document_destroy(document); return nullptr;
+    }
+    CssEngine* engine = css_engine_create(pool);
+    CssStylesheet* sheet = engine ? css_parse_stylesheet(engine, "", nullptr) : nullptr;
+    if (!engine || !sheet) { dom_document_destroy(document); return nullptr; }
+    css_engine_set_viewport(engine, width, height);
+    engine->context.print_media = true;
+    // Formatting documents share the CSS collector without starting browser scripts.
+    CssSourceScope source_scope(document);
+    CssStylesheet** authored = nullptr;
+    int authored_count = 0, authored_capacity = 0;
+    collect_stylesheets_in_document_order(root, original, engine,
+        http ? url_get_href(url) : path.path, pool, &authored, &authored_count,
+        &authored_capacity, nullptr);
+    CssStylesheet* fallback[] = {sheet};
+    store_document_stylesheets(document, fallback, 1, authored, authored_count, pool);
+    if (!document->stylesheets) { dom_document_destroy(document); return nullptr; }
+    document->services.cached_css_engine = engine;
+    layout_apply_css_stylesheets(document, original, document->stylesheets,
+        document->stylesheet_count, pool, engine);
+    populate_layout_document(document, original, root, HTML5, url, nullptr);
+    return document;
+}
+
+static DomDocument* load_fo_doc(Url* url, int width, int height, Pool* pool) {
+    return load_page_xml_doc(url, width, height, pool, true);
+}
+
+static DomDocument* load_radiant_page_doc(Url* url, int width, int height, Pool* pool) {
+    return load_page_xml_doc(url, width, height, pool, false);
+}
+
 DomDocument* load_xml_doc(Url* xml_url, int viewport_width, int viewport_height, Pool* pool) {
     auto total_start = time_now_ns();
 
@@ -4286,6 +4408,7 @@ struct LambdaFocusRestore {
     // copied: the rebuild retires the old DOM that owns the string.
     const char* focus_tag;
     char focus_id[128];
+    char* focus_key;
 };
 
 static bool find_child_element_index(DomElement* parent, DomElement* child,
@@ -4344,6 +4467,8 @@ static bool capture_lambda_focus_restore(DocState* state,
     View* focused = focus_get(state);
     if (!focused || !focused->is_element()) return false;
     DomElement* focused_elem = lam::dom_require_element(focused);
+    const char* focus_key = focused_elem->get_attribute("data-focus-key");
+    if (focus_key) out->focus_key = strdup(focus_key);
     if (focused_elem->form_control() &&
         focused_elem->form->control_type == FORM_CONTROL_TEXT) {
         out->fallback_tag = focused_elem->tag_name;
@@ -4423,6 +4548,23 @@ static View* resolve_lambda_focus_restore(DomDocument* doc,
 
     DomElement* elem = element_dom_map_lookup(doc->element_dom_map,
                                               result.element);
+    if (elem && restore->focus_key) {
+        // keyed descendants may reorder or change tag while their template owner survives.
+        DomNode* root = elem;
+        DomNode* node = root;
+        while (node) {
+            if (node->is_element()) {
+                DomElement* candidate = node->as_element();
+                const char* key = candidate->get_attribute("data-focus-key");
+                if (key && strcmp(key, restore->focus_key) == 0) return static_cast<View*>(candidate);
+                if (candidate->first_child) { node = candidate->first_child; continue; }
+            }
+            while (node != root && !node->next_sibling) node = node->parent;
+            if (node == root) break;
+            node = node->next_sibling;
+        }
+        return nullptr;
+    }
     for (int i = 0; elem && i < restore->path_len; i++) {
         int wanted = restore->path[i];
         int index = 0;
@@ -4449,6 +4591,10 @@ static View* resolve_lambda_focus_restore(DomDocument* doc,
 static bool focus_restore_matches(View* view, const LambdaFocusRestore* restore) {
     if (!view || !view->is_element() || !restore->focus_tag) return false;
     DomElement* elem = lam::dom_require_element(view);
+    if (restore->focus_key) {
+        const char* key = elem->get_attribute("data-focus-key");
+        return key && strcmp(key, restore->focus_key) == 0;
+    }
     if (!elem->tag_name || strcmp(elem->tag_name, restore->focus_tag) != 0) return false;
     const char* id = elem->id ? elem->id : "";
     return strcmp(id, restore->focus_id) == 0;
@@ -4456,7 +4602,10 @@ static bool focus_restore_matches(View* view, const LambdaFocusRestore* restore)
 
 static View* restore_lambda_focus(DomDocument* doc, DocState* state, bool had_focus,
                                   const LambdaFocusRestore* restore) {
-    if (!had_focus || !state || !doc || !doc->view_tree || !doc->view_tree->root) return nullptr;
+    if (!had_focus || !state || !doc || !doc->view_tree || !doc->view_tree->root) {
+        free(restore->focus_key);
+        return nullptr;
+    }
     View* focused = resolve_lambda_focus_restore(doc, restore);
     if (focused && (!doc->root || !view_tree_contains_view(
                         static_cast<DomNode*>(doc->root), focused))) {
@@ -4500,6 +4649,7 @@ static View* restore_lambda_focus(DomDocument* doc, DocState* state, bool had_fo
     } else if (focus_has_current(state)) {
         focus_clear(state);
     }
+    free(restore->focus_key);
     return focused;
 }
 
@@ -4579,9 +4729,10 @@ void rebuild_lambda_doc(UiContext* uicon) {
     auto t_layout = time_now_ns();
 
     restore_lambda_focus(doc, state, had_focus, &focus_restore);
+    radiant_queue_template_render_events(doc, doc->root);
 
     if (state && !focus_has_current(state) && doc->view_tree && doc->view_tree->root) {
-        radiant_run_autofocus(doc);
+        radiant_run_autofocus(uicon, doc);
     }
 
     if (state) {
@@ -4659,7 +4810,6 @@ void rebuild_lambda_doc_incremental(UiContext* uicon, RetransformResult* results
     CssEngine* css_engine = (CssEngine*)doc->services.cached_css_engine;
 
     struct { float x, y, w, h; } old_bounds[16] = {};
-    DomElement* new_doms[16] = {};
     for (int i = 0; i < result_count && i < 16; i++) {
         Element* old_elem = results[i].old_result.element;
         DomElement* old_dom = element_dom_map_lookup(doc->element_dom_map, old_elem);
@@ -4741,7 +4891,6 @@ void rebuild_lambda_doc_incremental(UiContext* uicon, RetransformResult* results
             doc->root = lam::up(new_dom);
             doc->input->root = {.element = html_elem};
         }
-        if (i < 16) new_doms[i] = new_dom;
 
         set_layout_dirty_subtree(static_cast<DomNode*>(new_dom), true);
 
@@ -4761,6 +4910,8 @@ void rebuild_lambda_doc_incremental(UiContext* uicon, RetransformResult* results
         }
 
         apply_inline_styles_to_tree(new_dom, doc->document_pool);
+        // each committed subtree owns its next frame; unrelated components stay idle.
+        radiant_queue_template_render_events(doc, new_dom);
     }
     auto t_dom_css = time_now_ns();
 
@@ -4788,7 +4939,7 @@ void rebuild_lambda_doc_incremental(UiContext* uicon, RetransformResult* results
     restore_lambda_focus(doc, state, had_focus, &focus_restore);
 
     if (state && !focus_has_current(state)) {
-        radiant_run_autofocus(doc);
+        radiant_run_autofocus(uicon, doc);
     }
 
     if (state) {

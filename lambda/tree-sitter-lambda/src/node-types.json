@@ -1121,23 +1121,7 @@
         "required": true,
         "types": [
           {
-            "type": "binary",
-            "named": true
-          },
-          {
             "type": "char_class",
-            "named": true
-          },
-          {
-            "type": "datetime",
-            "named": true
-          },
-          {
-            "type": "decimal",
-            "named": true
-          },
-          {
-            "type": "float",
             "named": true
           },
           {
@@ -1145,27 +1129,7 @@
             "named": true
           },
           {
-            "type": "imaginary",
-            "named": true
-          },
-          {
-            "type": "integer",
-            "named": true
-          },
-          {
-            "type": "named_value",
-            "named": true
-          },
-          {
             "type": "range_type",
-            "named": true
-          },
-          {
-            "type": "sized_float",
-            "named": true
-          },
-          {
-            "type": "sized_integer",
             "named": true
           },
           {
@@ -1189,10 +1153,6 @@
         "required": true,
         "types": [
           {
-            "type": "binary",
-            "named": true
-          },
-          {
             "type": "char_class",
             "named": true
           },
@@ -1201,43 +1161,11 @@
             "named": true
           },
           {
-            "type": "datetime",
-            "named": true
-          },
-          {
-            "type": "decimal",
-            "named": true
-          },
-          {
-            "type": "float",
-            "named": true
-          },
-          {
             "type": "identifier",
             "named": true
           },
           {
-            "type": "imaginary",
-            "named": true
-          },
-          {
-            "type": "integer",
-            "named": true
-          },
-          {
-            "type": "named_value",
-            "named": true
-          },
-          {
             "type": "range_type",
-            "named": true
-          },
-          {
-            "type": "sized_float",
-            "named": true
-          },
-          {
-            "type": "sized_integer",
             "named": true
           },
           {
@@ -1287,6 +1215,16 @@
             "named": true
           }
         ]
+      },
+      "tag": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "\\(",
+            "named": false
+          }
+        ]
       }
     }
   },
@@ -1298,10 +1236,6 @@
       "multiple": false,
       "required": true,
       "types": [
-        {
-          "type": "binary",
-          "named": true
-        },
         {
           "type": "char_class",
           "named": true
@@ -1315,43 +1249,11 @@
           "named": true
         },
         {
-          "type": "datetime",
-          "named": true
-        },
-        {
-          "type": "decimal",
-          "named": true
-        },
-        {
-          "type": "float",
-          "named": true
-        },
-        {
           "type": "identifier",
           "named": true
         },
         {
-          "type": "imaginary",
-          "named": true
-        },
-        {
-          "type": "integer",
-          "named": true
-        },
-        {
-          "type": "named_value",
-          "named": true
-        },
-        {
           "type": "range_type",
-          "named": true
-        },
-        {
-          "type": "sized_float",
-          "named": true
-        },
-        {
-          "type": "sized_integer",
           "named": true
         },
         {
@@ -5317,7 +5219,7 @@
     "fields": {
       "end": {
         "multiple": false,
-        "required": true,
+        "required": false,
         "types": [
           {
             "type": "binary",
@@ -5367,7 +5269,7 @@
       },
       "start": {
         "multiple": false,
-        "required": true,
+        "required": false,
         "types": [
           {
             "type": "binary",
@@ -5415,6 +5317,20 @@
           }
         ]
       }
+    },
+    "children": {
+      "multiple": true,
+      "required": false,
+      "types": [
+        {
+          "type": "string",
+          "named": true
+        },
+        {
+          "type": "symbol",
+          "named": true
+        }
+      ]
     }
   },
   {
@@ -6183,15 +6099,15 @@
     "named": false
   },
   {
+    "type": "\\(",
+    "named": false
+  },
+  {
     "type": "]",
     "named": false
   },
   {
     "type": "^",
-    "named": false
-  },
-  {
-    "type": "a",
     "named": false
   },
   {
@@ -6258,10 +6174,6 @@
   {
     "type": "current_parent_expr",
     "named": true
-  },
-  {
-    "type": "d",
-    "named": false
   },
   {
     "type": "datetime",
@@ -6440,10 +6352,6 @@
     "named": false
   },
   {
-    "type": "s",
-    "named": false
-  },
-  {
     "type": "sized_float",
     "named": true
   },
@@ -6493,10 +6401,6 @@
   },
   {
     "type": "view",
-    "named": false
-  },
-  {
-    "type": "w",
     "named": false
   },
   {

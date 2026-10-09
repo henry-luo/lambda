@@ -30,7 +30,7 @@ float layout_table_cell_vertical_align_target(int valign, float content_area_hei
 
 // shared track distribution; callers resolve source-specific widths and spacing first.
 void layout_table_distribute_fixed_columns(float* widths, size_t columns,
-    float* content_width, float specified_width, size_t unspecified_columns);
+    float* content_width, float specified_width, size_t unspecified_columns, const float* proportions = nullptr);
 
 // borrowed intrinsic tracks; adapters retain their own measurement storage.
 struct LayoutTableColumnWidths {

@@ -530,6 +530,7 @@ ViewPageBox* view_tree_page_append(ViewTree* tree, float width, float height,
     page->side = side;
     page->blank = blank;
     page->page_number = static_cast<uint32_t>(model->page_count + 1);
+    page->sequence_page = page->folio = page->page_number;
     pages[model->page_count++] = page;
     model_append_child(model->root, &page->node);
     return page;
@@ -598,6 +599,11 @@ ViewTree* view_tree_page_instances_create(ViewTree* source,
         instance->referenced_page = material->node.ref;
         instance->style = material->style;
         instance->name = material->name;
+        instance->sequence = material->sequence;
+        instance->fixed = material->fixed;
+        instance->sequence_page = material->sequence_page;
+        instance->folio = material->folio;
+        instance->label = material->label;
     }
     if (shell->model->page_count == owner->model->page_count && view_tree_model_commit(shell))
         status = view_tree_preview_arrange(shell, selection, options);

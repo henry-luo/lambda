@@ -1,0 +1,72 @@
+{
+  "pose": {
+    "name": "e1m1-lift-lowered",
+    "map": "E1M1",
+    "skill": 1,
+    "time": 1,
+    "camera": "player",
+    "player": {
+      "x": 3472,
+      "y": -3872,
+      "angle": -1.5707963267948966
+    },
+    "lift": 70,
+    "landmarks": [
+      {
+        "name": "lift shaft wall",
+        "rect": [
+          122,
+          192,
+          16,
+          16
+        ],
+        "rgb_min": [
+          20,
+          20,
+          20
+        ],
+        "rgb_max": [
+          35,
+          35,
+          35
+        ],
+        "max_mean_channel_delta": 8
+      }
+    ]
+  },
+  "viewport": {
+    "width": 660,
+    "height": 500,
+    "scale": 1
+  },
+  "browser": "HeadlessChrome/154.0.8037.57",
+  "source": "fixtures/_pose.ls and the shared scene/presenter; authored declarations exported without computed geometry.",
+  "html_sha256": "9efa9da3912281708ccea59bd33c8445242c308a6e70d4553763cd8bc3626fec",
+  "browser_sha256": "0ac5cede5291fc072a55817db94efe27a813b4497544eae467bdbeba7562ec95",
+  "native_sha256": "05dbc8036bdde28b8cdd034deaa17d005507e0fc48fc2d2bf7859634a1cd6b04",
+  "native_binary_sha256": "ccf436fbdc9e5d700a7b65d8592a4a64b2c6ef57124c71f725f3e531033423df",
+  "validation": {
+    "landmarks": [
+      {
+        "name": "lift shaft wall",
+        "rect": [
+          122,
+          192,
+          16,
+          16
+        ],
+        "native_rgb": [
+          27.23828125,
+          27.23828125,
+          27.23828125
+        ],
+        "browser_rgb": [
+          27.21875,
+          27.21875,
+          27.21875
+        ]
+      }
+    ],
+    "passed": true
+  }
+}

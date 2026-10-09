@@ -8,6 +8,9 @@
 > to the MathLive box model itself, then use that model to retire the remaining
 > hardcoded islands instead of adding more side-channel fields.
 
+> Current status (2026-10-09): Phases 11–12 replace and remove the MathLive
+> renderer. Phases 1–10 below record its historical migration.
+
 ## 1. Current State
 
 As of the Math4 endpoint:
@@ -500,10 +503,9 @@ The default is bundled CMU Serif, with existing CMU style faces and small
 KaTeX symbol/alphabet faces. Noto Sans Math remains a MATH-table test fixture
 under `test/lambda/math/fonts`. Explicit binary font snapshots keep resource
 acquisition in Lambda IO.
-SVG carries the measured glyph outlines, so downstream font substitution cannot
-change geometry. Chart measurement uses direct text records. Legacy
-`metrics_data` remains only behind the explicit `mathlive.ls` compatibility
-entry point and its low-level fixtures; production math does not import it.
+SVG originally carried measured glyph outlines; the RAD07-L3 revision below
+preserves native text painting with embedded fonts. Chart measurement uses direct text records. Phase 12 removes
+the transitional `mathlive.ls` adapter and its fixed `metrics_data` tables.
 
 Validation (2026-10-09): all 78 selected math/LaTeX/metrics/editor integration
 checks, 15 native font tests, and four editor math UI fixtures pass. The
@@ -522,10 +524,80 @@ Limits: direct text measurement shares the current SVG placement/shaping
 capabilities; it adds no shaping engine. MATH accents with a finite variant set
 stop at the largest supplied variant. Ordinary faces without constructions
 use geometric outline stretching, which can change stroke weights.
-Font caches are query-local, and math
-outlines trade selectable text for deterministic measured/painted geometry.
+Explicit font queries reuse one native snapshot per `EvalContext` (2026-10-09).
+The capsule owns its font contexts and complete byte/style identity independently
+of GC values, replaces the entry only after successful validation, and releases
+it at context teardown (**D5.4.2–D5.4.4**). Identity includes resource order,
+family, size, weight, slant and every font byte; a family name or GC address is
+insufficient. The key is capped at 8 MiB; larger snapshots and queries without
+explicit faces retain query-local contexts. `math_metrics`, `font_metrics` and
+`measure_text` share this path, avoiding repeated WOFF2 decompression for every
+formula while keeping resource acquisition in Lambda IO (**D7.1.2v2**).
+Platform fallback handles are also cached inside their owning `FontContext`,
+not a process-global table (**D5.4.3**). A handle retains pool-owned storage;
+sharing it between concurrent query/view contexts made iframe teardown release
+a handle after its original pool had gone. The native two-context regression
+`PlatformFallbackHandlesStayWithTheirOwningContext` and the existing LaTeX
+iframe navigation fixture cover this ownership boundary.
+`test_font_snapshot_reuse.ls` covers equivalent snapshots, changed bytes/styles,
+corrupt input, size changes, shared measurements and missing glyphs, including
+forced collection with freed-memory poisoning. Before/after release viewer
+artifacts for `test/input/math_intensive_test.tex` are retained under
+`temp/math-load/`; viewport PNGs at four distinct scroll positions are
+byte-identical.
+Three interleaved fresh-process runs per release binary (original/final/final/
+original/original/final, with
+`LAMBDA_AUTO_CLOSE=1`) measured median process time **20.28 s → 5.11 s**
+(3.97× faster, 75% lower). This includes startup, initial rendering and teardown;
+it excludes user dwell time. Each process starts with an empty native query
+cache; filesystem/platform caches are warm. No build or test from this task
+ran concurrently; ambient machine activity is recorded with the timing artifacts.
+These numbers are macOS measurements, not cross-platform gates.
+
+Cache validation: the snapshot regression passes with every-allocation GC and
+freed-memory poisoning; all 15 font unit tests, 108 vector tests and five focused
+viewer regressions pass. Three final-release iframe navigation replays and the
+four-position math render comparison finish with zero tracked live allocations.
+The Test262 baseline passes all 40,261 cases with no retries. The final Lambda
+baseline is 6,509/6,511: `edit_view_only` and the batched
+`math_test_math_html_output` mismatch also reproduce with the original release;
+the short math batch produces byte-identical HTML in both releases. The full
+Radiant gate retains existing CSS-list and CSS-memory mismatches; its iframe
+teardown failure was fixed and verified by the focused final-release runs.
+An optional native sweep remains incomplete because four standalone runners
+have unrelated geometry/boundary link failures. An extra every-allocation-GC
+iframe replay is also not a passing gate: the original crashes, while the final
+release misses the timed URL assertions. Logs and exact artifacts remain under
+`temp/math-load/`.
+
+**RAD07-L3** (2026-10-09) changes ordinary math
+glyphs to SVG `<text>` with explicit resolved family, weight, style and size.
+Used bundled/supplied faces accompany each SVG as embedded `@font-face` rules;
+installed-font options require the same fonts in the viewer. Unencoded MATH
+variants/assembly pieces retain paths because standard SVG text cannot address
+a font-local glyph ID. Geometric stretching and rules remain unchanged.
+The native metrics response copies the resolved style alongside geometry
+(**D4.2.2v2**); resource acquisition remains in Lambda IO (**D7.1.2v2**).
+
+The pixel audit found CMU italic paths have about 21–24% less ink than native
+Chrome text at 16px. Radiant now rasterizes eligible SVG text at its final
+visible font size using the normal glyph compositor, including uniform
+viewBox/device scaling. Retained rendering owns the glyph pixels after
+temporary font contexts die. Rotation, skew, nonuniform stretch, paint servers,
+strokes and vector export retain geometry. The same-font 16px SVG text sample
+changed from −20.15%/−23.24% ink versus Chrome to +4.53%/+2.25% at 1×/2×.
+See [RAD07-L3](radiant/Radiant_Issue_Ledger.md#rad07-l3) for the audit and limits.
+Embedding full font resources increases standalone SVG size; no subset-font
+generator is introduced. Editor Markdown projections retain generated font
+declarations after sanitizing authored HTML. Native SVG tests (10), the math
+corpus (921), and two document-math UI cases pass. The broader gates retain
+a LaTeX corpus timeout, paged-layout failure and an interpreter round-trip
+corruption reproduced with the pre-change renderer under forced GC; see
+RAD07-L3 for exact checks and limitations. Full baseline acceptance is not
+claimed.
 SVG titles retain the source expression. The Phase 1–10 acceptance criteria
-below describe the retained MathLive adapter; Phase 11 uses the gates above.
+below describe the historical MathLive adapter; Phases 11–12 use the font and
+SVG gates instead.
 
 Font audit and revision (2026-10-08, user): **MATH is an optional enhancement.**
 The 8 existing KaTeX WOFF2 faces and 12 CMU WOFF2 faces have no MATH table;
@@ -552,6 +624,99 @@ CMU sans/monospace, and the existing script/calligraphic/fraktur/AMS alphabets.
 Missing symbols try the authored bundled symbol families before platform
 fallback. Native MATH parser tests now use the test-only Noto fixture;
 production rendering neither reads nor requires that fixture.
+
+### Phase 12 — Remove the Legacy MathLive Renderer
+
+Implemented (2026-10-09, user): remove `mathlive.ls`, the HTML box/context/atom
+renderer, fixed metrics and their generator, class/font tables, MathLive-only
+formatting, CSS, probes and low-level compatibility tests. The public entry
+point remains `lambda.doc.math.math`, with font facts supplied by Radiant and
+layout policy in Lambda (**D7.1.1 / D7.1.2v2**). MATH remains optional.
+
+Document viewer and TikZ shells no longer load the retired math stylesheets;
+LaTeX document text keeps its CMU stylesheet. AMS commands in prose now use the
+same font-driven SVG renderer. Shared symbol mappings, spacing policy, syntax
+helpers and the fonts used by the current renderer remain.
+
+`make test-math-corpus` replaces the strict MathLive-markup target and remains
+in the Lambda baseline lane. It runs the retained formula corpus through the
+public renderer, rejecting errors, nonfinite dimensions/transforms, invalid
+SVG view boxes and external-font/legacy markup dependencies. Historical
+reference snapshots remain test data; matching their HTML is no longer a
+contract. The font-layout, ordinary-font and integration goldens continue to
+check measured/painted agreement and document behavior.
+
+Validation: 921/921 formula cases pass the SVG corpus; all 69 selected package
+checks and two editor/viewer UI fixtures pass. The larger LaTeX document corpus
+initially exceeded the harness's 60-second limit under concurrent load, then
+passed in isolation (55 seconds); its direct output also matches the golden.
+The document viewer compiles, and the production import/legacy-symbol audit
+finds no remaining dependencies.
+The required full interpreter sweep reports 1,053 matches, 54 exclusions,
+zero tier mismatches and three timeouts. Only retired fixture entries are
+removed from the committed lists; unrelated reclassifications from the shared
+checkout are not part of this change.
+
+### Phase 13 — Keep Outlined Math Responsive While Scrolling
+
+Implemented (2026-10-09): release profiling of `math_comprehensive.md` traced
+most scrolling time to SVG hit testing: repeated CSS parsing, inherited font
+contexts, ancestor transforms and unused stroke geometry. Scroll-position
+updates also invalidated otherwise unchanged SVG style caches.
+
+Radiant now retains the document's SVG cascade across scrolling, invalidating
+it for native style writes, DOM changes, selector state, layout and resource
+changes. SMIL base-value queries remain separate from completed animation
+samples. A synchronous hit walk shares font/transform results, skips stroke
+work when pointer-events only needs filled geometry, and rejects fill misses
+using contour bounds. Plain SVG transforms no longer allocate a CSS parser
+pool. Cached SVG layers apply their device transform once, including when a
+vector-backed blit is required. Visible overflow and precise stroke/clip
+targeting remain supported. This stays within the existing package/native
+boundary (**D7.1.1 / D7.1.2v2**); math layout and font selection remain in the
+Lambda package.
+
+Release validation: 30 headless wheel events at 1000×800 improved from about
+5.4 seconds to 21 milliseconds per event including repaint; after the first
+two events, the average is 15 milliseconds. The new scrolling/style-mutation
+fixture, SVG animation/interaction fixtures, and native vector/CSS suites
+cover cache invalidation and geometry preservation. Validation passes 394 UI
+baseline checks, 128 SVG fixtures, 96 native vector checks and 81 CSS checks.
+The broader visual gate retains the unchanged `pp_btn_shapes_01` threshold
+mismatch; its earlier and updated renderings are pixel-identical.
+
+Follow-up for `view test/input/math_intensive_test.tex` (2026-10-09): native
+text hit queries still rebuilt the entire host cascade per glyph, and native
+text measurement searched for unused ThorVG font files. Geometry queries now
+share the document cascade and retain logical character-cell paths, while
+ThorVG file resolution happens only for a backend that needs it. Selector
+matchers record dynamic state dependencies, including failed `:hover` tests,
+so scrolling preserves state-independent SVG styles without suppressing hover
+updates. DOM/style/layout changes, font resources and animation generations
+still expire the relevant results. The document owns retained paths and callers
+receive independent copies (**D4.2.6**); these native rendering caches preserve
+the package boundary (**D7.1.1 / D7.1.2v2**).
+
+Release validation for this TeX input: two control runs had median wheel latency
+4.37–4.57 seconds; the exact installed release had 151–152 milliseconds in two
+confirmation runs (about 30× lower). All twelve wheel events together fell from
+92.6–117.3 seconds to 8.83–8.91 seconds, excluding document startup. The controls
+and candidate use identical frozen objects except the SVG renderer and selector
+matcher. Control medians varied 4.7%; optimized medians varied 0.3%. All hit-target
+sequences match, and five viewport PNGs are byte-identical. Cold blank-area hits
+still reach about four seconds when the geometry cache for SVGs with visible
+overflow must be populated.
+
+The new wheel fixture passes 16 assertions and exits with zero tracked live
+allocations; the new hover fixture passes eight pixel/target/scroll assertions.
+The native vector suite passes 110 tests, UI baseline 400 fixtures, view UI 11,
+DOM UI 136, and the render baseline passes. `make test-radiant-baseline` records
+4,135 passes, 350 partial passes and eight failures: the same CSS list-layout
+and CSS-memory regressions in both control and final releases, plus six INFO-log
+assertions whose messages are compiled out in release. All six log-dependent
+checks pass against an isolated debug host. Timing, binary/source hashes, object
+inventory and pixel comparisons are retained in
+`temp/math-scroll/performance-comparison.json`; debug runs are validation only.
 
 ## 7. Risk Register
 

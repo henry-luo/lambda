@@ -601,7 +601,7 @@ static bool style_builder_materialize_owned(StyleEpochManager* manager,
             element->specified_style, builder->entries, builder->count,
             element->doc->document_pool)) return false;
     if (builder->count) {
-        element->style_version++;
+        element->advance_style_version();
         element->set_needs_style_recompute(true);
     }
     builder->count = 0;

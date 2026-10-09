@@ -23,6 +23,8 @@ struct PaintGlyphRun;
 struct PaintImageBox;
 struct ViewModelCheckpoint;
 struct ViewPageGeneration;
+struct RadiantPageSequence;
+struct RadiantFixedPage;
 struct Arena;
 struct hashmap;
 
@@ -57,7 +59,7 @@ struct LayoutViewRef {
 struct ViewNodeState;
 enum ViewFragmentRole : uint8_t {
     VIEW_FRAGMENT_BODY, VIEW_FRAGMENT_MARGIN, VIEW_FRAGMENT_NOTE, VIEW_FRAGMENT_FLOAT,
-    VIEW_FRAGMENT_RUNNING, VIEW_FRAGMENT_REPEATED_TABLE,
+    VIEW_FRAGMENT_RUNNING, VIEW_FRAGMENT_REPEATED_TABLE, VIEW_FRAGMENT_STATIC,
 };
 struct ViewTableRange { size_t column, span; bool missing; };
 struct LayoutViewNode {
@@ -80,6 +82,7 @@ struct LayoutViewNode {
     ViewFragmentRole role;
     bool generated;
     bool clip_content;
+    float clip_inset[4];
     bool first_fragment, last_fragment;
     bool paint_box;
 };
@@ -107,11 +110,16 @@ struct ViewPageBox {
     LayoutViewRef referenced_page; // instances borrow immutable content through their generation lease
     RdtLogicalRect content_rect;
     uint32_t page_number;
+    uint32_t sequence_page, folio;
+    lam::Up<const char> label;
+    lam::Up<const RadiantPageSequence> sequence;
+    lam::Up<const RadiantFixedPage> fixed;
     ViewPageSide side;
     bool blank;
     lam::Up<ViewPageStyle> style;
     lam::Up<const char> name;
     lam::Up<LayoutViewNode> margin_boxes[CSS_PAGE_MARGIN_BOX_COUNT];
+    lam::Up<LayoutViewNode> static_boxes[4];
 };
 
 struct ViewPageRange {

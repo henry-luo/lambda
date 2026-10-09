@@ -1852,3 +1852,25 @@ size_t str_cursor_count_run(StrCursor* c, char marker) {
 const char* str_cursor_mark(const StrCursor* c) {
     return c ? c->p : NULL;
 }
+
+size_t str_format_roman(uint64_t value, char* buffer, size_t capacity, bool uppercase) {
+    static const char* digits[3][10] = {
+        {"", "c", "cc", "ccc", "cd", "d", "dc", "dcc", "dccc", "cm"},
+        {"", "x", "xx", "xxx", "xl", "l", "lx", "lxx", "lxxx", "xc"},
+        {"", "i", "ii", "iii", "iv", "v", "vi", "vii", "viii", "ix"}
+    };
+    const char* parts[] = {digits[0][value % 1000 / 100],
+        digits[1][value % 100 / 10], digits[2][value % 10]};
+    uint64_t thousands = value / 1000;
+    size_t tail = strlen(parts[0]) + strlen(parts[1]) + strlen(parts[2]);
+    if (!value || !buffer || capacity <= tail || thousands >= capacity - tail) return 0;
+    size_t length = (size_t)thousands;
+    memset(buffer, 'm', length);
+    for (size_t i = 0; i < 3; i++) {
+        size_t count = strlen(parts[i]);
+        memcpy(buffer + length, parts[i], count); length += count;
+    }
+    buffer[length] = '\0';
+    if (uppercase) str_upper_inplace(buffer, length);
+    return length;
+}

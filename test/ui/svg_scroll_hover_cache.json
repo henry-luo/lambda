@@ -1,0 +1,20 @@
+{
+  "name": "SVG style snapshots preserve hover invalidation before and after wheel scrolling",
+  "html": "test/ui/svg_scroll_hover_cache.html",
+  "viewport": {"width": 400, "height": 300},
+  "events": [
+    {"type": "assert_pixel", "x": 40, "y": 160, "max_r": 8, "max_g": 8, "min_b": 247},
+    {"type": "mouse_move", "x": 40, "y": 160},
+    {"type": "assert_pixel", "x": 40, "y": 160, "min_r": 247, "max_g": 8, "max_b": 8},
+    {"type": "mouse_move", "x": 300, "y": 200},
+    {"type": "assert_pixel", "x": 40, "y": 160, "max_r": 8, "max_g": 8, "min_b": 247},
+    {"type": "scroll", "x": 300, "y": 200, "dy": -1, "dx": 0},
+    {"type": "assert_scroll", "x": 0, "y": 50, "tolerance": 1},
+    {"type": "assert_pixel", "x": 40, "y": 110, "max_r": 8, "max_g": 8, "min_b": 247},
+    {"type": "mouse_move", "x": 40, "y": 110},
+    {"type": "assert_hit_test", "x": 40, "y": 110, "expected_selector": "#glyph"},
+    {"type": "assert_pixel", "x": 40, "y": 110, "min_r": 247, "max_g": 8, "max_b": 8},
+    {"type": "mouse_move", "x": 300, "y": 200},
+    {"type": "assert_pixel", "x": 40, "y": 110, "max_r": 8, "max_g": 8, "min_b": 247}
+  ]
+}

@@ -69,11 +69,7 @@ fn resource_key(paint) string | error {
         paint.r1, paint.r2, paint.spread, [for (stop in paint.stops) [stop.offset, stop.color, stop.opacity]]]
         else [paint.pattern, paint.spacing, paint.stroke_width, paint.angle, paint.color,
             paint.opacity, paint.cross, paint.background];
-    let serialized = format(key, {type: "json", compact: true});
-    let encoded = if (serialized is error) serialized else format(binary(serialized), 'json');
-    // content identity prevents distinct paints in independently rendered SVGs from aliasing.
-    if (encoded is error) encoded else
-        replace(replace(replace(slice(encoded, 1, len(encoded) - 1), "+", "-"), "/", "_"), "=", "")
+    util.resource_key(key)
 }
 
 pub fn plan(values, scope = "chart") {

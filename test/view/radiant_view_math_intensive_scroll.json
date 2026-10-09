@@ -1,0 +1,200 @@
+{
+  "name": "Math intensive LaTeX wheel scrolling preserves viewport and SVG targeting",
+  "html": "test/input/math_intensive_test.tex",
+  "viewport": {
+    "width": 1200,
+    "height": 800
+  },
+  "events": [
+    {
+      "type": "assert_scroll",
+      "x": 0,
+      "y": 0,
+      "tolerance": 2
+    },
+    {
+      "type": "mouse_move",
+      "x": 600,
+      "y": 400
+    },
+    {
+      "type": "scroll",
+      "x": 600,
+      "y": 400,
+      "dx": 0,
+      "dy": -8
+    },
+    {
+      "type": "assert_scroll",
+      "x": 0,
+      "y": 400,
+      "tolerance": 2
+    },
+    {
+      "type": "scroll",
+      "x": 600,
+      "y": 400,
+      "dx": 0,
+      "dy": -8
+    },
+    {
+      "type": "assert_scroll",
+      "x": 0,
+      "y": 800,
+      "tolerance": 2
+    },
+    {
+      "type": "scroll",
+      "x": 600,
+      "y": 400,
+      "dx": 0,
+      "dy": -8
+    },
+    {
+      "type": "assert_scroll",
+      "x": 0,
+      "y": 1200,
+      "tolerance": 2
+    },
+    {
+      "type": "assert_hit_test",
+      "x": 600,
+      "y": 400,
+      "expected_tag": "text"
+    },
+    {
+      "type": "scroll",
+      "x": 600,
+      "y": 400,
+      "dx": 0,
+      "dy": -8
+    },
+    {
+      "type": "assert_scroll",
+      "x": 0,
+      "y": 1600,
+      "tolerance": 2
+    },
+    {
+      "type": "scroll",
+      "x": 600,
+      "y": 400,
+      "dx": 0,
+      "dy": -8
+    },
+    {
+      "type": "assert_scroll",
+      "x": 0,
+      "y": 2000,
+      "tolerance": 2
+    },
+    {
+      "type": "scroll",
+      "x": 600,
+      "y": 400,
+      "dx": 0,
+      "dy": -8
+    },
+    {
+      "type": "assert_scroll",
+      "x": 0,
+      "y": 2400,
+      "tolerance": 2
+    },
+    {
+      "type": "scroll",
+      "x": 600,
+      "y": 400,
+      "dx": 0,
+      "dy": -8
+    },
+    {
+      "type": "assert_scroll",
+      "x": 0,
+      "y": 2800,
+      "tolerance": 2
+    },
+    {
+      "type": "scroll",
+      "x": 600,
+      "y": 400,
+      "dx": 0,
+      "dy": -8
+    },
+    {
+      "type": "assert_scroll",
+      "x": 0,
+      "y": 3200,
+      "tolerance": 2
+    },
+    {
+      "type": "scroll",
+      "x": 600,
+      "y": 400,
+      "dx": 0,
+      "dy": 8
+    },
+    {
+      "type": "assert_scroll",
+      "x": 0,
+      "y": 2800,
+      "tolerance": 2
+    },
+    {
+      "type": "scroll",
+      "x": 600,
+      "y": 400,
+      "dx": 0,
+      "dy": 8
+    },
+    {
+      "type": "assert_scroll",
+      "x": 0,
+      "y": 2400,
+      "tolerance": 2
+    },
+    {
+      "type": "scroll",
+      "x": 600,
+      "y": 400,
+      "dx": 0,
+      "dy": 8
+    },
+    {
+      "type": "assert_scroll",
+      "x": 0,
+      "y": 2000,
+      "tolerance": 2
+    },
+    {
+      "type": "scroll",
+      "x": 600,
+      "y": 400,
+      "dx": 0,
+      "dy": 8
+    },
+    {
+      "type": "assert_scroll",
+      "x": 0,
+      "y": 1600,
+      "tolerance": 2
+    },
+    {
+      "type": "mouse_move",
+      "x": 600,
+      "y": 400
+    },
+    {
+      "type": "assert_scroll",
+      "x": 0,
+      "y": 1600,
+      "tolerance": 2
+    },
+    {
+      "type": "assert_hit_test",
+      "x": 600,
+      "y": 400,
+      "expected_tag": "svg"
+    }
+  ]
+}

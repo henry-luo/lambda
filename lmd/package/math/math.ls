@@ -1,5 +1,4 @@
-// Public font-driven math API. Math5 Phase 11; the old markup adapter lives in
-// mathlive.ls and is an explicit compatibility import, never a hidden fallback.
+// Public font-driven math API. Math5 Phases 11–12.
 import typeset: .typeset
 
 // Options: display, color, font_family, fonts [{font_family, data: binary}],
@@ -11,5 +10,5 @@ pub fn render_display(ast) { render_math(ast, {display: true})^ }
 pub fn render_inline(ast) { render_math(ast, {display: false})^ }
 pub fn render_standalone(ast) { render_math(ast, {display: true, standalone: true})^ }
 
-// Outlined SVG includes its measured glyphs and requires no external font CSS.
+// Each SVG carries the font declarations needed by its text glyphs.
 pub fn stylesheet(options = null) { "" }

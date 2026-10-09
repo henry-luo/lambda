@@ -9,8 +9,13 @@
 #include "../lambda/js/js_interp.hpp"
 #include "../lambda/js/js_function.hpp"
 #include "../lambda/js/js_property_attrs.h"
+#include "../lambda/js/js_object_meta.h"
+#include "../lambda/input/input.hpp"
+#include "../lambda/io/mark_builder.hpp"
+#include "../lib/mem_factory.h"
 #include "../lambda/js/js_runtime.h"
 #include "../lambda/js/js_runtime_state.hpp"
+#include "../lambda/js/js_event_loop.h"
 #include "../lambda/js/js_mir_internal.hpp"
 #include "../lambda/runtime/sys_func_registry.h"
 #include "../lambda/input/input-script-cache.h"
@@ -43,6 +48,74 @@ struct JsExecutionBackendScope {
         else unsetenv("JS_EXEC_BACKEND");
     }
 };
+
+static Item js_apply_getter_collect(void) {
+    heap_gc_collect();
+    return make_js_undefined();
+}
+
+TEST(JsArguments, ArrayLikeGettersRetainEarlierArgumentsAcrossCollection) {
+    const char* backends[] = {"ast", "mir"};
+    for (const char* backend : backends) {
+        SCOPED_TRACE(backend);
+        JsExecutionBackendScope selected(backend);
+        Runtime runtime = {};
+        runtime_init(&runtime);
+        ASSERT_FALSE(item_is_error(transpile_js_to_mir(&runtime, "0;",
+            "apply-getter-setup.js", NULL)));
+        gc_heap_t* gc = runtime.eval_context->heap->gc;
+        gc_set_poison_freed(gc, 1);
+        js_set_global_property(js_name_item("collectApplyArgs"),
+            js_new_native_function(js_apply_getter_collect), 0);
+        // index zero returns an unpublished object; only the argument-list
+        // builder can retain it when index one's getter collects (D5.4.1).
+        const char source[] =
+            "function receive(a, b) { return a.value + b.value; } "
+            "function Box(a, b) { this.value = receive(a, b); } "
+            "function list() { return {length: 2, "
+            "get 0() { return {value: 40}; }, "
+            "get 1() { collectApplyArgs(); return {value: 2}; }}; } "
+            "receive.apply(null, list()) + "
+            "Reflect.apply(receive, null, list()) + "
+            "Reflect.construct(Box, list()).value;";
+        Item result = transpile_js_to_mir(&runtime, source,
+            "apply-getter-roots.js", NULL);
+        EXPECT_FALSE(item_is_error(result));
+        if (!item_is_error(result)) {
+            EXPECT_EQ(js_strict_equal(result, flt2it(126.0)).item, b2it(true));
+        }
+        gc_set_poison_freed(gc, 0);
+        runtime_cleanup(&runtime);
+    }
+}
+
+TEST(JsStructuredClone, RetainsRecursiveDestinationsAcrossEveryAllocation) {
+    const char* backends[] = {"ast", "mir"};
+    for (const char* backend : backends) {
+        SCOPED_TRACE(backend);
+        JsExecutionBackendScope selected(backend);
+        Runtime runtime = {};
+        runtime_init(&runtime);
+        ASSERT_FALSE(item_is_error(transpile_js_to_mir(&runtime, "0;",
+            "clone-roots-setup.js", NULL)));
+        gc_heap_t* gc = runtime.eval_context->heap->gc;
+        gc_set_force_collect_interval(gc, 1);
+        gc_set_poison_freed(gc, 1);
+        const char source[] =
+            "const source = {nested: {value: 40}, list: [{value: 2}]}; "
+            "const cloned = structuredClone(source); "
+            "cloned !== source && cloned.nested !== source.nested && "
+            "cloned.list !== source.list && cloned.list[0] !== source.list[0] && "
+            "cloned.nested.value + cloned.list[0].value === 42;";
+        Item result = transpile_js_to_mir(&runtime, source,
+            "clone-recursive-roots.js", NULL);
+        EXPECT_FALSE(item_is_error(result));
+        if (!item_is_error(result)) EXPECT_EQ(result.item, b2it(true));
+        gc_set_force_collect_interval(gc, 0);
+        gc_set_poison_freed(gc, 0);
+        runtime_cleanup(&runtime);
+    }
+}
 
 TEST(JsDomEvents, NativeFocusConstructionRetainsUncachedRelatedTarget) {
     Runtime runtime = {};
@@ -79,6 +152,47 @@ TEST(JsDomEvents, NativeFocusConstructionRetainsUncachedRelatedTarget) {
             EXPECT_EQ(js_get_name_key(event.get(), "isTrusted").item, b2it(true));
         }
         gc_set_force_collect_interval(gc, 0);
+    }
+    runtime_cleanup(&runtime);
+}
+
+TEST(JsObjectMetadata, LambdaInputShapesRemainNeutralAfterJsBootstrap) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+    const char source[] =
+        "var parsed = JSON.parse('{\"empty\":{},\"point\":{\"x\":1,\"y\":2}}');"
+        "Object.getPrototypeOf(parsed) === Object.prototype && "
+        "Object.getPrototypeOf(parsed.empty) === Object.prototype && "
+        "Object.getPrototypeOf(parsed.point) === Object.prototype;";
+    Item warmup = js_interp_execute_source(&runtime, source, sizeof(source) - 1,
+        "separate-shape-roots.js", NULL);
+    EXPECT_EQ(warmup.item, b2it(true));
+    EXPECT_EQ(EmptyMap.js_meta, nullptr);
+    if (!item_is_error(warmup)) {
+        RootFrame roots(1);
+        Rooted<Item> object(roots, js_new_object());
+        EXPECT_TRUE(js_object_has_class(object.get(), JS_CLASS_OBJECT));
+        Pool* pool = mem_pool_create(NULL, MEM_ROLE_INPUT, "test.js.neutral.input");
+        Input* input = pool ? Input::create(pool) : nullptr;
+        EXPECT_NE(input, nullptr);
+        if (input) {
+            MarkBuilder builder(input);
+            Item empty = builder.map().final();
+            Item point = builder.map().put("x", (int64_t)1)
+                .put("y", (int64_t)2).final();
+            EXPECT_EQ(((TypeMap*)empty.map->type)->js_meta, nullptr);
+            TypeMap* parent = (TypeMap*)point.map->type;
+            EXPECT_EQ(parent->js_meta, nullptr);
+            // Loading Lambda data after JS bootstrap must still take the
+            // bounded contract edge, rather than clone every call (D3.4.7).
+            Input* tree = runtime_shape_tree();
+            ShapeEntry* x = typemap_first_field(parent);
+            TypeMap* number = type_tree_retype_contract(tree, parent, x, &TYPE_NUMBER);
+            EXPECT_NE(number, nullptr);
+            EXPECT_EQ(type_tree_retype_contract(tree, parent, x, &TYPE_NUMBER), number);
+            if (number) EXPECT_EQ(number->js_meta, nullptr);
+        }
+        if (pool) mem_pool_destroy(pool);
     }
     runtime_cleanup(&runtime);
 }
@@ -4289,6 +4403,33 @@ TEST(JsInterpreter, InitializesInstanceFieldsAtSharedConstructionTime) {
     ASSERT_FALSE(item_is_error(result));
     EXPECT_EQ(js_strict_equal(result, flt2it(42.0)).item, b2it(true));
 
+    runtime_cleanup(&runtime);
+}
+
+TEST(JsEventLoop, BrowserFrameDrainWaitsForLoadBoundary) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+    const char source[] = "globalThis.frameDrainProbe = 0; "
+        "() => { globalThis.frameDrainProbe++; };";
+    Item callback = js_interp_execute_source(&runtime, source, sizeof(source) - 1,
+        "frame-drain-load-boundary.js", nullptr);
+    ASSERT_EQ(get_type_id(callback), LMD_TYPE_FUNC);
+    {
+        RootFrame roots(1);
+        Rooted<Item> callback_root(roots, callback);
+        js_event_loop_set_auto_close_mode(true);
+        js_event_loop_set_auto_close_after_load(false);
+        js_requestAnimationFrame(callback_root.get());
+        js_event_loop_drain_script_turn(true, false);
+        EXPECT_TRUE(js_animation_frame_has_pending());
+        EXPECT_EQ(js_strict_equal(js_get_key_cstr(js_get_global_this(), "frameDrainProbe"),
+            flt2it(0.0)).item, b2it(true));
+        js_event_loop_set_auto_close_after_load(true);
+        js_event_loop_drain_script_turn(true, false);
+        EXPECT_FALSE(js_animation_frame_has_pending());
+        EXPECT_EQ(js_strict_equal(js_get_key_cstr(js_get_global_this(), "frameDrainProbe"),
+            flt2it(1.0)).item, b2it(true));
+    }
     runtime_cleanup(&runtime);
 }
 

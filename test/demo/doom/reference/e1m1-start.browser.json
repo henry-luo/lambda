@@ -1,0 +1,183 @@
+{
+  "pose": {
+    "name": "e1m1-start",
+    "map": "E1M1",
+    "skill": 1,
+    "time": 0,
+    "camera": "player",
+    "landmarks": [
+      {
+        "name": "near column",
+        "rect": [
+          122,
+          172,
+          16,
+          16
+        ],
+        "rgb_min": [
+          20,
+          15,
+          10
+        ],
+        "rgb_max": [
+          45,
+          40,
+          30
+        ],
+        "max_mean_channel_delta": 8
+      },
+      {
+        "name": "blue pool",
+        "rect": [
+          372,
+          220,
+          16,
+          16
+        ],
+        "rgb_min": [
+          0,
+          0,
+          40
+        ],
+        "rgb_max": [
+          3,
+          3,
+          75
+        ],
+        "max_mean_channel_delta": 8
+      },
+      {
+        "name": "foreground floor",
+        "rect": [
+          202,
+          292,
+          16,
+          16
+        ],
+        "rgb_min": [
+          8,
+          8,
+          8
+        ],
+        "rgb_max": [
+          20,
+          20,
+          20
+        ],
+        "max_mean_channel_delta": 8
+      },
+      {
+        "name": "opaque ceiling",
+        "rect": [
+          392,
+          92,
+          16,
+          16
+        ],
+        "rgb_min": [
+          10,
+          10,
+          10
+        ],
+        "rgb_max": [
+          20,
+          20,
+          20
+        ],
+        "max_mean_channel_delta": 8
+      }
+    ]
+  },
+  "viewport": {
+    "width": 660,
+    "height": 500,
+    "scale": 1
+  },
+  "browser": "HeadlessChrome/154.0.8037.57",
+  "source": "fixtures/_pose.ls and the shared scene/presenter; authored declarations exported without computed geometry.",
+  "html_sha256": "63b0eff46c6643514e05f4e740e2baef6f6970398a8b78143364993cf62b379b",
+  "browser_sha256": "c686fdfa632cd478de253a3934f05a1806d3c632633e404d7d10eac1b8a4468e",
+  "native_sha256": "924a0749bb748410188581a3faa4193a811c0709d79183a45b4e3473cd09042a",
+  "native_binary_sha256": "ccf436fbdc9e5d700a7b65d8592a4a64b2c6ef57124c71f725f3e531033423df",
+  "validation": {
+    "landmarks": [
+      {
+        "name": "near column",
+        "rect": [
+          122,
+          172,
+          16,
+          16
+        ],
+        "native_rgb": [
+          33.93359375,
+          26.87109375,
+          19.9375
+        ],
+        "browser_rgb": [
+          29.9296875,
+          23.31640625,
+          16.32421875
+        ]
+      },
+      {
+        "name": "blue pool",
+        "rect": [
+          372,
+          220,
+          16,
+          16
+        ],
+        "native_rgb": [
+          0,
+          0,
+          57.50390625
+        ],
+        "browser_rgb": [
+          0,
+          0,
+          56.02734375
+        ]
+      },
+      {
+        "name": "foreground floor",
+        "rect": [
+          202,
+          292,
+          16,
+          16
+        ],
+        "native_rgb": [
+          12.6328125,
+          12.83203125,
+          12.4921875
+        ],
+        "browser_rgb": [
+          12.734375,
+          12.94140625,
+          12.5703125
+        ]
+      },
+      {
+        "name": "opaque ceiling",
+        "rect": [
+          392,
+          92,
+          16,
+          16
+        ],
+        "native_rgb": [
+          15.25,
+          15.25,
+          15.25
+        ],
+        "browser_rgb": [
+          15.30859375,
+          15.30859375,
+          15.30859375
+        ]
+      }
+    ],
+    "passed": true
+  }
+}

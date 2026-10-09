@@ -2382,8 +2382,20 @@ static int table_apply_fixed_first_row_cell_width(LayoutContext* lycon, ViewTabl
 void layout_table_distribute_fixed_columns(float* explicit_col_widths, size_t columns,
                                                  float* content_width,
                                                  float total_explicit,
-                                                 size_t unspecified_cols) {
+                                                 size_t unspecified_cols, const float* proportions) {
     if (!explicit_col_widths || !columns || !content_width) return;
+    if (proportions) {
+        // retain fixed bases and normalize large weights without overflowing the float track domain.
+        double weight = 0.0;
+        for (size_t i = 0; i < columns; i++) weight += proportions[i];
+        if (weight > 0.0) {
+            float remaining = *content_width - total_explicit;
+            if (remaining < 0.0f) *content_width = total_explicit;
+            else for (size_t i = 0; i < columns; i++)
+                explicit_col_widths[i] += (float)((double)remaining * proportions[i] / weight);
+            return;
+        }
+    }
     if (total_explicit > 0.0f) {
         float remaining_width = *content_width - total_explicit;
         if (unspecified_cols > 0 && remaining_width > 0.0f) {

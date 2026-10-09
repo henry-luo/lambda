@@ -1,0 +1,4 @@
+# Preserve pinned resource bytes, including the upstream license formatting.
+assets/** -text
+data/maps/** -text
+assets/fonts/OFL.txt whitespace=-blank-at-eol,cr-at-eol

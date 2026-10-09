@@ -353,6 +353,10 @@ char* str_dup_upper(const char* s, size_t len);
  *  stops at first non-digit after optional leading sign & whitespace.
  *  *end (if non-NULL) receives pointer past last consumed byte. */
 bool str_to_int64(const char* s, size_t len, int64_t* out, const char** end);
+
+/** format a positive Roman numeral, including repeated thousands.
+ *  returns byte length, or 0 without writing if value/capacity is invalid. */
+size_t str_format_roman(uint64_t value, char* buffer, size_t capacity, bool uppercase);
 bool str_to_uint64(const char* s, size_t len, uint64_t* out, const char** end);
 bool str_to_double(const char* s, size_t len, double* out, const char** end);
 

@@ -67,6 +67,7 @@ static FontContext* g_picture_font_ctx = nullptr;
 
 typedef struct CGClipEntry {
     CGPathRef path;
+    RdtFillRule rule;
 } CGClipEntry;
 
 static const int RDT_CG_INITIAL_CLIP_DEPTH = 8;
@@ -106,7 +107,8 @@ static void cg_apply_active_clips(RdtVectorImpl* cg) {
     for (int i = 0; i < s_cg_clip_depth; i++) {
         if (!s_cg_clip_stack[i].path) continue;
         CGContextAddPath(cg->ctx, s_cg_clip_stack[i].path);
-        CGContextClip(cg->ctx);
+        if (s_cg_clip_stack[i].rule == RDT_FILL_EVEN_ODD) CGContextEOClip(cg->ctx);
+        else CGContextClip(cg->ctx);
     }
 }
 
@@ -766,7 +768,7 @@ void rdt_fill_radial_gradient(RdtVector* vec, RdtPath* p,
 // Clipping
 // ============================================================================
 
-void rdt_push_clip(RdtVector* vec, RdtPath* clip_path, const RdtMatrix* transform) {
+void rdt_push_clip(RdtVector* vec, RdtPath* clip_path, const RdtMatrix* transform, RdtFillRule rule) {
     if (!vec || !vec->impl || !clip_path) return;
     if (!cg_ensure_clip_capacity(s_cg_clip_depth + 1)) {
         return;
@@ -779,6 +781,7 @@ void rdt_push_clip(RdtVector* vec, RdtPath* clip_path, const RdtMatrix* transfor
         copied_path = CGPathCreateMutableCopy(clip_path->cg);
     }
     if (!copied_path) return;
+    s_cg_clip_stack[s_cg_clip_depth].rule = rule;
     s_cg_clip_stack[s_cg_clip_depth++].path = copied_path;
 }
 
@@ -815,12 +818,32 @@ void rdt_clip_restore_depth(int saved_depth) {
 
 void rdt_draw_image(RdtVector* vec, const uint32_t* pixels, int src_w, int src_h,
                     int src_stride, float dst_x, float dst_y, float dst_w, float dst_h,
-                    uint8_t opacity, const RdtMatrix* transform, uint64_t resource_generation, bool straight_alpha, uint64_t resource_identity) {
+                    uint8_t opacity, const RdtMatrix* transform, uint64_t resource_generation, bool straight_alpha,
+                    uint64_t resource_identity, ScaleMode scale_mode) {
     (void)resource_generation;(void)resource_identity;
     if (!vec || !vec->impl || !pixels) return;
     RdtVectorImpl* cg = vec->impl;
 
+    if (transform && (transform->e31 != 0 || transform->e32 != 0 || transform->e33 != 1)) {
+        uint32_t* projected = nullptr;
+        Rect rect;
+        if (!render_image_project_pixels(pixels, src_w, src_h, src_stride,
+            {dst_x, dst_y, dst_w, dst_h}, transform, {0, 0, (float)cg->width, (float)cg->height},
+            scale_mode, straight_alpha, &projected, &rect)) {
+            log_error("[IMAGE_PROJECT] Cannot sample transformed CoreGraphics image");
+            return;
+        }
+        if (projected) {
+            int width = (int)rect.width, height = (int)rect.height; // INT_CAST_OK: projected buffer pixel dimensions
+            rdt_draw_image(vec, projected, width, height, width, rect.x, rect.y, rect.width, rect.height,
+                opacity, nullptr, 0, false, 0, SCALE_MODE_NEAREST);
+            free(projected);
+        }
+        return;
+    }
+
     cg_begin_draw_state(cg);
+    CGContextSetInterpolationQuality(cg->ctx, scale_mode == SCALE_MODE_NEAREST ? kCGInterpolationNone : kCGInterpolationDefault);
 
     if (transform) {
         CGContextConcatCTM(cg->ctx, cg_affine_from_rdt(transform));

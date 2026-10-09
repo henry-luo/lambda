@@ -3,6 +3,7 @@
 #include "dom_engine.h"
 #include "dom.h"
 #include "dom_events.h"
+#include "dom_realm_hooks.h"
 #include "../js/js_event_loop.h"
 #include "../js/js_runtime.h"
 #include "../js/js_runtime_state.hpp"
@@ -33,6 +34,8 @@ typedef struct JsHistoryEventTask {
 struct JsHistoryRuntimeState {
     ArrayList* event_tasks = nullptr;
     bool drain_scheduled = false;
+    Item history_object = ItemNull;
+    bool history_rooted = false;
 };
 
 extern __thread EvalContext* context;
@@ -70,6 +73,11 @@ static void js_history_task_destroy(JsHistoryEventTask* task) {
 
 extern "C" void js_history_reset(void) {
     if (!js_history_runtime_state_get()) return;
+    if (js_history_state->history_rooted) {
+        heap_unregister_gc_root(&js_history_state->history_object.item);
+        js_history_state->history_rooted = false;
+    }
+    js_history_state->history_object = ItemNull;
     if (js_history_event_tasks) {
         for (int i = 0; i < js_history_event_tasks->length; i++) {
             js_history_task_destroy(
@@ -148,12 +156,13 @@ static bool js_history_queue_events(const RadiantHistoryTraversal* traversal,
 
 static void js_history_refresh_object(void) {
     DomDocument* document = js_history_document();
-    if (!document) return;
-    Item global = dom_realm_global();
-    Item history = dom_realm_get_cstr(global, "history");
-    if (get_type_id(history) != LMD_TYPE_MAP) return;
-    dom_realm_set_cstr(history, "length", (Item){.item = i2it(dom_engine_history_length(document))});
-    dom_realm_set_cstr(history, "state", radiant_history_state(document));
+    JsHistoryRuntimeState* state = js_history_runtime_state_get();
+    if (!document || !state || !state->history_rooted) return;
+    RootFrame roots(1);
+    Rooted<Item> history_root(roots, state->history_object);
+    if (!roots.valid()) return;
+    dom_realm_set_cstr(history_root.get(), "length", (Item){.item = i2it(dom_engine_history_length(document))});
+    dom_realm_set_cstr(history_root.get(), "state", radiant_history_state(document));
 }
 
 static const char* js_history_optional_url(Item value) {
@@ -164,13 +173,27 @@ static const char* js_history_optional_url(Item value) {
 
 typedef bool (*JsHistoryStateOperation)(DomDocument*, Item, const char*);
 
+static Item js_history_require_receiver(void) {
+    JsHistoryRuntimeState* state = js_history_runtime_state_get();
+    if (!state || !state->history_rooted ||
+            dom_realm_receiver().item != state->history_object.item) {
+        return dom_realm_throw_type_error("Illegal History receiver");
+    }
+    return ItemNull;
+}
+
 static Item js_history_update_state(Item state, Item title, Item url,
                                     JsHistoryStateOperation operation) {
+    JS_RETURN_IF_ERROR(js_history_require_receiver());
     (void)title;
     DomDocument* document = js_history_document();
     if (!document) return make_js_undefined();
-    JS_ASSIGN_OR_RETURN(cloned_state, js_structuredClone(state));
-    operation(document, cloned_state, js_history_optional_url(url));
+    JS_ROOTS(roots, url_root, url, state_root, state,
+        cloned_root, ItemNull);
+    cloned_root.set(js_structuredClone(state_root.get()));
+    JS_RETURN_IF_ERROR(cloned_root.get());
+    const char* url_text = js_history_optional_url(url_root.get());
+    operation(document, cloned_root.get(), url_text);
     js_history_refresh_object();
     return make_js_undefined();
 }
@@ -178,6 +201,7 @@ JS_FORWARD_STATIC_ITEM(js_history_push, (Item state, Item title, Item url), js_h
 JS_FORWARD_STATIC_ITEM(js_history_replace, (Item state, Item title, Item url), js_history_update_state, (state, title, url, radiant_history_replace_state))
 
 static Item js_history_go(Item delta_item) {
+    JS_RETURN_IF_ERROR(js_history_require_receiver());
     DomDocument* document = js_history_document();
     if (!document) return make_js_undefined();
     double number = js_get_number(delta_item);
@@ -210,24 +234,37 @@ extern "C" void js_history_install_globals(void) {
     DomDocument* document = js_history_document();
     if (!document || !dom_engine_history_initialize(document)) return;
 
-    Item global = dom_realm_global();
-    Item document_proxy = js_get_document_object_value();
-    dom_realm_set_cstr(global, "location", document_proxy);
+    if (!js_history_runtime_state_ensure()) return;
+    JS_ROOTS(roots, global_root, dom_realm_global(),
+        history_root, js_new_object());
+    if (!js_history_state->history_rooted) {
+        // the native receiver identity survives prototype method capture and
+        // collections, and leaves before heap replacement (D5.3.5, D5.4.2).
+        if (!heap_try_register_gc_root(&js_history_state->history_object.item)) return;
+        js_history_state->history_rooted = true;
+    }
+    js_history_state->history_object = history_root.get();
+    dom_install_history_interface(global_root.get(), history_root.get());
+    dom_realm_set_cstr(global_root.get(), "location", js_get_document_object_value());
+    dom_realm_set_cstr(history_root.get(), "scrollRestoration", make_string_item(dom_engine_history_scroll_restoration(document)));
+    dom_realm_set_cstr(global_root.get(), "history", history_root.get());
+    dom_realm_set_native(global_root.get(), js_name_item("focus"), js_history_window_noop);
+    dom_realm_set_native(global_root.get(), js_name_item("blur"), js_history_window_noop);
+    js_history_refresh_object();
+}
 
-    Item history = js_new_object();
+extern "C" void dom_history_install_interface(Item prototype) {
+    RootFrame roots(1);
+    Rooted<Item> prototype_root(roots, prototype);
+    if (!roots.valid()) return;
 #define JS_HISTORY_METHODS(M) \
     M("pushState", js_history_push) M("replaceState", js_history_replace) \
     M("back", js_history_back) M("forward", js_history_forward) M("go", js_history_go)
 #define JS_HISTORY_INSTALL_METHOD(name, target) \
-    dom_realm_set_native(history, make_string_item(name), target);
+    dom_realm_install_method(prototype_root.get(), name, target);
     JS_HISTORY_METHODS(JS_HISTORY_INSTALL_METHOD)
 #undef JS_HISTORY_INSTALL_METHOD
 #undef JS_HISTORY_METHODS
-    dom_realm_set_cstr(history, "scrollRestoration", make_string_item(dom_engine_history_scroll_restoration(document)));
-    dom_realm_set_cstr(global, "history", history);
-    dom_realm_set_native(global, make_string_item("focus"), js_history_window_noop);
-    dom_realm_set_native(global, make_string_item("blur"), js_history_window_noop);
-    js_history_refresh_object();
 }
 
 #undef js_history_state
@@ -238,7 +275,7 @@ static void js_history_capsule_destroy(void* capsule) {
     JsHistoryRuntimeState* state = (JsHistoryRuntimeState*)capsule;
     // The heap-release phase drains rooted traversal tasks before the capsule
     // itself is freed, so no callback Item can outlive its owner heap.
-    if (state->event_tasks || state->drain_scheduled) {
+    if (state->event_tasks || state->drain_scheduled || state->history_rooted) {
         log_error("js-history: context destroyed before traversal tasks were reset");
     }
     mem_free(state);

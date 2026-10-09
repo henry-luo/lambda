@@ -1324,7 +1324,7 @@ static Item js_arraybuffer_wrap_item_with_prototype(JsArrayBuffer* ab,
     m->map_kind = MAP_KIND_ARRAYBUFFER;
     m->type = js_object_type_for_class(shared
         ? JS_CLASS_SHARED_ARRAY_BUFFER : JS_CLASS_ARRAY_BUFFER);
-    if (!m->type) m->type = &EmptyMap;
+    if (!m->type) m->type = js_empty_object_type_map();
     m->data = NULL;
     m->data_cap = 0;
     carrier->payload = ab;
@@ -1832,7 +1832,7 @@ static Item js_typed_array_alloc_carrier(JsTypedArrayType element_type,
     map->type_id = LMD_TYPE_MAP;
     map->map_kind = MAP_KIND_TYPED_ARRAY;
     map->type = js_object_type_for_class(JS_CLASS_TYPED_ARRAY);
-    if (!map->type) map->type = &EmptyMap;
+    if (!map->type) map->type = js_empty_object_type_map();
     map->data = NULL;
     map->data_cap = 0;
     JsTypedArray* typed_array = &carrier->payload;
@@ -2966,7 +2966,7 @@ static Item js_dataview_create(Item buffer, Item offset_item, Item length_item,
     m->type_id = LMD_TYPE_MAP;
     m->map_kind = MAP_KIND_DATAVIEW;
     m->type = js_object_type_for_class(JS_CLASS_DATA_VIEW);
-    if (!m->type) m->type = &EmptyMap;
+    if (!m->type) m->type = js_empty_object_type_map();
     m->data = NULL;
     m->data_cap = 0;
     view_root.set((Item){.map = m});

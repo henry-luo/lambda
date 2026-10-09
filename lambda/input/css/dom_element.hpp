@@ -128,6 +128,8 @@ inline DomJsMutationKind dom_style_mutation_kind(CssPropertyCode prop_id) {
 typedef enum DomJsMutationAttribute {
     DOM_JS_MUTATION_ATTRIBUTE_UNKNOWN,
     DOM_JS_MUTATION_ATTRIBUTE_CLASS,
+    // a data/ARIA attribute absent from relational selector dependencies
+    DOM_JS_MUTATION_ATTRIBUTE_LOCAL,
 } DomJsMutationAttribute;
 
 // tier-1: document-owned journal, survives relayout
@@ -488,6 +490,8 @@ struct DomDocument : DomDocumentResourceData {
     // style nor selector matching. Content caches outside the written subtree
     // (inline SVG layers) key on this instead of every DOM write.
     uint64_t style_content_epoch;
+    // native attribute/style setters also invalidate computed queries before a DOM commit.
+    uint64_t style_query_epoch;
 
     // Constructor
     DomDocument() : input(nullptr), document_pool(nullptr), node_arena(nullptr),
@@ -520,7 +524,7 @@ struct DomDocument : DomDocumentResourceData {
                     pending_scroll_into_view_block(DOM_SCROLL_ALIGN_START),
                     pending_scroll_into_view_inline(DOM_SCROLL_ALIGN_NEAREST),
                     pending_scroll_into_view_behavior(DOM_SCROLL_BEHAVIOR_AUTO),
-                    loader_runtime(nullptr), style_content_epoch(0) {}
+                    loader_runtime(nullptr), style_content_epoch(0), style_query_epoch(0) {}
 
     bool init(Input* input);
     void destroy();
@@ -635,6 +639,7 @@ struct CssCustomProp {
     lam::Up<const char> value_text; // Raw value text for faithful CSSOM serialization
     size_t value_text_len;          // Length of value_text
     lam::Up<CssDeclaration> declaration; // cascade metadata and source-owner record
+    const void* animation_owner; // effect identity; cancellation removes only its samples
     lam::Own<CssCustomProp> next;   // Linked list for simple storage
 };
 
@@ -646,7 +651,7 @@ bool css_custom_property_name_matches(const char* stored_name,
 DomElement* dom_parent_element(DomElement* element);
 DomNode* dom_source_parent(DomNode* node);
 const CssCustomProp* dom_element_lookup_own_custom_property_entry(DomElement* element,
-    const char* name, size_t name_length = (size_t)-1);
+    const char* name, size_t name_length = (size_t)-1, bool exclude_animations = false);
 const CssValue* dom_element_lookup_own_custom_property(DomElement* element,
     const char* name, size_t name_length = (size_t)-1,
     StrView* token_text = nullptr);
@@ -911,6 +916,10 @@ struct DomElement : DomNode {
     uint32_t elmt_flags;         // compact element state; use the accessors below
     // document reference (provides Arena and Input*)
     lam::Up<DomDocument> doc;    // Parent document (provides arena and input)
+    void advance_style_version() {
+        style_version++;
+        if (doc) doc->style_query_epoch++;
+    }
     DomDocument* storage_owner() const {
         return ext && ext->storage_document ? ext->storage_document.get() : doc.get();
     }
@@ -1557,6 +1566,7 @@ bool dom_document_finalize_loader_pool(DomDocument* document, Pool* pool);
  * @return New DomElement or NULL on failure
  */
 DomElement* dom_element_create(DomDocument* doc, const char* tag_name, Element* native_element);
+DomElement* build_dom_tree_from_element(Element* element, DomDocument* document, DomElement* parent);
 
 /**
  * Destroy a DomElement
@@ -1590,6 +1600,10 @@ bool dom_element_commit_inline_declarations(DomElement* element, CssRule* rule, 
 bool dom_element_set_presentation_style(DomElement* element, const char* property,
                                         const char* value, bool* changed);
 bool dom_element_clear_presentation_style(DomElement* element);
+bool dom_element_set_animation_custom_property(DomElement* element,
+    const CssDeclaration* sample, const void* effect, bool* changed);
+bool dom_element_clear_animation_custom_properties(DomElement* element, const void* effect,
+    const char* name = nullptr);
 const char* dom_inline_style_declaration_end(const char* text);
 
 /**

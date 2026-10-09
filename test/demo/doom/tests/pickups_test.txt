@@ -1,0 +1,6 @@
+{
+  caps: [101, 200, 2, false, 61],
+  inventory: [["blue"], 3, [1, 2, 3], true, 400, 60, 12, 24],
+  powerup: [true, false, 0],
+  hazard: [0, 10, 0]
+}

@@ -109,6 +109,7 @@ TypesetStatus typeset_region_plan(const TypesetRegionQueue* queue,
             constraints->available_height - body_height - separator_height - required;
         TypesetRegionConstraints region = *constraints; region.available_height = fmaxf(0.0f, available);
         region.minimum = true;
+        region.retain_tail = false;
         TypesetStatus measured = !eligible || admitted != i || (material->clear_before && i) || available <= 0.0f ? TYPESET_UNPLACEABLE :
             material->measure(material->context, &cursor, &region, material->split, plan.scratch, &minimum[i]);
         if (measured == TYPESET_UNPLACEABLE) {
@@ -126,6 +127,7 @@ TypesetStatus typeset_region_plan(const TypesetRegionQueue* queue,
     }
     float used = 0.0f;
     for (size_t i = 0; status == TYPESET_OK && i < total; i++) {
+        bool incoming = i >= queue->count;
         const TypesetRegionMaterial* material = i < queue->count ? queue->entries[i].material : anchors[i - queue->count];
         TypesetResume cursor = i < queue->count ? queue->entries[i].cursor : material->start;
         uint32_t earliest = i < queue->count ? queue->entries[i].earliest_page : constraints->page_number + material->delay_pages;
@@ -133,8 +135,17 @@ TypesetStatus typeset_region_plan(const TypesetRegionQueue* queue,
         required -= minimum[i].metrics.height + minimum[i].metrics.depth;
         float available = constraints->available_height - body_height - separator_height - used - required;
         TypesetRegionConstraints region = *constraints; region.available_height = available; region.minimum = false;
+        region.retain_tail = constraints->retain_tail && i + 1 == total && !plan.pending_count;
         TypesetRegionSlice slice = {};
         status = material->measure(material->context, &cursor, &region, material->split, plan.scratch, &slice);
+        bool can_defer = !incoming || constraints->defer_anchors || material->defer_anchor;
+        if (status == TYPESET_UNPLACEABLE && region.retain_tail &&
+            (plan.count || ((body_height > 0.0f || constraints->occupied) && can_defer))) {
+            // an indivisible tail can wait after an already progressing prefix, preserving its exact cursor.
+            plan.pending[plan.pending_count++] = {material, cursor, earliest};
+            status = TYPESET_OK; break;
+        }
+        if (status == TYPESET_OK && region.retain_tail && slice.complete) status = TYPESET_NO_PROGRESS;
         if (status == TYPESET_OK) status = region_slice_valid(material, cursor, slice, available);
         if (status != TYPESET_OK) break;
         float height = slice.metrics.height + slice.metrics.depth;

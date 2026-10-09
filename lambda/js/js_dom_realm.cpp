@@ -28,6 +28,8 @@
 #include "../dom/dom_canvas.h"
 #include "../dom/dom_platform.h"
 #include "../dom/dom_cssom.h"
+#include "../dom/dom_history.h"
+#include "../dom/dom_observers.h"
 #include "../dom/dom_realm_hooks.h"
 #include "../dom/realm/dom_realm.h"
 #include "js_runtime.h"
@@ -137,12 +139,87 @@ static Item _iface_proto(Item global, const char* name) {
     return get_type_id(proto) == LMD_TYPE_MAP ? proto : ItemNull;
 }
 
+static Item dom_install_interface_members(Item global, const char* name,
+        void (*install_members)(Item)) {
+    JS_ROOTS(roots, global_root, global, prototype_root, ItemNull);
+    _install_iface(global_root.get(), name);
+    prototype_root.set(_iface_proto(global_root.get(), name));
+    install_members(prototype_root.get());
+    return prototype_root.get();
+}
+
+extern "C" void dom_bind_interface_prototype(Item global, Item object, const char* name) {
+    JS_ROOTS(roots, global_root, global, object_root, object,
+        prototype_root, ItemNull);
+    prototype_root.set(_iface_proto(global_root.get(), name));
+    js_set_prototype(object_root.get(), prototype_root.get());
+}
+
+static void dom_set_interface_method_metadata(Item prototype, const char* name, int length) {
+    JS_ROOTS(roots, prototype_root, prototype, method_root, ItemNull);
+    method_root.set(js_get_name_key(prototype_root.get(), name));
+    js_set_function_name(method_root.get(), js_name_item(name));
+    js_set_formal_length(method_root.get(), length);
+}
+
+template <JsObserverKind Kind>
+static Item dom_observer_constructor(Item callback, Item options) {
+    if (js_get_new_target().item == make_js_undefined().item) {
+        return js_throw_type_error("Observer constructor requires 'new'");
+    }
+    if (Kind == JS_OBSERVER_MUTATION) return dom_mutation_observer_new(callback);
+    if (Kind == JS_OBSERVER_RESIZE) return dom_resize_observer_new(callback);
+    return dom_intersection_observer_new(callback, options);
+}
+
+template <JsObserverKind Kind>
+static void dom_install_observer_constructor(Item global) {
+    JS_ROOTS(roots, global_root, global, prototype_root, ItemNull,
+        constructor_root, ItemNull);
+    const char* name = dom_observer_interface_name(Kind);
+    dom_install_value_constructor(global_root.get(), name, dom_observer_constructor<Kind>, true);
+    constructor_root.set(js_get_name_key(global_root.get(), name));
+    js_set_formal_length(constructor_root.get(), 1);
+    prototype_root.set(_iface_proto(global_root.get(), name));
+    dom_observer_install_interface(prototype_root.get(), Kind);
+    dom_set_interface_method_metadata(prototype_root.get(), "disconnect", 0);
+    dom_set_interface_method_metadata(prototype_root.get(), "observe", 1);
+    if (Kind != JS_OBSERVER_MUTATION) {
+        dom_set_interface_method_metadata(prototype_root.get(), "unobserve", 1);
+    }
+    if (Kind != JS_OBSERVER_RESIZE) {
+        dom_set_interface_method_metadata(prototype_root.get(), "takeRecords", 0);
+    }
+}
+
+extern "C" void dom_install_observer_globals(Item global) {
+    RootFrame roots(1);
+    Rooted<Item> global_root(roots, global);
+    if (!roots.valid()) return;
+    dom_install_observer_constructor<JS_OBSERVER_MUTATION>(global_root.get());
+    dom_install_observer_constructor<JS_OBSERVER_RESIZE>(global_root.get());
+    dom_install_observer_constructor<JS_OBSERVER_INTERSECTION>(global_root.get());
+}
+
+extern "C" void dom_install_history_interface(Item global, Item history) {
+    JS_ROOTS(roots, global_root, global, history_root, history,
+        prototype_root, ItemNull);
+    prototype_root.set(dom_install_interface_members(global_root.get(),
+        "History", dom_history_install_interface));
+    const char* methods[] = {"pushState", "replaceState", "back", "forward", "go"};
+    for (size_t index = 0; index < sizeof(methods) / sizeof(methods[0]); index++) {
+        // WebIDL length excludes optional parameters; the native adapter still
+        // receives the URL/delta operand through its declared ABI (D6.2.2v2).
+        dom_set_interface_method_metadata(prototype_root.get(), methods[index], index < 2 ? 2 : 0);
+    }
+    dom_bind_interface_prototype(global_root.get(), history_root.get(), "History");
+}
+
 extern "C" void dom_install_storage_globals(Item global) {
     RootFrame roots(6);
     Rooted<Item> global_root(roots, global);
-    _install_iface(global_root.get(), "Storage");
-    Rooted<Item> prototype_root(roots, _iface_proto(global_root.get(), "Storage"));
-    dom_storage_install_interface(prototype_root.get());
+    Rooted<Item> prototype_root(roots, dom_install_interface_members(
+        global_root.get(), "Storage", dom_storage_install_interface));
     static const char* methods[] = {"key", "getItem", "setItem", "removeItem", "clear"};
     for (const char* method : methods) {
         js_shape_entry_update_flags(prototype_root.get(), method, strlen(method),
@@ -150,8 +227,8 @@ extern "C" void dom_install_storage_globals(Item global) {
     }
     Rooted<Item> local_root(roots, dom_storage_local_object());
     Rooted<Item> session_root(roots, dom_storage_session_object());
-    js_set_prototype(local_root.get(), prototype_root.get());
-    js_set_prototype(session_root.get(), prototype_root.get());
+    dom_bind_interface_prototype(global_root.get(), local_root.get(), "Storage");
+    dom_bind_interface_prototype(global_root.get(), session_root.get(), "Storage");
     Rooted<Item> local_getter_root(roots, js_new_native_function(dom_storage_local_object));
     Rooted<Item> session_getter_root(roots, js_new_native_function(dom_storage_session_object));
     js_install_native_accessor(global_root.get(), js_name_item("localStorage"),
@@ -479,6 +556,13 @@ static bool _parent_node_receiver(Item receiver) {
     return type == 1 || type == 9 || type == 11;
 }
 
+static bool _child_node_receiver(Item receiver) {
+    Item kind = dom_core_node_type(receiver);
+    if (get_type_id(kind) != LMD_TYPE_INT) return false;
+    int type = it2i(kind);
+    return type == 1 || type == 3 || type == 4 || type == 7 || type == 8 || type == 10;
+}
+
 static bool _document_receiver(Item receiver) {
     Item kind = dom_core_node_type(receiver);
     return get_type_id(kind) == LMD_TYPE_INT && it2i(kind) == 9;
@@ -532,6 +616,8 @@ static void _install_node_interface_members(Item global) {
     static const char* const parent_node_members[] = {
         "children", "childElementCount", "firstElementChild", "lastElementChild",
         "querySelector", "querySelectorAll", NULL};
+    static const char* const child_node_members[] = {
+        "before", "after", "replaceWith", "remove", NULL};
     static const char* const document_members[] = {
         "cookie", "write", "writeln",
         "createElement", "createElementNS", "createTextNode", "createDocumentFragment",
@@ -551,6 +637,9 @@ static void _install_node_interface_members(Item global) {
         {"Attr", "attr", _attribute_receiver, attr_members},
         {"Element", "html_element", _parent_node_receiver, parent_node_members},
         {"DocumentFragment", "html_element", _parent_node_receiver, parent_node_members},
+        {"Element", "dom_node", _child_node_receiver, child_node_members},
+        {"CharacterData", "dom_node", _child_node_receiver, child_node_members},
+        {"DocumentType", "dom_node", _child_node_receiver, child_node_members},
         {"Document", "document", _document_receiver, document_members},
     };
     RootFrame roots(1);
@@ -571,6 +660,7 @@ static void _install_node_interface_members(Item global) {
 
 extern "C" void dom_install_collection_globals(void) {
     Item global = js_get_global_this();
+    dom_install_interface_members(global, "TreeWalker", dom_tree_walker_install_interface);
     _install_iface(global, "Window");
     _link_iface_proto(global, "Window", "EventTarget");
     Item window_proto = _iface_proto(global, "Window");
@@ -589,6 +679,7 @@ extern "C" void dom_install_collection_globals(void) {
     // must still succeed before libraries inspect static Document features.
     static const char* iface_links[][2] = {
         {"Attr", "Node"},
+        {"DocumentType", "Node"},
         {"Document", "Node"}, {"HTMLDocument", "Document"},
         {"Element", "Node"}, {"HTMLElement", "Element"},
         {"SVGElement", "Element"}, {"SVGGraphicsElement", "SVGElement"},
@@ -706,10 +797,13 @@ extern "C" void dom_install_collection_globals(void) {
 }
 
 extern "C" void dom_install_web_animation_globals(void) {
-    Item global = js_get_global_this();
-    dom_install_value_constructor(global, "KeyframeEffect",
+    JS_ROOTS(roots, global_root, js_get_global_this(), prototype_root, ItemNull);
+    dom_install_value_constructor(global_root.get(), "KeyframeEffect",
         dom_keyframe_effect_ctor, true);
-    dom_install_value_constructor(global, "Animation", dom_animation_ctor, true);
+    dom_install_value_constructor(global_root.get(), "Animation", dom_animation_ctor, true);
+    prototype_root.set(_iface_proto(global_root.get(), "Animation"));
+    dom_realm_install_method(prototype_root.get(), "cancel", dom_web_animation_cancel);
+    dom_set_interface_method_metadata(prototype_root.get(), "cancel", 0);
 }
 
 extern "C" void dom_install_option_constructor(void) {

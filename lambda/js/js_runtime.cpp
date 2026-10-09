@@ -6,6 +6,7 @@
  */
 #include "js_runtime_internal.hpp"
 #include "js_object_meta.h"
+#include "../input/input.hpp"
 #include "js_host_hooks.h"
 #include "js_regex_generated_properties.h"
 #include "js_regex_router_scanner.h"
@@ -1114,12 +1115,17 @@ static int js_typemap_storage_capacity(TypeMap* tm) {
     return data_size < 64 ? 64 : data_size;
 }
 
+extern "C" TypeMap* js_empty_object_type_map(void) {
+    return type_tree_map_root(js_input, js_class_meta_for_id(JS_CLASS_OBJECT));
+}
+
 extern "C" Item js_new_object() {
-    js_object_metadata_initialize();
+    TypeMap* root = js_empty_object_type_map();
+    if (!root) return ItemNull;
     Map* m = (Map*)heap_calloc_class(sizeof(Map), LMD_TYPE_MAP, JS_MAP_SIZE_CLASS);
     if (!m) return ItemNull;
     m->type_id = LMD_TYPE_MAP;
-    m->type = &EmptyMap;
+    m->type = root;
     return (Item){.map = m};
 }
 
@@ -1226,7 +1232,6 @@ extern "C" Item js_static_literal_from_recipe(const JsStaticLiteralRecipe* recip
 }
 
 static TypeMap* js_object_type_for_class_impl(int class_id) {
-    js_object_metadata_initialize();
     if (!js_input || !js_input->pool || class_id <= JS_CLASS_NONE ||
             class_id >= JS_CLASS__COUNT) return NULL;
     TypeMap* tm = (TypeMap*)pool_calloc(js_input->pool, sizeof(TypeMap));
@@ -1391,7 +1396,7 @@ extern "C" Item js_proxy_new(Item target, Item handler) {
     m->type_id = LMD_TYPE_MAP;
     m->map_kind = MAP_KIND_PROXY;
     m->type = js_object_type_for_class(JS_CLASS_PROXY);
-    if (!m->type) m->type = &EmptyMap;
+    if (!m->type) m->type = js_empty_object_type_map();
     m->data = NULL;
     m->data_cap = 0;
     proxy_root.set((Item){.map = m});
@@ -5093,8 +5098,7 @@ static bool js_try_get_primitive_string_length_no_gc(Item object, Item* out) {
     // A primitive String's own virtual length precedes String.prototype;
     // its UTF-16 code-unit value cannot be redefined by guest code.
     if (out) {
-        *out = (Item){.item = i2it(js_utf16_len(string->chars,
-            (int)string->len, (bool)string->is_ascii))};
+        *out = (Item){.item = i2it(js_string_utf16_length(string))};
     }
     return true;
 }
@@ -5409,7 +5413,7 @@ extern "C" Item js_get_key_core(Item object, Item key,
                 Item pv = js_map_shape_lookup(m, "__primitiveValue__", 18, &pv_found);
                 if (pv_found && get_type_id(pv) == LMD_TYPE_STRING) {
                     String* pv_str = it2s(pv);
-                    return (Item){.item = i2it(pv_str ? js_utf16_len(pv_str->chars, (int)pv_str->len, (bool)pv_str->is_ascii) : 0)};
+                    return (Item){.item = i2it(pv_str ? js_string_utf16_length(pv_str) : 0)};
                 }
             }
             int64_t string_index = -1;
@@ -5420,7 +5424,7 @@ extern "C" Item js_get_key_core(Item object, Item key,
                     if (pv_found && get_type_id(pv) == LMD_TYPE_STRING) {
                         String* pv_str = it2s(pv);
                         int64_t string_len = pv_str
-                            ? js_utf16_len(pv_str->chars, (int)pv_str->len, (bool)pv_str->is_ascii)
+                            ? js_string_utf16_length(pv_str)
                             : 0;
                         if (string_index >= 0 && string_index < string_len) {
                             return js_str_substring_utf16(pv, string_index, string_index + 1);
@@ -5677,13 +5681,13 @@ extern "C" Item js_get_key_core(Item object, Item key,
             if (!js_array_parse_index_name(str_key->chars, (int)str_key->len, &string_index)) {
                 return make_js_undefined();
             }
-            int64_t string_len = js_utf16_len(str->chars, (int)str->len, (bool)str->is_ascii);
+            int64_t string_len = js_string_utf16_length(str);
             if (string_index >= string_len) return make_js_undefined();
             return js_str_substring_utf16(object, string_index, string_index + 1);
         }
         int64_t idx = -1;
         if (js_array_key_is_index(key, &idx)) {
-            int64_t string_len = js_utf16_len(str->chars, (int)str->len, (bool)str->is_ascii);
+            int64_t string_len = js_string_utf16_length(str);
             if (idx >= 0 && idx < string_len) return js_str_substring_utf16(object, idx, idx + 1);
         }
         return make_js_undefined();
@@ -6266,7 +6270,7 @@ static SparseArrayMap* js_array_ensure_sparse_map(Array* arr) {
         *base = *existing;
     } else {
         base->type_id = LMD_TYPE_MAP;
-        base->type = &EmptyMap;
+        base->type = js_empty_object_type_map();
     }
     base->map_kind = MAP_KIND_ARRAY_SPARSE;
     sm->sparse_indices = NULL;
@@ -8959,7 +8963,7 @@ static int js_utf16_idx_to_byte(const char* chars, int str_len, int64_t utf16_id
 
 // Only the first registration needs to walk the realm root catalog. Once the
 // fixed cache range is registered for this heap, the ASCII hit path is direct.
-static inline bool js_ascii_substring_cache_is_ready(void) {
+static inline bool js_string_cache_is_ready(void) {
     if (!js_active_runtime_state || !js_runtime_state.string_caches) return false;
     RootVector* roots = js_runtime_state.string_caches;
     uint64_t epoch = js_get_heap_epoch();
@@ -8988,6 +8992,76 @@ static inline void js_ascii_substring_cache_store(Item value, uint32_t hash) {
     JsStringCacheState* caches = js_runtime_state.string_caches;
     caches->ascii_substrings[slot] = value;
     caches->ascii_substring_hashes[slot] = hash;
+}
+
+static JsUtf16StringPosition* js_utf16_string_position(String* string) {
+    if (!string || string->is_ascii || string->is_buffer ||
+            !js_string_cache_is_ready()) return NULL;
+    JsStringCacheState* caches = js_runtime_state.string_caches;
+    Item source = (Item){.item = s2it(string)};
+    JsUtf16StringPosition position = {};
+    int slot = JS_UTF16_POSITION_CACHE_CAPACITY - 1;
+    bool found = false;
+    for (int i = 0; i < JS_UTF16_POSITION_CACHE_CAPACITY; i++) {
+        if (caches->utf16_sources[i].item == source.item) {
+            position = caches->utf16_positions[i];
+            slot = i;
+            found = true;
+            break;
+        }
+    }
+    if (!found) position.length = js_utf16_len(string->chars, (int)string->len, false);
+    // retain frequently indexed sources while short result strings cycle through.
+    for (int i = slot; i > 0; i--) {
+        caches->utf16_sources[i] = caches->utf16_sources[i - 1];
+        caches->utf16_positions[i] = caches->utf16_positions[i - 1];
+    }
+    // D5.3.5: the epoch-guarded root range owns the source, never a raw GC pointer.
+    caches->utf16_sources[0] = source;
+    caches->utf16_positions[0] = position;
+    return &caches->utf16_positions[0];
+}
+
+int64_t js_string_utf16_length(String* string) {
+    if (!string) return 0;
+    if (string->is_ascii) return string->len;
+    JsUtf16StringPosition* position = js_utf16_string_position(string);
+    return position ? position->length
+        : js_utf16_len(string->chars, (int)string->len, false);
+}
+
+static void js_utf16_seek(String* string, int64_t index,
+        int* out_byte_offset, int64_t* out_unit_offset) {
+    JsUtf16StringPosition* position = js_utf16_string_position(string);
+    int byte_offset = position ? position->byte_offset : 0;
+    int64_t unit_offset = position ? position->unit_offset : 0;
+    // nearby reads in syntax highlighters must not rescan the whole prefix;
+    // retain a codepoint boundary so either half of a surrogate pair stays visible.
+    while (byte_offset > 0 && unit_offset > index) {
+        byte_offset--;
+        while (byte_offset > 0 &&
+                ((unsigned char)string->chars[byte_offset] & 0xC0) == 0x80) {
+            byte_offset--;
+        }
+        uint32_t codepoint;
+        js_utf8_decode_codepoint(string->chars, (int)string->len, byte_offset, &codepoint);
+        unit_offset -= codepoint > 0xFFFF ? 2 : 1;
+    }
+    while (byte_offset < (int)string->len && unit_offset < index) {
+        uint32_t codepoint;
+        int bytes = js_utf8_decode_codepoint(
+            string->chars, (int)string->len, byte_offset, &codepoint);
+        int units = codepoint > 0xFFFF ? 2 : 1;
+        if (unit_offset + units > index) break;
+        unit_offset += units;
+        byte_offset += bytes;
+    }
+    if (position) {
+        position->byte_offset = byte_offset;
+        position->unit_offset = unit_offset;
+    }
+    *out_byte_offset = byte_offset;
+    *out_unit_offset = unit_offset;
 }
 
 extern "C" Item js_try_ascii_string_builtin_no_gc(Item callee, Item receiver,
@@ -9053,7 +9127,7 @@ static Item js_str_substring_utf16(Item str_item, int64_t start, int64_t end) {
         bool cacheable = rlen >= 2 && rlen <= 32;
         uint32_t cache_hash = cacheable
             ? hash_djb2(s->chars + start, (size_t)rlen) : 0;
-        bool cache_ready = cacheable && js_ascii_substring_cache_is_ready();
+        bool cache_ready = cacheable && js_string_cache_is_ready();
         if (cacheable) {
             Item cached = js_ascii_substring_cache_lookup(s->chars + start,
                 (int)rlen, cache_hash, cache_ready);
@@ -9076,6 +9150,7 @@ static Item js_str_substring_utf16(Item str_item, int64_t start, int64_t end) {
     StrBuf* buf = strbuf_new_cap((size_t)((end - start) * 4 + 1));
     int pos = 0;
     int64_t cu = 0;
+    js_utf16_seek(s, start, &pos, &cu);
     while (pos < (int)s->len && cu < end) {
         int byte_start = pos;
         uint32_t cp;
@@ -9128,11 +9203,14 @@ int64_t js_utf16_len(const char* chars, int str_len, bool is_ascii) {
     return units;
 }
 
-static int js_utf16_code_unit_at(const char* chars, int str_len, bool is_ascii, int64_t index) {
-    if (!chars || index < 0) return -1;
-    if (is_ascii) return index < str_len ? (unsigned char)chars[index] : -1;
+static int js_utf16_code_unit_at(String* string, int64_t index) {
+    if (!string || index < 0) return -1;
+    const char* chars = string->chars;
+    int str_len = (int)string->len;
+    if (string->is_ascii) return index < str_len ? (unsigned char)chars[index] : -1;
     int64_t cu = 0;
     int pos = 0;
+    js_utf16_seek(string, index, &pos, &cu);
     while (pos < str_len) {
         uint32_t cp;
         int bytes = js_utf8_decode_codepoint(chars, str_len, pos, &cp);
@@ -9154,9 +9232,9 @@ static int js_utf16_code_unit_at(const char* chars, int str_len, bool is_ascii, 
 static int64_t js_regex_advance_string_index_units(String* s, int64_t index, bool full_unicode) {
     if (!s || index < 0) return index + 1;
     if (!full_unicode) return index + 1;
-    int first = js_utf16_code_unit_at(s->chars, (int)s->len, (bool)s->is_ascii, index);
+    int first = js_utf16_code_unit_at(s, index);
     if (utf_is_high_surrogate((uint32_t)first)) {
-        int second = js_utf16_code_unit_at(s->chars, (int)s->len, (bool)s->is_ascii, index + 1);
+        int second = js_utf16_code_unit_at(s, index + 1);
         if (utf_is_low_surrogate((uint32_t)second)) return index + 2;
     }
     return index + 1;
@@ -9555,7 +9633,7 @@ extern "C" Item js_elements_get_number(Item array, double index) {
 extern "C" Item js_string_get_int(Item str_item, int64_t index) {
     if (get_type_id(str_item) == LMD_TYPE_STRING && index >= 0) {
         String* str = it2s(str_item);
-        int64_t len = str ? js_utf16_len(str->chars, (int)str->len, (bool)str->is_ascii) : 0;
+        int64_t len = str ? js_string_utf16_length(str) : 0;
         if (index < len) return js_str_substring_utf16(str_item, index, index + 1);
         return make_js_undefined();
     }
@@ -15155,44 +15233,46 @@ DEFINE_JS_EXPORT_CALL_INTO(8, (Item a, Item b, Item c, Item d, Item e, Item f, I
 #undef DEFINE_JS_EXPORT_CALL_INTO
 #undef JS_EXPORT_CALL_PARAMS
 
+static Item js_array_to_length_status(Item value, int64_t* out);
+
 static Item js_array_like_arg_count(Item args_array, int* argc) {
     *argc = 0;
     TypeId args_type = get_type_id(args_array);
     // Compact numeric arrays are ordinary JavaScript arrays too; excluding
     // them here made Function.prototype.apply reject valid numeric argument
     // lists after the elements transition (D4.6.1v2).
-    if (args_type == LMD_TYPE_ARRAY || js_is_ordinary_numeric_array(args_array)) {
-        *argc = (int)args_array.array->length;
-        return js_status_ok();
-    }
-    if (args_type == LMD_TYPE_MAP || args_type == LMD_TYPE_FUNC ||
-            args_type == LMD_TYPE_ELEMENT ||
-            is_virtual_container_type_id(args_type)) {
-        JS_ASSIGN_OR_RETURN(len_val, js_get_name_key(args_array, "length", 6));
-        TypeId len_type = get_type_id(len_val);
-        if (len_type == LMD_TYPE_INT || len_type == LMD_TYPE_FLOAT) {
-            *argc = (len_type == LMD_TYPE_INT) ? (int)it2i(len_val) : (int)it2d(len_val);
+    int64_t length = 0;
+    if ((args_type == LMD_TYPE_ARRAY && !args_array.array->is_js_arguments) ||
+            js_is_ordinary_numeric_array(args_array)) {
+        length = args_array.array->length;
+    } else {
+        if (!js_is_object_value(args_array)) {
+            return js_throw_type_error("CreateListFromArrayLike called on non-object");
         }
-        return js_status_ok();
+        // arguments.length is an ordinary property independent of dense storage.
+        // Its getter and ToLength coercion may allocate or mutate the receiver.
+        JS_ROOTS(roots, array_root, args_array, length_root, ItemNull);
+        length_root.set(js_get_name_key(array_root.get(), "length", 6));
+        JS_RETURN_IF_ERROR(js_array_to_length_status(length_root.get(), &length));
     }
-    if (args_array.item != ITEM_NULL && args_array.item != ITEM_JS_UNDEFINED) {
-        return js_throw_type_error("CreateListFromArrayLike called on non-object");
+    if (length > INT_MAX) {
+        return js_throw_range_error("argument list is too large");
     }
+    *argc = (int)length;
     return js_status_ok();
 }
 
 static Item js_array_like_copy_args(Item args_array, Item* args, int argc) {
-    if (get_type_id(args_array) == LMD_TYPE_ARRAY ||
-            js_is_ordinary_numeric_array(args_array)) {
-        for (int i = 0; i < argc; i++) {
-            args[i] = js_elements_get(args_array, (Item){.item = i2it(i)});
-            if (item_is_error(args[i])) return args[i];
-        }
-        return js_status_ok();
-    }
+    RootFrame roots(1);
+    Rooted<Item> array_root(roots, args_array);
+    if (!roots.valid()) return ItemError;
     for (int i = 0; i < argc; i++) {
-        Item idx_key = js_property_index_key(i);
-        args[i] = js_get_key_default(args_array, idx_key);
+        // The destination is a RootSpan: earlier getter results must survive
+        // collections during later index reads (D5.3.5, D5.4.1).
+        Item source = array_root.get();
+        args[i] = js_is_js_array(source)
+            ? js_elements_get(source, (Item){.item = i2it(i)})
+            : js_get_key_default(source, js_property_index_key(i));
         if (item_is_error(args[i])) return args[i];
     }
     return js_status_ok();
@@ -15201,20 +15281,26 @@ static Item js_array_like_copy_args(Item args_array, Item* args, int argc) {
 // Function.prototype.apply(thisArg, argsArray)
 static Item js_apply_function_impl(Item func_item, Item this_val, Item args_array,
         uint64_t* result_home) {
-    if (!js_is_callable(func_item)) {
+    JS_ROOTS(roots, function_root, func_item, this_root, this_val,
+        array_root, args_array);
+    if (!js_is_callable(function_root.get())) {
         // Own `.apply` is an ordinary property and cannot grant [[Call]] to an
         // object; Function.prototype.apply validates the stored capability.
         log_error("js_apply_function: not a function (type=%d)", get_type_id(func_item));
         return js_throw_type_error("apply called on non-function");
     }
     int argc = 0;
-    Item* args = NULL;
-    JS_ASSIGN_OR_RETURN(argc_status, js_array_like_arg_count(args_array, &argc));
-    if (argc > 0) {
-        args = LAMBDA_ALLOCA(argc, Item);
-        JS_ASSIGN_OR_RETURN(copy_status, js_array_like_copy_args(args_array, args, argc));
+    if (args_array.item != ITEM_NULL && args_array.item != ITEM_JS_UNDEFINED) {
+        JS_RETURN_IF_ERROR(js_array_like_arg_count(array_root.get(), &argc));
     }
-    return js_call(func_item, this_val, args, argc, result_home, false);
+    RootSpan argument_roots((size_t)argc);
+    Item* args = argc > 0 ? argument_roots.items() : NULL;
+    if (argc > 0) {
+        if (!args) return ItemError;
+        JS_RETURN_IF_ERROR(js_array_like_copy_args(array_root.get(), args, argc));
+    }
+    return js_call(function_root.get(), this_root.get(), args, argc,
+        result_home, true);
 }
 JS_FORWARD_ITEM(js_apply_function, (Item func_item, Item this_val, Item args_array), js_apply_function_impl, (func_item, this_val, args_array, NULL))
 
@@ -15272,17 +15358,20 @@ Item js_intrinsic_throw_type_error_body(Item callee, Item this_value,
 
 extern "C" Item js_construct_array_like(
         Item constructor, Item args_array, Item new_target) {
+    JS_ROOTS(roots, constructor_root, constructor, array_root, args_array,
+        target_root, new_target);
     int argc = 0;
-    Item* args = NULL;
-    JS_ASSIGN_OR_RETURN(argc_status, js_array_like_arg_count(args_array, &argc));
+    JS_RETURN_IF_ERROR(js_array_like_arg_count(array_root.get(), &argc));
+    RootSpan argument_roots((size_t)argc);
+    Item* args = argc > 0 ? argument_roots.items() : NULL;
     if (argc > 0) {
-        args = LAMBDA_ALLOCA(argc, Item);
-        JS_ASSIGN_OR_RETURN(copy_status, js_array_like_copy_args(args_array, args, argc));
+        if (!args) return ItemError;
+        JS_RETURN_IF_ERROR(js_array_like_copy_args(array_root.get(), args, argc));
     }
     // D6.2.2v2: spread expansion produces operands only; the explicit
     // newTarget is forwarded to the single construct kernel.
-    return js_construct_value(constructor, args, argc, new_target, NULL,
-        false);
+    return js_construct_value(constructor_root.get(), args, argc,
+        target_root.get(), NULL, true);
 }
 
 // v11: Function.prototype.bind(thisArg, ...args)
@@ -19213,13 +19302,13 @@ static void js_regex_prepare_subject(String* input_s, bool needs_utf16,
     *subject_units = *match_len;
     if (needs_utf16) {
         *subject_units = input_s
-            ? js_utf16_len(input_s->chars, (int)input_s->len, (bool)input_s->is_ascii) : 0;
+            ? js_string_utf16_length(input_s) : 0;
         *match_s = js_string_expand_utf16_subject(input_s);
         *match_chars = *match_s ? (*match_s)->chars : "";
         *match_len = *match_s ? (int)(*match_s)->len : 0;
     } else if (count_code_units) {
         *subject_units = input_s
-            ? js_utf16_len(input_s->chars, (int)input_s->len, (bool)input_s->is_ascii) : 0;
+            ? js_string_utf16_length(input_s) : 0;
     }
 }
 
@@ -19984,7 +20073,7 @@ static Item js_regexp_symbol_replace(Item this_val, Item str, Item replacement) 
     // unit basis consistent across exec and substring/append.
     bool utf16_replace = (fast_rd && fast_rd->needs_utf16_subject) || (S && !S->is_ascii);
     int64_t source_units = utf16_replace && S ?
-        js_utf16_len(S->chars, (int)S->len, (bool)S->is_ascii) : lengthS;
+        js_string_utf16_length(S) : lengthS;
     if (fast_rd && fast_rd->global && !functional_replace) {
         bool own_global_fast = false;
         Item own_global_val = js_map_shape_lookup_ext(regex_root.get().map, "global", 6, &own_global_fast);
@@ -20194,7 +20283,7 @@ static Item js_regexp_symbol_replace(Item this_val, Item str, Item replacement) 
             if (rs) strbuf_append_str_n(buf, rs->chars, rs->len);
             if (utf16_replace) {
                 int64_t matched_units = matched_s ?
-                    js_utf16_len(matched_s->chars, (int)matched_s->len, (bool)matched_s->is_ascii) : 0;
+                    js_string_utf16_length(matched_s) : 0;
                 next_source_pos = (int)(position + matched_units);
             } else {
                 next_source_pos = position + matched_len;
@@ -20265,7 +20354,7 @@ static Item js_regexp_symbol_search(Item this_val, Item arg0) {
 // ever arises as the second half of such a pair, so this is exact.
 static bool js_split_index_is_trailing_surrogate(String* s, int index) {
     if (!s || s->is_ascii || index <= 0) return false;
-    int unit = js_utf16_code_unit_at(s->chars, (int)s->len, (bool)s->is_ascii, index);
+    int unit = js_utf16_code_unit_at(s, index);
     return utf_is_low_surrogate((uint32_t)unit);
 }
 
@@ -20351,7 +20440,7 @@ static Item js_regexp_symbol_split(Item this_val, Item str, Item limit) {
     // AdvanceStringIndex below — that, and not the index unit, is what `u`
     // governs here.
     int size = (int)(s_str
-        ? js_utf16_len(s_str->chars, (int)s_str->len, (bool)s_str->is_ascii)
+        ? js_string_utf16_length(s_str)
         : 0);
     (void)byte_size;
     // Step 7: newFlags = has_y ? flags : flags + "y"
@@ -20678,7 +20767,7 @@ static Item js_collection_create(int type, JsClass class_id) {
     collection->base.type_id = LMD_TYPE_MAP;
     collection->base.map_kind = MAP_KIND_COLLECTION;
     collection->base.type = js_object_type_for_class(class_id);
-    if (!collection->base.type) collection->base.type = &EmptyMap;
+    if (!collection->base.type) collection->base.type = js_empty_object_type_map();
     // D6.2.2v2: observable properties and internal capability/state are
     // independent. A string-keyed backing pointer leaked through OwnPropertyKeys
     // and generic clones copied it, aliasing distinct collection instances.
@@ -23009,7 +23098,7 @@ static Item js_string_pad(Item str, Item* args, int argc, bool pad_end) {
     if (isnan(target_d) || target_d <= 0) return str;
     if (isinf(target_d) && target_d > 0) return js_throw_range_error("Invalid string length");
     int64_t target = (int64_t)floor(target_d);
-    int64_t str_len = js_utf16_len(s->chars, (int)s->len, (bool)s->is_ascii);
+    int64_t str_len = js_string_utf16_length(s);
     if (str_len >= target) return str;
     String* pad = NULL;
     if (argc > 1 && get_type_id(args[1]) != LMD_TYPE_UNDEFINED) {
@@ -23020,7 +23109,7 @@ static Item js_string_pad(Item str, Item* args, int argc, bool pad_end) {
     int pad_len = pad ? (int)pad->len : 1;
     if (pad_len == 0) return str;
     int64_t needed = target - str_len;
-    int64_t pad_units = pad ? js_utf16_len(pad->chars, (int)pad->len, (bool)pad->is_ascii) : 1;
+    int64_t pad_units = pad ? js_string_utf16_length(pad) : 1;
     if (pad_units <= 0) return str;
 
     StrBuf* pad_buf = strbuf_new();
@@ -23149,11 +23238,11 @@ static Item js_string_search_intrinsic(Item str, JsStringIntrinsicOp operation,
     String* text = it2s(source.get());
     js_profile_string_leaf(text, JS_OPT_STRING_SEARCH_ASCII,
         JS_OPT_STRING_SEARCH_UNICODE);
-    int64_t length = js_utf16_len(text->chars, (int)text->len, text->is_ascii);
+    int64_t length = js_string_utf16_length(text);
     int64_t start = js_string_clamp_integer(position, length);
     if (suffix) {
         String* search = it2s(needle.get());
-        start -= js_utf16_len(search->chars, (int)search->len, search->is_ascii);
+        start -= js_string_utf16_length(search);
         if (start < 0) return (Item){.item = b2it(false)};
     }
     bool anchored = !index_result && operation != JS_STRING_INTRINSIC_INCLUDES;
@@ -23407,8 +23496,7 @@ static Item js_string_intrinsic_algorithm(Item str,
             // Lambda, wrong here. ASCII keeps the shared path: there the two
             // readings coincide and fn_split is cheaper.
             Item units_result = js_array_new(0);
-            int64_t units = js_utf16_len(sstr->chars, (int)sstr->len,
-                (bool)sstr->is_ascii);
+            int64_t units = js_string_utf16_length(sstr);
             for (int64_t i = 0; i < units; i++) {
                 if ((uint64_t)i >= (uint64_t)lim) break;
                 js_array_push(units_result,
@@ -23441,7 +23529,7 @@ static Item js_string_intrinsic_algorithm(Item str,
         String* s = it2s(str);
         js_profile_string_leaf(s, JS_OPT_STRING_SLICE_ASCII,
             JS_OPT_STRING_SLICE_UNICODE);
-        int64_t slen = s ? js_utf16_len(s->chars, (int)s->len, (bool)s->is_ascii) : 0;
+        int64_t slen = s ? js_string_utf16_length(s) : 0;
         JS_ASSIGN_OR_RETURN(start_num, js_to_number(args[0]));
         double dstart = js_get_number(start_num);
         int64_t start = isnan(dstart) ? 0 : (int64_t)dstart;
@@ -23532,8 +23620,7 @@ static Item js_string_intrinsic_algorithm(Item str,
         if (!s || s->len == 0) return js_make_number(NAN);
         int target_idx = isnan(didx) ? 0 : (int)didx;
         if (target_idx < 0) return js_make_number(NAN);
-        int code_unit = js_utf16_code_unit_at(
-            s->chars, (int)s->len, (bool)s->is_ascii, target_idx);
+        int code_unit = js_utf16_code_unit_at(s, target_idx);
         return code_unit < 0 ? js_make_number(NAN) :
             (Item){.item = i2it((int64_t)code_unit)};
     }
@@ -23547,12 +23634,10 @@ static Item js_string_intrinsic_algorithm(Item str,
         double didx = js_get_number(idx_num);
         int target_idx = isnan(didx) ? 0 : (int)didx;
         if (target_idx < 0) return make_js_undefined();
-        int first = js_utf16_code_unit_at(
-            s->chars, (int)s->len, (bool)s->is_ascii, target_idx);
+        int first = js_utf16_code_unit_at(s, target_idx);
         if (first < 0) return make_js_undefined();
         if (utf_is_high_surrogate((uint32_t)first)) {
-            int second = js_utf16_code_unit_at(
-                s->chars, (int)s->len, (bool)s->is_ascii, target_idx + 1);
+            int second = js_utf16_code_unit_at(s, target_idx + 1);
             if (utf_is_low_surrogate((uint32_t)second)) {
                 int codepoint = 0x10000 +
                     (((first - 0xD800) << 10) | (second - 0xDC00));
@@ -23662,7 +23747,7 @@ static Item js_string_intrinsic_algorithm(Item str,
         if (!s || s->len == 0) return make_js_undefined();
         double didx = 0.0;
         JS_ASSIGN_OR_RETURN(index_status, js_string_to_integer_or_infinity(args[0], 0.0, &didx));
-        int64_t len = js_utf16_len(s->chars, (int)s->len, (bool)s->is_ascii);
+        int64_t len = js_string_utf16_length(s);
         if (didx >= (double)len || didx < -(double)len || isinf(didx)) return make_js_undefined();
         int64_t idx = didx < 0.0 ? len + (int64_t)didx : (int64_t)didx;
         if (idx < 0 || idx >= len) return make_js_undefined();
@@ -28010,7 +28095,7 @@ extern "C" Item js_new_string_wrapper(Item arg) {
         JS_CLASS_STRING, "String", 6));
     // Also set length property
     String* s = it2s(str_val_root.get());
-    int len = s ? (int)js_utf16_len(s->chars, (int)s->len, (bool)s->is_ascii) : 0;
+    int len = s ? (int)js_string_utf16_length(s) : 0;
     Rooted<Item> len_key_root(roots, js_name_item("length", 6));
     Item len_val = (Item){.item = i2it(len)};
     js_set_key_default(obj_root.get(), len_key_root.get(), len_val);
@@ -29506,7 +29591,7 @@ static Item js_create_fixed_iterator(Item source, JsClass class_id, int64_t leng
     m->type_id = LMD_TYPE_MAP;
     m->map_kind = MAP_KIND_ITERATOR;
     m->type = js_object_type_for_class(class_id);
-    if (!m->type) m->type = &EmptyMap;
+    if (!m->type) m->type = js_empty_object_type_map();
     JsIterData* data = &carrier->payload;
     data->source = source_root.get();
     data->index = 0;

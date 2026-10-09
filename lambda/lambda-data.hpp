@@ -1361,8 +1361,8 @@ static inline Type* lambda_range_type_domain(const Type* type) {
     return ((const TypeRange*)type)->is_char ? &TYPE_STRING : &TYPE_INT;
 }
 
-// S11.1.2v3: a pattern admits text of its tag's domain, `string` for `\(...)`
-// and `symbol` for `\symbol(...)`, and decides membership by matching. Like a
+// S11.1.2v4: a pattern admits text of the domain established by its quotes
+// and named references, and decides membership by matching. Like a
 // range's domain it serves static carrier checks only: the pattern's own
 // LMD_TYPE_TYPE tag is the type of type values, never its members' carrier.
 static inline Type* lambda_pattern_type_domain(const Type* type) {
@@ -1378,9 +1378,13 @@ static inline Type* lambda_member_test_type_domain(const Type* type) {
 }
 
 // S11.1.5: `function` is the compact TYPE_FUNC singleton — the signature-less
-// union of `fn` and `pn`. Every other LMD_TYPE_FUNC type is a full TypeFunc,
-// so a caller that needs a signature must ask here rather than cast on the id.
+// union of `fn` and `pn`. Parameter carriers retain only its Type prefix;
+// resolve their full contract before reading any TypeFunc fields.
 static inline TypeFunc* lambda_type_func_signature(Type* type) {
+    if (type && type->type_id == LMD_TYPE_FUNC && type->kind == TYPE_KIND_PARAM) {
+        TypeParam* parameter = (TypeParam*)type;
+        type = parameter->full_type;
+    }
     return type && type->type_id == LMD_TYPE_FUNC && type != &TYPE_FUNC
         ? (TypeFunc*)type : NULL;
 }
@@ -1535,7 +1539,7 @@ extern TypeType LIT_TYPE_SYMBOL;
 extern TypeType LIT_TYPE_PATH;
 // PTH30: `reference` is the type ALIAS `symbol | path` (URI = URN | URL), not a
 // nominal supertype — a supertype would force every symbol operation
-// (indexing, slicing, `\symbol(…)` islands) to rule on paths, whereas the alias
+// (indexing, slicing, `\('…')` islands) to rule on paths, whereas the alias
 // dissolves at each use site into the two evaluation contracts S2.4.3v3 keeps
 // distinct.
 extern TypeBinary TYPE_REFERENCE;
@@ -1656,6 +1660,8 @@ typedef struct Input {
     Array* embedded_diagrams;
     // the caller's parse options, valid only while its parser runs (nullable)
     const struct InputParseOptions* parse_options;
+    // D3.4.7: an explicit JS boundary owns its branded root separately.
+    TypeMap* branded_shape_transition_root;
     // StringBuf* sb;
 
     // member functions

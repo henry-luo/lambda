@@ -1,0 +1,143 @@
+<?xml version='1.0' encoding='utf-8'?>
+<fo:root xmlns:fo="http://www.w3.org/1999/XSL/Format" font-family="Arial" font-size="7.5pt" line-height="9pt" border-collapse="separate">
+  <fo:layout-master-set>
+    <fo:simple-page-master master-name="sheet1" page-width="165pt" page-height="105pt" margin="7.5pt" display-align="before">
+      <fo:region-body region-name="main" display-align="inherit" />
+    </fo:simple-page-master>
+    <fo:simple-page-master master-name="sheet2" page-width="165pt" page-height="105pt" margin="7.5pt" display-align="center">
+      <fo:region-body region-name="main" display-align="inherit" />
+    </fo:simple-page-master>
+    <fo:simple-page-master master-name="sheet3" page-width="165pt" page-height="105pt" margin="7.5pt" display-align="after">
+      <fo:region-body region-name="main" display-align="inherit" />
+    </fo:simple-page-master>
+  </fo:layout-master-set>
+  <fo:page-sequence master-reference="sheet1" force-page-count="no-force" display-align="auto" relative-align="before">
+    <fo:flow flow-name="main">
+      <fo:table table-layout="fixed" width="100%">
+        <fo:table-column column-width="30pt" number-columns-repeated="5" />
+        <fo:table-body>
+          <fo:table-row>
+            <fo:table-cell>
+              <fo:block background-color="#cce0ff">A</fo:block>
+            </fo:table-cell>
+            <fo:table-cell padding-top="6pt">
+              <fo:block background-color="#ddffdd">B</fo:block>
+            </fo:table-cell>
+            <fo:table-cell padding-top="1.5pt" display-align="before">
+              <fo:block background-color="#ffdddd">C</fo:block>
+            </fo:table-cell>
+            <fo:table-cell relative-align="baseline">
+              <fo:block background-color="#ccffff" font-size="15pt" line-height="18pt">D</fo:block>
+            </fo:table-cell>
+            <fo:table-cell relative-align="baseline" padding-top="2.25pt">
+              <fo:block background-color="#ffeeaa">E</fo:block>
+            </fo:table-cell>
+          </fo:table-row>
+          <fo:table-row display-align="center" height="22.5pt">
+            <fo:table-cell display-align="inherit">
+              <fo:block background-color="#ddffdd">1F</fo:block>
+            </fo:table-cell>
+            <fo:table-cell display-align="auto">
+              <fo:block background-color="#ffdddd">1G</fo:block>
+            </fo:table-cell>
+            <fo:table-cell display-align="before">
+              <fo:block background-color="#ccffff">1H</fo:block>
+            </fo:table-cell>
+            <fo:table-cell display-align="center">
+              <fo:block background-color="#ffeeaa">1I</fo:block>
+            </fo:table-cell>
+            <fo:table-cell display-align="after">
+              <fo:block background-color="#cce0ff">1J</fo:block>
+            </fo:table-cell>
+          </fo:table-row>
+        </fo:table-body>
+      </fo:table>
+    </fo:flow>
+  </fo:page-sequence>
+  <fo:page-sequence master-reference="sheet2" force-page-count="no-force" display-align="auto" relative-align="before">
+    <fo:flow flow-name="main">
+      <fo:table table-layout="fixed" width="100%">
+        <fo:table-column column-width="30pt" number-columns-repeated="5" />
+        <fo:table-body>
+          <fo:table-row>
+            <fo:table-cell>
+              <fo:block background-color="#cce0ff">A</fo:block>
+            </fo:table-cell>
+            <fo:table-cell padding-top="6pt">
+              <fo:block background-color="#ddffdd">B</fo:block>
+            </fo:table-cell>
+            <fo:table-cell padding-top="1.5pt" display-align="before">
+              <fo:block background-color="#ffdddd">C</fo:block>
+            </fo:table-cell>
+            <fo:table-cell relative-align="baseline">
+              <fo:block background-color="#ccffff" font-size="15pt" line-height="18pt">D</fo:block>
+            </fo:table-cell>
+            <fo:table-cell relative-align="baseline" padding-top="2.25pt">
+              <fo:block background-color="#ffeeaa">E</fo:block>
+            </fo:table-cell>
+          </fo:table-row>
+          <fo:table-row display-align="center" height="22.5pt">
+            <fo:table-cell display-align="inherit">
+              <fo:block background-color="#ddffdd">2F</fo:block>
+            </fo:table-cell>
+            <fo:table-cell display-align="auto">
+              <fo:block background-color="#ffdddd">2G</fo:block>
+            </fo:table-cell>
+            <fo:table-cell display-align="before">
+              <fo:block background-color="#ccffff">2H</fo:block>
+            </fo:table-cell>
+            <fo:table-cell display-align="center">
+              <fo:block background-color="#ffeeaa">2I</fo:block>
+            </fo:table-cell>
+            <fo:table-cell display-align="after">
+              <fo:block background-color="#cce0ff">2J</fo:block>
+            </fo:table-cell>
+          </fo:table-row>
+        </fo:table-body>
+      </fo:table>
+    </fo:flow>
+  </fo:page-sequence>
+  <fo:page-sequence master-reference="sheet3" force-page-count="no-force" display-align="auto" relative-align="before">
+    <fo:flow flow-name="main">
+      <fo:table table-layout="fixed" width="100%">
+        <fo:table-column column-width="30pt" number-columns-repeated="5" />
+        <fo:table-body>
+          <fo:table-row>
+            <fo:table-cell>
+              <fo:block background-color="#cce0ff">A</fo:block>
+            </fo:table-cell>
+            <fo:table-cell padding-top="6pt">
+              <fo:block background-color="#ddffdd">B</fo:block>
+            </fo:table-cell>
+            <fo:table-cell padding-top="1.5pt" display-align="before">
+              <fo:block background-color="#ffdddd">C</fo:block>
+            </fo:table-cell>
+            <fo:table-cell relative-align="baseline">
+              <fo:block background-color="#ccffff" font-size="15pt" line-height="18pt">D</fo:block>
+            </fo:table-cell>
+            <fo:table-cell relative-align="baseline" padding-top="2.25pt">
+              <fo:block background-color="#ffeeaa">E</fo:block>
+            </fo:table-cell>
+          </fo:table-row>
+          <fo:table-row display-align="center" height="22.5pt">
+            <fo:table-cell display-align="inherit">
+              <fo:block background-color="#ddffdd">3F</fo:block>
+            </fo:table-cell>
+            <fo:table-cell display-align="auto">
+              <fo:block background-color="#ffdddd">3G</fo:block>
+            </fo:table-cell>
+            <fo:table-cell display-align="before">
+              <fo:block background-color="#ccffff">3H</fo:block>
+            </fo:table-cell>
+            <fo:table-cell display-align="center">
+              <fo:block background-color="#ffeeaa">3I</fo:block>
+            </fo:table-cell>
+            <fo:table-cell display-align="after">
+              <fo:block background-color="#cce0ff">3J</fo:block>
+            </fo:table-cell>
+          </fo:table-row>
+        </fo:table-body>
+      </fo:table>
+    </fo:flow>
+  </fo:page-sequence>
+</fo:root>

@@ -41,11 +41,10 @@ import { compareDVI, validateDVI } from './comparators/dvi_comparator.js';
 import { compareASTToMathML } from './comparators/mathml_comparator.js';
 import { compareASTToMathLive } from './comparators/mathlive_ast_comparator.js';
 import {
-    lambda_to_mathlive_classes,
     mathlive_expected_error,
     render_mathlive_markup,
     render_lambda_math
-} from '../lambda/mathlive/lambda_math_renderer.mjs';
+} from '../lambda/math/lambda_math_renderer.mjs';
 
 // Configuration
 const CONFIG = {
@@ -484,7 +483,7 @@ async function runLambdaParser(latex, options = {}) {
 
 async function compareMathLiveHtml(lambdaHtml, latex, display) {
     const expectedHtml = await render_mathlive_markup(latex, { display });
-    return compareHTML(lambda_to_mathlive_classes(lambdaHtml), expectedHtml, 'mathlive');
+    return compareHTML(lambdaHtml, expectedHtml, 'mathlive');
 }
 
 /**

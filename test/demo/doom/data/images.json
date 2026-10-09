@@ -1,0 +1,256 @@
+{
+  "revision": "438d2e17fb9f75fa3dbc54e1d21a3bc088ad009d",
+  "sheets": {
+    "zombieman": {
+      "w": 48,
+      "h": 55,
+      "cols": 5,
+      "frames": 2,
+      "rows": 7,
+      "path": "assets/sprites/sheets/POSS.png"
+    },
+    "shotgun-guy": {
+      "w": 52,
+      "h": 60,
+      "cols": 5,
+      "frames": 2,
+      "rows": 7,
+      "path": "assets/sprites/sheets/SPOS.png"
+    },
+    "imp": {
+      "w": 58,
+      "h": 62,
+      "cols": 5,
+      "frames": 2,
+      "rows": 7,
+      "path": "assets/sprites/sheets/TROO.png"
+    },
+    "demon": {
+      "w": 64,
+      "h": 59,
+      "cols": 6,
+      "frames": 2,
+      "rows": 7,
+      "path": "assets/sprites/sheets/SARG.png"
+    },
+    "spectre": {
+      "w": 64,
+      "h": 59,
+      "cols": 6,
+      "frames": 2,
+      "rows": 7,
+      "path": "assets/sprites/sheets/SARG.png"
+    },
+    "baron": {
+      "w": 69,
+      "h": 74,
+      "cols": 7,
+      "frames": 2,
+      "rows": 7,
+      "path": "assets/sprites/sheets/BOSS.png"
+    },
+    "barrel": {
+      "w": 60,
+      "h": 53,
+      "cols": 5,
+      "frames": 2,
+      "rows": 2,
+      "path": "assets/sprites/sheets/BAR1.png"
+    },
+    "red-torch": {
+      "w": 26,
+      "h": 97,
+      "frames": 4,
+      "path": "assets/sprites/sheets/TRED.png",
+      "rows": 1,
+      "cols": 4
+    },
+    "soulsphere": {
+      "w": 25,
+      "h": 25,
+      "frames": 4,
+      "path": "assets/sprites/sheets/SOUL.png",
+      "rows": 1,
+      "cols": 4
+    },
+    "health-bonus": {
+      "w": 14,
+      "h": 18,
+      "frames": 4,
+      "path": "assets/sprites/sheets/BON1.png",
+      "rows": 1,
+      "cols": 4
+    },
+    "armor-bonus": {
+      "w": 16,
+      "h": 15,
+      "frames": 4,
+      "path": "assets/sprites/sheets/BON2.png",
+      "rows": 1,
+      "cols": 4
+    },
+    "green-armor": {
+      "w": 31,
+      "h": 17,
+      "frames": 2,
+      "path": "assets/sprites/sheets/ARM1.png",
+      "rows": 1,
+      "cols": 2
+    },
+    "blue-armor": {
+      "w": 31,
+      "h": 17,
+      "frames": 2,
+      "path": "assets/sprites/sheets/ARM2.png",
+      "rows": 1,
+      "cols": 2
+    },
+    "invisibility": {
+      "w": 25,
+      "h": 25,
+      "frames": 4,
+      "path": "assets/sprites/sheets/PINS.png",
+      "rows": 1,
+      "cols": 4
+    },
+    "player": {
+      "w": 45,
+      "h": 56,
+      "frames": 4,
+      "rows": 5,
+      "path": "assets/sprites/sheets/PLAY.png",
+      "cols": 4
+    }
+  },
+  "weapons": {
+    "FIST": {
+      "w": 147,
+      "h": 76,
+      "frames": 4,
+      "path": "assets/weapons/FIST.png",
+      "rows": 1,
+      "cols": 4
+    },
+    "PISTOL": {
+      "w": 79,
+      "h": 103,
+      "frames": 5,
+      "path": "assets/weapons/PISTOL.png",
+      "rows": 1,
+      "cols": 5
+    },
+    "SHOTGUN": {
+      "w": 119,
+      "h": 151,
+      "frames": 6,
+      "path": "assets/weapons/SHOTGUN.png",
+      "rows": 1,
+      "cols": 6
+    },
+    "CHAINGUN": {
+      "w": 114,
+      "h": 103,
+      "frames": 3,
+      "path": "assets/weapons/CHAINGUN.png",
+      "rows": 1,
+      "cols": 3
+    },
+    "ROCKET": {
+      "w": 105,
+      "h": 119,
+      "frames": 5,
+      "path": "assets/weapons/ROCKET.png",
+      "rows": 1,
+      "cols": 5
+    },
+    "CHAINSAW": {
+      "w": 154,
+      "h": 89,
+      "frames": 4,
+      "path": "assets/weapons/CHAINSAW.png",
+      "rows": 1,
+      "cols": 4
+    }
+  },
+  "sources": [
+    {
+      "path": "src/renderer/scene/entities/sprites.css",
+      "sha256": "db1cb83e51134738591f84cf6b7d9e2f3ec22d364e967ace211da08224ec2a44"
+    },
+    {
+      "path": "src/renderer/scene/entities/enemies.css",
+      "sha256": "c74cd54818bf9f973c80d68785ef38924a9062394d5c0d7b34806757cca7cdae"
+    },
+    {
+      "path": "src/renderer/scene/entities/decorations.css",
+      "sha256": "7f19b8d348aaa814277da86e2c4c6cb41a662230c207192cf590ee60f281743b"
+    },
+    {
+      "path": "src/renderer/scene/entities/things.css",
+      "sha256": "9efa0bfda8bd6c35af0d2993d6e89cd13b4e1ed3a8fcb23983966b951682e6a3"
+    },
+    {
+      "path": "src/ui/weapons.css",
+      "sha256": "e39614a01659fb31d3e8053af42929976ea5da0cbbb8c7e78a3aa62a5f7baa06"
+    },
+    {
+      "path": "src/ui/spectator.css",
+      "sha256": "b205c463f63e65ae61ea875ccbd368908a5240a56c1ca4b0a69eed0a93439985"
+    },
+    {
+      "path": "src/renderer/scene/entities/sprites.js",
+      "sha256": "46a1a2c6d697b0a3b0c7fdaf6ac0c722fa90fb960d45d87086de8c1ac86f5851"
+    }
+  ],
+  "layouts": {
+    "3004": {
+      "atkRow": 5,
+      "atkFrames": 2,
+      "dieRow": 6,
+      "dieFrames": 5,
+      "walkFrames": 2
+    },
+    "9": {
+      "atkRow": 5,
+      "atkFrames": 2,
+      "dieRow": 6,
+      "dieFrames": 5,
+      "walkFrames": 2
+    },
+    "3001": {
+      "atkRow": 5,
+      "atkFrames": 3,
+      "dieRow": 6,
+      "dieFrames": 5,
+      "walkFrames": 2
+    },
+    "3002": {
+      "atkRow": 5,
+      "atkFrames": 3,
+      "dieRow": 6,
+      "dieFrames": 6,
+      "walkFrames": 2
+    },
+    "58": {
+      "atkRow": 5,
+      "atkFrames": 3,
+      "dieRow": 6,
+      "dieFrames": 6,
+      "walkFrames": 2
+    },
+    "3003": {
+      "atkRow": 5,
+      "atkFrames": 3,
+      "dieRow": 6,
+      "dieFrames": 7,
+      "walkFrames": 2
+    },
+    "2035": {
+      "atkRow": -1,
+      "atkFrames": 0,
+      "dieRow": 1,
+      "dieFrames": 5,
+      "walkFrames": 2
+    }
+  }
+}

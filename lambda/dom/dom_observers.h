@@ -7,6 +7,15 @@
 extern "C" {
 #endif
 
+typedef enum JsObserverKind {
+    JS_OBSERVER_MUTATION,
+    JS_OBSERVER_RESIZE,
+    JS_OBSERVER_INTERSECTION
+} JsObserverKind;
+
+const char* dom_observer_interface_name(JsObserverKind kind);
+void dom_observer_install_interface(Item prototype, JsObserverKind kind);
+void dom_install_observer_globals(Item global);
 Item dom_mutation_observer_new(Item callback);
 Item dom_resize_observer_new(Item callback);
 Item dom_intersection_observer_new(Item callback, Item options);

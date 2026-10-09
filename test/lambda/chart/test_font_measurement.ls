@@ -61,6 +61,15 @@ let converted = vega.convert({mark: "point", encoding: {x: {field: "x", type: "q
 let top = axis.x_axis(category_scale, 150, 100, {orient: "top", label_angle: -45, label_font_size: 24}, "top")
 let top_geometry = axis.geometry(category_scale, 150, 100, axis.prepare(category_scale,
     {orient: "top", label_angle: -45, label_font_size: 24}, "top"), true)
+let upright_titles = [for (orient in ["left", "right"], letter in ["y", "θ", "é"]) (
+    let options = axis.prepare(reversed, {orient: orient, title: letter}, "Value"),
+    let geo = axis.geometry(reversed, 90, 90, options, false),
+    let rendered = axis.y_axis(reversed, 90, 90, options, "Value"),
+    let title = (tags(rendered, 'text') |: content(~) == [letter])[0],
+    {name: "upright title " ++ orient ++ " " ++ letter, ok: geo.title_angle == 0 and title.transform == null and
+        close(geo.title_bounds.right - geo.title_bounds.left, text.span(options._title_metric)) and
+        (if (orient == "left") geo.title_bounds.right <= min(geo.rows |> ~.bounds.left) - options.title_padding
+            else geo.title_bounds.left >= max(geo.rows |> ~.bounds.right) + options.title_padding)})]
 let title_layout = layout.compute_layout({width: 300, height: 200, padding: {top: 0, right: 0, bottom: 0, left: 0},
     encoding: {}, config: {title_font_size: 60}, title: "Large"}, null, null, false, null)
 let checks = [
@@ -96,6 +105,9 @@ let checks = [
     {name: "vega font conversion", ok: converted.encoding.x.axis.label_font_family == "serif" and
         converted.encoding.x.axis.label_font_weight == 700 and converted.encoding.x.axis.label_separation == 8},
     {name: "top labels outside plot", ok: max(top_geometry.rows |> ~.bounds.bottom) < 0},
+    *upright_titles,
+    {name: "long vertical title retained", ok: axis.geometry(reversed, 90, 90,
+        axis.prepare(reversed, {}, "Value"), false).title_angle == -90},
     {name: "title reserves measured height", ok: title_layout.top_margin > 60 and title_layout.title_y > 0},
     {name: "invalid native viewport", ok: radiant.measure_svg_text(pinned_source, 0, 100) == null},
     {name: "invalid native source", ok: radiant.measure_svg_text("<html><body>text</body></html>", 10, 10) == null},

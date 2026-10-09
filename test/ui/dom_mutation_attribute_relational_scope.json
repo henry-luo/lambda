@@ -1,0 +1,81 @@
+{
+  "name": "Data and ARIA mutations preserve the relational-selector invalidation closure",
+  "html": "test/ui/dom_mutation_attribute_relational_scope.html",
+  "viewport": {
+    "width": 500,
+    "height": 240
+  },
+  "events": [
+    {
+      "type": "click",
+      "target": {
+        "selector": "#local"
+      }
+    },
+    {
+      "type": "assert_reconcile_mode",
+      "mode": "incremental",
+      "reason": "eligible"
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#ancestor"
+      },
+      "width": 40
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#aria"
+      }
+    },
+    {
+      "type": "assert_reconcile_mode",
+      "mode": "incremental",
+      "reason": "eligible"
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#ancestor"
+      },
+      "width": 40
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#related"
+      }
+    },
+    {
+      "type": "assert_reconcile_mode",
+      "mode": "retained_full_layout",
+      "reason": "broad-relational-css-risk"
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#ancestor"
+      },
+      "width": 60
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#stylesheet"
+      }
+    },
+    {
+      "type": "assert_reconcile_mode",
+      "mode": "retained_full_layout"
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#ancestor"
+      },
+      "width": 80
+    }
+  ]
+}

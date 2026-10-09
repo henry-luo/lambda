@@ -4,9 +4,10 @@
 #include "../radiant/event.hpp"
 #include "../radiant/svg_animation.hpp"
 #include "../radiant/radiant.hpp"
-#ifdef __APPLE__
 #include "../lib/font/font_internal.h"
-#endif
+#include "../lib/font/font_tables.h"
+#include "../lib/endian.h"
+#include "../lib/str.h"
 #include "../lambda/input/css/css_engine.hpp"
 #include "../lambda/input/css/css_formatter.hpp"
 #include "../lambda/input/css/dom_element.hpp"
@@ -691,6 +692,75 @@ TEST(RenderCompositeTest, MultiplyPreservesSurfaceAlphaRepresentation) {
     }
 }
 
+TEST(RenderFilterTest, ChannelTablesMatchScalarStepsForEveryByteAndAlpha) {
+    uint32_t pixels[256 * 256];
+    const FilterFunctionType types[] = {FILTER_BRIGHTNESS, FILTER_CONTRAST, FILTER_INVERT};
+    const float amounts[] = {-0.25f, 0.0f, 0.37f, 1.0f, 1.75f};
+    for (ImageAlphaMode mode : {IMAGE_ALPHA_STRAIGHT, IMAGE_ALPHA_PREMULTIPLIED}) {
+        for (FilterFunctionType type : types) for (float amount : amounts) {
+            for (unsigned alpha = 0; alpha < 256; alpha++) for (unsigned value = 0; value < 256; value++) {
+                uint32_t pixel = render_pixel_pack_abgr(value, 255 - value, (value * 37) & 255, alpha);
+                pixels[alpha * 256 + value] = mode == IMAGE_ALPHA_PREMULTIPLIED ? render_pixel_premultiply_abgr(pixel) : pixel;
+            }
+            FilterFunction function = {}; function.type = type; function.params.amount = amount;
+            FilterProp filter = {}; filter.functions = lam::own(&function); filter.functions_borrowed = true;
+            ImageSurface surface = {}; surface.width = surface.height = 256;
+            surface.pitch = 256 * sizeof(uint32_t); surface.pixels = pixels; surface.alpha_mode = mode;
+            Rect rect = {0, 0, 256, 256}; Bound clip = {0, 0, 256, 256};
+            apply_css_filters(nullptr, &surface, &filter, &rect, &clip);
+            for (unsigned alpha = 0; alpha < 256; alpha++) for (unsigned value = 0; value < 256; value++) {
+                uint32_t expected = render_pixel_pack_abgr(value, 255 - value, (value * 37) & 255, alpha);
+                if (mode == IMAGE_ALPHA_PREMULTIPLIED) expected = render_pixel_premultiply_abgr(expected);
+                ImageSurface scalar = {}; scalar.width = scalar.height = 1;
+                scalar.pitch = sizeof(uint32_t); scalar.pixels = &expected; scalar.alpha_mode = mode;
+                Rect unit = {0, 0, 1, 1}; Bound unit_clip = {0, 0, 1, 1};
+                apply_css_filters(nullptr, &scalar, &filter, &unit, &unit_clip);
+                ASSERT_EQ(pixels[alpha * 256 + value], expected)
+                    << "filter " << type << " amount " << amount << " alpha " << alpha << " byte " << value << " mode " << mode;
+            }
+        }
+    }
+}
+
+TEST(RenderFilterTest, BlurDoesNotSampleOrOverwriteOutsideItsSourceClip) {
+    Arena* arena = arena_create_default(); ASSERT_NE(arena, nullptr);
+    ScratchArena scratch = {}; scratch_init(&scratch, arena);
+    for (bool native : {false, true}) {
+        uint32_t pixels[32 * 32];
+        for (unsigned y = 0; y < 32; y++) for (unsigned x = 0; x < 32; x++)
+            pixels[y * 32 + x] = x < 8 || x >= 24 || y < 8 || y >= 24
+                ? 0xff00ff00u : x >= 12 && x < 20 && y >= 12 && y < 20 ? 0xff0000ffu : 0;
+        ImageSurface surface = {}; surface.width = surface.height = 32;
+        surface.pitch = 32 * sizeof(uint32_t); surface.pixels = pixels;
+        FilterFunction function = {}; function.type = FILTER_BLUR; function.params.blur_radius = 2;
+        FilterProp filter = {}; filter.functions = lam::own(&function); filter.functions_borrowed = true;
+        Rect rect = {8, 8, 16, 16}; Bound clip = {8, 8, 24, 24};
+        RenderBackendCaps caps = {}; caps.gaussian_blur = native;
+        ASSERT_TRUE(render_filter_apply_with_backend(&caps, &scratch, &surface, &filter, &rect, &clip));
+        for (unsigned y = 0; y < 32; y++) for (unsigned x = 0; x < 32; x++) {
+            uint32_t pixel = pixels[y * 32 + x];
+            if (x < 8 || x >= 24 || y < 8 || y >= 24) EXPECT_EQ(pixel, 0xff00ff00u);
+            else EXPECT_EQ(pixel & 0x00ffff00u, 0u); // the green backdrop never enters the red source.
+        }
+        EXPECT_GT(pixels[16 * 32 + 11] >> 24, 0u);
+    }
+    scratch_release(&scratch); arena_destroy(arena);
+}
+
+TEST(RasterPaintTest, TranslucentFillPreservesAnIsolatedSourceAlpha) {
+    for (ImageAlphaMode mode : {IMAGE_ALPHA_STRAIGHT, IMAGE_ALPHA_PREMULTIPLIED}) {
+        uint32_t pixel = 0;
+        ImageSurface surface = {};
+        surface.width = surface.height = 1; surface.pitch = sizeof(pixel);
+        surface.pixels = &pixel; surface.alpha_mode = mode;
+        RasterPaintContext context = raster_paint_context(&surface, nullptr, nullptr, 0);
+        raster_fill_rect(&context, nullptr, 0x800000ffu);
+        EXPECT_EQ(pixel, mode == IMAGE_ALPHA_STRAIGHT ? 0x800000ffu : 0x80000080u);
+        raster_fill_rect(&context, nullptr, 0x800000ffu);
+        EXPECT_EQ(pixel, mode == IMAGE_ALPHA_STRAIGHT ? 0xc00000ffu : 0xc00000c0u);
+    }
+}
+
 TEST(SvgExportTest, EncodingCopyRespectsMemoryBudgetAndRecovers) {
     uint32_t pixels[64 * 64] = {};
     ImageSurface surface = {};
@@ -707,6 +777,81 @@ TEST(SvgExportTest, EncodingCopyRespectsMemoryBudgetAndRecovers) {
     StrBuf* recovered = render_encode_surface_data_uri(&surface);
     EXPECT_NE(recovered, nullptr);
     if (recovered) strbuf_free(recovered);
+}
+
+TEST(SvgTextTest, PlainGlyphsKeepNativeCoverageAndOwnPixelsAfterFontContextDies) {
+    rdt_engine_init(0);
+    for (float density : {1.0f, 2.0f}) for (float font_ratio : {1.0f, 2.0f}) {
+        SCOPED_TRACE(density);
+        SCOPED_TRACE(font_ratio);
+        FontContextConfig config = {}; config.pixel_ratio = font_ratio;
+        FontContext* fonts = font_context_create(&config); ASSERT_NE(fonts, nullptr);
+        OffscreenRenderArenas arenas;
+        ASSERT_TRUE(arenas.init("test.svg.native_text", "test.svg.native_text.list", "test.svg.native_text.scratch_arena"));
+        DisplayList dl = {}; dl_init(&dl, arenas.list_arena);
+        PaintList paint = {}; paint_list_init(&paint, arenas.scratch_arena);
+        ScratchArena scratch = {}; mem_scratch_init(nullptr, &scratch, arenas.scratch_arena, MEM_ROLE_RENDER, "test.svg.native_text.scratch");
+        RasterRenderContext context = {}; context.raster_scale = density;
+        context.dl = lam::up(&dl); context.paint_list = lam::up(&paint);
+        const char source[] = "<svg xmlns='http://www.w3.org/2000/svg' width='80' height='40' viewBox='0 0 5000 2500'>"
+            "<text x='625' y='1875' font-size='1000' font-family='Times New Roman' font-style='italic' "
+            "fill='currentColor' color='#204080'>x</text></svg>";
+        RdtPicture* picture = rdt_picture_load_data(source, sizeof(source) - 1, "svg"); ASSERT_NE(picture, nullptr);
+        RdtMatrix transform = {density, 0, 0, 0, density, 0, 0, 0, 1};
+        render_svg_record_picture(&paint, &dl, &scratch, fonts, &context, picture, 255, &transform);
+        size_t images = 0;
+        for (int i = 0; i < dl.item_count(); i++) if (dl.data()[i].op == DL_DRAW_IMAGE) images++;
+        ASSERT_EQ(images, 1u);
+        font_context_destroy(fonts); rdt_picture_free(picture); paint_list_destroy(&paint);
+        scratch_release(&scratch);
+
+        // independent native font bitmap is the coverage reference; recording owners are already gone.
+        config.pixel_ratio = density; fonts = font_context_create(&config); ASSERT_NE(fonts, nullptr);
+        FontStyleDesc style = {}; style.family = "Times New Roman"; style.size_px = 16;
+        style.weight = FONT_WEIGHT_NORMAL; style.slant = FONT_SLANT_ITALIC;
+        FontHandle* font = font_resolve(fonts, &style); ASSERT_NE(font, nullptr);
+        const GlyphBitmap* bitmap = font_render_glyph(font, 'x', GLYPH_RENDER_NORMAL); ASSERT_NE(bitmap, nullptr);
+        ImageSurface* expected = image_surface_create(lroundf(80 * density), lroundf(40 * density));
+        ASSERT_NE(expected, nullptr);
+        ImageSurface* actual = image_surface_create(expected->width, expected->height);
+        ASSERT_NE(actual, nullptr);
+        memset(expected->pixels, 255, (size_t)expected->pitch * expected->height);
+        memset(actual->pixels, 255, (size_t)actual->pitch * actual->height);
+        DlDrawGlyph glyph = {}; glyph.bitmap = *bitmap;
+        glyph.x = lroundf(10 * density + bitmap->bearing_x); glyph.y = lroundf(30 * density - bitmap->bearing_y);
+        glyph.color.r = 32; glyph.color.g = 64; glyph.color.b = 128; glyph.color.a = 255;
+        glyph.clip = {0, 0, (float)actual->width, (float)actual->height};
+        dl_replay_draw_glyph(expected, &glyph);
+        RdtVector vector = {}; rdt_vector_init(&vector, (uint32_t*)actual->pixels, actual->width, actual->height, actual->width);
+        mem_scratch_init(nullptr, &scratch, arenas.scratch_arena, MEM_ROLE_RENDER, "test.svg.native_text.replay");
+        dl_replay(&dl, &vector, actual, &glyph.clip, &scratch, density, nullptr); rdt_vector_destroy(&vector);
+        int max_error = 0;
+        for (size_t i = 0; i < (size_t)actual->pitch * actual->height; i++) {
+            int difference = abs(((const uint8_t*)actual->pixels)[i] - ((const uint8_t*)expected->pixels)[i]);
+            if (difference > max_error) max_error = difference;
+        }
+        // the owned transparent image adds one 8-bit compositing round trip.
+        EXPECT_LE(max_error, 1);
+        image_surface_destroy(expected); image_surface_destroy(actual);
+        const char* vector_styles[] = {"transform='rotate(20)'", "transform='skewX(15)'",
+            "transform='scale(2 1)'", "rotate='15'", "stroke='blue' stroke-width='.5'", "fill='url(#ink)'"};
+        for (const char* attributes : vector_styles) {
+            SCOPED_TRACE(attributes);
+            dl_clear(&dl); paint_list_init(&paint, arenas.scratch_arena);
+            StrBuf* svg = strbuf_create("<svg xmlns='http://www.w3.org/2000/svg' width='80' height='40'>"
+                "<defs><linearGradient id='ink'><stop stop-color='red'/><stop offset='1' stop-color='blue'/></linearGradient></defs>");
+            strbuf_append_format(svg, "<text x='10' y='30' font-family='Times New Roman' font-size='16' %s>x</text></svg>", attributes);
+            picture = rdt_picture_load_data(svg->str, svg->length, "svg"); ASSERT_NE(picture, nullptr);
+            strbuf_free(svg);
+            render_svg_record_picture(&paint, &dl, &scratch, fonts, &context, picture, 255, &transform);
+            for (int i = 0; i < dl.item_count(); i++) EXPECT_NE(dl.data()[i].op, DL_DRAW_IMAGE);
+            EXPECT_GT(dl.item_count(), 0);
+            rdt_picture_free(picture); paint_list_destroy(&paint);
+        }
+        font_handle_release(font); font_context_destroy(fonts);
+        scratch_release(&scratch); dl_destroy(&dl); arenas.destroy();
+    }
+    rdt_engine_term();
 }
 
 TEST(SvgExportTest, RasterSnapshotRetainsTransparencyAndLogicalBoundsAtBothDensities) {
@@ -1864,6 +2009,54 @@ static const CssValue* css_token_test_lookup(void* context, DomElement*, const c
     return strcmp(name, "--t1") == 0 ? (const CssValue*)context : nullptr;
 }
 
+TEST(CssVariableSubstitutionTest, InvalidOwnedTokensDoNotRetainTemporaryStorage) {
+    Pool* source = pool_create();
+    Pool* retained = pool_create();
+    ASSERT_NE(source, nullptr);
+    ASSERT_NE(retained, nullptr);
+    const char* expression = "var(--missing)";
+    const char* declaration_text = "--value:var(--missing)";
+    CssDeclaration* declaration = css_parse_declaration_text(declaration_text,
+        strlen(declaration_text), source);
+    ASSERT_NE(declaration, nullptr);
+    CssValue* value = css_value_create_token_sequence(source, declaration->value,
+        strview_from_cstr(expression));
+    ASSERT_NE(value, nullptr);
+    PoolStats before = {};
+    pool_get_detailed_stats(retained, &before);
+    for (size_t i = 0; i < 128; i++) {
+        EXPECT_EQ(css_resolve_var_value(retained, value, nullptr, nullptr), nullptr);
+    }
+    PoolStats after = {};
+    pool_get_detailed_stats(retained, &after);
+    EXPECT_EQ(after.live_bytes, before.live_bytes);
+    pool_destroy(retained);
+    pool_destroy(source);
+}
+
+TEST(CssVariableSubstitutionTest, PublicComputedTextRetainsSubstitutedSpelling) {
+    Input input = {};
+    DomDocument document;
+    ASSERT_TRUE(document.init(&input));
+    DomElement* element = DomElement::create(&document, "div", nullptr);
+    ASSERT_NE(element, nullptr);
+    document.root = lam::up(element);
+    ASSERT_TRUE(element->set_attribute("style", "--base:12px;--result:var(--base)"));
+    Pool* retained = pool_create();
+    ASSERT_NE(retained, nullptr);
+    StrView text = {};
+    const CssValue* value = css_compute_element_custom_property_text(retained,
+        element, "--result", 8, &text);
+    ASSERT_NE(value, nullptr);
+    ASSERT_NE(text.str, nullptr);
+    EXPECT_EQ(text.length, 4u);
+    EXPECT_STREQ(text.str, "12px");
+    EXPECT_TRUE(pool_owns(retained, text.str));
+    document.destroy();
+    EXPECT_STREQ(text.str, "12px");
+    pool_destroy(retained);
+}
+
 TEST(CssVariableSubstitutionTest, OwnedTokenSpellingSurvivesSubstitutionBoundaries) {
     struct Case {const char* variable; const char* expression; const char* expected;};
     const Case cases[] = {
@@ -2136,6 +2329,113 @@ TEST_F(SvgAnimationLifetimeTest, EmptyNonPaintSubstitutionDoesNotReadPaintListHe
     // empty custom tokens are valid input to substitution, even when the consuming property defaults.
     const char* result = svg_get_dom_presentation_property(text, "font-size", true, value, sizeof(value));
     EXPECT_TRUE(!result || !*result);
+}
+
+TEST_F(SvgAnimationLifetimeTest, TextHitGeometryRefreshesInheritedStyleAndPosition) {
+    struct MetadataOwner {~MetadataOwner() {css_property_system_cleanup();}} metadata;
+    ASSERT_TRUE(css_property_system_init(doc.document_pool));
+    struct FontOwner {
+        FontContext* fonts = font_context_create(nullptr);
+        ~FontOwner() {font_context_destroy(fonts);}
+    } fonts;
+    ASSERT_NE(fonts.fonts, nullptr);
+    ui.font_ctx = lam::up(fonts.fonts);
+    Input* owner = authored_input(); ASSERT_NE(owner, nullptr);
+    doc.input = lam::up(owner);
+    MarkBuilder builder(owner);
+    Item source = builder.element("svg").attr("xmlns", "http://www.w3.org/2000/svg")
+        .attr("width", "200").attr("height", "200")
+        .child(builder.element("g").attr("style", "font:20px Arial")
+            .child(builder.element("text").attr("x", "10").attr("y", "60").text("W").final()).final()).final();
+    svg = build_dom_tree_from_element(source.element, &doc, nullptr); ASSERT_NE(svg, nullptr);
+    doc.root = lam::up(svg);
+    DomElement* group = svg->first_child->as_element(); ASSERT_NE(group, nullptr);
+    DomElement* text = group->first_child->as_element(); ASSERT_NE(text, nullptr);
+    SvgLengthContext lengths = {200.0f, 200.0f, 20.0f, 10.0f};
+    auto bounds = [&]() {
+        Bound result = {};
+        RdtPath* path = svg_text_geometry_path(text, &lengths, fonts.fonts);
+        EXPECT_NE(path, nullptr);
+        EXPECT_TRUE(rdt_path_get_bounds(path, &result.left, &result.top, &result.right, &result.bottom));
+        rdt_path_free(path);
+        return result;
+    };
+    Bound initial = bounds();
+    EXPECT_GT(initial.right - initial.left, 0.0f);
+    RdtPath* retained = svg_text_geometry_path(text, &lengths, fonts.fonts);
+    ASSERT_NE(retained, nullptr);
+    for (size_t i = 0; i < 3; i++) {
+        Bound repeated = bounds();
+        EXPECT_FLOAT_EQ(repeated.left, initial.left);
+        EXPECT_FLOAT_EQ(repeated.right, initial.right);
+    }
+    ASSERT_TRUE(group->set_attribute("style", "font:40px Arial"));
+    ASSERT_TRUE(text->set_attribute("x", "30"));
+    Bound changed = bounds();
+    EXPECT_NEAR(changed.left - initial.left, 20.0f, .01f);
+    EXPECT_NEAR(changed.right - changed.left, 2.0f * (initial.right - initial.left), .1f);
+    Bound original = {};
+    ASSERT_TRUE(rdt_path_get_bounds(retained, &original.left, &original.top, &original.right, &original.bottom));
+    EXPECT_FLOAT_EQ(original.left, initial.left);
+    EXPECT_FLOAT_EQ(original.right, initial.right);
+    rdt_path_free(retained);
+    ui.font_ctx = nullptr;
+}
+
+TEST_F(SvgAnimationLifetimeTest, SelectorStateDependencyIncludesFailedHoverQueries) {
+    struct MetadataOwner {~MetadataOwner() {css_property_system_cleanup();}} metadata;
+    ASSERT_TRUE(css_property_system_init(doc.document_pool));
+    CssEngine* engine = css_engine_create(doc.document_pool); ASSERT_NE(engine, nullptr);
+    SelectorMatcher* matcher = selector_matcher_create(doc.document_pool); ASSERT_NE(matcher, nullptr);
+    ASSERT_TRUE(svg->set_attribute("id", "scene"));
+    DomElement* rect = element("rect", svg); ASSERT_NE(rect, nullptr);
+    CssStylesheet* sheets[] = {css_parse_stylesheet(engine,
+        "#scene { color:red; & rect { fill:blue; } } rect { font:italic 20px Arial; }", nullptr)};
+    ASSERT_NE(sheets[0], nullptr);
+    CssDeclaration selected = {};
+    ASSERT_TRUE(css_select_element_declaration(engine, matcher, rect, sheets, 1,
+        nullptr, 0, "fill", &selected));
+    EXPECT_STREQ(selected.value_text, "blue");
+    ASSERT_TRUE(css_select_element_declaration(engine, matcher, rect, sheets, 1,
+        nullptr, 0, "font-size", &selected));
+    EXPECT_STREQ(selected.property_name, "font");
+    EXPECT_FALSE(matcher->depends_on_state);
+    CssSelectorGroup* hover = css_parse_selector_group_text("rect:hover", 10, doc.document_pool);
+    ASSERT_NE(hover, nullptr);
+    EXPECT_FALSE(selector_matcher_matches_group(matcher, hover, rect, nullptr));
+    EXPECT_TRUE(matcher->depends_on_state);
+    selector_matcher_destroy(matcher);
+    css_engine_destroy(engine);
+}
+
+TEST(FontContextTest, PlatformFallbackHandlesStayWithTheirOwningContext) {
+    FontContextConfig config = {};
+    config.pixel_ratio = 1.0f;
+    FontContext* first = font_context_create(&config);
+    FontContext* second = font_context_create(&config);
+    ASSERT_NE(first, nullptr);
+    ASSERT_NE(second, nullptr);
+    FontStyleDesc style = {};
+    style.family = "sans-serif";
+    style.size_px = 16.0f;
+    style.weight = FONT_WEIGHT_NORMAL;
+    FontHandle* a = font_find_codepoint_fallback(first, &style, 0x2211, nullptr);
+    FontHandle* b = font_find_codepoint_fallback(second, &style, 0x2211, nullptr);
+    ASSERT_NE(a, nullptr);
+    ASSERT_NE(b, nullptr);
+    EXPECT_EQ(a->ctx, first);
+    EXPECT_EQ(b->ctx, second);
+    EXPECT_NE(a, b);
+    font_handle_release(a);
+    font_handle_release(b);
+    // retiring either pool must leave the other's cached fallback usable.
+    font_context_destroy(first);
+    FontHandle* retained = font_find_codepoint_fallback(second, &style, 0x2211, nullptr);
+    ASSERT_NE(retained, nullptr);
+    EXPECT_EQ(retained->ctx, second);
+    EXPECT_GT(font_get_metrics(retained)->line_height, 0.0f);
+    font_handle_release(retained);
+    font_context_destroy(second);
 }
 
 TEST(SvgCascadeTest, FontDescriptorChangesAdvancePaintResourceGeneration) {
@@ -2631,4 +2931,160 @@ TEST(SvgTextTest, ColorGlyphFallsBackToCoverageGeometry) {
     EXPECT_TRUE(rdt_path_get_bounds(path, &left, &top, &right, &bottom));
     EXPECT_GT(right - left, 0.0f); EXPECT_GT(bottom - top, 0.0f);
     rdt_path_free(path); arena_destroy(arena); font_handle_release(emoji); font_context_destroy(context);
+}
+
+class FontLocalSourceTest : public ::testing::Test {
+protected:
+    FontContext* ctx = nullptr;
+
+    void SetUp() override {
+        FontContextConfig config = {};
+        config.pixel_ratio = 1.0f;
+        ctx = font_context_create(&config);
+        ASSERT_NE(ctx, nullptr);
+        arraylist_remove_range(ctx->database->scan_directories, 0,
+            ctx->database->scan_directories->length);
+        font_context_add_scan_directory(ctx, "test/ui/svg_font_assets");
+    }
+
+    void TearDown() override {
+        if (ctx) font_context_destroy(ctx);
+    }
+
+    FontHandle* load(FontFaceSource* sources, int count) {
+        FontFaceDesc descriptor = {};
+        descriptor.family = "Local Source Alias";
+        descriptor.weight = FONT_WEIGHT_NORMAL;
+        descriptor.slant = FONT_SLANT_NORMAL;
+        descriptor.sources = sources;
+        descriptor.source_count = count;
+        if (!font_face_register(ctx, &descriptor)) return nullptr;
+        FontStyleDesc style = {};
+        style.family = descriptor.family;
+        style.size_px = 20.0f;
+        style.weight = descriptor.weight;
+        const FontFaceDesc* registered = font_face_find(ctx, &style);
+        return registered ? font_face_load(ctx, registered, style.size_px) : nullptr;
+    }
+
+    void expect_name(FontHandle* handle, const char* name) {
+        ASSERT_NE(handle, nullptr);
+        NameTable* names = font_tables_get_name(handle->tables);
+        ASSERT_NE(names, nullptr);
+        EXPECT_STREQ(names->postscript_name, name);
+        font_handle_release(handle);
+        font_context_reset_document_fonts(ctx);
+        EXPECT_EQ(ctx->face_descriptor_count, 0);
+    }
+};
+
+TEST_F(FontLocalSourceTest, UniqueNamesTakePrecedenceOverLaterUrls) {
+    const char* names[] = {"SVG Test Rectangle Regular", "SVGTestRectangle-Regular",
+        "svgtestrectangle-regular"};
+    for (const char* name : names) {
+        FontFaceSource sources[2] = {};
+        sources[0].local_name = name;
+        sources[1].path = "test/lambda/math/fonts/NotoSansMath-Regular.ttf";
+        expect_name(load(sources, 2), "SVGTestRectangle-Regular");
+    }
+}
+
+TEST_F(FontLocalSourceTest, FamilyNamesFallThroughToTheNextSource) {
+    FontFaceSource sources[2] = {};
+    sources[0].local_name = "SVG Test Rectangle";
+    sources[1].path = "test/lambda/math/fonts/NotoSansMath-Regular.ttf";
+    expect_name(load(sources, 2), "NotoSansMath-Regular");
+}
+
+TEST_F(FontLocalSourceTest, RegistrationOwnsLocalNames) {
+    char name[] = "SVGTestRectangle-Regular";
+    FontFaceSource sources[2] = {};
+    sources[0].local_name = "Missing Local Source Test Face";
+    sources[1].local_name = name;
+    FontHandle* handle = load(sources, 2);
+    name[0] = 'X';
+    const FontFaceDesc* descriptors[1] = {};
+    ASSERT_EQ(font_face_list(ctx, "Local Source Alias", descriptors, 1), 1);
+    EXPECT_STREQ(descriptors[0]->sources[1].local_name, "SVGTestRectangle-Regular");
+    expect_name(handle, "SVGTestRectangle-Regular");
+}
+
+TEST_F(FontLocalSourceTest, DiskCachePreservesFullNames) {
+    ASSERT_NE(font_database_find_local_name_internal(ctx->database,
+        "SVG Test Rectangle Regular"), nullptr);
+    const char* path = "temp/font_local_source_cache.bin";
+    ASSERT_TRUE(font_database_save_cache_internal(ctx->database, path));
+    Pool* pool = pool_create();
+    Arena* arena = arena_create_default();
+    ASSERT_NE(pool, nullptr);
+    ASSERT_NE(arena, nullptr);
+    FontDatabase* database = font_database_create_internal(pool, arena);
+    ASSERT_NE(database, nullptr);
+    ASSERT_TRUE(font_database_load_cache_internal(database, path));
+    FontEntry* entry = font_database_find_local_name_internal(database,
+        "SVG Test Rectangle Regular");
+    ASSERT_NE(entry, nullptr);
+    EXPECT_STREQ(entry->postscript_name, "SVGTestRectangle-Regular");
+    font_database_destroy_internal(database);
+    arena_destroy(arena);
+    pool_destroy(pool);
+    EXPECT_EQ(remove(path), 0);
+}
+
+TEST_F(FontLocalSourceTest, CollectionInventoryCannotWinFaceMatchingOrExpandTwice) {
+    const char* paths[] = {"test/ui/svg_font_assets/rectangle.ttf",
+        "test/lambda/math/fonts/NotoSansMath-Regular.ttf"};
+    lam::Temp<char> fonts[2];
+    size_t sizes[2] = {};
+    size_t offsets[2] = {20, 0};
+    for (int i = 0; i < 2; i++) {
+        char* bytes = nullptr;
+        ASSERT_TRUE(file_read_all(paths[i], MEM_CAT_TEMP, &bytes, &sizes[i]));
+        fonts[i].reset(bytes);
+    }
+    offsets[1] = (offsets[0] + sizes[0] + 3) & ~(size_t)3;
+    size_t length = offsets[1] + sizes[1];
+    lam::Temp<uint8_t> collection((uint8_t*)mem_calloc(1, length, MEM_CAT_TEMP));
+    ASSERT_TRUE(collection);
+    write_be32(collection.get(), FONT_TAG('t', 't', 'c', 'f'));
+    write_be32(collection.get() + 4, 0x00010000);
+    write_be32(collection.get() + 8, 2);
+    for (int i = 0; i < 2; i++) {
+        write_be32(collection.get() + 12 + i * 4, (uint32_t)offsets[i]);
+        uint8_t* face = collection.get() + offsets[i];
+        memcpy(face, fonts[i].get(), sizes[i]);
+        uint16_t tables = read_be16(face + 4);
+        for (uint16_t t = 0; t < tables; t++) {
+            uint8_t* record = face + 12 + t * 16;
+            write_be32(record + 8, read_be32(record + 8) + (uint32_t)offsets[i]);
+        }
+    }
+    const char* path = "temp/font_local_source_collection.ttc";
+    ASSERT_EQ(write_binary_file_atomic(path, collection.get(), length), 0);
+    FontEntry* inventory = (FontEntry*)pool_calloc(ctx->pool, sizeof(FontEntry));
+    ASSERT_NE(inventory, nullptr);
+    inventory->family_name = arena_strdup(ctx->arena, "Noto Sans Math");
+    inventory->file_path = arena_strdup(ctx->arena, path);
+    inventory->format = FONT_FORMAT_TTC;
+    inventory->weight = FONT_WEIGHT_NORMAL;
+    inventory->is_placeholder = true;
+    arraylist_append(ctx->database->all_fonts, inventory);
+    ctx->database->scanned = true;
+    FontDatabaseCriteria criteria = {};
+    str_copy(criteria.family_name, sizeof(criteria.family_name), "Noto Sans Math", 14);
+    criteria.weight = FONT_WEIGHT_NORMAL;
+    for (int attempt = 0; attempt < 3; attempt++) {
+        FontDatabaseResult match = font_database_find_best_match_internal(ctx->database, &criteria);
+        ASSERT_NE(match.font, nullptr);
+        EXPECT_TRUE(match.font->is_collection);
+        EXPECT_EQ(match.font->collection_index, 1);
+        EXPECT_NE(match.font, inventory);
+        EXPECT_EQ(ctx->database->all_fonts->length, 3);
+    }
+    FontEntry* local = font_database_find_local_name_internal(ctx->database, "Noto Sans Math Regular");
+    ASSERT_NE(local, nullptr);
+    EXPECT_EQ(local->collection_index, 1);
+    EXPECT_TRUE(inventory->is_placeholder);
+    EXPECT_TRUE(inventory->collection_expanded);
+    EXPECT_EQ(remove(path), 0);
 }

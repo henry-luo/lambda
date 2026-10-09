@@ -1,0 +1,24 @@
+{
+  "name":"Chart template keyframe playback and controls",
+  "html":"test/lambda/ui/_chart_animation.ls",
+  "viewport":{"width":650,"height":300},
+  "events":[
+    {"type":"advance_time","ms":200,"steps":4},
+    {"type":"assert_attribute","target":{"selector":".lambda-chart"},"attribute":"data-chart-playback","equals":"playing"},
+    {"type":"click","target":{"selector":"#pause"}},
+    {"type":"assert_attribute","target":{"selector":".lambda-chart"},"attribute":"data-chart-playback","equals":"paused"},
+    {"type":"assert_text","target":{"selector":"#phase"},"equals":"pause"},
+    {"type":"click","target":{"selector":"#seek"}},
+    {"type":"assert_text","target":{"selector":"#phase"},"equals":"seek"},
+    {"type":"click","target":{"selector":"#resume"}},
+    {"type":"assert_attribute","target":{"selector":".lambda-chart"},"attribute":"data-chart-playback","equals":"playing"},
+    {"type":"advance_time","ms":1200,"steps":6},
+    {"type":"assert_attribute","target":{"selector":".lambda-chart"},"attribute":"data-chart-playback","equals":"ended"},
+    {"type":"assert_text","target":{"selector":"#phase"},"equals":"end"},
+    {"type":"click","target":{"selector":"#cancel"}},
+    {"type":"assert_attribute","target":{"selector":".lambda-chart"},"attribute":"data-chart-playback","equals":"idle"},
+    {"type":"assert_text","target":{"selector":"#phase"},"equals":"cancel"},
+    {"type":"click","target":{"selector":"#play"}},
+    {"type":"assert_text","target":{"selector":"#phase"},"equals":"start"}
+  ]
+}

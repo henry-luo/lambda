@@ -1,0 +1,21 @@
+<!doctype html>
+<style id="rules">
+#probe { width: 30px; height: 20px; }
+#anchor { width: 40px; height: 20px; }
+#anchor:has(.selected) { width: 60px; }
+#anchor:not(:has(input:checked)) { height: 25px; }
+</style>
+<button id="local">unrelated probe</button><button id="related">anchor mutation</button>
+<button id="sibling-rule">add sibling rule</button><button id="relative">sibling dependency</button>
+<div id="probe"></div><div id="anchor"></div>
+<script>
+function add(parent) { var item = document.createElement('span'); item.className = 'selected'; parent.appendChild(item); }
+document.getElementById('local').onclick = function () { add(document.getElementById('probe')); };
+document.getElementById('related').onclick = function () { add(document.getElementById('anchor')); };
+document.getElementById('sibling-rule').onclick = function () {
+ document.getElementById('rules').sheet.insertRule('#probe:has(+ #anchor .selected) { height: 35px; }', 4);
+};
+document.getElementById('relative').onclick = function () {
+ document.getElementById('anchor').firstChild.remove();
+};
+</script>

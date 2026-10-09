@@ -1,0 +1,162 @@
+{
+  "name": "ResizeObserver uses CSS boxes without transform-driven notifications",
+  "html": "test/ui/resize_observer_css_boxes.html",
+  "viewport": {
+    "width": 400,
+    "height": 300
+  },
+  "events": [
+    {
+      "type": "click",
+      "target": {
+        "selector": "#observe"
+      }
+    },
+    {
+      "type": "wait",
+      "ms": 30
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-calls",
+      "equals": "1"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-content",
+      "equals": "40,30"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-origin",
+      "equals": "5,5"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-logical",
+      "equals": "40,30"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-border",
+      "equals": "56,46"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#transform"
+      }
+    },
+    {
+      "type": "wait",
+      "ms": 30
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-calls",
+      "equals": "1"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-content",
+      "equals": "40,30"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#resize"
+      }
+    },
+    {
+      "type": "wait",
+      "ms": 30
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-calls",
+      "equals": "2"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-content",
+      "equals": "60,30"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-border",
+      "equals": "76,46"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#vertical"
+      }
+    },
+    {
+      "type": "wait",
+      "ms": 30
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-calls",
+      "equals": "3"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-content",
+      "equals": "60,30"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-logical",
+      "equals": "30,60"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-border",
+      "equals": "46,76"
+    }
+  ]
+}

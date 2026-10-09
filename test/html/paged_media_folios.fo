@@ -1,0 +1,12 @@
+<?xml version="1.0"?>
+<fo:root xmlns:fo="http://www.w3.org/1999/XSL/Format" font-family="Arial" font-size="7.5pt" line-height="9pt">
+  <fo:layout-master-set>
+    <fo:simple-page-master master-name="sheet" page-width="225pt" page-height="75pt" margin="7.5pt"><fo:region-body region-name="main"/></fo:simple-page-master>
+  </fo:layout-master-set>
+  <fo:page-sequence master-reference="sheet" initial-page-number="4" force-page-count="even" format="i">
+    <fo:flow flow-name="main"><fo:block>Page <fo:page-number/>. Chapter <fo:page-number-citation ref-id="content"/>–<fo:page-number-citation-last ref-id="content"/>. Including blank: <fo:page-number-citation-last ref-id="chapter"/>; normal: <fo:page-number-citation-last ref-id="chapter" page-citation-strategy="normal"/>.</fo:block></fo:flow>
+  </fo:page-sequence>
+  <fo:page-sequence id="chapter" master-reference="sheet" initial-page-number="12" force-page-count="even" format="(001)">
+    <fo:flow flow-name="main"><fo:block id="content"><fo:block>Chapter begins: <fo:page-number/>.</fo:block><fo:block break-before="page">Chapter continues: <fo:page-number/>.</fo:block><fo:block break-before="page">Chapter ends: <fo:page-number/>.</fo:block></fo:block></fo:flow>
+  </fo:page-sequence>
+</fo:root>

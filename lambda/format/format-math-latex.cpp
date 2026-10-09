@@ -403,7 +403,9 @@ static void format_env_body(StringBuf* sb, const ElementReader& elem, int depth)
 // Format `text_command` element: \text{content}
 static void format_text_command(StringBuf* sb, const ElementReader& elem, int depth) {
     ItemReader cmd = elem.get_attr("cmd");
-    ItemReader content = elem.get_attr("content");
+    // decoded text is for painting; source escapes must survive a LaTeX round trip.
+    ItemReader content = elem.get_attr("content_raw");
+    if (!content.isString()) content = elem.get_attr("content");
 
     if (!cmd.isNull() && cmd.isString()) {
         stringbuf_append_str(sb, cmd.asString()->chars);
@@ -648,6 +650,7 @@ enum MathLatexSlot {
     MATH_LATEX_RULE_COMMAND,
     MATH_LATEX_LIMITS_MODIFIER,
     MATH_LATEX_CHILDREN_NONE,
+    MATH_LATEX_NEGATION,
 };
 
 static const MathTagDispatch MATH_LATEX_TAGS[] = {
@@ -693,6 +696,8 @@ static const MathTagDispatch MATH_LATEX_TAGS[] = {
     {"ascii_operator", MATH_LATEX_CHILDREN_NONE},
     {"quoted_text", MATH_LATEX_CHILDREN_NONE},
     {"paren_script", MATH_LATEX_CHILDREN_SPACE},
+    {"not_overlay", MATH_LATEX_NEGATION},
+    {"not_empty", MATH_LATEX_NEGATION},
     {nullptr, MATH_LATEX_UNKNOWN},
 };
 
@@ -743,6 +748,14 @@ static void format_element_impl(StringBuf* sb, const ElementReader& elem, int de
     case MATH_LATEX_RULE_COMMAND: return format_rule_command(sb, elem, depth);
     case MATH_LATEX_LIMITS_MODIFIER: return;
     case MATH_LATEX_CHILDREN_NONE: return format_children(sb, elem, depth, "");
+    case MATH_LATEX_NEGATION: {
+        // keep negation in serialized math and in the SVG's accessible title.
+        stringbuf_append_str(sb, "\\not");
+        ItemReader target = elem.get_attr("target");
+        if (target.isNull()) stringbuf_append_str(sb, "{}");
+        else format_item(sb, target, depth + 1);
+        return;
+    }
     default:
         break;
     }

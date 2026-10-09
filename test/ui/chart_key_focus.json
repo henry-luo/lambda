@@ -1,0 +1,49 @@
+{
+  "name": "Chart key retains focus after source reordering",
+  "html": "test/lambda/ui/_chart_key_focus.ls",
+  "viewport": {
+    "width": 450,
+    "height": 300
+  },
+  "events": [
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "[data-chart-key]"
+      },
+      "count": 2
+    },
+    {
+      "type": "focus",
+      "target": {
+        "selector": "[data-chart-key]",
+        "index": 1
+      }
+    },
+    {
+      "type": "assert_focus",
+      "target": {
+        "selector": "[data-chart-key]",
+        "index": 1
+      }
+    },
+    {
+      "type": "key_press",
+      "key": "ArrowRight"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "[data-chart-key]"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_focus",
+      "target": {
+        "selector": "[data-chart-key]",
+        "index": 0
+      }
+    }
+  ]
+}

@@ -13,14 +13,14 @@ struct CanonicalInlineEntry {
     lam::Own<CanonicalInlineEntry> next;
 };
 
-struct CanonicalFontFamily {
+struct CanonicalString {
     const char* chars;
     size_t length;
 };
 
-struct CanonicalFontFamilies {
-    TypedHashMap<CanonicalFontFamily, HashMapLenStrMemberKeyOps<CanonicalFontFamily,
-        &CanonicalFontFamily::chars, &CanonicalFontFamily::length>> index;
+struct CanonicalStrings {
+    TypedHashMap<CanonicalString, HashMapLenStrMemberKeyOps<CanonicalString,
+        &CanonicalString::chars, &CanonicalString::length>> index;
 };
 
 static uint32_t inline_float_hash_bits(float value) {
@@ -191,22 +191,22 @@ void view_tree_canonical_init(ViewTree* tree) {
     memset(&tree->canonical_stats, 0, sizeof(tree->canonical_stats));
 }
 
-const char* view_tree_canonical_font_family(ViewTree* tree, const char* chars,
-                                            size_t length) {
+const char* view_tree_canonical_string(ViewTree* tree, const char* chars,
+                                       size_t length, bool* inserted) {
     if (!tree || !tree->prop_pool || !chars) return nullptr;
-    tree->canonical_stats.font_family_lookups++;
-    if (!tree->canonical_font_families) {
-        auto* families = (CanonicalFontFamilies*)pool_calloc(
-            tree->prop_pool, sizeof(CanonicalFontFamilies));
+    if (inserted) *inserted = false;
+    if (!tree->canonical_strings) {
+        auto* families = (CanonicalStrings*)pool_calloc(
+            tree->prop_pool, sizeof(CanonicalStrings));
         if (!families) return nullptr;
         if (!families->index.init(0)) {
             pool_free(tree->prop_pool, families);
             return nullptr;
         }
-        tree->canonical_font_families = lam::own(families);
+        tree->canonical_strings = lam::own(families);
     }
-    CanonicalFontFamilies* families = tree->canonical_font_families;
-    if (const CanonicalFontFamily* found = families->index.get({chars, length})) {
+    CanonicalStrings* families = tree->canonical_strings;
+    if (const CanonicalString* found = families->index.get({chars, length})) {
         return found->chars;
     }
     char* canonical = (char*)pool_alloc(tree->prop_pool, length + 1);
@@ -218,25 +218,35 @@ const char* view_tree_canonical_font_family(ViewTree* tree, const char* chars,
         pool_free(tree->prop_pool, canonical);
         return nullptr;
     }
-    tree->canonical_stats.font_family_misses++;
+    if (inserted) *inserted = true;
     return canonical;
 }
 
-static void canonical_font_families_destroy(ViewTree* tree) {
-    CanonicalFontFamilies* families = tree->canonical_font_families;
+const char* view_tree_canonical_font_family(ViewTree* tree, const char* chars,
+                                            size_t length) {
+    if (!tree) return nullptr;
+    tree->canonical_stats.font_family_lookups++;
+    bool inserted = false;
+    const char* result = view_tree_canonical_string(tree, chars, length, &inserted);
+    if (inserted) tree->canonical_stats.font_family_misses++;
+    return result;
+}
+
+static void canonical_strings_destroy(ViewTree* tree) {
+    CanonicalStrings* families = tree->canonical_strings;
     if (!families) return;
     size_t cursor = 0;
-    CanonicalFontFamily* entry = nullptr;
+    CanonicalString* entry = nullptr;
     while (families->index.next(&cursor, &entry)) {
         pool_free(tree->prop_pool, (void*)entry->chars);
     }
     families->index.destroy();
-    lam::free_owned(tree->prop_pool, tree->canonical_font_families);
+    lam::free_owned(tree->prop_pool, tree->canonical_strings);
 }
 
 void view_tree_canonical_destroy(ViewTree* tree) {
     if (!tree) return;
-    canonical_font_families_destroy(tree);
+    canonical_strings_destroy(tree);
     for (size_t i = 0; i < tree->inline_canonical_bucket_count; i++) {
         lam::free_owned_list(tree->prop_pool, tree->inline_canonical_buckets[i]);
     }

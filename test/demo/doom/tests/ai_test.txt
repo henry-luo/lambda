@@ -1,0 +1,7 @@
+{
+  wake: ["chasing", true],
+  chase: [true, "chasing", "attacking", "chasing"],
+  blocked: "idle",
+  melee: [true, true, true],
+  nightmare: [12, 20, false, "idle"]
+}

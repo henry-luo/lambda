@@ -1,0 +1,1222 @@
+{
+  "name": "E1M1 native exit route derived from fixed-step simulation",
+  "html": "test/demo/doom/doom.ls",
+  "viewport": {
+    "width": 660,
+    "height": 500
+  },
+  "default_timeout": 1,
+  "input_turn_ms": 0,
+  "events": [
+    {
+      "type": "advance_time",
+      "ms": 40,
+      "steps": 2
+    },
+    {
+      "type": "snapshot_state_store",
+      "target": {
+        "selector": "#scene"
+      },
+      "name": "scene"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#start"
+      }
+    },
+    {
+      "type": "advance_time",
+      "ms": 1,
+      "steps": 1
+    },
+    {
+      "type": "key_down",
+      "key": "w"
+    },
+    {
+      "type": "advance_time",
+      "ms": 2715,
+      "steps": 95
+    },
+    {
+      "type": "key_up",
+      "key": "w"
+    },
+    {
+      "type": "key_down",
+      "key": "w"
+    },
+    {
+      "type": "key_down",
+      "key": "d"
+    },
+    {
+      "type": "advance_time",
+      "ms": 200,
+      "steps": 7
+    },
+    {
+      "type": "key_up",
+      "key": "w"
+    },
+    {
+      "type": "key_up",
+      "key": "d"
+    },
+    {
+      "type": "key_down",
+      "key": "s"
+    },
+    {
+      "type": "advance_time",
+      "ms": 228,
+      "steps": 8
+    },
+    {
+      "type": "key_up",
+      "key": "s"
+    },
+    {
+      "type": "key_down",
+      "key": "d"
+    },
+    {
+      "type": "advance_time",
+      "ms": 572,
+      "steps": 20
+    },
+    {
+      "type": "key_up",
+      "key": "d"
+    },
+    {
+      "type": "key_down",
+      "key": "w"
+    },
+    {
+      "type": "advance_time",
+      "ms": 1371,
+      "steps": 48
+    },
+    {
+      "type": "key_up",
+      "key": "w"
+    },
+    {
+      "type": "key_down",
+      "key": "d"
+    },
+    {
+      "type": "advance_time",
+      "ms": 572,
+      "steps": 20
+    },
+    {
+      "type": "key_up",
+      "key": "d"
+    },
+    {
+      "type": "key_down",
+      "key": "w"
+    },
+    {
+      "type": "advance_time",
+      "ms": 200,
+      "steps": 7
+    },
+    {
+      "type": "key_up",
+      "key": "w"
+    },
+    {
+      "type": "key_down",
+      "key": "d"
+    },
+    {
+      "type": "advance_time",
+      "ms": 285,
+      "steps": 10
+    },
+    {
+      "type": "key_up",
+      "key": "d"
+    },
+    {
+      "type": "key_down",
+      "key": "ArrowRight"
+    },
+    {
+      "type": "advance_time",
+      "ms": 515,
+      "steps": 18
+    },
+    {
+      "type": "key_up",
+      "key": "ArrowRight"
+    },
+    {
+      "type": "key_down",
+      "key": "e"
+    },
+    {
+      "type": "advance_time",
+      "ms": 28,
+      "steps": 1
+    },
+    {
+      "type": "key_up",
+      "key": "e"
+    },
+    {
+      "type": "advance_time",
+      "ms": 1000,
+      "steps": 35
+    },
+    {
+      "type": "key_down",
+      "key": "w"
+    },
+    {
+      "type": "advance_time",
+      "ms": 572,
+      "steps": 20
+    },
+    {
+      "type": "key_up",
+      "key": "w"
+    },
+    {
+      "type": "key_down",
+      "key": "w"
+    },
+    {
+      "type": "advance_time",
+      "ms": 1428,
+      "steps": 50
+    },
+    {
+      "type": "key_up",
+      "key": "w"
+    },
+    {
+      "type": "key_down",
+      "key": "d"
+    },
+    {
+      "type": "advance_time",
+      "ms": 857,
+      "steps": 30
+    },
+    {
+      "type": "key_up",
+      "key": "d"
+    },
+    {
+      "type": "key_down",
+      "key": "Control"
+    },
+    {
+      "type": "advance_time",
+      "ms": 2000,
+      "steps": 70
+    },
+    {
+      "type": "key_up",
+      "key": "Control"
+    },
+    {
+      "type": "key_press",
+      "key": "P"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "paused"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-ticks",
+      "equals": "439"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-health",
+      "equals": "89"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-kills",
+      "equals": "0"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-pickups",
+      "equals": "0"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-floor",
+      "equals": "0"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-x",
+      "equals": "2107"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-y",
+      "equals": "-2537"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-ammo",
+      "equals": "46"
+    },
+    {
+      "type": "key_press",
+      "key": "P"
+    },
+    {
+      "type": "advance_time",
+      "ms": 1,
+      "steps": 1
+    },
+    {
+      "type": "key_down",
+      "key": "w"
+    },
+    {
+      "type": "advance_time",
+      "ms": 1600,
+      "steps": 56
+    },
+    {
+      "type": "key_up",
+      "key": "w"
+    },
+    {
+      "type": "key_down",
+      "key": "d"
+    },
+    {
+      "type": "advance_time",
+      "ms": 515,
+      "steps": 18
+    },
+    {
+      "type": "key_up",
+      "key": "d"
+    },
+    {
+      "type": "key_down",
+      "key": "a"
+    },
+    {
+      "type": "advance_time",
+      "ms": 343,
+      "steps": 12
+    },
+    {
+      "type": "key_up",
+      "key": "a"
+    },
+    {
+      "type": "key_down",
+      "key": "w"
+    },
+    {
+      "type": "advance_time",
+      "ms": 1771,
+      "steps": 62
+    },
+    {
+      "type": "key_up",
+      "key": "w"
+    },
+    {
+      "type": "key_down",
+      "key": "ArrowRight"
+    },
+    {
+      "type": "advance_time",
+      "ms": 829,
+      "steps": 29
+    },
+    {
+      "type": "key_up",
+      "key": "ArrowRight"
+    },
+    {
+      "type": "key_down",
+      "key": "Control"
+    },
+    {
+      "type": "advance_time",
+      "ms": 1371,
+      "steps": 48
+    },
+    {
+      "type": "key_up",
+      "key": "Control"
+    },
+    {
+      "type": "key_press",
+      "key": "P"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "paused"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-ticks",
+      "equals": "664"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-health",
+      "equals": "83"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-kills",
+      "equals": "1"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-pickups",
+      "equals": "0"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-floor",
+      "equals": "24"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-x",
+      "equals": "2284"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-y",
+      "equals": "-2465"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-ammo",
+      "equals": "43"
+    },
+    {
+      "type": "key_press",
+      "key": "P"
+    },
+    {
+      "type": "advance_time",
+      "ms": 1,
+      "steps": 1
+    },
+    {
+      "type": "key_down",
+      "key": "ArrowLeft"
+    },
+    {
+      "type": "advance_time",
+      "ms": 829,
+      "steps": 29
+    },
+    {
+      "type": "key_up",
+      "key": "ArrowLeft"
+    },
+    {
+      "type": "key_down",
+      "key": "d"
+    },
+    {
+      "type": "advance_time",
+      "ms": 686,
+      "steps": 24
+    },
+    {
+      "type": "key_up",
+      "key": "d"
+    },
+    {
+      "type": "key_down",
+      "key": "w"
+    },
+    {
+      "type": "advance_time",
+      "ms": 771,
+      "steps": 27
+    },
+    {
+      "type": "key_up",
+      "key": "w"
+    },
+    {
+      "type": "key_down",
+      "key": "a"
+    },
+    {
+      "type": "advance_time",
+      "ms": 572,
+      "steps": 20
+    },
+    {
+      "type": "key_up",
+      "key": "a"
+    },
+    {
+      "type": "key_down",
+      "key": "w"
+    },
+    {
+      "type": "advance_time",
+      "ms": 685,
+      "steps": 24
+    },
+    {
+      "type": "key_up",
+      "key": "w"
+    },
+    {
+      "type": "key_press",
+      "key": "P"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "paused"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-ticks",
+      "equals": "788"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-health",
+      "equals": "83"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-kills",
+      "equals": "1"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-pickups",
+      "equals": "1"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-floor",
+      "equals": "24"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-x",
+      "equals": "2288"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-y",
+      "equals": "-2382"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-ammo",
+      "equals": "43"
+    },
+    {
+      "type": "key_press",
+      "key": "P"
+    },
+    {
+      "type": "advance_time",
+      "ms": 1,
+      "steps": 1
+    },
+    {
+      "type": "key_down",
+      "key": "a"
+    },
+    {
+      "type": "advance_time",
+      "ms": 715,
+      "steps": 25
+    },
+    {
+      "type": "key_up",
+      "key": "a"
+    },
+    {
+      "type": "key_down",
+      "key": "w"
+    },
+    {
+      "type": "advance_time",
+      "ms": 1028,
+      "steps": 36
+    },
+    {
+      "type": "key_up",
+      "key": "w"
+    },
+    {
+      "type": "key_down",
+      "key": "d"
+    },
+    {
+      "type": "advance_time",
+      "ms": 1029,
+      "steps": 36
+    },
+    {
+      "type": "key_up",
+      "key": "d"
+    },
+    {
+      "type": "key_down",
+      "key": "w"
+    },
+    {
+      "type": "advance_time",
+      "ms": 828,
+      "steps": 29
+    },
+    {
+      "type": "key_up",
+      "key": "w"
+    },
+    {
+      "type": "key_down",
+      "key": "s"
+    },
+    {
+      "type": "advance_time",
+      "ms": 658,
+      "steps": 23
+    },
+    {
+      "type": "key_up",
+      "key": "s"
+    },
+    {
+      "type": "key_down",
+      "key": "d"
+    },
+    {
+      "type": "advance_time",
+      "ms": 400,
+      "steps": 14
+    },
+    {
+      "type": "key_up",
+      "key": "d"
+    },
+    {
+      "type": "key_down",
+      "key": "w"
+    },
+    {
+      "type": "advance_time",
+      "ms": 1057,
+      "steps": 37
+    },
+    {
+      "type": "key_up",
+      "key": "w"
+    },
+    {
+      "type": "key_down",
+      "key": "a"
+    },
+    {
+      "type": "advance_time",
+      "ms": 628,
+      "steps": 22
+    },
+    {
+      "type": "key_up",
+      "key": "a"
+    },
+    {
+      "type": "key_down",
+      "key": "w"
+    },
+    {
+      "type": "advance_time",
+      "ms": 915,
+      "steps": 32
+    },
+    {
+      "type": "key_up",
+      "key": "w"
+    },
+    {
+      "type": "key_down",
+      "key": "a"
+    },
+    {
+      "type": "advance_time",
+      "ms": 85,
+      "steps": 3
+    },
+    {
+      "type": "key_up",
+      "key": "a"
+    },
+    {
+      "type": "key_down",
+      "key": "w"
+    },
+    {
+      "type": "advance_time",
+      "ms": 743,
+      "steps": 26
+    },
+    {
+      "type": "key_up",
+      "key": "w"
+    },
+    {
+      "type": "key_down",
+      "key": "d"
+    },
+    {
+      "type": "advance_time",
+      "ms": 1057,
+      "steps": 37
+    },
+    {
+      "type": "key_up",
+      "key": "d"
+    },
+    {
+      "type": "key_down",
+      "key": "w"
+    },
+    {
+      "type": "advance_time",
+      "ms": 457,
+      "steps": 16
+    },
+    {
+      "type": "key_up",
+      "key": "w"
+    },
+    {
+      "type": "key_down",
+      "key": "d"
+    },
+    {
+      "type": "advance_time",
+      "ms": 343,
+      "steps": 12
+    },
+    {
+      "type": "key_up",
+      "key": "d"
+    },
+    {
+      "type": "key_down",
+      "key": "w"
+    },
+    {
+      "type": "advance_time",
+      "ms": 1229,
+      "steps": 43
+    },
+    {
+      "type": "key_up",
+      "key": "w"
+    },
+    {
+      "type": "key_down",
+      "key": "d"
+    },
+    {
+      "type": "advance_time",
+      "ms": 714,
+      "steps": 25
+    },
+    {
+      "type": "key_up",
+      "key": "d"
+    },
+    {
+      "type": "key_down",
+      "key": "w"
+    },
+    {
+      "type": "advance_time",
+      "ms": 572,
+      "steps": 20
+    },
+    {
+      "type": "key_up",
+      "key": "w"
+    },
+    {
+      "type": "key_down",
+      "key": "d"
+    },
+    {
+      "type": "advance_time",
+      "ms": 1857,
+      "steps": 65
+    },
+    {
+      "type": "key_up",
+      "key": "d"
+    },
+    {
+      "type": "key_down",
+      "key": "w"
+    },
+    {
+      "type": "advance_time",
+      "ms": 628,
+      "steps": 22
+    },
+    {
+      "type": "key_up",
+      "key": "w"
+    },
+    {
+      "type": "key_down",
+      "key": "d"
+    },
+    {
+      "type": "advance_time",
+      "ms": 2000,
+      "steps": 70
+    },
+    {
+      "type": "key_up",
+      "key": "d"
+    },
+    {
+      "type": "key_down",
+      "key": "d"
+    },
+    {
+      "type": "advance_time",
+      "ms": 1286,
+      "steps": 45
+    },
+    {
+      "type": "key_up",
+      "key": "d"
+    },
+    {
+      "type": "key_down",
+      "key": "d"
+    },
+    {
+      "type": "advance_time",
+      "ms": 457,
+      "steps": 16
+    },
+    {
+      "type": "key_up",
+      "key": "d"
+    },
+    {
+      "type": "key_down",
+      "key": "ArrowRight"
+    },
+    {
+      "type": "advance_time",
+      "ms": 486,
+      "steps": 17
+    },
+    {
+      "type": "key_up",
+      "key": "ArrowRight"
+    },
+    {
+      "type": "key_down",
+      "key": "e"
+    },
+    {
+      "type": "advance_time",
+      "ms": 28,
+      "steps": 1
+    },
+    {
+      "type": "key_up",
+      "key": "e"
+    },
+    {
+      "type": "advance_time",
+      "ms": 1000,
+      "steps": 35
+    },
+    {
+      "type": "key_down",
+      "key": "w"
+    },
+    {
+      "type": "advance_time",
+      "ms": 1572,
+      "steps": 55
+    },
+    {
+      "type": "key_up",
+      "key": "w"
+    },
+    {
+      "type": "key_down",
+      "key": "w"
+    },
+    {
+      "type": "advance_time",
+      "ms": 514,
+      "steps": 18
+    },
+    {
+      "type": "key_up",
+      "key": "w"
+    },
+    {
+      "type": "key_down",
+      "key": "e"
+    },
+    {
+      "type": "advance_time",
+      "ms": 29,
+      "steps": 1
+    },
+    {
+      "type": "key_up",
+      "key": "e"
+    },
+    {
+      "type": "advance_time",
+      "ms": 1000,
+      "steps": 35
+    },
+    {
+      "type": "key_down",
+      "key": "w"
+    },
+    {
+      "type": "advance_time",
+      "ms": 800,
+      "steps": 28
+    },
+    {
+      "type": "key_up",
+      "key": "w"
+    },
+    {
+      "type": "key_down",
+      "key": "a"
+    },
+    {
+      "type": "advance_time",
+      "ms": 143,
+      "steps": 5
+    },
+    {
+      "type": "key_up",
+      "key": "a"
+    },
+    {
+      "type": "key_down",
+      "key": "w"
+    },
+    {
+      "type": "advance_time",
+      "ms": 257,
+      "steps": 9
+    },
+    {
+      "type": "key_up",
+      "key": "w"
+    },
+    {
+      "type": "key_down",
+      "key": "e"
+    },
+    {
+      "type": "advance_time",
+      "ms": 28,
+      "steps": 1
+    },
+    {
+      "type": "key_up",
+      "key": "e"
+    },
+    {
+      "type": "advance_time",
+      "ms": 1000,
+      "steps": 35
+    },
+    {
+      "type": "key_down",
+      "key": "w"
+    },
+    {
+      "type": "advance_time",
+      "ms": 515,
+      "steps": 18
+    },
+    {
+      "type": "key_up",
+      "key": "w"
+    },
+    {
+      "type": "key_down",
+      "key": "d"
+    },
+    {
+      "type": "advance_time",
+      "ms": 228,
+      "steps": 8
+    },
+    {
+      "type": "key_up",
+      "key": "d"
+    },
+    {
+      "type": "key_down",
+      "key": "ArrowRight"
+    },
+    {
+      "type": "advance_time",
+      "ms": 486,
+      "steps": 17
+    },
+    {
+      "type": "key_up",
+      "key": "ArrowRight"
+    },
+    {
+      "type": "key_down",
+      "key": "e"
+    },
+    {
+      "type": "advance_time",
+      "ms": 28,
+      "steps": 1
+    },
+    {
+      "type": "key_up",
+      "key": "e"
+    },
+    {
+      "type": "key_press",
+      "key": "P"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "paused"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-ticks",
+      "equals": "1726"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-health",
+      "equals": "4"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-kills",
+      "equals": "3"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-pickups",
+      "equals": "6"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-floor",
+      "equals": "-24"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-x",
+      "equals": "2940"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-y",
+      "equals": "-4763"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-ammo",
+      "equals": "43"
+    },
+    {
+      "type": "assert_state_store_snapshot",
+      "target": {
+        "selector": "#scene"
+      },
+      "name": "scene"
+    },
+    {
+      "type": "key_press",
+      "key": "P"
+    },
+    {
+      "type": "advance_time",
+      "ms": 1,
+      "steps": 1
+    },
+    {
+      "type": "advance_time",
+      "ms": 1029,
+      "steps": 36
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-map",
+      "equals": "E1M2"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#map-picker option[value=\"E1M2\"]"
+      },
+      "attribute": "selected",
+      "present": true
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-generation",
+      "equals": "2"
+    },
+    {
+      "type": "window_close"
+    }
+  ]
+}

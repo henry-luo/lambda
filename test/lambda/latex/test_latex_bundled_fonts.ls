@@ -1,6 +1,7 @@
 // Standalone documents must declare bundled faces independently of the source directory.
 import latex: lambda.latex.latex
 import math: lambda.doc.math.math
+import amssymb: lambda.latex.packages.amssymb
 
 fn stylesheet_links(node) {
     if (node is array or node is list)
@@ -25,8 +26,17 @@ let options = {source_path: "elsewhere/paper.tex"}
 "native document:"; bundled_faces(latex.render_document(ast, options))
 "standalone HTML:"; bundled_faces(parse(latex.render_to_html(ast, {*:options, standalone: true}), "html")^)
 "fragment stylesheet links:"; len(stylesheet_links(latex.render(ast, {standalone: false})))
-// Phase 11 paints the queried glyphs directly; standalone math has no CSS font dependency.
+// RAD07-L3 embeds used faces with text, without external stylesheet links.
 let standalone_math = math.render_standalone(parse("x^2", {type: "math", flavor: "latex"})^)
 "standalone math:"; {svg: name(standalone_math) == 'svg',
-    outlines: contains(format(standalone_math, 'html'), "<path"),
+    text: contains(format(standalone_math, 'html'), "<text"),
+    embedded_fonts: contains(format(standalone_math, 'html'), "@font-face"),
     external_stylesheets: len(stylesheet_links(standalone_math))}
+
+// Prose AMS commands must not depend on the deleted MathLive font classes.
+let prose_symbol = amssymb.render_symbol("twoheadleftarrow")
+"prose AMS symbol:"; {svg: name(prose_symbol) == 'svg',
+    text: contains(format(prose_symbol, 'html'), "<text"),
+    embedded_fonts: contains(format(prose_symbol, 'html'), "@font-face"),
+    external_stylesheets: len(stylesheet_links(prose_symbol)),
+    unknown: amssymb.render_symbol("unknown-command")}

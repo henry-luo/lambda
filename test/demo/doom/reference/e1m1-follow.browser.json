@@ -1,0 +1,144 @@
+{
+  "pose": {
+    "name": "e1m1-follow",
+    "map": "E1M1",
+    "skill": 1,
+    "time": 0,
+    "camera": "follow",
+    "landmarks": [
+      {
+        "name": "player billboard",
+        "rect": [
+          324,
+          191,
+          16,
+          16
+        ],
+        "rgb_min": [
+          55,
+          90,
+          40
+        ],
+        "rgb_max": [
+          85,
+          125,
+          70
+        ],
+        "max_mean_channel_delta": 8
+      },
+      {
+        "name": "raised wall",
+        "rect": [
+          222,
+          218,
+          16,
+          16
+        ],
+        "rgb_min": [
+          25,
+          20,
+          15
+        ],
+        "rgb_max": [
+          45,
+          40,
+          35
+        ],
+        "max_mean_channel_delta": 8
+      },
+      {
+        "name": "outer void",
+        "rect": [
+          92,
+          292,
+          16,
+          16
+        ],
+        "rgb_min": [
+          25,
+          25,
+          57
+        ],
+        "rgb_max": [
+          27,
+          27,
+          59
+        ],
+        "max_mean_channel_delta": 8
+      }
+    ]
+  },
+  "viewport": {
+    "width": 660,
+    "height": 500,
+    "scale": 1
+  },
+  "browser": "HeadlessChrome/154.0.8037.57",
+  "source": "fixtures/_pose.ls and the shared scene/presenter; authored declarations exported without computed geometry.",
+  "html_sha256": "be6c5c1ae9aca8864df7f07781d1cb7d4c606a5e00a1358523c4eea8a95f6fc1",
+  "browser_sha256": "f78472d42cb721895973c69c231bfed081a44462f92463be0ff099106890d280",
+  "native_sha256": "5e57c94b1d03cdcb57e6cecd9786edc9442d52a6521bf0fd841278397e4db42e",
+  "native_binary_sha256": "ccf436fbdc9e5d700a7b65d8592a4a64b2c6ef57124c71f725f3e531033423df",
+  "validation": {
+    "landmarks": [
+      {
+        "name": "player billboard",
+        "rect": [
+          324,
+          191,
+          16,
+          16
+        ],
+        "native_rgb": [
+          71.0703125,
+          111.90234375,
+          53.5703125
+        ],
+        "browser_rgb": [
+          71.8359375,
+          111.41015625,
+          54.2109375
+        ]
+      },
+      {
+        "name": "raised wall",
+        "rect": [
+          222,
+          218,
+          16,
+          16
+        ],
+        "native_rgb": [
+          34.4765625,
+          30.125,
+          24.875
+        ],
+        "browser_rgb": [
+          35.15625,
+          30.828125,
+          25.2578125
+        ]
+      },
+      {
+        "name": "outer void",
+        "rect": [
+          92,
+          292,
+          16,
+          16
+        ],
+        "native_rgb": [
+          26,
+          26,
+          58
+        ],
+        "browser_rgb": [
+          26,
+          26,
+          58
+        ]
+      }
+    ],
+    "passed": true
+  }
+}

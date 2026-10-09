@@ -1,0 +1,189 @@
+{
+  "pose": {
+    "name": "e1m1-door-open",
+    "map": "E1M1",
+    "skill": 1,
+    "time": 1,
+    "camera": "player",
+    "player": {
+      "x": 1490,
+      "y": -2496,
+      "angle": -1.5707963267948966
+    },
+    "door": 4,
+    "landmarks": [
+      {
+        "name": "visible room through raised door",
+        "rect": [
+          252,
+          172,
+          16,
+          16
+        ],
+        "rgb_min": [
+          9,
+          9,
+          15
+        ],
+        "rgb_max": [
+          22,
+          22,
+          30
+        ],
+        "max_mean_channel_delta": 8
+      },
+      {
+        "name": "door passage floor",
+        "rect": [
+          322,
+          212,
+          16,
+          16
+        ],
+        "rgb_min": [
+          4,
+          4,
+          4
+        ],
+        "rgb_max": [
+          11,
+          11,
+          11
+        ],
+        "max_mean_channel_delta": 8
+      },
+      {
+        "name": "near wall",
+        "rect": [
+          92,
+          192,
+          16,
+          16
+        ],
+        "rgb_min": [
+          40,
+          40,
+          40
+        ],
+        "rgb_max": [
+          60,
+          60,
+          60
+        ],
+        "max_mean_channel_delta": 8
+      },
+      {
+        "name": "opposite wall",
+        "rect": [
+          492,
+          192,
+          16,
+          16
+        ],
+        "rgb_min": [
+          38,
+          38,
+          38
+        ],
+        "rgb_max": [
+          56,
+          56,
+          56
+        ],
+        "max_mean_channel_delta": 8
+      }
+    ]
+  },
+  "viewport": {
+    "width": 660,
+    "height": 500,
+    "scale": 1
+  },
+  "browser": "HeadlessChrome/154.0.8037.57",
+  "source": "fixtures/_pose.ls and the shared scene/presenter; authored declarations exported without computed geometry.",
+  "html_sha256": "12c354b5690749a9790530b03b841b6d8d5405d5012a9c7829d14fa39ecbc30b",
+  "browser_sha256": "1c1509988a56c2e8641f7291827272f9c8058713cadaeab54069d4725e76a304",
+  "native_sha256": "7d41604959dacb9cfaa756ee97bc42c1b53abf706fae7fbfce578d991915e50c",
+  "native_binary_sha256": "ccf436fbdc9e5d700a7b65d8592a4a64b2c6ef57124c71f725f3e531033423df",
+  "validation": {
+    "landmarks": [
+      {
+        "name": "visible room through raised door",
+        "rect": [
+          252,
+          172,
+          16,
+          16
+        ],
+        "native_rgb": [
+          14.33203125,
+          13.796875,
+          22.28125
+        ],
+        "browser_rgb": [
+          14.046875,
+          13.50390625,
+          21.85546875
+        ]
+      },
+      {
+        "name": "door passage floor",
+        "rect": [
+          322,
+          212,
+          16,
+          16
+        ],
+        "native_rgb": [
+          7.1796875,
+          7.171875,
+          6.94140625
+        ],
+        "browser_rgb": [
+          7.328125,
+          7.28515625,
+          7.10546875
+        ]
+      },
+      {
+        "name": "near wall",
+        "rect": [
+          92,
+          192,
+          16,
+          16
+        ],
+        "native_rgb": [
+          50.38671875,
+          50.38671875,
+          50.38671875
+        ],
+        "browser_rgb": [
+          50.35546875,
+          50.35546875,
+          50.35546875
+        ]
+      },
+      {
+        "name": "opposite wall",
+        "rect": [
+          492,
+          192,
+          16,
+          16
+        ],
+        "native_rgb": [
+          46.19921875,
+          46.19921875,
+          46.19921875
+        ],
+        "browser_rgb": [
+          49.3515625,
+          49.3515625,
+          49.3515625
+        ]
+      }
+    ],
+    "passed": true
+  }
+}

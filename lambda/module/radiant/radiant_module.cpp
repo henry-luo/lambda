@@ -12,6 +12,7 @@
 #include "../../../radiant/render.hpp"
 #include "../../../radiant/event.hpp"
 #include "../../../radiant/radiant.hpp"
+#include "../../../radiant/audio.hpp"
 #include "../../../lib/log.h"
 #include "../../../lib/mem.h"
 #include "../../../lib/mem_context.h"
@@ -19,6 +20,7 @@
 #include "../../../lib/mempool.h"
 #include "../../../lib/math_utils.h"
 #include "../../../lib/str.h"
+#include "../../../lib/byte_builder.h"
 #include "../../../lib/font/font_math.h"
 #include "../../../lib/endian.h"
 #include "../../runtime/side_stack.h"
@@ -1653,6 +1655,9 @@ RADIANT_C_API Item fn_radiant_get_state(Item node_item, Item name_item) {
         return ItemNull;
     }
     if (kind == RSTATE_TEXT) {
+        // Select values derive from option selectedness, not the text buffer.
+        if (elem->tag_name && str_icmp_cstr(elem->tag_name, "select") == 0)
+            return radiant_host_api->dom_catalog->select_value_bridge(elem);
         // range/number values live outside the text buffer; use the same live
         // projection as DOM .value instead of exposing the default attribute.
         if (elem->tag_name && (str_icmp_cstr(elem->tag_name, "input") == 0 ||
@@ -2392,6 +2397,48 @@ RADIANT_C_API Item fn_radiant_finish_model_edit(Item surface_item,
 static DomDocument* radiant_window_document_from_item(Item node_item, const char* op) {
     DomNode* node = radiant_dom_node_from_item(node_item, op);
     return node ? radiant_dom_document_from_node(node) : nullptr;
+}
+
+RADIANT_C_API Item fn_radiant_audio_open(Item node_item, Item bytes) {
+    DomDocument* doc = radiant_window_document_from_item(node_item, "AUDIO_OPEN");
+    if (!doc || get_type_id(bytes) != LMD_TYPE_BINARY) return ItemNull;
+    uint64_t token = radiant_audio_open(doc, binary_data(bytes.get_binary()), bytes.get_binary()->len);
+    return token ? radiant_int_item((int64_t)token) : ItemNull;
+}
+
+enum RadiantAudioOperation { AUDIO_PLAY, AUDIO_PAUSE, AUDIO_CLOSE, AUDIO_STATE };
+static Item radiant_audio_operation(Item node_item, Item token_item,
+    RadiantAudioOperation operation, Item volume_item = ItemNull) {
+    DomDocument* doc = radiant_window_document_from_item(node_item, "AUDIO_CONTROL");
+    TypeId type = get_type_id(token_item);
+    int64_t token = type == LMD_TYPE_INT || type == LMD_TYPE_INT64 ? it2l(token_item) : 0;
+    if (operation == AUDIO_STATE) return radiant_string_item(doc && token > 0
+        ? radiant_audio_state(doc, (uint64_t)token) : nullptr);
+    if (!doc || token <= 0) return radiant_bool_item(false);
+    switch (operation) {
+        case AUDIO_PLAY: {
+            float volume = 0;
+            return radiant_bool_item(radiant_item_to_float(volume_item, &volume) &&
+                radiant_audio_play(doc, (uint64_t)token, volume));
+        }
+        case AUDIO_PAUSE: return radiant_bool_item(radiant_audio_pause(doc, (uint64_t)token));
+        case AUDIO_CLOSE: return radiant_bool_item(radiant_audio_close(doc, (uint64_t)token));
+        default: return radiant_bool_item(false);
+    }
+}
+RADIANT_C_API Item fn_radiant_audio_play(Item node, Item token, Item volume) { return radiant_audio_operation(node, token, AUDIO_PLAY, volume); }
+RADIANT_C_API Item fn_radiant_audio_pause(Item node, Item token) { return radiant_audio_operation(node, token, AUDIO_PAUSE); }
+RADIANT_C_API Item fn_radiant_audio_close(Item node, Item token) { return radiant_audio_operation(node, token, AUDIO_CLOSE); }
+RADIANT_C_API Item fn_radiant_audio_state(Item node, Item token) { return radiant_audio_operation(node, token, AUDIO_STATE); }
+
+RADIANT_C_API Item fn_radiant_set_relative_mouse(Item node, Item enabled) {
+    DomElement* owner = radiant_dom_element_from_item(node, "SET_RELATIVE_MOUSE");
+    return radiant_bool_item(get_type_id(enabled) == LMD_TYPE_BOOL &&
+        radiant_window_set_relative_mouse(owner, it2b(enabled)));
+}
+RADIANT_C_API Item fn_radiant_relative_mouse_active(Item node) {
+    DomElement* owner = radiant_dom_element_from_item(node, "RELATIVE_MOUSE_ACTIVE");
+    return radiant_bool_item(radiant_window_relative_mouse_active(owner));
 }
 
 RADIANT_C_API Item fn_radiant_set_close_guard(Item node_item, Item armed_item) {
@@ -3469,8 +3516,26 @@ static bool radiant_font_style(Item item, FontStyleDesc* style, char (&family_bu
     return true;
 }
 
+struct RadiantQueryFace {
+    FontStyleDesc style;
+    char family[256];
+    const uint8_t* data;
+    size_t length;
+};
+
+static bool radiant_query_face(Item faces, int64_t index, RadiantQueryFace* face) {
+    RootFrame roots(1);
+    Rooted<Item> owner(roots, item_at(faces, index));
+    if (!radiant_font_style(owner.get(), &face->style, face->family)) return false;
+    Item bytes = radiant_obj_get(owner.get(), "data");
+    if (get_type_id(bytes) != LMD_TYPE_BINARY || !bytes.get_binary()->len) return false;
+    face->data = binary_data(bytes.get_binary());
+    face->length = bytes.get_binary()->len;
+    return true;
+}
+
 // font snapshots are supplied by lambda-io; these queries never acquire resources.
-static FontContext* radiant_query_fonts(Item faces) {
+static FontContext* radiant_build_query_fonts(Item faces) {
     if (!radiant_item_is_missing(faces) && !is_array_family_type_id(get_type_id(faces))) return nullptr;
     RootFrame owner_roots(1);
     Rooted<Item> owner(owner_roots, faces);
@@ -3480,29 +3545,113 @@ static FontContext* radiant_query_fonts(Item faces) {
     if (!fonts) return nullptr;
     int64_t count = radiant_item_is_missing(faces) ? 0 : fn_len(faces);
     for (int64_t index = 0; index < count; index++) {
-        RootFrame roots(1);
-        Rooted<Item> face(roots, item_at(owner.get(), index));
-        FontStyleDesc style;
-        char family[256];
-        if (!radiant_font_style(face.get(), &style, family)) { font_context_destroy(fonts); return nullptr; }
-        Item bytes = radiant_obj_get(face.get(), "data");
-        if (get_type_id(bytes) != LMD_TYPE_BINARY || !bytes.get_binary()->len) {
-            font_context_destroy(fonts); return nullptr;
-        }
+        RadiantQueryFace face = {};
+        if (!radiant_query_face(owner.get(), index, &face)) { font_context_destroy(fonts); return nullptr; }
         FontFaceSource source = {};
-        source.data = binary_data(bytes.get_binary());
-        source.data_length = bytes.get_binary()->len;
+        source.data = face.data;
+        source.data_length = face.length;
         FontFaceDesc descriptor = {};
-        descriptor.family = style.family; descriptor.weight = style.weight; descriptor.slant = style.slant;
+        descriptor.family = face.style.family; descriptor.weight = face.style.weight; descriptor.slant = face.style.slant;
         descriptor.sources = &source; descriptor.source_count = 1;
         if (!font_face_register(fonts, &descriptor)) { font_context_destroy(fonts); return nullptr; }
         // reject a corrupt explicit resource before system fallback can hide it.
-        FontHandle* handle = font_face_load(fonts, &descriptor, style.size_px);
+        FontHandle* handle = font_face_load(fonts, &descriptor, face.style.size_px);
         if (!handle) { font_context_destroy(fonts); return nullptr; }
         font_handle_release(handle);
     }
     return fonts;
 }
+
+struct RadiantQueryFontCache {
+    FontContext* fonts;
+    ByteBuilder key;
+};
+
+static void radiant_query_font_cache_clear(void* opaque) {
+    RadiantQueryFontCache* cache = (RadiantQueryFontCache*)opaque;
+    if (cache->fonts) font_context_destroy(cache->fonts);
+    cache->fonts = nullptr;
+    byte_builder_destroy(&cache->key);
+}
+
+static void radiant_query_font_cache_destroy(void* opaque) {
+    radiant_query_font_cache_clear(opaque);
+    mem_free(opaque);
+}
+
+static const uint32_t RADIANT_QUERY_FONT_CACHE_OWNER = 0x52464e54; // RFNT
+static const ContextCapsuleOps radiant_query_font_cache_ops = {
+    "radiant.query_fonts", CONTEXT_CAPSULE_LIFETIME_CONTEXT, sizeof(RadiantQueryFontCache),
+    nullptr, nullptr, radiant_query_font_cache_destroy
+};
+
+// compare complete resource bytes and normalized styles, never GC addresses or
+// family names alone. Oversized snapshots retain the uncached query path.
+static bool radiant_query_font_key(Item faces, ByteBuilder* key) {
+    if (!is_array_family_type_id(get_type_id(faces))) return false;
+    RootFrame roots(1);
+    Rooted<Item> owner(roots, faces);
+    int64_t count = fn_len(owner.get());
+    if (count <= 0) return false;
+    const size_t limit = 8 * 1024 * 1024;
+    if (!byte_builder_append_limited(key, &count, sizeof(count), limit)) return false;
+    for (int64_t index = 0; index < count; index++) {
+        RadiantQueryFace face = {};
+        if (!radiant_query_face(owner.get(), index, &face)) return false;
+        if (!byte_builder_append_limited(key, face.style.family, strlen(face.style.family) + 1, limit) ||
+            !byte_builder_append_limited(key, &face.style.size_px, sizeof(face.style.size_px), limit) ||
+            !byte_builder_append_limited(key, &face.style.weight, sizeof(face.style.weight), limit) ||
+            !byte_builder_append_limited(key, &face.style.slant, sizeof(face.style.slant), limit) ||
+            !byte_builder_append_limited(key, &face.length, sizeof(face.length), limit) ||
+            !byte_builder_append_limited(key, face.data, face.length, limit)) return false;
+    }
+    return true;
+}
+
+struct RadiantQueryFonts {
+    FontContext* fonts;
+    bool owned;
+
+    explicit RadiantQueryFonts(Item faces) : fonts(nullptr), owned(true) {
+        RootFrame roots(1);
+        Rooted<Item> owner(roots, faces);
+        ByteBuilder key = {};
+        if (::context && byte_builder_init(&key, 1024, MEM_CAT_RENDER, false) &&
+                radiant_query_font_key(owner.get(), &key)) {
+            RadiantQueryFontCache* cache = (RadiantQueryFontCache*)context_capsule_extension(
+                ::context, RADIANT_QUERY_FONT_CACHE_OWNER, 0);
+            if (cache && cache->fonts && cache->key.length == key.length &&
+                    memcmp(cache->key.data, key.data, key.length) == 0) {
+                fonts = cache->fonts;
+                owned = false;
+            } else {
+                fonts = radiant_build_query_fonts(owner.get());
+                if (fonts && !cache) {
+                    cache = (RadiantQueryFontCache*)mem_calloc(1, sizeof(*cache), MEM_CAT_RENDER);
+                    if (cache && !context_capsule_extension_install(::context,
+                            RADIANT_QUERY_FONT_CACHE_OWNER, 0, cache, &radiant_query_font_cache_ops)) {
+                        mem_free(cache);
+                        cache = nullptr;
+                    }
+                }
+                if (fonts && cache) {
+                    // publish only a validated snapshot; invalid replacements cannot
+                    // poison the previous entry. Native storage owns every font byte.
+                    radiant_query_font_cache_clear(cache);
+                    cache->fonts = fonts;
+                    cache->key = key;
+                    key = {};
+                    owned = false;
+                }
+            }
+        } else fonts = radiant_build_query_fonts(owner.get());
+        byte_builder_destroy(&key);
+    }
+
+    ~RadiantQueryFonts() { if (owned && fonts) font_context_destroy(fonts); }
+    RadiantQueryFonts(const RadiantQueryFonts&) = delete;
+    RadiantQueryFonts& operator=(const RadiantQueryFonts&) = delete;
+};
 
 static Item radiant_text_bounds(const Bound* bounds) {
     RootFrame roots(1);
@@ -3570,7 +3719,8 @@ RADIANT_C_API Item fn_radiant_measure_text(Item requests_item, Item faces_item) 
     TextMeasureRequest* requests = (TextMeasureRequest*)mem_calloc(count, sizeof(TextMeasureRequest), MEM_CAT_RENDER);
     SvgTextMeasurement* metrics = (SvgTextMeasurement*)mem_calloc(count, sizeof(SvgTextMeasurement), MEM_CAT_RENDER);
     RadiantMeasuredFonts resolved = {(ArrayList**)mem_calloc(count, sizeof(ArrayList*), MEM_CAT_RENDER), true};
-    FontContext* fonts = requests && metrics && resolved.requests ? radiant_query_fonts(faces.get()) : nullptr;
+    RadiantQueryFonts font_query(requests && metrics && resolved.requests ? faces.get() : ItemNull);
+    FontContext* fonts = requests && metrics && resolved.requests ? font_query.fonts : nullptr;
     bool valid = fonts != nullptr;
     for (int index = 0; valid && index < count; index++) {
         RootFrame request_roots(3);
@@ -3611,7 +3761,6 @@ RADIANT_C_API Item fn_radiant_measure_text(Item requests_item, Item faces_item) 
             radiant_array_push_item(result.get(), box.get());
         }
     }
-    if (fonts) font_context_destroy(fonts);
     if (requests) {
         for (int index = 0; index < count; index++) if (requests[index].text) mem_free((void*)requests[index].text);
         mem_free(requests);
@@ -3645,6 +3794,17 @@ static Item radiant_math_glyph_geometry(FontHandle* font, uint16_t glyph, const 
         bool ink = rdt_path_get_bounds(path, &bounds.left, &bounds.top, &bounds.right, &bounds.bottom);
         result.set(radiant_obj_new());
         radiant_rooted_obj_set(result, "glyph", radiant_int_item(glyph));
+        const char* family = nullptr;
+        float size = 0.0f;
+        FontWeight weight = FONT_WEIGHT_NORMAL;
+        FontSlant slant = FONT_SLANT_NORMAL;
+        font_handle_get_style(font, &family, &size, &weight, &slant);
+        // text painting must retain the resolved face, including style fallback.
+        radiant_rooted_obj_set(result, "font_family", radiant_string_item(family));
+        radiant_rooted_obj_set(result, "font_size", radiant_float_item(size));
+        radiant_rooted_obj_set(result, "font_weight", radiant_int_item(weight));
+        radiant_rooted_obj_set(result, "font_style", radiant_string_item(slant == FONT_SLANT_ITALIC ? "italic" :
+            slant == FONT_SLANT_OBLIQUE ? "oblique" : "normal"));
         radiant_rooted_obj_set(result, "advance", radiant_float_item(advance));
         radiant_rooted_obj_set(result, "ink", ink ? radiant_text_bounds(&bounds) : ItemNull);
         radiant_rooted_obj_set(result, "path", radiant_string_item(svg->str));
@@ -3709,9 +3869,6 @@ static Item radiant_math_glyph_record(FontHandle* font, const FontMathTable* mat
     radiant_rooted_obj_set(result, "codepoint", radiant_int_item(codepoint));
     radiant_rooted_obj_set(result, "extended", radiant_bool_item(info.extended));
     radiant_rooted_obj_set(result, "has_math", radiant_bool_item(math != nullptr));
-    const char* family = nullptr;
-    font_handle_get_style(font, &family, nullptr, nullptr, nullptr);
-    radiant_rooted_obj_set(result, "font_family", radiant_string_item(family));
     const char* corners[] = {"top_right", "top_left", "bottom_right", "bottom_left"};
     for (unsigned corner = 0; corner < 4; corner++) {
         const FontMathTable* kern = &info.kern[corner];
@@ -3765,7 +3922,8 @@ RADIANT_C_API Item fn_radiant_math_metrics(Item style_item, Item codepoints_item
     if (count < 0 || count > INT_MAX) return ItemNull;
     Item fallback_item = radiant_obj_get(style_root.get(), "fallback");
     bool allow_fallback = get_type_id(fallback_item) == LMD_TYPE_BOOL && fallback_item.bool_val;
-    FontContext* fonts = radiant_query_fonts(faces.get());
+    RadiantQueryFonts font_query(faces.get());
+    FontContext* fonts = font_query.fonts;
     FontHandle* handle = fonts ? font_resolve(fonts, &style) : nullptr;
     const FontMetrics* metrics = handle ? font_get_metrics(handle) : nullptr;
     FontMathTable math = {};
@@ -3817,7 +3975,6 @@ RADIANT_C_API Item fn_radiant_math_metrics(Item style_item, Item codepoints_item
         }
     }
     if (handle) font_handle_release(handle);
-    if (fonts) font_context_destroy(fonts);
     return result.get();
 }
 
@@ -3827,12 +3984,12 @@ RADIANT_C_API Item fn_radiant_font_metrics(Item style_item, Item faces_item) {
     FontStyleDesc style;
     char family_buffer[256];
     if (!radiant_font_style(style_root.get(), &style, family_buffer)) return ItemNull;
-    FontContext* fonts = radiant_query_fonts(faces.get());
+    RadiantQueryFonts font_query(faces.get());
+    FontContext* fonts = font_query.fonts;
     FontHandle* handle = fonts ? font_resolve(fonts, &style) : nullptr;
     const FontMetrics* metrics = handle ? font_get_metrics(handle) : nullptr;
     if (metrics) result.set(radiant_font_metrics_record(handle, metrics, style.size_px));
     if (handle) font_handle_release(handle);
-    if (fonts) font_context_destroy(fonts);
     return result.get();
 }
 
@@ -4503,6 +4660,13 @@ RADIANT_PROVIDE_ENGINE_1(form_url, fn_radiant_form_url)
 RADIANT_PROVIDE_ENGINE_1(hover_index, fn_radiant_hover_index)
 RADIANT_PROVIDE_ENGINE_1(option_count, fn_radiant_option_count)
 RADIANT_PROVIDE_ENGINE_1(capture_pointer, fn_radiant_capture_pointer)
+RADIANT_PROVIDE_ENGINE_2(audio_open, fn_radiant_audio_open)
+RADIANT_PROVIDE_ENGINE_3(audio_play, fn_radiant_audio_play)
+RADIANT_PROVIDE_ENGINE_2(audio_pause, fn_radiant_audio_pause)
+RADIANT_PROVIDE_ENGINE_2(audio_close, fn_radiant_audio_close)
+RADIANT_PROVIDE_ENGINE_2(audio_state, fn_radiant_audio_state)
+RADIANT_PROVIDE_ENGINE_2(set_relative_mouse, fn_radiant_set_relative_mouse)
+RADIANT_PROVIDE_ENGINE_1(relative_mouse_active, fn_radiant_relative_mouse_active)
 RADIANT_PROVIDE_ENGINE_2(input_operation, fn_radiant_input_operation)
 RADIANT_PROVIDE_ENGINE_3(set_range_from_point, fn_radiant_set_range_from_point)
 RADIANT_PROVIDE_ENGINE_1(range_max, fn_radiant_range_max)

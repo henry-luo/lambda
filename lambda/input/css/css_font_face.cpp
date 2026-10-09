@@ -238,15 +238,19 @@ static int parse_src_entries(const char* src_value, CssFontFaceSrc* entries, int
         while (*p && (*p == ' ' || *p == '\t' || *p == '\n')) p++;
         if (!*p) break;
 
-        // Find url(
+        // retain local names in the same fallback order as downloadable URLs.
         const char* url_start = strstr(p, "url(");
+        const char* local_start = strstr(p, "local(");
+        bool is_local = local_start && (!url_start || local_start < url_start);
+        if (is_local) url_start = local_start;
         if (!url_start) break;
 
         // Find the matching closing parenthesis for url()
         // Must track nested parentheses and respect quotes
-        const char* url_content_start = url_start + 4; // after "url("
+        size_t function_length = is_local ? 5 : 3;
+        const char* url_content_start = url_start + function_length + 1;
         bool url_closed = false;
-        const char* after_url = str_scan_balanced_quoted(url_start + 3, '(', ')', "\"'",
+        const char* after_url = str_scan_balanced_quoted(url_start + function_length, '(', ')', "\"'",
                                                           true, &url_closed);
         if (!url_closed) break;
         const char* url_paren_end = after_url - 1;
@@ -279,8 +283,10 @@ static int parse_src_entries(const char* src_value, CssFontFaceSrc* entries, int
         if (!entry_str) break;
 
         // Extract URL and format from this entry
-        entries[count].url = extract_url_value(entry_str, pool);
-        entries[count].format = extract_format_value(entry_str, pool);
+        entries[count].is_local = is_local;
+        entries[count].url = is_local ? extract_local_value(entry_str, pool)
+            : extract_url_value(entry_str, pool);
+        entries[count].format = is_local ? nullptr : extract_format_value(entry_str, pool);
 
         if (!pool) mem_free(entry_str);
 
@@ -304,6 +310,41 @@ static int parse_src_entries(const char* src_value, CssFontFaceSrc* entries, int
     }
 
     return count;
+}
+
+void css_font_face_resolve_sources(CssFontFaceDescriptor* descriptor, const char* base_path, Pool* pool) {
+    if (!descriptor || !base_path) return;
+    // Resolve all src URLs
+    if (descriptor->src_urls && base_path) {
+        for (int j = 0; j < descriptor->src_count; j++) {
+            if (descriptor->src_urls[j].url && !descriptor->src_urls[j].is_local) {
+                char* resolved = css_resolve_font_url(descriptor->src_urls[j].url, base_path, pool);
+                if (resolved) {
+                    if (!pool) mem_free(descriptor->src_urls[j].url);
+                    descriptor->src_urls[j].url = resolved;
+                    log_debug("[CSS FontFace]   resolved src[%d]: '%s'", j, resolved);
+                } else {
+                    // URL could not be resolved (e.g., remote URL) - clear it
+                    if (!pool) mem_free(descriptor->src_urls[j].url);
+                    descriptor->src_urls[j].url = nullptr;
+                }
+            }
+        }
+    }
+
+    // Also resolve the backwards-compatible src_url
+    if (descriptor->src_url && base_path) {
+        char* resolved = css_resolve_font_url(descriptor->src_url, base_path, pool);
+        if (resolved) {
+            if (!pool) mem_free(descriptor->src_url);
+            descriptor->src_url = resolved;
+            log_debug("[CSS FontFace]   resolved src: '%s'", descriptor->src_url);
+        } else {
+            // URL could not be resolved (e.g., remote URL) - clear it
+            if (!pool) mem_free(descriptor->src_url);
+            descriptor->src_url = nullptr;
+        }
+    }
 }
 
 char* css_resolve_font_url(const char* url, const char* base_path, Pool* pool) {
@@ -694,37 +735,7 @@ CssFontFaceDescriptor** css_extract_font_faces(CssStylesheet* stylesheet,
 
         CssFontFaceDescriptor* descriptor = css_parse_font_face_content(content, pool);
         if (descriptor) {
-            // Resolve all src URLs
-            if (descriptor->src_urls && base_path) {
-                for (int j = 0; j < descriptor->src_count; j++) {
-                    if (descriptor->src_urls[j].url) {
-                        char* resolved = css_resolve_font_url(descriptor->src_urls[j].url, base_path, pool);
-                        if (resolved) {
-                            if (!pool) mem_free(descriptor->src_urls[j].url);
-                            descriptor->src_urls[j].url = resolved;
-                            log_debug("[CSS FontFace]   resolved src[%d]: '%s'", j, resolved);
-                        } else {
-                            // URL could not be resolved (e.g., remote URL) - clear it
-                            if (!pool) mem_free(descriptor->src_urls[j].url);
-                            descriptor->src_urls[j].url = nullptr;
-                        }
-                    }
-                }
-            }
-
-            // Also resolve the backwards-compatible src_url
-            if (descriptor->src_url && base_path) {
-                char* resolved = css_resolve_font_url(descriptor->src_url, base_path, pool);
-                if (resolved) {
-                    if (!pool) mem_free(descriptor->src_url);
-                    descriptor->src_url = resolved;
-                    log_debug("[CSS FontFace]   resolved src: '%s'", descriptor->src_url);
-                } else {
-                    // URL could not be resolved (e.g., remote URL) - clear it
-                    if (!pool) mem_free(descriptor->src_url);
-                    descriptor->src_url = nullptr;
-                }
-            }
+            css_font_face_resolve_sources(descriptor, base_path, pool);
 
             result[idx++] = descriptor;
         }

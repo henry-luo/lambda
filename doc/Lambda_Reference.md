@@ -62,7 +62,7 @@ The Lambda documentation is organized into focused documents. New to Lambda? Sta
 | **[Lambda_Func.md](Lambda_Func.md)** | **Functions** — `fn` and `pn` declarations, parameters, closures, higher-order and colour-polymorphic functions, method-style calls |
 | **[Lambda_Procedural.md](Lambda_Procedural.md)** | **Procedural Programming** — `var`, assignment, value semantics, `while`, `return`, file output, the `io` module, `main()`, concurrency |
 | **[Lambda_Error_Handling.md](Lambda_Error_Handling.md)** | **Error Handling** — Error values, `raise`, `T^E` return types, postfix `^` propagation, the `^ { }` handler, compile-time enforcement, error codes |
-| **[Lambda_String_Pattern.md](Lambda_String_Pattern.md)** | **String Patterns** — The pattern language inside `\(…)`: character classes, ranges, quantifiers, negation, and pattern-aware `find`/`replace`/`split` |
+| **[Lambda_String_Pattern.md](Lambda_String_Pattern.md)** | **String and Symbol Patterns** — The pattern language inside `\(…)`: quoted character classes, ranges, quantifiers, negation, and pattern-aware `find`/`replace`/`split` |
 | **[Lambda_Modules.md](Lambda_Modules.md)** | **Modules and Imports** — Import forms and resolution, `pub` exports, built-in and package modules, JavaScript modules |
 | **[Lambda_Concurrency.md](Lambda_Concurrency.md)** | **Concurrency** — Tasks with `start`/`wait`, mailboxes, `select`, timeouts, cancellation, structured scope, JavaScript Promises |
 | **[Lambda_Cheatsheet.md](Lambda_Cheatsheet.md)** | **Cheatsheet** — One-page syntax summary |
@@ -199,11 +199,11 @@ p is Point                                // true (nominal)
 
 ```lambda
 // String patterns (see Lambda_String_Pattern.md)
-type digits = \(d+)
-type email = \(w+ "@" w+ "." a{2,6})
-type ident = \symbol(a w*)       // \symbol(...) matches symbols, \(...) strings
+type digits = \("\d"+)
+type email = \("\w"+ "@" "\w"+ "." "\a"{2,6})
+type ident = \('\a' '\w'*)       // single quotes select symbols; double quotes select strings
 "123" is digits                  // true (full-match)
-"12x" is \(d+)                   // false — patterns work inline too
+"12x" is \("\d"+)                   // false — patterns work inline too
 match input {
     case digits: "number"
     default: "other"

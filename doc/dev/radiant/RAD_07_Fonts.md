@@ -106,6 +106,16 @@ Three entry points feed it:
 - `process_font_face_rules_from_stylesheet` (`font_face.cpp:161`) — bulk-processes a stylesheet via `css_extract_font_faces`. It **skips remote sources**: any `http(s)` URL is nulled out (`is_http_url`, `font_face.cpp:17`) because remote web fonts are downloaded asynchronously by the network resource manager, not synchronously here — synchronous download would stall large documents before layout. `is_supported_web_font_source` (`font_face.cpp:21`) gates WOFF2/WOFF/TTF/OTF/TTC. Descriptors with no loadable local source are dropped.
 - `process_document_font_faces` (`font_face.cpp:264`) — iterates a document's stylesheets, computing the correct base path per stylesheet (`origin_url` handling for plain paths, `file://`, `http(s)`, and relative paths resolved via `file_realpath`) so relative `src:` URLs resolve against the CSS file, not the HTML document.
 
+`local()` entries and URL entries retain their declared order through the CSS
+parser, Radiant descriptor, and engine registry. Local names are copied into
+the registry's arena under **D4.5.1v4**. The loader checks the installed face's
+full or PostScript name (OpenType name IDs 4/6), rejects platform family
+substitutions, and continues to the next source when unavailable. The font
+database retains full names in its versioned disk cache, including faces from
+explicit scan directories. See [CSS Fonts `src`](https://drafts.csswg.org/css-fonts/#src-desc).
+Regression coverage: `FontLocalSourceTest`, CSS parser source-resolution tests,
+and `test/ui/font_face_local_sources.html` (verified 2026-10-09).
+
 ### 5.1 `register_font_face` — the bridge to the engine
 
 `register_font_face` (`font_face.cpp:387`) does two things. First it stores the descriptor in `UiContext.font_faces[]` (a dynamically grown array, initial capacity 10, doubling on overflow — `font_face.cpp:398-422`). Second, and critically, it **bridges to the engine** (`font_face.cpp:434-480`): it maps the descriptor's CssEnum weight/style to `FontWeight`/`FontSlant`, builds a `FontFaceDesc` (`font.h:343`) with the source list, and calls `font_face_register(font_ctx, &face_desc)` so that a later `font_resolve` finds the registered face directly. Without this bridge call the descriptor would be invisible to resolution. `fontface_cleanup` (`font.cpp:155`) frees the Radiant-side descriptor array on teardown.

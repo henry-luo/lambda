@@ -1693,6 +1693,11 @@ static const char* key_code_to_name(int key) {
         case RDT_KEY_END:       return "End";
         case RDT_KEY_PAGE_UP:   return "PageUp";
         case RDT_KEY_PAGE_DOWN: return "PageDown";
+        // Modifier presses are keys themselves, including when mods is zero.
+        case RDT_KEY_LEFT_SHIFT: case RDT_KEY_RIGHT_SHIFT: return "Shift";
+        case RDT_KEY_LEFT_CONTROL: case RDT_KEY_RIGHT_CONTROL: return "Control";
+        case RDT_KEY_LEFT_ALT: case RDT_KEY_RIGHT_ALT: return "Alt";
+        case RDT_KEY_LEFT_SUPER: case RDT_KEY_RIGHT_SUPER: return "Meta";
         default:                return "";
     }
 }
@@ -1750,6 +1755,14 @@ static const char* key_code_to_dom_code(int key) {
     if (key >= '0' && key <= '9') return digit_codes[key - '0'];
     switch (key) {
         case RDT_KEY_SPACE: return "Space";
+        case RDT_KEY_LEFT_SHIFT: return "ShiftLeft";
+        case RDT_KEY_RIGHT_SHIFT: return "ShiftRight";
+        case RDT_KEY_LEFT_CONTROL: return "ControlLeft";
+        case RDT_KEY_RIGHT_CONTROL: return "ControlRight";
+        case RDT_KEY_LEFT_ALT: return "AltLeft";
+        case RDT_KEY_RIGHT_ALT: return "AltRight";
+        case RDT_KEY_LEFT_SUPER: return "MetaLeft";
+        case RDT_KEY_RIGHT_SUPER: return "MetaRight";
         case '\'': return "Quote";
         case ',': return "Comma";
         case '-': return "Minus";
@@ -1770,6 +1783,11 @@ static int key_code_to_legacy_code(int key) {
         case RDT_KEY_BACKSPACE: return 8;
         case RDT_KEY_TAB:       return 9;
         case RDT_KEY_ENTER:     return 13;
+        case RDT_KEY_LEFT_SHIFT: case RDT_KEY_RIGHT_SHIFT: return 16;
+        case RDT_KEY_LEFT_CONTROL: case RDT_KEY_RIGHT_CONTROL: return 17;
+        case RDT_KEY_LEFT_ALT: case RDT_KEY_RIGHT_ALT: return 18;
+        case RDT_KEY_LEFT_SUPER: return 91;
+        case RDT_KEY_RIGHT_SUPER: return 92;
         case RDT_KEY_ESCAPE:    return 27;
         case RDT_KEY_PAGE_UP:   return 33;
         case RDT_KEY_PAGE_DOWN: return 34;
@@ -4093,7 +4111,7 @@ bool radiant_document_has_autofocus(DomElement* root) {
     return false;
 }
 
-void radiant_run_autofocus(DomDocument* doc) {
+void radiant_run_autofocus(UiContext* uicon, DomDocument* doc) {
     if (!doc || !doc->state || !doc->root || focus_has_current((DocState*)doc->state)) {
         return;
     }
@@ -4102,6 +4120,9 @@ void radiant_run_autofocus(DomDocument* doc) {
     // `focusinit` is behavior-only; its resulting native focus transition
     // still emits the public focus/focusin pair after the package selects it.
     EventContext evcon = {};
+    // autofocus listeners can mutate layout; borrow the host of the enclosing
+    // layout pass so their recascade uses the same viewport and document.
+    evcon.ui_context = uicon;
     evcon.target_document = doc;
     View* previous_focus = focus_get((DocState*)doc->state);
     dispatch_behavior_handler(&evcon, static_cast<View*>(doc->root),
@@ -6390,6 +6411,8 @@ static void dom_js_mutation_reset_records(DomDocument* doc) {
 
 static bool dom_js_document_has_structural_css_dependency(DomDocument* doc);
 static bool dom_js_document_has_broad_structural_css_dependency(DomDocument* doc);
+static bool dom_js_document_has_child_list_dependency(DomDocument* doc, DomNode* parent,
+    bool include_structural = false);
 
 struct FrameCommitProfile {
     double cascade_ms, layout_ms, repaint_ms;
@@ -6519,16 +6542,26 @@ static DomElement* dom_js_record_cascade_root(DomDocument* doc,
     DomNode* node = nullptr;
     if (record->kind == DOM_JS_MUTATION_CHILD_INSERT ||
         record->kind == DOM_JS_MUTATION_CHILD_REMOVE) {
-        // Structural selectors are affected by a parent's child list, not
-        // just by the inserted node. Re-cascading this subtree contains the
-        // invalidation without discarding the document's retained layout.
-        node = record->parent;
+        bool affects_existing_styles =
+            dom_js_document_has_child_list_dependency(doc, record->parent, true);
+        if (!affects_existing_styles) {
+            // unchanged siblings retain their cascade; detached removals have
+            // no styles to resolve, while insertions still inherit at their new parent.
+            if (record->kind == DOM_JS_MUTATION_CHILD_REMOVE ||
+                !record->target || !record->target->is_element() ||
+                !dom_js_is_connected_to_document(doc, record->target)) return nullptr;
+            node = record->target;
+        } else {
+            node = record->parent;
+        }
     } else if ((record->kind == DOM_JS_MUTATION_ATTRIBUTE ||
                 record->kind == DOM_JS_MUTATION_TEXT) &&
                dom_js_document_has_structural_css_dependency(doc)) {
         // A class/attribute change can alter a sibling selector's result. A
         // text change can flip :empty. Their parent contains that local closure.
-        node = record->parent;
+        // root edits have no containing element, so retain the root as their closure.
+        node = record->parent && record->parent->is_element() ?
+            record->parent : record->target;
     } else {
         node = record->target ? record->target : record->parent;
     }
@@ -6580,12 +6613,17 @@ static DomJsStructuralDependency dom_js_structural_dependency_merge(
 
 static DomJsStructuralDependency dom_js_selector_structural_dependency(CssSelector* selector);
 
-static DomJsStructuralDependency dom_js_simple_selector_structural_dependency(
-        CssSimpleSelector* simple) {
-    if (!simple) return DOM_JS_STRUCTURAL_DEPENDENCY_NONE;
+enum DomJsStructuralTarget {
+    DOM_JS_STRUCTURAL_TARGET_NONE,
+    DOM_JS_STRUCTURAL_TARGET_SELF,
+    DOM_JS_STRUCTURAL_TARGET_CHILD,
+    DOM_JS_STRUCTURAL_TARGET_ANCESTOR,
+};
 
-    switch (simple->type) {
+static DomJsStructuralTarget dom_js_structural_target(CssSelectorType type) {
+    switch (type) {
         case CSS_SELECTOR_PSEUDO_EMPTY:
+            return DOM_JS_STRUCTURAL_TARGET_SELF;
         case CSS_SELECTOR_PSEUDO_FIRST_CHILD:
         case CSS_SELECTOR_PSEUDO_LAST_CHILD:
         case CSS_SELECTOR_PSEUDO_ONLY_CHILD:
@@ -6596,14 +6634,22 @@ static DomJsStructuralDependency dom_js_simple_selector_structural_dependency(
         case CSS_SELECTOR_PSEUDO_NTH_LAST_CHILD:
         case CSS_SELECTOR_PSEUDO_NTH_OF_TYPE:
         case CSS_SELECTOR_PSEUDO_NTH_LAST_OF_TYPE:
-            return DOM_JS_STRUCTURAL_DEPENDENCY_LOCAL;
+            return DOM_JS_STRUCTURAL_TARGET_CHILD;
         case CSS_SELECTOR_PSEUDO_HAS:
-            // Descendant insertion can change an ancestor's match. A subtree
-            // pass cannot prove every affected ancestor has been revisited.
-            return DOM_JS_STRUCTURAL_DEPENDENCY_BROAD;
+            return DOM_JS_STRUCTURAL_TARGET_ANCESTOR;
         default:
-            break;
+            return DOM_JS_STRUCTURAL_TARGET_NONE;
     }
+}
+
+static DomJsStructuralDependency dom_js_simple_selector_structural_dependency(
+        CssSimpleSelector* simple) {
+    if (!simple) return DOM_JS_STRUCTURAL_DEPENDENCY_NONE;
+    DomJsStructuralTarget target = dom_js_structural_target(simple->type);
+    if (target == DOM_JS_STRUCTURAL_TARGET_ANCESTOR)
+        return DOM_JS_STRUCTURAL_DEPENDENCY_BROAD;
+    if (target != DOM_JS_STRUCTURAL_TARGET_NONE)
+        return DOM_JS_STRUCTURAL_DEPENDENCY_LOCAL;
 
     DomJsStructuralDependency dependency = DOM_JS_STRUCTURAL_DEPENDENCY_NONE;
     if (simple->function_selectors && simple->function_selector_count > 0) {
@@ -6721,10 +6767,12 @@ static bool dom_js_document_has_broad_structural_css_dependency(DomDocument* doc
     return false;
 }
 
-static bool dom_js_selector_has_column_dependency(CssSelector* selector) {
+static bool dom_js_selector_has_combinator_dependency(CssSelector* selector,
+        CssCombinator minimum = CSS_COMBINATOR_COLUMN) {
     if (!selector) return false;
+    if (selector->leading_combinator >= minimum) return true;
     for (size_t i = 0; i + 1 < selector->compound_selector_count; i++) {
-        if (selector->combinators[i] == CSS_COMBINATOR_COLUMN) return true;
+        if (selector->combinators[i] >= minimum) return true;
     }
     for (size_t i = 0; i < selector->compound_selector_count; i++) {
         CssCompoundSelector* compound = selector->compound_selectors[i];
@@ -6733,7 +6781,7 @@ static bool dom_js_selector_has_column_dependency(CssSelector* selector) {
             CssSimpleSelector* simple = compound->simple_selectors[s];
             if (!simple) continue;
             for (size_t f = 0; f < simple->function_selector_count; f++) {
-                if (dom_js_selector_has_column_dependency(simple->function_selectors[f]))
+                if (dom_js_selector_has_combinator_dependency(simple->function_selectors[f], minimum))
                     return true;
             }
         }
@@ -6742,10 +6790,10 @@ static bool dom_js_selector_has_column_dependency(CssSelector* selector) {
 }
 
 static bool dom_js_simple_selector_mentions_mutation_attribute(
-        CssSimpleSelector* simple, DomJsMutationAttribute attribute);
+        CssSimpleSelector* simple, const char* attribute);
 
 static bool dom_js_selector_mentions_mutation_attribute(
-        CssSelector* selector, DomJsMutationAttribute attribute) {
+        CssSelector* selector, const char* attribute) {
     if (!selector) return false;
     for (size_t i = 0; i < selector->compound_selector_count; i++) {
         CssCompoundSelector* compound = selector->compound_selectors[i];
@@ -6761,16 +6809,13 @@ static bool dom_js_selector_mentions_mutation_attribute(
 }
 
 static bool dom_js_simple_selector_mentions_mutation_attribute(
-        CssSimpleSelector* simple, DomJsMutationAttribute attribute) {
+        CssSimpleSelector* simple, const char* attribute) {
     if (!simple) return false;
-    if (attribute == DOM_JS_MUTATION_ATTRIBUTE_CLASS &&
-        (simple->type == CSS_SELECTOR_TYPE_CLASS ||
-         ((simple->type >= CSS_SELECTOR_ATTR_EXACT &&
-           simple->type <= CSS_SELECTOR_ATTR_CASE_SENSITIVE) &&
-          simple->attribute.name &&
-          str_icmp_cstr(simple->attribute.name, "class") == 0))) {
-        return true;
-    }
+    const char* selected_attribute = simple->type == CSS_SELECTOR_TYPE_CLASS ? "class" :
+        simple->type == CSS_SELECTOR_TYPE_ID ? "id" :
+        (simple->type >= CSS_SELECTOR_ATTR_EXACT && simple->type <= CSS_SELECTOR_ATTR_CASE_SENSITIVE)
+            ? simple->attribute.name : nullptr;
+    if (attribute && selected_attribute && str_icmp_cstr(selected_attribute, attribute) == 0) return true;
     for (size_t i = 0; i < simple->function_selector_count; i++) {
         if (dom_js_selector_mentions_mutation_attribute(
                 simple->function_selectors[i], attribute)) {
@@ -6781,10 +6826,10 @@ static bool dom_js_simple_selector_mentions_mutation_attribute(
 }
 
 static bool dom_js_selector_has_relational_mutation_attribute_dependency(
-        CssSelector* selector, DomJsMutationAttribute attribute);
+        CssSelector* selector, const char* attribute);
 
 static bool dom_js_simple_selector_has_relational_mutation_attribute_dependency(
-        CssSimpleSelector* simple, DomJsMutationAttribute attribute) {
+        CssSimpleSelector* simple, const char* attribute) {
     if (!simple) return false;
     if (simple->type == CSS_SELECTOR_PSEUDO_HAS) {
         for (size_t i = 0; i < simple->function_selector_count; i++) {
@@ -6804,7 +6849,7 @@ static bool dom_js_simple_selector_has_relational_mutation_attribute_dependency(
 }
 
 static bool dom_js_selector_has_relational_mutation_attribute_dependency(
-        CssSelector* selector, DomJsMutationAttribute attribute) {
+        CssSelector* selector, const char* attribute) {
     if (!selector) return false;
     for (size_t i = 0; i < selector->compound_selector_count; i++) {
         CssCompoundSelector* compound = selector->compound_selectors[i];
@@ -6868,17 +6913,27 @@ static bool dom_js_stylesheet_tree_has_match(CssStylesheet* stylesheet,
     return false;
 }
 
-static bool dom_js_rule_has_column_dependency(CssRule* rule, void*) {
-    if (!rule || (rule->type != CSS_RULE_STYLE &&
-                  rule->type != CSS_RULE_NESTING &&
-                  rule->type != CSS_RULE_NESTED_DECLARATIONS)) return false;
+typedef bool (*DomJsSelectorPredicate)(CssSelector* selector, void* context);
+
+static bool dom_js_rule_selector_has_match(CssRule* rule,
+        DomJsSelectorPredicate predicate, void* context) {
+    if (!rule || (rule->type != CSS_RULE_STYLE && rule->type != CSS_RULE_NESTING &&
+            rule->type != CSS_RULE_NESTED_DECLARATIONS)) return false;
     CssSelectorGroup* group = rule->data.style_rule.selector_group;
     if (group) {
         for (size_t i = 0; i < group->selector_count; i++) {
-            if (dom_js_selector_has_column_dependency(group->selectors[i])) return true;
+            if (predicate(group->selectors[i], context)) return true;
         }
     }
-    return dom_js_selector_has_column_dependency(rule->data.style_rule.selector);
+    return predicate(rule->data.style_rule.selector, context);
+}
+
+static bool dom_js_selector_has_column_dependency(CssSelector* selector, void*) {
+    return dom_js_selector_has_combinator_dependency(selector);
+}
+
+static bool dom_js_rule_has_column_dependency(CssRule* rule, void* context) {
+    return dom_js_rule_selector_has_match(rule, dom_js_selector_has_column_dependency, context);
 }
 
 static bool dom_js_document_rule_tree_has_match(DomDocument* doc,
@@ -6899,30 +6954,25 @@ static bool dom_js_rule_is_scope(CssRule* rule, void*) {
     return rule && rule->type == CSS_RULE_SCOPE;
 }
 
+static bool dom_js_selector_has_attribute_dependency(CssSelector* selector, void* context) {
+    return dom_js_selector_has_relational_mutation_attribute_dependency(
+        selector, *(const char**)context);
+}
+
 static bool dom_js_rule_has_relational_mutation_attribute_dependency(
         CssRule* rule, void* context) {
-    DomJsMutationAttribute attribute = *(DomJsMutationAttribute*)context;
-    if (!rule || (rule->type != CSS_RULE_STYLE &&
-                  rule->type != CSS_RULE_NESTING &&
-                  rule->type != CSS_RULE_NESTED_DECLARATIONS)) {
-        return false;
-    }
-    if (rule->data.style_rule.selector_group) {
-        for (size_t i = 0; i < rule->data.style_rule.selector_group->selector_count; i++) {
-            if (dom_js_selector_has_relational_mutation_attribute_dependency(
-                    rule->data.style_rule.selector_group->selectors[i], attribute)) {
-                return true;
-            }
-        }
-    }
-    return dom_js_selector_has_relational_mutation_attribute_dependency(
-        rule->data.style_rule.selector, attribute);
+    return dom_js_rule_selector_has_match(rule, dom_js_selector_has_attribute_dependency, context);
 }
 
 static bool dom_js_document_has_relational_mutation_attribute_dependency(
-        DomDocument* doc, DomJsMutationAttribute attribute) {
+        DomDocument* doc, const char* attribute) {
     return dom_js_document_rule_tree_has_match(doc,
         dom_js_rule_has_relational_mutation_attribute_dependency, &attribute);
+}
+
+extern "C" bool dom_engine_attribute_has_relational_css_dependency(DomDocument* doc, const char* name) {
+    if (!doc || !name || !doc->stylesheets || doc->stylesheet_count <= 0) return true;
+    return dom_js_document_has_relational_mutation_attribute_dependency(doc, name);
 }
 
 static bool dom_js_selector_can_match_mutated_element(CssSelector* selector,
@@ -6980,24 +7030,12 @@ static bool dom_js_selector_has_relational_mutation_target_dependency(
     return false;
 }
 
-static bool dom_js_rule_has_relational_mutation_target_dependency(CssRule* rule,
-                                                                   void* context) {
-    DomElement* target = (DomElement*)context;
-    if (!rule || !target || (rule->type != CSS_RULE_STYLE &&
-                             rule->type != CSS_RULE_NESTING &&
-                             rule->type != CSS_RULE_NESTED_DECLARATIONS)) {
-        return false;
-    }
-    if (rule->data.style_rule.selector_group) {
-        for (size_t i = 0; i < rule->data.style_rule.selector_group->selector_count; i++) {
-            if (dom_js_selector_has_relational_mutation_target_dependency(
-                    rule->data.style_rule.selector_group->selectors[i], target)) {
-                return true;
-            }
-        }
-    }
-    return dom_js_selector_has_relational_mutation_target_dependency(
-        rule->data.style_rule.selector, target);
+static bool dom_js_selector_has_target_dependency(CssSelector* selector, void* context) {
+    return dom_js_selector_has_relational_mutation_target_dependency(selector, (DomElement*)context);
+}
+
+static bool dom_js_rule_has_relational_mutation_target_dependency(CssRule* rule, void* context) {
+    return dom_js_rule_selector_has_match(rule, dom_js_selector_has_target_dependency, context);
 }
 
 static bool dom_js_document_has_relational_mutation_target_dependency(
@@ -7005,6 +7043,150 @@ static bool dom_js_document_has_relational_mutation_target_dependency(
     if (!doc || !target || !doc->stylesheets || doc->stylesheet_count <= 0) return true;
     return dom_js_document_rule_tree_has_match(doc,
         dom_js_rule_has_relational_mutation_target_dependency, target);
+}
+
+struct DomJsChildListDependency {
+    DomNode* parent;
+    SelectorMatcher matcher;
+    bool include_structural;
+};
+
+static bool dom_js_compound_can_match_anchor(CssCompoundSelector* compound,
+        DomElement* element, SelectorMatcher* matcher) {
+    for (size_t i = 0; i < compound->simple_selector_count; i++) {
+        CssSimpleSelector* simple = compound->simple_selectors[i];
+        if (!simple) continue;
+        bool stable = simple->type == CSS_SELECTOR_TYPE_ELEMENT ||
+            simple->type == CSS_SELECTOR_TYPE_CLASS || simple->type == CSS_SELECTOR_TYPE_ID ||
+            (simple->type >= CSS_SELECTOR_ATTR_EXACT && simple->type <= CSS_SELECTOR_ATTR_CASE_SENSITIVE);
+        if (stable && !selector_matcher_matches_simple(matcher, simple, element)) return false;
+    }
+    return true;
+}
+
+static bool dom_js_selector_prefix_can_match_anchor(CssSelector* selector, size_t index,
+        DomElement* element, SelectorMatcher* matcher, bool unknown_sibling = false) {
+    if (!element) return false;
+    CssCompoundSelector* compound = selector->compound_selectors[index];
+    if (!unknown_sibling && compound &&
+        !dom_js_compound_can_match_anchor(compound, element, matcher)) return false;
+    if (!index) return true;
+    CssCombinator combinator = selector->combinators[index - 1];
+    if (combinator == CSS_COMBINATOR_NEXT_SIBLING ||
+        combinator == CSS_COMBINATOR_SUBSEQUENT_SIBLING) {
+        // the former sibling may be detached; its ancestry still shares this
+        // child's parent, while its own static selector conditions are unknown.
+        return dom_js_selector_prefix_can_match_anchor(selector, index - 1,
+            element, matcher, true);
+    }
+    if (combinator != CSS_COMBINATOR_CHILD && combinator != CSS_COMBINATOR_DESCENDANT)
+        return true;
+    for (DomNode* parent = element->parent; parent; parent = parent->parent) {
+        if (parent->is_element() && dom_js_selector_prefix_can_match_anchor(selector,
+                index - 1, parent->as_element(), matcher)) return true;
+        if (combinator == CSS_COMBINATOR_CHILD) break;
+    }
+    return false;
+}
+
+static bool dom_js_child_list_has_anchor(CssSelector* selector, size_t index,
+        DomJsChildListDependency* dependency, bool self) {
+    DomNode* parent = dependency->parent;
+    if (!parent || !parent->is_element()) return true;
+    if (self) return dom_js_selector_prefix_can_match_anchor(selector, index,
+        parent->as_element(), &dependency->matcher);
+    for (DomNode* child = parent->as_element()->first_child; child; child = child->next_sibling) {
+        if (child->is_element() && dom_js_selector_prefix_can_match_anchor(selector,
+                index, child->as_element(), &dependency->matcher)) return true;
+    }
+    return false;
+}
+
+static bool dom_js_selector_has_direct_child_list_dependency(CssSelector* selector,
+    DomJsChildListDependency* dependency);
+
+static bool dom_js_simple_has_direct_child_list_dependency(CssSimpleSelector* simple,
+        CssSelector* selector, size_t index, DomJsChildListDependency* dependency) {
+    if (!simple) return false;
+    DomJsStructuralTarget target = dom_js_structural_target(simple->type);
+    if (target == DOM_JS_STRUCTURAL_TARGET_ANCESTOR) return false;
+    if (target != DOM_JS_STRUCTURAL_TARGET_NONE)
+        return dom_js_child_list_has_anchor(selector, index, dependency,
+            target == DOM_JS_STRUCTURAL_TARGET_SELF);
+    for (size_t f = 0; f < simple->function_selector_count; f++) {
+        CssSelector* nested = simple->function_selectors[f];
+        if (!nested) continue;
+        if (nested->compound_selector_count != 1) {
+            // complex functional arguments may put the structural condition
+            // on an ancestor of the outer subject; check their own anchors.
+            if (dom_js_selector_has_direct_child_list_dependency(nested, dependency)) return true;
+            continue;
+        }
+        CssCompoundSelector* compound = nested->compound_selectors[0];
+        if (!compound) continue;
+        for (size_t s = 0; s < compound->simple_selector_count; s++) {
+            if (dom_js_simple_has_direct_child_list_dependency(compound->simple_selectors[s],
+                    selector, index, dependency)) return true;
+        }
+    }
+    return false;
+}
+
+static bool dom_js_selector_has_direct_child_list_dependency(CssSelector* selector,
+        DomJsChildListDependency* dependency) {
+    if (!selector) return false;
+    for (size_t c = 0; c < selector->compound_selector_count; c++) {
+        if (c && selector->combinators[c - 1] >= CSS_COMBINATOR_NEXT_SIBLING &&
+            dom_js_child_list_has_anchor(selector, c, dependency, false)) return true;
+        CssCompoundSelector* compound = selector->compound_selectors[c];
+        if (!compound) continue;
+        for (size_t s = 0; s < compound->simple_selector_count; s++) {
+            if (dom_js_simple_has_direct_child_list_dependency(compound->simple_selectors[s],
+                    selector, c, dependency)) return true;
+        }
+    }
+    return false;
+}
+
+static bool dom_js_selector_has_child_list_dependency(CssSelector* selector, void* context) {
+    if (!selector) return false;
+    DomJsChildListDependency* dependency = (DomJsChildListDependency*)context;
+    if (dependency->include_structural &&
+        dom_js_selector_has_direct_child_list_dependency(selector, dependency)) return true;
+    for (size_t c = 0; c < selector->compound_selector_count; c++) {
+        CssCompoundSelector* compound = selector->compound_selectors[c];
+        if (!compound) continue;
+        for (size_t i = 0; i < compound->simple_selector_count; i++) {
+            CssSimpleSelector* simple = compound->simple_selectors[i];
+            if (!dom_js_simple_selector_has_relational_mutation_target_dependency(simple, nullptr)) continue;
+            // sibling/column arguments can reach anchors outside the parent's
+            // ancestry. Descendant/child arguments require an enclosing anchor.
+            for (size_t f = 0; f < simple->function_selector_count; f++) {
+                if (dom_js_selector_has_combinator_dependency(
+                        simple->function_selectors[f], CSS_COMBINATOR_NEXT_SIBLING)) return true;
+            }
+            for (DomNode* node = dependency->parent; node; node = node->parent) {
+                if (node->is_element() && dom_js_compound_can_match_anchor(
+                        compound, node->as_element(), &dependency->matcher)) return true;
+            }
+        }
+    }
+    return false;
+}
+
+static bool dom_js_rule_has_child_list_dependency(CssRule* rule, void* context) {
+    return dom_js_rule_selector_has_match(rule, dom_js_selector_has_child_list_dependency, context);
+}
+
+static bool dom_js_document_has_child_list_dependency(DomDocument* doc, DomNode* parent,
+        bool include_structural) {
+    if (!doc || !parent) return true;
+    if (dom_js_document_has_column_css_dependency(doc)) return true;
+    DomJsChildListDependency dependency = {};
+    dependency.parent = parent;
+    dependency.include_structural = include_structural;
+    selector_matcher_init(&dependency.matcher, doc->document_pool);
+    return dom_js_document_rule_tree_has_match(doc, dom_js_rule_has_child_list_dependency, &dependency);
 }
 
 static bool dom_js_document_has_structural_css_dependency(DomDocument* doc) {
@@ -7105,7 +7287,8 @@ static bool dom_js_mutation_can_incremental(DomDocument* doc,
                     dom_js_document_has_broad_structural_css_dependency(doc);
                 checked_broad_structural_css = true;
             }
-            if (!has_broad_structural_css) continue;
+            if (!has_broad_structural_css ||
+                !dom_js_document_has_child_list_dependency(doc, record->parent)) continue;
             // :has() can change matching ancestors outside the child-list
             // subtree. Local sibling and position selectors use the parent as
             // their cascade root above, so they retain incremental layout.
@@ -7113,11 +7296,17 @@ static bool dom_js_mutation_can_incremental(DomDocument* doc,
             return false;
         }
         if (record->kind == DOM_JS_MUTATION_ATTRIBUTE &&
+            record->attribute == DOM_JS_MUTATION_ATTRIBUTE_LOCAL) {
+            // The notifier proved no :has() argument mentions this data/ARIA
+            // name. A later stylesheet mutation still forces the broad path.
+            continue;
+        }
+        if (record->kind == DOM_JS_MUTATION_ATTRIBUTE &&
             record->attribute == DOM_JS_MUTATION_ATTRIBUTE_CLASS) {
             if (!checked_class_relational_css) {
                 has_class_relational_css =
                     dom_js_document_has_relational_mutation_attribute_dependency(
-                        doc, DOM_JS_MUTATION_ATTRIBUTE_CLASS);
+                        doc, "class");
                 checked_class_relational_css = true;
             }
             if (!has_class_relational_css) continue;
@@ -7599,14 +7788,19 @@ static bool post_html_handler_incremental_rebuild(
     return true;
 }
 
-// A presentation-channel write of opacity, or of a transform that stays a
+// A presentation-channel write of leaf visibility, opacity, or a transform that stays a
 // transform, changes paint and hit testing but never layout: Radiant reads
 // transforms in layout only to decide containing-block establishment and
 // computes overflow without them, and stacking order is collected at paint.
 // Presentation writes also leave attributes, and so selector matching, intact.
 static DomElement* dom_js_paint_only_target(DomDocument* doc, const DomJsMutationRecord* record) {
     CssPropertyCode property = record->presentation_property;
-    if (property != CSS_PROPERTY_OPACITY && property != CSS_PROPERTY_TRANSFORM) return nullptr;
+    bool background_position = property == CSS_PROPERTY_BACKGROUND_POSITION_X ||
+        property == CSS_PROPERTY_BACKGROUND_POSITION_Y;
+    bool transform_property = property == CSS_PROPERTY_TRANSFORM || css_individual_transform_index(property) >= 0;
+    bool color_filter = property == CSS_PROPERTY_FILTER;
+    if (property != CSS_PROPERTY_OPACITY && !transform_property &&
+        property != CSS_PROPERTY_VISIBILITY && !background_position && !color_filter) return nullptr;
     if (!record->target || !record->target->is_element() || !record->was_connected) return nullptr;
     DomElement* element = record->target->as_element();
     if (element->doc != doc || element->is_synthetic() || element->view_type == RDT_VIEW_NONE ||
@@ -7615,12 +7809,43 @@ static DomElement* dom_js_paint_only_target(DomDocument* doc, const DomJsMutatio
     StyleTree* style = element->specified_style;
     CssDeclaration* declaration = style_tree_get_declaration(style, property);
     if (!declaration || !declaration->value) return nullptr;
-    // transitions and animations start or sample during style resolution
+    // A transition can start on this write. An animation of another property
+    // does not require resampling or relayout (for example a sprite's Y row).
     static const CssPropertyCode motion[] = {
         CSS_PROPERTY_TRANSITION, CSS_PROPERTY_TRANSITION_PROPERTY,
-        CSS_PROPERTY_TRANSITION_DURATION, CSS_PROPERTY_ANIMATION, CSS_PROPERTY_ANIMATION_NAME};
+        CSS_PROPERTY_TRANSITION_DURATION};
     for (CssPropertyCode code : motion) if (style_tree_get_declaration(style, code)) return nullptr;
-    if (element->web_animation_state()) return nullptr;
+    if ((element->web_animation_state() || style_tree_get_declaration(style, CSS_PROPERTY_ANIMATION) ||
+         style_tree_get_declaration(style, CSS_PROPERTY_ANIMATION_NAME)) &&
+        css_animation_needs_computed_sample(element, property)) return nullptr;
+    if (background_position) return element;
+    if (color_filter) {
+        // Nonempty color filters keep an existing leaf's containing block,
+        // flattening and overflow unchanged. Spatial filters retain layout.
+        if (element->first_child || !element->filter_prop() ||
+            !render_filter_is_color_only(element->filterp()->functions)) return nullptr;
+        Pool* scratch = pool_create_sized(0);
+        if (!scratch) return nullptr;
+        LayoutContext context = {};
+        context.doc = lam::up(doc); context.view = lam::up(static_cast<View*>(element));
+        context.elmt = lam::up(element); context.pool = lam::up(scratch);
+        context.css_value_scratch = lam::up(scratch);
+        const CssValue* value = css_resolve_element_var_value(scratch, element,
+            declaration->value, CSS_PROPERTY_FILTER);
+        FilterFunction* functions = resolve_filter_value(&context, CSS_PROPERTY_FILTER, value, scratch);
+        bool valid = render_filter_is_color_only(functions);
+        radiant::destroy_filter_list(scratch, functions);
+        pool_destroy(scratch);
+        return valid ? element : nullptr;
+    }
+    if (property == CSS_PROPERTY_VISIBILITY) {
+        // visibility inherits; leaf writes need no descendant style resolution.
+        // collapse can remove table/ruby space and must retain the layout path.
+        const CssValue* value = declaration->value;
+        return !element->first_child && value->type == CSS_VALUE_TYPE_KEYWORD &&
+            (value->data.keyword == CSS_VALUE_VISIBLE || value->data.keyword == CSS_VALUE_HIDDEN)
+            ? element : nullptr;
+    }
     if (property == CSS_PROPERTY_OPACITY) {
         // opacity below one flattens preserve-3d, which changes descendants' containing blocks
         return element->transformp()->transform_style == CSS_VALUE_PRESERVE_3D ? nullptr : element;
@@ -7635,9 +7860,20 @@ static bool post_html_handler_paint_only_commit(EventContext* evcon, DomDocument
     DocState* state = (DocState*)doc->state;
     if (!state || !doc->view_tree || !doc->root || doc->js.mutation_record_count == 0 ||
         doc->js.mutation_record_overflow || doc->js.inline_stylesheet_mutation_count ||
-        doc->js.reflow_pending_before_batch || state->reflow_scheduler.pending) return false;
+        doc->js.reflow_pending_before_batch || state->reflow_scheduler.pending) {
+        if (active_frame_profile) log_notice("[FRAME_PRESENTATION_PENDING] before_batch=%u scheduled=%u records=%u overflow=%u stylesheet=%u",
+            doc->js.reflow_pending_before_batch, state && state->reflow_scheduler.pending ? 1u : 0u,
+            doc->js.mutation_record_count, doc->js.mutation_record_overflow,
+            doc->js.inline_stylesheet_mutation_count);
+        return false;
+    }
     for (int i = 0; i < doc->js.mutation_record_count; i++) {
-        if (!dom_js_paint_only_target(doc, &doc->js.mutation_records[i])) return false;
+        if (!dom_js_paint_only_target(doc, &doc->js.mutation_records[i])) {
+            const DomJsMutationRecord& record = doc->js.mutation_records[i];
+            if (active_frame_profile) log_notice("[FRAME_PRESENTATION_LAYOUT] target=%u kind=%u property=%u", record.target_id,
+                (unsigned)record.kind, (unsigned)record.presentation_property);
+            return false;
+        }
     }
     LayoutContext lycon = {};
     lycon.doc = lam::up(doc);
@@ -7647,6 +7883,7 @@ static bool post_html_handler_paint_only_commit(EventContext* evcon, DomDocument
         const DomJsMutationRecord* record = &doc->js.mutation_records[i];
         DomElement* element = record->target->as_element();
         lycon.view = lam::up(static_cast<View*>(element));
+        lycon.elmt = lam::up(element);
         // the same resolver layout uses writes the retained view prop
         resolve_css_property(record->presentation_property,
             style_tree_get_declaration(element->specified_style, record->presentation_property), &lycon);
@@ -8380,21 +8617,29 @@ static Item radiant_deliver_timing_event(Item env_item) {
 }
 
 static void radiant_queue_timing_event(UiContext* uicon, DomElement* target,
-    RadiantJsEventBuilder build, void* userdata) {
+    RadiantJsEventBuilder build, void* userdata, const char* css_event_type = nullptr) {
     if (!uicon || !target || !target->doc) return;
     EventContext evcon = {};
     evcon.ui_context = uicon; evcon.target_document = target->doc;
     JsCtxScope scope = {};
     bool entered_scope = radiant_js_ctx_enter(&scope, &evcon);
     if (!entered_scope && (!context || dom_get_document() != target->doc)) return;
-    // D5.3.3: target-wrapper allocation and callbacks can collect either argument.
-    RootFrame roots(2);
-    Rooted<Item> target_root(roots, dom_wrap_element(target));
-    Rooted<Item> event_root(roots, build(userdata));
-    Item values[2] = {target_root.get(), event_root.get()};
-    // listeners may mutate style; the traced task owns its arguments until layout has unwound.
-    js_schedule_native_env_timeout(radiant_deliver_timing_event, 0,
-        (Item){.item = i2it(0)}, values, 2);
+    // Lambda documents need no JS timer/closure for an unobserved CSS event.
+    // JS realms remain conservative because inline handlers may not be indexed
+    // until their DOM wrappers are initialized. Lambda author masks are live.
+    bool observed = !css_event_type || dom_document_has_js_realm(target->doc) ||
+        dom_event_type_has_js_listeners(css_event_type) ||
+        template_registry_has_author_handler(g_template_registry, css_event_type);
+    if (observed) {
+        // D5.3.3: target-wrapper allocation and callbacks can collect either argument.
+        RootFrame roots(2);
+        Rooted<Item> target_root(roots, dom_wrap_element(target));
+        Rooted<Item> event_root(roots, build(userdata));
+        Item values[2] = {target_root.get(), event_root.get()};
+        // listeners may mutate style; the traced task owns its arguments until layout has unwound.
+        js_schedule_native_env_timeout(radiant_deliver_timing_event, 0,
+            (Item){.item = i2it(0)}, values, 2);
+    }
     if (entered_scope) {
         input_context = scope.saved_input_ctx;
         scope.active = false;
@@ -8439,7 +8684,7 @@ void radiant_dispatch_css_event(UiContext* uicon, DomElement* target,
     const char* type, const char* detail_name, const char* detail_value, double elapsed_time) {
     if (!type || !*type) return;
     RadiantTimingEventData data = {type, detail_name, detail_value, elapsed_time, 0};
-    radiant_queue_timing_event(uicon, target, radiant_build_css_timing_event, &data);
+    radiant_queue_timing_event(uicon, target, radiant_build_css_timing_event, &data, type);
 }
 
 void radiant_dispatch_svg_time_event(UiContext* uicon, DomElement* target,
@@ -8554,17 +8799,20 @@ typedef struct {
     bool meta;
     int detail;
     double timestamp_ms;
+    double movement_x, movement_y;
 } MouseEventBuildArgs;
 
 static Item build_mouse_event_item(void* userdata) {
     MouseEventBuildArgs* args = (MouseEventBuildArgs*)userdata;
-    Item event = js_create_native_mouse_event(args->type, args->client_x, args->client_y,
+    RootFrame roots(1);
+    Rooted<Item> event(roots, js_create_native_mouse_event(args->type, args->client_x, args->client_y,
         args->button, args->buttons, args->ctrl, args->shift, args->alt,
-        args->meta, args->detail, ItemNull);
+        args->meta, args->detail, ItemNull));
     if (args->timestamp_ms >= 0.0) {
-        js_event_set_timestamp(event, args->timestamp_ms);
+        js_event_set_timestamp(event.get(), args->timestamp_ms);
     }
-    return event;
+    dom_event_set_movement(event.get(), args->movement_x, args->movement_y);
+    return event.get();
 }
 
 static bool radiant_dispatch_mouse_event(EventContext* evcon, View* target,
@@ -8577,8 +8825,12 @@ static bool radiant_dispatch_mouse_event(EventContext* evcon, View* target,
 {
     MouseEventBuildArgs args = {
         type, client_x, client_y, button, buttons,
-        ctrl, shift, alt, meta, detail, timestamp_ms
+        ctrl, shift, alt, meta, detail, timestamp_ms, 0, 0
     };
+    if (evcon && evcon->event.type == RDT_EVENT_MOUSE_MOVE) {
+        args.movement_x = evcon->event.mouse_position.movement_x;
+        args.movement_y = evcon->event.mouse_position.movement_y;
+    }
     bool is_click = type && strcmp(type, "click") == 0;
     bool prevented = radiant_dispatch_built_event(evcon, target, build_mouse_event_item,
         &args, true, dispatched, !is_click, type);
@@ -8640,6 +8892,13 @@ static NativePointerCapture* native_pointer_capture(DomDocument* doc,bool create
     capture->document=doc;
     if(!dom_document_add_resource(doc,capture,native_pointer_capture_destroy)) {mem_free(capture);return nullptr;}
     capture->next=native_pointer_captures;native_pointer_captures=capture;return capture;
+}
+static View* native_pointer_capture_target(DomDocument* doc) {
+    auto* capture = native_pointer_capture(doc, false);
+    if (!capture) return nullptr;
+    DomNode* target = dom_node_ref_validate(doc, capture->pending);
+    if (!target) target = dom_node_ref_validate(doc, capture->current);
+    return target && dom_is_connected(target) ? (View*)target : nullptr;
 }
 extern "C" int dom_engine_pointer_capture(DomElement* element,int32_t id,unsigned operation) {
     auto* capture=element?native_pointer_capture(element->doc,false):nullptr;
@@ -10483,6 +10742,7 @@ struct RadiantFrameQueue : DomDocumentResourceData {
     RadiantFrameRequest* tail;
     uint64_t next_token;
     uint32_t slot_count;
+    uint32_t profile_frames;
     bool profile;
 };
 
@@ -10567,6 +10827,56 @@ extern "C" bool dom_engine_frame_cancel(void* owner, uint64_t token) {
         }
     }
     return false;
+}
+
+void radiant_queue_template_render_events(DomDocument* doc, DomNode* root) {
+    // Plain HTML has no evaluator; its load phase must not read a context-owned
+    // template registry. Template callers enter their document scope first.
+    if (!doc || !root || !context || !g_template_registry ||
+        !template_registry_may_have_author_handler(g_template_registry, "render")) return;
+    RadiantFrameQueue* queue = frame_queue_for_document(doc, false);
+    DomNode* node = root;
+    while (node) {
+        if (node->is_element() && !node->as_element()->is_synthetic()) {
+            DomElement* element = node->as_element();
+            Item result = {.element = dom_element_render_source(element)};
+            bool handles_render = false;
+            for (RenderOwners owners(result); owners.valid(); owners.next()) {
+                RenderMapLookup lookup = owners.lookup;
+                TemplateEntry* entry = template_registry_find_ref(g_template_registry, lookup.template_ref);
+                // descendant reverse mappings must not schedule another clock for the same component.
+                if (entry && !entry->is_behavior && template_entry_find_handler(entry, "render") &&
+                    render_map_get_result(lookup.source_item, lookup.template_ref).item == result.item) {
+                    handles_render = true;
+                    break;
+                }
+            }
+            if (handles_render) {
+                DomNodeRef owner = dom_node_ref(element);
+                bool pending = false;
+                for (RadiantFrameRequest* request = queue ? queue->requests : nullptr;
+                        request; request = request->next) {
+                    if (request->pending && request->owner.address == owner.address &&
+                        request->owner.expected_id == owner.expected_id &&
+                        strcmp(request->name->str, "render") == 0) {
+                        pending = true;
+                        break;
+                    }
+                }
+                if (!pending) {
+                    dom_engine_frame_request(element, "render");
+                    queue = frame_queue_for_document(doc, false);
+                }
+            }
+        }
+        if (node->is_element() && node->as_element()->first_child) {
+            node = node->as_element()->first_child;
+        } else {
+            while (node != root && !node->next_sibling) node = node->parent;
+            if (node == root) break;
+            node = node->next_sibling;
+        }
+    }
 }
 
 // The nesting a frame owner may have below a rebuilt template result.
@@ -10670,12 +10980,13 @@ extern "C" bool dom_engine_frame_tick(DomDocument* doc, double timestamp_ms) {
         StyleEpochStats style_stats = {};
         style_epoch_get_stats(doc, &style_stats);
         // Synthetic dispatch reconciles inside its own scope; profile that nested commit too.
-        log_notice("[FRAME_PROFILE] timestamp_ms=%.3f total_ms=%.3f script_host_ms=%.3f "
+        log_notice("[FRAME_PROFILE] timestamp_ms=%.3f document_timestamp_ms=%.3f total_ms=%.3f script_host_ms=%.3f "
             "cascade_ms=%.3f layout_ms=%.3f repaint_request_ms=%.3f events=%u "
             "mutations=%u commits=%u slots=%u layout_before=%u layout_after=%u dom_bytes=%zu view_bytes=%zu "
             "input_arena_bytes=%zu node_arena_bytes=%zu commit_dom_growth=%lld cascade_dom_growth=%lld "
             "journal_capacity=%d style_entries=%llu style_cold_bytes=%zu style_live_bytes=%zu style_evictions=%llu",
-            timestamp_ms, total_ms, total_ms - profile.cascade_ms - profile.layout_ms - profile.repaint_ms,
+            timestamp_ms, js_performance_monotonic_to_relative(timestamp_ms), total_ms,
+            total_ms - profile.cascade_ms - profile.layout_ms - profile.repaint_ms,
             profile.cascade_ms, profile.layout_ms, profile.repaint_ms,
             delivered_count, profile.mutations, profile.commits, queue->slot_count,
             layout_before, doc->view_tree ? doc->view_tree->layout_generation : 0, dom_live, view_live,
@@ -10685,6 +10996,21 @@ extern "C" bool dom_engine_frame_tick(DomDocument* doc, double timestamp_ms) {
             doc->js.mutation_record_capacity, (unsigned long long)style_stats.canonical_entry_count,
             style_stats.current_unbound_bytes, style_stats.current_live_bytes,
             (unsigned long long)style_stats.cache_eviction_count);
+        if (queue->profile_frames++ % 35 == 0) {
+            log_mem_stage("frame-profile");
+            MemSnapshot* memory = mem_snapshot_capture(nullptr);
+            if (memory) {
+                for (uint32_t i = 0; i < memory->count; i++) {
+                    const MemStatSample& sample = memory->samples[i];
+                    if (!sample.parent_id && sample.bytes_reserved >= 1024 * 1024)
+                        log_notice("[FRAME_MEMORY] timestamp_ms=%.3f allocator=%s reserved=%llu live=%llu peak=%llu",
+                            timestamp_ms, sample.label, (unsigned long long)sample.bytes_reserved,
+                            (unsigned long long)sample.bytes_in_use,
+                            (unsigned long long)sample.high_water_bytes);
+                }
+                mem_snapshot_free(memory);
+            }
+        }
     }
     return delivered;
 }
@@ -12429,18 +12755,23 @@ struct EventDocumentScope {
 };
 
 void radiant_dispatch_lambda_body_load(UiContext* uicon, DomDocument* doc) {
-    if (!uicon || !doc || doc->page_kind != DOM_PAGE_KIND_LAMBDA_SCRIPT ||
-        dom_document_has_js_realm(doc)) return;
-    DomElement* body = radiant_document_body_element(doc);
-    if (!body) return;
+    if (!uicon || !doc) return;
     EventDocumentScope scope(uicon, doc);
     if (!scope.active) return;
+    if (doc->page_kind != DOM_PAGE_KIND_LAMBDA_SCRIPT || dom_document_has_js_realm(doc)) {
+        // mixed-script documents still start template-owned presentation clocks.
+        radiant_queue_template_render_events(doc, doc->root);
+        return;
+    }
+    DomElement* body = radiant_document_body_element(doc);
+    if (!body) return;
     EventContext evcon = {};
     evcon.ui_context = uicon;
     evcon.target_document = doc;
     evcon.target = static_cast<View*>(body);
     dispatch_lambda_handler(&evcon, static_cast<View*>(body), "load",
                             nullptr, nullptr, false);
+    radiant_queue_template_render_events(doc, doc->root);
 }
 
 void rdt_event_set_mouse_position(RdtEvent* event, EventType type,
@@ -12575,6 +12906,11 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
     switch (event->type) {
     case RDT_EVENT_MOUSE_MOVE: {
         MousePositionEvent* motion = &event->mouse_position;
+        MouseState* mouse = &uicon->mouse_state;
+        motion->movement_x = mouse->has_position ? motion->x - mouse->last_x : 0;
+        motion->movement_y = mouse->has_position ? motion->y - mouse->last_y : 0;
+        mouse->last_x = motion->x; mouse->last_y = motion->y; mouse->has_position = true;
+        evcon.event.mouse_position = *motion;
         log_debug("Mouse event at (%.1f, %.1f)", motion->x, motion->y);
         mouse_x = motion->x;  mouse_y = motion->y;
         // The select popup is a native overlay, so a row hover must not send
@@ -12584,6 +12920,11 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             break;
         }
         target_html_doc(&evcon, doc->view_tree);
+        if (DomElement* captured = radiant_relative_mouse_target(uicon)) evcon.target = captured;
+        // Capture must keep receiving pointermove even outside the document.
+        if (!evcon.target) {
+            evcon.target = native_pointer_capture_target(doc);
+        }
         document_scope.activate_target(&evcon);
         event_log_hit_target(cascade_log, cascade_id, &evcon);
 
@@ -13044,6 +13385,8 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
         log_debug("Mouse button event (%.1f, %.1f)", btn_event->x, btn_event->y);
         mouse_x = btn_event->x;  mouse_y = btn_event->y; // changed to use btn_event's y
         target_html_doc(&evcon, doc->view_tree);
+        if (DomElement* captured = radiant_relative_mouse_target(uicon)) evcon.target = captured;
+        if (!evcon.target) evcon.target = native_pointer_capture_target(doc);
         document_scope.activate_target(&evcon);
         event_log_hit_target(cascade_log, cascade_id, &evcon);
         if (event->type == RDT_EVENT_MOUSE_DOWN) {

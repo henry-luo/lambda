@@ -10,6 +10,7 @@
 extern "C" {
 #include "../lib/shell.h"
 #include "../lib/file.h"
+#include "../lib/strbuf.h"
 }
 
 #ifdef _WIN32
@@ -57,7 +58,9 @@ static const RadiantViewCase g_radiant_view_cases[] = {
     {"RadiantViewTest.LoadsMarkdownMathAsHeadlessView", "markdown_math", "test/input/simple_math_test.md"},
     {"RadiantViewTest.LoadsWikiAsHeadlessView", "wiki", "test/input/test.wiki"},
     {"RadiantViewTest.LoadsLatexShowcaseAsHeadlessView", "latex_showcase", "test/input/latex-showcase.tex"},
-    {"RadiantViewTest.LoadsMathIntensiveLatexAsHeadlessView", "latex_math_intensive", "test/input/math_intensive_test.tex"},
+    // font-query snapshots must be released with their evaluation context.
+    {"RadiantViewTest.LoadsMathIntensiveLatexAsHeadlessView", "latex_math_intensive", "test/input/math_intensive_test.tex",
+     "test/view/radiant_view_math_intensive_scroll.json", true},
     {"RadiantViewTest.LoadsYamlAsHeadlessView", "yaml", "test/input/more_test.yaml"},
     {"RadiantViewTest.LoadsLambdaReportAsHeadlessView", "lambda_report", "test/lambda/complex_iot_report_html.ls"},
     {"RadiantViewTest.LoadsLambdaChartDashboardAsHeadlessView", "lambda_chart_dashboard", "test/lambda/chart/chart_dashboard.ls"},
@@ -2291,14 +2294,19 @@ TEST(RadiantViewTest, UiScriptContentSurvivesForcedGc) {
     // reads it; forced, poisoning collection makes that deterministic.
     test_radiant_view_ensure_temp_dir();
     const char* view_path = "./temp/ui_script_content_gc_view.json";
+    const char* log_path = "./temp/ui_script_content_gc_native.log";
+    remove(log_path);
     const ShellEnvEntry env[] = {
+        {"LAMBDA_LOG_FILE", log_path},
         {"LAMBDA_GC_FORCE_EVERY", "1"},
         {"LAMBDA_GC_POISON_FREED", "1"},
+        {"LAMBDA_FUNC_JIT_THRESHOLD", "1"},
+        {"LAMBDA_SATELLITE_SYNC", "1"},
         {NULL, NULL},
     };
     const char* args[] = {
         "./lambda.exe", "layout", "test/html/ui_script_content_gc.ls",
-        "--view-output", view_path, "--no-log", NULL,
+        "--view-output", view_path, NULL,
     };
     ShellOptions options = {0};
     options.env = env;
@@ -2308,11 +2316,92 @@ TEST(RadiantViewTest, UiScriptContentSurvivesForcedGc) {
         << (shell_result.stdout_buf ? shell_result.stdout_buf : "");
     shell_result_free(&shell_result);
 
+    EXPECT_TRUE(test_radiant_view_file_contains(log_path,
+        "published queued satellite function='row'"));
+
     const char* expected[] = {"r1s1e10", "k2", "n1n2n3", "w1w1", "v1", "r4s4e40", "r5s5e50",
         "[9, 6, 13]override7128"};
     for (const char* text : expected) {
         EXPECT_TRUE(test_radiant_view_file_contains(view_path, text))
             << "missing content '" << text << "' after forced GC";
+    }
+}
+
+TEST(RadiantViewTest, DoomCssConsumersAndNativeEffectsSurviveForcedGcAndClose) {
+    test_radiant_view_ensure_temp_dir();
+    const char* probes[] = {"lighting", "effects", "input", "filters", "masks", "spectre", "timing", "styles", "sprites",
+#ifdef __APPLE__
+        "audio",
+#endif
+    };
+    for (const char* probe : probes) {
+        SCOPED_TRACE(probe);
+        StrBuf* page = strbuf_new();
+        StrBuf* events = strbuf_new();
+        strbuf_append_format(page, "test/demo/doom/fixtures/_%s.ls", probe);
+        strbuf_append_format(events, "test/demo/doom/replay/%s.json", probe);
+        const ShellEnvEntry env[] = {
+            {"LAMBDA_GC_FORCE_EVERY", "1"}, {"LAMBDA_GC_POISON_FREED", "1"},
+            {"LAMBDA_FUNC_JIT_THRESHOLD", "1"}, {"LAMBDA_SATELLITE_SYNC", "1"},
+            {"MEMTRACK_MODE", "STATS"}, {"VIEW_MEM_STAGES", "1"}, {nullptr, nullptr},
+        };
+        ShellResult result = test_radiant_view_run_logged_headless(page->str, events->str, env);
+        const char* output = result.stdout_buf ? result.stdout_buf : "";
+        EXPECT_EQ(result.exit_code, 0) << output;
+        EXPECT_NE(strstr(output, "Result: PASS"), nullptr) << output;
+        EXPECT_NE(strstr(output, "[MEMTRACK_LIVE] bytes=0 count=0"), nullptr) << output;
+        shell_result_free(&result);
+        strbuf_free(events);
+        strbuf_free(page);
+    }
+}
+
+TEST(RadiantViewTest, PromotedDocumentTransformUsesCallerStackLimit) {
+    // D5.3.6v2: package initialization retires its large-stack worker before
+    // the native loader invokes a retained export on the caller's stack.
+    const ShellEnvEntry env[] = {
+        {"LAMBDA_FUNC_JIT_THRESHOLD", "1"}, {"LAMBDA_SATELLITE_SYNC", "1"},
+        {nullptr, nullptr},
+    };
+    ShellResult result = test_radiant_view_run_logged_headless(
+        "test/demo/slides/slide_presentation.slides",
+        "test/ui/slide_playback_controls.json", env);
+    const char* output = result.stdout_buf ? result.stdout_buf : "";
+    EXPECT_EQ(result.exit_code, 0) << output;
+    EXPECT_NE(strstr(output, "Result: PASS"), nullptr) << output;
+    shell_result_free(&result);
+}
+
+TEST(RadiantViewTest, LambdaSelectValueReadsLiveOptionSelectedness) {
+    const ShellEnvEntry env[] = {
+        {"LAMBDA_GC_FORCE_EVERY", "1"}, {"LAMBDA_GC_POISON_FREED", "1"},
+        {"LAMBDA_FUNC_JIT_THRESHOLD", "1"}, {nullptr, nullptr},
+    };
+    ShellResult result = test_radiant_view_run_logged_headless(
+        "test/lambda/ui/_select_live_value.ls", "test/ui/select_live_value.json", env);
+    EXPECT_EQ(result.exit_code, 0) << (result.stdout_buf ? result.stdout_buf : "");
+    shell_result_free(&result);
+}
+
+TEST(RadiantViewTest, DoomNativeGameplayAndEpisodeLifecycle) {
+    const char* replays[] = {"e1m1_walkthrough", "e1m1_exit", "e1m1_death", "episode", "camera", "lifecycle"};
+    for (const char* replay : replays) {
+        SCOPED_TRACE(replay);
+        StrBuf* events = strbuf_new();
+        strbuf_append_format(events, "test/demo/doom/replay/%s.json", replay);
+        // Longer gameplay exercises repeated collections without collecting every allocation.
+        const ShellEnvEntry env[] = {
+            {"LAMBDA_GC_FORCE_EVERY", "5000"}, {"LAMBDA_GC_POISON_FREED", "1"},
+            {"MEMTRACK_MODE", "STATS"}, {"VIEW_MEM_STAGES", "1"}, {nullptr, nullptr},
+        };
+        ShellResult result = test_radiant_view_run_logged_headless("test/demo/doom/doom.ls",
+            events->str, env, nullptr, nullptr, 600000);
+        const char* output = result.stdout_buf ? result.stdout_buf : "";
+        EXPECT_EQ(result.exit_code, 0) << output;
+        EXPECT_NE(strstr(output, "Result: PASS"), nullptr) << output;
+        EXPECT_NE(strstr(output, "[MEMTRACK_LIVE] bytes=0 count=0"), nullptr) << output;
+        shell_result_free(&result);
+        strbuf_free(events);
     }
 }
 

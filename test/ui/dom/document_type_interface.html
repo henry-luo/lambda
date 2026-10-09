@@ -1,0 +1,38 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>DocumentType interface</title></head>
+<body><div id="parent"><span id="anchor"></span></div><div id="result">pending</div><script>
+    const result = document.getElementById('result');
+    function check(name, value) {result.setAttribute('data-' + name, String(value));}
+    const doctype = document.doctype;
+    check('prototype', Object.getPrototypeOf(doctype) === DocumentType.prototype &&
+        Object.getPrototypeOf(DocumentType.prototype) === Node.prototype);
+    check('instance', doctype instanceof DocumentType && doctype instanceof Node &&
+        !(doctype instanceof Comment) && doctype.nodeType === Node.DOCUMENT_TYPE_NODE);
+    check('tag', Object.prototype.toString.call(doctype) === '[object DocumentType]');
+    check('methods', ['before', 'after', 'replaceWith', 'remove'].every(function (name) {
+        return typeof DocumentType.prototype[name] === 'function' &&
+            typeof CharacterData.prototype[name] === 'function' && typeof Element.prototype[name] === 'function';
+    }));
+    const parent = document.getElementById('parent');
+    const anchor = document.getElementById('anchor');
+    const text = document.createTextNode('first');
+    Element.prototype.before.call(anchor, text);
+    const comment = document.createComment('after');
+    CharacterData.prototype.after.call(text, comment);
+    check('insert', parent.firstChild === text && text.nextSibling === comment && comment.nextSibling === anchor);
+    CharacterData.prototype.replaceWith.call(comment, 'replacement');
+    check('replace', text.nextSibling.nodeType === Node.TEXT_NODE && text.nextSibling.textContent === 'replacement');
+    CharacterData.prototype.remove.call(text);
+    check('remove', parent.firstChild.textContent === 'replacement' && text.parentNode === null);
+    const detached = document.implementation.createDocumentType('html', '', '');
+    check('created', detached instanceof DocumentType && detached.nodeType === Node.DOCUMENT_TYPE_NODE &&
+        typeof DocumentType.prototype.before.call(detached, 'unused') === 'undefined');
+    let forged = false;
+    try {DocumentType.prototype.remove.call(Object.create(DocumentType.prototype));}
+    catch (error) {forged = error instanceof TypeError;}
+    check('receiver', forged);
+    let illegal = false;
+    try {new DocumentType();} catch (error) {illegal = error instanceof TypeError;}
+    check('constructor', illegal);
+    result.textContent = 'complete';
+</script></body></html>

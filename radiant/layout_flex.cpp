@@ -334,6 +334,7 @@ static ViewElement* create_anonymous_flex_text_item(LayoutContext* lycon,
 }
 
 static bool append_anonymous_flex_text_run(LayoutContext* lycon,
+                                            ScratchMark* scope,
                                             ViewElement* item,
                                             DomText* text,
                                             bool preserve_leading_space,
@@ -353,8 +354,10 @@ static bool append_anonymous_flex_text_run(LayoutContext* lycon,
         return false;
     }
 
-    FlexAnonymousTextRun* run = (FlexAnonymousTextRun*)scratch_calloc(
-        &lycon->scratch, sizeof(FlexAnonymousTextRun));
+    // appended runs share the anonymous item's scratch owner (D4.5.1v4).
+    FlexAnonymousTextRun* run = (FlexAnonymousTextRun*)(scope
+        ? scratch_scope_calloc(&lycon->scratch, scope, sizeof(FlexAnonymousTextRun))
+        : scratch_calloc(&lycon->scratch, sizeof(FlexAnonymousTextRun)));
     if (!run) return false;
     run->text = lam::up(text);
     run->preserve_leading_space = preserve_leading_space;
@@ -1676,13 +1679,18 @@ static int collect_flex_item_nodes(LayoutContext* lycon, ViewBlock* container,
         lycon, container, first_child, nodes, capacity, &policy);
 }
 
-IntrinsicSizes flex_measure_display_contents_intrinsic_widths(
-    LayoutContext* lycon, ViewBlock* container, DomElement* contents,
+IntrinsicSizes flex_measure_intrinsic_item_widths(
+    LayoutContext* lycon, ViewBlock* container,
     bool row_flex, bool wrapping, int* item_count) {
     IntrinsicSizes sizes = {0.0f, 0.0f};
     if (item_count) *item_count = 0;
-    if (!lycon || !container || !contents) return sizes;
+    if (!lycon || !container) return sizes;
 
+    // speculative child styles must not commit or replace the caller's font/view.
+    LayoutFontScope font_scope(lycon);
+    LayoutViewScope view_scope(lycon);
+    radiant::LayoutRunModeScope run_mode_scope(lycon, radiant::RunMode::ComputeSize);
+    FontBox container_font = lycon->font;
     int capacity = layout_count_flattened_item_nodes(container, true);
     if (capacity <= 0) return sizes;
     ScratchScope scope(&lycon->scratch);
@@ -1690,7 +1698,27 @@ IntrinsicSizes flex_measure_display_contents_intrinsic_widths(
     if (!nodes) return sizes;
 
     int node_count = collect_flex_item_nodes(
-        lycon, container, contents->first_child, nodes, capacity, nullptr);
+        lycon, container, container->first_child, nodes, capacity, nullptr);
+    lycon->font = container_font;
+    lycon->view = lam::up(static_cast<View*>(container));
+    auto accumulate_item = [&](const IntrinsicSizes& contribution) {
+        if (row_flex) {
+            sizes.min_content = wrapping
+                ? max(sizes.min_content, contribution.min_content)
+                : sizes.min_content + contribution.min_content;
+            sizes.max_content += contribution.max_content;
+        } else {
+            sizes.min_content = max(sizes.min_content, contribution.min_content);
+            sizes.max_content = max(sizes.max_content, contribution.max_content);
+        }
+        if (item_count) (*item_count)++;
+    };
+    ViewElement* text_item = nullptr;
+    auto flush_text_item = [&]() {
+        if (!text_item) return;
+        accumulate_item(text_item->fi->intrinsic_width);
+        text_item = nullptr;
+    };
     for (int i = 0; i < node_count; i++) {
         DomNode* child = nodes[i];
         if (child->is_text()) {
@@ -1705,54 +1733,32 @@ IntrinsicSizes flex_measure_display_contents_intrinsic_widths(
             bool preserve_trailing_space = !text_is_whitespace &&
                 flex_text_has_collapsible_edge(child->as_text(), true) &&
                 flex_adjacent_flattened_text(child, container, true) != nullptr;
-            ViewElement* item = create_anonymous_flex_text_item(
+            // CSS Flexbox §4: adjacent flattened text belongs to one anonymous
+            // item, including runs exposed by separate contents pseudo-elements.
+            if (text_item && append_anonymous_flex_text_run(
+                    lycon, &scope.mark, text_item, child->as_text(), preserve_leading_space,
+                    preserve_trailing_space, text_is_whitespace)) {
+                continue;
+            }
+            flush_text_item();
+            text_item = create_anonymous_flex_text_item(
                 lycon, &scope.mark, container, child->as_text(), preserve_leading_space,
                 preserve_trailing_space, text_is_whitespace);
-            if (!item) continue;
-            if (row_flex) {
-                if (wrapping) {
-                    sizes.min_content = max(sizes.min_content,
-                        item->fi->intrinsic_width.min_content);
-                } else {
-                    sizes.min_content += item->fi->intrinsic_width.min_content;
-                }
-                sizes.max_content += item->fi->intrinsic_width.max_content;
-            } else {
-                sizes.min_content = max(sizes.min_content,
-                    item->fi->intrinsic_width.min_content);
-                sizes.max_content = max(sizes.max_content,
-                    item->fi->intrinsic_width.max_content);
-            }
-            if (item_count) (*item_count)++;
             continue;
         }
+        flush_text_item();
         if (!child->is_element()) continue;
 
-        init_flex_item_view(lycon, child);
-        ViewElement* item = lam::view_require_element(child);
-        if (!item || layout_element_is_display_none(item) ||
-            layout_block_is_out_of_flow_positioned(lam::view_as_block(item))) {
-            continue;
-        }
+        if (layout_element_is_abs_or_fixed(child->as_element())) continue;
         IntrinsicSizes child_sizes = measure_element_intrinsic_widths(
-            lycon, child->as_element(), true);
+            lycon, child->as_element());
         LayoutIntrinsicMarginPair margins = layout_intrinsic_horizontal_margin_pair(
             lycon, child->as_element(), {true, true, true, true, false});
         child_sizes.min_content += margins.left + margins.right;
         child_sizes.max_content += margins.left + margins.right;
-        if (row_flex) {
-            if (wrapping) {
-                sizes.min_content = max(sizes.min_content, child_sizes.min_content);
-            } else {
-                sizes.min_content += child_sizes.min_content;
-            }
-            sizes.max_content += child_sizes.max_content;
-        } else {
-            sizes.min_content = max(sizes.min_content, child_sizes.min_content);
-            sizes.max_content = max(sizes.max_content, child_sizes.max_content);
-        }
-        if (item_count) (*item_count)++;
+        accumulate_item(child_sizes);
     }
+    flush_text_item();
 
     return sizes;
 }
@@ -1808,7 +1814,7 @@ int collect_and_prepare_flex_items(LayoutContext* lycon,
                     // one anonymous item, including runs exposed by contents.
                     if (flex_item_is_anonymous_text(previous_item) &&
                         append_anonymous_flex_text_run(
-                            lycon, previous_item, child->as_text(),
+                            lycon, nullptr, previous_item, child->as_text(),
                             preserve_leading_space, preserve_trailing_space,
                             text_is_whitespace)) {
                         continue;

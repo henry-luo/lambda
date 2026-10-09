@@ -27,13 +27,25 @@ fn in_triangle(p, a, b, c) => cross(a, b, p) >= 0 and cross(b, c, p) >= 0 and cr
 fn on_segment(a, b, p) => cross(a, b, p) == 0 and p[0] >= min(a[0], b[0]) and p[0] <= max(a[0], b[0]) and
     p[1] >= min(a[1], b[1]) and p[1] <= max(a[1], b[1])
 
-fn intersects(a, b, c, d) {
+pub fn intersects(a, b, c, d) {
     let ac = cross(a, b, c);
     let ad = cross(a, b, d);
     let ca = cross(c, d, a);
     let cb = cross(c, d, b);
     (ac * ad < 0 and ca * cb < 0) or on_segment(a, b, c) or on_segment(a, b, d) or on_segment(c, d, a) or on_segment(c, d, b)
 }
+
+pub fn distance_segment(point, a, b) {
+    let length = (b[0]-a[0])**2 + (b[1]-a[1])**2;
+    let t = if (length == 0) 0.0 else max(0.0, min(1.0,
+        ((point[0]-a[0])*(b[0]-a[0])+(point[1]-a[1])*(b[1]-a[1])) / length));
+    let nearest = interpolate(a,b,t);
+    sqrt((point[0]-nearest[0])**2+(point[1]-nearest[1])**2)
+}
+
+pub fn contains_point(points, point) => len([for (i, a in points, let b=points[(i+1)%len(points)]
+    where (a[1]>point[1]) != (b[1]>point[1]) and point[0] <
+        (b[0]-a[0])*(point[1]-a[1])/(b[1]-a[1])+a[0]) true]) % 2 == 1
 
 pub fn simple_ring(points) => len([for (index in 0 to (len(points) - 2))
     for (other in (index + 2) to (len(points) - 2) where not (index == 0 and other == len(points) - 2) and
@@ -74,3 +86,7 @@ pub fn records(value) {
         else if (row.type != null and row.geometry == null) {geometry: row} else row]
     else value
 }
+
+// Ring relationships distinguish holes from independent closed subpaths during morphing.
+pub fn rings_intersect(a,b) => any([for (i,p in a) for (j,q in b)
+    intersects(p,a[(i+1)%len(a)],q,b[(j+1)%len(b)])])

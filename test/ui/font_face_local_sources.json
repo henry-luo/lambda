@@ -1,0 +1,42 @@
+{
+  "name": "Local font sources preserve ordered fallback",
+  "html": "test/ui/font_face_local_sources.html",
+  "viewport": {
+    "width": 400,
+    "height": 300
+  },
+  "events": [
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#local"
+      },
+      "width": 48,
+      "tolerance": 0.1
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#local-first"
+      },
+      "width": 48,
+      "tolerance": 0.1
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#url-first"
+      },
+      "width": 80,
+      "tolerance": 0.1
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#missing-first"
+      },
+      "width": 48,
+      "tolerance": 0.1
+    }
+  ]
+}

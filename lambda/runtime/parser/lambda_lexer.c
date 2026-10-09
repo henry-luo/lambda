@@ -305,7 +305,8 @@ bool lambda_lexer_word_bars_binding(const char* text, size_t length) {
     }
 }
 
-static bool lexer_scan_quoted(LambdaLexer* lexer, char quote, bool allow_newline) {
+static bool lexer_scan_quoted(LambdaLexer* lexer, char quote, bool allow_newline,
+        bool in_pattern) {
     lexer_advance_byte(lexer);
     bool any = false;
     while (lexer->offset < lexer->length) {
@@ -327,7 +328,8 @@ static bool lexer_scan_quoted(LambdaLexer* lexer, char quote, bool allow_newline
         }
         lexer_advance_byte(lexer);
         char escaped = lexer_peek(lexer, 0);
-        if (strchr("\"'\\/bfnrt", escaped)) {
+        if (strchr("\"'\\/bfnrt", escaped) ||
+                (in_pattern && escaped && strchr("dwsa", escaped))) {
             lexer_advance_byte(lexer);
             any = true;
             continue;
@@ -384,20 +386,15 @@ static bool lexer_backslash_is_relative_root(const LambdaLexer* lexer) {
 static bool lexer_scan_island(LambdaLexer* lexer) {
     if (lexer_peek(lexer, 0) != '\\') return false;
     lexer_advance_byte(lexer);
-    if (lexer_peek(lexer, 0) == '(') {
-        lexer_advance_byte(lexer);
-    } else {
-        if (!lexer_is_ident_start(lexer)) return false;
-        do { lexer_advance_ident_unit(lexer); } while (lexer_is_ident_continue(lexer));
-        if (lexer_peek(lexer, 0) != '(') return false;
-        lexer_advance_byte(lexer);
-    }
+    if (lexer_peek(lexer, 0) != '(') return false;
+    lexer_advance_byte(lexer);
 
     int depth = 1;
     while (lexer->offset < lexer->length && depth > 0) {
+        if (!lexer_skip_extras(lexer)) return false;
         char ch = lexer_peek(lexer, 0);
         if (ch == '"' || ch == '\'') {
-            if (!lexer_scan_quoted(lexer, ch, ch == '"')) return false;
+            if (!lexer_scan_quoted(lexer, ch, ch == '"', true)) return false;
             continue;
         }
         if (ch == '(') depth++;
@@ -553,7 +550,7 @@ LambdaToken lambda_lexer_next(LambdaLexer* lexer) {
 
     char ch = lexer_peek(lexer, 0);
     if (ch == '"' || ch == '\'') {
-        bool valid = lexer_scan_quoted(lexer, ch, ch == '"');
+        bool valid = lexer_scan_quoted(lexer, ch, ch == '"', false);
         return valid ? lexer_make_token(ch == '"' ? LAMBDA_TOK_STRING : LAMBDA_TOK_SYMBOL,
             start, line, column, lexer->offset) : lexer_error_token(lexer, start, line, column);
     }

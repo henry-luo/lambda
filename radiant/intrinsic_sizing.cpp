@@ -2460,9 +2460,10 @@ static bool intrinsic_pseudo_needs_intrinsic_materialization(DomElement* element
 
     CssEnum display = (CssEnum)0;
     if (!intrinsic_style_display_keyword(pseudo_styles, &display)) return false;
-    // Block-level generated boxes are real in-flow children for intrinsic sizing;
-    // deferring their materialization until normal layout drops their contribution.
-    return !intrinsic_pseudo_style_is_inline(pseudo_styles);
+    // flex measurement needs the same generated child sequence as layout;
+    // contents exposes text runs, while other pseudos generate separate items.
+    return intrinsic_element_display_matches(element, CSS_VALUE_FLEX, CSS_VALUE_INLINE_FLEX) ||
+        display == CSS_VALUE_CONTENTS || !intrinsic_pseudo_style_is_inline(pseudo_styles);
 }
 
 static bool intrinsic_list_item_has_table_ancestor(DomElement* element) {
@@ -2948,7 +2949,7 @@ static void intrinsic_record_first_inline_break(
 static float intrinsic_store_ratio_width_from_height(
         LayoutContext* lycon, DomElement* element, ViewBlock* view,
         float aspect_ratio, float height, bool minimum_height,
-        bool height_is_border_box, bool is_scroll_container,
+        bool height_is_border_box, bool is_scroll_container, bool content_only,
         IntrinsicSizes* sizes) {
     bool ratio_uses_border_box = !layout_aspect_ratio_uses_content_box(view) &&
         layout_uses_border_box(view);
@@ -2960,8 +2961,12 @@ static float intrinsic_store_ratio_width_from_height(
                layout_aspect_ratio_uses_content_box(view)) {
         ratio_height = layout_content_size_from_border_box(view, ratio_height, false);
     }
-    float aspect_width = layout_apply_min_max_axis(
-        view, ratio_height * aspect_ratio, true, layout_uses_border_box(view));
+    // an intrinsic inline limit must not constrain the content width used to resolve itself.
+    float aspect_width = ratio_height * aspect_ratio;
+    if (!content_only) {
+        aspect_width = layout_apply_min_max_axis(
+            view, aspect_width, true, layout_uses_border_box(view));
+    }
     bool width_is_border_box = ratio_uses_border_box ||
         (!layout_aspect_ratio_uses_content_box(view) &&
          intrinsic_view_uses_border_box(view, element));
@@ -2982,6 +2987,30 @@ static float intrinsic_store_ratio_width_from_height(
     return aspect_width;
 }
 
+// tier-3: layout-transient, valid within one measurement generation
+struct IntrinsicWidthCacheScope {
+    LayoutContext* lycon;
+    DomElement* element;
+    IntrinsicSizes& sizes;
+    uint32_t generation;
+    int basis;
+    radiant::IntrinsicWidthCacheEntry entry;
+    bool cacheable = true;
+
+    ~IntrinsicWidthCacheScope() {
+        if (!cacheable) return;
+        radiant::LayoutCache* cache = radiant::layout_pass_ensure_cache(lycon, element);
+        if (!cache) return;
+        // speculative style resolution is sufficient for this pass; table,
+        // grid and definite-size shortcuts must retain their complete result too.
+        entry.sizes = sizes;
+        entry.generation = generation;
+        entry.context.valid = true;
+        cache->intrinsic_widths[basis] = entry;
+        element->set_has_cached_intrinsic_widths(true);
+    }
+};
+
 IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement* element,
                                                 bool content_only) {
     IntrinsicSizes sizes = {0, 0};
@@ -2993,16 +3022,27 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
     // cannot reuse the normal intrinsic contribution for the same percentage basis.
     int intrinsic_basis = (content_only ? 2 : 0) +
         (intrinsic_percentage_width_is_indefinite(lycon) ? 1 : 0);
-    uint8_t intrinsic_basis_mask = (uint8_t)(1u << intrinsic_basis);
-    if (element->styles_resolved() && element->has_cached_intrinsic_widths() &&
-        element->layout_cache &&
-        (element->layout_cache->intrinsic_measurement_valid_mask & intrinsic_basis_mask) &&
-        element->layout_cache->intrinsic_measurement_generation[intrinsic_basis] ==
-            measurement_generation) {
+    // speculative percentages and replaced sizes depend on the actual containing
+    // dimensions and available space, even when both queries have a definite basis.
+    radiant::IntrinsicWidthCacheEntry query = {};
+    query.context.known_dimensions = {lycon->width, lycon->height, true, true};
+    query.context.available_space = lycon->available_space;
+    query.block_size = {lycon->block.content_width, lycon->block.content_height};
+    query.parent_size = {lycon->block.parent ? lycon->block.parent->content_width : -1.0f,
+                         intrinsic_parent_definite_height(lycon)};
+    radiant::IntrinsicWidthCacheEntry* cached = element->layout_cache
+        ? &element->layout_cache->intrinsic_widths[intrinsic_basis] : nullptr;
+    if (element->has_cached_intrinsic_widths() && cached &&
+        cached->generation == measurement_generation &&
+        radiant::layout_cache_constraints_match(&cached->context,
+            query.context.known_dimensions, query.context.available_space, 0.0f) &&
+        cached->block_size.width == query.block_size.width &&
+        cached->block_size.height == query.block_size.height &&
+        cached->parent_size.width == query.parent_size.width &&
+        cached->parent_size.height == query.parent_size.height) {
         radiant::layout_profiler_note_intrinsic_request(&lycon->profiler, true, false);
         assert(element->layout_cache);
-        return {element->layout_cache->intrinsic_min_content_width[intrinsic_basis],
-                element->layout_cache->intrinsic_max_content_width[intrinsic_basis]};
+        return cached->sizes;
     }
 
     if (element->measuring_intrinsic_width()) {
@@ -3012,6 +3052,8 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
     radiant::layout_profiler_note_intrinsic_request(&lycon->profiler, false, false);
     IntrinsicMeasureScope measure_scope(lycon, element);
     IntrinsicProfileScope profile_scope(lycon, element);
+    IntrinsicWidthCacheScope cache_scope = {
+        lycon, element, sizes, measurement_generation, intrinsic_basis, query};
 
     uint64_t t_measure_start = time_now_ns();
 
@@ -3461,7 +3503,8 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
         float intrinsic_width = remembered_width;
         // The remembered fragment width must replace hidden content's missing
         // max-content contribution before the containing multicol is sized.
-        return {intrinsic_width + padding_border, intrinsic_width + padding_border};
+        sizes = {intrinsic_width + padding_border, intrinsic_width + padding_border};
+        return sizes;
     }
     if (contain_intrinsic_width >= 0.0f && !contain_intrinsic_width_auto &&
         !has_definite_width) {
@@ -3470,7 +3513,8 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
         float intrinsic_width = contain_intrinsic_width + padding_border;
         // Size containment replaces descendant contributions with this synthetic box
         // in every intrinsic-width query, including flex and grid measurements.
-        return {intrinsic_width, intrinsic_width};
+        sizes = {intrinsic_width, intrinsic_width};
+        return sizes;
     }
     bool has_empty_size_containment =
         layout_block_has_size_containment_in_axis(resolved_width_view, true) &&
@@ -3487,7 +3531,8 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
             resolved_width_view, true) + padding_border;
         // An omitted fallback removes descendants from intrinsic sizing, while
         // preserving the box's own padding, borders, and fixed multicol tracks.
-        return {intrinsic_width, intrinsic_width};
+        sizes = {intrinsic_width, intrinsic_width};
+        return sizes;
     }
     bool can_use_definite_width = !content_only && !has_intrinsic_min_width &&
         !has_intrinsic_preferred_width && !has_intrinsic_max_width &&
@@ -3549,22 +3594,10 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
         layout_ensure_replaced_image_surface(lycon, view_block_for_aspect, element);
     }
     float aspect_ratio = layout_used_preferred_aspect_ratio(view_block_for_aspect);
-    if (aspect_ratio <= 0.0f && element->tag() == MARKUP_NAME_IMG) {
-        ImageSurface* image = layout_ensure_replaced_image_surface(
-            lycon, view_block_for_aspect, element);
-        if (image && image->width > 0 && image->height > 0) {
-            // An intrinsic preferred width stays symbolic until a definite height
-            // can transfer through the image's natural ratio.
-            aspect_ratio = (float)image->width / (float)image->height;
-        }
-    }
-    if (aspect_ratio <= 0.0f && element->tag() == MARKUP_NAME_CANVAS) {
-        float natural_width = 0.0f;
-        float natural_height = 0.0f;
-        if (layout_canvas_intrinsic_size(nullptr, view_block_for_aspect,
-                                         &natural_width, &natural_height)) {
-            aspect_ratio = natural_width / natural_height;
-        }
+    if (aspect_ratio <= 0.0f) {
+        // natural ratios, including a viewBox-only SVG, transfer a definite height into intrinsic width.
+        ReplacedIntrinsicFacts facts = layout_replaced_intrinsic_facts(lycon, view_block_for_aspect);
+        if (facts.has_natural_aspect_ratio) aspect_ratio = facts.natural_aspect_ratio;
     }
     float aspect_ratio_min_width = 0.0f;
     bool aspect_ratio_width_uses_border_box = false;
@@ -3707,7 +3740,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
             float aspect_width = intrinsic_store_ratio_width_from_height(
                 lycon, element, view_block_for_aspect, aspect_ratio, ratio_height,
                 false, layout_uses_border_box(view_block_for_aspect),
-                is_scroll_container, &sizes);
+                is_scroll_container, content_only, &sizes);
             if (!is_scroll_container && !layout_element_is_replaced(element) &&
                 element_has_in_flow_intrinsic_content(element)) {
                 // A non-replaced preferred ratio is an intrinsic-width floor;
@@ -3725,7 +3758,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                 // but its definite min-height still transfers through the ratio.
                 float aspect_width = intrinsic_store_ratio_width_from_height(
                     lycon, element, view_block_for_aspect, aspect_ratio, min_height,
-                    true, false, is_scroll_container, &sizes);
+                    true, false, is_scroll_container, content_only, &sizes);
                 if (!is_scroll_container && !layout_element_is_replaced(element) &&
                     element_has_in_flow_intrinsic_content(element)) {
                     aspect_ratio_min_width = aspect_width;
@@ -4408,6 +4441,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
             float* col_max = num_columns > 0 ? col_scope.array_zero<float>(num_columns) : nullptr;
             if (num_columns > 0 && (!col_min || !col_max)) {
                 log_error("measure_element_intrinsic_widths: failed to allocate %d table column widths", num_columns);
+                cache_scope.cacheable = false;
                 return sizes;
             }
 
@@ -4874,7 +4908,8 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                 }
             }
 
-            return {total_min, total_max};
+            sizes = {total_min, total_max};
+            return sizes;
         }
     }
 
@@ -4906,6 +4941,8 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
         // CSS Flexbox §9.9.1: for wrapping flex containers, min-content main size is the
         // largest flex item's min-content contribution (not the sum).
         is_flex_wrap = is_row_flex && flex_style.wrapping;
+        sizes = flex_measure_intrinsic_item_widths(
+            lycon, view_block, is_row_flex, is_flex_wrap, &flex_child_count);
     }
     // Measure children recursively
     bool explicit_box_decoration_inline =
@@ -4918,12 +4955,11 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
             break;
         }
     }
-    for (DomNode* child = element->first_child; child; child = child->next_sibling) {
+    for (DomNode* child = is_flex_container ? nullptr : element->first_child;
+         child; child = child->next_sibling) {
         IntrinsicSizes child_sizes = {0, 0};
         bool is_inline = false;
         bool child_is_float = false;
-        bool child_is_flex_contents = false;
-        int flattened_flex_child_count = 0;
 
         if (child->is_element() &&
             layout_marker_is_outside(static_cast<View*>(child->as_element()))) {
@@ -5183,14 +5219,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                 continue;
             }
 
-            DisplayValue child_display = resolve_display_value(child_elem);
-            child_is_flex_contents = is_flex_container &&
-                child_display.outer == CSS_VALUE_CONTENTS;
-            child_sizes = child_is_flex_contents
-                ? flex_measure_display_contents_intrinsic_widths(
-                    lycon, view_block, child_elem, is_row_flex, is_flex_wrap,
-                    &flattened_flex_child_count)
-                : measure_element_intrinsic_widths(lycon, child_elem);
+            child_sizes = measure_element_intrinsic_widths(lycon, child_elem);
             if (is_grid_container) {
                 // Auto-track grids use the normal child walk; retain the grid
                 // item's explicit minimum in that path as well.
@@ -5252,57 +5281,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
             }
         }
 
-        // Handle flex container children - all children become flex items
-        // In a flex container, both text and element children are flex items
-        // They should NOT go through the inline content path
-        if (is_flex_container) {
-            // CSS Flexbox §4: Absolutely positioned children are out-of-flow
-            // and do not participate in flex layout or contribute to intrinsic size
-            if (child->is_element() && !child_is_flex_contents) {
-                DomElement* child_elem = child->as_element();
-                ViewBlock* child_block = lam::unsafe_view_block_element_storage(child_elem);
-                bool child_is_absolute = false;
-                if (layout_block_is_out_of_flow_positioned(child_block)) {
-                    child_is_absolute = true;
-                } else if (child_elem->specified_style) {
-                    child_is_absolute = layout_element_is_abs_or_fixed(child_elem);
-                }
-                if (child_is_absolute) {
-                    continue;
-                }
-            }
-
-            // CSS Flexbox §9.9.1: Flex item intrinsic contributions include
-            // the item's outer size (content + padding + border + margin).
-            // Add flex item margins to child_sizes before accumulating.
-            if (child->is_element() && !child_is_flex_contents) {
-                DomElement* child_elem = child->as_element();
-                LayoutIntrinsicMarginPair margins =
-                    layout_intrinsic_horizontal_margin_pair(lycon, child_elem,
-                        {true, true, true, true, false});
-                child_sizes.min_content += margins.left + margins.right;
-                child_sizes.max_content += margins.left + margins.right;
-            }
-
-            if (is_row_flex) {
-                // Row flex: for wrapping containers, min-content is the largest item
-                // (CSS Flexbox §9.9.1). For nowrap, sum all items.
-                if (is_flex_wrap) {
-                    sizes.min_content = max(sizes.min_content, child_sizes.min_content);
-                } else {
-                    sizes.min_content += child_sizes.min_content;
-                }
-                sizes.max_content += child_sizes.max_content;
-                flex_child_count += child_is_flex_contents
-                    ? flattened_flex_child_count : 1;
-            } else {
-                // Column flex: take max of widths
-                sizes.min_content = max(sizes.min_content, child_sizes.min_content);
-                sizes.max_content = max(sizes.max_content, child_sizes.max_content);
-                flex_child_count += child_is_flex_contents
-                    ? flattened_flex_child_count : 1;
-            }
-        } else if (is_inline) {
+        if (is_inline) {
             // For inline content, sum widths for max-content (no wrapping)
             // and take max of min-content (can wrap between items)
             has_inline_content = true;
@@ -6009,18 +5988,6 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
 
     if (intrinsic_list_item_scope) {
         counter_pop_scope_propagate(lycon->counter_context, true);
-    }
-
-    // store result in intrinsic sizing cache
-    if (element->styles_resolved()) {
-        radiant::LayoutCache* cache = radiant::layout_pass_ensure_cache(lycon, element);
-        if (cache) {
-            cache->intrinsic_min_content_width[intrinsic_basis] = sizes.min_content;
-            cache->intrinsic_max_content_width[intrinsic_basis] = sizes.max_content;
-            cache->intrinsic_measurement_generation[intrinsic_basis] = measurement_generation;
-            cache->intrinsic_measurement_valid_mask |= intrinsic_basis_mask;
-            element->set_has_cached_intrinsic_widths(true);
-        }
     }
 
     double measure_ms = time_elapsed_ms_f(t_measure_start, time_now_ns());

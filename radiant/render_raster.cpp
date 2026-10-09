@@ -13,14 +13,16 @@ ScaleMode render_image_scale_mode(const ViewSpan* view, bool repeating) {
     return repeating ? SCALE_MODE_LINEAR_WRAP : SCALE_MODE_LINEAR;
 }
 
-static void raster_fill_row(uint8_t* pixels, int x, int wd, uint32_t color) {
+static void raster_fill_row(uint8_t* pixels, int x, int wd, uint32_t color, ImageAlphaMode alpha_mode) {
     uint32_t* pixel = (uint32_t*)pixels + x;
     uint32_t* end = pixel + wd;
     uint8_t src_a = (color >> 24) & 0xFF;
     if (src_a == 0) return;
     while (pixel < end) {
-        *pixel = src_a == 255 ? color :
-            render_pixel_source_over_opaque(*pixel, color);
+        // Isolated effect regions start transparent even on a window surface.
+        *pixel = src_a == 255 ? color : alpha_mode == IMAGE_ALPHA_PREMULTIPLIED
+            ? render_pixel_source_over_premultiplied_pair(*pixel, render_pixel_premultiply_abgr(color))
+            : render_pixel_source_over_straight(*pixel, color, 255);
         pixel++;
     }
 }
@@ -61,7 +63,7 @@ void raster_fill_rect(RasterPaintContext* ctx, Rect* rect, uint32_t color) {
         }
         if (rl >= rr) continue;
         uint8_t* row_pixels = (uint8_t*)surface->pixels + (i - y_off) * surface->pitch;
-        raster_fill_row(row_pixels, rl, rr - rl, color);
+        raster_fill_row(row_pixels, rl, rr - rl, color, surface->alpha_mode);
     }
 }
 
@@ -126,9 +128,9 @@ static int raster_pixelated_source_index(float intermediate_index, float multipl
 }
 
 static uint32_t raster_pixelated_sample(ImageSurface* src, const Rect* src_rect,
-                                        const Rect* dst_rect, int dst_x, int dst_y,
+                                        const Rect* dst_rect, float dst_x, float dst_y,
                                         int src_w, int src_h,
-                                        float x_multiple, float y_multiple) {
+                                        float x_multiple, float y_multiple, bool premultiply = false) {
     // Sample the virtual nearest-neighbor integer-multiple image through the
     // shared bilinear mixer, so noninteger final scales blend only at pixel edges.
     float ix = (dst_x - dst_rect->x + 0.5f) *
@@ -151,7 +153,118 @@ static uint32_t raster_pixelated_sample(ImageSurface* src, const Rect* src_rect,
     const uint8_t* p12 = pixels + (size_t)sy1 * src->pitch + sx0 * 4;
     const uint8_t* p22 = pixels + (size_t)sy1 * src->pitch + sx1 * 4;
     return render_pixel_bilinear_mix(p11, p21, p12, p22,
-                                     ix - ix0, iy - iy0, false);
+                                     ix - ix0, iy - iy0, false, premultiply);
+}
+
+bool render_image_project_pixels(const uint32_t* pixels, int width, int height, int stride,
+    Rect destination, const RdtMatrix* transform, Rect viewport, ScaleMode mode,
+    bool straight_alpha, uint32_t** output, Rect* output_rect, const Rect* repeated_tile) {
+    if (!output || !output_rect) return false;
+    *output = nullptr; *output_rect = {};
+    if (!pixels || width <= 0 || height <= 0 || stride < width ||
+        destination.width <= 0 || destination.height <= 0 ||
+        (repeated_tile && (repeated_tile->width <= 0 || repeated_tile->height <= 0))) return false;
+    RdtMatrix matrix = transform ? *transform : rdt_matrix_identity(), inverse;
+    if (!rdt_matrix_inverse(&matrix, &inverse)) return true;
+    float left, top, right, bottom;
+    if (!rdt_matrix_project_rect_bounds(&matrix, destination.x, destination.y,
+        destination.x + destination.width, destination.y + destination.height, &left, &top, &right, &bottom)) {
+        // A viewer-plane crossing is unbounded before clipping. Inverse-map
+        // only the viewport and reject samples on the hidden side below.
+        left = viewport.x; top = viewport.y;
+        right = viewport.x + viewport.width; bottom = viewport.y + viewport.height;
+    }
+    left = fmaxf(viewport.x, floorf(left)); top = fmaxf(viewport.y, floorf(top));
+    right = fminf(viewport.x + viewport.width, ceilf(right));
+    bottom = fminf(viewport.y + viewport.height, ceilf(bottom));
+    if (right <= left || bottom <= top) return true;
+    int out_w = (int)(right - left), out_h = (int)(bottom - top); // INT_CAST_OK: bounded raster buffer dimensions
+    if ((size_t)out_w > SIZE_MAX / sizeof(uint32_t) / (size_t)out_h) return false;
+    uint32_t* projected = (uint32_t*)mem_calloc((size_t)out_w * out_h, sizeof(uint32_t), MEM_CAT_RENDER);
+    if (!projected) return false;
+    lam::Temp<uint32_t> prepared;
+    if (straight_alpha && (size_t)width <= SIZE_MAX / sizeof(uint32_t) / (size_t)height &&
+        (size_t)width * height <= (size_t)out_w * out_h * 4) {
+        // Expand alpha once per source texel when projection will reuse it.
+        // This preserves the sampler's byte rounding and avoids four conversions per pixel.
+        prepared.reset((uint32_t*)mem_alloc((size_t)width * height * sizeof(uint32_t), MEM_CAT_RENDER));
+        if (prepared) {
+            for (int row = 0; row < height; row++)
+                memcpy(prepared.get() + (size_t)row * width, pixels + (size_t)row * stride,
+                    (size_t)width * sizeof(uint32_t));
+            ImageSurface source_copy = {};
+            source_copy.width = width; source_copy.height = height;
+            source_copy.pitch = width * 4; source_copy.pixels = prepared.get();
+            premultiply_surface_region(&source_copy, 0, 0, width, height);
+            pixels = prepared.get(); stride = width; straight_alpha = false;
+        }
+    }
+    ImageSurface source = {};
+    source.width = width; source.height = height; source.pitch = stride * 4; source.pixels = (void*)pixels;
+    Rect source_rect = {0, 0, (float)width, (float)height};
+    Rect sampling_rect = repeated_tile ? *repeated_tile : destination;
+    float multiple_x = fmaxf(1, ceilf(sampling_rect.width / width));
+    float multiple_y = fmaxf(1, ceilf(sampling_rect.height / height));
+    auto project_rows = [&](int row_begin, int row_end) {
+        for (int row = row_begin; row < row_end; row++) {
+            for (int column = 0; column < out_w; column++) {
+                float x = left + column + 0.5f, y = top + row + 0.5f;
+                float w = inverse.e31 * x + inverse.e32 * y + inverse.e33;
+                if (fabsf(w) <= 0.000001f) continue;
+                float u = (inverse.e11 * x + inverse.e12 * y + inverse.e13) / w;
+                float v = (inverse.e21 * x + inverse.e22 * y + inverse.e23) / w;
+                if (!isfinite(u) || !isfinite(v) || u < destination.x || v < destination.y ||
+                    u >= destination.x + destination.width || v >= destination.y + destination.height ||
+                    matrix.e31 * u + matrix.e32 * v + matrix.e33 <= 0.00001f) continue;
+                if (repeated_tile) {
+                    // Fold in plane coordinates, before filtering: large repeated
+                    // backgrounds need one viewport-sized projection, not one per tile.
+                    u = fmodf(u - sampling_rect.x, sampling_rect.width);
+                    v = fmodf(v - sampling_rect.y, sampling_rect.height);
+                    if (u < 0) u += sampling_rect.width;
+                    if (v < 0) v += sampling_rect.height;
+                    u += sampling_rect.x; v += sampling_rect.y;
+                }
+                float sx = (u - sampling_rect.x) * width / sampling_rect.width;
+                float sy = (v - sampling_rect.y) * height / sampling_rect.height;
+                uint32_t sample;
+                if (mode == SCALE_MODE_NEAREST) {
+                    int ix = min(width - 1, (int)floorf(sx)), iy = min(height - 1, (int)floorf(sy)); // INT_CAST_OK: validated source pixel indices
+                    sample = pixels[(size_t)iy * stride + ix];
+                    if (straight_alpha) sample = render_pixel_premultiply_abgr(sample);
+                } else if (mode == SCALE_MODE_PIXELATED) {
+                    sample = raster_pixelated_sample(&source, &source_rect, &sampling_rect, u - 0.5f, v - 0.5f,
+                        width, height, multiple_x, multiple_y, straight_alpha);
+                } else {
+                    sample = render_pixel_sample_bilinear((const uint8_t*)pixels, width, height, stride * 4,
+                        sx - 0.5f, sy - 0.5f, mode == SCALE_MODE_LINEAR_WRAP, true, straight_alpha);
+                }
+                projected[(size_t)row * out_w + column] = sample;
+            }
+    }
+    };
+    bool dispatched = false;
+    if ((size_t)out_w * out_h >= (size_t)TILE_SIZE_CSS * TILE_SIZE_CSS) {
+        // Reuse the render workers for disjoint scanlines. The closure and job
+        // arguments stay on this stack until synchronous dispatch has joined.
+        using ProjectRows = decltype(project_rows);
+        struct ProjectRowJob { ProjectRows* rows; int begin, end; };
+        ProjectRowJob ranges[8];
+        TileJob jobs[8] = {};
+        int count = min(8, out_h);
+        for (int i = 0; i < count; i++) {
+            ranges[i] = {&project_rows, out_h * i / count, out_h * (i + 1) / count};
+            jobs[i].work_context = &ranges[i];
+            jobs[i].work = [](void* argument) {
+                auto* range = (ProjectRowJob*)argument;
+                (*range->rows)(range->begin, range->end);
+            };
+        }
+        dispatched = render_output_dispatch_jobs(jobs, count) > 0;
+    }
+    if (!dispatched) project_rows(0, out_h);
+    *output = projected; *output_rect = {left, top, (float)out_w, (float)out_h};
+    return true;
 }
 
 void raster_blit_surface_scaled(RasterPaintContext* ctx, ImageSurface* src, Rect* src_rect,

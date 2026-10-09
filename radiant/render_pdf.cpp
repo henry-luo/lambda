@@ -4,6 +4,7 @@
 #include "view.hpp"
 #include "layout.hpp"
 #include "layout_paged.hpp"
+#include "page_document.hpp"
 #include "radiant.hpp"
 
 #include "../lib/tagged.hpp"
@@ -656,14 +657,15 @@ static void pdf_finish_effect_raster_fallback(PdfRenderContext* ctx) {
 }
 
 static bool pdf_push_clip_path(PdfRenderContext* ctx, RdtPath* path,
-                               const RdtMatrix* transform) {
+                               const RdtMatrix* transform, RdtFillRule rule = RDT_FILL_WINDING) {
     if (!ctx || !path) return false;
     if (HPDF_Page_GSave(ctx->current_page) != HPDF_OK) return false;
     if (!pdf_render_path(ctx, path, transform)) {
         HPDF_Page_GRestore(ctx->current_page);
         return false;
     }
-    if (HPDF_Page_Clip(ctx->current_page) != HPDF_OK) {
+    if ((rule == RDT_FILL_EVEN_ODD ? HPDF_Page_Eoclip(ctx->current_page) :
+        HPDF_Page_Clip(ctx->current_page)) != HPDF_OK) {
         HPDF_Page_GRestore(ctx->current_page);
         return false;
     }
@@ -1054,7 +1056,7 @@ static void pdf_lower_paint_list(PdfRenderContext* ctx, PaintList* commands) {
                     return true;
                 }
                 if (pdf_push_clip_path(ctx, p->clip_path,
-                                       effective_transform)) {
+                                       effective_transform, p->rule)) {
                     active_clip_depth++;
                 } else {
                     skipped_clip_depth++;
@@ -1937,8 +1939,22 @@ static bool pdf_secondary_page(ViewTree* tree, const ViewPageBox* page,
         const ViewPagePlacement*, void* context) {
     PdfRenderContext* ctx = (PdfRenderContext*)context;
     // CSS reference pixels are 1/96 inch; PDF points are 1/72 inch.
-    if (!pdf_page_begin(ctx, page->node.rect.width, page->node.rect.height, 72.0f / 96.0f) ||
-        !layout_secondary_paint_page(tree, page, &ctx->paint_list) ||
+    if (!pdf_page_begin(ctx, page->node.rect.width, page->node.rect.height, 72.0f / 96.0f)) return false;
+    if (page->fixed && page->fixed->label &&
+        HPDF_Page_SetLabel(ctx->current_page, page->fixed->label) != HPDF_OK) return false;
+    if (page->fixed && page->fixed->geometry.box_mask) {
+        const RadiantFixedGeometry& geometry = page->fixed->geometry;
+        static const HPDF_PageBox kinds[] = {HPDF_PAGE_BOX_MEDIA, HPDF_PAGE_BOX_CROP,
+            HPDF_PAGE_BOX_BLEED, HPDF_PAGE_BOX_TRIM, HPDF_PAGE_BOX_ART};
+        for (size_t i = 0; i < RADIANT_SOURCE_BOX_COUNT; i++) if (geometry.box_mask & (1u << i)) {
+            const RdtLogicalRect& box = geometry.boxes[i];
+            if (HPDF_Page_SetBox(ctx->current_page, kinds[i], box.x, box.y, box.x + box.width, box.y + box.height) != HPDF_OK) return false;
+        }
+        RdtMatrix matrix = radiant_fixed_page_source_transform(&geometry);
+        if (HPDF_Page_SetRotate(ctx->current_page, geometry.rotation) != HPDF_OK ||
+            HPDF_Page_Concat(ctx->current_page, matrix.e11, matrix.e21, matrix.e12, matrix.e22, matrix.e13, matrix.e23) != HPDF_OK) return false;
+    }
+    if (!layout_secondary_paint_page(tree, page, &ctx->paint_list) ||
         !paint_ir_validate_or_log(&ctx->paint_list, "pdf secondary page")) return false;
     for (LayoutViewNode* child = page->node.first_child; child; child = child->next_sibling)
         pdf_record_fragment_semantics(ctx, tree->model->document, child);

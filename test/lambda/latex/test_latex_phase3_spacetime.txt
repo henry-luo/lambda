@@ -6,5 +6,6 @@
   valid_strokes: true,
   colored_curve: true,
   arrows: true,
-  path_count: 105
+  path_count: 103,
+  text_count: 2
 }
