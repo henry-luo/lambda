@@ -503,8 +503,8 @@ The default is bundled CMU Serif, with existing CMU style faces and small
 KaTeX symbol/alphabet faces. Noto Sans Math remains a MATH-table test fixture
 under `test/lambda/math/fonts`. Explicit binary font snapshots keep resource
 acquisition in Lambda IO.
-SVG carries the measured glyph outlines, so downstream font substitution cannot
-change geometry. Chart measurement uses direct text records. Phase 12 removes
+SVG originally carried measured glyph outlines; the RAD07-L3 revision below
+preserves native text painting with embedded fonts. Chart measurement uses direct text records. Phase 12 removes
 the transitional `mathlive.ls` adapter and its fixed `metrics_data` tables.
 
 Validation (2026-10-09): all 78 selected math/LaTeX/metrics/editor integration
@@ -524,8 +524,31 @@ Limits: direct text measurement shares the current SVG placement/shaping
 capabilities; it adds no shaping engine. MATH accents with a finite variant set
 stop at the largest supplied variant. Ordinary faces without constructions
 use geometric outline stretching, which can change stroke weights.
-Font caches are query-local, and math
-outlines trade selectable text for deterministic measured/painted geometry.
+Font caches are query-local. **RAD07-L3** (2026-10-09) changes ordinary math
+glyphs to SVG `<text>` with explicit resolved family, weight, style and size.
+Used bundled/supplied faces accompany each SVG as embedded `@font-face` rules;
+installed-font options require the same fonts in the viewer. Unencoded MATH
+variants/assembly pieces retain paths because standard SVG text cannot address
+a font-local glyph ID. Geometric stretching and rules remain unchanged.
+The native metrics response copies the resolved style alongside geometry
+(**D4.2.2v2**); resource acquisition remains in Lambda IO (**D7.1.2v2**).
+
+The pixel audit found CMU italic paths have about 21–24% less ink than native
+Chrome text at 16px. Radiant now rasterizes eligible SVG text at its final
+visible font size using the normal glyph compositor, including uniform
+viewBox/device scaling. Retained rendering owns the glyph pixels after
+temporary font contexts die. Rotation, skew, nonuniform stretch, paint servers,
+strokes and vector export retain geometry. The same-font 16px SVG text sample
+changed from −20.15%/−23.24% ink versus Chrome to +4.53%/+2.25% at 1×/2×.
+See [RAD07-L3](radiant/Radiant_Issue_Ledger.md#rad07-l3) for the audit and limits.
+Embedding full font resources increases standalone SVG size; no subset-font
+generator is introduced. Editor Markdown projections retain generated font
+declarations after sanitizing authored HTML. Native SVG tests (10), the math
+corpus (921), and two document-math UI cases pass. The broader gates retain
+a LaTeX corpus timeout, paged-layout failure and an interpreter round-trip
+corruption reproduced with the pre-change renderer under forced GC; see
+RAD07-L3 for exact checks and limitations. Full baseline acceptance is not
+claimed.
 SVG titles retain the source expression. The Phase 1–10 acceptance criteria
 below describe the historical MathLive adapter; Phases 11–12 use the font and
 SVG gates instead.

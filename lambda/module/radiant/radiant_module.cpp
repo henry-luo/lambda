@@ -3691,6 +3691,17 @@ static Item radiant_math_glyph_geometry(FontHandle* font, uint16_t glyph, const 
         bool ink = rdt_path_get_bounds(path, &bounds.left, &bounds.top, &bounds.right, &bounds.bottom);
         result.set(radiant_obj_new());
         radiant_rooted_obj_set(result, "glyph", radiant_int_item(glyph));
+        const char* family = nullptr;
+        float size = 0.0f;
+        FontWeight weight = FONT_WEIGHT_NORMAL;
+        FontSlant slant = FONT_SLANT_NORMAL;
+        font_handle_get_style(font, &family, &size, &weight, &slant);
+        // text painting must retain the resolved face, including style fallback.
+        radiant_rooted_obj_set(result, "font_family", radiant_string_item(family));
+        radiant_rooted_obj_set(result, "font_size", radiant_float_item(size));
+        radiant_rooted_obj_set(result, "font_weight", radiant_int_item(weight));
+        radiant_rooted_obj_set(result, "font_style", radiant_string_item(slant == FONT_SLANT_ITALIC ? "italic" :
+            slant == FONT_SLANT_OBLIQUE ? "oblique" : "normal"));
         radiant_rooted_obj_set(result, "advance", radiant_float_item(advance));
         radiant_rooted_obj_set(result, "ink", ink ? radiant_text_bounds(&bounds) : ItemNull);
         radiant_rooted_obj_set(result, "path", radiant_string_item(svg->str));
@@ -3755,9 +3766,6 @@ static Item radiant_math_glyph_record(FontHandle* font, const FontMathTable* mat
     radiant_rooted_obj_set(result, "codepoint", radiant_int_item(codepoint));
     radiant_rooted_obj_set(result, "extended", radiant_bool_item(info.extended));
     radiant_rooted_obj_set(result, "has_math", radiant_bool_item(math != nullptr));
-    const char* family = nullptr;
-    font_handle_get_style(font, &family, nullptr, nullptr, nullptr);
-    radiant_rooted_obj_set(result, "font_family", radiant_string_item(family));
     const char* corners[] = {"top_right", "top_left", "bottom_right", "bottom_left"};
     for (unsigned corner = 0; corner < 4; corner++) {
         const FontMathTable* kern = &info.kern[corner];

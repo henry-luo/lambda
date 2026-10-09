@@ -1,4 +1,4 @@
-// Math5 Phase 11: ordinary faces use their own outlines and normal font metrics.
+// Math5: ordinary faces keep their measured metrics and SVG text font identity.
 import math: lambda.doc.math.math
 import stretch: lambda.doc.math.stretch
 import font: lambda.doc.math.font
@@ -48,9 +48,10 @@ let default_rendered = [for (source in formulas) math.render_box(ast(source))]
 let checks = [
     {name: "ordinary face has no MATH", ok: native.has_math == false and native.constants == null},
     {name: "normal advances retained", ok: close(plain.width, native.glyphs[0].advance / 1000)},
-    {name: "normal outline retained", ok: descendants(plain.element, 'path')[0].d == native.glyphs[0].path},
-    {name: "math italic uses ordinary italic face", ok: descendants(variable.element, 'path')[0].d == italic.glyphs[0].path and italic.glyphs[0].path != native.glyphs[0].path},
-    {name: "math bold uses ordinary bold face", ok: descendants(heavy.element, 'path')[0].d == bold.glyphs[0].path},
+    {name: "ordinary glyph is text", ok: content(descendants(plain.element, 'text')[0])[0] == "x" and len(descendants(plain.element, 'path')) == 0},
+    {name: "math italic uses ordinary italic face", ok: descendants(variable.element, 'text')[0]["font-style"] == "italic" and
+        descendants(variable.element, 'text')[0]["font-family"] == "OrdinarySerif"},
+    {name: "math bold uses ordinary bold face", ok: descendants(heavy.element, 'text')[0]["font-weight"] == 700},
     {name: "different ordinary font changes width", ok: sans.width != plain.width},
     {name: "fallback rule uses font underline thickness", ok: close(rule.height, native.font_metrics.underline_thickness)},
     {name: "fallback axis uses measured x height", ok: close(rule.y + rule.height / 2, 0 - native.font_metrics.x_height / 2)},
@@ -61,7 +62,8 @@ let checks = [
     {name: "installed ordinary font without snapshots", ok: math.render_box(ast("x^2+\\frac{a}{b}"), {font_family: "sans-serif"}).width > 0},
     {name: "default face needs no MATH table", ok: default_profile.facts.has_math == false and
         default_profile.family == native.font_family},
-    {name: "default variable uses bundled italic outline", ok: descendants(default_x.element, 'path')[0].d == italic.glyphs[0].path},
+    {name: "default variable uses bundled italic text", ok: descendants(default_x.element, 'text')[0]["font-family"] == bundled.FAMILY and
+        descendants(default_x.element, 'text')[0]["font-style"] == "italic" and len(descendants(default_x.element, 'style')) == 1},
     {name: "default rule uses ordinary metrics", ok: close(default_rule.height, native.font_metrics.underline_thickness)},
     {name: "default operators reuse bundled glyphs", ok: default_sum.has_math == false and
         default_sum.path == bundled_facts.glyphs[0].path and default_sum.font_family == "KaTeX_Size1" and

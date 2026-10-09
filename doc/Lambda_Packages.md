@@ -714,7 +714,7 @@ lambda render arch.dsl -o containers.svg --view-key Containers   # one Structuri
 ## 6. `math` — Math Typesetting
 
 The math package typesets a parsed math tree as self-contained inline SVG,
-using the selected font's glyph outlines and optional OpenType MATH data. The default reuses
+using SVG text with the selected font and optional OpenType MATH data (**RAD07-L3**). The default reuses
 bundled CMU Serif and the existing small KaTeX symbol/alphabet faces; geometry
 comes directly from those fonts. No new font asset is distributed.
 [Math_Support.md §2](Math_Support.md#2-rendering-math-to-html) documents the API.
@@ -725,7 +725,7 @@ import math: lambda.doc.math.math
 let ast = parse("\\sqrt{x^2 + 1}", 'math')^
 let el = math.render_display(ast)
 el.class                              // "lambda-math"
-contains(format(el, 'html'), "<path") // true
+contains(format(el, 'html'), "<text") // true
 ```
 
 | Function | Description |
@@ -736,20 +736,24 @@ contains(format(el, 'html'), "<path") // true
 | `render_inline(ast)` | Inline (text) style |
 | `render_display(ast)` | Display (block) style |
 | `render_standalone(ast)` | Self-contained display style SVG |
-| `stylesheet(options = null)` | Returns `""`; outlined math requires no external font CSS |
+| `stylesheet(options = null)` | Returns `""`; each SVG embeds its required font declarations |
 
 `fonts` uses the same binary face records as Radiant's metrics API. An explicit
 `font_family` without `fonts` uses installed fonts. MATH is optional: ordinary
 fonts use their measured geometry and MathML Core fallback layout constants;
 italic/bold letters resolve the corresponding ordinary style faces when the
 Unicode math alphabet is absent. Symbols missing from the face use normal
-font fallback, measuring and emitting the resolved glyph's own outline.
+font fallback, retaining the resolved face and style in SVG text. Bundled and
+supplied font bytes are embedded as `@font-face` rules for the faces actually
+used. Unencoded OpenType stretch variants and assembly parts retain paths;
+rules remain rectangles. Explicit installed fonts must also be available to
+the viewer.
 `radiant.math_metrics(font, codepoints, faces)` exposes copied glyph
 metrics/outlines and normal `font_metrics` for every usable face. `has_math`
 reports table availability; `constants` is `null` when absent. When available,
 it additionally exposes MATH constants, italic corrections, accent attachments,
 corner kerns, variants and assembly connectors. `font.fallback: true` enables
-codepoint fallback (off by default), and each glyph reports its actual family.
+codepoint fallback (off by default), and each glyph reports its actual family, weight, style and size.
 Invalid font data returns `null`; a codepoint with no glyph returns a null entry.
 Distances use the requested CSS pixel size; MATH percentages remain percentages.
 Algorithms stay in Lambda and font parsing stays in `lib/font` (**D7.1.1**).
@@ -798,7 +802,7 @@ name(page)                               // 'html'
 | `render_file_to_html(path)` | Parses a LaTeX file and returns an HTML string |
 | `render_string(source)`, `render_string_to_html(source)` | Meant to render LaTeX source text; see the note below |
 
-`options` may be `null`. `standalone` selects a complete page; `base_uri` resolves relative graphics and bibliography resources; `target: "pdf"` or `target: "svg"` enables output-specific diagnostics. The file entry points derive `base_uri` from the file path. Parsed-document CLI transforms receive a neutral `source_path` option from the host, which the LaTeX package uses as the resource base when `base_uri` is absent (**D7.1.2v2**). The document class comes from `\documentclass` in the source. On the command line, `lambda convert paper.tex -t html -o paper.html` writes the rendered body without the LaTeX stylesheets, `--full-document` writes the standalone page instead, and the legacy `--font-option` switch does not change outlined math; `lambda view`, `layout` and `render` always render the standalone page.
+`options` may be `null`. `standalone` selects a complete page; `base_uri` resolves relative graphics and bibliography resources; `target: "pdf"` or `target: "svg"` enables output-specific diagnostics. The file entry points derive `base_uri` from the file path. Parsed-document CLI transforms receive a neutral `source_path` option from the host, which the LaTeX package uses as the resource base when `base_uri` is absent (**D7.1.2v2**). The document class comes from `\documentclass` in the source. On the command line, `lambda convert paper.tex -t html -o paper.html` writes the rendered body without the LaTeX stylesheets, `--full-document` writes the standalone page instead, and the legacy `--font-option` switch does not change the math package's font selection; `lambda view`, `layout` and `render` always render the standalone page.
 
 `render_string` and `render_string_to_html` parse source text directly. For resources referenced from a source string, parse it and call `render` or `render_result` with an explicit `base_uri`.
 

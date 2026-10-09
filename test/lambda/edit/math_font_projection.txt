@@ -1,0 +1,2 @@
+"math projection isolation:"
+[true, true, true]

@@ -16,5 +16,6 @@ let output = html.to_html(result.elements)
         index_of(output, "stroke=\"thick\"") == null,
     colored_curve: index_of(output, "rgb(78,154,6)") != null,
     arrows: index_of(output, " Z\"") != null,
-    path_count: len(split(output, "<path")) - 1
+    path_count: len(split(output, "<path")) - 1,
+    text_count: len(split(output, "<text")) - 1
 }

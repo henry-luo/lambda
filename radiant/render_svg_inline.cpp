@@ -5347,24 +5347,40 @@ static uint32_t svg_text_sample_color_warp(void* data, float x, float y) {
         sample->bitmap->height, sample->bitmap->pitch, px - .5f, py - .5f, false, true);
 }
 
-static void svg_text_draw_color_glyph(SvgTextLayout* layout, SvgTextRun* run,
-    const RdtMatrix* matrix) {
+static bool svg_text_draw_bitmap_glyph(SvgTextLayout* layout, SvgTextRun* run,
+    const RdtMatrix* matrix, bool native_text = false) {
     SvgInlineRenderContext* ctx = layout->ctx;
-    if (ctx->fill_none || !ctx->paint_list) return;
+    if (ctx->fill_none || !ctx->paint_list) return false;
     const SvgTextStyle* style = &layout->styles[run->style];
     FontStyleDesc descriptor = svg_text_font_descriptor(style, run->font->family);
     FontHandle* primary = font_resolve(ctx->font_ctx, &descriptor);
+    if (native_text && primary) {
+        // SVG images may share a host font context with a different device ratio.
+        float ratio = font_handle_get_physical_size_px(primary) / font_handle_get_size_px(primary);
+        descriptor.size_px *= matrix->e22 / ratio;
+        font_handle_release(primary);
+        primary = font_resolve(ctx->font_ctx, &descriptor);
+    }
     FontHandle* fallback = svg_text_fallback_face(layout, primary, &descriptor, run->codepoint);
     FontHandle* font = fallback ? fallback : primary;
     if (fallback && primary) font_handle_release(primary);
-    if (!font) return;
+    if (!font) return false;
     const GlyphBitmap* bitmap = font_render_glyph(font, run->codepoint, GLYPH_RENDER_NORMAL);
-    if (!bitmap || bitmap->pixel_mode != GLYPH_PIXEL_BGRA || !bitmap->buffer) {
-        font_handle_release(font); return;
+    if (!bitmap || (!native_text && bitmap->pixel_mode != GLYPH_PIXEL_BGRA) || !bitmap->buffer ||
+        (native_text && bitmap->bitmap_scale > 0.0f && fabsf(bitmap->bitmap_scale - 1.0f) > 0.00001f)) {
+        font_handle_release(font); return false;
     }
     ImageSurface* image = image_surface_create(bitmap->width, bitmap->height);
-    if (!image) { font_handle_release(font); return; }
-    for (int row = 0; row < bitmap->height; row++) {
+    if (!image) { font_handle_release(font); return false; }
+    if (native_text) {
+        // isolated SVG font contexts die after recording; keep owned pixels for retained replay.
+        memset(image->pixels, 0, (size_t)image->pitch * image->height);
+        DlDrawGlyph glyph = {};
+        glyph.bitmap = *bitmap; glyph.color = ctx->fill_color;
+        glyph.is_color_emoji = bitmap->pixel_mode == GLYPH_PIXEL_BGRA;
+        glyph.clip = {0.0f, 0.0f, (float)image->width, (float)image->height};
+        dl_replay_draw_glyph(image, &glyph);
+    } else for (int row = 0; row < bitmap->height; row++) {
         const uint8_t* source = bitmap->buffer + (ptrdiff_t)row * bitmap->pitch;
         uint32_t* pixels = (uint32_t*)((uint8_t*)image->pixels + (size_t)row * image->pitch);
         for (int column = 0; column < bitmap->width; column++) {
@@ -5378,6 +5394,11 @@ static void svg_text_draw_color_glyph(SvgTextLayout* layout, SvgTextRun* run,
     RdtMatrix placement = {scale * run->glyph_scale_x, 0.0f,
         run->x + (float)bitmap->bearing_x * scale * run->glyph_scale_x,
         0.0f, scale, run->y - (float)bitmap->bearing_y * scale, 0.0f, 0.0f, 1.0f};
+    if (native_text) {
+        placement = rdt_matrix_translate(
+            lroundf(matrix->e11 * run->x + matrix->e13 + (float)bitmap->bearing_x),
+            lroundf(matrix->e22 * run->y + matrix->e23 - (float)bitmap->bearing_y));
+    }
     const SvgTextPathData* stretch_data = svg_text_stretch_data(layout, run);
     if (run->paint_warped && stretch_data && run->paint_path) {
         SvgTextColorWarpSample sample = {};
@@ -5406,14 +5427,28 @@ static void svg_text_draw_color_glyph(SvgTextLayout* layout, SvgTextRun* run,
                 ctx->fill_opacity * ctx->opacity, nullptr, svg_text_sample_color_warp, &sample, "svg_color_glyph_warp");
         image_surface_destroy(image);
     } else {
-        placement = rdt_matrix_multiply(matrix, &placement);
+        if (!native_text) placement = rdt_matrix_multiply(matrix, &placement);
         // glyph-cache storage is borrowed; the retained image owns its converted pixels.
         PaintRecordTarget destination = svg_record_target(ctx);
-        paint_record_draw_image_resource(&destination, "svg_color_glyph_image", image, 0.0f, 0.0f,
+        paint_record_draw_image_resource(&destination, "svg_glyph_image", image, 0.0f, 0.0f,
             (float)image->width, (float)image->height,
             clamp_byte_round(255.0f * ctx->fill_opacity * ctx->opacity), &placement, image_surface_destroy);
     }
     font_handle_release(font);
+    return true;
+}
+
+static bool svg_text_can_paint_native(const SvgTextLayout* layout, const SvgTextRun* run,
+    const RdtMatrix* matrix) {
+    const SvgInlineRenderContext* ctx = layout->ctx;
+    // retain vector geometry for exports, paint servers, strokes, and transformed glyphs.
+    return g_svg_active_rdcon && !ctx->semantic_target && ctx->font_ctx &&
+        (ctx->fill_paint.kind == SVG_PAINT_COLOR || ctx->fill_paint.kind == SVG_PAINT_CURRENT_COLOR) && ctx->stroke_none &&
+        !run->on_path && !run->paint_warped &&
+        fabsf(run->glyph_scale_x - 1.0f) < 0.00001f &&
+        matrix->e11 > 0.0f && matrix->e22 > 0.0f &&
+        fabsf(matrix->e12) < 0.00001f && fabsf(matrix->e21) < 0.00001f &&
+        fabsf(matrix->e11 - matrix->e22) <= matrix->e22 * 0.00001f;
 }
 
 static void svg_text_draw_decoration(SvgTextLayout* layout, int style_index, bool after_glyphs) {
@@ -5529,10 +5564,16 @@ static void svg_text_draw_style_content(SvgTextLayout* layout, int style_index,
         if (style->hidden || run->path_hidden || !run->font || run->glyph_scale_x <= 0.0f || str_all(text, run->len, str_is_space)) continue;
         RdtMatrix matrix = run->paint_warped ? ctx->transform : svg_text_run_transform(run, &ctx->transform);
         RdtPath* path = run->paint_path;
+        if (svg_text_can_paint_native(layout, run, &matrix) &&
+            svg_text_draw_bitmap_glyph(layout, run, &matrix, true)) {
+            if (path) rdt_path_free(path);
+            run->paint_path = nullptr;
+            continue;
+        }
         if (path) {
             float left, top, right, bottom;
             if (rdt_path_get_bounds(path, &left, &top, &right, &bottom)) {
-                if (run->color_bitmap) svg_text_draw_color_glyph(layout, run, &matrix);
+                if (run->color_bitmap) svg_text_draw_bitmap_glyph(layout, run, &matrix);
                 draw_svg_fill_stroke(ctx, path, style->element, &matrix,
                     layout->paint_box.left, layout->paint_box.top,
                     layout->paint_box.right - layout->paint_box.left,

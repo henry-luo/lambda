@@ -79,8 +79,15 @@ function checkGeometry(actual) {
   const attributes = [...actual.html.matchAll(/(?:d|transform|viewBox|width|height|x|y|style)="([^"]*)"/g)];
   if (attributes.some(([, value]) => /(?:^|[^A-Za-z])(?:NaN|[+-]?(?:Infinity|inf))(?:$|[^A-Za-z])/i.test(value)))
     return 'nonfinite SVG geometry';
-  if (/<(?:text|link|style)\b/.test(actual.html) || /class="lm_/.test(actual.html))
-    return 'external-font or legacy markup dependency';
+  if (/<link\b/.test(actual.html) || /class="lm_/.test(actual.html))
+    return 'external stylesheet or legacy markup dependency';
+  // Text is intentional; declared font resources must travel with the SVG.
+  const styles = [...actual.html.matchAll(/<style>([\s\S]*?)<\/style>/g)];
+  if (styles.some(([, css]) => [...css.matchAll(/url\(([^)]+)\)/g)].some(([, url]) => !url.startsWith('data:'))))
+    return 'external font URL';
+  const glyphs = [...actual.html.matchAll(/<text\b([^>]*)>/g)];
+  if (glyphs.some(([, attrs]) => !/font-family="[^"]+"/.test(attrs) || !/font-size="[0-9.]+"/.test(attrs)))
+    return 'text glyph missing measured font';
   return null;
 }
 

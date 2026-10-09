@@ -10,5 +10,5 @@ pub fn render_display(ast) { render_math(ast, {display: true})^ }
 pub fn render_inline(ast) { render_math(ast, {display: false})^ }
 pub fn render_standalone(ast) { render_math(ast, {display: true, standalone: true})^ }
 
-// Outlined SVG includes its measured glyphs and requires no external font CSS.
+// Each SVG carries the font declarations needed by its text glyphs.
 pub fn stylesheet(options = null) { "" }

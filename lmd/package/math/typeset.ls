@@ -18,7 +18,8 @@ pub fn render(ast, options) map | error {
     let result = node(ast, context)^
     // The title retains searchable, accessible math when painting font-local glyphs.
     let label = if (ast is string) ast else format(ast, {type: "math", flavor: "latex"})^
-    let output_el = bx.emit(result, font.UNITS, options.color, options.font_size, label);
+    let output_el = bx.emit(result, font.UNITS, options.color, options.font_size, label,
+        font.stylesheet(profile, result.body));
     {element: output_el, width: result.width / font.UNITS, height: result.height / font.UNITS,
         depth: result.depth / font.UNITS, type: result.type, italic: result.italic / font.UNITS,
         skew: 0.0, max_font_size: scale(context), font_family: profile.family}

@@ -17,13 +17,15 @@
 "standalone math:"
 {
   svg: true,
-  outlines: true,
+  text: true,
+  embedded_fonts: true,
   external_stylesheets: 0
 }
 "prose AMS symbol:"
 {
   svg: true,
-  outlines: true,
+  text: true,
+  embedded_fonts: true,
   external_stylesheets: 0,
   unknown: null
 }

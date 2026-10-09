@@ -1,4 +1,4 @@
-// Baseline-relative SVG geometry. Paths and dimensions share the same transform.
+// Baseline-relative SVG geometry. Text and dimensions share the same transform.
 import util: .util
 
 pub fn make(body: any, width: any, height: any, depth: any, atom: any = "mord") => {
@@ -10,7 +10,12 @@ pub fn empty(width = 0.0) => make(<g>, width, 0.0, 0.0)
 
 pub fn glyph(g, scale, atom = "mord") {
     let ink = g.ink
-    let bx = make(<path d: g.path, transform: "scale(" ++ string(scale) ++ ")">,
+    // Unencoded OpenType construction pieces still need their font-local outline.
+    let body = if (g.codepoint != null and g.text_family != null)
+        <text x: 0, y: 0, 'font-family': g.text_family, 'font-size': g.text_size * scale,
+            'font-weight': g.text_weight, 'font-style': g.text_style, chr(g.codepoint)>
+        else <path d: g.path, transform: "scale(" ++ string(scale) ++ ")">;
+    let bx = make(body,
         g.advance * scale, if (ink != null) max(0.0, 0.0 - ink.top * scale) else 0.0,
         if (ink != null) max(0.0, ink.bottom * scale) else 0.0, atom);
     // Ordinary combining marks have zero advance; their ink locates the attachment.
@@ -50,7 +55,7 @@ pub fn shifted(bx, x, y, width) {
 pub fn rule(width, thickness, y) =>
     make(<rect x: 0, y: y, width: width, height: thickness>, width, max(0.0, 0.0 - y), max(0.0, y + thickness))
 
-pub fn emit(bx, units, color, font_size = null, label = null) {
+pub fn emit(bx, units, color, font_size = null, label = null, font_css = "") {
     let height = bx.height + bx.depth
     let style = "width:" ++ util.fmt_em(bx.width / units) ++ ";height:" ++ util.fmt_em(height / units) ++
         ";vertical-align:" ++ util.fmt_em(0.0 - bx.depth / units) ++ ";overflow:visible" ++
@@ -60,5 +65,6 @@ pub fn emit(bx, units, color, font_size = null, label = null) {
         viewBox: "0 " ++ string(0.0 - bx.height) ++ " " ++ string(max(bx.width, 1.0)) ++ " " ++ string(max(height, 1.0)),
         style: style, fill: (color or "currentColor"),
         if (label != null) <title label> else null
+        if (font_css != "") <style font_css> else null
         bx.body>
 }
