@@ -1,0 +1,16 @@
+% AMS arrow fills combine real font glyphs for the additional accent forms.
+\makeatletter
+\newcommand{\ReferenceDefineAccent}[3]{%
+  \expandafter\newcommand\csname#1\endcsname{\mathpalette{#2{#3}}}}
+\ReferenceDefineAccent{Overrightarrow}{\overarrow@}{\Rightarrowfill@}
+\ReferenceDefineAccent{overleftharpoon}{\overarrow@}{\arrowfill@\leftharpoonup\relbar\relbar}
+\ReferenceDefineAccent{overrightharpoon}{\overarrow@}{\arrowfill@\relbar\relbar\rightharpoonup}
+\ReferenceDefineAccent{overlinesegment}{\overarrow@}{\arrowfill@\mapstochar\relbar\mapsfromchar}
+\ReferenceDefineAccent{underlinesegment}{\underarrow@}{\arrowfill@\mapstochar\relbar\mapsfromchar}
+\@ifundefined{ReferenceGroupLeft}{}{%
+  \ReferenceDefineAccent{overgroup}{\overarrow@}{\arrowfill@\ReferenceGroupLeft\ReferenceGroupRule\ReferenceGroupRight}
+  \ReferenceDefineAccent{undergroup}{\underarrow@}{\arrowfill@\ReferenceUnderGroupLeft\ReferenceUnderGroupRule\ReferenceUnderGroupRight}}
+\makeatother
+% A width-bearing phantom sizes the tilde while accents places it below the nucleus.
+\newcommand{\utilde}{\mathpalette\ReferenceUnderTilde}
+\newcommand{\ReferenceUnderTilde}[2]{\underaccent{#1\widetilde{\hphantom{#2}}}{#2}}

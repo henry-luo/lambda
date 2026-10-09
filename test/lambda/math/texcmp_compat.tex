@@ -1,0 +1,51 @@
+% KaTeX's alphabet selectors retain ordinary symbols outside their Latin repertoire.
+\DeclareMathAlphabet{\mathsfbf}{OT1}{cmss}{bx}{n}
+\DeclareMathAlphabet{\mathsfbfit}{OT1}{lmss}{bx}{sl}
+% Unicode bold italic specifies both properties, independently of an enclosing alphabet.
+\newcommand{\ReferenceBoldItalic}[1]{\bm{\mathnormal{#1}}}
+\newcommand{\ReferenceBoldScript}[1]{\bm{\mathscr{#1}}}
+\newcommand{\ReferenceBoldFraktur}[1]{\bm{\mathfrak{#1}}}
+\newcommand{\ReferenceUnicode}[4]{\text{\fontfamily{#1}\fontseries{#2}\fontshape{#3}\selectfont #4}}
+\makeatletter
+\newcommand{\ReferenceFixedSymbol}[1]{%
+  \count@=#1\relax
+  \ifnum\count@>"6FFF \advance\count@ by -"7000 \mathchardef#1=\count@\fi}
+\newcommand{\ReferenceKeepSymbols}{%
+  \forcsvlist{\ReferenceFixedSymbol}{\Gamma,\Delta,\Theta,\Lambda,\Xi,\Pi,\Sigma,\Upsilon,\Phi,\Psi,\Omega,\imath,\jmath}}
+\newcount\ReferenceCode
+\newcommand{\ReferenceKeepRange}[3]{%
+  \ReferenceCode=#1\relax
+  \loop\mathcode\ReferenceCode=\numexpr#3*256+\ReferenceCode\relax
+    \ifnum\ReferenceCode<#2\relax\advance\ReferenceCode by 1\repeat}
+\let\ReferenceFraktur\mathfrak
+\renewcommand{\mathfrak}[1]{{\ReferenceKeepSymbols\ReferenceFraktur{#1}}}
+\let\ReferenceScript\mathscr
+\renewcommand{\mathscr}[1]{{\ReferenceKeepSymbols
+  \ReferenceKeepRange{`a}{`z}{1}\ReferenceKeepRange{`0}{`9}{0}\ReferenceScript{#1}}}
+\makeatother
+
+% mu is one eighteenth of the current math style's symbol-font quad.
+\newdimen\ReferenceRaise
+\newdimen\ReferenceWidth
+\newdimen\ReferenceHeight
+\ExplSyntaxOn
+\cs_new_protected:Npn \reference_dimension_set:Nnn #1#2#3 {
+  \regex_extract_once:nnNTF {\A\s*([+\-]?(?:\d+\.?\d*|\.\d+))mu\s*\Z} {#3} \l_tmpa_seq
+    {
+      \tl_set:Nx \l_tmpa_tl {\seq_item:Nn \l_tmpa_seq {2}}
+      \dim_set:Nn #1 {\l_tmpa_tl\fontdimen6
+        \ifx#2\scriptstyle\scriptfont\else
+          \ifx#2\scriptscriptstyle\scriptscriptfont\else\textfont\fi\fi 2/18}
+    }
+    {\dim_set:Nn #1 {#3}}
+}
+\cs_new_eq:NN \ReferenceSetDimension \reference_dimension_set:Nnn
+\ExplSyntaxOff
+\newcommand{\ReferenceRule}[3][0pt]{%
+  \ifmmode\mathpalette{\ReferenceRuleAux{#1}{#2}{#3}}{}%
+  \else\rule[#1]{#2}{#3}\fi}
+\newcommand{\ReferenceRuleAux}[5]{\begingroup
+  \ReferenceSetDimension\ReferenceRaise{#4}{#1}%
+  \ReferenceSetDimension\ReferenceWidth{#4}{#2}%
+  \ReferenceSetDimension\ReferenceHeight{#4}{#3}%
+  \rule[\ReferenceRaise]{\ReferenceWidth}{\ReferenceHeight}\endgroup}

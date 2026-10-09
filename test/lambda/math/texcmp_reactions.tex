@@ -1,0 +1,7 @@
+% These are the same reaction spellings used by KaTeX's mhchem extension.
+\usepackage[version=4]{mhchem}
+\newcommand{\ReferenceDefineReaction}[2]{%
+  \expandafter\newcommand\csname#1\endcsname[2][]{\ce{#2[$\mathord{##2}$][$\mathord{##1}$]}}}
+\ReferenceDefineReaction{xrightleftarrows}{<-->}
+\ReferenceDefineReaction{xrightequilibrium}{<=>>}
+\ReferenceDefineReaction{xleftequilibrium}{<<=>}

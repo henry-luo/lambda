@@ -1,0 +1,13 @@
+% Select only MathABX accent glyphs; loading mathabx changes unrelated CM symbols.
+% Font slots are defined by mathabx.dcl (over/under-brace pieces and widecheck).
+\DeclareFontFamily{U}{referenceMathx}{}
+\DeclareFontShape{U}{referenceMathx}{m}{n}{<-> mathx10}{}
+\DeclareSymbolFont{referenceAccents}{U}{referenceMathx}{m}{n}
+\DeclareMathSymbol{\ReferenceGroupLeft}{\mathord}{referenceAccents}{"68}
+\DeclareMathSymbol{\ReferenceGroupRight}{\mathord}{referenceAccents}{"6A}
+\DeclareMathSymbol{\ReferenceGroupRule}{\mathord}{referenceAccents}{"6B}
+\DeclareMathSymbol{\ReferenceUnderGroupLeft}{\mathord}{referenceAccents}{"6C}
+\DeclareMathSymbol{\ReferenceUnderGroupRight}{\mathord}{referenceAccents}{"6E}
+\DeclareMathSymbol{\ReferenceUnderGroupRule}{\mathord}{referenceAccents}{"6F}
+\DeclareMathAccent{\widecheck}{\mathord}{referenceAccents}{"71}
+\pdfmapfile{+mathabx.map}
