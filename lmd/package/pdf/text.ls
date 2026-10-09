@@ -392,9 +392,70 @@ fn _raw_font_attr(fi) {
     else { "false" }
 }
 
-fn _emit_one(st, ctm, page_h, txt, run_advance) {
-    let el = _emit_text(st, ctm, page_h, txt, run_advance)
+fn _emit_one(st, ctm, page_h, txt, run_advance, paint = false) {
+    let outline_font = st.font_info and st.font_info.glyph_paths != null
+    let metadata = if (outline_font and not paint) {*: st, fill_opacity: 0.0, stroke_opacity: 0.0} else st
+    let el = _emit_text(metadata, ctm, page_h, txt, run_advance)
     if (el) { [el] } else { [] }
+}
+
+// PDF bytes select Type 1 outlines; ToUnicode is only the selection/copy text.
+fn _outline_advance(st, codes) {
+    let words = len([for (c in codes where c == 32) c]);
+    (_codes_width_units(st.font_info, codes) * st.font_size / 1000.0 +
+     st.char_space * len(codes) + st.word_space * words) * st.hor_scale / 100.0
+}
+
+fn _advance_outline(st, dx) {
+    let m = [st.tm[0], st.tm[1], st.tm[2], st.tm[3],
+             st.tm[4] + dx * st.tm[0], st.tm[5] + dx * st.tm[1]]
+    _with(st, m, st.tlm, st.font_name, st.font_size, st.font_info, st.leading, st.in_text)
+}
+
+fn _outline_transform(st, ctm, page_h) {
+    let m = util.matrix_mul(st.tm, ctm)
+    let scale = st.font_size / 1000.0
+    let hs = st.hor_scale / 100.0
+    util.fmt_matrix([m[0] * scale * hs, -m[1] * scale * hs,
+                     m[2] * scale, -m[3] * scale,
+                     m[4] + st.rise * m[2], float(page_h) - m[5] - st.rise * m[3]])
+}
+
+fn _outline_paths(st, ctm, page_h, codes, i) {
+    if (i >= len(codes)) { [] }
+    else {
+        let code = codes[i]
+        let path = <path d: st.font_info.glyph_paths[string(code)],
+                         transform: _outline_transform(st, ctm, page_h)>
+        let next = _advance_outline(st, _outline_advance(st, [code]));
+        [path] ++ _outline_paths(next, ctm, page_h, codes, i + 1)
+    }
+}
+
+fn _paint_operand(st, ctm, page_h, op, txt, adv) {
+    let paths = if (st.font_info) st.font_info.glyph_paths else null
+    let codes = _operand_codes(op, st.font_info)
+    let missing = if (paths == null) [] else [for (c in codes where paths[string(c)] == null) c]
+    if (paths == null or len(missing) > 0) {
+        [<g for (t in _emit_one(st, ctm, page_h, txt, adv, true)) t>]
+    }
+    else if (st.render_mode == 3 or st.render_mode == 7) { [] }
+    else {
+        let mode = st.render_mode
+        let fill = if (mode == 1 or mode == 5) "none" else st.fill
+        let stroke = if (mode == 1 or mode == 2 or mode == 5 or mode == 6) st.stroke else "none";
+        [<g 'data-pdf-glyphs': "type1", fill: fill, stroke: stroke,
+            'fill-opacity': util.fmt_num(st.fill_opacity),
+            'stroke-opacity': util.fmt_num(st.stroke_opacity),
+            for (p in _outline_paths(st, ctm, page_h, codes, 0)) p>]
+    }
+}
+
+fn _emit_operand(st, ctm, page_h, op, txt, adv) {
+    let metadata = _emit_one(st, ctm, page_h, txt, adv)
+    if (st.font_info and st.font_info.glyph_paths != null) {
+        metadata ++ _paint_operand(st, ctm, page_h, op, txt, adv)
+    } else { metadata }
 }
 
 fn _run_advance_between(a, b) {
@@ -706,8 +767,10 @@ fn _op_Tj(st, ctm, ops, page_h) {
     if (len(ops) >= 1) {
         let txt = _decode_operand(ops[0], st.font_info)
         let adv = _text_advance_for_operand(st, ctm, ops[0])
-        let s1 = if (txt == "") { st } else { _advance_text(st, adv) }
-        { state: s1, emit: _emit_one(st, ctm, page_h, txt, adv) }
+        let s1 = if (st.font_info and st.font_info.glyph_paths != null) {
+            _advance_outline(st, _outline_advance(st, _operand_codes(ops[0], st.font_info)))
+        } else { _advance_text(st, adv) }
+        { state: s1, emit: _emit_operand(st, ctm, page_h, ops[0], txt, adv) }
     }
     else { { state: st, emit: null } }
 }
@@ -732,7 +795,16 @@ fn _op_TJ_loop(items, i, n, cur, ctm, page_h, seg_text, seg_st, has_seg, emits) 
         let it = items[i]
         if (it is map and (it.kind == "string" or it.kind == "hex")) {
             let txt = _tj_text(it, cur.font_info)
-            if (txt != "") {
+            if (cur.font_info and cur.font_info.glyph_paths != null) {
+                // paint each original byte run while grouping copy text across kerning adjustments.
+                let adv = _text_advance_for_operand(cur, ctm, it)
+                let next_cur = _advance_outline(cur, _outline_advance(cur, _operand_codes(it, cur.font_info)))
+                let next_seg_st = if (has_seg) seg_st else cur
+                let paint = _paint_operand(cur, ctm, page_h, it, txt, adv)
+                _op_TJ_loop(items, i + 1, n, next_cur, ctm, page_h,
+                            seg_text ++ txt, next_seg_st, true, _append_emit(emits, paint))
+            }
+            else if (txt != "") {
                 let next_seg_st = if (has_seg) { seg_st } else { cur }
                 let next_cur = _advance_text(cur, _text_advance_for_operand(cur, ctm, it))
                 _op_TJ_loop(items, i + 1, n, next_cur, ctm, page_h,
@@ -748,7 +820,9 @@ fn _op_TJ_loop(items, i, n, cur, ctm, page_h, seg_text, seg_st, has_seg, emits) 
             else { emits }
             let next_seg_text = if (adj < -600.0 and has_seg) { "" } else { seg_text }
             let next_has_seg = if (adj < -600.0 and has_seg) { false } else { has_seg }
-            let next_cur = _advance_text(cur, _tj_adjustment(cur, ctm, adj))
+            let next_cur = if (cur.font_info and cur.font_info.glyph_paths != null) {
+                _advance_outline(cur, -adj * cur.font_size * cur.hor_scale / 100000.0)
+            } else { _advance_text(cur, _tj_adjustment(cur, ctm, adj)) }
             _op_TJ_loop(items, i + 1, n, next_cur, ctm, page_h,
                         next_seg_text, seg_st, next_has_seg, next_emits)
         }
@@ -767,11 +841,7 @@ fn _op_TJ(st, ctm, ops, page_h) {
 
 fn _op_quote(st, ctm, ops, page_h) {
     if (len(ops) >= 1) {
-        let s1 = _move(st, 0.0, -st.leading)
-        let txt = _decode_operand(ops[0], s1.font_info)
-        let adv = _text_advance_for_operand(s1, ctm, ops[0])
-        let s2 = if (txt == "") { s1 } else { _advance_text(s1, adv) }
-        { state: s2, emit: _emit_one(s1, ctm, page_h, txt, adv) }
+        _op_Tj(_move(st, 0.0, -st.leading), ctm, ops, page_h)
     }
     else { { state: st, emit: null } }
 }
@@ -779,11 +849,7 @@ fn _op_quote(st, ctm, ops, page_h) {
 fn _op_dquote(st, ctm, ops, page_h) {
     if (len(ops) >= 3) {
         let s0 = set_char_space(set_word_space(st, util.num(ops[0])), util.num(ops[1]))
-        let s1 = _move(s0, 0.0, -s0.leading)
-        let txt = _decode_operand(ops[2], s1.font_info)
-        let adv = _text_advance_for_operand(s1, ctm, ops[2])
-        let s2 = if (txt == "") { s1 } else { _advance_text(s1, adv) }
-        { state: s2, emit: _emit_one(s1, ctm, page_h, txt, adv) }
+        _op_quote(s0, ctm, [ops[2]], page_h)
     }
     else { { state: st, emit: null } }
 }

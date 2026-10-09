@@ -534,9 +534,13 @@ static bool render_reference_page(const PdfFileInfo* pdf, int page, char* out_pn
     return true;
 }
 
-static bool write_lambda_page_script(const PdfFileInfo* pdf, int page_index, int height, const char* script_path) {
+static bool write_lambda_page_script(const PdfFileInfo* pdf, int page_index, int height, const char* script_path,
+        bool natural_aspect = false) {
     char pdf_path_escaped[PATH_MAX * 2];
     char script[4096];
+    char svg_height[32];
+    if (natural_aspect) snprintf(svg_height, sizeof(svg_height), "auto");
+    else snprintf(svg_height, sizeof(svg_height), "%dpx", height);
 
     lambda_string_escape(pdf->path, pdf_path_escaped, sizeof(pdf_path_escaped));
     snprintf(script, sizeof(script),
@@ -547,16 +551,17 @@ static bool write_lambda_page_script(const PdfFileInfo* pdf, int page_index, int
              "<html\n"
              "  <head\n"
              "    <meta charset: \"utf-8\">\n"
-             "    <style \"html,body{margin:0;padding:0;background:white;overflow:hidden;}svg{display:block;width:%dpx;height:%dpx;}\">\n"
+             "    <style \"html,body{margin:0;padding:0;background:white;overflow:hidden;}svg{display:block;width:%dpx;height:%s;}\">\n"
              "  >\n"
              "  <body page>\n"
              ">\n",
-             pdf_path_escaped, page_index, RENDER_WIDTH, height);
+             pdf_path_escaped, page_index, RENDER_WIDTH, svg_height);
 
     return write_file_all(script_path, script, strlen(script));
 }
 
-static bool render_lambda_png_page(const PdfFileInfo* pdf, int page_index, int height, char* out_png, size_t out_size) {
+static bool render_lambda_png_page(const PdfFileInfo* pdf, int page_index, int height, char* out_png, size_t out_size,
+        bool natural_aspect = false) {
     char script_path[PATH_MAX];
     char qscript[PATH_MAX + 8];
     char qpng[PATH_MAX + 8];
@@ -566,7 +571,7 @@ static bool render_lambda_png_page(const PdfFileInfo* pdf, int page_index, int h
     snprintf(out_png, out_size, "%s/%s_page_%02d_lambda.png", PDF_TEMP_DIR, pdf->base, page_index + 1);
     unlink(out_png);
 
-    if (!write_lambda_page_script(pdf, page_index, height, script_path)) return false;
+    if (!write_lambda_page_script(pdf, page_index, height, script_path, natural_aspect)) return false;
 
     shell_quote(script_path, qscript, sizeof(qscript));
     shell_quote(out_png, qpng, sizeof(qpng));
@@ -637,8 +642,23 @@ static bool write_png_rgba(const char* path, const unsigned char* pixels, int wi
     return true;
 }
 
+static int sample_png_component(const ImageData& image, int x, int y, int channel, int radius) {
+    int total = 0, count = 0;
+    for (int dy = -radius; dy <= radius; dy++) {
+        for (int dx = -radius; dx <= radius; dx++) {
+            int px = x + dx, py = y + dy;
+            if (px < 0 || py < 0 || px >= image.width || py >= image.height) continue;
+            size_t offset = ((size_t)py * image.width + px) * 4;
+            total += composite_over_white(image.pixels[offset + channel], image.pixels[offset + 3]);
+            count++;
+        }
+    }
+    return total / count;
+}
+
 static void compare_pngs(const char* reference_path, const char* lambda_path,
-                         const char* diff_path, double* mismatch_percent, double* mean_abs_delta) {
+                         const char* diff_path, double* mismatch_percent, double* mean_abs_delta,
+                         int sample_radius = 0) {
     ImageData ref;
     ImageData got;
     ASSERT_TRUE(load_png_rgba(reference_path, &ref)) << "failed to load reference PNG: " << reference_path;
@@ -658,8 +678,8 @@ static void compare_pngs(const char* reference_path, const char* lambda_path,
         int ref_rgb[3];
         int got_rgb[3];
         for (int c = 0; c < 3; c++) {
-            ref_rgb[c] = composite_over_white(ref.pixels[off + c], ref.pixels[off + 3]);
-            got_rgb[c] = composite_over_white(got.pixels[off + c], got.pixels[off + 3]);
+            ref_rgb[c] = sample_png_component(ref, (int)(i % ref.width), (int)(i / ref.width), c, sample_radius);
+            got_rgb[c] = sample_png_component(got, (int)(i % got.width), (int)(i / got.width), c, sample_radius);
             int delta = abs(ref_rgb[c] - got_rgb[c]);
             if (delta > max_delta) max_delta = delta;
             total_delta += (uint64_t)delta;
@@ -8415,6 +8435,37 @@ static void parse_pdf_render_args(int* argc, char** argv) {
     }
     argv[out] = NULL;
     *argc = out;
+}
+
+TEST(PdfRenderVisual, EmbeddedType1MathMatchesPoppler) {
+    if (!command_exists("pdftoppm")) GTEST_SKIP() << "Poppler is required for the PDF reference";
+    ASSERT_TRUE(ensure_dir("temp"));
+    ASSERT_TRUE(ensure_dir(PDF_TEMP_DIR));
+    ASSERT_TRUE(ensure_dir(PDF_REF_DIR));
+    ASSERT_TRUE(ensure_dir(PDF_DIFF_DIR));
+    PdfFileInfo pdf = {};
+    snprintf(pdf.path, sizeof(pdf.path), "test/input/math_intensive_test.pdf");
+    snprintf(pdf.base, sizeof(pdf.base), "math_intensive_type1");
+    const int pages = pdf_page_count(pdf.path);
+    ASSERT_GT(pages, 1);
+    // page 2 exercises display sums/integrals, size-specific delimiters, accents and braces.
+    for (int page = 1; page <= pages; page++) {
+        char reference[PATH_MAX], actual[PATH_MAX], diff[PATH_MAX];
+        ASSERT_TRUE(render_reference_page(&pdf, page, reference, sizeof(reference)));
+        ImageData ref = {};
+        ASSERT_TRUE(load_png_rgba(reference, &ref));
+        int height = ref.height;
+        image_free(ref.pixels);
+        // Poppler rounds up the bitmap height; keep the SVG's intrinsic ratio to avoid a subpixel y inset.
+        ASSERT_TRUE(render_lambda_png_page(&pdf, page - 1, height, actual, sizeof(actual), true));
+        snprintf(diff, sizeof(diff), "%s/type1_math_page_%d.png", PDF_DIFF_DIR, page);
+        double mismatch = 100.0, delta = 255.0;
+        // compare ink geometry with one-pixel antialias smoothing: Poppler hints text, SVG paints outlines.
+        compare_pngs(reference, actual, diff, &mismatch, &delta, 1);
+        char property[64]; snprintf(property, sizeof(property), "page_%d_mismatch_percent", page);
+        RecordProperty(property, mismatch);
+        EXPECT_LT(mismatch, 0.75) << "page " << page << "; inspect " << diff;
+    }
 }
 
 TEST(PdfRenderVisual, CompareLambdaPagesAgainstPopplerReference) {

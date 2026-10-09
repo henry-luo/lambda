@@ -169,7 +169,8 @@ fn _runtime_font_info(info) {
             first_char: info.first_char,
             last_char:  info.last_char,
             cid_widths: info.cid_widths,
-            default_width: info.default_width
+            default_width: info.default_width,
+            glyph_paths: info.glyph_paths
         }
     }
 }

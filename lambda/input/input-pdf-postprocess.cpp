@@ -21,6 +21,7 @@
 
 #include "input.hpp"
 #include "input-parsers.h"
+#include "input-pdf-type1.hpp"
 #include "../io/mark_builder.hpp"
 #include "../core/mark_reader.hpp"
 #include "lib/log.h"
@@ -874,6 +875,18 @@ static void process_font_dict(Input* input, MarkBuilder& builder, Map* font,
     Item ty = map_lookup(font, "Type");
     String* ts = item_as_string(ty);
     if (!ts || !str_eq(ts, "Font")) return;
+
+    // Type 1 encodings address outlines, not Unicode; keep the embedded shapes for SVG painting.
+    if (str_eq(item_as_string(map_lookup(font, "Subtype")), "Type1")) {
+        Map* descriptor = item_as_map(resolve_ref_deep(map_lookup(font, "FontDescriptor"), table));
+        Map* program = descriptor ? item_as_map(resolve_ref_deep(map_lookup(descriptor, "FontFile"), table)) : nullptr;
+        if (program && map_has_type(program, "stream")) {
+            Map* dict = item_as_map(map_lookup(program, "dictionary"));
+            Item paths = pdf_type1_glyph_paths(input, item_as_string(map_lookup(program, "data")),
+                item_as_int(map_lookup(dict, "Length1"), 0), resolve_ref_deep(map_lookup(font, "Encoding"), table));
+            if (paths.item != ITEM_NULL) builder.putToMap(lam::gc_borrow(font), builder.createString("glyph_paths"), paths);
+        }
+    }
 
     Item tu = map_lookup(font, "ToUnicode");
     if (tu.item == ITEM_NULL) return;
