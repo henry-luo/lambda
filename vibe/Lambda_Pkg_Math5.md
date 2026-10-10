@@ -1,5 +1,38 @@
 # Lambda Math Package — Phase 5: MathLive Box Model Migration
 
+> **DESIGN RULE 1 — TeX conformance before visual similarity.**
+> User-ratified 2026-10-10. Every math layout fix MUST be derived from TeX's
+> math-list algorithms and the definition of the supported TeX/LaTeX command,
+> using the actual selected font's metrics or its explicitly matched TeX
+> companion. Never fit coordinates, gaps, glyph shifts, sizes, or curves to a
+> screenshot. Numeric constants require a cited algorithm, macro, font table,
+> or authored dimension. If the required data or construction is unavailable,
+> report the limitation; do not invent a visually plausible replacement.
+>
+> Knuth's [TeX82 `tex.web`](https://tug.ctan.org/systems/knuth/dist/tex/tex.web)
+> and *The TeXbook*, Appendix G, govern math-list conversion. Supported LaTeX
+> extensions use their package definitions, for example
+> [mathtools](https://ctan.org/pkg/mathtools) and
+> [amsmath](https://ctan.org/pkg/amsmath). MathLive/KaTeX output and raster diffs
+> are diagnostic evidence, never layout authority. A successful render or
+> refreshed snapshot does not establish TeX conformance. Validate the rule with
+> independent TeX box/metric evidence and painted geometry across math styles.
+>
+> This strengthens the existing Phase 14 package policy; it changes no formal
+> language ruling. Layout stays in `lambda.doc.math` (**D7.2.4**), with IO and
+> native font facts respecting **D7.1.1 / D7.1.2v2**. The historical MathLive
+> migration below is superseded wherever it conflicts with this rule.
+
+> **DESIGN RULE 2 — Do not add fonts to Lambda packages.**
+> User-ratified 2026-10-10: implement math support using the existing bundled
+> CMU and KaTeX faces. No new font files, font families, restored STIX resources,
+> or additional font dependencies for screenshot parity. A fallback composition
+> must have an explicit TeX macro definition and use measured existing glyphs
+> under Rule 1; it must not fabricate a missing glyph or copy another font's
+> metrics. Caller-supplied fonts remain optional. Missing constructions must
+> be documented. This preserves the 2026-10-08 distribution decision below
+> (**D7.2.4 / D7.1.2v2**).
+
 > Continues `Lambda_Pkg_Math.md` → `Math2` → `Math3` → `Math4`.
 > Math4 proved the structural thesis: replacing per-case constants with
 > metric-driven Rule 15/18/VBox geometry moved the corpus from 763/921 to
@@ -8,8 +41,9 @@
 > to the MathLive box model itself, then use that model to retire the remaining
 > hardcoded islands instead of adding more side-channel fields.
 
-> Current status (2026-10-09): Phases 11–12 replace and remove the MathLive
-> renderer. Phases 1–10 below record its historical migration.
+> Current status (2026-10-10): Phases 11–12 replace and remove the MathLive
+> renderer; Phase 14 establishes the TeX companion. The audit appendix records
+> remaining nonconforming constructions. Phases 1–10 are historical.
 
 ## 1. Current State
 
@@ -110,9 +144,9 @@ the same one-box-field model.
 - Do not rewrite the parser, AST builder, or LaTeX normalization.
 - Do not change MathLive snapshot goldens.
 - Do not touch unrelated Lambda runtime or JS engine code.
-- Do not hand-tune new per-case tables. If a case needs a constant, identify the
-  MathLive source of that constant: font metric, TeX sigma, register, style
-  scale, pstrut rule, delimiter recipe, or browser workaround.
+- Do not hand-tune per-case tables. Identify the TeX algorithm, package macro,
+  font metric, or authored dimension behind every constant. A MathLive value
+  or browser workaround alone cannot justify a production layout rule.
 
 ## 4. Remaining Hardcoded Islands
 
@@ -847,3 +881,108 @@ tex -interaction=nonstopmode -output-directory=temp test/lambda/math/tex_referen
 The TeX `showbox` oracle intentionally emits `! OK` diagnostics and exits
 nonzero; inspect its logged dimensions. Production rendering needs no TeX
 installation.
+
+## Appendix — TeX conformance audit (2026-10-10)
+
+Scope: the recent feature additions in `b7f698dd9`, `120aafaa3`, and the hook
+orientation/bracket-label corrections. **These fixes are not collectively
+TeX-conformant.** Restoring a missing construct and producing a recognizable
+image did not establish the correctness of its geometry. The following
+classification records that gap rather than treating the implementation as a
+new layout rule. Architecture remains governed by **D7.2.4 / D7.1.1 /
+D7.1.2v2**; this audit changes no formal language ruling.
+
+| Area | Finding and disposition |
+|---|---|
+| Infinity beside arrows | Root cause was an unintended Helvetica fallback for `\infty`. Plain TeX declares it as ordinary family-2 slot `0x31`; `\rightarrow` is relation family-2 slot `0x21`. TeX's `fetch` selects that font, and ordinary nuclei retain the font baseline. Added the already distributed `KaTeX_Main` CM symbol face to the bundled fallback chain. No infinity-specific translation or ink-centering rule was added. |
+| Closed multiple integral sizes | `\\oiint` / `\\oiiint` used a system glyph with no designed display size. The attempted STIX addition violated the distribution decision and has been removed, including its license, TFM and selection path. The bundled definition now composes the existing `\\iint` / `\\iiint` glyph with `\\bigcirc`, following the explicit TeX macro in `test/lambda/math/tex_bundled_integrals.tex`: centered `\\ooalign` rows, `\\vcenter`, and `\\mathop...\\nolimits`. TeX's operator, axis and script rules govern the box; no glyph is stretched or assigned another font's metrics. The contour is circular rather than STIX's oval. This is the documented bundled fallback, not a claim to reproduce STIX/esint glyphs. Explicit fonts keep their own glyphs and data. |
+| Vertical arrow delimiter heights | The parser did not consume `\uparrow` and the other five vertical arrow commands after `\big`/`\Big`/`\bigg`/`\Bigg`, leaving ordinary small arrows. The bundled profile now uses the original CMSY small glyph metrics and CMEX extension recipes with TeX82 `var_delimiter`: integer shaft repeats, unchanged heads, logical box joins and axis centering. Explicit AMS sizes use `bBigg@`'s text-style box and CMR parenthesis math-strut extent, including inside scripts. Independent TeX box dumps verify all six arrows at all four sizes. This does not certify the remaining delimiter families or the separate horizontal arrow construction. |
+| Stray backslashes between expressions | The `\\` row-break check was in the punctuation parser, but control symbols enter through the command parser. Outside matrices, the command therefore fell through to unknown-command painting. It now produces the existing separator AST used by alignments and serialization. LaTeX's `ltspace.dtx` defines `\\` through `\@normalcr` / `\@gnewline`, emitting layout material rather than glyphs. Independent boxed formulas verify zero natural width for these controls; `\backslash` still paints its symbol. This does not add paragraph line breaking to a standalone math SVG. |
+| KaTeX logo lettering | `\KaTeX` previously painted its mixed-case command name. It now follows the reference template's `\mbox` construction: `KATEX`, a three-quarter-size A with its top aligned to T, and the `\TeX` suffix's lowered E. The kerns come from `test/screenshotter/test.tex` and LaTeX `ltlogos.dtx`; heights and x-height come from the selected text face. Math alphabet commands and script styles do not select the logo's text font. This implements `\KaTeX`; the separate `\TeX` / `\LaTeX` command fallbacks still require their own complete macro handling. |
+| Sup/sub, fractions, atom spacing | The Phase 14 algorithms cite TeX82 `make_scripts`, `make_fraction`, and the math spacing table, with independent `tex_reference.tex` box dumps. They are the correct basis for placement. Their existing tests are narrower than proof that all fonts and constructs agree with TeX. |
+| Bracket/brace annotation mode | The always-stacked default is justified by `mathtools` and plain/LaTeX `\overbrace`/`\underbrace` ending in `\limits`; explicit `\nolimits` overrides it. `limits_box` follows TeX82 `make_op`/big-op-spacing parameters. This validates the annotation policy, not every bracket/brace construction. |
+| Bracket geometry | The previous 180-unit ends and generic overbar gap were unsourced. Replaced for `\overbracket`/`\underbracket` with `mathtools`' display-style nucleus, `.7 * fontdimen5(textfont2)` ends, `.2 * fontdimen5(textfont2)` gap, and `ht(\braceld)` rule. The original CMEX TFM supplies the latter. A profile without the required TeX extension metrics now reports an error instead of guessing. |
+| Hook and other extensible arrow shapes | Flipping the hook fixed its orientation, but the 200/110/60-unit head, curl and shaft geometry is unsourced. **Nonconforming; replacement remains required.** Use the package's `\arrowfill@` / `\ext@arrow` recipe and actual font components, including `\lhook`/`\rhook` and `\joinrel`; the hand-drawn cubic is not an accepted implementation. |
+| Paired reaction arrows | Natural font heads are preferable to fabricated heads. The `.2em` separation, `1.75em` minimum and half-em shortening still need a complete derivation from the supported AMS/mathtools/mhchem macro. Comments and tests repeating those constants do not certify them. **Not certified.** |
+| Brace/group/line-segment construction | Centered labels have the right limit policy. Scaled outlines, the remaining 180-unit group/segment construction, and generic gaps do not reproduce the relevant TeX font assembly and macro spacing. **Nonconforming construction remains.** |
+| CD diagrams and arrays | CD arrow dimensions and offsets are fabricated; array rule/dash spacing also contains unsourced values. AMS alignment classes, scoped cells and explicit row dimensions have a source-level basis, but the whole table/diagram algorithm is **not certified** against `amscd`/`amsmath`/`array`/`arydshln`. |
+| Raise/reflection/vcenter, transforms | Authored `\raisebox` lengths, horizontal reflection, and the `\vcenter` math-axis equation have a rule-based basis. The fixed `\pmb`, phase, actuarial-angle and strikeout constructions do not implement their full package definitions. **Those constructions remain nonconforming.** |
+| Modulo, math strut, boxes | The fixed 250/500-unit modulo spacing and 0.7/0.3em math-strut extents are not the AMS mu-glue rules or `\vphantom(`. Box padding/borders need their proper package registers. **Remaining gaps.** |
+| Images and text | Raster decoding, embedding, scoped text ASTs and verbatim token preservation restore content. The `0.9em` image default is a KaTeX convention, not graphicx's natural size; general graphicx sizing is not certified. Verbatim's wrong typewriter selection and literal quote/font-encoding mismatch remain open. Content support alone is not typography conformance. |
+
+Independent evidence retained under `temp/math-tex-audit/`:
+
+- `font-facts.txt` and before/after SVGs identify the unintended system font;
+  regression tests check CM symbol selection, unchanged baselines and math sizes.
+- `bracket-oracle.tex` / `.log` use installed `mathtools` and TeX `\showbox`:
+  at 10pt, `ht(\braceld) = 1.19997pt`, symbol x-height `4.30554pt`, end height
+  `3.01385pt`, and gap `0.86108pt`. The implementation reads the TFM value;
+  these rounded log values are test evidence, not production constants.
+- `before/` and `after/` retain native PNGs, PDF references and source hashes.
+  Successful comparisons and the 921-case finite-SVG smoke check do not certify
+  the remaining constructions or imply pixel equality.
+
+Integral revision (2026-10-10, user): no new fonts may be added to Lambda
+packages. `temp/math-integrals/` records the superseded STIX experiment;
+its font metrics are not acceptance values for the bundled renderer.
+The replacement evidence is under `temp/math-closed-integrals/`.
+`test/lambda/math/tex_bundled_integrals.tex` defines the bundled macro without
+fitted dimensions: the integral and circle retain their natural sizes and
+baselines, shared `\vphantom` extents retain the complete logical box,
+`\hfil` centers both rows in their maximum width, and `\vcenter`
+centers the composite on the math axis. The compound `\mathop` has no
+character italic correction; default limits stay at the side and explicit
+`\limits` stacks them through the usual operator rules. Its integral selects
+the existing larger face only in display style. The sources for the primitives
+are [LaTeX `ltplain.dtx`](https://github.com/latex3/latex2e/blob/develop/base/ltplain.dtx)
+and TeX82 `make_vcenter`, `make_op` and `make_scripts`; the fallback macro itself
+is Lambda's definition, not an upstream `\oiint` definition.
+`tex_integral_reference.tex` independently executes this macro in pdfLaTeX.
+Font advances and bounds can differ from the CM reference; pixel/style parity
+is not an acceptance gate. Production needs neither STIX nor TeX.
+
+Validation: 26/26 focused math tests and 921/921 SVG corpus formulas pass.
+The independent pdfLaTeX oracle produces 17 box dumps and passes 18 axis,
+style and limit-mode relations, with only the expected `! OK` diagnostics.
+`make test-lambda-baseline` passes 6,581/6,582 checks; the sole failure is the
+existing `edit_view_only` sanitized-attribute/math-source mismatch, matching
+the earlier row-separator recheck. `baseline-final.log` records the settled
+source run; the earlier `baseline.log` overlapped an edit and is invalid.
+Native `Integrands` painting was reviewed against the independent PDF;
+its font/contour differences remain diagnostic rather than acceptance values.
+
+Vertical-arrow evidence is under `temp/math-vertical-arrows/`: `before/` and
+`after/` retain the `DelimiterSizing` native render and independent PDF.
+The checked-in `test/lambda/math/tex_delimiter_reference.tex` oracle produces
+27 delimiter box dumps: all six arrows at four explicit sizes, script-style `\Bigg`,
+and small/tall automatic delimiters. At 10pt, the explicit height/depth pairs
+are `8.50006/3.50006`, `11.50009/6.50009`, `14.50012/9.50012` and
+`17.50015/12.50015` points. Regression tests verify those logical dimensions,
+unscaled head pieces, font selection and repeat counts. Only the affected
+automatic-arrow SVG in the HTML golden changed; its source and surrounding
+content were reviewed before replacement.
+
+Row-separator evidence is under `temp/math-row-separators/`: the same
+`DelimiterSizing` formula previously painted three unwanted backslashes and
+now paints none. The delimiter reference oracle also compares `a\\b\\c\\`
+with `abc`, and text-box row breaks with their plain text. The definitions
+come from LaTeX's [`ltspace.dtx`](https://github.com/latex3/latex2e/blob/develop/base/ltspace.dtx),
+not from the screenshot. Regression tests check separator ASTs, painting,
+serialization, valid text escapes and literal `\backslash` separately.
+
+Logo evidence is under `temp/math-katex-logo/`: `MathDefaultFonts` reproduces
+the mixed-case fallback, and `after/` retains native/PDF comparisons in four
+math font contexts. `test_math_katex_logo.ls` checks uppercase painting,
+text-font selection, the A and E boxes, size/style handling and serialization.
+`tex_logo_reference.tex` reuses the comparison's KaTeX macro definition and
+independently dumps eight pdfLaTeX boxes. The kernels are defined in
+[`ltlogos.dtx`](https://github.com/latex3/latex2e/blob/develop/base/ltlogos.dtx).
+CMU's outlines and size-independent font metrics differ from pdfLaTeX's
+optical CM sizes; the box evidence establishes the macro recipe and style
+policy, not pixel equality or identical metrics for those different fonts.
+
+For each remaining construction, obtain its package recipe and required font
+data first, implement shared TeX box/glue/assembly operations, then validate
+with independent TeX box dumps and native painting across text, display,
+script and scriptscript styles. Never accept a screenshot-fit substitute or
+refresh a golden as the sole evidence of a fix.

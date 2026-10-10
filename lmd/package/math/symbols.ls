@@ -45,7 +45,7 @@ let greek_upper = {
 
 let bin_operators = {
     pm: "±", mp: "∓", times: "×", div: "÷",
-    cdot: "⋅", ast: "∗", star: "⋆", circ: "∘",
+    cdot: "⋅", ast: "∗", star: "⋆", circ: "∘", bigcirc: "◯",
     bullet: "∙", oplus: "⊕", ominus: "⊖", otimes: "⊗",
     oslash: "⊘", odot: "⊙", dagger: "†", ddagger: "‡",
     cap: "∩", cup: "∪", sqcap: "⊓", sqcup: "⊔",
@@ -213,6 +213,9 @@ pub fn lookup_symbol(cmd) {
 }
 
 pub fn large_symbols() => [for (key, value at big_operators) value]
+
+// The bundled TeX overlay uses the existing multiple integral and big-circle glyphs.
+pub fn closed_integral_base(ch) => if (ch == "∯") "∬" else if (ch == "∰") "∭" else null
 
 // classify a symbol command into atom type
 pub fn classify_symbol(cmd) {

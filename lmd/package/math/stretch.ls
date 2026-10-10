@@ -9,6 +9,25 @@ fn expanded(parts, repeats) => [
 fn overlaps(parts) => [for (i in 1 to (len(parts) - 1))
     min(parts[i - 1].end_connector, parts[i].start_connector)]
 
+// TeX82 var_delimiter: butt logical char boxes together and use the fewest repeats.
+pub fn tex_assembly(recipe, target, scale, atom) {
+    let module = bx.glyph(recipe.repeat,scale,atom)
+    let step = module.height + module.depth
+    let fixed = sum([for (g in [recipe.top,recipe.middle,recipe.bottom] where g != null)
+        (g.height + g.depth) * scale])
+    let count = if (step <= 0.0) 0 else max(0,int(ceil((target - fixed) /
+        (step * (if (recipe.middle != null) 2.0 else 1.0)))))
+    let pieces = [*if (recipe.top != null) [recipe.top] else [],
+        *[for (i in 1 to count) recipe.repeat],
+        *if (recipe.middle != null) [recipe.middle,*[for (i in 1 to count) recipe.repeat]] else [],
+        *if (recipe.bottom != null) [recipe.bottom] else []]
+    let boxes = [for (g in pieces) bx.glyph(g,scale,atom)]
+    let entries = [for (i,b in boxes) {box:b, x:0.0,
+        y:sum([for (j in 0 to (i - 1)) boxes[j].height + boxes[j].depth]) + b.height}]
+    let result = bx.compose(entries,module.width,atom);
+    {*:result, body:<g 'data-math-kind':"tex-delimiter", result.body>}
+}
+
 // Ordinary fonts have no arrow assembly: extend the shaft without distorting the head.
 pub fn arrow(g, target, scale, right, axis, thickness) map | error {
     if (len(g.horizontal.parts) > 0 or len(g.horizontal.variants) > 0)

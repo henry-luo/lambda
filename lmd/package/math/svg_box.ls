@@ -11,13 +11,16 @@ pub fn empty(width = 0.0) => make(<g>, width, 0.0, 0.0)
 pub fn glyph(g, scale, atom = "mord") {
     let ink = g.ink
     // Unencoded OpenType construction pieces still need their font-local outline.
-    let body = if (g.codepoint != null and g.text_family != null)
+    let painted = if (g.codepoint != null and g.text_family != null)
         <text x: 0, y: 0, 'font-family': g.text_family, 'font-size': g.text_size * scale,
             'font-weight': g.text_weight, 'font-style': g.text_style, chr(g.codepoint)>
         else <path d: g.path, transform: "scale(" ++ string(scale) ++ ")">;
+    let body = if (g.source_baseline != null) <g transform:"translate(0 " ++ string(g.source_baseline * scale) ++ ")", painted>
+        else painted;
+    // Matched TFM logical extents take precedence over outline bounds for TeX glyphs.
     let bx = make(body,
-        g.advance * scale, if (ink != null) max(0.0, 0.0 - ink.top * scale) else 0.0,
-        if (ink != null) max(0.0, ink.bottom * scale) else 0.0, atom);
+        g.advance * scale, if (g.height != null) g.height * scale else if (ink != null) max(0.0, 0.0 - ink.top * scale) else 0.0,
+        if (g.depth != null) g.depth * scale else if (ink != null) max(0.0, ink.bottom * scale) else 0.0, atom);
     // Ordinary combining marks have zero advance; their ink locates the attachment.
     let attachment = if (g.accent != null) g.accent
         else if (g.has_math == false and g.advance == 0.0 and ink != null) (ink.left + ink.right) / 2.0

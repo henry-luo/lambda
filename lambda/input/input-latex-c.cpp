@@ -458,10 +458,6 @@ private:
             position_++;
             return builder_.createSymbolItem("row_sep");
         }
-        if (c == '\\' && position_ < length_ && source_[position_] == '\\') {
-            position_++;
-            return builder_.createSymbolItem("row_sep");
-        }
         if (c == '-' && position_ < length_ && source_[position_] == '>') {
             position_++;
             tag = "relation";
@@ -502,7 +498,9 @@ private:
         if (!read_command(name, sizeof(name), full, sizeof(full))) return ItemNull;
         if (name[0] == '\0') return ItemNull;
         if (name[0] == ' ' || name[0] == '\t' || name[0] == '\n') return builder_.createStringItem(" ");
-        if (strcmp(name, "cr") == 0) return builder_.createSymbolItem("row_sep");
+        // parse_primary sends control symbols here; \\ is a row break, never a printed backslash.
+        if (strcmp(name, "\\") == 0 || strcmp(name, "cr") == 0)
+            return builder_.createSymbolItem("row_sep");
         if (!allow_infix_ && is_infix_fraction_command(name)) return ItemNull;
 
         if (strcmp(name, "verb") == 0) {
@@ -1085,12 +1083,18 @@ private:
         size_t end = latex_scan_command(source_, length_, position_, name,
                                         sizeof(name), full, sizeof(full));
         if (end == 0) return false;
-        return strcmp(name, "{") == 0 || strcmp(name, "}") == 0 ||
-            strcmp(name, "|") == 0 || strcmp(name, "vert") == 0 ||
-            strcmp(name, "Vert") == 0 || strcmp(name, "lvert") == 0 ||
-            strcmp(name, "rvert") == 0 || strcmp(name, "lVert") == 0 ||
-            strcmp(name, "rVert") == 0 || strcmp(name, "langle") == 0 ||
-            strcmp(name, "rangle") == 0;
+        // fontmath.ltx declares vertical arrows, floors and ceilings as delimiter tokens too.
+        static const char* const delimiters[] = {
+            "{", "}", "|", "vert", "Vert", "lvert", "rvert", "lVert", "rVert",
+            "langle", "rangle", "lbrace", "rbrace", "lceil", "rceil", "lfloor", "rfloor",
+            "uparrow", "downarrow", "updownarrow", "Uparrow", "Downarrow", "Updownarrow",
+            "backslash", "arrowvert", "Arrowvert", "bracevert", "lmoustache", "rmoustache",
+            "lgroup", "rgroup", "lbrack", "rbrack"
+        };
+        for (const char* delimiter : delimiters) {
+            if (strcmp(name, delimiter) == 0) return true;
+        }
+        return false;
     }
 
     Item parse_delimiter_group(const char* full) {

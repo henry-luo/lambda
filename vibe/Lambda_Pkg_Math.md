@@ -1,5 +1,25 @@
 # Lambda Math Package Proposal
 
+> **DESIGN RULE 1 — TeX conformance before visual similarity.**
+> User-ratified 2026-10-10: every math layout fix MUST follow TeX math-list
+> algorithms and the supported command's TeX/LaTeX package definition, using
+> measured font data or its explicitly matched TeX companion. No screenshot-fit
+> offsets, gaps, glyph centering, curves, or per-case constants. Missing required
+> data must remain an explicit limitation. MathLive/KaTeX are comparison tools,
+> not layout authority. See the [current rule and audit](Lambda_Pkg_Math5.md)
+> for sources and acceptance evidence. This is package policy under **D7.2.4**;
+> resource IO and native font facts follow **D7.1.1 / D7.1.2v2**. The original
+> MathLive proposal below is historical wherever it conflicts with this rule.
+
+> **DESIGN RULE 2 — Do not add fonts to Lambda packages.**
+> User-ratified 2026-10-10: math support MUST work with the existing bundled
+> CMU and KaTeX fonts. Do not add font files or families, restore STIX, or add a
+> font dependency to improve comparison screenshots. TeX macro compositions
+> may reuse existing glyphs, with a documented definition and metric-derived
+> layout under Rule 1. Unavailable glyph constructions remain explicit
+> limitations. Caller-supplied fonts are optional and do not change this
+> distribution policy (**D7.2.4 / D7.1.2v2**).
+
 > **Location:** `lambda/doc/math/`
 > **Reference:** MathLive (`ref/mathlive/`), Chart package (`lambda/chart/`)
 > **Goal:** Turn LaTeX math into static (and eventually editable) HTML, written entirely in Lambda Script

@@ -63,7 +63,8 @@ fn atom_type(ch) {
 
 fn character(ch, c, atom, literal = false) {
     let actual = if (ch == "-" and not literal) "−" else ch
-    bx.glyph(font.character(c.profile, actual, c.variant)^, scale(c), atom)
+    if (not literal and contains(c.profile.closed_composites,actual)) closed_integral(actual,c)^
+    else bx.glyph(font.character(c.profile, actual, c.variant)^, scale(c), atom)
 }
 
 fn text(text_value, c, literal = false) {
@@ -151,7 +152,10 @@ fn node(n, c) {
         case 'symbol': text(value(n), c)^
         case 'number': text(value(n), {*:c, variant: "normal"})^
         case 'digit': text(value(n), {*:c, variant: "normal"})^
-        case 'unicode_text': text(value(n), c, true)^
+        // Contiguous Unicode operators still need math-list atom spacing and script policy.
+        case 'unicode_text': if (c.text_mode != true and len([for (ch in split(value(n),"")
+            where contains(c.profile.closed_composites,ch)) ch]) > 0) text(value(n),c)^
+            else text(value(n),c,true)^
         case 'raw_math_text': text(value(n), c, true)^
         case 'text_command': text_command(n, c)^
         case 'text_group': group(util.content_items(n), {*:c, text_mode:true, variant:c.text_variant or "normal"})^
@@ -195,6 +199,7 @@ fn command(raw, c) {
     let unicode = sym.lookup_symbol(key)
     let op = sym.get_operator_name(key)
     if (op != null) {*:text(op, c, true)^, type: "mop", limits: sym.is_limit_op(key)}
+    else if (contains(c.profile.closed_composites,unicode)) closed_integral(unicode,c)^
     else if (unicode != null) {
         let atom = sym.classify_symbol(key)
         let is_large = atom == "mop"
@@ -204,10 +209,39 @@ fn command(raw, c) {
         let centered = if (is_large) center_axis(result, c) else result;
         {*:centered, type: atom, limits: is_large and (key == "intop" or not contains(key, "int"))}
     } else if (key == "mathstrut") {*:bx.empty(), height:0.7 * font.UNITS * scale(c), depth:0.3 * font.UNITS * scale(c)}
-    else if (contains(["TeX", "LaTeX", "KaTeX"], key)) text(key, {*:c, text_variant:"normal"}, true)^
+    else if (key == "KaTeX") katex_logo(c)^
+    else if (contains(["TeX", "LaTeX"], key)) text(key, {*:c, text_variant:"normal"}, true)^
     else if (contains([",", ":", ";", "!", "quad", "qquad", "enspace", "thinspace"], key))
         space(<space_command cmd: "\\" ++ key>, c)
     else text(raw, {*:c, variant: "normal"}, true)^
+}
+
+fn closed_integral(ch, c) {
+    // tex_bundled_integrals.tex: mathop/vcenter, centered ooalign rows and shared vphantom extents.
+    let base = command(if (sym.closed_integral_base(ch) == "∬") "iint" else "iiint",c)^
+    let circle = character("◯",{*:c,variant:"normal"},"mord")^
+    let width = max(base.width,circle.width)
+    let overlay = bx.compose([{box:base,x:(width - base.width) / 2.0,y:0.0},
+        {box:circle,x:(width - circle.width) / 2.0,y:0.0}],width,"mop");
+    {*:center_axis(overlay,c),limits:false}
+}
+
+fn katex_logo(c) {
+    // screenshotter/test.tex uses an mbox; math alphabet and script styles do not select its font.
+    let context = with_style(c,"text")
+    let variant = c.text_variant or "normal"
+    let letters = [for (ch in ["K","T","E","X"]) text(ch,context,true)^]
+    let a = text("A",{*:context,size:c.size * 0.75},true)^
+    let em = font.UNITS * text_scale(c)
+    // Its vbox aligns A's top to T; ltlogos.dtx supplies the lowered E and TeX kerns.
+    let a_x = letters[0].width - 0.17 * em
+    let t_x = a_x + a.width - 0.15 * em
+    let e_x = t_x + letters[1].width - 0.1667 * em
+    let x_x = e_x + letters[2].width - 0.125 * em;
+    bx.compose([{box:letters[0],x:0.0,y:0.0}, {box:a,x:a_x,y:a.height - letters[1].height},
+        {box:letters[1],x:t_x,y:0.0},
+        {box:letters[2],x:e_x,y:0.5 * font.text_metrics(c.profile,variant).x_height * text_scale(c)},
+        {box:letters[3],x:x_x,y:0.0}],x_x + letters[3].width)
 }
 
 fn text_command(n, c) {
@@ -266,7 +300,9 @@ fn scripts(n, c) {
 fn side_scripts(n, c, base) {
     let sup = node(n.sup, script(c))^
     let sub = node(n.sub, {*:script(c), cramped: true})^
-    let limits = n.modifier == "limits" or (n.modifier != "nolimits" and c.style == "display" and base.limits == true)
+    // Bracket and brace annotations stack in every style; operators default to display only.
+    let limits = n.modifier == "limits" or (n.modifier != "nolimits" and
+        (base.limits == "always" or (c.style == "display" and base.limits == true)))
     if (limits) limits_box(base, if (n.sub != null) sub else null, if (n.sup != null) sup else null, c)
     else {
         // TeX Rule 18 exempts a character nucleus; compound drops use script-size parameters.
@@ -357,17 +393,34 @@ fn fraction(n, c) {
 
 fn center_axis(b, c) => bx.shifted(b, 0.0, (b.height - b.depth) / 2.0 - metric(c, "axis_height"), b.width)
 
+// TeX make_left_right uses delimiterfactor=901 and delimitershortfall=5pt.
+fn delimiter_target(extent, c) => max(extent * 901.0 / 1000.0, extent - dimension("5pt", c))
+
+fn tex_arrow(recipe, target, c, atom) {
+    let size = if (c.style == "scriptscript") 2 else if (c.style == "script") 1 else 0
+    // var_delimiter searches the current symbol size, then successively larger sizes.
+    let small = [for (i in 0 to size) (
+        let index = size - i,
+        let amount = font.scale(c.profile,["text","script","scriptscript"][index]) * text_scale(c),
+        {glyph:recipe.small[index], scale:amount})]
+    let adequate = [for (v in small where (v.glyph.height + v.glyph.depth) * v.scale >= target) v];
+    if (len(adequate) > 0) bx.glyph(adequate[0].glyph,adequate[0].scale,atom)
+    else stretch.tex_assembly(recipe,target,text_scale(c),atom)
+}
+
 fn delimiter(raw, target, c, atom) {
     let key = command_name(raw)
     let ch = if (raw == "\\|") "‖" else sym.lookup_symbol(key) or key
+    let recipe = font.tex_arrow(c.profile,ord(ch))^
     if (ch == "." or ch == "") bx.empty(dimension("1.2pt", c))
+    else if (recipe != null) center_axis(tex_arrow(recipe,target,c,atom),c)
     else center_axis(stretch.glyph(font.glyph(c.profile, ord(ch))^, target, true, scale(c), atom)^, c)
 }
 
 fn fence_box(body, left, right, c) {
     let axis = metric(c, "axis_height")
     let extent = 2.0 * max(body.height - axis, body.depth + axis)
-    let target = max(extent * 901.0 / 1000.0, extent - dimension("5pt", c))
+    let target = delimiter_target(extent,c)
     bx.row([delimiter(left, target, c, "mopen")^, body, delimiter(right, target, c, "mclose")^], "minner")
 }
 
@@ -375,14 +428,21 @@ fn delimited(n, c) {
     let items = if (n.body != null) util.content_items(n.body) else util.content_items(n)
     let body = group(items, c)^
     let extent = 2.0 * max(body.height - metric(c, "axis_height"), body.depth + metric(c, "axis_height"))
-    let target = max(extent * 0.901, extent - dimension("5pt", c));
+    let target = delimiter_target(extent,c);
     fence_box(group(items, {*:c, delimiter_target:target})^, string(n.left or "."), string(n.right or "."), c)^
 }
 
 fn sized_delimiter(n, c) {
-    // Explicit TeX sizes are author requests in em, not font size-face indices.
     let level = sym.get_delim_size(command_name(string(n.size or n.cmd or "big"))) or 1.0
-    delimiter(string(n.delim or n.value or util.text_of(n)), font.UNITS * scale(c) * level, c, "mord")^
+    let raw = string(n.delim or n.value or util.text_of(n))
+    let ch = sym.lookup_symbol(command_name(raw)) or raw
+    let recipe = font.tex_arrow(c.profile,ord(ch))^;
+    if (recipe != null) {
+        // amsmath bBigg@: a text-style hbox and 1.2 * math-strut extent times 1/1.5/2/2.5.
+        let context = with_style(c,"text")
+        let extent = c.profile.tex.math_strut_extent * level * text_scale(c);
+        delimiter(raw,delimiter_target(extent,context),context,"mord")^
+    } else delimiter(raw,font.UNITS * scale(c) * level,c,"mord")^
 }
 
 fn radical(n, c) {
@@ -405,7 +465,9 @@ fn radical(n, c) {
 
 fn accent(n, c, attached = null) {
     let key = command_name(string(n.cmd))
-    let base = node(n.base, if (key == "underline") c else {*:c, cramped: true})^
+    let bracket = contains(["overbracket", "underbracket"], key)
+    let base = node(n.base, if (bracket) with_style(c,"display")
+        else if (key == "underline") c else {*:c, cramped: true})^
     if (contains(["overline", "underline", "underbar"], key)) {
         let above = key == "overline"
         let thickness = metric(c, if (above) "overbar_rule_thickness" else "underbar_rule_thickness")
@@ -416,11 +478,14 @@ fn accent(n, c, attached = null) {
             depth: result.depth + (if (above) 0.0 else metric(c, "underbar_extra_descender"))}
     } else if (contains(["overbracket", "underbracket", "overlinesegment", "underlinesegment", "overgroup", "undergroup"], key)) {
         let above = starts_with(key, "over")
-        let mark = bracket_mark(key, base.width, c)
-        let y = if (above) 0.0 - base.height - metric(c, "overbar_vertical_gap") - mark.depth
-            else base.depth + metric(c, "underbar_vertical_gap") + mark.height
+        let mark = bracket_mark(key, base.width, c)^
+        // mathtools inserts .2 of the text symbol font's x-height at the nucleus.
+        let gap = if (bracket) 0.2 * metric(with_style(c,"text"),"math_x_height")
+            else metric(c,if (above) "overbar_vertical_gap" else "underbar_vertical_gap")
+        let y = if (above) 0.0 - base.height - gap - mark.depth
+            else base.depth + gap + mark.height
         let result = bx.compose([{box:base, x:0.0, y:0.0}, {box:mark, x:0.0, y:y}], base.width);
-        {*:result, limits:contains(key, "bracket")}
+        {*:result, limits:if (contains(key, "bracket")) "always" else false}
     } else if (key == "overbrace" or key == "underbrace") {
         let above = key == "overbrace"
         let g = font.glyph(c.profile, ord(if (above) "⏞" else "⏟"))^
@@ -428,7 +493,7 @@ fn accent(n, c, attached = null) {
         let y = if (above) 0.0 - base.height - metric(c, "stretch_stack_gap_above_min") - mark.depth
             else base.depth + metric(c, "stretch_stack_gap_below_min") + mark.height
         let result = bx.compose([{box: base, x: 0.0, y: 0.0}, {box: mark, x: (base.width - mark.width) / 2.0, y: y}], base.width);
-        {*:result, limits: true}
+        {*:result, limits: "always"}
     } else {
         let ch = sym.get_accent(key)
         if (ch == null) error("math: unsupported accent " ++ key)
@@ -478,9 +543,12 @@ fn arrow(n, c) {
 // Shafts grow with the label; hooks and arrowheads keep their em-sized geometry.
 fn arrow_shape(key, width, c) {
     let s = scale(c)
-    let w = max(width, 700.0 * s)
     let head = 200.0 * s
     let half = 110.0 * s
+    let hook = contains(key, "hook")
+    // An outward cubic reaches three quarters of its control-point offset.
+    let hook_inset = if (hook) 0.75 * head else 0.0
+    let w = max(width, 700.0 * s) - hook_inset
     let double = contains(key, "Right") or contains(key, "Left")
     let harpoon = contains(key, "harpoon")
     let left = contains(key, "left") or contains(key, "Left")
@@ -495,17 +563,33 @@ fn arrow_shape(key, width, c) {
         if (contains(key, "twohead")) <path d: if (right)
             "M" ++ string(w - 2.0 * head) ++ " " ++ string(0.0 - half) ++ " L" ++ string(w - head) ++ " 0 L" ++ string(w - 2.0 * head) ++ " " ++ string(half)
             else "M" ++ string(2.0 * head) ++ " " ++ string(0.0 - half) ++ " L" ++ string(head) ++ " 0 L" ++ string(2.0 * head) ++ " " ++ string(half)>
-        if (contains(key, "hook")) <path d: if (right)
-            "M0 0 C" ++ string(head) ++ " 0 " ++ string(head) ++ " " ++ string(0.0 - 2.0 * half) ++ " 0 " ++ string(0.0 - 2.0 * half)
-            else "M" ++ string(w) ++ " 0 C" ++ string(w - head) ++ " 0 " ++ string(w - head) ++ " " ++ string(0.0 - 2.0 * half) ++ " " ++ string(w) ++ " " ++ string(0.0 - 2.0 * half)>
+        if (hook) <path d: if (right)
+            "M0 0 C" ++ string(0.0 - head) ++ " 0 " ++ string(0.0 - head) ++ " " ++ string(0.0 - 2.0 * half) ++ " 0 " ++ string(0.0 - 2.0 * half)
+            else "M" ++ string(w) ++ " 0 C" ++ string(w + head) ++ " 0 " ++ string(w + head) ++ " " ++ string(0.0 - 2.0 * half) ++ " " ++ string(w) ++ " " ++ string(0.0 - 2.0 * half)>
         if (contains(key, "mapsto")) <path d: "M0 " ++ string(0.0 - half) ++ " V" ++ string(half)>
     >
     let axis = metric(c, "axis_height");
-    bx.make(<g 'data-math-kind':"extensible-arrow", transform:"translate(0 " ++ string(0.0 - axis) ++ ")", path>,
-        w, axis + 2.0 * half, max(0.0, half - axis), "mrel")
+    bx.make(<g 'data-math-kind':"extensible-arrow", transform:"translate(" ++ string(if (right) hook_inset else 0.0) ++ " " ++ string(0.0 - axis) ++ ")", path>,
+        w + hook_inset, axis + 2.0 * half, max(0.0, half - axis), "mrel")
 }
 
 fn bracket_mark(key, width, c) {
+    if (contains(["overbracket", "underbracket"], key)) {
+        // mathtools' rule is ht(braceld); end height is .7 * fontdimen5(textfont2).
+        if (c.profile.tex == null) error("math: bracket requires TeX extension-font metrics")
+        else {
+            let text_context = with_style(c,"text")
+            let rule = c.profile.tex.bracket_rule * text_scale(c)
+            let tick = 0.7 * metric(text_context,"math_x_height")
+            let above = key == "overbracket"
+            let bar_y = if (above) 0.0 - rule else 0.0
+            let tick_y = if (above) 0.0 else 0.0 - tick;
+            bx.make(<g fill:"currentColor",
+                <rect x:0.0, y:bar_y, width:width, height:rule>
+                for (x in [0.0,width - rule]) <rect x:x, y:tick_y, width:rule, height:tick>
+            >,width,if (above) rule else tick,if (above) tick else rule)
+        }
+    } else {
     let h = 180.0 * scale(c)
     let sign = if (starts_with(key, "under")) -1.0 else 1.0
     let tick = sign * h
@@ -513,6 +597,7 @@ fn bracket_mark(key, width, c) {
         else "M0 " ++ string(tick) ++ " V0 H" ++ string(width) ++ " V" ++ string(tick);
     bx.make(<path d:d, fill:"none", stroke:"currentColor", 'stroke-width':metric(c,"fraction_rule_thickness")>,
         width, if (sign < 0.0) h else 0.0, if (sign > 0.0) h else 0.0)
+    }
 }
 
 fn transformed(n, c) {

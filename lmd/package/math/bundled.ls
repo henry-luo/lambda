@@ -1,7 +1,8 @@
 // Reuse distributed CMU/KaTeX faces; this is resource selection, not geometry.
 // Binary acquisition stays in Lambda IO (D7.1.2v2).
 pub let FAMILY = "Computer Modern Serif"
-pub let SYMBOL_FAMILIES = "Computer Modern Serif,KaTeX_Size1,KaTeX_AMS"
+// CM math symbols must resolve before platform fallback (plain.tex family 2).
+pub let SYMBOL_FAMILIES = "Computer Modern Serif,KaTeX_Size1,KaTeX_AMS,KaTeX_Main"
 pub let VARIANT_FAMILIES = {sans: "Computer Modern Sans", mono: "Computer Modern Typewriter",
     script: "KaTeX_Script", cal: "KaTeX_Caligraphic", fraktur: "KaTeX_Fraktur", double: "KaTeX_AMS"}
 

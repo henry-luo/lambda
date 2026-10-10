@@ -70,7 +70,8 @@ fn collect(node) {
     if (node is string or node is symbol) {
         let text = string(node)
         let command = if (slice(text, 0, 1) == "\\") slice(text, 1, len(text)) else text
-        text ++ (sym.lookup_symbol(text) or "") ++ (sym.get_accent(command) or "")
+        text ++ (sym.lookup_symbol(text) or "") ++ (sym.get_accent(command) or "") ++
+            (if (command == "KaTeX") "KATEX" else "")
     } else if (node is array) util.str_join([for (child in node) collect(child)], "")
     else if (node is element) {
         let attrs = ["value", "name", "cmd", "text", "base", "sub", "sup", "numer", "denom",
@@ -99,10 +100,17 @@ pub fn prepare(ast, options) map | error {
     let variant_families = if (use_bundled) bundled.VARIANT_FAMILIES else {sans: "sans-serif", mono: "monospace"}
     // One batch owns all glyphs used by this formula; no mutable last-font state.
     let source = collect(ast)
-    let chars = unique(split(source ++ "()[]{}|‖⌈⌉⌊⌋⟨⟩√̂̃̄⃗̇̈⏞⏟←→↔⇀↽− /", ""))
+    let closed_composites = if (use_bundled) [for (ch in unique(split(source,""))
+        where sym.closed_integral_base(ch) != null) ch] else []
+    let components = util.str_join([for (ch in closed_composites) sym.closed_integral_base(ch) ++ "◯"],"")
+    let chars = unique(split(source ++ components ++ "()[]{}|‖⌈⌉⌊⌋⟨⟩√̂̃̄⃗̇̈⏞⏟←→↔⇀↽− /", ""))
     let styles = ["normal", "auto", "italic", "bold", "bolditalic", "script", "fraktur", "double", "sans", "sansitalic", "mono"]
     let points = unique([for (ch in chars, style in styles) variant(ch, style)])
     let large_points = [for (ch in sym.large_symbols() where contains(chars, ch)) ord(ch)]
+    let arrow_data = if (use_bundled and len([for (ch in ["↑","↓","↕","⇑","⇓","⇕"] where contains(chars,ch)) ch]) > 0)
+        tex_metrics.vertical_arrows()^ else null
+    let arrow_points = [for (p in arrow_data.pieces) p.codepoint]
+    let arrow_small_points = [for (r in arrow_data.recipes) r.codepoint]
     let native = measure({font_family: family, font_size: UNITS}, points, faces, family)
     if (native == null) error("math: cannot read selected font: " ++ family)
     else {
@@ -121,7 +129,9 @@ pub fn prepare(ast, options) map | error {
             font_weight: weight, font_style: slant}, points, faces, style_family)})]
     // Resolve only absent source characters; never replace a Latin variable with
     // a different font's mathematical-alphabet glyph just to obtain italics.
-    let fallback_points = [for (ch in chars where lookup({points: points}, native, ord(ch)) == null) ord(ch)]
+    // Composed symbols acquire only their bundled components, never a platform glyph.
+    let fallback_points = [for (ch in chars where not contains(closed_composites, ch) and
+        lookup({points: points}, native, ord(ch)) == null) ord(ch)]
     let fallback_facts = if (len(fallback_points) == 0) null else
         measure({font_family: if (use_bundled) bundled.SYMBOL_FAMILIES else family,
             font_size: UNITS, fallback: true}, fallback_points, faces)
@@ -134,6 +144,12 @@ pub fn prepare(ast, options) map | error {
         fallback_points: fallback_points, fallback_facts: fallback_facts, faces: faces,
         reaction_points: reaction_points,
         reaction_facts: if (use_bundled) measure({font_family:"KaTeX_Main", font_size:UNITS}, reaction_points, faces, "KaTeX_Main") else null,
+        closed_composites: closed_composites,
+        arrow_data:arrow_data, arrow_points:arrow_points, arrow_small_points:arrow_small_points,
+        arrow_facts:if (arrow_data != null) measure({font_family:"KaTeX_Size1",font_size:UNITS},
+            arrow_points,faces,"KaTeX_Size1") else null,
+        arrow_small_facts:if (arrow_data != null) measure({font_family:"KaTeX_Main",font_size:UNITS},
+            arrow_small_points,faces,"KaTeX_Main") else null,
         tex: if (use_bundled) tex_metrics.load()^ else null,
         large_points: large_points,
         large_facts: if (use_bundled and len(large_points) > 0)
@@ -172,11 +188,41 @@ pub fn glyph(profile, cp) map | error {
     else result
 }
 
+// Matched TFM supplies the selected glyph's logical box and italic correction.
+fn with_tex_metrics(g, m) => if (m == null) g else
+    {*:g, advance:m.width, height:m.height, depth:m.depth, italic:m.italic}
+
+fn arrow_piece(profile, slot) map | error {
+    let piece = [for (p in profile.arrow_data.pieces where p.slot == slot) p][0]
+    let g = lookup({points:profile.arrow_points},profile.arrow_facts,piece.codepoint);
+    if (piece == null or g == null) error("math: bundled CMEX arrow piece is unavailable")
+    // Size1 pieces are baseline-aligned at the bottom; CMEX's original baseline is at the top.
+    else {*:with_tex_metrics(g,piece.metrics), advance:piece.metrics.width + piece.metrics.italic,
+        source_baseline:piece.metrics.depth}
+}
+
+pub fn tex_arrow(profile, cp) {
+    let recipe = [for (r in profile.arrow_data.recipes where r.codepoint == cp) r][0]
+    if (recipe == null) null
+    else {
+        let base = lookup({points:profile.arrow_small_points},profile.arrow_small_facts,cp)
+        let parts = [for (i,slot in recipe.extension)
+            if (i < 3 and slot == 0) null else arrow_piece(profile,slot)^];
+        if (base == null) error("math: bundled CMSY arrow is unavailable")
+        else {small:[for (m in recipe.small) with_tex_metrics(base,m)],
+            top:parts[0], middle:parts[1], bottom:parts[2], repeat:parts[3]}
+    }
+}
+
+fn style_facts(profile, style) => [for (entry in profile.style_faces where entry.style == style) entry.facts][0]
+
+pub fn text_metrics(profile, style) => (style_facts(profile,style) or profile.facts).font_metrics
+
 pub fn character(profile, ch, style) map | error {
     let cp = variant(ch, style)
     let preferred = lookup(profile, profile.facts, cp)
     let actual = effective_style(ch, style)
-    let styled = [for (entry in profile.style_faces where entry.style == actual) entry.facts][0]
+    let styled = style_facts(profile,actual)
     let ordinary = lookup(profile, styled or profile.facts, ord(ch))
     if (preferred != null) preferred
     else if (ordinary != null) ordinary
