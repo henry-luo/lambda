@@ -7376,6 +7376,123 @@ TEST_F(SecondaryViewTest, ComputedPropertyBindingsUseTheSemanticParentAndRetainT
     EXPECT_EQ(snapshot_pixel(surface, sample_x, sample_y), 0xff0000ffu); image_surface_destroy(surface);
 }
 
+TEST_F(SecondaryViewTest, ComputedTypographyBindingsPreserveFamilyGroupsOwnerSpacingAndRetainedEditions) {
+    init_vector_engine();
+    stylesheet("@page{size:300px 180px;margin:10px}p,div{margin:0;line-height:36px}");
+    ASSERT_TRUE(source->set_attribute("xmlns:r", RADIANT_PAGE_NAMESPACE));
+    DomElement* parent = block(nullptr, "font:10px Arial;font-family:'Missing, grouped',Arial,sans-serif;letter-spacing:calc(10% + .1em);word-spacing:-.1em", "div");
+    ASSERT_NE(parent, nullptr);
+    DomElement* wrapper = block(nullptr, "font-size:99px;letter-spacing:19px", "div", parent); ASSERT_NE(wrapper, nullptr);
+    ASSERT_TRUE(wrapper->set_attribute("r:style-transparent", "true"));
+    DomElement* child = block("Family and spacing", "font-size:30px;font-family:var(--family);letter-spacing:var(--letter);"
+        "word-spacing:calc(var(--word) * 2);padding-top:var(--letter);background-color:#225588", "div", wrapper);
+    ASSERT_NE(child, nullptr);
+    ASSERT_TRUE(child->set_attribute("r:property-bindings", "--family:parent(font-family);--letter:parent(letter-spacing);--word:parent(word-spacing)"));
+    ViewTree* tree = secondary(); PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
+    ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    const ViewCssStyle* style = view_css_resolve(tree, child); ASSERT_NE(style, nullptr);
+    EXPECT_EQ(style->parent->source, parent); EXPECT_FLOAT_EQ(style->font.letter_spacing, 2); EXPECT_FLOAT_EQ(style->font.word_spacing, -2);
+    ASSERT_NE(style->padding[0], nullptr); EXPECT_DOUBLE_EQ(style->padding[0]->data.length.value, 2);
+    const CssValue* family = view_css_computed_property(tree, style, "font-family"); ASSERT_NE(family, nullptr);
+    ASSERT_EQ(family->type, CSS_VALUE_TYPE_LIST); ASSERT_EQ(family->data.list.count, 3); EXPECT_TRUE(family->data.list.comma_separated);
+    ASSERT_EQ(family->data.list.values[0]->type, CSS_VALUE_TYPE_STRING); EXPECT_STREQ(family->data.list.values[0]->data.string, "Missing, grouped");
+    const CssValue* letter = view_css_computed_property(tree, style, "letter-spacing"); ASSERT_NE(letter, nullptr);
+    ASSERT_EQ(letter->type, CSS_VALUE_TYPE_LENGTH); EXPECT_EQ(letter->data.length.unit, CSS_UNIT_PX); EXPECT_DOUBLE_EQ(letter->data.length.value, 2);
+    ViewCssStyle* generated = view_css_generated_style(tree, const_cast<ViewCssStyle*>(style), nullptr, nullptr, CSS_VALUE_LEFT);
+    ASSERT_NE(generated, nullptr);
+    EXPECT_EQ(view_css_computed_property(tree, generated, "font-family"), family);
+    EXPECT_EQ(view_css_computed_property(tree, generated, "letter-spacing"), letter);
+    ViewPreviewOptions preview = view_preview_options_default();
+    ViewTree* retained = view_tree_page_instances_create(tree, nullptr, &preview); ASSERT_NE(retained, nullptr);
+    ImageSurface* before = render_secondary_page_snapshot(retained, 1, 1.0f); ASSERT_NE(before, nullptr);
+    ASSERT_TRUE(parent->set_attribute("style", "font:20px serif;letter-spacing:.3em;word-spacing:1px"));
+    ASSERT_TRUE(view_tree_model_reset(tree));
+    ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    style = view_css_resolve(tree, child); ASSERT_NE(style, nullptr);
+    EXPECT_FLOAT_EQ(style->font.letter_spacing, 6); EXPECT_FLOAT_EQ(style->font.word_spacing, 2); EXPECT_STREQ(style->font.family.get(), "serif");
+    ASSERT_TRUE(view_tree_secondary_release(&doc, tree));
+    EXPECT_STREQ(family->data.list.values[0]->data.string, "Missing, grouped"); EXPECT_DOUBLE_EQ(letter->data.length.value, 2);
+    ImageSurface* after = render_secondary_page_snapshot(retained, 1, 1.0f);
+    expect_same_surface_pixels(before, after); image_surface_destroy(before); image_surface_destroy(after);
+}
+
+TEST_F(SecondaryViewTest, ComputedTypographyDefaultsAndExplicitNormalStayDistinctFromZeroLength) {
+    stylesheet("@page{size:240px 180px;margin:10px}p,div{margin:0;font:10px/12px Arial}");
+    ASSERT_TRUE(source->set_attribute("xmlns:r", RADIANT_PAGE_NAMESPACE));
+    DomElement* parent = block(nullptr, "letter-spacing:0px;word-spacing:-.1em", "div"); ASSERT_NE(parent, nullptr);
+    DomElement* normal = block("Normal", "font-family:initial;letter-spacing:normal;word-spacing:initial", "div", parent);
+    DomElement* inherited = block("Inherited", "font-size:30px;letter-spacing:inherit;word-spacing:inherit", "div", parent);
+    DomElement* initial = block("Initial", "font-family:var(--family);letter-spacing:var(--letter);word-spacing:var(--word)", "div", parent);
+    ASSERT_NE(normal, nullptr); ASSERT_NE(inherited, nullptr); ASSERT_NE(initial, nullptr);
+    ASSERT_TRUE(initial->set_attribute("r:property-bindings", "--family:ancestor(99,font-family);--letter:ancestor(99,letter-spacing);--word:ancestor(99,word-spacing)"));
+    ViewTree* tree = secondary(); PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
+    ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    for (const char* name : {"font-family", "letter-spacing", "word-spacing"}) {
+        SCOPED_TRACE(name); EXPECT_TRUE(view_css_computed_property_supported(name));
+        const CssValue* default_value = view_css_computed_property(tree, nullptr, name); ASSERT_NE(default_value, nullptr);
+        EXPECT_EQ(default_value->type, CSS_VALUE_TYPE_KEYWORD);
+        for (DomElement* element : {normal, initial}) {
+            const ViewCssStyle* style = view_css_resolve(tree, element); ASSERT_NE(style, nullptr);
+            const CssValue* computed = view_css_computed_property(tree, style, name); ASSERT_NE(computed, nullptr);
+            EXPECT_EQ(computed->type, CSS_VALUE_TYPE_KEYWORD); EXPECT_EQ(computed->data.keyword, default_value->data.keyword);
+        }
+    }
+    const ViewCssStyle* style = view_css_resolve(tree, inherited); ASSERT_NE(style, nullptr);
+    EXPECT_FLOAT_EQ(style->font.word_spacing, -1);
+    const CssValue* zero = view_css_computed_property(tree, style, "letter-spacing"); ASSERT_NE(zero, nullptr);
+    ASSERT_EQ(zero->type, CSS_VALUE_TYPE_LENGTH); EXPECT_DOUBLE_EQ(zero->data.length.value, 0);
+    const CssValue* negative = view_css_computed_property(tree, style, "word-spacing"); ASSERT_NE(negative, nullptr);
+    ASSERT_EQ(negative->type, CSS_VALUE_TYPE_LENGTH); EXPECT_DOUBLE_EQ(negative->data.length.value, -1);
+}
+
+TEST_F(SecondaryViewTest, FoTypographyQueriesSelectOriginalAncestorsAndRejectWrongTypesAtomically) {
+    DomElement* fo = formatting_root("<f:root xmlns:f='http://www.w3.org/1999/XSL/Format' font-family='Arial' font-size='7.5pt' line-height='9pt' letter-spacing='from-parent()' word-spacing='inherited-property-value()'>"
+        "<f:layout-master-set><f:simple-page-master master-name='sheet' page-width='180pt' page-height='135pt'><f:region-body/>"
+        "</f:simple-page-master></f:layout-master-set><f:page-sequence master-reference='sheet' force-page-count='no-force'><f:flow flow-name='xsl-region-body'>"
+        "<f:block font-family='&quot;Missing, grouped&quot;, Arial, sans-serif' font-size='10pt' letter-spacing='.2em' word-spacing='-.1em'>"
+        "<f:block font-size='20pt'><f:block font-size='30pt' font-family='from-nearest-specified-value(font-family)' "
+        "letter-spacing='from-parent()' word-spacing='from-parent(font-size) * .2' "
+        "padding-start='inherited-property-value(font-size) * .1'>Child</f:block></f:block></f:block></f:flow></f:page-sequence></f:root>");
+    ASSERT_NE(fo, nullptr);
+    DomElement* original = fo->last_child_element()->last_child_element()->first_child_element()->first_child_element()->first_child_element();
+    ASSERT_NE(original, nullptr);
+    RadiantFoOptions fo_options = radiant_fo_options_default();
+    RadiantFoTranslation* translated = radiant_fo_translate(&doc, fo, &fo_options); ASSERT_NE(translated, nullptr);
+    ASSERT_EQ(translated->diagnostic.status, TYPESET_OK) << translated->diagnostic.property << ": " << translated->diagnostic.reason;
+    DomElement* generated = install_fo_translation(translated); ASSERT_NE(generated, nullptr);
+    DomElement* child = generated->last_child_element()->last_child_element()->first_child_element()->first_child_element()->first_child_element(); ASSERT_NE(child, nullptr);
+    ViewTree* tree = secondary(); PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
+    ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    const ViewCssStyle* style = view_css_resolve(tree, child); ASSERT_NE(style, nullptr);
+    EXPECT_NEAR(style->font.letter_spacing, 8.0f / 3.0f, .0001f); EXPECT_NEAR(style->font.word_spacing, 16.0f / 3.0f, .0001f);
+    ASSERT_NE(style->padding[3], nullptr); EXPECT_NEAR(style->padding[3]->data.length.value, 8.0 / 3.0, .0001);
+    const CssValue* family = view_css_computed_property(tree, style, "font-family"); ASSERT_NE(family, nullptr);
+    ASSERT_EQ(family->type, CSS_VALUE_TYPE_LIST); ASSERT_EQ(family->data.list.count, 3);
+    EXPECT_STREQ(family->data.list.values[0]->data.string, "Missing, grouped");
+    for (const char* invalid : {"10%", "from-parent(font-size) + 10%", "auto", "2", "normal + 1pt", "from-parent(word-spacing) * 2", "from-parent(word-spacing)",
+            "from-nearest-specified-value(letter-spacing)", "from-parent(font-size) div 0"}) {
+        SCOPED_TRACE(invalid); ASSERT_TRUE(original->set_attribute("letter-spacing", invalid));
+        translated = radiant_fo_translate(&doc, fo, &fo_options); ASSERT_NE(translated, nullptr);
+        EXPECT_EQ(translated->diagnostic.status, TYPESET_INVALID); EXPECT_EQ(translated->diagnostic.source.address, original);
+        EXPECT_STREQ(translated->diagnostic.property, "letter-spacing");
+    }
+    struct Invalid {const char* property; const char* value;};
+    const Invalid invalid_values[] = {{"letter-spacing", "from-parent(font-family)"}, {"letter-spacing", "from-parent(color)"},
+        {"letter-spacing", "from-parent(font-size) div (from-parent(font-size) - from-parent(font-size))"},
+        {"letter-spacing", "1e300pt"},
+        {"font-family", "from-parent(font-size)"}, {"font-family", "from-parent(color)"}};
+    for (const Invalid& invalid : invalid_values) {
+        SCOPED_TRACE(invalid.value);
+        ASSERT_TRUE(original->set_attribute("letter-spacing", "normal"));
+        ASSERT_TRUE(original->set_attribute(invalid.property, invalid.value));
+        translated = radiant_fo_translate(&doc, fo, &fo_options); ASSERT_NE(translated, nullptr);
+        ASSERT_EQ(translated->diagnostic.status, TYPESET_OK) << translated->diagnostic.reason;
+        ASSERT_NE(install_fo_translation(translated), nullptr); tree = secondary();
+        EXPECT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_INVALID); EXPECT_EQ(tree->model->page_count, 0u);
+        ASSERT_NE(diagnostic.origin, nullptr); EXPECT_EQ(diagnostic.origin->source.address, original);
+    }
+}
+
 TEST_F(SecondaryViewTest, ComputedDecorationBindingsCaptureOwnerColorsKeywordsAndLineLimits) {
     stylesheet("@page{size:180px 160px;margin:10px}p,div{margin:0;font:10px/12px Arial}");
     ASSERT_TRUE(source->set_attribute("xmlns:r", RADIANT_PAGE_NAMESPACE));

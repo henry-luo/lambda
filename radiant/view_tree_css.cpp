@@ -97,11 +97,13 @@ static bool view_css_select(ViewTree* tree, ViewCssStyle* style, const char* nam
         style->inline_declarations, style->inline_count, name, result, style->pseudo_element);
 }
 
-enum ViewComputedPropertyKind { VIEW_COMPUTED_FONT_SIZE, VIEW_COMPUTED_FONT_WEIGHT, VIEW_COMPUTED_COLOR,
+enum ViewComputedPropertyKind { VIEW_COMPUTED_FONT_SIZE, VIEW_COMPUTED_FONT_WEIGHT, VIEW_COMPUTED_FONT_VALUE, VIEW_COMPUTED_COLOR,
     VIEW_COMPUTED_KEYWORD, VIEW_COMPUTED_LINE_LIMIT, VIEW_COMPUTED_BORDER_STYLE,
     VIEW_COMPUTED_LINE_HEIGHT, VIEW_COMPUTED_INDENT, VIEW_COMPUTED_MARGIN, VIEW_COMPUTED_PADDING, VIEW_COMPUTED_BORDER };
 static const struct { const char* name; ViewComputedPropertyKind kind; size_t index; } view_computed_properties[] = {
     {"font-size", VIEW_COMPUTED_FONT_SIZE, 0}, {"font-weight", VIEW_COMPUTED_FONT_WEIGHT, 0},
+    {"font-family", VIEW_COMPUTED_FONT_VALUE, 0}, {"letter-spacing", VIEW_COMPUTED_FONT_VALUE, 1},
+    {"word-spacing", VIEW_COMPUTED_FONT_VALUE, 2},
     {"color", VIEW_COMPUTED_COLOR, 0}, {"background-color", VIEW_COMPUTED_COLOR, 1},
     {"font-style", VIEW_COMPUTED_KEYWORD, 0}, {"text-align", VIEW_COMPUTED_KEYWORD, 1},
     {"orphans", VIEW_COMPUTED_LINE_LIMIT, 0}, {"widows", VIEW_COMPUTED_LINE_LIMIT, 1},
@@ -156,6 +158,9 @@ const CssValue* view_css_computed_property(ViewTree* tree, const ViewCssStyle* s
             case VIEW_COMPUTED_FONT_SIZE: pixels = style ? style->font.font_size : 16.0f; break;
             case VIEW_COMPUTED_FONT_WEIGHT:
                 return css_value_create_number(pool, style ? style->font.font_weight_numeric : 400);
+            case VIEW_COMPUTED_FONT_VALUE:
+                return style && style->font_values[property.index] ? style->font_values[property.index].get() :
+                    css_value_create_keyword(pool, property.index ? "normal" : "serif");
             case VIEW_COMPUTED_COLOR: {
                 Color color = { .r = 0, .g = 0, .b = 0, .a = 255 };
                 if (property.index == 1) color = style ? style->background : Color{};
@@ -533,6 +538,7 @@ static bool view_css_font_style(ViewTree* tree, ViewCssStyle* style, ViewCssStyl
         style->font.font_style = parent->font.font_style;
         style->font.letter_spacing = parent->font.letter_spacing;
         style->font.word_spacing = parent->font.word_spacing;
+        for (size_t i = 0; i < 3; i++) style->font_values[i] = parent->font_values[i];
         style->color = parent->color;
     } else {
         style->font.family = lam::up(const_cast<char*>("serif"));
@@ -562,6 +568,8 @@ static bool view_css_font_style(ViewTree* tree, ViewCssStyle* style, ViewCssStyl
         LayoutContext context = view_css_length_context(tree, style, 0.0f, 0.0f);
         const char* family = css_select_font_family(&context, value);
         style->font.family = lam::up(const_cast<char*>(family ? family : "serif"));
+        // the flattened renderer family string cannot reconstruct quoted names containing commas.
+        style->font_values[0] = lam::up(css_value_is_initial(value) ? nullptr : value);
     }
     style->font.font_style = view_css_keyword(tree, style, "font-style", CSS_VALUE_NORMAL,
         parent ? parent->font.font_style : CSS_VALUE_NORMAL, true);
@@ -581,7 +589,17 @@ static bool view_css_font_style(ViewTree* tree, ViewCssStyle* style, ViewCssStyl
         if (specified && !css_value_is_inherit(specified) && !css_value_is_unset(specified)) {
             float used = view_css_length(tree, style, specified,
                 i ? CSS_PROPERTY_WORD_SPACING : CSS_PROPERTY_LETTER_SPACING, 0.0f, 0.0f);
+            // expression doubles can still overflow the selected float geometry.
+            if (!isfinite(used) && specified->type != CSS_VALUE_TYPE_KEYWORD)
+                view_css_binding_failure(style, "text spacing is not a finite selected length");
             *spacing_values[i] = isfinite(used) ? used : 0.0f;
+            style->font_values[i + 1] = nullptr;
+            // normal has a zero used advance but remains a keyword for computed queries.
+            if (isfinite(used) && specified->type != CSS_VALUE_TYPE_KEYWORD) {
+                CssValue* computed = css_value_create_length(css->pool, used, CSS_UNIT_PX);
+                if (!computed) return false;
+                style->font_values[i + 1] = lam::up(computed);
+            }
         }
     }
     value = view_css_property(tree, style, "line-height");
@@ -857,6 +875,8 @@ ViewCssStyle* view_css_generated_style(ViewTree* tree, ViewCssStyle* base,
     style->source = base->source; style->parent = lam::up(base);
     style->next = css->styles; css->styles = lam::up(style);
     style->font = base->font; style->font.font_handle = nullptr;
+    // generated text's copied font must retain the same typed query values.
+    for (size_t i = 0; i < 3; i++) style->font_values[i] = base->font_values[i];
     style->font_box = {lam::up(&style->font), style->font.font_size};
     style->color = base->color; style->text_align = align; style->white_space = base->white_space;
     style->orphans = style->widows = 1;

@@ -451,11 +451,12 @@ const char* css_math_token_name(const CssValue* value) {
     return NULL;
 }
 
-enum CssValueSearch {CSS_SEARCH_VAR, CSS_SEARCH_PENDING, CSS_SEARCH_LENGTH_UNIT};
+enum CssValueSearch {CSS_SEARCH_VAR, CSS_SEARCH_PENDING, CSS_SEARCH_LENGTH_UNIT, CSS_SEARCH_PERCENTAGE};
 
 static bool css_value_matches_search(const CssValue* value, CssValueSearch search,
     CssUnit first, CssUnit second) {
     if (!value) return false;
+    if (search == CSS_SEARCH_PERCENTAGE) return value->type == CSS_VALUE_TYPE_PERCENTAGE;
     if (search == CSS_SEARCH_LENGTH_UNIT)
         return value->type == CSS_VALUE_TYPE_LENGTH &&
             (value->data.length.unit == first || value->data.length.unit == second);
@@ -502,6 +503,10 @@ bool css_value_contains_var_reference(const CssValue* value) {
 
 bool css_value_contains_pending_substitution(const CssValue* value) {
     return css_value_contains(CSS_SEARCH_PENDING, value);
+}
+
+bool css_value_contains_percentage(const CssValue* value) {
+    return css_value_contains(CSS_SEARCH_PERCENTAGE, value);
 }
 
 bool css_value_contains_length_unit(const CssValue* value, CssUnit first, CssUnit second) {

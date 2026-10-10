@@ -671,6 +671,8 @@ int css_tokenizer_tokenize(CssTokenizer* tokenizer,
 int css_skip_whitespace_tokens(const CssToken* tokens, int start, int token_count);
 bool css_selector_group_parse_consumed_all(const CssToken* tokens, int pos,
                                            int token_count);
+bool css_value_is_font_family_name(const CssValue* value);
+
 static inline bool css_validate_font_family_tokens(const CssToken* tokens, int token_count) {
     if (!tokens || token_count <= 0) return false;
 

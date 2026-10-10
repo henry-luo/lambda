@@ -164,7 +164,8 @@ static const char* fo_parent_value(FoTranslationContext* context, DomElement* so
             static const struct { const char* name; const char* initial; } initials[] = {
                 {"line-stacking-strategy", "max-height"}, {"text-altitude", "use-font-metrics"}, {"text-depth", "use-font-metrics"},
                 {"linefeed-treatment", "treat-as-space"}, {"white-space-treatment", "ignore-if-surrounding-linefeed"},
-                {"white-space-collapse", "true"}, {"wrap-option", "wrap"}, {"border-collapse", "collapse"}
+                {"white-space-collapse", "true"}, {"wrap-option", "wrap"}, {"border-collapse", "collapse"},
+                {"letter-spacing", "normal"}, {"word-spacing", "normal"}
             };
             for (const auto& initial : initials) if (!strcmp(initial.name, property)) return initial.initial;
             if (view_css_computed_property_supported(fo_computed_property_name(query)))
@@ -283,6 +284,9 @@ static bool fo_style_property(FoTranslationContext* context, DomElement* source,
     if (!declaration || !declaration->valid || !css_declaration_is_supported(declaration))
         return fo_failure(context, source, source_name ? source_name : name, "FO property value is unsupported by the common style engine");
     const CssValue* parsed = declaration->value;
+    // FO excludes percentage spacing even though common CSS admits percentage tracking.
+    if ((!strcmp(name, "letter-spacing") || !strcmp(name, "word-spacing")) && css_value_contains_percentage(parsed))
+        return fo_failure(context, source, source_name ? source_name : name, "FO text spacing excludes percentages in the admitted profile");
     if (length_component && !(css_value_is_inherit(parsed) || css_value_contains_var_reference(parsed) || parsed->type == CSS_VALUE_TYPE_LENGTH ||
         parsed->type == CSS_VALUE_TYPE_PERCENTAGE || parsed->type == CSS_VALUE_TYPE_FUNCTION ||
         (parsed->type == CSS_VALUE_TYPE_NUMBER && parsed->data.number.value == 0.0)))
@@ -328,6 +332,10 @@ struct FoBindingScope {
 
 static const char* fo_reference_binding(FoTranslationContext* context, DomElement* source,
         const char* property, const char* query, FoPropertyReference reference) {
+    // whole FO spacing queries require compound refinement, even when CSS stores a fixed advance.
+    if (!strcmp(query, "letter-spacing") || !strcmp(query, "word-spacing")) {
+        fo_failure(context, source, property, "FO text-spacing queries require compound refinement outside the admitted profile"); return nullptr;
+    }
     const char* native_query = fo_computed_property_name(query);
     if ((reference == FO_PROPERTY_INHERITED && !fo_property_inherits(query)) || !view_css_computed_property_supported(native_query)) {
         fo_failure(context, source, property, "FO property reference requires an admitted computed property and inheritance domain"); return nullptr;
@@ -380,7 +388,7 @@ static const char* fo_component_name(StrBuf* buffer, const char* property, const
     return buffer->str;
 }
 
-static const char* fo_common_properties[] = {"font-family", "font-size", "font-style", "font-weight", "color", "line-height", "text-align", "orphans", "widows",
+static const char* fo_common_properties[] = {"font-family", "font-size", "font-style", "font-weight", "letter-spacing", "word-spacing", "color", "line-height", "text-align", "orphans", "widows",
     "background-color", "border", "border-width", "border-style", "border-color", "border-top", "border-right", "border-bottom", "border-left",
     "border-top-width", "border-right-width", "border-bottom-width", "border-left-width",
     "border-top-style", "border-right-style", "border-bottom-style", "border-left-style",

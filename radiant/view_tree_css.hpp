@@ -37,6 +37,8 @@ struct ViewCssStyle {
     DisplayValue display;
     FontProp font;
     FontBox font_box;
+    // retain family grouping and normal-versus-length spacing in this CSS generation.
+    lam::Up<const CssValue> font_values[3]; // family, letter-spacing, word-spacing
     Color color, background;
     lam::Up<const CssValue> width, height, min_width, max_width, min_height, max_height;
     lam::Up<const CssValue> margin[4], padding[4], border_width[4];

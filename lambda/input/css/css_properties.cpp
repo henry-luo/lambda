@@ -2798,6 +2798,24 @@ bool css_property_validate_value_mode(CssPropertyCode id,
             break;
         }
 
+        case CSS_PROPERTY_FONT_FAMILY: {
+            if (css_value_is_global_keyword(value) || css_value_contains_pending_substitution(value)) return true;
+            // reuse the shorthand family grammar after typed variables have expanded their lists.
+            auto family_name = [](const CssValue* item, void*) { return css_value_is_font_family_name(item); };
+            return css_value_visit_list_items(value, family_name, nullptr);
+        }
+
+        case CSS_PROPERTY_LETTER_SPACING:
+        case CSS_PROPERTY_WORD_SPACING:
+            // typed ancestor substitution must not turn colors or family lists into a zero advance.
+            if (css_value_is_global_keyword(value) || css_value_contains_pending_substitution(value)) return true;
+            if (value->type == CSS_VALUE_TYPE_KEYWORD) return value->data.keyword == CSS_VALUE_NORMAL;
+            if (value->type == CSS_VALUE_TYPE_LENGTH) return css_unit_is_length(value->data.length.unit);
+            if (value->type == CSS_VALUE_TYPE_NUMBER) return value->data.number.value == 0.0;
+            // CSS Text 4 percentage tracking is already resolved against the current font size.
+            if (value->type == CSS_VALUE_TYPE_PERCENTAGE) return id == CSS_PROPERTY_LETTER_SPACING;
+            return css_value_is_length_expression(value, id == CSS_PROPERTY_LETTER_SPACING, false);
+
         case CSS_PROPERTY_LINE_HEIGHT: {
             // CSS Inline: invalid dimensions must not replace a valid inherited line-height.
             if (value->type == CSS_VALUE_TYPE_NUMBER) {

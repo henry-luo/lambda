@@ -1354,6 +1354,7 @@ TEST(RenderOutputParity, FoAndNativePageControlsSharePreviewAndPhysicalPdfPages)
         {"graphics_namespaces", 3, "/MediaBox [0 0 180.00 135.00]"},
         {"graphics_scales", 3, "/MediaBox [0 0 180.00 135.00]"},
         {"graphics_bindings", 3, "/MediaBox [0 0 180.00 135.00]"},
+        {"typography_bindings", 3, "/MediaBox [0 0 180.00 135.00]"},
         {"lists", 3, "/MediaBox [0 0 180.00 120.00]"},
         {"lists_context", 3, "/MediaBox [0 0 180.00 120.00]"},
         {"cell_flow", 3, "/MediaBox [0 0 150.00 120.00]"},

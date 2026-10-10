@@ -36,10 +36,11 @@ TEST_F(CssParserTest, ValueDependencySearchVisitsCompleteMixedTrees) {
     CssValue* leading = css_value_create_length(pool, 2.0, CSS_UNIT_LH);
     CssValue* pending = css_value_create_function(pool, "var", nullptr, 0);
     CssValue* environmental = css_value_create_function(pool, "env", nullptr, 0);
-    ASSERT_NE(leading, nullptr); ASSERT_NE(pending, nullptr); ASSERT_NE(environmental, nullptr);
-    CssValue* nodes[] = {leading, pending, environmental};
+    CssValue* percentage = css_value_create_percentage(pool, 10.0);
+    ASSERT_NE(leading, nullptr); ASSERT_NE(pending, nullptr); ASSERT_NE(environmental, nullptr); ASSERT_NE(percentage, nullptr);
+    CssValue* nodes[] = {leading, pending, environmental, percentage};
     for (size_t depth = 0; depth < 128; depth++) {
-        for (size_t index = 0; index < 3; index++) {
+        for (size_t index = 0; index < 4; index++) {
             CssValue** children = (CssValue**)pool_alloc(pool, 2 * sizeof(CssValue*));
             ASSERT_NE(children, nullptr);
             children[0] = nodes[index];
@@ -59,6 +60,8 @@ TEST_F(CssParserTest, ValueDependencySearchVisitsCompleteMixedTrees) {
     EXPECT_FALSE(css_value_contains_var_reference(nodes[2]));
     EXPECT_TRUE(css_value_contains_pending_substitution(nodes[2]));
     EXPECT_FALSE(css_value_contains_length_unit(nodes[2], CSS_UNIT_LH, CSS_UNIT_RLH));
+    EXPECT_FALSE(css_value_contains_percentage(nodes[0]));
+    EXPECT_TRUE(css_value_contains_percentage(nodes[3]));
 }
 
 TEST_F(CssParserTest, LinguisticFunctionsValidateTokensBeforeDecoding) {
@@ -254,6 +257,25 @@ TEST_F(CssEngineParserTest, LineHeightValidatesNumericTypesBeforeCascade) {
         EXPECT_NE(css_parse_declaration_text(text, strlen(text), pool), nullptr) << text;
     for (const char* text : invalid)
         EXPECT_EQ(css_parse_declaration_text(text, strlen(text), pool), nullptr) << text;
+}
+
+TEST_F(CssEngineParserTest, TextSpacingValidatesTypedLengthsAndNormalBeforeCascade) {
+    const char* valid[] = {"normal", "0", "-.2em", "3pt", "initial", "inherit", "unset", "revert",
+        "calc(1em - 2px)", "min(2px, 1em)", "var(--spacing)", "calc(var(--spacing) * 2)"};
+    const char* invalid[] = {"auto", "red", "Arial,sans-serif", "2", "1deg", "1s", "2foo",
+        "1px 2px", "calc(1em * 1em)", "calc(2)", "rgb(0,0,0)"};
+    auto check = [this](const char* property, const char* value, bool expected) {
+        CssDeclaration* declaration = css_parse_property_value_declaration(property, strlen(property), value, strlen(value), pool);
+        bool supported = declaration && declaration->valid && css_declaration_is_supported(declaration);
+        EXPECT_EQ(supported, expected) << property << ':' << value;
+    };
+    for (const char* property : {"letter-spacing", "word-spacing"}) {
+        for (const char* value : valid) check(property, value, true);
+        for (const char* value : invalid) check(property, value, false);
+    }
+    for (const char* value : {"10%", "-10%", "calc(10% + 1px)", "min(10%, 2px)"})
+        check("letter-spacing", value, true);
+    check("word-spacing", "10%", false);
 }
 
 TEST_F(CssEngineParserTest, SvgPaintAndStrokeWidthUseCompleteGrammar) {
