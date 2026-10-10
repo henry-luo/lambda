@@ -10156,6 +10156,139 @@ TEST_F(SecondaryViewTest, NativeStaticRegionsRejectBodySchedulingAndLateMaterial
     native_fragment_release(fixture);
 }
 
+TEST_F(SecondaryViewTest, BodyColumnRulesPaintOnlyOccupiedGapsWithoutChangingFragmentGeometry) {
+    init_vector_engine();
+    stylesheet("p,div{margin:0;font:10px/20px Arial;white-space:pre;orphans:1;widows:1}");
+    DomElement* region = nullptr;
+    DomElement* sequence = body_column_sequence("size:320px 100px;margin:10px",
+        "column-count:3;column-gap:30px;column-rule:6px solid lime", &region);
+    ASSERT_NE(sequence, nullptr); ASSERT_NE(region, nullptr);
+    DomElement* paragraphs[] = {
+        block("A\nB\nC\nD\nE\nF\nG\nH\nI", "background:red", "p", sequence),
+        block("J\nK\nL\nM\nN", "background:red;break-before:page", "p", sequence),
+        block("O", "background:red;break-before:page", "p", sequence)
+    };
+    for (DomElement* paragraph : paragraphs) ASSERT_NE(paragraph, nullptr);
+    ViewTree* tree = secondary(); PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
+    ImageSurface* expected = nullptr; ViewTree* retained = nullptr;
+    const char* styles[] = {"6px solid lime", "46px solid lime", "6px none lime", "6px hidden lime", "6px solid transparent"};
+    for (size_t mode = 0; mode < 5; mode++) {
+        SCOPED_TRACE(styles[mode]); ASSERT_TRUE(view_tree_model_reset(tree));
+        char css[160]; snprintf(css, sizeof(css), "column-count:3;column-gap:30px;column-rule:%s", styles[mode]);
+        ASSERT_TRUE(region->set_attribute("style", css));
+        ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+        ASSERT_EQ(tree->model->page_count, 3u);
+        for (size_t page = 0; page < 3; page++) {
+            const ViewPageBox* sheet = tree->model->pages.get()[page];
+            const ViewPageColumn* occupied = sheet->occupied_columns;
+            for (size_t column = 3 - page; column > 0; column--) {
+                ASSERT_NE(occupied, nullptr); EXPECT_EQ(occupied->index, column - 1); occupied = occupied->previous;
+            }
+            EXPECT_EQ(occupied, nullptr);
+            ImageSurface* pixels = render_secondary_page_snapshot(tree, static_cast<uint32_t>(page + 1)); ASSERT_NE(pixels, nullptr);
+            EXPECT_EQ(snapshot_pixel(pixels, 105, 50), mode < 2 && page < 2 ? 0xff00ff00u : 0xffffffffu);
+            EXPECT_EQ(snapshot_pixel(pixels, 215, 50), mode < 2 && page == 0 ? 0xff00ff00u : 0xffffffffu);
+            EXPECT_EQ(snapshot_pixel(pixels, 105, 5), 0xffffffffu);
+            // wide rules remain below the adjacent column's content background.
+            EXPECT_EQ(snapshot_pixel(pixels, 85, 20), 0xff0000ffu);
+            image_surface_destroy(pixels);
+        }
+        const size_t lines[] = {9, 5, 1};
+        for (size_t p = 0; p < 3; p++) {
+            expect_source_range_coverage(tree, paragraphs[p]->first_child);
+            for (size_t line = 0; line < lines[p]; line++) {
+                char text[] = "A"; text[0] += (p == 0 ? 0 : p == 1 ? 9 : 14) + line;
+                LayoutViewNode* node = source_glyph_text(tree, paragraphs[p]->first_child, text); ASSERT_NE(node, nullptr);
+                EXPECT_EQ(occurrence_page(node), p + 1);
+                EXPECT_FLOAT_EQ(node->rect.x, 10.0f + (line / 4) * 110.0f);
+                EXPECT_FLOAT_EQ(node->rect.y, 10.0f + (line % 4) * 20.0f);
+            }
+        }
+        if (!mode) {
+            expected = render_secondary_page_snapshot(tree, 1); ASSERT_NE(expected, nullptr);
+            ViewPreviewOptions preview = view_preview_options_default();
+            retained = view_tree_page_instances_create(tree, nullptr, &preview); ASSERT_NE(retained, nullptr);
+        }
+    }
+    ASSERT_TRUE(view_tree_model_reset(tree)); options.max_pages = 1;
+    EXPECT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_BUDGET_EXHAUSTED);
+    EXPECT_EQ(tree->model->page_count, 0u); ASSERT_TRUE(view_tree_secondary_release(&doc, tree));
+    ImageSurface* pixels = render_secondary_page_snapshot(retained, 1); ASSERT_NE(pixels, nullptr);
+    expect_same_surface_pixels(expected, pixels);
+    ASSERT_TRUE(create_dir("temp/paged-media-impl")); save_surface_to_png(pixels, "temp/paged-media-impl/body-column-rules.png");
+    EXPECT_TRUE(render_secondary_view_to_svg(retained, "temp/paged-media-impl/body-column-rules.svg", 1, 1));
+    EXPECT_TRUE(render_secondary_view_to_pdf(retained, "temp/paged-media-impl/body-column-rules.pdf"));
+    image_surface_destroy(expected); image_surface_destroy(pixels); ASSERT_TRUE(view_tree_secondary_release(&doc, retained));
+}
+
+TEST_F(SecondaryViewTest, BodyColumnRuleLengthsAndColorsUseTheirComputedDeclarationContext) {
+    CssPropertyCode longhands[3] = {};
+    ASSERT_EQ(css_property_get_longhand_properties(CSS_PROPERTY_COLUMN_RULE, longhands, 3), 3);
+    for (CssPropertyCode property : longhands) EXPECT_TRUE(css_property_shorthand_contains(CSS_PROPERTY_COLUMN_RULE, property));
+    DomElement* master = page_master("native", "size:200px 100px;margin:10px;font-size:10px;color:red;column-rule:.5em solid currentColor");
+    ASSERT_NE(master, nullptr);
+    DomElement* region = page_region(master, "body", "body", nullptr, "font-size:20px;color:blue;column-count:2;column-gap:20px;column-rule:inherit");
+    ASSERT_NE(region, nullptr); DomElement* sequence = page_sequence("native"); ASSERT_NE(sequence, nullptr);
+    ASSERT_NE(block("A", "font:10px/20px Arial;margin:0", "p", sequence), nullptr);
+    ViewTree* tree = secondary(); PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
+    const char* rules[] = {"column-rule:inherit", "column-rule-width:inherit;column-rule-style:inherit;column-rule-color:currentColor",
+        "--rule:.5em;column-rule:var(--rule) solid currentColor", "column-rule:medium solid"};
+    for (size_t i = 0; i < 4; i++) {
+        SCOPED_TRACE(rules[i]); ASSERT_TRUE(view_tree_model_reset(tree));
+        char css[256]; snprintf(css, sizeof(css), "font-size:20px;color:blue;column-count:2;column-gap:20px;%s", rules[i]);
+        ASSERT_TRUE(region->set_attribute("style", css));
+        ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+        const ViewCssStyle* style = tree->model->pages.get()[0]->style->body_style;
+        ASSERT_NE(style, nullptr); ASSERT_NE(style->column_rule_width, nullptr);
+        EXPECT_EQ(style->column_rule_width->type, CSS_VALUE_TYPE_LENGTH);
+        EXPECT_DOUBLE_EQ(style->column_rule_width->data.length.value, i < 2 ? 5 : i == 2 ? 10 : 3);
+        EXPECT_EQ(style->column_rule_style, CSS_VALUE_SOLID);
+        EXPECT_EQ(style->column_rule_color.c, i ? 0xffff0000u : 0xff0000ffu);
+    }
+    for (const char* rule : {"column-rule:2px dashed red", "column-rule:2px double red", "column-rule-width:calc(1px / 0);column-rule-style:solid"}) {
+        SCOPED_TRACE(rule); ASSERT_TRUE(view_tree_model_reset(tree));
+        char css[256]; snprintf(css, sizeof(css), "column-count:2;column-gap:20px;%s", rule);
+        ASSERT_TRUE(region->set_attribute("style", css));
+        EXPECT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_INVALID);
+        EXPECT_EQ(tree->model->page_count, 0u);
+    }
+    ASSERT_TRUE(view_tree_secondary_release(&doc, tree));
+}
+
+TEST_F(SecondaryViewTest, ExplicitBodyColumnRulesUseTheSharedFacingEdgesAndClipWithTheirBody) {
+    init_vector_engine();
+    stylesheet("p,div{margin:0;font:10px/20px Arial;orphans:1;widows:1}");
+    DomElement* region = nullptr;
+    DomElement* sequence = body_column_sequence("size:240px 120px;margin:10px", "column-rule:8px solid lime", &region);
+    ASSERT_NE(sequence, nullptr); ASSERT_NE(region, nullptr);
+    DomElement* first = page_column(region, "80px", "60px"); ASSERT_NE(first, nullptr);
+    DomElement* second = page_column(region, "80px", "80px", "120px", "20px"); ASSERT_NE(second, nullptr);
+    ASSERT_NE(block("A", nullptr, "p", sequence), nullptr);
+    ASSERT_NE(block("B", "break-before:column", "p", sequence), nullptr);
+    ViewTree* tree = secondary(); PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
+    for (bool reverse : {false, true}) {
+        SCOPED_TRACE(reverse); ASSERT_TRUE(view_tree_model_reset(tree));
+        ASSERT_TRUE(first->set_attribute("inline-start", reverse ? "120px" : "0"));
+        ASSERT_TRUE(second->set_attribute("inline-start", reverse ? "0" : "120px"));
+        ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+        ASSERT_EQ(tree->model->page_count, 1u);
+        ImageSurface* pixels = render_secondary_page_snapshot(tree, 1); ASSERT_NE(pixels, nullptr);
+        EXPECT_EQ(snapshot_pixel(pixels, 110, 20), 0xffffffffu);
+        EXPECT_EQ(snapshot_pixel(pixels, 110, 40), 0xff00ff00u);
+        EXPECT_EQ(snapshot_pixel(pixels, 110, 75), 0xffffffffu); image_surface_destroy(pixels);
+    }
+    ASSERT_TRUE(first->set_attribute("inline-start", "-100px"));
+    ASSERT_TRUE(second->set_attribute("inline-start", "0"));
+    for (bool clip : {false, true}) {
+        SCOPED_TRACE(clip); ASSERT_TRUE(view_tree_model_reset(tree));
+        ASSERT_TRUE(region->set_attribute("style", clip ? "column-rule:8px solid lime;overflow:hidden" : "column-rule:8px solid lime;overflow:visible"));
+        ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+        ImageSurface* pixels = render_secondary_page_snapshot(tree, 1); ASSERT_NE(pixels, nullptr);
+        EXPECT_EQ(snapshot_pixel(pixels, 1, 40), clip ? 0xffffffffu : 0xff00ff00u); image_surface_destroy(pixels);
+    }
+    ASSERT_TRUE(view_tree_secondary_release(&doc, tree));
+}
+
 TEST_F(SecondaryViewTest, NativeBodyColumnsKeepScopedBreaksPhysicalPagesAndRetainedPaint) {
     init_vector_engine();
     DomElement* region = nullptr;
@@ -10395,6 +10528,8 @@ TEST_F(SecondaryViewTest, ExplicitColumnsRoutePendingNotesAndFloatsPastEmptyUnpl
     DomElement* sequence = terminal_sequence("size:240px 120px;margin:10px", "size:240px 120px;margin:10px",
         true, "", "", &normal, &region);
     ASSERT_NE(sequence, nullptr); ASSERT_NE(normal, nullptr); ASSERT_NE(region, nullptr);
+    ASSERT_TRUE(normal->set_attribute("style", "column-rule:6px solid lime"));
+    ASSERT_TRUE(region->set_attribute("style", "column-rule:6px solid lime"));
     ASSERT_NE(page_column(normal, "100px", "80px"), nullptr);
     ASSERT_NE(page_column(normal, "100px", "80px", "100px"), nullptr);
     DomElement* first = page_column(region, "80px", "20px"); ASSERT_NE(first, nullptr);
@@ -10432,6 +10567,8 @@ TEST_F(SecondaryViewTest, ExplicitColumnsRoutePendingNotesAndFloatsPastEmptyUnpl
             ASSERT_EQ(tree->model->page_count, 2u);
             EXPECT_STREQ(tree->model->pages.get()[0]->name, "normal");
             EXPECT_STREQ(tree->model->pages.get()[1]->name, "last");
+            const ViewPageColumn* occupied = tree->model->pages.get()[1]->occupied_columns;
+            ASSERT_NE(occupied, nullptr); EXPECT_EQ(occupied->index, 1u); EXPECT_EQ(occupied->previous, nullptr);
             const ViewNodeState* state = view_tree_native_state(tree, &fixture->regions[0].source); ASSERT_NE(state, nullptr);
             ASSERT_EQ(state->occurrence_count, 1u); const LayoutViewNode* placed = state->first_occurrence;
             EXPECT_EQ(occurrence_page(placed), 2u); EXPECT_FLOAT_EQ(placed->rect.x, 110); EXPECT_FLOAT_EQ(placed->rect.y, 10);
@@ -10455,6 +10592,7 @@ TEST_F(SecondaryViewTest, ExplicitColumnsRoutePendingNotesAndFloatsPastEmptyUnpl
         }
     ImageSurface* body = render_secondary_page_snapshot(tree, 1); ASSERT_NE(body, nullptr);
     ImageSurface* auxiliary = render_secondary_page_snapshot(tree, 2); ASSERT_NE(auxiliary, nullptr);
+    EXPECT_EQ(snapshot_pixel(auxiliary, 90, 50), 0xffffffffu);
     ViewPreviewOptions preview_options = view_preview_options_default();
     ViewTree* preview = view_tree_page_instances_create(tree, nullptr, &preview_options); ASSERT_NE(preview, nullptr);
     fixture->assembly_mode = NATIVE_ASSEMBLY_NONE; fixture->committed_pages = fixture->assembly_phase = 0; fixture->first_candidate = false;
@@ -11066,7 +11204,7 @@ TEST_F(SecondaryViewTest, SelectedPageAndRegionBindingsKeepControlSourcesAndOrdi
 TEST_F(SecondaryViewTest, NativeColumnInsertionsSplitWithinSheetsRetainExactPaintAndRollbackAllColumns) {
     init_vector_engine();
     DomElement* master = page_master("native", "size:200px 100px;margin:10px"); ASSERT_NE(master, nullptr);
-    ASSERT_NE(page_region(master, "body", "body", nullptr, "column-count:2;column-gap:20px"), nullptr);
+    ASSERT_NE(page_region(master, "body", "body", nullptr, "column-count:2;column-gap:20px;column-rule:6px solid lime"), nullptr);
     DomElement* sequence = page_sequence("native"); ASSERT_NE(sequence, nullptr);
     DomElement* flow = page_control("r:flow", sequence); ASSERT_NE(flow, nullptr); ASSERT_TRUE(flow->set_attribute("region-name", "body"));
     NativeFragmentFixture* fixture = native_fragment_fixture(); ASSERT_NE(fixture, nullptr);
@@ -11101,6 +11239,9 @@ TEST_F(SecondaryViewTest, NativeColumnInsertionsSplitWithinSheetsRetainExactPain
         EXPECT_FLOAT_EQ(body->first_occurrence->rect.x, xs[i]); EXPECT_FLOAT_EQ(body->first_occurrence->rect.y, 10);
     }
     ImageSurface* expected = render_secondary_page_snapshot(tree, 1); ASSERT_NE(expected, nullptr);
+    EXPECT_EQ(snapshot_pixel(expected, 100, 30), 0xff00ff00u);
+    ImageSurface* last = render_secondary_page_snapshot(tree, 2); ASSERT_NE(last, nullptr);
+    EXPECT_EQ(snapshot_pixel(last, 100, 30), 0xffffffffu); image_surface_destroy(last);
     ViewPreviewOptions preview_options = view_preview_options_default();
     ViewTree* preview = view_tree_page_instances_create(tree, nullptr, &preview_options); ASSERT_NE(preview, nullptr);
     ASSERT_TRUE(view_tree_model_reset(tree)); fixture->contribution_count = 2;

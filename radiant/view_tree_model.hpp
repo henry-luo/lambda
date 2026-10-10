@@ -124,6 +124,11 @@ enum ViewPageSide : uint8_t {
     VIEW_PAGE_RIGHT,
 };
 
+struct ViewPageColumn {
+    lam::Up<const ViewPageColumn> previous;
+    uint32_t index;
+};
+
 struct ViewPageBox {
     LayoutViewNode node;
     LayoutViewRef referenced_page; // instances borrow immutable content through their generation lease
@@ -137,6 +142,7 @@ struct ViewPageBox {
     bool blank;
     lam::Up<ViewPageStyle> style;
     lam::Up<const char> name;
+    lam::Up<const ViewPageColumn> occupied_columns; // immutable selected input, rewound with the page checkpoint
     lam::Up<LayoutViewNode> margin_boxes[CSS_PAGE_MARGIN_BOX_COUNT];
     lam::Up<LayoutViewNode> static_boxes[4];
 };

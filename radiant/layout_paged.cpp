@@ -4118,7 +4118,19 @@ static TypesetStatus paged_regions_close_trial(PagedComposer* composer) {
         if (status == TYPESET_OK) status = typeset_region_commit(&composer->composition->queues[i], plan);
         typeset_region_plan_dispose(plan); region->anchor_count = 0;
     }
-    if (status == TYPESET_OK) composer->sheet_has_content |= placed;
+    if (status == TYPESET_OK) {
+        composer->sheet_has_content |= placed;
+        ViewPageBox* page = composer->page;
+        if (page->style->column_count > 1 && (composer->page_has_content || placed) &&
+            (!page->occupied_columns || page->occupied_columns->index != composer->column_index)) {
+            // immutable occupancy follows the selected input, including auxiliary-only columns and trial rollback.
+            if (!view_tree_model_touch_node(composer->tree, &page->node)) return TYPESET_OUT_OF_MEMORY;
+            auto* column = (ViewPageColumn*)arena_alloc(composer->tree->model->arena, sizeof(ViewPageColumn));
+            if (!column) return TYPESET_OUT_OF_MEMORY;
+            *column = {page->occupied_columns, composer->column_index};
+            page->occupied_columns = lam::up((const ViewPageColumn*)column);
+        }
+    }
     return status;
 }
 
@@ -7848,6 +7860,33 @@ static bool paged_paint_node(LayoutViewNode* node, PaintList* paint) {
     return true;
 }
 
+static bool paged_paint_column_rules(const ViewPageBox* page, PaintList* paint) {
+    const ViewPageStyle* style = page->style;
+    const ViewCssStyle* body = style ? style->body_style.get() : nullptr;
+    if (!body || body->column_rule_style != CSS_VALUE_SOLID || !body->column_rule_color.a || !body->column_rule_width) return true;
+    float width = (float)body->column_rule_width->data.length.value;
+    if (width <= 0.0f) return true;
+    BorderProp border = {}; border.width.left = width; border.left_style = CSS_VALUE_SOLID;
+    border.left_color = body->column_rule_color;
+    BoundaryProp boundary = {}; boundary.border = lam::own(&border);
+    if (style->body_clip && !paged_paint_clip(paint, style->body_rect, style->body_box.border.width.values)) return false;
+    for (const ViewPageColumn* right = page->occupied_columns; right && right->previous; right = right->previous) {
+        const ViewPageColumn* left = right->previous;
+        if (left->index + 1 != right->index) continue;
+        RdtLogicalRect first = {}, second = {};
+        if (!view_css_page_column(style, left->index, &first) || !view_css_page_column(style, right->index, &second)) return false;
+        if (second.x < first.x) { RdtLogicalRect swap = first; first = second; second = swap; }
+        float gap_start = first.x + first.width, gap_end = second.x;
+        float top = fmaxf(first.y, second.y), bottom = fminf(first.y + first.height, second.y + second.height);
+        // explicit rectangles share a vertical rule only along their horizontally separated, overlapping edges.
+        if (gap_end < gap_start || bottom <= top) continue;
+        float x = gap_start + (gap_end - gap_start - width) * 0.5f;
+        if (!render_paint_boundary_emit_box(paint, &boundary, {x, top, width, bottom - top})) return false;
+    }
+    if (style->body_clip) paint_pop_clip(paint);
+    return true;
+}
+
 bool layout_secondary_paint_page(ViewTree* tree, const ViewPageBox* page, PaintList* paint) {
     if (!paint) return false;
     page = view_tree_page_material(tree, page);
@@ -7862,6 +7901,7 @@ bool layout_secondary_paint_page(ViewTree* tree, const ViewPageBox* page, PaintL
         const RdtLogicalRect& rect = page->style->body_rect;
         if (!render_paint_boundary_emit_box(paint, &boundary, {rect.x, rect.y, rect.width, rect.height})) return false;
     }
+    if (!page->blank && !paged_paint_column_rules(page, paint)) return false;
     for (LayoutViewNode* child = page->node.first_child; child; child = child->next_sibling) {
         if (page->blank && child->role != VIEW_FRAGMENT_MARGIN && child->role != VIEW_FRAGMENT_STATIC) continue;
         bool body_clip = page->style && page->style->body_clip &&

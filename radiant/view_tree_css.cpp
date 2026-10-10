@@ -314,7 +314,8 @@ static const CssValue* view_css_project(ViewTree* tree, const CssDeclaration& de
             return css_box_shorthand_side_value(value, i);
         }
     }
-    if (strncmp(property, "border", 6) == 0 && css_property_is_shorthand(declaration.property_code)) {
+    if ((strncmp(property, "border", 6) == 0 || !strcmp(property, "column-rule")) &&
+        css_property_is_shorthand(declaration.property_code)) {
         const char* component = strrchr(name, '-');
         if (!component) return nullptr;
         component++;
@@ -674,6 +675,26 @@ static bool view_css_column_style(ViewTree* tree, ViewCssStyle* style, ViewCssSt
     return true;
 }
 
+static const CssValue* view_css_line_width(ViewTree* tree, ViewCssStyle* style, CssPropertyCode property,
+        const CssValue* inherited, CssEnum line_style) {
+    const CssValue* value = view_css_property(tree, style, css_property_get_by_code(property)->name);
+    const CssValue* width = view_css_compute_length(tree, style, property, value, inherited);
+    if (line_style == CSS_VALUE_NONE || line_style == CSS_VALUE_HIDDEN)
+        return css_value_create_length(tree->model->css->pool, 0.0, CSS_UNIT_PX);
+    if (!width || width->type == CSS_VALUE_TYPE_KEYWORD)
+        return css_value_create_length(tree->model->css->pool,
+            layout_css_border_width_keyword(width ? width->data.keyword : CSS_VALUE_MEDIUM), CSS_UNIT_PX);
+    return width;
+}
+
+static Color view_css_line_color(ViewTree* tree, ViewCssStyle* style, LayoutContext* context,
+        CssPropertyCode property, Color inherited) {
+    const CssValue* value = view_css_property(tree, style, css_property_get_by_code(property)->name);
+    return css_value_is_inherit(value) && style->parent ? inherited :
+        value && !css_value_is_inherit(value) && !css_value_is_initial(value) && !css_value_is_unset(value)
+            ? resolve_color_value(context, value) : style->color;
+}
+
 static void view_css_box_style(ViewTree* tree, ViewCssStyle* style) {
     ViewCssStyle* parent = style->parent;
     LayoutContext context = view_css_length_context(tree, style, 0.0f, 0.0f);
@@ -693,20 +714,18 @@ static void view_css_box_style(ViewTree* tree, ViewCssStyle* style) {
         style->border_style[i] = view_css_keyword(tree, style, css_property_get_by_code(property)->name,
             CSS_VALUE_NONE, parent ? parent->border_style[i] : CSS_VALUE_NONE);
         property = radiant_border_width_property(side);
-        value = view_css_property(tree, style, css_property_get_by_code(property)->name);
-        const CssValue* width = view_css_compute_length(tree, style, property, value, parent ? parent->border_width[i].get() : nullptr);
-        if (style->border_style[i] == CSS_VALUE_NONE || style->border_style[i] == CSS_VALUE_HIDDEN)
-            width = css_value_create_length(tree->model->css->pool, 0.0, CSS_UNIT_PX);
-        else if (!width || width->type == CSS_VALUE_TYPE_KEYWORD)
-            width = css_value_create_length(tree->model->css->pool,
-                layout_css_border_width_keyword(width ? width->data.keyword : CSS_VALUE_MEDIUM), CSS_UNIT_PX);
-        style->border_width[i] = lam::up(width);
+        style->border_width[i] = lam::up(view_css_line_width(tree, style, property,
+            parent ? parent->border_width[i].get() : nullptr, style->border_style[i]));
         property = radiant_box_side_property(CSS_PROPERTY_BORDER_COLOR, side);
-        value = view_css_property(tree, style, css_property_get_by_code(property)->name);
-        style->border_color[i] = css_value_is_inherit(value) && parent ? parent->border_color[i] :
-            value && !css_value_is_inherit(value) && !css_value_is_initial(value) && !css_value_is_unset(value)
-                ? resolve_color_value(&context, value) : style->color;
+        style->border_color[i] = view_css_line_color(tree, style, &context, property,
+            parent ? parent->border_color[i] : Color{});
     }
+    style->column_rule_style = view_css_keyword(tree, style, "column-rule-style",
+        CSS_VALUE_NONE, parent ? parent->column_rule_style : CSS_VALUE_NONE);
+    style->column_rule_width = lam::up(view_css_line_width(tree, style, CSS_PROPERTY_COLUMN_RULE_WIDTH,
+        parent ? parent->column_rule_width.get() : nullptr, style->column_rule_style));
+    style->column_rule_color = view_css_line_color(tree, style, &context, CSS_PROPERTY_COLUMN_RULE_COLOR,
+        parent ? parent->column_rule_color : Color{});
 }
 
 static ViewCssStyle* view_css_build_style(ViewTree* tree, DomElement* element,
@@ -1303,6 +1322,17 @@ ViewModelStatus view_css_page_style(ViewTree* tree, const char* name, uint32_t p
         }
         RdtLogicalRect column = {};
         if (!view_css_page_column(&style, 0, &column)) return VIEW_MODEL_INVALID_ARGUMENT;
+        if (style.column_count > 1) {
+            CssEnum rule = style.body_style->column_rule_style;
+            float width = view_css_length(tree, style.body_style, style.body_style->column_rule_width,
+                CSS_PROPERTY_COLUMN_RULE_WIDTH, NAN, NAN);
+            if (!isfinite(width) || width < 0.0f ||
+                (rule != CSS_VALUE_NONE && rule != CSS_VALUE_HIDDEN && rule != CSS_VALUE_SOLID)) {
+                if (diagnostic) *diagnostic = {VIEW_MODEL_INVALID_ARGUMENT, style.body_region->source,
+                    "body column rules require finite widths and solid, none or hidden styles"};
+                return VIEW_MODEL_INVALID_ARGUMENT;
+            }
+        }
     }
     value = view_css_property(tree, &default_style, "background-color");
     if (value) {

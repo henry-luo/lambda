@@ -1336,6 +1336,57 @@ TEST(RenderOutputParity, FixedPdfSourceLabelsSurviveImportAndExportSelections) {
     EXPECT_FALSE(file_contains_text(selected, "/P (AA)"));
 }
 
+TEST(RenderOutputParity, BodyColumnRulesSharePreviewSvgAndPhysicalPdfGeometry) {
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
+    ASSERT_TRUE(ensure_dir(PDF_REF_DIR)); ASSERT_TRUE(command_exists("pdftoppm"));
+    const char* source = "test/html/paged_media_column_rules.rpd";
+    const char* preview_path = "temp/render_output_parity/body_column_rules.png";
+    PdfFileInfo pdf = {};
+    snprintf(pdf.path, sizeof(pdf.path), "temp/render_output_parity/body_column_rules.pdf");
+    snprintf(pdf.base, sizeof(pdf.base), "body_column_rules");
+    ASSERT_TRUE(render_document_fixture(source, pdf.path, "--paged"));
+    ASSERT_EQ(pdf_page_count(pdf.path), 3);
+    EXPECT_TRUE(file_contains_text(pdf.path, "/MediaBox [0 0 240.00 75.00]"));
+    EXPECT_FALSE(file_contains_text(pdf.path, "/Subtype /Image"));
+    ASSERT_TRUE(render_document_fixture(source, preview_path, "--paged --page-grid 1x3"));
+    ImageData preview = {}; ASSERT_TRUE(load_png_rgba(preview_path, &preview));
+    ASSERT_EQ(preview.width, 960); ASSERT_EQ(preview.height, 100);
+    const struct { int x, y; } probes[] = {{105, 50}, {215, 50}, {105, 5}, {105, 95}};
+    for (int page = 0; page < 3; page++) {
+        SCOPED_TRACE(page);
+        char reference[PATH_MAX], svg[PATH_MAX], options[80];
+        ASSERT_TRUE(render_reference_page(&pdf, page + 1, reference, sizeof(reference)));
+        ImageData physical = {}; ASSERT_TRUE(load_png_rgba(reference, &physical));
+        EXPECT_EQ(physical.width, RENDER_WIDTH);
+        EXPECT_EQ(physical.height, (RENDER_WIDTH * 100 + 319) / 320); // Poppler rounds fractional raster extents up.
+        // compare occupied-gap interiors and both endpoints against the independent PDF rasterizer.
+        for (const auto& point : probes) {
+            bool green = point.y == 50 && (point.x == 105 ? page < 2 : page == 0);
+            expect_preview_pixel(preview, page * 320 + point.x, point.y, green ? 0 : 255, 255, green ? 0 : 255);
+            expect_preview_pixel(physical, point.x * RENDER_WIDTH / 320, point.y * RENDER_WIDTH / 320,
+                green ? 0 : 255, 255, green ? 0 : 255);
+        }
+        image_free(physical.pixels);
+        snprintf(svg, sizeof(svg), "temp/render_output_parity/body_column_rules_%d.svg", page + 1);
+        snprintf(options, sizeof(options), "--paged --thumbnail-page %d", page + 1);
+        ASSERT_TRUE(render_document_fixture(source, svg, options));
+        EXPECT_EQ(file_contains_text(svg, "fill=\"rgb(0,255,0)\""), page < 2);
+    }
+    image_free(preview.pixels);
+}
+
+TEST(RenderOutputParity, PagedViewerAdmitsNativeAndFoDocumentsThroughCommonLoaders) {
+    for (const char* fixture : {"test/html/paged_media_column_rules.rpd", "test/html/paged_media_body_columns.fo"}) {
+        SCOPED_TRACE(fixture);
+        char command[PATH_MAX + 192];
+        snprintf(command, sizeof(command), "MEMTRACK_MODE=DEBUG VIEW_MEM_STAGES=1 \"%s\" view \"%s\" --paged --headless 2>&1",
+            LAMBDA_EXE, fixture);
+        CommandResult result = run_command_capture(command);
+        EXPECT_EQ(result.exit_code, 0) << result.output;
+        EXPECT_NE(strstr(result.output, "[MEMTRACK_LIVE] bytes=0 count=0"), nullptr) << result.output;
+    }
+}
+
 TEST(RenderOutputParity, FoAndNativePageControlsSharePreviewAndPhysicalPdfPages) {
     ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
     ASSERT_TRUE(ensure_dir(PDF_REF_DIR)); ASSERT_TRUE(command_exists("pdftoppm"));

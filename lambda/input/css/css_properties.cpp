@@ -82,6 +82,9 @@ static CssPropertyCode transition_longhands[] = {
 static CssPropertyCode marker_longhands[] = {
     CSS_PROPERTY_MARKER_START, CSS_PROPERTY_MARKER_MID, CSS_PROPERTY_MARKER_END
 };
+static CssPropertyCode column_rule_longhands[] = {
+    CSS_PROPERTY_COLUMN_RULE_WIDTH, CSS_PROPERTY_COLUMN_RULE_STYLE, CSS_PROPERTY_COLUMN_RULE_COLOR
+};
 
 static CssProperty property_definitions[] = {
     // Layout Properties
@@ -375,7 +378,7 @@ static CssProperty property_definitions[] = {
     {CSS_PROPERTY_COLUMN_WIDTH, "column-width", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "auto", true, false, NULL, 0, validate_length, NULL},
     {CSS_PROPERTY_COLUMN_COUNT, "column-count", PROP_TYPE_NUMBER, PROP_INHERIT_NO, "auto", false, false, NULL, 0, validate_integer, NULL},
     {CSS_PROPERTY_COLUMNS, "columns", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "auto", false, true, NULL, 0, validate_keyword, NULL},
-    {CSS_PROPERTY_COLUMN_RULE, "column-rule", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "none", false, true, NULL, 0, validate_keyword, NULL},
+    {CSS_PROPERTY_COLUMN_RULE, "column-rule", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "none", false, true, column_rule_longhands, 3, validate_keyword, NULL},
     {CSS_PROPERTY_COLUMN_RULE_WIDTH, "column-rule-width", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "medium", true, false, NULL, 0, validate_length, NULL},
     {CSS_PROPERTY_COLUMN_RULE_STYLE, "column-rule-style", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "none", false, false, NULL, 0, validate_keyword, NULL},
     {CSS_PROPERTY_COLUMN_RULE_COLOR, "column-rule-color", PROP_TYPE_COLOR, PROP_INHERIT_NO, "currentColor", true, false, NULL, 0, validate_color, NULL},

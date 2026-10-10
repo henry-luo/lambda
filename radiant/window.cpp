@@ -352,7 +352,8 @@ static DomDocument* load_doc_by_format(const char* filename, Url* base_url, int 
             log_warn("RST format not yet implemented");
             return NULL;
         }
-        if (format == DOC_FORMAT_UNKNOWN) {
+        // paged formats share the export loader's admission before reaching the common document router.
+        if (format == DOC_FORMAT_UNKNOWN && !(print_media && render_paged_input_supported(filename))) {
             log_error("Unsupported document format for file: %s", filename);
             log_error("Supported formats: .html, .htm, .md, .markdown, .tex, .latex, .pgf, .ls, .slides, .xml, .pdf, .svg, .png, .jpg, .jpeg, .gif, .json, .yaml, .yml, .toml, .txt, .csv, .ini, .conf, .cfg, .log");
             return NULL;

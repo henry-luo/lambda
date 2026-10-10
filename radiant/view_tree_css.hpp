@@ -41,6 +41,9 @@ struct ViewCssStyle {
     // retain family grouping and normal-versus-length spacing in this CSS generation.
     lam::Up<const CssValue> font_values[3]; // family, letter-spacing, word-spacing
     lam::Up<const CssValue> column_values[2]; // count and gap computed at their declaration owner
+    lam::Up<const CssValue> column_rule_width;
+    CssEnum column_rule_style;
+    Color column_rule_color;
     Color color, background;
     lam::Up<const CssValue> width, height, min_width, max_width, min_height, max_height;
     lam::Up<const CssValue> margin[4], padding[4], border_width[4];
