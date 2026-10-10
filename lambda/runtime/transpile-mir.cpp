@@ -10361,7 +10361,9 @@ static MirValue transpile_ident_value(MirTranspiler* mt, AstIdentNode* ident) {
             bool satellite_dynamic_target = mt->satellite_target &&
                 !mir_satellite_defines(mt, entry_node);
             bool whole_script_dynamic_target = mt->whole_script_poc &&
-                !interp_satellite_supported((AstFuncNode*)entry_node);
+                !interp_satellite_supported(ident->entry->import
+                ? mir_import_script(mt, ident->entry->import) : mt->owner_script,
+                (AstFuncNode*)entry_node);
             satellite_dynamic_target = satellite_dynamic_target ||
                 whole_script_dynamic_target;
             if (!cap_var && !satellite_dynamic_target) {
@@ -11130,7 +11132,9 @@ static NativeFuncInfo* mir_direct_native_info(MirTranspiler* mt,
             target->node_type != AST_NODE_FUNC_EXPR &&
             target->node_type != AST_NODE_PROC)) return NULL;
     StrBuf* name = strbuf_new_cap(64);
-    write_fn_name(name, (AstFuncNode*)target,
+    // native-call metadata uses the same execution-local import identity as
+    // call lowering; a cached AST may refer to a retired worker (D8.5.1v7).
+    mir_write_fn_name(mt, name, (AstFuncNode*)target,
         ident->entry ? ident->entry->import : NULL);
     NativeFuncInfo* native = find_native_func_info(mt, name->str);
     strbuf_free(name);
@@ -32627,7 +32631,9 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node,
             (entry_node->node_type == AST_NODE_FUNC ||
              entry_node->node_type == AST_NODE_FUNC_EXPR ||
              entry_node->node_type == AST_NODE_PROC) &&
-            !interp_satellite_supported((AstFuncNode*)entry_node);
+            !interp_satellite_supported(ident->entry->import
+                ? mir_import_script(mt, ident->entry->import) : mt->owner_script,
+                (AstFuncNode*)entry_node);
         satellite_dynamic_target = satellite_dynamic_target ||
             whole_script_dynamic_target;
         if (!is_fn_variable && !satellite_dynamic_target && entry_node && (entry_node->node_type == AST_NODE_FUNC ||
@@ -47316,13 +47322,15 @@ static void mir_satellite_cluster_visit(AstNode* node, void* opaque) {
         return;   // a nested definition's calls are its own
     case AST_NODE_CALL_EXPR: {
         AstFuncNode* direct = ast_direct_call_function((AstCallNode*)node);
+        bool supported = direct && mir_satellite_module_definition(scan->root, direct) &&
+            interp_satellite_supported(scan->script, direct);
         if (direct && scan->count < scan->capacity &&
                 (((AstNode*)direct)->node_type == AST_NODE_FUNC ||
                  ((AstNode*)direct)->node_type == AST_NODE_PROC) &&
                 mir_satellite_module_definition(scan->root, direct) &&
                 interp_promotion_cell(scan->script, direct) &&
                 interp_promotion_cell(scan->script, direct)->state == FN_PROMOTION_INTERP &&
-                interp_satellite_supported(direct)) {
+                supported) {
             bool seen = false;
             for (int i = 0; i < scan->count && !seen; i++) seen = scan->members[i] == direct;
             const char* skip = getenv("LAMBDA_SATELLITE_CLUSTER_SKIP");
@@ -47342,7 +47350,7 @@ static void mir_satellite_cluster_visit(AstNode* node, void* opaque) {
                 (int)mir_satellite_module_definition(scan->root, direct),
                 interp_promotion_cell(scan->script, direct)
                     ? (int)interp_promotion_cell(scan->script, direct)->state : -1,
-                (int)interp_satellite_supported(direct));
+                (int)supported);
         }
         break;
     }
@@ -47393,7 +47401,7 @@ static bool compile_ast_function_satellite_image(Runtime* runtime, Script* scrip
         InterpSatelliteImage** out_image) {
     if (out_image) *out_image = NULL;
     if (!runtime || !script || !fn || !fn->analysis || !out_image ||
-            !interp_satellite_supported(fn) ||
+            !interp_satellite_supported(script, fn) ||
             (cancel_probe && cancel_probe(cancel_context))) {
         return false;
     }

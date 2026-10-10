@@ -13115,7 +13115,11 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
         // Handle text selection drag (supports cross-view selection)
         View* anchor_view = NULL;
         int anchor_offset = 0;
-        if (selection_get_pointer_anchor(state, &anchor_view, &anchor_offset)) {
+        // a stationary move after a press must not start edge autoscroll and
+        // move a different element under the pointer before the release.
+        bool selection_moved = motion->movement_x != 0.0f || motion->movement_y != 0.0f;
+        if ((selection_moved || (state && state->editing_autoscroll_active)) &&
+            selection_get_pointer_anchor(state, &anchor_view, &anchor_offset)) {
             View* current_target = evcon.target;
 
             log_debug("[SELECTION DRAG] is_selecting=true, anchor_view=%p, current_target=%p (type=%d)",

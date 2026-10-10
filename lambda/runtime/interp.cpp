@@ -6576,7 +6576,7 @@ static void interp_queue_loop_handoff(InterpFrame* frame, AstLoopControlNode* lo
         } else {
             memcpy(saved, live, sizeof(NameEntry*) * (size_t)live_count);
             cell->loop_live_ins = saved;
-            why = interp_satellite_refusal(continuation);
+            why = interp_satellite_refusal(frame->module, continuation);
         }
     }
     if (why) {
@@ -7950,7 +7950,7 @@ static bool interp_whole_script_publish_function(Script* script,
         AstFuncNode* def, Function* known_fn) {
     if (!script || !script->interp_whole_script_poc_active || !def ||
             !def->analysis || def->captures || def->is_generator ||
-            def->is_async || !interp_satellite_supported(def)) {
+            def->is_async || !interp_satellite_supported(script, def)) {
         // Whole-module lowering still exposes each function through the same
         // boxed ABI as a satellite. Keep the established aggregate/mutable
         // parameter admission gate or a valid MIR image can silently narrow
@@ -8054,7 +8054,7 @@ static bool interp_whole_script_compile(InterpState* st, Script* script,
 
     script->interp_whole_script_poc_attempted = true;
     if (!trigger || !trigger->def ||
-            !interp_satellite_supported((AstFuncNode*)trigger->def)) {
+            !interp_satellite_supported(script, (AstFuncNode*)trigger->def)) {
         // The whole image still publishes functions through the satellite
         // boxed ABI. Reject an unsupported first trigger before paying for a
         // module compile that cannot safely become active (D8.1.1v4/D5.2).
@@ -8187,7 +8187,7 @@ static bool interp_promote_function(Function* fn, bool count_entry) {
             return false;
         }
     }
-    if (const char* refusal = interp_satellite_refusal(def)) {
+    if (const char* refusal = interp_satellite_refusal(script, def)) {
         // A pinned definition is a declared interpreter policy, never a
         // fallback to a different module compilation path (T27-6).
         cell->state = FN_PROMOTION_PINNED_INTERP;

@@ -17,6 +17,7 @@ extern "C" {
 #endif
 
 bool dom_element_is_svg(void* element);
+bool dom_svg_is_text(void* element);
 const char* dom_element_namespace_uri(void* element);
 const char* dom_element_lookup_namespace_uri(void* element, const char* prefix);
 const char* dom_element_attribute_ns(void* element, const char* namespace_uri, const char* local_name);
