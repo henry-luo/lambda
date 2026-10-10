@@ -62,6 +62,7 @@ static void page_generation_detach(ViewTree* tree) {
     generation->retired->next_secondary = nullptr;
     generation->retired->model->page_generation = nullptr;
     generation->retired->model->retained_generation = lam::up(generation);
+    view_css_context_rebind(generation->retired);
     generation->owner = generation->retired.borrow();
     lam::Own<ViewTree> next = tree->next_secondary;
     *tree = {};
@@ -431,6 +432,7 @@ bool view_tree_model_destroy(ViewTree* tree) {
     model_native_release(model);
     image_resource_cache_cleanup(&model->image_resources);
     view_css_context_destroy(tree);
+    view_css_container_state_destroy(tree);
     page_generation_release(model);
     if (model->source_states) hashmap_free(model->source_states);
     if (model->arena) mem_arena_destroy(model->arena);
@@ -447,6 +449,7 @@ bool view_tree_model_reset(ViewTree* tree) {
     model_native_release(model);
     image_resource_cache_cleanup(&model->image_resources);
     view_css_context_destroy(tree);
+    view_css_container_state_destroy(tree);
     page_generation_release(model);
     hashmap_clear(model->source_states, false);
     arena_reset(model->arena);

@@ -773,7 +773,8 @@ extern "C" int lambda_scheduler_run_one(LambdaScheduler* scheduler) {
             task->fault = *fault;
             result = err2it(&task->fault.error);
         } else {
-            result = activation_value(task->activation);
+            // the activation owns returned wide scalars until its record is destroyed.
+            result = lambda_item_adopt_scalar_home(activation_value(task->activation), &task->result_scalar);
         }
         activation_destroy(task->activation);
         task->activation = NULL;

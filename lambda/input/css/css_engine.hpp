@@ -22,12 +22,35 @@ enum {
     // expansion bounds are UA-defined by CSS Values 5, applied per computed value.
     CSS_SUBSTITUTION_DEFAULT_MAX_BYTES = 1024 * 1024,
     CSS_SUBSTITUTION_DEFAULT_MAX_TOKENS = 64 * 1024,
+    CSS_SUBSTITUTION_DEFAULT_MAX_DEPTH = 128,
+    CSS_SUBSTITUTION_MAX_TRAVERSAL_DEPTH = 1024,
 };
 
 typedef enum CssConditionKind {
     CSS_CONDITION_MEDIA,
     CSS_CONDITION_SUPPORTS,
+    CSS_CONDITION_CONTAINER,
 } CssConditionKind;
+
+enum CssContainerAxis {
+    CSS_CONTAINER_WIDTH = 1,
+    CSS_CONTAINER_HEIGHT = 2,
+    CSS_CONTAINER_INLINE = 4,
+    CSS_CONTAINER_BLOCK = 8,
+};
+
+// the selected layout supplies content-box measurements; CSS never reads another view's boxes.
+typedef bool (*CssContainerValueResolver)(void* context, const CssValue* value, CssMathResult* result);
+typedef struct CssContainerMetrics {
+    const void* identity;
+    uint64_t generation;
+    double width, height;
+    bool vertical;
+    CssContainerValueResolver resolve_value; // includes owner var()/math before dimensional validation
+    void* value_context;
+} CssContainerMetrics;
+typedef bool (*CssContainerProvider)(void* context, struct DomElement* target,
+    const char* name, uint8_t axes, CssContainerMetrics* result);
 
 typedef struct CssConditionCacheEntry {
     const char* condition; // engine-owned copy, never a caller-owned span
@@ -95,6 +118,7 @@ typedef struct CssEngine {
     struct {
         size_t max_substitution_bytes;
         size_t max_substitution_tokens;
+        size_t max_substitution_depth;
     } limits;
 
     // Context settings
@@ -110,7 +134,12 @@ typedef struct CssEngine {
         bool quirks_mode;
         bool reduced_motion;
         bool high_contrast;
+        bool vertical_viewport;
     } context;
+
+    CssContainerProvider container_provider;
+    void* container_context; // borrowed from the layout owner, never a stylesheet payload
+    bool container_dependencies;
 
     // Engine statistics
     struct {
@@ -205,6 +234,7 @@ void css_style_engine_destroy(struct CssStyleEngine* engine);
 void css_engine_set_options(CssEngine* engine, const CssProcessingOptions* options);
 // zero selects the default per-value bound; each document may override the UA policy.
 void css_engine_set_substitution_limits(CssEngine* engine, size_t max_bytes, size_t max_tokens);
+void css_engine_set_substitution_depth_limit(CssEngine* engine, size_t max_depth);
 void css_engine_set_viewport(CssEngine* engine, double width, double height);
 void css_engine_set_color_scheme(CssEngine* engine, const char* scheme);
 void css_engine_set_root_font_size(CssEngine* engine, double size);
@@ -242,6 +272,13 @@ bool css_set_custom_property(CssEngine* engine, CssComputedStyle* style,
 bool css_evaluate_media_query(CssEngine* engine, const char* media_query);
 // Conditional Rules: evaluate a CSS @supports condition.
 bool css_evaluate_supports_condition(CssEngine* engine, const char* condition);
+bool css_evaluate_container_query(CssEngine* engine, struct DomElement* target,
+    const char* condition);
+bool css_container_length_to_px(CssEngine* engine, struct DomElement* target,
+    CssUnit unit, double value, double* pixels);
+uint8_t css_container_type_axes(const CssValue* value);
+bool css_container_matches(const CssValue* names, uint8_t available_axes, bool vertical,
+    const char* name, uint8_t requested_axes);
 
 // Statistics and debugging
 typedef struct CssEngineStats {

@@ -1760,6 +1760,74 @@ TEST(RenderOutputParity, PagedPercentageHeightsPreserveAutoAndDefiniteContaining
     }
 }
 
+TEST(RenderOutputParity, SizeContainersMatchExplicitGeometryInFlatAndFragmentedExports) {
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
+    ASSERT_TRUE(ensure_dir(PDF_REF_DIR));
+    ASSERT_TRUE(command_exists("pdftoppm"));
+    const char* common = "<!doctype html><style>@page{size:180px 80px;margin:0}"
+        "html,body,div{margin:0;padding:0}"
+        "#outer{container:card / size;width:120px;height:140px;padding:4px;"
+        "font-size:20px;--threshold:90px;background:#ddd}"
+        "#inner{container-type:inline-size;width:80px;height:20px}"
+        "#target{height:10px;background:red}#units{background:blue}#leaf{background:purple}"
+        "@media print{#outer{width:100px}}";
+    const char* variants[] = {
+        "#target{width:20px}#units{width:50cqw;height:10cqh}#leaf{width:10cqi;height:5cqh}"
+        "@container card (width >= 100px) and (height = 140px){#target{width:60px;background:green}}"
+        "@container card (width > calc(var(--threshold) + 1em)){#target{height:20px}}"
+        "@container (height > 100px){#leaf{background:green}}",
+        "#target{width:60px;height:20px;background:green}#units{width:60px;height:14px}"
+        "#leaf{width:8px;height:7px;background:green}"
+        "@media print{#target{height:10px}#units{width:50px}}"
+    };
+    const char* body = "</style><div id='outer'><div id='target'></div><div id='units'></div>"
+        "<div id='inner'><div id='leaf'></div></div></div>";
+    StrBuf* html[2] = {strbuf_new(), strbuf_new()};
+    ASSERT_NE(html[0], nullptr); ASSERT_NE(html[1], nullptr);
+    char previews[2][PATH_MAX]; PdfFileInfo pdfs[2] = {};
+    const char* stems[] = {"paged_size_containers", "paged_size_containers_explicit"};
+    for (size_t variant = 0; variant < 2; variant++) {
+        strbuf_append_str(html[variant], common);
+        strbuf_append_str(html[variant], variants[variant]);
+        strbuf_append_str(html[variant], body);
+        EXPECT_TRUE(render_paged_parity_variant(stems[variant], html[variant]->str,
+            previews[variant], &pdfs[variant], "--paged --block-remote-resources --page-grid 1x3"));
+    }
+    expect_paged_pair_output_parity(previews, pdfs, 2, 2);
+    expect_html_pair_output_parity("size_containers", html[0]->str, html[1]->str);
+    strbuf_free(html[0]); strbuf_free(html[1]);
+}
+
+TEST(RenderOutputParity, StyleContainedGeneratedTextMatchesLiteralPseudosAcrossOutputs) {
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
+    ASSERT_TRUE(ensure_dir(PDF_REF_DIR)); ASSERT_TRUE(command_exists("pdftoppm"));
+    const char* common = "<!doctype html><style>@page{size:180px 40px;margin:0}"
+        "html,body,div{margin:0;padding:0;font:14px/20px monospace}body{counter-reset:N 7}"
+        ".c{contain:style;counter-increment:N;quotes:'A' 'Z' '1' '9';height:20px}"
+        ".c span{contain:style}.c::before{content:counters(N,'.') open-quote}"
+        ".c::after{counter-increment:N 2;content:counters(N,'.') close-quote}"
+        ".c span::before{content:open-quote}.tail::before{content:counter(N)}";
+    const char* overrides[] = {"", ".c:nth-child(1)::before{content:'8A'}.c:nth-child(1)::after{content:'8.2Z'}"
+        ".c:nth-child(2)::before{content:'9A'}.c:nth-child(2)::after{content:'9.2Z'}"
+        ".c:nth-child(3)::before{content:'10A'}.c:nth-child(3)::after{content:'10.2Z'}"
+        ".c:nth-child(4)::before{content:'11A'}.c:nth-child(4)::after{content:'11.2Z'}"
+        ".c span::before{content:'1'}.tail::before{content:'11'}"};
+    const char* body = "</style><div class=c><span></span></div><div class=c><span></span></div>"
+        "<div class=c><span></span></div><div class=c><span></span></div><div class=tail></div>";
+    StrBuf* html[2] = {strbuf_new(), strbuf_new()};
+    ASSERT_NE(html[0], nullptr); ASSERT_NE(html[1], nullptr);
+    char previews[2][PATH_MAX]; PdfFileInfo pdfs[2] = {};
+    const char* stems[] = {"style_containment", "style_containment_literal"};
+    for (size_t i = 0; i < 2; i++) {
+        strbuf_append_str(html[i], common); strbuf_append_str(html[i], overrides[i]); strbuf_append_str(html[i], body);
+        EXPECT_TRUE(render_paged_parity_variant(stems[i], html[i]->str, previews[i], &pdfs[i],
+            "--paged --block-remote-resources --page-grid 1x3"));
+    }
+    expect_paged_pair_output_parity(previews, pdfs, 3, 3);
+    expect_html_pair_output_parity("style_containment", html[0]->str, html[1]->str);
+    strbuf_free(html[0]); strbuf_free(html[1]);
+}
+
 TEST(RenderOutputParity, ResponsivePicturePrintSelectionRetainsDensityAndPhysicalPageGeometry) {
     ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
     const char* html_path = "temp/render_output_parity/paged_responsive.html";

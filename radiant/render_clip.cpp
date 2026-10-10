@@ -1,4 +1,5 @@
 #include "render.hpp"
+#include "layout.hpp"
 
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lambda/input/css/css_style.hpp"
@@ -550,6 +551,34 @@ bool render_clip_push_vector_css(PaintList* paint, ViewElement* element,
     if (!path) return false;
     int before = paint_list_count(paint);
     paint_push_clip(paint, path, nullptr, rule);
+    rdt_path_free(path);
+    return paint_list_count(paint) > before;
+}
+
+bool render_clip_overflow_geometry(ViewBlock* block, Bound* clip, Corner* radius) {
+    if (!clip || !radius || !layout_block_overflow_clip(block, clip)) return false;
+    *radius = {};
+    BorderProp* border = block->bound ? block->boundary()->border.get() : nullptr;
+    if (border) {
+        resolve_border_radius_percentages(&border->radius, block->width, block->height);
+        *radius = radiant_corner_inset_edges(&border->radius, clip->top,
+            block->width - clip->right, block->height - clip->bottom, clip->left);
+        constrain_corner_radii(radius, clip->right - clip->left, clip->bottom - clip->top);
+    }
+    return true;
+}
+
+bool render_clip_push_vector(PaintList* paint, ViewElement* element,
+        float abs_x, float abs_y, RenderClipKind kind) {
+    if (kind == RENDER_CLIP_SHAPE) return render_clip_push_vector_css(paint, element, abs_x, abs_y);
+    ViewBlock* block = lam::view_as_block(element);
+    Bound clip; Corner radius;
+    if (!paint || !render_clip_overflow_geometry(block, &clip, &radius)) return false;
+    RdtPath* path = render_path_create_rounded_rect(
+        {abs_x + clip.left, abs_y + clip.top, clip.right - clip.left, clip.bottom - clip.top}, &radius);
+    if (!path) return false;
+    int before = paint_list_count(paint);
+    paint_push_clip(paint, path, nullptr, RDT_FILL_WINDING);
     rdt_path_free(path);
     return paint_list_count(paint) > before;
 }

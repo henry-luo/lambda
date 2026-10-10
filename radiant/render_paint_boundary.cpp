@@ -57,15 +57,6 @@ static bool boundary_border_has_visible_side(const BorderProp* border) {
     return false;
 }
 
-static bool boundary_border_all_sides_visible(const BorderProp* border) {
-    if (!border) return false;
-    for (int i = 0; i < 4; i++) {
-        if (!boundary_border_side_visible(border->width.values[i], border->styles[i],
-                                          border->colors[i])) return false;
-    }
-    return true;
-}
-
 static bool boundary_border_simple(const BorderProp* border) {
     if (!border) return true;
     if (boundary_has_radius(border) && boundary_border_has_visible_side(border)) return false;
@@ -90,18 +81,38 @@ static bool boundary_border_uniform_color(const BorderProp* border) {
     return true;
 }
 
+bool render_border_is_uniform_solid(const BorderProp* border) {
+    if (!border || border->width.values[0] <= 0.0f || border->colors[0].a == 0) return false;
+    for (int i = 0; i < 4; i++) {
+        if (border->width.values[i] != border->width.values[0] ||
+            border->styles[i] != CSS_VALUE_SOLID ||
+            border->colors[i].c != border->colors[0].c) return false;
+    }
+    return true;
+}
+
+bool render_paint_boundary_emit_solid_border(PaintList* paint, BorderProp* border, Rect rect) {
+    if (!paint || !render_border_is_uniform_solid(border) ||
+        rect.width <= border->width.top || rect.height <= border->width.top) return false;
+    resolve_border_radius_percentages(&border->radius, rect.width, rect.height);
+    constrain_corner_radii(&border->radius, rect.width, rect.height);
+    // a centered rounded stroke fills the curved border even with a transparent background.
+    RdtPath* path = render_border_create_centered_stroke_path(border, rect, border->width.top);
+    if (!path) return false;
+    int index = paint_list_count(paint);
+    paint_stroke_path(paint, path, border->top_color, border->width.top,
+        RDT_CAP_BUTT, RDT_JOIN_MITER, nullptr, 0, 0.0f, nullptr);
+    if (paint_list_take_path_payload(paint, index, PAINT_STROKE_PATH)) return true;
+    rdt_path_free(path);
+    return false;
+}
+
 static bool boundary_rounded_border_fill_supported(const BoundaryProp* bound) {
     if (!bound || !bound->border || !bound->background) return false;
     const BorderProp* border = bound->border;
     const BackgroundProp* bg = bound->background;
     if (bg->color.a != 255) return false;
-    if (!boundary_border_all_sides_visible(border)) return false;
-    for (int i = 0; i < 4; i++) {
-        if (border->styles[i] != CSS_VALUE_SOLID || border->colors[i].a != 255) return false;
-        if (i > 0 && (border->width.values[i] != border->width.values[0] ||
-                      border->colors[i].c != border->colors[0].c)) return false;
-    }
-    return true;
+    return render_border_is_uniform_solid(border) && border->colors[0].a == 255;
 }
 
 static void boundary_emit_border_side(PaintList* paint_list, float x, float y,

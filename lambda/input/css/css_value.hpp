@@ -622,6 +622,13 @@ typedef struct CssEnumInfo{
 const CssEnumInfo* css_enum_info(CssEnum id);
 CssEnum css_enum_by_name(const char* name);
 const char* css_value_identifier_name(const struct CssValue* value);
+bool css_value_identifier_is(const struct CssValue* value, const char* name, bool case_sensitive = false);
+bool css_value_has_identifier(const struct CssValue* value, const char* name, bool case_sensitive = false);
+enum CssContainmentFlags : uint8_t {
+    CSS_CONTAIN_SIZE = 1, CSS_CONTAIN_INLINE_SIZE = 2, CSS_CONTAIN_LAYOUT = 4,
+    CSS_CONTAIN_STYLE = 8, CSS_CONTAIN_PAINT = 16
+};
+uint8_t css_value_containment_flags(const struct CssValue* value);
 bool css_value_keyword_equals(const struct CssValue* value, CssEnum keyword);
 struct CssFunction;
 bool css_function_name_is(const CssFunction* function, const char* name);

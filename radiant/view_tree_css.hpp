@@ -24,6 +24,7 @@ enum ViewBreak : uint8_t {
 
 struct ViewCssStyle {
     uint8_t pseudo_element;
+    lam::Up<ViewTree> view;
     lam::Up<DomElement> source;
     lam::Up<ViewCssStyle> parent;
     lam::Up<ViewCssStyle> next;
@@ -35,6 +36,10 @@ struct ViewCssStyle {
     const char* binding_reason;
     lam::Up<ViewCssPageContext> page_context;
     DisplayValue display;
+    lam::Up<const CssValue> container_names;
+    uint8_t container_axes;
+    uint8_t computed_containment;
+    bool vertical;
     FontProp font;
     FontBox font_box;
     Color color, background;
@@ -134,6 +139,11 @@ struct ViewPageStyle {
 bool view_css_context_begin(ViewTree* tree);
 double view_css_number(const CssValue* value, ViewTree* tree = nullptr, const ViewCssStyle* style = nullptr);
 void view_css_context_destroy(ViewTree* tree);
+void view_css_context_rebind(ViewTree* tree);
+bool view_css_container_pass_begin(ViewTree* tree);
+bool view_css_container_pass_end(ViewTree* tree, bool* settled);
+bool view_css_container_pass_reset(ViewTree* tree);
+void view_css_container_state_destroy(ViewTree* tree);
 ViewCssStyle* view_css_resolve(ViewTree* tree, DomElement* element);
 ViewCssStyle* view_css_resolve_pseudo(ViewTree* tree, DomElement* element, uint8_t pseudo_element);
 ViewCssStyle* view_css_anonymous_style(ViewTree* tree, ViewCssStyle* parent, DisplayValue display);

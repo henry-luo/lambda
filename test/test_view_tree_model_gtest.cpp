@@ -622,6 +622,61 @@ TEST(TypesetTest, CounterSnapshotsOutliveMutableScopesAndKeepLongNestedValues) {
     ASSERT_TRUE(counter_snapshot_append(snapshot, "Missing", nullptr, CSS_VALUE_DECIMAL, text)); EXPECT_STREQ(text->str, "0");
     strbuf_free(text); mem_pool_destroy(pool);
 }
+TEST(TypesetTest, StyleCounterScopesKeepReadsAndIsolateNestedMutations) {
+    Arena* arena = mem_arena_create(nullptr, MEM_ROLE_LAYOUT, "test.counter.containment"); ASSERT_NE(arena, nullptr);
+    CounterContext* counters = counter_context_create(arena); ASSERT_NE(counters, nullptr);
+    counter_reset(counters, "N 7"); counters->quote_depth = 2;
+    {
+        CounterStyleScope boundary; ASSERT_TRUE(boundary.enter(counters, true));
+        EXPECT_EQ(counter_get_value(counters, "N"), 7);
+        ASSERT_TRUE(counter_push_scope(counters));
+        counter_reset(counters, "Other 3");
+        counter_increment(counters, "N 2");
+        counter_pop_scope_propagate(counters, true, true);
+        EXPECT_EQ(counter_get_value(counters, "N"), 2);
+        char values[64] = {};
+        EXPECT_GT(counters_format(counters, "N", ".", CSS_VALUE_DECIMAL, values, sizeof(values)), 0);
+        EXPECT_STREQ(values, "7.2");
+        {
+            CounterStyleScope nested; ASSERT_TRUE(nested.enter(counters, true));
+            counter_set(counters, "N 5"); counters->quote_depth = 4;
+            EXPECT_EQ(counter_get_value(counters, "N"), 5);
+        }
+        EXPECT_EQ(counter_get_value(counters, "N"), 2);
+        EXPECT_EQ(counters->quote_depth, 2);
+        counters->quote_depth = 1;
+    }
+    EXPECT_EQ(counter_get_value(counters, "N"), 7);
+    EXPECT_EQ(counter_get_value(counters, "Other"), 0);
+    EXPECT_EQ(counters->quote_depth, 2);
+    counter_context_destroy(counters); mem_arena_destroy(arena);
+}
+
+TEST(TypesetTest, CounterMeasurementCheckpointsRestoreValuesResetsAndUnfinishedFrames) {
+    Arena* arena = mem_arena_create(nullptr, MEM_ROLE_LAYOUT, "test.counter.checkpoint"); ASSERT_NE(arena, nullptr);
+    CounterContext* counters = counter_context_create(arena); ASSERT_NE(counters, nullptr);
+    counter_reset(counters, "N 7"); counters->quote_depth = 2;
+    CounterScope* original = counters->current_scope; size_t frames = counters->frame_stack->size();
+    Arena* scratch_arena = mem_arena_create(nullptr, MEM_ROLE_LAYOUT, "test.counter.checkpoint.scratch");
+    ASSERT_NE(scratch_arena, nullptr);
+    ScratchArena scratch; scratch_init(&scratch, scratch_arena);
+    {
+        ScratchScope storage(&scratch); CounterCheckpoint checkpoint;
+        ASSERT_TRUE(checkpoint.enter(counters, &scratch, &storage.mark));
+        counter_increment(counters, "N 3 New 9"); counters->quote_depth = 4;
+        ASSERT_TRUE(counter_push_scope(counters)); counter_reset(counters, "N 20");
+        counter_pop_scope_propagate(counters, true, true);
+        EXPECT_EQ(counter_get_value(counters, "N"), 20);
+        ASSERT_TRUE(counter_push_scope(counters));
+    }
+    EXPECT_EQ(counters->current_scope.get(), original);
+    EXPECT_EQ(counters->frame_stack->size(), frames);
+    EXPECT_EQ(counter_get_value(counters, "N"), 7);
+    EXPECT_EQ(counter_get_value(counters, "New"), 0);
+    EXPECT_EQ(counters->quote_depth, 2);
+    counter_context_destroy(counters); mem_arena_destroy(scratch_arena); mem_arena_destroy(arena);
+}
+
 TEST(TypesetTest, CounterListsKeepEveryImplicitValue) {
     Arena* arena = mem_arena_create(nullptr, MEM_ROLE_LAYOUT, "test.counter.implicit"); ASSERT_NE(arena, nullptr);
     CounterContext* counters = counter_context_create(arena); ASSERT_NE(counters, nullptr);
@@ -912,6 +967,10 @@ protected:
         return element;
     }
     DomElement* image(const char* css = nullptr, DomElement* parent = nullptr, const char* url = nullptr);
+    DomElement* identified_block(const char* id, DomElement* parent = nullptr) {
+        DomElement* element = block(nullptr, nullptr, "div", parent);
+        return element && element->set_attribute("id", id) ? element : nullptr;
+    }
     DomElement* page_control(const char* tag, DomElement* parent = nullptr, const char* css = nullptr) {
         if (!source->set_attribute("xmlns:r", RADIANT_PAGE_NAMESPACE)) return nullptr;
         return block(nullptr, css, tag, parent);
@@ -5663,6 +5722,28 @@ TEST_F(SecondaryViewTest, CounterSetFollowsIncrementAndQuotesSpanIndependentPseu
     EXPECT_STREQ(text->str, "3<Outer[Inner]>"); strbuf_free(text);
 }
 
+TEST_F(SecondaryViewTest, StyleContainmentScopesCountersAndQuotesInIndependentViews) {
+    stylesheet("@page { size: 400px 240px; margin: 10px } "
+        "p { counter-reset: N 7; quotes: 'A' 'Z' '1' '9' } "
+        "p, div, span { margin: 0; font-size: 10px; line-height: 12px } "
+        ".contained { contain: style; counter-increment: N } "
+        ".contained::before { content: counters(N, '.') open-quote } "
+        ".contained::after { counter-increment: N 2; content: counters(N, '.') close-quote } "
+        ".quote::before { content: open-quote } .tail::before { content: counter(N) close-quote }");
+    DomElement* contained = block("", nullptr, "div"); ASSERT_NE(contained, nullptr);
+    ASSERT_TRUE(contained->set_attribute("class", "contained"));
+    DomElement* quote = block("", "contain:style", "span", contained); ASSERT_NE(quote, nullptr);
+    ASSERT_TRUE(quote->set_attribute("class", "quote"));
+    DomElement* tail = block("", nullptr, "div"); ASSERT_NE(tail, nullptr);
+    ASSERT_TRUE(tail->set_attribute("class", "tail"));
+    ViewTree* tree = secondary(); PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
+    ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    LayoutViewNode* box = source_fragment(tree, contained, VIEW_FRAGMENT_BODY, true); ASSERT_NE(box, nullptr);
+    StrBuf* text = strbuf_new(); ASSERT_NE(text, nullptr); append_fragment_text(box, text);
+    EXPECT_STREQ(text->str, "8A18.2Z"); strbuf_free(text);
+    EXPECT_STREQ(view_css_resolve_pseudo(tree, tail, PSEUDO_ELEMENT_BEFORE)->generated_text, "8");
+}
+
 TEST_F(SecondaryViewTest, CounterResetsReachFollowingSiblingsWithoutEscapingTheirParent) {
     stylesheet("@page { size: 400px 240px; margin: 10px } p { counter-reset: N 0 } "
         "p, div, span { margin: 0; font-size: 10px; line-height: 12px } .show::before { content: counters(N, '.') ' ' } "
@@ -7324,6 +7405,126 @@ TEST_F(SecondaryViewTest, MediaCascadeAndLengthsBelongToEachView) {
     narrow->reset_retained();
     EXPECT_EQ(view_css_resolve(wide, source), a);
     EXPECT_EQ(view_css_resolve(print, source), c);
+}
+
+TEST_F(SecondaryViewTest, SizeContainerConditionsAndUnitsUseIndependentEditionGeometry) {
+    stylesheet("@page{size:600px 500px;margin:0}p{margin:0}"
+        "#container{container:card / size;width:50vw;height:40px}"
+        "#target{width:20px;height:10px}#units{width:50cqw;height:10cqh}"
+        "@container card (width > 200px){#target{width:100px}}"
+        "@media print{#container{width:120px}}");
+    DomElement* container = identified_block("container"); ASSERT_NE(container, nullptr);
+    DomElement* target = identified_block("target", container); ASSERT_NE(target, nullptr);
+    DomElement* units = identified_block("units", container); ASSERT_NE(units, nullptr);
+    ViewEnvironment environment = view_environment_default(VIEW_PRESENTATION_CONTINUOUS);
+    environment.viewport_width = 800.0f;
+    ViewTree* wide = view_tree_secondary_create(&doc, &environment);
+    environment.viewport_width = 320.0f;
+    ViewTree* narrow = view_tree_secondary_create(&doc, &environment);
+    environment.presentation = VIEW_PRESENTATION_PAGED;
+    environment.print_media = true;
+    ViewTree* print = view_tree_secondary_create(&doc, &environment);
+    ViewTree* trees[] = {wide, narrow, print};
+    const float expected_targets[] = {100.0f, 20.0f, 20.0f};
+    const float expected_units[] = {200.0f, 80.0f, 60.0f};
+    PagedLayoutOptions options = paged_layout_options_default();
+    for (size_t index = 0; index < 3; index++) {
+        SCOPED_TRACE(index);
+        ViewTree* tree = trees[index]; ASSERT_NE(tree, nullptr);
+        PagedLayoutDiagnostic diagnostic = {};
+        ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+        ViewNodeState* target_state = view_tree_node_state(tree, target, false);
+        ViewNodeState* unit_state = view_tree_node_state(tree, units, false);
+        ASSERT_NE(target_state, nullptr); ASSERT_NE(unit_state, nullptr);
+        ASSERT_NE(target_state->first_occurrence, nullptr); ASSERT_NE(unit_state->first_occurrence, nullptr);
+        EXPECT_FLOAT_EQ(target_state->first_occurrence->rect.width, expected_targets[index]);
+        EXPECT_FLOAT_EQ(unit_state->first_occurrence->rect.width, expected_units[index]);
+        EXPECT_FLOAT_EQ(unit_state->first_occurrence->rect.height, 4.0f);
+    }
+    EXPECT_FLOAT_EQ(source->width, 640.0f);
+    EXPECT_EQ(source->font, nullptr);
+}
+
+TEST_F(SecondaryViewTest, SizeContainerQueryMathUsesEditionOwnerFontsAndVariables) {
+    stylesheet("@page{size:400px 200px;margin:0}p{margin:0}"
+        "#container{container:card / size;width:180px;height:30px;font-size:20px;--threshold:150px}"
+        "#target{font-size:40px;width:20px;height:10px}"
+        "@container card (width > calc(var(--threshold) + 1em)){#target{width:100px}}"
+        "@media print{#container{font-size:30px}}");
+    DomElement* container = identified_block("container"); ASSERT_NE(container, nullptr);
+    DomElement* target = identified_block("target", container); ASSERT_NE(target, nullptr);
+    PagedLayoutOptions options = paged_layout_options_default();
+    for (bool print : {false, true}) {
+        ViewEnvironment environment = view_environment_default(VIEW_PRESENTATION_CONTINUOUS);
+        environment.print_media = print;
+        ViewTree* tree = view_tree_secondary_create(&doc, &environment); ASSERT_NE(tree, nullptr);
+        ASSERT_EQ(layout_secondary_view(tree, &options, nullptr), TYPESET_OK);
+        ViewNodeState* state = view_tree_node_state(tree, target, false); ASSERT_NE(state, nullptr);
+        ASSERT_NE(state->first_occurrence, nullptr);
+        EXPECT_FLOAT_EQ(state->first_occurrence->rect.width, print ? 20.0f : 100.0f);
+        EXPECT_FLOAT_EQ(state->computed_style->font.font_size, 40.0f);
+    }
+}
+
+TEST_F(SecondaryViewTest, SizeContainerFragmentsRetainTheUnfragmentedContentExtent) {
+    stylesheet("@page{size:180px 80px;margin:0}p{margin:0}"
+        "#container{container:card / size;width:100px;height:140px;padding:5px;border:2px solid}"
+        "#target{width:20px;height:10px}#units{width:50cqw;height:10cqh}"
+        "@container card (width = 100px) and (height = 140px){#target{width:60px}}");
+    DomElement* container = identified_block("container"); ASSERT_NE(container, nullptr);
+    DomElement* target = identified_block("target", container); ASSERT_NE(target, nullptr);
+    DomElement* units = identified_block("units", container); ASSERT_NE(units, nullptr);
+    ViewTree* tree = secondary(); PagedLayoutOptions options = paged_layout_options_default();
+    PagedLayoutDiagnostic diagnostic = {};
+    ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    ASSERT_GE(tree->model->page_count, 2u);
+    ViewNodeState* container_state = view_tree_node_state(tree, container, false);
+    ViewNodeState* target_state = view_tree_node_state(tree, target, false);
+    ViewNodeState* unit_state = view_tree_node_state(tree, units, false);
+    ASSERT_NE(container_state, nullptr); ASSERT_NE(target_state, nullptr); ASSERT_NE(unit_state, nullptr);
+    EXPECT_GT(container_state->occurrence_count, 1u);
+    EXPECT_FLOAT_EQ(container_state->container_width, 100.0f);
+    EXPECT_FLOAT_EQ(container_state->container_height, 140.0f);
+    EXPECT_FLOAT_EQ(target_state->first_occurrence->rect.width, 60.0f);
+    EXPECT_FLOAT_EQ(unit_state->first_occurrence->rect.width, 50.0f);
+    EXPECT_FLOAT_EQ(unit_state->first_occurrence->rect.height, 14.0f);
+}
+
+TEST_F(SecondaryViewTest, SizeContainerPassBudgetsFailBeforeCommitAndResetDropsMeasurements) {
+    stylesheet("@page{size:400px 200px;margin:0}p{margin:0}"
+        "#container{container-type:size;width:180px;height:30px}"
+        "#target{width:20px;height:10px}@container(width > 100px){#target{width:100px}}");
+    DomElement* container = identified_block("container"); ASSERT_NE(container, nullptr);
+    DomElement* target = identified_block("target", container); ASSERT_NE(target, nullptr);
+    ViewTree* tree = secondary(); PagedLayoutOptions options = paged_layout_options_default();
+    options.max_container_passes = 1;
+    PagedLayoutDiagnostic diagnostic = {};
+    EXPECT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_BUDGET_EXHAUSTED);
+    EXPECT_FALSE(tree->model->committed);
+    ASSERT_NE(diagnostic.reason, nullptr);
+    EXPECT_NE(strstr(diagnostic.reason, "condition-pass budget"), nullptr);
+    EXPECT_EQ(diagnostic.container_passes, 1u);
+    ASSERT_NE(tree->model->containers, nullptr);
+    tree->reset_retained();
+    EXPECT_EQ(tree->model->containers, nullptr);
+    options = paged_layout_options_default();
+    ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    ASSERT_TRUE(tree->model->committed);
+    EXPECT_FLOAT_EQ(view_tree_node_state(tree, target, false)->first_occurrence->rect.width, 100.0f);
+    ViewPreviewOptions preview_options = view_preview_options_default();
+    ViewTree* preview = view_tree_page_instances_create(tree, nullptr, &preview_options);
+    ASSERT_NE(preview, nullptr);
+    ViewTree* retained = view_tree_page_content_owner(preview); ASSERT_NE(retained, nullptr);
+    ViewCssContainerState* measurements = retained->model->containers;
+    tree->reset_retained();
+    EXPECT_EQ(tree->model->containers, nullptr);
+    retained = view_tree_page_content_owner(preview); ASSERT_NE(retained, nullptr);
+    EXPECT_EQ(retained->model->containers.get(), measurements);
+    EXPECT_FLOAT_EQ(view_tree_node_state(retained, target, false)->first_occurrence->rect.width, 100.0f);
+    EXPECT_TRUE(css_evaluate_container_query(retained->model->css->engine, target,
+        "(width > calc(160px + 1em))"));
+    ASSERT_EQ(layout_secondary_view(tree, &options, nullptr), TYPESET_OK);
+    EXPECT_NE(tree->model->containers.get(), measurements);
 }
 
 TEST_F(SecondaryViewTest, VariablesAndLineHeightInheritComputedOwnerValues) {

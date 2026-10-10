@@ -552,8 +552,14 @@ void animation_instance_pause(AnimationInstance* anim, double now) {
     log_debug("anim: paused animation type=%d target=%p", anim->type, anim->target);
 }
 
-void animation_instance_sample(AnimationInstance* anim, double now) {
+void animation_instance_sample(AnimationInstance* anim, double now, bool preserve_timeline) {
     if (!anim) return;
+    if (preserve_timeline) {
+        // geometry probes borrow the effect payload without advancing its clock or lifecycle.
+        AnimationInstance sample = *anim;
+        animation_instance_sample(&sample, now, false);
+        return;
+    }
     bool paused = anim->play_state == ANIM_PLAY_PAUSED;
     float progress = compute_animation_progress(anim, paused ? anim->pause_time : now);
     if (paused) anim->play_state = ANIM_PLAY_PAUSED;

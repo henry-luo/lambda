@@ -1,6 +1,6 @@
 #include "js_regexp_compile.h"
 #include "js_regex_wrapper.h"
-#include "js_runtime.h"
+#include "js_unicode_ident.h"
 #include "../../lib/arraylist.h"
 #include "../../lib/log.h"
 #include "../../lib/mem.h"
@@ -62,7 +62,9 @@ static bool js_regexp_name_lists_return(JsRegExpNameList* groups,
     return result;
 }
 
-JS_FORWARD_STATIC_EXPRESSION(bool, js_regexp_same_name, (const JsRegExpNameRef* a, const char* b, int b_len), (a && a->len == b_len && memcmp(a->name, b, b_len) == 0))
+static bool js_regexp_same_name(const JsRegExpNameRef* a, const char* b, int b_len) {
+    return a && a->len == b_len && memcmp(a->name, b, b_len) == 0;
+}
 
 static bool js_regexp_name_is_identifier(const char* name, int name_len) {
     if (!name || name_len <= 0) return false;

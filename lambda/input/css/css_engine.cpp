@@ -192,9 +192,11 @@ static void css_query_element_rule(CssElementDeclarationQuery* query, CssRule* r
         return;
     }
     if (rule->type == CSS_RULE_MEDIA || rule->type == CSS_RULE_SUPPORTS ||
-        rule->type == CSS_RULE_LAYER) {
+        rule->type == CSS_RULE_LAYER || rule->type == CSS_RULE_CONTAINER) {
         bool active = rule->type == CSS_RULE_LAYER || (query->engine &&
-            (rule->type == CSS_RULE_MEDIA
+            (rule->type == CSS_RULE_CONTAINER
+                ? css_evaluate_container_query(query->engine, query->element, rule->data.conditional_rule.condition)
+                : rule->type == CSS_RULE_MEDIA
                 ? css_evaluate_media_query(query->engine, rule->data.conditional_rule.condition)
                 : css_evaluate_supports_condition(query->engine, rule->data.conditional_rule.condition)));
         if (active) for (size_t i = 0; i < rule->data.conditional_rule.rule_count; i++) {
@@ -297,14 +299,16 @@ static uint64_t css_condition_environment_key(const CssEngine* engine,
     if (!engine) return 0;
     uint64_t width = 0;
     uint64_t height = 0;
-    uint64_t ratio = 0;
+    uint64_t ratio = 0, root_font = 0;
     memcpy(&width, &engine->context.viewport_width, sizeof(width));
     memcpy(&height, &engine->context.viewport_height, sizeof(height));
     memcpy(&ratio, &engine->context.device_pixel_ratio, sizeof(ratio));
-    uint64_t key = width ^ (height << 1u) ^ (ratio << 7u);
+    memcpy(&root_font, &engine->context.root_font_size, sizeof(root_font));
+    uint64_t key = width ^ (height << 1u) ^ (ratio << 7u) ^ root_font;
     key ^= engine->context.print_media ? UINT64_C(0x6a09e667f3bcc909) : 0;
     key ^= engine->context.reduced_motion ? UINT64_C(0x9e3779b97f4a7c15) : 0;
     key ^= engine->context.high_contrast ? UINT64_C(0xbf58476d1ce4e5b9) : 0;
+    key ^= engine->context.vertical_viewport ? UINT64_C(0x27d4eb2f165667c5) : 0;
     const char* scheme = engine->context.color_scheme ? engine->context.color_scheme : "";
     key ^= css_condition_hash_bytes(scheme, strlen(scheme));
     if (kind == CSS_CONDITION_SUPPORTS) {
@@ -455,14 +459,14 @@ bool css_register_document_property(DomDocument* doc,
 }
 
 static bool css_condition_cache_lookup(CssEngine* engine, CssConditionKind kind,
-                                       const char* condition, bool* result) {
+                                       const char* condition, bool* result, uint64_t dependency_key = 0) {
     if (!engine || !condition || !result) return false;
     size_t length = strlen(condition);
     uint64_t hash = css_condition_hash_bytes(condition, length);
     size_t slot = (size_t)(hash & (CSS_CONDITION_CACHE_CAPACITY - 1u));
     CssConditionCacheEntry* entry = &engine->condition_cache[slot];
     if (entry->kind != (uint8_t)kind || entry->condition_length != length ||
-        entry->environment_key != css_condition_environment_key(engine, kind) ||
+        entry->environment_key != hash_combine_u64(css_condition_environment_key(engine, kind), dependency_key) ||
         !entry->condition || memcmp(entry->condition, condition, length) != 0) return false;
     *result = entry->result != 0;
     engine->condition_cache_hits++;
@@ -470,7 +474,7 @@ static bool css_condition_cache_lookup(CssEngine* engine, CssConditionKind kind,
 }
 
 static void css_condition_cache_store(CssEngine* engine, CssConditionKind kind,
-                                      const char* condition, bool result) {
+                                      const char* condition, bool result, uint64_t dependency_key = 0) {
     if (!engine || !condition) return;
     size_t length = strlen(condition);
     if (length > CSS_CONDITION_CACHE_MAX_TEXT_BYTES) return;
@@ -482,7 +486,7 @@ static void css_condition_cache_store(CssEngine* engine, CssConditionKind kind,
     pool_free(engine->pool, (void*)entry->condition);
     entry->condition = copy;
     entry->condition_length = (uint32_t)length;
-    entry->environment_key = css_condition_environment_key(engine, kind);
+    entry->environment_key = hash_combine_u64(css_condition_environment_key(engine, kind), dependency_key);
     entry->kind = (uint8_t)kind;
     entry->result = result ? 1 : 0;
 }
@@ -533,6 +537,7 @@ CssEngine* css_engine_create(Pool* pool) {
     engine->performance.max_cache_size = 1000;
     engine->limits.max_substitution_bytes = CSS_SUBSTITUTION_DEFAULT_MAX_BYTES;
     engine->limits.max_substitution_tokens = CSS_SUBSTITUTION_DEFAULT_MAX_TOKENS;
+    engine->limits.max_substitution_depth = CSS_SUBSTITUTION_DEFAULT_MAX_DEPTH;
 
     // Set default document context
     engine->context.base_url = "";
@@ -586,6 +591,11 @@ void css_engine_set_substitution_limits(CssEngine* engine, size_t max_bytes, siz
     if (!engine) return;
     engine->limits.max_substitution_bytes = max_bytes ? max_bytes : CSS_SUBSTITUTION_DEFAULT_MAX_BYTES;
     engine->limits.max_substitution_tokens = max_tokens ? max_tokens : CSS_SUBSTITUTION_DEFAULT_MAX_TOKENS;
+}
+
+void css_engine_set_substitution_depth_limit(CssEngine* engine, size_t max_depth) {
+    if (!engine) return;
+    engine->limits.max_substitution_depth = max_depth ? max_depth : CSS_SUBSTITUTION_DEFAULT_MAX_DEPTH;
 }
 
 void css_engine_enable_feature(CssEngine* engine, const char* feature_name, bool enabled) {
@@ -1173,16 +1183,24 @@ typedef struct CssConditionSpan {
     size_t length;
 } CssConditionSpan;
 
+static bool css_condition_is_space(char c) {
+    return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f';
+}
+
+static bool css_condition_starts_keyword(CssConditionSpan span, const char* keyword) {
+    size_t length = strlen(keyword);
+    return span.length > length && str_ieq(span.start, length, keyword, length) &&
+        css_condition_is_space(span.start[length]);
+}
+
 static CssConditionSpan css_condition_trim(CssConditionSpan span) {
-    while (span.length > 0 &&
-           (span.start[0] == ' ' || span.start[0] == '\t' ||
-            span.start[0] == '\n' || span.start[0] == '\r')) {
+    while (span.length > 0 && css_condition_is_space(span.start[0])) {
         span.start++;
         span.length--;
     }
     while (span.length > 0) {
         char last = span.start[span.length - 1];
-        if (last != ' ' && last != '\t' && last != '\n' && last != '\r') break;
+        if (!css_condition_is_space(last)) break;
         span.length--;
     }
     return span;
@@ -1224,11 +1242,9 @@ static bool css_condition_find_operator(CssConditionSpan span, const char* op,
             continue;
         }
         if (depth != 0 || !str_ieq(span.start + i, op_len, op, op_len)) continue;
-        bool left_space = i == 0 || span.start[i - 1] == ' ' ||
-            span.start[i - 1] == '\t' || span.start[i - 1] == '\n' || span.start[i - 1] == '\r';
+        bool left_space = i == 0 || css_condition_is_space(span.start[i - 1]);
         size_t end = i + op_len;
-        bool right_space = end == span.length || span.start[end] == ' ' ||
-            span.start[end] == '\t' || span.start[end] == '\n' || span.start[end] == '\r';
+        bool right_space = end == span.length || css_condition_is_space(span.start[end]);
         if (left_space && right_space) {
             *out_pos = i;
             *out_len = op_len;
@@ -1244,7 +1260,7 @@ static bool css_evaluate_supports_span(CssEngine* engine, CssConditionSpan span,
     span = css_condition_trim(span);
     if (span.length == 0) return false;
 
-    if (str_istarts_with(span.start, span.length, "not ", 4)) {
+    if (css_condition_starts_keyword(span, "not")) {
         CssConditionSpan operand = {span.start + 4, span.length - 4};
         return !css_evaluate_supports_span(engine, operand, scratch);
     }
@@ -1309,12 +1325,17 @@ static char* css_media_trim_mutable(char* text) {
     return text;
 }
 
-static bool css_media_range_operand(CssEngine* engine, char* text,
-                                    double* value, bool* feature,
-                                    CssMediaNumericKind* kind) {
-    text = css_media_trim_mutable(text);
-    *feature = css_media_numeric_feature(engine, text, kind, value);
-    return *feature || *text != '\0';
+typedef bool (*CssNumericFeatureReader)(void*, const char*, CssMediaNumericKind*, double*);
+typedef double (*CssNumericValueReader)(void*, CssMediaNumericKind, const char*);
+
+static bool css_media_read_feature(void* data, const char* name,
+    CssMediaNumericKind* kind, double* value) {
+    return css_media_numeric_feature((CssEngine*)data, name, kind, value);
+}
+
+static double css_media_read_value(void*, CssMediaNumericKind kind, const char* text) {
+    double result = css_media_numeric_value(kind, text);
+    return result < 0.0 ? NAN : result;
 }
 
 static bool css_media_compare(double left, double right, const char* op) {
@@ -1325,56 +1346,59 @@ static bool css_media_compare(double left, double right, const char* op) {
     return strcmp(op, "=") == 0 && left == right;
 }
 
-static bool css_media_evaluate_range(CssEngine* engine, char* text) {
+// -1 is unknown, so negating an unsupported feature cannot turn it into a match.
+static int css_numeric_evaluate_range(void* context, CssNumericFeatureReader read_feature,
+    CssNumericValueReader read_value, char* text) {
     char* operands[3] = {text, nullptr, nullptr};
     char operators[2][3] = {};
     int operator_count = 0;
     for (char* cursor = text; *cursor; cursor++) {
         if (*cursor != '<' && *cursor != '>' && *cursor != '=') continue;
-        if (operator_count >= 2) return false;
+        if (operator_count >= 2) return -1;
         char op = *cursor;
         *cursor = '\0';
         operators[operator_count][0] = op;
         if (cursor[1] == '=') {
-            if (op == '=') return false;
+            if (op == '=') return -1;
             operators[operator_count][1] = '=';
             cursor++;
         } else if (op == '=' && (cursor[1] == '<' || cursor[1] == '>')) {
-            return false;
+            return -1;
         }
         operands[++operator_count] = cursor + 1;
     }
-    if (operator_count == 0) return false;
+    if (operator_count == 0) return -1;
+    if (operator_count == 2 && (operators[0][0] == '=' ||
+        operators[0][0] != operators[1][0])) return -1;
     double values[3] = {};
     bool features[3] = {};
     CssMediaNumericKind kind = CSS_MEDIA_NUMERIC_UNKNOWN;
     for (int i = 0; i <= operator_count; i++) {
         CssMediaNumericKind operand_kind = CSS_MEDIA_NUMERIC_UNKNOWN;
-        if (!css_media_range_operand(engine, operands[i], &values[i],
-                                     &features[i], &operand_kind))
-            return false;
+        operands[i] = css_media_trim_mutable(operands[i]);
+        if (!*operands[i]) return -1;
+        features[i] = read_feature(context, operands[i], &operand_kind, &values[i]);
         if (features[i]) {
-            if (kind != CSS_MEDIA_NUMERIC_UNKNOWN) return false;
+            if (kind != CSS_MEDIA_NUMERIC_UNKNOWN) return -1;
             kind = operand_kind;
         }
     }
-    if (kind == CSS_MEDIA_NUMERIC_UNKNOWN) return false;
+    if (kind == CSS_MEDIA_NUMERIC_UNKNOWN) return -1;
     for (int i = 0; i <= operator_count; i++) {
         if (features[i]) continue;
-        values[i] = css_media_numeric_value(
-            kind, css_media_trim_mutable(operands[i]));
-        if (values[i] < 0.0 || !isfinite(values[i])) return false;
+        values[i] = read_value(context, kind, operands[i]);
+        if (!isfinite(values[i])) return -1;
     }
     if (operator_count == 1) {
-        if (features[0] == features[1]) return false;
+        if (features[0] == features[1]) return -1;
     } else if (features[0] || !features[1] || features[2]) {
-        return false;
+        return -1;
     }
     for (int i = 0; i < operator_count; i++) {
         if (!css_media_compare(values[i], values[i + 1], operators[i]))
-            return false;
+            return 0;
     }
-    return true;
+    return 1;
 }
 
 static bool css_media_evaluate_atom(CssEngine* engine, CssConditionSpan span,
@@ -1392,7 +1416,7 @@ static bool css_media_evaluate_atom(CssEngine* engine, CssConditionSpan span,
         char* value = css_media_trim_mutable(colon + 1);
         return *name && *value && evaluate_media_feature(engine, name, value);
     }
-    if (strpbrk(content, "<=>")) return css_media_evaluate_range(engine, content);
+    if (strpbrk(content, "<=>")) return css_numeric_evaluate_range(engine, css_media_read_feature, css_media_read_value, content) == 1;
     char* name = css_media_trim_mutable(content);
     if (strcmp(name, "width") == 0) return engine->context.viewport_width > 0.0;
     if (strcmp(name, "height") == 0) return engine->context.viewport_height > 0.0;
@@ -1407,75 +1431,290 @@ static bool css_media_evaluate_atom(CssEngine* engine, CssConditionSpan span,
     return false;
 }
 
-static bool css_evaluate_media_span(CssEngine* engine, CssConditionSpan span,
-                                    Pool* scratch, int depth) {
-    if (!engine || !scratch || depth > 32) return false;
-    span = css_condition_trim(span);
-    if (span.length == 0) return false;
-    if (str_istarts_with(span.start, span.length, "not ", 4)) {
-        CssConditionSpan operand = {span.start + 4, span.length - 4};
-        return !css_evaluate_media_span(engine, operand, scratch, depth + 1);
-    }
-    if (str_istarts_with(span.start, span.length, "only ", 5)) {
-        CssConditionSpan operand = {span.start + 5, span.length - 5};
-        return css_evaluate_media_span(engine, operand, scratch, depth + 1);
-    }
-    size_t op_pos = 0, op_len = 0;
-    if (css_condition_find_operator(span, "or", &op_pos, &op_len)) {
-        CssConditionSpan left = {span.start, op_pos};
-        CssConditionSpan right = {span.start + op_pos + op_len,
-                                  span.length - op_pos - op_len};
-        return css_evaluate_media_span(engine, left, scratch, depth + 1) ||
-            css_evaluate_media_span(engine, right, scratch, depth + 1);
-    }
-    if (css_condition_find_operator(span, "and", &op_pos, &op_len)) {
-        CssConditionSpan left = {span.start, op_pos};
-        CssConditionSpan right = {span.start + op_pos + op_len,
-                                  span.length - op_pos - op_len};
-        return css_evaluate_media_span(engine, left, scratch, depth + 1) &&
-            css_evaluate_media_span(engine, right, scratch, depth + 1);
-    }
-    if (css_condition_outer_parens(&span)) {
-        if (span.length == 0) return false;
-        if (span.start[0] == '(' ||
-            str_istarts_with(span.start, span.length, "not ", 4) ||
-            css_condition_find_operator(span, "or", &op_pos, &op_len) ||
-            css_condition_find_operator(span, "and", &op_pos, &op_len)) {
-            return css_evaluate_media_span(engine, span, scratch, depth + 1);
-        }
-        return css_media_evaluate_atom(engine, span, scratch);
-    }
-    if (span.start[0] == '(' || span.start[0] == ')') return false;
-    char* type = pool_dup_n(scratch, span.start, span.length);
-    return type && evaluate_media_type(engine, css_media_trim_mutable(type));
+typedef int (*CssConditionAtomReader)(void*, CssConditionSpan, Pool*);
+
+static int css_media_read_atom(void* data, CssConditionSpan span, Pool* scratch) {
+    return css_media_evaluate_atom((CssEngine*)data, span, scratch) ? 1 : 0;
 }
 
-static bool css_evaluate_media_query_uncached(CssEngine* engine,
-                                              const char* media_query) {
-    if (!engine || !media_query || !*media_query) return true;
-    Pool* scratch = mem_pool_create(NULL, MEM_ROLE_TEMP,
-                                    "css.media_query.scratch");
-    if (!scratch) return false;
-    CssConditionSpan whole = {media_query, strlen(media_query)};
+static int css_evaluate_condition_span(void* context, CssConditionAtomReader read_atom,
+    CssConditionSpan span, Pool* scratch, int depth, CssEngine* media_engine = nullptr) {
+    if (!scratch || depth > 32) return -1;
+    span = css_condition_trim(span);
+    if (!span.length) return -1;
+    size_t op_pos = 0, op_len = 0;
+    bool has_or = css_condition_find_operator(span, "or", &op_pos, &op_len);
+    bool has_and = !has_or && css_condition_find_operator(span, "and", &op_pos, &op_len);
+    size_t other_pos = 0, other_len = 0;
+    if (!media_engine && ((has_or && css_condition_find_operator(span, "and", &other_pos, &other_len)) ||
+        ((has_or || has_and) && css_condition_starts_keyword(span, "not")))) return -1;
+    if (media_engine && css_condition_starts_keyword(span, "not")) {
+        CssConditionSpan operand = {span.start + 4, span.length - 4};
+        int result = css_evaluate_condition_span(context, read_atom, operand, scratch, depth + 1, media_engine);
+        return result < 0 ? -1 : !result;
+    }
+    if (has_or || has_and) {
+        CssConditionSpan left = {span.start, op_pos};
+        CssConditionSpan right = {span.start + op_pos + op_len, span.length - op_pos - op_len};
+        int l = css_evaluate_condition_span(context, read_atom, left, scratch, depth + 1, media_engine);
+        int r = css_evaluate_condition_span(context, read_atom, right, scratch, depth + 1, media_engine);
+        if (has_or) return l == 1 || r == 1 ? 1 : l < 0 || r < 0 ? -1 : 0;
+        return l == 0 || r == 0 ? 0 : l < 0 || r < 0 ? -1 : 1;
+    }
+    if (css_condition_starts_keyword(span, "not")) {
+        CssConditionSpan operand = {span.start + 4, span.length - 4};
+        int result = css_evaluate_condition_span(context, read_atom, operand, scratch, depth + 1, media_engine);
+        return result < 0 ? -1 : !result;
+    }
+    if (media_engine && css_condition_starts_keyword(span, "only")) {
+        CssConditionSpan operand = {span.start + 5, span.length - 5};
+        return css_evaluate_condition_span(context, read_atom, operand, scratch, depth + 1, media_engine);
+    }
+    if (css_condition_outer_parens(&span)) {
+        if (!span.length) return -1;
+        if (span.start[0] == '(' || css_condition_starts_keyword(span, "not") ||
+            css_condition_find_operator(span, "or", &op_pos, &op_len) ||
+            css_condition_find_operator(span, "and", &op_pos, &op_len))
+            return css_evaluate_condition_span(context, read_atom, span, scratch, depth + 1, media_engine);
+        return read_atom(context, span, scratch);
+    }
+    if (!media_engine || span.start[0] == '(' || span.start[0] == ')') return -1;
+    char* type = pool_dup_n(scratch, span.start, span.length);
+    return type && evaluate_media_type(media_engine, css_media_trim_mutable(type));
+}
+
+typedef bool (*CssConditionListReader)(void*, CssConditionSpan);
+
+static bool css_condition_list_any(void* context, CssConditionListReader read,
+    CssConditionSpan whole) {
     size_t start = 0;
     int depth = 0;
-    bool result = false;
     for (size_t i = 0; i <= whole.length; i++) {
         char c = i < whole.length ? whole.start[i] : ',';
         if (c == '(') depth++;
-        else if (c == ')') {
-            if (--depth < 0) break;
-        }
+        else if (c == ')' && --depth < 0) return false;
         if (c != ',' || depth != 0) continue;
-        CssConditionSpan part = {whole.start + start, i - start};
-        if (css_evaluate_media_span(engine, part, scratch, 0)) {
-            result = true;
-            break;
-        }
+        if (read(context, {whole.start + start, i - start})) return true;
         start = i + 1;
     }
+    return false;
+}
+
+struct CssMediaListContext {CssEngine* engine; Pool* scratch;};
+static bool css_media_read_query(void* data, CssConditionSpan query) {
+    CssMediaListContext* context = (CssMediaListContext*)data;
+    return css_evaluate_condition_span(context->engine, css_media_read_atom,
+        query, context->scratch, 0, context->engine) == 1;
+}
+
+static bool css_evaluate_media_query_uncached(CssEngine* engine, const char* media_query) {
+    if (!engine || !media_query || !*media_query) return true;
+    Pool* scratch = mem_pool_create(nullptr, MEM_ROLE_TEMP, "css.media_query.scratch");
+    if (!scratch) return false;
+    CssMediaListContext context = {engine, scratch};
+    bool result = css_condition_list_any(&context, css_media_read_query, {media_query, strlen(media_query)});
     mem_pool_destroy(scratch);
     return result;
+}
+
+struct CssContainerConditionContext {
+    CssEngine* engine;
+    const CssContainerMetrics* metrics;
+    Pool* scratch;
+    uint8_t axes;
+    bool unsupported;
+};
+
+static bool css_container_numeric_feature(void* data, const char* name,
+    CssMediaNumericKind* kind, double* value) {
+    CssContainerConditionContext* context = (CssContainerConditionContext*)data;
+    struct Feature {const char* name; uint8_t axes;};
+    static const Feature features[] = {
+        {"width", CSS_CONTAINER_WIDTH}, {"height", CSS_CONTAINER_HEIGHT},
+        {"inline-size", CSS_CONTAINER_INLINE}, {"block-size", CSS_CONTAINER_BLOCK},
+        {"aspect-ratio", CSS_CONTAINER_WIDTH | CSS_CONTAINER_HEIGHT},
+        {"orientation", CSS_CONTAINER_WIDTH | CSS_CONTAINER_HEIGHT},
+    };
+    for (const Feature& feature : features) {
+        if (!str_ieq_cstr(name, feature.name)) continue;
+        context->axes |= feature.axes;
+        *kind = strcmp(feature.name, "orientation") == 0 ? CSS_MEDIA_NUMERIC_UNKNOWN
+            : strcmp(feature.name, "aspect-ratio") == 0 ? CSS_MEDIA_NUMERIC_RATIO : CSS_MEDIA_NUMERIC_LENGTH;
+        const CssContainerMetrics* box = context->metrics;
+        if (!box) {*value = 0.0; return true;}
+        if (feature.axes == CSS_CONTAINER_INLINE) *value = box->vertical ? box->height : box->width;
+        else if (feature.axes == CSS_CONTAINER_BLOCK) *value = box->vertical ? box->width : box->height;
+        else if (feature.axes == CSS_CONTAINER_WIDTH) *value = box->width;
+        else if (feature.axes == CSS_CONTAINER_HEIGHT) *value = box->height;
+        else *value = box->height == 0.0 ? (box->width == 0.0 ? NAN : INFINITY) : box->width / box->height;
+        return true;
+    }
+    return false;
+}
+
+static bool css_container_absolute_leaf(void* data, const CssValue* value, double* result) {
+    CssContainerConditionContext* context = (CssContainerConditionContext*)data;
+    if (value->type != CSS_VALUE_TYPE_LENGTH) return false;
+    CssUnit unit = value->data.length.unit;
+    double number = value->data.length.value;
+    if (css_absolute_length_to_px(unit, number, result)) return true;
+    if (unit == CSS_UNIT_REM) {*result = number * context->engine->context.root_font_size; return true;}
+    return css_viewport_length_to_px(unit, number, context->engine->context.viewport_width,
+        context->engine->context.viewport_height, false, result);
+}
+
+static double css_container_read_value(void* data, CssMediaNumericKind kind, const char* text) {
+    CssContainerConditionContext* context = (CssContainerConditionContext*)data;
+    if (!context->metrics) return 0.0; // the discovery pass collects every required axis.
+    const CssValue* value = css_parse_component_value_text(text, strlen(text), context->scratch);
+    if (!value) return NAN;
+    const CssContainerMetrics* box = context->metrics;
+    CssMathResult computed = {};
+    if (box->resolve_value) {
+        if (!box->resolve_value(box->value_context, value, &computed)) return NAN;
+    } else {
+        CssMathEvaluationContext math = {css_container_absolute_leaf, context, 1.0, false};
+        computed = css_math_evaluate(value, &math);
+    }
+    if (kind == CSS_MEDIA_NUMERIC_RATIO)
+        return computed.resolved && computed.type == CSS_MATH_NUMBER && computed.value >= 0.0 ? computed.value : NAN;
+    return computed.resolved && (computed.type == CSS_MATH_LENGTH ||
+        (computed.type == CSS_MATH_NUMBER && computed.value == 0.0)) ? computed.value : NAN;
+}
+
+static int css_container_read_atom(void* data, CssConditionSpan span, Pool* scratch) {
+    CssContainerConditionContext* context = (CssContainerConditionContext*)data;
+    char* text = pool_dup_n(scratch, span.start, span.length);
+    if (!text) return -1;
+    char* colon = strchr(text, ':');
+    if (!colon && strpbrk(text, "<=>")) {
+        int result = css_numeric_evaluate_range(context, css_container_numeric_feature, css_container_read_value, text);
+        if (!context->metrics && result < 0) context->unsupported = true;
+        return result;
+    }
+    if (colon) *colon++ = '\0';
+    char* name = css_media_trim_mutable(text);
+    int comparison = 0;
+    if (str_istarts_with(name, strlen(name), "min-", 4)) {name += 4; comparison = 1;}
+    else if (str_istarts_with(name, strlen(name), "max-", 4)) {name += 4; comparison = -1;}
+    CssMediaNumericKind kind = CSS_MEDIA_NUMERIC_UNKNOWN;
+    double actual = 0.0;
+    if (!css_container_numeric_feature(context, name, &kind, &actual)) {
+        context->unsupported = true;
+        return -1;
+    }
+    if (!context->metrics) return 0;
+    if (!colon) return comparison ? -1 : str_ieq_cstr(name, "orientation") || actual != 0.0;
+    char* requested = css_media_trim_mutable(colon);
+    if (str_ieq_cstr(name, "orientation")) {
+        if (comparison) return -1;
+        if (str_ieq_cstr(requested, "portrait")) return context->metrics->height >= context->metrics->width;
+        if (str_ieq_cstr(requested, "landscape")) return context->metrics->width > context->metrics->height;
+        return -1;
+    }
+    double expected = css_container_read_value(context, kind, requested);
+    if (!isfinite(expected) || isnan(actual)) return -1;
+    return comparison > 0 ? actual >= expected : comparison < 0 ? actual <= expected : actual == expected;
+}
+
+static bool css_evaluate_container_part(CssEngine* engine, DomElement* target,
+    const char* condition, Pool* scratch) {
+    CssConditionSpan query = css_condition_trim({condition, strlen(condition)});
+    const char* name = nullptr;
+    if (query.length && query.start[0] != '(' &&
+        !css_condition_starts_keyword(query, "not")) {
+        size_t count = 0;
+        CssToken* tokens = css_tokenize(query.start, query.length, scratch, &count);
+        if (!tokens || !count || tokens[0].type != CSS_TOKEN_IDENT) return false;
+        name = tokens[0].value;
+        if (!name || str_ieq_cstr(name, "none") || str_ieq_cstr(name, "and") || str_ieq_cstr(name, "or")) return false;
+        size_t consumed = (size_t)(tokens[0].start + tokens[0].length - query.start);
+        query = css_condition_trim({query.start + consumed, query.length - consumed});
+    }
+    CssContainerConditionContext context = {engine, nullptr, scratch, 0, false};
+    int discovered = query.length ? css_evaluate_condition_span(&context, css_container_read_atom, query, scratch, 0) : 0;
+    if ((query.length && !context.axes) || (!query.length && !name) || context.unsupported || discovered < 0) return false;
+    CssContainerMetrics box = {};
+    if (!engine->container_provider(engine->container_context, target, name, context.axes, &box) ||
+        !box.identity || !isfinite(box.width) || !isfinite(box.height)) return false;
+    uint64_t key = hash_combine_u64((uintptr_t)box.identity, box.generation);
+    uint64_t width = 0, height = 0;
+    memcpy(&width, &box.width, sizeof(width));
+    memcpy(&height, &box.height, sizeof(height));
+    key = hash_combine_u64(key, width);
+    key = hash_combine_u64(key, height);
+    key = hash_combine_u64(key, box.vertical);
+    bool result = false;
+    if (css_condition_cache_lookup(engine, CSS_CONDITION_CONTAINER, condition, &result, key)) return result;
+    context.metrics = &box;
+    engine->condition_evaluations++;
+    result = !query.length || css_evaluate_condition_span(&context, css_container_read_atom, query, scratch, 0) == 1;
+    css_condition_cache_store(engine, CSS_CONDITION_CONTAINER, condition, result, key);
+    return result;
+}
+
+struct CssContainerListContext {CssEngine* engine; DomElement* target; Pool* scratch;};
+static bool css_container_read_query(void* data, CssConditionSpan query) {
+    CssContainerListContext* context = (CssContainerListContext*)data;
+    char* condition = pool_dup_n(context->scratch, query.start, query.length);
+    return condition && css_evaluate_container_part(context->engine, context->target, condition, context->scratch);
+}
+
+bool css_evaluate_container_query(CssEngine* engine, DomElement* target, const char* condition) {
+    if (engine) engine->container_dependencies = true;
+    if (!engine || !target || !condition || !engine->container_provider) return false;
+    Pool* scratch = mem_pool_create(nullptr, MEM_ROLE_TEMP, "css.container_query.scratch");
+    if (!scratch) return false;
+    CssContainerListContext context = {engine, target, scratch};
+    bool result = css_condition_list_any(&context, css_container_read_query, {condition, strlen(condition)});
+    mem_pool_destroy(scratch);
+    return result;
+}
+
+uint8_t css_container_type_axes(const CssValue* value) {
+    return css_value_has_identifier(value, "size") ? CSS_CONTAINER_INLINE | CSS_CONTAINER_BLOCK
+        : css_value_has_identifier(value, "inline-size") ? CSS_CONTAINER_INLINE : 0;
+}
+
+bool css_container_matches(const CssValue* names, uint8_t available_axes, bool vertical,
+        const char* name, uint8_t requested_axes) {
+    uint8_t required = requested_axes & (CSS_CONTAINER_INLINE | CSS_CONTAINER_BLOCK);
+    if (requested_axes & CSS_CONTAINER_WIDTH) required |= vertical ? CSS_CONTAINER_BLOCK : CSS_CONTAINER_INLINE;
+    if (requested_axes & CSS_CONTAINER_HEIGHT) required |= vertical ? CSS_CONTAINER_INLINE : CSS_CONTAINER_BLOCK;
+    // type keywords are insensitive; authored container names retain their spelling.
+    return (available_axes & required) == required && (!name || css_value_has_identifier(names, name, true));
+}
+
+bool css_container_length_to_px(CssEngine* engine, DomElement* target,
+    CssUnit unit, double number, double* pixels) {
+    if (!engine || !pixels || unit < CSS_UNIT_CQW || unit > CSS_UNIT_CQMAX) return false;
+    engine->container_dependencies = true;
+    if (unit == CSS_UNIT_CQMIN || unit == CSS_UNIT_CQMAX) {
+        double inline_size = 0.0, block_size = 0.0;
+        css_container_length_to_px(engine, target, CSS_UNIT_CQI, 1.0, &inline_size);
+        css_container_length_to_px(engine, target, CSS_UNIT_CQB, 1.0, &block_size);
+        *pixels = isnan(inline_size) || isnan(block_size) ? NAN
+            : number * (unit == CSS_UNIT_CQMIN ? fmin(inline_size, block_size) : fmax(inline_size, block_size));
+        return true;
+    }
+    uint8_t axis = unit == CSS_UNIT_CQW ? CSS_CONTAINER_WIDTH : unit == CSS_UNIT_CQH ? CSS_CONTAINER_HEIGHT
+        : unit == CSS_UNIT_CQI ? CSS_CONTAINER_INLINE : CSS_CONTAINER_BLOCK;
+    CssContainerMetrics box = {};
+    bool found = target && engine->container_provider &&
+        engine->container_provider(engine->container_context, target, nullptr, axis, &box);
+    double extent;
+    if (!found) {
+        // no eligible container uses the corresponding small-viewport dimension.
+        bool height_axis = axis == CSS_CONTAINER_HEIGHT ||
+            (axis == CSS_CONTAINER_INLINE && engine->context.vertical_viewport) ||
+            (axis == CSS_CONTAINER_BLOCK && !engine->context.vertical_viewport);
+        extent = height_axis
+            ? engine->context.viewport_height : engine->context.viewport_width;
+    } else if (axis == CSS_CONTAINER_WIDTH) extent = box.width;
+    else if (axis == CSS_CONTAINER_HEIGHT) extent = box.height;
+    else extent = (axis == CSS_CONTAINER_INLINE) != box.vertical ? box.width : box.height;
+    *pixels = number * extent / 100.0;
+    return true;
 }
 
 bool css_evaluate_supports_condition(CssEngine* engine, const char* condition) {

@@ -3,6 +3,7 @@
 #include "../../runtime/heap_api.h"
 #include "../../runtime/runtime-state.h"
 #include "../../input/input.hpp"
+#include "../../core/lambda-decimal.hpp"
 #include "../../../lib/hashmap.h"
 #include "../../../lib/utf.h"
 #include "../../../lib/mem.h"
@@ -17,7 +18,7 @@ static int bucket_compare(const void* a, const void* b, void*) {
     return x < y ? -1 : x != y;
 }
 static bool text_is(String* key, const char* text) {
-    return key->len == strlen(text) && !memcmp(key->chars, text, key->len);
+    return !property_key_requires_identity(key) && key->len == strlen(text) && !memcmp(key->chars, text, key->len);
 }
 static bool is_number(Item key) {
     TypeId tid = get_type_id(key);
@@ -35,6 +36,11 @@ static uint64_t key_hash(Item key) {
         String* s = key.get_string();
         return hashmap_sip(s->chars, s->len, 1, 0);
     }
+    if (get_type_id(key) == LMD_TYPE_DECIMAL) {
+        char* digits = bigint_to_cstring_radix(key, 10);
+        uint64_t hash = digits ? hashmap_sip(digits, strlen(digits), 3, 0) : 0;
+        mem_free(digits); return hash;
+    }
     return hashmap_sip(&key.item, sizeof(key.item), 2, 0);
 }
 static bool key_equal(Item a, Item b) {
@@ -49,6 +55,8 @@ static bool key_equal(Item a, Item b) {
         String* x = a.get_string(); String* y = b.get_string();
         return x->len == y->len && !memcmp(x->chars, y->chars, x->len);
     }
+    if (get_type_id(a) == LMD_TYPE_DECIMAL && get_type_id(b) == LMD_TYPE_DECIMAL)
+        return bigint_cmp(a, b) == 0;
     return a.item == b.item;
 }
 static Item canonical_string(Item value) {
@@ -60,6 +68,17 @@ static Item canonical_string(Item value) {
     return name ? Item{.item = s2it(name)} : mvp_lmd_fail(LMD_MVP_MEMORY, 0);
 }
 extern "C" Item mvp_lmd_property_key(Item string) {
+    if (get_type_id(string) != LMD_TYPE_STRING) {
+        string = mvp_lmd_to_primitive(string, 2);
+        if (item_is_error(string)) return string;
+        if (get_type_id(string) == LMD_TYPE_SYMBOL) {
+            Symbol* symbol = string.get_symbol();
+            NameRef key = symbol_has_js_identity(symbol) ? name_pool_resolve_id(context->name_pool, symbol->name_id) : NULL;
+            return key ? Item{.item = s2it(key)} : mvp_lmd_fail(LMD_MVP_TYPE, 0);
+        }
+        string = mvp_lmd_primitive_to_string(string);
+        if (item_is_error(string)) return string;
+    }
     String* s = string.get_string();
     if (text_is(s, "__proto__")) return mvp_lmd_fail(LMD_MVP_CAPABILITY, 0);
     // most keys are already canonical; keep array/string indexing allocation-free.
@@ -88,13 +107,13 @@ static Map* object_face(Item owner) {
     Map* map = owner.map;
     TypeMap* type = (TypeMap*)map->type;
     return type && type->nominal && !type->js_meta &&
-        (map->map_kind == MAP_KIND_PLAIN || map->map_kind == MAP_KIND_ORDERED) ? map : NULL;
+        (map->map_kind == MAP_KIND_PLAIN || map->map_kind == MAP_KIND_ORDERED ||
+         map->map_kind == MAP_KIND_GENERATOR || map->map_kind == MAP_KIND_ITERATOR) ? map : NULL;
 }
 static ShapeEntry* own_field(Map* map, String* key) {
-    return typemap_hash_lookup((TypeMap*)map->type, key->chars, (int)key->len);
+    return typemap_hash_lookup_key((TypeMap*)map->type, key);
 }
-int mvp_lmd_builtin_method(String* key, TypeId owner) {
-    static const struct { const char* name; TypeId owner; int id; } methods[] = {
+static const struct { const char* name; TypeId owner; int id; } methods[] = {
         {"get", LMD_TYPE_MAP, 1}, {"set", LMD_TYPE_MAP, 2}, {"has", LMD_TYPE_MAP, 3},
         {"delete", LMD_TYPE_MAP, 4}, {"clear", LMD_TYPE_MAP, 5}, {"entries", LMD_TYPE_MAP, 6},
         {"keys", LMD_TYPE_MAP, 7}, {"values", LMD_TYPE_MAP, 8},
@@ -102,24 +121,51 @@ int mvp_lmd_builtin_method(String* key, TypeId owner) {
         {"pop", LMD_TYPE_ARRAY, LMD_METHOD_POP}, {"join", LMD_TYPE_ARRAY, LMD_METHOD_JOIN},
         {"slice", LMD_TYPE_ARRAY, LMD_METHOD_SLICE}, {"forEach", LMD_TYPE_ARRAY, LMD_METHOD_FOREACH},
         {"map", LMD_TYPE_ARRAY, LMD_METHOD_ARRAY_MAP},
+        {"filter", LMD_TYPE_ARRAY, LMD_METHOD_FILTER}, {"indexOf", LMD_TYPE_ARRAY, LMD_METHOD_ARRAY_INDEX_OF},
         {"reverse", LMD_TYPE_ARRAY, LMD_METHOD_REVERSE}, {"sort", LMD_TYPE_ARRAY, LMD_METHOD_SORT},
+        {"flat", LMD_TYPE_ARRAY, LMD_METHOD_FLAT}, {"reduce", LMD_TYPE_ARRAY, LMD_METHOD_REDUCE},
+        {"some", LMD_TYPE_ARRAY, LMD_METHOD_SOME}, {"includes", LMD_TYPE_ARRAY, LMD_METHOD_INCLUDES},
+        {"toString", LMD_TYPE_ARRAY, LMD_METHOD_ARRAY_STRING},
+        {"concat", LMD_TYPE_ARRAY, LMD_METHOD_CONCAT}, {"splice", LMD_TYPE_ARRAY, LMD_METHOD_SPLICE},
+        {"unshift", LMD_TYPE_ARRAY, LMD_METHOD_UNSHIFT},
+        {"shift", LMD_TYPE_ARRAY, LMD_METHOD_SHIFT},
+        {"toReversed", LMD_TYPE_ARRAY, LMD_METHOD_TO_REVERSED},
+        {"at", LMD_TYPE_ARRAY, LMD_METHOD_AT},
         {"charAt", LMD_TYPE_STRING, LMD_METHOD_CHAR_AT}, {"charCodeAt", LMD_TYPE_STRING, LMD_METHOD_CODE_AT},
         {"repeat", LMD_TYPE_STRING, LMD_METHOD_REPEAT},
         {"substring", LMD_TYPE_STRING, LMD_METHOD_SUBSTRING}, {"slice", LMD_TYPE_STRING, LMD_METHOD_STRING_SLICE},
         {"split", LMD_TYPE_STRING, LMD_METHOD_SPLIT}, {"indexOf", LMD_TYPE_STRING, LMD_METHOD_INDEX_OF},
         {"startsWith", LMD_TYPE_STRING, LMD_METHOD_STARTS_WITH}, {"toUpperCase", LMD_TYPE_STRING, LMD_METHOD_UPPER},
-        {"toFixed", LMD_TYPE_FLOAT, LMD_METHOD_TO_FIXED}};
+        {"endsWith", LMD_TYPE_STRING, LMD_METHOD_ENDS_WITH}, {"padStart", LMD_TYPE_STRING, LMD_METHOD_PAD_START},
+        {"match", LMD_TYPE_STRING, LMD_METHOD_MATCH}, {"replace", LMD_TYPE_STRING, LMD_METHOD_REPLACE},
+        {"toLowerCase", LMD_TYPE_STRING, LMD_METHOD_LOWER}, {"toLocaleLowerCase", LMD_TYPE_STRING, LMD_METHOD_LOWER},
+        {"toFixed", LMD_TYPE_FLOAT, LMD_METHOD_TO_FIXED},
+        {"toString", LMD_TYPE_FLOAT, LMD_METHOD_NUMBER_STRING},
+        {"toString", LMD_TYPE_DECIMAL, LMD_METHOD_BIGINT_STRING}};
+TypeId mvp_lmd_method_owner(int id) {
+    for (const auto& method : methods) if (method.id == id) return method.owner;
+    return LMD_TYPE_NULL;
+}
+int mvp_lmd_builtin_method(String* key, TypeId owner) {
     for (const auto& method : methods)
         if (method.owner == owner && text_is(key, method.name)) return method.id;
     return 0;
 }
 extern "C" Item mvp_lmd_property_get(Item owner, Item name, int64_t callee) {
     TypeId tid = get_type_id(owner);
+    if (tid == LMD_TYPE_ARRAY) {
+        int64_t index = mvp_lmd_string_key(name.get_string());
+        if (index >= 0) {
+            Item value = index < owner.array->length ? owner.array->items[index] : Item{.item = ITEM_JS_UNDEFINED};
+            return value.item == ITEM_JS_DELETED_SENTINEL ? Item{.item = ITEM_JS_UNDEFINED} : value;
+        }
+        if (text_is(name.get_string(), "length")) return Item{.item = i2it(owner.array->length)};
+    }
     if (tid == LMD_TYPE_ARRAY && owner.array->type) {
         ShapeEntry* field = own_field((Map*)owner.array, name.get_string());
         if (field) return map_shape_field_to_item(owner.array->data, field);
     }
-    if (tid == LMD_TYPE_ARRAY || tid == LMD_TYPE_STRING || tid == LMD_TYPE_INT || tid == LMD_TYPE_FLOAT) {
+    if (tid == LMD_TYPE_ARRAY || tid == LMD_TYPE_STRING || tid == LMD_TYPE_INT || tid == LMD_TYPE_FLOAT || tid == LMD_TYPE_DECIMAL) {
         int method = mvp_lmd_builtin_method(name.get_string(), tid == LMD_TYPE_INT ? LMD_TYPE_FLOAT : tid);
         if (method) return callee ? Item{.item = mvp_lmd_method_token(method)} : mvp_lmd_fail(LMD_MVP_CAPABILITY, 0);
         return tid == LMD_TYPE_ARRAY ? Item{.item = ITEM_JS_UNDEFINED} : mvp_lmd_fail(LMD_MVP_CAPABILITY, 0);
@@ -132,6 +178,8 @@ extern "C" Item mvp_lmd_property_get(Item owner, Item name, int64_t callee) {
     if (field) return map_shape_field_to_item(map->data, field);
     if (map->map_kind == MAP_KIND_ORDERED) {
         if (text_is(key, "size")) return {.item = i2it(((OrderedMap*)map)->size)};
+        // library collections have actual prototype functions; Set must not acquire Map-only methods.
+        if (mvp_lmd_class_record(owner)) return Item{.item = ITEM_JS_UNDEFINED};
         int method = mvp_lmd_builtin_method(key);
         if (method) return callee ? Item{.item = mvp_lmd_method_token(method)} : mvp_lmd_fail(LMD_MVP_CAPABILITY, 0);
     }
@@ -152,24 +200,99 @@ extern "C" Item mvp_lmd_property_set(Item owner, Item name, Item value) {
         map->type = tree ? type_tree_map_root(tree) : NULL;
         if (!map->type) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
     }
-    if (map->map_kind == MAP_KIND_ORDERED && !own_field(map, name.get_string()) &&
-            (text_is(name.get_string(), "size") || mvp_lmd_builtin_method(name.get_string())))
+    ShapeEntry* field = own_field(map, name.get_string());
+    if (map->map_kind == MAP_KIND_ORDERED && !field &&
+            (text_is(name.get_string(), "size") || (!mvp_lmd_class_record(owner) && mvp_lmd_builtin_method(name.get_string()))))
         return mvp_lmd_fail(LMD_MVP_CAPABILITY, 0);
-    return map_shape_set(map, name.get_string(), value) ? value : mvp_lmd_fail(LMD_MVP_MEMORY, 0);
+    if (field && (field->flags & (JSPD_IS_ACCESSOR | JSPD_NON_WRITABLE)))
+        return field->flags & JSPD_IS_ACCESSOR ? mvp_lmd_fail(LMD_MVP_CAPABILITY, 0) : value;
+    // descriptor admission already resolved this immutable field; reuse it for the physical write.
+    return map_shape_set_resolved(map, name.get_string(), field, value) ? value : mvp_lmd_fail(LMD_MVP_MEMORY, 0);
 }
 extern "C" Item mvp_lmd_property_delete(Item owner, Item name) {
+    Map* face = object_face(owner);
+    ShapeEntry* field = face && face->type ? own_field(face, name.get_string()) : NULL;
+    if (field && (field->flags & JSPD_NON_CONFIGURABLE)) return Item{.item = ITEM_FALSE};
     if (get_type_id(owner) == LMD_TYPE_ARRAY) {
         int64_t index = mvp_lmd_string_key(name.get_string());
         if (index == -1) return mvp_lmd_fail(LMD_MVP_CAPABILITY, 0);
-        if (index < -1) return !owner.array->type || map_shape_delete((Map*)owner.array, name.get_string())
+        if (index < -1) return !owner.array->type || map_shape_delete_resolved(face, field)
             ? Item{.item = ITEM_TRUE} : mvp_lmd_fail(LMD_MVP_MEMORY, 0);
         if (index < owner.array->length) owner.array->items[index].item = ITEM_JS_DELETED_SENTINEL;
         return Item{.item = ITEM_TRUE};
     }
     // the MIR caller (including class dispatch) owns the roots throughout shared shape deletion.
+    if (!face) return mvp_lmd_fail(LMD_MVP_CAPABILITY, 0);
+    // configurable admission and physical deletion use the same current-shape field.
+    return map_shape_delete_resolved(face, field) ? Item{.item = ITEM_TRUE} : mvp_lmd_fail(LMD_MVP_MEMORY, 0);
+}
+extern "C" Item mvp_lmd_define_data_property(Item owner, Item name, Item descriptor) {
+    RootFrame roots(9);
+    if (!roots.valid()) return ItemError;
+    Rooted<Item> object(roots, owner), key(roots, name), desc(roots, descriptor);
+    TypeId type = get_type_id(descriptor);
+    if (type != LMD_TYPE_MAP && type != LMD_TYPE_ARRAY && type != LMD_TYPE_FUNC)
+        return mvp_lmd_fail(LMD_MVP_TYPE, 0);
     Map* map = object_face(owner);
-    if (!map) return mvp_lmd_fail(LMD_MVP_CAPABILITY, 0);
-    return map_shape_delete(map, name.get_string()) ? Item{.item = ITEM_TRUE} : mvp_lmd_fail(LMD_MVP_MEMORY, 0);
+    if (!map) return mvp_lmd_fail(get_type_id(owner) == LMD_TYPE_FUNC ? LMD_MVP_CAPABILITY : LMD_MVP_TYPE, 0);
+    if (get_type_id(owner) == LMD_TYPE_ARRAY && mvp_lmd_string_key(name.get_string()) >= -1)
+        return mvp_lmd_fail(LMD_MVP_CAPABILITY, 0);
+    const char* names[] = {"enumerable", "configurable", "value", "writable", "get", "set"};
+    uint64_t* values[6]; bool present[6] = {};
+    for (int i = 0; i < 6; i++) {
+        values[i] = roots.take_slot(); *values[i] = ITEM_JS_UNDEFINED;
+        String* spelling = heap_create_name(names[i], strlen(names[i]));
+        if (!spelling) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
+        Item field_name = {.item = s2it(spelling)};
+        Item exists = mvp_lmd_class_property(desc.get(), field_name, ItemNull, LMD_PROP_HAS, NULL);
+        if (item_is_error(exists)) return exists;
+        present[i] = exists.item == ITEM_TRUE;
+        if (present[i]) {
+            Item value = mvp_lmd_class_property(desc.get(), field_name, ItemNull, LMD_PROP_GET, NULL);
+            if (item_is_error(value)) return value;
+            *values[i] = value.item;
+        }
+    }
+    if (present[4] || present[5]) return mvp_lmd_fail(present[2] || present[3] ? LMD_MVP_TYPE : LMD_MVP_CAPABILITY, 0);
+    map = object.get().map;
+    ShapeEntry* old = map->type ? own_field(map, key.get().get_string()) : NULL;
+    uint8_t flags = old ? old->flags : JSPD_NON_ENUMERABLE | JSPD_NON_CONFIGURABLE | JSPD_NON_WRITABLE;
+    if (flags & JSPD_IS_ACCESSOR) return mvp_lmd_fail(LMD_MVP_CAPABILITY, 0);
+    const int indices[] = {0, 1, 3};
+    const uint8_t bits[] = {JSPD_NON_ENUMERABLE, JSPD_NON_CONFIGURABLE, JSPD_NON_WRITABLE};
+    for (int i = 0; i < 3; i++) if (present[indices[i]]) {
+        if (mvp_lmd_truthy(Item{.item = *values[indices[i]]})) flags &= ~bits[i]; else flags |= bits[i];
+    }
+    Item value = {.item = *values[2]};
+    if (old && (old->flags & JSPD_NON_CONFIGURABLE)) {
+        if (!(flags & JSPD_NON_CONFIGURABLE) || ((flags ^ old->flags) & JSPD_NON_ENUMERABLE) ||
+                ((old->flags & JSPD_NON_WRITABLE) && !(flags & JSPD_NON_WRITABLE)))
+            return mvp_lmd_fail(LMD_MVP_TYPE, 0);
+        if ((old->flags & JSPD_NON_WRITABLE) && present[2]) {
+            Item previous = map_shape_field_to_item(map->data, old);
+            bool same = key_equal(previous, value);
+            if (same && is_number(previous) && it2d(previous) == 0 && is_number(value))
+                same = signbit(it2d(previous)) == signbit(it2d(value));
+            if (!same) return mvp_lmd_fail(LMD_MVP_TYPE, 0);
+        }
+    }
+    if (present[2] || !old) {
+        // A fresh Array acquires its attribute face through the shared property writer.
+        bool stored = map->type ? map_shape_set_resolved(map, key.get().get_string(), old, value) :
+            !item_is_error(mvp_lmd_property_set(object.get(), key.get(), value));
+        if (!stored) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
+        map = object.get().map; old = own_field(map, key.get().get_string());
+    }
+    if (old->flags != flags) {
+        Input* tree = runtime_shape_tree();
+        TypeMap* transitioned = type_tree_reflag_field(tree, (TypeMap*)map->type, old, flags);
+        if (transitioned) map->type = transitioned;
+        else {
+            if (!map_clone_typemap_for_mutation(map, context->pool)) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
+            own_field(map, key.get().get_string())->flags = flags;
+        }
+    }
+    return object.get();
 }
 extern "C" Item mvp_lmd_property_has(Item owner, Item name, int64_t inherited) {
     if (get_type_id(owner) == LMD_TYPE_ARRAY) {
@@ -368,6 +491,57 @@ static int projection_order(const void* a, const void* b) {
     if (x->index == y->index) return x->order < y->order ? -1 : x->order != y->order;
     return x->index < y->index ? -1 : 1;
 }
+extern "C" Item mvp_lmd_for_in_keys(Item owner) {
+    RootFrame roots(5);
+    if (!roots.valid()) return ItemError;
+    Rooted<Item> object(roots, owner), result(roots, mvp_lmd_array_new(0));
+    Rooted<Item> seen(roots, ItemNull), keys(roots, ItemNull), key(roots, ItemNull);
+    if (item_is_error(result.get())) return result.get();
+    if (owner.item == ITEM_NULL || owner.item == ITEM_JS_UNDEFINED) return result.get();
+    seen.set(mvp_lmd_array_new(0));
+    if (item_is_error(seen.get())) return seen.get();
+    if (get_type_id(owner) == LMD_TYPE_STRING) {
+        int64_t length = utf8_to_utf16_length(owner.get_string()->chars, owner.get_string()->len);
+        for (int64_t i = 0; i < length; i++) {
+            key.set(mvp_lmd_number_to_string(i));
+            if (item_is_error(key.get())) return key.get();
+            Item stored = mvp_lmd_array_store(result.get(), i, key.get());
+            if (item_is_error(stored)) return stored;
+        }
+        return result.get();
+    }
+    TypeId type = get_type_id(owner);
+    if (type != LMD_TYPE_MAP && type != LMD_TYPE_ARRAY && type != LMD_TYPE_FUNC) return result.get();
+    MvpLmdClass* cls = mvp_lmd_class_record(owner);
+    bool statics = type == LMD_TYPE_FUNC;
+    if (statics) {
+        if (!cls) return mvp_lmd_fail(LMD_MVP_CAPABILITY, 0);
+        object.set(mvp_lmd_class_values(cls)[2]);
+    }
+    TypeNominal* nominal = cls ? &cls->nominal : NULL;
+    if (cls && (statics || object.get().item == mvp_lmd_class_values(cls)[1].item)) nominal = nominal->base;
+    for (;;) {
+        keys.set(mvp_lmd_object_project(object.get(), 3));
+        if (item_is_error(keys.get())) return keys.get();
+        for (int64_t i = 0; i < keys.get().array->length; i++) {
+            key.set(keys.get().array->items[i]); bool visited = false;
+            for (int64_t j = 0; j < seen.get().array->length; j++)
+                if (key_equal(key.get(), seen.get().array->items[j])) { visited = true; break; }
+            if (visited) continue;
+            Item stored = mvp_lmd_array_store(seen.get(), seen.get().array->length, key.get());
+            if (item_is_error(stored)) return stored;
+            ShapeEntry* field = object.get().map->type ? own_field(object.get().map, key.get().get_string()) : NULL;
+            if (field && (field->flags & JSPD_NON_ENUMERABLE)) continue;
+            stored = mvp_lmd_array_store(result.get(), result.get().array->length, key.get());
+            if (item_is_error(stored)) return stored;
+        }
+        if (!nominal) break;
+        if (nominal->extension != &mvp_lmd_class_extension) return mvp_lmd_fail(LMD_MVP_CAPABILITY, 0);
+        cls = (MvpLmdClass*)nominal->extension_data;
+        object.set(mvp_lmd_class_values(cls)[statics ? 2 : 1]); nominal = nominal->base;
+    }
+    return result.get();
+}
 extern "C" Item mvp_lmd_object_project(Item owner, int64_t projection) {
     Map* map = object_face(owner);
     bool indexed = get_type_id(owner) == LMD_TYPE_ARRAY;
@@ -386,11 +560,13 @@ extern "C" Item mvp_lmd_object_project(Item owner, int64_t projection) {
     int64_t count = 0;
     if (type) {
         FOR_EACH_MAP_FIELD(type, field) {
-            if (field->flags & JSPD_NON_ENUMERABLE) continue;
-            String* name = heap_create_name(field->name->str, field->name->length);
+            if ((field->key_kind != NAME_KEY_STRING && projection != 4) || (projection != 3 && (field->flags & JSPD_NON_ENUMERABLE))) continue;
+            String* name = field->key_kind != NAME_KEY_STRING ? name_pool_resolve_id(context->name_pool, field->name_id) :
+                heap_create_name(field->name->str, field->name->length);
             if (!name) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
             int64_t index = mvp_lmd_string_key(name);
-            fields[count] = {field, index >= 0 ? (uint32_t)index : UINT32_MAX, count}; count++;
+            fields[count] = {field, index >= 0 ? (uint32_t)index : UINT32_MAX,
+                count + (field->key_kind != NAME_KEY_STRING ? type->length : 0)}; count++;
         }
         // creation ordinals break ties so ordinary string keys retain source order.
         qsort(fields, (size_t)count, sizeof(ProjectionField), projection_order);
@@ -402,11 +578,12 @@ extern "C" Item mvp_lmd_object_project(Item owner, int64_t projection) {
         ShapeEntry* field = element ? NULL : fields[i - indexed_count].field;
         if (projection != 1) {
             key.set(element ? mvp_lmd_number_to_string((double)i) :
-                Item{.item = s2it(heap_create_name(field->name->str, field->name->length))});
+                Item{.item = s2it(field->key_kind != NAME_KEY_STRING ? name_pool_resolve_id(context->name_pool, field->name_id) :
+                    heap_create_name(field->name->str, field->name->length))});
             if (item_is_error(key.get())) return key.get();
         }
         // snapshots must outlive pair allocation and any subsequent storage growth.
-        value.set(projection == 0 ? key.get() : lambda_item_adopt_scalar_home(element
+        value.set(projection == 0 || projection >= 3 ? key.get() : lambda_item_adopt_scalar_home(element
             ? object.get().array->items[i] : map_shape_field_to_item(object.get().map->data, field), &value_home));
         if (projection == 2) {
             pair.set(array());
@@ -422,4 +599,34 @@ extern "C" Item mvp_lmd_object_project(Item owner, int64_t projection) {
     }
     if (fields) pool_free(context->pool, fields);
     return Item{.array = result.get()};
+}
+extern "C" Item mvp_lmd_object_copy(Item target, Item source, int64_t assign) {
+    TypeId type = get_type_id(source);
+    if (type != LMD_TYPE_MAP && type != LMD_TYPE_ARRAY && type != LMD_TYPE_FUNC && type != LMD_TYPE_STRING) return target;
+    RootFrame roots(5);
+    if (!roots.valid()) return ItemError;
+    Rooted<Item> output(roots, target), input(roots, source), keys(roots, ItemNull), key(roots, ItemNull), value(roots, ItemNull);
+    if (type == LMD_TYPE_FUNC) {
+        Item ready = mvp_lmd_function_prepare(input.get());
+        if (item_is_error(ready)) return ready;
+        input.set(mvp_lmd_class_values(mvp_lmd_class_record(input.get()))[2]);
+    }
+    if (type != LMD_TYPE_STRING) {
+        keys.set(mvp_lmd_object_project(input.get(), 4));
+        if (item_is_error(keys.get())) return keys.get();
+    }
+    int64_t length = type == LMD_TYPE_STRING ? utf8_to_utf16_length(input.get().get_string()->chars, input.get().get_string()->len) : keys.get().array->length;
+    uint64_t home = 0;
+    for (int64_t i = 0; i < length; i++) {
+        key.set(type == LMD_TYPE_STRING ? mvp_lmd_number_to_string(i) : keys.get().array->items[i]);
+        if (item_is_error(key.get())) return key.get();
+        value.set(type == LMD_TYPE_STRING ? mvp_lmd_string_at(input.get(), i, LMD_STRING_INDEX) :
+            mvp_lmd_class_property(input.get(), key.get(), ItemNull, LMD_PROP_GET, NULL));
+        if (item_is_error(value.get())) return value.get();
+        value.set(lambda_item_adopt_scalar_home(value.get(), &home));
+        Item stored = assign ? mvp_lmd_class_property(output.get(), key.get(), value.get(), LMD_PROP_SET | LMD_PROP_STRICT, NULL) :
+            map_shape_set(output.get().map, key.get().get_string(), value.get()) ? output.get() : ItemError;
+        if (item_is_error(stored)) return stored;
+    }
+    return output.get();
 }

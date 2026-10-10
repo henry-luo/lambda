@@ -181,6 +181,7 @@ bool js_ast_any_binding_pattern_child(JsAstNode* node,
     JsAstChildPredicate predicate, void* ctx);
 JsIdentifierNode* js_ast_parameter_binding_identifier(JsAstNode* parameter);
 JsAstParameterFacts js_ast_collect_parameter_facts(JsAstNode* parameters);
+bool js_ast_has_optional_chain(JsAstNode* node);
 // Structural gate: every JS-only child layout must appear in the extension table.
 bool js_ast_child_catalog_complete(void);
 

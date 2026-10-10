@@ -1,0 +1,314 @@
+{
+  "name": "WPT-derived size-query boolean, nesting and unsupported-feature evaluation",
+  "html": "test/ui/css_container_conditions.html",
+  "viewport": {
+    "width": 400,
+    "height": 300
+  },
+  "events": [
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#q0"
+      },
+      "property": "width",
+      "equals": "100px"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#q1"
+      },
+      "property": "width",
+      "equals": "20px"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#q2"
+      },
+      "property": "width",
+      "equals": "20px"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#q3"
+      },
+      "property": "width",
+      "equals": "20px"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#q4"
+      },
+      "property": "width",
+      "equals": "100px"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#q5"
+      },
+      "property": "width",
+      "equals": "20px"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#q6"
+      },
+      "property": "width",
+      "equals": "20px"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#q7"
+      },
+      "property": "width",
+      "equals": "100px"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#q8"
+      },
+      "property": "width",
+      "equals": "20px"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#q9"
+      },
+      "property": "width",
+      "equals": "20px"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#q10"
+      },
+      "property": "width",
+      "equals": "20px"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#q11"
+      },
+      "property": "width",
+      "equals": "100px"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#q12"
+      },
+      "property": "width",
+      "equals": "20px"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#q13"
+      },
+      "property": "width",
+      "equals": "20px"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#q14"
+      },
+      "property": "width",
+      "equals": "100px"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#q15"
+      },
+      "property": "width",
+      "equals": "100px"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#q16"
+      },
+      "property": "width",
+      "equals": "20px"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#q17"
+      },
+      "property": "width",
+      "equals": "20px"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#q18"
+      },
+      "property": "width",
+      "equals": "20px"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#q19"
+      },
+      "property": "width",
+      "equals": "20px"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#q20"
+      },
+      "property": "width",
+      "equals": "20px"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#q21"
+      },
+      "property": "width",
+      "equals": "20px"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#q22"
+      },
+      "property": "width",
+      "equals": "20px"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#q23"
+      },
+      "property": "width",
+      "equals": "100px"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#q24"
+      },
+      "property": "width",
+      "equals": "100px"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#q25"
+      },
+      "property": "width",
+      "equals": "20px"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#q26"
+      },
+      "property": "width",
+      "equals": "100px"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#q27"
+      },
+      "property": "width",
+      "equals": "100px"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#q28"
+      },
+      "property": "width",
+      "equals": "100px"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#q29"
+      },
+      "property": "width",
+      "equals": "20px"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#q30"
+      },
+      "property": "width",
+      "equals": "20px"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#q31"
+      },
+      "property": "width",
+      "equals": "20px"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#q32"
+      },
+      "property": "width",
+      "equals": "20px"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#q33"
+      },
+      "property": "width",
+      "equals": "20px"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#q34"
+      },
+      "property": "width",
+      "equals": "100px"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#q35"
+      },
+      "property": "width",
+      "equals": "20px"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#q36"
+      },
+      "property": "width",
+      "equals": "100px"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#q37"
+      },
+      "property": "width",
+      "equals": "20px"
+    }
+  ]
+}

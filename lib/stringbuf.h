@@ -44,8 +44,9 @@ void stringbuf_append_long(StringBuf *sb, long value);
 void stringbuf_append_ulong(StringBuf *sb, unsigned long value);
 void stringbuf_append_all(StringBuf *sb, int num_args, ...);
 void stringbuf_vappend(StringBuf *sb, int num_args, va_list args);
-void stringbuf_append_format(StringBuf *sb, const char *format, ...);
-void stringbuf_vappend_format(StringBuf *sb, const char *format, va_list args);
+// report failed growth/formatting so callers cannot expose partial serialized values.
+bool stringbuf_append_format(StringBuf *sb, const char *format, ...);
+bool stringbuf_vappend_format(StringBuf *sb, const char *format, va_list args);
 
 // Template emit functions (document formatting oriented).
 //

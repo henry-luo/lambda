@@ -581,6 +581,206 @@ metadata, payload ownership, and clone costs before admitting another prop
 group. A large global computed-style cache is not the first remedy for the
 measured specified-style retention.
 
+### 3.12 Bound substitution work and project complete computed text
+
+The per-value byte/component budgets and scoped dependency cache also bound
+named dependency depth (default 128, configurable per document). Include the
+remaining depth in each dependency-cache key: a value memoized on a shallow
+path must not make a longer path appear within budget. Exceeding the budget
+produces an invalid computed custom value; consumer fallbacks and registered
+defaults use the ordinary shared resolver. Unused fallbacks stay lazy.
+Inheritance follows declaration owners iteratively, so DOM ancestry does not
+consume the named-dependency budget. Separately guard recursive value/token
+walks against native-stack exhaustion, following the existing
+[memory-safety recursion contract](../Memory_Safety_Template.md#53-recursion-depth-librecursion_guardhpp).
+The depth policy is a UA resource limit, not a depth mandated by CSS; see
+[CSS Variables §3.3](https://www.w3.org/TR/css-variables-1/#long-variables).
+
+Computed accessor callbacks write growable text. Both the full String API and
+bounded native API use that computation; a bounded read reports failure and
+leaves empty output if the complete value does not fit. Intermediate formatting
+and substitutions stay in scratch storage; only the result crosses into the
+caller's pool, under **D4.5.1v4 / D4.1.4v5**. No formal ownership ruling changes.
+
+### 3.13 Size-container delivery contract
+
+The P1.1 size-query implementation extends §3.2's existing container-dependent
+key contract. Keep parsed conditions in the CSS/input owner; supply layout
+measurements through an explicit environment callback, preserving module
+boundaries under **D7.3.3–D7.3.4**. The selected view owns query measurements,
+dependency state and stabilization work under **D4.5.1v4 / D4.1.4v5**. An
+independent print/secondary view never reads browsing geometry to answer a query.
+
+For a size query, select a strict flat-tree ancestor with the requested name
+and containment on every axis required by the condition. Use its content-box
+dimensions and writing mode. Preserve container blocks in the active rule
+program, as with target-dependent scope blocks; do not flatten their children
+using a document-global condition result. A cached result includes condition
+version, selected container identity, measurement/style generation and the
+font/environment inputs it reads. Missing or unavailable query measurements
+produce an unknown query result, which does not apply its conditional rules.
+
+Apply the ordered stylesheet program to each ancestor before visiting its
+descendants. A stylesheet-major walk exposes only a prefix of the ancestor's
+font/custom-property cascade to an early query. The allocation-failure reference
+walker must preserve the same order. Compute the complete query value, including
+substitution, before checking its numeric dimension; a width declaration's
+nonnegative range is not the grammar of a size-query comparison.
+
+Container units perform the corresponding eligible-ancestor search for each
+required axis; the nearest containers for the two axes can differ. When no
+eligible container exists, use that axis's small-viewport size, as specified
+by [CSS Conditional Rules §7](https://www.w3.org/TR/css-conditional-5/#container-lengths).
+Names, axis selection and content-box measurements share the same provider
+between query matching and length computation, including font-relative math.
+
+Initial layout and subsequent container changes must stabilize query styles
+and geometry before publishing a committed view or dispatching motion events.
+Size containment and strict ancestor selection give the dependency graph its
+direction; process affected descendants in that order. An implementation that
+needs staged passes must retain measured inputs across those passes, detect
+non-convergence and report failure rather than silently publish an arbitrary
+iteration. DOM/style/font/viewport changes invalidate both measurements and
+dependent styles. Style and scroll-state queries retain their separate model
+prerequisites in P3.4 of the implementation plan.
+
+Secondary editions retain a previous-pass content-size table outside their
+replaceable CSS/layout scratch. Entries carry validated `DomNodeRef` identity;
+the edition owns both tables, and external reset/release destroys them with that
+generation (**D4.5.1v4 / D4.1.4v5**). Internal rejected passes preserve only this
+measurement input while rebuilding styles and fragments. Query values use the
+selected ancestor's edition-local font and custom-property state.
+
+Capture measurements from accepted compositor state after a complete pass.
+Block-frame measurements participate in the existing checkpoint journal, so
+speculative page trials cannot leak sizes into the next pass. Definite heights
+retain the pre-fragmentation content extent; automatic heights accumulate
+accepted content across fragments, excluding cloned decoration. Container
+eligibility still restricts which axes can be queried. Rewind page-policy
+callbacks before another pass, and commit only after reference bindings and
+container measurements both settle. A caller-visible condition-pass budget
+reports exhaustion without committing provisional material.
+
+### 3.14 Containment consumers
+
+Layout and paint containment establish an independent formatting context.
+Paint containment clips descendants at the overflow clip edge, with corner
+clipping and `overflow-clip-margin`; computed overflow keywords remain authored.
+This follows [CSS Containment 2 §3.4](https://www.w3.org/TR/css-contain-2/#paint-containment).
+Use the existing shared block-local overflow geometry for rendering and hit
+testing rather than creating a second containment clip. A paint-contained box
+does not need a scroll pane to clip, and removing containment must restore its
+ordinary used geometry after recascade.
+
+Containment flags are generation-local computed state under **D4.5.1v4 /
+D4.1.4v5**. Reset them before applying current winners; retain remembered
+intrinsic sizes separately when the visibility implementation needs them.
+Store the computed `contain` modes separately from size containment implied by
+`container-type`; explicit inheritance copies only the former. Keyword sets
+validate before parsing a declaration and again after substitution; computed
+reads use canonical keyword case/order while container names remain sensitive.
+
+Layout/paint containment creates a zero-level stacking context even for static
+boxes. The shared paint walk defers these boxes with other zero-level contexts;
+hit testing reverses the corresponding paint order, including ordinary siblings
+that overlap through negative margins. Descendant overflow clips begin after
+the box boundary is painted. PDF clip depth survives streamed paint batches,
+and SVG/PDF retain the same rounded solid-border path as raster. Elliptical
+corners constrain both descendant clips and the border's own hit region, per
+[CSS Backgrounds 3 §4.3](https://www.w3.org/TR/css-backgrounds-3/#corner-clipping).
+
+Contained horizontal column flows retain their child margins during ordinary
+measurement. Fragmentation recognizes the final child's margin and an empty
+block-end gap as break opportunities, truncates margin-only continuations, and
+keeps fractional balance minima. Fixed sizes retain their logical extent;
+size-contained boxes, scroll containers and `break-inside: avoid` keep their
+existing atomic behavior. These controls follow
+[CSS Fragmentation 3 §4.1/§5.2](https://www.w3.org/TR/css-break-3/#possible-breaks).
+
+Reverse hit traversal cannot let an editor's margin-caret fallback claim
+painted siblings or content outside its parent. SVG text targeting follows
+authored style ancestry across anonymous layout wrappers, including wrappers
+inserted after the style snapshot was indexed. Source-less layout placeholders
+have no Lambda attribute-map identity under **D4.5.1v4**. Shared ancestry
+collection uses checked growable storage rather than silently dropping ancestors.
+
+Complete stacking/depth ordering, non-principal boxes,
+secondary-view geometry/paint containment and `content-visibility: auto`
+still require their own observable controls before complete containment support
+can be claimed.
+
+### 3.15 Style containment and generated-content scopes
+
+Style containment creates a counter mutation boundary for the element's
+subtree, after its own counter reset/increment/set operations. Reads retain
+outer counter instances; an increment/set without a local instance creates
+one at the subtree boundary, initially zero. Nested resets keep normal CSS
+Lists sibling inheritance within that boundary. No subtree counter state is
+published back into its containing element's scope. `container-type: size`
+and `inline-size`, and skipped content, imply this same boundary.
+
+Quote depth starts at the enclosing depth, advances in flattened generated
+content order, and is restored on leaving a style-contained subtree. Both
+browsing and independent compositions use the shared content evaluator and
+counter-scope implementation. Scope ownership and generated text follow
+**D4.5.1v4 / D4.1.4v5**; pass-local snapshots never become document-owned pointers.
+Repeated materialization retains unchanged text rather than allocating a
+replacement document string. Counter/quote checkpoints must also bound
+measurement trials and early returns.
+
+The browsing owner is `LayoutCounterScope`, shared by block, inline and final
+flex/grid item layout. The list item's own implicit counter increment precedes
+the style boundary; its generated marker follows it. Final item content uses
+a retained flattened source order, independently of visual CSS `order`.
+Stretch measurement temporarily clones active counter maps in a checked
+`CounterCheckpoint`, restoring maps, active frames and quote depth before
+final content. The scratch checkpoint does not retain pointers into a retired
+style or view generation. Independent views use the same counter boundary
+around their existing source-order composition scopes.
+
+The semantics follow [CSS Containment 2 §3.3](https://www.w3.org/TR/css-contain-2/#style-containment)
+and the pinned WPT `css/css-contain/counter-scoping-*` / `quote-scoping-*`
+cases. This contract does not claim complete non-principal containment or
+`content-visibility: auto` relevance handling.
+
+### 3.16 Content visibility delivery contract (implementation pending)
+
+The computed `visible`, `hidden`, and `auto` states remain distinct from the
+used skipped state. Hidden/auto always imply layout, style and paint
+containment; skipped contents additionally imply size containment. A skipped
+subtree contributes neither descendant paint/hits nor outer counter effects.
+Hidden contents cannot be focused, selected or reached by tab navigation.
+Auto contents retain those user-agent routes and become relevant when focused,
+selected, in the top layer, or near/intersecting an applicable scroll viewport.
+
+Relevance and remembered inner sizes belong to the selected view. Reuse the
+existing last-remembered-size computation and containment measurement helpers,
+while removing their assumption that a DOM-wide default-view size is suitable
+for every view. State keys include validated DOM identity; detach, adoption,
+view reset and teardown must retire stale state under **D4.5.1v4 / D4.1.4v5**.
+Before first geometry exists, auto contents are measured. Subsequent layout
+settles relevance and placeholder geometry with a checked pass budget. An
+explicit activation margin is a user-agent policy, rather than an authored
+length or a hidden test-specific threshold. Scroll, resize, font/content,
+focus/selection and CSS mutation changes must schedule recomputation without
+requiring an unrelated DOM edit. Printing/paged views make their printable
+content relevant independently of the browsing viewport.
+
+Skipping retains reusable layout state, but its stale descendant boxes cannot
+participate in paint or hit traversal. Intrinsic `auto` placeholders use the
+last committed inner size of that view; ordinary explicit fallback lengths
+retain their CSS Sizing behavior. Measurement trials cannot publish remembered
+sizes, quote/counter changes or new motion timelines. Skipping and activation
+suppress transition creation for the associated style change, while existing
+animation phase/lifetime follows the shared motion owner.
+
+Acceptance must exercise visible clipping/BFC/counters, initially offscreen
+placeholders, activation by scroll/focus, remembered-size changes, nested
+scrollports, live auto/hidden/visible switches, and independent-view printing.
+The rules follow [CSS Containment 2 §4](https://www.w3.org/TR/css-contain-2/#content-visibility)
+and [CSS Sizing 4 §5](https://www.w3.org/TR/css-sizing-4/#intrinsic-size-override).
+This contract is pending implementation and does not promote the support row.
+
 ## 4. Instrumentation and decision criteria
 
 Extend existing `StyleEpochStats`, pool counters, and memory snapshots rather

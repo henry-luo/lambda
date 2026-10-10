@@ -1,0 +1,47 @@
+<!doctype html><meta charset="utf-8"><style>
+body { margin:0; font:16px sans-serif } section { counter-reset:n 0 }
+.c { contain:style; counter-increment:n }
+.c::before,.c::after { content:counters(n,'.') }
+.c::after { counter-increment:n 2 }
+.tail::before { content:counter(n) }
+.set .c { counter-set:n 1; counter-increment:none }
+.set .c::after { counter-set:n 2; counter-increment:none }
+.q { quotes:'A' 'Z' '1' '9' }
+.q::before { content:open-quote }.q::after { content:close-quote }
+.q span { contain:style }.q span::before { content:open-quote }
+.close span::before { content:normal }.close span::after { content:close-quote }
+.noopen span::before { content:no-open-quote }
+.noclose span::before { content:no-close-quote }
+
+#implicit-root {counter-reset:n 5} #implicit-root .axes {container-type:inline-size}
+#implicit-root .axes span {counter-increment:n 1000}
+#desc-root {counter-reset:n 9} #desc-root .boundary {contain:style}
+#desc-root .boundary span {counter-reset:other 3;counter-increment:n 2}
+#desc-root .boundary span::before {content:counters(n,'.')}
+#nested-root {counter-reset:n 4} #nested-root .boundary,#nested-root .inner {contain:style}
+#nested-root .first {counter-increment:n 2} #nested-root .inner {counter-increment:n 3}
+#nested-root .leaf {counter-increment:n 7}
+#nested-root .leaf::before,#nested-root .boundary::after,#nested-root .inner::before {content:counters(n,'.')}
+#block-quote::before,#block-quote::after {display:block}
+</style><section><div class=c id=increment></div><div class=tail id=increment-tail></div></section><section class=set><div class=c id=set></div><div class=tail id=set-tail></div></section><div class=q id=quote><span></span></div><div class="q close" id=close><span></span></div><div class="q noopen" id=noopen><span></span></div><div class="q noclose" id=noclose><span></span></div><section id=implicit-root><div class=axes><span></span></div><div class=axes style="container-type:size"><span></span></div><div class=tail id=implicit-tail></div></section><section id=desc-root><div class=boundary id=desc><span></span></div><div class=tail id=desc-tail></div></section><section id=nested-root><div class=boundary id=nested><span class=first></span><div class=inner><span class=leaf></span></div></div><div class=tail id=nested-tail></div></section><div class=q id=block-quote><span></span></div><div class=q id="measure-flex" style="display:flex"><span></span></div>
+<div class=q id="measure-grid" style="display:grid;grid-template-columns:repeat(3,auto)"><span></span></div>
+<div class=q id="measure-atomic" style="display:inline-block"><span></span></div>
+<div class=q id="measure-float" style="float:left"><span></span></div>
+<div class=q id="measure-columns" style="column-count:2;width:100px"><span></span></div>
+<style>
+.counter-layout {counter-reset:n 7}.counter-layout span {contain:style}
+.counter-layout em {counter-increment:n 2}.counter-layout::before,.counter-layout::after {content:counter(n)}
+.counter-layout em::before {content:counters(n,'.')}
+.order-layout {counter-reset:n 0;display:flex}.order-layout i::before {content:counter(n)}
+.order-layout i:nth-child(1) {counter-increment:n 1;order:3}
+.order-layout i:nth-child(2) {counter-increment:n 2;order:2}
+.order-layout i:nth-child(3) {counter-increment:n 3;order:1}
+</style>
+<div class=counter-layout id=counter-flex style="display:flex"><span><em></em></span></div>
+<div class=counter-layout id=counter-grid style="display:grid;grid-template-columns:repeat(3,auto)"><span><em></em></span></div>
+<div class=order-layout><i id=order-first></i><i id=order-second></i><i id=order-third></i></div>
+<div class=order-layout style="display:grid;grid-template-columns:repeat(3,auto)"><i id=grid-order-first></i><i id=grid-order-second></i><i id=grid-order-third></i></div>
+<div class=order-layout style="flex-wrap:wrap;align-content:stretch;width:300px;height:60px"><i id=wrap-order-first></i><i id=wrap-order-second></i><i id=wrap-order-third></i></div>
+<button id=toggle>toggle</button><script>
+let contained=true;document.querySelector('#toggle').onclick=()=>{contained=!contained;document.querySelector('#increment').style.contain=contained?'style':'none';document.querySelector('#quote span').style.contain=contained?'style':'none';};
+</script>

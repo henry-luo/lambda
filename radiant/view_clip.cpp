@@ -11,25 +11,19 @@ static int clip_floor_to_scanline(float value) {
     return (int)floorf(value); // INT_CAST_OK: raster scanline bounds are integer pixel columns.
 }
 
-static bool clip_point_in_rounded_rect(float px, float py,
-    float rx, float ry, float rw, float rh,
-    float r_tl, float r_tr, float r_br, float r_bl) {
-    if (px < rx || px > rx + rw || py < ry || py > ry + rh) return false;
-    if (r_tl > 0 && px < rx + r_tl && py < ry + r_tl) {
-        float dx = px - (rx + r_tl), dy = py - (ry + r_tl);
-        if (dx * dx + dy * dy > r_tl * r_tl) return false;
-    }
-    if (r_tr > 0 && px > rx + rw - r_tr && py < ry + r_tr) {
-        float dx = px - (rx + rw - r_tr), dy = py - (ry + r_tr);
-        if (dx * dx + dy * dy > r_tr * r_tr) return false;
-    }
-    if (r_br > 0 && px > rx + rw - r_br && py > ry + rh - r_br) {
-        float dx = px - (rx + rw - r_br), dy = py - (ry + rh - r_br);
-        if (dx * dx + dy * dy > r_br * r_br) return false;
-    }
-    if (r_bl > 0 && px < rx + r_bl && py > ry + rh - r_bl) {
-        float dx = px - (rx + r_bl), dy = py - (ry + rh - r_bl);
-        if (dx * dx + dy * dy > r_bl * r_bl) return false;
+bool clip_point_in_rounded_rect(float px, float py, Rect rect, const Corner* radius) {
+    if (rect.width <= 0.0f || rect.height <= 0.0f || px < rect.x || px > rect.x + rect.width ||
+        py < rect.y || py > rect.y + rect.height) return false;
+    for (size_t corner = 0; radius && corner < 4; corner++) {
+        float rx = radius->horizontal[corner], ry = radius->vertical[corner];
+        if (rx <= 0.0f || ry <= 0.0f) continue;
+        bool right = corner == 1 || corner == 2, bottom = corner >= 2;
+        float cx = right ? rect.x + rect.width - rx : rect.x + rx;
+        float cy = bottom ? rect.y + rect.height - ry : rect.y + ry;
+        if ((right ? px > cx : px < cx) && (bottom ? py > cy : py < cy)) {
+            float dx = (px - cx) / rx, dy = (py - cy) / ry;
+            if (dx * dx + dy * dy > 1.0f) return false;
+        }
     }
     return true;
 }
@@ -119,10 +113,15 @@ bool clip_point_in_shape(ClipShape* cs, float px, float py) {
         rdt_matrix_project_point(&cs->inverse_transform, px, py, &px, &py);
     }
     switch (cs->type) {
-        case CLIP_SHAPE_ROUNDED_RECT:
-            return clip_point_in_rounded_rect(px, py,
-                cs->rounded_rect.x, cs->rounded_rect.y, cs->rounded_rect.w, cs->rounded_rect.h,
-                cs->rounded_rect.r_tl, cs->rounded_rect.r_tr, cs->rounded_rect.r_br, cs->rounded_rect.r_bl);
+        case CLIP_SHAPE_ROUNDED_RECT: {
+            auto& shape = cs->rounded_rect;
+            Corner radius = {};
+            radius.top_left = radius.top_left_y = shape.r_tl;
+            radius.top_right = radius.top_right_y = shape.r_tr;
+            radius.bottom_right = radius.bottom_right_y = shape.r_br;
+            radius.bottom_left = radius.bottom_left_y = shape.r_bl;
+            return clip_point_in_rounded_rect(px, py, {shape.x, shape.y, shape.w, shape.h}, &radius);
+        }
         case CLIP_SHAPE_CIRCLE:
             return clip_point_in_circle(px, py, cs->circle.cx, cs->circle.cy, cs->circle.r);
         case CLIP_SHAPE_ELLIPSE:

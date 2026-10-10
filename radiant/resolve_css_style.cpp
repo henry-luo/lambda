@@ -1698,11 +1698,6 @@ static bool css_value_is_slash(const CssValue* value) {
            strcmp(value->data.custom_property.name, "/") == 0;
 }
 
-static bool css_value_identifier_is(const CssValue* value, const char* name) {
-    const char* ident = css_value_identifier_name(value);
-    return ident && name && str_icmp_cstr(ident, name) == 0;
-}
-
 static bool resolve_nonnegative_css_length(LayoutContext* lycon, uintptr_t property,
                                            const CssValue* value, float* out_length) {
     if (!value || !out_length) return false;
@@ -2112,38 +2107,6 @@ static bool resolve_contain_intrinsic_length(LayoutContext* lycon, uintptr_t pro
     return false;
 }
 
-static bool css_value_has_identifier(const CssValue* value, const char* identifier) {
-    if (css_value_identifier_is(value, identifier)) {
-        return true;
-    }
-    if (!value || value->type != CSS_VALUE_TYPE_LIST) return false;
-    for (int i = 0; i < value->data.list.count; i++) {
-        CssValue* item = value->data.list.values ? value->data.list.values[i] : nullptr;
-        if (css_value_identifier_is(item, identifier)) {
-            return true;
-        }
-    }
-    return false;
-}
-
-static bool css_contain_value_has_size(const CssValue* value) {
-    return css_value_has_identifier(value, "size") ||
-        css_value_has_identifier(value, "strict");
-}
-
-static bool css_contain_value_has_inline_size(const CssValue* value) {
-    return css_value_has_identifier(value, "inline-size");
-}
-
-static bool css_contain_value_establishes_positioning_cb(const CssValue* value) {
-    // CSS Containment: layout and paint containment establish absolute/fixed CBs;
-    // strict and content expand to those containment modes.
-    return css_value_has_identifier(value, "layout") ||
-        css_value_has_identifier(value, "paint") ||
-        css_value_has_identifier(value, "strict") ||
-        css_value_has_identifier(value, "content");
-}
-
 static void resolve_contain_intrinsic_axis(LayoutContext* lycon, ViewBlock* block,
                                            CssPropertyCode property,
                                            const CssValue* value, bool horizontal) {
@@ -2328,9 +2291,10 @@ bool layout_resolve_contain_intrinsic_size(LayoutContext* lycon, DomElement* ele
     CssDeclaration* contain_decl = style_tree_get_declaration(
         element->specified_style, CSS_PROPERTY_CONTAIN);
     bool contains_size = content_visibility_hidden ||
-        (contain_decl && css_contain_value_has_size(contain_decl->value));
-    bool contains_inline_size = contain_decl &&
-        css_contain_value_has_inline_size(contain_decl->value);
+        (block && block->blk && block->block()->contain_size) ||
+        (contain_decl && (css_value_containment_flags(contain_decl->value) & CSS_CONTAIN_SIZE));
+    bool contains_inline_size = (block && block->blk && block->block()->contain_inline_size) ||
+        (contain_decl && (css_value_containment_flags(contain_decl->value) & CSS_CONTAIN_INLINE_SIZE));
     if (!contains_size && !contains_inline_size) return false;
     CssDeclaration* size_decl = style_tree_get_declaration(
         element->specified_style, CSS_PROPERTY_CONTAIN_INTRINSIC_SIZE);
@@ -3781,8 +3745,18 @@ static float resolve_length_value_mode(LayoutContext* lycon, uintptr_t property,
             result = absolute_pixels;
             break;
         }
-        DomElement* length_owner = lycon->view && lycon->view->is_element()
-            ? lycon->view->as_element() : nullptr;
+        DomElement* length_owner = lycon->selected_style ? lycon->selected_style->source.get()
+            : lycon->view && lycon->view->is_element() ? lycon->view->as_element() : nullptr;
+        bool length_vertical = lycon->selected_style ? lycon->selected_style->vertical
+            : length_owner && layout_element_inline_axis_is_vertical(length_owner);
+        CssEngine* length_engine = lycon->selected_view_tree && lycon->selected_view_tree->model
+            ? lycon->selected_view_tree->model->css->engine.get()
+            : lycon->doc ? (CssEngine*)lycon->doc->services.cached_css_engine : nullptr;
+        double container_pixels = 0.0;
+        if (css_container_length_to_px(length_engine, length_owner, unit, num, &container_pixels)) {
+            result = container_pixels;
+            break;
+        }
         double viewport_pixels = 0.0;
         float viewport_width = lycon->width, viewport_height = lycon->height;
         if (lycon->selected_view_tree && lycon->selected_view_tree->model) {
@@ -3790,7 +3764,7 @@ static float resolve_length_value_mode(LayoutContext* lycon, uintptr_t property,
             viewport_height = lycon->selected_view_tree->model->environment.viewport_height;
         }
         if (css_viewport_length_to_px(unit, num, viewport_width, viewport_height,
-                length_owner && layout_element_inline_axis_is_vertical(length_owner),
+                length_vertical,
                 &viewport_pixels)) {
             result = (float)viewport_pixels;
             break;
@@ -3816,7 +3790,7 @@ static float resolve_length_value_mode(LayoutContext* lycon, uintptr_t property,
         case CSS_UNIT_IC: {
             FontStyleDesc style = lycon->font.style ? font_style_desc_from_prop(lycon->font.style) : FontStyleDesc{};
             float font_size = lycon->font.style ? lycon->font.style->font_size : lycon->font.current_font_size;
-            bool upright = length_owner && layout_element_inline_axis_is_vertical(length_owner) &&
+            bool upright = length_owner && length_vertical &&
                 layout_specified_keyword(length_owner, CSS_PROPERTY_TEXT_ORIENTATION, CSS_VALUE_MIXED) == CSS_VALUE_UPRIGHT;
             float pixels = 0.0f;
             result = css_font_metric_unit_px(font_box_handle(&lycon->font), &style,
@@ -4703,6 +4677,8 @@ static bool resolve_property_callback(AvlNode* node, void* context, bool font_pa
     LayoutContext* lycon = (LayoutContext*)context;
     StyleNode* style_node = (StyleNode*)node->declaration;
     CssPropertyCode prop_id = (CssPropertyCode)node->property_id;
+    if (prop_id == CSS_PROPERTY_CONTAINER || prop_id == CSS_PROPERTY_CONTAINER_NAME ||
+        prop_id == CSS_PROPERTY_CONTAINER_TYPE) return true;
     if (css_property_is_font(prop_id) != font_pass) return true;
     CssDeclaration* decl = style_node
         ? style_tree_get_declaration(lam::dom_require_element(lycon->view)->specified_style,
@@ -5797,6 +5773,18 @@ static void resolve_scroll_spacing(DomElement* element, LayoutContext* lycon,
 
 void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
     assert(dom_elem);
+    if (dom_elem->blk) {
+        css_value_destroy_owned(dom_elem->blk->container_names, layout_prop_pool(lycon));
+        dom_elem->blk->container_names = nullptr;
+        dom_elem->blk->container_axes = 0;
+        dom_elem->blk->contain_size = false;
+        dom_elem->blk->contain_inline_size = false;
+        dom_elem->blk->contain_positioning = false;
+        dom_elem->blk->contain_paint = false;
+        dom_elem->blk->computed_containment = 0;
+        dom_elem->blk->content_visibility_hidden = false;
+    }
+
     // rebuild retained leading before shorthand/inheritance resolution, while
     // preserving the UA normal value installed by HTML control defaults.
     {
@@ -5935,6 +5923,16 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
         }
     }
     avl_tree_foreach_inorder(style_tree->tree, resolve_non_font_property_callback, lycon);
+    // query eligibility and names use the same shorthand/longhand rollback winner.
+    const CssPropertyCode container_parts[] = {CSS_PROPERTY_CONTAINER_NAME, CSS_PROPERTY_CONTAINER_TYPE};
+    for (CssPropertyCode part : container_parts) {
+        CssDeclaration* winner = style_tree_get_declaration(style_tree, part);
+        if (winner) resolve_css_property(part, winner, lycon);
+    }
+    if (dom_elem->blk) {
+        dom_elem->blk->contain_size |= (dom_elem->blk->container_axes & CSS_CONTAINER_BLOCK) != 0;
+        dom_elem->blk->contain_inline_size |= (dom_elem->blk->container_axes & CSS_CONTAINER_INLINE) != 0;
+    }
     // A shorthand can supply a longhand even when that longhand has no AVL node.
     const CssPropertyCode border_image_parts[] = {
         CSS_PROPERTY_BORDER_IMAGE_SOURCE, CSS_PROPERTY_BORDER_IMAGE_SLICE,
@@ -6991,24 +6989,37 @@ static void resolve_multicol_keyword_property(LayoutContext* lycon, ViewBlock* b
     }
 }
 
-static void resolve_containment_property(LayoutContext* lycon, ViewBlock* block,
+static void resolve_containment_property(LayoutContext* lycon, ViewSpan* block,
                                          CssPropertyCode property,
                                          const CssValue* value) {
     if (!block || !value) return;
     block->ensure_block(lycon);
+    DomElement* parent = dom_parent_element(block);
+    bool inherits = css_value_is_inherit(value);
     if (property == CSS_PROPERTY_CONTAIN) {
-        block->blk->contain_size = css_contain_value_has_size(value);
-        block->blk->contain_inline_size = css_contain_value_has_inline_size(value);
-        block->blk->contain_positioning =
-            css_contain_value_establishes_positioning_cb(value);
-        block->blk->contain_paint = css_value_has_identifier(value, "paint") ||
-            css_value_has_identifier(value, "strict") || css_value_has_identifier(value, "content");
+        // inherit the CSS modes, before query-container and visibility containment are applied.
+        uint8_t modes = inherits ? parent && parent->blk ? parent->block()->computed_containment : 0
+            : css_value_containment_flags(value);
+        block->blk->computed_containment = modes;
+        block->blk->contain_size = (modes & CSS_CONTAIN_SIZE) != 0;
+        block->blk->contain_inline_size = (modes & CSS_CONTAIN_INLINE_SIZE) != 0;
+        block->blk->contain_positioning = (modes & (CSS_CONTAIN_LAYOUT | CSS_CONTAIN_PAINT)) != 0;
+        block->blk->contain_paint = (modes & CSS_CONTAIN_PAINT) != 0;
     } else if (property == CSS_PROPERTY_CONTAINER_TYPE) {
-        block->blk->contain_size = css_value_has_identifier(value, "size");
-        block->blk->contain_inline_size = css_value_has_identifier(value, "inline-size");
+        block->blk->container_axes = inherits
+            ? parent && parent->blk ? parent->block()->container_axes : 0
+            : css_container_type_axes(value);
+    } else if (property == CSS_PROPERTY_CONTAINER_NAME) {
+        Pool* pool = layout_prop_pool(lycon);
+        const CssValue* names = inherits
+            ? parent && parent->blk ? parent->block()->container_names.get() : nullptr : value;
+        CssValue* copy = css_value_clone_owned(names, pool);
+        css_value_destroy_owned(block->blk->container_names, pool);
+        block->blk->container_names = lam::own(copy);
     } else if (property == CSS_PROPERTY_CONTENT_VISIBILITY) {
         block->blk->content_visibility_hidden =
-            css_content_visibility_value_is_hidden(value);
+            inherits ? parent && parent->blk && parent->block()->content_visibility_hidden
+                : css_content_visibility_value_is_hidden(value);
     }
 }
 
@@ -8745,11 +8756,13 @@ void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, L
     WritingMode current_writing_mode = layout_element_writing_mode(current_element);
     bool vertical_block_start_is_right = current_writing_mode == WM_VERTICAL_RL;
     prop_id = css_physical_size_alias(prop_id, inline_axis_is_vertical);
-    CssComputedValueScratch value_scope(lycon, prop_id, value);
+    CssPropertyCode value_property = decl->property_code == CSS_PROPERTY_CONTAINER
+        ? CSS_PROPERTY_CONTAINER : prop_id;
+    CssComputedValueScratch value_scope(lycon, value_property, value);
     Pool* value_pool = lycon->css_value_scratch ? lycon->css_value_scratch.get() : lycon->pool.get();
-    const CssValue* substituted = css_resolve_element_var_value(value_pool, current_element, value, prop_id);
+    const CssValue* substituted = css_resolve_element_var_value(value_pool, current_element, value, value_property);
     if (substituted != value) {
-        if (!substituted || !css_property_validate_value(prop_id, substituted)) {
+        if (!substituted || !css_property_validate_value(value_property, substituted)) {
             // Invalid substitution happens at computed-value time. Keep the
             // fallback in its consumer owner because deferred consumers retain values.
             CssValue* fallback = (CssValue*)pool_calloc(value_pool,
@@ -8763,6 +8776,10 @@ void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, L
         }
     }
     ViewSpan* span = lam::view_require_element(lycon->view);
+    if (value_property == CSS_PROPERTY_CONTAINER) {
+        value = css_container_shorthand_longhand(value, prop_id, value_pool);
+        if (!value) return;
+    }
     ViewBlock* block = lam::view_as_block(span);
     CssEnum specified_direction = layout_specified_keyword(
         current_element, CSS_PROPERTY_DIRECTION, CSS_VALUE__UNDEF);
@@ -10478,8 +10495,10 @@ void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, L
         }
         case CSS_PROPERTY_CONTAIN:
         case CSS_PROPERTY_CONTAINER_TYPE:
+        case CSS_PROPERTY_CONTAINER_NAME:
         case CSS_PROPERTY_CONTENT_VISIBILITY: {
-            resolve_containment_property(lycon, block, prop_id, value);
+            // style containment applies to inline subtrees too; a principal block box is unnecessary.
+            resolve_containment_property(lycon, span, prop_id, value);
             break;
         }
         case CSS_PROPERTY_CONTAIN_INTRINSIC_WIDTH:

@@ -17,6 +17,7 @@
 void parse_json(Input* input, const char* json_string);
 Item parse_json_to_item(Input* input, const char* json_string);
 Item parse_json_to_item_strict(Input* input, const char* json_string, bool* ok);
+Item parse_json_to_item_strict(Input* input, const char* json_string, bool* ok, bool js_compat);
 // length-aware textual model dispatcher; returns false for unrelated formats.
 bool input_parse_model(Input* input, const char* source, size_t length, const char* type);
 void input_scene3d_asset(Input* input, const char* source, size_t length, const char* flavor);

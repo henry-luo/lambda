@@ -2,18 +2,28 @@
 #include "../../runtime/lambda-root-frame.hpp"
 #include "../../runtime/lambda-error.h"
 #include "../../core/lambda-decimal.hpp"
+#include "../../runtime/ast-core.hpp"
 #include "../../../lib/utf.h"
 #include "../../../lib/str.h"
+#include "../../../lib/mem.h"
+
+extern "C" int64_t mvp_lmd_truthy(Item value) {
+    TypeId type = get_type_id(value);
+    if (type == LMD_TYPE_INT || type == LMD_TYPE_FLOAT) return it2d(value) != 0 && !isnan(it2d(value));
+    if (type == LMD_TYPE_UNDEFINED) return false;
+    if (type == LMD_TYPE_DECIMAL) return !bigint_is_zero(value);
+    return is_truthy(value) == BOOL_TRUE;
+}
 
 extern "C" Item mvp_lmd_fail(int64_t kind, int64_t site) {
     static const char* messages[] = {"MVP capability error", "ReferenceError",
-        "TypeError", "RangeError", "MVP allocation failed"};
+        "TypeError", "RangeError", "MVP allocation failed", "SyntaxError"};
     static const LambdaErrorCode codes[] = {ERR_NOT_IMPLEMENTED,
         ERR_UNDEFINED_VARIABLE, ERR_TYPE_MISMATCH, ERR_INDEX_OUT_OF_BOUNDS,
-        ERR_POOL_EXHAUSTED};
+        ERR_POOL_EXHAUSTED, ERR_SYNTAX_ERROR};
     SourceLocation location = {};
     location.column = (int)site + 1;
-    if (kind < 0 || kind > LMD_MVP_MEMORY) kind = LMD_MVP_CAPABILITY;
+    if (kind < 0 || kind > LMD_MVP_SYNTAX) kind = LMD_MVP_CAPABILITY;
     char message[96];
     snprintf(message, sizeof(message), "%s at byte %lld", messages[kind], (long long)site);
     LambdaError* error = err_create_heap(codes[kind], message, &location);
@@ -84,7 +94,7 @@ extern "C" double mvp_lmd_parse_integer(String* string, int64_t radix) {
     return negative ? -result : result;
 }
 
-extern "C" double mvp_lmd_string_to_number(String* string) {
+extern "C" double mvp_lmd_parse_number(String* string, int64_t prefix) {
     Utf16Iterator iter = {(const unsigned char*)string->chars, string->len, 0, -1};
     int64_t start = -1, end = 0;
     uint16_t unit;
@@ -96,13 +106,13 @@ extern "C" double mvp_lmd_string_to_number(String* string) {
             end = iter.pos;
         }
     }
-    if (start < 0) return 0.0;
+    if (start < 0) return prefix ? NAN : 0.0;
     const char* s = string->chars + start;
     size_t n = (size_t)(end - start), i = 0;
     if (s[i] == '+' || s[i] == '-') i++;
-    if (n - i == 8 && memcmp(s + i, "Infinity", 8) == 0)
+    if ((prefix ? n - i >= 8 : n - i == 8) && memcmp(s + i, "Infinity", 8) == 0)
         return s[0] == '-' ? -INFINITY : INFINITY;
-    if (i == 0 && n >= 2 && s[0] == '0') {
+    if (!prefix && i == 0 && n >= 2 && s[0] == '0') {
         int radix = s[1] == 'x' || s[1] == 'X' ? 16 :
             s[1] == 'o' || s[1] == 'O' ? 8 : s[1] == 'b' || s[1] == 'B' ? 2 : 0;
         if (radix) {
@@ -117,15 +127,36 @@ extern "C" double mvp_lmd_string_to_number(String* string) {
     }
     if (!digits) return NAN;
     if (i < n && (s[i] == 'e' || s[i] == 'E')) {
+        size_t before_exponent = i;
         i++;
         if (i < n && (s[i] == '+' || s[i] == '-')) i++;
         size_t exponent = i;
         while (i < n && s[i] >= '0' && s[i] <= '9') i++;
-        if (i == exponent) return NAN;
+        if (i == exponent) { if (!prefix) return NAN; i = before_exponent; }
     }
-    if (i != n) return NAN;
+    if (!prefix && i != n) return NAN;
     double result;
-    return str_to_double(s, n, &result, NULL) ? result : NAN;
+    return str_to_double(s, prefix ? i : n, &result, NULL) ? result : NAN;
+}
+
+// preserve the common coercion ABI; prefix parsing shares the same scanner.
+extern "C" double mvp_lmd_string_to_number(String* string) {
+    return mvp_lmd_parse_number(string, 0);
+}
+
+extern "C" Item mvp_lmd_number_to_radix_string(double value, double radix) {
+    // ordinary String conversion always supplies radix ten; validate only the optional radix path.
+    if (radix != 10) {
+        radix = trunc(radix);
+        if (!isfinite(radix) || radix < 2 || radix > 36) return mvp_lmd_fail(LMD_MVP_RANGE, 0);
+        if (radix != 10 && isfinite(value)) {
+            // exact integers reuse the core arbitrary-radix formatter; fractional radix conversion is outside this subset.
+            if (value != trunc(value)) return mvp_lmd_fail(LMD_MVP_CAPABILITY, 0);
+            Item integer = bigint_from_double(value);
+            return item_is_error(integer) ? integer : mvp_lmd_bigint_to_string(integer, radix);
+        }
+    }
+    return mvp_lmd_number_to_string(value);
 }
 
 extern "C" Item mvp_lmd_number_to_string(double value) {
@@ -149,15 +180,108 @@ extern "C" Item mvp_lmd_number_to_fixed(double value, double digits) {
     return result ? Item{.item = s2it(result)} : mvp_lmd_fail(LMD_MVP_MEMORY, 0);
 }
 
-extern "C" Item mvp_lmd_primitive_to_string(Item value) {
+extern "C" Item mvp_lmd_primitive_to_number(Item value) {
     TypeId type = get_type_id(value);
+    if (type == LMD_TYPE_SYMBOL) return mvp_lmd_fail(LMD_MVP_TYPE, 0);
+    if (type == LMD_TYPE_MAP || type == LMD_TYPE_ARRAY || type == LMD_TYPE_FUNC || type == LMD_TYPE_ARRAY_NUM) {
+        RootFrame roots(1);
+        if (!roots.valid()) return ItemError;
+        Rooted<Item> primitive(roots, mvp_lmd_to_primitive(value, 1));
+        return item_is_error(primitive.get()) ? primitive.get() : mvp_lmd_primitive_to_number(primitive.get());
+    }
+    if (type == LMD_TYPE_INT || type == LMD_TYPE_FLOAT) return value;
+    if (type == LMD_TYPE_DECIMAL) return mvp_lmd_fail(LMD_MVP_TYPE, 0);
+    if (type == LMD_TYPE_STRING) return push_d(mvp_lmd_string_to_number(value.get_string()));
+    if (type == LMD_TYPE_NULL) return Item{.item = i2it(0)};
+    if (type == LMD_TYPE_BOOL) return Item{.item = i2it(value.bool_val)};
+    if (type == LMD_TYPE_UNDEFINED) return push_d(NAN);
+    return mvp_lmd_fail(LMD_MVP_CAPABILITY, 0);
+}
+extern "C" Item mvp_lmd_primitive_to_string(Item value, int64_t library_objects) {
+    TypeId type = get_type_id(value);
+    if (type == LMD_TYPE_SYMBOL) return mvp_lmd_fail(LMD_MVP_TYPE, 0);
     if (type == LMD_TYPE_STRING) return value;
+    if (type == LMD_TYPE_MAP || type == LMD_TYPE_ARRAY || type == LMD_TYPE_FUNC || type == LMD_TYPE_ARRAY_NUM) {
+        RootFrame roots(1);
+        if (!roots.valid()) return ItemError;
+        Rooted<Item> primitive(roots, mvp_lmd_to_primitive(value, 2, library_objects));
+        return item_is_error(primitive.get()) ? primitive.get() : mvp_lmd_primitive_to_string(primitive.get(), library_objects);
+    }
+    if (type == LMD_TYPE_DECIMAL) return mvp_lmd_bigint_to_string(value, 10);
     if (type == LMD_TYPE_INT || type == LMD_TYPE_FLOAT) return mvp_lmd_number_to_string(it2d(value));
     const char* text = type == LMD_TYPE_NULL ? "null" : type == LMD_TYPE_UNDEFINED ? "undefined" :
         type == LMD_TYPE_BOOL ? (value.bool_val ? "true" : "false") : NULL;
     if (!text) return mvp_lmd_fail(LMD_MVP_CAPABILITY, 0);
     String* result = heap_strcpy(text, strlen(text));
     return result ? Item{.item = s2it(result)} : mvp_lmd_fail(LMD_MVP_MEMORY, 0);
+}
+
+extern "C" Item mvp_lmd_bigint_to_string(Item value, double radix) {
+    if (get_type_id(value) != LMD_TYPE_DECIMAL) return mvp_lmd_fail(LMD_MVP_TYPE, 0);
+    radix = trunc(radix);
+    if (!(radix >= 2 && radix <= 36)) return mvp_lmd_fail(LMD_MVP_RANGE, 0);
+    char* bytes = bigint_to_cstring_radix(value, (int)radix);
+    if (!bytes) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
+    String* result = heap_strcpy(bytes, strlen(bytes));
+    mem_free(bytes);
+    return result ? Item{.item = s2it(result)} : mvp_lmd_fail(LMD_MVP_MEMORY, 0);
+}
+
+extern "C" Item mvp_lmd_bigint_binary(Item left, Item right, int64_t operation) {
+    RootFrame roots(2);
+    if (!roots.valid()) return ItemError;
+    Rooted<Item> a(roots, left), b(roots, right);
+    bool lb = get_type_id(left) == LMD_TYPE_DECIMAL, rb = get_type_id(right) == LMD_TYPE_DECIMAL;
+    if (lb) {
+        if (operation == OPERATOR_NEG) return bigint_neg(a.get());
+        if (operation == OPERATOR_JS_BIT_NOT) return bigint_bitwise_not(a.get());
+        if (operation == OPERATOR_JS_INCREMENT) return bigint_inc(a.get());
+        if (operation == OPERATOR_JS_DECREMENT) return bigint_dec(a.get());
+    }
+    bool equality = operation == OPERATOR_EQ || operation == OPERATOR_NE ||
+        operation == OPERATOR_JS_STRICT_EQ || operation == OPERATOR_JS_STRICT_NE;
+    bool comparison = equality || operation == OPERATOR_LT || operation == OPERATOR_LE ||
+        operation == OPERATOR_GT || operation == OPERATOR_GE;
+    if (comparison) {
+        int order = 0; bool unordered = false;
+        if (lb && rb) order = bigint_cmp(a.get(), b.get());
+        else {
+            Item other = lb ? b.get() : a.get();
+            TypeId type = get_type_id(other);
+            if (operation == OPERATOR_JS_STRICT_EQ || operation == OPERATOR_JS_STRICT_NE ||
+                    (equality && (type == LMD_TYPE_NULL || type == LMD_TYPE_UNDEFINED))) unordered = true;
+            else if (type == LMD_TYPE_STRING) {
+                Item parsed = bigint_from_string(other.get_string()->chars, other.get_string()->len);
+                if (item_is_error(parsed)) unordered = true;
+                else { if (lb) b.set(parsed); else a.set(parsed); order = bigint_cmp(a.get(), b.get()); }
+            } else {
+                double number = type == LMD_TYPE_INT || type == LMD_TYPE_FLOAT ? it2d(other) :
+                    type == LMD_TYPE_BOOL ? (double)(other.item & 1) : type == LMD_TYPE_NULL ? 0 : NAN;
+                if (type != LMD_TYPE_INT && type != LMD_TYPE_FLOAT && type != LMD_TYPE_BOOL &&
+                        type != LMD_TYPE_NULL && type != LMD_TYPE_UNDEFINED)
+                    return mvp_lmd_fail(LMD_MVP_CAPABILITY, 0);
+                unordered = isnan(number);
+                if (!unordered) order = lb ? bigint_cmp_double(a.get(), number) : -bigint_cmp_double(b.get(), number);
+            }
+        }
+        bool result = !unordered && (equality ? order == 0 : operation == OPERATOR_LT ? order < 0 :
+            operation == OPERATOR_LE ? order <= 0 : operation == OPERATOR_GT ? order > 0 : order >= 0);
+        if (operation == OPERATOR_NE || operation == OPERATOR_JS_STRICT_NE) result = !result;
+        return Item{.item = b2it(result)};
+    }
+    if (!lb || !rb) return mvp_lmd_fail(LMD_MVP_TYPE, 0);
+    if ((operation == OPERATOR_DIV || operation == OPERATOR_MOD) && bigint_is_zero(b.get()))
+        return mvp_lmd_fail(LMD_MVP_RANGE, 0);
+    if (operation == OPERATOR_JS_EXP && bigint_is_negative(b.get())) return mvp_lmd_fail(LMD_MVP_RANGE, 0);
+    // Lambda owns integer storage and arithmetic; this adapter only selects JS operations and errors.
+    static const struct { int operation; Item (*apply)(Item, Item); } operations[] = {
+        {OPERATOR_ADD, bigint_add}, {OPERATOR_SUB, bigint_sub}, {OPERATOR_MUL, bigint_mul},
+        {OPERATOR_DIV, bigint_div}, {OPERATOR_MOD, bigint_mod}, {OPERATOR_JS_EXP, bigint_pow},
+        {OPERATOR_JS_BIT_AND, bigint_bitwise_and}, {OPERATOR_JS_BIT_OR, bigint_bitwise_or},
+        {OPERATOR_JS_BIT_XOR, bigint_bitwise_xor}, {OPERATOR_JS_LSHIFT, bigint_left_shift},
+        {OPERATOR_JS_RSHIFT, bigint_right_shift}};
+    for (const auto& entry : operations) if (entry.operation == operation) return entry.apply(a.get(), b.get());
+    return mvp_lmd_fail(LMD_MVP_TYPE, 0);
 }
 
 extern "C" Item mvp_lmd_string_concat(Item left, Item right) {
@@ -179,9 +303,11 @@ extern "C" int64_t mvp_lmd_string_compare(Item left, Item right) {
 }
 
 extern "C" Item mvp_lmd_string_at(Item value, double index, int64_t mode) {
-    uint16_t unit = 0;
-    bool present = mode == LMD_STRING_FROM_CODE;
-    if (present) unit = (uint16_t)(uint32_t)index;
+    uint32_t unit = 0;
+    bool present = mode == LMD_STRING_FROM_CODE || mode == LMD_STRING_FROM_POINT;
+    if (mode == LMD_STRING_FROM_POINT && !(index >= 0 && index <= 0x10ffff && index == trunc(index)))
+        return mvp_lmd_fail(LMD_MVP_RANGE, 0);
+    if (present) unit = mode == LMD_STRING_FROM_POINT ? (uint32_t)index : (uint16_t)(uint32_t)index;
     else {
         String* string = value.get_string();
         index = isnan(index) ? 0 : trunc(index);
@@ -189,8 +315,9 @@ extern "C" Item mvp_lmd_string_at(Item value, double index, int64_t mode) {
             if (string->is_ascii) { unit = (uint8_t)string->chars[(uint32_t)index]; present = true; }
             else {
                 Utf16Iterator iter = {(const unsigned char*)string->chars, string->len, 0, -1};
+                uint16_t decoded = 0;
                 for (uint64_t i = 0; i <= (uint64_t)index; i++) {
-                    present = utf16_iterator_next(&iter, &unit);
+                    present = utf16_iterator_next(&iter, &decoded); unit = decoded;
                     if (!present) break;
                 }
             }
@@ -238,6 +365,36 @@ extern "C" Item mvp_lmd_array_resize(Item owner, int64_t length) {
     return held.get();
 }
 
+static Item flatten_into(Item output, Item source, double depth, int nesting) {
+    // nested arrays remain roots across destination growth; holes have no flattened element.
+    if (nesting > 512) return mvp_lmd_fail(LMD_MVP_RANGE, 0);
+    RootFrame roots(2);
+    if (!roots.valid()) return ItemError;
+    Rooted<Item> target(roots, output), input(roots, source);
+    int64_t length = source.array->length;
+    for (int64_t i = 0; i < length; i++) {
+        Item value = input.get().array->items[i];
+        if (value.item == ITEM_JS_DELETED_SENTINEL) continue;
+        Item result;
+        if (depth > 0 && get_type_id(value) == LMD_TYPE_ARRAY)
+            result = flatten_into(target.get(), value, depth - 1, nesting + 1);
+        else {
+            if (target.get().array->length >= UINT32_MAX) return mvp_lmd_fail(LMD_MVP_RANGE, 0);
+            result = mvp_lmd_array_store(target.get(), target.get().array->length, value);
+        }
+        if (item_is_error(result)) return result;
+    }
+    return target.get();
+}
+extern "C" Item mvp_lmd_array_flatten(Item source, double depth) {
+    RootFrame roots(1);
+    if (!roots.valid()) return ItemError;
+    Rooted<Item> input(roots, source);
+    Item output = mvp_lmd_array_new(0);
+    if (item_is_error(output)) return output;
+    return flatten_into(output, input.get(), isnan(depth) ? 0 : fmax(0, trunc(depth)), 0);
+}
+
 extern "C" double mvp_lmd_number_pow(double base, double exponent) {
     if (exponent == 0) return 1;
     if (isnan(exponent) || isnan(base)) return NAN;
@@ -246,6 +403,7 @@ extern "C" double mvp_lmd_number_pow(double base, double exponent) {
 }
 
 extern "C" int64_t mvp_lmd_string_key(String* s, int64_t typed) {
+    if (property_key_requires_identity(s)) return -2;
     if (s->len == 6 && memcmp(s->chars, "length", 6) == 0) return -1;
     if (typed) {
         if (s->len == 4 && memcmp(s->chars, "fill", 4) == 0) return -4;

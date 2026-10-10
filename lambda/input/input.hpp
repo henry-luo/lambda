@@ -113,6 +113,8 @@ TypeMap* type_tree_map_root(Input* input, const JsClassMeta* js_meta = nullptr);
 // laid out for `value_type` (D3.4.5 through the tree); NULL when declined.
 TypeMap* type_tree_retype_field(Input* input, TypeMap* parent, const ShapeEntry* field,
                                 TypeId value_type, const TypeMapRetypePlan** plan = NULL);
+// D3.4.3v5: data-attribute transitions retain the field contract and payload offsets.
+TypeMap* type_tree_reflag_field(Input* input, TypeMap* parent, const ShapeEntry* field, uint8_t flags);
 // Boundary admission uses the same bounded tree with the full field contract (D3.4.5).
 TypeMap* type_tree_retype_contract(Input* input, TypeMap* parent, const ShapeEntry* field,
                                   Type* contract);
