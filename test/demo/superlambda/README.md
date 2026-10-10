@@ -15,6 +15,12 @@ the red λ finish flag. A gold checkpoint halfway through saves your respawn
 position. Enemy contact, falling, and running out of time cost a life; you have
 three lives and 240 seconds. Coins and defeated enemies survive a lost life.
 
+Click **Auto Play** to watch a simple player walk right and jump when it sees
+an obstacle, enemy, or gap ahead. It uses ordinary movement and collision rules,
+collects coins, saves the checkpoint, and can reach the finish. Pause/resume
+preserves Auto Play; moving or jumping takes control, and restart starts a
+manual game. The finish and game-over screens also offer Auto Play.
+
 | Control | Action |
 | --- | --- |
 | Left / Right, A / D | Hold to move |
@@ -50,7 +56,7 @@ diff -u test/demo/superlambda/superlambda_test.txt temp/superlambda_test.actual.
   --event-result temp/superlambda_course_result.json
 ```
 
-The 48 rules assertions cover physics, short taps, landing, walls, head bumps,
+The 56 rules assertions cover physics, short taps, landing, walls, head bumps,
 coins, patrols, stomps, damage, checkpoint respawns, timer expiry, and a complete
 traversal using ordinary controls. The interactive replay checks keyboard
 press/release, pointer controls, pause, restart, sustained animation, and window
@@ -58,6 +64,9 @@ close. It is registered in `test/ui/superlambda_smoke.json`.
 The course replay reaches the checkpoint and finish flag, then starts another
 round. Its waits account for the event harness's 60 Hz input-task turns as well
 as explicit time advances.
+
+`test/ui/superlambda_autoplay.json` additionally runs the automatic player to
+the finish and checks pause/resume, manual takeover, restart, and close.
 
 Radiant resolves both keyboard phases against live focus or the document body,
 so **S12.1.3** redraws cannot swallow a release after retiring the focused node.

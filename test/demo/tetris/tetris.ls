@@ -35,10 +35,10 @@ fn mode_title(mode) {
   else "Game over."
 }
 
-view <tetris_app> state game: rules.new_game(42), falling_ms: 0 {
+view <tetris_app> state game: rules.new_game(42), falling_ms: 0, auto_plan: null {
   let active = piece_indices(game.piece)
   let ghost = piece_indices(rules.landing(game.board, game.piece));
-  <main id:"tetris", class:"game", tabindex:"0", 'data-mode':game.mode,
+  <main id:"tetris", class:"game", tabindex:"0", 'data-mode':game.mode, 'data-autoplay':string(game.autoplay),
     'data-x':string(game.piece.x), 'data-y':string(game.piece.y),
     'data-rotation':string(game.piece.rotation), 'data-kind':string(game.piece.kind),
     <header
@@ -49,7 +49,7 @@ view <tetris_app> state game: rules.new_game(42), falling_ms: 0 {
     <div class:"play-layout",
       <section class:"board-panel",
         <div class:"board-heading", <span "THE STACK">
-          <span class:"mode-label", if (game.mode == "playing") "LIVE" else upper(game.mode)>>
+          <span class:"mode-label", if (game.mode == "playing") (if (game.autoplay) "AUTO PLAY" else "LIVE") else upper(game.mode)>>
         <div class:"board-wrap",
           <div id:"board", class:"board", role:"img", 'aria-label':"Tetris board, 10 columns by 20 rows",
             for (i in 0 to 199) {
@@ -69,6 +69,8 @@ view <tetris_app> state game: rules.new_game(42), falling_ms: 0 {
               <button id:"overlay-action", class:(if (game.mode == "over") "restart" else "pause"),
                 if (game.mode == "over") "Play again [R]"
                 else if (game.mode == "ready") "Start game [Enter]" else "Resume [P]">
+              if (game.mode == "ready" or game.mode == "over")
+                <button id:"auto-play", class:"auto", "Auto Play">
             >
           }
         >
@@ -105,19 +107,28 @@ view <tetris_app> state game: rules.new_game(42), falling_ms: 0 {
   >
 }
 on click(evt) {
-  let command = dom.get_attribute(evt.target, "class")
-  if (contains(["left", "right", "down", "cw", "ccw", "drop", "hold", "pause", "restart"], command)) {
+  let button = dom.closest(evt.target, "button")
+  let command = dom.get_attribute(button, "class")
+  if (contains(["left", "right", "down", "cw", "ccw", "drop", "hold", "pause", "restart", "auto"], command)) {
     game = rules.action(game, command)
-    if (contains(RESET_GRAVITY, command)) { falling_ms = 0 }
+    if (command != "pause") {
+      game = {*:game, autoplay: command == "auto"}
+      auto_plan = null
+    }
+    if (contains(RESET_GRAVITY, command) or command == "auto") { falling_ms = 0 }
   }
 }
 on gravity(evt) {
   if (game.mode == "playing") {
     falling_ms = falling_ms + 100
-    let interval = rules.gravity_ms(game.level)
+    let interval = if (game.autoplay) 200 else rules.gravity_ms(game.level)
     if (falling_ms >= interval) {
       falling_ms = falling_ms - interval
-      game = rules.action(game, "tick")
+      if (game.autoplay) {
+        let next = rules.auto_step(game, auto_plan)
+        game = next.game
+        auto_plan = next.plan
+      } else { game = rules.action(game, "tick") }
     }
   }
 }

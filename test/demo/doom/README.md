@@ -45,6 +45,12 @@ In top view, W/A/S/D pans, Q/E rotates, R/F or the wheel zooms, and dragging pan
 Use the map and difficulty selectors, then Load map, to visit any of the nine
 bundled maps at one of five difficulty levels. Restart preserves the active
 difficulty; episode transitions preserve difficulty and inventory.
+Click **Auto Play** on the start screen for a simple demo player. It seeks
+visible enemies and pickups, aims and fires, tries doors, and turns away from
+blocked movement. It uses the same fixed-step simulation and collision rules;
+it has no route planner and can get stuck or die. Pause/resume preserves the
+demo. Movement or firing takes control, and restart starts a manual game.
+Auto Play leaves the mouse free while it runs.
 Temporary results and captures go in `./temp/doom/`.
 
 Native sound currently uses AVAudioPlayer on macOS. Other hosts report an absent
@@ -60,6 +66,14 @@ natural enemy damage through death/restart, every episode map and spectator inpu
   --event-result temp/doom/exit-result.json
 ./test/test_radiant_view_gtest.exe --gtest_filter='RadiantViewTest.Doom*'
 ```
+
+`tests/autoplay_test.ls` checks automatic movement, combat, wall steering,
+door-use edges, fixed-step updates, and pause/restart behavior.
+`replay/autoplay.json` checks the start button, progress, pause/resume, window
+blur, manual takeover, and close through the native view using the same
+`--event-file` command. The focus guard runs in event handlers (**S12.1.3**),
+preserving play between game buttons so menu clicks produce just one
+pause/resume transition.
 
 `tools/generate_replay.py` derives exit/death checkpoint values from the same
 fixed-step simulation and recorded control routes. These replays set

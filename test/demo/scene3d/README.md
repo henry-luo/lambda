@@ -25,6 +25,10 @@ orbit, tilt, zoom, Top / Side presets and Reset view. Focus the scene for arrow
 key panning, Shift-arrow orbiting, `+` / `-` zoom, `R` reset and Space playback.
 `ringworld.js` reuses unmodified OrbitControls for camera input; rendering stays
 on the native scene path. Camera distance, tilt and pan have bounded limits.
+Auto Play runs a repeating 24-second camera tour with orbit, pan, tilt and zoom,
+starting from the current view. Stop Auto Play holds the view; dragging, scrolling,
+camera keys or a camera toolbar button also stop the tour for manual control.
+Pause / Play and Restart continue to control the planet/moon timeline separately.
 All demo resources are local to this directory; viewing needs no network.
 
 For PNG output with the full native host:

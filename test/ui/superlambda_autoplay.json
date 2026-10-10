@@ -1,0 +1,159 @@
+{
+  "name": "superlambda Auto Play, pause/resume, manual takeover and close",
+  "html": "test/demo/superlambda/superlambda.ls",
+  "viewport": {
+    "width": 1024,
+    "height": 800
+  },
+  "input_turn_ms": 0,
+  "events": [
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#superlambda"
+      },
+      "attribute": "data-mode",
+      "equals": "ready"
+    },
+    {
+      "type": "assert_visible",
+      "target": {
+        "selector": "#auto-play"
+      },
+      "visible": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#auto-play"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#superlambda"
+      },
+      "attribute": "data-autoplay",
+      "equals": "true"
+    },
+    {
+      "type": "advance_time",
+      "ms": 1000,
+      "steps": 25
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#superlambda"
+      },
+      "attribute": "data-moving",
+      "equals": "true"
+    },
+    {
+      "type": "key_press",
+      "key": "p"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#superlambda"
+      },
+      "attribute": "data-mode",
+      "equals": "paused"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#superlambda"
+      },
+      "attribute": "data-autoplay",
+      "equals": "true"
+    },
+    {
+      "type": "advance_time",
+      "ms": 1000,
+      "steps": 25
+    },
+    {
+      "type": "key_press",
+      "key": "p"
+    },
+    {
+      "type": "advance_time",
+      "ms": 40000,
+      "steps": 1000
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#superlambda"
+      },
+      "attribute": "data-mode",
+      "equals": "won"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#superlambda"
+      },
+      "attribute": "data-checkpoint",
+      "equals": "true"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#auto-play"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#superlambda"
+      },
+      "attribute": "data-autoplay",
+      "equals": "true"
+    },
+    {
+      "type": "advance_time",
+      "ms": 400,
+      "steps": 10
+    },
+    {
+      "type": "key_down",
+      "key": "ArrowLeft"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#superlambda"
+      },
+      "attribute": "data-autoplay",
+      "equals": "false"
+    },
+    {
+      "type": "key_up",
+      "key": "ArrowLeft"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".control-restart"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#superlambda"
+      },
+      "attribute": "data-autoplay",
+      "equals": "false"
+    },
+    {
+      "type": "window_close"
+    },
+    {
+      "type": "assert_window_closed",
+      "closed": true
+    }
+  ]
+}

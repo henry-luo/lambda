@@ -84,7 +84,7 @@ pub fn new_game(seed) {
   {board: empty_board(), piece: spawn(fresh.bag[0]),
     queue: slice(fresh.bag, 1, 7), seed: fresh.seed,
     held: -1, can_hold: true, score: 0, lines: 0, level: 1,
-    mode: "ready", last_clear: 0}
+    mode: "ready", last_clear: 0, autoplay: false}
 }
 fn next_piece(game) {
   let next = refill({*:game, piece: spawn(game.queue[0]),
@@ -100,16 +100,18 @@ pub fn clear_rows(board) {
   let cleared_count = HEIGHT - len(rows)
   {board: [for (i in 0 to (cleared_count * WIDTH - 1)) 0, for (row in rows) *row], count: cleared_count}
 }
-fn occupied(piece, x, y) => len([for (cell in cells(piece)
-  where cell[0] == x and cell[1] == y) cell]) > 0
+// Locking and Auto Play previews share one merge of the four occupied cells.
+fn board_with_piece(board, piece) {
+  let indices = [for (cell in cells(piece)) cell[1] * WIDTH + cell[0]];
+  [for (i in 0 to (WIDTH * HEIGHT - 1))
+    if (contains(indices, i)) piece.kind + 1 else board[i]]
+}
 pub fn lock(game) {
   // A kicked piece above the ceiling cannot silently lose its hidden cells.
   if (len([for (cell in cells(game.piece) where cell[1] < 0) cell]) > 0) {
     {*:game, mode: "over"}
   } else {
-    let merged = [for (i in 0 to (WIDTH * HEIGHT - 1))
-      if (occupied(game.piece, i % WIDTH, i div WIDTH)) game.piece.kind + 1
-      else game.board[i]]
+    let merged = board_with_piece(game.board, game.piece)
     let cleared = clear_rows(merged)
     let lines = game.lines + cleared.count
     next_piece({*:game, board: cleared.board, lines: lines,
@@ -133,7 +135,8 @@ fn hold(game) {
 }
 pub fn gravity_ms(level) => max(100, 700 - (level - 1) * 65)
 pub fn action(game, command) {
-  if (command == "restart") {*:new_game(game.seed), mode: "playing"}
+  if (command == "restart" or command == "auto")
+    {*:new_game(game.seed), mode: "playing", autoplay: command == "auto"}
   else if (command == "pause") {
     if (game.mode == "playing") {*:game, mode: "paused"}
     else if (game.mode == "ready" or game.mode == "paused") {*:game, mode: "playing"}
@@ -153,4 +156,35 @@ pub fn action(game, command) {
   }
   else if (command == "hold") hold(game)
   else game
+}
+
+// Prefer low, even stacks without buried holes, rewarding completed rows.
+fn placement_cost(game, piece) {
+  let placed = clear_rows(board_with_piece(game.board, landing(game.board, piece)))
+  let heights = [for (x in 0 to (WIDTH - 1))
+    max([0, for (y in 0 to (HEIGHT - 1) where placed.board[y * WIDTH + x] != 0) HEIGHT - y])]
+  let holes = len([for (x in 0 to (WIDTH - 1), y in 0 to (HEIGHT - 1)
+    where y >= HEIGHT - heights[x] and placed.board[y * WIDTH + x] == 0) y])
+  sum(heights) + 8 * holes + 2 * sum([for (x in 1 to (WIDTH - 1)) abs(heights[x] - heights[x - 1])]) -
+    12 * placed.count + (if (not fits(placed.board, spawn(game.queue[0]))) 10000 else 0)
+}
+pub fn auto_plan(game) {
+  let choices = [for (turns in 0 to 3, x in -3 to (WIDTH - 1),
+    let rotated = reduce([game.piece, *[for (i in 1 to turns) i]],
+      (piece, unused) => rotate_piece(game.board, piece, 1)),
+    let candidate = {*:rotated, x: x}
+    // Every intermediate horizontal position must be reachable by normal moves.
+    where all([for (cx in min(x, rotated.x) to max(x, rotated.x)) fits(game.board, {*:rotated, x: cx})]))
+    {turns: turns, x: x, cost: placement_cost(game, candidate) + 0.01 * (turns + abs(x - rotated.x))}]
+  sort(choices, (choice) => choice.cost)[0]
+}
+pub fn auto_step(game, previous_plan = null) {
+  if (game.mode != "playing") {game: game, plan: previous_plan}
+  else {
+    let plan = previous_plan or auto_plan(game)
+    let command = if (plan == null) "drop" else if (plan.turns > 0) "cw"
+      else if (game.piece.x < plan.x) "right" else if (game.piece.x > plan.x) "left" else "drop"
+    {game: action(game, command), plan: if (command == "drop") null
+      else if (command == "cw") {*:plan, turns: plan.turns - 1} else plan}
+  }
 }
