@@ -2806,21 +2806,25 @@ static void set_corner_radius_values(LayoutContext* lycon, Corner* radius, int c
                                      const CssValue* expression_x = nullptr,
                                      const CssValue* expression_y = nullptr) {
     if (!radius || corner_index < 0 || corner_index >= 4) return;
-    radius->horizontal[corner_index] = radius_x;
-    radius->vertical[corner_index] = radius_y;
-    radius->horizontal_percent[corner_index] = percent_x;
-    radius->vertical_percent[corner_index] = percent_y;
-    radius->specificities[corner_index] = specificity;
-    if ((expression_x || expression_y) && !radius->expressions) {
+    // CSSOM and later paints need the computed radii before percentage/overlap resolution.
+    if (!radius->expressions) {
         radius->expressions = lam::up((CornerExpressions*)pool_calloc(layout_prop_pool(lycon), sizeof(CornerExpressions)));
         if (radius->expressions) {
             radius->expressions->computed = *radius;
             radius->expressions->computed.expressions = nullptr;
         }
     }
+    // update the paint and computed copies through one shape; the snapshot has no nested owner.
+    Corner* targets[] = {radius, radius->expressions ? &radius->expressions->computed : nullptr};
+    for (Corner* target : targets) {
+        if (!target) continue;
+        target->horizontal[corner_index] = radius_x;
+        target->vertical[corner_index] = radius_y;
+        target->horizontal_percent[corner_index] = percent_x;
+        target->vertical_percent[corner_index] = percent_y;
+        target->specificities[corner_index] = specificity;
+    }
     if (radius->expressions) {
-        set_corner_radius_values(lycon, &radius->expressions->computed, corner_index,
-            radius_x, percent_x, radius_y, percent_y, specificity);
         radius->expressions->horizontal[corner_index] = lam::up(expression_x);
         radius->expressions->vertical[corner_index] = lam::up(expression_y);
     }
@@ -8592,8 +8596,7 @@ CssEnum logical_inline_direction(DomElement* element) {
     return CSS_VALUE_LTR;
 }
 
-static int css_logical_corner_index(CssPropertyCode property,
-                                    DomElement* element) {
+int css_logical_corner_index(CssPropertyCode property, DomElement* element) {
     if (!element) return -1;
     CssEnum specified = layout_specified_keyword(
         element, CSS_PROPERTY_DIRECTION, CSS_VALUE__UNDEF);

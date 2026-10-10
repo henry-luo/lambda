@@ -1,0 +1,11 @@
+{
+  "name":"inline flex intrinsic width includes SVG and gaps",
+  "html":"test/ui/dtna/flex_icon_contracts.html",
+  "viewport":{"width":500,"height":150},
+  "events":[
+    {"type":"assert_rect","target":{"selector":"#svg-button"},"width":94,"height":32,"tolerance":0.2},
+    {"type":"assert_rect","target":{"selector":"#span-button"},"width":94,"height":32,"tolerance":0.2},
+    {"type":"assert_rect","target":{"selector":"#svg-div"},"width":94,"height":32,"tolerance":0.2},
+    {"type":"assert_rect","target":{"selector":"#svg-button svg"},"width":14,"height":14,"tolerance":0.2}
+  ]
+}

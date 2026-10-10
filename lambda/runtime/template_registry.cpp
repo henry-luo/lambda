@@ -627,6 +627,17 @@ static Item invoke_template(TemplateEntry* tmpl, Item target) {
     return fn((Context*)context, target);
 }
 
+static Item invoke_recorded_template(TemplateEntry* tmpl, Item target) {
+    uint64_t invocation_start = render_map_invocation_begin();
+    Item result = invoke_template(tmpl, target);
+    if (tmpl->template_ref) {
+        render_map_record_invocation(target, tmpl->template_ref, result,
+                                     ItemNull, -1, invocation_start);
+        render_map_record_source_path(target, tmpl->template_ref);
+    }
+    return result;
+}
+
 Item fn_apply1(Item target) {
     GUARD_ERROR1(target);
 
@@ -653,15 +664,7 @@ Item fn_apply1(Item target) {
         render_map_set_source_doc_root(target);
     }
 
-    Item result = invoke_template(tmpl, target);
-
-    // record source→result mapping in the render map for observer-based reconciliation
-    if (tmpl->template_ref) {
-        render_map_record(target, tmpl->template_ref, result, ItemNull, -1);
-        render_map_record_source_path(target, tmpl->template_ref);
-    }
-
-    return result;
+    return invoke_recorded_template(tmpl, target);
 }
 
 Item fn_apply2(Item target, Item options) {
@@ -721,13 +724,5 @@ Item fn_apply2(Item target, Item options) {
         render_map_set_source_doc_root(target);
     }
 
-    Item result = invoke_template(tmpl, target);
-
-    // record source→result mapping in the render map for observer-based reconciliation
-    if (tmpl->template_ref) {
-        render_map_record(target, tmpl->template_ref, result, ItemNull, -1);
-        render_map_record_source_path(target, tmpl->template_ref);
-    }
-
-    return result;
+    return invoke_recorded_template(tmpl, target);
 }

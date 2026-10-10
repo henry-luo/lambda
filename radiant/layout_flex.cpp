@@ -3488,6 +3488,7 @@ void align_items_main_axis(FlexContainerLayout* flex_layout, FlexLineInfo* line)
         line, flex_main_axis(flex_layout), 0.0f);
 
     int auto_margin_count = flex_line_auto_margin_count(flex_layout, line, main_axis);
+    bool reversed = flex_main_axis_reversed(flex_layout);
 
     float current_pos = 0.0f;
     float spacing = 0.0f;
@@ -3516,10 +3517,11 @@ void align_items_main_axis(FlexContainerLayout* flex_layout, FlexLineInfo* line)
         if (!item) continue;
 
         LayoutAxisRefs main_refs(item, main_axis);
-        bool start_auto = main_refs.margin_start_is_auto();
-        bool end_auto = main_refs.margin_end_is_auto();
-        float margin_start = main_refs.margin_start();
-        float margin_end = main_refs.margin_end();
+        // positioning runs from main-start; physical margins reverse with that axis.
+        bool start_auto = reversed ? main_refs.margin_end_is_auto() : main_refs.margin_start_is_auto();
+        bool end_auto = reversed ? main_refs.margin_start_is_auto() : main_refs.margin_end_is_auto();
+        float margin_start = reversed ? main_refs.margin_end() : main_refs.margin_start();
+        float margin_end = reversed ? main_refs.margin_start() : main_refs.margin_end();
         if (auto_margin_count > 0) {
             if (start_auto) margin_start = auto_margin_size;
             if (end_auto) margin_end = auto_margin_size;
@@ -3871,16 +3873,7 @@ static void flex_set_axis_position(ViewElement* item, float position,
 
 void set_main_axis_position(ViewElement* item, float position, FlexContainerLayout* flex_layout) {
     LayoutAxis axis = flex_main_axis(flex_layout);
-    bool direction_reverse = flex_layout->direction == CSS_VALUE_ROW_REVERSE ||
-        flex_layout->direction == CSS_VALUE_COLUMN_REVERSE;
-    bool vertical_rl_block_axis = flex_layout->writing_mode == WM_VERTICAL_RL &&
-        axis == LAYOUT_AXIS_X;
-    bool row_rtl = (flex_layout->direction == CSS_VALUE_ROW ||
-                    flex_layout->direction == CSS_VALUE_ROW_REVERSE) &&
-        flex_layout->text_direction == TD_RTL;
-    bool reverse = direction_reverse != vertical_rl_block_axis;
-    if (row_rtl) reverse = !reverse;
-    flex_set_axis_position(item, position, axis, reverse,
+    flex_set_axis_position(item, position, axis, flex_main_axis_reversed(flex_layout),
                            flex_layout->main_axis_size,
                            flex_main_axis_size(item, flex_layout));
 }
@@ -4068,7 +4061,10 @@ static void determine_hypothetical_cross_sizes(LayoutContext* lycon, FlexContain
             ViewElement* item = lam::view_as_element(line->items[j]);
             if (!item) continue;
 
-            if (item->form_control()) {
+            // HTML buttons size their flow label at the flexed width; native
+            // control metrics cannot represent wrapped or shifted descendants.
+            if (item->form_control() &&
+                (!is_horizontal || layout_form_control_has_native_intrinsic_size(item))) {
                 ViewBlock* item_block = lam::view_as_block(item);
                 IntrinsicSize form_size = layout_measure_form_control(lycon, item_block,
                                                                       lycon->available_space);

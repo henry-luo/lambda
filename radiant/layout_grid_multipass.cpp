@@ -257,6 +257,8 @@ void layout_grid_content(LayoutContext* lycon, ViewBlock* grid_container) {
     LayoutViewScope view_scope(lycon);
     lycon->elmt = lam::up(static_cast<DomNode*>(grid_container));
     lycon->view = lam::up(static_cast<View*>(grid_container));
+    // nested grids bypass block layout; generated boxes must precede item collection.
+    layout_materialize_pseudo_content(lycon, grid_container);
     // CACHE LOOKUP: Check if we have a cached result for these constraints
     // This avoids redundant layout for repeated measurements with same inputs
     DomElement* dom_elem = lam::dom_require<DOM_NODE_ELEMENT>(grid_container);
@@ -814,7 +816,14 @@ static void layout_grid_item_final_content_multipass(LayoutContext* lycon, ViewB
     line_init(lycon, content_x_offset, content_x_offset + content_width);
     lycon->line.right += 0.5f;
     // Check if this grid item is itself a grid or flex container (nested)
-    if (grid_item->display.inner == CSS_VALUE_GRID) {
+    if (layout_is_svg_viewport(grid_item->tag())) {
+        // SVG children are not flow items; only foreignObject establishes HTML layout.
+        layout_svg_foreign_objects(lycon, grid_item->as_element());
+        grid_item->content_width = content_width;
+        grid_item->content_height = content_height;
+        log_leave();
+        return;
+    } else if (grid_item->display.inner == CSS_VALUE_GRID) {
         log_info(">>> NESTED GRID DETECTED: item=%p (%s)", grid_item, grid_item->node_name());
         // Recursively handle nested grid
         {

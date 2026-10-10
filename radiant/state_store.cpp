@@ -1171,8 +1171,8 @@ extern "C" void state_store_refresh_editing_selection_shadow(DocState* state) {
 
     EditingSelection* shadow = &state->sel;
     if (shadow->kind == EDIT_SEL_TEXT_CONTROL && shadow->control &&
-        tc_is_text_control(shadow->control) &&
-        focus_get(state) == static_cast<View*>(shadow->control)) {
+        focus_get(state) == static_cast<View*>(shadow->control) &&
+        tc_is_text_control(shadow->control)) {
         // unrelated DOM mutations resync document ranges; focused text controls
         // keep their separate selection model until focus or form selection moves.
         return;
@@ -1782,15 +1782,15 @@ extern "C" void selection_refresh_presentation(DocState* state) {
 
     state_store_refresh_editing_selection_shadow(state);
     DomSelection* ds = state->dom_selection;
-    if (!ds) return;
-
     DomBoundary anchor = dom_selection_anchor_boundary(ds);
     DomBoundary focus = dom_selection_focus_boundary(ds);
-    if (ds->range_count == 0 || !anchor.node) {
+    // retiring a control can leave no document selection; its previous caret must disappear too.
+    if (!ds || ds->range_count == 0 || !anchor.node) {
+        bool presentation_changed = presentation->caret_visible || state->selection_layout_dirty;
         presentation->caret_visible = false;
         presentation->caret_blink_time = 0;
         state->selection_layout_dirty = false;
-        state->needs_repaint = true;
+        if (presentation_changed) state->needs_repaint = true;
         return;
     }
 
@@ -2994,6 +2994,13 @@ static uint32_t doc_state_prune_stale_transient_owners(DocState* state, DomNode*
             memset(&state->drag_drop->drop_end, 0, sizeof(state->drag_drop->drop_end));
             changed++;
         }
+    }
+    if (state->sel.kind == EDIT_SEL_TEXT_CONTROL && state->sel.control &&
+        !view_tree_contains_view(root, static_cast<View*>(state->sel.control))) {
+        // blurred controls can still own selection; release that pointer before subtree retirement.
+        state_store_refresh_editing_selection_shadow(state);
+        selection_refresh_presentation(state);
+        changed++;
     }
     if (state->active_text_control && !view_tree_contains_view(root, static_cast<View*>(state->active_text_control))) {
         state->active_text_control = NULL;

@@ -1,0 +1,34 @@
+<!doctype html>
+<style>
+#owner { pointer-events: none }
+#override { pointer-events: auto }
+.unrelated:active { color:red }
+.cover { position:relative; display:inline-block }
+.cover:after { content:""; position:absolute; inset:0; pointer-events:none }
+.loading>.cover:after { pointer-events:auto }
+</style>
+<div id="owner"><button id="inherited">Inherited</button><button id="override">Override</button></div>
+<output id="observed"></output>
+<div id="idle-owner"><div class="cover"><button id="idle">Idle</button></div></div>
+<div id="blocked-owner" class="loading"><div class="cover"><button id="blocked">Blocked</button></div></div>
+<button id="swap">Swap loading owners</button>
+<output id="clicked">0</output>
+<output id="pseudo-values"></output>
+<script>
+document.getElementById('override').addEventListener('click', () => {
+    document.getElementById('owner').style.pointerEvents = 'auto';
+    document.getElementById('observed').textContent = getComputedStyle(document.getElementById('inherited')).pointerEvents;
+});
+for (const id of ['idle','blocked']) {
+    document.getElementById(id).addEventListener('click', () => {
+        document.getElementById('clicked').textContent = String(Number(document.getElementById('clicked').textContent) + 1);
+    });
+}
+document.getElementById('swap').addEventListener('click', () => {
+    document.getElementById('idle-owner').className = 'loading';
+    document.getElementById('blocked-owner').className = '';
+    document.getElementById('pseudo-values').textContent =
+        getComputedStyle(document.querySelector('#idle-owner .cover'),'::after').pointerEvents + ':' +
+        getComputedStyle(document.querySelector('#blocked-owner .cover'),'::after').pointerEvents;
+});
+</script>

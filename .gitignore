@@ -65,6 +65,7 @@ yarn-debug.log*
 yarn-error.log*
 package-lock.json
 !test/lambda/graph/mermaid/reference/package-lock.json
+!test/ui/dtna_reference/app/package-lock.json
 yarn.lock
 pnpm-lock.yaml
 .npm

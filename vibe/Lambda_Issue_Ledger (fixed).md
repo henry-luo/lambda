@@ -2866,3 +2866,65 @@ and explicit resource-error probe. `test_js_bt_regex_gtest` passes all 50
 matcher tests, including all three anti-DoS budget tests.
 
 ---
+
+### A.15 UI package engine regressions
+
+<a id="ui-4-r"></a>**UI-4-R · Native form activation used retired nodes after author redraws · FIXED 2026-10-10**
+
+Clicking a nested Button label dispatched the author handler, which regenerated
+its containing form before physical submit/reset dispatch. The author-only seam
+did not propagate the replacement target. Nested reset dispatch could also
+regenerate the form before the outer UA procedure's reset continuation finished.
+
+`radiant/event.cpp` now carries the rebuilt target, including a null target for
+removal, into physical click defaults. Author-only settling uses the same target
+resolution helper as the behavior seam. Retransformation defers while an outer
+procedural handler context remains active, so its native continuation completes
+before retirement. Existing dispatch ordering is **ES25/ES26**; presentation
+remains functional under **S12.1.3**. No formal ruling changes.
+
+The independent `test/ui/dtna/form_activation_rebind.json` improves from 4/8 to
+8/8 assertions on both execution tiers (**D8.1.1v17**), covering nested text hits,
+author click/form redraws, submit cancellation, retained edits and actual reset.
+Button's fixture passes all 64 assertions per tier. Logs are under
+`temp/ui_dtna/button_increment/`; aggregate results are recorded separately.
+
+<a id="ui-3-r"></a>**UI-3-R · Active recascade erased borrowed generated styles and live pseudo reads retained vanished rules · FIXED 2026-10-10**
+
+An unrelated `:active` rule made a Spin idle-content click fail: pseudo-state
+recascade cleared `::after`'s borrowed declaration tree and matched the generated
+box as authored DOM. Its `pointer-events:none` disappeared between native down/
+up, so the transparent veil intercepted the click. Removing that unrelated rule
+made the same complete-stylesheet probe pass; no widget rule needed changing.
+
+`radiant/css_cascade.cpp` now excludes generated boxes from authored stylesheet
+matching and preserves their borrowed snapshots during clear traversal;
+`cmd_layout.cpp` follows the same rule. Layout rebinds to the host's replacement
+pseudo tree. Per-element CSSOM recascade replaces the host pseudo trees as well,
+discarding branches that no longer match while retained generated boxes keep
+their retired borrow until layout (**D4.5.1v4**). The property table exposes
+`pointer-events` through its shared inherited-declaration serializer.
+
+`test/ui/dtna/pointer_events_cssom_contracts.json` passes ten assertions, including
+live ancestor-class swaps and synchronous pseudo values. The complete-stylesheet
+probe improves from 0/2 to 2/2 clicks; Spin passes 41 assertions on each execution
+tier (**D8.1.1v17**). Evidence is in `temp/ui_dtna/spin_increment/`; full aggregate
+reruns remain separate gates. No formal semantics or design ruling changes.
+
+<a id="ui-2-r"></a>**UI-2-R · Non-stretch column flex height measurement subtracted decorations twice · FIXED 2026-10-10**
+
+The intrinsic width query had already converted max-content width to content
+width. The non-stretch column branch then passed it through a shared
+border-box clamp/subtraction, removing horizontal padding/borders a second
+time. Text wrapped during height measurement, while final layout placed one
+line and retained the larger measured height.
+
+`radiant/layout_flex_measurement.cpp` now restores a border-box budget with
+`layout_border_size_from_content_box` before that shared conversion. The
+unchanged `test/ui/dtna/flex_strut_contracts.json` passes all 8 assertions,
+including both small-font items at both viewport widths. The saved original
+binary passed 2/8, the parent-font correction passed 4/8, and the sizing fix
+passes 8/8. Independent Chromium/source/font evidence remains under
+`temp/ui_dtna/tag_increment/browser_strut.json`; verification is in
+`temp/ui_dtna/rate_increment/strut_interp.log`. No Lambda semantics/design
+ruling changes.

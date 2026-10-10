@@ -1,0 +1,72 @@
+{
+  "name": "ancestor hover boundaries preserve order, relatedTarget and non-bubbling flags",
+  "html": "test/ui/dtna/hover_boundary_contracts.html",
+  "viewport": {
+    "width": 500,
+    "height": 350
+  },
+  "events": [
+    {
+      "type": "mouse_move",
+      "x": 340,
+      "y": 50
+    },
+    {
+      "type": "mouse_move",
+      "x": 40,
+      "y": 40
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#trace"
+      },
+      "equals": "mouseenter:scope:outside|mouseenter:branch:outside|mouseenter:a:outside"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#flags"
+      },
+      "equals": "false:false:false"
+    },
+    {
+      "type": "mouse_move",
+      "x": 110,
+      "y": 40
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#trace"
+      },
+      "equals": "mouseenter:scope:outside|mouseenter:branch:outside|mouseenter:a:outside|mouseleave:a:b|mouseenter:b:a"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#flags"
+      },
+      "equals": "false:false:false"
+    },
+    {
+      "type": "mouse_move",
+      "x": 340,
+      "y": 50
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#trace"
+      },
+      "equals": "mouseenter:scope:outside|mouseenter:branch:outside|mouseenter:a:outside|mouseleave:a:b|mouseenter:b:a|mouseleave:b:outside|mouseleave:branch:outside|mouseleave:scope:outside"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#flags"
+      },
+      "equals": "false:false:false"
+    }
+  ]
+}

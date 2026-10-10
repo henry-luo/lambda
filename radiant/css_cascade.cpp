@@ -410,9 +410,8 @@ static void apply_active_rules_to_tree(DomElement* root, CssRule** rules,
                                        Pool* pool, CssEngine* engine, int depth) {
     if (!root || !rules || !matcher || !pool || depth > MAX_RADIANT_CSS_TREE_DEPTH) return;
 
-    // css_cascade is also linked without table layout by animation tests, so
-    // query the persistent DOM flag directly instead of taking a layout symbol.
-    if (!root->is_table_fixup()) {
+    // generated boxes read their host cascade rather than matching authored selectors.
+    if (!root->is_synthetic()) {
         for (size_t i = 0; i < rule_count; i++) {
             apply_rule_to_element(root, rules[i], matcher, pool, engine);
         }
@@ -434,7 +433,7 @@ static void apply_stylesheet_reference_to_tree(DomElement* root,
     if (!root || !stylesheet || !matcher || !pool ||
         depth > MAX_RADIANT_CSS_TREE_DEPTH) return;
 
-    if (!root->is_table_fixup()) {
+    if (!root->is_synthetic()) {
         for (size_t i = 0; i < stylesheet->rule_count; i++) {
             apply_rule_to_element_with_nested(root, stylesheet->rules[i], matcher,
                                                pool, engine, 0);
@@ -519,15 +518,47 @@ void radiant_apply_css_stylesheets_to_tree(DomDocument* doc, DomElement* root,
     if (epoch_scope) style_epoch_cascade_end(doc);
 }
 
+bool radiant_clear_cascaded_styles_visitor(DomNode* node, void*) {
+    node->layout_dirty = true;
+    if (!node->is_element()) return true;
+    DomElement* element = lam::dom_require_element(node);
+    // generated boxes borrow their host's pseudo cascade until layout rebinds
+    // them; clearing or matching them as authored DOM erases that live snapshot.
+    if (!element->is_synthetic()) {
+        dom_element_clear_cascaded_styles(element);
+        // pseudo declarations share the base cascade epoch.
+        dom_element_clear_pseudo_styles(element);
+        element->set_styles_resolved(false);
+    }
+    return true;
+}
+
+void radiant_recascade_document(DomDocument* doc) {
+    if (!doc || !doc->root || !doc->document_pool) return;
+    CssEngine* engine = (CssEngine*)doc->services.cached_css_engine;
+    if (!engine) return;
+    view_geometry_walk_dom_tree(static_cast<DomNode*>(doc->root),
+                                radiant_clear_cascaded_styles_visitor, nullptr);
+    SelectorMatcher matcher;
+    selector_matcher_init(&matcher, doc->document_pool);
+    state_configure_selector_matcher((DocState*)doc->state, &matcher);
+    radiant_apply_css_stylesheets_to_tree(doc, doc->root, doc->stylesheets,
+        doc->stylesheet_count, doc->document_pool, engine, &matcher);
+}
+
 void radiant_cascade_styles_for_element_with_matcher(DomElement* element,
                                                       SelectorMatcher* matcher) {
-    if (!element || !element->doc || !element->doc->document_pool || !matcher) return;
+    if (!element || !element->doc || !element->doc->document_pool || !matcher ||
+        element->is_synthetic()) return;
 
     DomDocument* doc = element->doc;
     Pool* pool = doc->document_pool;
     // Dynamic CSSOM nodes may never have entered layout, so their specified tree
     // still lacks stylesheet declarations when a transition samples the old value.
     dom_element_clear_cascaded_styles(element);
+    // vanished pseudo-selector branches must not survive a live CSSOM recascade;
+    // retained generated boxes keep the retired borrow until their next layout.
+    dom_element_clear_pseudo_styles(element);
 
     CssEngine* engine = (CssEngine*)doc->services.cached_css_engine;
     if (!engine || doc->stylesheet_count <= 0) return;

@@ -13,7 +13,7 @@ pub fn validate(kind, props) bool^ {
     else if (kind == 'col' and props.span != null and (not (props.span is int) or props.span < 1 or props.span > 24)) raise c.fail(kind,"span must be an int from 1 to 24")
     else if (props.percent != null and not c.finite(props.percent)) raise c.fail(kind,"percent must be finite")
     else if (kind == 'button' and not c.enum_valid(props.type,["button","submit","reset"])^) raise c.fail(kind,"invalid native button type")
-    else if (kind == 'button' and not c.enum_valid(props.shape,["default","circle","round"])^) raise c.fail(kind,"invalid button shape")
+    else if (kind == 'button' and not c.enum_valid(props.shape,["default","circle","round","square"])^) raise c.fail(kind,"invalid button shape")
     else if (kind == 'input' and not c.enum_valid(props.type,["text","password","search","email","url","tel"])^) raise c.fail(kind,"unsupported native input type")
     else if (not c.enum_valid(props.direction,if (kind == 'config-provider' or kind == 'page') ["ltr","rtl"] else ["horizontal","vertical"])^) raise c.fail(kind,"invalid direction")
     else if (kind == 'select') select_options(props)^

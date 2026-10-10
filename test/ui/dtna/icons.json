@@ -1,0 +1,14 @@
+{
+  "name":"dtna outlined filled two-tone and grouped SVG icons",
+  "html":"test/ui/dtna/icons.ls",
+  "viewport":{"width":500,"height":150},
+  "events":[
+    {"type":"assert_rect","target":{"selector":"#outlined-icon"},"width":32,"height":32,"tolerance":0.2},
+    {"type":"assert_attribute","target":{"selector":"#outlined-icon"},"attribute":"aria-label","equals":"Complete"},
+    {"type":"assert_attribute","target":{"selector":"#filled-icon"},"attribute":"aria-hidden","equals":"true"},
+    {"type":"assert_count","target":{"selector":"#two-tone-icon path"},"count":3},
+    {"type":"assert_attribute","target":{"selector":"#two-tone-icon path:first-child"},"attribute":"fill","equals":"#722ed1"},
+    {"type":"assert_count","target":{"selector":"#group-icon g path"},"count":1},
+    {"type":"render","file":"temp/ui_dtna/icons.png"}
+  ]
+}

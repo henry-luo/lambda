@@ -1313,10 +1313,7 @@ void contribute_inline_strut(LayoutContext* lycon, DomNode* source, ViewSpan* sp
         // CSS 2.1 §10.8.1: explicit leading surrounds the font content area,
         // not the font's normal-line-height distribution.
         font_get_content_area_split(font_box_handle(&lycon->font), &ascender, &descender);
-        float content_height = ascender + descender;
-        float half_leading = (lycon->block.line_height - content_height) / 2.0f;
-        ascender += half_leading;
-        descender += half_leading;
+        layout_apply_line_height_leading(lycon->block.line_height, &ascender, &descender);
     }
     if (ascender > 0.0f || descender > 0.0f) {
         layout_apply_baseline_shift(lycon, &ascender, &descender);

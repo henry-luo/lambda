@@ -586,6 +586,92 @@ TEST_F(MotionCascadeTest, AnimationShorthandProjectsWinningLonghands) {
     EXPECT_STREQ(name, "EASE, Red, BLOCK");
 }
 
+TEST(CssPropTable, BorderColorCssomReadsLiveDeclarationsWithoutCommittingGeometry) {
+    Pool* pool = pool_create();
+    ASSERT_NE(pool, nullptr);
+    ASSERT_TRUE(css_property_system_init(pool));
+    Input* input = Input::create(pool);
+    DomDocument* doc = input ? dom_document_create(input) : nullptr;
+    ASSERT_NE(doc, nullptr);
+    DomElement* element = DomElement::create(doc, "div", nullptr);
+    ASSERT_NE(element, nullptr);
+    doc->root = lam::up(element);
+    element->set_styles_resolved(true);
+    doc->js.mutation_count = 1;
+    const char* declarations[] = {"border-color:red", "border-color:red green",
+        "border-color:red green blue", "border-color:red green blue white", "color:currentColor;border-color:currentColor"};
+    const char* expected[] = {"rgb(255, 0, 0)", "rgb(255, 0, 0) rgb(0, 128, 0)",
+        "rgb(255, 0, 0) rgb(0, 128, 0) rgb(0, 0, 255)",
+        "rgb(255, 0, 0) rgb(0, 128, 0) rgb(0, 0, 255) rgb(255, 255, 255)", "rgb(0, 0, 0)"};
+    for (unsigned i = 0; i < sizeof(declarations) / sizeof(*declarations); i++) {
+        SCOPED_TRACE(declarations[i]);
+        ASSERT_TRUE(element->set_attribute("style", declarations[i]));
+        char value[256];
+        ASSERT_TRUE(css_prop_serialize_computed(element, CSS_PROPERTY_BORDER_COLOR, 0,
+            value, sizeof(value)));
+        EXPECT_STREQ(value, expected[i]);
+    }
+    char small[4];
+    EXPECT_FALSE(css_prop_serialize_computed(element, CSS_PROPERTY_BORDER_COLOR, 0,
+        small, sizeof(small)));
+    EXPECT_EQ(doc->js.mutation_count, 1);
+    dom_document_destroy(doc);
+    css_property_system_cleanup();
+    pool_destroy(pool);
+}
+
+TEST_F(MotionCascadeTest, CornerCssomRetainsComputedValuesAfterPaintConstraints) {
+    BoundaryProp boundary = {};
+    BorderProp border = {};
+    CornerExpressions original = {};
+    element.bound = lam::view_prop(&boundary);
+    boundary.border = lam::own(&border);
+    for (unsigned corner = 0; corner < 4; corner++) {
+        original.computed.horizontal[corner] = 80.0f;
+        original.computed.vertical[corner] = 50.0f;
+        original.computed.vertical_percent[corner] = true;
+    }
+    border.radius = original.computed;
+    border.radius.expressions = lam::up(&original);
+    const CssPropAccessor* shorthand = css_prop_accessor(CSS_PROPERTY_BORDER_RADIUS);
+    ASSERT_NE(shorthand, nullptr);
+    char value[128];
+    for (unsigned paint = 0; paint < 3; paint++) {
+        resolve_border_radius_percentages(&border.radius, 100.0f, 40.0f);
+        constrain_corner_radii(&border.radius, 100.0f, 40.0f);
+        EXPECT_FLOAT_EQ(border.radius.top_left, 50.0f);
+        ASSERT_TRUE(shorthand->serialize(shorthand, &element, 0, value, sizeof(value)));
+        EXPECT_STREQ(value, "80px / 50%");
+    }
+    char small[4] = {};
+    EXPECT_FALSE(shorthand->serialize(shorthand, &element, 0, small, sizeof(small)));
+    element.bound = nullptr;
+}
+
+TEST_F(MotionCascadeTest, CornerCssomCompressesBothAxesAndMapsLogicalCorners) {
+    BoundaryProp boundary = {};
+    BorderProp border = {};
+    element.bound = lam::view_prop(&boundary);
+    boundary.border = lam::own(&border);
+    const float values[] = {10.0f,20.0f,30.0f,20.0f};
+    for (unsigned corner = 0; corner < 4; corner++) {
+        border.radius.horizontal[corner] = values[corner];
+        border.radius.vertical[corner] = values[corner];
+    }
+    const CssPropertyCode properties[] = {CSS_PROPERTY_BORDER_RADIUS,
+        CSS_PROPERTY_BORDER_TOP_RIGHT_RADIUS, CSS_PROPERTY_BORDER_START_START_RADIUS};
+    const char* expected[] = {"10px 20px 30px","20px","20px"};
+    apply("direction:rtl");
+    for (unsigned i = 0; i < 3; i++) {
+        const CssPropAccessor* accessor = css_prop_accessor(properties[i]);
+        ASSERT_NE(accessor, nullptr);
+        char value[128];
+        ASSERT_TRUE(accessor->serialize(accessor, &element, 0, value, sizeof(value)));
+        EXPECT_STREQ(value, expected[i]);
+    }
+    element.bound = nullptr;
+}
+
 TEST_F(MotionCascadeTest, TransitionListsCycleAndLastPropertyEntryWinsBeyondEight) {
     apply("transition-duration: 9s");
     apply("transition: opacity 2s linear -1s, width 4s ease-in");

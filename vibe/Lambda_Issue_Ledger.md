@@ -1749,6 +1749,26 @@ The plan separates implemented cases, historical checkpoints and open gates.
 ---
 
 
+### 15.4 Reactive presentation gaps
+
+<a id="ui-1"></a>**UI-1 · Repeated ordinary markup moves its embedded native node between presentation slots · OPEN (found 2026-10-10)**
+
+`let image = <svg ...>; <div image><div image>` produces one native SVG rather
+than two occurrences in a Lambda UI document. The package-independent
+`temp/ui_dtna/repeated_markup/probe.ls` and `.json` record 1/2 assertions passing;
+the retained Segmented fixture records one SVG from eighteen icon slots
+(`test/ui/dtna/segmented_modes.json`, 41/42 assertions pass). In
+`lambda/input/css/dom_element.cpp`, `build_dom_tree_from_element` reuses the
+ordinary Element's embedded `DomElement`; `dom_detach_rebuilt_child` moves it
+from its earlier parent. `fn_apply1` returns an unmatched ordinary element
+unchanged. This is independent of the dtna component implementation.
+
+The repeated-presentation contract remains pending consultation under reactive
+UI **RS7/RSO1/RSO2/RSO10** and `Lambda_Pkg_UI.md` §11. **D7.4.5v2** distinguishes
+native Velmt handles from ordinary Element storage but does not itself settle
+presentation identity. Do not close this issue by cloning icons inside a widget,
+changing the fixture to create fresh values, or silently deciding the contract.
+
 # Appendix B — Cross-cutting clusters
 
 Several ledger entries are one defect wearing different masks. Fix them

@@ -922,7 +922,9 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
                                 item->boundary()->margin.right;
                         }
                     } else {
-                        available_width = max_width;
+                        // the common clamp/subtraction below expects a border-box budget, not content width.
+                        available_width = layout_border_size_from_content_box(
+                            lam::view_as_block(item), max_width, true);
                     }
 
                     if (item->blk) {

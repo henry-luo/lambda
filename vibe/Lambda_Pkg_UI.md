@@ -5,7 +5,7 @@
 > **Requested namespace:** `lambda.ui.dtna` (`dtna` reverses `antd`).
 > **Phase 1 target:** native Radiant, confirmed by the user. Interactive browser support is deferred.
 > **Scope:** a comprehensive Ant Design-inspired component package, reusable UI foundations, and an executable conformance workload for Lambda styling and interaction.
-> **Implementation status:** native controls/navigation plus initial Collapse, Tree and Table implemented; [progress and open gates](impl/Lambda_Impl_UI_Dtna.md). All 73 entries remain in scope; the feature manifest marks 37 partial and 36 planned. Performance and AntD pixel parity are unmeasured.
+> **Implementation status:** native controls/navigation, initial Collapse/Tree/Table, responsive Grid, compact groups, labelled Divider, advanced Pagination, selectable Steps, Avatar size variants and Tag selection/color/close behavior and Rate full/half/keyboard/RTL interactions, plus Alert banners/slots/controlled close and Spin delay/percent/nested/fullscreen modes, plus Button delayed loading/semantic parts/native form activation implemented; [progress and open gates](impl/Lambda_Impl_UI_Dtna.md). All 73 entries remain in scope; the feature manifest marks 38 partial and 35 planned. Avatar has a measured native pixel fixture; performance and catalog-wide AntD correspondence remain open.
 > **Authority:** [formal semantics](../doc/Lambda_Formal_Semantics.md), [formal design](../doc/Lambda_Formal_Design.md), then the existing [reactive UI design](Lambda_Design_Reactive_UI.md) and DOM design records. Implementation planning is collected in the appendices, following [Doc Convention](../doc/Doc_Convention.md).
 
 | Subject | Formal linkage | Consequence for this proposal |
@@ -101,7 +101,7 @@ Future style families should share state machines, action contracts, focus rules
 
 `null`, `false`, an empty string, and an omitted prop have different meanings under Lambda's value semantics. Controlledness requires a property-presence check, not a truthiness test. For collections, stable item keys are mandatory wherever selection, editing, expansion, or drag ordering persists across updates. Duplicate keys are an error, not a reason to fall back to array indices.
 
-A proposed application composition looks like this. The APIs are not implemented; these examples are deliberately marked `no-run` and must become executable fixtures before the corresponding milestone closes.
+A proposed application composition looks like this. These examples include unimplemented services and remain deliberately marked `no-run`; they must become executable fixtures before the corresponding milestone closes. The current shipped subset and runnable examples are documented in [Lambda_UI.md](../doc/Lambda_UI.md) (**D7.2.4**).
 
 ```lambda no-run
 import ui: lambda.ui.dtna
@@ -424,6 +424,77 @@ The namespace, Ant-inspired Phase 1 direction, comprehensive catalog goal, and R
 
 When a decision changes an existing semantics/design ruling, update both formal specification and working design, revise the formal ruling in place with its version suffix/doc semver change, and regenerate the formal index, as required by the project convention. Missing contracts are questions for review; implementation behavior cannot silently settle them.
 
+### 11.1 M0 contract proposal for review (2026-10-10)
+
+**Status: proposed; awaiting consultation, not a ratified runtime contract.**
+The following makes the choices in §11 concrete. Existing pure rendering and
+procedural interaction remain governed by **S12.1.1v2–S12.1.3**; retained values
+and handles remain subject to **D4.5.2/D5.3.3**. No formal ruling currently
+settles reactive presentation identity or lifecycle ordering. The source-keyed
+retention rule in the reactive UI design §5.2 remains authoritative until a
+reviewed extension replaces it.
+
+1. **Construction and identity.** Keep the shipped pure constructor + `apply`
+   facade (**D7.2.4**). Add an optional general presentation key, supplied
+   explicitly through `apply` options; dtna forwards its `key` prop. A keyed
+   instance is identified by owning presentation instance, explicit sibling
+   scope, key, and template identity. Keys are strings, symbols, or integers;
+   duplicate keys in one owner/scope/template are diagnosed. Rebuilding or
+   reordering a keyed source retains its state. Two presentations use distinct
+   scopes or keys and have independent state. Unkeyed calls retain the existing
+   source/template behavior; HTML `id` is never a state key. A reset generation
+   explicitly starts fresh state. Runtime addresses are not serialized keys
+   (**RS7/RSO1/RSO2/RSO10**).
+2. **Retention and resources.** Proposed default: preserve stored template state
+   while an instance is conditionally absent or temporarily matches another
+   template, consistent with reactive UI §5.2. Removing a presentation disposes
+   its native attachments, listeners, captures and scheduled work, advances its
+   delivery generation, and restores focus to the nearest surviving owner.
+   Remounting the same logical key restores state but creates new resources.
+   Explicit reset/forget and document teardown release retained state. An
+   alternative requiring review is to discard state on every removal; that
+   would change the current retention rule and conditional-hide behavior.
+3. **Provider data.** Resolve immutable configuration through explicit package
+   render data: `render` passes resolved configuration into child component
+   projections; nested providers override only supplied fields. Keyed identity
+   is independent of that projection, so locale/disabled/token changes preserve
+   local state. Custom projection functions receive configuration explicitly.
+   No mutable module singleton or new ambient lookup is introduced
+   (**S9.1.7**). Capture the originating resolved configuration for overlays and
+   root services. Raw external templates must pass configuration explicitly
+   when composing a new package subtree.
+4. **Overlay ownership.** Use one document-owned coordinator with separate
+   application-root scopes. Visual attachment may escape ancestor clipping,
+   while event routing, provider data and cleanup retain the originating
+   logical owner. Topmost eligible overlay handles outside click/Escape once;
+   nested children close before their parent. Modal focus is contained and
+   restored to a live trigger, then a surviving owner, then the application
+   root. Trigger removal closes its overlays. Implement a general DOM/layout
+   attachment mechanism only if ordinary positioned DOM fails the clipping
+   prototype; no dtna branches enter the engine (**D7.2.5**).
+5. **Async delivery.** Work carries document, application root, presentation
+   owner and generation. Delivery runs procedurally on the document UI thread;
+   a stale generation or dead owner rejects the result before state mutation.
+   Unmount/close cancels work and runs registered cleanup exactly once, child
+   before parent. Replacement work invalidates the previous request generation.
+   Pending confirmations keep the dialog open; success closes, failure exposes
+   an error, and cancel invalidates pending delivery. This does not authorize
+   asynchronous writes from pure constructors (**S12.1.1v2–S12.1.3**).
+6. **Initial native accessibility.** The source audit found no existing platform
+   accessibility-tree bridge. Proposed M0–M3 scope is a macOS bridge exposing
+   roles, names, values, states, focus, hierarchy and applicable actions for
+   these milestones, with native tree/action inspection and teardown tests.
+   Linux/Windows bridge coverage remains an explicit M7 platform gate. Keyboard
+   and ARIA tests remain separate evidence; VoiceOver usability is not claimed
+   without an actual assistive-technology check.
+
+Approval must be recorded here and distilled into the applicable formal specs
+before dependent runtime behavior is implemented. Reference freezing, feature
+ownership, platform auditing and components using existing contracts can proceed
+while these questions are pending. React-specific prop mechanisms retain an
+explicit purpose/equivalent/applicability disposition in the feature matrix;
+review of this proposal does not authorize dropping user-visible capabilities.
+
 ## 12. Later phases
 
 - **Phase 2 — additional styles and themes:** Ant-family dark/compact presets, then other visual families under appropriate `lambda.ui.*` packages or presets, reusing proven behavior and tests. Confirm the public naming when those styles are selected.
@@ -539,7 +610,7 @@ Require viewport-bounded mounted nodes for virtual collections and no cumulative
 
 ## Appendix D. Validation commands and reporting
 
-The following use current repository entry points; component paths and the `dtna` suite are **planned** and only become runnable after their registration. Do not report these commands as executed for this proposal.
+The component paths and `dtna` suite below are now registered. Exact executed commands, results and remaining failures are recorded in [the implementation record](impl/Lambda_Impl_UI_Dtna.md); their availability does not establish a passing Phase 1 gate (**D8.1.1v17**).
 
 ```bash
 # build/discovery checks after adding package/tests

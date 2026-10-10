@@ -319,6 +319,7 @@ float calculate_fit_content_width(LayoutContext* lycon, DomNode* node, float ava
 bool layout_element_inline_axis_is_vertical(DomElement* element);
 CssEnum layout_element_css_writing_mode(DomElement* element);
 WritingMode layout_element_writing_mode(DomElement* element);
+int css_logical_corner_index(CssPropertyCode property, DomElement* element);
 bool layout_inline_element_is_orthogonal(DomElement* element);
 // CSS 2.2 §9.2.1.1: block-in-inline fragments cannot collapse through a
 // parent when the inline box follows prior in-flow content.
@@ -2935,6 +2936,18 @@ inline LayoutAxis flex_main_axis(FlexContainerLayout* flex) {
     return flex_main_axis_from_props(flex);
 }
 
+inline bool flex_main_axis_reversed(const FlexProp* flex) {
+    if (!flex) return false;
+    bool direction_reverse = flex->direction == CSS_VALUE_ROW_REVERSE ||
+        flex->direction == CSS_VALUE_COLUMN_REVERSE;
+    bool vertical_rl_block_axis = flex->writing_mode == WM_VERTICAL_RL &&
+        flex_main_axis_from_props(flex) == LAYOUT_AXIS_X;
+    bool row_rtl = (flex->direction == CSS_VALUE_ROW ||
+                    flex->direction == CSS_VALUE_ROW_REVERSE) &&
+        flex->text_direction == TD_RTL;
+    return (direction_reverse != vertical_rl_block_axis) != row_rtl;
+}
+
 inline LayoutAxis flex_cross_axis(FlexContainerLayout* flex) {
     return flex_main_axis(flex) == LAYOUT_AXIS_X ? LAYOUT_AXIS_Y : LAYOUT_AXIS_X;
 }
@@ -4556,6 +4569,8 @@ static inline bool layout_block_is_skipped_container_item(const ViewBlock* block
 
 void line_init(LayoutContext* lycon, float left, float right);
 void line_reset(LayoutContext* lycon);
+float layout_apply_line_height_leading(float line_height,
+                                       float* ascender, float* descender);
 float vertical_align_baseline_shift(LayoutContext* lycon, CssEnum align,
                                     float valign_offset = 0);
 float layout_apply_baseline_shift(LayoutContext* lycon,

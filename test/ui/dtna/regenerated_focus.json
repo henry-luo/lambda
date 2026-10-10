@@ -1,0 +1,161 @@
+{
+  "name": "regenerated native input and textarea keep their own focus and selection",
+  "html": "test/ui/dtna/regenerated_focus.ls",
+  "viewport": {
+    "width": 600,
+    "height": 500
+  },
+  "events": [
+    {
+      "type": "click",
+      "target": {
+        "selector": "#edited-entry"
+      }
+    },
+    {
+      "type": "type",
+      "text": "abc"
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#edited-entry"
+      },
+      "equals": "abc"
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#first-entry"
+      },
+      "equals": "fixed"
+    },
+    {
+      "type": "assert_focus",
+      "target": {
+        "selector": "#edited-entry"
+      }
+    },
+    {
+      "type": "key_press",
+      "key": "home"
+    },
+    {
+      "type": "key_press",
+      "key": "right"
+    },
+    {
+      "type": "type",
+      "text": "X"
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#edited-entry"
+      },
+      "equals": "aXbc"
+    },
+    {
+      "type": "assert_caret",
+      "target": {
+        "selector": "#edited-entry"
+      },
+      "char_offset": 2
+    },
+    {
+      "type": "key_press",
+      "key": "backspace"
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#edited-entry"
+      },
+      "equals": "abc"
+    },
+    {
+      "type": "assert_caret",
+      "target": {
+        "selector": "#edited-entry"
+      },
+      "char_offset": 1
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#edited-notes"
+      }
+    },
+    {
+      "type": "key_press",
+      "key": "home"
+    },
+    {
+      "type": "key_press",
+      "key": "right"
+    },
+    {
+      "type": "type",
+      "text": "Y"
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#edited-notes"
+      },
+      "equals": "aYbcd"
+    },
+    {
+      "type": "assert_focus",
+      "target": {
+        "selector": "#edited-notes"
+      }
+    },
+    {
+      "type": "assert_caret",
+      "target": {
+        "selector": "#edited-notes"
+      },
+      "char_offset": 2
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#first-notes"
+      },
+      "equals": "fixed notes"
+    },
+    {
+      "type": "key_press",
+      "key": "backspace"
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#edited-notes"
+      },
+      "equals": "abcd"
+    },
+    {
+      "type": "assert_caret",
+      "target": {
+        "selector": "#edited-notes"
+      },
+      "char_offset": 1
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#entry-value"
+      },
+      "equals": "abc"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#notes-value"
+      },
+      "equals": "abcd"
+    }
+  ]
+}

@@ -9,6 +9,7 @@
 #include "../lib/math_utils.h"
 #include "../lib/mem_factory.h"
 #include "../lib/arraylist.h"
+#include "../lib/strbuf.h"
 #include "../lambda/dom/dom.h"
 
 #include <assert.h>
@@ -281,6 +282,11 @@ static ArrayList* cssom_collect_style_ancestors(DomElement* element) {
 
 static bool cssom_value_inherits(const CssValue* value, CssPropertyCode id) {
     if (!value) return css_property_is_inherited(id);
+    CssComputedColor color;
+    // currentColor on color inherits; on another property it resolves against
+    // the receiving element's live color, even before layout is committed.
+    if (id == CSS_PROPERTY_COLOR && css_color_compute(value, &color) &&
+        color.type == CSS_COLOR_CURRENTCOLOR) return true;
     return value->type == CSS_VALUE_TYPE_KEYWORD &&
         (value->data.keyword == CSS_VALUE_INHERIT ||
          (value->data.keyword == CSS_VALUE_UNSET && css_property_is_inherited(id)));
@@ -319,7 +325,7 @@ static bool format_decl_color(DomElement* element, const CssValue* value,
     if (!css_color_compute(value, &color)) return false;
     if (color.type == CSS_COLOR_COLOR || color.missing) return false;
     if (color.type == CSS_COLOR_CURRENTCOLOR)
-        return element && element->in_line ? format_color(out, out_size, element->inl()->color) : false;
+        return css_prop_serialize_computed(element, CSS_PROPERTY_COLOR, 0, out, out_size);
     Color rgba;
     return css_color_to_rgba(&color, &rgba.r, &rgba.g, &rgba.b, &rgba.a)
         ? format_color(out, out_size, rgba) : false;
@@ -331,6 +337,9 @@ static bool format_css_value(DomElement* element, CssPropertyCode id,
     if (!value) {
         // initial color names still serialize as computed colors after a rule stops matching.
         const CssProperty* property = css_property_get_by_code(id);
+        if (property && property->type == PROP_TYPE_COLOR &&
+            str_icmp_cstr(property_initial(id), "currentColor") == 0)
+            return css_prop_serialize_computed(element, CSS_PROPERTY_COLOR, 0, out, out_size);
         if (property && property->type == PROP_TYPE_COLOR &&
             format_color_text(property_initial(id), out, out_size)) return true;
         return copy_text(out, out_size, property_initial(id));
@@ -349,9 +358,7 @@ static bool format_css_value(DomElement* element, CssPropertyCode id,
     if (id == CSS_PROPERTY_COLOR || id == CSS_PROPERTY_BACKGROUND_COLOR ||
         id == CSS_PROPERTY_BORDER_TOP_COLOR || id == CSS_PROPERTY_BORDER_RIGHT_COLOR ||
         id == CSS_PROPERTY_BORDER_BOTTOM_COLOR || id == CSS_PROPERTY_BORDER_LEFT_COLOR) {
-        // Computed-style serialization has no live LayoutContext; use the
-        // element's already-resolved currentColor instead of calling the
-        // cascade resolver with an invalid context.
+        // declaration colors use live CSSOM color resolution without committing geometry.
         if (format_decl_color(element, value, out, out_size)) return true;
     }
     Pool* pool = scratch ? scratch : element && element->doc ? element->doc->document_pool : nullptr;
@@ -1033,6 +1040,77 @@ static bool serialize_used_size(const CssPropAccessor* accessor, DomElement* ele
     return format_number(out, out_size, value, "px");
 }
 
+static void append_box_sides(StrBuf* output, char values[4][512]) {
+    unsigned count = 4;
+    if (strcmp(values[3], values[1]) == 0) {
+        count = 3;
+        if (strcmp(values[2], values[0]) == 0) {
+            count = strcmp(values[1], values[0]) == 0 ? 1 : 2;
+        }
+    }
+    for (unsigned i = 0; i < count; i++) {
+        if (i) strbuf_append_char(output, ' ');
+        strbuf_append_str(output, values[i]);
+    }
+}
+
+static bool serialize_corner_radius(const CssPropAccessor* accessor, DomElement* element,
+                                    int pseudo_type, char* out, size_t out_size) {
+    if (!accessor || !element || pseudo_type != 0) return false;
+    const BoundaryProp* boundary = element->boundary();
+    const Corner* radius = boundary && boundary->border ? &boundary->border->radius : nullptr;
+    const CornerExpressions* expressions = radius ? radius->expressions.get() : nullptr;
+    if (expressions) radius = &expressions->computed;
+    char axes[2][4][512];
+    Pool* scratch = nullptr;
+    bool formatted = true;
+    for (unsigned axis = 0; axis < 2 && formatted; axis++) {
+        for (unsigned corner = 0; corner < 4 && formatted; corner++) {
+            const CssValue* expression = expressions ? (axis ? expressions->vertical[corner].get()
+                : expressions->horizontal[corner].get()) : nullptr;
+            float value = radius ? (axis ? radius->vertical[corner] : radius->horizontal[corner]) : 0.0f;
+            bool percent = radius && (axis ? radius->vertical_percent[corner] : radius->horizontal_percent[corner]);
+            if (expression) {
+                // CSSOM queries must release formatting scratch instead of growing the document pool.
+                if (!scratch) scratch = pool_create();
+                formatted = scratch && format_css_value(element, accessor->id, expression,
+                    axes[axis][corner], sizeof(axes[axis][corner]), scratch);
+            } else formatted = format_number(axes[axis][corner], sizeof(axes[axis][corner]), value, percent ? "%" : "px");
+        }
+    }
+    if (scratch) pool_destroy(scratch);
+    if (!formatted) return false;
+    StrBuf* output = strbuf_new();
+    if (!output) return false;
+    if (accessor->id == CSS_PROPERTY_BORDER_RADIUS) {
+        append_box_sides(output, axes[0]);
+        bool same = true;
+        for (unsigned corner = 0; corner < 4; corner++)
+            same = same && strcmp(axes[0][corner], axes[1][corner]) == 0;
+        if (!same) {
+            strbuf_append_str(output, " / ");
+            append_box_sides(output, axes[1]);
+        }
+    } else {
+        const CssPropertyCode physical[] = {CSS_PROPERTY_BORDER_TOP_LEFT_RADIUS,
+            CSS_PROPERTY_BORDER_TOP_RIGHT_RADIUS, CSS_PROPERTY_BORDER_BOTTOM_RIGHT_RADIUS,
+            CSS_PROPERTY_BORDER_BOTTOM_LEFT_RADIUS};
+        int corner = -1;
+        for (unsigned i = 0; i < 4; i++) if (accessor->id == physical[i]) corner = i;
+        if (corner < 0) corner = css_logical_corner_index(accessor->id, element);
+        if (corner < 0) { strbuf_free(output); return false; }
+        strbuf_append_str(output, axes[0][corner]);
+        if (strcmp(axes[0][corner], axes[1][corner]) != 0) {
+            strbuf_append_char(output, ' ');
+            strbuf_append_str(output, axes[1][corner]);
+        }
+    }
+    bool fits = output->length < out_size;
+    if (fits) str_copy(out, out_size, output->str, output->length);
+    strbuf_free(output);
+    return fits;
+}
+
 static bool serialize_edge(const CssPropAccessor* accessor, DomElement* element,
                            int pseudo_type, char* out, size_t out_size) {
     if (!accessor || !element || pseudo_type != 0) return false;
@@ -1079,6 +1157,26 @@ static bool serialize_border_component(const CssPropAccessor* accessor,
             // colors come from the computed side, including winning shorthands.
             return format_color(out, out_size, side.color ? *side.color : element->inl()->color);
     }
+}
+
+static bool serialize_border_colors(const CssPropAccessor* accessor, DomElement* element,
+                                     int pseudo_type, char* out, size_t out_size) {
+    const CssProperty* property = accessor ? css_property_get_by_code(accessor->id) : nullptr;
+    if (!property || property->longhand_count != 4) return false;
+    char values[4][512];
+    for (unsigned side = 0; side < 4; side++) {
+        // delegate computed colors so currentColor, cascade and animation
+        // sampling follow the same path as each physical longhand.
+        if (!css_prop_serialize_computed(element, property->longhand_props[side], pseudo_type,
+                values[side], sizeof(values[side]))) return false;
+    }
+    StrBuf* result = strbuf_new();
+    if (!result) return false;
+    append_box_sides(result, values);
+    bool fits = result->length < out_size;
+    if (fits) str_copy(out, out_size, result->str, result->length);
+    strbuf_free(result);
+    return fits;
 }
 
 static bool serialize_inset(const CssPropAccessor* accessor, DomElement* element,
@@ -1336,6 +1434,8 @@ static const CssPropAccessor CSS_PROP_ROWS[] = {
     DERIVED_ROW(CSS_PROPERTY_SCROLL_SNAP_TYPE, serialize_scroll_snap, 0),
     DERIVED_ROW(CSS_PROPERTY_SCROLL_SNAP_ALIGN, serialize_scroll_snap, 0),
     DERIVED_ROW(CSS_PROPERTY_VISIBILITY, serialize_visibility, 0),
+    // hit testing reads the cascade directly; CSSOM must expose that same inherited value.
+    DERIVED_ROW(CSS_PROPERTY_POINTER_EVENTS, serialize_decl, CSS_PROP_ACCESSOR_CASCADE_RESOLVED),
     DERIVED_ROW(CSS_PROPERTY_WIDTH, serialize_used_size, CSS_PROP_ACCESSOR_USED_VALUE),
     DERIVED_ROW(CSS_PROPERTY_HEIGHT, serialize_used_size, CSS_PROP_ACCESSOR_USED_VALUE),
     DERIVED_ROW(CSS_PROPERTY_MIN_WIDTH, serialize_minmax, CSS_PROP_ACCESSOR_USED_VALUE),
@@ -1401,6 +1501,16 @@ static const CssPropAccessor CSS_PROP_ROWS[] = {
     DERIVED_ROW(CSS_PROPERTY_BACKGROUND_COLOR, serialize_background_color,
                 CSS_PROP_ACCESSOR_CASCADE_RESOLVED),
     DERIVED_ROW(CSS_PROPERTY_BORDER_TOP_WIDTH, serialize_border_component, 0),
+    // serialize computed corners, preserving percentages and ignoring paint overlap constraints.
+    DERIVED_ROW(CSS_PROPERTY_BORDER_RADIUS, serialize_corner_radius, CSS_PROP_ACCESSOR_USED_VALUE),
+    DERIVED_ROW(CSS_PROPERTY_BORDER_TOP_LEFT_RADIUS, serialize_corner_radius, CSS_PROP_ACCESSOR_USED_VALUE),
+    DERIVED_ROW(CSS_PROPERTY_BORDER_TOP_RIGHT_RADIUS, serialize_corner_radius, CSS_PROP_ACCESSOR_USED_VALUE),
+    DERIVED_ROW(CSS_PROPERTY_BORDER_BOTTOM_RIGHT_RADIUS, serialize_corner_radius, CSS_PROP_ACCESSOR_USED_VALUE),
+    DERIVED_ROW(CSS_PROPERTY_BORDER_BOTTOM_LEFT_RADIUS, serialize_corner_radius, CSS_PROP_ACCESSOR_USED_VALUE),
+    DERIVED_ROW(CSS_PROPERTY_BORDER_START_START_RADIUS, serialize_corner_radius, CSS_PROP_ACCESSOR_USED_VALUE),
+    DERIVED_ROW(CSS_PROPERTY_BORDER_START_END_RADIUS, serialize_corner_radius, CSS_PROP_ACCESSOR_USED_VALUE),
+    DERIVED_ROW(CSS_PROPERTY_BORDER_END_START_RADIUS, serialize_corner_radius, CSS_PROP_ACCESSOR_USED_VALUE),
+    DERIVED_ROW(CSS_PROPERTY_BORDER_END_END_RADIUS, serialize_corner_radius, CSS_PROP_ACCESSOR_USED_VALUE),
     DERIVED_ROW(CSS_PROPERTY_BORDER_RIGHT_WIDTH, serialize_border_component, 0),
     DERIVED_ROW(CSS_PROPERTY_BORDER_BOTTOM_WIDTH, serialize_border_component, 0),
     DERIVED_ROW(CSS_PROPERTY_BORDER_LEFT_WIDTH, serialize_border_component, 0),
@@ -1409,6 +1519,7 @@ static const CssPropAccessor CSS_PROP_ROWS[] = {
     DERIVED_ROW(CSS_PROPERTY_BORDER_BOTTOM_STYLE, serialize_border_component, 0),
     DERIVED_ROW(CSS_PROPERTY_BORDER_LEFT_STYLE, serialize_border_component, 0),
     DERIVED_ROW(CSS_PROPERTY_BORDER_TOP_COLOR, serialize_border_component, 0),
+    DERIVED_ROW(CSS_PROPERTY_BORDER_COLOR, serialize_border_colors, CSS_PROP_ACCESSOR_CASCADE_RESOLVED),
     DERIVED_ROW(CSS_PROPERTY_BORDER_RIGHT_COLOR, serialize_border_component, 0),
     DERIVED_ROW(CSS_PROPERTY_BORDER_BOTTOM_COLOR, serialize_border_component, 0),
     DERIVED_ROW(CSS_PROPERTY_BORDER_LEFT_COLOR, serialize_border_component, 0),

@@ -2801,9 +2801,10 @@ static float layout_non_auto_margin_right(ViewBlock* block) {
 
 static float layout_strut_below_baseline(LayoutContext* lycon) {
     if (!lycon || layout_quirks_block_ignores_line_height(lycon, nullptr)) return 0.0f;
-    float half_leading = (lycon->block.line_height -
-        (lycon->block.init_ascender + lycon->block.init_descender)) / 2.0f;
-    return max(lycon->block.init_descender + half_leading, 0.0f);
+    float ascender = lycon->block.init_ascender;
+    float descender = lycon->block.init_descender;
+    layout_apply_line_height_leading(lycon->block.line_height, &ascender, &descender);
+    return max(descender, 0.0f);
 }
 
 static void layout_middle_inline_contribution(LayoutContext* lycon,
@@ -10297,9 +10298,12 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                 lycon->line.atomic_inline_count++;
             }
             // CSS 2.1 §10.8.1: vertical-align defaults to 'baseline' (CSS_VALUE__UNDEF=0 also means baseline).
+            // length/percentage alignment is stored as baseline plus an offset;
+            // do not re-add its unshifted baseline after the contribution above.
             bool has_non_baseline_valign = block->in_line &&
-                block->inl()->vertical_align != 0 &&
-                block->inl()->vertical_align != CSS_VALUE_BASELINE;
+                ((block->inl()->vertical_align != 0 &&
+                  block->inl()->vertical_align != CSS_VALUE_BASELINE) ||
+                 block->inl()->vertical_align_offset != 0.0f);
             if (has_non_baseline_valign) {
                 float block_flow_height = block->height + inline_block_box.margin_v;
                 if (block->inl()->vertical_align == CSS_VALUE_TEXT_TOP) {
