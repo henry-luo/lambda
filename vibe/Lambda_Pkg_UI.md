@@ -83,6 +83,27 @@ CSS inheritance and scoped theme selectors can carry visual tokens. Nonvisual co
 
 Future style families should share state machines, action contracts, focus rules, and data algorithms. They may supply different token derivation, icons, spacing, motion, and structural recipes. Allow structural differences where a new design system requires them; a theme need not be only a color replacement. Avoid creating a speculative universal widget framework before dtna establishes reusable requirements.
 
+### 3.4 Initial sibling family: bold
+
+The user selected **`bold`** as the theme and package name on 2026-10-10.
+`lambda.ui.bold` ships at `lmd/package/ui/bold.ls` under **D7.2.4** and presents
+logical `<bold.button>` and other qualified elements through ordinary imported
+views (**S2.4.3v3**, **S12.1.3**). Its initial neobrutalist styling references
+[Neobrutalism](https://neobrutalism.com/), with independent `bold-` selectors
+and `--bold-` variables. This adds a sibling style family without changing the
+dtna Phase 1 catalog or claiming reference-wide correspondence.
+
+`ui/core/control.ls` now owns shared native input/select/check/radio/switch
+markup, typed change requests and application-controlled synchronization.
+Both families use the same native radio-group ownership marker, allowing
+controlled peers of either family to settle after a request. Native editing,
+activation and exclusivity remain DOM package responsibilities (**D7.2.5**).
+The shared component helpers also supply namespace-aware attributes, property
+diagnostics, color validation and semantic headings. Bold supplies its own
+contracts, tokens, layout/surface recipes and presentation views. See the
+[implementation record](impl/Lambda_Impl_UI_Bold.md) and
+[user guide](../doc/Lambda_UI_Bold.md).
+
 ## 4. Proposed public API
 
 ### 4.1 Naming and common contracts

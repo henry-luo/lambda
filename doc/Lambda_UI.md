@@ -1,9 +1,15 @@
-# Lambda UI — dtna
+# Lambda UI
+
+Lambda ships two experimental native UI families: `lambda.ui.dtna` for an
+Ant Design-inspired appearance, and [`lambda.ui.bold`](Lambda_UI_Bold.md) for
+neobrutalist borders, flat colors and hard shadows. Both are ordinary source
+packages (**D7.2.4**) presented through logical elements (**S12.1.3**).
+This page documents `dtna`; the [bold guide](Lambda_UI_Bold.md) covers its API
+and gallery.
 
 `lambda.ui.dtna` is an experimental Ant Design-inspired package for native
 Radiant documents. Its ordinary shipped module is
-`lmd/package/ui/dtna.ls` (**D7.2.4**). Interactive browser distribution and
-additional style families are deferred.
+`lmd/package/ui/dtna.ls` (**D7.2.4**). Interactive browser distribution is deferred.
 
 The implementation covers portions of 37 of the 73 AntD 6.6.5 catalog
 entries. No entry is certified complete. The [feature inventory](../test/ui/dtna_reference/catalog.manifest)

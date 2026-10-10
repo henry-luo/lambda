@@ -21,21 +21,13 @@ fn decorated(node) {
     let marked = if (p.mark) [<mark *code>] else code;
     if (p.keyboard) [<kbd *marked>] else marked
 }
-fn heading(attributes, children, level) {
-    // tag-specific emission shares attributes/content so every level has the same contract.
-    if (level == 1) <h1 *:attributes,*children>
-    else if (level == 2) <h2 *:attributes,*children>
-    else if (level == 3) <h3 *:attributes,*children>
-    else if (level == 4) <h4 *:attributes,*children>
-    else <h5 *:attributes,*children>
-}
 view dtna_typography: <dtna kind:'title' | 'text' | 'paragraph' | 'link'> {
     let p = ~.props
     let level = c.option(p,"level",1)
     let attributes = {*:c.styled(~,"dtna-typography" ++ (if (p.type == null) "" else " dtna-text-" ++ c.text(p.type)) ++
         (if (p.disabled) " dtna-text-disabled" else "")),*:(if (p.disabled) {['aria-disabled']:"true"} else {})}
     let children = decorated(~);
-    if (~.kind == 'title') heading({*:attributes,style:c.style_with(p,"font-size:var(--dtna-font-size-heading-" ++ string(level) ++ ");line-height:var(--dtna-font-height-heading-" ++ string(level) ++ ");")},children,level)
+    if (~.kind == 'title') c.heading({*:attributes,style:c.style_with(p,"font-size:var(--dtna-font-size-heading-" ++ string(level) ++ ");line-height:var(--dtna-font-height-heading-" ++ string(level) ++ ");")},children,level)
     else if (~.kind == 'text') <span *:attributes,*children>
     else if (~.kind == 'paragraph') <p *:attributes,*children>
     // null is a present HTML attribute; omit href entirely for a disabled link.
