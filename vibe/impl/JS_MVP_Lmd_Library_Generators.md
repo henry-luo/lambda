@@ -422,6 +422,10 @@ estimated timed regions of the other three comparisons; ordinary OS activity
 is still present. Some late non-jq screen rows were also noisy; their repeated
 controls bound the claims above, without proving the machine was idle throughout.
 
-The [capture report](../../temp/mvp_tune_library_20261010/report.md) and
-`summary.json` retain commands, source/output/binary hashes, paired intervals
-and the final 87-row comparison. Published Results3–8 are unchanged.
+The final 87-row comparison is published as
+[MVP_Result9](../../test/benchmark/js_mvp_lmd/MVP_Result9.md) with
+[raw JSON](../../test/benchmark/js_mvp_lmd/MVP_Result9.json), retaining commands,
+source/output/binary hashes, paired intervals, validation logs and jq activity
+evidence. The original [capture report](../../temp/mvp_tune_library_20261010/report.md)
+and `summary.json` remain available. Publication reuses the recorded measurements;
+Results3–8 are unchanged.

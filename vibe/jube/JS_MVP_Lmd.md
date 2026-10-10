@@ -1399,4 +1399,6 @@ MVP 100/100 and activation 10/10 pass normally and under forced GC; Test262
 passes 40261/40261. Lambda is 6607/6608, retaining the known `edit_view_only`
 failure; §30's older `log_pipeline` issue remains
 separate. Evidence and limits are
-recorded in the [implementation plan](../impl/JS_MVP_Lmd_Library_Generators.md#6-library-workload-tuning).
+recorded in the [implementation plan](../impl/JS_MVP_Lmd_Library_Generators.md#6-library-workload-tuning)
+and published as [MVP_Result9](../../test/benchmark/js_mvp_lmd/MVP_Result9.md)
+with the complete 87-workload table and raw evidence.
