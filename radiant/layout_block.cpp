@@ -4622,6 +4622,8 @@ void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, CssEnum display
     layout_stretch_vertical_auto_inline_children(block);
     if (block->form_control() &&
         block->form_control()->control_type == FORM_CONTROL_BUTTON &&
+        // authored flex/grid alignment already positions every child as a unit.
+        block->display.inner != CSS_VALUE_FLEX && block->display.inner != CSS_VALUE_GRID &&
         !layout_block_inline_axis_is_vertical(block) && block->first_child &&
         (!block->blk || !block->block()->text_box_trim)) {
         center_button_text_in_block(

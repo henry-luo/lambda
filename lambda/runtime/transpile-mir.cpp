@@ -29032,6 +29032,8 @@ static MIR_reg_t emit_index_value(MirTranspiler* mt, AstNode* field, bool use_na
 
 static MIR_reg_t emit_boxed_index_call(MirTranspiler* mt, AstFieldNode* field_node) {
     MIR_reg_t boxed_obj = transpile_box_item(mt, field_node->object);
+    // even a defect-capable receiver owns `last`; evaluate the receiver once.
+    mt->last_index_item_reg = boxed_obj;
     MIR_reg_t boxed_idx = transpile_box_item(mt, field_node->field);
     return emit_call_2(mt, "fn_index", MIR_T_I64,
         MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_obj),
@@ -29270,11 +29272,11 @@ static MirValue emit_index_result_value(MirTranspiler* mt, AstFieldNode* field_n
         }
         return publish(result, VALUE_REP_ITEM);
     };
+    MirLastIndexScope last_scope(mt, field_node->object);
     if (mir_expr_may_carry_defect(mt, field_node->object)) {
         // a success-only element witness cannot unbox the defect receiver arm
         return publish(emit_boxed_index_call(mt, field_node), VALUE_REP_ITEM);
     }
-    MirLastIndexScope last_scope(mt, field_node->object);
     // Index paths mix direct scalar loads with generic runtime reads.  The
     // descriptor must record the actual producer carrier, not the indexed
     // expression's semantic element type (D2.4.1-D2.4.3).

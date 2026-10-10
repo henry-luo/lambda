@@ -11,6 +11,7 @@
 #include "../../lib/memtrack.h"
 #include "../../lib/sort.h"
 #include "../../lib/image.h"
+#include "../core/mark_reader.hpp"
 #include <cmath>
 #include <cstring>
 #include <climits>
@@ -803,7 +804,7 @@ static bool array_num_shape_is_valid(const ArrayNum* arr) {
 // Read shape and strides into caller-provided arrays. Returns zero for invalid
 // metadata; callers must return ItemError without consuming either buffer.
 // For 1-D owned arrays, returns ndim=1 with shp[0]=length, str[0]=1.
-static int get_shape_strides(ArrayNum* arr, int64_t* shp, int64_t* str) {
+int array_num_get_shape_strides(ArrayNum* arr, int64_t* shp, int64_t* str) {
     if (!shp || !str || !array_num_shape_is_valid(arr)) {
         log_error("array-num-shape: invalid rank metadata");
         return 0;
@@ -954,8 +955,8 @@ static ArrayNum* alloc_ndim_arraynum(ArrayNumElemType etype, int ndim, const int
 static Item vec_broadcast_op(ArrayNum* a, ArrayNum* b, int op) {
     int64_t shp_a[LAMBDA_ARRAY_NUM_MAX_NDIM], str_a[LAMBDA_ARRAY_NUM_MAX_NDIM];
     int64_t shp_b[LAMBDA_ARRAY_NUM_MAX_NDIM], str_b[LAMBDA_ARRAY_NUM_MAX_NDIM];
-    int ndim_a = get_shape_strides(a, shp_a, str_a);
-    int ndim_b = get_shape_strides(b, shp_b, str_b);
+    int ndim_a = array_num_get_shape_strides(a, shp_a, str_a);
+    int ndim_b = array_num_get_shape_strides(b, shp_b, str_b);
     if (ndim_a < 1 || ndim_b < 1) return ItemError;
 
     int64_t out_shp[LAMBDA_ARRAY_NUM_MAX_NDIM], eff_a[LAMBDA_ARRAY_NUM_MAX_NDIM];
@@ -1056,8 +1057,8 @@ static Item cmp_scalar_item(Item a, Item b, int op) {
 static Item vec_cmp_broadcast(ArrayNum* a, ArrayNum* b, int op) {
     int64_t shp_a[LAMBDA_ARRAY_NUM_MAX_NDIM], str_a[LAMBDA_ARRAY_NUM_MAX_NDIM];
     int64_t shp_b[LAMBDA_ARRAY_NUM_MAX_NDIM], str_b[LAMBDA_ARRAY_NUM_MAX_NDIM];
-    int ndim_a = get_shape_strides(a, shp_a, str_a);
-    int ndim_b = get_shape_strides(b, shp_b, str_b);
+    int ndim_a = array_num_get_shape_strides(a, shp_a, str_a);
+    int ndim_b = array_num_get_shape_strides(b, shp_b, str_b);
     if (ndim_a < 1 || ndim_b < 1) return ItemError;
     int64_t out_shp[LAMBDA_ARRAY_NUM_MAX_NDIM], eff_a[LAMBDA_ARRAY_NUM_MAX_NDIM];
     int64_t eff_b[LAMBDA_ARRAY_NUM_MAX_NDIM];
@@ -1560,7 +1561,7 @@ static Item vec_classified_scalar_op(Item vec, Item scalar, int op,
     int64_t shape[LAMBDA_ARRAY_NUM_MAX_NDIM], strides[LAMBDA_ARRAY_NUM_MAX_NDIM];
     int64_t index[LAMBDA_ARRAY_NUM_MAX_NDIM] = {0};
     int ndim = get_type_id(rooted_vec.get()) == LMD_TYPE_ARRAY_NUM ?
-        get_shape_strides(rooted_vec.get().array_num, shape, strides) : 1;
+        array_num_get_shape_strides(rooted_vec.get().array_num, shape, strides) : 1;
     if (ndim < 1) return ItemError;
     int64_t source_offset = 0;
     for (int64_t i = 0; i < len; i++) {
@@ -1592,8 +1593,8 @@ static Item vec_classified_broadcast_op(ArrayNum* left, ArrayNum* right,
         int op, const LambdaNumericDecision* decision) {
     int64_t left_shape[LAMBDA_ARRAY_NUM_MAX_NDIM], left_stride[LAMBDA_ARRAY_NUM_MAX_NDIM];
     int64_t right_shape[LAMBDA_ARRAY_NUM_MAX_NDIM], right_stride[LAMBDA_ARRAY_NUM_MAX_NDIM];
-    int left_ndim = get_shape_strides(left, left_shape, left_stride);
-    int right_ndim = get_shape_strides(right, right_shape, right_stride);
+    int left_ndim = array_num_get_shape_strides(left, left_shape, left_stride);
+    int right_ndim = array_num_get_shape_strides(right, right_shape, right_stride);
     if (left_ndim < 1 || right_ndim < 1) return ItemError;
     int64_t out_shape[LAMBDA_ARRAY_NUM_MAX_NDIM];
     int64_t left_effective[LAMBDA_ARRAY_NUM_MAX_NDIM], right_effective[LAMBDA_ARRAY_NUM_MAX_NDIM];
@@ -1812,7 +1813,7 @@ static Item vector_cumulative_model(Item item, int op) {
     }
     int64_t shape[LAMBDA_ARRAY_NUM_MAX_NDIM], strides[LAMBDA_ARRAY_NUM_MAX_NDIM];
     int ndim = get_type_id(rooted_source.get()) == LMD_TYPE_ARRAY_NUM ?
-        get_shape_strides(rooted_source.get().array_num, shape, strides) : 1;
+        array_num_get_shape_strides(rooted_source.get().array_num, shape, strides) : 1;
     if (ndim < 1) return ItemError;
     // S7.10.5v3: sequence in, array out -- a list input gives an array
     return seq_finish_array(vector_finalize_result(&rooted_result, typed, ndim, shape));
@@ -3409,7 +3410,7 @@ Item fn_shape(Item vec) {
     ArrayNum* arr = vec.array_num;
     if (!arr) return ItemError;
     int64_t dims[LAMBDA_ARRAY_NUM_MAX_NDIM], strides[LAMBDA_ARRAY_NUM_MAX_NDIM];
-    int ndim = get_shape_strides(arr, dims, strides);
+    int ndim = array_num_get_shape_strides(arr, dims, strides);
     if (ndim < 1) return ItemError;
 
     List* result = list();
@@ -3470,7 +3471,7 @@ static bool arr_num_copy_into(ArrayNum* src, ArrayNum* dst, int64_t dst_base) {
     }
     // per-element conversion, walking src in C-order via shape/strides
     int64_t shp[LAMBDA_ARRAY_NUM_MAX_NDIM], str[LAMBDA_ARRAY_NUM_MAX_NDIM];
-    int ndim = get_shape_strides(src, shp, str);
+    int ndim = array_num_get_shape_strides(src, shp, str);
     if (ndim < 1) return false;
     int64_t idx[LAMBDA_ARRAY_NUM_MAX_NDIM] = {0};
     int64_t off = 0;
@@ -3498,7 +3499,7 @@ Item fn_transpose(Item vec) {
     if (!base) return ItemError;
     int64_t base_shape[LAMBDA_ARRAY_NUM_MAX_NDIM];
     int64_t base_strides[LAMBDA_ARRAY_NUM_MAX_NDIM];
-    int ndim = get_shape_strides(base, base_shape, base_strides);
+    int ndim = array_num_get_shape_strides(base, base_shape, base_strides);
     if (ndim < 1) return ItemError;
     // 1-D arrays: transpose is identity.
     if (ndim < 2) return vec;
@@ -3526,7 +3527,7 @@ Item fn_transpose(Item vec) {
     if (!s) return ItemError;
     view = rooted_view.get();
     base = rooted_base.get();
-    if (get_shape_strides(base, base_shape, base_strides) != ndim) return ItemError;
+    if (array_num_get_shape_strides(base, base_shape, base_strides) != ndim) return ItemError;
     ArrayNumShape* bs = (ArrayNumShape*)(uintptr_t)base->extra;
     s->ndim = (uint8_t)ndim;
     if (!array_num_init_derived_view(view, s, base, 0)) return ItemError;
@@ -3627,8 +3628,8 @@ Item fn_matmul(Item a_item, Item b_item) {
     ArrayNum* B = b_item.array_num;
     int64_t a_shp[LAMBDA_ARRAY_NUM_MAX_NDIM], a_str[LAMBDA_ARRAY_NUM_MAX_NDIM];
     int64_t b_shp[LAMBDA_ARRAY_NUM_MAX_NDIM], b_str[LAMBDA_ARRAY_NUM_MAX_NDIM];
-    int a_ndim = get_shape_strides(A, a_shp, a_str);
-    int b_ndim = get_shape_strides(B, b_shp, b_str);
+    int a_ndim = array_num_get_shape_strides(A, a_shp, a_str);
+    int b_ndim = array_num_get_shape_strides(B, b_shp, b_str);
     if (a_ndim < 1 || b_ndim < 1) return ItemError;
     bool rf = !elem_is_int(A->get_elem_type()) || !elem_is_int(B->get_elem_type());
     ArrayNumElemType ret_et = rf ? ELEM_FLOAT64 : ELEM_INT64;
@@ -3715,8 +3716,8 @@ Item fn_concat(Item a_item, Item b_item) {
     ArrayNum* B = b_item.array_num;
     int64_t a_shp[LAMBDA_ARRAY_NUM_MAX_NDIM], a_str[LAMBDA_ARRAY_NUM_MAX_NDIM];
     int64_t b_shp[LAMBDA_ARRAY_NUM_MAX_NDIM], b_str[LAMBDA_ARRAY_NUM_MAX_NDIM];
-    int a_ndim = get_shape_strides(A, a_shp, a_str);
-    int b_ndim = get_shape_strides(B, b_shp, b_str);
+    int a_ndim = array_num_get_shape_strides(A, a_shp, a_str);
+    int b_ndim = array_num_get_shape_strides(B, b_shp, b_str);
     if (a_ndim < 1 || b_ndim < 1) return ItemError;
     if (a_ndim != b_ndim) { log_error("fn_concat: ndim mismatch (%d vs %d)", a_ndim, b_ndim); return ItemError; }
     for (int ax = 1; ax < a_ndim; ax++)
@@ -3751,8 +3752,8 @@ Item fn_stack(Item a_item, Item b_item) {
     ArrayNum* B = b_item.array_num;
     int64_t a_shp[LAMBDA_ARRAY_NUM_MAX_NDIM], a_str[LAMBDA_ARRAY_NUM_MAX_NDIM];
     int64_t b_shp[LAMBDA_ARRAY_NUM_MAX_NDIM], b_str[LAMBDA_ARRAY_NUM_MAX_NDIM];
-    int a_ndim = get_shape_strides(A, a_shp, a_str);
-    int b_ndim = get_shape_strides(B, b_shp, b_str);
+    int a_ndim = array_num_get_shape_strides(A, a_shp, a_str);
+    int b_ndim = array_num_get_shape_strides(B, b_shp, b_str);
     if (a_ndim < 1 || b_ndim < 1) return ItemError;
     if (a_ndim != b_ndim) { log_error("fn_stack: ndim mismatch (%d vs %d)", a_ndim, b_ndim); return ItemError; }
     for (int ax = 0; ax < a_ndim; ax++)
@@ -3833,7 +3834,7 @@ Item fn_array_split(Item arr_item, int64_t n, int64_t axis) {
     if (n <= 0) { log_error("split: section count must be positive, got %lld", (long long)n); return ItemError; }
 
     int64_t shp[LAMBDA_ARRAY_NUM_MAX_NDIM], str[LAMBDA_ARRAY_NUM_MAX_NDIM];
-    int ndim = get_shape_strides(arr, shp, str);
+    int ndim = array_num_get_shape_strides(arr, shp, str);
     if (ndim < 1) return ItemError;
     if (axis < 0) axis += ndim;
     if (axis < 0 || axis >= ndim) {
@@ -3956,7 +3957,7 @@ double array_num_reduce_double(ArrayNum* arr, int op) {
     // strided / view / FLOAT16 / BOOL: walk every element in row-major logical
     // order via the shape side-table, reading each by its true type.
     int64_t shp[LAMBDA_ARRAY_NUM_MAX_NDIM], str[LAMBDA_ARRAY_NUM_MAX_NDIM];
-    int ndim = get_shape_strides(arr, shp, str);
+    int ndim = array_num_get_shape_strides(arr, shp, str);
     if (ndim < 1) return NAN;
     int64_t idx[LAMBDA_ARRAY_NUM_MAX_NDIM] = {0};
     int64_t off = 0;
@@ -4039,7 +4040,7 @@ static Item array_num_reduce_axis(Item arr_item, Item axis_item, int op, const c
     if (axis == INT64_MIN) { log_error("%s: axis must be an integer", name); return ItemError; }
     ArrayNum* arr = arr_item.array_num;
     int64_t shp[LAMBDA_ARRAY_NUM_MAX_NDIM], str[LAMBDA_ARRAY_NUM_MAX_NDIM];
-    int ndim = get_shape_strides(arr, shp, str);
+    int ndim = array_num_get_shape_strides(arr, shp, str);
     if (ndim < 1) return ItemError;
     if (axis < 0) axis += ndim;
     if (axis < 0 || axis >= ndim) {
@@ -4110,7 +4111,7 @@ static Item array_num_cumulative_axis(Item arr_item, Item axis_item, bool is_pro
     if (axis == INT64_MIN) { log_error("%s: axis must be an integer", name); return ItemError; }
     ArrayNum* arr = arr_item.array_num;
     int64_t shp[LAMBDA_ARRAY_NUM_MAX_NDIM], str[LAMBDA_ARRAY_NUM_MAX_NDIM];
-    int ndim = get_shape_strides(arr, shp, str);
+    int ndim = array_num_get_shape_strides(arr, shp, str);
     if (ndim < 1) return ItemError;
     if (axis < 0) axis += ndim;
     if (axis < 0 || axis >= ndim) {
@@ -4210,8 +4211,8 @@ Item fn_mask_index(Item arr_item, Item mask_item) {
     }
     int64_t a_shape[LAMBDA_ARRAY_NUM_MAX_NDIM], a_str[LAMBDA_ARRAY_NUM_MAX_NDIM];
     int64_t m_shape[LAMBDA_ARRAY_NUM_MAX_NDIM], m_str[LAMBDA_ARRAY_NUM_MAX_NDIM];
-    int a_ndim = get_shape_strides(arr, a_shape, a_str);
-    int m_ndim = get_shape_strides(mask, m_shape, m_str);
+    int a_ndim = array_num_get_shape_strides(arr, a_shape, a_str);
+    int m_ndim = array_num_get_shape_strides(mask, m_shape, m_str);
     if (a_ndim < 1 || m_ndim < 1) return ItemError;
     ArrayNumElemType et = arr->get_elem_type();
     size_t esz = ELEM_TYPE_SIZE[et >> 4];
@@ -4347,8 +4348,8 @@ Item fn_index_assign(Item arr_item, Item idx_item, Item val_item) {
     ArrayNum* mask = idx_item.array_num;
     int64_t a_shape[LAMBDA_ARRAY_NUM_MAX_NDIM], a_str[LAMBDA_ARRAY_NUM_MAX_NDIM];
     int64_t m_shape[LAMBDA_ARRAY_NUM_MAX_NDIM], m_str[LAMBDA_ARRAY_NUM_MAX_NDIM];
-    int a_ndim = get_shape_strides(arr, a_shape, a_str);
-    int m_ndim = get_shape_strides(mask, m_shape, m_str);
+    int a_ndim = array_num_get_shape_strides(arr, a_shape, a_str);
+    int m_ndim = array_num_get_shape_strides(mask, m_shape, m_str);
     if (a_ndim < 1 || m_ndim < 1) return ItemError;
     bool same = (m_ndim == a_ndim);
     for (int d = 0; same && d < a_ndim; d++) if (m_shape[d] != a_shape[d]) same = false;
@@ -4430,8 +4431,8 @@ static Item lambda_array_mask_assign_checked_impl(Item owner, Item mask, Item va
     int64_t array_strides[LAMBDA_ARRAY_NUM_MAX_NDIM] = {};
     int64_t mask_shape[LAMBDA_ARRAY_NUM_MAX_NDIM] = {};
     int64_t mask_strides[LAMBDA_ARRAY_NUM_MAX_NDIM] = {};
-    int array_ndim = get_shape_strides(array, array_shape, array_strides);
-    int mask_ndim = get_shape_strides(mask_array, mask_shape, mask_strides);
+    int array_ndim = array_num_get_shape_strides(array, array_shape, array_strides);
+    int mask_ndim = array_num_get_shape_strides(mask_array, mask_shape, mask_strides);
     if (array_ndim < 1 || mask_ndim != array_ndim) {
         set_runtime_error_no_trace(ERR_TYPE_MISMATCH,
             "typed array mask shape must match the target shape");
@@ -4587,8 +4588,8 @@ Item array_num_stencil(Item in_item, Item kernel_item, int op, int border,
     ArrayNum* ker = kernel_item.array_num;
     int64_t ishp[LAMBDA_ARRAY_NUM_MAX_NDIM], istr[LAMBDA_ARRAY_NUM_MAX_NDIM];
     int64_t kshp[LAMBDA_ARRAY_NUM_MAX_NDIM], kstr[LAMBDA_ARRAY_NUM_MAX_NDIM];
-    int indim = get_shape_strides(in, ishp, istr);
-    int kndim = get_shape_strides(ker, kshp, kstr);
+    int indim = array_num_get_shape_strides(in, ishp, istr);
+    int kndim = array_num_get_shape_strides(ker, kshp, kstr);
     if (indim < 1 || kndim < 1) return ItemError;
     if ((indim != 2 && indim != 3) || kndim != 2) {
         log_error("stencil: input must be 2-D (H,W) or 3-D (H,W,C); kernel 2-D (Kh,Kw)");
@@ -4712,7 +4713,7 @@ Item fn_avgpool(Item img, Item ksize)       { return stencil_box_op(img, ksize, 
 static Item array_num_convert(ArrayNum* in, ArrayNumElemType out_etype, double scale,
                               bool clamp_round, double lo, double hi) {
     int64_t shp[LAMBDA_ARRAY_NUM_MAX_NDIM], str[LAMBDA_ARRAY_NUM_MAX_NDIM];
-    int ndim = get_shape_strides(in, shp, str);
+    int ndim = array_num_get_shape_strides(in, shp, str);
     if (ndim < 1) return ItemError;
     ArrayNum* out = alloc_ndim_arraynum(out_etype, ndim, shp);
     if (!out) return ItemError;
@@ -4732,28 +4733,70 @@ static Item array_num_convert(ArrayNum* in, ArrayNumElemType out_etype, double s
     return { .array_num = out };
 }
 
-// load(path) -> (H, W, 4) ELEM_UINT8 RGBA image.
+// load(path|bytes|{data,max_pixels,normalize_orientation}) -> RGBA8 image.
 Item fn_load(Item path_item) {
-    if (get_type_id(path_item) != LMD_TYPE_STRING) {
-        log_error("load: expects a string file path"); return ItemError;
+    RootFrame roots(3);
+    Rooted<Item> request(roots, path_item);
+    Rooted<Item> source(roots, path_item);
+    int64_t max_pixels = 0;
+    bool normalize = false;
+    if (get_type_id(path_item) == LMD_TYPE_MAP) {
+        MapReader options = MapReader::fromItem(request.get());
+        source.set(options.get("data").item());
+        ItemReader limit = options.get("max_pixels");
+        if (!limit.isNull() && (!limit.isInt() || limit.asInt() <= 0)) {
+            log_error("IMAGE_LOAD: invalid pixel limit"); return ItemError;
+        }
+        max_pixels = limit.asInt();
+        normalize = options.get("normalize_orientation").asBool();
     }
-    String* path = path_item.get_string();
-    if (!path || path->len == 0) { log_error("load: empty path"); return ItemError; }
     int w = 0, h = 0, ch = 0;
-    unsigned char* buf = image_load(path->chars, &w, &h, &ch, 0);  // always decodes to RGBA
-    if (!buf) { log_error("load: failed to read image %s", path->chars); return ItemError; }
+    int orientation = 1;
+    unsigned char* buf = nullptr;
+    if (get_type_id(source.get()) == LMD_TYPE_BINARY) {
+        Binary* bytes = source.get().get_binary();
+        const unsigned char* data = binary_data(bytes);
+        size_t size = binary_length(bytes);
+        // reject oversized headers before either the decoder or GC allocates pixels.
+        if (!image_get_dimensions_from_memory(data, size, &w, &h) ||
+            (max_pixels > 0 && (int64_t)w * h > max_pixels)) {
+            log_error("IMAGE_LOAD: malformed or oversized image header"); return ItemError;
+        }
+        if (normalize) orientation = image_jpeg_exif_orientation_from_memory(data, size);
+        buf = image_load_from_memory(data, size, &w, &h, &ch);
+    } else if (get_type_id(source.get()) == LMD_TYPE_STRING) {
+        if (normalize) {
+            log_error("IMAGE_LOAD: orientation normalization requires a binary snapshot"); return ItemError;
+        }
+        String* path = source.get().get_string();
+        if (max_pixels > 0 && (!image_get_dimensions(path->chars, &w, &h) || (int64_t)w * h > max_pixels)) {
+            log_error("IMAGE_LOAD: oversized image header"); return ItemError;
+        }
+        buf = image_load(path->chars, &w, &h, &ch, 0);
+    }
+    if (!buf) { log_error("IMAGE_LOAD: cannot decode source"); return ItemError; }
     int64_t shape[3] = { h, w, 4 };
     ArrayNum* out = alloc_ndim_arraynum(ELEM_UINT8, 3, shape);
     if (!out) { image_free(buf); return ItemError; }
     memcpy(out->data, buf, (size_t)h * (size_t)w * 4);
     image_free(buf);
-    return { .array_num = out };
+    Rooted<Item> result(roots, (Item){.array_num = out});
+    if (orientation == 2 || orientation == 5 || orientation == 7) result.set(fn_flip(result.get(), {.item = i2it(1)}));
+    if (orientation == 3) result.set(fn_rot90(result.get(), {.item = i2it(2)}));
+    if (orientation == 4) result.set(fn_flip(result.get(), {.item = i2it(0)}));
+    if (orientation == 5 || orientation == 8) result.set(fn_rot90(result.get(), {.item = i2it(1)}));
+    if (orientation == 6 || orientation == 7) result.set(fn_rot90(result.get(), {.item = i2it(3)}));
+    return result.get();
 }
 
 // save(img, path) -> writes a PNG; true on success.  Accepts 2-D (H,W) grayscale
 // or 3-D (H,W,C) with C in {1,3,4}; float images are taken as [0,1] and scaled to
 // [0,255], integer images are clamped directly.
 Item fn_save(Item arr_item, Item path_item) {
+    // conversion allocates; keep the destination path and source live across GC.
+    RootFrame roots(3);
+    Rooted<Item> source(roots, arr_item);
+    Rooted<Item> destination(roots, path_item);
     if (get_type_id(arr_item) != LMD_TYPE_ARRAY_NUM) {
         log_error("save: expects an image (typed numeric array)"); return ItemError;
     }
@@ -4764,7 +4807,7 @@ Item fn_save(Item arr_item, Item path_item) {
     if (!path || path->len == 0) { log_error("save: empty path"); return ItemError; }
     ArrayNum* in = arr_item.array_num;
     int64_t shp[LAMBDA_ARRAY_NUM_MAX_NDIM], str[LAMBDA_ARRAY_NUM_MAX_NDIM];
-    int ndim = get_shape_strides(in, shp, str);
+    int ndim = array_num_get_shape_strides(in, shp, str);
     if (ndim < 1) return ItemError;
     int64_t H, W, C;
     if (ndim == 2)      { H = shp[0]; W = shp[1]; C = 1; }
@@ -4775,9 +4818,10 @@ Item fn_save(Item arr_item, Item path_item) {
     }
     // gather to a contiguous ubyte buffer (float [0,1] -> [0,255], int clamped)
     bool src_float = !elem_is_int(in->get_elem_type());
-    Item ub = array_num_convert(in, ELEM_UINT8, src_float ? 255.0 : 1.0, true, 0.0, 255.0);
-    if (get_type_id(ub) != LMD_TYPE_ARRAY_NUM) return ItemError;
-    int ok = image_save_png(path->chars, (const unsigned char*)ub.array_num->data,
+    Rooted<Item> ub(roots, array_num_convert(in, ELEM_UINT8, src_float ? 255.0 : 1.0, true, 0.0, 255.0));
+    if (get_type_id(ub.get()) != LMD_TYPE_ARRAY_NUM) return ItemError;
+    path = destination.get().get_string();
+    int ok = image_save_png(path->chars, (const unsigned char*)ub.get().array_num->data,
                             (int)W, (int)H, (int)C);
     if (!ok) { log_error("save: failed to write %s", path->chars); return ItemError; }
     return { .item = b2it(BOOL_TRUE) };
@@ -4832,7 +4876,7 @@ static inline double image_white(ArrayNumElemType et) {
 template<typename Fn>
 static Item array_num_point_op(ArrayNum* in, Fn fn) {
     int64_t shp[LAMBDA_ARRAY_NUM_MAX_NDIM], str[LAMBDA_ARRAY_NUM_MAX_NDIM];
-    int ndim = get_shape_strides(in, shp, str);
+    int ndim = array_num_get_shape_strides(in, shp, str);
     if (ndim < 1) return ItemError;
     ArrayNum* out = alloc_ndim_arraynum(in->get_elem_type(), ndim, shp);
     if (!out) return ItemError;
@@ -4875,7 +4919,7 @@ Item fn_grayscale(Item img) {
     if (get_type_id(img) != LMD_TYPE_ARRAY_NUM) { log_error("grayscale: expects an image array"); return ItemError; }
     ArrayNum* in = img.array_num;
     int64_t shp[LAMBDA_ARRAY_NUM_MAX_NDIM], str[LAMBDA_ARRAY_NUM_MAX_NDIM];
-    int ndim = get_shape_strides(in, shp, str);
+    int ndim = array_num_get_shape_strides(in, shp, str);
     if (ndim < 1) return ItemError;
     if (ndim == 2) return array_num_point_op(in, [](double v){ return v; });  // already 1-channel
     if (ndim != 3) { log_error("grayscale: image must be 2-D (H,W) or 3-D (H,W,C)"); return ItemError; }
@@ -4926,7 +4970,7 @@ Item fn_flip(Item img, Item axis_item) {
     if (get_type_id(img) != LMD_TYPE_ARRAY_NUM) { log_error("flip: expects an image array"); return ItemError; }
     ArrayNum* in = img.array_num;
     int64_t shp[LAMBDA_ARRAY_NUM_MAX_NDIM], str[LAMBDA_ARRAY_NUM_MAX_NDIM];
-    int ndim = get_shape_strides(in, shp, str);
+    int ndim = array_num_get_shape_strides(in, shp, str);
     if (ndim < 1) return ItemError;
     if (ndim != 2 && ndim != 3) { log_error("flip: image must be 2-D or 3-D"); return ItemError; }
     int64_t axis = (int64_t)item_to_double(axis_item);
@@ -4946,7 +4990,7 @@ Item fn_rot90(Item img, Item k_item) {
     if (get_type_id(img) != LMD_TYPE_ARRAY_NUM) { log_error("rot90: expects an image array"); return ItemError; }
     ArrayNum* in = img.array_num;
     int64_t shp[LAMBDA_ARRAY_NUM_MAX_NDIM], str[LAMBDA_ARRAY_NUM_MAX_NDIM];
-    int ndim = get_shape_strides(in, shp, str);
+    int ndim = array_num_get_shape_strides(in, shp, str);
     if (ndim < 1) return ItemError;
     if (ndim != 2 && ndim != 3) { log_error("rot90: image must be 2-D or 3-D"); return ItemError; }
     int64_t k = ((int64_t)item_to_double(k_item)) % 4; if (k < 0) k += 4;
@@ -4980,7 +5024,7 @@ Item fn_crop(Item img, Item rrange, Item crange) {
     }
     ArrayNum* in = img.array_num;
     int64_t shp[LAMBDA_ARRAY_NUM_MAX_NDIM], str[LAMBDA_ARRAY_NUM_MAX_NDIM];
-    int ndim = get_shape_strides(in, shp, str);
+    int ndim = array_num_get_shape_strides(in, shp, str);
     if (ndim < 1) return ItemError;
     if (ndim != 2 && ndim != 3) { log_error("crop: image must be 2-D or 3-D"); return ItemError; }
     int64_t H = shp[0], W = shp[1], C = (ndim == 3) ? shp[2] : 1;
@@ -5014,7 +5058,7 @@ Item fn_histogram(Item img, Item bins_item) {
     if (!counts) return ItemError;
     for (int64_t i = 0; i < bins; i++) counts->items[i] = 0;   // v5: i64 lane
     int64_t shp[LAMBDA_ARRAY_NUM_MAX_NDIM], str[LAMBDA_ARRAY_NUM_MAX_NDIM];
-    int ndim = get_shape_strides(in, shp, str);
+    int ndim = array_num_get_shape_strides(in, shp, str);
     if (ndim < 1) return ItemError;
     int64_t total = 1; for (int d = 0; d < ndim; d++) total *= shp[d];
     int64_t idx[LAMBDA_ARRAY_NUM_MAX_NDIM]; for (int d = 0; d < ndim; d++) idx[d] = 0;
@@ -5039,7 +5083,7 @@ Item fn_otsu(Item img) {
     bool is_float = !elem_is_int(in->get_elem_type());
     int64_t h[256]; for (int i = 0; i < BINS; i++) h[i] = 0;
     int64_t shp[LAMBDA_ARRAY_NUM_MAX_NDIM], str[LAMBDA_ARRAY_NUM_MAX_NDIM];
-    int ndim = get_shape_strides(in, shp, str);
+    int ndim = array_num_get_shape_strides(in, shp, str);
     if (ndim < 1) return ItemError;
     int64_t total = 1; for (int d = 0; d < ndim; d++) total *= shp[d];
     int64_t idx[LAMBDA_ARRAY_NUM_MAX_NDIM]; for (int d = 0; d < ndim; d++) idx[d] = 0;
@@ -5077,7 +5121,7 @@ Item fn_label(Item mask_item) {
     if (get_type_id(mask_item) != LMD_TYPE_ARRAY_NUM) { log_error("label: expects a 2-D mask array"); return ItemError; }
     ArrayNum* in = mask_item.array_num;
     int64_t shp[LAMBDA_ARRAY_NUM_MAX_NDIM], str[LAMBDA_ARRAY_NUM_MAX_NDIM];
-    int ndim = get_shape_strides(in, shp, str);
+    int ndim = array_num_get_shape_strides(in, shp, str);
     if (ndim < 1) return ItemError;
     if (ndim != 2) { log_error("label: mask must be 2-D (H,W)"); return ItemError; }
     int64_t H = shp[0], W = shp[1];
@@ -5161,7 +5205,7 @@ Item fn_resize(Item img, Item h_item, Item w_item) {
     if (get_type_id(img) != LMD_TYPE_ARRAY_NUM) { log_error("resize: expects an image array"); return ItemError; }
     ArrayNum* in = img.array_num;
     int64_t shp[LAMBDA_ARRAY_NUM_MAX_NDIM], str[LAMBDA_ARRAY_NUM_MAX_NDIM];
-    int ndim = get_shape_strides(in, shp, str);
+    int ndim = array_num_get_shape_strides(in, shp, str);
     if (ndim < 1) return ItemError;
     if (ndim != 2 && ndim != 3) { log_error("resize: image must be 2-D or 3-D"); return ItemError; }
     int64_t nH = (int64_t)item_to_double(h_item), nW = (int64_t)item_to_double(w_item);
@@ -5181,7 +5225,7 @@ Item fn_rotate(Item img, Item deg_item) {
     if (get_type_id(img) != LMD_TYPE_ARRAY_NUM) { log_error("rotate: expects an image array"); return ItemError; }
     ArrayNum* in = img.array_num;
     int64_t shp[LAMBDA_ARRAY_NUM_MAX_NDIM], str[LAMBDA_ARRAY_NUM_MAX_NDIM];
-    int ndim = get_shape_strides(in, shp, str);
+    int ndim = array_num_get_shape_strides(in, shp, str);
     if (ndim < 1) return ItemError;
     if (ndim != 2 && ndim != 3) { log_error("rotate: image must be 2-D or 3-D"); return ItemError; }
     int64_t H = shp[0], W = shp[1], C = (ndim == 3) ? shp[2] : 1;
@@ -5204,8 +5248,8 @@ Item fn_affine_warp(Item img, Item m_item) {
     ArrayNum* in = img.array_num; ArrayNum* M = m_item.array_num;
     int64_t shp[LAMBDA_ARRAY_NUM_MAX_NDIM], str[LAMBDA_ARRAY_NUM_MAX_NDIM];
     int64_t mshp[LAMBDA_ARRAY_NUM_MAX_NDIM], mstr[LAMBDA_ARRAY_NUM_MAX_NDIM];
-    int ndim = get_shape_strides(in, shp, str);
-    int mndim = get_shape_strides(M, mshp, mstr);
+    int ndim = array_num_get_shape_strides(in, shp, str);
+    int mndim = array_num_get_shape_strides(M, mshp, mstr);
     if (ndim < 1 || mndim < 1) return ItemError;
     if (ndim != 2 && ndim != 3) { log_error("affine_warp: image must be 2-D or 3-D"); return ItemError; }
     if (mndim != 2 || mshp[0] != 2 || mshp[1] != 3) { log_error("affine_warp: matrix must be 2x3"); return ItemError; }

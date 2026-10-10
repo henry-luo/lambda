@@ -53,6 +53,8 @@ int image_get_dimensions(const char* filename, int* width, int* height);
 // Get image dimensions from memory buffer without decoding pixel data
 // Returns 1 on success, 0 on failure
 int image_get_dimensions_from_memory(const unsigned char* data, size_t length, int* width, int* height);
+// metadata parsing is shared by native painting and array image imports.
+int image_jpeg_exif_orientation_from_memory(const unsigned char* data, size_t length);
 
 // ============================================================================
 // Multi-frame GIF support

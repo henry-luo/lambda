@@ -32,6 +32,10 @@ typedef struct RadiantCanvasStateSnapshot {
 } RadiantCanvasStateSnapshot;
 
 RADIANT_C_API bool radiant_canvas_ensure(void* canvas_element);
+// pixels are a synchronous borrow; canvas keeps its own document-owned copy.
+RADIANT_C_API bool radiant_canvas_set_pixels(void* canvas_element, const uint8_t* rgba,
+                                            uint32_t width, uint32_t height,
+                                            const int64_t* strides);
 // caller releases the encoded bytes with strbuf_free; no surface escapes the waist.
 RADIANT_C_API struct StrBuf* radiant_canvas_to_data_url(void* canvas_element);
 RADIANT_C_API bool radiant_canvas_set_dimension(void* canvas_element,

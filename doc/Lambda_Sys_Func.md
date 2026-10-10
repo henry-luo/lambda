@@ -1619,12 +1619,39 @@ yet; their signatures come from the system-function registry
 | Complex numbers | `complex(re, im)`, `real(z)`, `imag(z)`, `conj(z)` — `complex(1, 2) + 1` is `2+2j` |
 | Array shape | `shape(a)`, `reshape(a, shape)`, `transpose(a)`, `flatten(a)`, `ravel(a)`, `matmul(a, b)`, `concat(a, b)`, `stack(a, b)`, `subview(a, start, end)`, `is_view(a)`, `ndim(a)` |
 | In-place mutation (`pn`) | `push(arr, value)`, `splice(arr, start, count)` |
-| Image processing | `load(path)`, `save(img, path)`, `as_float`, `as_ubyte`, `invert`, `gamma`, `threshold`, `grayscale`, `flip`, `rot90`, `crop(img, w, h)`, `resize(img, w, h)`, `rotate`, `affine_warp`, `convolve`, `blur`, `erode`, `dilate`, `median_filter`, `maxpool`, `avgpool`, `histogram`, `otsu`, `label` |
+| Image processing | `load(path_or_bytes)`, `save(img, path)`, `as_float`, `as_ubyte`, `invert`, `gamma`, `threshold`, `grayscale`, `flip`, `rot90`, `crop(img, rows, columns)`, `resize(img, height, width)`, `rotate`, `affine_warp`, `convolve`, `blur`, `erode`, `dilate`, `median_filter`, `maxpool`, `avgpool`, `histogram`, `otsu`, `label` |
 | Reactive UI | `apply(target, options?)`, `emit(event, payload)` — see [Reactive_UI.md](Reactive_UI.md) |
 | Editor bridge | `undo()`, `redo()`, `edit_commit(description?)` |
 | HTTP server (`pn`, untested) | `io.http_create_server(config)`, `io.http_listen(server, port)`, `io.http_route(server, method, path, handler)`, `io.http_use(server, middleware)`, `io.http_static(server, url_path, dir)`, `io.http_stop(server)` |
 
 ---
+
+### Image snapshots and native canvas upload
+
+`load(string_path)` retains its existing raw-orientation behavior.
+`load(binary_bytes)` decodes an immutable encoded snapshot into an `(H,W,4)`
+ubyte RGBA array. The request form adds pre-decode limits and optional JPEG
+EXIF normalization:
+
+```lambda
+let bytes = input("photo.jpg", 'binary')^
+let image = load({data:bytes, max_pixels:16000000, normalize_orientation:true})^
+```
+
+`max_pixels` must be a positive integer when supplied. Header dimensions are
+checked before decoding. `normalize_orientation` handles all eight JPEG EXIF
+orientations and requires binary `data`; PNG pixels need no orientation change.
+Malformed input and exceeded limits return errors. Acquisition remains in the
+existing I/O layer (**D7.1.2v2**); binary decoding introduces no Radiant dependency.
+
+In a Radiant event handler, `dom.set_canvas_pixels(canvas,image)^` synchronously
+copies a rank-three ubyte RGBA array into a document-owned retained canvas.
+Strided arrays are accepted. The bitmap dimensions become the array width and
+height; CSS controls its displayed size. Upload replaces the pixels, preserves
+straight-alpha array data, and premultiplies the native surface. Uploads are
+limited to 4096 pixels per dimension and 4,194,304 pixels, and reject an existing
+WebGL context. No borrowed array pointer survives the call (**D4.5.2**).
+The [Photo Studio demo](../test/demo/photo/README.md) uses this bridge.
 
 ## Quick Reference Table
 

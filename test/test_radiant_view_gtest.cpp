@@ -2560,6 +2560,59 @@ TEST(RadiantViewTest, LambdaSelectValueReadsLiveOptionSelectedness) {
     shell_result_free(&result);
 }
 
+static void test_radiant_view_expect_replay(const char* page, const char* replay,
+        const ShellEnvEntry* env, bool clean_memtrack = false, int timeout_ms = 180000) {
+    ShellResult result = test_radiant_view_run_logged_headless(
+        page, replay, env, nullptr, nullptr, timeout_ms);
+    const char* output = result.stdout_buf ? result.stdout_buf : "";
+    EXPECT_FALSE(result.timed_out) << output;
+    EXPECT_EQ(result.exit_code, 0) << output;
+    EXPECT_NE(strstr(output, "Result: PASS"), nullptr) << output;
+    if (clean_memtrack) EXPECT_NE(strstr(output, "[MEMTRACK_LIVE] bytes=0 count=0"), nullptr) << output;
+    shell_result_free(&result);
+}
+
+TEST(RadiantViewTest, PhotoCanvasCopiesRgbaAndReleasesItAcrossGc) {
+    // D4.5.2 / D5.3.3: the retained surface must outlive borrowed Lambda pixels.
+    const ShellEnvEntry env[] = {
+        {"LAMBDA_GC_FORCE_EVERY", "1"}, {"LAMBDA_GC_POISON_FREED", "1"},
+        {"LAMBDA_FUNC_JIT_THRESHOLD", "1"}, {"LAMBDA_SATELLITE_SYNC", "1"},
+        {"MEMTRACK_MODE", "STATS"}, {"VIEW_MEM_STAGES", "1"}, {nullptr, nullptr},
+    };
+    test_radiant_view_expect_replay(
+        "test/demo/photo/tests/_canvas_bridge.ls", "test/demo/photo/tests/canvas_bridge.json", env, true);
+}
+
+TEST(RadiantViewTest, PhotoEditorRetainsCanvasAcrossEditsAndHistory) {
+    for (const char* tier : {"auto", "jit"}) {
+        SCOPED_TRACE(tier);
+        const ShellEnvEntry env[] = {{"LAMBDA_EXEC_BACKEND", tier}, {nullptr, nullptr}};
+        test_radiant_view_expect_replay(
+            "test/demo/photo/photo.ls", "test/demo/photo/tests/photo_smoke.json", env);
+    }
+}
+
+TEST(RadiantViewTest, PhotoCropDraftAndKeyboardCompare) {
+    for (const char* tier : {"auto", "jit"}) {
+        SCOPED_TRACE(tier);
+        const ShellEnvEntry env[] = {
+            {"LAMBDA_EXEC_BACKEND", tier},
+            {"PHOTO_SOURCE", "test/demo/photo/tests/rgba.png"}, {nullptr, nullptr},
+        };
+        for (const char* replay : {"test/demo/photo/tests/photo_gestures.json",
+                                   "test/demo/photo/tests/photo_responsive.json"}) {
+            SCOPED_TRACE(replay);
+            test_radiant_view_expect_replay(
+                "test/demo/photo/photo.ls", replay, env);
+        }
+    }
+}
+
+TEST(RadiantViewTest, PhotoToolButtonsPreserveContainerAlignment) {
+    test_radiant_view_expect_replay(
+        "test/demo/photo/tests/_button_layout.ls", "test/demo/photo/tests/button_layout.json", nullptr, false, 30000);
+}
+
 TEST(RadiantViewTest, DoomNativeGameplayAndEpisodeLifecycle) {
     const char* replays[] = {"e1m1_walkthrough", "e1m1_exit", "e1m1_death", "episode", "camera", "lifecycle"};
     for (const char* replay : replays) {

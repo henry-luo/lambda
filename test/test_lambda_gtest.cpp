@@ -30,6 +30,7 @@ static const char* FUNCTIONAL_TEST_DIRECTORIES[] = {
     "test/lambda/ui_dtna",
     "test/lambda/map",
     "test/demo/doom/tests",
+    "test/demo/photo/tests",
     "test/lambda/graph/mermaid",
     "test/lambda/graph/graphviz",
     "test/lambda/graph/structurizr",
@@ -105,6 +106,7 @@ TEST(DoomDemoTests, GeometryInputAndResourceContractsAgreeAcrossTiers) {
 // Procedural scripts (executed with ./lambda.exe run <script>)
 static const char* PROCEDURAL_TEST_DIRECTORIES[] = {
     "test/lambda/proc",
+    "test/demo/photo/tests/proc",
     "test/lambda/conc",
     "test/lambda/pdf",
     "test/benchmark/awfy",
