@@ -16,7 +16,8 @@ pub fn render(ast, options) map | error {
     else {
     let profile = font.prepare(ast, options)^
     let context = {profile: profile, style: if (options.display == true) "display" else "text",
-        variant: "auto", cramped: false, size: 1.0, pixels_per_em: options.font_size or 16.0,
+        display_mode:options.display == true, variant: "auto", cramped: false, size: 1.0,
+        pixels_per_em: options.font_size or 16.0,
         base_uri: options.base_uri}
     let result = node(ast, context)^
     // The title retains searchable, accessible math when painting font-local glyphs.
@@ -31,6 +32,8 @@ pub fn render(ast, options) map | error {
 
 // LaTeX's 10pt size ladder has distinct script sizes; size declarations are absolute.
 let size_multipliers = [0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 1.2, 1.44, 1.728, 2.074, 2.488]
+// classes.dtx/size10.clo text baselines, in units of the initial 10pt em.
+let text_baselines = [0.6, null, 0.8, 0.95, 1.1, 1.2, 1.4, 1.8, 2.2, 2.5, 3.0]
 let size_styles = [[0,0,0], [1,0,0], [2,0,0], [3,1,0], [4,1,0], [5,2,0],
     [6,3,1], [7,5,2], [8,6,5], [9,7,6], [10,9,8]]
 let size_commands = ["tiny", "sixptsize", "scriptsize", "footnotesize", "small", "normalsize",
@@ -64,7 +67,7 @@ fn atom_type(ch) {
 fn character(ch, c, atom, literal = false) {
     let actual = if (ch == "-" and not literal) "−" else ch
     if (not literal and contains(c.profile.closed_composites,actual)) closed_integral(actual,c)^
-    else bx.glyph(font.character(c.profile, actual, c.variant)^, scale(c), atom)
+    else bx.glyph(font.character(c.profile, actual, c.variant, literal)^, scale(c), atom)
 }
 
 fn text(text_value, c, literal = false) {
@@ -117,6 +120,9 @@ fn group_boxes(items, c, i) {
         else if (size_index != null and name(item) == 'size_command')
             group_boxes(items, {*:c, size_index:size_index,
                 style:if (c.style == "display") "display" else "text"}, i + 1)^
+        else if (item is element and name(item) == 'mod_command')
+            // Expand into the enclosing list so declarations in macro arguments retain TeX scope.
+            group_boxes([*modulo_items(item,c),*slice(items,i + 1,len(items))],c,0)^
         else if (item is element and name(item) == 'color_switch') {
             let tail = group(slice(items, i + 1, len(items)), c)^;
             let color = item.color_raw or util.text_of(item.color);
@@ -163,7 +169,7 @@ fn node(n, c) {
         case 'verbatim': text(if (n.starred) replace(string(n.value), " ", "␣") else string(n.value), {*:c, text_variant:"mono"}, true)^
         case 'box_transform': transformed(n, c)^
         case 'equation_tag': equation_tag(n, c)^
-        case 'mod_command': modulo(n, c)^
+        case 'mod_command': group(modulo_items(n,c),c)^
         case 'cd_arrow': diagram_arrow(n, c)^
         case 'layout_control': bx.empty()
         case 'array_rule': bx.empty()
@@ -208,7 +214,7 @@ fn command(raw, c) {
             else text(unicode, if (is_large) {*:c, variant: "normal"} else c)^
         let centered = if (is_large) center_axis(result, c) else result;
         {*:centered, type: atom, limits: is_large and (key == "intop" or not contains(key, "int"))}
-    } else if (key == "mathstrut") {*:bx.empty(), height:0.7 * font.UNITS * scale(c), depth:0.3 * font.UNITS * scale(c)}
+    } else if (key == "mathstrut") phantom(<phantom_command cmd:"\\vphantom", content:"(">,c)^
     else if (key == "KaTeX") katex_logo(c)^
     else if (contains(["TeX", "LaTeX"], key)) text(key, {*:c, text_variant:"normal"}, true)^
     else if (contains([",", ":", ";", "!", "quad", "qquad", "enspace", "thinspace"], key))
@@ -351,6 +357,13 @@ fn limits_box(base, lower, upper, c) {
         depth:result.depth + (if (lower != null) metric(c, "limit_extra_padding") else 0.0)}
 }
 
+fn text_baseline(c) number | error {
+    let amount = text_baselines[c.size_index or 5];
+    // sixptsize is a math extension, not a size10.clo text-baseline definition.
+    if (amount == null) error("math: no text-strut baseline defined for \\sixptsize")
+    else amount * font.UNITS * c.size
+}
+
 fn fraction(n, c) {
     let key = command_name(string(n.cmd or "frac"))
     let chosen = if (n.style != null and n.style != "") ["display", "text", "script", "scriptscript"][int(n.style)] else null
@@ -358,7 +371,11 @@ fn fraction(n, c) {
         else if (contains(["dfrac", "dbinom", "cfrac"], key)) with_style(c, "display")
         else if (contains(["tfrac", "tbinom"], key)) with_style(c, "text") else c
     let child = fraction_child(context)
-    let numer = node(n.numer, child)^
+    let raw_numer = node(n.numer, child)^
+    // amsmath cfrac uses the surrounding text strut even in script math; ltfsstrc.dtx defines 70/30.
+    let baseline = if (key == "cfrac") text_baseline(c)^ else 0.0
+    let numer = if (key == "cfrac") {*:raw_numer, height:max(raw_numer.height,0.7 * baseline),
+        depth:max(raw_numer.depth,0.3 * baseline)} else raw_numer
     let denom = node(n.denom, {*:child, cramped: true})^
     let explicit_thickness = if (n.thickness != null and string(n.thickness) != "") dimension(string(n.thickness), context) else null
     let bar = if (explicit_thickness != null) explicit_thickness > 0.0 else not contains(["binom", "dbinom", "tbinom", "choose", "atop", "brace", "brack"], key)
@@ -379,7 +396,9 @@ fn fraction(n, c) {
     let up = if (bar) max(up0, axis + thickness / 2.0 + numer.depth + num_gap) else up0 + gap / 2.0
     let down = if (bar) max(down0, thickness / 2.0 + denom.height - axis + denom_gap) else down0 + gap / 2.0
     let width = max(numer.width, denom.width)
-    let result = bx.compose([{box: numer, x: (width - numer.width) / 2.0, y: 0.0 - up},
+    let alignment = if (key == "cfrac") util.text_of(n.options) else "c"
+    let num_x = if (alignment == "l") 0.0 else if (alignment == "r") width - numer.width else (width - numer.width) / 2.0
+    let result = bx.compose([{box: numer, x:num_x, y: 0.0 - up},
         {box: denom, x: (width - denom.width) / 2.0, y: down},
         *if (bar) [{box: bx.rule(width, thickness, 0.0 - axis - thickness / 2.0), x: 0.0, y: 0.0}] else []], width, "mord")
     let fences = if (contains(["binom", "dbinom", "tbinom", "choose"], key)) ["(", ")"]
@@ -388,7 +407,9 @@ fn fraction(n, c) {
     let target = metric(context, if (display) "delimiter_size_display" else "delimiter_size",
         c.profile.facts.constants.delimited_sub_formula_min_height);
     bx.row([delimiter(fences[0], target, context, "mopen")^, result,
-        delimiter(fences[1], target, context, "mclose")^], "mord")
+        delimiter(fences[1], target, context, "mclose")^,
+        // cfrac removes the right null-delimiter space so nested rules end together.
+        *if (key == "cfrac") [bx.empty(0.0 - dimension("1.2pt",context))] else []], "mord")
 }
 
 fn center_axis(b, c) => bx.shifted(b, 0.0, (b.height - b.depth) / 2.0 - metric(c, "axis_height"), b.width)
@@ -433,7 +454,11 @@ fn delimited(n, c) {
 }
 
 fn sized_delimiter(n, c) {
-    let level = sym.get_delim_size(command_name(string(n.size or n.cmd or "big"))) or 1.0
+    let key = command_name(string(n.size or n.cmd or "big"))
+    let level = sym.get_delim_size(key) or 1.0
+    // fontmath.ltx wraps bigl/bigr/bigm in mathopen/mathclose/mathrel respectively.
+    let atom = if (ends_with(key,"l")) "mopen" else if (ends_with(key,"r")) "mclose"
+        else if (ends_with(key,"m")) "mrel" else "mord"
     let raw = string(n.delim or n.value or util.text_of(n))
     let ch = sym.lookup_symbol(command_name(raw)) or raw
     let recipe = font.tex_arrow(c.profile,ord(ch))^;
@@ -441,8 +466,8 @@ fn sized_delimiter(n, c) {
         // amsmath bBigg@: a text-style hbox and 1.2 * math-strut extent times 1/1.5/2/2.5.
         let context = with_style(c,"text")
         let extent = c.profile.tex.math_strut_extent * level * text_scale(c);
-        delimiter(raw,delimiter_target(extent,context),context,"mord")^
-    } else delimiter(raw,font.UNITS * scale(c) * level,c,"mord")^
+        delimiter(raw,delimiter_target(extent,context),context,atom)^
+    } else delimiter(raw,font.UNITS * scale(c) * level,c,atom)^
 }
 
 fn radical(n, c) {
@@ -642,15 +667,19 @@ fn equation_tag(n, c) {
     if (n.starred) body else bx.row([character("(",c,"mord")^, body, character(")",c,"mord")^])
 }
 
-fn modulo(n, c) {
+fn modulo_items(n, c) {
     let key = command_name(string(n.cmd))
-    let body = node(n.body,c)^
-    let label = text("mod", {*:c, text_variant:"normal"}, true)^
-    let gap = bx.empty(250.0 * scale(c))
-    let expression = if (key == "pod") body else bx.row([label, gap, body]);
-    if (key == "bmod") {*:label, type:"mbin"}
-    else bx.row([bx.empty(500.0 * scale(c)), *if (key == "mod") [expression] else
-        [character("(",c,"mopen")^, expression, character(")",c,"mclose")^]])
+    let body = if (n.body is element and name(n.body) == 'group') util.content_items(n.body)
+        else if (n.body == null) [] else [n.body]
+    let label = <style_command cmd:"\\mathrm",arg:"mod">
+    let script_style = c.style == "script" or c.style == "scriptscript"
+    // amsmath.dtx: bmod has 5mu kerns and nonscript -medmuskip; pod/mod test display mode, not style.
+    let binary_gap = <skip_command cmd:"\\mkern",value:if (script_style) "5mu" else "1mu">
+    let leading = <skip_command cmd:"\\mkern",value:if (c.display_mode) "18mu" else if (key == "mod") "12mu" else "8mu">;
+    if (key == "bmod") [binary_gap,<math_atom atom:"mbin",body:label>,binary_gap]
+    else [leading,*if (key != "mod") ["("] else [],
+        *if (key != "pod") [label,<skip_command cmd:"\\mkern",value:"6mu">] else [],*body,
+        *if (key != "mod") [")"] else []]
 }
 
 fn diagram_arrow(n, c) {
@@ -765,10 +794,11 @@ fn matrix(n, c) {
 fn phantom(n, c) {
     let base = node(n.content, c)^
     let key = command_name(string(n.cmd));
-    {*:base, character:false, body: if (key == "smash") base.body else <g>,
-        width: if (key == "vphantom") 0.0 else base.width,
-        height: if (key == "hphantom" or (key == "smash" and util.text_of(n.options) != "b")) 0.0 else base.height,
-        depth: if (key == "hphantom" or (key == "smash" and util.text_of(n.options) != "t")) 0.0 else base.depth}
+    // LaTeX finph@nt/finsm@sh emits an ordinary box, without the source noad's glyph/limit metadata.
+    bx.make(if (key == "smash") base.body else <g>,
+        if (key == "vphantom") 0.0 else base.width,
+        if (key == "hphantom" or (key == "smash" and util.text_of(n.options) != "b")) 0.0 else base.height,
+        if (key == "hphantom" or (key == "smash" and util.text_of(n.options) != "t")) 0.0 else base.depth)
 }
 
 fn enclosed(n, c) {

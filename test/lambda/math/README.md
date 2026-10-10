@@ -188,6 +188,17 @@ explicitly skipped if their executables are unavailable; missing packages fail:
 npm test --prefix test/lambda/math
 ```
 
+This command also runs `tex_conformance.test.mjs`: 252 independently executed
+TeX boxes and 126 relations for AMS modulo glue/scope, parenthesis phantoms, sized
+delimiter classes, and continued-fraction alignment/text struts. It checks all
+four styles and both AMS display-flag values. TeX's shipped numerator positions
+are compared with the measured SVG glyph positions; glyph-font differences
+are excluded through width deltas. Named-size probes explicitly select the
+bundled companion's scaled CM10 profile. This is a bounded conformance check,
+not a certificate for all math constructions. Its scripts, logs, generated PDF,
+package version records, and relation data stay under `temp/math-conformance-*`.
+Run it alone with `node --test test/lambda/math/tex_conformance.test.mjs`.
+
 The checks also run the comparison pipeline for both image and reaction-arrow
 fixtures. They require a built `lambda.exe`, verify all eight embedded logos in
 native PNG output, and check the rendered arrow glyphs instead of command text.

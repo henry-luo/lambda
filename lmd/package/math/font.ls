@@ -61,10 +61,20 @@ let styled_commands = [
     {cmd: "\\mathsf", style: "sans"},
     {cmd: "\\mathsfit", style: "sansitalic"},
     {cmd: "\\mathtt", style: "mono"},
-    {cmd: "\\operatorname", style: "normal"}
+    {cmd: "\\operatorname", style: "normal"},
+    {cmd:"\\textbf",style:"bold"}, {cmd:"\\textit",style:"italic"}, {cmd:"\\emph",style:"italic"},
+    {cmd:"\\textsf",style:"sans"}, {cmd:"\\texttt",style:"mono"}
 ]
 
 pub fn command_variant(cmd) => [for (entry in styled_commands where entry.cmd == cmd) entry.style][0]
+
+fn source_items(node) {
+    let attrs = ["value", "name", "cmd", "text", "base", "sub", "sup", "numer", "denom",
+        "radicand", "index", "arg", "content", "body", "left", "right", "above", "below",
+        "label", "over", "under", "delim", "annotation", "upper", "lower", "target", "display", "script", "scriptscript"];
+    if (node is array) node
+    else if (node is element) [*[for (attr in attrs) node[attr]], *content(node)] else []
+}
 
 fn collect(node) {
     if (node is string or node is symbol) {
@@ -72,14 +82,15 @@ fn collect(node) {
         let command = if (slice(text, 0, 1) == "\\") slice(text, 1, len(text)) else text
         text ++ (sym.lookup_symbol(text) or "") ++ (sym.get_accent(command) or "") ++
             (if (command == "KaTeX") "KATEX" else "")
-    } else if (node is array) util.str_join([for (child in node) collect(child)], "")
-    else if (node is element) {
-        let attrs = ["value", "name", "cmd", "text", "base", "sub", "sup", "numer", "denom",
-            "radicand", "index", "arg", "content", "body", "left", "right", "above", "below",
-            "label", "over", "under", "delim", "annotation", "upper", "lower", "target", "display", "script", "scriptscript"];
-        util.str_join([for (attr in attrs) collect(node[attr])], "") ++ collect(content(node)) ++
+    } else util.str_join([for (child in source_items(node)) collect(child)], "") ++
             (if (name(node) == 'verbatim' and node.starred) "␣" else "")
-    } else ""
+}
+
+fn collect_styles(node) {
+    // Literal command spellings inside verbatim/text are not font declarations.
+    let style = if (node is element and name(node) == 'verbatim') "mono"
+        else if (node is element) command_variant(string(node.cmd or node.name or "")) else null;
+    [*if (style != null) [style] else [], *[for (child in source_items(node), request in collect_styles(child)) request]]
 }
 
 // Keep the CSS alias and style alongside measured geometry so SVG text selects the same face.
@@ -117,10 +128,7 @@ pub fn prepare(ast, options) map | error {
     let facts = {*:native, constants: if (native.has_math) native.constants else fallback.constants(native.font_metrics)}
     // Ordinary fonts put italic/bold letters in separate faces, not Unicode math alphabets.
     // Only request style faces used by this formula; each query owns its font resources.
-    let needed_styles = unique(["italic", *[for (entry in styled_commands where contains(source, entry.cmd)) entry.style],
-        *[for (entry in [{cmd: "\\textbf", style: "bold"}, {cmd: "\\textit", style: "italic"},
-            {cmd: "\\emph", style: "italic"}, {cmd: "\\textsf", style: "sans"}, {cmd: "\\texttt", style: "mono"}]
-            where contains(source, entry.cmd)) entry.style]])
+    let needed_styles = unique(["italic",*collect_styles(ast)])
     let style_faces = if (native.has_math) [] else [for (style in needed_styles where style != "normal")
         (let weight = if (style == "bold" or style == "bolditalic") 700 else 400,
          let slant = if (contains(["italic","bolditalic","sansitalic"],style)) "italic" else "normal",
@@ -218,13 +226,15 @@ fn style_facts(profile, style) => [for (entry in profile.style_faces where entry
 
 pub fn text_metrics(profile, style) => (style_facts(profile,style) or profile.facts).font_metrics
 
-pub fn character(profile, ch, style) map | error {
-    let cp = variant(ch, style)
+pub fn character(profile, ch, style, literal = false) map | error {
+    let cp = if (literal) ord(ch) else variant(ch, style)
     let preferred = lookup(profile, profile.facts, cp)
     let actual = effective_style(ch, style)
     let styled = style_facts(profile,actual)
     let ordinary = lookup(profile, styled or profile.facts, ord(ch))
-    if (preferred != null) preferred
+    // Text punctuation must follow its text face, not the base math face's unchanged codepoint.
+    if (literal and ordinary != null) ordinary
+    else if (preferred != null) preferred
     else if (ordinary != null) ordinary
     else glyph(profile, ord(ch))^
 }

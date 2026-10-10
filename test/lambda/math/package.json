@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node --test texcmp_pixels.test.mjs texcmp_dialect.test.mjs texcmp_reference.test.mjs texcmp_lambda.test.mjs",
+    "test": "node --test texcmp_pixels.test.mjs texcmp_dialect.test.mjs texcmp_reference.test.mjs texcmp_lambda.test.mjs tex_conformance.test.mjs",
     "texcmp": "node run_texcmp.mjs"
   },
   "dependencies": {

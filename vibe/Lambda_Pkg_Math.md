@@ -1,7 +1,8 @@
 # Lambda Math Package Design
 
 > **Status:** active design; consolidated and checked against the source tree on
-> 2026-10-10, revision `430b073cb`. Implementation gaps are recorded in §10.
+> 2026-10-10, revision `6bac05b81` plus the current AMS-primitives/font-selection
+> changes. Remaining gaps are recorded in §10.
 > **Scope:** static mathematical typesetting through `lambda.doc.math`.
 > **Formal linkage:** **D7.2.4** — package namespace and distribution;
 > **D7.1.1 / D7.1.2v2** — layering and resource acquisition;
@@ -147,7 +148,7 @@ complete TeX skew data or a recursive maximum-size calculation.
 
 | Option | Meaning |
 |---|---|
-| `display` | Choose initial display rather than text math style. |
+| `display` | Choose display mode and initial display rather than text math style. Later style declarations do not change the surrounding AMS display flag. |
 | `color` | Root paint color; otherwise inherit `currentColor`. |
 | `font_family` | Select a supplied or installed font family; explicit selection bypasses the default bundled profile. |
 | `fonts` | Optional binary face snapshots with family, weight and style descriptors. |
@@ -327,6 +328,23 @@ script/scriptscript style; `—` is an impossible pair after normalization.
 Explicit `\,`, `\:`, `\;` and `\!` use mu glue. `\quad`, `\qquad`
 and `\enspace` use text-em dimensions rather than shrinking with math style.
 
+AMS modulo commands contribute atoms and glue to the surrounding math list;
+boxing the entire command as an ordinary atom loses boundary spacing and
+binary normalization. `\bmod` surrounds its binary label with 5mu kerns
+and, outside script styles, negative medium glue. With the default 4mu
+medium glue this leaves 1mu on each side before normal atom spacing.
+`\pod` / `\pmod` prepend 18mu in display mode and 8mu otherwise;
+`\mod` prepends 18mu or 12mu respectively. The `mod` label and argument
+are separated by 6mu. These mu dimensions use the current symbol-font quad;
+the surrounding AMS display flag is inherited through style changes and
+arrays. This static renderer does not implement the macros' line-break penalties.
+
+`\mathstrut` follows LaTeX's `\vphantom(` definition: zero advance and
+no paint, with the selected parenthesis's height/depth in the current style.
+It is distinct from the text strut used by continued fractions. Phantom and
+smash commands produce ordinary compound boxes; source atom classes, operator
+limit policy, glyph kerns and italic corrections do not survive that boxing.
+
 ### 6.2 Scripts and limits
 
 TeX Rule 18 distinguishes a single-character nucleus from a compound box.
@@ -375,12 +393,23 @@ can increase them. Supplied MATH fonts retain their own fraction/stack gap
 constants. `\over`, `\atop`, `\choose`, `\brace` and `\brack` share
 these semantics with their corresponding structured fraction forms.
 
+AMS `\cfrac` forces display style and inserts a text strut in its numerator.
+Its default numerator alignment is centered; `[l]` and `[r]` align the
+numerator to the common fraction width. The trailing negative null-delimiter
+space allows nested fraction rules to end together. The current text-strut
+profile follows the LaTeX 10pt article size ladder: height/depth are 70/30
+of the text baseline skip, including inside script math. Custom document
+baseline registers and alternative optical-size font selection are not
+implied by this profile. The nonstandard `\sixptsize` has no approved text
+baseline definition; a continued fraction in that size reports the missing
+definition rather than inventing a strut.
+
 Radicals use a cramped nucleus, the profile's rule/gap/ascender data, and a
 sign adequate for the full nucleus extent. An index uses scriptscript style
 with profile-defined degree placement. The box must include the sign,
 overbar and index. A geometrically scaled sign is not proof of a valid TeX
-radical construction. Continued-fraction alignment and complete font-specific
-radical construction remain audit items in §10.
+radical construction. Complete font-specific radical construction remains
+an audit item in §10.
 
 ### 6.4 Delimiters
 
@@ -398,6 +427,9 @@ logical joins, and math-axis centering. Explicit AMS `\big`, `\Big`,
 multiples of 1.2 times the roman parenthesis strut, including inside scripts.
 This basis is independently checked for those six arrows; it does not certify
 the other fixed-size or automatic delimiter families.
+The `l`, `r` and `m` suffixes select open, close and relation atom classes;
+unsuffixed sized delimiters are ordinary atoms. This spacing policy applies
+independently of whether the glyph construction is conforming.
 
 ### 6.5 Accents, over/under annotations and brackets
 
@@ -443,7 +475,7 @@ remaining obligations.
 | Area | Supported behavior and boundary |
 |---|---|
 | Symbols and alphabets | Greek, binary/relation/arrow/AMS symbols, operator names, ordinary and specialist alphabets, and explicit atom classes. Coverage depends on command mapping and available glyphs. |
-| Text and mode changes | Scoped text styles, nested text commands, escaped specials, and embedded `$...$` math. Verbatim retains delimited source and starred visible spaces; font/quote encoding is not yet complete. |
+| Text and mode changes | Scoped text styles, nested text commands, escaped specials, and embedded `$...$` math. Bundled verbatim uses the existing typewriter face and retains delimited source and starred visible spaces. Font requests follow structured commands rather than literal command text. Quote encoding and supplied-MATH-font text selection remain incomplete. |
 | Dimensions | Supported `em`, `ex`, `mu`, `pt`, `bp`, `pc`, `in`, `cm`, `mm`, `px`; TeX points and big points remain distinct. Kern dimensions end at their unit and preserve following tokens. |
 | Arrays and AMS environments | Matrix families, cases/rcases/dcases, array, smallmatrix, subarray/substack, aligned/alignedat, gathered and related parsed environments; per-column alignment, starred matrix alignment, row gaps and solid/dashed rules. Cells scope infix fractions. This is bounded layout, not arbitrary TeX alignment/register execution. |
 | Array style | Small matrices/subarrays use script style; matrices use text style; supported AMS alignment/gathered environments and dcases use display style. Row placement accounts for cell heights/depths and centers the table on the axis. Complete strut/glue/rule derivation remains outstanding. |
@@ -543,12 +575,23 @@ Independent checked-in oracles cover:
   documented bundled macro in all styles, size changes and both limit modes.
 - [KaTeX logo](../test/lambda/math/tex_logo_reference.tex): text-font selection,
   math styles, alphabet wrappers and size changes.
+- [Automated AMS primitive checks](../test/lambda/math/tex_conformance.test.mjs):
+  modulo glue and boundary atoms, the parenthesis phantom, sized-delimiter
+  spacing and continued-fraction struts/alignment across four styles.
+  Execute 252 boxes and 126 relations against installed amsmath/LaTeX,
+  including declarations in modulo arguments and their effect on following atoms;
+  shipped TeX positions are compared with actual SVG numerator baselines
+  and advances. Named-size probes explicitly match the bundled scaled-CM10
+  companion profile rather than LaTeX's alternative optical-size fonts.
 
 These are independent TeX executions, not a single complete automated
 conformance suite. `\showbox` intentionally emits `! OK` diagnostics and a
 nonzero exit status. A valid run must contain the expected cases and no
 unexpected TeX errors; shell status alone cannot classify it as passed.
-Automatic relational checking and wider package coverage remain outstanding.
+The automated AMS checks use successful compilation and shipped position
+records instead of `\showbox`. They run with the comparison-harness tests;
+automatic checking of the older oracles and wider package coverage remain
+outstanding. Missing pdfLaTeX is an explicit skip, not conformance evidence.
 
 ### 9.3 Raster comparison contract
 
@@ -596,17 +639,18 @@ For changes to the math package or parser, complete
 `make test-lambda-baseline`; native font/layout/painting changes also require
 the relevant native tests and `make test-radiant-baseline`, with the Radiant
 dimension lint when layout code changes. Test262 remains a separate runtime
-gate when runtime work is involved. This document-only revision does not
-claim a new full-system baseline or performance result.
+gate when runtime work is involved. Aggregate failures retain their own
+diagnostics; focused math checks are not an all-green system baseline.
 
 | Evidence as of 2026-10-10 | Result and limits |
 |---|---|
-| Fresh focused math run for this consolidation | **26/26**; `temp/math-doc-consolidation/focused.log`. |
-| Fresh full geometry corpus for this consolidation | **921/921**; `temp/math-doc-consolidation/corpus.json`. Rendering smoke coverage only. |
-| Fresh comparison-harness checks | **74/74**, no skips; `temp/math-doc-consolidation/comparison-tests.log`. Includes native painting and pdfLaTeX/Poppler reference checks; no visual-equality claim. |
+| Focused math run after the AMS/text changes | **27/27**; `temp/math-support/focused.log`. |
+| Full geometry corpus after the AMS/text changes | **921/921**; `temp/math-support/corpus.json`. Rendering smoke coverage only. |
+| Automated independent AMS/LaTeX relations | **126/126** across **252** TeX boxes; `temp/math-support/conformance.log` and the reported `temp/math-conformance-*/evidence.json`. Includes phantom atom classes, shipped numerator positions, source/binary hashes and the installed AMS definition hash. |
+| Comparison-harness and conformance checks | **201/201**, no skips; `temp/math-support/comparison-tests.log`. Includes native painting and pdfLaTeX/Poppler reference checks; no visual-equality claim. |
 | Prior independent integral audit | 17 TeX box dumps, **18/18** axis/style/limit relations; retained under `temp/math-closed-integrals/oracle/`. |
 | Prior independent delimiter/logo audits | 27 delimiter boxes plus row-control cases; eight logo boxes. Sources above remain reproducible. |
-| Last retained Lambda baseline | **6,581/6,582**: input **2,112/2,112**, runtime **4,469/4,470**. Existing `edit_view_only` sanitized-attribute/math-source mismatch remains. `temp/math-closed-integrals/baseline-final.log`; not rerun for this documentation change. |
+| Lambda baseline after the AMS/text changes | **6,582/6,583**: input **2,112/2,112**, runtime **4,470/4,471**. `edit_view_only` differs only in boolean `disabled` attribute serialization; its math/source checks pass. The same failure reproduces with HEAD math sources. `temp/math-support/baseline.log`, copied result JSON and `edit-view-head.log`. |
 
 Older logs from overlapping builds/edits and narrower focused selections are
 not substitute aggregate results. The previous 206-case HTML snapshot scores
@@ -633,12 +677,12 @@ current code, not permission to adopt their present behavior as a new rule.
 |---|---|
 | Hook and other extensible horizontal arrows | Replace hand-drawn head/curl/shaft geometry with the supported package's font-component and glue recipe. Correct hook orientation alone does not establish conformance. |
 | Paired reaction arrows | Derive minimum width, shortening, separation and annotation spacing from the supported AMS/mathtools/mhchem definition. Natural heads and content regressions do not validate those dimensions. |
-| Remaining delimiters, radicals and wide marks | Replace whole-glyph geometric stretching where TeX requires designed variants/assemblies. Audit fixed-size non-arrow delimiters, sized-delimiter atom classes, finite variant exhaustion, brace/group/line-segment recipes and required italic/skew data. |
+| Remaining delimiters, radicals and wide marks | Replace whole-glyph geometric stretching where TeX requires designed variants/assemblies. Audit fixed-size non-arrow delimiter construction, finite variant exhaustion, brace/group/line-segment recipes and required italic/skew data. Sized-delimiter atom classes now have independent spacing checks. |
 | Accents and operators | Extend independent coverage of glyph attachment, nested accents, character/compound scripts, large-op selection and side/stacked limits across profiles. The public zero `skew` field is not measured skew support. |
 | Arrays, AMS alignments and CD | Derive struts, row/column glue, rule/dash spacing, centering and diagram dimensions from the declared package definitions. Audit optional arguments, ragged rows and unsupported alignment constructs. Current bounded tables are not arbitrary TeX alignment. |
-| Modulo, math strut and continued fractions | Replace fixed modulo gaps with AMS mu-glue semantics; implement `\mathstrut` from the proper parenthesis phantom; complete `\cfrac[l]` / `\cfrac[r]` behavior. |
+| Macro expansion and document registers | Extend modulo verification to following scripts, nested font/color macros and configurable math-glue registers. Integrate continued fractions with custom document baseline/strut registers and broaden nested/profile coverage. The default AMS glue and argument declaration scope, parenthesis phantom and cfrac alignment/text-strut contracts now have automated independent evidence. |
 | Decorations and framed boxes | Complete package-derived poor-man's-bold, strike/cancel, phase and actuarial geometry, box registers, bbox/enclose options and border/padding policy. Authored raise/reflection/vcenter support is not a certificate for these decorations. |
-| Text and quotes | Correct verbatim's typewriter selection and literal paired-quote/font-encoding behavior. Preserve text/math scoping and escapes while adding typography coverage. |
+| Text and quotes | Complete literal paired-quote/font-encoding behavior and text/typewriter selection with supplied MATH fonts. Preserve text/math scoping and escapes while adding typography coverage. Bundled verbatim typewriter selection is independently covered by content/font and native-paint checks. |
 | Logos, color and images | Complete standalone `\TeX` / `\LaTeX`; audit xcolor expressions/scoping and graphicx natural-size semantics. Keep the current bounded image convention explicit. |
 
 For each family, establish its command definition and available font data,
@@ -655,12 +699,13 @@ shape, reduced raster diff, or green smoke count cannot close these items.
 - Extend corpus checks beyond forced display style and structural validity:
   expected glyph content, inline baselines, all math styles, profile changes,
   actual font-resource availability and painted geometry need coverage.
-- Integrate repeatable checks for independent TeX box relations and package
-  macros. Existing checked-in oracles and one-off relation checks are narrower
-  than an automated comprehensive conformance suite.
+- Extend repeatable independent TeX relations beyond the automated AMS
+  primitives; integrate the older box oracles and additional package macros.
+  The present checks remain narrower than a comprehensive conformance suite.
 - Verify full document/editor source preservation and generated-font
-  sanitization through UI paths; the last retained aggregate baseline still
-  fails `edit_view_only`. No all-green baseline is claimed here.
+  sanitization through UI paths. The module-level math/source checks pass;
+  the aggregate still fails `edit_view_only` on unrelated boolean-attribute
+  serialization. No all-green baseline or complete UI verification is claimed here.
 - Bound platform-font fallback and standalone portability. A smoke check for
   external font URLs does not prove every resolved platform face is embedded.
   Ordinary-font measurements also retain the host's shaping limitations.
@@ -695,3 +740,4 @@ in this file. Git history retains their detailed implementation records.
 | 2026-10-09–2026-10-10 | Approved the CM TeX companion; audited scripts, fractions, spacing, accents, operators and delimiters against TeX. Added native PNG/pdfLaTeX comparison infrastructure and restored several missing command families. The later audit explicitly rejected successful rendering as sufficient conformance evidence. |
 | 2026-10-10 | Ratified TeX-first layout and no-new-font rules. Fixed CM symbol fallback, bracket annotation policy/geometry, vertical-arrow sizing, structural row separators and uppercase KaTeX logo handling. Removed the attempted STIX reintroduction and defined closed multiple integrals through existing-glyph TeX composition. Unsourced extension geometry remains listed in §10. |
 | 2026-10-10 consolidation | Replaced six overlapping proposals/roadmaps with this current design, bounded support contract, verification model and outstanding-work section. Historical plans, file inventories, tuning constants and implementation anecdotes are omitted. |
+| 2026-10-10 AMS primitive continuation | Replaced fixed modulo/strut behavior with AMS/LaTeX definitions, completed continued-fraction alignment/text struts, sized-delimiter classes and ordinary phantom boxing, and restored bundled verbatim's typewriter selection. Added repeatable TeX box/position relations; broader construction and document-register work remains outstanding. |

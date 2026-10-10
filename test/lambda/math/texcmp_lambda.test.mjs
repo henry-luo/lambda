@@ -120,6 +120,11 @@ test('native math comparison paints formerly missing constructs', {
   assert.equal(paint('CD'), 'A←aB→bCcdDE→F');
   assert.doesNotMatch(paint('TextWithMath'), /\$/);
   assert.ok(paint('Verb').includes('&amp;'), 'verbatim ampersands must survive matrix parsing');
+  const verbatimLetters = [...svg('Verb').matchAll(/<text\b([^>]*)>([^<]*)<\/text>/gu)]
+    .filter((m) => /[A-Za-z]/.test(m[2]));
+  assert.ok(verbatimLetters.length > 0);
+  for (const match of verbatimLetters) assert.match(match[1], /font-family="Computer Modern Typewriter"/,
+    `verbatim glyph ${match[2]} must paint in the selected typewriter face`);
   assert.match(svg('Colorbox'), /fill="red" stroke="blue"/);
   for (const name of names) {
     const png = PNG.sync.read(fs.readFileSync(path.join(dir, `cases/${name}/lambda.png`)));
