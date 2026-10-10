@@ -1,6 +1,14 @@
 // math/symbols.ls — LaTeX command → Unicode character mapping tables
 // Used to convert \alpha, \infty, etc. to their Unicode equivalents
 
+let reaction_arrows = {
+    xrightleftarrows: {upper: "→", lower: "←", upper_short: 0, lower_short: 0},
+    xrightequilibrium: {upper: "⇀", lower: "↽", upper_short: 0, lower_short: 1},
+    xleftequilibrium: {upper: "⇀", lower: "↽", upper_short: 1, lower_short: 0}
+}
+
+pub fn reaction_arrow(command) => reaction_arrows[command]
+
 // ============================================================
 // Greek letters (lowercase)
 // ============================================================

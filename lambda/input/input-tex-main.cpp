@@ -569,7 +569,8 @@ void main_control(Engine* e) {
             }
             bool raw = m.type == MT_CONSTRUCTOR && m.sub == 1;
             emit_passthrough(e, t, m.value);
-            pass_constructor_args(e, raw);
+            // math arguments are scoped typesetting groups, not adapter token lists.
+            if (!e->opts.math_mode || raw) pass_constructor_args(e, raw);
             break;
         }
         case MT_CHAR:
@@ -953,6 +954,7 @@ bool engine_wants_expl3(const Engine* e) {
 }
 
 bool engine_run(Engine* e, const char* source, size_t length, Result* result) {
+    if (e->opts.math_mode) e->math_depth = 1;
     const char* name = e->opts.base_path ? e->opts.base_path : "<main>";
     e->main_file = add_source(e, name, source, (uint32_t)length);
     push_file(e, e->main_file, false);

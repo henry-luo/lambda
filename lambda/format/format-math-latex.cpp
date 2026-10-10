@@ -62,6 +62,9 @@ static void format_subsup(StringBuf* sb, const ElementReader& elem, int depth) {
     if (!base.isNull()) {
         format_item(sb, base, depth + 1);
     }
+    // limit placement belongs to the scripted nucleus and must survive round trips.
+    ItemReader modifier = elem.get_attr("modifier");
+    if (modifier.isString()) stringbuf_append_all(sb, 2, "\\", modifier.asString()->chars);
 
     // Emit subscript
     if (!sub.isNull()) {
@@ -383,6 +386,10 @@ static void format_environment(StringBuf* sb, const ElementReader& elem, int dep
         stringbuf_append_all(sb, 2, "{", columns.asString()->chars);
         stringbuf_append_str(sb, "}");
     }
+    ItemReader alignment = elem.get_attr("alignment");
+    if (alignment.isString()) stringbuf_append_all(sb, 3, "[", alignment.asString()->chars, "]");
+    ItemReader pairs = elem.get_attr("pairs");
+    if (pairs.isString()) stringbuf_append_all(sb, 3, "{", pairs.asString()->chars, "}");
 
     stringbuf_append_str(sb, " ");
     if (!body.isNull()) format_item(sb, body, depth + 1);
@@ -497,17 +504,22 @@ static void format_command_with_optional_bracket(StringBuf* sb,
     if (!cmd.isNull() && cmd.isString()) stringbuf_append_str(sb, cmd.asString()->chars);
     if (!option.isNull()) {
         stringbuf_append_str(sb, "[");
-        format_item(sb, option, depth + 1);
+        if (option.isElement() && strcmp(option.asElement().tagName(), "brack_group") == 0)
+            format_children(sb, option.asElement(), depth + 1, " ");
+        else format_item(sb, option, depth + 1);
         stringbuf_append_str(sb, "]");
     }
     stringbuf_append_str(sb, "{");
-    if (!content.isNull()) format_item(sb, content, depth + 1);
+    if (content.isElement() && strcmp(content.asElement().tagName(), "group") == 0)
+        format_children(sb, content.asElement(), depth + 1, " ");
+    else if (!content.isNull()) format_item(sb, content, depth + 1);
     stringbuf_append_str(sb, "}");
 }
 
 // Format `extensible_arrow`: \xrightarrow[below]{above}
 static void format_extensible_arrow(StringBuf* sb, const ElementReader& elem, int depth) {
-    format_command_with_optional_bracket(sb, elem, depth, "below", "above");
+    bool direct = strcmp(elem.tagName(), "extended_arrow") == 0;
+    format_command_with_optional_bracket(sb, elem, depth, direct ? "lower" : "below", direct ? "upper" : "above");
 }
 
 // Format `sized_delimiter`: \big(, \Big|, etc.
@@ -556,10 +568,21 @@ static void format_phantom_command(StringBuf* sb, const ElementReader& elem, int
 // Format `mathop_command`: \mathop{content}
 static void format_mathop_command(StringBuf* sb, const ElementReader& elem, int depth) {
     stringbuf_append_str(sb, "\\mathop");
-    ItemReader content = elem.get_attr("content");
+    ItemReader content = elem.get_attr("body");
+    if (content.isNull()) content = elem.get_attr("content");
     stringbuf_append_str(sb, "{");
     if (!content.isNull()) format_item(sb, content, depth + 1);
     stringbuf_append_str(sb, "}");
+}
+
+static void format_mathchoice(StringBuf* sb, const ElementReader& elem, int depth) {
+    stringbuf_append_str(sb, "\\mathchoice");
+    static const char* styles[] = {"display", "text", "script", "scriptscript"};
+    for (const char* style : styles) {
+        stringbuf_append_str(sb, "{");
+        format_item(sb, elem.get_attr(style), depth + 1);
+        stringbuf_append_str(sb, "}");
+    }
 }
 
 // Format `matrix_command`: \matrix{body} (plain TeX)
@@ -640,11 +663,15 @@ enum MathLatexSlot {
     MATH_LATEX_SPACE_COMMAND,
     MATH_LATEX_OVERUNDER_COMMAND,
     MATH_LATEX_EXTENSIBLE_ARROW,
+    MATH_LATEX_IMAGE_COMMAND,
+    MATH_LATEX_ROW_SEP,
     MATH_LATEX_SIZED_DELIMITER,
     MATH_LATEX_COLOR_COMMAND,
     MATH_LATEX_BOX_COMMAND,
     MATH_LATEX_PHANTOM_COMMAND,
     MATH_LATEX_MATHOP_COMMAND,
+    MATH_LATEX_MATHCHOICE,
+    MATH_LATEX_MATH_ATOM,
     MATH_LATEX_MATRIX_COMMAND,
     MATH_LATEX_CHILDREN_SPACE,
     MATH_LATEX_RULE_COMMAND,
@@ -678,17 +705,24 @@ static const MathTagDispatch MATH_LATEX_TAGS[] = {
     {"text_command", MATH_LATEX_TEXT_COMMAND},
     {"textstyle_command", MATH_LATEX_TEXT_COMMAND},
     {"style_command", MATH_LATEX_STYLE_COMMAND},
+    {"size_command", MATH_LATEX_STYLE_COMMAND},
     {"space_command", MATH_LATEX_SPACE_COMMAND},
     {"spacing_command", MATH_LATEX_SPACE_COMMAND},
     {"hspace_command", MATH_LATEX_SPACE_COMMAND},
     {"skip_command", MATH_LATEX_SPACE_COMMAND},
     {"overunder_command", MATH_LATEX_OVERUNDER_COMMAND},
     {"extensible_arrow", MATH_LATEX_EXTENSIBLE_ARROW},
+    {"extended_arrow", MATH_LATEX_EXTENSIBLE_ARROW},
+    {"image_command", MATH_LATEX_IMAGE_COMMAND},
+    {"row_sep", MATH_LATEX_ROW_SEP},
     {"sized_delimiter", MATH_LATEX_SIZED_DELIMITER},
     {"color_command", MATH_LATEX_COLOR_COMMAND},
     {"box_command", MATH_LATEX_BOX_COMMAND},
     {"phantom_command", MATH_LATEX_PHANTOM_COMMAND},
     {"mathop_command", MATH_LATEX_MATHOP_COMMAND},
+    {"mathop", MATH_LATEX_MATHOP_COMMAND},
+    {"mathchoice", MATH_LATEX_MATHCHOICE},
+    {"math_atom", MATH_LATEX_MATH_ATOM},
     {"matrix_command", MATH_LATEX_MATRIX_COMMAND},
     {"matrix_body", MATH_LATEX_CHILDREN_SPACE},
     {"rule_command", MATH_LATEX_RULE_COMMAND},
@@ -738,11 +772,22 @@ static void format_element_impl(StringBuf* sb, const ElementReader& elem, int de
     case MATH_LATEX_SPACE_COMMAND: return format_space_command(sb, elem);
     case MATH_LATEX_OVERUNDER_COMMAND: return format_overunder_command(sb, elem, depth);
     case MATH_LATEX_EXTENSIBLE_ARROW: return format_extensible_arrow(sb, elem, depth);
+    case MATH_LATEX_IMAGE_COMMAND: return format_command_with_optional_bracket(sb, elem, depth, "options", "src");
+    case MATH_LATEX_ROW_SEP:
+        stringbuf_append_str(sb, " \\\\");
+        if (!elem.get_attr("gap").isNull()) {
+            stringbuf_append_str(sb, "[");
+            format_item(sb, elem.get_attr("gap"), depth + 1);
+            stringbuf_append_str(sb, "]");
+        }
+        return;
     case MATH_LATEX_SIZED_DELIMITER: return format_sized_delimiter(sb, elem);
     case MATH_LATEX_COLOR_COMMAND: return format_color_command(sb, elem, depth);
     case MATH_LATEX_BOX_COMMAND: return format_box_command(sb, elem, depth);
     case MATH_LATEX_PHANTOM_COMMAND: return format_phantom_command(sb, elem, depth);
     case MATH_LATEX_MATHOP_COMMAND: return format_mathop_command(sb, elem, depth);
+    case MATH_LATEX_MATHCHOICE: return format_mathchoice(sb, elem, depth);
+    case MATH_LATEX_MATH_ATOM: return format_command_with_optional_bracket(sb, elem, depth, "options", "body");
     case MATH_LATEX_MATRIX_COMMAND: return format_matrix_command(sb, elem, depth);
     case MATH_LATEX_CHILDREN_SPACE: return format_children(sb, elem, depth, " ");
     case MATH_LATEX_RULE_COMMAND: return format_rule_command(sb, elem, depth);

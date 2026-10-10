@@ -98,10 +98,18 @@ static bool view_css_select(ViewTree* tree, ViewCssStyle* style, const char* nam
 }
 
 enum ViewComputedPropertyKind { VIEW_COMPUTED_FONT_SIZE, VIEW_COMPUTED_FONT_WEIGHT, VIEW_COMPUTED_COLOR,
+    VIEW_COMPUTED_KEYWORD, VIEW_COMPUTED_LINE_LIMIT, VIEW_COMPUTED_BORDER_STYLE,
     VIEW_COMPUTED_LINE_HEIGHT, VIEW_COMPUTED_INDENT, VIEW_COMPUTED_MARGIN, VIEW_COMPUTED_PADDING, VIEW_COMPUTED_BORDER };
 static const struct { const char* name; ViewComputedPropertyKind kind; size_t index; } view_computed_properties[] = {
     {"font-size", VIEW_COMPUTED_FONT_SIZE, 0}, {"font-weight", VIEW_COMPUTED_FONT_WEIGHT, 0},
-    {"color", VIEW_COMPUTED_COLOR, 0}, {"line-height", VIEW_COMPUTED_LINE_HEIGHT, 0},
+    {"color", VIEW_COMPUTED_COLOR, 0}, {"background-color", VIEW_COMPUTED_COLOR, 1},
+    {"font-style", VIEW_COMPUTED_KEYWORD, 0}, {"text-align", VIEW_COMPUTED_KEYWORD, 1},
+    {"orphans", VIEW_COMPUTED_LINE_LIMIT, 0}, {"widows", VIEW_COMPUTED_LINE_LIMIT, 1},
+    {"border-top-color", VIEW_COMPUTED_COLOR, 2}, {"border-right-color", VIEW_COMPUTED_COLOR, 3},
+    {"border-bottom-color", VIEW_COMPUTED_COLOR, 4}, {"border-left-color", VIEW_COMPUTED_COLOR, 5},
+    {"border-top-style", VIEW_COMPUTED_BORDER_STYLE, 0}, {"border-right-style", VIEW_COMPUTED_BORDER_STYLE, 1},
+    {"border-bottom-style", VIEW_COMPUTED_BORDER_STYLE, 2}, {"border-left-style", VIEW_COMPUTED_BORDER_STYLE, 3},
+    {"line-height", VIEW_COMPUTED_LINE_HEIGHT, 0},
     {"start-indent", VIEW_COMPUTED_INDENT, 0}, {"end-indent", VIEW_COMPUTED_INDENT, 1},
     {"margin-top", VIEW_COMPUTED_MARGIN, 0}, {"margin-right", VIEW_COMPUTED_MARGIN, 1},
     {"margin-bottom", VIEW_COMPUTED_MARGIN, 2}, {"margin-left", VIEW_COMPUTED_MARGIN, 3},
@@ -113,6 +121,9 @@ static const struct { const char* name; ViewComputedPropertyKind kind; size_t in
 
 bool view_css_computed_property_supported(const char* name) {
     if (!name) return false;
+    if (radiant_image_trait_name(name)) return true;
+    bool space = false; size_t index = 0, component = 0;
+    if (radiant_flow_trait_key(name, &space, &index, &component) && component) return true;
     for (const auto& property : view_computed_properties) if (!strcmp(name, property.name)) return true;
     return false;
 }
@@ -120,6 +131,25 @@ bool view_css_computed_property_supported(const char* name) {
 const CssValue* view_css_computed_property(ViewTree* tree, const ViewCssStyle* style, const char* name) {
     if (!name || !view_tree_model_source_valid(tree) || !tree->model->css) return nullptr;
     Pool* pool = tree->model->css->pool;
+    if (radiant_image_trait_name(name)) return radiant_image_computed_trait(pool, style ? style->image_spec.get() : nullptr, name);
+    bool space = false; size_t index = 0, component = 0;
+    if (radiant_flow_trait_key(name, &space, &index, &component) && component) {
+        RadiantFlowTraits initial = {};
+        const RadiantFlowTraits* traits = style && style->flow_traits ? style->flow_traits.get() : &initial;
+        if (space) {
+            const RadiantSpaceSpec& value = index ? traits->after : traits->before;
+            if (component < 4) {
+                const float ranges[] = {value.minimum, value.optimum, value.maximum};
+                return css_value_create_length(pool, ranges[component - 1], CSS_UNIT_PX);
+            }
+            if (component == 4 && !value.force) return css_value_create_number(pool, value.precedence);
+            return css_value_create_keyword(pool, component == 4 ? "force" : value.retain ? "retain" : "discard");
+        }
+        const RadiantKeepSpec* keeps[] = {&traits->together, &traits->next, &traits->previous};
+        const RadiantKeepStrength& strength = keeps[index]->scope[component - 1];
+        return strength.kind == RADIANT_KEEP_NUMBER ? css_value_create_number(pool, strength.value) :
+            css_value_create_keyword(pool, strength.kind == RADIANT_KEEP_ALWAYS ? "always" : "auto");
+    }
     for (const auto& property : view_computed_properties) if (!strcmp(name, property.name)) {
         float pixels = 0.0f;
         switch (property.kind) {
@@ -127,10 +157,22 @@ const CssValue* view_css_computed_property(ViewTree* tree, const ViewCssStyle* s
             case VIEW_COMPUTED_FONT_WEIGHT:
                 return css_value_create_number(pool, style ? style->font.font_weight_numeric : 400);
             case VIEW_COMPUTED_COLOR: {
-                Color color = style ? style->color : Color{.r = 0, .g = 0, .b = 0, .a = 255};
+                Color color = { .r = 0, .g = 0, .b = 0, .a = 255 };
+                if (property.index == 1) color = style ? style->background : Color{};
+                else if (style) color = property.index ? style->border_color[property.index - 2] : style->color;
+                // currentcolor is already computed at the queried owner, independently of the receiving color.
                 CssComputedColor computed = {CSS_COLOR_RGB, {color.r / 255.0, color.g / 255.0, color.b / 255.0, color.a / 255.0}, 0, true};
                 return css_value_create_computed_color(pool, &computed);
             }
+            case VIEW_COMPUTED_KEYWORD:
+            case VIEW_COMPUTED_BORDER_STYLE: {
+                CssEnum value = property.kind == VIEW_COMPUTED_BORDER_STYLE ? (style ? style->border_style[property.index] : CSS_VALUE_NONE) :
+                    property.index ? (style ? style->text_align : CSS_VALUE_START) : (style ? style->font.font_style : CSS_VALUE_NORMAL);
+                const CssEnumInfo* info = css_enum_info(value);
+                return info ? css_value_create_keyword(pool, info->name) : nullptr;
+            }
+            case VIEW_COMPUTED_LINE_LIMIT:
+                return css_value_create_number(pool, style ? (property.index ? style->widows : style->orphans) : 2);
             case VIEW_COMPUTED_LINE_HEIGHT:
                 return style && style->line_height_value ? style->line_height_value.get() : css_value_create_keyword(pool, "normal");
             case VIEW_COMPUTED_INDENT:
@@ -311,16 +353,32 @@ const CssValue* view_css_property(ViewTree* tree, ViewCssStyle* style, const cha
     return view_css_declaration_value(tree, style, &declaration, name);
 }
 
+static bool view_css_binding_math_finite(const CssValue* value, size_t depth = 0) {
+    if (!value || depth > 32) return false;
+    CssMathEvaluationContext context = {}; context.preserve_percentages = true;
+    CssMathResult number = css_math_evaluate(value, &context);
+    if (number.type != CSS_MATH_INVALID)
+        return !number.resolved || (isfinite(number.value) && isfinite(number.percentage));
+    // color and other enclosing functions can hide nonfinite substituted arithmetic.
+    const auto* list = value->type == CSS_VALUE_TYPE_LIST ? &value->data.list : nullptr;
+    const CssFunction* function = value->type == CSS_VALUE_TYPE_FUNCTION ? value->data.function : nullptr;
+    if (list || function) {
+        size_t count = list ? (size_t)list->count : (size_t)function->arg_count;
+        CssValue** values = list ? list->values : function->args;
+        for (size_t i = 0; i < count; i++)
+            if (!view_css_binding_math_finite(values[i], depth + 1)) return false;
+    }
+    return true;
+}
+
 const CssValue* view_css_declaration_value(ViewTree* tree, ViewCssStyle* style,
         const CssDeclaration* declaration, const char* property) {
     if (!declaration || !style) return nullptr;
     CssDeclaration computed = *declaration;
     computed.value = const_cast<CssValue*>(view_css_resolve_value(tree, style, declaration->value));
     if (style->computed_bindings && css_value_contains_var_reference(declaration->value)) {
-        CssMathEvaluationContext context = {}; context.preserve_percentages = true;
-        CssMathResult number = css_math_evaluate(computed.value, &context);
         if (!computed.value || !css_declaration_is_supported(&computed) ||
-            (number.resolved && (!isfinite(number.value) || !isfinite(number.percentage)))) {
+            !view_css_binding_math_finite(computed.value)) {
             view_css_binding_failure(style, "computed-property substitution has an invalid type or nonfinite value");
             return nullptr;
         }
@@ -397,9 +455,16 @@ static CssEnum view_css_keyword(ViewTree* tree, ViewCssStyle* style, const char*
         ? value->data.keyword : initial;
 }
 
-static double view_css_number(const CssValue* value) {
-    CssMathEvaluationContext context = {};
-    CssMathResult result = css_math_evaluate(value, &context);
+double view_css_number(const CssValue* value, ViewTree* tree, const ViewCssStyle* style) {
+    CssMathResult result = {};
+    if (tree && style) {
+        LayoutContext context = view_css_length_context(tree, style, NAN, NAN);
+        result = layout_evaluate_css_math(&context, (uintptr_t)(-(intptr_t)CSS_PROPERTY_OPACITY), value, true, true);
+    } else {
+        // a null context requests type analysis and leaves numeric leaves unresolved.
+        CssMathEvaluationContext context = {};
+        result = css_math_evaluate(value, &context);
+    }
     return result.type == CSS_MATH_NUMBER && result.resolved ? result.value : NAN;
 }
 

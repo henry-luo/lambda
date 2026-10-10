@@ -9,6 +9,7 @@ strict comparison records that difference. display_alignment isolates supported
 display and body alignment without changing the relative-alignment fixture.
 The lists_context fixture retains the nearest-list-block function binding case;
 FOP 2.11 reads the part's inherited provisional values instead and differs.
+The graphics_scales and graphics_bindings fixtures retain allowed-scale properties, rejected by FOP 2.11.
 """
 
 import argparse
@@ -77,7 +78,7 @@ def main():
     parser.add_argument("--fop-home", type=Path, required=True,
                         help="directory containing build/ and lib/")
     parser.add_argument("--fop-config", type=Path, required=True)
-    parser.add_argument("--fixture", choices=("tables", "alignment", "display_alignment", "graphics", "lists", "lists_context", "cell_flow", "indents", "indents_auto", "corresponding", "conditional", "conditional_components", "conditional_visible", "proportions", "proportions_columns", "numbered_columns", "table_furniture", "expressions", "parent_values", "property_bindings", "nearest_values", "percentage_indents", "percentage_indents_fractional"), default="tables")
+    parser.add_argument("--fixture", choices=("tables", "alignment", "display_alignment", "graphics", "graphics_namespaces", "graphics_scales", "graphics_bindings", "lists", "lists_context", "cell_flow", "indents", "indents_auto", "corresponding", "conditional", "conditional_components", "conditional_visible", "proportions", "proportions_columns", "numbered_columns", "table_furniture", "expressions", "parent_values", "property_bindings", "nearest_values", "percentage_indents", "percentage_indents_fractional", "proportions_mixed", "proportions_affine", "decoration_bindings", "direct_cells", "dimensional_arithmetic", "space_bindings", "rgb_expressions", "rgb_percentages", "decoration_expressions", "policy_bindings"), default="tables")
     parser.add_argument("--output-dir", type=Path, default=Path("temp/fo_table_reference"))
     args = parser.parse_args()
     root = Path(__file__).resolve().parent.parent
@@ -89,7 +90,7 @@ def main():
                                 (args.lambda_exe, args.java, args.fop_home, args.fop_config)]
     fixture = root / ("test/html/paged_media_" + args.fixture + ".fo")
     source = ET.parse(fixture)
-    color_properties = ("background-color", "fill") if args.fixture == "graphics" else (
+    color_properties = ("background-color", "fill") if args.fixture in ("graphics", "graphics_namespaces", "graphics_scales", "graphics_bindings") else (
         ("background-color", "border-before-color", "border-after-color", "border-start-color", "border-end-color")
         if args.fixture in ("corresponding", "conditional", "conditional_components", "conditional_visible") else ("background-color",))
     colors, unresolved_colors = set(), set()
@@ -171,10 +172,10 @@ def main():
                 raise RuntimeError("Reference conditional furniture occurs on an incorrect page " + str(page))
             if expected["colors"][color]["box"] != actual["colors"][color]["box"]:
                 raise RuntimeError("Region bounds differ for " + color + " on page " + str(page))
-            if args.fixture == "graphics" and expected["colors"][color]["mask_sha256"] != actual["colors"][color]["mask_sha256"]:
+            if args.fixture in ("graphics", "graphics_namespaces", "graphics_scales", "graphics_bindings") and expected["colors"][color]["mask_sha256"] != actual["colors"][color]["mask_sha256"]:
                 raise RuntimeError("Graphic color masks differ for " + color + " on page " + str(page))
     print("PASS: three physical pages and every colored region bound match Apache FOP" +
-          ("; graphics masks match exactly" if args.fixture == "graphics" else ""))
+          ("; graphics masks match exactly" if args.fixture in ("graphics", "graphics_namespaces", "graphics_scales", "graphics_bindings") else ""))
 
 
 if __name__ == "__main__":

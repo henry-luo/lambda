@@ -38,7 +38,7 @@ static char* resolve_wpt_absolute_image_path(DomDocument* document, const char* 
 
 // Detect if memory content is SVG by checking for XML/SVG signature
 bool image_content_is_svg(const unsigned char* data, size_t size) {
-    if (!data || size < 10) return false;
+    if (!data || size < 4) return false;
 
     // Skip UTF-8 BOM if present
     size_t offset = 0;
@@ -52,14 +52,17 @@ bool image_content_is_svg(const unsigned char* data, size_t size) {
         offset++;
     }
 
-    // Check for XML declaration or SVG tag
-    if (size - offset >= 5) {
-        if (strncmp((const char*)data + offset, "<?xml", 5) == 0 ||
-            strncmp((const char*)data + offset, "<svg", 4) == 0) {
-            return true;
-        }
+    // sniff the local root name; the XML loader validates its namespace binding.
+    const char* start = (const char*)data + offset;
+    const char* end = (const char*)data + size;
+    if (end - start >= 5 && !memcmp(start, "<?xml", 5)) return true;
+    if (start == end || *start++ != '<') return false;
+    const char* local = start;
+    while (start < end && !str_char_is_ascii_space(*start) && *start != '/' && *start != '>') {
+        if (*start == ':') local = start + 1;
+        start++;
     }
-    return false;
+    return start < end && start - local == 3 && !memcmp(local, "svg", 3);
 }
 
 typedef struct SvgImageIntrinsicMetadata {
@@ -70,76 +73,6 @@ typedef struct SvgImageIntrinsicMetadata {
     bool has_height;
     bool has_ratio;
 } SvgImageIntrinsicMetadata;
-
-static const char* svg_root_tag_end(const char* svg, const char* end) {
-    if (!svg || !end) return NULL;
-    const char* tag_end = strn_scan_top_level(svg, end, ">", '(', ')', "\"'", false);
-    return tag_end < end ? tag_end : NULL;
-}
-
-static bool svg_find_root_attr(const char* svg, const char* tag_end, const char* name,
-                               char* out, size_t out_cap) {
-    if (!svg || !tag_end || !name || !out || out_cap == 0) return false;
-
-    const char* p = svg + 4;
-    size_t name_len = strlen(name);
-    while (p < tag_end) {
-        while (p < tag_end && isspace((unsigned char)*p)) p++;
-        if (p >= tag_end || *p == '/' || *p == '>') break;
-
-        const char* attr_start = p;
-        while (p < tag_end &&
-               (isalnum((unsigned char)*p) || *p == ':' || *p == '_' || *p == '-')) {
-            p++;
-        }
-        size_t attr_len = (size_t)(p - attr_start);
-        while (p < tag_end && isspace((unsigned char)*p)) p++;
-        if (p >= tag_end || *p != '=') {
-            while (p < tag_end && !isspace((unsigned char)*p)) p++;
-            continue;
-        }
-        p++;
-        while (p < tag_end && isspace((unsigned char)*p)) p++;
-        if (p >= tag_end) break;
-
-        char quote = 0;
-        if (*p == '"' || *p == '\'') {
-            quote = *p;
-            p++;
-        }
-        const char* value_start = p;
-        if (quote) {
-            while (p < tag_end && *p != quote) p++;
-        } else {
-            while (p < tag_end && !isspace((unsigned char)*p) && *p != '>') p++;
-        }
-        const char* value_end = p;
-        if (quote && p < tag_end) p++;
-
-        if (attr_len == name_len && strncmp(attr_start, name, name_len) == 0) {
-            size_t value_len = (size_t)(value_end - value_start);
-            if (value_len >= out_cap) value_len = out_cap - 1;
-            str_copy(out, out_cap, value_start, value_len);
-            return true;
-        }
-    }
-
-    return false;
-}
-
-static bool svg_parse_viewbox_attr(const char* value, float* width, float* height) {
-    if (!value || !width || !height) return false;
-
-    float values[4];
-    if (str_parse_float_list(value, ", \t\n\r\f\v", values, 4, NULL) != 4) return false;
-    float vb_width = values[2];
-    float vb_height = values[3];
-    if (!isfinite(vb_width) || !isfinite(vb_height) || vb_width <= 0.0f || vb_height <= 0.0f) return false;
-
-    *width = vb_width;
-    *height = vb_height;
-    return true;
-}
 
 static bool svg_parse_definite_length_attr(const char* value, float* out_value) {
     if (!value || !out_value) return false;
@@ -160,62 +93,27 @@ static bool svg_parse_definite_length_attr(const char* value, float* out_value) 
     return isfinite(*out_value);
 }
 
-static SvgImageIntrinsicMetadata svg_read_intrinsic_metadata_in_memory(const char* data, size_t size) {
+static SvgImageIntrinsicMetadata svg_read_intrinsic_metadata(Element* root) {
     SvgImageIntrinsicMetadata meta = {};
-    if (!data || size == 0) return meta;
-
-    const char* end = data + size;
-    size_t svg_offset = str_find(data, size, "<svg", 4);
-    const char* svg = svg_offset == STR_NPOS ? NULL : data + svg_offset;
-    if (!svg) return meta;
-
-    const char* tag_end = svg_root_tag_end(svg, end);
-    if (!tag_end) return meta;
-
-    char width_attr[128];
-    char height_attr[128];
-    char viewbox_attr[160];
-    bool has_width_attr = svg_find_root_attr(svg, tag_end, "width", width_attr, sizeof(width_attr));
-    bool has_height_attr = svg_find_root_attr(svg, tag_end, "height", height_attr, sizeof(height_attr));
-    bool has_viewbox_attr = svg_find_root_attr(svg, tag_end, "viewBox", viewbox_attr, sizeof(viewbox_attr));
-    if (!has_viewbox_attr) {
-        has_viewbox_attr = svg_find_root_attr(svg, tag_end, "viewbox", viewbox_attr, sizeof(viewbox_attr));
-    }
-
-    float viewbox_width = 0.0f;
-    float viewbox_height = 0.0f;
-    if (has_viewbox_attr && svg_parse_viewbox_attr(viewbox_attr, &viewbox_width, &viewbox_height)) {
-        meta.ratio = viewbox_width / viewbox_height;
+    if (!root) return meta;
+    // the parsed picture owns the root; metadata does not rescan XML or depend on QName spelling.
+    String* width = root->get_attr("width").string();
+    String* height = root->get_attr("height").string();
+    String* viewbox = root->get_attr("viewBox").string();
+    if (!viewbox) viewbox = root->get_attr("viewbox").string();
+    SvgViewBox box = svg_parse_viewbox(viewbox ? viewbox->chars : nullptr);
+    if (box.has_viewbox && box.width > 0.0f && box.height > 0.0f) {
+        meta.ratio = box.width / box.height;
         meta.has_ratio = isfinite(meta.ratio) && meta.ratio > 0.0f;
     }
-
-    if (has_width_attr && svg_parse_definite_length_attr(width_attr, &meta.width)) {
-        meta.has_width = true;
-    }
-    if (has_height_attr && svg_parse_definite_length_attr(height_attr, &meta.height)) {
-        meta.has_height = true;
-    }
-
+    meta.has_width = width && svg_parse_definite_length_attr(width->chars, &meta.width);
+    meta.has_height = height && svg_parse_definite_length_attr(height->chars, &meta.height);
     // SVG 2 section 8.12: definite axes take ratio precedence over viewBox; inferred axes are not natural sizes.
     if (meta.has_width && meta.has_height) {
         meta.ratio = meta.width / meta.height;
         meta.has_ratio = isfinite(meta.ratio) && meta.ratio > 0.0f;
     }
-
     return meta;
-}
-
-static SvgImageIntrinsicMetadata svg_read_intrinsic_metadata_in_file(const char* file_path) {
-    SvgImageIntrinsicMetadata meta = {};
-    if (!file_path) return meta;
-
-    FILE* fp = fopen(file_path, "rb");
-    if (!fp) return meta;
-
-    char buffer[4096];
-    size_t read_count = fread(buffer, 1, sizeof(buffer), fp);
-    fclose(fp);
-    return svg_read_intrinsic_metadata_in_memory(buffer, read_count);
 }
 
 static int svg_dimension_to_image_px(float value) {
@@ -550,8 +448,6 @@ static ImageSurface* load_image_resource(DomDocument* document, lam::Own<hashmap
         ImageSurface* surface;
         GifFrames* inline_frames = nullptr;
         if (is_svg) {
-            SvgImageIntrinsicMetadata svg_meta =
-                svg_read_intrinsic_metadata_in_memory((const char*)decoded.get(), decoded_len);
             surface = image_surface_alloc();
             surface->format = IMAGE_FORMAT_SVG;
             surface->pic = lam::counted(rdt_picture_load_data((const char*)decoded.get(), (int)decoded_len, "svg"));
@@ -561,7 +457,7 @@ static ImageSurface* load_image_resource(DomDocument* document, lam::Own<hashmap
             }
             float svg_w, svg_h;
             rdt_picture_get_size(surface->pic, &svg_w, &svg_h);
-            image_surface_apply_svg_metadata(surface, svg_meta, svg_w, svg_h);
+            image_surface_apply_svg_metadata(surface, svg_read_intrinsic_metadata(rdt_picture_get_svg_root(surface->pic)), svg_w, svg_h);
         } else {
             int width, height;
             int orientation = jpeg_exif_orientation_from_memory(decoded.get(), decoded_len);
@@ -754,9 +650,6 @@ static ImageSurface* load_image_resource(DomDocument* document, lam::Own<hashmap
     }
 
     if (is_svg) {
-        SvgImageIntrinsicMetadata svg_meta = is_http && downloaded_data
-            ? svg_read_intrinsic_metadata_in_memory((const char*)downloaded_data.get(), downloaded_size)
-            : svg_read_intrinsic_metadata_in_file(file_path.get());
         surface = image_surface_alloc();
         surface->format = IMAGE_FORMAT_SVG;
         if (is_http && downloaded_data) {
@@ -772,7 +665,7 @@ static ImageSurface* load_image_resource(DomDocument* document, lam::Own<hashmap
         }
         float svg_w, svg_h;
         rdt_picture_get_size(surface->pic, &svg_w, &svg_h);
-        image_surface_apply_svg_metadata(surface, svg_meta, svg_w, svg_h);
+        image_surface_apply_svg_metadata(surface, svg_read_intrinsic_metadata(rdt_picture_get_svg_root(surface->pic)), svg_w, svg_h);
         log_debug("SVG image size: %d x %d (picture %.1f x %.1f, intrinsic=%d)",
                   surface->width, surface->height, svg_w, svg_h, surface->has_intrinsic_size);
     }

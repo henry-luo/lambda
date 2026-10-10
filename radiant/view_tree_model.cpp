@@ -18,9 +18,22 @@
 #include <string.h>
 
 struct SourceStateEntry {
-    uint32_t id;
+    uint64_t identity[3]; // provider, source generation, node; provider zero identifies the document DOM
     ViewNodeState* state;
 };
+
+struct ViewNativeLease {
+    ViewNativeOwner owner;
+    ViewNativeLease* next;
+};
+
+static void model_native_release(ViewTreeModel* model, ViewNativeLease* stop = nullptr) {
+    while (model->native_leases.get() != stop) {
+        ViewNativeLease* lease = model->native_leases;
+        model->native_leases = lam::up(lease->next);
+        lease->owner.release(lease->owner.context);
+    }
+}
 
 struct ViewPageGeneration {
     RefCount references;
@@ -65,18 +78,26 @@ struct ViewModelCheckpoint {
     ViewModelCheckpoint* previous;
     ArenaMark mark;
     size_t node_count, node_id_count, page_count;
+    ViewNativeLease* native_leases;
 };
 
 static atomic_int64 next_secondary_tree_id = {0};
 
 static uint64_t source_state_hash(const void* entry, uint64_t seed0, uint64_t seed1) {
-    return hashmap_sip(&((const SourceStateEntry*)entry)->id, sizeof(uint32_t), seed0, seed1);
+    return hashmap_sip(((const SourceStateEntry*)entry)->identity, sizeof(SourceStateEntry::identity), seed0, seed1);
 }
 
 static int source_state_compare(const void* left, const void* right, void*) {
-    uint32_t a = ((const SourceStateEntry*)left)->id;
-    uint32_t b = ((const SourceStateEntry*)right)->id;
-    return a < b ? -1 : a > b ? 1 : 0;
+    const uint64_t* a = ((const SourceStateEntry*)left)->identity;
+    const uint64_t* b = ((const SourceStateEntry*)right)->identity;
+    for (size_t i = 0; i < 3; i++) if (a[i] != b[i]) return a[i] < b[i] ? -1 : 1;
+    return 0;
+}
+
+static SourceStateEntry source_state_key(const ViewNodeState* state) {
+    const TypesetSource& source = state->native_source;
+    return source.provider ? SourceStateEntry{{source.provider, source.generation, source.node}, nullptr}
+        : SourceStateEntry{{0, 0, state->source.expected_id}, nullptr};
 }
 
 static void model_checkpoint_dispose(ViewTreeModel* model) {
@@ -109,6 +130,7 @@ ViewModelCheckpoint* view_tree_model_checkpoint(ViewTree* tree) {
     checkpoint->node_count = model->node_count;
     checkpoint->node_id_count = model->node_id_count;
     checkpoint->page_count = model->page_count;
+    checkpoint->native_leases = model->native_leases;
     model->checkpoint = lam::up(checkpoint);
     return checkpoint;
 }
@@ -164,6 +186,8 @@ bool view_tree_model_restore(ViewTree* tree, ViewModelCheckpoint* checkpoint) {
     for (size_t i = checkpoint->page_count; i < model->page_count; i++) model->pages.get()[i] = nullptr;
     model->node_count = checkpoint->node_count;
     model->page_count = checkpoint->page_count;
+    // leases added by rejected nested trials end before their arena descriptors disappear.
+    model_native_release(model, checkpoint->native_leases);
     arena_rewind(model->arena, checkpoint->mark);
     model_checkpoint_dispose(model);
     return true;
@@ -404,6 +428,7 @@ bool view_tree_model_destroy(ViewTree* tree) {
     ViewTreeModel* model = tree->model;
     while (model->checkpoint) model_checkpoint_dispose(model);
     paged_composition_destroy(tree);
+    model_native_release(model);
     image_resource_cache_cleanup(&model->image_resources);
     view_css_context_destroy(tree);
     page_generation_release(model);
@@ -419,6 +444,7 @@ bool view_tree_model_reset(ViewTree* tree) {
     ViewTreeModel* model = tree->model;
     while (model->checkpoint) model_checkpoint_dispose(model);
     paged_composition_destroy(tree);
+    model_native_release(model);
     image_resource_cache_cleanup(&model->image_resources);
     view_css_context_destroy(tree);
     page_generation_release(model);
@@ -435,16 +461,8 @@ bool view_tree_model_reset(ViewTree* tree) {
     return initialized;
 }
 
-ViewNodeState* view_tree_node_state(ViewTree* tree, DomNode* source, bool create) {
-    if (!source || !view_tree_model_source_valid(tree)) return nullptr;
+static ViewNodeState* model_source_state(ViewTree* tree, SourceStateEntry key, bool create) {
     ViewTreeModel* model = tree->model;
-    if (model->page_instances) {
-        ViewTree* owner = view_tree_page_content_owner(tree);
-        return !create && owner ? view_tree_node_state(owner, source, false) : nullptr;
-    }
-    DomNodeRef ref = dom_node_ref(source);
-    if (dom_node_ref_validate(model->document, ref) != source) return nullptr;
-    SourceStateEntry key = {ref.expected_id, nullptr};
     const SourceStateEntry* existing = (const SourceStateEntry*)hashmap_get(model->source_states, &key);
     if (existing) return existing->state;
     if (!create || model->committed) return nullptr;
@@ -455,10 +473,32 @@ ViewNodeState* view_tree_node_state(ViewTree* tree, DomNode* source, bool create
     ViewNodeState* state = (ViewNodeState*)arena_alloc(model->arena, sizeof(ViewNodeState));
     if (!state) return nullptr;
     memset(state, 0, sizeof(*state));
-    state->source = ref;
     key.state = state;
     hashmap_set(model->source_states, &key);
     return hashmap_oom(model->source_states) ? nullptr : state;
+}
+
+ViewNodeState* view_tree_node_state(ViewTree* tree, DomNode* source, bool create) {
+    if (!source || !view_tree_model_source_valid(tree)) return nullptr;
+    ViewTreeModel* model = tree->model;
+    if (model->page_instances) {
+        ViewTree* owner = view_tree_page_content_owner(tree);
+        return !create && owner ? view_tree_node_state(owner, source, false) : nullptr;
+    }
+    DomNodeRef ref = dom_node_ref(source);
+    if (dom_node_ref_validate(model->document, ref) != source) return nullptr;
+    ViewNodeState* state = model_source_state(tree, {{0, 0, ref.expected_id}, nullptr}, create);
+    if (state && !state->source.address) state->source = ref;
+    return state;
+}
+
+const ViewNodeState* view_tree_native_state(ViewTree* tree, const TypesetSource* source) {
+    if (!source || !source->provider || !source->generation || source->offset_unit > TYPESET_PROVIDER_OFFSETS ||
+        !view_tree_model_source_valid(tree)) return nullptr;
+    if (tree->model->page_instances) tree = view_tree_page_content_owner(tree);
+    if (!tree) return nullptr;
+    ViewNodeState* state = model_source_state(tree, {{source->provider, source->generation, source->node}, nullptr}, false);
+    return state && state->native_source.offset_unit == source->offset_unit ? state : nullptr;
 }
 
 LayoutViewNode* view_tree_node_resolve(ViewTree* tree, LayoutViewRef ref) {
@@ -475,17 +515,12 @@ static void model_append_child(LayoutViewNode* parent, LayoutViewNode* child) {
     parent->last_child = lam::up(child);
 }
 
-LayoutViewNode* view_tree_fragment_append(ViewTree* tree, LayoutViewNode* parent,
-        DomNode* source, RdtLogicalRect rect, size_t text_start, size_t text_length) {
-    if (!parent || !valid_rect(rect) || !view_tree_model_source_valid(tree) ||
-        tree->model->committed || view_tree_node_resolve(tree, parent->ref) != parent ||
-        text_length > SIZE_MAX - text_start) return nullptr;
-    ViewNodeState* state = source ? view_tree_node_state(tree, source, true) : nullptr;
-    if (source && !state) return nullptr;
+static LayoutViewNode* model_fragment_append(ViewTree* tree, LayoutViewNode* parent,
+        ViewNodeState* state, RdtLogicalRect rect, size_t text_start, size_t text_length) {
     if (!view_tree_model_touch_node(tree, parent) ||
         (parent->last_child && !view_tree_model_touch_node(tree, parent->last_child))) return nullptr;
     if (state) {
-        SourceStateEntry key = {state->source.expected_id, nullptr};
+        SourceStateEntry key = source_state_key(state);
         for (ViewModelCheckpoint* checkpoint = tree->model->checkpoint; checkpoint; checkpoint = checkpoint->previous)
             if (!hashmap_get(checkpoint->created_states, &key) && !model_record(checkpoint, state, sizeof(*state))) return nullptr;
         if (state->last_occurrence && !view_tree_model_touch_node(tree, state->last_occurrence)) return nullptr;
@@ -504,6 +539,89 @@ LayoutViewNode* view_tree_fragment_append(ViewTree* tree, LayoutViewNode* parent
         state->occurrence_count++;
     }
     model_append_child(parent, node);
+    return node;
+}
+
+LayoutViewNode* view_tree_fragment_append(ViewTree* tree, LayoutViewNode* parent,
+        DomNode* source, RdtLogicalRect rect, size_t text_start, size_t text_length) {
+    if (!parent || !valid_rect(rect) || !view_tree_model_source_valid(tree) ||
+        tree->model->committed || view_tree_node_resolve(tree, parent->ref) != parent ||
+        text_length > SIZE_MAX - text_start) return nullptr;
+    ViewNodeState* state = source ? view_tree_node_state(tree, source, true) : nullptr;
+    return source && !state ? nullptr : model_fragment_append(tree, parent, state, rect, text_start, text_length);
+}
+
+LayoutViewNode* view_tree_native_fragment_append(ViewTree* tree, LayoutViewNode* parent,
+        const ViewNativeMaterial* material, RdtLogicalRect rect, ViewModelStatus* status) {
+    if (status) *status = VIEW_MODEL_INVALID_ARGUMENT;
+    if (!material || !parent || !valid_rect(rect) || !material->owner.context ||
+        !material->owner.retain || !material->owner.release) return nullptr;
+    if (!view_tree_model_source_valid(tree)) {
+        if (status) *status = VIEW_MODEL_STALE_SOURCE;
+        return nullptr;
+    }
+    if (tree->model->committed || view_tree_node_resolve(tree, parent->ref) != parent ||
+        !material->source.provider || !material->source.generation ||
+        material->source.offset_unit > TYPESET_PROVIDER_OFFSETS || material->length > SIZE_MAX - material->start)
+        return nullptr;
+    if (!material->owner.retain(material->owner.context)) {
+        if (status) *status = VIEW_MODEL_STALE_SOURCE;
+        return nullptr;
+    }
+    const TypesetMetrics& metrics = material->metrics;
+    bool valid = isfinite(metrics.advance) && isfinite(metrics.height) && isfinite(metrics.depth) &&
+        isfinite(metrics.height + metrics.depth) && isfinite(metrics.baseline) && valid_rect(metrics.ink) &&
+        (!material->source.native || material->source.native->provider == material->source.provider) &&
+        (!metrics.exact || metrics.exact->provider == material->source.provider) &&
+        (!material->solution || material->solution->provider == material->source.provider);
+    if (!valid) { material->owner.release(material->owner.context); return nullptr; }
+    ViewModelCheckpoint* checkpoint = view_tree_model_checkpoint(tree);
+    if (!checkpoint) {
+        material->owner.release(material->owner.context);
+        if (status) *status = VIEW_MODEL_OUT_OF_MEMORY;
+        return nullptr;
+    }
+    Arena* arena = tree->model->arena;
+    ViewNativeLease* lease = (ViewNativeLease*)arena_alloc(arena, sizeof(ViewNativeLease));
+    if (!lease) {
+        material->owner.release(material->owner.context);
+        view_tree_model_restore(tree, checkpoint);
+        if (status) *status = VIEW_MODEL_OUT_OF_MEMORY;
+        return nullptr;
+    }
+    *lease = {material->owner, tree->model->native_leases.get()};
+    tree->model->native_leases = lam::up(lease);
+    const TypesetSource& source = material->source;
+    ViewNodeState* state = model_source_state(tree, {{source.provider, source.generation, source.node}, nullptr}, true);
+    if (state && !state->native_source.provider) state->native_source = source;
+    if (state && state->native_source.offset_unit != source.offset_unit) {
+        view_tree_model_restore(tree, checkpoint);
+        return nullptr;
+    }
+    ViewNativeMaterial* copy = (ViewNativeMaterial*)arena_alloc(arena, sizeof(ViewNativeMaterial));
+    PaintGlyphRun* run = material->glyph_run ? (PaintGlyphRun*)arena_alloc(arena, sizeof(PaintGlyphRun)) : nullptr;
+    PaintImageBox* image = material->image_box ? (PaintImageBox*)arena_alloc(arena, sizeof(PaintImageBox)) : nullptr;
+    LayoutViewNode* node = state && copy && (!material->glyph_run || run) && (!material->image_box || image)
+        ? model_fragment_append(tree, parent, state, rect, material->start, material->length) : nullptr;
+    if (!node) {
+        view_tree_model_restore(tree, checkpoint);
+        if (status) *status = VIEW_MODEL_OUT_OF_MEMORY;
+        return nullptr;
+    }
+    *copy = *material;
+    if (run) {
+        *run = *material->glyph_run;
+        // the native owner retains text; transient paint lists must not take its ownership.
+        run->owned_text = nullptr;
+        node->glyph_run = lam::up(run); copy->glyph_run = lam::up((const PaintGlyphRun*)run);
+    }
+    if (image) {
+        *image = *material->image_box;
+        node->image_box = lam::up(image); copy->image_box = lam::up((const PaintImageBox*)image);
+    }
+    node->native_material = lam::up((const ViewNativeMaterial*)copy);
+    view_tree_model_accept(tree, checkpoint);
+    if (status) *status = VIEW_MODEL_OK;
     return node;
 }
 

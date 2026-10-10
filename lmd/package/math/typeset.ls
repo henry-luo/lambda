@@ -6,15 +6,18 @@ import stretch: .stretch
 import sym: .symbols
 import spaces: .spacing_table
 import util: .util
+import graphics: .graphics
 
 pub fn render(ast, options) map | error {
-    if (options.font_size != null and (not (options.font_size is number) or options.font_size <= 0 or
+    if (ast.error != null) error("math: " ++ string(ast.error))
+    else if (options.font_size != null and (not (options.font_size is number) or options.font_size <= 0 or
         options.font_size - options.font_size != 0))
         error("math: font_size must be finite positive CSS pixels")
     else {
     let profile = font.prepare(ast, options)^
     let context = {profile: profile, style: if (options.display == true) "display" else "text",
-        variant: "auto", cramped: false, size: 1.0, pixels_per_em: options.font_size or 16.0}
+        variant: "auto", cramped: false, size: 1.0, pixels_per_em: options.font_size or 16.0,
+        base_uri: options.base_uri}
     let result = node(ast, context)^
     // The title retains searchable, accessible math when painting font-local glyphs.
     let label = if (ast is string) ast else format(ast, {type: "math", flavor: "latex"})^
@@ -26,10 +29,20 @@ pub fn render(ast, options) map | error {
     }
 }
 
-fn scale(c) => font.scale(c.profile, c.style) * c.size
+// LaTeX's 10pt size ladder has distinct script sizes; size declarations are absolute.
+let size_multipliers = [0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 1.2, 1.44, 1.728, 2.074, 2.488]
+let size_styles = [[0,0,0], [1,0,0], [2,0,0], [3,1,0], [4,1,0], [5,2,0],
+    [6,3,1], [7,5,2], [8,6,5], [9,7,6], [10,9,8]]
+let size_commands = ["tiny", "sixptsize", "scriptsize", "footnotesize", "small", "normalsize",
+    "large", "Large", "LARGE", "huge", "Huge"]
+
+fn text_scale(c) => (if (c.size_index != null) size_multipliers[c.size_index] else 1.0) * c.size
+fn scale(c) => if (c.size_index != null and c.profile.tex != null)
+    size_multipliers[size_styles[c.size_index][if (c.style == "script") 1 else if (c.style == "scriptscript") 2 else 0]] * c.size
+    else font.scale(c.profile, c.style) * text_scale(c)
 fn metric(c, key, fallback_value = 0.0) {
     let companion = c.profile.tex.styles[if (c.style == "display") "text" else c.style][key];
-    if (companion != null) companion * c.size
+    if (companion != null) companion * (scale(c) / font.scale(c.profile, c.style))
     else (c.profile.facts.constants[key] or fallback_value) * scale(c)
 }
 fn math_quad(c) => metric(c, "math_quad", font.UNITS)
@@ -94,8 +107,12 @@ fn group_boxes(items, c, i) {
         let item = items[i]
         let command = if (item is element) string(item.cmd or item.name or "") else ""
         let style = style_name(command)
+        let size_index = index_of(size_commands, command_name(command))
         if (style != null and item.arg == null)
             group_boxes(items, with_style(c, style), i + 1)^
+        else if (size_index != null and name(item) == 'size_command')
+            group_boxes(items, {*:c, size_index:size_index,
+                style:if (c.style == "display") "display" else "text"}, i + 1)^
         else if (item is element and name(item) == 'color_switch') {
             let tail = group(slice(items, i + 1, len(items)), c)^;
             [{*:tail, body: <g fill: (item.color_raw or util.text_of(item.color)), tail.body>}]
@@ -137,8 +154,12 @@ fn node(n, c) {
         case 'style_command': styled(n, c)^
         case 'textstyle_command': styled(n, c)^
         case 'mathop': {*:node(n.body, {*:c, variant: "normal"})^, type: "mop", character:false, limits:true}
+        case 'math_atom': {*:node(n.body, c)^, type:string(n.atom), character:false, limits:false}
+        case 'mathchoice': if (n[c.style] is element and name(n[c.style]) == 'group')
+            group(util.content_items(n[c.style]), c)^ else node(n[c.style], c)^
         case 'overunder_command': overunder(n, c)^
         case 'extended_arrow': arrow(n, c)^
+        case 'image_command': graphics.render(n, c.base_uri, (raw) => dimension(raw, c))^
         case 'environment': matrix(n, c)^
         case 'matrix_command': matrix(n, c)^
         case 'phantom_command': phantom(n, c)^
@@ -403,38 +424,65 @@ fn overunder(n, c) {
 fn arrow(n, c) {
     let key = command_name(string(n.cmd))
     let ch = if (contains(key, "leftright")) "↔" else if (contains(key, "left")) "←" else "→"
-    let upper = node(n.upper or n.label or n.above or n.over, script(c))^
-    let lower = node(n.lower or n.below or n.under, script(c))^
-    let width = max(upper.width, lower.width) + 2.0 * metric(c, "space_after_script")
-    let base = stretch.glyph(font.glyph(c.profile, ord(ch))^, width, false, scale(c), "mrel")^
-    limits_box(base, lower, upper, c)
+    let upper_node = n.upper or n.label or n.above or n.over
+    let lower_node = n.lower or n.below or n.under
+    let upper = node(upper_node, script(c))^
+    let lower = node(lower_node, script(c))^
+    let recipe = sym.reaction_arrow(key)
+    let width = max(max(upper.width, lower.width) + (if (recipe != null) font.UNITS * scale(c) else 2.0 * metric(c, "space_after_script")),
+        if (recipe != null) 1.75 * font.UNITS * scale(c) else 0.0)
+    let base = if (recipe != null) paired_arrow(recipe, width, c)^
+        else stretch.glyph(font.glyph(c.profile, ord(ch))^, width, false, scale(c), "mrel")^;
+    limits_box(base, if (lower_node != null) lower else null, if (upper_node != null) upper else null, c)
+}
+
+fn paired_arrow(recipe, width, c) {
+    // mhchem centers the short harpoon with a half-em inset on each side.
+    let inset = 0.5 * font.UNITS * scale(c)
+    let upper = center_axis(stretch.arrow(font.glyph(c.profile, ord(recipe.upper))^,
+        width - 2.0 * recipe.upper_short * inset, scale(c), true,
+        metric(c, "axis_height"), metric(c, "fraction_rule_thickness"))^, c)
+    let lower = center_axis(stretch.arrow(font.glyph(c.profile, ord(recipe.lower))^,
+        width - 2.0 * recipe.lower_short * inset, scale(c), false,
+        metric(c, "axis_height"), metric(c, "fraction_rule_thickness"))^, c)
+    let separation = 0.2 * font.UNITS * scale(c);
+    bx.compose([{box: upper, x: (width - upper.width) / 2.0, y: 0.0 - separation},
+        {box: lower, x: (width - lower.width) / 2.0, y: separation}], width, "mrel")
 }
 
 fn matrix(n, c) {
-    let key = command_name(string(n.name or n.cmd or "matrix"))
-    let child = with_style(c, if (key == "smallmatrix") "script" else "text")
+    let raw_key = command_name(string(n.name or n.cmd or "matrix"))
+    let key = if (ends_with(raw_key, "*")) slice(raw_key, 0, len(raw_key) - 1) else raw_key
+    let aligned = contains(["aligned", "alignedat", "align", "alignat", "split"], key)
+    let display = aligned or contains(["gathered", "gather", "equation", "dcases"], key)
+    let child = with_style(c, if (key == "smallmatrix") "script" else if (display) "display" else "text")
     let items = util.content_items(n.body)
     let rows = util.parse_rows(items, 0, len(items), [], [], [])
-    let cells = [for (row in rows) [for (cell in row.cells) group(cell.items, child)^]]
+    // AMS starts each right-hand cell with an empty ordinary atom for relation glue.
+    let cells = [for (row in rows) [for (col, cell in row.cells)
+        group([*if (aligned and col % 2 == 1) [<group>] else [], *cell.items], child)^]]
     let count = max([0, *[for (row in cells) len(row)]])
     let widths = [for (col in 0 to (count - 1)) max([0.0, *[for (row in cells) row[col].width or 0.0]])]
-    let heights = [for (row in cells) max([0.0, *[for (cell in row) cell.height]])]
-    let depths = [for (row in cells) max([0.0, *[for (cell in row) cell.depth]])]
-    let aligned = contains(["aligned", "align", "align*", "split"], key)
+    // Array struts keep simple rows apart: 12pt baseline with 70/30 height/depth at 10pt.
+    let row_skip = (if (key == "smallmatrix") 0.6 else 1.2) * font.UNITS * text_scale(c)
+    let heights = [for (row in cells) max([0.7 * row_skip, *[for (cell in row) cell.height]])]
+    let depths = [for (row in cells) max([0.3 * row_skip, *[for (cell in row) cell.depth]])]
     let gap_x = font.UNITS * scale(child)
     let gaps = [for (col in 0 to (count - 1)) if (col == 0) 0.0
-        else if (aligned) (if (col % 2 == 1) 0.0 else 2.0 * gap_x) else gap_x]
+        else if (aligned) (if (col % 2 == 1 or key == "alignedat" or key == "alignat") 0.0 else 2.0 * gap_x) else gap_x]
     let declared = [for (ch in split(string(n.columns or ""), "") where contains("lcr", ch)) ch]
-    let aligns = [for (col in 0 to (count - 1)) declared[col] or
+    let aligns = [for (col in 0 to (count - 1)) declared[col] or n.alignment or
         (if (aligned) (if (col % 2 == 0) "r" else "l") else if (key == "cases" or key == "rcases") "l" else "c")]
-    let gap_y = metric(child, "stack_gap_min")
-    let total = sum(heights) + sum(depths) + gap_y * max(0, len(rows) - 1)
+    let gap_y = if (aligned or contains(["gathered", "gather"], key)) 0.3 * font.UNITS * text_scale(c) else 0.0
+    let extra_gaps = [for (row in rows) dimension(row.gap or "0em", child)]
+    let total = sum(heights) + sum(depths) + gap_y * max(0, len(rows) - 1) + sum(extra_gaps)
     let top = 0.0 - total / 2.0 - metric(c, "axis_height")
     let entries = [for (r, row in cells, col, cell in row) {
         box: {*:cell, body: <g 'data-column-align': aligns[col], cell.body>},
         x: sum(slice(widths, 0, col)) + sum(slice(gaps, 0, col + 1)) +
             (if (aligns[col] == "r") widths[col] - cell.width else if (aligns[col] == "l") 0.0 else (widths[col] - cell.width) / 2.0),
-        y: top + sum(slice(heights, 0, r)) + sum(slice(depths, 0, r)) + float(r) * gap_y + heights[r]}]
+        y: top + sum(slice(heights, 0, r)) + sum(slice(depths, 0, r)) + float(r) * gap_y +
+            sum(slice(extra_gaps, 0, r)) + heights[r]}]
     let table = bx.compose(entries, sum(widths) + sum(gaps), "minner")
     let result = {*:table, body: <g 'data-math-kind': "matrix", table.body>}
     let fences = match key {
@@ -444,6 +492,7 @@ fn matrix(n, c) {
         case "vmatrix": ["|", "|"]
         case "Vmatrix": ["‖", "‖"]
         case "cases": ["{", "."]
+        case "dcases": ["{", "."]
         case "rcases": [".", "}"]
         default: null
     }
@@ -495,16 +544,17 @@ fn space(n, c) {
         case "qquad": 2.0
         default: null
     }
-    {*:bx.empty(if (em != null) em * (if (contains(["quad", "qquad", "enspace"], key)) font.UNITS * c.size else math_quad(c)) else dimension(string(n.value or "0em"), c)), type: "skip"}
+    {*:bx.empty(if (em != null) em * (if (contains(["quad", "qquad", "enspace"], key)) font.UNITS * text_scale(c) else math_quad(c)) else dimension(string(n.value or "0em"), c)), type: "skip"}
 }
 
 fn dimension(raw, c) {
     let dim = util.dimension_from_string(raw)
     let units = match dim.unit {
-        case "em": font.UNITS * c.size
-        case "ex": c.profile.font_metrics.x_height * c.size
+        case "em": font.UNITS * text_scale(c)
+        case "ex": c.profile.font_metrics.x_height * text_scale(c)
         case "mu": math_quad(c) / 18.0
         case "pt": font.UNITS * 96.0 / 72.27 / c.pixels_per_em
+        case "bp": font.UNITS * 96.0 / 72.0 / c.pixels_per_em
         case "pc": font.UNITS * 96.0 / 72.27 * 12.0 / c.pixels_per_em
         case "in": font.UNITS * 96.0 / c.pixels_per_em
         case "cm": font.UNITS * 96.0 / 2.54 / c.pixels_per_em

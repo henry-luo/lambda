@@ -196,3 +196,7 @@ bool animation_track_sample(const AnimationTrackView& track, double time, double
     }
     return true;
 }
+
+float css_interpolate_float(float a, float b, float t) {
+    return a + (b - a) * t;
+}

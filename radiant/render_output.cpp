@@ -821,8 +821,10 @@ static int render_paged_window(UiContext* ui) {
     render_paged_window_scroll(ui, ui->paged_scroll_x, ui->paged_scroll_y);
     float scale = ui->device_scale;
     RdtLogicalRect viewport = {ui->paged_scroll_x, ui->paged_scroll_y, ui->viewport_width, ui->viewport_height};
+    OffscreenRenderArenas arenas;
+    if (!arenas.init("render.paged.window", "render.paged.window.list", "render.paged.window.scratch")) return 1;
     PaintList paint = {}; paint_list_init(&paint, nullptr);
-    DisplayList list = {}; dl_init(&list, nullptr);
+    DisplayList list = {}; dl_init(&list, arenas.list_arena);
     RdtLogicalRect bounds = {};
     bool ok = render_secondary_raster_record(tree, nullptr, scale, &viewport, &paint, &list, &bounds);
     if (ok) {
@@ -832,7 +834,7 @@ static int render_paged_window(UiContext* ui) {
                 (viewport.x + viewport.width) * scale, (viewport.y + viewport.height) * scale},
             scale, Color{.c = 0xffd0d0d0});
     }
-    dl_destroy(&list); paint_list_destroy(&paint);
+    dl_destroy(&list); paint_list_destroy(&paint); arenas.destroy();
     return ok ? 0 : 1;
 }
 
@@ -840,8 +842,11 @@ static ImageSurface* render_secondary_snapshot(ViewTree* tree, const ViewPageBox
         float raster_scale, Color backdrop) {
     if (!view_tree_model_source_valid(tree) || !tree->model->committed ||
         !isfinite(raster_scale) || raster_scale <= 0.0f) return nullptr;
+    OffscreenRenderArenas arenas;
+    if (!arenas.init("render.paged.snapshot", "render.paged.snapshot.list", "render.paged.snapshot.scratch")) return nullptr;
     PaintList paint = {}; paint_list_init(&paint, nullptr);
-    DisplayList list = {}; dl_init(&list, nullptr);
+    // SVG stops, dashes and captured metadata must survive recording through replay (D4.5.1v4).
+    DisplayList list = {}; dl_init(&list, arenas.list_arena);
     ImageSurface* surface = nullptr;
     RdtLogicalRect bounds = {};
     if (render_secondary_raster_record(tree, page, raster_scale, nullptr, &paint, &list, &bounds)) {
@@ -851,7 +856,7 @@ static ImageSurface* render_secondary_snapshot(ViewTree* tree, const ViewPageBox
              (bounds.x + bounds.width) * raster_scale, (bounds.y + bounds.height) * raster_scale},
             raster_scale, backdrop);
     }
-    dl_destroy(&list); paint_list_destroy(&paint);
+    dl_destroy(&list); paint_list_destroy(&paint); arenas.destroy();
     return surface;
 }
 

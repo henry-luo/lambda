@@ -418,13 +418,6 @@ void layout_compute_math_lengths(LayoutContext* context, CssValue* value,
     }
 }
 
-float radiant::resolve_computed_length_percentage(const CssValue* value, float reference_size) {
-    LayoutContext context = {};
-    context.transform_length_math = true;
-    context.transform_percentage_base = reference_size;
-    return resolve_length_value(&context, CSS_PROPERTY_TRANSFORM, value);
-}
-
 bool resolve_individual_transform_value(LayoutContext* lycon,
     CssPropertyCode property, const CssValue* value, TransformFunction* out) {
     if (!value || !out || !css_property_validate_value(property, value)) return false;
@@ -3689,6 +3682,14 @@ static bool css_layout_math_leaf(void* data, const CssValue* value, double* resu
     return !isnan(*result);
 }
 
+CssMathResult layout_evaluate_css_math(LayoutContext* layout, uintptr_t property,
+        const CssValue* value, bool computed_units, bool preserve_percentages) {
+    CssLayoutMathContext leaves = {layout, property, computed_units};
+    CssMathEvaluationContext context = {css_layout_math_leaf, &leaves,
+        layout ? 1.0 / ui_context_raster_scale(layout->ui_context) : 1.0, preserve_percentages};
+    return css_math_evaluate(value, &context);
+}
+
 static bool css_percentage_uses_containing_inline_size(uintptr_t property) {
     CssPropertyCode code = (CssPropertyCode)property;
     return code == CSS_PROPERTY_MARGIN || code == CSS_PROPERTY_PADDING ||
@@ -3952,10 +3953,7 @@ static float resolve_length_value_mode(LayoutContext* lycon, uintptr_t property,
             break;
         }
         uintptr_t raw_property = (intptr_t)property < 0 ? property : (uintptr_t)(-(intptr_t)property);
-        CssLayoutMathContext leaf_context = {lycon, raw_property, computed_units};
-        CssMathEvaluationContext math_context = {css_layout_math_leaf, &leaf_context,
-            1.0 / ui_context_raster_scale(lycon->ui_context), false};
-        CssMathResult math = css_math_evaluate(value, &math_context);
+        CssMathResult math = layout_evaluate_css_math(lycon, raw_property, value, computed_units);
         if (math.type != CSS_MATH_INVALID && math.type != CSS_MATH_DEFERRED) {
             // Layout supplies the used percentage basis; parsing and computation share the same grammar.
             result = math.resolved ? (isnan(math.value) ? 0.0 : math.value) : NAN;
@@ -6325,7 +6323,9 @@ void set_multi_value(LayoutContext* lycon, MultiValue* mv, const CssValue* value
     if (!mv || !value) return;
     value = resolve_var_function(lycon, value);
     if (!value) return;
-    if (value->type == CSS_VALUE_TYPE_LENGTH || value->type == CSS_VALUE_TYPE_PERCENTAGE || value->type == CSS_VALUE_TYPE_NUMBER) {
+    // typed math widths remain widths when border shorthands project into individual sides.
+    if (value->type == CSS_VALUE_TYPE_LENGTH || value->type == CSS_VALUE_TYPE_PERCENTAGE || value->type == CSS_VALUE_TYPE_NUMBER ||
+        (value->type == CSS_VALUE_TYPE_FUNCTION && css_math_value_type(value) == CSS_MATH_LENGTH)) {
         mv->length = (CssValue*)value;
     // Border shorthand colors such as rgba() are function values; otherwise
     // they fall through to currentcolor and paint as an opaque black border.

@@ -2063,10 +2063,14 @@ static void paint_ir_lower_svg_unchecked(const PaintList* pl, StrBuf* out,
         case PAINT_DRAW_IMAGE_RESOURCE: {
             const PaintDrawImageResource* p = &cmd->draw_image_resource;
             ImageSurface* image = p->image;
+            if (!paint_svg_caps_allow_image(caps, p->has_transform)) { note_unsupported(cmd->op); break; }
             const char* href = (image && image->url && image->url->href)
                 ? image->url->href->chars
                 : nullptr;
-            if (!href || !paint_svg_caps_allow_image(caps, p->has_transform)) {
+            // native producers can retain decoded images without a source URL.
+            StrBuf* uri = !href && image && image->pixels ? render_encode_surface_data_uri(image) : nullptr;
+            if (uri) href = uri->str;
+            if (!href) {
                 note_unsupported(cmd->op);
                 break;
             }
@@ -2083,6 +2087,7 @@ static void paint_ir_lower_svg_unchecked(const PaintList* pl, StrBuf* out,
             paint_svg_append_matrix_attr(out,
                                          paint_optional_transform(p->has_transform, &p->transform));
             strbuf_append_str(out, " />\n");
+            if (uri) strbuf_free(uri);
             active_stats->emitted_count++;
             break;
         }

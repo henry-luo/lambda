@@ -4,6 +4,7 @@
 extern "C" {
 #include "../../lib/url.h"
 #include "../../lib/log.h"
+#include "../../lib/memtrack.h"
 }
 
 class UrlTest : public ::testing::Test {
@@ -18,6 +19,33 @@ protected:
         // Runs after each test
     }
 };
+
+class UrlCloneOwnershipTest : public UrlTest {
+protected:
+    void SetUp() override { UrlTest::SetUp(); ASSERT_TRUE(memtrack_init(MEMTRACK_MODE_STATS)); }
+    void TearDown() override { EXPECT_EQ(memtrack_shutdown(), 0u); UrlTest::TearDown(); }
+};
+
+TEST_F(UrlCloneOwnershipTest, RepeatedClonesReleaseEveryComponentAndSurviveSourceRelease) {
+    const char* sources[] = {"https://user:secret@example.com:9443/a?q=1#part", "file:///books/chapter.svg", "data:image/svg+xml,svg"};
+    for (const char* text : sources) {
+        SCOPED_TRACE(text); Url* source = url_parse(text); ASSERT_NE(source, nullptr);
+        MemtrackStats before = {}; memtrack_get_stats(&before);
+        for (size_t iteration = 0; iteration < 6; iteration++) {
+            Url* clone = url_clone(source); ASSERT_NE(clone, nullptr); EXPECT_TRUE(url_equals(source, clone));
+            ASSERT_NE(clone->pathname, nullptr); EXPECT_NE(clone->pathname, source->pathname);
+            EXPECT_STREQ(clone->pathname->chars, source->pathname->chars); url_destroy(clone);
+        }
+        MemtrackStats after = {}; memtrack_get_stats(&after);
+        EXPECT_EQ(after.current_count, before.current_count); EXPECT_EQ(after.current_bytes, before.current_bytes);
+        Url* retained = url_clone(source); ASSERT_NE(retained, nullptr); url_destroy(source);
+        EXPECT_TRUE(url_is_valid(retained)); ASSERT_NE(retained->href, nullptr); EXPECT_STREQ(retained->href->chars, text);
+        url_destroy(retained);
+    }
+    Url empty = {}; Url* clone = url_clone(&empty); ASSERT_NE(clone, nullptr);
+    EXPECT_EQ(clone->host, nullptr); EXPECT_EQ(clone->pathname, nullptr); EXPECT_FALSE(url_is_valid(clone));
+    url_destroy(clone); EXPECT_EQ(url_clone(nullptr), nullptr);
+}
 
 TEST_F(UrlTest, DocumentIdentityIgnoresOnlyTheFragmentAndKeepsEscapedHashes) {
     Url* base = url_parse("https://example.com/a%23b?q=1#old"); ASSERT_NE(base, nullptr);

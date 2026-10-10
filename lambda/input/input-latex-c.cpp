@@ -66,6 +66,21 @@ static bool is_style_command(const char* name) {
         strcmp(name, "scriptscriptstyle") == 0;
 }
 
+static bool is_size_command(const char* name) {
+    static const char* commands[] = {"tiny", "sixptsize", "scriptsize", "footnotesize", "small",
+        "normalsize", "large", "Large", "LARGE", "huge", "Huge"};
+    for (const char* command : commands) if (strcmp(name, command) == 0) return true;
+    return false;
+}
+
+static const char* math_atom_class(const char* name) {
+    static const struct { const char* command; const char* atom; } atoms[] = {
+        {"mathord", "mord"}, {"mathbin", "mbin"}, {"mathrel", "mrel"},
+        {"mathopen", "mopen"}, {"mathclose", "mclose"}, {"mathpunct", "mpunct"}, {"mathinner", "minner"}};
+    for (const auto& atom : atoms) if (strcmp(name, atom.command) == 0) return atom.atom;
+    return nullptr;
+}
+
 static bool is_spacing_command(const char* name) {
     return strcmp(name, "quad") == 0 || strcmp(name, "qquad") == 0 ||
         strcmp(name, "hspace") == 0 || strcmp(name, "vspace") == 0 ||
@@ -99,16 +114,12 @@ static bool is_infix_fraction_command(const char* name) {
 }
 
 static bool is_supported_math_environment(const char* name) {
-    return strcmp(name, "array") == 0 || strcmp(name, "matrix") == 0 ||
-        strcmp(name, "pmatrix") == 0 || strcmp(name, "bmatrix") == 0 ||
-        strcmp(name, "Bmatrix") == 0 || strcmp(name, "vmatrix") == 0 ||
-        strcmp(name, "Vmatrix") == 0 || strcmp(name, "cases") == 0 ||
-        strcmp(name, "rcases") == 0 || strcmp(name, "dcases") == 0 ||
-        strcmp(name, "aligned") == 0 || strcmp(name, "align") == 0 ||
-        // split must retain its row/column separators inside a structured environment.
-        strcmp(name, "split") == 0 ||
-        strcmp(name, "equation") == 0 || strcmp(name, "smallmatrix") == 0 ||
-        strcmp(name, "IEEEeqnarray") == 0;
+    static const char* environments[] = {"array", "matrix", "matrix*", "pmatrix", "pmatrix*",
+        "bmatrix", "bmatrix*", "Bmatrix", "Bmatrix*", "vmatrix", "vmatrix*", "Vmatrix", "Vmatrix*",
+        "cases", "rcases", "dcases", "aligned", "alignedat", "align", "align*", "alignat", "alignat*",
+        "gathered", "gather", "gather*", "split", "equation", "equation*", "smallmatrix", "IEEEeqnarray"};
+    for (const char* environment : environments) if (strcmp(name, environment) == 0) return true;
+    return false;
 }
 
 static bool is_math_document_environment(const char* name) {
@@ -144,8 +155,9 @@ public:
         : ctx_(context), builder_(context.builder), source_(source), length_(length),
           offset_(source_offset), position_(0), ascii_(ascii), allow_infix_(allow_infix) {}
 
-    Item parse() {
+    Item parse(const char* expansion_error = nullptr) {
         ElementBuilder root = builder_.element("math");
+        if (expansion_error) root.attr("error", builder_.createStringItem(expansion_error));
         parse_children(root, false);
         return root.final();
     }
@@ -286,6 +298,23 @@ private:
             return builder_.createStringItem(source_ + begin, end - begin);
         }
         size_t begin = position_;
+        // an unbraced TeX dimension ends after its unit, even when math follows immediately.
+        while (position_ < length_ && (source_[position_] == '+' || source_[position_] == '-')) {
+            position_++;
+            skip_space();
+        }
+        bool number = false;
+        while (position_ < length_ && (isdigit((unsigned char)source_[position_]) || source_[position_] == '.')) {
+            number = true;
+            position_++;
+        }
+        if (number) {
+            skip_space();
+            if (position_ + 1 < length_ && isalpha((unsigned char)source_[position_]) &&
+                isalpha((unsigned char)source_[position_ + 1])) position_ += 2;
+            return builder_.createStringItem(source_ + begin, position_ - begin);
+        }
+        position_ = begin;
         while (position_ < length_ && !isspace((unsigned char)source_[position_])) position_++;
         return builder_.createStringItem(source_ + begin, position_ - begin);
     }
@@ -425,6 +454,7 @@ private:
         if (!read_command(name, sizeof(name), full, sizeof(full))) return ItemNull;
         if (name[0] == '\0') return ItemNull;
         if (name[0] == ' ' || name[0] == '\t' || name[0] == '\n') return builder_.createStringItem(" ");
+        if (strcmp(name, "cr") == 0) return builder_.createSymbolItem("row_sep");
         if (!allow_infix_ && is_infix_fraction_command(name)) return ItemNull;
 
         if (strcmp(name, "frac") == 0 || strcmp(name, "dfrac") == 0 ||
@@ -458,7 +488,9 @@ private:
             if (item_present(radicand)) elem.attr("radicand", radicand);
             return elem.final();
         }
-        if (strcmp(name, "xrightarrow") == 0 || strcmp(name, "xleftarrow") == 0) {
+        if (strcmp(name, "xrightarrow") == 0 || strcmp(name, "xleftarrow") == 0 ||
+            strcmp(name, "xrightleftarrows") == 0 || strcmp(name, "xrightequilibrium") == 0 ||
+            strcmp(name, "xleftequilibrium") == 0) {
             Item lower = ItemNull;
             skip_space();
             if (position_ < length_ && source_[position_] == '[') lower = parse_brack_group();
@@ -469,10 +501,44 @@ private:
             if (item_present(lower)) elem.attr("lower", lower);
             return elem.final();
         }
+        if (strcmp(name, "includegraphics") == 0) {
+            ElementBuilder elem = builder_.element("image_command");
+            elem.attr("cmd", builder_.createStringItem(full));
+            size_t begin = 0, end = 0;
+            skip_space();
+            if (position_ < length_ && source_[position_] == '[' &&
+                consume_group_span('[', ']', &begin, &end))
+                elem.attr("options", builder_.createStringItem(source_ + begin, end - begin));
+            skip_space();
+            // paths and option values are raw source, not math identifiers or subscripts.
+            if (position_ < length_ && source_[position_] == '{' &&
+                consume_group_span('{', '}', &begin, &end))
+                elem.attr("src", builder_.createStringItem(source_ + begin, end - begin));
+            else error("includegraphics requires a braced source");
+            return elem.final();
+        }
         if (strcmp(name, "mathop") == 0) {
             Item body = parse_script_arg();
             ElementBuilder elem = builder_.element("mathop");
             if (item_present(body)) elem.attr("body", body);
+            return elem.final();
+        }
+        if (const char* atom = math_atom_class(name)) {
+            Item body = parse_script_arg();
+            ElementBuilder elem = builder_.element("math_atom");
+            elem.attr("cmd", builder_.createStringItem(full));
+            elem.attr("atom", builder_.createStringItem(atom));
+            if (item_present(body)) elem.attr("body", body);
+            return elem.final();
+        }
+        if (strcmp(name, "mathchoice") == 0) {
+            ElementBuilder elem = builder_.element("mathchoice");
+            // all four branches must survive parsing; the current math style selects one later.
+            static const char* styles[] = {"display", "text", "script", "scriptscript"};
+            for (const char* style : styles) {
+                Item branch = parse_script_arg();
+                if (item_present(branch)) elem.attr(style, branch);
+            }
             return elem.final();
         }
         if (strcmp(name, "stackrel") == 0 || strcmp(name, "overset") == 0 ||
@@ -497,6 +563,11 @@ private:
             return parse_text_command(full);
         }
         if (is_text_command(name)) return parse_text_command(full);
+        if (is_size_command(name)) {
+            ElementBuilder elem = builder_.element("size_command");
+            elem.attr("cmd", builder_.createStringItem(full));
+            return elem.final();
+        }
         if (is_style_command(name)) {
             ElementBuilder elem = builder_.element("style_command");
             elem.attr("cmd", builder_.createStringItem(full));
@@ -882,26 +953,41 @@ private:
         size_t name_len = strlen(name);
         size_t recovery_end = 0;
         size_t recovery_body_end = 0;
-        for (size_t i = from; i + 5 < length_; i++) {
-            if (source_[i] != '\\' || !starts_with(source_, length_, i, "\\end{")) continue;
-            size_t name_start = i + 5;
+        size_t nested_depth = 0;
+        for (size_t i = from; i < length_;) {
+            if (source_[i] == '%') {
+                while (i < length_ && source_[i] != '\n' && source_[i] != '\r') i++;
+                continue;
+            }
+            if (source_[i] != '\\') { i++; continue; }
+            size_t command_start = i;
+            char command[96], full[104];
+            size_t after_command = latex_scan_command(source_, length_, i, command, sizeof(command), full, sizeof(full));
+            if (!after_command) { i++; continue; }
+            i = after_command;
+            if (strcmp(command, "begin") != 0 && strcmp(command, "end") != 0) continue;
+            while (i < length_ && isspace((unsigned char)source_[i])) i++;
             size_t end_name_start = 0;
             size_t end_name_end = 0;
-            size_t after_end = latex_scan_group_end(source_, length_, i + 4, '{', '}',
+            size_t after_end = latex_scan_group_end(source_, length_, i, '{', '}',
                                                      &end_name_start, &end_name_end);
-            if (after_end != 0 && recovery_end == 0) {
+            if (!after_end) continue;
+            i = after_end;
+            // a nested environment's terminator cannot close the surrounding matrix.
+            if (strcmp(command, "begin") == 0) { nested_depth++; continue; }
+            if (nested_depth > 0) { nested_depth--; continue; }
+            if (recovery_end == 0) {
                 // MathLive recovers an unmatched environment by ending at the
                 // first closing environment token rather than consuming it as
                 // ordinary math content.
-                recovery_body_end = i;
+                recovery_body_end = command_start;
                 recovery_end = after_end;
             }
-            if (name_start + name_len < length_ &&
-                memcmp(source_ + name_start, name, name_len) == 0 &&
-                source_[name_start + name_len] == '}') {
-                if (body_end) *body_end = i;
+            if (end_name_end - end_name_start == name_len &&
+                memcmp(source_ + end_name_start, name, name_len) == 0) {
+                if (body_end) *body_end = command_start;
                 if (found) *found = true;
-                return name_start + name_len + 1;
+                return after_end;
             }
         }
         if (recovery_end != 0) {
@@ -931,6 +1017,17 @@ private:
         }
         ElementBuilder elem = builder_.element("environment");
         elem.attr("name", builder_.createStringItem(env_name));
+        skip_space();
+        if (strcmp(env_name, "alignedat") == 0 || strcmp(env_name, "alignat") == 0 || strcmp(env_name, "alignat*") == 0) {
+            size_t begin = 0, end = 0;
+            if (position_ < length_ && source_[position_] == '{' && consume_group_span('{', '}', &begin, &end))
+                elem.attr("pairs", builder_.createStringItem(source_ + begin, end - begin));
+        } else if (env_len > 0 && env_name[env_len - 1] == '*' && strstr(env_name, "matrix") != nullptr &&
+                   position_ < length_ && source_[position_] == '[') {
+            size_t begin = 0, end = 0;
+            if (consume_group_span('[', ']', &begin, &end))
+                elem.attr("alignment", builder_.createStringItem(source_ + begin, end - begin));
+        }
         if (strcmp(env_name, "array") == 0 && position_ < length_ && source_[position_] == '{') {
             size_t columns_begin = 0, columns_end = 0;
             if (consume_group_span('{', '}', &columns_begin, &columns_end)) {
@@ -971,7 +1068,14 @@ private:
             }
             if (matrix_mode && starts_with(source_, length_, position_, "\\\\")) {
                 position_ += 2;
-                children.append(builder_.createSymbolItem("row_sep"));
+                skip_space();
+                size_t begin = 0, end = 0;
+                if (position_ < length_ && source_[position_] == '[' &&
+                    consume_group_span('[', ']', &begin, &end)) {
+                    ElementBuilder separator = builder_.element("row_sep");
+                    separator.attr("gap", builder_.createStringItem(source_ + begin, end - begin));
+                    children.append(separator.final());
+                } else children.append(builder_.createSymbolItem("row_sep"));
                 continue;
             }
             Item child = parse_atom_with_scripts();
@@ -1809,19 +1913,49 @@ private:
 
 } // namespace
 
+static tex::Engine* run_tex_engine(const InputParseOptions* options, const char* source,
+                                   size_t length, tex::Result* result, bool math_mode = false);
+
 extern "C" Item parse_math_direct_to_ast(Input* input, const char* math_source, size_t math_len, const char* flavor) {
     if (!input || !math_source) return ItemNull;
-    InputContext context(input, math_source, math_len);
     bool ascii = flavor && (strcmp(flavor, "ascii") == 0 || strcmp(flavor, "asciimath") == 0);
+    // ordinary formulas keep the recovery parser; definitions need scoped TeX expansion.
+    bool expand = !ascii && input->parse_options && input->parse_options->tex_expand;
+    for (size_t p = 0; !ascii && !expand && p < math_len;) {
+        if (math_source[p] == '%') {
+            while (p < math_len && math_source[p] != '\n' && math_source[p] != '\r') p++;
+        } else if (math_source[p] == '\\') {
+            char name[96], full[104];
+            p = latex_scan_command(math_source, math_len, p, name, sizeof(name), full, sizeof(full));
+            static const char* definitions[] = {"def", "gdef", "edef", "xdef", "let",
+                "newcommand", "renewcommand", "providecommand", "DeclareRobustCommand",
+                "NewDocumentCommand", "RenewDocumentCommand", "ProvideDocumentCommand", "DeclareDocumentCommand"};
+            for (const char* command : definitions) if (strcmp(name, command) == 0) expand = true;
+        } else p++;
+    }
+    tex::Engine* engine = nullptr;
+    tex::Result expanded = {};
+    if (expand) {
+        engine = run_tex_engine(input->parse_options, math_source, math_len, &expanded, true);
+        if (engine) {
+            math_source = expanded.text;
+            math_len = expanded.length;
+        }
+    }
+    InputContext context(input, math_source, math_len);
     DirectMathParser parser(context, context.source(), context.source_length(), 0, ascii);
-    Item result = parser.parse();
+    Item result = parser.parse(expanded.diagnostic_count ? expanded.diagnostics[0].message : nullptr);
     if (context.hasErrors()) context.logErrors();
+    if (engine) tex::engine_destroy(engine);
     return result;
 }
 
 static tex::Engine* run_tex_engine(const InputParseOptions* options, const char* source,
-                                   tex::Result* result) {
+                                   size_t length, tex::Result* result, bool math_mode) {
+    InputParseOptions defaults = {};
+    if (!options) options = &defaults;
     tex::EngineOptions eo = {};
+    eo.math_mode = math_mode;
     eo.base_path = options->tex_base;
     eo.ini = options->tex_ini;
     eo.adapters = options->tex_adapters;
@@ -1830,14 +1964,14 @@ static tex::Engine* run_tex_engine(const InputParseOptions* options, const char*
     eo.raw_command_count = options->tex_raw_command_count;
     tex::Engine* engine = tex::engine_create(&eo);
     if (!engine) return nullptr;
-    tex::engine_run(engine, source, strlen(source), result);
+    tex::engine_run(engine, source, length, result);
     if (tex::engine_wants_expl3(engine)) {
         // the document asked for expl3: run it again from the expl3 format
         tex::engine_destroy(engine);
         eo.expl3 = true;
         engine = tex::engine_create(&eo);
         if (!engine) return nullptr;
-        tex::engine_run(engine, source, strlen(source), result);
+        tex::engine_run(engine, source, length, result);
     }
     return engine;
 }
@@ -1867,7 +2001,7 @@ void parse_latex_direct(Input* input, const char* latex_string) {
     if (options && options->tex_expand) {
         // §9.2: expansion before digestion; the parser reads the engine's text
         tex::Result result = {};
-        tex::Engine* engine = run_tex_engine(options, latex_string, &result);
+        tex::Engine* engine = run_tex_engine(options, latex_string, strlen(latex_string), &result);
         if (engine) {
             InputContext context(input, result.text, result.length);
             DirectLatexParser parser(context, &result);
@@ -1890,7 +2024,7 @@ void parse_tex_expansion(Input* input, const char* source) {
     InputParseOptions defaults = {};
     const InputParseOptions* options = input->parse_options ? input->parse_options : &defaults;
     tex::Result result = {};
-    tex::Engine* engine = run_tex_engine(options, source, &result);
+    tex::Engine* engine = run_tex_engine(options, source, strlen(source), &result);
     if (!engine) return;
     InputContext context(input);
     MarkBuilder& builder = context.builder;

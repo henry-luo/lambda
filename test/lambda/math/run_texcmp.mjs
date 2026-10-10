@@ -126,6 +126,7 @@ function render_case(item, opts) {
     const rendered = render_lambda_math(`${definitions}\n${item.tex}`, {
       display: !!item.display, lambda: opts.lambda, timeout: opts.timeout,
       script: path.join(dir, 'formula.ls'),
+      base_uri: dir,
     });
     fs.writeFileSync(path.join(dir, 'lambda.json'), JSON.stringify(rendered, null, 2) + '\n');
     if (rendered.error !== 'no-error') throw new Error(rendered.error || 'Lambda returned no rendering');

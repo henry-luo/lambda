@@ -1,0 +1,37 @@
+<?xml version="1.0"?>
+<fo:root xmlns:fo="http://www.w3.org/1999/XSL/Format" font-family="Arial" font-size="7.5pt" line-height="9pt" orphans="1" widows="1" border-collapse="separate" line-stacking-strategy="from-parent()" text-altitude="from-parent(text-altitude)" white-space-collapse="inherited-property-value()">
+  <fo:layout-master-set><fo:simple-page-master master-name="sheet" page-width="75pt * 4pt div 2pt" page-height="(60pt * 2pt + 60pt * 2pt) div 2pt" margin="7.5pt"><fo:region-body overflow="visible"/></fo:simple-page-master></fo:layout-master-set>
+  <fo:page-sequence master-reference="sheet" force-page-count="no-force"><fo:flow flow-name="xsl-region-body">
+    <fo:table table-layout="fixed" width="100%"><fo:table-column column-width="30pt * 3pt div 3pt"/><fo:table-column/><fo:table-body><fo:table-row>
+      <fo:table-cell><fo:block background-color="#ffdddd">Term</fo:block><fo:block background-color="#ffdddd">Second</fo:block></fo:table-cell>
+      <fo:table-cell><fo:block>Lead</fo:block><fo:block border="0.75pt solid red" padding="1.5pt" color="#ddffdd" start-indent="4.5pt" end-indent="-1.5pt">
+        <fo:block linefeed-treatment="preserve" white-space-treatment="preserve" background-color="from-parent(color)" font-size="from-parent(font-size) * from-parent(font-size) div from-parent(font-size)" color="black" padding-before="inherited-property-value(font-size) * 0">A
+B
+C
+D
+E
+F
+G</fo:block>
+        <fo:block padding-top="abs(-2.25pt * 3pt) div 3pt" padding-bottom="2.25pt" background-color="#aaaaff" start-indent="-1.5pt" end-indent="6pt"/>
+        <fo:block linefeed-treatment="preserve" white-space-treatment="preserve" background-color="#dde0ff" start-indent="from-parent(font-size) * 2pt div 1pt" end-indent="from-parent(end-indent) + 0pt" color="black">H
+I
+J
+K
+L
+M
+N
+O
+P
+Q
+R
+S
+T
+U
+V
+W
+X
+Y</fo:block>
+      </fo:block><fo:block>Tail</fo:block></fo:table-cell>
+    </fo:table-row></fo:table-body></fo:table>
+  </fo:flow></fo:page-sequence>
+</fo:root>

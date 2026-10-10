@@ -155,10 +155,13 @@ fn is_unit_char(ch) {
 // Preserve explicit row/cell token boundaries during matrix layout.
 pub fn parse_rows(body, i, n, rows, current_row, current_cell) {
     if (i >= n) {
-        rows ++ [make_row(current_row ++ [make_cell(current_cell)])]
-    } else if (body[i] == 'row_sep' or body[i] == 'col_sep') {
-        if (body[i] == 'row_sep')
-            parse_rows(body, i + 1, n, rows ++ [make_row(current_row ++ [make_cell(current_cell)])], [], [])
+        // a final row terminator does not introduce another empty matrix row.
+        if (len(rows) > 0 and len(current_row) == 0 and len(current_cell) == 0) rows
+        else rows ++ [make_row(current_row ++ [make_cell(current_cell)])]
+    } else if (body[i] == 'row_sep' or body[i] == 'col_sep' or
+        (body[i] is element and name(body[i]) == 'row_sep')) {
+        if (body[i] == 'row_sep' or (body[i] is element and name(body[i]) == 'row_sep'))
+            parse_rows(body, i + 1, n, rows ++ [{*:make_row(current_row ++ [make_cell(current_cell)]), gap: body[i].gap}], [], [])
         else
             parse_rows(body, i + 1, n, rows, current_row ++ [make_cell(current_cell)], [])
     } else

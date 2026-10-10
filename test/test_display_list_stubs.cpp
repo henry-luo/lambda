@@ -168,8 +168,8 @@ bool rdt_picture_is_text(RdtPicture* pic) {
     return false;
 }
 
-void rdt_push_clip(RdtVector* vec, RdtPath* clip, const RdtMatrix* transform) {
-    (void)vec; (void)clip; (void)transform;
+void rdt_push_clip(RdtVector* vec, RdtPath* clip, const RdtMatrix* transform, RdtFillRule fill_rule) {
+    (void)vec; (void)clip; (void)transform; (void)fill_rule;
 }
 
 void rdt_pop_clip(RdtVector* vec) {

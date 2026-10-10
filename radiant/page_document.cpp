@@ -6,6 +6,8 @@
 #include "../lib/memtrack.h"
 #include "../lib/hashmap_helpers.h"
 #include "../lib/str.h"
+#include "../lib/sort.h"
+#include "../lib/arraylist.h"
 #include "../lib/url.h"
 #include <string.h>
 #include <math.h>
@@ -69,12 +71,17 @@ DomElement* radiant_page_style_parent(DomElement* source) {
 
 static const char* whitespace_names[] = {"linefeed-treatment", "white-space-treatment", "white-space-collapse", "wrap-option"};
 
-static const char* image_trait_names[] = {"content-width", "content-height", "scaling"};
+static const char* image_trait_names[] = {"content-width", "content-height", "scaling", "allowed-width-scale", "allowed-height-scale"};
 
-static bool page_computed_dimension(ViewTree* tree, ViewCssStyle* style, const char* text,
+static const CssValue* page_computed_value(ViewTree* tree, ViewCssStyle* style, const char* text) {
+    // native traits validate their own domains after untyped CSS parsing and binding substitution.
+    const char* property = "--radiant-trait";
+    CssDeclaration* declaration = css_parse_property_value_declaration(property, strlen(property), text, strlen(text), tree->model->css->pool);
+    return declaration ? view_css_resolve_value(tree, style, declaration->value) : nullptr;
+}
+
+static bool page_resolved_dimension(ViewTree* tree, ViewCssStyle* style, const CssValue* value,
         RadiantLengthPercentage* result) {
-    CssDeclaration* declaration = css_parse_property_value_declaration("margin-top", 10, text, strlen(text), tree->model->css->pool);
-    const CssValue* value = declaration ? view_css_resolve_value(tree, style, declaration->value) : nullptr;
     if (!value) return false;
     CssMathType type = css_math_value_type(value);
     result->percentage = type == CSS_MATH_PERCENT;
@@ -90,6 +97,11 @@ static bool page_computed_dimension(ViewTree* tree, ViewCssStyle* style, const c
         result->value = view_css_length(tree, style, value, CSS_PROPERTY_MARGIN_TOP, 0.0f, 0.0f);
     }
     return isfinite(result->value);
+}
+
+static bool page_computed_dimension(ViewTree* tree, ViewCssStyle* style, const char* text,
+        RadiantLengthPercentage* result) {
+    return page_resolved_dimension(tree, style, page_computed_value(tree, style, text), result);
 }
 
 bool radiant_page_boolean(const char* text, bool inherited, bool* result) {
@@ -187,38 +199,142 @@ bool radiant_image_trait_name(const char* name) {
     return false;
 }
 
+CssValue* radiant_image_computed_trait(Pool* pool, const RadiantImageSpec* spec, const char* name) {
+    if (!pool || !name || (spec && spec->status != VIEW_MODEL_OK)) return nullptr;
+    RadiantImageSpec initial = {}; if (!spec) spec = &initial;
+    for (size_t i = 0; i < sizeof(image_trait_names) / sizeof(*image_trait_names); i++) if (!strcmp(name, image_trait_names[i])) {
+        if (i == 2) return css_value_create_keyword(pool, spec->non_uniform ? "non-uniform" : "uniform");
+        if (i < 2) {
+            const RadiantImageAxis& axis = spec->axes[i];
+            if (axis.kind == RADIANT_IMAGE_LENGTH) return css_value_create_length(pool, axis.value, CSS_UNIT_PX);
+            if (axis.kind == RADIANT_IMAGE_PERCENT) return css_value_create_percentage(pool, axis.value);
+            const char* keywords[] = {"auto", "scale-to-fit", "scale-down-to-fit", "scale-up-to-fit"};
+            size_t keyword = axis.kind == RADIANT_IMAGE_AUTO ? 0u : (size_t)axis.kind - RADIANT_IMAGE_FIT + 1u;
+            return keyword < 4 ? css_value_create_keyword(pool, keywords[keyword]) : nullptr;
+        }
+        const RadiantImageScales& scales = spec->allowed[i - 3];
+        if (!scales.count) return css_value_create_keyword(pool, "any");
+        if (scales.count > (size_t)INT_MAX - (scales.any ? 1u : 0u) || !scales.values) return nullptr;
+        ArrayList* entries = arraylist_new(8); if (!entries) return nullptr;
+        bool valid = true;
+        for (size_t j = 0; valid && j < scales.count + (scales.any ? 1u : 0u); j++) {
+            CssValue* entry = j < scales.count ? css_value_create_percentage(pool, (double)scales.values[j] * 100.0)
+                : css_value_create_keyword(pool, "any");
+            valid = entry && arraylist_append(entries, entry);
+        }
+        CssValue* value = valid ? css_value_create_list(pool, (CssValue**)entries->data, (size_t)entries->length) : nullptr;
+        arraylist_free(entries); return value;
+    }
+    return nullptr;
+}
+
 bool radiant_image_traits_resolve(ViewTree* tree, ViewCssStyle* style) {
-    const char* values[3] = {};
-    if (!page_native_values(style->source, image_trait_names, 3, values)) return true;
+    const char* values[5] = {};
+    bool specified = page_native_values(style->source, image_trait_names, 5, values);
+    const RadiantImageSpec* inherited = style->parent ? style->parent->image_spec.get() : nullptr;
+    if (!specified && (!inherited || (!inherited->allowed[0].count && !inherited->allowed[0].any &&
+        !inherited->allowed[1].count && !inherited->allowed[1].any))) return true;
     RadiantImageSpec* result = (RadiantImageSpec*)pool_calloc(tree->model->css->pool, sizeof(RadiantImageSpec));
     if (!result) return false;
     style->image_spec = lam::up(result);
     RadiantImageSpec initial = {};
-    const RadiantImageSpec* parent = style->parent && style->parent->image_spec ? style->parent->image_spec.get() : &initial;
+    const RadiantImageSpec* parent = inherited ? inherited : &initial;
+    // allowed scales inherit through ordinary blocks; content dimensions and scaling do not.
+    for (size_t i = 0; i < 2; i++) result->allowed[i] = parent->allowed[i];
     auto fail = [&]() { result->status = VIEW_MODEL_INVALID_ARGUMENT; result->reason = "invalid native image content size or scaling"; return true; };
     for (size_t i = 0; i < 3; i++) {
         const char* value = values[i]; if (!value) continue;
+        const CssValue* computed = page_computed_value(tree, style, value);
+        if (!computed) return fail();
+        const char* keyword = computed->type == CSS_VALUE_TYPE_KEYWORD || computed->type == CSS_VALUE_TYPE_CUSTOM
+            ? css_value_identifier_name(computed) : nullptr;
         if (i == 2) {
-            if (!strcmp(value, "inherit")) result->non_uniform = parent->non_uniform;
-            else if (!strcmp(value, "non-uniform")) result->non_uniform = true;
-            else if (strcmp(value, "uniform")) return fail();
+            if (!keyword) return fail();
+            if (!strcmp(keyword, "inherit")) result->non_uniform = parent->non_uniform;
+            else if (!strcmp(keyword, "non-uniform")) result->non_uniform = true;
+            else if (strcmp(keyword, "uniform")) return fail();
             continue;
         }
         RadiantImageAxis& axis = result->axes[i];
-        if (!strcmp(value, "inherit")) { axis = parent->axes[i]; continue; }
-        if (!strcmp(value, "auto")) continue;
-        if (!strcmp(value, "scale-to-fit")) axis.kind = RADIANT_IMAGE_FIT;
-        else if (!strcmp(value, "scale-down-to-fit")) axis.kind = RADIANT_IMAGE_FIT_DOWN;
-        else if (!strcmp(value, "scale-up-to-fit")) axis.kind = RADIANT_IMAGE_FIT_UP;
+        if (keyword && !strcmp(keyword, "inherit")) { axis = parent->axes[i]; continue; }
+        if (keyword && !strcmp(keyword, "auto")) continue;
+        if (keyword && !strcmp(keyword, "scale-to-fit")) axis.kind = RADIANT_IMAGE_FIT;
+        else if (keyword && !strcmp(keyword, "scale-down-to-fit")) axis.kind = RADIANT_IMAGE_FIT_DOWN;
+        else if (keyword && !strcmp(keyword, "scale-up-to-fit")) axis.kind = RADIANT_IMAGE_FIT_UP;
         else {
             RadiantLengthPercentage size = {};
-            if (!page_computed_dimension(tree, style, value, &size)) return fail();
+            if (!page_resolved_dimension(tree, style, computed, &size)) return fail();
             axis.kind = size.percentage ? RADIANT_IMAGE_PERCENT : RADIANT_IMAGE_LENGTH;
             axis.value = size.value;
             if (!isfinite(axis.value) || axis.value < 0.0f) return fail();
         }
     }
+    for (size_t axis = 0; axis < 2; axis++) {
+        const char* text = values[axis + 3];
+        if (!text || !strcmp(text, "inherit")) continue;
+        const CssValue* value = page_computed_value(tree, style, text);
+        bool list = value && value->type == CSS_VALUE_TYPE_LIST;
+        size_t count = list ? (size_t)value->data.list.count : 1u;
+        if (!value || !count || (list && value->data.list.comma_separated) || count > SIZE_MAX / sizeof(float)) return fail();
+        float* scales = (float*)pool_alloc(tree->model->css->pool, count * sizeof(float));
+        if (!scales) return false;
+        RadiantImageScales& allowed = result->allowed[axis]; allowed = {scales, 0, false};
+        for (size_t i = 0; i < count; i++) {
+            const CssValue* entry = list ? value->data.list.values[i] : value;
+            const char* keyword = entry && (entry->type == CSS_VALUE_TYPE_KEYWORD || entry->type == CSS_VALUE_TYPE_CUSTOM)
+                ? css_value_identifier_name(entry) : nullptr;
+            if (keyword && !strcmp(keyword, "any")) { allowed.any = true; continue; }
+            CssMathEvaluationContext context = {}; context.preserve_percentages = true;
+            CssMathResult factor = css_math_evaluate(entry, &context);
+            float scale = (float)(factor.percentage / 100.0);
+            if (factor.type != CSS_MATH_PERCENT || !factor.resolved || !isfinite(scale) || scale < 0.0f) return fail();
+            scales[allowed.count++] = scale;
+        }
+        qsort(scales, allowed.count, sizeof(float), sort_cmp_float_asc);
+    }
     return true;
+}
+
+static bool page_image_scale_equal(float left, float right) {
+    // equivalent percentage and length divisions may differ by one float rounding step.
+    return left == right || (isfinite(left) && isfinite(right) &&
+        fabsf(left - right) <= FLT_EPSILON * fmaxf(fabsf(left), fabsf(right)));
+}
+
+static bool page_image_scale_explicit(const RadiantImageScales& allowed, float scale) {
+    size_t low = 0, high = allowed.count;
+    while (low < high) {
+        size_t middle = low + (high - low) / 2;
+        if (page_image_scale_equal(allowed.values[middle], scale)) return true;
+        if (allowed.values[middle] < scale) low = middle + 1;
+        else high = middle;
+    }
+    return false;
+}
+
+static bool page_image_scale_select(const RadiantImageScales* const* sets, size_t count,
+        float target, bool flexible, float* selected) {
+    if (!isfinite(target) || target < 0.0f) return false;
+    size_t best_fallbacks = SIZE_MAX; float best = -1.0f;
+    auto consider = [&](float scale) {
+        if (!isfinite(scale) || scale < 0.0f ||
+            (scale > target && !page_image_scale_equal(scale, target)) ||
+            (!flexible && !page_image_scale_equal(scale, target))) return;
+        size_t fallbacks = 0;
+        for (size_t i = 0; i < count; i++) {
+            const RadiantImageScales& set = *sets[i];
+            if (!set.count || page_image_scale_explicit(set, scale)) continue;
+            if (!set.any) return;
+            fallbacks++;
+        }
+        if (fallbacks < best_fallbacks || (fallbacks == best_fallbacks && scale > best)) {
+            best = scale; best_fallbacks = fallbacks;
+        }
+    };
+    consider(target);
+    for (size_t i = 0; i < count; i++) for (size_t j = 0; j < sets[i]->count; j++) consider(sets[i]->values[j]);
+    if (best < 0.0f) return false;
+    *selected = best; return true;
 }
 
 bool radiant_image_size(const RadiantImageSpec* spec, float natural_width, float natural_height,
@@ -227,19 +343,29 @@ bool radiant_image_size(const RadiantImageSpec* spec, float natural_width, float
         !isfinite(natural_width) || !isfinite(natural_height) || natural_width <= 0.0f || natural_height <= 0.0f) return false;
     const float natural[] = {natural_width, natural_height};
     const float viewport[] = {*viewport_width, *viewport_height};
-    float scale[] = {1.0f, 1.0f}; bool specified[] = {false, false};
+    float scale[] = {1.0f, 1.0f}; bool specified[] = {false, false}, flexible[] = {false, false};
     for (size_t i = 0; i < 2; i++) {
         const RadiantImageAxis& axis = spec->axes[i]; specified[i] = axis.kind != RADIANT_IMAGE_AUTO;
         if (axis.kind == RADIANT_IMAGE_LENGTH) scale[i] = axis.value / natural[i];
         else if (axis.kind == RADIANT_IMAGE_PERCENT) scale[i] = axis.value / 100.0f;
         else if (axis.kind >= RADIANT_IMAGE_FIT && isfinite(viewport[i])) {
             scale[i] = viewport[i] / natural[i];
+            flexible[i] = axis.kind == RADIANT_IMAGE_FIT || (axis.kind == RADIANT_IMAGE_FIT_DOWN && scale[i] < 1.0f) ||
+                (axis.kind == RADIANT_IMAGE_FIT_UP && scale[i] > 1.0f);
             if (axis.kind == RADIANT_IMAGE_FIT_DOWN) scale[i] = fminf(1.0f, scale[i]);
             if (axis.kind == RADIANT_IMAGE_FIT_UP) scale[i] = fmaxf(1.0f, scale[i]);
         }
     }
-    if (specified[0] != specified[1]) scale[specified[0] ? 1 : 0] = scale[specified[0] ? 0 : 1];
-    else if (!spec->non_uniform && specified[0]) scale[0] = scale[1] = fminf(scale[0], scale[1]);
+    const RadiantImageScales* sets[] = {&spec->allowed[0], &spec->allowed[1]};
+    bool linked = specified[0] != specified[1] || !spec->non_uniform;
+    if (linked) {
+        size_t axis = specified[0] ? 0u : 1u;
+        float target = specified[0] && specified[1] ? fminf(scale[0], scale[1]) : scale[axis];
+        bool variable = specified[0] && specified[1] ? flexible[0] && flexible[1] : flexible[axis];
+        if (!page_image_scale_select(sets, 2, target, variable, &scale[0])) return false;
+        scale[1] = scale[0];
+    } else for (size_t i = 0; i < 2; i++)
+        if (!page_image_scale_select(sets + i, 1, scale[i], flexible[i], &scale[i])) return false;
     *content_width = natural_width * scale[0]; *content_height = natural_height * scale[1];
     if (isnan(*viewport_width)) *viewport_width = *content_width;
     if (isnan(*viewport_height)) *viewport_height = *content_height;
@@ -312,7 +438,8 @@ static const char* flow_space_components[] = {"minimum", "optimum", "maximum", "
 static const char* flow_keep_names[] = {"keep-together", "keep-with-next", "keep-with-previous"};
 static const char* flow_keep_components[] = {"within-line", "within-column", "within-page"};
 
-static bool flow_trait_key(const char* name, bool* space, size_t* index, size_t* component) {
+bool radiant_flow_trait_key(const char* name, bool* space, size_t* index, size_t* component, const char** base) {
+    if (!name) return false;
     for (size_t family = 0; family < 2; family++) {
         const char* const* names = family ? flow_keep_names : flow_space_names;
         const char* const* components = family ? flow_keep_components : flow_space_components;
@@ -320,15 +447,18 @@ static bool flow_trait_key(const char* name, bool* space, size_t* index, size_t*
         for (size_t i = 0; i < count; i++) {
             size_t length = strlen(names[i]);
             if (strncmp(name, names[i], length)) continue;
-            if (!name[length]) { *space = !family; *index = i; *component = 0; return true; }
+            if (!name[length]) {
+                *space = !family; *index = i; *component = 0; if (base) *base = names[i]; return true;
+            }
             if (name[length] != '.') continue;
             for (size_t j = 0; j < component_count; j++) if (!strcmp(name + length + 1, components[j])) {
-                *space = !family; *index = i; *component = j + 1; return true;
+                *space = !family; *index = i; *component = j + 1; if (base) *base = names[i]; return true;
             }
         }
     }
     return false;
 }
+
 
 static const char* flow_decoration_names[2][2] = {
     {"border-before-width.conditionality", "border-after-width.conditionality"},
@@ -361,7 +491,7 @@ bool radiant_flow_trait_name(const char* name) {
         !strcmp(name, "start-indent") || !strcmp(name, "end-indent") || !strcmp(name, "column-proportion") || !strcmp(name, "column-number") ||
         !strcmp(name, "style-transparent") ||
         !strcmp(name, flow_table_omit_names[0]) || !strcmp(name, flow_table_omit_names[1]) ||
-        flow_decoration_key(name, &index, &component) || flow_trait_key(name, &space, &index, &component));
+        flow_decoration_key(name, &index, &component) || radiant_flow_trait_key(name, &space, &index, &component));
 }
 
 bool radiant_text_metrics(const ViewCssStyle* style, float* altitude, float* depth) {
@@ -415,6 +545,13 @@ static bool flow_integer(const char* value, int32_t* result) {
     return true;
 }
 
+static bool flow_computed_integer(ViewTree* tree, ViewCssStyle* style, const CssValue* value, int32_t* result) {
+    double number = view_css_number(value, tree, style);
+    if (!isfinite(number) || number != floor(number) || number < INT32_MIN || number > INT32_MAX) return false;
+    *result = static_cast<int32_t>(number); // INT_CAST_OK: validated keep/precedence counter domain
+    return true;
+}
+
 static bool flow_length(ViewTree* tree, ViewCssStyle* style, const char* text, float* result) {
     RadiantLengthPercentage size = {};
     if (!page_computed_dimension(tree, style, text, &size) || size.percentage) return false;
@@ -447,7 +584,7 @@ bool radiant_flow_traits_resolve(ViewTree* tree, ViewCssStyle* style) {
         if (!strcmp(local, "text-altitude")) { nominal[0] = value; return true; }
         if (!strcmp(local, "text-depth")) { nominal[1] = value; return true; }
         if (flow_decoration_key(local, &index, &component)) { decorations[index][component] = value; return true; }
-        if (!flow_trait_key(local, &space, &index, &component)) return false;
+        if (!radiant_flow_trait_key(local, &space, &index, &component)) return false;
         (space ? spaces[index][component] : keeps[index][component]) = value; return true;
     });
     const RadiantFlowTraits* inherited_traits = style->parent ? style->parent->flow_traits.get() : nullptr;
@@ -498,8 +635,7 @@ bool radiant_flow_traits_resolve(ViewTree* tree, ViewCssStyle* style) {
     }
     for (size_t i = 0; i < 2; i++) if (const char* value = indents[i]) {
         if (!strcmp(value, "inherit")) continue;
-        CssDeclaration* declaration = css_parse_property_value_declaration("margin-left", 11, value, strlen(value), tree->model->css->pool);
-        const CssValue* resolved = declaration ? view_css_resolve_value(tree, style, declaration->value) : nullptr;
+        const CssValue* resolved = page_computed_value(tree, style, value);
         CssMathType type = resolved ? css_math_value_type(resolved) : CSS_MATH_INVALID;
         if (type != CSS_MATH_LENGTH && type != CSS_MATH_PERCENT && type != CSS_MATH_LENGTH_PERCENT &&
             !(resolved && resolved->type == CSS_VALUE_TYPE_NUMBER && !resolved->data.number.value))
@@ -577,16 +713,20 @@ bool radiant_flow_traits_resolve(ViewTree* tree, ViewCssStyle* style) {
             if (j < 3) {
                 if (inherit) *ranges[j] = ancestor_ranges[j];
                 else if (!flow_length(tree, style, text, ranges[j])) return fail("space range requires lengths without percentages");
-            } else if (j == 3) {
+                continue;
+            }
+            const CssValue* value = inherit ? nullptr : page_computed_value(tree, style, text);
+            const char* keyword = css_value_identifier_name(value);
+            if (j == 3) {
                 if (inherit) { output.precedence = ancestor.precedence; output.force = ancestor.force; }
-                else if (!strcmp(text, "force")) output.force = true;
+                else if (keyword && !strcmp(keyword, "force")) output.force = true;
                 else {
                     output.force = false;
-                    if (!flow_integer(text, &output.precedence)) return fail("space precedence requires force or a signed integer");
+                    if (!flow_computed_integer(tree, style, value, &output.precedence)) return fail("space precedence requires force or a signed integer");
                 }
             } else if (inherit) output.retain = ancestor.retain;
-            else if (!strcmp(text, "retain")) output.retain = true;
-            else if (!strcmp(text, "discard")) output.retain = false;
+            else if (keyword && !strcmp(keyword, "retain")) output.retain = true;
+            else if (keyword && !strcmp(keyword, "discard")) output.retain = false;
             else return fail("space conditionality requires discard or retain");
         }
         output.minimum = fminf(output.minimum, output.optimum); output.maximum = fmaxf(output.maximum, output.optimum);
@@ -598,10 +738,14 @@ bool radiant_flow_traits_resolve(ViewTree* tree, ViewCssStyle* style) {
         if (!text) continue;
         RadiantKeepStrength& output = keep_outputs[i]->scope[j];
         if (!strcmp(text, "inherit")) output = keep_ancestors[i]->scope[j];
-        else if (!strcmp(text, "always")) output.kind = RADIANT_KEEP_ALWAYS;
-        else if (strcmp(text, "auto")) {
-            output.kind = RADIANT_KEEP_NUMBER;
-            if (!flow_integer(text, &output.value)) return fail("keep strength requires auto, always or a signed integer");
+        else {
+            const CssValue* value = page_computed_value(tree, style, text);
+            const char* keyword = css_value_identifier_name(value);
+            if (keyword && !strcmp(keyword, "always")) output.kind = RADIANT_KEEP_ALWAYS;
+            else if (!keyword || strcmp(keyword, "auto")) {
+                output.kind = RADIANT_KEEP_NUMBER;
+                if (!flow_computed_integer(tree, style, value, &output.value)) return fail("keep strength requires auto, always or a signed integer");
+            }
         }
     }
     return true;

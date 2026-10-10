@@ -1,0 +1,26 @@
+<?xml version="1.0"?>
+<fo:root xmlns:fo="http://www.w3.org/1999/XSL/Format" font-family="Arial" font-size="12pt" line-height="20pt" color="#16304a">
+  <fo:layout-master-set>
+    <fo:simple-page-master master-name="report" page-width="300pt" page-height="180pt" margin="18pt">
+      <fo:region-body region-name="body" background-color="#f3f1ff"/>
+    </fo:simple-page-master>
+  </fo:layout-master-set>
+  <fo:page-sequence master-reference="report">
+    <fo:flow flow-name="body" keep-with-next.within-page="90" space-after.precedence="force" space-after.conditionality="retain">
+      <fo:block line-height="40pt" keep-with-next.within-page="from-parent(keep-with-next.within-page)" background-color="#ffdddd">A: stronger keep</fo:block>
+      <fo:block line-height="40pt" keep-with-next.within-page="from-parent(keep-with-next.within-page) - 80" background-color="#ddffdd">B: weaker keep</fo:block>
+      <fo:block line-height="40pt" keep-with-next.within-column="from-parent(keep-with-next.within-page) + 10" background-color="#aaaaff">C: keep with D</fo:block>
+      <fo:block line-height="40pt" background-color="#dde0ff">D: same page as C</fo:block>
+    </fo:flow>
+  </fo:page-sequence>
+  <fo:page-sequence master-reference="report">
+    <fo:flow flow-name="body" space-after.precedence="force" space-after.conditionality="retain">
+      <fo:block space-after.minimum="10pt" space-after.optimum="30pt" space-after.maximum="40pt" space-after.precedence="from-parent(space-after.precedence)" space-after.conditionality="from-parent(space-after.conditionality)" background-color="#ffffaa">Flexible space below</fo:block>
+      <fo:block>First line</fo:block>
+      <fo:block>Second line</fo:block>
+      <fo:block>Third line</fo:block>
+      <fo:block>Fourth line</fo:block>
+      <fo:block>Fifth line</fo:block>
+    </fo:flow>
+  </fo:page-sequence>
+</fo:root>
