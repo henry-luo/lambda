@@ -304,6 +304,34 @@ lambda render graph.d2 -o graph.png
 
 ---
 
+### `demo` — Named Demos and Document Viewer
+
+```
+lambda demo [name] [view options]
+lambda demo --list
+```
+
+With no name, opens the bundled `lambda.doc` viewer with its startup splash from
+`<LAMBDA_HOME>/package/doc/doc_viewer.html` (D7.2.4). Named demos launch through
+`view`: `lambda demo tetris` is equivalent to
+`lambda view test/demo/tetris/tetris.ls`.
+
+Names include `tetris`, `superlambda`, `doom`, `scene3d` (also `ringworld`),
+`observatory`, `three-gallery`, `asset-gallery`, `shared-animation`, `slides`
+and `wordcloud`. Run named demos from the checkout or unpacked release root;
+their relative paths and local assets are under `test/demo/`.
+See the [demo catalog](../test/demo/README.md) for entry points and controls.
+
+`--list`, `--help` and `-h` show the available demos. An unknown name reports an
+error and the catalog. Other options pass through to `view` unchanged.
+
+```bash
+lambda demo scene3d
+lambda demo tetris --headless --event-file test/ui/tetris_autoplay.json
+```
+
+---
+
 ### `view` — Interactive Document Viewer
 
 Open a document in an interactive viewer window.

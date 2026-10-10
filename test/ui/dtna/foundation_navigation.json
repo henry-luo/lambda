@@ -1,0 +1,397 @@
+{
+  "name": "dtna foundation navigation",
+  "html": "test/ui/dtna/foundation_navigation.ls",
+  "viewport": {
+    "width": 900,
+    "height": 900
+  },
+  "events": [
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#advanced-pages [data-dtna-page]"
+      },
+      "count": 11
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#advanced-pages .dtna-page-jump"
+      },
+      "count": 2
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#advanced-pages [aria-label=\"Next 5 pages\"]"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#last-request"
+      },
+      "equals": "advanced-pages:15:10"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#advanced-pages [aria-current=page]"
+      },
+      "equals": "15"
+    },
+    {
+      "type": "select_option",
+      "target": {
+        "selector": "#advanced-pages [data-dtna-page-size]"
+      },
+      "value": "20"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#last-request"
+      },
+      "equals": "advanced-pages:8:20"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#advanced-pages [aria-current=page]"
+      },
+      "equals": "8"
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#advanced-pages [data-dtna-page-size]"
+      },
+      "equals": "20"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#advanced-pages [data-dtna-page-input]"
+      }
+    },
+    {
+      "type": "type",
+      "text": "3.5",
+      "clear": true
+    },
+    {
+      "type": "key_press",
+      "key": "enter"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#last-request"
+      },
+      "equals": "advanced-pages:8:20"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#advanced-pages [aria-current=page]"
+      },
+      "equals": "8"
+    },
+    {
+      "type": "type",
+      "text": "abc",
+      "clear": true
+    },
+    {
+      "type": "key_press",
+      "key": "enter"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#last-request"
+      },
+      "equals": "advanced-pages:8:20"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#advanced-pages [aria-current=page]"
+      },
+      "equals": "8"
+    },
+    {
+      "type": "type",
+      "text": "0",
+      "clear": true
+    },
+    {
+      "type": "key_press",
+      "key": "enter"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#last-request"
+      },
+      "equals": "advanced-pages:8:20"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#advanced-pages [aria-current=page]"
+      },
+      "equals": "8"
+    },
+    {
+      "type": "type",
+      "text": "999",
+      "clear": true
+    },
+    {
+      "type": "key_press",
+      "key": "enter"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#last-request"
+      },
+      "equals": "advanced-pages:50:20"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#advanced-pages [aria-current=page]"
+      },
+      "equals": "50"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#fixed-pages [aria-label=\"Next page\"]"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#last-request"
+      },
+      "equals": "fixed-pages:5:10"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#fixed-pages [aria-current=page]"
+      },
+      "equals": "4"
+    },
+    {
+      "type": "select_option",
+      "target": {
+        "selector": "#fixed-pages [data-dtna-page-size]"
+      },
+      "value": "20"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#last-request"
+      },
+      "equals": "fixed-pages:2:20"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#fixed-pages [aria-current=page]"
+      },
+      "equals": "4"
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#fixed-pages [data-dtna-page-size]"
+      },
+      "equals": "10"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#chinese-pages [aria-label=\"\u4e0b\u4e00\u9875\"]"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#last-request"
+      },
+      "equals": "chinese-pages:2:10"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#chinese-pages [aria-current=page]"
+      },
+      "equals": "2"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#disabled-pages [aria-label=\"Next page\"]"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#last-request"
+      },
+      "equals": "chinese-pages:2:10"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#step-flow [data-dtna-step=\"1\"]"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#step-flow li:first-child"
+      },
+      "attribute": "aria-current",
+      "equals": "step"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#step-flow [data-dtna-step=\"2\"]"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#last-request"
+      },
+      "equals": "step-flow:2"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#step-flow li:last-child"
+      },
+      "attribute": "aria-current",
+      "equals": "step"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#step-flow [data-dtna-step=\"0\"]"
+      }
+    },
+    {
+      "type": "key_press",
+      "key": "tab"
+    },
+    {
+      "type": "assert_focus",
+      "target": {
+        "selector": "#step-flow [data-dtna-step=\"2\"]"
+      }
+    },
+    {
+      "type": "key_press",
+      "key": "space"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#last-request"
+      },
+      "equals": "step-flow:2"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#fixed-flow [data-dtna-step=\"1\"]"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#last-request"
+      },
+      "equals": "fixed-flow:1"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#fixed-flow li:first-child"
+      },
+      "attribute": "aria-current",
+      "equals": "step"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#locked-button"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#activation-count"
+      },
+      "equals": "0"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#enabled-button"
+      }
+    },
+    {
+      "type": "key_press",
+      "key": "enter"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#activation-count"
+      },
+      "equals": "2"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#step-flow"
+      },
+      "property": "flex-direction",
+      "equals": "row"
+    },
+    {
+      "type": "resize",
+      "width": 500,
+      "height": 900
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#step-flow"
+      },
+      "property": "flex-direction",
+      "equals": "column"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#step-flow li:last-child"
+      },
+      "attribute": "aria-current",
+      "equals": "step"
+    },
+    {
+      "type": "render",
+      "file": "temp/ui_dtna/foundation_increment/navigation.png"
+    }
+  ]
+}

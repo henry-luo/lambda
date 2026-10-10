@@ -2357,6 +2357,38 @@ static bool apply_common_mir_option(const char* arg, Runtime* runtime) {
     return false;
 }
 
+struct LambdaDemo {
+    const char* name;
+    const char* path;
+};
+
+// one catalog drives both command lookup and the list of launchable demos.
+static const LambdaDemo LAMBDA_DEMOS[] = {
+    {"tetris", "test/demo/tetris/tetris.ls"},
+    {"superlambda", "test/demo/superlambda/superlambda.ls"},
+    {"doom", "test/demo/doom/doom.ls"},
+    {"photo", "test/demo/photo/photo.ls"},
+    {"scene3d", "test/demo/scene3d/ringworld.ls"},
+    {"ringworld", "test/demo/scene3d/ringworld.ls"},
+    {"observatory", "test/demo/scene3d/observatory.html"},
+    {"three-gallery", "test/demo/scene3d/three-gallery.html"},
+    {"asset-gallery", "test/demo/scene3d/asset-gallery.ls"},
+    {"shared-animation", "test/demo/scene3d/shared-animation.html"},
+    {"slides", "test/demo/slides/northstar.slides"},
+    {"wordcloud", "test/demo/wordcloud.ls"},
+};
+
+static void print_demo_help(FILE* stream) {
+    fputs("Usage: lambda demo [name] [view options]\n"
+          "\nWith no name, opens the bundled document viewer with its startup splash.\n"
+          "Named demos (run from the checkout or release root):\n", stream);
+    for (const LambdaDemo& demo : LAMBDA_DEMOS) {
+        fprintf(stream, "  %-18s %s\n", demo.name, demo.path); // PRINTF_OK: user-facing CLI help.
+    }
+    fputs("\n  --list, --help, -h  Show this list\n"
+          "Other options are passed to 'lambda view'.\n", stream);
+}
+
 static int lambda_main_impl(int argc, char *argv[]) {
 #ifdef _WIN32
     // Set console to UTF-8 for proper Unicode display on Windows
@@ -2469,17 +2501,44 @@ static int lambda_main_impl(int argc, char *argv[]) {
     memtrack_init(mode);
     atexit(lambda_main_memtrack_atexit);  // fallback for exit() paths
 
-    // 'demo' opens the bundled lambda.doc splash from Lambda home (D7.2.4).
+    // demos share view's launch options; the unnamed splash follows Lambda home (D7.2.4).
     // allocate after tracker initialization so teardown uses the same headers.
     if (argc >= 2 && strcmp(argv[1], "demo") == 0) {
+        const char* path = nullptr;
+        int first_option = 2;
+        if (argc >= 3) {
+            if (!strcmp(argv[2], "--list") || !strcmp(argv[2], "--help") || !strcmp(argv[2], "-h")) {
+                print_demo_help(stdout);
+                return lambda_main_finish(0);
+            }
+            if (argv[2][0] != '-') {
+                for (const LambdaDemo& demo : LAMBDA_DEMOS) {
+                    if (strcmp(argv[2], demo.name) == 0) { path = demo.path; break; }
+                }
+                if (!path) {
+                    fprintf(stderr, "Error: unknown demo '%s'.\n\n", argv[2]); // PRINTF_OK: user-facing CLI diagnostic.
+                    print_demo_help(stderr);
+                    return lambda_main_finish(1);
+                }
+                first_option = 3;
+            }
+        }
+        if (!path) {
+            g_lambda_main_viewer_path = lambda_home_path("package/doc/doc_viewer.html");
+            path = g_lambda_main_viewer_path;
+        }
         char** demo_argv = (char**)mem_alloc(sizeof(char*) * (argc + 2), MEM_CAT_SYSTEM);
         g_lambda_main_demo_argv = demo_argv;
-        g_lambda_main_viewer_path = lambda_home_path("package/doc/doc_viewer.html");
+        if (!path || !demo_argv) {
+            fputs("Error: could not allocate demo launch arguments.\n", stderr);
+            return lambda_main_finish(1);
+        }
         demo_argv[0] = argv[0];
         demo_argv[1] = (char*)"view";
-        demo_argv[2] = g_lambda_main_viewer_path;
-        for (int i = 2; i < argc; i++) demo_argv[i + 1] = argv[i];
-        argc++;
+        demo_argv[2] = (char*)path;
+        int demo_argc = 3;
+        for (int i = first_option; i < argc; i++) demo_argv[demo_argc++] = argv[i];
+        argc = demo_argc;
         demo_argv[argc] = NULL;
         argv = demo_argv;
     }

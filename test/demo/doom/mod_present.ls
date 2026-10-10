@@ -157,6 +157,7 @@ pub pn paint(owner, map_data, before, game, handles, previous_visibility, rules,
         text(handles.message, if (game.mode == "dead") "You died. Press R to restart."
             else if (game.mode == "paused") "Paused" else if (game.mode == "won") "Episode complete" else "Lambda Script / Radiant")
     }
+    if (before == null or game.autoplay != before.autoplay) text(handles.status, scene.status_text(game))
     let pickup_flash = game.time < (game.player.pickup_until or 0)
     let flash_color = if (game.time < game.teleport_until) "#fff" else if (pickup_flash) "#ff0" else "#f00"
     let previous_flash_color = if (before == null) "" else if (before.time < before.teleport_until) "#fff"
@@ -169,7 +170,7 @@ pub pn paint(owner, map_data, before, game, handles, previous_visibility, rules,
     // diagnostic attributes otherwise invalidate the entire scene's selectors.
     if (before == null or game.mode != "playing" or game.mode != before.mode or game.generation != before.generation or
         game.spectator != before.spectator) {
-        let diagnostics = {mode: game.mode, map: game.level_name, spectator: game.spectator, ticks: game.ticks,
+        let diagnostics = {mode: game.mode, autoplay: game.autoplay, map: game.level_name, spectator: game.spectator, ticks: game.ticks,
             x: round(game.player.x), y: round(game.player.y), z: round(game.player.z),
             floor: round(game.player.floor), angle: scene.fmt(game.player.angle),
             'camera-height': round(game.camera_control.height),

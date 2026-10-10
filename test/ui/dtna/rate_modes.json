@@ -1,0 +1,681 @@
+{
+  "name": "dtna Rate half preview clear controlled keyboard RTL and readonly",
+  "html": "test/ui/dtna/rate_modes.ls",
+  "viewport": {
+    "width": 600,
+    "height": 700
+  },
+  "events": [
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#rate-default"
+      },
+      "width": 132,
+      "height": 20.5,
+      "tolerance": 0.2
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#rate-default"
+      },
+      "property": "font-size",
+      "equals": "20px"
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#rate-half"
+      },
+      "width": 132,
+      "height": 20.5,
+      "tolerance": 0.2
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#rate-half"
+      },
+      "property": "font-size",
+      "equals": "20px"
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#rate-fixed"
+      },
+      "width": 132,
+      "height": 20.5,
+      "tolerance": 0.2
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#rate-fixed"
+      },
+      "property": "font-size",
+      "equals": "20px"
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#rate-disabled"
+      },
+      "width": 132,
+      "height": 20.5,
+      "tolerance": 0.2
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#rate-disabled"
+      },
+      "property": "font-size",
+      "equals": "20px"
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#rate-readonly"
+      },
+      "width": 132,
+      "height": 20.5,
+      "tolerance": 0.2
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#rate-readonly"
+      },
+      "property": "font-size",
+      "equals": "20px"
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#rate-no-clear"
+      },
+      "width": 132,
+      "height": 20.5,
+      "tolerance": 0.2
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#rate-no-clear"
+      },
+      "property": "font-size",
+      "equals": "20px"
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#rate-no-keyboard"
+      },
+      "width": 132,
+      "height": 20.5,
+      "tolerance": 0.2
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#rate-no-keyboard"
+      },
+      "property": "font-size",
+      "equals": "20px"
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#rate-small"
+      },
+      "width": 107,
+      "height": 15.125,
+      "tolerance": 0.2
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#rate-small"
+      },
+      "property": "font-size",
+      "equals": "15px"
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#rate-large"
+      },
+      "width": 157,
+      "height": 25.875,
+      "tolerance": 0.2
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#rate-large"
+      },
+      "property": "font-size",
+      "equals": "25px"
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#rate-custom"
+      },
+      "width": 49.375,
+      "height": 20,
+      "tolerance": 0.2
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#rate-custom"
+      },
+      "property": "font-size",
+      "equals": "20px"
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#rate-rtl"
+      },
+      "width": 132,
+      "height": 20.5,
+      "tolerance": 0.2
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#rate-rtl"
+      },
+      "property": "font-size",
+      "equals": "20px"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#rate-default"
+      },
+      "attribute": "role",
+      "equals": "radiogroup"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#rate-default"
+      },
+      "attribute": "aria-label",
+      "equals": "Default rating"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#rate-default .dtna-rate-star"
+      },
+      "count": 5
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#rate-half .dtna-rate-full"
+      },
+      "count": 2
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#rate-half .dtna-rate-half"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#rate-default svg"
+      },
+      "count": 10
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#rate-custom .dtna-rate-star"
+      },
+      "attribute": "aria-label",
+      "equals": "Poor"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#rate-half input"
+      },
+      "attribute": "value",
+      "equals": "2.5"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#rate-half .dtna-rate-star",
+        "index": 1,
+        "offset_x": 2,
+        "offset_y": 10
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#rate-half"
+      },
+      "attribute": "data-value",
+      "equals": "1.5"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#rate-request"
+      },
+      "equals": "rate-half:1.5"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#rate-type"
+      },
+      "equals": "float"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#rate-count"
+      },
+      "equals": "1"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#rate-half .dtna-rate-star",
+        "index": 1,
+        "offset_x": 2,
+        "offset_y": 10
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#rate-half"
+      },
+      "attribute": "data-value",
+      "equals": "0"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#rate-count"
+      },
+      "equals": "2"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#rate-half input"
+      },
+      "attribute": "value",
+      "equals": "0"
+    },
+    {
+      "type": "mouse_move",
+      "target": {
+        "selector": "#rate-half .dtna-rate-star",
+        "index": 2,
+        "offset_x": 2,
+        "offset_y": 10
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#rate-half .dtna-rate-half"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#rate-half"
+      },
+      "attribute": "data-value",
+      "equals": "0"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#rate-hover"
+      },
+      "equals": "rate-half:2.5"
+    },
+    {
+      "type": "mouse_move",
+      "x": 500,
+      "y": 680
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#rate-half .dtna-rate-half"
+      },
+      "count": 0
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#rate-hover"
+      },
+      "equals": "rate-half:null"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#rate-default .dtna-rate-star",
+        "index": 3
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#rate-default"
+      },
+      "attribute": "data-value",
+      "equals": "4"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#rate-count"
+      },
+      "equals": "3"
+    },
+    {
+      "type": "key_press",
+      "key": "right"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#rate-default"
+      },
+      "attribute": "data-value",
+      "equals": "5"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#rate-count"
+      },
+      "equals": "4"
+    },
+    {
+      "type": "key_press",
+      "key": "right"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#rate-count"
+      },
+      "equals": "4"
+    },
+    {
+      "type": "key_press",
+      "key": "left"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#rate-default"
+      },
+      "attribute": "data-value",
+      "equals": "4"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#rate-count"
+      },
+      "equals": "5"
+    },
+    {
+      "type": "key_press",
+      "key": "space"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#rate-default"
+      },
+      "attribute": "data-value",
+      "equals": "0"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#rate-count"
+      },
+      "equals": "6"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#rate-fixed .dtna-rate-star",
+        "index": 2
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#rate-fixed"
+      },
+      "attribute": "data-value",
+      "equals": "2"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#rate-request"
+      },
+      "equals": "rate-fixed:3"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#rate-count"
+      },
+      "equals": "7"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#rate-disabled .dtna-rate-star",
+        "index": 2
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#rate-count"
+      },
+      "equals": "7"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#rate-readonly .dtna-rate-star",
+        "index": 2
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#rate-count"
+      },
+      "equals": "7"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#rate-inherited .dtna-rate-star",
+        "index": 2
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#rate-count"
+      },
+      "equals": "7"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#rate-no-clear .dtna-rate-star",
+        "index": 1
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#rate-no-clear"
+      },
+      "attribute": "data-value",
+      "equals": "2"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#rate-count"
+      },
+      "equals": "8"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#rate-no-keyboard .dtna-rate-star",
+        "index": 2
+      }
+    },
+    {
+      "type": "key_press",
+      "key": "right"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#rate-no-keyboard"
+      },
+      "attribute": "data-value",
+      "equals": "3"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#rate-count"
+      },
+      "equals": "9"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#rate-rtl .dtna-rate-star",
+        "index": 1,
+        "offset_x": 18,
+        "offset_y": 10
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#rate-rtl"
+      },
+      "attribute": "data-value",
+      "equals": "1.5"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#rate-count"
+      },
+      "equals": "10"
+    },
+    {
+      "type": "key_press",
+      "key": "left"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#rate-rtl"
+      },
+      "attribute": "data-value",
+      "equals": "2"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#rate-count"
+      },
+      "equals": "11"
+    },
+    {
+      "type": "key_press",
+      "key": "right"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#rate-rtl"
+      },
+      "attribute": "data-value",
+      "equals": "1.5"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#rate-count"
+      },
+      "equals": "12"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#rate-custom .dtna-rate-star",
+        "index": 2
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#rate-custom"
+      },
+      "attribute": "data-value",
+      "equals": "3"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#rate-request"
+      },
+      "equals": "rate-custom:3"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#rate-count"
+      },
+      "equals": "13"
+    },
+    {
+      "type": "render",
+      "file": "temp/ui_dtna/rate_modes.png"
+    }
+  ]
+}

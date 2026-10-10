@@ -1187,71 +1187,31 @@ void render_box_shadow(RasterRenderContext* rdcon, ViewBlock* view, Rect rect) {
         exclude_params[4] = r_tl;       exclude_params[5] = r_tr;
         exclude_params[6] = r_br;       exclude_params[7] = r_bl;
 
-        if (s_blur >= 1.0f) {
-            // Blur > 0: use isolated temp-buffer pipeline (rasterise + blur +
-            // composite) so the blur kernel doesn't smear neighbouring pixels.
-            if (xform && rdcon->ui_context->surface) {
-                assert(rdcon->dl && "transformed box-shadow requires display-list recording");
-                ScratchArena* shadow_arena = &rdcon->dl->arena;
-                int sh_x = 0, sh_y = 0, sh_w = 0, sh_h = 0;
-                uint32_t* shadow_pixels = render_outer_shadow_blur_image(
-                    shadow_arena, rdcon->ui_context->surface,
-                    shadow_x, shadow_y, shadow_w, shadow_h,
-                    sr_tl, sr_tr, sr_br, sr_bl,
-                    s->color, s_blur,
-                    exclude_type, exclude_params,
-                    &sh_x, &sh_y, &sh_w, &sh_h);
-                if (shadow_pixels && sh_w > 0 && sh_h > 0) {
-                    // rc_draw_image records uint32_t row stride; shadow pixels are tightly packed.
-                    rc_draw_image(rdcon, shadow_pixels, sh_w, sh_h, sh_w,
-                                  (float)sh_x, (float)sh_y, (float)sh_w, (float)sh_h,
-                                  255, xform);
-                }
-            } else {
-                rc_outer_shadow(rdcon,
-                                shadow_x, shadow_y, shadow_w, shadow_h,
-                                sr_tl, sr_tr, sr_br, sr_bl,
-                                s->color, s_blur,
-                                exclude_type, exclude_params,
-                                clip_type, clip_params);
+        // hard shadows also exclude the border-box, even for transparent square boxes.
+        if (xform && rdcon->ui_context->surface) {
+            assert(rdcon->dl && "transformed box-shadow requires display-list recording");
+            ScratchArena* shadow_arena = &rdcon->dl->arena;
+            int sh_x = 0, sh_y = 0, sh_w = 0, sh_h = 0;
+            uint32_t* shadow_pixels = render_outer_shadow_blur_image(
+                shadow_arena, rdcon->ui_context->surface,
+                shadow_x, shadow_y, shadow_w, shadow_h,
+                sr_tl, sr_tr, sr_br, sr_bl,
+                s->color, s_blur,
+                exclude_type, exclude_params,
+                &sh_x, &sh_y, &sh_w, &sh_h);
+            if (shadow_pixels && sh_w > 0 && sh_h > 0) {
+                // rc_draw_image records uint32_t row stride; shadow pixels are tightly packed.
+                rc_draw_image(rdcon, shadow_pixels, sh_w, sh_h, sh_w,
+                              (float)sh_x, (float)sh_y, (float)sh_w, (float)sh_h,
+                              255, xform);
             }
         } else {
-            // No blur (or sub-pixel blur, treated as 0 per CSS): paint the
-            // shadow path directly.  For rounded elements we still need to
-            // restore the inside of the border-box because the shadow path
-            // covers the same area as the element.
-            bool need_shadow_clip = (r_tl > 0 || r_tr > 0 || r_br > 0 || r_bl > 0);
-            int save_rx = 0, save_ry = 0, save_rw = 0, save_rh = 0;
-            if (need_shadow_clip) {
-                save_rx = (int)floorf(rect.x);
-                save_ry = (int)floorf(rect.y);
-                save_rw = (int)ceilf(rect.x + rect.width) - save_rx;
-                save_rh = (int)ceilf(rect.y + rect.height) - save_ry;
-                rc_shadow_clip_save(rdcon, save_rx, save_ry, save_rw, save_rh);
-            }
-
-            // Build shadow path
-            Rect shadow_rect = {shadow_x, shadow_y, shadow_w, shadow_h};
-            RdtPath* shadow_path = nullptr;
-            if (sr_tl > 0 || sr_tr > 0 || sr_br > 0 || sr_bl > 0) {
-                Corner shadow_radius = render_path_uniform_corner(
-                    sr_tl, sr_tr, sr_br, sr_bl);
-                shadow_path = render_path_create_rounded_rect(shadow_rect, &shadow_radius);
-            } else {
-                shadow_path = render_path_create_rounded_rect(shadow_rect, nullptr);
-            }
-
-            RdtPath* clip_path = render_path_create_clip_path(rdcon);
-            rc_push_clip(rdcon, clip_path, xform);
-            rc_fill_path(rdcon, shadow_path, s->color, RDT_FILL_WINDING, xform);
-            rc_pop_clip(rdcon);
-            rdt_path_free(shadow_path);
-            rdt_path_free(clip_path);
-
-            if (need_shadow_clip) {
-                rc_shadow_clip_restore(rdcon, exclude_type, exclude_params,
-                                       save_rx, save_ry, save_rw, save_rh, 1);
-            }
+            rc_outer_shadow(rdcon,
+                            shadow_x, shadow_y, shadow_w, shadow_h,
+                            sr_tl, sr_tr, sr_br, sr_bl,
+                            s->color, s_blur,
+                            exclude_type, exclude_params,
+                            clip_type, clip_params);
         }
     }
 }

@@ -1,0 +1,207 @@
+{
+  "name": "doom Auto Play, pause/resume, manual takeover and close",
+  "html": "test/demo/doom/doom.ls",
+  "viewport": {
+    "width": 660,
+    "height": 500
+  },
+  "input_turn_ms": 0,
+  "events": [
+    {
+      "type": "advance_time",
+      "ms": 40,
+      "steps": 2
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "ready"
+    },
+    {
+      "type": "assert_visible",
+      "target": {
+        "selector": "#auto-play"
+      },
+      "visible": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#auto-play"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-autoplay",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "advance_time",
+      "ms": 4000,
+      "steps": 140
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#pause"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "paused"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-autoplay",
+      "equals": "true"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#doom[data-ticks]:not([data-ticks=\"0\"])"
+      },
+      "min": 1
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#doom:not([data-x=\"1056\"]), #doom:not([data-y=\"-3616\"])"
+      },
+      "min": 1
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-error",
+      "present": false
+    },
+    {
+      "type": "advance_time",
+      "ms": 1000,
+      "steps": 35
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#start"
+      }
+    },
+    {
+      "type": "window_focus",
+      "focused": false
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "paused"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-autoplay",
+      "equals": "true"
+    },
+    {
+      "type": "window_focus",
+      "focused": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#start"
+      }
+    },
+    {
+      "type": "advance_time",
+      "ms": 1000,
+      "steps": 35
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "key_down",
+      "key": "w"
+    },
+    {
+      "type": "key_up",
+      "key": "w"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#pause"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-autoplay",
+      "equals": "false"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#restart"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#doom"
+      },
+      "attribute": "data-autoplay",
+      "equals": "false"
+    },
+    {
+      "type": "window_close"
+    },
+    {
+      "type": "assert_window_closed",
+      "closed": true
+    }
+  ]
+}

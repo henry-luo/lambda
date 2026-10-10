@@ -1336,6 +1336,111 @@ TEST(RenderOutputParity, FixedPdfSourceLabelsSurviveImportAndExportSelections) {
     EXPECT_FALSE(file_contains_text(selected, "/P (AA)"));
 }
 
+TEST(RenderOutputParity, BodyColumnRulesSharePreviewSvgAndPhysicalPdfGeometry) {
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
+    ASSERT_TRUE(ensure_dir(PDF_REF_DIR)); ASSERT_TRUE(command_exists("pdftoppm"));
+    const char* source = "test/html/paged_media_column_rules.rpd";
+    const char* preview_path = "temp/render_output_parity/body_column_rules.png";
+    PdfFileInfo pdf = {};
+    snprintf(pdf.path, sizeof(pdf.path), "temp/render_output_parity/body_column_rules.pdf");
+    snprintf(pdf.base, sizeof(pdf.base), "body_column_rules");
+    ASSERT_TRUE(render_document_fixture(source, pdf.path, "--paged"));
+    ASSERT_EQ(pdf_page_count(pdf.path), 3);
+    EXPECT_TRUE(file_contains_text(pdf.path, "/MediaBox [0 0 240.00 75.00]"));
+    EXPECT_FALSE(file_contains_text(pdf.path, "/Subtype /Image"));
+    ASSERT_TRUE(render_document_fixture(source, preview_path, "--paged --page-grid 1x3"));
+    ImageData preview = {}; ASSERT_TRUE(load_png_rgba(preview_path, &preview));
+    ASSERT_EQ(preview.width, 960); ASSERT_EQ(preview.height, 100);
+    const struct { int x, y; } probes[] = {{105, 50}, {215, 50}, {105, 5}, {105, 95}};
+    for (int page = 0; page < 3; page++) {
+        SCOPED_TRACE(page);
+        char reference[PATH_MAX], svg[PATH_MAX], options[80];
+        ASSERT_TRUE(render_reference_page(&pdf, page + 1, reference, sizeof(reference)));
+        ImageData physical = {}; ASSERT_TRUE(load_png_rgba(reference, &physical));
+        EXPECT_EQ(physical.width, RENDER_WIDTH);
+        EXPECT_EQ(physical.height, (RENDER_WIDTH * 100 + 319) / 320); // Poppler rounds fractional raster extents up.
+        // compare occupied-gap interiors and both endpoints against the independent PDF rasterizer.
+        for (const auto& point : probes) {
+            bool green = point.y == 50 && (point.x == 105 ? page < 2 : page == 0);
+            expect_preview_pixel(preview, page * 320 + point.x, point.y, green ? 0 : 255, 255, green ? 0 : 255);
+            expect_preview_pixel(physical, point.x * RENDER_WIDTH / 320, point.y * RENDER_WIDTH / 320,
+                green ? 0 : 255, 255, green ? 0 : 255);
+        }
+        image_free(physical.pixels);
+        snprintf(svg, sizeof(svg), "temp/render_output_parity/body_column_rules_%d.svg", page + 1);
+        snprintf(options, sizeof(options), "--paged --thumbnail-page %d", page + 1);
+        ASSERT_TRUE(render_document_fixture(source, svg, options));
+        EXPECT_EQ(file_contains_text(svg, "fill=\"rgb(0,255,0)\""), page < 2);
+    }
+    image_free(preview.pixels);
+}
+
+TEST(RenderOutputParity, PatternedBodyColumnRulesRemainVectorAndMatchIndependentPdfRasters) {
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity")); ASSERT_TRUE(ensure_dir(PDF_REF_DIR));
+    ASSERT_TRUE(command_exists("pdftoppm"));
+    const char* source = "test/html/paged_media_column_rule_styles.rpd";
+    PdfFileInfo pdf = {};
+    snprintf(pdf.path, sizeof(pdf.path), "temp/render_output_parity/column_rule_styles.pdf");
+    snprintf(pdf.base, sizeof(pdf.base), "column_rule_styles");
+    ASSERT_TRUE(render_document_fixture(source, pdf.path, "--paged")); ASSERT_EQ(pdf_page_count(pdf.path), 7);
+    EXPECT_TRUE(file_contains_text(pdf.path, "/MediaBox [0 0 150.00 90.00]"));
+    EXPECT_FALSE(file_contains_text(pdf.path, "/Subtype /Image"));
+    const char* png = "temp/render_output_parity/column_rule_styles.png";
+    ASSERT_TRUE(render_document_fixture(source, png, "--paged --page-grid 1x7"));
+    ImageData preview = {}; ASSERT_TRUE(load_png_rgba(png, &preview));
+    ASSERT_EQ(preview.width, 1400); ASSERT_EQ(preview.height, 120);
+    for (int page = 0; page < 7; page++) {
+        SCOPED_TRACE(page);
+        char reference[PATH_MAX], svg[PATH_MAX], options[80];
+        ASSERT_TRUE(render_reference_page(&pdf, page + 1, reference, sizeof(reference)));
+        ImageData physical = {}; ASSERT_TRUE(load_png_rgba(reference, &physical));
+        ASSERT_EQ(physical.width, 600); ASSERT_EQ(physical.height, 360);
+        const int xs[] = {95, 100, 104};
+        for (int x : xs) {
+            expect_preview_pixel(preview, page * 200 + x, 5, 255, 255, 255);
+            expect_preview_pixel(physical, x * 3 + 1, 16, 255, 255, 255);
+            if (page == 1 || page == 2) {
+                int green = 0, white = 0, disagreements = 0;
+                for (int y = 15; y < 105; y++) {
+                    const uint8_t* a = preview.pixels + (y * preview.width + page * 200 + x) * 4;
+                    const uint8_t* b = physical.pixels + ((y * 3 + 1) * physical.width + x * 3 + 1) * 4;
+                    green += a[0] < 20 && a[1] > 240 && a[2] < 20;
+                    white += a[0] > 240 && a[1] > 240 && a[2] > 240;
+                    // tolerate only antialiasing at patterned edges, not a missing stroke or gap.
+                    disagreements += abs(a[0] - b[0]) > 32 || abs(a[1] - b[1]) > 32 || abs(a[2] - b[2]) > 32;
+                }
+                EXPECT_GT(green, 10); EXPECT_GT(white, 10); EXPECT_LE(disagreements, 8);
+            } else {
+                bool white = page == 0 && x == 100;
+                bool dark = (page == 3 || page == 6) ? x == 95 : page >= 4 && x != 95;
+                uint8_t r = white ? 255 : 0, g = white ? 255 : dark ? 127 : 255, b = r;
+                expect_preview_pixel(preview, page * 200 + x, 50, r, g, b);
+                expect_preview_pixel(physical, x * 3 + 1, 151, r, g, b);
+            }
+        }
+        snprintf(svg, sizeof(svg), "temp/render_output_parity/column_rule_styles_%d.svg", page + 1);
+        snprintf(options, sizeof(options), "--paged --thumbnail-page %d", page + 1);
+        ASSERT_TRUE(render_document_fixture(source, svg, options));
+        EXPECT_FALSE(file_contains_text(svg, "<image"));
+        if (page == 1 || page == 2) EXPECT_TRUE(file_contains_text(svg, "stroke-dasharray="));
+        if (page == 2) EXPECT_TRUE(file_contains_text(svg, "stroke-linecap=\"round\""));
+        image_free(physical.pixels);
+    }
+    image_free(preview.pixels);
+}
+
+TEST(RenderOutputParity, PagedViewerAdmitsNativeAndFoDocumentsThroughCommonLoaders) {
+    for (const char* fixture : {"test/html/paged_media_column_rules.rpd", "test/html/paged_media_body_columns.fo"}) {
+        SCOPED_TRACE(fixture);
+        char command[PATH_MAX + 192];
+        snprintf(command, sizeof(command), "MEMTRACK_MODE=DEBUG VIEW_MEM_STAGES=1 \"%s\" view \"%s\" --paged --headless 2>&1",
+            LAMBDA_EXE, fixture);
+        CommandResult result = run_command_capture(command);
+        EXPECT_EQ(result.exit_code, 0) << result.output;
+        EXPECT_NE(strstr(result.output, "[MEMTRACK_LIVE] bytes=0 count=0"), nullptr) << result.output;
+    }
+}
+
 TEST(RenderOutputParity, FoAndNativePageControlsSharePreviewAndPhysicalPdfPages) {
     ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
     ASSERT_TRUE(ensure_dir(PDF_REF_DIR)); ASSERT_TRUE(command_exists("pdftoppm"));
@@ -1354,6 +1459,10 @@ TEST(RenderOutputParity, FoAndNativePageControlsSharePreviewAndPhysicalPdfPages)
         {"graphics_namespaces", 3, "/MediaBox [0 0 180.00 135.00]"},
         {"graphics_scales", 3, "/MediaBox [0 0 180.00 135.00]"},
         {"graphics_bindings", 3, "/MediaBox [0 0 180.00 135.00]"},
+        {"typography_bindings", 3, "/MediaBox [0 0 180.00 135.00]"},
+        {"body_columns", 3, "/MediaBox [0 0 180.00 135.00]"},
+        {"column_queries", 3, "/MediaBox [0 0 180.00 135.00]"},
+        {"terminal_columns", 3, "/MediaBox [0 0 180.00 135.00]"},
         {"lists", 3, "/MediaBox [0 0 180.00 120.00]"},
         {"lists_context", 3, "/MediaBox [0 0 180.00 120.00]"},
         {"cell_flow", 3, "/MediaBox [0 0 150.00 120.00]"},
@@ -1397,6 +1506,35 @@ TEST(RenderOutputParity, FoAndNativePageControlsSharePreviewAndPhysicalPdfPages)
             EXPECT_TRUE(file_contains_text(pdfs[i].path, fixture.media_box));
         }
         expect_paged_pair_output_parity(previews, pdfs, 2, fixture.pages);
+    }
+}
+
+TEST(RenderOutputParity, ExplicitNativeColumnsRetainUnequalGeometryInPreviewSvgAndPhysicalPdf) {
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity")); ASSERT_TRUE(ensure_dir(PDF_REF_DIR));
+    ASSERT_TRUE(command_exists("pdftoppm"));
+    const char* source = "test/html/paged_media_explicit_columns.rpd";
+    PdfFileInfo pdf = {};
+    snprintf(pdf.path, sizeof(pdf.path), "temp/render_output_parity/explicit_columns.pdf");
+    snprintf(pdf.base, sizeof(pdf.base), "explicit_columns");
+    ASSERT_TRUE(render_document_fixture(source, pdf.path, "--paged --block-remote-resources"));
+    ASSERT_EQ(pdf_page_count(pdf.path), 2); EXPECT_TRUE(file_contains_text(pdf.path, "/MediaBox [0 0 165.00 90.00]"));
+    const uint8_t colors[2][3][3] = {{{255,0,0},{0,255,0},{0,0,255}}, {{255,255,0},{255,0,255},{0,255,255}}};
+    for (int page = 1; page <= 2; page++) {
+        SCOPED_TRACE(page); char preview[PATH_MAX], svg[PATH_MAX], reference[PATH_MAX], arguments[128];
+        snprintf(preview, sizeof(preview), "temp/render_output_parity/explicit_columns_%d.png", page);
+        snprintf(svg, sizeof(svg), "temp/render_output_parity/explicit_columns_%d.svg", page);
+        snprintf(arguments, sizeof(arguments), "--paged --thumbnail-page %d --block-remote-resources", page);
+        ASSERT_TRUE(render_document_fixture(source, preview, arguments)); ASSERT_TRUE(render_document_fixture(source, svg, arguments));
+        EXPECT_TRUE(file_contains_text(svg, "viewBox=\"0 0 220 120\"")); EXPECT_TRUE(file_contains_text(svg, "<path"));
+        ASSERT_TRUE(render_reference_page(&pdf, page, reference, sizeof(reference), false, true));
+        for (const char* path : {preview, reference}) {
+            ImageData image = {}; ASSERT_TRUE(load_png_rgba(path, &image)); EXPECT_EQ(image.width, 220); EXPECT_EQ(image.height, 120);
+            const int points[3][2] = {{80,30}, {200,40}, {200,70}};
+            for (size_t i = 0; i < 3; i++) expect_preview_pixel(image, points[i][0], points[i][1],
+                colors[page-1][i][0], colors[page-1][i][1], colors[page-1][i][2]);
+            expect_preview_pixel(image, 95, 30, 255, 255, 255); expect_preview_pixel(image, 80, 60, 255, 255, 255);
+            expect_preview_pixel(image, 200, 90, 255, 255, 255); image_free(image.pixels);
+        }
     }
 }
 

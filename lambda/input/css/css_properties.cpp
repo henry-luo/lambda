@@ -82,6 +82,9 @@ static CssPropertyCode transition_longhands[] = {
 static CssPropertyCode marker_longhands[] = {
     CSS_PROPERTY_MARKER_START, CSS_PROPERTY_MARKER_MID, CSS_PROPERTY_MARKER_END
 };
+static CssPropertyCode column_rule_longhands[] = {
+    CSS_PROPERTY_COLUMN_RULE_WIDTH, CSS_PROPERTY_COLUMN_RULE_STYLE, CSS_PROPERTY_COLUMN_RULE_COLOR
+};
 
 static CssPropertyCode container_longhands[] = {CSS_PROPERTY_CONTAINER_NAME, CSS_PROPERTY_CONTAINER_TYPE};
 
@@ -377,7 +380,7 @@ static CssProperty property_definitions[] = {
     {CSS_PROPERTY_COLUMN_WIDTH, "column-width", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "auto", true, false, NULL, 0, validate_length, NULL},
     {CSS_PROPERTY_COLUMN_COUNT, "column-count", PROP_TYPE_NUMBER, PROP_INHERIT_NO, "auto", false, false, NULL, 0, validate_integer, NULL},
     {CSS_PROPERTY_COLUMNS, "columns", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "auto", false, true, NULL, 0, validate_keyword, NULL},
-    {CSS_PROPERTY_COLUMN_RULE, "column-rule", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "none", false, true, NULL, 0, validate_keyword, NULL},
+    {CSS_PROPERTY_COLUMN_RULE, "column-rule", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "none", false, true, column_rule_longhands, 3, validate_keyword, NULL},
     {CSS_PROPERTY_COLUMN_RULE_WIDTH, "column-rule-width", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "medium", true, false, NULL, 0, validate_length, NULL},
     {CSS_PROPERTY_COLUMN_RULE_STYLE, "column-rule-style", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "none", false, false, NULL, 0, validate_keyword, NULL},
     {CSS_PROPERTY_COLUMN_RULE_COLOR, "column-rule-color", PROP_TYPE_COLOR, PROP_INHERIT_NO, "currentColor", true, false, NULL, 0, validate_color, NULL},
@@ -2917,6 +2920,24 @@ bool css_property_validate_value_mode(CssPropertyCode id,
             }
             break;
         }
+
+        case CSS_PROPERTY_FONT_FAMILY: {
+            if (css_value_is_global_keyword(value) || css_value_contains_pending_substitution(value)) return true;
+            // reuse the shorthand family grammar after typed variables have expanded their lists.
+            auto family_name = [](const CssValue* item, void*) { return css_value_is_font_family_name(item); };
+            return css_value_visit_list_items(value, family_name, nullptr);
+        }
+
+        case CSS_PROPERTY_LETTER_SPACING:
+        case CSS_PROPERTY_WORD_SPACING:
+            // typed ancestor substitution must not turn colors or family lists into a zero advance.
+            if (css_value_is_global_keyword(value) || css_value_contains_pending_substitution(value)) return true;
+            if (value->type == CSS_VALUE_TYPE_KEYWORD) return value->data.keyword == CSS_VALUE_NORMAL;
+            if (value->type == CSS_VALUE_TYPE_LENGTH) return css_unit_is_length(value->data.length.unit);
+            if (value->type == CSS_VALUE_TYPE_NUMBER) return value->data.number.value == 0.0;
+            // CSS Text 4 percentage tracking is already resolved against the current font size.
+            if (value->type == CSS_VALUE_TYPE_PERCENTAGE) return id == CSS_PROPERTY_LETTER_SPACING;
+            return css_value_is_length_expression(value, id == CSS_PROPERTY_LETTER_SPACING, false);
 
         case CSS_PROPERTY_LINE_HEIGHT: {
             // CSS Inline: invalid dimensions must not replace a valid inherited line-height.

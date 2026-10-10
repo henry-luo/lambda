@@ -1,0 +1,349 @@
+{
+  "name": "dtna Tag colors close requests and native checkable activation",
+  "html": "test/ui/dtna/tag_modes.ls",
+  "viewport": {
+    "width": 600,
+    "height": 700
+  },
+  "events": [
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#tag-default"
+      },
+      "height": 22,
+      "tolerance": 0.2
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#tag-blue"
+      },
+      "height": 22,
+      "tolerance": 0.2
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#tag-red"
+      },
+      "height": 22,
+      "tolerance": 0.2
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#tag-success"
+      },
+      "height": 22,
+      "tolerance": 0.2
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#tag-custom"
+      },
+      "height": 22,
+      "tolerance": 0.2
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#tag-close"
+      },
+      "height": 22,
+      "tolerance": 0.2
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#tag-retain"
+      },
+      "height": 22,
+      "tolerance": 0.2
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#tag-disabled"
+      },
+      "height": 22,
+      "tolerance": 0.2
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#tag-link"
+      },
+      "height": 22,
+      "tolerance": 0.2
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#tag-check"
+      },
+      "height": 22,
+      "tolerance": 0.2
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#tag-fixed"
+      },
+      "height": 22,
+      "tolerance": 0.2
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#tag-check-disabled"
+      },
+      "height": 22,
+      "tolerance": 0.2
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#tag-inherited"
+      },
+      "height": 22,
+      "tolerance": 0.2
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#tag-default"
+      },
+      "property": "border-radius",
+      "equals": "4px"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#tag-blue"
+      },
+      "property": "background-color",
+      "equals": "rgb(230, 244, 255)"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#tag-custom"
+      },
+      "property": "background-color",
+      "equals": "rgb(231, 244, 253)"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#tag-check"
+      },
+      "attribute": "role",
+      "equals": "checkbox"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#tag-check"
+      },
+      "attribute": "aria-checked",
+      "equals": "false"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#tag-fixed"
+      },
+      "attribute": "aria-checked",
+      "equals": "false"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#tag-check-disabled"
+      },
+      "attribute": "aria-checked",
+      "equals": "true"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".dtna-tag-icon svg"
+      },
+      "count": 1
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#tag-disabled .dtna-tag-close"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#tag-count"
+      },
+      "equals": "0"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#tag-check-disabled"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#tag-count"
+      },
+      "equals": "0"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#tag-inherited"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#tag-count"
+      },
+      "equals": "0"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#tag-fixed"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#tag-fixed"
+      },
+      "attribute": "aria-checked",
+      "equals": "false"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#tag-request"
+      },
+      "equals": "tag-fixed:true"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#tag-type"
+      },
+      "equals": "bool"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#tag-count"
+      },
+      "equals": "1"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#tag-check"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#tag-check"
+      },
+      "attribute": "aria-checked",
+      "equals": "true"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#tag-count"
+      },
+      "equals": "2"
+    },
+    {
+      "type": "key_press",
+      "key": "space"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#tag-check"
+      },
+      "attribute": "aria-checked",
+      "equals": "false"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#tag-count"
+      },
+      "equals": "3"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#tag-retain .dtna-tag-close svg path"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#tag-retain"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#tag-request"
+      },
+      "equals": "tag-retain:close"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#tag-count"
+      },
+      "equals": "4"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#tag-close .dtna-tag-close"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#tag-close"
+      },
+      "count": 0
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#tag-request"
+      },
+      "equals": "tag-close:close"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#tag-count"
+      },
+      "equals": "5"
+    },
+    {
+      "type": "render",
+      "file": "temp/ui_dtna/tag_modes.png"
+    }
+  ]
+}

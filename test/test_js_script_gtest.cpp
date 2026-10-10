@@ -156,6 +156,47 @@ TEST(JsDomEvents, NativeFocusConstructionRetainsUncachedRelatedTarget) {
     runtime_cleanup(&runtime);
 }
 
+TEST(JsDomEvents, NativeMouseBoundariesRetainRelatedTargetAndEventFlags) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+    const char source[] = "0;";
+    Item warmup = js_interp_execute_source(&runtime, source, sizeof(source) - 1,
+        "native-mouse-roots.js", NULL);
+    EXPECT_FALSE(item_is_error(warmup));
+    if (!item_is_error(warmup)) {
+        gc_heap_t* gc = runtime.eval_context->heap->gc;
+        gc_set_force_collect_interval(gc, 1);
+        const char* types[] = {"mouseenter", "mouseleave", "mouseover", "mouseout"};
+        for (int i = 0; i < 4; i++) {
+            SCOPED_TRACE(types[i]);
+            RootFrame roots(2);
+            Rooted<Item> event(roots, ItemNull);
+            Item related = ItemNull;
+            {
+                RootFrame setup_roots(1);
+                Rooted<Item> target(setup_roots, js_new_object());
+                js_set_key_default(target.get(), js_name_item("marker"), Item{.item = i2it(73)});
+                related = target.get();
+            }
+            // the native factory owns this weakly cached argument during allocation.
+            event.set(js_create_native_mouse_event(types[i], 10, 20, 0, 0,
+                false, false, false, false, 0, related));
+            Rooted<Item> observed(roots, js_get_name_key(event.get(), "relatedTarget"));
+            EXPECT_EQ(observed.get().item, related.item);
+            EXPECT_EQ(js_get_name_key(observed.get(), "marker").item, i2it(73));
+            heap_gc_collect();
+            EXPECT_EQ(js_get_name_key(observed.get(), "marker").item, i2it(73));
+            bool bubbles = i >= 2;
+            EXPECT_EQ(js_get_name_key(event.get(), "bubbles").item, b2it(bubbles));
+            EXPECT_EQ(js_get_name_key(event.get(), "cancelable").item, b2it(bubbles));
+            EXPECT_EQ(js_get_name_key(event.get(), "composed").item, b2it(bubbles));
+            EXPECT_EQ(js_get_name_key(event.get(), "isTrusted").item, b2it(true));
+        }
+        gc_set_force_collect_interval(gc, 0);
+    }
+    runtime_cleanup(&runtime);
+}
+
 TEST(JsObjectMetadata, LambdaInputShapesRemainNeutralAfterJsBootstrap) {
     Runtime runtime = {};
     runtime_init(&runtime);

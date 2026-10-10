@@ -119,6 +119,8 @@ void radiant_apply_css_stylesheets_to_tree(DomDocument* doc, DomElement* root,
                                            CssStylesheet** stylesheets, int count,
                                            Pool* pool, CssEngine* engine,
                                            SelectorMatcher* matcher = nullptr);
+// shared full-cascade invalidation for viewport, selector-state and DOM changes.
+void radiant_recascade_document(DomDocument* doc);
 
 struct TextRect;
 // layout position follows containing blocks and scrolling, before CSS transforms.

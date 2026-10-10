@@ -1,0 +1,22 @@
+{
+  "name":"dtna card tabs, metadata, grid and illustrated empty/result",
+  "html":"test/ui/dtna/surfaces.ls",
+  "viewport":{"width":820,"height":1050},
+  "events":[
+    {"type":"assert_text","target":{"selector":"#card .dtna-card-meta-title"},"equals":"Ada"},
+    {"type":"assert_count","target":{"selector":"#card .dtna-card-actions li"},"count":2},
+    {"type":"assert_text","target":{"selector":"#tabs .dtna-tab-panel"},"equals":"Alpha"},
+    {"type":"click","target":{"selector":"#tabs [data-dtna-choice='1']"}},
+    {"type":"assert_focus","target":{"selector":"#tabs [data-dtna-choice='1']"}},
+    {"type":"assert_text","target":{"selector":"#tabs .dtna-tab-panel"},"equals":"Beta"},
+    {"type":"key_press","key":"home"},
+    {"type":"assert_focus","target":{"selector":"#tabs [data-dtna-choice='0']"}},
+    {"type":"assert_text","target":{"selector":"#tabs .dtna-tab-panel"},"equals":"Alpha"},
+    {"type":"assert_count","target":{"selector":"#grid .dtna-card-grid"},"count":3},
+    {"type":"assert_text","target":{"selector":"#empty .dtna-empty-description"},"equals":"暂无数据"},
+    {"type":"assert_count","target":{"selector":"#empty svg"},"count":1},
+    {"type":"assert_count","target":{"selector":"#result svg"},"count":1},
+    {"type":"assert_text","target":{"selector":"#result .dtna-result-subtitle"},"equals":"Page missing"},
+    {"type":"render","file":"temp/ui_dtna/surfaces.png"}
+  ]
+}

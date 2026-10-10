@@ -467,29 +467,32 @@ TEST_F(Scene3dTest, RingworldAnimatesAndKeepsOrbitPanZoomIndependent) {
         RdtEvent move={};move.type=RDT_EVENT_MOUSE_MOVE;move.mouse_position.x=560;move.mouse_position.y=430;handle_event(&ui,page,&move);
         button(RDT_EVENT_MOUSE_UP,560,430);
     };
-    ASSERT_FALSE(item_is_error(run_js("globalThis.cameraBefore=ringworld.camera.position.clone()")));
+    ASSERT_FALSE(item_is_error(run_js("ringworld.autoplay(true);globalThis.cameraBefore=ringworld.camera.position.clone()")));
     drag();
     ASSERT_FALSE(item_is_error(run_js("if(ringworld.camera.position.distanceTo(cameraBefore)<.1)throw new Error('native scene drag did not orbit')")));
+    ASSERT_FALSE(item_is_error(run_js("if(document.getElementById('auto-play').getAttribute('aria-pressed')!=='false')throw new Error('drag did not stop auto play')")));
     ASSERT_FALSE(item_is_error(run_js("if(document.activeElement!==document.getElementById('ringworld'))throw new Error('scene did not receive keyboard focus')")));
     auto key=[&](int code,int mods=0) {
         RdtEvent event={};event.type=RDT_EVENT_KEY_DOWN;event.key.key=code;event.key.mods=mods;handle_event(&ui,page,&event);
         event.type=RDT_EVENT_KEY_UP;handle_event(&ui,page,&event);
     };
-    ASSERT_FALSE(item_is_error(run_js("globalThis.keyTargetBefore=ringworld.controls.target.clone();globalThis.tiltBefore=ringworld.controls.getPolarAngle()")));
+    ASSERT_FALSE(item_is_error(run_js("ringworld.autoplay(true);globalThis.keyTargetBefore=ringworld.controls.target.clone();globalThis.tiltBefore=ringworld.controls.getPolarAngle()")));
     key(RDT_KEY_RIGHT);key(RDT_KEY_UP,RDT_MOD_SHIFT);
     ASSERT_FALSE(item_is_error(run_js(R"JS(
         if(ringworld.controls.target.distanceTo(keyTargetBefore)<.001)throw new Error('arrow key did not pan');
         if(Math.abs(ringworld.controls.getPolarAngle()-tiltBefore)<.001)throw new Error('shift-arrow did not tilt');
+        if(document.getElementById('auto-play').getAttribute('aria-pressed')!=='false')throw new Error('camera key did not stop auto play');
     )JS")));
     ASSERT_FALSE(item_is_error(run_js("document.getElementById('pan-mode').click();globalThis.targetBefore=ringworld.controls.target.clone()")));
     drag();
     ASSERT_FALSE(item_is_error(run_js("if(ringworld.controls.target.distanceTo(targetBefore)<.1)throw new Error('pan mode did not move the target')")));
     ASSERT_NE(scene3d_snapshot(scene,&ui,624,342,1),nullptr)<<scene3d_diagnostic(scene);
     EXPECT_EQ(scene3d_animations(scene),animation);EXPECT_NEAR(action->time,1,1e-6);
-    ASSERT_FALSE(item_is_error(run_js("globalThis.zoomBefore=ringworld.camera.position.distanceTo(ringworld.controls.target)")));
+    ASSERT_FALSE(item_is_error(run_js("ringworld.autoplay(true);globalThis.zoomBefore=ringworld.camera.position.distanceTo(ringworld.controls.target)")));
     RdtEvent scroll={};scroll.type=RDT_EVENT_SCROLL;scroll.scroll.x=500;scroll.scroll.y=400;scroll.scroll.yoffset=1;handle_event(&ui,page,&scroll);
     ASSERT_FALSE(item_is_error(run_js(R"JS(
         if(Math.abs(ringworld.camera.position.distanceTo(ringworld.controls.target)-zoomBefore)<.01)throw new Error('wheel did not zoom');
+        if(document.getElementById('auto-play').getAttribute('aria-pressed')!=='false')throw new Error('wheel did not stop auto play');
         document.getElementById('tilt-up').click();document.getElementById('orbit-right').click();
         document.getElementById('zoom-in').click();document.getElementById('zoom-out').click();
         document.getElementById('top').click();
@@ -511,6 +514,63 @@ TEST_F(Scene3dTest, RingworldAnimatesAndKeepsOrbitPanZoomIndependent) {
     key(RDT_KEY_SPACE);
     animation_scheduler_tick(scheduler,scheduler->current_time+.25,nullptr);
     EXPECT_NEAR(action->time,.25,1e-6);
+}
+TEST_F(Scene3dTest, RingworldAutoPlayToursCameraAndStopsWithoutPendingFrames) {
+    ASSERT_NE(load_page("test/demo/scene3d/ringworld.ls",1120,900),nullptr);
+    DomElement* scene=dom_find_element_by_id(page->root->as_element(),"ringworld");ASSERT_NE(scene,nullptr);
+    ASSERT_STREQ(scene->get_attribute("data-ready"),"true");
+    ASSERT_NE(scene3d_snapshot(scene,&ui,624,342,1),nullptr)<<scene3d_diagnostic(scene);
+    ASSERT_FALSE(item_is_error(run_js(R"JS(
+        globalThis.autoButton=document.getElementById('auto-play');
+        if(autoButton.getAttribute('aria-pressed')!=='false')throw new Error('auto play should start disabled');
+        document.getElementById('play').click();
+        globalThis.tourOrigin=ringworld.camera.position.clone();
+        globalThis.tourDistance=ringworld.controls.getDistance();
+        globalThis.tourTilt=ringworld.controls.getPolarAngle();
+        globalThis.tourAngle=ringworld.controls.getAzimuthalAngle();
+        autoButton.click();
+        if(autoButton.getAttribute('aria-pressed')!=='true'||autoButton.textContent!=='Stop Auto Play')
+            throw new Error('auto play toggle did not start');
+    )JS")));
+    // sample actual rAF callbacks at a fixed cadence, including one complete camera loop.
+    for(unsigned frame=0;frame<=60;frame++) ASSERT_EQ(js_animation_frame_flush(1000.+frame*100.),1);
+    ASSERT_FALSE(item_is_error(run_js(R"JS(
+        if(ringworld.controls.target.length()<.5)throw new Error('auto play did not pan');
+        if(Math.abs(ringworld.controls.getDistance()-tourDistance)<1)throw new Error('auto play did not zoom');
+        if(Math.abs(ringworld.controls.getPolarAngle()-tourTilt)<.2)throw new Error('auto play did not tilt');
+        if(Math.abs(ringworld.controls.getAzimuthalAngle()-tourAngle)<1)throw new Error('auto play did not orbit');
+        const position=document.getElementById('main').getAttribute('position').split(' ').map(Number);
+        if(ringworld.camera.position.distanceTo(ringworld.camera.position.clone().fromArray(position))>1e-6)
+            throw new Error('auto play did not sync native camera');
+        if(document.getElementById('play').getAttribute('aria-pressed')!=='false')
+            throw new Error('camera tour changed scene playback');
+    )JS")));
+    ASSERT_NE(scene3d_snapshot(scene,&ui,624,342,1),nullptr)<<scene3d_diagnostic(scene);
+    for(unsigned frame=61;frame<=240;frame++) ASSERT_EQ(js_animation_frame_flush(1000.+frame*100.),1);
+    ASSERT_FALSE(item_is_error(run_js(R"JS(
+        if(ringworld.camera.position.distanceTo(tourOrigin)>1e-6||ringworld.controls.target.length()>1e-6)
+            throw new Error('camera tour did not loop');
+        autoButton.click();
+        globalThis.stoppedCamera=ringworld.camera.position.clone();
+        if(autoButton.getAttribute('aria-pressed')!=='false'||autoButton.textContent!=='Auto Play')
+            throw new Error('auto play toggle did not stop');
+    )JS")));
+    EXPECT_EQ(js_animation_frame_flush(26000),0);
+    ASSERT_FALSE(item_is_error(run_js(R"JS(
+        if(ringworld.camera.position.distanceTo(stoppedCamera)>1e-6)throw new Error('stopped tour moved');
+        autoButton.click();autoButton.click();autoButton.click();
+    )JS")));
+    EXPECT_EQ(js_animation_frame_flush(27000),1);
+    ASSERT_FALSE(item_is_error(run_js(R"JS(
+        document.getElementById('reset').click();
+        if(autoButton.getAttribute('aria-pressed')!=='false')throw new Error('manual reset did not stop auto play');
+        if(ringworld.camera.position.distanceTo(tourOrigin)>1e-6||ringworld.controls.target.length()>1e-6)
+            throw new Error('manual reset did not restore view');
+        autoButton.click();
+        window.dispatchEvent(new Event('pagehide'));
+        if(autoButton.getAttribute('aria-pressed')!=='false')throw new Error('pagehide did not stop auto play');
+    )JS")));
+    EXPECT_EQ(js_animation_frame_flush(28000),0);
 }
 TEST_F(Scene3dTest, ParentTransformAndVisibilityUpdatePixels) {
     DomElement* group=element("group",root);DomElement* object=mesh("plane","#00ff00","basic",group);

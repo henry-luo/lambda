@@ -1,0 +1,60 @@
+{
+  "name": "dtna progress shapes and discrete segments",
+  "html": "test/ui/dtna/progress.ls",
+  "viewport": {
+    "width": 500,
+    "height": 500
+  },
+  "events": [
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#line"
+      },
+      "attribute": "aria-valuenow",
+      "equals": "40"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#steps .dtna-progress-step"
+      },
+      "count": 5
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#circle svg"
+      },
+      "width": 100,
+      "height": 100,
+      "tolerance": 0.2
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#dashboard circle"
+      },
+      "count": 2
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#complete .dtna-progress-label svg"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#failure"
+      },
+      "attribute": "role",
+      "equals": "progressbar"
+    },
+    {
+      "type": "render",
+      "file": "temp/ui_dtna/progress.png"
+    }
+  ]
+}

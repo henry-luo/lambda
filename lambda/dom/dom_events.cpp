@@ -1581,11 +1581,7 @@ static Item js_create_trusted_native_event(const char* type, Item init,
 extern "C" Item js_create_native_composition_event(const char* type,
     const char* data)
 {
-    // Boundary hover events are intentionally non-bubbling; setting the
-    // factory default to true made ancestor mouseenter handlers fire twice.
-    bool boundary_hover = type &&
-        (strcmp(type, "mouseenter") == 0 || strcmp(type, "mouseleave") == 0);
-    Item init = js_create_native_event_init(!boundary_hover, false, true);
+    Item init = js_create_native_event_init(true, false, true);
     event_set_str(init, "data", data ? data : "");
     return js_create_trusted_native_event(type ? type : "compositionupdate", init,
                                           js_ctor_composition_event_fn);
@@ -1999,16 +1995,23 @@ extern "C" Item js_create_native_mouse_event(const char* type,
     bool ctrl, bool shift, bool alt, bool meta,
     int detail, Item related_target)
 {
-    Item init = js_create_native_event_init(true, true, true);
-    event_set_int(init, "detail", detail);
-    stamp_client_coordinates(init, client_x, client_y, true);
-    event_set_int(init, "button", button);
-    event_set_int(init, "buttons", buttons);
-    stamp_modifier_init(init, ctrl, shift, alt, meta);
-    if (related_target.item != 0) {
-        event_set_item(init, "relatedTarget", related_target);
+    bool boundary_hover = type &&
+        (strcmp(type, "mouseenter") == 0 || strcmp(type, "mouseleave") == 0);
+    // boundary events target every changed ancestor separately; bubbling
+    // would invoke ancestor listeners again (UI Events §4.3.4).
+    RootFrame roots(2);
+    Rooted<Item> related_root(roots, related_target);
+    Rooted<Item> init_root(roots, js_create_native_event_init(
+        !boundary_hover, !boundary_hover, !boundary_hover));
+    event_set_int(init_root.get(), "detail", detail);
+    stamp_client_coordinates(init_root.get(), client_x, client_y, true);
+    event_set_int(init_root.get(), "button", button);
+    event_set_int(init_root.get(), "buttons", buttons);
+    stamp_modifier_init(init_root.get(), ctrl, shift, alt, meta);
+    if (related_root.get().item != 0) {
+        event_set_item(init_root.get(), "relatedTarget", related_root.get());
     }
-    return js_create_trusted_native_event(type, init, js_ctor_mouse_event_fn);
+    return js_create_trusted_native_event(type, init_root.get(), js_ctor_mouse_event_fn);
 }
 JS_FORWARD_VOID( js_event_set_timestamp, (Item event, double timestamp_ms), event_set_double, (event, "timeStamp", timestamp_ms))
 extern "C" void dom_event_set_movement(Item event, double movement_x, double movement_y) {

@@ -813,7 +813,7 @@ bool radiant_page_element(DomElement* element, const char* local_name) {
 
 bool radiant_page_control_hidden(DomElement* element) {
     return radiant_page_element(element, "master-set") || radiant_page_element(element, "page-master") ||
-        radiant_page_element(element, "region") || radiant_page_element(element, "master-rule") ||
+        radiant_page_element(element, "region") || radiant_page_element(element, "column") || radiant_page_element(element, "master-rule") ||
         radiant_page_element(element, "sequence-master") || radiant_page_element(element, "master-run");
 }
 
@@ -1033,6 +1033,43 @@ template<typename T, size_t N> static bool page_keyword(const char* text, const 
     return false;
 }
 
+static bool page_native_columns_compile(RadiantPageDocument* program, RadiantPageRegion* region, Pool* pool) {
+    static const char* names[] = {"inline-start", "block-start", "inline-size", "block-size"};
+    static const char* properties[] = {"left", "top", "width", "height"};
+    RadiantPageColumn** tail = &region->columns;
+    DomElement* source = region->source.address->as_element();
+    for (DomNode* node = source->first_child; node; node = node->next_sibling) {
+        if (node->is_text()) {
+            if (!radiant_page_whitespace(node->as_text()))
+                return page_document_fail(program, VIEW_MODEL_INVALID_ARGUMENT, source, "page region cannot contain text");
+            continue;
+        }
+        if (!node->is_element()) continue;
+        DomElement* child = node->as_element();
+        if (region->role != RADIANT_REGION_BODY || !radiant_page_element(child, "column"))
+            return page_document_fail(program, VIEW_MODEL_INVALID_ARGUMENT, child, "body region accepts only empty column controls");
+        for (DomNode* content = child->first_child; content; content = content->next_sibling)
+            if (content->is_element() || (content->is_text() && !radiant_page_whitespace(content->as_text())))
+                return page_document_fail(program, VIEW_MODEL_INVALID_ARGUMENT, child, "native column control must be empty");
+        if (region->column_count == UINT32_MAX)
+            return page_document_fail(program, VIEW_MODEL_INVALID_ARGUMENT, child, "native column count exceeds its domain");
+        auto* column = (RadiantPageColumn*)pool_calloc(pool, sizeof(RadiantPageColumn));
+        if (!column) return page_document_fail(program, VIEW_MODEL_OUT_OF_MEMORY, child, "native column allocation failed");
+        column->source = dom_node_ref(child);
+        for (size_t i = 0; i < 4; i++) {
+            const char* text = child->get_attribute(names[i]);
+            if (!text) text = i == 2 ? nullptr : i == 3 ? "100%" : "0";
+            if (!text) return page_document_fail(program, VIEW_MODEL_INVALID_ARGUMENT, child, "native column requires inline-size");
+            CssDeclaration* parsed = css_parse_property_value_declaration(properties[i], strlen(properties[i]), text, strlen(text), pool);
+            if (!parsed || !parsed->valid || !parsed->value)
+                return page_document_fail(program, VIEW_MODEL_INVALID_ARGUMENT, child, "native column geometry requires a CSS length or percentage");
+            column->geometry[i] = parsed->value;
+        }
+        *tail = column; tail = &column->next; region->column_count++;
+    }
+    return true;
+}
+
 static bool page_native_master_compile(RadiantPageDocument* program, DomElement* source, Pool* pool) {
     const char* name = source->get_attribute("name");
     if (!name || !*name) return page_document_fail(program, VIEW_MODEL_INVALID_ARGUMENT, source, "page master requires a name");
@@ -1072,6 +1109,7 @@ static bool page_native_master_compile(RadiantPageDocument* program, DomElement*
             slot->zero_box = box_policy != nullptr;
             style = dom_element_get_inline_style(child);
             if (style && *style) slot->declarations = css_parse_declaration_list_text(style, strlen(style), pool, &slot->declaration_count);
+            if (!page_native_columns_compile(program, slot, pool)) return false;
             if (kind != RADIANT_REGION_BODY) {
                 if (const char* extent = child->get_attribute("extent")) {
                     CssDeclaration* parsed = css_parse_property_value_declaration("height", 6, extent, strlen(extent), pool);

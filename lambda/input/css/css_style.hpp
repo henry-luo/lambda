@@ -133,6 +133,7 @@ bool css_viewport_length_to_px(CssUnit unit, double value, double width,
                                double* pixels);
 const char* css_math_token_name(const CssValue* value);
 bool css_value_contains_var_reference(const CssValue* value);
+bool css_value_contains_percentage(const CssValue* value);
 bool css_value_contains_pending_substitution(const CssValue* value);
 bool css_value_contains_length_unit(const CssValue* value, CssUnit first, CssUnit second);
 const char* css_value_identifier_name(const CssValue* value);

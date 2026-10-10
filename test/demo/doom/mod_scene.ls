@@ -138,6 +138,8 @@ pub fn fuzz_filter() => <svg width:"0", height:"0", style:"display:block", 'aria
         <feComposite in:"shadow", in2:"noiseAlpha", operator:"arithmetic", k1:"0", k2:"1", k3:"1", k4:"0">
     >>
 >
+pub fn status_text(game) => (if (game.autoplay) "AUTO PLAY · Move or fire to take control. · " else "") ++
+    "W/S move · A/D strafe · arrows turn · Shift run · E/Space use · Ctrl fire · 1–6 weapon"
 pub fn tree(map_data, game, rules, visuals, images, base) =>
     <main id:"doom", tabindex:"0", 'data-mode':game.mode, 'data-map':game.level_name, 'data-spectator':game.spectator, 'data-skill':game.skill,
         fuzz_filter();
@@ -175,7 +177,8 @@ pub fn tree(map_data, game, rules, visuals, images, base) =>
                 <div <span "KEYS"> <strong id:"keys", "—">>
             >
             <div id:"overlay", <h1 "DOOM"> <p id:"overlay-message", "Lambda Script / Radiant">
-                <button id:"start", 'data-action':"pause", "START / RESUME">>
+                <button id:"start", 'data-action':"pause", "START / RESUME">
+                <button id:"auto-play", 'data-action':"auto", "Auto Play">>
         >
         <nav <button id:"pause", 'data-action':"pause", "Pause / P">
             <button id:"restart", 'data-action':"restart", "Restart / R">
@@ -190,5 +193,5 @@ pub fn tree(map_data, game, rules, visuals, images, base) =>
             >
             <button id:"load-map", 'data-action':"map", "Load map">
         >
-        <p id:"doom-status", "W/S move · A/D strafe · arrows turn · Shift run · E/Space use · Ctrl fire · 1–6 weapon">
+        <p id:"doom-status", status_text(game)>
     >

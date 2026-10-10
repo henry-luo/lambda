@@ -394,6 +394,39 @@ extern "C" bool radiant_canvas_ensure(void* canvas_element) {
     entry->mode=1;return true;
 }
 
+extern "C" bool radiant_canvas_set_pixels(void* canvas_element, const uint8_t* rgba,
+                                          uint32_t width, uint32_t height,
+                                          const int64_t* strides) {
+    if (!rgba || !strides || width == 0 || height == 0 ||
+        width > RADIANT_CANVAS_MAX_DIMENSION || height > RADIANT_CANVAS_MAX_DIMENSION ||
+        (uint64_t)width * height > RADIANT_CANVAS_MAX_PIXELS) return false;
+    DomElement* element = (DomElement*)canvas_element;
+    CanvasEntry* entry = canvas_entry_for_element(element, true);
+    if (!entry || entry->mode == 2) return false;
+    if (!entry->surface || entry->surface->width != (int)width || // INT_CAST_OK: bounded bitmap pixel count
+        entry->surface->height != (int)height) { // INT_CAST_OK: bounded bitmap pixel count
+        if (!canvas_replace_surface(entry, (int)width, (int)height)) return false; // INT_CAST_OK: bounded bitmap pixel count
+    }
+    // copy before returning: the GC array must never become a retained paint pointer (D4.5.2).
+    for (uint32_t row = 0; row < height; row++) {
+        uint32_t* destination = (uint32_t*)((uint8_t*)entry->surface->pixels + row * entry->surface->pitch);
+        for (uint32_t col = 0; col < width; col++) {
+            const uint8_t* sample = rgba + row * strides[0] + col * strides[1];
+            Color color = canvas_color(sample[0], sample[strides[2]], sample[2 * strides[2]], sample[3 * strides[2]]);
+            destination[col] = render_pixel_premultiply_abgr(color.c);
+        }
+    }
+    entry->surface->alpha_mode = IMAGE_ALPHA_PREMULTIPLIED;
+    entry->mode = 1;
+    char dimension[16];
+    str_fmt(dimension, sizeof(dimension), "%u", width);
+    element->set_attribute("width", dimension);
+    str_fmt(dimension, sizeof(dimension), "%u", height);
+    element->set_attribute("height", dimension);
+    canvas_note_pixels_changed(entry);
+    return true;
+}
+
 extern "C" StrBuf* radiant_canvas_to_data_url(void* canvas_element) {
     CanvasEntry* entry = canvas_entry_for_element((DomElement*)canvas_element, true);
     if (!entry) return nullptr;

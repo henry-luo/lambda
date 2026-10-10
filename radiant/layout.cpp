@@ -20,6 +20,7 @@ extern "C" {
 #include "../lambda/input/css/css_style.hpp"
 #include "../lambda/input/css/css_engine.hpp"
 #include "../lambda/input/css/css_style_node.hpp"
+#include "../lambda/input/css/css_engine.hpp"
 #include "../lambda/lambda-data.hpp"
 #include "../lambda/dom/dom_observers.h"
 #include "../lambda/dom/dom.h"
@@ -710,6 +711,21 @@ void layout_reset_color_background_style_cache(LayoutContext* lycon, ViewSpan* v
     reset_background_style_cache(view);
 }
 
+static void reset_position_style_cache(LayoutContext* lycon, ViewSpan* view) {
+    if (!view->position) return;
+    PositionProp* position = view->position;
+    if (layout_context_is_measuring(lycon)) {
+        // intrinsic probes refresh CSS values without unlinking already-laid-out abs children.
+        int custom_z = position->custom_layout_z_index;
+        bool has_custom_z = position->has_custom_layout_z_index;
+        memcpy(position, &POSITION_PROP_DEFAULT, offsetof(PositionProp, first_abs_child));
+        position->custom_layout_z_index = custom_z;
+        position->has_custom_layout_z_index = has_custom_z;
+    } else {
+        memcpy(position, &POSITION_PROP_DEFAULT, sizeof(PositionProp));
+    }
+}
+
 static void reset_non_inherited_style_cache(LayoutContext* lycon, ViewSpan* view) {
     if (!lycon || !view) return;
 
@@ -738,7 +754,7 @@ static void reset_non_inherited_style_cache(LayoutContext* lycon, ViewSpan* view
     if (view->position) {
         // Removed positioning declarations otherwise survive retained recascade
         // and leave a now-static table cell excluded from normal row sizing.
-        memcpy(view->position, &POSITION_PROP_DEFAULT, sizeof(PositionProp));
+        reset_position_style_cache(lycon, view);
     }
 
     reset_background_style_cache(view);
@@ -827,7 +843,7 @@ static void reset_css_all_visual_style(LayoutContext* lycon, ViewSpan* view) {
         view->scroller->pane = lam::own(pane);
     }
     if (view->position) {
-        memcpy(view->position, &POSITION_PROP_DEFAULT, sizeof(PositionProp));
+        reset_position_style_cache(lycon, view);
     }
     if (view->embed) {
         view->embed->object_fit = EMBED_PROP_DEFAULT.object_fit;
@@ -1913,17 +1929,10 @@ void layout_setup_block_font_metrics(LayoutContext* lycon) {
         font_get_normal_lh_split(font_box_handle(&lycon->font),
             &lycon->block.init_ascender, &lycon->block.init_descender);
     } else {
-        TypoMetrics typo = get_os2_typo_metrics(font_box_handle(&lycon->font));
-        if (typo.valid && typo.use_typo_metrics) {
-            lycon->block.init_ascender = typo.ascender;
-            lycon->block.init_descender = typo.descender;
-        } else {
-            const FontMetrics* metrics = font_get_metrics(font_box_handle(&lycon->font));
-            if (metrics) {
-                lycon->block.init_ascender = metrics->hhea_ascender;
-                lycon->block.init_descender = -metrics->hhea_descender;
-            }
-        }
+        // formatting contexts share the block-flow content-area split; raw
+        // hhea metrics differ from the platform's rounded rendering cell.
+        font_get_content_area_split(font_box_handle(&lycon->font),
+            &lycon->block.init_ascender, &lycon->block.init_descender);
     }
     lycon->block.lead_y = max(0.0f, (lycon->block.line_height -
         (lycon->block.init_ascender + lycon->block.init_descender)) / 2.0f);
@@ -2068,6 +2077,17 @@ void dom_node_resolve_style(DomNode* node, LayoutContext* lycon) {
     g_style_resolve_count++;
     radiant::layout_profiler_record_node(&lycon->profiler,
         radiant::LAYOUT_PROFILE_STYLE, node, elapsed_ms);
+}
+
+float layout_apply_line_height_leading(float line_height,
+                                       float* ascender, float* descender) {
+    float leading = line_height - (*ascender + *descender);
+    // Blink CalculateLeadingSpace floors the ascent half and assigns the
+    // remainder below the baseline; preserve the full authored line-height.
+    float ascent_leading = floorf(leading / 2.0f);
+    *ascender += ascent_leading;
+    *descender += leading - ascent_leading;
+    return ascent_leading;
 }
 
 float vertical_align_baseline_shift(LayoutContext* lycon, CssEnum align,
@@ -2524,8 +2544,10 @@ float line_baseline_position(LayoutContext* lycon, float* out_line_height) {
     if (!lycon->block.line_height_is_normal) {
         float strut_content_height = lycon->block.init_ascender + lycon->block.init_descender;
         if (strut_content_height > 0.0f) {
-            strut_baseline = lycon->block.init_ascender +
-                (lycon->block.line_height - strut_content_height) / 2.0f;
+            float strut_descender = lycon->block.init_descender;
+            strut_baseline = lycon->block.init_ascender;
+            layout_apply_line_height_leading(lycon->block.line_height,
+                &strut_baseline, &strut_descender);
         }
     }
     if (out_line_height) *out_line_height = line_height;
@@ -5172,6 +5194,14 @@ void layout_init(LayoutContext* lycon, DomDocument* doc, UiContext* uicon) {
         log_info("layout_init: viewport meta override height=%d", doc->viewport.height);
     }
 
+    CssEngine* css_engine = (CssEngine*)doc->services.cached_css_engine;
+    if (css_engine && (css_engine->context.viewport_width != lycon->width ||
+                       css_engine->context.viewport_height != lycon->height)) {
+        // media declarations must change with geometry on native and synthetic resize.
+        css_engine_set_viewport(css_engine, lycon->width, lycon->height);
+        radiant_recascade_document(doc);
+    }
+
     lycon->available_space = AvailableSpace::make_indefinite();
 
     clear_measurement_cache(doc->view_tree);
@@ -5356,6 +5386,11 @@ static LayoutContainerMeasurements layout_container_measurements(DomNode* root) 
     return result;
 }
 
+static bool layout_clear_dirty_visitor(DomNode* node, void*) {
+    node->layout_dirty = false;
+    return true;
+}
+
 void layout_html_doc(UiContext* uicon, DomDocument *doc, bool is_reflow) {
     uint64_t t_start = time_now_ns();
 
@@ -5514,6 +5549,11 @@ void layout_html_doc(UiContext* uicon, DomDocument *doc, bool is_reflow) {
 
     if (doc->view_tree && uicon->window) {
         webview_manager_sync_layout(uicon, doc->view_tree);
+    }
+    // container-query recascades dirty nodes during layout; publish consumed
+    // geometry before observers and CSSOM read the completed snapshot.
+    if (doc->view_tree && doc->view_tree->root) {
+        view_geometry_walk_dom_tree(root_node, layout_clear_dirty_visitor, nullptr);
     }
     dom_observers_post_layout();
 

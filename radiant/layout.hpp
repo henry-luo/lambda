@@ -319,6 +319,7 @@ float calculate_fit_content_width(LayoutContext* lycon, DomNode* node, float ava
 bool layout_element_inline_axis_is_vertical(DomElement* element);
 CssEnum layout_element_css_writing_mode(DomElement* element);
 WritingMode layout_element_writing_mode(DomElement* element);
+int css_logical_corner_index(CssPropertyCode property, DomElement* element);
 bool layout_inline_element_is_orthogonal(DomElement* element);
 // CSS 2.2 §9.2.1.1: block-in-inline fragments cannot collapse through a
 // parent when the inline box follows prior in-flow content.
@@ -2971,6 +2972,18 @@ inline LayoutAxis flex_main_axis(FlexContainerLayout* flex) {
     return flex_main_axis_from_props(flex);
 }
 
+inline bool flex_main_axis_reversed(const FlexProp* flex) {
+    if (!flex) return false;
+    bool direction_reverse = flex->direction == CSS_VALUE_ROW_REVERSE ||
+        flex->direction == CSS_VALUE_COLUMN_REVERSE;
+    bool vertical_rl_block_axis = flex->writing_mode == WM_VERTICAL_RL &&
+        flex_main_axis_from_props(flex) == LAYOUT_AXIS_X;
+    bool row_rtl = (flex->direction == CSS_VALUE_ROW ||
+                    flex->direction == CSS_VALUE_ROW_REVERSE) &&
+        flex->text_direction == TD_RTL;
+    return (direction_reverse != vertical_rl_block_axis) != row_rtl;
+}
+
 inline LayoutAxis flex_cross_axis(FlexContainerLayout* flex) {
     return flex_main_axis(flex) == LAYOUT_AXIS_X ? LAYOUT_AXIS_Y : LAYOUT_AXIS_X;
 }
@@ -3378,7 +3391,11 @@ void layout_grid_container(LayoutContext* lycon, ViewBlock* container);
 void layout_grid_content(LayoutContext* lycon, ViewBlock* grid_container);
 int resolve_grid_item_styles(LayoutContext* lycon, ViewBlock* grid_container);
 void init_grid_item_view(LayoutContext* lycon, DomNode* child);
-void measure_grid_items(LayoutContext* lycon, GridContainerLayout* grid_layout);
+void measure_grid_items(LayoutContext* lycon, GridContainerLayout* grid_layout,
+                        bool intrinsic_width_contribution = false);
+IntrinsicSizes measure_grid_intrinsic_widths(LayoutContext* lycon, ViewBlock* container);
+void layout_apply_grid_item_min_content_floor(
+    LayoutContext* lycon, DomElement* item, IntrinsicSizes* sizes);
 void measure_grid_item_intrinsic(LayoutContext* lycon, ViewBlock* item,
                                   float* min_width, float* max_width,
                                   float* min_height, float* max_height);
@@ -4112,6 +4129,7 @@ float layout_rtl_inline_item_x(Linebox* line, float item_width);
 void layout_flow_node(LayoutContext* lycon, DomNode* node);
 void layout_flow_children(LayoutContext* lycon, DomNode* first_child,
                          bool finalize_line = false);
+void layout_center_button_text(ViewBlock* block);
 // CSS Shadow DOM: return the tree that supplies a host's rendered children;
 // light-DOM children remain the DOM/API tree and are projected at <slot>.
 DomNode* layout_render_child_list(DomElement* element);
@@ -4594,6 +4612,8 @@ static inline bool layout_block_is_skipped_container_item(const ViewBlock* block
 
 void line_init(LayoutContext* lycon, float left, float right);
 void line_reset(LayoutContext* lycon);
+float layout_apply_line_height_leading(float line_height,
+                                       float* ascender, float* descender);
 float vertical_align_baseline_shift(LayoutContext* lycon, CssEnum align,
                                     float valign_offset = 0);
 float layout_apply_baseline_shift(LayoutContext* lycon,

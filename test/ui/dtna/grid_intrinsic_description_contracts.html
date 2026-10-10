@@ -1,0 +1,59 @@
+<!doctype html>
+<style>
+body{margin:0;font:14px/22px Arial}
+.row{display:flex;gap:40px;align-items:flex-start;margin-bottom:12px}
+.slot{display:inline-flex;min-width:0}
+.grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));margin:0}
+.cell{display:flex;min-width:0;padding:0 16px 16px 0;gap:8px;box-sizing:border-box}
+.cell:nth-child(2){grid-column:span 2}
+dt{flex-shrink:0}
+dd{margin:0;min-width:0;overflow-wrap:break-word}
+.variable{--columns:repeat(3,minmax(0,1fr));grid-template-columns:var(--columns)}
+.auto{grid-template-columns:auto auto auto}
+.weighted{grid-template-columns:minmax(0,1fr) minmax(0,2fr) minmax(0,1fr);column-gap:6px}
+.named{grid-template-columns:[a] 120px [b] 160px [c] 100px [d];column-gap:6px}
+.named .cell:nth-child(2){grid-column:b / d}
+.hidden{display:none}
+</style>
+<div class="row">
+  <div id="direct-slot" class="slot"><section>
+    <dl id="direct" class="grid direct">
+      <div id="direct-first" class="cell"><dt>Target:</dt><dd>Radiant</dd></div>
+      <div id="direct-second" class="cell"><dt>Theme:</dt><dd>Default light</dd></div>
+    </dl>
+  </section></div>
+</div>
+<div class="row">
+  <div id="variable-slot" class="slot"><section>
+    <dl id="variable" class="grid variable">
+      <div id="variable-first" class="cell"><dt>Target:</dt><dd>Radiant</dd></div>
+      <div id="variable-second" class="cell"><dt>Theme:</dt><dd>Default light</dd></div>
+    </dl>
+  </section></div>
+</div>
+<div class="row">
+  <div id="auto-slot" class="slot"><section>
+    <dl id="auto" class="grid auto">
+      <div id="auto-first" class="cell"><dt>Target:</dt><dd>Radiant</dd></div>
+      <div id="auto-second" class="cell"><dt>Theme:</dt><dd>Default light</dd></div>
+    </dl>
+  </section></div>
+</div>
+<div class="row">
+  <div id="weighted-slot" class="slot"><section>
+    <dl id="weighted" class="grid weighted">
+      <div id="weighted-first" class="cell"><dt>Target:</dt><dd>Radiant</dd></div>
+      <div id="weighted-second" class="cell"><dt>Theme:</dt><dd>Default light</dd></div>
+      <div class="cell hidden">This hidden item cannot contribute</div>
+    </dl>
+  </section></div>
+</div>
+<div class="row">
+  <div id="named-slot" class="slot"><section>
+    <dl id="named" class="grid named">
+      <div id="named-first" class="cell"><dt>Target:</dt><dd>Radiant</dd></div>
+      <div id="named-second" class="cell"><dt>Theme:</dt><dd>Default light</dd></div>
+      <div class="cell hidden">This hidden item cannot contribute</div>
+    </dl>
+  </section></div>
+</div>

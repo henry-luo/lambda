@@ -1,0 +1,10 @@
+{
+  "name":"dtna foundation reference protocol",
+  "html":"test/ui/dtna_reference/native_foundation.ls",
+  "viewport":{"width":800,"height":600},
+  "events":[
+    {"type":"assert_count","target":{"selector":".dtna-button"},"count":8},
+    {"type":"assert_rect","target":{"selector":".dtna-button"},"height":32,"tolerance":0.2},
+    {"type":"render","file":"temp/ui_dtna/reference/native_foundation.png"}
+  ]
+}

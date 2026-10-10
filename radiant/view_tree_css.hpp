@@ -10,6 +10,7 @@ struct CounterSnapshot;
 struct ViewCssPageContext;
 struct RadiantPageDocument;
 struct RadiantPageRegion;
+struct RadiantPageDiagnostic;
 struct RadiantFlowTraits;
 struct RadiantPageQuery;
 struct RadiantNoteBinding;
@@ -18,7 +19,7 @@ struct RadiantImageSpec;
 struct RadiantLabelBodySpec;
 
 enum ViewBreak : uint8_t {
-    VIEW_BREAK_AUTO, VIEW_BREAK_AVOID, VIEW_BREAK_PAGE,
+    VIEW_BREAK_AUTO, VIEW_BREAK_AVOID, VIEW_BREAK_AVOID_COLUMN, VIEW_BREAK_AVOID_PAGE, VIEW_BREAK_COLUMN, VIEW_BREAK_PAGE,
     VIEW_BREAK_LEFT, VIEW_BREAK_RIGHT, VIEW_BREAK_RECTO, VIEW_BREAK_VERSO,
 };
 
@@ -42,6 +43,12 @@ struct ViewCssStyle {
     bool vertical;
     FontProp font;
     FontBox font_box;
+    // retain family grouping and normal-versus-length spacing in this CSS generation.
+    lam::Up<const CssValue> font_values[3]; // family, letter-spacing, word-spacing
+    lam::Up<const CssValue> column_values[2]; // count and gap computed at their declaration owner
+    lam::Up<const CssValue> column_rule_width;
+    CssEnum column_rule_style;
+    Color column_rule_color;
     Color color, background;
     lam::Up<const CssValue> width, height, min_width, max_width, min_height, max_height;
     lam::Up<const CssValue> margin[4], padding[4], border_width[4];
@@ -116,6 +123,9 @@ struct ViewPageStyle {
     float margin[4], padding[4], border_width[4];
     Color background;
     RdtLogicalRect content_rect;
+    uint32_t column_count;
+    float column_gap;
+    lam::Up<const RdtLogicalRect> column_rects; // selected explicit geometry, owned by the CSS generation
     lam::Up<const RadiantPageRegion> body_region;
     lam::Up<ViewCssStyle> body_style;
     RdtLogicalRect body_rect;
@@ -137,6 +147,7 @@ struct ViewPageStyle {
 };
 
 bool view_css_context_begin(ViewTree* tree);
+bool view_css_page_column(const ViewPageStyle* style, uint32_t index, RdtLogicalRect* rect);
 double view_css_number(const CssValue* value, ViewTree* tree = nullptr, const ViewCssStyle* style = nullptr);
 void view_css_context_destroy(ViewTree* tree);
 void view_css_context_rebind(ViewTree* tree);
@@ -164,7 +175,8 @@ float view_css_length(ViewTree* tree, const ViewCssStyle* style, const CssValue*
 bool view_css_border_spacing(ViewTree* tree, ViewCssStyle* style, float* horizontal, float* vertical);
 ViewBreak view_css_break(const CssValue* value);
 ViewModelStatus view_css_page_style(ViewTree* tree, const char* name, uint32_t page_number,
-                                  ViewPageSide side, bool blank, ViewPageStyle* result);
+                                  ViewPageSide side, bool blank, ViewPageStyle* result,
+                                  RadiantPageDiagnostic* diagnostic = nullptr);
 
 ViewModelStatus view_css_box_edges(ViewTree* tree, const ViewCssStyle* source,
     float width, ViewCssBoxEdges* box);

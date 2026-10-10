@@ -1,12 +1,11 @@
 import ui: lambda.ui.dtna
-let form_model = ui.form({id:"project-form"},[
-    ui.form_item({label:"Name",for:"project-name",required:true},
-        ui.input({id:"project-name",name:"project",required:true})^)^,
-    ui.space({},[ui.button({id:"submit",type:"submit",variant:'primary'},"Create")^,
-        ui.button({id:"reset",type:"reset"},"Reset")^])^
-])^
+let form_model = <dtna.form id:"project-form", *[
+    <dtna.form_item label:"Name",for:"project-name",required:true, <dtna.input id:"project-name",name:"project",required:true>>,
+    <dtna.space *[<dtna.button id:"submit",type:"submit",variant:'primary', "Create">,
+        <dtna.button id:"reset",type:"reset", "Reset">]>
+]>
 view dtna_form_test: <form_test> state submitted:"", submissions:0 {
-    <div *[ui.render(form_model),<span id:"submitted",submitted>,<span id:"submissions",string(submissions)>]>
+    <div *[apply(form_model),<span id:"submitted",submitted>,<span id:"submissions",string(submissions)>]>
 }
 on ui_action(action) {
     if (action.action == 'submit') {
@@ -14,4 +13,4 @@ on ui_action(action) {
         submissions = submissions + 1
     }
 }
-ui.page(<form_test>)^
+apply(<dtna.page <form_test>>)

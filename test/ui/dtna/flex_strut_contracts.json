@@ -1,0 +1,17 @@
+{
+  "name":"flex item line boxes use their own font metrics rather than their parent or sibling",
+  "html":"test/ui/dtna/flex_strut_contracts.html",
+  "viewport":{"width":500,"height":400},
+  "events":[
+    {"type":"assert_rect","target":{"selector":"#strut-small-first"},"height":22,"tolerance":0.2},
+    {"type":"assert_rect","target":{"selector":"#strut-large"},"height":30,"tolerance":0.2},
+    {"type":"assert_rect","target":{"selector":"#strut-small-last"},"height":22,"tolerance":0.2},
+    {"type":"assert_rect","target":{"selector":"#strut-inherited"},"height":24,"tolerance":0.2},
+    {"type":"resize","width":700,"height":400},
+    {"type":"assert_rect","target":{"selector":"#strut-small-first"},"height":22,"tolerance":0.2},
+    {"type":"assert_rect","target":{"selector":"#strut-large"},"height":30,"tolerance":0.2},
+    {"type":"assert_rect","target":{"selector":"#strut-small-last"},"height":22,"tolerance":0.2},
+    {"type":"assert_rect","target":{"selector":"#strut-inherited"},"height":24,"tolerance":0.2},
+    {"type":"render","file":"temp/ui_dtna/flex_strut_contracts.png"}
+  ]
+}

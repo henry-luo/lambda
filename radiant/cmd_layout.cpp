@@ -1603,7 +1603,7 @@ CssStylesheet** extract_and_collect_css(Element* html_root, DomElement* dom_root
 static bool clear_load_stylesheet_cascade_visitor(DomNode* node, void*) {
     if (!node->is_element()) return true;
     DomElement* elem = lam::dom_require_element(node);
-    if (!layout_element_is_anonymous_table_fixup(elem)) {
+    if (!elem->is_synthetic()) {
         dom_element_clear_cascaded_styles(elem);
         // Keep pseudo declarations in the same cascade epoch as element styles.
         dom_element_clear_pseudo_styles(elem);
@@ -4349,8 +4349,7 @@ static View* find_matching_input(View* root, const char* match_tag, const char* 
     if (!root) return nullptr;
     if (root->is_element()) {
         DomElement* elem = lam::dom_require_element(root);
-        if (elem->form_control() &&
-            elem->form->control_type == FORM_CONTROL_TEXT) {
+        if (elem->form_control() && tc_is_text_control(elem)) {
             bool tag_ok = (!match_tag || (elem->tag_name && strcmp(elem->tag_name, match_tag) == 0));
             bool class_ok = true;
             if (match_class) {
@@ -4478,10 +4477,12 @@ static bool capture_lambda_focus_restore(DocState* state,
     if (!focused || !focused->is_element()) return false;
     DomElement* focused_elem = lam::dom_require_element(focused);
     out->from_keyboard = focus_get_visible(state) == focused;
+    out->focus_tag = focused_elem->tag_name;
+    const char* id = focused_elem->id;
+    if (id) snprintf(out->focus_id, sizeof(out->focus_id), "%s", id);
     const char* focus_key = focused_elem->get_attribute("data-focus-key");
     if (focus_key) out->focus_key = strdup(focus_key);
-    if (focused_elem->form_control() &&
-        focused_elem->form->control_type == FORM_CONTROL_TEXT) {
+    if (focused_elem->form_control() && tc_is_text_control(focused_elem)) {
         out->fallback_tag = focused_elem->tag_name;
         if (focused_elem->class_count > 0 && focused_elem->class_names) {
             out->fallback_class = focused_elem->class_names[0];
@@ -4490,13 +4491,6 @@ static bool capture_lambda_focus_restore(DocState* state,
                                    &out->selection_start, &out->selection_end,
                                    &out->selection_direction);
         out->has_text_selection = true;
-    } else {
-        // A reactive render rebuilds the focused element too; without this
-        // an editing host lost focus on every edit and Tab, which only
-        // reaches the focused element, fell through to focus navigation.
-        out->focus_tag = focused_elem->tag_name;
-        const char* id = focused_elem->id;
-        if (id) snprintf(out->focus_id, sizeof(out->focus_id), "%s", id);
     }
 
     DomNode* node = static_cast<DomNode*>(focused);
@@ -4628,24 +4622,26 @@ static View* restore_lambda_focus(DomDocument* doc, DocState* state, bool had_fo
         DomElement* elem = focused->is_element()
             ? lam::dom_require_element(focused) : nullptr;
         bool is_matching_text_control = elem && elem->form_control() && elem->form &&
-            elem->form->control_type == FORM_CONTROL_TEXT && elem->tag_name &&
+            tc_is_text_control(elem) && elem->tag_name &&
             strcmp(elem->tag_name, restore->fallback_tag) == 0 &&
-            (!restore->fallback_class || elem->has_class(restore->fallback_class));
+            (!restore->fallback_class || elem->has_class(restore->fallback_class)) &&
+            focus_restore_matches(focused, restore);
         // The render-map path can resolve to the template root instead of the
         // focused descendant; only a matching control may retain text focus.
         if (!is_matching_text_control) focused = nullptr;
     } else if (focused && !focus_restore_matches(focused, restore)) {
         focused = nullptr;
     }
-    if (!focused && restore->fallback_tag) {
-        focused = find_matching_input(
-            doc->view_tree->root, restore->fallback_tag, restore->fallback_class);
-    }
     if (!focused && restore->focus_id[0] && doc->root) {
         DomElement* by_id = dom_find_element_by_id(doc->root, restore->focus_id);
         if (by_id && focus_restore_matches(static_cast<View*>(by_id), restore)) {
             focused = static_cast<View*>(by_id);
         }
+    }
+    if (!focused && !restore->focus_id[0] && restore->fallback_tag) {
+        // named controls must not fall back to the first same-class input after source regeneration.
+        focused = find_matching_input(
+            doc->view_tree->root, restore->fallback_tag, restore->fallback_class);
     }
     if (focused) {
         // rebuilding preserves programmatic-only targets and their keyboard ring.

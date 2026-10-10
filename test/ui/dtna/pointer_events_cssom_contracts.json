@@ -1,0 +1,23 @@
+{
+  "name": "Pointer-events CSSOM matches inherited and live hit-test declarations",
+  "html": "test/ui/dtna/pointer_events_cssom_contracts.html",
+  "viewport": {"width": 400, "height": 200},
+  "events": [
+    {"type":"assert_style","target":{"selector":"#owner"},"property":"pointer-events","equals":"none"},
+    {"type":"assert_style","target":{"selector":"#inherited"},"property":"pointer-events","equals":"none"},
+    {"type":"assert_style","target":{"selector":"#override"},"property":"pointer-events","equals":"auto"},
+    {"type":"click","target":{"selector":"#override"}},
+    {"type":"assert_text","target":{"selector":"#observed"},"equals":"auto"},
+    {"type":"assert_style","target":{"selector":"#inherited"},"property":"pointer-events","equals":"auto"},
+    {"type":"click","target":{"selector":"#idle"}},
+    {"type":"assert_text","target":{"selector":"#clicked"},"equals":"1"},
+    {"type":"click","target":{"selector":"#blocked"}},
+    {"type":"assert_text","target":{"selector":"#clicked"},"equals":"1"},
+    {"type":"click","target":{"selector":"#swap"}},
+    {"type":"assert_text","target":{"selector":"#pseudo-values"},"equals":"auto:none"},
+    {"type":"click","target":{"selector":"#idle"}},
+    {"type":"assert_text","target":{"selector":"#clicked"},"equals":"1"},
+    {"type":"click","target":{"selector":"#blocked"}},
+    {"type":"assert_text","target":{"selector":"#clicked"},"equals":"2"}
+  ]
+}

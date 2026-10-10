@@ -1,4 +1,5 @@
 // Resource IO uses lambda-io (D7.1.2v2); callers supply an explicit demo base URI.
+import resources: ~~.mod_resources
 pub let MAPS = ["E1M1", "E1M2", "E1M3", "E1M4", "E1M5", "E1M6", "E1M7", "E1M8", "E1M9"]
 fn fail(message) error => error("DOOM data: " ++ message)
 fn point(value) => value is map and value.x is number and value.y is number
@@ -7,9 +8,7 @@ fn sector_index(value, total) => value is int and value >= 0 and value < total
 // CLI input() is cwd-relative. Resolve the actual entry argument once, rather
 // than assuming the checkout's directory or changing input() semantics.
 pub fn entry_uri() string^ {
-    let paths = [for (argument in sys.proc.self.argv# where ends_with(argument, ".ls")) argument]
-    if (len(paths) == 0) raise fail("no Lambda entry path in command line")
-    else url_resolve("file://" ++ sys.proc.self.cwd# ++ "/", paths[0])
+    resources.entry_uri()^
 }
 pub fn read(base, relative) any^ => input(url_resolve(base, relative), 'json') ^ {
     raise fail("cannot read " ++ relative ++ ": " ++ ^.message)

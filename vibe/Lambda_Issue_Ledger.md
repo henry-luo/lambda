@@ -1749,6 +1749,61 @@ The plan separates implemented cases, historical checkpoints and open gates.
 ---
 
 
+### 15.4 Reactive presentation gaps
+
+<a id="ui-1"></a>**UI-1 · Repeated ordinary markup moves its embedded native node between presentation slots · OPEN (found 2026-10-10)**
+
+`let image = <svg ...>; <div image><div image>` produces one native SVG rather
+than two occurrences in a Lambda UI document. The package-independent
+`temp/ui_dtna/repeated_markup/probe.ls` and `.json` record 1/2 assertions passing;
+the retained Segmented fixture records one SVG from eighteen icon slots
+(`test/ui/dtna/segmented_modes.json`, 41/42 assertions pass). In
+`lambda/input/css/dom_element.cpp`, `build_dom_tree_from_element` reuses the
+ordinary Element's embedded `DomElement`; `dom_detach_rebuilt_child` moves it
+from its earlier parent. `fn_apply1` returns an unmatched ordinary element
+unchanged. This is independent of the dtna component implementation.
+
+The repeated-presentation contract remains pending consultation under reactive
+UI **RS7/RSO1/RSO2/RSO10** and `Lambda_Pkg_UI.md` §11. **D7.4.5v2** distinguishes
+native Velmt handles from ordinary Element storage but does not itself settle
+presentation identity. Do not close this issue by cloning icons inside a widget,
+changing the fixture to create fresh values, or silently deciding the contract.
+
+<a id="ui-2"></a>**UI-2 · Uncontrolled native select loses its selection after a parent presentation update · OPEN (found 2026-10-10)**
+
+On `047a15f6f` with the working UI packages, `test/ui/bold/controls.json`
+records **20/21** assertions passing on `interp`, `auto` and `jit`. Choose
+Twenty with Down then Enter: the package emits integer `20`, the parent
+updates its request display, and the native control returns to authored
+default `10`. Replacing the package and logical tags with dtna in
+`temp/ui_bold/_dtna_controls.ls` reproduces the same failure independently of
+bold's presentation. The failing assertion remains in the committed fixture.
+
+`rebuild_lambda_doc_incremental` replaces DOM wrappers and migrates ViewState
+through `view_state_preserve_subtree_identity`. The migration does not copy the
+option's native selectedness/dirty bits; the fresh option wrappers retain
+authored `selected` defaults. `dom_option_is_selected` and native form-data
+queries then read those defaults instead of the chosen value. Preserve native
+control state in the general presentation lifecycle, respecting changed authored
+defaults; do not add a second selection owner inside a theme (**D7.2.5;
+S12.1.3**).
+
+<a id="ui-3"></a>**UI-3 · Native overflow clips retain earlier flex dimensions · OPEN (found 2026-10-10)**
+
+`./lambda.exe render test/ui/bold_gallery.ls -vw 1100 -vh 1900 -o
+temp/ui_bold/gallery_render.png` reproduces a clipped progress track in the
+right-hand card. The layout tree gives the track a 24px border-box height;
+the raster trace pushes a rounded inner clip only 8px high. Card clips also
+retain a smaller height than the final flex box. `layout_block_overflow_clip`
+reads `ScrollProp::clip`, populated during block layout, while later flex
+sizing changes the box dimensions. The resize/clip publication paths need a
+focused engine regression and a shared lifecycle fix. The native viewer also
+shows a mispositioned block-button label after its initial relayout; that
+observation still needs isolation from the clipping defect. No compensating
+padding, fixed heights or theme-specific layout branches are added. The
+package exercises ordinary CSS through the existing engine (**D7.2.4;
+S12.1.3**).
+
 # Appendix B — Cross-cutting clusters
 
 Several ledger entries are one defect wearing different masks. Fix them

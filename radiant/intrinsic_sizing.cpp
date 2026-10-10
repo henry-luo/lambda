@@ -381,7 +381,7 @@ static float intrinsic_resolve_definite_constraint(LayoutContext* lycon,
     return isfinite(resolved) && resolved >= 0.0f ? resolved : -1.0f;
 }
 
-static void intrinsic_apply_grid_item_min_content_floor(
+void layout_apply_grid_item_min_content_floor(
         LayoutContext* lycon, DomElement* child_elem, IntrinsicSizes* child_sizes) {
     if (!lycon || !child_elem || !child_sizes) return;
     ViewBlock* child_view = lam::unsafe_view_block_element_storage(child_elem);
@@ -3759,8 +3759,9 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                 float aspect_width = intrinsic_store_ratio_width_from_height(
                     lycon, element, view_block_for_aspect, aspect_ratio, min_height,
                     true, false, is_scroll_container, content_only, &sizes);
-                if (!is_scroll_container && !layout_element_is_replaced(element) &&
-                    element_has_in_flow_intrinsic_content(element)) {
+                // an opposite-axis minimum floors replaced natural size; it cannot replace it with zero.
+                if (!is_scroll_container && (layout_element_is_replaced(element) ||
+                    element_has_in_flow_intrinsic_content(element))) {
                     aspect_ratio_min_width = aspect_width;
                     sizes = {0.0f, 0.0f};
                 } else {
@@ -4804,78 +4805,11 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
     bool is_grid_container = intrinsic_element_display_matches(
         element, CSS_VALUE_GRID, CSS_VALUE_INLINE_GRID);
     if (is_grid_container) {
-        // CSS Grid §10.1: Grid container intrinsic widths are computed column-by-column.
-        // For a grid with N explicit columns, the max-content width = sum of column max-contents
-        // (each column's max-content = max of all items spanning only that column).
-        // This is different from a block container which takes max of block children.
-        GridProp* grid_prop = view_block->embed ? view_block->embedp()->grid : nullptr;
-        // An implicit grid starts with one auto column when no template exists.
-        int col_count = intrinsic_grid_template_column_count(
-            element, view_block, 1);
-
-        // A one-column grid still has a grid track whose content contribution
-        // defines min/max-content width; skipping it collapses width:max-content.
-        if (col_count > 0) {
-            // Compute per-column max-content: assign each child to a column (auto-placement)
-            // and take max of children's max-content in each column
-            ScratchScope col_scope(&lycon->scratch);
-            float* col_min = col_scope.array_zero<float>(col_count);
-            float* col_max = col_scope.array_zero<float>(col_count);
-
-            int item_idx = 0;
-            for (DomNode* child = element->first_child; child; child = child->next_sibling) {
-                if (!child->is_element()) continue;
-                DomElement* child_elem = child->as_element();
-                // Auto-placement: assign to column item_idx % col_count
-                int col = item_idx % col_count;
-                IntrinsicSizes child_sizes = measure_element_intrinsic_widths(lycon, child_elem);
-                intrinsic_apply_grid_item_min_content_floor(lycon, child_elem, &child_sizes);
-                if (child_sizes.min_content > col_min[col]) col_min[col] = child_sizes.min_content;
-                if (child_sizes.max_content > col_max[col]) col_max[col] = child_sizes.max_content;
-
-                // Check for explicit fixed-width track
-                if (grid_prop && grid_prop->grid_template_columns &&
-                        col < grid_prop->grid_template_columns->track_count) {
-                    GridTrackSize* track = grid_prop->grid_template_columns->tracks[col];
-                    if (track && track->type == GRID_TRACK_SIZE_LENGTH && track->value > 0) {
-                        // Fixed length track: the column size is the fixed value, not the content
-                        float fixed_px = track->is_percentage ? 0 : (float)track->value;
-                        if (fixed_px > 0) {
-                            col_max[col] = fixed_px;
-                            col_min[col] = fixed_px;
-                        }
-                    }
-                }
-
-                item_idx++;
-            }
-
-            // Check if track sizes are fixed-length (from CSS)
-            // For fixed tracks, use fixed value regardless of content
-            if (grid_prop && grid_prop->grid_template_columns) {
-                int explicit_count = min(col_count, grid_prop->grid_template_columns->track_count);
-                for (int c = 0; c < explicit_count; c++) {
-                    GridTrackSize* track = grid_prop->grid_template_columns->tracks[c];
-                    if (track && track->type == GRID_TRACK_SIZE_LENGTH && !track->is_percentage && track->value > 0) {
-                        col_max[c] = (float)track->value;
-                        col_min[c] = (float)track->value;
-                    }
-                }
-            }
-
-            // Sum column sizes + gaps
-            float column_gap = (grid_prop ? grid_prop->column_gap : 0.0f);
-            float total_min = 0.0f, total_max = 0.0f;
-            for (int c = 0; c < col_count; c++) {
-                total_min += col_min[c];
-                total_max += col_max[c];
-            }
-            if (col_count > 1 && column_gap > 0) {
-                total_min += column_gap * (col_count - 1);
-                total_max += column_gap * (col_count - 1);
-            }
-
-            col_scope.end();
+        // use the same resolved tracks, spans and flex fractions as final grid layout.
+        IntrinsicSizes tracks = measure_grid_intrinsic_widths(lycon, view_block);
+        {
+            float total_min = tracks.min_content;
+            float total_max = tracks.max_content;
 
             // Add padding and border
             float pad_left = 0, pad_right = 0, border_left = 0, border_right = 0;
@@ -5224,7 +5158,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
             if (is_grid_container) {
                 // Auto-track grids use the normal child walk; retain the grid
                 // item's explicit minimum in that path as well.
-                intrinsic_apply_grid_item_min_content_floor(lycon, child_elem, &child_sizes);
+                layout_apply_grid_item_min_content_floor(lycon, child_elem, &child_sizes);
             }
 
             // Re-check display:none after measurement (display may be resolved during measurement)

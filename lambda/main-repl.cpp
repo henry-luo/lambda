@@ -243,7 +243,8 @@ void print_help() {
     printf("  lambda render <input.html> -o <output.svg|pdf|png|jpg>  - Render HTML to SVG/PDF/PNG/JPEG\n");
     printf("  lambda view [file.pdf|file.html]  - Open a document (default: bundled lambda.doc viewer)\n");
     printf("  lambda edit <file.md|file.html|file.svg>  - Open a document in the editing application\n");
-    printf("  lambda demo                  - Open the bundled lambda.doc viewer with its startup splash\n");
+    fputs("  lambda demo [name]            - Open a named demo, or the document viewer's startup splash\n"
+          "  lambda demo --list            - List available demos\n", stdout);
     printf("  lambda fetch <url> [-o file]  - Fetch HTTP/HTTPS resource\n");
     printf("  lambda --help                - Show this help message\n");
     printf("\nScript Options:\n");

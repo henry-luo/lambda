@@ -1780,6 +1780,8 @@ TypeMap* type_tree_follow(Input* input, TypeMap* start, const TypeTreeStep* step
 Item array_num_read_borrowed_item(ArrayNum* array, int64_t offset);
 Item array_num_read_item(ArrayNum* array, int64_t offset);
 double array_num_read_double(ArrayNum* arr, int64_t offset);
+// shared rank validation for native consumers of strided numeric arrays.
+int array_num_get_shape_strides(ArrayNum* array, int64_t* shape, int64_t* strides);
 
 // Strict structural equality for non-observable no-op elision.
 bool item_deep_equal(Item a, Item b);

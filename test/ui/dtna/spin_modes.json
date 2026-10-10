@@ -1,0 +1,406 @@
+{
+  "name": "dtna Spin sizes nested content custom percent delayed controlled and owner cleanup",
+  "html": "test/ui/dtna/spin_modes.ls",
+  "viewport": {
+    "width": 600,
+    "height": 800
+  },
+  "events": [
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#spin-default .dtna-spin-indicator"
+      },
+      "width": 20,
+      "height": 20,
+      "tolerance": 0.2
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#spin-default"
+      },
+      "attribute": "aria-busy",
+      "equals": "true"
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#spin-small .dtna-spin-indicator"
+      },
+      "width": 14,
+      "height": 14,
+      "tolerance": 0.2
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#spin-small"
+      },
+      "attribute": "aria-busy",
+      "equals": "true"
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#spin-large .dtna-spin-indicator"
+      },
+      "width": 32,
+      "height": 32,
+      "tolerance": 0.2
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#spin-large"
+      },
+      "attribute": "aria-busy",
+      "equals": "true"
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#spin-manual"
+      },
+      "width": 20,
+      "height": 20,
+      "tolerance": 0.2
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#spin-manual"
+      },
+      "attribute": "aria-busy",
+      "equals": "true"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#spin-small .dtna-spin-description"
+      },
+      "property": "font-size",
+      "equals": "14px"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#spin-large .dtna-spin-description"
+      },
+      "property": "font-size",
+      "equals": "14px"
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#spin-nested"
+      },
+      "width": 400,
+      "height": 100,
+      "tolerance": 0.2
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#spin-nested .dtna-spin-container"
+      },
+      "property": "opacity",
+      "equals": "0.5"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#spin-nested .dtna-spin-container"
+      },
+      "property": "pointer-events",
+      "equals": "none"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#spin-idle"
+      },
+      "attribute": "aria-busy",
+      "equals": "false"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#spin-idle .dtna-spin-indicator"
+      },
+      "count": 0
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#spin-default .dtna-spin-dot-item"
+      },
+      "count": 4
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#custom-indicator"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#spin-parts.authored-section .authored-indicator"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#spin-parts .dtna-spin-description"
+      },
+      "property": "font-weight",
+      "equals": "700"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#spin-manual .dtna-progress"
+      },
+      "attribute": "aria-valuenow",
+      "equals": "37"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#idle-content"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#spin-clicks"
+      },
+      "equals": "1"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#blocked-content"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#spin-clicks"
+      },
+      "equals": "1"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#spin-delay"
+      },
+      "attribute": "aria-busy",
+      "equals": "false"
+    },
+    {
+      "type": "advance_time",
+      "ms": 6000,
+      "steps": 14
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#spin-delay"
+      },
+      "attribute": "aria-busy",
+      "equals": "true"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#spin-delay .dtna-spin-description"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#spin-auto .dtna-progress"
+      },
+      "count": 1
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#toggle-spin"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#spin-controlled"
+      },
+      "attribute": "aria-busy",
+      "equals": "false"
+    },
+    {
+      "type": "advance_time",
+      "ms": 150,
+      "steps": 3
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#spin-controlled"
+      },
+      "attribute": "aria-busy",
+      "equals": "false"
+    },
+    {
+      "type": "advance_time",
+      "ms": 200,
+      "steps": 4
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#spin-controlled"
+      },
+      "attribute": "aria-busy",
+      "equals": "true"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#toggle-spin"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#spin-controlled"
+      },
+      "attribute": "aria-busy",
+      "equals": "false"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#spin-controlled .dtna-spin-indicator"
+      },
+      "count": 0
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#remove-spin"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#spin-removable"
+      },
+      "count": 0
+    },
+    {
+      "type": "advance_time",
+      "ms": 70000,
+      "steps": 30
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#spin-removable"
+      },
+      "count": 0
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#spin-controlled"
+      },
+      "attribute": "aria-busy",
+      "equals": "false"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#spin-clicks"
+      },
+      "equals": "1"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#toggle-fullscreen"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#spin-fullscreen"
+      },
+      "attribute": "aria-busy",
+      "equals": "true"
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#spin-fullscreen"
+      },
+      "x": 0,
+      "y": 0,
+      "width": 600,
+      "height": 800,
+      "tolerance": 0.2
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#spin-fullscreen"
+      },
+      "property": "pointer-events",
+      "equals": "auto"
+    },
+    {
+      "type": "key_press",
+      "key": "space"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#spin-fullscreen"
+      },
+      "attribute": "aria-busy",
+      "equals": "false"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#toggle-fullscreen"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#spin-fullscreen"
+      },
+      "attribute": "aria-busy",
+      "equals": "true"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#toggle-spin"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#spin-controlled"
+      },
+      "attribute": "aria-busy",
+      "equals": "false"
+    }
+  ]
+}

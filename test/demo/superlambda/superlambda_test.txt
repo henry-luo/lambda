@@ -1,4 +1,14 @@
 {
+  auto_starts: true,
+  auto_finishes: true,
+  auto_checkpoint: true,
+  auto_coins: true,
+  auto_keeps_lives: true,
+  auto_pause: true,
+  auto_resume: true,
+  auto_restart_manual: true
+}
+{
   starts_ready: true,
   ready_frozen: true,
   starts_playing: true,

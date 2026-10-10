@@ -1,0 +1,34 @@
+{
+  "schema": 1,
+  "package": "antd",
+  "version": "6.6.5",
+  "scope": "default-light illustrations; originating semantic labels are supplied by the component",
+  "generated": "lmd/package/ui/dtna/illustrations",
+  "records": {
+    "empty-default": {
+      "source": "antd/lib/empty/empty.js",
+      "source_sha256": "495a6540098113fcdcd987a7e7d9e7e424b0f32f560ad791c40825ee861eff2f",
+      "sha256": "e972cb95a52ca656fb2dc58e23c8662e8e0ae8a5a3f558f676deda47c0f6455b"
+    },
+    "empty-simple": {
+      "source": "antd/lib/empty/simple.js",
+      "source_sha256": "13e4d4eba6d6a97d99fbb83b9db8801cf5a4c3749a3502e50f5d465e01fed03d",
+      "sha256": "5fc85f91794c309753e83c1e535fbaa0750168172ea752b87456ca9e3b704c34"
+    },
+    "result-403": {
+      "source": "antd/lib/result/unauthorized.js",
+      "source_sha256": "ee5ae13d54f8361a2ded3630bd4ffd423788243b48d08b9da50c173ecfc2081c",
+      "sha256": "5229f26c9de9e0ed191398b6b877602777b1a20385cc92b92c1a848050f0637e"
+    },
+    "result-404": {
+      "source": "antd/lib/result/noFound.js",
+      "source_sha256": "4f990ced91b2a0e90e3d0ddfc67d88145a4dd6b6a7da49de4bb1c9016e585c88",
+      "sha256": "2a6ac6490ccb19f8feaf085e4a82bc30c8796ab6e981bdc1aca609e673899a53"
+    },
+    "result-500": {
+      "source": "antd/lib/result/serverError.js",
+      "source_sha256": "8b0b8076ef84fa14e7dc98ecfd6bcb011bdb3344139b08b8b99a08de93d64bbd",
+      "sha256": "1d854290f07565dcdb0e1d427b644b098e31e9a06de9f77acc7043f0eef19402"
+    }
+  }
+}

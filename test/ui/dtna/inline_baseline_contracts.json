@@ -1,0 +1,159 @@
+{
+  "name": "shifted atomic baselines and flex outer boxes retain fractional leading",
+  "html": "test/ui/dtna/inline_baseline_contracts.html",
+  "viewport": {
+    "width": 500,
+    "height": 400
+  },
+  "events": [
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#flow-small"
+      },
+      "width": 80,
+      "height": 15.125,
+      "tolerance": 0.2
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#flow-middle"
+      },
+      "width": 80,
+      "height": 20.5,
+      "tolerance": 0.2
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#flow-large"
+      },
+      "width": 80,
+      "height": 25.875,
+      "tolerance": 0.2
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#flow-up"
+      },
+      "width": 80,
+      "height": 25.5,
+      "tolerance": 0.2
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#flex-small"
+      },
+      "width": 15,
+      "height": 15.125,
+      "tolerance": 0.2
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#flex-middle"
+      },
+      "width": 20,
+      "height": 20.5,
+      "tolerance": 0.2
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#flex-large"
+      },
+      "width": 25,
+      "height": 25.875,
+      "tolerance": 0.2
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#flex-ink"
+      },
+      "width": 41.71875,
+      "height": 20,
+      "tolerance": 0.2
+    },
+    {
+      "type": "resize",
+      "width": 700,
+      "height": 400
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#flow-small"
+      },
+      "width": 80,
+      "height": 15.125,
+      "tolerance": 0.2
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#flow-middle"
+      },
+      "width": 80,
+      "height": 20.5,
+      "tolerance": 0.2
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#flow-large"
+      },
+      "width": 80,
+      "height": 25.875,
+      "tolerance": 0.2
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#flow-up"
+      },
+      "width": 80,
+      "height": 25.5,
+      "tolerance": 0.2
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#flex-small"
+      },
+      "width": 15,
+      "height": 15.125,
+      "tolerance": 0.2
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#flex-middle"
+      },
+      "width": 20,
+      "height": 20.5,
+      "tolerance": 0.2
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#flex-large"
+      },
+      "width": 25,
+      "height": 25.875,
+      "tolerance": 0.2
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#flex-ink"
+      },
+      "width": 41.71875,
+      "height": 20,
+      "tolerance": 0.2
+    }
+  ]
+}

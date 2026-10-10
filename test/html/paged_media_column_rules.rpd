@@ -1,0 +1,27 @@
+<?xml version="1.0"?>
+<r:page-document xmlns:r="urn:lambda:radiant:page" style="font:10px/20px Arial;white-space:pre;orphans:1;widows:1">
+  <r:master-set>
+    <r:page-master name="sheet" style="size:320px 100px;margin:10px">
+      <r:region role="body" name="body" style="column-count:3;column-gap:30px;column-rule:6px solid lime"/>
+    </r:page-master>
+  </r:master-set>
+  <r:page-sequence master-reference="sheet" force-page-count="no-force">
+    <r:flow region-name="body">
+      <p style="margin:0;background:#f2cccc">A
+B
+C
+D
+E
+F
+G
+H
+I</p>
+      <p style="margin:0;background:#cce5ff;break-before:page">J
+K
+L
+M
+N</p>
+      <p style="margin:0;background:#d5efcd;break-before:page">O</p>
+    </r:flow>
+  </r:page-sequence>
+</r:page-document>

@@ -1,1 +1,2 @@
 ["choice", "choice", "choice", "fallback", "fallback"]
+["named tag", "named tag", true, true, true]

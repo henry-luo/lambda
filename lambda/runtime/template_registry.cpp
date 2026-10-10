@@ -397,6 +397,44 @@ void template_registry_set_element_pattern(TemplateEntry* entry, const void* elm
               total, literal);
 }
 
+// S10.1.1v3: a root union keeps every alternative, rather than reading it as TypeType.
+static void template_set_pattern(TemplateEntry* entry, const Type* pattern) {
+    if (!pattern) return;
+    if (lambda_type_is_union(pattern)) {
+        const TypeBinary* either = (const TypeBinary*)pattern;
+        TemplateEntry left = {}, right = {};
+        template_set_pattern(&left, either->left);
+        template_set_pattern(&right, either->right);
+        entry->match_union_type = pattern;
+        entry->specificity = left.specificity > right.specificity
+            ? left.specificity : right.specificity;
+        return;
+    }
+    if (pattern->type_id == LMD_TYPE_TYPE) {
+        template_set_pattern(entry, ((const TypeType*)pattern)->type);
+        return;
+    }
+    entry->match_type_id = pattern->type_id;
+    entry->specificity = pattern->type_id == LMD_TYPE_ANY
+        ? TMPL_SPEC_CATCHALL : TMPL_SPEC_SIMPLE_TYPE;
+    if (pattern->type_id == LMD_TYPE_ELEMENT) {
+        const TypeElmt* element = (const TypeElmt*)pattern;
+        if (element->name.str && element->name.length) {
+            entry->match_tag = element->name.str;
+            entry->match_tag_len = (int)element->name.length;
+            entry->specificity = element->length > 0
+                ? TMPL_SPEC_ELMT_ATTR : TMPL_SPEC_ELMT_TAG;
+            template_registry_set_element_pattern(entry, element);
+        }
+    }
+}
+
+void template_registry_set_view_pattern(TemplateEntry* entry, AstViewNode* view) {
+    if (!entry || !view) return;
+    template_set_pattern(entry, view->pattern ? view->pattern->type : NULL);
+    if (view->name) entry->specificity = TMPL_SPEC_NAMED;
+}
+
 // ============================================================================
 // Pattern matching
 // ============================================================================
@@ -476,6 +514,16 @@ static bool template_attrs_match(const TypeElmt* pattern, Item target) {
 // Check if a template's pattern matches a given item
 static bool template_matches(TemplateEntry* tmpl, Item target) {
     TypeId tid = get_type_id(target);
+
+    if (tmpl->match_union_type) {
+        const TypeBinary* either = (const TypeBinary*)tmpl->match_union_type;
+        TemplateEntry branch = {};
+        template_set_pattern(&branch, either->left);
+        if (template_matches(&branch, target)) return true;
+        branch = {};
+        template_set_pattern(&branch, either->right);
+        return template_matches(&branch, target);
+    }
 
     // catch-all matches everything
     if (tmpl->match_type_id == LMD_TYPE_ANY) return true;
@@ -627,6 +675,17 @@ static Item invoke_template(TemplateEntry* tmpl, Item target) {
     return fn((Context*)context, target);
 }
 
+static Item invoke_recorded_template(TemplateEntry* tmpl, Item target) {
+    uint64_t invocation_start = render_map_invocation_begin();
+    Item result = invoke_template(tmpl, target);
+    if (tmpl->template_ref) {
+        render_map_record_invocation(target, tmpl->template_ref, result,
+                                     ItemNull, -1, invocation_start);
+        render_map_record_source_path(target, tmpl->template_ref);
+    }
+    return result;
+}
+
 Item fn_apply1(Item target) {
     GUARD_ERROR1(target);
 
@@ -653,15 +712,7 @@ Item fn_apply1(Item target) {
         render_map_set_source_doc_root(target);
     }
 
-    Item result = invoke_template(tmpl, target);
-
-    // record source→result mapping in the render map for observer-based reconciliation
-    if (tmpl->template_ref) {
-        render_map_record(target, tmpl->template_ref, result, ItemNull, -1);
-        render_map_record_source_path(target, tmpl->template_ref);
-    }
-
-    return result;
+    return invoke_recorded_template(tmpl, target);
 }
 
 Item fn_apply2(Item target, Item options) {
@@ -721,13 +772,5 @@ Item fn_apply2(Item target, Item options) {
         render_map_set_source_doc_root(target);
     }
 
-    Item result = invoke_template(tmpl, target);
-
-    // record source→result mapping in the render map for observer-based reconciliation
-    if (tmpl->template_ref) {
-        render_map_record(target, tmpl->template_ref, result, ItemNull, -1);
-        render_map_record_source_path(target, tmpl->template_ref);
-    }
-
-    return result;
+    return invoke_recorded_template(tmpl, target);
 }

@@ -154,70 +154,6 @@ static void image_surface_apply_svg_metadata(ImageSurface* surface,
     surface->generation = 1;
 }
 
-static uint16_t read_exif_u16(const unsigned char* p, bool little_endian) {
-    return little_endian ? read_le16((const uint8_t*)p) : read_be16((const uint8_t*)p);
-}
-
-static uint32_t read_exif_u32(const unsigned char* p, bool little_endian) {
-    return little_endian ? read_le32((const uint8_t*)p) : read_be32((const uint8_t*)p);
-}
-
-static int jpeg_exif_orientation_from_memory(const unsigned char* data, size_t size) {
-    if (!data || size < 4 || data[0] != 0xFF || data[1] != 0xD8) return 1;
-
-    size_t pos = 2;
-    while (pos + 4 <= size) {
-        while (pos < size && data[pos] == 0xFF) pos++;
-        if (pos >= size) break;
-
-        unsigned char marker = data[pos++];
-        if (marker == 0xDA || marker == 0xD9) break;
-        if (pos + 2 > size) break;
-
-        uint16_t seg_len = (uint16_t)((data[pos] << 8) | data[pos + 1]);
-        pos += 2;
-        if (seg_len < 2) break;
-
-        size_t payload_len = (size_t)seg_len - 2;
-        if (pos + payload_len > size) break;
-
-        if (marker == 0xE1 && payload_len >= 14 && memcmp(data + pos, "Exif\0\0", 6) == 0) {
-            const unsigned char* tiff = data + pos + 6;
-            size_t tiff_len = payload_len - 6;
-            if (tiff_len < 8) return 1;
-
-            bool little_endian = false;
-            if (tiff[0] == 'I' && tiff[1] == 'I') little_endian = true;
-            else if (tiff[0] == 'M' && tiff[1] == 'M') little_endian = false;
-            else return 1;
-
-            if (read_exif_u16(tiff + 2, little_endian) != 42) return 1;
-            uint32_t ifd_offset = read_exif_u32(tiff + 4, little_endian);
-            if (ifd_offset + 2 > tiff_len) return 1;
-
-            const unsigned char* ifd = tiff + ifd_offset;
-            uint16_t entry_count = read_exif_u16(ifd, little_endian);
-            size_t entries_start = ifd_offset + 2;
-            for (uint16_t i = 0; i < entry_count; i++) {
-                size_t entry_offset = entries_start + (size_t)i * 12;
-                if (entry_offset + 12 > tiff_len) break;
-
-                const unsigned char* entry = tiff + entry_offset;
-                uint16_t tag = read_exif_u16(entry, little_endian);
-                uint16_t type = read_exif_u16(entry + 2, little_endian);
-                uint32_t count = read_exif_u32(entry + 4, little_endian);
-                if (tag == 0x0112 && type == 3 && count >= 1) {
-                    int orientation = read_exif_u16(entry + 8, little_endian);
-                    return (orientation >= 1 && orientation <= 8) ? orientation : 1;
-                }
-            }
-            return 1;
-        }
-        pos += payload_len;
-    }
-    return 1;
-}
-
 static int jpeg_exif_orientation_from_file(const char* file_path) {
     if (!file_path) return 1;
 
@@ -248,7 +184,7 @@ static int jpeg_exif_orientation_from_file(const char* file_path) {
 
     int orientation = 1;
     if (read_count == (size_t)file_size) {
-        orientation = jpeg_exif_orientation_from_memory(bytes.get(), (size_t)file_size);
+        orientation = image_jpeg_exif_orientation_from_memory(bytes.get(), (size_t)file_size);
     }
     return orientation;
 }
@@ -460,7 +396,7 @@ static ImageSurface* load_image_resource(DomDocument* document, lam::Own<hashmap
             image_surface_apply_svg_metadata(surface, svg_read_intrinsic_metadata(rdt_picture_get_svg_root(surface->pic)), svg_w, svg_h);
         } else {
             int width, height;
-            int orientation = jpeg_exif_orientation_from_memory(decoded.get(), decoded_len);
+            int orientation = image_jpeg_exif_orientation_from_memory(decoded.get(), decoded_len);
             if (!image_get_dimensions_from_memory(decoded.get(), decoded_len, &width, &height)) {
                 // Invalid inline payloads are common in scraped pages; probe
                 // before full decode so placeholders do not emit backend errors.
@@ -780,7 +716,7 @@ static ImageSurface* load_image_resource(DomDocument* document, lam::Own<hashmap
         if (surface->format == IMAGE_FORMAT_JPEG) {
             int orientation = 1;
             if (is_http && surface->source_data && surface->source_data_len > 0) {
-                orientation = jpeg_exif_orientation_from_memory(surface->source_data, surface->source_data_len);
+                orientation = image_jpeg_exif_orientation_from_memory(surface->source_data, surface->source_data_len);
             } else {
                 orientation = jpeg_exif_orientation_from_file(file_path.get());
             }

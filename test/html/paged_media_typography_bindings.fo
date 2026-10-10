@@ -1,0 +1,19 @@
+<?xml version="1.0"?>
+<fo:root xmlns:fo="http://www.w3.org/1999/XSL/Format" font-family="Arial" font-size="7.5pt" line-height="9pt" orphans="1" widows="1">
+  <fo:layout-master-set><fo:simple-page-master master-name="sheet" page-width="180pt" page-height="135pt" margin="7.5pt"><fo:region-body overflow="hidden"/></fo:simple-page-master></fo:layout-master-set>
+  <fo:page-sequence master-reference="sheet" force-page-count="no-force"><fo:flow flow-name="xsl-region-body">
+    <fo:block font-family="&quot;Missing, grouped&quot;, Arial, sans-serif" font-size="10pt" letter-spacing=".15em" word-spacing="-.075em">
+      <fo:block font-size="15pt" line-height="18pt" font-family="from-parent(font-family)" letter-spacing="from-parent(font-size) * -.15" word-spacing="from-parent(font-size) * .3" padding-before="from-parent(font-size) * .15" background-color="#e8f0ff">Parent family and spacing</fo:block>
+    </fo:block>
+  </fo:flow></fo:page-sequence>
+  <fo:page-sequence master-reference="sheet" force-page-count="no-force"><fo:flow flow-name="xsl-region-body">
+    <fo:block font-family="&quot;Missing, grouped&quot;, Arial, sans-serif" letter-spacing="normal" word-spacing="0pt">
+      <fo:block font-size="15pt"><fo:block font-size="7.5pt" font-family="from-nearest-specified-value(font-family)" letter-spacing="inherited-property-value(letter-spacing)" word-spacing="from-parent()" background-color="#e8ffe8">Normal and zero remain distinct</fo:block></fo:block>
+    </fo:block>
+  </fo:flow></fo:page-sequence>
+  <fo:page-sequence master-reference="sheet" force-page-count="no-force"><fo:flow flow-name="xsl-region-body">
+    <fo:block font-family="Arial, sans-serif" font-size="10pt" letter-spacing=".15em" word-spacing="-.075em">
+      <fo:block font-size="20pt"><fo:block font-size="7.5pt" font-family="from-nearest-specified-value(font-family)" letter-spacing="from-parent()" word-spacing="from-parent(word-spacing)" padding-start="from-parent(font-size) * .075" background-color="#fff0d0">Original declaring font values</fo:block></fo:block>
+    </fo:block>
+  </fo:flow></fo:page-sequence>
+</fo:root>

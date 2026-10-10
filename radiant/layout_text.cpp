@@ -2297,9 +2297,7 @@ static void contribute_block_root_strut(LayoutContext* lycon) {
     float content_height = ascender + descender;
     if (content_height <= 0.0f) return;
     // CSS Inline 3: the block container generates a root inline box whose
-    float half_leading = (lycon->block.line_height - content_height) / 2.0f;
-    ascender += half_leading;
-    descender += half_leading;
+    layout_apply_line_height_leading(lycon->block.line_height, &ascender, &descender);
 
     if (ascender > 0.0f) {
         lycon->line.max_ascender = max(lycon->line.max_ascender, ascender);
@@ -3254,10 +3252,8 @@ void output_text(LayoutContext* lycon, ViewText* text, TextRect* rect, int text_
         float half_leading = 0.0f;
         float css_baseline_ascender = ascender;
         if (!lycon->block.line_height_is_normal) {
-            float content_height = ascender + descender;
-            half_leading = (lycon->block.line_height - content_height) / 2.0f;
-            ascender += half_leading;
-            descender += half_leading;
+            half_leading = layout_apply_line_height_leading(
+                lycon->block.line_height, &ascender, &descender);
             css_baseline_ascender = ascender;
             const FontMetrics* m = font_box_handle(&lycon->font) ? font_get_metrics(font_box_handle(&lycon->font)) : NULL;
             if (m) {

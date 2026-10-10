@@ -3905,6 +3905,19 @@ void render_outer_shadow_blur_composite(
 
 // ===== render_border.hpp =====
 // Border rendering functions
+// borrowed stroke parameters are valid only during the callback; a null stroke denotes a fill.
+struct RenderBorderStroke {
+    float width;
+    float dashes[2];
+    float phase;
+    RdtStrokeCap cap;
+    int dash_count;
+};
+// the callback takes ownership of path, including on failure (D4.5.1v4).
+using RenderBorderPathCallback = bool (*)(void* context, RdtPath* path, Color color, const RenderBorderStroke* stroke);
+bool render_border_style_supported(CssEnum style);
+bool render_border_emit_side(Rect rect, const BorderProp* border, size_t side, bool rounded,
+                             RenderBorderPathCallback emit, void* context);
 void render_border(RasterRenderContext* rdcon, ViewBlock* view, Rect rect);
 RdtPath* render_border_create_centered_stroke_path(const BorderProp* border, Rect rect, float width);
 bool corner_has_radius(const Corner* radius);

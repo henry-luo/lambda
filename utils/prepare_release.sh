@@ -22,6 +22,10 @@ mkdir -p ./release
 # Step 1: Copy the runtime asset tree (packages, schemas, stylesheets, fonts).
 cp -r ./lmd ./release/lmd
 
+# Named demo commands retain their checkout paths and local resource trees.
+mkdir -p ./release/test
+cp -R ./test/demo ./release/test/demo
+
 # Step 2c: Copy sample documents for the demo viewer to browse
 # Copy layout sample HTML files from test/html/
 mkdir -p ./release/test/html

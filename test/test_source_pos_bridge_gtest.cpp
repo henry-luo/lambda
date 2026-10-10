@@ -282,6 +282,48 @@ TEST(SourcePosBridgePathTable, MissOnUnknownResultItem) {
     render_map_reset();
 }
 
+TEST(RenderMapOwnership, IndependentInvocationsReusingAResultDoNotWrap) {
+    render_map_destroy();
+    Item result = synthetic_bridge_item(0x4300);
+    Item first_source = synthetic_bridge_item(0x4100);
+    Item next_source = synthetic_bridge_item(0x4200);
+    uint64_t first = render_map_invocation_begin();
+    render_map_record_invocation(first_source, "first", result, ItemNull, -1, first);
+    uint64_t next = render_map_invocation_begin();
+    render_map_record_invocation(next_source, "next", result, ItemNull, -1, next);
+
+    RenderMapLookup lookup = {};
+    ASSERT_TRUE(render_map_reverse_lookup(result, &lookup));
+    EXPECT_EQ(lookup.source_item.item, next_source.item);
+    EXPECT_STREQ(lookup.template_ref, "next");
+    EXPECT_FALSE(render_map_wrapper_lookup(lookup, &lookup));
+    render_map_destroy();
+}
+
+TEST(RenderMapOwnership, NestedInvocationsKeepInnerAndOutwardHandlerOrder) {
+    // distinct models may recursively select the same template reference.
+    const char* refs[][3] = {{"outer", "middle", "inner"}, {"recursive", "recursive", "recursive"}};
+    for (const auto& names : refs) {
+        render_map_destroy();
+        Item result = synthetic_bridge_item(0x4300);
+        Item sources[] = {synthetic_bridge_item(1), synthetic_bridge_item(2), synthetic_bridge_item(3)};
+        uint64_t starts[3];
+        for (int i = 0; i < 3; i++) starts[i] = render_map_invocation_begin();
+        for (int i = 2; i >= 0; i--) {
+            render_map_record_invocation(sources[i], names[i], result, ItemNull, -1, starts[i]);
+        }
+
+        RenderMapLookup lookup = {};
+        ASSERT_TRUE(render_map_reverse_lookup(result, &lookup));
+        for (int i = 2; i >= 0; i--) {
+            EXPECT_EQ(lookup.source_item.item, sources[i].item);
+            EXPECT_STREQ(lookup.template_ref, names[i]);
+            EXPECT_EQ(render_map_wrapper_lookup(lookup, &lookup), i > 0);
+        }
+    }
+    render_map_destroy();
+}
+
 TEST(SourcePosBridgePathIndex, RecordsOnlyItemsOwnedBySourceRoot) {
     source_pos_bridge_reset();
     render_map_reset();
@@ -740,6 +782,45 @@ static Item retransform_recording_body(Context*, Item) {
             synthetic_bridge_item(-child), Item{0}, -1);
     }
     return Item{0};
+}
+
+static bool retransform_records_inner = false;
+static Item retransform_shared_body(Context*, Item) {
+    Item result = synthetic_bridge_item(20);
+    if (retransform_records_inner) {
+        render_map_record(synthetic_bridge_item(3), "inner", result, ItemNull, -1);
+    }
+    return result;
+}
+
+TEST(RenderMapRetransform, WrapperOwnershipRequiresANestedCallInTheCurrentBody) {
+    TemplateEntry entry = {};
+    entry.template_ref = "outer";
+    entry.body_func = (fn_ptr)retransform_shared_body;
+    TemplateRegistry registry = {};
+    registry.first = registry.last = &entry;
+    registry.count = 1;
+    test_template_registry = &registry;
+
+    for (bool nested : {false, true}) {
+        render_map_destroy();
+        retransform_records_inner = nested;
+        Item result = synthetic_bridge_item(20);
+        render_map_record(synthetic_bridge_item(1), "earlier", result, ItemNull, -1);
+        render_map_record(synthetic_bridge_item(2), "outer", synthetic_bridge_item(10), ItemNull, -1);
+        render_map_mark_dirty(synthetic_bridge_item(2), "outer");
+        ASSERT_EQ(render_map_retransform(), 1);
+
+        RenderMapLookup lookup = {};
+        ASSERT_TRUE(render_map_reverse_lookup(result, &lookup));
+        EXPECT_EQ(lookup.source_item.item, synthetic_bridge_item(nested ? 3 : 2).item);
+        EXPECT_EQ(render_map_wrapper_lookup(lookup, &lookup), nested);
+        EXPECT_EQ(lookup.source_item.item, synthetic_bridge_item(2).item);
+        EXPECT_FALSE(render_map_wrapper_lookup(lookup, &lookup));
+    }
+
+    render_map_destroy();
+    test_template_registry = nullptr;
 }
 
 TEST(RenderMapRetransform, EveryDirtyEntryRunsOnceDespiteInserts) {
