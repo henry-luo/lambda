@@ -50,6 +50,7 @@ DomElement* dom_shadow_root(DomNode* node);
 DomElement* dom_shadow_first_matching_slot(DomNode* root, const char* name);
 bool dom_slot_assignment_matches(DomElement* slot, DomNode* child);
 DomElement* dom_slot_assignment_host(DomElement* slot);
+DomElement* dom_flat_tree_parent(DomElement* element);
 
 typedef const char* (*DomDirectionValueResolver)(DomElement*, void*);
 // Shared HTML first-strong scan used by dir=auto layout and :dir() matching.
@@ -1759,7 +1760,8 @@ bool dom_element_append_content(DomElement* element, const CssValue* value,
  * @param arena Arena for allocating result string
  */
 const char* dom_element_get_pseudo_element_content_with_counters(
-    DomElement* element, int pseudo_element, void* counter_context, Arena* arena);
+    DomElement* element, int pseudo_element, void* counter_context, Arena* arena,
+    int* quote_depth = nullptr);
 
 /**
  * Remove a CSS property from an element

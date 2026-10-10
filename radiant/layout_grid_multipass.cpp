@@ -754,7 +754,8 @@ void layout_final_grid_content(LayoutContext* lycon, GridContainerLayout* grid_l
     log_info("FINAL GRID CONTENT LAYOUT START");
     // Layout content within each grid item with their final sizes
     for (int i = 0; i < grid_layout->item_count; i++) {
-        ViewBlock* item = grid_layout->grid_items[i];
+        ViewBlock* item = grid_layout->source_items
+            ? grid_layout->source_items[i] : grid_layout->grid_items[i];
         if (!item) continue;
 
         layout_grid_item_final_content_multipass(lycon, item);
@@ -774,6 +775,13 @@ static void layout_grid_item_final_content_multipass(LayoutContext* lycon, ViewB
              grid_item->x, grid_item->y);
 
     LayoutContextScope context_scope(lycon);
+    LayoutCounterScope counter_scope;
+    if (!counter_scope.enter(lycon, grid_item, grid_item->as_element(), grid_item->display)) {
+        log_error("counter scope: cannot allocate grid item frame");
+        log_leave();
+        return;
+    }
+    layout_materialize_pseudo_content(lycon, grid_item);
 
     float grid_item_percentage_base = grid_item_percentage_base_from_parent(lycon, grid_item);
     layout_reresolve_percentage_box(grid_item, grid_item_percentage_base);

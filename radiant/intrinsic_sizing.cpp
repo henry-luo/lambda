@@ -4694,6 +4694,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
         if (view_block->blk && view_block->block_mut()->counter_set) {
             counter_set(lycon->counter_context, view_block->block()->counter_set);
         }
+        layout_apply_list_item_counter(lycon, view_block, element);
         process_list_item(lycon, view_block, element, element,
                           view_block->display);
     }

@@ -1,0 +1,35 @@
+<!doctype html>
+<style>
+@property --registered { syntax:"*"; inherits:false; initial-value:safe; }
+#consumer { width:var(--depth128,55px); height:12px; background:green; }
+</style>
+<button id="check">check depth</button><button id="verify">verify fallback</button>
+<button id="restored">verify restored width</button><div id="report"></div>
+<div id="target"><div id="consumer"></div></div>
+<script>
+var target=document.getElementById('target'),report=document.getElementById('report');
+function check(name,value){report.setAttribute('data-'+name,String(value));}
+document.getElementById('check').addEventListener('click',function(){
+    var s=target.style,c=getComputedStyle(target);
+    s.setProperty('--depth0','5px');
+    for(var i=1;i<=128;i++)s.setProperty('--depth'+i,'var(--depth'+(i-1)+')');
+    check('boundary',c.getPropertyValue('--depth127')==='5px');
+    check('over-depth',c.getPropertyValue('--depth128')==='');
+    s.setProperty('--proof','var(--depth0) var(--depth128,safe)');
+    check('cached-path',c.getPropertyValue('--proof')==='5px safe');
+    s.setProperty('--registered','var(--depth128)');
+    check('registered-default',c.getPropertyValue('--registered')==='safe');
+    s.setProperty('--lazy','var(--depth0,var(--depth128))');
+    check('lazy-fallback',c.getPropertyValue('--lazy')==='5px');
+    s.setProperty('--depth0','7px');
+    check('live-leaf',c.getPropertyValue('--depth127')==='7px');
+});
+document.getElementById('verify').addEventListener('click',function(){
+    check('consumer-fallback',getComputedStyle(document.getElementById('consumer')).width==='55px');
+    target.style.setProperty('--depth128','11px');
+    check('live-depth-recovery',getComputedStyle(target).getPropertyValue('--depth128')==='11px');
+});
+document.getElementById('restored').addEventListener('click',function(){
+    check('consumer-recovery',getComputedStyle(document.getElementById('consumer')).width==='11px');
+});
+</script>

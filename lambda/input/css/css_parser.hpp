@@ -526,6 +526,8 @@ bool css_resolve_selector_namespaces(CssSelector* selector,
                                      CssNamespaceLookupFn lookup, void* context);
 
 // Value parsing
+// parses component values without a property grammar; the consumer checks the resulting type.
+CssValue* css_parse_component_value_text(const char* text, size_t length, Pool* pool);
 CssValue* css_parse_value(CssTokenStream* stream, CssPropertyCode property_code, Pool* pool);
 CssValue* css_parse_number(CssTokenStream* stream, Pool* pool);
 CssValue* css_parse_percentage(CssTokenStream* stream, Pool* pool);

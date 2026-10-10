@@ -1,0 +1,154 @@
+{
+  "name": "Container conditions use completed cross-stylesheet owner fonts and variables",
+  "html": "test/ui/css_container_owner_values.html",
+  "viewport": {
+    "width": 640,
+    "height": 300
+  },
+  "events": [
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#font-target"
+      },
+      "property": "width",
+      "equals": "20px"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#var-target"
+      },
+      "property": "width",
+      "equals": "20px"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#math-target"
+      },
+      "property": "width",
+      "equals": "20px"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#fallback-target"
+      },
+      "property": "width",
+      "equals": "100px"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#invalid-target"
+      },
+      "property": "width",
+      "equals": "20px"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#name-target"
+      },
+      "property": "width",
+      "equals": "100px"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#font"
+      }
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#font-target"
+      },
+      "property": "width",
+      "equals": "100px"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#var-target"
+      },
+      "property": "width",
+      "equals": "20px"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#variable"
+      }
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#var-target"
+      },
+      "property": "width",
+      "equals": "100px"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#math-target"
+      },
+      "property": "width",
+      "equals": "100px"
+    },
+    {
+      "type": "assert_pixel",
+      "x": 50,
+      "y": 15,
+      "min_r": 0,
+      "max_r": 5,
+      "min_g": 123,
+      "max_g": 133,
+      "min_b": 0,
+      "max_b": 5
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#restore"
+      }
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#font-target"
+      },
+      "property": "width",
+      "equals": "20px"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#var-target"
+      },
+      "property": "width",
+      "equals": "20px"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#math-target"
+      },
+      "property": "width",
+      "equals": "20px"
+    },
+    {
+      "type": "assert_pixel",
+      "x": 50,
+      "y": 15,
+      "min_r": 250,
+      "max_r": 255,
+      "min_g": 250,
+      "max_g": 255,
+      "min_b": 250,
+      "max_b": 255
+    }
+  ]
+}

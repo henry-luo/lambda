@@ -80,13 +80,7 @@ static Corner background_corner_inset_box(const Corner* radius, CssEnum box,
     if (box == CSS_VALUE_CONTENT_BOX && padding) {
         for (int i = 0; i < 4; i++) insets[i] += padding->values[i] * scale;
     }
-    static const uint8_t horizontal_inset[4] = {3, 1, 1, 3};
-    static const uint8_t vertical_inset[4] = {0, 0, 2, 2};
-    for (int i = 0; i < 4; i++) {
-        out.horizontal[i] = max(0.0f, out.horizontal[i] - insets[horizontal_inset[i]]);
-        out.vertical[i] = max(0.0f, out.vertical[i] - insets[vertical_inset[i]]);
-    }
-    return out;
+    return radiant_corner_inset_edges(&out, insets[0], insets[1], insets[2], insets[3]);
 }
 
 void render_background(RasterRenderContext* rdcon, ViewBlock* view, Rect rect) {

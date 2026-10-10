@@ -623,6 +623,15 @@ int collect_grid_items(GridContainerLayout* grid_layout, ViewBlock* container, V
     }
 
     grid_layout->item_count = count;
+    grid_layout->source_items = lam::own_arr((ViewBlock**)scratch_alloc(&grid_layout->lycon->scratch,
+        sizeof(ViewBlock*) * (size_t)count));
+    if (!grid_layout->source_items) {
+        log_error("counter order: cannot retain flattened grid item order");
+        *items = nullptr;
+        grid_layout->item_count = 0;
+        return 0;
+    }
+    memcpy(grid_layout->source_items.get(), grid_layout->grid_items.get(), sizeof(ViewBlock*) * (size_t)count);
     // Sort items by CSS order property (stable sort - preserve DOM order for equal orders)
     // CSS Grid spec: items are placed in order-modified document order
     if (count > 1) {

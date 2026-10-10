@@ -1107,6 +1107,13 @@ void layout_flex_container(LayoutContext* lycon, ViewBlock* container) {
         return;
     }
 
+    flex_layout->source_items = lam::own_arr((View**)scratch_alloc(&flex_layout->lycon->scratch,
+        sizeof(View*) * (size_t)item_count));
+    if (!flex_layout->source_items) {
+        log_error("counter order: cannot retain flattened flex item order");
+        return;
+    }
+    memcpy(flex_layout->source_items.get(), items, sizeof(View*) * (size_t)item_count);
     sort_flex_items_by_order(items, item_count);
     // This must happen before flex basis calculation in create_flex_lines
     apply_constraints_to_flex_items(flex_layout);
@@ -1373,6 +1380,13 @@ void layout_flex_container(LayoutContext* lycon, ViewBlock* container) {
         align_content(flex_layout);
 
         if (flex_layout->align_content == ALIGN_STRETCH && flex_layout->lycon) {
+            ScratchScope counter_scratch(&flex_layout->lycon->scratch);
+            CounterCheckpoint counter_checkpoint;
+            if (!counter_checkpoint.enter(flex_layout->lycon->counter_context,
+                    &flex_layout->lycon->scratch, &counter_scratch.mark)) {
+                log_error("counter trial: cannot isolate stretched flex measurement");
+                return;
+            }
             for (int li = 0; li < line_count; li++) {
                 FlexLineInfo* sline = &flex_layout->lines[li];
                 for (int si = 0; si < sline->item_count; si++) {

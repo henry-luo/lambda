@@ -1,0 +1,40 @@
+<!doctype html>
+<style>
+html,body {margin:0;background:white;}
+#card {position:absolute;left:10px;top:10px;width:300px;padding:10px;border:10px solid black;container:card / inline-size;}
+#queried {width:20px;height:10px;background:red;}
+#units {width:50cqw;height:10px;background:blue;}
+#inner {width:50cqw;container:inner / inline-size;}
+#leaf {width:10px;height:10px;background:red;}
+@container card (width > 200px) {
+    #queried {width:100px;background:green;}
+    @container inner (inline-size >= 100px) {#leaf {width:40px;background:green;}}
+}
+#outer {position:absolute;left:370px;top:10px;width:240px;height:120px;container:outer / size;}
+#inline {width:100px;container-type:inline-size;}
+#axis {width:50cqw;height:50cqh;background:blue;}
+#mixed {width:50cqmax;height:10px;background:green;}
+#font {position:absolute;left:10px;top:180px;width:300px;font-size:20px;container:font / inline-size;}
+#font-child {width:10px;height:10px;background:red;font-size:80px;}
+@container font (width >= 15em) {#font-child {width:70px;background:green;}}
+#fallback {position:absolute;left:10px;top:230px;width:10cqw;height:10cqh;background:blue;}
+#controls {position:absolute;left:10px;top:300px;}
+</style>
+<div id="card"><div id="queried"></div><div id="units"></div><div id="inner"><div id="leaf"></div></div></div>
+<div id="outer"><div id="inline"><div id="axis"></div><div id="mixed"></div></div></div>
+<div id="font"><div id="font-child"></div></div>
+<div id="fallback"></div>
+<div id="controls"><button id="shrink">shrink</button><button id="grow">grow</button><button id="change-font">font</button><button id="check">check</button><span id="report"></span></div>
+<script>
+var card=document.getElementById('card'),report=document.getElementById('report');
+document.getElementById('shrink').addEventListener('click',function(){card.style.width='180px';});
+document.getElementById('grow').addEventListener('click',function(){card.style.width='360px';});
+document.getElementById('change-font').addEventListener('click',function(){document.getElementById('font').style.fontSize='40px';});
+document.getElementById('check').addEventListener('click',function(){
+    var computed=getComputedStyle(card);
+    report.setAttribute('data-name',computed.getPropertyValue('container-name'));
+    report.setAttribute('data-type',computed.getPropertyValue('container-type'));
+    card.style.setProperty('container-type','size inline-size');
+    report.setAttribute('data-invalid',computed.getPropertyValue('container-type')==='inline-size');
+});
+</script>

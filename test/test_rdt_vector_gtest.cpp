@@ -21,10 +21,57 @@
 #include "../lib/image.h"
 #include "../lib/file.h"
 #include "../lib/memtrack.h"
+#include "../lib/tagged.hpp"
+
+TEST(ClipGeometry, EllipticalCornersRetainTheSamePaintAndHitRegion) {
+    Corner radius = {};
+    for (size_t corner = 0; corner < 4; corner++) {
+        radius.horizontal[corner] = 20.0f;
+        radius.vertical[corner] = 10.0f;
+    }
+    Rect rect = {10, 20, 100, 60};
+    const float points[][2] = {{1, 1}, {8, 4}, {99, 1}, {92, 4}, {99, 59}, {92, 56}, {1, 59}, {8, 56}};
+    for (size_t index = 0; index < sizeof(points) / sizeof(*points); index++)
+        EXPECT_EQ(clip_point_in_rounded_rect(10 + points[index][0], 20 + points[index][1], rect, &radius),
+            index % 2 == 1) << index;
+    EXPECT_TRUE(clip_point_in_rounded_rect(60, 50, rect, &radius));
+    EXPECT_FALSE(clip_point_in_rounded_rect(9, 50, rect, &radius));
+    EXPECT_FALSE(clip_point_in_rounded_rect(10, 20, {10, 20, 0, 0}, &radius));
+}
+
+TEST(ClipGeometry, PaintContainmentClipsWithoutAllocatingAScrollPane) {
+    DomElement element = {};
+    element.node_type = DOM_NODE_ELEMENT;
+    element.set_synthetic(true);
+    element.view_type = RDT_VIEW_BLOCK;
+    ViewBlock* block = lam::view_as_block(&element);
+    ASSERT_NE(block, nullptr);
+    BlockProp properties = BLOCK_PROP_DEFAULT;
+    BoundaryProp boundary = {}; BorderProp border = {};
+    properties.contain_paint = true;
+    block->blk = lam::view_prop(&properties);
+    block->bound = lam::view_prop(&boundary);
+    boundary.border = lam::own(&border);
+    block->width = 100; block->height = 60;
+    for (size_t side = 0; side < 4; side++) {
+        border.width.values[side] = 5;
+        border.radius.horizontal[side] = 20;
+        border.radius.vertical[side] = 15;
+    }
+    Bound clip; Corner radius;
+    ASSERT_TRUE(render_clip_overflow_geometry(block, &clip, &radius));
+    EXPECT_FLOAT_EQ(clip.left, 5); EXPECT_FLOAT_EQ(clip.top, 5);
+    EXPECT_FLOAT_EQ(clip.right, 95); EXPECT_FLOAT_EQ(clip.bottom, 55);
+    EXPECT_FLOAT_EQ(radius.top_left, 15); EXPECT_FLOAT_EQ(radius.top_left_y, 10);
+    EXPECT_EQ(block->scroller, nullptr);
+    properties.contain_paint = false;
+    EXPECT_FALSE(render_clip_overflow_geometry(block, &clip, &radius));
+    boundary.border = nullptr;
+    block->blk = nullptr; block->bound = nullptr;
+}
 
 class SvgAnimationLifetimeTest : public ::testing::Test {
 protected:
-    Input input{};
     Pool* authored_pool = nullptr;
     Input* authored_owner = nullptr;
     DomDocument doc{};
@@ -33,6 +80,13 @@ protected:
     DomElement* svg = nullptr;
 
     DomElement* element(const char* tag, DomElement* parent = nullptr, Element* source = nullptr) {
+        // authored SVG identity distinguishes DOM fixtures from layout-only boxes.
+        if (!source) {
+            Input* owner = authored_input();
+            if (!owner) return nullptr;
+            MarkBuilder builder(owner);
+            source = builder.element(tag).final().element;
+        }
         DomElement* node = DomElement::create(&doc, tag, source);
         if (node && parent && !static_cast<DomNode*>(parent)->append_child(node)) return nullptr;
         return node;
@@ -45,7 +99,8 @@ protected:
     }
 
     void SetUp() override {
-        ASSERT_TRUE(doc.init(&input));
+        Input* owner = authored_input(); ASSERT_NE(owner, nullptr);
+        ASSERT_TRUE(doc.init(owner));
         root = element("div"); ASSERT_NE(root, nullptr); doc.root = lam::up(root);
         svg = element("svg", root); ASSERT_NE(svg, nullptr);
         ASSERT_TRUE(svg->set_attribute("width", "200"));
@@ -1916,6 +1971,7 @@ TEST(CssVariableSubstitutionTest, DocumentLimitsBoundBytesTokensAndAuthoredText)
     doc.services.cached_css_engine = engine;
     EXPECT_EQ(engine->limits.max_substitution_bytes, CSS_SUBSTITUTION_DEFAULT_MAX_BYTES);
     EXPECT_EQ(engine->limits.max_substitution_tokens, CSS_SUBSTITUTION_DEFAULT_MAX_TOKENS);
+    EXPECT_EQ(engine->limits.max_substitution_depth, CSS_SUBSTITUTION_DEFAULT_MAX_DEPTH);
     struct Sample {const char* text; size_t bytes, tokens; bool valid;} samples[] = {
         {"abcdefghijklmnop", 16, 4, true}, {"abcdefghijklmnopq", 16, 4, false},
         {"éééééééé", 16, 4, true}, {"ééééééééé", 16, 4, false},
@@ -1957,6 +2013,88 @@ TEST(CssVariableSubstitutionTest, DocumentLimitsBoundBytesTokensAndAuthoredText)
     css_engine_set_substitution_limits(engine, 0, 0);
     EXPECT_EQ(engine->limits.max_substitution_bytes, CSS_SUBSTITUTION_DEFAULT_MAX_BYTES);
     EXPECT_EQ(engine->limits.max_substitution_tokens, CSS_SUBSTITUTION_DEFAULT_MAX_TOKENS);
+    css_engine_set_substitution_depth_limit(engine, 4);
+    ASSERT_EQ(dom_element_apply_inline_style(node,
+        "--a:5px;--b:var(--a);--c:var(--b);--d:var(--c);--e:var(--d)"), 5);
+    const CssValue* depth_value = css_compute_element_custom_property(doc.document_pool, node, "--d");
+    ASSERT_NE(depth_value, nullptr);
+    ASSERT_EQ(depth_value->type, CSS_VALUE_TYPE_LENGTH);
+    EXPECT_EQ(depth_value->data.length.value, 5.0);
+    EXPECT_EQ(css_compute_element_custom_property(doc.document_pool, node, "--e"), nullptr);
+    css_engine_set_substitution_depth_limit(engine, 0);
+    EXPECT_EQ(engine->limits.max_substitution_depth, CSS_SUBSTITUTION_DEFAULT_MAX_DEPTH);
+    EXPECT_NE(css_compute_element_custom_property(doc.document_pool, node, "--e"), nullptr);
+}
+
+TEST(CssVariableSubstitutionTest, DependencyDepthIncludesSharedCachePathsAndKeepsFallbackLazy) {
+    Pool* pool = pool_create();
+    ASSERT_NE(pool, nullptr);
+    struct Cleanup {Pool* pool; ~Cleanup() {pool_destroy(pool);}} cleanup = {pool};
+    struct Lookup {CssDeclaration* nodes[CSS_SUBSTITUTION_DEFAULT_MAX_DEPTH + 1];} lookup = {};
+    for (int index = 0; index <= CSS_SUBSTITUTION_DEFAULT_MAX_DEPTH; index++) {
+        char name[32], text[64];
+        snprintf(name, sizeof(name), "--depth%d", index);
+        if (index) snprintf(text, sizeof(text), "var(--depth%d)", index - 1);
+        else str_copy(text, sizeof(text), "5px", 3);
+        lookup.nodes[index] = css_parse_property_declaration(name, strlen(name), text, strlen(text), pool);
+        ASSERT_NE(lookup.nodes[index], nullptr);
+    }
+    auto lookup_value = [](void* data, DomElement*, const char* name,
+        DomElement** owner) -> const CssValue* {
+        *owner = nullptr;
+        Lookup* lookup = (Lookup*)data;
+        for (CssDeclaration* node : lookup->nodes)
+            if (strcmp(node->property_name, name) == 0) return node->value;
+        return nullptr;
+    };
+    struct Sample {const char* source; const char* expected;} samples[] = {
+        {"var(--depth127)", "5px"},
+        {"var(--depth128)", nullptr},
+        {"var(--depth128,9px)", "9px"},
+        {"var(--depth0) var(--depth128,9px)", "5px 9px"},
+        {"var(--depth0,var(--depth128))", "5px"}
+    };
+    for (bool owned : {false, true}) {
+        if (owned) {
+            for (CssDeclaration* node : lookup.nodes) {
+                node->value = css_value_create_token_sequence(pool, node->value,
+                    strview_init(node->value_text, node->value_text_len));
+                ASSERT_NE(node->value, nullptr);
+            }
+        }
+        for (const Sample& sample : samples) {
+            CssDeclaration* declaration = css_parse_property_declaration("--result", 8,
+                sample.source, strlen(sample.source), pool);
+            ASSERT_NE(declaration, nullptr);
+            const CssValue* value = css_resolve_var_value(pool, declaration->value, lookup_value, &lookup);
+            if (!sample.expected) {EXPECT_EQ(value, nullptr); continue;}
+            ASSERT_NE(value, nullptr) << sample.source;
+            CssFormatter* formatter = css_formatter_create(pool, CSS_FORMAT_COMPACT);
+            ASSERT_NE(formatter, nullptr);
+            css_format_value(formatter, (CssValue*)value);
+            EXPECT_STREQ(stringbuf_to_string(formatter->output)->chars, sample.expected) << sample.source;
+        }
+    }
+}
+
+TEST_F(SvgAnimationLifetimeTest, CustomPropertyInheritanceDoesNotConsumeDependencyDepth) {
+    ASSERT_TRUE(root->set_attribute("style", "--base:7px;--alias:var(--base)"));
+    DomElement* descendant = root;
+    for (int index = 0; index < 600; index++) {
+        descendant = element("div", descendant);
+        ASSERT_NE(descendant, nullptr);
+    }
+    ASSERT_TRUE(descendant->set_attribute("style", "--base:99px"));
+    Pool* scratch = pool_create();
+    ASSERT_NE(scratch, nullptr);
+    struct Cleanup {Pool* pool; ~Cleanup() {pool_destroy(pool);}} cleanup = {scratch};
+    const CssValue* value = css_compute_element_custom_property(scratch, descendant, "--alias");
+    ASSERT_NE(value, nullptr);
+    ASSERT_EQ(value->type, CSS_VALUE_TYPE_LENGTH);
+    EXPECT_EQ(value->data.length.value, 7.0);
+    const CssValue* declaration = css_parse_property_declaration("width", 5,
+        "var(--alias)", 12, scratch)->value;
+    EXPECT_TRUE(css_value_depends_on_custom_property(scratch, descendant, declaration, root, "--base"));
 }
 
 TEST(CssVariableSubstitutionTest, RepeatedEmptyDependenciesAreMemoizedWithinEachCall) {
@@ -2381,6 +2519,46 @@ TEST_F(SvgAnimationLifetimeTest, TextHitGeometryRefreshesInheritedStyleAndPositi
     EXPECT_FLOAT_EQ(original.left, initial.left);
     EXPECT_FLOAT_EQ(original.right, initial.right);
     rdt_path_free(retained);
+    ui.font_ctx = nullptr;
+}
+
+TEST_F(SvgAnimationLifetimeTest, TextHitGeometrySkipsLayoutOnlyAncestors) {
+    struct MetadataOwner {~MetadataOwner() {css_property_system_cleanup();}} metadata;
+    ASSERT_TRUE(css_property_system_init(doc.document_pool));
+    struct FontOwner {
+        FontContext* fonts = font_context_create(nullptr);
+        ~FontOwner() {font_context_destroy(fonts);}
+    } fonts;
+    ASSERT_NE(fonts.fonts, nullptr);
+    Input* owner = authored_input(); ASSERT_NE(owner, nullptr);
+    doc.input = lam::up(owner);
+    MarkBuilder builder(owner);
+    Item source = builder.element("svg").attr("xmlns", "http://www.w3.org/2000/svg")
+        .attr("width", "200").attr("height", "200")
+        .child(builder.element("text").attr("x", "10").attr("y", "60").text("W").final()).final();
+    svg = build_dom_tree_from_element(source.element, &doc, nullptr); ASSERT_NE(svg, nullptr);
+    doc.root = lam::up(svg);
+    ui.font_ctx = lam::up(fonts.fonts);
+    root = DomElement::create(&doc, "::anon-block", nullptr); ASSERT_NE(root, nullptr);
+    ASSERT_TRUE(root->is_synthetic());
+    ASSERT_EQ(root->elmt.type, nullptr);
+    DomElement* text = svg->first_child->as_element(); ASSERT_NE(text, nullptr);
+    SvgLengthContext lengths = {200.0f, 200.0f, 20.0f, 10.0f};
+    RdtPath* path = svg_text_geometry_path(text, &lengths, fonts.fonts);
+    ASSERT_NE(path, nullptr);
+    rdt_path_free(path);
+    // layout wrappers do not invalidate the authored SVG style snapshot.
+    root->first_child = lam::own(static_cast<DomNode*>(svg));
+    root->last_child = lam::up(static_cast<DomNode*>(svg));
+    svg->parent = lam::up(static_cast<DomNode*>(root));
+    doc.root = lam::up(root);
+    lengths.viewport_width = 201.0f;
+    path = svg_text_geometry_path(text, &lengths, fonts.fonts);
+    ASSERT_NE(path, nullptr);
+    Bound bounds = {};
+    EXPECT_TRUE(rdt_path_get_bounds(path, &bounds.left, &bounds.top, &bounds.right, &bounds.bottom));
+    EXPECT_GT(bounds.right - bounds.left, 0.0f);
+    rdt_path_free(path);
     ui.font_ctx = nullptr;
 }
 

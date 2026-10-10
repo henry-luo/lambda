@@ -33,6 +33,8 @@ typedef struct PdfPaintLoweringState {
     int skipped_transform_depth;
     int active_effect_depth;
     int passthrough_effect_depth;
+    int active_clip_depth;
+    int skipped_clip_depth;
     RdtMatrix current_transform;
     RdtMatrix transform_stack[PDF_PAINT_TRANSFORM_STACK_MAX];
     float current_opacity;
@@ -923,7 +925,10 @@ static void pdf_lower_paint_list(PdfRenderContext* ctx, PaintList* commands) {
         paint_list_has_op_flags(&paint, PAINT_OP_FLAG_EFFECT_STACK) ||
         state->active_effect_depth > 0 ||
         state->passthrough_effect_depth > 0;
-    if (!streaming_transform && !streaming_effect &&
+    // descendant clips span batches, just like transform and effect scopes.
+    bool streaming_clip = paint_list_has_op_flags(&paint, PAINT_OP_FLAG_CLIP_STACK) ||
+        state->active_clip_depth > 0 || state->skipped_clip_depth > 0;
+    if (!streaming_transform && !streaming_effect && !streaming_clip &&
         !paint_ir_validate_or_log(&paint, "pdf_lower_paint_list")) {
         paint_list_clear(&paint);
         return;
@@ -931,8 +936,6 @@ static void pdf_lower_paint_list(PdfRenderContext* ctx, PaintList* commands) {
     pdf_record_page_backdrop_paint_list(ctx, &paint);
     const RenderExportTargetCaps* caps =
         render_export_target_get_caps(RENDER_EXPORT_TARGET_PDF);
-    int active_clip_depth = 0;
-    int skipped_clip_depth = 0;
     auto handle_transform_stack = [&](PaintCmd* cmd) -> bool {
         if (!paint_op_has_flags(cmd->op, PAINT_OP_FLAG_TRANSFORM_STACK)) return false;
         if (paint_op_has_flags(cmd->op, PAINT_OP_FLAG_STACK_PUSH)) {
@@ -1054,33 +1057,33 @@ static void pdf_lower_paint_list(PdfRenderContext* ctx, PaintList* commands) {
         auto handle_clip_stack = [&](PaintCmd* cmd) -> bool {
             if (!paint_op_has_flags(cmd->op, PAINT_OP_FLAG_CLIP_STACK)) return false;
             if (paint_op_has_flags(cmd->op, PAINT_OP_FLAG_STACK_PUSH)) {
-                if (skipped_clip_depth > 0) {
-                    skipped_clip_depth++;
+                if (state->skipped_clip_depth > 0) {
+                    state->skipped_clip_depth++;
                     return true;
                 }
                 if (!caps || !caps->clips) {
-                    skipped_clip_depth++;
+                    state->skipped_clip_depth++;
                     return true;
                 }
                 PaintPushClip* p = &cmd->push_clip;
                 if (!resolve_command_transform(p->has_transform, &p->transform)) {
-                    skipped_clip_depth++;
+                    state->skipped_clip_depth++;
                     return true;
                 }
                 if (pdf_push_clip_path(ctx, p->clip_path,
                                        effective_transform, p->rule)) {
-                    active_clip_depth++;
+                    state->active_clip_depth++;
                 } else {
-                    skipped_clip_depth++;
+                    state->skipped_clip_depth++;
                 }
                 return true;
             }
             if (paint_op_has_flags(cmd->op, PAINT_OP_FLAG_STACK_POP)) {
-                if (skipped_clip_depth > 0) {
-                    skipped_clip_depth--;
-                } else if (active_clip_depth > 0) {
+                if (state->skipped_clip_depth > 0) {
+                    state->skipped_clip_depth--;
+                } else if (state->active_clip_depth > 0) {
                     HPDF_Page_GRestore(ctx->current_page);
-                    active_clip_depth--;
+                    state->active_clip_depth--;
                 }
                 return true;
             }
@@ -1296,22 +1299,8 @@ static bool pdf_paint_fill_radial_gradient(PdfRenderContext* ctx,
     return owns_payload;
 }
 
-static Corner pdf_corner_inset(const Corner* radius, float inset_x, float inset_y) {
-    return radiant_corner_inset(radius, inset_x, inset_y);
-}
-
 static bool pdf_has_border_radius(const BorderProp* border) {
     return border && radiant_corner_has_radius(&border->radius);
-}
-
-static bool pdf_border_is_uniform_solid(const BorderProp* border) {
-    if (!border || border->width.values[0] <= 0.0f || border->colors[0].a == 0) return false;
-    for (int i = 0; i < 4; i++) {
-        if (border->width.values[i] != border->width.values[0] ||
-            border->styles[i] != CSS_VALUE_SOLID ||
-            border->colors[i].c != border->colors[0].c) return false;
-    }
-    return true;
 }
 
 // Render text view
@@ -1484,22 +1473,10 @@ static void pdf_cb_render_bound(RenderContext* vctx, ViewBlock* view, float abs_
     // Borders
     if (view->boundary()->border) {
         BorderProp* border = view->boundary()->border;
-        if (pdf_has_border_radius(border) && pdf_border_is_uniform_solid(border) &&
-            width > border->width.top && height > border->width.top) {
-            float border_width = border->width.top;
-            float half_width = border_width * 0.5f;
-            Corner border_radius = border->radius;
-            constrain_corner_radii(&border_radius, width, height);
-            Corner stroke_radius = pdf_corner_inset(&border_radius, half_width, half_width);
-            Rect stroke_rect = {abs_x + half_width, abs_y + half_width,
-                                width - border_width, height - border_width};
-            RdtPath* stroke_path = render_path_create_rounded_rect(stroke_rect, &stroke_radius);
-            if (stroke_path) {
-                bool owns_path =
-                    pdf_paint_stroke_path(ctx, stroke_path, border->top_color, border_width);
-                if (!owns_path) rdt_path_free(stroke_path);
-                return;
-            }
+        if (pdf_has_border_radius(border) && render_paint_boundary_emit_solid_border(
+                pdf_active_paint_list(ctx), border, {abs_x, abs_y, width, height})) {
+            pdf_lower_paint_list(ctx);
+            return;
         }
         if (border->width.top > 0 && border->top_color.a > 0)
             pdf_paint_fill_rect(ctx, abs_x, abs_y, width, (float)border->width.top, border->top_color);
@@ -1737,10 +1714,10 @@ static void pdf_cb_end_transform(RenderContext* vctx) {
 }
 
 static bool pdf_cb_begin_clip(RenderContext* vctx, ViewElement* element,
-                              float abs_x, float abs_y) {
+                              float abs_x, float abs_y, RenderClipKind kind) {
     PdfRenderContext* ctx = (PdfRenderContext*)vctx;
-    if (!ctx || !render_clip_push_vector_css(pdf_active_paint_list(ctx), element,
-            abs_x, abs_y)) return false;
+    if (!ctx || !render_clip_push_vector(pdf_active_paint_list(ctx), element,
+            abs_x, abs_y, kind)) return false;
     pdf_lower_paint_list(ctx);
     return true;
 }
@@ -1987,7 +1964,8 @@ static bool pdf_secondary_page(ViewTree* tree, const ViewPageBox* page,
         pdf_record_fragment_semantics(ctx, tree->model->document, child);
     pdf_lower_paint_list(ctx);
     return ctx->paint_state.unsupported_count == 0 && ctx->paint_state.active_transform_depth == 0 &&
-        ctx->paint_state.active_effect_depth == 0;
+        ctx->paint_state.active_effect_depth == 0 && ctx->paint_state.active_clip_depth == 0 &&
+        ctx->paint_state.skipped_clip_depth == 0;
 }
 
 bool render_secondary_view_to_pdf(ViewTree* tree, const char* filename,

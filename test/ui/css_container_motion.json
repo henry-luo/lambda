@@ -1,0 +1,19 @@
+{
+  "name":"Container stabilization starts transitions only from committed styles",
+  "html":"test/ui/css_container_motion.html",
+  "input_turn_ms":0,
+  "viewport":{"width":400,"height":180},
+  "events":[
+    {"type":"assert_style","target":{"selector":"#target"},"property":"width","equals":"100px","animated":true,"tolerance":0.1},
+    {"type":"click","target":{"selector":"#shrink"}},
+    {"type":"advance_time","ms":500,"steps":10},
+    {"type":"assert_style","target":{"selector":"#target"},"property":"width","equals":"80px","animated":true,"tolerance":1},
+    {"type":"advance_time","ms":1600,"steps":16},
+    {"type":"assert_style","target":{"selector":"#target"},"property":"width","equals":"20px","animated":true,"tolerance":0.1},
+    {"type":"click","target":{"selector":"#grow"}},
+    {"type":"advance_time","ms":1000,"steps":10},
+    {"type":"assert_style","target":{"selector":"#target"},"property":"width","equals":"60px","animated":true,"tolerance":1},
+    {"type":"advance_time","ms":1100,"steps":11},
+    {"type":"assert_style","target":{"selector":"#target"},"property":"width","equals":"100px","animated":true,"tolerance":0.1}
+  ]
+}

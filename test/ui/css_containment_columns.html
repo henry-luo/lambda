@@ -1,0 +1,21 @@
+<!doctype html>
+<style>
+html,body{margin:0;background:white}
+article{column-count:3;column-gap:0;width:300px;border:1px solid black;margin-bottom:4px}
+article>div{contain:layout;background:lime}
+h3{font:18.72px/22px serif;margin:18.72px 0;column-span:all}
+#paint>div{contain:paint}#content>div{contain:content}
+#fixed>div{height:70px}#padded>div{padding-bottom:5px}
+body.single article{column-count:1}
+</style>
+<article id="layout"><div><h3>one line</h3></div></article>
+<article id="paint"><div><h3>one line</h3></div></article>
+<article id="content"><div><h3>one line</h3></div></article>
+<article id="fixed"><div><h3>one line</h3></div></article>
+<article id="padded"><div><h3>one line</h3></div></article>
+<button id="toggle">toggle columns</button>
+<script>
+document.getElementById('toggle').addEventListener('click',function(){
+  document.body.classList.toggle('single');
+});
+</script>

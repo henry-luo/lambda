@@ -16,5 +16,8 @@
   "svg_font_shorthands",
   "svg_text_resources",
   "svg_filter_coordinates",
-  "svg_smil_export_initial"
+  "svg_smil_export_initial",
+  "css_container_size",
+  "css_containment_boxes",
+  "css_containment_stacking"
 ]

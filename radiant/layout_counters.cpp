@@ -6,6 +6,7 @@
 #include "../lib/log.h"
 #include "../lib/memtrack.h"
 #include "../lib/str.h"
+#include "../lib/tagged.hpp"
 #include "../lambda/input/css/css_value.hpp"
 #include <stdio.h>
 #include <stdlib.h>
@@ -38,6 +39,7 @@ bool CounterContext::init(Arena* backing_arena) {
     current_scope = nullptr;
     scope_stack = nullptr;
     frame_stack = nullptr;
+    quote_depth = 0;
     void* stack_mem = mem_alloc(sizeof(lam::ArrayList<CounterScope*>), MEM_CAT_LAYOUT);
     if (!stack_mem) return false;
     scope_stack = lam::own(new (stack_mem) lam::ArrayList<CounterScope*>(MEM_CAT_LAYOUT, 16)); // NEW_DELETE_OK: single audited construction of scope_stack inside CounterContext::init.
@@ -86,37 +88,158 @@ void CounterContext::destroy() {
 
 }
 
-void counter_push_scope(CounterContext* ctx, bool pseudo_scope) {
-    if (!ctx) return;
-    ctx->push_scope(pseudo_scope);
+bool counter_push_scope(CounterContext* ctx, bool pseudo_scope) {
+    return ctx && ctx->push_scope(pseudo_scope);
 }
 
-void CounterContext::push_scope(bool pseudo_scope) {
+bool CounterContext::push_scope(bool pseudo_scope, bool style_boundary) {
     // Allocate new scope
     CounterScope* scope = (CounterScope*)arena_alloc(arena, sizeof(CounterScope));
-    if (!scope) return;
+    if (!scope) return false;
     // Create hash map for counters in this scope
     scope->counters = lam::own(CounterMap::create(16));
+    if (!scope->counters) return false;
     scope->parent = current_scope;
-    scope->owner_depth = current_scope && frame_stack ? (int)frame_stack->size() : -1;
+    scope->owner_depth = current_scope && frame_stack ? (int)frame_stack->size() : -1; // INT_CAST_OK: counter nesting depth, not geometry.
     scope->pseudo_scope = pseudo_scope;
     scope->reset_replaces_sibling = false;
     scope->pseudo_reset_for_descendants = false;
+    scope->style_boundary = style_boundary;
     // Keep all allocated scopes for destruction; frame_stack owns nesting boundaries.
-    if (scope_stack) {
-        scope_stack->append(scope);
+    if (!scope_stack || !scope_stack->append(scope)) {
+        CounterMap::destroy(scope->counters);
+        return false;
     }
 
     if (!current_scope) {
         current_scope = lam::up(scope);
-        return;
+        return true;
     }
 
     if (frame_stack) {
         CounterFrame frame = {lam::up(current_scope), lam::up(scope)};
-        frame_stack->append(frame);
+        if (!frame_stack->append(frame)) return false;
     }
     current_scope = lam::up(scope);
+    return true;
+}
+
+bool CounterStyleScope::enter(CounterContext* counters, bool enabled) {
+    if (!enabled || !counters) return true;
+    if (!counters->push_scope(false, true)) return false;
+    context = counters;
+    saved_quote_depth = counters->quote_depth;
+    return true;
+}
+
+void CounterStyleScope::close() {
+    if (!context) return;
+    context->quote_depth = saved_quote_depth;
+    context->pop_scope();
+    context = nullptr;
+}
+
+bool layout_has_style_containment(const ViewSpan* span) {
+    const BlockProp* block = span && span->blk ? span->block() : nullptr;
+    return block && ((block->computed_containment & CSS_CONTAIN_STYLE) ||
+        block->container_axes || block->content_visibility_hidden);
+}
+
+bool LayoutCounterScope::enter(LayoutContext* lycon, ViewSpan* span,
+                               DomElement* element, DisplayValue display) {
+    if (!lycon || !lycon->counter_context) return true;
+    bool before = element && element->tag_name && strcmp(element->tag_name, "::before") == 0;
+    bool after = element && element->tag_name && strcmp(element->tag_name, "::after") == 0;
+    if (!counter_push_scope(lycon->counter_context, before || after)) return false;
+    context = lycon->counter_context;
+    ViewBlock* block = lam::unsafe_view_block_api_span(span);
+    bool list_item = display.outer == CSS_VALUE_LIST_ITEM || display.list_item;
+    if (before || after) {
+        DomElement* origin = element->parent && element->parent->is_element()
+            ? element->parent->as_element() : nullptr;
+        if (origin) apply_pseudo_counter_ops(lycon,
+            origin->pseudo_style(before ? PSEUDO_STYLE_BEFORE : PSEUDO_STYLE_AFTER));
+    } else {
+        setup_list_container_counters(lycon, block, element);
+        if (span->blk) {
+            if (span->block()->counter_reset) {
+                counter_reset(context, span->block()->counter_reset);
+                compute_reversed_counter_initial(lycon, element);
+            }
+            if (span->block()->counter_increment) counter_increment(context, span->block()->counter_increment);
+            if (span->block()->counter_set) counter_set(context, span->block()->counter_set);
+        }
+        if (list_item) layout_apply_list_item_counter(lycon, block, element);
+    }
+    // the element's own operations precede the boundary; generated children follow it.
+    if (!style.enter(context, layout_has_style_containment(span))) { close(); return false; }
+    if (before || after) layout_update_pseudo_content_with_counters(lycon, element, false);
+    else if (list_item) {
+        process_list_item(lycon, block, element, element, display);
+        if (!span->bound) span->ensure_boundary(lycon);
+    }
+    return true;
+}
+
+void LayoutCounterScope::close() {
+    if (!context) return;
+    style.close();
+    counter_pop_scope_propagate(context, true);
+    context = nullptr;
+}
+
+struct CounterCheckpointState {
+    lam::Up<CounterScope> scope;
+    lam::Own<HashMap> original, copy;
+    bool reset_replaces_sibling, pseudo_reset_for_descendants;
+};
+
+bool CounterCheckpoint::enter(CounterContext* counters, ScratchArena* scratch, ScratchMark* mark) {
+    if (!counters) return true;
+    for (CounterScope* scope = counters->current_scope; scope; scope = scope->parent) count++;
+    size_t bytes = 0;
+    if (!math_checked_mul(count, sizeof(CounterCheckpointState), &bytes)) return false;
+    states = lam::up((CounterCheckpointState*)scratch_scope_calloc(scratch, mark, bytes));
+    if (!states && count) return false;
+    size_t index = 0;
+    for (CounterScope* scope = counters->current_scope; scope; scope = scope->parent, index++) {
+        CounterCheckpointState& state = states[index];
+        state.scope = lam::up(scope);
+        state.copy = lam::own(CounterMap::create(CounterMap::count(scope->counters)));
+        size_t cursor = 0; CounterValue* value = nullptr;
+        while (state.copy && CounterMap::next(scope->counters, &cursor, &value)) {
+            CounterMap::set(state.copy, *value);
+            if (CounterMap::oom(state.copy)) break;
+        }
+        if (!state.copy || CounterMap::oom(state.copy)) {
+            for (size_t i = 0; i <= index; i++) CounterMap::destroy(states[i].copy);
+            return false;
+        }
+    }
+    context = lam::up(counters); current = counters->current_scope;
+    frames = counters->frame_stack->size(); quote_depth = counters->quote_depth;
+    for (size_t i = 0; i < count; i++) {
+        CounterCheckpointState& state = states[i];
+        state.original = state.scope->counters;
+        state.scope->counters = state.copy; state.copy = nullptr;
+        state.reset_replaces_sibling = state.scope->reset_replaces_sibling;
+        state.pseudo_reset_for_descendants = state.scope->pseudo_reset_for_descendants;
+    }
+    return true;
+}
+
+void CounterCheckpoint::close() {
+    if (!context) return;
+    for (size_t i = 0; i < count; i++) {
+        CounterCheckpointState& state = states[i];
+        CounterMap::destroy(state.scope->counters);
+        state.scope->counters = state.original; state.original = nullptr;
+        state.scope->reset_replaces_sibling = state.reset_replaces_sibling;
+        state.scope->pseudo_reset_for_descendants = state.pseudo_reset_for_descendants;
+    }
+    while (context->frame_stack->size() > frames) context->frame_stack->remove(context->frame_stack->size() - 1);
+    context->current_scope = current; context->quote_depth = quote_depth;
+    context = nullptr;
 }
 
 void CounterContext::pop_scope() {
@@ -269,22 +392,23 @@ static void parse_counter_spec(const char* spec,
 }
 // Counter Operations
 
-static CounterValue* counter_find(CounterScope* scope, CounterValue* search_key) {
+static CounterScope* counter_find_scope(CounterScope* scope,
+        CounterValue* search_key, CounterScope** creation_scope = nullptr) {
     while (scope) {
-        CounterValue* counter = CounterMap::get(scope->counters, *search_key);
-        if (counter) return counter;
+        if (CounterMap::get(scope->counters, *search_key)) return scope;
+        if (creation_scope && scope->style_boundary) {
+            *creation_scope = scope;
+            return nullptr;
+        }
         scope = scope->parent;
     }
     return nullptr;
 }
 
-static CounterScope* counter_find_scope(CounterScope* scope,
-                                        CounterValue* search_key) {
-    while (scope) {
-        if (CounterMap::get(scope->counters, *search_key)) return scope;
-        scope = scope->parent;
-    }
-    return nullptr;
+static CounterValue* counter_find(CounterScope* scope, CounterValue* search_key,
+                                  CounterScope** creation_scope = nullptr) {
+    CounterScope* owner = counter_find_scope(scope, search_key, creation_scope);
+    return owner ? CounterMap::get(owner->counters, *search_key) : nullptr;
 }
 
 static void counter_create(CounterScope* scope, char* name, int value,
@@ -366,10 +490,11 @@ void counter_increment(CounterContext* ctx, const char* counter_spec) {
         // CSS Lists 3 §4.2/§4.4.1: use the inherited counter instance when the
         // element has not created a nearer reset scope.
         CounterValue search_key = {lam::up((const char*)parsed.names[i]), 0, false, false};
-        CounterValue* cv = counter_find(ctx->current_scope, &search_key);
+        CounterScope* creation_scope = ctx->current_scope;
+        CounterValue* cv = counter_find(ctx->current_scope, &search_key, &creation_scope);
 
         if (!cv) {
-            counter_create(ctx->current_scope, parsed.names[i], increment, false);
+            counter_create(creation_scope, parsed.names[i], increment, false);
         } else {
             // CSS counter ranges are bounded; continued page sequences must not overflow signed integers.
             int64_t value = (int64_t)cv->value + increment;
@@ -385,14 +510,15 @@ static void counter_set_parsed(CounterContext* ctx, ParsedCounterSpec parsed) {
         // a new counter is created with the specified value.
         // Unlike counter-reset, this does NOT create a new scope.
         CounterValue search_key = {lam::up((const char*)parsed.names[i]), 0, false, false};
-        CounterValue* cv = counter_find(ctx->current_scope, &search_key);
+        CounterScope* creation_scope = ctx->current_scope;
+        CounterValue* cv = counter_find(ctx->current_scope, &search_key, &creation_scope);
 
         if (cv) {
             // set existing counter to specified value
             cv->value = parsed.values[i];
         } else {
             // create new counter in current scope with specified value
-            counter_create(ctx->current_scope, parsed.names[i], parsed.values[i], false);
+            counter_create(creation_scope, parsed.names[i], parsed.values[i], false);
         }
     }
 }
