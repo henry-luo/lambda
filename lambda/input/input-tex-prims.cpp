@@ -307,6 +307,12 @@ bool echo_finish(Engine* e, const EchoMark& m) {
     return true;
 }
 
+void echo_definition(Engine* e, const EchoMark& m) {
+    // document analysis retains declarations; math paints only their expansions.
+    if (e->opts.math_mode) echo_cancel(e, m);
+    else echo_finish(e, m);
+}
+
 // ======================================================================
 // groups, braces and math shifts in the main loop
 // ======================================================================
@@ -1033,7 +1039,7 @@ void prefixed_command(Engine* e, Token t, Meaning m, uint8_t a) {
     EchoMark em = echo_begin(e, t);
     bool echo_def = false;
     prefixed_command_inner(e, t, m, a, &echo_def);
-    if (echo_def) echo_finish(e, em);
+    if (echo_def) echo_definition(e, em);
     else echo_cancel(e, em);
 }
 

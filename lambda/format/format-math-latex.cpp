@@ -497,17 +497,22 @@ static void format_command_with_optional_bracket(StringBuf* sb,
     if (!cmd.isNull() && cmd.isString()) stringbuf_append_str(sb, cmd.asString()->chars);
     if (!option.isNull()) {
         stringbuf_append_str(sb, "[");
-        format_item(sb, option, depth + 1);
+        if (option.isElement() && strcmp(option.asElement().tagName(), "brack_group") == 0)
+            format_children(sb, option.asElement(), depth + 1, " ");
+        else format_item(sb, option, depth + 1);
         stringbuf_append_str(sb, "]");
     }
     stringbuf_append_str(sb, "{");
-    if (!content.isNull()) format_item(sb, content, depth + 1);
+    if (content.isElement() && strcmp(content.asElement().tagName(), "group") == 0)
+        format_children(sb, content.asElement(), depth + 1, " ");
+    else if (!content.isNull()) format_item(sb, content, depth + 1);
     stringbuf_append_str(sb, "}");
 }
 
 // Format `extensible_arrow`: \xrightarrow[below]{above}
 static void format_extensible_arrow(StringBuf* sb, const ElementReader& elem, int depth) {
-    format_command_with_optional_bracket(sb, elem, depth, "below", "above");
+    bool direct = strcmp(elem.tagName(), "extended_arrow") == 0;
+    format_command_with_optional_bracket(sb, elem, depth, direct ? "lower" : "below", direct ? "upper" : "above");
 }
 
 // Format `sized_delimiter`: \big(, \Big|, etc.
@@ -640,6 +645,8 @@ enum MathLatexSlot {
     MATH_LATEX_SPACE_COMMAND,
     MATH_LATEX_OVERUNDER_COMMAND,
     MATH_LATEX_EXTENSIBLE_ARROW,
+    MATH_LATEX_IMAGE_COMMAND,
+    MATH_LATEX_ROW_SEP,
     MATH_LATEX_SIZED_DELIMITER,
     MATH_LATEX_COLOR_COMMAND,
     MATH_LATEX_BOX_COMMAND,
@@ -684,6 +691,9 @@ static const MathTagDispatch MATH_LATEX_TAGS[] = {
     {"skip_command", MATH_LATEX_SPACE_COMMAND},
     {"overunder_command", MATH_LATEX_OVERUNDER_COMMAND},
     {"extensible_arrow", MATH_LATEX_EXTENSIBLE_ARROW},
+    {"extended_arrow", MATH_LATEX_EXTENSIBLE_ARROW},
+    {"image_command", MATH_LATEX_IMAGE_COMMAND},
+    {"row_sep", MATH_LATEX_ROW_SEP},
     {"sized_delimiter", MATH_LATEX_SIZED_DELIMITER},
     {"color_command", MATH_LATEX_COLOR_COMMAND},
     {"box_command", MATH_LATEX_BOX_COMMAND},
@@ -738,6 +748,15 @@ static void format_element_impl(StringBuf* sb, const ElementReader& elem, int de
     case MATH_LATEX_SPACE_COMMAND: return format_space_command(sb, elem);
     case MATH_LATEX_OVERUNDER_COMMAND: return format_overunder_command(sb, elem, depth);
     case MATH_LATEX_EXTENSIBLE_ARROW: return format_extensible_arrow(sb, elem, depth);
+    case MATH_LATEX_IMAGE_COMMAND: return format_command_with_optional_bracket(sb, elem, depth, "options", "src");
+    case MATH_LATEX_ROW_SEP:
+        stringbuf_append_str(sb, " \\\\");
+        if (!elem.get_attr("gap").isNull()) {
+            stringbuf_append_str(sb, "[");
+            format_item(sb, elem.get_attr("gap"), depth + 1);
+            stringbuf_append_str(sb, "]");
+        }
+        return;
     case MATH_LATEX_SIZED_DELIMITER: return format_sized_delimiter(sb, elem);
     case MATH_LATEX_COLOR_COMMAND: return format_color_command(sb, elem, depth);
     case MATH_LATEX_BOX_COMMAND: return format_box_command(sb, elem, depth);

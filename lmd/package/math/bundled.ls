@@ -15,6 +15,7 @@ let resources = [
     {family: "KaTeX_Size1", file: "math/fonts/KaTeX_Size1-Regular.woff2"},
     {family: "KaTeX_Size2", file: "math/fonts/KaTeX_Size2-Regular.woff2"},
     {family: "KaTeX_AMS", file: "math/fonts/KaTeX_AMS-Regular.woff2"},
+    {family: "KaTeX_Main", file: "math/fonts/KaTeX_Main-Regular.woff2"},
     {family: VARIANT_FAMILIES.script, file: "math/fonts/KaTeX_Script-Regular.woff2"},
     {family: VARIANT_FAMILIES.cal, file: "math/fonts/KaTeX_Caligraphic-Regular.woff2"},
     {family: VARIANT_FAMILIES.fraktur, file: "math/fonts/KaTeX_Fraktur-Regular.woff2"}

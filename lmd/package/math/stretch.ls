@@ -9,6 +9,22 @@ fn expanded(parts, repeats) => [
 fn overlaps(parts) => [for (i in 1 to (len(parts) - 1))
     min(parts[i - 1].end_connector, parts[i].start_connector)]
 
+// Ordinary fonts have no arrow assembly: extend the shaft without distorting the head.
+pub fn arrow(g, target, scale, right, axis, thickness) map | error {
+    if (len(g.horizontal.parts) > 0 or len(g.horizontal.variants) > 0)
+        glyph(g, target, false, scale, "mrel")^
+    else {
+        let natural = bx.glyph(g, scale, "mrel")
+        let width = max(target, natural.width)
+        let extra = width - natural.width
+        let start = if (right) 0.0 else g.ink.right * scale - thickness
+        let length = extra + (if (right) g.ink.left * scale else natural.width - g.ink.right * scale) + thickness;
+        if (extra <= 0.0) natural
+        else bx.compose([{box: bx.rule(length, thickness, 0.0 - axis - thickness / 2.0), x: start, y: 0.0},
+            {box: natural, x: if (right) extra else 0.0, y: 0.0}], width, "mrel")
+    }
+}
+
 // TeX accents use the largest designed variant that fits over the nucleus.
 pub fn accent(g, target, scale) map | error {
     let variants = [for (v in g.horizontal.variants where v.extent * scale <= target) v];

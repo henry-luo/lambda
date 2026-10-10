@@ -156,9 +156,10 @@ fn is_unit_char(ch) {
 pub fn parse_rows(body, i, n, rows, current_row, current_cell) {
     if (i >= n) {
         rows ++ [make_row(current_row ++ [make_cell(current_cell)])]
-    } else if (body[i] == 'row_sep' or body[i] == 'col_sep') {
-        if (body[i] == 'row_sep')
-            parse_rows(body, i + 1, n, rows ++ [make_row(current_row ++ [make_cell(current_cell)])], [], [])
+    } else if (body[i] == 'row_sep' or body[i] == 'col_sep' or
+        (body[i] is element and name(body[i]) == 'row_sep')) {
+        if (body[i] == 'row_sep' or (body[i] is element and name(body[i]) == 'row_sep'))
+            parse_rows(body, i + 1, n, rows ++ [{*:make_row(current_row ++ [make_cell(current_cell)]), gap: body[i].gap}], [], [])
         else
             parse_rows(body, i + 1, n, rows, current_row ++ [make_cell(current_cell)], [])
     } else

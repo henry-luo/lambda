@@ -89,9 +89,27 @@ Rendering errors and threshold failures exit 1. Cases marked `nolatex` upstream
 are explicit skips with their original reasons. Failures do not stop later cases.
 `--timeout` bounds each renderer command in milliseconds (default 60000).
 
+## Renderer support
+
+The public math renderer (`lambda.doc.math.math`, D7.2.4) supports inline raster
+images with `\includegraphics[width=...,height=...,totalheight=...,alt=...]{...}`.
+`height` measures above the baseline; `totalheight - height` is the depth.
+Without an explicit width, the image keeps its intrinsic aspect ratio. The
+default height is `0.9em`; unitless image dimensions use big points (`bp`).
+Images are embedded in the emitted SVG. Pass `base_uri` as the directory for
+relative image paths; the comparison runner uses each case's artifact directory.
+Missing images, invalid dimensions, and unsupported options return errors.
+
+Math input expands scoped TeX definitions such as `\def` and `\newcommand`
+through the existing TeX engine. `\xrightleftarrows`, `\xrightequilibrium`, and
+`\xleftequilibrium` produce paired arrows with optional lower and required upper
+labels. Ordinary-font arrow stretching extends the shaft while preserving the
+head shape. These behaviors have focused `.ls` regressions alongside this runner.
+
 ## Corpus scope
 
 The source is [KaTeX's screenshot corpus](https://github.com/KaTeX/KaTeX/blob/main/test/screenshotter/ss_data.yaml).
+
 Strings and object entries are supported. Each case's `display` mode is honored,
 and fixture macro definitions are passed to both renderers. This is a
 **formula-only** comparison: browser `pre`, `post`, and `styles` fields remain
@@ -144,3 +162,7 @@ explicitly skipped if their executables are unavailable; missing packages fail:
 ```sh
 npm test --prefix test/lambda/math
 ```
+
+The checks also run the comparison pipeline for both image and reaction-arrow
+fixtures. They require a built `lambda.exe`, verify all eight embedded logos in
+native PNG output, and check the rendered arrow glyphs instead of command text.

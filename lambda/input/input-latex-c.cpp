@@ -144,8 +144,9 @@ public:
         : ctx_(context), builder_(context.builder), source_(source), length_(length),
           offset_(source_offset), position_(0), ascii_(ascii), allow_infix_(allow_infix) {}
 
-    Item parse() {
+    Item parse(const char* expansion_error = nullptr) {
         ElementBuilder root = builder_.element("math");
+        if (expansion_error) root.attr("error", builder_.createStringItem(expansion_error));
         parse_children(root, false);
         return root.final();
     }
@@ -458,7 +459,9 @@ private:
             if (item_present(radicand)) elem.attr("radicand", radicand);
             return elem.final();
         }
-        if (strcmp(name, "xrightarrow") == 0 || strcmp(name, "xleftarrow") == 0) {
+        if (strcmp(name, "xrightarrow") == 0 || strcmp(name, "xleftarrow") == 0 ||
+            strcmp(name, "xrightleftarrows") == 0 || strcmp(name, "xrightequilibrium") == 0 ||
+            strcmp(name, "xleftequilibrium") == 0) {
             Item lower = ItemNull;
             skip_space();
             if (position_ < length_ && source_[position_] == '[') lower = parse_brack_group();
@@ -467,6 +470,22 @@ private:
             elem.attr("cmd", builder_.createStringItem(full));
             if (item_present(upper)) elem.attr("upper", upper);
             if (item_present(lower)) elem.attr("lower", lower);
+            return elem.final();
+        }
+        if (strcmp(name, "includegraphics") == 0) {
+            ElementBuilder elem = builder_.element("image_command");
+            elem.attr("cmd", builder_.createStringItem(full));
+            size_t begin = 0, end = 0;
+            skip_space();
+            if (position_ < length_ && source_[position_] == '[' &&
+                consume_group_span('[', ']', &begin, &end))
+                elem.attr("options", builder_.createStringItem(source_ + begin, end - begin));
+            skip_space();
+            // paths and option values are raw source, not math identifiers or subscripts.
+            if (position_ < length_ && source_[position_] == '{' &&
+                consume_group_span('{', '}', &begin, &end))
+                elem.attr("src", builder_.createStringItem(source_ + begin, end - begin));
+            else error("includegraphics requires a braced source");
             return elem.final();
         }
         if (strcmp(name, "mathop") == 0) {
@@ -971,7 +990,14 @@ private:
             }
             if (matrix_mode && starts_with(source_, length_, position_, "\\\\")) {
                 position_ += 2;
-                children.append(builder_.createSymbolItem("row_sep"));
+                skip_space();
+                size_t begin = 0, end = 0;
+                if (position_ < length_ && source_[position_] == '[' &&
+                    consume_group_span('[', ']', &begin, &end)) {
+                    ElementBuilder separator = builder_.element("row_sep");
+                    separator.attr("gap", builder_.createStringItem(source_ + begin, end - begin));
+                    children.append(separator.final());
+                } else children.append(builder_.createSymbolItem("row_sep"));
                 continue;
             }
             Item child = parse_atom_with_scripts();
@@ -1809,19 +1835,49 @@ private:
 
 } // namespace
 
+static tex::Engine* run_tex_engine(const InputParseOptions* options, const char* source,
+                                   size_t length, tex::Result* result, bool math_mode = false);
+
 extern "C" Item parse_math_direct_to_ast(Input* input, const char* math_source, size_t math_len, const char* flavor) {
     if (!input || !math_source) return ItemNull;
-    InputContext context(input, math_source, math_len);
     bool ascii = flavor && (strcmp(flavor, "ascii") == 0 || strcmp(flavor, "asciimath") == 0);
+    // ordinary formulas keep the recovery parser; definitions need scoped TeX expansion.
+    bool expand = !ascii && input->parse_options && input->parse_options->tex_expand;
+    for (size_t p = 0; !ascii && !expand && p < math_len;) {
+        if (math_source[p] == '%') {
+            while (p < math_len && math_source[p] != '\n' && math_source[p] != '\r') p++;
+        } else if (math_source[p] == '\\') {
+            char name[96], full[104];
+            p = latex_scan_command(math_source, math_len, p, name, sizeof(name), full, sizeof(full));
+            static const char* definitions[] = {"def", "gdef", "edef", "xdef", "let",
+                "newcommand", "renewcommand", "providecommand", "DeclareRobustCommand",
+                "NewDocumentCommand", "RenewDocumentCommand", "ProvideDocumentCommand", "DeclareDocumentCommand"};
+            for (const char* command : definitions) if (strcmp(name, command) == 0) expand = true;
+        } else p++;
+    }
+    tex::Engine* engine = nullptr;
+    tex::Result expanded = {};
+    if (expand) {
+        engine = run_tex_engine(input->parse_options, math_source, math_len, &expanded, true);
+        if (engine) {
+            math_source = expanded.text;
+            math_len = expanded.length;
+        }
+    }
+    InputContext context(input, math_source, math_len);
     DirectMathParser parser(context, context.source(), context.source_length(), 0, ascii);
-    Item result = parser.parse();
+    Item result = parser.parse(expanded.diagnostic_count ? expanded.diagnostics[0].message : nullptr);
     if (context.hasErrors()) context.logErrors();
+    if (engine) tex::engine_destroy(engine);
     return result;
 }
 
 static tex::Engine* run_tex_engine(const InputParseOptions* options, const char* source,
-                                   tex::Result* result) {
+                                   size_t length, tex::Result* result, bool math_mode) {
+    InputParseOptions defaults = {};
+    if (!options) options = &defaults;
     tex::EngineOptions eo = {};
+    eo.math_mode = math_mode;
     eo.base_path = options->tex_base;
     eo.ini = options->tex_ini;
     eo.adapters = options->tex_adapters;
@@ -1830,14 +1886,14 @@ static tex::Engine* run_tex_engine(const InputParseOptions* options, const char*
     eo.raw_command_count = options->tex_raw_command_count;
     tex::Engine* engine = tex::engine_create(&eo);
     if (!engine) return nullptr;
-    tex::engine_run(engine, source, strlen(source), result);
+    tex::engine_run(engine, source, length, result);
     if (tex::engine_wants_expl3(engine)) {
         // the document asked for expl3: run it again from the expl3 format
         tex::engine_destroy(engine);
         eo.expl3 = true;
         engine = tex::engine_create(&eo);
         if (!engine) return nullptr;
-        tex::engine_run(engine, source, strlen(source), result);
+        tex::engine_run(engine, source, length, result);
     }
     return engine;
 }
@@ -1867,7 +1923,7 @@ void parse_latex_direct(Input* input, const char* latex_string) {
     if (options && options->tex_expand) {
         // §9.2: expansion before digestion; the parser reads the engine's text
         tex::Result result = {};
-        tex::Engine* engine = run_tex_engine(options, latex_string, &result);
+        tex::Engine* engine = run_tex_engine(options, latex_string, strlen(latex_string), &result);
         if (engine) {
             InputContext context(input, result.text, result.length);
             DirectLatexParser parser(context, &result);
@@ -1890,7 +1946,7 @@ void parse_tex_expansion(Input* input, const char* source) {
     InputParseOptions defaults = {};
     const InputParseOptions* options = input->parse_options ? input->parse_options : &defaults;
     tex::Result result = {};
-    tex::Engine* engine = run_tex_engine(options, source, &result);
+    tex::Engine* engine = run_tex_engine(options, source, strlen(source), &result);
     if (!engine) return;
     InputContext context(input);
     MarkBuilder& builder = context.builder;

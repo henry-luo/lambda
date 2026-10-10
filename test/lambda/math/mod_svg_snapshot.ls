@@ -25,7 +25,7 @@ pub fn geometry(node, x = 0.0, y = 0.0, sx = 1.0, sy = 1.0) {
         let ty = if (starts_with(transform, "translate(")) y + sy * (values[1] or 0.0) else y
         let ax = if (starts_with(transform, "scale(")) sx * values[0] else sx
         let ay = if (starts_with(transform, "scale(")) sy * (values[1] or values[0]) else sy;
-        [*if (name(node) == 'text' or name(node) == 'rect' or name(node) == 'path')
+        [*if (name(node) == 'text' or name(node) == 'rect' or name(node) == 'path' or name(node) == 'image')
             [{node:node, x:tx + ax * (node.x or 0.0), y:ty + ay * (node.y or 0.0), sx:ax, sy:ay,
                 text:if (name(node) == 'text') util.text_of(node) else ""}] else [],
          *[for (child in content(node), found in geometry(child, tx, ty, ax, ay)) found]]

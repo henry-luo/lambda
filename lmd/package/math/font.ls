@@ -85,6 +85,8 @@ fn text_facts(facts, family) {
             text_size: facts.font_size}]}
 }
 
+fn measure(style, points, faces, family = null) => text_facts(radiant.math_metrics(style, points, faces), family)
+
 pub fn prepare(ast, options) map | error {
     let use_bundled = options.font_family == null and options.fonts == null
     let family = options.font_family or bundled.FAMILY
@@ -93,11 +95,11 @@ pub fn prepare(ast, options) map | error {
     let variant_families = if (use_bundled) bundled.VARIANT_FAMILIES else {sans: "sans-serif", mono: "monospace"}
     // One batch owns all glyphs used by this formula; no mutable last-font state.
     let source = collect(ast)
-    let chars = unique(split(source ++ "()[]{}|‖⌈⌉⌊⌋⟨⟩√̂̃̄⃗̇̈⏞⏟←→↔− /", ""))
+    let chars = unique(split(source ++ "()[]{}|‖⌈⌉⌊⌋⟨⟩√̂̃̄⃗̇̈⏞⏟←→↔⇀↽− /", ""))
     let styles = ["normal", "auto", "italic", "bold", "bolditalic", "script", "fraktur", "double", "sans", "mono"]
     let points = unique([for (ch in chars, style in styles) variant(ch, style)])
     let large_points = [for (ch in sym.large_symbols() where contains(chars, ch)) ord(ch)]
-    let native = text_facts(radiant.math_metrics({font_family: family, font_size: UNITS}, points, faces), family)
+    let native = measure({font_family: family, font_size: UNITS}, points, faces, family)
     if (native == null) error("math: cannot read selected font: " ++ family)
     else {
     let facts = {*:native, constants: if (native.has_math) native.constants else fallback.constants(native.font_metrics)}
@@ -111,23 +113,27 @@ pub fn prepare(ast, options) map | error {
         (let weight = if (style == "bold" or style == "bolditalic") 700 else 400,
          let slant = if (style == "italic" or style == "bolditalic") "italic" else "normal",
          let style_family = variant_families[style] or family,
-         {style: style, facts: text_facts(radiant.math_metrics({font_family: style_family, font_size: UNITS,
-            font_weight: weight, font_style: slant}, points, faces), style_family)})]
+         {style: style, facts: measure({font_family: style_family, font_size: UNITS,
+            font_weight: weight, font_style: slant}, points, faces, style_family)})]
     // Resolve only absent source characters; never replace a Latin variable with
     // a different font's mathematical-alphabet glyph just to obtain italics.
     let fallback_points = [for (ch in chars where lookup({points: points}, native, ord(ch)) == null) ord(ch)]
     let fallback_facts = if (len(fallback_points) == 0) null else
-        text_facts(radiant.math_metrics({font_family: if (use_bundled) bundled.SYMBOL_FAMILIES else family,
-            font_size: UNITS, fallback: true}, fallback_points, faces), null)
+        measure({font_family: if (use_bundled) bundled.SYMBOL_FAMILIES else family,
+            font_size: UNITS, fallback: true}, fallback_points, faces)
+    // Keep paired harpoons in one bundled face instead of unrelated system fallbacks.
+    let reaction_points = if (use_bundled) [ord("⇀"), ord("↽")] else []
     if (facts.constants.script_percent_scale_down <= 0 or facts.constants.script_script_percent_scale_down <= 0)
         error("math: selected font has invalid script scale constants")
     else {facts: facts, points: points, family: facts.font_family,
         font_metrics: facts.font_metrics, style_faces: style_faces,
         fallback_points: fallback_points, fallback_facts: fallback_facts, faces: faces,
+        reaction_points: reaction_points,
+        reaction_facts: if (use_bundled) measure({font_family:"KaTeX_Main", font_size:UNITS}, reaction_points, faces, "KaTeX_Main") else null,
         tex: if (use_bundled) tex_metrics.load()^ else null,
         large_points: large_points,
         large_facts: if (use_bundled and len(large_points) > 0)
-            text_facts(radiant.math_metrics({font_family:"KaTeX_Size2", font_size:UNITS}, large_points, faces), "KaTeX_Size2") else null}
+            measure({font_family:"KaTeX_Size2", font_size:UNITS}, large_points, faces, "KaTeX_Size2") else null}
     }
 }
 
@@ -156,6 +162,7 @@ fn lookup(profile, facts, cp) {
 
 pub fn glyph(profile, cp) map | error {
     let result = lookup(profile, profile.facts, cp) or
+        lookup({points: profile.reaction_points}, profile.reaction_facts, cp) or
         lookup({points: profile.fallback_points}, profile.fallback_facts, cp)
     if (result == null) error("math: selected font lacks glyph U+" ++ string(cp) ++ " (" ++ profile.family ++ ")")
     else result
