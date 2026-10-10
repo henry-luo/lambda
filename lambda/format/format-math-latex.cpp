@@ -62,6 +62,9 @@ static void format_subsup(StringBuf* sb, const ElementReader& elem, int depth) {
     if (!base.isNull()) {
         format_item(sb, base, depth + 1);
     }
+    // limit placement belongs to the scripted nucleus and must survive round trips.
+    ItemReader modifier = elem.get_attr("modifier");
+    if (modifier.isString()) stringbuf_append_all(sb, 2, "\\", modifier.asString()->chars);
 
     // Emit subscript
     if (!sub.isNull()) {
@@ -383,6 +386,10 @@ static void format_environment(StringBuf* sb, const ElementReader& elem, int dep
         stringbuf_append_all(sb, 2, "{", columns.asString()->chars);
         stringbuf_append_str(sb, "}");
     }
+    ItemReader alignment = elem.get_attr("alignment");
+    if (alignment.isString()) stringbuf_append_all(sb, 3, "[", alignment.asString()->chars, "]");
+    ItemReader pairs = elem.get_attr("pairs");
+    if (pairs.isString()) stringbuf_append_all(sb, 3, "{", pairs.asString()->chars, "}");
 
     stringbuf_append_str(sb, " ");
     if (!body.isNull()) format_item(sb, body, depth + 1);
@@ -561,10 +568,21 @@ static void format_phantom_command(StringBuf* sb, const ElementReader& elem, int
 // Format `mathop_command`: \mathop{content}
 static void format_mathop_command(StringBuf* sb, const ElementReader& elem, int depth) {
     stringbuf_append_str(sb, "\\mathop");
-    ItemReader content = elem.get_attr("content");
+    ItemReader content = elem.get_attr("body");
+    if (content.isNull()) content = elem.get_attr("content");
     stringbuf_append_str(sb, "{");
     if (!content.isNull()) format_item(sb, content, depth + 1);
     stringbuf_append_str(sb, "}");
+}
+
+static void format_mathchoice(StringBuf* sb, const ElementReader& elem, int depth) {
+    stringbuf_append_str(sb, "\\mathchoice");
+    static const char* styles[] = {"display", "text", "script", "scriptscript"};
+    for (const char* style : styles) {
+        stringbuf_append_str(sb, "{");
+        format_item(sb, elem.get_attr(style), depth + 1);
+        stringbuf_append_str(sb, "}");
+    }
 }
 
 // Format `matrix_command`: \matrix{body} (plain TeX)
@@ -652,6 +670,8 @@ enum MathLatexSlot {
     MATH_LATEX_BOX_COMMAND,
     MATH_LATEX_PHANTOM_COMMAND,
     MATH_LATEX_MATHOP_COMMAND,
+    MATH_LATEX_MATHCHOICE,
+    MATH_LATEX_MATH_ATOM,
     MATH_LATEX_MATRIX_COMMAND,
     MATH_LATEX_CHILDREN_SPACE,
     MATH_LATEX_RULE_COMMAND,
@@ -685,6 +705,7 @@ static const MathTagDispatch MATH_LATEX_TAGS[] = {
     {"text_command", MATH_LATEX_TEXT_COMMAND},
     {"textstyle_command", MATH_LATEX_TEXT_COMMAND},
     {"style_command", MATH_LATEX_STYLE_COMMAND},
+    {"size_command", MATH_LATEX_STYLE_COMMAND},
     {"space_command", MATH_LATEX_SPACE_COMMAND},
     {"spacing_command", MATH_LATEX_SPACE_COMMAND},
     {"hspace_command", MATH_LATEX_SPACE_COMMAND},
@@ -699,6 +720,9 @@ static const MathTagDispatch MATH_LATEX_TAGS[] = {
     {"box_command", MATH_LATEX_BOX_COMMAND},
     {"phantom_command", MATH_LATEX_PHANTOM_COMMAND},
     {"mathop_command", MATH_LATEX_MATHOP_COMMAND},
+    {"mathop", MATH_LATEX_MATHOP_COMMAND},
+    {"mathchoice", MATH_LATEX_MATHCHOICE},
+    {"math_atom", MATH_LATEX_MATH_ATOM},
     {"matrix_command", MATH_LATEX_MATRIX_COMMAND},
     {"matrix_body", MATH_LATEX_CHILDREN_SPACE},
     {"rule_command", MATH_LATEX_RULE_COMMAND},
@@ -762,6 +786,8 @@ static void format_element_impl(StringBuf* sb, const ElementReader& elem, int de
     case MATH_LATEX_BOX_COMMAND: return format_box_command(sb, elem, depth);
     case MATH_LATEX_PHANTOM_COMMAND: return format_phantom_command(sb, elem, depth);
     case MATH_LATEX_MATHOP_COMMAND: return format_mathop_command(sb, elem, depth);
+    case MATH_LATEX_MATHCHOICE: return format_mathchoice(sb, elem, depth);
+    case MATH_LATEX_MATH_ATOM: return format_command_with_optional_bracket(sb, elem, depth, "options", "body");
     case MATH_LATEX_MATRIX_COMMAND: return format_matrix_command(sb, elem, depth);
     case MATH_LATEX_CHILDREN_SPACE: return format_children(sb, elem, depth, " ");
     case MATH_LATEX_RULE_COMMAND: return format_rule_command(sb, elem, depth);

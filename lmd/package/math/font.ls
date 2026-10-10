@@ -72,7 +72,7 @@ fn collect(node) {
     else if (node is element) {
         let attrs = ["value", "name", "cmd", "text", "base", "sub", "sup", "numer", "denom",
             "radicand", "index", "arg", "content", "body", "left", "right", "above", "below",
-            "label", "over", "under", "delim", "annotation", "upper", "lower", "target"];
+            "label", "over", "under", "delim", "annotation", "upper", "lower", "target", "display", "script", "scriptscript"];
         util.str_join([for (attr in attrs) collect(node[attr])], "") ++ collect(content(node))
     } else ""
 }

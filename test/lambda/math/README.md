@@ -106,6 +106,20 @@ through the existing TeX engine. `\xrightleftarrows`, `\xrightequilibrium`, and
 labels. Ordinary-font arrow stretching extends the shaft while preserving the
 head shape. These behaviors have focused `.ls` regressions alongside this runner.
 
+The renderer selects `\mathchoice` branches using the current math style, honors
+scoped size declarations (`\tiny` through `\Huge`, including script sizes), and
+supports explicit atom classes such as `\mathbin` and `\mathrel`. AMS `gathered`
+and `alignedat` retain their row structure and display style; starred matrices
+accept `[l]`, `[c]`, or `[r]` column alignment. Matrix rows use minimum strut
+dimensions and AMS line spacing. Unbraced kern dimensions stop at their unit,
+preserving adjacent variables and scripts.
+
+Size and alignment behavior follows the upstream
+[size ladder](https://github.com/KaTeX/KaTeX/blob/main/src/Options.ts) and
+[array implementation](https://github.com/KaTeX/KaTeX/blob/main/src/environments/array.ts).
+The screenshot checks exercise these features through native PNG rendering;
+font and remaining layout differences are still reported for visual review.
+
 ## Corpus scope
 
 The source is [KaTeX's screenshot corpus](https://github.com/KaTeX/KaTeX/blob/main/test/screenshotter/ss_data.yaml).
