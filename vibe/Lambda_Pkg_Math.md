@@ -1,8 +1,8 @@
 # Lambda Math Package Design
 
 > **Status:** active design; consolidated and checked against the source tree on
-> 2026-10-10, revision `6bac05b81` plus the current AMS-primitives/font-selection
-> changes. Remaining gaps are recorded in §10.
+> 2026-10-10, revision `f7aced322` plus the current delimiter-construction and
+> comparison-scale changes. Remaining gaps are recorded in §10.
 > **Scope:** static mathematical typesetting through `lambda.doc.math`.
 > **Formal linkage:** **D7.2.4** — package namespace and distribution;
 > **D7.1.1 / D7.1.2v2** — layering and resource acquisition;
@@ -259,8 +259,10 @@ metrics.
 
 The bundled companion contains the existing original `cmr10`, `cmsy10`,
 `cmsy7`, `cmsy5` and `cmex10` TFM resources. It supplies CM math parameters,
-the roman parenthesis strut, bracket thickness and the supported vertical-arrow
-recipes. Symbol parameters follow the 10/7/5 selections; plain TeX's tenex
+the roman parenthesis strut, bracket thickness and supported delimiter variant
+chains and recipes. Symbol parameters follow the 10/7/5 selections; the matched
+roman profile scales CM10 instead of borrowing unavailable optical-size data.
+Plain TeX's tenex
 extension parameters remain at their original size across styles. Its use
 does not assert that CMU outline bounds equal original CM glyph boxes.
 Matched logical metrics are used only for the explicitly identified CM
@@ -419,14 +421,35 @@ larger of `901/1000` of that extent and the extent minus `5pt`. Selection,
 assembly and axis placement use TeX's delimiter rules and the chosen profile.
 `\middle` shares its enclosing group's demand.
 
-The bundled vertical-arrow family (`\uparrow`, `\downarrow`,
-`\updownarrow`, `\Uparrow`, `\Downarrow`, `\Updownarrow`) uses the
-matched CMSY/CMEX recipe: minimum integer shaft repeats, unchanged heads,
-logical joins, and math-axis centering. Explicit AMS `\big`, `\Big`,
-`\bigg`, `\Bigg` use a text-style measurement with 1, 1.5, 2 and 2.5
-multiples of 1.2 times the roman parenthesis strut, including inside scripts.
-This basis is independently checked for those six arrows; it does not certify
-the other fixed-size or automatic delimiter families.
+The bundled profile supports 26 delimiter shapes: parentheses, brackets,
+floors, ceilings, braces, angles, single/double bars, slashes, six vertical
+arrows, groups and moustaches. Selection searches the small character at the
+current math size and successively larger sizes, then the original CMEX
+next-larger chain. An extensible recipe takes the minimum integer repeat
+count; a middle piece requires equal repeats above and below it. Logical butt
+joins preserve curved tips, corners, brace middles and arrowheads. Finite
+chains such as angles and slashes retain their largest design when exhausted.
+No complete glyph is stretched in these bundled constructions.
+
+Existing KaTeX Main and Size1–Size4 faces paint the matched characters. Their
+authored encoding and baseline translations are font facts; reversing those
+translations preserves the original CMEX logical coordinates. TeX defines
+selection, dimensions, assembly and axis centering. Null delimiters retain
+their space and an axis-centered empty box. No font is added to the bundle
+(**D7.2.4 / D7.1.2v2**, Rule 2).
+
+All left, right and middle delimiters share the enclosing group's first-pass
+demand, which excludes the delimiters themselves. Under
+[e-TeX's definition](https://github.com/TeX-Live/texlive-source/blob/trunk/texk/web2c/etexdir/etex.ch),
+`\middle` acts as a close atom before the boundary and an open atom after it;
+the boundary restores the enclosing math context. Binary normalization and
+glue follow those two roles.
+
+Explicit AMS `\big`, `\Big`, `\bigg`, `\Bigg` use a text-style measurement
+with 1, 1.5, 2 and 2.5 multiples of 1.2 times the roman parenthesis strut,
+including inside scripts. Automatic and explicit construction are independently
+checked for all 26 bundled shapes across four styles. This does not certify
+unmapped special delimiters, bold profiles or supplied-font assemblies.
 The `l`, `r` and `m` suffixes select open, close and relation atom classes;
 unsuffixed sized delimiters are ordinary atoms. This spacing policy applies
 independently of whether the glyph construction is conforming.
@@ -578,18 +601,27 @@ Independent checked-in oracles cover:
 - [Automated AMS primitive checks](../test/lambda/math/tex_conformance.test.mjs):
   modulo glue and boundary atoms, the parenthesis phantom, sized-delimiter
   spacing and continued-fraction struts/alignment across four styles.
-  Execute 252 boxes and 126 relations against installed amsmath/LaTeX,
+  Execute 260 boxes and 130 relations against installed amsmath/LaTeX,
   including declarations in modulo arguments and their effect on following atoms;
   shipped TeX positions are compared with actual SVG numerator baselines
   and advances. Named-size probes explicitly match the bundled scaled-CM10
   companion profile rather than LaTeX's alternative optical-size fonts.
+- [Automated delimiter checks](../test/lambda/math/tex_delimiter_conformance.test.mjs):
+  820 cases compare actual TeX box dimensions and shipped DVI component
+  positions with measured SVG geometry. They cover all 26 shapes, four styles,
+  four explicit sizes, small/large automatic demands, finite-chain exhaustion,
+  and cramped, nested, empty and middle-boundary cases. The reference explicitly
+  selects the same scaled-CM10 roman and fixed-size CMEX profile. Encoding
+  translations are reversed before comparing component baselines; they never
+  supply the expected layout. Native PNG checks separately verify intact
+  assembled tips, brace middles and joins.
 
 These are independent TeX executions, not a single complete automated
 conformance suite. `\showbox` intentionally emits `! OK` diagnostics and a
 nonzero exit status. A valid run must contain the expected cases and no
 unexpected TeX errors; shell status alone cannot classify it as passed.
-The automated AMS checks use successful compilation and shipped position
-records instead of `\showbox`. They run with the comparison-harness tests;
+The automated AMS and delimiter checks use successful compilation and shipped
+position records instead of `\showbox`. They run with the comparison-harness tests;
 automatic checking of the older oracles and wider package coverage remain
 outstanding. Missing pdfLaTeX is an explicit skip, not conformance evidence.
 
@@ -602,8 +634,13 @@ then compiles a documented pdfLaTeX equivalent and rasterizes it with Poppler.
 Both receive fixture macros and the case's display mode. Browser `pre`,
 `post` and `styles` remain metadata; this is a formula-only comparison.
 
-Both images use the same em scale: default 64 CSS pixels versus a 10pt TeX em
-at the corresponding DPI. Crop white margins and search only integer
+Both layouts use a logical 10pt em, including conversion of authored point
+lengths. Painting magnifies that em to the default 64 CSS pixels, with the
+corresponding DPI in Poppler. The previous harness left Lambda's logical em at
+its default 16px while painting at the requested comparison size; its point
+lengths therefore differed from the 10pt reference. Those older raster scores
+are not directly comparable with the corrected harness.
+Crop white margins and search only integer
 translation within the configured radius, default 12px per axis. Never resize
 or deform images independently. Boundary hits are flagged. The overlay shows
 overlapping ink in black, Lambda-only ink in red and reference-only ink in
@@ -644,13 +681,14 @@ diagnostics; focused math checks are not an all-green system baseline.
 
 | Evidence as of 2026-10-10 | Result and limits |
 |---|---|
-| Focused math run after the AMS/text changes | **27/27**; `temp/math-support/focused.log`. |
-| Full geometry corpus after the AMS/text changes | **921/921**; `temp/math-support/corpus.json`. Rendering smoke coverage only. |
-| Automated independent AMS/LaTeX relations | **126/126** across **252** TeX boxes; `temp/math-support/conformance.log` and the reported `temp/math-conformance-*/evidence.json`. Includes phantom atom classes, shipped numerator positions, source/binary hashes and the installed AMS definition hash. |
-| Comparison-harness and conformance checks | **201/201**, no skips; `temp/math-support/comparison-tests.log`. Includes native painting and pdfLaTeX/Poppler reference checks; no visual-equality claim. |
+| Focused math run after the delimiter changes | **28/28**; `temp/math-delimiters/focused-final.log`. |
+| Full geometry corpus after the delimiter changes | **921/921**; `temp/math-delimiters/corpus.json`. Rendering smoke coverage only. |
+| Automated independent AMS/LaTeX relations | **130/130** across **260** TeX boxes; reported `temp/math-conformance-*/evidence.json`. Includes phantom atom classes, middle-boundary binary normalization, shipped numerator positions, source/binary hashes and the installed AMS definition hash. |
+| Automated independent delimiter checks | **820/820** TeX boxes and component-position comparisons; reported `temp/math-delimiter-oracle-*/evidence.json`. Includes source/binary and installed TFM hashes. |
+| Comparison-harness and conformance checks | **1,032/1,032**, no skips; `temp/math-delimiters/comparison-tests-final.log`. Includes native painting, logical point-scale checks and pdfLaTeX/Poppler references; no visual-equality claim. |
 | Prior independent integral audit | 17 TeX box dumps, **18/18** axis/style/limit relations; retained under `temp/math-closed-integrals/oracle/`. |
 | Prior independent delimiter/logo audits | 27 delimiter boxes plus row-control cases; eight logo boxes. Sources above remain reproducible. |
-| Lambda baseline after the AMS/text changes | **6,582/6,583**: input **2,112/2,112**, runtime **4,470/4,471**. `edit_view_only` differs only in boolean `disabled` attribute serialization; its math/source checks pass. The same failure reproduces with HEAD math sources. `temp/math-support/baseline.log`, copied result JSON and `edit-view-head.log`. |
+| Lambda baseline after the delimiter changes | **6,583/6,584**: input **2,112/2,112**, runtime **4,471/4,472**. The sole failing test is `edit_view_only`: the known boolean `disabled` serialization mismatch plus a failed source-preservation assertion. Math rendering/projection checks pass. A standalone import/export preserves the source, while the full fixture drops inter-formula text; a prior HEAD reproduction also recorded a source round-trip failure. This integration issue remains unresolved. `temp/math-delimiters/baseline.log`, copied result JSON and source probes retain the evidence. |
 
 Older logs from overlapping builds/edits and narrower focused selections are
 not substitute aggregate results. The previous 206-case HTML snapshot scores
@@ -677,7 +715,7 @@ current code, not permission to adopt their present behavior as a new rule.
 |---|---|
 | Hook and other extensible horizontal arrows | Replace hand-drawn head/curl/shaft geometry with the supported package's font-component and glue recipe. Correct hook orientation alone does not establish conformance. |
 | Paired reaction arrows | Derive minimum width, shortening, separation and annotation spacing from the supported AMS/mathtools/mhchem definition. Natural heads and content regressions do not validate those dimensions. |
-| Remaining delimiters, radicals and wide marks | Replace whole-glyph geometric stretching where TeX requires designed variants/assemblies. Audit fixed-size non-arrow delimiter construction, finite variant exhaustion, brace/group/line-segment recipes and required italic/skew data. Sized-delimiter atom classes now have independent spacing checks. |
+| Remaining delimiters, radicals and wide marks | Extend beyond the 26 verified bundled delimiter shapes to unmapped special delimiters (`\arrowvert`, `\Arrowvert`, `\bracevert`) and audit bold/supplied-font profiles. Complete font-specific radical and wide-accent/brace/line-segment construction with required italic/skew data. Whole-glyph stretching in those remaining paths is not conforming. |
 | Accents and operators | Extend independent coverage of glyph attachment, nested accents, character/compound scripts, large-op selection and side/stacked limits across profiles. The public zero `skew` field is not measured skew support. |
 | Arrays, AMS alignments and CD | Derive struts, row/column glue, rule/dash spacing, centering and diagram dimensions from the declared package definitions. Audit optional arguments, ragged rows and unsupported alignment constructs. Current bounded tables are not arbitrary TeX alignment. |
 | Macro expansion and document registers | Extend modulo verification to following scripts, nested font/color macros and configurable math-glue registers. Integrate continued fractions with custom document baseline/strut registers and broaden nested/profile coverage. The default AMS glue and argument declaration scope, parenthesis phantom and cfrac alignment/text-strut contracts now have automated independent evidence. |
@@ -700,12 +738,16 @@ shape, reduced raster diff, or green smoke count cannot close these items.
   expected glyph content, inline baselines, all math styles, profile changes,
   actual font-resource availability and painted geometry need coverage.
 - Extend repeatable independent TeX relations beyond the automated AMS
-  primitives; integrate the older box oracles and additional package macros.
+  primitives and bundled delimiters; integrate the older box oracles and additional package macros.
   The present checks remain narrower than a comprehensive conformance suite.
 - Verify full document/editor source preservation and generated-font
-  sanitization through UI paths. The module-level math/source checks pass;
-  the aggregate still fails `edit_view_only` on unrelated boolean-attribute
-  serialization. No all-green baseline or complete UI verification is claimed here.
+  sanitization through UI paths. Math rendering/projection checks pass, but
+  `edit_view_only` fails boolean-attribute serialization and a source-preservation
+  assertion. Its full-context import loses inter-formula text although a
+  standalone import/export succeeds; an older HEAD run also recorded a source
+  round-trip failure. Identify the cause of this context-dependent loss before changing
+  goldens or claiming source preservation. No all-green baseline or complete
+  UI verification is claimed here.
 - Bound platform-font fallback and standalone portability. A smoke check for
   external font URLs does not prove every resolved platform face is embedded.
   Ordinary-font measurements also retain the host's shaping limitations.
@@ -741,3 +783,4 @@ in this file. Git history retains their detailed implementation records.
 | 2026-10-10 | Ratified TeX-first layout and no-new-font rules. Fixed CM symbol fallback, bracket annotation policy/geometry, vertical-arrow sizing, structural row separators and uppercase KaTeX logo handling. Removed the attempted STIX reintroduction and defined closed multiple integrals through existing-glyph TeX composition. Unsourced extension geometry remains listed in §10. |
 | 2026-10-10 consolidation | Replaced six overlapping proposals/roadmaps with this current design, bounded support contract, verification model and outstanding-work section. Historical plans, file inventories, tuning constants and implementation anecdotes are omitted. |
 | 2026-10-10 AMS primitive continuation | Replaced fixed modulo/strut behavior with AMS/LaTeX definitions, completed continued-fraction alignment/text struts, sized-delimiter classes and ordinary phantom boxing, and restored bundled verbatim's typewriter selection. Added repeatable TeX box/position relations; broader construction and document-register work remains outstanding. |
+| 2026-10-10 delimiter continuation | Replaced bundled delimiter scaling with original TeX variant/assembly selection, completed middle-boundary demand and atom behavior, and restored parenthesis aliases. Added independent DVI geometry and native assembly checks. Corrected the comparison harness's logical point scale; existing Size3/Size4 fonts were reused without adding resources. |

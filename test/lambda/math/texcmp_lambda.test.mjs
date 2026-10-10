@@ -10,10 +10,10 @@ const ROOT = fileURLToPath(new URL('../../../', import.meta.url));
 const missing = ['pdflatex', 'pdftoppm', 'pdfinfo'].filter((tool) =>
   spawnSync(tool, [tool === 'pdflatex' ? '--version' : '-v']).status !== 0);
 
-async function compareCases(t, names) {
+async function compareCases(t, names, data = null) {
   const output = fs.mkdtempSync(path.join(ROOT, 'temp', 'mathcmp-lambda-tests-'));
   const run = spawnSync(process.execPath, [path.join(ROOT, 'test/lambda/math/run_texcmp.mjs'),
-    '--out', output, ...names.flatMap((name) => ['--case', name])],
+    '--out', output, ...(data ? ['--data', data] : []), ...names.flatMap((name) => ['--case', name])],
   { cwd: ROOT, encoding: 'utf8', timeout: 180000, maxBuffer: 8 * 1024 * 1024 });
   fs.writeFileSync(path.join(output, 'runner.log'), (run.stdout || '') + (run.stderr || ''));
   assert.ifError(run.error);
@@ -29,6 +29,36 @@ async function compareCases(t, names) {
 function paintedText(svg) {
   return [...svg.matchAll(/<text\b[^>]*>([^<]*)<\/text>/gu)].map((match) => match[1]);
 }
+
+test('native math painting retains tall CMEX delimiter assemblies', {
+  skip: missing.length ? `missing tools: ${missing.join(', ')}` : false,
+}, async (t) => {
+  const names = ['TallParentheses', 'TallBrackets', 'TallBraces', 'FiniteAngles', 'PointRule'];
+  const dir = await compareCases(t, names, path.join(ROOT, 'test/lambda/math/delimiter_cases.yaml'));
+  for (const name of names) await t.test(name, () => {
+    const svg = fs.readFileSync(path.join(dir, `cases/${name}/lambda.svg`), 'utf8');
+    const text = paintedText(svg);
+    const png = PNG.sync.read(fs.readFileSync(path.join(dir, `cases/${name}/lambda.png`)));
+    if (name === 'PointRule') {
+      assert.match(svg, /\bwidth="1em"/);
+      const reference = PNG.sync.read(fs.readFileSync(path.join(dir, `cases/${name}/pdflatex.png`)));
+      // A ten-point rule is one reference em; integer raster bounds differ by at most one pixel.
+      assert.ok(Math.abs(png.width - reference.width) <= 1, 'authored points must use the same logical em');
+      return;
+    }
+    assert.match(svg, /font-family="KaTeX_Size4"/);
+    if (name === 'FiniteAngles') assert.deepEqual(text, ['⟨', '⟩']);
+    else {
+      assert.ok(text.length > 4, 'tips and repeated components must reach native painting');
+      assert.ok(png.height > 6 * 64, 'full assemblies must survive beyond their finite designs');
+      for (let y = 0; y < png.height; y++) {
+        const row = png.data.subarray(y * png.width * 4, (y + 1) * png.width * 4);
+        // crop_ink retains faint antialiased edge pixels below 250, including the tip's first row.
+        assert.ok(row.some((v, i) => i % 4 !== 3 && v < 250), `unpainted seam at row ${y}`);
+      }
+    }
+  });
+});
 
 test('native math comparison paints graphics and reaction arrows', {
   skip: missing.length ? `missing tools: ${missing.join(', ')}` : false,

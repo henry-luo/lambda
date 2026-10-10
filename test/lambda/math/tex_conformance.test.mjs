@@ -58,6 +58,8 @@ test('AMS primitives agree with independently executed TeX boxes and positions',
     checks.push({ name: `parenthesis phantom: ${style}`, kind: 'strut',
       left: add(String.raw`\mathstrut`, context), right: add(String.raw`\vphantom(`, context) });
     delta(`sized relation spacing: ${style}`, String.raw`a\bigm\uparrow b`, String.raw`a\big\uparrow b`, context);
+    delta(`middle close/open binary normalization: ${style}`,
+      String.raw`\left(a+\middle|+b\right)`, String.raw`\left(a{+}\middle|{+}b\right)`, context);
     for (const align of ['l', 'c', 'r']) {
       const source = `\\cfrac[${align}]{1}{12345}`;
       const marked = `\\cfrac[${align}]{\\markpos{num}1}{12345}`;

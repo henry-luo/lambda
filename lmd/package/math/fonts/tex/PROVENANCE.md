@@ -39,18 +39,34 @@ in all styles, so its extension parameters remain constant across styles.
 Parameter identities and algorithms come from
 [TeX82 `tex.web`](https://tug.ctan.org/systems/knuth/dist/tex/tex.web), the TFM font-parameter format and math-list conversion algorithms.
 
-Vertical arrow delimiters use the original CMSY small-character metrics and
-CMEX extension recipes, including their top, bottom and repeat character
-slots. `KaTeX_Main` paints the small arrows; `KaTeX_Size1` paints the unchanged
-CMEX pieces at its Unicode encoding. Size1 places these pieces' baselines at
-the bottom, while CMEX places them at the top; the original TFM depth restores
-that baseline before assembly. TeX82 `var_delimiter` supplies the integer
-repeat count, butt joins, width and axis centering. No arrowhead is stretched.
+The 26 supported bundled delimiter shapes use original family-0/CMSY small
+metrics, CMEX next-larger chains and extension recipes, including top, middle,
+bottom and repeat character slots. Family 0 uses scaled `cmr10` at all three
+sizes because the approved companion does not contain smaller roman optical
+fonts; CMSY uses its actual 10/7/5 selections. CMEX remains text-size in every
+style. The independent reference explicitly selects this same profile.
+
+Existing `KaTeX_Main` paints the small characters and Size1–Size4 paint the
+designed variants and pieces at their Unicode encodings. Their character
+mappings and baseline translations come from the font project's
+[`src/fonts/makeFF`](https://github.com/KaTeX/katex-fonts/blob/master/src/fonts/makeFF)
+(reviewed 2026-10-10). These are authored font-generation translations, not TFM
+depth estimates or inferred outline bounds. Reversing them restores the CMEX
+baseline before composition. The font generator supplies encoding facts only:
+TeX82 `var_delimiter` supplies selection, integer repeat counts, balanced brace
+middles, butt joins, width and axis centering. Finite chains stop at their
+largest design. No complete glyph is stretched.
 For AMS explicit big delimiters, `amsmath`'s `bBigg@` uses a text-style box
 and `1.2 * (height + depth)` of the roman parenthesis. `cmr10.tfm` slot `0x28`
 supplies this math-strut extent. The four size multipliers are 1, 1.5, 2 and 2.5.
 `test/lambda/math/tex_delimiter_reference.tex` independently checks all six
 vertical arrows at those sizes, plus script-style and automatic delimiters.
+`test/lambda/math/tex_delimiter_conformance.test.mjs` adds 820 independently
+executed TeX cases over all 26 shapes, comparing box dimensions and shipped
+DVI component positions/sizes with Lambda's measured SVG geometry. Its
+artifacts retain the installed reference TFM paths and hashes. e-TeX's
+[`middle` definition](https://github.com/TeX-Live/texlive-source/blob/trunk/texk/web2c/etexdir/etex.ch)
+supplies the shared demand, close/open boundary roles and context restoration.
 
 This is an explicitly selected Computer Modern math companion for CMU's
 Computer Modern text outlines. It does not claim that CMU contains a MATH

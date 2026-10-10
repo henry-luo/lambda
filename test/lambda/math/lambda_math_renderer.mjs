@@ -26,7 +26,7 @@ export function render_lambda_math(formula, options = {}) {
   const display = options.display ?? true;
   const lambda = options.lambda ?? DEFAULT_LAMBDA;
   const script_path = options.script ?? DEFAULT_SCRIPT;
-  const script = build_lambda_math_script(formula, display, options.base_uri);
+  const script = build_lambda_math_script(formula, display, options.base_uri, options.font_size);
 
   fs.mkdirSync(path.dirname(script_path), { recursive: true });
   fs.writeFileSync(script_path, script);
@@ -73,9 +73,9 @@ export function mathlive_expected_error(formula) {
   return null;
 }
 
-function build_lambda_math_script(formula, display, base_uri) {
+function build_lambda_math_script(formula, display, base_uri, font_size) {
   const formula_literal = JSON.stringify(formula);
-  const render_options = `{display: ${display}, base_uri: ${JSON.stringify(base_uri ?? null)}}`;
+  const render_options = `{display: ${display}, base_uri: ${JSON.stringify(base_uri ?? null)}, font_size: ${JSON.stringify(font_size ?? null)}}`;
   return `import math_pkg: lambda.doc.math.math
 import html_ser: lambda.latex.to_html
 

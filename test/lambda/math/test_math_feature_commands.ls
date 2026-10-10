@@ -49,7 +49,8 @@ let checks = [
     {name:"negated groups survive roundtrip", ok:paint(format(ast("\\not{abc}"),{type:"math",flavor:"latex"})^) == "abc/"},
     {name:"set fences survive roundtrip", ok:paint(format(ast("\\Set{x|x<1}"),{type:"math",flavor:"latex"})^) == "{x|x<1}"},
     {name:"escaped fences do not become backslashes", ok:contains(paint("\\left\\{a\\right\\}"),"{") and not contains(paint("\\left\\{a\\right\\}"),"\\")},
-    {name:"double-bar escape stays distinct from a single bar", ok:paint("\\left\\|x\\right\\|") == "‖x‖" and paint("\\left|x\\right|") == "|x|"},
+    // CMSY's single/double bars use the corresponding KaTeX_Main Unicode encodings.
+    {name:"double-bar escape stays distinct from a single bar", ok:paint("\\left\\|x\\right\\|") == "∥x∥" and paint("\\left|x\\right|") == "∣x∣"},
     {name:"missing symbol aliases resolve", ok:paint("\\mapsfrom\\pounds\\textdollar\\intop") == "↤£$∫"},
     {name:"colorbox preserves border and background", ok:len([for (r in svg.nodes(box("\\fcolorbox{blue}{red}{C}").element,'rect') where r.fill == "red" and r.stroke == "blue") r]) == 1},
     {name:"bottom smash keeps height", ok:box("\\smash[b]{y}").height == box("y").height and box("\\smash[b]{y}").depth == 0.0},

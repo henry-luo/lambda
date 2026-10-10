@@ -135,6 +135,8 @@ let misc_symbols = {
     langle: "⟨", rangle: "⟩",
     lceil: "⌈", rceil: "⌉", lfloor: "⌊", rfloor: "⌋",
     lbrace: "{", rbrace: "}",
+    lparen:"(", rparen:")", lbrack:"[", rbrack:"]",
+    lgroup:"⟮", rgroup:"⟯", lmoustache:"⎰", rmoustache:"⎱",
     lvert: "∣", rvert: "∣", lVert: "∥", rVert: "∥"
 }
 

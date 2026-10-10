@@ -87,7 +87,8 @@ fn normalize_atoms(boxes, i, previous) {
         let kind = if (item.type == "mbin" and (previous == null or
             contains(["mbin", "mop", "mrel", "mopen", "mpunct"], previous) or next == null or
             contains(["mrel", "mclose", "mpunct"], next))) "mord" else item.type;
-        [{*:item, type:kind}, *normalize_atoms(boxes, i + 1, if (kind == "skip") previous else kind)]
+        [{*:item, type:kind}, *normalize_atoms(boxes, i + 1,
+            if (kind == "skip") previous else item.after_type or kind)]
     }
 }
 
@@ -96,7 +97,7 @@ fn spaced(boxes, c) {
     let with_spaces = [for (i, item in normalized) (
         let previous = [for (j in 0 to (i - 1) where normalized[j].type != "skip") normalized[j]],
         let left = previous[len(previous) - 1],
-        [if (left != null and item.type != "skip") bx.empty(spaces.get_spacing(left.type, item.type,
+        [if (left != null and item.type != "skip") bx.empty(spaces.get_spacing(left.after_type or left.type, item.type,
             item.spacing_style or c.style) * (item.spacing_quad or math_quad(c))) else bx.empty(), item])];
     if (len(normalized) == 1) normalized[0] else bx.row([for (pair in with_spaces, item in pair) item])
 }
@@ -112,7 +113,12 @@ fn group_boxes(items, c, i) {
         let command = if (item is element) string(item.cmd or item.name or "") else ""
         let style = style_name(command)
         let size_index = index_of(size_commands, command_name(command))
-        if (item is element and name(item) == 'font_switch') {
+        if (item is element and name(item) == 'middle_delim') {
+            // e-TeX closes the preceding math group and reopens it in the enclosing style/scope.
+            let restored = {*:(c.delimiter_context or c),delimiter_context:c.delimiter_context,
+                delimiter_target:c.delimiter_target,measuring_delimiters:c.measuring_delimiters};
+            [middle_delimiter(item,restored)^,*group_boxes(items,restored,i + 1)^]
+        } else if (item is element and name(item) == 'font_switch') {
             let variant = {rm:"normal", it:"italic", bf:"bold", sf:"sans", tt:"mono"}[command_name(command)];
             group_boxes(items, {*:c, variant:variant, text_variant:variant}, i + 1)^
         } else if (style != null and item.arg == null)
@@ -146,7 +152,7 @@ fn node(n, c) {
         case 'accent': accent(n, c)^
         case 'delimiter_group': delimited(n, c)^
         case 'sized_delimiter': sized_delimiter(n, c)^
-        case 'middle_delim': delimiter(string(n.delim or "."), c.delimiter_target or font.UNITS * scale(c), c, "mrel")^
+        case 'middle_delim': middle_delimiter(n,c)^
         case 'command': command_node(n, c)^
         // parsed symbol commands store their spelling in name, like command nodes.
         case 'symbol_command': command_node(n, c)^
@@ -417,40 +423,56 @@ fn center_axis(b, c) => bx.shifted(b, 0.0, (b.height - b.depth) / 2.0 - metric(c
 // TeX make_left_right uses delimiterfactor=901 and delimitershortfall=5pt.
 fn delimiter_target(extent, c) => max(extent * 901.0 / 1000.0, extent - dimension("5pt", c))
 
-fn tex_arrow(recipe, target, c, atom) {
+fn tex_delimiter(recipe, target, c, atom) {
     let size = if (c.style == "scriptscript") 2 else if (c.style == "script") 1 else 0
     // var_delimiter searches the current symbol size, then successively larger sizes.
-    let small = [for (i in 0 to size) (
+    let small = [for (i in 0 to size where recipe.small[size - i] != null) (
         let index = size - i,
         let amount = font.scale(c.profile,["text","script","scriptscript"][index]) * text_scale(c),
         {glyph:recipe.small[index], scale:amount})]
-    let adequate = [for (v in small where (v.glyph.height + v.glyph.depth) * v.scale >= target) v];
+    // CMEX is the same text-sized extension font in every style; search its TFM character list.
+    let variants = [*small,*[for (g in recipe.variants) {glyph:g,scale:text_scale(c)}]]
+    let adequate = [for (v in variants where (v.glyph.height + v.glyph.depth) * v.scale >= target) v];
     if (len(adequate) > 0) bx.glyph(adequate[0].glyph,adequate[0].scale,atom)
-    else stretch.tex_assembly(recipe,target,text_scale(c),atom)
+    else if (recipe.repeat != null) stretch.tex_assembly(recipe,target,text_scale(c),atom)
+    // TeX keeps the largest finite variant when the character list has no extension recipe.
+    else bx.glyph(variants[len(variants) - 1].glyph,variants[len(variants) - 1].scale,atom)
 }
 
 fn delimiter(raw, target, c, atom) {
     let key = command_name(raw)
     let ch = if (raw == "\\|") "‖" else sym.lookup_symbol(key) or key
-    let recipe = font.tex_arrow(c.profile,ord(ch))^
-    if (ch == "." or ch == "") bx.empty(dimension("1.2pt", c))
-    else if (recipe != null) center_axis(tex_arrow(recipe,target,c,atom),c)
+    let recipe = font.tex_delimiter(c.profile,ord(ch))^
+    // var_delimiter centers even the empty null-delimiter box on the math axis.
+    if (ch == "." or ch == "") {*:bx.empty(dimension("1.2pt",c)),
+        height:metric(c,"axis_height"),depth:0.0 - metric(c,"axis_height")}
+    else if (recipe != null) center_axis(tex_delimiter(recipe,target,c,atom),c)
     else center_axis(stretch.glyph(font.glyph(c.profile, ord(ch))^, target, true, scale(c), atom)^, c)
 }
 
-fn fence_box(body, left, right, c) {
+fn fence_box(body, left, right, c, demand = null) {
     let axis = metric(c, "axis_height")
     let extent = 2.0 * max(body.height - axis, body.depth + axis)
-    let target = delimiter_target(extent,c)
+    let target = if (demand != null) demand else delimiter_target(extent,c)
     bx.row([delimiter(left, target, c, "mopen")^, body, delimiter(right, target, c, "mclose")^], "minner")
 }
 
 fn delimited(n, c) {
     let items = if (n.body != null) util.content_items(n.body) else util.content_items(n)
-    let body = group(items, c)^
+    // TeX's demand ignores left/right/middle noads; all three use the same first-pass extent.
+    let body = group(items,{*:c,delimiter_context:c,measuring_delimiters:true})^
     let extent = 2.0 * max(body.height - metric(c, "axis_height"), body.depth + metric(c, "axis_height"))
     let target = delimiter_target(extent,c);
-    fence_box(group(items, {*:c, delimiter_target:target})^, string(n.left or "."), string(n.right or "."), c)^
+    fence_box(group(items,{*:c,delimiter_context:c,delimiter_target:target,measuring_delimiters:false})^,
+        string(n.left or "."),string(n.right or "."),c,target)^
+}
+
+fn middle_delimiter(n,c) {
+    let result = if (c.measuring_delimiters) bx.empty() else
+        delimiter(string(n.delim or "."),if (c.delimiter_target != null) c.delimiter_target
+            else font.UNITS * scale(c),c,"mclose")^;
+    // e-TeX's middle is close on its left and open on its right, not a relation atom.
+    {*:result,type:"mclose",after_type:"mopen",spacing_style:c.style,spacing_quad:math_quad(c)}
 }
 
 fn sized_delimiter(n, c) {
@@ -461,7 +483,7 @@ fn sized_delimiter(n, c) {
         else if (ends_with(key,"m")) "mrel" else "mord"
     let raw = string(n.delim or n.value or util.text_of(n))
     let ch = sym.lookup_symbol(command_name(raw)) or raw
-    let recipe = font.tex_arrow(c.profile,ord(ch))^;
+    let recipe = font.tex_delimiter(c.profile,ord(ch))^;
     if (recipe != null) {
         // amsmath bBigg@: a text-style hbox and 1.2 * math-strut extent times 1/1.5/2/2.5.
         let context = with_style(c,"text")

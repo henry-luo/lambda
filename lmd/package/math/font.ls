@@ -118,10 +118,8 @@ pub fn prepare(ast, options) map | error {
     let styles = ["normal", "auto", "italic", "bold", "bolditalic", "script", "fraktur", "double", "sans", "sansitalic", "mono"]
     let points = unique([for (ch in chars, style in styles) variant(ch, style)])
     let large_points = [for (ch in sym.large_symbols() where contains(chars, ch)) ord(ch)]
-    let arrow_data = if (use_bundled and len([for (ch in ["↑","↓","↕","⇑","⇓","⇕"] where contains(chars,ch)) ch]) > 0)
-        tex_metrics.vertical_arrows()^ else null
-    let arrow_points = [for (p in arrow_data.pieces) p.codepoint]
-    let arrow_small_points = [for (r in arrow_data.recipes) r.codepoint]
+    let delimiter_data = if (use_bundled) tex_metrics.delimiters()^ else null
+    let delimiter_small_points = [for (r in delimiter_data.recipes where len(r.small) > 0) r.codepoint]
     let native = measure({font_family: family, font_size: UNITS}, points, faces, family)
     if (native == null) error("math: cannot read selected font: " ++ family)
     else {
@@ -153,11 +151,13 @@ pub fn prepare(ast, options) map | error {
         reaction_points: reaction_points,
         reaction_facts: if (use_bundled) measure({font_family:"KaTeX_Main", font_size:UNITS}, reaction_points, faces, "KaTeX_Main") else null,
         closed_composites: closed_composites,
-        arrow_data:arrow_data, arrow_points:arrow_points, arrow_small_points:arrow_small_points,
-        arrow_facts:if (arrow_data != null) measure({font_family:"KaTeX_Size1",font_size:UNITS},
-            arrow_points,faces,"KaTeX_Size1") else null,
-        arrow_small_facts:if (arrow_data != null) measure({font_family:"KaTeX_Main",font_size:UNITS},
-            arrow_small_points,faces,"KaTeX_Main") else null,
+        delimiter_data:delimiter_data,
+        delimiter_faces:[for (family in unique([for (p in delimiter_data.pieces) p.family]))
+            (let points = unique([for (p in delimiter_data.pieces where p.family == family) p.codepoint]),
+            {family:family,points:points,facts:measure({font_family:family,font_size:UNITS},points,faces,family)})],
+        delimiter_small_points:delimiter_small_points,
+        delimiter_small_facts:if (delimiter_data != null) measure({font_family:"KaTeX_Main",font_size:UNITS},
+            delimiter_small_points,faces,"KaTeX_Main") else null,
         tex: if (use_bundled) tex_metrics.load()^ else null,
         large_points: large_points,
         large_facts: if (use_bundled and len(large_points) > 0)
@@ -200,24 +200,30 @@ pub fn glyph(profile, cp) map | error {
 fn with_tex_metrics(g, m) => if (m == null) g else
     {*:g, advance:m.width, height:m.height, depth:m.depth, italic:m.italic}
 
-fn arrow_piece(profile, slot) map | error {
-    let piece = [for (p in profile.arrow_data.pieces where p.slot == slot) p][0]
-    let g = lookup({points:profile.arrow_points},profile.arrow_facts,piece.codepoint);
-    if (piece == null or g == null) error("math: bundled CMEX arrow piece is unavailable")
-    // Size1 pieces are baseline-aligned at the bottom; CMEX's original baseline is at the top.
+fn delimiter_piece(profile, slot) map | error {
+    let piece = [for (p in profile.delimiter_data.pieces where p.slot == slot) p][0]
+    let face = [for (f in profile.delimiter_faces where f.family == piece.family) f][0]
+    let g = lookup(face,face.facts,piece.codepoint);
+    if (piece == null or g == null) error("math: bundled CMEX delimiter piece is unavailable")
+    // Reverse makeFF's authored glyph translation to recover the original CMEX baseline.
     else {*:with_tex_metrics(g,piece.metrics), advance:piece.metrics.width + piece.metrics.italic,
-        source_baseline:piece.metrics.depth}
+        source_baseline:piece.shift}
 }
 
-pub fn tex_arrow(profile, cp) {
-    let recipe = [for (r in profile.arrow_data.recipes where r.codepoint == cp) r][0]
+pub fn tex_delimiter(profile, cp) {
+    let canonical = if (cp == 124) ord("∣") else if (cp == ord("‖")) ord("∥")
+        else if (cp == 60) ord("⟨") else if (cp == 62) ord("⟩")
+        else if (cp == ord("∖")) ord("\\") else cp
+    let recipe = [for (r in profile.delimiter_data.recipes where r.codepoint == canonical) r][0]
     if (recipe == null) null
     else {
-        let base = lookup({points:profile.arrow_small_points},profile.arrow_small_facts,cp)
-        let parts = [for (i,slot in recipe.extension)
-            if (i < 3 and slot == 0) null else arrow_piece(profile,slot)^];
-        if (base == null) error("math: bundled CMSY arrow is unavailable")
-        else {small:[for (m in recipe.small) with_tex_metrics(base,m)],
+        let base = lookup({points:profile.delimiter_small_points},profile.delimiter_small_facts,canonical)
+        let extension = recipe.chain[len(recipe.chain) - 1].metrics.extension
+        let parts = [for (i,slot in extension)
+            if (i < 3 and slot == 0) null else delimiter_piece(profile,slot)^];
+        if (base == null and len(recipe.small) > 0) error("math: bundled small delimiter is unavailable")
+        else {small:[for (m in recipe.small) {*:with_tex_metrics(base,m),advance:m.width + m.italic}],
+            variants:[for (v in recipe.chain where v.metrics.extension == null) delimiter_piece(profile,v.slot)^],
             top:parts[0], middle:parts[1], bottom:parts[2], repeat:parts[3]}
     }
 }

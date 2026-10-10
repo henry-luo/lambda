@@ -1089,7 +1089,8 @@ private:
             "langle", "rangle", "lbrace", "rbrace", "lceil", "rceil", "lfloor", "rfloor",
             "uparrow", "downarrow", "updownarrow", "Uparrow", "Downarrow", "Updownarrow",
             "backslash", "arrowvert", "Arrowvert", "bracevert", "lmoustache", "rmoustache",
-            "lgroup", "rgroup", "lbrack", "rbrack"
+            // parenthesis aliases must be consumed as the delimiter, like bracket aliases.
+            "lgroup", "rgroup", "lbrack", "rbrack", "lparen", "rparen"
         };
         for (const char* delimiter : delimiters) {
             if (strcmp(name, delimiter) == 0) return true;
