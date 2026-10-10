@@ -18,6 +18,7 @@ struct BlockProp;
 struct StyleTree;
 struct ViewCssStyle;
 struct ViewCssContext;
+struct ViewCssContainerState;
 struct PagedComposition;
 struct ViewPageStyle;
 struct PaintGlyphRun;
@@ -117,11 +118,18 @@ struct ViewNodeState {
     lam::Up<LayoutViewNode> first_occurrence;
     lam::Up<LayoutViewNode> last_occurrence;
     size_t occurrence_count;
+    float container_width, container_height;
+    bool container_measured;
 };
 
 enum ViewPageSide : uint8_t {
     VIEW_PAGE_LEFT,
     VIEW_PAGE_RIGHT,
+};
+
+struct ViewPageColumn {
+    lam::Up<const ViewPageColumn> previous;
+    uint32_t index;
 };
 
 struct ViewPageBox {
@@ -137,6 +145,7 @@ struct ViewPageBox {
     bool blank;
     lam::Up<ViewPageStyle> style;
     lam::Up<const char> name;
+    lam::Up<const ViewPageColumn> occupied_columns; // immutable selected input, rewound with the page checkpoint
     lam::Up<LayoutViewNode> margin_boxes[CSS_PAGE_MARGIN_BOX_COUNT];
     lam::Up<LayoutViewNode> static_boxes[4];
 };
@@ -195,6 +204,7 @@ struct ViewTreeModel {
     lam::Own<Arena> arena;
     lam::Own<hashmap> source_states;
     lam::Own<ViewCssContext> css;
+    lam::Own<ViewCssContainerState> containers;
     lam::Own<PagedComposition> composition;
     lam::Own<hashmap> image_resources; // generation owns assets independently of browsing and other editions
     lam::Up<ViewNativeLease> native_leases;

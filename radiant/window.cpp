@@ -352,7 +352,8 @@ static DomDocument* load_doc_by_format(const char* filename, Url* base_url, int 
             log_warn("RST format not yet implemented");
             return NULL;
         }
-        if (format == DOC_FORMAT_UNKNOWN) {
+        // paged formats share the export loader's admission before reaching the common document router.
+        if (format == DOC_FORMAT_UNKNOWN && !(print_media && render_paged_input_supported(filename))) {
             log_error("Unsupported document format for file: %s", filename);
             log_error("Supported formats: .html, .htm, .md, .markdown, .tex, .latex, .pgf, .ls, .slides, .xml, .pdf, .svg, .png, .jpg, .jpeg, .gif, .json, .yaml, .yml, .toml, .txt, .csv, .ini, .conf, .cfg, .log");
             return NULL;
@@ -498,11 +499,6 @@ DomDocument* show_loaded_html_doc(DomDocument* doc, const char* doc_url) {
     return doc;
 }
 
-static bool window_clear_layout_dirty_visitor(DomNode* node, void*) {
-    node->layout_dirty = false;
-    return true;
-}
-
 void reflow_html_doc(DomDocument* doc) {
     if (doc && doc == ui_context.document && ui_context.paged_options) {
         render_paged_window_compose(&ui_context);
@@ -513,11 +509,6 @@ void reflow_html_doc(DomDocument* doc) {
         return;
     }
     layout_html_doc(&ui_context, doc, true);
-    // The completed reflow has consumed the dirty geometry snapshot. Leaving
-    // this bit set makes CSSOM fall back to shorthand declarations instead of
-    // the freshly resolved values (notably outline longhands).
-    view_geometry_walk_dom_tree(static_cast<DomNode*>(doc->root),
-                                window_clear_layout_dirty_visitor, nullptr);
     // Skip render here — let the main loop handle it via render().
     // Mark dirty so the main loop knows to repaint.
     if (doc->state) {

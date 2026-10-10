@@ -3,11 +3,16 @@
 From the repository root, open the native Radiant window:
 
 ```sh
-./lambda.exe view test/demo/tetris/tetris.ls
+./lambda.exe demo tetris
 ```
 
 Click **Start game** or focus the game and press Enter. All controls also have
 clickable buttons.
+
+Click **Auto Play** on the start or game-over screen to watch a simple player
+rotate, move, and drop pieces. It favors low stacks, fewer holes, and completed
+rows. Pause/resume keeps the demo running; a movement button/key takes control,
+and restart begins a manual game.
 
 | Key | Action |
 | --- | --- |
@@ -49,7 +54,7 @@ diff -u test/demo/tetris/tetris_test.txt temp/tetris_test.actual.txt
 ```
 
 Create `temp/` first if it does not exist. `tetris_test.txt` is the expected
-result; every boolean must be true. The 48 rules assertions cover bags, kicks,
+result; every boolean must be true. The 55 rules assertions cover bags, kicks,
 collision, line clearing, scoring, hold, and top-out. The 17 interactive
 assertions check keyboard movement, rotation, scoring, hold, uninterrupted
 gravity, pause/resume, and restart. The replay is also registered under
@@ -60,6 +65,9 @@ after accumulating 500 ms, down, hold, hard drop, restart and pause/resume must
 start a fresh gravity interval. The reset uses a braced statement branch under
 S16.6.1/S16.6.8v2; the correction is already present in commit `9bdf0d93a`.
 Run it with the same `view --event-file` command as the smoke replay above.
+
+`test/ui/tetris_autoplay.json` checks the Auto Play button, visible stacking,
+pause/resume, manual takeover, restart, and close through the same native view.
 
 `tetris_close.json` exercises sustained gravity, piece locking, restarts, and
 the window-close path. The regression runner bounds execution so a

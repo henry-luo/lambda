@@ -3,7 +3,7 @@
 Run these commands from the repository root.
 
 ```bash
-./lambda.exe view test/demo/slides/northstar.slides
+./lambda.exe demo slides
 ```
 
 **Northstar / Strategy 2027** is an 18-slide fictional leadership briefing with

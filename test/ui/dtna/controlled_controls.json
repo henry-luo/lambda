@@ -1,0 +1,474 @@
+{
+  "name": "dtna controlled native values remain application owned",
+  "html": "test/ui/dtna/controlled_controls.ls",
+  "viewport": {
+    "width": 700,
+    "height": 800
+  },
+  "events": [
+    {
+      "type": "click",
+      "target": {
+        "selector": "#fixed-input"
+      }
+    },
+    {
+      "type": "key_press",
+      "key": "end"
+    },
+    {
+      "type": "type",
+      "text": "X"
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#fixed-input"
+      },
+      "equals": "seed"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#requested"
+      },
+      "equals": "seedX"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#requested-type"
+      },
+      "equals": "string"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#fixed-area"
+      }
+    },
+    {
+      "type": "key_press",
+      "key": "end"
+    },
+    {
+      "type": "type",
+      "text": "!"
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#fixed-area"
+      },
+      "equals": "notes"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#requested"
+      },
+      "equals": "notes!"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#fixed-check"
+      }
+    },
+    {
+      "type": "assert_checked",
+      "target": {
+        "selector": "#fixed-check"
+      },
+      "checked": false
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#requested"
+      },
+      "equals": "true"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#requested-type"
+      },
+      "equals": "bool"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#fixed-true"
+      }
+    },
+    {
+      "type": "assert_checked",
+      "target": {
+        "selector": "#fixed-true"
+      },
+      "checked": true
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#requested"
+      },
+      "equals": "false"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#requested-type"
+      },
+      "equals": "bool"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#fixed-switch"
+      }
+    },
+    {
+      "type": "assert_checked",
+      "target": {
+        "selector": "#fixed-switch"
+      },
+      "checked": false
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#requested"
+      },
+      "equals": "true"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#requested-type"
+      },
+      "equals": "bool"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#fixed-check"
+      }
+    },
+    {
+      "type": "key_press",
+      "key": "space"
+    },
+    {
+      "type": "assert_checked",
+      "target": {
+        "selector": "#fixed-check"
+      },
+      "checked": false
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#radio-b"
+      }
+    },
+    {
+      "type": "assert_checked",
+      "target": {
+        "selector": "#radio-a"
+      },
+      "checked": true
+    },
+    {
+      "type": "assert_checked",
+      "target": {
+        "selector": "#radio-b"
+      },
+      "checked": false
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#requested"
+      },
+      "equals": "b"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#requested-type"
+      },
+      "equals": "symbol"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#radio-a"
+      }
+    },
+    {
+      "type": "key_press",
+      "key": "right"
+    },
+    {
+      "type": "assert_checked",
+      "target": {
+        "selector": "#radio-a"
+      },
+      "checked": true
+    },
+    {
+      "type": "assert_checked",
+      "target": {
+        "selector": "#radio-b"
+      },
+      "checked": false
+    },
+    {
+      "type": "select_option",
+      "target": {
+        "selector": "#fixed-select"
+      },
+      "value": "20"
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#fixed-select"
+      },
+      "equals": "10"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#requested"
+      },
+      "equals": "20"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#requested-type"
+      },
+      "equals": "int"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#accepted-input"
+      }
+    },
+    {
+      "type": "key_press",
+      "key": "end"
+    },
+    {
+      "type": "type",
+      "text": "ab"
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#accepted-input"
+      },
+      "equals": "ab"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#accepted-value"
+      },
+      "equals": "ab"
+    },
+    {
+      "type": "assert_focus",
+      "target": {
+        "selector": "#accepted-input"
+      }
+    },
+    {
+      "type": "key_press",
+      "key": "home"
+    },
+    {
+      "type": "key_press",
+      "key": "right"
+    },
+    {
+      "type": "type",
+      "text": "X"
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#accepted-input"
+      },
+      "equals": "aXb"
+    },
+    {
+      "type": "assert_caret",
+      "target": {
+        "selector": "#accepted-input"
+      },
+      "char_offset": 2
+    },
+    {
+      "type": "key_press",
+      "key": "backspace"
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#accepted-input"
+      },
+      "equals": "ab"
+    },
+    {
+      "type": "assert_caret",
+      "target": {
+        "selector": "#accepted-input"
+      },
+      "char_offset": 1
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#accepted-check"
+      }
+    },
+    {
+      "type": "assert_checked",
+      "target": {
+        "selector": "#accepted-check"
+      },
+      "checked": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#accepted-check"
+      }
+    },
+    {
+      "type": "assert_checked",
+      "target": {
+        "selector": "#accepted-check"
+      },
+      "checked": false
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#fixed-input"
+      }
+    },
+    {
+      "type": "key_press",
+      "key": "end"
+    },
+    {
+      "type": "ime_compose",
+      "phase": "begin"
+    },
+    {
+      "type": "ime_compose",
+      "phase": "update",
+      "preedit": "日",
+      "caret": 1
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#fixed-input"
+      },
+      "equals": "seed"
+    },
+    {
+      "type": "ime_compose",
+      "phase": "commit",
+      "commit": "日本"
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#fixed-input"
+      },
+      "equals": "seed"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#requested"
+      },
+      "equals": "seed日本"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#accepted-input"
+      }
+    },
+    {
+      "type": "key_press",
+      "key": "end"
+    },
+    {
+      "type": "ime_compose",
+      "phase": "begin"
+    },
+    {
+      "type": "ime_compose",
+      "phase": "update",
+      "preedit": "日",
+      "caret": 1
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#accepted-input"
+      },
+      "equals": "ab"
+    },
+    {
+      "type": "ime_compose",
+      "phase": "commit",
+      "commit": "日本"
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#accepted-input"
+      },
+      "equals": "ab日本"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#accepted-value"
+      },
+      "equals": "ab日本"
+    },
+    {
+      "type": "ime_compose",
+      "phase": "begin"
+    },
+    {
+      "type": "ime_compose",
+      "phase": "update",
+      "preedit": "取消",
+      "caret": 2
+    },
+    {
+      "type": "ime_compose",
+      "phase": "cancel"
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#accepted-input"
+      },
+      "equals": "ab日本"
+    }
+  ]
+}

@@ -1,0 +1,4 @@
+{"name":"Photo tool buttons preserve container alignment","html":"test/demo/photo/tests/_button_layout.ls","viewport":{"width":400,"height":300},"events":[
+ {"type":"assert_attribute","target":{"selector":"#flex"},"attribute":"data-aligned","equals":"true"},
+ {"type":"assert_attribute","target":{"selector":"#grid"},"attribute":"data-aligned","equals":"true"}
+]}

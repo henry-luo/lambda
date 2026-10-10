@@ -1,0 +1,3 @@
+["invalid-csl-style", "unsupported-csl-element", "missing-csl-macro", "cyclic-csl-macro", "unsupported-csl-attribute", "unsupported-csl-feature"]
+["missing-csl-parent", "cyclic-csl-parent", "in-text"]
+"csl-depth"

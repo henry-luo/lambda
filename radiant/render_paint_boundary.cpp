@@ -45,7 +45,7 @@ static bool boundary_border_side_visible(float width, CssEnum style, Color color
 
 static bool boundary_border_side_simple(float width, CssEnum style, Color color) {
     if (!boundary_border_side_visible(width, style, color)) return true;
-    return style == CSS_VALUE_SOLID;
+    return render_border_style_supported(style);
 }
 
 static bool boundary_border_has_visible_side(const BorderProp* border) {
@@ -55,15 +55,6 @@ static bool boundary_border_has_visible_side(const BorderProp* border) {
                                          border->colors[i])) return true;
     }
     return false;
-}
-
-static bool boundary_border_all_sides_visible(const BorderProp* border) {
-    if (!border) return false;
-    for (int i = 0; i < 4; i++) {
-        if (!boundary_border_side_visible(border->width.values[i], border->styles[i],
-                                          border->colors[i])) return false;
-    }
-    return true;
 }
 
 static bool boundary_border_simple(const BorderProp* border) {
@@ -90,24 +81,55 @@ static bool boundary_border_uniform_color(const BorderProp* border) {
     return true;
 }
 
+bool render_border_is_uniform_solid(const BorderProp* border) {
+    if (!border || border->width.values[0] <= 0.0f || border->colors[0].a == 0) return false;
+    for (int i = 0; i < 4; i++) {
+        if (border->width.values[i] != border->width.values[0] ||
+            border->styles[i] != CSS_VALUE_SOLID ||
+            border->colors[i].c != border->colors[0].c) return false;
+    }
+    return true;
+}
+
+bool render_paint_boundary_emit_solid_border(PaintList* paint, BorderProp* border, Rect rect) {
+    if (!paint || !render_border_is_uniform_solid(border) ||
+        rect.width <= border->width.top || rect.height <= border->width.top) return false;
+    resolve_border_radius_percentages(&border->radius, rect.width, rect.height);
+    constrain_corner_radii(&border->radius, rect.width, rect.height);
+    // a centered rounded stroke fills the curved border even with a transparent background.
+    RdtPath* path = render_border_create_centered_stroke_path(border, rect, border->width.top);
+    if (!path) return false;
+    int index = paint_list_count(paint);
+    paint_stroke_path(paint, path, border->top_color, border->width.top,
+        RDT_CAP_BUTT, RDT_JOIN_MITER, nullptr, 0, 0.0f, nullptr);
+    if (paint_list_take_path_payload(paint, index, PAINT_STROKE_PATH)) return true;
+    rdt_path_free(path);
+    return false;
+}
+
 static bool boundary_rounded_border_fill_supported(const BoundaryProp* bound) {
     if (!bound || !bound->border || !bound->background) return false;
     const BorderProp* border = bound->border;
     const BackgroundProp* bg = bound->background;
     if (bg->color.a != 255) return false;
-    if (!boundary_border_all_sides_visible(border)) return false;
-    for (int i = 0; i < 4; i++) {
-        if (border->styles[i] != CSS_VALUE_SOLID || border->colors[i].a != 255) return false;
-        if (i > 0 && (border->width.values[i] != border->width.values[0] ||
-                      border->colors[i].c != border->colors[0].c)) return false;
-    }
-    return true;
+    return render_border_is_uniform_solid(border) && border->colors[0].a == 255;
 }
 
 static void boundary_emit_border_side(PaintList* paint_list, float x, float y,
                                       float w, float h, Color color) {
     if (w <= 0.0f || h <= 0.0f || color.a == 0) return;
     paint_fill_rect(paint_list, x, y, w, h, color);
+}
+
+static bool boundary_emit_styled_path(void* context, RdtPath* path, Color color, const RenderBorderStroke* stroke) {
+    PaintList* paint = (PaintList*)context;
+    int index = paint_list_count(paint);
+    if (stroke) paint_stroke_path(paint, path, color, stroke->width, stroke->cap, RDT_JOIN_MITER,
+                                 stroke->dashes, stroke->dash_count, stroke->phase, nullptr);
+    else paint_fill_path(paint, path, color, RDT_FILL_WINDING, nullptr);
+    // paths and copied dash arrays must survive the caller's stack (D4.5.1v4).
+    if (paint_list_take_path_payload(paint, index, stroke ? PAINT_STROKE_PATH : PAINT_FILL_PATH)) return true;
+    rdt_path_free(path); return false;
 }
 
 bool render_paint_boundary_emit_simple(PaintList* paint_list, ViewBlock* view,
@@ -185,20 +207,9 @@ bool render_paint_boundary_emit_box(PaintList* paint_list, BoundaryProp* bound, 
     bool uniform_color = boundary_border_uniform_color(border);
     for (int i = 0; i < 4; i++) {
         if (boundary_border_side_visible(widths[i], border->styles[i], border->colors[i])) {
-            if (uniform_color) boundary_emit_border_side(paint_list, side_x[i], side_y[i],
-                side_w[i], side_h[i], border->colors[i]);
-            else {
-                float before = i == 0 || i == 2 ? widths[3] : widths[0];
-                float after = i == 0 || i == 2 ? widths[1] : widths[2];
-                RdtPath* path = render_path_create_border_side(rect, i, widths[i], before, after);
-                if (!path) return false;
-                int index = paint_list_count(paint_list);
-                paint_fill_path(paint_list, path, border->colors[i], RDT_FILL_WINDING, nullptr);
-                // boundary commands survive this call and retain their paths (D4.5.1v4).
-                if (!paint_list_take_path_payload(paint_list, index, PAINT_FILL_PATH)) {
-                    rdt_path_free(path); return false;
-                }
-            }
+            if (uniform_color && border->styles[i] == CSS_VALUE_SOLID) {
+                boundary_emit_border_side(paint_list, side_x[i], side_y[i], side_w[i], side_h[i], border->colors[i]);
+            } else if (!render_border_emit_side(rect, border, i, false, boundary_emit_styled_path, paint_list)) return false;
         }
     }
     return true;

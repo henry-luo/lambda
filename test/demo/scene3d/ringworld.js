@@ -49,6 +49,43 @@ function preset(polar) {
     controls.update();
 }
 
+const autoPlay = document.getElementById('auto-play');
+const tourTarget = new THREE.Vector3();
+const tourView = new THREE.Spherical();
+const tourOffset = new THREE.Vector3();
+let touring = false, tourFrame = 0, previousTime = null, tourTime = 0;
+function tour(now) {
+    if (!touring) return;
+    // elapsed time keeps the tour speed independent of frame rate and avoids jumps after a stall.
+    if (previousTime !== null) tourTime += Math.min(Math.max((now - previousTime) / 1000, 0), 0.1);
+    previousTime = now;
+    const phase = tourTime * Math.PI / 12;
+    controls.target.copy(tourTarget);
+    controls.target.x += 0.8 * Math.sin(phase);
+    controls.target.y += 0.3 * Math.sin(phase * 2);
+    const distance = THREE.MathUtils.clamp(tourView.radius * (1 - 0.18 * Math.sin(phase)),
+        controls.minDistance, controls.maxDistance);
+    const tilt = THREE.MathUtils.clamp(tourView.phi + 0.32 * Math.sin(phase),
+        controls.minPolarAngle, controls.maxPolarAngle);
+    tourOffset.setFromSpherical(new THREE.Spherical(distance, tilt, tourView.theta + phase));
+    camera.position.copy(controls.target).add(tourOffset);
+    controls.update();
+    tourFrame = requestAnimationFrame(tour);
+}
+function autoplay(enabled) {
+    if (touring === enabled) return;
+    touring = enabled;
+    autoPlay.textContent = touring ? 'Stop Auto Play' : 'Auto Play';
+    autoPlay.setAttribute('aria-pressed', String(touring));
+    if (!touring) { cancelAnimationFrame(tourFrame); return; }
+    // begin from the current view so starting or restarting never snaps the camera.
+    tourTarget.copy(controls.target);
+    tourView.setFromVector3(camera.position.clone().sub(controls.target));
+    tourTime = 0; previousTime = null;
+    tourFrame = requestAnimationFrame(tour);
+}
+controls.addEventListener('start', () => autoplay(false));
+
 const host = new RadiantAnimationHost(viewport);
 const play = document.getElementById('play');
 let playing = true;
@@ -63,6 +100,7 @@ function rewind() {
     if (playing) host.operate(12, 2, 'orbits');
 }
 const actions = {
+    'auto-play': () => autoplay(!touring),
     play: () => playback(!playing), rewind,
     'orbit-mode': () => mode(false), 'pan-mode': () => mode(true),
     'orbit-left': () => orbit(-0.16, 0), 'orbit-right': () => orbit(0.16, 0),
@@ -70,11 +108,15 @@ const actions = {
     'zoom-in': () => zoom(0.85), 'zoom-out': () => zoom(1 / 0.85), reset,
     top: () => preset(0.16), side: () => preset(Math.PI / 2)
 };
-for (const id of Object.keys(actions)) document.getElementById(id).addEventListener('click', actions[id]);
+for (const id of Object.keys(actions)) document.getElementById(id).addEventListener('click', () => {
+    if (id !== 'auto-play' && id !== 'play' && id !== 'rewind') autoplay(false);
+    actions[id]();
+});
 // OrbitControls prevents the pointer default, so claim keyboard focus explicitly.
 viewport.addEventListener('pointerdown', () => viewport.focus());
 viewport.addEventListener('keydown', event => {
     const key = event.key.toLowerCase();
+    if (['arrowleft', 'arrowright', 'arrowup', 'arrowdown', '+', '=', '-', '_', 'r'].includes(key)) autoplay(false);
     if (key === '+' || key === '=') zoom(0.85);
     else if (key === '-' || key === '_') zoom(1 / 0.85);
     else if (key === 'r') reset();
@@ -87,7 +129,7 @@ window.addEventListener('resize', () => {
     if (bounds.height > 0) camera.aspect = bounds.width / bounds.height;
     camera.updateProjectionMatrix();
 });
-window.addEventListener('pagehide', () => { controls.dispose(); host.operate(11); });
+window.addEventListener('pagehide', () => { autoplay(false); controls.dispose(); host.operate(11); });
 
-globalThis.ringworld = { camera, controls, orbit, zoom, reset, playback, rewind };
+globalThis.ringworld = { camera, controls, orbit, zoom, reset, playback, rewind, autoplay };
 viewport.setAttribute('data-ready', 'true');

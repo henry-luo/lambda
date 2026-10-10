@@ -297,6 +297,25 @@ DomElement* dom_slot_assignment_host(DomElement* slot) {
         ? root->shadow_host_element() : nullptr;
 }
 
+DomElement* dom_flat_tree_parent(DomElement* element) {
+    DomNode* source_parent = dom_source_parent(element);
+    if (source_parent && source_parent->is_element() && source_parent->as_element()->shadow_host_element())
+        return source_parent->as_element()->shadow_host_element();
+    DomElement* parent = dom_parent_element(element);
+    if (!parent) return nullptr;
+    DomElement* shadow = parent->shadow_root_element();
+    if (shadow) {
+        const char* name = dom_element_attribute_value_ns(element, "", "slot");
+        return dom_shadow_first_matching_slot(shadow, name);
+    }
+    if (dom_is_html_slot(parent)) {
+        DomElement* host = dom_slot_assignment_host(parent);
+        for (DomNode* child = host ? host->first_child.get() : nullptr; child; child = child->next_sibling)
+            if (dom_slot_assignment_matches(parent, child)) return nullptr;
+    }
+    return parent;
+}
+
 static CssEnum dom_html_direction_state(DomElement* element) {
     if (!element || strcmp(dom_element_namespace_uri(element), "http://www.w3.org/1999/xhtml"))
         return CSS_VALUE__UNDEF;
@@ -3056,7 +3075,8 @@ bool dom_element_append_content(DomElement* element, const CssValue* value,
 }
 
 const char* dom_element_get_pseudo_element_content_with_counters(
-        DomElement* element, int pseudo_element, void* counter_context, Arena* arena) {
+        DomElement* element, int pseudo_element, void* counter_context, Arena* arena,
+        int* quote_depth) {
     if (!element || !arena) return nullptr;
     PseudoStyleKind kind = pseudo_element == 1 ? PSEUDO_STYLE_BEFORE : pseudo_element == 2 ? PSEUDO_STYLE_AFTER : PSEUDO_STYLE_MARKER;
     if (pseudo_element != 1 && pseudo_element != 2 && pseudo_element != 6) return nullptr;
@@ -3065,8 +3085,9 @@ const char* dom_element_get_pseudo_element_content_with_counters(
     if (!declaration || !declaration->value) return nullptr;
     StrBuf* text = strbuf_new();
     if (!text) return nullptr;
-    int quote_depth = 0;
-    bool ok = dom_element_append_content(element, declaration->value, counter_context, &quote_depth, text);
+    int local_quote_depth = 0;
+    bool ok = dom_element_append_content(element, declaration->value, counter_context,
+        quote_depth ? quote_depth : &local_quote_depth, text);
     const char* result = ok ? arena_dup_n(arena, text->str ? text->str : "", text->length) : nullptr;
     strbuf_free(text);
     return result;

@@ -1417,7 +1417,7 @@ static const char* resolve_pseudo_generated_content(LayoutContext* lycon,
 }
 
 void layout_update_pseudo_content_with_counters(LayoutContext* lycon,
-                                                DomElement* pseudo_element) {
+                                                DomElement* pseudo_element, bool apply_counters) {
     if (!lycon || !lycon->counter_context || !pseudo_element ||
         !pseudo_element->parent || !pseudo_element->parent->is_element()) {
         return;
@@ -1432,14 +1432,17 @@ void layout_update_pseudo_content_with_counters(LayoutContext* lycon,
     PseudoElementType pseudo = is_before ? PSEUDO_ELEMENT_BEFORE : PSEUDO_ELEMENT_AFTER;
     StyleTree* style = origin->pseudo_style(
         is_before ? PSEUDO_STYLE_BEFORE : PSEUDO_STYLE_AFTER);
-    apply_pseudo_counter_ops(lycon, style);
+    if (apply_counters) apply_pseudo_counter_ops(lycon, style);
     const char* content = dom_element_get_pseudo_element_content_with_counters(
-        origin, pseudo, lycon->counter_context, lycon->pass_arena);
+        origin, pseudo, lycon->counter_context, lycon->pass_arena,
+        &lycon->counter_context->quote_depth);
     if (!content) content = dom_element_get_pseudo_element_content(origin, pseudo);
     if (!content) content = "";
     DomNode* first = pseudo_element->first_child;
     if (first && first->is_text()) {
         DomText* text_node = lam::dom_as<DOM_NODE_TEXT>(first);
+        // unchanged generated text must not grow document-owned string storage on every layout.
+        if (text_node->text && strcmp(text_node->text, content) == 0) return;
         size_t content_len = strlen(content);
         String* text_string = dom_document_create_string(
             pseudo_element->doc, content, content_len);
@@ -2156,12 +2159,18 @@ static void adjust_text_bounds_in_view(View* view) {
 static float block_context_float_bottom(const BlockContext* context,
                                         bool include_lowest);
 
-static void center_button_text_in_block(View* first_child, float block_extent) {
-    if (!first_child || block_extent <= 0.0f) return;
+void layout_center_button_text(ViewBlock* block) {
+    // authored flex/grid alignment already positions every child as a unit.
+    if (!block || !block->form_control() ||
+        block->form_control()->control_type != FORM_CONTROL_BUTTON ||
+        block->display.inner == CSS_VALUE_FLEX || block->display.inner == CSS_VALUE_GRID ||
+        layout_block_inline_axis_is_vertical(block) || !block->first_child ||
+        (block->blk && block->block()->text_box_trim) || block->height <= 0.0f) return;
+    View* first_child = static_cast<View*>(block->first_child);
     float min_y = 0.0f;
     float max_y = 0.0f;
     if (!text_rect_y_bounds(first_child, &min_y, &max_y)) return;
-    float delta = (block_extent - (max_y - min_y)) / 2.0f - min_y;
+    float delta = (block->height - (max_y - min_y)) / 2.0f - min_y;
     if (fabsf(delta) < 0.001f) return;
     shift_text_geometry(first_child, delta, TEXT_RECT_SHIFT_ALL);
     adjust_text_bounds_in_view(first_child);
@@ -2801,9 +2810,10 @@ static float layout_non_auto_margin_right(ViewBlock* block) {
 
 static float layout_strut_below_baseline(LayoutContext* lycon) {
     if (!lycon || layout_quirks_block_ignores_line_height(lycon, nullptr)) return 0.0f;
-    float half_leading = (lycon->block.line_height -
-        (lycon->block.init_ascender + lycon->block.init_descender)) / 2.0f;
-    return max(lycon->block.init_descender + half_leading, 0.0f);
+    float ascender = lycon->block.init_ascender;
+    float descender = lycon->block.init_descender;
+    layout_apply_line_height_leading(lycon->block.line_height, &ascender, &descender);
+    return max(descender, 0.0f);
 }
 
 static void layout_middle_inline_contribution(LayoutContext* lycon,
@@ -4619,13 +4629,7 @@ void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, CssEnum display
         }
     }
     layout_stretch_vertical_auto_inline_children(block);
-    if (block->form_control() &&
-        block->form_control()->control_type == FORM_CONTROL_BUTTON &&
-        !layout_block_inline_axis_is_vertical(block) && block->first_child &&
-        (!block->blk || !block->block()->text_box_trim)) {
-        center_button_text_in_block(
-            static_cast<View*>(block->first_child), block->height);
-    }
+    layout_center_button_text(block);
     // CSS 2.1 §10.6.7: Finalize an auto-height BFC before CSS Align computes
     // its free space, so contained floats cannot create artificial overflow.
     bool has_text_box_trim = block->blk && block->block_mut()->text_box_trim;
@@ -9774,30 +9778,12 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
             return;
         }
     }
-    // CSS Counter handling (CSS 2.1 Section 12.4)
-    if (lycon->counter_context) {
-        counter_push_scope(lycon->counter_context);
-        // OL/UL/MENU/DIR implicit counter-reset: list-item (CSS 2.1 §12.5)
-        setup_list_container_counters(lycon, block, dom_elem);
-        if (block->blk && block->block_mut()->counter_reset) {
-            counter_reset(lycon->counter_context, block->block()->counter_reset);
-            compute_reversed_counter_initial(lycon, dom_elem);
-        }
-        if (block->blk && block->block_mut()->counter_increment) {
-            counter_increment(lycon->counter_context, block->block()->counter_increment);
-        }
-        if (block->blk && block->block_mut()->counter_set) {
-            counter_set(lycon->counter_context, block->block()->counter_set);
-        }
-        // CSS 2.1 Section 12.5: List markers use implicit "list-item" counter
-        if (display.outer == CSS_VALUE_LIST_ITEM || display.list_item) {
-            process_list_item(lycon, block, elmt, dom_elem, display);
-            // CSS 2.1 §8.3.1: Ensure list items have BoundaryProp allocated so
-            // wrappers) fires incorrectly, and parent-child collapse cannot
-            if (!block->bound) {
-                block->ensure_boundary(lycon);
-            }
-        }
+    LayoutCounterScope counter_scope;
+    if (!counter_scope.enter(lycon, block, dom_elem, display)) {
+        log_error("counter scope: cannot allocate block counter frame");
+        layout_block_restore_parent_context(lycon, pa_block, pa_font, pa_line);
+        log_leave();
+        return;
     }
     float original_margin_top = 0.0f;
     bool sibling_margin_collapsed_before_layout = false;
@@ -10297,9 +10283,12 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                 lycon->line.atomic_inline_count++;
             }
             // CSS 2.1 §10.8.1: vertical-align defaults to 'baseline' (CSS_VALUE__UNDEF=0 also means baseline).
+            // length/percentage alignment is stored as baseline plus an offset;
+            // do not re-add its unshifted baseline after the contribution above.
             bool has_non_baseline_valign = block->in_line &&
-                block->inl()->vertical_align != 0 &&
-                block->inl()->vertical_align != CSS_VALUE_BASELINE;
+                ((block->inl()->vertical_align != 0 &&
+                  block->inl()->vertical_align != CSS_VALUE_BASELINE) ||
+                 block->inl()->vertical_align_offset != 0.0f);
             if (has_non_baseline_valign) {
                 float block_flow_height = block->height + inline_block_box.margin_v;
                 if (block->inl()->vertical_align == CSS_VALUE_TEXT_TOP) {
@@ -10818,10 +10807,7 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
             layout_sticky_positioned(lycon, block);
         }
     }
-    // propagate_resets=true for regular elements (sibling visibility per CSS 2.1 §12.4.1)
-    if (lycon->counter_context) {
-        counter_pop_scope_propagate(lycon->counter_context, true);
-    }
+    counter_scope.close();
     if (!has_custom_layout) {
         radiant::SizeF result = radiant::size_f(block->width, block->height);
         radiant::layout_pass_cache_store(lycon, dom_elem, known_dims, result, "BLOCK");

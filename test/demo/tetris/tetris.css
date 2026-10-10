@@ -26,6 +26,7 @@ h1 { margin: 4px 0 0; font-size: 46px; letter-spacing: 5px; line-height: 1; }
 .overlay p { font-size: 12px; line-height: 1.6; color: #aab8d0; }
 .overlay .eyebrow { font-size: 9px; color: #57e4c2; }
 .overlay button { margin-top: 12px; background: #57e4c2; color: #102c29; border-color: #57e4c2; font-weight: bold; }
+.overlay #auto-play { display: block; margin: 10px auto 0; background: #202c44; color: #57e4c2; }
 .board-footnote { margin: 14px 0 0; color: #8996ae; font-size: 10px; }
 .sidebar { width: 252px; }
 .stats, .pieces, .held { padding: 18px; background: #151d31; border: 1px solid #2b3751; border-radius: 14px; margin-bottom: 16px; }

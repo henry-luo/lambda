@@ -319,6 +319,7 @@ float calculate_fit_content_width(LayoutContext* lycon, DomNode* node, float ava
 bool layout_element_inline_axis_is_vertical(DomElement* element);
 CssEnum layout_element_css_writing_mode(DomElement* element);
 WritingMode layout_element_writing_mode(DomElement* element);
+int css_logical_corner_index(CssPropertyCode property, DomElement* element);
 bool layout_inline_element_is_orthogonal(DomElement* element);
 // CSS 2.2 §9.2.1.1: block-in-inline fragments cannot collapse through a
 // parent when the inline box follows prior in-flow content.
@@ -840,12 +841,16 @@ inline BoxEdges layout_boundary_border_edges(const BoundaryProp* bound) {
 // Paint, the selection overlay and hit-testing share it so they clip alike. False
 // when the block does not clip its content.
 inline bool layout_block_overflow_clip(const ViewBlock* block, Bound* out) {
-    if (!block || !block->scroller || !block->scroll()->has_clip) return false;
+    if (!block) return false;
+    bool paint_containment = block->blk && block->block()->contain_paint;
+    if (!paint_containment && (!block->scroller || !block->scroll()->has_clip)) return false;
     BoxEdges border = layout_boundary_border_edges(
         block->bound ? block->boundary() : nullptr);
     BoxEdges padding = layout_boundary_padding_edges(
         block->bound ? block->boundary() : nullptr);
-    Bound clip = block->scroll()->clip;
+    // paint containment uses the overflow clip edge without creating a scroll container.
+    Bound clip = paint_containment ? Bound{0.0f, 0.0f, block->width, block->height}
+        : block->scroll()->clip;
     float margin = block->scroll()->overflow_clip_margin;
     CssEnum box = block->scroll()->overflow_clip_box;
     float left = box == CSS_VALUE_BORDER_BOX ? 0.0f : border.left;
@@ -1275,6 +1280,7 @@ typedef struct CounterScope {
     bool pseudo_scope;
     bool reset_replaces_sibling;
     bool pseudo_reset_for_descendants;
+    bool style_boundary;
 } CounterScope;
 // tier-3: layout-transient, valid within pass
 typedef struct CounterFrame {
@@ -1289,10 +1295,11 @@ typedef struct CounterContext {
     lam::Own<lam::ArrayList<CounterScope*>> scope_stack;
     // tracks element/pseudo boundaries separately from the active counter chain
     lam::Own<lam::ArrayList<CounterFrame>> frame_stack;
+    int quote_depth;
 
     bool init(Arena* backing_arena);
     void destroy();
-    void push_scope(bool pseudo_scope = false);
+    bool push_scope(bool pseudo_scope = false, bool style_boundary = false);
     void pop_scope();
     void pop_scope_propagate(bool propagate_resets = false,
                              bool preserve_reset_scope = false);
@@ -1300,13 +1307,41 @@ typedef struct CounterContext {
 
 CounterContext* counter_context_create(Arena* arena);
 void counter_context_destroy(CounterContext* ctx);
-void counter_push_scope(CounterContext* ctx, bool pseudo_scope = false);
+bool counter_push_scope(CounterContext* ctx, bool pseudo_scope = false);
 void counter_pop_scope_propagate(CounterContext* ctx, bool propagate_resets = false,
                                  bool preserve_reset_scope = false);
 void counter_reset(CounterContext* ctx, const char* counter_spec);
 void counter_increment(CounterContext* ctx, const char* counter_spec);
 void counter_set(CounterContext* ctx, const char* counter_spec);
 int counter_get_value(CounterContext* ctx, const char* name);
+// subtree mutations cannot escape style containment; reads retain outer instances.
+struct CounterStyleScope {
+    CounterContext* context = nullptr;
+    int saved_quote_depth = 0;
+    bool enter(CounterContext* counters, bool enabled);
+    void close();
+    ~CounterStyleScope() { close(); }
+};
+bool layout_has_style_containment(const ViewSpan* span);
+struct LayoutCounterScope {
+    CounterContext* context = nullptr;
+    CounterStyleScope style;
+    bool enter(LayoutContext* lycon, ViewSpan* span, DomElement* element, DisplayValue display);
+    void close();
+    ~LayoutCounterScope() { close(); }
+};
+struct CounterCheckpointState;
+// measurement temporarily owns cloned active maps; rollback restores values, frames and quote depth.
+struct CounterCheckpoint {
+    lam::Up<CounterContext> context;
+    lam::Up<CounterCheckpointState> states;
+    lam::Up<CounterScope> current;
+    size_t count = 0, frames = 0;
+    int quote_depth = 0;
+    bool enter(CounterContext* counters, ScratchArena* scratch, ScratchMark* mark);
+    void close();
+    ~CounterCheckpoint() { close(); }
+};
 void counter_get_all_values(CounterContext* ctx, const char* name, int** values, int* count);
 int counter_format_value(int value, uint32_t style, char* buffer, size_t buffer_size);
 struct CounterSnapshotEntry { const char* name; int value; };
@@ -1781,6 +1816,7 @@ bool layout_sum_reversed_counter_incs(DomElement* parent, const char* name,
 void compute_reversed_counter_initial(LayoutContext* lycon, DomElement* dom_elem);
 void process_list_item(LayoutContext* lycon, ViewBlock* block, DomNode* elmt,
                        DomElement* dom_elem, DisplayValue display);
+void layout_apply_list_item_counter(LayoutContext* lycon, ViewBlock* block, DomElement* element);
 bool layout_marker_is_outside(View* view);
 bool layout_list_item_has_in_flow_content(DomElement* element);
 const char* extract_counter_spec_from_style(StyleTree* style, CssPropertyCode css_property,
@@ -2406,6 +2442,7 @@ typedef struct FlexResolvedAxis {
 typedef struct FlexContainerLayout : FlexProp {
     // Layout state (computed during layout)
     lam::OwnArr<View*> flex_items;  // Array of child flex items
+    lam::OwnArr<View*> source_items; // generated content follows flattened source order, before CSS order sorting
     int item_count;
     int allocated_items;  // For dynamic array growth
     // Line information
@@ -2935,6 +2972,18 @@ inline LayoutAxis flex_main_axis(FlexContainerLayout* flex) {
     return flex_main_axis_from_props(flex);
 }
 
+inline bool flex_main_axis_reversed(const FlexProp* flex) {
+    if (!flex) return false;
+    bool direction_reverse = flex->direction == CSS_VALUE_ROW_REVERSE ||
+        flex->direction == CSS_VALUE_COLUMN_REVERSE;
+    bool vertical_rl_block_axis = flex->writing_mode == WM_VERTICAL_RL &&
+        flex_main_axis_from_props(flex) == LAYOUT_AXIS_X;
+    bool row_rtl = (flex->direction == CSS_VALUE_ROW ||
+                    flex->direction == CSS_VALUE_ROW_REVERSE) &&
+        flex->text_direction == TD_RTL;
+    return (direction_reverse != vertical_rl_block_axis) != row_rtl;
+}
+
 inline LayoutAxis flex_cross_axis(FlexContainerLayout* flex) {
     return flex_main_axis(flex) == LAYOUT_AXIS_X ? LAYOUT_AXIS_Y : LAYOUT_AXIS_X;
 }
@@ -3263,6 +3312,7 @@ typedef struct GridContainerLayout : GridProp {
     lam::Up<radiant::grid::TrackArray> computed_rows;
     lam::Up<radiant::grid::TrackArray> computed_columns;
     lam::OwnArr<struct ViewBlock*> grid_items;
+    lam::OwnArr<struct ViewBlock*> source_items;
     int item_count;
     int allocated_items;
     lam::OwnArr<GridLineName> line_names;
@@ -3341,7 +3391,11 @@ void layout_grid_container(LayoutContext* lycon, ViewBlock* container);
 void layout_grid_content(LayoutContext* lycon, ViewBlock* grid_container);
 int resolve_grid_item_styles(LayoutContext* lycon, ViewBlock* grid_container);
 void init_grid_item_view(LayoutContext* lycon, DomNode* child);
-void measure_grid_items(LayoutContext* lycon, GridContainerLayout* grid_layout);
+void measure_grid_items(LayoutContext* lycon, GridContainerLayout* grid_layout,
+                        bool intrinsic_width_contribution = false);
+IntrinsicSizes measure_grid_intrinsic_widths(LayoutContext* lycon, ViewBlock* container);
+void layout_apply_grid_item_min_content_floor(
+    LayoutContext* lycon, DomElement* item, IntrinsicSizes* sizes);
 void measure_grid_item_intrinsic(LayoutContext* lycon, ViewBlock* item,
                                   float* min_width, float* max_width,
                                   float* min_height, float* max_height);
@@ -3353,6 +3407,7 @@ typedef struct LayoutContext {
     lam::Up<DomNode> elmt;  // current dom element, used before the view is created
     lam::Up<ViewTree> selected_view_tree; // explicit secondary environment for shared value resolution
     lam::Up<struct ViewCssStyle> selected_style;
+    bool css_query_probe; // resolve geometry without committing new motion timelines/snapshots
 
     BlockContext block;  // unified block context (layout state + floats + BFC)
     Linebox line;  // current linebox
@@ -3928,7 +3983,7 @@ void layout_materialize_pseudo_content(LayoutContext* lycon, ViewBlock* block,
 void layout_detach_first_letter_pseudo_content_for_layout_reset(struct DomElement* root);
 void layout_detach_materialized_pseudo_content_for_layout_reset(struct DomElement* root);
 void layout_update_pseudo_content_with_counters(LayoutContext* lycon,
-                                                DomElement* pseudo_element);
+                                                DomElement* pseudo_element, bool apply_counters = true);
 // Cross-origin document navigation needs its own host turn.  The synchronous
 // layout paths use this guard to retain the iframe's replaced-element box.
 DomDocument* layout_load_iframe_src_doc(LayoutContext* lycon, const char* src,
@@ -4074,6 +4129,7 @@ float layout_rtl_inline_item_x(Linebox* line, float item_width);
 void layout_flow_node(LayoutContext* lycon, DomNode* node);
 void layout_flow_children(LayoutContext* lycon, DomNode* first_child,
                          bool finalize_line = false);
+void layout_center_button_text(ViewBlock* block);
 // CSS Shadow DOM: return the tree that supplies a host's rendered children;
 // light-DOM children remain the DOM/API tree and are projected at <slot>.
 DomNode* layout_render_child_list(DomElement* element);
@@ -4556,6 +4612,8 @@ static inline bool layout_block_is_skipped_container_item(const ViewBlock* block
 
 void line_init(LayoutContext* lycon, float left, float right);
 void line_reset(LayoutContext* lycon);
+float layout_apply_line_height_leading(float line_height,
+                                       float* ascender, float* descender);
 float vertical_align_baseline_shift(LayoutContext* lycon, CssEnum align,
                                     float valign_offset = 0);
 float layout_apply_baseline_shift(LayoutContext* lycon,

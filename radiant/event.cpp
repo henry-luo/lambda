@@ -81,7 +81,6 @@ void rebuild_lambda_doc(UiContext* uicon);
 void rebuild_lambda_doc_incremental(UiContext* uicon, RetransformResult* results, int result_count);
 
 struct SelectorMatcher* selector_matcher_create(Pool* pool);
-static bool clear_cascaded_styles_visitor(DomNode* node, void* context);
 static void pseudo_state_batch_begin(DocState* state);
 static void pseudo_state_batch_end(DomDocument* doc, DocState* state);
 static bool radiant_dispatch_simple_event(EventContext* evcon, View* target,
@@ -101,15 +100,6 @@ static bool event_view_pointer_events_none(View* view) {
 }
 
 
-
-static bool event_view_is_float(View* view) {
-    if (!view || !view->is_element()) return false;
-    DomElement* elem = lam::dom_require_element(view);
-    CssEnum float_value = elem->position
-        ? elem->positionp()->float_prop
-        : layout_specified_keyword(elem, CSS_PROPERTY_FLOAT, CSS_VALUE_NONE);
-    return float_value == CSS_VALUE_LEFT || float_value == CSS_VALUE_RIGHT;
-}
 
 // Forward declarations for event targeting
 void target_html_doc(EventContext* evcon, ViewTree* view_tree);
@@ -899,11 +889,9 @@ static void target_custom_layout_children(EventContext* evcon, ViewBlock* block)
 void target_children(EventContext* evcon, View* view) {
     if (!evcon || !view) return;
 
-    bool has_float_child = false;
     bool has_step8 = false;
     View* last = view;
     for (View* child = view; child; child = child->next()) {
-        if (event_view_is_float(child)) has_float_child = true;
         if (!radiant_stack_is_deferred_from_normal_flow(child) &&
             radiant_stack_is_in_flow_positioned_step8(child)) {
             has_step8 = true;
@@ -925,13 +913,10 @@ void target_children(EventContext* evcon, View* view) {
         if (evcon->target) return;
     }
 
-    // floating siblings can overlap after shrink-to-fit; later floats paint on
-    // top of earlier ones, so their normal-flow hit order must be reversed.
-    for (View* child = has_float_child ? last : view;
+    // overlapping normal-flow boxes also take hits in reverse paint order.
+    for (View* child = last;
          child && !evcon->target;
-         child = has_float_child
-             ? (child == view ? nullptr : static_cast<View*>(child->prev_sibling))
-             : child->next()) {
+         child = child == view ? nullptr : static_cast<View*>(child->prev_sibling)) {
         // step-8 boxes were tried above
         if (has_step8 && radiant_stack_is_in_flow_positioned_step8(child)) continue;
         if (child->is_block()) {
@@ -1223,13 +1208,14 @@ void target_block_view(EventContext* evcon, ViewBlock* block) {
     // must not take the hit either: an overflowing child would claim clicks on
     // a later sibling painted over it, e.g. a tab bar under a long <pre>. The
     // clip is in unscrolled block space, so test it before the scroll offset.
-    Bound overflow_clip;
-    bool clipped_out = layout_block_overflow_clip(block, &overflow_clip) &&
+    Bound overflow_clip; Corner overflow_radius;
+    bool clipped_out = render_clip_overflow_geometry(block, &overflow_clip, &overflow_radius) &&
         !event_block_is_top_level_viewport(block) &&
-        !(evcon->block.x + overflow_clip.left <= event->x &&
-          event->x < evcon->block.x + overflow_clip.right &&
-          evcon->block.y + overflow_clip.top <= event->y &&
-          event->y < evcon->block.y + overflow_clip.bottom);
+        (event->x - evcon->block.x >= overflow_clip.right ||
+         event->y - evcon->block.y >= overflow_clip.bottom ||
+         !clip_point_in_rounded_rect(event->x - evcon->block.x, event->y - evcon->block.y,
+            {overflow_clip.left, overflow_clip.top, overflow_clip.right - overflow_clip.left,
+             overflow_clip.bottom - overflow_clip.top}, &overflow_radius));
     // target the scrollbars first
     View* view = NULL;
     bool hover = false;
@@ -1363,9 +1349,15 @@ void target_block_view(EventContext* evcon, ViewBlock* block) {
         bool rich_host_margin_hit_allowed = event_inside_block(evcon, block);
         bool rich_host = is_rich_editable_host(static_cast<View*>(block));
         if (!rich_host_margin_hit_allowed && rich_host) {
-            bool event_inside_later_sibling = false;
-            for (View* sibling = static_cast<View*>(block)->next_sibling;
+            // margin caret snapping belongs to this parent's gaps; it must not
+            // claim painted siblings or distant content during reverse hit traversal.
+            ViewBlock* parent_block = lam::view_as_block(block->parent);
+            rich_host_margin_hit_allowed = parent_block &&
+                pa_block.x <= event->x && event->x < pa_block.x + parent_block->width &&
+                pa_block.y <= event->y && event->y < pa_block.y + parent_block->height;
+            for (View* sibling = parent_block ? parent_block->first_child : nullptr;
                  sibling; sibling = sibling->next_sibling) {
+                if (sibling == static_cast<View*>(block)) continue;
                 if (sibling->view_type != RDT_VIEW_BLOCK &&
                     sibling->view_type != RDT_VIEW_INLINE_BLOCK &&
                     sibling->view_type != RDT_VIEW_LIST_ITEM) {
@@ -1376,11 +1368,10 @@ void target_block_view(EventContext* evcon, ViewBlock* block) {
                 float sibling_y = pa_block.y + sibling_block->y;
                 if (sibling_x <= event->x && event->x < sibling_x + sibling_block->width &&
                     sibling_y <= event->y && event->y < sibling_y + sibling_block->height) {
-                    event_inside_later_sibling = true;
+                    rich_host_margin_hit_allowed = false;
                     break;
                 }
             }
-            rich_host_margin_hit_allowed = !event_inside_later_sibling;
         }
         if (!evcon->target && is_in_rich_editable_subtree(static_cast<View*>(block)) &&
             rich_host_margin_hit_allowed) {
@@ -1428,8 +1419,16 @@ void target_block_view(EventContext* evcon, ViewBlock* block) {
         // use the block's own accumulated position (parent + block offset),
         // not the restored parent position
         float x = evcon->block.x + block->x, y = evcon->block.y + block->y;
+        BorderProp* border = block->bound ? block->boundary_mut()->border.get() : nullptr;
+        Corner radius = {};
+        if (border) {
+            resolve_border_radius_percentages(&border->radius, block->width, block->height);
+            radius = border->radius;
+            constrain_corner_radii(&radius, block->width, block->height);
+        }
         if (x <= event->x && event->x < x + block->width &&
-            y <= event->y && event->y < y + block->height) {
+            y <= event->y && event->y < y + block->height &&
+            clip_point_in_rounded_rect(event->x, event->y, {x, y, block->width, block->height}, &radius)) {
             // A fixed editor overlay can cover the viewport visually while
             // pointer-events:none makes the underlying control the hit target.
             log_debug("hit on block: %s", block->node_name());
@@ -3152,8 +3151,15 @@ struct TemplateUiAllocationScope {
     }
 };
 
+static void sync_hover_pseudo_state_after_transition(DocState* state,
+                                                     View* prev_hover,
+                                                     View* new_target);
+
 static bool settle_template_retransform(EventContext* evcon,
                                         bool* out_model_reconciled) {
+    // nested dispatch must finish the active procedural handler before its
+    // redraw can retire nodes still needed by the handler's native continuation.
+    if (g_emit_handler_ctx) return false;
     if (!render_map_has_dirty()) return false;
     RetransformResult results[16];
     int count = 0;
@@ -3172,7 +3178,25 @@ static bool settle_template_retransform(EventContext* evcon,
     }
     if (!any_changed) return false;
     if (evcon) {
+        DocState* state = event_context_target_state(evcon);
+        bool had_hover = state && state->hover_target;
         rebuild_lambda_doc_incremental(evcon->ui_context, results, reported);
+        if (had_hover && evcon->ui_context->mouse_state.has_position) {
+            // regeneration retires physical nodes, but the pointer has not
+            // moved. Re-hit the settled tree so its next exit has a source.
+            DomDocument* doc = event_context_target_document(evcon);
+            MouseState* mouse = &evcon->ui_context->mouse_state;
+            // mouse positions belong to the host viewport; its hit test also
+            // applies iframe transforms before selecting a document's node.
+            DomElement* hit_element = (DomElement*)radiant_document_element_from_point(
+                evcon->ui_context->document, mouse->last_x, mouse->last_y);
+            View* hit = hit_element && hit_element->doc == doc
+                ? static_cast<View*>(hit_element) : nullptr;
+            View* previous = static_cast<View*>(state->hover_target);
+            HoverTransitionArgs args = { .target = hit };
+            hover_transition(state, HOVER_TRANSITION_SET_TARGET, &args);
+            sync_hover_pseudo_state_after_transition(state, previous, hit);
+        }
         evcon->need_repaint = true;
     }
     if (out_model_reconciled) *out_model_reconciled = true;
@@ -3246,7 +3270,7 @@ static View* settle_author_templates_for_ua(EventContext* evcon, View* target,
     if (!target_path) return target;
     DomDocument* doc = event_context_target_document(evcon);
     View* rebuilt_target = resolve_event_target_path(doc, target_path);
-    if (rebuilt_target && evcon) {
+    if (evcon) {
         // The physical default-action seam follows this call. Keep its target
         // on the replacement node after author reactivity retired the old one.
         evcon->target = rebuilt_target;
@@ -4766,7 +4790,10 @@ static bool dispatch_lambda_handler(EventContext* evcon, View* target, const cha
         DomDocument* doc = event_context_target_document(evcon);
         bool target_path_valid = capture_event_target_path(doc, target, &target_path);
         if (!allow_behavior || radiant_dom_event_default_prevented(evcon->dom_event)) {
-            settle_pending_author_templates(evcon, out_model_reconciled);
+            // author-only dispatch still precedes physical click defaults;
+            // keep their target on the rebuilt tree even without a UA handler.
+            settle_author_templates_for_ua(evcon, target,
+                target_path_valid ? &target_path : nullptr, out_model_reconciled);
             return false;
         }
         if (!evcon->dom_event_ua_handled) {
@@ -6526,11 +6553,6 @@ static void dom_js_record_reconcile(DomDocument* doc,
     event_state_log_finish_record(state->active_event_log, &w);
 }
 
-static bool dom_js_clear_layout_dirty_visitor(DomNode* node, void*) {
-    node->layout_dirty = false;
-    return true;
-}
-
 static bool dom_js_is_connected_to_document(DomDocument* doc, DomNode* node) {
     if (!doc || !node) return false;
     DomNode* root = static_cast<DomNode*>(doc->root);
@@ -7377,14 +7399,7 @@ static void dom_js_recascade_subtree(DomDocument* doc, DomElement* root,
         return;
     }
 
-    view_geometry_walk_dom_tree(static_cast<DomNode*>(root),
-                                clear_cascaded_styles_visitor, nullptr);
-
-    Pool* pool = doc->document_pool;
-    CssEngine* css_engine = (CssEngine*)doc->services.cached_css_engine;
-    radiant_apply_css_stylesheets_to_tree(
-        doc, root, doc->stylesheets, doc->stylesheet_count,
-        pool, css_engine, matcher);
+    radiant_recascade_document_styles(doc, root, matcher);
 }
 
 static bool dom_js_recascade_mutations(DomDocument* doc, SelectorMatcher* matcher) {
@@ -7726,11 +7741,6 @@ static bool post_html_handler_incremental_rebuild(
     doc->incremental_layout = false;
     if (evcon->ui_context) evcon->ui_context->document = lam::up(saved_doc);
 
-    if (doc->root) {
-        view_geometry_walk_dom_tree(static_cast<DomNode*>(doc->root),
-                                    dom_js_clear_layout_dirty_visitor, nullptr);
-    }
-
     uint64_t t2 = time_now_ns();
 
     int dirty_rect_count = 0;
@@ -7975,7 +7985,7 @@ static void post_html_handler_rebuild(EventContext* evcon,
     // Clear previously cascaded declarations so removed classes/attributes cannot
     // keep stale winning CSS declarations in specified_style.
     view_geometry_walk_dom_tree(static_cast<DomNode*>(doc->root),
-                                clear_cascaded_styles_visitor, nullptr);
+                                radiant_clear_cascaded_styles_visitor, nullptr);
     SelectorMatcher matcher_storage;
     selector_matcher_init(&matcher_storage, pool);
     SelectorMatcher* matcher = &matcher_storage;
@@ -8825,14 +8835,17 @@ typedef struct {
     int detail;
     double timestamp_ms;
     double movement_x, movement_y;
+    View* related;
 } MouseEventBuildArgs;
 
 static Item build_mouse_event_item(void* userdata) {
     MouseEventBuildArgs* args = (MouseEventBuildArgs*)userdata;
-    RootFrame roots(1);
+    RootFrame roots(2);
+    DomElement* related = view_geometry_nearest_dom_element(args->related);
+    Rooted<Item> related_root(roots, related ? dom_wrap_element(related) : ItemNull);
     Rooted<Item> event(roots, js_create_native_mouse_event(args->type, args->client_x, args->client_y,
         args->button, args->buttons, args->ctrl, args->shift, args->alt,
-        args->meta, args->detail, ItemNull));
+        args->meta, args->detail, related_root.get()));
     if (args->timestamp_ms >= 0.0) {
         js_event_set_timestamp(event.get(), args->timestamp_ms);
     }
@@ -8846,11 +8859,12 @@ static bool radiant_dispatch_mouse_event(EventContext* evcon, View* target,
                                          bool ctrl, bool shift, bool alt, bool meta,
                                          int detail,
                                          bool* dispatched = nullptr,
-                                         double timestamp_ms = -1.0)
+                                         double timestamp_ms = -1.0,
+                                         View* related = nullptr)
 {
     MouseEventBuildArgs args = {
         type, client_x, client_y, button, buttons,
-        ctrl, shift, alt, meta, detail, timestamp_ms, 0, 0
+        ctrl, shift, alt, meta, detail, timestamp_ms, 0, 0, related
     };
     if (evcon && evcon->event.type == RDT_EVENT_MOUSE_MOVE) {
         args.movement_x = evcon->event.mouse_position.movement_x;
@@ -9575,24 +9589,6 @@ bool radiant_editing_animation_tick(UiContext* uicon, double timestamp) {
 // Interaction State Updates
 // ============================================================================
 
-/**
- * Clear stylesheet declarations and styles_resolved on every element in the
- * subtree. Live inline declarations remain attached while previously matching
- * selector declarations (e.g. :hover) are removed.
- */
-static bool clear_cascaded_styles_visitor(DomNode* node, void*) {
-    if (!node->is_element()) return true;
-    DomElement* e = lam::dom_require_element(node);
-    if (!layout_element_is_anonymous_table_fixup(e)) {
-        dom_element_clear_cascaded_styles(e);
-        // Pseudo declarations share the base cascade epoch; otherwise a :hover
-        // recascade reads declarations that no longer match.
-        dom_element_clear_pseudo_styles(e);
-        e->set_styles_resolved(false);
-    }
-    return true;
-}
-
 static bool mark_layout_dirty_visitor(DomNode* node, void*) {
     node->layout_dirty = true;
     return true;
@@ -10079,31 +10075,10 @@ static void refresh_hover_color_background_paths(DocState* state,
     refresh_hover_color_background_path(state, doc, &lycon, new_target);
 }
 
-static void recascade_document_for_pseudo_state(DomDocument* doc, DocState* state) {
-    if (!doc || !state) return;
-
-    Pool* pool = doc->document_pool;
-    CssEngine* css_engine = (CssEngine*)doc->services.cached_css_engine;
-    if (pool && css_engine && doc->root) {
-        // Pseudo-state changes can affect descendants through selectors like
-        // `.parent:hover .child`, so clear and re-apply the full cascade once
-        // after the StateStore pseudo bits have been updated.
-        view_geometry_walk_dom_tree(static_cast<DomNode*>(doc->root),
-                                    clear_cascaded_styles_visitor, nullptr);
-        // caller-owned matcher: a pointer-state change must not retain one per event
-        SelectorMatcher matcher_storage;
-        selector_matcher_init(&matcher_storage, pool);
-        state_configure_selector_matcher(state, &matcher_storage);
-        radiant_apply_css_stylesheets_to_tree(
-            doc, doc->root, doc->stylesheets, doc->stylesheet_count,
-            pool, css_engine, &matcher_storage);
-    }
-}
-
 static void apply_pseudo_state_restyle(DomDocument* doc, DocState* state) {
     if (!doc || !state || !doc->root) return;
 
-    recascade_document_for_pseudo_state(doc, state);
+    radiant_recascade_document(doc);
 
     // Selector combinators can make a pseudo-state change affect siblings
     // and ancestors, so a subtree-only request leaves `:checked + label`
@@ -10204,7 +10179,7 @@ static void sync_hover_pseudo_state_after_transition(DocState* state,
         if (paint_only_hover) {
             refresh_hover_color_background_paths(state, doc, prev_hover, new_target);
         } else {
-            recascade_document_for_pseudo_state(doc, state);
+            radiant_recascade_document(doc);
             if (doc->root) {
                 reflow_schedule(state, doc->root, REFLOW_SUBTREE, CHANGE_PSEUDO_STATE);
                 dirty_mark_element(state, doc->root);
@@ -10229,6 +10204,46 @@ static void sync_hover_pseudo_state_after_transition(DocState* state,
     doc_state_mark_dirty(state);
 }
 
+struct HoverEventPath {
+    DomDocument* document;
+    DomNodeRef* nodes;
+    size_t count;
+
+    HoverEventPath(DomDocument* doc, View* target)
+        : document(doc), nodes(nullptr), count(0) {
+        DomElement* element = view_geometry_nearest_dom_element(target);
+        if (!doc || !element) return;
+        size_t depth = 0;
+        for (DomNode* node = element; node; node = node->parent) {
+            if (node->is_element()) depth++;
+        }
+        nodes = (DomNodeRef*)mem_calloc(depth, sizeof(DomNodeRef), MEM_CAT_LAYOUT);
+        if (!nodes) return;
+        // handlers may rebuild or detach this chain during the first event.
+        // snapshot and pin every target before invoking author code (D4.5.2).
+        for (DomNode* node = element; node; node = node->parent) {
+            if (!node->is_element()) continue;
+            DomNodeRef ref = dom_node_ref(node);
+            if (dom_node_ref_validate(doc, ref) &&
+                dom_node_pin(doc, ref, DOM_NODE_PIN_EVENT_QUEUE)) {
+                nodes[count++] = ref;
+            }
+        }
+    }
+
+    ~HoverEventPath() {
+        for (size_t i = 0; i < count; i++) {
+            dom_node_unpin(document, nodes[i], DOM_NODE_PIN_EVENT_QUEUE);
+        }
+        if (nodes) mem_free(nodes);
+    }
+
+    View* at(size_t index) const {
+        return index < count
+            ? static_cast<View*>(dom_node_ref_validate(document, nodes[index])) : nullptr;
+    }
+};
+
 /**
  * Update hover state when mouse moves to a new target
  * Sets :hover on target and all ancestors, clears :hover on previous target
@@ -10241,35 +10256,42 @@ void update_hover_state(EventContext* evcon, View* new_target) {
 
     if (prev_hover == new_target) return;  // no change
 
+    DomDocument* doc = event_context_target_document(evcon);
+    HoverEventPath previous_path(doc, prev_hover);
+    HoverEventPath next_path(doc, new_target);
+    size_t leave_count = previous_path.count;
+    size_t enter_count = next_path.count;
+    // shared ancestors remain hovered when the pointer crosses sibling content.
+    while (leave_count && enter_count &&
+           previous_path.nodes[leave_count - 1].address == next_path.nodes[enter_count - 1].address &&
+           previous_path.nodes[leave_count - 1].expected_id == next_path.nodes[enter_count - 1].expected_id) {
+        leave_count--;
+        enter_count--;
+    }
+
     HoverTransitionArgs hover_args = { .target = new_target };
     hover_transition(state, HOVER_TRANSITION_SET_TARGET, &hover_args);
 
     sync_hover_pseudo_state_after_transition(state, prev_hover, new_target);
     evcon->need_repaint = true;
 
-    if (prev_hover) {
-        log_debug("update_hover_state: cleared hover on %p", prev_hover);
-        // Hover transitions previously emitted only mouseover, leaving
-        // mouseenter-driven tooltip libraries unable to observe real input.
-        radiant_dispatch_mouse_event(evcon, prev_hover, "mouseout",
+    if (previous_path.at(0) == next_path.at(0)) return;
+
+    auto dispatch_boundary = [&](View* target, const char* type, View* related) {
+        if (!target) return;
+        radiant_dispatch_mouse_event(evcon, target, type,
             evcon->event.mouse_position.x, evcon->event.mouse_position.y,
-            0, 0, false, false, false, false, 0);
-        radiant_dispatch_mouse_event(evcon, prev_hover, "mouseleave",
-            evcon->event.mouse_position.x, evcon->event.mouse_position.y,
-            0, 0, false, false, false, false, 0);
+            0, 0, false, false, false, false, 0, nullptr, -1.0, related);
+    };
+    dispatch_boundary(previous_path.at(0), "mouseout", next_path.at(0));
+    // UI Events generates non-bubbling boundaries for each changed ancestor:
+    // leave from the leaf outward, then enter from the outer ancestor inward.
+    for (size_t i = 0; i < leave_count; i++) {
+        dispatch_boundary(previous_path.at(i), "mouseleave", next_path.at(0));
     }
-
-    if (new_target) {
-        log_debug("update_hover_state: set hover on %p", new_target);
-
-        // Dispatch through the unified EventTarget path. Static inline
-        // attributes have already been installed as IDL `onmouseover` slots.
-        radiant_dispatch_mouse_event(evcon, new_target, "mouseover",
-            evcon->event.mouse_position.x, evcon->event.mouse_position.y,
-            0, 0, false, false, false, false, 0);
-        radiant_dispatch_mouse_event(evcon, new_target, "mouseenter",
-            evcon->event.mouse_position.x, evcon->event.mouse_position.y,
-            0, 0, false, false, false, false, 0);
+    dispatch_boundary(next_path.at(0), "mouseover", previous_path.at(0));
+    for (size_t i = enter_count; i > 0; i--) {
+        dispatch_boundary(next_path.at(i - 1), "mouseenter", previous_path.at(0));
     }
 }
 
@@ -10521,12 +10543,17 @@ static bool dispatch_click_default_actions(EventContext* evcon, View* target) {
     if (!evcon || !target || evcon->default_prevented) return false;
 
     bool handled = false;
+    bool reconciled = false;
     View* activation_target = find_checkbox_radio_input(target);
     if (!activation_target) activation_target = target;
-    if (dispatch_lambda_handler(evcon, activation_target, "click")) {
+    if (dispatch_lambda_handler(evcon, activation_target, "click", nullptr, &reconciled)) {
         evcon->need_repaint = true;
         handled = true;
     }
+
+    // settling author state can retire a nested label before form/link defaults.
+    if (reconciled) target = evcon->target;
+    if (!target) return handled;
 
     View* submit_target = find_form_activation_button(target, false);
     if (submit_target && !evcon->default_prevented &&
@@ -11425,14 +11452,15 @@ void update_focus_state(EventContext* evcon, View* new_focus, bool from_keyboard
                 should_dispatch_change ? SM_EV_UI_FOCUS_WITH_CHANGE :
                                          SM_EV_UI_FOCUS_WITH_BLUR,
                 new_focus);
-            focus_set(state, new_focus, from_keyboard);
+            // the mouse policy can choose tabindex=-1; only Tab uses sequential eligibility.
+            focus_set_programmatic(state, new_focus, from_keyboard);
             if (should_dispatch_change) {
                 dispatch_focus_change_observed(evcon, prev_focus);
             }
             dispatch_focus_blur_observed(evcon, prev_focus, new_focus);
             sm_guard.commit();
         } else {
-            focus_set(state, new_focus, from_keyboard);
+            focus_set_programmatic(state, new_focus, from_keyboard);
         }
 
         radiant_dispatch_focus_event(evcon, new_focus, "focus", prev_focus);
@@ -14297,6 +14325,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 // hit testing lands on a child created by a widget library.
                 bool click_on_disabled_control = click_target_is_disabled_control(
                     state, evcon.target);
+                // disabled pointer activation must also skip deferred Lambda dispatch.
                 if (evcon.target && !click_on_disabled_control) {
                     bool prevented = radiant_dispatch_button_mouse_event(
                         &evcon, evcon.target, "click", mouse_x, mouse_y,
@@ -14394,12 +14423,12 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     }
                 }
 
-                if (evcon.target) {
+                if (evcon.target && !click_on_disabled_control) {
                     dispatch_click_default_actions(&evcon, evcon.target);
                 }
                 // finish click defaults before dblclick replaces the in-flight
                 // record; otherwise Lambda author handlers receive click twice.
-                if (evcon.target && btn_event->clicks == 2) {
+                if (evcon.target && !click_on_disabled_control && btn_event->clicks == 2) {
                     radiant_dispatch_button_mouse_event(
                         &evcon, evcon.target, "dblclick", mouse_x, mouse_y,
                         btn_event, 0, 2);

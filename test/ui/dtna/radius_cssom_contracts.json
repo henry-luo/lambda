@@ -1,0 +1,195 @@
+{
+  "name": "computed corner radii preserve percentages math and logical mapping after paint and resize",
+  "html": "test/ui/dtna/radius_cssom_contracts.html",
+  "viewport": {
+    "width": 500,
+    "height": 500
+  },
+  "events": [
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#percent"
+      },
+      "property": "border-radius",
+      "equals": "50%"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#percent"
+      },
+      "property": "border-top-left-radius",
+      "equals": "50%"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#overlap"
+      },
+      "property": "border-radius",
+      "equals": "80px"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#elliptic"
+      },
+      "property": "border-radius",
+      "equals": "10px 20px 30px 40px / 50% 60% 70% 80%"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#elliptic"
+      },
+      "property": "border-top-right-radius",
+      "equals": "20px 60%"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#elliptic"
+      },
+      "property": "border-bottom-left-radius",
+      "equals": "40px 80%"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#math"
+      },
+      "property": "border-radius",
+      "equals": "calc(10px + 20%)"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#font"
+      },
+      "property": "border-radius",
+      "equals": "20px"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#logical"
+      },
+      "property": "border-top-right-radius",
+      "equals": "11px 22px"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#logical"
+      },
+      "property": "border-start-start-radius",
+      "equals": "11px 22px"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#logical"
+      },
+      "property": "border-top-left-radius",
+      "equals": "0px"
+    },
+    {
+      "type": "render",
+      "file": "temp/ui_dtna/radius_cssom_contracts.png"
+    },
+    {
+      "type": "resize",
+      "width": 700,
+      "height": 500
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#percent"
+      },
+      "property": "border-radius",
+      "equals": "50%"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#percent"
+      },
+      "property": "border-top-left-radius",
+      "equals": "50%"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#overlap"
+      },
+      "property": "border-radius",
+      "equals": "80px"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#elliptic"
+      },
+      "property": "border-radius",
+      "equals": "10px 20px 30px 40px / 50% 60% 70% 80%"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#elliptic"
+      },
+      "property": "border-top-right-radius",
+      "equals": "20px 60%"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#elliptic"
+      },
+      "property": "border-bottom-left-radius",
+      "equals": "40px 80%"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#math"
+      },
+      "property": "border-radius",
+      "equals": "calc(10px + 20%)"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#font"
+      },
+      "property": "border-radius",
+      "equals": "20px"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#logical"
+      },
+      "property": "border-top-right-radius",
+      "equals": "11px 22px"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#logical"
+      },
+      "property": "border-start-start-radius",
+      "equals": "11px 22px"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#logical"
+      },
+      "property": "border-top-left-radius",
+      "equals": "0px"
+    }
+  ]
+}

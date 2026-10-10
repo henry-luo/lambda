@@ -1,5 +1,19 @@
 import world: .superlambda_core
 
+let auto = world.action(world.new_game(), "auto")
+let auto_finish = reduce([auto, *[for (i in 1 to 1000) i]],
+  (game, unused) => if (game.mode == "playing") world.tick(world.auto_controls(game)) else game)
+{
+  auto_starts: auto.autoplay and auto.mode == "playing",
+  auto_finishes: auto_finish.mode == "won",
+  auto_checkpoint: auto_finish.checkpoint,
+  auto_coins: auto_finish.coins > 0,
+  auto_keeps_lives: auto_finish.lives > 0,
+  auto_pause: world.tick(world.action(auto, "pause")).ticks == 0,
+  auto_resume: world.action(world.action(auto, "pause"), "pause").autoplay,
+  auto_restart_manual: not world.action(auto, "restart").autoplay
+}
+
 fn frames(game, remaining) => if (remaining <= 0) game else frames(world.tick(game), remaining - 1)
 fn at(game, x, y, vx, vy, grounded) => {*:game,
   hero: {*:game.hero, x: x, y: y, vx: vx, vy: vy, grounded: grounded, coyote: 0}}

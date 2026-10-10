@@ -82,6 +82,11 @@ static CssPropertyCode transition_longhands[] = {
 static CssPropertyCode marker_longhands[] = {
     CSS_PROPERTY_MARKER_START, CSS_PROPERTY_MARKER_MID, CSS_PROPERTY_MARKER_END
 };
+static CssPropertyCode column_rule_longhands[] = {
+    CSS_PROPERTY_COLUMN_RULE_WIDTH, CSS_PROPERTY_COLUMN_RULE_STYLE, CSS_PROPERTY_COLUMN_RULE_COLOR
+};
+
+static CssPropertyCode container_longhands[] = {CSS_PROPERTY_CONTAINER_NAME, CSS_PROPERTY_CONTAINER_TYPE};
 
 static CssProperty property_definitions[] = {
     // Layout Properties
@@ -375,7 +380,7 @@ static CssProperty property_definitions[] = {
     {CSS_PROPERTY_COLUMN_WIDTH, "column-width", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "auto", true, false, NULL, 0, validate_length, NULL},
     {CSS_PROPERTY_COLUMN_COUNT, "column-count", PROP_TYPE_NUMBER, PROP_INHERIT_NO, "auto", false, false, NULL, 0, validate_integer, NULL},
     {CSS_PROPERTY_COLUMNS, "columns", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "auto", false, true, NULL, 0, validate_keyword, NULL},
-    {CSS_PROPERTY_COLUMN_RULE, "column-rule", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "none", false, true, NULL, 0, validate_keyword, NULL},
+    {CSS_PROPERTY_COLUMN_RULE, "column-rule", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "none", false, true, column_rule_longhands, 3, validate_keyword, NULL},
     {CSS_PROPERTY_COLUMN_RULE_WIDTH, "column-rule-width", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "medium", true, false, NULL, 0, validate_length, NULL},
     {CSS_PROPERTY_COLUMN_RULE_STYLE, "column-rule-style", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "none", false, false, NULL, 0, validate_keyword, NULL},
     {CSS_PROPERTY_COLUMN_RULE_COLOR, "column-rule-color", PROP_TYPE_COLOR, PROP_INHERIT_NO, "currentColor", true, false, NULL, 0, validate_color, NULL},
@@ -499,7 +504,7 @@ static CssProperty property_definitions[] = {
     {CSS_PROPERTY_WIDOWS, "widows", PROP_TYPE_NUMBER, PROP_INHERIT_YES, "2", false, false, NULL, 0, validate_integer, NULL},
 
     // Container Properties
-    {CSS_PROPERTY_CONTAINER, "container", PROP_TYPE_STRING, PROP_INHERIT_NO, "none", false, true, NULL, 0, validate_string, NULL},
+    {CSS_PROPERTY_CONTAINER, "container", PROP_TYPE_STRING, PROP_INHERIT_NO, "none", false, true, container_longhands, 2, validate_string, NULL},
     {CSS_PROPERTY_CONTAINER_TYPE, "container-type", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "normal", false, false, NULL, 0, validate_keyword, NULL},
     {CSS_PROPERTY_CONTAINER_NAME, "container-name", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "none", false, false, NULL, 0, validate_keyword, NULL},
     {CSS_PROPERTY_CONTAIN, "contain", PROP_TYPE_STRING, PROP_INHERIT_NO, "none", false, false, NULL, 0, validate_string, NULL},
@@ -2271,10 +2276,128 @@ static bool css_grid_track_list_valid(const CssValue* value, bool line_names,
     return !inside_names && tracks > 0;
 }
 
+static const CssValue* css_space_list_item(const CssValue* value, size_t index) {
+    return value->type == CSS_VALUE_TYPE_LIST ? value->data.list.values[index] : index ? nullptr : value;
+}
+
+static size_t css_space_list_count(const CssValue* value) {
+    return !value ? 0 : value->type == CSS_VALUE_TYPE_LIST
+        ? value->data.list.comma_separated ? 0 : (size_t)value->data.list.count : 1;
+}
+
+struct CssKeywordSetItem { const char* name; uint32_t bit; bool alone; };
+
+static bool css_keyword_set_valid(const CssValue* value, size_t first, size_t count,
+        const CssKeywordSetItem* options, size_t option_count, uint32_t exclusive) {
+    if (!count) return false;
+    uint32_t seen = 0;
+    for (size_t i = first; i < first + count; i++) {
+        const CssValue* item = css_space_list_item(value, i);
+        const char* name = css_value_identifier_name(item);
+        if (!name || item->type == CSS_VALUE_TYPE_STRING) return false;
+        const CssKeywordSetItem* option = nullptr;
+        for (size_t j = 0; j < option_count; j++)
+            if (str_ieq_cstr(name, options[j].name)) { option = &options[j]; break; }
+        if (!option || (option->alone && count != 1) || (seen & option->bit) ||
+            ((option->bit & exclusive) && (seen & exclusive))) return false;
+        seen |= option->bit;
+    }
+    return true;
+}
+
+static bool css_container_items_valid(const CssValue* value, size_t first, size_t count, bool type) {
+    if (type) {
+        static const CssKeywordSetItem options[] = {
+            {"normal", 1, true}, {"size", 2, false}, {"inline-size", 4, false}, {"scroll-state", 8, false}
+        };
+        return css_keyword_set_valid(value, first, count, options, sizeof(options) / sizeof(*options), 2 | 4);
+    }
+    if (!count) return false;
+    for (size_t i = first; i < first + count; i++) {
+        const CssValue* item = css_space_list_item(value, i);
+        const char* name = css_value_identifier_name(item);
+        if (!name || item->type == CSS_VALUE_TYPE_STRING) return false;
+        if (str_ieq_cstr(name, "none")) { if (count != 1) return false; }
+        else if (!css_value_is_custom_ident(item) || str_ieq_cstr(name, "and") ||
+            str_ieq_cstr(name, "or") || str_ieq_cstr(name, "not")) return false;
+    }
+    return true;
+}
+
+static bool css_container_parts(const CssValue* value, size_t* split, size_t* count) {
+    *count = css_space_list_count(value);
+    *split = *count;
+    for (size_t i = 0; i < *count; i++) {
+        const char* name = css_value_identifier_name(css_space_list_item(value, i));
+        if (name && strcmp(name, "/") == 0) {
+            if (*split != *count) return false;
+            *split = i;
+        }
+    }
+    return css_container_items_valid(value, 0, *split, false) &&
+        (*split == *count || css_container_items_valid(value, *split + 1, *count - *split - 1, true));
+}
+
+static const CssValue* css_container_name_token(const CssValue* value, Pool* pool) {
+    if (!value || value->type != CSS_VALUE_TYPE_KEYWORD || value->data.keyword == CSS_VALUE_NONE) return value;
+    CssValue* name = (CssValue*)pool_calloc(pool, sizeof(CssValue));
+    if (!name) return nullptr;
+    name->type = CSS_VALUE_TYPE_CUSTOM;
+    name->data.custom_property.name = value->has_keyword_spelling
+        ? value->data.keyword_token.spelling : css_value_identifier_name(value);
+    return name;
+}
+
+const CssValue* css_container_shorthand_longhand(const CssValue* value,
+    CssPropertyCode property, Pool* pool) {
+    if (!value || !pool || (property != CSS_PROPERTY_CONTAINER_NAME && property != CSS_PROPERTY_CONTAINER_TYPE)) return nullptr;
+    if (css_value_is_global_keyword(value)) return value;
+    size_t split = 0, count = 0;
+    if (!css_container_parts(value, &split, &count)) return nullptr;
+    if (property == CSS_PROPERTY_CONTAINER_TYPE && split == count) {
+        CssValue* normal = (CssValue*)pool_calloc(pool, sizeof(CssValue));
+        if (normal) {normal->type = CSS_VALUE_TYPE_KEYWORD; normal->data.keyword = CSS_VALUE_NORMAL;}
+        return normal;
+    }
+    size_t first = property == CSS_PROPERTY_CONTAINER_NAME ? 0 : split + 1;
+    size_t length = property == CSS_PROPERTY_CONTAINER_NAME ? split : count - first;
+    if (length == 1) return property == CSS_PROPERTY_CONTAINER_NAME
+        ? css_container_name_token(css_space_list_item(value, first), pool) : css_space_list_item(value, first);
+    CssValue* result = (CssValue*)pool_calloc(pool, sizeof(CssValue));
+    if (!result) return nullptr;
+    result->type = CSS_VALUE_TYPE_LIST;
+    if (property == CSS_PROPERTY_CONTAINER_NAME) {
+        result->data.list.values = (CssValue**)pool_calloc(pool, length * sizeof(CssValue*));
+        if (!result->data.list.values) return nullptr;
+        for (size_t i = 0; i < length; i++) {
+            result->data.list.values[i] = (CssValue*)css_container_name_token(css_space_list_item(value, first + i), pool);
+            if (!result->data.list.values[i]) return nullptr;
+        }
+    } else result->data.list.values = value->data.list.values + first;
+    result->data.list.count = length;
+    return result;
+}
+
 bool css_property_validate_value_mode(CssPropertyCode id,
                                       const CssValue* value,
                                       bool quirks_mode) {
     if (!value) return false;
+    if (id == CSS_PROPERTY_CONTAIN) {
+        if (css_value_is_global_keyword(value) || css_value_contains_pending_substitution(value)) return true;
+        static const CssKeywordSetItem options[] = {
+            {"none", 1, true}, {"strict", 2, true}, {"content", 4, true},
+            {"size", 8, false}, {"inline-size", 16, false}, {"layout", 32, false},
+            {"style", 64, false}, {"paint", 128, false}
+        };
+        return css_keyword_set_valid(value, 0, css_space_list_count(value), options,
+            sizeof(options) / sizeof(*options), 8 | 16);
+    }
+    if (id == CSS_PROPERTY_CONTAINER || id == CSS_PROPERTY_CONTAINER_NAME || id == CSS_PROPERTY_CONTAINER_TYPE) {
+        if (css_value_is_global_keyword(value) || css_value_contains_pending_substitution(value)) return true;
+        size_t split = 0, count = 0;
+        return id == CSS_PROPERTY_CONTAINER ? css_container_parts(value, &split, &count)
+            : css_container_items_valid(value, 0, css_space_list_count(value), id == CSS_PROPERTY_CONTAINER_TYPE);
+    }
 
     if (id == CSS_PROPERTY_GRID_TEMPLATE_COLUMNS || id == CSS_PROPERTY_GRID_TEMPLATE_ROWS ||
         id == CSS_PROPERTY_GRID_AUTO_COLUMNS || id == CSS_PROPERTY_GRID_AUTO_ROWS) {
@@ -2797,6 +2920,24 @@ bool css_property_validate_value_mode(CssPropertyCode id,
             }
             break;
         }
+
+        case CSS_PROPERTY_FONT_FAMILY: {
+            if (css_value_is_global_keyword(value) || css_value_contains_pending_substitution(value)) return true;
+            // reuse the shorthand family grammar after typed variables have expanded their lists.
+            auto family_name = [](const CssValue* item, void*) { return css_value_is_font_family_name(item); };
+            return css_value_visit_list_items(value, family_name, nullptr);
+        }
+
+        case CSS_PROPERTY_LETTER_SPACING:
+        case CSS_PROPERTY_WORD_SPACING:
+            // typed ancestor substitution must not turn colors or family lists into a zero advance.
+            if (css_value_is_global_keyword(value) || css_value_contains_pending_substitution(value)) return true;
+            if (value->type == CSS_VALUE_TYPE_KEYWORD) return value->data.keyword == CSS_VALUE_NORMAL;
+            if (value->type == CSS_VALUE_TYPE_LENGTH) return css_unit_is_length(value->data.length.unit);
+            if (value->type == CSS_VALUE_TYPE_NUMBER) return value->data.number.value == 0.0;
+            // CSS Text 4 percentage tracking is already resolved against the current font size.
+            if (value->type == CSS_VALUE_TYPE_PERCENTAGE) return id == CSS_PROPERTY_LETTER_SPACING;
+            return css_value_is_length_expression(value, id == CSS_PROPERTY_LETTER_SPACING, false);
 
         case CSS_PROPERTY_LINE_HEIGHT: {
             // CSS Inline: invalid dimensions must not replace a valid inherited line-height.
@@ -3389,6 +3530,7 @@ CssPropertyCode css_property_cascade_shorthand(CssPropertyCode property) {
         {CSS_PROPERTY_TRANSITION, transition_longhands, sizeof(transition_longhands) / sizeof(*transition_longhands)},
         {CSS_PROPERTY_BORDER_IMAGE, border_image_longhands, sizeof(border_image_longhands) / sizeof(*border_image_longhands)},
         {CSS_PROPERTY_MARKER, marker_longhands, sizeof(marker_longhands) / sizeof(*marker_longhands)},
+        {CSS_PROPERTY_CONTAINER, container_longhands, sizeof(container_longhands) / sizeof(*container_longhands)},
     };
     for (const Group& group : groups)
         for (size_t i = 0; i < group.count; i++) if (group.members[i] == property) return group.shorthand;

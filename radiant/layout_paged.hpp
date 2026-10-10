@@ -8,7 +8,7 @@ struct RadiantSourceOrigin;
 struct TypesetRegionPlacement;
 // bindings and policy are borrowed for layout; immutable material owners move with the retained generation.
 struct PagedNativeFlowBinding {
-    DomNodeRef control; // absent for a registered nested-only provider
+    DomNodeRef control; // body flow or repeated static content; absent for a nested-only provider
     TypesetFlowProvider provider;
     TypesetResume start;
     ViewNativeOwner owner;
@@ -27,6 +27,7 @@ struct PagedLayoutOptions {
     size_t max_nodes, max_items;
     size_t max_block_trials;
     uint32_t max_reference_passes;
+    uint32_t max_container_passes;
     bool right_binding;
     ViewPageSide first_side;
     const PagedNativeFlowBinding* native_flows;
@@ -41,6 +42,7 @@ struct PagedLayoutDiagnostic {
     const char* reason;
     uint32_t relaxed_line_minima, relaxed_avoidance;
     uint32_t reference_passes;
+    uint32_t container_passes;
     const RadiantSourceOrigin* origin;
 };
 PagedLayoutOptions paged_layout_options_default();

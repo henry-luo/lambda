@@ -1713,6 +1713,8 @@ static void radiant_option_selection_changed(DomElement* option, DocState* state
     doc_state_request_repaint(state);
 }
 
+static bool radiant_input_commit_value(DomElement* elem, DocState* state, const char* value);
+
 RADIANT_C_API Item fn_radiant_set_state(Item node_item, Item name_item, Item value_item) {
     DomElement* elem = nullptr;
     DocState* state = radiant_state_for_element(node_item, "SET_STATE", &elem);
@@ -1734,6 +1736,12 @@ RADIANT_C_API Item fn_radiant_set_state(Item node_item, Item name_item, Item val
     // bits, the form-control writers, or the generic state map — and schedules
     // the pseudo-class restyle, so script never bypasses that bookkeeping.
     if (kind == RSTATE_TEXT) {
+        // range values use the canonical numeric writer, including thumb state.
+        FormControlProp* control = elem->form_control();
+        if (control && control->control_type == FORM_CONTROL_RANGE) {
+            const char* text = fn_to_cstr(value_item);
+            return (Item){.item = b2it(radiant_input_commit_value(elem, state, text ? text : "") ? 1 : 0)};
+        }
         // tc_set_value is the canonical writer: it replaces the buffer, collapses
         // the selection, refreshes placeholder state and mirrors the legacy
         // pointer the renderer reads. Script must not poke the buffer directly.
@@ -3248,6 +3256,31 @@ RADIANT_C_API Item fn_radiant_capture_pointer(Item node_item) {
     if (!state || !elem) return (Item){.item = b2it(0)};
     DragTransitionArgs args = { .target = (View*)elem, .dragging = true };
     return (Item){.item = b2it(drag_transition(state, DRAG_TRANSITION_SET_STATE, &args) ? 1 : 0)};
+}
+
+RADIANT_C_API Item fn_radiant_set_canvas_pixels(Item node_item, Item pixels_item) {
+    RootFrame roots(2);
+    Rooted<Item> node(roots, node_item);
+    Rooted<Item> pixels(roots, pixels_item);
+    DomElement* element = (DomElement*)radiant_dom_unwrap_node(node.get());
+    int64_t shape[LAMBDA_ARRAY_NUM_MAX_NDIM], strides[LAMBDA_ARRAY_NUM_MAX_NDIM];
+    if (!element || element->tag() != MARKUP_NAME_CANVAS ||
+        get_type_id(pixels.get()) != LMD_TYPE_ARRAY_NUM) {
+        log_error("CANVAS_UPLOAD: expected a canvas and RGBA numeric array");
+        return ItemError;
+    }
+    ArrayNum* array = pixels.get().array_num;
+    if (array->get_elem_type() != ELEM_UINT8 ||
+        array_num_get_shape_strides(array, shape, strides) != 3 ||
+        shape[2] != 4 || shape[0] <= 0 || shape[1] <= 0 ||
+        shape[0] > UINT32_MAX || shape[1] > UINT32_MAX ||
+        !radiant_canvas_set_pixels(element, (const uint8_t*)array->data,
+            (uint32_t)shape[1], (uint32_t)shape[0], strides)) {
+        log_error("CANVAS_UPLOAD: rejected RGBA8 shape, context, or allocation");
+        return ItemError;
+    }
+    dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, element, element->parent);
+    return (Item){.item = b2it(1)};
 }
 
 // Pointer geometry for a range control: which value the given document-space
@@ -5043,6 +5076,7 @@ RADIANT_PROVIDE_ENGINE_1(form_url, fn_radiant_form_url)
 RADIANT_PROVIDE_ENGINE_1(hover_index, fn_radiant_hover_index)
 RADIANT_PROVIDE_ENGINE_1(option_count, fn_radiant_option_count)
 RADIANT_PROVIDE_ENGINE_1(capture_pointer, fn_radiant_capture_pointer)
+RADIANT_PROVIDE_ENGINE_2(set_canvas_pixels, fn_radiant_set_canvas_pixels)
 RADIANT_PROVIDE_ENGINE_2(audio_open, fn_radiant_audio_open)
 RADIANT_PROVIDE_ENGINE_3(audio_play, fn_radiant_audio_play)
 RADIANT_PROVIDE_ENGINE_2(audio_pause, fn_radiant_audio_pause)

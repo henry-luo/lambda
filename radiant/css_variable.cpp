@@ -8,6 +8,7 @@
 #include "../lib/mem_grow.hpp"
 #include "../lib/hashmap.h"
 #include "../lib/mem.h"
+#include "../lib/recursion_guard.hpp"
 #include <limits.h>
 #include <math.h>
 #include <stdlib.h>
@@ -33,6 +34,7 @@ struct CssVarCacheEntry {
     const CssValue* source;
     const char* name;
     size_t name_length;
+    size_t remaining_depth;
     const CssValue* value;
     StrView text;
     CssVarSize size;
@@ -46,14 +48,15 @@ static uint64_t css_var_cache_hash(const void* item, uint64_t seed0, uint64_t se
     return hashmap_sip(&entry->owner, sizeof(entry->owner), seed0, seed1) ^
         hashmap_sip(&entry->source, sizeof(entry->source), seed1, seed0) ^
         (entry->name ? hashmap_sip(entry->name, entry->name_length, seed0, seed1) : 0) ^
-        entry->leaf ^ ((uint64_t)entry->preserve_tokens << 1);
+        entry->leaf ^ ((uint64_t)entry->preserve_tokens << 1) ^ entry->remaining_depth;
 }
 
 static int css_var_cache_compare(const void* a, const void* b, void*) {
     const CssVarCacheEntry* left = (const CssVarCacheEntry*)a;
     const CssVarCacheEntry* right = (const CssVarCacheEntry*)b;
     if (left->owner != right->owner || left->source != right->source || left->leaf != right->leaf ||
-        left->name_length != right->name_length || left->preserve_tokens != right->preserve_tokens) return 1;
+        left->name_length != right->name_length || left->preserve_tokens != right->preserve_tokens ||
+        left->remaining_depth != right->remaining_depth) return 1;
     return left->name_length ? memcmp(left->name, right->name, left->name_length) : 0;
 }
 
@@ -63,6 +66,8 @@ struct CssVarContext {
     void* lookup_context;
     size_t max_bytes = CSS_SUBSTITUTION_DEFAULT_MAX_BYTES;
     size_t max_tokens = CSS_SUBSTITUTION_DEFAULT_MAX_TOKENS;
+    size_t max_depth = CSS_SUBSTITUTION_DEFAULT_MAX_DEPTH;
+    int traversal_depth = 0;
     HashMap* cache = nullptr;
     Pool* measure_pool = nullptr;
     CssFormatter* scalar_formatter = nullptr;
@@ -81,6 +86,7 @@ struct CssVarContext {
             ? (CssEngine*)element->doc->services.cached_css_engine : nullptr;
         if (engine && engine->limits.max_substitution_bytes) max_bytes = engine->limits.max_substitution_bytes;
         if (engine && engine->limits.max_substitution_tokens) max_tokens = engine->limits.max_substitution_tokens;
+        if (engine && engine->limits.max_substitution_depth) max_depth = engine->limits.max_substitution_depth;
     }
     ~CssVarContext() {
         // cache borrows end at return; output stays in the caller's pool (D4.5.1v4).
@@ -133,7 +139,10 @@ static bool css_var_size_add(CssVarSize* total, CssVarSize addition) {
 }
 
 static bool css_var_measure_value(const CssValue* value, CssVarSize* size) {
-    if (!value) return false;
+    CssVarContext* context = css_active_var_context;
+    if (!value || !context) return false;
+    lam::RecursionGuard traversal(&context->traversal_depth, CSS_SUBSTITUTION_MAX_TRAVERSAL_DEPTH);
+    if (!traversal) return false;
     if (value->type == CSS_VALUE_TYPE_TOKEN_SEQUENCE) {
         const String* text = value->data.tokens.text;
         if (!text || !css_var_measure_value(value->data.tokens.value, size)) return false;
@@ -141,8 +150,7 @@ static bool css_var_measure_value(const CssValue* value, CssVarSize* size) {
         if (text->len > size->bytes) size->bytes = text->len;
         return css_active_var_context && size->bytes <= css_active_var_context->max_bytes;
     }
-    CssVarContext* context = css_active_var_context;
-    if (!context || context->allocation_failed) return false;
+    if (context->allocation_failed) return false;
     CssValue** children = nullptr;
     int count = 0;
     bool comma = false;
@@ -231,6 +239,25 @@ static bool css_var_stack_contains(const CssVarStack* stack, DomElement* element
         return true;
     }
     return false;
+}
+
+static size_t css_var_remaining_depth(const CssVarStack* stack) {
+    size_t remaining = css_active_var_context->max_depth;
+    for (; stack; stack = stack->parent) {
+        // anonymous font/consumer frames do not introduce a custom-property dependency.
+        if (stack->name) {
+            if (!remaining) return 0;
+            remaining--;
+        }
+    }
+    return remaining;
+}
+
+static void css_var_observe_dependency(DomElement* element, const char* name, size_t name_length) {
+    CssVarContext* context = css_active_var_context;
+    if (context->dependency_owner == element && context->dependency_name &&
+        strlen(context->dependency_name) == name_length &&
+        memcmp(context->dependency_name, name, name_length) == 0) context->dependency_found = true;
 }
 
 static const CssValue* resolve_var_function_inner(Pool* pool, const CssValue* value,
@@ -373,66 +400,73 @@ static const CssValue* css_compute_custom_property_uncached(Pool* pool, DomEleme
     const CssCustomProp* specified_entry = nullptr) {
     if (!element) return nullptr;
     if (name_length == (size_t)-1) name_length = strlen(name);
-    const CssPropertyRegistration* registration = element->doc
-        ? css_find_document_property_registration(element->doc, name, name_length) : nullptr;
-    const CssValue* initial = registration ? registration->initial_value : nullptr;
-    const CssCustomProp* entry = specified_entry ? specified_entry : dom_element_lookup_own_custom_property_entry(element,
-        name, name_length, css_active_var_context->exclude_animation_element == element);
-    const CssValue* value = entry ? entry->value : nullptr;
-    bool inherit = registration ? registration->inherits : true;
-    if (value && css_value_is_global_keyword(value)) {
-        CssEnum keyword = value->data.keyword;
-        if (keyword == CSS_VALUE_INITIAL) {value = nullptr; inherit = false;}
-        else if (keyword == CSS_VALUE_INHERIT) {value = nullptr; inherit = true;}
-        else {value = nullptr;}
-    }
-    if (value) {
-        bool invalid = false;
-        CssVarStack current = {name, element, stack, &invalid, CSS_PROPERTY_UNKNOWN, name_length};
-        current.preserve_tokens = stack && stack->preserve_tokens;
-        CssVarResolutionScope scope(&current);
-        StrView computed_text = {};
-        bool valid_text = true;
-        if (entry && entry->value_text) {
-            if (css_value_contains_var_reference(value)) {
-                // bound authored expansion before the typed resolver allocates flattened value arrays.
-                computed_text = css_substitute_custom_text(pool, element,
-                    {entry->value_text, entry->value_text_len}, &current);
-                valid_text = computed_text.str != nullptr;
-            } else computed_text = {entry->value_text, entry->value_text_len};
-            valid_text = valid_text && computed_text.length <= css_active_var_context->max_bytes;
+    // inheritance is an ancestry walk, not another variable dependency or native stack frame.
+    while (element) {
+        if (css_var_stack_contains(stack, element, name, name_length)) return nullptr;
+        css_var_observe_dependency(element, name, name_length);
+        const CssPropertyRegistration* registration = element->doc
+            ? css_find_document_property_registration(element->doc, name, name_length) : nullptr;
+        const CssValue* initial = registration ? registration->initial_value : nullptr;
+        const CssCustomProp* entry = specified_entry ? specified_entry : dom_element_lookup_own_custom_property_entry(element,
+            name, name_length, css_active_var_context->exclude_animation_element == element);
+        specified_entry = nullptr;
+        const CssValue* value = entry ? entry->value : nullptr;
+        bool inherit = registration ? registration->inherits : true;
+        if (value && css_value_is_global_keyword(value)) {
+            CssEnum keyword = value->data.keyword;
+            if (keyword == CSS_VALUE_INITIAL) {value = nullptr; inherit = false;}
+            else if (keyword == CSS_VALUE_INHERIT) {value = nullptr; inherit = true;}
+            else {value = nullptr;}
         }
-        const CssValue* resolved = valid_text && !invalid
-            ? resolve_var_function_inner(pool, value, element, nullptr, nullptr, &current) : nullptr;
-        if (invalid || !css_var_value_fits(resolved)) resolved = nullptr;
-        if (resolved && (!registration || registration->universal)) {
-            if (text) *text = computed_text;
-            return resolved;
+        if (value) {
+            bool invalid = false;
+            CssVarStack current = {name, element, stack, &invalid, CSS_PROPERTY_UNKNOWN, name_length};
+            current.preserve_tokens = stack && stack->preserve_tokens;
+            CssVarResolutionScope scope(&current);
+            StrView computed_text = {};
+            bool valid_text = true;
+            if (entry && entry->value_text) {
+                if (css_value_contains_var_reference(value)) {
+                    // bound authored expansion before the typed resolver allocates flattened value arrays.
+                    computed_text = css_substitute_custom_text(pool, element,
+                        {entry->value_text, entry->value_text_len}, &current);
+                    valid_text = computed_text.str != nullptr;
+                } else computed_text = {entry->value_text, entry->value_text_len};
+                valid_text = valid_text && computed_text.length <= css_active_var_context->max_bytes;
+            }
+            const CssValue* resolved = valid_text && !invalid
+                ? resolve_var_function_inner(pool, value, element, nullptr, nullptr, &current) : nullptr;
+            if (invalid || !css_var_value_fits(resolved)) resolved = nullptr;
+            if (resolved && (!registration || registration->universal)) {
+                if (text) *text = computed_text;
+                return resolved;
+            }
+            const CssPropertySyntaxComponent* matched = registration
+                ? css_match_property_syntax(registration, css_value_unwrap(resolved)) : nullptr;
+            if (matched) {
+                const CssValue* computed = css_compute_registered_atom(pool, element, matched, resolved);
+                if (computed && !invalid && css_var_value_fits(computed)) return computed;
+            }
+            // an invalid unregistered declaration stays invalid instead of inheriting a parent value.
+            if (!registration) return nullptr;
+            // Invalid computed values use the registered default; the losing declaration stays discarded.
         }
-        const CssPropertySyntaxComponent* matched = registration
-            ? css_match_property_syntax(registration, css_value_unwrap(resolved)) : nullptr;
-        if (matched) {
-            const CssValue* computed = css_compute_registered_atom(pool, element, matched, resolved);
-            if (computed && !invalid && css_var_value_fits(computed)) return computed;
+        DomElement* parent = element->doc && element == element->doc->root
+            ? nullptr : dom_parent_element(element);
+        if (inherit && parent) {element = parent; continue;}
+        if (!initial) return nullptr;
+        if (registration->universal) {
+            if (!css_var_value_fits(initial) ||
+                registration->initial_text_length > css_active_var_context->max_bytes) return nullptr;
+            if (text && registration->initial_text)
+                *text = {registration->initial_text, registration->initial_text_length};
+            return initial;
         }
-        // an invalid unregistered declaration stays invalid instead of inheriting a parent value.
-        if (!registration) return nullptr;
-        // Invalid computed values use the registered default; the losing declaration stays discarded.
+        const CssPropertySyntaxComponent* matched = css_match_property_syntax(registration, initial);
+        const CssValue* computed = matched ? css_compute_registered_atom(pool, element, matched, initial) : nullptr;
+        return css_var_value_fits(computed) ? computed : nullptr;
     }
-    DomElement* parent = element->doc && element == element->doc->root
-        ? nullptr : dom_parent_element(element);
-    if (inherit && parent) return css_compute_custom_property(pool, parent, name, stack, name_length, text);
-    if (!initial) return nullptr;
-    if (registration->universal) {
-        if (!css_var_value_fits(initial) ||
-            registration->initial_text_length > css_active_var_context->max_bytes) return nullptr;
-        if (text && registration->initial_text)
-            *text = {registration->initial_text, registration->initial_text_length};
-        return initial;
-    }
-    const CssPropertySyntaxComponent* matched = css_match_property_syntax(registration, initial);
-    const CssValue* computed = matched ? css_compute_registered_atom(pool, element, matched, initial) : nullptr;
-    return css_var_value_fits(computed) ? computed : nullptr;
+    return nullptr;
 }
 
 static const CssValue* css_compute_custom_property(Pool* pool, DomElement* element,
@@ -442,15 +476,14 @@ static const CssValue* css_compute_custom_property(Pool* pool, DomElement* eleme
     if (css_var_stack_contains(stack, element, name, name_length)) return nullptr;
     // Observe the same inheritance and indirection walk used by substitution;
     // a descendant's own override must stop an ancestor dependency.
-    CssVarContext* context = css_active_var_context;
-    if (context->dependency_owner == element && context->dependency_name &&
-        strlen(context->dependency_name) == name_length &&
-        memcmp(context->dependency_name, name, name_length) == 0) context->dependency_found = true;
+    css_var_observe_dependency(element, name, name_length);
     CssVarCacheEntry key = {};
     key.owner = element;
     key.name = name;
     key.name_length = name_length;
     key.preserve_tokens = stack && stack->preserve_tokens;
+    key.remaining_depth = css_var_remaining_depth(stack);
+    if (!key.remaining_depth) return nullptr;
     const CssVarCacheEntry* cached = css_active_var_context->get(key);
     if (cached) {
         if (text) *text = cached->text;
@@ -554,6 +587,8 @@ static const char* css_var_name_from_text(StrView source) {
 
 static bool css_append_custom_text(Pool* pool, DomElement* element, StrView source,
     const CssVarStack* stack, CssCustomTextOutput* output, bool trim_boundary_comments) {
+    lam::RecursionGuard traversal(&css_active_var_context->traversal_depth, CSS_SUBSTITUTION_MAX_TRAVERSAL_DEPTH);
+    if (!traversal) return false;
     Pool* temporary_pool = css_active_var_context->temporary_pool();
     if (!temporary_pool) return false;
     size_t count = 0;
@@ -735,6 +770,8 @@ static const CssValue* resolve_var_function_inner(Pool* pool, const CssValue* va
                                                   void* lookup_context,
                                                   const CssVarStack* stack) {
     if (!value || (css_active_var_context && css_active_var_context->allocation_failed)) return nullptr;
+    lam::RecursionGuard traversal(&css_active_var_context->traversal_depth, CSS_SUBSTITUTION_MAX_TRAVERSAL_DEPTH);
+    if (!traversal) return nullptr;
     if (pool && value->type == CSS_VALUE_TYPE_TOKEN_SEQUENCE)
         return css_resolve_token_text(pool, value, context_element, stack);
     if (value->type == CSS_VALUE_TYPE_LIST) {
@@ -845,6 +882,9 @@ static const CssValue* css_lookup_custom_value(Pool* pool, DomElement* element,
     key.name = name;
     key.name_length = strlen(name);
     key.preserve_tokens = stack && stack->preserve_tokens;
+    // the same cached subtree may fit a shallow path but exceed a deeper dependency budget.
+    key.remaining_depth = css_var_remaining_depth(stack);
+    if (!key.remaining_depth) return nullptr;
     const CssVarCacheEntry* cached = context->get(key);
     if (cached) {
         if (text) *text = cached->text;

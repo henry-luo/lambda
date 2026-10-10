@@ -1,0 +1,73 @@
+{
+  "name": "dtna CSS line and conic ring gradients",
+  "html": "test/ui/dtna/progress_gradients.ls",
+  "viewport": {
+    "width": 300,
+    "height": 250
+  },
+  "events": [
+    {
+      "type": "assert_pixel",
+      "x": 34,
+      "y": 32,
+      "min_r": 230,
+      "max_g": 5,
+      "max_b": 25
+    },
+    {
+      "type": "assert_pixel",
+      "x": 214,
+      "y": 32,
+      "max_r": 25,
+      "max_g": 5,
+      "min_b": 230
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#ring-gradient mask .dtna-progress-arc"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#ring-gradient .dtna-progress-gradient"
+      },
+      "attribute": "mask",
+      "equals": "url(#ring-gradient-gradient-conic)"
+    },
+    {
+      "type": "assert_pixel",
+      "x": 121,
+      "y": 114,
+      "min_r": 110,
+      "max_r": 150,
+      "min_g": 50,
+      "max_g": 80,
+      "max_b": 10
+    },
+    {
+      "type": "assert_pixel",
+      "x": 74,
+      "y": 161,
+      "max_r": 10,
+      "min_g": 115,
+      "max_b": 10
+    },
+    {
+      "type": "assert_pixel",
+      "x": 27,
+      "y": 115,
+      "max_r": 10,
+      "min_g": 50,
+      "max_g": 80,
+      "min_b": 110,
+      "max_b": 150
+    },
+    {
+      "type": "render",
+      "file": "temp/ui_dtna/progress_gradients.png"
+    }
+  ]
+}

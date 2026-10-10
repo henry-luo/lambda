@@ -1,0 +1,19 @@
+<?xml version="1.0"?>
+<r:page-document r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" xmlns:r="urn:lambda:radiant:page" style="margin:0;font-family:Arial;font-size:7.5pt;line-height:9pt;color:black;white-space:normal;orphans:1;widows:1" r:line-stacking-strategy="max-height" r:linefeed-treatment="treat-as-space" r:white-space-treatment="ignore-if-surrounding-linefeed" r:white-space-collapse="true" r:wrap-option="wrap">
+  <r:master-set r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics"><r:page-master r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" name="sheet" style="size:180pt 135pt;margin:7.5pt"><r:region r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" role="body" name="xsl-region-body" style="overflow:hidden"/></r:page-master></r:master-set>
+  <r:page-sequence r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" master-reference="sheet" force-page-count="no-force"><r:flow r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" region-name="xsl-region-body">
+    <div r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" r:block-inline-geometry="reference" style="font-family:&quot;Missing, grouped&quot;,Arial,sans-serif;font-size:10pt;letter-spacing:.15em;word-spacing:-.075em">
+      <div r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" r:block-inline-geometry="reference" r:property-bindings="--family:parent(font-family);--font:parent(font-size)" style="font-size:15pt;line-height:18pt;font-family:var(--family);letter-spacing:calc(var(--font) * -.15);word-spacing:calc(var(--font) * .3);padding-top:calc(var(--font) * .15);background-color:#e8f0ff">Parent family and spacing</div>
+    </div>
+  </r:flow></r:page-sequence>
+  <r:page-sequence r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" master-reference="sheet" force-page-count="no-force"><r:flow r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" region-name="xsl-region-body">
+    <div r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" r:block-inline-geometry="reference" style="font-family:&quot;Missing, grouped&quot;,Arial,sans-serif;letter-spacing:normal;word-spacing:0pt">
+      <div r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" r:block-inline-geometry="reference" style="font-size:15pt"><div r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" r:block-inline-geometry="reference" r:property-bindings="--family:ancestor(2,font-family)" style="font-size:7.5pt;font-family:var(--family);letter-spacing:inherit;word-spacing:inherit;background-color:#e8ffe8">Normal and zero remain distinct</div></div>
+    </div>
+  </r:flow></r:page-sequence>
+  <r:page-sequence r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" master-reference="sheet" force-page-count="no-force"><r:flow r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" region-name="xsl-region-body">
+    <div r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" r:block-inline-geometry="reference" style="font-family:Arial,sans-serif;font-size:10pt;letter-spacing:.15em;word-spacing:-.075em">
+      <div r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" r:block-inline-geometry="reference" style="font-size:20pt"><div r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" r:block-inline-geometry="reference" r:property-bindings="--family:ancestor(2,font-family);--font:parent(font-size)" style="font-size:7.5pt;font-family:var(--family);letter-spacing:inherit;word-spacing:inherit;padding-left:calc(var(--font) * .075);background-color:#fff0d0">Original declaring font values</div></div>
+    </div>
+  </r:flow></r:page-sequence>
+</r:page-document>

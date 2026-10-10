@@ -1,4 +1,5 @@
 #include "image.h"
+#include "endian.h"
 #include "memtrack.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -13,6 +14,71 @@
 #include "str.h"
 #include "memtrack.h"
 #include "math_checked.hpp"
+
+static uint16_t read_exif_u16(const unsigned char* p, bool little_endian) {
+    return little_endian ? read_le16((const uint8_t*)p) : read_be16((const uint8_t*)p);
+}
+
+static uint32_t read_exif_u32(const unsigned char* p, bool little_endian) {
+    return little_endian ? read_le32((const uint8_t*)p) : read_be32((const uint8_t*)p);
+}
+
+int image_jpeg_exif_orientation_from_memory(const unsigned char* data, size_t size) {
+    if (!data || size < 4 || data[0] != 0xFF || data[1] != 0xD8) return 1;
+
+    size_t pos = 2;
+    while (pos + 4 <= size) {
+        while (pos < size && data[pos] == 0xFF) pos++;
+        if (pos >= size) break;
+
+        unsigned char marker = data[pos++];
+        if (marker == 0xDA || marker == 0xD9) break;
+        if (pos + 2 > size) break;
+
+        uint16_t seg_len = (uint16_t)((data[pos] << 8) | data[pos + 1]);
+        pos += 2;
+        if (seg_len < 2) break;
+
+        size_t payload_len = (size_t)seg_len - 2;
+        if (pos + payload_len > size) break;
+
+        if (marker == 0xE1 && payload_len >= 14 && memcmp(data + pos, "Exif\0\0", 6) == 0) {
+            const unsigned char* tiff = data + pos + 6;
+            size_t tiff_len = payload_len - 6;
+            if (tiff_len < 8) return 1;
+
+            bool little_endian = false;
+            if (tiff[0] == 'I' && tiff[1] == 'I') little_endian = true;
+            else if (tiff[0] == 'M' && tiff[1] == 'M') little_endian = false;
+            else return 1;
+
+            if (read_exif_u16(tiff + 2, little_endian) != 42) return 1;
+            uint32_t ifd_offset = read_exif_u32(tiff + 4, little_endian);
+            // widen before addition: hostile offsets must not wrap into the segment.
+            if ((uint64_t)ifd_offset + 2 > tiff_len) return 1;
+
+            const unsigned char* ifd = tiff + ifd_offset;
+            uint16_t entry_count = read_exif_u16(ifd, little_endian);
+            size_t entries_start = ifd_offset + 2;
+            for (uint16_t i = 0; i < entry_count; i++) {
+                size_t entry_offset = entries_start + (size_t)i * 12;
+                if (entry_offset + 12 > tiff_len) break;
+
+                const unsigned char* entry = tiff + entry_offset;
+                uint16_t tag = read_exif_u16(entry, little_endian);
+                uint16_t type = read_exif_u16(entry + 2, little_endian);
+                uint32_t count = read_exif_u32(entry + 4, little_endian);
+                if (tag == 0x0112 && type == 3 && count >= 1) {
+                    int orientation = read_exif_u16(entry + 8, little_endian);
+                    return (orientation >= 1 && orientation <= 8) ? orientation : 1;
+                }
+            }
+            return 1;
+        }
+        pos += payload_len;
+    }
+    return 1;
+}
 
 // A single decoded image or animation may consume at most this much owned
 // pixel storage. This is an input quota, independent of allocator pressure.

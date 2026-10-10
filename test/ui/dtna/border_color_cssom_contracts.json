@@ -1,0 +1,17 @@
+{
+  "name": "CSSOM border colors compress computed sides and refresh currentColor",
+  "html": "test/ui/dtna/border_color_cssom_contracts.html",
+  "viewport": {"width":500,"height":400},
+  "events": [
+    {"type":"assert_style","target":{"selector":"#one"},"property":"border-color","equals":"rgb(255, 0, 0)"},
+    {"type":"assert_style","target":{"selector":"#two"},"property":"border-color","equals":"rgb(255, 0, 0) rgb(0, 128, 0)"},
+    {"type":"assert_style","target":{"selector":"#three"},"property":"border-color","equals":"rgb(255, 0, 0) rgb(0, 128, 0) rgb(0, 0, 255)"},
+    {"type":"assert_style","target":{"selector":"#four"},"property":"border-color","equals":"rgb(255, 0, 0) rgb(0, 128, 0) rgb(0, 0, 255) rgb(255, 255, 255)"},
+    {"type":"assert_style","target":{"selector":"#inherited"},"property":"border-color","equals":"rgb(128, 0, 128)"},
+    {"type":"assert_style","target":{"selector":"#current"},"property":"border-color","equals":"rgb(10, 20, 30)"},
+    {"type":"click","target":{"selector":"#change"}},
+    {"type":"assert_text","target":{"selector":"#read"},"equals":"rgb(255, 0, 0) rgb(0, 128, 0) rgb(0, 0, 255)|rgb(40, 50, 60)"},
+    {"type":"assert_style","target":{"selector":"#four"},"property":"border-color","equals":"rgb(255, 0, 0) rgb(0, 128, 0) rgb(0, 0, 255)"},
+    {"type":"assert_style","target":{"selector":"#current"},"property":"border-color","equals":"rgb(40, 50, 60)"}
+  ]
+}

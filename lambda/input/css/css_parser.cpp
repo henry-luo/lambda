@@ -687,6 +687,7 @@ static CssValue* css_parse_value_at(const CssToken* tokens, int* pos, int end, P
 
 static CssIdentifierGrammar css_declaration_identifier_grammar(const char* property, int index, int count) {
     if (strcmp(property, "page") == 0) return CSS_IDENT_PAGE;
+    if (strcmp(property, "container-name") == 0) return CSS_IDENT_CUSTOM;
     if (strcmp(property, "counter-reset") == 0 || strcmp(property, "counter-increment") == 0 ||
         strcmp(property, "counter-set") == 0 || (strcmp(property, "string-set") == 0 && index == 0 && count > 1))
         return CSS_IDENT_CUSTOM;
@@ -878,7 +879,7 @@ static bool css_font_shorthand_is_valid_line_height(const CssValue* value) {
          value->data.keyword == CSS_VALUE_INHERIT);
 }
 
-static bool css_font_shorthand_is_family_value(const CssValue* value) {
+bool css_value_is_font_family_name(const CssValue* value) {
     if (!value || css_font_shorthand_is_slash(value)) return false;
     if (value->type == CSS_VALUE_TYPE_KEYWORD) {
         const CssEnumInfo* info = css_enum_info(value->data.keyword);
@@ -886,9 +887,7 @@ static bool css_font_shorthand_is_family_value(const CssValue* value) {
     }
     return value->type == CSS_VALUE_TYPE_CUSTOM ||
         value->type == CSS_VALUE_TYPE_STRING ||
-        value->type == CSS_VALUE_TYPE_FUNCTION ||
-        value->type == CSS_VALUE_TYPE_VAR ||
-        value->type == CSS_VALUE_TYPE_ENV;
+        css_value_contains_pending_substitution(value);
 }
 
 static bool css_font_shorthand_has_family(const CssValue* group, size_t start) {
@@ -897,7 +896,7 @@ static bool css_font_shorthand_has_family(const CssValue* group, size_t start) {
         return false;
     }
     for (size_t i = start; i < (size_t)group->data.list.count; i++) {
-        if (!css_font_shorthand_is_family_value(group->data.list.values[i])) return false;
+        if (!css_value_is_font_family_name(group->data.list.values[i])) return false;
     }
     return true;
 }
@@ -983,7 +982,7 @@ bool css_parse_font_shorthand(const CssValue* value, CssFontShorthandParts* part
             const CssValue* family = value->data.list.values[i];
             if (family && family->type == CSS_VALUE_TYPE_LIST) {
                 if (!css_font_shorthand_has_family(family, 0)) return false;
-            } else if (!css_font_shorthand_is_family_value(family)) {
+            } else if (!css_value_is_font_family_name(family)) {
                 return false;
             }
         }
@@ -4703,7 +4702,7 @@ static bool css_property_value_token_span(const CssToken* tokens, size_t count,
     return true;
 }
 
-CssDeclaration* css_parse_property_value_declaration(const char* property, size_t property_length,
+static CssDeclaration* css_parse_value_text_fragment(const char* property, size_t property_length,
     const char* value, size_t value_length, Pool* pool) {
     if (!property || !value || !pool) return nullptr;
     size_t count = 0;
@@ -4717,11 +4716,22 @@ CssDeclaration* css_parse_property_value_declaration(const char* property, size_
     bool custom = property_length > 2 && property[0] == '-' && property[1] == '-';
     if (!custom && memchr(property, '\0', property_length)) valid = false;
     int pos = 0;
-    CssDeclaration* declaration = valid && property_length
+    CssDeclaration* declaration = valid
         ? css_parse_named_declaration_value(tokens, &pos, (int)count, pool,
             false, strview_init(property, property_length)) : nullptr;
     css_token_array_release(pool, tokens, count);
     return declaration;
+}
+
+CssDeclaration* css_parse_property_value_declaration(const char* property, size_t property_length,
+    const char* value, size_t value_length, Pool* pool) {
+    return property_length ? css_parse_value_text_fragment(property, property_length,
+        value, value_length, pool) : nullptr;
+}
+
+CssValue* css_parse_component_value_text(const char* text, size_t length, Pool* pool) {
+    CssDeclaration* parsed = css_parse_value_text_fragment("", 0, text, length, pool);
+    return parsed ? parsed->value : nullptr;
 }
 
 // snapshot payloads into the recipient's lifetime, reparsing only uncloneable value trees.

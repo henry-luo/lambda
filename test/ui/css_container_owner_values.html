@@ -1,0 +1,24 @@
+<!doctype html>
+<style>
+html,body {margin:0;background:white;}
+#container {width:300px;container:card / inline-size;font-size:10px;--threshold:200px;}
+.target {width:20px;height:10px;background:red;}
+@container card (width >= 20em) {#font-target {width:100px;background:green;}}
+@container card (width >= var(--threshold)) {#var-target {width:100px;background:green;}}
+@container card (width >= calc(var(--threshold) + 10px)) {#math-target {width:100px;background:green;}}
+@container card (width >= var(--missing, 200px)) {#fallback-target {width:100px;background:green;}}
+@container card (width >= var(--invalid, 200px)) {#invalid-target {width:100px;background:green;}}
+#named {container-name:marker;}
+@container marker {#name-target {width:100px;background:green;}}
+#controls {position:absolute;top:100px;}
+</style>
+<style>#container {font-size:20px;--threshold:400px;--invalid:50%;}</style>
+<div id="container"><div id="font-target" class="target"></div><div id="var-target" class="target"></div><div id="math-target" class="target"></div><div id="fallback-target" class="target"></div><div id="invalid-target" class="target"></div></div>
+<div id="named"><div id="name-target" class="target"></div></div>
+<div id="controls"><button id="font">font</button><button id="variable">variable</button><button id="restore">restore</button></div>
+<script>
+var container=document.getElementById('container');
+document.getElementById('font').addEventListener('click',function(){container.style.fontSize='10px';});
+document.getElementById('variable').addEventListener('click',function(){container.style.setProperty('--threshold','200px');});
+document.getElementById('restore').addEventListener('click',function(){container.style.fontSize='20px';container.style.setProperty('--threshold','400px');});
+</script>

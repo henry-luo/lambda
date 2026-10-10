@@ -8258,6 +8258,8 @@ extern "C" void dom_after_set_attribute(void* elem_ptr,
     dom_aria_clear_direct_ref(elem, attr_name);
     dom_compile_event_attr_to_expando(elem, attr_name, attr_value);
     dom_reinit_behavior_if_constraint_attr(elem, attr_name);
+    // attribute writes share reflected disabled-property focus semantics.
+    if (str_icmp_cstr(attr_name, "disabled") == 0) dom_clear_focus_if_disabled_now(elem);
     if (_is_tag(elem, "option") && str_icmp_cstr(attr_name, "selected") == 0) {
         DomElement* sel = _nearest_select_for_node((DomNode*)elem);
         if (sel && !sel->has_attribute("multiple")) _select_ask_for_reset(sel);
@@ -16109,14 +16111,8 @@ extern "C" Item dom_core_get_attribute(Item n, Item name) {
 
 static void dom_attribute_value_did_set(DomElement* elem, const char* attr_name,
         const char* attr_val, const char* old_value) {
-    dom_aria_clear_direct_ref(elem, attr_name);
-    dom_compile_event_attr_to_expando(elem, attr_name, attr_val);
-    dom_reinit_behavior_if_constraint_attr(elem, attr_name);
-    if (_is_tag(elem, "option") && str_icmp_cstr(attr_name, "selected") == 0) {
-        DomElement* sel = _nearest_select_for_node((DomNode*)elem);
-        if (sel && !sel->has_attribute("multiple")) _select_ask_for_reset(sel);
-    }
-    _after_image_src_set(elem, attr_name, attr_val);
+    // neutral and reflected writes run the same attribute side effects.
+    dom_after_set_attribute(elem, attr_name, attr_val);
     dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem,
                            elem->parent, attr_name, old_value);
 }

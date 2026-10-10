@@ -1011,13 +1011,13 @@ static const char* svg_style_property_value(SvgInlineRenderContext* ctx, Element
         (str_icmp_cstr(prop->value, "unset") == 0 && !inherits))) prop->value = initial;
     else if (prop->value && (str_icmp_cstr(prop->value, "inherit") == 0 || str_icmp_cstr(prop->value, "unset") == 0)) {
         // inherited properties follow the instance traversal; explicit inherit also applies to non-inherited properties.
-        DomNode* parent = entry->node->parent;
+        DomNode* parent = svg_dom_style_parent(entry->node, nullptr);
         prop->value = inherits ? nullptr : parent && parent->is_element()
             ? svg_style_property_value(ctx, dom_element_to_element(parent->as_element()), name) : initial;
         if (!inherits && !prop->value) prop->value = initial;
     }
     CssPropertyCode property = css_property_code_from_name(name);
-    DomNode* parent = entry->node->parent;
+    DomNode* parent = svg_dom_style_parent(entry->node, nullptr);
     if (!prop->value && inherits && css_property_is_svg_presentation(property) &&
         !css_property_is_svg_paint(property) && parent && parent->is_element() &&
         !dom_element_is_svg(parent->as_element())) {
@@ -1035,7 +1035,7 @@ static const char* svg_style_ancestor_property_value(SvgInlineRenderContext* ctx
     Element* elem, const char* name) {
     SvgStyleContext* style = ctx ? (SvgStyleContext*)ctx->style_context : nullptr;
     SvgStyleEntry* entry = svg_style_entry(style, elem);
-    for (DomNode* node = entry ? entry->node : nullptr; node && node->is_element(); node = node->parent) {
+    for (DomNode* node = entry ? entry->node : nullptr; node && node->is_element(); node = svg_dom_style_parent(node, nullptr)) {
         const char* value = svg_style_property_value(ctx, dom_element_to_element(node->as_element()), name);
         if (value && str_icmp_cstr(value, "currentColor") != 0) return value;
     }
@@ -1054,9 +1054,13 @@ static Element* svg_find_element_id(SvgInlineRenderContext* ctx, const char* id)
 
 DomNode* svg_dom_style_parent(DomNode* node, const SvgDomStyleScope* scope) {
     // a use shadow root inherits from its instance host without changing selector ancestry.
+    DomNode* parent = node ? node->parent : nullptr;
     for (const SvgDomStyleScope* current = scope; current; current = current->previous)
-        if (node == current->root) return current->parent;
-    return node ? node->parent : nullptr;
+        if (node == current->root) { parent = current->parent; break; }
+    // anonymous layout wrappers do not participate in authored CSS inheritance.
+    while (parent && parent->is_element() && parent->as_element()->is_synthetic())
+        parent = parent->parent;
+    return parent;
 }
 
 static const char* svg_dom_resolve_property(SvgStyleContext* query, DomElement* element,
@@ -1647,6 +1651,22 @@ static void svg_apply_inherited_paint_attrs(SvgInlineRenderContext* ctx, Element
     }
 }
 
+static bool svg_apply_dom_ancestor_paint(SvgInlineRenderContext* ctx, DomNode* node,
+    const SvgDomStyleScope* instance_scope = nullptr) {
+    lam::ArrayList<Element*> ancestors(MEM_CAT_RENDER, 0);
+    for (; node && node->is_element(); node = svg_dom_style_parent(node, instance_scope)) {
+        // layout-only wrappers have no source attributes or selector identity.
+        Element* source = dom_element_backing(node->as_element());
+        if (source && !ancestors.append(source)) {
+            log_error("SVG ancestor paint: allocation failed");
+            return false;
+        }
+    }
+    for (size_t i = ancestors.size(); i > 0; i--)
+        svg_apply_inherited_paint_attrs(ctx, ancestors[i - 1]);
+    return true;
+}
+
 void render_svg_initial_paint(const ViewSpan* view, Color current_color,
                               SvgInitialPaint* paint) {
     if (!paint) return;
@@ -2082,8 +2102,8 @@ static void svg_template_chain(SvgInlineRenderContext* ctx, Element* resource,
     }
 }
 
-static const char* svg_template_attribute(SvgInlineRenderContext* ctx, const lam::ArrayList<SvgResourceReference>* chain,
-    const char* name, const char* fallback, bool same_kind = false) {
+static Element* svg_template_attribute_source(SvgInlineRenderContext* ctx,
+    const lam::ArrayList<SvgResourceReference>* chain, const char* name, bool same_kind) {
     SvgInlineRenderContext first = chain->size() ? svg_reference_render_context(ctx, &(*chain)[0]) : *ctx;
     const char* first_tag = chain->size() ? get_element_tag_name(&first, (*chain)[0].element) : nullptr;
     for (size_t i = 0; i < chain->size(); i++) {
@@ -2091,16 +2111,25 @@ static const char* svg_template_attribute(SvgInlineRenderContext* ctx, const lam
         SvgInlineRenderContext source = svg_reference_render_context(ctx, &(*chain)[i]);
         const char* tag = get_element_tag_name(&source, elem);
         if (same_kind && (!tag || !first_tag || strcmp(tag, first_tag) != 0)) continue;
-        const char* value = get_svg_attr(elem, name);
-        if (value) return value;
+        if (get_svg_attr(elem, name) || ElementReader(elem).has_attr(name)) return elem;
     }
-    return fallback;
+    return nullptr;
+}
+
+static const char* svg_template_attribute(SvgInlineRenderContext* ctx, const lam::ArrayList<SvgResourceReference>* chain,
+    const char* name, const char* fallback, bool same_kind = false) {
+    Element* source = svg_template_attribute_source(ctx, chain, name, same_kind);
+    const char* value = source ? get_svg_attr(source, name) : nullptr;
+    return value ? value : fallback;
 }
 
 static float svg_gradient_length(SvgInlineRenderContext* ctx, const lam::ArrayList<SvgResourceReference>* chain,
     const char* name, const char* fallback, const SvgLengthContext* lengths,
     SvgLengthAxis axis) {
-    return svg_resolve_length(svg_template_attribute(ctx, chain, name, fallback, true), lengths, axis, 0.0f);
+    // Lambda SVG builders carry numeric Items; resource inheritance must preserve them.
+    float initial = svg_resolve_length(fallback, lengths, axis, 0.0f);
+    Element* source = svg_template_attribute_source(ctx, chain, name, true);
+    return source ? get_svg_number_attr(source, name, initial, lengths, axis) : initial;
 }
 
 static bool svg_resolve_gradient(SvgInlineRenderContext* ctx, Element* element,
@@ -2121,11 +2150,11 @@ static bool svg_resolve_gradient(SvgInlineRenderContext* ctx, Element* element,
     def->cx = svg_gradient_length(ctx, &chain, "cx", "50%", &lengths, SVG_LENGTH_X);
     def->cy = svg_gradient_length(ctx, &chain, "cy", "50%", &lengths, SVG_LENGTH_Y);
     def->r = svg_gradient_length(ctx, &chain, "r", "50%", &lengths, SVG_LENGTH_DIAGONAL);
-    const char* fx = svg_template_attribute(ctx, &chain, "fx", nullptr, true);
-    const char* fy = svg_template_attribute(ctx, &chain, "fy", nullptr, true);
+    Element* fx = svg_template_attribute_source(ctx, &chain, "fx", true);
+    Element* fy = svg_template_attribute_source(ctx, &chain, "fy", true);
     def->options.has_focal = def->is_radial;
-    def->options.fx = fx ? svg_resolve_length(fx, &lengths, SVG_LENGTH_X, def->cx) : def->cx;
-    def->options.fy = fy ? svg_resolve_length(fy, &lengths, SVG_LENGTH_Y, def->cy) : def->cy;
+    def->options.fx = fx ? get_svg_number_attr(fx, "fx", def->cx, &lengths, SVG_LENGTH_X) : def->cx;
+    def->options.fy = fy ? get_svg_number_attr(fy, "fy", def->cy, &lengths, SVG_LENGTH_Y) : def->cy;
     def->options.fr = svg_gradient_length(ctx, &chain, "fr", "0%", &lengths, SVG_LENGTH_DIAGONAL);
     const char* spread = svg_template_attribute(ctx, &chain, "spreadMethod", "pad");
     def->options.spread = strcmp(spread, "repeat") == 0 ? RDT_GRADIENT_REPEAT
@@ -2164,12 +2193,14 @@ static bool svg_resolve_gradient(SvgInlineRenderContext* ctx, Element* element,
     const char* host_color = svg_style_ancestor_property_value(ctx, element, "color");
     Color current_color = parse_svg_color(host_color);
     float previous_offset = 0.0f;
+    SvgLengthContext offsets = lengths;
+    offsets.viewport_width = offsets.viewport_height = 1.0f;
     for (int64_t j = 0; j < content->length; j++) {
         Element* child = get_child_element_at(content, j);
         const char* tag = child ? get_element_tag_name(&content_context, child) : nullptr;
         if (!tag || strcmp(tag, "stop") != 0) continue;
         RdtGradientStop* stop = &def->stops[def->stop_count++];
-        stop->offset = fmaxf(previous_offset, clamp_unit(parse_svg_pct_or_num(get_svg_attr(child, "offset"), 0.0f)));
+        stop->offset = fmaxf(previous_offset, clamp_unit(get_svg_number_attr(child, "offset", 0.0f, &offsets, SVG_LENGTH_X)));
         previous_offset = stop->offset;
         const char* color_text = svg_style_property_value(&content_context, child, "stop-color");
         const char* own_color = svg_style_property_value(&content_context, child, "color");
@@ -2351,11 +2382,8 @@ static SvgInlineRenderContext svg_resource_style_context(SvgInlineRenderContext*
     result.inherited_font_weight = 400; result.inherited_font_style = nullptr;
     result.inherited_text_anchor = nullptr; result.visibility_hidden = false;
     SvgStyleEntry* entry = svg_style_entry((SvgStyleContext*)ctx->style_context, resource);
-    lam::ArrayList<Element*> ancestors(MEM_CAT_RENDER, 0);
-    for (DomNode* node = entry ? entry->node : nullptr; node && node->is_element(); node = node->parent)
-        if (!ancestors.append(dom_element_to_element(node->as_element()))) break;
-    for (size_t i = ancestors.size(); i > 0; i--) svg_apply_inherited_paint_attrs(&result, ancestors[i - 1]);
-    if (ancestors.size() == 0) svg_apply_inherited_paint_attrs(&result, resource);
+    if (entry) svg_apply_dom_ancestor_paint(&result, entry->node);
+    else svg_apply_inherited_paint_attrs(&result, resource);
     return result;
 }
 
@@ -5816,11 +5844,10 @@ static RdtPath* svg_text_geometry_collect(SvgTextGeometryScope* scope, DomElemen
     DomElement* text, SvgTextMeasurement* measurement) {
     ScratchMark mark = scratch_mark(&scope->scratch);
     SvgInlineRenderContext ctx = scope->context;
-    DomElement* ancestors[64]; int count = 0;
-    for (DomNode* node = text->parent; node && count < 64; node = node->parent) {
-        if (node->is_element()) ancestors[count++] = node->as_element();
+    if (!svg_apply_dom_ancestor_paint(&ctx, text->parent)) {
+        scratch_restore(&scope->scratch, mark);
+        return nullptr;
     }
-    for (int i = count - 1; i >= 0; i--) svg_apply_inherited_paint_attrs(&ctx, dom_element_to_element(ancestors[i]));
     SvgTextLayout layout = {};
     Element* text_source = dom_element_to_element(text);
     Element* target_source = dom_element_to_element(target);
@@ -7291,11 +7318,12 @@ bool svg_dom_clip_contains_point(DomElement* target, const SvgLengthContext* len
     ctx.current_viewport_w = lengths->viewport_width; ctx.current_viewport_h = lengths->viewport_height;
     ctx.inherited_font_size = 16.0f; ctx.inherited_font_weight = 400;
     ctx.transform = *frame; ctx.raster_scale = 1.0f;
-    lam::ArrayList<Element*> ancestors(MEM_CAT_RENDER, 0);
-    for (DomNode* node = svg_dom_style_parent(target, instance_scope); node && node->is_element();
-        node = svg_dom_style_parent(node, instance_scope))
-        if (!ancestors.append(dom_element_to_element(node->as_element()))) break;
-    for (size_t index = ancestors.size(); index > 0; index--) svg_apply_inherited_paint_attrs(&ctx, ancestors[index - 1]);
+    if (!svg_apply_dom_ancestor_paint(&ctx, svg_dom_style_parent(target, instance_scope), instance_scope)) {
+        scratch_release(&scratch);
+        mem_arena_destroy(arena);
+        svg_style_destroy(&style);
+        return false;
+    }
     SvgClipHitQuery query = {contains, lam::up(point), false}; ctx.clip_hit_query = lam::up(&query);
     lam::Temp<char> base(radiant_document_resource_base(target->doc, MEM_CAT_RENDER)); ctx.source_path = lam::up(base.get());
     Element* element = dom_element_to_element(target);

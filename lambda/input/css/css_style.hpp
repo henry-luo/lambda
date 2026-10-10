@@ -133,6 +133,7 @@ bool css_viewport_length_to_px(CssUnit unit, double value, double width,
                                double* pixels);
 const char* css_math_token_name(const CssValue* value);
 bool css_value_contains_var_reference(const CssValue* value);
+bool css_value_contains_percentage(const CssValue* value);
 bool css_value_contains_pending_substitution(const CssValue* value);
 bool css_value_contains_length_unit(const CssValue* value, CssUnit first, CssUnit second);
 const char* css_value_identifier_name(const CssValue* value);
@@ -805,6 +806,10 @@ typedef enum CssPropertyCode {
     CSS_PROPERTY_COUNT,
     CSS_PROPERTY_UNKNOWN = -1
 } CssPropertyCode;
+
+const CssValue* css_container_shorthand_longhand(const CssValue* value,
+    CssPropertyCode property, Pool* pool);
+
 
 // individual transforms compose in this order, independently of declaration order.
 static inline int css_individual_transform_index(CssPropertyCode property) {

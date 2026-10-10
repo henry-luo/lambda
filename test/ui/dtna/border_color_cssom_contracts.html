@@ -1,0 +1,19 @@
+<!doctype html>
+<html><head><style>
+body{margin:0;color:black;font:14px "Liberation Sans"}.sample{border:2px solid;width:100px;height:20px}
+#one{border-color:red}#two{border-color:red green}#three{border-color:red green blue}
+#four{border-color:red green blue white}#parent{border-color:purple}#inherited{border-color:inherit}
+#current{color:rgb(10,20,30);border-color:currentColor}
+</style></head><body>
+<div class="sample" id="one"></div><div class="sample" id="two"></div><div class="sample" id="three"></div>
+<div class="sample" id="four"></div><div id="parent" class="sample"><span id="inherited" class="sample"></span></div>
+<div class="sample" id="current"></div><button id="change">Change</button><output id="read"></output>
+<script>
+document.getElementById('change').onclick = function() {
+  var four = document.getElementById('four');
+  four.style.borderLeftColor = 'green';
+  var current = document.getElementById('current');
+  current.style.color = 'rgb(40,50,60)';
+  document.getElementById('read').textContent = getComputedStyle(four).borderColor + '|' + getComputedStyle(current).borderColor;
+};
+</script></body></html>

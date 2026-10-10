@@ -402,6 +402,11 @@ static bool ui_parse_manifest(UiManifest* manifest) {
 
 static void ui_collect_json_files(const std::string& directory,
                                   std::vector<std::string>& files) {
+    // reference apps contain package metadata, not interaction fixtures.
+    // honor the same explicit asset boundary during static and validated discovery.
+    char asset_marker[4096];
+    int marker_length = snprintf(asset_marker, sizeof(asset_marker), "%s/.ui-assets", directory.c_str());
+    if (marker_length > 0 && (size_t)marker_length < sizeof(asset_marker) && file_exists(asset_marker)) return;
 #ifdef _WIN32
     std::string pattern = directory + "\\*";
     WIN32_FIND_DATAA fd;

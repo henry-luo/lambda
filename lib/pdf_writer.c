@@ -788,6 +788,31 @@ HPDF_STATUS HPDF_Page_SetMiterLimit(HPDF_Page page, float limit) {
     return limit < 1 ? HPDF_ERROR_INVALID_PARAM : pdf_page_scalar_operator(page, limit, " M\n");
 }
 
+
+HPDF_STATUS HPDF_Page_SetDashPattern(HPDF_Page page, const float* lengths, int count, float phase) {
+    if (!page || count < 0 || (count && !lengths) || !isfinite(phase)) return HPDF_ERROR_INVALID_PARAM;
+    double period = 0.0;
+    for (int i = 0; i < count; i++) {
+        if (!isfinite(lengths[i]) || lengths[i] < 0.0f) return HPDF_ERROR_INVALID_PARAM;
+        period += lengths[i];
+    }
+    if (count && period <= 0.0) return HPDF_ERROR_INVALID_PARAM;
+    // validate before writing; zero-length on segments with round caps produce dots.
+    strbuf_append_char(page->content, '[');
+    for (int i = 0; i < count; i++) {
+        if (i) strbuf_append_char(page->content, ' ');
+        pdf_format_float(page->content, lengths[i]);
+    }
+    strbuf_append_str(page->content, "] ");
+    if (count && phase < 0.0f) {
+        if (count % 2) period *= 2.0; // odd arrays alternate their on/off role on the next cycle.
+        phase = (float)(fmod(phase, period) + period);
+    }
+    pdf_format_float(page->content, count ? phase : 0.0f);
+    strbuf_append_str(page->content, " d\n");
+    return HPDF_OK;
+}
+
 HPDF_ExtGState HPDF_CreateExtGState(HPDF_Doc doc) {
     if (!doc) return NULL;
 

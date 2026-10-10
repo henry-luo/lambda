@@ -29,6 +29,7 @@ typedef struct RenderMapState {
     void* path_recorder_state; // recorder-private, context-owned side state
     render_map_path_recorder_state_cleanup_fn path_recorder_state_cleanup;
     HashMap* reverse_map;
+    uint64_t record_sequence;
     bool roots_registered;
 } RenderMapState;
 
@@ -135,6 +136,7 @@ static Item render_map_get_field_from_type(TypeMap* map_type, void* map_data, co
 typedef struct ReverseMapEntry {
     uint64_t result_item_bits;   // Item.item value of the result node (key)
     RenderMapKey key;            // source_item + template_ref
+    uint64_t recorded_at;
 } ReverseMapEntry;
 
 typedef TypedHashMap<ReverseMapEntry,
@@ -173,16 +175,18 @@ static bool render_map_same_key(RenderMapKey a, RenderMapKey b) {
 static void render_map_record_reverse_result_tree(HashMap* reverse_map,
                                                   Item result_node,
                                                   RenderMapKey key,
+                                                  uint64_t invocation_start,
+                                                  uint64_t recorded_at,
                                                   int depth) {
     if (!reverse_map || !result_node.item || depth > 128) return;
 
     ReverseMapEntry query = {};
     query.result_item_bits = result_node.item;
     const ReverseMapEntry* owner = ReverseMap::get(reverse_map, query);
-    // A template whose body applies another template returns that template's
-    // element: the inner template recorded it first and keeps it, and this
-    // one wraps it, so neither template's handlers hide the other's.
-    if (depth == 0 && owner && !render_map_same_key(owner->key, key) &&
+    // only an application inside this body can establish a wrapper; sharing
+    // an immutable result across independent calls does not imply nesting.
+    if (depth == 0 && invocation_start && owner &&
+        owner->recorded_at > invocation_start && !render_map_same_key(owner->key, key) &&
         render_map_link_wrapper(owner->key, key, result_node)) {
         return;
     }
@@ -193,6 +197,7 @@ static void render_map_record_reverse_result_tree(HashMap* reverse_map,
         ReverseMapEntry entry = {};
         entry.result_item_bits = result_node.item;
         entry.key = key;
+        entry.recorded_at = recorded_at;
         ReverseMap::set(reverse_map, entry);
     }
 
@@ -202,14 +207,14 @@ static void render_map_record_reverse_result_tree(HashMap* reverse_map,
         if (!element || !element->items) return;
         for (int64_t i = 0; i < element->length; i++) {
             render_map_record_reverse_result_tree(reverse_map, element->items[i],
-                                                  key, depth + 1);
+                                                  key, invocation_start, recorded_at, depth + 1);
         }
     } else if (result_type == LMD_TYPE_ARRAY) {
         Array* array = result_node.array;
         if (!array || !array->items) return;
         for (int64_t i = 0; i < array->length; i++) {
             render_map_record_reverse_result_tree(reverse_map, array->items[i],
-                                                  key, depth + 1);
+                                                  key, invocation_start, recorded_at, depth + 1);
         }
     }
 }
@@ -353,6 +358,17 @@ void render_map_destroy(void) {
 
 void render_map_record(Item source_item, const char* template_ref,
                        Item result_node, Item parent_result, int child_index) {
+    render_map_record_invocation(source_item, template_ref, result_node,
+                                 parent_result, child_index, 0);
+}
+
+uint64_t render_map_invocation_begin(void) {
+    return ++render_map_state()->record_sequence;
+}
+
+void render_map_record_invocation(Item source_item, const char* template_ref,
+                                  Item result_node, Item parent_result, int child_index,
+                                  uint64_t invocation_start) {
     HashMap* map = ensure_map();
     RenderMapEntry entry;
     memset(&entry, 0, sizeof(entry));
@@ -370,7 +386,8 @@ void render_map_record(Item source_item, const char* template_ref,
     // list leaves all rendered descendants without route ownership.
     if (result_node.item) {
         HashMap* rmap = ensure_reverse_map();
-        render_map_record_reverse_result_tree(rmap, result_node, entry.key, 0);
+        render_map_record_reverse_result_tree(rmap, result_node, entry.key,
+            invocation_start, ++render_map_state()->record_sequence, 0);
     }
 
     log_debug("render_map_record: tmpl=%s result=0x%llx reverse_map_count=%zu",
@@ -515,6 +532,7 @@ int render_map_retransform_with_results(RetransformResult* out_results, int max_
             entry->dirty = false;
             continue;
         }
+        uint64_t invocation_start = render_map_invocation_begin();
         Item new_result = render_map_invoke_template(tmpl, saved.key.source_item);
 
         // record result before updating entry
@@ -528,7 +546,8 @@ int render_map_retransform_with_results(RetransformResult* out_results, int max_
         }
 
         if (s_reverse_map && new_result.item) {
-            render_map_record_reverse_result_tree(s_reverse_map, new_result, saved.key, 0);
+            render_map_record_reverse_result_tree(s_reverse_map, new_result, saved.key,
+                invocation_start, ++render_map_state()->record_sequence, 0);
         }
 
         render_map_replace_tree_result(saved, tree_parent, tree_child_index, new_result);

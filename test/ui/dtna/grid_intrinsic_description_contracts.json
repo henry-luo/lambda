@@ -1,0 +1,375 @@
+{
+  "name": "grid intrinsic widths use resolved variables, fractional tracks and item spans",
+  "html": "test/ui/dtna/grid_intrinsic_description_contracts.html",
+  "viewport": {
+    "width": 1200,
+    "height": 500
+  },
+  "events": [
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#direct"
+      },
+      "width": 345.234375,
+      "tolerance": 0.75
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#direct-slot"
+      },
+      "width": 345.234375,
+      "tolerance": 0.75
+    },
+    {
+      "type": "assert_position",
+      "element_a": {
+        "selector": "#direct-first dd"
+      },
+      "element_b": {
+        "selector": "#direct-second dt"
+      },
+      "relation": "left_of",
+      "gap": 16,
+      "tolerance": 0.75
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#direct-second dd"
+      },
+      "height": 22,
+      "tolerance": 0.2
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#variable"
+      },
+      "width": 345.234375,
+      "tolerance": 0.75
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#variable-slot"
+      },
+      "width": 345.234375,
+      "tolerance": 0.75
+    },
+    {
+      "type": "assert_position",
+      "element_a": {
+        "selector": "#variable-first dd"
+      },
+      "element_b": {
+        "selector": "#variable-second dt"
+      },
+      "relation": "left_of",
+      "gap": 16,
+      "tolerance": 0.75
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#variable-second dd"
+      },
+      "height": 22,
+      "tolerance": 0.2
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#auto"
+      },
+      "width": 260.484375,
+      "tolerance": 0.75
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#auto-slot"
+      },
+      "width": 260.484375,
+      "tolerance": 0.75
+    },
+    {
+      "type": "assert_position",
+      "element_a": {
+        "selector": "#auto-first dd"
+      },
+      "element_b": {
+        "selector": "#auto-second dt"
+      },
+      "relation": "left_of",
+      "gap": 16,
+      "tolerance": 0.75
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#auto-second dd"
+      },
+      "height": 22,
+      "tolerance": 0.2
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#weighted"
+      },
+      "width": 472.3125,
+      "tolerance": 0.75
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#weighted-slot"
+      },
+      "width": 472.3125,
+      "tolerance": 0.75
+    },
+    {
+      "type": "assert_position",
+      "element_a": {
+        "selector": "#weighted-first dd"
+      },
+      "element_b": {
+        "selector": "#weighted-second dt"
+      },
+      "relation": "left_of",
+      "gap": 16,
+      "tolerance": 0.75
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#weighted-second dd"
+      },
+      "height": 22,
+      "tolerance": 0.2
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#named"
+      },
+      "width": 392,
+      "tolerance": 0.75
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#named-slot"
+      },
+      "width": 392,
+      "tolerance": 0.75
+    },
+    {
+      "type": "assert_position",
+      "element_a": {
+        "selector": "#named-first dd"
+      },
+      "element_b": {
+        "selector": "#named-second dt"
+      },
+      "relation": "left_of",
+      "gap": 16,
+      "tolerance": 0.75
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#named-second dd"
+      },
+      "height": 22,
+      "tolerance": 0.2
+    },
+    {
+      "type": "resize",
+      "width": 900,
+      "height": 500
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#direct"
+      },
+      "width": 345.234375,
+      "tolerance": 0.75
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#direct-slot"
+      },
+      "width": 345.234375,
+      "tolerance": 0.75
+    },
+    {
+      "type": "assert_position",
+      "element_a": {
+        "selector": "#direct-first dd"
+      },
+      "element_b": {
+        "selector": "#direct-second dt"
+      },
+      "relation": "left_of",
+      "gap": 16,
+      "tolerance": 0.75
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#direct-second dd"
+      },
+      "height": 22,
+      "tolerance": 0.2
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#variable"
+      },
+      "width": 345.234375,
+      "tolerance": 0.75
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#variable-slot"
+      },
+      "width": 345.234375,
+      "tolerance": 0.75
+    },
+    {
+      "type": "assert_position",
+      "element_a": {
+        "selector": "#variable-first dd"
+      },
+      "element_b": {
+        "selector": "#variable-second dt"
+      },
+      "relation": "left_of",
+      "gap": 16,
+      "tolerance": 0.75
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#variable-second dd"
+      },
+      "height": 22,
+      "tolerance": 0.2
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#auto"
+      },
+      "width": 260.484375,
+      "tolerance": 0.75
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#auto-slot"
+      },
+      "width": 260.484375,
+      "tolerance": 0.75
+    },
+    {
+      "type": "assert_position",
+      "element_a": {
+        "selector": "#auto-first dd"
+      },
+      "element_b": {
+        "selector": "#auto-second dt"
+      },
+      "relation": "left_of",
+      "gap": 16,
+      "tolerance": 0.75
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#auto-second dd"
+      },
+      "height": 22,
+      "tolerance": 0.2
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#weighted"
+      },
+      "width": 472.3125,
+      "tolerance": 0.75
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#weighted-slot"
+      },
+      "width": 472.3125,
+      "tolerance": 0.75
+    },
+    {
+      "type": "assert_position",
+      "element_a": {
+        "selector": "#weighted-first dd"
+      },
+      "element_b": {
+        "selector": "#weighted-second dt"
+      },
+      "relation": "left_of",
+      "gap": 16,
+      "tolerance": 0.75
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#weighted-second dd"
+      },
+      "height": 22,
+      "tolerance": 0.2
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#named"
+      },
+      "width": 392,
+      "tolerance": 0.75
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#named-slot"
+      },
+      "width": 392,
+      "tolerance": 0.75
+    },
+    {
+      "type": "assert_position",
+      "element_a": {
+        "selector": "#named-first dd"
+      },
+      "element_b": {
+        "selector": "#named-second dt"
+      },
+      "relation": "left_of",
+      "gap": 16,
+      "tolerance": 0.75
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#named-second dd"
+      },
+      "height": 22,
+      "tolerance": 0.2
+    }
+  ]
+}

@@ -317,12 +317,13 @@ static ShellResult test_radiant_view_run_logged_headless(const char* page,
                                                          const char* optimization = nullptr,
                                                          const char* const* preview_options = nullptr,
                                                          int timeout_ms = 0,
-                                                         const char* executable = "./lambda.exe") {
+                                                         const char* executable = "./lambda.exe",
+                                                         const char* command = "view") {
     const char* args[32] = {};
     int arg_count = 0;
     args[arg_count++] = executable;
-    args[arg_count++] = "view";
-    args[arg_count++] = page;
+    args[arg_count++] = command;
+    if (page) args[arg_count++] = page;
     if (event_path) {
         args[arg_count++] = "--event-file";
         args[arg_count++] = event_path;
@@ -336,6 +337,76 @@ static ShellResult test_radiant_view_run_logged_headless(const char* page,
     options.merge_stderr = true;
     options.timeout_ms = timeout_ms;
     return shell_exec(executable, args, &options);
+}
+
+TEST(RadiantViewTest, DemoCommandListsNamesAndRejectsUnknownNames) {
+    for (const char* name : {"--list", "--help", "-h", "unknown-demo"}) {
+        SCOPED_TRACE(name);
+        const char* args[] = {"./lambda.exe", "demo", name, "--no-log", nullptr};
+        ShellOptions options = {};
+        options.merge_stderr = true;
+        options.timeout_ms = 30000;
+        ShellResult result = shell_exec("./lambda.exe", args, &options);
+        const char* output = result.stdout_buf ? result.stdout_buf : "";
+        EXPECT_FALSE(result.timed_out);
+        EXPECT_EQ(result.exit_code, strcmp(name, "unknown-demo") == 0 ? 1 : 0) << output;
+        EXPECT_NE(strstr(output, "Usage: lambda demo [name] [view options]"), nullptr) << output;
+        EXPECT_NE(strstr(output, "test/demo/tetris/tetris.ls"), nullptr) << output;
+        EXPECT_NE(strstr(output, "test/demo/scene3d/ringworld.ls"), nullptr) << output;
+        if (strcmp(name, "unknown-demo") == 0) EXPECT_NE(strstr(output, "unknown demo 'unknown-demo'"), nullptr) << output;
+        shell_result_free(&result);
+    }
+}
+
+TEST(RadiantViewTest, DemoCommandLaunchesCatalogAndPreservesViewerOptions) {
+    test_radiant_view_ensure_temp_dir();
+    const char* events = "./temp/test_demo_launch_events.json";
+    const char* result_path = "./temp/test_demo_launch_result.json";
+    const char* custom_home = "./temp/test_demo_home";
+    ASSERT_TRUE(create_dir("./temp/test_demo_home/package/doc"));
+    write_text_file("./temp/test_demo_home/package/doc/doc_viewer.html", "<main id='demo-home-splash'>Custom viewer</main>");
+    struct DemoCase {
+        const char* name; const char* selector;
+        bool graphics = false; const char* home = "./lmd";
+    };
+    const DemoCase cases[] = {
+        {nullptr, "#splash"},
+        {"tetris", "#tetris[data-mode=ready]"},
+        {"superlambda", "#superlambda[data-mode=ready]"},
+        {"doom", "#doom[data-mode=ready]"},
+        {"scene3d", "#ringworld[data-ready=true]", true},
+        {"ringworld", "#ringworld[data-ready=true]", true},
+        {"observatory", "#status[data-ready=true]", true},
+        {"three-gallery", "#status[data-ready=true]", true},
+        {"asset-gallery", "scene3d", true},
+        {"shared-animation", "#deformation", true},
+        {"slides", ".slide-player"},
+        {"wordcloud", ".gallery .card"},
+        {nullptr, "#demo-home-splash", false, custom_home},
+    };
+    for (const DemoCase& demo : cases) {
+        SCOPED_TRACE(demo.name ? demo.name : demo.home);
+        StrBuf* replay = strbuf_new();
+        strbuf_append_format(replay,
+            "{\"input_turn_ms\":0,\"events\":["
+            "{\"type\":\"assert_count\",\"target\":{\"selector\":\"%s\"},\"min\":1},"
+            "{\"type\":\"window_close\"},{\"type\":\"assert_window_closed\",\"closed\":true}]}", demo.selector);
+        write_text_file(events, replay->str);strbuf_free(replay);
+        remove(result_path);
+        // text measurement uses worker-owned windowless contexts; only GPU demos need GLFW.
+        const ShellEnvEntry env[] = {
+            {"LAMBDA_HOME", demo.home}, {"LAMBDA_HEADLESS_GLFW_WINDOW", demo.graphics ? "1" : nullptr}, {nullptr, nullptr},
+        };
+        const char* options[] = {"--event-result", result_path, "--no-log", nullptr};
+        ShellResult result = test_radiant_view_run_logged_headless(demo.name, events, env,
+            nullptr, options, 30000, "./lambda.exe", "demo");
+        EXPECT_FALSE(result.timed_out);
+        EXPECT_EQ(result.exit_code, 0) << (result.stdout_buf ? result.stdout_buf : "");
+        EXPECT_TRUE(test_radiant_view_file_contains(result_path, "\"result\":\"PASS\""));
+        shell_result_free(&result);
+    }
+    remove(events);remove(result_path);
+    ASSERT_TRUE(file_delete_recursive(custom_home) == 0);
 }
 
 TEST(RadiantViewTest, DocumentLanguageUsesOnlyFinalHttpResponseAndMetadataPrecedence) {
@@ -2558,6 +2629,59 @@ TEST(RadiantViewTest, LambdaSelectValueReadsLiveOptionSelectedness) {
         "test/lambda/ui/_select_live_value.ls", "test/ui/select_live_value.json", env);
     EXPECT_EQ(result.exit_code, 0) << (result.stdout_buf ? result.stdout_buf : "");
     shell_result_free(&result);
+}
+
+static void test_radiant_view_expect_replay(const char* page, const char* replay,
+        const ShellEnvEntry* env, bool clean_memtrack = false, int timeout_ms = 180000) {
+    ShellResult result = test_radiant_view_run_logged_headless(
+        page, replay, env, nullptr, nullptr, timeout_ms);
+    const char* output = result.stdout_buf ? result.stdout_buf : "";
+    EXPECT_FALSE(result.timed_out) << output;
+    EXPECT_EQ(result.exit_code, 0) << output;
+    EXPECT_NE(strstr(output, "Result: PASS"), nullptr) << output;
+    if (clean_memtrack) EXPECT_NE(strstr(output, "[MEMTRACK_LIVE] bytes=0 count=0"), nullptr) << output;
+    shell_result_free(&result);
+}
+
+TEST(RadiantViewTest, PhotoCanvasCopiesRgbaAndReleasesItAcrossGc) {
+    // D4.5.2 / D5.3.3: the retained surface must outlive borrowed Lambda pixels.
+    const ShellEnvEntry env[] = {
+        {"LAMBDA_GC_FORCE_EVERY", "1"}, {"LAMBDA_GC_POISON_FREED", "1"},
+        {"LAMBDA_FUNC_JIT_THRESHOLD", "1"}, {"LAMBDA_SATELLITE_SYNC", "1"},
+        {"MEMTRACK_MODE", "STATS"}, {"VIEW_MEM_STAGES", "1"}, {nullptr, nullptr},
+    };
+    test_radiant_view_expect_replay(
+        "test/demo/photo/tests/_canvas_bridge.ls", "test/demo/photo/tests/canvas_bridge.json", env, true);
+}
+
+TEST(RadiantViewTest, PhotoEditorRetainsCanvasAcrossEditsAndHistory) {
+    for (const char* tier : {"auto", "jit"}) {
+        SCOPED_TRACE(tier);
+        const ShellEnvEntry env[] = {{"LAMBDA_EXEC_BACKEND", tier}, {nullptr, nullptr}};
+        test_radiant_view_expect_replay(
+            "test/demo/photo/photo.ls", "test/demo/photo/tests/photo_smoke.json", env);
+    }
+}
+
+TEST(RadiantViewTest, PhotoCropDraftAndKeyboardCompare) {
+    for (const char* tier : {"auto", "jit"}) {
+        SCOPED_TRACE(tier);
+        const ShellEnvEntry env[] = {
+            {"LAMBDA_EXEC_BACKEND", tier},
+            {"PHOTO_SOURCE", "test/demo/photo/tests/rgba.png"}, {nullptr, nullptr},
+        };
+        for (const char* replay : {"test/demo/photo/tests/photo_gestures.json",
+                                   "test/demo/photo/tests/photo_responsive.json"}) {
+            SCOPED_TRACE(replay);
+            test_radiant_view_expect_replay(
+                "test/demo/photo/photo.ls", replay, env);
+        }
+    }
+}
+
+TEST(RadiantViewTest, PhotoToolButtonsPreserveContainerAlignment) {
+    test_radiant_view_expect_replay(
+        "test/demo/photo/tests/_button_layout.ls", "test/demo/photo/tests/button_layout.json", nullptr, false, 30000);
 }
 
 TEST(RadiantViewTest, DoomNativeGameplayAndEpisodeLifecycle) {

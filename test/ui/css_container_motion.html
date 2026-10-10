@@ -1,0 +1,14 @@
+<!doctype html>
+<style>
+body {margin:0;}
+#container {position:absolute;left:0;top:40px;width:300px;container:card / inline-size;}
+#target {width:20px;height:20px;background:green;transition:width 2s linear;}
+@container card (width > 200px) {#target {width:100px;}}
+</style>
+<button id="shrink">shrink</button><button id="grow">grow</button>
+<div id="container"><div id="target"></div></div>
+<script>
+var container=document.getElementById('container');
+document.getElementById('shrink').addEventListener('click',function(){container.style.width='150px';});
+document.getElementById('grow').addEventListener('click',function(){container.style.width='300px';});
+</script>

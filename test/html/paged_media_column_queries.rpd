@@ -1,0 +1,12 @@
+<?xml version="1.0"?>
+<r:page-document xmlns:r="urn:lambda:radiant:page" style="margin:0;font-family:Arial;font-size:10px;line-height:25px;color:black;orphans:1;widows:1" r:line-stacking-strategy="max-height" r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" r:linefeed-treatment="treat-as-space" r:white-space-treatment="ignore-if-surrounding-linefeed" r:white-space-collapse="true" r:wrap-option="wrap">
+  <r:master-set r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics"><r:page-master r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" name="sheet" style="size:240px 180px;margin:15px"><r:region r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" role="body" name="xsl-region-body" style="column-count:2;column-gap:18px;overflow:hidden"/></r:page-master></r:master-set>
+  <r:page-sequence r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" master-reference="sheet" force-page-count="no-force"><r:flow r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" region-name="xsl-region-body">
+    <div r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" r:block-inline-geometry="reference" style="margin:0;background-color:#f2cccc;padding-left:16px">Parent initial</div>
+    <div r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" r:block-inline-geometry="reference" style="margin:0;background-color:#cce5ff;break-before:column">Owner gap</div>
+    <div r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" r:block-inline-geometry="reference" style="margin:0;background-color:#d5efcd;break-before:page">Page two</div>
+    <div r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" r:block-inline-geometry="reference" style="margin:0;background-color:#fff0bd;break-before:column">Column two</div>
+    <div r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" r:block-inline-geometry="reference" style="margin:0;background-color:#e8d5f4;break-before:page">Number initial</div>
+    <div r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" r:block-inline-geometry="reference" style="margin:0;background-color:#ccece8;break-before:column">Last column</div>
+  </r:flow></r:page-sequence>
+</r:page-document>

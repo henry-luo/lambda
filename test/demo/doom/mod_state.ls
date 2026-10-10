@@ -40,7 +40,7 @@ pub fn new_game(level, rules, visuals, skill = 1, seed = 1) {
         where sector.tag == 666 and lowest_floor < sector.floorHeight)
         {sectorIndex: i, tag: 666, upperHeight: sector.floorHeight, lowerHeight: lowest_floor,
             oneWay: true, duration: 2, collisionEdges: []}]
-    {mode: "ready", skill: skill, time: 0.0, ticks: 0, seed: spawned.seed, initial_seed: seed,
+    {mode: "ready", autoplay: false, skill: skill, time: 0.0, ticks: 0, seed: spawned.seed, initial_seed: seed,
         player: {x: level.playerStart.x, y: level.playerStart.y,
             floor: level.playerStart.floorHeight or 0,
             z: (level.playerStart.floorHeight or 0) + rules.EYE_HEIGHT,
@@ -63,7 +63,7 @@ pub fn new_game(level, rules, visuals, skill = 1, seed = 1) {
 }
 pub fn transition(game, level, rules, visuals, map_name) {
     let fresh = new_game(level, rules, visuals, game.skill, game.seed)
-    {*: fresh, mode: "playing", generation: game.generation + 1,
+    {*: fresh, mode: "playing", autoplay: game.autoplay, generation: game.generation + 1,
         player: {*: fresh.player, health: game.player.health, armor: game.player.armor,
             armor_type: game.player.armor_type, ammo: game.player.ammo, max_ammo: game.player.max_ammo,
             backpack: game.player.backpack, weapons: game.player.weapons, weapon: game.player.weapon},

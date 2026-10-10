@@ -1313,10 +1313,7 @@ void contribute_inline_strut(LayoutContext* lycon, DomNode* source, ViewSpan* sp
         // CSS 2.1 §10.8.1: explicit leading surrounds the font content area,
         // not the font's normal-line-height distribution.
         font_get_content_area_split(font_box_handle(&lycon->font), &ascender, &descender);
-        float content_height = ascender + descender;
-        float half_leading = (lycon->block.line_height - content_height) / 2.0f;
-        ascender += half_leading;
-        descender += half_leading;
+        layout_apply_line_height_leading(lycon->block.line_height, &ascender, &descender);
     }
     if (ascender > 0.0f || descender > 0.0f) {
         layout_apply_baseline_shift(lycon, &ascender, &descender);
@@ -2359,44 +2356,11 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         lycon->block.direction = layout_resolve_plaintext_direction(
             elmt_elem, pa_direction);
     }
-    // CSS Counter handling (CSS 2.1 Section 12.4, CSS Lists 3)
-    bool pushed_counter_scope = false;
-    bool is_before_pseudo = elmt_elem && elmt_elem->tag_name &&
-        strcmp(elmt_elem->tag_name, "::before") == 0;
-    bool is_after_pseudo = elmt_elem && elmt_elem->tag_name &&
-        strcmp(elmt_elem->tag_name, "::after") == 0;
-    if (lycon->counter_context) {
-        counter_push_scope(lycon->counter_context, is_before_pseudo || is_after_pseudo);
-        pushed_counter_scope = true;
-    }
-
-    if (lycon->counter_context && (is_before_pseudo || is_after_pseudo)) {
-        if (elmt_elem) {
-            layout_update_pseudo_content_with_counters(lycon, elmt_elem);
-        }
-    } else if (lycon->counter_context && span->blk) {
-        ViewBlock* block_api_span = lam::unsafe_view_block_api_span(span);
-        // CSS Lists 3 §4.4: an inline list container still establishes the
-        // implicit list-item counter scope; outer display does not remove it.
-        setup_list_container_counters(lycon, block_api_span, elmt_elem);
-        if (elmt_elem) {
-            compute_reversed_counter_initial(lycon, elmt_elem);
-        }
-        if (span->block()->counter_reset) {
-            counter_reset(lycon->counter_context, span->block()->counter_reset);
-        }
-
-        if (span->block()->counter_increment) {
-            counter_increment(lycon->counter_context, span->block()->counter_increment);
-        }
-
-        if (span->block()->counter_set) {
-            counter_set(lycon->counter_context, span->block()->counter_set);
-        }
-
-        if (display.list_item) {
-            process_list_item(lycon, block_api_span, elmt, elmt_elem, display);
-        }
+    LayoutCounterScope counter_scope;
+    if (!counter_scope.enter(lycon, span, elmt_elem, display)) {
+        log_error("counter scope: cannot allocate inline counter frame");
+        restore_parent_state(true);
+        return;
     }
 
     if (elmt->is_element()) {
@@ -2661,9 +2625,7 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         }
 
         restore_parent_state(false);
-        if (pushed_counter_scope) {
-            counter_pop_scope_propagate(lycon->counter_context, true);
-        }
+        counter_scope.close();
         return;
     }
 
@@ -3186,7 +3148,5 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     }
 
     restore_parent_state(true);
-    if (pushed_counter_scope) {
-        counter_pop_scope_propagate(lycon->counter_context, true);
-    }
+    counter_scope.close();
 }

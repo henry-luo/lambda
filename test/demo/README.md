@@ -1,4 +1,37 @@
-# Lambda Script Readability Demo
+# Lambda demos
+
+Run `./lambda.exe demo <name>` from the repository root, or `./lambda demo <name>`
+from an unpacked release. Each named demo uses the same viewer as `lambda view`.
+Run `lambda demo --list` for the catalog. With no name, `lambda demo` opens the
+bundled document viewer with its startup splash (D7.2.4).
+
+| Name | Entry point | Guide |
+| --- | --- | --- |
+| `tetris` | `tetris/tetris.ls` | [Tetris](tetris/TETRIS.md) |
+| `superlambda` | `superlambda/superlambda.ls` | [Superlambda](superlambda/README.md) |
+| `doom` | `doom/doom.ls` | [DOOM](doom/README.md) |
+| `photo` | `photo/photo.ls` | [Photo Studio](photo/README.md) |
+| `scene3d`, `ringworld` | `scene3d/ringworld.ls` | [Native 3D](scene3d/README.md) |
+| `observatory` | `scene3d/observatory.html` | [Native 3D](scene3d/README.md) |
+| `three-gallery` | `scene3d/three-gallery.html` | [Native 3D](scene3d/README.md) |
+| `asset-gallery` | `scene3d/asset-gallery.ls` | [Native 3D](scene3d/README.md) |
+| `shared-animation` | `scene3d/shared-animation.html` | [Native 3D](scene3d/README.md) |
+| `slides` | `slides/northstar.slides` | [Slides](slides/README.md) |
+| `wordcloud` | `wordcloud.ls` | [Charts](CHARTS.md) |
+
+Paths in the table are relative to `test/demo/`. Viewer options follow the name:
+
+```sh
+./lambda.exe demo tetris
+./lambda.exe demo scene3d
+./lambda.exe demo tetris --headless --event-file test/ui/tetris_autoplay.json \
+  --event-result temp/tetris-demo.json
+```
+
+The games and Ringworld include an **Auto Play** button. Direct `lambda view`
+commands and individual test/replay commands remain available in each guide.
+
+## Readability extraction
 
 This demo replicates the functionality of [Mozilla's Readability](https://github.com/mozilla/readability) library using Lambda Script's functional programming capabilities and multi-format I/O system.
 
@@ -188,5 +221,5 @@ This demonstrates Lambda Script's capability to implement sophisticated document
 
 ## Interactive Tetris
 
-Run `./lambda.exe view test/demo/tetris/tetris.ls` for a native, interactive Tetris
+Run `./lambda.exe demo tetris` for a native, interactive Tetris
 game written in Lambda. See [TETRIS.md](tetris/TETRIS.md) for controls and test commands.

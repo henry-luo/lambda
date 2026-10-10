@@ -40,7 +40,13 @@ bool radiant_stack_is_deferred_from_normal_flow(View* view) {
 // siblings, as for positive z; negative z still paints in tree order.
 bool radiant_stack_is_in_flow_positioned_step8(View* view) {
     ViewElement* element = lam::view_as_element(view);
-    if (!element || !element->position) return false;
+    if (!element) return false;
+    ViewBlock* block = lam::view_as_block(view);
+    // layout/paint containment creates a stacking context even for static boxes.
+    if (block && block->blk && block->block()->contain_positioning &&
+        (!element->position || element->positionp()->position == CSS_VALUE_STATIC ||
+         element->positionp()->z_index == 0)) return true;
+    if (!element->position) return false;
     const PositionProp* position = element->positionp();
     // a custom layout sequences its own children (radiant_stack_collect_custom_layout_paint)
     if (position->has_custom_layout_z_index) return false;

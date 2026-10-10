@@ -28,8 +28,10 @@ static const char* FUNCTIONAL_TEST_DIRECTORIES[] = {
     "test/lambda/slide",
     "test/lambda/scene3d",
     "test/lambda/ui_dtna",
+    "test/lambda/ui_bold",
     "test/lambda/map",
     "test/demo/doom/tests",
+    "test/demo/photo/tests",
     "test/lambda/graph/mermaid",
     "test/lambda/graph/graphviz",
     "test/lambda/graph/structurizr",
@@ -39,8 +41,8 @@ static const size_t NUM_FUNCTIONAL_TEST_DIRECTORIES = sizeof(FUNCTIONAL_TEST_DIR
 
 TEST(UiDtnaTests, PackageContractsAgreeAcrossTiers) {
     const char* tiers[] = {"interp", "auto", "jit"};
-    const char* names[] = {"dtna_attribute_union", "dtna_collections",
-        "dtna_contracts", "dtna_disclosure", "dtna_display", "dtna_imported_outcomes", "dtna_table", "dtna_tokens", "dtna_tree"};
+    const char* names[] = {"dtna_alert", "dtna_attribute_union", "dtna_avatar", "dtna_button", "dtna_collections",
+        "dtna_contracts", "dtna_disclosure", "dtna_display", "dtna_display_variants", "dtna_elements", "dtna_foundations", "dtna_grid_modes", "dtna_icons", "dtna_imported_outcomes", "dtna_pagination_modes", "dtna_progress", "dtna_rate", "dtna_segmented", "dtna_skeleton", "dtna_spin", "dtna_surfaces", "dtna_table", "dtna_tag", "dtna_timeline_statistic", "dtna_tokens", "dtna_tree", "dtna_typography"};
     for (const char* tier : tiers) {
         SCOPED_TRACE(tier);
         for (const char* name : names) {
@@ -105,6 +107,7 @@ TEST(DoomDemoTests, GeometryInputAndResourceContractsAgreeAcrossTiers) {
 // Procedural scripts (executed with ./lambda.exe run <script>)
 static const char* PROCEDURAL_TEST_DIRECTORIES[] = {
     "test/lambda/proc",
+    "test/demo/photo/tests/proc",
     "test/lambda/conc",
     "test/lambda/pdf",
     "test/benchmark/awfy",

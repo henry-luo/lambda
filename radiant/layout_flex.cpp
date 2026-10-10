@@ -1107,6 +1107,13 @@ void layout_flex_container(LayoutContext* lycon, ViewBlock* container) {
         return;
     }
 
+    flex_layout->source_items = lam::own_arr((View**)scratch_alloc(&flex_layout->lycon->scratch,
+        sizeof(View*) * (size_t)item_count));
+    if (!flex_layout->source_items) {
+        log_error("counter order: cannot retain flattened flex item order");
+        return;
+    }
+    memcpy(flex_layout->source_items.get(), items, sizeof(View*) * (size_t)item_count);
     sort_flex_items_by_order(items, item_count);
     // This must happen before flex basis calculation in create_flex_lines
     apply_constraints_to_flex_items(flex_layout);
@@ -1373,6 +1380,13 @@ void layout_flex_container(LayoutContext* lycon, ViewBlock* container) {
         align_content(flex_layout);
 
         if (flex_layout->align_content == ALIGN_STRETCH && flex_layout->lycon) {
+            ScratchScope counter_scratch(&flex_layout->lycon->scratch);
+            CounterCheckpoint counter_checkpoint;
+            if (!counter_checkpoint.enter(flex_layout->lycon->counter_context,
+                    &flex_layout->lycon->scratch, &counter_scratch.mark)) {
+                log_error("counter trial: cannot isolate stretched flex measurement");
+                return;
+            }
             for (int li = 0; li < line_count; li++) {
                 FlexLineInfo* sline = &flex_layout->lines[li];
                 for (int si = 0; si < sline->item_count; si++) {
@@ -2633,17 +2647,13 @@ float apply_flex_constraint(
     // CSS Flexbox §4.5: min-width:auto for replaced elements = intrinsic width.
     if (item->form_control()) {
         bool is_horizontal = is_main_axis_horizontal(flex_layout);
-        // and cross-axis must apply CSS min-/max- constraints; previously the
         bool axis_is_horizontal = is_main_axis ? is_horizontal : !is_horizontal;
         ViewBlock* item_block = lam::view_as_block(item);
         LayoutAxisRefs selected(item, axis_is_horizontal);
         float min_size = 0;
-        float max_size = layout_positive_max_axis_or(item_block, axis_is_horizontal, FLT_MAX);
 
         float explicit_min = layout_explicit_min_axis_or(item_block, axis_is_horizontal, -1.0f);
-        if (explicit_min >= 0.0f) {
-            min_size = explicit_min;
-        } else if (is_main_axis && item->form) {
+        if (explicit_min < 0.0f && is_main_axis && item->form) {
             float intrinsic_min = flex_form_intrinsic_size(
                 item, flex_layout, axis_is_horizontal);
             if (intrinsic_min > 0.0f) {
@@ -2660,6 +2670,12 @@ float apply_flex_constraint(
             }
         }
 
+        // flex sizes are border-box; shared CSS clamping also caps the
+        // native automatic minimum by max-size (CSS Flexbox section 4.5).
+        min_size = layout_apply_min_max_border_box_axis(
+            item_block, min_size, axis_is_horizontal);
+        float max_size = layout_apply_min_max_border_box_axis(
+            item_block, FLT_MAX, axis_is_horizontal);
         return flex_clamp_constraint(computed_size, min_size, max_size, hit_min, hit_max);
     }
 
@@ -3488,6 +3504,7 @@ void align_items_main_axis(FlexContainerLayout* flex_layout, FlexLineInfo* line)
         line, flex_main_axis(flex_layout), 0.0f);
 
     int auto_margin_count = flex_line_auto_margin_count(flex_layout, line, main_axis);
+    bool reversed = flex_main_axis_reversed(flex_layout);
 
     float current_pos = 0.0f;
     float spacing = 0.0f;
@@ -3516,10 +3533,11 @@ void align_items_main_axis(FlexContainerLayout* flex_layout, FlexLineInfo* line)
         if (!item) continue;
 
         LayoutAxisRefs main_refs(item, main_axis);
-        bool start_auto = main_refs.margin_start_is_auto();
-        bool end_auto = main_refs.margin_end_is_auto();
-        float margin_start = main_refs.margin_start();
-        float margin_end = main_refs.margin_end();
+        // positioning runs from main-start; physical margins reverse with that axis.
+        bool start_auto = reversed ? main_refs.margin_end_is_auto() : main_refs.margin_start_is_auto();
+        bool end_auto = reversed ? main_refs.margin_start_is_auto() : main_refs.margin_end_is_auto();
+        float margin_start = reversed ? main_refs.margin_end() : main_refs.margin_start();
+        float margin_end = reversed ? main_refs.margin_start() : main_refs.margin_end();
         if (auto_margin_count > 0) {
             if (start_auto) margin_start = auto_margin_size;
             if (end_auto) margin_end = auto_margin_size;
@@ -3871,16 +3889,7 @@ static void flex_set_axis_position(ViewElement* item, float position,
 
 void set_main_axis_position(ViewElement* item, float position, FlexContainerLayout* flex_layout) {
     LayoutAxis axis = flex_main_axis(flex_layout);
-    bool direction_reverse = flex_layout->direction == CSS_VALUE_ROW_REVERSE ||
-        flex_layout->direction == CSS_VALUE_COLUMN_REVERSE;
-    bool vertical_rl_block_axis = flex_layout->writing_mode == WM_VERTICAL_RL &&
-        axis == LAYOUT_AXIS_X;
-    bool row_rtl = (flex_layout->direction == CSS_VALUE_ROW ||
-                    flex_layout->direction == CSS_VALUE_ROW_REVERSE) &&
-        flex_layout->text_direction == TD_RTL;
-    bool reverse = direction_reverse != vertical_rl_block_axis;
-    if (row_rtl) reverse = !reverse;
-    flex_set_axis_position(item, position, axis, reverse,
+    flex_set_axis_position(item, position, axis, flex_main_axis_reversed(flex_layout),
                            flex_layout->main_axis_size,
                            flex_main_axis_size(item, flex_layout));
 }
@@ -4068,7 +4077,10 @@ static void determine_hypothetical_cross_sizes(LayoutContext* lycon, FlexContain
             ViewElement* item = lam::view_as_element(line->items[j]);
             if (!item) continue;
 
-            if (item->form_control()) {
+            // HTML buttons size their flow label at the flexed width; native
+            // control metrics cannot represent wrapped or shifted descendants.
+            if (item->form_control() &&
+                (!is_horizontal || layout_form_control_has_native_intrinsic_size(item))) {
                 ViewBlock* item_block = lam::view_as_block(item);
                 IntrinsicSize form_size = layout_measure_form_control(lycon, item_block,
                                                                       lycon->available_space);

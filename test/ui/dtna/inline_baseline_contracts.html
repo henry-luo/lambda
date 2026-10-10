@@ -1,0 +1,17 @@
+<!doctype html>
+<html><head><style>
+body{margin:0;font-family:'Liberation Sans';display:flex;flex-direction:column;align-items:flex-start;gap:10px}
+.line,.row{font-size:20px;line-height:1}.line{width:80px}.small{font-size:15px}.large{font-size:25px}
+.row{display:flex;align-items:center;gap:8px}.icon{display:inline-flex;width:1em;height:1em;line-height:0;vertical-align:-0.125em;background:#1677ff}
+.up{vertical-align:0.125em}button{display:inline-block;padding:0;border:0;margin:0;font:inherit;line-height:1;background:transparent}.label{display:block}
+.clip{font-size:25px;line-height:20px}.clip button{line-height:20px}
+</style></head><body>
+<div id="flow-small" class="line small"><span class="icon"></span></div>
+<div id="flow-middle" class="line"><span class="icon"></span></div>
+<div id="flow-large" class="line large"><span class="icon"></span></div>
+<div id="flow-up" class="line"><span class="icon up"></span></div>
+<div id="flex-small" class="row small"><button><span class="label"><span class="icon"></span></span></button></div>
+<div id="flex-middle" class="row"><button><span class="label"><span class="icon"></span></span></button></div>
+<div id="flex-large" class="row large"><button><span class="label"><span class="icon"></span></span></button></div>
+<div id="flex-ink" class="row clip"><button><span class="label">123</span></button></div>
+</body></html>

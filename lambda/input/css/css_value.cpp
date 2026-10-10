@@ -288,6 +288,35 @@ bool css_value_keyword_equals(const CssValue* value, CssEnum keyword) {
     return value && value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == keyword;
 }
 
+bool css_value_identifier_is(const CssValue* value, const char* name, bool case_sensitive) {
+    const char* identifier = css_value_identifier_name(value);
+    return identifier && name && (case_sensitive ? strcmp(identifier, name) == 0
+        : str_ieq_cstr(identifier, name));
+}
+
+bool css_value_has_identifier(const CssValue* value, const char* name, bool case_sensitive) {
+    if (css_value_identifier_is(value, name, case_sensitive)) return true;
+    if (!value || value->type != CSS_VALUE_TYPE_LIST) return false;
+    for (int i = 0; value->data.list.values && i < value->data.list.count; i++) {
+        if (css_value_identifier_is(value->data.list.values[i], name, case_sensitive)) return true;
+    }
+    return false;
+}
+
+uint8_t css_value_containment_flags(const CssValue* value) {
+    if (css_value_has_identifier(value, "strict"))
+        return CSS_CONTAIN_SIZE | CSS_CONTAIN_LAYOUT | CSS_CONTAIN_STYLE | CSS_CONTAIN_PAINT;
+    if (css_value_has_identifier(value, "content"))
+        return CSS_CONTAIN_LAYOUT | CSS_CONTAIN_STYLE | CSS_CONTAIN_PAINT;
+    const struct {const char* name; uint8_t flag;} modes[] = {
+        {"size", CSS_CONTAIN_SIZE}, {"inline-size", CSS_CONTAIN_INLINE_SIZE},
+        {"layout", CSS_CONTAIN_LAYOUT}, {"style", CSS_CONTAIN_STYLE}, {"paint", CSS_CONTAIN_PAINT}
+    };
+    uint8_t flags = 0;
+    for (const auto& mode : modes) if (css_value_has_identifier(value, mode.name)) flags |= mode.flag;
+    return flags;
+}
+
 bool css_function_name_is(const CssFunction* function, const char* name) {
     return function && function->name && name && str_ieq_cstr(function->name, name);
 }
@@ -365,6 +394,8 @@ bool css_content_append(const CssValue* value, const CssContentBindings* binding
     }
     int quote = css_content_quote_type(value);
     if (quote) {
+        // CSS Content 3: a closing quote at depth zero emits nothing and cannot make depth negative.
+        if ((quote == 2 || quote == 4) && *quote_depth <= 0) return true;
         if (quote == 2 || quote == 4) { if (*quote_depth > 0) (*quote_depth)--; }
         if ((quote == 1 || quote == 2) && bindings->quote) {
             const char* result = bindings->quote(bindings->context, quote == 1, *quote_depth);
@@ -451,11 +482,12 @@ const char* css_math_token_name(const CssValue* value) {
     return NULL;
 }
 
-enum CssValueSearch {CSS_SEARCH_VAR, CSS_SEARCH_PENDING, CSS_SEARCH_LENGTH_UNIT};
+enum CssValueSearch {CSS_SEARCH_VAR, CSS_SEARCH_PENDING, CSS_SEARCH_LENGTH_UNIT, CSS_SEARCH_PERCENTAGE};
 
 static bool css_value_matches_search(const CssValue* value, CssValueSearch search,
     CssUnit first, CssUnit second) {
     if (!value) return false;
+    if (search == CSS_SEARCH_PERCENTAGE) return value->type == CSS_VALUE_TYPE_PERCENTAGE;
     if (search == CSS_SEARCH_LENGTH_UNIT)
         return value->type == CSS_VALUE_TYPE_LENGTH &&
             (value->data.length.unit == first || value->data.length.unit == second);
@@ -502,6 +534,10 @@ bool css_value_contains_var_reference(const CssValue* value) {
 
 bool css_value_contains_pending_substitution(const CssValue* value) {
     return css_value_contains(CSS_SEARCH_PENDING, value);
+}
+
+bool css_value_contains_percentage(const CssValue* value) {
+    return css_value_contains(CSS_SEARCH_PERCENTAGE, value);
 }
 
 bool css_value_contains_length_unit(const CssValue* value, CssUnit first, CssUnit second) {

@@ -1,0 +1,57 @@
+{
+  "csl_version": "1.0.2",
+  "files": [
+    {
+      "path": "styles/ieee.csl",
+      "url": "https://raw.githubusercontent.com/citation-style-language/styles/590f2615e62a2b4172382fd1419ff00b4d359fc3/ieee.csl",
+      "sha256": "6dee2b87ce90a7ab86f232d78a9216f47adc6193f13b6307b4a83c65594e721a",
+      "license": "CC-BY-SA-3.0"
+    },
+    {
+      "path": "styles/apa.csl",
+      "url": "https://raw.githubusercontent.com/citation-style-language/styles/590f2615e62a2b4172382fd1419ff00b4d359fc3/apa.csl",
+      "sha256": "41b4f3c9c61b58b7428ab21d653891995db7b4648d2f0a906eabcb8b2742e7ae",
+      "license": "CC-BY-SA-3.0"
+    },
+    {
+      "path": "styles/chicago-author-date.csl",
+      "url": "https://raw.githubusercontent.com/citation-style-language/styles/590f2615e62a2b4172382fd1419ff00b4d359fc3/chicago-author-date.csl",
+      "sha256": "635db8db1d0feca7fae37999470f0b56b51c208a71482e5ff4c45c30bdfb32bf",
+      "license": "CC-BY-SA-3.0"
+    },
+    {
+      "path": "styles/chicago-fullnote-bibliography.csl",
+      "url": "https://raw.githubusercontent.com/citation-style-language/styles/590f2615e62a2b4172382fd1419ff00b4d359fc3/chicago-fullnote-bibliography.csl",
+      "sha256": "28c47961cbcc1ead1137d67daf9f8acfcc2079be48eab10d3036120f33e1d231",
+      "license": "CC-BY-SA-3.0"
+    },
+    {
+      "path": "locales/locales-en-US.xml",
+      "url": "https://raw.githubusercontent.com/citation-style-language/locales/8353f0623998ad020bb2f52b59eeb175408cb107/locales-en-US.xml",
+      "sha256": "6f2cd3d1d5527ff07a2981f7ec237753e3b6787568d053c08485802cc3d04ac0",
+      "license": "CC-BY-SA-3.0"
+    },
+    {
+      "path": "locales/locales-de-DE.xml",
+      "url": "https://raw.githubusercontent.com/citation-style-language/locales/8353f0623998ad020bb2f52b59eeb175408cb107/locales-de-DE.xml",
+      "sha256": "915af1411019bdf4b4a7cdfa14536c8f3f2ce7ccc5184d54e04084e8b3472915",
+      "license": "CC-BY-SA-3.0"
+    },
+    {
+      "path": "locales/locales-fr-FR.xml",
+      "url": "https://raw.githubusercontent.com/citation-style-language/locales/8353f0623998ad020bb2f52b59eeb175408cb107/locales-fr-FR.xml",
+      "sha256": "3db97cc0276ef45463959d4158724dd3d55fe22d51a495c8e29ad9e449f1807f",
+      "license": "CC-BY-SA-3.0"
+    }
+  ],
+  "upstreams": {
+    "citation-style-language/styles": {
+      "commit": "590f2615e62a2b4172382fd1419ff00b4d359fc3",
+      "ref": "v1.0.2"
+    },
+    "citation-style-language/locales": {
+      "commit": "8353f0623998ad020bb2f52b59eeb175408cb107",
+      "ref": "v1.0.2"
+    }
+  }
+}

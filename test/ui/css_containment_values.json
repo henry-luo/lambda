@@ -1,0 +1,111 @@
+{
+  "name": "Containment validates before and after substitution and inherits computed containment only",
+  "html": "test/ui/css_containment_values.html",
+  "viewport": {
+    "width": 500,
+    "height": 220
+  },
+  "events": [
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#inherit"
+      },
+      "height": 30
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#initial"
+      },
+      "height": 0
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#unset"
+      },
+      "height": 0
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#invalid-parse"
+      },
+      "height": 30
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#invalid-computed"
+      },
+      "height": 0
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#upper"
+      },
+      "height": 30
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#implicit"
+      },
+      "height": 0
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#implicit"
+      },
+      "property": "contain",
+      "equals": "none"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#inherit"
+      },
+      "property": "contain",
+      "equals": "layout"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#upper"
+      },
+      "property": "contain",
+      "equals": "layout"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#change"
+      }
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#inherit"
+      },
+      "height": 0
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#upper"
+      },
+      "height": 0
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#inherit"
+      },
+      "property": "contain",
+      "equals": "none"
+    }
+  ]
+}

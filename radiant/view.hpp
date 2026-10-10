@@ -66,7 +66,7 @@ constexpr int MAX_RADIANT_CSS_TREE_DEPTH = 512;
 void state_configure_selector_matcher(struct DocState* state, SelectorMatcher* matcher);
 typedef bool (*CssPropSerializeFn)(const CssPropAccessor* accessor,
                                    DomElement* element, int pseudo_type,
-                                   char* out, size_t out_size);
+                                   StringBuf* out);
 typedef CssPropSerializeFn CssPropDeriveFn;
 
 // The row shape is intentionally plain and pointer-free apart from callbacks so
@@ -87,6 +87,7 @@ bool css_prop_serialize_computed(DomElement* element, CssPropertyCode id,
                                  int pseudo_type, char* out, size_t out_size);
 String* css_prop_serialize_computed_value(Pool* pool, DomElement* element,
     CssPropertyCode id, int pseudo_type);
+bool css_prop_compute_numeric_value(DomElement* element, const CssValue* value, CssMathResult* result);
 String* css_prop_serialize_svg_value(Pool* pool, DomElement* declaring,
     CssPropertyCode id, const CssValue* value);
 String* css_prop_serialize_custom_property(Pool* pool, DomElement* element,
@@ -94,6 +95,9 @@ String* css_prop_serialize_custom_property(Pool* pool, DomElement* element,
 
 // Refresh one dynamic element's stylesheet declarations without constructing a
 // view tree; CSSOM and transition capture need the cascade, not committed layout.
+bool radiant_clear_cascaded_styles_visitor(DomNode* node, void* context);
+void radiant_recascade_document_styles(DomDocument* document, DomElement* root,
+                                      SelectorMatcher* matcher = nullptr);
 void radiant_cascade_styles_for_element(DomElement* element);
 // Reuse a caller-owned matcher for repeated element-local recascades.
 void radiant_cascade_styles_for_element_with_matcher(DomElement* element,
@@ -115,6 +119,8 @@ void radiant_apply_css_stylesheets_to_tree(DomDocument* doc, DomElement* root,
                                            CssStylesheet** stylesheets, int count,
                                            Pool* pool, CssEngine* engine,
                                            SelectorMatcher* matcher = nullptr);
+// shared full-cascade invalidation for viewport, selector-state and DOM changes.
+void radiant_recascade_document(DomDocument* doc);
 
 struct TextRect;
 // layout position follows containing blocks and scrolling, before CSS transforms.
@@ -286,7 +292,7 @@ AnimationInstance* animation_clock_driver_start(AnimationScheduler* scheduler, A
     void* target, AnimTickFn tick, AnimFinishFn released);
 double animation_clock_time(const AnimationScheduler* scheduler, const AnimationInstance* driver, double origin);
 void animation_instance_pause(AnimationInstance* anim, double now);
-void animation_instance_sample(AnimationInstance* anim, double now);
+void animation_instance_sample(AnimationInstance* anim, double now, bool preserve_timeline = false);
 void animation_instance_resume(AnimationInstance* anim, double now);
 
 // 3x3 affine transform matrix shared by view transforms and render backends.
@@ -1124,14 +1130,20 @@ inline bool radiant_corner_has_radius(const Corner* radius) {
     return false;
 }
 
-inline Corner radiant_corner_inset(const Corner* radius, float inset_x, float inset_y) {
+inline Corner radiant_corner_inset_edges(const Corner* radius, float top, float right, float bottom, float left) {
     Corner out = *radius;
     out.expressions = nullptr;
+    float horizontal[4] = {left, right, right, left};
+    float vertical[4] = {top, top, bottom, bottom};
     for (int i = 0; i < 4; i++) {
-        out.horizontal[i] = max(0.0f, out.horizontal[i] - inset_x);
-        out.vertical[i] = max(0.0f, out.vertical[i] - inset_y);
+        out.horizontal[i] = max(0.0f, out.horizontal[i] - horizontal[i]);
+        out.vertical[i] = max(0.0f, out.vertical[i] - vertical[i]);
     }
     return out;
+}
+
+inline Corner radiant_corner_inset(const Corner* radius, float inset_x, float inset_y) {
+    return radiant_corner_inset_edges(radius, inset_y, inset_x, inset_y, inset_x);
 }
 
 inline Corner radiant_corner_expand(const Corner* radius, float expand_x, float expand_y) {
@@ -2203,6 +2215,9 @@ typedef struct BlockProp {
     bool contain_inline_size;
     bool contain_positioning;
     bool contain_paint;
+    uint8_t computed_containment; // inherited CSS value excludes containment implied by container-type
+    uint8_t container_axes; // logical size-query eligibility, independent of authored contain
+    lam::Own<CssValue> container_names;
     bool content_visibility_hidden;
     float given_min_width_percent;   // Raw percentage if min-width: X% (NaN if not percentage)
     float given_max_width_percent;   // Raw percentage if max-width: X% (NaN if not percentage)
@@ -3234,6 +3249,7 @@ struct ClipShape {
 #define RDT_CLIP_PARAM_COUNT 18 // geometry (8), transform flag (1), inverse matrix (9)
 
 bool clip_point_in_shape(ClipShape* cs, float px, float py);
+bool clip_point_in_rounded_rect(float px, float py, Rect rect, const Corner* radius);
 bool clip_shapes_rect_inside(ClipShape** shapes, int depth,
     float x, float y, float w, float h);
 void clip_shapes_scanline_bounds(ClipShape** shapes, int depth,
@@ -3891,6 +3907,7 @@ void css_animation_finish(AnimationInstance* anim);
 // Process animation properties during style resolution and start animations
 // if animation-name references valid @keyframes. Called after resolve_css_styles.
 void css_animation_resolve(DomElement* element, LayoutContext* lycon);
+void css_motion_sample_existing(DomElement* element, LayoutContext* lycon);
 const CssValue* css_motion_computed_value(Pool* pool, DomElement* element,
     CssPropertyCode property);
 

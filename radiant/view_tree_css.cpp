@@ -1,12 +1,15 @@
 #include "view_tree_css.hpp"
 #include "page_document.hpp"
 #include "layout.hpp"
+#include "render.hpp"
 #include "../lambda/input/css/selector_matcher.hpp"
 #include "../lambda/input/css/css_parser.hpp"
 #include "../lambda/dom/dom.h"
 #include "../lib/font/font.h"
 #include "../lib/mem_factory.h"
+#include "../lib/checked_alloc.hpp"
 #include "../lib/str.h"
+#include "../lib/hashmap_helpers.h"
 #include <math.h>
 #include <string.h>
 
@@ -29,6 +32,89 @@ struct ViewCssPageContext {
 };
 static bool view_css_select_page(ViewTree* tree, const ViewCssPageContext* context,
     const char* name, CssDeclaration* result);
+static bool view_css_container_provider(void* context, DomElement* target,
+    const char* name, uint8_t axes, CssContainerMetrics* result);
+
+struct ViewCssContainerEntry {
+    DomNodeRef source;
+    float width, height;
+};
+struct ViewCssContainerState {
+    hashmap* previous;
+    hashmap* current;
+    uint64_t generation;
+};
+static uint64_t view_css_container_hash(const void* item, uint64_t seed0, uint64_t seed1) {
+    const ViewCssContainerEntry* entry = (const ViewCssContainerEntry*)item;
+    return hashmap_hash_bytes(&entry->source.expected_id, sizeof(entry->source.expected_id), seed0, seed1);
+}
+static int view_css_container_compare(const void* left, const void* right, void*) {
+    uint64_t a = ((const ViewCssContainerEntry*)left)->source.expected_id;
+    uint64_t b = ((const ViewCssContainerEntry*)right)->source.expected_id;
+    return a < b ? -1 : a > b;
+}
+
+void view_css_container_state_destroy(ViewTree* tree) {
+    ViewCssContainerState* state = tree && tree->model ? tree->model->containers.get() : nullptr;
+    if (!state) return;
+    if (state->previous) hashmap_free(state->previous);
+    if (state->current) hashmap_free(state->current);
+    pool_free(tree->prop_pool, state);
+    tree->model->containers = nullptr;
+}
+
+bool view_css_container_pass_begin(ViewTree* tree) {
+    if (!view_tree_model_source_valid(tree) || tree->model->committed) return false;
+    ViewCssContainerState* state = tree->model->containers;
+    if (state) hashmap_clear(state->current, false);
+    return true;
+}
+
+bool view_css_container_pass_end(ViewTree* tree, bool* settled) {
+    if (!settled || !tree->model->css) return false;
+    ViewCssContainerState* state = tree->model->containers;
+    bool dependencies = tree->model->css->engine->container_dependencies;
+    if (!state && !dependencies) { *settled = true; return true; }
+    if (!state) {
+        state = (ViewCssContainerState*)pool_calloc(tree->prop_pool, sizeof(ViewCssContainerState));
+        if (!state) return false;
+        tree->model->containers = lam::own(state);
+        state->previous = hashmap_new(sizeof(ViewCssContainerEntry), 16, 0, 0,
+            view_css_container_hash, view_css_container_compare, nullptr, nullptr);
+        state->current = hashmap_new(sizeof(ViewCssContainerEntry), 16, 0, 0,
+            view_css_container_hash, view_css_container_compare, nullptr, nullptr);
+        if (!state->previous || !state->current) { view_css_container_state_destroy(tree); return false; }
+    }
+    bool equal = true;
+    for (size_t i = 0; i < tree->model->node_id_count; i++) {
+        LayoutViewNode* node = tree->model->nodes.get()[i];
+        ViewNodeState* owner = node ? node->state.get() : nullptr;
+        if (!owner || !owner->container_measured) continue;
+        ViewCssContainerEntry entry = {owner->source, owner->container_width, owner->container_height};
+        const ViewCssContainerEntry* old = (const ViewCssContainerEntry*)hashmap_get(state->previous, &entry);
+        if (!old || old->source.address != entry.source.address || old->width != entry.width || old->height != entry.height)
+            equal = false;
+        hashmap_set(state->current, &entry);
+        if (hashmap_oom(state->current)) return false;
+    }
+    equal = equal && hashmap_count(state->previous) == hashmap_count(state->current);
+    hashmap* previous = state->previous;
+    state->previous = state->current; state->current = previous;
+    ++state->generation;
+    *settled = !dependencies || equal;
+    return true;
+}
+
+bool view_css_container_pass_reset(ViewTree* tree) {
+    // only uncommitted internal passes carry measured inputs across scratch reset (D4.5.1v4).
+    if (!tree || !tree->model || tree->model->committed) return false;
+    lam::Own<ViewCssContainerState> retained = tree->model->containers;
+    tree->model->containers = nullptr;
+    uint32_t generation = tree->layout_generation;
+    tree->reset_retained();
+    tree->model->containers = retained;
+    return tree->layout_generation != generation && tree->model->node_count == 1;
+}
 
 bool view_css_context_begin(ViewTree* tree) {
     if (!view_tree_model_source_valid(tree)) return false;
@@ -47,6 +133,8 @@ bool view_css_context_begin(ViewTree* tree) {
     css_engine_set_viewport(css->engine, environment.viewport_width, environment.viewport_height);
     css->engine->context.device_pixel_ratio = environment.device_scale;
     css->engine->context.print_media = environment.print_media;
+    css->engine->container_provider = view_css_container_provider;
+    css->engine->container_context = tree;
     DomDocument* doc = tree->model->document;
     // the GCPM Appendix B fallback stays at UA origin so author resets can override it.
     CssStylesheet* defaults = css_parse_stylesheet(css->engine,
@@ -86,6 +174,14 @@ void view_css_context_destroy(ViewTree* tree) {
     tree->model->css = nullptr;
 }
 
+void view_css_context_rebind(ViewTree* tree) {
+    ViewCssContext* css = tree && tree->model ? tree->model->css.get() : nullptr;
+    if (!css) return;
+    // a leased generation moves to a reserved shell without moving its styles or metrics.
+    css->engine->container_context = tree;
+    for (ViewCssStyle* style = css->styles; style; style = style->next) style->view = lam::up(tree);
+}
+
 static bool view_css_select(ViewTree* tree, ViewCssStyle* style, const char* name,
                             CssDeclaration* result) {
     if (style->page_context) return view_css_select_page(tree, style->page_context, name, result);
@@ -97,11 +193,14 @@ static bool view_css_select(ViewTree* tree, ViewCssStyle* style, const char* nam
         style->inline_declarations, style->inline_count, name, result, style->pseudo_element);
 }
 
-enum ViewComputedPropertyKind { VIEW_COMPUTED_FONT_SIZE, VIEW_COMPUTED_FONT_WEIGHT, VIEW_COMPUTED_COLOR,
-    VIEW_COMPUTED_KEYWORD, VIEW_COMPUTED_LINE_LIMIT, VIEW_COMPUTED_BORDER_STYLE,
+enum ViewComputedPropertyKind { VIEW_COMPUTED_FONT_SIZE, VIEW_COMPUTED_FONT_WEIGHT, VIEW_COMPUTED_FONT_VALUE, VIEW_COMPUTED_COLOR,
+    VIEW_COMPUTED_KEYWORD, VIEW_COMPUTED_LINE_LIMIT, VIEW_COMPUTED_BORDER_STYLE, VIEW_COMPUTED_COLUMN,
     VIEW_COMPUTED_LINE_HEIGHT, VIEW_COMPUTED_INDENT, VIEW_COMPUTED_MARGIN, VIEW_COMPUTED_PADDING, VIEW_COMPUTED_BORDER };
 static const struct { const char* name; ViewComputedPropertyKind kind; size_t index; } view_computed_properties[] = {
     {"font-size", VIEW_COMPUTED_FONT_SIZE, 0}, {"font-weight", VIEW_COMPUTED_FONT_WEIGHT, 0},
+    {"font-family", VIEW_COMPUTED_FONT_VALUE, 0}, {"letter-spacing", VIEW_COMPUTED_FONT_VALUE, 1},
+    {"word-spacing", VIEW_COMPUTED_FONT_VALUE, 2},
+    {"column-count", VIEW_COMPUTED_COLUMN, 0}, {"column-gap", VIEW_COMPUTED_COLUMN, 1},
     {"color", VIEW_COMPUTED_COLOR, 0}, {"background-color", VIEW_COMPUTED_COLOR, 1},
     {"font-style", VIEW_COMPUTED_KEYWORD, 0}, {"text-align", VIEW_COMPUTED_KEYWORD, 1},
     {"orphans", VIEW_COMPUTED_LINE_LIMIT, 0}, {"widows", VIEW_COMPUTED_LINE_LIMIT, 1},
@@ -156,6 +255,12 @@ const CssValue* view_css_computed_property(ViewTree* tree, const ViewCssStyle* s
             case VIEW_COMPUTED_FONT_SIZE: pixels = style ? style->font.font_size : 16.0f; break;
             case VIEW_COMPUTED_FONT_WEIGHT:
                 return css_value_create_number(pool, style ? style->font.font_weight_numeric : 400);
+            case VIEW_COMPUTED_FONT_VALUE:
+                return style && style->font_values[property.index] ? style->font_values[property.index].get() :
+                    css_value_create_keyword(pool, property.index ? "normal" : "serif");
+            case VIEW_COMPUTED_COLUMN:
+                return style && style->column_values[property.index] ? style->column_values[property.index].get() :
+                    css_value_create_keyword(pool, property.index ? "normal" : "auto");
             case VIEW_COMPUTED_COLOR: {
                 Color color = { .r = 0, .g = 0, .b = 0, .a = 255 };
                 if (property.index == 1) color = style ? style->background : Color{};
@@ -295,6 +400,8 @@ static const CssValue* view_css_project(ViewTree* tree, const CssDeclaration& de
     const char* property = declaration.property_name;
     if (!property || strcmp(property, name) == 0) return value;
     if (strcmp(property, "font") == 0) return css_font_shorthand_longhand(value, name, tree->model->css->pool);
+    if (strcmp(property, "container") == 0)
+        return css_container_shorthand_longhand(value, css_property_code_from_name(name), tree->model->css->pool);
     if (strcmp(property, "list-style") == 0)
         return layout_list_style_longhand(value, css_property_code_from_name(name), tree->model->css->pool);
     static const char* sides[] = {"top", "right", "bottom", "left"};
@@ -304,7 +411,8 @@ static const CssValue* view_css_project(ViewTree* tree, const CssDeclaration& de
             return css_box_shorthand_side_value(value, i);
         }
     }
-    if (strncmp(property, "border", 6) == 0 && css_property_is_shorthand(declaration.property_code)) {
+    if ((strncmp(property, "border", 6) == 0 || !strcmp(property, "column-rule")) &&
+        css_property_is_shorthand(declaration.property_code)) {
         const char* component = strrchr(name, '-');
         if (!component) return nullptr;
         component++;
@@ -400,6 +508,37 @@ static LayoutContext view_css_length_context(ViewTree* tree, const ViewCssStyle*
     return context;
 }
 
+static bool view_css_container_value(void* context, const CssValue* value, CssMathResult* result) {
+    ViewCssStyle* style = (ViewCssStyle*)context;
+    ViewTree* tree = style->view;
+    const CssValue* resolved = view_css_resolve_value(tree, style, value);
+    if (!resolved) return false;
+    LayoutContext layout = view_css_length_context(tree, style, NAN, NAN);
+    *result = layout_evaluate_css_math(&layout, CSS_PROPERTY_WIDTH, resolved, true, true);
+    return result->type != CSS_MATH_INVALID && result->resolved && isfinite(result->value);
+}
+
+static bool view_css_container_provider(void* context, DomElement* target,
+        const char* name, uint8_t axes, CssContainerMetrics* result) {
+    ViewTree* tree = (ViewTree*)context;
+    ViewCssContainerState* containers = tree->model->containers;
+    for (DomElement* ancestor = dom_flat_tree_parent(target); ancestor; ancestor = dom_flat_tree_parent(ancestor)) {
+        ViewCssStyle* style = view_css_resolve(tree, ancestor);
+        if (!style || style->display.outer == CSS_VALUE_NONE || style->display.outer == CSS_VALUE_CONTENTS ||
+            (style->display.outer == CSS_VALUE_INLINE && style->display.inner == CSS_VALUE_FLOW)) continue;
+        if (!css_container_matches(style->container_names, style->container_axes, style->vertical, name, axes)) continue;
+        // unavailable geometry on the nearest eligible ancestor cannot select a farther ancestor.
+        ViewCssContainerEntry key = {dom_node_ref(ancestor), 0.0f, 0.0f};
+        const ViewCssContainerEntry* entry = containers
+            ? (const ViewCssContainerEntry*)hashmap_get(containers->previous, &key) : nullptr;
+        if (!entry || dom_node_ref_validate(tree->model->document, entry->source) != ancestor) return false;
+        *result = {ancestor, containers->generation, entry->width, entry->height, style->vertical,
+            view_css_container_value, style};
+        return true;
+    }
+    return false;
+}
+
 float view_css_length(ViewTree* tree, const ViewCssStyle* style, const CssValue* value,
                      CssPropertyCode property, float inline_size, float block_size) {
     if (!value || css_value_is_auto(value) || css_value_is_none(value)) return NAN;
@@ -438,7 +577,10 @@ ViewBreak view_css_break(const CssValue* value) {
     const char* name = css_value_identifier_name(value);
     if (!name) return VIEW_BREAK_AUTO;
     if (strcmp(name, "page") == 0 || strcmp(name, "always") == 0 || strcmp(name, "all") == 0) return VIEW_BREAK_PAGE;
-    if (strcmp(name, "avoid") == 0 || strcmp(name, "avoid-page") == 0) return VIEW_BREAK_AVOID;
+    if (strcmp(name, "column") == 0) return VIEW_BREAK_COLUMN;
+    if (strcmp(name, "avoid") == 0) return VIEW_BREAK_AVOID;
+    if (strcmp(name, "avoid-column") == 0) return VIEW_BREAK_AVOID_COLUMN;
+    if (strcmp(name, "avoid-page") == 0) return VIEW_BREAK_AVOID_PAGE;
     if (strcmp(name, "left") == 0) return VIEW_BREAK_LEFT;
     if (strcmp(name, "right") == 0) return VIEW_BREAK_RIGHT;
     if (strcmp(name, "recto") == 0) return VIEW_BREAK_RECTO;
@@ -533,6 +675,7 @@ static bool view_css_font_style(ViewTree* tree, ViewCssStyle* style, ViewCssStyl
         style->font.font_style = parent->font.font_style;
         style->font.letter_spacing = parent->font.letter_spacing;
         style->font.word_spacing = parent->font.word_spacing;
+        for (size_t i = 0; i < 3; i++) style->font_values[i] = parent->font_values[i];
         style->color = parent->color;
     } else {
         style->font.family = lam::up(const_cast<char*>("serif"));
@@ -562,6 +705,8 @@ static bool view_css_font_style(ViewTree* tree, ViewCssStyle* style, ViewCssStyl
         LayoutContext context = view_css_length_context(tree, style, 0.0f, 0.0f);
         const char* family = css_select_font_family(&context, value);
         style->font.family = lam::up(const_cast<char*>(family ? family : "serif"));
+        // the flattened renderer family string cannot reconstruct quoted names containing commas.
+        style->font_values[0] = lam::up(css_value_is_initial(value) ? nullptr : value);
     }
     style->font.font_style = view_css_keyword(tree, style, "font-style", CSS_VALUE_NORMAL,
         parent ? parent->font.font_style : CSS_VALUE_NORMAL, true);
@@ -581,7 +726,17 @@ static bool view_css_font_style(ViewTree* tree, ViewCssStyle* style, ViewCssStyl
         if (specified && !css_value_is_inherit(specified) && !css_value_is_unset(specified)) {
             float used = view_css_length(tree, style, specified,
                 i ? CSS_PROPERTY_WORD_SPACING : CSS_PROPERTY_LETTER_SPACING, 0.0f, 0.0f);
+            // expression doubles can still overflow the selected float geometry.
+            if (!isfinite(used) && specified->type != CSS_VALUE_TYPE_KEYWORD)
+                view_css_binding_failure(style, "text spacing is not a finite selected length");
             *spacing_values[i] = isfinite(used) ? used : 0.0f;
+            style->font_values[i + 1] = nullptr;
+            // normal has a zero used advance but remains a keyword for computed queries.
+            if (isfinite(used) && specified->type != CSS_VALUE_TYPE_KEYWORD) {
+                CssValue* computed = css_value_create_length(css->pool, used, CSS_UNIT_PX);
+                if (!computed) return false;
+                style->font_values[i + 1] = lam::up(computed);
+            }
         }
     }
     value = view_css_property(tree, style, "line-height");
@@ -624,6 +779,50 @@ const CssValue* view_css_compute_length(ViewTree* tree, ViewCssStyle* style,
     return value;
 }
 
+static bool view_css_column_style(ViewTree* tree, ViewCssStyle* style, ViewCssStyle* parent) {
+    const CssValue* count = view_css_property(tree, style, "column-count");
+    if (css_value_is_inherit(count)) style->column_values[0] = parent ? parent->column_values[0] : nullptr;
+    else if (count && !css_value_is_auto(count) && !css_value_is_initial(count) && !css_value_is_unset(count)) {
+        double value = view_css_number(count, tree, style);
+        // CSS math in an integer context rounds at computed-value time, like FO counts.
+        uint32_t rounded = 0;
+        if (count->type == CSS_VALUE_TYPE_FUNCTION && radiant_page_rounded_count(value, 1, &rounded)) value = rounded;
+        if (!isfinite(value) || value < 1.0 || value > UINT32_MAX || floor(value) != value)
+            view_css_binding_failure(style, "column count requires a bounded positive integer");
+        else {
+            style->column_values[0] = lam::up(css_value_create_number(tree->model->css->pool, value));
+            if (!style->column_values[0]) return false;
+        }
+    }
+    const CssValue* gap = view_css_property(tree, style, "column-gap");
+    if (css_value_is_inherit(gap)) style->column_values[1] = parent ? parent->column_values[1] : nullptr;
+    else if (gap && !css_value_is_initial(gap) && !css_value_is_unset(gap) && !css_value_keyword_equals(gap, CSS_VALUE_NORMAL)) {
+        style->column_values[1] = lam::up(view_css_compute_length(tree, style, CSS_PROPERTY_COLUMN_GAP, gap, nullptr));
+        if (!style->column_values[1]) return false;
+    }
+    return true;
+}
+
+static const CssValue* view_css_line_width(ViewTree* tree, ViewCssStyle* style, CssPropertyCode property,
+        const CssValue* inherited, CssEnum line_style) {
+    const CssValue* value = view_css_property(tree, style, css_property_get_by_code(property)->name);
+    const CssValue* width = view_css_compute_length(tree, style, property, value, inherited);
+    if (line_style == CSS_VALUE_NONE || line_style == CSS_VALUE_HIDDEN)
+        return css_value_create_length(tree->model->css->pool, 0.0, CSS_UNIT_PX);
+    if (!width || width->type == CSS_VALUE_TYPE_KEYWORD)
+        return css_value_create_length(tree->model->css->pool,
+            layout_css_border_width_keyword(width ? width->data.keyword : CSS_VALUE_MEDIUM), CSS_UNIT_PX);
+    return width;
+}
+
+static Color view_css_line_color(ViewTree* tree, ViewCssStyle* style, LayoutContext* context,
+        CssPropertyCode property, Color inherited) {
+    const CssValue* value = view_css_property(tree, style, css_property_get_by_code(property)->name);
+    return css_value_is_inherit(value) && style->parent ? inherited :
+        value && !css_value_is_inherit(value) && !css_value_is_initial(value) && !css_value_is_unset(value)
+            ? resolve_color_value(context, value) : style->color;
+}
+
 static void view_css_box_style(ViewTree* tree, ViewCssStyle* style) {
     ViewCssStyle* parent = style->parent;
     LayoutContext context = view_css_length_context(tree, style, 0.0f, 0.0f);
@@ -643,20 +842,18 @@ static void view_css_box_style(ViewTree* tree, ViewCssStyle* style) {
         style->border_style[i] = view_css_keyword(tree, style, css_property_get_by_code(property)->name,
             CSS_VALUE_NONE, parent ? parent->border_style[i] : CSS_VALUE_NONE);
         property = radiant_border_width_property(side);
-        value = view_css_property(tree, style, css_property_get_by_code(property)->name);
-        const CssValue* width = view_css_compute_length(tree, style, property, value, parent ? parent->border_width[i].get() : nullptr);
-        if (style->border_style[i] == CSS_VALUE_NONE || style->border_style[i] == CSS_VALUE_HIDDEN)
-            width = css_value_create_length(tree->model->css->pool, 0.0, CSS_UNIT_PX);
-        else if (!width || width->type == CSS_VALUE_TYPE_KEYWORD)
-            width = css_value_create_length(tree->model->css->pool,
-                layout_css_border_width_keyword(width ? width->data.keyword : CSS_VALUE_MEDIUM), CSS_UNIT_PX);
-        style->border_width[i] = lam::up(width);
+        style->border_width[i] = lam::up(view_css_line_width(tree, style, property,
+            parent ? parent->border_width[i].get() : nullptr, style->border_style[i]));
         property = radiant_box_side_property(CSS_PROPERTY_BORDER_COLOR, side);
-        value = view_css_property(tree, style, css_property_get_by_code(property)->name);
-        style->border_color[i] = css_value_is_inherit(value) && parent ? parent->border_color[i] :
-            value && !css_value_is_inherit(value) && !css_value_is_initial(value) && !css_value_is_unset(value)
-                ? resolve_color_value(&context, value) : style->color;
+        style->border_color[i] = view_css_line_color(tree, style, &context, property,
+            parent ? parent->border_color[i] : Color{});
     }
+    style->column_rule_style = view_css_keyword(tree, style, "column-rule-style",
+        CSS_VALUE_NONE, parent ? parent->column_rule_style : CSS_VALUE_NONE);
+    style->column_rule_width = lam::up(view_css_line_width(tree, style, CSS_PROPERTY_COLUMN_RULE_WIDTH,
+        parent ? parent->column_rule_width.get() : nullptr, style->column_rule_style));
+    style->column_rule_color = view_css_line_color(tree, style, &context, CSS_PROPERTY_COLUMN_RULE_COLOR,
+        parent ? parent->column_rule_color : Color{});
 }
 
 static ViewCssStyle* view_css_build_style(ViewTree* tree, DomElement* element,
@@ -664,6 +861,7 @@ static ViewCssStyle* view_css_build_style(ViewTree* tree, DomElement* element,
     ViewCssContext* css = tree->model->css;
     ViewCssStyle* style = (ViewCssStyle*)pool_calloc(css->pool, sizeof(ViewCssStyle));
     if (!style) return nullptr;
+    style->view = lam::up(tree);
     style->source = lam::up(element);
     style->pseudo_element = pseudo_element;
     style->parent = lam::up(parent);
@@ -704,7 +902,20 @@ static ViewCssStyle* view_css_build_style(ViewTree* tree, DomElement* element,
     if (style->display.outer == CSS_VALUE_LIST_ITEM) {
         style->display.outer = CSS_VALUE_BLOCK; style->display.list_item = true;
     }
+    value = view_css_property(tree, style, "container-type");
+    style->container_axes = css_value_is_inherit(value) && parent
+        ? parent->container_axes : css_container_type_axes(value);
+    value = view_css_property(tree, style, "contain");
+    style->computed_containment = css_value_is_inherit(value) && parent
+        ? parent->computed_containment : css_value_containment_flags(value);
+    value = view_css_property(tree, style, "container-name");
+    style->container_names = css_value_is_inherit(value) && parent ? parent->container_names
+        : css_value_is_initial(value) || css_value_is_unset(value) ? nullptr : lam::up(value);
+    CssEnum writing_mode = view_css_keyword(tree, style, "writing-mode", CSS_VALUE_HORIZONTAL_TB,
+        parent && parent->vertical ? CSS_VALUE_VERTICAL_RL : CSS_VALUE_HORIZONTAL_TB, true);
+    style->vertical = writing_mode != CSS_VALUE_HORIZONTAL_TB;
     if (!view_css_font_style(tree, style, parent)) return nullptr;
+    if (!view_css_column_style(tree, style, parent)) return nullptr;
     view_css_box_style(tree, style);
     const char* lengths[] = {"width", "height", "min-width", "max-width", "min-height", "max-height"};
     lam::Up<const CssValue>* destinations[] = {&style->width, &style->height, &style->min_width,
@@ -854,9 +1065,12 @@ ViewCssStyle* view_css_generated_style(ViewTree* tree, ViewCssStyle* base,
     ViewCssContext* css = tree->model->css;
     ViewCssStyle* style = (ViewCssStyle*)pool_calloc(css->pool, sizeof(ViewCssStyle));
     if (!style) return nullptr;
+    style->view = lam::up(tree);
     style->source = base->source; style->parent = lam::up(base);
     style->next = css->styles; css->styles = lam::up(style);
     style->font = base->font; style->font.font_handle = nullptr;
+    // generated text's copied font must retain the same typed query values.
+    for (size_t i = 0; i < 3; i++) style->font_values[i] = base->font_values[i];
     style->font_box = {lam::up(&style->font), style->font.font_size};
     style->color = base->color; style->text_align = align; style->white_space = base->white_space;
     style->orphans = style->widows = 1;
@@ -970,8 +1184,10 @@ static bool view_css_select_page(ViewTree* tree, const ViewCssPageContext* conte
 }
 
 static ViewCssStyle* view_css_page_context_style(ViewTree* tree, ViewCssStyle* parent,
-        const PageStyleQuery& query, uint32_t page_number, CssPageAreaKind area, int margin_box = -1) {
+        const PageStyleQuery& query, uint32_t page_number, CssPageAreaKind area, int margin_box = -1,
+        DomElement* control = nullptr) {
     ViewCssContext* css = tree->model->css;
+    if (query.body) control = query.body->source.address->as_element();
     for (ViewCssStyle* style = css->styles; style; style = style->next) {
         const ViewCssPageContext* context = style->page_context;
         if (context && style->parent.get() == parent && context->page_number == page_number &&
@@ -981,14 +1197,17 @@ static ViewCssStyle* view_css_page_context_style(ViewTree* tree, ViewCssStyle* p
     ViewCssPageContext* context = (ViewCssPageContext*)pool_calloc(css->pool, sizeof(ViewCssPageContext));
     ViewCssStyle* style = (ViewCssStyle*)pool_calloc(css->pool, sizeof(ViewCssStyle));
     if (!context || !style) return nullptr;
+    style->view = lam::up(tree);
     *context = {nullptr, page_number, query.pseudos, area, margin_box, query.body};
     if (query.name && !(context->name = pool_dup_n(css->pool, query.name, strlen(query.name)))) return nullptr;
     style->page_context = lam::up(context); style->parent = lam::up(parent);
-    style->source = parent ? parent->source : nullptr;
+    style->source = control ? lam::up(control) : parent ? parent->source : nullptr;
     style->display = {CSS_VALUE_BLOCK, CSS_VALUE_FLOW}; style->orphans = style->widows = 1;
     style->next = css->styles; css->styles = lam::up(style);
+    if (control) view_css_bind_properties(tree, style);
     // Page contexts inherit from their CSS parent, while relocated notes retain their DOM cascade.
     if (!view_css_font_style(tree, style, parent)) return nullptr;
+    if (!view_css_column_style(tree, style, parent)) return nullptr;
     view_css_box_style(tree, style);
     style->text_align = view_css_keyword(tree, style, "text-align", CSS_VALUE_START,
         parent ? parent->text_align : CSS_VALUE_START, true);
@@ -1081,8 +1300,24 @@ static bool page_size_resolve(ViewTree* tree, const CssValue* value, ViewPageSty
     return true;
 }
 
+bool view_css_page_column(const ViewPageStyle* style, uint32_t index, RdtLogicalRect* rect) {
+    if (!style || !rect) return false;
+    uint32_t count = style->column_count ? style->column_count : 1;
+    if (index >= count) return false;
+    if (style->column_rects) *rect = style->column_rects.get()[index];
+    else {
+        if (!isfinite(style->column_gap) || style->column_gap < 0.0f) return false;
+        *rect = style->content_rect;
+        rect->width = (rect->width - style->column_gap * (count - 1)) / count;
+        rect->x += index * (rect->width + style->column_gap);
+    }
+    return isfinite(rect->x) && isfinite(rect->y) && isfinite(rect->width) && rect->width > 0.0f &&
+        isfinite(rect->height) && rect->height > 0.0f;
+}
+
 ViewModelStatus view_css_page_style(ViewTree* tree, const char* name, uint32_t page_number,
-                                  ViewPageSide side, bool blank, ViewPageStyle* result) {
+                                  ViewPageSide side, bool blank, ViewPageStyle* result, RadiantPageDiagnostic* diagnostic) {
+    if (diagnostic) *diagnostic = {};
     if (!result || !page_number || side > VIEW_PAGE_RIGHT || !view_css_context_begin(tree)) return VIEW_MODEL_INVALID_ARGUMENT;
     if (!view_tree_model_source_valid(tree)) return VIEW_MODEL_STALE_SOURCE;
     if (tree->model->css->page_document->diagnostic.status != VIEW_MODEL_OK)
@@ -1102,15 +1337,18 @@ ViewModelStatus view_css_page_style(ViewTree* tree, const char* name, uint32_t p
     const char* borders[] = {"border-top-width", "border-right-width", "border-bottom-width", "border-left-width"};
     DomElement* root = tree->model->document->root;
     ViewCssStyle* parent = root ? view_css_resolve(tree, root) : nullptr;
+    DomElement* control = nullptr;
     if (root && !parent) return VIEW_MODEL_OUT_OF_MEMORY;
     for (const RadiantPageRule* rule = tree->model->css->page_document->rules; rule; rule = rule->next) {
         if (rule->kind != RADIANT_PAGE_NATIVE || !name || !rule->name || strcmp(rule->name, name) != 0) continue;
+        control = rule->source.address->as_element();
         DomElement* ancestor = rule->source.address->as_element()->parent_element();
         if (ancestor && !(parent = view_css_resolve(tree, ancestor))) return VIEW_MODEL_OUT_OF_MEMORY;
     }
-    style.computed_style = lam::up(view_css_page_context_style(tree, parent, query, page_number, CSS_PAGE_AREA_PAGE));
+    style.computed_style = lam::up(view_css_page_context_style(tree, parent, query, page_number, CSS_PAGE_AREA_PAGE, -1, control));
     if (!style.computed_style) return VIEW_MODEL_OUT_OF_MEMORY;
     ViewCssStyle& default_style = *style.computed_style;
+    if (default_style.binding_status != VIEW_MODEL_OK) return default_style.binding_status;
     const CssValue* value = view_css_property(tree, &default_style, "size");
     if (!page_size_resolve(tree, value, &style)) return VIEW_MODEL_INVALID_ARGUMENT;
     for (size_t i = 0; i < 4; i++) {
@@ -1144,6 +1382,7 @@ ViewModelStatus view_css_page_style(ViewTree* tree, const char* name, uint32_t p
         PageStyleQuery edge_query = query; edge_query.body = style.edge_regions[i];
         style.edge_style[i] = lam::up(view_css_page_context_style(tree, style.computed_style, edge_query, page_number, CSS_PAGE_AREA_PAGE));
         if (!style.edge_style[i]) return VIEW_MODEL_OUT_OF_MEMORY;
+        if (style.edge_style[i]->binding_status != VIEW_MODEL_OK) return style.edge_style[i]->binding_status;
         const CssValue* extent = style.edge_regions[i]->extent;
         extents[i] = extent ? view_css_length(tree, style.edge_style[i], extent,
             i < 2 ? CSS_PROPERTY_HEIGHT : CSS_PROPERTY_WIDTH, reference.width, reference.height) : 0.0f;
@@ -1166,6 +1405,7 @@ ViewModelStatus view_css_page_style(ViewTree* tree, const char* name, uint32_t p
         PageStyleQuery body_query = query; body_query.body = style.body_region;
         style.body_style = lam::up(view_css_page_context_style(tree, style.computed_style, body_query, page_number, CSS_PAGE_AREA_PAGE));
         if (!style.body_style) return VIEW_MODEL_OUT_OF_MEMORY;
+        if (style.body_style->binding_status != VIEW_MODEL_OK) return style.body_style->binding_status;
         float edges[4] = {};
         for (size_t i = 0; i < 4; i++) {
             value = view_css_property(tree, style.body_style, margins[i]);
@@ -1185,6 +1425,57 @@ ViewModelStatus view_css_page_style(ViewTree* tree, const char* name, uint32_t p
         style.content_rect = {style.body_rect.x + inset[3], style.body_rect.y + inset[0],
             style.body_rect.width - inset[3] - inset[1], style.body_rect.height - inset[0] - inset[2]};
         if (style.content_rect.width <= 0.0f || style.content_rect.height <= 0.0f) return VIEW_MODEL_INVALID_ARGUMENT;
+    }
+    style.column_count = 1;
+    if (style.body_style) {
+        if (style.body_style->binding_status != VIEW_MODEL_OK) return style.body_style->binding_status;
+        value = style.body_style->column_values[0];
+        if (value) style.column_count = static_cast<uint32_t>(value->data.number.value);
+        value = style.body_style->column_values[1];
+        style.column_gap = !value
+            ? style.body_style->font.font_size : view_css_length(tree, style.body_style, value,
+                CSS_PROPERTY_COLUMN_GAP, style.content_rect.width, style.content_rect.height);
+        if (style.body_region->columns) {
+            style.column_count = style.body_region->column_count;
+            auto* rects = lam::checked_pool_array<RdtLogicalRect>(tree->model->css->pool, style.column_count);
+            if (!rects) return VIEW_MODEL_OUT_OF_MEMORY;
+            size_t index = 0;
+            static const CssPropertyCode axes[] = {CSS_PROPERTY_WIDTH, CSS_PROPERTY_HEIGHT, CSS_PROPERTY_WIDTH, CSS_PROPERTY_HEIGHT};
+            for (const RadiantPageColumn* column = style.body_region->columns; column; column = column->next, index++) {
+                auto invalid = [&]() {
+                    if (diagnostic) *diagnostic = {VIEW_MODEL_INVALID_ARGUMENT, column->source,
+                        "native column requires finite length/percentage geometry and positive extents"};
+                    return VIEW_MODEL_INVALID_ARGUMENT;
+                };
+                float dimensions[4];
+                for (size_t i = 0; i < 4; i++) {
+                    const CssValue* geometry = view_css_resolve_value(tree, style.body_style, column->geometry[i]);
+                    CssMathType type = css_math_value_type(geometry);
+                    if (type != CSS_MATH_LENGTH && type != CSS_MATH_PERCENT && type != CSS_MATH_LENGTH_PERCENT &&
+                        !(geometry && geometry->type == CSS_VALUE_TYPE_NUMBER && !geometry->data.number.value))
+                        return invalid();
+                    dimensions[i] = view_css_length(tree, style.body_style, geometry, axes[i], style.content_rect.width, style.content_rect.height);
+                    if (!isfinite(dimensions[i]) || (i >= 2 && dimensions[i] <= 0.0f)) return invalid();
+                }
+                // authored order is flow order; independent rectangles may also occupy body margins.
+                rects[index] = {style.content_rect.x + dimensions[0], style.content_rect.y + dimensions[1], dimensions[2], dimensions[3]};
+                if (!isfinite(rects[index].x) || !isfinite(rects[index].y)) return invalid();
+            }
+            style.column_rects = lam::up((const RdtLogicalRect*)rects);
+        }
+        RdtLogicalRect column = {};
+        if (!view_css_page_column(&style, 0, &column)) return VIEW_MODEL_INVALID_ARGUMENT;
+        if (style.column_count > 1) {
+            CssEnum rule = style.body_style->column_rule_style;
+            float width = view_css_length(tree, style.body_style, style.body_style->column_rule_width,
+                CSS_PROPERTY_COLUMN_RULE_WIDTH, NAN, NAN);
+            if (!isfinite(width) || width < 0.0f ||
+                !render_border_style_supported(rule)) {
+                if (diagnostic) *diagnostic = {VIEW_MODEL_INVALID_ARGUMENT, style.body_region->source,
+                    "body column rules require finite widths and supported border styles"};
+                return VIEW_MODEL_INVALID_ARGUMENT;
+            }
+        }
     }
     value = view_css_property(tree, &default_style, "background-color");
     if (value) {

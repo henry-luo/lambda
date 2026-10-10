@@ -1,0 +1,1 @@
+[["year-suffix", true], ["explicit-year-suffix", true], ["given-initials", true], ["numeric-collapse", true], ["note-history", true], ["nocite-history", true]]

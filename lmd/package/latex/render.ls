@@ -388,16 +388,16 @@ fn render_element(el, info) {
         // ---- bibliography ----
         case 'thebibliography': render_bibliography(el, info)
         case 'bibitem': null
-        case 'addbibresource': if (registry.active(info.packages, "biblatex")) null else render_generic_default(el, info)
-        case 'printbibliography': if (registry.active(info.packages, "biblatex"))
+        case 'addbibresource': if (info.biblatex_context.processor == "csl" or registry.active(info.packages, "biblatex")) null else render_generic_default(el, info)
+        case 'printbibliography': if (info.biblatex_context.processor == "csl" or registry.active(info.packages, "biblatex"))
             biblatex.render_bibliography(el, info.biblatex_context) else render_generic_default(el, info)
         case 'bibliography': if (info.biblatex_context != null)
             biblatex.render_bibliography(el, info.biblatex_context) else render_generic_default(el, info)
         case 'bibliographystyle': if (info.biblatex_context != null) null
             else render_generic_default(el, info)
-        case 'refsection': if (registry.active(info.packages, "biblatex"))
+        case 'refsection': if (info.biblatex_context.processor == "csl" or registry.active(info.packages, "biblatex"))
             render_children(el, 0, info) else render_generic_default(el, info)
-        case 'refsegment': if (registry.active(info.packages, "biblatex"))
+        case 'refsegment': if (info.biblatex_context.processor == "csl" or registry.active(info.packages, "biblatex"))
             render_children(el, 0, info) else render_generic_default(el, info)
         case 'hypersetup': if (registry.active(info.packages, "hyperref")) null else render_generic_default(el, info)
 

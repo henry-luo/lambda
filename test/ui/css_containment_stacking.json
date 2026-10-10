@@ -1,0 +1,212 @@
+{
+  "name": "Layout and paint containment establish an atomic stacking destination",
+  "html": "test/ui/css_containment_stacking.html",
+  "viewport": {
+    "width": 390,
+    "height": 150
+  },
+  "events": [
+    {
+      "type": "assert_pixel",
+      "x": 30,
+      "y": 30,
+      "min_r": 255,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 0,
+      "max_b": 0
+    },
+    {
+      "type": "assert_hit_test",
+      "x": 30,
+      "y": 30,
+      "expected_selector": "#paint"
+    },
+    {
+      "type": "assert_pixel",
+      "x": 120,
+      "y": 30,
+      "min_r": 255,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 0,
+      "max_b": 0
+    },
+    {
+      "type": "assert_hit_test",
+      "x": 120,
+      "y": 30,
+      "expected_selector": "#layout"
+    },
+    {
+      "type": "assert_pixel",
+      "x": 210,
+      "y": 30,
+      "min_r": 0,
+      "max_r": 0,
+      "min_g": 128,
+      "max_g": 128,
+      "min_b": 0,
+      "max_b": 0
+    },
+    {
+      "type": "assert_hit_test",
+      "x": 210,
+      "y": 30,
+      "expected_selector": "#style-later"
+    },
+    {
+      "type": "assert_pixel",
+      "x": 300,
+      "y": 30,
+      "min_r": 0,
+      "max_r": 0,
+      "min_g": 128,
+      "max_g": 128,
+      "min_b": 0,
+      "max_b": 0
+    },
+    {
+      "type": "assert_hit_test",
+      "x": 300,
+      "y": 30,
+      "expected_selector": "#size-later"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#remove"
+      }
+    },
+    {
+      "type": "assert_pixel",
+      "x": 30,
+      "y": 30,
+      "min_r": 0,
+      "max_r": 0,
+      "min_g": 128,
+      "max_g": 128,
+      "min_b": 0,
+      "max_b": 0
+    },
+    {
+      "type": "assert_hit_test",
+      "x": 30,
+      "y": 30,
+      "expected_selector": "#paint-later"
+    },
+    {
+      "type": "assert_pixel",
+      "x": 120,
+      "y": 30,
+      "min_r": 0,
+      "max_r": 0,
+      "min_g": 128,
+      "max_g": 128,
+      "min_b": 0,
+      "max_b": 0
+    },
+    {
+      "type": "assert_hit_test",
+      "x": 120,
+      "y": 30,
+      "expected_selector": "#layout-later"
+    }
+  ],
+  "pixel_oracles": {
+    "1": [
+      {
+        "type": "assert_pixel",
+        "x": 30,
+        "y": 30,
+        "min_r": 255,
+        "max_r": 255,
+        "min_g": 0,
+        "max_g": 0,
+        "min_b": 0,
+        "max_b": 0
+      },
+      {
+        "type": "assert_pixel",
+        "x": 120,
+        "y": 30,
+        "min_r": 255,
+        "max_r": 255,
+        "min_g": 0,
+        "max_g": 0,
+        "min_b": 0,
+        "max_b": 0
+      },
+      {
+        "type": "assert_pixel",
+        "x": 210,
+        "y": 30,
+        "min_r": 0,
+        "max_r": 0,
+        "min_g": 128,
+        "max_g": 128,
+        "min_b": 0,
+        "max_b": 0
+      },
+      {
+        "type": "assert_pixel",
+        "x": 300,
+        "y": 30,
+        "min_r": 0,
+        "max_r": 0,
+        "min_g": 128,
+        "max_g": 128,
+        "min_b": 0,
+        "max_b": 0
+      }
+    ],
+    "2": [
+      {
+        "type": "assert_pixel",
+        "x": 30,
+        "y": 30,
+        "min_r": 255,
+        "max_r": 255,
+        "min_g": 0,
+        "max_g": 0,
+        "min_b": 0,
+        "max_b": 0
+      },
+      {
+        "type": "assert_pixel",
+        "x": 120,
+        "y": 30,
+        "min_r": 255,
+        "max_r": 255,
+        "min_g": 0,
+        "max_g": 0,
+        "min_b": 0,
+        "max_b": 0
+      },
+      {
+        "type": "assert_pixel",
+        "x": 210,
+        "y": 30,
+        "min_r": 0,
+        "max_r": 0,
+        "min_g": 128,
+        "max_g": 128,
+        "min_b": 0,
+        "max_b": 0
+      },
+      {
+        "type": "assert_pixel",
+        "x": 300,
+        "y": 30,
+        "min_r": 0,
+        "max_r": 0,
+        "min_g": 128,
+        "max_g": 128,
+        "min_b": 0,
+        "max_b": 0
+      }
+    ]
+  }
+}

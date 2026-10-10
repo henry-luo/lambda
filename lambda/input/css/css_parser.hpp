@@ -526,6 +526,8 @@ bool css_resolve_selector_namespaces(CssSelector* selector,
                                      CssNamespaceLookupFn lookup, void* context);
 
 // Value parsing
+// parses component values without a property grammar; the consumer checks the resulting type.
+CssValue* css_parse_component_value_text(const char* text, size_t length, Pool* pool);
 CssValue* css_parse_value(CssTokenStream* stream, CssPropertyCode property_code, Pool* pool);
 CssValue* css_parse_number(CssTokenStream* stream, Pool* pool);
 CssValue* css_parse_percentage(CssTokenStream* stream, Pool* pool);
@@ -671,6 +673,8 @@ int css_tokenizer_tokenize(CssTokenizer* tokenizer,
 int css_skip_whitespace_tokens(const CssToken* tokens, int start, int token_count);
 bool css_selector_group_parse_consumed_all(const CssToken* tokens, int pos,
                                            int token_count);
+bool css_value_is_font_family_name(const CssValue* value);
+
 static inline bool css_validate_font_family_tokens(const CssToken* tokens, int token_count) {
     if (!tokens || token_count <= 0) return false;
 

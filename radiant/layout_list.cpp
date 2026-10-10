@@ -546,8 +546,8 @@ static DomElement* create_marker_element(LayoutContext* lycon, DomElement* paren
     return marker_elem;
 }
 
-void process_list_item(LayoutContext* lycon, ViewBlock* block, DomNode* elmt,
-                       DomElement* dom_elem, DisplayValue display) {
+void layout_apply_list_item_counter(LayoutContext* lycon, ViewBlock* block,
+                                    DomElement* dom_elem) {
     if (!lycon->counter_context) return;
     // Detect if parent is <ol reversed>
     bool parent_reversed = false;
@@ -578,6 +578,11 @@ void process_list_item(LayoutContext* lycon, ViewBlock* block, DomNode* elmt,
     if (!explicit_list_item_inc) {
         counter_increment(lycon->counter_context, parent_reversed ? "list-item -1" : "list-item 1");
     }
+}
+
+void process_list_item(LayoutContext* lycon, ViewBlock* block, DomNode* elmt,
+                       DomElement* dom_elem, DisplayValue display) {
+    if (!lycon->counter_context) return;
     // CSS Display 3: `inline flow-root list-item` is laid out atomically but
     // retains the outside-marker behavior of its inline-level principal box.
     bool is_inline_list_item = display.list_item &&
@@ -633,7 +638,8 @@ void process_list_item(LayoutContext* lycon, ViewBlock* block, DomNode* elmt,
             } else if (!(cv->type == CSS_VALUE_TYPE_KEYWORD && cv->data.keyword == CSS_VALUE_NORMAL)) {
                 // explicit content (not 'normal') - resolve using counter context
                 marker_css_content = dom_element_get_pseudo_element_content_with_counters(
-                    list_elem, 6, lycon->counter_context, lycon->pass_arena);
+                    list_elem, 6, lycon->counter_context, lycon->pass_arena,
+                    lycon->counter_context ? &lycon->counter_context->quote_depth : nullptr);
                 if (marker_css_content) {
                     has_marker = true;
                 }

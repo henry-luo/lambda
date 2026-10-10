@@ -360,17 +360,18 @@ void stringbuf_emit(StringBuf *sb, const char *fmt, ...) {
     va_end(args);
 }
 
-void stringbuf_append_format(StringBuf *sb, const char *format, ...) {
-    if (!sb || !format) return;
+bool stringbuf_append_format(StringBuf *sb, const char *format, ...) {
+    if (!sb || !format) return false;
 
     va_list args;
     va_start(args, format);
-    stringbuf_vappend_format(sb, format, args);
+    bool result = stringbuf_vappend_format(sb, format, args);
     va_end(args);
+    return result;
 }
 
-void stringbuf_vappend_format(StringBuf *sb, const char *format, va_list args) {
-    if (!sb || !format) return;
+bool stringbuf_vappend_format(StringBuf *sb, const char *format, va_list args) {
+    if (!sb || !format) return false;
 
     va_list args_copy;
     va_copy(args_copy, args);
@@ -378,19 +379,25 @@ void stringbuf_vappend_format(StringBuf *sb, const char *format, va_list args) {
     int size = vsnprintf(NULL, 0, format, args_copy);
     va_end(args_copy);
 
-    if (size < 0) return;
+    if (size < 0) return false;
 
     size_t new_length;
-    if (!stringbuf_can_append(sb, (size_t)size, &new_length)) return;
+    if (!stringbuf_can_append(sb, (size_t)size, &new_length)) return false;
 
-    if (!stringbuf_ensure_cap(sb, new_length + 1)) return;
+    if (!stringbuf_ensure_cap(sb, new_length + 1)) return false;
 
-    size = vsnprintf(sb->str->chars + sb->length, (sb->capacity - sizeof(String)) - sb->length, format, args);
-    if (size < 0) return;
+    int written = vsnprintf(sb->str->chars + sb->length,
+        (sb->capacity - sizeof(String)) - sb->length, format, args);
+    if (written != size) {
+        // preserve the committed prefix when the second formatting pass fails.
+        sb->str->chars[sb->length] = '\0';
+        return false;
+    }
 
     sb->length = new_length;
     sb->str->chars[sb->length] = '\0';
     sb->str->len = sb->length;
+    return true;
 }
 
 void stringbuf_copy(StringBuf *dst, const StringBuf *src) {

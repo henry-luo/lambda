@@ -1,10 +1,28 @@
-# Proposal: close CSS selector and property gaps in Radiant
+# Retired: CSS selector and property implementation record
 
-**Status:** Implementation continuing 2026-10-10 (language canonicalization, document defaults, shadow-host/named-slot direction, namespace-qualified text scanning, expanded attribute identity and XML/HTML round trips connected to shared consumers; boundary audit, complete CSSOM semantics and P0–P5 remain open)
+**Status:** Closed and retired 2026-10-10; unfinished scope transferred to [Radiant_Impl_CSS_Support.md](Radiant_Impl_CSS_Support.md). This is a historical delivery record, not a completed-CSS claim.
 **Date:** 2026-10-10
 **Baseline:** [HTML, CSS and SVG Support](../../doc/HTML_CSS_SVG_Support.md) §§3, 5–7, 18, assessed 2026-09-28  
 **Scope:** Stylesheet selectors, their DOM-query counterpart, and CSS properties reported as partial, parsed only, or unrecognized. At-rules and value syntax enter the plan where a selector or property depends on them.  
 **Authority:** This is an implementation proposal, not a CSS ruling. The report is an observed-support inventory. Radiant allocation and ownership must continue to follow **D4.5.1v4**; a change to that contract needs a separate design decision. No CSS-specific S#/D# ruling was found for the choices below.
+
+## Closeout and handoff — 2026-10-10
+
+This implementation iteration is closed at the user's request. Its P0–P5 phases delivered substantial functionality but did not meet every original exit criterion. All unfinished implementation and qualification work is now tracked in the [new CSS support plan](Radiant_Impl_CSS_Support.md); no future work is scheduled from this file.
+
+The original plan, progress, intermediate failures and evidence below are retained unchanged as history. Statements such as “P0–P5 remain open” describe their dated checkpoint, not a second active backlog. Later deliveries supersede earlier missing-feature notes; in particular, shared selector/cascade fixes, bounded custom-property expansion, raw token serialization, logical corner math, typed grid tracks, named-slot direction and expanded attribute/factory identity must not be scheduled again without a current reproducer.
+
+| Retired phase | Delivered foundation | Unfinished work transferred to the new plan |
+|---|---|---|
+| P0 — cascade and failure behavior | Specificity/validation, layers/rollback, nesting, variables, typed computation and live CSSOM foundations | P0.1–P0.3 current inventory, critical computation and invalidation; P2.5 complete CSSOM/registered-value semantics. |
+| P1 — selector core | Filtered siblings/relative selectors, state/link/namespace/table matching, language and direction consumers | P2.4 remaining language/namespace/shadow/DOM routes; P3.4 host/state-dependent additions. Live correctness remains P0.3. |
+| P2 — pseudo-element consumers | Marker color/font, selection foreground/background, separate raster file-button styles | P1.5 control sizing; P2.6 remaining part/top-layer paint; P2.4 shadow prerequisites; P3.4 highlight/cue/state models. |
+| P3 — partial property families | Common text fixes, shared motion grammar/sampling, grid math, logical geometry and raster background/border consumers | P1 common responsive/layout/text/image/scroll residue; P2 shaping/paint/export/motion; P3 broader values and models. |
+| P4 — parsed-only consumers | Logical overflow, scroll behavior/snap, caret and image sampling, attachment/alignment/backface consumers | P1.5 practical scroll/control gaps; P2.1 text/fonts; P2.2 effects/export; P3.2/P3.4 remaining unconsumed families. |
+| P5 — new property families | Individual transforms, underline controls, logical borders/corners, inherited SVG presentation and reference properties | P2.2/P2.3/P2.5 remaining paint/motion/CSSOM consumers; P3 new masks/shapes/positioning/timelines/font/UI families. |
+| Cross-cutting qualification | Dated native/UI/browser/ASan/release and aggregate records below | P0.1 source-backed consumer recount, fresh regression/tool/platform qualification and module-boundary debt under **D7.3.3–D7.3.4**. |
+
+The complete carry-forward mapping, priorities, dependencies and acceptance checks are in [new plan §7](Radiant_Impl_CSS_Support.md#7-carry-forward-coverage-from-the-retired-plan). The current observed-support source is [HTML, CSS and SVG Support](../../doc/HTML_CSS_SVG_Support.md), audited 2026-10-10. That report distinguishes historical inventories from fresh focused checks; this closeout does not reclassify the historical 244/43/55 totals or assert full aggregate/platform qualification.
 
 ## Goal and completion rule
 

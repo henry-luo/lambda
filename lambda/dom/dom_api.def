@@ -289,6 +289,7 @@ DOM_OP(CORE, stylesheet_delete_rule, style, 2, "pn(sheet: any, index: int) -> nu
 DOM_OP(CORE, caret_surface, editing, 1, "fn(n: any) -> string|null", dom_engine_caret_surface, DOM_F_ENGINE | DOM_F_NEUTRAL, "", none, "", "")
 DOM_OP(CORE, check_validity, forms, 1, "pn(form: any) -> bool", dom_engine_check_validity, DOM_F_ENGINE | DOM_F_NEUTRAL | DOM_F_MUTATES, "", none, "", "")
 DOM_OP(CORE, capture_pointer, input, 1, "pn(n: any) -> bool", dom_engine_capture_pointer, DOM_F_ENGINE | DOM_F_NEUTRAL | DOM_F_MUTATES, "", none, "", "")
+DOM_OP(CORE, set_canvas_pixels, canvas, 2, "pn(n: any, pixels: any) -> bool^", dom_engine_set_canvas_pixels, DOM_F_ENGINE | DOM_F_NEUTRAL | DOM_F_MUTATES, "", none, "", "")
 DOM_OP(CORE, close_context_menu, input, 1, "pn(n: any) -> bool", dom_engine_close_context_menu, DOM_F_ENGINE | DOM_F_NEUTRAL | DOM_F_MUTATES, "", none, "", "")
 DOM_OP(CORE, custom_validity, forms, 1, "fn(n: any) -> string", dom_engine_custom_validity, DOM_F_ENGINE | DOM_F_NEUTRAL, "", none, "", "")
 DOM_OP(CORE, dom_delete_dom_range, editing, 2, "pn(n: any, invocation: int) -> bool", dom_engine_dom_delete_dom_range, DOM_F_ENGINE | DOM_F_NEUTRAL | DOM_F_MUTATES, "", none, "", "")

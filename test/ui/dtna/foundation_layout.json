@@ -1,0 +1,222 @@
+{
+  "name": "dtna foundation layout",
+  "html": "test/ui/dtna/foundation_layout.ls",
+  "viewport": {
+    "width": 500,
+    "height": 900
+  },
+  "events": [
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#responsive-row"
+      },
+      "tolerance": 0.2,
+      "width": 416,
+      "height": 52
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#responsive-left"
+      },
+      "tolerance": 0.2,
+      "width": 416
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#responsive-right"
+      },
+      "tolerance": 0.2,
+      "width": 416
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#offset"
+      },
+      "tolerance": 0.2,
+      "x": 224,
+      "width": 100
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#first"
+      },
+      "tolerance": 0.2,
+      "x": 24,
+      "width": 100
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#rtl-offset"
+      },
+      "tolerance": 0.2,
+      "x": 224,
+      "width": 100
+    },
+    {
+      "type": "assert_visible",
+      "target": {
+        "selector": "#hidden-column"
+      },
+      "visible": false
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#split-space .dtna-space-item"
+      },
+      "count": 3
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#split-space .dtna-space-separator"
+      },
+      "count": 2
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#wrapped"
+      },
+      "tolerance": 0.2,
+      "height": 48
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#vertical-compact"
+      },
+      "tolerance": 0.2,
+      "height": 63
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#compact-first"
+      },
+      "tolerance": 0.2,
+      "height": 32
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#compact-last"
+      },
+      "tolerance": 0.2,
+      "height": 32
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#labelled .dtna-divider-line"
+      },
+      "property": "border-top-style",
+      "equals": "dashed"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#labelled .dtna-divider-label"
+      },
+      "equals": "Section"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#vertical-divider"
+      },
+      "property": "border-left-style",
+      "equals": "dashed"
+    },
+    {
+      "type": "resize",
+      "width": 800,
+      "height": 900
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#responsive-row"
+      },
+      "tolerance": 0.2,
+      "width": 424,
+      "height": 20
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#responsive-left"
+      },
+      "tolerance": 0.2,
+      "width": 212
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#responsive-right"
+      },
+      "tolerance": 0.2,
+      "width": 212
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#hidden-column"
+      },
+      "tolerance": 0.2,
+      "width": 133.3333
+    },
+    {
+      "type": "resize",
+      "width": 1930,
+      "height": 900
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#responsive-left"
+      },
+      "tolerance": 0.2,
+      "width": 106
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#responsive-right"
+      },
+      "tolerance": 0.2,
+      "width": 106
+    },
+    {
+      "type": "resize",
+      "width": 500,
+      "height": 900
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#responsive-row"
+      },
+      "tolerance": 0.2,
+      "width": 416,
+      "height": 52
+    },
+    {
+      "type": "assert_visible",
+      "target": {
+        "selector": "#hidden-column"
+      },
+      "visible": false
+    },
+    {
+      "type": "render",
+      "file": "temp/ui_dtna/foundation_increment/layout.png"
+    }
+  ]
+}

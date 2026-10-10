@@ -92,6 +92,8 @@ protected:
     }
 
     void TearDown() override {
+        // release registry roots before deleting externally allocated nodes.
+        dom_lifecycle_destroy(&doc_storage);
         // Nodes were heap-allocated by `new`; tear them down explicitly.
         delete world;
         delete hello;
@@ -108,6 +110,8 @@ protected:
         e->node_type = DOM_NODE_ELEMENT;
         e->set_synthetic(true);
         e->doc = lam::up(&doc_storage);
+        e->DomNode::id = dom_document_alloc_node_id(&doc_storage);
+        EXPECT_TRUE(dom_node_registry_register(&doc_storage, e, sizeof(*e), false));
         return e;
     }
 
@@ -118,6 +122,9 @@ protected:
         t->node_type = DOM_NODE_TEXT;
         t->text = lam::up(s);
         t->length = len;
+        // mutations retain document-owned strings through this node's record.
+        t->id = dom_document_alloc_node_id(&doc_storage);
+        EXPECT_TRUE(dom_node_registry_register(&doc_storage, t, sizeof(*t), false));
         return t;
     }
 };

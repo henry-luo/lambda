@@ -282,6 +282,12 @@ static void release_element_font_prop(DomElement* elem, ViewTree*) {
     release_font_prop(elem ? elem->font : nullptr);
 }
 
+static void free_block_container_payload(DomElement* elem, ViewTree* tree) {
+    if (!elem || !elem->blk || !tree || !tree->prop_pool) return;
+    css_value_destroy_owned(elem->blk->container_names, tree->prop_pool);
+    elem->blk->container_names = nullptr;
+}
+
 static void free_element_font_payload(DomElement* elem, ViewTree* tree) {
     if (!elem || !elem->font) return;
     // Font families may be borrowed from an ancestor or the document CSS
@@ -595,7 +601,7 @@ static const ViewPropTeardownEntry VIEW_PROP_TEARDOWN[] = {
     { "font", release_element_font_prop, free_element_font_payload, view_prop_get_font, view_prop_clear_font, view_prop_free_font, nullptr, nullptr, &FONT_PROP_DEFAULT, sizeof(FontProp), nullptr },
     { "inline", nullptr, nullptr, view_prop_get_in_line, view_prop_clear_inline, nullptr, nullptr, free_inline_prop, nullptr, sizeof(InlineProp), reset_inline_prop },
     { "boundary", nullptr, free_boundary_payload, view_prop_get_bound, view_prop_clear_bound, view_prop_free_bound, nullptr, nullptr, &BOUNDARY_PROP_DEFAULT, sizeof(BoundaryProp), nullptr },
-    { "block", nullptr, nullptr, view_prop_get_blk, view_prop_clear_blk, view_prop_free_blk, nullptr, nullptr, &BLOCK_PROP_DEFAULT, sizeof(BlockProp), nullptr },
+    { "block", nullptr, free_block_container_payload, view_prop_get_blk, view_prop_clear_blk, view_prop_free_blk, nullptr, nullptr, &BLOCK_PROP_DEFAULT, sizeof(BlockProp), nullptr },
     { "marker", nullptr, nullptr, view_prop_get_marker, view_prop_clear_marker, view_prop_free_marker, nullptr, nullptr, nullptr, sizeof(MarkerProp), reset_marker_prop },
     { "scroll", nullptr, free_scroll_payload, view_prop_get_scroller, view_prop_clear_scroller, view_prop_free_scroller, nullptr, nullptr, &SCROLL_PROP_DEFAULT, sizeof(ScrollProp), nullptr },
     { "embed", release_embed_prop_entry, free_embed_payload, view_prop_get_embed, view_prop_clear_embed, view_prop_free_embed, nullptr, nullptr, &EMBED_PROP_DEFAULT, sizeof(EmbedProp), reset_embed_prop, release_embed_prop_for_reset },

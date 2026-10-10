@@ -49,6 +49,7 @@ button:active { box-shadow: 0 1px 0 #20322f; background: #ffd35f; }
 button:focus { outline: 2px solid #e85940; outline-offset: 3px; }
 #overlay-action { background: #ef6248; color: #fff9e8; width: 220px; }
 #overlay-action:hover { background: #d44c35; }
+#auto-play { display: block; width: 220px; margin: 10px auto 0; background: #dce8c6; }
 .overlay-keys { font-size: 10px; color: #7b8773; margin: 15px 0 0; }
 .dashboard { display: flex; align-items: center; justify-content: space-between; margin-top: 18px; }
 .movement, .game-menu { display: flex; gap: 10px; }

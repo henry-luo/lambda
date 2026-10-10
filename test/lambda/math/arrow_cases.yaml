@@ -1,0 +1,8 @@
+EmptyArrow: '\xrightarrow{}'
+WideRightArrow: '\xrightarrow{\phantom{\rule{40pt}{3pt}}}'
+WideLeftArrow: '\xleftarrow{\phantom{\rule{40pt}{3pt}}}'
+WideBothArrow: '\xleftrightarrow{\phantom{\rule{40pt}{3pt}}}'
+WideDoubleArrow: '\xLeftrightarrow{\phantom{\rule{40pt}{3pt}}}'
+OverArrow: '\overrightarrow{\phantom{\rule{40pt}{3pt}}}'
+UnderArrow: '\underleftarrow{\phantom{\rule{40pt}{3pt}}}'
+StyleArrows: '\displaystyle\xrightarrow{a}\;\scriptstyle\xrightarrow{a}\;\scriptscriptstyle\xrightarrow{a}'

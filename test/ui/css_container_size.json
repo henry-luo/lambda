@@ -1,0 +1,301 @@
+{
+  "name": "Named and nested size containers, axis-specific units, font bases and live resize",
+  "html": "test/ui/css_container_size.html",
+  "viewport": {
+    "width": 640,
+    "height": 400
+  },
+  "events": [
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#queried"
+      },
+      "property": "width",
+      "equals": "100px"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#units"
+      },
+      "property": "width",
+      "equals": "150px"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#leaf"
+      },
+      "property": "width",
+      "equals": "40px"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#axis"
+      },
+      "property": "width",
+      "equals": "50px"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#axis"
+      },
+      "property": "height",
+      "equals": "60px"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#mixed"
+      },
+      "property": "width",
+      "equals": "60px"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#font-child"
+      },
+      "property": "width",
+      "equals": "70px"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#fallback"
+      },
+      "property": "width",
+      "equals": "64px"
+    },
+    {
+      "type": "assert_pixel",
+      "x": 60,
+      "y": 35,
+      "min_r": 0,
+      "max_r": 5,
+      "min_g": 123,
+      "max_g": 133,
+      "min_b": 0,
+      "max_b": 5
+    },
+    {
+      "type": "assert_pixel",
+      "x": 120,
+      "y": 45,
+      "min_r": 0,
+      "max_r": 5,
+      "min_g": 0,
+      "max_g": 5,
+      "min_b": 250,
+      "max_b": 255
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#shrink"
+      }
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#queried"
+      },
+      "property": "width",
+      "equals": "20px"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#units"
+      },
+      "property": "width",
+      "equals": "90px"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#leaf"
+      },
+      "property": "width",
+      "equals": "10px"
+    },
+    {
+      "type": "assert_pixel",
+      "x": 40,
+      "y": 35,
+      "min_r": 250,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 5,
+      "min_b": 0,
+      "max_b": 5
+    },
+    {
+      "type": "assert_pixel",
+      "x": 80,
+      "y": 35,
+      "min_r": 250,
+      "max_r": 255,
+      "min_g": 250,
+      "max_g": 255,
+      "min_b": 250,
+      "max_b": 255
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#grow"
+      }
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#queried"
+      },
+      "property": "width",
+      "equals": "100px"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#units"
+      },
+      "property": "width",
+      "equals": "180px"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#leaf"
+      },
+      "property": "width",
+      "equals": "40px"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#change-font"
+      }
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#font-child"
+      },
+      "property": "width",
+      "equals": "10px"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#check"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-name",
+      "equals": "card"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-type",
+      "equals": "inline-size"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-invalid",
+      "equals": "true"
+    },
+    {
+      "type": "resize",
+      "width": 800,
+      "height": 450
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#fallback"
+      },
+      "property": "width",
+      "equals": "80px"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#fallback"
+      },
+      "property": "height",
+      "equals": "45px"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#queried"
+      },
+      "property": "width",
+      "equals": "100px"
+    }
+  ],
+  "pixel_oracles": {
+    "1": [
+      {
+        "type": "assert_pixel",
+        "x": 60,
+        "y": 35,
+        "min_r": 0,
+        "max_r": 5,
+        "min_g": 123,
+        "max_g": 133,
+        "min_b": 0,
+        "max_b": 5
+      },
+      {
+        "type": "assert_pixel",
+        "x": 120,
+        "y": 45,
+        "min_r": 0,
+        "max_r": 5,
+        "min_g": 0,
+        "max_g": 5,
+        "min_b": 250,
+        "max_b": 255
+      }
+    ],
+    "2": [
+      {
+        "type": "assert_pixel",
+        "x": 60,
+        "y": 35,
+        "min_r": 0,
+        "max_r": 5,
+        "min_g": 123,
+        "max_g": 133,
+        "min_b": 0,
+        "max_b": 5
+      },
+      {
+        "type": "assert_pixel",
+        "x": 120,
+        "y": 45,
+        "min_r": 0,
+        "max_r": 5,
+        "min_g": 0,
+        "max_g": 5,
+        "min_b": 250,
+        "max_b": 255
+      }
+    ]
+  }
+}
