@@ -19,6 +19,8 @@ import biblatex: .packages.biblatex
 import natbib: .packages.natbib
 import bib_style: .packages.bib_style
 import bib_data: .packages.bib_data
+import csl_resources: .citeproc.resources
+import csl: .citeproc.adapter
 import hyperref: .packages.hyperref
 import amsmath: .packages.amsmath
 import paths: lambda.edit.session
@@ -84,13 +86,19 @@ pub fn render_result(ast, options) {
         amsmath.operators(ast) else {definitions: [], diagnostics: []}
     // package activation precedes counter and label analysis.
     let language = document_language(options, loaded.packages, polyglossia)
-    let base_info = analyzer.analyze_with_language(ast, loaded.packages, language)
-    let bibliography = if (registry.active(loaded.packages, "biblatex"))
+    let csl_capture = if (options != null and options.citeproc != null)
+        csl_resources.load(ast, base_uri, options.citeproc, language) else null
+    let base_info = analyzer.analyze_with_language(ast, loaded.packages, language,
+        {citeproc: csl_capture != null, note_style: csl_capture.compiled.style.class == "note"})
+    let bibliography = if (csl_capture != null)
+        csl.prepare(ast, csl_capture, base_info.footnotes,
+            {*:options.citeproc, legacy_options: registry.options_for(loaded.packages, "biblatex")})
+        else if (registry.active(loaded.packages, "biblatex"))
         biblatex.prepare(ast, base_uri,
             registry.options_for(loaded.packages, "biblatex"), language)
         else natbib.prepare(ast, base_uri,
             registry.options_for(loaded.packages, "natbib"), language)
-    let language_issues = if (registry.active(loaded.packages, "biblatex") and
+    let language_issues = if (csl_capture == null and registry.active(loaded.packages, "biblatex") and
         not (bib_style.supported_language(language) ^ { false }))
         [util.diagnostic("unsupported-bib-language", "biblatex", language,
             "Unsupported bibliography language " ++ language,
@@ -185,9 +193,12 @@ pub fn render_result(ast, options) {
         output_diagnostics(elements)
     {body: html, elements: elements,
      stylesheet: css.get_stylesheet() ++ math.stylesheet(options) ++ package_stylesheet(info),
-     metadata: hyperref.metadata(link_settings, info.title, info.author),
+     metadata: if (csl_capture == null) hyperref.metadata(link_settings, info.title, info.author)
+         else {*:hyperref.metadata(link_settings, info.title, info.author),
+             bibliography: bibliography.metadata},
      packages: loaded.packages, diagnostics: diagnostics,
-     assets: registry.assets(ast, info.base_uri) ++ bib_data.resource_assets(ast, info.base_uri)}
+     assets: registry.assets(ast, info.base_uri) ++ (if (csl_capture == null)
+         bib_data.resource_assets(ast, info.base_uri) else bibliography.assets)}
 }
 
 fn document_language(options, packages, polyglossia) {
@@ -224,6 +235,7 @@ fn output_diagnostics(node) {
 }
 
 fn package_stylesheet(info) {
+    (if (info.biblatex_context.processor == "csl") csl.stylesheet() else "") ++
     geometry.stylesheet(registry.options_for(info.packages, "geometry")) ++
     (if (registry.active(info.packages, "fullpage") and
         not registry.active(info.packages, "geometry"))
@@ -324,8 +336,10 @@ fn render_footnotes_section(info) {
 
 fn render_footnote_item(fn_entry, info) {
     let fn_num = fn_entry.number
-    let content = if (string(name(fn_entry.node)) == "footcite" and
-        info.biblatex_context != null)
+    let content = if (info.biblatex_context != null and
+        (string(name(fn_entry.node)) == "footcite" or
+        (info.biblatex_context.processor == "csl" and
+         (string(name(fn_entry.node)) == "autocite" or string(name(fn_entry.node)) == "autocites"))))
         [biblatex.render_footcite_content(fn_entry.node, info.biblatex_context)]
         else dispatcher.render_children_of(fn_entry.node, info);
     <li id: "fn-" ++ (fn_num),

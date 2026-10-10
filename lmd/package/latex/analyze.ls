@@ -28,9 +28,11 @@ pub fn analyze(ast) => analyze_with_packages(ast, [])
 pub fn analyze_with_packages(ast, packages) =>
     analyze_with_language(ast, packages, "english")
 
-pub fn analyze_with_language(ast, packages, language) {
+pub fn analyze_with_language(ast, packages, language, options = {}) {
     let st = {
         packages: packages,
+        citeproc: options.citeproc == true,
+        citeproc_note: options.note_style == true,
         language: language,
         bibliography_count: 0,
         listing_count: 0,
@@ -164,10 +166,15 @@ fn walk_element(el, st) {
 
         // ---- footnotes ----
         case 'footnote': walk_footnote(el, st)
-        case 'footcite': if (registry.active(st.packages, "biblatex"))
+        case 'footcite': if (st.citeproc or registry.active(st.packages, "biblatex"))
             walk_footnote(el, st) else walk_children(el, 0, len(el), st)
 
-        case 'printbibliography': if (registry.active(st.packages, "biblatex"))
+        case 'autocite': if (st.citeproc_note) walk_footnote(el, st)
+            else walk_children(el, 0, len(el), st)
+        case 'autocites': if (st.citeproc_note) walk_footnote(el, st)
+            else walk_children(el, 0, len(el), st)
+
+        case 'printbibliography': if (st.citeproc or registry.active(st.packages, "biblatex"))
             walk_printbibliography(el, st) else walk_children(el, 0, len(el), st)
 
         // ---- equations ----

@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<style xmlns="http://purl.org/net/xbiblio/csl" version="1.0" class="in-text">
+  <info><title>Lambda resource test</title><id>urn:lambda:test:resources</id></info>
+  <citation><layout prefix="[" suffix="]"><text variable="title"/></layout></citation>
+  <bibliography><layout><group delimiter=": "><text term="reference"/><text variable="title"/></group></layout></bibliography>
+</style>

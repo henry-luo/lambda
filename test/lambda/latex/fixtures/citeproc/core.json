@@ -1,0 +1,319 @@
+[
+  {
+    "id": "group-empty",
+    "style": "<style xmlns=\"http://purl.org/net/xbiblio/csl\" version=\"1.0\" class=\"in-text\"><info><title>Lambda fixture</title><id>urn:lambda:group-empty</id></info><citation><layout><group prefix=\"(\" suffix=\")\" delimiter=\": \"><text value=\"edition\"/><text variable=\"edition\"/></group><text variable=\"title\"/></layout></citation></style>",
+    "references": [
+      {
+        "id": "item",
+        "type": "book",
+        "title": "Visible"
+      }
+    ],
+    "expected": "Visible"
+  },
+  {
+    "id": "group-nested",
+    "style": "<style xmlns=\"http://purl.org/net/xbiblio/csl\" version=\"1.0\" class=\"in-text\"><info><title>Lambda fixture</title><id>urn:lambda:group-nested</id></info><citation><layout><group delimiter=\" \"><text value=\"before\"/><group><text variable=\"publisher\"/></group><text variable=\"title\"/></group></layout></citation></style>",
+    "references": [
+      {
+        "id": "item",
+        "type": "book",
+        "title": "Visible"
+      }
+    ],
+    "expected": "before Visible"
+  },
+  {
+    "id": "choose-any",
+    "style": "<style xmlns=\"http://purl.org/net/xbiblio/csl\" version=\"1.0\" class=\"in-text\"><info><title>Lambda fixture</title><id>urn:lambda:choose-any</id></info><citation><layout><choose><if variable=\"publisher\" type=\"book\" match=\"any\"><text value=\"yes\"/></if><else><text value=\"no\"/></else></choose></layout></citation></style>",
+    "references": [
+      {
+        "id": "item",
+        "type": "book"
+      }
+    ],
+    "expected": "yes"
+  },
+  {
+    "id": "macro-affixes",
+    "style": "<style xmlns=\"http://purl.org/net/xbiblio/csl\" version=\"1.0\" class=\"in-text\"><info><title>Lambda fixture</title><id>urn:lambda:macro-affixes</id></info><macro name=\"title\"><text variable=\"title\"/></macro><citation><layout><text macro=\"title\" prefix=\"[\" suffix=\"]\"/><text variable=\"publisher\" prefix=\", \"/></layout></citation></style>",
+    "references": [
+      {
+        "id": "item",
+        "type": "book",
+        "title": "Visible"
+      }
+    ],
+    "expected": "[Visible]"
+  },
+  {
+    "id": "name-inheritance",
+    "style": "<style xmlns=\"http://purl.org/net/xbiblio/csl\" version=\"1.0\" class=\"in-text\"><info><title>Lambda fixture</title><id>urn:lambda:name-inheritance</id></info><citation initialize-with=\". \" name-delimiter=\"; \"><layout><names variable=\"author\"><name/></names></layout></citation></style>",
+    "references": [
+      {
+        "id": "item",
+        "type": "book",
+        "author": [
+          {
+            "family": "Doe",
+            "given": "John"
+          },
+          {
+            "family": "Roe",
+            "given": "Jane"
+          }
+        ]
+      }
+    ],
+    "expected": "J. Doe; J. Roe"
+  },
+  {
+    "id": "name-substitute",
+    "style": "<style xmlns=\"http://purl.org/net/xbiblio/csl\" version=\"1.0\" class=\"in-text\"><info><title>Lambda fixture</title><id>urn:lambda:name-substitute</id></info><citation><layout><names variable=\"author\"><name form=\"short\"/><substitute><names variable=\"editor\"/><text variable=\"title\"/></substitute></names><text variable=\"editor\" prefix=\" DUPLICATED \"/></layout></citation></style>",
+    "references": [
+      {
+        "id": "item",
+        "type": "book",
+        "editor": [
+          {
+            "family": "Doe",
+            "given": "John"
+          }
+        ]
+      }
+    ],
+    "expected": "Doe"
+  },
+  {
+    "id": "name-count",
+    "style": "<style xmlns=\"http://purl.org/net/xbiblio/csl\" version=\"1.0\" class=\"in-text\"><info><title>Lambda fixture</title><id>urn:lambda:name-count</id></info><citation><layout><names variable=\"author editor\"><name form=\"count\"/></names></layout></citation></style>",
+    "references": [
+      {
+        "id": "item",
+        "type": "book",
+        "author": [
+          {
+            "family": "Doe"
+          },
+          {
+            "family": "Roe"
+          }
+        ],
+        "editor": [
+          {
+            "family": "Smith"
+          }
+        ]
+      }
+    ],
+    "expected": "3"
+  },
+  {
+    "id": "name-etal",
+    "style": "<style xmlns=\"http://purl.org/net/xbiblio/csl\" version=\"1.0\" class=\"in-text\"><info><title>Lambda fixture</title><id>urn:lambda:name-etal</id></info><citation et-al-min=\"3\" et-al-use-first=\"1\"><layout><names variable=\"author\"><name form=\"short\"/></names></layout></citation></style>",
+    "references": [
+      {
+        "id": "item",
+        "type": "book",
+        "author": [
+          {
+            "family": "Doe"
+          },
+          {
+            "family": "Roe"
+          },
+          {
+            "family": "Smith"
+          }
+        ]
+      }
+    ],
+    "expected": "Doe et al."
+  },
+  {
+    "id": "localized-de",
+    "style": "<style xmlns=\"http://purl.org/net/xbiblio/csl\" version=\"1.0\" class=\"in-text\" default-locale=\"de-DE\"><info><title>Lambda fixture</title><id>urn:lambda:localized-de</id></info><citation><layout><date variable=\"issued\" form=\"text\"/></layout></citation></style>",
+    "references": [
+      {
+        "id": "item",
+        "type": "book",
+        "issued": {
+          "date-parts": [
+            [
+              2020,
+              2,
+              3
+            ]
+          ]
+        }
+      }
+    ],
+    "expected": "3. Februar 2020"
+  },
+  {
+    "id": "localized-fr",
+    "style": "<style xmlns=\"http://purl.org/net/xbiblio/csl\" version=\"1.0\" class=\"in-text\" default-locale=\"fr-FR\"><info><title>Lambda fixture</title><id>urn:lambda:localized-fr</id></info><citation><layout><date variable=\"issued\" form=\"text\" date-parts=\"year-month\"/></layout></citation></style>",
+    "references": [
+      {
+        "id": "item",
+        "type": "book",
+        "issued": {
+          "date-parts": [
+            [
+              2020,
+              2,
+              3
+            ]
+          ]
+        }
+      }
+    ],
+    "expected": "février 2020"
+  },
+  {
+    "id": "date-range",
+    "style": "<style xmlns=\"http://purl.org/net/xbiblio/csl\" version=\"1.0\" class=\"in-text\"><info><title>Lambda fixture</title><id>urn:lambda:date-range</id></info><citation><layout><date variable=\"issued\" form=\"text\"/></layout></citation></style>",
+    "references": [
+      {
+        "id": "item",
+        "type": "book",
+        "issued": {
+          "date-parts": [
+            [
+              2020,
+              5,
+              1
+            ],
+            [
+              2020,
+              5,
+              3
+            ]
+          ]
+        }
+      }
+    ],
+    "expected": "May 1–3, 2020"
+  },
+  {
+    "id": "ordinal-roman",
+    "style": "<style xmlns=\"http://purl.org/net/xbiblio/csl\" version=\"1.0\" class=\"in-text\"><info><title>Lambda fixture</title><id>urn:lambda:ordinal-roman</id></info><citation><layout><number variable=\"edition\" form=\"ordinal\" suffix=\"; \"/><number variable=\"volume\" form=\"roman\"/></layout></citation></style>",
+    "references": [
+      {
+        "id": "item",
+        "type": "book",
+        "edition": "12",
+        "volume": "14"
+      }
+    ],
+    "expected": "12th; xiv"
+  },
+  {
+    "id": "page-minimal",
+    "style": "<style xmlns=\"http://purl.org/net/xbiblio/csl\" version=\"1.0\" class=\"in-text\" page-range-format=\"minimal-two\"><info><title>Lambda fixture</title><id>urn:lambda:page-minimal</id></info><citation><layout><label variable=\"page\" form=\"short\" suffix=\" \"/><text variable=\"page\"/></layout></citation></style>",
+    "references": [
+      {
+        "id": "item",
+        "type": "book",
+        "page": "321-328"
+      }
+    ],
+    "expected": "pp. 321–28"
+  },
+  {
+    "id": "numeric-condition",
+    "style": "<style xmlns=\"http://purl.org/net/xbiblio/csl\" version=\"1.0\" class=\"in-text\"><info><title>Lambda fixture</title><id>urn:lambda:numeric-condition</id></info><citation><layout><choose><if is-numeric=\"edition\"><text value=\"numeric\"/></if><else><text value=\"text\"/></else></choose></layout></citation></style>",
+    "references": [
+      {
+        "id": "item",
+        "type": "book",
+        "edition": "5th"
+      }
+    ],
+    "expected": "numeric"
+  },
+  {
+    "id": "rich-case",
+    "style": "<style xmlns=\"http://purl.org/net/xbiblio/csl\" version=\"1.0\" class=\"in-text\"><info><title>Lambda fixture</title><id>urn:lambda:rich-case</id></info><citation><layout><text variable=\"title\" text-case=\"title\"/></layout></citation></style>",
+    "references": [
+      {
+        "id": "item",
+        "type": "book",
+        "title": "a guide to <span class=\"nocase\">CSL</span>"
+      }
+    ],
+    "expected": "A Guide to CSL"
+  },
+  {
+    "id": "quote-punctuation",
+    "style": "<style xmlns=\"http://purl.org/net/xbiblio/csl\" version=\"1.0\" class=\"in-text\"><info><title>Lambda fixture</title><id>urn:lambda:quote-punctuation</id></info><citation><layout><text variable=\"title\" quotes=\"true\"/><text value=\", next\"/></layout></citation></style>",
+    "references": [
+      {
+        "id": "item",
+        "type": "book",
+        "title": "Title"
+      }
+    ],
+    "expected": "“Title”, next"
+  },
+  {
+    "id": "inline-empty-term",
+    "style": "<style xmlns=\"http://purl.org/net/xbiblio/csl\" version=\"1.0\" class=\"in-text\"><info><title>Lambda fixture</title><id>urn:lambda:inline-empty-term</id></info><locale><terms><term name=\"page\"/></terms></locale><citation><layout><label variable=\"page\"/><text variable=\"page-first\"/></layout></citation></style>",
+    "references": [
+      {
+        "id": "item",
+        "type": "book",
+        "page": "22-45"
+      }
+    ],
+    "expected": "22"
+  },
+  {
+    "id": "name-particle-case",
+    "style": "<style xmlns=\"http://purl.org/net/xbiblio/csl\" version=\"1.0\" class=\"in-text\" ><info><title>Lambda fixture</title><id>urn:lambda:additional</id></info><citation><layout><names variable=\"author\"><name><name-part name=\"family\" text-case=\"uppercase\"/></name></names></layout></citation></style>",
+    "references": [
+      {
+        "id": "item",
+        "type": "book",
+        "author": [
+          {
+            "family": "Meer",
+            "given": "Gerard",
+            "dropping-particle": "van",
+            "non-dropping-particle": "der"
+          }
+        ]
+      }
+    ],
+    "expected": "Gerard van DER MEER"
+  },
+  {
+    "id": "name-particle-initials",
+    "style": "<style xmlns=\"http://purl.org/net/xbiblio/csl\" version=\"1.0\" class=\"in-text\" ><info><title>Lambda fixture</title><id>urn:lambda:additional</id></info><citation><layout><names variable=\"author\"><name initialize-with=\".\"/></names></layout></citation></style>",
+    "references": [
+      {
+        "id": "item",
+        "type": "book",
+        "author": [
+          {
+            "family": "Doe",
+            "given": "Anders de Maan"
+          }
+        ]
+      }
+    ],
+    "expected": "A. de M. Doe"
+  },
+  {
+    "id": "rich-sentence-case",
+    "style": "<style xmlns=\"http://purl.org/net/xbiblio/csl\" version=\"1.0\" class=\"in-text\" ><info><title>Lambda fixture</title><id>urn:lambda:additional</id></info><citation><layout><text variable=\"title\" text-case=\"sentence\"/></layout></citation></style>",
+    "references": [
+      {
+        "id": "item",
+        "type": "book",
+        "title": "<span class=\"nocase\">CSL</span> and THE body"
+      }
+    ],
+    "expected": "CSL and the body"
+  }
+]
