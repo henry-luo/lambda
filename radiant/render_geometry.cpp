@@ -172,3 +172,58 @@ bool render_geometry_transform_matrix(const TransformProp* transform,
         transform, width, height, origin.x, origin.y);
     return !rdt_matrix_is_identity(out_matrix);
 }
+
+/**
+ * Constrain border radii to prevent overlapping per CSS Backgrounds Level 3 §5.5
+ */
+void constrain_corner_radii(Corner* radius, float width, float height) {
+    if (!radius) return;
+
+    float horizontal_sum_top = radius->horizontal[0] + radius->horizontal[1];
+    float horizontal_sum_bottom = radius->horizontal[3] + radius->horizontal[2];
+    float vertical_sum_left = radius->vertical[0] + radius->vertical[3];
+    float vertical_sum_right = radius->vertical[1] + radius->vertical[2];
+
+    float f = 1.0f;
+    if (horizontal_sum_top > width) f = min(f, width / horizontal_sum_top);
+    if (horizontal_sum_bottom > width) f = min(f, width / horizontal_sum_bottom);
+    if (vertical_sum_left > height) f = min(f, height / vertical_sum_left);
+    if (vertical_sum_right > height) f = min(f, height / vertical_sum_right);
+
+    if (f < 1.0f) {
+        log_debug("[BORDER RADIUS] Constraining radii by factor %.2f", f);
+        for (int i = 0; i < 4; i++) {
+            radius->horizontal[i] *= f;
+            radius->vertical[i] *= f;
+        }
+    }
+}
+
+/**
+ * Resolve percentage border-radius values to pixels.
+ * CSS Backgrounds 3 §5.3: percentages resolve against element dimensions.
+ */
+void resolve_border_radius_percentages(Corner* radius, float width, float height) {
+    if (!radius) return;
+    if (radius->expressions) {
+        CornerExpressions* expressions = radius->expressions;
+        *radius = expressions->computed;
+        radius->expressions = lam::up(expressions);
+    }
+    for (int i = 0; i < 4; i++) {
+        if (radius->expressions && radius->expressions->horizontal[i]) {
+            radius->horizontal[i] = fmaxf(0.0f, radiant::resolve_computed_length_percentage(
+                radius->expressions->horizontal[i], width));
+        } else if (radius->horizontal_percent[i]) {
+            radius->horizontal[i] = radius->horizontal[i] * width / 100.0f;
+            radius->horizontal_percent[i] = false;
+        }
+        if (radius->expressions && radius->expressions->vertical[i]) {
+            radius->vertical[i] = fmaxf(0.0f, radiant::resolve_computed_length_percentage(
+                radius->expressions->vertical[i], height));
+        } else if (radius->vertical_percent[i]) {
+            radius->vertical[i] = radius->vertical[i] * height / 100.0f;
+            radius->vertical_percent[i] = false;
+        }
+    }
+}

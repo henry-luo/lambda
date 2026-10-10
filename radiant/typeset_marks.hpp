@@ -21,6 +21,7 @@ struct TypesetMarkStore {
     Pool* pool;
     TypesetMark* entries;
     size_t count, capacity;
+    TypesetSourceScope sources;
 };
 
 // Payloads remain producer-owned immutable values throughout trial and replay.

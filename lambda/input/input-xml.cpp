@@ -1110,7 +1110,21 @@ Element* parse_svg_document(Input* input, const char* svg_source) {
         Item child = document->items[i];
         if (get_type_id(child) != LMD_TYPE_ELEMENT) continue;
         TypeElmt* type = (TypeElmt*)child.element->type;
-        if (type && type->name.str && strcmp(type->name.str, "svg") == 0) return child.element;
+        if (!type || !type->name.str) continue;
+        const char* name = type->name.str;
+        const char* colon = strchr(name, ':');
+        if (strcmp(colon ? colon + 1 : name, "svg")) continue;
+        const char* declaration = "xmlns";
+        if (colon) {
+            size_t length = (size_t)(colon - name);
+            char* qualified = (char*)pool_alloc(input->pool, length + 7);
+            if (!qualified) return nullptr;
+            memcpy(qualified, "xmlns:", 6); memcpy(qualified + 6, name, length); qualified[length + 6] = '\0';
+            declaration = qualified;
+        }
+        String* uri = child.element->get_attr(declaration).string();
+        // preserve namespace-free legacy inputs; an authored namespace must identify SVG.
+        if ((uri && !strcmp(uri->chars, "http://www.w3.org/2000/svg")) || (!colon && !uri)) return child.element;
     }
     log_error("svg_document: no SVG root element found in external XML document");
     return nullptr;

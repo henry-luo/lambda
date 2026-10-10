@@ -620,14 +620,14 @@ static void svg_animation_scan(DomElement* element, DomElement* root,
         scan->has_elements = true;
         const char* name = element->get_attribute("attributeName");
         const char* href = element->get_attribute("href");
-        if (!href) href = element->get_attribute("xlink:href");
+        if (!href) href = dom_element_attribute_ns(element, "http://www.w3.org/1999/xlink", "href");
         bool targets_root = element->parent == root || (href && href[0] == '#' &&
             root->get_attribute("id") && strcmp(href + 1, root->get_attribute("id")) == 0);
         if (targets_root && name && (strcmp(name, "width") == 0 || strcmp(name, "height") == 0 ||
             strcmp(name, "display") == 0)) scan->layout_affects = true;
     }
     // embedded HTML can inherit animated SVG fonts and has viewport-dependent containing blocks.
-    if (element->tag() == MARKUP_NAME_FOREIGNOBJECT) scan->layout_affects = true;
+    if (dom_element_is_svg(element) && strcmp(element->local_name(), "foreignObject") == 0) scan->layout_affects = true;
     for (DomNode* node = element->first_child; node; node = node->next_sibling)
         if (node->is_element()) svg_animation_scan(node->as_element(), root, scan, depth + 1, all_fragments);
 }
@@ -1575,7 +1575,6 @@ DomElement* svg_animation_target_element(DomElement* animation) {
     if (!animation || !svg_animation_is_element(animation)) return nullptr;
     const char* href = animation->get_attribute("href");
     if (!href) href = dom_element_attribute_ns(animation, "http://www.w3.org/1999/xlink", "href");
-    if (!href) href = animation->get_attribute("xlink:href");
     DomElement* target = href ? (href[0] == '#' ? dom_find_element_by_id(animation->doc->root, href + 1) : nullptr) :
         animation->parent && animation->parent->is_element() ? animation->parent->as_element() : nullptr;
     return target && svg_animation_root(target) == svg_animation_root(animation) ? target : nullptr;
@@ -2479,7 +2478,9 @@ const char* svg_animation_value(DomElement* element, const char* name, bool css_
 const char* svg_animation_attribute(DomElement* element, const char* name) {
     const char* value = element ? svg_animation_target_value(svg_animation_registry(element->doc, false),
         dom_element_to_element(element), name, 2) : nullptr;
-    return value ? value : element ? element->get_attribute(name) : nullptr;
+    if (value || !element) return value;
+    return strcmp(name, "xlink:href") == 0
+        ? dom_element_attribute_ns(element, "http://www.w3.org/1999/xlink", "href") : element->get_attribute(name);
 }
 
 const char* svg_animation_source_value(Element* element, const char* name) {

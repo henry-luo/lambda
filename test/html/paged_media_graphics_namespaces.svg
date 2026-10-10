@@ -1,0 +1,5 @@
+<s:svg xmlns:s="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="30pt" height="15pt" viewBox="0 0 40 20" preserveAspectRatio="none">
+  <s:style>.shape { fill:#d04020 }</s:style>
+  <s:defs><s:rect id="shape" class="shape" width="40" height="20" /></s:defs>
+  <s:use xlink:href="#shape" />
+</s:svg>

@@ -1,0 +1,37 @@
+<?xml version="1.0"?>
+<r:page-document r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" xmlns:r="urn:lambda:radiant:page" style="margin:0;font-family:Arial;font-size:7.5pt;line-height:9pt;color:black;white-space:normal;orphans:1;widows:1;border-collapse:separate" r:line-stacking-strategy="max-height" r:linefeed-treatment="treat-as-space" r:white-space-treatment="ignore-if-surrounding-linefeed" r:white-space-collapse="true" r:wrap-option="wrap">
+  <r:master-set r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics"><r:page-master r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" name="sheet" style="size:150pt 120pt;margin:7.5pt"><r:region r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" role="body" name="xsl-region-body" style="overflow:visible"/></r:page-master></r:master-set>
+  <r:page-sequence r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" master-reference="sheet" force-page-count="no-force"><r:flow r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" region-name="xsl-region-body">
+    <div r:block-inline-geometry="reference" r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" r:space-before="3pt"><table r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" style="table-layout:fixed;width:100%;border-collapse:separate;border-spacing:0"><col r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" style="width:30pt"/><col r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics"/><tbody r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics"><tr r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics">
+      <td r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" r:cell-alignment="relative-before" style="padding:0;vertical-align:top"><div r:block-inline-geometry="reference" r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" style="background-color:#ffdddd">Term</div><div r:block-inline-geometry="reference" r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" style="background-color:#ffdddd">Second</div></td>
+      <td r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" r:cell-alignment="relative-before" style="padding:0;vertical-align:top"><div r:block-inline-geometry="reference" r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics">Lead</div><div r:block-inline-geometry="reference" r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" r:start-indent="4.5pt" r:end-indent="-1.5pt" style="border:0.75pt solid red;padding:1.5pt;color:#ddffdd">
+        <div r:block-inline-geometry="reference" r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" r:linefeed-treatment="preserve" r:white-space-treatment="preserve" r:property-bindings="--font:parent(font-size);--ink:parent(color)" style="background-color:var(--ink);font-size:calc(var(--font) + 0px);color:black;padding-top:calc(var(--font) * 0)">A
+B
+C
+D
+E
+F
+G</div>
+        <div r:block-inline-geometry="reference" r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" r:start-indent="-1.5pt" r:end-indent="6pt" style="padding-top:2.25pt;padding-bottom:2.25pt;background-color:#aaaaff"/>
+        <div r:block-inline-geometry="reference" r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" r:linefeed-treatment="preserve" r:white-space-treatment="preserve" r:property-bindings="--font:parent(font-size);--indent:parent(end-indent)" r:start-indent="calc(var(--font) * 2)" r:end-indent="calc(var(--indent) + 0px)" style="background-color:#dde0ff;color:black">H
+I
+J
+K
+L
+M
+N
+O
+P
+Q
+R
+S
+T
+U
+V
+W
+X
+Y</div>
+      </div><div r:block-inline-geometry="reference" r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics">Tail</div></td>
+    </tr></tbody></table></div>
+  </r:flow></r:page-sequence>
+</r:page-document>

@@ -328,11 +328,9 @@ static const char* extract_element_attribute(Element* element, const char* attr_
 // Helper: Get element tag name
 // ============================================================================
 
-static const char* get_element_tag_name(Element* elem) {
-    if (!elem || !elem->type) return nullptr;
-    TypeElmt* type = (TypeElmt*)elem->type;
-    return type->name.str;
-}
+struct SvgStyleContext;
+static DomElement* svg_style_node(SvgStyleContext* style, Element* element);
+static const char* get_element_tag_name(SvgInlineRenderContext* ctx, Element* element);
 
 // ============================================================================
 // Helper: Get attribute from Element
@@ -395,7 +393,7 @@ static int svg_export_begin_element(SvgInlineRenderContext* ctx, Element* elem) 
         if (!values.append(text)) { stringbuf_free(text); break; }
         attrs.append({lam::up(name), lam::up(text->str->chars)});
     }
-    const char* tag = get_element_tag_name(elem);
+    const char* tag = get_element_tag_name(ctx, elem);
     StringBuf* title = nullptr;
     if (tag && strcmp(tag, "text") == 0) {
         title = stringbuf_new(ctx->pool);
@@ -516,6 +514,30 @@ struct SvgResourceDocument {
     SvgResourceDocument* next;
 };
 
+static SvgStyleEntry* svg_style_entry_lookup(SvgStyleContext* style, Element* element) {
+    SvgStyleEntry key = {}; key.element = element;
+    return style && style->entries ? SvgStyleMap::get(style->entries, key) : nullptr;
+}
+
+static DomElement* svg_style_node(SvgStyleContext* style, Element* element) {
+    SvgStyleEntry* entry = svg_style_entry_lookup(style, element);
+    return entry ? entry->node : nullptr;
+}
+
+static const char* get_element_tag_name(SvgInlineRenderContext* ctx, Element* element) {
+    DomElement* node = ctx ? svg_style_node((SvgStyleContext*)ctx->style_context, element) : nullptr;
+    // expanded names distinguish qualified SVG from identically named foreign content.
+    return node && dom_element_is_svg(node) ? node->local_name() : nullptr;
+}
+
+static const char* get_svg_href(SvgInlineRenderContext* ctx, Element* element) {
+    const char* href = get_svg_attr(element, "href");
+    if (href) return href;
+    // a referenced document owns its XLink binding and animation registry, independently of its prefix.
+    DomElement* node = ctx ? svg_style_node((SvgStyleContext*)ctx->style_context, element) : nullptr;
+    return node ? svg_animation_attribute(node, "xlink:href") : nullptr;
+}
+
 static void svg_resource_document_destroy(SvgResourceDocument* document);
 
 DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElement* parent);
@@ -547,8 +569,11 @@ static void svg_style_index_tree(SvgStyleContext* style, DomElement* node) {
 
 static void svg_style_collect_sheets(SvgStyleContext* style, Element* elem) {
     if (!elem) return;
-    const char* tag = get_element_tag_name(elem);
-    if (tag && strcmp(tag, "style") == 0) {
+    DomElement* node = svg_style_node(style, elem);
+    const char* tag = node ? node->local_name() : nullptr;
+    const char* uri = node ? dom_element_namespace_uri(node) : "";
+    if (tag && strcmp(tag, "style") == 0 &&
+        (!strcmp(uri, "http://www.w3.org/2000/svg") || !strcmp(uri, "http://www.w3.org/1999/xhtml"))) {
         lam::Temp<char> text((char*)get_direct_text_content(elem));
         const char* type = get_svg_attr(elem, "type");
         if (text && (!type || str_icmp_cstr(type, "text/css") == 0)) {
@@ -649,13 +674,21 @@ static bool svg_style_init(SvgStyleContext* style, Element* root,
     dom_document_borrow_input_resources(style->document);
     style->document->services.svg_image_document = image_document;
     if (source_path && *source_path) style->document->url = lam::own(url_parse_path_or_url(source_path, nullptr));
-    style->document->root = lam::up(build_dom_tree_from_element(root, style->document, nullptr));
+    DomElement* node = build_dom_tree_from_element(root, style->document, nullptr);
+    if (node && strcmp(node->local_name(), "svg")) {
+        // generated fragments inherit SVG membership from an implicit viewport; authored declarations still win.
+        DomElement* viewport = DomElement::create(style->document, "svg", nullptr);
+        if (viewport) viewport->link_child(node);
+        style->document->root = lam::up(viewport);
+    } else style->document->root = lam::up(node);
     style->engine = css_engine_create(style->document->document_pool);
     if (!style->document->root || !style->engine) { svg_style_destroy(style); return false; }
     style->document->services.cached_css_engine = style->engine;
     css_engine_set_viewport(style->engine, viewport_width, viewport_height);
+    if (!svg_style_finish(style, nullptr)) return false;
+    // stylesheet discovery needs the same expanded names as paint and resource dispatch.
     svg_style_collect_sheets(style, root);
-    return svg_style_finish(style, nullptr);
+    return true;
 }
 
 // painting and DOM geometry queries share the host cascade. Rebuilding a
@@ -786,9 +819,7 @@ static FontContext* svg_style_font_context(SvgStyleContext* style, const char* s
 }
 
 static SvgStyleEntry* svg_style_entry(SvgStyleContext* style, Element* element) {
-    SvgStyleEntry query = {};
-    query.element = element;
-    SvgStyleEntry* entry = style && style->entries ? SvgStyleMap::get(style->entries, query) : nullptr;
+    SvgStyleEntry* entry = svg_style_entry_lookup(style, element);
     if (entry && !entry->inline_parsed) {
         // each SVG indexes the host for references; unrelated inline CSS is never queried.
         const char* text = entry->node->get_attribute("style");
@@ -2029,8 +2060,8 @@ static SvgResourceReference svg_resolve_reference(SvgInlineRenderContext* ctx, c
     return result;
 }
 
-static bool svg_is_gradient(Element* elem) {
-    const char* tag = get_element_tag_name(elem);
+static bool svg_is_gradient(SvgInlineRenderContext* ctx, Element* elem) {
+    const char* tag = get_element_tag_name(ctx, elem);
     return tag && (strcmp(tag, "linearGradient") == 0 || strcmp(tag, "radialGradient") == 0);
 }
 
@@ -2040,61 +2071,63 @@ static void svg_template_chain(SvgInlineRenderContext* ctx, Element* resource,
     SvgStyleContext* style = (SvgStyleContext*)ctx->style_context;
     SvgResourceReference current = {resource, style ? style->resource_document : nullptr};
     while (current.element && chain->size() < SVG_MAX_ELEM_DEFS) {
-        const char* tag = get_element_tag_name(current.element);
-        if (!tag || (gradient ? !svg_is_gradient(current.element) : strcmp(tag, "pattern") != 0)) break;
+        SvgInlineRenderContext source = svg_reference_render_context(ctx, &current);
+        const char* tag = get_element_tag_name(&source, current.element);
+        if (!tag || (gradient ? !svg_is_gradient(&source, current.element) : strcmp(tag, "pattern") != 0)) break;
         bool cycle = false;
         for (size_t i = 0; i < chain->size(); i++) if ((*chain)[i].element == current.element) { cycle = true; break; }
         if (cycle || !chain->append(current)) break;
-        const char* href = get_svg_attr(current.element, "href");
-        if (!href) href = get_svg_attr(current.element, "xlink:href");
-        SvgInlineRenderContext source = svg_reference_render_context(ctx, &current);
+        const char* href = get_svg_href(&source, current.element);
         current = svg_resolve_reference(&source, href);
     }
 }
 
-static const char* svg_template_attribute(const lam::ArrayList<SvgResourceReference>* chain,
+static const char* svg_template_attribute(SvgInlineRenderContext* ctx, const lam::ArrayList<SvgResourceReference>* chain,
     const char* name, const char* fallback, bool same_kind = false) {
-    const char* first_tag = chain->size() ? get_element_tag_name((*chain)[0].element) : nullptr;
+    SvgInlineRenderContext first = chain->size() ? svg_reference_render_context(ctx, &(*chain)[0]) : *ctx;
+    const char* first_tag = chain->size() ? get_element_tag_name(&first, (*chain)[0].element) : nullptr;
     for (size_t i = 0; i < chain->size(); i++) {
         Element* elem = (*chain)[i].element;
-        if (same_kind && strcmp(get_element_tag_name(elem), first_tag) != 0) continue;
+        SvgInlineRenderContext source = svg_reference_render_context(ctx, &(*chain)[i]);
+        const char* tag = get_element_tag_name(&source, elem);
+        if (same_kind && (!tag || !first_tag || strcmp(tag, first_tag) != 0)) continue;
         const char* value = get_svg_attr(elem, name);
         if (value) return value;
     }
     return fallback;
 }
 
-static float svg_gradient_length(const lam::ArrayList<SvgResourceReference>* chain,
+static float svg_gradient_length(SvgInlineRenderContext* ctx, const lam::ArrayList<SvgResourceReference>* chain,
     const char* name, const char* fallback, const SvgLengthContext* lengths,
     SvgLengthAxis axis) {
-    return svg_resolve_length(svg_template_attribute(chain, name, fallback, true), lengths, axis, 0.0f);
+    return svg_resolve_length(svg_template_attribute(ctx, chain, name, fallback, true), lengths, axis, 0.0f);
 }
 
 static bool svg_resolve_gradient(SvgInlineRenderContext* ctx, Element* element,
                                  float bx, float by, float bw, float bh, SvgGradDef* def) {
-    if (!svg_is_gradient(element)) return false;
+    if (!svg_is_gradient(ctx, element)) return false;
     *def = {};
     lam::ArrayList<SvgResourceReference> chain(MEM_CAT_RENDER, 0);
     svg_template_chain(ctx, element, &chain, true);
-    def->is_radial = strcmp(get_element_tag_name(element), "radialGradient") == 0;
-    def->user_space = strcmp(svg_template_attribute(&chain, "gradientUnits", "objectBoundingBox"), "userSpaceOnUse") == 0;
+    def->is_radial = strcmp(get_element_tag_name(ctx, element), "radialGradient") == 0;
+    def->user_space = strcmp(svg_template_attribute(ctx, &chain, "gradientUnits", "objectBoundingBox"), "userSpaceOnUse") == 0;
     SvgInlineRenderContext resource_style = svg_resource_style_context(ctx, element);
     SvgLengthContext lengths = svg_length_context(&resource_style);
     if (!def->user_space) { lengths.viewport_width = lengths.viewport_height = 1.0f; }
-    def->x1 = svg_gradient_length(&chain, "x1", "0%", &lengths, SVG_LENGTH_X);
-    def->y1 = svg_gradient_length(&chain, "y1", "0%", &lengths, SVG_LENGTH_Y);
-    def->x2 = svg_gradient_length(&chain, "x2", "100%", &lengths, SVG_LENGTH_X);
-    def->y2 = svg_gradient_length(&chain, "y2", "0%", &lengths, SVG_LENGTH_Y);
-    def->cx = svg_gradient_length(&chain, "cx", "50%", &lengths, SVG_LENGTH_X);
-    def->cy = svg_gradient_length(&chain, "cy", "50%", &lengths, SVG_LENGTH_Y);
-    def->r = svg_gradient_length(&chain, "r", "50%", &lengths, SVG_LENGTH_DIAGONAL);
-    const char* fx = svg_template_attribute(&chain, "fx", nullptr, true);
-    const char* fy = svg_template_attribute(&chain, "fy", nullptr, true);
+    def->x1 = svg_gradient_length(ctx, &chain, "x1", "0%", &lengths, SVG_LENGTH_X);
+    def->y1 = svg_gradient_length(ctx, &chain, "y1", "0%", &lengths, SVG_LENGTH_Y);
+    def->x2 = svg_gradient_length(ctx, &chain, "x2", "100%", &lengths, SVG_LENGTH_X);
+    def->y2 = svg_gradient_length(ctx, &chain, "y2", "0%", &lengths, SVG_LENGTH_Y);
+    def->cx = svg_gradient_length(ctx, &chain, "cx", "50%", &lengths, SVG_LENGTH_X);
+    def->cy = svg_gradient_length(ctx, &chain, "cy", "50%", &lengths, SVG_LENGTH_Y);
+    def->r = svg_gradient_length(ctx, &chain, "r", "50%", &lengths, SVG_LENGTH_DIAGONAL);
+    const char* fx = svg_template_attribute(ctx, &chain, "fx", nullptr, true);
+    const char* fy = svg_template_attribute(ctx, &chain, "fy", nullptr, true);
     def->options.has_focal = def->is_radial;
     def->options.fx = fx ? svg_resolve_length(fx, &lengths, SVG_LENGTH_X, def->cx) : def->cx;
     def->options.fy = fy ? svg_resolve_length(fy, &lengths, SVG_LENGTH_Y, def->cy) : def->cy;
-    def->options.fr = svg_gradient_length(&chain, "fr", "0%", &lengths, SVG_LENGTH_DIAGONAL);
-    const char* spread = svg_template_attribute(&chain, "spreadMethod", "pad");
+    def->options.fr = svg_gradient_length(ctx, &chain, "fr", "0%", &lengths, SVG_LENGTH_DIAGONAL);
+    const char* spread = svg_template_attribute(ctx, &chain, "spreadMethod", "pad");
     def->options.spread = strcmp(spread, "repeat") == 0 ? RDT_GRADIENT_REPEAT
         : strcmp(spread, "reflect") == 0 ? RDT_GRADIENT_REFLECT : RDT_GRADIENT_PAD;
     RdtMatrix authored = rdt_matrix_identity();
@@ -2118,9 +2151,10 @@ static bool svg_resolve_gradient(SvgInlineRenderContext* ctx, Element* element,
     SvgInlineRenderContext content_context = *ctx;
     int count = 0;
     for (size_t i = 0; i < chain.size() && !content; i++) {
+        SvgInlineRenderContext source = svg_reference_render_context(ctx, &chain[i]);
         for (int64_t j = 0; j < chain[i].element->length; j++) {
             Element* child = get_child_element_at(chain[i].element, j);
-            const char* tag = child ? get_element_tag_name(child) : nullptr;
+            const char* tag = child ? get_element_tag_name(&source, child) : nullptr;
             if (tag && strcmp(tag, "stop") == 0) { content = chain[i].element; content_context = svg_reference_render_context(ctx, &chain[i]); count++; }
         }
     }
@@ -2132,7 +2166,7 @@ static bool svg_resolve_gradient(SvgInlineRenderContext* ctx, Element* element,
     float previous_offset = 0.0f;
     for (int64_t j = 0; j < content->length; j++) {
         Element* child = get_child_element_at(content, j);
-        const char* tag = child ? get_element_tag_name(child) : nullptr;
+        const char* tag = child ? get_element_tag_name(&content_context, child) : nullptr;
         if (!tag || strcmp(tag, "stop") != 0) continue;
         RdtGradientStop* stop = &def->stops[def->stop_count++];
         stop->offset = fmaxf(previous_offset, clamp_unit(parse_svg_pct_or_num(get_svg_attr(child, "offset"), 0.0f)));
@@ -2235,10 +2269,11 @@ static RdtMatrix compose_element_transform(SvgInlineRenderContext* ctx, Element*
     if (reference && (strcmp(reference, "fill-box") == 0 || strcmp(reference, "stroke-box") == 0)) {
         SvgStyleContext* style = (SvgStyleContext*)ctx->style_context;
         SvgStyleEntry* entry = svg_style_entry(style, elem);
-        RdtPath* path = strcmp(get_element_tag_name(elem), "path") == 0
+        const char* tag = get_element_tag_name(ctx, elem);
+        RdtPath* path = tag && strcmp(tag, "path") == 0
             ? svg_parse_path_d(get_svg_attr(elem, "d")) : rdt_path_new();
         if (path) {
-            if (strcmp(get_element_tag_name(elem), "path") != 0) svg_append_basic_shape_path(elem, path, &lengths);
+            if (tag && strcmp(tag, "path") != 0) svg_append_basic_shape_path(svg_style_node((SvgStyleContext*)ctx->style_context, elem), path, &lengths);
             rdt_path_get_bounds(path, &box.left, &box.top, &box.right, &box.bottom);
             rdt_path_free(path);
         }
@@ -2593,7 +2628,7 @@ static bool draw_pattern_fill(SvgInlineRenderContext* ctx, RdtPath* path, Elemen
                               const RdtMatrix* transform, RdtFillRule rule, float opacity,
                               const RdtGradientOptions* stroke = nullptr,
                               const RdtMatrix* resource_frame = nullptr) {
-    const char* tag = pattern_elem ? get_element_tag_name(pattern_elem) : nullptr;
+    const char* tag = pattern_elem ? get_element_tag_name(ctx, pattern_elem) : nullptr;
     if (!ctx || !path || !tag || strcmp(tag, "pattern") != 0) return false;
     const SvgPaintResourceScope* parent = (SvgPaintResourceScope*)ctx->paint_resource_scope;
     int depth = 0;
@@ -2606,16 +2641,17 @@ static bool draw_pattern_fill(SvgInlineRenderContext* ctx, RdtPath* path, Elemen
     Element* content = nullptr;
     SvgInlineRenderContext content_context = *ctx;
     for (size_t i = 0; i < chain.size() && !content; i++) {
+        SvgInlineRenderContext source = svg_reference_render_context(ctx, &chain[i]);
         for (int64_t j = 0; j < chain[i].element->length; j++) {
             Element* child = get_child_element_at(chain[i].element, j);
-            const char* name = child ? get_element_tag_name(child) : nullptr;
+            const char* name = child ? get_element_tag_name(&source, child) : nullptr;
             if (name && strcmp(name, "title") != 0 && strcmp(name, "desc") != 0 && strcmp(name, "metadata") != 0)
                 { content = chain[i].element; content_context = svg_reference_render_context(ctx, &chain[i]); break; }
         }
     }
     if (!content) return false;
-    bool user_space = strcmp(svg_template_attribute(&chain, "patternUnits", "objectBoundingBox"), "userSpaceOnUse") == 0;
-    bool content_bbox = strcmp(svg_template_attribute(&chain, "patternContentUnits", "userSpaceOnUse"), "objectBoundingBox") == 0;
+    bool user_space = strcmp(svg_template_attribute(ctx, &chain, "patternUnits", "objectBoundingBox"), "userSpaceOnUse") == 0;
+    bool content_bbox = strcmp(svg_template_attribute(ctx, &chain, "patternContentUnits", "userSpaceOnUse"), "objectBoundingBox") == 0;
     if ((!user_space || content_bbox) && (bw <= 0.0f || bh <= 0.0f)) return true;
     SvgInlineRenderContext resource = svg_resource_style_context(ctx, pattern_elem);
     // template children retain their own selector/document context and inherit the host's paint state.
@@ -2624,10 +2660,10 @@ static bool draw_pattern_fill(SvgInlineRenderContext* ctx, RdtPath* path, Elemen
     resource.paint_resource_scope = lam::up(&scope);
     SvgLengthContext lengths = svg_length_context(&resource);
     if (!user_space) lengths.viewport_width = lengths.viewport_height = 1.0f;
-    float x = svg_resolve_length(svg_template_attribute(&chain, "x", "0"), &lengths, SVG_LENGTH_X, 0.0f);
-    float y = svg_resolve_length(svg_template_attribute(&chain, "y", "0"), &lengths, SVG_LENGTH_Y, 0.0f);
-    float width = svg_resolve_length(svg_template_attribute(&chain, "width", "0"), &lengths, SVG_LENGTH_X, 0.0f);
-    float height = svg_resolve_length(svg_template_attribute(&chain, "height", "0"), &lengths, SVG_LENGTH_Y, 0.0f);
+    float x = svg_resolve_length(svg_template_attribute(ctx, &chain, "x", "0"), &lengths, SVG_LENGTH_X, 0.0f);
+    float y = svg_resolve_length(svg_template_attribute(ctx, &chain, "y", "0"), &lengths, SVG_LENGTH_Y, 0.0f);
+    float width = svg_resolve_length(svg_template_attribute(ctx, &chain, "width", "0"), &lengths, SVG_LENGTH_X, 0.0f);
+    float height = svg_resolve_length(svg_template_attribute(ctx, &chain, "height", "0"), &lengths, SVG_LENGTH_Y, 0.0f);
     if (width <= 0.0f || height <= 0.0f) return true;
     RdtMatrix authored = rdt_matrix_identity();
     for (size_t i = 0; i < chain.size(); i++) {
@@ -2653,12 +2689,12 @@ static bool draw_pattern_fill(SvgInlineRenderContext* ctx, RdtPath* path, Elemen
     ImageSurface* tile = svg_create_paint_surface(fmaxf(1.0f, hypotf(tiles.e11, tiles.e21)),
         fmaxf(1.0f, hypotf(tiles.e12, tiles.e22)));
     if (!tile) return true;
-    SvgViewBox viewbox = svg_parse_viewbox(svg_template_attribute(&chain, "viewBox", nullptr));
+    SvgViewBox viewbox = svg_parse_viewbox(svg_template_attribute(ctx, &chain, "viewBox", nullptr));
     RdtMatrix content_matrix = rdt_matrix_identity();
     if (viewbox.has_viewbox) {
         if (viewbox.width <= 0.0f || viewbox.height <= 0.0f) { image_surface_destroy(tile); return true; }
         content_matrix = svg_viewbox_transform(&viewbox, width, height,
-            svg_template_attribute(&chain, "preserveAspectRatio", nullptr));
+            svg_template_attribute(ctx, &chain, "preserveAspectRatio", nullptr));
         resource.current_viewport_w = viewbox.width; resource.current_viewport_h = viewbox.height;
     } else {
         content_matrix.e11 = content_bbox ? (user_space ? bw : 1.0f) : user_space ? 1.0f : 1.0f / bw;
@@ -2950,11 +2986,12 @@ static void svg_path_add_ellipse(RdtPath* path, float cx, float cy,
 
 
 // Appends the simple SVG primitives shared by normal painting, masks, and clips.
-bool svg_append_basic_shape_path(Element* elem, RdtPath* path,
+bool svg_append_basic_shape_path(DomElement* node, RdtPath* path,
     const SvgLengthContext* lengths, SvgBasicShapeGeometry* geometry) {
-    if (!elem || !path) return false;
-    const char* tag = get_element_tag_name(elem);
-    if (!tag) return false;
+    if (!node || !path || !dom_element_is_svg(node)) return false;
+    Element* elem = dom_element_render_source(node);
+    if (!elem) elem = dom_element_to_element(node);
+    const char* tag = node->local_name();
     SvgBasicShapeGeometry result = {};
 
     if (strcmp(tag, "rect") == 0) {
@@ -3022,7 +3059,7 @@ static void render_svg_basic_shape(SvgInlineRenderContext* ctx, Element* elem) {
     RdtPath* path = rdt_path_new();
     SvgBasicShapeGeometry geometry = {};
     SvgLengthContext lengths = svg_length_context(ctx, elem);
-    if (!path || !svg_append_basic_shape_path(elem, path, &lengths, &geometry)) {
+    if (!path || !svg_append_basic_shape_path(svg_style_node((SvgStyleContext*)ctx->style_context, elem), path, &lengths, &geometry)) {
         if (path) rdt_path_free(path);
         return;
     }
@@ -3624,7 +3661,7 @@ static float svg_marker_reference(Element* marker, const char* name,
 static void render_svg_markers(SvgInlineRenderContext* ctx, Element* elem, RdtPath* path,
     const SvgPathTopology* authored, const RdtMatrix* transform,
     const SvgContextPaint* producer, const RdtGradientOptions* stroke) {
-    const char* tag = get_element_tag_name(elem);
+    const char* tag = get_element_tag_name(ctx, elem);
     if (!tag || (strcmp(tag, "text") == 0 || strcmp(tag, "tspan") == 0)) return;
     SvgInheritedProperty properties[3];
     bool present = false;
@@ -3654,7 +3691,8 @@ static void render_svg_markers(SvgInlineRenderContext* ctx, Element* elem, RdtPa
             if (reference_paint.kind != SVG_PAINT_RESOURCE) continue;
             SvgResourceReference reference = svg_resolve_reference(&declaration, reference_paint.reference);
             Element* marker = reference.element;
-            const char* marker_tag = marker ? get_element_tag_name(marker) : nullptr;
+            SvgInlineRenderContext document = svg_reference_render_context(&declaration, &reference);
+            const char* marker_tag = marker ? get_element_tag_name(&document, marker) : nullptr;
             if (!marker_tag || strcmp(marker_tag, "marker") != 0) continue;
             const SvgPaintResourceScope* parent = (const SvgPaintResourceScope*)ctx->paint_resource_scope;
             bool recursive = false; size_t depth = 0;
@@ -3662,7 +3700,6 @@ static void render_svg_markers(SvgInlineRenderContext* ctx, Element* elem, RdtPa
                 if (scope->element == marker || ++depth >= SVG_USE_DEPTH_MAX) { recursive = true; break; }
             }
             if (recursive) continue;
-            SvgInlineRenderContext document = svg_reference_render_context(&declaration, &reference);
             SvgInlineRenderContext instance = svg_resource_style_context(&document, marker);
             SvgLengthContext lengths = svg_length_context(&instance);
             float width = get_svg_number_attr(marker, "markerWidth", 3.0f, &lengths, SVG_LENGTH_X);
@@ -4764,7 +4801,7 @@ static void svg_text_collect(SvgTextLayout* layout, Element* elem, int style) {
         }
         if (type != LMD_TYPE_ELEMENT || !child.element) continue;
         Element* child_elem = child.element;
-        const char* tag = get_element_tag_name(child_elem);
+        const char* tag = get_element_tag_name(ctx, child_elem);
         if (!tag || (strcmp(tag, "tspan") != 0 && strcmp(tag, "a") != 0 && strcmp(tag, "textPath") != 0)) continue;
         if (!svg_element_is_eligible(ctx, child_elem)) continue;
         char display_buf[64];
@@ -5010,8 +5047,7 @@ static void svg_text_resolve_paths(SvgTextLayout* layout) {
         SvgTextPathData* data = &layout->paths[index];
         Element* elem = style->element;
         const char* inline_path = get_svg_attr(elem, "path");
-        const char* href = get_svg_attr(elem, "href");
-        if (!href) href = get_svg_attr(elem, "xlink:href");
+        const char* href = get_svg_href(ctx, elem);
         SvgResourceReference reference = !inline_path && href ? svg_resolve_reference(ctx, href) : SvgResourceReference{};
         RdtPath* path = inline_path ? svg_parse_path_d(inline_path) : nullptr;
         RdtMatrix mapping = rdt_matrix_identity();
@@ -5022,9 +5058,9 @@ static void svg_text_resolve_paths(SvgTextLayout* layout) {
             geometry.transform = rdt_matrix_identity();
             geometry.current_viewport_w = ctx->current_viewport_w; geometry.current_viewport_h = ctx->current_viewport_h;
             SvgLengthContext lengths = svg_length_context(&geometry, reference.element);
-            const char* tag = get_element_tag_name(reference.element);
+            const char* tag = get_element_tag_name(&geometry, reference.element);
             path = tag && strcmp(tag, "path") == 0 ? svg_parse_path_d(get_svg_attr(reference.element, "d")) : rdt_path_new();
-            if (path && (!tag || (strcmp(tag, "path") != 0 && !svg_append_basic_shape_path(reference.element, path, &lengths)))) {
+            if (path && (!tag || (strcmp(tag, "path") != 0 && !svg_append_basic_shape_path(svg_style_node((SvgStyleContext*)geometry.style_context, reference.element), path, &lengths)))) {
                 rdt_path_free(path); path = nullptr;
             }
             // SVG2 section 11.8.2 uses the referenced element's own transform, excluding its ancestors.
@@ -6125,8 +6161,7 @@ static void render_svg_image_resource(SvgInlineRenderContext* ctx, Element* elem
 }
 
 static void render_svg_image(SvgInlineRenderContext* ctx, Element* elem) {
-    const char* href = get_svg_attr(elem, "href");
-    if (!href) href = get_svg_attr(elem, "xlink:href");
+    const char* href = get_svg_href(ctx, elem);
     SvgLengthContext lengths = svg_length_context(ctx, elem);
     float x = svg_resolve_length(get_svg_attr(elem, "x"), &lengths, SVG_LENGTH_X, 0.0f);
     float y = svg_resolve_length(get_svg_attr(elem, "y"), &lengths, SVG_LENGTH_Y, 0.0f);
@@ -6247,7 +6282,7 @@ static void process_svg_def_resources(SvgInlineRenderContext* ctx, Element* elem
     for (int64_t i = 0; i < elem->length; i++) {
         Element* child = get_child_element_at(elem, i);
         if (!child) continue;
-        const char* child_tag = get_element_tag_name(child);
+        const char* child_tag = get_element_tag_name(ctx, child);
         if (!child_tag) continue;
         if (strcmp(child_tag, "defs") == 0) {
             process_svg_defs(ctx, child);
@@ -6339,7 +6374,7 @@ static void render_svg_use_target(SvgInlineRenderContext* ctx, Element* use_elem
             context.geometry_box.top += uy; context.geometry_box.bottom += uy;
         }
     }
-    const char* ref_tag = get_element_tag_name(ref);
+    const char* ref_tag = get_element_tag_name(&instance, ref);
     if (ref_tag && strcmp(ref_tag, "symbol") == 0) {
         float sym_w = image_viewport ? image_viewport->right - image_viewport->left : get_svg_number_attr(use_elem, "width", lengths.viewport_width, &lengths, SVG_LENGTH_X);
         float sym_h = image_viewport ? image_viewport->bottom - image_viewport->top : get_svg_number_attr(use_elem, "height", lengths.viewport_height, &lengths, SVG_LENGTH_Y);
@@ -6527,7 +6562,7 @@ static void render_svg_foreign_object(SvgInlineRenderContext* ctx, Element* elem
 static void render_svg_element_content(SvgInlineRenderContext* ctx, Element* elem) {
     if (!elem) return;
 
-    const char* tag = get_element_tag_name(elem);
+    const char* tag = get_element_tag_name(ctx, elem);
     if (!tag) return;
 
     char display_buf[64];
@@ -6561,8 +6596,7 @@ static void render_svg_element_content(SvgInlineRenderContext* ctx, Element* ele
         // inline inside transformed groups immediately before their users.
         register_svg_def_element(ctx, elem);
     } else if (strcmp(tag, "use") == 0) {
-        const char* href = get_svg_attr(elem, "href");
-        if (!href) href = get_svg_attr(elem, "xlink:href");
+        const char* href = get_svg_href(ctx, elem);
         bool resolved = false;
         if (href && href[0] == '#') {
             // SVG 2 §5.6: the fragment names any element of the document, as
@@ -6604,9 +6638,9 @@ static void svg_draw_element_content(SvgInlineRenderContext* ctx, Element* elem,
 
 static bool svg_effect_geometry_box(SvgInlineRenderContext* ctx, Element* elem, Bound* box) {
     SvgLengthContext lengths = svg_length_context(ctx, elem);
-    const char* tag = get_element_tag_name(elem);
+    const char* tag = get_element_tag_name(ctx, elem);
     RdtPath* path = tag && strcmp(tag, "path") == 0 ? svg_parse_path_d(get_svg_attr(elem, "d")) : rdt_path_new();
-    bool valid = path && tag && (strcmp(tag, "path") == 0 || svg_append_basic_shape_path(elem, path, &lengths));
+    bool valid = path && tag && (strcmp(tag, "path") == 0 || svg_append_basic_shape_path(svg_style_node((SvgStyleContext*)ctx->style_context, elem), path, &lengths));
     if (valid) valid = rdt_path_get_bounds(path, &box->left, &box->top, &box->right, &box->bottom);
     if (path) rdt_path_free(path);
     if (valid) return true;
@@ -6626,8 +6660,9 @@ static SvgResourceReference svg_effect_reference(SvgInlineRenderContext* ctx, El
     return reference;
 }
 
-static bool svg_effect_resource_is(const SvgResourceReference* resource, const char* tag) {
-    const char* actual = resource->element ? get_element_tag_name(resource->element) : nullptr;
+static bool svg_effect_resource_is(SvgInlineRenderContext* ctx, const SvgResourceReference* resource, const char* tag) {
+    SvgInlineRenderContext document = svg_reference_render_context(ctx, resource);
+    const char* actual = resource->element ? get_element_tag_name(&document, resource->element) : nullptr;
     return actual && strcmp(actual, tag) == 0;
 }
 
@@ -6638,17 +6673,17 @@ static bool svg_is_clip_shape_tag(const char* tag) {
 }
 
 static bool svg_effect_clip_is_valid(SvgInlineRenderContext* ctx, const SvgResourceReference* resource) {
-    if (!svg_effect_resource_is(resource, "clipPath")) return false;
+    if (!svg_effect_resource_is(ctx, resource, "clipPath")) return false;
     SvgInlineRenderContext document = svg_reference_render_context(ctx, resource);
     for (int64_t index = 0; index < resource->element->length; index++) {
         Element* child = get_child_element_at(resource->element, index);
-        const char* tag = child ? get_element_tag_name(child) : nullptr;
+        const char* tag = child ? get_element_tag_name(&document, child) : nullptr;
         if (!tag || strcmp(tag, "use") != 0) continue;
-        const char* href = get_svg_attr(child, "href");
-        if (!href) href = get_svg_attr(child, "xlink:href");
+        const char* href = get_svg_href(&document, child);
         SvgResourceReference target = href ? svg_resolve_reference(&document, href) : SvgResourceReference{};
         // CSS Masking 1 section 6.1 permits only direct shape/text references in a clipPath.
-        if (!svg_is_clip_shape_tag(target.element ? get_element_tag_name(target.element) : nullptr)) return false;
+        SvgInlineRenderContext target_document = svg_reference_render_context(&document, &target);
+        if (!svg_is_clip_shape_tag(target.element ? get_element_tag_name(&target_document, target.element) : nullptr)) return false;
     }
     return true;
 }
@@ -6659,7 +6694,7 @@ static void svg_draw_clip_children(SvgInlineRenderContext* ctx, Element* elem, v
     ctx->transform = compose_element_transform(ctx, elem);
     for (int64_t index = 0; index < elem->length; index++) {
         Element* child = get_child_element_at(elem, index);
-        const char* tag = child ? get_element_tag_name(child) : nullptr;
+        const char* tag = child ? get_element_tag_name(ctx, child) : nullptr;
         if (svg_is_clip_shape_tag(tag) || (tag && strcmp(tag, "use") == 0))
             render_svg_element(ctx, child);
     }
@@ -6822,7 +6857,7 @@ static RdtSvgFilterProgram* svg_filter_compile(SvgInlineRenderContext* ctx, cons
     if (!program->valid) return program;
     for (int64_t index = 0; index < reference->element->length; index++) {
         Element* child = get_child_element_at(reference->element, index);
-        const char* tag = child ? get_element_tag_name(child) : nullptr;
+        const char* tag = child ? get_element_tag_name(&style, child) : nullptr;
         if (tag && strncmp(tag, "fe", 2) == 0) program->count++;
     }
     if (!program->count || program->count > RDT_SVG_FILTER_MAX_NODES) { program->valid = false; return program; }
@@ -6831,7 +6866,7 @@ static RdtSvgFilterProgram* svg_filter_compile(SvgInlineRenderContext* ctx, cons
     size_t next = 0;
     for (int64_t index = 0; index < reference->element->length; index++) {
         Element* child = get_child_element_at(reference->element, index);
-        const char* tag = child ? get_element_tag_name(child) : nullptr;
+        const char* tag = child ? get_element_tag_name(&style, child) : nullptr;
         if (!tag || strncmp(tag, "fe", 2) != 0) continue;
         RdtSvgFilterNode* node = &program->nodes[next];
         node->element = lam::up(child);
@@ -6867,7 +6902,7 @@ static RdtSvgFilterProgram* svg_filter_compile(SvgInlineRenderContext* ctx, cons
         } else if (node->kind == RDT_SVG_FILTER_MERGE) {
             for (int64_t child_index = 0; child_index < child->length; child_index++) {
                 Element* merge = get_child_element_at(child, child_index);
-                const char* name = merge ? get_element_tag_name(merge) : nullptr;
+                const char* name = merge ? get_element_tag_name(&style, merge) : nullptr;
                 if (name && strcmp(name, "feMergeNode") == 0) node->merge_count++;
             }
             if (node->merge_count > SIZE_MAX / sizeof(int)) { program->valid = false; break; }
@@ -6876,7 +6911,7 @@ static RdtSvgFilterProgram* svg_filter_compile(SvgInlineRenderContext* ctx, cons
             size_t merge_index = 0;
             for (int64_t child_index = 0; child_index < child->length; child_index++) {
                 Element* merge = get_child_element_at(child, child_index);
-                const char* name = merge ? get_element_tag_name(merge) : nullptr;
+                const char* name = merge ? get_element_tag_name(&style, merge) : nullptr;
                 if (name && strcmp(name, "feMergeNode") == 0) node->merge_inputs[merge_index++] = render_svg_filter_input(program, next, get_svg_attr(merge, "in"));
             }
         } else if (node->kind == RDT_SVG_FILTER_MATRIX) {
@@ -6967,7 +7002,7 @@ static RdtSvgFilterProgram* svg_filter_compile(SvgInlineRenderContext* ctx, cons
             node->color.a = 255; // lighting-color supplies RGB; lighting equations determine output alpha.
             for (int64_t light_index = 0; light_index < child->length; light_index++) {
                 Element* source = get_child_element_at(child, light_index);
-                const char* source_tag = source ? get_element_tag_name(source) : nullptr;
+                const char* source_tag = source ? get_element_tag_name(&style, source) : nullptr;
                 if (!source_tag) continue;
                 if (strcmp(source_tag, "feDistantLight") == 0) {
                     light->kind = 1;
@@ -7016,7 +7051,7 @@ RdtSvgFilterProgram* render_css_svg_filter_compile(DomDocument* document, const 
     lam::Temp<char> base(radiant_document_resource_base(document, MEM_CAT_RENDER));
     context.source_path = lam::up(base.get());
     SvgResourceReference reference = svg_resolve_reference(&context, url);
-    if (!reference.element || !svg_effect_resource_is(&reference, "filter")) return nullptr;
+    if (!reference.element || !svg_effect_resource_is(&context, &reference, "filter")) return nullptr;
     return svg_filter_compile(&context, &reference);
 }
 
@@ -7040,8 +7075,7 @@ static void svg_filter_resolve_lengths(RdtSvgFilterHost* host, Element* element,
 
 static void svg_filter_draw_image(SvgInlineRenderContext* ctx, Element* element, void* data) {
     SvgFilterImageContext* image = (SvgFilterImageContext*)data;
-    const char* href = get_svg_attr(element, "href");
-    if (!href) href = get_svg_attr(element, "xlink:href");
+    const char* href = get_svg_href(ctx, element);
     if (!href || !*href) return;
     if (strchr(href, '#') && strncmp(href, "data:", 5) != 0) {
         SvgResourceReference reference = svg_resolve_reference(ctx, href);
@@ -7165,7 +7199,7 @@ static bool svg_render_effect_boundary(SvgInlineRenderContext* ctx, Element* ele
     Bound geometry = {}; svg_effect_geometry_box(ctx, elem, &geometry);
     RdtMatrix frame = frame_ready ? ctx->transform : compose_element_transform(ctx, elem);
     SvgResourceReference filter_reference = ctx->clip_geometry ? SvgResourceReference{} : svg_effect_reference(ctx, elem, "filter");
-    bool filtered = svg_effect_resource_is(&filter_reference, "filter");
+    bool filtered = svg_effect_resource_is(ctx, &filter_reference, "filter");
     if (!has_clip && !has_mask && !filtered && !isolated && alpha >= 1.0f) return false;
     if (alpha <= 0.0f) return true;
     RdtSvgFilterProgram* program = filtered ? svg_filter_compile(ctx, &filter_reference) : nullptr;
@@ -7220,7 +7254,7 @@ static bool svg_render_effect_boundary(SvgInlineRenderContext* ctx, Element* ele
         const SvgResourceReference* resource = operation == 0 ? &clip : &mask;
         ImageSurface* coverage = nullptr;
         bool luminance = false, linear = false;
-        bool valid = operation == 0 || svg_effect_resource_is(resource, "mask");
+        bool valid = operation == 0 || svg_effect_resource_is(ctx, resource, "mask");
         valid = valid && render_svg_filter_spend_work(coverage_context.filter_work, count) &&
             svg_effect_coverage(&coverage_context, resource, &geometry, &frame, &capture,
             operation == 1, &coverage, &luminance, &linear);
@@ -7283,7 +7317,7 @@ static void render_svg_element(SvgInlineRenderContext* ctx, Element* elem) {
     const char* visibility = svg_style_property_value(ctx, elem, "visibility");
     if (visibility) ctx->visibility_hidden = strcmp(visibility, "hidden") == 0 ||
         strcmp(visibility, "collapse") == 0;
-    const char* tag = get_element_tag_name(elem);
+    const char* tag = get_element_tag_name(ctx, elem);
     bool container = tag && (strcmp(tag, "g") == 0 || strcmp(tag, "svg") == 0 ||
         strcmp(tag, "a") == 0 || strcmp(tag, "use") == 0 || strcmp(tag, "text") == 0 ||
         strcmp(tag, "switch") == 0 || strcmp(tag, "foreignObject") == 0);

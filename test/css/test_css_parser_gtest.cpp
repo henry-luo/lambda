@@ -679,8 +679,11 @@ TEST_F(CssEngineParserTest, ScrollBehaviorAcceptsOnlyAutoAndSmooth) {
     }
 }
 
-TEST_F(CssEngineParserTest, LogicalBorderPartsValidateOneOrTwoSides) {
+TEST_F(CssEngineParserTest, BorderPartsValidateTheirSideCountsAndComponentDomains) {
     const char* valid[] = {
+        "border-width: 2px", "border-width: 0 thin medium thick",
+        "border-width: calc(1pt + 2pt) 4px", "border-width: inherit",
+        "border-width: var(--edge)", "border-width: 1em 2px 3pt 4cm",
         "border-inline-width: 2px 4px",
         "border-inline-style: solid dashed",
         "border-inline-color: red rgb(0, 0, 255)",
@@ -697,6 +700,10 @@ TEST_F(CssEngineParserTest, LogicalBorderPartsValidateOneOrTwoSides) {
             << text;
     }
     const char* invalid[] = {
+        "border-width: 4pt div 2", "border-width: 1px 2px 3px 4px 5px",
+        "border-width: 1px, 2px", "border-width: 1px inherit",
+        "border-width: solid", "border-width: red", "border-width: 2",
+        "border-width: -2px", "border-width: 20%", "border-width: calc(2s)",
         "border-inline-width: 2px 4px 6px",
         "border-inline-width: -2px",
         "border-inline-width: 20%",
@@ -2078,6 +2085,54 @@ TEST_F(CssEngineParserTest, SharedMathComputationKeepsCanonicalUnitsAndPercentag
         EXPECT_NEAR(result.value, entry.value, 0.000001) << entry.expression;
         EXPECT_NEAR(result.percentage, entry.percent, 0.000001) << entry.expression;
     }
+}
+
+TEST_F(CssEngineParserTest, SharedMathCancelsIntermediateDimensionPowersBeforePropertyAdmission) {
+    struct Case {const char* expression; CssMathType type; double value;};
+    const Case cases[] = {
+        {"calc(1in / 12pt)", CSS_MATH_NUMBER, 6},
+        {"calc(2pt * 3pt / 1pt)", CSS_MATH_LENGTH, 8},
+        {"calc((2px * 3px + 4px * 3px) / 2px)", CSS_MATH_LENGTH, 9},
+        {"calc((2 / 1px) * 3px)", CSS_MATH_NUMBER, 6},
+        {"calc((2px * 3px) / (1px * 2px))", CSS_MATH_NUMBER, 3},
+        {"calc(abs(-2px * 3px) / 1px)", CSS_MATH_LENGTH, 6},
+        {"calc(max(2px * 3px, 4px * 3px) / 1px)", CSS_MATH_LENGTH, 12},
+        {"calc(rem(7px * 3px, 2px * 3px) / 1px)", CSS_MATH_LENGTH, 3},
+        {"calc(round(up, 7px * 3px, 2px * 3px) / 1px)", CSS_MATH_LENGTH, 24},
+        {"calc(1s * 4px / 500ms)", CSS_MATH_LENGTH, 8},
+        {"calc(.5turn * 2s / 500ms)", CSS_MATH_ANGLE, 720},
+        {"calc(96dpi * 3px / 1dppx)", CSS_MATH_LENGTH, 3},
+        {"calc(atan2(2px * 3px, 2px * 3px))", CSS_MATH_ANGLE, 45},
+        {"calc(sign(-2px * 3px))", CSS_MATH_NUMBER, -1},
+    };
+    CssMathEvaluationContext context = {nullptr, nullptr, 1.0, true};
+    for (const Case& entry : cases) {
+        SCOPED_TRACE(entry.expression);
+        CssDeclaration* declaration = css_parse_property_declaration("--test", 6,
+            entry.expression, strlen(entry.expression), pool);
+        ASSERT_NE(declaration, nullptr);
+        EXPECT_EQ(css_math_value_type(declaration->value), entry.type);
+        CssMathResult result = css_math_evaluate(declaration->value, &context);
+        EXPECT_EQ(result.type, entry.type); ASSERT_TRUE(result.resolved);
+        EXPECT_NEAR(result.value, entry.value, 0.000001); EXPECT_DOUBLE_EQ(result.percentage, 0);
+    }
+    const Case invalid[] = {{"calc(1px * 2px)", CSS_MATH_INVALID, 0},
+        {"calc(1 / 2px)", CSS_MATH_INVALID, 0}, {"calc((1px * 2px + 1px) / 1px)", CSS_MATH_INVALID, 0},
+        {"calc(min(1px * 2px, 1s * 2s) / 1px)", CSS_MATH_INVALID, 0},
+        {"calc(rem(2px * 3px, 1px) / 1px)", CSS_MATH_INVALID, 0},
+        {"calc(2px * 3s / 1px)", CSS_MATH_TIME, 6}, {"calc(1px * 1px / 1s)", CSS_MATH_INVALID, 0},
+        {"calc((10% + 1px) * 2px / 1px)", CSS_MATH_INVALID, 0}};
+    for (const Case& entry : invalid) {
+        SCOPED_TRACE(entry.expression);
+        CssDeclaration* declaration = css_parse_property_declaration("--test", 6, entry.expression, strlen(entry.expression), pool);
+        ASSERT_NE(declaration, nullptr);
+        CssMathResult result = css_math_evaluate(declaration->value, &context);
+        EXPECT_EQ(result.type, entry.type);
+        // the final type, rather than the intermediate product, determines length-property admission.
+        EXPECT_EQ(css_parse_property_declaration("width", 5, entry.expression, strlen(entry.expression), pool), nullptr);
+    }
+    const char* length = "calc(2px * 3s / 1s)";
+    EXPECT_NE(css_parse_property_declaration("width", 5, length, strlen(length), pool), nullptr);
 }
 
 static bool css_test_math_leaf(void* data, const CssValue* value, double* result) {

@@ -9,6 +9,7 @@
 #include "../lib/font/font.h"
 #include "../lib/mem_factory.h"
 #include "../lib/mem_grow.hpp"
+#include "../lib/ref_count.h"
 #include "../lib/utf.h"
 #include "../lib/hashmap_helpers.h"
 #include "../lib/str.h"
@@ -19,9 +20,9 @@
 #include <string.h>
 
 enum PagedFlowKind : uint8_t {
-    PAGED_FLOW_BLOCK, PAGED_FLOW_PARAGRAPH, PAGED_FLOW_TABLE_ROW, PAGED_FLOW_TABLE_COLUMN, PAGED_FLOW_TABLE_WRAPPER
+    PAGED_FLOW_BLOCK, PAGED_FLOW_PARAGRAPH, PAGED_FLOW_TABLE_ROW, PAGED_FLOW_TABLE_COLUMN, PAGED_FLOW_TABLE_WRAPPER, PAGED_FLOW_NATIVE
 };
-enum PagedFlowStepKind : uint8_t { PAGED_STEP_BEFORE, PAGED_STEP_OPEN, PAGED_STEP_LINE, PAGED_STEP_TABLE_ROW, PAGED_STEP_CLOSE };
+enum PagedFlowStepKind : uint8_t { PAGED_STEP_BEFORE, PAGED_STEP_OPEN, PAGED_STEP_LINE, PAGED_STEP_TABLE_ROW, PAGED_STEP_NATIVE, PAGED_STEP_CLOSE };
 enum PagedTableGroup : uint8_t { PAGED_TABLE_BODY, PAGED_TABLE_HEADER, PAGED_TABLE_FOOTER };
 enum PagedRelaxation : uint32_t { PAGED_RELAX_MINIMA = 1, PAGED_RELAX_AVOIDANCE = 2 };
 enum PagedRegionKind : uint8_t { PAGED_REGION_NOTE, PAGED_REGION_TOP, PAGED_REGION_BOTTOM, PAGED_REGION_COUNT };
@@ -51,8 +52,10 @@ struct PagedTableContinuation {
     uint64_t identity;
     size_t* first;
 };
+struct PagedNativeFlow;
 struct PagedFlowNode {
     PagedFlowKind kind;
+    PagedNativeFlow* native;
     DomElement* source;
     ViewCssStyle* style;
     PagedFlowNode* first_child;
@@ -109,6 +112,7 @@ static TypesetStatus paged_flow_walk(PagedFlowNode* flow, size_t depth, size_t m
     if (flow->kind == PAGED_FLOW_TABLE_ROW)
         return status == TYPESET_OK ? visit(PAGED_STEP_TABLE_ROW, flow) : status;
     if (status == TYPESET_OK) status = visit(PAGED_STEP_OPEN, flow);
+    if (status == TYPESET_OK && flow->native) status = visit(PAGED_STEP_NATIVE, flow);
     for (PagedFlowNode* child = flow->first_child; status == TYPESET_OK && child; child = child->next)
         status = paged_flow_walk(child, depth + 1, max_depth, visit);
     return status == TYPESET_OK ? visit(PAGED_STEP_CLOSE, flow) : status;
@@ -211,13 +215,62 @@ struct PagedReferenceWidth {
 HASHMAP_DEFINE_PTRKEY(paged_reference_widths, PagedReferenceWidth, owner)
 struct PagedReferenceUndo { PagedReferenceWidth previous; bool present; uint64_t revision; };
 
+struct PagedNativeCursor {
+    TypesetResume resume;
+    PagedNativeFlow* producer;
+    size_t parent, index;
+    TypesetBreak return_boundary;
+    TypesetSource return_source;
+};
+static int paged_native_cursor_compare(const void* first, const void* second, void*) {
+    const auto& a = *(const PagedNativeCursor*)first; const auto& b = *(const PagedNativeCursor*)second;
+    int order = memcmp(&a.resume, &b.resume, sizeof(TypesetResume));
+    if (order) return order;
+    if (a.producer != b.producer) return (uintptr_t)a.producer < (uintptr_t)b.producer ? -1 : 1;
+    return a.parent == b.parent ? 0 : a.parent < b.parent ? -1 : 1;
+}
+static uint64_t paged_native_cursor_hash(const void* value, uint64_t seed0, uint64_t seed1) {
+    const auto& cursor = *(const PagedNativeCursor*)value;
+    uint64_t hash = hashmap_hash_bytes(&cursor.resume, sizeof(TypesetResume), seed0, seed1);
+    hash = hashmap_hash_bytes(&cursor.producer, sizeof(cursor.producer), hash, seed1);
+    return hashmap_hash_bytes(&cursor.parent, sizeof(cursor.parent), hash, seed1);
+}
+struct PagedNativeFlow {
+    PagedNativeFlowBinding binding;
+    PagedNativeFlow* next;
+    TypesetResume active;
+    PagedNativeCursor* cursors;
+    size_t count, capacity;
+    HashMap* index;
+    bool used;
+};
+struct PagedNativeRegion {
+    const TypesetRegionMaterial* source;
+    PagedNativeFlow* flow;
+    TypesetRegionMaterial material;
+    PagedRegionKind kind;
+};
+struct PagedNativeRegionEntry {
+    const TypesetRegionMaterial* source;
+    PagedNativeFlow* flow;
+    PagedNativeRegion* region;
+};
+HASHMAP_DEFINE_FIELD2_KEY(paged_native_regions, PagedNativeRegionEntry, source, flow)
+struct PagedNativeCheckpoint {
+    PagedNativeFlow* flow;
+    TypesetResume saved;
+    PagedNativeCheckpoint* next;
+};
+
 struct PagedComposition {
     Pool* pool;
     DomDocument* document;
     PagedFlowNode* root;
+    PagedNativeFlow* native_flows;
+    lam::Own<HashMap> native_regions;
     PagedLayoutOptions options;
     PagedLayoutDiagnostic diagnostic;
-    size_t nodes, items, generated_glyphs, block_trials, table_continuations;
+    size_t nodes, items, generated_glyphs, block_trials, table_continuations, page_transitions;
     // query caches survive trials in the composition pool; their glyph budget must not rewind.
     size_t query_glyphs;
     lam::Own<HashMap> mark_sources;
@@ -231,11 +284,36 @@ struct PagedComposition {
     bool reference_used;
     Pool* reference_pool;
     TypesetTargetStore targets;
+    TypesetTargetStore native_targets;
     lam::Own<HashMap> reference_widths;
     PagedReferenceUndo* reference_undo;
     size_t reference_count, reference_capacity;
     uint64_t reference_revision, reference_serial;
 };
+
+static TypesetStatus paged_native_checkpoint(PagedComposition* composition, Pool* pool,
+        PagedNativeCheckpoint** records) {
+    for (PagedNativeFlow* flow = composition->native_flows; flow; flow = flow->next) {
+        auto* record = (PagedNativeCheckpoint*)pool_calloc(pool, sizeof(PagedNativeCheckpoint));
+        if (!record) return TYPESET_OUT_OF_MEMORY;
+        TypesetStatus status = typeset_flow_checkpoint(&flow->binding.provider, &flow->active, &record->saved);
+        if (status != TYPESET_OK) return status;
+        record->flow = flow; record->next = *records; *records = record;
+    }
+    return TYPESET_OK;
+}
+
+static TypesetStatus paged_native_restore(PagedNativeCheckpoint* records) {
+    TypesetStatus status = TYPESET_OK;
+    for (auto* record = records; record; record = record->next) {
+        TypesetResume restored = {};
+        TypesetStatus result = typeset_flow_restore(&record->flow->binding.provider, &record->saved, &restored);
+        if (result == TYPESET_OK && memcmp(&restored, &record->saved, sizeof(restored))) result = TYPESET_STALE;
+        if (status == TYPESET_OK) status = result;
+        if (result == TYPESET_OK) record->flow->active = restored;
+    }
+    return status;
+}
 
 static void paged_reference_restore(PagedComposition* composition, size_t count) {
     while (composition->reference_count > count) {
@@ -322,7 +400,10 @@ struct PagedRegionTrial {
     TypesetRegionPlan plans[PAGED_REGION_COUNT];
     size_t anchor_counts[PAGED_REGION_COUNT];
 };
+struct PagedPageProvider;
+struct PagedVerticalMeasure { float natural, minimum; size_t end; };
 struct PagedComposer {
+    PagedPageProvider* provider;
     ViewTree* tree;
     PagedComposition* composition;
     PagedFrame* frames;
@@ -331,7 +412,7 @@ struct PagedComposer {
     ViewPageStyle page_style;
     RdtLogicalRect initial_containing_block;
     float y, bottom, page_start, pending_margin;
-    bool pending_break, page_has_content, closure_failure, body_aligned;
+    bool pending_break, page_has_content, closure_failure, body_aligned, policy_done, auxiliary_page;
     ViewFragmentRole role;
     ViewBreak requested_break;
     const char* page_name;
@@ -348,6 +429,12 @@ struct PagedComposer {
     bool space_start;
     float space_ratio, space_optimum_extra;
 };
+
+static float paged_body_height(const PagedComposer* composer) {
+    return composer->y - composer->page_style.content_rect.y - composer->regions[PAGED_REGION_TOP].plan.reserved_height;
+}
+
+static PagedVerticalMeasure paged_vertical_measure(PagedComposer* composer, float body, bool end);
 
 static bool paged_table_omits(const PagedFlowNode* table, bool footer) {
     return table->style->flow_traits && table->style->flow_traits->table_omit[footer];
@@ -378,6 +465,9 @@ struct PagedCheckpoint {
     TypesetMarkCheckpoint marks = {};
     PagedLayoutDiagnostic diagnostic = {};
     size_t generated_glyphs = 0, reference_count = 0;
+    PagedNativeCheckpoint* native = nullptr;
+    TypesetPolicyCheckpoint policy_checkpoint = {};
+    bool policy_saved = false;
 
     void dispose() {
         for (size_t i = 0; i < PAGED_REGION_COUNT; i++) {
@@ -386,7 +476,7 @@ struct PagedCheckpoint {
             queues[i] = {};
         }
         if (pool) mem_pool_destroy(pool);
-        pool = nullptr;
+        pool = nullptr; native = nullptr; policy_saved = false;
     }
 
     TypesetStatus begin(PagedComposer* target) {
@@ -409,6 +499,14 @@ struct PagedCheckpoint {
             if (status == TYPESET_OK) status = typeset_region_checkpoint(&target->composition->queues[i], pool, &queues[i]);
             if (status != TYPESET_OK) return status;
         }
+        TypesetStatus native_status = paged_native_checkpoint(target->composition, pool, &native);
+        if (native_status != TYPESET_OK) return native_status;
+        const TypesetPagePolicy* policy = target->composition->options.page_policy;
+        if (policy && policy->checkpoint) {
+            TypesetStatus status = typeset_policy_checkpoint(policy, &policy_checkpoint);
+            if (status != TYPESET_OK) return status;
+            policy_saved = true;
+        }
         marks = typeset_marks_checkpoint(&target->composition->marks);
         generated_glyphs = target->composition->generated_glyphs;
         reference_count = target->composition->reference_count;
@@ -419,7 +517,12 @@ struct PagedCheckpoint {
 
     TypesetStatus restore() {
         if (!view) return TYPESET_INVALID;
-        TypesetStatus status = TYPESET_OK;
+        TypesetStatus status = paged_native_restore(native);
+        const TypesetPagePolicy* policy = composer->composition->options.page_policy;
+        if (policy_saved) {
+            TypesetStatus result = typeset_policy_restore(policy, &policy_checkpoint);
+            if (status == TYPESET_OK) status = result;
+        }
         PagedFrame* current_frames = composer->frames;
         size_t frame_capacity = composer->frame_capacity;
         RadiantSpaceSpec* current_spaces = composer->spaces; size_t space_capacity = composer->space_capacity;
@@ -478,6 +581,9 @@ struct PagedCheckpoint {
 static TypesetStatus paged_regions_prepare(PagedComposer* composer);
 static TypesetStatus paged_regions_close(PagedComposer* composer);
 static TypesetStatus paged_regions_drain(PagedComposer* composer);
+static TypesetStatus paged_page_policy_finish(PagedComposer* composer);
+static TypesetStatus paged_assembly_resolve(PagedComposer* composer, TypesetPagePlan* plan,
+    TypesetPageAssembly* assembly, bool* reinsert);
 static TypesetStatus paged_region_measure(void* context, const TypesetResume* start,
     const TypesetRegionConstraints* constraints, bool split, Pool* scratch, TypesetRegionSlice* slice);
 static TypesetStatus paged_flow_height(PagedComposer* composer, PagedFlowNode* flow,
@@ -504,6 +610,7 @@ PagedLayoutOptions paged_layout_options_default() {
     options.max_pages = 10000;
     options.max_nodes = 1000000;
     options.max_block_trials = 2 * options.max_nodes;
+    options.max_page_transitions = options.max_block_trials;
     options.max_items = 4000000;
     options.max_depth = 256;
     options.max_reference_passes = 8;
@@ -514,9 +621,15 @@ PagedLayoutOptions paged_layout_options_default() {
 void paged_composition_destroy(ViewTree* tree) {
     if (!tree || !tree->model || !tree->model->composition) return;
     PagedComposition* composition = tree->model->composition;
+    for (PagedNativeFlow* flow = composition->native_flows; flow; flow = flow->next) {
+        if (flow->index) hashmap_free(flow->index);
+        flow->binding.owner.release(flow->binding.owner.context);
+    }
     if (composition->mark_sources) hashmap_free(composition->mark_sources);
     if (composition->reference_widths) hashmap_free(composition->reference_widths);
+    if (composition->native_regions) hashmap_free(composition->native_regions);
     typeset_targets_dispose(&composition->targets);
+    typeset_targets_dispose(&composition->native_targets);
     if (composition->reference_pool) mem_pool_destroy(composition->reference_pool);
     counter_context_destroy(composition->counters);
     mem_pool_destroy(composition->pool);
@@ -534,6 +647,109 @@ static TypesetStatus paged_failure(PagedComposition* composition, TypesetStatus 
     composition->diagnostic.reason = reason;
     composition->diagnostic.origin = radiant_page_source_origin(composition->document, source);
     return status;
+}
+
+static PagedNativeFlow* paged_native_find(PagedComposition* composition, DomNode* control) {
+    for (PagedNativeFlow* flow = composition->native_flows; flow; flow = flow->next)
+        if (control && flow->binding.control.address == control) return flow;
+    return nullptr;
+}
+
+static TypesetStatus paged_native_region_measure(void* context, const TypesetResume* start,
+        const TypesetRegionConstraints* constraints, bool split, Pool* scratch, TypesetRegionSlice* slice) {
+    const TypesetRegionMaterial* source = ((const PagedNativeRegion*)context)->source;
+    return source->measure(source->context, start, constraints, split, scratch, slice);
+}
+
+static TypesetStatus paged_native_namespaces(Pool* pool, const PagedLayoutOptions& options, TypesetSourceScope* scope) {
+    if (!options.native_flow_count) return TYPESET_OK;
+    if (options.native_flow_count > options.max_nodes || options.native_flow_count > SIZE_MAX / sizeof(TypesetSourceNamespace))
+        return TYPESET_BUDGET_EXHAUSTED;
+    TypesetSourceNamespace* namespaces = (TypesetSourceNamespace*)pool_alloc(pool,
+        options.native_flow_count * sizeof(TypesetSourceNamespace));
+    if (!namespaces) return TYPESET_OUT_OF_MEMORY;
+    for (size_t i = 0; i < options.native_flow_count; i++) {
+        const PagedNativeFlowBinding& binding = options.native_flows[i];
+        if (!binding.provider.identity || !binding.provider.generation || (binding.target_count && !binding.targets) ||
+            binding.target_count > options.max_nodes) return TYPESET_INVALID;
+        for (size_t j = 0; j < i; j++)
+            if (namespaces[j].provider == binding.provider.identity && namespaces[j].generation == binding.provider.generation)
+                return TYPESET_INVALID;
+        namespaces[i] = {binding.provider.identity, binding.provider.generation};
+    }
+    *scope = {namespaces, options.native_flow_count};
+    return TYPESET_OK;
+}
+
+static TypesetStatus paged_native_cursor(PagedComposition* composition, PagedNativeFlow* flow,
+        PagedNativeCursor key, size_t* index) {
+    key.index = flow->count;
+    const auto* existing = (const PagedNativeCursor*)hashmap_get(flow->index, &key);
+    if (existing) {
+        if (existing->return_boundary.legality != key.return_boundary.legality ||
+            existing->return_boundary.scope != key.return_boundary.scope ||
+            existing->return_boundary.penalty != key.return_boundary.penalty ||
+            existing->return_boundary.reason != key.return_boundary.reason ||
+            !typeset_source_same_identity(existing->return_source, key.return_source)) return TYPESET_STALE;
+        *index = existing->index; return TYPESET_OK;
+    }
+    if (flow->count >= composition->options.max_items) return paged_failure(composition, TYPESET_BUDGET_EXHAUSTED,
+        flow->binding.control.address, 0, "native continuation cursor count exceeds the common item budget");
+    if (!lam::pool_grow_array(composition->pool, &flow->cursors, &flow->capacity, flow->count + 1, 16))
+        return TYPESET_OUT_OF_MEMORY;
+    hashmap_set(flow->index, &key);
+    if (hashmap_oom(flow->index)) return TYPESET_OUT_OF_MEMORY;
+    *index = flow->count; flow->cursors[flow->count++] = key;
+    return TYPESET_OK;
+}
+
+static TypesetStatus paged_native_bindings(ViewTree* tree, PagedComposition* composition) {
+    const PagedLayoutOptions& options = composition->options;
+    if (!options.native_flow_count) return TYPESET_OK;
+    if (!options.native_flows || options.native_flow_count > options.max_nodes ||
+        tree->model->environment.presentation != VIEW_PRESENTATION_PAGED || tree->model->css->page_document->fixed_count)
+        return paged_failure(composition, TYPESET_INVALID, nullptr, 0, "native flows require flowing paged controls and bounded bindings");
+    TypesetStatus namespace_status = paged_native_namespaces(composition->pool, options, &composition->marks.sources);
+    if (namespace_status != TYPESET_OK) return namespace_status;
+    composition->native_targets = {tree->model->tree_id, tree->layout_generation, composition->pool,
+        nullptr, 0, 0, options.max_nodes, nullptr, composition->marks.sources};
+    for (size_t i = 0; i < options.native_flow_count; i++) {
+        const PagedNativeFlowBinding& binding = options.native_flows[i];
+        DomNode* control = dom_node_ref_validate(composition->document, binding.control);
+        bool bound = false;
+        for (const RadiantPageSequence* sequence = tree->model->css->page_document->sequences; sequence; sequence = sequence->next)
+            for (const RadiantPageFlowBinding* flow = sequence->flows; flow; flow = flow->next)
+                bound |= flow->source.address == control;
+        bool body = !binding.control.address || (control && control->is_element() &&
+            radiant_page_element(control->as_element(), "flow") && bound && !paged_native_find(composition, control));
+        if (!body || !binding.provider.identity || !binding.provider.generation ||
+            !binding.provider.next || !binding.provider.checkpoint || !binding.provider.restore || !binding.material ||
+            !binding.owner.context || !binding.owner.retain || !binding.owner.release)
+            return paged_failure(composition, TYPESET_INVALID, control, 0, "native flow binding requires a live body or nested-only control, replayable provider and material owner");
+        for (DomNode* child = control ? control->as_element()->first_child : nullptr; child; child = child->next_sibling)
+            if (!child->is_text() || !radiant_page_whitespace(child->as_text()))
+                return paged_failure(composition, TYPESET_INVALID, control, 0, "native flow bindings cannot replace authored content");
+        PagedNativeFlow* flow = (PagedNativeFlow*)pool_calloc(composition->pool, sizeof(PagedNativeFlow));
+        if (!flow) return TYPESET_OUT_OF_MEMORY;
+        if (!binding.owner.retain(binding.owner.context)) return TYPESET_STALE;
+        flow->binding = binding; flow->next = composition->native_flows; composition->native_flows = flow;
+        flow->index = hashmap_new(sizeof(PagedNativeCursor), 16, 0, 0,
+            paged_native_cursor_hash, paged_native_cursor_compare, nullptr, nullptr);
+        if (!flow->index) return TYPESET_OUT_OF_MEMORY;
+        TypesetStatus status = typeset_flow_restore(&binding.provider, &binding.start, &flow->active);
+        if (status == TYPESET_OK && memcmp(&flow->active, &binding.start, sizeof(binding.start))) status = TYPESET_STALE;
+        TypesetResume saved = {};
+        if (status == TYPESET_OK) status = typeset_flow_checkpoint(&binding.provider, &flow->active, &saved);
+        size_t index = 0;
+        if (status == TYPESET_OK) status = paged_native_cursor(composition, flow, {saved, flow, SIZE_MAX, 0, {}, {}}, &index);
+        if (status != TYPESET_OK) return paged_failure(composition, status, control, 0, "native flow start could not be checkpointed");
+        for (size_t j = 0; j < binding.target_count; j++) {
+            TypesetTarget target = binding.targets[j]; target.page_number = target.last_page_number = 0; target.binding = nullptr;
+            status = typeset_target_append(&composition->native_targets, &target);
+            if (status != TYPESET_OK) return status;
+        }
+    }
+    return TYPESET_OK;
 }
 
 static RadiantSpaceSpec paged_space_range(const PagedComposer* composer, bool end) {
@@ -1366,7 +1582,7 @@ static TypesetStatus paged_build_children(ViewTree* tree, PagedComposition* comp
         } else {
             const TypesetTarget* target = typeset_target_find(&composition->references->targets, query->target);
             if (!target) return paged_failure(composition, TYPESET_INVALID, element, 0, "folio reference has no matching source ID");
-            const PagedTargetValue* value = (const PagedTargetValue*)target->value.get();
+            const PagedTargetValue* value = (const PagedTargetValue*)target->binding.get();
             text = value->labels[query->area][query->edge == RADIANT_QUERY_LAST];
         }
         if (!text && composition->references->pass > 1)
@@ -1480,9 +1696,13 @@ static TypesetStatus paged_build_children(ViewTree* tree, PagedComposition* comp
             bool block = style->display.outer == CSS_VALUE_BLOCK;
             if (block) {
                 *paragraph = nullptr;
-                PagedFlowNode* flow = paged_flow_new(composition, PAGED_FLOW_BLOCK, child_element, style);
+                PagedNativeFlow* native = paged_native_find(composition, child_element);
+                if (native && furniture) return paged_failure(composition, TYPESET_INVALID, child, 0,
+                    "native body providers cannot occur in page furniture");
+                PagedFlowNode* flow = paged_flow_new(composition, native ? PAGED_FLOW_NATIVE : PAGED_FLOW_BLOCK, child_element, style);
                 if (!flow) return TYPESET_OUT_OF_MEMORY;
                 paged_flow_link(parent, flow);
+                if (native) { flow->native = native; native->used = true; continue; }
                 PagedFlowNode* nested_paragraph = nullptr;
                 TypesetStatus status = paged_build_children(tree, composition, child_element, flow, &nested_paragraph, depth + 1, furniture);
                 if (status != TYPESET_OK) return status;
@@ -2435,6 +2655,7 @@ static TypesetStatus paged_page_create(PagedComposer* composer, bool blank) {
     paged_page_bind(composer->page, spec);
     composer->y = composer->page_start = style->content_rect.y;
     composer->page_has_content = false;
+    composer->policy_done = composer->auxiliary_page = false;
     composer->body_aligned = false;
     composer->retain_aux_tail = false;
     composer->space_count = composer->space_anchor_count = 0;
@@ -2468,6 +2689,7 @@ static TypesetStatus paged_sequence_end(PagedComposer* composer, const RadiantPa
     composer->sequence = sequence; composer->page_name = sequence->master_reference;
     composer->terminal_page = static_cast<uint32_t>(composer->tree->model->page_count + 1);
     TypesetStatus status = paged_page_create(composer, true);
+    if (status == TYPESET_OK) status = paged_page_policy_finish(composer);
     composer->sequence = pending; composer->page_name = name;
     composer->terminal_page = terminal;
     return status;
@@ -2493,6 +2715,7 @@ static TypesetStatus paged_next_page(PagedComposer* composer) {
     bool side_request = paged_requested_side(composer, request, &wanted);
     if (side_request && paged_side(composer, composer->tree->model->page_count) != wanted) {
         TypesetStatus status = paged_page_create(composer, true);
+        if (status == TYPESET_OK) status = paged_page_policy_finish(composer);
         if (status != TYPESET_OK) return status;
     }
     TypesetStatus status = paged_page_create(composer, false);
@@ -2566,6 +2789,7 @@ static TypesetStatus paged_targets_seed(ViewTree* tree, PagedReferenceSession* s
         value->before = value->after = "";
         TypesetTarget target = {id, {tree->model->tree_id, tree->layout_generation,
             value->source.expected_id, TYPESET_PROVIDER_OFFSETS, nullptr}, 0, lam::up((const TypesetRecord*)value)};
+        target.binding = target.value;
         TypesetStatus status = typeset_target_append(&session->targets, &target);
         if (status != TYPESET_OK) return status;
     }
@@ -2574,6 +2798,29 @@ static TypesetStatus paged_targets_seed(ViewTree* tree, PagedReferenceSession* s
         if (status != TYPESET_OK) return status;
     }
     return TYPESET_OK;
+}
+
+static TypesetStatus paged_native_targets_seed(ViewTree* tree, PagedReferenceSession* session,
+        const PagedLayoutOptions& options) {
+    TypesetStatus status = paged_native_namespaces(session->pool, options, &session->targets.sources);
+    for (size_t i = 0; status == TYPESET_OK && i < options.native_flow_count; i++) {
+        const PagedNativeFlowBinding& flow = options.native_flows[i];
+        for (size_t j = 0; status == TYPESET_OK && j < flow.target_count; j++) {
+            TypesetTarget target = flow.targets[j];
+            if (target.source.provider != flow.provider.identity || target.source.generation != flow.provider.generation ||
+                target.source.offset_unit > TYPESET_PROVIDER_OFFSETS ||
+                (target.source.native && target.source.native->provider != target.source.provider) ||
+                (target.value && target.value->provider != target.source.provider)) return TYPESET_INVALID;
+            PagedTargetValue* value = (PagedTargetValue*)pool_calloc(session->pool, sizeof(PagedTargetValue));
+            if (!value) return TYPESET_OUT_OF_MEMORY;
+            value->provider = tree->model->tree_id; value->text = value->before = value->after = "";
+            value->counters = counter_snapshot_copy(nullptr, session->pool);
+            if (!value->counters) return TYPESET_OUT_OF_MEMORY;
+            target.page_number = target.last_page_number = 0; target.binding = lam::up((const TypesetRecord*)value);
+            status = typeset_target_append(&session->targets, &target);
+        }
+    }
+    return status;
 }
 
 static const TypesetTarget* paged_content_target(PagedContentBinding* binding, const CssValue* argument) {
@@ -2625,8 +2872,8 @@ static bool paged_content_target_function(PagedContentBinding* binding, const Cs
     size_t required = target_text ? 1 : plural ? 3 : 2;
     if ((size_t)function->arg_count < required || (size_t)function->arg_count > required + 1) return false;
     const TypesetTarget* target = paged_content_target(binding, function->args[0]);
-    if (!target || !target->value || target->value->provider != binding->tree->model->tree_id) return false;
-    const PagedTargetValue* value = (const PagedTargetValue*)target->value.get();
+    if (!target || !target->binding || target->binding->provider != binding->tree->model->tree_id) return false;
+    const PagedTargetValue* value = (const PagedTargetValue*)target->binding.get();
     if (target_text) {
         const char* part = function->arg_count == 2 ? css_value_identifier_name(function->args[1]) : "content";
         const char* result = part && str_ieq_cstr(part, "content") ? value->text :
@@ -2858,8 +3105,11 @@ static TypesetStatus paged_mark_enter(PagedComposer* composer, DomNode* source, 
     }
     TypesetMarkStore* marks = &composer->composition->marks;
     uint32_t source_id = dom_node_ref(source).expected_id;
+    TypesetSource identity = {composer->tree->model->tree_id, composer->tree->layout_generation,
+        source_id, TYPESET_PROVIDER_OFFSETS, nullptr};
     // Count restoration also invalidates the adapter's assignment cursor.
-    if (owner->assigned_at < marks->count && marks->entries[owner->assigned_at].source.node == source_id) return TYPESET_OK;
+    if (owner->assigned_at < marks->count && typeset_source_same_identity(marks->entries[owner->assigned_at].source, identity))
+        return TYPESET_OK;
     size_t assignment = marks->count;
     const CssValue* value = owner->style->string_set;
     TypesetStatus status = TYPESET_OK;
@@ -3551,7 +3801,83 @@ static TypesetStatus paged_regions_prepare(PagedComposer* composer) {
     return status;
 }
 
-static TypesetStatus paged_region_emit(PagedComposer* composer, LayoutViewNode* parent, const TypesetRegionPlacement& placement) {
+static TypesetStatus paged_native_append(PagedComposer* composer, LayoutViewNode* parent,
+        const ViewNativeMaterial& material, RdtLogicalRect rect, float baseline, LayoutViewNode** result = nullptr) {
+    ViewModelStatus model_status = VIEW_MODEL_OK;
+    LayoutViewNode* node = view_tree_native_fragment_append(composer->tree, parent, &material, rect, &model_status);
+    if (!node) return model_status == VIEW_MODEL_OUT_OF_MEMORY ? TYPESET_OUT_OF_MEMORY :
+        model_status == VIEW_MODEL_STALE_SOURCE ? TYPESET_STALE : TYPESET_INVALID;
+    if (node->glyph_run) { node->glyph_run->x += rect.x; node->glyph_run->baseline_y += baseline; }
+    if (node->image_box) {
+        node->image_box->content_rect.x += rect.x; node->image_box->content_rect.y += rect.y;
+        node->image_box->image_rect.x += rect.x; node->image_box->image_rect.y += rect.y;
+    }
+    node->paint_box = true; node->role = composer->role;
+    if (result) *result = node;
+    return TYPESET_OK;
+}
+
+struct PagedNativeRegionLease {
+    RefCount references;
+    ViewNativeOwner producer;
+    TypesetRegionPlan plan;
+};
+static bool paged_native_region_retain(void* context) {
+    return ref_count_retain(&((PagedNativeRegionLease*)context)->references);
+}
+static void paged_native_region_release(void* context) {
+    PagedNativeRegionLease* lease = (PagedNativeRegionLease*)context;
+    if (ref_count_release(&lease->references) != REF_COUNT_LAST) return;
+    typeset_region_plan_dispose(&lease->plan);
+    lease->producer.release(lease->producer.context); mem_free(lease);
+}
+
+static TypesetStatus paged_native_region_emit(PagedComposer* composer, LayoutViewNode* parent,
+        const TypesetRegionPlan* plan, const TypesetRegionPlacement& placement) {
+    const PagedNativeRegion* region = (const PagedNativeRegion*)placement.material->context;
+    PagedNativeRegionLease* lease = (PagedNativeRegionLease*)mem_calloc(1, sizeof(PagedNativeRegionLease), MEM_CAT_LAYOUT); // OBJ_HEAP_OK: retained fragments own this lease beyond the composition pool; the last owner releases it.
+    if (!lease) return TYPESET_OUT_OF_MEMORY;
+    ref_count_init(&lease->references); lease->producer = region->flow->binding.owner;
+    if (!lease->producer.retain(lease->producer.context)) { mem_free(lease); return TYPESET_STALE; }
+    // measured paint/metric records may live in the plan scratch, independently of the producer owner.
+    TypesetStatus status = typeset_region_plan_retain(plan, &lease->plan);
+    ViewNativeOwner owner = {lease, paged_native_region_retain, paged_native_region_release};
+    RdtLogicalRect rect = placement.rect;
+    rect.x += composer->page_style.content_rect.x; rect.y += composer->page_style.content_rect.y;
+    PagedComposer local = *composer; local.role = region->kind == PAGED_REGION_NOTE ? VIEW_FRAGMENT_NOTE : VIEW_FRAGMENT_FLOAT;
+    ViewNativeMaterial material = {};
+    material.source = placement.material->source; material.metrics = placement.slice.metrics;
+    material.solution = placement.slice.paint; material.owner = owner;
+    LayoutViewNode* box = nullptr;
+    if (status == TYPESET_OK) status = paged_native_append(&local, parent, material, rect, rect.y + material.metrics.baseline, &box);
+    if (status == TYPESET_OK) {
+        box->generated = true; box->first_fragment = placement.start.serial == placement.material->start.serial;
+        box->last_fragment = placement.slice.complete;
+    }
+    for (size_t index = 0; status == TYPESET_OK; index++) {
+        material = {}; RdtLogicalRect item_rect = {};
+        TypesetRegionPlacement selected = placement; selected.material = region->source;
+        status = region->flow->binding.region_item(region->flow->binding.context, &selected, index, &material, &item_rect);
+        if (status == TYPESET_DONE) { status = TYPESET_OK; break; }
+        if (status != TYPESET_OK) break;
+        if (index >= composer->composition->options.max_items) { status = TYPESET_BUDGET_EXHAUSTED; break; }
+        if (!isfinite(item_rect.x) || !isfinite(item_rect.y) || !isfinite(item_rect.width) || !isfinite(item_rect.height) ||
+            item_rect.x < 0.0f || item_rect.y < 0.0f || item_rect.width < 0.0f || item_rect.height < 0.0f ||
+            item_rect.x + item_rect.width > rect.width || item_rect.y + item_rect.height > rect.height) {
+            status = TYPESET_UNPLACEABLE; break;
+        }
+        if (!material.owner.context) material.owner = owner;
+        item_rect.x += rect.x; item_rect.y += rect.y;
+        status = paged_native_append(&local, box, material, item_rect, item_rect.y + material.metrics.baseline);
+    }
+    paged_native_region_release(lease);
+    return status;
+}
+
+static TypesetStatus paged_region_emit(PagedComposer* composer, LayoutViewNode* parent,
+        const TypesetRegionPlan* plan, const TypesetRegionPlacement& placement) {
+    if (placement.material->measure == paged_native_region_measure)
+        return paged_native_region_emit(composer, parent, plan, placement);
     const PagedRegionRecord* record = (const PagedRegionRecord*)placement.material->source.native.get();
     const PagedRegionPaint* paint = (const PagedRegionPaint*)placement.slice.paint.get();
     RdtLogicalRect rect = placement.rect;
@@ -3625,7 +3951,7 @@ static TypesetStatus paged_regions_close_trial(PagedComposer* composer) {
         active |= composer->regions[i].plan.scratch != nullptr;
     }
     // Declared block extents and closing decorations participate in the final reservation.
-    float body_height = composer->y - composer->page_style.content_rect.y - composer->regions[PAGED_REGION_TOP].plan.reserved_height;
+    float body_height = paged_body_height(composer);
     TypesetStatus status = active ? paged_regions_trial(composer, body_height, &trial) : TYPESET_OK;
     if (status != TYPESET_OK) {
         composer->closure_failure = status == TYPESET_UNPLACEABLE;
@@ -3650,18 +3976,89 @@ static TypesetStatus paged_regions_close_trial(PagedComposer* composer) {
         if (!plan->scratch) continue;
         LayoutViewNode* parent = &composer->page->node;
         if (i == PAGED_REGION_NOTE && plan->count) status = paged_note_area_emit(composer, plan, &parent);
-        for (size_t j = 0; status == TYPESET_OK && j < plan->count; j++) status = paged_region_emit(composer, parent, plan->placements[j]);
+        for (size_t j = 0; status == TYPESET_OK && j < plan->count; j++) status = paged_region_emit(composer, parent, plan, plan->placements[j]);
         if (status == TYPESET_OK) status = typeset_region_commit(&composer->composition->queues[i], plan);
         typeset_region_plan_dispose(plan); region->anchor_count = 0;
     }
     return status;
 }
 
+static TypesetStatus paged_page_policy_finish(PagedComposer* composer) {
+    const TypesetPagePolicy* policy = composer->composition->options.page_policy;
+    if (!policy || !composer->page || composer->policy_done) return TYPESET_OK;
+    PagedCheckpoint checkpoint;
+    TypesetStatus status = checkpoint.begin(composer);
+    if (status != TYPESET_OK) return status;
+    TypesetPageAssembly assembly = {};
+    while (status == TYPESET_OK) {
+        size_t count = composer->page->fixed ? 1 : 0;
+        for (const PagedRegionState& region : composer->regions) {
+            if (region.plan.count > composer->composition->options.max_items - count) { status = TYPESET_BUDGET_EXHAUSTED; break; }
+            count += region.plan.count;
+        }
+        if (status != TYPESET_OK) break;
+        if (count > SIZE_MAX / sizeof(TypesetContribution)) { status = TYPESET_BUDGET_EXHAUSTED; break; }
+        Pool* scratch = mem_pool_create((MemContext*)composer->composition->document->services.mem_ctx,
+            MEM_ROLE_LAYOUT, "typeset.physical-page.assembly");
+        if (!scratch) { status = TYPESET_OUT_OF_MEMORY; break; }
+        TypesetContribution* contributions = count ? (TypesetContribution*)pool_calloc(scratch,
+            count * sizeof(TypesetContribution)) : nullptr;
+        if (count && !contributions) { mem_pool_destroy(scratch); status = TYPESET_OUT_OF_MEMORY; break; }
+        TypesetPageCandidate candidate = {};
+        candidate.kind = composer->page->fixed ? TYPESET_PAGE_FIXED : composer->page->blank ? TYPESET_PAGE_BLANK :
+            composer->auxiliary_page || count ? TYPESET_PAGE_REGION : TYPESET_PAGE_EMPTY;
+        candidate.page_number = composer->page->page_number;
+        candidate.start = {composer->tree->model->tree_id, composer->tree->layout_generation,
+            candidate.page_number - 1, {candidate.page_number, candidate.kind}};
+        candidate.end = candidate.start; candidate.end.serial++;
+        candidate.body_height = paged_body_height(composer);
+        candidate.available_height = composer->page_style.content_rect.height;
+        candidate.note_height = composer->regions[PAGED_REGION_NOTE].plan.reserved_height;
+        candidate.float_height = composer->regions[PAGED_REGION_TOP].plan.reserved_height +
+            composer->regions[PAGED_REGION_BOTTOM].plan.reserved_height;
+        candidate.boundary = {TYPESET_BREAK_ALLOWED, TYPESET_BREAK_PAGE, 0, 0};
+        size_t index = 0;
+        if (composer->page->fixed) {
+            contributions[index].kind = TYPESET_CONTRIBUTION_BOX;
+            contributions[index].metrics = {composer->page_style.content_rect.width, candidate.body_height, 0,
+                candidate.body_height, {0, 0, composer->page_style.content_rect.width, candidate.body_height}, {}};
+            index++;
+        }
+        for (size_t i = 0; i < PAGED_REGION_COUNT; i++) for (size_t j = 0; j < composer->regions[i].plan.count; j++) {
+            const TypesetRegionPlacement& placement = composer->regions[i].plan.placements[j];
+            TypesetContribution& value = contributions[index++];
+            value.kind = i == PAGED_REGION_NOTE ? TYPESET_CONTRIBUTION_INSERTION : TYPESET_CONTRIBUTION_FLOAT;
+            value.region = i == PAGED_REGION_NOTE ? TYPESET_REGION_NOTE : TYPESET_REGION_FLOAT;
+            value.region_edge = i == PAGED_REGION_BOTTOM ? TYPESET_REGION_END : TYPESET_REGION_START;
+            value.source = placement.material->source; value.metrics = placement.slice.metrics;
+            value.region_material = placement.material;
+        }
+        TypesetPagePlan plan = {}; plan.scratch = scratch; plan.policy = policy; plan.candidate = candidate;
+        plan.contributions = contributions; plan.count = count; plan.complete = true;
+        size_t selected = SIZE_MAX; bool reinsert = false;
+        status = typeset_page_select(policy, &candidate, 1, &selected, &plan.action);
+        if (status == TYPESET_OK) status = paged_assembly_resolve(composer, &plan, &assembly, &reinsert);
+        TypesetPolicyCheckpoint progressed = {};
+        if (status == TYPESET_OK && reinsert) status = typeset_policy_checkpoint(policy, &progressed);
+        if (status == TYPESET_OK && !reinsert && policy->committed) status = policy->committed(policy->context, &candidate);
+        mem_pool_destroy(scratch);
+        if (status != TYPESET_OK || !reinsert) break;
+        // reinsert the selected physical input while retaining only the journaled policy transition.
+        status = checkpoint.restore();
+        if (status == TYPESET_OK) status = typeset_policy_restore(policy, &progressed);
+        if (status == TYPESET_OK) status = checkpoint.begin(composer);
+        if (status == TYPESET_OK && !composer->page->blank && !composer->page->fixed) status = paged_regions_prepare(composer);
+    }
+    if (status == TYPESET_OK) { composer->policy_done = true; return checkpoint.accept(); }
+    return checkpoint.fail(status);
+}
+
 static TypesetStatus paged_regions_close(PagedComposer* composer) {
     PagedCheckpoint checkpoint;
     TypesetStatus status = checkpoint.begin(composer);
     if (status != TYPESET_OK) return status;
-    status = paged_regions_close_trial(composer);
+    status = paged_page_policy_finish(composer);
+    if (status == TYPESET_OK) status = paged_regions_close_trial(composer);
     return status == TYPESET_OK ? checkpoint.accept() : checkpoint.fail(status);
 }
 
@@ -3679,6 +4076,7 @@ static TypesetStatus paged_regions_drain(PagedComposer* composer) {
         composer->terminal_page = 0;
         status = paged_page_create(composer, false);
         if (status != TYPESET_OK) break;
+        composer->auxiliary_page = true;
         status = paged_regions_prepare(composer);
         bool ordinary_finished = status == TYPESET_OK && !paged_region_plans_pending(composer);
         if (sequence && sequence->master_program && sequence->master_program->terminal &&
@@ -3711,21 +4109,29 @@ static float paged_tail_edges(const PagedComposer* composer, bool closes) {
     return extent;
 }
 
+static TypesetStatus paged_region_anchor(PagedComposer* composer, PagedRegionKind kind,
+        const TypesetRegionMaterial* material, size_t* count) {
+    if (*count >= composer->composition->options.max_nodes) return TYPESET_BUDGET_EXHAUSTED;
+    PagedRegionState* region = &composer->regions[kind];
+    if (!lam::pool_grow_array(composer->composition->pool, &region->anchors, &region->anchor_capacity, *count + 1, 16))
+        return TYPESET_OUT_OF_MEMORY;
+    region->anchors[(*count)++] = material;
+    return TYPESET_OK;
+}
+
 static TypesetStatus paged_regions_for_lines(PagedComposer* composer, PagedFlowNode* flow,
         const TypesetLineCandidate* lines, size_t fit, PagedRegionTrial* trial) {
     for (size_t i = 0; i < PAGED_REGION_COUNT; i++) trial->anchor_counts[i] = composer->regions[i].anchor_count;
-    float body_height = composer->y - composer->page_style.content_rect.y - composer->regions[PAGED_REGION_TOP].plan.reserved_height;
+    float body_height = paged_body_height(composer);
     for (size_t i = 0; i < fit; i++) {
         body_height += lines[i].height;
         for (size_t j = lines[i].first; j < lines[i].next; j++) {
             const PagedSourceRecord* source = (const PagedSourceRecord*)flow->items[j].source.native.get();
             if (!source || !source->insertion) continue;
-            size_t kind = source->insertion->kind;
-            PagedRegionState* region = &composer->regions[kind];
+            PagedRegionKind kind = source->insertion->kind;
             size_t* count = &trial->anchor_counts[kind];
-            if (!lam::pool_grow_array(composer->composition->pool, &region->anchors,
-                &region->anchor_capacity, *count + 1, 16)) return TYPESET_OUT_OF_MEMORY;
-            region->anchors[(*count)++] = &source->insertion->material;
+            TypesetStatus status = paged_region_anchor(composer, kind, &source->insertion->material, count);
+            if (status != TYPESET_OK) return status;
         }
     }
     if (fit) body_height += paged_tail_edges(composer,
@@ -5013,10 +5419,11 @@ static TypesetStatus paged_block_finish(PagedComposer* composer, float parent_wi
     // cell replay belongs to an admitted row; only the outer row participates in joint region scheduling.
     if (composer->role == VIEW_FRAGMENT_BODY && !composer->atomic_fragment && composer->tree->model->environment.presentation == VIEW_PRESENTATION_PAGED) {
         // closing a sibling can expose ancestor edges that no paragraph candidate could reserve.
-        float body_height = composer->y - composer->page_style.content_rect.y -
-            composer->regions[PAGED_REGION_TOP].plan.reserved_height + paged_tail_edges(composer, true);
+        float body_height = paged_body_height(composer) + paged_tail_edges(composer, true);
         PagedRegionTrial trial = {};
         for (size_t i = 0; i < PAGED_REGION_COUNT; i++) trial.anchor_counts[i] = composer->regions[i].anchor_count;
+        // closing trials use the same native shrink/conditional-space constraints as page candidates.
+        body_height = paged_vertical_measure(composer, body_height, true).minimum;
         status = body_height > composer->page_style.content_rect.height ? TYPESET_UNPLACEABLE :
             paged_regions_trial(composer, body_height, &trial);
         if (status == TYPESET_OK) status = paged_regions_accept(composer, &trial);
@@ -5090,6 +5497,8 @@ struct PagedCandidateInfo {
     float space_capacity;
     const RadiantPageSequence* sequence;
     bool pending_aux;
+    TypesetPacking native_packing;
+    size_t native_end;
 };
 
 struct PagedPageProvider {
@@ -5110,12 +5519,17 @@ struct PagedPageProvider {
     float space_ratio = 0.0f;
     Pool* candidate_pool = nullptr;
     bool reject_terminal = false;
+    TypesetItem* vertical_glues = nullptr;
+    size_t vertical_count = 0, vertical_capacity = 0, vertical_tail = 0, vertical_end = SIZE_MAX;
+    TypesetPacking vertical_packing = {};
 
     ~PagedPageProvider() {
+        if (composer->provider == this) composer->provider = nullptr;
         Pool* pool = composer->composition->pool;
         if (steps) pool_free(pool, steps);
         if (scratch) pool_free(pool, scratch);
         if (lines) pool_free(pool, lines);
+        if (vertical_glues) pool_free(pool, vertical_glues);
     }
 
     TypesetStatus append(PagedFlowStepKind kind, PagedFlowNode* flow) {
@@ -5184,6 +5598,18 @@ struct PagedPageProvider {
     }
 };
 
+static PagedVerticalMeasure paged_vertical_measure(PagedComposer* composer, float body, bool end) {
+    PagedPageProvider* provider = composer->provider;
+    if (!provider || !provider->vertical_count) return {body, body, 0};
+    // selected replay has already applied packing and conditional trimming to its geometry.
+    if (provider->vertical_end != SIZE_MAX) return {body, body, provider->vertical_count};
+    size_t glue_end = provider->vertical_count;
+    if (end) while (glue_end > provider->vertical_tail && provider->vertical_glues[glue_end - 1].glue.discard_end)
+        body -= provider->vertical_glues[--glue_end].glue.natural;
+    TypesetPacking minimum = typeset_pack_glue(provider->vertical_glues, 0, glue_end, body, 0.0f);
+    return {body, glue_end ? fmaxf(0.0f, -minimum.residual) : body, glue_end};
+}
+
 static RadiantKeepStrength paged_context_keep(const RadiantKeepSpec& spec) {
     // the current body fragmentainer is one column; a page boundary crosses both domains.
     return radiant_keep_max(spec.scope[1], spec.scope[2]);
@@ -5212,7 +5638,10 @@ static RadiantKeepStrength paged_boundary_keep(PagedComposer* composer, PagedFlo
     return result;
 }
 
-static size_t paged_choose_page(void*, const TypesetPageCandidate* candidates, size_t count) {
+static size_t paged_choose_page(void* context, const TypesetPageCandidate* candidates, size_t count) {
+    PagedPageProvider* provider = (PagedPageProvider*)context;
+    const TypesetPagePolicy* policy = provider->composer->composition->options.page_policy;
+    if (policy) return policy->choose(policy->context, candidates, count);
     size_t selected = 0; RadiantKeepStrength weakest = {};
     if (candidates[0].trial) weakest = ((const PagedCandidateInfo*)candidates[0].trial)->keep;
     for (size_t i = 0; i < count; i++) {
@@ -5225,10 +5654,48 @@ static size_t paged_choose_page(void*, const TypesetPageCandidate* candidates, s
 
 static TypesetAssemblyAction paged_pack_page(void* context, const TypesetPageCandidate* candidate) {
     PagedPageProvider* provider = (PagedPageProvider*)context;
+    const TypesetPagePolicy* policy = provider->composer->composition->options.page_policy;
+    TypesetAssemblyAction action = policy ? policy->assemble(policy->context, candidate) : TYPESET_ASSEMBLY_FINALIZE;
+    if (action != TYPESET_ASSEMBLY_FINALIZE) return action;
     const PagedCandidateInfo* info = (const PagedCandidateInfo*)candidate->trial;
     float free = candidate->available_height - candidate->body_height - candidate->note_height - candidate->float_height;
     provider->space_ratio = info && info->space_capacity > 0.0f ? fminf(1.0f, fmaxf(0.0f, free / info->space_capacity)) : 1.0f;
+    provider->vertical_packing = info ? info->native_packing : TypesetPacking{};
+    provider->vertical_end = info ? info->native_end : SIZE_MAX;
     return TYPESET_ASSEMBLY_FINALIZE;
+}
+
+static TypesetStatus paged_policy_checkpoint(void* context, TypesetPolicyCheckpoint* saved) {
+    PagedPageProvider* provider = (PagedPageProvider*)context;
+    return typeset_policy_checkpoint(provider->composer->composition->options.page_policy, saved);
+}
+static TypesetStatus paged_policy_restore(void* context, const TypesetPolicyCheckpoint* saved) {
+    PagedPageProvider* provider = (PagedPageProvider*)context;
+    return typeset_policy_restore(provider->composer->composition->options.page_policy, saved);
+}
+static TypesetStatus paged_page_transition(void* context, TypesetAssemblyAction action, const TypesetPagePlan* plan) {
+    PagedPageProvider* provider = (PagedPageProvider*)context;
+    const TypesetPagePolicy* policy = provider->composer->composition->options.page_policy;
+    if (!policy || !policy->transition || !policy->checkpoint || !policy->restore)
+        return paged_failure(provider->composer->composition, TYPESET_INVALID, nullptr,
+            provider->composer->page->page_number, "held or reinserted pages require a journaled policy transition");
+    return policy->transition(policy->context, action, plan);
+}
+
+static TypesetStatus paged_assembly_resolve(PagedComposer* composer, TypesetPagePlan* plan,
+        TypesetPageAssembly* assembly, bool* reinsert) {
+    assembly->pool = composer->composition->pool;
+    assembly->limit = composer->composition->options.max_page_transitions;
+    assembly->transitions = composer->composition->page_transitions;
+    *reinsert = false;
+    TypesetStatus status = TYPESET_OK;
+    while (status == TYPESET_OK && plan->action != TYPESET_ASSEMBLY_FINALIZE && !*reinsert)
+        status = typeset_page_transition(plan, assembly, reinsert);
+    composer->composition->page_transitions = assembly->transitions;
+    if (status != TYPESET_OK) paged_failure(composer->composition, status, nullptr,
+        composer->page->page_number, status == TYPESET_NO_PROGRESS ? "page assembly repeated a policy state" :
+        status == TYPESET_BUDGET_EXHAUSTED ? "page assembly exhausted its transition budget" : "page assembly transition failed");
+    return status;
 }
 
 static bool paged_sibling_avoidance(PagedFlowNode* flow) {
@@ -5295,6 +5762,280 @@ static TypesetStatus paged_page_line(PagedPageProvider* provider, PagedFlowNode*
     return TYPESET_OK;
 }
 
+static TypesetStatus paged_native_material(PagedPageProvider* provider, PagedFlowNode* flow, PagedNativeFlow* native,
+        const TypesetContribution& contribution, const TypesetItem* item, const TypesetLineCandidate* alternative,
+        const TypesetMetrics& metrics, float x, float y, float baseline) {
+    TypesetStatus status = paged_mark_enter(provider->composer, flow->source);
+    if (status != TYPESET_OK) return status;
+    ViewNativeMaterial material = {};
+    status = native->binding.material(native->binding.context, &contribution, item, alternative, &material);
+    if (status != TYPESET_OK) return status;
+    material.source = item ? item->source : contribution.source; material.metrics = metrics;
+    material.solution = alternative ? alternative->solution : nullptr;
+    if (item) { material.start = item->start; material.length = item->length; }
+    if (!material.owner.context) material.owner = native->binding.owner;
+    PagedComposer* composer = provider->composer;
+    return paged_native_append(composer, composer->frames[composer->depth - 1].fragment, material,
+        {x, y, metrics.advance, metrics.height + metrics.depth}, baseline);
+}
+
+static TypesetStatus paged_native_event(PagedComposer* composer, PagedFlowNode* flow,
+        const TypesetContribution& value) {
+    TypesetStatus status = paged_mark_enter(composer, flow->source);
+    if (status != TYPESET_OK) return status;
+    if (value.kind == TYPESET_CONTRIBUTION_MARK) {
+        if (!value.mark || !typeset_source_same_identity(value.mark->source, value.source) ||
+            value.mark->kind == TYPESET_MARK_RUNNING ||
+            (value.mark->value && value.mark->value->provider != value.source.provider)) return TYPESET_INVALID;
+        if (composer->composition->marks.count >= composer->composition->options.max_items) return TYPESET_BUDGET_EXHAUSTED;
+        TypesetMark mark = *value.mark;
+        if (!mark.name || !*mark.name) return TYPESET_INVALID;
+        mark.name = pool_strdup(composer->composition->pool, mark.name);
+        if (mark.text) mark.text = pool_strdup(composer->composition->pool, mark.text);
+        if (!mark.name || (value.mark->text && !mark.text)) return TYPESET_OUT_OF_MEMORY;
+        mark.page_number = composer->page->page_number; mark.at_page_start = !composer->page_has_content;
+        return typeset_mark_append(&composer->composition->marks, &mark);
+    }
+    if (!value.target || !typeset_source_same_identity(value.target->source, value.source)) return TYPESET_INVALID;
+    TypesetTarget* target = const_cast<TypesetTarget*>(typeset_target_find(&composer->composition->native_targets, value.target->name));
+    if (!target || !typeset_source_same_identity(target->source, value.source) || target->value.get() != value.target->value.get())
+        return TYPESET_INVALID;
+    // all target slots are seeded before trials, so their addresses remain stable through nested journals.
+    if (!view_tree_model_record(composer->tree, target, sizeof(*target))) return TYPESET_OUT_OF_MEMORY;
+    if (!target->page_number) target->page_number = composer->page->page_number;
+    target->last_page_number = composer->page->page_number;
+    return TYPESET_OK;
+}
+
+static TypesetStatus paged_native_region_anchor(PagedComposer* composer, PagedFlowNode* flow, PagedNativeFlow* native,
+        const TypesetContribution& value) {
+    const TypesetRegionMaterial* material = value.region_material;
+    if (!material || !material->identity || !material->measure || !native->binding.region_item ||
+        !typeset_source_same_identity(material->source, value.source) ||
+        material->start.provider != value.source.provider || material->start.generation != value.source.generation ||
+        (value.identity && value.identity != material->identity) || value.region_edge > TYPESET_REGION_END ||
+        (value.kind == TYPESET_CONTRIBUTION_INSERTION ? value.region != TYPESET_REGION_NOTE : value.region != TYPESET_REGION_FLOAT))
+        return TYPESET_INVALID;
+    PagedRegionKind kind = value.kind == TYPESET_CONTRIBUTION_INSERTION ? PAGED_REGION_NOTE :
+        value.region_edge == TYPESET_REGION_START ? PAGED_REGION_TOP : PAGED_REGION_BOTTOM;
+    PagedComposition* composition = composer->composition;
+    if (!composition->native_regions) composition->native_regions = lam::own(paged_native_regions_new(16));
+    if (!composition->native_regions) return TYPESET_OUT_OF_MEMORY;
+    PagedNativeRegionEntry key = {material, native, nullptr};
+    const PagedNativeRegionEntry* prior = (const PagedNativeRegionEntry*)hashmap_get(composition->native_regions, &key);
+    if (prior) key.region = prior->region;
+    else {
+        if (hashmap_count(composition->native_regions) >= composition->options.max_nodes) return TYPESET_BUDGET_EXHAUSTED;
+        key.region = (PagedNativeRegion*)pool_calloc(composition->pool, sizeof(PagedNativeRegion));
+        if (!key.region) return TYPESET_OUT_OF_MEMORY;
+        *key.region = {material, native, *material, kind};
+        key.region->material.context = key.region; key.region->material.measure = paged_native_region_measure;
+        hashmap_set(composition->native_regions, &key);
+        if (hashmap_oom(composition->native_regions)) return TYPESET_OUT_OF_MEMORY;
+    }
+    if (key.region->kind != kind) return TYPESET_INVALID;
+    PagedRegionTrial trial = {};
+    for (size_t i = 0; i < PAGED_REGION_COUNT; i++) trial.anchor_counts[i] = composer->regions[i].anchor_count;
+    TypesetStatus status = paged_mark_enter(composer, flow->source);
+    if (status == TYPESET_OK) status = paged_region_anchor(composer, kind, &key.region->material, &trial.anchor_counts[kind]);
+    float body = paged_body_height(composer) + paged_tail_edges(composer, false);
+    body = paged_vertical_measure(composer, body, true).minimum;
+    if (status == TYPESET_OK) status = paged_regions_trial(composer, body, &trial);
+    if (status == TYPESET_OK) status = paged_regions_accept(composer, &trial);
+    paged_region_trial_dispose(&trial);
+    return status;
+}
+
+static TypesetStatus paged_native_expand(PagedComposition* composition, PagedNativeFlow* root,
+        size_t index, TypesetContribution* value, size_t* following, PagedNativeFlow** producer, bool* structural) {
+    if (index >= root->count) return TYPESET_STALE;
+    PagedNativeCursor cursor = root->cursors[index];
+    PagedNativeFlow* native = cursor.producer; *producer = native; *structural = false;
+    if (memcmp(&cursor.resume, &native->active, sizeof(TypesetResume))) {
+        TypesetStatus status = typeset_flow_restore(&native->binding.provider, &cursor.resume, &native->active);
+        if (status != TYPESET_OK) return status;
+        if (memcmp(&cursor.resume, &native->active, sizeof(TypesetResume))) return TYPESET_STALE;
+    }
+    TypesetResume end = {};
+    TypesetStatus status = typeset_flow_next(&native->binding.provider, &cursor.resume, value, &end);
+    if (status == TYPESET_DONE && cursor.parent != SIZE_MAX) {
+        *value = {}; value->kind = TYPESET_CONTRIBUTION_BOUNDARY;
+        value->source = cursor.return_source; value->boundary = cursor.return_boundary;
+        *following = cursor.parent; *structural = true; return TYPESET_OK;
+    }
+    if (status != TYPESET_OK) return status;
+    native->active = end;
+    if (value->source.provider != native->binding.provider.identity || value->source.generation != native->binding.provider.generation ||
+        value->source.offset_unit > TYPESET_PROVIDER_OFFSETS ||
+        (value->source.native && value->source.native->provider != value->source.provider) ||
+        value->boundary.legality > TYPESET_BREAK_FORCED || value->boundary.scope > TYPESET_BREAK_PAGE)
+        return TYPESET_INVALID;
+    status = typeset_flow_checkpoint(&native->binding.provider, &end, &cursor.resume);
+    if (status == TYPESET_OK) status = paged_native_cursor(composition, root, cursor, following);
+    if (status != TYPESET_OK || value->kind != TYPESET_CONTRIBUTION_NESTED) return status;
+    const TypesetFlowProvider* requested = value->nested;
+    PagedNativeFlow* child = nullptr;
+    for (auto* entry = composition->native_flows; requested && entry; entry = entry->next)
+        if (entry->binding.provider.identity == requested->identity && entry->binding.provider.generation == requested->generation)
+            child = entry;
+    if (!child || child->binding.control.address || child->binding.provider.context != requested->context ||
+        child->binding.provider.next != requested->next || child->binding.provider.checkpoint != requested->checkpoint ||
+        child->binding.provider.restore != requested->restore) return TYPESET_INVALID;
+    size_t depth = 1;
+    for (size_t parent = index; parent != SIZE_MAX; parent = root->cursors[parent].parent) {
+        if (root->cursors[parent].producer == child) return TYPESET_INVALID;
+        if (++depth > composition->options.max_depth) return paged_failure(composition, TYPESET_BUDGET_EXHAUSTED,
+            root->binding.control.address, 0, "native nested provider depth exceeds the common context budget");
+    }
+    // parent indices and canonical cursors survive trial rewind; no stack or scratch pointer is serialized.
+    PagedNativeCursor entered = {child->cursors[0].resume, child, *following, 0, value->boundary, value->source};
+    status = paged_native_cursor(composition, root, entered, following);
+    if (status != TYPESET_OK) return status;
+    *value = {}; value->kind = TYPESET_CONTRIBUTION_BOUNDARY;
+    value->source = entered.return_source; value->boundary.legality = TYPESET_BREAK_FORBIDDEN;
+    *structural = true; return TYPESET_OK;
+}
+
+static TypesetStatus paged_native_lookahead(PagedComposition* composition, PagedNativeFlow* root,
+        size_t index, bool* terminal) {
+    Pool* pool = mem_pool_create((MemContext*)composition->document->services.mem_ctx,
+        MEM_ROLE_LAYOUT, "typeset.native.lookahead");
+    if (!pool) return TYPESET_OUT_OF_MEMORY;
+    PagedNativeCheckpoint* records = nullptr;
+    TypesetStatus status = paged_native_checkpoint(composition, pool, &records);
+    *terminal = false;
+    for (size_t steps = 0; status == TYPESET_OK; steps++) {
+        if (steps >= composition->options.max_items) { status = TYPESET_BUDGET_EXHAUSTED; break; }
+        TypesetContribution value = {}; PagedNativeFlow* producer = nullptr; bool structural = false;
+        status = paged_native_expand(composition, root, index, &value, &index, &producer, &structural);
+        if (status == TYPESET_DONE) { *terminal = true; status = TYPESET_OK; break; }
+        if (status != TYPESET_OK || !structural) break;
+    }
+    TypesetStatus restored = paged_native_restore(records);
+    mem_pool_destroy(pool);
+    return restored == TYPESET_OK ? status : restored;
+}
+
+static TypesetStatus paged_native_next(PagedPageProvider* provider, PagedFlowNode* flow,
+        const TypesetResume* cursor, TypesetResume* next, TypesetContribution* contribution) {
+    PagedComposer* composer = provider->composer;
+    PagedNativeFlow* root = flow->native;
+    size_t index = cursor->state[1];
+    if (!composer->depth || index >= root->count) return TYPESET_STALE;
+    const TypesetResume saved = root->cursors[index].resume;
+    TypesetContribution value = {}; PagedNativeFlow* native = nullptr;
+    size_t following = 0; bool structural = false;
+    TypesetStatus status = paged_native_expand(composer->composition, root, index, &value, &following, &native, &structural);
+    if (status == TYPESET_DONE) {
+        next->state[0]++; next->state[1] = next->state[3] = 0;
+        return TYPESET_OK;
+    }
+    if (status != TYPESET_OK) return status;
+    *contribution = value; next->state[1] = following; next->state[3] = 0;
+    float x = composer->frames[composer->depth - 1].content_x;
+    float width = composer->frames[composer->depth - 1].content_width;
+    float extent = 0.0f;
+    status = paged_space_flush(composer);
+    if (status != TYPESET_OK) return status;
+    switch (value.kind) {
+        case TYPESET_CONTRIBUTION_BOX:
+            extent = value.metrics.height + value.metrics.depth;
+            if (!isfinite(extent) || extent < 0.0f || value.metrics.advance > width) return TYPESET_UNPLACEABLE;
+            status = paged_native_material(provider, flow, native, value, nullptr, nullptr, value.metrics, x, composer->y,
+                composer->y + value.metrics.baseline);
+            break;
+        case TYPESET_CONTRIBUTION_PARAGRAPH: {
+            const TypesetParagraph* paragraph = value.paragraph;
+            if (!paragraph || !paragraph->items || !paragraph->count) return TYPESET_INVALID;
+            size_t capacity = paragraph->max_alternatives ? paragraph->max_alternatives : paragraph->count;
+            if (paragraph->count > composer->composition->options.max_items || capacity > composer->composition->options.max_items)
+                return TYPESET_BUDGET_EXHAUSTED;
+            if (!lam::pool_grow_array(composer->composition->pool, &provider->scratch, &provider->line_capacity,
+                capacity, 16)) return TYPESET_OUT_OF_MEMORY;
+            TypesetLineCandidate line = {};
+            status = typeset_next_line(paragraph, cursor->state[3], width, provider->scratch, capacity, &line);
+            if (status != TYPESET_OK) return status;
+            extent = line.height;
+            if (line.overflow) return TYPESET_UNPLACEABLE;
+            float baseline = paragraph->baseline_aware || paragraph->minimum_baseline > 0.0f || line.baseline > 0.0f
+                ? line.baseline : line.height - line.depth;
+            if (!isfinite(baseline)) return TYPESET_INVALID;
+            for (size_t i = line.paint_first; status == TYPESET_OK && i < line.paint_end; i++) {
+                const TypesetItem& item = paragraph->items[i];
+                TypesetMetrics metrics = item.metrics;
+                if (paragraph->measure && !paragraph->measure(paragraph, i, width, &metrics, paragraph->context))
+                    return TYPESET_INVALID;
+                if (item.kind == TYPESET_GLUE) x += typeset_glue_advance(&item.glue, &line.packing);
+                else if (item.kind == TYPESET_BOX || item.paint) {
+                    status = paged_native_material(provider, flow, native, value, &item, &line, metrics, x,
+                        composer->y + baseline - metrics.height, composer->y + baseline);
+                    x += metrics.advance;
+                }
+            }
+            if (line.next < paragraph->count) {
+                next->state[1] = index; next->state[3] = line.next;
+                contribution->boundary = {TYPESET_BREAK_ALLOWED, TYPESET_BREAK_PAGE, line.penalty, 0};
+                // partially consumed paragraphs retain the producer's pre-expansion checkpoint.
+                TypesetStatus restored = typeset_flow_restore(&native->binding.provider, &saved, &native->active);
+                if (restored != TYPESET_OK) return restored;
+            }
+            contribution->kind = TYPESET_CONTRIBUTION_BOX; contribution->metrics.height = extent; contribution->metrics.depth = 0.0f;
+            break;
+        }
+        case TYPESET_CONTRIBUTION_GLUE:
+            if (!isfinite(value.glue.natural) || !isfinite(value.glue.stretch) || !isfinite(value.glue.shrink) ||
+                value.glue.stretch < 0.0f || value.glue.shrink < 0.0f) return TYPESET_INVALID;
+            if (value.glue.discard_start && !composer->page_has_content) break;
+            if (provider->vertical_count >= composer->composition->options.max_items) return TYPESET_BUDGET_EXHAUSTED;
+            if (!lam::pool_grow_array(composer->composition->pool, &provider->vertical_glues, &provider->vertical_capacity,
+                provider->vertical_count + 1, 16)) return TYPESET_OUT_OF_MEMORY;
+            provider->vertical_glues[provider->vertical_count] = {};
+            provider->vertical_glues[provider->vertical_count].kind = TYPESET_GLUE;
+            provider->vertical_glues[provider->vertical_count].glue = value.glue;
+            extent = provider->vertical_count < provider->vertical_end ? typeset_glue_advance(&value.glue, &provider->vertical_packing) : 0.0f;
+            provider->vertical_count++;
+            break;
+        case TYPESET_CONTRIBUTION_BOUNDARY:
+            break;
+        case TYPESET_CONTRIBUTION_MARK:
+        case TYPESET_CONTRIBUTION_TARGET:
+            status = paged_native_event(composer, flow, value);
+            break;
+        case TYPESET_CONTRIBUTION_INSERTION:
+        case TYPESET_CONTRIBUTION_FLOAT:
+            status = paged_native_region_anchor(composer, flow, native, value);
+            break;
+        case TYPESET_CONTRIBUTION_FLUSH_DEFERRED: {
+            bool pending = paged_region_plans_pending(composer);
+            bool occupied = composer->page_has_content || paged_regions_placed(composer) || pending;
+            contribution->boundary.legality = occupied ? TYPESET_BREAK_FORCED : TYPESET_BREAK_ALLOWED;
+            if (pending) {
+                // keep the flush cursor until every earlier region is placed, independently of ordinary page ejects.
+                next->state[1] = index;
+                status = typeset_flow_restore(&native->binding.provider, &saved, &native->active);
+            }
+            break;
+        }
+        default:
+            return paged_failure(composer->composition, TYPESET_INVALID, flow->source,
+                composer->page->page_number, "native contribution requires an admitted common region or event producer");
+    }
+    if (status == TYPESET_OK && contribution->boundary.legality == TYPESET_BREAK_FORCED) {
+        bool terminal = false;
+        status = paged_native_lookahead(composer->composition, root, next->state[1], &terminal);
+        if (status != TYPESET_OK) return status;
+        // nested providers may finish before their parent; only exhaustion of the full path suppresses an eject.
+        if (terminal) contribution->boundary.legality = TYPESET_BREAK_ALLOWED;
+    }
+    if (status == TYPESET_OK) {
+        composer->y += extent;
+        if (value.kind == TYPESET_CONTRIBUTION_BOX || value.kind == TYPESET_CONTRIBUTION_PARAGRAPH) {
+            composer->page_has_content = true; provider->vertical_tail = provider->vertical_count;
+        }
+    }
+    return status;
+}
+
 static TypesetStatus paged_page_next(void* context, const TypesetResume* cursor,
         TypesetContribution* contribution, TypesetResume* next) {
     PagedPageProvider* provider = (PagedPageProvider*)context;
@@ -5316,6 +6057,7 @@ static TypesetStatus paged_page_next(void* context, const TypesetResume* cursor,
     contribution->source = {composer->tree->model->tree_id, composer->tree->layout_generation,
         dom_node_ref(flow->source).expected_id, TYPESET_PROVIDER_OFFSETS, nullptr};
     TypesetStatus status = TYPESET_OK;
+    float previous_y = composer->y;
     switch (step.kind) {
         case PAGED_STEP_BEFORE: {
             bool forced = false;
@@ -5330,6 +6072,11 @@ static TypesetStatus paged_page_next(void* context, const TypesetResume* cursor,
         case PAGED_STEP_LINE:
             next->state[0] = cursor->state[0];
             status = paged_page_line(provider, flow, cursor, next, contribution);
+            break;
+        case PAGED_STEP_NATIVE:
+            next->state[0] = cursor->state[0];
+            status = paged_native_next(provider, flow, cursor, next, contribution);
+            contribution->payload = &step;
             break;
         case PAGED_STEP_TABLE_ROW: {
             bool complete = false; uint64_t continuation = 0;
@@ -5377,6 +6124,8 @@ static TypesetStatus paged_page_next(void* context, const TypesetResume* cursor,
             break;
         }
     }
+    if (status == TYPESET_OK && step.kind != PAGED_STEP_NATIVE && composer->y > previous_y)
+        provider->vertical_tail = provider->vertical_count;
     if (status == TYPESET_UNPLACEABLE) {
         // keep earlier candidates; the overflowing trial is discarded by the start checkpoint.
         provider->blocked = status; provider->failed_source = flow->source;
@@ -5420,6 +6169,7 @@ static TypesetStatus paged_page_restore(void* context, const TypesetResume* save
     if (saved->serial < provider->start.serial) return TYPESET_STALE;
     TypesetStatus status = provider->checkpoint.view ? provider->checkpoint.restore() : TYPESET_OK;
     provider->blocked = TYPESET_OK; provider->active = provider->start;
+    provider->vertical_count = provider->vertical_tail = 0;
     // continuations contain stable flow indices; replay under one journal owns every trial fragment.
     while (status == TYPESET_OK && provider->active.serial < saved->serial) {
         TypesetContribution contribution = {}; TypesetResume next = {};
@@ -5437,18 +6187,25 @@ static TypesetStatus paged_page_probe(void* context, const TypesetContribution* 
     PagedPageProvider* provider = (PagedPageProvider*)context;
     PagedComposer* composer = provider->composer;
     if (provider->blocked != TYPESET_OK) { *stop = true; return provider->blocked; }
-    float body = composer->y - composer->page_style.content_rect.y - composer->regions[PAGED_REGION_TOP].plan.reserved_height;
+    float body = paged_body_height(composer);
     body += paged_tail_edges(composer, false);
     RadiantSpaceSpec tail = paged_space_range(composer, true);
     body += tail.minimum + (tail.optimum - tail.minimum) * provider->space_ratio;
+    PagedVerticalMeasure vertical = paged_vertical_measure(composer, body, true);
+    size_t glue_end = vertical.end; body = vertical.natural;
     PagedRegionTrial trial = {};
     for (size_t i = 0; i < PAGED_REGION_COUNT; i++) trial.anchor_counts[i] = composer->regions[i].anchor_count;
-    TypesetStatus status = paged_regions_trial(composer, body, &trial);
+    TypesetStatus status = paged_regions_trial(composer, vertical.minimum, &trial);
     if (status == TYPESET_OK) {
+        candidate->kind = TYPESET_PAGE_FLOW; candidate->page_number = composer->page->page_number;
         candidate->body_height = fmaxf(0.0f, body);
         candidate->note_height = trial.plans[PAGED_REGION_NOTE].reserved_height;
         candidate->float_height = trial.plans[PAGED_REGION_TOP].reserved_height + trial.plans[PAGED_REGION_BOTTOM].reserved_height;
         candidate->available_height = composer->page_style.content_rect.height;
+        float target = fmaxf(0.0f, candidate->available_height - candidate->note_height - candidate->float_height);
+        TypesetPacking packing = typeset_pack_glue(provider->vertical_glues, 0, glue_end, body, target);
+        if (glue_end) candidate->body_height = fmaxf(0.0f, target - packing.residual);
+        if (glue_end && !packing.order) candidate->cost += fmin(10000.0, 100.0 * fabs((double)packing.ratio * packing.ratio * packing.ratio));
         float capacity = composer->space_optimum_extra + tail.optimum - tail.minimum;
         const RadiantPageSequence* sequence = composer->page->sequence;
         bool pending = false;
@@ -5456,14 +6213,14 @@ static TypesetStatus paged_page_probe(void* context, const TypesetContribution* 
         if (provider->reject_terminal && provider->finishes_sequence(candidate->end, sequence) && !pending)
             candidate->boundary.legality = TYPESET_BREAK_FORBIDDEN;
         if (candidate->boundary.legality != TYPESET_BREAK_FORBIDDEN &&
-            (provider->boundary_keep.kind != RADIANT_KEEP_AUTO || capacity > 0.0f || (sequence && sequence->master_program))) {
+            (provider->boundary_keep.kind != RADIANT_KEEP_AUTO || capacity > 0.0f || provider->vertical_count || (sequence && sequence->master_program))) {
             PagedCandidateInfo* info = (PagedCandidateInfo*)pool_alloc(provider->candidate_pool, sizeof(PagedCandidateInfo));
             if (!info) status = TYPESET_OUT_OF_MEMORY;
-            else { *info = {provider->boundary_keep, capacity, sequence, pending}; candidate->trial = info; }
+            else { *info = {provider->boundary_keep, capacity, sequence, pending, packing, glue_end}; candidate->trial = info; }
         }
     }
     paged_region_trial_dispose(&trial);
-    if (status == TYPESET_UNPLACEABLE || body > composer->page_style.content_rect.height) {
+    if (status == TYPESET_UNPLACEABLE || candidate->body_height + candidate->note_height + candidate->float_height > composer->page_style.content_rect.height) {
         const PagedFlowStep* step = (const PagedFlowStep*)contributions[count - 1].payload;
         // opening edges cannot choose a break; diagnose at the first material they obstruct.
         *stop = step->kind != PAGED_STEP_OPEN && step->kind != PAGED_STEP_BEFORE;
@@ -5481,7 +6238,11 @@ static TypesetStatus paged_page_committed(void* context, const TypesetPageCandid
     if (candidate->boundary.reason & PAGED_RELAX_MINIMA) provider->composer->composition->diagnostic.relaxed_line_minima++;
     if (candidate->boundary.reason & PAGED_RELAX_AVOIDANCE) provider->composer->composition->diagnostic.relaxed_avoidance++;
     TypesetStatus status = paged_space_flush(provider->composer, true);
-    return status == TYPESET_OK ? provider->checkpoint.accept() : status;
+    const TypesetPagePolicy* policy = provider->composer->composition->options.page_policy;
+    if (status == TYPESET_OK && policy && policy->committed) status = policy->committed(policy->context, candidate);
+    if (status != TYPESET_OK) return status;
+    provider->composer->policy_done = true;
+    return provider->checkpoint.accept();
 }
 
 static TypesetStatus paged_page_plan_try(PagedPageProvider* context, const TypesetFlowProvider* provider,
@@ -5489,14 +6250,19 @@ static TypesetStatus paged_page_plan_try(PagedPageProvider* context, const Types
         const TypesetPagePolicy* policy, Pool* scratch, TypesetPagePlan* plan) {
     context->relax_minima = context->relax_avoidance = false;
     context->hard_failure = {}; context->failed_source = nullptr; context->failed_reason = nullptr;
-    context->space_ratio = 0.0f;
-    TypesetStatus status = typeset_page_plan(provider, cursor, constraints, probe, policy, scratch, plan);
+    context->space_ratio = 0.0f; context->vertical_packing = {}; context->vertical_end = SIZE_MAX;
+    context->vertical_count = context->vertical_tail = 0;
+    TypesetPolicyCheckpoint policy_checkpoint = {};
+    TypesetStatus status = typeset_policy_checkpoint(policy, &policy_checkpoint);
+    if (status == TYPESET_OK) status = typeset_page_plan(provider, cursor, constraints, probe, policy, scratch, plan);
     if (status == TYPESET_UNPLACEABLE && !paged_regions_placed(context->composer)) {
-        context->relax_minima = true; context->space_ratio = 0.0f;
-        status = typeset_page_plan(provider, cursor, constraints, probe, policy, scratch, plan);
+        context->relax_minima = true; context->space_ratio = 0.0f; context->vertical_packing = {}; context->vertical_end = SIZE_MAX;
+        status = typeset_policy_restore(policy, &policy_checkpoint);
+        if (status == TYPESET_OK) status = typeset_page_plan(provider, cursor, constraints, probe, policy, scratch, plan);
         if (status == TYPESET_UNPLACEABLE) {
-            context->relax_avoidance = true; context->space_ratio = 0.0f;
-            status = typeset_page_plan(provider, cursor, constraints, probe, policy, scratch, plan);
+            context->relax_avoidance = true; context->space_ratio = 0.0f; context->vertical_packing = {}; context->vertical_end = SIZE_MAX;
+            status = typeset_policy_restore(policy, &policy_checkpoint);
+            if (status == TYPESET_OK) status = typeset_page_plan(provider, cursor, constraints, probe, policy, scratch, plan);
         }
     }
     return status;
@@ -5506,13 +6272,15 @@ static TypesetStatus paged_layout_pages(PagedComposer* composer, PagedFlowNode* 
     PagedCheckpoint document;
     TypesetStatus status = document.begin(composer);
     if (status != TYPESET_OK) return status;
-    PagedPageProvider context = {}; context.composer = composer;
+    PagedPageProvider context = {}; context.composer = composer; composer->provider = &context;
     status = context.flatten(root);
     if (status == TYPESET_OK) status = paged_next_page(composer);
     TypesetFlowProvider provider = {composer->tree->model->tree_id, composer->tree->layout_generation,
         &context, paged_page_next, paged_flow_cursor_copy, paged_page_restore};
     TypesetResume cursor = {provider.identity, provider.generation, 0, {}}, next = {};
-    TypesetPagePolicy policy = {&context, paged_choose_page, paged_pack_page, paged_page_committed};
+    TypesetPagePolicy policy = {&context, paged_choose_page, paged_pack_page, paged_page_committed,
+        paged_policy_checkpoint, paged_policy_restore, paged_page_transition};
+    TypesetPageAssembly assembly = {};
     TypesetPageProbe probe = {&context, paged_page_probe};
     TypesetPageConstraints constraints = {INFINITY, composer->composition->options.max_items,
         composer->composition->options.max_items};
@@ -5523,7 +6291,9 @@ static TypesetStatus paged_layout_pages(PagedComposer* composer, PagedFlowNode* 
         if (!scratch) { status = TYPESET_OUT_OF_MEMORY; break; }
         context.candidate_pool = scratch;
         TypesetPagePlan plan = {};
-        status = paged_page_plan_try(&context, &provider, &cursor, &constraints, &probe, &policy, scratch, &plan);
+        TypesetPolicyCheckpoint policy_checkpoint = {};
+        status = typeset_policy_checkpoint(&policy, &policy_checkpoint);
+        if (status == TYPESET_OK) status = paged_page_plan_try(&context, &provider, &cursor, &constraints, &probe, &policy, scratch, &plan);
         const PagedCandidateInfo* info = status == TYPESET_OK ? (const PagedCandidateInfo*)plan.candidate.trial : nullptr;
         const RadiantPageSequence* sequence = info ? info->sequence :
             status == TYPESET_UNPLACEABLE ? context.source_sequence(context.failed_source) : nullptr;
@@ -5539,7 +6309,8 @@ static TypesetStatus paged_layout_pages(PagedComposer* composer, PagedFlowNode* 
                 status = paged_empty_page_restyle(composer, false);
                 if (status == TYPESET_OK) {
                     plan = {};
-                    status = paged_page_plan_try(&context, &provider, &cursor, &constraints, &probe, &policy, scratch, &plan);
+                    status = typeset_policy_restore(&policy, &policy_checkpoint);
+                    if (status == TYPESET_OK) status = paged_page_plan_try(&context, &provider, &cursor, &constraints, &probe, &policy, scratch, &plan);
                 }
                 if (status == TYPESET_UNPLACEABLE || (status == TYPESET_OK && !context.finishes_page(plan.candidate, sequence))) {
                     composer->terminal_page = 0;
@@ -5548,13 +6319,22 @@ static TypesetStatus paged_layout_pages(PagedComposer* composer, PagedFlowNode* 
                     if (status == TYPESET_OK) {
                         // keep material for a following terminal page instead of oscillating page counts.
                         context.reject_terminal = normal_finished; plan = {};
-                        status = paged_page_plan_try(&context, &provider, &cursor, &constraints, &probe, &policy, scratch, &plan);
+                        status = typeset_policy_restore(&policy, &policy_checkpoint);
+                        if (status == TYPESET_OK) status = paged_page_plan_try(&context, &provider, &cursor, &constraints, &probe, &policy, scratch, &plan);
                     }
                 }
             } else if (status == TYPESET_OK) status = ordinary_status;
         }
-        if (status == TYPESET_OK) status = typeset_page_commit(&plan, &next);
+        bool reinsert = false;
+        if (status == TYPESET_OK) status = paged_assembly_resolve(composer, &plan, &assembly, &reinsert);
+        if (status == TYPESET_OK && !reinsert) status = typeset_page_commit(&plan, &next);
         mem_pool_destroy(scratch);
+        if (status == TYPESET_OK && reinsert) {
+            // the owned plan has returned to input; retain policy progress, without emitting this candidate.
+            composer->terminal_page = 0; composer->retain_aux_tail = false;
+            status = paged_empty_page_restyle(composer, false);
+            continue;
+        }
         if (status == TYPESET_UNPLACEABLE && paged_regions_placed(composer)) {
             // an insertion-only page advances its queue without advancing the body continuation.
             status = paged_next_page(composer); cursor.state[2] = 0; continue;
@@ -5562,6 +6342,7 @@ static TypesetStatus paged_layout_pages(PagedComposer* composer, PagedFlowNode* 
         if (status != TYPESET_OK) break;
         if (next.serial <= cursor.serial) { status = TYPESET_NO_PROGRESS; break; }
         cursor = next;
+        assembly.count = 0;
         if (cursor.state[0] < context.count) {
             size_t following = context.following_material(cursor.state[0]);
             if (following < context.count && context.steps[following].kind == PAGED_STEP_BEFORE) {
@@ -5579,9 +6360,11 @@ static TypesetStatus paged_layout_pages(PagedComposer* composer, PagedFlowNode* 
     }
     if (status == TYPESET_OK) return document.accept();
     composer->composition->diagnostic = failure;
-    paged_failure(composer->composition, status, context.failed_source ? context.failed_source : root->source,
-        composer->page ? composer->page->page_number : 0,
-        context.failed_reason ? context.failed_reason : "whole-page flow could not be composed");
+    // trial rewind preserves a precise producer diagnostic; add the whole-page fallback only when absent.
+    if (failure.status != status || !failure.reason)
+        paged_failure(composer->composition, status, context.failed_source ? context.failed_source : root->source,
+            composer->page ? composer->page->page_number : 0,
+            context.failed_reason ? context.failed_reason : "whole-page flow could not be composed");
     return document.fail(status);
 }
 
@@ -5957,6 +6740,7 @@ static TypesetStatus paged_layout_fixed_pages(ViewTree* tree, PagedComposition* 
         if (!composer.page->label) { status = TYPESET_OUT_OF_MEMORY; break; }
         status = paged_fixed_flow(&composer, flow);
         if (status == TYPESET_OK) status = paged_space_flush(&composer, true);
+        if (status == TYPESET_OK) status = paged_page_policy_finish(&composer);
     }
     if (status != TYPESET_OK && composition->diagnostic.status == TYPESET_OK)
         paged_failure(composition, status, program->fixed_source.address, 0, "fixed page content could not be composed");
@@ -5992,11 +6776,16 @@ static TypesetStatus paged_layout_pass(ViewTree* tree, const PagedLayoutOptions*
     if (root_scope.status != TYPESET_OK) return root_scope.status;
     TypesetStatus mark_status = paged_mark_register(composition, style);
     if (mark_status != TYPESET_OK) return mark_status;
+    TypesetStatus native_status = paged_native_bindings(tree, composition);
+    if (native_status != TYPESET_OK) return native_status;
     if (tree->model->css->page_document->fixed_count) return paged_layout_fixed_pages(tree, composition, style);
     composition->root = paged_flow_new(composition, PAGED_FLOW_BLOCK, root, style);
     if (!composition->root) return TYPESET_OUT_OF_MEMORY;
     PagedFlowNode* paragraph = nullptr;
     TypesetStatus status = paged_build_children(tree, composition, root, composition->root, &paragraph, 0);
+    for (PagedNativeFlow* flow = composition->native_flows; status == TYPESET_OK && flow; flow = flow->next)
+        if (flow->binding.control.address && !flow->used) status = paged_failure(composition, TYPESET_INVALID, flow->binding.control.address, 0,
+            "native flow control was not admitted to body composition");
     PagedComposer composer = {}; composer.tree = tree; composer.composition = composition;
     PagedCheckpoint edition;
     if (status == TYPESET_OK) status = edition.begin(&composer);
@@ -6052,19 +6841,43 @@ static uint32_t paged_target_page(ViewTree* tree, DomElement* source, bool last 
     return result;
 }
 
+static void paged_target_area_range(uint32_t (*pages)[2], uint32_t page, bool normal, bool blank) {
+    if (!page) return;
+    for (size_t area = 0; area < 3; area++) {
+        if ((area == RADIANT_QUERY_NORMAL && !normal) || (area == RADIANT_QUERY_NON_BLANK && blank)) continue;
+        if (!pages[area][0] || page < pages[area][0]) pages[area][0] = page;
+        if (page > pages[area][1]) pages[area][1] = page;
+    }
+}
+
 static void paged_target_area_enter(PagedComposition* composition, DomNode* source,
         uint32_t page, bool normal, bool blank) {
     for (DomNode* node = source; node; node = node->parent) {
         PagedMarkSource key = {}; key.source = node;
         PagedMarkSource* mark = (PagedMarkSource*)hashmap_get(composition->mark_sources, &key);
         if (!mark) continue;
-        for (size_t area = 0; area < 3; area++) {
-            if ((area == RADIANT_QUERY_NORMAL && !normal) || (area == RADIANT_QUERY_NON_BLANK && blank)) continue;
-            uint32_t* pages = mark->generated_pages[area];
-            if (!pages[0] || page < pages[0]) pages[0] = page;
-            if (page > pages[1]) pages[1] = page;
-        }
+        paged_target_area_range(mark->generated_pages, page, normal, blank);
     }
+}
+
+static void paged_native_target_areas(ViewTree* tree, TypesetTarget* target, PagedTargetValue* value) {
+    const ViewNodeState* state = view_tree_native_state(tree, &target->source);
+    bool placed = false;
+    for (LayoutViewNode* node = state ? state->first_occurrence.get() : nullptr; node; node = node->next_occurrence) {
+        LayoutViewNode* parent = node->parent;
+        while (parent && parent->kind != LAYOUT_VIEW_PAGE) parent = parent->parent;
+        if (!parent) continue;
+        const ViewPageBox* page = (const ViewPageBox*)parent;
+        bool normal = node->role == VIEW_FRAGMENT_BODY || node->role == VIEW_FRAGMENT_REPEATED_TABLE || node->role == VIEW_FRAGMENT_STATIC;
+        paged_target_area_range(value->pages, page->page_number, normal, page->blank); placed = true;
+    }
+    if (!placed) {
+        // explicit zero-size events bind anchors without manufacturing paint fragments.
+        paged_target_area_range(value->pages, target->page_number, true, false);
+        paged_target_area_range(value->pages, target->last_page_number, true, false);
+    }
+    target->page_number = value->pages[RADIANT_QUERY_ALL][0];
+    target->last_page_number = value->pages[RADIANT_QUERY_ALL][1];
 }
 
 static void paged_target_areas_capture(ViewTree* tree) {
@@ -6081,7 +6894,13 @@ static void paged_target_areas_capture(ViewTree* tree) {
             radiant_page_element(node->source.address->as_element(), "region");
         bool normal = node->role == VIEW_FRAGMENT_BODY || node->role == VIEW_FRAGMENT_REPEATED_TABLE ||
             (node->role == VIEW_FRAGMENT_STATIC && !viewport);
-        paged_target_area_enter(composition, node->source.address, ((ViewPageBox*)parent)->page_number, normal, false);
+        DomNode* area_source = node->source.address;
+        if (!area_source && node->native_material) {
+            // real page-control ancestors own the native body's area; native source identity remains independent.
+            for (LayoutViewNode* owner = node->parent; owner && owner->kind != LAYOUT_VIEW_PAGE; owner = owner->parent)
+                if (owner->source.address) { area_source = owner->source.address; break; }
+        }
+        paged_target_area_enter(composition, area_source, ((ViewPageBox*)parent)->page_number, normal, false);
     }
     for (size_t i = 0; i < tree->model->page_count; i++) {
         const ViewPageBox* page = tree->model->pages.get()[i];
@@ -6100,37 +6919,43 @@ static TypesetStatus paged_targets_capture(ViewTree* tree, PagedReferenceSession
         if (!session->page_labels[i]) return TYPESET_OUT_OF_MEMORY;
     }
     TypesetTargetStore next = {tree->model->tree_id, tree->layout_generation, session->pool,
-        nullptr, 0, 0, session->targets.limit, nullptr};
+        nullptr, 0, 0, session->targets.limit, nullptr, session->targets.sources};
     TypesetStatus status = TYPESET_OK;
     for (size_t i = 0; status == TYPESET_OK && i < session->targets.count; i++) {
         const TypesetTarget& previous = session->targets.entries[i];
-        const PagedTargetValue* old = (const PagedTargetValue*)previous.value.get();
-        DomNode* node = dom_node_ref_validate(tree->model->document, old->source);
-        if (!node || !node->is_element()) { status = TYPESET_STALE; break; }
-        DomElement* source = node->as_element();
-        ViewCssStyle* style = view_css_resolve(tree, source);
+        const PagedTargetValue* old = (const PagedTargetValue*)previous.binding.get();
+        DomNode* node = old->source.address ? dom_node_ref_validate(tree->model->document, old->source) : nullptr;
+        if (old->source.address && (!node || !node->is_element())) { status = TYPESET_STALE; break; }
+        DomElement* source = node ? node->as_element() : nullptr;
+        ViewCssStyle* style = source ? view_css_resolve(tree, source) : nullptr;
         PagedTargetValue* value = (PagedTargetValue*)pool_calloc(session->pool, sizeof(PagedTargetValue));
-        if (!style || !value) { status = TYPESET_OUT_OF_MEMORY; break; }
+        if ((source && !style) || !value) { status = TYPESET_OUT_OF_MEMORY; break; }
         value->provider = tree->model->tree_id; value->source = old->source; value->text = old->text;
-        value->counters = counter_snapshot_copy(style->counters, session->pool);
+        value->counters = counter_snapshot_copy(style ? style->counters.get() : old->counters, session->pool);
         if (!value->counters) { status = TYPESET_OUT_OF_MEMORY; break; }
         const uint8_t pseudos[] = {PSEUDO_ELEMENT_BEFORE, PSEUDO_ELEMENT_AFTER};
         const char** parts[] = {&value->before, &value->after};
         for (size_t j = 0; j < 2; j++) {
-            ViewCssStyle* pseudo = view_css_resolve_pseudo(tree, source, pseudos[j]);
-            if (!pseudo) { status = TYPESET_OUT_OF_MEMORY; break; }
-            *parts[j] = pool_strdup(session->pool, pseudo->generated_text ? pseudo->generated_text.get() : "");
+            ViewCssStyle* pseudo = source ? view_css_resolve_pseudo(tree, source, pseudos[j]) : nullptr;
+            if (source && !pseudo) { status = TYPESET_OUT_OF_MEMORY; break; }
+            *parts[j] = pool_strdup(session->pool, pseudo && pseudo->generated_text ? pseudo->generated_text.get() : "");
             if (!*parts[j]) { status = TYPESET_OUT_OF_MEMORY; break; }
         }
         if (status != TYPESET_OK) break;
-        TypesetTarget target = {previous.name, {tree->model->tree_id, tree->layout_generation,
-            value->source.expected_id, TYPESET_PROVIDER_OFFSETS, nullptr}, paged_target_page(tree, source),
-            lam::up((const TypesetRecord*)value)};
-        target.last_page_number = paged_target_page(tree, source, true);
+        const TypesetTarget* placed = source ? nullptr : typeset_target_find(&tree->model->composition->native_targets, previous.name);
+        if (!source && !placed) { status = TYPESET_STALE; break; }
+        TypesetTarget target = previous;
+        target.page_number = source ? paged_target_page(tree, source) : placed->page_number;
+        target.last_page_number = source ? paged_target_page(tree, source, true) : placed->last_page_number;
+        target.binding = lam::up((const TypesetRecord*)value);
+        if (source) {
+            // DOM sources follow the rebuilt edition; native provider generations remain unchanged.
+            target.source.generation = tree->layout_generation; target.value = target.binding;
+        } else paged_native_target_areas(tree, &target, value);
         PagedMarkSource key = {}; key.source = source;
-        const PagedMarkSource* mark = (const PagedMarkSource*)hashmap_get(tree->model->composition->mark_sources, &key);
+        const PagedMarkSource* mark = source ? (const PagedMarkSource*)hashmap_get(tree->model->composition->mark_sources, &key) : nullptr;
         for (size_t area = 0; area < 3; area++) for (size_t edge = 0; edge < 2; edge++) {
-            uint32_t number = mark ? mark->generated_pages[area][edge] : 0;
+            uint32_t number = source ? mark ? mark->generated_pages[area][edge] : 0 : value->pages[area][edge];
             value->pages[area][edge] = number;
             if (number) {
                 value->labels[area][edge] = pool_strdup(session->pool, tree->model->pages.get()[number - 1]->label);
@@ -6192,6 +7017,15 @@ static TypesetStatus paged_reference_observe(ViewTree* tree, PagedReferenceSessi
         paged_signature_value(signature, node->source.expected_id); paged_signature_value(signature, node->role);
         paged_signature_rect(signature, node->rect);
         paged_signature_value(signature, node->text_start); paged_signature_value(signature, node->text_length);
+        paged_signature_value(signature, node->native_material != nullptr);
+        if (node->native_material) {
+            const ViewNativeMaterial& material = *node->native_material;
+            paged_signature_value(signature, material.source.provider); paged_signature_value(signature, material.source.generation);
+            paged_signature_value(signature, material.source.node); paged_signature_value(signature, material.source.offset_unit);
+            paged_signature_value(signature, material.metrics.advance); paged_signature_value(signature, material.metrics.height);
+            paged_signature_value(signature, material.metrics.depth); paged_signature_value(signature, material.metrics.baseline);
+            paged_signature_rect(signature, material.metrics.ink);
+        }
         paged_signature_value(signature, node->first_fragment); paged_signature_value(signature, node->last_fragment);
         if (node->image_box) {
             const PaintImageBox* box = node->image_box;
@@ -6204,8 +7038,13 @@ static TypesetStatus paged_reference_observe(ViewTree* tree, PagedReferenceSessi
     paged_signature_value(signature, session->targets.count);
     for (size_t i = 0; i < session->targets.count; i++) {
         const TypesetTarget& target = session->targets.entries[i];
-        const PagedTargetValue* value = (const PagedTargetValue*)target.value.get();
+        const PagedTargetValue* value = (const PagedTargetValue*)target.binding.get();
         paged_signature_text(signature, target.name); paged_signature_value(signature, target.page_number);
+        paged_signature_value(signature, target.last_page_number);
+        if (!value->source.address) {
+            paged_signature_value(signature, target.source.provider); paged_signature_value(signature, target.source.generation);
+            paged_signature_value(signature, target.source.node); paged_signature_value(signature, target.source.offset_unit);
+        }
         paged_signature_text(signature, value->text); paged_signature_text(signature, value->before);
         paged_signature_text(signature, value->after);
         paged_signature_counters(signature, value->counters);
@@ -6215,6 +7054,19 @@ static TypesetStatus paged_reference_observe(ViewTree* tree, PagedReferenceSessi
             paged_signature_text(signature, value->labels[area][edge]);
         }
     }
+    const TypesetMarkStore& marks = tree->model->composition->marks;
+    paged_signature_value(signature, marks.count);
+    for (size_t i = 0; i < marks.count; i++) {
+        const TypesetMark& mark = marks.entries[i];
+        paged_signature_value(signature, mark.kind); paged_signature_text(signature, mark.name);
+        // a rebuilt DOM edition changes its layout epoch; producer generations remain semantic input.
+        uint64_t generation = mark.source.provider == marks.provider && mark.source.generation == marks.generation ?
+            0 : mark.source.generation;
+        paged_signature_value(signature, mark.source.provider); paged_signature_value(signature, generation);
+        paged_signature_value(signature, mark.source.node); paged_signature_value(signature, mark.source.offset_unit);
+        paged_signature_value(signature, mark.page_number); paged_signature_value(signature, mark.at_page_start);
+        paged_signature_text(signature, mark.text);
+    }
     TypesetStatus status = typeset_convergence_observe(&session->convergence, signature->str, signature->length, settled);
     strbuf_free(signature);
     return status;
@@ -6223,7 +7075,11 @@ static TypesetStatus paged_reference_observe(ViewTree* tree, PagedReferenceSessi
 TypesetStatus layout_secondary_view(ViewTree* tree, const PagedLayoutOptions* options,
                                     PagedLayoutDiagnostic* diagnostic) {
     if (diagnostic) *diagnostic = {};
-    if (!tree || !tree->model || !options || !options->max_pages || !options->max_nodes ||
+    if (!tree || !tree->model || !options || (options->native_flow_count && !options->native_flows) ||
+        (options->page_policy && (!options->page_policy->choose || !options->page_policy->assemble ||
+            (!!options->page_policy->checkpoint != !!options->page_policy->restore) ||
+            ((options->page_policy->committed || options->page_policy->transition) && !options->page_policy->checkpoint))) ||
+        !options->max_pages || !options->max_nodes ||
         !options->max_items || !options->max_block_trials || !options->max_depth || !options->max_reference_passes ||
         options->first_side > VIEW_PAGE_RIGHT || tree->model->committed) return TYPESET_INVALID;
     if (!view_tree_model_source_valid(tree)) return TYPESET_STALE;
@@ -6235,8 +7091,14 @@ TypesetStatus layout_secondary_view(ViewTree* tree, const PagedLayoutOptions* op
     session.targets = {tree->model->tree_id, tree->layout_generation, session.pool,
         nullptr, 0, 0, options->max_nodes, nullptr};
     session.convergence.pool = session.pool; session.convergence.limit = options->max_reference_passes;
+    TypesetPolicyCheckpoint policy_checkpoint = {};
+    const TypesetPagePolicy* policy = options->page_policy;
+    bool policy_saved = policy && policy->checkpoint;
+    TypesetStatus status = typeset_policy_checkpoint(policy, &policy_checkpoint);
+    if (status != TYPESET_OK) return status;
     size_t visited = 0;
-    TypesetStatus status = paged_targets_seed(tree, &session, tree->model->document->root, 0, &visited, options);
+    status = paged_targets_seed(tree, &session, tree->model->document->root, 0, &visited, options);
+    if (status == TYPESET_OK) status = paged_native_targets_seed(tree, &session, *options);
     bool settled = false;
     while (status == TYPESET_OK && !settled) {
         session.pass++;
@@ -6255,7 +7117,11 @@ TypesetStatus layout_secondary_view(ViewTree* tree, const PagedLayoutOptions* op
             if (diagnostic) *diagnostic = composition->diagnostic;
             composition->references = nullptr;
         }
-        if (status == TYPESET_OK && !settled) tree->reset_retained();
+        if (status == TYPESET_OK && !settled) {
+            // provisional page callbacks rewind with a rejected reference pass (D4.5.1v4).
+            if (policy_saved) status = typeset_policy_restore(policy, &policy_checkpoint);
+            if (status == TYPESET_OK) tree->reset_retained();
+        }
     }
     if (status == TYPESET_OK && session.targets.count) {
         // Settled anchor bindings belong to this view generation, alongside its fragments.
@@ -6264,6 +7130,10 @@ TypesetStatus layout_secondary_view(ViewTree* tree, const PagedLayoutOptions* op
         session.targets = {}; session.pool = nullptr;
     }
     if (status == TYPESET_OK) status = view_tree_model_commit(tree) ? TYPESET_OK : TYPESET_INVALID;
+    if (status != TYPESET_OK && policy_saved) {
+        TypesetStatus restored = typeset_policy_restore(policy, &policy_checkpoint);
+        if (restored != TYPESET_OK) status = restored;
+    }
     if (diagnostic && diagnostic->status == TYPESET_OK) diagnostic->status = status;
     return status;
 }
@@ -6273,6 +7143,14 @@ const TypesetTarget* layout_secondary_target(ViewTree* tree, const char* id) {
     if (tree->model->page_instances) tree = view_tree_page_content_owner(tree);
     if (!tree || !tree->model->composition) return nullptr;
     return typeset_target_find(&tree->model->composition->targets, id);
+}
+
+const TypesetMark* layout_secondary_mark(ViewTree* tree, TypesetMarkKind kind, const char* name,
+        uint32_t page_number, TypesetMarkSelection selection) {
+    if (!view_tree_model_source_valid(tree) || !tree->model->committed) return nullptr;
+    if (tree->model->page_instances) tree = view_tree_page_content_owner(tree);
+    if (!tree || !tree->model->composition) return nullptr;
+    return typeset_mark_select(&tree->model->composition->marks, kind, name, page_number, selection);
 }
 
 static void paged_paint_table_background(LayoutViewNode* node, PaintList* paint, Color color,

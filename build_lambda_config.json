@@ -3420,6 +3420,11 @@
               "radiant/paint_ir.cpp",
               "radiant/render_paint_block.cpp",
               "radiant/render_paint_boundary.cpp",
+              "radiant/render_geometry.cpp",
+              "radiant/render_path.cpp",
+              "radiant/view_length.cpp",
+              "radiant/view_transform.cpp",
+              "radiant/animation_value.cpp",
               "test/test_display_list_stubs.cpp",
               "radiant/render_glyph_path.cpp"
             ],

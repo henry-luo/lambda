@@ -71,7 +71,8 @@ Url* url_create() {
 Url* url_clone(const Url* src) {
     if (!src) return NULL;
 
-    Url* url = url_create();
+    // cloning preserves absent components and must not overwrite constructor-owned defaults.
+    Url* url = mem_calloc(1, sizeof(Url), MEM_CAT_TEMP);
     if (!url) return NULL;
 
     // Copy primitive fields
@@ -79,18 +80,16 @@ Url* url_clone(const Url* src) {
     url->port_number = src->port_number;
     url->is_valid = src->is_valid;
 
-    // Clone string fields
-    if (src->href) url->href = url_string_clone(src->href);
-    if (src->origin) url->origin = url_string_clone(src->origin);
-    if (src->protocol) url->protocol = url_string_clone(src->protocol);
-    if (src->username) url->username = url_string_clone(src->username);
-    if (src->password) url->password = url_string_clone(src->password);
-    if (src->host) url->host = url_string_clone(src->host);
-    if (src->hostname) url->hostname = url_string_clone(src->hostname);
-    if (src->port) url->port = url_string_clone(src->port);
-    if (src->pathname) url->pathname = url_string_clone(src->pathname);
-    if (src->search) url->search = url_string_clone(src->search);
-    if (src->hash) url->hash = url_string_clone(src->hash);
+    const struct { String** destination; const String* source; } fields[] = {
+        {&url->href, src->href}, {&url->origin, src->origin}, {&url->protocol, src->protocol},
+        {&url->username, src->username}, {&url->password, src->password}, {&url->host, src->host},
+        {&url->hostname, src->hostname}, {&url->port, src->port}, {&url->pathname, src->pathname},
+        {&url->search, src->search}, {&url->hash, src->hash}
+    };
+    for (size_t i = 0; i < sizeof(fields) / sizeof(*fields); i++) if (fields[i].source) {
+        *fields[i].destination = url_string_clone(fields[i].source);
+        if (!*fields[i].destination) { url_destroy(url); return NULL; }
+    }
 
     return url;
 }

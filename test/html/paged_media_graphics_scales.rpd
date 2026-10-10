@@ -1,0 +1,47 @@
+<?xml version='1.0' encoding='utf-8'?>
+<r:page-document xmlns:r="urn:lambda:radiant:page" r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" r:line-stacking-strategy="max-height" style="margin:0; font-family:Arial; font-size:7.5pt; line-height:9pt; color:black; white-space:normal" r:linefeed-treatment="treat-as-space" r:white-space-treatment="ignore-if-surrounding-linefeed" r:white-space-collapse="true" r:wrap-option="wrap" r:allowed-width-scale="any 50% 150% 300%" r:allowed-height-scale="any 100% 150%">
+  <r:master-set r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics">
+    <r:page-master r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" name="sheet" style="size:180pt 135pt; margin:7.5pt">
+      <r:region r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" role="body" name="xsl-region-body" display-align="before" style="overflow:hidden" />
+    </r:page-master>
+  </r:master-set>
+  <r:page-sequence r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" master-reference="sheet" force-page-count="no-force">
+    <r:flow r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" region-name="xsl-region-body">
+      <div r:block-inline-geometry="reference" r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics">
+        <img r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" src="paged_media_graphics.svg" r:content-width="scale-to-fit" r:content-height="scale-to-fit" r:scaling="uniform" style="width:60pt; height:30pt; object-position:0% 0%; overflow:hidden; background-color:#e8f0ff; text-align:start" />
+      </div>
+      <div r:block-inline-geometry="reference" r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics">
+        <img r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" src="paged_media_graphics.svg" r:content-width="scale-to-fit" r:content-height="scale-to-fit" r:scaling="uniform" style="width:60pt; height:30pt; object-position:0% 0%; overflow:hidden; background-color:#e8ffe8; text-align:start" r:allowed-width-scale="300% any" r:allowed-height-scale="any" />
+      </div>
+      <div r:block-inline-geometry="reference" r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics">
+        <img r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" src="paged_media_graphics.svg" r:content-width="150%" r:content-height="auto" r:scaling="uniform" style="width:60pt; height:30pt; object-position:50% 100%; overflow:hidden; background-color:#fff0d0; text-align:center" r:allowed-width-scale="150%" r:allowed-height-scale="any" />
+      </div>
+    </r:flow>
+  </r:page-sequence>
+  <r:page-sequence r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" master-reference="sheet" force-page-count="no-force">
+    <r:flow r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" region-name="xsl-region-body">
+      <div r:block-inline-geometry="reference" r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics">
+        <img r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" src="paged_media_graphics.svg" r:content-width="scale-to-fit" r:content-height="scale-to-fit" r:scaling="non-uniform" style="width:60pt; height:30pt; object-position:0% 50%; overflow:hidden; background-color:#e8f0ff; text-align:start" r:allowed-width-scale="50% 150%" r:allowed-height-scale="100%" />
+      </div>
+      <div r:block-inline-geometry="reference" r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics">
+        <img r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" src="paged_media_graphics.svg" r:content-width="scale-to-fit" r:content-height="auto" r:scaling="non-uniform" style="width:60pt; height:30pt; object-position:50% 100%; overflow:visible; background-color:#e8ffe8; text-align:center" r:allowed-width-scale="50% 150%" r:allowed-height-scale="150%" />
+      </div>
+      <div r:block-inline-geometry="reference" r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics">
+        <img r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" src="paged_media_graphics.svg" r:content-width="scale-to-fit" r:content-height="scale-to-fit" r:scaling="uniform" style="width:60pt; height:30pt; object-position:100% 100%; overflow:hidden; background-color:#fff0d0; text-align:end" r:allowed-width-scale="300% any" r:allowed-height-scale="300% any" />
+      </div>
+    </r:flow>
+  </r:page-sequence>
+  <r:page-sequence r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" master-reference="sheet" force-page-count="no-force">
+    <r:flow r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" region-name="xsl-region-body">
+      <div r:block-inline-geometry="reference" r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics">
+        <img r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" src="data:image/svg+xml,%3Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20width%3D'30pt'%20height%3D'15pt'%20viewBox%3D'0%200%2040%2020'%20preserveAspectRatio%3D'none'%3E%3Crect%20width%3D'40'%20height%3D'20'%20fill%3D'%23d04020'%2F%3E%3C%2Fsvg%3E" r:content-width="scale-down-to-fit" r:content-height="auto" r:scaling="uniform" style="width:60pt; height:30pt; object-position:50% 50%; overflow:hidden; background-color:#e8f0ff; text-align:center" r:allowed-width-scale="100% 150%" r:allowed-height-scale="any" />
+      </div>
+      <div r:block-inline-geometry="reference" r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics">
+        <img r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" src="data:image/svg+xml,%3Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20width%3D'30pt'%20height%3D'15pt'%20viewBox%3D'0%200%2040%2020'%20preserveAspectRatio%3D'none'%3E%3Crect%20width%3D'40'%20height%3D'20'%20fill%3D'%23d04020'%2F%3E%3C%2Fsvg%3E" r:content-width="scale-up-to-fit" r:content-height="auto" r:scaling="uniform" style="width:60pt; height:30pt; object-position:100% 100%; overflow:hidden; background-color:#e8ffe8; text-align:end" r:allowed-width-scale="50% 150%" r:allowed-height-scale="any" />
+      </div>
+      <div r:block-inline-geometry="reference" r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics">
+        <img r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" src="data:image/svg+xml,%3Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20width%3D'30pt'%20height%3D'15pt'%20viewBox%3D'0%200%2040%2020'%20preserveAspectRatio%3D'none'%3E%3Crect%20width%3D'40'%20height%3D'20'%20fill%3D'%23d04020'%2F%3E%3C%2Fsvg%3E" r:content-width="scale-to-fit" r:content-height="scale-to-fit" r:scaling="uniform" style="width:60pt; height:30pt; object-position:0% 0%; overflow:hidden; background-color:#fff0d0; text-align:start" r:allowed-width-scale="any calc(25% * 2) calc(75% * 2)" r:allowed-height-scale="min(200%, 150%) any" />
+      </div>
+    </r:flow>
+  </r:page-sequence>
+</r:page-document>

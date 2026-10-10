@@ -142,6 +142,7 @@ typedef enum CssMathType {
     CSS_MATH_INVALID, CSS_MATH_NUMBER, CSS_MATH_LENGTH, CSS_MATH_PERCENT,
     CSS_MATH_LENGTH_PERCENT, CSS_MATH_ANGLE, CSS_MATH_DEFERRED,
     CSS_MATH_TIME, CSS_MATH_RESOLUTION,
+    CSS_MATH_COMPOUND, // intermediate products are rejected at the public property boundary
 } CssMathType;
 typedef bool (*CssMathLeafResolver)(void* context, const CssValue* value, double* result);
 struct CssMathEvaluationContext {
@@ -1362,6 +1363,7 @@ CssValue* css_value_create_length(Pool* pool, double value, CssUnit unit);
 CssValue* css_value_create_percentage(Pool* pool, double value);
 CssValue* css_value_create_number(Pool* pool, double value);
 CssValue* css_value_create_color_rgba(Pool* pool, uint8_t r, uint8_t g, uint8_t b, uint8_t a);
+CssValue* css_value_create_color_hex(Pool* pool, const char* hex);
 CssValue* css_value_create_keyword(Pool* pool, const char* keyword);
 CssValue* css_value_create_string(Pool* pool, const char* string);
 CssValue* css_value_create_url(Pool* pool, const char* url);
