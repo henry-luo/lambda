@@ -96,14 +96,14 @@ void fiber_memory_reclaim(void* addr, size_t len) {
 #endif
 }
 
-void fiber_stack_trim(FiberStack* stack, size_t keep_bytes) {
+void fiber_stack_trim(FiberStack* stack, size_t keep_bytes, bool reclaim) {
     if (!stack || !stack->reservation) return;
     size_t page = fiber_page_size();
     uintptr_t keep = (keep_bytes + page - 1) & ~(uintptr_t)(page - 1);
     if (stack->high - stack->low <= keep) return;
     uintptr_t end = stack->high - keep;
     fiber_memory_discard((void*)stack->low, end - stack->low);
-    fiber_memory_reclaim((void*)stack->low, end - stack->low);
+    if (reclaim) fiber_memory_reclaim((void*)stack->low, end - stack->low);
 }
 
 // ---------------------------------------------------------------------------

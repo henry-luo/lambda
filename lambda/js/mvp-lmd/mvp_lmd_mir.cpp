@@ -1656,6 +1656,8 @@ static LmdValue boxed(LmdCompiler* c, MIR_reg_t r, unsigned hint = K_ANY) {
 static bool is_boxed(LmdValue v) { return v.kind & K_BOXED; }
 static unsigned semantic(LmdValue v) { return v.kind & K_ANY; }
 static LmdValue expression(LmdCompiler* c, AstNode* n, bool borrow_scalar = false, bool numeric = false, bool chain_continuation = false);
+static bool constructor_layout_reusable(MvpLmdProgram*, AstNode*, bool value = false,
+    bool construction = false, int depth = 0);
 static LmdValue box(LmdCompiler* c, LmdValue value);
 static MIR_reg_t to_number(LmdCompiler* c, LmdValue value);
 static MIR_reg_t truth(LmdCompiler* c, LmdValue value);
@@ -2922,10 +2924,23 @@ static MIR_reg_t property_access(LmdCompiler* c, int operation, MIR_reg_t owner,
         MIR_T_I64, operation == LMD_PROP_SET ? reg(c, value) :
             integer(c, operation == LMD_PROP_CALLEE || operation == LMD_PROP_HAS), true);
 }
-static LmdValue canonical_key(LmdCompiler* c, LmdValue value) {
+static LmdValue canonical_key(LmdCompiler* c, LmdValue value, bool preserve_number = false) {
+    MIR_reg_t result = 0;
+    MIR_label_t done = NULL;
+    if (preserve_number && (semantic(value) & K_NUMBER)) {
+        if (semantic(value) == K_NUMBER) return value;
+        result = em_new_reg(&c->em, "index_key", MIR_T_I64);
+        move(c, result, reg(c, box(c, value).reg));
+        done = label(c);
+        // numeric indices need no allocating spelling; other keys convert once before the RHS.
+        branch(c, MIR_BEQ, done, reg(c, tag(c, value)), integer(c, LMD_TYPE_FLOAT));
+    }
     LmdValue string = c->program->symbols ? box(c, value) : to_string(c, value);
     MIR_reg_t key = em_call_1(&c->em, "mvp_lmd_property_key", MIR_T_I64, MIR_T_I64, reg(c, string.reg), true);
-    check_error(c, key); return boxed(c, key, K_STRING);
+    check_error(c, key);
+    if (!done) return boxed(c, key, K_STRING);
+    move(c, result, reg(c, key)); put_label(c, done);
+    return boxed(c, result, K_NUMBER | K_STRING);
 }
 static MIR_reg_t reference_name(LmdCompiler* c, LmdReference ref) {
     return ref.name ? ref.name : canonical_key(c, ref.deferred_name).reg;
@@ -2962,6 +2977,9 @@ static LmdReference reference(LmdCompiler* c, AstNode* n, bool capture_name = fa
         }
     }
     if (typed || semantic(owner) == K_ARRAY || semantic(owner) == K_STRING) {
+        // optional numeric lanes already carry presence and range proofs; preserve their native index path.
+        if (!known && !capture_name && !key.number_present && semantic(key) != K_NUMBER && (semantic(key) & K_NUMBER))
+            key = canonical_key(c, key, true);
         LmdReference ref = {NULL, owner, known ? constant(c, (uint64_t)index) : property_key(c, key, typed), known, index};
         AstNode* source = field->object;
         if (source->node_type == AST_NODE_IDENT) {
@@ -2999,7 +3017,7 @@ static LmdReference reference(LmdCompiler* c, AstNode* n, bool capture_name = fa
             // immutable builtins need a spelling, not an allocating property-key guard.
             ref.name = to_string(c, key).reg;
         } else if (capture_name || ((semantic(owner) == K_ARRAY || c->program->iterators) && !index_only && (!known || index < -1))) {
-            if (!capture_name && semantic(key) == K_NUMBER) ref.deferred_name = key;
+            if (!capture_name && (semantic(key) & K_NUMBER)) ref.deferred_name = key;
             else ref.name = canonical_key(c, key).reg;
         }
         return ref;
@@ -3008,15 +3026,7 @@ static LmdReference reference(LmdCompiler* c, AstNode* n, bool capture_name = fa
     if (field->computed && (semantic(key) & K_NUMBER) && !capture_name &&
             semantic(owner) != K_OBJECT && semantic(owner) != K_MAP) {
         bool numeric = semantic(key) == K_NUMBER;
-        if (!numeric) {
-            MIR_reg_t saved = em_new_reg(&c->em, "index_key", MIR_T_I64);
-            move(c, saved, reg(c, box(c, key).reg));
-            MIR_label_t ready = label(c);
-            branch(c, MIR_BEQ, ready, reg(c, tag(c, key)), integer(c, LMD_TYPE_FLOAT));
-            // nonnumeric keys still convert before the RHS, preserving conversion errors/effects.
-            move(c, saved, reg(c, canonical_key(c, key).reg)); put_label(c, ready);
-            key = boxed(c, saved, K_NUMBER | K_STRING);
-        }
+        if (!numeric) key = canonical_key(c, key, true);
         LmdReference ref = {NULL, owner, known ? constant(c, (uint64_t)index) : property_key(c, key), known, index};
         ref.numeric_key = numeric; ref.deferred_name = key;
         return ref;
@@ -5406,7 +5416,9 @@ static LmdValue expression(LmdCompiler* c, AstNode* n, bool borrow_scalar, bool 
             LmdFunction* initializer = cls && cls->reusable_layout
                 ? (LmdFunction*)c->program->functions->data[cls->constructor_id] : NULL;
             LmdInlineBody body = {};
-            if (initializer && inline_body(c, initializer, &body, true, true)) {
+            // expanded constructor proofs reuse class metadata without creating new per-site caches (D8.4.1v2).
+            if (initializer && constructor_layout_reusable(c->program, initializer->ast->body) &&
+                    inline_body(c, initializer, &body, true, true)) {
                 LmdValue* values = call_arguments(c, call, false);
                 int count = ast_linked_node_count(call->arguments);
                 LmdObjectPlan* native_plan = c->inlining && c->inlining->region && count
@@ -7276,8 +7288,8 @@ static bool dense_append_loop(MvpLmdProgram* p, AstFieldNode* field, AstNode* wr
     }
     return true;
 }
-static bool constructor_layout_reusable(AstNode* node, bool value = false) {
-    if (!node) return false;
+static bool constructor_layout_reusable(MvpLmdProgram* p, AstNode* node, bool value, bool construction, int depth) {
+    if (!node || depth >= 16) return false;
     if (value) {
         if (node->node_type == AST_NODE_LITERAL) return true;
         if (node->node_type == AST_NODE_IDENT) {
@@ -7286,19 +7298,39 @@ static bool constructor_layout_reusable(AstNode* node, bool value = false) {
         }
         if (node->node_type == AST_NODE_BINARY) {
             AstBinaryNode* binary = (AstBinaryNode*)node;
-            return constructor_layout_reusable(binary->left, true) &&
-                constructor_layout_reusable(binary->right, true);
+            return constructor_layout_reusable(p, binary->left, true, construction, depth) &&
+                constructor_layout_reusable(p, binary->right, true, construction, depth);
         }
         if (node->node_type == AST_NODE_UNARY) {
             AstUnaryNode* unary = (AstUnaryNode*)node;
             return (unary->op == OPERATOR_POS || unary->op == OPERATOR_NEG || unary->op == OPERATOR_NOT ||
-                unary->op == OPERATOR_JS_BIT_NOT) && constructor_layout_reusable(unary->operand, true);
+                unary->op == OPERATOR_JS_BIT_NOT) && constructor_layout_reusable(p, unary->operand, true, construction, depth);
+        }
+        if (construction && node->node_type == AST_NODE_CONDITIONAL_EXPR) {
+            AstIfNode* branch = (AstIfNode*)node;
+            return constructor_layout_reusable(p, branch->test, true, construction, depth) &&
+                constructor_layout_reusable(p, branch->then, true, construction, depth) &&
+                constructor_layout_reusable(p, branch->otherwise, true, construction, depth);
+        }
+        if (construction && node->node_type == AST_NODE_NEW_EXPR) {
+            AstCallNode* call = (AstCallNode*)node;
+            if (call->callee->node_type != AST_NODE_IDENT || call->interp_has_spread_args) return false;
+            LmdBinding* callee = identifier_binding(p, (AstIdentNode*)call->callee);
+            for (AstNode* argument = call->arguments; argument; argument = argument->next)
+                if (!constructor_layout_reusable(p, argument, true, construction, depth)) return false;
+            if (callee && callee->intrinsic == I_ARRAY) return true;
+            MvpLmdClass* cls = class_plan(p, NULL, callee);
+            if (!cls || cls->constructor_id < 0 || cls->initializer_count || cls->ast->superclass) return false;
+            LmdFunction* constructor = (LmdFunction*)p->functions->data[cls->constructor_id];
+            // nested construction cannot expose this receiver; recursively exclude arbitrary calls and escapes.
+            return !constructor->complex_params &&
+                constructor_layout_reusable(p, constructor->ast->body, false, construction, depth + 1);
         }
         return false;
     }
     if (node->node_type == AST_NODE_BLOCK) {
         for (AstNode* child = ((AstBlockNode*)node)->statements; child; child = child->next)
-            if (!constructor_layout_reusable(child)) return false;
+            if (!constructor_layout_reusable(p, child, false, construction, depth)) return false;
         return true;
     }
     if (node->node_type != AST_NODE_EXPR_STMT) return false;
@@ -7307,9 +7339,9 @@ static bool constructor_layout_reusable(AstNode* node, bool value = false) {
     AstAssignNode* assignment = (AstAssignNode*)expression;
     if (assignment->op != OPERATOR_ASSIGN || assignment->left->node_type != AST_NODE_MEMBER_EXPR) return false;
     AstFieldNode* field = (AstFieldNode*)assignment->left;
-    // no calls, receiver reads or escapes can reveal the preallocated field set during initialization.
+    // receiver reads, escapes and unproven calls could reveal the preallocated field set.
     return !field->computed && field->object->node_type == AST_NODE_IDENT &&
-        named(((AstIdentNode*)field->object)->name, "this") && constructor_layout_reusable(assignment->right, true);
+        named(((AstIdentNode*)field->object)->name, "this") && constructor_layout_reusable(p, assignment->right, true, construction, depth);
 }
 static int lower_pass(void* opaque) {
     MvpLmdProgram* p = (MvpLmdProgram*)opaque;
@@ -7317,7 +7349,9 @@ static int lower_pass(void* opaque) {
         MvpLmdClass* cls = (MvpLmdClass*)p->classes->data[i];
         if (cls->constructor_id >= 0 && !cls->ast->superclass) {
             LmdFunction* constructor = (LmdFunction*)p->functions->data[cls->constructor_id];
-            cls->reusable_layout = !cls->initializer_count && constructor_layout_reusable(constructor->ast->body);
+            // parameter initializers can inspect or expose this before the proven body starts.
+            cls->reusable_layout = !cls->initializer_count && !constructor->complex_params &&
+                constructor_layout_reusable(p, constructor->ast->body, false, true);
             if (cls->reusable_layout) {
                 AstNode* first = ((AstBlockNode*)constructor->ast->body)->statements;
                 cls->nullable_initializers = (String**)pool_calloc(p->frontend->pool,

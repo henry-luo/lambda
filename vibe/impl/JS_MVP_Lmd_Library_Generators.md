@@ -311,3 +311,117 @@ explicit unsupported completion if accessor execution is attempted. It cannot
 strip the declaration, turn it into a data property, or key behavior to a
 benchmark. Declaration-only admission now follows this boundary; report any
 actual accessor dependency before expanding scope.
+
+## 6. Library workload tuning
+
+**Implemented and measured, 2026-10-10.** Native release profiles are retained under
+`temp/mvp_tune_library_20261010/profiles/`. The exact control is round4m,
+SHA-256 `5499bb795ecc8ea24aa49208d2b3852d5f9f44fc92c131e93cec87aa92a7e75d`.
+Sampling uses an unstripped link of the release objects; its timings are not
+acceptance evidence. Canonical workloads and checksums are unchanged.
+
+| Target | Observed cost | Implementation |
+|---|---|---|
+| `text_search` | Allocating decimal spellings for dynamic numeric array indices | Extend existing `canonical_key` with a preserve-number option; canonicalize other keys once before the RHS. |
+| `havlak` | Repeated field additions, shape traversal and allocation during class construction | Extend `constructor_layout_reusable` to prove conditional initializers, intrinsic Array construction and recursively admitted class constructors. Reject non-simple parameters, receiver reads/escapes, spread and arbitrary calls; retain the original inline-admission boundary to avoid adding per-site cache state. |
+| `regexredux` | Rebuilding the whole matcher input and rescanning UTF offsets for each match | New local `MvpLmdRegExpInput` owns or borrows one prepared input for the operation; reuse `JsRegexScratch` and `js_bt_exec`. ASCII offsets are direct; non-Unicode surrogate splitting and Unicode offsets keep existing UTF helpers. |
+| jq | `madvise`, mapping churn and generator activation management | Extend `fiber_stack_trim` with a reclaim option; coalesce the contiguous side-segment discard and defer reclaim until acquisition. Free excess mappings directly. Retain one idle stack's pages for immediate reuse, within the existing 32-stack pool bound. Compact/restore parked stacks with one contiguous advise span, including unused pages above the saved root watermark. |
+
+The only new local helper type is `MvpLmdRegExpInput`; its constructor,
+destructor and offset methods replace repeated preparation inside existing
+RegExp helpers. No new runtime ABI helper is introduced. Activation policy
+applies to both languages (**D1.3v3**, **D5.1.1v3**); the retained stack is idle,
+has no live root range and adds at most 3 MiB of resident pages. The RA13 warm
+window remains 16. No conservative stack scanning is introduced (**D5.2–D5.3**).
+Class fields still use Lambda Maps and immutable shape transitions
+(**D3.4.3v5**, **D3.4.5**). The previously recorded cache discrepancy remains
+separate; this work does not expand the per-site constructor cache population
+(**D8.4.1v2**).
+
+Focused probes cover numeric/object/Symbol key conversion order, integer versus
+floating/string equality, nested constructors that expose `this`, Unicode and
+lone-surrogate matches, allocating replacement callbacks, and more than 32
+simultaneously suspended generators. Run normal and forced-GC/poison checks,
+Lambda and Test262 baselines, then isolated release comparisons. Preserve
+every completed capture, label interrupted screens, and report single jq
+observations separately from repeated paired measurements. §30's existing
+`log_pipeline` regression stays open until fresh evidence resolves it.
+
+An additional finite-integer equality guard was screened and removed: the
+character-code arrays retain floating Number carriers, so the extra integer
+guard adds work to their hot comparisons. Preserve this experiment's frozen
+round2 evidence separately from the final candidate.
+
+The first 83-workload screen caught a 3.7x `triangl` regression: eager
+normalization boxed an already native optional index and lost its range and
+presence proofs. Exclude `number_present` lanes from that normalization; their
+existing indexed path already implements absence. A focused MIR assertion
+prevents the optional index from passing through a boxed `index_key` join.
+The rejected capture remains under `final83`; final measurements use round6.
+
+Review also found that non-simple constructor parameters can inspect or
+expose `this` before the proven body. The `default_receiver.js` probe matches
+Node and round4m but fails on round5. Exclude `complex_params` from reusable
+constructor layouts and retain the probe in the focused suite. Round5 is
+therefore rejected, and its partial `jq-final` capture is marked interrupted.
+`default_receiver.json` records the corrected round6 result against both
+Node and the frozen controls.
+
+### 6.1 Corrected release evidence
+
+The corrected round6 release is frozen at
+`temp/mvp_tune_library_20261010/round6-tested/candidate.exe`, SHA-256
+`2c67152b386faf735960f302264fb08602042812be47eebb09a3970a899b29af`.
+The fresh `round6-83` screen passes all 83 non-jq output contracts, including
+15 measured rounds for eight earlier timing suspects. `round6-confirm` and
+`round6-confirm-more` repeat 19 further possible slowdowns for 15 rounds;
+none remains slower against both control lanes at the paired bootstrap
+interval. This is bounded measurement evidence, not a guarantee for every
+workload. The corrected `triangl` takes 175.03 ms versus 175.67 ms in the
+screen; the identical-control peer takes 177.57 ms.
+
+Seven measured pairs plus an identical-control peer (within `round6-83`):
+
+| Workload | Control | Round6 | Change |
+|---|---:|---:|---:|
+| Havlak | 1993.157 ms | 1770.569 ms | 11.2% less time |
+| regexredux | 37.979 ms | 3.139 ms | 12.1x faster |
+| text_search | 7764.503 ms | 6041.896 ms | 22.2% less time |
+
+The exact release passes MVP 100/100 and ActivationCore 10/10, both normally
+and with forced GC/poisoning. Test262 passes 40261/40261 with zero unstable
+results or retries. The refreshed Lambda gate is 6607/6608, with only the
+known `edit_view_only` failure. Logs are under `validation6/`; these gates
+were completed before the performance captures. Validation is on
+macOS arm64; this round does not establish Linux or Windows performance.
+
+The first round6 jq capture (`jq6-final`) is rejected for timing attribution:
+concurrent Lambda-opus baseline tests and heavy system load overlapped it.
+Its `jq_records` checksum passed, but 164.77 s versus 91.14 s is not evidence
+of an engine regression. The driver and its separately grouped benchmark
+child were stopped; unrelated jobs were left running. `contention.md` and
+`contention-processes.txt` record the observations.
+
+The monitored rerun (`jq6-quiet`) completes all four canonical jq workloads,
+bringing the final candidate to **87/87 output contracts**. Single matched
+observations, with unchanged workloads and self-reported timers:
+
+| Workload | Control | Round6 | Observed time reduction |
+|---|---:|---:|---:|
+| jq_records | 88.768 s | 73.137 s | 17.6% |
+| jq_mix | 379.301 s | 306.339 s | 19.2% |
+| jq_bf | 390.782 s | 307.974 s | 21.2% |
+| jq_tree | 605.850 s | 455.800 s | 24.8% |
+
+These single observations do not establish confidence intervals. Another
+Lambda test briefly overlapped the `jq_mix` candidate, so its change is
+descriptive rather than isolated causal evidence. Five-second process samples
+and approximate timed-overlap analysis are in `jq6-quiet.activity.jsonl` and
+`jq6-quiet.activity-summary.json`. They detect no build/test overlap in the
+estimated timed regions of the other three comparisons; ordinary OS activity
+is still present. Some late non-jq screen rows were also noisy; their repeated
+controls bound the claims above, without proving the machine was idle throughout.
+
+The [capture report](../../temp/mvp_tune_library_20261010/report.md) and
+`summary.json` retain commands, source/output/binary hashes, paired intervals
+and the final 87-row comparison. Published Results3–8 are unchanged.

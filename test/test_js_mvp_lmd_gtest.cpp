@@ -187,6 +187,16 @@ TEST_F(JsMvpLmd, RegExpStateCapturesAndReplacement) {
     )JS");
     error("new RegExp('[','')", "SyntaxError");
     error("new RegExp('a','gg')", "SyntaxError");
+    boolean(R"JS(
+        let text='x\ud83d\ude00\u00e9y', offsets=[];
+        let replaced=text.replace(/./gu,function(s,i){
+            offsets.push(i);let trash=[];for(let j=0;j<40;j++)trash.push({s:s});return s;
+        });
+        replaced===text && offsets.join(',')==='0,1,3,4' &&
+          text.replace(/(?:)/gu,'-')==='-x-\ud83d\ude00-\u00e9-y-' &&
+          'a\ud800b'.match(/./g).length===3 &&
+          /\u00e9/u.exec(text).index===3;
+    )JS");
 }
 TEST_F(JsMvpLmd, FunctionCallApplyBindOwnership) {
     boolean(R"JS(
@@ -322,6 +332,16 @@ TEST_F(JsMvpLmd, GeneratorsUseLambdaActivations) {
     boolean("function* g(){yield 1;}let it=g();let ok=false;try{it.throw(7);}catch(e){ok=e===7;}ok&&it.next().done");
     boolean("let it;function* g(){try{it.next();}catch(e){yield e.name;}}it=g();it.next().value==='TypeError'");
     boolean("function* g(){return 5e-324;}let result=g().next();result.done&&result.value===5e-324");
+    boolean(R"JS(
+        function* item(n){let saved={n:n,value:5e-324};yield saved;return saved.value;}
+        let ok=true;
+        for(let round=0;round<3;round++) {
+            let active=[];
+            for(let i=0;i<48;i++){let g=item(i);ok=ok&&g.next().value.n===i;active.push(g);}
+            for(let i=0;i<48;i++){let result=active[i].next();ok=ok&&result.done&&result.value===5e-324;}
+        }
+        ok;
+    )JS");
 }
 TEST_F(JsMvpLmd, SymbolPropertyIdentity) {
     boolean(R"JS(
@@ -761,6 +781,34 @@ TEST_F(JsMvpLmd, ShiftPreservesHolesAndScalarOwnership) {
 }
 TEST_F(JsMvpLmd, NumericConstructorRegionsKeepIdentityAndLanes) {
     boolean(R"JS(
+        class Holder {
+            constructor(keys=Object.keys(this).join(',')) {
+                this.items=new Array(2);this.keys=keys;
+            }
+        }
+        let a=new Holder(),b=new Holder();a.keys===''&&b.keys==='';
+    )JS");
+    boolean(R"JS(
+        class Storage {constructor(n){this.items=n===undefined||n===0?null:new Array(n);this.size=0;}}
+        class Holder {constructor(n){this.storage=new Storage(n);this.ready=true;}}
+        let ok=true, saved=[];
+        for(let i=0;i<30;i++){
+            let h=new Holder(i%3);saved.push(h);
+            ok=ok && h.ready && h.storage.size===0 &&
+                Object.keys(h).join(',')==='storage,ready' &&
+                Object.keys(h.storage).join(',')==='items,size';
+            if(i%3===0)ok=ok&&h.storage.items===null;
+            else {ok=ok&&h.storage.items.length===i%3&&!(0 in h.storage.items);h.storage.items[0]=i;}
+        }
+        ok && saved[1].storage.items[0]===1 && saved[2].storage.items[0]===2;
+    )JS");
+    boolean(R"JS(
+        let escaped=[];
+        class Observe {constructor(owner){escaped.push(Object.keys(owner).join(','));}}
+        class Holder {constructor(){this.first=1;this.child=new Observe(this);this.last=2;}}
+        let a=new Holder(),b=new Holder();escaped.join('|')==='first|first'&&a.child!==b.child;
+    )JS");
+    boolean(R"JS(
         class Pair { constructor(x,y){this.x=x;this.y=y}
             shift(n){return new Pair(this.x+n,this.y+n)} }
         class Triple { constructor(x,y,z){this.x=x;this.y=y;this.z=z}
@@ -910,6 +958,13 @@ TEST_F(JsMvpLmd, OptionalIntegerElementsPreserveUndefined) {
         "const missing=a[i];a.fill(missing);return a[0]===0 && missing===undefined} f()");
     boolean("function f(i){const a=[-0,1.5,NaN];return a[i]} var g=f;"
         "1/g(0)===-Infinity && g(1)===1.5 && g(2)!==g(2) && g(3)===undefined");
+    boolean("function f(){const keys=[0,1];const a=[7,9];let i=Math.sqrt(9);"
+        "return a[keys[i]]===undefined} f()");
+    char* mir = dump("temp/mvp_optional_index.mir");
+    ASSERT_NE(mir, nullptr);
+    // native optional indices must not round-trip through a boxed property-key join.
+    EXPECT_EQ(strstr(mir, "index_key"), nullptr);
+    mem_free(mir);
     error("function f(){const keys=[0,1];const a=new Uint8Array(2);let i=Math.sqrt(9);"
         "return a[keys[i]]} f()", "capability");
 }
@@ -1077,6 +1132,13 @@ TEST_F(JsMvpLmd, GuardedIntegerLoopReplay) {
     numeric("let seen=0;function hit(){seen++}function f(n){let x=n;while(x>1){hit();x=x/2}return x}f(5)+seen", 3.625);
 }
 TEST_F(JsMvpLmd, EqualityAndTruth) {
+    boolean(R"JS(
+        function equal(a,b){return a[0]===b[0];}
+        function loose(a,b){return a[0]==b[0];}
+        equal([-7],[-7]) && !equal([-7],[7]) && equal([0],[-0]) && !equal([NaN],[NaN]) &&
+          equal([9007199254740991],[9007199254740991]) && equal([5e-324],[5e-324]) &&
+          !equal([1],['1']) && !equal([0],[false]) && loose([1],['1']) && loose([0],[false]);
+    )JS");
     boolean("null == undefined && null !== undefined && 0 == false && '1' == true");
     boolean("'x' === 'x' && '1' !== 1 && NaN !== NaN && 0 === -0");
     boolean("!NaN && !undefined && !null && !0 && !'' && !![]");
@@ -1256,6 +1318,15 @@ TEST_F(JsMvpLmd, ClosedParameterKindsAndSnapshots) {
     boolean("function at(a,i){return a[i]} at([2],1.5)===undefined");
 }
 TEST_F(JsMvpLmd, GenericElementCoercion) {
+    boolean(R"JS(
+        let trace='', a=[3,4], symbol=Symbol('key');a[symbol]=9;a['undefined']=7;a['1.5']=8;
+        function key(){return {toString(){trace+='k';return '1';}};}
+        function store(k){a[k]=(trace+='v',5);return a[k];}
+        function read(k){return a[k];}
+        let assigned=store(key());
+        assigned===5 && trace==='kvk' && read(-0)===3 && read(undefined)===7 &&
+          read(1.5)===8 && read(symbol)===9 && read(NaN)===undefined;
+    )JS");
     // every read stays generic: the array contains numbers and coercible non-number values.
     numeric("function sum(a){let s=0;for(let i=0;i<6;i++){s+=+a[i]}return s} "
         "sum([1.25,-2,true,false,null,'3.5',undefined])", 3.75);

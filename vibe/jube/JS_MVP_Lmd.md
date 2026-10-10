@@ -1363,7 +1363,7 @@ new coverage and performance claims require complete evidence.
 Implementation sequence, helper inventory and validation status:
 [implementation plan](../impl/JS_MVP_Lmd_Library_Generators.md).
 
-**Current checks:** 100/100 focused tests pass normally and with forced GC;
+**Phase 30 baseline (round4m):** 100/100 focused tests pass normally and with forced GC;
 Test262 passes 40261/40261 without unstable batches. The Lambda aggregate is
 6590/6591, retaining only the reproduced §29 `edit_view_only` failure. All eleven
 new canonical targets pass their output/backend checks, establishing functional
@@ -1374,3 +1374,29 @@ measurement uncertainty, but `log_pipeline` remains **1.3% slower** against the
 control (also positive against the identical-control peer). Its cause is still
 open, so the strict no-regression gate is not passed. Generator stack overhead
 also remains a material performance limit for the new jq workloads.
+
+### 30.1 Library workload tuning
+
+**Implemented and measured (2026-10-10):** tune `havlak`, `regexredux`,
+`text_search` and the four canonical jq workloads. Preserve numeric element
+keys until an actual named-property fallback. Reuse completed class
+shapes for constructors with simple parameters whose conditional and nested
+initializers cannot expose the receiver (**D3.4.3v5**, **D3.4.5**); expanded
+admission adds no new per-site cache cells (**D8.4.1v2**).
+
+RegExp operations reuse one prepared input and the existing matcher scratch
+storage. Lambda's shared activation pool batches discard/reclaim operations
+and retains one idle stack for immediate reuse (**D1.3v3**, **D5.1.1v3**).
+Precise roots, the 16-activation warm window and the 32-stack pool bound stay
+in force; retained pages add at most one 3 MiB mapping to resident memory.
+Frozen-release, pinned-MIR comparisons show **11.2% less time for Havlak**,
+**12.1x faster regexredux**, and **22.2% less time for text_search** over seven
+measured pairs. All **87 benchmark output contracts** pass. Longer checks
+found no new slowdown against both control copies in the 83 non-jq workloads.
+The four jq comparisons observe **17.6–24.8% less time**, but are single
+observations; another test briefly overlapped the `jq_mix` candidate.
+MVP 100/100 and activation 10/10 pass normally and under forced GC; Test262
+passes 40261/40261. Lambda is 6607/6608, retaining the known `edit_view_only`
+failure; §30's older `log_pipeline` issue remains
+separate. Evidence and limits are
+recorded in the [implementation plan](../impl/JS_MVP_Lmd_Library_Generators.md#6-library-workload-tuning).
