@@ -1355,6 +1355,9 @@ TEST(RenderOutputParity, FoAndNativePageControlsSharePreviewAndPhysicalPdfPages)
         {"graphics_scales", 3, "/MediaBox [0 0 180.00 135.00]"},
         {"graphics_bindings", 3, "/MediaBox [0 0 180.00 135.00]"},
         {"typography_bindings", 3, "/MediaBox [0 0 180.00 135.00]"},
+        {"body_columns", 3, "/MediaBox [0 0 180.00 135.00]"},
+        {"column_queries", 3, "/MediaBox [0 0 180.00 135.00]"},
+        {"terminal_columns", 3, "/MediaBox [0 0 180.00 135.00]"},
         {"lists", 3, "/MediaBox [0 0 180.00 120.00]"},
         {"lists_context", 3, "/MediaBox [0 0 180.00 120.00]"},
         {"cell_flow", 3, "/MediaBox [0 0 150.00 120.00]"},
@@ -1398,6 +1401,35 @@ TEST(RenderOutputParity, FoAndNativePageControlsSharePreviewAndPhysicalPdfPages)
             EXPECT_TRUE(file_contains_text(pdfs[i].path, fixture.media_box));
         }
         expect_paged_pair_output_parity(previews, pdfs, 2, fixture.pages);
+    }
+}
+
+TEST(RenderOutputParity, ExplicitNativeColumnsRetainUnequalGeometryInPreviewSvgAndPhysicalPdf) {
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity")); ASSERT_TRUE(ensure_dir(PDF_REF_DIR));
+    ASSERT_TRUE(command_exists("pdftoppm"));
+    const char* source = "test/html/paged_media_explicit_columns.rpd";
+    PdfFileInfo pdf = {};
+    snprintf(pdf.path, sizeof(pdf.path), "temp/render_output_parity/explicit_columns.pdf");
+    snprintf(pdf.base, sizeof(pdf.base), "explicit_columns");
+    ASSERT_TRUE(render_document_fixture(source, pdf.path, "--paged --block-remote-resources"));
+    ASSERT_EQ(pdf_page_count(pdf.path), 2); EXPECT_TRUE(file_contains_text(pdf.path, "/MediaBox [0 0 165.00 90.00]"));
+    const uint8_t colors[2][3][3] = {{{255,0,0},{0,255,0},{0,0,255}}, {{255,255,0},{255,0,255},{0,255,255}}};
+    for (int page = 1; page <= 2; page++) {
+        SCOPED_TRACE(page); char preview[PATH_MAX], svg[PATH_MAX], reference[PATH_MAX], arguments[128];
+        snprintf(preview, sizeof(preview), "temp/render_output_parity/explicit_columns_%d.png", page);
+        snprintf(svg, sizeof(svg), "temp/render_output_parity/explicit_columns_%d.svg", page);
+        snprintf(arguments, sizeof(arguments), "--paged --thumbnail-page %d --block-remote-resources", page);
+        ASSERT_TRUE(render_document_fixture(source, preview, arguments)); ASSERT_TRUE(render_document_fixture(source, svg, arguments));
+        EXPECT_TRUE(file_contains_text(svg, "viewBox=\"0 0 220 120\"")); EXPECT_TRUE(file_contains_text(svg, "<path"));
+        ASSERT_TRUE(render_reference_page(&pdf, page, reference, sizeof(reference), false, true));
+        for (const char* path : {preview, reference}) {
+            ImageData image = {}; ASSERT_TRUE(load_png_rgba(path, &image)); EXPECT_EQ(image.width, 220); EXPECT_EQ(image.height, 120);
+            const int points[3][2] = {{80,30}, {200,40}, {200,70}};
+            for (size_t i = 0; i < 3; i++) expect_preview_pixel(image, points[i][0], points[i][1],
+                colors[page-1][i][0], colors[page-1][i][1], colors[page-1][i][2]);
+            expect_preview_pixel(image, 95, 30, 255, 255, 255); expect_preview_pixel(image, 80, 60, 255, 255, 255);
+            expect_preview_pixel(image, 200, 90, 255, 255, 255); image_free(image.pixels);
+        }
     }
 }
 

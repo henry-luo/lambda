@@ -8,7 +8,7 @@ struct RadiantSourceOrigin;
 struct TypesetRegionPlacement;
 // bindings and policy are borrowed for layout; immutable material owners move with the retained generation.
 struct PagedNativeFlowBinding {
-    DomNodeRef control; // absent for a registered nested-only provider
+    DomNodeRef control; // body flow or repeated static content; absent for a nested-only provider
     TypesetFlowProvider provider;
     TypesetResume start;
     ViewNativeOwner owner;

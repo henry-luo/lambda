@@ -106,6 +106,10 @@ static bool fo_property_assigned(DomElement* source, const char* name);
 static const char* fo_computed_property_name(const char* name);
 static bool fo_decoration_condition_name(const char* name);
 
+static const char* fo_column_initial(const char* name) {
+    return !strcmp(name, "column-count") ? "1" : !strcmp(name, "column-gap") ? "12pt" : nullptr;
+}
+
 static const char* fo_inherited(FoTranslationContext* context, DomElement* source, const char* name) {
     for (DomElement* node = source; node; node = node->parent_element()) {
         const char* raw = node->get_attribute(name);
@@ -158,7 +162,8 @@ static const char* fo_parent_value(FoTranslationContext* context, DomElement* so
             fo_failure(context, source, property, "inherited-property-value requires an inherited FO property"); return nullptr;
         }
         FoPropertyReference reference = static_cast<FoPropertyReference>(kind);
-        if (kind == FO_PROPERTY_NEAREST || strcmp(query, property)) return fo_reference_binding(context, source, property, query, reference);
+        if (kind == FO_PROPERTY_NEAREST || strcmp(query, property) || fo_column_initial(query))
+            return fo_reference_binding(context, source, property, query, reference);
         if (fo_element(source, "root") || !source->parent_element()) {
             if (fo_decoration_condition_name(property)) return "discard";
             static const struct { const char* name; const char* initial; } initials[] = {
@@ -197,7 +202,9 @@ static CssValue* fo_expression_reference(void* owner, const char* function, cons
     const char* text = fo_reference_binding(query->translation, query->source, query->property,
         property ? property : query->property, reference);
     if (!text) return nullptr;
-    CssDeclaration* value = css_parse_property_value_declaration("margin-top", 10, text, strlen(text), query->translation->document->document_pool);
+    // references carry their own numeric domain; a length property's grammar rejects valid number initials.
+    const char* untyped = "--radiant-trait";
+    CssDeclaration* value = css_parse_property_value_declaration(untyped, strlen(untyped), text, strlen(text), query->translation->document->document_pool);
     return value ? value->value : nullptr;
 }
 
@@ -257,7 +264,8 @@ static Item fo_transparent_row(FoTranslationContext* context, DomElement* source
 }
 
 static bool fo_style_property(FoTranslationContext* context, DomElement* source, StrBuf* style,
-        const char* name, const char* value, const char* source_name = nullptr, bool emit = true, bool length_component = false) {
+        const char* name, const char* value, const char* source_name = nullptr, bool emit = true,
+        bool length_component = false, bool computed_expression = false) {
     if (!value) return true;
     const char* authored = value;
     value = fo_parent_value(context, source, source_name ? source_name : name, value);
@@ -273,7 +281,7 @@ static bool fo_style_property(FoTranslationContext* context, DomElement* source,
         property->type == PROP_TYPE_COLOR || property->code == CSS_PROPERTY_FONT_WEIGHT);
     bool shorthand = property && css_property_is_shorthand(property->code);
     expression |= shorthand;
-    if (expression && (!declaration || !declaration->valid || !css_declaration_is_supported(declaration) ||
+    if (expression && !computed_expression && (!declaration || !declaration->valid || !css_declaration_is_supported(declaration) ||
         (declaration->value && (declaration->value->type == CSS_VALUE_TYPE_FUNCTION || (shorthand && strchr(value, '('))) &&
             (value == authored || !css_value_contains_var_reference(declaration->value))))) {
         value = fo_expression_text(context, source, source_name ? source_name : name, value,
@@ -315,10 +323,46 @@ static bool fo_sheet_size(FoTranslationContext* context, DomElement* source, Str
     return true;
 }
 
+static const char* fo_count_text(FoTranslationContext* context, DomElement* source, const char* property,
+        const char* raw, uint32_t maximum, const char* reason) {
+    CssValue* expression = fo_expression(context, source, property, raw);
+    if (!expression) return nullptr;
+    CssMathEvaluationContext evaluation = {};
+    CssMathResult computed = css_math_evaluate(expression, &evaluation);
+    uint32_t value = 0;
+    if (computed.type != CSS_MATH_NUMBER || !computed.resolved ||
+        !radiant_page_rounded_count(computed.value, 1, &value) || value > maximum) {
+        fo_failure(context, source, property, reason); return nullptr;
+    }
+    char number[16]; snprintf(number, sizeof(number), "%u", value);
+    const char* text = pool_strdup(context->document->document_pool, number);
+    if (!text) fo_failure(context, source, property, "FO count allocation failed", TYPESET_OUT_OF_MEMORY);
+    return text;
+}
+
 struct FoStyleBuffer {
     StrBuf* value = strbuf_new();
     ~FoStyleBuffer() { strbuf_free(value); }
 };
+
+static bool fo_column_style(FoTranslationContext* context, DomElement* source, StrBuf* style, const char* name) {
+    const char* value = source->get_attribute(name);
+    if (!value) {
+        if (!fo_element(source, "region-body")) return true;
+        value = fo_column_initial(name);
+    } else if (!strcmp(value, "inherit")) value = fo_reference_binding(context, source, name, name, FO_PROPERTY_PARENT);
+    else value = fo_parent_value(context, source, name, value);
+    if (!value) return false;
+    CssDeclaration* parsed = css_parse_property_value_declaration(name, strlen(name), value, strlen(value), context->document->document_pool);
+    // computed ancestor bindings are already CSS expressions; authored FO arithmetic refines once.
+    if (!parsed || !css_value_contains_var_reference(parsed->value)) value = fo_expression_text(context, source, name, value);
+    if (!value) return false;
+    FoStyleBuffer buffer;
+    if (!buffer.value) return fo_failure(context, source, name, "FO column allocation failed", TYPESET_OUT_OF_MEMORY);
+    strbuf_append_str(buffer.value, !strcmp(name, "column-count") ? "max(1," : "max(0px,");
+    strbuf_append_str(buffer.value, value); strbuf_append_char(buffer.value, ')');
+    return fo_style_property(context, source, style, name, buffer.value->str, nullptr, true, false, true);
+}
 
 struct FoBindingScope {
     FoTranslationContext* context;
@@ -349,6 +393,11 @@ static const char* fo_reference_binding(FoTranslationContext* context, DomElemen
         }
         if (!ancestor) levels = 0;
     }
+    DomElement* selected = source;
+    for (size_t level = 0; selected && level < levels; level++) selected = selected->parent_element();
+    // these noninherited FO properties have different initials from CSS auto/normal.
+    if (const char* initial = fo_column_initial(query))
+        if (!levels || !selected || !fo_property_assigned(selected, query)) return initial;
     if (!levels || fo_element(source, "root") || !source->parent_element()) {
         if (!strcmp(native_query, "font-size")) return "12pt";
         if (radiant_image_trait_name(native_query))
@@ -597,6 +646,9 @@ static bool fo_style(FoTranslationContext* context, DomElement* source, StrBuf* 
     if (fo_element(source, "simple-page-master") || fo_element(source, "region-body"))
         for (const char* property : fo_margin_properties)
             if (!fo_style_property(context, source, style, property, source->get_attribute(property))) return false;
+    if (fo_element(source, "region-body") || fo_element(source, "simple-page-master") || fo_element(source, "layout-master-set"))
+        for (const char* property : {"column-count", "column-gap"})
+            if (!fo_column_style(context, source, style, property)) return false;
     if (fo_region_kind(source) != SIZE_MAX || graphic) {
         const char* overflow = source->get_attribute("overflow");
         if (!overflow || !strcmp(overflow, "auto")) overflow = "hidden";
@@ -605,7 +657,8 @@ static bool fo_style(FoTranslationContext* context, DomElement* source, StrBuf* 
         if (!fo_style_property(context, source, style, "overflow", overflow)) return false;
     }
     const char* before = source->get_attribute("break-before"), *after = source->get_attribute("break-after");
-    if ((before && strcmp(before, "auto") && strcmp(before, "page")) || (after && strcmp(after, "auto") && strcmp(after, "page")))
+    if ((before && strcmp(before, "auto") && strcmp(before, "page") && strcmp(before, "column")) ||
+        (after && strcmp(after, "auto") && strcmp(after, "page") && strcmp(after, "column")))
         return fo_failure(context, source, "break-before/break-after", "FO break requires common logical folio or column support");
     return fo_style_property(context, source, style, "break-before", before) &&
         fo_style_property(context, source, style, "break-after", after);
@@ -656,6 +709,8 @@ static bool fo_attribute_admitted(FoTranslationContext* context, DomElement* sou
         fo_property_in(name, fo_common_properties, sizeof(fo_common_properties) / sizeof(fo_common_properties[0]))) return true;
     if ((fo_element(source, "simple-page-master") || fo_element(source, "region-body")) &&
         fo_property_in(name, fo_margin_properties, sizeof(fo_margin_properties) / sizeof(fo_margin_properties[0]))) return true;
+    if ((fo_element(source, "region-body") || fo_element(source, "simple-page-master") || fo_element(source, "layout-master-set")) &&
+        fo_column_initial(name)) return true;
     if (fo_element(source, "simple-page-master") && (!strcmp(name, "master-name") || !strcmp(name, "page-width") || !strcmp(name, "page-height"))) return true;
     size_t region = fo_region_kind(source);
     if (region != SIZE_MAX && !strcmp(name, "region-name")) return true;
@@ -872,16 +927,10 @@ static Item fo_translate_element(FoTranslationContext* context, DomElement* sour
         {FO_TABLE_CELL, "number-rows-spanned", "rowspan", 65534}
     };
     for (const auto& count : counts) if (table == count.kind) if (const char* raw = source->get_attribute(count.source)) {
-        CssValue* expression = fo_expression(context, source, count.source, raw);
-        if (!expression) return ItemNull;
-        CssMathEvaluationContext evaluation = {};
-        CssMathResult computed = css_math_evaluate(expression, &evaluation);
-        uint32_t value = 0;
-        if (computed.type != CSS_MATH_NUMBER || !computed.resolved ||
-            !radiant_page_rounded_count(computed.value, 1, &value) || value > count.maximum) {
-            fo_failure(context, source, count.source, "FO table count exceeds the admitted HTML grid domain"); return ItemNull;
-        }
-        char number[16]; snprintf(number, sizeof(number), "%u", value); output.attr(count.target, number);
+        const char* value = fo_count_text(context, source, count.source, raw, count.maximum,
+            "FO table count exceeds the admitted HTML grid domain");
+        if (!value) return ItemNull;
+        output.attr(count.target, value);
     }
     FoStyleBuffer buffer;
     StrBuf* style = buffer.value;

@@ -3,6 +3,7 @@
 #include "../lib/mempool.h"
 
 struct MemContext;
+enum TypesetRegionReference { TYPESET_REGION_REFERENCE_PAGE, TYPESET_REGION_REFERENCE_COLUMN };
 struct TypesetRegionConstraints {
     float inline_size, available_height;
     uint32_t page_number;
@@ -13,6 +14,7 @@ struct TypesetRegionConstraints {
     bool occupied; // body material outside this region may leave it with a zero budget
     float minimum_height; // reserve this extent only when material actually occupies the region
     bool retain_tail; // leave real material for a later region; producers choose a legal nonterminal prefix
+    uint32_t column_number, column_count; // physical-page position, one based; zero for standalone region callers
 };
 struct TypesetRegionSlice {
     TypesetResume end;
@@ -32,6 +34,7 @@ struct TypesetRegionMaterial {
     uint32_t delay_pages;
     bool clear_before; // begin on a fresh region after preceding material has been placed
     bool defer_anchor; // an insertion may follow its reference when the producing policy permits it
+    TypesetRegionReference reference; // zero-initialized producers retain page attachment
 };
 struct TypesetRegionPending {
     const TypesetRegionMaterial* material;

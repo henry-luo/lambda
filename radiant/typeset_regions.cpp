@@ -5,7 +5,8 @@
 #include <string.h>
 
 static bool region_cursor_valid(const TypesetRegionMaterial* material, const TypesetResume& cursor) {
-    return material && material->identity && material->measure &&
+    return material && material->identity && material->measure && material->reference >= TYPESET_REGION_REFERENCE_PAGE &&
+        material->reference <= TYPESET_REGION_REFERENCE_COLUMN &&
         material->source.provider == cursor.provider && material->source.generation == cursor.generation;
 }
 

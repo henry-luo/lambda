@@ -916,8 +916,8 @@ protected:
         if (!source->set_attribute("xmlns:r", RADIANT_PAGE_NAMESPACE)) return nullptr;
         return block(nullptr, css, tag, parent);
     }
-    DomElement* page_master(const char* name, const char* css) {
-        DomElement* master = page_control("r:page-master", nullptr, css);
+    DomElement* page_master(const char* name, const char* css, DomElement* parent = nullptr) {
+        DomElement* master = page_control("r:page-master", parent, css);
         return master && master->set_attribute("name", name) ? master : nullptr;
     }
     DomElement* page_sequence(const char* master, const char* initial = "auto", const char* end = "no-force") {
@@ -937,6 +937,18 @@ protected:
         return region && region->set_attribute("role", role) && region->set_attribute("name", name) &&
             (!extent || region->set_attribute("extent", extent)) ? region : nullptr;
     }
+    DomElement* body_column_sequence(const char* css, const char* columns, DomElement** body = nullptr) {
+        DomElement* master = page_master("native", css);
+        DomElement* region = master ? page_region(master, "body", "body", nullptr, columns) : nullptr;
+        if (body) *body = region;
+        return region ? page_sequence("native") : nullptr;
+    }
+    DomElement* page_column(DomElement* body, const char* width, const char* height = "100%",
+            const char* x = "0", const char* y = "0") {
+        DomElement* column = page_control("r:column", body);
+        return column && column->set_attribute("inline-size", width) && column->set_attribute("block-size", height) &&
+            column->set_attribute("inline-start", x) && column->set_attribute("block-start", y) ? column : nullptr;
+    }
     DomElement* static_content(DomElement* sequence, const char* name, const char* text = nullptr) {
         DomElement* binding = page_control("r:static-content", sequence);
         return binding && binding->set_attribute("region-name", name) &&
@@ -955,8 +967,16 @@ protected:
         if (!generated || !radiant_page_set_origins(&doc, translated->origins)) return nullptr;
         doc.root = lam::up(generated); return generated;
     }
-    DomElement* terminal_sequence(const char* normal_css, const char* last_css, bool ordinary = true) {
-        if (!page_master("normal", normal_css) || !page_master("last", last_css)) return nullptr;
+    DomElement* terminal_sequence(const char* normal_css, const char* last_css, bool ordinary = true,
+            const char* normal_columns = nullptr, const char* last_columns = nullptr,
+            DomElement** normal_body = nullptr, DomElement** last_body = nullptr) {
+        DomElement* normal = page_master("normal", normal_css), *last = page_master("last", last_css);
+        if (!normal || !last) return nullptr;
+        DomElement* bodies[] = {normal_columns ? page_region(normal, "body", "body", nullptr, normal_columns) : nullptr,
+            last_columns ? page_region(last, "body", "body", nullptr, last_columns) : nullptr};
+        if ((normal_columns && !bodies[0]) || (last_columns && !bodies[1])) return nullptr;
+        if (normal_body) *normal_body = bodies[0];
+        if (last_body) *last_body = bodies[1];
         DomElement* program = page_control("r:sequence-master");
         if (!program || !program->set_attribute("name", "chapter")) return nullptr;
         DomElement* run = page_control("r:master-run", program);
@@ -5523,6 +5543,19 @@ static LayoutViewNode* source_glyph_text(ViewTree* tree, DomNode* source, const 
     return nullptr;
 }
 
+static void expect_source_range_coverage(ViewTree* tree, DomNode* source, size_t expected = 1) {
+    ASSERT_TRUE(source && source->is_text());
+    size_t length = source->as_text()->length;
+    const ViewNodeState* state = view_tree_node_state(tree, source, false); ASSERT_NE(state, nullptr);
+    size_t* coverage = (size_t*)pool_calloc(tree->prop_pool, length * sizeof(size_t)); ASSERT_NE(coverage, nullptr);
+    for (const LayoutViewNode* node = state->first_occurrence; node; node = node->next_occurrence) {
+        ASSERT_LE(node->text_start, length); ASSERT_LE(node->text_length, length - node->text_start);
+        for (size_t i = node->text_start; i < node->text_start + node->text_length; i++) coverage[i]++;
+    }
+    for (size_t i = 0; i < length; i++) EXPECT_EQ(coverage[i], expected) << i;
+    pool_free(tree->prop_pool, coverage);
+}
+
 TEST_F(SecondaryViewTest, PublishingCorpusCombinesImagesNotesFloatsReferencesAndRetainedPreviews) {
     stylesheet("@page { size: 240px 140px; margin: 20px; @top-center { content: string(Title); font-size: 7px } "
         "@bottom-center { content: counter(page) '/' counter(pages); font-size: 7px } } "
@@ -6138,16 +6171,13 @@ TEST_F(SecondaryViewTest, OversizedKeepGroupRelaxesOnlyAtAUsableBodyBoundary) {
     ASSERT_EQ(tree->model->page_count, 2u); EXPECT_EQ(diagnostic.relaxed_avoidance, 1u);
     EXPECT_EQ(diagnostic.relaxed_line_minima, 0u);
     ViewNodeState* state = view_tree_node_state(tree, paragraph->first_child, false); ASSERT_NE(state, nullptr);
-    size_t coverage[5] = {}, ink[2] = {};
+    size_t ink[2] = {};
     for (LayoutViewNode* fragment = state->first_occurrence; fragment; fragment = fragment->next_occurrence) {
         uint32_t page = occurrence_page(fragment); ASSERT_GE(page, 1u); ASSERT_LE(page, 2u);
         if (fragment->glyph_run) ink[page - 1]++;
-        for (size_t i = fragment->text_start; i < fragment->text_start + fragment->text_length; i++) {
-            ASSERT_LT(i, 5u); coverage[i]++;
-        }
     }
     EXPECT_EQ(ink[0], 2u); EXPECT_EQ(ink[1], 1u);
-    for (size_t i = 0; i < 5; i++) EXPECT_EQ(coverage[i], 1u);
+    expect_source_range_coverage(tree, paragraph->first_child);
 }
 
 TEST_F(SecondaryViewTest, ForcedPageBoundaryOverridesSiblingAndEnclosingAvoidance) {
@@ -6692,14 +6722,10 @@ TEST_F(SecondaryViewTest, TwoFootnotesShareReservationAndDrainAfterBodyEnds) {
     for (LayoutViewNode* fragment = second_state->first_occurrence; fragment; fragment = fragment->next_occurrence)
         if (fragment->role == VIEW_FRAGMENT_NOTE) EXPECT_EQ(occurrence_page(fragment), 1u);
     ViewNodeState* text_state = view_tree_node_state(tree, text_source, false); ASSERT_NE(text_state, nullptr);
-    size_t* coverage = (size_t*)pool_calloc(input_pool, text_source->length * sizeof(size_t)); ASSERT_NE(coverage, nullptr);
     for (LayoutViewNode* fragment = text_state->first_occurrence; fragment; fragment = fragment->next_occurrence) {
         EXPECT_EQ(fragment->role, VIEW_FRAGMENT_NOTE);
-        for (size_t i = fragment->text_start; i < fragment->text_start + fragment->text_length; i++) {
-            ASSERT_LT(i, text_source->length); coverage[i]++;
-        }
     }
-    for (size_t i = 0; i < text_source->length; i++) EXPECT_EQ(coverage[i], 1u) << i;
+    expect_source_range_coverage(tree, text_source);
     ASSERT_TRUE(create_dir("temp/paged-media-impl"));
     EXPECT_TRUE(render_secondary_view_to_pdf(tree, "temp/paged-media-impl/footnotes.pdf"));
 }
@@ -9669,7 +9695,14 @@ struct NativeFragmentFixture {
     uint32_t page_numbers[16];
     NativeAssemblyMode assembly_mode;
     bool assembly_seen_exact;
-    bool first_candidate, fail_commit, fail_region_paint;
+    float forbidden_commit_height;
+    bool inspect_sheet;
+    bool inspect_auxiliary_exact, assembly_seen_auxiliary;
+    size_t sheet_columns[16], assembly_exact_count;
+    size_t sheet_notes[16][3], sheet_floats[16][3];
+    float sheet_capacities[16];
+    TypesetFragmentainerCandidate sheet_regions[16][3];
+    bool first_candidate, fail_commit, fail_region_paint, fail_material;
 };
 static bool native_fragment_retain(void* context) {
     NativeFragmentFixture* fixture = (NativeFragmentFixture*)context;
@@ -9725,7 +9758,7 @@ static void native_fragment_paint_fixture(NativeFragmentFixture* fixture) {
 }
 
 static void native_fragment_export_preview(ViewTree* preview, const ImageSurface* expected,
-        const char* png, const char* svg, const char* pdf) {
+        const char* png, const char* svg, const char* pdf, uint32_t page = 1) {
     ASSERT_TRUE(create_dir("temp/paged-media-impl"));
     bool glyph_pixels = false;
     for (size_t y = 0; y < (size_t)expected->height; y++) for (size_t x = 0; x < (size_t)expected->width; x++) {
@@ -9733,9 +9766,9 @@ static void native_fragment_export_preview(ViewTree* preview, const ImageSurface
         glyph_pixels |= pixel[3] && pixel[0] < 80 && pixel[1] > 20 && pixel[1] < 130 && pixel[2] > 100;
     }
     ASSERT_TRUE(glyph_pixels);
-    ImageSurface* retained = render_secondary_page_snapshot(preview, 1); ASSERT_NE(retained, nullptr);
+    ImageSurface* retained = render_secondary_page_snapshot(preview, page); ASSERT_NE(retained, nullptr);
     expect_same_surface_pixels(expected, retained); save_surface_to_png(retained, png); image_surface_destroy(retained);
-    ASSERT_TRUE(render_secondary_view_to_svg(preview, svg, 1, 1));
+    ASSERT_TRUE(render_secondary_view_to_svg(preview, svg, page, 1));
     ASSERT_TRUE(render_secondary_view_to_pdf(preview, pdf));
 }
 
@@ -9761,13 +9794,60 @@ static TypesetStatus native_bound_restore(void* context, const TypesetResume* sa
 static TypesetStatus native_bound_material(void* context, const TypesetContribution*, const TypesetItem*,
         const TypesetLineCandidate*, ViewNativeMaterial* material) {
     NativeFragmentFixture* fixture = (NativeFragmentFixture*)context;
+    if (fixture->fail_material) return TYPESET_INVALID;
     *material = native_fragment_material(fixture);
     if (fixture->run.font) material->glyph_run = lam::up((const PaintGlyphRun*)&fixture->run);
     if (fixture->image) material->image_box = lam::up((const PaintImageBox*)&fixture->image_box);
     return TYPESET_OK;
 }
+static bool native_sheet_candidate_valid(const TypesetPageCandidate& candidate) {
+    if (!candidate.fragmentainers || !candidate.fragmentainer_count || candidate.fragmentainer_count > 3 ||
+        candidate.boundary.scope != TYPESET_BREAK_PAGE) return false;
+    float body = 0.0f, notes = 0.0f, floats = 0.0f, available = 0.0f;
+    uint64_t serial = candidate.start.serial;
+    for (size_t i = 0; i < candidate.fragmentainer_count; i++) {
+        const auto& region = candidate.fragmentainers[i];
+        if (region.rect.width <= 0.0f || region.rect.height <= 0.0f || region.start.serial != serial ||
+            region.end.serial < serial || region.start.provider != candidate.start.provider ||
+            region.end.provider != candidate.end.provider || region.start.generation != candidate.start.generation ||
+            region.end.generation != candidate.end.generation || !isfinite(region.rect.x) || !isfinite(region.rect.y)) return false;
+        serial = region.end.serial; body += region.body_height; notes += region.note_height;
+        floats += region.float_height; available += region.rect.height;
+        if (region.auxiliary_count && !region.auxiliary) return false;
+        for (size_t j = 0; j < region.auxiliary_count; j++) {
+            const TypesetRegionSelection& auxiliary = region.auxiliary[j];
+            if (auxiliary.count && !auxiliary.placements) return false;
+            for (size_t k = 0; k < auxiliary.count; k++) {
+                const TypesetRegionPlacement& placement = auxiliary.placements[k];
+                if (!placement.material || placement.start.provider != placement.slice.end.provider ||
+                    placement.start.generation != placement.slice.end.generation || placement.slice.end.serial < placement.start.serial ||
+                    !isfinite(placement.slice.metrics.height) || !isfinite(placement.slice.metrics.depth)) return false;
+            }
+        }
+    }
+    return serial == candidate.end.serial && fabsf(body - candidate.body_height) < 0.01f &&
+        fabsf(notes - candidate.note_height) < 0.01f && fabsf(floats - candidate.float_height) < 0.01f &&
+        fabsf(available - candidate.available_height) < 0.01f;
+}
+
+static bool native_policy_candidate_valid(NativeFragmentFixture* fixture, const TypesetPageCandidate& candidate) {
+    if (!fixture->inspect_sheet || (candidate.kind != TYPESET_PAGE_FLOW && candidate.kind != TYPESET_PAGE_REGION)) return true;
+    bool valid = native_sheet_candidate_valid(candidate);
+    if (valid && fixture->inspect_auxiliary_exact) for (size_t i = 0; i < candidate.fragmentainer_count; i++) {
+        const auto& column = candidate.fragmentainers[i];
+        for (size_t j = 0; j < column.auxiliary_count; j++) for (size_t k = 0; k < column.auxiliary[j].count; k++) {
+            const auto& placement = column.auxiliary[j].placements[k];
+            const auto* exact = (const NativeRegionFixture*)placement.slice.metrics.exact.get();
+            valid &= exact && exact->provider == 917 && exact->scaled_points >= UINT64_C(9007199254740993);
+        }
+    }
+    EXPECT_TRUE(valid);
+    return valid;
+}
+
 static size_t native_bound_choose(void* context, const TypesetPageCandidate* candidates, size_t count) {
     NativeFragmentFixture* fixture = (NativeFragmentFixture*)context;
+    for (size_t i = 0; i < count; i++) if (!native_policy_candidate_valid(fixture, candidates[i])) return SIZE_MAX;
     for (size_t i = 0; i < count; i++) if (candidates[i].boundary.legality == TYPESET_BREAK_FORCED) return i;
     if (fixture->first_candidate) {
         size_t selected = SIZE_MAX;
@@ -9779,6 +9859,9 @@ static size_t native_bound_choose(void* context, const TypesetPageCandidate* can
 }
 static TypesetAssemblyAction native_bound_assemble(void* context, const TypesetPageCandidate* candidate) {
     NativeFragmentFixture* fixture = (NativeFragmentFixture*)context;
+    if (!native_policy_candidate_valid(fixture, *candidate)) return (TypesetAssemblyAction)255;
+    for (size_t i = 0; i < candidate->fragmentainer_count; i++)
+        fixture->assembly_seen_auxiliary |= candidate->fragmentainers[i].auxiliary_count != 0;
     if (fixture->assembly_mode == NATIVE_ASSEMBLY_NONE ||
         (fixture->assembly_page && fixture->assembly_page != candidate->page_number)) return TYPESET_ASSEMBLY_FINALIZE;
     if (fixture->assembly_mode == NATIVE_ASSEMBLY_PER_PAGE)
@@ -9798,10 +9881,12 @@ static TypesetStatus native_bound_transition(void* context, TypesetAssemblyActio
     if ((fixture->assembly_page ? fixture->committed_pages + 1 != fixture->assembly_page : fixture->committed_pages != 0) ||
         (action == TYPESET_ASSEMBLY_HOLD ? fixture->assembly_phase != 1 : fixture->assembly_phase != 2))
         return TYPESET_INVALID;
+    fixture->assembly_exact_count = 0;
     for (size_t i = 0; i < plan->count; i++) if (plan->contributions[i].metrics.exact) {
         const NativeRegionFixture* exact = (const NativeRegionFixture*)plan->contributions[i].metrics.exact.get();
         if (exact->provider != 917 || exact->scaled_points < UINT64_C(9007199254740993)) return TYPESET_INVALID;
         fixture->assembly_seen_exact = true;
+        fixture->assembly_exact_count++;
     }
     if (action == TYPESET_ASSEMBLY_REINSERT) fixture->first_candidate = true;
     return TYPESET_OK;
@@ -9809,7 +9894,28 @@ static TypesetStatus native_bound_transition(void* context, TypesetAssemblyActio
 static TypesetStatus native_bound_committed(void* context, const TypesetPageCandidate* candidate) {
     NativeFragmentFixture* fixture = (NativeFragmentFixture*)context;
     if (fixture->fail_commit && (!fixture->fail_page || fixture->fail_page == candidate->page_number)) return TYPESET_INVALID;
+    if (fixture->forbidden_commit_height > 0 && fixture->forbidden_commit_height == candidate->available_height) return TYPESET_INVALID;
     if (fixture->committed_pages >= sizeof(fixture->page_kinds) / sizeof(fixture->page_kinds[0])) return TYPESET_BUDGET_EXHAUSTED;
+    if (!native_policy_candidate_valid(fixture, *candidate)) return TYPESET_INVALID;
+    if (fixture->inspect_sheet && (candidate->kind == TYPESET_PAGE_FLOW || candidate->kind == TYPESET_PAGE_REGION)) {
+        fixture->sheet_columns[fixture->committed_pages] = candidate->fragmentainer_count;
+        fixture->sheet_capacities[fixture->committed_pages] = candidate->available_height;
+        memcpy(fixture->sheet_regions[fixture->committed_pages], candidate->fragmentainers,
+            candidate->fragmentainer_count * sizeof(TypesetFragmentainerCandidate));
+        for (size_t i = 0; i < candidate->fragmentainer_count; i++) {
+            fixture->sheet_notes[fixture->committed_pages][i] = fixture->sheet_floats[fixture->committed_pages][i] = 0;
+            const auto& column = candidate->fragmentainers[i];
+            // auxiliary pointers are borrowed only during callbacks; keep scalar observations afterward.
+            fixture->sheet_regions[fixture->committed_pages][i].auxiliary = nullptr;
+            fixture->sheet_regions[fixture->committed_pages][i].auxiliary_count = 0;
+            for (size_t j = 0; j < column.auxiliary_count; j++) {
+                const auto& region = column.auxiliary[j];
+                size_t* count = region.kind == TYPESET_REGION_NOTE ? &fixture->sheet_notes[fixture->committed_pages][i] :
+                    &fixture->sheet_floats[fixture->committed_pages][i];
+                *count += region.count;
+            }
+        }
+    }
     fixture->page_kinds[fixture->committed_pages] = candidate->kind;
     fixture->page_numbers[fixture->committed_pages] = candidate->page_number;
     fixture->committed_pages++;
@@ -9893,11 +9999,1096 @@ static size_t native_bound_alternatives(const TypesetParagraph* paragraph, size_
     return count;
 }
 
+static void native_bound_paragraph(NativeFragmentFixture* fixture, TypesetContribution* contribution,
+        const TypesetMetrics& metrics, size_t stride = 1, size_t length = 1, float minimum_height = 0.0f) {
+    size_t count = sizeof(fixture->items) / sizeof(fixture->items[0]);
+    fixture->paragraph = {fixture->items, count, minimum_height, native_bound_alternatives, typeset_choose_lowest_cost, fixture};
+    contribution->kind = TYPESET_CONTRIBUTION_PARAGRAPH; contribution->paragraph = &fixture->paragraph;
+    for (size_t i = 0; i < count; i++) {
+        fixture->items[i].kind = TYPESET_BOX; fixture->items[i].source = contribution->source;
+        fixture->items[i].start = i * stride; fixture->items[i].length = length; fixture->items[i].metrics = metrics;
+    }
+}
+
 static TypesetContribution native_bound_nested(NativeFragmentFixture* fixture, uint64_t node,
         const TypesetFlowProvider* child, TypesetBreakLegality boundary = TYPESET_BREAK_ALLOWED) {
     TypesetContribution value = native_bound_box(fixture, node);
     value.kind = TYPESET_CONTRIBUTION_NESTED; value.metrics = {}; value.nested = child;
     value.boundary.legality = boundary; return value;
+}
+
+TEST_F(SecondaryViewTest, NativeStaticRegionsRemeasureNestedParagraphsAcrossMastersAndRetainEditions) {
+    init_vector_engine();
+    const char* names[] = {"narrow", "wide"}; const char* widths[] = {"90px", "160px"};
+    for (size_t i = 0; i < 2; i++) {
+        DomElement* master = page_master(names[i], "size:300px 160px; margin:10px"); ASSERT_NE(master, nullptr);
+        ASSERT_NE(page_region(master, "body", "body", nullptr, "margin-left:170px"), nullptr);
+        DomElement* region = page_region(master, "start", "side", widths[i]); ASSERT_NE(region, nullptr);
+        ASSERT_TRUE(region->set_attribute("display-align", i ? "after" : "center"));
+    }
+    DomElement* program = page_control("r:sequence-master"); ASSERT_NE(program, nullptr); ASSERT_TRUE(program->set_attribute("name", "book"));
+    DomElement* run = page_control("r:master-run", program); ASSERT_NE(run, nullptr);
+    ASSERT_NE(master_choice(run, "narrow", "first"), nullptr); ASSERT_NE(master_choice(run, "wide"), nullptr);
+    DomElement* sequence = page_sequence("book"); ASSERT_NE(sequence, nullptr);
+    DomElement* body = page_control("r:flow", sequence); ASSERT_NE(body, nullptr); ASSERT_TRUE(body->set_attribute("region-name", "body"));
+    DomElement* margin = static_content(sequence, "side"); ASSERT_NE(margin, nullptr);
+    NativeFragmentFixture* fixtures[3] = {}; PagedNativeFlowBinding bindings[3] = {};
+    for (size_t i = 0; i < 3; i++) {
+        fixtures[i] = native_fragment_fixture(); ASSERT_NE(fixtures[i], nullptr); fixtures[i]->exact.provider += i;
+        bindings[i] = native_bound_binding(fixtures[i], i == 0 ? body : i == 1 ? margin : nullptr);
+    }
+    fixtures[0]->contribution_count = 2;
+    for (size_t i = 0; i < 2; i++) fixtures[0]->contributions[i] = native_bound_box(fixtures[0], 5800 + i);
+    fixtures[0]->contributions[0].boundary.legality = TYPESET_BREAK_FORCED;
+    fixtures[1]->contribution_count = 1; fixtures[1]->contributions[0] = native_bound_nested(fixtures[1], 5810, &bindings[2].provider);
+    NativeFragmentFixture* child = fixtures[2]; child->contribution_count = 2;
+    native_fragment_paint_fixture(child); child->image_box.opacity = 0;
+    child->contributions[0] = native_bound_box(child, 5820);
+    native_bound_paragraph(child, &child->contributions[0], {70,15,5,15,{0,0,70,20},lam::up((const TypesetRecord*)&child->exact)});
+    child->contributions[1] = native_bound_box(child, 5821); child->contributions[1].kind = TYPESET_CONTRIBUTION_TARGET;
+    child->targets[0] = {"margin-target", child->contributions[1].source, 0, lam::up((const TypesetRecord*)&child->exact)};
+    child->contributions[1].target = &child->targets[0]; bindings[2].targets = child->targets; bindings[2].target_count = 1;
+    PagedLayoutOptions options = paged_layout_options_default(); options.native_flows = bindings; options.native_flow_count = 3;
+    ViewTree* tree = secondary(); PagedLayoutDiagnostic diagnostic = {};
+    ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    ASSERT_EQ(tree->model->page_count, 2u);
+    EXPECT_EQ(fixtures[0]->active.state[0], 2u); EXPECT_EQ(fixtures[1]->active.state[0], 0u); EXPECT_EQ(child->active.state[0], 0u);
+    const ViewNodeState* state = view_tree_native_state(tree, &child->contributions[0].source); ASSERT_NE(state, nullptr);
+    ASSERT_EQ(state->occurrence_count, 8u);
+    size_t occurrences[2] = {};
+    for (auto* node = state->first_occurrence.get(); node; node = node->next_occurrence) {
+        size_t page = occurrence_page(node) - 1; ASSERT_LT(page, 2u); occurrences[page]++;
+        const RdtLogicalRect& region = tree->model->pages.get()[page]->style->edge_rects[RADIANT_REGION_START];
+        EXPECT_FLOAT_EQ(region.width, page ? 160.0f : 90.0f);
+        EXPECT_EQ(node->role, VIEW_FRAGMENT_STATIC); EXPECT_EQ(node->native_material->metrics.exact.get(), &child->exact);
+        EXPECT_EQ(node->native_material->solution.get(), &child->exact);
+        EXPECT_FLOAT_EQ(node->rect.x, region.x + (page ? node->text_start % 2 * 70.0f : 0.0f));
+        float top = page ? region.y + region.height - 40.0f : region.y + (region.height - 80.0f) * 0.5f;
+        EXPECT_FLOAT_EQ(node->rect.y, top + (page ? node->text_start / 2 : node->text_start) * 20.0f);
+    }
+    EXPECT_EQ(occurrences[0], 4u); EXPECT_EQ(occurrences[1], 4u);
+    const TypesetTarget* target = layout_secondary_target(tree, "margin-target"); ASSERT_NE(target, nullptr);
+    EXPECT_EQ(target->page_number, 1u); EXPECT_EQ(target->last_page_number, 2u);
+    ImageSurface* expected[2] = {};
+    for (uint32_t page = 1; page <= 2; page++) { expected[page - 1] = render_secondary_page_snapshot(tree, page); ASSERT_NE(expected[page - 1], nullptr); }
+    ViewPreviewOptions preview_options = view_preview_options_default();
+    ViewTree* preview = view_tree_page_instances_create(tree, nullptr, &preview_options); ASSERT_NE(preview, nullptr);
+    ASSERT_TRUE(view_tree_model_reset(tree)); options.max_pages = 1;
+    EXPECT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_BUDGET_EXHAUSTED); EXPECT_EQ(tree->model->page_count, 0u);
+    for (auto* fixture : fixtures) EXPECT_EQ(fixture->active.state[0], 0u);
+    ASSERT_TRUE(view_tree_secondary_release(&doc, tree));
+    for (auto* fixture : fixtures) native_fragment_release(fixture);
+    ASSERT_TRUE(create_dir("temp/paged-media-impl"));
+    EXPECT_TRUE(render_secondary_view_to_pdf(preview, "temp/paged-media-impl/native-static-regions.pdf"));
+    EXPECT_TRUE(render_secondary_view_to_svg(preview, "temp/paged-media-impl/native-static-regions.svg"));
+    for (uint32_t page = 1; page <= 2; page++) {
+        ImageSurface* retained = render_secondary_page_snapshot(preview, page); ASSERT_NE(retained, nullptr);
+        expect_same_surface_pixels(expected[page - 1], retained); image_surface_destroy(expected[page - 1]); image_surface_destroy(retained);
+    }
+    ASSERT_TRUE(view_tree_secondary_release(&doc, preview));
+}
+
+TEST_F(SecondaryViewTest, NativeStaticRegionsRejectBodySchedulingAndLateMaterialFailureAtomically) {
+    DomElement* master = page_master("native", "size:200px 100px; margin:10px"); ASSERT_NE(master, nullptr);
+    ASSERT_NE(page_region(master, "start", "side", "90px"), nullptr);
+    DomElement* sequence = page_sequence("native"); ASSERT_NE(sequence, nullptr); ASSERT_NE(block("Body", nullptr, "div", sequence), nullptr);
+    DomElement* margin = static_content(sequence, "side"); ASSERT_NE(margin, nullptr);
+    NativeFragmentFixture* fixture = native_fragment_fixture(); ASSERT_NE(fixture, nullptr);
+    fixture->contribution_count = 2;
+    PagedNativeFlowBinding binding = native_bound_binding(fixture, margin);
+    PagedLayoutOptions options = paged_layout_options_default(); options.native_flows = &binding; options.native_flow_count = 1;
+    const TypesetContributionKind invalid[] = {TYPESET_CONTRIBUTION_MARK, TYPESET_CONTRIBUTION_INSERTION,
+        TYPESET_CONTRIBUTION_FLOAT, TYPESET_CONTRIBUTION_FLUSH_DEFERRED, TYPESET_CONTRIBUTION_BOUNDARY, TYPESET_CONTRIBUTION_BOX};
+    ViewTree* tree = secondary(); PagedLayoutDiagnostic diagnostic = {};
+    for (auto kind : invalid) {
+        SCOPED_TRACE(kind); ASSERT_TRUE(view_tree_model_reset(tree));
+        for (size_t i = 0; i < 2; i++) fixture->contributions[i] = native_bound_box(fixture, 5900 + i);
+        fixture->contributions[0].kind = kind;
+        if (kind == TYPESET_CONTRIBUTION_BOUNDARY) fixture->contributions[0].boundary.legality = TYPESET_BREAK_FORCED;
+        if (kind == TYPESET_CONTRIBUTION_BOX) fixture->contributions[1].metrics.advance = 91;
+        EXPECT_EQ(layout_secondary_view(tree, &options, &diagnostic), kind == TYPESET_CONTRIBUTION_BOX ? TYPESET_UNPLACEABLE : TYPESET_INVALID);
+        EXPECT_EQ(tree->model->page_count, 0u); EXPECT_EQ(fixture->active.state[0], 0u);
+    }
+    ASSERT_TRUE(view_tree_model_reset(tree)); fixture->fail_material = true;
+    for (size_t i = 0; i < 2; i++) fixture->contributions[i] = native_bound_box(fixture, 5900 + i);
+    EXPECT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_INVALID);
+    EXPECT_EQ(tree->model->page_count, 0u); EXPECT_EQ(fixture->active.state[0], 0u);
+    ASSERT_TRUE(view_tree_secondary_release(&doc, tree));
+    EXPECT_EQ(ref_count_get(&fixture->references), 1); EXPECT_EQ(fixture->retained, fixture->released);
+    native_fragment_release(fixture);
+}
+
+TEST_F(SecondaryViewTest, NativeBodyColumnsKeepScopedBreaksPhysicalPagesAndRetainedPaint) {
+    init_vector_engine();
+    DomElement* region = nullptr;
+    DomElement* sequence = body_column_sequence("size:200px 100px;margin:10px", "column-count:2;column-gap:20px", &region);
+    ASSERT_NE(sequence, nullptr); ASSERT_NE(region, nullptr);
+    DomElement* flow = page_control("r:flow", sequence); ASSERT_NE(flow, nullptr); ASSERT_TRUE(flow->set_attribute("region-name", "body"));
+    NativeFragmentFixture* fixture = native_fragment_fixture(); ASSERT_NE(fixture, nullptr);
+    native_fragment_paint_fixture(fixture); fixture->image_box.opacity = 0; fixture->contribution_count = 6;
+    PagedNativeFlowBinding binding = native_bound_binding(fixture, flow);
+    PagedLayoutOptions options = paged_layout_options_default(); options.native_flows = &binding; options.native_flow_count = 1;
+    const uint32_t pages[][6] = {{1,1,1,1,2,2}, {1,1,1,2,2,2}, {1,2,2,2,2,3}};
+    const float xs[][6] = {{10,10,110,110,10,10}, {10,110,110,10,10,110}, {10,10,10,110,110,10}};
+    const float ys[][6] = {{10,41,10,41,10,41}, {10,10,41,10,41,10}, {10,10,41,10,41,10}};
+    ViewTree* tree = secondary(); PagedLayoutDiagnostic diagnostic = {};
+    for (size_t mode = 0; mode < 3; mode++) {
+        SCOPED_TRACE(mode); ASSERT_TRUE(view_tree_model_reset(tree));
+        for (size_t i = 0; i < 6; i++) fixture->contributions[i] = native_bound_box(fixture, 6000 + i);
+        if (mode) { fixture->contributions[0].boundary.legality = TYPESET_BREAK_FORCED;
+            fixture->contributions[0].boundary.scope = mode == 1 ? TYPESET_BREAK_COLUMN : TYPESET_BREAK_PAGE; }
+        ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+        EXPECT_EQ(tree->model->page_count, mode == 2 ? 3u : 2u);
+        for (size_t i = 0; i < 6; i++) {
+            const ViewNodeState* state = view_tree_native_state(tree, &fixture->contributions[i].source); ASSERT_NE(state, nullptr);
+            ASSERT_EQ(state->occurrence_count, 1u); const auto* node = state->first_occurrence.get();
+            EXPECT_EQ(occurrence_page(node), pages[mode][i]); EXPECT_FLOAT_EQ(node->rect.x, xs[mode][i]); EXPECT_FLOAT_EQ(node->rect.y, ys[mode][i]);
+            EXPECT_EQ(node->native_material->metrics.exact.get(), &fixture->exact);
+        }
+        for (size_t i = 0; i < tree->model->page_count; i++) {
+            const auto* page = tree->model->pages.get()[i];
+            EXPECT_FLOAT_EQ(page->node.rect.width, 200); EXPECT_FLOAT_EQ(page->content_rect.width, 180);
+            EXPECT_EQ(page->style->column_count, 2u); EXPECT_EQ(page->folio, i + 1);
+        }
+    }
+    ImageSurface* expected = render_secondary_page_snapshot(tree, 1); ASSERT_NE(expected, nullptr);
+    ViewPreviewOptions preview_options = view_preview_options_default();
+    ViewTree* preview = view_tree_page_instances_create(tree, nullptr, &preview_options); ASSERT_NE(preview, nullptr);
+    ASSERT_TRUE(view_tree_model_reset(tree)); ASSERT_TRUE(region->set_attribute("style", "column-count:2;column-gap:200px"));
+    EXPECT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_INVALID); EXPECT_EQ(tree->model->page_count, 0u);
+    EXPECT_EQ(fixture->active.state[0], 0u);
+    ASSERT_TRUE(view_tree_model_reset(tree)); ASSERT_TRUE(region->set_attribute("style", "column-count:129;column-gap:0"));
+    options.max_nodes = 128;
+    EXPECT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_BUDGET_EXHAUSTED); EXPECT_EQ(tree->model->page_count, 0u);
+    EXPECT_EQ(fixture->active.state[0], 0u); ASSERT_TRUE(view_tree_model_reset(tree));
+    ASSERT_TRUE(region->set_attribute("style", "column-count:2;column-gap:20px")); options.max_nodes = 1000000;
+    TypesetPagePolicy policy = native_bound_policy(fixture); options.page_policy = &policy;
+    ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    EXPECT_EQ(tree->model->page_count, 3u); EXPECT_EQ(fixture->committed_pages, 3u); EXPECT_EQ(fixture->active.state[0], 6u);
+    for (size_t i = 0; i < 6; i++) {
+        const ViewNodeState* state = view_tree_native_state(tree, &fixture->contributions[i].source); ASSERT_NE(state, nullptr);
+        ASSERT_EQ(state->occurrence_count, 1u); EXPECT_EQ(occurrence_page(state->first_occurrence), pages[2][i]);
+        EXPECT_FLOAT_EQ(state->first_occurrence->rect.x, xs[2][i]); EXPECT_FLOAT_EQ(state->first_occurrence->rect.y, ys[2][i]);
+    }
+    ASSERT_TRUE(view_tree_secondary_release(&doc, tree)); native_fragment_release(fixture);
+    native_fragment_export_preview(preview, expected, "temp/paged-media-impl/native-body-columns.png",
+        "temp/paged-media-impl/native-body-columns.svg", "temp/paged-media-impl/native-body-columns.pdf");
+    image_surface_destroy(expected); ASSERT_TRUE(view_tree_secondary_release(&doc, preview));
+}
+
+TEST_F(SecondaryViewTest, ExplicitNativeColumnsPreserveUnequalSheetGeometryThroughReinsertionAndRelease) {
+    init_vector_engine();
+    DomElement* region = nullptr;
+    DomElement* sequence = body_column_sequence("size:200px 120px;margin:10px", nullptr, &region);
+    ASSERT_NE(sequence, nullptr); ASSERT_NE(region, nullptr);
+    ASSERT_NE(page_column(region, "80px", "50px"), nullptr);
+    ASSERT_NE(page_column(region, "100px", "80px", "80px", "10px"), nullptr);
+    DomElement* flow = page_control("r:flow", sequence); ASSERT_NE(flow, nullptr); ASSERT_TRUE(flow->set_attribute("region-name", "body"));
+    NativeFragmentFixture* fixture = native_fragment_fixture(); ASSERT_NE(fixture, nullptr);
+    native_fragment_paint_fixture(fixture); fixture->image_box.opacity = 0; fixture->inspect_sheet = true;
+    fixture->run.x = fixture->run.baseline_y = 0;
+    fixture->contribution_count = 6;
+    for (size_t i = 0; i < 6; i++) fixture->contributions[i] = native_bound_box(fixture, 6980 + i);
+    PagedNativeFlowBinding binding = native_bound_binding(fixture, flow); TypesetPagePolicy policy = native_bound_policy(fixture);
+    PagedLayoutOptions options = paged_layout_options_default(); options.native_flows = &binding; options.native_flow_count = 1;
+    options.page_policy = &policy; ViewTree* tree = secondary(); PagedLayoutDiagnostic diagnostic = {};
+    for (NativeAssemblyMode mode : {NATIVE_ASSEMBLY_NONE, NATIVE_ASSEMBLY_PER_PAGE, NATIVE_ASSEMBLY_HOLD_REINSERT}) {
+        SCOPED_TRACE(mode); ASSERT_TRUE(view_tree_model_reset(tree));
+        fixture->assembly_mode = mode; fixture->first_candidate = false; fixture->assembly_phase = fixture->committed_pages = 0;
+        ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+        bool reinsert = mode == NATIVE_ASSEMBLY_HOLD_REINSERT;
+        ASSERT_EQ(tree->model->page_count, reinsert ? 6u : 2u);
+        EXPECT_EQ(fixture->committed_pages, tree->model->page_count);
+        EXPECT_EQ(fixture->assembly_phase, mode == NATIVE_ASSEMBLY_NONE ? 0u : reinsert ? 2u : 4u);
+        if (reinsert) EXPECT_EQ(fixture->assembly_exact_count, 3u);
+        for (size_t page = 0; page < tree->model->page_count; page++) {
+            EXPECT_EQ(fixture->sheet_columns[page], 2u); EXPECT_FLOAT_EQ(fixture->sheet_capacities[page], 130);
+            for (size_t column = 0; column < 2; column++) {
+                const auto& rect = fixture->sheet_regions[page][column].rect;
+                EXPECT_FLOAT_EQ(rect.x, column ? 90 : 10); EXPECT_FLOAT_EQ(rect.y, column ? 20 : 10);
+                EXPECT_FLOAT_EQ(rect.width, column ? 100 : 80); EXPECT_FLOAT_EQ(rect.height, column ? 80 : 50);
+            }
+        }
+        for (size_t i = 0; i < 6; i++) {
+            const ViewNodeState* state = view_tree_native_state(tree, &fixture->contributions[i].source); ASSERT_NE(state, nullptr);
+            ASSERT_EQ(state->occurrence_count, 1u); const LayoutViewNode* node = state->first_occurrence;
+            EXPECT_EQ(occurrence_page(node), reinsert ? i + 1 : i / 3 + 1);
+            EXPECT_FLOAT_EQ(node->rect.x, reinsert || i % 3 == 0 ? 10 : 90);
+            EXPECT_FLOAT_EQ(node->rect.y, reinsert || i % 3 == 0 ? 10 : 20 + (i % 3 - 1) * 31);
+            EXPECT_EQ(node->native_material->metrics.exact.get(), &fixture->exact);
+        }
+    }
+    // retain the fully filled unequal sheet rather than the later earliest-eject edition.
+    ASSERT_TRUE(view_tree_model_reset(tree)); fixture->assembly_mode = NATIVE_ASSEMBLY_NONE; fixture->first_candidate = false;
+    fixture->assembly_phase = fixture->committed_pages = 0;
+    ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    ImageSurface* expected = render_secondary_page_snapshot(tree, 1); ASSERT_NE(expected, nullptr);
+    ImageSurface* second = render_secondary_page_snapshot(tree, 2); ASSERT_NE(second, nullptr);
+    ViewPreviewOptions preview_options = view_preview_options_default();
+    ViewTree* preview = view_tree_page_instances_create(tree, nullptr, &preview_options); ASSERT_NE(preview, nullptr);
+    ASSERT_TRUE(view_tree_model_reset(tree)); fixture->fail_commit = true; fixture->fail_page = 2;
+    fixture->committed_pages = 0;
+    EXPECT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_INVALID);
+    EXPECT_EQ(tree->model->page_count, 0u); EXPECT_EQ(fixture->committed_pages, 0u); EXPECT_EQ(fixture->active.state[0], 0u);
+    ASSERT_TRUE(view_tree_secondary_release(&doc, tree)); native_fragment_release(fixture);
+    native_fragment_export_preview(preview, expected, "temp/paged-media-impl/native-explicit-columns.png",
+        "temp/paged-media-impl/native-explicit-columns.svg", "temp/paged-media-impl/native-explicit-columns.pdf");
+    native_fragment_export_preview(preview, second, "temp/paged-media-impl/native-explicit-columns-2.png",
+        "temp/paged-media-impl/native-explicit-columns-2.svg", "temp/paged-media-impl/native-explicit-columns.pdf", 2);
+    image_surface_destroy(expected); image_surface_destroy(second); ASSERT_TRUE(view_tree_secondary_release(&doc, preview));
+}
+
+TEST_F(SecondaryViewTest, ExplicitTerminalColumnsCommitOnlyTheSelectedUnequalMaster) {
+    DomElement* normal = nullptr, *last = nullptr;
+    DomElement* sequence = terminal_sequence("size:220px 120px;margin:10px", "size:330px 140px;margin:10px",
+        true, "", "", &normal, &last); ASSERT_NE(sequence, nullptr);
+    ASSERT_NE(page_column(normal, "80px", "50px"), nullptr);
+    ASSERT_NE(page_column(normal, "100px", "80px", "100px", "10px"), nullptr);
+    ASSERT_NE(page_column(last, "80px", "50px"), nullptr);
+    ASSERT_NE(page_column(last, "100px", "80px", "100px", "10px"), nullptr);
+    ASSERT_NE(page_column(last, "110px", "100px", "200px", "20px"), nullptr);
+    DomElement* flow = page_control("r:flow", sequence); ASSERT_NE(flow, nullptr); ASSERT_TRUE(flow->set_attribute("region-name", "body"));
+    NativeFragmentFixture* fixture = native_fragment_fixture(); ASSERT_NE(fixture, nullptr);
+    fixture->inspect_sheet = true; fixture->contribution_count = 5; fixture->forbidden_commit_height = 130;
+    for (size_t i = 0; i < 5; i++) fixture->contributions[i] = native_bound_box(fixture, 7020 + i);
+    PagedNativeFlowBinding binding = native_bound_binding(fixture, flow); TypesetPagePolicy policy = native_bound_policy(fixture);
+    PagedLayoutOptions options = paged_layout_options_default(); options.native_flows = &binding; options.native_flow_count = 1;
+    options.page_policy = &policy; ViewTree* tree = secondary(); PagedLayoutDiagnostic diagnostic = {};
+    for (NativeAssemblyMode mode : {NATIVE_ASSEMBLY_NONE, NATIVE_ASSEMBLY_PER_PAGE}) {
+        SCOPED_TRACE(mode); ASSERT_TRUE(view_tree_model_reset(tree)); fixture->assembly_mode = mode;
+        fixture->committed_pages = fixture->assembly_phase = 0;
+        ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+        ASSERT_EQ(tree->model->page_count, 1u); EXPECT_STREQ(tree->model->pages.get()[0]->name, "last");
+        EXPECT_EQ(fixture->committed_pages, 1u); EXPECT_EQ(fixture->sheet_columns[0], 3u);
+        EXPECT_FLOAT_EQ(fixture->sheet_capacities[0], 230); EXPECT_EQ(fixture->assembly_phase, mode == NATIVE_ASSEMBLY_NONE ? 0u : 2u);
+        const float widths[] = {80,100,110}, heights[] = {50,80,100};
+        for (size_t column = 0; column < 3; column++) {
+            const auto& rect = fixture->sheet_regions[0][column].rect;
+            EXPECT_FLOAT_EQ(rect.width, widths[column]); EXPECT_FLOAT_EQ(rect.height, heights[column]);
+            EXPECT_FLOAT_EQ(rect.x, 10 + column * 100); EXPECT_FLOAT_EQ(rect.y, 10 + column * 10);
+        }
+        for (size_t i = 0; i < 5; i++) {
+            const ViewNodeState* state = view_tree_native_state(tree, &fixture->contributions[i].source); ASSERT_NE(state, nullptr);
+            ASSERT_EQ(state->occurrence_count, 1u); EXPECT_EQ(occurrence_page(state->first_occurrence), 1u);
+            size_t column = i == 0 ? 0 : i < 3 ? 1 : 2;
+            EXPECT_FLOAT_EQ(state->first_occurrence->rect.x, 10 + column * 100);
+            EXPECT_FLOAT_EQ(state->first_occurrence->rect.y, 10 + column * 10 + (i == 2 || i == 4 ? 31 : 0));
+            EXPECT_EQ(state->first_occurrence->native_material->metrics.exact.get(), &fixture->exact);
+        }
+    }
+    ASSERT_TRUE(view_tree_secondary_release(&doc, tree)); EXPECT_EQ(fixture->retained, fixture->released); native_fragment_release(fixture);
+}
+
+TEST_F(SecondaryViewTest, ExplicitColumnsBypassUnplaceableEmptyRegionsWithoutEmptySheetCommitment) {
+    DomElement* region = nullptr;
+    DomElement* sequence = body_column_sequence("size:200px 120px;margin:10px", nullptr, &region);
+    ASSERT_NE(sequence, nullptr); ASSERT_NE(region, nullptr);
+    DomElement* columns[] = {page_column(region, "60px", "50px"), page_column(region, "100px", "80px", "80px", "10px")};
+    ASSERT_NE(columns[0], nullptr); ASSERT_NE(columns[1], nullptr);
+    DomElement* flow = page_control("r:flow", sequence); ASSERT_NE(flow, nullptr); ASSERT_TRUE(flow->set_attribute("region-name", "body"));
+    NativeFragmentFixture* fixture = native_fragment_fixture(); ASSERT_NE(fixture, nullptr); fixture->inspect_sheet = true;
+    fixture->contribution_count = 6;
+    for (size_t i = 0; i < 6; i++) fixture->contributions[i] = native_bound_box(fixture, 6995 + i);
+    PagedNativeFlowBinding binding = native_bound_binding(fixture, flow); TypesetPagePolicy policy = native_bound_policy(fixture);
+    PagedLayoutOptions options = paged_layout_options_default(); options.native_flows = &binding; options.native_flow_count = 1;
+    ViewTree* tree = secondary(); PagedLayoutDiagnostic diagnostic = {};
+    for (size_t mode = 0; mode < 3; mode++) for (bool custom : {false, true}) {
+        SCOPED_TRACE(mode);
+        SCOPED_TRACE(custom); ASSERT_TRUE(view_tree_model_reset(tree));
+        ASSERT_TRUE(columns[0]->set_attribute("inline-size", mode == 0 ? "60px" : "80px"));
+        ASSERT_TRUE(columns[0]->set_attribute("block-size", mode == 1 ? "20px" : mode == 2 ? "80px" : "50px"));
+        ASSERT_TRUE(columns[1]->set_attribute("inline-size", mode == 2 ? "60px" : "100px"));
+        fixture->committed_pages = 0; options.page_policy = custom ? &policy : nullptr;
+        ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+        ASSERT_EQ(tree->model->page_count, 3u);
+        for (size_t i = 0; i < 6; i++) {
+            const ViewNodeState* state = view_tree_native_state(tree, &fixture->contributions[i].source); ASSERT_NE(state, nullptr);
+            ASSERT_EQ(state->occurrence_count, 1u); const LayoutViewNode* node = state->first_occurrence;
+            EXPECT_EQ(occurrence_page(node), i / 2 + 1); EXPECT_FLOAT_EQ(node->rect.x, mode == 2 ? 10 : 90);
+            EXPECT_FLOAT_EQ(node->rect.y, (mode == 2 ? 10 : 20) + i % 2 * 31);
+        }
+        if (custom) for (size_t i = 0; i < 3; i++) {
+            const auto& empty = fixture->sheet_regions[i][mode == 2 ? 1 : 0];
+            EXPECT_EQ(empty.start.serial, empty.end.serial); EXPECT_FLOAT_EQ(empty.body_height, 0);
+            EXPECT_EQ(fixture->page_numbers[i], i + 1);
+        }
+    }
+    ASSERT_TRUE(view_tree_model_reset(tree)); ASSERT_TRUE(columns[0]->set_attribute("inline-size", "60px"));
+    fixture->committed_pages = 0; options.page_policy = &policy;
+    EXPECT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_UNPLACEABLE) << diagnostic.reason;
+    EXPECT_EQ(tree->model->page_count, 0u); EXPECT_EQ(fixture->committed_pages, 0u); EXPECT_EQ(fixture->active.state[0], 0u);
+    ASSERT_TRUE(view_tree_secondary_release(&doc, tree)); EXPECT_EQ(fixture->retained, fixture->released); native_fragment_release(fixture);
+}
+
+TEST_F(SecondaryViewTest, ExplicitColumnsRemeasureParagraphsInAuthoredOrderWithComputedGeometry) {
+    DomElement* region = nullptr;
+    DomElement* sequence = body_column_sequence("size:200px 120px;margin:10px", "font-size:10px;--narrow:6em", &region);
+    ASSERT_NE(sequence, nullptr); ASSERT_NE(region, nullptr);
+    ASSERT_NE(page_column(region, "var(--narrow)", "40%", "calc(100% - 60px)"), nullptr);
+    ASSERT_NE(page_column(region, "100px", "calc(100% - 20px)", "0", "1em"), nullptr);
+    DomElement* flow = page_control("r:flow", sequence); ASSERT_NE(flow, nullptr); ASSERT_TRUE(flow->set_attribute("region-name", "body"));
+    NativeFragmentFixture* fixture = native_fragment_fixture(); ASSERT_NE(fixture, nullptr); fixture->inspect_sheet = true;
+    fixture->contribution_count = 1; fixture->contributions[0] = native_bound_box(fixture, 6990);
+    native_bound_paragraph(fixture, &fixture->contributions[0], {45,15,5,15,{0,0,45,20},lam::up((const TypesetRecord*)&fixture->exact)});
+    PagedNativeFlowBinding binding = native_bound_binding(fixture, flow); TypesetPagePolicy policy = native_bound_policy(fixture);
+    PagedLayoutOptions options = paged_layout_options_default(); options.native_flows = &binding; options.native_flow_count = 1;
+    ViewTree* tree = secondary(); PagedLayoutDiagnostic diagnostic = {};
+    for (bool custom : {false, true}) {
+        SCOPED_TRACE(custom); ASSERT_TRUE(view_tree_model_reset(tree)); options.page_policy = custom ? &policy : nullptr;
+        ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+        ASSERT_EQ(tree->model->page_count, 1u);
+        const ViewNodeState* state = view_tree_native_state(tree, &fixture->contributions[0].source); ASSERT_NE(state, nullptr);
+        ASSERT_EQ(state->occurrence_count, 4u); size_t index = 0;
+        for (const LayoutViewNode* node = state->first_occurrence; node; node = node->next_occurrence, index++) {
+            EXPECT_EQ(node->native_material->start, index); EXPECT_EQ(node->native_material->length, 1u);
+            // the wider column joins the remaining two source items on one line, with separate paint occurrences.
+            EXPECT_FLOAT_EQ(node->rect.x, index < 2 ? 130 : 10 + (index - 2) * 45);
+            EXPECT_FLOAT_EQ(node->rect.y, index == 1 ? 30 : index < 2 ? 10 : 20);
+            EXPECT_FLOAT_EQ(node->rect.width, 45); EXPECT_EQ(node->native_material->solution.get(), &fixture->exact);
+        }
+        if (custom) { EXPECT_EQ(fixture->sheet_columns[0], 2u); EXPECT_FLOAT_EQ(fixture->sheet_capacities[0], 120); }
+    }
+    ASSERT_TRUE(view_tree_secondary_release(&doc, tree)); EXPECT_EQ(fixture->retained, fixture->released); native_fragment_release(fixture);
+}
+
+TEST_F(SecondaryViewTest, ExplicitColumnsPlaceNotesAndFloatsAtEachIndependentRegionEdge) {
+    stylesheet("p,div,span{margin:0;font:10px/20px Arial;orphans:1;widows:1}");
+    DomElement* region = nullptr;
+    DomElement* sequence = body_column_sequence("size:240px 140px;margin:10px", nullptr, &region);
+    ASSERT_NE(sequence, nullptr); ASSERT_NE(region, nullptr);
+    ASSERT_NE(page_column(region, "80px", "80px"), nullptr);
+    ASSERT_NE(page_column(region, "100px", "100px", "120px", "10px"), nullptr);
+    DomElement* paragraphs[2] = {}, *notes[2] = {}, *floats[2] = {};
+    for (size_t i = 0; i < 2; i++) {
+        paragraphs[i] = block(i ? "B" : "A", i ? "break-before:column" : nullptr, "p", sequence); ASSERT_NE(paragraphs[i], nullptr);
+        floats[i] = block(i ? "Top B" : "Top A", "float:top;float-reference:column;height:20px;background:red", "div", paragraphs[i]);
+        ASSERT_NE(floats[i], nullptr);
+        notes[i] = block(i ? "Note B" : "Note A", "float:footnote;float-reference:column;footnote-policy:line", "span", paragraphs[i]);
+        ASSERT_NE(notes[i], nullptr);
+    }
+    NativeFragmentFixture* fixture = native_fragment_fixture(); ASSERT_NE(fixture, nullptr); fixture->inspect_sheet = true;
+    fixture->assembly_mode = NATIVE_ASSEMBLY_PER_PAGE; TypesetPagePolicy policy = native_bound_policy(fixture);
+    ViewTree* tree = secondary(); PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
+    for (bool custom : {false, true}) {
+        SCOPED_TRACE(custom); ASSERT_TRUE(view_tree_model_reset(tree)); options.page_policy = custom ? &policy : nullptr;
+        ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason; ASSERT_EQ(tree->model->page_count, 1u);
+        for (size_t i = 0; i < 2; i++) {
+            LayoutViewNode* body = source_glyph_text(tree, paragraphs[i]->first_child, i ? "B" : "A"); ASSERT_NE(body, nullptr);
+            EXPECT_FLOAT_EQ(body->rect.x, i ? 130 : 10); EXPECT_FLOAT_EQ(body->rect.y, i ? 40 : 30);
+            LayoutViewNode* note = source_fragment(tree, notes[i], VIEW_FRAGMENT_NOTE, true); ASSERT_NE(note, nullptr);
+            EXPECT_FLOAT_EQ(note->rect.x, i ? 130 : 10); EXPECT_FLOAT_EQ(note->rect.y, i ? 100 : 70);
+            EXPECT_FLOAT_EQ(note->rect.width, i ? 100 : 80);
+            LayoutViewNode* floating = source_fragment(tree, floats[i], VIEW_FRAGMENT_FLOAT, true); ASSERT_NE(floating, nullptr);
+            EXPECT_FLOAT_EQ(floating->rect.x, i ? 130 : 10); EXPECT_FLOAT_EQ(floating->rect.y, i ? 20 : 10);
+            EXPECT_FLOAT_EQ(floating->rect.width, i ? 100 : 80);
+            expect_source_range_coverage(tree, notes[i]->first_child); expect_source_range_coverage(tree, floats[i]->first_child);
+        }
+        if (custom) EXPECT_FLOAT_EQ(fixture->sheet_capacities[0], 180);
+    }
+    ASSERT_TRUE(view_tree_secondary_release(&doc, tree)); native_fragment_release(fixture);
+}
+
+TEST_F(SecondaryViewTest, ExplicitColumnTablesContinueCellsAcrossFragmentainersOnTheSamePhysicalSheet) {
+    stylesheet("p,div,td{margin:0;font:10px/20px Arial;orphans:1;widows:1}td{padding:0;vertical-align:top;white-space:pre}");
+    DomElement* region = nullptr;
+    DomElement* sequence = body_column_sequence("size:220px 120px;margin:10px", nullptr, &region);
+    ASSERT_NE(sequence, nullptr); ASSERT_NE(region, nullptr);
+    ASSERT_NE(page_column(region, "80px", "40px"), nullptr);
+    ASSERT_NE(page_column(region, "100px", "60px", "100px", "10px"), nullptr);
+    DomElement* table = block(nullptr, "table-layout:fixed;width:100%;border-spacing:0;border-collapse:separate", "table", sequence);
+    ASSERT_NE(table, nullptr); DomElement* group = block(nullptr, nullptr, "tbody", table); ASSERT_NE(group, nullptr);
+    DomElement* row = block(nullptr, nullptr, "tr", group); ASSERT_NE(row, nullptr);
+    DomElement* cell = block("A\nB\nC\nD\nE", nullptr, "td", row); ASSERT_NE(cell, nullptr);
+    NativeFragmentFixture* fixture = native_fragment_fixture(); ASSERT_NE(fixture, nullptr); fixture->inspect_sheet = true;
+    TypesetPagePolicy policy = native_bound_policy(fixture); ViewTree* tree = secondary();
+    PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
+    for (bool explicit_geometry : {true, false}) {
+        if (!explicit_geometry) {
+            while (region->first_child) ASSERT_TRUE(region->DomNode::remove_child(region->first_child));
+            ASSERT_TRUE(region->set_attribute("style", "column-count:2;column-gap:20px"));
+            ASSERT_TRUE(region->parent_element()->set_attribute("style", "size:220px 80px;margin:10px"));
+        }
+        SCOPED_TRACE(explicit_geometry);
+        for (bool custom : {false, true}) {
+            SCOPED_TRACE(custom); ASSERT_TRUE(view_tree_model_reset(tree)); options.page_policy = custom ? &policy : nullptr;
+            fixture->committed_pages = 0;
+            ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+            ASSERT_EQ(tree->model->page_count, 1u); const char* lines[] = {"A","B","C","D","E"};
+            for (size_t i = 0; i < 5; i++) {
+                LayoutViewNode* node = source_glyph_text(tree, cell->first_child, lines[i]); ASSERT_NE(node, nullptr);
+                size_t first_lines = explicit_geometry ? 2 : 3;
+                EXPECT_EQ(occurrence_page(node), 1u); EXPECT_FLOAT_EQ(node->rect.x, i < first_lines ? 10 : explicit_geometry ? 110 : 120);
+                EXPECT_FLOAT_EQ(node->rect.y, i < first_lines ? 10 + i * 20 : (explicit_geometry ? 20 : 10) + (i - first_lines) * 20);
+            }
+            expect_source_range_coverage(tree, cell->first_child);
+            const ViewNodeState* grids = view_tree_node_state(tree, table, false); ASSERT_NE(grids, nullptr);
+            ASSERT_EQ(grids->occurrence_count, 2u); EXPECT_FLOAT_EQ(grids->first_occurrence->rect.width, explicit_geometry ? 80 : 90);
+            EXPECT_FLOAT_EQ(grids->last_occurrence->rect.width, explicit_geometry ? 100 : 90);
+            if (custom) { EXPECT_EQ(fixture->committed_pages, 1u); EXPECT_FLOAT_EQ(fixture->sheet_capacities[0], explicit_geometry ? 100 : 120); }
+        }
+    }
+    ASSERT_TRUE(view_tree_secondary_release(&doc, tree)); native_fragment_release(fixture);
+}
+
+TEST_F(SecondaryViewTest, ExplicitColumnGeometryRejectsInvalidInputsAndBoundsColumnCount) {
+    DomElement* region = nullptr;
+    DomElement* sequence = body_column_sequence("size:200px 100px;margin:10px", nullptr, &region);
+    ASSERT_NE(sequence, nullptr); ASSERT_NE(region, nullptr);
+    DomElement* column = page_column(region, "100%", "100%"); ASSERT_NE(column, nullptr);
+    DomElement* content = block("A", "font:10px/20px Arial;margin:0", "p", sequence); ASSERT_NE(content, nullptr);
+    ViewTree* tree = secondary(); PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
+    ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    for (const char* value : {"auto", "0px", "-1px", "var(--missing)", "calc(0px / 0)"}) {
+        SCOPED_TRACE(value); ASSERT_TRUE(view_tree_model_reset(tree)); ASSERT_TRUE(column->set_attribute("inline-size", value));
+        EXPECT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_INVALID) << diagnostic.reason;
+        EXPECT_EQ(diagnostic.source.address, column);
+        EXPECT_EQ(tree->model->page_count, 0u);
+    }
+    ASSERT_TRUE(view_tree_model_reset(tree)); ASSERT_TRUE(column->set_attribute("inline-size", "80px"));
+    for (size_t i = 0; i < 128; i++) ASSERT_NE(page_column(region, "80px"), nullptr);
+    options.max_nodes = 128;
+    EXPECT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_BUDGET_EXHAUSTED); EXPECT_EQ(tree->model->page_count, 0u);
+    ASSERT_TRUE(view_tree_secondary_release(&doc, tree));
+}
+
+TEST_F(SecondaryViewTest, NativeTerminalColumnsRestoreProvidersMarksTargetsAndRetainExactPaint) {
+    init_vector_engine();
+    DomElement* sequence = terminal_sequence("size:200px 100px;margin:10px", "size:350px 100px;margin:10px", true,
+        "column-count:2;column-gap:20px", "column-count:3;column-gap:15px"); ASSERT_NE(sequence, nullptr);
+    DomElement* flow = page_control("r:flow", sequence); ASSERT_NE(flow, nullptr); ASSERT_TRUE(flow->set_attribute("region-name", "body"));
+    NativeFragmentFixture* fixture = native_fragment_fixture(); ASSERT_NE(fixture, nullptr);
+    native_fragment_paint_fixture(fixture); fixture->image_box.opacity = 0; fixture->contribution_count = 9;
+    for (size_t i = 0; i < 9; i++) fixture->contributions[i] = native_bound_box(fixture, 6600 + i);
+    for (size_t i = 0; i < 2; i++) {
+        size_t index = i ? 7 : 0;
+        fixture->marks[i] = {TYPESET_MARK_NATIVE, "chapter", fixture->contributions[index].source, i ? "Beta" : "Alpha",
+            lam::up((const TypesetRecord*)&fixture->exact), 0, false};
+        fixture->contributions[index].kind = TYPESET_CONTRIBUTION_MARK; fixture->contributions[index].mark = &fixture->marks[i];
+    }
+    fixture->targets[0] = {"column-anchor", fixture->contributions[1].source, 0, lam::up((const TypesetRecord*)&fixture->exact)};
+    for (size_t index : {1u, 8u}) {
+        fixture->contributions[index].kind = TYPESET_CONTRIBUTION_TARGET;
+        fixture->contributions[index].source = fixture->targets[0].source; fixture->contributions[index].target = &fixture->targets[0];
+    }
+    PagedNativeFlowBinding binding = native_bound_binding(fixture, flow); binding.targets = fixture->targets; binding.target_count = 1;
+    PagedLayoutOptions options = paged_layout_options_default(); options.native_flows = &binding; options.native_flow_count = 1;
+    ViewTree* tree = secondary(); PagedLayoutDiagnostic diagnostic = {};
+    ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    ASSERT_EQ(tree->model->page_count, 1u); EXPECT_STREQ(tree->model->pages.get()[0]->name, "last");
+    for (size_t i = 0; i < 5; i++) {
+        const ViewNodeState* state = view_tree_native_state(tree, &fixture->contributions[i + 2].source); ASSERT_NE(state, nullptr);
+        ASSERT_EQ(state->occurrence_count, 1u); const LayoutViewNode* node = state->first_occurrence;
+        EXPECT_EQ(occurrence_page(node), 1u); EXPECT_FLOAT_EQ(node->rect.x, 10.0f + (i / 2) * 115.0f);
+        EXPECT_FLOAT_EQ(node->rect.y, 10.0f + (i % 2) * 31.0f); EXPECT_EQ(node->native_material->metrics.exact.get(), &fixture->exact);
+    }
+    const TypesetTarget* target = layout_secondary_target(tree, "column-anchor"); ASSERT_NE(target, nullptr);
+    EXPECT_EQ(target->page_number, 1u); EXPECT_EQ(target->last_page_number, 1u); EXPECT_EQ(target->value.get(), &fixture->exact);
+    const TypesetMark* mark = layout_secondary_mark(tree, TYPESET_MARK_NATIVE, "chapter", 1, TYPESET_MARK_LAST); ASSERT_NE(mark, nullptr);
+    EXPECT_STREQ(mark->text, "Beta"); EXPECT_FALSE(mark->at_page_start); EXPECT_EQ(fixture->active.state[0], 9u);
+    ImageSurface* expected = render_secondary_page_snapshot(tree, 1); ASSERT_NE(expected, nullptr);
+    ViewPreviewOptions preview_options = view_preview_options_default();
+    ViewTree* preview = view_tree_page_instances_create(tree, nullptr, &preview_options); ASSERT_NE(preview, nullptr);
+    ASSERT_TRUE(view_tree_model_reset(tree)); options.max_pages = 1;
+    fixture->contributions[2].boundary.legality = TYPESET_BREAK_FORCED; fixture->contributions[2].boundary.scope = TYPESET_BREAK_PAGE;
+    EXPECT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_BUDGET_EXHAUSTED);
+    EXPECT_EQ(tree->model->page_count, 0u); EXPECT_EQ(fixture->active.state[0], 0u);
+    ASSERT_TRUE(view_tree_secondary_release(&doc, tree)); native_fragment_release(fixture);
+    native_fragment_export_preview(preview, expected, "temp/paged-media-impl/native-terminal-columns.png",
+        "temp/paged-media-impl/native-terminal-columns.svg", "temp/paged-media-impl/native-terminal-columns.pdf");
+    image_surface_destroy(expected); ASSERT_TRUE(view_tree_secondary_release(&doc, preview));
+}
+
+TEST_F(SecondaryViewTest, NativeSheetPoliciesChooseAllColumnsAndReinsertOwnedPhysicalInputs) {
+    init_vector_engine();
+    DomElement* sequence = body_column_sequence("size:200px 100px;margin:10px", "column-count:2;column-gap:20px");
+    ASSERT_NE(sequence, nullptr);
+    DomElement* flow = page_control("r:flow", sequence); ASSERT_NE(flow, nullptr); ASSERT_TRUE(flow->set_attribute("region-name", "body"));
+    NativeFragmentFixture* fixture = native_fragment_fixture(); ASSERT_NE(fixture, nullptr);
+    native_fragment_paint_fixture(fixture); fixture->image_box.opacity = 0; fixture->inspect_sheet = true;
+    fixture->contribution_count = 6;
+    for (size_t i = 0; i < 6; i++) fixture->contributions[i] = native_bound_box(fixture, 6800 + i);
+    PagedNativeFlowBinding binding = native_bound_binding(fixture, flow); TypesetPagePolicy policy = native_bound_policy(fixture);
+    PagedLayoutOptions options = paged_layout_options_default(); options.native_flows = &binding; options.native_flow_count = 1;
+    options.page_policy = &policy; ViewTree* tree = secondary(); PagedLayoutDiagnostic diagnostic = {};
+    for (NativeAssemblyMode mode : {NATIVE_ASSEMBLY_NONE, NATIVE_ASSEMBLY_PER_PAGE, NATIVE_ASSEMBLY_HOLD_REINSERT}) {
+        SCOPED_TRACE(mode); ASSERT_TRUE(view_tree_model_reset(tree));
+        fixture->assembly_mode = mode; fixture->first_candidate = false; fixture->assembly_phase = fixture->committed_pages = 0;
+        ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+        bool reinsert = mode == NATIVE_ASSEMBLY_HOLD_REINSERT;
+        ASSERT_EQ(tree->model->page_count, reinsert ? 6u : 2u);
+        EXPECT_EQ(fixture->committed_pages, tree->model->page_count);
+        EXPECT_EQ(fixture->assembly_phase, mode == NATIVE_ASSEMBLY_NONE ? 0u : reinsert ? 2u : 4u);
+        if (reinsert) { EXPECT_TRUE(fixture->assembly_seen_exact); EXPECT_EQ(fixture->assembly_exact_count, 4u); }
+        for (size_t page = 0; page < tree->model->page_count; page++) {
+            EXPECT_EQ(fixture->page_numbers[page], page + 1); EXPECT_EQ(fixture->sheet_columns[page], 2u);
+            EXPECT_FLOAT_EQ(fixture->sheet_capacities[page], 160.0f);
+            for (size_t column = 0; column < 2; column++) {
+                const auto& region = fixture->sheet_regions[page][column];
+                EXPECT_FLOAT_EQ(region.rect.x, 10.0f + column * 100.0f); EXPECT_FLOAT_EQ(region.rect.y, 10);
+                EXPECT_FLOAT_EQ(region.rect.width, 80); EXPECT_FLOAT_EQ(region.rect.height, 80);
+            }
+        }
+        for (size_t i = 0; i < 6; i++) {
+            const ViewNodeState* state = view_tree_native_state(tree, &fixture->contributions[i].source); ASSERT_NE(state, nullptr);
+            ASSERT_EQ(state->occurrence_count, 1u); const LayoutViewNode* node = state->first_occurrence;
+            EXPECT_EQ(occurrence_page(node), reinsert ? i + 1 : i / 4 + 1);
+            EXPECT_FLOAT_EQ(node->rect.x, reinsert ? 10.0f : 10.0f + (i % 4 / 2) * 100.0f);
+            EXPECT_FLOAT_EQ(node->rect.y, reinsert ? 10.0f : 10.0f + i % 2 * 31.0f);
+            EXPECT_EQ(node->native_material->metrics.exact.get(), &fixture->exact);
+        }
+    }
+    ImageSurface* expected = render_secondary_page_snapshot(tree, 1); ASSERT_NE(expected, nullptr);
+    ViewPreviewOptions preview_options = view_preview_options_default();
+    ViewTree* preview = view_tree_page_instances_create(tree, nullptr, &preview_options); ASSERT_NE(preview, nullptr);
+    for (NativeAssemblyMode mode : {NATIVE_ASSEMBLY_NONE, NATIVE_ASSEMBLY_STUCK, NATIVE_ASSEMBLY_CYCLE, NATIVE_ASSEMBLY_ENDLESS}) {
+        SCOPED_TRACE(mode); ASSERT_TRUE(view_tree_model_reset(tree)); fixture->assembly_mode = mode;
+        fixture->assembly_phase = fixture->committed_pages = 0; fixture->first_candidate = false;
+        fixture->fail_commit = mode == NATIVE_ASSEMBLY_NONE; fixture->fail_page = 2; options.max_page_transitions = 2;
+        TypesetStatus failure = mode == NATIVE_ASSEMBLY_NONE ? TYPESET_INVALID : mode == NATIVE_ASSEMBLY_ENDLESS ?
+            TYPESET_BUDGET_EXHAUSTED : TYPESET_NO_PROGRESS;
+        EXPECT_EQ(layout_secondary_view(tree, &options, &diagnostic), failure) << diagnostic.reason;
+        EXPECT_EQ(tree->model->page_count, 0u); EXPECT_EQ(fixture->committed_pages, 0u);
+        EXPECT_EQ(fixture->assembly_phase, 0u); EXPECT_FALSE(fixture->first_candidate); EXPECT_EQ(fixture->active.state[0], 0u);
+    }
+    ASSERT_TRUE(view_tree_secondary_release(&doc, tree)); native_fragment_release(fixture);
+    native_fragment_export_preview(preview, expected, "temp/paged-media-impl/native-sheet-policy.png",
+        "temp/paged-media-impl/native-sheet-policy.svg", "temp/paged-media-impl/native-sheet-policy.pdf");
+    image_surface_destroy(expected); ASSERT_TRUE(view_tree_secondary_release(&doc, preview));
+}
+
+TEST_F(SecondaryViewTest, TerminalSheetPoliciesReceiveTheSelectedThreeColumnGeometryOnce) {
+    DomElement* sequence = terminal_sequence("size:200px 100px;margin:10px", "size:350px 100px;margin:10px", true,
+        "column-count:2;column-gap:20px", "column-count:3;column-gap:15px"); ASSERT_NE(sequence, nullptr);
+    DomElement* flow = page_control("r:flow", sequence); ASSERT_NE(flow, nullptr); ASSERT_TRUE(flow->set_attribute("region-name", "body"));
+    NativeFragmentFixture* fixture = native_fragment_fixture(); ASSERT_NE(fixture, nullptr);
+    fixture->inspect_sheet = true; fixture->contribution_count = 5; fixture->forbidden_commit_height = 160;
+    for (size_t i = 0; i < 5; i++) fixture->contributions[i] = native_bound_box(fixture, 6900 + i);
+    PagedNativeFlowBinding binding = native_bound_binding(fixture, flow); TypesetPagePolicy policy = native_bound_policy(fixture);
+    PagedLayoutOptions options = paged_layout_options_default(); options.native_flows = &binding; options.native_flow_count = 1;
+    options.page_policy = &policy; ViewTree* tree = secondary(); PagedLayoutDiagnostic diagnostic = {};
+    for (NativeAssemblyMode mode : {NATIVE_ASSEMBLY_NONE, NATIVE_ASSEMBLY_PER_PAGE}) {
+        SCOPED_TRACE(mode); ASSERT_TRUE(view_tree_model_reset(tree)); fixture->assembly_mode = mode;
+        fixture->assembly_phase = fixture->committed_pages = 0;
+        ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+        ASSERT_EQ(tree->model->page_count, 1u); EXPECT_STREQ(tree->model->pages.get()[0]->name, "last");
+        EXPECT_EQ(fixture->committed_pages, 1u); EXPECT_EQ(fixture->sheet_columns[0], 3u);
+        EXPECT_FLOAT_EQ(fixture->sheet_capacities[0], 240); EXPECT_EQ(fixture->assembly_phase, mode == NATIVE_ASSEMBLY_NONE ? 0u : 2u);
+        for (size_t column = 0; column < 3; column++) {
+            const auto& region = fixture->sheet_regions[0][column];
+            EXPECT_FLOAT_EQ(region.rect.x, 10.0f + column * 115.0f); EXPECT_FLOAT_EQ(region.rect.width, 100);
+            EXPECT_FLOAT_EQ(region.body_height, column < 2 ? 62 : 31);
+        }
+        for (size_t i = 0; i < 5; i++) {
+            const ViewNodeState* state = view_tree_native_state(tree, &fixture->contributions[i].source); ASSERT_NE(state, nullptr);
+            ASSERT_EQ(state->occurrence_count, 1u); EXPECT_EQ(occurrence_page(state->first_occurrence), 1u);
+            EXPECT_FLOAT_EQ(state->first_occurrence->rect.x, 10.0f + (i / 2) * 115.0f);
+            EXPECT_FLOAT_EQ(state->first_occurrence->rect.y, 10.0f + i % 2 * 31.0f);
+        }
+    }
+    ASSERT_TRUE(view_tree_secondary_release(&doc, tree)); EXPECT_EQ(fixture->retained, fixture->released); native_fragment_release(fixture);
+}
+
+TEST_F(SecondaryViewTest, LeadingBlankStaysCommittedWhenAColumnSheetIsReinserted) {
+    DomElement* sequence = body_column_sequence("size:200px 100px;margin:10px", "column-count:2;column-gap:20px");
+    ASSERT_NE(sequence, nullptr);
+    DomElement* flow = page_control("r:flow", sequence, "break-before:left"); ASSERT_NE(flow, nullptr);
+    ASSERT_TRUE(flow->set_attribute("region-name", "body"));
+    NativeFragmentFixture* fixture = native_fragment_fixture(); ASSERT_NE(fixture, nullptr);
+    fixture->inspect_sheet = true; fixture->contribution_count = 4;
+    fixture->assembly_mode = NATIVE_ASSEMBLY_HOLD_REINSERT; fixture->assembly_page = 2;
+    for (size_t i = 0; i < 4; i++) fixture->contributions[i] = native_bound_box(fixture, 6950 + i);
+    PagedNativeFlowBinding binding = native_bound_binding(fixture, flow); TypesetPagePolicy policy = native_bound_policy(fixture);
+    PagedLayoutOptions options = paged_layout_options_default(); options.native_flows = &binding; options.native_flow_count = 1;
+    options.page_policy = &policy; ViewTree* tree = secondary(); PagedLayoutDiagnostic diagnostic = {};
+    ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    ASSERT_EQ(tree->model->page_count, 5u); EXPECT_EQ(fixture->committed_pages, 5u);
+    EXPECT_EQ(fixture->assembly_phase, 2u); EXPECT_EQ(fixture->assembly_exact_count, 4u);
+    EXPECT_TRUE(tree->model->pages.get()[0]->blank); EXPECT_EQ(fixture->page_kinds[0], TYPESET_PAGE_BLANK);
+    for (size_t page = 0; page < 5; page++) EXPECT_EQ(fixture->page_numbers[page], page + 1);
+    for (size_t i = 0; i < 4; i++) {
+        const ViewNodeState* state = view_tree_native_state(tree, &fixture->contributions[i].source); ASSERT_NE(state, nullptr);
+        ASSERT_EQ(state->occurrence_count, 1u); EXPECT_EQ(occurrence_page(state->first_occurrence), i + 2);
+        EXPECT_FLOAT_EQ(state->first_occurrence->rect.x, 10); EXPECT_FLOAT_EQ(state->first_occurrence->rect.y, 10);
+        EXPECT_EQ(fixture->sheet_columns[i + 1], 2u); EXPECT_FLOAT_EQ(fixture->sheet_capacities[i + 1], 160);
+        EXPECT_EQ(fixture->sheet_regions[i + 1][1].start.serial, fixture->sheet_regions[i + 1][1].end.serial);
+    }
+    ASSERT_TRUE(view_tree_model_reset(tree)); fixture->committed_pages = fixture->assembly_phase = 0; fixture->first_candidate = false;
+    fixture->fail_commit = true; fixture->fail_page = 4;
+    EXPECT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_INVALID);
+    EXPECT_EQ(tree->model->page_count, 0u); EXPECT_EQ(fixture->committed_pages, 0u); EXPECT_EQ(fixture->assembly_phase, 0u);
+    EXPECT_EQ(fixture->active.state[0], 0u); EXPECT_FALSE(fixture->first_candidate);
+    ASSERT_TRUE(view_tree_secondary_release(&doc, tree)); EXPECT_EQ(fixture->retained, fixture->released); native_fragment_release(fixture);
+}
+
+TEST_F(SecondaryViewTest, SheetPolicyEjectsRespectPageKeepsAcrossInteriorColumnBoundaries) {
+    stylesheet("p,div{margin:0;font:10px/20px Arial;white-space:pre;orphans:1;widows:1}");
+    DomElement* sequence = body_column_sequence("size:200px 100px;margin:10px", "column-count:2;column-gap:20px");
+    ASSERT_NE(sequence, nullptr);
+    DomElement* group = block(nullptr, nullptr, "div", sequence); ASSERT_NE(group, nullptr);
+    ASSERT_TRUE(group->set_attribute("r:keep-together.within-page", "always"));
+    DomElement* paragraph = block("L0\nL1\nL2\nL3\nL4\nL5", nullptr, "p", group); ASSERT_NE(paragraph, nullptr);
+    NativeFragmentFixture* fixture = native_fragment_fixture(); ASSERT_NE(fixture, nullptr);
+    fixture->inspect_sheet = true; fixture->first_candidate = true;
+    TypesetPagePolicy policy = native_bound_policy(fixture); PagedLayoutOptions options = paged_layout_options_default();
+    options.page_policy = &policy; ViewTree* tree = secondary(); PagedLayoutDiagnostic diagnostic = {};
+    ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    ASSERT_EQ(tree->model->page_count, 1u); EXPECT_EQ(fixture->committed_pages, 1u);
+    expect_source_range_coverage(tree, paragraph->first_child);
+    for (size_t i = 0; i < 6; i++) {
+        char text[] = "L0"; text[1] += i;
+        LayoutViewNode* node = source_glyph_text(tree, paragraph->first_child, text); ASSERT_NE(node, nullptr);
+        EXPECT_EQ(occurrence_page(node), 1u); EXPECT_FLOAT_EQ(node->rect.x, i < 4 ? 10 : 110);
+        EXPECT_FLOAT_EQ(node->rect.y, 10.0f + i % 4 * 20.0f);
+    }
+    ASSERT_TRUE(view_tree_secondary_release(&doc, tree)); native_fragment_release(fixture);
+}
+
+TEST_F(SecondaryViewTest, TerminalPolicyAssemblyAndCommitSeeOnlyTheSelectedMasterGeometry) {
+    DomElement* sequence = terminal_sequence("size:200px 100px;margin:10px", "size:120px 60px;margin:10px"); ASSERT_NE(sequence, nullptr);
+    DomElement* flow = page_control("r:flow", sequence); ASSERT_NE(flow, nullptr); ASSERT_TRUE(flow->set_attribute("region-name", "body"));
+    NativeFragmentFixture* fixture = native_fragment_fixture(); ASSERT_NE(fixture, nullptr);
+    fixture->contribution_count = 1; fixture->contributions[0] = native_bound_box(fixture, 6700); fixture->forbidden_commit_height = 80;
+    fixture->contributions[0].boundary.legality = TYPESET_BREAK_FORBIDDEN;
+    PagedNativeFlowBinding binding = native_bound_binding(fixture, flow); TypesetPagePolicy policy = native_bound_policy(fixture);
+    PagedLayoutOptions options = paged_layout_options_default(); options.native_flows = &binding; options.native_flow_count = 1;
+    options.page_policy = &policy; ViewTree* tree = secondary(); PagedLayoutDiagnostic diagnostic = {};
+    for (NativeAssemblyMode mode : {NATIVE_ASSEMBLY_NONE, NATIVE_ASSEMBLY_PER_PAGE, NATIVE_ASSEMBLY_HOLD_REINSERT}) {
+        SCOPED_TRACE(mode); ASSERT_TRUE(view_tree_model_reset(tree)); fixture->committed_pages = fixture->assembly_phase = 0;
+        fixture->assembly_mode = mode; fixture->first_candidate = false;
+        ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+        ASSERT_EQ(tree->model->page_count, 1u); EXPECT_STREQ(tree->model->pages.get()[0]->name, "last");
+        EXPECT_EQ(fixture->committed_pages, 1u); EXPECT_EQ(fixture->assembly_phase, mode == NATIVE_ASSEMBLY_NONE ? 0u : 2u);
+        const ViewNodeState* state = view_tree_native_state(tree, &fixture->contributions[0].source); ASSERT_NE(state, nullptr);
+        EXPECT_EQ(state->occurrence_count, 1u); EXPECT_EQ(fixture->active.state[0], 1u);
+    }
+    for (NativeAssemblyMode mode : {NATIVE_ASSEMBLY_STUCK, NATIVE_ASSEMBLY_CYCLE, NATIVE_ASSEMBLY_ENDLESS}) {
+        SCOPED_TRACE(mode); ASSERT_TRUE(view_tree_model_reset(tree)); fixture->committed_pages = fixture->assembly_phase = 0;
+        fixture->assembly_mode = mode; fixture->first_candidate = false; options.max_page_transitions = 2;
+        EXPECT_EQ(layout_secondary_view(tree, &options, &diagnostic), mode == NATIVE_ASSEMBLY_ENDLESS ?
+            TYPESET_BUDGET_EXHAUSTED : TYPESET_NO_PROGRESS) << diagnostic.reason;
+        EXPECT_EQ(tree->model->page_count, 0u); EXPECT_EQ(fixture->committed_pages, 0u); EXPECT_EQ(fixture->assembly_phase, 0u);
+        EXPECT_EQ(fixture->active.state[0], 0u);
+    }
+    ASSERT_TRUE(view_tree_secondary_release(&doc, tree));
+    EXPECT_EQ(ref_count_get(&fixture->references), 1); EXPECT_EQ(fixture->retained, fixture->released); native_fragment_release(fixture);
+}
+
+TEST_F(SecondaryViewTest, CommonBodyColumnsContinueDomRangesAndSeparateColumnFromPageBreaks) {
+    stylesheet("p,div{margin:0;font:10px/20px Arial;white-space:pre;orphans:1;widows:1}");
+    DomElement* master = page_master("native", "size:200px 100px;margin:10px"); ASSERT_NE(master, nullptr);
+    ASSERT_NE(page_region(master, "body", "body", nullptr, "column-count:2;column-gap:20px"), nullptr);
+    DomElement* sequence = page_sequence("native"); ASSERT_NE(sequence, nullptr);
+    DomElement* paragraph = block("L0\nL1\nL2\nL3\nL4\nL5\nL6\nL7\nL8\nL9", nullptr, "p", sequence); ASSERT_NE(paragraph, nullptr);
+    DomElement* column = block("Column", "break-before:column", "p", sequence); ASSERT_NE(column, nullptr);
+    DomElement* page_break = block("Page", "break-before:page", "p", sequence); ASSERT_NE(page_break, nullptr);
+    ViewTree* tree = secondary(); PagedLayoutDiagnostic diagnostic = {}; PagedLayoutOptions options = paged_layout_options_default();
+    ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    ASSERT_EQ(tree->model->page_count, 3u);
+    const ViewNodeState* state = view_tree_node_state(tree, paragraph->first_child, false); ASSERT_NE(state, nullptr);
+    expect_source_range_coverage(tree, paragraph->first_child);
+    for (size_t line = 0; line < 10; line++) {
+        char text[] = "L0"; text[1] += line;
+        LayoutViewNode* node = source_glyph_text(tree, paragraph->first_child, text); ASSERT_NE(node, nullptr) << line;
+        EXPECT_EQ(occurrence_page(node), line < 8 ? 1u : 2u);
+        EXPECT_FLOAT_EQ(node->rect.x, line >= 4 && line < 8 ? 110.0f : 10.0f);
+        EXPECT_FLOAT_EQ(node->rect.y, 10.0f + line % 4 * 20.0f);
+    }
+    LayoutViewNode* node = source_glyph_text(tree, column->first_child, "Column"); ASSERT_NE(node, nullptr);
+    EXPECT_EQ(occurrence_page(node), 2u); EXPECT_FLOAT_EQ(node->rect.x, 110); EXPECT_FLOAT_EQ(node->rect.y, 10);
+    node = source_glyph_text(tree, page_break->first_child, "Page"); ASSERT_NE(node, nullptr);
+    EXPECT_EQ(occurrence_page(node), 3u); EXPECT_FLOAT_EQ(node->rect.x, 10); EXPECT_FLOAT_EQ(node->rect.y, 10);
+}
+
+TEST_F(SecondaryViewTest, FoBodyColumnsRefineCountsGapsAndScopedBreaksThroughCommonRegions) {
+    DomElement* fo = formatting_root(
+        "<f:root xmlns:f='http://www.w3.org/1999/XSL/Format' font-family='Arial' font-size='7.5pt' line-height='15pt'>"
+        "<f:layout-master-set><f:simple-page-master master-name='sheet' page-width='150pt' page-height='75pt' margin='7.5pt'>"
+        "<f:region-body column-count='1.5' column-gap='10% + 1.5pt'/></f:simple-page-master></f:layout-master-set>"
+        "<f:page-sequence master-reference='sheet' force-page-count='no-force'><f:flow flow-name='xsl-region-body'>"
+        "<f:block id='first'>First</f:block><f:block id='column' break-before='column'>Column</f:block>"
+        "<f:block id='page' break-before='page'>Page</f:block></f:flow></f:page-sequence></f:root>");
+    ASSERT_NE(fo, nullptr); RadiantFoOptions fo_options = radiant_fo_options_default();
+    RadiantFoTranslation* translated = radiant_fo_translate(&doc, fo, &fo_options); ASSERT_NE(translated, nullptr);
+    ASSERT_EQ(translated->diagnostic.status, TYPESET_OK) << translated->diagnostic.reason;
+    DomElement* generated = install_fo_translation(translated); ASSERT_NE(generated, nullptr);
+    ViewTree* tree = secondary(); PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
+    ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    ASSERT_EQ(tree->model->page_count, 2u);
+    const auto* style = tree->model->pages.get()[0]->style.get(); ASSERT_NE(style, nullptr);
+    EXPECT_EQ(style->column_count, 2u); EXPECT_FLOAT_EQ(style->column_gap, 20);
+    DomElement* flow = generated->last_child_element()->first_child_element(); ASSERT_NE(flow, nullptr);
+    DomElement* first = flow->first_child_element(); DomElement* column = first->next_sibling->as_element();
+    DomElement* page = column->next_sibling->as_element();
+    LayoutViewNode* node = source_glyph_text(tree, first->first_child, "First"); ASSERT_NE(node, nullptr);
+    EXPECT_EQ(occurrence_page(node), 1u); EXPECT_FLOAT_EQ(node->rect.x, 10); EXPECT_GT(node->rect.width, 0);
+    node = source_glyph_text(tree, column->first_child, "Column"); ASSERT_NE(node, nullptr);
+    EXPECT_EQ(occurrence_page(node), 1u); EXPECT_FLOAT_EQ(node->rect.x, 110); EXPECT_FLOAT_EQ(node->rect.y, 10);
+    node = source_glyph_text(tree, page->first_child, "Page"); ASSERT_NE(node, nullptr);
+    EXPECT_EQ(occurrence_page(node), 2u); EXPECT_FLOAT_EQ(node->rect.x, 10);
+    ASSERT_TRUE(view_tree_secondary_release(&doc, tree));
+    DomElement* region = fo->first_child_element()->first_child_element()->first_child_element(); ASSERT_NE(region, nullptr);
+    const struct { const char* count; const char* gap; uint32_t expected_count; float expected_gap; } cases[] = {
+        {"-3", "-2pt", 1, 0}, {"2.49", "inherit", 2, 16}, {"3 - 1", "2pt * 3", 2, 8}};
+    for (const auto& item : cases) {
+        SCOPED_TRACE(item.count); ASSERT_TRUE(region->set_attribute("column-count", item.count));
+        ASSERT_TRUE(region->set_attribute("column-gap", item.gap));
+        translated = radiant_fo_translate(&doc, fo, &fo_options); ASSERT_NE(translated, nullptr);
+        ASSERT_EQ(translated->diagnostic.status, TYPESET_OK) << translated->diagnostic.reason;
+        ASSERT_NE(install_fo_translation(translated), nullptr); tree = secondary();
+        ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+        EXPECT_EQ(tree->model->pages.get()[0]->style->column_count, item.expected_count);
+        EXPECT_FLOAT_EQ(tree->model->pages.get()[0]->style->column_gap, item.expected_gap);
+        ASSERT_TRUE(view_tree_secondary_release(&doc, tree));
+    }
+}
+
+TEST_F(SecondaryViewTest, BodyColumnComputedBindingsRetainOwnerLengthsAndRegionPercentages) {
+    DomElement* master = page_master("native", "size:200px 100px;margin:10px;font-size:10px;column-count:2;column-gap:2em"); ASSERT_NE(master, nullptr);
+    DomElement* region = page_region(master, "body", "body", nullptr,
+        "font-size:30px;column-count:inherit;column-gap:inherit"); ASSERT_NE(region, nullptr);
+    DomElement* sequence = page_sequence("native"); ASSERT_NE(sequence, nullptr);
+    DomElement* paragraph = block("Text", "margin:0;font:10px/20px Arial", "p", sequence); ASSERT_NE(paragraph, nullptr);
+    ViewTree* tree = secondary(); PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
+    ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    const ViewPageStyle* selected = tree->model->pages.get()[0]->style; ASSERT_NE(selected, nullptr);
+    EXPECT_EQ(selected->column_count, 2u); EXPECT_FLOAT_EQ(selected->column_gap, 20);
+    const CssValue* count = view_css_computed_property(tree, selected->body_style, "column-count"); ASSERT_NE(count, nullptr);
+    ASSERT_EQ(count->type, CSS_VALUE_TYPE_NUMBER); EXPECT_DOUBLE_EQ(count->data.number.value, 2);
+    const CssValue* gap = view_css_computed_property(tree, selected->body_style, "column-gap"); ASSERT_NE(gap, nullptr);
+    ASSERT_EQ(gap->type, CSS_VALUE_TYPE_LENGTH); EXPECT_DOUBLE_EQ(gap->data.length.value, 20);
+    ViewPreviewOptions preview_options = view_preview_options_default();
+    ViewTree* preview = view_tree_page_instances_create(tree, nullptr, &preview_options); ASSERT_NE(preview, nullptr);
+    ASSERT_TRUE(region->set_attribute("style", "font-size:30px;column-count:2;column-gap:calc(2em + 10%)"));
+    ASSERT_TRUE(view_tree_model_reset(tree)); ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    selected = tree->model->pages.get()[0]->style; EXPECT_FLOAT_EQ(selected->column_gap, 78);
+    const struct { const char* css; uint32_t count; } counts[] = {
+        {"font-size:10px;column-count:calc(1.5);column-gap:normal", 2},
+        {"font-size:10px;column-count:calc(2.49);column-gap:normal", 2},
+        {"font-size:10px;column-count:calc(-3);column-gap:normal", 1}};
+    for (const auto& item : counts) {
+        ASSERT_TRUE(region->set_attribute("style", item.css)); ASSERT_TRUE(view_tree_model_reset(tree));
+        ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+        EXPECT_EQ(tree->model->pages.get()[0]->style->column_count, item.count);
+        EXPECT_FLOAT_EQ(tree->model->pages.get()[0]->style->column_gap, 10);
+    }
+    ASSERT_TRUE(view_tree_secondary_release(&doc, tree));
+    const ViewPageBox* retained = view_tree_page_material(preview, preview->model->pages.get()[0]); ASSERT_NE(retained, nullptr);
+    EXPECT_EQ(retained->style->body_style->column_values[1].get(), gap); EXPECT_DOUBLE_EQ(gap->data.length.value, 20);
+    ASSERT_TRUE(view_tree_secondary_release(&doc, preview));
+}
+
+TEST_F(SecondaryViewTest, FoColumnQueriesUseFoInitialsAndComputedOwnerValues) {
+    DomElement* fo = formatting_root(
+        "<f:root xmlns:f='http://www.w3.org/1999/XSL/Format' font-family='Arial' font-size='12pt' line-height='15pt'>"
+        "<f:layout-master-set column-count='1.5' column-gap='2em'><f:simple-page-master master-name='sheet' "
+        "font-size='7.5pt' page-width='150pt' page-height='75pt' margin='7.5pt' "
+        "column-count='from-parent(column-count) + .5' column-gap='from-parent(column-gap) * .5'>"
+        "<f:region-body font-size='22.5pt' column-count='from-parent(column-count) - 1' "
+        "column-gap='from-nearest-specified-value(column-gap) + 10%'/></f:simple-page-master></f:layout-master-set>"
+        "<f:page-sequence master-reference='sheet' force-page-count='no-force'><f:flow flow-name='xsl-region-body'>"
+        "<f:block id='first' padding-start='from-parent(column-gap)' "
+        "space-before='from-nearest-specified-value(column-count) * 1pt'>Query</f:block>"
+        "</f:flow></f:page-sequence></f:root>");
+    ASSERT_NE(fo, nullptr); RadiantFoOptions fo_options = radiant_fo_options_default();
+    RadiantFoTranslation* translated = radiant_fo_translate(&doc, fo, &fo_options); ASSERT_NE(translated, nullptr);
+    ASSERT_EQ(translated->diagnostic.status, TYPESET_OK) << translated->diagnostic.property << ": " << translated->diagnostic.reason;
+    DomElement* generated = install_fo_translation(translated); ASSERT_NE(generated, nullptr);
+    DomElement* child = generated->last_child_element()->last_child_element()->first_child_element(); ASSERT_NE(child, nullptr);
+    ViewTree* tree = secondary(); PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
+    ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    ASSERT_EQ(tree->model->page_count, 1u);
+    const ViewPageStyle* page = tree->model->pages.get()[0]->style; ASSERT_NE(page, nullptr);
+    EXPECT_EQ(page->column_count, 2u); EXPECT_FLOAT_EQ(page->column_gap, 34);
+    const ViewCssStyle* style = view_css_resolve(tree, child); ASSERT_NE(style, nullptr);
+    ASSERT_NE(style->padding[3], nullptr); EXPECT_DOUBLE_EQ(style->padding[3]->data.length.value, 16);
+    ASSERT_NE(style->flow_traits, nullptr); EXPECT_NEAR(style->flow_traits->before.optimum, 4.0f / 3.0f, .0001f);
+    const ViewCssStyle* master = page->body_style->parent; ASSERT_NE(master, nullptr);
+    const CssValue* count = view_css_computed_property(tree, master, "column-count"); ASSERT_NE(count, nullptr);
+    ASSERT_EQ(count->type, CSS_VALUE_TYPE_NUMBER); EXPECT_DOUBLE_EQ(count->data.number.value, 3);
+    const CssValue* gap = view_css_computed_property(tree, master, "column-gap"); ASSERT_NE(gap, nullptr);
+    ASSERT_EQ(gap->type, CSS_VALUE_TYPE_LENGTH); EXPECT_DOUBLE_EQ(gap->data.length.value, 16);
+    ViewPreviewOptions preview_options = view_preview_options_default();
+    ViewTree* preview = view_tree_page_instances_create(tree, nullptr, &preview_options); ASSERT_NE(preview, nullptr);
+    ASSERT_TRUE(view_tree_model_reset(tree)); ASSERT_TRUE(view_tree_secondary_release(&doc, tree));
+    EXPECT_DOUBLE_EQ(count->data.number.value, 3); EXPECT_DOUBLE_EQ(gap->data.length.value, 16);
+    ASSERT_TRUE(view_tree_secondary_release(&doc, preview));
+    DomElement* original = fo->first_child_element()->first_child_element()->first_child_element(); ASSERT_NE(original, nullptr);
+    for (const char* invalid : {"inherited-property-value(column-count)", "from-parent(column-gap)"}) {
+        SCOPED_TRACE(invalid); ASSERT_TRUE(original->set_attribute("column-count", invalid));
+        translated = radiant_fo_translate(&doc, fo, &fo_options); ASSERT_NE(translated, nullptr);
+        if (translated->diagnostic.status == TYPESET_OK) {
+            ASSERT_NE(install_fo_translation(translated), nullptr); tree = secondary();
+            EXPECT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_INVALID); EXPECT_EQ(tree->model->page_count, 0u);
+            ASSERT_NE(diagnostic.origin, nullptr); EXPECT_EQ(diagnostic.origin->source.address, original);
+            ASSERT_TRUE(view_tree_secondary_release(&doc, tree));
+        } else {
+            EXPECT_EQ(translated->diagnostic.status, TYPESET_INVALID); EXPECT_EQ(translated->diagnostic.source.address, original);
+        }
+    }
+}
+
+TEST_F(SecondaryViewTest, SelectedPageAndRegionBindingsKeepControlSourcesAndOrdinaryStylesDistinct) {
+    DomElement* set = page_control("r:master-set", nullptr, "font-size:10px;column-count:2;column-gap:2em"); ASSERT_NE(set, nullptr);
+    DomElement* master = page_master("native", "size:200px 100px;margin:10px;font-size:calc(var(--font) * 2);"
+        "column-count:calc(var(--count) + 1);column-gap:var(--gap)", set); ASSERT_NE(master, nullptr);
+    ASSERT_TRUE(master->set_attribute("r:property-bindings", "--font:parent(font-size);--count:parent(column-count);--gap:parent(column-gap)"));
+    DomElement* region = page_region(master, "body", "body", nullptr,
+        "font-size:30px;column-count:calc(var(--count) - 1);column-gap:calc(var(--gap) + 10%)"); ASSERT_NE(region, nullptr);
+    ASSERT_TRUE(region->set_attribute("r:property-bindings", "--count:parent(column-count);--gap:parent(column-gap)"));
+    DomElement* sequence = page_sequence("native"); ASSERT_NE(sequence, nullptr);
+    ASSERT_NE(block("Text", "margin:0;font:10px/20px Arial", "p", sequence), nullptr);
+    ViewTree* tree = secondary(); PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
+    ViewCssStyle* ordinary = view_css_resolve(tree, master); ASSERT_NE(ordinary, nullptr);
+    ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    const ViewPageStyle* page = tree->model->pages.get()[0]->style; ASSERT_NE(page, nullptr);
+    EXPECT_EQ(page->computed_style->source, master); EXPECT_EQ(page->body_style->source, region);
+    EXPECT_EQ(page->column_count, 2u); EXPECT_FLOAT_EQ(page->column_gap, 38);
+    EXPECT_FLOAT_EQ(page->computed_style->font.font_size, 20);
+    EXPECT_EQ(view_css_resolve(tree, master), ordinary);
+    EXPECT_EQ(ordinary->page_context, nullptr); EXPECT_NE(ordinary, page->computed_style.get());
+    EXPECT_EQ(ordinary->source, master); EXPECT_FLOAT_EQ(ordinary->font.font_size, 20);
+    ASSERT_TRUE(view_tree_model_reset(tree));
+    ASSERT_TRUE(region->set_attribute("r:property-bindings", "--count:parent(color);--gap:parent(column-gap)"));
+    EXPECT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_INVALID); EXPECT_EQ(tree->model->page_count, 0u);
+    EXPECT_EQ(diagnostic.source.address, region);
+}
+
+TEST_F(SecondaryViewTest, NativeColumnInsertionsSplitWithinSheetsRetainExactPaintAndRollbackAllColumns) {
+    init_vector_engine();
+    DomElement* master = page_master("native", "size:200px 100px;margin:10px"); ASSERT_NE(master, nullptr);
+    ASSERT_NE(page_region(master, "body", "body", nullptr, "column-count:2;column-gap:20px"), nullptr);
+    DomElement* sequence = page_sequence("native"); ASSERT_NE(sequence, nullptr);
+    DomElement* flow = page_control("r:flow", sequence); ASSERT_NE(flow, nullptr); ASSERT_TRUE(flow->set_attribute("region-name", "body"));
+    NativeFragmentFixture* fixture = native_fragment_fixture(); ASSERT_NE(fixture, nullptr);
+    native_fragment_paint_fixture(fixture); fixture->image_box.opacity = 0; fixture->run.x = fixture->run.baseline_y = 0;
+    fixture->region_records[0] = {{917}, UINT64_C(9007199254740993), 2, 40};
+    fixture->regions[0] = native_region_material(&fixture->region_records[0], 5, 6200, true);
+    fixture->regions[0].measure = native_bound_region_measure; fixture->regions[0].reference = TYPESET_REGION_REFERENCE_COLUMN;
+    fixture->contributions[0] = native_bound_box(fixture, 6300);
+    fixture->contributions[1] = native_bound_box(fixture, 6200);
+    fixture->contributions[1].kind = TYPESET_CONTRIBUTION_INSERTION; fixture->contributions[1].region = TYPESET_REGION_NOTE;
+    fixture->contributions[1].source = fixture->regions[0].source; fixture->contributions[1].region_material = &fixture->regions[0];
+    fixture->contributions[2] = native_bound_box(fixture, 6301); fixture->contributions[3] = native_bound_box(fixture, 6302);
+    fixture->contributions[2].boundary.legality = TYPESET_BREAK_FORCED;
+    fixture->contribution_count = 4;
+    PagedNativeFlowBinding binding = native_bound_binding(fixture, flow); binding.region_item = native_bound_region_item;
+    PagedLayoutOptions options = paged_layout_options_default(); options.native_flows = &binding; options.native_flow_count = 1;
+    ViewTree* tree = secondary(); PagedLayoutDiagnostic diagnostic = {};
+    ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    ASSERT_EQ(tree->model->page_count, 2u);
+    const ViewNodeState* notes = view_tree_native_state(tree, &fixture->regions[0].source); ASSERT_NE(notes, nullptr);
+    ASSERT_EQ(notes->occurrence_count, 2u); const LayoutViewNode* note = notes->first_occurrence;
+    for (size_t i = 0; i < 2; i++, note = note->next_occurrence) {
+        ASSERT_NE(note, nullptr); EXPECT_EQ(occurrence_page(note), 1u);
+        EXPECT_FLOAT_EQ(note->rect.x, i ? 110 : 10); EXPECT_FLOAT_EQ(note->rect.y, 50); EXPECT_FLOAT_EQ(note->rect.width, 80);
+        ASSERT_NE(note->native_material, nullptr);
+        EXPECT_EQ(((const NativeRegionFixture*)note->native_material->solution.get())->scaled_points, UINT64_C(9007199254740993));
+    }
+    const uint32_t pages[] = {1, 1, 2}; const float xs[] = {10, 110, 10};
+    for (size_t i = 0; i < 3; i++) {
+        const auto* body = view_tree_native_state(tree, &fixture->contributions[i ? i + 1 : 0].source); ASSERT_NE(body, nullptr);
+        ASSERT_EQ(body->occurrence_count, 1u); EXPECT_EQ(occurrence_page(body->first_occurrence), pages[i]);
+        EXPECT_FLOAT_EQ(body->first_occurrence->rect.x, xs[i]); EXPECT_FLOAT_EQ(body->first_occurrence->rect.y, 10);
+    }
+    ImageSurface* expected = render_secondary_page_snapshot(tree, 1); ASSERT_NE(expected, nullptr);
+    ViewPreviewOptions preview_options = view_preview_options_default();
+    ViewTree* preview = view_tree_page_instances_create(tree, nullptr, &preview_options); ASSERT_NE(preview, nullptr);
+    ASSERT_TRUE(view_tree_model_reset(tree)); fixture->contribution_count = 2;
+    ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    ASSERT_EQ(tree->model->page_count, 1u);
+    notes = view_tree_native_state(tree, &fixture->regions[0].source); ASSERT_NE(notes, nullptr);
+    ASSERT_EQ(notes->occurrence_count, 2u);
+    EXPECT_EQ(occurrence_page(notes->last_occurrence), 1u); EXPECT_FLOAT_EQ(notes->last_occurrence->rect.x, 110);
+    fixture->contribution_count = 4;
+    // a late second-column failure must rewind earlier column fragments and queue continuations together.
+    ASSERT_TRUE(view_tree_model_reset(tree)); options.max_pages = 1;
+    EXPECT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_BUDGET_EXHAUSTED); EXPECT_EQ(tree->model->page_count, 0u);
+    EXPECT_EQ(fixture->active.state[0], 0u); ASSERT_TRUE(view_tree_model_reset(tree)); options.max_pages = 100;
+    fixture->regions[0].reference = TYPESET_REGION_REFERENCE_PAGE;
+    EXPECT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_INVALID); EXPECT_EQ(tree->model->page_count, 0u);
+    EXPECT_EQ(fixture->active.state[0], 0u);
+    ASSERT_TRUE(view_tree_secondary_release(&doc, tree)); native_fragment_release(fixture);
+    native_fragment_export_preview(preview, expected, "temp/paged-media-impl/native-column-notes.png",
+        "temp/paged-media-impl/native-column-notes.svg", "temp/paged-media-impl/native-column-notes.pdf");
+    image_surface_destroy(expected); ASSERT_TRUE(view_tree_secondary_release(&doc, preview));
+}
+
+TEST_F(SecondaryViewTest, NativeSheetPoliciesRetainColumnSlicesAndReinsertAuxiliaryOnlySheets) {
+    init_vector_engine();
+    DomElement* sequence = body_column_sequence("size:200px 100px;margin:10px", "column-count:2;column-gap:20px");
+    ASSERT_NE(sequence, nullptr);
+    DomElement* flow = page_control("r:flow", sequence); ASSERT_NE(flow, nullptr); ASSERT_TRUE(flow->set_attribute("region-name", "body"));
+    NativeFragmentFixture* fixture = native_fragment_fixture(); ASSERT_NE(fixture, nullptr);
+    native_fragment_paint_fixture(fixture); fixture->image_box.opacity = 0; fixture->run.x = fixture->run.baseline_y = 0;
+    fixture->inspect_sheet = fixture->inspect_auxiliary_exact = true;
+    fixture->region_records[0] = {{917}, UINT64_C(9007199254740993), 5, 40};
+    fixture->regions[0] = native_region_material(&fixture->region_records[0], 5, 6960, true);
+    fixture->regions[0].measure = native_bound_region_measure; fixture->regions[0].reference = TYPESET_REGION_REFERENCE_COLUMN;
+    fixture->contributions[0] = native_bound_box(fixture, 6970);
+    fixture->contributions[1] = native_bound_box(fixture, 6960);
+    fixture->contributions[1].kind = TYPESET_CONTRIBUTION_INSERTION; fixture->contributions[1].region = TYPESET_REGION_NOTE;
+    fixture->contributions[1].source = fixture->regions[0].source; fixture->contributions[1].region_material = &fixture->regions[0];
+    fixture->contributions[2] = native_bound_box(fixture, 6971); fixture->contribution_count = 3;
+    PagedNativeFlowBinding binding = native_bound_binding(fixture, flow); binding.region_item = native_bound_region_item;
+    TypesetPagePolicy policy = native_bound_policy(fixture); PagedLayoutOptions options = paged_layout_options_default();
+    options.page_policy = &policy; options.native_flows = &binding; options.native_flow_count = 1;
+    ViewTree* tree = secondary(); PagedLayoutDiagnostic diagnostic = {};
+    for (NativeAssemblyMode mode : {NATIVE_ASSEMBLY_NONE, NATIVE_ASSEMBLY_PER_PAGE, NATIVE_ASSEMBLY_HOLD_REINSERT}) {
+        SCOPED_TRACE(mode); ASSERT_TRUE(view_tree_model_reset(tree)); fixture->assembly_mode = mode;
+        fixture->assembly_page = mode == NATIVE_ASSEMBLY_HOLD_REINSERT ? 2 : 0;
+        fixture->committed_pages = fixture->assembly_phase = 0; fixture->first_candidate = false; fixture->assembly_seen_auxiliary = false;
+        ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+        ASSERT_EQ(tree->model->page_count, 2u); EXPECT_EQ(fixture->committed_pages, 2u);
+        EXPECT_EQ(fixture->page_kinds[0], TYPESET_PAGE_FLOW); EXPECT_EQ(fixture->page_kinds[1], TYPESET_PAGE_REGION);
+        EXPECT_TRUE(fixture->assembly_seen_auxiliary);
+        EXPECT_EQ(fixture->assembly_phase, mode == NATIVE_ASSEMBLY_NONE ? 0u : mode == NATIVE_ASSEMBLY_PER_PAGE ? 4u : 2u);
+        if (mode == NATIVE_ASSEMBLY_HOLD_REINSERT) EXPECT_EQ(fixture->assembly_exact_count, 2u);
+        for (size_t page = 0; page < 2; page++) for (size_t column = 0; column < 2; column++) {
+            EXPECT_EQ(fixture->sheet_columns[page], 2u); EXPECT_EQ(fixture->page_numbers[page], page + 1);
+            EXPECT_EQ(fixture->sheet_notes[page][column], 1u); EXPECT_EQ(fixture->sheet_floats[page][column], 0u);
+            EXPECT_FLOAT_EQ(fixture->sheet_regions[page][column].note_height, page == 1 && column == 0 ? 80 : 40);
+        }
+        const ViewNodeState* note = view_tree_native_state(tree, &fixture->regions[0].source); ASSERT_NE(note, nullptr);
+        ASSERT_EQ(note->occurrence_count, 4u); size_t occurrence = 0;
+        for (const LayoutViewNode* node = note->first_occurrence; node; node = node->next_occurrence, occurrence++) {
+            EXPECT_EQ(occurrence_page(node), occurrence / 2 + 1); EXPECT_FLOAT_EQ(node->rect.x, occurrence % 2 ? 110 : 10);
+            EXPECT_EQ(((const NativeRegionFixture*)node->native_material->solution.get())->scaled_points, UINT64_C(9007199254740993));
+        }
+        for (size_t i = 0; i < 5; i++) {
+            TypesetSource line = fixture->regions[0].source; line.node += 10000 + i;
+            const ViewNodeState* state = view_tree_native_state(tree, &line); ASSERT_NE(state, nullptr);
+            ASSERT_EQ(state->occurrence_count, 1u); EXPECT_EQ(state->first_occurrence->native_material->start, i);
+        }
+    }
+    ImageSurface* expected = render_secondary_page_snapshot(tree, 1); ASSERT_NE(expected, nullptr);
+    ImageSurface* auxiliary = render_secondary_page_snapshot(tree, 2); ASSERT_NE(auxiliary, nullptr);
+    ViewPreviewOptions preview_options = view_preview_options_default();
+    ViewTree* preview = view_tree_page_instances_create(tree, nullptr, &preview_options); ASSERT_NE(preview, nullptr);
+    for (NativeAssemblyMode mode : {NATIVE_ASSEMBLY_NONE, NATIVE_ASSEMBLY_STUCK, NATIVE_ASSEMBLY_CYCLE, NATIVE_ASSEMBLY_ENDLESS}) {
+        SCOPED_TRACE(mode); ASSERT_TRUE(view_tree_model_reset(tree)); fixture->assembly_mode = mode; fixture->assembly_page = 2;
+        fixture->committed_pages = fixture->assembly_phase = 0; fixture->first_candidate = false;
+        fixture->fail_commit = mode == NATIVE_ASSEMBLY_NONE; fixture->fail_page = 2; options.max_page_transitions = 2;
+        EXPECT_EQ(layout_secondary_view(tree, &options, &diagnostic), mode == NATIVE_ASSEMBLY_NONE ? TYPESET_INVALID :
+            mode == NATIVE_ASSEMBLY_ENDLESS ? TYPESET_BUDGET_EXHAUSTED : TYPESET_NO_PROGRESS) << diagnostic.reason;
+        EXPECT_EQ(tree->model->page_count, 0u); EXPECT_EQ(fixture->committed_pages, 0u); EXPECT_EQ(fixture->assembly_phase, 0u);
+        EXPECT_EQ(fixture->active.state[0], 0u); EXPECT_FALSE(fixture->first_candidate);
+    }
+    ASSERT_TRUE(view_tree_secondary_release(&doc, tree)); native_fragment_release(fixture);
+    native_fragment_export_preview(preview, expected, "temp/paged-media-impl/native-sheet-aux-policy.png",
+        "temp/paged-media-impl/native-sheet-aux-policy.svg", "temp/paged-media-impl/native-sheet-aux-policy.pdf");
+    native_fragment_export_preview(preview, auxiliary, "temp/paged-media-impl/native-sheet-aux-policy-2.png",
+        "temp/paged-media-impl/native-sheet-aux-policy-2.svg", "temp/paged-media-impl/native-sheet-aux-policy.pdf", 2);
+    image_surface_destroy(expected); image_surface_destroy(auxiliary); ASSERT_TRUE(view_tree_secondary_release(&doc, preview));
+}
+
+TEST_F(SecondaryViewTest, ColumnNotesAndTopFloatsReserveOnlyTheirSelectedBodyColumn) {
+    stylesheet("p,div,span{margin:0;font:10px/20px Arial;orphans:1;widows:1}");
+    DomElement* master = page_master("native", "size:200px 100px;margin:10px"); ASSERT_NE(master, nullptr);
+    ASSERT_NE(page_region(master, "body", "body", nullptr, "column-count:2;column-gap:20px"), nullptr);
+    DomElement* sequence = page_sequence("native"); ASSERT_NE(sequence, nullptr);
+    DomElement* paragraphs[2] = {}, *notes[2] = {}, *floats[2] = {};
+    for (size_t i = 0; i < 2; i++) {
+        paragraphs[i] = block(i ? "B" : "A", i ? "break-before:column" : nullptr, "p", sequence); ASSERT_NE(paragraphs[i], nullptr);
+        floats[i] = block(i ? "Top B" : "Top A", "float:top;float-reference:column;height:20px;background:red", "div", paragraphs[i]);
+        ASSERT_NE(floats[i], nullptr);
+        notes[i] = block(i ? "Note B" : "Note A", "float:footnote;float-reference:column;footnote-policy:line", "span", paragraphs[i]);
+        ASSERT_NE(notes[i], nullptr);
+    }
+    NativeFragmentFixture* fixture = native_fragment_fixture(); ASSERT_NE(fixture, nullptr);
+    fixture->inspect_sheet = true; fixture->assembly_mode = NATIVE_ASSEMBLY_PER_PAGE;
+    TypesetPagePolicy policy = native_bound_policy(fixture);
+    ViewTree* tree = secondary(); PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
+    for (bool custom : {false, true}) {
+        SCOPED_TRACE(custom); ASSERT_TRUE(view_tree_model_reset(tree)); options.page_policy = custom ? &policy : nullptr;
+        ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+        ASSERT_EQ(tree->model->page_count, 1u);
+        if (custom) { EXPECT_EQ(fixture->committed_pages, 1u); EXPECT_EQ(fixture->assembly_phase, 2u); }
+        for (size_t i = 0; i < 2; i++) {
+            LayoutViewNode* body = source_glyph_text(tree, paragraphs[i]->first_child, i ? "B" : "A"); ASSERT_NE(body, nullptr);
+            EXPECT_FLOAT_EQ(body->rect.x, i ? 110 : 10); EXPECT_FLOAT_EQ(body->rect.y, 30);
+            LayoutViewNode* note = source_fragment(tree, notes[i], VIEW_FRAGMENT_NOTE, true); ASSERT_NE(note, nullptr);
+            EXPECT_EQ(occurrence_page(note), 1u); EXPECT_FLOAT_EQ(note->rect.x, i ? 110 : 10); EXPECT_FLOAT_EQ(note->rect.y, 70);
+            EXPECT_FLOAT_EQ(note->rect.width, 80);
+            LayoutViewNode* floating = source_fragment(tree, floats[i], VIEW_FRAGMENT_FLOAT, true); ASSERT_NE(floating, nullptr);
+            EXPECT_EQ(occurrence_page(floating), 1u); EXPECT_FLOAT_EQ(floating->rect.x, i ? 110 : 10); EXPECT_FLOAT_EQ(floating->rect.y, 10);
+            EXPECT_FLOAT_EQ(floating->rect.width, 80);
+            if (custom) { EXPECT_EQ(fixture->sheet_notes[0][i], 1u); EXPECT_EQ(fixture->sheet_floats[0][i], 1u); }
+            expect_source_range_coverage(tree, notes[i]->first_child); expect_source_range_coverage(tree, floats[i]->first_child);
+        }
+    }
+    ASSERT_TRUE(view_tree_secondary_release(&doc, tree)); native_fragment_release(fixture);
+}
+
+TEST_F(SecondaryViewTest, ColumnTablesRepeatGroupsWithinOnePhysicalSheetAndKeepEveryBodyRange) {
+    stylesheet("p,div,td{margin:0;font:8px/20px Arial;orphans:1;widows:1}td{vertical-align:top}");
+    DomElement* master = page_master("native", "size:240px 100px;margin:10px"); ASSERT_NE(master, nullptr);
+    ASSERT_NE(page_region(master, "body", "body", nullptr, "column-count:2;column-gap:20px"), nullptr);
+    DomElement* sequence = page_sequence("native"); ASSERT_NE(sequence, nullptr);
+    DomElement* header = nullptr, *footer = nullptr;
+    DomElement* table = fixed_table(5, &header, &footer); ASSERT_NE(table, nullptr);
+    ASSERT_TRUE(source->DomNode::remove_child(table)); ASSERT_TRUE(sequence->DomNode::append_child(table));
+    ViewTree* tree = secondary(); PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
+    ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    ASSERT_EQ(tree->model->page_count, 2u);
+    const ViewNodeState* tables = view_tree_node_state(tree, table, false); ASSERT_NE(tables, nullptr);
+    ASSERT_EQ(tables->occurrence_count, 3u);
+    size_t index = 0;
+    for (LayoutViewNode* grid = tables->first_occurrence; grid; grid = grid->next_occurrence, index++) {
+        EXPECT_EQ(occurrence_page(grid), index < 2 ? 1u : 2u);
+        EXPECT_FLOAT_EQ(grid->rect.x, index == 1 ? 130 : 10); EXPECT_FLOAT_EQ(grid->rect.width, 100);
+    }
+    for (DomElement* group : {header, footer}) {
+        DomElement* cell = group->first_child->as_element()->first_child->as_element();
+        expect_source_range_coverage(tree, cell->first_child, 3);
+    }
+    DomElement* body = table->last_child_element(); ASSERT_NE(body, nullptr);
+    for (DomElement* row = body->first_child_element(); row; row = row->next_sibling_element()) {
+        expect_source_range_coverage(tree, row->first_child->as_element()->first_child);
+    }
+}
+
+TEST_F(SecondaryViewTest, ColumnDisplayAlignmentMovesOnlyTheCurrentRootAfterItsFramesClose) {
+    stylesheet("p,div{margin:0;font:10px/20px Arial;white-space:pre;orphans:1;widows:1}");
+    DomElement* master = page_master("native", "size:200px 100px;margin:10px"); ASSERT_NE(master, nullptr);
+    DomElement* region = page_region(master, "body", "body", nullptr, "column-count:2;column-gap:20px"); ASSERT_NE(region, nullptr);
+    ASSERT_TRUE(region->set_attribute("display-align", "center"));
+    DomElement* sequence = page_sequence("native"); ASSERT_NE(sequence, nullptr);
+    DomElement* first = block("A", nullptr, "p", sequence); ASSERT_NE(first, nullptr);
+    DomElement* second = block("B\nC", "break-before:column", "p", sequence); ASSERT_NE(second, nullptr);
+    ViewTree* tree = secondary(); PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
+    ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    ASSERT_EQ(tree->model->page_count, 1u);
+    LayoutViewNode* a = source_glyph_text(tree, first->first_child, "A"), *b = source_glyph_text(tree, second->first_child, "B");
+    LayoutViewNode* c = source_glyph_text(tree, second->first_child, "C"); ASSERT_NE(a, nullptr); ASSERT_NE(b, nullptr); ASSERT_NE(c, nullptr);
+    EXPECT_FLOAT_EQ(a->rect.x, 10); EXPECT_FLOAT_EQ(a->rect.y, 40);
+    EXPECT_FLOAT_EQ(b->rect.x, 110); EXPECT_FLOAT_EQ(b->rect.y, 30); EXPECT_FLOAT_EQ(c->rect.y, 50);
+}
+
+TEST_F(SecondaryViewTest, ColumnAndPageAvoidanceAndKeepsUseTheirOwnBoundaryDomains) {
+    stylesheet("p,div{margin:0;font:10px/20px Arial;orphans:1;widows:1}");
+    DomElement* master = page_master("native", "size:200px 100px;margin:10px"); ASSERT_NE(master, nullptr);
+    ASSERT_NE(page_region(master, "body", "body", nullptr, "column-count:2;column-gap:20px"), nullptr);
+    DomElement* sequence = page_sequence("native"); ASSERT_NE(sequence, nullptr);
+    ASSERT_NE(block("Lead", "height:60px", "div", sequence), nullptr);
+    DomElement* a = block("A", nullptr, "p", sequence), *b = block("B", nullptr, "p", sequence);
+    ASSERT_NE(a, nullptr); ASSERT_NE(b, nullptr);
+    const struct { const char* css; const char* keep; float x; } cases[] = {
+        {"break-after:avoid-page", nullptr, 10}, {"break-after:avoid-column", nullptr, 110},
+        {"break-after:auto", "r:keep-with-next.within-page", 10},
+        {"break-after:auto", "r:keep-with-next.within-column", 110}};
+    ViewTree* tree = secondary(); PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
+    for (const auto& item : cases) {
+        SCOPED_TRACE(item.css); ASSERT_TRUE(a->set_attribute("style", item.css));
+        for (const char* name : {"r:keep-with-next.within-page", "r:keep-with-next.within-column"})
+            if (a->get_attribute(name)) a->remove_attribute(name);
+        if (item.keep) ASSERT_TRUE(a->set_attribute(item.keep, "always"));
+        ASSERT_TRUE(view_tree_model_reset(tree)); ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+        ASSERT_EQ(tree->model->page_count, 1u);
+        LayoutViewNode* node = source_glyph_text(tree, a->first_child, "A"); ASSERT_NE(node, nullptr);
+        EXPECT_FLOAT_EQ(node->rect.x, item.x); EXPECT_FLOAT_EQ(node->rect.y, item.x == 10 ? 70 : 10);
+        node = source_glyph_text(tree, b->first_child, "B"); ASSERT_NE(node, nullptr); EXPECT_FLOAT_EQ(node->rect.x, 110);
+        EXPECT_EQ(diagnostic.relaxed_avoidance, 0u);
+    }
 }
 
 TEST_F(SecondaryViewTest, NativeNestedStreamsResumeParentsAfterChildBreaksAndRetainEveryOwner) {
@@ -9965,13 +11156,7 @@ TEST_F(SecondaryViewTest, NativeNestedParagraphsKeepPerInvocationCursorsAndRemea
     parent->contribution_count = 2; child->contribution_count = 1;
     for (size_t i = 0; i < 2; i++) parent->contributions[i] = native_bound_nested(parent, 5100 + i, &bindings[1].provider);
     child->contributions[0] = native_bound_box(child, 5200);
-    for (size_t i = 0; i < 4; i++) {
-        child->items[i].kind = TYPESET_BOX; child->items[i].source = child->contributions[0].source;
-        child->items[i].start = i; child->items[i].length = 1;
-        child->items[i].metrics = child->contributions[0].metrics;
-    }
-    child->paragraph = {child->items, 4, 0, native_bound_alternatives, typeset_choose_lowest_cost, child};
-    child->contributions[0].kind = TYPESET_CONTRIBUTION_PARAGRAPH; child->contributions[0].paragraph = &child->paragraph;
+    native_bound_paragraph(child, &child->contributions[0], child->contributions[0].metrics);
     PagedLayoutOptions options = paged_layout_options_default(); options.native_flows = bindings; options.native_flow_count = 2;
     PagedLayoutDiagnostic diagnostic = {}; ViewTree* tree = secondary();
     ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
@@ -10212,14 +11397,9 @@ void SecondaryViewTest::native_publishing_session(bool nested) {
         fixture->marks[i] = {TYPESET_MARK_NATIVE, "chapter", value.source, texts[i],
             lam::up((const TypesetRecord*)&fixture->exact), 0, false}; value.mark = &fixture->marks[i];
     }
-    fixture->contributions[1].kind = TYPESET_CONTRIBUTION_PARAGRAPH;
-    fixture->paragraph = {fixture->items, 4, 20, native_bound_alternatives, typeset_choose_lowest_cost, fixture};
-    fixture->paragraph.baseline_aware = true; fixture->contributions[1].paragraph = &fixture->paragraph;
-    for (size_t i = 0; i < 4; i++) {
-        fixture->items[i].kind = TYPESET_BOX; fixture->items[i].source = fixture->contributions[1].source;
-        fixture->items[i].start = i * 9; fixture->items[i].length = 9;
-        fixture->items[i].metrics = {65, 15, 5, 15, {0, 0, 65, 20}, lam::up((const TypesetRecord*)&fixture->exact)};
-    }
+    native_bound_paragraph(fixture, &fixture->contributions[1],
+        {65,15,5,15,{0,0,65,20},lam::up((const TypesetRecord*)&fixture->exact)}, 9, 9, 20);
+    fixture->paragraph.baseline_aware = true;
     fixture->contributions[2].kind = TYPESET_CONTRIBUTION_GLUE;
     fixture->contributions[2].glue = {5, 1, 0, 2, 0, false, true};
     fixture->contributions[2].boundary = {TYPESET_BREAK_FORBIDDEN, TYPESET_BREAK_PAGE, -30, 0x40};
@@ -10431,10 +11611,12 @@ TEST_F(SecondaryViewTest, LeadingBlankPageAssemblyReplaysBeforeTheFirstBodyCommi
     TypesetPagePolicy policy = native_bound_policy(fixture); PagedLayoutOptions options = paged_layout_options_default();
     options.page_policy = &policy; ViewTree* tree = secondary(); ASSERT_NE(tree, nullptr); PagedLayoutDiagnostic diagnostic = {};
     ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
-    ASSERT_EQ(tree->model->page_count, 2u); EXPECT_TRUE(tree->model->pages.get()[0]->blank);
-    EXPECT_EQ(fixture->committed_pages, 2u); EXPECT_EQ(fixture->assembly_phase, 2u);
+    // the blank's reinsertion changes policy state before body choice, so its earliest prefix ships separately.
+    ASSERT_EQ(tree->model->page_count, 3u); EXPECT_TRUE(tree->model->pages.get()[0]->blank);
+    EXPECT_EQ(fixture->committed_pages, 3u); EXPECT_EQ(fixture->assembly_phase, 2u);
     EXPECT_EQ(fixture->page_kinds[0], TYPESET_PAGE_BLANK); EXPECT_EQ(fixture->page_numbers[0], 1u);
     EXPECT_EQ(fixture->page_kinds[1], TYPESET_PAGE_FLOW); EXPECT_EQ(fixture->page_numbers[1], 2u);
+    EXPECT_EQ(fixture->page_kinds[2], TYPESET_PAGE_FLOW); EXPECT_EQ(fixture->page_numbers[2], 3u);
     ASSERT_TRUE(view_tree_secondary_release(&doc, tree)); native_fragment_release(fixture);
 }
 
@@ -10730,14 +11912,9 @@ TEST_F(SecondaryViewTest, NativeParagraphAlternativesResumeAcrossMasterWidthChan
     ASSERT_TRUE(flow->set_attribute("region-name", "body"));
     NativeFragmentFixture* fixture = native_fragment_fixture(); ASSERT_NE(fixture, nullptr);
     fixture->contribution_count = 1; fixture->contributions[0] = native_bound_box(fixture, 200);
-    fixture->contributions[0].kind = TYPESET_CONTRIBUTION_PARAGRAPH;
-    fixture->paragraph = {fixture->items, 4, 20.0f, native_bound_alternatives, typeset_choose_lowest_cost, fixture};
-    fixture->paragraph.baseline_aware = true; fixture->contributions[0].paragraph = &fixture->paragraph;
-    for (size_t i = 0; i < 4; i++) {
-        fixture->items[i].kind = TYPESET_BOX; fixture->items[i].source = fixture->contributions[0].source;
-        fixture->items[i].start = i * 9; fixture->items[i].length = 9;
-        fixture->items[i].metrics = {45, 15, 5, 15, {0, 0, 45, 20}, lam::up((const TypesetRecord*)&fixture->exact)};
-    }
+    native_bound_paragraph(fixture, &fixture->contributions[0],
+        {45,15,5,15,{0,0,45,20},lam::up((const TypesetRecord*)&fixture->exact)}, 9, 9, 20);
+    fixture->paragraph.baseline_aware = true;
     PagedNativeFlowBinding binding = native_bound_binding(fixture, flow);
     PagedLayoutOptions options = paged_layout_options_default(); options.native_flows = &binding; options.native_flow_count = 1;
     ViewTree* tree = secondary(); ASSERT_NE(tree, nullptr); PagedLayoutDiagnostic diagnostic = {};
@@ -12208,6 +13385,103 @@ TEST_F(SecondaryViewTest, NativeTerminalMastersRemeasureWidthBeforeCommittingAnd
     size_t covered = 0;
     for (LayoutViewNode* node = text->first_occurrence; node; node = node->next_occurrence) covered += node->text_length;
     EXPECT_EQ(covered, strlen(content->first_child->as_text()->text));
+}
+
+TEST_F(SecondaryViewTest, TerminalColumnMastersReplayEveryColumnAndReferenceAreaAfterEarlierSheets) {
+    stylesheet("p,div{margin:0;font:10px/20px Arial;orphans:1;widows:1}");
+    DomElement* sequence = terminal_sequence("size:200px 100px;margin:10px", "size:350px 100px;margin:10px", true,
+        "column-count:2;column-gap:20px", "column-count:3;column-gap:15px"); ASSERT_NE(sequence, nullptr);
+    ASSERT_NE(block("Intro", "height:40px", "div", sequence), nullptr);
+    DomElement* content[5] = {};
+    for (size_t i = 0; i < 5; i++) {
+        content[i] = block("Alpha Beta", i ? "height:40px" : "height:40px;break-before:page", "div", sequence);
+        ASSERT_NE(content[i], nullptr); ASSERT_TRUE(content[i]->set_attribute("r:block-inline-geometry", "reference"));
+    }
+    ViewTree* tree = secondary(); PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
+    ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    ASSERT_EQ(tree->model->page_count, 2u); EXPECT_STREQ(tree->model->pages.get()[0]->name, "normal");
+    EXPECT_STREQ(tree->model->pages.get()[1]->name, "last"); EXPECT_EQ(tree->model->pages.get()[1]->style->column_count, 3u);
+    for (size_t i = 0; i < 5; i++) {
+        LayoutViewNode* box = source_fragment(tree, content[i], VIEW_FRAGMENT_BODY, true); ASSERT_NE(box, nullptr);
+        EXPECT_EQ(occurrence_page(box), 2u); EXPECT_FLOAT_EQ(box->rect.x, 10.0f + (i / 2) * 115.0f);
+        EXPECT_FLOAT_EQ(box->rect.y, 10.0f + (i % 2) * 40.0f); EXPECT_FLOAT_EQ(box->rect.width, 100);
+        expect_source_range_coverage(tree, content[i]->first_child);
+    }
+}
+
+TEST_F(SecondaryViewTest, SmallerTerminalColumnsRetainRealBodyTailWithoutOscillationAndRollbackLateFailure) {
+    init_vector_engine();
+    stylesheet("p,div{margin:0;font:10px/20px Arial;orphans:1;widows:1}");
+    DomElement* sequence = terminal_sequence("size:260px 100px;margin:10px", "size:200px 60px;margin:10px", true,
+        "column-count:2;column-gap:20px", "column-count:3;column-gap:10px"); ASSERT_NE(sequence, nullptr);
+    DomElement* content[8] = {};
+    for (auto*& element : content) { element = block("A", "height:40px", "div", sequence); ASSERT_NE(element, nullptr); }
+    ViewTree* tree = secondary(); PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
+    ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    ASSERT_EQ(tree->model->page_count, 3u);
+    for (size_t i = 0; i < 3; i++) EXPECT_STREQ(tree->model->pages.get()[i]->name, i == 2 ? "last" : "normal");
+    for (size_t i = 0; i < 8; i++) {
+        LayoutViewNode* box = source_fragment(tree, content[i], VIEW_FRAGMENT_BODY, true); ASSERT_NE(box, nullptr);
+        EXPECT_EQ(occurrence_page(box), i < 4 ? 1u : i < 7 ? 2u : 3u);
+        expect_source_range_coverage(tree, content[i]->first_child);
+    }
+    ViewPreviewOptions preview_options = view_preview_options_default();
+    ViewTree* preview = view_tree_page_instances_create(tree, nullptr, &preview_options); ASSERT_NE(preview, nullptr);
+    ImageSurface* expected = render_secondary_page_snapshot(preview, 3); ASSERT_NE(expected, nullptr);
+    ASSERT_TRUE(view_tree_model_reset(tree)); options.max_pages = 2;
+    EXPECT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_BUDGET_EXHAUSTED);
+    EXPECT_EQ(tree->model->page_count, 0u); ASSERT_TRUE(view_tree_secondary_release(&doc, tree));
+    ImageSurface* retained = render_secondary_page_snapshot(preview, 3); ASSERT_NE(retained, nullptr);
+    expect_same_surface_pixels(expected, retained); image_surface_destroy(expected); image_surface_destroy(retained);
+    ASSERT_TRUE(view_tree_secondary_release(&doc, preview));
+}
+
+TEST_F(SecondaryViewTest, TerminalColumnNotesCompleteTheirSheetBeforeTheFollowingSequence) {
+    stylesheet("p,div,span{margin:0;font:10px/12px Arial;white-space:pre-wrap;orphans:1;widows:1}");
+    DomElement* sequence = terminal_sequence("size:200px 100px;margin:10px", "size:350px 60px;margin:10px", true,
+        "column-count:2;column-gap:20px", "column-count:3;column-gap:15px"); ASSERT_NE(sequence, nullptr);
+    DomElement* call = block("Call ", nullptr, "div", sequence); ASSERT_NE(call, nullptr);
+    DomElement* note = block("A\nB\nC\nD\nE\nF\nG\nH", "float:footnote;float-reference:column", "span", call); ASSERT_NE(note, nullptr);
+    DomElement* following = page_sequence("normal", "20"); ASSERT_NE(following, nullptr);
+    ASSERT_NE(block("Following", nullptr, "div", following), nullptr);
+    ViewTree* tree = secondary(); PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
+    ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    ASSERT_EQ(tree->model->page_count, 2u); EXPECT_STREQ(tree->model->pages.get()[0]->name, "last");
+    EXPECT_EQ(tree->model->pages.get()[1]->folio, 20u);
+    ViewNodeState* state = view_tree_node_state(tree, note->first_child, false); ASSERT_NE(state, nullptr);
+    expect_source_range_coverage(tree, note->first_child);
+    for (auto* node = state->first_occurrence.get(); node; node = node->next_occurrence) EXPECT_EQ(occurrence_page(node), 1u);
+    ASSERT_TRUE(view_tree_model_reset(tree));
+    ASSERT_TRUE(note->DomNode::remove_child(note->first_child));
+    const char* longer = "A\nB\nC\nD\nE\nF\nG\nH\nI\nJ\nK\nL\nM\nN\nO\nP\nQ\nR\nS\nT\nU\nV";
+    DomText* text = DomText::create_copy(longer, strlen(longer), note); ASSERT_NE(text, nullptr);
+    ASSERT_TRUE(note->DomNode::append_child(text));
+    ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    ASSERT_EQ(tree->model->page_count, 4u);
+    EXPECT_STREQ(tree->model->pages.get()[0]->name, "normal"); EXPECT_STREQ(tree->model->pages.get()[1]->name, "normal");
+    EXPECT_STREQ(tree->model->pages.get()[2]->name, "last"); EXPECT_EQ(tree->model->pages.get()[3]->folio, 20u);
+    expect_source_range_coverage(tree, text);
+    LayoutViewNode* last = source_glyph_text(tree, text, "V"); ASSERT_NE(last, nullptr); EXPECT_EQ(occurrence_page(last), 3u);
+    NativeFragmentFixture* fixture = native_fragment_fixture(); ASSERT_NE(fixture, nullptr); fixture->inspect_sheet = true;
+    TypesetPagePolicy policy = native_bound_policy(fixture); options.page_policy = &policy;
+    for (NativeAssemblyMode mode : {NATIVE_ASSEMBLY_PER_PAGE, NATIVE_ASSEMBLY_HOLD_REINSERT}) {
+        SCOPED_TRACE(mode); ASSERT_TRUE(view_tree_model_reset(tree)); fixture->assembly_mode = mode;
+        fixture->assembly_page = mode == NATIVE_ASSEMBLY_HOLD_REINSERT ? 3 : 0;
+        fixture->committed_pages = fixture->assembly_phase = 0; fixture->first_candidate = false;
+        ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+        ASSERT_EQ(tree->model->page_count, 4u); EXPECT_EQ(fixture->committed_pages, 4u);
+        EXPECT_EQ(fixture->assembly_phase, mode == NATIVE_ASSEMBLY_PER_PAGE ? 8u : 2u);
+        EXPECT_STREQ(tree->model->pages.get()[2]->name, "last"); EXPECT_EQ(fixture->sheet_columns[2], 3u);
+        EXPECT_FLOAT_EQ(fixture->sheet_capacities[2], 120); EXPECT_EQ(tree->model->pages.get()[3]->folio, 20u);
+        EXPECT_EQ(fixture->page_kinds[1], TYPESET_PAGE_REGION); EXPECT_EQ(fixture->page_kinds[2], TYPESET_PAGE_REGION);
+        expect_source_range_coverage(tree, text);
+        last = source_glyph_text(tree, text, "V"); ASSERT_NE(last, nullptr); EXPECT_EQ(occurrence_page(last), 3u);
+    }
+    ASSERT_TRUE(view_tree_model_reset(tree)); fixture->committed_pages = fixture->assembly_phase = 0; fixture->first_candidate = false;
+    fixture->fail_commit = true; fixture->fail_page = 3;
+    EXPECT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_INVALID);
+    EXPECT_EQ(tree->model->page_count, 0u); EXPECT_EQ(fixture->committed_pages, 0u); EXPECT_EQ(fixture->assembly_phase, 0u);
+    ASSERT_TRUE(view_tree_secondary_release(&doc, tree)); native_fragment_release(fixture);
 }
 
 TEST_F(SecondaryViewTest, NativeOnlyAndBlankTerminalMastersIncludeRealSequencePadding) {
