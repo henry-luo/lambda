@@ -23,9 +23,23 @@ let checks = [for (command in commands, entry in cases) {
             snapshot.painted_text(math.render_math(parse(serialized, 'math')^)^) == entry.text}
     ]
 }];
-let unchanged = [for (source in ["  a  b  ", "\\unknown", "\\\\$"]) {
+let unchanged = [for (source in ["  a  b  ", "\\unknown"]) {
     let ast = parse("\\text{" ++ source ++ "}", 'math')^;
     {name: "preserves undecoded text: " ++ source, ok:
         ast[0].content == source and snapshot.painted_text(math.render_math(ast)^) == source}
 }];
-[for (check in [*[for (group in checks, item in group) item], *unchanged] where check.ok != true) check.name]
+// LaTeX's normalcr produces layout controls, not literal slashes, even inside text boxes.
+let row_breaks = [for (entry in [{raw:"a\\\\b", text:"ab"}, {raw:"\\\\\\$", text:"$"}]) {
+    let source = "\\text{" ++ entry.raw ++ "}"
+    let ast = parse(source,'math')^
+    let serialized = format(ast,{type:"math",flavor:"latex"})^;
+    {name:"text row breaks retain source without painting backslashes: " ++ entry.raw,
+        ok:serialized == source and snapshot.painted_text(math.render_math(ast)^) == entry.text and
+            snapshot.painted_text(math.render_math(parse(serialized,'math')^)^) == entry.text}
+}];
+// An unmatched dollar remains recovery text; the preceding row-break command still does not paint.
+let recovery = parse("\\text{\\\\$}",'math')^;
+[for (check in [*[for (group in checks, item in group) item], *unchanged, *row_breaks,
+    {name:"row break before an unmatched text dollar preserves raw content", ok:
+        recovery[0].content == "\\\\$" and snapshot.painted_text(math.render_math(recovery)^) == "$"}]
+    where check.ok != true) check.name]

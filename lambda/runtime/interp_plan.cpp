@@ -421,6 +421,7 @@ static bool interp_checked_scalar_index_expr(AstNode* node) {
 }
 
 typedef struct SatelliteScanCtx {
+    const Script* script;
     bool ok;
     // T27-6: the innermost node kind that refused, so a pinned hot function
     // is a one-line diagnosis instead of a missing promotion log line.
@@ -2235,7 +2236,7 @@ static void interp_scan_satellite_node_kind(AstNode* node, SatelliteScanCtx* sc)
         bool hosted_js = entry->import && entry->import->is_cross_lang &&
             entry->import->script && entry->import->script->profile == &js_profile;
         if (entry->import && !hosted_js &&
-                !interp_satellite_import_supported(NULL, entry)) {
+                !interp_satellite_import_supported(sc->script, entry)) {
             sc->ok = false;
         }
         break;
@@ -2246,11 +2247,11 @@ static void interp_scan_satellite_node_kind(AstNode* node, SatelliteScanCtx* sc)
     if (sc->ok) interp_visit_children(node, interp_scan_satellite_node, sc);
 }
 
-bool interp_satellite_supported(const AstFuncNode* fn) {
-    return interp_satellite_refusal(fn) == NULL;
+bool interp_satellite_supported(const Script* script, const AstFuncNode* fn) {
+    return interp_satellite_refusal(script, fn) == NULL;
 }
 
-const char* interp_satellite_refusal(const AstFuncNode* fn) {
+const char* interp_satellite_refusal(const Script* script, const AstFuncNode* fn) {
     if (!fn || !fn->analysis || !fn->body) return "no-analysis";
     if (fn->captures) return "captures";
     if (fn->is_generator) return "generator";
@@ -2280,7 +2281,9 @@ const char* interp_satellite_refusal(const AstFuncNode* fn) {
     ScanCtx full_scan = {true, AST_NODE_NULL};
     interp_scan_visit(fn->body, &full_scan);
     if (!full_scan.ok) return interp_node_kind_name(full_scan.reject);
-    SatelliteScanCtx sc = {true, AST_NODE_NULL};
+    // cached import nodes may retain retired prebuild-worker Scripts; resolve
+    // eligibility through this execution's import overlay (D8.5.1v7).
+    SatelliteScanCtx sc = {script, true, AST_NODE_NULL};
     interp_scan_satellite_node((AstNode*)fn->body, &sc);
     return sc.ok ? NULL : interp_node_kind_name(sc.reject);
 }

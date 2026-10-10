@@ -1,0 +1,26 @@
+% Independent TeX engine oracle for the documented bundled-font macro.
+% showbox reports ! OK and a nonzero exit status; inspect the log dimensions.
+\documentclass[10pt]{article}
+\usepackage{amsmath}
+\input{test/lambda/math/tex_bundled_integrals.tex}
+\showboxbreadth=1000 \showboxdepth=100 \tracingonline=1
+\def\audit#1#2{\setbox0=\hbox{$#2$}\immediate\write16{CASE:#1 WIDTH:\the\wd0 HEIGHT:\the\ht0 DEPTH:\the\dp0}\showbox0}
+\begin{document}
+\audit{display-integrals}{\displaystyle\int+\oint+\iint+\oiint+\iiint+\oiiint}
+\audit{text-integrals}{\textstyle\int+\oint+\iint+\oiint+\iiint+\oiiint}
+\audit{display-oiint}{\displaystyle\oiint}
+\audit{text-oiint}{\textstyle\oiint}
+\audit{script-oiint}{\scriptstyle\oiint}
+\audit{scriptscript-oiint}{\scriptscriptstyle\oiint}
+\audit{display-oiiint}{\displaystyle\oiiint}
+\audit{text-oiiint}{\textstyle\oiiint}
+\audit{script-oiiint}{\scriptstyle\oiiint}
+\audit{scriptscript-oiiint}{\scriptscriptstyle\oiiint}
+\audit{display-side-limits}{\displaystyle\oiint_i^n+\oiiint_i^n}
+\audit{text-side-limits}{\textstyle\oiint_i^n+\oiiint_i^n}
+\audit{script-side-limits}{\scriptstyle\oiint_i^n+\oiiint_i^n}
+\audit{stacked-limits}{\displaystyle\oiint\limits_i^n+\oiiint\limits_i^n}
+\audit{text-stacked-limits}{\textstyle\oiint\limits_i^n+\oiiint\limits_i^n}
+\audit{explicit-nolimits}{\displaystyle\oiint\nolimits_i^n+\oiiint\nolimits_i^n}
+{\large\audit{large}{\oiint+\oiiint}}
+\end{document}

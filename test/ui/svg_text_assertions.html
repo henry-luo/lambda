@@ -1,0 +1,9 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>SVG assertion geometry and visible glyph text</title>
+<style>body { margin: 0; } svg { position: absolute; left: 310px; top: 10px; }</style>
+<svg xmlns="http://www.w3.org/2000/svg" id="probe-svg" width="80" height="60" viewBox="0 0 80 60">
+  <title>Metadata is not visible glyph text</title>
+  <style>text { font: 20px Arial, sans-serif; }</style>
+  <text id="probe-text" x="4" y="25">A<tspan id="probe-span" dx="2">B</tspan></text>
+</svg>

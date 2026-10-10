@@ -270,6 +270,51 @@ TEST(InputScriptCacheTest, PrebuildSharedImportClosureCompletesWithoutRegistryDe
     unlink(leaf_b_path);
 }
 
+TEST(InputScriptCacheTest, PrebuiltImportsPromoteThroughExecutionOverlay) {
+    ASSERT_EQ(file_ensure_dir("temp"), 0);
+    int generation = (int)getpid();
+    char root_path[128], middle_path[128], leaf_path[128];
+    char root_source[256], middle_source[256];
+    snprintf(root_path, sizeof(root_path), "temp/cache_satellite_root_%d.ls", generation);
+    snprintf(middle_path, sizeof(middle_path), "temp/cache_satellite_middle_%d.ls", generation);
+    snprintf(leaf_path, sizeof(leaf_path), "temp/cache_satellite_leaf_%d.ls", generation);
+    snprintf(root_source, sizeof(root_source),
+        "import .cache_satellite_middle_%d\n"
+        "sum(for (i in 1 to 64) middle_value(i))\n", generation);
+    snprintf(middle_source, sizeof(middle_source),
+        "import .cache_satellite_leaf_%d\n"
+        "pub fn middle_value(x) => leaf_value(x) + 1\n", generation);
+    const char leaf_source[] = "pub fn leaf_value(x) => x * 2\n";
+    ASSERT_EQ(write_binary_file(root_path, root_source, strlen(root_source)), 0);
+    ASSERT_EQ(write_binary_file(middle_path, middle_source, strlen(middle_source)), 0);
+    ASSERT_EQ(write_binary_file(leaf_path, leaf_source, sizeof(leaf_source) - 1), 0);
+
+    // the middle template imports a worker-owned Script that is retired before
+    // runtime promotion; eligibility must use the fresh overlay (D8.5.1v7).
+    const char* lambda_exe = "./lambda.exe";
+    const char* args[] = {lambda_exe, root_path, NULL};
+    const ShellEnvEntry env[] = {
+        {"LAMBDA_EXEC_BACKEND", "auto"},
+        {"LAMBDA_MODULE_AST_THREADS", "2"},
+        {"LAMBDA_FUNC_JIT_THRESHOLD", "1"},
+        {"LAMBDA_SATELLITE_SYNC", "1"},
+        {NULL, NULL},
+    };
+    ShellOptions options = {};
+    options.env = env;
+    options.timeout_ms = 10000;
+    options.merge_stderr = true;
+    ShellResult result = shell_exec(lambda_exe, args, &options);
+    EXPECT_FALSE(result.timed_out);
+    EXPECT_EQ(result.exit_code, 0) << (result.stdout_buf ? result.stdout_buf : "");
+    EXPECT_NE(strstr(result.stdout_buf ? result.stdout_buf : "", "4224"), nullptr);
+    shell_result_free(&result);
+
+    unlink(root_path);
+    unlink(middle_path);
+    unlink(leaf_path);
+}
+
 TEST(InputScriptCacheTest, PrebuildQueuesNestedImportsWithoutDepthBarrier) {
     ASSERT_EQ(file_ensure_dir("temp"), 0);
     CacheQueuePrebuildState state = {};

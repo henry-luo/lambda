@@ -1,0 +1,11 @@
+{
+  "name": "SVG assertions read painted glyph text and resolve native hits from targets",
+  "viewport": {"width": 400, "height": 300},
+  "events": [
+    {"type": "assert_text", "target": {"selector": "#probe-svg"}, "equals": "AB"},
+    {"type": "assert_text", "target": {"selector": "#probe-text"}, "equals": "AB"},
+    {"type": "assert_text", "target": {"selector": "#probe-span"}, "equals": "B"},
+    {"type": "assert_hit_test", "target": {"selector": "#probe-span"}, "expected_selector": "#probe-span", "expected_tag": "tspan"},
+    {"type": "assert_hit_test", "x": 320, "y": 25, "expected_selector": "#probe-text", "expected_tag": "text"}
+  ]
+}

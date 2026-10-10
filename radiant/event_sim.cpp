@@ -864,9 +864,15 @@ static void sim_append_visible_text(StrBuf* buf, const char* text) {
 static bool sim_extract_text_visitor(View* view, bool entering, void* context) {
     if (!entering) return true;
     StrBuf* buf = (StrBuf*)context;
-    if (view->view_type == RDT_VIEW_TEXT) {
-        DomText* text = view->as_text();
-        if (text && text->text) sim_append_visible_text(buf, text->text);
+    DomText* text = view->as_text();
+    if (text && text->text) {
+        DomElement* parent = view->parent ? view->parent->as_element() : nullptr;
+        // SVG glyph strings bypass CSS text layout; metadata and style text
+        // remain excluded from visible-text assertions.
+        if (view->view_type == RDT_VIEW_TEXT ||
+            (dom_element_is_svg(parent) && dom_svg_is_text(parent))) {
+            sim_append_visible_text(buf, text->text);
+        }
     }
     return true;
 }
@@ -1721,6 +1727,7 @@ static SimEvent* parse_sim_event(EventSimContext* ctx, MapReader& reader) {
     else if (strcmp(type_str, "assert_hit_test") == 0) {
         ev->type = SIM_EVENT_ASSERT_HIT_TEST;
         parse_element_at_fields(reader, ev);
+        parse_target(reader, ev);
         if (!ev->expected_at_selector && !ev->expected_at_tag) {
             log_error("event_sim: assert_hit_test requires expected_selector or expected_tag");
             return parse_sim_event_fail(ev);
@@ -4867,20 +4874,28 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
         case SIM_EVENT_ASSERT_HIT_TEST: {
             DomDocument* doc = sim_require_document(ctx, uicon, "assert_hit_test");
             if (!doc) break;
+            float x = ev->at_x, y = ev->at_y;
+            // semantic targets keep hit probes tied to geometry after font or
+            // layout changes; the hit still goes through the native point API.
+            if ((ev->target_selector || ev->target_text) &&
+                !resolve_target(ev, doc, &x, &y)) {
+                sim_record_assertion(ctx, false);
+                break;
+            }
             DomElement* found = (DomElement*)dom_document_element_from_point_native(
-                doc, ev->at_x, ev->at_y);
+                doc, x, y);
             if (!found) {
                 log_error("event_sim: assert_hit_test FAIL - no element found at (%.2f, %.2f)",
-                    ev->at_x, ev->at_y);
+                    x, y);
                 ctx->fail_count++;
                 break;
             }
             bool passed = true;
             passed = sim_element_matches_assertions(
                 "assert_hit_test", doc, static_cast<View*>(found), ev,
-                ev->at_x, ev->at_y, false);
+                x, y, false);
             if (passed) {
-                log_info("event_sim: assert_hit_test PASS at (%.2f, %.2f)", ev->at_x, ev->at_y);
+                log_info("event_sim: assert_hit_test PASS at (%.2f, %.2f)", x, y);
             }
             sim_record_assertion(ctx, passed);
             break;

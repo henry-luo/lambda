@@ -541,7 +541,7 @@ static void do_newcommand(Engine* e, const Token& t, uint8_t sub) {
         if (has_default) ((Macro*)m.macro)->opt_default = dflt;
         define_cs(e, cs, m, false);
     }
-    echo_finish(e, em);
+    echo_definition(e, em);
 }
 
 static void do_newenvironment(Engine* e, const Token& t, uint8_t sub) {
@@ -577,7 +577,7 @@ static void do_newenvironment(Engine* e, const Token& t, uint8_t sub) {
         define_cs(e, cs_begin, mb, false);
         define_cs(e, cs_end, macro_meaning(e, match_params(e, 1, 0), convert_params(e, end_body, 0), 0, flags & MF_LONG), false);
     }
-    echo_finish(e, em);
+    echo_definition(e, em);
 }
 
 // ======================================================================
@@ -1726,7 +1726,7 @@ static void do_new_document_command(Engine* e, const Token& t, uint8_t sub) {
             define_cs(e, cs_end, macro_meaning(e, match_params(e, 1, 0), convert_params(e, end_body, 0), 0, MF_LONG), false);
         }
     }
-    echo_finish(e, em);
+    echo_definition(e, em);
 }
 
 // ======================================================================
