@@ -58,8 +58,10 @@
     },
     {
       "type": "assert_hit_test",
-      "x": 600,
-      "y": 400,
+      "target": {
+        "selector": "#calculus-and-vector-groups + .latex-equation svg text"
+      },
+      "expected_selector": "#calculus-and-vector-groups + .latex-equation svg text",
       "expected_tag": "text"
     },
     {
@@ -192,9 +194,14 @@
     },
     {
       "type": "assert_hit_test",
-      "x": 600,
-      "y": 400,
+      "target": {
+        "selector": "#cases + .latex-equation svg",
+        "offset_x": 1,
+        "offset_y": 1
+      },
+      "expected_selector": "#cases + .latex-equation svg",
       "expected_tag": "svg"
     }
-  ]
+  ],
+  "description": "Wheel offsets remain exact; resolve glyph and unpainted SVG hit probes from section geometry so TeX font-metric changes cannot move unrelated content under fixed probe coordinates."
 }

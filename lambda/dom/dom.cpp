@@ -12660,7 +12660,8 @@ static RdtMatrix dom_svg_transform_from_element(DomElement* elem) {
 }
 
 
-static bool dom_svg_is_text(DomElement* elem) {
+extern "C" bool dom_svg_is_text(void* element) {
+    DomElement* elem = (DomElement*)element;
     return elem && elem->tag_name && (str_icmp_cstr(elem->tag_name, "text") == 0 ||
         str_icmp_cstr(elem->tag_name, "tspan") == 0 || str_icmp_cstr(elem->tag_name, "textPath") == 0);
 }

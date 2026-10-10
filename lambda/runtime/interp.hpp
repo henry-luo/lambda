@@ -275,13 +275,13 @@ bool interp_scan_supported(Script* script, AstNodeType* reject);
 // procedures and synchronous functions without captures, nested definitions,
 // or unsupported mutation. Module bindings are read from T0's shared slab; a
 // rejected function remains T0 for semantic safety.
-bool interp_satellite_supported(const AstFuncNode* fn);
+bool interp_satellite_supported(const Script* script, const AstFuncNode* fn);
 // Returns the execution-local P2 state for a definition. Non-cached scripts
 // use the definition-owned cell; AST-cache instances use their Script overlay.
 FnPromotionCell* interp_promotion_cell(Script* script, const AstFuncNode* fn);
 // T27-6: NULL when supported, otherwise a short reason (an AST node kind
 // name for a scanner refusal) for the pinned-function log line.
-const char* interp_satellite_refusal(const AstFuncNode* fn);
+const char* interp_satellite_refusal(const Script* script, const AstFuncNode* fn);
 // D8.1.1v9: a satellite image co-compiles the target's direct-callee cluster;
 // each extra member's boxed entry is published to its T0 Function here.
 bool interp_publish_satellite_member(Script* script, AstFuncNode* def, void* entry);
