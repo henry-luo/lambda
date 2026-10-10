@@ -49,7 +49,7 @@ fn math_quad(c) => metric(c, "math_quad", font.UNITS)
 fn with_style(c, style) => {*:c, style: style, cramped: false}
 fn script(c) => {*:c, style: if (c.style == "display" or c.style == "text") "script" else "scriptscript"}
 fn fraction_child(c) => if (c.style == "display") {*:c, style: "text"} else script(c)
-fn command_name(text) => if (slice(text, 0, 1) == "\\") slice(text, 1, len(text)) else text
+fn command_name(text) => if (len(text) > 1 and slice(text, 0, 1) == "\\") slice(text, 1, len(text)) else text
 fn value(n) => string(n.value or n.text or util.text_of(n))
 
 fn atom_type(ch) {
@@ -108,21 +108,25 @@ fn group_boxes(items, c, i) {
         let command = if (item is element) string(item.cmd or item.name or "") else ""
         let style = style_name(command)
         let size_index = index_of(size_commands, command_name(command))
-        if (style != null and item.arg == null)
+        if (item is element and name(item) == 'font_switch') {
+            let variant = {rm:"normal", it:"italic", bf:"bold", sf:"sans", tt:"mono"}[command_name(command)];
+            group_boxes(items, {*:c, variant:variant, text_variant:variant}, i + 1)^
+        } else if (style != null and item.arg == null)
             group_boxes(items, with_style(c, style), i + 1)^
         else if (size_index != null and name(item) == 'size_command')
             group_boxes(items, {*:c, size_index:size_index,
                 style:if (c.style == "display") "display" else "text"}, i + 1)^
         else if (item is element and name(item) == 'color_switch') {
             let tail = group(slice(items, i + 1, len(items)), c)^;
-            [{*:tail, body: <g fill: (item.color_raw or util.text_of(item.color)), tail.body>}]
+            let color = item.color_raw or util.text_of(item.color);
+            [{*:tail, body: <g fill:color, style:"color:" ++ color, tail.body>}]
         } else [{*:node(item, c)^, spacing_style:c.style, spacing_quad:math_quad(c)}, *group_boxes(items, c, i + 1)^]
     }
 }
 
 fn node(n, c) {
     if (n == null) bx.empty()
-    else if (n is string) text(n, c)^
+    else if (n is string) text(n, c, c.text_mode == true)^
     else if (n is array) group(n, c)^
     else if (not (n is element)) bx.empty()
     else match name(n) {
@@ -135,7 +139,7 @@ fn node(n, c) {
         case 'accent': accent(n, c)^
         case 'delimiter_group': delimited(n, c)^
         case 'sized_delimiter': sized_delimiter(n, c)^
-        case 'middle_delim': delimiter(value(n), font.UNITS * scale(c), c, "mrel")^
+        case 'middle_delim': delimiter(string(n.delim or "."), c.delimiter_target or font.UNITS * scale(c), c, "mrel")^
         case 'command': command_node(n, c)^
         // parsed symbol commands store their spelling in name, like command nodes.
         case 'symbol_command': command_node(n, c)^
@@ -150,7 +154,15 @@ fn node(n, c) {
         case 'unicode_text': text(value(n), c, true)^
         case 'raw_math_text': text(value(n), c, true)^
         case 'text_command': text_command(n, c)^
-        case 'text_group': text(util.text_of(n), c, true)^
+        case 'text_group': group(util.content_items(n), {*:c, text_mode:true, variant:c.text_variant or "normal"})^
+        case 'embedded_math': group(util.content_items(n), {*:c, text_mode:false, variant:"auto", style:"text"})^
+        case 'verbatim': text(if (n.starred) replace(string(n.value), " ", "␣") else string(n.value), {*:c, text_variant:"mono"}, true)^
+        case 'box_transform': transformed(n, c)^
+        case 'equation_tag': equation_tag(n, c)^
+        case 'mod_command': modulo(n, c)^
+        case 'cd_arrow': diagram_arrow(n, c)^
+        case 'layout_control': bx.empty()
+        case 'array_rule': bx.empty()
         case 'style_command': styled(n, c)^
         case 'textstyle_command': styled(n, c)^
         case 'mathop': {*:node(n.body, {*:c, variant: "normal"})^, type: "mop", character:false, limits:true}
@@ -190,8 +202,10 @@ fn command(raw, c) {
             stretch.glyph(font.large_operator(c.profile, ord(unicode))^, metric(c, "display_operator_min_height"), true, scale(c), atom)^
             else text(unicode, if (is_large) {*:c, variant: "normal"} else c)^
         let centered = if (is_large) center_axis(result, c) else result;
-        {*:centered, type: atom, limits: is_large and not contains(key, "int")}
-    } else if (contains([",", ":", ";", "!", "quad", "qquad", "enspace", "thinspace"], key))
+        {*:centered, type: atom, limits: is_large and (key == "intop" or not contains(key, "int"))}
+    } else if (key == "mathstrut") {*:bx.empty(), height:0.7 * font.UNITS * scale(c), depth:0.3 * font.UNITS * scale(c)}
+    else if (contains(["TeX", "LaTeX", "KaTeX"], key)) text(key, {*:c, text_variant:"normal"}, true)^
+    else if (contains([",", ":", ";", "!", "quad", "qquad", "enspace", "thinspace"], key))
         space(<space_command cmd: "\\" ++ key>, c)
     else text(raw, {*:c, variant: "normal"}, true)^
 }
@@ -199,7 +213,8 @@ fn command(raw, c) {
 fn text_command(n, c) {
     let variant = if (n.cmd == "\\textbf") "bold" else if (n.cmd == "\\textit" or n.cmd == "\\emph") "italic"
         else if (n.cmd == "\\texttt") "mono" else if (n.cmd == "\\textsf") "sans" else "normal"
-    text(util.text_of(n.content), {*:c, text_variant: variant}, true)^
+    if (n.body != null) node(n.body, {*:c, text_variant:variant})^
+    else text(util.text_of(n.content), {*:c, text_variant: variant}, true)^
 }
 
 fn command_node(n, c) {
@@ -212,7 +227,8 @@ fn command_node(n, c) {
             left:util.text_of(items[0]), right:util.text_of(items[1]), thickness: util.text_of(items[2])>,
             if (style != null) with_style(c, style) else c)^
     } else if (len(items) > 0) spaced([command(key, c)^, *[for (item in items) node(item, c)^]], c)
-    else command(key, c)^
+    else command(if (c.text_mode == true and sym.lookup_symbol(key) == null and
+        sym.get_operator_name(key) == null and not contains(["TeX","LaTeX","KaTeX","mathstrut"],key)) "\\" ++ key else key, c)^
 }
 
 fn style_name(cmd) {
@@ -229,7 +245,8 @@ fn styled(n, c) {
     let variant = font.command_variant(string(n.cmd))
     let style = style_name(string(n.cmd))
     let child = {*:if (style != null) with_style(c, style) else c, variant: variant or c.variant}
-    node(n.arg or content(n)^, child)^
+    let result = node(n.arg or content(n)^, child)^;
+    if (n.cmd == "\\operatorname") {*:result, type:"mop", limits:n.limits == true, character:false} else result
 }
 
 fn kern(b, corner, height) {
@@ -240,7 +257,8 @@ fn kern(b, corner, height) {
 
 fn scripts(n, c) {
     if (n.base is element and name(n.base) == 'accent' and
-        not contains(["\\overline", "\\underline", "\\overbrace", "\\underbrace"], n.base.cmd))
+        not contains(["\\overline", "\\underline", "\\underbar", "\\overbrace", "\\underbrace",
+            "\\overbracket", "\\underbracket", "\\overgroup", "\\undergroup", "\\overlinesegment", "\\underlinesegment"], n.base.cmd))
         accent(n.base, c, n)^
     else side_scripts(n, c, node(n.base, c)^)^
 }
@@ -299,7 +317,9 @@ fn limits_box(base, lower, upper, c) {
 
 fn fraction(n, c) {
     let key = command_name(string(n.cmd or "frac"))
-    let context = if (contains(["dfrac", "dbinom", "cfrac"], key)) with_style(c, "display")
+    let chosen = if (n.style != null and n.style != "") ["display", "text", "script", "scriptscript"][int(n.style)] else null
+    let context = if (chosen != null) with_style(c, chosen)
+        else if (contains(["dfrac", "dbinom", "cfrac"], key)) with_style(c, "display")
         else if (contains(["tfrac", "tbinom"], key)) with_style(c, "text") else c
     let child = fraction_child(context)
     let numer = node(n.numer, child)^
@@ -328,7 +348,7 @@ fn fraction(n, c) {
         *if (bar) [{box: bx.rule(width, thickness, 0.0 - axis - thickness / 2.0), x: 0.0, y: 0.0}] else []], width, "mord")
     let fences = if (contains(["binom", "dbinom", "tbinom", "choose"], key)) ["(", ")"]
         else if (key == "brace") ["{", "}"] else if (key == "brack") ["[", "]"]
-        else [string(n.left or "."), string(n.right or ".")]
+        else [string(n.left_delim or n.left or "."), string(n.right_delim or n.right or ".")]
     let target = metric(context, if (display) "delimiter_size_display" else "delimiter_size",
         c.profile.facts.constants.delimited_sub_formula_min_height);
     bx.row([delimiter(fences[0], target, context, "mopen")^, result,
@@ -338,7 +358,8 @@ fn fraction(n, c) {
 fn center_axis(b, c) => bx.shifted(b, 0.0, (b.height - b.depth) / 2.0 - metric(c, "axis_height"), b.width)
 
 fn delimiter(raw, target, c, atom) {
-    let ch = sym.lookup_symbol(raw) or raw
+    let key = command_name(raw)
+    let ch = if (raw == "\\|") "‖" else sym.lookup_symbol(key) or key
     if (ch == "." or ch == "") bx.empty(dimension("1.2pt", c))
     else center_axis(stretch.glyph(font.glyph(c.profile, ord(ch))^, target, true, scale(c), atom)^, c)
 }
@@ -350,7 +371,13 @@ fn fence_box(body, left, right, c) {
     bx.row([delimiter(left, target, c, "mopen")^, body, delimiter(right, target, c, "mclose")^], "minner")
 }
 
-fn delimited(n, c) => fence_box(group(util.content_items(n), c)^, string(n.left or "."), string(n.right or "."), c)^
+fn delimited(n, c) {
+    let items = if (n.body != null) util.content_items(n.body) else util.content_items(n)
+    let body = group(items, c)^
+    let extent = 2.0 * max(body.height - metric(c, "axis_height"), body.depth + metric(c, "axis_height"))
+    let target = max(extent * 0.901, extent - dimension("5pt", c));
+    fence_box(group(items, {*:c, delimiter_target:target})^, string(n.left or "."), string(n.right or "."), c)^
+}
 
 fn sized_delimiter(n, c) {
     // Explicit TeX sizes are author requests in em, not font size-face indices.
@@ -379,7 +406,7 @@ fn radical(n, c) {
 fn accent(n, c, attached = null) {
     let key = command_name(string(n.cmd))
     let base = node(n.base, if (key == "underline") c else {*:c, cramped: true})^
-    if (key == "overline" or key == "underline") {
+    if (contains(["overline", "underline", "underbar"], key)) {
         let above = key == "overline"
         let thickness = metric(c, if (above) "overbar_rule_thickness" else "underbar_rule_thickness")
         let gap = metric(c, if (above) "overbar_vertical_gap" else "underbar_vertical_gap")
@@ -387,6 +414,13 @@ fn accent(n, c, attached = null) {
         let result = bx.compose([{box: base, x: 0.0, y: 0.0}, {box: bx.rule(base.width, thickness, y), x: 0.0, y: 0.0}], base.width);
         {*:result, height: result.height + (if (above) metric(c, "overbar_extra_ascender") else 0.0),
             depth: result.depth + (if (above) 0.0 else metric(c, "underbar_extra_descender"))}
+    } else if (contains(["overbracket", "underbracket", "overlinesegment", "underlinesegment", "overgroup", "undergroup"], key)) {
+        let above = starts_with(key, "over")
+        let mark = bracket_mark(key, base.width, c)
+        let y = if (above) 0.0 - base.height - metric(c, "overbar_vertical_gap") - mark.depth
+            else base.depth + metric(c, "underbar_vertical_gap") + mark.height
+        let result = bx.compose([{box:base, x:0.0, y:0.0}, {box:mark, x:0.0, y:y}], base.width);
+        {*:result, limits:contains(key, "bracket")}
     } else if (key == "overbrace" or key == "underbrace") {
         let above = key == "overbrace"
         let g = font.glyph(c.profile, ord(if (above) "⏞" else "⏟"))^
@@ -400,12 +434,14 @@ fn accent(n, c, attached = null) {
         if (ch == null) error("math: unsupported accent " ++ key)
         else {
         let g = font.glyph(c.profile, ord(ch))^
-        let wide = starts_with(key, "wide") or contains(key, "arrow")
-        let mark = if (contains(key, "arrow")) stretch.glyph(g, base.width, false, scale(c), "mord")^
+        let wide = starts_with(key, "wide") or contains(key, "arrow") or key == "utilde"
+        let mark = if (contains(key, "harpoon") or key == "Overrightarrow") arrow_shape(key, base.width, c)
+            else if (contains(key, "arrow")) stretch.glyph(g, base.width, false, scale(c), "mord")^
             else if (wide) stretch.accent(g, base.width, scale(c))^ else bx.glyph(g, scale(c))
         let x = base.accent - mark.accent
         // below-arrow accents must clear the base's descent instead of its top.
-        let y = if (starts_with(key, "under")) base.depth + metric(c, "underbar_vertical_gap") + mark.height
+        let y = if (starts_with(key, "under") or key == "utilde" or key == "cedilla") base.depth + metric(c, "underbar_vertical_gap") + mark.height
+            else if (contains(key,"harpoon") or key == "Overrightarrow") 0.0 - base.height - metric(c,"overbar_vertical_gap") - mark.depth
             else 0.0 - max(0.0, base.height - metric(c, "accent_base_height"));
         let scripted = if (attached != null and base.character == true) side_scripts(attached, c, base)^ else base
         let result = bx.compose([{box: scripted, x: 0.0, y: 0.0}, {box: mark, x: x, y: y}], scripted.width, base.type);
@@ -429,11 +465,133 @@ fn arrow(n, c) {
     let upper = node(upper_node, script(c))^
     let lower = node(lower_node, script(c))^
     let recipe = sym.reaction_arrow(key)
-    let width = max(max(upper.width, lower.width) + (if (recipe != null) font.UNITS * scale(c) else 2.0 * metric(c, "space_after_script")),
-        if (recipe != null) 1.75 * font.UNITS * scale(c) else 0.0)
+    let width = max(n.min_width or 0.0, max(max(upper.width, lower.width) + (if (recipe != null) font.UNITS * scale(c) else 2.0 * metric(c, "space_after_script")),
+        if (recipe != null) 1.75 * font.UNITS * scale(c) else 0.0))
     let base = if (recipe != null) paired_arrow(recipe, width, c)^
-        else stretch.glyph(font.glyph(c.profile, ord(ch))^, width, false, scale(c), "mrel")^;
+        else if (contains(["xrightarrow", "xleftarrow", "xleftrightarrow"], key))
+            stretch.arrow(font.glyph(c.profile, ord(ch))^, width, scale(c), ch != "←",
+                metric(c, "axis_height"), metric(c, "fraction_rule_thickness"))^
+        else arrow_shape(key, max(width, 1.75 * font.UNITS * scale(c)), c);
     limits_box(base, if (lower_node != null) lower else null, if (upper_node != null) upper else null, c)
+}
+
+// Shafts grow with the label; hooks and arrowheads keep their em-sized geometry.
+fn arrow_shape(key, width, c) {
+    let s = scale(c)
+    let w = max(width, 700.0 * s)
+    let head = 200.0 * s
+    let half = 110.0 * s
+    let double = contains(key, "Right") or contains(key, "Left")
+    let harpoon = contains(key, "harpoon")
+    let left = contains(key, "left") or contains(key, "Left")
+    let right = contains(key, "right") or contains(key, "Right") or key == "xmapsto"
+    let shaft = if (double) [0.0 - 60.0 * s, 60.0 * s] else [0.0]
+    let path = <g fill: "none", stroke: "currentColor", 'stroke-width': metric(c, "fraction_rule_thickness"),
+        for (y in shaft) <path d: "M0 " ++ string(y) ++ " H" ++ string(w)>
+        if (right) <path d: "M" ++ string(w - head) ++ " " ++ string(0.0 - half) ++ " L" ++ string(w) ++ " 0" ++
+            (if (harpoon) "" else " L" ++ string(w - head) ++ " " ++ string(half))>
+        if (left) <path d: "M" ++ string(head) ++ " " ++ string(if (harpoon) half else 0.0 - half) ++ " L0 0" ++
+            (if (harpoon) "" else " L" ++ string(head) ++ " " ++ string(half))>
+        if (contains(key, "twohead")) <path d: if (right)
+            "M" ++ string(w - 2.0 * head) ++ " " ++ string(0.0 - half) ++ " L" ++ string(w - head) ++ " 0 L" ++ string(w - 2.0 * head) ++ " " ++ string(half)
+            else "M" ++ string(2.0 * head) ++ " " ++ string(0.0 - half) ++ " L" ++ string(head) ++ " 0 L" ++ string(2.0 * head) ++ " " ++ string(half)>
+        if (contains(key, "hook")) <path d: if (right)
+            "M0 0 C" ++ string(head) ++ " 0 " ++ string(head) ++ " " ++ string(0.0 - 2.0 * half) ++ " 0 " ++ string(0.0 - 2.0 * half)
+            else "M" ++ string(w) ++ " 0 C" ++ string(w - head) ++ " 0 " ++ string(w - head) ++ " " ++ string(0.0 - 2.0 * half) ++ " " ++ string(w) ++ " " ++ string(0.0 - 2.0 * half)>
+        if (contains(key, "mapsto")) <path d: "M0 " ++ string(0.0 - half) ++ " V" ++ string(half)>
+    >
+    let axis = metric(c, "axis_height");
+    bx.make(<g 'data-math-kind':"extensible-arrow", transform:"translate(0 " ++ string(0.0 - axis) ++ ")", path>,
+        w, axis + 2.0 * half, max(0.0, half - axis), "mrel")
+}
+
+fn bracket_mark(key, width, c) {
+    let h = 180.0 * scale(c)
+    let sign = if (starts_with(key, "under")) -1.0 else 1.0
+    let tick = sign * h
+    let d = if (contains(key, "group")) "M0 " ++ string(tick) ++ " Q" ++ string(width / 2.0) ++ " " ++ string(0.0 - tick) ++ " " ++ string(width) ++ " " ++ string(tick)
+        else "M0 " ++ string(tick) ++ " V0 H" ++ string(width) ++ " V" ++ string(tick);
+    bx.make(<path d:d, fill:"none", stroke:"currentColor", 'stroke-width':metric(c,"fraction_rule_thickness")>,
+        width, if (sign < 0.0) h else 0.0, if (sign > 0.0) h else 0.0)
+}
+
+fn transformed(n, c) {
+    let key = command_name(string(n.cmd))
+    let base = node(n.body, c)^
+    if (contains(key, "reflectbox")) {*:base, character:false, body:<g 'data-math-kind':"reflection",
+        transform:"translate(" ++ string(base.width) ++ " 0) scale(-1 1)", base.body>}
+    else if (key == "raisebox") {
+        let result = bx.shifted(base, 0.0, 0.0 - dimension(string(n.raise), c), base.width);
+        {*:result, height:if (n.height != null) dimension(n.height,c) else result.height,
+            depth:if (n.depth != null) dimension(n.depth,c) else result.depth}
+    } else if (key == "vcenter") center_axis(base, c)
+    else if (key == "pmb") bx.compose([for (dx in [0.0, 25.0, 50.0]) {box:base, x:dx * scale(c), y:0.0}], base.width)
+    else if (key == "angl") {
+        let pad = 100.0 * scale(c)
+        let width = base.width + pad
+        let top = 0.0 - base.height - pad;
+        {*:base, width:width, height:base.height + pad, character:false,
+            body:<g base.body; <path d:"M0 " ++ string(top) ++ " H" ++ string(width) ++ " V" ++ string(base.depth),
+                fill:"none", stroke:"currentColor", 'stroke-width':metric(c,"fraction_rule_thickness")>>}
+    }
+    else if (key == "phase") {
+        let pad = 350.0 * scale(c)
+        let raised = bx.shifted(base, pad, 0.0, base.width + pad)
+        let path = "M0 " ++ string(base.depth) ++ " L" ++ string(pad) ++ " " ++ string(0.0 - base.height) ++
+            " M0 " ++ string(base.depth) ++ " H" ++ string(raised.width);
+        {*:raised, body:<g <path d:path, fill:"none", stroke:"currentColor", 'stroke-width':metric(c,"fraction_rule_thickness")> raised.body>}
+    } else {
+        let x = base.width
+        let top = 0.0 - base.height
+        let bottom = base.depth
+        let d = if (key == "sout") "M0 " ++ string(0.0 - metric(c,"axis_height")) ++ " H" ++ string(x)
+            else (if (key != "bcancel") "M0 " ++ string(bottom) ++ " L" ++ string(x) ++ " " ++ string(top) else "") ++
+                (if (key != "cancel") " M0 " ++ string(top) ++ " L" ++ string(x) ++ " " ++ string(bottom) else "");
+        {*:base, character:false, body:<g 'data-math-kind':key, base.body;
+            <path d:d, fill:"none", stroke:"currentColor", 'stroke-width':metric(c,"fraction_rule_thickness")>>}
+    }
+}
+
+fn equation_tag(n, c) {
+    let body = node(n.body, {*:c, style:"text"})^;
+    if (n.starred) body else bx.row([character("(",c,"mord")^, body, character(")",c,"mord")^])
+}
+
+fn modulo(n, c) {
+    let key = command_name(string(n.cmd))
+    let body = node(n.body,c)^
+    let label = text("mod", {*:c, text_variant:"normal"}, true)^
+    let gap = bx.empty(250.0 * scale(c))
+    let expression = if (key == "pod") body else bx.row([label, gap, body]);
+    if (key == "bmod") {*:label, type:"mbin"}
+    else bx.row([bx.empty(500.0 * scale(c)), *if (key == "mod") [expression] else
+        [character("(",c,"mopen")^, expression, character(")",c,"mclose")^]])
+}
+
+fn diagram_arrow(n, c) {
+    let dir = string(n.direction)
+    let upper = node(n.upper,script(c))^
+    let lower = node(n.lower,script(c))^
+    let w = max(3000.0 * scale(c), max(upper.width,lower.width) + 500.0 * scale(c))
+    if (dir == "<" or dir == ">") arrow(<extended_arrow cmd:if (dir == "<") "\\xleftarrow" else "\\xrightarrow",
+        upper:n.upper, lower:n.lower, min_width:w>,c)^
+    else if (dir == "=") bx.make(<g stroke:"currentColor", 'stroke-width':metric(c,"fraction_rule_thickness"),
+        <path d:"M0 -200 H" ++ string(w) ++ " M0 -300 H" ++ string(w)>>,w,300.0 * scale(c),0.0)
+    else if (dir == ".") bx.empty(w)
+    else if (not contains(["A","V","|"],dir)) error("math: unsupported CD arrow " ++ dir)
+    else {
+        let h = 1600.0 * scale(c)
+        let x = max(upper.width,lower.width) + 200.0 * scale(c)
+        let d = if (dir == "|") "M" ++ string(x - 50.0 * scale(c)) ++ " " ++ string(0.0 - h / 2.0) ++ " v" ++ string(h) ++
+            " M" ++ string(x + 50.0 * scale(c)) ++ " " ++ string(0.0 - h / 2.0) ++ " v" ++ string(h)
+            else "M" ++ string(x) ++ " " ++ string(0.0 - h / 2.0) ++ " v" ++ string(h) ++
+                " M" ++ string(x - 120.0 * scale(c)) ++ " " ++ string(if (dir == "A") 0.0 - h / 2.0 + 200.0 * scale(c) else h / 2.0 - 200.0 * scale(c)) ++
+                " L" ++ string(x) ++ " " ++ string(if (dir == "A") 0.0 - h / 2.0 else h / 2.0) ++
+                " L" ++ string(x + 120.0 * scale(c)) ++ " " ++ string(if (dir == "A") 0.0 - h / 2.0 + 200.0 * scale(c) else h / 2.0 - 200.0 * scale(c))
+        let mark = bx.make(<path d:d, fill:"none", stroke:"currentColor", 'stroke-width':metric(c,"fraction_rule_thickness")>,x + lower.width + 200.0 * scale(c),h / 2.0,h / 2.0);
+        bx.compose([{box:mark,x:0.0,y:0.0}, {box:upper,x:x - 200.0 * scale(c) - upper.width,y:0.0},
+            {box:lower,x:x + 200.0 * scale(c),y:0.0}],mark.width)
+    }
 }
 
 fn paired_arrow(recipe, width, c) {
@@ -455,16 +613,18 @@ fn matrix(n, c) {
     let key = if (ends_with(raw_key, "*")) slice(raw_key, 0, len(raw_key) - 1) else raw_key
     let aligned = contains(["aligned", "alignedat", "align", "alignat", "split"], key)
     let display = aligned or contains(["gathered", "gather", "equation", "dcases"], key)
-    let child = with_style(c, if (key == "smallmatrix") "script" else if (display) "display" else "text")
+    let small = key == "smallmatrix" or key == "subarray"
+    let child = with_style(c, if (small) "script" else if (display) "display" else "text")
     let items = util.content_items(n.body)
     let rows = util.parse_rows(items, 0, len(items), [], [], [])
     // AMS starts each right-hand cell with an empty ordinary atom for relation glue.
     let cells = [for (row in rows) [for (col, cell in row.cells)
-        group([*if (aligned and col % 2 == 1) [<group>] else [], *cell.items], child)^]]
+        group([*if (aligned and col % 2 == 1) [<group>] else [],
+            *[for (item in cell.items where not (item is element and name(item) == 'array_rule')) item]], child)^]]
     let count = max([0, *[for (row in cells) len(row)]])
     let widths = [for (col in 0 to (count - 1)) max([0.0, *[for (row in cells) row[col].width or 0.0]])]
     // Array struts keep simple rows apart: 12pt baseline with 70/30 height/depth at 10pt.
-    let row_skip = (if (key == "smallmatrix") 0.6 else 1.2) * font.UNITS * text_scale(c)
+    let row_skip = (if (small) 0.6 else 1.2) * font.UNITS * text_scale(c)
     let heights = [for (row in cells) max([0.7 * row_skip, *[for (cell in row) cell.height]])]
     let depths = [for (row in cells) max([0.3 * row_skip, *[for (cell in row) cell.depth]])]
     let gap_x = font.UNITS * scale(child)
@@ -483,7 +643,25 @@ fn matrix(n, c) {
             (if (aligns[col] == "r") widths[col] - cell.width else if (aligns[col] == "l") 0.0 else (widths[col] - cell.width) / 2.0),
         y: top + sum(slice(heights, 0, r)) + sum(slice(depths, 0, r)) + float(r) * gap_y +
             sum(slice(extra_gaps, 0, r)) + heights[r]}]
-    let table = bx.compose(entries, sum(widths) + sum(gaps), "minner")
+    let width = sum(widths) + sum(gaps)
+    let thickness = metric(c,"fraction_rule_thickness")
+    let column_spec = split(string(n.columns or ""), "")
+    let verticals = [for (i,ch in column_spec where ch == "|" or ch == ":") (
+        let col = len([for (v in slice(column_spec,0,i) where contains("lcr",v)) v]),
+        let boundary = sum(slice(widths,0,col)) + sum(slice(gaps,0,col + 1)),
+        let repeated = if (i > 0 and column_spec[i - 1] == "|") 150.0 * scale(c) else 0.0,
+        <path d:"M" ++ string(boundary - (if (col > 0 and col < count) gaps[col] / 2.0 else 0.0) + repeated) ++ " " ++ string(top) ++ " v" ++ string(total),
+            fill:"none", stroke:"currentColor", 'stroke-width':thickness, 'stroke-dasharray':if (ch == ":") "150 100" else "none">)]
+    let horizontals = [for (r,row in rows, i,mark in [
+        *[for (cell in row.cells, item in cell.items where item is element and name(item) == 'array_rule') {item:item,trailing:false}],
+        *[for (item in row.trailing_rules) {item:item,trailing:true}]])
+        <path d:"M0 " ++ string(top + sum(slice(heights,0,r)) + sum(slice(depths,0,r)) + float(r) * gap_y +
+            sum(slice(extra_gaps,0,r)) + (if (mark.trailing) heights[r] + depths[r] else 0.0) + float(i) * 3.0 * thickness) ++ " H" ++ string(width),
+            fill:"none", stroke:"currentColor", 'stroke-width':thickness,
+            'stroke-dasharray':if (mark.item.cmd == "\\hdashline") "150 100" else "none">]
+    let table0 = bx.compose(entries, width, "minner")
+    let table = if (len(verticals) + len(horizontals) == 0) table0 else
+        {*:table0, body:<g table0.body; for (line in verticals) line; for (line in horizontals) line>}
     let result = {*:table, body: <g 'data-math-kind': "matrix", table.body>}
     let fences = match key {
         case "pmatrix": ["(", ")"]
@@ -504,8 +682,8 @@ fn phantom(n, c) {
     let key = command_name(string(n.cmd));
     {*:base, character:false, body: if (key == "smash") base.body else <g>,
         width: if (key == "vphantom") 0.0 else base.width,
-        height: if (key == "hphantom" or key == "smash") 0.0 else base.height,
-        depth: if (key == "hphantom" or key == "smash") 0.0 else base.depth}
+        height: if (key == "hphantom" or (key == "smash" and util.text_of(n.options) != "b")) 0.0 else base.height,
+        depth: if (key == "hphantom" or (key == "smash" and util.text_of(n.options) != "t")) 0.0 else base.depth}
 }
 
 fn enclosed(n, c) {
@@ -526,9 +704,14 @@ fn enclosed(n, c) {
 fn colored(n, c) {
     let base = node(n.content, c)^
     let color = n.color_raw or util.text_of(n.color)
-    if (n.cmd == "\\colorbox") {*:base, body: <g <rect x: 0, y: 0.0 - base.height,
-        width: base.width, height: base.height + base.depth, fill: color> base.body>}
-    else {*:base, body: <g fill: color, style: "color:" ++ color, base.body>}
+    if (n.cmd == "\\colorbox" or n.cmd == "\\fcolorbox") {
+        let pad = dimension("3pt",c)
+        let result = bx.shifted(base,pad,0.0,base.width + 2.0 * pad);
+        {*:result, height:base.height + pad, depth:base.depth + pad,
+            body: <g <rect x:0, y:0.0 - base.height - pad, width:result.width,
+                height:base.height + base.depth + 2.0 * pad, fill:color,
+                stroke:n.border_color or "none", 'stroke-width':metric(c,"fraction_rule_thickness")> result.body>}
+    } else ({*:base, body: <g fill: color, style: "color:" ++ color, base.body>})
 }
 
 fn space(n, c) {

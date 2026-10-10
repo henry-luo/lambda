@@ -13,7 +13,7 @@ let alphabets = {
     italic: [0x1D434, 0x1D44E, 0], bold: [0x1D400, 0x1D41A, 0x1D7CE],
     bolditalic: [0x1D468, 0x1D482, 0], script: [0x1D49C, 0x1D4B6, 0],
     fraktur: [0x1D504, 0x1D51E, 0], double: [0x1D538, 0x1D552, 0x1D7D8],
-    sans: [0x1D5A0, 0x1D5BA, 0x1D7E2], mono: [0x1D670, 0x1D68A, 0x1D7F6]
+    sans: [0x1D5A0, 0x1D5BA, 0x1D7E2], sansitalic:[0x1D608,0x1D622,0], mono: [0x1D670, 0x1D68A, 0x1D7F6]
 }
 // Unicode preserves these alphabet members in the Letterlike Symbols block.
 let exceptions = {
@@ -48,6 +48,8 @@ pub fn variant(ch, style) {
 
 // Share command spellings between rendering and style-face acquisition.
 let styled_commands = [
+    {cmd:"\\rm", style:"normal"}, {cmd:"\\it", style:"italic"}, {cmd:"\\bf", style:"bold"},
+    {cmd:"\\sf", style:"sans"}, {cmd:"\\tt", style:"mono"},
     {cmd: "\\mathrm", style: "normal"},
     {cmd: "\\mathbf", style: "bold"},
     {cmd: "\\boldsymbol", style: "bolditalic"},
@@ -57,6 +59,7 @@ let styled_commands = [
     {cmd: "\\mathfrak", style: "fraktur"},
     {cmd: "\\mathbb", style: "double"},
     {cmd: "\\mathsf", style: "sans"},
+    {cmd: "\\mathsfit", style: "sansitalic"},
     {cmd: "\\mathtt", style: "mono"},
     {cmd: "\\operatorname", style: "normal"}
 ]
@@ -73,7 +76,8 @@ fn collect(node) {
         let attrs = ["value", "name", "cmd", "text", "base", "sub", "sup", "numer", "denom",
             "radicand", "index", "arg", "content", "body", "left", "right", "above", "below",
             "label", "over", "under", "delim", "annotation", "upper", "lower", "target", "display", "script", "scriptscript"];
-        util.str_join([for (attr in attrs) collect(node[attr])], "") ++ collect(content(node))
+        util.str_join([for (attr in attrs) collect(node[attr])], "") ++ collect(content(node)) ++
+            (if (name(node) == 'verbatim' and node.starred) "␣" else "")
     } else ""
 }
 
@@ -96,7 +100,7 @@ pub fn prepare(ast, options) map | error {
     // One batch owns all glyphs used by this formula; no mutable last-font state.
     let source = collect(ast)
     let chars = unique(split(source ++ "()[]{}|‖⌈⌉⌊⌋⟨⟩√̂̃̄⃗̇̈⏞⏟←→↔⇀↽− /", ""))
-    let styles = ["normal", "auto", "italic", "bold", "bolditalic", "script", "fraktur", "double", "sans", "mono"]
+    let styles = ["normal", "auto", "italic", "bold", "bolditalic", "script", "fraktur", "double", "sans", "sansitalic", "mono"]
     let points = unique([for (ch in chars, style in styles) variant(ch, style)])
     let large_points = [for (ch in sym.large_symbols() where contains(chars, ch)) ord(ch)]
     let native = measure({font_family: family, font_size: UNITS}, points, faces, family)
@@ -111,8 +115,8 @@ pub fn prepare(ast, options) map | error {
             where contains(source, entry.cmd)) entry.style]])
     let style_faces = if (native.has_math) [] else [for (style in needed_styles where style != "normal")
         (let weight = if (style == "bold" or style == "bolditalic") 700 else 400,
-         let slant = if (style == "italic" or style == "bolditalic") "italic" else "normal",
-         let style_family = variant_families[style] or family,
+         let slant = if (contains(["italic","bolditalic","sansitalic"],style)) "italic" else "normal",
+         let style_family = variant_families[if (style == "sansitalic") "sans" else style] or family,
          {style: style, facts: measure({font_family: style_family, font_size: UNITS,
             font_weight: weight, font_style: slant}, points, faces, style_family)})]
     // Resolve only absent source characters; never replace a Latin variable with
@@ -122,7 +126,7 @@ pub fn prepare(ast, options) map | error {
         measure({font_family: if (use_bundled) bundled.SYMBOL_FAMILIES else family,
             font_size: UNITS, fallback: true}, fallback_points, faces)
     // Keep paired harpoons in one bundled face instead of unrelated system fallbacks.
-    let reaction_points = if (use_bundled) [ord("⇀"), ord("↽")] else []
+    let reaction_points = if (use_bundled) [ord("⇀"), ord("↽"), ord("↼"), ord("⇁")] else []
     if (facts.constants.script_percent_scale_down <= 0 or facts.constants.script_script_percent_scale_down <= 0)
         error("math: selected font has invalid script scale constants")
     else {facts: facts, points: points, family: facts.font_family,

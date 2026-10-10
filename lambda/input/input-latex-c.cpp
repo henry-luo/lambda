@@ -35,7 +35,8 @@ static bool is_big_operator(const char* name) {
     return strcmp(name, "sum") == 0 || strcmp(name, "prod") == 0 ||
         strcmp(name, "coprod") == 0 || strcmp(name, "int") == 0 ||
         strcmp(name, "iint") == 0 || strcmp(name, "iiint") == 0 ||
-        strcmp(name, "oint") == 0 || strcmp(name, "lim") == 0 ||
+        strcmp(name, "oint") == 0 || strcmp(name, "intop") == 0 || strcmp(name, "oiint") == 0 ||
+        strcmp(name, "oiiint") == 0 || strcmp(name, "lim") == 0 ||
         strcmp(name, "limsup") == 0 || strcmp(name, "liminf") == 0 ||
         strcmp(name, "sup") == 0 || strcmp(name, "inf") == 0 ||
         strcmp(name, "max") == 0 || strcmp(name, "min") == 0 ||
@@ -57,7 +58,7 @@ static bool is_literal_text_escape(const char* name) {
 static bool is_style_command(const char* name) {
     return strcmp(name, "mathrm") == 0 || strcmp(name, "mathbf") == 0 ||
         strcmp(name, "boldsymbol") == 0 ||
-        strcmp(name, "mathit") == 0 || strcmp(name, "mathsf") == 0 ||
+        strcmp(name, "mathit") == 0 || strcmp(name, "mathsf") == 0 || strcmp(name, "mathsfit") == 0 ||
         strcmp(name, "mathtt") == 0 || strcmp(name, "mathcal") == 0 ||
         strcmp(name, "mathbb") == 0 || strcmp(name, "mathfrak") == 0 ||
         strcmp(name, "mathscr") == 0 || strcmp(name, "mathnormal") == 0 ||
@@ -69,6 +70,26 @@ static bool is_style_command(const char* name) {
 static bool is_size_command(const char* name) {
     static const char* commands[] = {"tiny", "sixptsize", "scriptsize", "footnotesize", "small",
         "normalsize", "large", "Large", "LARGE", "huge", "Huge"};
+    for (const char* command : commands) if (strcmp(name, command) == 0) return true;
+    return false;
+}
+
+static bool is_math_accent(const char* name) {
+    static const char* commands[] = {"hat", "bar", "vec", "dot", "ddot", "dddot", "ddddot",
+        "tilde", "acute", "breve", "check", "grave", "widehat", "widetilde", "widecheck",
+        "overline", "underline", "underbar", "overbrace", "underbrace", "overbracket", "underbracket",
+        "overrightarrow", "Overrightarrow", "underrightarrow", "overleftarrow", "underleftarrow",
+        "overleftrightarrow", "underleftrightarrow", "overleftharpoon", "overrightharpoon",
+        "overgroup", "undergroup", "overlinesegment", "underlinesegment", "utilde", "mathring"};
+    for (const char* command : commands) if (strcmp(name, command) == 0) return true;
+    return false;
+}
+
+static bool is_extended_arrow(const char* name) {
+    static const char* commands[] = {"xrightarrow", "xleftarrow", "xleftrightarrow", "xRightarrow",
+        "xLeftarrow", "xLeftrightarrow", "xhookrightarrow", "xhookleftarrow", "xtwoheadrightarrow",
+        "xtwoheadleftarrow", "xmapsto", "xrightleftharpoons", "xleftrightharpoons",
+        "xrightleftarrows", "xrightequilibrium", "xleftequilibrium"};
     for (const char* command : commands) if (strcmp(name, command) == 0) return true;
     return false;
 }
@@ -117,7 +138,7 @@ static bool is_supported_math_environment(const char* name) {
     static const char* environments[] = {"array", "matrix", "matrix*", "pmatrix", "pmatrix*",
         "bmatrix", "bmatrix*", "Bmatrix", "Bmatrix*", "vmatrix", "vmatrix*", "Vmatrix", "Vmatrix*",
         "cases", "rcases", "dcases", "aligned", "alignedat", "align", "align*", "alignat", "alignat*",
-        "gathered", "gather", "gather*", "split", "equation", "equation*", "smallmatrix", "IEEEeqnarray"};
+        "gathered", "gather", "gather*", "split", "equation", "equation*", "smallmatrix", "subarray", "CD", "IEEEeqnarray"};
     for (const char* environment : environments) if (strcmp(name, environment) == 0) return true;
     return false;
 }
@@ -151,9 +172,9 @@ static void append_latex_content(MarkBuilder& builder, ElementBuilder& command, 
 class DirectMathParser {
 public:
     DirectMathParser(InputContext& context, const char* source, size_t length,
-                     size_t source_offset, bool ascii, bool allow_infix = true)
+                     size_t source_offset, bool ascii, bool allow_infix = true, bool text_mode = false)
         : ctx_(context), builder_(context.builder), source_(source), length_(length),
-          offset_(source_offset), position_(0), ascii_(ascii), allow_infix_(allow_infix) {}
+          offset_(source_offset), position_(0), ascii_(ascii), allow_infix_(allow_infix), text_mode_(text_mode) {}
 
     Item parse(const char* expansion_error = nullptr) {
         ElementBuilder root = builder_.element("math");
@@ -175,6 +196,7 @@ private:
     size_t position_;
     bool ascii_;
     bool allow_infix_;
+    bool text_mode_;
 
     void error(const char* message) {
         ctx_.tracker.seek(offset_ + position_);
@@ -250,6 +272,7 @@ private:
             error("missing script argument");
             return ItemNull;
         }
+        if (text_mode_) return parse_text_arg();
         if (source_[position_] == '{') return parse_group();
         if (ascii_ && source_[position_] == '(') return parse_paren_script_group();
         if (!ascii_) {
@@ -327,6 +350,18 @@ private:
         const char* modifier = nullptr;
         for (;;) {
             skip_space();
+            if (position_ < length_ && source_[position_] == '\'') {
+                ElementBuilder primes = builder_.element("group");
+                if (item_present(sup)) primes.child(sup);
+                while (position_ < length_ && source_[position_] == '\'') {
+                    position_++;
+                    ElementBuilder prime = builder_.element("symbol_command");
+                    prime.attr("name", builder_.createStringItem("prime"));
+                    primes.child(prime.final());
+                }
+                sup = primes.final();
+                continue;
+            }
             if (position_ < length_ && source_[position_] == '\\') {
                 char modifier_name[96];
                 char modifier_full[104];
@@ -344,7 +379,12 @@ private:
             char marker = source_[position_++];
             Item value = parse_script_arg();
             if (marker == '_') sub = value;
-            else sup = value;
+            else if (item_present(sup)) {
+                ElementBuilder combined = builder_.element("group");
+                combined.child(sup);
+                combined.child(value);
+                sup = combined.final();
+            } else sup = value;
         }
         if (!item_present(sub) && !item_present(sup)) return base;
         ElementBuilder result = builder_.element("subsup");
@@ -448,6 +488,14 @@ private:
         return true;
     }
 
+    size_t verbatim_end(size_t cursor) {
+        if (cursor < length_ && source_[cursor] == '*') cursor++;
+        if (cursor >= length_) return length_;
+        char delimiter = source_[cursor++];
+        while (cursor < length_ && source_[cursor] != delimiter) cursor++;
+        return cursor < length_ ? cursor + 1 : cursor;
+    }
+
     Item parse_command() {
         char name[96];
         char full[104];
@@ -457,12 +505,143 @@ private:
         if (strcmp(name, "cr") == 0) return builder_.createSymbolItem("row_sep");
         if (!allow_infix_ && is_infix_fraction_command(name)) return ItemNull;
 
+        if (strcmp(name, "verb") == 0) {
+            size_t after = verbatim_end(position_);
+            bool starred = position_ < length_ && source_[position_] == '*';
+            if (starred) position_++;
+            size_t begin = position_ < length_ ? position_ + 1 : length_;
+            char delimiter = position_ < length_ ? source_[position_++] : '\0';
+            position_ = after > begin && source_[after - 1] == delimiter ? after - 1 : after;
+            ElementBuilder elem = builder_.element("verbatim");
+            elem.attr("value", builder_.createStringItem(source_ + begin, position_ - begin));
+            elem.attr("starred", builder_.createBool(starred));
+            elem.attr("delimiter", builder_.createStringItem(&delimiter, 1));
+            if (position_ < length_) position_++;
+            return elem.final();
+        }
+        if (strcmp(name, "raisebox") == 0 || strcmp(name, "reflectbox") == 0 ||
+            strcmp(name, "mathreflectbox") == 0 || strcmp(name, "vcenter") == 0 ||
+            strcmp(name, "cancel") == 0 || strcmp(name, "bcancel") == 0 ||
+            strcmp(name, "xcancel") == 0 || strcmp(name, "sout") == 0 ||
+            strcmp(name, "pmb") == 0 || strcmp(name, "phase") == 0 || strcmp(name, "angl") == 0 ||
+            strcmp(name, "angln") == 0 || strcmp(name, "anglr") == 0 || strcmp(name, "anglk") == 0) {
+            ElementBuilder elem = builder_.element("box_transform");
+            elem.attr("cmd", builder_.createStringItem(full));
+            if (strcmp(name, "raisebox") == 0) {
+                elem.attr("raise", parse_dimension_arg());
+                // optional height/depth override the raised box's reported extents.
+                static const char* extents[] = {"height", "depth"};
+                for (const char* attr : extents) {
+                    skip_space();
+                    size_t begin = 0, end = 0;
+                    if (position_ < length_ && source_[position_] == '[' && consume_group_span('[', ']', &begin, &end))
+                        elem.attr(attr, builder_.createStringItem(source_ + begin, end - begin));
+                }
+            }
+            bool text_box = strcmp(name, "raisebox") == 0 || strcmp(name, "reflectbox") == 0;
+            if (strlen(name) == 5 && strncmp(name, "angl", 4) == 0) {
+                elem.attr("cmd", builder_.createStringItem("\\angl"));
+                elem.attr("body", builder_.createStringItem(name + 4, 1));
+            } else elem.attr("body", text_box ? parse_text_arg() : parse_script_arg());
+            return elem.final();
+        }
+        if (strcmp(name, "substack") == 0) {
+            size_t begin = 0, end = 0;
+            skip_space();
+            ElementBuilder elem = builder_.element("environment");
+            elem.attr("name", builder_.createStringItem("subarray"));
+            elem.attr("columns", builder_.createStringItem("c"));
+            if (consume_group_span('{', '}', &begin, &end)) {
+                ElementBuilder body = builder_.element("env_body");
+                DirectMathParser nested(ctx_, source_ + begin, end - begin, offset_ + begin, ascii_);
+                nested.parse_into(body, true);
+                elem.attr("body", body.final());
+            }
+            return elem.final();
+        }
+        if (strcmp(name, "tag") == 0) {
+            ElementBuilder elem = builder_.element("equation_tag");
+            bool starred = position_ < length_ && source_[position_] == '*';
+            if (starred) position_++;
+            elem.attr("starred", builder_.createBool(starred));
+            elem.attr("body", parse_text_arg());
+            return elem.final();
+        }
+        if (strcmp(name, "nonumber") == 0 || strcmp(name, "notag") == 0 ||
+            strcmp(name, "nobreak") == 0 || strcmp(name, "allowbreak") == 0 || strcmp(name, "newline") == 0) {
+            ElementBuilder elem = builder_.element("layout_control");
+            elem.attr("cmd", builder_.createStringItem(full));
+            return elem.final();
+        }
+        if (strcmp(name, "hline") == 0 || strcmp(name, "hdashline") == 0) {
+            ElementBuilder elem = builder_.element("array_rule");
+            elem.attr("cmd", builder_.createStringItem(full));
+            return elem.final();
+        }
+        if (strcmp(name, "rm") == 0 || strcmp(name, "it") == 0 || strcmp(name, "bf") == 0 ||
+            strcmp(name, "sf") == 0 || strcmp(name, "tt") == 0) {
+            ElementBuilder elem = builder_.element("font_switch");
+            elem.attr("cmd", builder_.createStringItem(full));
+            return elem.final();
+        }
+        if (strcmp(name, "bmod") == 0 || strcmp(name, "pmod") == 0 || strcmp(name, "mod") == 0 || strcmp(name, "pod") == 0) {
+            ElementBuilder elem = builder_.element("mod_command");
+            elem.attr("cmd", builder_.createStringItem(full));
+            if (strcmp(name, "bmod") != 0) elem.attr("body", parse_script_arg());
+            return elem.final();
+        }
+        if (strcmp(name, "genfrac") == 0) {
+            ElementBuilder elem = builder_.element("genfrac");
+            static const char* attrs[] = {"left_delim", "right_delim", "thickness", "style"};
+            for (const char* attr : attrs) {
+                skip_space();
+                if (strcmp(attr, "left_delim") == 0 || strcmp(attr, "right_delim") == 0)
+                    elem.attr(attr, parse_delimiter_token());
+                else elem.attr(attr, parse_dimension_arg());
+            }
+            elem.attr("numer", parse_script_arg());
+            elem.attr("denom", parse_script_arg());
+            return elem.final();
+        }
+        if (strcmp(name, "Set") == 0 || strcmp(name, "Braket") == 0) {
+            ElementBuilder elem = builder_.element("delimiter_group");
+            elem.attr("left", builder_.createStringItem(strcmp(name, "Set") == 0 ? "\\{" : "\\langle"));
+            elem.attr("right", builder_.createStringItem(strcmp(name, "Set") == 0 ? "\\}" : "\\rangle"));
+            elem.attr("body", parse_script_arg());
+            return elem.final();
+        }
+        static const char* colors[] = {"red", "green", "blue", "cyan", "magenta", "yellow", "black", "white", "purple", "orange", "gray"};
+        for (const char* color : colors) if (strcmp(name, color) == 0) {
+            ElementBuilder elem = builder_.element("color_command");
+            elem.attr("cmd", builder_.createStringItem("\\textcolor"));
+            elem.attr("color_raw", builder_.createStringItem(color));
+            elem.attr("content", parse_script_arg());
+            return elem.final();
+        }
+        if (strcmp(name, "fcolorbox") == 0) {
+            ElementBuilder elem = builder_.element("color_command");
+            elem.attr("cmd", builder_.createStringItem(full));
+            static const char* attrs[] = {"border_color", "color_raw"};
+            for (const char* attr : attrs) {
+                size_t begin = 0, end = 0;
+                skip_space();
+                if (consume_group_span('{', '}', &begin, &end))
+                    elem.attr(attr, builder_.createStringItem(source_ + begin, end - begin));
+            }
+            elem.attr("content", parse_text_arg());
+            return elem.final();
+        }
+
         if (strcmp(name, "frac") == 0 || strcmp(name, "dfrac") == 0 ||
             strcmp(name, "tfrac") == 0 || strcmp(name, "cfrac") == 0) {
+            Item alignment = ItemNull;
+            skip_space();
+            if (strcmp(name, "cfrac") == 0 && position_ < length_ && source_[position_] == '[') alignment = parse_brack_group();
             Item numer = parse_script_arg();
             Item denom = parse_script_arg();
             ElementBuilder elem = builder_.element("fraction");
             elem.attr("cmd", builder_.createStringItem(full));
+            if (item_present(alignment)) elem.attr("options", alignment);
             if (item_present(numer)) elem.attr("numer", numer);
             if (item_present(denom)) elem.attr("denom", denom);
             return elem.final();
@@ -488,9 +667,7 @@ private:
             if (item_present(radicand)) elem.attr("radicand", radicand);
             return elem.final();
         }
-        if (strcmp(name, "xrightarrow") == 0 || strcmp(name, "xleftarrow") == 0 ||
-            strcmp(name, "xrightleftarrows") == 0 || strcmp(name, "xrightequilibrium") == 0 ||
-            strcmp(name, "xleftequilibrium") == 0) {
+        if (is_extended_arrow(name)) {
             Item lower = ItemNull;
             skip_space();
             if (position_ < length_ && source_[position_] == '[') lower = parse_brack_group();
@@ -571,6 +748,10 @@ private:
         if (is_style_command(name)) {
             ElementBuilder elem = builder_.element("style_command");
             elem.attr("cmd", builder_.createStringItem(full));
+            if (strcmp(name, "operatorname") == 0 && position_ < length_ && source_[position_] == '*') {
+                position_++;
+                elem.attr("limits", builder_.createBool(true));
+            }
             bool declaration = strcmp(name, "displaystyle") == 0 ||
                 strcmp(name, "textstyle") == 0 || strcmp(name, "scriptstyle") == 0 ||
                 strcmp(name, "scriptscriptstyle") == 0;
@@ -604,7 +785,8 @@ private:
                 latex_scan_group_end(source_, length_, position_, '{', '}', &color_begin, &color_end) != 0;
             Item color = parse_script_arg();
             Item content = ItemNull;
-            if (strcmp(name, "textcolor") == 0 || strcmp(name, "colorbox") == 0) content = parse_color_content();
+            if (strcmp(name, "textcolor") == 0) content = parse_color_content();
+            else if (strcmp(name, "colorbox") == 0) content = parse_text_arg();
             ElementBuilder elem = builder_.element(strcmp(name, "color") == 0 ?
                                                      "color_switch" : "color_command");
             elem.attr("cmd", builder_.createStringItem(full));
@@ -619,9 +801,12 @@ private:
         if (strcmp(name, "phantom") == 0 || strcmp(name, "hphantom") == 0 ||
             strcmp(name, "vphantom") == 0 || strcmp(name, "smash") == 0) {
             // these commands change box dimensions and cannot use literal-command fallback.
-            Item content = parse_script_arg();
             ElementBuilder elem = builder_.element("phantom_command");
             elem.attr("cmd", builder_.createStringItem(full));
+            skip_space();
+            if (strcmp(name, "smash") == 0 && position_ < length_ && source_[position_] == '[')
+                elem.attr("options", parse_brack_group());
+            Item content = parse_script_arg();
             if (item_present(content)) elem.attr("content", content);
             return elem.final();
         }
@@ -643,17 +828,7 @@ private:
             if (item_present(content)) elem.attr("content", content);
             return elem.final();
         }
-        if (strcmp(name, "hat") == 0 || strcmp(name, "bar") == 0 || strcmp(name, "vec") == 0 ||
-            strcmp(name, "dot") == 0 || strcmp(name, "ddot") == 0 || strcmp(name, "dddot") == 0 ||
-            strcmp(name, "ddddot") == 0 || strcmp(name, "tilde") == 0 || strcmp(name, "acute") == 0 ||
-            strcmp(name, "breve") == 0 || strcmp(name, "check") == 0 || strcmp(name, "grave") == 0 ||
-            strcmp(name, "widehat") == 0 || strcmp(name, "widetilde") == 0 ||
-            strcmp(name, "overline") == 0 || strcmp(name, "underline") == 0 ||
-            strcmp(name, "overbrace") == 0 || strcmp(name, "underbrace") == 0 ||
-            strcmp(name, "overrightarrow") == 0 || strcmp(name, "underrightarrow") == 0 ||
-            strcmp(name, "overleftarrow") == 0 || strcmp(name, "underleftarrow") == 0 ||
-            strcmp(name, "overleftrightarrow") == 0 || strcmp(name, "underleftrightarrow") == 0 ||
-            strcmp(name, "mathring") == 0) {
+        if (is_math_accent(name)) {
             Item base = parse_optional_script_arg();
             ElementBuilder elem = builder_.element("accent");
             elem.attr("cmd", builder_.createStringItem(full));
@@ -665,7 +840,7 @@ private:
             elem.attr("target", builder_.createStringItem("="));
             return elem.final();
         }
-        if (is_greek_letter(name) || is_math_operator(name) || is_trig_function(name) || is_log_function(name)) {
+        if (is_greek_letter(name) || is_math_operator(name) || is_big_operator(name) || is_trig_function(name) || is_log_function(name)) {
             ElementBuilder elem = builder_.element(is_big_operator(name) || is_trig_function(name) || is_log_function(name) ? "command" : "symbol_command");
             elem.attr("name", builder_.createStringItem(name));
             return elem.final();
@@ -705,10 +880,9 @@ private:
                     return elem.final();
                 }
             }
-            if (position_ < length_ && strchr("=<>|", source_[position_]) != nullptr) {
+            if (position_ < length_) {
                 ElementBuilder elem = builder_.element("not_overlay");
-                elem.attr("target", builder_.createStringItem(source_ + position_, 1));
-                position_++;
+                elem.attr("target", parse_script_arg());
                 return elem.final();
             }
         }
@@ -753,12 +927,99 @@ private:
         return elem.final();
     }
 
+    Item parse_text_arg() {
+        skip_space();
+        size_t begin = 0, end = 0;
+        if (position_ < length_ && source_[position_] == '{' && consume_group_span('{', '}', &begin, &end)) {
+            DirectMathParser nested(ctx_, source_ + begin, end - begin, offset_ + begin, ascii_, true, true);
+            ElementBuilder group = builder_.element("text_group");
+            group.attr("source", builder_.createStringItem(source_ + begin, end - begin));
+            nested.parse_text_into(group);
+            return group.final();
+        }
+        if (position_ < length_ && source_[position_] == '\\') return parse_command();
+        begin = position_;
+        if (position_ < length_) position_++;
+        while (position_ < length_ && ((unsigned char)source_[position_] & 0xC0) == 0x80) position_++;
+        ElementBuilder text = builder_.element("raw_math_text");
+        text.attr("value", builder_.createStringItem(source_ + begin, position_ - begin));
+        return text.final();
+    }
+
+    void parse_text_into(ElementBuilder& parent) {
+        while (position_ < length_) {
+            char ch = source_[position_];
+            if (ch == '%') {
+                while (position_ < length_ && source_[position_] != '\n') position_++;
+            } else if (ch == '{') parent.child(parse_text_arg());
+            else if (ch == '$') {
+                size_t begin = ++position_;
+                // a text box's math switch owns its dollars, including escaped dollars inside math.
+                while (position_ < length_ && source_[position_] != '$') {
+                    if (source_[position_] == '\\' && position_ + 1 < length_) position_++;
+                    position_++;
+                }
+                if (position_ == length_) {
+                    // unmatched text dollars remain recoverable literal input.
+                    parent.child(builder_.createStringItem("$"));
+                    position_ = begin;
+                    continue;
+                }
+                ElementBuilder math = builder_.element("embedded_math");
+                DirectMathParser nested(ctx_, source_ + begin, position_ - begin, offset_ + begin, ascii_);
+                nested.parse_into(math, false);
+                parent.child(math.final());
+                if (position_ < length_) position_++;
+            } else if (ch == '\\') {
+                size_t saved = position_;
+                char name[96], full[104];
+                read_command(name, sizeof(name), full, sizeof(full));
+                const char* accent = nullptr;
+                static const struct {const char* name; const char* accent;} accents[] = {
+                    {"'", "acute"}, {"`", "grave"}, {"^", "hat"}, {"~", "tilde"},
+                    {"=", "bar"}, {".", "dot"}, {"\"", "ddot"}, {"u", "breve"},
+                    {"v", "check"}, {"H", "doubleacute"}, {"r", "mathring"}, {"c", "cedilla"}};
+                for (const auto& entry : accents) if (strcmp(name, entry.name) == 0) accent = entry.accent;
+                if (accent) {
+                    ElementBuilder elem = builder_.element("accent");
+                    elem.attr("cmd", builder_.createStringItem(accent));
+                    elem.attr("base", parse_text_arg());
+                    parent.child(elem.final());
+                } else if (is_literal_text_escape(name) || strcmp(name, " ") == 0 || strcmp(name, ",") == 0) {
+                    parent.child(builder_.createStringItem(strcmp(name, ",") == 0 ? " " : name));
+                } else {
+                    position_ = saved;
+                    parent.child(parse_command());
+                    // spaces after a control word terminate its name; they are not text glue.
+                    if (isalpha((unsigned char)name[0]) && position_ == saved + strlen(full)) skip_space();
+                }
+            } else if (ch == '~' || isspace((unsigned char)ch)) {
+                position_++;
+                if (ch != '~') while (position_ < length_ && isspace((unsigned char)source_[position_])) position_++;
+                parent.child(builder_.createStringItem(" "));
+            } else {
+                size_t begin = position_++;
+                while (position_ < length_ && !strchr("{}$\\~%", source_[position_]) &&
+                       !isspace((unsigned char)source_[position_])) position_++;
+                parent.child(builder_.createStringItem(source_ + begin, position_ - begin));
+            }
+        }
+    }
+
     Item parse_text_command(const char* full) {
         skip_space();
         size_t begin = 0, end = 0;
         ElementBuilder elem = builder_.element("text_command");
         elem.attr("cmd", builder_.createStringItem(full));
         if (consume_group_span('{', '}', &begin, &end)) {
+            if (memchr(source_ + begin, '\\', end - begin) ||
+                memchr(source_ + begin, '$', end - begin) || memchr(source_ + begin, '{', end - begin) ||
+                memchr(source_ + begin, '~', end - begin)) {
+                DirectMathParser nested(ctx_, source_ + begin, end - begin, offset_ + begin, ascii_, true, true);
+                ElementBuilder body = builder_.element("text_group");
+                nested.parse_text_into(body);
+                elem.attr("body", body.final());
+            }
             if (!memchr(source_ + begin, '\\', end - begin)) {
                 elem.attr("content", builder_.createStringItem(source_ + begin, end - begin));
             } else {
@@ -793,6 +1054,10 @@ private:
         skip_space();
         if (position_ >= length_) return builder_.createStringItem(".");
         if (source_[position_] == '{') {
+            if (position_ + 1 < length_ && source_[position_ + 1] == '}') {
+                position_ += 2;
+                return builder_.createStringItem("");
+            }
             // MathLive accepts a braced delimiter spelling after \right while
             // retaining only its first delimiter token.
             size_t begin = ++position_;
@@ -907,6 +1172,14 @@ private:
                 cursor++;
                 continue;
             }
+            if (strcmp(name, "begin") == 0) {
+                cursor = skip_environment_span(end);
+                continue;
+            }
+            if (strcmp(name, "verb") == 0) {
+                cursor = verbatim_end(end);
+                continue;
+            }
             if (brace_depth == 0 && is_infix_fraction_command(name)) {
                 *command_begin = cursor;
                 *command_end = end;
@@ -918,6 +1191,38 @@ private:
             cursor = end;
         }
         return false;
+    }
+
+    size_t skip_environment_span(size_t cursor) {
+        while (cursor < length_ && isspace((unsigned char)source_[cursor])) cursor++;
+        size_t begin = 0, end = 0;
+        size_t after = latex_scan_group_end(source_, length_, cursor, '{', '}', &begin, &end);
+        if (!after) return cursor;
+        char name[96];
+        size_t count = end - begin < sizeof(name) ? end - begin : sizeof(name) - 1;
+        str_copy(name, sizeof(name), source_ + begin, count);
+        size_t body_end = 0;
+        return find_environment_end(name, after, &body_end, nullptr, nullptr);
+    }
+
+    size_t cell_boundary(size_t begin) {
+        for (size_t cursor = begin; cursor < length_;) {
+            char ch = source_[cursor];
+            if (ch == '&') return cursor;
+            if (ch == '%') {
+                while (cursor < length_ && source_[cursor] != '\n') cursor++;
+            } else if (ch == '{') {
+                size_t end = latex_scan_group_end(source_, length_, cursor, '{', '}', nullptr, nullptr);
+                cursor = end ? end : length_;
+            } else if (ch == '\\') {
+                char name[96], full[104];
+                size_t end = latex_scan_command(source_, length_, cursor, name, sizeof(name), full, sizeof(full));
+                if (strcmp(name, "\\") == 0 || strcmp(name, "cr") == 0) return cursor;
+                cursor = strcmp(name, "begin") == 0 ? skip_environment_span(end) :
+                    strcmp(name, "verb") == 0 ? verbatim_end(end) : end;
+            } else cursor++;
+        }
+        return length_;
     }
 
     Item parse_infix_fraction_side(size_t begin, size_t end, bool allow_infix) {
@@ -940,6 +1245,11 @@ private:
         ElementBuilder fraction = builder_.element("infix_frac");
         fraction.attr("cmd", builder_.createStringItem(command));
         fraction.attr("numer", parse_infix_fraction_side(position_, command_begin, false));
+        if (strcmp(command, "\\above") == 0) {
+            position_ = command_end;
+            fraction.attr("thickness", parse_dimension_arg());
+            command_end = position_;
+        }
         fraction.attr("denom", parse_infix_fraction_side(command_end, length_, false));
         parent.child(fraction.final());
         position_ = length_;
@@ -999,6 +1309,48 @@ private:
         return length_;
     }
 
+    void parse_cd_into(ElementBuilder& parent) {
+        bool vertical_cell = false;
+        while (position_ < length_) {
+            skip_space();
+            if (position_ >= length_) break;
+            if (starts_with(source_, length_, position_, "\\\\")) {
+                position_ += 2;
+                parent.child(builder_.createSymbolItem("row_sep"));
+                vertical_cell = false;
+            } else if (source_[position_] == '@' && position_ + 1 < length_) {
+                size_t begin = position_++;
+                char direction = source_[position_++];
+                bool vertical = direction == 'A' || direction == 'V' || direction == '|';
+                if (!vertical || vertical_cell) parent.child(builder_.createSymbolItem("col_sep"));
+                if (vertical && vertical_cell) parent.child(builder_.createSymbolItem("col_sep"));
+                ElementBuilder arrow = builder_.element("cd_arrow");
+                arrow.attr("direction", builder_.createStringItem(&direction, 1));
+                if (strchr("<>AV", direction)) {
+                    static const char* attrs[] = {"upper", "lower"};
+                    for (const char* attr : attrs) {
+                        size_t label_begin = position_;
+                        while (position_ < length_ && source_[position_] != direction) {
+                            if (source_[position_] == '{') {
+                                size_t end = latex_scan_group_end(source_, length_, position_, '{', '}', nullptr, nullptr);
+                                position_ = end ? end : length_;
+                            } else if (source_[position_] == '\\') {
+                                char name[96], full[104];
+                                position_ = latex_scan_command(source_, length_, position_, name, sizeof(name), full, sizeof(full));
+                            } else position_++;
+                        }
+                        arrow.attr(attr, parse_group_contents(label_begin, position_));
+                        if (position_ < length_) position_++;
+                    }
+                }
+                arrow.attr("source", builder_.createStringItem(source_ + begin, position_ - begin));
+                parent.child(arrow.final());
+                if (!vertical) parent.child(builder_.createSymbolItem("col_sep"));
+                vertical_cell = vertical;
+            } else parent.child(parse_atom_with_scripts());
+        }
+    }
+
     Item parse_environment() {
         skip_space();
         size_t name_begin = 0, name_end = 0;
@@ -1028,7 +1380,8 @@ private:
             if (consume_group_span('[', ']', &begin, &end))
                 elem.attr("alignment", builder_.createStringItem(source_ + begin, end - begin));
         }
-        if (strcmp(env_name, "array") == 0 && position_ < length_ && source_[position_] == '{') {
+        if ((strcmp(env_name, "array") == 0 || strcmp(env_name, "subarray") == 0) &&
+            position_ < length_ && source_[position_] == '{') {
             size_t columns_begin = 0, columns_end = 0;
             if (consume_group_span('{', '}', &columns_begin, &columns_end)) {
                 elem.attr("columns", builder_.createStringItem(source_ + columns_begin,
@@ -1049,7 +1402,8 @@ private:
         size_t body_len = body_end >= position_ ? body_end - position_ : 0;
         ElementBuilder body = builder_.element("env_body");
         DirectMathParser nested(ctx_, body_source, body_len, offset_ + position_, ascii_);
-        nested.parse_into(body, true);
+        if (strcmp(env_name, "CD") == 0) nested.parse_cd_into(body);
+        else nested.parse_into(body, true);
         elem.attr("body", body.final());
         position_ = after_end;
         return elem.final();
@@ -1066,8 +1420,10 @@ private:
                 children.append(builder_.createSymbolItem("col_sep"));
                 continue;
             }
-            if (matrix_mode && starts_with(source_, length_, position_, "\\\\")) {
-                position_ += 2;
+            if (matrix_mode && (starts_with(source_, length_, position_, "\\\\") ||
+                (starts_with(source_, length_, position_, "\\cr") &&
+                 (position_ + 3 == length_ || !isalpha((unsigned char)source_[position_ + 3]))))) {
+                position_ += source_[position_ + 1] == '\\' ? 2 : 3;
                 skip_space();
                 size_t begin = 0, end = 0;
                 if (position_ < length_ && source_[position_] == '[' &&
@@ -1076,6 +1432,26 @@ private:
                     separator.attr("gap", builder_.createStringItem(source_ + begin, end - begin));
                     children.append(separator.final());
                 } else children.append(builder_.createSymbolItem("row_sep"));
+                continue;
+            }
+            if (matrix_mode) {
+                if (source_[position_] == '\\') {
+                    char name[96], full[104];
+                    latex_scan_command(source_, length_, position_, name, sizeof(name), full, sizeof(full));
+                    if (strcmp(name, "hline") == 0 || strcmp(name, "hdashline") == 0) {
+                        // row rules are alignment material, outside the following cell's math list.
+                        children.append(parse_command());
+                        continue;
+                    }
+                }
+                size_t end = cell_boundary(position_);
+                DirectMathParser cell(ctx_, source_ + position_, end - position_, offset_ + position_, ascii_);
+                ElementBuilder contents = builder_.element("group");
+                cell.parse_into(contents, false);
+                // each cell is its own math list, including infix fractions and declarations.
+                Element* parsed_cell = contents.final().element;
+                for (int64_t i = 0; i < parsed_cell->length; i++) children.append(parsed_cell->items[i]);
+                position_ = end;
                 continue;
             }
             Item child = parse_atom_with_scripts();

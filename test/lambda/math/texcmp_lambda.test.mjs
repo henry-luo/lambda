@@ -98,3 +98,32 @@ test('native math comparison paints style choices, sizes and AMS environments', 
   assert.ok(png('VerticalSpacing').height > 90, 'large superscripts must not clip');
   assert.ok(png('Alignedat').height > 130, 'alignment rows need struts and jot');
 });
+
+test('native math comparison paints formerly missing constructs', {
+  skip: missing.length ? `missing tools: ${missing.join(', ')}` : false,
+}, async (t) => {
+  const names = ['Raisebox', 'Reflectbox', 'CD', 'ExtensibleArrows', 'StrikeThrough',
+    'StrikeThroughColor', 'Arrays', 'FractionTest', 'HorizontalBrackets', 'StretchyAccent',
+    'LowerAccent', 'TextWithMath', 'TextStacked', 'AccentsText', 'Verb', 'Colorbox',
+    'OpLimits', 'Integrands', 'Mod', 'Mapsfrom', 'OperatorName', 'Tag', 'Phase', 'PrimeSuper'];
+  const dir = await compareCases(t, names);
+  const svg = (name) => fs.readFileSync(path.join(dir, `cases/${name}/lambda.svg`), 'utf8');
+  const paint = (name) => paintedText(svg(name)).join('');
+  for (const name of names.filter((n) => n !== 'Verb')) assert.doesNotMatch(paint(name),
+    /raisebox|reflectbox|xRightarrow|xhookrightarrow|xtwoheadrightarrow|cancel|hline|subarray|genfrac|overbracket|underbracket|substack|intop|oiint|mapsfrom|operatorname|phase|\\textbf/);
+  assert.equal((svg('Reflectbox').match(/scale\(-1 1\)/g) || []).length, 4);
+  assert.match(svg('StrikeThrough'), /data-math-kind="xcancel"/);
+  assert.match(svg('StrikeThrough'), /data-math-kind="sout"/);
+  assert.match(svg('Arrays'), /stroke-dasharray="150 100"/);
+  assert.match(svg('ExtensibleArrows'), /data-math-kind="extensible-arrow"/);
+  assert.ok(paint('HorizontalBrackets').includes('note') && paint('HorizontalBrackets').includes('label'));
+  assert.equal(paint('CD'), 'A←aB→bCcdDE→F');
+  assert.doesNotMatch(paint('TextWithMath'), /\$/);
+  assert.ok(paint('Verb').includes('&amp;'), 'verbatim ampersands must survive matrix parsing');
+  assert.match(svg('Colorbox'), /fill="red" stroke="blue"/);
+  for (const name of names) {
+    const png = PNG.sync.read(fs.readFileSync(path.join(dir, `cases/${name}/lambda.png`)));
+    const ink = png.data.some((v, i) => i % 4 !== 3 && v < 128);
+    assert.ok(ink && png.width > 10 && png.height > 10, `${name} must paint visible native pixels`);
+  }
+});

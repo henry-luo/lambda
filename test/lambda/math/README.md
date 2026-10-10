@@ -114,6 +114,17 @@ accept `[l]`, `[c]`, or `[r]` column alignment. Matrix rows use minimum strut
 dimensions and AMS line spacing. Unbraced kern dimensions stop at their unit,
 preserving adjacent variables and scripts.
 
+Text boxes retain nested text commands and `$...$` math; `\verb` preserves its
+delimited source, including ampersands inside arrays. Raised, reflected, and
+vertically centered boxes, cancellation/strikeout, phase and actuarial angles,
+extensible arrows, upper/lower brackets and accents, primes, modular operators,
+and equation tags have dedicated rendering. Arrays retain solid/dashed rules,
+subarrays and substacks, and scope infix fractions to individual cells. `CD`
+diagrams retain horizontal/vertical arrows, equalities, and labels. These command
+forms follow [KaTeX's supported functions](https://katex.org/docs/supported).
+Tag placement, line wrapping, and font/spacing parity remain visual review items;
+nonprinting controls such as `\nonumber` and `\allowbreak` do not paint their names.
+
 Size and alignment behavior follows the upstream
 [size ladder](https://github.com/KaTeX/KaTeX/blob/main/src/Options.ts) and
 [array implementation](https://github.com/KaTeX/KaTeX/blob/main/src/environments/array.ts).

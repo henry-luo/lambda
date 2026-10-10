@@ -14,6 +14,9 @@ pub fn painted_text(node) {
     else ""
 }
 
+pub fn nodes(node, tag) => if (not (node is element)) [] else
+    [*if (name(node) == tag) [node] else [], *[for (child in content(node), found in nodes(child,tag)) found]]
+
 // Resolve the renderer's translate/scale groups so tests inspect painted baselines.
 pub fn geometry(node, x = 0.0, y = 0.0, sx = 1.0, sy = 1.0) {
     if (not (node is element)) []

@@ -156,7 +156,9 @@ fn is_unit_char(ch) {
 pub fn parse_rows(body, i, n, rows, current_row, current_cell) {
     if (i >= n) {
         // a final row terminator does not introduce another empty matrix row.
-        if (len(rows) > 0 and len(current_row) == 0 and len(current_cell) == 0) rows
+        let rules = [for (item in current_cell where item is element and name(item) == 'array_rule') item];
+        if (len(rows) > 0 and len(current_row) == 0 and len(current_cell) == len(rules))
+            [*slice(rows,0,len(rows) - 1), {*:rows[len(rows) - 1], trailing_rules:rules}]
         else rows ++ [make_row(current_row ++ [make_cell(current_cell)])]
     } else if (body[i] == 'row_sep' or body[i] == 'col_sep' or
         (body[i] is element and name(body[i]) == 'row_sep')) {
