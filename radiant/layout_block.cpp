@@ -1417,7 +1417,7 @@ static const char* resolve_pseudo_generated_content(LayoutContext* lycon,
 }
 
 void layout_update_pseudo_content_with_counters(LayoutContext* lycon,
-                                                DomElement* pseudo_element) {
+                                                DomElement* pseudo_element, bool apply_counters) {
     if (!lycon || !lycon->counter_context || !pseudo_element ||
         !pseudo_element->parent || !pseudo_element->parent->is_element()) {
         return;
@@ -1432,14 +1432,17 @@ void layout_update_pseudo_content_with_counters(LayoutContext* lycon,
     PseudoElementType pseudo = is_before ? PSEUDO_ELEMENT_BEFORE : PSEUDO_ELEMENT_AFTER;
     StyleTree* style = origin->pseudo_style(
         is_before ? PSEUDO_STYLE_BEFORE : PSEUDO_STYLE_AFTER);
-    apply_pseudo_counter_ops(lycon, style);
+    if (apply_counters) apply_pseudo_counter_ops(lycon, style);
     const char* content = dom_element_get_pseudo_element_content_with_counters(
-        origin, pseudo, lycon->counter_context, lycon->pass_arena);
+        origin, pseudo, lycon->counter_context, lycon->pass_arena,
+        &lycon->counter_context->quote_depth);
     if (!content) content = dom_element_get_pseudo_element_content(origin, pseudo);
     if (!content) content = "";
     DomNode* first = pseudo_element->first_child;
     if (first && first->is_text()) {
         DomText* text_node = lam::dom_as<DOM_NODE_TEXT>(first);
+        // unchanged generated text must not grow document-owned string storage on every layout.
+        if (text_node->text && strcmp(text_node->text, content) == 0) return;
         size_t content_len = strlen(content);
         String* text_string = dom_document_create_string(
             pseudo_element->doc, content, content_len);
@@ -9775,30 +9778,12 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
             return;
         }
     }
-    // CSS Counter handling (CSS 2.1 Section 12.4)
-    if (lycon->counter_context) {
-        counter_push_scope(lycon->counter_context);
-        // OL/UL/MENU/DIR implicit counter-reset: list-item (CSS 2.1 §12.5)
-        setup_list_container_counters(lycon, block, dom_elem);
-        if (block->blk && block->block_mut()->counter_reset) {
-            counter_reset(lycon->counter_context, block->block()->counter_reset);
-            compute_reversed_counter_initial(lycon, dom_elem);
-        }
-        if (block->blk && block->block_mut()->counter_increment) {
-            counter_increment(lycon->counter_context, block->block()->counter_increment);
-        }
-        if (block->blk && block->block_mut()->counter_set) {
-            counter_set(lycon->counter_context, block->block()->counter_set);
-        }
-        // CSS 2.1 Section 12.5: List markers use implicit "list-item" counter
-        if (display.outer == CSS_VALUE_LIST_ITEM || display.list_item) {
-            process_list_item(lycon, block, elmt, dom_elem, display);
-            // CSS 2.1 §8.3.1: Ensure list items have BoundaryProp allocated so
-            // wrappers) fires incorrectly, and parent-child collapse cannot
-            if (!block->bound) {
-                block->ensure_boundary(lycon);
-            }
-        }
+    LayoutCounterScope counter_scope;
+    if (!counter_scope.enter(lycon, block, dom_elem, display)) {
+        log_error("counter scope: cannot allocate block counter frame");
+        layout_block_restore_parent_context(lycon, pa_block, pa_font, pa_line);
+        log_leave();
+        return;
     }
     float original_margin_top = 0.0f;
     bool sibling_margin_collapsed_before_layout = false;
@@ -10822,10 +10807,7 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
             layout_sticky_positioned(lycon, block);
         }
     }
-    // propagate_resets=true for regular elements (sibling visibility per CSS 2.1 §12.4.1)
-    if (lycon->counter_context) {
-        counter_pop_scope_propagate(lycon->counter_context, true);
-    }
+    counter_scope.close();
     if (!has_custom_layout) {
         radiant::SizeF result = radiant::size_f(block->width, block->height);
         radiant::layout_pass_cache_store(lycon, dom_elem, known_dims, result, "BLOCK");

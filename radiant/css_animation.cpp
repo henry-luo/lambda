@@ -2456,6 +2456,30 @@ bool css_animation_needs_computed_sample(DomElement* element, CssPropertyCode pr
     return needs_sample;
 }
 
+void css_motion_sample_existing(DomElement* element, LayoutContext* lycon) {
+    DomDocument* document = element ? element->doc.get() : nullptr;
+    DocState* state = document ? (DocState*)document->state : nullptr;
+    AnimationScheduler* scheduler = state ? state->animation_scheduler : nullptr;
+    if (!scheduler || document->disable_css_animations) return;
+    for (AnimationInstance* instance = scheduler->first; instance; instance = instance->next) {
+        if (instance->target != element || instance->scheduler_removed) continue;
+        if (instance->type == ANIM_CSS_ANIMATION && instance->state) {
+            CssAnimState* sample = (CssAnimState*)instance->state;
+            css_animation_refresh_value_samples(sample, lycon);
+            bool suppressed = sample->suppress_events;
+            sample->suppress_events = true;
+            animation_instance_sample(instance, scheduler->current_time, true);
+            sample->suppress_events = suppressed;
+        } else if (instance->type == ANIM_CSS_TRANSITION) {
+            animation_instance_sample(instance, scheduler->current_time, true);
+        }
+    }
+    if (element->blk) {
+        lycon->block.given_width = element->block()->given_width;
+        lycon->block.given_height = element->block()->given_height;
+    }
+}
+
 void css_animation_resolve(DomElement* element, LayoutContext* lycon) {
     if (!element || !lycon || !lycon->ui_context) return;
     DomDocument* doc = lycon->ui_context->document;

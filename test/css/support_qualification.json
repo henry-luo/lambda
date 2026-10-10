@@ -1,0 +1,49 @@
+{
+  "version": 1,
+  "families": [
+    {
+      "properties": [
+        "container",
+        "container-name",
+        "container-type"
+      ],
+      "qualification": "partial",
+      "scope": "size/inline-size names, shorthand winners, browsing mutation and independent-view measurement/stabilization",
+      "evidence": [
+        "test/ui/css_container_size.json",
+        "test/ui/css_container_owner_values.json",
+        "test/ui/css_container_conditions.json",
+        "test/ui/css_container_motion.json",
+        "test/test_view_tree_model_gtest.cpp#SizeContainerConditionsAndUnitsUseIndependentEditionGeometry",
+        "test/test_view_tree_model_gtest.cpp#SizeContainerQueryMathUsesEditionOwnerFontsAndVariables",
+        "test/test_view_tree_model_gtest.cpp#SizeContainerFragmentsRetainTheUnfragmentedContentExtent",
+        "test/test_view_tree_model_gtest.cpp#SizeContainerPassBudgetsFailBeforeCommitAndResetDropsMeasurements",
+        "test/test_pdf_render_visual_gtest.cpp#SizeContainersMatchExplicitGeometryInFlatAndFragmentedExports"
+      ],
+      "limits": "broader containment and consumers; pseudo/shadow rendering; complete conditional-motion lifecycle; resource-pressure controls; style/scroll-state queries"
+    },
+    {
+      "properties": [
+        "contain"
+      ],
+      "qualification": "partial",
+      "scope": "validated keyword sets, computed inheritance/defaulting, browsing layout/paint formatting contexts, horizontal column end-gap/margin breaks, browsing/independent counter and quote scoping, flex/grid source-order generated content and stretch-trial rollback, zero-level stacking and rounded descendant clip/hit agreement; PNG/SVG/PDF 1x/2x",
+      "evidence": [
+        "test/ui/css_containment_boxes.json",
+        "test/ui/css_containment_values.json",
+        "test/ui/css_containment_stacking.json",
+        "test/ui/css_containment_columns.json",
+        "test/test_css_animation_gtest.cpp#ContainmentRejectsMixedDuplicateAndInvalidTokens",
+        "test/test_css_animation_gtest.cpp#ContainmentInheritsComputedModesWithoutImplicitContainerContainment",
+        "test/test_rdt_vector_gtest.cpp#PaintContainmentClipsWithoutAllocatingAScrollPane",
+        "test/test_rdt_vector_gtest.cpp#EllipticalCornersRetainTheSamePaintAndHitRegion",
+        "test/ui/css_containment_style.json",
+        "test/test_view_tree_model_gtest.cpp#StyleCounterScopesKeepReadsAndIsolateNestedMutations",
+        "test/test_view_tree_model_gtest.cpp#CounterMeasurementCheckpointsRestoreValuesResetsAndUnfinishedFrames",
+        "test/test_view_tree_model_gtest.cpp#StyleContainmentScopesCountersAndQuotesInIndependentViews",
+        "test/test_pdf_render_visual_gtest.cpp#StyleContainedGeneratedTextMatchesLiteralPseudosAcrossOutputs"
+      ],
+      "limits": "complete stacking/depth ordering and non-principal/table/ruby applicability; complete intrinsic-size/visibility interactions; secondary-view geometry/paint containment"
+    }
+  ]
+}

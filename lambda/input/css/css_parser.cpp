@@ -687,6 +687,7 @@ static CssValue* css_parse_value_at(const CssToken* tokens, int* pos, int end, P
 
 static CssIdentifierGrammar css_declaration_identifier_grammar(const char* property, int index, int count) {
     if (strcmp(property, "page") == 0) return CSS_IDENT_PAGE;
+    if (strcmp(property, "container-name") == 0) return CSS_IDENT_CUSTOM;
     if (strcmp(property, "counter-reset") == 0 || strcmp(property, "counter-increment") == 0 ||
         strcmp(property, "counter-set") == 0 || (strcmp(property, "string-set") == 0 && index == 0 && count > 1))
         return CSS_IDENT_CUSTOM;
@@ -4701,7 +4702,7 @@ static bool css_property_value_token_span(const CssToken* tokens, size_t count,
     return true;
 }
 
-CssDeclaration* css_parse_property_value_declaration(const char* property, size_t property_length,
+static CssDeclaration* css_parse_value_text_fragment(const char* property, size_t property_length,
     const char* value, size_t value_length, Pool* pool) {
     if (!property || !value || !pool) return nullptr;
     size_t count = 0;
@@ -4715,11 +4716,22 @@ CssDeclaration* css_parse_property_value_declaration(const char* property, size_
     bool custom = property_length > 2 && property[0] == '-' && property[1] == '-';
     if (!custom && memchr(property, '\0', property_length)) valid = false;
     int pos = 0;
-    CssDeclaration* declaration = valid && property_length
+    CssDeclaration* declaration = valid
         ? css_parse_named_declaration_value(tokens, &pos, (int)count, pool,
             false, strview_init(property, property_length)) : nullptr;
     css_token_array_release(pool, tokens, count);
     return declaration;
+}
+
+CssDeclaration* css_parse_property_value_declaration(const char* property, size_t property_length,
+    const char* value, size_t value_length, Pool* pool) {
+    return property_length ? css_parse_value_text_fragment(property, property_length,
+        value, value_length, pool) : nullptr;
+}
+
+CssValue* css_parse_component_value_text(const char* text, size_t length, Pool* pool) {
+    CssDeclaration* parsed = css_parse_value_text_fragment("", 0, text, length, pool);
+    return parsed ? parsed->value : nullptr;
 }
 
 // snapshot payloads into the recipient's lifetime, reparsing only uncloneable value trees.

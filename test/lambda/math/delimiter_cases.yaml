@@ -1,0 +1,6 @@
+# Exercise CMEX assemblies beyond the four finite delimiter designs.
+TallParentheses: '\left(\vphantom{\rule{0pt}{60pt}}\right)'
+TallBrackets: '\left[\vphantom{\rule{0pt}{60pt}}\right]'
+TallBraces: '\left\{\vphantom{\rule{0pt}{60pt}}\right\}'
+FiniteAngles: '\left\langle\vphantom{\rule{0pt}{60pt}}\right\rangle'
+PointRule: '\rule{10pt}{2pt}'

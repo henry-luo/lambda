@@ -1,0 +1,43 @@
+<!doctype html>
+<!-- bounded higher-level size-query cases from WPT css/css-conditional/container-queries/query-evaluation.html -->
+<style>html,body {margin:0;} #container {width:1px;height:0;container-type:size;} .target {width:20px;height:1px;}
+@container (width) {#q0 {width:100px;}}
+@container (height) {#q1 {width:100px;}}
+@container (unknown) {#q2 {width:100px;}}
+@container unknown(width) {#q3 {width:100px;}}
+@container ((width)) {#q4 {width:100px;}}
+@container ((height)) {#q5 {width:100px;}}
+@container ((unknown)) {#q6 {width:100px;}}
+@container ((((width)))) {#q7 {width:100px;}}
+@container ((((height)))) {#q8 {width:100px;}}
+@container ((((unknown)))) {#q9 {width:100px;}}
+@container (not (width)) {#q10 {width:100px;}}
+@container (not (height)) {#q11 {width:100px;}}
+@container (not (unknown)) {#q12 {width:100px;}}
+@container (not unknown(width)) {#q13 {width:100px;}}
+@container ((width) and (width)) {#q14 {width:100px;}}
+@container ((width) and (width) and (width)) {#q15 {width:100px;}}
+@container ((height) and (height)) {#q16 {width:100px;}}
+@container ((height) and (width) and (width)) {#q17 {width:100px;}}
+@container ((width) and (height) and (width)) {#q18 {width:100px;}}
+@container ((width) and (width) and (height)) {#q19 {width:100px;}}
+@container ((unknown) and (width) and (width)) {#q20 {width:100px;}}
+@container ((width) and (unknown) and (width)) {#q21 {width:100px;}}
+@container ((width) and (width) and (unknown)) {#q22 {width:100px;}}
+@container ((width) or (width)) {#q23 {width:100px;}}
+@container ((width) or (width) or (width)) {#q24 {width:100px;}}
+@container ((height) or (height)) {#q25 {width:100px;}}
+@container ((height) or (width) or (width)) {#q26 {width:100px;}}
+@container ((width) or (height) or (width)) {#q27 {width:100px;}}
+@container ((width) or (width) or (height)) {#q28 {width:100px;}}
+@container ((unknown) or (width) or (width)) {#q29 {width:100px;}}
+@container ((width) or (unknown) or (width)) {#q30 {width:100px;}}
+@container ((width) or (width) or (unknown)) {#q31 {width:100px;}}
+@container ((unknown) or (height) or (width)) {#q32 {width:100px;}}
+@container (not ((width) and (width))) {#q33 {width:100px;}}
+@container (not ((width) and (height))) {#q34 {width:100px;}}
+@container ((width) and (not ((height) or (width)))) {#q35 {width:100px;}}
+@container ((height) or (not ((height) and (width)))) {#q36 {width:100px;}}
+@container ((height) or ((height) and (width))) {#q37 {width:100px;}}
+</style>
+<div id="container"><div id="q0" class="target"></div><div id="q1" class="target"></div><div id="q2" class="target"></div><div id="q3" class="target"></div><div id="q4" class="target"></div><div id="q5" class="target"></div><div id="q6" class="target"></div><div id="q7" class="target"></div><div id="q8" class="target"></div><div id="q9" class="target"></div><div id="q10" class="target"></div><div id="q11" class="target"></div><div id="q12" class="target"></div><div id="q13" class="target"></div><div id="q14" class="target"></div><div id="q15" class="target"></div><div id="q16" class="target"></div><div id="q17" class="target"></div><div id="q18" class="target"></div><div id="q19" class="target"></div><div id="q20" class="target"></div><div id="q21" class="target"></div><div id="q22" class="target"></div><div id="q23" class="target"></div><div id="q24" class="target"></div><div id="q25" class="target"></div><div id="q26" class="target"></div><div id="q27" class="target"></div><div id="q28" class="target"></div><div id="q29" class="target"></div><div id="q30" class="target"></div><div id="q31" class="target"></div><div id="q32" class="target"></div><div id="q33" class="target"></div><div id="q34" class="target"></div><div id="q35" class="target"></div><div id="q36" class="target"></div><div id="q37" class="target"></div></div>

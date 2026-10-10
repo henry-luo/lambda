@@ -1,0 +1,14 @@
+<!doctype html><style>
+html,body{margin:0;background:white}
+#paint{margin:20px;width:80px;height:40px;padding:10px;border:5px solid blue}
+#overflow{width:140px;height:20px;background:red}
+#layout{margin-left:20px;width:80px;background:green}
+#float{float:left;width:20px;height:30px;background:red}
+#controls{position:absolute;top:180px;left:20px}
+#rounded{position:absolute;left:200px;top:20px;width:60px;height:40px;border:5px solid blue;border-radius:20px;contain:paint}#round-overflow{position:absolute;left:-15px;top:-15px;width:120px;height:80px;background:red}</style><div id="paint" style="contain:paint"><div id="overflow"></div></div>
+<div id="layout" style="contain:layout"><div id="float"></div></div>
+<div id="rounded"><div id="round-overflow"></div></div><div id="controls"><button id="remove">remove</button></div>
+<script>document.getElementById('remove').addEventListener('click',function(){
+document.getElementById('paint').style.removeProperty('contain');
+document.getElementById('layout').style.removeProperty('contain');
+});</script>

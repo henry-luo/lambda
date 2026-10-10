@@ -410,7 +410,7 @@ TEST_F(StringBufTest, TestStringbufVeryLargeFormat) {
     memset(large_input, 'A', 999);
     large_input[999] = '\0';
 
-    stringbuf_append_format(sb, "Large string: %s", large_input);
+    ASSERT_TRUE(stringbuf_append_format(sb, "Large string: %s", large_input));
 
     ASSERT_GT(sb->str->len, 1000) << "resulting string should be very large";
     ASSERT_EQ(strncmp(sb->str->chars, "Large string: AAA", 17), 0) << "should start with expected prefix";
@@ -424,7 +424,8 @@ TEST_F(StringBufTest, TestStringbufFormatNullFormat) {
     StringBuf *sb = stringbuf_new(test_pool);
 
     stringbuf_append_str(sb, "Before");
-    stringbuf_append_format(sb, nullptr);  // Should be handled gracefully
+    ASSERT_FALSE(stringbuf_append_format(sb, nullptr));
+    ASSERT_TRUE(stringbuf_append_format(sb, "%s", ""));
     stringbuf_append_str(sb, "After");
 
     ASSERT_STREQ(sb->str->chars, "BeforeAfter") << "null format should not affect other appends";
@@ -454,7 +455,7 @@ TEST_F(StringBufTest, TestStringbufLengthOverflowProtection) {
     stringbuf_append_str(sb, "This should be rejected");
     ASSERT_EQ(sb->length, huge_len) << "string append should be rejected due to overflow";
 
-    stringbuf_append_format(sb, "Number: %d", 42);
+    ASSERT_FALSE(stringbuf_append_format(sb, "Number: %d", 42));
     ASSERT_EQ(sb->length, huge_len) << "format append should be rejected due to overflow";
 
     sb->length = old_length;

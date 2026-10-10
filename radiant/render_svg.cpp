@@ -789,7 +789,10 @@ static void render_bound_svg(SvgRenderContext* ctx, ViewBlock* view) {
         // When border-radius is present, clip border polygons to the outer
         // rounded rect — matching the raster path's radius_clip approach.
         bool has_radius = svg_has_border_radius(border);
-        if (has_radius) {
+        bool shared_border = has_radius && render_paint_boundary_emit_solid_border(
+            svg_active_paint_list(ctx), border, {x, y, width, height});
+        if (shared_border) svg_lower_paint_list(ctx);
+        if (has_radius && !shared_border) {
             char clip_id[64];
             // retained IDs keep exported references independent of allocator addresses (D4.5.1v4).
             str_fmt(clip_id, sizeof(clip_id), "border-clip-%u", static_cast<View*>(view)->id);
@@ -802,12 +805,12 @@ static void render_bound_svg(SvgRenderContext* ctx, ViewBlock* view) {
             strbuf_append_format(ctx->svg_content, "<g clip-path=\"url(#%s)\">\n", clip_id);
         }
 
-        for (int i = 0; i < 4; i++) {
+        for (int i = 0; !shared_border && i < 4; i++) {
             svg_emit_border_side(ctx, border->styles[i], border->colors[i],
                 x, y, width, height, bwt, bwr, bwb, bwl, i);
         }
 
-        if (has_radius) {
+        if (has_radius && !shared_border) {
             svg_indent(ctx);
             strbuf_append_str(ctx->svg_content, "</g>\n");
         }
@@ -1208,10 +1211,10 @@ static void svg_cb_end_transform(RenderContext* vctx) {
 }
 
 static bool svg_cb_begin_clip(RenderContext* vctx, ViewElement* element,
-                              float abs_x, float abs_y) {
+                              float abs_x, float abs_y, RenderClipKind kind) {
     SvgRenderContext* ctx = (SvgRenderContext*)vctx;
-    if (!ctx || !render_clip_push_vector_css(svg_active_paint_list(ctx), element,
-            abs_x, abs_y)) return false;
+    if (!ctx || !render_clip_push_vector(svg_active_paint_list(ctx), element,
+            abs_x, abs_y, kind)) return false;
     svg_lower_paint_list(ctx);
     return true;
 }

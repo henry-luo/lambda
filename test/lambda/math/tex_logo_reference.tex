@@ -1,0 +1,17 @@
+% Independent oracle: use the comparison harness's reference_environment for local TeX packages.
+% Run pdflatex -interaction=nonstopmode -output-directory=temp test/lambda/math/tex_logo_reference.tex
+% showbox intentionally reports ! OK and a nonzero exit status.
+\documentclass[10pt]{article}
+\input{test/lambda/math/texcmp_preamble.tex}
+\showboxbreadth=1000 \showboxdepth=100 \tracingonline=1
+\def\audit#1#2{\setbox0=\hbox{${#2}$}\immediate\write16{CASE:#1 WIDTH:\the\wd0 HEIGHT:\the\ht0 DEPTH:\the\dp0}\showbox0}
+\begin{document}
+\audit{logo}{\KaTeX}
+\audit{logo-display}{\displaystyle\KaTeX}
+\audit{logo-script}{\scriptstyle\KaTeX}
+\audit{logo-scriptscript}{\scriptscriptstyle\KaTeX}
+\audit{logo-large}{\large\KaTeX}
+\audit{logo-mathbf}{\mathbf{\KaTeX}}
+\audit{logo-mathsf}{\mathsf{\KaTeX}}
+\audit{logo-textbf}{\textbf{\KaTeX}}
+\end{document}

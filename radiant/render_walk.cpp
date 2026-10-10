@@ -134,7 +134,7 @@ static bool render_walk_block_begin(RenderPaintBlockDriver* ctx, ViewBlock* bloc
     }
 
     p->opened_clip = backend->begin_clip && backend->end_clip &&
-        backend->begin_clip(backend->ctx, block, state->x, state->y);
+        backend->begin_clip(backend->ctx, block, state->x, state->y, RENDER_CLIP_SHAPE);
 
     PaintEffectGroup group = {};
     bool has_effect_group = render_walk_block_effect_group(block, state->x, state->y, &group);
@@ -202,6 +202,9 @@ static double render_walk_block_paint_children(RenderPaintBlockDriver* ctx, View
     RenderBackend* backend = driver->backend;
     RenderWalkState* state = driver->state;
     if (block->first_child || block->custom_layout_paint_prop()) {
+        // overflow and containment clip descendants after the box's own boundary paint.
+        bool content_clip = backend->begin_clip && backend->end_clip &&
+            backend->begin_clip(backend->ctx, block, state->x, state->y, RENDER_CLIP_CONTENTS);
         if (backend->begin_block_children) {
             backend->begin_block_children(backend->ctx, block);
         }
@@ -245,6 +248,7 @@ static double render_walk_block_paint_children(RenderPaintBlockDriver* ctx, View
         if (backend->end_block_children) {
             backend->end_block_children(backend->ctx, block);
         }
+        if (content_clip) backend->end_clip(backend->ctx);
     }
     return 0.0;
 }
@@ -324,7 +328,7 @@ void render_walk_inline(RenderBackend* backend, RenderWalkState* state, ViewSpan
     // Inline image wrappers carry graphicx trim/clip on their own element.
     bool opened_clip = backend->begin_clip && backend->end_clip &&
         backend->begin_clip(backend->ctx, span,
-            state->x + span->x, state->y + span->y);
+            state->x + span->x, state->y + span->y, RENDER_CLIP_SHAPE);
 
     if (span->first_child) {
         PaintEffectGroup group = {};

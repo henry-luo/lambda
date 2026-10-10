@@ -126,6 +126,9 @@ function render_case(item, opts) {
     const rendered = render_lambda_math(`${definitions}\n${item.tex}`, {
       display: !!item.display, lambda: opts.lambda, timeout: opts.timeout,
       script: path.join(dir, 'formula.ls'),
+      base_uri: dir,
+      // The reference's 10pt em must also govern Lambda's authored pt/bp lengths.
+      font_size: 10 * 96 / 72.27,
     });
     fs.writeFileSync(path.join(dir, 'lambda.json'), JSON.stringify(rendered, null, 2) + '\n');
     if (rendered.error !== 'no-error') throw new Error(rendered.error || 'Lambda returned no rendering');
@@ -137,7 +140,7 @@ function render_case(item, opts) {
       return Math.max(1, Math.ceil(Number(match[1]) * opts.pixels)) + 64;
     });
     fs.writeFileSync(path.join(dir, 'lambda.html'), `<!doctype html><html><head><meta charset="utf-8">
-<style>html,body{margin:0;background:white;color:black;}body{padding:32px;font-size:${opts.pixels}px;}svg{display:block;}</style>
+<style>html,body{margin:0;background:white;color:black;}body{padding:32px;font-size:${opts.pixels}px;}svg{display:block;font-size:${opts.pixels}px!important;}</style>
 </head><body>${rendered.html}</body></html>`);
     command(opts.lambda, ['--no-log', 'render', path.join(dir, 'lambda.html'), '-o',
       path.join(dir, 'lambda.raw.png'), '-vw', String(size[0]), '-vh', String(size[1])],

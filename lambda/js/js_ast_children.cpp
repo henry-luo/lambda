@@ -544,3 +544,20 @@ bool js_ast_index_can_suspend(const AstIndex* index, AstNodeId root_id,
     }
     return false;
 }
+
+// Check if an expression subtree contains an optional chain (?.),
+// meaning the result may be undefined due to short-circuiting.
+bool js_ast_has_optional_chain(JsAstNode* node) {
+    if (!node) return false;
+    if (node->node_type == AST_NODE_MEMBER_EXPR || node->node_type == AST_NODE_INDEX_EXPR) {
+        JsMemberNode* m = (JsMemberNode*)node;
+        if (m->optional) return true;
+        return m->object && node->source_span.start_byte == m->object->source_span.start_byte && js_ast_has_optional_chain(m->object);
+    }
+    if (node->node_type == AST_NODE_CALL_EXPR) {
+        JsCallNode* c = (JsCallNode*)node;
+        if (c->optional) return true;
+        return c->callee && node->source_span.start_byte == c->callee->source_span.start_byte && js_ast_has_optional_chain(c->callee);
+    }
+    return false;
+}

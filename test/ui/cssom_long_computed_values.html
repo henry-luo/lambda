@@ -1,0 +1,31 @@
+<!doctype html>
+<style>
+#target { width:200px; height:30px; overflow:hidden; background:#def; }
+#target::before { content:var(--label,"short"); color:green; }
+</style>
+<button id="check">check long values</button><button id="verify">verify restyle</button>
+<div id="report"></div><div id="target"></div>
+<script>
+var target=document.getElementById('target'),report=document.getElementById('report');
+var names='',label='';
+for(var i=0;i<120;i++){if(i)names+=', ';names+='motion'+i;label+='abcdef';}
+function check(name,value){report.setAttribute('data-'+name,String(value));}
+document.getElementById('check').addEventListener('click',function(){
+    target.style.animationName=names;
+    var computed=getComputedStyle(target);
+    check('long-declaration',computed.animationName===names);
+    target.style.fontFamily=names+', Arial';
+    check('font-tail',computed.fontFamily.indexOf('motion119')>=0&&computed.fontFamily.indexOf('Arial')>=0);
+    target.style.setProperty('--label','"'+label+'"');
+    check('pseudo-content',getComputedStyle(target,'::before').content==='"'+label+'"');
+    target.style.animationName=names+', last';
+    check('live-wrapper',computed.animationName===names+', last');
+    for(var j=0;j<12;j++)check('repeated-read',computed.animationName===names+', last');
+    target.style.setProperty('--label','"updated '+label+'"');
+});
+document.getElementById('verify').addEventListener('click',function(){
+    check('post-layout',getComputedStyle(target).animationName===names+', last');
+    check('pseudo-restyle',getComputedStyle(target,'::before').content==='"updated '+label+'"');
+    check('consumer-box',target.getBoundingClientRect().width===200);
+});
+</script>

@@ -148,44 +148,20 @@ void scrollpane_render(RasterRenderContext* rdcon, ScrollPane* sp, Rect* block_b
 
 void setup_scroller(RasterRenderContext* rdcon, ViewBlock* block) {
     float s = rdcon->raster_scale;
-    Bound padding_clip;
-    if (layout_block_overflow_clip(block, &padding_clip)) {
+    Bound padding_clip; Corner radius;
+    if (render_clip_overflow_geometry(block, &padding_clip, &radius)) {
         log_debug("setup scroller clip: left:%f, top:%f, right:%f, bottom:%f",
             padding_clip.left, padding_clip.top, padding_clip.right, padding_clip.bottom);
         rdcon->block.clip.left = max(rdcon->block.clip.left, rdcon->block.x + padding_clip.left * s);
         rdcon->block.clip.top = max(rdcon->block.clip.top, rdcon->block.y + padding_clip.top * s);
         rdcon->block.clip.right = min(rdcon->block.clip.right, rdcon->block.x + padding_clip.right * s);
         rdcon->block.clip.bottom = min(rdcon->block.clip.bottom, rdcon->block.y + padding_clip.bottom * s);
-
-        // Copy border-radius for the resolved overflow clip edge (scale radius)
-        if (block->bound && block->boundary_mut()->border) {
-            BorderProp* border = block->boundary()->border;
-            // resolve percentage border-radius if not yet resolved
-            resolve_border_radius_percentages(&border->radius, block->width, block->height);
-            if (corner_has_radius(&border->radius)) {
-                rdcon->block.has_clip_radius = true;
-                // Derive each corner from the chosen clip edge, including a
-                // signed overflow-clip-margin outside or inside the border.
-                float horizontal_inset[4] = {
-                    padding_clip.left, block->width - padding_clip.right,
-                    block->width - padding_clip.right, padding_clip.left};
-                float vertical_inset[4] = {
-                    padding_clip.top, padding_clip.top,
-                    block->height - padding_clip.bottom,
-                    block->height - padding_clip.bottom};
-                for (int corner = 0; corner < 4; corner++) {
-                    rdcon->block.clip_radius.horizontal[corner] =
-                        fmaxf(0, border->radius.horizontal[corner] - horizontal_inset[corner]) * s;
-                    rdcon->block.clip_radius.vertical[corner] =
-                        fmaxf(0, border->radius.vertical[corner] - vertical_inset[corner]) * s;
-                }
-                constrain_corner_radii(&rdcon->block.clip_radius,
-                    rdcon->block.clip.right - rdcon->block.clip.left,
-                    rdcon->block.clip.bottom - rdcon->block.clip.top);
-                log_debug("setup rounded clip: tl=%f, tr=%f, bl=%f, br=%f",
-                    rdcon->block.clip_radius.top_left, rdcon->block.clip_radius.top_right,
-                    rdcon->block.clip_radius.bottom_left, rdcon->block.clip_radius.bottom_right);
-            }
+        if (radiant_corner_has_radius(&radius)) {
+            rdcon->block.has_clip_radius = true;
+            rdcon->block.clip_radius = radiant_corner_scaled(&radius, s);
+            constrain_corner_radii(&rdcon->block.clip_radius,
+                rdcon->block.clip.right - rdcon->block.clip.left,
+                rdcon->block.clip.bottom - rdcon->block.clip.top);
         }
     }
     if (block->scroll()->pane) {

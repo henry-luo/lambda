@@ -53,7 +53,7 @@ static void inset_outset_side_colors(Color base, CssEnum style,
     }
 }
 
-static RdtPath* render_border_create_centered_stroke_path(BorderProp* border,
+RdtPath* render_border_create_centered_stroke_path(const BorderProp* border,
                                                           Rect rect,
                                                           float width) {
     float half_w = width / 2.0f;

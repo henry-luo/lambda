@@ -34,6 +34,7 @@ static bool render_block_fully_transparent(ViewBlock* block) {
 
 static bool render_block_has_visible_child_overflow(RasterRenderContext* rdcon, ViewBlock* block) {
     if (!block || !block->is_element() || !block->first_child) return false;
+    if (block->blk && block->block()->contain_paint) return false;
     if (block->scroller &&
         (block->scroll()->overflow_x != CSS_VALUE_VISIBLE ||
          block->scroll()->overflow_y != CSS_VALUE_VISIBLE)) {
@@ -513,7 +514,7 @@ static RenderBlockChildrenPhase render_block_begin_children_phase(RasterRenderCo
 
     render_block_apply_inherited_color(rdcon, block);
 
-    if (block->scroller) {
+    if (block->scroller || (block->blk && block->block()->contain_paint)) {
         setup_scroller(rdcon, block);
     }
 

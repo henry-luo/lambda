@@ -9,7 +9,6 @@
 #include "../lib/math_utils.h"
 #include "../lib/mem_factory.h"
 #include "../lib/arraylist.h"
-#include "../lib/strbuf.h"
 #include "../lambda/dom/dom.h"
 
 #include <assert.h>
@@ -147,29 +146,40 @@ void radiant_set_cssom_used_value_sync(RadiantCssomUsedValueSync sync) {
     s_cssom_used_value_sync = sync;
 }
 
-static bool copy_text(char* out, size_t out_size, const char* text) {
-    if (!out || out_size == 0) return false;
+static bool copy_text(StringBuf* out, const char* text) {
+    if (!out) return false;
     const char* value = text ? text : "";
-    str_copy(out, out_size, value, strlen(value));
-    return true;
+    size_t length = strlen(value);
+    if (length >= UINT32_MAX || !stringbuf_ensure_cap(out, length + 1)) return false;
+    stringbuf_reset(out);
+    stringbuf_append_str_n(out, value, length);
+    return out->length == length;
 }
 
-static bool format_number(char* out, size_t out_size, double value, const char* unit) {
-    if (!out || out_size == 0) return false;
-    snprintf(out, out_size, "%.6g%s", value, unit ? unit : "");
-    return true;
+static bool format_text(StringBuf* out, const char* format, ...) {
+    if (!out) return false;
+    va_list args;
+    va_start(args, format);
+    stringbuf_reset(out);
+    bool valid = stringbuf_vappend_format(out, format, args);
+    va_end(args);
+    return valid;
 }
 
-static bool format_color(char* out, size_t out_size, Color color) {
+static bool format_number(StringBuf* out, double value, const char* unit) {
+    if (!out) return false;
+    return format_text(out, "%.6g%s", value, unit ? unit : "");
+}
+
+static bool format_color(StringBuf* out, Color color) {
     if (color.a == 255) {
-        snprintf(out, out_size, "rgb(%u, %u, %u)",
+        return format_text(out, "rgb(%u, %u, %u)",
                  (unsigned)color.r, (unsigned)color.g, (unsigned)color.b);
     } else {
-        snprintf(out, out_size, "rgba(%u, %u, %u, %.3g)",
+        return format_text(out, "rgba(%u, %u, %u, %.3g)",
                  (unsigned)color.r, (unsigned)color.g, (unsigned)color.b,
                  css_color_legacy_alpha(color.a));
     }
-    return true;
 }
 
 static Color rgba_color(uint8_t r, uint8_t g, uint8_t b, uint8_t a) {
@@ -181,10 +191,10 @@ static Color rgba_color(uint8_t r, uint8_t g, uint8_t b, uint8_t a) {
     return color;
 }
 
-static bool format_color_text(const char* text, char* out, size_t out_size) {
+static bool format_color_text(const char* text, StringBuf* out) {
     CssColor color = {};
     return text && css_parse_color(text, &color) && color.type != CSS_COLOR_CURRENT &&
-        format_color(out, out_size, rgba_color(color.r, color.g, color.b, color.a));
+        format_color(out, rgba_color(color.r, color.g, color.b, color.a));
 }
 
 static const void* prop_group_base(const DomElement* element, PropGroupKind group) {
@@ -214,7 +224,7 @@ static const char* property_initial(CssPropertyCode id) {
 }
 
 static bool serialize_direct(const CssPropAccessor* accessor, DomElement* element,
-                             int pseudo_type, char* out, size_t out_size) {
+                             int pseudo_type, StringBuf* out) {
     if (!accessor || !element || pseudo_type != 0) return false;
     const uint8_t* base = (const uint8_t*)prop_group_base(element, accessor->group_kind);
     if (!base) return false;
@@ -223,21 +233,20 @@ static bool serialize_direct(const CssPropAccessor* accessor, DomElement* elemen
         case CSS_PROP_VALUE_ENUM: {
             CssEnum value = *(const CssEnum*)field;
             const CssEnumInfo* info = css_enum_info(value);
-            return copy_text(out, out_size,
+            return copy_text(out,
                 info && info->name ? info->name : property_initial(accessor->id));
         }
         case CSS_PROP_VALUE_PX:
-            return format_number(out, out_size, *(const float*)field, "px");
+            return format_number(out, *(const float*)field, "px");
         case CSS_PROP_VALUE_NUMBER:
-            return format_number(out, out_size, *(const float*)field, "");
+            return format_number(out, *(const float*)field, "");
         case CSS_PROP_VALUE_INTEGER:
-            snprintf(out, out_size, "%d", *(const int*)field);
-            return true;
+            return format_text(out, "%d", *(const int*)field);
         case CSS_PROP_VALUE_COLOR:
-            return format_color(out, out_size, *(const Color*)field);
+            return format_color(out, *(const Color*)field);
         case CSS_PROP_VALUE_STRING: {
             const char* value = *(char* const*)field;
-            return copy_text(out, out_size, value ? value : property_initial(accessor->id));
+            return copy_text(out, value ? value : property_initial(accessor->id));
         }
         case CSS_PROP_VALUE_SPECIAL:
         default:
@@ -319,30 +328,54 @@ static const CssValue* computed_box_side_value(DomElement* element,
     return css_box_shorthand_side_value(shorthand->value, radiant_css_box_side(id));
 }
 
+static bool serialize_computed(DomElement* element, CssPropertyCode id,
+                               int pseudo_type, StringBuf* out);
+
 static bool format_decl_color(DomElement* element, const CssValue* value,
-                              char* out, size_t out_size) {
+                              StringBuf* out) {
     CssComputedColor color;
     if (!css_color_compute(value, &color)) return false;
     if (color.type == CSS_COLOR_COLOR || color.missing) return false;
     if (color.type == CSS_COLOR_CURRENTCOLOR)
-        return css_prop_serialize_computed(element, CSS_PROPERTY_COLOR, 0, out, out_size);
+        return serialize_computed(element, CSS_PROPERTY_COLOR, 0, out);
     Color rgba;
     return css_color_to_rgba(&color, &rgba.r, &rgba.g, &rgba.b, &rgba.a)
-        ? format_color(out, out_size, rgba) : false;
+        ? format_color(out, rgba) : false;
+}
+
+static bool format_keyword_set(const CssValue* value, StringBuf* out,
+        const char* const* keywords, size_t count) {
+    stringbuf_reset(out);
+    bool written = false;
+    for (size_t index = 0; index < count; index++) {
+        if (!css_value_has_identifier(value, keywords[index])) continue;
+        if (!stringbuf_append_format(out, "%s%s", written ? " " : "", keywords[index])) return false;
+        written = true;
+    }
+    return written;
 }
 
 static bool format_css_value(DomElement* element, CssPropertyCode id,
-                             const CssValue* value, char* out, size_t out_size,
+                             const CssValue* value, StringBuf* out,
                              Pool* scratch = nullptr) {
     if (!value) {
         // initial color names still serialize as computed colors after a rule stops matching.
         const CssProperty* property = css_property_get_by_code(id);
         if (property && property->type == PROP_TYPE_COLOR &&
             str_icmp_cstr(property_initial(id), "currentColor") == 0)
-            return css_prop_serialize_computed(element, CSS_PROPERTY_COLOR, 0, out, out_size);
+            return serialize_computed(element, CSS_PROPERTY_COLOR, 0, out);
         if (property && property->type == PROP_TYPE_COLOR &&
-            format_color_text(property_initial(id), out, out_size)) return true;
-        return copy_text(out, out_size, property_initial(id));
+            format_color_text(property_initial(id), out)) return true;
+        return copy_text(out, property_initial(id));
+    }
+    // computed keyword sets use grammar order and canonical case, while names retain case.
+    if (id == CSS_PROPERTY_CONTAIN) {
+        const char* keywords[] = {"none", "strict", "content", "size", "inline-size", "layout", "style", "paint"};
+        return format_keyword_set(value, out, keywords, sizeof(keywords) / sizeof(*keywords));
+    }
+    if (id == CSS_PROPERTY_CONTAINER_TYPE) {
+        const char* keywords[] = {"normal", "size", "inline-size", "scroll-state"};
+        return format_keyword_set(value, out, keywords, sizeof(keywords) / sizeof(*keywords));
     }
     if (id == CSS_PROPERTY_OPACITY) {
         // numeric opacity math needs a value context, without consuming pending geometry.
@@ -351,7 +384,7 @@ static bool format_css_value(DomElement* element, CssPropertyCode id,
         LayoutContext context = {};
         context.pool = lam::up(scratch);
         context.view = lam::up(static_cast<View*>(element));
-        bool result = format_number(out, out_size, resolve_css_opacity_value(&context, value), "");
+        bool result = format_number(out, resolve_css_opacity_value(&context, value), "");
         pool_destroy(scratch);
         return result;
     }
@@ -359,7 +392,7 @@ static bool format_css_value(DomElement* element, CssPropertyCode id,
         id == CSS_PROPERTY_BORDER_TOP_COLOR || id == CSS_PROPERTY_BORDER_RIGHT_COLOR ||
         id == CSS_PROPERTY_BORDER_BOTTOM_COLOR || id == CSS_PROPERTY_BORDER_LEFT_COLOR) {
         // declaration colors use live CSSOM color resolution without committing geometry.
-        if (format_decl_color(element, value, out, out_size)) return true;
+        if (format_decl_color(element, value, out)) return true;
     }
     Pool* pool = scratch ? scratch : element && element->doc ? element->doc->document_pool : nullptr;
     if (!pool) return false;
@@ -370,20 +403,20 @@ static bool format_css_value(DomElement* element, CssPropertyCode id,
     formatter->options.computed_colors = property && property->type == PROP_TYPE_COLOR && css_color_compute(value, &color);
     css_format_value(formatter, (CssValue*)value);
     String* result = stringbuf_to_string(formatter->output);
-    return copy_text(out, out_size, result ? result->chars : "");
+    return copy_text(out, result ? result->chars : "");
 }
 
 static bool format_legacy_font_color(DomElement* element, CssPropertyCode id,
-                                     int pseudo_type, char* out, size_t out_size) {
+                                     int pseudo_type, StringBuf* out) {
     if (!element || id != CSS_PROPERTY_COLOR || pseudo_type != 0 ||
         element->tag() != MARKUP_NAME_FONT) {
         return false;
     }
-    return format_color_text(element->get_attribute("color"), out, out_size);
+    return format_color_text(element->get_attribute("color"), out);
 }
 
 static bool serialize_inherited_decl(DomElement* element, CssPropertyCode id,
-                                     int pseudo_type, char* out, size_t out_size,
+                                     int pseudo_type, StringBuf* out,
                                      Pool* scratch, bool preserve_color_model = false) {
     if (!element) return false;
     // walk the complete CSS ancestry without consuming native stack frames.
@@ -393,24 +426,25 @@ static bool serialize_inherited_decl(DomElement* element, CssPropertyCode id,
         if (pseudo_type == 0 && (css_animation_longhand_index(id) >= 0 ||
             css_transition_longhand_index(id) >= 0)) {
             const CssValue* animation_value = css_motion_computed_value(scratch, element, id);
-            return format_css_value(element, id, animation_value, out, out_size, scratch);
+            return format_css_value(element, id, animation_value, out, scratch);
         }
         // Legacy presentational attributes participate before inherited color is
         // consulted, including for dynamic computed-style reads without layout.
-        if (!value && format_legacy_font_color(element, id, pseudo_type, out, out_size)) {
+        if (!value && format_legacy_font_color(element, id, pseudo_type, out)) {
             if (preserve_color_model) return false;
             return true;
         }
         if (!value && id == CSS_PROPERTY_DIRECTION && pseudo_type == 0 &&
             dom_element_has_directionality_hint(element)) {
             // live HTML hints apply even when CSSOM reads precede the next layout pass.
-            return copy_text(out, out_size, dom_css_element_directionality(element) > 0 ? "rtl" : "ltr");
+            return copy_text(out, dom_css_element_directionality(element) > 0 ? "rtl" : "ltr");
         }
         // The specified-style tree keeps shorthands intact for CSSOM mutation.
         // Resolve their winning physical component before serializing a longhand.
         const CssValue* shorthand_value = computed_box_side_value(
             element, id, pseudo_type, &declaration);
         if (shorthand_value) value = shorthand_value;
+        bool container_shorthand = declaration && declaration->property_code == CSS_PROPERTY_CONTAINER;
         bool background_shorthand = false;
         if (id == CSS_PROPERTY_BACKGROUND_COLOR) {
             CssDeclaration* background = computed_decl(element, CSS_PROPERTY_BACKGROUND, pseudo_type);
@@ -422,10 +456,11 @@ static bool serialize_inherited_decl(DomElement* element, CssPropertyCode id,
         if (css_value_contains_pending_substitution(value)) {
             // A live declaration read can precede layout; use the same substitution and validation as layout.
             value = css_resolve_element_var_value(scratch, element, value,
-                background_shorthand ? CSS_PROPERTY_BACKGROUND : id);
-            if (!value || !css_property_validate_value(background_shorthand ? CSS_PROPERTY_BACKGROUND : id, value))
+                container_shorthand ? CSS_PROPERTY_CONTAINER : background_shorthand ? CSS_PROPERTY_BACKGROUND : id);
+            if (!value || !css_property_validate_value(container_shorthand ? CSS_PROPERTY_CONTAINER : background_shorthand ? CSS_PROPERTY_BACKGROUND : id, value))
                 value = nullptr;
         }
+        if (container_shorthand) value = css_container_shorthand_longhand(value, id, scratch);
         if (cssom_value_inherits(value, id)) {
             DomElement* parent = cssom_inherited_source(element, &pseudo_type);
             if (parent) {
@@ -446,27 +481,27 @@ static bool serialize_inherited_decl(DomElement* element, CssPropertyCode id,
         if (id == CSS_PROPERTY_CONTENT && pseudo_type != 0 &&
             (!value || (value->type == CSS_VALUE_TYPE_KEYWORD &&
                         value->data.keyword == CSS_VALUE_NORMAL))) {
-            return copy_text(out, out_size, "none");
+            return copy_text(out, "none");
         }
-        return value ? format_css_value(element, id, value, out, out_size, scratch)
-                     : !preserve_color_model && format_css_value(element, id, nullptr, out, out_size, scratch);
+        return value ? format_css_value(element, id, value, out, scratch)
+                     : !preserve_color_model && format_css_value(element, id, nullptr, out, scratch);
     }
     return false;
 }
 
 static bool serialize_decl_value(DomElement* element, CssPropertyCode id,
-                                 int pseudo_type, char* out, size_t out_size,
+                                 int pseudo_type, StringBuf* out,
                                  bool preserve_color_model = false) {
     Pool* scratch = pool_create();
     if (!scratch) return false;
-    bool result = serialize_inherited_decl(element, id, pseudo_type, out, out_size, scratch, preserve_color_model);
+    bool result = serialize_inherited_decl(element, id, pseudo_type, out, scratch, preserve_color_model);
     pool_destroy(scratch);
     return result;
 }
 
 static bool serialize_decl(const CssPropAccessor* accessor, DomElement* element,
-                           int pseudo_type, char* out, size_t out_size) {
-    return accessor && serialize_decl_value(element, accessor->id, pseudo_type, out, out_size);
+                           int pseudo_type, StringBuf* out) {
+    return accessor && serialize_decl_value(element, accessor->id, pseudo_type, out);
 }
 
 static const CssValue* cssom_declared_font_value(Pool* scratch, DomElement* element,
@@ -555,7 +590,8 @@ static bool cssom_resolve_font_size_value(CssomFontMathContext* context,
             if (document && document->viewport.width > 0) viewport_width = document->viewport.width;
             if (document && document->viewport.height > 0) viewport_height = document->viewport.height;
             double viewport_pixels = 0.0;
-            if (css_viewport_length_to_px(unit, number, viewport_width, viewport_height,
+            if (css_container_length_to_px(engine, context->element, unit, number, &viewport_pixels) ||
+                css_viewport_length_to_px(unit, number, viewport_width, viewport_height,
                     context->viewport_vertical, &viewport_pixels)) {
                 resolved = (float)viewport_pixels;
             } else if (unit == CSS_UNIT_LH || unit == CSS_UNIT_RLH) {
@@ -698,6 +734,22 @@ static bool cssom_resolve_font_state(Pool* scratch, DomElement* element, int pse
     return true;
 }
 
+bool css_prop_compute_numeric_value(DomElement* element, const CssValue* value, CssMathResult* result) {
+    if (!element || !value || !result) return false;
+    Pool* scratch = mem_pool_create(nullptr, MEM_ROLE_TEMP, "css.computed_length.scratch");
+    if (!scratch) return false;
+    CssomFontState root = {}, state = {};
+    bool valid = cssom_resolve_font_state(scratch, element, 0, &root, &state, true);
+    CssomFontMathContext lengths = {element, state.font.size_px, root.font.size_px,
+        &state, &state, &root, state.vertical};
+    value = css_resolve_element_var_value(scratch, element, value, CSS_PROPERTY_WIDTH);
+    CssMathEvaluationContext math = {cssom_font_math_leaf, &lengths, 1.0, false};
+    *result = css_math_evaluate(value, &math);
+    valid = valid && result->resolved;
+    mem_pool_destroy(scratch);
+    return valid;
+}
+
 bool css_compute_cascaded_font_size(DomElement* element, float* font_size) {
     if (!font_size) return false;
     Pool* scratch = pool_create();
@@ -709,33 +761,33 @@ bool css_compute_cascaded_font_size(DomElement* element, float* font_size) {
     return valid;
 }
 
-static bool serialize_cssom_font_size(DomElement* element, int pseudo_type, char* out, size_t out_size) {
+static bool serialize_cssom_font_size(DomElement* element, int pseudo_type, StringBuf* out) {
     dom_ensure_computed(element, false);
     Pool* scratch = pool_create();
     if (!scratch) return false;
     CssomFontState root = {}, state = {};
     bool success = cssom_resolve_font_state(scratch, element, pseudo_type, &root, &state) &&
-        format_number(out, out_size, state.font.size_px, "px");
+        format_number(out, state.font.size_px, "px");
     pool_destroy(scratch);
     return success;
 }
 
 static bool serialize_line_height(const CssPropAccessor* accessor, DomElement* element,
-    int pseudo_type, char* out, size_t out_size) {
+    int pseudo_type, StringBuf* out) {
     if (!accessor || !element) return false;
     Pool* scratch = pool_create();
     if (!scratch) return false;
     CssomFontState root = {}, state = {};
     bool success = false;
     if (cssom_resolve_font_state(scratch, element, pseudo_type, &root, &state, true)) {
-        if (state.line_height.type == CSS_VALUE_TYPE_KEYWORD) success = copy_text(out, out_size, "normal");
+        if (state.line_height.type == CSS_VALUE_TYPE_KEYWORD) success = copy_text(out, "normal");
         else {
             float pixels = cssom_font_state_line_height(element, &state);
-            if (!isnan(pixels)) success = format_number(out, out_size, layout_clamp_dimension(pixels), "px");
+            if (!isnan(pixels)) success = format_number(out, layout_clamp_dimension(pixels), "px");
         }
     }
     pool_destroy(scratch);
-    return success || serialize_decl(accessor, element, pseudo_type, out, out_size);
+    return success || serialize_decl(accessor, element, pseudo_type, out);
 }
 
 struct CssomSvgLengthContext {SvgLengthContext svg; CssomFontMathContext font;};
@@ -863,16 +915,11 @@ static String* serialize_svg_paint_value(Pool* pool, DomElement* element, CssPro
 }
 
 static bool serialize_svg_paint(const CssPropAccessor* accessor, DomElement* element,
-    int pseudo_type, char* out, size_t out_size) {
-    if (pseudo_type != 0 && !(accessor->flags & CSS_PROP_ACCESSOR_CASCADE_RESOLVED))
-        return serialize_decl(accessor, element, pseudo_type, out, out_size);
-    Pool* pool = mem_pool_create(nullptr, MEM_ROLE_CSS, "cssom.svg.computed_value");
-    if (!pool) return false;
-    String* value = css_prop_serialize_computed_value(pool, element, accessor->id, pseudo_type);
-    bool success = value && value->len < out_size;
-    if (success) str_copy(out, out_size, value->chars, value->len);
-    mem_pool_destroy(pool);
-    return success;
+    int pseudo_type, StringBuf* out) {
+    if (pseudo_type != 0)
+        return serialize_decl(accessor, element, pseudo_type, out);
+    String* value = serialize_svg_paint_value(out->pool, element, accessor->id);
+    return value && copy_text(out, value->chars);
 }
 
 static bool format_self_alignment(char* out, size_t out_size,
@@ -916,7 +963,7 @@ static bool resolve_place_component(CssDeclaration* shorthand,
 typedef bool (*PlaceShorthandParser)(const CssValue*, CssSelfAlignment*, CssSelfAlignment*);
 
 static bool serialize_place_alignment(
-        DomElement* element, int pseudo_type, char* out, size_t out_size,
+        DomElement* element, int pseudo_type, StringBuf* out,
         CssPropertyCode shorthand_id, CssPropertyCode align_id,
         CssPropertyCode justify_id, CssEnum initial_value,
         PlaceShorthandParser shorthand_parser,
@@ -927,7 +974,7 @@ static bool serialize_place_alignment(
     CssSelfAlignment justify = {initial_value};
     if (shorthand && (!shorthand->value ||
         !shorthand_parser(shorthand->value, &align, &justify))) {
-        return serialize_decl_value(element, shorthand_id, 0, out, out_size);
+        return serialize_decl_value(element, shorthand_id, 0, out);
     }
     // CSS Cascade expands a shorthand before constituent longhands compete.
     if (!resolve_place_component(shorthand, computed_decl(element, align_id, 0),
@@ -944,49 +991,48 @@ static bool serialize_place_alignment(
         return false;
     }
     // CSS Align 3 §8 omits the second component when both longhand values match.
-    if (self_alignment_equal(align, justify)) return copy_text(out, out_size, align_text);
-    snprintf(out, out_size, "%s %s", align_text, justify_text);
-    return true;
+    if (self_alignment_equal(align, justify)) return copy_text(out, align_text);
+    return format_text(out, "%s %s", align_text, justify_text);
 }
 
 static bool serialize_place_self(const CssPropAccessor*, DomElement* element,
-                                 int pseudo_type, char* out, size_t out_size) {
+                                 int pseudo_type, StringBuf* out) {
     return serialize_place_alignment(
-        element, pseudo_type, out, out_size, CSS_PROPERTY_PLACE_SELF,
+        element, pseudo_type, out, CSS_PROPERTY_PLACE_SELF,
         CSS_PROPERTY_ALIGN_SELF, CSS_PROPERTY_JUSTIFY_SELF, CSS_VALUE_AUTO,
         css_parse_place_self_alignment, css_parse_self_alignment_value);
 }
 
 static bool serialize_place_content(const CssPropAccessor*, DomElement* element,
-                                    int pseudo_type, char* out, size_t out_size) {
+                                    int pseudo_type, StringBuf* out) {
     return serialize_place_alignment(
-        element, pseudo_type, out, out_size, CSS_PROPERTY_PLACE_CONTENT,
+        element, pseudo_type, out, CSS_PROPERTY_PLACE_CONTENT,
         CSS_PROPERTY_ALIGN_CONTENT, CSS_PROPERTY_JUSTIFY_CONTENT, CSS_VALUE_NORMAL,
         css_parse_place_content_alignment, css_parse_content_alignment_value);
 }
 
 static bool serialize_display(const CssPropAccessor*, DomElement* element, int pseudo_type,
-                              char* out, size_t out_size) {
+                              StringBuf* out) {
     if (!element || pseudo_type != 0) return false;
-    if (element->display.outer == CSS_VALUE_NONE) return copy_text(out, out_size, "none");
+    if (element->display.outer == CSS_VALUE_NONE) return copy_text(out, "none");
     if (element->display.inner == CSS_VALUE_FLEX) {
-        return copy_text(out, out_size,
+        return copy_text(out,
             element->display.outer == CSS_VALUE_INLINE ? "inline-flex" : "flex");
     }
     if (element->display.inner == CSS_VALUE_GRID) {
-        return copy_text(out, out_size,
+        return copy_text(out,
             element->display.outer == CSS_VALUE_INLINE ? "inline-grid" : "grid");
     }
     if (element->display.inner == CSS_VALUE_TABLE) {
-        return copy_text(out, out_size,
+        return copy_text(out,
             element->display.outer == CSS_VALUE_INLINE ? "inline-table" : "table");
     }
     const CssEnumInfo* info = css_enum_info(element->display.outer);
-    return copy_text(out, out_size, info && info->name ? info->name : "block");
+    return copy_text(out, info && info->name ? info->name : "block");
 }
 
 static bool serialize_visibility(const CssPropAccessor*, DomElement* element,
-                                 int pseudo_type, char* out, size_t out_size) {
+                                 int pseudo_type, StringBuf* out) {
     if (!element || pseudo_type != 0) return false;
     const InlineProp* in_line = element->inl();
     Visibility visibility = in_line
@@ -994,18 +1040,18 @@ static bool serialize_visibility(const CssPropAccessor*, DomElement* element,
     // Visibility is a compact render enum, not a CssEnum; indexing the CSS
     // keyword table with it serialized VIS_HIDDEN as the unrelated "_length".
     switch (visibility) {
-        case VIS_HIDDEN: return copy_text(out, out_size, "hidden");
-        case VIS_COLLAPSE: return copy_text(out, out_size, "collapse");
+        case VIS_HIDDEN: return copy_text(out, "hidden");
+        case VIS_COLLAPSE: return copy_text(out, "collapse");
         case VIS_VISIBLE:
-        default: return copy_text(out, out_size, "visible");
+        default: return copy_text(out, "visible");
     }
 }
 
 static bool serialize_transform(const CssPropAccessor* accessor, DomElement* element,
-                                 int pseudo_type, char* out, size_t out_size) {
+                                 int pseudo_type, StringBuf* out) {
     if (!accessor || !element || pseudo_type != 0) return false;
     TransformFunction* functions = element->transform ? element->transform->functions.get() : nullptr;
-    if (!functions) return copy_text(out, out_size, "none");
+    if (!functions) return copy_text(out, "none");
     // CSS Transforms 1 §4.2 serializes the function product without transform-origin.
     RdtMatrix4 matrix = radiant::compute_transform_matrix_3d(functions,
         element->width, element->height, 0.0f, 0.0f, 0.0f);
@@ -1013,20 +1059,21 @@ static bool serialize_transform(const CssPropAccessor* accessor, DomElement* ele
     bool is_2d = rdt_matrix4_is_2d(&matrix);
     const int planar_indices[] = {0, 4, 1, 5, 3, 7};
     int count = is_2d ? 6 : 16;
-    size_t used = str_copy(out, out_size, is_2d ? "matrix(" : "matrix3d(", is_2d ? 7 : 9);
+    if (!copy_text(out, is_2d ? "matrix(" : "matrix3d(")) return false;
     for (int index = 0; index < count; index++) {
-        if (index) used = str_cat(out, used, out_size, ", ", 2);
         int component = is_2d ? planar_indices[index] : (index % 4) * 4 + index / 4;
         char number[64];
-        format_number(number, sizeof(number), values[component], "");
-        used = str_cat(out, used, out_size, number, strlen(number));
+        int length = snprintf(number, sizeof(number), "%s%.6g", index ? ", " : "", values[component]);
+        if (length < 0 || (size_t)length >= sizeof(number) ||
+            !stringbuf_ensure_cap(out, out->length + (size_t)length + 2)) return false;
+        stringbuf_append_str_n(out, number, (size_t)length);
     }
-    str_cat(out, used, out_size, ")", 1);
+    stringbuf_append_char(out, ')');
     return true;
 }
 
 static bool serialize_used_size(const CssPropAccessor* accessor, DomElement* element,
-                                int pseudo_type, char* out, size_t out_size) {
+                                int pseudo_type, StringBuf* out) {
     if (!accessor || !element || pseudo_type != 0) return false;
     float value = accessor->id == CSS_PROPERTY_WIDTH ? element->width : element->height;
     if (!element->doc || !element->doc->view_tree || !element->doc->view_tree->root) {
@@ -1037,59 +1084,54 @@ static bool serialize_used_size(const CssPropAccessor* accessor, DomElement* ele
         // the resolved CSS size is the only valid computed value at that seam.
         if (specified >= 0.0f) value = specified;
     }
-    return format_number(out, out_size, value, "px");
+    return format_number(out, value, "px");
 }
 
-static void append_box_sides(StrBuf* output, char values[4][512]) {
+static bool append_box_sides(StringBuf* output, String* values[4]) {
     unsigned count = 4;
-    if (strcmp(values[3], values[1]) == 0) {
+    if (strcmp(values[3]->chars, values[1]->chars) == 0) {
         count = 3;
-        if (strcmp(values[2], values[0]) == 0) {
-            count = strcmp(values[1], values[0]) == 0 ? 1 : 2;
+        if (strcmp(values[2]->chars, values[0]->chars) == 0) {
+            count = strcmp(values[1]->chars, values[0]->chars) == 0 ? 1 : 2;
         }
     }
     for (unsigned i = 0; i < count; i++) {
-        if (i) strbuf_append_char(output, ' ');
-        strbuf_append_str(output, values[i]);
+        if (!stringbuf_append_format(output, "%s%s", i ? " " : "", values[i]->chars)) return false;
     }
+    return true;
 }
 
 static bool serialize_corner_radius(const CssPropAccessor* accessor, DomElement* element,
-                                    int pseudo_type, char* out, size_t out_size) {
+                                    int pseudo_type, StringBuf* out) {
     if (!accessor || !element || pseudo_type != 0) return false;
     const BoundaryProp* boundary = element->boundary();
     const Corner* radius = boundary && boundary->border ? &boundary->border->radius : nullptr;
     const CornerExpressions* expressions = radius ? radius->expressions.get() : nullptr;
     if (expressions) radius = &expressions->computed;
-    char axes[2][4][512];
-    Pool* scratch = nullptr;
-    bool formatted = true;
-    for (unsigned axis = 0; axis < 2 && formatted; axis++) {
-        for (unsigned corner = 0; corner < 4 && formatted; corner++) {
+    // axis strings share the serializer's temporary pool without imposing a size limit (D4.5.1v4).
+    String* axes[2][4];
+    for (unsigned axis = 0; axis < 2; axis++) {
+        for (unsigned corner = 0; corner < 4; corner++) {
             const CssValue* expression = expressions ? (axis ? expressions->vertical[corner].get()
                 : expressions->horizontal[corner].get()) : nullptr;
             float value = radius ? (axis ? radius->vertical[corner] : radius->horizontal[corner]) : 0.0f;
             bool percent = radius && (axis ? radius->vertical_percent[corner] : radius->horizontal_percent[corner]);
-            if (expression) {
-                // CSSOM queries must release formatting scratch instead of growing the document pool.
-                if (!scratch) scratch = pool_create();
-                formatted = scratch && format_css_value(element, accessor->id, expression,
-                    axes[axis][corner], sizeof(axes[axis][corner]), scratch);
-            } else formatted = format_number(axes[axis][corner], sizeof(axes[axis][corner]), value, percent ? "%" : "px");
+            StringBuf* text = stringbuf_new(out->pool);
+            if (!text || !(expression
+                ? format_css_value(element, accessor->id, expression, text, out->pool)
+                : format_number(text, value, percent ? "%" : "px"))) return false;
+            axes[axis][corner] = stringbuf_to_string(text);
+            if (!axes[axis][corner]) return false;
         }
     }
-    if (scratch) pool_destroy(scratch);
-    if (!formatted) return false;
-    StrBuf* output = strbuf_new();
-    if (!output) return false;
+    stringbuf_reset(out);
     if (accessor->id == CSS_PROPERTY_BORDER_RADIUS) {
-        append_box_sides(output, axes[0]);
+        if (!append_box_sides(out, axes[0])) return false;
         bool same = true;
         for (unsigned corner = 0; corner < 4; corner++)
-            same = same && strcmp(axes[0][corner], axes[1][corner]) == 0;
+            same = same && strcmp(axes[0][corner]->chars, axes[1][corner]->chars) == 0;
         if (!same) {
-            strbuf_append_str(output, " / ");
-            append_box_sides(output, axes[1]);
+            if (!stringbuf_append_format(out, " / ") || !append_box_sides(out, axes[1])) return false;
         }
     } else {
         const CssPropertyCode physical[] = {CSS_PROPERTY_BORDER_TOP_LEFT_RADIUS,
@@ -1098,21 +1140,15 @@ static bool serialize_corner_radius(const CssPropAccessor* accessor, DomElement*
         int corner = -1;
         for (unsigned i = 0; i < 4; i++) if (accessor->id == physical[i]) corner = i;
         if (corner < 0) corner = css_logical_corner_index(accessor->id, element);
-        if (corner < 0) { strbuf_free(output); return false; }
-        strbuf_append_str(output, axes[0][corner]);
-        if (strcmp(axes[0][corner], axes[1][corner]) != 0) {
-            strbuf_append_char(output, ' ');
-            strbuf_append_str(output, axes[1][corner]);
-        }
+        if (corner < 0 || !copy_text(out, axes[0][corner]->chars)) return false;
+        if (strcmp(axes[0][corner]->chars, axes[1][corner]->chars) != 0 &&
+            !stringbuf_append_format(out, " %s", axes[1][corner]->chars)) return false;
     }
-    bool fits = output->length < out_size;
-    if (fits) str_copy(out, out_size, output->str, output->length);
-    strbuf_free(output);
-    return fits;
+    return true;
 }
 
 static bool serialize_edge(const CssPropAccessor* accessor, DomElement* element,
-                           int pseudo_type, char* out, size_t out_size) {
+                           int pseudo_type, StringBuf* out) {
     if (!accessor || !element || pseudo_type != 0) return false;
     const BoundaryProp* boundary = element->boundary();
     float value = 0.0f;
@@ -1128,13 +1164,13 @@ static bool serialize_edge(const CssPropAccessor* accessor, DomElement* element,
         case CSS_PROPERTY_PADDING_LEFT: value = boundary->padding.left; break;
         default: return false;
     }
-    if (type == CSS_VALUE_AUTO) return copy_text(out, out_size, "auto");
-    return format_number(out, out_size, value, "px");
+    if (type == CSS_VALUE_AUTO) return copy_text(out, "auto");
+    return format_number(out, value, "px");
 }
 
 static bool serialize_border_component(const CssPropAccessor* accessor,
                                        DomElement* element, int pseudo_type,
-                                       char* out, size_t out_size) {
+                                       StringBuf* out) {
     if (!accessor || !element || pseudo_type != 0) return false;
     const BoundaryProp* boundary = element->boundary();
     RadiantBorderSide side = radiant_border_side(boundary ? boundary->border : nullptr,
@@ -1145,42 +1181,39 @@ static bool serialize_border_component(const CssPropAccessor* accessor,
         case CSS_PROPERTY_BORDER_BOTTOM_WIDTH:
         case CSS_PROPERTY_BORDER_LEFT_WIDTH:
             // resolved edge widths include none/hidden and UA border defaults.
-            return format_number(out, out_size, side.width ? *side.width : 0.0f, "px");
+            return format_number(out, side.width ? *side.width : 0.0f, "px");
         case CSS_PROPERTY_BORDER_TOP_STYLE:
         case CSS_PROPERTY_BORDER_RIGHT_STYLE:
         case CSS_PROPERTY_BORDER_BOTTOM_STYLE:
         case CSS_PROPERTY_BORDER_LEFT_STYLE: {
             const CssEnumInfo* info = side.style ? css_enum_info(*side.style) : nullptr;
-            return copy_text(out, out_size, info && info->name ? info->name : "none");
+            return copy_text(out, info && info->name ? info->name : "none");
         }
         default:
             // colors come from the computed side, including winning shorthands.
-            return format_color(out, out_size, side.color ? *side.color : element->inl()->color);
+            return format_color(out, side.color ? *side.color : element->inl()->color);
     }
 }
 
 static bool serialize_border_colors(const CssPropAccessor* accessor, DomElement* element,
-                                     int pseudo_type, char* out, size_t out_size) {
+                                     int pseudo_type, StringBuf* out) {
     const CssProperty* property = accessor ? css_property_get_by_code(accessor->id) : nullptr;
     if (!property || property->longhand_count != 4) return false;
-    char values[4][512];
+    String* values[4];
     for (unsigned side = 0; side < 4; side++) {
         // delegate computed colors so currentColor, cascade and animation
         // sampling follow the same path as each physical longhand.
-        if (!css_prop_serialize_computed(element, property->longhand_props[side], pseudo_type,
-                values[side], sizeof(values[side]))) return false;
+        StringBuf* text = stringbuf_new(out->pool);
+        if (!text || !serialize_computed(element, property->longhand_props[side], pseudo_type, text)) return false;
+        values[side] = stringbuf_to_string(text);
+        if (!values[side]) return false;
     }
-    StrBuf* result = strbuf_new();
-    if (!result) return false;
-    append_box_sides(result, values);
-    bool fits = result->length < out_size;
-    if (fits) str_copy(out, out_size, result->str, result->length);
-    strbuf_free(result);
-    return fits;
+    stringbuf_reset(out);
+    return append_box_sides(out, values);
 }
 
 static bool serialize_inset(const CssPropAccessor* accessor, DomElement* element,
-                            int pseudo_type, char* out, size_t out_size) {
+                            int pseudo_type, StringBuf* out) {
     if (!accessor || !element || pseudo_type != 0) return false;
     const PositionProp* position = element->positionp();
     bool present = false;
@@ -1192,48 +1225,47 @@ static bool serialize_inset(const CssPropAccessor* accessor, DomElement* element
         case CSS_PROPERTY_LEFT: present = position->has_left; value = position->left; break;
         default: return false;
     }
-    return present ? format_number(out, out_size, value, "px")
-                   : copy_text(out, out_size, "auto");
+    return present ? format_number(out, value, "px")
+                   : copy_text(out, "auto");
 }
 
 static bool serialize_font_weight(const CssPropAccessor*, DomElement* element, int pseudo_type,
-                                  char* out, size_t out_size) {
+                                  StringBuf* out) {
     if (!element || pseudo_type != 0) return false;
     const FontProp* font = element->fontp();
     if (font->font_weight_numeric > 0) {
-        snprintf(out, out_size, "%d", (int)font->font_weight_numeric);
-        return true;
+        return format_text(out, "%d", (int)font->font_weight_numeric);
     }
     const CssEnumInfo* info = css_enum_info(font->font_weight);
-    return copy_text(out, out_size, info && info->name ? info->name : "normal");
+    return copy_text(out, info && info->name ? info->name : "normal");
 }
 
 static bool serialize_color_prop(const CssPropAccessor*, DomElement* element, int pseudo_type,
-                                 char* out, size_t out_size) {
+                                 StringBuf* out) {
     if (!element || pseudo_type != 0) return false;
     const InlineProp* inl = element->inl();
     Color color = inl->color;
     if (!inl->has_color) { color.r = color.g = color.b = 0; color.a = 255; }
-    return format_color(out, out_size, color);
+    return format_color(out, color);
 }
 
 static bool serialize_background_color(const CssPropAccessor*, DomElement* element,
-                                       int pseudo_type, char* out, size_t out_size) {
+                                       int pseudo_type, StringBuf* out) {
     if (!element || pseudo_type != 0) return false;
     const BoundaryProp* boundary = element->boundary();
     // recascade can precede event-turn layout, leaving the old background paint cache intact.
     bool dirty_cascade = element->doc && element->doc->js.mutation_count > 0;
     if (boundary && boundary->background &&
         (!dirty_cascade || css_animation_needs_computed_sample(element, CSS_PROPERTY_BACKGROUND_COLOR))) {
-        return format_color(out, out_size, boundary->background->color);
+        return format_color(out, boundary->background->color);
     }
 
     // use the common shorthand/substitution/inheritance path before paint has caught up.
-    return serialize_decl_value(element, CSS_PROPERTY_BACKGROUND_COLOR, pseudo_type, out, out_size);
+    return serialize_decl_value(element, CSS_PROPERTY_BACKGROUND_COLOR, pseudo_type, out);
 }
 
 static bool serialize_minmax(const CssPropAccessor* accessor, DomElement* element,
-                             int pseudo_type, char* out, size_t out_size) {
+                             int pseudo_type, StringBuf* out) {
     if (!accessor || !element || pseudo_type != 0) return false;
     const BlockProp* block = element->block();
     float value = -1.0f;
@@ -1245,39 +1277,38 @@ static bool serialize_minmax(const CssPropAccessor* accessor, DomElement* elemen
         case CSS_PROPERTY_MAX_HEIGHT: value = block->given_max_height; maximum = true; break;
         default: return false;
     }
-    if (value < 0.0f) return copy_text(out, out_size, maximum ? "none" : "0px");
-    return format_number(out, out_size, value, "px");
+    if (value < 0.0f) return copy_text(out, maximum ? "none" : "0px");
+    return format_number(out, value, "px");
 }
 
 static bool serialize_z_index(const CssPropAccessor*, DomElement* element, int pseudo_type,
-                              char* out, size_t out_size) {
+                              StringBuf* out) {
     if (!element || pseudo_type != 0) return false;
     const PositionProp* position = element->positionp();
     if (position->position == CSS_VALUE_STATIC && position->z_index == 0) {
-        return copy_text(out, out_size, "auto");
+        return copy_text(out, "auto");
     }
-    snprintf(out, out_size, "%d", position->z_index);
-    return true;
+    return format_text(out, "%d", position->z_index);
 }
 
 static bool serialize_outline(const CssPropAccessor* accessor, DomElement* element,
-                              int pseudo_type, char* out, size_t out_size) {
+                              int pseudo_type, StringBuf* out) {
     if (!accessor || !element || pseudo_type != 0) return false;
     OutlineProp* outline = element->boundary() ? element->boundary()->outline : nullptr;
     if (!outline) {
-        if (accessor->id == CSS_PROPERTY_OUTLINE_STYLE) return copy_text(out, out_size, "none");
-        if (accessor->id == CSS_PROPERTY_OUTLINE_WIDTH) return copy_text(out, out_size, "0px");
-        return copy_text(out, out_size, "rgba(0, 0, 0, 0)");
+        if (accessor->id == CSS_PROPERTY_OUTLINE_STYLE) return copy_text(out, "none");
+        if (accessor->id == CSS_PROPERTY_OUTLINE_WIDTH) return copy_text(out, "0px");
+        return copy_text(out, "rgba(0, 0, 0, 0)");
     }
     if (accessor->id == CSS_PROPERTY_OUTLINE_STYLE) {
         const CssEnumInfo* info = css_enum_info(outline->style);
-        return copy_text(out, out_size, info && info->name ? info->name : "none");
+        return copy_text(out, info && info->name ? info->name : "none");
     }
     if (accessor->id == CSS_PROPERTY_OUTLINE_WIDTH) {
-        return format_number(out, out_size, outline->width, "px");
+        return format_number(out, outline->width, "px");
     }
     if (accessor->id == CSS_PROPERTY_OUTLINE_COLOR) {
-        return format_color(out, out_size, outline->color);
+        return format_color(out, outline->color);
     }
     return false;
 }
@@ -1295,11 +1326,11 @@ static const char* scroll_snap_axis_name(ScrollSnapAxis axis) {
 }
 
 static bool serialize_individual_transform(const CssPropAccessor* accessor,
-    DomElement* element, int, char* out, size_t out_size) {
+    DomElement* element, int, StringBuf* out) {
     int index = css_individual_transform_index(accessor->id);
     const TransformFunction* function = element && element->transform
         ? &element->transformp()->individual[index] : nullptr;
-    if (!function || function->type == TRANSFORM_NONE) return copy_text(out, out_size, "none");
+    if (!function || function->type == TRANSFORM_NONE) return copy_text(out, "none");
     if (accessor->id == CSS_PROPERTY_TRANSLATE) {
         bool three_d = function->type == TRANSFORM_TRANSLATE3D;
         float x = three_d ? function->params.translate3d.x : function->params.translate.x;
@@ -1308,39 +1339,38 @@ static bool serialize_individual_transform(const CssPropAccessor* accessor,
         char components[3][64];
         bool x_percent = !isnan(function->translate_x_percent);
         bool y_percent = !isnan(function->translate_y_percent);
-        format_number(components[0], sizeof(components[0]),
+        snprintf(components[0], sizeof(components[0]), "%.6g%s",
             x_percent ? function->translate_x_percent : x, x_percent ? "%" : "px");
-        format_number(components[1], sizeof(components[1]),
+        snprintf(components[1], sizeof(components[1]), "%.6g%s",
             y_percent ? function->translate_y_percent : y, y_percent ? "%" : "px");
-        format_number(components[2], sizeof(components[2]), z, "px");
-        if (z != 0.0f) snprintf(out, out_size, "%s %s %s", components[0], components[1], components[2]);
-        else if (y != 0.0f || y_percent) snprintf(out, out_size, "%s %s", components[0], components[1]);
-        else return copy_text(out, out_size, components[0]);
+        snprintf(components[2], sizeof(components[2]), "%.6gpx", z);
+        if (z != 0.0f) return format_text(out, "%s %s %s", components[0], components[1], components[2]);
+        else if (y != 0.0f || y_percent) return format_text(out, "%s %s", components[0], components[1]);
+        else return copy_text(out, components[0]);
     } else if (accessor->id == CSS_PROPERTY_SCALE) {
         bool three_d = function->type == TRANSFORM_SCALE3D;
         float x = three_d ? function->params.scale3d.x : function->params.scale.x;
         float y = three_d ? function->params.scale3d.y : function->params.scale.y;
         float z = three_d ? function->params.scale3d.z : 1.0f;
-        if (z != 1.0f) snprintf(out, out_size, "%.6g %.6g %.6g", x, y, z);
-        else if (x != y) snprintf(out, out_size, "%.6g %.6g", x, y);
-        else return format_number(out, out_size, x, "");
+        if (z != 1.0f) return format_text(out, "%.6g %.6g %.6g", x, y, z);
+        else if (x != y) return format_text(out, "%.6g %.6g", x, y);
+        else return format_number(out, x, "");
     } else {
         bool three_d = function->type == TRANSFORM_ROTATE3D;
         float angle = (float)math_radians_to_degrees_d(three_d
             ? function->params.rotate3d.angle : function->params.angle);
         if (!three_d || (function->params.rotate3d.x == 0.0f &&
             function->params.rotate3d.y == 0.0f && function->params.rotate3d.z > 0.0f)) {
-            return format_number(out, out_size, angle, "deg");
+            return format_number(out, angle, "deg");
         }
         if (function->params.rotate3d.z == 0.0f &&
             ((function->params.rotate3d.x != 0.0f && function->params.rotate3d.y == 0.0f) ||
              (function->params.rotate3d.y != 0.0f && function->params.rotate3d.x == 0.0f))) {
             bool x_axis = function->params.rotate3d.x != 0.0f;
             float axis = x_axis ? function->params.rotate3d.x : function->params.rotate3d.y;
-            snprintf(out, out_size, "%s %.6gdeg", x_axis ? "x" : "y", axis < 0.0f ? -angle : angle);
-            return true;
+            return format_text(out, "%s %.6gdeg", x_axis ? "x" : "y", axis < 0.0f ? -angle : angle);
         }
-        snprintf(out, out_size, "%.6g %.6g %.6g %.6gdeg", function->params.rotate3d.x,
+        return format_text(out, "%.6g %.6g %.6g %.6gdeg", function->params.rotate3d.x,
             function->params.rotate3d.y, function->params.rotate3d.z, angle);
     }
     return true;
@@ -1348,39 +1378,36 @@ static bool serialize_individual_transform(const CssPropAccessor* accessor,
 
 static bool serialize_scroll_snap(const CssPropAccessor* accessor,
                                   DomElement* element, int pseudo_type,
-                                  char* out, size_t out_size) {
+                                  StringBuf* out) {
     if (!accessor || !element || pseudo_type != 0) return false;
     const ScrollProp* scroll = element->scroll();
     if (accessor->id == CSS_PROPERTY_SCROLL_SNAP_TYPE) {
         const char* axis = scroll_snap_axis_name(scroll->snap_axis);
         if (scroll->snap_axis == SCROLL_SNAP_AXIS_NONE ||
             !scroll->snap_strictness_explicit) {
-            return copy_text(out, out_size, axis);
+            return copy_text(out, axis);
         }
-        snprintf(out, out_size, "%s %s", axis,
+        return format_text(out, "%s %s", axis,
                  scroll->snap_mandatory ? "mandatory" : "proximity");
-        return true;
     }
     const CssEnumInfo* block = css_enum_info(scroll->snap_align_block);
     const CssEnumInfo* inline_axis = css_enum_info(scroll->snap_align_inline);
-    snprintf(out, out_size, "%s %s",
+    return format_text(out, "%s %s",
              block && block->name ? block->name : "none",
              inline_axis && inline_axis->name ? inline_axis->name : "none");
-    return true;
 }
 
 static bool serialize_overscroll_behavior(const CssPropAccessor* accessor,
                                           DomElement* element, int pseudo_type,
-                                          char* out, size_t out_size) {
+                                          StringBuf* out) {
     if (!accessor || !element || pseudo_type != 0) return false;
     const ScrollProp* scroll = element->scroll();
     const CssEnumInfo* x = css_enum_info(scroll->overscroll_x);
     const CssEnumInfo* y = css_enum_info(scroll->overscroll_y);
     const char* x_name = x && x->name ? x->name : "auto";
     const char* y_name = y && y->name ? y->name : "auto";
-    if (strcmp(x_name, y_name) == 0) return copy_text(out, out_size, x_name);
-    snprintf(out, out_size, "%s %s", x_name, y_name);
-    return true;
+    if (strcmp(x_name, y_name) == 0) return copy_text(out, x_name);
+    return format_text(out, "%s %s", x_name, y_name);
 }
 
 #define DIRECT_ROW(prop_id, group, type, field, kind, row_flags) \
@@ -1547,6 +1574,10 @@ static const CssPropAccessor CSS_PROP_ROWS[] = {
     DECL_ROW(CSS_PROPERTY_DIRECTION),
     DECL_ROW(CSS_PROPERTY_CONTENT),
     DECL_ROW(CSS_PROPERTY_FIELD_SIZING),
+    DECL_ROW(CSS_PROPERTY_CONTAIN),
+    DECL_ROW(CSS_PROPERTY_CONTENT_VISIBILITY),
+    DECL_ROW(CSS_PROPERTY_CONTAINER_NAME),
+    DECL_ROW(CSS_PROPERTY_CONTAINER_TYPE),
 };
 
 #undef DECL_ROW
@@ -1618,10 +1649,10 @@ bool dom_ensure_computed(DomElement* element, bool needs_used_value) {
     return false;
 }
 
-bool css_prop_serialize_computed(DomElement* element, CssPropertyCode id,
-                                 int pseudo_type, char* out, size_t out_size) {
-    if (!out || out_size == 0) return false;
-    out[0] = '\0';
+static bool serialize_computed(DomElement* element, CssPropertyCode id,
+                                 int pseudo_type, StringBuf* out) {
+    if (!element || !out) return false;
+    stringbuf_reset(out);
     const CssPropAccessor* accessor = css_prop_accessor(id);
     if (!accessor) {
         static bool logged[CSS_PROPERTY_COUNT] = {};
@@ -1637,10 +1668,12 @@ bool css_prop_serialize_computed(DomElement* element, CssPropertyCode id,
     if (id == CSS_PROPERTY_FONT_SIZE && element->doc) {
         // CSSOM font-size is an absolute length even when a preliminary view
         // tree exists but has not yet propagated inherited font properties.
-        return serialize_cssom_font_size(element, pseudo_type, out, out_size);
+        return serialize_cssom_font_size(element, pseudo_type, out);
     }
-    if (css_property_is_svg_presentation(id) && pseudo_type == 0)
-        return accessor->serialize(accessor, element, pseudo_type, out, out_size);
+    if (css_property_is_svg_presentation(id) && pseudo_type == 0) {
+        dom_ensure_computed(element, false);
+        return accessor->serialize(accessor, element, pseudo_type, out);
+    }
     // only actual effects add a sampling dependency to ordinary declaration reads.
     const CssPropertyRuntimeMetadata* metadata = css_property_runtime_metadata(id);
     bool needs_used = (accessor->flags & CSS_PROP_ACCESSOR_USED_VALUE) != 0;
@@ -1652,7 +1685,7 @@ bool css_prop_serialize_computed(DomElement* element, CssPropertyCode id,
     const CssProperty* property = css_property_get_by_code(id);
     if (property && property->type == PROP_TYPE_COLOR &&
         !css_animation_needs_computed_sample(element, id) &&
-        serialize_decl_value(element, id, pseudo_type, out, out_size, true)) return true;
+        serialize_decl_value(element, id, pseudo_type, out, true)) return true;
 
     if (!computed) {
         // Before the first UiContext exists, loader scripts can only observe
@@ -1662,25 +1695,43 @@ bool css_prop_serialize_computed(DomElement* element, CssPropertyCode id,
             (id >= CSS_PROPERTY_BORDER_TOP_WIDTH &&
              id <= CSS_PROPERTY_BORDER_LEFT_STYLE)) {
             return accessor->serialize && accessor->serialize(
-                accessor, element, pseudo_type, out, out_size);
+                accessor, element, pseudo_type, out);
         }
-        return serialize_decl(accessor, element, pseudo_type, out, out_size);
+        return serialize_decl(accessor, element, pseudo_type, out);
     }
-    if (pseudo_type != 0) return serialize_decl(accessor, element, pseudo_type, out, out_size);
+    if (pseudo_type != 0) return serialize_decl(accessor, element, pseudo_type, out);
     return accessor->serialize && accessor->serialize(accessor, element, pseudo_type,
-                                                      out, out_size);
+                                                      out);
 }
 
 String* css_prop_serialize_computed_value(Pool* pool, DomElement* element,
     CssPropertyCode id, int pseudo_type) {
     if (!pool || !element) return nullptr;
-    if (css_property_is_svg_presentation(id) && pseudo_type == 0) {
-        dom_ensure_computed(element, false);
-        return serialize_svg_paint_value(pool, element, id);
-    }
-    char value[512];
-    return css_prop_serialize_computed(element, id, pseudo_type, value, sizeof(value))
-        ? create_string(pool, value) : nullptr;
+    // intermediate formatter trees never accumulate in a retained caller pool (D4.5.1v4).
+    Pool* scratch = pool_create();
+    if (!scratch) return nullptr;
+    StringBuf* output = stringbuf_new(scratch);
+    String* value = output && serialize_computed(element, id, pseudo_type, output)
+        ? stringbuf_to_string(output) : nullptr;
+    String* result = value ? create_string(pool, value->chars) : nullptr;
+    pool_destroy(scratch);
+    return result;
+}
+
+bool css_prop_serialize_computed(DomElement* element, CssPropertyCode id,
+    int pseudo_type, char* out, size_t out_size) {
+    if (!out || !out_size) return false;
+    out[0] = '\0';
+    Pool* scratch = pool_create();
+    if (!scratch) return false;
+    StringBuf* output = stringbuf_new(scratch);
+    String* value = output && serialize_computed(element, id, pseudo_type, output)
+        ? stringbuf_to_string(output) : nullptr;
+    // a bounded projection succeeds only when the complete computed value fits.
+    bool success = value && value->len < out_size;
+    if (success) str_copy(out, out_size, value->chars, value->len);
+    pool_destroy(scratch);
+    return success;
 }
 
 String* css_prop_serialize_custom_property(Pool* pool, DomElement* element,

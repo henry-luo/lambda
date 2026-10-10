@@ -2697,6 +2697,7 @@ extern "C" {
 
     Map* map(int64_t type_index);
     Map* map_with_data(int64_t type_index);
+    Map* map_fill_reserve_data(Map* map);
     // shared physical construction; profiles retain layout and property admission.
     Map* map_alloc_for_type(struct TypeMap* map_type, LambdaRegion* region,
         int64_t minimum_capacity);
@@ -2704,7 +2705,13 @@ extern "C" {
     void map_field_store_int_as_float(void* field_ptr, Item value);
     // neutral packed-field mutation; no descriptors, prototype dispatch, or JS hooks.
     bool map_shape_set(Map* map, String* key, Item value);
+    // compiler-proven ordinary string keys bypass Symbol/private-name admission.
+    bool map_shape_set_text(Map* map, String* key, Item value);
+    // field must be resolved against the current shape; NULL means an absent own field.
+    bool map_shape_set_resolved(Map* map, String* key, struct ShapeEntry* field, Item value);
     bool map_shape_delete(Map* map, String* key);
+    bool map_shape_delete_text(Map* map, String* key);
+    bool map_shape_delete_resolved(Map* map, struct ShapeEntry* field);
     bool map_field_store_dynamic_item(void* field_ptr, Item value);
     Map* map_with_tl(int64_t type_index, void* type_list_ptr);
     Map* map_with_region_tl(LambdaRegion* region, int64_t type_index,

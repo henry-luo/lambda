@@ -1,0 +1,21 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Stationary click beside a scrollport edge</title>
+<style>
+  body { margin: 0; font: 16px Arial, sans-serif; }
+  #port { width: 300px; height: 200px; overflow: auto; }
+  #content { padding-top: 160px; height: 600px; }
+  .row { height: 24px; line-height: 24px; }
+</style>
+<div id="port"><div id="content">
+  <div id="first" class="row">First row</div>
+  <div id="second" class="row">Second row</div>
+</div></div>
+<output id="clicked"></output>
+<script>
+  document.querySelectorAll('.row').forEach(function (row) {
+    row.addEventListener('click', function () {
+      document.getElementById('clicked').textContent = row.id;
+    });
+  });
+</script>

@@ -70,9 +70,11 @@ pub fn attr_or(el, key, default_val) {
 }
 
 // get text content of a leaf element
-pub fn text_of(el) {
+pub fn text_of(el, include_values = false) {
     if (el is string or el is symbol) string(el)
-    else if (el is element or el is array) children_text(el, text_of)
+    // Parsed operators store their token in value; dimension signs are not child text.
+    else if (include_values and el is element and el.value != null) string(el.value)
+    else if (el is element or el is array) children_text(el,(child) => text_of(child,include_values))
     else if (el == null) ""
     else string(el)
 }
@@ -155,10 +157,15 @@ fn is_unit_char(ch) {
 // Preserve explicit row/cell token boundaries during matrix layout.
 pub fn parse_rows(body, i, n, rows, current_row, current_cell) {
     if (i >= n) {
-        rows ++ [make_row(current_row ++ [make_cell(current_cell)])]
-    } else if (body[i] == 'row_sep' or body[i] == 'col_sep') {
-        if (body[i] == 'row_sep')
-            parse_rows(body, i + 1, n, rows ++ [make_row(current_row ++ [make_cell(current_cell)])], [], [])
+        // a final row terminator does not introduce another empty matrix row.
+        let rules = [for (item in current_cell where item is element and name(item) == 'array_rule') item];
+        if (len(rows) > 0 and len(current_row) == 0 and len(current_cell) == len(rules))
+            [*slice(rows,0,len(rows) - 1), {*:rows[len(rows) - 1], trailing_rules:rules}]
+        else rows ++ [make_row(current_row ++ [make_cell(current_cell)])]
+    } else if (body[i] == 'row_sep' or body[i] == 'col_sep' or
+        (body[i] is element and name(body[i]) == 'row_sep')) {
+        if (body[i] == 'row_sep' or (body[i] is element and name(body[i]) == 'row_sep'))
+            parse_rows(body, i + 1, n, rows ++ [{*:make_row(current_row ++ [make_cell(current_cell)]), gap: body[i].gap}], [], [])
         else
             parse_rows(body, i + 1, n, rows, current_row ++ [make_cell(current_cell)], [])
     } else

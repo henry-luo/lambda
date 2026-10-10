@@ -8,6 +8,7 @@
 #include <gtest/gtest.h>
 #include <cmath>
 #include <cstring>
+#include "../lib/strbuf.h"
 
 #include "../radiant/view.hpp"
 #include "../radiant/layout.hpp"
@@ -15,6 +16,7 @@
 #include "../radiant/render.hpp"
 #include "../radiant/render_css3d.hpp"
 #include "../lambda/input/input.hpp"
+#include "../lambda/io/mark_builder.hpp"
 #include "../lambda/input/css/css_engine.hpp"
 #include "../lambda/input/css/css_parser.hpp"
 #include "../lambda/input/css/dom_node.hpp"
@@ -508,6 +510,240 @@ protected:
     }
 };
 
+struct ContainerQueryProbe {
+    CssContainerMetrics metrics;
+    uint8_t axes;
+    const char* name;
+    bool available;
+};
+
+static bool provide_container_probe(void* data, DomElement*, const char* name,
+    uint8_t axes, CssContainerMetrics* result) {
+    ContainerQueryProbe* probe = (ContainerQueryProbe*)data;
+    probe->axes = axes;
+    probe->name = name;
+    if (!probe->available || (name && strcmp(name, "card") != 0)) return false;
+    *result = probe->metrics;
+    return true;
+}
+
+TEST_F(MotionCascadeTest, ContainerConditionsSelectAllAxesAndInvalidateMeasurementCache) {
+    ContainerQueryProbe probe = {{&element, 1, 300.0, 120.0, false, nullptr, nullptr}, 0, nullptr, true};
+    engine->container_provider = provide_container_probe;
+    engine->container_context = &probe;
+    EXPECT_TRUE(css_evaluate_container_query(engine, &element, "card (width > 200px)"));
+    EXPECT_EQ(probe.axes, CSS_CONTAINER_WIDTH);
+    EXPECT_TRUE(css_evaluate_container_query(engine, &element, "card (200px < width <= 300px)"));
+    EXPECT_TRUE(css_evaluate_container_query(engine, &element, "card ((min-width:300px) and (block-size:120px))"));
+    EXPECT_EQ(probe.axes, CSS_CONTAINER_WIDTH | CSS_CONTAINER_BLOCK);
+    EXPECT_TRUE(css_evaluate_container_query(engine, &element, "card (orientation:landscape)"));
+    EXPECT_TRUE(css_evaluate_container_query(engine, &element, "card (aspect-ratio:5/2)"));
+    EXPECT_TRUE(css_evaluate_container_query(engine, &element, "card (width > calc(100px + 2rem))"));
+    EXPECT_TRUE(css_evaluate_container_query(engine, &element, "card (width > -10px)"));
+    EXPECT_TRUE(css_evaluate_container_query(engine, &element, "card not\t(width:0px)"));
+    EXPECT_TRUE(css_evaluate_container_query(engine, &element, "other (width > 0px), card (width > 200px)"));
+    EXPECT_TRUE(css_evaluate_container_query(engine, &element, "card"));
+    EXPECT_FALSE(css_evaluate_container_query(engine, &element, "card not (unknown-feature:1)"));
+    EXPECT_FALSE(css_evaluate_container_query(engine, &element, "card ((unknown-feature:1) or (width > 0px))"));
+    EXPECT_FALSE(css_evaluate_container_query(engine, &element, "card (width > 0px) and (height > 0px) or (width > 0px)"));
+    EXPECT_FALSE(css_evaluate_container_query(engine, &element, "card (0px < width > 10px)"));
+    EXPECT_FALSE(css_evaluate_container_query(engine, &element, "card not (orientation > 0px)"));
+    EXPECT_FALSE(css_evaluate_container_query(engine, &element, "other not (width:0px)"));
+    uint64_t hits = engine->condition_cache_hits;
+    EXPECT_TRUE(css_evaluate_container_query(engine, &element, "card (width > 200px)"));
+    EXPECT_TRUE(css_evaluate_container_query(engine, &element, "card (width > 200px)"));
+    EXPECT_GT(engine->condition_cache_hits, hits);
+    probe.metrics.width = 150.0;
+    ++probe.metrics.generation;
+    EXPECT_FALSE(css_evaluate_container_query(engine, &element, "card (width > 200px)"));
+    probe.metrics.vertical = true;
+    EXPECT_TRUE(css_evaluate_container_query(engine, &element, "card (inline-size:120px)"));
+    EXPECT_TRUE(css_evaluate_container_query(engine, &element, "card (block-size:150px)"));
+    probe.available = false;
+    EXPECT_FALSE(css_evaluate_container_query(engine, &element, "not (width:0px)"));
+}
+
+TEST_F(MotionCascadeTest, ContainerUnitsUseEligibleAxesAndViewportFallback) {
+    ContainerQueryProbe probe = {{&element, 1, 300.0, 120.0, true, nullptr, nullptr}, 0, nullptr, true};
+    engine->container_provider = provide_container_probe;
+    engine->container_context = &probe;
+    double pixels = NAN;
+    EXPECT_TRUE(css_container_length_to_px(engine, &element, CSS_UNIT_CQW, 50.0, &pixels));
+    EXPECT_DOUBLE_EQ(pixels, 150.0);
+    EXPECT_TRUE(css_container_length_to_px(engine, &element, CSS_UNIT_CQI, 50.0, &pixels));
+    EXPECT_DOUBLE_EQ(pixels, 60.0);
+    EXPECT_EQ(probe.axes, CSS_CONTAINER_INLINE);
+    EXPECT_TRUE(css_container_length_to_px(engine, &element, CSS_UNIT_CQB, 50.0, &pixels));
+    EXPECT_DOUBLE_EQ(pixels, 150.0);
+    EXPECT_TRUE(css_container_length_to_px(engine, &element, CSS_UNIT_CQMIN, 50.0, &pixels));
+    EXPECT_DOUBLE_EQ(pixels, 60.0);
+    EXPECT_TRUE(css_container_length_to_px(engine, &element, CSS_UNIT_CQMAX, 50.0, &pixels));
+    EXPECT_DOUBLE_EQ(pixels, 150.0);
+    probe.available = false;
+    css_engine_set_viewport(engine, 800.0, 600.0);
+    EXPECT_TRUE(css_container_length_to_px(engine, &element, CSS_UNIT_CQW, 50.0, &pixels));
+    EXPECT_DOUBLE_EQ(pixels, 400.0);
+    EXPECT_TRUE(css_container_length_to_px(engine, &element, CSS_UNIT_CQH, 50.0, &pixels));
+    EXPECT_DOUBLE_EQ(pixels, 300.0);
+    EXPECT_FALSE(css_container_length_to_px(engine, &element, CSS_UNIT_PX, 50.0, &pixels));
+    engine->context.vertical_viewport = true;
+    EXPECT_TRUE(css_container_length_to_px(engine, &element, CSS_UNIT_CQI, 50.0, &pixels));
+    EXPECT_DOUBLE_EQ(pixels, 300.0);
+}
+
+TEST_F(MotionCascadeTest, ContainerShorthandPreservesNamesAndUsesCascadeWinners) {
+    apply("container: FLEX Card / inline-size");
+    String* names = css_prop_serialize_computed_value(pool, &element, CSS_PROPERTY_CONTAINER_NAME, 0);
+    ASSERT_NE(names, nullptr);
+    EXPECT_STREQ(names->chars, "FLEX Card");
+    String* type = css_prop_serialize_computed_value(pool, &element, CSS_PROPERTY_CONTAINER_TYPE, 0);
+    ASSERT_NE(type, nullptr);
+    EXPECT_STREQ(type->chars, "inline-size");
+    apply("container-type:size");
+    type = css_prop_serialize_computed_value(pool, &element, CSS_PROPERTY_CONTAINER_TYPE, 0);
+    ASSERT_NE(type, nullptr);
+    EXPECT_STREQ(type->chars, "size");
+    apply("container-name:GRID");
+    names = css_prop_serialize_computed_value(pool, &element, CSS_PROPERTY_CONTAINER_NAME, 0);
+    ASSERT_NE(names, nullptr);
+    EXPECT_STREQ(names->chars, "GRID");
+    const char* invalid[] = {"container: / size", "container:card /", "container:none card / size",
+        "container:card / size inline-size", "container-name:and", "container-type:card"};
+    for (const char* text : invalid)
+        EXPECT_EQ(css_parse_declaration_text(text, strlen(text), pool), nullptr) << text;
+    apply("container:card");
+    type = css_prop_serialize_computed_value(pool, &element, CSS_PROPERTY_CONTAINER_TYPE, 0);
+    ASSERT_NE(type, nullptr);
+    EXPECT_STREQ(type->chars, "normal");
+}
+
+TEST_F(MotionCascadeTest, ContainerTypeKeywordsAreInsensitiveAndNamesRemainSensitive) {
+    CssDeclaration* declaration = css_parse_declaration_text("container:Card / INLINE-SIZE", 28, pool);
+    ASSERT_NE(declaration, nullptr);
+    const CssValue* type = css_container_shorthand_longhand(declaration->value, CSS_PROPERTY_CONTAINER_TYPE, pool);
+    const CssValue* names = css_container_shorthand_longhand(declaration->value, CSS_PROPERTY_CONTAINER_NAME, pool);
+    ASSERT_NE(type, nullptr); ASSERT_NE(names, nullptr);
+    uint8_t axes = css_container_type_axes(type);
+    EXPECT_EQ(axes, CSS_CONTAINER_INLINE);
+    EXPECT_TRUE(css_container_matches(names, axes, false, "Card", CSS_CONTAINER_WIDTH));
+    EXPECT_FALSE(css_container_matches(names, axes, false, "card", CSS_CONTAINER_WIDTH));
+    apply("container:Card / INLINE-SIZE");
+    String* computed = css_prop_serialize_computed_value(pool, &element, CSS_PROPERTY_CONTAINER_TYPE, 0);
+    ASSERT_NE(computed, nullptr);
+    EXPECT_STREQ(computed->chars, "inline-size");
+}
+
+TEST_F(MotionCascadeTest, ContainmentRejectsMixedDuplicateAndInvalidTokens) {
+    const char* valid[] = {"none", "strict", "content", "size", "inline-size layout",
+        "paint style layout", "layout style paint size", "inherit", "initial", "unset"};
+    for (const char* value : valid)
+        EXPECT_NE(css_parse_property_declaration("contain", 7, value, strlen(value), pool), nullptr) << value;
+    const char* invalid[] = {"none paint", "strict layout", "content size", "paint paint",
+        "size inline-size", "paint bogus", "\"paint\"", "paint, layout", "calc(1px)"};
+    for (const char* value : invalid)
+        EXPECT_EQ(css_parse_property_declaration("contain", 7, value, strlen(value), pool), nullptr) << value;
+}
+
+TEST_F(MotionCascadeTest, ContainmentInheritsComputedModesWithoutImplicitContainerContainment) {
+    DomElement parent = {};
+    parent.node_type = DOM_NODE_ELEMENT;
+    parent.set_synthetic(true);
+    parent.view_type = element.view_type = RDT_VIEW_BLOCK;
+    parent.doc = lam::up(&doc);
+    element.parent = lam::up(static_cast<DomNode*>(&parent));
+    doc.root = lam::up(&parent);
+    BlockProp parent_block = BLOCK_PROP_DEFAULT, child_block = BLOCK_PROP_DEFAULT;
+    parent.blk = lam::view_prop(&parent_block);
+    element.blk = lam::view_prop(&child_block);
+    LayoutContext context = {};
+    context.pool = lam::up(pool);
+    context.doc = lam::up(&doc);
+    context.view = lam::up(static_cast<DomNode*>(&element));
+    CssDeclaration* inherited = css_parse_declaration_text("contain:inherit", 15, pool);
+    ASSERT_NE(inherited, nullptr);
+    parent_block.computed_containment = CSS_CONTAIN_LAYOUT | CSS_CONTAIN_STYLE | CSS_CONTAIN_PAINT;
+    resolve_css_property(CSS_PROPERTY_CONTAIN, inherited, &context);
+    EXPECT_EQ(child_block.computed_containment, parent_block.computed_containment);
+    EXPECT_TRUE(child_block.contain_positioning);
+    EXPECT_TRUE(child_block.contain_paint);
+    EXPECT_FALSE(child_block.contain_size);
+
+    // query-container size containment is a used effect, not the parent's contain value.
+    parent_block.computed_containment = 0;
+    parent_block.container_axes = CSS_CONTAINER_INLINE | CSS_CONTAINER_BLOCK;
+    parent_block.contain_size = parent_block.contain_inline_size = true;
+    resolve_css_property(CSS_PROPERTY_CONTAIN, inherited, &context);
+    EXPECT_EQ(child_block.computed_containment, 0);
+    EXPECT_FALSE(child_block.contain_size);
+    EXPECT_FALSE(child_block.contain_inline_size);
+    EXPECT_FALSE(child_block.contain_positioning);
+    EXPECT_FALSE(child_block.contain_paint);
+
+    const struct {const char* text; uint8_t flags;} modes[] = {
+        {"strict", CSS_CONTAIN_SIZE | CSS_CONTAIN_LAYOUT | CSS_CONTAIN_STYLE | CSS_CONTAIN_PAINT},
+        {"content", CSS_CONTAIN_LAYOUT | CSS_CONTAIN_STYLE | CSS_CONTAIN_PAINT},
+        {"inline-size style", CSS_CONTAIN_INLINE_SIZE | CSS_CONTAIN_STYLE}, {"LaYoUt", CSS_CONTAIN_LAYOUT}
+    };
+    for (const auto& mode : modes) {
+        CssDeclaration* declaration = css_parse_property_declaration("contain", 7,
+            mode.text, strlen(mode.text), pool);
+        ASSERT_NE(declaration, nullptr);
+        EXPECT_EQ(css_value_containment_flags(declaration->value), mode.flags) << mode.text;
+    }
+    element.blk = nullptr;
+    element.parent = nullptr;
+}
+
+TEST_F(MotionCascadeTest, ComputedValuesPreserveLongDeclarationsAndRejectShortBuffers) {
+    StrBuf* names = strbuf_new();
+    ASSERT_NE(names, nullptr);
+    struct Cleanup {StrBuf* names; ~Cleanup() {strbuf_free(names);}} cleanup = {names};
+    for (int index = 0; index < 120; index++) {
+        if (index) strbuf_append_str(names, ", ");
+        strbuf_append_format(names, "animation%d", index);
+    }
+    CssDeclaration* declaration = css_parse_property_declaration("animation-name", 14,
+        names->str, names->length, pool);
+    ASSERT_NE(declaration, nullptr);
+    ASSERT_NE(style_tree_apply_declaration(element.specified_style, declaration), nullptr);
+    Pool* result_pool = pool_create();
+    ASSERT_NE(result_pool, nullptr);
+    struct ResultOwner {Pool* pool; ~ResultOwner() {pool_destroy(pool);}} result_owner = {result_pool};
+    String* value = css_prop_serialize_computed_value(result_pool, &element,
+        CSS_PROPERTY_ANIMATION_NAME, 0);
+    ASSERT_NE(value, nullptr);
+    EXPECT_EQ(value->len, names->length);
+    EXPECT_STREQ(value->chars, names->str);
+
+    char short_buffer[32];
+    // bounded native reads must report failure rather than return valid-looking truncated CSS.
+    EXPECT_FALSE(css_prop_serialize_computed(&element, CSS_PROPERTY_ANIMATION_NAME,
+        0, short_buffer, sizeof(short_buffer)));
+    EXPECT_STREQ(short_buffer, "");
+
+    FontProp font = FONT_PROP_DEFAULT;
+    font.family = lam::up(names->str);
+    element.font = lam::view_prop(&font);
+    value = css_prop_serialize_computed_value(result_pool, &element, CSS_PROPERTY_FONT_FAMILY, 0);
+    ASSERT_NE(value, nullptr);
+    EXPECT_EQ(value->len, names->length);
+    EXPECT_STREQ(value->chars, names->str);
+    element.font = nullptr;
+
+    size_t before_bytes = 0, before_count = 0;
+    pool_get_stats(pool, &before_bytes, &before_count);
+    for (int read = 0; read < 100; read++) {
+        char complete_buffer[4096];
+        ASSERT_TRUE(css_prop_serialize_computed(&element, CSS_PROPERTY_ANIMATION_NAME,
+            0, complete_buffer, sizeof(complete_buffer)));
+        EXPECT_STREQ(complete_buffer, names->str);
+    }
+    size_t after_bytes = 0, after_count = 0;
+    pool_get_stats(pool, &after_bytes, &after_count);
+    EXPECT_EQ(after_bytes, before_bytes);
+    EXPECT_EQ(after_count, before_count);
+}
+
 TEST_F(MotionCascadeTest, ScrollKeepsSelectorCacheValidButHoverInvalidatesIt) {
     ASSERT_NE(state_store_create(&doc), nullptr);
     DocState* state = doc.state;
@@ -635,16 +871,19 @@ TEST_F(MotionCascadeTest, CornerCssomRetainsComputedValuesAfterPaintConstraints)
     border.radius.expressions = lam::up(&original);
     const CssPropAccessor* shorthand = css_prop_accessor(CSS_PROPERTY_BORDER_RADIUS);
     ASSERT_NE(shorthand, nullptr);
-    char value[128];
+    StringBuf* value = stringbuf_new(pool);
+    ASSERT_NE(value, nullptr);
     for (unsigned paint = 0; paint < 3; paint++) {
         resolve_border_radius_percentages(&border.radius, 100.0f, 40.0f);
         constrain_corner_radii(&border.radius, 100.0f, 40.0f);
         EXPECT_FLOAT_EQ(border.radius.top_left, 50.0f);
-        ASSERT_TRUE(shorthand->serialize(shorthand, &element, 0, value, sizeof(value)));
-        EXPECT_STREQ(value, "80px / 50%");
+        ASSERT_TRUE(shorthand->serialize(shorthand, &element, 0, value));
+        EXPECT_STREQ(value->str->chars, "80px / 50%");
     }
+    // the bounded public projection retains its failure contract after callbacks become growable.
+    apply("border-radius:80px / 50%");
     char small[4] = {};
-    EXPECT_FALSE(shorthand->serialize(shorthand, &element, 0, small, sizeof(small)));
+    EXPECT_FALSE(css_prop_serialize_computed(&element, CSS_PROPERTY_BORDER_RADIUS, 0, small, sizeof(small)));
     element.bound = nullptr;
 }
 
@@ -665,9 +904,10 @@ TEST_F(MotionCascadeTest, CornerCssomCompressesBothAxesAndMapsLogicalCorners) {
     for (unsigned i = 0; i < 3; i++) {
         const CssPropAccessor* accessor = css_prop_accessor(properties[i]);
         ASSERT_NE(accessor, nullptr);
-        char value[128];
-        ASSERT_TRUE(accessor->serialize(accessor, &element, 0, value, sizeof(value)));
-        EXPECT_STREQ(value, expected[i]);
+        StringBuf* value = stringbuf_new(pool);
+        ASSERT_NE(value, nullptr);
+        ASSERT_TRUE(accessor->serialize(accessor, &element, 0, value));
+        EXPECT_STREQ(value->str->chars, expected[i]);
     }
     element.bound = nullptr;
 }
@@ -2443,6 +2683,66 @@ TEST_F(AnimationTickTest, NeutralOpacityAndColorEndpointsKeepUnderlyingValues) {
         }
         animation_scheduler_cancel(scheduler, instance);
     }
+}
+
+TEST_F(AnimationTickTest, GeometryProbeSamplesWithoutAdvancingTheRetainedTimeline) {
+    MockElement mock;
+    DomElement* element = createMockElement(&mock);
+    CssAnimProp config = defaultAnimProp("schedulerFade", 2.0f);
+    AnimationInstance* instance = css_animation_create(scheduler, element, &config,
+        opacityKeyframes(), 0.0, pool);
+    ASSERT_NE(instance, nullptr);
+    ((CssAnimState*)instance->state)->suppress_events = true;
+    AnimationInstance before = *instance;
+    animation_instance_sample(instance, 1.0, true);
+    EXPECT_FLOAT_EQ(mock.in_line.opacity, .5f);
+    animation_instance_sample(instance, 3.0, true);
+    EXPECT_FLOAT_EQ(mock.in_line.opacity, 1.0f);
+    EXPECT_EQ(instance->play_state, before.play_state);
+    EXPECT_DOUBLE_EQ(instance->start_time, before.start_time);
+    EXPECT_DOUBLE_EQ(instance->sample_time, before.sample_time);
+    EXPECT_DOUBLE_EQ(instance->active_time, before.active_time);
+    EXPECT_DOUBLE_EQ(instance->current_iteration, before.current_iteration);
+    EXPECT_EQ(instance->sampled, before.sampled);
+    EXPECT_EQ(instance->finish_notified, before.finish_notified);
+    EXPECT_EQ(scheduler->count, 1);
+    animation_instance_sample(instance, 1.0);
+    EXPECT_FLOAT_EQ(mock.in_line.opacity, .5f);
+}
+
+TEST(CssContainerIdentity, FlatTreeParentUsesShadowHostsAndNamedSlotAssignments) {
+    unsigned destroyed = 0;
+    DomDocument* document = cssom_create_owned_document(&destroyed);
+    ASSERT_NE(document, nullptr);
+    struct Cleanup {DomDocument* document; ~Cleanup() {free_document(document);}} cleanup = {document};
+    MarkBuilder builder(document->input);
+    auto create = [&](const char* tag) {
+        Item source = builder.element(tag).final();
+        return DomElement::create(document, tag, source.element);
+    };
+    DomElement* host = create("div");
+    DomElement* shadow = create("#document-fragment");
+    DomElement* slot = create("slot");
+    DomElement* fallback = create("span");
+    DomElement* child = create("div");
+    ASSERT_NE(host, nullptr); ASSERT_NE(shadow, nullptr); ASSERT_NE(slot, nullptr);
+    ASSERT_NE(fallback, nullptr); ASSERT_NE(child, nullptr);
+    ASSERT_TRUE(document->root->append_child(host));
+    host->set_shadow_root_element(shadow);
+    shadow->set_shadow_host_element(host);
+    ASSERT_TRUE(shadow->append_child(slot));
+    ASSERT_TRUE(slot->append_child(fallback));
+    EXPECT_EQ(dom_flat_tree_parent(slot), host);
+    EXPECT_EQ(dom_flat_tree_parent(fallback), slot);
+    ASSERT_TRUE(host->append_child(child));
+    EXPECT_EQ(dom_flat_tree_parent(child), slot);
+    EXPECT_EQ(dom_flat_tree_parent(fallback), nullptr);
+    ASSERT_TRUE(child->set_attribute("slot", "missing"));
+    EXPECT_EQ(dom_flat_tree_parent(child), nullptr);
+    EXPECT_EQ(dom_flat_tree_parent(fallback), slot);
+    ASSERT_TRUE(slot->set_attribute("name", "missing"));
+    EXPECT_EQ(dom_flat_tree_parent(child), slot);
+    EXPECT_EQ(dom_flat_tree_parent(slot), host);
 }
 
 TEST_F(AnimationTickTest, MissingStopsUsePropertyIntervalsAndInteriorNeutralEndpoints) {

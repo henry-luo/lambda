@@ -1555,6 +1555,16 @@ int image_get_dimensions_from_memory(const unsigned char* data, size_t length, i
     }
 }
 
+const char* image_mime_type_from_memory(const unsigned char* data, size_t length) {
+    switch (get_image_type_from_memory(data, length)) {
+        case IMAGE_TYPE_PNG: return "image/png";
+        case IMAGE_TYPE_JPEG: return "image/jpeg";
+        case IMAGE_TYPE_GIF: return "image/gif";
+        case IMAGE_TYPE_WEBP: return "image/webp";
+        default: return NULL;
+    }
+}
+
 // ============================================================================
 // Multi-frame GIF support (giflib-based)
 // ============================================================================

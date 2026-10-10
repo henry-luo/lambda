@@ -62,6 +62,9 @@ static void format_subsup(StringBuf* sb, const ElementReader& elem, int depth) {
     if (!base.isNull()) {
         format_item(sb, base, depth + 1);
     }
+    // limit placement belongs to the scripted nucleus and must survive round trips.
+    ItemReader modifier = elem.get_attr("modifier");
+    if (modifier.isString()) stringbuf_append_all(sb, 2, "\\", modifier.asString()->chars);
 
     // Emit subscript
     if (!sub.isNull()) {
@@ -144,13 +147,23 @@ static void format_radical(StringBuf* sb, const ElementReader& elem, int depth) 
     stringbuf_append_str(sb, "}");
 }
 
+static void format_optional_bracket(StringBuf* sb, ItemReader option, int depth) {
+    if (option.isNull()) return;
+    stringbuf_append_str(sb, "[");
+    if (option.isElement() && strcmp(option.asElement().tagName(), "brack_group") == 0)
+        format_children(sb, option.asElement(), depth + 1, " ");
+    else format_item(sb, option, depth + 1);
+    stringbuf_append_str(sb, "]");
+}
+
 static void format_two_arg_command(StringBuf* sb, ItemReader cmd,
-        const char* fallback, ItemReader first, ItemReader second, int depth) {
+        const char* fallback, ItemReader first, ItemReader second, int depth, const ItemReader* option = nullptr) {
     if (!cmd.isNull() && cmd.isString()) {
         stringbuf_append_str(sb, cmd.asString()->chars);
     } else {
         stringbuf_append_str(sb, fallback);
     }
+    if (option) format_optional_bracket(sb, *option, depth);
     stringbuf_append_str(sb, "{");
     if (!first.isNull()) format_item(sb, first, depth + 1);
     stringbuf_append_all(sb, 2, "}", "{");
@@ -164,7 +177,8 @@ static void format_fraction(StringBuf* sb, const ElementReader& elem, int depth)
     ItemReader numer = elem.get_attr("numer");
     ItemReader denom = elem.get_attr("denom");
 
-    format_two_arg_command(sb, cmd, "\\frac", numer, denom, depth);
+    ItemReader option = elem.get_attr("options");
+    format_two_arg_command(sb, cmd, "\\frac", numer, denom, depth, &option);
 }
 
 // Format `frac_like` element (merged grammar): the first child is typically
@@ -182,6 +196,7 @@ static void format_frac_like(StringBuf* sb, const ElementReader& elem, int depth
         } else {
             stringbuf_append_str(sb, "\\frac");
         }
+        format_optional_bracket(sb, elem.get_attr("options"), depth);
         stringbuf_append_str(sb, "{");
         format_item(sb, numer, depth + 1);
         stringbuf_append_all(sb, 2, "}", "{");
@@ -315,7 +330,9 @@ static void format_delimiter_group(StringBuf* sb, const ElementReader& elem, int
     }
 
     stringbuf_append_str(sb, " ");
-    format_children(sb, elem, depth, " ");
+    ItemReader body = elem.get_attr("body");
+    if (!body.isNull()) format_item(sb, body, depth + 1);
+    else format_children(sb, elem, depth, " ");
     stringbuf_append_str(sb, " ");
 
     stringbuf_append_str(sb, "\\right");
@@ -383,6 +400,10 @@ static void format_environment(StringBuf* sb, const ElementReader& elem, int dep
         stringbuf_append_all(sb, 2, "{", columns.asString()->chars);
         stringbuf_append_str(sb, "}");
     }
+    ItemReader alignment = elem.get_attr("alignment");
+    if (alignment.isString()) stringbuf_append_all(sb, 3, "[", alignment.asString()->chars, "]");
+    ItemReader pairs = elem.get_attr("pairs");
+    if (pairs.isString()) stringbuf_append_all(sb, 3, "{", pairs.asString()->chars, "}");
 
     stringbuf_append_str(sb, " ");
     if (!body.isNull()) format_item(sb, body, depth + 1);
@@ -430,6 +451,8 @@ static void format_style_command(StringBuf* sb, const ElementReader& elem, int d
     if (!cmd.isNull() && cmd.isString()) {
         stringbuf_append_str(sb, cmd.asString()->chars);
     }
+    ItemReader limits = elem.get_attr("limits");
+    if (limits.isBool() && limits.asBool()) stringbuf_append_str(sb, "*");
 
     if (!arg.isNull()) {
         stringbuf_append_str(sb, "{");
@@ -448,8 +471,16 @@ static void format_space_command(StringBuf* sb, const ElementReader& elem) {
 
 // Format `infix_frac`: convert to \frac{numer}{denom}
 static void format_infix_frac(StringBuf* sb, const ElementReader& elem, int depth) {
-    // infix fracs are converted to use fraction format in output
-    format_fraction(sb, elem, depth);
+    // infix commands own both sides of a braced math list, including authored thickness.
+    stringbuf_append_str(sb, "{");
+    format_item(sb, elem.get_attr("numer"), depth + 1);
+    stringbuf_append_str(sb, " ");
+    ItemReader cmd = elem.get_attr("cmd");
+    if (cmd.isString()) stringbuf_append_str(sb, cmd.asString()->chars);
+    format_item(sb, elem.get_attr("thickness"), depth + 1);
+    stringbuf_append_str(sb, " ");
+    format_item(sb, elem.get_attr("denom"), depth + 1);
+    stringbuf_append_str(sb, "}");
 }
 
 // Format `genfrac`: \genfrac{left}{right}{thickness}{style}{numer}{denom}
@@ -495,19 +526,18 @@ static void format_command_with_optional_bracket(StringBuf* sb,
     ItemReader option = elem.get_attr(option_attr);
     ItemReader content = elem.get_attr(content_attr);
     if (!cmd.isNull() && cmd.isString()) stringbuf_append_str(sb, cmd.asString()->chars);
-    if (!option.isNull()) {
-        stringbuf_append_str(sb, "[");
-        format_item(sb, option, depth + 1);
-        stringbuf_append_str(sb, "]");
-    }
+    format_optional_bracket(sb, option, depth);
     stringbuf_append_str(sb, "{");
-    if (!content.isNull()) format_item(sb, content, depth + 1);
+    if (content.isElement() && strcmp(content.asElement().tagName(), "group") == 0)
+        format_children(sb, content.asElement(), depth + 1, " ");
+    else if (!content.isNull()) format_item(sb, content, depth + 1);
     stringbuf_append_str(sb, "}");
 }
 
 // Format `extensible_arrow`: \xrightarrow[below]{above}
 static void format_extensible_arrow(StringBuf* sb, const ElementReader& elem, int depth) {
-    format_command_with_optional_bracket(sb, elem, depth, "below", "above");
+    bool direct = strcmp(elem.tagName(), "extended_arrow") == 0;
+    format_command_with_optional_bracket(sb, elem, depth, direct ? "lower" : "below", direct ? "upper" : "above");
 }
 
 // Format `sized_delimiter`: \big(, \Big|, etc.
@@ -515,8 +545,8 @@ static void format_sized_delimiter(StringBuf* sb, const ElementReader& elem) {
     ItemReader size = elem.get_attr("size");
     ItemReader delim = elem.get_attr("delim");
 
-    stringbuf_append_str(sb, "\\");
     if (!size.isNull() && size.isString()) {
+        if (size.asString()->chars[0] != '\\') stringbuf_append_str(sb, "\\");
         stringbuf_append_str(sb, size.asString()->chars);
     }
     if (!delim.isNull() && delim.isString()) {
@@ -527,10 +557,18 @@ static void format_sized_delimiter(StringBuf* sb, const ElementReader& elem) {
 // Format `color_command`: \textcolor{color}{content}
 static void format_color_command(StringBuf* sb, const ElementReader& elem, int depth) {
     ItemReader cmd = elem.get_attr("cmd");
-    ItemReader color = elem.get_attr("color");
+    ItemReader color = elem.get_attr("color_raw");
+    if (color.isNull()) color = elem.get_attr("color");
     ItemReader content = elem.get_attr("content");
 
     append_latex_command(sb, cmd);
+
+    ItemReader border = elem.get_attr("border_color");
+    if (!border.isNull()) {
+        stringbuf_append_str(sb, "{");
+        format_item(sb, border, depth + 1);
+        stringbuf_append_str(sb, "}");
+    }
 
     stringbuf_append_str(sb, "{");
     if (!color.isNull()) format_item(sb, color, depth + 1);
@@ -556,10 +594,21 @@ static void format_phantom_command(StringBuf* sb, const ElementReader& elem, int
 // Format `mathop_command`: \mathop{content}
 static void format_mathop_command(StringBuf* sb, const ElementReader& elem, int depth) {
     stringbuf_append_str(sb, "\\mathop");
-    ItemReader content = elem.get_attr("content");
+    ItemReader content = elem.get_attr("body");
+    if (content.isNull()) content = elem.get_attr("content");
     stringbuf_append_str(sb, "{");
     if (!content.isNull()) format_item(sb, content, depth + 1);
     stringbuf_append_str(sb, "}");
+}
+
+static void format_mathchoice(StringBuf* sb, const ElementReader& elem, int depth) {
+    stringbuf_append_str(sb, "\\mathchoice");
+    static const char* styles[] = {"display", "text", "script", "scriptscript"};
+    for (const char* style : styles) {
+        stringbuf_append_str(sb, "{");
+        format_item(sb, elem.get_attr(style), depth + 1);
+        stringbuf_append_str(sb, "}");
+    }
 }
 
 // Format `matrix_command`: \matrix{body} (plain TeX)
@@ -640,17 +689,26 @@ enum MathLatexSlot {
     MATH_LATEX_SPACE_COMMAND,
     MATH_LATEX_OVERUNDER_COMMAND,
     MATH_LATEX_EXTENSIBLE_ARROW,
+    MATH_LATEX_IMAGE_COMMAND,
+    MATH_LATEX_ROW_SEP,
     MATH_LATEX_SIZED_DELIMITER,
     MATH_LATEX_COLOR_COMMAND,
     MATH_LATEX_BOX_COMMAND,
     MATH_LATEX_PHANTOM_COMMAND,
     MATH_LATEX_MATHOP_COMMAND,
+    MATH_LATEX_MATHCHOICE,
+    MATH_LATEX_MATH_ATOM,
     MATH_LATEX_MATRIX_COMMAND,
     MATH_LATEX_CHILDREN_SPACE,
     MATH_LATEX_RULE_COMMAND,
     MATH_LATEX_LIMITS_MODIFIER,
     MATH_LATEX_CHILDREN_NONE,
     MATH_LATEX_NEGATION,
+    MATH_LATEX_BOX_TRANSFORM,
+    MATH_LATEX_TAG,
+    MATH_LATEX_MOD,
+    MATH_LATEX_VERBATIM,
+    MATH_LATEX_RAW_SOURCE,
 };
 
 static const MathTagDispatch MATH_LATEX_TAGS[] = {
@@ -678,17 +736,24 @@ static const MathTagDispatch MATH_LATEX_TAGS[] = {
     {"text_command", MATH_LATEX_TEXT_COMMAND},
     {"textstyle_command", MATH_LATEX_TEXT_COMMAND},
     {"style_command", MATH_LATEX_STYLE_COMMAND},
+    {"size_command", MATH_LATEX_STYLE_COMMAND},
     {"space_command", MATH_LATEX_SPACE_COMMAND},
     {"spacing_command", MATH_LATEX_SPACE_COMMAND},
     {"hspace_command", MATH_LATEX_SPACE_COMMAND},
     {"skip_command", MATH_LATEX_SPACE_COMMAND},
     {"overunder_command", MATH_LATEX_OVERUNDER_COMMAND},
     {"extensible_arrow", MATH_LATEX_EXTENSIBLE_ARROW},
+    {"extended_arrow", MATH_LATEX_EXTENSIBLE_ARROW},
+    {"image_command", MATH_LATEX_IMAGE_COMMAND},
+    {"row_sep", MATH_LATEX_ROW_SEP},
     {"sized_delimiter", MATH_LATEX_SIZED_DELIMITER},
     {"color_command", MATH_LATEX_COLOR_COMMAND},
     {"box_command", MATH_LATEX_BOX_COMMAND},
     {"phantom_command", MATH_LATEX_PHANTOM_COMMAND},
     {"mathop_command", MATH_LATEX_MATHOP_COMMAND},
+    {"mathop", MATH_LATEX_MATHOP_COMMAND},
+    {"mathchoice", MATH_LATEX_MATHCHOICE},
+    {"math_atom", MATH_LATEX_MATH_ATOM},
     {"matrix_command", MATH_LATEX_MATRIX_COMMAND},
     {"matrix_body", MATH_LATEX_CHILDREN_SPACE},
     {"rule_command", MATH_LATEX_RULE_COMMAND},
@@ -698,6 +763,16 @@ static const MathTagDispatch MATH_LATEX_TAGS[] = {
     {"paren_script", MATH_LATEX_CHILDREN_SPACE},
     {"not_overlay", MATH_LATEX_NEGATION},
     {"not_empty", MATH_LATEX_NEGATION},
+    {"box_transform", MATH_LATEX_BOX_TRANSFORM},
+    {"equation_tag", MATH_LATEX_TAG},
+    {"mod_command", MATH_LATEX_MOD},
+    {"verbatim", MATH_LATEX_VERBATIM},
+    {"cd_arrow", MATH_LATEX_RAW_SOURCE},
+    {"font_switch", MATH_LATEX_STYLE_COMMAND},
+    {"array_rule", MATH_LATEX_STYLE_COMMAND},
+    {"layout_control", MATH_LATEX_STYLE_COMMAND},
+    {"text_group", MATH_LATEX_RAW_SOURCE},
+    {"embedded_math", MATH_LATEX_ROOT},
     {nullptr, MATH_LATEX_UNKNOWN},
 };
 
@@ -738,11 +813,22 @@ static void format_element_impl(StringBuf* sb, const ElementReader& elem, int de
     case MATH_LATEX_SPACE_COMMAND: return format_space_command(sb, elem);
     case MATH_LATEX_OVERUNDER_COMMAND: return format_overunder_command(sb, elem, depth);
     case MATH_LATEX_EXTENSIBLE_ARROW: return format_extensible_arrow(sb, elem, depth);
+    case MATH_LATEX_IMAGE_COMMAND: return format_command_with_optional_bracket(sb, elem, depth, "options", "src");
+    case MATH_LATEX_ROW_SEP:
+        stringbuf_append_str(sb, " \\\\");
+        if (!elem.get_attr("gap").isNull()) {
+            stringbuf_append_str(sb, "[");
+            format_item(sb, elem.get_attr("gap"), depth + 1);
+            stringbuf_append_str(sb, "]");
+        }
+        return;
     case MATH_LATEX_SIZED_DELIMITER: return format_sized_delimiter(sb, elem);
     case MATH_LATEX_COLOR_COMMAND: return format_color_command(sb, elem, depth);
     case MATH_LATEX_BOX_COMMAND: return format_box_command(sb, elem, depth);
     case MATH_LATEX_PHANTOM_COMMAND: return format_phantom_command(sb, elem, depth);
     case MATH_LATEX_MATHOP_COMMAND: return format_mathop_command(sb, elem, depth);
+    case MATH_LATEX_MATHCHOICE: return format_mathchoice(sb, elem, depth);
+    case MATH_LATEX_MATH_ATOM: return format_command_with_optional_bracket(sb, elem, depth, "options", "body");
     case MATH_LATEX_MATRIX_COMMAND: return format_matrix_command(sb, elem, depth);
     case MATH_LATEX_CHILDREN_SPACE: return format_children(sb, elem, depth, " ");
     case MATH_LATEX_RULE_COMMAND: return format_rule_command(sb, elem, depth);
@@ -753,9 +839,58 @@ static void format_element_impl(StringBuf* sb, const ElementReader& elem, int de
         stringbuf_append_str(sb, "\\not");
         ItemReader target = elem.get_attr("target");
         if (target.isNull()) stringbuf_append_str(sb, "{}");
-        else format_item(sb, target, depth + 1);
+        else {
+            stringbuf_append_str(sb, "{");
+            format_item(sb, target, depth + 1);
+            stringbuf_append_str(sb, "}");
+        }
         return;
     }
+    case MATH_LATEX_BOX_TRANSFORM: {
+        ItemReader raise = elem.get_attr("raise");
+        if (!raise.isNull()) {
+            append_latex_command(sb, elem.get_attr("cmd"));
+            stringbuf_append_str(sb, "{");
+            format_item(sb, raise, depth + 1);
+            stringbuf_append_str(sb, "}");
+            static const char* attrs[] = {"height", "depth"};
+            for (const char* attr : attrs) {
+                ItemReader extent = elem.get_attr(attr);
+                if (!extent.isNull()) {
+                    stringbuf_append_str(sb, "[");
+                    format_item(sb, extent, depth + 1);
+                    stringbuf_append_str(sb, "]");
+                }
+            }
+            stringbuf_append_str(sb, "{");
+            format_item(sb, elem.get_attr("body"), depth + 1);
+            stringbuf_append_str(sb, "}");
+        } else format_command_with_optional_bracket(sb, elem, depth, "options", "body");
+        return;
+    }
+    case MATH_LATEX_TAG: {
+        stringbuf_append_str(sb, "\\tag");
+        ItemReader starred = elem.get_attr("starred");
+        if (starred.isBool() && starred.asBool()) stringbuf_append_str(sb, "*");
+        stringbuf_append_str(sb, "{");
+        format_item(sb, elem.get_attr("body"), depth + 1);
+        stringbuf_append_str(sb, "}");
+        return;
+    }
+    case MATH_LATEX_MOD:
+        if (elem.get_attr("body").isNull()) append_latex_command(sb, elem.get_attr("cmd"));
+        else format_command_with_optional_bracket(sb, elem, depth, "options", "body");
+        return;
+    case MATH_LATEX_VERBATIM: {
+        stringbuf_append_str(sb, "\\verb");
+        ItemReader starred = elem.get_attr("starred");
+        if (starred.isBool() && starred.asBool()) stringbuf_append_str(sb, "*");
+        append_latex_command(sb, elem.get_attr("delimiter"));
+        append_latex_command(sb, elem.get_attr("value"));
+        append_latex_command(sb, elem.get_attr("delimiter"));
+        return;
+    }
+    case MATH_LATEX_RAW_SOURCE: return append_latex_command(sb, elem.get_attr("source"));
     default:
         break;
     }

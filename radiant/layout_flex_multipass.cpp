@@ -485,11 +485,12 @@ static bool flex_final_content_is_layout_item(View* view) {
 
 template <typename Fn>
 static void flex_for_each_final_content_item(ViewBlock* container,
-                                             FlexContainerLayout* flex, Fn fn) {
+                                             FlexContainerLayout* flex, Fn fn,
+                                             bool source_order = false) {
     if (!container) return;
     if (flex && flex->flex_items && flex->item_count > 0) {
         for (int i = 0; i < flex->item_count; i++) {
-            View* item = flex->flex_items[i];
+            View* item = source_order && flex->source_items ? flex->source_items[i] : flex->flex_items[i];
             if (flex_final_content_is_layout_item(item)) {
                 fn(lam::view_require_element(item));
             }
@@ -1002,6 +1003,13 @@ void layout_flex_item_content(LayoutContext* lycon, ViewBlock* flex_item) {
     log_enter();
 
     LayoutContext saved_context = *lycon;
+    // final flex item layout bypasses layout_block, including its generated-content scope.
+    LayoutCounterScope counter_scope;
+    if (!counter_scope.enter(lycon, flex_item, flex_item->as_element(), flex_item->display)) {
+        log_error("counter scope: cannot allocate flex item frame");
+        log_leave();
+        return;
+    }
     LayoutContentBox content = layout_content_box(flex_item);
     float content_width = content.width;
     float content_height = content.height;
@@ -1583,7 +1591,7 @@ void layout_final_flex_content(LayoutContext* lycon, ViewBlock* flex_container) 
         [&](ViewElement* item) {
             if (layout_view_is_abs_or_fixed(lam::view_require_block(item))) return;
             layout_flex_item_content(lycon, lam::view_require_block(item));
-        });
+        }, true);
 
     apply_anonymous_flex_text_geometry(flex);
     // CRITICAL: Adjust positions of items after content layout for column flex

@@ -101,15 +101,6 @@ static bool event_view_pointer_events_none(View* view) {
 
 
 
-static bool event_view_is_float(View* view) {
-    if (!view || !view->is_element()) return false;
-    DomElement* elem = lam::dom_require_element(view);
-    CssEnum float_value = elem->position
-        ? elem->positionp()->float_prop
-        : layout_specified_keyword(elem, CSS_PROPERTY_FLOAT, CSS_VALUE_NONE);
-    return float_value == CSS_VALUE_LEFT || float_value == CSS_VALUE_RIGHT;
-}
-
 // Forward declarations for event targeting
 void target_html_doc(EventContext* evcon, ViewTree* view_tree);
 void target_block_view(EventContext* evcon, ViewBlock* block);
@@ -898,11 +889,9 @@ static void target_custom_layout_children(EventContext* evcon, ViewBlock* block)
 void target_children(EventContext* evcon, View* view) {
     if (!evcon || !view) return;
 
-    bool has_float_child = false;
     bool has_step8 = false;
     View* last = view;
     for (View* child = view; child; child = child->next()) {
-        if (event_view_is_float(child)) has_float_child = true;
         if (!radiant_stack_is_deferred_from_normal_flow(child) &&
             radiant_stack_is_in_flow_positioned_step8(child)) {
             has_step8 = true;
@@ -924,13 +913,10 @@ void target_children(EventContext* evcon, View* view) {
         if (evcon->target) return;
     }
 
-    // floating siblings can overlap after shrink-to-fit; later floats paint on
-    // top of earlier ones, so their normal-flow hit order must be reversed.
-    for (View* child = has_float_child ? last : view;
+    // overlapping normal-flow boxes also take hits in reverse paint order.
+    for (View* child = last;
          child && !evcon->target;
-         child = has_float_child
-             ? (child == view ? nullptr : static_cast<View*>(child->prev_sibling))
-             : child->next()) {
+         child = child == view ? nullptr : static_cast<View*>(child->prev_sibling)) {
         // step-8 boxes were tried above
         if (has_step8 && radiant_stack_is_in_flow_positioned_step8(child)) continue;
         if (child->is_block()) {
@@ -1222,13 +1208,14 @@ void target_block_view(EventContext* evcon, ViewBlock* block) {
     // must not take the hit either: an overflowing child would claim clicks on
     // a later sibling painted over it, e.g. a tab bar under a long <pre>. The
     // clip is in unscrolled block space, so test it before the scroll offset.
-    Bound overflow_clip;
-    bool clipped_out = layout_block_overflow_clip(block, &overflow_clip) &&
+    Bound overflow_clip; Corner overflow_radius;
+    bool clipped_out = render_clip_overflow_geometry(block, &overflow_clip, &overflow_radius) &&
         !event_block_is_top_level_viewport(block) &&
-        !(evcon->block.x + overflow_clip.left <= event->x &&
-          event->x < evcon->block.x + overflow_clip.right &&
-          evcon->block.y + overflow_clip.top <= event->y &&
-          event->y < evcon->block.y + overflow_clip.bottom);
+        (event->x - evcon->block.x >= overflow_clip.right ||
+         event->y - evcon->block.y >= overflow_clip.bottom ||
+         !clip_point_in_rounded_rect(event->x - evcon->block.x, event->y - evcon->block.y,
+            {overflow_clip.left, overflow_clip.top, overflow_clip.right - overflow_clip.left,
+             overflow_clip.bottom - overflow_clip.top}, &overflow_radius));
     // target the scrollbars first
     View* view = NULL;
     bool hover = false;
@@ -1362,9 +1349,15 @@ void target_block_view(EventContext* evcon, ViewBlock* block) {
         bool rich_host_margin_hit_allowed = event_inside_block(evcon, block);
         bool rich_host = is_rich_editable_host(static_cast<View*>(block));
         if (!rich_host_margin_hit_allowed && rich_host) {
-            bool event_inside_later_sibling = false;
-            for (View* sibling = static_cast<View*>(block)->next_sibling;
+            // margin caret snapping belongs to this parent's gaps; it must not
+            // claim painted siblings or distant content during reverse hit traversal.
+            ViewBlock* parent_block = lam::view_as_block(block->parent);
+            rich_host_margin_hit_allowed = parent_block &&
+                pa_block.x <= event->x && event->x < pa_block.x + parent_block->width &&
+                pa_block.y <= event->y && event->y < pa_block.y + parent_block->height;
+            for (View* sibling = parent_block ? parent_block->first_child : nullptr;
                  sibling; sibling = sibling->next_sibling) {
+                if (sibling == static_cast<View*>(block)) continue;
                 if (sibling->view_type != RDT_VIEW_BLOCK &&
                     sibling->view_type != RDT_VIEW_INLINE_BLOCK &&
                     sibling->view_type != RDT_VIEW_LIST_ITEM) {
@@ -1375,11 +1368,10 @@ void target_block_view(EventContext* evcon, ViewBlock* block) {
                 float sibling_y = pa_block.y + sibling_block->y;
                 if (sibling_x <= event->x && event->x < sibling_x + sibling_block->width &&
                     sibling_y <= event->y && event->y < sibling_y + sibling_block->height) {
-                    event_inside_later_sibling = true;
+                    rich_host_margin_hit_allowed = false;
                     break;
                 }
             }
-            rich_host_margin_hit_allowed = !event_inside_later_sibling;
         }
         if (!evcon->target && is_in_rich_editable_subtree(static_cast<View*>(block)) &&
             rich_host_margin_hit_allowed) {
@@ -1427,8 +1419,16 @@ void target_block_view(EventContext* evcon, ViewBlock* block) {
         // use the block's own accumulated position (parent + block offset),
         // not the restored parent position
         float x = evcon->block.x + block->x, y = evcon->block.y + block->y;
+        BorderProp* border = block->bound ? block->boundary_mut()->border.get() : nullptr;
+        Corner radius = {};
+        if (border) {
+            resolve_border_radius_percentages(&border->radius, block->width, block->height);
+            radius = border->radius;
+            constrain_corner_radii(&radius, block->width, block->height);
+        }
         if (x <= event->x && event->x < x + block->width &&
-            y <= event->y && event->y < y + block->height) {
+            y <= event->y && event->y < y + block->height &&
+            clip_point_in_rounded_rect(event->x, event->y, {x, y, block->width, block->height}, &radius)) {
             // A fixed editor overlay can cover the viewport visually while
             // pointer-events:none makes the underlying control the hit target.
             log_debug("hit on block: %s", block->node_name());
@@ -6553,11 +6553,6 @@ static void dom_js_record_reconcile(DomDocument* doc,
     event_state_log_finish_record(state->active_event_log, &w);
 }
 
-static bool dom_js_clear_layout_dirty_visitor(DomNode* node, void*) {
-    node->layout_dirty = false;
-    return true;
-}
-
 static bool dom_js_is_connected_to_document(DomDocument* doc, DomNode* node) {
     if (!doc || !node) return false;
     DomNode* root = static_cast<DomNode*>(doc->root);
@@ -7404,14 +7399,7 @@ static void dom_js_recascade_subtree(DomDocument* doc, DomElement* root,
         return;
     }
 
-    view_geometry_walk_dom_tree(static_cast<DomNode*>(root),
-                                radiant_clear_cascaded_styles_visitor, nullptr);
-
-    Pool* pool = doc->document_pool;
-    CssEngine* css_engine = (CssEngine*)doc->services.cached_css_engine;
-    radiant_apply_css_stylesheets_to_tree(
-        doc, root, doc->stylesheets, doc->stylesheet_count,
-        pool, css_engine, matcher);
+    radiant_recascade_document_styles(doc, root, matcher);
 }
 
 static bool dom_js_recascade_mutations(DomDocument* doc, SelectorMatcher* matcher) {
@@ -7752,11 +7740,6 @@ static bool post_html_handler_incremental_rebuild(
     doc->skip_style_reset = false;
     doc->incremental_layout = false;
     if (evcon->ui_context) evcon->ui_context->document = lam::up(saved_doc);
-
-    if (doc->root) {
-        view_geometry_walk_dom_tree(static_cast<DomNode*>(doc->root),
-                                    dom_js_clear_layout_dirty_visitor, nullptr);
-    }
 
     uint64_t t2 = time_now_ns();
 
@@ -13160,7 +13143,11 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
         // Handle text selection drag (supports cross-view selection)
         View* anchor_view = NULL;
         int anchor_offset = 0;
-        if (selection_get_pointer_anchor(state, &anchor_view, &anchor_offset)) {
+        // a stationary move after a press must not start edge autoscroll and
+        // move a different element under the pointer before the release.
+        bool selection_moved = motion->movement_x != 0.0f || motion->movement_y != 0.0f;
+        if ((selection_moved || (state && state->editing_autoscroll_active)) &&
+            selection_get_pointer_anchor(state, &anchor_view, &anchor_offset)) {
             View* current_target = evcon.target;
 
             log_debug("[SELECTION DRAG] is_selecting=true, anchor_view=%p, current_target=%p (type=%d)",

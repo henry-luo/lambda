@@ -26,6 +26,7 @@
 #include "../../../lib/str.h"
 #include "../../../lib/byte_builder.h"
 #include "../../../lib/font/font_math.h"
+#include "../../../lib/image.h"
 #include "../../../lib/endian.h"
 #include "../../runtime/side_stack.h"
 #include "../../runtime/gc/gc_heap.h"
@@ -4290,6 +4291,22 @@ static Item radiant_font_metrics_record(FontHandle* handle, const FontMetrics* m
     return result.get();
 }
 
+// D7.1.2v2: scripts acquire bytes and choose layout; the host returns image facts.
+RADIANT_C_API Item fn_radiant_image_metrics(Item data_item) {
+    if (get_type_id(data_item) != LMD_TYPE_BINARY) return ItemNull;
+    Binary* data = data_item.get_binary();
+    int width = 0, height = 0;
+    if (!image_get_dimensions_from_memory(binary_data(data), data->len, &width, &height) ||
+        width <= 0 || height <= 0) return ItemNull;
+    const char* mime = image_mime_type_from_memory(binary_data(data), data->len);
+    RootFrame roots(1);
+    Rooted<Item> result(roots, radiant_obj_new());
+    radiant_rooted_obj_set(result, "width", radiant_int_item(width));
+    radiant_rooted_obj_set(result, "height", radiant_int_item(height));
+    radiant_rooted_obj_set(result, "mime_type", radiant_string_item(mime));
+    return result.get();
+}
+
 RADIANT_C_API Item fn_radiant_math_metrics(Item style_item, Item codepoints_item, Item faces_item) {
     RootFrame roots(7);
     Rooted<Item> style_root(roots, style_item), source(roots, codepoints_item), faces(roots, faces_item),
@@ -4845,6 +4862,8 @@ static const JubeFuncDef radiant_functions[] = {
      "Item fn_radiant_font_metrics(Item style, Item faces)", (fn_ptr)fn_radiant_font_metrics},
     {"math_metrics", "fn(style: map, codepoints: array, faces: array|null) -> map|null", (fn_ptr)fn_radiant_math_metrics, JUBE_FN_NONE,
      "Item fn_radiant_math_metrics(Item style, Item codepoints, Item faces)", (fn_ptr)fn_radiant_math_metrics},
+    {"image_metrics", "fn(data: binary) -> map|null", (fn_ptr)fn_radiant_image_metrics, JUBE_FN_NONE,
+     "Item fn_radiant_image_metrics(Item data)", (fn_ptr)fn_radiant_image_metrics},
     {"graphemes", "fn(text: string) -> array|null", (fn_ptr)fn_radiant_graphemes, JUBE_FN_NONE,
      "Item fn_radiant_graphemes(Item text)", (fn_ptr)fn_radiant_graphemes},
     {"measure_html", "fn(html: string, width: int, height: int) -> array|null", (fn_ptr)fn_radiant_measure_html, JUBE_FN_NONE,

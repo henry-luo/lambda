@@ -1,0 +1,275 @@
+{
+  "name": "style containment scopes",
+  "html": "test/ui/css_containment_style.html",
+  "viewport": {
+    "width": 500,
+    "height": 500
+  },
+  "events": [
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#increment"
+      },
+      "equals": "11.2"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#increment-tail"
+      },
+      "equals": "1"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#set"
+      },
+      "equals": "11.2"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#set-tail"
+      },
+      "equals": "1"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#quote"
+      },
+      "equals": "A1Z"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#close"
+      },
+      "equals": "AZZ"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#noopen"
+      },
+      "equals": "AZ"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#noclose"
+      },
+      "equals": "AZ"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#implicit-tail"
+      },
+      "equals": "5"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#desc"
+      },
+      "equals": "9.2"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#desc-tail"
+      },
+      "equals": "9"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#nested"
+      },
+      "equals": "4.54.5.74.5"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#nested-tail"
+      },
+      "equals": "4"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#block-quote"
+      },
+      "equals": "A1Z"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#measure-flex"
+      },
+      "equals": "A1Z"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#measure-grid"
+      },
+      "equals": "A1Z"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#measure-atomic"
+      },
+      "equals": "A1Z"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#measure-float"
+      },
+      "equals": "A1Z"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#measure-columns"
+      },
+      "equals": "A1Z"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#counter-flex"
+      },
+      "equals": "77.27"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#counter-grid"
+      },
+      "equals": "77.27"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#order-first"
+      },
+      "equals": "1"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#order-second"
+      },
+      "equals": "3"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#order-third"
+      },
+      "equals": "6"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#grid-order-first"
+      },
+      "equals": "1"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#grid-order-second"
+      },
+      "equals": "3"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#grid-order-third"
+      },
+      "equals": "6"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#wrap-order-first"
+      },
+      "equals": "1"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#wrap-order-second"
+      },
+      "equals": "3"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#wrap-order-third"
+      },
+      "equals": "6"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#toggle"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#increment"
+      },
+      "equals": "13"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#increment-tail"
+      },
+      "equals": "3"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#quote"
+      },
+      "equals": "A19"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#toggle"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#increment"
+      },
+      "equals": "11.2"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#increment-tail"
+      },
+      "equals": "1"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#quote"
+      },
+      "equals": "A1Z"
+    }
+  ],
+  "input_turn_ms": 0
+}

@@ -589,6 +589,7 @@ struct EchoMark {
 
 EchoMark echo_begin(Engine* e, const Token& t);
 bool echo_finish(Engine* e, const EchoMark& m);
+void echo_definition(Engine* e, const EchoMark& m);
 
 // names
 uint32_t intern(Engine* e, const char* chars, uint32_t len);

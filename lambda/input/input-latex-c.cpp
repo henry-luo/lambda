@@ -35,7 +35,8 @@ static bool is_big_operator(const char* name) {
     return strcmp(name, "sum") == 0 || strcmp(name, "prod") == 0 ||
         strcmp(name, "coprod") == 0 || strcmp(name, "int") == 0 ||
         strcmp(name, "iint") == 0 || strcmp(name, "iiint") == 0 ||
-        strcmp(name, "oint") == 0 || strcmp(name, "lim") == 0 ||
+        strcmp(name, "oint") == 0 || strcmp(name, "intop") == 0 || strcmp(name, "oiint") == 0 ||
+        strcmp(name, "oiiint") == 0 || strcmp(name, "lim") == 0 ||
         strcmp(name, "limsup") == 0 || strcmp(name, "liminf") == 0 ||
         strcmp(name, "sup") == 0 || strcmp(name, "inf") == 0 ||
         strcmp(name, "max") == 0 || strcmp(name, "min") == 0 ||
@@ -57,13 +58,48 @@ static bool is_literal_text_escape(const char* name) {
 static bool is_style_command(const char* name) {
     return strcmp(name, "mathrm") == 0 || strcmp(name, "mathbf") == 0 ||
         strcmp(name, "boldsymbol") == 0 ||
-        strcmp(name, "mathit") == 0 || strcmp(name, "mathsf") == 0 ||
+        strcmp(name, "mathit") == 0 || strcmp(name, "mathsf") == 0 || strcmp(name, "mathsfit") == 0 ||
         strcmp(name, "mathtt") == 0 || strcmp(name, "mathcal") == 0 ||
         strcmp(name, "mathbb") == 0 || strcmp(name, "mathfrak") == 0 ||
         strcmp(name, "mathscr") == 0 || strcmp(name, "mathnormal") == 0 ||
         strcmp(name, "operatorname") == 0 || strcmp(name, "displaystyle") == 0 ||
         strcmp(name, "textstyle") == 0 || strcmp(name, "scriptstyle") == 0 ||
         strcmp(name, "scriptscriptstyle") == 0;
+}
+
+static bool is_size_command(const char* name) {
+    static const char* commands[] = {"tiny", "sixptsize", "scriptsize", "footnotesize", "small",
+        "normalsize", "large", "Large", "LARGE", "huge", "Huge"};
+    for (const char* command : commands) if (strcmp(name, command) == 0) return true;
+    return false;
+}
+
+static bool is_math_accent(const char* name) {
+    static const char* commands[] = {"hat", "bar", "vec", "dot", "ddot", "dddot", "ddddot",
+        "tilde", "acute", "breve", "check", "grave", "widehat", "widetilde", "widecheck",
+        "overline", "underline", "underbar", "overbrace", "underbrace", "overbracket", "underbracket",
+        "overrightarrow", "Overrightarrow", "underrightarrow", "overleftarrow", "underleftarrow",
+        "overleftrightarrow", "underleftrightarrow", "overleftharpoon", "overrightharpoon",
+        "overgroup", "undergroup", "overlinesegment", "underlinesegment", "utilde", "mathring"};
+    for (const char* command : commands) if (strcmp(name, command) == 0) return true;
+    return false;
+}
+
+static bool is_extended_arrow(const char* name) {
+    static const char* commands[] = {"xrightarrow", "xleftarrow", "xleftrightarrow", "xRightarrow",
+        "xLeftarrow", "xLeftrightarrow", "xhookrightarrow", "xhookleftarrow", "xtwoheadrightarrow",
+        "xtwoheadleftarrow", "xmapsto", "xrightleftharpoons", "xleftrightharpoons",
+        "xrightleftarrows", "xrightequilibrium", "xleftequilibrium"};
+    for (const char* command : commands) if (strcmp(name, command) == 0) return true;
+    return false;
+}
+
+static const char* math_atom_class(const char* name) {
+    static const struct { const char* command; const char* atom; } atoms[] = {
+        {"mathord", "mord"}, {"mathbin", "mbin"}, {"mathrel", "mrel"},
+        {"mathopen", "mopen"}, {"mathclose", "mclose"}, {"mathpunct", "mpunct"}, {"mathinner", "minner"}};
+    for (const auto& atom : atoms) if (strcmp(name, atom.command) == 0) return atom.atom;
+    return nullptr;
 }
 
 static bool is_spacing_command(const char* name) {
@@ -99,16 +135,12 @@ static bool is_infix_fraction_command(const char* name) {
 }
 
 static bool is_supported_math_environment(const char* name) {
-    return strcmp(name, "array") == 0 || strcmp(name, "matrix") == 0 ||
-        strcmp(name, "pmatrix") == 0 || strcmp(name, "bmatrix") == 0 ||
-        strcmp(name, "Bmatrix") == 0 || strcmp(name, "vmatrix") == 0 ||
-        strcmp(name, "Vmatrix") == 0 || strcmp(name, "cases") == 0 ||
-        strcmp(name, "rcases") == 0 || strcmp(name, "dcases") == 0 ||
-        strcmp(name, "aligned") == 0 || strcmp(name, "align") == 0 ||
-        // split must retain its row/column separators inside a structured environment.
-        strcmp(name, "split") == 0 ||
-        strcmp(name, "equation") == 0 || strcmp(name, "smallmatrix") == 0 ||
-        strcmp(name, "IEEEeqnarray") == 0;
+    static const char* environments[] = {"array", "matrix", "matrix*", "pmatrix", "pmatrix*",
+        "bmatrix", "bmatrix*", "Bmatrix", "Bmatrix*", "vmatrix", "vmatrix*", "Vmatrix", "Vmatrix*",
+        "cases", "rcases", "dcases", "aligned", "alignedat", "align", "align*", "alignat", "alignat*",
+        "gathered", "gather", "gather*", "split", "equation", "equation*", "smallmatrix", "subarray", "CD", "IEEEeqnarray"};
+    for (const char* environment : environments) if (strcmp(name, environment) == 0) return true;
+    return false;
 }
 
 static bool is_math_document_environment(const char* name) {
@@ -140,12 +172,13 @@ static void append_latex_content(MarkBuilder& builder, ElementBuilder& command, 
 class DirectMathParser {
 public:
     DirectMathParser(InputContext& context, const char* source, size_t length,
-                     size_t source_offset, bool ascii, bool allow_infix = true)
+                     size_t source_offset, bool ascii, bool allow_infix = true, bool text_mode = false)
         : ctx_(context), builder_(context.builder), source_(source), length_(length),
-          offset_(source_offset), position_(0), ascii_(ascii), allow_infix_(allow_infix) {}
+          offset_(source_offset), position_(0), ascii_(ascii), allow_infix_(allow_infix), text_mode_(text_mode) {}
 
-    Item parse() {
+    Item parse(const char* expansion_error = nullptr) {
         ElementBuilder root = builder_.element("math");
+        if (expansion_error) root.attr("error", builder_.createStringItem(expansion_error));
         parse_children(root, false);
         return root.final();
     }
@@ -163,6 +196,7 @@ private:
     size_t position_;
     bool ascii_;
     bool allow_infix_;
+    bool text_mode_;
 
     void error(const char* message) {
         ctx_.tracker.seek(offset_ + position_);
@@ -238,6 +272,7 @@ private:
             error("missing script argument");
             return ItemNull;
         }
+        if (text_mode_) return parse_text_arg();
         if (source_[position_] == '{') return parse_group();
         if (ascii_ && source_[position_] == '(') return parse_paren_script_group();
         if (!ascii_) {
@@ -286,6 +321,23 @@ private:
             return builder_.createStringItem(source_ + begin, end - begin);
         }
         size_t begin = position_;
+        // an unbraced TeX dimension ends after its unit, even when math follows immediately.
+        while (position_ < length_ && (source_[position_] == '+' || source_[position_] == '-')) {
+            position_++;
+            skip_space();
+        }
+        bool number = false;
+        while (position_ < length_ && (isdigit((unsigned char)source_[position_]) || source_[position_] == '.')) {
+            number = true;
+            position_++;
+        }
+        if (number) {
+            skip_space();
+            if (position_ + 1 < length_ && isalpha((unsigned char)source_[position_]) &&
+                isalpha((unsigned char)source_[position_ + 1])) position_ += 2;
+            return builder_.createStringItem(source_ + begin, position_ - begin);
+        }
+        position_ = begin;
         while (position_ < length_ && !isspace((unsigned char)source_[position_])) position_++;
         return builder_.createStringItem(source_ + begin, position_ - begin);
     }
@@ -298,6 +350,18 @@ private:
         const char* modifier = nullptr;
         for (;;) {
             skip_space();
+            if (position_ < length_ && source_[position_] == '\'') {
+                ElementBuilder primes = builder_.element("group");
+                if (item_present(sup)) primes.child(sup);
+                while (position_ < length_ && source_[position_] == '\'') {
+                    position_++;
+                    ElementBuilder prime = builder_.element("symbol_command");
+                    prime.attr("name", builder_.createStringItem("prime"));
+                    primes.child(prime.final());
+                }
+                sup = primes.final();
+                continue;
+            }
             if (position_ < length_ && source_[position_] == '\\') {
                 char modifier_name[96];
                 char modifier_full[104];
@@ -315,7 +379,12 @@ private:
             char marker = source_[position_++];
             Item value = parse_script_arg();
             if (marker == '_') sub = value;
-            else sup = value;
+            else if (item_present(sup)) {
+                ElementBuilder combined = builder_.element("group");
+                combined.child(sup);
+                combined.child(value);
+                sup = combined.final();
+            } else sup = value;
         }
         if (!item_present(sub) && !item_present(sup)) return base;
         ElementBuilder result = builder_.element("subsup");
@@ -389,10 +458,6 @@ private:
             position_++;
             return builder_.createSymbolItem("row_sep");
         }
-        if (c == '\\' && position_ < length_ && source_[position_] == '\\') {
-            position_++;
-            return builder_.createSymbolItem("row_sep");
-        }
         if (c == '-' && position_ < length_ && source_[position_] == '>') {
             position_++;
             tag = "relation";
@@ -419,20 +484,162 @@ private:
         return true;
     }
 
+    size_t verbatim_end(size_t cursor) {
+        if (cursor < length_ && source_[cursor] == '*') cursor++;
+        if (cursor >= length_) return length_;
+        char delimiter = source_[cursor++];
+        while (cursor < length_ && source_[cursor] != delimiter) cursor++;
+        return cursor < length_ ? cursor + 1 : cursor;
+    }
+
     Item parse_command() {
         char name[96];
         char full[104];
         if (!read_command(name, sizeof(name), full, sizeof(full))) return ItemNull;
         if (name[0] == '\0') return ItemNull;
         if (name[0] == ' ' || name[0] == '\t' || name[0] == '\n') return builder_.createStringItem(" ");
+        // parse_primary sends control symbols here; \\ is a row break, never a printed backslash.
+        if (strcmp(name, "\\") == 0 || strcmp(name, "cr") == 0)
+            return builder_.createSymbolItem("row_sep");
         if (!allow_infix_ && is_infix_fraction_command(name)) return ItemNull;
+
+        if (strcmp(name, "verb") == 0) {
+            size_t after = verbatim_end(position_);
+            bool starred = position_ < length_ && source_[position_] == '*';
+            if (starred) position_++;
+            size_t begin = position_ < length_ ? position_ + 1 : length_;
+            char delimiter = position_ < length_ ? source_[position_++] : '\0';
+            position_ = after > begin && source_[after - 1] == delimiter ? after - 1 : after;
+            ElementBuilder elem = builder_.element("verbatim");
+            elem.attr("value", builder_.createStringItem(source_ + begin, position_ - begin));
+            elem.attr("starred", builder_.createBool(starred));
+            elem.attr("delimiter", builder_.createStringItem(&delimiter, 1));
+            if (position_ < length_) position_++;
+            return elem.final();
+        }
+        if (strcmp(name, "raisebox") == 0 || strcmp(name, "reflectbox") == 0 ||
+            strcmp(name, "mathreflectbox") == 0 || strcmp(name, "vcenter") == 0 ||
+            strcmp(name, "cancel") == 0 || strcmp(name, "bcancel") == 0 ||
+            strcmp(name, "xcancel") == 0 || strcmp(name, "sout") == 0 ||
+            strcmp(name, "pmb") == 0 || strcmp(name, "phase") == 0 || strcmp(name, "angl") == 0 ||
+            strcmp(name, "angln") == 0 || strcmp(name, "anglr") == 0 || strcmp(name, "anglk") == 0) {
+            ElementBuilder elem = builder_.element("box_transform");
+            elem.attr("cmd", builder_.createStringItem(full));
+            if (strcmp(name, "raisebox") == 0) {
+                elem.attr("raise", parse_dimension_arg());
+                // optional height/depth override the raised box's reported extents.
+                static const char* extents[] = {"height", "depth"};
+                for (const char* attr : extents) {
+                    skip_space();
+                    size_t begin = 0, end = 0;
+                    if (position_ < length_ && source_[position_] == '[' && consume_group_span('[', ']', &begin, &end))
+                        elem.attr(attr, builder_.createStringItem(source_ + begin, end - begin));
+                }
+            }
+            bool text_box = strcmp(name, "raisebox") == 0 || strcmp(name, "reflectbox") == 0;
+            if (strlen(name) == 5 && strncmp(name, "angl", 4) == 0) {
+                elem.attr("cmd", builder_.createStringItem("\\angl"));
+                elem.attr("body", builder_.createStringItem(name + 4, 1));
+            } else elem.attr("body", text_box ? parse_text_arg() : parse_script_arg());
+            return elem.final();
+        }
+        if (strcmp(name, "substack") == 0) {
+            size_t begin = 0, end = 0;
+            skip_space();
+            ElementBuilder elem = builder_.element("environment");
+            elem.attr("name", builder_.createStringItem("subarray"));
+            elem.attr("columns", builder_.createStringItem("c"));
+            if (consume_group_span('{', '}', &begin, &end)) {
+                ElementBuilder body = builder_.element("env_body");
+                DirectMathParser nested(ctx_, source_ + begin, end - begin, offset_ + begin, ascii_);
+                nested.parse_into(body, true);
+                elem.attr("body", body.final());
+            }
+            return elem.final();
+        }
+        if (strcmp(name, "tag") == 0) {
+            ElementBuilder elem = builder_.element("equation_tag");
+            bool starred = position_ < length_ && source_[position_] == '*';
+            if (starred) position_++;
+            elem.attr("starred", builder_.createBool(starred));
+            elem.attr("body", parse_text_arg());
+            return elem.final();
+        }
+        if (strcmp(name, "nonumber") == 0 || strcmp(name, "notag") == 0 ||
+            strcmp(name, "nobreak") == 0 || strcmp(name, "allowbreak") == 0 || strcmp(name, "newline") == 0) {
+            ElementBuilder elem = builder_.element("layout_control");
+            elem.attr("cmd", builder_.createStringItem(full));
+            return elem.final();
+        }
+        if (strcmp(name, "hline") == 0 || strcmp(name, "hdashline") == 0) {
+            ElementBuilder elem = builder_.element("array_rule");
+            elem.attr("cmd", builder_.createStringItem(full));
+            return elem.final();
+        }
+        if (strcmp(name, "rm") == 0 || strcmp(name, "it") == 0 || strcmp(name, "bf") == 0 ||
+            strcmp(name, "sf") == 0 || strcmp(name, "tt") == 0) {
+            ElementBuilder elem = builder_.element("font_switch");
+            elem.attr("cmd", builder_.createStringItem(full));
+            return elem.final();
+        }
+        if (strcmp(name, "bmod") == 0 || strcmp(name, "pmod") == 0 || strcmp(name, "mod") == 0 || strcmp(name, "pod") == 0) {
+            ElementBuilder elem = builder_.element("mod_command");
+            elem.attr("cmd", builder_.createStringItem(full));
+            if (strcmp(name, "bmod") != 0) elem.attr("body", parse_script_arg());
+            return elem.final();
+        }
+        if (strcmp(name, "genfrac") == 0) {
+            ElementBuilder elem = builder_.element("genfrac");
+            static const char* attrs[] = {"left_delim", "right_delim", "thickness", "style"};
+            for (const char* attr : attrs) {
+                skip_space();
+                if (strcmp(attr, "left_delim") == 0 || strcmp(attr, "right_delim") == 0)
+                    elem.attr(attr, parse_delimiter_token());
+                else elem.attr(attr, parse_dimension_arg());
+            }
+            elem.attr("numer", parse_script_arg());
+            elem.attr("denom", parse_script_arg());
+            return elem.final();
+        }
+        if (strcmp(name, "Set") == 0 || strcmp(name, "Braket") == 0) {
+            ElementBuilder elem = builder_.element("delimiter_group");
+            elem.attr("left", builder_.createStringItem(strcmp(name, "Set") == 0 ? "\\{" : "\\langle"));
+            elem.attr("right", builder_.createStringItem(strcmp(name, "Set") == 0 ? "\\}" : "\\rangle"));
+            elem.attr("body", parse_script_arg());
+            return elem.final();
+        }
+        static const char* colors[] = {"red", "green", "blue", "cyan", "magenta", "yellow", "black", "white", "purple", "orange", "gray"};
+        for (const char* color : colors) if (strcmp(name, color) == 0) {
+            ElementBuilder elem = builder_.element("color_command");
+            elem.attr("cmd", builder_.createStringItem("\\textcolor"));
+            elem.attr("color_raw", builder_.createStringItem(color));
+            elem.attr("content", parse_script_arg());
+            return elem.final();
+        }
+        if (strcmp(name, "fcolorbox") == 0) {
+            ElementBuilder elem = builder_.element("color_command");
+            elem.attr("cmd", builder_.createStringItem(full));
+            static const char* attrs[] = {"border_color", "color_raw"};
+            for (const char* attr : attrs) {
+                size_t begin = 0, end = 0;
+                skip_space();
+                if (consume_group_span('{', '}', &begin, &end))
+                    elem.attr(attr, builder_.createStringItem(source_ + begin, end - begin));
+            }
+            elem.attr("content", parse_text_arg());
+            return elem.final();
+        }
 
         if (strcmp(name, "frac") == 0 || strcmp(name, "dfrac") == 0 ||
             strcmp(name, "tfrac") == 0 || strcmp(name, "cfrac") == 0) {
+            Item alignment = ItemNull;
+            skip_space();
+            if (strcmp(name, "cfrac") == 0 && position_ < length_ && source_[position_] == '[') alignment = parse_brack_group();
             Item numer = parse_script_arg();
             Item denom = parse_script_arg();
             ElementBuilder elem = builder_.element("fraction");
             elem.attr("cmd", builder_.createStringItem(full));
+            if (item_present(alignment)) elem.attr("options", alignment);
             if (item_present(numer)) elem.attr("numer", numer);
             if (item_present(denom)) elem.attr("denom", denom);
             return elem.final();
@@ -458,7 +665,7 @@ private:
             if (item_present(radicand)) elem.attr("radicand", radicand);
             return elem.final();
         }
-        if (strcmp(name, "xrightarrow") == 0 || strcmp(name, "xleftarrow") == 0) {
+        if (is_extended_arrow(name)) {
             Item lower = ItemNull;
             skip_space();
             if (position_ < length_ && source_[position_] == '[') lower = parse_brack_group();
@@ -469,10 +676,44 @@ private:
             if (item_present(lower)) elem.attr("lower", lower);
             return elem.final();
         }
+        if (strcmp(name, "includegraphics") == 0) {
+            ElementBuilder elem = builder_.element("image_command");
+            elem.attr("cmd", builder_.createStringItem(full));
+            size_t begin = 0, end = 0;
+            skip_space();
+            if (position_ < length_ && source_[position_] == '[' &&
+                consume_group_span('[', ']', &begin, &end))
+                elem.attr("options", builder_.createStringItem(source_ + begin, end - begin));
+            skip_space();
+            // paths and option values are raw source, not math identifiers or subscripts.
+            if (position_ < length_ && source_[position_] == '{' &&
+                consume_group_span('{', '}', &begin, &end))
+                elem.attr("src", builder_.createStringItem(source_ + begin, end - begin));
+            else error("includegraphics requires a braced source");
+            return elem.final();
+        }
         if (strcmp(name, "mathop") == 0) {
             Item body = parse_script_arg();
             ElementBuilder elem = builder_.element("mathop");
             if (item_present(body)) elem.attr("body", body);
+            return elem.final();
+        }
+        if (const char* atom = math_atom_class(name)) {
+            Item body = parse_script_arg();
+            ElementBuilder elem = builder_.element("math_atom");
+            elem.attr("cmd", builder_.createStringItem(full));
+            elem.attr("atom", builder_.createStringItem(atom));
+            if (item_present(body)) elem.attr("body", body);
+            return elem.final();
+        }
+        if (strcmp(name, "mathchoice") == 0) {
+            ElementBuilder elem = builder_.element("mathchoice");
+            // all four branches must survive parsing; the current math style selects one later.
+            static const char* styles[] = {"display", "text", "script", "scriptscript"};
+            for (const char* style : styles) {
+                Item branch = parse_script_arg();
+                if (item_present(branch)) elem.attr(style, branch);
+            }
             return elem.final();
         }
         if (strcmp(name, "stackrel") == 0 || strcmp(name, "overset") == 0 ||
@@ -497,9 +738,18 @@ private:
             return parse_text_command(full);
         }
         if (is_text_command(name)) return parse_text_command(full);
+        if (is_size_command(name)) {
+            ElementBuilder elem = builder_.element("size_command");
+            elem.attr("cmd", builder_.createStringItem(full));
+            return elem.final();
+        }
         if (is_style_command(name)) {
             ElementBuilder elem = builder_.element("style_command");
             elem.attr("cmd", builder_.createStringItem(full));
+            if (strcmp(name, "operatorname") == 0 && position_ < length_ && source_[position_] == '*') {
+                position_++;
+                elem.attr("limits", builder_.createBool(true));
+            }
             bool declaration = strcmp(name, "displaystyle") == 0 ||
                 strcmp(name, "textstyle") == 0 || strcmp(name, "scriptstyle") == 0 ||
                 strcmp(name, "scriptscriptstyle") == 0;
@@ -533,7 +783,8 @@ private:
                 latex_scan_group_end(source_, length_, position_, '{', '}', &color_begin, &color_end) != 0;
             Item color = parse_script_arg();
             Item content = ItemNull;
-            if (strcmp(name, "textcolor") == 0 || strcmp(name, "colorbox") == 0) content = parse_color_content();
+            if (strcmp(name, "textcolor") == 0) content = parse_color_content();
+            else if (strcmp(name, "colorbox") == 0) content = parse_text_arg();
             ElementBuilder elem = builder_.element(strcmp(name, "color") == 0 ?
                                                      "color_switch" : "color_command");
             elem.attr("cmd", builder_.createStringItem(full));
@@ -548,9 +799,12 @@ private:
         if (strcmp(name, "phantom") == 0 || strcmp(name, "hphantom") == 0 ||
             strcmp(name, "vphantom") == 0 || strcmp(name, "smash") == 0) {
             // these commands change box dimensions and cannot use literal-command fallback.
-            Item content = parse_script_arg();
             ElementBuilder elem = builder_.element("phantom_command");
             elem.attr("cmd", builder_.createStringItem(full));
+            skip_space();
+            if (strcmp(name, "smash") == 0 && position_ < length_ && source_[position_] == '[')
+                elem.attr("options", parse_brack_group());
+            Item content = parse_script_arg();
             if (item_present(content)) elem.attr("content", content);
             return elem.final();
         }
@@ -572,17 +826,7 @@ private:
             if (item_present(content)) elem.attr("content", content);
             return elem.final();
         }
-        if (strcmp(name, "hat") == 0 || strcmp(name, "bar") == 0 || strcmp(name, "vec") == 0 ||
-            strcmp(name, "dot") == 0 || strcmp(name, "ddot") == 0 || strcmp(name, "dddot") == 0 ||
-            strcmp(name, "ddddot") == 0 || strcmp(name, "tilde") == 0 || strcmp(name, "acute") == 0 ||
-            strcmp(name, "breve") == 0 || strcmp(name, "check") == 0 || strcmp(name, "grave") == 0 ||
-            strcmp(name, "widehat") == 0 || strcmp(name, "widetilde") == 0 ||
-            strcmp(name, "overline") == 0 || strcmp(name, "underline") == 0 ||
-            strcmp(name, "overbrace") == 0 || strcmp(name, "underbrace") == 0 ||
-            strcmp(name, "overrightarrow") == 0 || strcmp(name, "underrightarrow") == 0 ||
-            strcmp(name, "overleftarrow") == 0 || strcmp(name, "underleftarrow") == 0 ||
-            strcmp(name, "overleftrightarrow") == 0 || strcmp(name, "underleftrightarrow") == 0 ||
-            strcmp(name, "mathring") == 0) {
+        if (is_math_accent(name)) {
             Item base = parse_optional_script_arg();
             ElementBuilder elem = builder_.element("accent");
             elem.attr("cmd", builder_.createStringItem(full));
@@ -594,7 +838,7 @@ private:
             elem.attr("target", builder_.createStringItem("="));
             return elem.final();
         }
-        if (is_greek_letter(name) || is_math_operator(name) || is_trig_function(name) || is_log_function(name)) {
+        if (is_greek_letter(name) || is_math_operator(name) || is_big_operator(name) || is_trig_function(name) || is_log_function(name)) {
             ElementBuilder elem = builder_.element(is_big_operator(name) || is_trig_function(name) || is_log_function(name) ? "command" : "symbol_command");
             elem.attr("name", builder_.createStringItem(name));
             return elem.final();
@@ -634,10 +878,9 @@ private:
                     return elem.final();
                 }
             }
-            if (position_ < length_ && strchr("=<>|", source_[position_]) != nullptr) {
+            if (position_ < length_) {
                 ElementBuilder elem = builder_.element("not_overlay");
-                elem.attr("target", builder_.createStringItem(source_ + position_, 1));
-                position_++;
+                elem.attr("target", parse_script_arg());
                 return elem.final();
             }
         }
@@ -682,12 +925,99 @@ private:
         return elem.final();
     }
 
+    Item parse_text_arg() {
+        skip_space();
+        size_t begin = 0, end = 0;
+        if (position_ < length_ && source_[position_] == '{' && consume_group_span('{', '}', &begin, &end)) {
+            DirectMathParser nested(ctx_, source_ + begin, end - begin, offset_ + begin, ascii_, true, true);
+            ElementBuilder group = builder_.element("text_group");
+            group.attr("source", builder_.createStringItem(source_ + begin, end - begin));
+            nested.parse_text_into(group);
+            return group.final();
+        }
+        if (position_ < length_ && source_[position_] == '\\') return parse_command();
+        begin = position_;
+        if (position_ < length_) position_++;
+        while (position_ < length_ && ((unsigned char)source_[position_] & 0xC0) == 0x80) position_++;
+        ElementBuilder text = builder_.element("raw_math_text");
+        text.attr("value", builder_.createStringItem(source_ + begin, position_ - begin));
+        return text.final();
+    }
+
+    void parse_text_into(ElementBuilder& parent) {
+        while (position_ < length_) {
+            char ch = source_[position_];
+            if (ch == '%') {
+                while (position_ < length_ && source_[position_] != '\n') position_++;
+            } else if (ch == '{') parent.child(parse_text_arg());
+            else if (ch == '$') {
+                size_t begin = ++position_;
+                // a text box's math switch owns its dollars, including escaped dollars inside math.
+                while (position_ < length_ && source_[position_] != '$') {
+                    if (source_[position_] == '\\' && position_ + 1 < length_) position_++;
+                    position_++;
+                }
+                if (position_ == length_) {
+                    // unmatched text dollars remain recoverable literal input.
+                    parent.child(builder_.createStringItem("$"));
+                    position_ = begin;
+                    continue;
+                }
+                ElementBuilder math = builder_.element("embedded_math");
+                DirectMathParser nested(ctx_, source_ + begin, position_ - begin, offset_ + begin, ascii_);
+                nested.parse_into(math, false);
+                parent.child(math.final());
+                if (position_ < length_) position_++;
+            } else if (ch == '\\') {
+                size_t saved = position_;
+                char name[96], full[104];
+                read_command(name, sizeof(name), full, sizeof(full));
+                const char* accent = nullptr;
+                static const struct {const char* name; const char* accent;} accents[] = {
+                    {"'", "acute"}, {"`", "grave"}, {"^", "hat"}, {"~", "tilde"},
+                    {"=", "bar"}, {".", "dot"}, {"\"", "ddot"}, {"u", "breve"},
+                    {"v", "check"}, {"H", "doubleacute"}, {"r", "mathring"}, {"c", "cedilla"}};
+                for (const auto& entry : accents) if (strcmp(name, entry.name) == 0) accent = entry.accent;
+                if (accent) {
+                    ElementBuilder elem = builder_.element("accent");
+                    elem.attr("cmd", builder_.createStringItem(accent));
+                    elem.attr("base", parse_text_arg());
+                    parent.child(elem.final());
+                } else if (is_literal_text_escape(name) || strcmp(name, " ") == 0 || strcmp(name, ",") == 0) {
+                    parent.child(builder_.createStringItem(strcmp(name, ",") == 0 ? " " : name));
+                } else {
+                    position_ = saved;
+                    parent.child(parse_command());
+                    // spaces after a control word terminate its name; they are not text glue.
+                    if (isalpha((unsigned char)name[0]) && position_ == saved + strlen(full)) skip_space();
+                }
+            } else if (ch == '~' || isspace((unsigned char)ch)) {
+                position_++;
+                if (ch != '~') while (position_ < length_ && isspace((unsigned char)source_[position_])) position_++;
+                parent.child(builder_.createStringItem(" "));
+            } else {
+                size_t begin = position_++;
+                while (position_ < length_ && !strchr("{}$\\~%", source_[position_]) &&
+                       !isspace((unsigned char)source_[position_])) position_++;
+                parent.child(builder_.createStringItem(source_ + begin, position_ - begin));
+            }
+        }
+    }
+
     Item parse_text_command(const char* full) {
         skip_space();
         size_t begin = 0, end = 0;
         ElementBuilder elem = builder_.element("text_command");
         elem.attr("cmd", builder_.createStringItem(full));
         if (consume_group_span('{', '}', &begin, &end)) {
+            if (memchr(source_ + begin, '\\', end - begin) ||
+                memchr(source_ + begin, '$', end - begin) || memchr(source_ + begin, '{', end - begin) ||
+                memchr(source_ + begin, '~', end - begin)) {
+                DirectMathParser nested(ctx_, source_ + begin, end - begin, offset_ + begin, ascii_, true, true);
+                ElementBuilder body = builder_.element("text_group");
+                nested.parse_text_into(body);
+                elem.attr("body", body.final());
+            }
             if (!memchr(source_ + begin, '\\', end - begin)) {
                 elem.attr("content", builder_.createStringItem(source_ + begin, end - begin));
             } else {
@@ -722,6 +1052,10 @@ private:
         skip_space();
         if (position_ >= length_) return builder_.createStringItem(".");
         if (source_[position_] == '{') {
+            if (position_ + 1 < length_ && source_[position_ + 1] == '}') {
+                position_ += 2;
+                return builder_.createStringItem("");
+            }
             // MathLive accepts a braced delimiter spelling after \right while
             // retaining only its first delimiter token.
             size_t begin = ++position_;
@@ -749,12 +1083,19 @@ private:
         size_t end = latex_scan_command(source_, length_, position_, name,
                                         sizeof(name), full, sizeof(full));
         if (end == 0) return false;
-        return strcmp(name, "{") == 0 || strcmp(name, "}") == 0 ||
-            strcmp(name, "|") == 0 || strcmp(name, "vert") == 0 ||
-            strcmp(name, "Vert") == 0 || strcmp(name, "lvert") == 0 ||
-            strcmp(name, "rvert") == 0 || strcmp(name, "lVert") == 0 ||
-            strcmp(name, "rVert") == 0 || strcmp(name, "langle") == 0 ||
-            strcmp(name, "rangle") == 0;
+        // fontmath.ltx declares vertical arrows, floors and ceilings as delimiter tokens too.
+        static const char* const delimiters[] = {
+            "{", "}", "|", "vert", "Vert", "lvert", "rvert", "lVert", "rVert",
+            "langle", "rangle", "lbrace", "rbrace", "lceil", "rceil", "lfloor", "rfloor",
+            "uparrow", "downarrow", "updownarrow", "Uparrow", "Downarrow", "Updownarrow",
+            "backslash", "arrowvert", "Arrowvert", "bracevert", "lmoustache", "rmoustache",
+            // parenthesis aliases must be consumed as the delimiter, like bracket aliases.
+            "lgroup", "rgroup", "lbrack", "rbrack", "lparen", "rparen"
+        };
+        for (const char* delimiter : delimiters) {
+            if (strcmp(name, delimiter) == 0) return true;
+        }
+        return false;
     }
 
     Item parse_delimiter_group(const char* full) {
@@ -836,6 +1177,14 @@ private:
                 cursor++;
                 continue;
             }
+            if (strcmp(name, "begin") == 0) {
+                cursor = skip_environment_span(end);
+                continue;
+            }
+            if (strcmp(name, "verb") == 0) {
+                cursor = verbatim_end(end);
+                continue;
+            }
             if (brace_depth == 0 && is_infix_fraction_command(name)) {
                 *command_begin = cursor;
                 *command_end = end;
@@ -847,6 +1196,38 @@ private:
             cursor = end;
         }
         return false;
+    }
+
+    size_t skip_environment_span(size_t cursor) {
+        while (cursor < length_ && isspace((unsigned char)source_[cursor])) cursor++;
+        size_t begin = 0, end = 0;
+        size_t after = latex_scan_group_end(source_, length_, cursor, '{', '}', &begin, &end);
+        if (!after) return cursor;
+        char name[96];
+        size_t count = end - begin < sizeof(name) ? end - begin : sizeof(name) - 1;
+        str_copy(name, sizeof(name), source_ + begin, count);
+        size_t body_end = 0;
+        return find_environment_end(name, after, &body_end, nullptr, nullptr);
+    }
+
+    size_t cell_boundary(size_t begin) {
+        for (size_t cursor = begin; cursor < length_;) {
+            char ch = source_[cursor];
+            if (ch == '&') return cursor;
+            if (ch == '%') {
+                while (cursor < length_ && source_[cursor] != '\n') cursor++;
+            } else if (ch == '{') {
+                size_t end = latex_scan_group_end(source_, length_, cursor, '{', '}', nullptr, nullptr);
+                cursor = end ? end : length_;
+            } else if (ch == '\\') {
+                char name[96], full[104];
+                size_t end = latex_scan_command(source_, length_, cursor, name, sizeof(name), full, sizeof(full));
+                if (strcmp(name, "\\") == 0 || strcmp(name, "cr") == 0) return cursor;
+                cursor = strcmp(name, "begin") == 0 ? skip_environment_span(end) :
+                    strcmp(name, "verb") == 0 ? verbatim_end(end) : end;
+            } else cursor++;
+        }
+        return length_;
     }
 
     Item parse_infix_fraction_side(size_t begin, size_t end, bool allow_infix) {
@@ -869,6 +1250,11 @@ private:
         ElementBuilder fraction = builder_.element("infix_frac");
         fraction.attr("cmd", builder_.createStringItem(command));
         fraction.attr("numer", parse_infix_fraction_side(position_, command_begin, false));
+        if (strcmp(command, "\\above") == 0) {
+            position_ = command_end;
+            fraction.attr("thickness", parse_dimension_arg());
+            command_end = position_;
+        }
         fraction.attr("denom", parse_infix_fraction_side(command_end, length_, false));
         parent.child(fraction.final());
         position_ = length_;
@@ -882,26 +1268,41 @@ private:
         size_t name_len = strlen(name);
         size_t recovery_end = 0;
         size_t recovery_body_end = 0;
-        for (size_t i = from; i + 5 < length_; i++) {
-            if (source_[i] != '\\' || !starts_with(source_, length_, i, "\\end{")) continue;
-            size_t name_start = i + 5;
+        size_t nested_depth = 0;
+        for (size_t i = from; i < length_;) {
+            if (source_[i] == '%') {
+                while (i < length_ && source_[i] != '\n' && source_[i] != '\r') i++;
+                continue;
+            }
+            if (source_[i] != '\\') { i++; continue; }
+            size_t command_start = i;
+            char command[96], full[104];
+            size_t after_command = latex_scan_command(source_, length_, i, command, sizeof(command), full, sizeof(full));
+            if (!after_command) { i++; continue; }
+            i = after_command;
+            if (strcmp(command, "begin") != 0 && strcmp(command, "end") != 0) continue;
+            while (i < length_ && isspace((unsigned char)source_[i])) i++;
             size_t end_name_start = 0;
             size_t end_name_end = 0;
-            size_t after_end = latex_scan_group_end(source_, length_, i + 4, '{', '}',
+            size_t after_end = latex_scan_group_end(source_, length_, i, '{', '}',
                                                      &end_name_start, &end_name_end);
-            if (after_end != 0 && recovery_end == 0) {
+            if (!after_end) continue;
+            i = after_end;
+            // a nested environment's terminator cannot close the surrounding matrix.
+            if (strcmp(command, "begin") == 0) { nested_depth++; continue; }
+            if (nested_depth > 0) { nested_depth--; continue; }
+            if (recovery_end == 0) {
                 // MathLive recovers an unmatched environment by ending at the
                 // first closing environment token rather than consuming it as
                 // ordinary math content.
-                recovery_body_end = i;
+                recovery_body_end = command_start;
                 recovery_end = after_end;
             }
-            if (name_start + name_len < length_ &&
-                memcmp(source_ + name_start, name, name_len) == 0 &&
-                source_[name_start + name_len] == '}') {
-                if (body_end) *body_end = i;
+            if (end_name_end - end_name_start == name_len &&
+                memcmp(source_ + end_name_start, name, name_len) == 0) {
+                if (body_end) *body_end = command_start;
                 if (found) *found = true;
-                return name_start + name_len + 1;
+                return after_end;
             }
         }
         if (recovery_end != 0) {
@@ -911,6 +1312,48 @@ private:
             return recovery_end;
         }
         return length_;
+    }
+
+    void parse_cd_into(ElementBuilder& parent) {
+        bool vertical_cell = false;
+        while (position_ < length_) {
+            skip_space();
+            if (position_ >= length_) break;
+            if (starts_with(source_, length_, position_, "\\\\")) {
+                position_ += 2;
+                parent.child(builder_.createSymbolItem("row_sep"));
+                vertical_cell = false;
+            } else if (source_[position_] == '@' && position_ + 1 < length_) {
+                size_t begin = position_++;
+                char direction = source_[position_++];
+                bool vertical = direction == 'A' || direction == 'V' || direction == '|';
+                if (!vertical || vertical_cell) parent.child(builder_.createSymbolItem("col_sep"));
+                if (vertical && vertical_cell) parent.child(builder_.createSymbolItem("col_sep"));
+                ElementBuilder arrow = builder_.element("cd_arrow");
+                arrow.attr("direction", builder_.createStringItem(&direction, 1));
+                if (strchr("<>AV", direction)) {
+                    static const char* attrs[] = {"upper", "lower"};
+                    for (const char* attr : attrs) {
+                        size_t label_begin = position_;
+                        while (position_ < length_ && source_[position_] != direction) {
+                            if (source_[position_] == '{') {
+                                size_t end = latex_scan_group_end(source_, length_, position_, '{', '}', nullptr, nullptr);
+                                position_ = end ? end : length_;
+                            } else if (source_[position_] == '\\') {
+                                char name[96], full[104];
+                                position_ = latex_scan_command(source_, length_, position_, name, sizeof(name), full, sizeof(full));
+                            } else position_++;
+                        }
+                        arrow.attr(attr, parse_group_contents(label_begin, position_));
+                        if (position_ < length_) position_++;
+                    }
+                }
+                arrow.attr("source", builder_.createStringItem(source_ + begin, position_ - begin));
+                parent.child(arrow.final());
+                if (!vertical) parent.child(builder_.createSymbolItem("col_sep"));
+                vertical_cell = vertical;
+            } else parent.child(parse_atom_with_scripts());
+        }
     }
 
     Item parse_environment() {
@@ -931,7 +1374,19 @@ private:
         }
         ElementBuilder elem = builder_.element("environment");
         elem.attr("name", builder_.createStringItem(env_name));
-        if (strcmp(env_name, "array") == 0 && position_ < length_ && source_[position_] == '{') {
+        skip_space();
+        if (strcmp(env_name, "alignedat") == 0 || strcmp(env_name, "alignat") == 0 || strcmp(env_name, "alignat*") == 0) {
+            size_t begin = 0, end = 0;
+            if (position_ < length_ && source_[position_] == '{' && consume_group_span('{', '}', &begin, &end))
+                elem.attr("pairs", builder_.createStringItem(source_ + begin, end - begin));
+        } else if (env_len > 0 && env_name[env_len - 1] == '*' && strstr(env_name, "matrix") != nullptr &&
+                   position_ < length_ && source_[position_] == '[') {
+            size_t begin = 0, end = 0;
+            if (consume_group_span('[', ']', &begin, &end))
+                elem.attr("alignment", builder_.createStringItem(source_ + begin, end - begin));
+        }
+        if ((strcmp(env_name, "array") == 0 || strcmp(env_name, "subarray") == 0) &&
+            position_ < length_ && source_[position_] == '{') {
             size_t columns_begin = 0, columns_end = 0;
             if (consume_group_span('{', '}', &columns_begin, &columns_end)) {
                 elem.attr("columns", builder_.createStringItem(source_ + columns_begin,
@@ -952,7 +1407,8 @@ private:
         size_t body_len = body_end >= position_ ? body_end - position_ : 0;
         ElementBuilder body = builder_.element("env_body");
         DirectMathParser nested(ctx_, body_source, body_len, offset_ + position_, ascii_);
-        nested.parse_into(body, true);
+        if (strcmp(env_name, "CD") == 0) nested.parse_cd_into(body);
+        else nested.parse_into(body, true);
         elem.attr("body", body.final());
         position_ = after_end;
         return elem.final();
@@ -969,9 +1425,38 @@ private:
                 children.append(builder_.createSymbolItem("col_sep"));
                 continue;
             }
-            if (matrix_mode && starts_with(source_, length_, position_, "\\\\")) {
-                position_ += 2;
-                children.append(builder_.createSymbolItem("row_sep"));
+            if (matrix_mode && (starts_with(source_, length_, position_, "\\\\") ||
+                (starts_with(source_, length_, position_, "\\cr") &&
+                 (position_ + 3 == length_ || !isalpha((unsigned char)source_[position_ + 3]))))) {
+                position_ += source_[position_ + 1] == '\\' ? 2 : 3;
+                skip_space();
+                size_t begin = 0, end = 0;
+                if (position_ < length_ && source_[position_] == '[' &&
+                    consume_group_span('[', ']', &begin, &end)) {
+                    ElementBuilder separator = builder_.element("row_sep");
+                    separator.attr("gap", builder_.createStringItem(source_ + begin, end - begin));
+                    children.append(separator.final());
+                } else children.append(builder_.createSymbolItem("row_sep"));
+                continue;
+            }
+            if (matrix_mode) {
+                if (source_[position_] == '\\') {
+                    char name[96], full[104];
+                    latex_scan_command(source_, length_, position_, name, sizeof(name), full, sizeof(full));
+                    if (strcmp(name, "hline") == 0 || strcmp(name, "hdashline") == 0) {
+                        // row rules are alignment material, outside the following cell's math list.
+                        children.append(parse_command());
+                        continue;
+                    }
+                }
+                size_t end = cell_boundary(position_);
+                DirectMathParser cell(ctx_, source_ + position_, end - position_, offset_ + position_, ascii_);
+                ElementBuilder contents = builder_.element("group");
+                cell.parse_into(contents, false);
+                // each cell is its own math list, including infix fractions and declarations.
+                Element* parsed_cell = contents.final().element;
+                for (int64_t i = 0; i < parsed_cell->length; i++) children.append(parsed_cell->items[i]);
+                position_ = end;
                 continue;
             }
             Item child = parse_atom_with_scripts();
@@ -1809,19 +2294,49 @@ private:
 
 } // namespace
 
+static tex::Engine* run_tex_engine(const InputParseOptions* options, const char* source,
+                                   size_t length, tex::Result* result, bool math_mode = false);
+
 extern "C" Item parse_math_direct_to_ast(Input* input, const char* math_source, size_t math_len, const char* flavor) {
     if (!input || !math_source) return ItemNull;
-    InputContext context(input, math_source, math_len);
     bool ascii = flavor && (strcmp(flavor, "ascii") == 0 || strcmp(flavor, "asciimath") == 0);
+    // ordinary formulas keep the recovery parser; definitions need scoped TeX expansion.
+    bool expand = !ascii && input->parse_options && input->parse_options->tex_expand;
+    for (size_t p = 0; !ascii && !expand && p < math_len;) {
+        if (math_source[p] == '%') {
+            while (p < math_len && math_source[p] != '\n' && math_source[p] != '\r') p++;
+        } else if (math_source[p] == '\\') {
+            char name[96], full[104];
+            p = latex_scan_command(math_source, math_len, p, name, sizeof(name), full, sizeof(full));
+            static const char* definitions[] = {"def", "gdef", "edef", "xdef", "let",
+                "newcommand", "renewcommand", "providecommand", "DeclareRobustCommand",
+                "NewDocumentCommand", "RenewDocumentCommand", "ProvideDocumentCommand", "DeclareDocumentCommand"};
+            for (const char* command : definitions) if (strcmp(name, command) == 0) expand = true;
+        } else p++;
+    }
+    tex::Engine* engine = nullptr;
+    tex::Result expanded = {};
+    if (expand) {
+        engine = run_tex_engine(input->parse_options, math_source, math_len, &expanded, true);
+        if (engine) {
+            math_source = expanded.text;
+            math_len = expanded.length;
+        }
+    }
+    InputContext context(input, math_source, math_len);
     DirectMathParser parser(context, context.source(), context.source_length(), 0, ascii);
-    Item result = parser.parse();
+    Item result = parser.parse(expanded.diagnostic_count ? expanded.diagnostics[0].message : nullptr);
     if (context.hasErrors()) context.logErrors();
+    if (engine) tex::engine_destroy(engine);
     return result;
 }
 
 static tex::Engine* run_tex_engine(const InputParseOptions* options, const char* source,
-                                   tex::Result* result) {
+                                   size_t length, tex::Result* result, bool math_mode) {
+    InputParseOptions defaults = {};
+    if (!options) options = &defaults;
     tex::EngineOptions eo = {};
+    eo.math_mode = math_mode;
     eo.base_path = options->tex_base;
     eo.ini = options->tex_ini;
     eo.adapters = options->tex_adapters;
@@ -1830,14 +2345,14 @@ static tex::Engine* run_tex_engine(const InputParseOptions* options, const char*
     eo.raw_command_count = options->tex_raw_command_count;
     tex::Engine* engine = tex::engine_create(&eo);
     if (!engine) return nullptr;
-    tex::engine_run(engine, source, strlen(source), result);
+    tex::engine_run(engine, source, length, result);
     if (tex::engine_wants_expl3(engine)) {
         // the document asked for expl3: run it again from the expl3 format
         tex::engine_destroy(engine);
         eo.expl3 = true;
         engine = tex::engine_create(&eo);
         if (!engine) return nullptr;
-        tex::engine_run(engine, source, strlen(source), result);
+        tex::engine_run(engine, source, length, result);
     }
     return engine;
 }
@@ -1867,7 +2382,7 @@ void parse_latex_direct(Input* input, const char* latex_string) {
     if (options && options->tex_expand) {
         // §9.2: expansion before digestion; the parser reads the engine's text
         tex::Result result = {};
-        tex::Engine* engine = run_tex_engine(options, latex_string, &result);
+        tex::Engine* engine = run_tex_engine(options, latex_string, strlen(latex_string), &result);
         if (engine) {
             InputContext context(input, result.text, result.length);
             DirectLatexParser parser(context, &result);
@@ -1890,7 +2405,7 @@ void parse_tex_expansion(Input* input, const char* source) {
     InputParseOptions defaults = {};
     const InputParseOptions* options = input->parse_options ? input->parse_options : &defaults;
     tex::Result result = {};
-    tex::Engine* engine = run_tex_engine(options, source, &result);
+    tex::Engine* engine = run_tex_engine(options, source, strlen(source), &result);
     if (!engine) return;
     InputContext context(input);
     MarkBuilder& builder = context.builder;

@@ -65,17 +65,14 @@ void dom_shutdown(void) {}
 
 // --- GC hooks: only JS-layout objects carry payloads these would visit ---
 
-extern "C" void js_generator_map_gc_trace(Map* map, gc_heap_t* gc) { (void)map; (void)gc; }
 extern "C" void js_async_frame_map_gc_trace(Map* map, gc_heap_t* gc) { (void)map; (void)gc; }
 extern "C" void js_collection_map_gc_trace(Map* map, gc_heap_t* gc) { (void)map; (void)gc; }
-extern "C" void js_iterator_map_gc_trace(Map* map, gc_heap_t* gc) { (void)map; (void)gc; }
 extern "C" void js_regex_map_heap_destroy(Map* map, gc_native_seen_t* seen_native) {
     (void)map; (void)seen_native;
 }
 extern "C" void js_collection_map_heap_destroy(Map* map, gc_native_seen_t* seen_native) {
     (void)map; (void)seen_native;
 }
-extern "C" void js_generator_map_heap_destroy(Map* map) { (void)map; }
 extern "C" void js_async_frame_map_heap_destroy(Map* map) { (void)map; }
 // 0 = not a JS function layout; the collector falls through to Lambda tracing
 extern "C" int js_function_gc_trace(void* data, gc_heap_t* gc) { (void)data; (void)gc; return 0; }

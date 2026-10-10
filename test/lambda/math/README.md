@@ -63,8 +63,12 @@ and every reference syntax translation with its original source span.
 
 ## What the comparison measures
 
-Both renderers use the same em scale: by default 64 CSS pixels in Lambda and
-10 TeX points at `64 * 72.27 / 10` DPI in Poppler. White margins are cropped;
+Both renderers lay out a logical 10pt em. Lambda receives `font_size` in CSS
+pixels (`10 * 96 / 72.27`), so authored `pt` lengths use the same logical scale
+as TeX. The PNG wrapper then paints the SVG em at `--font-size` (default 64px),
+and Poppler uses `64 * 72.27 / 10` DPI. Earlier runs left Lambda at its default
+16px logical em; their point lengths and raster scores are not directly
+comparable with this corrected setup. White margins are cropped;
 an integer translation within `--align-radius` pixels per axis (default 12)
 maximizes grayscale ink correlation. Images are never independently resized or
 deformed. Reaching the alignment search boundary is flagged in the report.
@@ -89,9 +93,52 @@ Rendering errors and threshold failures exit 1. Cases marked `nolatex` upstream
 are explicit skips with their original reasons. Failures do not stop later cases.
 `--timeout` bounds each renderer command in milliseconds (default 60000).
 
+## Renderer support
+
+The public math renderer (`lambda.doc.math.math`, D7.2.4) supports inline raster
+images with `\includegraphics[width=...,height=...,totalheight=...,alt=...]{...}`.
+`height` measures above the baseline; `totalheight - height` is the depth.
+Without an explicit width, the image keeps its intrinsic aspect ratio. The
+default height is `0.9em`; unitless image dimensions use big points (`bp`).
+Images are embedded in the emitted SVG. Pass `base_uri` as the directory for
+relative image paths; the comparison runner uses each case's artifact directory.
+Missing images, invalid dimensions, and unsupported options return errors.
+
+Math input expands scoped TeX definitions such as `\def` and `\newcommand`
+through the existing TeX engine. `\xrightleftarrows`, `\xrightequilibrium`, and
+`\xleftequilibrium` produce paired arrows with optional lower and required upper
+labels. Ordinary-font arrow stretching extends the shaft while preserving the
+head shape. These behaviors have focused `.ls` regressions alongside this runner.
+
+The renderer selects `\mathchoice` branches using the current math style, honors
+scoped size declarations (`\tiny` through `\Huge`, including script sizes), and
+supports explicit atom classes such as `\mathbin` and `\mathrel`. AMS `gathered`
+and `alignedat` retain their row structure and display style; starred matrices
+accept `[l]`, `[c]`, or `[r]` column alignment. Matrix rows use minimum strut
+dimensions and AMS line spacing. Unbraced kern dimensions stop at their unit,
+preserving adjacent variables and scripts.
+
+Text boxes retain nested text commands and `$...$` math; `\verb` preserves its
+delimited source, including ampersands inside arrays. Raised, reflected, and
+vertically centered boxes, cancellation/strikeout, phase and actuarial angles,
+extensible arrows, upper/lower brackets and accents, primes, modular operators,
+and equation tags have dedicated rendering. Arrays retain solid/dashed rules,
+subarrays and substacks, and scope infix fractions to individual cells. `CD`
+diagrams retain horizontal/vertical arrows, equalities, and labels. These command
+forms follow [KaTeX's supported functions](https://katex.org/docs/supported).
+Tag placement, line wrapping, and font/spacing parity remain visual review items;
+nonprinting controls such as `\nonumber` and `\allowbreak` do not paint their names.
+
+Layout authority is TeX and the supported LaTeX package definition, as required
+by [Math Design Rule 1](../../../vibe/Lambda_Pkg_Math.md). KaTeX/MathLive outputs
+and screenshot differences are comparison evidence. Recognizable commands do
+not establish conforming layout; remaining array, arrow, accent and decoration
+gaps are recorded in the design. Rule 2 requires the existing bundled fonts.
+
 ## Corpus scope
 
 The source is [KaTeX's screenshot corpus](https://github.com/KaTeX/KaTeX/blob/main/test/screenshotter/ss_data.yaml).
+
 Strings and object entries are supported. Each case's `display` mode is honored,
 and fixture macro definitions are passed to both renderers. This is a
 **formula-only** comparison: browser `pre`, `post`, and `styles` fields remain
@@ -144,3 +191,79 @@ explicitly skipped if their executables are unavailable; missing packages fail:
 ```sh
 npm test --prefix test/lambda/math
 ```
+
+This command also runs `tex_conformance.test.mjs`: 260 independently executed
+TeX boxes and 130 relations for AMS modulo glue/scope, parenthesis phantoms, sized
+delimiter classes, middle-boundary binary normalization, and continued-fraction
+alignment/text struts. It checks all
+four styles and both AMS display-flag values. TeX's shipped numerator positions
+are compared with the measured SVG glyph positions; glyph-font differences
+are excluded through width deltas. Named-size probes explicitly select the
+bundled companion's scaled CM10 profile. This is a bounded conformance check,
+not a certificate for all math constructions. Its scripts, logs, generated PDF,
+package version records, and relation data stay under `temp/math-conformance-*`.
+Run it alone with `node --test test/lambda/math/tex_conformance.test.mjs`.
+
+`tex_delimiter_conformance.test.mjs` independently executes 820 cases using
+TeX's actual delimiter construction. It compares box dimensions and shipped
+DVI glyph positions/sizes against Lambda SVG geometry for 26 bundled shapes
+across four styles, four explicit sizes, three automatic demands, and cramped,
+nested, empty and middle-boundary cases. The reference selects scaled CM10
+roman characters and fixed-size CMEX10 to match the declared companion profile.
+Original CMEX baseline positions are recovered from the existing KaTeX fonts'
+authored encoding translations, not outline bounds or image fitting. Scripts,
+DVI, font hashes, source/binary hashes and detailed relations remain under
+`temp/math-delimiter-oracle-*`. Run it alone with:
+
+```sh
+node --test test/lambda/math/tex_delimiter_conformance.test.mjs
+```
+
+`tex_radical_conformance.test.mjs` independently ships 472 TeX boxes for square
+and indexed roots and finite CMEX `\widehat`/`\widetilde` selection. Cases
+span all four styles, small/finite/assembled signs, lowered nuclei, nested
+roots/fractions, and empty/lowered degrees. Dimensions, component identities,
+positions, sizes and rules are checked against actual SVG geometry. Rule
+nuclei isolate construction from unrelated text-font metrics; character
+skew/italic attachment and supplied-font MATH construction remain unverified.
+The shared geometry runner retains reference macro/TFM hashes, existing
+production font/TFM hashes and source/binary hashes under
+`temp/math-radical-oracle-*`. Run it alone with:
+
+```sh
+node --test test/lambda/math/tex_radical_conformance.test.mjs
+```
+
+Nine native cases in `radical_cases.yaml` verify finite and tall surds,
+top/repeat/bottom joins, degrees, all styles and designed hats/tildes. The
+bundled accents intentionally stop at the original third CMEX design; the
+comparison preamble can select a different reference package's wider design.
+Native raster similarity is separate from the matched-profile TeX oracle.
+
+`tex_arrow_conformance.test.mjs` independently ships 692 AMS/mathtools boxes
+for six labelled single/double arrows and six over/under single-arrow marks.
+Checks include component identity and natural size, dimensions, baselines,
+rules, all four styles, empty/zero-width labels, leader-count boundaries,
+braced/unbraced following scripts, and nested/cramped cases. An additional
+76 of those boxes check AMS under-arrow clearance across 19 physical text
+sizes (1pt–24.88pt), explicitly scaling the matched font profile. The reference
+records its installed AMS, amsgen and mathtools definitions alongside the
+unchanged production font/TFM and source/binary hashes under
+`temp/math-arrow-oracle-*`. Run it alone with:
+
+```sh
+node --test test/lambda/math/tex_arrow_conformance.test.mjs
+```
+
+Eight `arrow_cases.yaml` native cases verify painting of the existing
+single/double heads and centered glyph leaders, including continuous shafts.
+Hooks, maps-to, harpoons, paired reactions, named text sizes and supplied/bold
+font profiles remain outside this independent construction coverage.
+
+The checks also run the comparison pipeline for both image and reaction-arrow
+fixtures. They require a built `lambda.exe`, verify all eight embedded logos in
+native PNG output, and check the rendered arrow glyphs instead of command text.
+Five additional native cases in `delimiter_cases.yaml` check tall parentheses,
+brackets, braces, finite angle variants and the logical point scale. Assembled
+tips and brace middles must survive native painting without interior gaps;
+these checks supplement the independent geometry oracle.

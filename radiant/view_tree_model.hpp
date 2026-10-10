@@ -18,6 +18,7 @@ struct BlockProp;
 struct StyleTree;
 struct ViewCssStyle;
 struct ViewCssContext;
+struct ViewCssContainerState;
 struct PagedComposition;
 struct ViewPageStyle;
 struct PaintGlyphRun;
@@ -117,6 +118,8 @@ struct ViewNodeState {
     lam::Up<LayoutViewNode> first_occurrence;
     lam::Up<LayoutViewNode> last_occurrence;
     size_t occurrence_count;
+    float container_width, container_height;
+    bool container_measured;
 };
 
 enum ViewPageSide : uint8_t {
@@ -201,6 +204,7 @@ struct ViewTreeModel {
     lam::Own<Arena> arena;
     lam::Own<hashmap> source_states;
     lam::Own<ViewCssContext> css;
+    lam::Own<ViewCssContainerState> containers;
     lam::Own<PagedComposition> composition;
     lam::Own<hashmap> image_resources; // generation owns assets independently of browsing and other editions
     lam::Up<ViewNativeLease> native_leases;

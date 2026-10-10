@@ -1,7 +1,8 @@
 // Reuse distributed CMU/KaTeX faces; this is resource selection, not geometry.
 // Binary acquisition stays in Lambda IO (D7.1.2v2).
 pub let FAMILY = "Computer Modern Serif"
-pub let SYMBOL_FAMILIES = "Computer Modern Serif,KaTeX_Size1,KaTeX_AMS"
+// CM math symbols must resolve before platform fallback (plain.tex family 2).
+pub let SYMBOL_FAMILIES = "Computer Modern Serif,KaTeX_Size1,KaTeX_AMS,KaTeX_Main"
 pub let VARIANT_FAMILIES = {sans: "Computer Modern Sans", mono: "Computer Modern Typewriter",
     script: "KaTeX_Script", cal: "KaTeX_Caligraphic", fraktur: "KaTeX_Fraktur", double: "KaTeX_AMS"}
 
@@ -14,7 +15,10 @@ let resources = [
     {family: VARIANT_FAMILIES.mono, file: "latex/fonts/Typewriter/cmuntt.woff2"},
     {family: "KaTeX_Size1", file: "math/fonts/KaTeX_Size1-Regular.woff2"},
     {family: "KaTeX_Size2", file: "math/fonts/KaTeX_Size2-Regular.woff2"},
+    {family: "KaTeX_Size3", file: "math/fonts/KaTeX_Size3-Regular.woff2"},
+    {family: "KaTeX_Size4", file: "math/fonts/KaTeX_Size4-Regular.woff2"},
     {family: "KaTeX_AMS", file: "math/fonts/KaTeX_AMS-Regular.woff2"},
+    {family: "KaTeX_Main", file: "math/fonts/KaTeX_Main-Regular.woff2"},
     {family: VARIANT_FAMILIES.script, file: "math/fonts/KaTeX_Script-Regular.woff2"},
     {family: VARIANT_FAMILIES.cal, file: "math/fonts/KaTeX_Caligraphic-Regular.woff2"},
     {family: VARIANT_FAMILIES.fraktur, file: "math/fonts/KaTeX_Fraktur-Regular.woff2"}

@@ -2114,6 +2114,8 @@ typedef struct RadiantStackPaintList {
     int count;
 } RadiantStackPaintList;
 
+enum RenderClipKind { RENDER_CLIP_SHAPE, RENDER_CLIP_CONTENTS };
+
 struct RenderBackend {
     lam::Up<RenderContext> ctx;   // the backend's context: RasterRenderContext, SvgRenderContext or PdfRenderContext
 
@@ -2159,7 +2161,7 @@ struct RenderBackend {
     void (*end_inline_children)(RenderContext* ctx, ViewSpan* span);
 
     // CSS shape clips cover both self paint and descendants in vector output.
-    bool (*begin_clip)(RenderContext* ctx, ViewElement* element, float abs_x, float abs_y);
+    bool (*begin_clip)(RenderContext* ctx, ViewElement* element, float abs_x, float abs_y, RenderClipKind kind);
     void (*end_clip)(RenderContext* ctx);
 
     // ── Semantic effect wrapper ────────────────────────────────────────
@@ -2942,7 +2944,7 @@ void radiant_video_notify_frame_ready(DocState* state);
 bool radiant_stack_is_positive_z_positioned(View* view);
 bool radiant_stack_is_out_of_flow_positioned(View* view);
 bool radiant_stack_is_deferred_from_normal_flow(View* view);
-// relative/sticky with z-index auto/0: painted after non-positioned siblings (CSS 2.1 E step 8)
+// zero-level positioned/containment contexts paint after ordinary siblings (CSS 2.1 E step 8).
 bool radiant_stack_is_in_flow_positioned_step8(View* view);
 
 ArrayList* radiant_stack_collect_positive_z_descendants(View* first_child, const char* log_prefix);
@@ -2977,6 +2979,8 @@ RenderPaintBlockResult render_paint_block_run(RenderPaintBlockOps* ops,
 bool render_paint_boundary_emit_simple(PaintList* paint_list, ViewBlock* view,
                                        float x, float y);
 bool render_paint_boundary_emit_box(PaintList* paint_list, BoundaryProp* boundary, Rect rect);
+bool render_border_is_uniform_solid(const BorderProp* border);
+bool render_paint_boundary_emit_solid_border(PaintList* paint_list, BorderProp* border, Rect rect);
 bool render_paint_boundary_emit_outer_shadows(PaintList* paint_list, ViewBlock* view,
                                               float x, float y);
 
@@ -3654,6 +3658,9 @@ RenderClipScope render_clip_push_css_scope(RasterRenderContext* rdcon, ViewBlock
                                            float parent_x, float parent_y, float scale);
 bool render_clip_push_vector_css(PaintList* paint, ViewElement* element,
                                  float abs_x, float abs_y);
+bool render_clip_overflow_geometry(ViewBlock* block, Bound* clip, Corner* radius);
+bool render_clip_push_vector(PaintList* paint, ViewElement* element,
+    float abs_x, float abs_y, RenderClipKind kind);
 RenderClipScope render_clip_push_rect_scope(RasterRenderContext* rdcon, const Bound* clip);
 RenderClipScope render_clip_push_overflow_scope(RasterRenderContext* rdcon);
 void render_clip_pop_scope(RasterRenderContext* rdcon, RenderClipScope* scope);
@@ -3912,6 +3919,7 @@ bool render_border_style_supported(CssEnum style);
 bool render_border_emit_side(Rect rect, const BorderProp* border, size_t side, bool rounded,
                              RenderBorderPathCallback emit, void* context);
 void render_border(RasterRenderContext* rdcon, ViewBlock* view, Rect rect);
+RdtPath* render_border_create_centered_stroke_path(const BorderProp* border, Rect rect, float width);
 bool corner_has_radius(const Corner* radius);
 void constrain_corner_radii(Corner* radius, float width, float height);
 void constrain_border_radii(BorderProp* border, float width, float height);

@@ -277,7 +277,6 @@ struct PagedComposition {
     TypesetMarkStore marks;
     TypesetRegionQueue queues[PAGED_REGION_COUNT];
     CounterContext* counters;
-    int quote_depth;
     uint64_t note_counter;
     PagedReferenceSession* references;
     DomNodeRef reference_source;
@@ -665,6 +664,7 @@ PagedLayoutOptions paged_layout_options_default() {
     options.max_items = 4000000;
     options.max_depth = 256;
     options.max_reference_passes = 8;
+    options.max_container_passes = 256;
     options.first_side = VIEW_PAGE_RIGHT;
     return options;
 }
@@ -898,6 +898,7 @@ static TypesetStatus paged_counter_property(ViewTree* tree, PagedComposition* ow
 
 struct PagedCounterScope {
     PagedComposition* composition;
+    CounterStyleScope style_scope;
     bool pushed, preserve_reset_scope;
     TypesetStatus status;
     PagedCounterScope(ViewTree* tree, PagedComposition* owner, ViewCssStyle* style, bool pseudo = false)
@@ -944,8 +945,12 @@ struct PagedCounterScope {
         }
         style->counters = lam::up(counter_snapshot_create(owner->counters, tree->model->css->pool));
         if (!style->counters) status = TYPESET_OUT_OF_MEMORY;
+        if (!style_scope.enter(owner->counters,
+                (style->computed_containment & CSS_CONTAIN_STYLE) || style->container_axes))
+            status = TYPESET_OUT_OF_MEMORY;
     }
     ~PagedCounterScope() {
+        style_scope.close();
         // Element resets reach following siblings; the parent frame bounds their lifetime (CSS Lists 3 section 4.4).
         if (pushed) counter_pop_scope_propagate(composition->counters, true, preserve_reset_scope);
     }
@@ -2288,6 +2293,20 @@ static TypesetStatus paged_frame_finish(PagedComposer* composer, PagedFrame* fra
     if (!view_tree_model_touch_node(composer->tree, frame->fragment)) return TYPESET_OUT_OF_MEMORY;
     frame->fragment->rect.height = fmaxf(0.0f, composer->y - frame->page_start);
     frame->fragment->last_fragment = last;
+    ViewNodeState* state = frame->fragment->state;
+    ViewCssStyle* style = frame->flow->style;
+    if (state && style && !style->pseudo_element && style == state->computed_style.get() &&
+        composer->role == VIEW_FRAGMENT_BODY) {
+        if (!view_tree_model_record(composer->tree, state, sizeof(*state))) return TYPESET_OUT_OF_MEMORY;
+        if (frame->fragment->first_fragment) state->container_width = frame->content_width;
+        if (last) {
+            float top = paged_fragment_edge(style, frame->box, 0, frame->fragment->first_fragment);
+            float bottom = paged_fragment_edge(style, frame->box, 2, true);
+            state->container_height = isfinite(frame->content_height) ? frame->content_height
+                : frame->consumed_content + fmaxf(0.0f, frame->fragment->rect.height - top - bottom);
+            state->container_measured = isfinite(state->container_width) && isfinite(state->container_height);
+        }
+    }
     if (frame->flow->column_sources) {
         TypesetStatus status = paged_table_columns_finish(composer->tree, frame->fragment);
         if (status != TYPESET_OK) return status;
@@ -3141,7 +3160,7 @@ static TypesetStatus paged_content_text(ViewTree* tree, PagedComposition* compos
     if (!text) return TYPESET_OUT_OF_MEMORY;
     int quotes = 0;
     // Source generation shares quote depth; repeated page furniture has its own evaluation.
-    bool ok = css_content_append(content, &callbacks, page ? &quotes : &composition->quote_depth, text);
+    bool ok = css_content_append(content, &callbacks, page ? &quotes : &composition->counters->quote_depth, text);
     *length = text->length;
     *result = ok ? pool_dup_n(composition->pool, text->str ? text->str : "", text->length) : nullptr;
     TypesetStatus status = TYPESET_OK;
@@ -4121,7 +4140,8 @@ static TypesetStatus paged_regions_close_trial(PagedComposer* composer) {
     if (status == TYPESET_OK) {
         composer->sheet_has_content |= placed;
         ViewPageBox* page = composer->page;
-        if (page->style->column_count > 1 && (composer->page_has_content || placed) &&
+        // continuous editions have no physical page or column occupancy.
+        if (page && page->style->column_count > 1 && (composer->page_has_content || placed) &&
             (!page->occupied_columns || page->occupied_columns->index != composer->column_index)) {
             // immutable occupancy follows the selected input, including auxiliary-only columns and trial rollback.
             if (!view_tree_model_touch_node(composer->tree, &page->node)) return TYPESET_OUT_OF_MEMORY;
@@ -7721,6 +7741,7 @@ TypesetStatus layout_secondary_view(ViewTree* tree, const PagedLayoutOptions* op
             ((options->page_policy->committed || options->page_policy->transition) && !options->page_policy->checkpoint))) ||
         !options->max_pages || !options->max_nodes ||
         !options->max_items || !options->max_block_trials || !options->max_depth || !options->max_reference_passes ||
+        !options->max_container_passes ||
         options->first_side > VIEW_PAGE_RIGHT || tree->model->committed) return TYPESET_INVALID;
     if (!view_tree_model_source_valid(tree)) return TYPESET_STALE;
     if (tree->model->composition || tree->model->node_count != 1) return TYPESET_INVALID;
@@ -7740,13 +7761,22 @@ TypesetStatus layout_secondary_view(ViewTree* tree, const PagedLayoutOptions* op
     status = paged_targets_seed(tree, &session, tree->model->document->root, 0, &visited, options);
     if (status == TYPESET_OK) status = paged_native_targets_seed(tree, &session, *options);
     bool settled = false;
+    uint32_t container_passes = 0;
     while (status == TYPESET_OK && !settled) {
         session.pass++;
+        if (!view_css_container_pass_begin(tree)) { status = TYPESET_OUT_OF_MEMORY; break; }
         status = paged_layout_pass(tree, options, &session);
         PagedComposition* composition = tree->model->composition;
         if (status == TYPESET_OK) {
             status = paged_targets_capture(tree, &session);
-            if (status == TYPESET_OK && composition->reference_used) status = paged_reference_observe(tree, &session, &settled);
+            bool containers_settled = false;
+            if (status == TYPESET_OK && !view_css_container_pass_end(tree, &containers_settled)) status = TYPESET_OUT_OF_MEMORY;
+            if (status == TYPESET_OK && !containers_settled) {
+                if (++container_passes >= options->max_container_passes)
+                    status = paged_failure(composition, TYPESET_BUDGET_EXHAUSTED, nullptr, 0,
+                        "container styles exhausted their condition-pass budget");
+            } else if (status == TYPESET_OK && composition->reference_used)
+                status = paged_reference_observe(tree, &session, &settled);
             else if (status == TYPESET_OK) settled = true;
             if (status != TYPESET_OK) paged_failure(composition, status, composition->reference_source.address, 0,
                 status == TYPESET_NO_PROGRESS ? "reference pagination repeated a nonconverged state" :
@@ -7754,13 +7784,14 @@ TypesetStatus layout_secondary_view(ViewTree* tree, const PagedLayoutOptions* op
         }
         if (composition) {
             composition->diagnostic.reference_passes = session.pass;
+            composition->diagnostic.container_passes = container_passes;
             if (diagnostic) *diagnostic = composition->diagnostic;
             composition->references = nullptr;
         }
         if (status == TYPESET_OK && !settled) {
             // provisional page callbacks rewind with a rejected reference pass (D4.5.1v4).
             if (policy_saved) status = typeset_policy_restore(policy, &policy_checkpoint);
-            if (status == TYPESET_OK) tree->reset_retained();
+            if (status == TYPESET_OK && !view_css_container_pass_reset(tree)) status = TYPESET_OUT_OF_MEMORY;
         }
     }
     if (status == TYPESET_OK && session.targets.count) {

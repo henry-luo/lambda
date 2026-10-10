@@ -9,6 +9,63 @@ fn expanded(parts, repeats) => [
 fn overlaps(parts) => [for (i in 1 to (len(parts) - 1))
     min(parts[i - 1].end_connector, parts[i].start_connector)]
 
+// TeX82 var_delimiter: butt logical char boxes together and use the fewest repeats.
+pub fn tex_assembly(recipe, target, scale, atom) {
+    let module = bx.glyph(recipe.repeat,scale,atom)
+    let step = module.height + module.depth
+    let fixed = sum([for (g in [recipe.top,recipe.middle,recipe.bottom] where g != null)
+        (g.height + g.depth) * scale])
+    let count = if (step <= 0.0) 0 else max(0,int(ceil((target - fixed) /
+        (step * (if (recipe.middle != null) 2.0 else 1.0)))))
+    let pieces = [*if (recipe.top != null) [recipe.top] else [],
+        *[for (i in 1 to count) recipe.repeat],
+        *if (recipe.middle != null) [recipe.middle,*[for (i in 1 to count) recipe.repeat]] else [],
+        *if (recipe.bottom != null) [recipe.bottom] else []]
+    let boxes = [for (g in pieces) bx.glyph(g,scale,atom)]
+    let entries = [for (i,b in boxes) {box:b, x:0.0,
+        // var_delimiter keeps the first component's baseline, including its radical rule height.
+        y:sum([for (j in 0 to (i - 1)) boxes[j].height + boxes[j].depth]) + b.height - boxes[0].height}]
+    let result = bx.compose(entries,module.width,atom);
+    {*:result, body:<g 'data-math-kind':"tex-delimiter", result.body>}
+}
+
+// AMS arrowfill@: -7mu end kerns, -2mu leader kerns, TeX82 centered leaders.
+pub fn tex_arrow(left, middle, right, target, mu, sp) {
+    // TeX font dimensions and mu arithmetic are integral scaled points; leader counts
+    // at exact boundaries must use that arithmetic rather than floating em widths.
+    let parts = [for (b in [left,middle,right]) {*:b,
+        width:floor(b.width / sp + 0.5) * sp,height:floor(b.height / sp + 0.5) * sp,
+        depth:floor(b.depth / sp + 0.5) * sp}]
+    let widths = [for (b in parts) floor(b.width / sp + 0.5)]
+    let mu_sp = floor(floor(mu * 18.0 / sp + 0.5) / 18.0)
+    let width = max(floor(target / sp + 0.5),widths[0] + widths[2] - 14.0 * mu_sp)
+    let step = widths[1] - 4.0 * mu_sp
+    // hlist_out adds ten scaled points before computing centered leader count/remainder.
+    let fill = width - widths[0] - widths[2] + 14.0 * mu_sp + 10.0
+    let count = if (step > 0.0) max(0,int(floor(fill / step))) else 0
+    let start = widths[0] - 9.0 * mu_sp + floor((fill - count * step) / 2.0)
+    let result = bx.compose([{box:parts[0],x:0.0,y:0.0},
+        *[for (i in 0 to (count - 1)) {box:parts[1],x:(start + i * step) * sp,y:0.0}],
+        {box:parts[2],x:(width - widths[2]) * sp,y:0.0}],width * sp,"mrel");
+    {*:result,body:<g 'data-math-kind':"extensible-arrow", result.body>}
+}
+
+// Ordinary fonts have no arrow assembly: extend the shaft without distorting the head.
+pub fn arrow(g, target, scale, right, axis, thickness) map | error {
+    if (len(g.horizontal.parts) > 0 or len(g.horizontal.variants) > 0)
+        glyph(g, target, false, scale, "mrel")^
+    else {
+        let natural = bx.glyph(g, scale, "mrel")
+        let width = max(target, natural.width)
+        let extra = width - natural.width
+        let start = if (right) 0.0 else g.ink.right * scale - thickness
+        let length = extra + (if (right) g.ink.left * scale else natural.width - g.ink.right * scale) + thickness;
+        if (extra <= 0.0) natural
+        else bx.compose([{box: bx.rule(length, thickness, 0.0 - axis - thickness / 2.0), x: start, y: 0.0},
+            {box: natural, x: if (right) extra else 0.0, y: 0.0}], width, "mrel")
+    }
+}
+
 // TeX accents use the largest designed variant that fits over the nucleus.
 pub fn accent(g, target, scale) map | error {
     let variants = [for (v in g.horizontal.variants where v.extent * scale <= target) v];

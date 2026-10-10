@@ -2266,6 +2266,51 @@ static bool multicol_find_fragmentable_line_metrics(
 
 static bool multicol_is_contained_monolithic(ViewBlock* block);
 
+struct MulticolBlockEndBreak {
+    float trimmable_margin;
+    bool can_break;
+};
+
+static MulticolBlockEndBreak multicol_block_end_break(ViewBlock* child) {
+    MulticolBlockEndBreak result = {};
+    if (!child || multicol_has_vertical_inline_axis(child) ||
+        layout_block_has_size_containment_in_axis(child, false) ||
+        multicol_is_scroll_container(child) ||
+        (child->blk && child->block()->break_inside == CSS_VALUE_AVOID)) return result;
+    ViewBlock* last_block = nullptr;
+    for (View* descendant = child->first_placed_child(); descendant; descendant = descendant->next()) {
+        ViewBlock* block = multicol_in_flow_block(descendant);
+        if (block && layout_view_is_block_flow_box(block)) last_block = block;
+        else if (multicol_has_visible_inline_content(descendant)) last_block = nullptr;
+    }
+    if (!last_block) return result;
+    float margin_after = 0.0f;
+    multicol_flow_margins(child, last_block, nullptr, &margin_after);
+    float decoration = layout_axis_decoration_end(child->bound, LAYOUT_AXIS_Y);
+    float retained_gap = child->height - decoration - last_block->y - last_block->height;
+    // css-break §4.1 class C permits a break in the gap beyond the child's
+    // margin edge, including a fixed-size parent's otherwise empty remainder.
+    result.can_break = retained_gap > margin_after + 0.5f;
+    if (!layout_axis_has_given_size(child, false) && decoration == 0.0f &&
+        layout_positive_min_axis(child, false) <= 0.0f) {
+        result.trimmable_margin = max(0.0f, min(margin_after, retained_gap));
+        result.can_break |= result.trimmable_margin > 0.5f;
+    }
+    return result;
+}
+
+static float multicol_trim_fragment_tail_margin(ViewBlock* child, float item_height,
+    float fragment_height, float initial_fragment_offset) {
+    float margin = multicol_block_end_break(child).trimmable_margin;
+    if (margin <= 0.0f || fragment_height <= 0.0f) return item_height;
+    float content_end = initial_fragment_offset + max(0.0f, item_height - margin);
+    float end_offset = fmodf(content_end, fragment_height);
+    float remaining = end_offset <= 0.01f ? 0.0f : fragment_height - end_offset;
+    // css-break §5.2: a margin-only continuation truncates at the break;
+    // it must not publish an empty fragment or advance the flow cursor.
+    return margin > remaining + 0.01f ? item_height - margin : item_height;
+}
+
 static bool multicol_has_fragmentable_block_children(ViewBlock* child) {
     if (!child || (child->multicol_prop() && is_multicol_container(child))) {
         // a nested multicol owns its child fragmentation context.
@@ -2289,6 +2334,8 @@ static bool multicol_has_fragmentable_block_children(ViewBlock* child) {
             all_blocks_avoid_break = false;
         }
     }
+    // a retained final margin supplies a break after an otherwise atomic child.
+    if (multicol_block_end_break(child).can_break) return true;
     // css fragmentation: a sequence of monolithic children can break between
     // adjacent blocks without fragmenting an individual child.
     return is_list_item || (in_flow_block_count > 1 &&
@@ -2695,7 +2742,7 @@ static float multicol_block_children_balance_floor(
 
     float best = upper;
     for (int step = 0; step < 12; step++) {
-        float mid = floorf((lower + upper) * 0.5f);
+        float mid = max(lower, floorf((lower + upper) * 0.5f));
         if (mid <= 0.0f) mid = (lower + upper) * 0.5f;
         if (fragment_count_for_target(mid) <= column_count) {
             best = mid;
@@ -6180,6 +6227,8 @@ static float multicol_fragmented_child_union(
 ) {
     float row_gap = multicol_row_gap(container);
     if (row_gap < 0) row_gap = 0;
+    item_height = multicol_trim_fragment_tail_margin(
+        child, item_height, fragment_height, initial_fragment_offset);
     if (out_fragment_flow_height) *out_fragment_flow_height = item_height;
     bool zero_height_fragmentainer = fragment_height == 0.0f && container &&
         container->multicol_prop() &&
@@ -6843,8 +6892,10 @@ static void multicol_distribute_flow_group(
             int used_columns = 1;
             int fragment_count = multicol_fragment_count(
                 info.content_height, target_height);
-            float flow_height = multicol_text_box_trim_fragmented_flow_height(
-                child, info.content_height, target_height, fragment_count,
+            float flow_height = multicol_trim_fragment_tail_margin(
+                child, info.content_height, target_height, cursor->block_offset);
+            flow_height = multicol_text_box_trim_fragmented_flow_height(
+                child, flow_height, target_height, fragment_count,
                 cursor->block_offset);
             float fragmented_flow_height = flow_height;
             // css-break: only descendant forced breaks create new flow beyond
@@ -9030,7 +9081,8 @@ static float multicol_balanced_target_search(
 
     float best = upper;
     for (int step = 0; step < 12; step++) {
-        float mid = floorf((lower + upper) * 0.5f);
+        // rounding below a fractional minimum creates a spurious continuation.
+        float mid = max(lower, floorf((lower + upper) * 0.5f));
         if (mid <= 0) mid = (lower + upper) * 0.5f;
         if (mid < 1) mid = 1;
 
@@ -9823,57 +9875,6 @@ static void multicol_layout_children(LayoutContext* lycon, ViewBlock* block) {
     layout_flow_children(lycon, child, true);
 }
 
-static float multicol_adjust_contained_block_start(ViewBlock* container,
-                                                   ViewBlock* child,
-                                                   bool finalize_geometry) {
-    if (!container || !child || !child->blk ||
-        !child->block()->contain_positioning ||
-        multicol_has_vertical_inline_axis(container) ||
-        (child->bound && layout_axis_decoration_start(
-            child->boundary(), LAYOUT_AXIS_Y) > 0.0f)) {
-        return 0.0f;
-    }
-
-    ViewBlock* first_block = nullptr;
-    for (View* descendant = child->first_placed_child(); descendant;
-         descendant = descendant->next()) {
-        if (!descendant->is_block()) continue;
-        ViewBlock* descendant_block = lam::view_as_block(descendant);
-        if (descendant_block && !layout_block_is_out_of_flow_positioned(descendant_block)) {
-            first_block = descendant_block;
-            break;
-        }
-    }
-    if (!first_block) return 0.0f;
-
-    float margin_before = 0.0f;
-    float margin_after = 0.0f;
-    multicol_flow_margins(child, first_block, &margin_before, &margin_after);
-    if (margin_before <= 0.0f) return 0.0f;
-    if (!finalize_geometry && child->bound) {
-        BoundaryProp* boundary = child->boundary_mut();
-        if (fabsf(boundary->margin.top - margin_before) <= 0.01f) {
-            boundary->margin.top = 0.0f;
-        }
-        if (margin_after > 0.0f &&
-            fabsf(boundary->margin.bottom - margin_after) <= 0.01f) {
-            boundary->margin.bottom = 0.0f;
-        }
-    }
-
-    // css containment: the first child margin belongs inside the contained box.
-    if (finalize_geometry) {
-        first_block->y += margin_before;
-    }
-    if (child->block()->given_height < 0.0f) {
-        if (!finalize_geometry) {
-            child->height += margin_before;
-            child->content_height += margin_before;
-        }
-        return 0.0f;
-    }
-    return finalize_geometry ? 0.0f : -margin_before;
-}
 
 /**
  * Layout multi-column content
@@ -9994,15 +9995,8 @@ void layout_multicol_content(LayoutContext* lycon, ViewBlock* block) {
     }
     // Layout children normally within column width
     multicol_layout_children(lycon, block);
-    // Get total content height after layout
+    // containment formatting contexts already include their child margins.
     float total_content_height = lycon->block.advance_y;
-    for (View* placed = block->first_placed_child(); placed; placed = placed->next()) {
-        ViewBlock* child_block = lam::view_as_block(placed);
-        if (!child_block || layout_block_is_out_of_flow_positioned(child_block)) continue;
-        total_content_height += multicol_adjust_contained_block_start(
-            block, child_block, false);
-    }
-    lycon->block.advance_y = total_content_height;
     // Restore original widths (for container sizing)
     lycon->line.left = orig_line_left;
     lycon->line.right = orig_line_right;
@@ -10870,12 +10864,6 @@ void layout_multicol_content(LayoutContext* lycon, ViewBlock* block) {
         // css inline: a post-spanner break establishes a final line box in a
         // new column group even though it has no text rect to redistribute.
         max_column_height += trailing_br_extent;
-    }
-
-    for (View* placed = block->first_placed_child(); placed; placed = placed->next()) {
-        ViewBlock* child_block = lam::view_as_block(placed);
-        if (!child_block || layout_block_is_out_of_flow_positioned(child_block)) continue;
-        multicol_adjust_contained_block_start(block, child_block, true);
     }
 
     bool has_text_box_trim = block->blk && block->block()->text_box_trim;

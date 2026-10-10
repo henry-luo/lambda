@@ -807,6 +807,10 @@ typedef enum CssPropertyCode {
     CSS_PROPERTY_UNKNOWN = -1
 } CssPropertyCode;
 
+const CssValue* css_container_shorthand_longhand(const CssValue* value,
+    CssPropertyCode property, Pool* pool);
+
+
 // individual transforms compose in this order, independently of declaration order.
 static inline int css_individual_transform_index(CssPropertyCode property) {
     return property >= CSS_PROPERTY_TRANSLATE && property <= CSS_PROPERTY_SCALE

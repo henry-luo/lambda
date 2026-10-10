@@ -1,0 +1,29 @@
+% Independent oracle: pdflatex -interaction=nonstopmode -output-directory=temp this-file.tex
+% showbox reports ! OK and a nonzero exit status; inspect the dimensions in the log.
+\documentclass[10pt]{article}
+\usepackage{amsmath}
+\showboxbreadth=1000 \showboxdepth=100 \tracingonline=1
+\def\audit#1#2{\setbox0=\hbox{$#2$}\immediate\write16{CASE:#1 WIDTH:\the\wd0 HEIGHT:\the\ht0 DEPTH:\the\dp0}\showbox0}
+\def\arrowcases#1#2{%
+  \audit{big-#2}{\bigl#1}%
+  \audit{Big-#2}{\Bigl#1}%
+  \audit{bigg-#2}{\biggl#1}%
+  \audit{Bigg-#2}{\Biggl#1}}
+\def\arrows#1{\expandafter\arrowcases\csname#1\endcsname{#1}}
+\begin{document}
+\arrows{uparrow}
+\arrows{downarrow}
+\arrows{updownarrow}
+\arrows{Uparrow}
+\arrows{Downarrow}
+\arrows{Updownarrow}
+\audit{script-big}{\scriptstyle\Biggl\uparrow}
+\audit{automatic-small}{\left\uparrow x\right\downarrow}
+\audit{automatic-tall}{\left\uparrow\vphantom{\rule{0em}{3em}}\right\downarrow}
+\audit{row-break-controls}{a\\b\\c\\}
+\audit{row-break-plain}{abc}
+\audit{literal-backslash}{a\backslash b}
+\audit{text-row-break-controls}{\text{a\\b}}
+\audit{text-row-break-plain}{\text{ab}}
+\audit{text-row-break-dollar}{\text{\\\$}}
+\end{document}

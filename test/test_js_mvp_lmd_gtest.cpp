@@ -9,6 +9,7 @@
 #include "lib/file.h"
 #include "lib/mem.h"
 #include "lib/hashmap.h"
+#include "lib/strbuf.h"
 #include <math.h>
 #include <string.h>
 
@@ -72,6 +73,361 @@ TEST_F(JsMvpLmd, HostClockOutputAndFiles) {
     EXPECT_EQ(size, sizeof(expected) - 1);
     if (size == sizeof(expected) - 1) EXPECT_EQ(memcmp(bytes, expected, size), 0);
     mem_free(bytes);
+}
+TEST_F(JsMvpLmd, BigIntSharedArithmeticAndOwnership) {
+    boolean(R"JS(
+        let large=123456789012345678901234567890n;
+        let values=[large, 2n]; let object={value:large};
+        function show(value){return value.toString();}
+        function counter(){let n=0n;return ()=>++n;}
+        let next=counter();next();
+        typeof values[0]==='bigint' && show(values[0]*values[1])==='246913578024691357802469135780' &&
+          object.value===large && next()===2n && large/10n===12345678901234567890123456789n &&
+          -10n%3n===-1n && (1n<<70n).toString(16)==='400000000000000000' &&
+          0xdeadbeefn.toString(16)==='deadbeef' && ~1n===-2n && 2n**10n===1024n &&
+          1n==1 && 1n!==1 && 1n<'2' && -2n< -1.5 && 0n=='' && 1n==' 1 ' &&
+          1n!=null && 1n!=undefined && 1n==true && 1n+'x'==='1x' &&
+          Number(9007199254740993n)===9007199254740992 && !0n && !!large;
+    )JS");
+    error("1n+1", "TypeError");
+    error("+1n", "TypeError");
+    error("1n/0n", "RangeError");
+    error("2n**-1n", "RangeError");
+    error("1n>>>0n", "TypeError");
+    error("1n.toString(1)", "RangeError");
+}
+TEST_F(JsMvpLmd, DefaultAndRestParameters) {
+    boolean(R"JS(
+        let calls=0;
+        function f(a=++calls,b=a+1,...rest){return [a,b,rest];}
+        let a=f(), b=f(undefined,8,1,2), c=f(null);
+        function closure(a=3,b=()=>a){a++;return b;}
+        calls===2 && a[0]===1 && a[1]===2 && a[2].length===0 &&
+          b[0]===2 && b[1]===8 && b[2].join(',')==='1,2' &&
+          c[0]===null && c[1]===1 && closure()()===4;
+    )JS");
+    error("function f(a=b,b=2){return a} f()", "ReferenceError");
+    error("function f(a=a){return a} f()", "ReferenceError");
+}
+TEST_F(JsMvpLmd, ArrayFlattenReduceSomeIncludes) {
+    boolean(R"JS(
+        let holes=new Array(3); holes[1]=[1,[2],new Array(2)];
+        let flat=holes.flat(); let deep=holes.flat(Infinity);
+        let values=new Array(4); values[1]=3;values[3]=5;
+        let calls=0;
+        let sum=values.reduce((sum,value,index,array)=>{
+          calls++;if(index===1){array[2]=4;array.push(9);}return sum+value;
+        },0);
+        let seen=0; let found=values.some(value=>{seen++;return value===4;});
+        flat.length===3 && flat[0]===1 && flat[1][0]===2 && flat[2].length===2 &&
+          deep.join(',')==='1,2' && holes.flat(0).length===1 &&
+          sum===12 && calls===3 && found && seen===2 &&
+          new Array(2).includes(undefined) && [NaN].includes(NaN) &&
+          [0].includes(-0) && ![1,2].includes(1,1) && [1,2].includes(2,-1) &&
+          [].reduce((a,b)=>a+b,undefined)===undefined &&
+          [1,2,3].reduce((a,b)=>a+b)===6 && ![].some(()=>true);
+    )JS");
+    error("new Array(3).reduce((a,b)=>a+b)", "TypeError");
+    error("[].some(1)", "TypeError");
+}
+TEST_F(JsMvpLmd, JsonUsesSharedParserAndMutableStorage) {
+    boolean(R"JS(
+        let data=JSON.parse('{"name":"a\\u0000b","values":[1,2,5e-324],"flag":true,"empty":null}');
+        data.values.push(3);data.values[0]=4;data.extra='kept';
+        let text=JSON.stringify(data), copy=JSON.parse(text);
+        copy.name.length===3 && copy.name.charCodeAt(1)===0 &&
+          copy.values.length===4 && copy.values[0]===4 && copy.values[2]===5e-324 &&
+          copy.extra==='kept' && copy.flag && copy.empty===null &&
+          JSON.stringify({b:undefined,a:1,'2':2,'1':1})==='{"1":1,"2":2,"a":1}' &&
+          JSON.stringify([undefined,NaN,Infinity,null])==='[null,null,null,null]' &&
+          JSON.stringify(undefined)===undefined && JSON.stringify(-0)==='0' &&
+          JSON.stringify('\ud800')==='"\\ud800"' && JSON.parse('"\\ud800"').charCodeAt(0)===55296 &&
+          1/JSON.parse('-0')===-Infinity && JSON.parse('9007199254740993')===9007199254740992 &&
+          JSON.parse('1e400')===Infinity && JSON.parse('{"x":1,"x":2}').x===2;
+    )JS");
+    error("JSON.parse('[1,]')", "SyntaxError");
+    error("JSON.parse('01')", "SyntaxError");
+    error("JSON.parse('\\v1')", "SyntaxError");
+    error("JSON.parse('1\\u0000')", "SyntaxError");
+    error("let a={};a.self=a;JSON.stringify(a)", "TypeError");
+    error("JSON.stringify(1n)", "TypeError");
+}
+TEST_F(JsMvpLmd, DateClockAndArrayStringCoercion) {
+    boolean(R"JS(
+        let date=new Date(123.9);date.extra='kept';
+        let invalid=new Date(NaN);let cycle=[1];cycle.push(cycle);cycle.push([2,3]);
+        let now=Date.now(), after=new Date().getTime();
+        date.getTime()===123 && date.valueOf()===123 && date.extra==='kept' &&
+          date instanceof Date && date.constructor.name==='Date' &&
+          invalid.getTime()!==invalid.getTime() && 1/new Date(-0).getTime()===Infinity &&
+          now>1700000000000 && after>=now &&
+          [1,[2,3],null,undefined].toString()==='1,2,3,,' &&
+          String(cycle)==='1,,2,3' && 'pixels:'+[[1,2],[3,4]]==='pixels:1,2,3,4' &&
+          Object.keys(date).join(',')==='extra' && Object.keys(JSON).length===0;
+    )JS");
+}
+TEST_F(JsMvpLmd, RegExpStateCapturesAndReplacement) {
+    boolean(R"JS(
+        let re=/(a)(b)?/g, first=re.exec('a ab'), next=re.exec('a ab');
+        let good=first[0]==='a' && first[1]==='a' && first[2]===undefined && first.index===0 &&
+          next[0]==='ab' && next.index===2 && re.lastIndex===4 && re.exec('a ab')===null && re.lastIndex===0;
+        let sticky=/a/y;sticky.lastIndex=1;
+        good=good && sticky.test('ba') && sticky.lastIndex===2 && !sticky.test('ba') && sticky.lastIndex===0;
+        let empty=/(?:)/g;
+        good && 'aaa'.match(/a/g).length===3 && 'xyz'.match(/a/)===null &&
+          'a\nb\nc'.replace(/\n/g,'')==='abc' &&
+          'ab a'.replace(/(a)(b)?/g,'$2-$1-$$')==='b-a-$ -a-$' &&
+          'aba'.replace(/a/g,function(m,i,s){return i+':'+s.length;})==='0:3b2:3' &&
+          'ab'.replace(empty,'-')==='-a-b-' && empty.lastIndex===0 &&
+          'x\ud83d\ude00y'.match(/./g).length===4 && 'x\ud83d\ude00y'.match(/./gu).length===3 &&
+          /(?<letter>a)/.exec('ba').groups.letter==='a' &&
+          'aba'.replace(/(?<letter>a)/g,'$<letter>!')==='a!ba!' &&
+          /a(?!b)/.test('ac') && !/a(?!b)/.test('ab') &&
+          new RegExp('a','gi').flags==='gi' && new RegExp('a') instanceof RegExp;
+    )JS");
+    error("new RegExp('[','')", "SyntaxError");
+    error("new RegExp('a','gg')", "SyntaxError");
+}
+TEST_F(JsMvpLmd, FunctionCallApplyBindOwnership) {
+    boolean(R"JS(
+        function sum(a,b){return this.base+a+b;}
+        let object={base:7}, bound=sum.bind(object,2), nested=bound.bind({base:90},3);
+        let args=[1.5,2.25];
+        function snapshot(a,b){args[0]=99;args[1]=100;return a+b;}
+        let test=/a/.test.bind(/a/);
+        sum.call(object,1,2)===10 && sum.apply(object,[3,4])===14 && bound(4)===13 && nested()===12 &&
+          bound.length===1 && snapshot.apply(null,args)===3.75 && test('cat') && !test('dog') &&
+          Object.prototype.toString.call([])==='[object Array]' &&
+          Object.prototype.toString.call(1)==='[object Number]' &&
+          Object.prototype.hasOwnProperty.call({a:undefined},'a') &&
+          !Object.prototype.hasOwnProperty.call({},'a');
+    )JS");
+}
+TEST_F(JsMvpLmd, ArrayEditsAndInheritedEnumeration) {
+    boolean(R"JS(
+        let a=new Array(4);a[1]=1.25;a[3]=3.5;
+        let b=a.concat([5],6), cut=a.splice(1,2,7,8,9);
+        let ok=b.length===6 && !(0 in b) && !(2 in b) && b[1]===1.25 && b[5]===6 &&
+          cut.length===2 && cut[0]===1.25 && !(1 in cut) && a.join(',')===',7,8,9,3.5';
+        ok=ok && a.unshift(0)===6 && a[0]===0 && !(1 in a) && a[5]===3.5;
+        function Base(){this.own=1;} Base.prototype.inherited=2;
+        let x=new Base(), keys='';for(let key in x){keys+=key+',';}
+        let deleted={a:1,b:2}, names='';for(let key in deleted){names+=key;delete deleted.b;}
+        let skipped=0;for(let key in null){skipped++;}
+        ok && keys==='own,inherited,' && names==='a' && skipped===0;
+    )JS");
+    boolean(R"JS(
+        var exposed=3;let hidden=4;globalThis.exposed=5;
+        let ok=exposed===5 && globalThis.hidden===undefined;
+        exposed=7;globalThis.self=globalThis;
+        ok && globalThis.exposed===7 && globalThis.self===this;
+    )JS");
+}
+TEST_F(JsMvpLmd, OptionalChainsAndPrimitiveConversion) {
+    boolean(R"JS(
+        let calls=0, absent=null, object={base:4, fn:function(x){return this.base+x;}};
+        let missing=absent?.[calls++].x;
+        let empty=object.missing?.(calls++);
+        let good=missing===undefined && empty===undefined && calls===0 &&
+          object?.fn?.(3)===7 && delete absent?.x &&
+          ({x:7})?.[absent?.x]===undefined;
+        let order='', converted={valueOf:function(){order+='v';return 6;},toString:function(){order+='s';return 'text';}};
+        good=good && converted+''==='6' && String(converted)==='text' && +converted===6 && order==='vsv';
+        let values=[1]; values.push.apply(values,[2,5e-324]);
+        let tiny={valueOf:()=>5e-324}, zero={valueOf:()=>-0};
+        let mixed=[undefined,null,true,'3',1], numbers=mixed.map(x=>+x);
+        good && values.length===3 && values[2]===5e-324 &&
+          +tiny===5e-324 && 1/+zero===-Infinity &&
+          Number.isNaN(numbers[0]) && numbers.slice(1).join(',')==='0,1,3,1' &&
+          Number.isNaN(NaN) && !Number.isNaN('x') && !Number.isNaN({}) &&
+          isNaN('x') && !isNaN(new Date(1)) && isNaN(/a/g) &&
+          /a/g+''==='/a/g' && String(/a/i)==='/a/i' &&
+          Array.isArray([]) && !Array.isArray({}) && !Array.isArray(new Int32Array(1));
+    )JS");
+    error("let x=null;(x?.y).z", "TypeError");
+    error("let x={y:1};x.y?.()", "TypeError");
+    boolean("let order='',slot={value:5e-324},left={valueOf(){order+='l';slot.value=7;return 0;}};let result=left+slot?.value;result===5e-324&&slot.value===7&&order==='l'");
+    boolean("let order='',a={valueOf(){order+='a';return 1;}},b={valueOf(){order+='b';return 2;}};let observed=a?.value; a<b&&order==='ab'");
+}
+TEST_F(JsMvpLmd, DataDescriptorTransitionsAndPrototypeReflection) {
+    boolean(R"JS(
+        let a={},b={},c={};
+        Object.defineProperty(a,'x',{value:1});
+        Object.defineProperty(b,'x',{value:2,enumerable:true,writable:true,configurable:true});
+        Object.defineProperty(c,'x',{value:3});
+        a.x=9;b.x=8;c.x=7;
+        let names='';for(let key in a){names+=key;}
+        let ok=a.x===1 && b.x===8 && c.x===3 && names==='' &&
+          Object.keys(a).length===0 && Object.keys(b)[0]==='x' && !delete a.x;
+        Object.defineProperty(b,'x',{writable:false}); b.x=10;
+        Object.defineProperty(a,'x',{value:1});
+        let values=[]; Object.defineProperty(values,'named',{value:4});values.named=9;
+        ok && b.x===8 && delete b.x && values.named===4 && !delete values.named &&
+          Object.getPrototypeOf(a)===Object.prototype && Object.getPrototypeOf([])===Array.prototype &&
+          Object.getPrototypeOf(Array.prototype)===Object.prototype && Object.getPrototypeOf(Object.prototype)===null &&
+          Object.getPrototypeOf(new Date(1)).constructor.name==='Date' &&
+          Object.getPrototypeOf(/a/).constructor.name==='RegExp';
+    )JS");
+    error("let a={};Object.defineProperty(a,'x',{value:1});Object.defineProperty(a,'x',{value:2})", "TypeError");
+    error("'use strict';let a={};Object.defineProperty(a,'x',{value:1});a.x=2", "TypeError");
+    error("'use strict';let a=[];Object.defineProperty(a,'x',{value:1});a.x=2", "TypeError");
+    error("'use strict';let a={};Object.defineProperty(a,'x',{value:1});delete a.x", "TypeError");
+}
+TEST_F(JsMvpLmd, ExplicitCatchFinallyCompletions) {
+    boolean(R"JS(
+        let trace='';
+        function pass(value){throw value;}
+        function choose(){try{return 1;}finally{return 2;}}
+        function recover(){try{pass(5e-324);}catch(e){return e;}finally{trace+='f';}}
+        let object={tag:'kept'}, caught;
+        try {try{pass(object);}finally{trace+='i';}} catch(e) {caught=e;trace+='c';}
+        let total=0;
+        for(let i=0;i<4;i++) {
+            try {if(i===1)continue;if(i===3)break;total+=i;}
+            finally {trace+=i;}
+        }
+        let name='';try {null.x;} catch(e) {name=e.name;}
+        let thrown;try {try {throw 1;}finally{throw 2;}}catch(e){thrown=e;}
+        let x=recover();
+        caught===object && trace==='ic0123f' && total===2 && name==='TypeError' && thrown===2 && choose()===2 && x===5e-324;
+    )JS");
+    boolean("let n=0;try{for(let i=0;i<2;i++){break;}n++;}finally{n+=2;}n===3");
+    boolean("let n=0;try{throw undefined;}catch(e){n=e===undefined?1:0;}n===1");
+    error("try {new Date('unsupported');}catch(e){1;}", "capability");
+}
+TEST_F(JsMvpLmd, GeneratorsUseLambdaActivations) {
+    boolean("function* g(){yield 1;}let it=g();let a=it.next();a.value===1&&!a.done&&it.next().done");
+    boolean(R"JS(
+        let trace='';
+        function* values(a=(trace+='p',5e-324)) {
+            trace+='b';
+            try {let received=yield a;yield received+1;}
+            catch(e) {yield e;}
+            finally {trace+='f';yield 'cleanup';}
+            return 9;
+        }
+        let g=values(), before=trace==='p', first=g.next(), second=g.next(4);
+        let stop=g.return(7), done=g.next();
+        let h=values(3);h.next();let thrown=h.throw('caught'), clean=h.next(), end=h.next();
+        let unused=values(2), closed=unused.return(6);
+        class Holder {constructor(v){this.value=v;} *read(){yield this.value;}}
+        let instance=new Holder(11), method=instance.read();
+        before && first.value===5e-324 && !first.done && second.value===5 && !second.done &&
+          stop.value==='cleanup' && !stop.done && done.value===7 && done.done &&
+          thrown.value==='caught' && clean.value==='cleanup' && end.value===9 && end.done &&
+          closed.done && closed.value===6 && unused.next().done && method.next().value===11 &&
+          trace==='pbfbf';
+    )JS");
+    boolean("function* g(a=missing){yield a;}let ok=false;try{g();}catch(e){ok=e.name==='ReferenceError';}ok");
+    boolean("function* g(){yield 1;}let it=g();let ok=false;try{it.throw(7);}catch(e){ok=e===7;}ok&&it.next().done");
+    boolean("let it;function* g(){try{it.next();}catch(e){yield e.name;}}it=g();it.next().value==='TypeError'");
+    boolean("function* g(){return 5e-324;}let result=g().next();result.done&&result.value===5e-324");
+}
+TEST_F(JsMvpLmd, SymbolPropertyIdentity) {
+    boolean(R"JS(
+        let a=Symbol('x'), b=Symbol('x'), o={x:3};o[a]=1;o[b]=2;
+        o[Symbol.iterator]=4;
+        typeof a==='symbol' && a!==b && !!a && o[a]===1 && o[b]===2 && o.x===3 &&
+          o[Symbol.iterator]===4 && Object.keys(o).join(',')==='x' &&
+          Object.hasOwn(o,a) && delete o[a] && !Object.hasOwn(o,a) && o[b]===2
+    )JS");
+    boolean("let a=Symbol(),b=Symbol();a!==b&&typeof a==='symbol'");
+    error("new Symbol('x')", "TypeError");
+}
+TEST_F(JsMvpLmd, FixedPrototypeCreationAndCopy) {
+    boolean(R"JS(
+        let base={a:1}, child=Object.create(base), leaf=Object.create(child);
+        base.a=2;child.b=3;leaf.c=4;
+        let flat=Object.assign({},leaf), spread={a:9,...child,c:5};
+        let symbol=Symbol('s');base[symbol]=7;let copied={...base};
+        let nil=Object.create(null);nil.x=1;
+        Object.getPrototypeOf(child)===base&&Object.getPrototypeOf(leaf)===child&&
+          leaf.a===2&&leaf.b===3&&Object.keys(flat).join(',')==='c'&&
+          spread.a===9&&spread.b===3&&spread.c===5&&copied[symbol]===7&&
+          Object.getPrototypeOf(nil)===null&&nil.toString===undefined&&nil.x===1
+    )JS");
+    boolean("function* g(){yield 1;}let f=Object.assign(g,{params:[2]});f===g&&g.params[0]===2&&g().next().value===1");
+    boolean("let a=Object.assign({},'a😀');a[0]==='a'&&a[1]==='\\ud83d'&&a[2]==='\\ude00'");
+    error("let p={};Object.defineProperty(p,'x',{value:1});Object.assign(Object.create(p),{x:2})", "TypeError");
+}
+TEST_F(JsMvpLmd, ObjectBindingPatterns) {
+    boolean("function f({a,b=3}={a:2}){return a+b;}f()===5&&f({a:1,b:4})===5&&f.length===0");
+    boolean("let f=({key,value})=>key+value;f({key:1,value:2})===3");
+    boolean("function f({a},b=()=>a){a++;return b;}f({a:4})()===5");
+    boolean("let {a:x,b:y=4,n:{z}}={a:1,n:{z:3}};let a=0;({a}= {a:7});x===1&&y===4&&z===3&&a===7");
+    boolean("let sum=0;for(let {key,value=2} of [{key:1},{key:3,value:4}])sum+=key+value;sum===10");
+    boolean("let key='x', count=0;let {[key]:v=(count++,2)}={x:1};v===1&&count===0");
+    boolean("let value=0;try{throw {a:7};}catch({a}){value=a;}value===7");
+    error("let {}=null", "TypeError");
+}
+TEST_F(JsMvpLmd, NonConstructorFunctionProperties) {
+    boolean("let o={x:2,method(y){return this.x+y;},*iterate(){yield this.x;}};o.method(3)===5&&o.iterate().next().value===2&&o.method.prototype===undefined");
+    error("let o={method(){}};new o.method()", "TypeError");
+    boolean("let f=x=>x+1;f.ast={value:2};f.trace=x=>x;f(2)===3&&f.ast.value===2&&f.trace(4)===4&&f.prototype===undefined&&Object.keys(f).join(',')==='ast,trace'");
+    boolean("class A{method(x){return x;}}let f=A.prototype.method;f.extra=2;f(3)===3&&f.extra===2&&f.prototype===undefined");
+    error("let f=x=>x;f.extra=1;new f()", "TypeError");
+    error("let f=x=>x;({}) instanceof f", "TypeError");
+}
+TEST_F(JsMvpLmd, CollectionIteratorAndSet) {
+    boolean("let m=new Map([[1,2]]);Object.defineProperty(m,'get',{value:()=>9});m.get(1)===9&&[...m][0][1]===2");
+    boolean("let m=new Map([[1,2]]);const O=Object;O.assign(m,{has:()=>false});!m.has(1)&&m.get(1)===2");
+    boolean("let a=[1,2];const O=Object;O.defineProperty(a,'map',{value:()=>9});a.map(x=>x+1)===9");
+    boolean("let m=new Map([[1,2]]),a=[1];({f:m.get,g:a.map}={f:()=>7,g:()=>8});m.get(1)===7&&a.map(x=>x)===8");
+    boolean("let m=new Map([[1,2]]);let before=[...m.entries()];function key(){m.get=function(){return 9;};return 1;}before[0][1]===2&&m.get(key())===2&&m.get(1)===9");
+    boolean("let m=new Map([[1,2]]);m.has=function(){return 'own';};let f=x=>x;f.get=function(){return 3;};[...m].length===1&&m.has(1)==='own'&&f.get()===3");
+    boolean("let s=new Set([1,2,2,NaN,NaN,-0]);s.size===4&&s.has(0)&&s.has(NaN)&&s.add(3)===s&&s.delete(2)&&!s.has(2)&&s.get===undefined&&s.set===undefined&&s.keys===s.values&&s.values===s[Symbol.iterator]");
+    boolean("let m=new Map([[1,2],[3,4]]), it=m.entries();m.set(5,6);it.next().value.join(',')==='1,2'&&it.next().value.join(',')==='3,4'&&it.next().value.join(',')==='5,6'&&it.next().done");
+    boolean("let s=new Set([1,2]),it=s.values();let first=it.next().value;s.delete(2);s.add(3);first===1&&it.next().value===3&&it.next().done");
+    boolean("let m=new Map([[1,2]]),it=m.keys();m.clear();m.set(3,4);it.next().value===3&&it.next().done");
+    boolean("let s=new Set([1,2]),a=[];for(let n of s)a.push(n);Array.from(s).join(',')==='1,2'&&a.join(',')==='1,2'&&s.entries().next().value.join(',')==='1,1'");
+    boolean("let m=new Map([[1,2]]);m[Symbol.iterator]=function*(){yield 7;};Array.from(m)[0]===7");
+    error("new Set().add.call(new Map(),1)", "TypeError");
+    error("new Set().values.call(new Map())", "TypeError");
+    error("let s=new Set();new Map().keys.call(s)", "TypeError");
+}
+TEST_F(JsMvpLmd, PublicInstanceFields) {
+    boolean("class A{static a=new A();x=3;}A.a.x===3");
+    boolean("let count=0;class A{x=++count;y=this.x+1;z;}let a=new A(),b=new A();a.x===1&&b.x===2&&a.y===2&&b.y===3&&Object.hasOwn(a,'z')&&a.z===undefined");
+    boolean("let order='';class A{x=(order+='a',1);constructor(){order+='b';}}class B extends A{x=(order+='c',2);constructor(){super();order+='d';}}let b=new B();order==='abcd'&&b.x===2&&b instanceof A&&b instanceof B");
+    boolean("class A{x=1;}class B extends A{y=2;}class C extends B{}let c=new C();c.x===1&&c.y===2");
+    boolean("let value=1;class A{x=value;fn=()=>this.x;}value=2;let a=new A();a.x===2&&a.fn()===2");
+}
+TEST_F(JsMvpLmd, LibraryVisitorsAndStringPrimitives) {
+    boolean("let map=Array.prototype.map;map.call('abc',(v,i)=>v+i).join(',')==='a0,b1,c2'&&map.call({0:2,2:4,length:3},x=>x*2).join(',')==='4,,8'");
+    boolean("let a=[1,,2,3];a.filter(x=>x%2).join(',')==='1,3'&&a.indexOf(undefined)===-1&&a.indexOf(2)===2&&[NaN].indexOf(NaN)===-1");
+    boolean("let a=[1,2,3],visit=Array.prototype.filter;visit.call(a,(x,i)=>{if(i===0)a.length=1;return true;}).join(',')==='1'");
+    boolean("let reduce=Array.prototype.reduce;reduce.call([5e-324,5e-324],(a,b)=>a+b)===1e-323");
+    boolean("Number.parseInt('ff',16)===255&&Number.parseFloat('  -1.25e2rest')===-125&&Number.parseFloat('1e+')===1&&Number.parseFloat('0x10')===0&&Number.isNaN(Number.parseFloat(''))");
+    boolean("Number.isFinite(1)&&!Number.isFinite('1')&&!Number.isFinite(Infinity)&&!Number.isFinite(NaN)&&Number.POSITIVE_INFINITY===Infinity");
+    boolean("(255).toString(16)==='ff'&&(1.25).toString()==='1.25'&&(-16).toString(2)==='-10000'&&'abc'.endsWith('bc')&&'abcd'.endsWith('bc',3)&&'abc'.endsWith('bc',undefined)");
+    boolean("'x'.padStart(4,'ab')==='abax'&&'x'.padStart(2,'😀')==='\\ud83dx'&&'x'.padStart(3)==='  x'&&'x'.padStart(5,'')==='x'");
+    error("(1).toString(1)", "RangeError");
+}
+TEST_F(JsMvpLmd, IteratorProtocolAndDelegation) {
+    boolean("function* g(){yield 9;}let a=[1,,3],seen=[];for(let x of a){seen.push(x);if(seen.length===1)a.push(4);}seen.length===4&&seen[1]===undefined&&seen[3]===4&&g().next().value===9");
+    boolean("let a=[1,2];a[Symbol.iterator]=function*(){yield 7;};let sum=0;for(let x of a)sum+=x;sum===7");
+    boolean("function* g(){yield 1;yield 2;}Array.from(g(),(v,i)=>v+i).join(',')==='1,3'&&[0,...g(),3].join(',')==='0,1,2,3'");
+    boolean("function* g(){yield 2;yield 3;}function add(a,b,c){return a+b+c;}let a=[1];a.push(...g());add(...a)===6");
+    boolean("class A{get ordinary(){return 1;}}'ordinary' in new A()&&Object.keys(A.prototype).length===0");
+    error("class A{get ordinary(){return 1;}}new A().ordinary", "capability");
+    boolean("let a=[1,,3],it=a[Symbol.iterator]();a.push(4);it[Symbol.iterator]()===it&&it.next().value===1&&it.next().value===undefined&&it.next().value===3&&it.next().value===4&&it.next().done");
+    boolean("let it='a😀b'[Symbol.iterator]();it.next().value==='a'&&it.next().value==='😀'&&it.next().value==='b'&&it.next().done");
+    boolean("function* g(){yield* [1,2];yield 3;return 4;}let it=g();it.next().value===1&&it.next().value===2&&it.next().value===3&&it.next().value===4&&it.next().done");
+    boolean("function* inner(){let n=yield 1;return n;}function* outer(){return yield* inner();}let it=outer();it.next().value===1&&it.next(5).value===5&&it.next().done");
+    boolean("function* inner(){try{yield 1;}finally{yield 2;}}function* outer(){yield* inner();return 3;}let it=outer();it.next().value===1&&it.return(7).value===2&&it.next().value===3&&it.next().done");
+    boolean("let trace='';function* g(){try{yield 1;yield 2;}finally{trace+='c';}}let total=0;for(let v of g()){total+=v;break;}total===1&&trace==='c'");
+    boolean("function* g(){yield 1;yield 2;}let total=0;for(let v of g())total+=v;total===3");
+    boolean("let total='';for(let ch of 'a😀b')total+=ch;function* g(){} total==='a😀b'");
+    boolean(R"JS(
+        let closed=0, object={}, result={value:3,done:false,extra:4};
+        object[Symbol.iterator]=function(){return this;};
+        object.next=function(){return result;};
+        object.return=function(){closed++;throw 2;};
+        let caught=0;try {for(let v of object)throw 1;}catch(e){caught=e;}
+        let failed=0;try {for(let v of object)break;}catch(e){failed=e;}
+        function* g(){yield* object;}let it=g();
+        caught===1&&failed===2&&closed===2&&it.next()===result
+    )JS");
 }
 TEST_F(JsMvpLmd, PublicStaticFields) {
     boolean(R"JS(
@@ -324,13 +680,13 @@ TEST_F(JsMvpLmd, NumericMethodGuardsAndSpecialNumbers) {
     )JS");
 }
 TEST_F(JsMvpLmd, NumericRegionEffectsStayOrdered) {
-    error(R"JS(
+    numeric(R"JS(
         class Probe {
             order(a,b) { if(a===b)return 0; if(a<b)return -1; return 1; }
             read(a) { const first=this.order(a,2); return first+this.order.x+this.order.y; }
         }
         let p=new Probe(); p.read(1);
-    )JS", "capability");
+    )JS", NAN);
     numeric(R"JS(
         class Point { constructor(x,y) { this.x=x; this.y=y; } }
         function kernel(p) {
@@ -354,6 +710,54 @@ TEST_F(JsMvpLmd, NumericRegionEffectsStayOrdered) {
         a.order=function(x,y) { a.y=7; a.order=function(x,y){return x-y;}; return 0; };
         ok && a.compare(b)===4 && a.y===7;
     )JS");
+}
+TEST_F(JsMvpLmd, PolymorphicMethodExpansionHasCallerBudget) {
+    StrBuf* source = strbuf_new();
+    ASSERT_NE(source, nullptr);
+    for (int i = 0; i < 12; i++) strbuf_append_format(source,
+        "class C%d {constructor(child){this.child=child;}"
+        "toString(){return '['+this.child.toString()+']';}}", i);
+    strbuf_append_str(source,
+        "function show(value){return value.toString();}"
+        "let value=new C11(new C7(new C2(31)));"
+        "show(value)==='[[[31]]]' && show(31)==='31';");
+    boolean(source->str); strbuf_free(source);
+    char* mir = dump("temp/mvp_polymorphic_budget.mir");
+    ASSERT_NE(mir, nullptr);
+    // A wide method graph must not grow exponentially at each nested call.
+    EXPECT_LT(strlen(mir), 20000000u);
+    mem_free(mir);
+}
+TEST_F(JsMvpLmd, MathNamespaceCallsAndSpread) {
+    boolean("let m=Math;m.abs=function(x){return 'changed'};Math.abs(-3)==='changed'&&Object.keys(Math).length===0");
+    boolean("Math.PI=0;Math.PI>3&&delete Math.PI===false");
+    error("'use strict';Math.PI=0", "TypeError");
+    boolean(R"JS(
+        let methods=['sqrt','abs','floor','min','max']; let sum=0;
+        for(let method of methods){if(method in Math)sum+=Math[method](4,9);}
+        let round=Math.round, minimum=Math.min;
+        sum===23 && Math.max(...[1,7,3])===7 && minimum()===Infinity &&
+          minimum(3,NaN)!==minimum(3,NaN) && 1/minimum(0,-0)===-Infinity &&
+          round(-1.5)===-1 && 1/round(-0.1)===-Infinity &&
+          typeof Math.sqrt==='function';
+    )JS");
+}
+TEST_F(JsMvpLmd, ShiftPreservesHolesAndScalarOwnership) {
+    boolean("[] instanceof Array && new Array(2) instanceof Array && [] instanceof Object && !(Array.prototype instanceof Array) && Array.prototype instanceof Object");
+    boolean("let key=Symbol('own'),a=[];a[key]=1;a.hasOwnProperty(key)&&Map.assign===undefined&&Set.keys===undefined&&RegExp.create===undefined");
+    boolean("let caught=0;try{({}).hasOwnProperty({toString(){throw 7;}});}catch(e){caught=e;}caught===7");
+    error("({}).hasOwnProperty('__proto__')", "capability");
+    boolean(R"JS(
+        let values=[,5e-324,3]; let absent=values.shift();
+        let shift=Array.prototype.shift, tiny=shift.call(values,99);
+        let later=[1,2,3]; later.shift();
+        absent===undefined && tiny===5e-324 && values.length===1 && values[0]===3 &&
+          shift.call([])===undefined && later.join(',')==='2,3';
+    )JS");
+    boolean("let a=[1,,3],b=a.toReversed();b.join(',')==='3,,1'&&b.hasOwnProperty(1)&&!a.hasOwnProperty(1)&&a.at(-1)===3&&a.at(-4)===undefined&&a.at(Infinity)===undefined");
+    boolean("String.fromCodePoint(65,0x1f600,0xd800)==='A😀\\ud800'&&String.fromCodePoint()===''&&String.fromCharCode(0x10041)==='A'");
+    error("String.fromCodePoint(0x110000)", "RangeError");
+    error("String.fromCodePoint(1.5)", "RangeError");
 }
 TEST_F(JsMvpLmd, NumericConstructorRegionsKeepIdentityAndLanes) {
     boolean(R"JS(
@@ -741,6 +1145,9 @@ TEST_F(JsMvpLmd, OrdinaryArrayHolesFillAndJoin) {
     error("new Array(1.5)", "RangeError");
     error("new Array(4294967296)", "RangeError");
     error("[{}].join('')", "capability");
+    error("[[{}]].join('')", "capability");
+    boolean("let a=[{}];a.toString=()=>7;String(a)==='7'");
+    boolean("let a=[{}];a.join=()=>8;String(a)==='8'");
 }
 TEST_F(JsMvpLmd, CharacterCodesAndAsciiReuse) {
     boolean("function code(s,i){return s.charCodeAt(i)}"
@@ -951,11 +1358,11 @@ TEST_F(JsMvpLmd, RejectsUnsupportedUnitBeforeExecution) {
     error("if(false){({get a(){return 1}})}", "scope");
     boolean("function f(){return ()=>x; var x=1} f()()===undefined");
     numeric("{let x=1; function f(){return x}} f()", 1);
-    error("function f(a=1){return a} 1", "scope");
+    numeric("function f(a=1){return a} f()", 1);
     boolean("function f(){return this} f()===f()");
-    error("[1,,2]", "scope");
+    boolean("let a=[1,,2];a.length===3&&!Object.hasOwn(a,1)&&a[1]===undefined");
     error("var x=1; with([]){x=2}", "scope");
-    error("try{1}catch(e){2}", "scope");
+    numeric("try{1}catch(e){2}", 1);
     error("async function f(){return 1} 1", "scope");
 }
 TEST_F(JsMvpLmd, ExactRootsAndBoundedScalarHomes) {
@@ -1123,12 +1530,12 @@ TEST_F(JsMvpLmd, ObjectAndMapScopeBoundary) {
     error("({__proto__:null})", "scope");
     error("let o={};o.__proto__", "scope");
     error("let o={};o['__'+'proto__']=1", "capability");
-    error("new Map([])", "capability");
-    error("let m=new Map();let f=m.get", "capability");
-    error("let m=new Map();m.set=()=>1", "capability");
+    boolean("new Map([]).size===0");
+    boolean("let m=new Map();m.set(1,2);let f=m.get;f.call(m,1)===2");
+    boolean("let m=new Map();m.set=()=>1;m.set()===1&&m.size===0");
     error("let o={};o.toString", "capability");
     error("let o={};o[{}]=1", "capability");
-    error("for(let k in {}){}", "scope");
+    numeric("let count=0;for(let k in {}){count++;}count", 0);
     numeric("let Object={keys:()=>7};Object.keys({})", 7);
     numeric("let Map=()=>7;Map()", 7);
     error("let Map=()=>7;new Map()", "TypeError");

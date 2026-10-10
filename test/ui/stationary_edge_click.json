@@ -1,0 +1,17 @@
+{
+  "name": "Stationary edge clicks preserve the scrollport and release target",
+  "viewport": {"width": 400, "height": 300},
+  "events": [
+    {"type": "assert_state_store", "target": {"selector": "#port"}, "view_scroll_y": 0, "tolerance": 0.1},
+    {"type": "click", "target": {"selector": "#first", "offset_x": 20, "offset_y": 12}},
+    {"type": "assert_text", "target": {"selector": "#clicked"}, "equals": "first"},
+    {"type": "assert_state_store", "target": {"selector": "#port"}, "view_scroll_y": 0, "tolerance": 0.1},
+    {"type": "mouse_down", "target": {"selector": "#second", "offset_x": 20, "offset_y": 12}},
+    {"type": "mouse_move", "target": {"selector": "#second", "offset_x": 20, "offset_y": 12}},
+    {"type": "advance_time", "ms": 96, "steps": 4},
+    {"type": "assert_state_store", "target": {"selector": "#port"}, "view_scroll_y": 0, "tolerance": 0.1},
+    {"type": "mouse_up", "target": {"selector": "#second", "offset_x": 20, "offset_y": 12}},
+    {"type": "assert_text", "target": {"selector": "#clicked"}, "equals": "second"},
+    {"type": "assert_state_store", "target": {"selector": "#port"}, "view_scroll_y": 0, "tolerance": 0.1}
+  ]
+}

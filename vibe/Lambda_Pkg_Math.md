@@ -1,1395 +1,889 @@
-# Lambda Math Package Proposal
+# Lambda Math Package Design
 
-> **Location:** `lambda/doc/math/`
-> **Reference:** MathLive (`ref/mathlive/`), Chart package (`lambda/chart/`)
-> **Goal:** Turn LaTeX math into static (and eventually editable) HTML, written entirely in Lambda Script
+> **Status:** active design; consolidated and checked against the source tree on
+> 2026-10-10, revision `4c8f7eaae` plus the current AMS horizontal-arrow
+> changes. Remaining gaps are recorded in §10.
+> **Scope:** static mathematical typesetting through `lambda.doc.math`.
+> **Formal linkage:** **D7.2.4** — package namespace and distribution;
+> **D7.1.1 / D7.1.2v2** — layering and resource acquisition;
+> **D7.4.6 / S12.1.1v2** — declared host-function effects;
+> **D4.2.3 / D4.5.2 / D5.4.2–D5.4.4** — context ownership and retention;
+> **D7.1.6** — hosts that exclude Radiant. This consolidation changes no formal
+> language ruling. The two rules below were user-ratified on 2026-10-10.
 
----
+> **DESIGN RULE 1 — TeX conformance before visual similarity.**
+>
+> Every math layout change MUST follow TeX's math-list algorithms and the
+> supported command's TeX/LaTeX definition, using the selected font's measured
+> data or its explicitly matched TeX companion. Numeric dimensions require a
+> cited algorithm, macro, font table, or authored length. Never fit offsets,
+> gaps, glyph centering, sizes, or curves to a screenshot, fixture name, or
+> expected image. Missing data or constructions remain explicit limitations.
+> MathLive, KaTeX, raster diffs, and refreshed goldens are comparison evidence;
+> they do not define correct layout. Verify the algorithm independently with
+> TeX box/metric evidence and the geometry actually painted across math styles.
 
-## 1. Project Goals & Scope
+> **DESIGN RULE 2 — Do not add fonts to Lambda packages.**
+>
+> Math support MUST use the existing bundled CMU and KaTeX faces. Do not add
+> font files or families, restore STIX, or introduce a font dependency to
+> improve comparison images. An explicit TeX composition may reuse existing
+> glyphs under Rule 1. A construction that cannot be supplied remains a
+> documented limitation. Optional caller-supplied fonts do not change this
+> distribution policy. The already approved Computer Modern metric companion
+> supplies TeX data; it does not introduce another painted font.
 
-### 1.1 Primary Goal
+## 1. Purpose and scope
 
-Build a **pure Lambda Script package** at `lambda/doc/math/` that converts a LaTeX math AST (already produced by tree-sitter-latex-math) into MathLive-compatible HTML elements. The package takes parsed Lambda elements as input and produces `<span>` element trees as output, which can be serialized to HTML via `format(result, 'html')`.
+The package transforms a structured math AST into a measured static SVG. It
+owns math layout in Lambda Script so document packages and applications can
+reuse and extend the same functional transformation. Parsing, resource
+acquisition, font inspection, and painting retain their existing host roles.
+Production rendering requires neither an external TeX installation nor
+MathLive, KaTeX JavaScript, Node.js, or a font CDN.
 
-### 1.2 Why a Lambda Package?
+The supported surface includes mathematical symbols and alphabets, atom
+spacing, fractions, scripts, roots, operators and limits, delimiters, accents,
+arrays, text, dimensions, colors, boxes, and selected extension commands.
+Support has three distinct meanings: preserving the construct's content,
+providing a renderable box, and conforming to its TeX layout definition.
+The first two do not establish the third. §7 describes the bounded command
+surface; §10 identifies incomplete constructions.
 
-The existing C++ pipeline (`tex_math_bridge → tex_math_ast_typeset → tex_html_render`) hardcodes the entire flow in ~5,000 lines of C++. A Lambda package offers:
+Full LaTeX document processing belongs to `lambda.latex`. Arbitrary package
+execution, paragraph/page layout, automatic equation numbering, an interactive
+math editor, MathML, and speech generation are outside the current renderer's
+contract. Existing AsciiMath input can supply the same AST, but a formula
+corpus pass does not establish complete AsciiMath or serialization parity.
 
-- **Prototyping velocity** — iterate on rendering logic without recompiling
-- **User extensibility** — users can import the package and customize rendering
-- **Consistency** — follows the same module pattern as the chart package
-- **Editability path** — Lambda's functional data model naturally supports immutable snapshots + incremental edits (matching MathLive's Atom tree philosophy)
+## 2. Architecture and ownership
 
-### 1.3 Scope
+**D7.2.4** places document math at `lambda.doc.math`; `lambda.math` remains
+the built-in numerical module. The distributed source lives under
+`<lambda-home>/package/math/`, currently `lmd/package/math/` in this checkout.
+The public renderer is `lambda.doc.math.math`.
 
-| In Scope | Out of Scope (for now) |
-|----------|----------------------|
-| LaTeX math AST → static HTML elements | Interactive editing / cursor / selection |
-| MathLive-compatible CSS class structure | IME input, virtual keyboard |
-| Core constructs (fracs, roots, scripts, delimiters, accents, matrices, big ops) | Full LaTeX document processing |
-| Reuse tree-sitter-latex-math parsed AST | Parsing LaTeX (already done in C++) |
-| Port mathlive snapshot tests for verification | Visual regression testing |
-| Inline and display math styles | MathML output |
-
-### 1.4 Replaces C++ Math Typesetter
-
-This package **replaces** the existing C++ math-to-HTML pipeline (`tex_math_bridge` → `tex_math_ast_typeset` → `tex_html_render`, ~5,000 lines of C++ across `lambda/tex/`). Once feature-complete, the C++ HTML renderer for math will be deprecated. The C++ pipeline may still be maintained for DVI/PDF output paths, but all HTML math rendering will go through this Lambda package.
-
----
-
-## 2. Feasibility Study
-
-### 2.1 What Lambda Already Provides
-
-| Capability | Status | Details |
-|-----------|--------|---------|
-| **Tree-sitter LaTeX math parser** | ✅ Ready | Dedicated grammar at `lambda/tree-sitter-latex-math/grammar.js` (538 lines) with its own compiled library (`libtree-sitter-latex-math.a`). Separate from the document-level `tree-sitter-latex` grammar. Parses math-mode content into 40+ node types. `input-latex-ts.cpp` function `parse_math_to_ast()` creates a `TSParser`, sets the `tree_sitter_latex_math()` language, parses the math string, then `convert_math_node()` recursively converts the tree-sitter CST into Lambda elements with named attributes (`numer`, `denom`, `base`, `sub`, `sup`, etc.) |
-| **Element construction** | ✅ Ready | Lambda elements (`<span class: "ML__mathit"; "x">`) map directly to HTML spans. The chart package demonstrates complex SVG element construction in pure Lambda |
-| **Module system** | ✅ Ready | `import`/`pub` system proven by the chart package (12 modules, qualified access) |
-| **HTML formatter** | ✅ Ready | `format(element, 'html')` serializes Lambda elements to HTML strings |
-| **Pattern matching** | ✅ Ready | `match` expressions dispatch on element tag names (`case "fraction": ...`) |
-| **Element traversal** | ✅ Ready | `name(el)`, `el.attr`, `el[i]`, `len(el)` — sufficient for walking the math AST |
-| **String concatenation** | ✅ Ready | `++` operator for building CSS class strings |
-| **Math utilities** | ✅ Ready | `round()`, `floor()`, `ceil()`, `max()`, `min()` — needed for metric calculations |
-| **Map construction** | ✅ Ready | Context objects can be passed as maps: `{style: 'display', size: 1.0, color: "black"}` |
-| **For comprehensions** | ✅ Ready | `for (child in children) render(child, ctx)` — natural for recursive rendering |
-| **Recursive functions** | ✅ Ready | Essential for tree-walking; Lambda supports full recursion |
-
-### 2.2 Language Features Assessment
-
-#### Must-Have (required before starting)
-
-| Feature | Status | Notes |
-|---------|--------|-------|
-| **Float arithmetic** | ✅ Available | Font metrics are all in `em` units (floats). Lambda has full float support |
-| **String formatting for numbers** | ⚠️ Partial | Need `fmt_num(x, decimals)` — chart package has one in `util.ls` that can be imported or replicated |
-| **Element attribute access by name** | ✅ Available | `el.numer`, `el.denom`, `el.base` etc. work for tree-sitter-produced AST elements |
-| **Conditional element attributes** | ⚠️ Needs verification | Need to conditionally include `style:` attributes on elements. Currently doable via map spread or conditional construction |
-
-#### Good-to-Have (would improve implementation quality)
-
-| Feature                                       | Impact | Notes                                                                                                                                                        |
-| --------------------------------------------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **Default map merging**                       | Medium | Context inheritance (`{...parent_ctx, style: 'script'}`) — verify spread works in maps                                                                       |
-| **`let` bindings in `match` arms**            | Medium | Complex match arms with intermediate bindings. Confirmed working per language spec                                                                           |
-| **Multi-line string literals**                | Low    | For embedding CSS constants. Already supported                                                                                                               |
-| **Tail-call optimization**                    | Low    | TCO confirmed supported. Deep recursive math nesting is safe                                                                                                 |
-| **Named element construction from variables** | High   | Confirmed working — chart package does `<rect x: x, y: y>`. Dynamic attrs also via `<el (map_expr), c: d; ...>`                                             |
-| **Dynamic map construction**                  | Low    | `{a: b, (map_expr), ...}` — merge maps inline. Useful for building attr maps conditionally                                                                  |
-| **`map()` for lookup tables**                 | Low    | `map([k, v, k, v, ...])` constructor builds maps from flat key-value lists. Ideal for symbol tables                                                          |
-
-#### Feature Gap Analysis
-
-| Gap                                       | Severity | Workaround                                                                                                                        |
-| ----------------------------------------- | -------- | --------------------------------------------------------------------------------------------------------------------------------- |
-| **No string `repeat(n)`**                 | Low      | For constructing stretchy delimiters. Can implement as recursive function                                                         |
-| **No `char_code()` / `from_char_code()`** | Low      | For Unicode codepoint manipulation. Can pre-build lookup maps instead                                                             |
-| **No mutable accumulator (by design)**    | Low      | Pure functional — use `for` comprehensions + element concatenation. Not a gap, it's the design philosophy                        |
-
-### 2.3 Architecture Validation
-
-The chart package proves the architecture is viable:
-
-```
-chart package:   <chart> element → parse → compute scales → build <svg> elements → format('html')
-math package:    <math> AST      → parse → compute metrics → build <span> elements → format('html')
+```mermaid
+flowchart TD
+    source[LaTeX or AsciiMath source] --> input[Lambda math input]
+    input --> ast[Structured math AST]
+    ast --> layout[Lambda math layout]
+    io[Lambda IO: font and image bytes] --> facts[Native font and image facts]
+    facts --> layout
+    layout --> boxes[Measured baseline-relative boxes]
+    boxes --> svg[SVG with measured glyphs and resources]
+    svg --> host[Document, editor preview, browser or Radiant]
 ```
 
-Both follow the same pattern: **input element tree → functional transformation → output element tree**.
-
-### 2.4 Key Risk: Font Metrics
-
-MathLive uses detailed font metrics (height, depth, italic correction, kern pairs) from TeX fonts to compute precise layout. The Lambda package has two options:
-
-1. **Simplified metrics** — Use a compact lookup table of essential metrics (character heights/depths for ~200 key symbols). Sufficient for correct structure, may have minor spacing differences.
-2. **Full metrics** — Port MathLive's `font-metrics.ts` σ/ξ parameters as a Lambda map constant. ~50 named constants.
-
-**Recommendation:** Start with option 2 (full metrics as constants). It's a one-time data entry that pays dividends in rendering accuracy.
-
----
-
-## 3. Package Design
-
-### 3.1 Module Structure
-
-```
-lambda/doc/math/
-├── math.ls              # Main entry point: pub fn render(ast), pub fn render_latex(str)
-├── parse.ls             # AST normalization: tree-sitter elements → internal representation
-├── context.ls           # Rendering context: math style, font, color, size
-├── box.ls               # Box model: create_box(), vbox(), hbox(), skip_box()
-├── render.ls            # Core renderer: atom → box tree dispatch
-├── atoms/
-│   ├── fraction.ls      # \frac, \dfrac, \tfrac, \cfrac, \binom
-│   ├── radical.ls       # \sqrt, \sqrt[n]{}
-│   ├── scripts.ls       # Superscript, subscript, limits
-│   ├── delimiter.ls     # \left...\right, \big..\Big, sized delimiters
-│   ├── accent.ls        # \hat, \vec, \bar, \overline, \overbrace, etc.
-│   ├── operator.ls      # \sum, \prod, \int (extensible symbols + big ops)
-│   ├── array.ls         # matrix, pmatrix, bmatrix, cases, aligned, array
-│   ├── text.ls          # \text{}, \textrm{}, \mbox{}
-│   ├── style.ls         # \mathbf, \mathrm, \mathbb, \mathcal, \displaystyle
-│   ├── color.ls         # \textcolor, \colorbox, \color
-│   ├── spacing.ls       # \quad, \qquad, \, \: \; \! \hspace \kern
-│   └── enclose.ls       # \boxed, \fbox, \cancel (future)
-├── symbols.ls           # Symbol tables: command name → Unicode character
-├── metrics.ls           # Font metrics: σ/ξ TeX parameters, char dimensions
-├── spacing_table.ls     # Inter-atom spacing rules (TeX 8×8 table)
-├── css.ls               # CSS class name builder, default stylesheet string
-└── util.ls              # Numeric helpers, em conversion
-```
-
-### 3.2 Data Flow
-
-```
-                    ┌─────────────────────────────────────┐
-                    │           Lambda Runtime             │
-                    │                                      │
-  LaTeX string ──→  │  input("...", {type:'math',          │
-  "\\frac{a}{b}"   │         flavor:'latex'})             │
-                    │           │                          │
-                    │    tree-sitter-latex-math            │
-                    │           │                          │
-                    │    <math                             │
-                    │      <fraction cmd: "\\frac"         │
-                    │        numer: <group "a">            │
-                    │        denom: <group "b">            │
-                    │      >                               │
-                    │    >                                  │
-                    │           │                          │
-                    │     math.render(ast)                 │
-                    │           │                          │
-                    │    <span class: "ML__latex"          │
-                    │      <span class: "ML__strut" ...>   │
-                    │      <span class: "ML__mfrac" ...>   │
-                    │      ...                             │
-                    │    >                                  │
-                    │           │                          │
-                    │    format(result, 'html')            │
-                    └───────────│──────────────────────────┘
-                                ↓
-              <span class="ML__latex">...</span>
-```
-
-### 3.3 Core Abstractions
-
-#### Context (context.ls)
-
-```lambda
-// rendering context — passed down during tree walk
-// immutable: child contexts are new maps with overridden fields
-pub fn make_context(parent_ctx, overrides) {
-    // merge parent with overrides, compute derived values
-    let style = overrides.style or parent_ctx.style   // 'display' | 'text' | 'script' | 'scriptscript'
-    let size = compute_size(style)                     // scale factor
-    let color = overrides.color or parent_ctx.color
-    {style: style, size: size, color: color,
-     font: overrides.font or parent_ctx.font,
-     class_prefix: "ML"}
-}
-```
-
-#### Box (box.ls)
-
-A box is a Lambda map with rendering metadata, wrapping an element:
-
-```lambda
-// a box is: {element: <span ...>, height: float, depth: float, width: float, type: symbol}
-pub fn make_box(element, height, depth, width, box_type) =>
-    {element: element, height: height, depth: depth,
-     width: width, type: box_type}
-
-pub fn vbox(elements, options) {
-    // build ML__vlist-t structure with pstrut and table layout
-    // returns a box wrapping the vlist <span> tree
-}
-
-pub fn skip_box(width_em) =>
-    make_box(<span style: "display:inline-block;width:" ++ fmt(width_em) ++ "em">,
-             0.0, 0.0, width_em, 'skip')
-```
-
-#### Renderer (render.ls)
-
-```lambda
-pub fn render_atom(node, ctx) {
-    match name(node) {
-        case "math":       render_math(node, ctx)
-        case "fraction":   fraction.render(node, ctx)
-        case "radical":    radical.render(node, ctx)
-        case "subsup":     scripts.render(node, ctx)
-        case "delimiter_group": delimiter.render(node, ctx)
-        case "accent":     accent.render(node, ctx)
-        case "big_operator": operator.render(node, ctx)
-        case "environment": array.render(node, ctx)
-        case "text_command": text.render(node, ctx)
-        case "style_command": style.render(node, ctx)
-        case "command":    render_command(node, ctx)
-        case "operator":   render_binary_op(node, ctx)
-        case "relation":   render_relation(node, ctx)
-        case "space_command": spacing.render(node, ctx)
-        default:           render_default(node, ctx)
-    }
-}
-```
-
-### 3.4 CSS Strategy
-
-**Embedded CSS** — The MathLive core stylesheet (~810 lines of Less, compiled to ~600 lines CSS) is embedded as a string constant in `css.ls`. A `pub fn get_stylesheet()` returns it. This keeps the package self-contained and simplifies testing — no external file dependencies. The CSS will be moved to an external file when the implementation is fully tested.
-
-The `render()` function optionally wraps output in a `<style>` + `<span>` for standalone HTML:
-
-```lambda
-// standalone mode: includes CSS inline
-math.render(ast, {standalone: true})
-// → <span><style>.ML__latex{...}</style><span class="ML__latex">...</span></span>
-
-// fragment mode (default): just the math element, CSS assumed external
-math.render(ast)
-// → <span class="ML__latex">...</span>
-```
-
-Key classes reused from MathLive: `ML__latex`, `ML__strut`, `ML__base`, `ML__mathit`, `ML__cmr`, `ML__mfrac`, `ML__frac-line`, `ML__sqrt`, `ML__sqrt-sign`, `ML__sqrt-line`, `ML__vlist-t`, `ML__vlist-r`, `ML__vlist`, `ML__pstrut`, etc.
-
-### 3.5 Symbol Tables (symbols.ls)
-
-```lambda
-// LaTeX command → Unicode character mapping
-pub let greek_lower = {
-    alpha: "α", beta: "β", gamma: "γ", delta: "δ",
-    epsilon: "ε", zeta: "ζ", eta: "η", theta: "θ",
-    iota: "ι", kappa: "κ", lambda: "λ", mu: "μ",
-    // ... ~50 entries
-}
-
-pub let operators = {
-    pm: "±", mp: "∓", times: "×", cdot: "⋅",
-    leq: "≤", geq: "≥", neq: "≠", equiv: "≡",
-    // ... ~100 entries
-}
-
-pub fn lookup_command(cmd) {
-    greek_lower[cmd] or greek_upper[cmd] or
-    operators[cmd] or arrows[cmd] or
-    misc_symbols[cmd] or cmd   // fallback: raw command name
-}
-```
-
-### 3.6 Font Metrics (metrics.ls)
-
-```lambda
-// TeX font metric parameters (sigma values from MathLive's font-metrics.ts)
-pub let sigma = {
-    slant: 0.0,                  // σ1
-    space: 0.0,                  // σ2
-    stretch: 0.0,                // σ3
-    shrink: 0.0,                 // σ4
-    xHeight: 0.431,              // σ5
-    quad: 1.0,                   // σ6
-    extraSpace: 0.0,             // σ7
-    num1: 0.677,                 // σ8 — numerator shift (display)
-    num2: 0.394,                 // σ9 — numerator shift (inline)
-    num3: 0.444,                 // σ10
-    denom1: 0.686,               // σ11 — denominator shift (display)
-    denom2: 0.345,               // σ12 — denominator shift (inline)
-    sup1: 0.413,                 // σ13 — superscript shift
-    sup2: 0.363,                 // σ14
-    sup3: 0.289,                 // σ15
-    sub1: 0.15,                  // σ16 — subscript shift
-    sub2: 0.247,                 // σ17
-    supDrop: 0.386,              // σ18
-    subDrop: 0.05,               // σ19
-    delim1: 2.39,                // σ20
-    delim2: 1.01,                // σ21
-    axisHeight: 0.25,            // σ22
-    // ... additional xi parameters
-}
-
-// math style scale factors
-pub let style_scale = {
-    display: 1.0,
-    text: 1.0,
-    script: 0.7,
-    scriptscript: 0.5
-}
-```
-
-### 3.7 Editability-Ready Design
-
-Even though Phase 1 is static-only, the design anticipates editing:
-
-1. **Atom identity** — Each rendered box carries a `data-atom-id` attribute (integer index into a flat atom list), matching MathLive's approach for hit-testing.
-
-2. **Immutable snapshots** — Lambda's functional model means the rendered tree is a pure function of the AST. Editing = produce a new AST → re-render. No mutable state.
-
-3. **Structural elements** — Placeholder atoms (`<span class="ML__placeholder">`) are rendered for empty groups, providing future edit targets.
-
-4. **Source mapping** — Each rendered box optionally carries the original LaTeX source as a `data-latex` attribute, enabling roundtrip editing.
-
----
-
-## 4. Implementation Phases
-
-### Phase 1: Foundation (Weeks 1–2)
-
-**Goal:** Render simple expressions (`a + b`, `x^2`, `\frac{a}{b}`)
-
-| Module | Deliverable |
-|--------|-------------|
-| `math.ls` | Entry point: `render(ast)` → `<span class="ML__latex">` wrapper with struts |
-| `context.ls` | Basic context: display/text/script/scriptscript style, size scaling |
-| `box.ls` | `make_box()`, `skip_box()`, `hbox()` (horizontal concatenation) |
-| `render.ls` | Dispatch on AST node type, render ordinary symbols (mord) |
-| `symbols.ls` | Greek letters, basic operators, relations |
-| `metrics.ls` | σ parameters, style scale factors |
-| `spacing_table.ls` | 8×8 inter-atom spacing table |
-| `css.ls` | Class name builder, embedded stylesheet |
-| `util.ls` | `fmt_em()`, numeric helpers |
-| `atoms/scripts.ls` | Superscript/subscript rendering |
-| `atoms/fraction.ls` | `\frac` rendering with vbox |
-
-**Tests:** Verify against mathlive snapshot tests for: basic symbols, fractions, superscripts/subscripts.
-
-### Phase 2: Core Constructs (Weeks 3–4)
-
-**Goal:** Cover the most common math constructs
-
-| Module | Deliverable |
-|--------|-------------|
-| `box.ls` | `vbox()` — full MathLive-compatible vlist structure |
-| `atoms/radical.ls` | `\sqrt`, `\sqrt[n]{}` with SVG surd sign |
-| `atoms/delimiter.ls` | `\left...\right`, sized delimiters (`\big`, `\Big`, etc.) |
-| `atoms/accent.ls` | `\hat`, `\vec`, `\bar`, `\overline`, `\widehat`, etc. |
-| `atoms/operator.ls` | `\sum`, `\prod`, `\int` with limits placement |
-| `atoms/spacing.ls` | `\quad`, `\,`, `\:`, `\;`, `\!`, `\hspace`, `\kern` |
-| `atoms/text.ls` | `\text{}`, `\textrm{}`, `\mbox{}` |
-
-**Tests:** mathlive snapshot tests for: fractions (advanced), surds, accents, delimiters, big operators, spacing.
-
-### Phase 3: Environments & Styling (Weeks 5–6)
-
-**Goal:** Matrices, cases, font styles, colors
-
-| Module | Deliverable |
-|--------|-------------|
-| `atoms/array.ls` | `matrix`, `pmatrix`, `bmatrix`, `vmatrix`, `cases`, `aligned`, `array` |
-| `atoms/style.ls` | `\mathbf`, `\mathrm`, `\mathbb`, `\mathcal`, `\displaystyle`, `\operatorname` |
-| `atoms/color.ls` | `\textcolor`, `\color`, `\colorbox` — named colors + hex |
-| `atoms/enclose.ls` | `\boxed`, `\fbox` |
-
-**Tests:** mathlive snapshot tests for: environments, sizing, colors, fonts.
-
-### Phase 4: Polish & Compatibility (Weeks 7–8)
-
-**Goal:** Edge cases, full test coverage, documentation
-
-| Task | Deliverable |
-|------|-------------|
-| Inter-atom spacing | Correct TeX spacing rules between all atom type pairs |
-| Box coalescing | Merge adjacent spans with identical classes (optimization) |
-| Delimiter stretching | SVG-based extensible delimiters for tall expressions |
-| Error rendering | Unknown commands rendered with `ML__error` class |
-| Documentation | Usage guide, API reference, architecture doc |
-| Test suite | Comprehensive Lambda test scripts + mathlive test port |
-
-### Future Phases (Post v1)
-
-| Phase | Description |
-|-------|-------------|
-| **Editing support** | Cursor model, selection, keyboard input |
-| **Bidirectional** | LaTeX → AST → HTML → edits → AST → LaTeX roundtrip |
-| **MathML output** | Alternative output format for accessibility |
-| **Custom macros** | User-defined `\newcommand` support |
-
----
-
-## 5. Test Strategy
-
-### 5.1 Porting MathLive Tests
-
-MathLive's `test/markup.test.ts` contains ~30 test groups with LaTeX → HTML snapshot tests. These can be ported as Lambda integration tests:
-
-```lambda
-// test/lambda/test_math_fractions.ls
-import math: .lambda.doc.math.math
-
-// Test: \frac{a}{b}
-let ast = input("\\frac{a}{b}", {type: 'math', flavor: 'latex'})
-let html = math.render(ast)
-format(html, 'html')
-```
-
-Expected output files (`test/lambda/test_math_fractions.txt`) contain the HTML string to match.
-
-### 5.2 Test Categories (from MathLive)
-
-| Category | # Tests | Priority |
-|----------|---------|----------|
-| Fractions | 9 | P1 |
-| Superscript/subscript | 3 | P1 |
-| Surds (roots) | 5 | P1 |
-| Accents | 10 | P2 |
-| Delimiters (left/right) | 26+ | P2 |
-| Delimiter sizing | 4 | P2 |
-| Environments | 9+ | P2 |
-| Colors | 10+ | P3 |
-| Fonts | 5 | P3 |
-| Spacing/kern | 10 | P3 |
-| Binary operators | 10 | P1 |
-| Not/negation | 10 | P3 |
-| Rules/dimensions | 15 | P3 |
-| Box commands | 10 | P3 |
-| Over/underline | 2 | P2 |
-| Mode shift | 2 | P3 |
-| Extensions | 8 | P3 |
-
-### 5.3 Comparison Approach
-
-Since our HTML output may differ from MathLive in minor ways (whitespace, attribute order), use two comparison levels:
-
-1. **Structural match** — Parse both HTML outputs back to elements and compare tree structure (tag names, key classes, text content)
-2. **Visual match** — Render both in a browser and compare screenshots (Phase 4)
-
----
-
-## 6. Questions & Suggestions
-
-### 6.1 Open Questions
-
-1. **Math input interface** — When a user calls `input("...", {type:'math', flavor:'latex'})`, the current C++ code in `input-math.cpp` produces a simple map `{type: 'latex-math', source: "..."}`. But the tree-sitter path in `input-latex-ts.cpp` (`parse_math_to_ast()`) produces rich structured AST elements. The math package needs the rich AST. **Decision needed:** modify `input-math.cpp` to route LaTeX flavor through `parse_math_to_ast()` by default, or add a separate input flavor.
-
-2. **AST completeness** — 15 grammar node types currently fall through to the generic default handler in `convert_math_node()`, losing their named field attributes (see §6.3). These should be fixed in C++ before starting the Lambda package, since the package relies on well-structured AST input.
-
-### 6.2 Unicode-Only vs KaTeX Fonts: Analysis
-
-MathLive uses 12 KaTeX font families (20 WOFF2 files, ~296 KB total). Here is the comparison:
-
-#### Unicode-Only (system fonts)
-
-| Pros | Cons |
-|------|------|
-| Zero font loading — instant render | Missing glyphs: calligraphic (𝒜ℬ𝒞), script (𝒜ℬ), Fraktur (𝔄𝔅), Size1–4 delimiter variants |
-| No external dependencies | Wrong metrics: superscript placement, fraction bar alignment, spacing all depend on TeX-specific glyph dimensions |
-| Smaller payload, cacheable by browser | No extensible delimiters: tall `(`, `[`, `{` around matrices/fractions won't scale |
-| Works offline, in emails, markdown | Large operators (∑∏∫) won't have display-size variants |
-| Easier to maintain | Accents (ˆ˜) won't stretch over multi-character expressions |
-
-#### KaTeX Fonts (bundled or CDN)
-
-| Pros | Cons |
-|------|------|
-| Pixel-perfect TeX rendering | 296 KB font download (WOFF2, one-time cached) |
-| All glyphs available including Private Use Area | Dependency on font files (CDN or bundled) |
-| Precise metrics for every character (height, depth, width, italic correction, skew) | Font loading flash (FOUT) |
-| Extensible delimiters via Size1–4 stacking pieces | More complex CSS (@font-face declarations) |
-| Display-size large operators (∑ in display mode is larger than inline) | |
-| Calligraphic, Script, Fraktur alphabets render correctly | |
-
-#### What breaks without KaTeX fonts
-
-| Feature | Severity | Detail |
-|---------|----------|--------|
-| `\left( \frac{...}{...} \right)` with tall content | **Critical** | Size1–4 fonts provide progressively larger delimiters; system fonts have only one size |
-| `\mathcal{L}`, `\mathscr{F}`, `\mathfrak{g}` | **High** | Entirely missing font families; fallback is generic cursive/serif |
-| `\sum`, `\prod`, `\int` in display mode | **High** | Display-size variants live in Size1/Size2 fonts |
-| Superscript/subscript positioning | **Medium** | Italic correction and skew values differ from system fonts |
-| `\widehat{ABC}`, `\widetilde{xyz}` | **Medium** | Multi-width accent variants in Size1–4 |
-| Inter-atom spacing | **Low** | Widths slightly off → cumulative spacing drift |
-
-#### Recommendation
-
-**Phase 1–2: KaTeX fonts from CDN.** This gives pixel-perfect rendering from day one and makes test comparison against MathLive snapshots feasible. The CSS `@font-face` declarations are a one-time addition to the embedded stylesheet.
-
-**Future option:** Provide a `{fonts: 'unicode'}` render option that skips KaTeX fonts for lightweight embedding contexts (emails, markdown preview) where approximate rendering is acceptable.
-
-### 6.3 Unhandled AST Node Types (15 total)
-
-The following node types in `tree-sitter-latex-math/grammar.js` fall through to the **generic default handler** in `convert_math_node()` (line ~600 of `input-latex-ts.cpp`). The default handler creates an element with the node type as tag name and recursively converts children, but **loses all named field attributes** — the children become anonymous positional items instead of named fields like `numer`, `cmd`, `base`, etc.
-
-| # | Node Type | Grammar Fields Lost | Example LaTeX | Priority |
-|---|-----------|--------------------|--------------|---------|
-| 1 | `genfrac` | `left_delim`, `right_delim`, `thickness`, `style`, `numer`, `denom` | `\genfrac{(}{)}{0pt}{}{n}{k}` | Low (rare) |
-| 2 | `infix_frac` | `numer`, `cmd`, `denom` | `a \over b`, `n \choose k` | Medium |
-| 3 | `overunder_command` | `cmd`, `annotation`, `base` | `\overset{n}{X}`, `\underset{k}{Y}` | Medium |
-| 4 | `extensible_arrow` | `cmd`, `below`, `above` | `\xrightarrow{f}`, `\xleftarrow[g]{h}` | Medium |
-| 5 | `sized_delimiter` | `size`, `delim` | `\big(`, `\Big\{`, `\bigg[` | High |
-| 6 | `color_command` | `cmd`, `color`, `content` | `\textcolor{red}{x}`, `\colorbox{yellow}{y}` | High |
-| 7 | `box_command` | `cmd`, `options`, `content` | `\boxed{E=mc^2}`, `\fbox{text}` | Medium |
-| 8 | `phantom_command` | `cmd`, `options`, `content` | `\phantom{x}`, `\vphantom{y}` | Low |
-| 9 | `mathop_command` | `content` | `\mathop{lim\,sup}` | Low |
-| 10 | `matrix_command` | `cmd`, `body` | `\pmatrix{a & b \cr c & d}` (plain TeX) | Low |
-| 11 | `hspace_command` | `cmd`, `sign`, `value`, `unit` | `\hspace{1em}`, `\hspace*{2cm}` | Medium |
-| 12 | `skip_command` | `cmd`, `sign`, `value`, `unit` | `\kern 3pt`, `\hskip 1em` | Medium |
-| 13 | `middle_delim` | `delim` | `\left( a \middle\| b \right)` | Medium |
-| 14 | `limits_modifier` | (leaf — just `\limits`/`\nolimits` text) | `\sum\limits_{i=0}` | Medium |
-| 15 | `symbol_command` | (leaf — commands like `\infty`, `\partial`, `\nabla`) | `\infty`, `\forall`, `\exists` | **High** |
-
-**Impact:** Items #5 (`sized_delimiter`), #6 (`color_command`), and #15 (`symbol_command`) are high-priority because they are commonly used. `symbol_command` is especially critical — `\infty`, `\partial`, `\forall`, `\exists`, `\nabla`, `\cdots`, `\ldots` all fall through to the default handler and lose their semantic identity.
-
-**Recommendation:** Fix all 15 in `convert_math_node()` before starting the Lambda package. Each fix is ~10–20 lines of C++ (extract named fields via `ts_node_child_by_field_name()` and set them as element attributes). Estimated effort: ~2 hours total.
-
-### 6.4 Suggestions
-
-1. **Fix the 15 unhandled AST node types first** (see §6.3). This is a prerequisite — the Lambda package should receive clean, well-structured ASTs.
-
-2. **Route `input("...", {type:'math', flavor:'latex'})` through `parse_math_to_ast()`** — modify `input-math.cpp` so the default LaTeX path produces the rich tree-sitter AST instead of the simple `{type: 'latex-math', source: "..."}` map. The package needs structured AST input.
-
-3. **Start with a "golden set" of 20 expressions** — Rather than porting all mathlive tests at once, start with 20 representative expressions that cover every atom type:
-
-    ```
-    x + y                           # basic symbols + binary op
-    x^2                             # superscript
-    x_i                             # subscript
-    x_i^2                           # combined sub/sup
-    \frac{a}{b}                     # fraction
-    \sqrt{x}                        # root
-    \sqrt[3]{x}                     # nth root
-    \sum_{i=0}^{n} x_i              # big operator with limits
-    \int_0^1 f(x) dx               # integral
-    \left( \frac{a}{b} \right)      # auto-delimiters
-    \hat{x}                         # accent
-    \overline{AB}                   # overline
-    \begin{pmatrix} a & b \\ c & d \end{pmatrix}  # matrix
-    \begin{cases} x & y \end{cases} # cases
-    \alpha + \beta                  # greek
-    \mathbf{A} \cdot \mathbf{B}     # font style
-    \textcolor{red}{x}              # color
-    a \quad b                       # spacing
-    \text{for all } x               # text mode
-    \binom{n}{k}                    # binomial
-    ```
-
-4. **Package auto-discovery** — Currently `lambda/chart/` is imported via `import chart: .lambda.chart.chart`. Consider if there should be a package registry or convention (`import 'math'` resolving to `lambda/doc/math/math.ls`).
-
-5. **Consider a `render_latex(string)` convenience function** — That calls `input()` + `render()` in one step:
-
-    ```lambda
-    import math: .lambda.doc.math.math
-    math.render_latex("\\frac{a}{b}")   // → HTML element tree
-    ```
-
----
-
-## 7. Dependency Summary
-
-### Required (already available)
-
-| Dependency | Source |
-|-----------|--------|
-| Tree-sitter-latex-math parser | `lambda/tree-sitter-latex-math/grammar.js` + `input-latex-ts.cpp` |
-| Lambda element system | Core runtime |
-| HTML formatter | `lambda/format/format-html.cpp` |
-| Lambda module system | `import`/`pub` |
-
-### Reference (read-only)
-
-| Reference | Purpose |
-|-----------|---------|
-| MathLive source (`ref/mathlive/src/`) | Rendering algorithms, CSS classes, font metrics |
-| MathLive CSS (`ref/mathlive/css/core.less`) | Stylesheet to port |
-| MathLive tests (`ref/mathlive/test/markup.test.ts`) | Test cases to port |
-| Existing C++ HTML renderer (`lambda/tex/tex_html_render.cpp`) | Already MathLive-compatible; reference for VList structure |
-| Existing MathLive analysis (`vibe/MathLive_Analysis.md`, `vibe/Mathlive.md`) | Architecture study |
-
-### New (to create)
-
-| Artifact | Location |
-|----------|----------|
-| Math package modules | `lambda/doc/math/*.ls` |
-| Test scripts | `test/lambda/test_math_*.ls` |
-| Expected outputs | `test/lambda/test_math_*.txt` |
-
----
-
-## 8. Success Criteria
-
-| Metric | Target |
-|--------|--------|
-| Golden set (20 expressions) | 100% structurally correct HTML |
-| MathLive test categories P1 | ≥ 90% output match |
-| MathLive test categories P2 | ≥ 80% output match |
-| Package size | ≤ 15 modules, ≤ 3000 lines total |
-| Render performance | < 10ms per expression (interpreted) |
-| C++ AST fixes complete | All 15 unhandled node types produce named attributes |
-| Replaces C++ HTML path | `tex_html_render.cpp` no longer needed for math HTML |
-
----
-
-## Appendix A: MathLive Rendering Pipeline (Reference)
-
-```
-LaTeX string
-    │
-    ▼
-Tokenizer (tokenizer.ts)
-    │  tokens
-    ▼
-Parser (parser.ts)
-    │  Atom tree
-    ▼
-Atom.render(context) ──→ Box tree
-    │                     ├── Box (horizontal span)
-    │                     ├── VBox (vertical stack, table layout)
-    │                     ├── SkipBox (inline-block spacer)
-    │                     └── SvgBox (stretchy symbols)
-    ▼
-applyInterBoxSpacing()
-    │
-    ▼
-coalesce() ──→ merge adjacent same-class spans
-    │
-    ▼
-makeStruts() ──→ add ML__strut / ML__strut--bottom
-    │
-    ▼
-Box.toMarkup() ──→ HTML string
-```
-
-## Appendix B: AST Node → Atom Type Mapping
-
-| Tree-sitter AST Node | MathLive Atom Type | Lambda Package Module |
-|-----------------------|-------------------|-----------------------|
-| `symbol` (letter) | `mord` | `render.ls` |
-| `number` | `mord` | `render.ls` |
-| `operator` | `mbin` | `render.ls` |
-| `relation` | `mrel` | `render.ls` |
-| `punctuation` | `mpunct` | `render.ls` |
-| `subsup` | `subsup` | `atoms/scripts.ls` |
-| `fraction` | `genfrac` | `atoms/fraction.ls` |
-| `binomial` | `genfrac` | `atoms/fraction.ls` |
-| `radical` | `surd` | `atoms/radical.ls` |
-| `delimiter_group` | `leftright` | `atoms/delimiter.ls` |
-| `accent` | `accent` | `atoms/accent.ls` |
-| `big_operator` | `extensible-symbol` | `atoms/operator.ls` |
-| `environment` | `array` | `atoms/array.ls` |
-| `text_command` | `text` | `atoms/text.ls` |
-| `style_command` | `group` (styled) | `atoms/style.ls` |
-| `space_command` | `spacing` | `atoms/spacing.ls` |
-| `command` (greek) | `mord` | `symbols.ls` |
-| `group` | `group` | `render.ls` |
-| `color_command` | `group` (colored) | `atoms/color.ls` |
-| `box_command` | `box` | `atoms/enclose.ls` |
-
-## Appendix C: Inter-Atom Spacing Table (from TeX)
-
-```
-         ord  op  bin  rel  open close punct inner
-ord       0    1   *2    *3   0    0    0     *1
-op        1    1    -    *3   0    0    0     1
-bin      *2    *2   -     -  *2    -    -    *2
-rel      *3    *3   -     0  *3    0    0    *3
-open      0    0    -     0   0    0    0     0
-close     0    1   *2    *3   0    0    0    *1
-punct     *1   *1   -    *1  *1   *1   *1    *1
-inner     *1   1   *2    *3  *1    0   *1     *1
-
-0 = no space, 1 = thin (3mu), 2 = medium (4mu), 3 = thick (5mu)
-* = space only in display/text style (not script/scriptscript)
-- = impossible combination
-```
-
----
-
-## 9. Phase 1 Progress Report
-
-### 9.1 Status: Complete
-
-All Phase 1 deliverables are implemented and passing. 12 modules totaling **1,763 lines** of Lambda Script.
-
-| Module | Lines | Status | Notes |
-|--------|-------|--------|-------|
-| `math.ls` | 47 | ✅ Done | Entry point: `render_math()`, `render_display()`, `render_inline()`, `render_standalone()`, `stylesheet()` |
-| `context.ls` | 123 | ✅ Done | Style derivation (display/text/script/scriptscript), context constructors |
-| `box.ls` | 232 | ✅ Done | `make_box`, `text_box`, `skip_box`, `hbox`, `vbox`, `build_vbox`, `make_struts`, `box_cls`, `box_styled` |
-| `render.ls` | 469 | ✅ Done | Dispatch on ~30 AST node types, inter-atom spacing insertion, recursive rendering |
-| `symbols.ls` | 198 | ✅ Done | Greek letters, operators, relations, arrows, accents, delimiter sizes |
-| `metrics.ls` | 102 | ✅ Done | TeX σ/ξ parameters, style-indexed arrays, `at()` accessor |
-| `spacing_table.ls` | 77 | ✅ Done | 8×8 inter-atom spacing matrix, atom type classification |
-| `css.ls` | 152 | ✅ Done | ~45 CSS class constants, embedded MathLive stylesheet |
-| `util.ls` | 72 | ✅ Done | `fmt_em()`, `text_of()`, `map_children()`, type-check helpers |
-| `atoms/fraction.ls` | 134 | ✅ Done | `\frac` with display/inline style, vbox numerator/denominator/bar layout |
-| `atoms/scripts.ls` | 105 | ✅ Done | Superscript, subscript, combined sub+sup with vlist |
-| `atoms/spacing.ls` | 52 | ✅ Done | `\quad`, `\qquad`, `\,`, `\:`, `\;`, `\!`, `\hspace`, `\kern` |
-
-### 9.2 Test Results
-
-Six test expressions all produce correct output with **zero runtime errors**:
-
-| # | Expression | Validates |
-|---|-----------|-----------|
-| 1 | `x` | Basic symbol → `<span class="ML__mathit">x</span>` |
-| 2 | `a + b` | Binary op with inter-atom spacing (mediumspace) |
-| 3 | `x^2` | Superscript vlist with correct height (0.363em) |
-| 4 | `\frac{a}{b}` (inline) | Fraction with bar, numerator/denominator shifts |
-| 5 | `\frac{a}{b}` (display) | Display-style fraction with larger shifts (0.59em) |
-| 6 | Standalone render | Full output with embedded CSS stylesheet |
-
-Baseline regression: **328/328** existing tests pass — zero regressions.
-
-### 9.3 Bugs Fixed
-
-Six significant Lambda JIT runtime issues were discovered and worked around during implementation:
-
-#### Bug 1: `type(x) == 'string'` returns `error` instead of `bool`
-
-- **Symptom:** Type dispatch in `render_node` never matched any branch; raw AST elements passed through unrendered.
-- **Root cause:** `type()` returns a TYPE value (not a symbol/string). Comparing a TYPE with `==` against a string literal produces `error`, which is falsy, so all branches silently fail.
-- **Fix:** Replaced all `type(x) == 'string'` patterns with `x is string`, `x is element`, `x is int`, etc. For null: use `x == null` (not `x is null`).
-- **Files changed:** `util.ls` (2 replacements), `render.ls` (3 replacements).
-
-#### Bug 2: `format(x, 'html')` wraps output in DOCTYPE and converts lists to `<ul><li>`
-
-- **Symptom:** Output wrapped in `<!DOCTYPE html><html><body>...` with list children converted to unordered list items.
-- **Root cause:** The `'html'` format mode applies full HTML document semantics, including list-to-`<ul>` conversion.
-- **Fix:** Use `format(x, 'xml')` for raw element serialization without HTML document wrapping.
-- **Files changed:** `math.ls`, test scripts.
-
-#### Bug 3: `match` expressions returning `int` or `float` produce garbage values
-
-- **Symptom:** `style_index()` returning 0/1/2/3 via `match` produced `[unknown]` values. All downstream array indexing and metric lookups failed with `<error>`.
-- **Root cause:** Lambda JIT produces incorrect values when a `match` expression returns numeric types (int/float). Match returning strings works correctly.
-- **Fix:** Converted all numeric-returning `match` expressions to if-else chains.
-- **Files changed:** `metrics.ls` (`style_index`, `style_scale`), `spacing_table.ls` (`atom_type_index`, `get_spacing`), `atoms/spacing.ls` (`parse_dimension`).
-- **Status:** ⚠️ **Outstanding JIT bug** — not fixed at the engine level. Workaround in place.
-
-#### Bug 4: Cross-module array indexing causes stack overflow
-
-- **Symptom:** `met.sup1[si]` (accessing an array exported from another module by index) caused infinite recursion / stack overflow.
-- **Root cause:** Lambda JIT does not correctly handle indexing into arrays that were obtained via cross-module qualified access (`module.array[i]`). Even `let d = module.array; d[i]` fails.
-- **Fix:** Added `pub fn at(arr, i) => arr[i]` accessor in `metrics.ls`. All cross-module array access uses `met.at(met.sup1, si)` instead of `met.sup1[si]`.
-- **Files changed:** `metrics.ls` (+1 accessor), `atoms/scripts.ls` (8 replacements), `atoms/fraction.ls` (8 replacements).
-- **Status:** ⚠️ **Outstanding JIT bug** — not fixed at the engine level. Workaround in place.
-
-#### Bug 5: Elements passed as function arguments to other modules get corrupted
-
-- **Symptom:** `box.make_box(<span class: "ML__frac-line">)` returned a box whose `.element` was `<root/>` instead of the constructed `<span>`.
-- **Root cause:** Lambda elements constructed in module A and passed as arguments to a function in module B get corrupted during cross-module function calls. The element's tag name and attributes are lost.
-- **Fix:** Added `box_cls(cls, h, d, w, type)` and `box_styled(cls, style, h, d, w, type)` helper functions in `box.ls` that construct the `<span>` element internally (same module as `make_box`), avoiding cross-module element passing. Replaced all cross-module `box.make_box(<span ...>)` calls.
-- **Files changed:** `box.ls` (+2 helpers), `render.ls` (5 replacements), `atoms/fraction.ls` (1 replacement), `atoms/spacing.ls` (11 replacements).
-- **Status:** ⚠️ **Outstanding JIT bug** — not fixed at the engine level. Workaround in place.
-
-#### Bug 6: `++` at start of continuation line parsed as unary `+`
-
-- **Symptom:** CSS string concatenation with `++` at the beginning of continuation lines produced compiler warnings and incorrect results.
-- **Root cause:** Lambda's parser treats `++` at the start of a line as two unary `+` operators rather than the binary concatenation operator.
-- **Fix:** Restructured all multi-line `++` concatenation so the `++` operator appears at the **end** of each line, not the start of the next line.
-- **Files changed:** `css.ls` (full stylesheet string restructured).
-
-### 9.4 Lambda Script Syntax Rules Discovered
-
-A comprehensive set of Lambda syntax constraints was identified through trial and error. These rules should be followed in all future Lambda package development:
-
-| #   | Rule                                                                         | Consequence of Violation                          |
-| --- | ---------------------------------------------------------------------------- | ------------------------------------------------- |
-| 1   | Use `x is string` / `x is element` — never `type(x) == 'string'`             | Silent `error` value, all comparisons fail        |
-| 2   | Use `format(x, 'xml')` — never `format(x, 'html')` for element serialization | Unwanted DOCTYPE wrapping, list→`<ul>` conversion |
-| 3   | Use if-else chains for `match` returning int/float                           | Garbage / `[unknown]` values from JIT             |
-| 4   | Use accessor functions for cross-module array indexing                       | Stack overflow                                    |
-| 5   | Construct elements inside the module that returns them                       | Elements corrupted to `<root/>` across modules    |
-| 6   | Put `++` at end of line, never at start of continuation                      | Parsed as unary `+`                               |
-| 7   | Public constants: `pub name = value` — not `pub let name = value`            | Compile error                                     |
-| 8   | Quote `"in"` and `"inf"` as map keys (grammar keywords)                      | Parse error                                       |
-| 9   | No `*spread` in elements — use `for (child in list) child`                   | Compile error                                     |
-| 10  | `max`, `min`, `sum` not valid pipe targets — use `max(list)`                 | Compile error                                     |
-| 11  | No nested `fn` inside function bodies                                        | JIT error                                         |
-| 12  | Symmetric if-else: both branches must be blocks or both expressions          | Compile error when mixed                          |
-| 13  | Zero-param `pub fn name() => { map }` is ambiguous — use block body          | Returns function, not map                         |
-
-### 9.5 Outstanding Work for Phase 2
-
-Phase 2 modules not yet created (from §4 Phase 2 plan):
-
-| Module | Feature | Priority |
-|--------|---------|----------|
-| `atoms/radical.ls` | `\sqrt`, `\sqrt[n]{}` with SVG surd | High |
-| `atoms/delimiter.ls` | `\left...\right`, `\big`, `\Big`, sized delimiters | High |
-| `atoms/accent.ls` | `\hat`, `\vec`, `\bar`, `\overline`, `\widehat` | Medium |
-| `atoms/operator.ls` | `\sum`, `\prod`, `\int` with limits | High |
-| `atoms/text.ls` | `\text{}`, `\textrm{}`, `\mbox{}` | Medium |
-
-Additionally, the 15 unhandled AST node types in C++ (§6.3) remain unfixed — most notably `symbol_command` (#15), `sized_delimiter` (#5), and `color_command` (#6).
-
----
-
-## 10. Phase 2 Progress Report
-
-### 10.1 Status: Complete
-
-Phase 2 rendering support for all core constructs is implemented and working. All 10 Phase 2 test expressions render without crashes. Baseline regression: **328/328** existing tests pass — zero regressions.
-
-### 10.2 C++ Prerequisite Fixes
-
-Two critical C++ issues had to be resolved before Phase 2 rendering could work:
-
-#### C++ Fix 1: Math input returns simple map instead of AST
-
-- **Symptom:** `input("\\sqrt{x}", {type: 'math', flavor: 'latex'})` returned `{type: :latex-math, source: "\\sqrt{x}", display: false}` — a flat map with no parsed structure.
-- **Root cause:** `parse_math()` in `input-math.cpp` stored the raw source string instead of routing through the tree-sitter-latex-math parser.
-- **Fix:** Modified `input-math.cpp` to call `parse_math_latex_to_ast()` (new public wrapper in `input-latex-ts.cpp`) which creates a `TSParser`, sets the `tree_sitter_latex_math()` language, parses the math string, then calls `convert_math_node()` recursively. Also added the declaration in `input.hpp`.
-- **Files changed:** `input-math.cpp`, `input-latex-ts.cpp` (+wrapper function + forward declaration), `input.hpp` (+declaration).
-- **Impact:** Unblocked entire Phase 2 — without this, the math package had no structured AST to render.
-
-#### C++ Fix 2: Anonymous token fields return null from `ts_node_child_by_field_name()`
-
-- **Symptom:** `accent.cmd`, `big_operator.op`, `fraction.cmd` were all `null` in the AST despite the grammar defining them as named fields.
-- **Root cause:** Fields referencing hidden token rules (`_accent_cmd`, `_big_operator_cmd`, `_frac_cmd`, etc.) use `token()` patterns with `_` prefix in the tree-sitter grammar. Tree-sitter makes these nodes anonymous, and `ts_node_child_by_field_name()` cannot find anonymous nodes — it returns null.
-- **Fix:** Added `extract_leading_command()` helper function that extracts the `\command` from the parent node's source text. Applied to all 14 `cmd` field handlers and 1 `op` field handler as an `else` fallback when field lookup returns null.
-- **Files changed:** `input-latex-ts.cpp` (+helper function, 15 handler modifications).
-- **Impact:** Fixed command extraction for `\hat`, `\vec`, `\bar`, `\sum`, `\int`, `\frac`, `\binom`, `\text`, `\overline`, `\underset`, `\overset`, `\mathbf`, `\color`, `\boxed`, `\phantom`, `\hspace`, `\kern`, and all other command-bearing node types.
-
-### 10.3 Lambda Render Fixes
-
-| File | Fix | Details |
-|------|-----|---------|
-| `render.ls` | `render_radical`: `node.body` → `node.radicand` | AST uses `radicand` attribute, not `body` |
-| `render.ls` | `render_big_op`: `node.cmd` → `node.op` | Big operators store their command in `op`, not `cmd` |
-| `render.ls` | `render_big_op`: added limits rendering | Split into `render_big_op_with_limits`, `render_big_op_display`, `render_big_op_inline` helper functions. Display mode stacks limits above/below via `vbox`; inline mode places them beside the operator with `MSUBSUP` class |
-| `render.ls` | `render_accent`: now works | Was already correct — just needed the C++ `cmd` field fix to populate `\hat` → accent lookup |
-
-### 10.4 Phase 2 Test Results
-
-All 10 Phase 2 test expressions render without errors:
-
-| # | Expression | File | Validates |
-|---|-----------|------|-----------|
-| 1 | `\sqrt{x}` | `m1.tex` | Radical with radicand |
-| 2 | `\sqrt[3]{x}` | `m2.tex` | Radical with index |
-| 3 | `\left( \frac{a}{b} \right)` | `m3.tex` | Auto-sized delimiters |
-| 4 | `\hat{x}` | `m4.tex` | Accent with combining character |
-| 5 | `\overline{AB}` | `m5.tex` | Overline accent |
-| 6 | `\sum_{i=0}^{n} x_i` | `m6.tex` | Big operator with limits |
-| 7 | `\int_0^1 f(x) dx` | `m7.tex` | Integral with limits |
-| 8 | `\text{for all } x` | `m8.tex` | Text command |
-| 9 | `\vec{v}` | `m9.tex` | Vector accent |
-| 10 | `\bar{x}` | `m10.tex` | Bar accent |
-
-AST attribute verification:
-- `accent.cmd = \hat` ✅ (was `null` before C++ fix)
-- `big_operator.op = \sum` ✅ (was `null` before C++ fix)
-- `big_operator.lower` populated ✅
-- `big_operator.upper` populated ✅
-- `fraction.cmd = \frac` ✅ (was `null` before C++ fix)
-- `radical.radicand` populated ✅
-
-### 10.5 Bugs Found (Phase 2)
-
-#### Bug 7: `input()` resolves first argument as file path, not inline string
-
-- **Symptom:** `input("\\sqrt{x}", {type: 'math', flavor: 'latex'})` treated the string as a file/URL path and failed to find it.
-- **Root cause:** The `input()` function always resolves its first argument as a path. There is no inline-string parsing mode.
-- **Workaround:** Write math expressions to `.tex` files first, then `input("temp/m1.tex", {type: 'math', flavor: 'latex'})`.
-- **Status:** Design limitation. A `render_latex(string)` convenience function (§6.4 item 5) would bypass this.
-
-#### Bug 8: `use format` causes parse error
-
-- **Symptom:** Having `use sys` + `use format` before `pn main()` produced a parse error (`ERROR node at Ln 1`).
-- **Root cause:** Unknown — may be a parser issue with `use` and certain identifiers.
-- **Workaround:** Call `format()` directly without `use format`. The function is available as a built-in.
-
-#### Bug 9: Inline comments break nested let-chain expressions
-
-- **Symptom:** A deeply nested `(let ..., let ..., // comment, if (...) ...)` expression caused parse error at the comment line.
-- **Root cause:** The parser does not handle `//` comments inside comma-separated let-chain expressions within parenthesized groups.
-- **Fix:** Refactored complex nested expressions into separate named helper functions. This also improves readability.
-- **Files changed:** `render.ls` — split `render_big_op` into `render_big_op_with_limits`, `render_big_op_display`, `render_big_op_inline`.
-
-#### Bug 10: `format(box_result, 'xml')` renders as `<root/>`
-
-- **Symptom:** Rendering results serialized as `<root/>` via `format(result, 'xml')`, hiding all interior content.
-- **Root cause:** The render result is a map (box model: `{element: <span ...>, height: ..., width: ...}`), not a raw element. `format()` on a map wraps it in a `<root>` element with attributes from map keys, and the nested `<span>` element inside the `element` field is not expanded.
-- **Workaround:** Access the inner element directly: `format(result.element, 'xml')`. Or use `math.render_standalone(ast)` which returns a fully composed element.
-- **Status:** Expected behavior — not a bug, but a usability trap.
-
-#### Bug 11: `for (i in 0 to expr)` does not parse in `pn` context
-
-- **Symptom:** Range-based for loop `for (i in 0 to n)` produced a parse error inside a `pn` procedure block.
-- **Root cause:** Unknown — `for` with range may only be supported in `fn` (functional) context.
-- **Workaround:** Use manual loop: `let i = 0; loop { if (i >= n) break; ...; i = i + 1 }`.
-
-#### Bug 12: Multiple `let x^err` bindings in same scope conflict
-
-- **Symptom:** Having `let a^err = ...` and `let b^err = ...` in the same scope caused "duplicate definition of 'err'" compile error.
-- **Root cause:** The error variable name (`err`) is shared across all error-handling bindings in the same scope.
-- **Fix:** Use unique error variable names: `let a^e1 = ...`, `let b^e2 = ...`, etc.
-
-#### Bug 13: `pn` required for `print()` and error propagation
-
-- **Symptom:** Using `print()` or `?` error propagation inside `fn` caused compile errors.
-- **Root cause:** `fn` is pure functional — side effects like `print()` and error propagation with `?` are only allowed in `pn` (procedure) blocks.
-- **Fix:** Use `pn` for test scripts and any code that needs I/O or error handling.
-
-### 10.6 Updated Lambda Script Syntax Rules
-
-New rules discovered in Phase 2, extending §9.4:
-
-| #   | Rule                                                                         | Consequence of Violation                          |
-| --- | ---------------------------------------------------------------------------- | ------------------------------------------------- |
-| 14  | `input()` first argument is always a file path — no inline string parsing    | File-not-found error                              |
-| 15  | No `//` comments inside parenthesized let-chain expressions                  | Parse error                                       |
-| 16  | `for (i in 0 to n)` may not work in `pn` context                            | Parse error                                       |
-| 17  | Use unique error variable names: `let x^e1`, `let y^e2` — not `^err` twice  | Duplicate definition error                        |
-| 18  | `print()` and `?` error propagation require `pn`, not `fn`                   | Compile error                                     |
-| 19  | Don't use `use format` — call `format()` directly as a built-in             | Parse error                                       |
-| 20  | Access `.element` field on box results before formatting                     | `format()` on boxes produces `<root/>`            |
-
-### 10.7 Outstanding Work for Phase 3
-
-Phase 3 modules not yet created (from §4 Phase 3 plan):
-
-| Module | Feature | Priority |
-|--------|---------|----------|
-| `atoms/array.ls` | `matrix`, `pmatrix`, `bmatrix`, `vmatrix`, `cases`, `aligned`, `array` | High |
-| `atoms/style.ls` | `\mathbf`, `\mathrm`, `\mathbb`, `\mathcal`, `\displaystyle`, `\operatorname` | High |
-| `atoms/color.ls` | `\textcolor`, `\color`, `\colorbox` — named colors + hex | Medium |
-| `atoms/enclose.ls` | `\boxed`, `\fbox` | Low |
-
-## 11. Phase 3 Progress Report
-
-### 11.1 Status: Complete
-
-All Phase 3 atom modules are implemented and working. **14/14** Phase 3 test constructs render correctly. Baseline regression: **328/328** — zero regressions.
-
-### 11.2 New Modules
-
-| Module | Lines | Constructs | Description |
-|--------|-------|------------|-------------|
-| `atoms/style.ls` | 77 | `\mathbf`, `\mathrm`, `\mathbb`, `\mathcal`, `\mathfrak`, `\mathsf`, `\mathtt`, `\mathit`, `\displaystyle`, `\textstyle`, `\operatorname` | Font style commands — maps command name to CSS class, applies to rendered argument |
-| `atoms/color.ls` | 118 | `\textcolor`, `\color`, `\colorbox` | Color commands — resolves named colors (red, blue, etc.) and hex codes, applies as CSS `color` or `background-color` |
-| `atoms/enclose.ls` | 153 | `\boxed`, `\fbox`, `\phantom`, `\rule` | Enclosure commands — `\boxed`/`\fbox` add border, `\phantom` renders invisible, `\rule` draws a filled rectangle with parsed dimensions |
-| `atoms/array.ls` | 220 | `\begin{pmatrix}`, `\begin{bmatrix}`, `\begin{vmatrix}`, `\begin{Vmatrix}`, `\begin{cases}`, `\begin{aligned}`, `\begin{array}`, `\matrix`, `\pmatrix` | Environment/matrix rendering — CSS grid layout with delimiter wrapping |
-
-**Total new code:** 568 lines across 4 new modules.
-
-### 11.3 Modified Files
-
-| File | Lines | Changes |
-|------|-------|---------|
-| `render.ls` | 401 | Added imports for `style`, `color`, `enclose`, `arr_mod`; added dispatch cases for `style_command`, `color_command`, `phantom_command`, `box_command`, `rule_command`, `environment`, `matrix_command`, `env_body`, `matrix_body` |
-| `css.ls` | 154 | Added `MTABLE` class constant and `.ML__mtable{display:inline-grid;vertical-align:middle}` CSS rule |
-
-### 11.4 Architecture Decisions
-
-#### CSS Grid for Matrix/Environment Layout
-
-Environments (matrices, cases, etc.) use **CSS grid** rather than nested box structures:
-- `grid-template-columns: auto auto ...` (one `auto` per column)
-- `column-gap: 1em` (default), `0.2em` for `cases`
-- `row-gap: 0.16em`
-- Per-cell `justify-self` alignment (center, left, or right based on column spec)
-- The grid element is returned as an inline map `{element: ..., height: ..., depth: ...}` directly, avoiding cross-module element JIT issues.
-
-This approach avoids the list-flattening problem discovered during development: Lambda's `for` expression produces lists that auto-flatten when nested, making nested row/column box structures unreliable.
-
-#### Delimiter Wrapping
-
-Matrix environments automatically add matching delimiters:
-- `pmatrix` → `(` ... `)`
-- `bmatrix` → `[` ... `]`
-- `vmatrix` → `|` ... `|`
-- `Vmatrix` → `‖` ... `‖`
-- `cases` → `{` (left only)
-- Others → no delimiters
-
-Delimiters use CSS class `ML__small-delim` and are assembled with `box.hbox()`.
-
-### 11.5 Critical Bug Discovery: `array` Is a Reserved Word
-
-**Root cause:** Using `import array: .lambda.doc.math.atoms.array` causes JIT corruption. The alias name `array` conflicts with Lambda's built-in `array` type, causing all return values from functions called via the `array.` prefix to be corrupted.
-
-**Symptoms:**
-- `unknown type error in set_fields` (3× per function call)
-- `map_get ANY type is UNKNOWN: 24` (2× per function call)
-- Elements become `[error]`, numeric values become `<error>`
-- The function body is irrelevant — even `fn f() => box.text_box("X", null, "mord")` fails when called as `array.f()`
-
-**Isolation method:** Systematically simplified `array.ls` to a 10-line stub → still errored. Moved the function inline to `render.ls` → worked. Changed import alias from `array` to `arr_mod` → worked. Confirmed the alias name `array` is the sole cause.
-
-**Fix:** `import arr_mod: .lambda.doc.math.atoms.array` in `render.ls`.
-
-**Rule added:** Never use `array`, `list`, `map`, `string`, `int`, `float`, `bool`, `null`, or other built-in type names as import aliases.
-
-### 11.6 Test Results
-
-All 14 Phase 3 constructs render correctly:
-
-| # | Input | Construct | Result |
-|---|-------|-----------|--------|
-| 1 | `\mathbf{A}` | Bold font | `ML__mathbf` class applied |
-| 2 | `\mathbb{R}` | Blackboard bold | `ML__bb` class applied |
-| 3 | `\mathcal{L}` | Calligraphic | `ML__cal` class applied |
-| 4 | `\displaystyle \frac{a}{b}` | Display style | Display context propagated to fraction |
-| 5 | `\operatorname{sin}(x)` | Operator name | `ML__cmr` class applied |
-| 6 | `\textcolor{red}{x+y}` | Text color | `color:#d32f2f` inline style |
-| 7 | `\colorbox{yellow}{z}` | Color box | `background-color:#ffeb3b` + padding |
-| 8 | `\boxed{E=mc^2}` | Boxed | `border:1px solid` style |
-| 9 | `\phantom{x}y` | Phantom | `visibility:hidden` style |
-| 10 | `\rule{2em}{0.5em}` | Rule | `ML__rule` class + width/height styles |
-| 11 | `\begin{pmatrix}` | Pmatrix | `(` + 2×2 CSS grid + `)` |
-| 12 | `\begin{bmatrix}` | Bmatrix | `[` + 2×3 CSS grid + `]` |
-| 13 | `\begin{cases}` | Cases | `{` + 2×2 grid with `0.2em` gap |
-| 14 | `\begin{vmatrix}` | Vmatrix | `|` + 2×2 CSS grid + `|` |
-
-### 11.7 Lambda Syntax Rules Discovered
-
-| # | Rule | Symptom if Violated |
-|---|------|---------------------|
-| 21 | `array` is a reserved type name — cannot be used as an import alias | JIT corruption: `unknown type error in set_fields`, `map_get ANY type is UNKNOWN: 24` |
-| 22 | `for` expressions produce lists that auto-flatten when nested (flatMap behavior) | Nested table structures collapse into flat sequences |
-| 23 | Element literal syntax: `<tag attr1: v1, attr2: v2; child1 child2>` — comma-separated attrs, semicolon before children | Parse errors |
-| 24 | `for` inside element children works: `<span class: c; for (item in items) item>` | N/A — useful pattern |
-| 25 | Inline maps `{element: ..., height: ...}` can be returned from `fn` to avoid cross-module element JIT issues | Elements constructed in one module may corrupt when returned to another |
-
----
-
-## §12 Phase 4 Implementation Notes
-
-### 12.1 Summary
-
-Phase 4 delivers three functional enhancements plus one partial optimization:
-
-| Feature | Status | Module |
-|---------|--------|--------|
-| Stretchy delimiters (extensible) | ✅ Complete | `atoms/delimiters.ls` |
-| Sized delimiters (`\big`, `\Big`, `\bigg`, `\Bigg`) | ✅ Complete | `atoms/delimiters.ls` |
-| Box coalescing (adjacent span merge) | ✅ Partial | `optimize.ls` |
-| Error rendering (unknown commands) | ✅ Complete | `css.ls` (ERROR class) |
-| Inter-atom spacing | ✅ Already done (Phase 1) | `spacing_table.ls` |
-
-**Test results**: 8/8 Phase 4 tests pass, 328/328 baseline regression pass, Phase 2 + Phase 3 tests all pass.
-
-### 12.2 New Modules
-
-#### `atoms/delimiters.ls` (~164 lines)
-
-Extensible delimiter rendering with two strategies:
-
-1. **Sized fonts (levels 1–4)**: Uses KaTeX size font classes (`size1-regular` through `size4-regular`) for delimiters from 1.2em to 3.0em. Size thresholds: 1.2, 1.8, 2.4, 3.0em.
-
-2. **CSS scaleY (level 5+)**: For delimiters taller than 3.0em, applies a `transform: scaleY(N)` CSS transform to stretch the glyph vertically.
-
-Public API:
-- `render_stretchy(delim, content_height, atom_type)` — Automatically selects size level based on content height, used by `\left...\right` delimiters
-- `render_at_scale(delim, scale, atom_type)` — Renders at a specific scale factor, used by `\big`, `\Big`, `\bigg`, `\Bigg` commands
-
-Supporting data:
-- `SIZED_DELIMS` — Map of all delimiters with sized font variants
-- `DELIM_CHARS` — Maps LaTeX commands (`\langle`, `\vert`, etc.) to Unicode display characters
-- `SVG_DELIM_DATA` — SVG path data for delimiter segments (reserved for future SVG rendering)
-
-#### `optimize.ls` (~65 lines)
-
-Post-processing optimization pass that merges adjacent same-class text-only `<span>` elements to reduce DOM node count.
-
-Public API:
-- `coalesce(bx)` — Takes a box map `{element, height, depth, width, type, italic, skew}` and returns an optimized version
-
-Internal algorithm:
-1. `merge_children(el)` — Entry point; processes multi-child elements
-2. `build_merged(el)` — Extracts children, recursively walks sub-elements, merges adjacent spans via `merge_list`, reconstructs element
-3. `walk(c)` — Recursively processes multi-child child elements
-4. `merge_list(items)` / `do_merge(items, i, acc)` — Functional fold that merges adjacent items passing `can_merge` test
-5. `can_merge(a, b)` — Two elements are mergeable when both have exactly 1 text child, same CSS class, and no inline style
-6. `merge_two(a, b)` — Concatenates text content into a single `<span>`
-
-**Limitation**: Coalescing only penetrates multi-child element levels. Single-child wrapper chains (common at the top of the render tree) are not traversed due to JIT stack overflow constraints.
-
-### 12.3 Modified Files
-
-#### `render.ls` Changes
-- Added `import delims: .lambda.doc.math.atoms.delimiters`
-- `render_delimiter_group`: Now uses `delims.render_stretchy()` for `\left`/`\right` delimiters. Calculates `content_height = content.height + content.depth` and passes to delimiter renderer for size selection.
-- `render_sized_delim`: Now uses `delims.render_at_scale()` for `\big`/`\Big`/`\bigg`/`\Bigg` commands.
-
-#### `math.ls` Changes
-- Added `import opt: .lambda.doc.math.optimize`
-- Render pipeline now: `render_node(ast)` → `opt.coalesce()` → `box.make_struts()` → wrap in `<span class: ML__latex>`
-
-### 12.4 Architecture Decisions
-
-1. **Font-based stretching over SVG**: Sized KaTeX fonts (Size1–Size4) provide sharp, scalable delimiters at discrete levels. CSS `scaleY` handles arbitrary heights above 3.0em. SVG path stacking (top/repeat/bottom segments) is architecturally prepared but not yet rendering — the font+CSS approach covers all practical cases.
-
-2. **Coalescing as post-processing**: Box coalescing runs after the full render tree is built, not during rendering. This keeps the renderer simple and makes the optimization optional.
-
-3. **Functional fold for merging**: `do_merge` uses a tail-recursive fold pattern with an accumulator, which is the idiomatic Lambda approach for stateful iteration.
-
-### 12.5 Critical JIT Bugs Discovered
-
-| # | Bug Description | Workaround |
-|---|----------------|------------|
-| 1 | `for` comprehension inside element children MUST be on a separate line. `<span; for (c in items) c>` causes parse error. Multi-line `<span;\n for (c in items) c\n>` works. | Always put `for` on its own line inside elements |
-| 2 | `merge_list` return value cannot be directly iterated in element constructor `for (c in merged) c` — produces `[[unknown type raw_pointer!!]]`. Re-extracting via `(for (j in 0 to (len(merged) - 1)) merged[j])` works. | Re-extract array elements through indexing before use in element children |
-| 3 | Recursive functions through single-child element wrappers cause stack overflow even with depth limits of 10. The JIT per-function stack frame size appears very large. | Only recurse through multi-child elements |
-
-#### Bug #3 Detail: Stack Overflow in Single-Child Element Recursion
-
-**Goal**: Walk through single-child wrapper elements (e.g., `<span class: "ML__latex"; <span; <span; [x, y, z]>>>`) to reach multi-child levels where coalescing can happen.
-
-**Attempt 1 — Unbounded recursion** (stack overflow):
-```lambda
-fn merge_children(el) {
-    if (len(el) > 1) build_merged(el)
-    else if (len(el) == 1)
-        (let child = el[0],
-         if (type(child) == "element")
-             <span class: el.class, style: el.style;
-                 merge_children(child)
-             >
-         else el)
-    else el
-}
+| Owner | Responsibility |
+|---|---|
+| Math input | Parse syntax, retain command distinctions and scoped structure, report parse errors, and perform supported macro expansion. |
+| Lambda math package | Select the math profile; propagate styles; classify atoms; compute boxes, glue, assemblies and annotations; emit SVG. |
+| Lambda IO | Acquire font/image bytes and resolve resource locations. |
+| Native font services | Return selected-face metrics, glyph identity and geometry, and optional OpenType MATH facts. |
+| Document/editor integration | Preserve authored source, choose inline/display presentation, and present failures or source fallbacks. |
+| Painter | Paint the supplied SVG and resolved fonts without redoing math layout. |
+
+This separation follows **D7.1.1 / D7.1.2v2**: math policy stays in Lambda;
+native services supply facts and never fetch package resources on behalf of
+the renderer. Font-query results are copied values, not borrowed native
+font/document pointers. Context ownership and retained-input lifetimes follow
+**D4.2.3 / D4.5.2**. Host modules declare read queries as functions and effectful
+operations as procedures under **D7.4.6 / S12.1.1v2**; repeated reads require
+a stable font context. A runtime-only host that excludes Radiant cannot supply
+these services (**D7.1.6**).
+
+Repeated queries may reuse a validated font snapshot within their owning
+evaluation context (**D5.4.2–D5.4.4**). Identity must include ordered resource
+bytes and style descriptors; a family name or GC address is insufficient.
+Invalid replacement data must not damage a valid snapshot. Fallback handles
+belong to their font context and must not cross independent contexts. A cache
+is an optimization: uncached queries must have the same results and ownership.
+Measurements and painting share font resolution and baseline conventions;
+neither introduces a separate shaping engine.
+
+## 3. Input and public contract
+
+### 3.1 Input model
+
+Callers parse source with `parse(source, {type: "math", flavor: "latex"})`
+and pass the resulting AST to the renderer. The current production input is
+the direct math parser. The retained Tree-sitter grammar is not the production
+math parsing path.
+
+The AST distinguishes nuclei, groups, fractions, scripts, delimiters, styles,
+text, environments, spacing, and extension constructs. Named arguments and
+command identity matter: `\dfrac` differs from `\tfrac`, `\limits` differs
+from `\nolimits`, and a group can change an atom's class. Those distinctions
+must survive parsing, rendering, and serialization where supported.
+
+Definitions such as `\def` and `\newcommand` use the existing scoped TeX
+expansion facility. This is bounded input support, not a promise to run every
+TeX primitive or arbitrary LaTeX package. Recovery parsing and unknown
+commands also require care: current fallback paths can paint a command name or
+its children. Successful SVG emission alone cannot identify an unsupported
+command; explicit unsupported-feature reporting remains outstanding.
+
+Plain string input can be rendered as characters; the rendering API does not
+implicitly parse such a string as LaTeX. Applications that accept LaTeX must
+use the parser first.
+
+### 3.2 Rendering interface
+
+| Public operation | Result |
+|---|---|
+| `render_box(ast, options)` | Measured box or error. |
+| `render_math(ast, options)` | The box's SVG element or error. |
+| `render_inline(ast)` | SVG with initial text math style. |
+| `render_display(ast)` | SVG with initial display math style. |
+| `render_standalone(ast)` | Display SVG; font declarations already travel with the SVG. |
+| `render_box_element(box)` | Extract the rendered element from a measured box. |
+| `stylesheet(options)` | Compatibility entry point returning an empty string; no external math stylesheet is required. |
+
+A public measured box exposes `element`, `width`, `height`, `depth`, atom
+`type`, `italic`, `font_family`, and compatibility fields `skew` and
+`max_font_size`. Dimensions are in em. Currently `skew` is zero and
+`max_font_size` describes the initial context scale; they are not promises of
+complete TeX skew data or a recursive maximum-size calculation.
+
+| Option | Meaning |
+|---|---|
+| `display` | Choose display mode and initial display rather than text math style. Later style declarations do not change the surrounding AMS display flag. |
+| `color` | Root paint color; otherwise inherit `currentColor`. |
+| `font_family` | Select a supplied or installed font family; explicit selection bypasses the default bundled profile. |
+| `fonts` | Optional binary face snapshots with family, weight and style descriptors. |
+| `font_size` | Positive finite CSS pixel size; dimensions returned by the API remain em. The default physical-length conversion uses 16px per em. |
+| `base_uri` | Directory used to resolve relative inline-image sources. |
+
+Parse diagnostics, invalid font data, unresolvable requested glyphs, invalid
+image requests, and unavailable required constructions must remain visible.
+Document previews may preserve source as a fallback; that is an integration
+decision, not a successful math layout result.
+
+## 4. Geometry and style model
+
+### 4.1 One measured box
+
+A box has one full-precision advance width, height above its baseline, and
+depth below it. Logical dimensions and ink bounds are different facts: TeX
+may assign a logical box that differs from the painted outline. Italic
+correction, accent attachment, character-versus-compound identity, and atom
+class travel with the relevant nucleus.
+
+Horizontal composition sums advances and takes the union of shifted vertical
+extents. Vertical composition derives its extents from child boxes and their
+baseline shifts. Rules and explicit glue participate in the same measured
+geometry. Phantoms, smash and overlap boxes deliberately alter reserved
+dimensions without necessarily changing the painted ink.
+
+Parents consume these full-precision dimensions. Numeric formatting happens
+only when emitting output; rounded CSS strings must never feed back into
+layout. There is one canonical set of dimensions for every parent, including
+struts and delimiters. A real overlay belongs in the composed geometry, not
+in a correction table for selected examples.
+
+Ordinary glyphs retain their font baseline. Math-axis centering is applied
+where TeX specifies it, such as operators, delimiters and `\vcenter`.
+For a centered box, height minus depth equals twice the current axis height.
+An infinity glyph beside an arrow is therefore resolved through the correct
+symbol font; it is not translated to align its ink with the arrow.
+
+### 4.2 Math context
+
+The context carries display, text, script or scriptscript style plus an
+independent cramped flag, selected font profile, semantic alphabet, text/math
+mode, size, color and resource base. Child contexts inherit this information
+and override only what the TeX construct changes. Group boundaries scope
+declarations. Style changes must preserve the outer list's atom relationships.
+
+Scripts descend to script then scriptscript style. A display fraction uses
+text-style children; smaller fractions descend further. Denominators,
+subscripts, radical nuclei and ordinary accent nuclei use cramped style.
+Explicit style commands reset cramped state; underline preserves the
+surrounding nucleus style. `\mathchoice` chooses exactly one branch from the
+current style.
+
+The bundled CM profile uses 70% and 50% script sizes. A supplied MATH font
+provides its own percentages; the ordinary-font fallback uses MathML Core
+defaults. Size declarations `\tiny` through `\Huge` use the supported
+LaTeX/KaTeX size ladder and distinct script sizes, scoped to their group.
+Physical size and math style remain separate concepts.
+
+## 5. Fonts and mathematical data
+
+### 5.1 Existing bundled resources
+
+The default profile uses Computer Modern Serif from the existing CMU bundle,
+with ordinary italic, bold and bold-italic faces. Existing CMU Sans and
+Typewriter support those variants. Existing KaTeX Script, Caligraphic,
+Fraktur and AMS faces supply specialist alphabets; Main, AMS and Size faces
+supply missing CM symbols and larger operators. Merely having an asset in the
+bundle does not mean every one of its constructions is implemented.
+
+Semantic mathematical alphabets are distinct from a font's character map.
+Use mathematical Unicode glyphs when the selected face supplies them;
+otherwise use the appropriate ordinary style face and its own measurements.
+Latin variables and lowercase Greek normally select math italics, uppercase
+Greek normally remains upright, and text/named operators use upright text
+unless their command specifies otherwise. Font and atom class are separate
+choices.
+
+Missing symbols first try the authored bundled symbol families, then the
+available platform fallback. Each resolved glyph retains its actual font,
+style, advance, bounds and optional MATH facts. Never attach another face's
+dimensions to a replacement outline merely to improve a comparison. Platform
+fallback can affect portability; see §10.
+
+### 5.2 Three parameter profiles
+
+| Selected profile | Layout parameter source |
+|---|---|
+| Default bundled CMU | The explicitly approved Computer Modern TeX companion, with actual CMU/KaTeX painted glyph facts. |
+| Explicit supplied/installed font with MATH | That selected font's MATH constants and glyph data. |
+| Explicit supplied/installed ordinary font | MathML Core fallback constants derived from that font's normal measurements. |
+
+OpenType MATH is optional. The existing CMU/KaTeX resources used by the default
+profile lack it. Absence is a capability result, not corrupt font data.
+Available MATH data includes constants, italic corrections, accent attachment,
+math kerns, designed variants, assembly parts and connector limits. Font data
+provides measurements and constraints; the package still owns the layout
+algorithm. The test-only Noto Sans Math fixture exercises this path and is
+not a production dependency.
+
+For ordinary explicit fonts, fallback parameters use their own x-height,
+underline thickness and script offsets under
+[MathML Core's layout-constant defaults](https://w3c.github.io/mathml-core/#layout-constants-mathconstants).
+They do not borrow CM or Noto MATH constants. This is a documented fallback
+profile, not a claim that an arbitrary ordinary font has original TeX math
+metrics.
+
+The bundled companion contains the existing original `cmr10`, `cmsy10`,
+`cmsy7`, `cmsy5` and `cmex10` TFM resources. It supplies CM math parameters,
+the roman parenthesis strut, bracket thickness and supported delimiter variant
+chains and recipes. Symbol parameters follow the 10/7/5 selections; the matched
+roman profile scales CM10 instead of borrowing unavailable optical-size data.
+Plain TeX's tenex
+extension parameters remain at their original size across styles. Its use
+does not assert that CMU outline bounds equal original CM glyph boxes.
+Matched logical metrics are used only for the explicitly identified CM
+constructions. Supplied or installed fonts never inherit this companion.
+Resource identity, licenses and hashes are recorded in
+[font provenance](../lmd/package/math/fonts/SOURCES.md) and
+[companion provenance](../lmd/package/math/fonts/tex/PROVENANCE.md).
+
+### 5.3 Stretching contract
+
+Prefer an adequate natural glyph, then the appropriate designed variant or
+font assembly. Assemblies use the font's extender parts and valid connector
+overlaps; they preserve the heads and other fixed parts. TeX companion
+recipes use their own logical joins and integer repeats. Do not confuse a
+font assembly with geometric scaling of a complete glyph.
+
+For wide accents, TeX selects the largest designed accent that fits the
+nucleus. A finite variant repertoire can limit coverage. Zero-advance
+combining marks require their ink origin and attachment data, not an invented
+advance width. Missing italic correction, skew or construction data cannot
+be recovered by matching a screenshot.
+
+The current ordinary-font path still scales some complete glyph outlines
+when construction data is absent and retains the largest variant when no
+larger construction exists. Those behaviors are current limitations, not
+exceptions to Rule 1. A successful finite box does not certify a TeX delimiter,
+radical, brace or accent construction.
+
+## 6. TeX layout requirements
+
+The algorithmic authority is [Knuth's TeX82 source](https://tug.ctan.org/systems/knuth/dist/tex/tex.web)
+and *The TeXbook*, Appendix G. LaTeX extensions follow their documented
+package definitions. [OpenType MATH](https://learn.microsoft.com/en-us/typography/opentype/spec/math)
+defines optional font facts. MathLive and KaTeX remain useful independent
+comparisons, including when their rendering differs from TeX.
+
+### 6.1 Atom classes and glue
+
+Math lists distinguish ordinary, operator, binary, relation, opening, closing,
+punctuation and inner atoms. Explicit `\mathord`, `\mathop`, `\mathbin`,
+`\mathrel`, `\mathopen`, `\mathclose`, `\mathpunct` and `\mathinner`
+set the enclosing class without erasing the content. Ordinary grouped
+expressions and fractions have ordinary class; a `\left...\right` group
+has inner class. Character identity is separately retained where TeX's
+single-character rules apply.
+
+Normalize binary atoms sequentially using the preceding normalized atom and
+following significant atom, ignoring explicit glue. Unary signs and binary
+atoms next to incompatible classes become ordinary. Then apply TeX's spacing
+table in the current style's symbol-font quad, with 18mu per quad.
+
+| Left / right | ord | op | bin | rel | open | close | punct | inner |
+|---|---|---|---|---|---|---|---|---|
+| ord | 0 | t | m* | T* | 0 | 0 | 0 | t* |
+| op | t | t | — | T* | 0 | 0 | 0 | t* |
+| bin | m* | m* | — | — | m* | — | — | m* |
+| rel | T* | T* | — | 0 | T* | 0 | 0 | T* |
+| open | 0 | 0 | — | 0 | 0 | 0 | 0 | 0 |
+| close | 0 | t | m* | T* | 0 | 0 | 0 | t* |
+| punct | t* | t* | — | t* | t* | t* | t* | t* |
+| inner | t* | t | m* | T* | t* | 0 | t* | t* |
+
+Here `t`, `m`, `T` mean 3mu, 4mu and 5mu; `*` suppresses the glue in
+script/scriptscript style; `—` is an impossible pair after normalization.
+Explicit `\,`, `\:`, `\;` and `\!` use mu glue. `\quad`, `\qquad`
+and `\enspace` use text-em dimensions rather than shrinking with math style.
+
+AMS modulo commands contribute atoms and glue to the surrounding math list;
+boxing the entire command as an ordinary atom loses boundary spacing and
+binary normalization. `\bmod` surrounds its binary label with 5mu kerns
+and, outside script styles, negative medium glue. With the default 4mu
+medium glue this leaves 1mu on each side before normal atom spacing.
+`\pod` / `\pmod` prepend 18mu in display mode and 8mu otherwise;
+`\mod` prepends 18mu or 12mu respectively. The `mod` label and argument
+are separated by 6mu. These mu dimensions use the current symbol-font quad;
+the surrounding AMS display flag is inherited through style changes and
+arrays. This static renderer does not implement the macros' line-break penalties.
+
+`\mathstrut` follows LaTeX's `\vphantom(` definition: zero advance and
+no paint, with the selected parenthesis's height/depth in the current style.
+It is distinct from the text strut used by continued fractions. Phantom and
+smash commands produce ordinary compound boxes; source atom classes, operator
+limit policy, glyph kerns and italic corrections do not survive that boxing.
+
+### 6.2 Scripts and limits
+
+TeX Rule 18 distinguishes a single-character nucleus from a compound box.
+The former starts with zero baseline drops; compound drops use the nucleus
+extent and the appropriate script-font parameters. Superscript minima depend
+on display/text/cramped style. Subscript and coupled-script constraints use
+the current math x-height and rule thickness. When both scripts are present,
+open the required gap and apply TeX's coupled adjustment, rather than shifting
+each independently. Horizontal attachment uses italic correction and, where
+available, the selected font's math kerns. Script-space remains a TeX length,
+not a percentage chosen from a screenshot.
+
+For the CM/TeX profile, the superscript bottom must be at least one-quarter
+of the math x-height above the baseline. A lone subscript's top is bounded
+by four-fifths of that x-height. Paired scripts use the paired-subscript
+minimum and at least four default rule thicknesses between their boxes;
+when opening that gap, TeX's additional coupled adjustment can raise both
+scripts to satisfy the superscript-bottom constraint. All these tests use
+measured child extents, including descenders and nested constructs. Supplied
+MATH fonts provide the corresponding limits through their own constants.
+
+Large operators select designed display variants and center on the math axis.
+Named operators retain text-font lettering and operator spacing. Eligible
+operators default to stacked limits in display style; integrals normally keep
+side scripts. `\limits` and `\nolimits` override that policy. Stacked limits
+use the nucleus/annotation widths, italic correction and big-op spacing
+parameters. Brace and bracket annotations default to stacked placement in
+every style, with explicit `\nolimits` still honored.
+
+### 6.3 Fractions and radicals
+
+TeX Rule 15 selects numerator and denominator styles, baseline shifts and
+clearance from style and rule thickness. With a bar, center it on the math
+axis and enforce the appropriate clearance on each side. An authored thick
+bar uses its own thickness. Without a bar, open the required numerator-to-
+denominator gap symmetrically. Center both children to their shared width.
+Binomials and generalized fractions retain their declared fences, thickness
+and style; null delimiters retain the TeX null-delimiter space.
+
+In the CM/TeX profile, a ruled fraction requires three times its actual bar
+thickness of clearance on each side in display style and one thickness in
+smaller styles. A ruleless stack requires seven default rule thicknesses
+between the children in display style and three otherwise. Initial shifts
+come from the profile's numerator/denominator parameters; these clearances
+can increase them. Supplied MATH fonts retain their own fraction/stack gap
+constants. `\over`, `\atop`, `\choose`, `\brace` and `\brack` share
+these semantics with their corresponding structured fraction forms.
+
+AMS `\cfrac` forces display style and inserts a text strut in its numerator.
+Its default numerator alignment is centered; `[l]` and `[r]` align the
+numerator to the common fraction width. The trailing negative null-delimiter
+space allows nested fraction rules to end together. The current text-strut
+profile follows the LaTeX 10pt article size ladder: height/depth are 70/30
+of the text baseline skip, including inside script math. Custom document
+baseline registers and alternative optical-size font selection are not
+implied by this profile. The nonstandard `\sixptsize` has no approved text
+baseline definition; a continued fraction in that size reports the missing
+definition rather than inventing a strut.
+
+Radicals use a cramped nucleus. In the bundled CM companion, TeX82's
+`make_radical` requests a sign for the nucleus's height plus depth, the
+style-dependent clearance and the default rule thickness. Selection uses the
+original symbol-size search, CMEX next-larger chain and, when necessary, its
+top/repeat/bottom recipe. Extension pieces retain their natural proportions;
+the extension font remains text-sized in every math style.
+
+The selected sign's logical height supplies the vinculum thickness and extra
+top clearance. Initial clearance is the default rule thickness plus one
+quarter of the symbol x-height in display style, or one quarter of the
+default rule thickness otherwise. Add half any positive excess of the sign's
+depth over the nucleus extent plus clearance. Align the sign baseline with
+the bottom of the vinculum above the nucleus; the sign's logical depth may
+extend below the nucleus. These are font/algorithm dimensions, not outline
+estimates or image corrections.
+
+An indexed root follows LaTeX/amsmath's default root definition: typeset the
+degree in uncramped scriptscript style, precede it by `5mu`, follow it by
+`-10mu`, and raise it by `.6 * (height - depth)` of the root box. Preserve
+negative kerns, including an empty degree. The full box includes sign,
+vinculum, nucleus and degree. Supplied-font MATH construction and configurable
+degree adjustments remain separate obligations in §10; geometric scaling of
+a complete sign does not establish conformance.
+
+Authored `\rule[raise]{width}{height}` lengths preserve the optional signed
+raise independently of the two mandatory dimensions. The raised/lowered
+rule's logical height and depth participate in surrounding math construction.
+
+### 6.4 Delimiters
+
+Automatic delimiter sizing measures content above and below the math axis.
+For twice the maximum axis-relative extent, TeX's default demand is the
+larger of `901/1000` of that extent and the extent minus `5pt`. Selection,
+assembly and axis placement use TeX's delimiter rules and the chosen profile.
+`\middle` shares its enclosing group's demand.
+
+The bundled profile supports 26 delimiter shapes: parentheses, brackets,
+floors, ceilings, braces, angles, single/double bars, slashes, six vertical
+arrows, groups and moustaches. Selection searches the small character at the
+current math size and successively larger sizes, then the original CMEX
+next-larger chain. An extensible recipe takes the minimum integer repeat
+count; a middle piece requires equal repeats above and below it. Logical butt
+joins preserve curved tips, corners, brace middles and arrowheads. Finite
+chains such as angles and slashes retain their largest design when exhausted.
+No complete glyph is stretched in these bundled constructions.
+
+Existing KaTeX Main and Size1–Size4 faces paint the matched characters. Their
+authored encoding and baseline translations are font facts; reversing those
+translations preserves the original CMEX logical coordinates. TeX defines
+selection, dimensions, assembly and axis centering. Null delimiters retain
+their space and an axis-centered empty box. No font is added to the bundle
+(**D7.2.4 / D7.1.2v2**, Rule 2).
+
+All left, right and middle delimiters share the enclosing group's first-pass
+demand, which excludes the delimiters themselves. Under
+[e-TeX's definition](https://github.com/TeX-Live/texlive-source/blob/trunk/texk/web2c/etexdir/etex.ch),
+`\middle` acts as a close atom before the boundary and an open atom after it;
+the boundary restores the enclosing math context. Binary normalization and
+glue follow those two roles.
+
+Explicit AMS `\big`, `\Big`, `\bigg`, `\Bigg` use a text-style measurement
+with 1, 1.5, 2 and 2.5 multiples of 1.2 times the roman parenthesis strut,
+including inside scripts. Automatic and explicit construction are independently
+checked for all 26 bundled shapes across four styles. This does not certify
+unmapped special delimiters, bold profiles or supplied-font assemblies.
+The `l`, `r` and `m` suffixes select open, close and relation atom classes;
+unsuffixed sized delimiters are ordinary atoms. This spacing policy applies
+independently of whether the glyph construction is conforming.
+
+### 6.5 Accents, over/under annotations and brackets
+
+Narrow accents retain natural glyphs. Wide accents use designed variants or
+assemblies and the nucleus's attachment point. TeX character accents attach
+scripts to the character nucleus where required; compound accents retain
+their full box. Overline and underline use their proper rule/gap/extents and
+style policies. Above/below annotations reserve their measured space.
+
+Bundled `\widehat` and `\widetilde` follow TeX82's finite CMEX character
+lists. Retain the first design for a narrower nucleus; otherwise choose the
+last design whose logical width does not exceed the nucleus. Stop at the
+third design even for wider content. Use the text-sized extension font in
+every style and its x-height to determine vertical attachment. A wider mark
+from another font or anisotropic stretching would change this declared
+profile. Independent coverage establishes variant selection and placement
+over compound/rule nuclei. Character skew and character-specific script
+attachment still require the font data and broader checks listed in §10.
+
+The supported `\overbracket` / `\underbracket` definition follows
+[mathtools](https://github.com/latex3/mathtools/blob/main/mathtools.dtx):
+a display-style nucleus, ends of `.7` times the text symbol font's
+x-height, a `.2` x-height gap, and rule thickness `ht(\braceld)`. A profile
+without the required TeX extension data reports that limitation. Correct
+annotation placement does not validate the separate brace, group, line-
+segment or harpoon construction. Verified AMS arrow marks are specified in §6.7.
+
+### 6.6 Closed multiple integrals
+
+The bundled `\oiint` / `\oiiint` fallback is an explicit Lambda TeX
+definition, not the STIX/esint glyph definition. Compose the existing
+`\iint` / `\iiint` glyph and `\bigcirc` at their natural sizes and
+baselines. Center the two rows in their maximum advance width. Shared
+vertical phantoms preserve both rows' complete extents; `\vcenter` centers
+the resulting union on the math axis. Treat it as a compound
+`\mathop...\nolimits`: no character italic correction, side scripts by
+default, ordinary stacked-limit rules when explicitly requested.
+
+Display style selects the existing larger integral face. Text/script/
+scriptscript and size declarations follow the normal profile. Raw Unicode
+closed integrals use the same math-atom behavior. The circle may differ in
+shape and coverage from another font's oval; neither glyph scaling nor
+fitted offsets are allowed to remove that difference. Explicit fonts keep
+their own closed-integral glyphs and data. The executable definition is
+[the bundled integral macro](../test/lambda/math/tex_bundled_integrals.tex).
+
+### 6.7 Horizontal arrows and arrow marks
+
+The bundled profile follows
+[AMS](https://github.com/latex3/latex2e/blob/develop/required/amsmath/amsmath.dtx)
+for `\xrightarrow` and `\xleftarrow`, and
+[mathtools](https://github.com/latex3/mathtools/blob/main/mathtools.dtx)
+for `\xleftrightarrow`, `\xRightarrow`, `\xLeftarrow` and
+`\xLeftrightarrow`. Fillers combine existing arrowhead and minus/equal glyphs
+using the package's negative kerns and centered leaders. Heads and repeated
+glyphs retain their natural proportions and baselines. Leader counts and
+centering follow TeX's scaled-point arithmetic, including rounding at an
+exact repeat boundary. Single-line minus boxes are smashed without changing
+their ink; double-line equal signs retain their logical boxes.
+
+Labelled arrows are relations with a compound operator nucleus and stacked
+limits. Build the filler in display style and measure label demand in explicit
+uncramped script style, independently of the surrounding style. Actual upper
+and lower labels use the surrounding style's superscript/subscript policy.
+Retain each command's distinct measurement and attachment kerns. Mathtools'
+double arrows add text-font control spaces even when an authored label is
+empty; those spaces participate in width and limit presence. Empty arguments
+and nonempty zero-width arguments remain distinct after TeX argument scanning.
+
+The six AMS over/under single-arrow marks use explicit uncramped style for
+both the nucleus and filler. Center narrower content within the filler's
+minimum width. Above marks follow the macro's vbox with no interline glue;
+below marks follow its vtop with `1.3\ex@` clearance. `\ex@` is the nonlinear
+text-size-dependent point length defined by
+[amsgen](https://github.com/latex3/latex2e/blob/develop/required/amsmath/amsgen.dtx),
+not font x-height. Preserve the body's baseline. Unbraced following scripts
+attach after the macro's mathchoice; an authored enclosing group instead
+receives ordinary compound-nucleus scripts. Character-accent attachment rules
+do not apply to these macros.
+
+Independent evidence covers these twelve constructions at the default text
+size across all four math styles, with nested/cramped bodies, label presence,
+script attachment and leader boundaries. Separate under-arrow cases cover
+the nonlinear clearance at 19 physical text sizes with matched scaled fonts.
+This does not certify hooks, maps-to,
+harpoons, paired reactions, other profiles or named-size combinations (§10).
+All constructions remain in the package layer (**D7.2.4**), and font/metric
+resources remain acquired through Lambda IO (**D7.1.2v2**).
+
+## 7. Content and extension surface
+
+The following describes current content/structural support. Entries do not
+certify every package's spacing, geometry or typography; §10 states the
+remaining obligations.
+
+| Area | Supported behavior and boundary |
+|---|---|
+| Symbols and alphabets | Greek, binary/relation/arrow/AMS symbols, operator names, ordinary and specialist alphabets, and explicit atom classes. Coverage depends on command mapping and available glyphs. |
+| Text and mode changes | Scoped text styles, nested text commands, escaped specials, and embedded `$...$` math. Bundled verbatim uses the existing typewriter face and retains delimited source and starred visible spaces. Font requests follow structured commands rather than literal command text. Quote encoding and supplied-MATH-font text selection remain incomplete. |
+| Dimensions | Supported `em`, `ex`, `mu`, `pt`, `bp`, `pc`, `in`, `cm`, `mm`, `px`; TeX points and big points remain distinct. Kern dimensions end at their unit and preserve following tokens. |
+| Arrays and AMS environments | Matrix families, cases/rcases/dcases, array, smallmatrix, subarray/substack, aligned/alignedat, gathered and related parsed environments; per-column alignment, starred matrix alignment, row gaps and solid/dashed rules. Cells scope infix fractions. This is bounded layout, not arbitrary TeX alignment/register execution. |
+| Array style | Small matrices/subarrays use script style; matrices use text style; supported AMS alignment/gathered environments and dcases use display style. Row placement accounts for cell heights/depths and centers the table on the axis. Complete strut/glue/rule derivation remains outstanding. |
+| Equation material | Parsed tags and nonprinting controls are retained. Numbering, references and outer display placement belong to the document layer; standalone math has no general line-breaking engine. |
+| Row separators | `\\` and `\cr` are structural controls, never painted backslashes. They delimit rows in an alignment; accepting them elsewhere does not promise paragraph line breaking. `\backslash` remains a literal symbol. |
+| Annotation arrows | Six labelled single/double arrows and six AMS over/under single-arrow marks follow §6.7. Paired reaction arrows retain upper/lower content. Other hook/head recipes and package-derived reaction spacing remain incomplete. |
+| CD diagrams | Rows, arrow direction, labels and equalities are represented. Their current dimensions are not certified against amscd. |
+| Boxes and transforms | Phantom variants, smash, overlaps, authored raise/lower dimensions, reflection and axis centering; framed/color boxes and cancel/strike/phase/actuarial forms render. Package-specific padding, stroke and decoration rules still need conformance work. |
+| Color | Scoped foreground paint, background and framed-color boxes are represented. Full xcolor expression evaluation and package-register semantics are not established by these paths. |
+| Images | Raster `\includegraphics` with width, height, totalheight and alt; intrinsic aspect ratio when width is absent; relative sources use `base_uri`. Bytes are embedded. Invalid sources/options/dimensions return errors. The current `.9em` default and unitless `bp` contract are KaTeX conventions, not full graphicx natural-size semantics. |
+| Logos | `\KaTeX` follows its reference macro: uppercase KATEX, reduced A aligned by text metrics, lowered E and authored kerns. Math alphabet/script declarations do not change its text-font policy. Standalone `\TeX` / `\LaTeX` fallbacks are incomplete. |
+
+HTML wrappers/links/data attributes, arbitrary menclose forms, tooltips,
+chemistry `\ce` / `\pu`, accessibility representations and editor atom
+metadata are not a complete supported feature set. Parsing or retaining a
+generic command does not supply its semantics. Reaction-arrow support alone
+does not implement mhchem.
+
+## 8. Output and document integration
+
+The SVG's em width and total height come from the measured box; its vertical
+alignment is minus the depth. The view box uses the same baseline-relative
+geometry, with visible overflow for intentionally protruding ink. It carries
+`class="lambda-math"`, `role="math"` and a source title. A source title is a
+useful text fallback, not MathML, speech, or a complete accessibility model.
+
+Ordinary encoded glyphs emit SVG text with the exact measured family, weight,
+style and size. Used bundled/supplied text faces accompany the SVG as embedded
+font declarations. Font-local unencoded variants and assembly pieces use
+outlines; rules and other geometry remain vector elements. Installed-font
+choices and unresolved platform fallback require matching resources in the
+viewer. Full-face embedding trades larger SVGs for portable declared fonts;
+font subsetting is not part of the current design.
+
+MathLive class names, vlist DOM structure, CEIL@2 CSS rounding, and historical
+`lm_` HTML snapshots are not current output contracts. The renderer requires
+no external math stylesheet. Native rasterization should use ordinary text
+painting at the final visible size where eligible, while vector export and
+transformed/unencoded glyphs preserve geometry.
+
+LaTeX documents, Markdown projections, AMS prose symbols and editor previews
+share this renderer. The document model retains authored math source
+independently of its rendered projection; generated font declarations must
+survive projection sanitization. Editing later can replace the AST and
+rerender without making the box tree mutable. Stable atom IDs, source-range
+mapping, hit-testing targets, caret/selection and placeholder edit targets
+remain future work rather than implied SVG features.
+
+Scrolling and hit testing must not recompute math or change its geometry.
+Host caches may retain styles, transforms and glyph geometry within their
+document/resource lifetimes. DOM, style, font, layout, dynamic selector state
+and animation changes must invalidate the appropriate data. Performance
+changes require unchanged painted output and hit targets as well as measured
+latency; startup, scroll latency and process time are separate measurements.
+
+## 9. Testing and verification
+
+### 9.1 Separate proof obligations
+
+| Layer | Evidence required | What it does not prove |
+|---|---|---|
+| Parsing and content | Named arguments, scopes, macros, escapes, rows, source serialization, and actual expected glyphs. | Recognizable content does not establish layout correctness. |
+| Focused math regressions | Box dimensions, selected-face facts, painted coordinates, styles, axis relations, limits and error cases. | Assertions that repeat an unsourced production constant do not validate it. |
+| Native font tests | Normal/no-MATH and MATH fonts, variants/connectors, malformed data, fallback ownership and snapshot lifetime. | Correct font parsing does not validate a package layout recipe. |
+| Formula corpus | Every retained formula renders with finite measured/emitted geometry, valid SVG and no retired markup/external font URL dependency. | No TeX equivalence, complete command coverage, or guarantee that every fallback font is embedded. |
+| Independent TeX oracle | Execute the relevant TeX primitives/package definition; inspect boxes, baselines, glue, variants, styles and limits independently. | Different fonts need not have identical absolute advances or raster images. |
+| Native PNG comparison | Expected content reaches the real painter; review Lambda/reference/overlay images and recorded provenance. | A low pixel error is neither semantic correctness nor a TeX conformance proof. |
+| Document/UI and aggregate gates | Math source, projection, baseline placement, sanitization, resources, scrolling and lifecycle work through actual integrations. | Focused passes do not make a failing aggregate gate green. |
+
+### 9.2 Corpus and regression contracts
+
+The current geometry corpus combines **206 MathLive-derived formulas** and
+**715 Lambda-input-derived formulas**, **921 total**, using retained snapshots
+as formula data. The baseline registration runs `--fixture-source all`.
+The runner currently renders every case in display style; inline, script,
+scriptscript and cramped behavior require focused checks. Historical expected
+HTML/errors in snapshots are not compared by this smoke gate. Upstream
+Jest/Playwright tests still exercise MathLive, not Lambda.
+
+Focused `.ls` tests have corresponding `.txt` expected results. Tests cover
+both supplied MATH fonts and ordinary faces, font switching and fallback,
+metric/paint agreement, scripts/fractions, atom classes/glue, choices/sizes,
+environments, images, text/escapes, transforms, reaction arrows, closed
+integrals, logos and document HTML. Font snapshot reuse has separate lifetime
+coverage. A golden changes only after checking the intended content and
+painted geometry, never as the sole evidence for a fix.
+
+Independent checked-in oracles cover:
+
+- [Core TeX math rules](../test/lambda/math/tex_reference.tex): character and
+  compound nuclei, display/text/cramped shifts, fractions, accents, underline,
+  mixed styles, operators and symbol baselines.
+- [Vertical delimiters and row controls](../test/lambda/math/tex_delimiter_reference.tex):
+  six arrows at four explicit sizes, script and automatic selection, and
+  nonpainting row-break controls.
+- [Closed integrals](../test/lambda/math/tex_integral_reference.tex): the
+  documented bundled macro in all styles, size changes and both limit modes.
+- [KaTeX logo](../test/lambda/math/tex_logo_reference.tex): text-font selection,
+  math styles, alphabet wrappers and size changes.
+- [Automated AMS primitive checks](../test/lambda/math/tex_conformance.test.mjs):
+  modulo glue and boundary atoms, the parenthesis phantom, sized-delimiter
+  spacing and continued-fraction struts/alignment across four styles.
+  Execute 260 boxes and 130 relations against installed amsmath/LaTeX,
+  including declarations in modulo arguments and their effect on following atoms;
+  shipped TeX positions are compared with actual SVG numerator baselines
+  and advances. Named-size probes explicitly match the bundled scaled-CM10
+  companion profile rather than LaTeX's alternative optical-size fonts.
+- [Automated delimiter checks](../test/lambda/math/tex_delimiter_conformance.test.mjs):
+  820 cases compare actual TeX box dimensions and shipped DVI component
+  positions with measured SVG geometry. They cover all 26 shapes, four styles,
+  four explicit sizes, small/large automatic demands, finite-chain exhaustion,
+  and cramped, nested, empty and middle-boundary cases. The reference explicitly
+  selects the same scaled-CM10 roman and fixed-size CMEX profile. Encoding
+  translations are reversed before comparing component baselines; they never
+  supply the expected layout. Native PNG checks separately verify intact
+  assembled tips, brace middles and joins.
+- [Automated radical and wide-accent checks](../test/lambda/math/tex_radical_conformance.test.mjs):
+  472 independently shipped TeX boxes cover square/indexed roots, small and
+  finite surds, tall assemblies, nested roots/fractions, lowered nuclei,
+  empty/lowered degrees and both finite accent chains across all four styles.
+  Compare dimensions, component identities, positions, sizes and painted rules;
+  the reference retains installed macro/TFM and production-resource hashes.
+  Native PNG checks separately exercise all radical pieces, finite accents
+  and indices. Rule nuclei isolate the construction from CMU character
+  metrics and unavailable italic/skew data; this is not a character-accent
+  conformance certificate.
+- [Automated horizontal-arrow checks](../test/lambda/math/tex_arrow_conformance.test.mjs):
+  692 independently shipped TeX boxes cover the twelve constructions in §6.7,
+  empty and nonempty zero-width labels, distinct measurement/attachment styles,
+  leader-count boundaries, braced/unbraced scripts and nested/cramped bodies.
+  Under-arrow clearance is checked at 19 physical text sizes with explicitly
+  matched scaled fonts. Compare component identities, natural sizes, positions,
+  dimensions and rules; retain installed macro/TFM and production-resource
+  hashes. Eight native PNG cases verify natural heads and continuous shafts.
+
+These are independent TeX executions, not a single complete automated
+conformance suite. `\showbox` intentionally emits `! OK` diagnostics and a
+nonzero exit status. A valid run must contain the expected cases and no
+unexpected TeX errors; shell status alone cannot classify it as passed.
+The automated AMS, delimiter, radical and arrow checks use successful
+compilation and shipped position records instead of `\showbox`.
+They run with the comparison-harness tests;
+automatic checking of the older oracles and wider package coverage remain
+outstanding. Missing pdfLaTeX is an explicit skip, not conformance evidence.
+
+### 9.3 Raster comparison contract
+
+`make test-mathcmp` uses the separately retained
+[KaTeX screenshot corpus](https://github.com/KaTeX/KaTeX/blob/main/test/screenshotter/ss_data.yaml).
+It renders formulas through Lambda's public package and native PNG painter,
+then compiles a documented pdfLaTeX equivalent and rasterizes it with Poppler.
+Both receive fixture macros and the case's display mode. Browser `pre`,
+`post` and `styles` remain metadata; this is a formula-only comparison.
+
+Both layouts use a logical 10pt em, including conversion of authored point
+lengths. Painting magnifies that em to the default 64 CSS pixels, with the
+corresponding DPI in Poppler. The previous harness left Lambda's logical em at
+its default 16px while painting at the requested comparison size; its point
+lengths therefore differed from the 10pt reference. Those older raster scores
+are not directly comparable with the corrected harness.
+Crop white margins and search only integer
+translation within the configured radius, default 12px per axis. Never resize
+or deform images independently. Boundary hits are flagged. The overlay shows
+overlapping ink in black, Lambda-only ink in red and reference-only ink in
+green. Ink error measures grayscale difference divided by union ink mass;
+mismatch fraction counts differing ink pixels above a chosen tolerance.
+Neither metric establishes surrounding-text baseline placement.
+
+References translate supported KaTeX syntax into pdfLaTeX and record every
+translation with its source span. Installed reference packages/fonts may
+differ from production fonts, including the reference-only STIX integral
+glyphs; that does not authorize bundling them. Missing reference glyphs and
+undefined commands are fatal. Upstream `nolatex` cases are explicit skips.
+Without an explicit threshold, a completed comparison is reported for review;
+render errors fail, and an optional ink-error threshold adds a visual gate.
+Reports retain formulas, translations, executable/corpus hashes, tool
+versions, settings, dimensions, offsets, PNG/SVG/PDF artifacts and logs under
+`./temp/`. Dependencies are not installed automatically. Setup and individual
+case commands are in [the comparison guide](../test/lambda/math/README.md).
+
+### 9.4 Reproduction and current evidence
+
+Use a stable built host; do not replace it during a run. All generated files
+belong under `./temp/`. The standard checks are:
+
+```sh
+./test/test_lambda_gtest.exe --gtest_filter='AutoDiscovered/*math_test_math_*'
+make test-math-corpus
+npm test --prefix test/lambda/math
+make test-mathcmp ARGS='--case Integrands --case DelimiterSizing --case MathDefaultFonts'
 ```
 
-**Attempt 2 — Depth-limited to 10** (still stack overflow):
-```lambda
-fn merge_at_depth(el, d) {
-    if (d <= 0) el
-    else if (len(el) > 1) build_merged(el)
-    else if (len(el) == 1)
-        (let child = el[0],
-         if (type(child) == "element")
-             <span class: el.class, style: el.style;
-                 merge_at_depth(child, d - 1)
-             >
-         else el)
-    else el
-}
+For changes to the math package or parser, complete
+`make test-lambda-baseline`; native font/layout/painting changes also require
+the relevant native tests and `make test-radiant-baseline`, with the Radiant
+dimension lint when layout code changes. Test262 remains a separate runtime
+gate when runtime work is involved. Aggregate failures retain their own
+diagnostics; focused math checks are not an all-green system baseline.
 
-fn merge_children(el) {
-    merge_at_depth(el, 10)
-}
-```
+| Evidence as of 2026-10-10 | Result and limits |
+|---|---|
+| Focused math run after the arrow changes | **30/30**; `temp/math-arrows/focused-final.log`. |
+| Full geometry corpus after the arrow changes | **921/921**; `temp/math-arrows/corpus-final.json`. Rendering smoke coverage only. |
+| Automated independent AMS/LaTeX relations | **130/130** across **260** TeX boxes; reported `temp/math-conformance-*/evidence.json`. Includes phantom atom classes, middle-boundary binary normalization, shipped numerator positions, source/binary hashes and the installed AMS definition hash. |
+| Automated independent delimiter checks | **820/820** TeX boxes and component-position comparisons; reported `temp/math-delimiter-oracle-*/evidence.json`. Includes source/binary and installed TFM hashes. |
+| Automated independent radical/accent checks | **472/472** TeX box, component and rule comparisons; `temp/math-radical-oracle-7bgJro/evidence.json`. Includes installed macro/TFM, production resource and source/binary hashes. |
+| Automated independent horizontal-arrow checks | **692/692** TeX box, component and rule comparisons; `temp/math-arrow-oracle-IR4bZt/evidence.json`. Includes all four styles and 19 physical text sizes for under-arrow clearance. Installed AMS/amsgen/mathtools, TFM, production-resource and source/binary hashes are retained. |
+| Comparison-harness and conformance checks | **2,217/2,217**, no skips; `temp/math-arrows/comparison-tests-final.log`. Includes native painting, logical point-scale checks and pdfLaTeX/Poppler references; no visual-equality claim. |
+| Prior independent integral audit | 17 TeX box dumps, **18/18** axis/style/limit relations; retained under `temp/math-closed-integrals/oracle/`. |
+| Prior independent delimiter/logo audits | 27 delimiter boxes plus row-control cases; eight logo boxes. Sources above remain reproducible. |
+| Lambda baseline after the arrow changes | **6,585/6,586**: input **2,112/2,112**, runtime **4,473/4,474**. The sole failure is the existing `edit_view_only` boolean `disabled` serialization mismatch; its math/projection/source assertions pass. The LaTeX sample corpus completes in this run. `temp/math-arrows/baseline.log`, `baseline-final/` and `verification.json` retain the results and exact host/source provenance. |
+| Prior Lambda baseline after the radical changes | **6,583/6,585**: input **2,112/2,112**, runtime **4,471/4,473**. `edit_view_only` fails boolean `disabled` serialization; its math/projection/source assertions pass in that run. `latex_test_latex_phase3_corpus` exceeds the harness's 60-second limit, including when run alone; the previous math package reproduces that timeout on the same host. The earlier source-loss symptom remains unresolved. `temp/math-radicals/baseline.log`, `baseline-initial/`, `latex-timeout-recheck.log` and `latex-head-recheck.log` retain the evidence. |
 
-**Root cause**: Each recursive call constructs a `<span class: ..., style: ...; recursive_call(...)>` element inline. The JIT-compiled stack frame for a function that constructs elements appears to be very large (possibly allocating temporary space for element attribute slots, child arrays, and intermediate `Item` values). Even ~10 frames is enough to exhaust the ~8MB stack.
+Older logs from overlapping builds/edits and narrower focused selections are
+not substitute aggregate results. The previous 206-case HTML snapshot scores
+measure the retired renderer and cannot be compared with today's 921-case
+geometry smoke score. Passing comparisons likewise do not mean pixel identity.
 
-**Error output**:
-```
-signal handler: stack overflow detected (fault_addr=0x16b46bfd0, stack_limit=0x16b47c000)
-exec: recovered from stack overflow via signal handler
-stack overflow in function '<signal>' - possible infinite recursion
-stack usage: 7 KB / 8176 KB (0.1%)
-runtime error [308]: Stack overflow in '<signal>' - likely infinite recursion (stack: 7KB/8176KB)
-```
+For package-specific evidence, the relevant primary definitions include
+[amsmath](https://github.com/latex3/latex2e/blob/develop/required/amsmath/amsmath.dtx),
+[LaTeX box/alignment primitives](https://github.com/latex3/latex2e/blob/develop/base/ltplain.dtx),
+[row-break controls](https://github.com/latex3/latex2e/blob/develop/base/ltspace.dtx),
+[logos](https://github.com/latex3/latex2e/blob/develop/base/ltlogos.dtx), and
+[KaTeX's comparison template](https://github.com/KaTeX/KaTeX/blob/main/test/screenshotter/test.tex).
+Record the exact installed package/resource version with oracle artifacts;
+upstream links alone do not pin a reproducible reference.
 
-Note: the reported "stack usage: 7 KB" is misleading — this is measured *after* the signal handler recovered and unwound the stack. The actual usage at overflow was ~8MB.
+## 10. Outstanding work
 
-**Working workaround** — skip single-child wrappers entirely:
-```lambda
-fn merge_children(el) {
-    if (len(el) > 1) build_merged(el)
-    else el
-}
-```
+### 10.1 TeX conformance gaps in existing rendering
 
-This limits coalescing to multi-child levels only. Single-child wrapper chains (common at the top of the math render tree) are left as-is. The tradeoff is acceptable because coalescing's primary value is merging adjacent same-class text siblings, which only exist at multi-child levels.
-| 4 | `[items[0]]` as a standalone expression causes parse error ("expected ']'"). Same syntax works as a function argument: `do_merge(items, 1, [items[0]])`. | Use `let first = items[0], [first]` or pass as function argument |
-| 5 | `if/else` returning elements with different attribute shapes (e.g., `<span class: c; x>` vs `<span; x>`) crashes JIT | Always use consistent shapes: `<span class: a.class; x>` where class may be null |
+These are observed design violations or unverified constructions in the
+current code, not permission to adopt their present behavior as a new rule.
 
-### 12.6 Test Results
+| Area | Outstanding obligation |
+|---|---|
+| Remaining horizontal arrows and profiles | Replace hook, maps-to, harpoon and two-headed constructions with the supported package's font-component and glue recipe. Audit named text sizes, bold and supplied-font profiles. The twelve constructions in §6.7 now have independent bundled-profile evidence; correct hook orientation alone does not establish conformance for the remaining paths. |
+| Paired reaction arrows | Derive minimum width, shortening, separation and annotation spacing from the supported AMS/mathtools/mhchem definition. Natural heads and content regressions do not validate those dimensions. |
+| Remaining delimiters and profiles | Extend beyond the 26 verified bundled delimiter shapes to unmapped special delimiters (`\arrowvert`, `\Arrowvert`, `\bracevert`). Audit named-size/style combinations and bold/supplied-font profiles. |
+| Radicals and wide marks | Complete supplied-font MATH radicals and wide constructions, configurable root-degree adjustments, and package-defined braces/groups/line segments. Bundled radicals and finite CMEX hats/tildes have independent construction evidence; character accents still lack required italic/skew data and broader script/nesting coverage. Whole-glyph stretching in the remaining paths is not conforming. |
+| Accents and operators | Extend independent coverage of glyph attachment, nested accents, character/compound scripts, large-op selection and side/stacked limits across profiles. The public zero `skew` field is not measured skew support. |
+| Arrays, AMS alignments and CD | Derive struts, row/column glue, rule/dash spacing, centering and diagram dimensions from the declared package definitions. Audit optional arguments, ragged rows and unsupported alignment constructs. Current bounded tables are not arbitrary TeX alignment. |
+| Macro expansion and document registers | Extend modulo verification to following scripts, nested font/color macros and configurable math-glue registers. Integrate continued fractions with custom document baseline/strut registers and broaden nested/profile coverage. The default AMS glue and argument declaration scope, parenthesis phantom and cfrac alignment/text-strut contracts now have automated independent evidence. |
+| Decorations and framed boxes | Complete package-derived poor-man's-bold, strike/cancel, phase and actuarial geometry, box registers, bbox/enclose options and border/padding policy. Authored raise/reflection/vcenter support is not a certificate for these decorations. |
+| Text and quotes | Complete literal paired-quote/font-encoding behavior and text/typewriter selection with supplied MATH fonts. Preserve text/math scoping and escapes while adding typography coverage. Bundled verbatim typewriter selection is independently covered by content/font and native-paint checks. |
+| Logos, color and images | Complete standalone `\TeX` / `\LaTeX`; audit xcolor expressions/scoping and graphicx natural-size semantics. Keep the current bounded image convention explicit. |
 
-| # | Test | LaTeX Input | Validates |
-|---|------|-------------|-----------|
-| 1 | Stretchy delimiters | `\left(\frac{a}{b}\right)` | Size selection, delimiter rendering |
-| 2 | Sized delimiters | `\bigl( x \bigr)` | Scale-to-class mapping |
-| 3 | Coalescing candidate | `xyz` | Box coalescing pass (identity at top level) |
-| 4 | Error rendering | `\undefinedcommand` | `ML__error` class on unknown commands |
-| 5 | Tall delimiters | `\left[\frac{\frac{a}{b}}{\frac{c}{d}}\right]` | Multi-level size selection (2.303em height) |
-| 6 | Middle delimiter | `\left( a \middle| b \right)` | `\middle` support in delimiter groups |
-| 7 | Inter-atom spacing | `a + b = c` | Spacing between atom types |
-| 8 | Complex integration | `\sum_{i=0}^{n}\left(\frac{x_i}{y_i}\right)^2` | All features composed |
+For each family, establish its command definition and available font data,
+then verify the resulting box/glue/assembly behavior with independent TeX and
+native painting in display, text, script and scriptscript styles, including
+cramped and nested cases. Rules 1 and 2 apply throughout. A recognizable
+shape, reduced raster diff, or green smoke count cannot close these items.
 
-### 12.7 Lambda Syntax Rules Discovered
+### 10.2 Coverage and verification gaps
 
-| # | Rule | Symptom if Violated |
-|---|------|---------------------|
-| 26 | `for` in element children MUST be on its own line | Parse error: `ERROR node at Ln X` spanning the entire function body |
-| 27 | `[expr[n]]` as standalone return value is parsed as subscript, not array-with-subscript | Parse error: "expected ']'" |
-| 28 | Function return values from `merge_list` (multi-branch return array) produce `raw_pointer` when used in `for (c in result) c` inside element constructor | `[[unknown type raw_pointer!!]]` in element children |
-| 29 | Recursive single-child element traversal overflows stack even with depth limit 10 — JIT stack frames are very large | Stack overflow signal handler fires |
-| 30 | `<span; for (c in items) c>` single-line fails but `<span;\n    for (c in items) c\n>` multi-line works | Parse error vs working code |
+- Make unsupported commands, generic AST fallthrough and unavailable
+  constructions explicit; prevent fallback command text from being counted
+  as implemented math. Separate expected parse failures from render success.
+- Extend corpus checks beyond forced display style and structural validity:
+  expected glyph content, inline baselines, all math styles, profile changes,
+  actual font-resource availability and painted geometry need coverage.
+- Extend repeatable independent TeX relations beyond the automated AMS
+  primitives, bundled delimiters, radicals, finite wide accents and horizontal
+  arrows; integrate the older box oracles and additional package macros.
+  The present checks remain narrower than a comprehensive conformance suite.
+- Verify full document/editor source preservation and generated-font
+  sanitization through UI paths. `edit_view_only` still fails boolean-attribute
+  serialization. Its math/projection/source assertions pass in the current
+  run, but earlier full-context imports lost inter-formula text while a
+  standalone import/export succeeded; an older HEAD run also recorded a source
+  round-trip failure. Identify the cause of this intermittent loss before
+  changing goldens or claiming source preservation. Diagnose the historical
+  full LaTeX sample-corpus timeout, which also reproduced with the preceding
+  math package. That corpus completes in the current baseline, but this does
+  not establish the timeout's cause or resolution. Neither an all-green
+  baseline nor complete UI verification is claimed here.
+- Bound platform-font fallback and standalone portability. A smoke check for
+  external font URLs does not prove every resolved platform face is embedded.
+  Ordinary-font measurements also retain the host's shaping limitations.
+- Broaden native painting, font-lifetime, installed-font, Linux and Windows
+  coverage before claiming cross-platform equivalence. Performance evidence
+  must use release binaries, matched artifacts and separate startup/scroll
+  measurements; historic macOS improvements are not a portable performance gate.
 
-### 12.8 Module Inventory (Phase 4 Complete)
+### 10.3 Deferred product scope
 
-```
-lambda/doc/math/
-├── math.ls              # Entry point (48 lines)
-├── render.ls            # Core renderer (398 lines)
-├── box.ls               # Box model (233 lines)
-├── css.ls               # CSS classes (126 lines)
-├── context.ls           # Display/text context (42 lines)
-├── metrics.ls           # Font metrics (197 lines)
-├── symbols.ls           # Symbol table (379 lines)
-├── util.ls              # Utilities (47 lines)
-├── spacing_table.ls     # Inter-atom spacing (91 lines)
-├── optimize.ls          # Box coalescing (65 lines)  ← NEW
-└── atoms/
-    ├── fraction.ls      # Fractions (148 lines)
-    ├── scripts.ls       # Sub/superscripts (192 lines)
-    ├── spacing.ls       # Spacing commands (68 lines)
-    ├── style.ls         # Style/font commands (77 lines)
-    ├── color.ls         # Color commands (118 lines)
-    ├── enclose.ls       # Boxing/enclosure (153 lines)
-    ├── array.ls         # Matrix environments (220 lines)
-    └── delimiters.ls    # Stretchy delimiters (164 lines) ← NEW
-```
+Full MathML/speech output, stable atom/source mappings, placeholders and math
+editing, arbitrary HTML integration commands, general chemistry, complete
+AsciiMath/LaTeX serialization parity and equation line breaking remain
+separate design work. None follows automatically from static SVG coverage.
+Any expansion must preserve the existing resource boundary and the two
+prominent rules.
 
-Total: 18 modules, ~2,568 lines of Lambda Script.
+## Appendix A. Brief implementation history
 
-## Appendix D: Completeness Analysis — Lambda Math vs. MathLive
+This document replaces `Lambda_Pkg_Math2.md`, `Lambda_Pkg_Math3.md`,
+`Lambda_Pkg_Math4.md`, `Lambda_Pkg_Math4_PhaseA_Roadmap.md` and
+`Lambda_Pkg_Math5.md`, as well as the original proposal/progress log formerly
+in this file. Git history retains their detailed implementation records.
 
-This appendix documents a comprehensive audit of the Lambda math package against MathLive's full feature set, identifying what is covered, what is missing, and the priority path toward broader coverage.
-
-### D.1 Grammar Node Type Coverage (94%)
-
-The tree-sitter-latex-math grammar (`lambda/tree-sitter-latex-math/grammar.js`) produces 33 atom-level node types. The `render.ls` dispatch table handles **31 of 33**:
-
-| # | Node Type | Status |
-|---|-----------|:------:|
-| 1 | `symbol` | ✅ |
-| 2 | `number` | ✅ |
-| 3 | `symbol_command` | ✅ |
-| 4 | `operator` | ✅ |
-| 5 | `relation` | ✅ |
-| 6 | `punctuation` | ✅ |
-| 7 | `group` | ✅ |
-| 8 | `fraction` | ✅ |
-| 9 | `binomial` | ✅ |
-| 10 | `genfrac` | ✅ |
-| 11 | `radical` | ✅ |
-| 12 | `delimiter_group` | ✅ |
-| 13 | `sized_delimiter` | ✅ |
-| 14 | `overunder_command` | ✅ |
-| 15 | `extensible_arrow` | ❌ Missing |
-| 16 | `accent` | ✅ |
-| 17 | `box_command` | ✅ |
-| 18 | `color_command` | ✅ |
-| 19 | `rule_command` | ✅ |
-| 20 | `phantom_command` | ✅ |
-| 21 | `big_operator` | ✅ |
-| 22 | `mathop_command` | ❌ Missing |
-| 23 | `matrix_command` | ✅ |
-| 24 | `environment` | ✅ |
-| 25 | `text_command` | ✅ |
-| 26 | `style_command` | ✅ |
-| 27 | `space_command` | ✅ |
-| 28 | `hspace_command` | ✅ |
-| 29 | `skip_command` | ✅ |
-| 30 | `command` | ✅ (generic fallback) |
-| 31 | `subsup` | ✅ |
-| 32 | `infix_frac` | ✅ |
-| 33 | `brack_group` | ✅ (mapped to `render_group`) |
-
-**Missing renderers** (grammar already parses these):
-- **`extensible_arrow`** — `\xrightarrow`, `\xleftarrow`, `\xRightarrow`, `\xLeftarrow`, `\xleftrightarrow`, `\xhookleftarrow`, `\xhookrightarrow`, `\xmapsto`. Currently falls through to `default` → `render_default`, losing the arrow SVG body and above/below annotations.
-- **`mathop_command`** — `\mathop{...}` (custom operator with limits behavior). Falls through to `default`, losing operator-with-limits semantics.
-
-### D.2 Symbol Coverage (250/506 = 49%)
-
-Lambda `symbols.ls` contains **250 symbols** vs. MathLive's **~506** unique LaTeX commands:
-
-| Category | Lambda | MathLive (approx) |
-|----------|-------:|-------------------:|
-| Greek lowercase | 30 | 34 |
-| Greek uppercase | 11 | 11 |
-| Binary operators | 27 | 52 |
-| Relations | 36 | 86 |
-| Arrows | 30 | 62 |
-| Miscellaneous symbols | 54 | 79 |
-| Big operators | 16 | 28 |
-| Accents | 14 | 22 |
-| Operator names | 32 | 32 |
-| **Total** | **250** | **~506** |
-
-**Major missing symbol categories** (~256 symbols):
-
-- **Negated relations** (~40): `\nless`, `\nleq`, `\ngeq`, `\ngtr`, `\nleqslant`, `\ngeqslant`, `\ncong`, `\nsim`, `\nparallel`, `\nVDash`, `\nvdash`, `\nvDash`, `\nsubseteq`, `\nsupseteq`, `\precnsim`, `\succnsim`, etc.
-- **AMS relations** (~50): `\leqslant`, `\geqslant`, `\lesssim`, `\gtrsim`, `\approxeq`, `\thickapprox`, `\lessgtr`, `\gtrless`, `\curlyeqprec`, `\curlyeqsucc`, `\Vdash`, `\vDash`, `\Vvdash`, `\between`, `\pitchfork`, `\backepsilon`, `\therefore`, `\because`, etc.
-- **AMS binary operators** (~25): `\ltimes`, `\rtimes`, `\leftthreetimes`, `\rightthreetimes`, `\intercal`, `\dotplus`, `\doublebarwedge`, `\divideontimes`, `\boxminus`, `\boxplus`, `\boxtimes`, `\circleddash`, `\circledast`, `\circledcirc`, etc.
-- **AMS arrows** (~20): `\dashrightarrow`, `\dashleftarrow`, `\Rrightarrow`, `\Lleftarrow`, `\leftarrowtail`, `\rightarrowtail`, `\twoheadleftarrow`, `\twoheadrightarrow`, `\upuparrows`, `\downdownarrows`, `\rightsquigarrow`, `\leadsto`, `\multimap`, etc.
-- **AMS ordinals** (~25): `\square`, `\Box`, `\blacksquare`, `\blacktriangle`, `\blacktriangledown`, `\lozenge`, `\blacklozenge`, `\complement`, `\diagup`, `\measuredangle`, `\sphericalangle`, `\backprime`, `\eth`, `\mho`, `\Finv`, `\Game`, etc.
-- **Negated arrows** (~12): `\nleftarrow`, `\nrightarrow`, `\nRightarrow`, `\nLeftarrow`, `\nleftrightarrow`, `\nLeftrightarrow`, etc.
-- **St. Mary's Road / specialty** (~30): `\llbracket`, `\rrbracket`, `\Lbag`, `\Rbag`, `\boxbar`, `\lightning`, etc.
-- **Missing delimiters** (~8): `\ulcorner`, `\urcorner`, `\llcorner`, `\lrcorner`, `\lparen`, `\rparen`, `\lbrack`, `\rbrack`
-- **Missing Greek** (~4): `\digamma`, `\varkappa`, `\coppa`, `\sampi` (AMS/archaic)
-- **Additional integrals** (~5): `\oiint`, `\oiiint`, `\intclockwise`, `\varointclockwise`, `\ointctrclockwise`
-
-### D.3 MathLive Features with No Lambda Equivalent
-
-| Feature | MathLive Source | Description |
-|---------|-----------------|-------------|
-| **Chemistry (mhchem)** | `mhchem.ts` (2603 lines) | `\ce{}`, `\pu{}` chemical equations |
-| **Extensible arrows** | `extensible-symbols.ts` | `\xrightarrow[below]{above}` with SVG arrow body |
-| **Extensible over/under SVGs** | `extensible-symbols.ts` | `\overrightarrow`, `\overleftarrow`, `\overleftrightarrow`, `\overgroup`, `\underrightarrow`, `\underleftarrow`, etc. |
-| **`\mathop{...}`** | `styling.ts` | Custom operator with limits placement |
-| **Cancel / strikethrough** | `enclose.ts` | `\cancel`, `\bcancel`, `\xcancel`, `\sout` |
-| **`\enclose` (MathML)** | `enclose.ts` | Arbitrary menclose notations |
-| **Font sizing** | `styling.ts` | `\tiny`, `\small`, `\large`, `\Large`, `\LARGE`, `\huge`, `\Huge` |
-| **`\mathchoice`** | `styling.ts` | Display/text/script/scriptscript branching |
-| **`\mathbin`/`\mathrel`/`\mathord`** | `styling.ts` | Explicit atom type override |
-| **`\operatorname{...}`** | `styling.ts` | Custom named operators (e.g., `\operatorname{argmax}`) |
-| **`\not` (negation prefix)** | `styling.ts` | Generic negation via overlay slash |
-| **Tooltips** | `styling.ts` | `\mathtip`, `\texttip` |
-| **HTML integration** | `styling.ts` | `\href`, `\class`, `\cssId`, `\htmlStyle`, `\htmlData` |
-| **`\raisebox`/`\raise`/`\lower`** | `styling.ts` | Vertical positioning |
-| **`\char`/`\unicode`** | `styling.ts` | Arbitrary Unicode by codepoint |
-| **Text-mode accents** | `accents.ts` | `\^{a}`, `` \`{e} ``, `\'{o}`, `\"{u}`, `\~{n}`, `\c{c}` |
-| **`\overarc`/`\overparen`** | `accents.ts` | Arc accents |
-| **`\utilde`** | `accents.ts` | Under-tilde |
-| **`\overunderset`** | `styling.ts` | Combined over+under simultaneously |
-| **`\cfrac[l]`/`\cfrac[r]`** | `functions.ts` | Left/right-aligned continued fractions |
-| **`\pdiff`** | `functions.ts` | Partial derivative shorthand |
-| **`\ang`** | `functions.ts` | Angle from siunitx |
-| **`\mathstrut`** | `styling.ts` | Invisible parenthesis-height strut |
-| **`\fcolorbox`** | `styling.ts` | Framed color box |
-| **Starred matrix variants** | `environments.ts` | `pmatrix*`, `bmatrix*`, etc. |
-| **`eqnarray`/`subequations`** | `environments.ts` | Equation environments |
-| **`\displaylines`** | `functions.ts` | Multi-line display |
-
-### D.4 What IS Working Well
-
-The Lambda math package competently handles the **core 85–90%** of everyday math rendering:
-
-- **Fractions**: `\frac`, `\dfrac`, `\tfrac`, `\cfrac`, `\binom`, `\dbinom`, `\tbinom`, `\genfrac`, infix (`\over`, `\atop`, `\choose`, etc.)
-- **Scripts**: subscript, superscript, combined sub+sup, `\limits`/`\nolimits`
-- **Radicals**: `\sqrt` with optional index
-- **Delimiters**: `\left`/`\right` with stretchy rendering (4 size levels + CSS scaleY), `\middle`, all sized variants (`\big` through `\Bigg`)
-- **Accents**: 14 accent types — `\hat`, `\bar`, `\vec`, `\dot`, `\ddot`, `\widehat`, `\widetilde`, `\overbrace`, `\underbrace`, `\overline`, `\underline`, etc.
-- **Big operators**: `\sum`, `\prod`, `\int`, `\iint`, `\iiint`, `\oint`, display-mode limit placement
-- **Environments/matrices**: `array`, `matrix`, `pmatrix`, `bmatrix`, `Bmatrix`, `vmatrix`, `Vmatrix`, `cases`, `aligned`, `gathered`, etc.
-- **Styling**: `\mathrm`, `\mathbb`, `\mathcal`, `\mathfrak`, `\mathscr`, `\mathbf`, `\mathsf`, `\mathtt`, `\displaystyle`, `\textstyle`, etc.
-- **Text**: `\text`, `\textrm`, `\textbf`, `\textit`, `\mbox`
-- **Colors**: `\color`, `\textcolor`, `\colorbox`
-- **Spacing**: `\,`, `\:`, `\;`, `\!`, `\quad`, `\qquad`, `\hspace`, `\kern`, `\hskip`, `\mskip`
-- **Boxes/phantoms**: `\boxed`, `\fbox`, `\bbox`, `\phantom`, `\hphantom`, `\vphantom`, `\smash`, `\llap`, `\rlap`
-- **Rules**: `\rule` with width/height/depth dimensions
-- **Inter-atom spacing**: Full Knuth spacing table (7×7 atom types)
-- **Post-processing**: Text node coalescing via `optimize.ls`
-
-### D.5 Coverage Summary
-
-| Metric | Value |
-|--------|-------|
-| Grammar node types handled | 31 / 33 (94%) |
-| Symbol coverage vs. MathLive | 250 / 506 (49%) |
-| Core math feature coverage | ~85–90% of common expressions |
-| Advanced/AMS feature coverage | ~40% |
-| Missing renderer dispatch entries | 2 (`extensible_arrow`, `mathop_command`) |
-| Missing MathLive features (no equivalent) | ~27 features |
-| Missing AMS symbols (table entries) | ~256 commands |
-
-**Practical interpretation**: ~85–90% of typical math content (textbook equations, homework, academic papers) uses fractions, scripts, radicals, Greek letters, basic operators/relations, arrows, delimiters, matrices, and accents — all of which are fully handled. The remaining ~10–15% relies on AMS extended symbols, extensible arrows, cancel notations, and specialty features.
-
-### D.6 Priority Path to Broader Coverage
-
-Ranked by impact-to-effort ratio:
-
-1. **Add `extensible_arrow` renderer** — grammar already parses it; needs dispatch case + render function with SVG arrow body. Covers `\xrightarrow`, `\xleftarrow`, and 7 other commands.
-2. **Add `mathop_command` renderer** — grammar already parses it; simple dispatch + big-operator-style limits logic. Covers `\mathop{...}`.
-3. **Expand `symbols.ls` with ~150 AMS symbols** — pure table additions (Unicode codepoints + atom types). Covers negated relations, AMS arrows, AMS binary operators, AMS ordinals. Largest single improvement to symbol coverage.
-4. **Add `\cancel`/`\bcancel`/`\xcancel`** — very common in educational content; diagonal/back-diagonal line overlay via CSS.
-5. **Add `\operatorname{...}` support** — frequently used for custom function names (`\operatorname{argmax}`, `\operatorname{Tr}`). Render as upright text with operator spacing.
-6. **Add font sizing commands** — `\small`, `\large`, `\Large`, etc. Map to CSS font-size multipliers.
-7. **Add `\mathbin`/`\mathrel`/`\mathord`** — atom type override for correct spacing; simple wrapper that sets atom type on child.
-8. **Add `\not` generic negation** — overlay slash on following symbol via CSS positioning.
-9. **Expand delimiter table** — add corner brackets (`\ulcorner`, etc.) and aliases (`\lparen`, `\lbrack`).
-10. **Chemistry (`\ce{}`)** — large feature (MathLive's implementation is 2600 lines); lowest priority unless chemistry use cases are targeted.
+| Period | Design progression |
+|---|---|
+| Initial package and enhancement work | Established Lambda-side static math, shared AST/document integration, symbols/styles/environments, and a MathLive-derived test mirror. The original ~~MathLive-compatible span/CSS output~~ goal later became measured SVG. |
+| Math3 and Math4, through 2026-06-18 | Expanded the formula corpus from 206 to 921 and exposed the limits of case-tuned constants. Rule 15/18 and full-precision composition replaced major fraction/script tables. Historical HTML parity reached about 825/921, a different metric from the current smoke gate. |
+| Math5 box convergence | Removed competing raw/render/strut extent channels as producers acquired real measured boxes. The useful invariant is one full-precision box; ~~MathLive DOM and CEIL@2 emission as authority~~ was superseded. |
+| 2026-10-08–2026-10-09 | Moved production geometry to actual font facts with optional MATH, existing CMU/KaTeX distribution and supplied-font support. Removed STIX and the legacy MathLive renderer/tables/styles. SVG text with embedded fonts replaced ordinary-glyph outline-only painting. |
+| 2026-10-09 | Added context-owned font snapshot reuse and corrected native SVG scrolling/hit-test cache lifetimes. Release comparisons retained output/target evidence; those host optimizations did not change math policy. |
+| 2026-10-09–2026-10-10 | Approved the CM TeX companion; audited scripts, fractions, spacing, accents, operators and delimiters against TeX. Added native PNG/pdfLaTeX comparison infrastructure and restored several missing command families. The later audit explicitly rejected successful rendering as sufficient conformance evidence. |
+| 2026-10-10 | Ratified TeX-first layout and no-new-font rules. Fixed CM symbol fallback, bracket annotation policy/geometry, vertical-arrow sizing, structural row separators and uppercase KaTeX logo handling. Removed the attempted STIX reintroduction and defined closed multiple integrals through existing-glyph TeX composition. Unsourced extension geometry remains listed in §10. |
+| 2026-10-10 consolidation | Replaced six overlapping proposals/roadmaps with this current design, bounded support contract, verification model and outstanding-work section. Historical plans, file inventories, tuning constants and implementation anecdotes are omitted. |
+| 2026-10-10 AMS primitive continuation | Replaced fixed modulo/strut behavior with AMS/LaTeX definitions, completed continued-fraction alignment/text struts, sized-delimiter classes and ordinary phantom boxing, and restored bundled verbatim's typewriter selection. Added repeatable TeX box/position relations; broader construction and document-register work remains outstanding. |
+| 2026-10-10 delimiter continuation | Replaced bundled delimiter scaling with original TeX variant/assembly selection, completed middle-boundary demand and atom behavior, and restored parenthesis aliases. Added independent DVI geometry and native assembly checks. Corrected the comparison harness's logical point scale; existing Size3/Size4 fonts were reused without adding resources. |
+| 2026-10-10 radical continuation | Replaced bundled whole-surd stretching with TeX's variant/extension and rule construction, restored default indexed-root kern/raise behavior, and selected finite CMEX hats/tildes. Preserved signed optional rule raises. Added shared independent DVI/rule geometry and native radical/accent checks, reusing the existing fonts and metric files. |
+| 2026-10-10 arrow continuation | Replaced six labelled-arrow and six over/under-arrow approximations with AMS/mathtools glyph-leader, style, label and alignment definitions. Preserved TeX's optional-argument and following-script behavior. Added independent leader-boundary geometry and native shaft-continuity checks without adding fonts or metrics. |
