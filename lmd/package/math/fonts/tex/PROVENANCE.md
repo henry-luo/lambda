@@ -95,6 +95,37 @@ native PNG checks cover tall radical joins and finite accent painting.
 Artifacts record both reference and production resources and reference macro
 hashes. No font or metric files were added for these constructions.
 
+AMS horizontal fillers reuse CMSY slots `0x00` (minus), `0x20`/`0x21`
+(single arrowheads) and `0x28`/`0x29` (double arrowheads), plus CMR slot
+`0x3D` (equal sign). Existing `KaTeX_Main` has unchanged Unicode encodings
+for these glyphs; no translation, stretching or new resource is required.
+The single-line `\relbar` smashes its logical minus height/depth while
+retaining its ink. `\Relbar` retains the equal sign's logical metrics.
+
+[AMS `arrowfill@`/`ext@arrow` and over/under-arrow definitions](https://github.com/latex3/latex2e/blob/develop/required/amsmath/amsmath.dtx)
+and [mathtools' additional arrows](https://github.com/latex3/mathtools/blob/main/mathtools.dtx)
+supply the component, kern, control-space, style and label recipes. TeX82's
+`hlist_out` supplies centered leader placement, including its ten-scaled-point
+rounding allowance. Font dimensions, mu kerns and leader-count arithmetic
+use TeX scaled points at these boundaries. Under-arrow clearance is
+`1.3\ex@`, with `\ex@` defined by
+[amsgen's `compute@ex@`](https://github.com/latex3/latex2e/blob/develop/required/amsmath/amsgen.dtx),
+not by a font x-height. At 10pt it is one point. Its `.97` factor is the TeX
+16.16 value 63570/65536; dimension-register multiplication truncates on each
+iteration. The `1.3` multiplier likewise truncates its 85197/65536 product.
+The reference's installed definitions are retained.
+
+`tex_arrow_conformance.test.mjs` independently ships 692 boxes for the six
+single/double labelled arrows and six AMS over/under single-arrow marks.
+It checks component identities, sizes, baselines, box dimensions and rules
+in all four styles, including leader-count boundaries, empty and nonempty
+zero-width labels, braced/unbraced following scripts and nested/cramped cases.
+Of these, 76 under-arrow cases check the nonlinear clearance at 19 physical
+text sizes from 1pt to 24.88pt, with the matched fonts explicitly scaled.
+Eight native PNG cases additionally check natural heads and shaft continuity.
+Hooks, maps-to, harpoons, paired reactions and other font profiles remain
+outside this construction evidence. All existing font/TFM bytes are unchanged.
+
 This is an explicitly selected Computer Modern math companion for CMU's
 Computer Modern text outlines. It does not claim that CMU contains a MATH
 table or that CMU glyph bounds equal the original TeX fonts. Advances,
