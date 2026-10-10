@@ -1375,6 +1375,60 @@ TEST(RenderOutputParity, BodyColumnRulesSharePreviewSvgAndPhysicalPdfGeometry) {
     image_free(preview.pixels);
 }
 
+TEST(RenderOutputParity, PatternedBodyColumnRulesRemainVectorAndMatchIndependentPdfRasters) {
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity")); ASSERT_TRUE(ensure_dir(PDF_REF_DIR));
+    ASSERT_TRUE(command_exists("pdftoppm"));
+    const char* source = "test/html/paged_media_column_rule_styles.rpd";
+    PdfFileInfo pdf = {};
+    snprintf(pdf.path, sizeof(pdf.path), "temp/render_output_parity/column_rule_styles.pdf");
+    snprintf(pdf.base, sizeof(pdf.base), "column_rule_styles");
+    ASSERT_TRUE(render_document_fixture(source, pdf.path, "--paged")); ASSERT_EQ(pdf_page_count(pdf.path), 7);
+    EXPECT_TRUE(file_contains_text(pdf.path, "/MediaBox [0 0 150.00 90.00]"));
+    EXPECT_FALSE(file_contains_text(pdf.path, "/Subtype /Image"));
+    const char* png = "temp/render_output_parity/column_rule_styles.png";
+    ASSERT_TRUE(render_document_fixture(source, png, "--paged --page-grid 1x7"));
+    ImageData preview = {}; ASSERT_TRUE(load_png_rgba(png, &preview));
+    ASSERT_EQ(preview.width, 1400); ASSERT_EQ(preview.height, 120);
+    for (int page = 0; page < 7; page++) {
+        SCOPED_TRACE(page);
+        char reference[PATH_MAX], svg[PATH_MAX], options[80];
+        ASSERT_TRUE(render_reference_page(&pdf, page + 1, reference, sizeof(reference)));
+        ImageData physical = {}; ASSERT_TRUE(load_png_rgba(reference, &physical));
+        ASSERT_EQ(physical.width, 600); ASSERT_EQ(physical.height, 360);
+        const int xs[] = {95, 100, 104};
+        for (int x : xs) {
+            expect_preview_pixel(preview, page * 200 + x, 5, 255, 255, 255);
+            expect_preview_pixel(physical, x * 3 + 1, 16, 255, 255, 255);
+            if (page == 1 || page == 2) {
+                int green = 0, white = 0, disagreements = 0;
+                for (int y = 15; y < 105; y++) {
+                    const uint8_t* a = preview.pixels + (y * preview.width + page * 200 + x) * 4;
+                    const uint8_t* b = physical.pixels + ((y * 3 + 1) * physical.width + x * 3 + 1) * 4;
+                    green += a[0] < 20 && a[1] > 240 && a[2] < 20;
+                    white += a[0] > 240 && a[1] > 240 && a[2] > 240;
+                    // tolerate only antialiasing at patterned edges, not a missing stroke or gap.
+                    disagreements += abs(a[0] - b[0]) > 32 || abs(a[1] - b[1]) > 32 || abs(a[2] - b[2]) > 32;
+                }
+                EXPECT_GT(green, 10); EXPECT_GT(white, 10); EXPECT_LE(disagreements, 8);
+            } else {
+                bool white = page == 0 && x == 100;
+                bool dark = (page == 3 || page == 6) ? x == 95 : page >= 4 && x != 95;
+                uint8_t r = white ? 255 : 0, g = white ? 255 : dark ? 127 : 255, b = r;
+                expect_preview_pixel(preview, page * 200 + x, 50, r, g, b);
+                expect_preview_pixel(physical, x * 3 + 1, 151, r, g, b);
+            }
+        }
+        snprintf(svg, sizeof(svg), "temp/render_output_parity/column_rule_styles_%d.svg", page + 1);
+        snprintf(options, sizeof(options), "--paged --thumbnail-page %d", page + 1);
+        ASSERT_TRUE(render_document_fixture(source, svg, options));
+        EXPECT_FALSE(file_contains_text(svg, "<image"));
+        if (page == 1 || page == 2) EXPECT_TRUE(file_contains_text(svg, "stroke-dasharray="));
+        if (page == 2) EXPECT_TRUE(file_contains_text(svg, "stroke-linecap=\"round\""));
+        image_free(physical.pixels);
+    }
+    image_free(preview.pixels);
+}
+
 TEST(RenderOutputParity, PagedViewerAdmitsNativeAndFoDocumentsThroughCommonLoaders) {
     for (const char* fixture : {"test/html/paged_media_column_rules.rpd", "test/html/paged_media_body_columns.fo"}) {
         SCOPED_TRACE(fixture);

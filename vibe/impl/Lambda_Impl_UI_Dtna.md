@@ -1069,3 +1069,139 @@ failures remain **UI-1**, `doc_editor_indexed_math_arrows`,
 `RadiantViewTest.LoadsMathIntensiveLatexAsHeadlessView` and
 `radiant_view_math_intensive_scroll`, matching the pre-fix aggregate. The
 final native gallery preview is `gallery_final.png` in the evidence directory.
+## Declarative gallery authoring — 2026-10-10
+
+The main `test/ui/dtna_gallery.ls` now authors one logical dtna element tree,
+including the page, layout, panels, controls and nested providers, and presents
+it with one `apply(gallery)` call. The imported component views own the HTML/SVG
+transformation (**S12.1.3**); the gallery has no component constructor calls or
+handwritten HTML presentation.
+
+The facade registers a `<dtna.page>` view that shares `page`'s existing
+document shell, option validation, stylesheet and token generation. Page content
+splices its rendered children so multiple authored roots remain direct children
+of `.dtna-root`. Optional constructors and `ui.page` remain available for
+programmatic composition. The public introduction and working design now show
+element authoring first.
+
+Component properties are flat element attributes:
+`<dtna.button id:"gallery-primary",variant:'primary',"Primary">`.
+Empty property bags are omitted entirely. The shared constructor produces the
+same flat source shape, and dtna views and event handlers read its attributes
+through the common property projection. That projection reads attributes independently of
+children, normalizes symbolic element keys to the constructor maps' string keys,
+and retains explicitly authored `null`/`false` (**S8.2.2v5**). Other style-family
+descriptors using a nested property map remain compatible with shared helpers.
+
+Verification:
+
+- The gallery's entire serialized presentation is byte-identical to the saved
+  pre-change result on forced interpreter and MIR Direct tiers
+  (**D8.1.1v17**).
+- `dtna_elements.ls/.txt` covers retained logical source, page metadata/defaults,
+  root tokens, multiple root children, nested button/checkbox/progress views and
+  rejected page options, flat constructor equivalence, omitted properties and
+  attribute presence/projection; all **12 checks** pass on every tier. The tier
+  contract test includes it. All **27 package
+  goldens** pass across interpreter, automatic and MIR Direct modes; the full
+  selected package run passes **29/29 GTests**.
+- `gallery_elements.json` passes all **16 assertions** on each native tier:
+  complete template application, six panels, progress/skeleton presentation,
+  scoped colors, text entry, switch/radio interaction, keyboard tab selection,
+  pagination, alert close and retained input. The two existing gallery fixtures
+  also pass all **6 assertions** on each tier.
+- The updated getting-started example executes successfully. The native
+  `temp/ui_dtna/declarative_gallery/gallery.png` was inspected; evidence and
+  before/after outputs live beside it.
+- After flattening the source attributes, all **52/53 native dtna fixtures**
+  pass on each forced tier (**54/55 GTests**, including scheduler checks).
+  The sole retained failure is the existing repeated authored SVG issue
+  **UI-1** in `dtna_segmented_modes`. Evidence for this migration is under
+  `temp/ui_dtna/flat_attributes/`. Interpreter validation was rerun in isolation
+  after overlapping tier runners raced on a shared machine-result file; that
+  isolated run has no new failures.
+
+### Component names as tags — 2026-10-10
+
+The dtna source vocabulary now uses `<dtna.button variant:'dashed', "Dashed">`,
+`<dtna.card>`, and `<dtna.page>` rather than a shared tag with a `kind`
+attribute (**S2.4.3v3; S12.1.3**). Multiword local names use underscores,
+for example `<dtna.form_item>` and `<dtna.text_area>`. Imported package views
+match these exact qualified names, so native `<button>` and another
+vocabulary's `<other.button>` remain separate. The namespace prefix is part of
+the authored tag; URI alias equivalence is outside this package migration.
+
+Constructor validation remains shared. One private table supplies the static
+Lambda tag literals, keeping markup construction in Lambda without parsing
+formatted strings. Source attributes stay flat. Shared helpers read `name()`
+to avoid a control's authored `name` attribute shadowing the tag, translate
+multiword local names to existing CSS/event names, and retain the other UI
+family's descriptor support.
+
+The shared template registry previously treated a root union as a `TypeType`,
+reading only one side. Interpreter and MIR registration now use one pattern
+metadata helper; root alternatives retain their tag and attribute predicates
+(**S10.1.1v3**). Component families share renderer/state/handler definitions
+through patterns such as `<dtna.tabs> | <dtna.segmented> | <dtna.menu>`.
+
+Validation evidence for this migration lives under
+`temp/ui_dtna/named_elements/`.
+
+- Gallery serialization is byte-identical to the pre-migration presentation
+  on interpreter and MIR Direct; the rendered native gallery was inspected.
+- All **27 package goldens** pass on interpreter, automatic and MIR Direct
+  through the tier agreement check; the automatic golden run passes **27/27**.
+  The **17 declarative-element checks** include flat constructor equivalence,
+  intrinsic tag access, native HTML isolation and distinct prefixes in both
+  view dispatch and layout composition.
+  The root-union fixture also verifies positive and negative tag/attribute cases.
+- Native dtna fixtures pass **52/53** on each tier (**54/55 GTests**); all
+  **22 gallery assertions** pass. The retained failure is the same **UI-1**
+  repeated authored SVG issue in `dtna_segmented_modes`.
+- State-store tests pass **16/16**, the published introductory example runs,
+  and the 73-entry component catalog check passes.
+
+- The full Lambda baseline ran **6599 tests: 6596 passed, 3 failed**.
+  Its dtna-element failure compared a batch result captured before the final
+  fixture edit against the newer golden; the finalized test passes in
+  isolation and in the three-tier package run. The other failures are
+  `edit_view_only` (sanitized boolean-attribute spelling and Markdown
+  round-trip result) and `latex_test_latex_phase3_corpus` (60-second timeout).
+  Both reproduce with the saved pre-migration binary: editor output is
+  byte-identical, and the LaTeX corpus times out at the same limit.
+
+### Remaining sample and native fixture authoring — 2026-10-10
+
+The data gallery, all 30 dtna component fixture pages, and the reference
+foundation now author qualified `<dtna.*>` elements (**S2.4.3v3**) and apply
+the imported views (**S12.1.3**). Stable source bindings, controlled values,
+collection models and event handlers retain their existing ownership across
+parent redraws. Native HTML remains for engine probes, custom scene structure
+and test outputs. Photo Studio's button helper also applies a logical
+`<dtna.button>` rather than composing constructor/render calls. The documented
+stateful authoring example follows the same pattern. Constructor API/validation
+goldens and the rejected-document fixture continue to test that public surface.
+
+Space's separate text items use `<dtna.text>` children: spreading adjacent
+strings into element content merges them before template dispatch
+(**S2.6.4**), so raw string children cannot express those three item boundaries.
+
+Evidence is under `temp/ui_dtna/page_migration/`:
+
+- All 32 page scripts execute on interpreter and MIR Direct. For each tier,
+  31 serialized presentations are byte-identical to the saved source versions;
+  foundation layout differs only by the explicit text spans inside Space items.
+- Native dtna checks retain **52/53** passing fixtures on each tier. Interpreter
+  foundation layout passes its unchanged **24 assertions** on the final targeted
+  rerun; the complete final JIT sweep passes **54/55 GTests**. The sole remaining
+  fixture failure is the existing **UI-1** repeated SVG issue in Segmented.
+- The data gallery's additional native replay passes **8/8 assertions** on
+  each tier: rendered table tags, hierarchy state, physical Unicode typing,
+  retained editing across disclosure close/reopen, and pagination. Its rendered
+  PNG was inspected. Unicode injection uses `type_physical`; the historical
+  `type` event deliberately emits UTF-8 bytes separately and is unsuitable for
+  that probe, identically before and after this migration.
+- Photo Studio's existing editing/history and crop/keyboard/responsive tests
+  pass **2/2 GTests**, covering six replays on automatic and forced-JIT paths.
+- The updated stateful documentation example executes, the 73-entry catalog
+  check passes, and the scoped diff has no whitespace errors.

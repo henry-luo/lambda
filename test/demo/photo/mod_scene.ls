@@ -2,8 +2,9 @@ import ui: lambda.ui.dtna
 import model: .mod_model
 import presets: .mod_presets
 
-fn button(id, action, label, primary=false) => ui.render(ui.button({id:id,'data-action':action,
-    variant:if (primary) 'primary' else 'default'},label)^)
+// apply the imported button view before embedding it in the retained native scene (S12.1.3).
+fn button(id, action, label, primary=false) => apply(<dtna.button id:id,'data-action':action,
+    variant:if (primary) 'primary' else 'default', label>)
 fn buttons(children) => <div class:"two-buttons", *children>
 fn field(id, caption, value="", kind="text") => <label *[caption,<input id:id,type:kind,value:value>]>
 fn slider(key, caption) => <label class:"adjustment", *[

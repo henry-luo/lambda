@@ -41,8 +41,8 @@ fn formatted(props) {
         [<span class:"dtna-statistic-integer",parts.whole>,if (parts.fraction != "") <span class:"dtna-statistic-fraction",parts.fraction> else null])
     else c.text(value)
 }
-view dtna_statistic: <dtna kind:'statistic'> {
-    let p = ~.props;
+view dtna_statistic: <dtna.statistic> {
+    let p = c.props(~);
     <div *:c.styled(~),["aria-busy"]:if (p.loading) "true" else null,
         *[if (p.title != null) <div class:"dtna-statistic-title",c.render(p.title)> else null,
         if (p.loading) <span class:"dtna-statistic-placeholder",["aria-hidden"]:"true"> else

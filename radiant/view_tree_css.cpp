@@ -1,6 +1,7 @@
 #include "view_tree_css.hpp"
 #include "page_document.hpp"
 #include "layout.hpp"
+#include "render.hpp"
 #include "../lambda/input/css/selector_matcher.hpp"
 #include "../lambda/input/css/css_parser.hpp"
 #include "../lambda/dom/dom.h"
@@ -1327,9 +1328,9 @@ ViewModelStatus view_css_page_style(ViewTree* tree, const char* name, uint32_t p
             float width = view_css_length(tree, style.body_style, style.body_style->column_rule_width,
                 CSS_PROPERTY_COLUMN_RULE_WIDTH, NAN, NAN);
             if (!isfinite(width) || width < 0.0f ||
-                (rule != CSS_VALUE_NONE && rule != CSS_VALUE_HIDDEN && rule != CSS_VALUE_SOLID)) {
+                !render_border_style_supported(rule)) {
                 if (diagnostic) *diagnostic = {VIEW_MODEL_INVALID_ARGUMENT, style.body_region->source,
-                    "body column rules require finite widths and solid, none or hidden styles"};
+                    "body column rules require finite widths and supported border styles"};
                 return VIEW_MODEL_INVALID_ARGUMENT;
             }
         }

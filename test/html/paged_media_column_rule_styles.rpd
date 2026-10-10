@@ -1,0 +1,68 @@
+<?xml version="1.0"?>
+<r:page-document xmlns:r="urn:lambda:radiant:page" style="font:10px/20px Arial;orphans:1;widows:1">
+  <r:master-set>
+    <r:page-master name="double" style="size:200px 120px;margin:10px">
+      <r:region role="body" name="body" style="column-count:2;column-gap:20px;column-rule:12px double lime"/>
+    </r:page-master>
+    <r:page-master name="dashed" style="size:200px 120px;margin:10px">
+      <r:region role="body" name="body" style="column-count:2;column-gap:20px;column-rule:12px dashed lime"/>
+    </r:page-master>
+    <r:page-master name="dotted" style="size:200px 120px;margin:10px">
+      <r:region role="body" name="body" style="column-count:2;column-gap:20px;column-rule:12px dotted lime"/>
+    </r:page-master>
+    <r:page-master name="groove" style="size:200px 120px;margin:10px">
+      <r:region role="body" name="body" style="column-count:2;column-gap:20px;column-rule:12px groove lime"/>
+    </r:page-master>
+    <r:page-master name="ridge" style="size:200px 120px;margin:10px">
+      <r:region role="body" name="body" style="column-count:2;column-gap:20px;column-rule:12px ridge lime"/>
+    </r:page-master>
+    <r:page-master name="inset" style="size:200px 120px;margin:10px">
+      <r:region role="body" name="body" style="column-count:2;column-gap:20px;column-rule:12px inset lime"/>
+    </r:page-master>
+    <r:page-master name="outset" style="size:200px 120px;margin:10px">
+      <r:region role="body" name="body" style="column-count:2;column-gap:20px;column-rule:12px outset lime"/>
+    </r:page-master>
+  </r:master-set>
+  <r:page-sequence master-reference="double" force-page-count="no-force">
+    <r:flow region-name="body">
+      <p style="margin:0">double</p>
+      <p style="margin:0;break-before:column">double</p>
+    </r:flow>
+  </r:page-sequence>
+  <r:page-sequence master-reference="dashed" force-page-count="no-force">
+    <r:flow region-name="body">
+      <p style="margin:0">dashed</p>
+      <p style="margin:0;break-before:column">dashed</p>
+    </r:flow>
+  </r:page-sequence>
+  <r:page-sequence master-reference="dotted" force-page-count="no-force">
+    <r:flow region-name="body">
+      <p style="margin:0">dotted</p>
+      <p style="margin:0;break-before:column">dotted</p>
+    </r:flow>
+  </r:page-sequence>
+  <r:page-sequence master-reference="groove" force-page-count="no-force">
+    <r:flow region-name="body">
+      <p style="margin:0">groove</p>
+      <p style="margin:0;break-before:column">groove</p>
+    </r:flow>
+  </r:page-sequence>
+  <r:page-sequence master-reference="ridge" force-page-count="no-force">
+    <r:flow region-name="body">
+      <p style="margin:0">ridge</p>
+      <p style="margin:0;break-before:column">ridge</p>
+    </r:flow>
+  </r:page-sequence>
+  <r:page-sequence master-reference="inset" force-page-count="no-force">
+    <r:flow region-name="body">
+      <p style="margin:0">inset</p>
+      <p style="margin:0;break-before:column">inset</p>
+    </r:flow>
+  </r:page-sequence>
+  <r:page-sequence master-reference="outset" force-page-count="no-force">
+    <r:flow region-name="body">
+      <p style="margin:0">outset</p>
+      <p style="margin:0;break-before:column">outset</p>
+    </r:flow>
+  </r:page-sequence>
+</r:page-document>

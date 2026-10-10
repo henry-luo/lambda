@@ -10245,12 +10245,66 @@ TEST_F(SecondaryViewTest, BodyColumnRuleLengthsAndColorsUseTheirComputedDeclarat
         EXPECT_EQ(style->column_rule_style, CSS_VALUE_SOLID);
         EXPECT_EQ(style->column_rule_color.c, i ? 0xffff0000u : 0xff0000ffu);
     }
-    for (const char* rule : {"column-rule:2px dashed red", "column-rule:2px double red", "column-rule-width:calc(1px / 0);column-rule-style:solid"}) {
+    for (const char* rule : {"column-rule-width:calc(1px / 0);column-rule-style:solid"}) {
         SCOPED_TRACE(rule); ASSERT_TRUE(view_tree_model_reset(tree));
         char css[256]; snprintf(css, sizeof(css), "column-count:2;column-gap:20px;%s", rule);
         ASSERT_TRUE(region->set_attribute("style", css));
         EXPECT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_INVALID);
         EXPECT_EQ(tree->model->page_count, 0u);
+    }
+    ASSERT_TRUE(view_tree_secondary_release(&doc, tree));
+}
+
+TEST_F(SecondaryViewTest, PatternedBodyColumnRulesRetainGeometryShadingAndStrokePayloads) {
+    init_vector_engine();
+    stylesheet("p,div{margin:0;font:10px/20px Arial;orphans:1;widows:1}");
+    DomElement* region = nullptr;
+    DomElement* sequence = body_column_sequence("size:200px 120px;margin:10px", nullptr, &region);
+    ASSERT_NE(sequence, nullptr); ASSERT_NE(region, nullptr);
+    DomElement* a = block("A", nullptr, "p", sequence);
+    DomElement* b = block("B", "break-before:column", "p", sequence);
+    ASSERT_NE(a, nullptr); ASSERT_NE(b, nullptr);
+    ViewTree* tree = secondary(); PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
+    const char* styles[] = {"double", "dashed", "dotted", "groove", "ridge", "inset", "outset"};
+    for (size_t mode = 0; mode < 7; mode++) {
+        SCOPED_TRACE(styles[mode]); ASSERT_TRUE(view_tree_model_reset(tree));
+        char css[160]; snprintf(css, sizeof(css), "column-count:2;column-gap:20px;column-rule:12px %s lime", styles[mode]);
+        ASSERT_TRUE(region->set_attribute("style", css));
+        ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+        ASSERT_EQ(tree->model->page_count, 1u);
+        for (DomElement* element : {a, b}) {
+            LayoutViewNode* node = source_glyph_text(tree, element->first_child, element == a ? "A" : "B");
+            ASSERT_NE(node, nullptr); EXPECT_FLOAT_EQ(node->rect.x, element == a ? 10 : 110); EXPECT_FLOAT_EQ(node->rect.y, 10);
+        }
+        ImageSurface* expected = render_secondary_page_snapshot(tree, 1); ASSERT_NE(expected, nullptr);
+        EXPECT_EQ(snapshot_pixel(expected, 100, 5), 0xffffffffu);
+        EXPECT_EQ(snapshot_pixel(expected, 100, 115), 0xffffffffu);
+        if (!mode) {
+            EXPECT_EQ(snapshot_pixel(expected, 95, 50), 0xff00ff00u);
+            EXPECT_EQ(snapshot_pixel(expected, 100, 50), 0xffffffffu);
+            EXPECT_EQ(snapshot_pixel(expected, 104, 50), 0xff00ff00u);
+        } else if (mode < 3) {
+            size_t green = 0, white = 0, edge_green = 0;
+            for (size_t y = 10; y < 110; y++) {
+                green += snapshot_pixel(expected, 100, y) == 0xff00ff00u;
+                white += snapshot_pixel(expected, 100, y) == 0xffffffffu;
+                edge_green += snapshot_pixel(expected, 95, y) == 0xff00ff00u;
+            }
+            EXPECT_GT(green, 20u); EXPECT_GT(white, 10u);
+            // round dots have fewer fully covered edge pixels than center pixels.
+            if (mode == 2) EXPECT_LT(edge_green, green);
+        } else {
+            bool groove = mode == 3 || mode == 6; // collapsed inset is ridge; outset is groove.
+            EXPECT_EQ(snapshot_pixel(expected, 95, 50), groove ? 0xff007f00u : 0xff00ff00u);
+            EXPECT_EQ(snapshot_pixel(expected, 104, 50), groove ? 0xff00ff00u : 0xff007f00u);
+        }
+        ViewPreviewOptions preview = view_preview_options_default();
+        ViewTree* retained = view_tree_page_instances_create(tree, nullptr, &preview); ASSERT_NE(retained, nullptr);
+        ASSERT_TRUE(view_tree_model_reset(tree));
+        ImageSurface* pixels = render_secondary_page_snapshot(retained, 1); ASSERT_NE(pixels, nullptr);
+        expect_same_surface_pixels(expected, pixels);
+        image_surface_destroy(expected); image_surface_destroy(pixels);
+        ASSERT_TRUE(view_tree_secondary_release(&doc, retained));
     }
     ASSERT_TRUE(view_tree_secondary_release(&doc, tree));
 }

@@ -21,14 +21,15 @@ records implemented behavior and remaining features; the
 ```lambda
 import ui: lambda.ui.dtna
 
-ui.page(ui.card({title:"Project"}, [
-    ui.form_item({label:"Name",for:"project-name"},
-        ui.input({id:"project-name",name:"project",placeholder:"Project name"})^)^,
-    ui.space({}, [
-        ui.button({id:"save",variant:'primary'},"Save")^,
-        ui.button({disabled:true},"Archive")^
-    ])^
-])^, {title:"My project"})^
+let project = <dtna.page title:"My project",
+    <dtna.card title:"Project",
+        <dtna.form_item label:"Name",for:"project-name",
+            <dtna.input id:"project-name",name:"project",placeholder:"Project name">>
+        <dtna.space
+            <dtna.button id:"save",variant:'primary',"Save">
+            <dtna.button disabled:true,"Archive">>>>;
+
+apply(project)
 ```
 
 Save this as a `.ls` document and open it with `./lambda.exe view path/to/page.ls`.
@@ -36,10 +37,21 @@ The shipped explorers are `./lambda.exe view test/ui/dtna_gallery.ls` and
 `./lambda.exe view test/ui/dtna_data_gallery.ls`.
 Set `LAMBDA_HOME` to the absolute `lmd` path when launching outside the checkout.
 
-Constructors return logical `<dtna kind:...>` elements and use explicit error
-propagation (`^`) for invalid props. `ui.render(source)` applies the imported
-view templates; `ui.page(source, options)` adds HTML structure, scoped styles,
-and root tokens. Ordinary HTML/SVG elements and arrays are valid child slots.
+Author pages as logical `<dtna.button id:... variant:...>` elements, then call `apply`
+to run the imported view templates. The `page` template adds HTML structure,
+scoped styles, and root tokens; its props are `title`, `tokens`, `locale`, and
+`direction`. Component properties are ordinary element attributes; there is no
+`props` wrapper or `kind` attribute. The component kind is its element name:
+`<dtna.button variant:'dashed', "Dashed">`. The `dtna.` prefix distinguishes
+component tags from native HTML tags such as `<button>` (**S2.4.3v3**).
+Importing `lambda.ui.dtna` installs these views; no separate namespace declaration
+is needed for these qualified tag names. Multiword components use underscores,
+for example `<dtna.text_area>` and `<dtna.form_item>`.
+Its children remain logical elements until presentation.
+The optional constructors return the same component elements and use explicit
+error propagation (`^`) to validate props during construction. `ui.render(source)`
+and `ui.page(source, options)` remain available for programmatic composition.
+Ordinary HTML/SVG elements and arrays are valid child slots.
 Inside ordinary HTML, apply `ui.render` to logical component children explicitly,
 as the event example below does.
 Rendering is functional; DOM access and event effects belong in procedures
@@ -337,14 +349,14 @@ The envelope is `{component, id, action, value}`. For example:
 import ui: lambda.ui.dtna
 
 // Retain a source item so parent updates reuse its component instance.
-let save = ui.button({id:"save",variant:'primary'},"Save")^
+let save = <dtna.button id:"save",variant:'primary',"Save">
 view project: <project> state saves:0 {
-    <div *[ui.render(save), <p "Saves: " ++ string(saves)>]>
+    <div *[apply(save), <p "Saves: " ++ string(saves)>]>
 }
 on ui_action(action) {
     if (action.id == "save") { saves = saves + 1 }
 }
-ui.page(<project>)^
+apply(<dtna.page <project>>)
 ```
 
 | Component | Event | Action and value |

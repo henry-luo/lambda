@@ -14,7 +14,7 @@ let hidden = [for (child in content(rendered) where child is element and name(ch
     ["icon slot",name(content(content(buttons[0])[0])[0]) == 'svg'],
     ["native form entry",len(hidden) == 1 and hidden[0].name == "choice" and hidden[0].value == "1"],
     ["disabled form omission",'disabled' at [for (child in content(ui.render(ui.segmented({id:"off",items:items,name:"ignored",disabled:true})^)) where child is element and name(child) == 'input') child][0]],
-    ["typed controlled value",(ui.segmented({id:"typed",items:items,value:3})^).props.value is int],
+    ["typed controlled value",(ui.segmented({id:"typed",items:items,value:3})^).value is int],
     ["invalid size",(ui.segmented({id:"bad",items:items,size:'huge'}) or null) == null],
     ["invalid shape",(ui.segmented({id:"bad",items:items,shape:'square'}) or null) == null],
     ["invalid block",(ui.segmented({id:"bad",items:items,block:1}) or null) == null],

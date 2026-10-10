@@ -43,8 +43,8 @@ fn block(kind, props, child = null) {
 }
 fn paragraph_width(props, index, rows) => if (props.width is array) (if (props.width[index] == null) "100%" else props.width[index])
     else if (props.width != null and index == rows-1) props.width else if (index == rows-1 and rows > 1) "61%" else "100%"
-view dtna_skeleton: <dtna kind:'skeleton'> {
-    let p = ~.props
+view dtna_skeleton: <dtna.skeleton> {
+    let p = c.props(~)
     let paragraph = part_options(p.paragraph)
     let title = part_options(p.title)
     let rows = c.option(paragraph,"rows",c.option(p,"rows",3));
@@ -58,9 +58,9 @@ view dtna_skeleton: <dtna kind:'skeleton'> {
                 <div class:"dtna-skeleton-shape dtna-skeleton-line",style:"width:" ++ c.length(paragraph_width(paragraph,index,rows)) ++ ";" ++
                     (if (p.round) "border-radius:999px;" else "")>]> else null]>]>
 }
-view dtna_skeleton_part: <dtna kind:'skeleton-avatar' | 'skeleton-button' | 'skeleton-input' | 'skeleton-image' | 'skeleton-node'> {
-    <span *:c.styled(~,if (~.props.active) "dtna-skeleton-active" else ""),["aria-busy"]:"true",["aria-label"]:c.option(~.props,"label","Loading"),
-        block(slice(c.text(~.kind),9),~.props,c.contents(~))>
+view dtna_skeleton_part: <dtna.skeleton_avatar> | <dtna.skeleton_button> | <dtna.skeleton_input> | <dtna.skeleton_image> | <dtna.skeleton_node> {
+    <span *:c.styled(~,if (c.props(~).active) "dtna-skeleton-active" else ""),["aria-busy"]:"true",["aria-label"]:c.option(c.props(~),"label","Loading"),
+        block(slice(c.text(c.kind(~)),9),c.props(~),c.contents(~))>
 }
 pub let css = "
 .dtna-skeleton{display:flex;gap:16px;width:100%}.dtna-skeleton-section{flex:1;min-width:0}.dtna-skeleton-header{flex-shrink:0}

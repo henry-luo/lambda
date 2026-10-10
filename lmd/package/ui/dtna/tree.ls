@@ -61,11 +61,11 @@ pub fn tree(props) element^ {
         raise c.fail("tree","single selection allows at most one key")
     else node
 }
-fn keys(node, name, current) => c.option(node.props,name ++ "_keys",current)
+fn keys(node, name, current) => c.option(c.props(node),name ++ "_keys",current)
 fn transition(node, rows, expanded, selected, checked, key, action) {
     let next_expanded = if (action == 'expand') collection.toggle(expanded,key) else expanded
-    let next_selected = if (action == 'select') (if (node.props.multiple) collection.toggle(selected,key) else [key]) else selected
-    let next_checked = if (action == 'check') toggle_check(rows,checked,key,node.props.check_strictly == true) else checks(rows,checked,node.props.check_strictly == true);
+    let next_selected = if (action == 'select') (if (c.props(node).multiple) collection.toggle(selected,key) else [key]) else selected
+    let next_checked = if (action == 'check') toggle_check(rows,checked,key,c.props(node).check_strictly == true) else checks(rows,checked,c.props(node).check_strictly == true);
     {expanded:next_expanded,selected:next_selected,checked:next_checked.checked_keys,
         value:if (action == 'expand') {key:key,expanded_keys:next_expanded,expanded:contains(next_expanded,key)}
         else if (action == 'select') {key:key,selected_keys:next_selected,selected:contains(next_selected,key)}
@@ -75,40 +75,40 @@ pn focus_key(node, evt, rows, key) {
     let found = [for (index,row in rows where row.key == key) index];
     if (len(found) == 1) interaction.focus(node,evt,"[data-dtna-tree-node='" ++ string(found[0]) ++ "']") else false
 }
-view dtna_tree: <dtna kind:'tree'> state expanded:c.option(~.props,"default_expanded_keys",[]),
-    selected:c.option(~.props,"default_selected_keys",[]),checked:c.option(~.props,"default_checked_keys",[]),focused:null {
-    let rows = flatten(~.props.items)^
+view dtna_tree: <dtna.tree> state expanded:c.option(c.props(~),"default_expanded_keys",[]),
+    selected:c.option(c.props(~),"default_selected_keys",[]),checked:c.option(c.props(~),"default_checked_keys",[]),focused:null {
+    let rows = flatten(c.props(~).items)^
     let opened = keys(~,"expanded",expanded)
     let chosen = keys(~,"selected",selected)
-    let checked_model = checks(rows,keys(~,"checked",checked),~.props.check_strictly == true)
+    let checked_model = checks(rows,keys(~,"checked",checked),c.props(~).check_strictly == true)
     let shown = visible(rows,opened)
     let tab_key = if (any([for (row in collection.enabled(shown)) row.key == focused])) focused else collection.enabled(shown)[0].key;
-    <div *:c.attrs(~.props),class:c.classes('tree',~.props),style:~.props.style,role:"tree",
-        ["aria-label"]:~.props.label,["aria-multiselectable"]:c.aria(~.props.multiple),
+    <div *:c.attrs(c.props(~)),class:c.classes('tree',c.props(~)),style:c.props(~).style,role:"tree",
+        ["aria-label"]:c.props(~).label,["aria-multiselectable"]:c.aria(c.props(~).multiple),
         *[for (index,row in rows where any([for (entry in shown) entry.key == row.key]))
-            <div id:~.props.id ++ "-node-" ++ string(index),class:"dtna-tree-node" ++ (if (contains(chosen,row.key)) " dtna-tree-selected" else ""),
-                role:"treeitem",tabindex:if (row.key == tab_key and not ~.props.disabled) "0" else "-1",
+            <div id:c.props(~).id ++ "-node-" ++ string(index),class:"dtna-tree-node" ++ (if (contains(chosen,row.key)) " dtna-tree-selected" else ""),
+                role:"treeitem",tabindex:if (row.key == tab_key and not c.props(~).disabled) "0" else "-1",
                 ["data-dtna-tree-node"]:string(index),["aria-level"]:string(row.level),["aria-posinset"]:string(row.position),["aria-setsize"]:string(row.siblings),
-                ["aria-disabled"]:c.aria(~.props.disabled or row.disabled),["aria-selected"]:c.aria(contains(chosen,row.key)),
+                ["aria-disabled"]:c.aria(c.props(~).disabled or row.disabled),["aria-selected"]:c.aria(contains(chosen,row.key)),
                 *:(if (row.branch) {'aria-expanded':c.aria(contains(opened,row.key))} else {}),
-                *:(if (~.props.checkable) {'aria-checked':if (contains(checked_model.half_checked_keys,row.key)) "mixed" else c.aria(contains(checked_model.checked_keys,row.key))} else {}),
+                *:(if (c.props(~).checkable) {'aria-checked':if (contains(checked_model.half_checked_keys,row.key)) "mixed" else c.aria(contains(checked_model.checked_keys,row.key))} else {}),
                 style:"padding-left:" ++ c.px((row.level - 1)*24), *[
                 if (row.branch) <button type:"button",tabindex:"-1",class:"dtna-tree-expander",["data-dtna-tree-expand"]:"",
-                    ["aria-label"]:if (contains(opened,row.key)) "Collapse" else "Expand",*:c.boolean_attr("disabled",~.props.disabled or row.disabled),
+                    ["aria-label"]:if (contains(opened,row.key)) "Collapse" else "Expand",*:c.boolean_attr("disabled",c.props(~).disabled or row.disabled),
                     general.icon({name:"chevron-down",style:if (contains(opened,row.key)) "" else "transform:rotate(-90deg);"})^>
                 else <span class:"dtna-tree-spacer">,
-                if (~.props.checkable) <span class:"dtna-check",["data-dtna-tree-check"]:"",["aria-hidden"]:"true",
+                if (c.props(~).checkable) <span class:"dtna-check",["data-dtna-tree-check"]:"",["aria-hidden"]:"true",
                     if (contains(checked_model.half_checked_keys,row.key)) "−" else if (contains(checked_model.checked_keys,row.key)) "✓" else ""> else null,
                 <span class:"dtna-tree-label",c.render(row.item.label)>]>]>
 }
 on click(evt) {
     let target = interaction.target(~,evt,"[data-dtna-tree-node]")
-    if (target == null or ~.props.disabled) { return 'pass' }
-    let rows = flatten(~.props.items)^
+    if (target == null or c.props(~).disabled) { return 'pass' }
+    let rows = flatten(c.props(~).items)^
     let row = rows[int(dom.get_attribute(target,"data-dtna-tree-node")) or 0]
     if (row.disabled) { return 'pass' }
     let action = if (dom.closest(evt.target,"[data-dtna-tree-expand]") != null) 'expand'
-        else if (~.props.checkable and dom.closest(evt.target,"[data-dtna-tree-check]") != null) 'check' else 'select'
+        else if (c.props(~).checkable and dom.closest(evt.target,"[data-dtna-tree-check]") != null) 'check' else 'select'
     if (action == 'select' and dom.closest(evt.target,"input,textarea,select,button,a") != null) { return 'pass' }
     if (action == 'check' and not checkable(row)) { return 'pass' }
     let next = transition(~,rows,keys(~,"expanded",expanded),keys(~,"selected",selected),keys(~,"checked",checked),row.key,action)
@@ -122,13 +122,13 @@ on click(evt) {
 }
 on keydown(evt) {
     let target = interaction.target(~,evt,"[data-dtna-tree-node]")
-    if (target == null or ~.props.disabled or dom.closest(evt.target,"input,textarea,select,button") != null) { return 'pass' }
-    let rows = flatten(~.props.items)^
+    if (target == null or c.props(~).disabled or dom.closest(evt.target,"input,textarea,select,button") != null) { return 'pass' }
+    let rows = flatten(c.props(~).items)^
     let row = rows[int(dom.get_attribute(target,"data-dtna-tree-node")) or 0]
     if (row.disabled) { return 'pass' }
     let opened = keys(~,"expanded",expanded)
     let shown = visible(rows,opened)
-    let action = if (evt.key == "Enter") 'select' else if (evt.key == " ") (if (~.props.checkable) 'check' else 'select')
+    let action = if (evt.key == "Enter") 'select' else if (evt.key == " ") (if (c.props(~).checkable) 'check' else 'select')
         else if (row.branch and ((evt.key == "ArrowRight" and not contains(opened,row.key)) or (evt.key == "ArrowLeft" and contains(opened,row.key)))) 'expand' else null
     if (action != null) {
         if (action == 'check' and not checkable(row)) { return 'pass' }

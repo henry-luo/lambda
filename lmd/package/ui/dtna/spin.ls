@@ -28,7 +28,7 @@ fn indicator(props, clock) {
     else <span *:attributes,["aria-hidden"]:"true",dots()>
 }
 fn presentation(node, clock) {
-    let p = node.props
+    let p = c.props(node)
     let shown = c.option(p,"spinning",true) and clock.shown
     let nested = len(content(node)) > 0 or p.fullscreen
     let description = c.option(p,"description",p.tip)
@@ -44,7 +44,7 @@ fn presentation(node, clock) {
 }
 // timers use the existing document-owned frame queue; pure projection only reads explicit clock state.
 pn advance(node, evt, previous) {
-    let config = settings(node.props)
+    let config = settings(c.props(node))
     let changed = config != previous.settings
     let restarted = previous.settings == null or config.spinning != previous.settings.spinning or config.delay != previous.settings.delay
     let automatic_changed = config.automatic != previous.settings.automatic
@@ -61,12 +61,12 @@ pn advance(node, evt, previous) {
     {settings:config,start:start,shown:shown,progress:stepped,update_at:update_at,
         token:if (waiting) dom.request_frame(evt.target,"dtna_spin_tick") else 0}
 }
-view dtna_spin: <dtna kind:'spin'> state clock:{settings:null,start:0,progress:0,update_at:0,token:0,
-    shown:c.option(~.props,"spinning",true) and c.option(~.props,"delay",0) == 0} {
+view dtna_spin: <dtna.spin> state clock:{settings:null,start:0,progress:0,update_at:0,token:0,
+    shown:c.option(c.props(~),"spinning",true) and c.option(c.props(~),"delay",0) == 0} {
     presentation(~,clock)
 }
 on render(evt) {
-    if (evt.event_phase == 2 and clock.settings != settings(~.props)) { clock = advance(~,evt,clock) }
+    if (evt.event_phase == 2 and clock.settings != settings(c.props(~))) { clock = advance(~,evt,clock) }
     'pass'
 }
 on dtna_spin_tick(evt) {

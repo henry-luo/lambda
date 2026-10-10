@@ -39,10 +39,10 @@ fn colors(props) {
         (if (style == "solid") (if (palette != null) palette[5] else foreground) else background) ++ ";border-color:" ++
         (if (style == "solid") (if (palette != null) palette[5] else foreground) else if (style == "outlined") border else "transparent") ++ ";"
 }
-fn parts(node) => [if (node.props.icon != null) <span class:"dtna-tag-icon",c.render(node.props.icon)>,
+fn parts(node) => [if (c.props(node).icon != null) <span class:"dtna-tag-icon",c.render(c.props(node).icon)>,
     <span class:"dtna-tag-content",*c.contents(node)>]
 fn presentation(node) {
-    let p = node.props
+    let p = c.props(node)
     let body = [*parts(node),if (p.closable) <button type:"button",class:"dtna-tag-close",["aria-label"]:"Close",
         *:c.boolean_attr("disabled",p.disabled),c.render(c.option(p,"close_icon",icons.descriptor({name:"close",width:10,height:10})^))>]
     let attributes = {*:c.styled(node,"dtna-tag-" ++ variant(p)^ ++ (if (p.disabled) " dtna-tag-disabled" else "")),
@@ -51,29 +51,29 @@ fn presentation(node) {
     if (p.href != null) <a *:attributes,href:if (p.disabled) null else p.href,target:p.target,*body>
     else <span *:attributes,*body>
 }
-view dtna_tag: <dtna kind:'tag'> state visible:c.option(~.props,"default_visible",true) {
-    if (c.option(~.props,"visible",visible)) presentation(~) else <span hidden:"">
+view dtna_tag: <dtna.tag> state visible:c.option(c.props(~),"default_visible",true) {
+    if (c.option(c.props(~),"visible",visible)) presentation(~) else <span hidden:"">
 }
 on click(evt) {
-    if (~.props.disabled) { return 'prevent-default' }
-    if (~.props.closable and dom.closest(evt.target,".dtna-tag-close") != null) {
+    if (c.props(~).disabled) { return 'prevent-default' }
+    if (c.props(~).closable and dom.closest(evt.target,".dtna-tag-close") != null) {
         // a controlled owner declines closing by retaining visible:true; requests cannot mutate its prop.
-        if (not c.has(~.props,"visible")) { visible = false }
+        if (not c.has(c.props(~),"visible")) { visible = false }
         emit("ui_action",c.action(~,'close',false))
         return 'prevent-default'
     }
     'pass'
 }
-view dtna_checkable_tag: <dtna kind:'checkable-tag'> state checked:c.option(~.props,"default_checked",false) {
-    let selected = c.option(~.props,"checked",checked);
+view dtna_checkable_tag: <dtna.checkable_tag> state checked:c.option(c.props(~),"default_checked",false) {
+    let selected = c.option(c.props(~),"checked",checked);
     <button *:c.styled(~,"dtna-tag dtna-tag-checkable" ++ (if (selected) " dtna-tag-checked" else "")),
-        type:"button",role:"checkbox",["aria-checked"]:c.aria(selected),["aria-disabled"]:c.aria(~.props.disabled),
-        *:c.boolean_attr("disabled",~.props.disabled),*parts(~)>
+        type:"button",role:"checkbox",["aria-checked"]:c.aria(selected),["aria-disabled"]:c.aria(c.props(~).disabled),
+        *:c.boolean_attr("disabled",c.props(~).disabled),*parts(~)>
 }
 on click(evt) {
-    if (~.props.disabled) { return 'prevent-default' }
-    let next = not c.option(~.props,"checked",checked)
-    if (not c.has(~.props,"checked")) { checked = next }
+    if (c.props(~).disabled) { return 'prevent-default' }
+    let next = not c.option(c.props(~),"checked",checked)
+    if (not c.has(c.props(~),"checked")) { checked = next }
     emit("ui_change",c.action(~,'check',next))
     'pass'
 }

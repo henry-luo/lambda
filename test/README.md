@@ -182,4 +182,11 @@ Pure/API goldens: `test/lambda/ui_dtna/`. Native click/type/keyboard/style check
 `test/ui/dtna_reference/catalog.manifest`. The gallery capture is a native
 inspection artifact, not an AntD visual-equivalence baseline.
 
+The galleries, native component pages and reference foundation author
+`<dtna.*>` elements and apply the imported view templates (**S12.1.3**).
+Stateful fixtures keep stable logical component bindings across parent redraws;
+native HTML remains where it isolates engine behavior or exposes test outputs.
+Constructor API/validation goldens and `dtna_error_document.ls` retain explicit
+constructor calls to exercise that interface.
+
 The URL clone ownership control (`./test/test_url_gtest.exe --gtest_filter='UrlCloneOwnershipTest.*'`) runs with allocation tracking and checks clone/free balance, retained components after source release and absent-component preservation. It covers the resource-base clones used by FO/native graphic exports under D4.5.1v4/D4.1.4v5 and D7.1.2v2.

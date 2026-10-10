@@ -19,7 +19,7 @@ fn closable(props) => c.option(props,"closable",props.close_icon != null and pro
 fn status(props) string^ => c.text(c.option(props,"status",if (props.banner) 'warning' else 'info'))^
 fn default_icon(props) => icons.descriptor({name:{success:"check-circle",info:"info-circle",warning:"exclamation-circle",error:"close-circle"}[status(props)^],theme:'filled'})^
 fn presentation(node) {
-    let p = node.props
+    let p = c.props(node)
     let description = p.description != null
     let title = c.option(p,"title",p.message)
     let root = c.part_attrs(p,"root",c.classes('alert',p,"dtna-status-" ++ status(p)^ ++
@@ -36,14 +36,14 @@ fn presentation(node) {
         if (closable(p)) <button *:c.part_attrs(p,"close","dtna-alert-close dtna-close"),type:"button",["aria-label"]:c.option(p,"close_label","Close"),
             if (close_icon == true) c.render(icons.descriptor({name:"close"})^) else if (close_icon == false) null else c.render(close_icon)> else null]>
 }
-view dtna_alert: <dtna kind:'alert'> state visible:c.option(~.props,"default_visible",true) {
-    if (c.option(~.props,"visible",visible)) presentation(~) else <span hidden:"">
+view dtna_alert: <dtna.alert> state visible:c.option(c.props(~),"default_visible",true) {
+    if (c.option(c.props(~),"visible",visible)) presentation(~) else <span hidden:"">
 }
 on click(evt) {
     let close = interaction.target(~,evt,".dtna-alert-close")
-    if (closable(~.props) and close != null) {
+    if (closable(c.props(~)) and close != null) {
         // retaining controlled visibility cancels a close without a synchronous callback contract (S12.1.3).
-        if (not c.has(~.props,"visible")) { visible = false }
+        if (not c.has(c.props(~),"visible")) { visible = false }
         emit("ui_action",c.action(~,'close',false))
         return 'prevent-default'
     }

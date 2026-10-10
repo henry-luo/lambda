@@ -75,7 +75,7 @@ fn completed_steps(props, count, percent) int^ {
     else int(min(count,max(0,rounded)))
 }
 fn line(node, percent, success, phase, count) {
-    let p = node.props
+    let p = c.props(node)
     let width = c.option(p,"stroke_width",if (c.text(p.size) == "small") 6 else 8)
     let cap = c.option(p,"stroke_linecap","round")
     let rail = c.option(p,"rail_color","var(--dtna-disabled-background)")
@@ -102,7 +102,7 @@ fn ring_gradient(props, metrics, cells) {
             <div xmlns:"http://www.w3.org/1999/xhtml",style:"width:100%;height:100%;background:" ++ background ++ ";">>]
 }
 fn ring(node, percent, success, phase, count) {
-    let p = node.props
+    let p = c.props(node)
     let width = c.option(p,"stroke_width",6)
     let radius = 50.0-width/2.0
     let length = 2.0*math.pi*radius
@@ -130,8 +130,8 @@ fn ring(node, percent, success, phase, count) {
         *(if (gradient) ring_gradient(p,metrics,cells) else []),
         if (success > 0 and count == 0) ring_arc(metrics,"dtna-progress-success",c.option(p.success,"stroke_color","var(--dtna-success)"),0,usable*success/100.0) else null]>
 }
-view dtna_progress: <dtna kind:'progress'> {
-    let p = ~.props
+view dtna_progress: <dtna.progress> {
+    let p = c.props(~)
     let percent = clamp_percent(c.option(p,"percent",0))
     let success = min(percent,clamp_percent(c.option(p.success,"percent",0)))
     let phase = status(p,percent)

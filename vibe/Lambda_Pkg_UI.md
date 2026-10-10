@@ -69,7 +69,7 @@ The public entry point maps directly to `lmd/package/ui/dtna.ls` under **D7.2.4/
 
 ### 3.2 Component data and presentation
 
-Recommended public shape: pure constructor functions accept a props map and, where appropriate, child content. They produce **logical component elements** such as `<dtna kind:'button'>`; installed `view` templates present them as HTML/SVG through `apply`. Plain Lambda element content remains a valid slot value. Pattern matches are specific to dtna tags, avoiding broad map/catch-all templates that could intercept unrelated application models.
+Pages and component demos are authored as **logical component elements**, such as `<dtna.button variant:'primary',"Save">`, composed inside a `<dtna.page>` document. The component kind becomes the local tag name, with `dtna.` separating the vocabulary from native HTML (**S2.4.3v3**); no `kind` attribute or property wrapper is needed. Multiword local names use underscores (`dtna.form_item`, `dtna.text_area`), matching the package function names. Installed `view` templates present that source tree as HTML/SVG through `apply` (**S12.1.3**). Pure constructor functions remain optional helpers for programmatic construction and prop validation; the gallery must demonstrate direct element authoring. Plain Lambda element content remains a valid slot value. Pattern matches are specific to dtna tags, avoiding broad map/catch-all templates that could intercept unrelated application models.
 
 Keep construction distinct from application so a component source can be retained and rendered again. Do not describe an HTML `id` or a proposed `key` prop as an implemented state-identity mechanism. Current template state is keyed by source item and template identity; rebuilding a constructor result may create a new source identity. The repeated-child/reorder contract is an M0 prerequisite (§6.1 and §11).
 
@@ -111,8 +111,8 @@ contracts, tokens, layout/surface recipes and presentation views. See the
 | Area | Proposed contract |
 |---|---|
 | Import | `import ui: lambda.ui.dtna` |
-| Construction | `ui.button(props, children)`, `ui.select(props)`, `ui.table(props)`, and equivalent constructors listed in §7 |
-| Application | `ui.page(root, options)` creates a full Radiant document; `ui.render(root, options)` supplies embeddable presentation without an additional document shell. |
+| Construction | Compose `<dtna.button id:... variant:...>` elements directly, with component properties as ordinary attributes; §7 constructors are optional helpers producing the same flat elements. |
+| Application | `apply` presents the element tree; `<dtna.page>` supplies a full Radiant document. `ui.page(root, options)` and `ui.render(root)` support programmatic composition and embeddable presentation. |
 | Common props | `id`, `class`, `style`, `size`, `disabled`, `status`, `variant`, semantic-part overrides, and applicable role/label attributes |
 | Values | `value`/`default_value`, `checked`/`default_checked`, `open`/`default_open`; presence of the controlled prop determines ownership. |
 | Content | Named slots and child content; pure render functions for table cells, options, and similar data projections |
@@ -127,20 +127,19 @@ A proposed application composition looks like this. These examples include unimp
 ```lambda no-run
 import ui: lambda.ui.dtna
 
-let content = ui.layout({id: "admin"}, [
-    ui.layout_header({}, [ui.title({level: 3}, "Orders")]),
-    ui.layout_content({}, [
-        ui.space({}, [
-            ui.button({id: "create-order", variant: 'primary'}, "New order"),
-            ui.input({id: "order-search", placeholder: "Search orders"})
-        ]),
-        ui.table({id: "orders", row_key: "id",
-            columns: [{key: "name", title: "Name", data_index: "name"}],
-            data: [{id: "o1", name: "Example order"}]})
-    ])
-])
+let orders = <dtna.page title:"Orders",locale:"en-US",
+    <dtna.layout id:"admin",
+        <dtna.layout_header
+            <dtna.title level:3,"Orders">>
+        <dtna.layout_content
+            <dtna.space
+                <dtna.button id:"create-order",variant:'primary',"New order">
+                <dtna.input id:"order-search",placeholder:"Search orders">>
+            <dtna.table id:"orders",row_key:"id",
+                columns:[{key:"name",title:"Name",data_index:"name"}],
+                data:[{id:"o1",name:"Example order"}]>>>>;
 
-ui.page(content, {title: "Orders", locale: "en-US"})
+apply(orders)
 ```
 
 ### 4.2 Events and application-owned state
@@ -153,16 +152,15 @@ Application `view`/`edit` templates handle these requests. Read-only controls ca
 import ui: lambda.ui.dtna
 
 view <counter_panel> state count: 0 {
-    ui.render(ui.space({}, [
-        ui.text({}, string(count)),
-        ui.button({id: "increment"}, "Increment")
-    ]))
+    apply(<dtna.space
+        <dtna.text string(count)>
+        <dtna.button id:"increment","Increment">>)
 }
 on ui_action(action) {
     if (action.id == "increment") { count = count + 1 }
 }
 
-ui.page(apply(<counter_panel>))
+apply(<dtna.page <counter_panel>>)
 ```
 
 This second example intentionally contains only stateless child presentation. Reconstructing a child with local input, popup, or validation state requires the identity decision in §11; the example does not establish that contract by implication.
@@ -434,7 +432,7 @@ The namespace, Ant-inspired Phase 1 direction, comprehensive catalog goal, and R
 
 | Open contract | Recommendation | Consultation/acceptance point |
 |---|---|---|
-| Public construction surface | Pure constructors returning logical elements, plus `view`/`apply` presentation; keep direct tag syntax possible | Confirm the facade in M0 with one complete interactive vertical slice. |
+| Public construction surface | Direct logical elements with `view`/`apply` presentation; pure constructors are optional programmatic helpers | The main gallery and introductory example use element authoring; retain constructor contract tests. |
 | Stable identity | Explicit component/item identity scoped by owner and presentation location, with defined retain/reset/removal behavior | Resolve **RS7/RSO1/RSO2/RSO10** before claiming stateful nested composition. |
 | Nonvisual provider propagation | Compare explicit render/config data against a minimal reviewed host facility; avoid mutable ambient globals | Decide in M0; demonstrate nested providers without child state loss. |
 | Overlay attachment | Shared package overlay ownership, reusing general DOM/layout mechanisms; define logical event ancestry separately from paint position | Decide in M0/M2 against clipping, nested ownership and focus fixtures. |

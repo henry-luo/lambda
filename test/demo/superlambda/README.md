@@ -6,7 +6,7 @@ palette and smooth SVG artwork. Lambda wears a red cap with **λ** on it.
 From the repository root:
 
 ```sh
-./lambda.exe view test/demo/superlambda/superlambda.ls
+./lambda.exe demo superlambda
 ```
 
 Click **LET'S GO** or press Enter. The meadow spans 3,840 pixels: collect coins,

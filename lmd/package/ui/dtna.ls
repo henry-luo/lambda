@@ -45,9 +45,14 @@ pub fn page(root, options = {}) element^ {
     let names = c.properties(options,["tokens","title","locale","direction"],"page")^
     let valid = contract.validate('page',options)^
     let variables = theme.variables(c.option(options, "tokens", {}))^;
+    // authored page children become sibling nodes rather than a nested array slot.
     <html lang:c.option(options, "locale", "en-US"), dir:c.option(options, "direction", "ltr"),
         <head <meta charset:"UTF-8"> <title c.option(options, "title", "Lambda UI")> <style styles.css>>
-        <body style:"margin:0;", <div class:"dtna-root", style:variables, c.render(root)>>>
+        <body style:"margin:0;", <div class:"dtna-root", style:variables, *c.children(c.render(root))>>>
+}
+// direct element documents share the constructor's shell and validation (S12.1.3).
+view dtna_page: <dtna.page> {
+    page(content(~),c.props(~))^
 }
 pub fn button(props = {}, child = null) element^ => button_parts.descriptor(props,child)^
 pub fn button_group(props = {}, child = null) element^ => layout_parts.compact('button-group',props,child)^

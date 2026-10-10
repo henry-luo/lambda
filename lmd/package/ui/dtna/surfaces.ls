@@ -41,7 +41,7 @@ fn card_tabs(p) element^ => navigation.choice('tabs',{
         id:p.id ++ "-tabs",items:p.tab_list,
         *:(if (c.has(p,"active_tab")) {value:p.active_tab} else if (c.has(p,"default_active_tab")) {default_value:p.default_active_tab} else {})})^
 fn card_view(node) {
-    let p = node.props
+    let p = c.props(node)
     let tabs = if (p.tab_list == null) null else card_tabs(p)^;
     <section *:c.styled(node,(if (p.bordered == false) "dtna-card-borderless " else "") ++
         (if (p.hoverable) "dtna-card-hoverable " else "") ++ (if (p.type == 'inner' or p.type == "inner") "dtna-card-inner" else "")),
@@ -55,7 +55,7 @@ fn card_view(node) {
         if (p.actions != null and len(p.actions) > 0) <ul class:"dtna-card-actions",*[for (action in p.actions) <li c.render(action)>]> else null]>
 }
 fn empty_view(node) {
-    let p = node.props
+    let p = c.props(node)
     let image = c.option(p,"image",'default')
     let preset = c.text(image)
     let height = c.option(p,"image_height",if (preset == "simple") 40 else 100)
@@ -68,7 +68,7 @@ fn empty_view(node) {
         if (len(content(node)) > 0) <div class:"dtna-empty-footer",*c.contents(node)> else null]>
 }
 fn result_view(node) {
-    let p = node.props
+    let p = c.props(node)
     let status = c.text(c.option(p,"status",'info'))
     let exception = contains(["403","404","500"],status)
     let icon = c.option(p,"icon",if (exception) null else icons.render({name:
@@ -81,16 +81,16 @@ fn result_view(node) {
         if (p.extra != null) <div class:"dtna-result-extra",c.render(p.extra)> else null,
         if (len(content(node)) > 0) <div class:"dtna-result-content",*c.contents(node)> else null]>
 }
-view dtna_surfaces: <dtna kind:'card' | 'card-grid' | 'card-meta' | 'empty' | 'result'> {
-    if (~.kind == 'card') card_view(~)
-    else if (~.kind == 'empty') empty_view(~)
-    else if (~.kind == 'result') result_view(~)
-    else if (~.kind == 'card-grid') <div *:c.styled(~,if (~.props.hoverable == false) "dtna-card-grid-static" else ""),*c.contents(~)>
+view dtna_surfaces: <dtna.card> | <dtna.card_grid> | <dtna.card_meta> | <dtna.empty> | <dtna.result> {
+    if (c.kind(~) == 'card') card_view(~)
+    else if (c.kind(~) == 'empty') empty_view(~)
+    else if (c.kind(~) == 'result') result_view(~)
+    else if (c.kind(~) == 'card-grid') <div *:c.styled(~,if (c.props(~).hoverable == false) "dtna-card-grid-static" else ""),*c.contents(~)>
     else <div *:c.styled(~),*[
-        if (~.props.avatar != null) <div class:"dtna-card-meta-avatar",c.render(~.props.avatar)> else null,
+        if (c.props(~).avatar != null) <div class:"dtna-card-meta-avatar",c.render(c.props(~).avatar)> else null,
         <div class:"dtna-card-meta-detail",*[
-            if (~.props.title != null) <div class:"dtna-card-meta-title",c.render(~.props.title)> else null,
-            if (~.props.description != null) <div class:"dtna-card-meta-description",c.render(~.props.description)> else null,*c.contents(~)]>]>
+            if (c.props(~).title != null) <div class:"dtna-card-meta-title",c.render(c.props(~).title)> else null,
+            if (c.props(~).description != null) <div class:"dtna-card-meta-description",c.render(c.props(~).description)> else null,*c.contents(~)]>]>
 }
 pub let css = "
 .dtna-card.dtna-card-borderless{border:0}.dtna-card-hoverable:hover,.dtna-card-grid:hover{box-shadow:0 6px 16px rgba(0,0,0,0.08)}

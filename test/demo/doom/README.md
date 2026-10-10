@@ -34,7 +34,7 @@ python3 test/demo/doom/tools/import_upstream.py --verify
 Open `doom.ls` from the repository root with:
 
 ```sh
-./lambda.exe view test/demo/doom/doom.ls
+./lambda.exe demo doom
 ```
 
 Press Start, then W/S to move, A/D to strafe, arrows to turn, Shift to run,

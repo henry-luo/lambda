@@ -3,7 +3,7 @@
 From the repository root, open the native Radiant window:
 
 ```sh
-./lambda.exe view test/demo/tetris/tetris.ls
+./lambda.exe demo tetris
 ```
 
 Click **Start game** or focus the game and press Enter. All controls also have

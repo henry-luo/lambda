@@ -1134,7 +1134,9 @@ static void pdf_lower_paint_list(PdfRenderContext* ctx, PaintList* commands) {
         case PAINT_STROKE_PATH: {
             if (!caps || !caps->strokes) break;
             PaintStrokePath* p = &cmd->stroke_path;
-            if (p->color.a == 0 || p->dash_count > 0) break;
+            if (p->color.a == 0) break;
+            // set even empty patterns so a later solid stroke cannot inherit earlier dashes.
+            if (HPDF_Page_SetDashPattern(ctx->current_page, p->dash_array, p->dash_count, p->dash_phase) != HPDF_OK) break;
             if (!resolve_command_transform(p->has_transform, &p->transform)) break;
             pdf_set_color(ctx, p->color);
             HPDF_Page_SetLineWidth(ctx->current_page, p->width);

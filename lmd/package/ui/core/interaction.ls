@@ -1,8 +1,9 @@
 import dom
+import c: lambda.ui.core.component
 
 // nested components must not interpret each other's bubbling DOM events.
 pub pn root(node, evt) {
-    let selector = ".dtna-" ++ string(node.kind)
+    let selector = ".dtna-" ++ string(c.kind(node))
     let found = dom.closest(evt.target, selector)
     let owner = dom.closest(evt.currentTarget, selector);
     // native dispatch position scopes delegation even when nested roots omit HTML ids.
@@ -12,7 +13,7 @@ pub pn target(node, evt, selector) {
     let found = dom.closest(evt.target, selector)
     let owner = root(node, evt);
     if (found != null and owner != null and
-        dom.closest(found,".dtna-" ++ string(node.kind)) == owner) found else null
+        dom.closest(found,".dtna-" ++ string(c.kind(node))) == owner) found else null
 }
 pub pn focus(node, evt, selector) {
     let owner = root(node, evt);

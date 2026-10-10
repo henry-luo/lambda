@@ -20,7 +20,7 @@ pub fn ribbon(props, child) element^ {
     else c.node('badge-ribbon',props,child,["text","color","placement"])^
 }
 fn badge_view(node) {
-    let p = node.props
+    let p = c.props(node)
     let status = p.status != null
     let dot = p.dot == true or status
     let count = c.option(p,"count",null)
@@ -70,7 +70,7 @@ fn description_spans(items, count, key, used = 0) {
         [span,*description_spans(slice(items,1,len(items)),count,key,if (used+span == count) 0 else used+span)])
 }
 fn descriptions_view(node) {
-    let p = node.props
+    let p = c.props(node)
     let column = map([for (bp in responsive.breakpoints) (bp.key,
         responsive.at(c.option(p,"column",default_columns),bp.key,responsive.at(default_columns,bp.key,3)))])
     let packed = [for (bp in responsive.breakpoints) {key:bp.key,spans:description_spans(p.items,responsive.at(column,bp.key,3),bp.key)}];
@@ -87,11 +87,11 @@ fn descriptions_view(node) {
                 <dt style:item.label_style,*[c.render(item.label),if (p.colon != false and c.text(p.layout) != "vertical") ":" else null]>
                 <dd style:item.content_style,c.render(item.children)>>)]>]>
 }
-view dtna_display: <dtna kind:'badge' | 'badge-ribbon' | 'descriptions'> {
-    if (~.kind == 'badge') badge_view(~)
-    else if (~.kind == 'descriptions') descriptions_view(~)
-    else <div *:c.styled(~,"dtna-ribbon-" ++ c.text(c.option(~.props,"placement","end"))),
-        *[*c.contents(~),<div class:"dtna-ribbon",style:if (~.props.color == null) null else "background:" ++ ~.props.color ++ ";",c.render(~.props.text)>]>
+view dtna_display: <dtna.badge> | <dtna.badge_ribbon> | <dtna.descriptions> {
+    if (c.kind(~) == 'badge') badge_view(~)
+    else if (c.kind(~) == 'descriptions') descriptions_view(~)
+    else <div *:c.styled(~,"dtna-ribbon-" ++ c.text(c.option(c.props(~),"placement","end"))),
+        *[*c.contents(~),<div class:"dtna-ribbon",style:if (c.props(~).color == null) null else "background:" ++ c.props(~).color ++ ";",c.render(c.props(~).text)>]>
 }
 pub let css = "
 .dtna-badge-standalone .dtna-badge-count{position:relative;display:inline-block;top:auto;right:auto}

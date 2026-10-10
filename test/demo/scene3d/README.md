@@ -3,11 +3,11 @@
 From the worktree root:
 
 ```sh
-./lambda.exe view test/demo/scene3d/asset-gallery.ls
-./lambda.exe view test/demo/scene3d/observatory.html
-./lambda.exe view test/demo/scene3d/shared-animation.html
-./lambda.exe view test/demo/scene3d/three-gallery.html
-./lambda.exe view test/demo/scene3d/ringworld.ls
+./lambda.exe demo scene3d
+./lambda.exe demo asset-gallery
+./lambda.exe demo observatory
+./lambda.exe demo shared-animation
+./lambda.exe demo three-gallery
 ```
 
 `three-gallery.html` runs the official, unmodified Three.js 0.186.1

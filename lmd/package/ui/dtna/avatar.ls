@@ -25,8 +25,8 @@ fn dimensions(props) {
         number:size is number,responsive:size is map}
 }
 fn metrics(side) => c.px(side)
-view dtna_avatar: <dtna kind:'avatar'> {
-    let p = ~.props
+view dtna_avatar: <dtna.avatar> {
+    let p = c.props(~)
     let size = dimensions(p)
     let image = p.src != null
     let icon = not image and p.icon != null

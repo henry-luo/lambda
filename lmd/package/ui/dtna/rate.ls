@@ -23,48 +23,48 @@ fn character_node(props,index,value) {
     else c.render(if (character is fn) character({index:index,count:c.option(props,"count",5),value:value,disabled:props.disabled}) else character)
 }
 fn locked(props) => props.disabled or props.readonly
-fn stars(node,value,shown) => [for (index in 0 to c.option(node.props,"count",5)-1)
+fn stars(node,value,shown) => [for (index in 0 to c.option(c.props(node),"count",5)-1)
     <button type:"button",class:"dtna-rate-star" ++ (if (index + 1 <= shown) " dtna-rate-full"
-        else if (node.props.allow_half and shown + 0.5 >= index + 1) " dtna-rate-half" else " dtna-rate-zero"),
+        else if (c.props(node).allow_half and shown + 0.5 >= index + 1) " dtna-rate-half" else " dtna-rate-zero"),
         role:"radio",["aria-checked"]:c.aria(value > index),["aria-posinset"]:c.text(index + 1),
-        ["aria-setsize"]:c.text(c.option(node.props,"count",5)),["aria-label"]:if (node.props.tooltips[index] != null) node.props.tooltips[index] else c.text(index + 1),
-        ["data-dtna-rate-index"]:c.text(index),title:node.props.tooltips[index],
-        tabindex:if (locked(node.props)) -1 else 0,*:c.boolean_attr("disabled",node.props.disabled),
-        <span class:"dtna-rate-first",["aria-hidden"]:"true",character_node(node.props,index,shown)>
-        <span class:"dtna-rate-second",["aria-hidden"]:"true",character_node(node.props,index,shown)>>]
-fn current(node,selected) => c.option(node.props,"value",selected)
+        ["aria-setsize"]:c.text(c.option(c.props(node),"count",5)),["aria-label"]:if (c.props(node).tooltips[index] != null) c.props(node).tooltips[index] else c.text(index + 1),
+        ["data-dtna-rate-index"]:c.text(index),title:c.props(node).tooltips[index],
+        tabindex:if (locked(c.props(node))) -1 else 0,*:c.boolean_attr("disabled",c.props(node).disabled),
+        <span class:"dtna-rate-first",["aria-hidden"]:"true",character_node(c.props(node),index,shown)>
+        <span class:"dtna-rate-second",["aria-hidden"]:"true",character_node(c.props(node),index,shown)>>]
+fn current(node,selected) => c.option(c.props(node),"value",selected)
 pn pointer_value(node,evt) {
     let star = dom.closest(evt.target,".dtna-rate-star");
     if (star == null) null else (
         let index = int(dom.get_attribute(star,"data-dtna-rate-index"))^,
         let rect = dom.bounding_box(star),
         let rtl = dom.computed_style(star,"direction") == "rtl",
-        let half = node.props.allow_half and rect != null and
+        let half = c.props(node).allow_half and rect != null and
             (if (rtl) evt.x - rect.x > rect.width / 2 else evt.x - rect.x < rect.width / 2),
         index + 1 - (if (half) 0.5 else 0)
     )
 }
-view dtna_rate: <dtna kind:'rate'> state selected:c.option(~.props,"default_value",0),hover:null,cleaned:null {
+view dtna_rate: <dtna.rate> state selected:c.option(c.props(~),"default_value",0),hover:null,cleaned:null {
     let value = current(~,selected);
-    <div *:c.styled(~,if (locked(~.props)) "dtna-rate-locked" else ""),role:"radiogroup",
-        ["aria-label"]:~.props.label,["aria-disabled"]:c.aria(~.props.disabled),["aria-readonly"]:c.aria(~.props.readonly),
+    <div *:c.styled(~,if (locked(c.props(~))) "dtna-rate-locked" else ""),role:"radiogroup",
+        ["aria-label"]:c.props(~).label,["aria-disabled"]:c.aria(c.props(~).disabled),["aria-readonly"]:c.aria(c.props(~).readonly),
         ["data-value"]:c.text(value),*[*stars(~,value,if (hover == null) value else hover),
-        if (~.props.name != null) <input type:"hidden",name:~.props.name,value:c.text(value),*:c.boolean_attr("disabled",~.props.disabled)>]>
+        if (c.props(~).name != null) <input type:"hidden",name:c.props(~).name,value:c.text(value),*:c.boolean_attr("disabled",c.props(~).disabled)>]>
 }
 on click(evt) {
-    if (locked(~.props)) { return 'prevent-default' }
+    if (locked(c.props(~))) { return 'prevent-default' }
     let requested = pointer_value(~,evt)
     if (requested == null) { return 'pass' }
-    let reset = c.option(~.props,"allow_clear",true) and requested == current(~,selected)
+    let reset = c.option(c.props(~),"allow_clear",true) and requested == current(~,selected)
     let next = if (reset) 0 else requested
-    if (not c.has(~.props,"value")) { selected = next }
+    if (not c.has(c.props(~),"value")) { selected = next }
     hover = null
     cleaned = if (reset) requested else null
     emit("ui_change",c.action(~,'rate',next))
     'pass'
 }
 on mousemove(evt) {
-    if (locked(~.props)) { return 'pass' }
+    if (locked(c.props(~))) { return 'pass' }
     let requested = pointer_value(~,evt)
     if (requested != null and requested != cleaned and requested != hover) {
         hover = requested
@@ -80,14 +80,14 @@ on mouseleave(evt) {
     'pass'
 }
 on keydown(evt) {
-    if (locked(~.props) or not c.option(~.props,"keyboard",true)) { return 'pass' }
+    if (locked(c.props(~)) or not c.option(c.props(~),"keyboard",true)) { return 'pass' }
     if (not contains(["ArrowLeft","ArrowRight"],evt.key)) { return 'pass' }
     let rtl = dom.computed_style(evt.target,"direction") == "rtl"
     let increase = (evt.key == "ArrowRight") != rtl
-    let step = if (~.props.allow_half) 0.5 else 1
-    let next = max(0,min(c.option(~.props,"count",5),current(~,selected) + (if (increase) step else -step)))
+    let step = if (c.props(~).allow_half) 0.5 else 1
+    let next = max(0,min(c.option(c.props(~),"count",5),current(~,selected) + (if (increase) step else -step)))
     if (next != current(~,selected)) {
-        if (not c.has(~.props,"value")) { selected = next }
+        if (not c.has(c.props(~),"value")) { selected = next }
         hover = null
         cleaned = null
         emit("ui_change",c.action(~,'rate',next))

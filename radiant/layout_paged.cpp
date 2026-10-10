@@ -7863,10 +7863,14 @@ static bool paged_paint_node(LayoutViewNode* node, PaintList* paint) {
 static bool paged_paint_column_rules(const ViewPageBox* page, PaintList* paint) {
     const ViewPageStyle* style = page->style;
     const ViewCssStyle* body = style ? style->body_style.get() : nullptr;
-    if (!body || body->column_rule_style != CSS_VALUE_SOLID || !body->column_rule_color.a || !body->column_rule_width) return true;
+    if (!body || body->column_rule_style == CSS_VALUE_NONE || body->column_rule_style == CSS_VALUE_HIDDEN ||
+        !body->column_rule_color.a || !body->column_rule_width) return true;
     float width = (float)body->column_rule_width->data.length.value;
     if (width <= 0.0f) return true;
-    BorderProp border = {}; border.width.left = width; border.left_style = CSS_VALUE_SOLID;
+    BorderProp border = {}; border.width.left = width;
+    // CSS multicol interprets rule styles using collapsed borders: inset is ridge, outset is groove.
+    border.left_style = body->column_rule_style == CSS_VALUE_INSET ? CSS_VALUE_RIDGE :
+        body->column_rule_style == CSS_VALUE_OUTSET ? CSS_VALUE_GROOVE : body->column_rule_style;
     border.left_color = body->column_rule_color;
     BoundaryProp boundary = {}; boundary.border = lam::own(&border);
     if (style->body_clip && !paged_paint_clip(paint, style->body_rect, style->body_box.border.width.values)) return false;

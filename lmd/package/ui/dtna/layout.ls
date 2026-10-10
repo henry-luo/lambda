@@ -53,30 +53,30 @@ fn column_variables(prefix, values) => join([for (field,value in values)
     "--dtna-col-" ++ prefix ++ "-" ++ string(field) ++ ":" ++ column_property(string(field),value) ++ ";" ++
     (if (string(field) == "span") "--dtna-col-" ++ prefix ++ "-display:" ++ (if (value == 0) "none" else "block") ++ ";" else "")],"")
 fn column(node) {
-    let base = {span:c.option(node.props,"span",24),offset:c.option(node.props,"offset",0),order:c.option(node.props,"order",0),
-        push:c.option(node.props,"push",0),pull:c.option(node.props,"pull",0)}
-    let sizes = [for (bp in breakpoints where c.has(node.props,bp.key)) {key:bp.key,values:column_values(node.props[bp.key])}];
+    let base = {span:c.option(c.props(node),"span",24),offset:c.option(c.props(node),"offset",0),order:c.option(c.props(node),"order",0),
+        push:c.option(c.props(node),"push",0),pull:c.option(c.props(node),"pull",0)}
+    let sizes = [for (bp in breakpoints where c.has(c.props(node),bp.key)) {key:bp.key,values:column_values(c.props(node)[bp.key])}];
     <div *:c.styled(node,join([for (size in sizes) join([for (field,value in size.values) "dtna-col-" ++ size.key ++ "-" ++ string(field)]," ")]," ")),
-        style:c.style_with(node.props,column_variables("base",base) ++ join([for (size in sizes) column_variables(size.key,size.values)],"") ++
+        style:c.style_with(c.props(node),column_variables("base",base) ++ join([for (size in sizes) column_variables(size.key,size.values)],"") ++
             // the reference's base flex is inline and therefore takes precedence over responsive flex classes.
-            (if (c.has(node.props,"flex")) "flex:" ++ flex_value(node.props.flex) ++ ";" else "")), *c.contents(node)>
+            (if (c.has(c.props(node),"flex")) "flex:" ++ flex_value(c.props(node).flex) ++ ";" else "")), *c.contents(node)>
 }
 fn gap_variables(axis, value) => if (value is map) join([for (key,gap in value)
     "--dtna-row-" ++ string(key) ++ "-" ++ axis ++ ":" ++ c.length(gap) ++ ";"],"")
     else "--dtna-row-base-" ++ axis ++ ":" ++ c.length(value) ++ ";"
 fn gap_classes(axis, value) => if (value is map) [for (key,gap in value) "dtna-row-" ++ string(key) ++ "-" ++ axis] else []
 fn row_view(node) {
-    let gap = gaps(node.props)
-    let align = c.option(node.props,"align","top")
-    let justify = c.option(node.props,"justify","start")
+    let gap = gaps(c.props(node))
+    let align = c.option(c.props(node),"align","top")
+    let justify = c.option(c.props(node),"justify","start")
     let classes = [*gap_classes("x",gap[0]),*gap_classes("y",gap[1]),
         responsive.classes("dtna-row-align",align),responsive.classes("dtna-row-justify",justify)];
-    <div *:c.styled(node,join(classes," ")), style:c.style_with(node.props,
+    <div *:c.styled(node,join(classes," ")), style:c.style_with(c.props(node),
         "--dtna-row-base-x:0px;--dtna-row-base-y:0px;--dtna-row-align-base:flex-start;--dtna-row-justify-base:flex-start;" ++
         gap_variables("x",gap[0]) ++ gap_variables("y",gap[1]) ++
         responsive.variables("dtna-row-align",align,(value) => align_values[c.text(value)]) ++
         responsive.variables("dtna-row-justify",justify,(value) => justify_values[c.text(value)]) ++
-        "flex-wrap:" ++ (if (node.props.wrap == false) "nowrap" else "wrap") ++ ";"), *c.contents(node)>
+        "flex-wrap:" ++ (if (c.props(node).wrap == false) "nowrap" else "wrap") ++ ";"), *c.contents(node)>
 }
 fn breakpoint_rules(key) =>
     ".dtna-row-" ++ key ++ "-x{--dtna-gutter:var(--dtna-row-" ++ key ++ "-x)}" ++
@@ -118,9 +118,9 @@ fn spacing_style(props) {
 }
 fn space(node) {
     let children = [for (child in content(node) where child != null) child];
-    <div *:c.styled(node),style:c.style_with(node.props,spacing_style(node.props)),
+    <div *:c.styled(node),style:c.style_with(c.props(node),spacing_style(c.props(node))),
         *[for (index,child in children) (
-            if (index > 0 and node.props.separator != null) <span class:"dtna-space-separator",["aria-hidden"]:"true",c.render(node.props.separator)> else null,
+            if (index > 0 and c.props(node).separator != null) <span class:"dtna-space-separator",["aria-hidden"]:"true",c.render(c.props(node).separator)> else null,
             <div class:"dtna-space-item",c.render(if (child is element and name(child) == 'dtna_space_slot') child.value else child)>)]>
 }
 pub fn divider(props, child) element^ {
@@ -132,18 +132,18 @@ pub fn divider(props, child) element^ {
 }
 fn divider_view(node) {
     let labelled = len(content(node)) > 0;
-    <div *:c.styled(node,"dtna-divider-" ++ c.text(c.option(node.props,"placement","center")) ++
-            (if (labelled) " dtna-divider-labelled" else "") ++ (if (node.props.dashed) " dtna-divider-dashed" else "") ++ (if (node.props.plain) " dtna-divider-plain" else "")),
-        role:"separator",["aria-orientation"]:c.text(c.option(node.props,"direction","horizontal")),
+    <div *:c.styled(node,"dtna-divider-" ++ c.text(c.option(c.props(node),"placement","center")) ++
+            (if (labelled) " dtna-divider-labelled" else "") ++ (if (c.props(node).dashed) " dtna-divider-dashed" else "") ++ (if (c.props(node).plain) " dtna-divider-plain" else "")),
+        role:"separator",["aria-orientation"]:c.text(c.option(c.props(node),"direction","horizontal")),
         *[if (labelled) (<span class:"dtna-divider-line">,<span class:"dtna-divider-label",*c.contents(node)>,<span class:"dtna-divider-line">) else null]>
 }
-view dtna_layout_parts: <dtna kind:'row' | 'col' | 'space' | 'flex' | 'space-compact' | 'button-group' | 'divider'> {
-    if (~.kind == 'row') row_view(~)
-    else if (~.kind == 'col') column(~)
-    else if (~.kind == 'space') space(~)
-    else if (~.kind == 'flex') <div *:c.styled(~),style:c.style_with(~.props,spacing_style(~.props)),*c.contents(~)>
-    else if (~.kind == 'divider') divider_view(~)
-    else <fieldset *:c.styled(~,"dtna-compact" ++ (if (c.text(~.props.direction) == "vertical") " dtna-compact-vertical" else "") ++
-            (if (~.props.block) " dtna-compact-block" else "")),role:"group",["aria-label"]:~.props.label,
-            *:c.boolean_attr("disabled",~.props.disabled),*c.contents(~)>
+view dtna_layout_parts: <dtna.row> | <dtna.col> | <dtna.space> | <dtna.flex> | <dtna.space_compact> | <dtna.button_group> | <dtna.divider> {
+    if (c.kind(~) == 'row') row_view(~)
+    else if (c.kind(~) == 'col') column(~)
+    else if (c.kind(~) == 'space') space(~)
+    else if (c.kind(~) == 'flex') <div *:c.styled(~),style:c.style_with(c.props(~),spacing_style(c.props(~))),*c.contents(~)>
+    else if (c.kind(~) == 'divider') divider_view(~)
+    else <fieldset *:c.styled(~,"dtna-compact" ++ (if (c.text(c.props(~).direction) == "vertical") " dtna-compact-vertical" else "") ++
+            (if (c.props(~).block) " dtna-compact-block" else "")),role:"group",["aria-label"]:c.props(~).label,
+            *:c.boolean_attr("disabled",c.props(~).disabled),*c.contents(~)>
 }

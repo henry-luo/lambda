@@ -30,8 +30,8 @@ fn marker(item) {
     if (custom != null) c.render(custom) else if (item.loading) icons.render({name:"loading"})^
     else <span class:"dtna-timeline-dot">
 }
-view dtna_timeline: <dtna kind:'timeline'> {
-    let p = ~.props
+view dtna_timeline: <dtna.timeline> {
+    let p = c.props(~)
     let mode = placement(c.option(p,"mode","start"))
     // resolve placement before reversing; legacy pending has no alternating placement.
     let original = [*[for (index,item in c.option(p,"items",[])) {*:item,_side:placement(c.option(item,"placement",c.option(item,"position",

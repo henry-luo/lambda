@@ -973,8 +973,9 @@ These packages implement parts of the engine in Lambda. They load automatically 
 ### 10.4 `doc` — the bundled document viewer
 
 Bare `lambda view` loads `package/doc/doc_viewer.ls` from Lambda home;
-`lambda demo` opens the adjacent `doc_viewer.html` startup splash. The viewer
-browses the current working directory and loads documents on selection. Its
+`lambda demo` with no name opens the adjacent `doc_viewer.html` startup splash.
+Named demos use `lambda demo <name>`; see the [demo catalog](../test/demo/README.md).
+The viewer browses the current working directory and loads documents on selection. Its
 Seti icon font and license ship in `package/doc/icons/`, and its KaTeX stylesheet
 comes from `package/math/`. These application resources belong to the shipped
 `lambda.doc` package (D7.2.4); UI event fixtures remain under `test/ui/`.

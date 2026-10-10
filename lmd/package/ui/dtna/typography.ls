@@ -11,7 +11,7 @@ pub fn descriptor(kind, props, child) element^ {
         *(if (kind == 'title') ["level"] else if (kind == 'link') ["href","target","rel","download"] else [])])^
 }
 fn decorated(node) {
-    let p = node.props
+    let p = c.props(node)
     let children = c.contents(node)
     let strong = if (p.strong) [<strong *children>] else children
     let italic = if (p.italic) [<em *strong>] else strong
@@ -21,22 +21,22 @@ fn decorated(node) {
     let marked = if (p.mark) [<mark *code>] else code;
     if (p.keyboard) [<kbd *marked>] else marked
 }
-view dtna_typography: <dtna kind:'title' | 'text' | 'paragraph' | 'link'> {
-    let p = ~.props
+view dtna_typography: <dtna.title> | <dtna.text> | <dtna.paragraph> | <dtna.link> {
+    let p = c.props(~)
     let level = c.option(p,"level",1)
     let attributes = {*:c.styled(~,"dtna-typography" ++ (if (p.type == null) "" else " dtna-text-" ++ c.text(p.type)) ++
         (if (p.disabled) " dtna-text-disabled" else "")),*:(if (p.disabled) {['aria-disabled']:"true"} else {})}
     let children = decorated(~);
-    if (~.kind == 'title') c.heading({*:attributes,style:c.style_with(p,"font-size:var(--dtna-font-size-heading-" ++ string(level) ++ ");line-height:var(--dtna-font-height-heading-" ++ string(level) ++ ");")},children,level)
-    else if (~.kind == 'text') <span *:attributes,*children>
-    else if (~.kind == 'paragraph') <p *:attributes,*children>
+    if (c.kind(~) == 'title') c.heading({*:attributes,style:c.style_with(p,"font-size:var(--dtna-font-size-heading-" ++ string(level) ++ ");line-height:var(--dtna-font-height-heading-" ++ string(level) ++ ");")},children,level)
+    else if (c.kind(~) == 'text') <span *:attributes,*children>
+    else if (c.kind(~) == 'paragraph') <p *:attributes,*children>
     // null is a present HTML attribute; omit href entirely for a disabled link.
     else <a *:attributes,*:map([for (key in ["href","target","rel"] where p[key] != null and (key != "href" or not p.disabled)) (key,p[key])]),
         tabindex:if (p.disabled) "-1" else p.tabindex,
         *:(if (p.rel == null and p.target == "_blank") {rel:"noopener noreferrer"} else {}),
         *:(if (p.download == true) {download:""} else if (p.download is string) {download:p.download} else {}),*children>
 }
-on click(evt) { if (~.props.disabled) 'prevent-default' else 'pass' }
+on click(evt) { if (c.props(~).disabled) 'prevent-default' else 'pass' }
 pub let css = "
 .dtna-typography{color:inherit}.dtna-text-secondary{color:var(--dtna-text-secondary)}.dtna-text-success{color:var(--dtna-success)}
 .dtna-text-warning{color:var(--dtna-warning)}.dtna-text-danger{color:var(--dtna-error)}.dtna-text-disabled{color:var(--dtna-disabled-text);cursor:default;user-select:none}

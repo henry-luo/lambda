@@ -492,6 +492,29 @@ TEST_F(PdfWriterTest, FillPath) {
     HPDF_Free(doc);
 }
 
+TEST_F(PdfWriterTest, DashPatternsPreserveFractionalLengthsAndRejectInvalidInput) {
+    HPDF_Doc doc = HPDF_New(nullptr, nullptr); ASSERT_NE(doc, nullptr);
+    HPDF_Page page = HPDF_AddPage(doc); ASSERT_NE(page, nullptr);
+    const float fractional[] = {2.5f, 1.25f}, dots[] = {0.0f, 3.5f};
+    EXPECT_EQ(HPDF_Page_SetDashPattern(page, fractional, 2, 0.75f), HPDF_OK);
+    EXPECT_EQ(HPDF_Page_SetDashPattern(page, dots, 2, -0.5f), HPDF_OK);
+    const float zero[] = {0, 0}, negative[] = {2, -1}, nonfinite[] = {2, NAN};
+    for (const float* invalid : {zero, negative, nonfinite}) {
+        EXPECT_EQ(HPDF_Page_SetDashPattern(page, invalid, 2, 0), HPDF_ERROR_INVALID_PARAM);
+    }
+    EXPECT_EQ(HPDF_Page_SetDashPattern(page, nullptr, 2, 0), HPDF_ERROR_INVALID_PARAM);
+    EXPECT_EQ(HPDF_Page_SetDashPattern(page, fractional, -1, 0), HPDF_ERROR_INVALID_PARAM);
+    EXPECT_EQ(HPDF_Page_SetDashPattern(page, fractional, 2, INFINITY), HPDF_ERROR_INVALID_PARAM);
+    EXPECT_EQ(HPDF_Page_SetDashPattern(nullptr, fractional, 2, 0), HPDF_ERROR_INVALID_PARAM);
+    EXPECT_EQ(HPDF_Page_SetDashPattern(page, nullptr, 0, 7), HPDF_OK);
+    const char* output = "temp/pdf_writer_dash.pdf";
+    EXPECT_EQ(HPDF_SaveToFile(doc, output), HPDF_OK); HPDF_Free(doc);
+    EXPECT_TRUE(file_contains(output, "[2.5 1.25] 0.75 d"));
+    EXPECT_TRUE(file_contains(output, "[0 3.5] 3 d"));
+    EXPECT_TRUE(file_contains(output, "[] 0 d"));
+    EXPECT_FALSE(file_contains(output, "[0 0]"));
+}
+
 TEST_F(PdfWriterTest, StrokePath) {
     HPDF_Doc doc = HPDF_New(NULL, NULL);
     HPDF_Page page = HPDF_AddPage(doc);

@@ -1,3 +1,5 @@
+import elements: lambda.ui.dtna.elements
+
 // UI descriptors retain source identity; presentation never owns application data (S12.1.3).
 pub let common_props = ["id", "class", "style", "label", "title", "role", "tabindex"]
 
@@ -56,7 +58,7 @@ pub fn properties(props, allowed: array, kind, attributes = false, family = "dtn
 pub fn node(kind, props, child, allowed = []) element^ {
     let names = properties(props,[*common_props,*allowed],kind,true)^
     let values = validate(kind,props)^;
-    <dtna kind:kind,props:props,*children(child)>
+    elements.create(kind,props,children(child))
 }
 
 pub fn attrs(props) => map([for (key, value in props where contains(["id", "role", "tabindex"], string(key)) or (string(key) == "title" and value is string) or
