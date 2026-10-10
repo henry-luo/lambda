@@ -68,6 +68,33 @@ artifacts retain the installed reference TFM paths and hashes. e-TeX's
 [`middle` definition](https://github.com/TeX-Live/texlive-source/blob/trunk/texk/web2c/etexdir/etex.ch)
 supplies the shared demand, close/open boundary roles and context restoration.
 
+The same original TFM files now supply the bundled radical and finite wide
+accent constructions. `fontmath.ltx` declares CMSY/CMEX slot `0x70` for
+`\sqrtsign`. The existing small surd in `KaTeX_Main` reverses makeFF's
+760-unit translation. CMEX slots `0x70`–`0x73` use Size1–Size4 translations
+810/1110/1410/1710; its extension recipe uses top `0x76` (U+E001, 565), repeat
+`0x75` (U+E000, 605) and bottom `0x74` (U+23B7, 915). These values describe
+font encoding only. TeX82 `make_radical` supplies demand, clearance, the
+selected sign-height rule thickness, baseline and extra top kern. LaTeX/
+amsmath's default `r@@t` supplies scriptscript degrees, `5mu`/`-10mu` kerns
+and `.6*(height-depth)` raise; no MATH degree percentage is substituted.
+
+TeX82 `make_math_accent` selects the last fitting finite CMEX variant,
+retaining its first variant for a narrower nucleus. Hats use slots
+`0x62`–`0x64` and tildes `0x65`–`0x67`, painted as spacing U+02C6/U+02DC in
+existing Size1–Size3. These spacing encodings have no baseline/horizontal
+translation; the combining alternatives do. The larger Size4 accent designs
+are AMS additions and are outside the original CMEX chains. Accent placement
+uses the extension font's x-height at text size in every style. Character
+skew/italic attachment remains unverified; no CMMI companion was added.
+
+`tex_radical_conformance.test.mjs` independently ships 472 root/accent boxes
+with TeX, comparing dimensions, component identities, baselines, sizes and
+rules. It includes lowered nuclei, empty/lowered degrees and all four styles;
+native PNG checks cover tall radical joins and finite accent painting.
+Artifacts record both reference and production resources and reference macro
+hashes. No font or metric files were added for these constructions.
+
 This is an explicitly selected Computer Modern math companion for CMU's
 Computer Modern text outlines. It does not claim that CMU contains a MATH
 table or that CMU glyph bounds equal the original TeX fonts. Advances,

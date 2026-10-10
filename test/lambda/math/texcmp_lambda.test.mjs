@@ -30,6 +30,49 @@ function paintedText(svg) {
   return [...svg.matchAll(/<text\b[^>]*>([^<]*)<\/text>/gu)].map((match) => match[1]);
 }
 
+function assertPaintedRows(png) {
+  for (let y = 0; y < png.height; y++) {
+    const row = png.data.subarray(y * png.width * 4, (y + 1) * png.width * 4);
+    // crop_ink retains faint antialiased edge pixels below 250, including the tip's first row.
+    assert.ok(row.some((v, i) => i % 4 !== 3 && v < 250), `unpainted seam at row ${y}`);
+  }
+}
+
+test('native math painting retains radical recipes and finite wide accents', {
+  skip: missing.length ? `missing tools: ${missing.join(', ')}` : false,
+}, async (t) => {
+  const names = ['SmallRoot', 'FiniteRoot', 'TallRoot', 'IndexedRoot', 'WideHatOne',
+    'WideHatTwo', 'WideHatCap', 'WideTildeCap', 'StyleRoots'];
+  const dir = await compareCases(t, names, path.join(ROOT, 'test/lambda/math/radical_cases.yaml'));
+  for (const name of names) await t.test(name, () => {
+    const svg = fs.readFileSync(path.join(dir, `cases/${name}/lambda.svg`), 'utf8');
+    const text = paintedText(svg);
+    const png = PNG.sync.read(fs.readFileSync(path.join(dir, `cases/${name}/lambda.png`)));
+    assert.ok(png.data.some((v, i) => i % 4 !== 3 && v < 128), 'native ink must survive');
+    if (name === 'TallRoot') {
+      assert.equal(text[0], '\uE001');
+      assert.equal(text.at(-1), '⎷');
+      assert.ok(text.filter((ch) => ch === '\uE000').length > 1, 'repeat pieces must paint');
+      assert.ok(png.height > 6 * 64, 'full radical extent must survive');
+      assertPaintedRows(png);
+    } else if (name.startsWith('Wide')) {
+      assert.deepEqual(text, [name.startsWith('WideHat') ? 'ˆ' : '˜']);
+      const size = name.endsWith('One') ? 1 : name.endsWith('Two') ? 2 : 3;
+      assert.match(svg, new RegExp(`font-family="KaTeX_Size${size}"`));
+      assert.ok(png.width > 20, 'designed accent must paint across its natural width');
+      assertPaintedRows(png);
+    } else if (name === 'StyleRoots') {
+      assert.equal(text.filter((ch) => ch === '√').length, 4);
+      assert.doesNotMatch(svg, /scale\(1 [^1]/, 'root signs retain natural proportions');
+    } else if (name === 'IndexedRoot') {
+      assert.ok(text.includes('3') && text.includes('a') && text.includes('d'));
+    } else {
+      assert.deepEqual(text, ['√']);
+      assert.match(svg, new RegExp(`font-family="${name === 'SmallRoot' ? 'KaTeX_Main' : 'KaTeX_Size4'}"`));
+    }
+  });
+});
+
 test('native math painting retains tall CMEX delimiter assemblies', {
   skip: missing.length ? `missing tools: ${missing.join(', ')}` : false,
 }, async (t) => {
@@ -51,11 +94,7 @@ test('native math painting retains tall CMEX delimiter assemblies', {
     else {
       assert.ok(text.length > 4, 'tips and repeated components must reach native painting');
       assert.ok(png.height > 6 * 64, 'full assemblies must survive beyond their finite designs');
-      for (let y = 0; y < png.height; y++) {
-        const row = png.data.subarray(y * png.width * 4, (y + 1) * png.width * 4);
-        // crop_ink retains faint antialiased edge pixels below 250, including the tip's first row.
-        assert.ok(row.some((v, i) => i % 4 !== 3 && v < 250), `unpainted seam at row ${y}`);
-      }
+      assertPaintedRows(png);
     }
   });
 });

@@ -15,13 +15,14 @@ fn tfm_data(file) binary | error {
     else data
 }
 
-fn parameters(file, required) array | error {
-    let data = tfm_data(file)^
+fn parameters_from(data, file, required) array | error {
     let words = halfword(data, 0)
     let count = halfword(data, 22);
     if (count < required or count > words - 6) error("math: invalid Computer Modern TFM parameter table: " ++ file)
     else [for (i in 0 to (count - 1)) fix_word(data, (words - count + i) * 4)]
 }
+
+fn parameters(file, required) array | error => parameters_from(tfm_data(file)^,file,required)^
 
 fn table_metric(data, file, start, count, index) number | error {
     if (index >= count or (start + index + 1) * 4 > len(data))
@@ -89,7 +90,9 @@ pub fn delimiters() map | error {
         {ch:"↕",small:0x6C,large:0x3F}, {ch:"⇑",small:0x2A,large:0x7E},
         {ch:"⇓",small:0x2B,large:0x7F}, {ch:"⇕",small:0x6D,large:0x77},
         {ch:"⟮",large:0x3A}, {ch:"⟯",large:0x3B},
-        {ch:"⎰",large:0x40}, {ch:"⎱",large:0x41}]
+        {ch:"⎰",large:0x40}, {ch:"⎱",large:0x41},
+        // fontmath.ltx sqrtsign; makeFF translates the small CMSY surd by 760 units.
+        {ch:"√",small:0x70,large:0x70,small_shift:760}]
     // KaTeX fonts/src/fonts/makeFF: encoding and authored translations, in 1000-unit ems.
     let variant_chars = split("()[]⌊⌋⌈⌉{}⟨⟩/\\","")
     let variant_slots = [[0,1,2,3,4,5,6,7,8,9,10,11,14,15],
@@ -99,19 +102,25 @@ pub fn delimiters() map | error {
     let encodings = [*[for (i,slots in variant_slots)
         {family:"KaTeX_Size" ++ string(i + 1),chars:[for (j,slot in slots)
             [slot,variant_chars[j],[810,1110,1410,1710][i]]]}],
+        *[for (i in 0 to 3) {family:"KaTeX_Size" ++ string(i + 1),chars:[[0x70 + i,"√",[810,1110,1410,1710][i]]]}],
+        *[for (i in 0 to 2) {family:"KaTeX_Size" ++ string(i + 1),chars:[[0x62 + i,"ˆ",0],[0x65 + i,"˜",0]]}],
         {family:"KaTeX_Size1",chars:[[12,"∣",606],[13,"∥",606],[63,"⏐",601],[119,"‖",601],
             [120,"↑",600],[121,"↓",600],[126,"⇑",600],[127,"⇓",600]]},
         {family:"KaTeX_Size4",chars:[[48,"⎛",1115],[49,"⎞",1115],[50,"⎡",1115],[51,"⎤",1115],
             [52,"⎣",1115],[53,"⎦",1115],[54,"⎢",601],[55,"⎥",601],
             [56,"⎧",900],[57,"⎫",900],[58,"⎩",0],[59,"⎭",0],
             [60,"⎨",1150],[61,"⎬",1150],[62,"⎪",300],
-            [64,"⎝",1115],[65,"⎠",1115],[66,"⎜",600],[67,"⎟",600]]}]
+            [64,"⎝",1115],[65,"⎠",1115],[66,"⎜",600],[67,"⎟",600],
+            [0x74,"⎷",915],[0x75,"\uE000",605],[0x76,"\uE001",565]]}]
     let encoded = [for (encoding in encodings,p in encoding.chars)
         {slot:p[0],ch:p[1],family:encoding.family,shift:p[2]}];
-    {recipes:[for (d in definitions) {codepoint:ord(d.ch),
+    {recipes:[for (d in definitions) {codepoint:ord(d.ch),small_shift:d.small_shift,
         small:if (d.small == null) [] else [for (data in symbols)
             character_metrics(if (d.roman) roman else data,if (d.roman) "cmr10" else "cmsy",d.small)^],
         chain:character_chain(extension,file,d.large)^}],
+        accents:[for (d in [{cmd:"widehat",slot:0x62},{cmd:"widetilde",slot:0x65}])
+            {*:d,chain:character_chain(extension,file,d.slot)^}],
+        accent_x_height:parameters_from(extension,file,13)^[4] * 1000.0,
         pieces:[for (p in encoded) {*:p,codepoint:ord(p.ch),metrics:character_metrics(extension,file,p.slot)^}]}
 }
 

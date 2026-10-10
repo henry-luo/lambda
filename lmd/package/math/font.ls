@@ -200,7 +200,7 @@ pub fn glyph(profile, cp) map | error {
 fn with_tex_metrics(g, m) => if (m == null) g else
     {*:g, advance:m.width, height:m.height, depth:m.depth, italic:m.italic}
 
-fn delimiter_piece(profile, slot) map | error {
+fn tex_piece(profile, slot) map | error {
     let piece = [for (p in profile.delimiter_data.pieces where p.slot == slot) p][0]
     let face = [for (f in profile.delimiter_faces where f.family == piece.family) f][0]
     let g = lookup(face,face.facts,piece.codepoint);
@@ -220,12 +220,19 @@ pub fn tex_delimiter(profile, cp) {
         let base = lookup({points:profile.delimiter_small_points},profile.delimiter_small_facts,canonical)
         let extension = recipe.chain[len(recipe.chain) - 1].metrics.extension
         let parts = [for (i,slot in extension)
-            if (i < 3 and slot == 0) null else delimiter_piece(profile,slot)^];
+            if (i < 3 and slot == 0) null else tex_piece(profile,slot)^];
         if (base == null and len(recipe.small) > 0) error("math: bundled small delimiter is unavailable")
-        else {small:[for (m in recipe.small) {*:with_tex_metrics(base,m),advance:m.width + m.italic}],
-            variants:[for (v in recipe.chain where v.metrics.extension == null) delimiter_piece(profile,v.slot)^],
+        else {small:[for (m in recipe.small) {*:with_tex_metrics(base,m),advance:m.width + m.italic,
+                source_baseline:recipe.small_shift}],
+            variants:[for (v in recipe.chain where v.metrics.extension == null) tex_piece(profile,v.slot)^],
             top:parts[0], middle:parts[1], bottom:parts[2], repeat:parts[3]}
     }
+}
+
+pub fn tex_accent(profile, command) {
+    let entry = [for (a in profile.delimiter_data.accents where a.cmd == command) a][0];
+    if (entry == null) null else {variants:[for (v in entry.chain) tex_piece(profile,v.slot)^],
+        x_height:profile.delimiter_data.accent_x_height}
 }
 
 fn style_facts(profile, style) => [for (entry in profile.style_faces where entry.style == style) entry.facts][0]

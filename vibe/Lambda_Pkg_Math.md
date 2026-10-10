@@ -1,8 +1,8 @@
 # Lambda Math Package Design
 
 > **Status:** active design; consolidated and checked against the source tree on
-> 2026-10-10, revision `f7aced322` plus the current delimiter-construction and
-> comparison-scale changes. Remaining gaps are recorded in §10.
+> 2026-10-10, revision `4f88dbb4f` plus the current radical and finite-wide-accent
+> changes. Remaining gaps are recorded in §10.
 > **Scope:** static mathematical typesetting through `lambda.doc.math`.
 > **Formal linkage:** **D7.2.4** — package namespace and distribution;
 > **D7.1.1 / D7.1.2v2** — layering and resource acquisition;
@@ -406,12 +406,33 @@ implied by this profile. The nonstandard `\sixptsize` has no approved text
 baseline definition; a continued fraction in that size reports the missing
 definition rather than inventing a strut.
 
-Radicals use a cramped nucleus, the profile's rule/gap/ascender data, and a
-sign adequate for the full nucleus extent. An index uses scriptscript style
-with profile-defined degree placement. The box must include the sign,
-overbar and index. A geometrically scaled sign is not proof of a valid TeX
-radical construction. Complete font-specific radical construction remains
-an audit item in §10.
+Radicals use a cramped nucleus. In the bundled CM companion, TeX82's
+`make_radical` requests a sign for the nucleus's height plus depth, the
+style-dependent clearance and the default rule thickness. Selection uses the
+original symbol-size search, CMEX next-larger chain and, when necessary, its
+top/repeat/bottom recipe. Extension pieces retain their natural proportions;
+the extension font remains text-sized in every math style.
+
+The selected sign's logical height supplies the vinculum thickness and extra
+top clearance. Initial clearance is the default rule thickness plus one
+quarter of the symbol x-height in display style, or one quarter of the
+default rule thickness otherwise. Add half any positive excess of the sign's
+depth over the nucleus extent plus clearance. Align the sign baseline with
+the bottom of the vinculum above the nucleus; the sign's logical depth may
+extend below the nucleus. These are font/algorithm dimensions, not outline
+estimates or image corrections.
+
+An indexed root follows LaTeX/amsmath's default root definition: typeset the
+degree in uncramped scriptscript style, precede it by `5mu`, follow it by
+`-10mu`, and raise it by `.6 * (height - depth)` of the root box. Preserve
+negative kerns, including an empty degree. The full box includes sign,
+vinculum, nucleus and degree. Supplied-font MATH construction and configurable
+degree adjustments remain separate obligations in §10; geometric scaling of
+a complete sign does not establish conformance.
+
+Authored `\rule[raise]{width}{height}` lengths preserve the optional signed
+raise independently of the two mandatory dimensions. The raised/lowered
+rule's logical height and depth participate in surrounding math construction.
 
 ### 6.4 Delimiters
 
@@ -461,6 +482,16 @@ assemblies and the nucleus's attachment point. TeX character accents attach
 scripts to the character nucleus where required; compound accents retain
 their full box. Overline and underline use their proper rule/gap/extents and
 style policies. Above/below annotations reserve their measured space.
+
+Bundled `\widehat` and `\widetilde` follow TeX82's finite CMEX character
+lists. Retain the first design for a narrower nucleus; otherwise choose the
+last design whose logical width does not exceed the nucleus. Stop at the
+third design even for wider content. Use the text-sized extension font in
+every style and its x-height to determine vertical attachment. A wider mark
+from another font or anisotropic stretching would change this declared
+profile. Independent coverage establishes variant selection and placement
+over compound/rule nuclei. Character skew and character-specific script
+attachment still require the font data and broader checks listed in §10.
 
 The supported `\overbracket` / `\underbracket` definition follows
 [mathtools](https://github.com/latex3/mathtools/blob/main/mathtools.dtx):
@@ -615,12 +646,22 @@ Independent checked-in oracles cover:
   translations are reversed before comparing component baselines; they never
   supply the expected layout. Native PNG checks separately verify intact
   assembled tips, brace middles and joins.
+- [Automated radical and wide-accent checks](../test/lambda/math/tex_radical_conformance.test.mjs):
+  472 independently shipped TeX boxes cover square/indexed roots, small and
+  finite surds, tall assemblies, nested roots/fractions, lowered nuclei,
+  empty/lowered degrees and both finite accent chains across all four styles.
+  Compare dimensions, component identities, positions, sizes and painted rules;
+  the reference retains installed macro/TFM and production-resource hashes.
+  Native PNG checks separately exercise all radical pieces, finite accents
+  and indices. Rule nuclei isolate the construction from CMU character
+  metrics and unavailable italic/skew data; this is not a character-accent
+  conformance certificate.
 
 These are independent TeX executions, not a single complete automated
 conformance suite. `\showbox` intentionally emits `! OK` diagnostics and a
 nonzero exit status. A valid run must contain the expected cases and no
 unexpected TeX errors; shell status alone cannot classify it as passed.
-The automated AMS and delimiter checks use successful compilation and shipped
+The automated AMS, delimiter and radical checks use successful compilation and shipped
 position records instead of `\showbox`. They run with the comparison-harness tests;
 automatic checking of the older oracles and wider package coverage remain
 outstanding. Missing pdfLaTeX is an explicit skip, not conformance evidence.
@@ -681,14 +722,15 @@ diagnostics; focused math checks are not an all-green system baseline.
 
 | Evidence as of 2026-10-10 | Result and limits |
 |---|---|
-| Focused math run after the delimiter changes | **28/28**; `temp/math-delimiters/focused-final.log`. |
-| Full geometry corpus after the delimiter changes | **921/921**; `temp/math-delimiters/corpus.json`. Rendering smoke coverage only. |
+| Focused math run after the radical changes | **29/29**; `temp/math-radicals/focused-final.log`. |
+| Full geometry corpus after the radical changes | **921/921**; `temp/math-radicals/corpus-final.json`. Rendering smoke coverage only. |
 | Automated independent AMS/LaTeX relations | **130/130** across **260** TeX boxes; reported `temp/math-conformance-*/evidence.json`. Includes phantom atom classes, middle-boundary binary normalization, shipped numerator positions, source/binary hashes and the installed AMS definition hash. |
 | Automated independent delimiter checks | **820/820** TeX boxes and component-position comparisons; reported `temp/math-delimiter-oracle-*/evidence.json`. Includes source/binary and installed TFM hashes. |
-| Comparison-harness and conformance checks | **1,032/1,032**, no skips; `temp/math-delimiters/comparison-tests-final.log`. Includes native painting, logical point-scale checks and pdfLaTeX/Poppler references; no visual-equality claim. |
+| Automated independent radical/accent checks | **472/472** TeX box, component and rule comparisons; `temp/math-radical-oracle-CpZbOc/evidence.json`. Includes installed macro/TFM, production resource and source/binary hashes. |
+| Comparison-harness and conformance checks | **1,515/1,515**, no skips; `temp/math-radicals/comparison-tests-final.log`. Includes native painting, logical point-scale checks and pdfLaTeX/Poppler references; no visual-equality claim. |
 | Prior independent integral audit | 17 TeX box dumps, **18/18** axis/style/limit relations; retained under `temp/math-closed-integrals/oracle/`. |
 | Prior independent delimiter/logo audits | 27 delimiter boxes plus row-control cases; eight logo boxes. Sources above remain reproducible. |
-| Lambda baseline after the delimiter changes | **6,583/6,584**: input **2,112/2,112**, runtime **4,471/4,472**. The sole failing test is `edit_view_only`: the known boolean `disabled` serialization mismatch plus a failed source-preservation assertion. Math rendering/projection checks pass. A standalone import/export preserves the source, while the full fixture drops inter-formula text; a prior HEAD reproduction also recorded a source round-trip failure. This integration issue remains unresolved. `temp/math-delimiters/baseline.log`, copied result JSON and source probes retain the evidence. |
+| Lambda baseline after the radical changes | **6,583/6,585**: input **2,112/2,112**, runtime **4,471/4,473**. `edit_view_only` fails boolean `disabled` serialization; its math/projection/source assertions pass in this run. `latex_test_latex_phase3_corpus` exceeds the harness's 60-second limit, including when run alone; the previous math package reproduces that timeout on the same host. The earlier source-loss symptom remains unresolved. `temp/math-radicals/baseline.log`, `baseline-initial/`, `latex-timeout-recheck.log` and `latex-head-recheck.log` retain the evidence. |
 
 Older logs from overlapping builds/edits and narrower focused selections are
 not substitute aggregate results. The previous 206-case HTML snapshot scores
@@ -715,7 +757,8 @@ current code, not permission to adopt their present behavior as a new rule.
 |---|---|
 | Hook and other extensible horizontal arrows | Replace hand-drawn head/curl/shaft geometry with the supported package's font-component and glue recipe. Correct hook orientation alone does not establish conformance. |
 | Paired reaction arrows | Derive minimum width, shortening, separation and annotation spacing from the supported AMS/mathtools/mhchem definition. Natural heads and content regressions do not validate those dimensions. |
-| Remaining delimiters, radicals and wide marks | Extend beyond the 26 verified bundled delimiter shapes to unmapped special delimiters (`\arrowvert`, `\Arrowvert`, `\bracevert`) and audit bold/supplied-font profiles. Complete font-specific radical and wide-accent/brace/line-segment construction with required italic/skew data. Whole-glyph stretching in those remaining paths is not conforming. |
+| Remaining delimiters and profiles | Extend beyond the 26 verified bundled delimiter shapes to unmapped special delimiters (`\arrowvert`, `\Arrowvert`, `\bracevert`). Audit named-size/style combinations and bold/supplied-font profiles. |
+| Radicals and wide marks | Complete supplied-font MATH radicals and wide constructions, configurable root-degree adjustments, and package-defined braces/groups/line segments. Bundled radicals and finite CMEX hats/tildes have independent construction evidence; character accents still lack required italic/skew data and broader script/nesting coverage. Whole-glyph stretching in the remaining paths is not conforming. |
 | Accents and operators | Extend independent coverage of glyph attachment, nested accents, character/compound scripts, large-op selection and side/stacked limits across profiles. The public zero `skew` field is not measured skew support. |
 | Arrays, AMS alignments and CD | Derive struts, row/column glue, rule/dash spacing, centering and diagram dimensions from the declared package definitions. Audit optional arguments, ragged rows and unsupported alignment constructs. Current bounded tables are not arbitrary TeX alignment. |
 | Macro expansion and document registers | Extend modulo verification to following scripts, nested font/color macros and configurable math-glue registers. Integrate continued fractions with custom document baseline/strut registers and broaden nested/profile coverage. The default AMS glue and argument declaration scope, parenthesis phantom and cfrac alignment/text-strut contracts now have automated independent evidence. |
@@ -738,16 +781,17 @@ shape, reduced raster diff, or green smoke count cannot close these items.
   expected glyph content, inline baselines, all math styles, profile changes,
   actual font-resource availability and painted geometry need coverage.
 - Extend repeatable independent TeX relations beyond the automated AMS
-  primitives and bundled delimiters; integrate the older box oracles and additional package macros.
+  primitives, bundled delimiters, radicals and finite wide accents; integrate the older box oracles and additional package macros.
   The present checks remain narrower than a comprehensive conformance suite.
 - Verify full document/editor source preservation and generated-font
-  sanitization through UI paths. Math rendering/projection checks pass, but
-  `edit_view_only` fails boolean-attribute serialization and a source-preservation
-  assertion. Its full-context import loses inter-formula text although a
-  standalone import/export succeeds; an older HEAD run also recorded a source
-  round-trip failure. Identify the cause of this context-dependent loss before changing
-  goldens or claiming source preservation. No all-green baseline or complete
-  UI verification is claimed here.
+  sanitization through UI paths. `edit_view_only` still fails boolean-attribute
+  serialization. Its math/projection/source assertions pass in the current
+  run, but earlier full-context imports lost inter-formula text while a
+  standalone import/export succeeded; an older HEAD run also recorded a source
+  round-trip failure. Identify the cause of this intermittent loss before
+  changing goldens or claiming source preservation. Resolve the full LaTeX
+  sample-corpus timeout, which also reproduces with the preceding math package;
+  neither an all-green baseline nor complete UI verification is claimed here.
 - Bound platform-font fallback and standalone portability. A smoke check for
   external font URLs does not prove every resolved platform face is embedded.
   Ordinary-font measurements also retain the host's shaping limitations.
@@ -784,3 +828,4 @@ in this file. Git history retains their detailed implementation records.
 | 2026-10-10 consolidation | Replaced six overlapping proposals/roadmaps with this current design, bounded support contract, verification model and outstanding-work section. Historical plans, file inventories, tuning constants and implementation anecdotes are omitted. |
 | 2026-10-10 AMS primitive continuation | Replaced fixed modulo/strut behavior with AMS/LaTeX definitions, completed continued-fraction alignment/text struts, sized-delimiter classes and ordinary phantom boxing, and restored bundled verbatim's typewriter selection. Added repeatable TeX box/position relations; broader construction and document-register work remains outstanding. |
 | 2026-10-10 delimiter continuation | Replaced bundled delimiter scaling with original TeX variant/assembly selection, completed middle-boundary demand and atom behavior, and restored parenthesis aliases. Added independent DVI geometry and native assembly checks. Corrected the comparison harness's logical point scale; existing Size3/Size4 fonts were reused without adding resources. |
+| 2026-10-10 radical continuation | Replaced bundled whole-surd stretching with TeX's variant/extension and rule construction, restored default indexed-root kern/raise behavior, and selected finite CMEX hats/tildes. Preserved signed optional rule raises. Added shared independent DVI/rule geometry and native radical/accent checks, reusing the existing fonts and metric files. |

@@ -23,7 +23,8 @@ pub fn tex_assembly(recipe, target, scale, atom) {
         *if (recipe.bottom != null) [recipe.bottom] else []]
     let boxes = [for (g in pieces) bx.glyph(g,scale,atom)]
     let entries = [for (i,b in boxes) {box:b, x:0.0,
-        y:sum([for (j in 0 to (i - 1)) boxes[j].height + boxes[j].depth]) + b.height}]
+        // var_delimiter keeps the first component's baseline, including its radical rule height.
+        y:sum([for (j in 0 to (i - 1)) boxes[j].height + boxes[j].depth]) + b.height - boxes[0].height}]
     let result = bx.compose(entries,module.width,atom);
     {*:result, body:<g 'data-math-kind':"tex-delimiter", result.body>}
 }

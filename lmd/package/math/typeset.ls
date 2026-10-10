@@ -266,7 +266,12 @@ fn text_command(n, c) {
 fn command_node(n, c) {
     let key = command_name(string(n.name or n.cmd or ""))
     let items = util.content_items(n)
-    if (key == "rule") rule(<rule_command width: util.text_of(items[0]), height: util.text_of(items[1])>, c)
+    if (key == "rule") {
+        // LaTeX's optional raise precedes the two mandatory dimensions; it is not the width.
+        let start = if (name(items[0]) == 'brack_group') 1 else 0;
+        rule(<rule_command width:util.text_of(items[start],true),height:util.text_of(items[start + 1],true),
+            raise:if (start == 1) util.text_of(items[0],true) else "0pt">,c)
+    }
     else if (key == "genfrac" and len(items) == 6) {
         let style = ["display", "text", "script", "scriptscript"][int(util.text_of(items[3]))]
         fraction(<fraction cmd: "\\genfrac", numer: items[4], denom: items[5],
@@ -493,6 +498,34 @@ fn sized_delimiter(n, c) {
 }
 
 fn radical(n, c) {
+    let recipe = font.tex_delimiter(c.profile,ord("√"))^;
+    if (recipe != null) tex_radical(n,c,recipe)^
+    else font_radical(n,c)^
+}
+
+fn tex_radical(n,c,recipe) {
+    let body = node(n.radicand,{*:c,cramped:true})^
+    let gap = metric(c,if (c.style == "display") "radical_display_style_vertical_gap" else "radical_vertical_gap")
+    let sign = tex_delimiter(recipe,body.height + body.depth + gap + metric(c,"radical_rule_thickness"),c,"mord")
+    // TeX make_radical uses the selected sign's height as the rule thickness, even in scripts.
+    let clearance = gap + max(0.0,sign.depth - body.height - body.depth - gap) / 2.0
+    let top = 0.0 - body.height - clearance - sign.height
+    let result = bx.compose([{box:sign,x:0.0,y:0.0 - body.height - clearance},
+        {box:body,x:sign.width,y:0.0},
+        {box:bx.rule(body.width,sign.height,top),x:sign.width,y:0.0}],sign.width + body.width)
+    let root = {*:result,height:result.height + sign.height};
+    if (n.index == null) root
+    else {
+        // LaTeX/amsmath r@@t: scriptscript degree, 5mu, -10mu, raised .6*(height-depth).
+        let degree = node(n.index,with_style(c,"scriptscript"))^
+        let mu = math_quad(c) / 18.0
+        let offset = degree.width - 5.0 * mu;
+        bx.compose([{box:degree,x:5.0 * mu,y:0.0 - 0.6 * (root.height - root.depth)},
+            {box:root,x:offset,y:0.0}],root.width + offset)
+    }
+}
+
+fn font_radical(n, c) {
     let body = node(n.radicand, {*:c, cramped: true})^
     let thickness = metric(c, "radical_rule_thickness")
     let gap = metric(c, if (c.style == "display") "radical_display_style_vertical_gap" else "radical_vertical_gap")
@@ -545,16 +578,21 @@ fn accent(n, c, attached = null) {
         let ch = sym.get_accent(key)
         if (ch == null) error("math: unsupported accent " ++ key)
         else {
-        let g = font.glyph(c.profile, ord(ch))^
+        let designed = font.tex_accent(c.profile,key)^
+        let g = if (designed != null) null else font.glyph(c.profile, ord(ch))^
         let wide = starts_with(key, "wide") or contains(key, "arrow") or key == "utilde"
-        let mark = if (contains(key, "harpoon") or key == "Overrightarrow") arrow_shape(key, base.width, c)
+        let mark = if (designed != null) (
+            let variants = [for (v in designed.variants where v.advance * text_scale(c) <= base.width) v],
+            bx.glyph(if (len(variants) > 0) variants[len(variants) - 1] else designed.variants[0],text_scale(c)))
+            else if (contains(key, "harpoon") or key == "Overrightarrow") arrow_shape(key, base.width, c)
             else if (contains(key, "arrow")) stretch.glyph(g, base.width, false, scale(c), "mord")^
             else if (wide) stretch.accent(g, base.width, scale(c))^ else bx.glyph(g, scale(c))
         let x = base.accent - mark.accent
         // below-arrow accents must clear the base's descent instead of its top.
         let y = if (starts_with(key, "under") or key == "utilde" or key == "cedilla") base.depth + metric(c, "underbar_vertical_gap") + mark.height
             else if (contains(key,"harpoon") or key == "Overrightarrow") 0.0 - base.height - metric(c,"overbar_vertical_gap") - mark.depth
-            else 0.0 - max(0.0, base.height - metric(c, "accent_base_height"));
+            else 0.0 - max(0.0,base.height - (if (designed != null) designed.x_height * text_scale(c)
+                else metric(c,"accent_base_height")));
         let scripted = if (attached != null and base.character == true) side_scripts(attached, c, base)^ else base
         let result = bx.compose([{box: scripted, x: 0.0, y: 0.0}, {box: mark, x: x, y: y}], scripted.width, base.type);
         if (attached != null and base.character != true) side_scripts(attached, c, result)^ else result
@@ -888,7 +926,7 @@ fn dimension(raw, c) {
 fn rule(n, c) {
     let width = dimension(string(n.width or "0em"), c)
     let height = dimension(string(n.height or "0em"), c)
-    bx.rule(width, height, 0.0 - height)
+    bx.rule(width,height,0.0 - height - dimension(string(n.raise or "0pt"),c))
 }
 
 fn negated(n, c) {

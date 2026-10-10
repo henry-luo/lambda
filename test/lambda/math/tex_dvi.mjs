@@ -24,13 +24,17 @@ export function read_dvi(file) {
     const op = uint(1);
     if (op < 128) glyph(op, true);
     else if (op <= 131) glyph(uint(op - 127), true);
-    else if (op === 132 || op === 137) { sint(4); const width = sint(4); if (op === 132) state.h += width; }
+    else if (op === 132 || op === 137) {
+      const height = sint(4), width = sint(4);
+      if (height > 0 && width > 0) page.rules.push({ x:state.h, y:state.v, width, height });
+      if (op === 132) state.h += width;
+    }
     else if (op <= 136) glyph(uint(op - 132), false);
     else if (op === 138) { /* nop */ }
     else if (op === 139) {
       offset += 44;
       state = { h: 0, v: 0, w: 0, x: 0, y: 0, z: 0 }; stack = [];
-      page = { glyphs: [], markers: [] }; pages.push(page);
+      page = { glyphs: [], rules: [], markers: [] }; pages.push(page);
     } else if (op === 140) assert.equal(stack.length, 0, 'balanced DVI page stack');
     else if (op === 141) stack.push({ ...state });
     else if (op === 142) { assert.ok(stack.length); state = stack.pop(); }

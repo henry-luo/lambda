@@ -219,6 +219,27 @@ DVI, font hashes, source/binary hashes and detailed relations remain under
 node --test test/lambda/math/tex_delimiter_conformance.test.mjs
 ```
 
+`tex_radical_conformance.test.mjs` independently ships 472 TeX boxes for square
+and indexed roots and finite CMEX `\widehat`/`\widetilde` selection. Cases
+span all four styles, small/finite/assembled signs, lowered nuclei, nested
+roots/fractions, and empty/lowered degrees. Dimensions, component identities,
+positions, sizes and rules are checked against actual SVG geometry. Rule
+nuclei isolate construction from unrelated text-font metrics; character
+skew/italic attachment and supplied-font MATH construction remain unverified.
+The shared geometry runner retains reference macro/TFM hashes, existing
+production font/TFM hashes and source/binary hashes under
+`temp/math-radical-oracle-*`. Run it alone with:
+
+```sh
+node --test test/lambda/math/tex_radical_conformance.test.mjs
+```
+
+Nine native cases in `radical_cases.yaml` verify finite and tall surds,
+top/repeat/bottom joins, degrees, all styles and designed hats/tildes. The
+bundled accents intentionally stop at the original third CMEX design; the
+comparison preamble can select a different reference package's wider design.
+Native raster similarity is separate from the matched-profile TeX oracle.
+
 The checks also run the comparison pipeline for both image and reaction-arrow
 fixtures. They require a built `lambda.exe`, verify all eight embedded logos in
 native PNG output, and check the rendered arrow glyphs instead of command text.

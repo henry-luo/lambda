@@ -70,9 +70,11 @@ pub fn attr_or(el, key, default_val) {
 }
 
 // get text content of a leaf element
-pub fn text_of(el) {
+pub fn text_of(el, include_values = false) {
     if (el is string or el is symbol) string(el)
-    else if (el is element or el is array) children_text(el, text_of)
+    // Parsed operators store their token in value; dimension signs are not child text.
+    else if (include_values and el is element and el.value != null) string(el.value)
+    else if (el is element or el is array) children_text(el,(child) => text_of(child,include_values))
     else if (el == null) ""
     else string(el)
 }

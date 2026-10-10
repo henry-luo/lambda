@@ -1,0 +1,10 @@
+# Native painting checks complement independent TeX box/component comparisons.
+SmallRoot: '\sqrt{\vphantom{\rule{0pt}{4pt}}}'
+FiniteRoot: '\sqrt{\vphantom{\rule{0pt}{24pt}}}'
+TallRoot: '\sqrt{\vphantom{\rule{0pt}{60pt}}}'
+IndexedRoot: '\sqrt[3]{\frac{a+b}{c+d}}'
+WideHatOne: '\widehat{\phantom{\rule{3pt}{2pt}}}'
+WideHatTwo: '\widehat{\phantom{\rule{11pt}{2pt}}}'
+WideHatCap: '\widehat{\phantom{\rule{30pt}{2pt}}}'
+WideTildeCap: '\widetilde{\phantom{\rule{30pt}{2pt}}}'
+StyleRoots: '\displaystyle\sqrt{x}+\textstyle\sqrt{x}+\scriptstyle\sqrt{x}+\scriptscriptstyle\sqrt{x}'
