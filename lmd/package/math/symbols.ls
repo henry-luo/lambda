@@ -4,7 +4,9 @@
 let reaction_arrows = {
     xrightleftarrows: {upper: "→", lower: "←", upper_short: 0, lower_short: 0},
     xrightequilibrium: {upper: "⇀", lower: "↽", upper_short: 0, lower_short: 1},
-    xleftequilibrium: {upper: "⇀", lower: "↽", upper_short: 1, lower_short: 0}
+    xleftequilibrium: {upper: "⇀", lower: "↽", upper_short: 1, lower_short: 0},
+    xrightleftharpoons: {upper:"⇀", lower:"↽", upper_short:0, lower_short:0},
+    xleftrightharpoons: {upper:"↼", lower:"⇁", upper_short:0, lower_short:0}
 }
 
 pub fn reaction_arrow(command) => reaction_arrows[command]
@@ -43,7 +45,7 @@ let greek_upper = {
 
 let bin_operators = {
     pm: "±", mp: "∓", times: "×", div: "÷",
-    cdot: "⋅", ast: "∗", star: "⋆", circ: "∘",
+    cdot: "⋅", ast: "∗", star: "⋆", circ: "∘", bigcirc: "◯",
     bullet: "∙", oplus: "⊕", ominus: "⊖", otimes: "⊗",
     oslash: "⊘", odot: "⊙", dagger: "†", ddagger: "‡",
     cap: "∩", cup: "∪", sqcap: "⊓", sqcup: "⊔",
@@ -80,6 +82,7 @@ let relations = {
 // ============================================================
 
 let arrows = {
+    mapsfrom:"↤", longmapsfrom:"⟻",
     leftarrow: "←", rightarrow: "→", uparrow: "↑", downarrow: "↓",
     leftrightarrow: "↔", updownarrow: "↕",
     Leftarrow: "⇐", Rightarrow: "⇒", Uparrow: "⇑", Downarrow: "⇓",
@@ -125,13 +128,15 @@ let misc_symbols = {
     gothicCapitalC: "C", gothicCapitalH: "H", scriptCapitalE: "E",
     doubleStruckCapitalQ: "Q", Bbbk: "k",
     checkmark: "✓", maltese: "✠",
-    degree: "°", copyright: "©",
+    degree: "°", copyright: "©", pounds:"£", textdollar:"$", minuso:"⦵", i:"ı", j:"ȷ",
     dots: "…", ldots: "…", cdots: "⋯",
     vdots: "⋮", ddots: "⋱",
     colon: ":", coloneq: "≔", vert: "∣", Vert: "∥",
     langle: "⟨", rangle: "⟩",
     lceil: "⌈", rceil: "⌉", lfloor: "⌊", rfloor: "⌋",
     lbrace: "{", rbrace: "}",
+    lparen:"(", rparen:")", lbrack:"[", rbrack:"]",
+    lgroup:"⟮", rgroup:"⟯", lmoustache:"⎰", rmoustache:"⎱",
     lvert: "∣", rvert: "∣", lVert: "∥", rVert: "∥"
 }
 
@@ -141,7 +146,7 @@ let misc_symbols = {
 
 let big_operators = {
     sum: "∑", prod: "∏", coprod: "∐",
-    int: "∫", iint: "∬", iiint: "∭", oint: "∮",
+    int: "∫", intop:"∫", iint: "∬", iiint: "∭", oint: "∮", oiint:"∯", oiiint:"∰",
     bigcup: "⋃", bigcap: "⋂", bigsqcup: "⊔",
     bigvee: "⋁", bigwedge: "⋀",
     bigoplus: "⨁", bigotimes: "⨂", bigodot: "⨀",
@@ -160,7 +165,8 @@ let accents = {
     // the direct parser also emits higher derivatives and below-arrow accents.
     dddot: "\u20DB", ddddot: "\u20DC",
     acute: "́", grave: "̀", breve: "̆",
-    check: "̌", mathring: "̊",
+    check: "̌", widecheck:"̌", mathring: "̊", utilde:"̃", doubleacute:"̋", cedilla:"̧",
+    Overrightarrow:"⇒", overleftharpoon:"↼", overrightharpoon:"⇀",
     overleftarrow: "⃖", overrightarrow: "⃗", overleftrightarrow: "⃡",
     underleftarrow: "\u20EE", underrightarrow: "\u20EF", underleftrightarrow: "\u034D"
 }
@@ -209,6 +215,9 @@ pub fn lookup_symbol(cmd) {
 }
 
 pub fn large_symbols() => [for (key, value at big_operators) value]
+
+// The bundled TeX overlay uses the existing multiple integral and big-circle glyphs.
+pub fn closed_integral_base(ch) => if (ch == "∯") "∬" else if (ch == "∰") "∭" else null
 
 // classify a symbol command into atom type
 pub fn classify_symbol(cmd) {

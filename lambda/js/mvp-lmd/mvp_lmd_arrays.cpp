@@ -1,8 +1,10 @@
 #include "mvp_lmd_runtime.h"
 #include "../../runtime/lambda-root-frame.hpp"
 #include "../../runtime/runtime-state.h"
+#include "../../runtime/heap_api.h"
 #include "../../../lib/sort.h"
 #include "../../../lib/mem.h"
+#include "../../../lib/utf.h"
 #include <math.h>
 
 struct MvpLmdSort {
@@ -10,6 +12,149 @@ struct MvpLmdSort {
     Rooted<Item>* values;
     Rooted<Item>* error;
 };
+extern "C" Item mvp_lmd_array_visit(Item owner, Item* args, int64_t count, int64_t method) {
+    if (owner.item == ITEM_NULL || owner.item == ITEM_JS_UNDEFINED || !count || get_type_id(args[0]) != LMD_TYPE_FUNC)
+        return mvp_lmd_fail(LMD_MVP_TYPE, 0);
+    TypeId type = get_type_id(owner);
+    bool reduce = method == LMD_METHOD_REDUCE, map = method == LMD_METHOD_ARRAY_MAP, filter = method == LMD_METHOD_FILTER;
+    RootFrame roots(8);
+    if (!roots.valid()) return ItemError;
+    Rooted<Item> source(roots, owner), callback(roots, args[0]), self(roots, !reduce && count > 1 ? args[1] : Item{.item = ITEM_JS_UNDEFINED}),
+        output(roots, reduce && count > 1 ? args[1] : Item{.item = ITEM_JS_UNDEFINED}), value(roots, ItemNull),
+        key(roots, ItemNull), mapped(roots, ItemNull), length_value(roots, ItemNull);
+    int64_t length = type == LMD_TYPE_ARRAY ? owner.array->length : type == LMD_TYPE_STRING ?
+        utf8_to_utf16_length(owner.get_string()->chars, owner.get_string()->len) : 0;
+    if (type == LMD_TYPE_MAP) {
+        String* name = heap_create_name("length", 6);
+        if (!name) return ItemError;
+        length_value.set(mvp_lmd_class_property(source.get(), Item{.item = s2it(name)}, ItemNull, LMD_PROP_GET, NULL));
+        if (item_is_error(length_value.get())) return length_value.get();
+        length_value.set(mvp_lmd_primitive_to_number(length_value.get()));
+        if (item_is_error(length_value.get())) return length_value.get();
+        double amount = it2d(length_value.get());
+        if (amount > UINT32_MAX) return mvp_lmd_fail(LMD_MVP_RANGE, 0);
+        length = isnan(amount) || amount < 0 ? 0 : (int64_t)trunc(amount);
+    }
+    if (map || filter) output.set(mvp_lmd_array_new(map ? length : 0));
+    if (item_is_error(output.get())) return output.get();
+    bool initialized = count > 1;
+    uint64_t value_home = 0, result_home = 0;
+    for (int64_t index = 0; index < length; index++) {
+        if (type == LMD_TYPE_ARRAY) {
+            if (index >= source.get().array->length || source.get().array->items[index].item == ITEM_JS_DELETED_SENTINEL) continue;
+            value.set(source.get().array->items[index]);
+        } else if (type == LMD_TYPE_STRING) value.set(mvp_lmd_string_at(source.get(), index, LMD_STRING_CHAR));
+        else {
+            key.set(mvp_lmd_number_to_string(index));
+            if (item_is_error(key.get())) return key.get();
+            Item present = mvp_lmd_class_property(source.get(), key.get(), ItemNull, LMD_PROP_HAS, NULL);
+            if (item_is_error(present)) return present;
+            if (!mvp_lmd_truthy(present)) continue;
+            value.set(mvp_lmd_class_property(source.get(), key.get(), ItemNull, LMD_PROP_GET, NULL));
+        }
+        value.set(lambda_item_adopt_scalar_home(value.get(), &value_home));
+        if (item_is_error(value.get())) return value.get();
+        if (reduce && !initialized) {
+            output.set(lambda_item_adopt_scalar_home(value.get(), &result_home)); initialized = true; continue;
+        }
+        Item arguments[4]; int argc = 0;
+        if (reduce) arguments[argc++] = output.get();
+        arguments[argc++] = value.get(); arguments[argc++] = Item{.item = i2it(index)}; arguments[argc++] = source.get();
+        mapped.set(mvp_lmd_class_invoke(callback.get(), self.get(), arguments, argc, Item{.item = ITEM_JS_UNDEFINED}));
+        if (item_is_error(mapped.get())) return mapped.get();
+        if (method == LMD_METHOD_SOME && mvp_lmd_truthy(mapped.get())) return Item{.item = ITEM_TRUE};
+        if (reduce) output.set(lambda_item_adopt_scalar_home(mapped.get(), &result_home));
+        if (map || (filter && mvp_lmd_truthy(mapped.get()))) {
+            Item stored = mvp_lmd_array_store(output.get(), map ? index : output.get().array->length, map ? mapped.get() : value.get());
+            if (item_is_error(stored)) return stored;
+        }
+    }
+    if (reduce && !initialized) return mvp_lmd_fail(LMD_MVP_TYPE, 0);
+    return reduce ? lambda_item_uses_scalar_home(output.get()) ? push_d(it2d(output.get())) : output.get() :
+        method == LMD_METHOD_SOME ? Item{.item = ITEM_FALSE} : output.get();
+}
+extern "C" Item mvp_lmd_array_edit(Item owner, Item* args, int64_t count, int64_t method) {
+    if (get_type_id(owner) != LMD_TYPE_ARRAY) return mvp_lmd_fail(LMD_MVP_TYPE, 0);
+    RootFrame roots(3);
+    if (!roots.valid()) return ItemError;
+    Rooted<Item> target(roots, owner), result(roots, mvp_lmd_array_new(0)), current(roots, ItemNull);
+    if (item_is_error(result.get())) return result.get();
+    if (method == LMD_METHOD_AT) {
+        int64_t length = target.get().array->length;
+        current.set(count ? mvp_lmd_primitive_to_number(args[0]) : Item{.item = i2it(0)});
+        if (item_is_error(current.get())) return current.get();
+        double index = it2d(current.get()); index = isnan(index) ? 0 : trunc(index);
+        if (index < 0) index += length;
+        if (!(index >= 0 && index < length && index < target.get().array->length)) return Item{.item = ITEM_JS_UNDEFINED};
+        Item value = target.get().array->items[(int64_t)index];
+        return value.item == ITEM_JS_DELETED_SENTINEL ? Item{.item = ITEM_JS_UNDEFINED} :
+            lambda_item_uses_scalar_home(value) ? push_d(it2d(value)) : value;
+    }
+    if (method == LMD_METHOD_CONCAT || method == LMD_METHOD_TO_REVERSED) {
+        if (method == LMD_METHOD_TO_REVERSED) count = 0;
+        for (int64_t i = -1; i < count; i++) {
+            current.set(i < 0 ? target.get() : args[i]);
+            bool spread = get_type_id(current.get()) == LMD_TYPE_ARRAY;
+            int64_t length = spread ? current.get().array->length : 1;
+            if (length > UINT32_MAX - result.get().array->length) return mvp_lmd_fail(LMD_MVP_RANGE, 0);
+            for (int64_t j = 0; j < length; j++) {
+                Item value = spread ? current.get().array->items[j] : current.get();
+                if (method == LMD_METHOD_TO_REVERSED && value.item == ITEM_JS_DELETED_SENTINEL)
+                    value.item = ITEM_JS_UNDEFINED;
+                Item stored = mvp_lmd_array_store(result.get(), result.get().array->length, value);
+                if (item_is_error(stored)) return stored;
+            }
+        }
+        if (method == LMD_METHOD_TO_REVERSED) array_reverse_in_place(result.get().array);
+        return result.get();
+    }
+    int64_t length = target.get().array->length, start = method == LMD_METHOD_PUSH ? length : 0, removed = 0;
+    int64_t inserted = method != LMD_METHOD_SPLICE ? count : count > 2 ? count - 2 : 0;
+    if (method == LMD_METHOD_SHIFT) { inserted = 0; removed = length ? 1 : 0; }
+    if (method == LMD_METHOD_SPLICE && count) {
+        current.set(mvp_lmd_primitive_to_number(args[0]));
+        if (item_is_error(current.get())) return current.get();
+        double index = it2d(current.get()); index = isnan(index) ? 0 : trunc(index);
+        start = index < 0 ? (int64_t)fmax(length + index, 0) : (int64_t)fmin(index, length);
+        removed = length - start;
+        if (count > 1) {
+            current.set(mvp_lmd_primitive_to_number(args[1]));
+            if (item_is_error(current.get())) return current.get();
+            double amount = it2d(current.get());
+            removed = isnan(amount) ? 0 : (int64_t)fmin(fmax(trunc(amount), 0), removed);
+        }
+    }
+    if (inserted > UINT32_MAX - (length - removed)) return mvp_lmd_fail(LMD_MVP_RANGE, 0);
+    for (int64_t i = 0; i < removed; i++) {
+        Item stored = mvp_lmd_array_store(result.get(), i, target.get().array->items[start + i]);
+        if (item_is_error(stored)) return stored;
+    }
+    if (inserted > removed) {
+        for (int64_t i = length; i > start + removed;) {
+            i--;
+            Item stored = mvp_lmd_array_store(target.get(), i + inserted - removed, target.get().array->items[i]);
+            if (item_is_error(stored)) return stored;
+        }
+    } else if (inserted < removed) {
+        for (int64_t i = start + removed; i < length; i++) {
+            Item stored = mvp_lmd_array_store(target.get(), i + inserted - removed, target.get().array->items[i]);
+            if (item_is_error(stored)) return stored;
+        }
+    }
+    for (int64_t i = 0; i < inserted; i++) {
+        Item stored = mvp_lmd_array_store(target.get(), start + i, args[i + (method == LMD_METHOD_SPLICE ? 2 : 0)]);
+        if (item_is_error(stored)) return stored;
+    }
+    Item resized = mvp_lmd_array_resize(target.get(), length - removed + inserted);
+    if (item_is_error(resized)) return resized;
+    if (method == LMD_METHOD_SHIFT) {
+        Item value = removed ? result.get().array->items[0] : Item{.item = ITEM_JS_UNDEFINED};
+        // the removed array owns numeric homes; publish the scalar before its root is released.
+        return value.item == ITEM_JS_DELETED_SENTINEL ? Item{.item = ITEM_JS_UNDEFINED} :
+            lambda_item_uses_scalar_home(value) ? push_d(it2d(value)) : value;
+    }
+    return method != LMD_METHOD_SPLICE ? Item{.item = i2it(target.get().array->length)} : result.get();
+}
 static int array_sort_compare(const void* left, const void* right, void* opaque) {
     MvpLmdSort* sort = (MvpLmdSort*)opaque;
     int64_t a = *(const int64_t*)left, b = *(const int64_t*)right;
@@ -35,14 +180,9 @@ static int array_sort_compare(const void* left, const void* right, void* opaque)
                 Item{.item = ITEM_JS_UNDEFINED}, roots.items(), 2, Item{.item = ITEM_JS_UNDEFINED});
             result = lambda_item_resolve_pending_slot(result);
             if (item_is_error(result)) { sort->error->set(result); return 0; }
-            TypeId type = get_type_id(result);
-            double number = type == LMD_TYPE_STRING ? mvp_lmd_string_to_number(result.get_string()) :
-                type == LMD_TYPE_NULL ? 0 : type == LMD_TYPE_UNDEFINED ? NAN :
-                type == LMD_TYPE_BOOL ? (double)(result.item & 1) :
-                type == LMD_TYPE_INT || type == LMD_TYPE_FLOAT ? it2d(result) : NAN;
-            if (type != LMD_TYPE_STRING && type != LMD_TYPE_NULL && type != LMD_TYPE_UNDEFINED &&
-                    type != LMD_TYPE_BOOL && type != LMD_TYPE_INT && type != LMD_TYPE_FLOAT)
-                sort->error->set(mvp_lmd_fail(LMD_MVP_CAPABILITY, 0));
+            result = mvp_lmd_primitive_to_number(result);
+            if (item_is_error(result)) { sort->error->set(result); return 0; }
+            double number = it2d(result);
             order = (number > 0) - (number < 0);
         }
     }

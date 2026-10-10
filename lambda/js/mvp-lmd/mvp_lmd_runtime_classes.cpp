@@ -20,21 +20,34 @@ MvpLmdClass* mvp_lmd_class_record(Item owner) {
     return nominal && nominal->extension == &mvp_lmd_class_extension
         ? (MvpLmdClass*)nominal->extension_data : NULL;
 }
-static Item mvp_lmd_inherited_member(Item owner, const char* key, size_t length, bool* found) {
+static Item mvp_lmd_inherited_member_flags(Item owner, const char* key, size_t length, bool* found, uint8_t* flags, NameRef identity = NULL) {
     *found = false;
     MvpLmdClass* cls = mvp_lmd_class_record(owner);
     if (!cls) return Item{.item = ITEM_JS_UNDEFINED};
     bool statics = get_type_id(owner) == LMD_TYPE_FUNC || owner.map == mvp_lmd_class_values(cls)[2].map;
     TypeNominal* nominal = &cls->nominal;
-    if (statics || owner.map == mvp_lmd_class_values(cls)[1].map) nominal = nominal->base;
+    // intrinsic instance ancestry does not make Object's static methods constructor ancestors.
+    if (statics) nominal = cls->ast ? nominal->base : NULL;
+    else if (owner.map == mvp_lmd_class_values(cls)[1].map) nominal = nominal->base;
     for (; nominal; nominal = nominal->base) {
         if (nominal->extension != &mvp_lmd_class_extension) return mvp_lmd_fail(LMD_MVP_CAPABILITY, 0);
         MvpLmdClass* current = (MvpLmdClass*)nominal->extension_data;
-        Map* properties = mvp_lmd_class_values(current)[statics ? 2 : 1].map;
-        ShapeEntry* field = typemap_hash_lookup((TypeMap*)properties->type, key, (int)length);
-        if (field) { *found = true; return map_shape_field_to_item(properties->data, field); }
+        Item prototype = mvp_lmd_class_values(current)[statics ? 2 : 1];
+        if (prototype.item == ITEM_NULL) continue;
+        Map* properties = prototype.map;
+        ShapeEntry* field = identity ? typemap_hash_lookup_key((TypeMap*)properties->type, identity) :
+            typemap_hash_lookup((TypeMap*)properties->type, key, (int)length);
+        if (field) {
+            *found = true;
+            if (flags) { *flags = field->flags; return ItemNull; }
+            if (field->flags & JSPD_IS_ACCESSOR) return mvp_lmd_fail(LMD_MVP_CAPABILITY, 0);
+            return map_shape_field_to_item(properties->data, field);
+        }
     }
     return Item{.item = ITEM_JS_UNDEFINED};
+}
+static Item mvp_lmd_inherited_member(Item owner, const char* key, size_t length, bool* found) {
+    return mvp_lmd_inherited_member_flags(owner, key, length, found, NULL);
 }
 static Item mvp_lmd_nominal_owner(const void* data) {
     const MvpLmdClass* cls = (const MvpLmdClass*)data;
@@ -49,7 +62,8 @@ static void mvp_lmd_cache_property(MvpLmdPropertyCache* cache, TypeMap* shape,
         if (cache->entries[i].shape == shape) { entry = &cache->entries[i]; break; }
     if (!entry) entry = &cache->entries[cache->next++ % MVP_LMD_PROPERTY_CACHE_SIZE];
     entry->shape = shape; entry->field = field;
-    entry->inherited = field ? ItemNull : inherited; entry->writable = writable;
+    entry->inherited = field ? ItemNull : inherited;
+    entry->writable = writable && (!field || !(field->flags & (JSPD_NON_WRITABLE | JSPD_IS_ACCESSOR)));
     entry->nullable_initializer = nullable_initializer;
     // only ordinary packed fields use the inline cache lane; shared readers own optional layouts.
     entry->offset = field ? field->byte_offset : 0;
@@ -85,9 +99,17 @@ static bool mvp_lmd_class_widen_allocation(MvpLmdClass* cls, String* key, TypeId
 
 extern "C" Item mvp_lmd_class_property(Item owner, Item name, Item value, int64_t operation,
         MvpLmdPropertyCache* cache) {
+    bool strict = (operation & LMD_PROP_STRICT) != 0;
+    operation &= ~LMD_PROP_STRICT;
     bool initializing = operation == LMD_PROP_INITIALIZE;
     if (initializing) operation = LMD_PROP_SET;
     if (get_type_id(owner) == LMD_TYPE_FUNC && !mvp_lmd_class_record(owner)) {
+        if (operation == LMD_PROP_GET || operation == LMD_PROP_CALLEE || operation == LMD_PROP_HAS) {
+            Item method = mvp_lmd_function_method(owner, name.get_string());
+            if (method.item != ITEM_JS_UNDEFINED) return operation == LMD_PROP_HAS ? Item{.item = ITEM_TRUE} : method;
+            if (!owner.function->def && name.get_string()->len == 6 && !memcmp(name.get_string()->chars, "length", 6))
+                return operation == LMD_PROP_HAS ? Item{.item = ITEM_TRUE} : Item{.item = i2it(owner.function->arity)};
+        }
         Item prepared = mvp_lmd_function_prepare(owner);
         if (item_is_error(prepared)) return prepared;
     }
@@ -98,7 +120,7 @@ extern "C" Item mvp_lmd_class_property(Item owner, Item name, Item value, int64_
         bool metadata = constructor || map == mvp_lmd_class_values(cls)[1].map || map == mvp_lmd_class_values(cls)[2].map;
         if (metadata && (operation == LMD_PROP_SET || operation == LMD_PROP_DELETE)) {
             String* key = name.get_string();
-            ShapeEntry* field = typemap_hash_lookup((TypeMap*)map->type, key->chars, key->len);
+            ShapeEntry* field = typemap_hash_lookup_key((TypeMap*)map->type, key);
             if ((!constructor && !cls->owner) ||
                     (constructor && field && (field->flags & JSPD_NON_ENUMERABLE)))
                 return mvp_lmd_fail(LMD_MVP_CAPABILITY, 0);
@@ -109,24 +131,46 @@ extern "C" Item mvp_lmd_class_property(Item owner, Item name, Item value, int64_
         if (operation == LMD_PROP_GET || operation == LMD_PROP_CALLEE ||
                 operation == LMD_PROP_OWN || operation == LMD_PROP_HAS) {
             String* key = name.get_string();
-            ShapeEntry* field = typemap_hash_lookup((TypeMap*)map->type, key->chars, key->len);
+            ShapeEntry* field = typemap_hash_lookup_key((TypeMap*)map->type, key);
             bool found = field != NULL;
-            Item result = found ? map_shape_field_to_item(map->data, field) : Item{.item = ITEM_JS_UNDEFINED};
-            if (!found && operation != LMD_PROP_OWN)
-                result = mvp_lmd_inherited_member(owner, key->chars, key->len, &found);
+            if (field && (field->flags & JSPD_IS_ACCESSOR) &&
+                    (operation == LMD_PROP_GET || operation == LMD_PROP_CALLEE)) return mvp_lmd_fail(LMD_MVP_CAPABILITY, 0);
+            bool presence = operation == LMD_PROP_OWN || operation == LMD_PROP_HAS;
+            Item result = found && !presence ? map_shape_field_to_item(map->data, field) : Item{.item = ITEM_JS_UNDEFINED};
+            if (!found && operation != LMD_PROP_OWN) {
+                uint8_t flags;
+                result = mvp_lmd_inherited_member_flags(owner, key->chars, key->len, &found, presence ? &flags : NULL, key);
+            }
+            if (!found && constructor && operation != LMD_PROP_OWN) {
+                result = mvp_lmd_function_method(owner, key);
+                found = result.item != ITEM_JS_UNDEFINED;
+            }
             if (item_is_error(result)) return result;
             // immutable shapes invalidate on shadowing/retyping; methods remain program-rooted.
             TypeMap* shape = (TypeMap*)map->type;
-            if (cache && !cls->owner && !constructor && found &&
+            if (cache && !presence && !cls->owner && !constructor && found &&
                     (typemap_is_shared_shape(shape) || shape == &cls->shape) &&
                     (field || get_type_id(result) == LMD_TYPE_FUNC)) {
                 mvp_lmd_cache_property(cache, shape, field, result, !metadata);
             }
             if (operation == LMD_PROP_OWN) return Item{.item = b2it(found)};
             if (found) return operation == LMD_PROP_HAS ? Item{.item = ITEM_TRUE} : result;
+            // The nominal walk is complete, including a null prototype; no implicit Object fallback remains.
+            if (map->map_kind != MAP_KIND_ORDERED)
+                return Item{.item = operation == LMD_PROP_HAS ? ITEM_FALSE : ITEM_JS_UNDEFINED};
         }
         if (operation == LMD_PROP_SET) {
-            ShapeEntry* field = typemap_hash_lookup((TypeMap*)map->type, name.get_string()->chars, name.get_string()->len);
+            ShapeEntry* field = typemap_hash_lookup_key((TypeMap*)map->type, name.get_string());
+            uint8_t flags = field ? field->flags : 0;
+            if (!field) {
+                bool found;
+                Item inherited = mvp_lmd_inherited_member_flags(owner, name.get_string()->chars,
+                    name.get_string()->len, &found, &flags, name.get_string());
+                if (item_is_error(inherited)) return inherited;
+            }
+            if (flags & (JSPD_IS_ACCESSOR | JSPD_NON_WRITABLE))
+                return flags & JSPD_IS_ACCESSOR ? mvp_lmd_fail(LMD_MVP_CAPABILITY, 0) :
+                    strict ? mvp_lmd_fail(LMD_MVP_TYPE, 0) : value;
             // classes without nullable initializers need no extra value classification.
             bool nullable_initializer = !metadata && cls->nullable_initializer_count &&
                 mvp_lmd_class_widen_allocation(cls, name.get_string(), get_type_id(value));
@@ -143,14 +187,27 @@ extern "C" Item mvp_lmd_class_property(Item owner, Item name, Item value, int64_
                 map_field_store_int_as_float((char*)map->data + field->byte_offset, value);
                 return value;
             }
+            // the nominal lookup and descriptor checks also serve the physical shape write.
+            if (map->map_kind != MAP_KIND_ORDERED)
+                return map_shape_set_resolved(map, name.get_string(), field, value)
+                    ? value : mvp_lmd_fail(LMD_MVP_MEMORY, 0);
         }
         owner = Item{.map = map};
     }
     switch (operation) {
     case LMD_PROP_GET: case LMD_PROP_CALLEE:
         return mvp_lmd_property_get(owner, name, operation == LMD_PROP_CALLEE);
-    case LMD_PROP_SET: return mvp_lmd_property_set(owner, name, value);
-    case LMD_PROP_DELETE: return mvp_lmd_property_delete(owner, name);
+    case LMD_PROP_SET: {
+        if (strict && get_type_id(owner) == LMD_TYPE_ARRAY && owner.array->type) {
+            ShapeEntry* field = typemap_hash_lookup_key((TypeMap*)owner.array->type, name.get_string());
+            if (field && (field->flags & JSPD_NON_WRITABLE)) return mvp_lmd_fail(LMD_MVP_TYPE, 0);
+        }
+        return mvp_lmd_property_set(owner, name, value);
+    }
+    case LMD_PROP_DELETE: {
+        Item result = mvp_lmd_property_delete(owner, name);
+        return strict && result.item == ITEM_FALSE ? mvp_lmd_fail(LMD_MVP_TYPE, 0) : result;
+    }
     case LMD_PROP_OWN: case LMD_PROP_HAS:
         return mvp_lmd_property_has(owner, name, operation == LMD_PROP_HAS);
     default: return mvp_lmd_object_project(owner, operation - LMD_PROP_KEYS);
@@ -173,6 +230,26 @@ extern "C" Item mvp_lmd_constructor_result(Item value, Item receiver, int64_t de
     if (derived && value.item != ITEM_JS_UNDEFINED) return mvp_lmd_fail(LMD_MVP_TYPE, 0);
     return receiver.item == ITEM_JS_TDZ ? mvp_lmd_fail(LMD_MVP_REFERENCE, 0) : receiver;
 }
+extern "C" Item mvp_lmd_class_initialize_instance(Item constructor, Item receiver) {
+    MvpLmdClass* cls = ((MvpLmdCallable*)constructor.function)->home;
+    RootFrame roots(3);
+    if (!roots.valid()) return ItemError;
+    Rooted<Item> held(roots, constructor), object(roots, receiver), value(roots, ItemNull);
+    uint32_t index = 0;
+    for (AstNode* node = ((AstBlockNode*)cls->ast->body)->statements; node; node = node->next) {
+        if (node->node_type != AST_NODE_FIELD || ((AstClassFieldNode*)node)->is_static) continue;
+        AstClassFieldNode* field = (AstClassFieldNode*)node;
+        Item initializer = cls->initializers[index++];
+        uint64_t home = 0;
+        value.set(lambda_item_adopt_scalar_home(initializer.item == ITEM_JS_UNDEFINED ? initializer :
+            mvp_lmd_class_invoke(initializer, object.get(), NULL, 0, Item{.item = ITEM_JS_UNDEFINED}), &home));
+        if (item_is_error(value.get())) return value.get();
+        Item key = {.item = s2it(((AstIdentNode*)field->key)->name)};
+        Item stored = mvp_lmd_property_set(object.get(), key, value.get());
+        if (item_is_error(stored)) return stored;
+    }
+    return object.get();
+}
 extern "C" Item mvp_lmd_class_invoke(Item callee, Item receiver, Item* arguments,
         int64_t argc, Item new_target) {
     if (get_type_id(callee) != LMD_TYPE_FUNC) return mvp_lmd_fail(LMD_MVP_TYPE, 0);
@@ -188,6 +265,11 @@ extern "C" Item mvp_lmd_class_invoke(Item callee, Item receiver, Item* arguments
         if (new_target.item == ITEM_JS_UNDEFINED) return mvp_lmd_fail(LMD_MVP_TYPE, 0);
         MvpLmdClass* cls = fn->home;
         while (cls->constructor_id < 0 && cls->nominal.base) {
+            if (cls->initializer_count) {
+                MvpLmdClass* base = (MvpLmdClass*)cls->nominal.base->extension_data;
+                self.set(mvp_lmd_class_invoke(mvp_lmd_class_values(base)[0], receiver, arguments, argc, target.get()));
+                return item_is_error(self.get()) ? self.get() : mvp_lmd_class_initialize_instance(held.get(), self.get());
+            }
             cls = (MvpLmdClass*)cls->nominal.base->extension_data;
             held.set(mvp_lmd_class_values(cls)[0]); fn = (MvpLmdCallable*)held.get().function;
         }
@@ -199,9 +281,17 @@ extern "C" Item mvp_lmd_class_invoke(Item callee, Item receiver, Item* arguments
             if (actual == cls && cls->reusable_layout) reusable = cls;
             self.set(mvp_lmd_object_new(reusable && reusable->allocation_shape
                 ? reusable->allocation_shape : &actual->shape, 0));
-            if (item_is_error(self.get()) || cls->constructor_id < 0) return self.get();
+            if (item_is_error(self.get())) return self.get();
+            if (cls->initializer_count) {
+                Item initialized = mvp_lmd_class_initialize_instance(held.get(), self.get());
+                if (item_is_error(initialized)) return initialized;
+            }
+            if (cls->constructor_id < 0) return self.get();
         }
+    } else if (new_target.item != ITEM_JS_UNDEFINED && fn->native_constructor) {
+        if (new_target.item != callee.item) return mvp_lmd_fail(LMD_MVP_CAPABILITY, 0);
     } else if (new_target.item != ITEM_JS_UNDEFINED) {
+        if (fn->non_constructible) return mvp_lmd_fail(LMD_MVP_TYPE, 0);
         const AstFuncNode* ast = (const AstFuncNode*)fn->def;
         if (!ast || (ast->node_type != AST_NODE_FUNC_EXPR && ast->node_type != AST_NODE_FUNC))
             return mvp_lmd_fail(LMD_MVP_TYPE, 0);
@@ -218,7 +308,7 @@ extern "C" Item mvp_lmd_class_invoke(Item callee, Item receiver, Item* arguments
         held.get(), self.get(), target.get());
     result = lambda_item_resolve_pending_slot(result);
     if (item_is_error(result)) return result;
-    if (!fn->constructor && target.get().item != ITEM_JS_UNDEFINED)
+    if (!fn->constructor && !fn->native_constructor && target.get().item != ITEM_JS_UNDEFINED)
         result = mvp_lmd_constructor_result(result, self.get(), false);
     // admitted initializers cannot observe these fields until every store has completed.
     if (reusable && result.item == self.get().item && get_type_id(result) == LMD_TYPE_MAP &&
@@ -238,6 +328,15 @@ extern "C" Item mvp_lmd_instanceof(Item value, Item constructor) {
     MvpLmdClass* cls = mvp_lmd_class_record(constructor);
     if (!cls || get_type_id(constructor) != LMD_TYPE_FUNC)
         return mvp_lmd_fail(get_type_id(constructor) == LMD_TYPE_FUNC ? LMD_MVP_CAPABILITY : LMD_MVP_TYPE, 0);
+    if (!typemap_hash_lookup((TypeMap*)mvp_lmd_class_values(cls)[2].map->type, "prototype", 9))
+        return mvp_lmd_fail(LMD_MVP_TYPE, 0);
+    MvpLmdLibraryState* library = mvp_lmd_program_library(cls->program);
+    if (library && get_type_id(value) == LMD_TYPE_ARRAY) {
+        // Lambda arrays retain their native layout; their fixed JS prototype is program-owned.
+        bool result = cls == &library->object || (cls == &library->array &&
+            value.item != library->values[LMD_LIBRARY_ARRAY_PROTOTYPE].item);
+        return Item{.item = b2it(result)};
+    }
     // fixed class-created links make the shared ancestry predicate exact for admitted instances.
     MvpLmdClass* actual = mvp_lmd_class_record(value);
     bool result = actual && get_type_id(value) == LMD_TYPE_MAP &&

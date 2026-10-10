@@ -2,7 +2,8 @@
 
 This directory retains copied upstream tests and HTML snapshots as reference
 data. Lambda's legacy MathLive renderer, fixed font metrics, compatibility
-probes and markup-comparison runner have been removed (Math5 Phase 12).
+probes and markup-comparison runner have been removed; see the
+[current design and history](../../../vibe/Lambda_Pkg_Math.md).
 The upstream Jest/Playwright tests call MathLive APIs, not Lambda.
 
 The Lambda baseline now exercises the public font-driven SVG renderer:

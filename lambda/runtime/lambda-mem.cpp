@@ -290,6 +290,7 @@ static void gc_finalize_typed_array(JsTypedArray* ta, gc_native_seen_t* seen_nat
 extern "C" void js_regex_map_heap_destroy(Map* map, gc_native_seen_t* seen_native);
 extern "C" void js_collection_map_heap_destroy(Map* map, gc_native_seen_t* seen_native);
 extern "C" void js_generator_map_heap_destroy(Map* map);
+extern "C" void js_iterator_map_heap_destroy(Map* map);
 extern "C" void js_async_frame_map_heap_destroy(Map* map);
 
 static void gc_finalize_js_native_map(Map* map, gc_native_seen_t* seen_native) {
@@ -328,6 +329,7 @@ static void gc_finalize_js_native_map(Map* map, gc_native_seen_t* seen_native) {
     // JSCU9/JSCU10: a collected generator or async-frame carrier frees its
     // interpreter continuations.
     js_generator_map_heap_destroy(map);
+    js_iterator_map_heap_destroy(map);
     js_async_frame_map_heap_destroy(map);
 }
 

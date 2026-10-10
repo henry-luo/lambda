@@ -1,0 +1,13 @@
+% Lambda's bundled-font fallback definition, not the STIX/esint glyph definition.
+% LaTeX ltplain.dtx defines ooalign; TeX82 make_vcenter and make_op place the box.
+% Each row uses its natural glyph size. hfil centers rows at their maximum width.
+% Shared vertical phantoms retain both rows' full height/depth in ooalign's vtop.
+\makeatletter
+\newcommand{\LambdaClosedIntegral}[1]{\mathop{\mathpalette\lambda@closedintegral{#1}}\nolimits}
+\newcommand{\lambda@closedintegral}[2]{\vcenter{\hbox{\ooalign{%
+  \hfil\vphantom{$\m@th#1#2\bigcirc$}$\m@th#1#2$\hfil\cr
+  \hfil\vphantom{$\m@th#1#2\bigcirc$}$\m@th#1\bigcirc$\hfil\cr
+}}}}
+\newcommand{\oiint}{\LambdaClosedIntegral{\iint}}
+\newcommand{\oiiint}{\LambdaClosedIntegral{\iiint}}
+\makeatother

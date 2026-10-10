@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Capture the sixteen-workload expansion and exact Result8 regression contracts."""
+"""Capture MVP expansion phases with frozen workloads and exact release controls."""
 import argparse
 import datetime
 import hashlib
@@ -28,15 +28,21 @@ TARGETS = ('awfy/deltablue', 'awfy/json', 'text/text_search', 'text/three_way_me
     'beng/knucleotide', 'julia/formatted_output', 'jetstream/cube3d',
     'jetstream/navier_stokes', 'jetstream/splay')
 CONTROL_SHA = '5f0ce0ed8d41059e76a65ac9f972f95c0daed9d42ccedb1b419c0c779d10ce16'
+LIBRARY_TARGETS = ('jetstream/raytrace3d', 'text/prettier_ast', 'beng/pidigits',
+    'beng/regexredux', 'text/fast_diff', 'text/hyphen', 'text/microdiff',
+    'text/jq_mix', 'text/jq_records', 'text/jq_bf', 'text/jq_tree')
+LIBRARY_CONTROL_SHA = '990bae9b78b747f85e8ec5053a15a3757c7b5f8f0ac3f868293dcd96dd7f876b'
 FLAGS = dict(JS_EXEC_BACKEND='mir', JS_EXECUTION_BACKEND='mir', JS_MIR_INTERP='0',
     LAMBDA_JS_LARGE_INTERP='0', LAMBDA_EXEC_BACKEND='jit', LAMBDA_TIER='jit')
 
 
-def prepare_new(out, binary, references):
+def prepare_new(out, binary, references, targets=TARGETS, population='new16'):
     specs = {r['suite'] + '/' + r['name']: r
              for r in build_benchmark_list(None, None, include_text=True)}
     rows = []
-    for identifier in TARGETS:
+    inventory = {row['id']: row for row in json.loads(
+        (ROOT / 'test/benchmark/js_mvp_lmd_manifest_v1.json').read_text())['workloads']}
+    for identifier in targets:
         spec = specs[identifier]
         original = Path(spec['js_path'] or spec['ref_js'])
         if spec['suite'] == 'awfy':
@@ -67,12 +73,28 @@ def prepare_new(out, binary, references):
         if expanded != original:
             helper = original.parent / original.read_text().splitlines()[0].split()[-1]
             sources.append({'original': str(helper), 'sha256': sha(helper)})
-        if identifier in ('beng/revcomp', 'beng/knucleotide'):
-            data = Path('test/benchmark/beng/input/fasta_1000.txt')
-            sources.append({'input': str(data), 'sha256': sha(data)})
+        for data in inventory[identifier]['inputs']:
+            path = Path(data['path'])
+            if sha(path) != data['sha256']:
+                raise ValueError('input differs from manifest: ' + str(path))
+            sources.append({'input': str(path), 'sha256': sha(path)})
+        if spec['suite'] == 'text' and spec['name'].startswith('jq_'):
+            # The jq driver reads its filter and optional data outside the timed region.
+            call = re.search(r'runJqBenchmark\("([^"]+)", "(?:null|json|raw)", (null|"[^"]+")', original.read_text())
+            if not call or call.group(1) != spec['name']:
+                raise ValueError('unrecognized jq input contract: ' + identifier)
+            inputs = [ROOT / 'test/benchmark/text/jq' / (spec['name'][3:] + '.jq')]
+            if call.group(2) != 'null':
+                inputs.append(ROOT / json.loads(call.group(2)))
+            for path in inputs:
+                frozen = out / 'inputs' / path.relative_to(ROOT)
+                frozen.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(path, frozen)
+                sources.extend([{'input': str(path), 'sha256': sha(path)},
+                                {'frozen': str(frozen), 'sha256': sha(frozen)}])
         commands = {'node': [shutil.which('node'), str(script)],
                     'candidate': [binary, 'js', '--runtime=mvp-lmd', '--no-log', str(script)]}
-        row = dict(id=identifier, population='new16', contract=contract,
+        row = dict(id=identifier, population=population, contract=contract,
                    pending=pending, sources=sources, commands=commands, samples=[])
         if references:
             untyped, _ = mir_script_variants(spec)
@@ -93,7 +115,8 @@ def prepare_new(out, binary, references):
             if spec['suite'] == 'jetstream':
                 row['lambda_expected'] = {'cube3d': '3d-cube: PASS',
                     'navier_stokes': 'navier-stokes: PASS (checksum=77)',
-                    'splay': 'splay: PASS (nodes=8000)'}[spec['name']]
+                    'splay': 'splay: PASS (nodes=8000)',
+                    'raytrace3d': '3d-raytrace: PASS (pixels=7200)'}.get(spec['name'], row['lambda_expected'])
             row['lambda_variant'] = 'canonical .ls with annotations' if re.search(
                 r':\s*(?:int|float|u32)\b', path.read_text()) else 'untyped canonical .ls'
             row['lambda_comparability'] = {
@@ -131,6 +154,46 @@ def prepare_previous(out, baseline, binary, control):
     return rows
 
 
+def prepare_phase29(out, binary, control):
+    """Retain each accepted source/timer/oracle, including the older value-printing CLI."""
+    summary_path = ROOT / 'temp/mvp_expansion/final-stage25.json'
+    summary = json.loads(summary_path.read_text())
+    if summary['candidate_sha256'] != LIBRARY_CONTROL_SHA:
+        raise ValueError('phase29 summary has a different control')
+    rows = []
+    for cohort in ('prior60', 'new16'):
+        evidence = summary['captures'][cohort]
+        path = summary_path.parent / evidence['path']
+        if sha(path) != evidence['sha256']:
+            raise ValueError('phase29 capture changed: ' + str(path))
+        record = json.loads(path.read_text())
+        if record['metadata']['candidate']['sha256'] != LIBRARY_CONTROL_SHA:
+            raise ValueError('phase29 capture has a different control')
+        for previous in record['rows']:
+            if previous['status'] != 'ok':
+                raise ValueError('phase29 workload was not validated: ' + previous['id'])
+            command = previous['commands']['candidate'][:]
+            sources = previous['sources'][:]
+            for source in sources:
+                original = next(source[key] for key in ('frozen', 'original', 'input', 'reference', 'record') if key in source)
+                if sha(original) != source['sha256']:
+                    raise ValueError('phase29 dependency changed: ' + original)
+            if '-p' not in command:
+                index = next(i for i, argument in enumerate(command) if argument.endswith('.js'))
+                script = out / ('prior_' + previous['id'].replace('/', '_') + '.js')
+                shutil.copy2(command[index], script); command[index] = str(script)
+                sources.append({'frozen': str(script), 'sha256': sha(script)})
+            sources.append({'record': str(path), 'sha256': sha(path)})
+            commands = {lane: [executable] + command[1:] for lane, executable in
+                [('candidate', binary), ('control', control), ('control_peer', control)]}
+            rows.append(dict(id=previous['id'], population='prior60' if cohort == 'prior60' else 'prior16',
+                contract=previous['contract'], expected=previous['expected'], sources=sources,
+                commands=commands, samples=[], pending=[]))
+    if len(rows) != 76 or len({row['id'] for row in rows}) != 76:
+        raise ValueError('phase29 must retain 76 distinct contracts')
+    return rows
+
+
 def capture(row, lane, iteration, out, environment, timeout):
     command = row['commands'][lane][:]
     env = environment.copy()
@@ -142,7 +205,7 @@ def capture(row, lane, iteration, out, environment, timeout):
         env['LAMBDA_MIR_DUMP_PATH'] = str(mir)
     result = run_once(command[0], '', timeout, language='lambda' if lane == 'lambda_untyped' else 'js',
         command=command, environment=env, strict_timing=True,
-        exact_stdout=row['population'] == 'new16' and lane != 'lambda_untyped', capture_output=True)
+        exact_stdout=row['population'] != 'prior60' and lane != 'lambda_untyped', capture_output=True)
     for stream in ('stdout', 'stderr'):
         (out / (stem + '.' + stream)).write_text(result.pop(stream, ''))
     output = result.pop('stable_stdout', '')
@@ -175,12 +238,14 @@ def capture(row, lane, iteration, out, environment, timeout):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--phase', choices=['expansion', 'library'], default='expansion')
     parser.add_argument('--candidate', default='lambda.exe')
-    parser.add_argument('--control', default='temp/mvp_expansion/control.exe')
+    parser.add_argument('--control')
     parser.add_argument('--baseline-dir', default='temp/mvp_regressions_20261009/accepted')
-    parser.add_argument('--population', choices=['new16', 'prior60', 'all'], default='all')
+    parser.add_argument('--population', choices=['new16', 'prior60', 'new11', 'prior76', 'all'], default='all')
     parser.add_argument('--bench', help='comma-separated exact workload IDs')
-    parser.add_argument('--runs', type=int, default=15)
+    parser.add_argument('--runs', type=int, default=15,
+        help='measured repeats after preflight; 0 validates outputs/backend without a timing comparison')
     parser.add_argument('--timeout', type=int, default=180)
     parser.add_argument('--out', default='temp/mvp_expansion/capture')
     parser.add_argument('--prepare-only', action='store_true')
@@ -188,21 +253,26 @@ def main():
     args = parser.parse_args()
     os.chdir(ROOT)
     out = Path(args.out).resolve()
-    if not out.is_relative_to(ROOT / 'temp') or args.runs < 1:
-        parser.error('use an output below temp/ and positive run count')
+    if not out.is_relative_to(ROOT / 'temp') or args.runs < 0:
+        parser.error('use an output below temp/ and nonnegative run count')
     out.mkdir(parents=True, exist_ok=True)
     binary = out / 'candidate.exe'
     if binary.resolve() != Path(args.candidate).resolve():
         shutil.copy2(args.candidate, binary)
     check_release_build(exe_path=str(binary), log_path=str(out / 'release.log'))
-    control = Path(args.control).resolve()
+    library = args.phase == 'library'
+    control = Path(args.control or ('temp/mvp_library/control.exe' if library else 'temp/mvp_expansion/control.exe')).resolve()
+    if args.population not in (('new11', 'prior76', 'all') if library else ('new16', 'prior60', 'all')):
+        parser.error('population does not belong to the selected phase')
     rows = []
-    if args.population in ('new16', 'all'):
-        rows.extend(prepare_new(out, str(binary), args.lambda_reference))
-    if args.population in ('prior60', 'all'):
-        if sha(control) != CONTROL_SHA:
-            parser.error('control differs from the accepted Result8 binary')
-        rows.extend(prepare_previous(out, Path(args.baseline_dir), str(binary), str(control)))
+    if args.population in ('new16', 'new11', 'all'):
+        rows.extend(prepare_new(out, str(binary), args.lambda_reference,
+            LIBRARY_TARGETS if library else TARGETS, 'new11' if library else 'new16'))
+    if args.population in ('prior60', 'prior76', 'all'):
+        if sha(control) != (LIBRARY_CONTROL_SHA if library else CONTROL_SHA):
+            parser.error('control differs from the accepted phase binary')
+        rows.extend(prepare_phase29(out, str(binary), str(control)) if library else
+            prepare_previous(out, Path(args.baseline_dir), str(binary), str(control)))
     if args.bench:
         selected = set(args.bench.split(','))
         rows = [r for r in rows if r['id'] in selected]
@@ -217,10 +287,10 @@ def main():
         revision=subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip(),
         platform=platform.platform(), machine=platform.machine(),
         control={'path': str(control), 'sha256': sha(control)} if control.exists() else None,
-        runs=args.runs, warmups=1, flags=FLAGS,
+        runs=args.runs, warmups=1, validation_only=args.runs == 0, flags=FLAGS, phase=args.phase,
         node_version=subprocess.check_output(['node', '--version'], text=True).strip(),
         node_sha256=sha(shutil.which('node')),
-        timing='Script self-timing for new16; exact entry timers for prior60; process wall time separate. '
+        timing='Script self-timing except exact archived entry timers for prior60; process wall time separate. '
                'Fresh processes; initial MIR compilation excluded; Node in-workload tiering included.'),
         'rows': rows}
     def save():
@@ -237,8 +307,8 @@ def main():
             save()
         if valid:
             for iteration in range(1, args.runs + 1):
-                lanes = list(permutations[(iteration - 1) % 6]) if row['population'] == 'prior60' else list(row['commands'])
-                if row['population'] == 'new16':
+                lanes = list(permutations[(iteration - 1) % 6]) if 'control' in row['commands'] else list(row['commands'])
+                if 'control' not in row['commands']:
                     offset = iteration % len(lanes)
                     lanes = lanes[offset:] + lanes[:offset]
                 for lane in lanes:
@@ -247,10 +317,10 @@ def main():
                 if not valid:
                     break
         row['status'] = 'ok' if valid and not row['pending'] else 'pending_contract' if valid else 'failed'
-        if valid:
+        if valid and args.runs:
             row['median_ms'] = {lane: statistics.median(s['exec_ms'] for s in row['samples']
                 if s['lane'] == lane and s['round']) for lane in row['commands']}
-            if row['population'] == 'prior60':
+            if 'control' in row['commands']:
                 for lane in ('candidate', 'control_peer'):
                     pairs = [{'control': next(s for s in row['samples']
                               if s['lane'] == 'control' and s['round'] == i),

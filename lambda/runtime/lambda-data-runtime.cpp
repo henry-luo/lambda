@@ -2683,7 +2683,7 @@ Map* map_with_region_type_tl(LambdaRegion* region, TypeMap* map_type,
 
 // Empty map types have no field storage. Root the new map while allocating
 // nonempty storage because the data-zone allocation can collect and move it.
-static Map* map_fill_reserve_data(Map* map) {
+Map* map_fill_reserve_data(Map* map) {
     if (!map || map->data) return map;
     TypeMap* map_type = (TypeMap*)map->type;
     if (map_type->byte_size == 0) return map;
@@ -2693,6 +2693,7 @@ static Map* map_fill_reserve_data(Map* map) {
     map = rooted_map.get();
     if (!data) return NULL;
     map->data = data;
+    map->data_cap = map_type->byte_size;
     return map;
 }
 

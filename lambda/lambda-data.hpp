@@ -1043,6 +1043,16 @@ static inline ShapeEntry* typemap_hash_lookup(TypeMap* tm, const char* key, int 
     return typemap_hash_lookup_by_hash(tm, key, key_len, typemap_name_hash(key, key_len));
 }
 
+// Text names retain canonical byte identity; JS symbol/private keys use NameId.
+static inline ShapeEntry* typemap_hash_lookup_key(TypeMap* tm, String* key) {
+    if (!key) return NULL;
+    const NameMeta* meta = property_key_meta(key);
+    if (meta && meta->key_kind != NAME_KEY_STRING)
+        return typemap_hash_lookup_by_name_id(tm, meta->name_id, meta->hash);
+    // canonical pooled names already carry the shared FNV hash; unpooled text uses the byte fallback.
+    return typemap_hash_lookup_by_hash(tm, key->chars, key->len, meta ? meta->hash : 0);
+}
+
 static inline ShapeEntry* typemap_hash_lookup_idless(TypeMap* tm,
         const char* key, int key_len) {
     // A complete table proves a missing spelling has no id-less entry either;

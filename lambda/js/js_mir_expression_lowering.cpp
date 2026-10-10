@@ -8542,7 +8542,7 @@ static MirValue jm_emit_call_expression(JsMirTranspiler* mt,
             // receiver/key pair; probing by emitting the member expression a
             // second time duplicates observable receiver evaluation.
             bool can_reuse_reference = !m->optional && !call->optional &&
-                !jm_has_optional_chain(m->object) &&
+                !js_ast_has_optional_chain(m->object) &&
                 !args_have_spread;
             JsMirReference named_ref;
             memset(&named_ref, 0, sizeof(named_ref));
@@ -8595,7 +8595,7 @@ static MirValue jm_emit_call_expression(JsMirTranspiler* mt,
                     mt, (JsAstNode*)m->property, method_key_name);
             }
 
-            bool receiver_optional = m->optional || jm_has_optional_chain(m->object);
+            bool receiver_optional = m->optional || js_ast_has_optional_chain(m->object);
             if (!receiver_optional) {
                 jm_callr_1(mt, "js_require_object_coercible", MIR_T_I64, recv);
                 jm_emit_error_lane_propagate_check(mt);
@@ -8791,7 +8791,7 @@ static MirValue jm_emit_call_expression(JsMirTranspiler* mt,
 
     // Optional chaining propagation: if callee is from an optional chain,
     // it may be undefined from short-circuiting — skip the call.
-    if (!call->optional && jm_has_optional_chain(call->callee)) {
+    if (!call->optional && js_ast_has_optional_chain(call->callee)) {
         return jm_emit_call_item_value(mt, call,
             jm_emit_optional_function_call(mt, callee, call, arg_count,
                 fallback_has_spread, "optpc", "optpk"));
@@ -8899,7 +8899,7 @@ static MirValue jm_emit_member_value(JsMirTranspiler* mt,
 
     // Optional chains retain lazy key evaluation below. All ordinary members
     // construct one Reference and use its shared post-evaluation decision.
-    if (!mem->optional && !jm_has_optional_chain(mem->object)) {
+    if (!mem->optional && !js_ast_has_optional_chain(mem->object)) {
         JsMirReference ref = jm_emit_reference(mt, (JsAstNode*)mem);
         MIR_reg_t value = jm_emit_get_value(mt, &ref);
         // Reference users such as compound assignment own their completion

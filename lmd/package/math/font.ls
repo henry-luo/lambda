@@ -13,7 +13,7 @@ let alphabets = {
     italic: [0x1D434, 0x1D44E, 0], bold: [0x1D400, 0x1D41A, 0x1D7CE],
     bolditalic: [0x1D468, 0x1D482, 0], script: [0x1D49C, 0x1D4B6, 0],
     fraktur: [0x1D504, 0x1D51E, 0], double: [0x1D538, 0x1D552, 0x1D7D8],
-    sans: [0x1D5A0, 0x1D5BA, 0x1D7E2], mono: [0x1D670, 0x1D68A, 0x1D7F6]
+    sans: [0x1D5A0, 0x1D5BA, 0x1D7E2], sansitalic:[0x1D608,0x1D622,0], mono: [0x1D670, 0x1D68A, 0x1D7F6]
 }
 // Unicode preserves these alphabet members in the Letterlike Symbols block.
 let exceptions = {
@@ -48,6 +48,8 @@ pub fn variant(ch, style) {
 
 // Share command spellings between rendering and style-face acquisition.
 let styled_commands = [
+    {cmd:"\\rm", style:"normal"}, {cmd:"\\it", style:"italic"}, {cmd:"\\bf", style:"bold"},
+    {cmd:"\\sf", style:"sans"}, {cmd:"\\tt", style:"mono"},
     {cmd: "\\mathrm", style: "normal"},
     {cmd: "\\mathbf", style: "bold"},
     {cmd: "\\boldsymbol", style: "bolditalic"},
@@ -57,24 +59,38 @@ let styled_commands = [
     {cmd: "\\mathfrak", style: "fraktur"},
     {cmd: "\\mathbb", style: "double"},
     {cmd: "\\mathsf", style: "sans"},
+    {cmd: "\\mathsfit", style: "sansitalic"},
     {cmd: "\\mathtt", style: "mono"},
-    {cmd: "\\operatorname", style: "normal"}
+    {cmd: "\\operatorname", style: "normal"},
+    {cmd:"\\textbf",style:"bold"}, {cmd:"\\textit",style:"italic"}, {cmd:"\\emph",style:"italic"},
+    {cmd:"\\textsf",style:"sans"}, {cmd:"\\texttt",style:"mono"}
 ]
 
 pub fn command_variant(cmd) => [for (entry in styled_commands where entry.cmd == cmd) entry.style][0]
+
+fn source_items(node) {
+    let attrs = ["value", "name", "cmd", "text", "base", "sub", "sup", "numer", "denom",
+        "radicand", "index", "arg", "content", "body", "left", "right", "above", "below",
+        "label", "over", "under", "delim", "annotation", "upper", "lower", "target", "display", "script", "scriptscript"];
+    if (node is array) node
+    else if (node is element) [*[for (attr in attrs) node[attr]], *content(node)] else []
+}
 
 fn collect(node) {
     if (node is string or node is symbol) {
         let text = string(node)
         let command = if (slice(text, 0, 1) == "\\") slice(text, 1, len(text)) else text
-        text ++ (sym.lookup_symbol(text) or "") ++ (sym.get_accent(command) or "")
-    } else if (node is array) util.str_join([for (child in node) collect(child)], "")
-    else if (node is element) {
-        let attrs = ["value", "name", "cmd", "text", "base", "sub", "sup", "numer", "denom",
-            "radicand", "index", "arg", "content", "body", "left", "right", "above", "below",
-            "label", "over", "under", "delim", "annotation", "upper", "lower", "target", "display", "script", "scriptscript"];
-        util.str_join([for (attr in attrs) collect(node[attr])], "") ++ collect(content(node))
-    } else ""
+        text ++ (sym.lookup_symbol(text) or "") ++ (sym.get_accent(command) or "") ++
+            (if (command == "KaTeX") "KATEX" else "")
+    } else util.str_join([for (child in source_items(node)) collect(child)], "") ++
+            (if (name(node) == 'verbatim' and node.starred) "␣" else "")
+}
+
+fn collect_styles(node) {
+    // Literal command spellings inside verbatim/text are not font declarations.
+    let style = if (node is element and name(node) == 'verbatim') "mono"
+        else if (node is element) command_variant(string(node.cmd or node.name or "")) else null;
+    [*if (style != null) [style] else [], *[for (child in source_items(node), request in collect_styles(child)) request]]
 }
 
 // Keep the CSS alias and style alongside measured geometry so SVG text selects the same face.
@@ -95,34 +111,38 @@ pub fn prepare(ast, options) map | error {
     let variant_families = if (use_bundled) bundled.VARIANT_FAMILIES else {sans: "sans-serif", mono: "monospace"}
     // One batch owns all glyphs used by this formula; no mutable last-font state.
     let source = collect(ast)
-    let chars = unique(split(source ++ "()[]{}|‖⌈⌉⌊⌋⟨⟩√̂̃̄⃗̇̈⏞⏟←→↔⇀↽− /", ""))
-    let styles = ["normal", "auto", "italic", "bold", "bolditalic", "script", "fraktur", "double", "sans", "mono"]
+    let closed_composites = if (use_bundled) [for (ch in unique(split(source,""))
+        where sym.closed_integral_base(ch) != null) ch] else []
+    let components = util.str_join([for (ch in closed_composites) sym.closed_integral_base(ch) ++ "◯"],"")
+    let chars = unique(split(source ++ components ++ "()[]{}|‖⌈⌉⌊⌋⟨⟩√̂̃̄⃗̇̈⏞⏟←→↔⇀↽− /", ""))
+    let styles = ["normal", "auto", "italic", "bold", "bolditalic", "script", "fraktur", "double", "sans", "sansitalic", "mono"]
     let points = unique([for (ch in chars, style in styles) variant(ch, style)])
     let large_points = [for (ch in sym.large_symbols() where contains(chars, ch)) ord(ch)]
+    let delimiter_data = if (use_bundled) tex_metrics.delimiters()^ else null
+    let delimiter_small_points = [for (r in delimiter_data.recipes where len(r.small) > 0) r.codepoint]
     let native = measure({font_family: family, font_size: UNITS}, points, faces, family)
     if (native == null) error("math: cannot read selected font: " ++ family)
     else {
     let facts = {*:native, constants: if (native.has_math) native.constants else fallback.constants(native.font_metrics)}
     // Ordinary fonts put italic/bold letters in separate faces, not Unicode math alphabets.
     // Only request style faces used by this formula; each query owns its font resources.
-    let needed_styles = unique(["italic", *[for (entry in styled_commands where contains(source, entry.cmd)) entry.style],
-        *[for (entry in [{cmd: "\\textbf", style: "bold"}, {cmd: "\\textit", style: "italic"},
-            {cmd: "\\emph", style: "italic"}, {cmd: "\\textsf", style: "sans"}, {cmd: "\\texttt", style: "mono"}]
-            where contains(source, entry.cmd)) entry.style]])
+    let needed_styles = unique(["italic",*collect_styles(ast)])
     let style_faces = if (native.has_math) [] else [for (style in needed_styles where style != "normal")
         (let weight = if (style == "bold" or style == "bolditalic") 700 else 400,
-         let slant = if (style == "italic" or style == "bolditalic") "italic" else "normal",
-         let style_family = variant_families[style] or family,
+         let slant = if (contains(["italic","bolditalic","sansitalic"],style)) "italic" else "normal",
+         let style_family = variant_families[if (style == "sansitalic") "sans" else style] or family,
          {style: style, facts: measure({font_family: style_family, font_size: UNITS,
             font_weight: weight, font_style: slant}, points, faces, style_family)})]
     // Resolve only absent source characters; never replace a Latin variable with
     // a different font's mathematical-alphabet glyph just to obtain italics.
-    let fallback_points = [for (ch in chars where lookup({points: points}, native, ord(ch)) == null) ord(ch)]
+    // Composed symbols acquire only their bundled components, never a platform glyph.
+    let fallback_points = [for (ch in chars where not contains(closed_composites, ch) and
+        lookup({points: points}, native, ord(ch)) == null) ord(ch)]
     let fallback_facts = if (len(fallback_points) == 0) null else
         measure({font_family: if (use_bundled) bundled.SYMBOL_FAMILIES else family,
             font_size: UNITS, fallback: true}, fallback_points, faces)
     // Keep paired harpoons in one bundled face instead of unrelated system fallbacks.
-    let reaction_points = if (use_bundled) [ord("⇀"), ord("↽")] else []
+    let reaction_points = if (use_bundled) [ord("⇀"), ord("↽"), ord("↼"), ord("⇁")] else []
     if (facts.constants.script_percent_scale_down <= 0 or facts.constants.script_script_percent_scale_down <= 0)
         error("math: selected font has invalid script scale constants")
     else {facts: facts, points: points, family: facts.font_family,
@@ -130,6 +150,14 @@ pub fn prepare(ast, options) map | error {
         fallback_points: fallback_points, fallback_facts: fallback_facts, faces: faces,
         reaction_points: reaction_points,
         reaction_facts: if (use_bundled) measure({font_family:"KaTeX_Main", font_size:UNITS}, reaction_points, faces, "KaTeX_Main") else null,
+        closed_composites: closed_composites,
+        delimiter_data:delimiter_data,
+        delimiter_faces:[for (family in unique([for (p in delimiter_data.pieces) p.family]))
+            (let points = unique([for (p in delimiter_data.pieces where p.family == family) p.codepoint]),
+            {family:family,points:points,facts:measure({font_family:family,font_size:UNITS},points,faces,family)})],
+        delimiter_small_points:delimiter_small_points,
+        delimiter_small_facts:if (delimiter_data != null) measure({font_family:"KaTeX_Main",font_size:UNITS},
+            delimiter_small_points,faces,"KaTeX_Main") else null,
         tex: if (use_bundled) tex_metrics.load()^ else null,
         large_points: large_points,
         large_facts: if (use_bundled and len(large_points) > 0)
@@ -168,13 +196,58 @@ pub fn glyph(profile, cp) map | error {
     else result
 }
 
-pub fn character(profile, ch, style) map | error {
-    let cp = variant(ch, style)
+// Matched TFM supplies the selected glyph's logical box and italic correction.
+fn with_tex_metrics(g, m) => if (m == null) g else
+    {*:g, advance:m.width, height:m.height, depth:m.depth, italic:m.italic}
+
+fn tex_piece(profile, slot) map | error {
+    let piece = [for (p in profile.delimiter_data.pieces where p.slot == slot) p][0]
+    let face = [for (f in profile.delimiter_faces where f.family == piece.family) f][0]
+    let g = lookup(face,face.facts,piece.codepoint);
+    if (piece == null or g == null) error("math: bundled CMEX delimiter piece is unavailable")
+    // Reverse makeFF's authored glyph translation to recover the original CMEX baseline.
+    else {*:with_tex_metrics(g,piece.metrics), advance:piece.metrics.width + piece.metrics.italic,
+        source_baseline:piece.shift}
+}
+
+pub fn tex_delimiter(profile, cp) {
+    let canonical = if (cp == 124) ord("∣") else if (cp == ord("‖")) ord("∥")
+        else if (cp == 60) ord("⟨") else if (cp == 62) ord("⟩")
+        else if (cp == ord("∖")) ord("\\") else cp
+    let recipe = [for (r in profile.delimiter_data.recipes where r.codepoint == canonical) r][0]
+    if (recipe == null) null
+    else {
+        let base = lookup({points:profile.delimiter_small_points},profile.delimiter_small_facts,canonical)
+        let extension = recipe.chain[len(recipe.chain) - 1].metrics.extension
+        let parts = [for (i,slot in extension)
+            if (i < 3 and slot == 0) null else tex_piece(profile,slot)^];
+        if (base == null and len(recipe.small) > 0) error("math: bundled small delimiter is unavailable")
+        else {small:[for (m in recipe.small) {*:with_tex_metrics(base,m),advance:m.width + m.italic,
+                source_baseline:recipe.small_shift}],
+            variants:[for (v in recipe.chain where v.metrics.extension == null) tex_piece(profile,v.slot)^],
+            top:parts[0], middle:parts[1], bottom:parts[2], repeat:parts[3]}
+    }
+}
+
+pub fn tex_accent(profile, command) {
+    let entry = [for (a in profile.delimiter_data.accents where a.cmd == command) a][0];
+    if (entry == null) null else {variants:[for (v in entry.chain) tex_piece(profile,v.slot)^],
+        x_height:profile.delimiter_data.accent_x_height}
+}
+
+fn style_facts(profile, style) => [for (entry in profile.style_faces where entry.style == style) entry.facts][0]
+
+pub fn text_metrics(profile, style) => (style_facts(profile,style) or profile.facts).font_metrics
+
+pub fn character(profile, ch, style, literal = false) map | error {
+    let cp = if (literal) ord(ch) else variant(ch, style)
     let preferred = lookup(profile, profile.facts, cp)
     let actual = effective_style(ch, style)
-    let styled = [for (entry in profile.style_faces where entry.style == actual) entry.facts][0]
+    let styled = style_facts(profile,actual)
     let ordinary = lookup(profile, styled or profile.facts, ord(ch))
-    if (preferred != null) preferred
+    // Text punctuation must follow its text face, not the base math face's unchanged codepoint.
+    if (literal and ordinary != null) ordinary
+    else if (preferred != null) preferred
     else if (ordinary != null) ordinary
     else glyph(profile, ord(ch))^
 }

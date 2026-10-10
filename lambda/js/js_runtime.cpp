@@ -121,15 +121,6 @@ typedef struct JsProxyMapCarrier {
     JsProxyData payload;
 } JsProxyMapCarrier;
 
-// JSCU9 (D5.1.1v2/D5.1.3): the generator's suspended state is carried by the
-// generator object itself, not a context-wide index table. The object owns its
-// re-homed environment and traces its own edges; there is no pool, cap, or
-// slot-recycling identity hazard.
-typedef struct JsGeneratorMapCarrier {
-    Map base;
-    JsGeneratorStateRecord state;
-} JsGeneratorMapCarrier;
-
 struct JsRegexData;
 typedef struct JsRegExpMapCarrier JsRegExpMapCarrier;
 static JsRegexData* js_get_regex_data(Item obj);
@@ -259,9 +250,8 @@ extern "C" Item js_suspended_activation_step(JsSuspendedActivation* record,
     }
     ActivationStatus status = activation_resume(record->activation, input);
     if (out_status) *out_status = status;
-    // A wide scalar the body handed over lives in its number segment, which a
-    // park may compact and completion releases; re-home it in this frame
-    // while that segment is still mapped.
+    // the activation owns a returned wide scalar; re-home it before destroying
+    // the record or allowing the next resume to replace its value.
     Item result = scalar_storage_read(activation_value(record->activation), false);
     if (status != ACTIVATION_DONE) return result;
     bool faulted = activation_fault(record->activation) != NULL;
@@ -28601,47 +28591,6 @@ extern "C" Item js_object_rest(Item src, Item* exclude_keys, int exclude_count) 
 // [value, next_state] where next_state == -1 means done.
 using JsGenerator = JsGeneratorStateRecord;
 
-static void js_suspended_activation_trace_environment(void* context,
-        void* environment) {
-    gc_mark_object_ptr((gc_heap_t*)context, environment);
-}
-
-static void js_suspended_activation_gc_trace(
-        const JsSuspendedActivation* activation, gc_heap_t* gc) {
-    if (!activation || !gc) return;
-    durable_activation_visit_environment(activation, gc,
-        js_suspended_activation_trace_environment);
-    if (activation->with_env) gc_mark_object_ptr(gc, activation->with_env);
-    gc_mark_item(gc, activation->ast_function.item);
-    gc_mark_item(gc, activation->ast_arguments.item);
-    // A parked interpreted body's frames live in its activation's segment.
-    activation_trace(activation->activation, gc);
-    if (activation->ast_function_env) {
-        gc_mark_object_ptr(gc, activation->ast_function_env);
-    }
-    if (activation->ast_body_env) {
-        gc_mark_object_ptr(gc, activation->ast_body_env);
-    }
-}
-
-extern "C" void js_generator_map_gc_trace(Map* map, gc_heap_t* gc) {
-    if (!map || !gc || map->map_kind != MAP_KIND_GENERATOR) return;
-    JsGeneratorStateRecord* gen = &((JsGeneratorMapCarrier*)map)->state;
-    js_suspended_activation_gc_trace(gen, gc);
-    gc_mark_item(gc, gen->private_home_class.item);
-    gc_mark_item(gc, gen->delegate.item);
-    gc_mark_item(gc, gen->ast_this.item);
-}
-
-// A generator collected before it finishes abandons its parked activation:
-// the stack is released and none of its code runs again (RA7).
-extern "C" void js_generator_map_heap_destroy(Map* map) {
-    if (!map || map->map_kind != MAP_KIND_GENERATOR) return;
-    JsGeneratorStateRecord* gen = &((JsGeneratorMapCarrier*)map)->state;
-    activation_destroy(gen->activation);
-    gen->activation = NULL;
-}
-
 // Helper: create {value, done} iterator result object
 extern "C" Item js_make_iter_result(Item value, bool done) {
     JS_ROOTS(roots, value_root, value, result_root, js_new_object());
@@ -29634,20 +29583,6 @@ JS_DEFINE_ITERATOR_PROTO(js_get_set_iterator_proto, js_set_iterator_proto_cache,
 JS_DEFINE_ITERATOR_PROTO(js_get_regexp_string_iterator_proto, js_regexp_string_iterator_proto_cache,
     JS_BUILTIN_OWNER_REGEXP_ITERATOR_INTERNAL, "RegExp String Iterator")
 
-// v28: Fixed-layout iterator data (16 bytes, 2 slots)
-// Slot 0 (offset 0): source Item (array, string, or typed array)
-// Slot 1 (offset 8): current index (int64_t)
-struct JsIterData {
-    Item source;     // the iterable being iterated
-    int64_t index;   // current position
-    int64_t length;  // v28: snapshot of source length at creation (prevents infinite loops)
-};
-
-typedef struct JsIteratorMapCarrier {
-    Map base;
-    JsIterData payload;
-} JsIteratorMapCarrier;
-
 static Item js_create_fixed_iterator(Item source, JsClass class_id, int64_t length);
 
 static Item js_create_array_iterator_object(Item source, int kind) {
@@ -29679,15 +29614,6 @@ static Item js_create_fixed_iterator(Item source, JsClass class_id, int64_t leng
     m->data = NULL;
     m->data_cap = 0;
     return (Item){.map = m};
-}
-
-extern "C" void js_iterator_map_gc_trace(Map* map, gc_heap_t* gc) {
-    if (!map || !gc || map->type_id != LMD_TYPE_MAP ||
-            map->map_kind != MAP_KIND_ITERATOR) return;
-    JsIterData* data = &((JsIteratorMapCarrier*)map)->payload;
-    // Lightweight iterator state is native side storage; retain its iterable
-    // for the lifetime of the managed iterator wrapper.
-    gc_mark_item(gc, data->source.item);
 }
 
 // v95: Check if Array.prototype[Symbol.iterator] has been overridden or deleted.

@@ -10,8 +10,6 @@
 #include "../../../lib/utf.h"
 
 // host bindings are explicitly supplied by the embedder, outside the core globals allowlist.
-struct MvpLmdHostCallable : MvpLmdCallable { MvpLmdHostState* state; };
-typedef Item (*HostEntry)(Context*, MvpLmdProgram*, Item*, uint64_t, Item, Item, Item);
 
 static const char* host_utf8_bytes(String* value, size_t* size, char** owned) {
     *owned = NULL; *size = value->len;
@@ -27,13 +25,13 @@ static const char* host_utf8_bytes(String* value, size_t* size, char** owned) {
 }
 
 static Item host_clock(Context*, MvpLmdProgram*, Item*, uint64_t, Item self, Item, Item) {
-    MvpLmdHostState* state = ((MvpLmdHostCallable*)self.function)->state;
+    MvpLmdHostState* state = (MvpLmdHostState*)((MvpLmdNativeCallable*)self.function)->state;
     // d2it tags a pointer; the shared scalar publisher owns this numeric result.
     return push_d((pn_clock() - state->origin) * 1000.0);
 }
 
 static Item host_output(Item self, Item* arguments, uint64_t count, bool line) {
-    MvpLmdHostState* state = ((MvpLmdHostCallable*)self.function)->state;
+    MvpLmdHostState* state = (MvpLmdHostState*)((MvpLmdNativeCallable*)self.function)->state;
     RootFrame roots(1);
     if (!roots.valid()) return ItemError;
     Rooted<Item> text(roots, ItemNull);
@@ -65,7 +63,7 @@ static Item host_require(Context*, MvpLmdProgram*, Item* arguments, uint64_t cou
     if (!count || get_type_id(arguments[0]) != LMD_TYPE_STRING) return mvp_lmd_fail(LMD_MVP_TYPE, 0);
     String* module = arguments[0].get_string();
     if (module->len != 2 || memcmp(module->chars, "fs", 2)) return mvp_lmd_fail(LMD_MVP_CAPABILITY, 0);
-    return ((MvpLmdHostCallable*)self.function)->state->values[LMD_HOST_FS];
+    return ((MvpLmdHostState*)((MvpLmdNativeCallable*)self.function)->state)->values[LMD_HOST_FS];
 }
 static Item host_read_file(Context*, MvpLmdProgram*, Item* arguments, uint64_t count, Item, Item, Item) {
     if (count < 2 || get_type_id(arguments[0]) != LMD_TYPE_STRING ||
@@ -104,8 +102,8 @@ static Item host_write_file(Context*, MvpLmdProgram*, Item* arguments, uint64_t 
         return err2it(err_create_heap(ERR_FILE_WRITE_ERROR, "MVP file write failed", NULL));
     return Item{.item = ITEM_JS_UNDEFINED};
 }
-static Item host_function(MvpLmdProgram* program, MvpLmdHostState* state, HostEntry entry, uint8_t arity) {
-    MvpLmdHostCallable* function = (MvpLmdHostCallable*)heap_calloc(sizeof(MvpLmdHostCallable), LMD_TYPE_FUNC);
+Item mvp_lmd_native_function(MvpLmdProgram* program, void* state, MvpLmdNativeEntry entry, uint8_t arity) {
+    MvpLmdNativeCallable* function = (MvpLmdNativeCallable*)heap_calloc(sizeof(MvpLmdNativeCallable), LMD_TYPE_FUNC);
     if (!function) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
     function_init_abi(function, LMD_TYPE_FUNC, FN_ENTRY_ABI_MVP_LMD);
     function->requires_runtime_context = true; function->runtime_context = context;
@@ -113,7 +111,7 @@ static Item host_function(MvpLmdProgram* program, MvpLmdHostState* state, HostEn
     function->state = state; function->arity = arity;
     return Item{.function = function};
 }
-static Item host_set(Item owner, const char* key, Item value) {
+Item mvp_lmd_named_set(Item owner, const char* key, Item value) {
     if (item_is_error(value)) return value;
     RootFrame roots(2);
     if (!roots.valid()) return ItemError;
@@ -131,11 +129,11 @@ Item mvp_lmd_host_initialize(MvpLmdProgram* program, MvpLmdHostState* state,
     if (!roots.valid()) return ItemError;
     Rooted<Item> temporary(roots, ItemNull), arguments(roots, ItemNull);
     for (int i = 0; i < LMD_HOST_COUNT; i++) {
-        state->values[i] = i == LMD_HOST_REQUIRE ? host_function(program, state, host_require, 1)
+        state->values[i] = i == LMD_HOST_REQUIRE ? mvp_lmd_native_function(program, state, host_require, 1)
             : mvp_lmd_object_new(shape, 0);
         if (item_is_error(state->values[i])) return state->values[i];
     }
-    struct Binding { int owner; const char* key; HostEntry entry; uint8_t arity; };
+    struct Binding { int owner; const char* key; MvpLmdNativeEntry entry; uint8_t arity; };
     const Binding functions[] = {
         {LMD_HOST_PERFORMANCE, "now", host_clock, 0},
         {LMD_HOST_CONSOLE, "log", host_console_log, 0},
@@ -143,15 +141,15 @@ Item mvp_lmd_host_initialize(MvpLmdProgram* program, MvpLmdHostState* state,
         {LMD_HOST_FS, "writeFileSync", host_write_file, 2}
     };
     for (const Binding& binding : functions) {
-        Item result = host_set(state->values[binding.owner], binding.key,
-            host_function(program, state, binding.entry, binding.arity));
+        Item result = mvp_lmd_named_set(state->values[binding.owner], binding.key,
+            mvp_lmd_native_function(program, state, binding.entry, binding.arity));
         if (item_is_error(result)) return result;
     }
     temporary.set(mvp_lmd_object_new(shape, 0));
     if (item_is_error(temporary.get())) return temporary.get();
-    Item result = host_set(temporary.get(), "write", host_function(program, state, host_stdout_write, 1));
+    Item result = mvp_lmd_named_set(temporary.get(), "write", mvp_lmd_native_function(program, state, host_stdout_write, 1));
     if (item_is_error(result)) return result;
-    result = host_set(state->values[LMD_HOST_PROCESS], "stdout", temporary.get());
+    result = mvp_lmd_named_set(state->values[LMD_HOST_PROCESS], "stdout", temporary.get());
     if (item_is_error(result)) return result;
     arguments.set(mvp_lmd_array_new(host->argc));
     if (item_is_error(arguments.get())) return arguments.get();
@@ -161,7 +159,7 @@ Item mvp_lmd_host_initialize(MvpLmdProgram* program, MvpLmdHostState* state,
         result = mvp_lmd_array_store(arguments.get(), i, Item{.item = s2it(text)});
         if (item_is_error(result)) return result;
     }
-    result = host_set(state->values[LMD_HOST_PROCESS], "argv", arguments.get());
+    result = mvp_lmd_named_set(state->values[LMD_HOST_PROCESS], "argv", arguments.get());
     if (item_is_error(result)) return result;
 #if defined(_WIN32)
     const char* platform = "win32";
@@ -172,7 +170,7 @@ Item mvp_lmd_host_initialize(MvpLmdProgram* program, MvpLmdHostState* state,
 #endif
     String* name = heap_strcpy(platform, strlen(platform));
     if (!name) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
-    result = host_set(state->values[LMD_HOST_PROCESS], "platform", Item{.item = s2it(name)});
+    result = mvp_lmd_named_set(state->values[LMD_HOST_PROCESS], "platform", Item{.item = s2it(name)});
     state->origin = pn_clock();
     return result;
 }

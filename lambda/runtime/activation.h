@@ -43,7 +43,8 @@ Activation* activation_create(ActivationEntry entry, Item arg, bool strong,
 ActivationStatus activation_resume(Activation* activation, Item input);
 // The value passed to the pending `activation_suspend`, or the entry's result
 // once DONE. A DONE value is no longer rooted by the activation: the caller
-// stores it in a rooted home before allocating.
+// stores it in a rooted home before allocating. Wide scalars borrow the record's
+// home until the next resume or destruction; the caller must adopt them first.
 Item activation_value(const Activation* activation);
 // Non-NULL when the entry ended in a native fault caught by the activation's
 // own execution boundary; the value is then the fault's error Item.
