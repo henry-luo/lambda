@@ -15,6 +15,7 @@ struct TypesetRegionConstraints {
     float minimum_height; // reserve this extent only when material actually occupies the region
     bool retain_tail; // leave real material for a later region; producers choose a legal nonterminal prefix
     uint32_t column_number, column_count; // physical-page position, one based; zero for standalone region callers
+    bool defer_unplaceable; // host guarantees bounded routing to another fragmentainer, or a progressing sheet
 };
 struct TypesetRegionSlice {
     TypesetResume end;
@@ -63,6 +64,7 @@ struct TypesetRegionPlan {
     TypesetRegionPending* pending;
     size_t count, pending_count;
     float reserved_height;
+    bool blocked; // eligible leading material could not fit; no cursor progress was manufactured
 };
 struct TypesetRegionCheckpoint {
     TypesetRegionQueue* queue;

@@ -3807,6 +3807,11 @@ static bool paged_regions_placed(const PagedComposer* composer) {
     return false;
 }
 
+static bool paged_regions_blocked(const PagedComposer* composer) {
+    for (const PagedRegionState& region : composer->regions) if (region.plan.blocked) return true;
+    return false;
+}
+
 static bool paged_region_plans_pending(const PagedComposer* composer) {
     for (const PagedRegionState& region : composer->regions) if (region.plan.pending_count) return true;
     return false;
@@ -3837,12 +3842,18 @@ static TypesetStatus paged_regions_trial(PagedComposer* composer, float body_hei
             i != PAGED_REGION_NOTE, i == PAGED_REGION_TOP, composer->page_style.content_rect.height};
         constraints.column_number = composer->column_index + 1;
         constraints.column_count = composer->page_style.column_count;
+        // empty explicit columns may route pending input forward; an empty whole sheet still fails at its last column.
+        constraints.defer_unplaceable = composer->page->style->column_rects &&
+            (paged_has_next_column(composer) || composer->sheet_has_content || body_height > 0.0f || reserved > 0.0f);
         constraints.retain_tail = composer->retain_aux_tail && i == tail_region;
         float occupied = body_height + reserved, separator = 0.0f;
         PagedNoteArea area = {};
         if (i == PAGED_REGION_NOTE) {
             TypesetStatus status = paged_note_area(composer, &area);
-            if (status != TYPESET_OK) { paged_region_trial_dispose(trial); return status; }
+            bool feasible = status == TYPESET_OK;
+            if (!feasible && (status != TYPESET_UNPLACEABLE || !constraints.defer_unplaceable)) {
+                paged_region_trial_dispose(trial); return status;
+            }
             if (body_height > constraints.available_height) { paged_region_trial_dispose(trial); return TYPESET_UNPLACEABLE; }
             constraints.occupied = body_height > 0.0f || limit_notes;
             constraints.available_height -= body_height;
@@ -3850,7 +3861,9 @@ static TypesetStatus paged_regions_trial(PagedComposer* composer, float body_hei
             if (constraints.occupied) constraints.available_height = fminf(constraints.available_height, fmaxf(0.0f, area.maximum + margins));
             if (isfinite(area.preferred)) constraints.available_height = fminf(constraints.available_height, fmaxf(0.0f, area.preferred + margins));
             constraints.minimum_height = fmaxf(0.0f, (isfinite(area.preferred) ? area.preferred : area.minimum) + margins);
-            constraints.inline_size = area.width - area.edges[1] - area.edges[3];
+            // an infeasible note area offers zero capacity; queue input survives without a measured or painted slice.
+            if (feasible) constraints.inline_size = area.width - area.edges[1] - area.edges[3];
+            else constraints.available_height = 0.0f;
             separator = area.edges[0] + area.edges[2] + margins; occupied = 0.0f;
         }
         TypesetStatus status = typeset_region_plan(queue, composer->regions[i].anchors, trial->anchor_counts[i],
@@ -4094,6 +4107,7 @@ static TypesetStatus paged_regions_close_trial(PagedComposer* composer) {
         if (status != TYPESET_OK) return status;
     }
     composer->body_aligned = true;
+    bool placed = paged_regions_placed(composer);
     for (size_t i = 0; i < PAGED_REGION_COUNT; i++) {
         PagedRegionState* region = &composer->regions[i];
         TypesetRegionPlan* plan = &region->plan;
@@ -4104,6 +4118,7 @@ static TypesetStatus paged_regions_close_trial(PagedComposer* composer) {
         if (status == TYPESET_OK) status = typeset_region_commit(&composer->composition->queues[i], plan);
         typeset_region_plan_dispose(plan); region->anchor_count = 0;
     }
+    if (status == TYPESET_OK) composer->sheet_has_content |= placed;
     return status;
 }
 
@@ -5957,6 +5972,16 @@ static TypesetStatus paged_sheet_policy_prefix(PagedComposer* composer, const Ty
     return TYPESET_OK;
 }
 
+static TypesetStatus paged_sheet_empty_column(PagedComposer* composer, const TypesetResume& cursor) {
+    if (!composer->sheet_trial) return TYPESET_OK;
+    TypesetPagePlan empty = {};
+    empty.candidate.start = empty.candidate.end = cursor;
+    empty.candidate.kind = TYPESET_PAGE_EMPTY; empty.candidate.page_number = composer->page->page_number;
+    empty.candidate.available_height = composer->page_style.content_rect.height;
+    empty.candidate.boundary = {TYPESET_BREAK_ALLOWED, TYPESET_BREAK_COLUMN, 0, 0};
+    return paged_sheet_policy_prefix(composer, empty);
+}
+
 static size_t paged_choose_default(const TypesetPageCandidate* candidates, size_t count) {
     size_t selected = 0; RadiantKeepStrength weakest = {};
     if (candidates[0].trial) weakest = ((const PagedCandidateInfo*)candidates[0].trial)->keep;
@@ -5991,6 +6016,8 @@ static TypesetStatus paged_sheet_aux_column(PagedComposer* composer, TypesetResu
     if (!info) return TYPESET_OUT_OF_MEMORY;
     TypesetStatus status = paged_sheet_auxiliary_select(composer, nullptr, &info->auxiliary, &info->auxiliary_count);
     if (status != TYPESET_OK) return status;
+    // routing across an unplaceable empty column changes geometry only, not the host input cursor.
+    if (!info->auxiliary_count && paged_regions_blocked(composer)) return paged_sheet_empty_column(composer, *cursor);
     info->sequence = composer->page->sequence;
     for (const PagedRegionState& region : composer->regions) info->pending_aux |= region.plan.pending_count != 0;
     TypesetPageCandidate candidate = {};
@@ -6759,15 +6786,8 @@ static TypesetStatus paged_layout_columns(PagedPageProvider* context, const Type
         if (status == TYPESET_UNPLACEABLE && composer->page->style->column_rects && !composer->page_has_content) {
             // an empty narrow/short column may be bypassed; only a sheet with source progress can eject.
             if (!paged_has_next_column(composer)) return composer->sheet_has_content ? TYPESET_OK : status;
-            if (composer->sheet_trial) {
-                TypesetPagePlan empty = {};
-                empty.candidate.start = empty.candidate.end = *cursor;
-                empty.candidate.kind = TYPESET_PAGE_EMPTY; empty.candidate.page_number = composer->page->page_number;
-                empty.candidate.available_height = composer->page_style.content_rect.height;
-                empty.candidate.boundary = {TYPESET_BREAK_ALLOWED, TYPESET_BREAK_COLUMN, 0, 0};
-                status = paged_sheet_policy_prefix(composer, empty);
-                if (status != TYPESET_OK) return status;
-            }
+            status = paged_sheet_empty_column(composer, *cursor);
+            if (status != TYPESET_OK) return status;
             status = paged_next_column(composer); cursor->state[2] = 0; continue;
         }
         if (status == TYPESET_UNPLACEABLE && reject_terminal && composer->sheet_has_content)
