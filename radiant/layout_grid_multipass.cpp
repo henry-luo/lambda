@@ -543,6 +543,39 @@ void layout_grid_content(LayoutContext* lycon, ViewBlock* grid_container) {
 
     log_leave();
 }
+IntrinsicSizes measure_grid_intrinsic_widths(LayoutContext* lycon, ViewBlock* container) {
+    IntrinsicSizes result = {};
+    if (!lycon || !container) return result;
+    for (int query = 0; query < 2; query++) {
+        bool minimum = query == 0;
+        // intrinsic queries share placement and track sizing, while measurement owns geometry rollback.
+        radiant::LayoutMeasureScope measure_scope(lycon, container);
+        LayoutViewScope view_scope(lycon);
+        lycon->view = lam::up(static_cast<View*>(container));
+        lycon->available_space.width = minimum
+            ? AvailableSize::make_min_content() : AvailableSize::make_max_content();
+        lycon->available_space.height = AvailableSize::make_indefinite();
+        lycon->block.given_width = -1.0f;
+        lycon->block.content_width = 0.0f;
+        // uninitialized views cannot receive computed grid tracks or var() substitutions.
+        bool resolve_style = !container->is_block() || !container->styles_resolved() ||
+            container->needs_style_recompute();
+        container->view_type = RDT_VIEW_BLOCK;
+        container->width = 0.0f;
+        container->content_width = 0.0f;
+        if (resolve_style) dom_node_resolve_style(container, lycon);
+        GridLayoutScope grid_scope(lycon, container);
+        if (!lycon->grid_container) return result;
+        resolve_grid_item_styles(lycon, container);
+        measure_grid_items(lycon, lycon->grid_container, true);
+        layout_grid_container(lycon, container);
+        float extent = lycon->grid_container->content_width;
+        if (minimum) result.min_content = extent;
+        else result.max_content = extent;
+    }
+    return result;
+}
+
 // Pass 0: Style Resolution and View Initialization
 
 int resolve_grid_item_styles(LayoutContext* lycon, ViewBlock* grid_container) {
@@ -641,7 +674,8 @@ void init_grid_item_view(LayoutContext* lycon, DomNode* child) {
 }
 // Pass 1: Content Measurement
 
-void measure_grid_items(LayoutContext* lycon, GridContainerLayout* grid_layout) {
+void measure_grid_items(LayoutContext* lycon, GridContainerLayout* grid_layout,
+                        bool intrinsic_width_contribution) {
     if (!grid_layout) return;
 
     log_enter();
@@ -668,6 +702,13 @@ void measure_grid_items(LayoutContext* lycon, GridContainerLayout* grid_layout) 
                 float min_width = 0, max_width = 0, min_height = 0, max_height = 0;
                 measure_grid_item_intrinsic(lycon, item, &min_width, &max_width,
                                             &min_height, &max_height);
+                if (intrinsic_width_contribution) {
+                    // intrinsic grid contributions retain the item's authored minimum, including zero.
+                    IntrinsicSizes widths = {min_width, max_width};
+                    layout_apply_grid_item_min_content_floor(lycon, item, &widths);
+                    min_width = widths.min_content;
+                    max_width = widths.max_content;
+                }
                 layout_reresolve_percentage_box(item, container_content_width);
                 // Store only WIDTH measurements in the item for later use
                 // HEIGHT measurements are intentionally NOT stored here because:

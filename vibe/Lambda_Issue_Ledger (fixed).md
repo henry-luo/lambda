@@ -2869,6 +2869,70 @@ matcher tests, including all three anti-DoS budget tests.
 
 ### A.15 UI package engine regressions
 
+<a id="ui-7-r"></a>**UI-7-R · Grid intrinsic-width approximation collapsed description fields · FIXED 2026-10-10**
+
+The gallery's “Target: Radiant” value overlapped “Theme: Default light”.
+Intrinsic grid measurement counted the unresolved `var()` template as one
+column. Its separate per-column approximation also ignored item spans and
+fractional-track sizing. The resulting 150.9px grid gave the first value a
+zero-width box even though final layout used three fractional columns.
+
+`measure_grid_intrinsic_widths` now activates a block view for computed style
+resolution and uses the existing grid placement and track-sizing pipeline for
+both intrinsic constraints. `LayoutMeasureScope` restores provisional geometry;
+`GridLayoutScope` owns the scratch state. This follows CSS Grid §12.1/§12.7
+without widget CSS changes or new formal rulings.
+The shared pass preserves the existing item minimum-contribution helper.
+Transferred minimum heights floor an image's natural width instead of replacing
+it with a provisional zero; the 776-case sizing baseline passes.
+
+All 40 reduced geometry assertions agree with Chromium and pass on native
+interpreter and MIR Direct (**D8.1.1v17**). They cover variable/direct templates,
+fractional/weighted/auto/fixed tracks, spans, named lines, hidden items and
+resizing. Six control/image assertions and four real-gallery spacing assertions
+also pass on both tiers. Evidence
+is under `temp/ui_dtna/description_overlap/`; aggregate results are recorded in
+the dtna implementation record.
+
+<a id="ui-6-r"></a>**UI-6-R · Flex-item buttons skipped native label centering · FIXED 2026-10-10**
+
+Pagination numbers in `test/ui/dtna_gallery.ls` sat above the vertical center
+of their 32px buttons. Flex-item content layout bypasses block finalization,
+which contained the existing native button text-centering step.
+
+The shared `layout_center_button_text` helper now runs from both block
+finalization and flex-item content layout after its used height settles.
+Authored flex/grid alignment, vertical writing and text-box trimming retain
+their existing paths. Package CSS needs no changes; no formal ruling changes.
+
+The independent `button_text_alignment_contracts` fixture passes all 16
+assertions on interpreter and MIR Direct (**D8.1.1v17**), checking flow, row,
+column, small/tall and stretched buttons, authored flex/grid alignment and
+viewport resizing. Chromium agrees with all 16 assertions. Evidence is under
+`temp/ui_dtna/pagination_alignment/`; aggregate validation is recorded in the
+dtna implementation record.
+
+<a id="ui-5-r"></a>**UI-5-R · Nested flex wrappers ignored native-control CSS size constraints · FIXED 2026-10-10**
+
+In `test/ui/dtna_gallery.ls`, Select laid out at its 120px CSS minimum while
+its Space wrapper contributed only 57px. The next checkbox therefore started
+55px inside the dropdown. The nested-flex measurement path used raw native
+control metrics instead of the existing constrained outer contribution.
+
+`radiant/layout_flex_measurement.cpp` now measures controls through the shared
+intrinsic-width path. Native flex clamping also uses the shared border-box
+min/max helper, preserving content-box decorations and capping automatic
+minimums by the CSS maximum (CSS Flexbox §4.5 and §9.9.3). Package CSS and
+component spacing need no changes; no formal ruling changes.
+
+The independent `flex_control_intrinsic_contracts` fixture passes all 18
+assertions on interpreter and MIR Direct (**D8.1.1v17**), covering Select,
+Input and Textarea, content/border boxes, minima, maxima and sibling gaps.
+Chromium agrees with all 18 oracles. The actual gallery fixture passes both
+spacing and native checkbox-click assertions on each tier. Evidence is under
+`temp/ui_dtna/select_overlap/`; aggregate validation is recorded in the dtna
+implementation record.
+
 <a id="ui-4-r"></a>**UI-4-R · Native form activation used retired nodes after author redraws · FIXED 2026-10-10**
 
 Clicking a nested Button label dispatched the author handler, which regenerated

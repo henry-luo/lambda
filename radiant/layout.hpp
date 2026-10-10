@@ -3354,7 +3354,11 @@ void layout_grid_container(LayoutContext* lycon, ViewBlock* container);
 void layout_grid_content(LayoutContext* lycon, ViewBlock* grid_container);
 int resolve_grid_item_styles(LayoutContext* lycon, ViewBlock* grid_container);
 void init_grid_item_view(LayoutContext* lycon, DomNode* child);
-void measure_grid_items(LayoutContext* lycon, GridContainerLayout* grid_layout);
+void measure_grid_items(LayoutContext* lycon, GridContainerLayout* grid_layout,
+                        bool intrinsic_width_contribution = false);
+IntrinsicSizes measure_grid_intrinsic_widths(LayoutContext* lycon, ViewBlock* container);
+void layout_apply_grid_item_min_content_floor(
+    LayoutContext* lycon, DomElement* item, IntrinsicSizes* sizes);
 void measure_grid_item_intrinsic(LayoutContext* lycon, ViewBlock* item,
                                   float* min_width, float* max_width,
                                   float* min_height, float* max_height);
@@ -4087,6 +4091,7 @@ float layout_rtl_inline_item_x(Linebox* line, float item_width);
 void layout_flow_node(LayoutContext* lycon, DomNode* node);
 void layout_flow_children(LayoutContext* lycon, DomNode* first_child,
                          bool finalize_line = false);
+void layout_center_button_text(ViewBlock* block);
 // CSS Shadow DOM: return the tree that supplies a host's rendered children;
 // light-DOM children remain the DOM/API tree and are projected at <slot>.
 DomNode* layout_render_child_list(DomElement* element);

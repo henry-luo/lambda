@@ -1,0 +1,13 @@
+<!doctype html>
+<style>
+body{margin:0;font:14px Arial}
+.row{display:flex;gap:8px;margin-bottom:8px;align-items:center}
+.slot{display:inline-flex;min-width:0;align-items:center}
+.control{font:inherit;box-sizing:border-box;height:32px;padding:4px 11px;border:1px solid #ddd}
+</style>
+<div class="row"><div id="minimum-slot" class="slot"><select id="minimum-control" class="control" style="min-width:120px;"><option>Active</option><option>Archived</option></select></div><label id="minimum-next"><input type="checkbox">Subscribe</label></div>
+<div class="row"><div id="content-minimum-slot" class="slot"><select id="content-minimum-control" class="control" style="box-sizing:content-box;min-width:120px;"><option>Active</option><option>Archived</option></select></div><label id="content-minimum-next"><input type="checkbox">Subscribe</label></div>
+<div class="row"><div id="maximum-slot" class="slot"><select id="maximum-control" class="control" style="max-width:72px;"><option>A deliberately long option label</option></select></div><label id="maximum-next"><input type="checkbox">Subscribe</label></div>
+<div class="row"><div id="input-minimum-slot" class="slot"><input id="input-minimum-control" class="control" style="min-width:260px;" value="Seed"></div><label id="input-minimum-next"><input type="checkbox">Subscribe</label></div>
+<div class="row"><div id="input-maximum-slot" class="slot"><input id="input-maximum-control" class="control" style="max-width:96px;" value="Seed"></div><label id="input-maximum-next"><input type="checkbox">Subscribe</label></div>
+<div class="row"><div id="textarea-minimum-slot" class="slot"><textarea id="textarea-minimum-control" class="control" style="min-width:220px;">Seed</textarea></div><label id="textarea-minimum-next"><input type="checkbox">Subscribe</label></div>

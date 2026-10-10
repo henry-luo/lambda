@@ -2633,17 +2633,13 @@ float apply_flex_constraint(
     // CSS Flexbox §4.5: min-width:auto for replaced elements = intrinsic width.
     if (item->form_control()) {
         bool is_horizontal = is_main_axis_horizontal(flex_layout);
-        // and cross-axis must apply CSS min-/max- constraints; previously the
         bool axis_is_horizontal = is_main_axis ? is_horizontal : !is_horizontal;
         ViewBlock* item_block = lam::view_as_block(item);
         LayoutAxisRefs selected(item, axis_is_horizontal);
         float min_size = 0;
-        float max_size = layout_positive_max_axis_or(item_block, axis_is_horizontal, FLT_MAX);
 
         float explicit_min = layout_explicit_min_axis_or(item_block, axis_is_horizontal, -1.0f);
-        if (explicit_min >= 0.0f) {
-            min_size = explicit_min;
-        } else if (is_main_axis && item->form) {
+        if (explicit_min < 0.0f && is_main_axis && item->form) {
             float intrinsic_min = flex_form_intrinsic_size(
                 item, flex_layout, axis_is_horizontal);
             if (intrinsic_min > 0.0f) {
@@ -2660,6 +2656,12 @@ float apply_flex_constraint(
             }
         }
 
+        // flex sizes are border-box; shared CSS clamping also caps the
+        // native automatic minimum by max-size (CSS Flexbox section 4.5).
+        min_size = layout_apply_min_max_border_box_axis(
+            item_block, min_size, axis_is_horizontal);
+        float max_size = layout_apply_min_max_border_box_axis(
+            item_block, FLT_MAX, axis_is_horizontal);
         return flex_clamp_constraint(computed_size, min_size, max_size, hit_min, hit_max);
     }
 

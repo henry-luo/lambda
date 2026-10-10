@@ -2156,12 +2156,18 @@ static void adjust_text_bounds_in_view(View* view) {
 static float block_context_float_bottom(const BlockContext* context,
                                         bool include_lowest);
 
-static void center_button_text_in_block(View* first_child, float block_extent) {
-    if (!first_child || block_extent <= 0.0f) return;
+void layout_center_button_text(ViewBlock* block) {
+    // authored flex/grid alignment already positions every child as a unit.
+    if (!block || !block->form_control() ||
+        block->form_control()->control_type != FORM_CONTROL_BUTTON ||
+        block->display.inner == CSS_VALUE_FLEX || block->display.inner == CSS_VALUE_GRID ||
+        layout_block_inline_axis_is_vertical(block) || !block->first_child ||
+        (block->blk && block->block()->text_box_trim) || block->height <= 0.0f) return;
+    View* first_child = static_cast<View*>(block->first_child);
     float min_y = 0.0f;
     float max_y = 0.0f;
     if (!text_rect_y_bounds(first_child, &min_y, &max_y)) return;
-    float delta = (block_extent - (max_y - min_y)) / 2.0f - min_y;
+    float delta = (block->height - (max_y - min_y)) / 2.0f - min_y;
     if (fabsf(delta) < 0.001f) return;
     shift_text_geometry(first_child, delta, TEXT_RECT_SHIFT_ALL);
     adjust_text_bounds_in_view(first_child);
@@ -4620,15 +4626,7 @@ void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, CssEnum display
         }
     }
     layout_stretch_vertical_auto_inline_children(block);
-    if (block->form_control() &&
-        block->form_control()->control_type == FORM_CONTROL_BUTTON &&
-        // authored flex/grid alignment already positions every child as a unit.
-        block->display.inner != CSS_VALUE_FLEX && block->display.inner != CSS_VALUE_GRID &&
-        !layout_block_inline_axis_is_vertical(block) && block->first_child &&
-        (!block->blk || !block->block()->text_box_trim)) {
-        center_button_text_in_block(
-            static_cast<View*>(block->first_child), block->height);
-    }
+    layout_center_button_text(block);
     // CSS 2.1 §10.6.7: Finalize an auto-height BFC before CSS Align computes
     // its free space, so contained floats cannot create artificial overflow.
     bool has_text_box_trim = block->blk && block->block_mut()->text_box_trim;

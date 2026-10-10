@@ -1249,6 +1249,8 @@ void layout_flex_item_content(LayoutContext* lycon, ViewBlock* flex_item) {
     // CRITICAL FIX: For column flex items without explicit height,
     FlexContainerLayout* parent_flex = saved_context.flex_container;
     flex_apply_content_height_after_layout(lycon, flex_item, parent_flex);
+    // flex items bypass block finalization; center native labels after their used height settles.
+    layout_center_button_text(flex_item);
 
     int current_depth = lycon->depth;
     int current_flex_depth = lycon->flex_depth;

@@ -1,0 +1,178 @@
+{
+  "name": "native form controls contribute CSS min/max sizes through nested flex wrappers",
+  "html": "test/ui/dtna/flex_control_intrinsic_contracts.html",
+  "viewport": {
+    "width": 800,
+    "height": 500
+  },
+  "events": [
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#minimum-slot"
+      },
+      "width": 120,
+      "tolerance": 0.2
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#minimum-control"
+      },
+      "width": 120,
+      "tolerance": 0.2
+    },
+    {
+      "type": "assert_position",
+      "element_a": {
+        "selector": "#minimum-control"
+      },
+      "element_b": {
+        "selector": "#minimum-next"
+      },
+      "relation": "left_of",
+      "gap": 8,
+      "tolerance": 0.2
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#content-minimum-slot"
+      },
+      "width": 144,
+      "tolerance": 0.2
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#content-minimum-control"
+      },
+      "width": 144,
+      "tolerance": 0.2
+    },
+    {
+      "type": "assert_position",
+      "element_a": {
+        "selector": "#content-minimum-control"
+      },
+      "element_b": {
+        "selector": "#content-minimum-next"
+      },
+      "relation": "left_of",
+      "gap": 8,
+      "tolerance": 0.2
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#maximum-slot"
+      },
+      "width": 72,
+      "tolerance": 0.2
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#maximum-control"
+      },
+      "width": 72,
+      "tolerance": 0.2
+    },
+    {
+      "type": "assert_position",
+      "element_a": {
+        "selector": "#maximum-control"
+      },
+      "element_b": {
+        "selector": "#maximum-next"
+      },
+      "relation": "left_of",
+      "gap": 8,
+      "tolerance": 0.2
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#input-minimum-slot"
+      },
+      "width": 260,
+      "tolerance": 0.2
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#input-minimum-control"
+      },
+      "width": 260,
+      "tolerance": 0.2
+    },
+    {
+      "type": "assert_position",
+      "element_a": {
+        "selector": "#input-minimum-control"
+      },
+      "element_b": {
+        "selector": "#input-minimum-next"
+      },
+      "relation": "left_of",
+      "gap": 8,
+      "tolerance": 0.2
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#input-maximum-slot"
+      },
+      "width": 96,
+      "tolerance": 0.2
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#input-maximum-control"
+      },
+      "width": 96,
+      "tolerance": 0.2
+    },
+    {
+      "type": "assert_position",
+      "element_a": {
+        "selector": "#input-maximum-control"
+      },
+      "element_b": {
+        "selector": "#input-maximum-next"
+      },
+      "relation": "left_of",
+      "gap": 8,
+      "tolerance": 0.2
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#textarea-minimum-slot"
+      },
+      "width": 220,
+      "tolerance": 0.2
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#textarea-minimum-control"
+      },
+      "width": 220,
+      "tolerance": 0.2
+    },
+    {
+      "type": "assert_position",
+      "element_a": {
+        "selector": "#textarea-minimum-control"
+      },
+      "element_b": {
+        "selector": "#textarea-minimum-next"
+      },
+      "relation": "left_of",
+      "gap": 8,
+      "tolerance": 0.2
+    }
+  ]
+}

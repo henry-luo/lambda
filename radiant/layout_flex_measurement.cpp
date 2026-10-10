@@ -1034,29 +1034,9 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
                                 lycon, child_view, /*content_only=*/true);
                             child_min_width = child_sizes.min_content;
                             child_max_width = child_sizes.max_content;
-                        } else if (child_view->form_control()) {
-                            if (child_width_is_percentage && lycon) {
-                                IntrinsicSizes child_sizes = measure_element_intrinsic_widths(
-                                    lycon, c->as_element(), true);
-                                child_min_width = child_sizes.min_content;
-                                child_max_width = child_sizes.max_content;
-                                if (!isnan(child_width_percentage)) {
-                                    // Flex item intrinsic sizing uses the percentage
-                                    // size suggestion against the natural max-content size.
-                                    child_min_width = child_max_width *
-                                        child_width_percentage / 100.0f;
-                                }
-                            } else if (layout_form_control_has_native_intrinsic_size(child_view)) {
-                                child_min_width = child_view->form->intrinsic_width;
-                                child_max_width = child_view->form->intrinsic_width;
-                            }
-                            if (child_max_width <= 0.0f && lycon) {
-                                IntrinsicSizes child_sizes = measure_element_intrinsic_widths(
-                                    lycon, lam::dom_require<DOM_NODE_ELEMENT>(child_view));
-                                child_min_width = child_sizes.min_content;
-                                child_max_width = child_sizes.max_content;
-                            }
                         } else if (lycon) {
+                            // native control metrics omit CSS min/max constraints;
+                            // use the shared outer contribution for controls too.
                             // The child's own FlexItemProp intrinsic cache is not an
                             // outer contribution: it is content-box, it belongs to the
                             // child's container pass, and a reflow retains it from the
@@ -1070,6 +1050,8 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
                                 child_min_width = child_max_width *
                                     child_width_percentage / 100.0f;
                             }
+                        } else if (layout_form_control_has_native_intrinsic_size(child_view)) {
+                            child_min_width = child_max_width = child_view->form->intrinsic_width;
                         }
                         // Get child height - explicit (from View or DOM) or intrinsic
                         if (child_explicit.has_height) {

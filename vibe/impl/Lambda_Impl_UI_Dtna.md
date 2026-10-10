@@ -933,3 +933,139 @@ were therefore not rerun after the Button/event-continuation edits; the earlier
 Spin/provenance aggregate results above remain dated evidence, not validation
 of this final increment. Work is paused at the user's wrap-up request, with
 M0–M3 and the listed contracts/features still open.
+
+### Gallery Select/Checkbox overlap — 2026-10-10
+
+**UI-5-R** fixes a shared Radiant sizing defect exposed by the gallery. Select's
+120px border box sat in a 57px Space item because nested-flex intrinsic sizing
+read raw native control metrics, bypassing CSS minimum/maximum constraints.
+The wrapper now uses the existing constrained intrinsic-width contribution.
+Native flex constraints use the shared border-box clamp as well, retaining
+content-box padding/borders and capping the automatic minimum by the maximum
+(CSS Flexbox §4.5/§9.9.3). No dtna stylesheet or spacing workaround is needed.
+
+The reduced HTML fixture improves from 3/18 to **18/18 assertions**; the actual
+gallery improves from 0/2 to **2/2**, including a real checkbox click. Both pass
+on interpreter and MIR Direct (**D8.1.1v17**). Independent Chromium geometry
+agrees with all 18 reduced oracles. Gallery Select remains at x=75, width=120;
+the next label moves from x=140 to x=203, leaving the authored 8px gap.
+The rebuilt executable, dimension lint, catalog and whitespace checks pass.
+Logs, geometry and browser evidence are under `temp/ui_dtna/select_overlap/`.
+This bug fix does not resume milestone work.
+Isolated native dtna runs pass **47/48 fixtures (49/50 GTests)** on each tier;
+their sole failure remains **UI-1**.
+
+The required Radiant aggregate completed: **4219 passing, 350 partial, five
+failing of 4574**. All **3294 layout thresholds** and **211 accepted render
+baselines** passed. The retained failures are **UI-1**,
+`doc_editor_indexed_math_arrows`,
+`RadiantViewTest.LoadsMathIntensiveLatexAsHeadlessView` and
+`radiant_view_math_intensive_scroll`. The fifth report was a runner artifact:
+overlapping interpreter/JIT suite runs shared Rate's machine-result path.
+Its original stdout passed 70/70 assertions, and an isolated interpreter rerun
+with a unique result file passed **70/70**, including the machine result.
+The aggregate's raw result remains a failure; the rerun does not rewrite it.
+
+The additional Radiant unit sweep passed **927/931**. Four `StyleEpochTest`
+cases fail CSS assertions before any layout call:
+`OverlappingMutationRootsCascadeTheFinalTreeOnce`,
+`ChildListOutsideStructuralAnchorsPreservesExistingCascade`,
+`PositionAndEmptySelectorsRecascadeChangedParent` and
+`SiblingRemovalRecascadesWhenPreviousAnchorIsDetached`. Their fixture creates
+synthetic nodes through null backing and expects authored stylesheet matching;
+these paths do not call the changed flex code. Those tests remain unchanged.
+
+### Gallery pagination text alignment — 2026-10-10
+
+**UI-6-R** fixes pagination numbers sitting above the center of their buttons.
+The flex-item content path bypassed block finalization and its native button
+label-centering step. That existing helper is now shared with flex-item layout,
+after the used height settles; authored flex/grid alignment and the existing
+vertical-writing/text-box-trim exclusions remain intact. No package CSS changes
+or new formal rulings are needed.
+
+The reduced HTML fixture passes **16/16 assertions** on interpreter and MIR
+Direct (**D8.1.1v17**), matching independent Chromium observations. It covers
+flow/row/column layout, small/tall/stretched buttons, authored flex/grid alignment
+and resize relayout. The gallery PNG shows centered pagination labels. The
+debug executable, dimension lint, catalog and whitespace checks pass. Evidence
+is under `temp/ui_dtna/pagination_alignment/`. This bug fix does not resume
+milestone work.
+
+Gallery geometry confirms that all seven pagination labels move from a
+**−3.5px** vertical center offset to **0px**, retaining 32px button heights.
+The additional Radiant unit sweep again passes **927/931**, with the same four
+pre-layout `StyleEpochTest` failures listed under the Select/Checkbox fix above.
+Isolated native dtna runs pass **48/49 fixtures (50/51 GTests)** on each tier;
+the sole retained failure is **UI-1**. Both the 64-assertion Button fixture and
+the 18-assertion pagination interaction fixture pass on interpreter and MIR
+Direct.
+
+The required Radiant aggregate completes with **4221 passing, 350 partial and
+four failing of 4575**. All **3294 layout thresholds** and **211 accepted render
+baselines** pass, as do the page snapshot, DOM integration, vector, page-load,
+CSS memory, fuzzy-crash and WPT gates. Its four retained failures are **UI-1**,
+`doc_editor_indexed_math_arrows`,
+`RadiantViewTest.LoadsMathIntensiveLatexAsHeadlessView` and
+`radiant_view_math_intensive_scroll`. These match the genuine failures recorded
+before this fix; the earlier overlapping-run Rate artifact does not recur.
+
+### Gallery description text overlap — 2026-10-10
+
+**UI-7-R** fixes the overlap between “Radiant” and “Theme” in the gallery.
+Intrinsic grid sizing counted an unresolved variable template as one column
+and used a separate approximation that omitted spans and flexible fractions.
+It assigned 150.9px to the three-column grid and zero width to its first value.
+
+Intrinsic width queries now activate the grid's block view before computed
+style resolution, then reuse its existing placement and track-sizing pipeline.
+The existing measurement scope restores geometry and the grid scope releases
+scratch allocations. This implements the existing
+[CSS Grid §12.1/§12.7](https://www.w3.org/TR/css-grid-2/#algo-flex-tracks)
+algorithms; package styles and formal rulings are unchanged.
+
+The shared measurement pass retains the existing grid-item minimum contribution
+helper, including an authored zero minimum for a compressible native control.
+Resolving child styles earlier also exposed an opposite-axis ratio bug: a
+resolved zero `min-height` replaced an image's natural width. Transferred
+minimum heights now floor the natural contribution, preserving natural size
+when the minimum is smaller. The existing 776-case sizing baseline passes.
+
+The reduced fixture passes **40/40 assertions**, matching Chromium, and the
+actual gallery passes **4/4 assertions** on interpreter and MIR Direct
+(**D8.1.1v17**), including resizing. Its description grid expands to 353.6px;
+the first value receives its 48.9px text width, with the authored 16px space
+before the next label. Three existing intrinsic/grid ownership unit contracts,
+the debug build, dimension lint, catalog and whitespace checks pass. Evidence
+is under `temp/ui_dtna/description_overlap/`. This fix does not resume milestone
+work.
+
+Six additional browser-derived assertions cover a range control in a nested
+grid and image minima of zero or less than the natural height, before and
+after resizing. All **50 geometry assertions** pass on interpreter and MIR
+Direct. Isolated dtna runs pass **51/52 fixtures (53/54 GTests)** on each tier;
+the sole retained failure is **UI-1**. The extended exploratory probe retains
+two pre-existing final layout gaps: an explicit `width:min-content` control
+grid and an image minimum larger than its natural height. Both reproduce with
+the saved pre-fix binary; their evidence is retained as
+`replaced_extended_probe.*` and
+`replaced_before_*` in the evidence directory.
+
+The additional Radiant unit sweep passes **927/931**, retaining the same four
+pre-layout `StyleEpochTest` failures listed above. No unit expectations were
+changed.
+
+The render runner once stalled in Node/V8 shutdown after reporting all 211
+accepted baselines passed. A process sample captured the main thread joining
+a background baseline-compiler worker waiting for GC. The completed process
+was terminated so the aggregate could continue; an unmodified standalone
+rerun exits normally with all 211 baselines passing. The stack sample and
+rerun log are retained in the evidence directory.
+
+The final Radiant aggregate records **4224 passing, 350 partial and four
+failing of 4578**. All **3294 recorded layout thresholds**, the page snapshot,
+**211 accepted render baselines**, DOM integration and WPT gates pass. The four
+failures remain **UI-1**, `doc_editor_indexed_math_arrows`,
+`RadiantViewTest.LoadsMathIntensiveLatexAsHeadlessView` and
+`radiant_view_math_intensive_scroll`, matching the pre-fix aggregate. The
+final native gallery preview is `gallery_final.png` in the evidence directory.
