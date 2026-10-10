@@ -31,8 +31,14 @@ DateTime* datetime_new(Pool* pool) {
 }
 
 DateTime* datetime_now(Pool* pool) {
-    time_t now = time(NULL);
-    return datetime_from_unix(pool, (int64_t)now);
+    return datetime_from_unix_ms(pool, datetime_now_ms());
+}
+
+int64_t datetime_now_ms(void) {
+    // wall time is separate from the monotonic elapsed-time clock.
+    struct timespec now;
+    if (timespec_get(&now, TIME_UTC) != TIME_UTC) return (int64_t)time(NULL) * 1000;
+    return (int64_t)now.tv_sec * 1000 + now.tv_nsec / 1000000;
 }
 
 DateTime* datetime_from_unix(Pool* pool, int64_t unix_timestamp) {

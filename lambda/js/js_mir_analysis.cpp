@@ -194,23 +194,6 @@ bool jm_can_suspend(JsMirTranspiler* mt, JsAstNode* node) {
         (mt->in_async && jm_has_await(mt, node));
 }
 
-// Check if an expression subtree contains an optional chain (?.),
-// meaning the result may be undefined due to short-circuiting.
-bool jm_has_optional_chain(JsAstNode* node) {
-    if (!node) return false;
-    if (node->node_type == AST_NODE_MEMBER_EXPR) {
-        JsMemberNode* m = (JsMemberNode*)node;
-        if (m->optional) return true;
-        return jm_has_optional_chain(m->object);
-    }
-    if (node->node_type == AST_NODE_CALL_EXPR) {
-        JsCallNode* c = (JsCallNode*)node;
-        if (c->optional) return true;
-        return jm_has_optional_chain(c->callee);
-    }
-    return false;
-}
-
 
 bool jm_has_await(JsMirTranspiler* mt, JsAstNode* node) {
     return jm_has_indexed_suspension(mt, node, JS_SUSPENSION_AWAIT);

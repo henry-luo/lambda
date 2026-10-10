@@ -399,7 +399,6 @@ void jm_name_set_add(struct hashmap* set, const char* name);
 bool jm_name_set_has(struct hashmap* set, const char* name);
 bool jm_binding_set_has(struct hashmap* set, NameEntry* binding);
 bool jm_can_suspend(JsMirTranspiler* mt, JsAstNode* node);
-bool jm_has_optional_chain(JsAstNode* node);
 bool jm_has_await(JsMirTranspiler* mt, JsAstNode* node);
 void jm_collect_indexed_func_assignments(JsMirTranspiler* mt, JsAstNode* node,
     struct hashmap* names);

@@ -702,7 +702,7 @@ static ShapeEntry* clone_shape_entries_owned(TypeAlloc alloc, const TypeMap* sou
 // literal's, a contract's, a nominal, a parsed or a private type. JS shapes
 // (class metadata, fixed slots, descriptor flags, accessors), array-index
 // shapes and spread link slots keep their own paths.
-static bool external_parent_admissible(const TypeMap* parent) {
+static bool external_parent_admissible(const TypeMap* parent, bool data_attributes = false) {
     if (!parent || (parent->type_id != LMD_TYPE_MAP && parent->type_id != LMD_TYPE_ELEMENT)) {
         return false;
     }
@@ -710,7 +710,7 @@ static bool external_parent_admissible(const TypeMap* parent) {
             parent->slot_entries || parent->slot_count > 0) return false;
     int64_t count = 0;
     FOR_EACH_MAP_FIELD(parent, field) {
-        if (!field->name || field->byte_offset < 0 || field->flags != 0 || field->accessor) {
+        if (!field->name || field->byte_offset < 0 || (field->flags & (data_attributes ? ~(JSPD_NON_WRITABLE | JSPD_NON_ENUMERABLE | JSPD_NON_CONFIGURABLE) : 0xFF)) || field->accessor) {
             return false;
         }
         count++;
@@ -752,7 +752,7 @@ static bool external_identity_matches(const TypeMap* parent, const TypeMap* chil
 // when `same_offsets`, its offsets. The entry at `retyped` (-1: none) carries
 // `retyped_to` instead of the parent's contract.
 static bool external_entries_match(const TypeMap* parent, const TypeMap* copy,
-        bool same_offsets, int64_t retyped, const Type* retyped_to) {
+        bool same_offsets, int64_t retyped, const Type* retyped_to, int replacement_flags = -1) {
     const ShapeEntry* c = typemap_first_field(copy);
     int64_t count = 0;
     FOR_EACH_MAP_FIELD(parent, p) {
@@ -761,7 +761,7 @@ static bool external_entries_match(const TypeMap* parent, const TypeMap* copy,
                 memcmp(c->name->str, p->name->str, p->name->length) != 0 ||
                 c->name_id != p->name_id || c->key_kind != p->key_kind ||
                 c->type != expected || (same_offsets && c->byte_offset != p->byte_offset) ||
-                c->flags != p->flags || c->ns != p->ns ||
+                c->flags != (count == retyped && replacement_flags >= 0 ? replacement_flags : p->flags) || c->ns != p->ns ||
                 c->default_value != p->default_value) {
             return false;
         }
@@ -781,10 +781,10 @@ static bool external_child_matches_parent(const TypeMap* parent, const TypeMap* 
 // with the field at `position` laid out for `retyped_to` (offsets after it
 // may move).
 static bool retype_target_matches_parent(const TypeMap* parent, const TypeMap* target,
-        int64_t position, const Type* retyped_to) {
+        int64_t position, const Type* retyped_to, int replacement_flags = -1) {
     return external_identity_matches(parent, target) &&
         target->length == parent->length &&
-        external_entries_match(parent, target, false, position, retyped_to);
+        external_entries_match(parent, target, false, position, retyped_to, replacement_flags);
 }
 
 // The identity a node minted from an external parent copies: the record, and
@@ -1195,10 +1195,10 @@ static const uint8_t TYPE_TREE_RETYPE_EDGE = 0x80;
 // its own adds then follow its edges like any node's. NULL when the tree
 // declines (an inadmissible parent, the fan-out cap, the budget).
 static TypeMap* type_tree_retype_target(Input* input, TypeMap* parent, const ShapeEntry* field,
-        Type* contract) {
+        Type* contract, int replacement_flags = -1) {
     if (!input || !input->keeps_external_edges || !parent || !field || !contract ||
             !input->pool || !input->type_list) return NULL;
-    if (!external_parent_admissible(parent)) return NULL;
+    if (!external_parent_admissible(parent, replacement_flags >= 0)) return NULL;
     int64_t position = 0;
     bool found = false;
     FOR_EACH_MAP_FIELD(parent, entry) {
@@ -1211,6 +1211,8 @@ static TypeMap* type_tree_retype_target(Input* input, TypeMap* parent, const Sha
     uint8_t op[sizeof(int64_t) + 2] = {TYPE_TREE_RETYPE_EDGE, value_type};
     memcpy(op + 2, &position, sizeof(position));
     uint64_t fingerprint = fingerprint_mix(external_parent_fingerprint(parent), op, sizeof(op));
+    // Data attributes change shape identity, while preserving the existing value contract/layout.
+    if (replacement_flags >= 0) fingerprint = fingerprint_mix(fingerprint, &replacement_flags, sizeof(replacement_flags));
     TypeMapTransition** edges = external_edges_for(input, fingerprint);
     if (!edges) return NULL;
 
@@ -1220,7 +1222,7 @@ static TypeMap* type_tree_retype_target(Input* input, TypeMap* parent, const Sha
     for (TypeMapTransition* tr = *edges; tr; tr = tr->next) {
         transition_count++;
         if (tr->flags == TYPE_TREE_RETYPE_EDGE && tr->value_type == value_type && tr->target &&
-                retype_target_matches_parent(parent, tr->target, position, retyped_to)) {
+                retype_target_matches_parent(parent, tr->target, position, retyped_to, replacement_flags)) {
             if (stats) shape_tree_stat_add(&stats->external_hits, 1);
             return tr->target;
         }
@@ -1247,7 +1249,10 @@ static TypeMap* type_tree_retype_target(Input* input, TypeMap* parent, const Sha
     int64_t offset = 0;
     int64_t index = 0;
     for (ShapeEntry* e = first; e; e = shape_chain_next_until(e, last), index++) {
-        if (index == position) shape_entry_set_type(e, (Type*)retyped_to);
+        if (index == position) {
+            shape_entry_set_type(e, (Type*)retyped_to);
+            if (replacement_flags >= 0) e->flags = (uint8_t)replacement_flags;
+        }
         e->byte_offset = offset;
         offset += shape_entry_storage_size(e);
     }
@@ -1323,6 +1328,12 @@ TypeMap* type_tree_retype_field(Input* input, TypeMap* parent, const ShapeEntry*
     plan->next = parent->retype_plans; parent->retype_plans = plan;
     if (out_plan) *out_plan = plan;
     return target;
+}
+
+TypeMap* type_tree_reflag_field(Input* input, TypeMap* parent, const ShapeEntry* field, uint8_t flags) {
+    if (!field || (flags & ~(JSPD_NON_WRITABLE | JSPD_NON_ENUMERABLE | JSPD_NON_CONFIGURABLE))) return NULL;
+    if (field->flags == flags) return parent;
+    return type_tree_retype_target(input, parent, field, field->type, flags);
 }
 
 TypeMap* type_tree_retype_contract(Input* input, TypeMap* parent, const ShapeEntry* field,

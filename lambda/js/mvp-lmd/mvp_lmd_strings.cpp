@@ -35,6 +35,10 @@ extern "C" int64_t mvp_lmd_string_search(Item value, Item needle, double start, 
     String* string = value.get_string(); String* pattern = needle.get_string();
     int64_t length = string->is_ascii ? string->len : utf8_to_utf16_length(string->chars, string->len);
     int64_t first = string_bound(start, length, false);
+    if (prefix == 2) {
+        first -= pattern->is_ascii ? pattern->len : utf8_to_utf16_length(pattern->chars, pattern->len);
+        if (first < 0) return false;
+    }
     int64_t result;
     if (string->is_ascii && pattern->is_ascii) {
         if (!first) result = fn_index_of_raw(value, needle);
@@ -44,6 +48,25 @@ extern "C" int64_t mvp_lmd_string_search(Item value, Item needle, double start, 
         }
     } else result = utf16_find(string->chars, string->len, pattern->chars, pattern->len, first);
     return prefix ? result == first : result;
+}
+extern "C" Item mvp_lmd_string_pad(Item string, double length, Item filler) {
+    RootFrame roots(3);
+    if (!roots.valid()) return ItemError;
+    Rooted<Item> source(roots, string), fill(roots, filler), repeated(roots, ItemNull);
+    int64_t current = utf8_to_utf16_length(string.get_string()->chars, string.get_string()->len);
+    length = isnan(length) || length < 0 ? 0 : trunc(length);
+    if (length <= current) return source.get();
+    fill.set(filler.item == ITEM_JS_UNDEFINED ? Item{.item = s2it(get_ascii_char_string(' '))} : mvp_lmd_primitive_to_string(filler));
+    if (item_is_error(fill.get())) return fill.get();
+    int64_t width = utf8_to_utf16_length(fill.get().get_string()->chars, fill.get().get_string()->len);
+    if (!width) return source.get();
+    if (!isfinite(length) || length > INT_MAX - sizeof(String) - 1) return mvp_lmd_fail(LMD_MVP_RANGE, 0);
+    int64_t missing = (int64_t)length - current;
+    String* text = str_repeat(fill.get().get_string(), (missing + width - 1) / width);
+    if (!text) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
+    repeated.set(Item{.item = s2it(text)});
+    repeated.set(mvp_lmd_string_range(repeated.get(), 0, missing, 1));
+    return item_is_error(repeated.get()) ? repeated.get() : mvp_lmd_string_concat(repeated.get(), source.get());
 }
 extern "C" Item mvp_lmd_string_split(Item value, Item separator, int64_t limit) {
     String* string = value.get_string();

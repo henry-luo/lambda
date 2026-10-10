@@ -90,6 +90,7 @@ struct Activation {
     int gc_own_no_gc_depth;
 #endif
     Item result;
+    uint64_t result_home;
     LambdaFaultRecord fault;
     // Strong activations only: the collector's root list (weak ones are traced
     // by their owners, so visiting them every collection would be wasted).
@@ -587,11 +588,11 @@ extern "C" ActivationStatus activation_resume(Activation* activation, Item input
     ambient_load(&activation->ambient, activation->stacks);
     fiber_switch(self ? &self->sp : &thread->base_sp, activation->sp);
 
-    // Back on the resumer: the activation saved itself and reinstalled us. The
-    // value it handed over is taken raw; a wide scalar in it still points into
-    // the activation's number segment, and each language moves it to an owner
-    // of its own (a Lambda task's result slot, the JS driver's frame).
-    activation->result.item = activation_slots(activation)[ACTIVATION_SLOT_TRANSFER];
+    // Back on the resumer: the activation saved itself and reinstalled us.
+    // The segment may be discarded below. Own a wide scalar before either
+    // compaction or completion releases its source storage (D5.1.1v3).
+    Item transferred = {.item = activation_slots(activation)[ACTIVATION_SLOT_TRANSFER]};
+    activation->result = lambda_item_adopt_scalar_home(transferred, &activation->result_home);
     if (activation->status == ACTIVATION_SUSPENDED) activation_note_parked(activation);
     if (activation->status == ACTIVATION_DONE) {
         strong_unlink(activation);

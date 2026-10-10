@@ -114,6 +114,7 @@ typedef enum {
 DateTime* datetime_new(Pool* pool);
 DateTime* datetime_from_string(Pool* pool, const char* datetime_str);
 DateTime* datetime_now(Pool* pool);
+int64_t datetime_now_ms(void);
 void datetime_to_string(StrBuf *strbuf, DateTime* dt, DateTimeFormat format);
 
 // Parsing functions for different formats

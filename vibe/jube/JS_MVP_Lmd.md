@@ -1310,3 +1310,67 @@ unmodified committed build. Windows clock validation remains open. The
 implementation plan records these limits and the pre-existing class-cache
 discrepancy under **D8.4.1v2**. Results3–8 are preserved; the published population
 remains Result8's 60 until aggregate acceptance is resolved.
+
+## 30. Library completion and generator-based benchmarks
+
+**Feature implementation complete; performance gate open (2026-10-10):** adds **11 standard benchmarks** in the following order.
+The target is **70 of 71 standard benchmarks**, plus 17 microbenchmarks:
+**87 workloads** after acceptance. `jetstream/hashmap` remains excluded, together
+with mutable prototype links and accessor execution. All eleven new canonical
+oracles pass on the final frozen release; phase acceptance still requires
+resolving the remaining `log_pipeline` regression.
+
+| Round | Targets | Required additions |
+|---|---|---|
+| 1. Core library completion | `jetstream/raytrace3d`, `text/prettier_ast`, `beng/pidigits` | Basic Date and array-to-string coercion; JSON parse/stringify; default/rest parameters; Array flat/reduce/some/includes; BigInt literals, exact arithmetic/comparison and string conversion |
+| 2. RegExp and array editing | `beng/regexredux`, `text/fast_diff`, `text/hyphen` | RegExp literals/test/match/replace, including negative lookahead; Array splice/concat/unshift; Function call/bind; for-in, globalThis, basic Object prototype methods and default-locale lowercase |
+| 3. Reflection and bounded data descriptors | `text/microdiff` | Optional chaining, Function apply, Array.isArray, numeric classification, prototype reflection and constructor names, Date/RegExp coercion, and data-only Object.defineProperty |
+| 4. Generators, iterators and exception handling | `text/jq_mix`, `text/jq_records`, `text/jq_bf`, `text/jq_tree` | Generator functions/methods, yield/yield*, general iterators and Symbol.iterator, iterator closing, try/catch/finally, destructuring and call/object spread; ordinary object methods and named public instance fields; Object.create/assign, Set, and remaining collection/string builtins |
+
+Reuse Lambda implementations first, adding options for small semantic differences
+(**D1.3v3**). BigInt should use the existing core `bigint_*` operations. JSON,
+arrays, UTF traversal, regex matching and clocks should reuse applicable shared
+kernels with explicit JS semantics. Date uses wall-clock milliseconds; existing
+`performance.now()` keeps its monotonic execution-relative timing contract.
+Disclose any new helper before implementation.
+
+Objects, class inheritance and collection storage retain Lambda Maps and shared
+shapes (**D2.6.9v3**, **D3.4.3v5**, **D3.4.5**). `Object.create(p)` establishes a
+prototype link at creation; subsequent link reassignment remains excluded.
+Generator suspension should build on existing Function/closure machinery with
+precisely traced saved state; JS captures remain mutable (**D5.3**,
+**D6.2.2v2–D6.2.4**). Exceptions and iterator cleanup use explicit completions
+through every frame (**D1.4v4**). Preserve guarded specialization and shared
+fallback dispatch (**D8.4.1v2**).
+
+**Scope limits:** no `__proto__`, prototype replacement/reassignment, getter or
+setter execution, proxies, VMap for plain objects, general descriptor support, or async
+execution. The synchronous hyphen workload does not require Promise scheduling.
+The jq tracing getter is admitted with an accessor flag on its ordinary nominal
+shape; presence checks can observe the declaration. Reads and writes explicitly
+reject accessor execution. Focused checks cover declaration, enumeration and
+rejection; all four canonical jq workloads pass. Report any
+executed accessor dependency before expanding scope (**D3.4.3v5**, **D8.4.1v2**).
+
+**Acceptance:** preserve canonical sources, inputs, warmup, timed work and exact
+oracles for all 11 targets, using existing script self-timing. Freeze the §29
+release as control and check all prior **76 workloads** with release, pinned MIR,
+paired self-reported times and an identical-control peer; confirm suspected
+regressions with longer runs. Require focused normal/forced-GC checks and shared
+Lambda/Test262 gates. Keep §29's existing failures and platform limits explicit;
+new coverage and performance claims require complete evidence.
+
+Implementation sequence, helper inventory and validation status:
+[implementation plan](../impl/JS_MVP_Lmd_Library_Generators.md).
+
+**Current checks:** 100/100 focused tests pass normally and with forced GC;
+Test262 passes 40261/40261 without unstable batches. The Lambda aggregate is
+6590/6591, retaining only the reproduced §29 `edit_view_only` failure. All eleven
+new canonical targets pass their output/backend checks, establishing functional
+coverage of **87 workloads**. The seven-repeat prior-76 screen passes every
+oracle, with effectively unchanged aggregate timing (geometric mean **0.9992×**
+control). Longer confirmation clears the other suspected slowdowns within
+measurement uncertainty, but `log_pipeline` remains **1.3% slower** against the
+control (also positive against the identical-control peer). Its cause is still
+open, so the strict no-regression gate is not passed. Generator stack overhead
+also remains a material performance limit for the new jq workloads.

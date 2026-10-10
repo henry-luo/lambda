@@ -1,14 +1,19 @@
 #include "input.hpp"
+#include "input-parsers.h"
 #include "input-context.hpp"
 #include "input-utils.hpp"
 #include "../io/mark_builder.hpp"
+#include "../../lib/utf.h"
 #include <cstring>
 #include <cstdlib>
 
 #define MAX_PARSING_DEPTH 64                  // Max nesting depth
 using namespace lambda;
 
-static Item parse_value(InputContext& ctx, const char **json, int depth = 0);
+static Item parse_value(InputContext& ctx, const char **json, int depth = 0, bool js_compat = false);
+static void json_skip_whitespace(const char** json) {
+    *json += strspn(*json, " \t\r\n");
+}
 
 static bool json_recover_to_separator(InputContext& ctx, const char** json,
         char closing, bool skip_after_comma) {
@@ -19,7 +24,7 @@ static bool json_recover_to_separator(InputContext& ctx, const char** json,
     if (**json == ',') {
         (*json)++;
         ctx.tracker.advance(1);
-        if (skip_after_comma) skip_whitespace(json);
+        if (skip_after_comma) json_skip_whitespace(json);
         return true;
     }
     return false;
@@ -34,7 +39,7 @@ static void json_consume_comma_or_recover(InputContext& ctx, const char** json,
     }
     (*json)++;
     ctx.tracker.advance(1);
-    skip_whitespace(json);
+    json_skip_whitespace(json);
 }
 
 // End of the run of plain string bytes starting at p: the first quote,
@@ -49,7 +54,7 @@ static inline const char* json_string_run_end(const char* p) {
 // next string). Plain runs are appended and advanced in bulk; the per-byte
 // append and tracker update were two fifths of JSON parse time.
 static bool parse_string_raw(InputContext& ctx, const char **json,
-        const char** out_chars, size_t* out_len) {
+        const char** out_chars, size_t* out_len, bool js_compat) {
     SourceTracker& tracker = ctx.tracker;
 
     if (**json != '"') {
@@ -108,13 +113,16 @@ static bool parse_string_raw(InputContext& ctx, const char **json,
         if (escape == 'u') {
             uint32_t cp;
             size_t consumed;
-            if (!escape_decode_utf16_escape(*json + 1, strnlen(*json + 1, 10), true, &cp, &consumed)) {
+            if (!escape_decode_utf16_escape(*json + 1, strnlen(*json + 1, 10), !js_compat, &cp, &consumed)) {
                 ctx.addError(tracker.location(), "Invalid JSON Unicode escape");
                 return false;
             }
             *json += consumed + 1;
             tracker.advance(consumed + 1);
-            stringbuf_append_utf8(sb, cp);
+            // JS preserves lone UTF-16 units; other Input consumers keep replacement semantics.
+            char bytes[4];
+            size_t length = js_compat ? utf8_encode_wtf8(cp, bytes) : utf8_encode(cp, bytes);
+            stringbuf_append_str_n(sb, bytes, length);
             continue;
         }
         int consumed = parse_escape_char(json, sb);
@@ -134,19 +142,19 @@ static bool parse_string_raw(InputContext& ctx, const char **json,
     return true;
 }
 
-static String* parse_string(InputContext& ctx, const char **json) {
+static String* parse_string(InputContext& ctx, const char **json, bool js_compat) {
     const char* chars = nullptr;
     size_t len = 0;
-    if (!parse_string_raw(ctx, json, &chars, &len)) return nullptr;
+    if (!parse_string_raw(ctx, json, &chars, &len, js_compat)) return nullptr;
     return ctx.builder.createString(chars, len);
 }
 
-static Item parse_number(InputContext& ctx, const char **json) {
+static Item parse_number(InputContext& ctx, const char **json, bool js_compat) {
     SourceTracker& tracker = ctx.tracker;
 
     char* end;
     const char* start = *json;
-    strtod(*json, &end);
+    double value = strtod(*json, &end);
 
     if (end == *json) {
         ctx.addError(tracker.location(), "Invalid number format");
@@ -185,6 +193,8 @@ static Item parse_number(InputContext& ctx, const char **json) {
         return ctx.builder.createNull();
     }
 
+    // JS JSON numbers are IEEE doubles, including -0 and overflow to infinity.
+    if (js_compat) return ctx.builder.createFloat(value);
     Item number_item = parse_scanned_decimal_number(ctx, start, len, false, true);
     if (number_item.item == ITEM_NULL) {
         const char* msg = scanned_number_has_float_marker(start, len)
@@ -196,7 +206,7 @@ static Item parse_number(InputContext& ctx, const char **json) {
     return number_item;
 }
 
-static Item parse_array(InputContext& ctx, const char **json, int depth) {
+static Item parse_array(InputContext& ctx, const char **json, int depth, bool js_compat) {
     SourceTracker& tracker = ctx.tracker;
 
     if (**json != '[') {
@@ -208,7 +218,7 @@ static Item parse_array(InputContext& ctx, const char **json, int depth) {
 
     (*json)++; // skip [
     tracker.advance(1);
-    skip_whitespace(json);
+    json_skip_whitespace(json);
 
     if (**json == ']') {
         (*json)++;
@@ -218,10 +228,10 @@ static Item parse_array(InputContext& ctx, const char **json, int depth) {
 
     bool closed = false;
     while (**json && !ctx.shouldStopParsing()) {
-        Item item = parse_value(ctx, json, depth + 1);
+        Item item = parse_value(ctx, json, depth + 1, js_compat);
         arr_builder.append(item);
 
-        skip_whitespace(json);
+        json_skip_whitespace(json);
         if (**json == ']') {
             (*json)++;
             tracker.advance(1);
@@ -237,7 +247,7 @@ static Item parse_array(InputContext& ctx, const char **json, int depth) {
     return arr_builder.final();
 }
 
-static Item parse_object(InputContext& ctx, const char **json, int depth) {
+static Item parse_object(InputContext& ctx, const char **json, int depth, bool js_compat) {
     SourceTracker& tracker = ctx.tracker;
 
     if (**json != '{') {
@@ -249,7 +259,7 @@ static Item parse_object(InputContext& ctx, const char **json, int depth) {
 
     (*json)++; // skip '{'
     tracker.advance(1);
-    skip_whitespace(json);
+    json_skip_whitespace(json);
 
     if (**json == '}') { // empty map
         (*json)++;
@@ -271,7 +281,7 @@ static Item parse_object(InputContext& ctx, const char **json, int depth) {
         // the throwaway arena String parse_string would build first
         const char* key_chars = nullptr;
         size_t key_len = 0;
-        String* key = parse_string_raw(ctx, json, &key_chars, &key_len)
+        String* key = parse_string_raw(ctx, json, &key_chars, &key_len, js_compat)
             ? ctx.builder.createName(key_chars, key_len) : nullptr;
         if (!key) {
             // Error recovery: skip to next comma or closing brace
@@ -279,7 +289,7 @@ static Item parse_object(InputContext& ctx, const char **json, int depth) {
             break;
         }
 
-        skip_whitespace(json);
+        json_skip_whitespace(json);
         if (**json != ':') {
             ctx.addError(tracker.location(), "Expected ':' after object key");
             // Error recovery: skip to next comma or closing brace
@@ -289,11 +299,11 @@ static Item parse_object(InputContext& ctx, const char **json, int depth) {
 
         (*json)++;
         tracker.advance(1);
-        skip_whitespace(json);
+        json_skip_whitespace(json);
 
-        Item value = parse_value(ctx, json, depth + 1);
+        Item value = parse_value(ctx, json, depth + 1, js_compat);
         map_builder.put(key, value);
-        skip_whitespace(json);
+        json_skip_whitespace(json);
         if (**json == '}') {
             (*json)++;
             tracker.advance(1);
@@ -308,7 +318,7 @@ static Item parse_object(InputContext& ctx, const char **json, int depth) {
     return map_builder.final();
 }
 
-static Item parse_value(InputContext& ctx, const char **json, int depth) {
+static Item parse_value(InputContext& ctx, const char **json, int depth, bool js_compat) {
     SourceTracker& tracker = ctx.tracker;
 
     // Security: Prevent stack overflow from deeply nested structures
@@ -317,7 +327,7 @@ static Item parse_value(InputContext& ctx, const char **json, int depth) {
         return ctx.builder.createNull();
     }
 
-    skip_whitespace(json);
+    json_skip_whitespace(json);
 
     if (!**json) {
         ctx.addError(tracker.location(), "Unexpected end of JSON");
@@ -326,11 +336,11 @@ static Item parse_value(InputContext& ctx, const char **json, int depth) {
 
     switch (**json) {
         case '{':
-            return parse_object(ctx, json, depth);
+            return parse_object(ctx, json, depth, js_compat);
         case '[':
-            return parse_array(ctx, json, depth);
+            return parse_array(ctx, json, depth, js_compat);
         case '"': {
-            String* str = parse_string(ctx, json);
+            String* str = parse_string(ctx, json, js_compat);
             if (!str) {
                 return ctx.builder.createNull();  // actual parse error
             }
@@ -347,7 +357,7 @@ static Item parse_value(InputContext& ctx, const char **json, int depth) {
             return ctx.builder.createNull();
         default:
             if ((**json >= '0' && **json <= '9') || **json == '-') {
-                return parse_number(ctx, json);
+                return parse_number(ctx, json, js_compat);
             }
             ctx.addError(tracker.location(),
                         "Unexpected character: '%c'", **json);
@@ -392,6 +402,9 @@ Item parse_json_to_item(Input* input, const char* json_string) {
 // Strict variant: parse JSON and verify no trailing non-whitespace content
 // Returns ITEM_NULL and sets *ok = false if there is trailing content or parse error
 Item parse_json_to_item_strict(Input* input, const char* json_string, bool* ok) {
+    return parse_json_to_item_strict(input, json_string, ok, false);
+}
+Item parse_json_to_item_strict(Input* input, const char* json_string, bool* ok, bool js_compat) {
     *ok = false;
     if (!json_string || !*json_string) {
         return {.item = ITEM_NULL};
@@ -399,14 +412,14 @@ Item parse_json_to_item_strict(Input* input, const char* json_string, bool* ok) 
 
     InputContext ctx(input, json_string, strlen(json_string));
 
-    Item result = parse_value(ctx, &json_string, 0);
+    Item result = parse_value(ctx, &json_string, 0, js_compat);
 
     if (ctx.hasErrors()) {
         return {.item = ITEM_NULL};
     }
 
     // check for trailing non-whitespace content
-    skip_whitespace(&json_string);
+    json_skip_whitespace(&json_string);
     if (*json_string != '\0') {
         return {.item = ITEM_NULL};
     }

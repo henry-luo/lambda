@@ -11795,9 +11795,12 @@ static bool map_extend_open_shape(Item map_item, Item key, Item value) {
     name->str = name_copy;
     name->length = key_length;
     added->name = name;
-    added->name_hash = typemap_name_hash(name->str, (int)name->length);
-    added->name_id = NAME_ID_NONE;
-    added->key_kind = NAME_KEY_STRING;
+    String* key_ref = key_type == LMD_TYPE_STRING ? key.get_string() : NULL;
+    const NameMeta* key_meta = key_ref ? property_key_meta(key_ref) : NULL;
+    // pooled keys already carry the canonical hash and identity; read the metadata once.
+    added->name_hash = key_meta && key_meta->hash ? key_meta->hash : typemap_name_hash(name->str, (int)name->length);
+    added->name_id = key_meta ? key_meta->name_id : NAME_ID_NONE;
+    added->key_kind = key_meta ? key_meta->key_kind : NAME_KEY_STRING;
     shape_entry_set_type(added, type_info[value_type].type);
     added->byte_offset = offset;
     map_field_store((char*)new_data + offset, rooted_value.get(), value_type);
@@ -13588,23 +13591,42 @@ static bool container_retype_field(Container* owner, TypeId kind, void** type_sl
         kind, owner, field, type_info[tid].type, value);
 }
 
-// D3.4.3/D3.4.5: immutable transitions for packed plain maps, without JS policy hooks.
-bool map_shape_set(Map* map, String* key, Item value) {
+// D3.4.3/D3.4.5: share mutation without repeating admission around the resolved-field entry.
+enum MapShapeKeyMode { MAP_SHAPE_RESOLVED, MAP_SHAPE_KEY, MAP_SHAPE_TEXT };
+template<MapShapeKeyMode key_mode>
+static inline bool map_shape_set_impl(Map* map, String* key, Item value, ShapeEntry* field) {
     TypeMap* type = (TypeMap*)map->type;
-    if (!type || type->js_meta || !key || get_type_id(value) == LMD_TYPE_ERROR) return false;
-    ShapeEntry* field = typemap_hash_lookup(type, key->chars, (int)key->len);
-    if (!field) return map_extend_open_shape(Item{.map = map}, Item{.item = s2it(key)}, value);
+    if (!type || type->js_meta || !key) return false;
+    // lookup cannot change the value's type; retain its admission result across the lookup call.
     TypeId tid = get_type_id(value);
+    if (tid == LMD_TYPE_ERROR) return false;
+    if constexpr (key_mode == MAP_SHAPE_KEY) field = typemap_hash_lookup_key(type, key);
+    if constexpr (key_mode == MAP_SHAPE_TEXT) field = typemap_hash_lookup(type, key->chars, key->len);
+    if (!field) return map_extend_open_shape(Item{.map = map}, Item{.item = s2it(key)}, value);
     if (field->type->type_id == tid)
         return map_field_store((char*)map->data + field->byte_offset, value, tid);
     return container_retype_field(map, LMD_TYPE_MAP, &map->type, &map->data,
         &map->data_cap, field, value);
 }
 
-bool map_shape_delete(Map* map, String* key) {
+bool map_shape_set(Map* map, String* key, Item value) {
+    return map_shape_set_impl<MAP_SHAPE_KEY>(map, key, value, NULL);
+}
+
+bool map_shape_set_text(Map* map, String* key, Item value) {
+    return map_shape_set_impl<MAP_SHAPE_TEXT>(map, key, value, NULL);
+}
+
+bool map_shape_set_resolved(Map* map, String* key, ShapeEntry* field, Item value) {
+    return map_shape_set_impl<MAP_SHAPE_RESOLVED>(map, key, value, field);
+}
+
+template<MapShapeKeyMode key_mode>
+static inline bool map_shape_delete_impl(Map* map, String* key, ShapeEntry* removed) {
     TypeMap* old = (TypeMap*)map->type;
-    if (!old || old->js_meta || !key) return false;
-    ShapeEntry* removed = typemap_hash_lookup(old, key->chars, (int)key->len);
+    if (!old || old->js_meta || (key_mode != MAP_SHAPE_RESOLVED && !key)) return false;
+    if constexpr (key_mode == MAP_SHAPE_KEY) removed = typemap_hash_lookup_key(old, key);
+    if constexpr (key_mode == MAP_SHAPE_TEXT) removed = typemap_hash_lookup(old, key->chars, key->len);
     if (!removed) return true;
     Input* tree = runtime_shape_tree();
     const TypeMapRetypePlan* plan = NULL;
@@ -13635,6 +13657,18 @@ bool map_shape_delete(Map* map, String* key) {
     }
     return container_move_to_type(&map->type, &map->data, &map->data_cap,
         map, old, target, NULL, ItemNull, 0, removed, plan);
+}
+
+bool map_shape_delete(Map* map, String* key) {
+    return map_shape_delete_impl<MAP_SHAPE_KEY>(map, key, NULL);
+}
+
+bool map_shape_delete_text(Map* map, String* key) {
+    return map_shape_delete_impl<MAP_SHAPE_TEXT>(map, key, NULL);
+}
+
+bool map_shape_delete_resolved(Map* map, ShapeEntry* field) {
+    return map_shape_delete_impl<MAP_SHAPE_RESOLVED>(map, NULL, field);
 }
 
 // map/element field assignment: obj.field = val
