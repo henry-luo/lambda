@@ -267,7 +267,7 @@ static Item regexp_replacement(Item source, Item match, Item replacement) {
     int64_t start = it2d(regexp_property(match, "index"));
     String* full = match.array->items[0].get_string();
     int64_t end = start + utf8_to_utf16_length(full->chars, full->len);
-    if (get_type_id(replacement) == LMD_TYPE_FUNC) {
+    if (mvp_lmd_is_callable(replacement)) {
         RootSpan arguments(count + 3);
         if (!arguments.valid()) return ItemError;
         for (int i = 0; i < count; i++) arguments.items()[i] = record.get().array->items[i];
@@ -329,7 +329,7 @@ extern "C" Item mvp_lmd_regexp_string_method(MvpLmdLibraryState* state, Item sou
         regex.set(mvp_lmd_regexp_new(state, regex.get(), Item{.item = ITEM_JS_UNDEFINED}));
         if (item_is_error(regex.get())) return regex.get();
     }
-    if (replace && get_type_id(substitution.get()) != LMD_TYPE_FUNC) {
+    if (replace && !mvp_lmd_is_callable(substitution.get())) {
         substitution.set(mvp_lmd_primitive_to_string(substitution.get()));
         if (item_is_error(substitution.get())) return substitution.get();
     }

@@ -13380,7 +13380,7 @@ static bool container_move_to_type(void** type_slot, void** data_slot, int* cap_
     field_index = 0;
     while (old_e && new_e) {
         if (old_e == removed_entry) { old_e = typemap_next_field(old_map_type, old_e); continue; }
-        if (old_e->byte_offset < 0 || new_e->byte_offset < 0) {
+        if ((old_e->byte_offset < 0 && old_e != changed_entry) || new_e->byte_offset < 0) {
             old_e = typemap_next_field(old_map_type, old_e);
             new_e = typemap_next_field(new_type, new_e);
             field_index++;
@@ -13479,7 +13479,8 @@ static bool map_rebuild_for_type_change(void** type_slot, void** data_slot, int*
         // union with its LMD_TYPE_TYPE carrier makes the packed Item look like
         // a Type* and corrupts it on the next validation read.
         shape_entry_set_type(ne, field_contract);
-        bool virtual_field = e->byte_offset < 0;
+        // an explicit replacement materializes a former virtual descriptor.
+        bool virtual_field = e->byte_offset < 0 && e != changed_entry;
         bool fixed_slot = !virtual_field && field_index < fixed_slot_count;
         ne->byte_offset = virtual_field ? -1 : (fixed_slot ? e->byte_offset : byte_offset);
         ne->ns = e->ns;
@@ -13490,6 +13491,10 @@ static bool map_rebuild_for_type_change(void** type_slot, void** data_slot, int*
         ne->flags = e->flags;
         ne->default_value = e->default_value;
         ne->accessor = e->accessor;
+        if (e == changed_entry && e->byte_offset < 0) {
+            ne->flags &= (uint8_t)~JSPD_IS_ACCESSOR;
+            ne->accessor = NULL;
+        }
 
         if (!first) first = ne;
         if (prev) prev->chain_next = ne;
@@ -13603,7 +13608,7 @@ static inline bool map_shape_set_impl(Map* map, String* key, Item value, ShapeEn
     if constexpr (key_mode == MAP_SHAPE_KEY) field = typemap_hash_lookup_key(type, key);
     if constexpr (key_mode == MAP_SHAPE_TEXT) field = typemap_hash_lookup(type, key->chars, key->len);
     if (!field) return map_extend_open_shape(Item{.map = map}, Item{.item = s2it(key)}, value);
-    if (field->type->type_id == tid)
+    if (field->byte_offset >= 0 && field->type->type_id == tid)
         return map_field_store((char*)map->data + field->byte_offset, value, tid);
     return container_retype_field(map, LMD_TYPE_MAP, &map->type, &map->data,
         &map->data_cap, field, value);
@@ -13642,8 +13647,11 @@ static inline bool map_shape_delete_impl(Map* map, String* key, ShapeEntry* remo
             ShapeEntry* copy = (ShapeEntry*)pool_calloc(context->pool, sizeof(ShapeEntry));
             if (!copy) return false;
             *copy = *field; copy->chain_next = NULL; copy->chain_index = 0;
-            copy->byte_offset = target->byte_size;
-            target->byte_size += shape_entry_storage_size(copy);
+            // virtual descriptors retain their cell and consume no packed bytes.
+            if (copy->byte_offset >= 0) {
+                copy->byte_offset = target->byte_size;
+                target->byte_size += shape_entry_storage_size(copy);
+            }
             if (target->last) target->last->chain_next = copy;
             else target->shape = copy;
             target->last = copy; target->length++;

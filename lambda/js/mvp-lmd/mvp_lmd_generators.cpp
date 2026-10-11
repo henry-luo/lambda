@@ -22,13 +22,13 @@ extern "C" Item mvp_lmd_iterator_get(MvpLmdProgram* program, Item source) {
     method.set(type == LMD_TYPE_ARRAY || type == LMD_TYPE_STRING ? mvp_lmd_array_method_value(program, source, name) :
         mvp_lmd_class_property(source, name, ItemNull, LMD_PROP_GET, NULL));
     if (item_is_error(method.get())) return method.get();
-    if (get_type_id(method.get()) != LMD_TYPE_FUNC) return mvp_lmd_fail(LMD_MVP_TYPE, 0);
+    if (!mvp_lmd_is_callable(method.get())) return mvp_lmd_fail(LMD_MVP_TYPE, 0);
     iterator.set(mvp_lmd_class_invoke(method.get(), owner.get(), NULL, 0, Item{.item = ITEM_JS_UNDEFINED}));
     if (item_is_error(iterator.get())) return iterator.get();
     if (!iterator_object(iterator.get())) return mvp_lmd_fail(LMD_MVP_TYPE, 0);
     method.set(iterator_property(iterator.get(), "next"));
     if (item_is_error(method.get())) return method.get();
-    if (get_type_id(method.get()) != LMD_TYPE_FUNC) return mvp_lmd_fail(LMD_MVP_TYPE, 0);
+    if (!mvp_lmd_is_callable(method.get())) return mvp_lmd_fail(LMD_MVP_TYPE, 0);
     record.set(mvp_lmd_array_new(0));
     if (item_is_error(record.get())) return record.get();
     Item stored = mvp_lmd_array_store(record.get(), 0, iterator.get());
@@ -46,7 +46,7 @@ extern "C" Item mvp_lmd_iterator_close(Item record, Item completion) {
     Rooted<Item> held(roots, record), pending(roots, completion), method(roots, iterator_property(record.array->items[0], "return"));
     if (method.get().item == ITEM_JS_UNDEFINED || method.get().item == ITEM_NULL) return pending.get();
     Item result = method.get();
-    if (!item_is_error(result)) result = get_type_id(result) != LMD_TYPE_FUNC ? mvp_lmd_fail(LMD_MVP_TYPE, 0) :
+    if (!item_is_error(result)) result = !mvp_lmd_is_callable(result) ? mvp_lmd_fail(LMD_MVP_TYPE, 0) :
         mvp_lmd_class_invoke(method.get(), held.get().array->items[0], NULL, 0, Item{.item = ITEM_JS_UNDEFINED});
     // An existing throw wins over a failing close, as in IteratorClose.
     if (item_is_error(pending.get())) return pending.get();
@@ -58,7 +58,7 @@ extern "C" Item mvp_lmd_iterator_collect(MvpLmdProgram* program, Item target, It
     if (!roots.valid()) return ItemError;
     Rooted<Item> output(roots, target), input(roots, source), callback(roots, mapper), self(roots, receiver),
         record(roots, ItemNull), result(roots, ItemNull);
-    if (mapper.item != ITEM_JS_UNDEFINED && get_type_id(mapper) != LMD_TYPE_FUNC) return mvp_lmd_fail(LMD_MVP_TYPE, 0);
+    if (mapper.item != ITEM_JS_UNDEFINED && !mvp_lmd_is_callable(mapper)) return mvp_lmd_fail(LMD_MVP_TYPE, 0);
     record.set(mvp_lmd_iterator_get(program, input.get()));
     if (item_is_error(record.get())) return record.get();
     uint64_t scalar_home = 0;
@@ -101,7 +101,7 @@ static Item sequence_iterator(Context*, MvpLmdProgram* program, Item*, uint64_t,
     int code = (intptr_t)((MvpLmdNativeCallable*)self.function)->state;
     int projection = code & 31;
     if (projection ? type != LMD_TYPE_MAP || receiver.map->map_kind != MAP_KIND_ORDERED :
-            type != LMD_TYPE_ARRAY && type != LMD_TYPE_STRING) return mvp_lmd_fail(LMD_MVP_TYPE, 0);
+            type != LMD_TYPE_STRING && !mvp_lmd_is_object(receiver)) return mvp_lmd_fail(LMD_MVP_TYPE, 0);
     if (projection && mvp_lmd_class_record(receiver) != (code & 32 ? &mvp_lmd_program_library(program)->set :
             &mvp_lmd_program_library(program)->map)) return mvp_lmd_fail(LMD_MVP_TYPE, 0);
     RootFrame roots(1);
@@ -124,10 +124,12 @@ static Item sequence_next(Context*, MvpLmdProgram* program, Item*, uint64_t, Ite
     Rooted<Item> held(roots, receiver), value(roots, Item{.item = ITEM_JS_UNDEFINED});
     JsIterData* data = &((JsIteratorMapCarrier*)receiver.map)->payload;
     bool done = data->source.item == ITEM_JS_UNDEFINED;
-    if (!done && get_type_id(data->source) == LMD_TYPE_ARRAY) {
-        done = data->index >= data->source.array->length;
+    if (!done && !data->ordered_projection && get_type_id(data->source) != LMD_TYPE_STRING) {
+        Item extent = mvp_lmd_sequence_length(data->source);
+        if (item_is_error(extent)) return extent;
+        done = data->index >= it2i(extent);
         if (!done) {
-            value.set(data->source.array->items[data->index++]);
+            value.set(mvp_lmd_array_index_property(data->source, data->index++, ItemNull, LMD_PROP_GET));
             if (value.get().item == ITEM_JS_DELETED_SENTINEL) value.set(Item{.item = ITEM_JS_UNDEFINED});
         }
     } else if (!done && data->ordered_projection) {
@@ -251,7 +253,7 @@ extern "C" Item mvp_lmd_generator_park(Item value, int64_t kind) {
                     Item closed = mvp_lmd_iterator_close(record.get(), Item{.item = ITEM_JS_UNDEFINED});
                     return item_is_error(closed) ? closed : mvp_lmd_fail(LMD_MVP_TYPE, 0);
                 }
-                if (get_type_id(method.get()) != LMD_TYPE_FUNC) return mvp_lmd_fail(LMD_MVP_TYPE, 0);
+                if (!mvp_lmd_is_callable(method.get())) return mvp_lmd_fail(LMD_MVP_TYPE, 0);
                 Item argument = received.get();
                 result.set(mvp_lmd_class_invoke(method.get(), record.get().array->items[0], &argument, 1,
                     Item{.item = ITEM_JS_UNDEFINED}));
@@ -283,9 +285,10 @@ static Item collection_method(Context*, MvpLmdProgram* program, Item* args, uint
     int code = (intptr_t)((MvpLmdNativeCallable*)self.function)->state;
     MvpLmdLibraryState* library = mvp_lmd_program_library(program);
     MvpLmdClass* cls = code & 32 ? &library->set : &library->map;
-    if (get_type_id(receiver) != LMD_TYPE_MAP || receiver.map->map_kind != MAP_KIND_ORDERED ||
+    if (!mvp_lmd_is_ordered_map(receiver) ||
             mvp_lmd_class_record(receiver) != cls) return mvp_lmd_fail(LMD_MVP_TYPE, 0);
     int method = code & 31;
+    if (!method) return Item{.item = i2it(((OrderedMap*)receiver.map)->size)};
     Item key = count ? args[0] : Item{.item = ITEM_JS_UNDEFINED};
     return mvp_lmd_map_call(receiver, Item{.item = mvp_lmd_method_token(method)}, key,
         code & 32 ? key : count > 1 ? args[1] : Item{.item = ITEM_JS_UNDEFINED});
@@ -302,7 +305,7 @@ static Item collection_construct(Context*, MvpLmdProgram* program, Item* args, u
         return output.get();
     adder.set(iterator_property(output.get(), set ? "add" : "set"));
     if (item_is_error(adder.get())) return adder.get();
-    if (get_type_id(adder.get()) != LMD_TYPE_FUNC) return mvp_lmd_fail(LMD_MVP_TYPE, 0);
+    if (!mvp_lmd_is_callable(adder.get())) return mvp_lmd_fail(LMD_MVP_TYPE, 0);
     record.set(mvp_lmd_iterator_get(program, args[0]));
     if (item_is_error(record.get())) return record.get();
     for (;;) {
@@ -372,6 +375,14 @@ Item mvp_lmd_generator_initialize(MvpLmdProgram* program, MvpLmdLibraryState* st
         if (item_is_error(method) || !map_shape_set(state->values[slot + 1].map, key, method)) return ItemError;
         if (set) {
             result = mvp_lmd_named_set(state->values[slot + 1], "keys", method);
+            if (item_is_error(result)) return result;
+        }
+        if (state->mutable_prototypes) {
+            // size is an inherited accessor, so live prototype traversal must observe its descriptor.
+            identity.set(mvp_lmd_native_function(program, (void*)(intptr_t)(set * 32), collection_method, 0));
+            if (item_is_error(identity.get())) return identity.get();
+            Item name = {.item = s2it(heap_create_name("size", 4))};
+            result = mvp_lmd_define_accessor(state->values[slot + 1], name, identity.get(), JSPD_NON_ENUMERABLE << 8);
             if (item_is_error(result)) return result;
         }
     }

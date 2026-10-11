@@ -444,6 +444,11 @@ struct PrintItemVisitor {
 
     void operator()(lam::ItemOf<LMD_TYPE_ARRAY> item) const {
         Array* array = item.ptr();
+        // sparse JS storage needs an explicit projection before Lambda serialization.
+        if (container_js_elements_kind(array) == JS_ELEMENTS_SPARSE_TAGGED) {
+            print_item(strbuf, ItemError, depth, indent);
+            return;
+        }
         log_debug("print array: %p, length: %ld", array, array->length);
         strbuf_append_char(strbuf, '[');
         for (int i = 0; i < array->length; i++) {

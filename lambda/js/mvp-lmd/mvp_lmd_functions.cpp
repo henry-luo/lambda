@@ -2,31 +2,43 @@
 #include "../../runtime/lambda-root-frame.hpp"
 #include "../../runtime/runtime-state.h"
 #include "../../runtime/side_stack.h"
+#include "../../runtime/heap_api.h"
+#include "../js_well_known_names.h"
+#include "../js_props.h"
+#include "../../input/input.hpp"
 #include "../../../lib/mem.h"
 
 Item mvp_lmd_function_forward(Item function, Item receiver, Item prefix, Item* arguments, uint64_t count, int skip, MvpLmdNativeEntry entry, Item target) {
-    RootFrame roots(5);
+    RootFrame roots(4);
     if (!roots.valid()) return ItemError;
     Rooted<Item> callee(roots, function), self(roots, receiver), head(roots, prefix), new_target(roots, target);
-    Rooted<Item> copied(roots, mvp_lmd_array_new(0));
-    if (item_is_error(copied.get())) return copied.get();
     uint64_t first = prefix.item == ITEM_JS_UNDEFINED ? 0 : prefix.array->length - skip;
     if (count > UINT32_MAX || first > UINT32_MAX - count) return mvp_lmd_fail(LMD_MVP_RANGE, 0);
-    for (uint64_t i = 0; i < first + count; i++) {
-        Item value = i < first ? head.get().array->items[i + skip] : arguments[i - first];
-        if (value.item == ITEM_JS_DELETED_SENTINEL) value.item = ITEM_JS_UNDEFINED;
-        Item stored = mvp_lmd_array_store(copied.get(), i, value);
-        if (item_is_error(stored)) return stored;
-    }
     RootSpan span(first + count ? first + count : 1);
     if (!span.valid()) return ItemError;
     uint64_t* watermark = context->side_number_top;
     if (!lambda_side_stack_ensure_tls(0, first + count)) return ItemError;
     uint64_t* homes = context->side_number_top;
     context->side_number_top += first + count;
-    // Heap data can move at the callee's first safepoint; arguments and scalar homes must be stable.
-    for (uint64_t i = 0; i < first + count; i++)
-        span.items()[i] = lambda_item_adopt_scalar_home(copied.get().array->items[i], &homes[i]);
+    // snapshot incoming values before a prefix getter can reenter; these slots also survive the callee.
+    for (uint64_t i = 0; i < count; i++) {
+        Item value = arguments[i];
+        if (item_is_error(value)) {
+            context->side_number_top = watermark;
+            return value;
+        }
+        if (value.item == ITEM_JS_DELETED_SENTINEL) value.item = ITEM_JS_UNDEFINED;
+        span.items()[first + i] = lambda_item_adopt_scalar_home(value, &homes[first + i]);
+    }
+    for (uint64_t i = 0; i < first; i++) {
+        Item value = mvp_lmd_array_index_property(head.get(), i + skip, ItemNull, LMD_PROP_GET);
+        if (item_is_error(value)) {
+            context->side_number_top = watermark;
+            return value;
+        }
+        if (value.item == ITEM_JS_DELETED_SENTINEL) value.item = ITEM_JS_UNDEFINED;
+        span.items()[i] = lambda_item_adopt_scalar_home(value, &homes[i]);
+    }
     MvpLmdCallable* callable = (MvpLmdCallable*)callee.get().function;
     Item result = entry ? entry(context, callable->program, span.items(), first + count,
         callee.get(), self.get(), Item{.item = ITEM_JS_UNDEFINED}) :
@@ -39,16 +51,16 @@ Item mvp_lmd_function_forward(Item function, Item receiver, Item prefix, Item* a
     return number ? push_d(scalar) : result;
 }
 extern "C" Item mvp_lmd_call_array(Item function, Item receiver, Item arguments, Item target) {
-    if (get_type_id(function) != LMD_TYPE_FUNC) return mvp_lmd_fail(LMD_MVP_TYPE, 0);
+    if (!mvp_lmd_is_callable(function)) return mvp_lmd_fail(LMD_MVP_TYPE, 0);
     return mvp_lmd_function_forward(function, receiver, arguments, NULL, 0, 0, NULL, target);
 }
-static Item function_bound(Context*, MvpLmdProgram*, Item* args, uint64_t count, Item self, Item, Item target) {
-    if (target.item != ITEM_JS_UNDEFINED) return mvp_lmd_fail(LMD_MVP_CAPABILITY, 0);
+Item mvp_lmd_function_bound(Context*, MvpLmdProgram*, Item* args, uint64_t count, Item self, Item, Item target) {
     Item* env = (Item*)self.function->closure_env;
-    return mvp_lmd_function_forward(env[0], env[1].array->items[0], env[1], args, count, 1);
+    return mvp_lmd_function_forward(env[0], env[1].array->items[0], env[1], args, count, 1, NULL,
+        target.item == self.item ? env[0] : target);
 }
 static Item function_method(Context*, MvpLmdProgram* program, Item* args, uint64_t count, Item self, Item receiver, Item) {
-    if (get_type_id(receiver) != LMD_TYPE_FUNC) return mvp_lmd_fail(LMD_MVP_TYPE, 0);
+    if (!mvp_lmd_is_callable(receiver)) return mvp_lmd_fail(LMD_MVP_TYPE, 0);
     MvpLmdLibraryState* state = (MvpLmdLibraryState*)((MvpLmdNativeCallable*)self.function)->state;
     Item absent = {.item = ITEM_JS_UNDEFINED}, this_arg = count ? args[0] : absent;
     if (self.item == state->values[LMD_LIBRARY_CALL].item)
@@ -72,9 +84,18 @@ static Item function_method(Context*, MvpLmdProgram* program, Item* args, uint64
         Item stored = mvp_lmd_array_store(arguments.get(), i, args[i]);
         if (item_is_error(stored)) return stored;
     }
-    int arity = callee.get().function->arity - (int)(count ? count - 1 : 0);
-    bound.set(mvp_lmd_native_function(program, state, function_bound, arity > 0 ? arity : 0));
+    int arity;
+    if (mvp_lmd_is_proxy(callee.get())) {
+        Item key = {.item = s2it(heap_create_name("length", 6))};
+        Item length = mvp_lmd_property_with_receiver(callee.get(), key, ItemNull, LMD_PROP_GET, callee.get());
+        if (item_is_error(length)) return length;
+        double number = get_type_id(length) == LMD_TYPE_INT || get_type_id(length) == LMD_TYPE_FLOAT ? it2d(length) : 0;
+        arity = number > 255 ? 255 : number > 0 ? (int)number : 0;
+    } else arity = callee.get().function->arity;
+    arity -= (int)(count ? count - 1 : 0);
+    bound.set(mvp_lmd_native_function(program, state, mvp_lmd_function_bound, arity > 0 ? arity : 0));
     if (item_is_error(bound.get())) return bound.get();
+    ((MvpLmdCallable*)bound.get().function)->native_constructor = mvp_lmd_is_constructor(callee.get());
     Item* env = (Item*)heap_calloc_closure_env(2 * sizeof(Item));
     if (!env) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
     bound.get().function->closure_env = env; bound.get().function->closure_field_count = 2;
@@ -82,10 +103,40 @@ static Item function_method(Context*, MvpLmdProgram* program, Item* args, uint64
     env[0] = callee.get(); env[1] = arguments.get();
     return bound.get();
 }
+static Item function_prototype(Context*, MvpLmdProgram*, Item*, uint64_t, Item, Item, Item) {
+    return Item{.item = ITEM_JS_UNDEFINED};
+}
+static Item function_has_instance(Context*, MvpLmdProgram*, Item* args, uint64_t count, Item, Item receiver, Item) {
+    return mvp_lmd_instanceof(count ? args[0] : Item{.item = ITEM_JS_UNDEFINED}, receiver, 1);
+}
 Item mvp_lmd_function_initialize(MvpLmdProgram* program, MvpLmdLibraryState* state) {
     for (int i = LMD_LIBRARY_CALL; i <= LMD_LIBRARY_BIND; i++) {
         state->values[i] = mvp_lmd_native_function(program, state, function_method, i == LMD_LIBRARY_APPLY ? 2 : 1);
         if (item_is_error(state->values[i])) return state->values[i];
+    }
+    if (state->mutable_prototypes) {
+        Item& prototype = state->values[LMD_LIBRARY_FUNCTION_PROTOTYPE];
+        prototype = mvp_lmd_native_function(program, state, function_prototype, 0);
+        if (item_is_error(prototype)) return prototype;
+        Item ready = mvp_lmd_function_prepare(prototype);
+        if (item_is_error(ready)) return ready;
+        Map* map = mvp_lmd_property_map(prototype);
+        const char* names[] = {"call", "apply", "bind"};
+        for (int i = 0; i < 3; i++) {
+            Item stored = mvp_lmd_named_set(Item{.map = map}, names[i], state->values[LMD_LIBRARY_CALL + i]);
+            if (item_is_error(stored)) return stored;
+            ShapeEntry* field = typemap_hash_lookup((TypeMap*)map->type, names[i], strlen(names[i]));
+            TypeMap* shape = type_tree_reflag_field(runtime_shape_tree(), (TypeMap*)map->type, field, JSPD_NON_ENUMERABLE);
+            if (!shape) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
+            map->type = shape;
+        }
+        Item key = {.item = s2it(well_known_name_ref(JS_SYMBOL_HAS_INSTANCE))};
+        Item callable = mvp_lmd_native_function(program, state, function_has_instance, 1);
+        if (item_is_error(callable)) return callable;
+        JsPropertyDescriptor descriptor = {};
+        descriptor.flags = JS_PD_HAS_VALUE; descriptor.value = callable;
+        Item defined = mvp_lmd_define_own_property(prototype, key, &descriptor);
+        if (item_is_error(defined) || defined.item == ITEM_FALSE) return item_is_error(defined) ? defined : mvp_lmd_fail(LMD_MVP_TYPE, 0);
     }
     return ItemNull;
 }

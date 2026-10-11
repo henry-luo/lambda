@@ -397,6 +397,13 @@ bool js_array_set_existing_number_no_gc(Item array, double index, double value);
 // path, or ItemNull when descriptor/prototype/exotic checks require fallback.
 Item js_elements_set_int_completion(Item array, int64_t index, Item value);
 Item js_elements_set_int_direct(Item array, int64_t index, Item value);
+// Neutral sparse storage shared by the full engine and the MVP semantic adapter.
+struct SparseArrayMap* js_sparse_array_map_new(Map* existing, struct TypeMap* empty_shape);
+bool js_sparse_array_map_set(struct SparseArrayMap* map, int64_t index, Item value);
+bool js_array_sparse_get(Array* array, int64_t index, Item* value);
+bool js_array_should_store_sparse_for_index(Array* array, int64_t index);
+bool js_array_should_keep_length_sparse(Array* array, int64_t length);
+void js_array_try_promote_sparse_dense(Item array, bool gc_items);
 int64_t js_array_sparse_delete_index(Item array, int64_t index);
 int64_t js_array_sparse_has_index(Item array, int64_t index);
 Item js_array_sparse_get_index(Item array, int64_t index);
@@ -1282,6 +1289,8 @@ typedef struct JsProxyData {
 } JsProxyData;
 
 Item js_proxy_new(Item target, Item handler);
+// shared physical carrier allocation; guest adapters supply shape and capabilities.
+Item js_proxy_carrier_new(Item target, Item handler, struct TypeMap* shape, bool callable, bool constructable);
 Item js_proxy_revocable(Item target, Item handler);
 
 // Check if an Item is a Proxy

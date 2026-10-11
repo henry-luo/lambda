@@ -251,6 +251,7 @@ MIR_context_t jit_init(unsigned int optimize_level);
 // interpreter diagnostic mode used by other compilation paths.
 MIR_context_t jit_init_native(unsigned int optimize_level);
 void* jit_gen_func(MIR_context_t ctx, const char *func_name);
+void jit_log_code_addresses(MIR_context_t ctx);
 size_t jit_release_generated_ir(MIR_context_t ctx);
 MIR_item_t find_import(MIR_context_t ctx, const char *mod_name);
 void* find_func(MIR_context_t ctx, const char *fn_name);

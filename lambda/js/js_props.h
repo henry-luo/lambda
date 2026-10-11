@@ -299,6 +299,15 @@ bool js_ordinary_reserved_constructor_slot_can_initialize(Item target,
 // ToPropertyDescriptor. Failures return the D8.4.3 merged ERROR Item.
 Item js_descriptor_from_object(Item desc_obj, JsPropertyDescriptor* out);
 
+// guest adapters share ToPropertyDescriptor ordering without sharing call ABIs.
+struct JsDescriptorReader {
+    Item (*property)(Item owner, Item key, bool presence);
+    bool (*callable)(Item value);
+    Item (*type_error)(const char* message);
+};
+Item js_descriptor_from_object_with_reader(Item desc_obj, JsPropertyDescriptor* out,
+    const JsDescriptorReader* reader, uint64_t* value_home);
+
 // Apply a validated descriptor to ordinary storage. Callers supply whether
 // the property is new and whether its previous form was an accessor.
 Item js_define_own_property_from_descriptor(Item object,

@@ -217,7 +217,7 @@ Item array_get(Array *array, int64_t index) {
     if (array_has_native_lane(array)) {
         return array_native_lane_read(array, index);
     }
-    return container_scalar_read((Container*)array, array->items[index]);
+    return container_scalar_read((Container*)array, array_item_read(array, index));
 }
 
 // ============================================================================
@@ -2601,6 +2601,7 @@ Item list_fill(List *list, int count, ...) {
 Item list_get(List *list, int64_t index) {
     if (!list || ((uintptr_t)list >> 56)) { return ItemNull; }
     if (index < 0 || index >= list->length) { return ItemNull; }
+    if (list->type_id == LMD_TYPE_ARRAY) return array_get((Array*)list, index);
     return container_scalar_read((Container*)list, list->items[index]);
 }
 
@@ -2796,8 +2797,11 @@ Item _map_read_field(ShapeEntry* field, void* map_data) {
 
 static Item map_read_field_for_owner(Container* owner, ShapeEntry* field,
                                      void* map_data) {
-    if (!field || field->byte_offset < 0) return ItemNull;
+    if (!field) return ItemNull;
+    if (field->byte_offset < 0) return field->flags & JSPD_IS_ACCESSOR ? ItemError : ItemNull;
     if (!owner || !owner->is_immortal) return _map_read_field(field, map_data);
+    // the shared reader already rejects accessors; only the immortal scalar shortcut needs a guard here.
+    if (field->flags & JSPD_IS_ACCESSOR) return ItemError;
     void* field_ptr = (char*)map_data + field->byte_offset;
     switch (shape_entry_storage_type_id(field)) {
     case LMD_TYPE_INT64: {
@@ -2834,6 +2838,8 @@ static Item map_get_for_owner_keyed(Container* owner, TypeMap* map_type, void* m
                                     bool* is_found) {
     Item result = ItemNull;
     *is_found = false;
+    // proxy carriers have no physical data payload; their keys require procedural observation.
+    if (!map_data && owner && owner->type_id == LMD_TYPE_MAP && owner->map_kind == MAP_KIND_PROXY) return ItemError;
     if (map_table_answers_reads(map_type)) {
         ShapeEntry* field = typemap_hash_lookup_by_hash(map_type, key, key_len, key_id);
         if (field && field->key_kind == NAME_KEY_STRING) {
@@ -2949,7 +2955,12 @@ static Item map_get_by_name_id_keyed(Container* owner, TypeMap* map_type,
                                      bool* is_found) {
     Item result = ItemNull;
     *is_found = false;
-    if (!map_type || !map_data || name_id == NAME_ID_NONE) return result;
+    if (!map_data) {
+        // js_proxy_carrier_new stores all proxy edges outside Map::data.
+        if (owner && owner->type_id == LMD_TYPE_MAP && owner->map_kind == MAP_KIND_PROXY) return ItemError;
+        return result;
+    }
+    if (!map_type || name_id == NAME_ID_NONE) return result;
     NameRef key = name_pool_resolve_id(context ? context->name_pool : NULL,
         name_id);
     if (key && map_type->is_trusted_contract && !map_type->has_spread &&

@@ -1,19 +1,21 @@
 # JS MVP Lmd — JavaScript MIR on the untyped Lambda substrate
 
-**Date:** 2026-10-09
+**Date:** 2026-10-10
 
 **Status:** scalar/dense-array/function MVP, integer tuning, and the map/plain-object
 phase implemented. Ordinary arrays and core strings are implemented (§18);
-the latest tuning measurements and validation status are recorded in §28.
+the latest tuning measurements and validation status are recorded in §30.1.
 The numeric-library phase is implemented in source (§15); its full feature
 edge matrix remains pending. §§16–17 record the subsequent tuning.
 Basic classes and single inheritance are implemented in source (§21);
 class-phase validation and performance evidence are tracked separately there.
 Closures, callbacks and array growth are implemented and validated in §22.
 Class property access and constructor allocation are tuned in §23.
-The next benchmark coverage phase is planned in §29.
+Benchmark/library expansion is implemented in §§29–30, with acceptance limits
+recorded there. Prototype, accessor, proxy and sparse-array expansion is implemented
+in source in §31; performance acceptance remains pending.
 
-**Performance history:** [MVP_Result3–8](../../test/benchmark/js_mvp_lmd/README.md)
+**Performance history:** [MVP_Result3–9](../../test/benchmark/js_mvp_lmd/README.md)
 retains one representative comparison per major tuning phase.
 
 **Destination:** `lambda/js/mvp-lmd/`
@@ -1402,3 +1404,61 @@ separate. Evidence and limits are
 recorded in the [implementation plan](../impl/JS_MVP_Lmd_Library_Generators.md#6-library-workload-tuning)
 and published as [MVP_Result9](../../test/benchmark/js_mvp_lmd/MVP_Result9.md)
 with the complete 87-workload table and raw evidence.
+
+## 31. Prototypes, accessors, proxies and sparse arrays
+
+**Scoped features implemented (2026-10-11); performance acceptance pending.** A common
+receiver-aware property layer supports prototype/descriptor foundations, accessor
+execution, sparse arrays, and proxies including callable/constructable targets.
+Lift the earlier `__proto__` exclusion as part of this phase. The new canonical
+target `jetstream/hashmap` now passes its unchanged oracle and pinned-MIR
+preflight. Recorded coverage expands to **88 workloads** across phase checkpoints:
+84 non-jq contracts pass; the four jq workloads retain historical Result9 evidence.
+
+Reuse Lambda functions/storage first (**D1.3v3**). Ordinary objects retain nominal
+Maps and shared shape transitions; accessors reuse object-local `JsAccessorCell`
+entries on private shapes (**D2.6.9v3**, **D3.4.3v5–D3.4.8**). Sparse arrays reuse
+Array/`SparseArrayMap` storage and existing element kinds; proxies reuse the
+existing carrier and operation contract through MVP invocation adapters. No
+VMap conversion of plain objects, arrays or accessors was introduced. Canonical
+UTF-8/WTF-8 key identity remains shared (**S8.2.2v5**).
+
+**Do without `is_normal`:** protect ordinary paths with local shape property
+facts, existing element kinds and a separate closed-unit prototype proof. Known own data
+fields and present dense elements retain direct access when proven; missing
+properties, holes, descriptors and exotic behavior use the common kernel.
+Keep shared shapes immutable and avoid redundant guards or new per-site caches
+(**D3.4.7**, **D8.4.1v2**).
+
+Class-created links initially align with Lambda inheritance. Mutable JS
+`[[Prototype]]` links remain separate from stable `TypeNominal.base`, nominal
+identity and declared field prefixes (**S2.1.4**, **S11.3.1v2**, **D2.6.10**).
+Accessors/traps preserve receiver, explicit completions and precise roots across
+reentry (**D1.4v4**, **D5.2–D5.3**); arbitrary JS callbacks cross into Lambda
+through a procedural boundary, preserving pure `fn` reads (**S12.1.1v2**).
+
+Acceptance includes full ordinary descriptors/integrity operations, live
+prototype behavior, sparse-array interactions and all scoped proxy traps,
+focused normal/forced-GC checks, shared Lambda/Test262 gates, and paired release,
+pinned-MIR self-timing checks of all **87 Result9 workloads**. Preserve Result9's
+known gate and timing limitations; record new evidence independently. Disclose
+new helpers before coding. General async/Node expansion is outside this phase.
+
+The current release passes **157/157** MVP groups normally and with forced
+GC/poison; **631/631** extracted cases pass on both Node and the frozen release.
+Shared LambdaJS Test262 passes **40,261/40,261** without retries. The Lambda
+baseline is **6,702/6,703**; its only failure is the preexisting `edit_view_only`
+mismatch reproduced on the exact phase-entry binary. LaTeX phase 3 passes.
+
+All **83 non-jq** prior workload contracts pass a fresh seven-round release,
+pinned-MIR, self-timed comparison. Hashmap also passes 15 measurements. The
+four jq workloads retain historical evidence only. Hyphen and Map iteration
+improve; object growth is within measurement noise. **Performance acceptance
+remains open:** 31-round confirmation finds Towers about **1%**, Knucleotide
+**1.4%**, and JSON Gen **2%** slower than the phase-entry control. Shared Lambda
+checks establish no slowdown against both controls; the 26–28 microsecond
+Sieve row remains borderline. Capability boundaries, exact hashes and evidence
+are recorded in the plan. Results3–9 are unchanged.
+
+Full dependencies, reuse/helper inventory, acceptance fixtures and commands:
+[implementation plan](../impl/JS_MVP_Lmd_Property_Expansion.md).

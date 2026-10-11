@@ -1197,8 +1197,15 @@ static inline MIR_type_t em_numeric_storage_type(ArrayNumElemType type) {
 }
 
 // finite INT primitives require a proven tag/band; guest operators own overflow policy.
-static inline MIR_reg_t em_unbox_finite_int_item(MirEmitter* em, MIR_reg_t item, MIR_reg_t value = 0) {
+static inline MIR_reg_t em_unbox_finite_int_item(MirEmitter* em, MIR_reg_t item,
+        MIR_reg_t value = 0, bool nonnegative = false) {
     if (!value) value = em_new_reg(em, "finite_int", MIR_T_I64);
+    if (nonnegative) {
+        // a proven nonnegative payload needs no sign extension.
+        em_emit_insn(em, MIR_new_insn(em->ctx, MIR_AND, MIR_new_reg_op(em->ctx, value),
+            MIR_new_reg_op(em->ctx, item), MIR_new_uint_op(em->ctx, ITEM_INT_PAYLOAD_MASK)));
+        return value;
+    }
     em_emit_insn(em, MIR_new_insn(em->ctx, MIR_LSH, MIR_new_reg_op(em->ctx, value),
         MIR_new_reg_op(em->ctx, item), MIR_new_int_op(em->ctx, 8)));
     em_emit_insn(em, MIR_new_insn(em->ctx, MIR_RSH, MIR_new_reg_op(em->ctx, value),
