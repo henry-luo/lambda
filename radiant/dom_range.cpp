@@ -1790,6 +1790,9 @@ static DomText* prev_text_before(DomNode* n);
 // must skip text in these — otherwise `move backward by word` from the body
 // can wander into <script> source.
 static bool node_is_in_non_selectable_subtree(const DomNode* n) {
+    DomElement* element = n && n->is_element() ? const_cast<DomNode*>(n)->as_element()
+        : n && n->parent ? n->parent->as_element() : nullptr;
+    if (view_content_visibility_hides(element, CONTENT_VISIBILITY_USER_AGENT, true)) return true;
     for (const DomNode* p = n; p; p = p->parent) {
         if (!p->is_element()) continue;
         const char* tag = p->as_element()->tag_name;
@@ -1962,11 +1965,17 @@ static bool tag_is_block(const char* tag) {
 static CssEnum effective_keyword(const DomElement* e, CssPropertyCode prop);
 
 // Find the nearest ancestor element (or self) that is a block-level element.
-static DomElement* nearest_block_ancestor_or_self(DomNode* n) {
+static bool text_is_atomic_inline(const DomElement* element) {
+    return element && (element->display.outer == CSS_VALUE_INLINE_BLOCK ||
+        (element->display.outer == CSS_VALUE_INLINE && element->display.inner != CSS_VALUE_FLOW));
+}
+
+static DomElement* nearest_block_ancestor_or_self(DomNode* n, bool include_atomic = false) {
     DomNode* cur = n;
     while (cur) {
         if (cur->is_element()) {
             DomElement* e = cur->as_element();
+            if (include_atomic && text_is_atomic_inline(e)) return e;
             if (tag_is_block(e->tag_name)) return e;
             // CSS override: any element with explicit display:block (e.g. a
             // <script style="display:block"> or <style style="display:block">)
@@ -2098,36 +2107,7 @@ static CssEnum effective_keyword(const DomElement* e, CssPropertyCode prop) {
     return cascaded_keyword(e, prop);
 }
 
-// True iff `e` (or some ancestor) has `content-visibility: hidden`. The
-// property is not inherited per spec, but its visual effect cascades because
-// the element's subtree is skipped from rendering. We walk ancestors to
-// implement the per-spec subtree exclusion (any descendant text is skipped).
-static bool elem_subtree_content_visibility_hidden(const DomElement* e) {
-    while (e) {
-        // Lambda has no dedicated CSS_PROPERTY_CONTENT_VISIBILITY enum yet
-        // (the property isn't part of the interpreted style), so we look up
-        // the inline style attribute's "content-visibility" declaration via
-        // the DomElement's `style` attribute. If neither layout nor parser
-        // populated this, the test won't be hit and the function returns
-        // false — that's the correct conservative fallback.
-        if (!e->is_synthetic()) {
-            const char* style = const_cast<DomElement*>(e)->get_attribute("style");
-            if (style) {
-                const char* p = style;
-                while ((p = strstr(p, "content-visibility")) != nullptr) {
-                    p += strlen("content-visibility");
-                    while (*p == ' ' || *p == '\t' || *p == ':') p++;
-                    if (strncmp(p, "hidden", 6) == 0) return true;
-                    // skip to next declaration boundary
-                    while (*p && *p != ';') p++;
-                }
-            }
-        }
-        DomNode* parent = e->parent;
-        e = (parent && parent->is_element()) ? parent->as_element() : nullptr;
-    }
-    return false;
-}
+
 
 // Compute the effective `user-select` value for `t` by walking up its
 // ancestors. The cascade follows the spec: a closer ancestor's explicit value
@@ -2155,15 +2135,25 @@ static CssEnum effective_user_select(const DomNode* n) {
 }
 
 // True iff `t` should be excluded from a Selection.toString() result by CSS.
-static bool text_excluded_for_rendered_stringify(const DomText* t) {
+static bool text_excluded_for_rendered_stringify(const DomText* t, DomStringifyMode mode) {
     if (!t || !t->parent || !t->parent->is_element()) return false;
     const DomElement* parent = t->parent->as_element();
 
     // user-select: none on any ancestor (without a closer `text`/`all` override)
-    if (effective_user_select((const DomNode*)t) == CSS_VALUE_NONE) return true;
+    if (mode == DOM_STRINGIFY_RENDERED &&
+        effective_user_select((const DomNode*)t) == CSS_VALUE_NONE) return true;
+
+    if (mode == DOM_STRINGIFY_INNER_TEXT) {
+        for (DomElement* ancestor = const_cast<DomElement*>(parent); ancestor;
+             ancestor = dom_flat_tree_parent(ancestor)) {
+            if (ancestor->display.outer == CSS_VALUE_NONE ||
+                dom_is_generated_pseudo_node(ancestor)) return true;
+        }
+        if (parent->in_line && parent->in_line->visibility != VIS_VISIBLE) return true;
+    }
 
     // content-visibility: hidden on any ancestor → entire subtree skipped
-    if (elem_subtree_content_visibility_hidden(parent)) return true;
+    if (view_content_visibility_hides(const_cast<DomElement*>(parent), CONTENT_VISIBILITY_PAINT, true)) return true;
 
     // Tag-based "not rendered as text" exclusions. Per spec these elements
     // never contribute their text to the rendering, regardless of CSS:
@@ -2619,8 +2609,8 @@ char* dom_range_to_string_ex(const DomRange* r, DomStringifyMode mode) {
         // (`user-select: none`, `content-visibility: hidden`) or by the
         // tag table (<script>, <style>, <head>, etc.). The skip preserves
         // surrounding text verbatim — no whitespace inserted.
-        if (mode == DOM_STRINGIFY_RENDERED &&
-            text_excluded_for_rendered_stringify(cur)) {
+        if (mode != DOM_STRINGIFY_RAW &&
+            text_excluded_for_rendered_stringify(cur, mode)) {
             // A skipped subtree absorbs adjacent whitespace contributions:
             // any pending ws-streak is consumed and ws_streak is reset, so
             // a following ws-only text is treated as freshly-adjacent-to-skip.
@@ -2692,8 +2682,20 @@ char* dom_range_to_string_ex(const DomRange* r, DomStringifyMode mode) {
                 }
                 bool just_emitted_nl = (pending_nl > 0);
                 pending_nl = 0;
-                if (mode == DOM_STRINGIFY_RENDERED &&
+                if (mode != DOM_STRINGIFY_RAW &&
                     !text_preserves_whitespace(cur)) {
+                    DomElement* formatting_root = mode == DOM_STRINGIFY_INNER_TEXT
+                        ? nearest_block_ancestor_or_self(cur, true) : nullptr;
+                    if (text_is_atomic_inline(formatting_root)) {
+                        // atomic inline boxes trim whitespace at their own line edges.
+                        if (leftmost_text_in(formatting_root) == cur) {
+                            while (b_start < b_end && str_is_html_space(cur->text[b_start])) b_start++;
+                        }
+                        DomText* next = dom_range_next_text_after_any(cur);
+                        if (!next || !view_geometry_dom_is_descendant(next, formatting_root)) {
+                            while (b_end > b_start && str_is_html_space(cur->text[b_end - 1])) b_end--;
+                        }
+                    }
                     bool buf_ends_in_ws = (sb->length > 0 && sb->str &&
                                            sb->str[sb->length - 1] == ' ');
                     // Suppress leading whitespace of new content when:
@@ -2708,7 +2710,8 @@ char* dom_range_to_string_ex(const DomRange* r, DomStringifyMode mode) {
                                     (buf_ends_in_ws && !prev_skipped);
                     // A skipped text node preserves both whitespace flanks.
                     strbuf_append_collapsed_ascii_whitespace(
-                        sb, cur->text + b_start, b_end - b_start, false, suppress);
+                        sb, cur->text + b_start, b_end - b_start,
+                        mode == DOM_STRINGIFY_INNER_TEXT, suppress);
                 } else {
                     strbuf_append_str_n(sb, cur->text + b_start, b_end - b_start);
                 }
@@ -2723,7 +2726,7 @@ char* dom_range_to_string_ex(const DomRange* r, DomStringifyMode mode) {
     // Build NUL-terminated copy.
     size_t len = sb->length;
     size_t off = 0;
-    if (mode == DOM_STRINGIFY_RENDERED && sb->str) {
+    if (mode != DOM_STRINGIFY_RAW && sb->str) {
         // Trim leading spaces/tabs/CR (preserve '\n' — leading newlines are
         // the encoding of a leading visible block boundary, e.g. in WPT
         // script-and-style-elements where the range begins with a text node

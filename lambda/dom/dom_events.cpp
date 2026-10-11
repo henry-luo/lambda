@@ -1774,6 +1774,45 @@ extern "C" Item js_ctor_webgl_context_event_fn(Item type_arg, Item init_arg) {
 #undef JS_DOM_TIMING_EVENT_CTOR
 #undef JS_DOM_UI_EVENT_CTOR
 
+Item js_ctor_content_visibility_auto_state_change_event(Item type_arg, Item init_arg) {
+    RootFrame roots(4);
+    Rooted<Item> type(roots, type_arg), init(roots, init_arg);
+    Rooted<Item> event(roots, ItemNull), member(roots, ItemNull);
+    type.set(js_to_string(type.get()));
+    JS_RETURN_IF_ERROR(type.get());
+    bool absent = !init.get().item || get_type_id(init.get()) == LMD_TYPE_UNDEFINED ||
+        get_type_id(init.get()) == LMD_TYPE_NULL;
+    if (!absent && !js_is_object_value(init.get()))
+        return dom_realm_throw_type_error("EventInit must be an object");
+    const char* fields[] = {"bubbles", "cancelable", "composed", "skipped"};
+    bool values[4] = {};
+    for (size_t i = 0; !absent && i < 4; i++) {
+        member.set(dom_realm_get_name(init.get(), fields[i]));
+        JS_RETURN_IF_ERROR(member.get());
+        values[i] = js_is_truthy(member.get());
+    }
+    event.set(js_create_event_init_with_class(fn_to_cstr(type.get()), values[0],
+        values[1], values[2], JS_CLASS_CONTENT_VISIBILITY_AUTO_STATE_CHANGE_EVENT));
+    // D5.3.3: keep the receiver rooted while attaching its traced readonly payload.
+    if (!radiant_dom_event_set_payload(event.get(), Item{.item = b2it(values[3])}))
+        return ItemError;
+    return event.get();
+}
+
+static Item content_visibility_event_skipped(Item, Item receiver, Item*, int, uint64_t*) {
+    Item value = radiant_dom_event_payload(receiver, JS_CLASS_CONTENT_VISIBILITY_AUTO_STATE_CHANGE_EVENT);
+    return get_type_id(value) == LMD_TYPE_BOOL ? value
+        : dom_realm_throw_type_error("Illegal ContentVisibilityAutoStateChangeEvent receiver");
+}
+
+void js_content_visibility_event_install_prototype(Item prototype) {
+    RootFrame roots(3);
+    Rooted<Item> object(roots, prototype), key(roots, js_name_item("skipped"));
+    Rooted<Item> getter(roots, js_new_native_payload_function(content_visibility_event_skipped, 0, 0));
+    js_set_function_name(getter.get(), key.get());
+    dom_realm_install_accessor(object.get(), key.get(), getter.get(), ItemNull, 0);
+}
+
 enum MessageEventSlot {
     MESSAGE_DATA, MESSAGE_ORIGIN, MESSAGE_LAST_ID, MESSAGE_SOURCE, MESSAGE_PORTS,
     MESSAGE_SLOT_COUNT
@@ -1956,6 +1995,14 @@ static Item js_create_trusted_native_event(const char* type, Item init,
     Rooted<Item> event_root(roots, ctor(type_root.get(), init_root.get()));
     event_set_bool(event_root.get(), "isTrusted", true);
     return event_root.get();
+}
+
+Item js_create_native_content_visibility_event(bool skipped) {
+    RootFrame roots(1);
+    Rooted<Item> init(roots, js_create_native_event_init(false, false, false));
+    event_set_bool(init.get(), "skipped", skipped);
+    return js_create_trusted_native_event("contentvisibilityautostatechange", init.get(),
+        js_ctor_content_visibility_auto_state_change_event);
 }
 
 extern "C" Item js_create_native_event(const char* type, bool bubbles,

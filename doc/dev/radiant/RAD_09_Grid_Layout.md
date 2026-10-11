@@ -1,6 +1,7 @@
 # Radiant — CSS Grid Layout
 
 > **Last verified against tree:** 2026-07-15 *(initial stamp from git history)*
+> **Scoped source refresh:** 2026-10-11 — storage, placement references/extents and owner-font math, calculated repeat counts, repeat expansion, decoded area grammar and grid component cascade/CSSOM (§2.3–2.5, §4, §7–8). Older driver/measurement references retain their historical stamp.
 
 > **Part of the [Radiant detailed-design set](RAD_00_Overview.md).** This document covers Radiant's CSS Grid implementation: `grid-template-*` and `repeat()` expansion, definite and auto placement (dense/sparse) over an occupancy matrix, the CSS Grid §11.4–11.8 track-sizing algorithm (intrinsic sizing, `fr`, `minmax`, `fit-content`, auto-stretch), track offsetting and content/self alignment, baseline alignment, and per-item content layout. The defining structural fact is a **single canonical computed-track model**: `GridContainerLayout` stores `radiant::grid::TrackArray` objects, and parsed `GridTrackSize` syntax is converted into that model once when a sizing pass initializes.
 >
@@ -33,19 +34,39 @@ Grid lines are represented in two coordinate systems, following Taffy's design (
 
 Taffy separates a track's minimum and maximum sizing functions. `MinTrackSizingFunction` (`grid_track.hpp:58`) and `MaxTrackSizingFunction` (`grid_track.hpp:121`) are distinct types over `SizingFunctionType` (`grid_track.hpp:41`), with predicates `is_intrinsic()`/`is_percent()`/`is_fr()` and a `fit_content_limit()`; a `TrackSizingFunction` (`grid_track.hpp` minmax pair) bundles the two. `EnhancedGridTrack` (`grid_track.hpp:290`) is the algorithm's per-track working struct: `base_size`, `growth_limit`, plus the §11 scratch fields (`item_incurred_increase`, `base_size_planned_increase`, `growth_limit_planned_increase`, `infinitely_growable`, `content_alignment_adjustment`) — these named scratch fields are what make the port a faithful translation of the Rust freeze/plan algorithm rather than a reinvention. `GridTrackKind` (`grid_track.hpp:277`) distinguishes real `Track` entries from `Gutter` (gap) entries, since gaps are modelled as inert tracks in the array.
 
-### 2.3 No-STL fixed-capacity arrays
+### 2.3 Scoped growable arrays
 
-Per project rules, the grid layer uses no STL containers. Tracks live in `TrackArray` (cap `MAX_GRID_TRACKS=64`) and helper indices in `IndexArray`; items live in `ItemInfoArray` (cap `MAX_GRID_ITEMS=256`) and contributions in `ContribArray`. These fixed-capacity structures reject entries beyond their bound and emit one searchable warning per array instance. Fields carry `LARGE_ARRAY_OK` markers documenting each bound.
+`TrackArray`, `IndexArray`, `ItemInfoArray` and `ContribArray` share `GridArray<T>`, a checked `lam::ArrayList<T>` owner. There is no item/contribution-count cap. Sizing temporaries allocate for the actual track count. Computed track objects live under a grid scratch mark, and `cleanup_grid_container` destroys their heap backing before restoring the mark; reinitialization destroys the previous array. Retained parsed definitions remain owned by the view-property pool under **D4.5.1v4 / D4.1.4v5**.
 
-### 2.4 Occupancy matrix (`grid_occupancy.hpp`)
+The extent policy is separate from storage capacity: at most 10,000 explicit tracks, with origin-zero lines bounded to [-10000,10000]. `grid_clamp_line_span` clips a crossing area and moves a wholly outside area into the last track on its edge, following [CSS Grid 2 §5.4](https://www.w3.org/TR/css-grid-2/#overlarge-grids). Authored declarations are preserved. Allocation failure marks the placement/sizing owner and prevents treating partial arrays as a complete result.
 
-`CellOccupancyMatrix` (`grid_occupancy.hpp:42`, "Based on Taffy's CellOccupancyMatrix design") is a row-major flat `data_` buffer allocated with `mem_alloc`/`mem_free` (not pooled), holding a `CellOccupancyState` per cell and a per-axis `TrackCounts`. `mark_area_as` (`grid_occupancy.hpp:187`) stamps a placed item's cells; `expand_to_fit_range` (`grid_occupancy.hpp:360`) grows the buffer four-way as implicit tracks appear.
+### 2.4 Sparse occupancy (`grid_occupancy.hpp`)
+
+`CellOccupancyMatrix` retains origin-zero rectangles and per-axis `TrackCounts`. `ensure_fits` expands counts without shifting occupancy or allocating all empty cells. `mark_area_as` appends a rectangle; later marks, including clears, override earlier states. Collision checks intersect occupied rectangles; the less common clear path preserves cell-level overwrite semantics. This replaces the dense buffer and its independent one-million-cell clamp, which could shrink existing dimensions during expansion.
+
+### 2.5 Retained resolved track values
+
+`GridLayoutScope::close` serializes final track sizes and expanded explicit line-name sets before releasing pass scratch. Browsing `GridProp` owns the combined row/column text in its property pool. Independent `ViewNodeState` owns the corresponding projection through its model arena, including checkpoint rollback and generation retirement (**D4.5.1v4 / D4.1.4v5**). Computed reads borrow that snapshot and copy the full value into caller-owned storage; non-grid reads compute owner-font lengths while retaining repeat/math syntax. Dirty host callbacks retain the existing non-forcing geometry contract.
+
+Placement references, omitted shorthand members and canonical serialization share the CSS-owned `css_grid_*` helpers in `lambda/input/css/css_value.cpp`. CSSOM member mutation expands overlapping placement shorthands, preserving siblings. Pending projections retain their original shorthand grammar through declaration ownership, then substitute and project at computed-value time. The implementation record's 50-assertion fixture covers browsing values and inline mutation; independent retention has a native control, while independent paged grid layout remains open.
+
+Calculated line references retain a borrowed expression during validation and an owned syntax tree after shorthand projection. Layout and CSSOM supply their existing owner-font math adapters at computation; specified serialization keeps unrounded expressions. Inheritance reads the parent's computed component even when its native item storage is inapplicable. Deferred zero clamps to line one, while CSS-wide defaults are never implicit-line names. Source-pool retirement and 256 repeated caller-pool reads preserve **D4.5.1v4 / D4.1.4v5** ownership. `css_grid_line_math` covers 342 specified/computed/geometry checks with causal font/value edits and restoration; six comparisons explicitly follow Radiant's numeric/extent limits rather than Chromium's larger limits.
+
+Area rows use the same CSS-owned decoded-string tokenizer and rectangularity
+validator for declaration acceptance, computed substitution and canonical
+serialization ([CSS Grid 2 §7.3](https://www.w3.org/TR/css-grid-2/#grid-template-areas)).
+The visitor exposes borrowed bounds only after every row validates; layout
+copies names into its property pool and applies the explicit-grid extent policy.
+Invalid declarations preserve earlier winners, while invalid substituted values
+default before projection. The 66-assertion live fixture exercises inline and
+rule mutation; six reference pairs at 1×/2× cover PNG/SVG/PDF pixels. Area-form
+grid-definition shorthand and independent paged layout remain open.
 
 ---
 
 ## 3. The multipass driver
 
-`layout_grid_content` (`layout_grid_multipass.cpp:390`) orchestrates the whole thing, following the same multipass shape as flex (`layout_grid_multipass.cpp:23` notes it mirrors `layout_flex_multipass.cpp`; cross-reference [RAD_08 — Flexbox Layout](RAD_08_Flexbox_Layout.md)). It first guards nested-grid recursion: `lycon->grid_depth` against `MAX_GRID_DEPTH`, with an RAII `GridDepthGuard` (`layout_grid_multipass.cpp:403`) that increments/decrements the counter — this guard exists because the entire ported algorithm is header-`inline` and produces large stack frames ([§8](#8-known-issues--future-improvements)). It then consults the shared Taffy-style layout-pass cache via `layout_pass_cache_get(...,"GRID")` (`layout_grid_multipass.cpp:437`) and, in `RunMode::ComputeSize` with both dimensions already known, returns the cached size without laying out (`layout_grid_multipass.cpp:448`). Otherwise it runs the passes.
+`layout_grid_content` (`layout_grid_multipass.cpp:390`) orchestrates the whole thing, following the same multipass shape as flex (`layout_grid_multipass.cpp:23` notes it mirrors `layout_flex_multipass.cpp`; cross-reference [RAD_08 — Flexbox Layout](RAD_08_Flexbox_Layout.md)). It guards nested-grid recursion through the shared `LayoutContext.depth` / `MAX_LAYOUT_DEPTH` policy described in §1 (**D5.1.1v3**). It then consults the shared Taffy-style layout-pass cache via `layout_pass_cache_get(...,"GRID")` (`layout_grid_multipass.cpp:437`) and, in `RunMode::ComputeSize` with both dimensions already known, returns the cached size without laying out (`layout_grid_multipass.cpp:448`). Otherwise it runs the passes.
 
 <img alt="Grid multipass driver flow" src="diagram/rad09_multipass_driver.svg" width="720">
 
@@ -61,9 +82,13 @@ The `ComputeSize`-only branch (`layout_grid_multipass.cpp:517`) runs just `layou
 
 ## 4. Placement and auto-placement
 
-Pass 2's `layout_grid_container` (`layout_grid.cpp:186`) begins by deciding shrink-to-fit width (`layout_grid.cpp:216` — inline-grid, or abs-pos with no explicit width), computing the content box (subtracting border/padding), and resolving percentage gaps (deferred to `gap=0` for indefinite width, `layout_grid.cpp:262`). Then, in order: `collect_grid_items` (`layout_grid.cpp:673`) gathers element children into the item array; `expand_auto_repeat_tracks` (`layout_grid.cpp:982`) expands `repeat(auto-fill/auto-fit, …)` now that content width and item count are known ([§7](#7-repeat-template-areas-and-utilities)); named-line resolution maps item line-name references through `find_grid_line_by_name` (`layout_grid.cpp:371-383`); and then **placement**.
+`layout_grid_container` collects order-modified items, expands automatic repeats, registers line names, places items, sizes tracks, then positions and aligns them. `place_items_with_occupancy` extracts local `GridPlacement` references without rewriting authored item fields. `grid_axis_placement` shares numeric/named edge, span and conflict resolution. Negative authored numeric indices resolve against the explicit grid; physical zero/negative coordinates remain definite. Named references retain decoded aliases, positive/negative occurrences, anchored spans and implicit-name fallback.
 
-Placement is delegated to `grid_adapter::place_items_with_occupancy` (`layout_grid.cpp:392`, defined `grid_enhanced_adapter.hpp:600`). The adapter builds an `ItemInfoArray` via `extract_grid_item_info` (`grid_enhanced_adapter.hpp:336`) per item, sizes a `CellOccupancyMatrix` from `calculate_initial_grid_extent` (`grid_enhanced_adapter.hpp:550`), and calls the spec-ordered `place_grid_items` (`grid_placement.hpp:591`). That function walks placement in the CSS-mandated phases: (1) items definite in both axes → `place_definite_item` (`grid_placement.hpp:253`); (2) definite-row/auto-column; (3) the remainder in DOM order — definite-column items, then fully-auto items via `place_indefinite_item` (`grid_placement.hpp:450`) advancing a `GridCursor` (`grid_placement.hpp:39`). `GridAutoFlow` (`grid_placement.hpp:45`) with `is_dense` (`grid_placement.hpp:55`) selects packing: **dense** resets the cursor to the grid start each iteration (`grid_placement.hpp:679`) so it back-fills holes, whereas sparse advances monotonically. Results copy back through `apply_placement_to_item` (`grid_enhanced_adapter.hpp:420`), offset by the negative-implicit track count, into each `gi->computed_grid_*`. Negative line references are resolved once the grid extent is known via `resolve_negative_lines_in_items` (`grid_enhanced_adapter.hpp:453`).
+`place_grid_items` tracks occupied areas and advances the sparse cursor, or resets it for dense packing. `apply_placement_to_item` writes `computed_grid_*` fields with the negative-implicit offset. The primary extent includes definite item positions before accommodating automatic spans; `none` does not invent an explicit track. Placement searches terminate at the declared grid extent instead of an unrelated iteration count. Broader flow/order and logical-axis combinations remain unqualified.
+
+When neither edge anchors an axis, a named span becomes one and a competing end span is discarded; numeric start spans keep their computed count. The shared axis adapter applies these rules to both axes without rewriting authored references. Eight independent absolute-reference cases cover line math, inherited placement, substituted defaults and unanchored spans in PNG/SVG/PDF at both scales.
+
+The placement steps choose their fixed/search axes from `grid-auto-flow`, so column flow transposes the row-flow algorithm. Sparse locked items start after earlier locked items whose secondary spans overlap; dense placement may fill earlier gaps. Definite-primary and fully automatic items share the same cursor, whose position remains at the placed item's start line. `css_grid_flow` checks both axes and packing modes, order, spans and negative implicit extents, then changes density and flow direction and restores the original styles. Broader writing-mode/alignment and fragmentation combinations remain open.
 
 After placement, `determine_grid_size` recomputes track counts from item end positions. Placement already established counts that include negative implicit tracks, which that recomputation cannot infer, so a guard preserves the placement-established lower bound. Orthogonal-flow items (vertical writing modes) then have their width contributions re-measured per CSS Grid §11.7.1.
 
@@ -102,19 +127,33 @@ Baseline alignment now runs directly inside `align_grid_items` (`grid_positionin
 
 ## 7. `repeat()`, template areas, and utilities
 
-`expand_auto_repeat_tracks` (`layout_grid.cpp:982`) expands `repeat(auto-fill/auto-fit, …)` once content width and item count are known: it computes how many repetitions fit and, for `auto-fit`, caps the repeat count at the item count when there are more tracks than items (`layout_grid.cpp:1043-1044`), recording the resulting track indices into the `auto_fit_columns`/`auto_fit_rows` masks. Grid-template-areas are parsed by `parse_grid_template_areas` (`grid_utils.cpp:202`), which validates that each named area is rectangular (`grid_utils.cpp:348`) and records its row/column span; `resolve_grid_template_areas` (`layout.hpp`) maps areas onto line numbers. The intrinsic-sizing bridge into [RAD_05](RAD_05_Intrinsic_Sizing.md) is `calculate_grid_item_intrinsic_sizes` (`grid_utils.cpp:409`, declared `layout.hpp`) plus `measure_grid_item_intrinsic`.
+`expand_auto_repeat_tracks` computes repetitions from the definite axis size and fixed-track/gutter space. It preserves the explicit repeat count for placement; `run_enhanced_track_sizing` collapses unoccupied `auto-fit` tracks afterward. Collapsed gutters overlap, leaving one gutter between surviving tracks and none at the edges. Automatic-repeat names merge internal boundaries and retain surrounding aliases. Fixed-repeat parsing uses the same retained name representation; truncated authored names do not move onto the capped boundary.
+
+`css_integer_value_valid` distinguishes integer tokens from typed number-valued math. `css_compute_integer_value` shares nearest-integer rounding and range clamping between placement and fixed repeats; repeat layout supplies the owning computed font context. Specified repeat math keeps its unrounded value and unresolved dimensional grouping, while computed reads serialize the rounded count. The owned simplifier and computed repeat-name projection allocate only in the caller's pool (**D4.5.1v4 / D4.1.4v5**); repeated reads retire that pool without retained document growth. Real grid boxes project merged repeat boundaries for the legacy computed template shorthand; non-grid elements retain the computed repeated pattern.
+
+`css_grid_repeat_structure` preserves the final auto-repeat line-name set required by [CSS Grid 2 §7.2.5](https://www.w3.org/TR/css-grid-2/#computed-tracks). Chromium 152 drops `[b]` in computed `repeat(auto-fill,10px[b])` when no leading named line exists. Its [auto-repeat serializer](https://raw.githubusercontent.com/chromium/chromium/main/third_party/blink/renderer/core/css/properties/computed_style_utils.cc) bounds trailing-name iteration by entry count, consistent with the reproduced omission. Three raw browser comparisons remain recorded as reference differences; the fixture does not discard the valid line name.
+
+`css_grid_visit_template_areas` validates decoded rows and streams cell tokens into full-length named bounds; `parse_grid_template_areas` only projects validated bounds into the layout owner. Cardinality versus bounding-box area checks rectangularity without retaining a cell matrix. `GridProp::template_area_rows/columns` retain the full bounded dimensions, including unnamed cells; computed row/column counts belong to `GridContainerLayout`. Missing explicit track sizes follow the `grid-auto-*` pattern. Generated `-start`/`-end` aliases allocate from actual name lengths. Parse-time and substituted-value rejection/defaulting and canonical area CSSOM share this validator. Broader named-area placement and pseudo/paged contexts remain open.
 
 ---
 
+### Grid-definition cascade and CSSOM
+
+`css_grid_property_members` is the shared immutable identity table for placement and definition components. `css_grid_shorthand_longhand` parses `grid-template` / `grid` once per projection and clones the selected member into its caller's pool (**D4.5.1v4 / D4.1.4v5**). Area strings use the same decoded rectangle validator as the longhand; adjacent row-boundary name groups merge, omitted row sizes become `auto`, and area-form column tracks exclude `repeat()`. The `grid` auto-flow branches set either axis and reset the other auto/template members; `grid-template` leaves the implicit-grid members alone.
+
+`resolve_grid_components` uses the existing physical-component cascade for both placement and definition shorthands, longhands, `all`, importance and layer rollback. Placement's noncontiguous members use the shared CSS-owned mask, so a lower-priority longhand cannot overwrite a shorthand through traversal order. Variable substitution validates the original shorthand before projecting members, including after CSSOM expands a partially overridden pending declaration. `dom_cssom.cpp` uses the same member mask and serializer for specified reads, partial override/removal and recomposition. Inherited native area metadata copies names into the receiving owner.
+
+Computed `grid-template` preserves computed track functions and owner-relative lengths; an entirely implicit axis uses its resolved track list. Computed `grid` preserves Chromium's legacy slash-separated rows / columns / areas / flow / auto-rows / auto-columns projection. Specified shorthands remain grammar-round-trippable. Both specified and computed `grid-auto-flow` omit the default `row` when `dense` is present. This compatibility behavior follows [CSSOM's legacy serialization allowance](https://drafts.csswg.org/cssom/#serializing-css-values) and the [Chromium computed-style source](https://raw.githubusercontent.com/chromium/chromium/main/third_party/blink/renderer/core/css/properties/computed_style_utils.cc); it does not introduce another retained layout model.
+
 ## 8. Known Issues & Future Improvements
 
-1. **Sparse packing is incomplete.** `grid_placement.hpp` carries `// TODO: Use last_of_type for sparse packing` — the sparse cursor does not track the last placed line per span, so sparse auto-flow can diverge from spec in edge cases.
-2. **Auto-fit empty-track collapse is deferred.** `collapse_empty_auto_fit_tracks` exists but is gated off; CSS Grid §7.2.3.2 gutter collapse for empty `auto-fit` tracks is unimplemented. Empty auto-fit tracks therefore still occupy space.
-3. **Fixed capacity limits large grids.** `MAX_GRID_TRACKS=64` and `MAX_GRID_ITEMS=256` are hard bounds. Track counts clamp to the canonical 64-track limit, and fixed arrays reject excess entries with searchable warnings. *Improvement:* grow dynamically like the occupancy matrix.
-4. **Pass-3 row-height reconciliation is a heuristic patch.** Pass-1 intrinsic height may underestimate complex flex/margin content, so Pass 3 re-derives auto/intrinsic row heights from laid-out content. This is an accuracy repair, not a clean single-pass result, and only touches non-fixed tracks.
-5. **`determine_grid_size` needs a placement-count invariant.** The post-placement guard prevents recomputation from shrinking counts because item end positions do not encode the full negative-implicit extent. Consolidating count derivation would make this preservation rule unnecessary.
-6. **Placeholder spans and simplified line-name math.** Placement starts some unresolved spans at one pending post-hoc resolution, and the line-name calculation is explicitly simplified relative to full CSS Grid semantics.
-7. **Header-inline algorithm bloats the stack.** The ported algorithm remains `inline` in large headers, inflating per-call stack frames and motivating the dedicated `MAX_GRID_DEPTH` guard. *Improvement:* move bodies to `.cpp` and shrink stack pressure.
+1. **Broad flow, ordering and logical-axis qualification remains open.** The focused dense/sparse and both-flow capacity controls do not establish every placement combination.
+2. **Track/area CSSOM and grammar remain partial.** Shared grid-definition and decoded-area grammar now supply parse-time/substituted-value validation, component cascade, owned projection and CSSOM mutation. Calculated repeat counts have owner-font, inheritance, variable/defaulting, specified/computed and mutation controls. Pseudo-element reads and broader owner-unit/track grammar remain open.
+3. **Pass-3 row-height reconciliation remains heuristic.** It repairs underestimated intrinsic heights from laid-out content and applies only to non-fixed tracks.
+4. **Placement counts still have a preservation guard.** Post-placement item endpoints cannot reconstruct the entire negative-implicit extent, so recomputation must preserve placement-established counts.
+5. **Independent paged grid remains unqualified.** Browsing and PNG/SVG/PDF controls do not establish fragmented-grid behavior.
+
+Focused evidence: `css_grid_auto_fit`, `css_grid_named_lines`, `css_grid_capacity`, `css_grid_extent_policy`, `GridStorage.*`, retained-clone retirement and `RenderOutputParity.Grid*` cases. The active [CSS support plan](../../../vibe/impl/Radiant_Impl_CSS_Support.md) records dated qualification and remaining P0–P2 work.
 
 ---
 
@@ -123,13 +162,13 @@ Baseline alignment now runs directly inside `align_grid_items` (`grid_positionin
 | File | Responsibility (this doc) |
 |---|---|
 | `radiant/layout.hpp` / `layout_grid_multipass.cpp` | Public grid declarations and the multipass driver `layout_grid_content`; passes 0–3, depth guard, pass cache, Pass-3 row-height reconciliation, per-item content layout (flex reuse). |
-| `radiant/layout_grid.cpp` | Pass-2 `layout_grid_container`: shrink-to-fit, item collection, `repeat()` expansion, placement dispatch, `determine_grid_size` + shrink guard, orthogonal-flow re-measure, auto-fit collapse (gated). |
+| `radiant/layout_grid.cpp` | Pass-2 `layout_grid_container`: shrink-to-fit, item collection, `repeat()` expansion, placement dispatch, `determine_grid_size` + shrink guard, orthogonal-flow re-measure, automatic-repeat expansion and collapse projection. |
 | `radiant/grid_positioning.cpp` | `position_grid_items` (track offsets + content alignment/space distribution), `align_grid_items`/`align_grid_item` (self-alignment + margins). |
-| `radiant/grid_sizing.cpp` | Scratch-owned canonical `TrackArray` initialization, one-time parsed-sizing conversion, implicit cycling, canonical capacity clamp, and the `resolve_track_sizes_enhanced` wrapper. |
+| `radiant/grid_sizing.cpp` | Scratch-owned canonical `TrackArray` initialization, one-time parsed-sizing conversion, implicit cycling and checked growable storage, and the `resolve_track_sizes_enhanced` wrapper. |
 | `radiant/grid_utils.cpp` | Template-area parsing, area resolution, `calculate_grid_item_intrinsic_sizes` intrinsic bridge. |
 | `radiant/layout.hpp` | Grid orchestration state (`GridContainerLayout` with canonical `TrackArray` pointers), parsed syntax (`GridTrackSize`), per-item state, and dual grid coordinates. |
-| `radiant/grid_track.hpp` | Canonical computed tracks: min/max sizing functions, `EnhancedGridTrack` scratch fields, and `TrackArray`/`IndexArray` caps. |
-| `radiant/grid_occupancy.hpp` | `CellOccupancyMatrix` (mem-alloc buffer, `mark_area_as`, dynamic expand). |
+| `radiant/grid_track.hpp` | Canonical computed tracks: min/max sizing functions, `EnhancedGridTrack` scratch fields, and `TrackArray`/`IndexArray` owners. |
+| `radiant/grid_occupancy.hpp` | `CellOccupancyMatrix` (sparse rectangles, `mark_area_as`, count expansion). |
 | `radiant/grid_placement.hpp` | `GridCursor`/`GridAutoFlow`/`GridPlacement`/`GridItemInfo`; spec-ordered `place_grid_items`, dense/sparse packing. |
 | `radiant/grid_sizing_algorithm.hpp` | Shared §11.4–§11.8 algorithm bodies consumed by the single live sizing entry. |
 | `radiant/grid_enhanced_adapter.hpp` | Parsed-sizing conversion, in-place largest-remainder finalization, placement integration, and the single live `run_enhanced_track_sizing` driver. |

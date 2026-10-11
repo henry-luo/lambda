@@ -1,4 +1,5 @@
 #include "layout.hpp"
+#include "view_tree_model.hpp"
 #include "../lambda/input/css/css_engine.hpp"
 #include "../lib/str.h"
 #include "../lib/strbuf.h"
@@ -32,13 +33,63 @@ struct ImageSourceChoice {
     bool has_width, has_one;
 };
 
-static void image_source_consider(ImageSourceChoice* choice, ImageSourceCandidate candidate) {
-    const ImageSourceCandidate& old = choice->selected;
+static bool image_source_density_preferred(bool has_old, double old, double candidate, double desired) {
     // pick the smallest sufficient density, or the largest available; ties preserve source order.
-    if (!old.url || (old.density < choice->desired
-            ? candidate.density > old.density
-            : candidate.density >= choice->desired && candidate.density < old.density))
-        choice->selected = candidate;
+    return !has_old || (old < desired ? candidate > old
+        : candidate >= desired && candidate < old);
+}
+
+static void image_source_consider(ImageSourceChoice* choice, ImageSourceCandidate candidate) {
+    if (image_source_density_preferred(choice->selected.url != nullptr,
+            choice->selected.density, candidate.density, choice->desired)) choice->selected = candidate;
+}
+
+float layout_image_device_scale(const LayoutContext* context) {
+    ViewTree* tree = layout_context_view_tree(context);
+    float scale = tree && tree->model ? tree->model->environment.device_scale
+        : context && context->ui_context ? context->ui_context->device_scale : 1.0f;
+    return isfinite(scale) && scale > 0.0f ? scale : 1.0f;
+}
+
+float layout_css_image_density(const ImageSurface* image, float resolution) {
+    // CSS Images 4 §2.4: the selected density overrides raster natural resolution, not vector dimensions.
+    return image && image->format != IMAGE_FORMAT_SVG && isfinite(resolution) && resolution > 0.0f
+        ? resolution : 1.0f;
+}
+
+bool layout_select_css_image(const CssValue* value, float device_scale, CssImageChoice* choice,
+                            bool (*supports_type)(const char*)) {
+    if (!value || !choice) return false;
+    *choice = {};
+    const CssValue* selected = value;
+    double resolution = 1.0;
+    if (css_value_is_image_set(value)) {
+        if (!css_image_set_valid(value)) return false;
+        if (!supports_type) supports_type = layout_image_type_supported;
+        double desired = isfinite(device_scale) && device_scale > 0.0f ? device_scale : 1.0;
+        selected = nullptr;
+        const CssFunction* function = value->data.function;
+        for (int index = 0; index < function->arg_count; index++) {
+            CssImageSetOption option;
+            if (!css_image_set_option(function->args[index], &option) ||
+                    option.resolution <= 0.0 || !supports_type(option.type)) continue;
+            // compare at the precision retained by CSS image consumers after canonical unit conversion.
+            float candidate_resolution = (float)option.resolution;
+            if (!isfinite(candidate_resolution) || candidate_resolution <= 0.0f) continue;
+            if (image_source_density_preferred(selected != nullptr, resolution, candidate_resolution, desired)) {
+                selected = option.image;
+                resolution = candidate_resolution;
+            }
+        }
+    }
+    // source strings denote URLs only inside image-set; ordinary content strings remain text.
+    if (!selected || (selected->type == CSS_VALUE_TYPE_STRING && !css_value_is_image_set(value))) return false;
+    const char* url = css_background_url_value(selected);
+    if (!url && selected->type != CSS_VALUE_TYPE_FUNCTION) return false;
+    choice->image = selected;
+    choice->url = url;
+    choice->resolution = (float)resolution;
+    return true;
 }
 
 static bool image_source_descriptor(const char* text, const char* end, bool integer, double* value) {

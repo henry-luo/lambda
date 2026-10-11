@@ -183,10 +183,17 @@ static void format_number_clean(StringBuf* output, double value) {
     }
 }
 
+static void format_calc_number(StringBuf* output, double value) {
+    stringbuf_append_str(output, "calc(");
+    if (isfinite(value)) format_number_clean(output, value);
+    else stringbuf_append_str(output, isnan(value) ? "NaN" : value < 0.0 ? "-infinity" : "infinity");
+    stringbuf_append_char(output, ')');
+}
+
 static void format_color_channel(StringBuf* output, double value, bool missing, const char* suffix = "") {
     if (missing) stringbuf_append_str(output, "none");
     else if (!isfinite(value)) {
-        stringbuf_append_str(output, isnan(value) ? "calc(NaN)" : value < 0.0 ? "calc(-infinity)" : "calc(infinity)");
+        format_calc_number(output, value);
     }
     else {
         // CSS Color 4 §16 requires rounding and sufficient precision for modern alpha.
@@ -233,16 +240,118 @@ static bool format_computed_color(CssFormatter* formatter, const CssValue* value
 // Value Formatting
 // ============================================================================
 
-// Internal helper with property context
-static void css_format_value_with_property(CssFormatter* formatter, CssValue* value, CssPropertyCode property_code);
+static void css_format_function_value(CssFormatter* formatter, const CssFunction* function, bool math);
 
+static void css_format_function_argument(CssFormatter* formatter, CssValue* value, bool math, bool grouped) {
+    if (!value) return;
+    if (value->type == CSS_VALUE_TYPE_LIST) {
+        if (math && grouped) stringbuf_append_char(formatter->output, '(');
+        for (int i = 0; i < value->data.list.count; i++) {
+            if (i) stringbuf_append_str(formatter->output, value->data.list.comma_separated ? ", " : " ");
+            css_format_function_argument(formatter, value->data.list.values[i], math, true);
+        }
+        if (math && grouped) stringbuf_append_char(formatter->output, ')');
+    } else if (math && value->type == CSS_VALUE_TYPE_FUNCTION) {
+        const CssFunction* function = value->data.function;
+        // a nested calc() contributes its calculation directly to a math argument.
+        if (function && function->name && !strcmp(function->name,"calc") && function->arg_count == 1)
+            css_format_function_argument(formatter,function->args[0],true,grouped);
+        else css_format_function_value(formatter,function,true);
+    } else css_format_value(formatter, value);
+}
+
+static void css_format_function_value(CssFormatter* formatter, const CssFunction* function, bool math) {
+    if (!function || !function->name) return;
+    stringbuf_append_all(formatter->output, 2, function->name, "(");
+    for (int i = 0; i < function->arg_count; i++) {
+        if (i) stringbuf_append_str(formatter->output, ", ");
+        if (function->args) css_format_function_argument(formatter, function->args[i], math, false);
+    }
+    stringbuf_append_char(formatter->output, ')');
+}
+
+// Internal helper with property context
 // Format value (complete implementation)
 void css_format_value(CssFormatter* formatter, CssValue* value) {
     css_format_value_with_property(formatter, value, CSS_PROPERTY_UNKNOWN);
 }
 
+static bool css_format_integer_math(CssFormatter* formatter, const CssValue* value) {
+    CssValue* simplified = css_simplify_math_value(formatter->pool,value);
+    if (!simplified) return false;
+    // specified integer math keeps its unrounded value; range checks belong to computation.
+    if (simplified->type == CSS_VALUE_TYPE_NUMBER) format_calc_number(formatter->output,simplified->data.number.value);
+    else if (simplified->type == CSS_VALUE_TYPE_FUNCTION)
+        css_format_function_value(formatter,simplified->data.function,true);
+    else css_format_value(formatter,simplified);
+    return true;
+}
+
+String* css_serialize_integer_math(Pool* pool, const CssValue* value) {
+    CssFormatter* formatter = css_formatter_create(pool,CSS_FORMAT_COMPACT);
+    return formatter && css_format_integer_math(formatter,value) ? stringbuf_to_string(formatter->output) : nullptr;
+}
+
+static bool css_format_grid_component(CssFormatter* formatter, CssValue* value,
+        CssGridTrackLeafFormatter leaf, void* context, unsigned depth, bool repeat_count) {
+    if (!formatter || !formatter->output || !value || depth > 32) return false;
+    StringBuf* output = formatter->output;
+    if (value->type == CSS_VALUE_TYPE_LIST) {
+        if (value->data.list.comma_separated || !value->data.list.values) return false;
+        bool inside_names = false, written = false, named = false;
+        for (int i = 0; i < value->data.list.count; i++) {
+            CssValue* item = value->data.list.values[i];
+            const char* token = css_math_token_name(item);
+            if (token && !strcmp(token, "[")) {
+                if (inside_names) return false;
+                if (written) stringbuf_append_char(output, ' ');
+                stringbuf_append_char(output, '[');
+                inside_names = true; named = false;
+            } else if (token && !strcmp(token, "]")) {
+                if (!inside_names) return false;
+                stringbuf_append_char(output, ']'); inside_names = false; written = true;
+            } else if (inside_names) {
+                if (!token) return false;
+                if (named) stringbuf_append_char(output, ' ');
+                css_append_identifier(output, token, strlen(token)); named = true;
+            } else {
+                if (written) stringbuf_append_char(output, ' ');
+                if (!css_format_grid_component(formatter, item, leaf, context, depth + 1, false)) return false;
+                written = true;
+            }
+        }
+        return written && !inside_names;
+    }
+    const CssFunction* function = value->type == CSS_VALUE_TYPE_FUNCTION ? value->data.function : nullptr;
+    const char* name = function ? function->name : nullptr;
+    if (name && (!strcmp(name, "repeat") || !strcmp(name, "minmax") || !strcmp(name, "fit-content"))) {
+        if (!function->args || !stringbuf_append_format(output, "%s(", name)) return false;
+        for (int i = 0; i < function->arg_count; i++) {
+            if (i) stringbuf_append_str(output, ", ");
+            if (!css_format_grid_component(formatter, function->args[i], leaf, context, depth + 1,
+                i == 0 && !strcmp(name, "repeat"))) return false;
+        }
+        stringbuf_append_char(output, ')');
+        return true;
+    }
+    if (leaf) return leaf(formatter, value, repeat_count, context);
+    if (repeat_count && function) return css_format_integer_math(formatter,value);
+    if (!repeat_count && value->type == CSS_VALUE_TYPE_NUMBER && value->data.number.value == 0.0) {
+        stringbuf_append_str(output, "0px");
+        return true;
+    }
+    css_format_value(formatter, value);
+    return true;
+}
+
+bool css_format_grid_track_value(CssFormatter* formatter, CssValue* value,
+        CssGridTrackLeafFormatter leaf, void* context) {
+    // specified and owner-computed values share brackets/functions; only length leaves differ.
+    return css_format_grid_component(formatter, value, leaf, context, 0, false);
+}
+
 // Internal implementation with property context
-static void css_format_value_with_property(CssFormatter* formatter, CssValue* value, CssPropertyCode property_code) {
+void css_format_value_with_property(CssFormatter* formatter, CssValue* value, CssPropertyCode property_code) {
     if (!formatter || !value) return;
 
     if (value->type == CSS_VALUE_TYPE_TOKEN_SEQUENCE) {
@@ -250,6 +359,41 @@ static void css_format_value_with_property(CssFormatter* formatter, CssValue* va
             const String* text = value->data.tokens.text;
             stringbuf_append_str_n(formatter->output, text->chars, text->len);
         } else css_format_value_with_property(formatter, value->data.tokens.value, property_code);
+        return;
+    }
+
+    if ((css_grid_placement_mask(property_code) || property_code == CSS_PROPERTY_LINE_CLAMP ||
+        property_code == CSS_PROPERTY_WEBKIT_LINE_CLAMP) && value->type == CSS_VALUE_TYPE_FUNCTION) {
+        css_format_integer_math(formatter,value);
+        return;
+    }
+
+    if (property_code == CSS_PROPERTY_GRID_TEMPLATE_ROWS || property_code == CSS_PROPERTY_GRID_TEMPLATE_COLUMNS ||
+        property_code == CSS_PROPERTY_GRID_AUTO_ROWS || property_code == CSS_PROPERTY_GRID_AUTO_COLUMNS) {
+        css_format_grid_track_value(formatter, value);
+        return;
+    }
+
+    if (property_code == CSS_PROPERTY_GRID_AUTO_FLOW && !css_value_is_global_keyword(value) &&
+        !css_value_contains_pending_substitution(value)) {
+        bool column = css_value_has_identifier(value, "column");
+        bool dense = css_value_has_identifier(value, "dense");
+        stringbuf_append_str(formatter->output, column ? "column" : dense ? "dense" : "row");
+        if (column && dense) stringbuf_append_str(formatter->output, " dense");
+        return;
+    }
+
+    if ((property_code == CSS_PROPERTY_GRID_TEMPLATE || property_code == CSS_PROPERTY_GRID) &&
+        !css_value_is_global_keyword(value) && !css_value_contains_pending_substitution(value)) {
+        String* text = css_grid_serialize_definition_value(formatter->pool, value, property_code);
+        if (text) stringbuf_append_str_n(formatter->output, text->chars, text->len);
+        return;
+    }
+
+    if (property_code == CSS_PROPERTY_GRID_TEMPLATE_AREAS &&
+        (value->type == CSS_VALUE_TYPE_STRING || value->type == CSS_VALUE_TYPE_LIST)) {
+        String* text = css_grid_serialize_template_areas(formatter->pool, value);
+        if (text) stringbuf_append_str_n(formatter->output, text->chars, text->len);
         return;
     }
 
@@ -368,53 +512,7 @@ static void css_format_value_with_property(CssFormatter* formatter, CssValue* va
             break;
 
         case CSS_VALUE_TYPE_FUNCTION:
-            if (value->data.function && value->data.function->name) {
-                stringbuf_append_all(formatter->output, 2, value->data.function->name, "(");
-                // Format function arguments (comma-separated at top level, space-separated within)
-                for (size_t i = 0; i < (size_t)value->data.function->arg_count; i++) {
-                    if (i > 0) {
-                        stringbuf_append_str(formatter->output, ", ");
-                    }
-                    if (value->data.function->args && value->data.function->args[i]) {
-                        CssValue* arg = value->data.function->args[i];
-
-                        // If the argument is a list, format it with space separators
-                        // (not commas, since commas separate function arguments, not list items within an argument)
-                        if (arg->type == CSS_VALUE_TYPE_LIST && arg->data.list.values) {
-                            for (size_t j = 0; j < (size_t)arg->data.list.count; j++) {
-                                if (j > 0) {
-                                    if (arg->data.list.comma_separated) {
-                                        stringbuf_append_str(formatter->output, ", ");
-                                    } else {
-                                        stringbuf_append_str(formatter->output, " ");
-                                    }
-                                }
-                                if (arg->data.list.values[j]) {
-                                    StringBuf* temp = formatter->output;
-                                    formatter->output = stringbuf_new(formatter->pool);
-                                    css_format_value(formatter, arg->data.list.values[j]);
-                                    String* formatted_str = stringbuf_to_string(formatter->output);
-                                    formatter->output = temp;
-                                    if (formatted_str) {
-                                        stringbuf_append_str(formatter->output, formatted_str->chars);
-                                    }
-                                }
-                            }
-                        } else {
-                            // Single value argument - format normally
-                            StringBuf* temp = formatter->output;
-                            formatter->output = stringbuf_new(formatter->pool);
-                            css_format_value(formatter, arg);
-                            String* formatted_str = stringbuf_to_string(formatter->output);
-                            formatter->output = temp;
-                            if (formatted_str) {
-                                stringbuf_append_str(formatter->output, formatted_str->chars);
-                            }
-                        }
-                    }
-                }
-                stringbuf_append_str(formatter->output, ")");
-            }
+            css_format_function_value(formatter, value->data.function, false);
             break;
 
         case CSS_VALUE_TYPE_LIST:

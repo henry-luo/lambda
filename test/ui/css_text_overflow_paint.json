@@ -1,0 +1,260 @@
+{
+  "name": "Ellipsis and clamp inheritance, font/color mutation and restoration",
+  "html": "test/ui/css_text_overflow_paint.html",
+  "viewport": {
+    "width": 800,
+    "height": 160
+  },
+  "events": [
+    {
+      "type": "click",
+      "target": {
+        "selector": "#check"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-ellipsis",
+      "equals": "ellipsis|20px|rgb(0, 0, 255)|none|62|24"
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#ellipsis",
+        "offset_x": 51,
+        "offset_y": 17
+      },
+      "search_radius": 1,
+      "min_b": 160,
+      "max_r": 150,
+      "max_g": 150
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-clamp",
+      "equals": "clip|20px|rgb(0, 0, 255)|1|62|24"
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#clamp",
+        "offset_x": 51,
+        "offset_y": 17
+      },
+      "search_radius": 1,
+      "min_b": 160,
+      "max_r": 150,
+      "max_g": 150
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#change"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#changed"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-changed-ellipsis",
+      "equals": "ellipsis|10px|rgb(0, 128, 0)|none|62|24"
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#ellipsis",
+        "offset_x": 51,
+        "offset_y": 17
+      },
+      "search_radius": 1,
+      "min_r": 245,
+      "min_g": 245,
+      "min_b": 245
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-changed-clamp",
+      "equals": "clip|10px|rgb(0, 128, 0)|1|62|24"
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#clamp",
+        "offset_x": 51,
+        "offset_y": 17
+      },
+      "search_radius": 1,
+      "min_r": 245,
+      "min_g": 245,
+      "min_b": 245
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#restore"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#restored"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-restored-ellipsis",
+      "equals": "ellipsis|20px|rgb(0, 0, 255)|none|62|24"
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#ellipsis",
+        "offset_x": 51,
+        "offset_y": 17
+      },
+      "search_radius": 1,
+      "min_b": 160,
+      "max_r": 150,
+      "max_g": 150
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-restored-clamp",
+      "equals": "clip|20px|rgb(0, 0, 255)|1|62|24"
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#clamp",
+        "offset_x": 51,
+        "offset_y": 17
+      },
+      "search_radius": 1,
+      "min_b": 160,
+      "max_r": 150,
+      "max_g": 150
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#disable"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#disabled"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-disabled-ellipsis",
+      "equals": "clip|20px|rgb(0, 0, 255)|none|62|24"
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#ellipsis",
+        "offset_x": 51,
+        "offset_y": 17
+      },
+      "search_radius": 1,
+      "min_r": 245
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-disabled-clamp",
+      "equals": "clip|20px|rgb(0, 0, 255)|none|62|24"
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#clamp",
+        "offset_x": 51,
+        "offset_y": 17
+      },
+      "search_radius": 1,
+      "min_r": 245
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#enable"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#enabled"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-enabled-ellipsis",
+      "equals": "ellipsis|20px|rgb(0, 0, 255)|none|62|24"
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#ellipsis",
+        "offset_x": 51,
+        "offset_y": 17
+      },
+      "search_radius": 1,
+      "min_b": 160,
+      "max_r": 150,
+      "max_g": 150
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-enabled-clamp",
+      "equals": "clip|20px|rgb(0, 0, 255)|1|62|24"
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#clamp",
+        "offset_x": 51,
+        "offset_y": 17
+      },
+      "search_radius": 1,
+      "min_b": 160,
+      "max_r": 150,
+      "max_g": 150
+    }
+  ]
+}

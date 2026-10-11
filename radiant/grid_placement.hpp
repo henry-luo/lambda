@@ -15,7 +15,7 @@
  *
  * Based on Taffy's implementation with adaptations for Radiant's architecture.
  *
- * Uses explicit structs and fixed-capacity arrays for auto-placement scratch
+ * Uses explicit structs and scoped growable arrays for auto-placement scratch
  * data.
  */
 
@@ -32,6 +32,7 @@
 
 #include "layout.hpp"
 #include "grid_occupancy.hpp"
+#include "grid_track.hpp"
 #include "../lib/log.h"
 
 namespace radiant {
@@ -172,24 +173,9 @@ struct GridPlacement {
         //      0 = before explicit grid start (after negative line resolution)
         // OriginZero: 0 = first line of explicit grid
 
-        int16_t oz_start;
-        uint16_t explicit_line_count = explicit_track_count + 1;
-
-        if (has_negative_start && start < 0) {
-            // Unresolved negative CSS line: convert using explicit grid size
-            oz_start = start + static_cast<int16_t>(explicit_line_count);
-        } else {
-            // Resolved CSS line number: direct conversion
-            // CSS line N maps to OriginZero N-1 (works for positive, zero, and negative resolved values)
-            // CSS line 0 = OriginZero -1 (before explicit grid, creates negative implicit track)
-            oz_start = start - 1;
-        }
-
-        // Always compute end from start + span for robustness
-        // This correctly handles cases where CSS start == end (zero-span clamped to span=1)
-        int16_t oz_end = oz_start + span;
-
-        return LineSpan(OriginZeroLine(oz_start), OriginZeroLine(oz_end));
+        int64_t oz_start = has_negative_start && start < 0
+            ? (int64_t)start + explicit_track_count + 1 : (int64_t)start - 1;
+        return grid_clamp_line_span(oz_start, oz_start + span);
     }
 };
 
@@ -208,38 +194,7 @@ struct GridItemInfo {
     GridItemInfo() : item_index(-1), row(), column(), resolved_row(), resolved_column() {}
 };
 
-// Fixed-capacity array of GridItemInfo
-// MAX_GRID_ITEMS is defined in grid_sizing_algorithm.hpp (256); use same constant
-#ifndef MAX_GRID_ITEMS
-#define MAX_GRID_ITEMS 256
-#endif
-struct ItemInfoArray {
-    GridItemInfo data[MAX_GRID_ITEMS];  // LARGE_ARRAY_OK: fixed-capacity struct field; bound = MAX_GRID_ITEMS (256) × ~24 B ≈ 6 KiB; layout-pass scratch.
-    size_t count;
-    bool truncation_logged;
-    ItemInfoArray() : count(0), truncation_logged(false) {}
-    size_t size() const { return count; }
-    bool empty() const { return count == 0; }
-    GridItemInfo& operator[](size_t i) { return data[i]; }
-    const GridItemInfo& operator[](size_t i) const { return data[i]; }
-    void push_back(const GridItemInfo& v) {
-        if (count < MAX_GRID_ITEMS) {
-            data[count++] = v;
-            return;
-        }
-        if (!truncation_logged) {
-            log_warn("[RAD_CAP_GRID_ITEMS] dropping grid item beyond MAX_GRID_ITEMS=%d", MAX_GRID_ITEMS);
-            truncation_logged = true;
-        }
-    }
-    GridItemInfo& back() { return data[count - 1]; }
-    void reserve(size_t) {} // no-op
-    void clear() { count = 0; truncation_logged = false; }
-    GridItemInfo* begin() { return data; }
-    GridItemInfo* end()   { return data + count; }
-    const GridItemInfo* begin() const { return data; }
-    const GridItemInfo* end()   const { return data + count; }
-};
+struct ItemInfoArray : GridArray<GridItemInfo> {};
 
 /**
  * Place a single definitely positioned item
@@ -265,7 +220,8 @@ inline void place_definite_axis_item(
     GridItemInfo& item,
     AbsoluteAxis definite_axis,
     uint16_t explicit_definite_count,
-    const char* axis_name
+    const char* axis_name,
+    OriginZeroLine search_start
 ) {
     const GridPlacement& definite_placement = definite_axis == AbsoluteAxis::Vertical
         ? item.row : item.column;
@@ -274,11 +230,8 @@ inline void place_definite_axis_item(
     LineSpan definite_span = definite_placement.to_origin_zero(explicit_definite_count);
     uint16_t search_item_span = search_placement.get_span();
     AbsoluteAxis search_axis = other_axis(definite_axis);
-    OriginZeroLine search_start = matrix.track_counts(search_axis).implicit_start_line();
-    constexpr int MAX_SEARCH_ITERATIONS = 10000;
-
-    for (int iterations = 0; iterations < MAX_SEARCH_ITERATIONS; iterations++) {
-        LineSpan search_span(search_start, search_start + search_item_span);
+    while (search_start.value < GRID_MAX_TRACK_LINE) {
+        LineSpan search_span = grid_span_at(search_start, search_item_span);
         LineSpan column_span = definite_axis == AbsoluteAxis::Vertical
             ? search_span : definite_span;
         LineSpan row_span = definite_axis == AbsoluteAxis::Vertical
@@ -294,10 +247,9 @@ inline void place_definite_axis_item(
         search_start += 1;
     }
 
-    log_warn("[RAD_CAP_GRID_AUTO_PLACE] exhausted definite-%s search after %d iterations; placing at grid end",
-             axis_name, MAX_SEARCH_ITERATIONS);
+    log_warn("[RAD_CAP_GRID_EXTENT] definite-%s placement reached the positive extent", axis_name);
     OriginZeroLine fallback_start = matrix.track_counts(search_axis).implicit_end_line();
-    LineSpan search_span(fallback_start, fallback_start + search_item_span);
+    LineSpan search_span = grid_span_at(fallback_start, search_item_span);
     LineSpan column_span = definite_axis == AbsoluteAxis::Vertical
         ? search_span : definite_span;
     LineSpan row_span = definite_axis == AbsoluteAxis::Vertical
@@ -305,48 +257,6 @@ inline void place_definite_axis_item(
     matrix.ensure_fits(AbsoluteAxis::Horizontal, column_span, row_span);
     item.resolved_row = row_span;
     item.resolved_column = column_span;
-}
-
-/**
- * Place an item with definite row but indefinite column (CSS Grid spec step 2)
- *
- * @param matrix The cell occupancy matrix
- * @param item The item to place
- * @param auto_flow The auto-flow mode
- * @param explicit_row_count Number of explicit row tracks
- * @param explicit_col_count Number of explicit column tracks
- */
-inline void place_definite_row_item(
-    CellOccupancyMatrix& matrix,
-    GridItemInfo& item,
-    GridAutoFlow auto_flow,
-    uint16_t explicit_row_count,
-    uint16_t explicit_col_count
-) {
-    (void)auto_flow;
-    place_definite_axis_item(matrix, item, AbsoluteAxis::Vertical,
-                             explicit_row_count, "row");
-}
-
-/**
- * Place an item with definite column but indefinite row (CSS Grid spec step 3)
- *
- * @param matrix The cell occupancy matrix
- * @param item The item to place
- * @param auto_flow The auto-flow mode
- * @param explicit_row_count Number of explicit row tracks
- * @param explicit_col_count Number of explicit column tracks
- */
-inline void place_definite_column_item(
-    CellOccupancyMatrix& matrix,
-    GridItemInfo& item,
-    GridAutoFlow auto_flow,
-    uint16_t explicit_row_count,
-    uint16_t explicit_col_count
-) {
-    (void)auto_flow;
-    place_definite_axis_item(matrix, item, AbsoluteAxis::Horizontal,
-                             explicit_col_count, "column");
 }
 
 /**
@@ -384,9 +294,6 @@ inline GridCursor place_indefinite_item(
     // Check if primary position is definite
     bool has_definite_primary = primary_placement.is_definite;
 
-    // Iteration limit to prevent infinite loops
-    constexpr int MAX_SEARCH_ITERATIONS = 10000;
-    int iterations = 0;
 
     if (has_definite_primary) {
         // Fixed primary position - search along secondary axis
@@ -403,8 +310,8 @@ inline GridCursor place_indefinite_item(
             secondary_idx += 1;
         }
 
-        while (iterations < MAX_SEARCH_ITERATIONS) {
-            LineSpan secondary_span(secondary_idx, secondary_idx + secondary_item_span);
+        while (secondary_idx.value < GRID_MAX_TRACK_LINE) {
+            LineSpan secondary_span = grid_span_at(secondary_idx, secondary_item_span);
 
             // Ensure matrix can accommodate this search position
             matrix.ensure_fits(primary, primary_span_resolved, secondary_span);
@@ -417,18 +324,16 @@ inline GridCursor place_indefinite_item(
                     item.resolved_row = secondary_span;
                     item.resolved_column = primary_span_resolved;
                 }
-                return {primary_span_resolved.end, secondary_span.start};
+                return {primary_span_resolved.start, secondary_span.start};
             }
 
             secondary_idx += 1;
-            iterations++;
         }
 
         // Fallback: place at the end of secondary axis
-        log_warn("[RAD_CAP_GRID_AUTO_PLACE] exhausted definite-primary search after %d iterations; placing at grid end",
-                 MAX_SEARCH_ITERATIONS);
+        log_warn("[RAD_CAP_GRID_EXTENT] definite-primary placement reached the positive extent");
         OriginZeroLine fallback_secondary = matrix.track_counts(other_axis(primary)).implicit_end_line();
-        LineSpan secondary_span(fallback_secondary, fallback_secondary + secondary_item_span);
+        LineSpan secondary_span = grid_span_at(fallback_secondary, secondary_item_span);
         matrix.ensure_fits(primary, primary_span_resolved, secondary_span);
 
         if (primary == AbsoluteAxis::Vertical) {
@@ -438,13 +343,13 @@ inline GridCursor place_indefinite_item(
             item.resolved_row = secondary_span;
             item.resolved_column = primary_span_resolved;
         }
-        return {primary_span_resolved.end, secondary_span.start};
+        return {primary_span_resolved.start, secondary_span.start};
 
     } else {
         // No fixed axis - search in grid order
-        while (iterations < MAX_SEARCH_ITERATIONS) {
-            LineSpan primary_span(primary_idx, primary_idx + primary_item_span);
-            LineSpan secondary_span(secondary_idx, secondary_idx + secondary_item_span);
+        while (secondary_idx.value < GRID_MAX_TRACK_LINE) {
+            LineSpan primary_span = grid_span_at(primary_idx, primary_item_span);
+            LineSpan secondary_span = grid_span_at(secondary_idx, secondary_item_span);
 
             // Check if primary is out of bounds - wrap to next secondary track
             if (primary_span.end > primary_end_line) {
@@ -452,7 +357,6 @@ inline GridCursor place_indefinite_item(
                 primary_idx = primary_start_line;
                 // Update end line after potential matrix expansion
                 primary_end_line = matrix.track_counts(primary).implicit_end_line();
-                iterations++;
                 continue;
             }
 
@@ -467,20 +371,18 @@ inline GridCursor place_indefinite_item(
                     item.resolved_row = secondary_span;
                     item.resolved_column = primary_span;
                 }
-                return {primary_span.end, secondary_span.start};
+                return {primary_span.start, secondary_span.start};
             }
 
             primary_idx += 1;
-            iterations++;
         }
 
         // Fallback: place at the end of the grid
-        log_warn("[RAD_CAP_GRID_AUTO_PLACE] exhausted indefinite search after %d iterations; placing at grid end",
-                 MAX_SEARCH_ITERATIONS);
+        log_warn("[RAD_CAP_GRID_EXTENT] auto placement reached the positive extent");
         OriginZeroLine fallback_primary = matrix.track_counts(primary).implicit_end_line();
         OriginZeroLine fallback_secondary = secondary_idx;
-        LineSpan primary_span(fallback_primary, fallback_primary + primary_item_span);
-        LineSpan secondary_span(fallback_secondary, fallback_secondary + secondary_item_span);
+        LineSpan primary_span = grid_span_at(fallback_primary, primary_item_span);
+        LineSpan secondary_span = grid_span_at(fallback_secondary, secondary_item_span);
         matrix.ensure_fits(primary, primary_span, secondary_span);
 
         if (primary == AbsoluteAxis::Vertical) {
@@ -490,7 +392,7 @@ inline GridCursor place_indefinite_item(
             item.resolved_row = secondary_span;
             item.resolved_column = primary_span;
         }
-        return {primary_span.end, secondary_span.start};
+        return {primary_span.start, secondary_span.start};
     }
 }
 
@@ -515,6 +417,7 @@ inline void place_grid_items(
 
     // Step 1: Place items with definite positions in both axes
     for (auto& item : items) {
+        if (!matrix.good()) return;
         if (item.row.is_definite && item.column.is_definite) {
             place_definite_item(item, explicit_row_count, explicit_col_count);
 
@@ -528,27 +431,53 @@ inline void place_grid_items(
         }
     }
 
-    // Step 2: Place items with definite row positions (auto column)
-    // Per CSS Grid spec §8.5: "Process the items locked to a given row"
-    // These are items with definite row position but auto column position
+    // step 2 locks the secondary axis; column flow transposes the row-flow algorithm.
+    uint16_t explicit_secondary = secondary == AbsoluteAxis::Vertical ? explicit_row_count : explicit_col_count;
     for (auto& item : items) {
-        if (item.row.is_definite && !item.column.is_definite) {
-            place_definite_row_item(
-                matrix, item, auto_flow, explicit_row_count, explicit_col_count
-            );
-
-            // Mark as occupied
-            matrix.mark_area_as(
-                AbsoluteAxis::Horizontal,
-                item.resolved_column,
-                item.resolved_row,
-                CellOccupancyState::AutoPlaced
-            );
+        if (!matrix.good()) return;
+        const GridPlacement& fixed = secondary == AbsoluteAxis::Vertical ? item.row : item.column;
+        const GridPlacement& automatic = primary == AbsoluteAxis::Horizontal ? item.column : item.row;
+        if (!fixed.is_definite || automatic.is_definite) continue;
+        OriginZeroLine search_start = matrix.track_counts(primary).implicit_start_line();
+        if (!is_dense(auto_flow)) {
+            LineSpan fixed_span = fixed.to_origin_zero(explicit_secondary);
+            // sparse packing cannot backfill before an earlier locked item in any overlapping row/column.
+            for (const auto& previous : items) {
+                if (&previous == &item) break;
+                const GridPlacement& previous_fixed = secondary == AbsoluteAxis::Vertical ? previous.row : previous.column;
+                const GridPlacement& previous_auto = primary == AbsoluteAxis::Horizontal ? previous.column : previous.row;
+                if (!previous_fixed.is_definite || previous_auto.is_definite) continue;
+                LineSpan previous_fixed_span = secondary == AbsoluteAxis::Vertical ? previous.resolved_row : previous.resolved_column;
+                LineSpan previous_auto_span = primary == AbsoluteAxis::Horizontal ? previous.resolved_column : previous.resolved_row;
+                if (fixed_span.start < previous_fixed_span.end && previous_fixed_span.start < fixed_span.end &&
+                    search_start < previous_auto_span.end) search_start = previous_auto_span.end;
+            }
         }
+        place_definite_axis_item(matrix,item,secondary,explicit_secondary,
+            secondary == AbsoluteAxis::Vertical ? "row" : "column",search_start);
+        matrix.mark_area_as(AbsoluteAxis::Horizontal,item.resolved_column,item.resolved_row,CellOccupancyState::AutoPlaced);
     }
 
-    // Step 3: Determine implicit grid columns
-    // This is handled implicitly by CellOccupancyMatrix's expand_to_fit_range
+    // CSS Grid §8.5 step 3 includes definite primary positions before automatic spans.
+    // otherwise a negative-only item beside an empty explicit grid leaves an extra unused track.
+    uint16_t explicit_primary = primary == AbsoluteAxis::Horizontal ? explicit_col_count : explicit_row_count;
+    for (const auto& item : items) {
+        const GridPlacement& placement = primary == AbsoluteAxis::Horizontal ? item.column : item.row;
+        if (placement.is_definite) matrix.ensure_fits(primary, placement.to_origin_zero(explicit_primary),
+            grid_span_at(matrix.track_counts(secondary).implicit_start_line(), 1));
+    }
+
+    // CSS Grid §8.5: the primary extent must also accommodate the largest automatic span.
+    uint16_t largest_auto_span = 1;
+    for (const auto& item : items) {
+        const GridPlacement& placement = primary == AbsoluteAxis::Horizontal ? item.column : item.row;
+        if (!placement.is_definite && placement.span > largest_auto_span) largest_auto_span = placement.span;
+    }
+    if (largest_auto_span > matrix.track_counts(primary).len()) {
+        matrix.ensure_fits(primary,
+            grid_span_at(matrix.track_counts(primary).implicit_start_line(), largest_auto_span),
+            grid_span_at(matrix.track_counts(secondary).implicit_start_line(), 1));
+    }
 
     // Step 4: Place remaining items in order-modified document order
     // Per CSS Grid spec §8.5: "Position the remaining grid items"
@@ -562,25 +491,11 @@ inline void place_grid_items(
     GridCursor grid_start = cursor;
 
     for (auto& item : items) {
-        bool row_definite = item.row.is_definite;
-        bool col_definite = item.column.is_definite;
-
-        // Skip items already placed in step 1 or step 2
-        if (row_definite) {
-            continue;
-        }
-
-        if (col_definite) {
-            // Item has definite column but auto row
-            // Per spec: "If the item has a definite column position:"
-            // Use the column position and search for available row
-            place_definite_column_item(
-                matrix, item, auto_flow, explicit_row_count, explicit_col_count
-            );
-        } else {
-            // Item has auto in both axes
-            cursor = place_indefinite_item(matrix, item, auto_flow, cursor);
-        }
+        if (!matrix.good()) return;
+        const GridPlacement& fixed = secondary == AbsoluteAxis::Vertical ? item.row : item.column;
+        if (fixed.is_definite) continue;  // steps 1 and 2 already placed these items.
+        // definite-primary and fully automatic items both advance the same sparse cursor.
+        cursor = place_indefinite_item(matrix,item,auto_flow,cursor);
 
         // Mark as occupied
         matrix.mark_area_as(

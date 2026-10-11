@@ -7,10 +7,19 @@
 #include "../../../lib/log.h"
 #include "../../../lib/time_util.h"
 #include "../../../lib/mem_grow.hpp"
+#include "../../../lib/hashmap_helpers.h"
 
 #include <assert.h>
 #include <stdlib.h>
 #include <string.h>
+
+uint64_t dom_node_ref_identity_hash(DomNodeRef ref, uint64_t seed0, uint64_t seed1) {
+    return hashmap_hash_bytes(&ref.expected_id, sizeof(ref.expected_id), seed0, seed1);
+}
+
+int dom_node_ref_identity_compare(DomNodeRef left, DomNodeRef right) {
+    return left.expected_id < right.expected_id ? -1 : left.expected_id > right.expected_id;
+}
 
 typedef struct DomNodeRecord {
     DomNode* address;

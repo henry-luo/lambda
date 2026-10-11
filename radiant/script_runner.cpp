@@ -3064,6 +3064,14 @@ extern "C" void collect_and_compile_event_handlers(DomDocument* dom_doc) {
 extern "C" void script_runner_cleanup_js_state(DomDocument* dom_doc) {
     if (!dom_doc) return;
 
+    Runtime* runtime = dom_doc->js.runtime;
+    if (runtime && runtime != dom_doc->lambda_runtime) {
+        // native callback roots must unregister before their evaluator and code retire (D5.3.3).
+        dom_document_release_runtime_resources(dom_doc,
+            (Context*)runtime_get_eval_context(runtime));
+        state_store_retire_runtime(dom_doc, runtime_get_eval_context(runtime));
+    }
+
     // the realm dies with the state torn down below; clear before any early
     // return so a partially cleaned document never reports a live realm.
     dom_doc->js_has_dom_realm = false;
@@ -3076,7 +3084,6 @@ extern "C" void script_runner_cleanup_js_state(DomDocument* dom_doc) {
         dom_doc->js.preamble_state = nullptr;
         dom_doc->js.mir_ctx = nullptr;
     }
-    Runtime* runtime = dom_doc->js.runtime;
     if (!runtime) return;
 
     // detach the borrowed document before either owner can tear down the runtime.

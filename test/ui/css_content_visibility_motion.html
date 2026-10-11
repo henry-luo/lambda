@@ -1,0 +1,34 @@
+<!doctype html><meta charset=utf-8><style>
+body {margin:0;background:white}
+#controls {position:fixed;left:220px;top:0;z-index:20}
+#controls button {display:block;width:100px;height:25px}
+#spacer {height:2000px}
+#auto {content-visibility:auto;contain-intrinsic-size:40px;width:80px}
+.animated {height:40px;background:green;animation:fade 1s linear forwards}
+@keyframes fade {from {opacity:.2} to {opacity:var(--end,.8)}}
+#live {position:fixed;left:90px;top:0;width:80px;height:80px;--end:.8}
+#transition {height:40px;background:blue;transition:opacity 1s linear}
+</style>
+<div id=controls><button id=down>activate auto</button><button id=hide>hide live</button>
+<button id=mutate>change hidden</button><button id=probe>read hidden style</button><button id=show>show live</button></div>
+<div id=live><div id=running class=animated></div><div id=transition></div></div>
+<div id=spacer></div><div id=auto><div id=deferred class=animated></div></div>
+<script>
+function byId(id) {return document.getElementById(id)}
+['running','deferred','transition'].forEach(function(id) {
+    ['animationstart','animationend','transitionrun'].forEach(function(type) {
+        byId(id).setAttribute('data-'+type,'0');
+        byId(id).addEventListener(type,function() {
+            this.setAttribute('data-'+type,String(Number(this.getAttribute('data-'+type))+1));
+        });
+    });
+});
+byId('down').onclick=function(){window.scrollTo(0,1950)};
+byId('hide').onclick=function(){byId('live').style.contentVisibility='hidden'};
+byId('mutate').onclick=function(){byId('transition').style.opacity='.2'};
+byId('probe').onclick=function(){
+    byId('live').style.setProperty('--end','.6');
+    byId('running').setAttribute('data-sampled-opacity',getComputedStyle(byId('running')).opacity);
+};
+byId('show').onclick=function(){byId('live').style.contentVisibility='visible'};
+</script>

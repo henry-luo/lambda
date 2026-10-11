@@ -37,4 +37,11 @@ import to_html: lambda.latex.to_html
 // ---- element with id ----
 "12. id attr:"; contains(to_html.to_html(<h1 id: "sec1", "Title">), "id=")
 
+// ---- nested sequences and non-string attribute values ----
+"13. sequences:"; to_html.to_html(["a", (<b "b">, "&"), [], null, 3]) == "a<b>b</b>&amp;3"
+"14. attrs:"; to_html.to_html(<input disabled: true, checked: false, title: "<&\">">) == "<input disabled title=\"&lt;&amp;&quot;&gt;\">"
+
+// ---- style content remains raw CSS after joining ----
+"15. raw style:"; to_html.to_html(<style ".a > .b { content: '<'; }">) == "<style>.a > .b { content: '\\3c '; }</style>"
+
 "===== ALL LATEX TO_HTML TESTS DONE ====="

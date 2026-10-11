@@ -10,6 +10,14 @@ extern "C" {
 #include "../lib/tagged.hpp"
 // NOTE: All conversion functions removed - enums now align directly with Lexbor constants
 
+CssEnum layout_flex_direction(ViewElement* container) {
+    // legacy orientation selects the used axis without changing computed flex-direction.
+    if (container && container->display.legacy_box)
+        return container->display.legacy_vertical ? CSS_VALUE_COLUMN : CSS_VALUE_ROW;
+    return container && container->embed && container->embedp()->flex
+        ? (CssEnum)container->embedp()->flex->direction : CSS_VALUE_ROW;
+}
+
 float get_cross_axis_size(ViewElement* item, FlexContainerLayout* flex_layout);
 static bool should_skip_flex_item(ViewElement* item);
 float calculate_item_baseline(ViewElement* item);
@@ -755,8 +763,8 @@ float flex_column_content_contribution(LayoutContext* lycon, ViewElement* contai
         !container->embed || !container->embedp()->flex) {
         return 0.0f;
     }
-    int direction = container->embedp()->flex->direction;
-    if (direction != DIR_COLUMN && direction != DIR_COLUMN_REVERSE) return 0.0f;
+    CssEnum direction = layout_flex_direction(container);
+    if (direction != CSS_VALUE_COLUMN && direction != CSS_VALUE_COLUMN_REVERSE) return 0.0f;
 
     float total = 0.0f;
     for (DomNode* child = container->as_element()->first_child;
@@ -814,6 +822,7 @@ void init_flex_container(LayoutContext* lycon, ViewBlock* container) {
         flex->text_direction = container->block()->direction == CSS_VALUE_RTL
             ? TD_RTL : TD_LTR;
     }
+    flex->direction = layout_flex_direction(container);
     // CRITICAL: For containers with explicit height (like body with height: 100%), use given_height
     // since container->height may not be set yet at this point in the layout flow.
     float content_width = container->width;
@@ -909,9 +918,8 @@ void init_flex_container(LayoutContext* lycon, ViewBlock* container) {
             bool parent_is_flex = parent_elem && (parent_elem->display.inner == CSS_VALUE_FLEX);
             if (parent_is_flex) {
                 ViewBlock* parent_block = lam::view_as_block(parent_elem);
-                int parent_dir = parent_block && parent_block->embed && parent_block->embedp()->flex ?
-                    parent_block->embedp()->flex->direction : DIR_ROW;
-                bool parent_is_row = (parent_dir == DIR_ROW || parent_dir == DIR_ROW_REVERSE);
+                CssEnum parent_dir = layout_flex_direction(parent_block);
+                bool parent_is_row = (parent_dir == CSS_VALUE_ROW || parent_dir == CSS_VALUE_ROW_REVERSE);
                 if (container->fi->main_size_from_flex ||
                     (!parent_is_row && (container->fi->flex_basis >= 0 ||
                                          container->fi->flex_grow > 0.0f))) {
@@ -3953,8 +3961,8 @@ static void flex_apply_intrinsic_cross_size(ViewElement* item,
         FlexProp* item_flex = item_block && item_block->embed
             ? item_block->embedp()->flex : nullptr;
         bool row_wrap = item_flex &&
-            (item_flex->direction == CSS_VALUE_ROW ||
-             item_flex->direction == CSS_VALUE_ROW_REVERSE) &&
+            (layout_flex_direction(item_block) == CSS_VALUE_ROW ||
+             layout_flex_direction(item_block) == CSS_VALUE_ROW_REVERSE) &&
             (item_flex->wrap == CSS_VALUE_WRAP ||
              item_flex->wrap == CSS_VALUE_WRAP_REVERSE);
         if (preserve_wrapping_width && row_wrap &&

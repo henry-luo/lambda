@@ -5464,8 +5464,7 @@ static bool svg_text_draw_bitmap_glyph(SvgTextLayout* layout, SvgTextRun* run,
                 source[4 * column + 2], source[4 * column + 1], source[4 * column], alpha);
         }
     }
-    float scale = font_handle_get_size_px(font) / font_handle_get_physical_size_px(font);
-    if (bitmap->bitmap_scale > 0.0f) scale *= bitmap->bitmap_scale;
+    float scale = render_font_pixel_to_css(font, bitmap);
     RdtMatrix placement = {scale * run->glyph_scale_x, 0.0f,
         run->x + (float)bitmap->bearing_x * scale * run->glyph_scale_x,
         0.0f, scale, run->y - (float)bitmap->bearing_y * scale, 0.0f, 0.0f, 1.0f};

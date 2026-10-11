@@ -1,0 +1,92 @@
+{
+  "name": "ScrollIntoView settles content relevance before publishing geometry and paint",
+  "html": "test/ui/css_content_visibility_scroll_into_view.html",
+  "viewport": {
+    "width": 320,
+    "height": 240
+  },
+  "events": [
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#auto"
+      },
+      "height": 40
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#own"
+      }
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#auto"
+      },
+      "y": 0,
+      "height": 120
+    },
+    {
+      "type": "assert_scroll",
+      "x": 0,
+      "y": 2000,
+      "tolerance": 1
+    },
+    {
+      "type": "assert_pixel",
+      "x": 20,
+      "y": 60,
+      "min_r": 0,
+      "max_r": 5,
+      "min_g": 0,
+      "max_g": 5,
+      "min_b": 250,
+      "max_b": 255
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#up"
+      }
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#auto"
+      },
+      "height": 40
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#descendant"
+      }
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#auto"
+      },
+      "y": 0,
+      "height": 120
+    },
+    {
+      "type": "assert_scroll",
+      "x": 0,
+      "y": 2000,
+      "tolerance": 1
+    },
+    {
+      "type": "assert_pixel",
+      "x": 20,
+      "y": 60,
+      "min_r": 0,
+      "max_r": 5,
+      "min_g": 0,
+      "max_g": 5,
+      "min_b": 250,
+      "max_b": 255
+    }
+  ]
+}

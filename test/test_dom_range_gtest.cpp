@@ -92,34 +92,19 @@ protected:
     }
 
     void TearDown() override {
-        // Nodes were heap-allocated by `new`; tear them down explicitly.
-        delete world;
-        delete hello;
-        delete b;
-        delete span;
-        delete div;
+        dom_lifecycle_destroy(&doc_storage);
         if (arena) arena_destroy(arena);
         tu_teardown_pool(pool);
     }
 
-    // Create a minimally-initialized DomElement.
     DomElement* make_element() {
-        DomElement* e = new DomElement{};
-        e->node_type = DOM_NODE_ELEMENT;
-        e->set_synthetic(true);
-        e->doc = lam::up(&doc_storage);
-        return e;
+        return dom_element_create(&doc_storage, "span", nullptr);
     }
 
-    // Create a minimally-initialized DomText with a literal C string. The
-    // string lives as long as the test (string literals have static storage).
     DomText* make_text(const char* s, size_t len) {
-        DomText* t = new DomText{};
-        t->node_type = DOM_NODE_TEXT;
-        t->text = lam::up(s);
-        t->length = len;
-        return t;
+        return DomText::create_detached_copy(&doc_storage, s, len);
     }
+
 };
 
 // ============================================================================
@@ -320,6 +305,32 @@ TEST_F(DomRangeTest, SelectNodeContentsCoversWholeNode) {
     dom_range_release(r);
 }
 
+TEST_F(DomRangeTest, InnerTextTrimsAtomicInlineEdgesAndOmitsSkippedContents) {
+    hello->text = lam::up("hello ");
+    hello->length = 6;
+    span->display = {CSS_VALUE_INLINE_BLOCK, CSS_VALUE_FLOW};
+    ASSERT_TRUE(b->append_child(world));
+    DomRange range = {};
+    ASSERT_TRUE(dom_range_select_node_contents(&range, div, nullptr));
+    char* raw = dom_range_to_string_ex(&range, DOM_STRINGIFY_RAW);
+    ASSERT_NE(raw, nullptr);
+    EXPECT_STREQ(raw, "hello world");
+    mem_free(raw);
+    char* rendered = dom_range_to_string_ex(&range, DOM_STRINGIFY_INNER_TEXT);
+    ASSERT_NE(rendered, nullptr);
+    EXPECT_STREQ(rendered, "helloworld");
+    mem_free(rendered);
+    BlockProp properties = {};
+    properties.content_visibility = CSS_VALUE_AUTO;
+    properties.content_visibility_skipped = true;
+    span->blk = lam::view_prop(&properties);
+    rendered = dom_range_to_string_ex(&range, DOM_STRINGIFY_INNER_TEXT);
+    ASSERT_NE(rendered, nullptr);
+    EXPECT_STREQ(rendered, "world");
+    mem_free(rendered);
+    span->blk = nullptr;
+}
+
 TEST_F(DomRangeTest, CollapseToStartAndEnd) {
     DomRange* r = dom_range_create(state);
     const char* exc = nullptr;
@@ -513,14 +524,6 @@ protected:
         ASSERT_TRUE(p->append_child(c));
     }
 
-    void TearDown() override {
-        delete t2;
-        delete t1;
-        delete c;
-        delete a;
-        delete p;
-        DomRangeTest::TearDown();
-    }
 };
 
 // pre_remove: endpoint inside removed subtree collapses to (parent, index)
@@ -895,7 +898,6 @@ TEST_F(DomRangeTest, BoundaryMoveCharacterCrossesTextNodes) {
     b = dom_boundary_move(b, DOM_MOD_CHARACTER, +1);
     // should land at start of next text 'w' or step into it
     EXPECT_TRUE(b.node == (DomNode*)w || (b.node == (DomNode*)hello && b.offset == 5));
-    delete w;
     span->last_child = lam::up((DomNode*)hello);
     hello->next_sibling = nullptr;
 }

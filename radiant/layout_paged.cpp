@@ -891,7 +891,8 @@ struct PagedCounterScope {
         style->counters = lam::up(counter_snapshot_create(owner->counters, tree->model->css->pool));
         if (!style->counters) status = TYPESET_OUT_OF_MEMORY;
         if (!style_scope.enter(owner->counters,
-                (style->computed_containment & CSS_CONTAIN_STYLE) || style->container_axes))
+                (style->computed_containment & CSS_CONTAIN_STYLE) || style->container_axes ||
+                (style->content_visibility != CSS_VALUE_VISIBLE && view_size_containment_applies(style->display))))
             status = TYPESET_OUT_OF_MEMORY;
     }
     ~PagedCounterScope() {
@@ -1560,6 +1561,9 @@ static TypesetStatus paged_build_children(ViewTree* tree, PagedComposition* comp
     if (depth > composition->options.max_depth) return TYPESET_BUDGET_EXHAUSTED;
     ViewCssStyle* source_style = view_css_resolve(tree, element);
     if (!source_style) return TYPESET_OUT_OF_MEMORY;
+    if (view_css_contents_skipped(source_style))
+        return paged_context_admit(tree, composition, source_style,
+            parent->source == element && (parent->table_cell || source_style->display.inner == CSS_VALUE_TABLE_CAPTION));
     if (source_style->display.inner == CSS_VALUE_TABLE)
         return furniture ? paged_failure(composition, TYPESET_INVALID, element, 0,
             "nested and auxiliary tables require a nested table producer") : paged_table_build(tree, composition, parent, depth);
@@ -2364,6 +2368,8 @@ static TypesetStatus paged_frame_measure(PagedComposer* composer, PagedFrame* fr
         CSS_PROPERTY_HEIGHT, parent_width, NAN, parent_height);
     if (isfinite(frame->content_height)) frame->content_height = fmaxf(0.0f, frame->content_height -
         (style->box_sizing == CSS_VALUE_BORDER_BOX ? frame->box.edges[0] + frame->box.edges[2] : 0.0f));
+    else if (view_css_contents_skipped(style))
+        frame->content_height = view_css_contained_intrinsic_size(composer->tree, style, false);
     if (reference) {
         if ((style->width && !css_value_is_auto(style->width)) || style->min_width || style->max_width || left || right)
             return paged_failure(composer->composition, TYPESET_INVALID, frame->flow->source, 0,
@@ -4352,6 +4358,8 @@ static TypesetStatus paged_flow_intrinsic(PagedComposer* composer, PagedFlowNode
             image.margin[3] + image.margin[1];
         return TYPESET_OK;
     }
+    if (view_css_contents_skipped(style))
+        result->minimum = result->maximum = view_css_contained_intrinsic_size(composer->tree, style, true);
     for (PagedFlowNode* child = flow->first_child; child; child = child->next) {
         PagedIntrinsic widths = {};
         TypesetStatus status = paged_flow_intrinsic(composer, child, basis, &widths);

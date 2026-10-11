@@ -1,0 +1,42 @@
+<!doctype html><meta charset="utf-8">
+<style>html,body{margin:0}.grid{display:grid;width:120px;grid-auto-columns:20px;grid-auto-rows:10px;justify-content:start}button{height:24px}</style>
+<style>#ruled{grid-template-areas:"a a"}</style>
+<button id="check">Check</button><button id="change">Change</button><button id="changed">Changed</button><button id="restore">Restore</button><button id="restored">Restored</button><output id="report"></output>
+<div id="canonical" class="grid" style='grid-template-areas:"a   ...b" "a . b"'><div style="grid-column:1/-1"></div></div>
+<div id="invalid" class="grid" style='grid-template-areas:"a a";grid-template-areas:"a a" "a ."'><div style="grid-column:1/-1"></div></div>
+<div id="variable" class="grid" style='--areas:"a a";grid-template-areas:var(--areas)'><div style="grid-column:1/-1"></div></div>
+<div id="ruled" class="grid"><div style="grid-column:1/-1"></div></div>
+<div id="names" class="grid" style='grid-template-areas:"1st é 😀"'><div style="grid-column:1/-1"></div></div>
+<div id="setter"></div>
+<script>
+(function(){
+    var report=document.getElementById('report'),rule=document.styleSheets[1].cssRules[0];
+    function record(prefix){
+        ['canonical','invalid','variable','ruled','names'].forEach(function(id){
+            var element=document.getElementById(id);
+            report.setAttribute('data-'+prefix+id,getComputedStyle(element).gridTemplateAreas);
+            report.setAttribute('data-'+prefix+id+'-width',String(element.firstChild.getBoundingClientRect().width));
+        });
+        report.setAttribute('data-'+prefix+'inline',document.getElementById('canonical').style.gridTemplateAreas);
+        report.setAttribute('data-'+prefix+'rule',rule.style.gridTemplateAreas);
+        var style=document.getElementById('setter').style;
+        ['"a . a"','"a a" "b"','""','"  "','"a@b"','"a,b"','"a" none','a','"a", "b"'].forEach(function(value,index){
+            style.gridTemplateAreas='"a a"';style.gridTemplateAreas=value;
+            report.setAttribute('data-'+prefix+'reject-'+index,style.gridTemplateAreas);
+        });
+        style.gridTemplateAreas='"a\\000020b"';
+        report.setAttribute('data-'+prefix+'escape',style.gridTemplateAreas);
+    }
+    document.getElementById('check').onclick=function(){record('');};
+    document.getElementById('change').onclick=function(){
+        document.getElementById('variable').style.setProperty('--areas','"a . a"');
+        rule.style.gridTemplateAreas='"b c d"';
+    };
+    document.getElementById('changed').onclick=function(){record('changed-');};
+    document.getElementById('restore').onclick=function(){
+        document.getElementById('variable').style.setProperty('--areas','"b b"');
+        rule.style.gridTemplateAreas='"a a"';rule.style.gridTemplateAreas='"a . a"';
+    };
+    document.getElementById('restored').onclick=function(){record('restored-');};
+})();
+</script>

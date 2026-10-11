@@ -706,6 +706,13 @@ const char* dom_element_language(DomElement* element) {
     return dom_document_default_language(element->doc);
 }
 
+static void dom_document_destroy_resource(lam::Own<DomDocumentResource>* link) {
+    DomDocumentResource* resource = *link;
+    *link = resource->next;
+    if (resource->destroy) resource->destroy(resource->data);
+    mem_free(resource);
+}
+
 void DomDocument::destroy() {
     dom_retire_begin_destroy(this);
     mem_free(services.preferred_languages); services.preferred_languages = nullptr;
@@ -739,14 +746,7 @@ void DomDocument::destroy() {
     dom_lifecycle_release_backing_roots(this);
     // Runtime-backed extension values must release their GC roots while the
     // document's retained Lambda runtime is still alive.
-    DomDocumentResource* resource = resources;
-    while (resource) {
-        DomDocumentResource* next = resource->next;
-        if (resource->destroy) resource->destroy(resource->data);
-        mem_free(resource);
-        resource = next;
-    }
-    resources = nullptr;
+    while (resources) dom_document_destroy_resource(&resources);
 
     if (lambda_runtime) {
         if (g_runtime_cleanup_hook) g_runtime_cleanup_hook(lambda_runtime);
@@ -789,13 +789,16 @@ void DomDocument::destroy() {
 }
 
 bool dom_document_add_resource(DomDocument* document, DomDocumentResourceData* data,
-                               DomDocumentResourceDestroyFn destroy) {
+                               DomDocumentResourceDestroyFn destroy, Context* runtime_owner,
+                               DomDocumentResourceDestroyFn retire_runtime) {
     if (!document || !data || !destroy) return false;
     DomDocumentResource* resource = (DomDocumentResource*)mem_calloc(
         1, sizeof(DomDocumentResource), MEM_CAT_LAYOUT);
     if (!resource) return false;
     resource->data = lam::own(data);
     resource->destroy = destroy;
+    resource->runtime_owner = lam::up(runtime_owner);
+    resource->retire_runtime = retire_runtime;
     resource->next = document->resources;
     document->resources = lam::own(resource);
     return true;
@@ -807,14 +810,40 @@ bool dom_document_release_resource(DomDocument* document, DomDocumentResourceDat
     while (*link) {
         DomDocumentResource* resource = *link;
         if (resource->data == data) {
-            *link = resource->next;
-            if (resource->destroy) resource->destroy(resource->data);
-            mem_free(resource);
+            dom_document_destroy_resource(link);
             return true;
         }
         link = &resource->next;
     }
     return false;
+}
+
+bool dom_document_bind_resource_runtime(DomDocument* document, DomDocumentResourceData* data,
+        Context* runtime_owner, DomDocumentResourceDestroyFn retire_runtime) {
+    if (!document || !data || !runtime_owner) return false;
+    for (DomDocumentResource* resource = document->resources; resource; resource = resource->next) {
+        if (resource->data != data) continue;
+        if (resource->runtime_owner && resource->runtime_owner != runtime_owner) return false;
+        resource->runtime_owner = lam::up(runtime_owner);
+        resource->retire_runtime = retire_runtime;
+        return true;
+    }
+    return false;
+}
+
+void dom_document_release_runtime_resources(DomDocument* document, Context* runtime_owner) {
+    if (!document || !runtime_owner) return;
+    lam::Own<DomDocumentResource>* link = &document->resources;
+    while (*link) {
+        DomDocumentResource* resource = *link;
+        if (resource->runtime_owner == runtime_owner) {
+            if (!resource->retire_runtime) { dom_document_destroy_resource(link); continue; }
+            // clear the binding before callbacks so repeated retirement cannot unroot twice.
+            resource->runtime_owner = nullptr;
+            resource->retire_runtime(resource->data);
+        }
+        link = &resource->next;
+    }
 }
 
 bool dom_document_set_embedding(DomDocument* embedded, DomDocument* parent,

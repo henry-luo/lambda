@@ -1,0 +1,15 @@
+{
+  "name":"Selection activates auto content and hidden descendants cannot scroll the viewport",
+  "html":"test/ui/css_content_visibility_selection.html",
+  "viewport":{"width":340,"height":260},
+  "events":[
+    {"type":"assert_rect","target":{"selector":"#auto"},"height":40},
+    {"type":"click","target":{"selector":"#select"}},
+    {"type":"assert_rect","target":{"selector":"#auto"},"height":120},
+    {"type":"assert_scroll","x":0,"y":0,"tolerance":1},
+    {"type":"click","target":{"selector":"#clear"}},
+    {"type":"assert_rect","target":{"selector":"#auto"},"height":120},
+    {"type":"click","target":{"selector":"#scroll-hidden"}},
+    {"type":"assert_scroll","x":0,"y":0,"tolerance":1}
+  ]
+}

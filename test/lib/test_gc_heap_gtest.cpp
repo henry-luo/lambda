@@ -617,14 +617,30 @@ TEST_F(GCHeapTest, RootVectorBindsExternalSpan) {
     void* object = gc_heap_alloc(gc, 32, LMD_TYPE_STRING);
     ASSERT_NE(object, nullptr);
     slots[0].item = string_item(object);
+    EXPECT_EQ(root_vector_external_at(&v, 0), &slots[0]);
+    EXPECT_EQ(root_vector_external_at(&v, 2), nullptr);
     gc_collect_with_root_region(gc, NULL, 0, NULL, 0);
     EXPECT_EQ(gc->object_count, 1u);
 
+    gc_heap_t* gc2 = gc_heap_create();
+    ASSERT_NE(gc2, nullptr);
+    heap.gc = gc2;
+    heap.generation = 2;
+    EXPECT_EQ(root_vector_external_at(&v, 0), nullptr);
+    EXPECT_EQ(gc2->root_range_count, 0);
+    ASSERT_TRUE(root_vector_ensure_external(&v));
+    object = gc_heap_alloc(gc2, 32, LMD_TYPE_STRING);
+    ASSERT_NE(object, nullptr);
+    slots[0].item = string_item(object);
+    gc_collect_with_root_region(gc2, NULL, 0, NULL, 0);
+    EXPECT_EQ(gc2->object_count, 1u);
     root_vector_clear_external(&v);
-    gc_collect_with_root_region(gc, NULL, 0, NULL, 0);
-    EXPECT_EQ(gc->object_count, 0u);
+    gc_collect_with_root_region(gc2, NULL, 0, NULL, 0);
+    EXPECT_EQ(gc2->object_count, 0u);
     root_vector_unbind_external(&v);
-    EXPECT_EQ(gc->root_range_count, 0);
+    EXPECT_EQ(gc2->root_range_count, 0);
+    EXPECT_EQ(root_vector_external_at(&v, 0), nullptr);
+    gc_heap_destroy(gc2);
 }
 
 // ============================================================================

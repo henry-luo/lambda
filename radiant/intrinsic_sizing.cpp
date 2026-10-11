@@ -1448,6 +1448,18 @@ static inline bool intrinsic_allows_soft_wrap_after_codepoint(uint32_t cp) {
     return cp == 0x002D || cp == 0x2010;
 }
 
+static bool intrinsic_break_all_opportunity(uint32_t first, uint32_t last,
+                                             const unsigned char* next,
+                                             const unsigned char* end) {
+    if (!is_typographic_letter_unit(first)) return false;
+    uint32_t following = 0;
+    layout_utf8_next_codepoint(&next, end, &following);
+    // break-all changes letter classes, while graphemes and punctuation retain their boundaries.
+    return (!following || utf8proc_grapheme_break(last, following)) &&
+        layout_text_allows_letter_break(last, following, CSS_VALUE_AUTO,
+                                         last == 0x200D, false);
+}
+
 static float intrinsic_loaded_glyph_advance(LayoutContext* lycon,
                                             uint32_t codepoint,
                                             bool small_caps_lower,
@@ -1533,6 +1545,7 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
                                                    CssEnum word_break) {
     bool break_anywhere = (overflow_wrap == CSS_VALUE_ANYWHERE);
     bool break_word = (overflow_wrap == CSS_VALUE_BREAK_WORD);
+    bool break_all = (word_break == CSS_VALUE_BREAK_ALL);
     bool cjk_breaks = (word_break != CSS_VALUE_KEEP_ALL);
     TextIntrinsicWidths result = {0, 0};
 
@@ -1566,7 +1579,10 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
             } else {
                 current_word += 11.0f;  // Use 11.0 to match font fallback width
                 total_width += 11.0f;
-                if (break_anywhere || intrinsic_allows_soft_wrap_after_codepoint((uint32_t)ch)) {
+                if (break_anywhere || intrinsic_allows_soft_wrap_after_codepoint((uint32_t)ch) ||
+                    (break_all && intrinsic_break_all_opportunity(ch, ch,
+                        (const unsigned char*)text + i + 1,
+                        (const unsigned char*)text + length))) {
                     longest_word = fmax(longest_word, current_word);
                     current_word = 0.0f;
                 }
@@ -1657,7 +1673,7 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
                 float shaped_bidi_width = 0.0f;
                 uint32_t shaped_bidi_first = 0;
                 uint32_t shaped_bidi_last = 0;
-                if (intrinsic_measure_shaped_run(
+                if (!break_all && intrinsic_measure_shaped_run(
                         lycon, &str[i], length - i, text_transform,
                         font_variant, break_anywhere, break_word,
                         false, text_autospace,
@@ -1706,7 +1722,9 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
                     prev_is_zwj_base = false;
                     is_word_start = false;
                     i += cluster_bytes;
-                    if (cjk_breaks && has_id_line_break_class(cluster_last)) {
+                    if ((cjk_breaks && has_id_line_break_class(cluster_last)) ||
+                        (break_all && intrinsic_break_all_opportunity(
+                            cluster_first, cluster_last, &str[i], str + length))) {
                         longest_word = fmax(longest_word, current_word);
                         current_word = 0.0f;
                     }
@@ -1718,7 +1736,7 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
             float shaped_width = 0.0f;
             uint32_t shaped_first_cp = 0;
             uint32_t shaped_last_cp = 0;
-            if (intrinsic_measure_shaped_run(
+            if (!break_all && intrinsic_measure_shaped_run(
                     lycon, &str[i], length - i, text_transform, font_variant,
                     break_anywhere, break_word, true, text_autospace,
                     &shaped_bytes, &shaped_width,
@@ -1834,7 +1852,9 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
         prev_text_autospace_codepoint = codepoint;
         i += bytes;  // Advance by the number of bytes consumed
 
-        if (break_anywhere || intrinsic_allows_soft_wrap_after_codepoint(codepoint)) {
+        if (break_anywhere || intrinsic_allows_soft_wrap_after_codepoint(codepoint) ||
+            (break_all && intrinsic_break_all_opportunity(
+                codepoint, codepoint, &str[i], str + length))) {
             longest_word = fmax(longest_word, current_word);
             current_word = 0.0f;
         }
@@ -1847,7 +1867,11 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
     longest_word = fmax(longest_word, current_word);
 
     result.min_content = longest_word;   // Keep float precision
-    result.max_content = total_width;    // Keep float precision
+    // wrap opportunities affect min-content, while max-content retains whole-run shaping.
+    result.max_content = break_all || break_anywhere || break_word
+        ? measure_text_intrinsic_widths(lycon, text, length, text_transform,
+            font_variant, white_space, CSS_VALUE_NORMAL, CSS_VALUE_NORMAL).max_content
+        : total_width;
 
     return result;
 }
@@ -2762,21 +2786,9 @@ static float intrinsic_image_height(DomElement* element, ImageSurface* image, fl
     return height;
 }
 
-ImageSurface* layout_ensure_replaced_image_surface(LayoutContext* lycon,
-                                                    ViewBlock* block,
-                                                    DomElement* element) {
-    if (!block || !element) return nullptr;
-    NameId tag = element->tag();
-    bool loadable = tag == MARKUP_NAME_IMG || tag == MARKUP_NAME_EMBED ||
-        (tag == MARKUP_NAME_OBJECT && element->get_attribute(MARKUP_NAME_DATA));
-    if (!loadable) return nullptr;
-    if (!lycon || !lycon->ui_context || !lycon->doc) return nullptr;
-    if (tag != MARKUP_NAME_IMG && block->embed && block->embedp()->img) return block->embedp()->img;
-    CssEngine* engine = (CssEngine*)lycon->doc->services.cached_css_engine;
-    float density = 1.0f; DomElement* dimensions = element;
-    lam::Temp<char> selected_source(tag == MARKUP_NAME_IMG
-        ? layout_resolve_replaced_image_source(element, engine, &density, &dimensions) : nullptr);
-    const char* source = tag == MARKUP_NAME_IMG ? selected_source.get() : element->get_attribute(MARKUP_NAME_DATA);
+ImageSurface* layout_admit_replaced_image_surface(LayoutContext* lycon, ViewBlock* block,
+        const char* source, float density) {
+    if (!lycon || !lycon->doc || !lycon->ui_context || !block) return nullptr;
     if (!block->embed) block->ensure_embed(lycon);
     if (!block->embed) return nullptr;
     // revalidate admission before any warm-cache reuse, including a retained embed slot.
@@ -2793,6 +2805,24 @@ ImageSurface* layout_ensure_replaced_image_surface(LayoutContext* lycon,
         block->embed->selected_image_source = lam::own(copy);
     }
     return block->embedp()->img;
+}
+
+ImageSurface* layout_ensure_replaced_image_surface(LayoutContext* lycon,
+                                                    ViewBlock* block,
+                                                    DomElement* element) {
+    if (!block || !element) return nullptr;
+    NameId tag = element->tag();
+    bool loadable = tag == MARKUP_NAME_IMG || tag == MARKUP_NAME_EMBED ||
+        (tag == MARKUP_NAME_OBJECT && element->get_attribute(MARKUP_NAME_DATA));
+    if (!loadable) return nullptr;
+    if (!lycon || !lycon->ui_context || !lycon->doc) return nullptr;
+    if (tag != MARKUP_NAME_IMG && block->embed && block->embedp()->img) return block->embedp()->img;
+    CssEngine* engine = (CssEngine*)lycon->doc->services.cached_css_engine;
+    float density = 1.0f; DomElement* dimensions = element;
+    lam::Temp<char> selected_source(tag == MARKUP_NAME_IMG
+        ? layout_resolve_replaced_image_source(element, engine, &density, &dimensions) : nullptr);
+    const char* source = tag == MARKUP_NAME_IMG ? selected_source.get() : element->get_attribute(MARKUP_NAME_DATA);
+    return layout_admit_replaced_image_surface(lycon, block, source, density);
 }
 
 CssEnum get_element_font_variant(DomElement* element) {
@@ -3493,11 +3523,12 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                                           &contain_intrinsic_height);
     bool contain_intrinsic_width_auto = resolved_width_view->blk &&
         resolved_width_view->block()->contain_intrinsic_width_auto;
+    float remembered_width = 0.0f;
     if (resolved_width_view->blk &&
-        resolved_width_view->block()->content_visibility_hidden &&
-        contain_intrinsic_width_auto && element->has_last_remembered_width() &&
+        resolved_width_view->block()->content_visibility_skipped &&
+        contain_intrinsic_width_auto &&
+        layout_get_last_remembered_size(lycon, element, true, &remembered_width) &&
         !has_definite_width) {
-        float remembered_width = element->last_remembered_width();
         float padding_border = layout_intrinsic_padding_border_axis(
             lycon, element, true, lycon->block.content_width);
         float intrinsic_width = remembered_width;
@@ -3521,9 +3552,9 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
         !contain_intrinsic_width_auto &&
         contain_intrinsic_width < 0.0f && !has_definite_width &&
         (resolved_width_view->display.inner != CSS_VALUE_GRID ||
-         resolved_width_view->block()->content_visibility_hidden) &&
+         resolved_width_view->block()->content_visibility_skipped) &&
         (!resolved_width_view->form ||
-         resolved_width_view->block()->content_visibility_hidden);
+         resolved_width_view->block()->content_visibility_skipped);
     if (has_empty_size_containment) {
         float padding_border = layout_intrinsic_padding_border_axis(
             lycon, element, true, lycon->block.content_width);
@@ -3652,7 +3683,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
             height = -1.0f;
         }
         if (element->tag() == MARKUP_NAME_CANVAS && view_block_for_aspect->blk &&
-            view_block_for_aspect->block()->content_visibility_hidden &&
+            view_block_for_aspect->block()->content_visibility_skipped &&
             view_block_for_aspect->block()->contain_intrinsic_height_auto) {
             // Last-remembered canvas height must not reuse the provisional max-content
             // height produced by the hidden pass; the bitmap's natural ratio is the memory source.
@@ -4773,7 +4804,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
     // grid items, including intrinsic aspect-ratio transfer.
     float element_definite_height = -1.0f;
     bool hidden_auto_height = view_block->blk &&
-        view_block->block()->content_visibility_hidden &&
+        view_block->block()->content_visibility_skipped &&
         view_block->block()->contain_intrinsic_height_auto;
     if (!hidden_auto_height && view_block->blk && view_block->block_mut()->given_height > 0) {
         element_definite_height = view_block->block()->given_height;
@@ -6360,10 +6391,11 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
     bool has_contain_intrinsic_height = contain_intrinsic_height >= 0.0f &&
         !contain_intrinsic_height_auto &&
         !intrinsic_has_definite_css_height(lycon, element, view);
-    if (view->blk && view->block()->content_visibility_hidden &&
-        contain_intrinsic_height_auto && element->has_last_remembered_height() &&
+    float remembered_height = 0.0f;
+    if (view->blk && view->block()->content_visibility_skipped &&
+        contain_intrinsic_height_auto &&
+        layout_get_last_remembered_size(lycon, element, false, &remembered_height) &&
         !intrinsic_has_definite_css_height(lycon, element, view)) {
-        float remembered_height = element->last_remembered_height();
         float padding_border = layout_intrinsic_padding_border_axis(
             lycon, element, false, width);
         // Intrinsic queries expose the remembered inner size as a border-box contribution.
@@ -6373,9 +6405,9 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
         layout_block_has_size_containment_in_axis(view, false) &&
         !contain_intrinsic_height_auto &&
         contain_intrinsic_height < 0.0f &&
-        (!view->form || view->block()->content_visibility_hidden) &&
+        (!view->form || view->block()->content_visibility_skipped) &&
         (view->display.inner != CSS_VALUE_GRID ||
-         view->block()->content_visibility_hidden);
+         view->block()->content_visibility_skipped);
 
     // CSS 2.1 §10.6.2: Replaced element intrinsic height
     // Size containment substitutes the fallback before a natural image ratio can

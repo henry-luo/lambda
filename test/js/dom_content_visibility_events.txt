@@ -1,0 +1,16 @@
+sample:true:true:false
+true
+false
+false
+true
+function:undefined:true:true
+true
+true
+true
+true
+true
+true
+type,bubbles,cancelable,composed,skipped
+converted:true:true
+true
+true

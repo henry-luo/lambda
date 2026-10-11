@@ -1,0 +1,17 @@
+<!doctype html><meta charset=utf-8><style>
+body {margin:0}
+#controls {position:fixed;top:0;left:180px;z-index:20}
+button {display:block;width:130px;height:25px}
+#spacer {height:2000px}
+#auto {content-visibility:auto;contain-intrinsic-size:40px;width:100px}
+#child {height:120px;background:blue}
+#tail {height:1000px}
+</style>
+<div id=controls><button id=own>scroll container</button><button id=descendant>scroll child</button>
+<button id=up>scroll up</button></div>
+<div id=spacer></div><div id=auto><div id=child></div></div><div id=tail></div>
+<script>
+document.getElementById('own').onclick=function(){document.getElementById('auto').scrollIntoView();};
+document.getElementById('descendant').onclick=function(){document.getElementById('child').scrollIntoView();};
+document.getElementById('up').onclick=function(){window.scrollTo(0,0);};
+</script>

@@ -289,7 +289,8 @@ static void format_element_reader(HtmlContext& ctx, const ElementReader& elem, i
 
             bool is_bool_attr = is_boolean_attribute(field_name, field_name_len);
 
-            if (value.isNull()) {
+            // HTML parsing preserves empty attributes as strings; boolean presence still uses the bare spelling.
+            if (value.isNull() || (is_bool_attr && value.isString() && value.asString()->len == 0)) {
                 if (is_bool_attr) {
                     stringbuf_emit(ctx.output(), " %.*s", field_name_len, field_name);
                 } else {

@@ -1,6 +1,4 @@
 #include "view.hpp"
-#include "event.hpp"
-#include "../lambda/module/radiant/radiant_input_value.hpp"
 
 #include "../lib/str.h"
 
@@ -80,15 +78,4 @@ bool form_input_intrinsic_size(const char* type, float* width, float* height) {
     if (height) *height = descriptor->fixed_intrinsic_height;
     return descriptor->fixed_intrinsic_width > 0.0f ||
         descriptor->fixed_intrinsic_height > 0.0f;
-}
-
-static const char* form_direction_live_value(DomElement* element, void*) {
-    // text values stay StateStore-owned; recascade reads must not initialize another owner (D4.5.1v4).
-    DocState* state = element && element->doc ? (DocState*)element->doc->state : nullptr;
-    const char* value = form_control_get_value(state, static_cast<View*>(element), nullptr);
-    return value ? value : radiant_input_peek_live_value(element);
-}
-
-extern "C" int dom_css_element_directionality(void* element) {
-    return dom_element_directionality((DomElement*)element, form_direction_live_value);
 }

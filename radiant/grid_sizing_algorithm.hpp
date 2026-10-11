@@ -130,35 +130,7 @@ struct GridItemContribution {
     ViewBlock* item;                   // Reference to the item for debugging
 };
 
-#define MAX_GRID_ITEMS 256
-
-// Fixed-capacity array of GridItemContribution
-struct ContribArray {
-    GridItemContribution data[MAX_GRID_ITEMS];  // LARGE_ARRAY_OK: fixed-capacity struct field; bound = MAX_GRID_ITEMS (256) × ~56 B ≈ 14 KiB; parent struct is short-lived (single layout pass).
-    size_t count;
-    bool truncation_logged;
-    ContribArray() : count(0), truncation_logged(false) {}
-    size_t size() const { return count; }
-    bool empty() const { return count == 0; }
-    GridItemContribution& operator[](size_t i) { return data[i]; }
-    const GridItemContribution& operator[](size_t i) const { return data[i]; }
-    void push_back(const GridItemContribution& c) {
-        if (count < MAX_GRID_ITEMS) {
-            data[count++] = c;
-            return;
-        }
-        if (!truncation_logged) {
-            log_warn("[RAD_CAP_GRID_CONTRIB] dropping grid contribution beyond MAX_GRID_ITEMS=%d", MAX_GRID_ITEMS);
-            truncation_logged = true;
-        }
-    }
-    void reserve(size_t) {} // no-op
-    void clear() { count = 0; truncation_logged = false; }
-    GridItemContribution* begin() { return data; }
-    GridItemContribution* end()   { return data + count; }
-    const GridItemContribution* begin() const { return data; }
-    const GridItemContribution* end()   const { return data + count; }
-};
+struct ContribArray : GridArray<GridItemContribution> {};
 
 inline int compare_grid_item_contribution_for_intrinsic_sizing(const void* lhs, const void* rhs) {
     const GridItemContribution* a = (const GridItemContribution*)lhs;
@@ -169,28 +141,6 @@ inline int compare_grid_item_contribution_for_intrinsic_sizing(const void* lhs, 
     if (a->track_span < b->track_span) return -1;
     if (a->track_span > b->track_span) return 1;
     return 0;
-}
-
-/**
- * Calculate the space already accounted for by spanned tracks.
- * Used when distributing item contributions across multiple tracks.
- */
-inline float spanned_tracks_size(
-    const TrackArray& tracks,
-    size_t start_index,
-    size_t span,
-    float gap
-) {
-    float sum = 0.0f;
-    size_t end = grid_min_value(start_index + span, tracks.size());
-    for (size_t i = start_index; i < end; ++i) {
-        sum += tracks[i].base_size;
-    }
-    // Add gaps between tracks (span - 1 gaps)
-    if (span > 1) {
-        sum += (span - 1) * gap;
-    }
-    return sum;
 }
 
 /**
@@ -227,7 +177,7 @@ inline void increase_sizes_for_spanning_item(
 
     // Helper lambda: build eligible track list filtered by a predicate
     auto build_eligible = [&](auto include) {
-        IndexArray result;
+        IndexArray result(&tracks.complete);
         for (size_t i = start_index; i < end; ++i) {
             const auto& track = tracks[i];
             bool is_truly_flexible = track.is_flexible() && track.max_track_sizing_function.flex_factor() > 0;
@@ -312,7 +262,7 @@ inline void increase_sizes_for_spanning_item(
                 if (bs < min_base) { second_min_base = min_base; min_base = bs; }
                 else if (bs < second_min_base) { second_min_base = bs; }
             }
-            IndexArray min_tracks;
+            IndexArray min_tracks(&tracks.complete);
             for (size_t idx : eligible_indices) {
                 if (fabsf(tracks[idx].base_size - min_base) < 0.01f) min_tracks.push_back(idx);
             }
@@ -376,7 +326,7 @@ inline void increase_sizes_for_spanning_item(
         auto is_max_content_tier = [](const EnhancedGridTrack& t) {
             return t.max_track_sizing_function.type == SizingFunctionType::MaxContent;
         };
-        IndexArray tier1, tier2;
+        IndexArray tier1(&tracks.complete), tier2(&tracks.complete);
         for (size_t idx : all_eligible) {
             if (is_max_content_tier(tracks[idx])) tier1.push_back(idx);
             else tier2.push_back(idx);
@@ -462,7 +412,7 @@ inline void distribute_max_content_minimum(
     size_t end,
     float gap
 ) {
-    IndexArray eligible_tracks;
+    IndexArray eligible_tracks(&tracks.complete);
     for (size_t i = contribution.track_start; i < end; ++i) {
         auto& track = tracks[i];
         if (track.min_track_sizing_function.type != SizingFunctionType::MaxContent ||
@@ -515,7 +465,7 @@ inline void resolve_intrinsic_track_sizes(
     bool is_min_content_constraint = false,
     bool is_max_content_constraint = false
 ) {
-    if (contributions.empty() || tracks.empty()) return;
+    if (tracks.empty()) return;
 
     // Mark which items cross flexible tracks
     for (auto& contrib : contributions) {
@@ -640,7 +590,7 @@ inline void resolve_intrinsic_track_sizes(
 
         // Tier 1: distribute min_content to non-fit-content-max tracks
         {
-            IndexArray tier1;
+            IndexArray tier1(&tracks.complete);
             for (size_t i = contrib.track_start; i < end; ++i) {
                 auto min_type = tracks[i].min_track_sizing_function.type;
                 auto max_type = tracks[i].max_track_sizing_function.type;
@@ -787,10 +737,7 @@ inline void resolve_intrinsic_track_sizes(
                     sum += tracks[i].growth_limit;
                 }
             }
-            // Include gaps between spanned tracks (same as spanned_tracks_size)
-            if (contrib.track_span > 1) {
-                sum += (contrib.track_span - 1) * gap;
-            }
+            sum += grid_track_gaps(tracks, contrib.track_start, contrib.track_span, gap);
             return sum;
         };
 
@@ -798,7 +745,7 @@ inline void resolve_intrinsic_track_sizes(
         auto distribute_to_gl = [&](float space, auto is_eligible) {
             if (space <= 0.01f) return;
             // Build eligible list
-            IndexArray eligible;
+            IndexArray eligible(&tracks.complete);
             for (size_t i = contrib.track_start; i < end; ++i) {
                 if (is_eligible(tracks[i])) eligible.push_back(i);
             }
@@ -873,8 +820,10 @@ inline void resolve_intrinsic_track_sizes(
     // for span=1 items, or to cover remaining content for spanning items.
     {
         // Track per-track max_content from span=1 items for fit-content clamping
-        float fc_span1_max[MAX_GRID_TRACKS];  // LARGE_ARRAY_OK: bound = MAX_GRID_TRACKS (64) × 4 B = 256 B; layout-pass scratch.
-        float fc_max_growth[MAX_GRID_TRACKS];  // LARGE_ARRAY_OK: bound = MAX_GRID_TRACKS (64) × 4 B = 256 B; layout-pass scratch.
+        auto fc_span1_max = lam::temp_array<float>(tracks.size(), MEM_CAT_LAYOUT);
+        if (!fc_span1_max) { tracks.fail("fc_span1_max"); return; }
+        auto fc_max_growth = lam::temp_array<float>(tracks.size(), MEM_CAT_LAYOUT);
+        if (!fc_max_growth) { tracks.fail("fc_max_growth"); return; }
         for (size_t i = 0; i < tracks.size(); ++i) { fc_span1_max[i] = -1.0f; fc_max_growth[i] = -1.0f; }
         for (const auto& contrib : contributions) {
             if (contrib.crosses_flexible_track) continue;
@@ -896,7 +845,7 @@ inline void resolve_intrinsic_track_sizes(
                 }
                 // Remaining content after all current bases and gaps
                 float remaining = contrib.max_content_contribution - span_base_sum;
-                remaining -= (contrib.track_span - 1) * gap;
+                remaining -= grid_track_gaps(tracks, contrib.track_start, contrib.track_span, gap);
                 remaining = grid_max_value(0.0f, remaining);
 
                 for (size_t i = contrib.track_start; i < end; ++i) {
@@ -973,7 +922,8 @@ inline void resolve_intrinsic_track_sizes(
 
         // Gather flex tracks to update and their respective contribution floors
         struct FlexEntry { size_t idx; float contribution; float flex_factor; };
-        FlexEntry flex_entries[MAX_GRID_TRACKS];  // LARGE_ARRAY_OK: bound = MAX_GRID_TRACKS (64) × 16 B = 1 KiB; layout-pass scratch.
+        auto flex_entries = lam::temp_array<FlexEntry>(tracks.size(), MEM_CAT_LAYOUT);
+        if (!flex_entries) { tracks.fail("flex_entries"); return; }
         size_t fe_count = 0;
         float total_flex_factor = 0.0f;
         for (size_t i = contrib.track_start; i < p3_end; ++i) {
@@ -990,7 +940,7 @@ inline void resolve_intrinsic_track_sizes(
             if (mt == SizingFunctionType::Auto ||
                 mt == SizingFunctionType::MinContent ||
                 mt == SizingFunctionType::MaxContent) {
-                if (fe_count < MAX_GRID_TRACKS) flex_entries[fe_count++] = {i, item_contrib, t.flex_factor()};
+                flex_entries[fe_count++] = {i, item_contrib, t.flex_factor()};
                 total_flex_factor += t.flex_factor();
             }
         }
@@ -1080,7 +1030,7 @@ inline void maximize_tracks(
     float space_to_distribute = free_space;
 
     while (space_to_distribute > 0.01f) {
-        IndexArray eligible;
+        IndexArray eligible(&tracks.complete);
         for (size_t i = 0; i < tracks.size(); i++) {
             const auto& t = tracks[i];
             if (t.is_flexible()) continue;
@@ -1154,7 +1104,8 @@ inline void expand_flexible_tracks(
 
         // Save Phase 3 base_sizes as min floors for Pass 2
         size_t n = tracks.size();
-        float phase3_base[MAX_GRID_TRACKS];  // LARGE_ARRAY_OK: bound = MAX_GRID_TRACKS (64) × 4 B = 256 B; layout-pass scratch.
+        auto phase3_base = lam::temp_array<float>(tracks.size(), MEM_CAT_LAYOUT);
+        if (!phase3_base) { tracks.fail("phase3_base"); return; }
         for (size_t i = 0; i < n; ++i) phase3_base[i] = 0.0f;
         for (size_t i = 0; i < n; ++i) {
             if (tracks[i].is_flexible()) phase3_base[i] = tracks[i].base_size;
@@ -1180,15 +1131,15 @@ inline void expand_flexible_tracks(
 
             // Collect flex and non-flex info for tracks in this span
             float non_flex_size = 0.0f;
-            int span_count = (int)(p_end - contrib.track_start);
-            float span_gap = (span_count > 1) ? (span_count - 1) * gap : 0.0f;
+            float span_gap = grid_track_gaps(tracks, contrib.track_start, contrib.track_span, gap);
 
             struct FlexInfo { size_t idx; float flex; float base; };
-            FlexInfo flex_infos[MAX_GRID_TRACKS];  // LARGE_ARRAY_OK: bound = MAX_GRID_TRACKS (64) × 16 B = 1 KiB; layout-pass scratch.
+            auto flex_infos = lam::temp_array<FlexInfo>(tracks.size(), MEM_CAT_LAYOUT);
+            if (!flex_infos) { tracks.fail("flex_infos"); return; }
             size_t fi_count = 0;
             for (size_t i = contrib.track_start; i < p_end; ++i) {
                 if (tracks[i].is_flexible()) {
-                    if (fi_count < MAX_GRID_TRACKS) flex_infos[fi_count++] = {i, tracks[i].flex_factor(), tracks[i].base_size};
+                    flex_infos[fi_count++] = {i, tracks[i].flex_factor(), tracks[i].base_size};
                 } else {
                     non_flex_size += tracks[i].base_size;
                 }
@@ -1198,7 +1149,8 @@ inline void expand_flexible_tracks(
             float target = contrib.max_content_contribution - span_gap;
             // Iterative "Find the Size of an fr" sub-algorithm (§12.7.1)
             float fr_result = 0.0f;
-            bool inflexible[MAX_GRID_TRACKS];  // LARGE_ARRAY_OK: bound = MAX_GRID_TRACKS (64) × 1 B = 64 B; layout-pass scratch.
+            auto inflexible = lam::temp_array<bool>(tracks.size(), MEM_CAT_LAYOUT);
+            if (!inflexible) { tracks.fail("inflexible"); return; }
             for (size_t fi = 0; fi < fi_count; ++fi) inflexible[fi] = false;
             for (;;) {
                 float leftover = target - non_flex_size;
@@ -1234,10 +1186,7 @@ inline void expand_flexible_tracks(
             }
             intrinsic_total += tracks[i].base_size;
         }
-        // Add gaps
-        int track_count = 0;
-        for (const auto& t : tracks) { if (t.kind == GridTrackKind::Track) track_count++; }
-        intrinsic_total += (track_count > 1) ? (track_count - 1) * gap : 0.0f;
+        intrinsic_total += grid_track_gaps(tracks, 0, tracks.size(), gap);
 
         // --- Pass 2: Re-run with intrinsic total as definite available ---
         // The definite iterative freeze redistributes space with max(sum,1) clamping,
@@ -1268,8 +1217,10 @@ inline void expand_flexible_tracks(
     // recompute the fr size from the remaining unfrozen tracks. Repeat until stable.
 
     size_t n = tracks.size();
-    float min_floor[MAX_GRID_TRACKS];  // LARGE_ARRAY_OK: bound = MAX_GRID_TRACKS (64) × 4 B = 256 B; layout-pass scratch.
-    bool frozen[MAX_GRID_TRACKS];  // LARGE_ARRAY_OK: bound = MAX_GRID_TRACKS (64) × 1 B = 64 B; layout-pass scratch.
+    auto min_floor = lam::temp_array<float>(tracks.size(), MEM_CAT_LAYOUT);
+    if (!min_floor) { tracks.fail("min_floor"); return; }
+    auto frozen = lam::temp_array<bool>(tracks.size(), MEM_CAT_LAYOUT);
+    if (!frozen) { tracks.fail("frozen"); return; }
     for (size_t i = 0; i < n; ++i) { min_floor[i] = 0.0f; frozen[i] = false; }
 
     for (size_t i = 0; i < n; ++i) {
@@ -1341,8 +1292,11 @@ inline void expand_flexible_tracks(
 inline void stretch_auto_tracks(
     TrackArray& tracks,
     float axis_min_size,
-    float axis_available_space
+    float axis_available_space,
+    int32_t content_alignment
 ) {
+    // other alignments position the intrinsic tracks instead of stretching auto maxima.
+    if (content_alignment != CSS_VALUE_NORMAL && content_alignment != CSS_VALUE_STRETCH) return;
     // Count auto tracks (tracks with auto max sizing that aren't flexible)
     size_t auto_track_count = 0;
     float used_space = 0.0f;
@@ -1393,10 +1347,7 @@ inline void compute_track_offsets(
         tracks[i].offset = offset;
         offset += tracks[i].base_size;
 
-        // Add gap after each track except the last
-        if (i < tracks.size() - 1 && tracks[i].kind == GridTrackKind::Track) {
-            offset += gap;
-        }
+        if (grid_track_has_gutter_after(tracks, i)) offset += gap;
     }
 }
 

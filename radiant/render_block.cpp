@@ -441,11 +441,12 @@ static void render_block_paint_self(RasterRenderContext* rdcon, ViewBlock* block
             time_elapsed_ms_f(tb1, tb2));
     }
 
-    if (!phase->self_hidden && block->vector_path() && block->vector_path()->segments) {
+    if (!phase->self_hidden && !view_contents_are_skipped(block) &&
+        block->vector_path() && block->vector_path()->segments) {
         render_vector_path(rdcon, block);
     }
 
-    if (!phase->self_hidden &&
+    if (!phase->self_hidden && !view_contents_are_skipped(block) &&
         block->form_control()) {
         render_form_control(rdcon, block);
     }
@@ -467,7 +468,7 @@ static void render_block_paint_self(RasterRenderContext* rdcon, ViewBlock* block
 }
 
 static bool block_should_paint_children(ViewBlock* block) {
-    if (!block) return false;
+    if (!block || view_contents_are_skipped(block)) return false;
     if (block->form_control() &&
         block->tag() != MARKUP_NAME_BUTTON) {
         return false;
@@ -511,8 +512,6 @@ static RenderBlockChildrenPhase render_block_begin_children_phase(RasterRenderCo
     if (!phase.has_children) {
         return phase;
     }
-
-    render_block_apply_inherited_color(rdcon, block);
 
     if (block->scroller || (block->blk && block->block()->contain_paint)) {
         setup_scroller(rdcon, block);
@@ -613,6 +612,8 @@ static bool raster_block_paint_self(RenderPaintBlockDriver* ctx, ViewBlock* bloc
     RasterBlockPaintDriver* driver = static_cast<RasterBlockPaintDriver*>(ctx);
     if (!driver || !driver->rdcon || !block || !phase) return false;
     render_block_paint_self(driver->rdcon, block, (RenderBlockPhase*)phase);
+    render_block_apply_inherited_color(driver->rdcon, block);
+    if (view_contents_are_skipped(block)) return false;
     if (driver->content) {
         RenderBlockPhase* current=(RenderBlockPhase*)phase;
         if (!current->self_hidden) {
@@ -630,6 +631,8 @@ static double raster_block_paint_children(RenderPaintBlockDriver* ctx, ViewBlock
     (void)phase;
     RasterBlockPaintDriver* driver = static_cast<RasterBlockPaintDriver*>(ctx);
     if (!driver || !driver->rdcon || !block) return 0.0;
+    RenderTextPaintScope text_paint(driver->rdcon, block,
+        &driver->rdcon->font, &driver->rdcon->color);
     return render_block_paint_children(driver->rdcon, block);
 }
 

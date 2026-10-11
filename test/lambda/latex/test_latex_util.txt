@@ -32,4 +32,10 @@ true
 true
 "51. lookup null:"
 true
+"52. content only:"
+true
+"53. rich array:"
+true
+"54. skip brackets:"
+true
 "===== ALL LATEX UTIL TESTS DONE ====="

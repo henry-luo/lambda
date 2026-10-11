@@ -1311,14 +1311,15 @@ static void render_text_view_pdf(PdfRenderContext* ctx, ViewText* text) {
     // Calculate absolute position using block context (like SVG renderer)
     // Extract the text content
     unsigned char* str = text->text_data();
-    TextRect *text_rect = text->rect;
-    NEXT_RECT:
+    RenderTextPaintIterator paint_iterator(ctx, text);
+    TextRect* text_rect;
+    while ((text_rect = paint_iterator.next())) {
     float base_x = (float)ctx->block.x + text_rect->x, y = (float)ctx->block.y + text_rect->y;
 
     lam::Temp<char> text_content(render_text_create_export_segment(
-        str, text_rect, text_transform, false));
+        str, text_rect, text_transform, true, get_white_space_value(text)));
 
-    if (strlen(text_content.get()) == 0) return;
+    if (!text_content.get() || !text_content.get()[0]) continue;
 
     // Set font if available
     float font_size = 16.0f;
@@ -1329,7 +1330,7 @@ static void render_text_view_pdf(PdfRenderContext* ctx, ViewText* text) {
 
     // Check if text is justified by comparing TextRect width with natural width
     // Use shared font backend to measure text width (similar to canvas renderer)
-    float space_width = ctx->font.style ? ctx->font.style->space_width : 4.0f;
+    float space_width = text_space_advance(ctx->font.style);
     float adjusted_space_width = space_width;
 
     // Calculate natural width using glyph metrics (excluding trailing spaces)
@@ -1353,9 +1354,9 @@ static void render_text_view_pdf(PdfRenderContext* ctx, ViewText* text) {
                 space_count++;
             } else if (codepoint != 0xFE0F) {
                 LoadedGlyph* glyph = font_load_glyph(font_box_handle(&ctx->font), &descriptor, codepoint, false);
-                if (glyph) natural_width += glyph->advance_x;
+                if (glyph) natural_width += glyph->advance_x * render_font_pixel_to_css(font_box_handle(&ctx->font));
             }
-            natural_width += ctx->font.style->letter_spacing;
+            if (codepoint != ' ') natural_width += text_character_spacing(ctx->font.style, codepoint);
         }
     }
 
@@ -1388,8 +1389,7 @@ static void render_text_view_pdf(PdfRenderContext* ctx, ViewText* text) {
     pdf_record_link_rect(ctx, pdf_nearest_link(text), base_x, y,
         text_rect->width, text_rect->height);
 
-    text_rect = text_rect->next;
-    if (text_rect) { goto NEXT_RECT; }
+    }
 }
 
 // ============================================================================
@@ -1468,6 +1468,15 @@ static void pdf_cb_render_bound(RenderContext* vctx, ViewBlock* view, float abs_
                 rdt_path_free(gradient.path);
             }
         }
+    }
+
+    if (render_paint_background_image(pdf_active_paint_list(ctx), ctx->ui_context, view,
+            {abs_x, abs_y, width, height})) pdf_lower_paint_list(ctx);
+
+    if (render_paint_border_image(pdf_active_paint_list(ctx), ctx->ui_context,
+            view->boundary()->border, {abs_x, abs_y, width, height})) {
+        pdf_lower_paint_list(ctx);
+        return;
     }
 
     // Borders
@@ -1771,11 +1780,19 @@ static void pdf_cb_on_font_change(RenderContext* vctx, FontProp* font_prop) {
     }
 }
 
+static void pdf_cb_render_marker(RenderContext* context, ViewSpan* marker, float x, float y,
+                                 FontBox* font, Color color) {
+    PdfRenderContext* pdf = (PdfRenderContext*)context;
+    if (render_paint_marker_image(pdf_active_paint_list(pdf), pdf->ui_context, marker, x, y, font))
+        pdf_lower_paint_list(pdf);
+}
+
 static RenderBackend pdf_make_backend(PdfRenderContext* ctx) {
     RenderBackend b = {};
     b.ctx              = lam::up(ctx);
     b.render_bound     = pdf_cb_render_bound;
     b.render_text      = pdf_cb_render_text;
+    b.render_marker    = pdf_cb_render_marker;
     b.render_image     = pdf_cb_render_image;
     b.render_inline_svg = pdf_cb_render_inline_svg;
     b.render_geomap = pdf_cb_render_geomap;
@@ -2022,11 +2039,11 @@ static int render_export_session_to_pdf(RenderExportSession* session, const char
 
 // Main function to layout HTML and render to PDF.
 int render_html_to_pdf(const char* html_file, const char* pdf_file, int viewport_width,
-        int viewport_height, float scale, bool paged) {
+        int viewport_height, float scale, bool paged, float device_scale) {
     RenderExportSession session;
     if (!render_export_session_begin(
             &session, html_file, viewport_width, viewport_height, 800, 1200, scale,
-            true, paged)) {
+            true, paged, device_scale)) {
         return 1;
     }
     int result = render_export_session_to_pdf(&session, pdf_file);
@@ -2037,11 +2054,11 @@ int render_html_to_pdf(const char* html_file, const char* pdf_file, int viewport
 int render_document_transform_to_pdf(const char* document_file,
         const LambdaDocumentTransformConfig* transform,
         const LambdaDocumentTransformOption* options, int option_count,
-        const char* pdf_file, int viewport_width, int viewport_height, float scale, bool paged) {
+        const char* pdf_file, int viewport_width, int viewport_height, float scale, bool paged, float device_scale) {
     RenderExportSession session;
     if (!render_export_session_begin_document_transform(&session, document_file, transform,
             options, option_count, viewport_width, viewport_height, 800, 1200, scale,
-            1.0f, false, paged, true)) {
+            device_scale, false, paged, true)) {
         return 1;
     }
     int result = render_export_session_to_pdf(&session, pdf_file);

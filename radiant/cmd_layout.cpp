@@ -3179,6 +3179,9 @@ static void populate_layout_document(DomDocument* doc, DomElement* root,
             layout_detach_first_letter_pseudo_content_for_layout_reset(
                 doc->root->as_element());
         }
+        // geometry replacement keeps committed sizing and motion history in this edition.
+        lam::Own<ContentVisibilityState> visibility = doc->view_tree->content_visibility_state;
+        doc->view_tree->content_visibility_state = nullptr;
         view_pool_destroy(doc->view_tree);
         if (doc->root && doc->root->is_element()) {
             // View teardown needs the complete rendered tree; generated DOM-only
@@ -3187,6 +3190,7 @@ static void populate_layout_document(DomDocument* doc, DomElement* root,
                 doc->root->as_element());
         }
         doc->view_tree->init((MemContext*)doc->services.mem_ctx);
+        doc->view_tree->content_visibility_state = visibility;
     }
     doc->lambda_runtime = runtime;
 }

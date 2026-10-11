@@ -32,6 +32,8 @@ typedef struct DomNodeRef {
     DomNode* address;
     uint32_t expected_id;
 } DomNodeRef;
+uint64_t dom_node_ref_identity_hash(DomNodeRef ref, uint64_t seed0, uint64_t seed1);
+int dom_node_ref_identity_compare(DomNodeRef left, DomNodeRef right);
 
 typedef struct DomLifecycleStats {
     uint64_t registered_nodes;

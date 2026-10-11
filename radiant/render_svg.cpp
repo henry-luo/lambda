@@ -193,7 +193,7 @@ static void svg_render_text_emphasis_marks(SvgRenderContext* ctx,
         else {
             LoadedGlyph* glyph = font_load_glyph(
                 font_box_handle(&ctx->font), &style, codepoint, false);
-            if (glyph) advance = glyph->advance_x;
+            if (glyph) advance = glyph->advance_x * render_font_pixel_to_css(font_box_handle(&ctx->font));
         }
         if (text_emphasis_marks_codepoint(codepoint)) {
             svg_indent(ctx);
@@ -205,7 +205,7 @@ static void svg_render_text_emphasis_marks(SvgRenderContext* ctx,
                 font_handle_get_family_name(font_box_handle(&ctx->font)),
                 font_size * 0.5f, color_string, font->text_emphasis_mark);
         }
-        x += advance + font->letter_spacing;
+        x += advance + text_character_spacing(font, codepoint);
     }
 }
 
@@ -214,12 +214,13 @@ static void render_text_view_svg(SvgRenderContext* ctx, ViewText* text) {
     unsigned char* str = text->text_data();
     CssEnum text_transform = render_text_inherited_transform(text);
 
-    TextRect *text_rect = text->rect;
-    NEXT_RECT:
+    RenderTextPaintIterator paint_iterator(ctx, text);
+    TextRect* text_rect;
+    while ((text_rect = paint_iterator.next())) {
     float x = ctx->block.x + text_rect->x, y = ctx->block.y + text_rect->y;
 
     lam::Temp<char> text_content(render_text_create_export_segment(
-        str, text_rect, text_transform, true));
+        str, text_rect, text_transform, true, get_white_space_value(text)));
 
     // Calculate natural text width and gap count for justify rendering.
     // NOTE: includes trailing spaces. The layout's count_justify_opportunities
@@ -236,7 +237,7 @@ static void render_text_view_svg(SvgRenderContext* ctx, ViewText* text) {
         unsigned char* content_end = scan + content_len;
         while (scan < content_end) {  // Only scan up to content_end
             if (is_space(*scan)) {
-                natural_width += ctx->font.style->space_width;
+                natural_width += text_space_advance(ctx->font.style);
                 space_count++;
                 scan++;
             }
@@ -264,10 +265,11 @@ static void render_text_view_svg(SvgRenderContext* ctx, ViewText* text) {
                     ? font_load_glyph_emoji(font_box_handle(&ctx->font), &_sd, codepoint, false)
                     : font_load_glyph(font_box_handle(&ctx->font), &_sd, codepoint, false);
                 if (glyph) {
-                    natural_width += glyph->advance_x;
+                    natural_width += glyph->advance_x * render_font_pixel_to_css(font_box_handle(&ctx->font));
                 } else {
                     natural_width += ctx->font.style->space_width;
                 }
+                natural_width += text_character_spacing(ctx->font.style, codepoint);
             }
         }
     }
@@ -328,15 +330,27 @@ static void render_text_view_svg(SvgRenderContext* ctx, ViewText* text) {
         run.cjk_spacing = cjk_spacing;
         run.font_weight = font_weight;
         run.italic = italic;
-        paint_glyph_run(svg_active_paint_list(ctx), &run);
-        svg_lower_paint_list(ctx);
+        // a receiving SVG viewer may substitute this face and change fitted glyph bounds (FT-15).
+        RdtPath* outline = !ctx->effect_fallback.active
+            ? render_path_create_text_run(&run, ctx->ui_context ? ctx->ui_context->font_ctx.get() : nullptr)
+            : nullptr;
+        if (outline) {
+            // outlines retain accessible text without asking the viewer to paint a replacement font.
+            RenderSemanticGroup label = {}; label.title = run.text;
+            paint_begin_semantic_group(svg_active_paint_list(ctx), &label);
+            int index = paint_list_count(svg_active_paint_list(ctx));
+            paint_fill_path(svg_active_paint_list(ctx), outline, run.color, RDT_FILL_WINDING, nullptr);
+            paint_end_semantic_group(svg_active_paint_list(ctx));
+            svg_lower_owned_path(ctx, index, PAINT_FILL_PATH, outline);
+        } else {
+            paint_glyph_run(svg_active_paint_list(ctx), &run);
+            svg_lower_paint_list(ctx);
+        }
 
         // run.text stays valid here: text_content, or the command's owned copy
         svg_render_text_emphasis_marks(ctx, run.text, x, y,
                                        font_size, word_spacing, cjk_spacing);
-        text_rect = text_rect->next;
-        if (text_rect) { goto NEXT_RECT; }
-        return;
+        continue;
     }
 
     size_t transformed_len = strlen(text_content.get());
@@ -366,9 +380,12 @@ static void render_text_view_svg(SvgRenderContext* ctx, ViewText* text) {
         strbuf_append_str(ctx->svg_content, " font-style=\"italic\"");
     }
 
-    // Add word-spacing for justified text
-    if (word_spacing > 0.01f) {
-        strbuf_append_format(ctx->svg_content, " word-spacing=\"%.2f\"", word_spacing);
+    float used_word_spacing = ctx->font.style->word_spacing + word_spacing;
+    if (fabsf(used_word_spacing) > 0.01f) {
+        strbuf_append_format(ctx->svg_content, " word-spacing=\"%.2f\"", used_word_spacing);
+    }
+    if (fabsf(ctx->font.style->letter_spacing) > 0.01f) {
+        strbuf_append_format(ctx->svg_content, " letter-spacing=\"%.2f\"", ctx->font.style->letter_spacing);
     }
     paint_svg_append_cjk_dx(ctx->svg_content, text_content.get(),
                             (int)strlen(text_content.get()), cjk_spacing); // INT_CAST_OK: export segment byte length is bounded by TextRect input.
@@ -438,8 +455,7 @@ static void render_text_view_svg(SvgRenderContext* ctx, ViewText* text) {
                                    font_size, word_spacing, cjk_spacing);
 
     text_content.reset();  strbuf_free(escaped_text);
-    text_rect = text_rect->next;
-    if (text_rect) { goto NEXT_RECT; }
+    }
 }
 
 /**
@@ -672,112 +688,13 @@ static void render_bound_svg(SvgRenderContext* ctx, ViewBlock* view) {
         }
     }
 
-    // Render background image (background-image, background-size, background-position, background-repeat)
-    if (view->boundary_mut()->background && view->boundary_mut()->background->image) {
-        BackgroundProp* bg = view->boundary()->background;
-        const char* img_url = bg->image;
+    if (render_paint_background_image(svg_active_paint_list(ctx), ctx->ui_context, view,
+            {x, y, width, height})) svg_lower_paint_list(ctx);
 
-        // Border widths and padding in CSS px (same coordinate space as x/y/width/height in SVG path)
-        const float* border_widths = view->boundary()->border
-            ? view->boundary()->border->width.values : nullptr;
-        float bwt = border_widths ? border_widths[0] : 0.0f;
-        float bwr = border_widths ? border_widths[1] : 0.0f;
-        float bwb = border_widths ? border_widths[2] : 0.0f;
-        float bwl = border_widths ? border_widths[3] : 0.0f;
-        const float* padding_values = view->boundary()->padding.values;
-        float pt = padding_values[0], pr = padding_values[1];
-        float pb = padding_values[2], pl = padding_values[3];
-
-        // Compute positioning area (background-origin, default: padding-box)
-        CssEnum origin = bg->bg_origin ? bg->bg_origin : CSS_VALUE_PADDING_BOX;
-        float ox = x, oy = y, ow = width, oh = height;
-        if (origin == CSS_VALUE_PADDING_BOX || origin == CSS_VALUE_CONTENT_BOX) {
-            ox += bwl; oy += bwt; ow -= bwl + bwr; oh -= bwt + bwb;
-        }
-        if (origin == CSS_VALUE_CONTENT_BOX) {
-            ox += pl; oy += pt; ow -= pl + pr; oh -= pt + pb;
-        }
-        if (ow < 0) ow = 0;
-        if (oh < 0) oh = 0;
-
-        // Compute paint area (background-clip, default: border-box)
-        CssEnum clip_box = bg->bg_clip ? bg->bg_clip : CSS_VALUE_BORDER_BOX;
-        float cx = x, cy = y, cw = width, ch = height;
-        if (clip_box == CSS_VALUE_PADDING_BOX || clip_box == CSS_VALUE_CONTENT_BOX) {
-            cx += bwl; cy += bwt; cw -= bwl + bwr; ch -= bwt + bwb;
-        }
-        if (clip_box == CSS_VALUE_CONTENT_BOX) {
-            cx += pl; cy += pt; cw -= pl + pr; ch -= pt + pb;
-        }
-        if (cw < 0) cw = 0;
-        if (ch < 0) ch = 0;
-
-        // Compute rendered image size
-        float img_w = ow, img_h = oh;
-        const char* preserve_ratio = "none";
-        if (bg->bg_size_type == CSS_VALUE_COVER) {
-            img_w = ow; img_h = oh;
-            preserve_ratio = "xMidYMid slice";
-        } else if (bg->bg_size_type == CSS_VALUE_CONTAIN) {
-            img_w = ow; img_h = oh;
-            preserve_ratio = "xMidYMid meet";
-        } else if (bg->bg_size_type == (CssEnum)0) {
-            // Explicit dimensions
-            if (!bg->bg_size_width_auto) {
-                img_w = bg->bg_size_width_is_percent ? ow * bg->bg_size_width / 100.0f : bg->bg_size_width;
-            }
-            if (!bg->bg_size_height_auto) {
-                img_h = bg->bg_size_height_is_percent ? oh * bg->bg_size_height / 100.0f : bg->bg_size_height;
-            }
-            preserve_ratio = "none";
-        }
-
-        // Compute image position within origin box
-        float pos_x = ox, pos_y = oy;
-        if (bg->bg_position_set) {
-            pos_x = ox + background_position_offset(bg, true, ow - img_w);
-            pos_y = oy + background_position_offset(bg, false, oh - img_h);
-        }
-
-        bool no_repeat = (bg->bg_repeat_x == CSS_VALUE_NO_REPEAT && bg->bg_repeat_y == CSS_VALUE_NO_REPEAT);
-        uintptr_t view_id = (uintptr_t)view;
-
-        if (no_repeat) {
-            // Single image with a clip-path limited to the paint area
-            char clip_id[64];
-            str_fmt(clip_id, sizeof(clip_id), "bgclip-%lx", (unsigned long)view_id);
-            svg_indent(ctx);
-            strbuf_append_format(ctx->svg_content,
-                "<defs><clipPath id=\"%s\"><rect x=\"%.2f\" y=\"%.2f\" width=\"%.2f\" height=\"%.2f\"/></clipPath></defs>\n",
-                clip_id, cx, cy, cw, ch);
-            svg_indent(ctx);
-            strbuf_append_format(ctx->svg_content,
-                "<image x=\"%.2f\" y=\"%.2f\" width=\"%.2f\" height=\"%.2f\" "
-                "preserveAspectRatio=\"%s\" href=\"%s\" clip-path=\"url(#%s)\" />\n",
-                pos_x, pos_y, img_w, img_h, preserve_ratio, img_url, clip_id);
-        } else {
-            // Tiled image via SVG <pattern>
-            char pat_id[64], clip_id[64];
-            str_fmt(pat_id,  sizeof(pat_id),  "bgpat-%lx",  (unsigned long)view_id);
-            str_fmt(clip_id, sizeof(clip_id), "bgclip-%lx", (unsigned long)view_id);
-            svg_indent(ctx);
-            // pattern origin at pos_x/pos_y so tiling is offset correctly
-            strbuf_append_format(ctx->svg_content,
-                "<defs>"
-                "<clipPath id=\"%s\"><rect x=\"%.2f\" y=\"%.2f\" width=\"%.2f\" height=\"%.2f\"/></clipPath>"
-                "<pattern id=\"%s\" x=\"%.2f\" y=\"%.2f\" width=\"%.2f\" height=\"%.2f\" patternUnits=\"userSpaceOnUse\">"
-                "<image x=\"0\" y=\"0\" width=\"%.2f\" height=\"%.2f\" preserveAspectRatio=\"%s\" href=\"%s\"/>"
-                "</pattern>"
-                "</defs>\n",
-                clip_id, cx, cy, cw, ch,
-                pat_id, pos_x, pos_y, img_w, img_h,
-                img_w, img_h, preserve_ratio, img_url);
-            svg_indent(ctx);
-            strbuf_append_format(ctx->svg_content,
-                "<rect x=\"%.2f\" y=\"%.2f\" width=\"%.2f\" height=\"%.2f\" "
-                "fill=\"url(#%s)\" clip-path=\"url(#%s)\" />\n",
-                cx, cy, cw, ch, pat_id, clip_id);
-        }
+    if (render_paint_border_image(svg_active_paint_list(ctx), ctx->ui_context,
+            view->boundary()->border, {x, y, width, height})) {
+        svg_lower_paint_list(ctx);
+        return;
     }
 
     // Render borders with style-aware per-side SVG polygons
@@ -1001,7 +918,7 @@ static void svg_cb_render_image(RenderContext* vctx, ViewBlock* block, float abs
     PaintList* paint = svg_active_paint_list(ctx);
     if (render_media_paint_svg_picture(paint, ctx->ui_context, block, &content_rect)) {
         svg_lower_paint_list(ctx);
-    } else if (img->url && img->url->href) {
+    } else {
         Rect image_rect = render_media_image_rect(block, img, content_rect, 1.0f);
         paint_draw_image_resource(paint, img, image_rect.x, image_rect.y,
             image_rect.width, image_rect.height, 255, nullptr);
@@ -1234,6 +1151,11 @@ static void svg_cb_render_marker(RenderContext* vctx, ViewSpan* marker, float ab
     DomElement* elem = lam::dom_require_element(lam::view_dom_node(marker));
     MarkerProp* marker_prop = elem->marker_prop();
     if (!marker_prop) return;
+    if (render_paint_marker_image(svg_active_paint_list(ctx), ctx->ui_context,
+            marker, abs_x, abs_y, font)) {
+        svg_lower_paint_list(ctx);
+        return;
+    }
     if (marker_prop->has_color) color = marker_prop->color;
     FontBox marker_font_box = elem->font
         ? FontBox{lam::up(elem->font), font_prop_used_size(elem->font)} : *font;
@@ -1369,34 +1291,59 @@ static RenderBackend svg_make_backend(SvgRenderContext* ctx) {
     return b;
 }
 
-// Calculate the actual content bounds recursively
-void calculate_content_bounds(View* view, int* max_x, int* max_y) {
+// export extents follow the same accumulated transforms and overflow clips as painting.
+static void calculate_visible_content_bounds(View* view, Bound clip,
+                                               RdtMatrix transform,
+                                               float* max_x, float* max_y) {
     if (!view) return;
-
-    if (view->view_type == RDT_VIEW_BLOCK) {
-        ViewBlock* block = lam::view_require_block(view);
-        int right = block->x + block->width;
-        int bottom = block->y + block->height;
-        if (right > *max_x) *max_x = right;
-        if (bottom > *max_y) *max_y = bottom;
+    RdtLogicalPoint origin = view_geometry_node_document_origin(view);
+    ViewBlock* block = lam::view_as_block(view);
+    RdtMatrix local;
+    if (block && render_geometry_transform_matrix(block->transform,
+            origin.x, origin.y, view->width, view->height, &local)) {
+        transform = rdt_matrix_multiply(&transform, &local);
     }
-    else if (view->view_type == RDT_VIEW_TEXT) {
-        ViewText* text = lam::view_require_text(view);
-        int right = text->x + text->width;
-        int bottom = text->y + text->height;
-        if (right > *max_x) *max_x = right;
-        if (bottom > *max_y) *max_y = bottom;
+    Bound projected = {origin.x, origin.y,
+        origin.x + view->width, origin.y + view->height};
+    // retain the existing finite box when a projective rectangle crosses w=0.
+    rdt_matrix_project_rect_bounds(&transform, projected.left, projected.top,
+        projected.right, projected.bottom, &projected.left, &projected.top,
+        &projected.right, &projected.bottom);
+    Bound visible = view_geometry_intersect_bound_rect(clip,
+        {projected.left, projected.top, projected.right - projected.left,
+         projected.bottom - projected.top});
+    if (visible.right > visible.left && visible.bottom > visible.top) {
+        *max_x = fmaxf(*max_x, visible.right);
+        *max_y = fmaxf(*max_y, visible.bottom);
     }
-
-    // Recursively check children
-    if (view->view_type >= RDT_VIEW_INLINE) {
-        ViewElement* group = lam::view_require_element(view);
-        View* child = group->first_child;
-        while (child) {
-            calculate_content_bounds(child, max_x, max_y);
-            child = child->next_sibling;
+    if (!view->is_element()) return;
+    ViewElement* element = lam::view_require_element(view);
+    if (block) {
+        if (view_contents_are_skipped(block)) return;
+        Bound overflow;
+        if (layout_block_overflow_clip(block, &overflow)) {
+            overflow.left += origin.x;
+            overflow.right += origin.x;
+            overflow.top += origin.y;
+            overflow.bottom += origin.y;
+            rdt_matrix_project_rect_bounds(&transform, overflow.left, overflow.top,
+                overflow.right, overflow.bottom, &overflow.left, &overflow.top,
+                &overflow.right, &overflow.bottom);
+            clip = view_geometry_intersect_bound_rect(clip,
+                {overflow.left, overflow.top,
+                 overflow.right - overflow.left, overflow.bottom - overflow.top});
         }
     }
+    for (View* child = element->first_child; child; child = child->next())
+        calculate_visible_content_bounds(child, clip, transform, max_x, max_y);
+}
+
+void calculate_content_bounds(View* view, int* max_x, int* max_y) {
+    float right = (float)*max_x, bottom = (float)*max_y;
+    calculate_visible_content_bounds(view,
+        {-INFINITY, -INFINITY, INFINITY, INFINITY}, rdt_matrix_identity(), &right, &bottom);
+    *max_x = (int)ceilf(right); // INT_CAST_OK: the legacy export API uses integral surface extents.
+    *max_y = (int)ceilf(bottom); // INT_CAST_OK: the legacy export API uses integral surface extents.
 }
 
 // Render caret to SVG
@@ -1570,10 +1517,10 @@ static int render_export_session_to_svg(RenderExportSession* session, const char
 // Main function to layout HTML and render to SVG.
 // scale: User-specified scale factor (default 1.0, use 2.0 for high-DPI output)
 int render_html_to_svg(const char* html_file, const char* svg_file, int viewport_width,
-        int viewport_height, float scale) {
+        int viewport_height, float scale, float device_scale) {
     RenderExportSession session;
     if (!render_export_session_begin(
-            &session, html_file, viewport_width, viewport_height, 1200, 800, scale)) {
+            &session, html_file, viewport_width, viewport_height, 1200, 800, scale, false, false, device_scale)) {
         return 1;
     }
     int result = render_export_session_to_svg(&session, svg_file);
@@ -1584,11 +1531,11 @@ int render_html_to_svg(const char* html_file, const char* svg_file, int viewport
 int render_document_transform_to_svg(const char* document_file,
         const LambdaDocumentTransformConfig* transform,
         const LambdaDocumentTransformOption* options, int option_count,
-        const char* svg_file, int viewport_width, int viewport_height, float scale) {
+        const char* svg_file, int viewport_width, int viewport_height, float scale, float device_scale) {
     RenderExportSession session;
     if (!render_export_session_begin_document_transform(&session, document_file, transform,
             options, option_count, viewport_width, viewport_height, 1200, 800, scale,
-            1.0f, false)) {
+            device_scale, false)) {
         return 1;
     }
     int result = render_export_session_to_svg(&session, svg_file);

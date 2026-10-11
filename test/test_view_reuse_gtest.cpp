@@ -2,6 +2,8 @@
 
 #include "../radiant/view.hpp"
 #include "../radiant/layout.hpp"
+#include "../radiant/grid_placement.hpp"
+#include "../radiant/grid_sizing_algorithm.hpp"
 #include "../radiant/render.hpp"
 #include "../radiant/event.hpp"
 #include "../lambda/lambda-data.hpp"
@@ -9,11 +11,13 @@
 #include "../lambda/input/css/style_epoch.hpp"
 #include "../lambda/input/css/css_engine.hpp"
 #include "../lambda/input/css/css_parser.hpp"
+#include "../lambda/input/css/css_formatter.hpp"
 #include "../lambda/input/css/css_style_node.hpp"
 #include "../lambda/io/mark_builder.hpp"
 #include "../lambda/runtime/transpiler.hpp"
 #include "../lambda/runtime/gc/gc_heap.h"
 #include "../lib/mem_grow.hpp"
+#include "../lib/strbuf.h"
 #include "../lib/font/font_internal.h"
 
 DomElement* build_dom_tree_from_element(Element*, DomDocument*, DomElement*);
@@ -41,6 +45,53 @@ protected:
         return value;
     }
 };
+
+TEST(TextIntrinsicWrap, BreakAllRetainsPunctuationAndMaxContentWidth) {
+    LayoutContext context = {};
+    TextIntrinsicWidths normal = measure_text_intrinsic_widths(&context,
+        "ABCDEF", 6);
+    TextIntrinsicWidths broken = measure_text_intrinsic_widths(&context,
+        "ABCDEF", 6, CSS_VALUE_NONE, CSS_VALUE_NONE, CSS_VALUE_NORMAL,
+        CSS_VALUE_NORMAL, CSS_VALUE_BREAK_ALL);
+    EXPECT_FLOAT_EQ(normal.min_content, normal.max_content);
+    EXPECT_FLOAT_EQ(broken.min_content * 6.0f, broken.max_content);
+    EXPECT_FLOAT_EQ(broken.max_content, normal.max_content);
+
+    TextIntrinsicWidths punctuation = measure_text_intrinsic_widths(&context,
+        "A)B", 3, CSS_VALUE_NONE, CSS_VALUE_NONE, CSS_VALUE_NORMAL,
+        CSS_VALUE_NORMAL, CSS_VALUE_BREAK_ALL);
+    EXPECT_FLOAT_EQ(punctuation.min_content, punctuation.max_content);
+    EXPECT_FALSE(layout_text_allows_letter_break('A', ')', CSS_VALUE_AUTO, false, false));
+    EXPECT_FALSE(layout_text_allows_letter_break('A', 0x200D, CSS_VALUE_AUTO, false, false));
+    EXPECT_TRUE(layout_text_allows_letter_break('A', 'B', CSS_VALUE_AUTO, false, false));
+}
+
+TEST(TextIntrinsicWrap, BreakAllKeepsShapedMaxContentAdvance) {
+    FontContextConfig config = {}; config.pixel_ratio = 1;
+    FontContext* fonts = font_context_create(&config);
+    ASSERT_NE(fonts, nullptr);
+    FontStyleDesc descriptor = {"Arial", 20, FONT_WEIGHT_NORMAL, FONT_SLANT_NORMAL, nullptr};
+    FontHandle* handle = font_resolve(fonts, &descriptor);
+    ASSERT_NE(handle, nullptr);
+    FontProp font = FONT_PROP_DEFAULT;
+    font.font_handle = lam::counted(handle); font.font_size = 20;
+    UiContext ui = {}; ui.font_ctx = lam::up(fonts);
+    LayoutContext context = {}; context.ui_context = lam::up(&ui);
+    context.font = {lam::up(&font), 20};
+    const char* cases[] = {"السلام", "لا", "office", "ÁB", "AVAV"};
+    for (const char* text : cases) {
+        SCOPED_TRACE(text);
+        TextIntrinsicWidths normal = measure_text_intrinsic_widths(&context, text, strlen(text));
+        const CssEnum wrapping[] = {CSS_VALUE_NORMAL, CSS_VALUE_ANYWHERE, CSS_VALUE_BREAK_WORD};
+        for (CssEnum wrap : wrapping) {
+            TextIntrinsicWidths broken = measure_text_intrinsic_widths(&context, text, strlen(text),
+                CSS_VALUE_NONE, CSS_VALUE_NONE, CSS_VALUE_NORMAL, wrap, CSS_VALUE_BREAK_ALL);
+            EXPECT_NEAR(broken.max_content, normal.max_content, 0.01f);
+        }
+    }
+    font_handle_release(handle);
+    font_context_destroy(fonts);
+}
 
 TEST_F(ViewReuseTest, ExplicitHashAndEqualityCoverEveryInlineField) {
     InlineProp left = INLINE_PROP_DEFAULT;
@@ -254,18 +305,471 @@ TEST_F(ViewReuseTest, IntrinsicGridUsesResolvedTracksInsteadOfAuthoredLineNames)
     arena_destroy(scratch);
 }
 
-TEST_F(ViewReuseTest, GridTrackCloneOwnsMathAfterSourcePoolRetirement) {
+TEST(GridStorage, SparseOccupancyRetainsNegativeExpansionAndOverwrites) {
+    using namespace radiant::grid;
+    // a dense 10000-by-10000 allocation used to exceed the independent cell cap.
+    CellOccupancyMatrix matrix(TrackCounts(0, 10000, 0), TrackCounts(0, 10000, 0));
+    matrix.mark_area_as(AbsoluteAxis::Horizontal, grid_clamp_line_span(-10000, -9999),
+                        grid_clamp_line_span(9999, 10000), CellOccupancyState::DefinitelyPlaced);
+    matrix.mark_area_as(AbsoluteAxis::Horizontal, grid_clamp_line_span(9999, 10000),
+                        grid_clamp_line_span(-4, -3), CellOccupancyState::AutoPlaced);
+    ASSERT_TRUE(matrix.good());
+    EXPECT_EQ(matrix.cols(), 20000u);
+    EXPECT_EQ(matrix.rows(), 10004u);
+    EXPECT_EQ(matrix.get(10003, 0), CellOccupancyState::DefinitelyPlaced);
+    EXPECT_EQ(matrix.get(0, 19999), CellOccupancyState::AutoPlaced);
+    OriginZeroLine found;
+    ASSERT_TRUE(matrix.last_of_type(AbsoluteAxis::Horizontal, OriginZeroLine(9999),
+                                    CellOccupancyState::DefinitelyPlaced, found));
+    EXPECT_EQ(found.value, -10000);
+    ASSERT_TRUE(matrix.last_of_type(AbsoluteAxis::Vertical, OriginZeroLine(9999),
+                                    CellOccupancyState::AutoPlaced, found));
+    EXPECT_EQ(found.value, -4);
+    matrix.set(10003, 0, CellOccupancyState::Unoccupied);
+    EXPECT_TRUE(matrix.line_area_is_unoccupied(AbsoluteAxis::Horizontal,
+        grid_clamp_line_span(-10000, -9999), grid_clamp_line_span(9999, 10000)));
+    EXPECT_FALSE(matrix.track_area_is_unoccupied(AbsoluteAxis::Horizontal, 19999, 20000, 0, 1));
+    EXPECT_EQ(matrix.get(0, 19999), CellOccupancyState::AutoPlaced);
+}
+
+TEST(GridGrammar, PlacementAndTrackListsRejectInvalidDeclarationsBeforeCascade) {
+    Pool* pool = pool_create(); ASSERT_NE(pool, nullptr);
+    const char* valid[] = {"grid-column-start:Foo 2 span", "grid-column-start:SPAN Foo 2",
+        "grid-column-start:calc(1.6)", "grid-column-start:span calc(0)", "grid-column-start:2147483648",
+        "grid-area:Foo / Bar", "grid-column:2 / span 3", "grid-area:var(--area)",
+        "grid-template-columns:[Red] repeat(2,[blue] 10px [tail]) [end]"};
+    for (const char* text : valid) { SCOPED_TRACE(text); EXPECT_NE(css_parse_declaration_text(text, strlen(text), pool), nullptr); }
+    const char* invalid[] = {"grid-column-start:Foo span 2", "grid-column-start:span", "grid-column-start:2.0",
+        "grid-column-start:0", "grid-column-start:span -1", "grid-column-start:Foo Bar", "grid-column-start:auto 2",
+        "grid-column-start:calc(0)", "grid-column:2 /", "grid-column:2 / 3 / 4", "grid-area:Foo / / 3",
+        "grid-template-columns:[a][b] 10px", "grid-template-columns:10px [a][b]",
+        "grid-template-columns:repeat(2,[a][b] 10px)"};
+    for (const char* text : invalid) { SCOPED_TRACE(text); EXPECT_EQ(css_parse_declaration_text(text, strlen(text), pool), nullptr); }
+    pool_destroy(pool);
+}
+
+TEST(GridGrammar, RepeatMathRoundsAtComputationAndChecksLiteralGrammar) {
+    Pool* pool = pool_create(); ASSERT_NE(pool, nullptr);
+    const char* valid[] = {"2", "calc(1 + 1)", "calc(1.5)", "calc(-2)", "calc(0 / 0)",
+        "calc(infinity)", "calc(-infinity)", "min(2,3)", "clamp(1,2.6,4)",
+        "calc(2 * 10px / 5px)", "calc(2em / 1em)", "calc(sign(100em - 1px))"};
+    for (const char* amount : valid) {
+        SCOPED_TRACE(amount);
+        StringBuf* text = stringbuf_new(pool);
+        stringbuf_append_format(text,"repeat(%s, [a] 10px [b] 20px [c])",amount);
+        EXPECT_NE(css_parse_property_declaration("grid-template-columns",21,
+            text->str->chars,text->length,pool),nullptr);
+    }
+    const char* invalid[] = {"2.0", "2e0", "0", "-2", "calc(1px)", "calc(2%)", "calc(1 + 1px)"};
+    for (const char* amount : invalid) {
+        SCOPED_TRACE(amount);
+        StringBuf* text = stringbuf_new(pool);
+        stringbuf_append_format(text,"repeat(%s, 10px)",amount);
+        EXPECT_EQ(css_parse_property_declaration("grid-template-columns",21,
+            text->str->chars,text->length,pool),nullptr);
+    }
+    struct Case { const char* amount; double result; };
+    const Case cases[] = {{"2",2},{"calc(1.5)",2},{"calc(0.5)",1},{"calc(-2)",1},
+        {"calc(0 / 0)",1},{"calc(infinity)",10001},{"calc(-infinity)",1},
+        {"calc(2 * 10px / 5px)",4},{"clamp(1,2.6,4)",3}};
+    CssMathEvaluationContext context = {};
+    for (const Case& item : cases) {
+        SCOPED_TRACE(item.amount);
+        const CssValue* value = css_parse_component_value_text(item.amount,strlen(item.amount),pool);
+        double result = 0;
+        ASSERT_TRUE(css_compute_integer_value(value,&context,1,10001,&result));
+        EXPECT_EQ(result,item.result);
+    }
+    pool_destroy(pool);
+}
+
+TEST(LineClampGrammar, RejectsNonIntegerTokensAndRetainsCalculatedCounts) {
+    Pool* pool = pool_create(); ASSERT_NE(pool, nullptr);
+    const char* properties[] = {"line-clamp", "-webkit-line-clamp"};
+    const char* valid[] = {"none", "1", "2", "inherit", "initial", "unset", "revert-layer",
+        "calc(1.5)", "calc(-1)", "calc(20px / 1em)", "min(1, 2)",
+        "calc(infinity)", "calc(0 / 0)", "var(--count)"};
+    const char* invalid[] = {"0", "-1", "2.0", "2e0", "2.5", "2px", "2%", "auto",
+        "2 3", "none 2", "calc(1px)", "calc(1%)", "calc(1 + 1px)", "initial 2"};
+    for (const char* property : properties) {
+        SCOPED_TRACE(property);
+        for (const char* value : valid) {
+            SCOPED_TRACE(value);
+            EXPECT_NE(css_parse_property_declaration(property, strlen(property), value, strlen(value), pool), nullptr);
+        }
+        for (const char* value : invalid) {
+            SCOPED_TRACE(value);
+            EXPECT_EQ(css_parse_property_declaration(property, strlen(property), value, strlen(value), pool), nullptr);
+        }
+        CssDeclaration* declaration = css_parse_property_declaration(property, strlen(property),
+            "min(1, 2)", 9, pool);
+        ASSERT_NE(declaration, nullptr);
+        CssFormatter* formatter = css_formatter_create(pool, CSS_FORMAT_COMPACT);
+        css_format_value_with_property(formatter, declaration->value, declaration->property_code);
+        EXPECT_STREQ(stringbuf_to_string(formatter->output)->chars, "calc(1)");
+    }
+    pool_destroy(pool);
+}
+
+TEST(LegacyBoxGrammar, OrientationAndDisplayRejectInvalidTokens) {
+    Pool* pool = pool_create(); ASSERT_NE(pool, nullptr);
+    const char* valid[] = {"horizontal", "vertical", "inline-axis", "block-axis",
+        "inherit", "initial", "unset", "revert-layer", "var(--axis)"};
+    const char* invalid[] = {"normal", "row", "column", "inline", "block", "0",
+        "vertical horizontal", "initial vertical"};
+    for (const char* value : valid) {
+        SCOPED_TRACE(value);
+        EXPECT_NE(css_parse_property_declaration("-webkit-box-orient",18,value,strlen(value),pool),nullptr);
+    }
+    for (const char* value : invalid) {
+        SCOPED_TRACE(value);
+        EXPECT_EQ(css_parse_property_declaration("-webkit-box-orient",18,value,strlen(value),pool),nullptr);
+    }
+    const char* displays[] = {"-webkit-box", "-webkit-inline-box"};
+    for (const char* value : displays) {
+        SCOPED_TRACE(value);
+        EXPECT_NE(css_parse_property_declaration("display",7,value,strlen(value),pool),nullptr);
+    }
+    pool_destroy(pool);
+}
+
+TEST(GridGrammar, PlacementMathRetainsExpressionsAcrossProjectionAndOwnerChanges) {
+    Pool* source = pool_create(), *owner = pool_create();
+    const char* text = "calc(20px / 1em) / span calc(1.6)";
+    CssDeclaration* declaration = css_parse_property_declaration("grid-column",11,text,strlen(text),source);
+    ASSERT_NE(declaration,nullptr);
+    CssGridLineReference lines[4] = {};
+    ASSERT_TRUE(css_grid_parse_placement(declaration->value,CSS_PROPERTY_GRID_COLUMN,lines));
+    ASSERT_NE(lines[1].number_expression,nullptr); ASSERT_NE(lines[3].number_expression,nullptr);
+    String* specified = css_grid_serialize_placement(owner,lines,CSS_PROPERTY_GRID_COLUMN);
+    ASSERT_NE(specified,nullptr); EXPECT_STREQ(specified->chars,text);
+    const CssValue* start = css_grid_placement_longhand(owner,declaration->value,
+        CSS_PROPERTY_GRID_COLUMN,CSS_PROPERTY_GRID_COLUMN_START);
+    pool_destroy(source);
+    ASSERT_NE(start,nullptr);
+    double font = 10;
+    auto leaf = [](void* data,const CssValue* value,double* result) {
+        if (value->type != CSS_VALUE_TYPE_LENGTH) return false;
+        if (value->data.length.unit == CSS_UNIT_EM) {
+            *result = *(double*)data * value->data.length.value; return true;
+        }
+        return css_absolute_length_to_px(value->data.length.unit,value->data.length.value,result);
+    };
+    CssMathEvaluationContext math = {leaf,&font,1.0,false};
+    ASSERT_TRUE(css_grid_parse_placement(start,CSS_PROPERTY_GRID_COLUMN_START,lines,&math));
+    EXPECT_EQ(lines[1].number,2); EXPECT_EQ(lines[1].number_expression,nullptr);
+    font = 20;
+    ASSERT_TRUE(css_grid_parse_placement(start,CSS_PROPERTY_GRID_COLUMN_START,lines,&math));
+    EXPECT_EQ(lines[1].number,1);
+    const char* zero = "calc(20px / 1em - 1)";
+    const CssValue* deferred_zero = css_parse_component_value_text(zero,strlen(zero),owner);
+    ASSERT_TRUE(css_grid_parse_placement(deferred_zero,CSS_PROPERTY_GRID_COLUMN_START,lines,&math));
+    EXPECT_EQ(lines[1].number,1);
+    const char* invalid[] = {"initial Foo", "span unset", "inherit 2", "revert-layer Foo"};
+    for (const char* text : invalid) {
+        SCOPED_TRACE(text);
+        EXPECT_EQ(css_parse_property_declaration("grid-column-start",17,text,strlen(text),owner),nullptr);
+    }
+    String* retained = css_serialize_integer_math(owner,start);
+    ASSERT_NE(retained,nullptr); EXPECT_STREQ(retained->chars,"calc(20px / 1em)");
+    pool_destroy(owner);
+}
+
+TEST(GridGrammar, AreaRowsValidateDecodedRectanglesAndCanonicalizeCells) {
+    Pool* pool = pool_create(); ASSERT_NE(pool, nullptr);
+    struct Case { const char* source; const char* canonical; size_t rows, columns; };
+    const Case valid[] = {
+        {"\"a   ...b\" \"a . b\"", "\"a . b\" \"a . b\"", 2, 3},
+        {"\"1st é 😀\"", "\"1st é 😀\"", 1, 3},
+        {"\"a\\000020b\"", "\"a b\"", 1, 2},
+        {"\"a\\00000ab\"", "\"a b\"", 1, 2},
+        {"\"a\\61\"", "\"aa\"", 1, 1},
+        {"\"A a\"", "\"A a\"", 1, 2},
+        {"\".... ..\"", "\". .\"", 1, 2},
+        {"none", "none", 0, 0}
+    };
+    const char* property = "grid-template-areas";
+    for (const Case& item : valid) {
+        SCOPED_TRACE(item.source);
+        CssDeclaration* declaration = css_parse_property_declaration(property, strlen(property),
+            item.source, strlen(item.source), pool);
+        ASSERT_NE(declaration, nullptr);
+        CssGridAreaDimensions dimensions = {};
+        ASSERT_TRUE(css_grid_visit_template_areas(declaration->value, &dimensions));
+        EXPECT_EQ(dimensions.rows, item.rows);
+        EXPECT_EQ(dimensions.columns, item.columns);
+        EXPECT_STREQ(css_serialize_declaration_value(declaration, pool), item.canonical);
+    }
+    const char* invalid[] = {"\"a a\" \"a .\"", "\"a . a\"", "\"a a\" \"b\"",
+        "\"\"", "\"  \"", "\"a@b\"", "\"a,b\"", "\"a\" none", "a", "\"a\", \"b\""};
+    for (const char* text : invalid) {
+        SCOPED_TRACE(text);
+        EXPECT_EQ(css_parse_property_declaration(property, strlen(property), text, strlen(text), pool), nullptr);
+    }
+    CssValue rows[2] = {}, list = {};
+    CssValue* values[] = {&rows[0], &rows[1]};
+    rows[0].type = rows[1].type = CSS_VALUE_TYPE_STRING;
+    rows[0].data.string = "a a"; rows[1].data.string = "a .";
+    list.type = CSS_VALUE_TYPE_LIST; list.data.list = {values, 2, false};
+    CssGridAreaDimensions dimensions{99, 99};
+    size_t visits = 0;
+    EXPECT_FALSE(css_grid_visit_template_areas(&list, &dimensions,
+        [](const CssGridAreaBounds&, void* context) { (*(size_t*)context)++; return true; }, &visits));
+    EXPECT_EQ(visits, 0u);
+    EXPECT_EQ(dimensions.rows, 0u);
+    EXPECT_EQ(dimensions.columns, 0u);
+    pool_destroy(pool);
+}
+
+TEST(GridGrammar, DefinitionFormsShareTracksAndOwnProjectedAreaNames) {
+    Pool* source = pool_create(); Pool* owner = pool_create();
+    ASSERT_NE(source, nullptr); ASSERT_NE(owner, nullptr);
+    struct Case { const char* value; const char* canonical; };
+    const Case common[] = {{"none", "none"}, {"none / none", "none"}, {"none / 20px", "none / 20px"},
+        {"10px / none", "10px / none"}, {"10px / 20px", "10px / 20px"}, {"\"a b\"", "\"a b\""},
+        {"\"a b\" 10px \"c d\" 20px / 30px 40px", "\"a b\" 10px \"c d\" 20px / 30px 40px"},
+        {"[top] \"a a\" 10px [mid] [next] \"b b\" [end] / [l] 20px [m] 30px [r]",
+            "[top] \"a a\" 10px [mid next] \"b b\" [end] / [l] 20px [m] 30px [r]"},
+        {"repeat(2,10px) / minmax(0,1fr)", "repeat(2, 10px) / minmax(0px, 1fr)"},
+        {"1em / repeat(2,[Em] 2em [tail])", "1em / repeat(2, [Em] 2em [tail])"},
+        {"var(--definition)", "var(--definition)"}, {"inherit", "inherit"}};
+    const char* properties[] = {"grid-template", "grid"};
+    for (const char* property : properties) for (const Case& item : common) {
+        SCOPED_TRACE(property);
+        SCOPED_TRACE(item.value);
+        CssDeclaration* declaration = css_parse_property_declaration(property, strlen(property),
+            item.value, strlen(item.value), source);
+        ASSERT_NE(declaration, nullptr);
+        EXPECT_STREQ(css_serialize_declaration_value(declaration, owner), item.canonical);
+    }
+    const char* flows[] = {"auto-flow 10px 20px / 30px", "dense auto-flow minmax(10px,20px) / repeat(2,30px)",
+        "10px 20px / auto-flow dense 30px", "auto-flow / 20px"};
+    for (const char* value : flows) {
+        SCOPED_TRACE(value);
+        EXPECT_NE(css_parse_property_declaration("grid", 4, value, strlen(value), source), nullptr);
+        EXPECT_EQ(css_parse_property_declaration("grid-template", 13, value, strlen(value), source), nullptr);
+    }
+    const char* invalid[] = {"\"a b\" / repeat(2,20px)", "\"a b\" / none", "\"a a\" \"a .\"",
+        "10px", "10px /", "/ 20px", "10px / 20px / 30px", "auto-flow / auto-flow", "dense / 20px",
+        "auto-flow 20px dense / 30px", "\"a\" -1px", "\"a\" calc(1px + 1)", "[auto] \"a\"",
+        "[a][b][c] \"a\""};
+    for (const char* property : properties) for (const char* value : invalid) {
+        SCOPED_TRACE(property);
+        SCOPED_TRACE(value);
+        EXPECT_EQ(css_parse_property_declaration(property, strlen(property), value, strlen(value), source), nullptr);
+    }
+    const char* text = "[top] \"a a\" 10px [mid] [next] \"b b\" [end] / 20px 30px";
+    CssDeclaration* declaration = css_parse_property_declaration("grid", 4, text, strlen(text), source);
+    ASSERT_NE(declaration, nullptr);
+    const CssValue* rows = css_grid_shorthand_longhand(owner, declaration->value, CSS_PROPERTY_GRID,
+        CSS_PROPERTY_GRID_TEMPLATE_ROWS);
+    const CssValue* areas = css_grid_shorthand_longhand(owner, declaration->value, CSS_PROPERTY_GRID,
+        CSS_PROPERTY_GRID_TEMPLATE_AREAS);
+    const CssValue* automatic = css_grid_shorthand_longhand(owner, declaration->value, CSS_PROPERTY_GRID,
+        CSS_PROPERTY_GRID_AUTO_COLUMNS);
+    pool_destroy(source);
+    ASSERT_NE(rows, nullptr); ASSERT_EQ(rows->type, CSS_VALUE_TYPE_LIST);
+    ASSERT_EQ(rows->data.list.count, 12);
+    EXPECT_STREQ(css_math_token_name(rows->data.list.values[1]), "top");
+    EXPECT_STREQ(css_math_token_name(rows->data.list.values[6]), "next");
+    EXPECT_EQ(rows->data.list.values[8]->data.keyword, CSS_VALUE_AUTO);
+    CssGridAreaDimensions dimensions = {};
+    ASSERT_TRUE(css_grid_visit_template_areas(areas, &dimensions));
+    EXPECT_EQ(dimensions.rows, 2u); EXPECT_EQ(dimensions.columns, 2u);
+    ASSERT_NE(automatic, nullptr); EXPECT_EQ(automatic->data.keyword, CSS_VALUE_AUTO);
+    pool_destroy(owner);
+}
+
+TEST(GridStorage, PlacementRetainsEveryItemBeyondPreviousCapacityInBothFlows) {
+    using namespace radiant::grid;
+    const GridAutoFlow flows[] = {GridAutoFlow::Row, GridAutoFlow::Column};
+    for (GridAutoFlow flow : flows) {
+        ItemInfoArray items;
+        for (int i = 0; i < 300; i++) {
+            GridItemInfo item;
+            item.item_index = i;
+            ASSERT_TRUE(items.push_back(item));
+        }
+        CellOccupancyMatrix matrix(TrackCounts(0, 1, 0), TrackCounts(0, 1, 0));
+        place_grid_items(matrix, items, flow, 1, 1);
+        ASSERT_TRUE(matrix.good());
+        EXPECT_EQ(items.size(), 300u);
+        const GridItemInfo& last = items.back();
+        EXPECT_EQ(flow == GridAutoFlow::Row ? last.resolved_row.start.value : last.resolved_column.start.value, 299);
+        EXPECT_EQ(flow == GridAutoFlow::Row ? matrix.rows() : matrix.cols(), 300u);
+    }
+}
+
+TEST(GridStorage, EmptyExplicitGridUsesOnlyTheDefiniteNegativeTrackInBothFlows) {
+    using namespace radiant::grid;
+    const GridAutoFlow flows[] = {GridAutoFlow::Row, GridAutoFlow::Column};
+    for (GridAutoFlow flow : flows) {
+        ItemInfoArray items;
+        GridItemInfo item;
+        if (flow == GridAutoFlow::Row) item.column = GridPlacement::FromStartSpan(-2,1);
+        else item.row = GridPlacement::FromStartSpan(-2,1);
+        ASSERT_TRUE(items.push_back(item));
+        CellOccupancyMatrix matrix;
+        place_grid_items(matrix,items,flow,0,0);
+        EXPECT_EQ(matrix.cols(),1u); EXPECT_EQ(matrix.rows(),1u);
+        AbsoluteAxis axis = primary_axis(flow);
+        EXPECT_EQ(matrix.track_counts(axis).explicit_count,0);
+        EXPECT_EQ(matrix.track_counts(axis).negative_implicit,1);
+        EXPECT_EQ(matrix.track_counts(axis).positive_implicit,0);
+    }
+}
+
+TEST(GridStorage, LockedAxisPackingAndCursorTransposeAcrossBothFlows) {
+    using namespace radiant::grid;
+    const GridAutoFlow flows[] = {GridAutoFlow::Row,GridAutoFlow::RowDense,
+        GridAutoFlow::Column,GridAutoFlow::ColumnDense};
+    for (GridAutoFlow flow : flows) {
+        bool row = primary_axis(flow) == AbsoluteAxis::Horizontal;
+        for (bool locked : {true,false}) {
+            SCOPED_TRACE(locked ? "locked" : "cursor");
+            ItemInfoArray items;
+            auto append = [&](GridPlacement primary, GridPlacement secondary) {
+                GridItemInfo item;
+                item.column = row ? primary : secondary;
+                item.row = row ? secondary : primary;
+                EXPECT_TRUE(items.push_back(item));
+            };
+            append(GridPlacement::FromStartSpan(2,1),GridPlacement::FromStartSpan(1,1));
+            append(GridPlacement::Auto(2),locked ? GridPlacement::FromStartSpan(1,1) : GridPlacement::Auto());
+            append(locked ? GridPlacement::Auto() : GridPlacement::FromStartSpan(3,1),
+                locked ? GridPlacement::FromStartSpan(1,1) : GridPlacement::Auto());
+            if (!locked) append(GridPlacement::Auto(),GridPlacement::Auto());
+            CellOccupancyMatrix matrix(TrackCounts(0,row ? 3 : 2,0),TrackCounts(0,row ? 2 : 3,0));
+            place_grid_items(matrix,items,flow,row ? 2 : 3,row ? 3 : 2);
+            ASSERT_TRUE(matrix.good());
+            auto expect = [&](size_t index,int primary,int secondary) {
+                EXPECT_EQ((row ? items[index].resolved_column : items[index].resolved_row).start.value,primary);
+                EXPECT_EQ((row ? items[index].resolved_row : items[index].resolved_column).start.value,secondary);
+            };
+            expect(0,1,0);
+            if (locked) {
+                expect(1,2,0); expect(2,is_dense(flow) ? 0 : 4,0);
+                EXPECT_EQ(matrix.track_counts(primary_axis(flow)).len(),is_dense(flow) ? 4 : 5);
+            } else {
+                expect(1,0,1); expect(2,2,is_dense(flow) ? 0 : 1);
+                expect(3,0,is_dense(flow) ? 0 : 2);
+            }
+        }
+    }
+}
+
+TEST(GridStorage, ExtentClipsCrossingAreasAndMovesWhollyOutsideAreas) {
+    using namespace radiant::grid;
+    struct Case { int64_t start, end; int16_t expected_start, expected_end; };
+    const Case cases[] = {
+        {9998, INT64_MAX, 9998, 10000}, {INT64_MIN, -9998, -10000, -9998},
+        {INT64_MAX - 1, INT64_MAX, 9999, 10000}, {INT64_MIN, INT64_MIN + 1, -10000, -9999},
+        {INT64_MAX, INT64_MIN, -10000, 10000}, {10000, 10000, 9999, 10000}
+    };
+    for (const Case& item : cases) {
+        LineSpan span = grid_clamp_line_span(item.start, item.end);
+        EXPECT_EQ(span.start.value, item.expected_start);
+        EXPECT_EQ(span.end.value, item.expected_end);
+    }
+    LineSpan negative = GridPlacement::FromNegativeLines(-32000, -31999).to_origin_zero(10000);
+    EXPECT_EQ(negative.start.value, -10000);
+    EXPECT_EQ(negative.end.value, -9999);
+}
+
+TEST(GridStorage, AllocationFailureRetainsExistingEntriesAndPropagatesToSizingOwner) {
+    using namespace radiant::grid;
+    TrackArray tracks;
+    ASSERT_TRUE(tracks.push_back(EnhancedGridTrack()));
+    IndexArray indices(&tracks.complete);
+    ASSERT_TRUE(indices.push_back(0));
+    memtrack_fault_inject(0);
+    bool reserved = indices.reserve(indices.capacity() + 1);
+    memtrack_fault_clear();
+    EXPECT_FALSE(reserved);
+    EXPECT_FALSE(indices.good());
+    EXPECT_FALSE(tracks.good());
+    ASSERT_EQ(indices.size(), 1u);
+    EXPECT_EQ(indices[0], 0u);
+    CellOccupancyMatrix matrix(TrackCounts(0, 10000, 0), TrackCounts(0, 10000, 0));
+    memtrack_fault_inject(0);
+    matrix.mark_area_as(AbsoluteAxis::Horizontal, grid_clamp_line_span(0, 1),
+                        grid_clamp_line_span(0, 1), CellOccupancyState::AutoPlaced);
+    memtrack_fault_clear();
+    EXPECT_FALSE(matrix.good());
+    EXPECT_EQ(matrix.cols(), 10000u);
+    EXPECT_EQ(matrix.rows(), 10000u);
+}
+
+TEST_F(ViewReuseTest, GridAreasRetainLongNamesAndFullDimensions) {
+    GridProp grid = {};
+    auto project = [&](const char* text) {
+        CssDeclaration* declaration = css_parse_property_declaration("grid-template-areas", 19,
+            text, strlen(text), tree.prop_pool);
+        EXPECT_NE(declaration, nullptr);
+        if (declaration) parse_grid_template_areas(tree.prop_pool, &grid, declaration->value);
+    };
+    StrBuf* source = strbuf_new();
+    ASSERT_NE(source, nullptr);
+    strbuf_append_char(source, '"');
+    for (int i = 0; i < 40; i++) {
+        if (i) strbuf_append_char(source, ' ');
+        strbuf_append_str(source, "long_area_name_that_must_not_be_split_into_separate_cells_");
+        strbuf_append_int(source, i);
+    }
+    strbuf_append_char(source, '"');
+    project(source->str);
+    strbuf_free(source);
+    ASSERT_EQ(grid.area_count, 40);
+    EXPECT_EQ(grid.template_area_rows, 1);
+    EXPECT_EQ(grid.template_area_columns, 40);
+    EXPECT_STREQ(grid.grid_areas[39].name, "long_area_name_that_must_not_be_split_into_separate_cells_39");
+    EXPECT_EQ(grid.grid_areas[39].column_start, 40);
+    EXPECT_EQ(grid.grid_areas[39].column_end, 41);
+    project("\"a...b\"");
+    ASSERT_EQ(grid.area_count, 2);
+    EXPECT_EQ(grid.template_area_columns, 3);
+    EXPECT_EQ(grid.grid_areas[1].column_start, 3);
+    project("\"a a\" \"a a\"");
+    ASSERT_EQ(grid.area_count, 1);
+    EXPECT_EQ(grid.template_area_rows, 2);
+    EXPECT_EQ(grid.grid_areas[0].row_end, 3);
+    EXPECT_EQ(grid.grid_areas[0].column_end, 3);
+    project("\".... ..\"");
+    EXPECT_EQ(grid.area_count, 0);
+    EXPECT_EQ(grid.template_area_rows, 1);
+    EXPECT_EQ(grid.template_area_columns, 2);
+    clear_grid_template_areas(tree.prop_pool, &grid);
+    EXPECT_EQ(grid.template_area_columns, 0);
+    EXPECT_EQ(grid.template_area_rows, 0);
+    lam::free_owned(tree.prop_pool, grid.grid_areas);
+}
+
+TEST_F(ViewReuseTest, GridTrackCloneOwnsMathAndNamesAfterSourcePoolRetirement) {
     Pool* source_pool = pool_create();
     ASSERT_NE(source_pool, nullptr);
     const char* text = "calc(10px + 25%)";
     CssDeclaration* declaration = css_parse_property_declaration(
         "grid-template-columns", strlen("grid-template-columns"), text, strlen(text), source_pool);
     ASSERT_NE(declaration, nullptr);
-    GridTrackList* source = create_grid_track_list(source_pool, 1);
+    GridTrackList* source = create_grid_track_list(source_pool, 2);
     ASSERT_NE(source, nullptr);
     source->tracks[0] = create_grid_track_size(source_pool, GRID_TRACK_SIZE_PERCENTAGE, 0.0f);
     ASSERT_NE(source->tracks[0], nullptr);
-    source->track_count = 1;
+    source->track_count = 2;
+    GridTrackSize* repeat = create_grid_track_size(source_pool, GRID_TRACK_SIZE_REPEAT, 0.0f);
+    ASSERT_NE(repeat, nullptr);
+    source->tracks[1] = repeat;
+    repeat->is_auto_fill = true;
+    repeat->repeat_tracks = lam::own_arr((GridTrackSize**)pool_calloc(source_pool, sizeof(GridTrackSize*)));
+    ASSERT_NE(repeat->repeat_tracks, nullptr);
+    repeat->repeat_tracks[0] = create_grid_track_size(source_pool, GRID_TRACK_SIZE_LENGTH, 40.0f);
+    ASSERT_NE(repeat->repeat_tracks[0], nullptr);
+    repeat->repeat_track_count = 1;
+    ASSERT_TRUE(grid_add_track_line_name(source_pool, nullptr, &source->line_names, "foo bar", 0));
+    ASSERT_TRUE(grid_add_track_line_name(source_pool, nullptr, &source->line_names, "foo", 0));
+    ASSERT_TRUE(grid_add_track_line_name(source_pool, nullptr, &source->line_names, "end", 2));
+    ASSERT_TRUE(grid_add_track_line_name(source_pool, nullptr, &repeat->repeat_line_names, "s", 0));
+    ASSERT_TRUE(grid_add_track_line_name(source_pool, nullptr, &repeat->repeat_line_names, "e", 1));
     source->tracks[0]->expression_owner = lam::own(css_value_clone_owned(declaration->value, source_pool));
     source->tracks[0]->expression = lam::up((const CssValue*)source->tracks[0]->expression_owner.get());
     ASSERT_NE(source->tracks[0]->expression, nullptr);
@@ -276,6 +780,16 @@ TEST_F(ViewReuseTest, GridTrackCloneOwnsMathAfterSourcePoolRetirement) {
     pool_destroy(source_pool);
     EXPECT_FLOAT_EQ(radiant::resolve_computed_length_percentage(clone->tracks[0]->expression, 200.0f), 60.0f);
     EXPECT_FLOAT_EQ(radiant::resolve_computed_length_percentage(clone->tracks[0]->expression, 100.0f), 35.0f);
+    ASSERT_EQ(clone->line_names.count, 3);
+    EXPECT_STREQ(clone->line_names.entries[0].name, "foo bar");
+    EXPECT_STREQ(clone->line_names.entries[1].name, "foo");
+    EXPECT_EQ(clone->line_names.entries[2].line_index, 2);
+    ASSERT_NE(clone->tracks[1], nullptr);
+    EXPECT_FLOAT_EQ(clone->tracks[1]->repeat_tracks[0]->value, 40.0f);
+    ASSERT_EQ(clone->tracks[1]->repeat_line_names.count, 2);
+    EXPECT_STREQ(clone->tracks[1]->repeat_line_names.entries[0].name, "s");
+    EXPECT_STREQ(clone->tracks[1]->repeat_line_names.entries[1].name, "e");
+    EXPECT_EQ(clone->tracks[1]->repeat_line_names.entries[1].line_index, 1);
     destroy_grid_track_list(tree.prop_pool, clone);
 }
 
@@ -2117,6 +2631,205 @@ TEST_F(StyleEpochTest, OwnedDeclarationRetainsKeywordSpelling) {
     spelling[0] = 'x';
     EXPECT_STREQ(copy->value->data.keyword_token.spelling, "auto");
     css_declaration_destroy_owned(copy, doc.document_pool);
+}
+
+TEST_F(StyleEpochTest, PendingGridProjectionRetainsGrammarAfterSourcePoolRetirement) {
+    struct Case {const char* declaration; CssPropertyCode shorthand, member; const char* resolved; const char* expected;};
+    const Case cases[] = {
+        {"grid-area:var(--definition)", CSS_PROPERTY_GRID_AREA, CSS_PROPERTY_GRID_ROW_END, "1 / Foo / 3 / Bar", "3"},
+        {"grid-template:var(--definition)", CSS_PROPERTY_GRID_TEMPLATE, CSS_PROPERTY_GRID_TEMPLATE_COLUMNS,
+            "\"a b\" 10px / 20px 30px", "20px 30px"},
+        {"grid:var(--definition)", CSS_PROPERTY_GRID, CSS_PROPERTY_GRID_AUTO_COLUMNS,
+            "10px / auto-flow dense 30px 40px", "30px 40px"}
+    };
+    for (const Case& item : cases) {
+        SCOPED_TRACE(item.declaration);
+        Pool* source_pool = pool_create(); ASSERT_NE(source_pool, nullptr);
+        CssDeclaration* source = css_parse_declaration_text(item.declaration, strlen(item.declaration), source_pool);
+        ASSERT_NE(source, nullptr);
+        source->property_code = item.member;
+        source->pending_shorthand_code = item.shorthand;
+        source->pending_identity_shorthand = true;
+        CssDeclaration* copy = css_declaration_clone_owned(source, {}, CSS_ORIGIN_AUTHOR, doc.document_pool);
+        ASSERT_NE(copy, nullptr);
+        pool_destroy(source_pool);
+        EXPECT_EQ(copy->pending_shorthand_code, item.shorthand);
+        EXPECT_TRUE(copy->pending_identity_shorthand);
+        EXPECT_TRUE(css_value_contains_pending_substitution(copy->value));
+        EXPECT_STREQ(copy->value_text, "var(--definition)");
+        CssValue* resolved = css_parse_component_value_text(item.resolved, strlen(item.resolved), doc.document_pool);
+        ASSERT_NE(resolved, nullptr);
+        const CssValue* projected = css_grid_shorthand_longhand(doc.document_pool, resolved,
+            copy->pending_shorthand_code, copy->property_code);
+        ASSERT_NE(projected, nullptr);
+        CssFormatter* formatter = css_formatter_create(doc.document_pool, CSS_FORMAT_COMPACT);
+        ASSERT_NE(formatter, nullptr);
+        css_format_value_with_property(formatter, const_cast<CssValue*>(projected), item.member);
+        EXPECT_STREQ(stringbuf_to_string(formatter->output)->chars, item.expected);
+        css_declaration_destroy_owned(copy, doc.document_pool);
+    }
+}
+
+TEST_F(StyleEpochTest, GridComputedReadsDoNotRetainProjectionScratch) {
+    // component cascade reads require the same property metadata initialized by a document loader.
+    ASSERT_TRUE(css_property_system_init(doc.document_pool));
+    DomElement* child = append("child");
+    struct Case {CssPropertyCode property; const char* expected;};
+    const Case cases[] = {
+        {CSS_PROPERTY_GRID_TEMPLATE_COLUMNS, "repeat(2, [Em] 20px [tail])"},
+        {CSS_PROPERTY_GRID_TEMPLATE, "10px / repeat(2, [Em] 20px [tail])"},
+        {CSS_PROPERTY_GRID, "10px / repeat(2, [Em] 20px [tail]) / none / row / auto / auto"},
+        {CSS_PROPERTY_GRID_COLUMN_START, "2"},
+        {CSS_PROPERTY_GRID_COLUMN_END, "span 2"},
+        {CSS_PROPERTY_GRID_COLUMN, "2 / span 2"}
+    };
+    auto read = [&]() {
+        Pool* caller = pool_create();
+        for (const Case& item : cases) {
+            String* value = css_prop_serialize_computed_value(caller, child, item.property, 0);
+            EXPECT_NE(value, nullptr);
+            if (value) EXPECT_STREQ(value->chars, item.expected);
+        }
+        pool_destroy(caller);
+    };
+    const char* counts[] = {"2", "calc(20px / 1em)", "calc(2 * (3 - 2))"};
+    for (const char* count : counts) {
+        SCOPED_TRACE(count);
+        char style[256];
+        snprintf(style,sizeof(style),"font-size:10px;grid-template:1em / repeat(%s,[Em] 2em [tail]);grid-column:calc(20px / 1em) / span calc(1.6)",count);
+        ASSERT_TRUE(child->set_attribute("style", style));
+        ASSERT_NE(dom_element_get_specified_value(child,CSS_PROPERTY_GRID_TEMPLATE),nullptr);
+        read();
+        PoolStats warm = {}; pool_get_detailed_stats(doc.document_pool, &warm);
+        for (size_t i = 0; i < 256; i++) read();
+        PoolStats repeated = {}; pool_get_detailed_stats(doc.document_pool, &repeated);
+        EXPECT_EQ(repeated.live_bytes, warm.live_bytes);
+    }
+}
+
+TEST_F(StyleEpochTest, LineClampComputedCountsUseDeclarationOwnersWithoutRetainedScratch) {
+    ASSERT_TRUE(css_property_system_init(doc.document_pool));
+    DomElement* parent = append("parent");
+    DomElement* child = DomElement::create(&doc, "child", nullptr);
+    ASSERT_NE(child, nullptr); ASSERT_TRUE(parent->append_child(child));
+    ASSERT_TRUE(parent->set_attribute("style", "font-size:10px;-webkit-line-clamp:calc(20px / 1em)"));
+    const struct Case { const char* style; const char* expected; } cases[] = {
+        {"font-size:5px;-webkit-line-clamp:inherit", "2"},
+        {"font-size:10px;-webkit-line-clamp:calc(20px / 1em)", "2"},
+        {"font-size:20px;-webkit-line-clamp:calc(20px / 1em)", "1"},
+        {"-webkit-line-clamp:calc(-1)", "1"},
+        {"-webkit-line-clamp:calc(1.5)", "2"},
+        {"-webkit-line-clamp:4;-webkit-line-clamp:2.0", "4"},
+        {"--count:1px;-webkit-line-clamp:4;-webkit-line-clamp:var(--count)", "none"},
+        {"-webkit-line-clamp:initial", "none"},
+        {"-webkit-line-clamp:unset", "none"},
+        {"all:initial", "none"},
+        {"all:inherit", "2"},
+        {"", "none"}
+    };
+    for (const Case& item : cases) {
+        SCOPED_TRACE(item.style);
+        ASSERT_TRUE(child->set_attribute("style", item.style));
+        auto read = [&]() {
+            Pool* caller = pool_create();
+            String* value = css_prop_serialize_computed_value(caller, child, CSS_PROPERTY_WEBKIT_LINE_CLAMP, 0);
+            EXPECT_NE(value, nullptr);
+            if (value) EXPECT_STREQ(value->chars, item.expected);
+            pool_destroy(caller);
+        };
+        read();
+        PoolStats warm = {}; pool_get_detailed_stats(doc.document_pool, &warm);
+        for (size_t i = 0; i < 256; i++) read();
+        PoolStats repeated = {}; pool_get_detailed_stats(doc.document_pool, &repeated);
+        EXPECT_EQ(repeated.live_bytes, warm.live_bytes);
+    }
+}
+
+TEST_F(StyleEpochTest, LegacyBoxComputedReadsUseLiveDeclarationsAndReleaseScratch) {
+    ASSERT_TRUE(css_property_system_init(doc.document_pool));
+    const CssProperty* orientation = css_property_get_by_name("-webkit-box-orient");
+    ASSERT_NE(orientation, nullptr);
+    DomElement* parent = append("parent");
+    DomElement* child = DomElement::create(&doc, "child", nullptr);
+    ASSERT_NE(child, nullptr); ASSERT_TRUE(parent->append_child(child));
+    ASSERT_TRUE(parent->set_attribute("style", "-webkit-box-orient:vertical"));
+    const struct Case { const char* style; const char* axis; const char* display; } cases[] = {
+        {"display:-webkit-box", "horizontal", "-webkit-box"},
+        {"display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2", "vertical", "flow-root"},
+        {"display:-webkit-inline-box;-webkit-box-orient:vertical;-webkit-line-clamp:2", "vertical", "inline-block"},
+        {"display:-webkit-box;-webkit-box-orient:inline-axis;-webkit-line-clamp:2", "horizontal", "-webkit-box"},
+        {"display:-webkit-box;-webkit-box-orient:block-axis;-webkit-line-clamp:2", "vertical", "flow-root"},
+        {"display:-webkit-box;-webkit-box-orient:inherit;-webkit-line-clamp:2", "vertical", "flow-root"},
+        {"display:-webkit-box;-webkit-box-orient:unset;-webkit-line-clamp:2", "horizontal", "-webkit-box"},
+        {"display:-webkit-box;--axis:block-axis;-webkit-box-orient:var(--axis);-webkit-line-clamp:2", "vertical", "flow-root"},
+        {"display:-webkit-box;--axis:invalid;-webkit-box-orient:var(--axis);-webkit-line-clamp:2", "horizontal", "-webkit-box"},
+        {"display:flow-root;-webkit-box-orient:vertical;-webkit-line-clamp:2", "vertical", "flow-root"}
+    };
+    for (const Case& item : cases) {
+        SCOPED_TRACE(item.style); ASSERT_TRUE(child->set_attribute("style", item.style));
+        auto read = [&]() {
+            Pool* caller = pool_create();
+            String* axis = css_prop_serialize_computed_value(caller, child, orientation->code, 0);
+            String* display = css_prop_serialize_computed_value(caller, child, CSS_PROPERTY_DISPLAY, 0);
+            EXPECT_NE(axis, nullptr); EXPECT_NE(display, nullptr);
+            if (axis) EXPECT_STREQ(axis->chars, item.axis);
+            if (display) EXPECT_STREQ(display->chars, item.display);
+            pool_destroy(caller);
+        };
+        read(); PoolStats warm = {}; pool_get_detailed_stats(doc.document_pool, &warm);
+        for (size_t i = 0; i < 256; i++) read();
+        PoolStats repeated = {}; pool_get_detailed_stats(doc.document_pool, &repeated);
+        EXPECT_EQ(repeated.live_bytes, warm.live_bytes);
+    }
+}
+
+TEST_F(StyleEpochTest, TextTransformComputedReadsFollowInheritanceAndReleaseScratch) {
+    ASSERT_TRUE(css_property_system_init(doc.document_pool));
+    DomElement* parent = append("parent");
+    DomElement* child = DomElement::create(&doc, "child", nullptr);
+    ASSERT_NE(child, nullptr); ASSERT_TRUE(parent->append_child(child));
+    ASSERT_TRUE(parent->set_attribute("style", "text-transform:uppercase;word-spacing:10px"));
+    const struct Case { const char* style; const char* expected; CssPropertyCode property = CSS_PROPERTY_TEXT_TRANSFORM; } cases[] = {
+        {"", "uppercase"},
+        {"text-transform:capitalize", "capitalize"},
+        {"text-transform:lowercase", "lowercase"},
+        {"text-transform:none", "none"},
+        {"text-transform:inherit", "uppercase"},
+        {"text-transform:unset", "uppercase"},
+        {"text-transform:initial", "none"},
+        {"--case:capitalize;text-transform:var(--case)", "capitalize"},
+        {"--case:invalid;text-transform:none;text-transform:var(--case)", "uppercase"},
+        {"text-transform:lowercase;text-transform:invalid", "lowercase"},
+        {"text-transform:uppercase full-width", "uppercase full-width"},
+        {"text-transform:full-size-kana", "full-size-kana"},
+        {"text-transform:math-auto", "math-auto"},
+        {"text-transform:lowercase;text-transform:none uppercase", "lowercase"},
+        {"text-transform:lowercase;text-transform:uppercase lowercase", "lowercase"},
+        {"text-transform:lowercase;text-transform:uppercase uppercase", "lowercase"},
+        {"", "10px", CSS_PROPERTY_WORD_SPACING},
+        {"word-spacing:normal", "0px", CSS_PROPERTY_WORD_SPACING},
+        {"word-spacing:initial", "0px", CSS_PROPERTY_WORD_SPACING},
+        {"word-spacing:inherit", "10px", CSS_PROPERTY_WORD_SPACING},
+        {"word-spacing:unset", "10px", CSS_PROPERTY_WORD_SPACING},
+        {"word-spacing:-5px", "-5px", CSS_PROPERTY_WORD_SPACING},
+        {"--gap:initial;word-spacing:var(--gap)", "10px", CSS_PROPERTY_WORD_SPACING},
+        {"word-spacing:var(--missing,initial)", "0px", CSS_PROPERTY_WORD_SPACING},
+        {"--gap:normal;word-spacing:var(--gap)", "0px", CSS_PROPERTY_WORD_SPACING}
+    };
+    for (const Case& item : cases) {
+        SCOPED_TRACE(item.style); ASSERT_TRUE(child->set_attribute("style", item.style));
+        auto read = [&]() {
+            Pool* caller = pool_create();
+            String* value = css_prop_serialize_computed_value(caller, child, item.property, 0);
+            EXPECT_NE(value, nullptr);
+            if (value) EXPECT_STREQ(value->chars, item.expected);
+            pool_destroy(caller);
+        };
+        read(); PoolStats warm = {}; pool_get_detailed_stats(doc.document_pool, &warm);
+        for (size_t index = 0; index < 256; index++) read();
+        PoolStats repeated = {}; pool_get_detailed_stats(doc.document_pool, &repeated);
+        EXPECT_EQ(repeated.live_bytes, warm.live_bytes);
+    }
 }
 
 TEST_F(StyleEpochTest, PresentationLayerPreservesAuthoredStateAndCascade) {

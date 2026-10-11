@@ -120,6 +120,7 @@ struct ViewNodeState {
     size_t occurrence_count;
     float container_width, container_height;
     bool container_measured;
+    lam::Up<const char> grid_used_rows, grid_used_columns; // generation arena owns resolved track text
 };
 
 enum ViewPageSide : uint8_t {
@@ -234,6 +235,8 @@ bool view_tree_model_destroy(ViewTree* tree);
 bool view_tree_model_reset(ViewTree* tree);
 bool view_tree_model_source_valid(const ViewTree* tree);
 ViewNodeState* view_tree_node_state(ViewTree* tree, DomNode* source, bool create);
+bool view_tree_set_grid_track_values(ViewTree* tree, DomNode* source,
+    const char* rows, const char* columns);
 // lookup borrows retained source identity only; ranges and repeated occurrences use the shared chain.
 const ViewNodeState* view_tree_native_state(ViewTree* tree, const TypesetSource* source);
 LayoutViewNode* view_tree_fragment_append(ViewTree* tree, LayoutViewNode* parent,

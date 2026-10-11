@@ -1,0 +1,364 @@
+{
+  "name": "Grid line aliases, repeat boundary unions, occurrences, named spans and live owner-relative tracks",
+  "html": "test/ui/css_grid_named_lines.html",
+  "viewport": {
+    "width": 640,
+    "height": 1800
+  },
+  "events": [
+    {
+      "type": "click",
+      "target": {
+        "selector": "#check"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-aliases",
+      "equals": "40,0,50,20"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-boundary",
+      "equals": "0,0,40,20,40,0,40,20"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-positive",
+      "equals": "40,0,40,20"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-negative",
+      "equals": "40,0,40,20"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-number-first",
+      "equals": "40,0,40,20"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-span-end",
+      "equals": "0,0,80,20"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-span-start",
+      "equals": "0,0,80,20"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-implicit-positive",
+      "equals": "160,0,20,20"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-implicit-negative",
+      "equals": "0,0,20,20"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-unknown-positive",
+      "equals": "140,0,20,20"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-unknown-negative",
+      "equals": "0,0,20,20"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-auto-outer",
+      "equals": "130,0,30,20"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-auto-inner",
+      "equals": "80,0,40,20"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-auto-fit",
+      "equals": "0,0,40,20"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-rows",
+      "equals": "0,30,40,30"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-area-duplicate",
+      "equals": "100,0,20,20"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-longhand",
+      "equals": "40,0,40,20"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-variable",
+      "equals": "150,0,40,20"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-font",
+      "equals": "150,0,40,20"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-escaped",
+      "equals": "0,0,40,20"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-case-sensitive",
+      "equals": "40,0,50,20"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-keyword-alias",
+      "equals": "0,0,40,20"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-multi-pattern",
+      "equals": "50,0,50,20"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-bare-area",
+      "equals": "0,0,30,20"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-area-occurrence",
+      "equals": "40,20,40,20"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-span-implicit",
+      "equals": "40,0,100,20"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-span-opposite",
+      "equals": "0,0,100,20"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-numeric-span-auto",
+      "equals": "0,0,80,20,0,20,80,20"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-numeric-span-end",
+      "equals": "40,0,80,20"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-numeric-end-only",
+      "equals": "40,0,40,20"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-numeric-negative-end",
+      "equals": "80,0,40,20"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-numeric-reversed",
+      "equals": "0,0,80,20"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#change"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#changed"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-variable",
+      "equals": "180,0,50,20"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-font",
+      "equals": "140,0,60,20"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#retarget"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#retargeted"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-variable",
+      "equals": "60,0,50,20"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-positive",
+      "equals": "50,0,50,20"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#restore"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#restored"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-variable",
+      "equals": "150,0,40,20"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-font",
+      "equals": "150,0,40,20"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-positive",
+      "equals": "40,0,40,20"
+    }
+  ]
+}

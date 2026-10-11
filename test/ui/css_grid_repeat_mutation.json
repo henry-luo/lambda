@@ -1,0 +1,544 @@
+{
+  "name": "Calculated repeat owner units, inheritance and custom-property invalidation",
+  "html": "test/ui/css_grid_repeat_mutation.html",
+  "viewport": {
+    "width": 1000,
+    "height": 640
+  },
+  "events": [
+    {
+      "type": "click",
+      "target": {
+        "selector": "#check"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-variable-columns",
+      "equals": "[s] 10px [e s] 10px [e]"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-variable-template",
+      "equals": "10px / [s] repeat(2, [s] 10px [e s]) [e]"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-variable-rect",
+      "equals": "10,10"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-inherited-columns",
+      "equals": "[s] 10px [e s] 10px [e]"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-inherited-template",
+      "equals": "10px / [s] repeat(2, [s] 10px [e s]) [e]"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-inherited-rect",
+      "equals": "10,10"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-fallback-columns",
+      "equals": "[s] 10px [e s] 10px [e]"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-fallback-template",
+      "equals": "10px / [s] repeat(2, [s] 10px [e s]) [e]"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-fallback-rect",
+      "equals": "10,10"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-rounded-columns",
+      "equals": "[s] 10px [e s] 10px [e s] 10px [e]"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-rounded-template",
+      "equals": "10px / [s] repeat(3, [s] 10px [e s]) [e]"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-rounded-rect",
+      "equals": "20,10"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#font"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#changed"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-changed-variable-columns",
+      "equals": "[s] 10px [e]"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-changed-variable-template",
+      "equals": "10px / [s] repeat(1, [s] 10px [e]) [e]"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-changed-variable-rect",
+      "equals": "0,10"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-changed-inherited-columns",
+      "equals": "[s] 10px [e s] 10px [e s] 10px [e s] 10px [e]"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-changed-inherited-template",
+      "equals": "10px / [s] repeat(4, [s] 10px [e s]) [e]"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-changed-inherited-rect",
+      "equals": "30,10"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-changed-fallback-columns",
+      "equals": "[s] 10px [e s] 10px [e]"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-changed-fallback-template",
+      "equals": "10px / [s] repeat(2, [s] 10px [e s]) [e]"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-changed-fallback-rect",
+      "equals": "10,10"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-changed-rounded-columns",
+      "equals": "[s] 10px [e s] 10px [e s] 10px [e]"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-changed-rounded-template",
+      "equals": "10px / [s] repeat(3, [s] 10px [e s]) [e]"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-changed-rounded-rect",
+      "equals": "20,10"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#value"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#valued"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-valued-variable-columns",
+      "equals": "[s] 10px [e s] 10px [e s] 10px [e]"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-valued-variable-template",
+      "equals": "10px / [s] repeat(3, [s] 10px [e s]) [e]"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-valued-variable-rect",
+      "equals": "20,10"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-valued-inherited-columns",
+      "equals": "[s] 10px [e s] 10px [e s] 10px [e s] 10px [e]"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-valued-inherited-template",
+      "equals": "10px / [s] repeat(4, [s] 10px [e s]) [e]"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-valued-inherited-rect",
+      "equals": "30,10"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-valued-fallback-columns",
+      "equals": "[s] 10px [e s] 10px [e]"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-valued-fallback-template",
+      "equals": "10px / [s] repeat(2, [s] 10px [e s]) [e]"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-valued-fallback-rect",
+      "equals": "10,10"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-valued-rounded-columns",
+      "equals": "[s] 10px [e s] 10px [e s] 10px [e]"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-valued-rounded-template",
+      "equals": "10px / [s] repeat(3, [s] 10px [e s]) [e]"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-valued-rounded-rect",
+      "equals": "20,10"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#invalid"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#invalided"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-invalid-variable-columns",
+      "equals": "7px"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-invalid-variable-template",
+      "equals": "10px / 7px"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-invalid-variable-rect",
+      "equals": "0,7"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-invalid-inherited-columns",
+      "equals": "[s] 10px [e s] 10px [e s] 10px [e s] 10px [e]"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-invalid-inherited-template",
+      "equals": "10px / [s] repeat(4, [s] 10px [e s]) [e]"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-invalid-inherited-rect",
+      "equals": "30,10"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-invalid-fallback-columns",
+      "equals": "[s] 10px [e s] 10px [e]"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-invalid-fallback-template",
+      "equals": "10px / [s] repeat(2, [s] 10px [e s]) [e]"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-invalid-fallback-rect",
+      "equals": "10,10"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-invalid-rounded-columns",
+      "equals": "[s] 10px [e s] 10px [e s] 10px [e]"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-invalid-rounded-template",
+      "equals": "10px / [s] repeat(3, [s] 10px [e s]) [e]"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-invalid-rounded-rect",
+      "equals": "20,10"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#restore"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#restored"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-restored-variable-columns",
+      "equals": "[s] 10px [e s] 10px [e]"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-restored-variable-template",
+      "equals": "10px / [s] repeat(2, [s] 10px [e s]) [e]"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-restored-variable-rect",
+      "equals": "10,10"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-restored-inherited-columns",
+      "equals": "[s] 10px [e s] 10px [e]"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-restored-inherited-template",
+      "equals": "10px / [s] repeat(2, [s] 10px [e s]) [e]"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-restored-inherited-rect",
+      "equals": "10,10"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-restored-fallback-columns",
+      "equals": "[s] 10px [e s] 10px [e]"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-restored-fallback-template",
+      "equals": "10px / [s] repeat(2, [s] 10px [e s]) [e]"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-restored-fallback-rect",
+      "equals": "10,10"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-restored-rounded-columns",
+      "equals": "[s] 10px [e s] 10px [e s] 10px [e]"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-restored-rounded-template",
+      "equals": "10px / [s] repeat(3, [s] 10px [e s]) [e]"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-restored-rounded-rect",
+      "equals": "20,10"
+    }
+  ]
+}

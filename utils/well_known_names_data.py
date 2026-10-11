@@ -36,8 +36,13 @@ MARKUP_EXTRA_ENTRIES = [
     ("COLOR", "color"), ("BACKGROUND", "background"), ("OPEN", "open"),
     ("CONTROLS", "controls"),
 ]
+# append new identities after the existing catalog tail (D4.6.1v4).
+MARKUP_TRAILING_ENTRIES = [
+    ("SCENE3D", "scene3d"), ("GEOMAP", "geomap"),
+    ("CSS_WEBKIT_BOX_ORIENT", "-webkit-box-orient"),
+]
 MARKUP_ENTRY_SYMBOLS = {
-    spelling: symbol for symbol, spelling in MARKUP_TAG_ENTRIES + MARKUP_EXTRA_ENTRIES
+    spelling: symbol for symbol, spelling in MARKUP_TAG_ENTRIES + MARKUP_EXTRA_ENTRIES + MARKUP_TRAILING_ENTRIES
 }
 
 # CSS dispatch codes are deliberately defined by css_properties.cpp.  This list
@@ -105,6 +110,7 @@ scroll-padding-top scroll-padding-right scroll-padding-bottom scroll-padding-lef
 translate rotate scale
 fill-opacity stroke-opacity stroke-dasharray stroke-dashoffset stroke-linecap stroke-linejoin stroke-miterlimit fill-rule clip-rule paint-order stop-color stop-opacity flood-color flood-opacity lighting-color
 marker-start marker-mid marker-end marker vector-effect color-interpolation color-interpolation-filters text-anchor
+-webkit-box-orient
 """.split()
 
 CSS_PROPERTY_ENTRIES = [
@@ -114,7 +120,7 @@ CSS_PROPERTY_ENTRIES = [
 ]
 
 POOLS = {
-    0: ("markup", MARKUP_TAG_ENTRIES + MARKUP_EXTRA_ENTRIES + CSS_PROPERTY_ENTRIES + [("SCENE3D", "scene3d"), ("GEOMAP", "geomap")]),
+    0: ("markup", MARKUP_TAG_ENTRIES + MARKUP_EXTRA_ENTRIES + CSS_PROPERTY_ENTRIES + MARKUP_TRAILING_ENTRIES),
     1: ("lambda", [
         ("TYPE", "type"), ("STRING", "string"), ("NUMBER", "number"),
         ("BOOLEAN", "boolean"), ("LENGTH", "length"),

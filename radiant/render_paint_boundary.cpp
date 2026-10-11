@@ -131,6 +131,9 @@ bool render_paint_boundary_emit_simple(PaintList* paint_list, ViewBlock* view,
 
 bool render_paint_boundary_emit_box(PaintList* paint_list, BoundaryProp* bound, Rect rect) {
     if (!paint_list || !bound) return false;
+    // image borders replace the solid ring; the image producer resolves load fallback.
+    if (bound->border && (bound->border->border_image_url ||
+            bound->border->border_image_type != GRADIENT_NONE)) return false;
     float x = rect.x, y = rect.y, width = rect.width, height = rect.height;
     if (width < 0.0f || height < 0.0f) return false;
 

@@ -5116,7 +5116,25 @@ extern "C" void* dom_engine_subtree_element_from_point(DomElement* root, float x
     return radiant_subtree_element_from_point(root, x, y);
 }
 extern "C" bool dom_engine_hit_test_skips_subtree(DomElement* element) {
-    return view_backface_is_hidden(element, BACKFACE_HIT_TEST);
+    return view_backface_is_hidden(element, BACKFACE_HIT_TEST) ||
+        view_content_visibility_hides(element, CONTENT_VISIBILITY_PAINT);
+}
+extern "C" bool dom_engine_content_hidden_for_user_agent(DomElement* element) {
+    return view_content_visibility_hides(element, CONTENT_VISIBILITY_USER_AGENT);
+}
+extern "C" bool dom_engine_content_is_skipped(DomElement* element, bool include_self) {
+    return view_content_visibility_hides(element, CONTENT_VISIBILITY_PAINT, include_self);
+}
+extern "C" char* dom_engine_element_inner_text(DomElement* element) {
+    if (!element) return nullptr;
+    if (view_content_visibility_hides(element, CONTENT_VISIBILITY_PAINT, true))
+        return mem_dup_n("", 0, MEM_CAT_DOM);
+    if (element->view_type == RDT_VIEW_NONE || element->display.outer == CSS_VALUE_NONE)
+        return nullptr;
+    DomRange range = {};
+    range.start = {element, 0};
+    range.end = {element, dom_node_boundary_length(element)};
+    return dom_range_to_string_ex(&range, DOM_STRINGIFY_INNER_TEXT);
 }
 
 PROVIDE(bool, history_initialize, (DomDocument* d), (d))

@@ -1,0 +1,1081 @@
+{
+  "name": "Grid repeat names, unit computation and precedence",
+  "html": "test/ui/css_grid_repeat_structure.html",
+  "viewport": {
+    "width": 640,
+    "height": 640
+  },
+  "events": [
+    {
+      "type": "click",
+      "target": {
+        "selector": "#check"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-0-specified",
+      "equals": "repeat(2, 10px)"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-0-used",
+      "equals": "10px 10px"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-0-template",
+      "equals": "10px / repeat(2, 10px)"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-0-nongrid",
+      "equals": "repeat(2, 10px)"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-0-rect",
+      "equals": "10,10"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-1-specified",
+      "equals": "repeat(2, [a] 10px)"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-1-used",
+      "equals": "[a] 10px [a] 10px"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-1-template",
+      "equals": "10px / [a] repeat(2, [a] 10px [a])"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-1-nongrid",
+      "equals": "repeat(2, [a] 10px)"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-1-rect",
+      "equals": "10,10"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-2-specified",
+      "equals": "repeat(2, 10px [b])"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-2-used",
+      "equals": "10px [b] 10px [b]"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-2-template",
+      "equals": "10px / repeat(2, 10px [b]) [b]"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-2-nongrid",
+      "equals": "repeat(2, 10px [b])"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-2-rect",
+      "equals": "10,10"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-3-specified",
+      "equals": "repeat(2, [a] 10px [b])"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-3-used",
+      "equals": "[a] 10px [b a] 10px [b]"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-3-template",
+      "equals": "10px / [a] repeat(2, [a] 10px [b a]) [b]"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-3-nongrid",
+      "equals": "repeat(2, [a] 10px [b])"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-3-rect",
+      "equals": "10,10"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-4-specified",
+      "equals": "repeat(1, [a] 10px [b] 20px [c])"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-4-used",
+      "equals": "[a] 10px [b] 20px [c]"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-4-template",
+      "equals": "10px / [a] repeat(1, [a] 10px [b] 20px [c]) [c]"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-4-nongrid",
+      "equals": "repeat(1, [a] 10px [b] 20px [c])"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-4-rect",
+      "equals": "10,20"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-5-specified",
+      "equals": "[before] repeat(2, [a] 10px [b] 20px [c]) [after]"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-5-used",
+      "equals": "[before a] 10px [b] 20px [c a] 10px [b] 20px [c after]"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-5-template",
+      "equals": "10px / [before a] repeat(2, [before a] 10px [b] 20px [c a]) [c after]"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-5-nongrid",
+      "equals": "[before] repeat(2, [a] 10px [b] 20px [c]) [after]"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-5-rect",
+      "equals": "40,20"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-6-specified",
+      "equals": "5px repeat(2, [a] 10px [b]) 6px"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-6-used",
+      "equals": "5px [a] 10px [b a] 10px [b] 6px"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-6-template",
+      "equals": "10px / 5px [a] repeat(2, [a] 10px [b a]) [b] 6px"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-6-nongrid",
+      "equals": "5px repeat(2, [a] 10px [b]) 6px"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-6-rect",
+      "equals": "25,6"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-7-specified",
+      "equals": "repeat(2, [a] 10px [b]) repeat(3, [c] 20px [d])"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-7-used",
+      "equals": "[a] 10px [b a] 10px [b c] 20px [d c] 20px [d c] 20px [d]"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-7-template",
+      "equals": "10px / [a] repeat(2, [a] 10px [b a]) [b c] repeat(3, [b c] 20px [d c]) [d]"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-7-nongrid",
+      "equals": "repeat(2, [a] 10px [b]) repeat(3, [c] 20px [d])"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-7-rect",
+      "equals": "60,20"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-8-specified",
+      "equals": "repeat(calc(2), 10px)"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-8-used",
+      "equals": "10px 10px"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-8-template",
+      "equals": "10px / repeat(2, 10px)"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-8-nongrid",
+      "equals": "repeat(2, 10px)"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-8-rect",
+      "equals": "10,10"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-9-specified",
+      "equals": "repeat(calc(2em / 1em), 10px)"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-9-used",
+      "equals": "10px 10px"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-9-template",
+      "equals": "10px / repeat(2, 10px)"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-9-nongrid",
+      "equals": "repeat(2, 10px)"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-9-rect",
+      "equals": "10,10"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-10-specified",
+      "equals": "repeat(calc(20px / 1em), 10px)"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-10-used",
+      "equals": "10px"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-10-template",
+      "equals": "10px / repeat(1, 10px)"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-10-nongrid",
+      "equals": "repeat(1, 10px)"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-10-rect",
+      "equals": "0,10"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-11-specified",
+      "equals": "repeat(calc(60px / 5px), 10px)"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-11-used",
+      "equals": "10px 10px 10px 10px 10px 10px 10px 10px 10px 10px 10px 10px"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-11-template",
+      "equals": "10px / repeat(12, 10px)"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-11-nongrid",
+      "equals": "repeat(12, 10px)"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-11-rect",
+      "equals": "110,10"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-12-specified",
+      "equals": "repeat(calc(20px / 10px), 10px)"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-12-used",
+      "equals": "10px 10px"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-12-template",
+      "equals": "10px / repeat(2, 10px)"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-12-nongrid",
+      "equals": "repeat(2, 10px)"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-12-rect",
+      "equals": "10,10"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-13-specified",
+      "equals": "repeat(calc(2 + (3px / 2px)), 10px)"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-13-used",
+      "equals": "10px 10px 10px 10px"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-13-template",
+      "equals": "10px / repeat(4, 10px)"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-13-nongrid",
+      "equals": "repeat(4, 10px)"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-13-rect",
+      "equals": "30,10"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-14-specified",
+      "equals": "repeat(calc(2 + ((3 / 2px) * 4px)), 10px)"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-14-used",
+      "equals": "10px 10px 10px 10px 10px 10px 10px 10px"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-14-template",
+      "equals": "10px / repeat(8, 10px)"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-14-nongrid",
+      "equals": "repeat(8, 10px)"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-14-rect",
+      "equals": "70,10"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-15-specified",
+      "equals": "repeat(calc(8), 10px)"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-15-used",
+      "equals": "10px 10px 10px 10px 10px 10px 10px 10px"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-15-template",
+      "equals": "10px / repeat(8, 10px)"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-15-nongrid",
+      "equals": "repeat(8, 10px)"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-15-rect",
+      "equals": "70,10"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-16-specified",
+      "equals": "repeat(calc(6em / 1em), 10px)"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-16-used",
+      "equals": "10px 10px 10px 10px 10px 10px"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-16-template",
+      "equals": "10px / repeat(6, 10px)"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-16-nongrid",
+      "equals": "repeat(6, 10px)"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-16-rect",
+      "equals": "50,10"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-17-specified",
+      "equals": "repeat(calc((2px / 1px) * 3), 10px)"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-17-used",
+      "equals": "10px 10px 10px 10px 10px 10px"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-17-template",
+      "equals": "10px / repeat(6, 10px)"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-17-nongrid",
+      "equals": "repeat(6, 10px)"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-17-rect",
+      "equals": "50,10"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-18-specified",
+      "equals": "repeat(auto-fill, [a] 10px [b])"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-18-used",
+      "equals": "[a] 10px [b a] 10px [b a] 10px [b a] 10px [b a] 10px [b a] 10px [b a] 10px [b a] 10px [b a] 10px [b a] 10px [b a] 10px [b a] 10px [b]"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-18-template",
+      "equals": "10px / repeat(auto-fill, [a] 10px [b])"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-18-nongrid",
+      "equals": "repeat(auto-fill, [a] 10px [b])"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-18-rect",
+      "equals": "110,10"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-19-specified",
+      "equals": "repeat(auto-fit, [a] 10px [b])"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-19-used",
+      "equals": "[a] 0px [b a] 0px [b a] 0px [b a] 0px [b a] 0px [b a] 0px [b a] 0px [b a] 0px [b a] 0px [b a] 0px [b a] 0px [b a] 10px [b]"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-19-template",
+      "equals": "10px / repeat(auto-fit, [a] 10px [b])"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-19-nongrid",
+      "equals": "repeat(auto-fit, [a] 10px [b])"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-19-rect",
+      "equals": "0,10"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-20-specified",
+      "equals": "repeat(auto-fill, 10px [b])"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-20-used",
+      "equals": "10px [b] 10px [b] 10px [b] 10px [b] 10px [b] 10px [b] 10px [b] 10px [b] 10px [b] 10px [b] 10px [b] 10px [b]"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-20-template",
+      "equals": "10px / repeat(auto-fill, 10px [b])"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-20-nongrid",
+      "equals": "repeat(auto-fill, 10px [b])"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-20-rect",
+      "equals": "110,10"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-21-specified",
+      "equals": "repeat(auto-fill, [a] 10px)"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-21-used",
+      "equals": "[a] 10px [a] 10px [a] 10px [a] 10px [a] 10px [a] 10px [a] 10px [a] 10px [a] 10px [a] 10px [a] 10px [a] 10px"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-21-template",
+      "equals": "10px / repeat(auto-fill, [a] 10px)"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-21-nongrid",
+      "equals": "repeat(auto-fill, [a] 10px)"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-21-rect",
+      "equals": "110,10"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-0-nongridTemplate",
+      "equals": "10px / repeat(2, 10px)"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-1-nongridTemplate",
+      "equals": "10px / repeat(2, [a] 10px)"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-2-nongridTemplate",
+      "equals": "10px / repeat(2, 10px [b])"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-3-nongridTemplate",
+      "equals": "10px / repeat(2, [a] 10px [b])"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-4-nongridTemplate",
+      "equals": "10px / repeat(1, [a] 10px [b] 20px [c])"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-5-nongridTemplate",
+      "equals": "10px / [before] repeat(2, [a] 10px [b] 20px [c]) [after]"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-6-nongridTemplate",
+      "equals": "10px / 5px repeat(2, [a] 10px [b]) 6px"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-7-nongridTemplate",
+      "equals": "10px / repeat(2, [a] 10px [b]) repeat(3, [c] 20px [d])"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-8-nongridTemplate",
+      "equals": "10px / repeat(2, 10px)"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-9-nongridTemplate",
+      "equals": "10px / repeat(2, 10px)"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-10-nongridTemplate",
+      "equals": "10px / repeat(1, 10px)"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-11-nongridTemplate",
+      "equals": "10px / repeat(12, 10px)"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-12-nongridTemplate",
+      "equals": "10px / repeat(2, 10px)"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-13-nongridTemplate",
+      "equals": "10px / repeat(4, 10px)"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-14-nongridTemplate",
+      "equals": "10px / repeat(8, 10px)"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-15-nongridTemplate",
+      "equals": "10px / repeat(8, 10px)"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-16-nongridTemplate",
+      "equals": "10px / repeat(6, 10px)"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-17-nongridTemplate",
+      "equals": "10px / repeat(6, 10px)"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-18-nongridTemplate",
+      "equals": "10px / repeat(auto-fill, [a] 10px [b])"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-19-nongridTemplate",
+      "equals": "10px / repeat(auto-fit, [a] 10px [b])"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-20-nongridTemplate",
+      "equals": "10px / repeat(auto-fill, 10px [b])"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-21-nongridTemplate",
+      "equals": "10px / repeat(auto-fill, [a] 10px)"
+    }
+  ],
+  "reference_differences": {
+    "browser": "Chromium 152.0.7977.42",
+    "attributes": [
+      "data-20-nongrid",
+      "data-20-template",
+      "data-20-nongridTemplate"
+    ],
+    "reason": "CSS Grid 2 section 7.2.5 retains the final line-name set; Chromium PopulateAutoRepeater uses the number of name entries rather than the last line index and omits [b] when there is no initial named line. Raw browser failures are retained in the delivery evidence."
+  }
+}

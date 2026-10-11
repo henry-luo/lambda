@@ -13,6 +13,316 @@
 #include <stdlib.h>
 #include <string.h>
 
+struct RenderTextPaintEntry {
+    lam::Up<ViewText> text;
+    lam::Up<TextRect> rect;
+    FontBox font;
+    int start_index;
+    int length;
+    float x;
+    float width;
+    bool projected;
+    bool marker;
+    float marker_x, marker_y;
+};
+
+struct RenderTextPaintData {
+    lam::Own<ArrayList> entries;
+    FontBox font;
+    Color color;
+    float marker_width;
+    bool rtl;
+};
+
+static void render_text_paint_collect(RenderTextPaintData* data, RenderContext* context,
+                                       View* first, FontBox font) {
+    for (View* view = first; view; view = view->next()) {
+        if (view->view_type == RDT_VIEW_TEXT) {
+            ViewText* text = lam::view_require_text(view);
+            FontBox text_font = font;
+            if (text->font) setup_font(context->ui_context, &text_font, text->font);
+            for (TextRect* rect = text->rect; rect; rect = rect->next) {
+                RenderTextPaintEntry* entry = (RenderTextPaintEntry*)mem_calloc(
+                    1, sizeof(RenderTextPaintEntry), MEM_CAT_RENDER);
+                entry->text = lam::up(text);
+                entry->rect = lam::up(rect);
+                entry->font = text_font;
+                entry->start_index = rect->start_index;
+                entry->length = rect->length;
+                entry->x = rect->x;
+                entry->width = rect->width;
+                arraylist_append(data->entries, entry);
+                if (getenv("RADIANT_TRACE_TEXT"))
+                    log_debug("text-overflow plan: line=%d x=%.4f y=%.4f width=%.4f bytes=%d source=%.*s",
+                        rect->line_number, rect->x, rect->y, rect->width,
+                        rect->length, rect->length, text->text_data() + rect->start_index);
+            }
+        } else if (view->view_type == RDT_VIEW_INLINE) {
+            ViewSpan* span = lam::view_require_element(view);
+            FontBox child_font = font;
+            if (span->font) setup_font(context->ui_context, &child_font, span->font);
+            render_text_paint_collect(data, context, span->first_child, child_font);
+        }
+        // nested blocks establish their own paint scope and line numbering.
+    }
+}
+
+static int render_text_paint_visual_order(ArrayListValue left, ArrayListValue right) {
+    const TextRect* a = ((RenderTextPaintEntry*)left)->rect;
+    const TextRect* b = ((RenderTextPaintEntry*)right)->rect;
+    if (a->line_number != b->line_number) return a->line_number < b->line_number ? -1 : 1;
+    return a->x < b->x ? -1 : a->x > b->x ? 1 : 0;
+}
+
+static int render_text_paint_source_order(ArrayListValue left, ArrayListValue right) {
+    uintptr_t a = (uintptr_t)((RenderTextPaintEntry*)left)->rect.get();
+    uintptr_t b = (uintptr_t)((RenderTextPaintEntry*)right)->rect.get();
+    return a < b ? -1 : a > b ? 1 : 0;
+}
+
+static bool render_text_source_has_space(const unsigned char* text, int byte_offset,
+                                         bool preserve_spaces) {
+    return !preserve_spaces && byte_offset > 0 && is_space(text[byte_offset - 1]);
+}
+
+static bool render_text_source_word_start(const unsigned char* text, int byte_offset) {
+    // a paint slice can start inside a word; UTF-8 continuation bytes cannot be CSS whitespace.
+    return byte_offset == 0 || is_space(text[byte_offset - 1]);
+}
+
+static void render_text_paint_fit(RenderTextPaintEntry* entry, float edge,
+                                  RenderContext* context, bool first_cluster_required = false,
+                                  bool retain_suffix = false) {
+    const unsigned char* start = entry->text->text_data() + entry->rect->start_index;
+    const unsigned char* end = start + entry->rect->length;
+    const unsigned char* cursor = start;
+    const unsigned char* retained_start = start;
+    float discarded_width = 0.0f;
+    bool suffix_started = false;
+    bool preserve_spaces = white_space_preserves_space_advance(get_white_space_value(entry->text));
+    bool has_space = render_text_source_has_space(
+        entry->text->text_data(), entry->rect->start_index, preserve_spaces);
+    float width = 0.0f;
+    float scale = ui_context_raster_scale(context->ui_context);
+    FontStyleDesc descriptor = font_style_desc_from_prop(entry->font.style);
+    CssEnum transform = render_text_inherited_transform(entry->text);
+    bool word_start = render_text_source_word_start(
+        entry->text->text_data(), entry->rect->start_index);
+    while (cursor < end) {
+        size_t bytes = 0;
+        if (!layout_get_grapheme_cluster_bytes(cursor, end, &bytes)) {
+            uint32_t codepoint = 0;
+            int decoded = str_utf8_decode((const char*)cursor, (size_t)(end - cursor), &codepoint);
+            bytes = decoded > 0 ? (size_t)decoded : 1;
+        }
+        if (retain_suffix && !suffix_started &&
+            (entry->rect->x + width >= edge - 0.001f ||
+             (first_cluster_required && cursor + bytes == end))) {
+            suffix_started = true;
+        }
+        const unsigned char* cluster = cursor;
+        float advance = 0.0f;
+        while (cluster < cursor + bytes) {
+            uint32_t codepoint = 0;
+            if (!layout_utf8_next_codepoint(&cluster, cursor + bytes, &codepoint)) break;
+            if (codepoint == 0x00AD || text_codepoint_has_zero_advance(codepoint)) continue;
+            if (is_space(codepoint)) {
+                if (preserve_spaces || !has_space) advance += text_space_advance(entry->font.style);
+                has_space = true;
+                word_start = true;
+                continue;
+            }
+            has_space = false;
+            uint32_t transformed[3];
+            int count = apply_text_transform_full(codepoint, transform, word_start, transformed);
+            word_start = is_space(codepoint);
+            for (int index = 0; index < count; index++) {
+                LoadedGlyph* glyph = font_load_glyph(font_box_handle(&entry->font),
+                    &descriptor, transformed[index], false);
+                advance += glyph ? glyph->advance_x / scale : entry->font.style->space_width;
+                advance += text_character_spacing(entry->font.style, transformed[index]);
+            }
+        }
+        if (!retain_suffix && entry->rect->x + width + advance > edge + 0.001f &&
+            !(first_cluster_required && cursor == start)) break;
+        width += advance;
+        cursor += bytes;
+        if (retain_suffix && !suffix_started) {
+            // retain the original byte offset and advance so left clipping does not move surviving glyphs.
+            retained_start = cursor;
+            discarded_width = width;
+        }
+    }
+    entry->start_index = entry->rect->start_index +
+        (int)(retained_start - start); // INT_CAST_OK: retained byte offset is bounded by the source TextRect.
+    entry->length = (int)(cursor - retained_start); // INT_CAST_OK: retained byte count is bounded by the source TextRect.
+    entry->x = entry->rect->x + discarded_width;
+    entry->width = width - discarded_width;
+    entry->projected = true;
+    if (getenv("RADIANT_TRACE_TEXT"))
+        log_debug("text-overflow fit: x=%.4f edge=%.4f width=%.4f prefix=%d", entry->rect->x, edge, width, entry->length);
+}
+
+RenderTextPaintScope::RenderTextPaintScope(RenderContext* context, ViewBlock* block,
+                                           const FontBox* font, const Color* color)
+    : context(lam::up(context)), previous(lam::up(context ? context->text_paint.get() : nullptr)), data(nullptr) {
+    if (!context) return;
+    context->text_paint = nullptr;
+    bool ellipsis = block && block->blk && block->blk->text_overflow == CSS_VALUE_ELLIPSIS &&
+        block->scroller && block->scroll()->overflow_x != CSS_VALUE_VISIBLE;
+    bool clamp = block && block->blk && block->blk->line_clamp > 0;
+    if ((!ellipsis && !clamp) || !font || !font_box_handle(font) || !color) return;
+
+    data = lam::own((RenderTextPaintData*)mem_calloc(1, sizeof(RenderTextPaintData), MEM_CAT_RENDER));
+    data->entries = lam::own(arraylist_new(16));
+    data->font = *font;
+    data->color = *color;
+    data->rtl = block->blk && block->block()->direction == CSS_VALUE_RTL;
+    data->marker_width = layout_text_overflow_ellipsis_width(
+        font_box_handle(font), font->current_font_size);
+    render_text_paint_collect(data, context, block->first_child, *font);
+    arraylist_sort(data->entries, render_text_paint_visual_order);
+    BoxMetrics box = layout_box_metrics(block);
+    float left = box.border.left + box.padding.left;
+    float right = block->width - box.border.right - box.padding.right;
+    if (block->scroller && block->scroll()->pane) {
+        left += block->scroll()->pane->h_scroll_position;
+        right += block->scroll()->pane->h_scroll_position;
+    }
+    if (getenv("RADIANT_TRACE_TEXT"))
+        log_debug("text-overflow block: width=%.4f right=%.4f ellipsis=%d clamp=%d", block->width, right, ellipsis, clamp);
+    for (int begin = 0; begin < data->entries->length;) {
+        int end = begin;
+        RenderTextPaintEntry* first = (RenderTextPaintEntry*)data->entries->data[begin];
+        bool truncated = false;
+        while (end < data->entries->length) {
+            RenderTextPaintEntry* entry = (RenderTextPaintEntry*)data->entries->data[end];
+            if (entry->rect->line_number != first->rect->line_number) break;
+            bool discarded = end + 1 < data->entries->length ||
+                (size_t)(entry->rect->start_index + entry->rect->length) < entry->text->length;
+            bool end_overflow = data->rtl ? entry->rect->x < left - 0.001f
+                : entry->rect->x + entry->rect->width > right + 0.001f;
+            truncated |= (ellipsis && end_overflow) ||
+                (clamp && entry->rect->has_trailing_ellipsis && discarded);
+            // reaching the clamp count alone does not prove that any content was discarded.
+            if (entry->rect->has_trailing_ellipsis) entry->projected = true;
+            end++;
+        }
+        if (truncated) {
+            RenderTextPaintEntry* visual_first = data->rtl
+                ? (RenderTextPaintEntry*)data->entries->data[end - 1] : first;
+            RenderTextPaintEntry* marker = visual_first;
+            float marker_x = 0.0f;
+            bool retained = false;
+            float fit_edge = data->rtl ? left + data->marker_width : right - data->marker_width;
+            for (int index = begin; index < end; index++) {
+                RenderTextPaintEntry* entry = (RenderTextPaintEntry*)data->entries->data[index];
+                render_text_paint_fit(entry, fit_edge, context, false, data->rtl);
+                float candidate = data->rtl ? entry->x - data->marker_width : entry->x + entry->width;
+                if (entry->length > 0 && (!retained ||
+                        (data->rtl ? candidate < marker_x : candidate > marker_x))) {
+                    marker = entry;
+                    marker_x = candidate;
+                    retained = true;
+                }
+            }
+            if (!retained) {
+                // CSS Overflow 3 §6.1 clips the visual first cluster instead of removing it.
+                render_text_paint_fit(visual_first, fit_edge, context, true, data->rtl);
+                marker_x = data->rtl ? visual_first->x - data->marker_width
+                    : visual_first->x + visual_first->width;
+            }
+            marker->marker = data->rtl ? marker_x + data->marker_width > left : marker_x < right;
+            marker->marker_x = marker_x;
+            marker->marker_y = marker->rect->y +
+                font_get_rendering_ascender(font_box_handle(&marker->font)) -
+                font_get_rendering_ascender(font_box_handle(font));
+        }
+        begin = end;
+    }
+    arraylist_sort(data->entries, render_text_paint_source_order);
+    context->text_paint = data.borrow();
+}
+
+RenderTextPaintScope::~RenderTextPaintScope() {
+    if (context) context->text_paint = previous;
+    if (!data) return;
+    for (int index = 0; index < data->entries->length; index++)
+        mem_free(data->entries->data[index]);
+    arraylist_free(data->entries);
+    mem_free(data);
+}
+
+RenderTextPaintIterator::RenderTextPaintIterator(RenderContext* context, ViewText* text)
+    : context(lam::up(context)), cursor(lam::up(text ? text->rect.get() : nullptr)),
+      pending_marker(nullptr), projection{}, saved_font(context->font), saved_color(context->color) {}
+
+RenderTextPaintIterator::~RenderTextPaintIterator() {
+    context->font = saved_font;
+    context->color = saved_color;
+}
+
+TextRect* RenderTextPaintIterator::next() {
+    context->font = saved_font;
+    context->color = saved_color;
+    if (pending_marker) {
+        RenderTextPaintEntry* entry = pending_marker;
+        pending_marker = nullptr;
+        projection = {};
+        projection.x = entry->marker_x;
+        projection.y = entry->marker_y;
+        projection.width = context->text_paint->marker_width;
+        projection.height = entry->rect->height;
+        projection.has_trailing_ellipsis = true;
+        context->font = context->text_paint->font;
+        context->color = context->text_paint->color;
+        if (getenv("RADIANT_TRACE_TEXT"))
+            log_debug("text-overflow marker: x=%.4f y=%.4f color=%08x", projection.x, projection.y, context->color.c);
+        return &projection;
+    }
+    while (cursor) {
+        TextRect* source = cursor;
+        cursor = source->next.borrow();
+        RenderTextPaintData* data = context->text_paint;
+        if (!data) return source;
+        int low = 0, high = data->entries->length;
+        while (low < high) {
+            int middle = low + (high - low) / 2;
+            RenderTextPaintEntry* entry = (RenderTextPaintEntry*)data->entries->data[middle];
+            if ((uintptr_t)entry->rect.get() < (uintptr_t)source) low = middle + 1;
+            else high = middle;
+        }
+        if (low == data->entries->length) return source;
+        RenderTextPaintEntry* entry = (RenderTextPaintEntry*)data->entries->data[low];
+        if (entry->rect != source || !entry->projected) return source;
+        bool combined_marker = entry->marker && entry->length &&
+            !data->rtl &&
+            saved_font.style == data->font.style && saved_color.c == data->color.c;
+        if (entry->marker && !combined_marker) pending_marker = lam::up(entry);
+        if (!entry->length) {
+            if (pending_marker) return next();
+            continue;
+        }
+        // copy only scalar paint geometry; ownership of the layout chain stays with the view.
+        projection = {};
+        projection.x = entry->x;
+        projection.y = source->y;
+        projection.width = entry->width;
+        projection.height = source->height;
+        projection.start_index = entry->start_index;
+        projection.length = entry->length;
+        projection.line_number = source->line_number;
+        if (entry->length == source->length) {
+            projection.has_trailing_hyphen = source->has_trailing_hyphen;
+            projection.trailing_hyphenate_character = source->trailing_hyphenate_character;
+        }
+        projection.has_trailing_ellipsis = combined_marker;
+        if (combined_marker) projection.width += data->marker_width;
+        return &projection;
+    }
+    return nullptr;
+}
+
 static bool render_text_trace_enabled(void) {
     static int enabled = -1;
     if (enabled < 0) {
@@ -55,10 +365,6 @@ static bool render_text_background_clip_linear_text(RasterRenderContext* rdcon,
 static Color render_text_sample_linear_gradient(LinearGradient* gradient, Rect rect,
                                                 float px, float py);
 
-static inline bool render_text_preserve_spaces(CssEnum ws) {
-    return ws == CSS_VALUE_PRE || ws == CSS_VALUE_PRE_WRAP || ws == CSS_VALUE_BREAK_SPACES;
-}
-
 CssEnum render_text_inherited_transform(ViewText* text_view) {
     if (!text_view) return CSS_VALUE_NONE;
     return get_text_transform_from_node(text_view->parent);
@@ -75,7 +381,7 @@ static inline uint32_t render_text_resolve_mathlive_fallback_glyph(uint32_t code
 char* render_text_create_export_segment(const unsigned char* text,
                                         const TextRect* text_rect,
                                         CssEnum text_transform,
-                                        bool include_ellipsis) {
+                                        bool include_ellipsis, CssEnum white_space) {
     if (!text || !text_rect) return nullptr;
 
     const char* trailing_character = text_rect->trailing_hyphenate_character;
@@ -89,57 +395,33 @@ char* render_text_create_export_segment(const unsigned char* text,
     unsigned char* src_end = src + text_rect->length;
     char* dst = content;
 
-    if (text_transform != CSS_VALUE_NONE) {
-        bool is_word_start = true;
-        while (src < src_end) {
-            uint32_t codepoint = *src;
-            int bytes = 1;
-            if (codepoint >= 128) {
-                bytes = str_utf8_decode((const char*)src, (size_t)(src_end - src), &codepoint);
-                if (bytes <= 0) bytes = 1;
-            }
-
-            if (codepoint == 0x00AD) {
-                src += bytes;
-                continue;
-            }
-            if (is_space(codepoint)) {
-                is_word_start = true;
-                *dst++ = *src;
-                src += bytes;
-                continue;
-            }
-
-            uint32_t transformed_codepoints[3];
-            int transformed_count = apply_text_transform_full(
-                codepoint, text_transform, is_word_start, transformed_codepoints);
+    bool preserve_spaces = white_space_preserves_space_advance(white_space);
+    bool has_space = render_text_source_has_space(text, text_rect->start_index, preserve_spaces);
+    bool is_word_start = render_text_source_word_start(text, text_rect->start_index);
+    while (src < src_end) {
+        uint32_t codepoint = *src;
+        int bytes = 1;
+        if (codepoint >= 128) {
+            bytes = str_utf8_decode((const char*)src, (size_t)(src_end - src), &codepoint);
+            if (bytes <= 0) bytes = 1;
+        }
+        if (codepoint == 0x00AD) { src += bytes; continue; }
+        if (is_space(codepoint)) {
+            // the source byte range stays intact; only its painted representation collapses.
+            if (preserve_spaces || !has_space) *dst++ = preserve_spaces ? *src : ' ';
+            has_space = true;
+            is_word_start = true;
+        } else {
+            has_space = false;
+            uint32_t transformed[3];
+            int count = apply_text_transform_full(codepoint, text_transform, is_word_start, transformed);
             is_word_start = false;
-            for (int i = 0; i < transformed_count; i++) {
-                uint32_t transformed = render_text_resolve_mathlive_fallback_glyph(
-                    transformed_codepoints[i]);
-                if (transformed != 0) dst += utf8_encode(transformed, dst);
+            for (int index = 0; index < count; index++) {
+                uint32_t exported = render_text_resolve_mathlive_fallback_glyph(transformed[index]);
+                if (exported != 0) dst += utf8_encode(exported, dst);
             }
-            src += bytes;
         }
-    } else {
-        while (src < src_end) {
-            uint32_t codepoint = *src;
-            int bytes = 1;
-            if (codepoint >= 128) {
-                bytes = str_utf8_decode((const char*)src, (size_t)(src_end - src), &codepoint);
-                if (bytes <= 0) bytes = 1;
-            }
-            if (codepoint != 0x00AD) {
-                uint32_t exported = render_text_resolve_mathlive_fallback_glyph(codepoint);
-                if (exported == codepoint) {
-                    memcpy(dst, src, (size_t)bytes);
-                    dst += bytes;
-                } else {
-                    dst += utf8_encode(exported, dst);
-                }
-            }
-            src += bytes;
-        }
+        src += bytes;
     }
 
     if (text_rect->has_trailing_hyphen && trailing_character) {
@@ -219,7 +501,7 @@ void render_text_view(RasterRenderContext* rdcon, ViewText* text_view) {
 
     // Get the white-space property for this text node
     CssEnum white_space = get_white_space_value(text_view);
-    bool preserve_spaces = render_text_preserve_spaces(white_space);
+    bool preserve_spaces = white_space_preserves_space_advance(white_space);
     CssEnum text_justify = text_justify_computed_value(text_view->parent);
 
     // Get text-transform from parent elements
@@ -253,13 +535,14 @@ void render_text_view(RasterRenderContext* rdcon, ViewText* text_view) {
         text_shadow = parent_elem->fontp()->text_shadow;
     }
 
-    while (text_rect) {
+    {
+    RenderTextPaintIterator paint_iterator(rdcon, text_view);
+    while ((text_rect = paint_iterator.next())) {
         // Apply scale to convert CSS pixel positions to physical surface pixels
         float x = rdcon->block.x + text_rect->x * s, y = rdcon->block.y + text_rect->y * s;
 
         if (render_text_rect_misses_clip(rdcon, x, y,
                 text_rect->width * s, text_rect->height * s)) {
-            text_rect = text_rect->next;
             continue;
         }
 
@@ -273,10 +556,11 @@ void render_text_view(RasterRenderContext* rdcon, ViewText* text_view) {
         // Calculate natural text width and space count for justify rendering
         // Note: space_width is in CSS pixels (scaled down for layout), need to scale up for render
         float scaled_space_width = rdcon->font.style->space_width * s;
+        float computed_space_width = text_space_advance(rdcon->font.style) * s;
         float natural_width = 0.0f;
         int space_count = 0;
         unsigned char* scan = p;
-        bool scan_has_space = false;
+        bool scan_has_space = render_text_source_has_space(str, text_rect->start_index, preserve_spaces);
 
         // Scan all content including trailing spaces for width calculation
         // Trailing whitespace is intentionally included because layout has already
@@ -288,7 +572,7 @@ void render_text_view(RasterRenderContext* rdcon, ViewText* text_view) {
             if (is_space(*scan)) {
                 if (preserve_spaces || !scan_has_space) {
                     scan_has_space = true;
-                    natural_width += scaled_space_width;
+                    natural_width += computed_space_width;
                     space_count++;
                 }
                 scan++;
@@ -307,7 +591,7 @@ void render_text_view(RasterRenderContext* rdcon, ViewText* text_view) {
                 render_profiler_add_sample(rdcon->profiler, RENDER_PROFILE_GLYPH_LOAD,
                     time_elapsed_ms_f(t1, t2));
                 if (glyph) {
-                    natural_width += glyph->advance_x + rdcon->font.style->letter_spacing * s;  // already in physical pixels
+                    natural_width += glyph->advance_x + text_character_spacing(rdcon->font.style, scan_codepoint) * s;  // already in physical pixels
                 } else {
                     natural_width += scaled_space_width;  // fallback width in physical pixels
                 }
@@ -315,7 +599,7 @@ void render_text_view(RasterRenderContext* rdcon, ViewText* text_view) {
         }
 
         // Calculate adjusted space width for justified text (in physical pixels)
-        float space_width = scaled_space_width;
+        float space_width = computed_space_width;
         float justification_per_gap = 0.0f;
         int justification_gaps = count_rendered_justify_opportunities(
             text_view, text_rect, false);
@@ -332,8 +616,9 @@ void render_text_view(RasterRenderContext* rdcon, ViewText* text_view) {
         }
 
         // Render the text with adjusted spacing
-        bool has_space = false;  uint32_t codepoint;
-        bool is_word_start = true;  // Track word boundaries for capitalize
+        bool has_space = render_text_source_has_space(str, text_rect->start_index, preserve_spaces);
+        uint32_t codepoint;
+        bool is_word_start = render_text_source_word_start(str, text_rect->start_index);
         int char_index = text_rect->start_index;  // Track character offset for selection
         uint32_t previous_codepoint = 0;
 
@@ -475,14 +760,14 @@ void render_text_view(RasterRenderContext* rdcon, ViewText* text_view) {
                         render_profiler_add_sample(rdcon->profiler, RENDER_PROFILE_GLYPH_DRAW,
                             time_elapsed_ms_f(t3, t4));
                         // advance to the next position (include letter-spacing)
-                        x += glyph_advance + rdcon->font.style->letter_spacing * s;
+                        x += glyph_advance + text_character_spacing(rdcon->font.style, render_cp) * s;
                     }
                 } // end for tti (full case mapping expansion)
             }
         }
         x = render_text_trailing_marks(rdcon, text_rect, x, y);
         render_text_decorations(rdcon, str, text_rect);
-        text_rect = text_rect->next;
+    }
     }
 
     // Restore color and font (in case they were changed for PDF text)
@@ -617,9 +902,9 @@ static bool render_text_paint_blurred_shadows(RasterRenderContext* rdcon, unsign
     unsigned char* sp = str + text_rect->start_index;
     unsigned char* s_end = sp + text_rect->length;
     float sx_pos = x;
-    bool s_has_space = false;
+    bool s_has_space = render_text_source_has_space(str, text_rect->start_index, preserve_spaces);
     FontStyleDesc sd = font_style_desc_from_prop(rdcon->font.style);
-    bool s_word_start = true;
+    bool s_word_start = render_text_source_word_start(str, text_rect->start_index);
     uint32_t previous_codepoint = 0;
 
     while (sp < s_end) {
@@ -687,7 +972,7 @@ static bool render_text_paint_blurred_shadows(RasterRenderContext* rdcon, unsign
                 ts = ts->next;
             }
             rdcon->color = saved_color;
-            sx_pos += s_glyph->advance_x + rdcon->font.style->letter_spacing * s;
+            sx_pos += s_glyph->advance_x + text_character_spacing(rdcon->font.style, s_tt_cp) * s;
         }
     }
 

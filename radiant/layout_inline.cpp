@@ -2305,6 +2305,14 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         }
     };
     lycon->elmt = lam::up(elmt);
+    auto resolve_inline_style = [&]() {
+        float given_width = lycon->block.given_width;
+        float given_height = lycon->block.given_height;
+        dom_node_resolve_style(elmt, lycon);
+        // non-replaced inline sizes cannot replace the containing block's definite sizes.
+        lycon->block.given_width = given_width;
+        lycon->block.given_height = given_height;
+    };
 
     DomElement* elmt_elem = elmt->is_element() ? lam::dom_as<DOM_NODE_ELEMENT>(elmt) : nullptr;
     if (elmt_elem && layout_noscript_content_suppressed(elmt_elem)) {
@@ -2318,7 +2326,7 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         layout_set_view_geometry(span, 0.0f, 0.0f, 0.0f, 0.0f);
         span->content_height = 0.0f;
         span->display = display;
-        dom_node_resolve_style(elmt, lycon);
+        resolve_inline_style();
         span->display = display;
         elmt_elem->display = display;
         lycon->line.start_view = lam::up(saved_line_start);
@@ -2351,7 +2359,7 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         span->set_has_fragment_union(FRAGMENT_UNION_INLINE_CB, true);
     }
 
-    dom_node_resolve_style(elmt, lycon);
+    resolve_inline_style();
     elmt_elem = lam::dom_as<DOM_NODE_ELEMENT>(elmt);
     if (elmt_elem && span->blk && span->block()->unicode_bidi == CSS_VALUE_PLAINTEXT) {
         // CSS Writing Modes §2.2: an inline plaintext box establishes its own

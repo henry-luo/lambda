@@ -44,6 +44,13 @@ static const int SM_TO_SELECTION_RANGE_OR_CARET[] = {
     SM_STATE_SAME,
 };
 
+static const int SM_TO_SELECTION_SETTLED[] = {
+    SEL_EMPTY,
+    SEL_CARET_COLLAPSED,
+    SEL_RANGE_FORWARD,
+    SEL_RANGE_BACKWARD,
+};
+
 static const int SM_TO_SELECTION_POINTER[] = {
     SEL_POINTER_SELECTING,
     SM_STATE_SAME,
@@ -252,7 +259,8 @@ static const StateTransitionRule RADIANT_STATE_RULES[] = {
       SM_ACT_DISPATCH_SELECTSTART, NULL, 0,
       "sel.ui_start_pointer" },
     { SM_FAMILY_SELECTION, SM_VC_ANY, SM_STATE_ANY, SM_EV_END_POINTER_SELECTION,
-      SM_GUARD_NONE, SM_RULE_TO(SM_TO_SELECTION_RANGE_OR_CARET), 0, NULL, 0,
+      // author handlers can remove the range before mouse-up ends pointer tracking.
+      SM_GUARD_NONE, SM_RULE_TO(SM_TO_SELECTION_SETTLED), 0, NULL, 0,
       "sel.end_pointer" },
     { SM_FAMILY_SELECTION, SM_VC_ANY, SM_STATE_ANY, SM_EV_EXTEND_TO_BOUNDARY,
       SM_GUARD_NONE, SM_RULE_TO(SM_TO_SELECTION_RANGE_OR_CARET), 0, NULL, 0,

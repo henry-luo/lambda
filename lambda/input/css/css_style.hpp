@@ -135,8 +135,35 @@ const char* css_math_token_name(const CssValue* value);
 bool css_value_contains_var_reference(const CssValue* value);
 bool css_value_contains_pending_substitution(const CssValue* value);
 bool css_value_contains_length_unit(const CssValue* value, CssUnit first, CssUnit second);
+bool css_value_contains_dimension(const CssValue* value);
 const char* css_value_identifier_name(const CssValue* value);
 bool css_value_is_global_keyword(const CssValue* value);
+
+struct CssGridLineReference {
+    const char* name;
+    int number;
+    bool has_number;
+    bool span;
+    const CssValue* number_expression;  // borrowed syntax until an owned projection or computation.
+};
+
+struct CssMathEvaluationContext;
+bool css_grid_line_reference(const CssValue* const* parts, size_t count, CssGridLineReference* reference,
+    const CssMathEvaluationContext* math_context = nullptr);
+
+struct CssGridAreaBounds {
+    const char* name;
+    size_t name_length;
+    size_t first_row, last_row, first_column, last_column, cells;
+};
+
+struct CssGridAreaDimensions { size_t rows, columns; };
+typedef bool (*CssGridAreaVisitor)(const CssGridAreaBounds& area, void* context);
+
+// borrowed decoded names are visited only after every row and rectangle validates.
+bool css_grid_visit_template_areas(const CssValue* value, CssGridAreaDimensions* dimensions = nullptr,
+    CssGridAreaVisitor visitor = nullptr, void* context = nullptr);
+String* css_grid_serialize_template_areas(Pool* pool, const CssValue* value);
 
 typedef enum CssMathType {
     CSS_MATH_INVALID, CSS_MATH_NUMBER, CSS_MATH_LENGTH, CSS_MATH_PERCENT,
@@ -160,6 +187,25 @@ struct CssMathResult {
 CssMathResult css_math_evaluate(const CssValue* value,
     const CssMathEvaluationContext* context, int depth = 0);
 CssMathType css_math_value_type(const CssValue* value, int depth = 0);
+
+struct CssImageSetOption {
+    const CssValue* image; // borrowed from the computed declaration owner.
+    const char* type;
+    double resolution;
+};
+enum CssImageKind {
+    CSS_IMAGE_NONE, CSS_IMAGE_URL, CSS_IMAGE_LINEAR_GRADIENT,
+    CSS_IMAGE_RADIAL_GRADIENT, CSS_IMAGE_CONIC_GRADIENT, CSS_IMAGE_SET
+};
+CssImageKind css_value_image_kind(const CssValue* value);
+bool css_value_is_image_set(const CssValue* value);
+bool css_image_set_option(const CssValue* value, CssImageSetOption* option);
+bool css_image_set_valid(const CssValue* value);
+
+bool css_integer_value_valid(const CssValue* value);
+bool css_compute_integer_value(const CssValue* value, const CssMathEvaluationContext* context,
+    double minimum, double maximum, double* result);
+CssValue* css_simplify_math_value(Pool* pool, const CssValue* value);
 
 // line-height numbers retain their multiplier; other numeric forms compute to inherited px.
 bool css_compute_line_height_value(const CssValue* value,
@@ -799,12 +845,36 @@ typedef enum CssPropertyCode {
     CSS_PROPERTY_COLOR_INTERPOLATION_FILTERS,
     CSS_PROPERTY_TEXT_ANCHOR,
 
+    CSS_PROPERTY_WEBKIT_BOX_ORIENT,
+
     // Custom Properties (CSS Variables)
     CSS_PROPERTY_CUSTOM,
 
     CSS_PROPERTY_COUNT,
     CSS_PROPERTY_UNKNOWN = -1
 } CssPropertyCode;
+
+unsigned css_grid_placement_mask(CssPropertyCode property);
+CssPropertyCode css_grid_placement_member(unsigned index);
+bool css_grid_parse_placement(const CssValue* value, CssPropertyCode property, CssGridLineReference lines[4],
+    const CssMathEvaluationContext* math_context = nullptr);
+const CssValue* css_grid_placement_longhand(Pool* pool, const CssValue* value,
+    CssPropertyCode shorthand, CssPropertyCode longhand);
+String* css_grid_serialize_placement(Pool* pool, const CssGridLineReference lines[4], CssPropertyCode property);
+
+enum { CSS_GRID_PROPERTY_MEMBER_COUNT = 10 };
+extern const CssPropertyCode css_grid_property_members[CSS_GRID_PROPERTY_MEMBER_COUNT];
+unsigned css_grid_property_mask(CssPropertyCode property);
+CssPropertyCode css_grid_property_member(unsigned index);
+bool css_grid_definition_valid(const CssValue* value, CssPropertyCode property);
+const CssValue* css_grid_shorthand_longhand(Pool* pool, const CssValue* value,
+    CssPropertyCode shorthand, CssPropertyCode longhand);
+String* css_grid_serialize_shorthand(Pool* pool, const CssValue* const members[CSS_GRID_PROPERTY_MEMBER_COUNT],
+    CssPropertyCode property);
+String* css_grid_serialize_definition_value(Pool* pool, const CssValue* value, CssPropertyCode property);
+bool css_grid_track_list_valid(const CssValue* value, bool line_names,
+    bool repeats, bool fixed_required = false);
+CssValue* css_grid_project_resolved_template_tracks(Pool* pool, const CssValue* value);
 
 const CssValue* css_container_shorthand_longhand(const CssValue* value,
     CssPropertyCode property, Pool* pool);
@@ -1074,6 +1144,7 @@ typedef struct CssDeclaration {
     uint32_t scope_proximity; // zero is unscoped; scoped values store ancestor hops plus one
     bool important;           // !important flag
     bool pending_identity_shorthand; // projected var()/env() longhands serialize as pending
+    CssPropertyCode pending_shorthand_code; // original grammar needed after substituting a projected longhand
     const char* source_file;  // Source file (for debugging)
     int source_line;          // Source line (for debugging)
     const char* property_name; // Original property name (for unknown/vendor properties)
@@ -1468,7 +1539,7 @@ typedef struct CssProperty {
     const char* initial_value;   // Initial value as string
     bool animatable;             // Whether property can be animated
     bool shorthand;              // Whether this is a shorthand property
-    CssPropertyCode* longhand_props; // Array of longhand properties (for shorthands)
+    const CssPropertyCode* longhand_props; // Array of longhand properties (for shorthands)
     int longhand_count;          // Number of longhand properties
 
     // Validation function pointer
@@ -1746,6 +1817,7 @@ enum CssTextDecorationLineFlag : uint8_t {
 };
 uint8_t css_text_decoration_line_flag(CssEnum keyword);
 bool css_property_validate_value(CssPropertyCode id, const CssValue* value);
+uint8_t css_intrinsic_size_axes(CssPropertyCode property, bool vertical);
 bool css_property_is_svg_paint(CssPropertyCode id);
 bool css_property_is_svg_resource(CssPropertyCode id);
 bool css_property_is_svg_presentation(CssPropertyCode id);
