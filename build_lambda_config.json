@@ -3599,7 +3599,10 @@
               ]
             },
             "binary": "test_view_reuse_gtest.exe",
-            "icon": "\u267b\ufe0f"
+            "icon": "\u267b\ufe0f",
+            "runner_args": [
+              "--gtest_filter=SecondaryViewTest.*:PagedCssTest.*:TypesetTest.*:ViewModelOptionsTest.*:FontPathTest.*:FontMetricTest.*:ResourceAdmissionTest.*"
+            ]
           },
           {
             "source": "test/test_css_cascade_memory_gtest.cpp",
@@ -3817,7 +3820,7 @@
           {
             "source": "test/wpt/test_wpt_css_syntax_gtest.cpp",
             "name": "WPT CSS Syntax Tests",
-            "category": "extended",
+            "category": "baseline",
             "dependencies": [
               "lambda-lib"
             ],
@@ -3825,7 +3828,8 @@
             "libraries": [
               "gtest"
             ],
-            "icon": "\ud83c\udfa8"
+            "icon": "\ud83c\udfa8",
+            "minimum_passed": 25
           },
           {
             "source": "test/wpt/test_wpt_selection_gtest.cpp",
@@ -3972,7 +3976,7 @@
           {
             "source": "test/wpt/test_wpt_input_events_gtest.cpp",
             "name": "WPT Input Events Tests",
-            "category": "extended",
+            "category": "baseline",
             "parallel": false,
             "dependencies": [],
             "binary": "test_wpt_input_events_gtest.exe",
@@ -4007,6 +4011,103 @@
             ],
             "requires_lambda_exe": true,
             "icon": "\ud83e\ude9e"
+          },
+          {
+            "source": "test/test_ui_automation_gtest.cpp",
+            "name": "UI Automation Tests",
+            "dependencies": [
+              "lambda-data"
+            ],
+            "binary": "test_ui_automation_gtest.exe",
+            "libraries": [
+              "gtest",
+              "gtest_main"
+            ],
+            "requires_lambda_exe": true,
+            "icon": "\ud83d\uddb1\ufe0f",
+            "runner_args": [
+              "--suite",
+              "baseline,dtna,timeline"
+            ]
+          },
+          {
+            "source": "test/test_ui_automation_gtest.cpp",
+            "name": "Radiant View UI Fixtures",
+            "runner_only": true,
+            "runner_name": "test_radiant_view_ui_gtest",
+            "runner_args": [
+              "--suite",
+              "view"
+            ],
+            "binary": "test_ui_automation_gtest.exe",
+            "libraries": [
+              "gtest",
+              "gtest_main"
+            ],
+            "parallel": false,
+            "icon": "\ud83d\uddb1\ufe0f"
+          },
+          {
+            "source": "test/test_ui_automation_gtest.cpp",
+            "name": "DOM UI Integration Tests",
+            "runner_only": true,
+            "runner_name": "test_dom_ui_gtest",
+            "runner_args": [
+              "--suite",
+              "dom"
+            ],
+            "binary": "test_ui_automation_gtest.exe",
+            "libraries": [
+              "gtest",
+              "gtest_main"
+            ],
+            "parallel": false,
+            "icon": "\ud83d\uddb1\ufe0f"
+          },
+          {
+            "source": "test/test_page_load_gtest.cpp",
+            "name": "Page Load Tests",
+            "dependencies": [
+              "lambda-lib"
+            ],
+            "binary": "test_page_load_gtest.exe",
+            "libraries": [
+              "gtest",
+              "gtest_main"
+            ],
+            "requires_lambda_exe": true,
+            "icon": "\ud83d\udcc4"
+          },
+          {
+            "source": "test/test_radiant_view_gtest.cpp",
+            "name": "Radiant View Tests",
+            "dependencies": [
+              "lambda-lib"
+            ],
+            "binary": "test_radiant_view_gtest.exe",
+            "libraries": [
+              "gtest",
+              "gtest_main"
+            ],
+            "requires_lambda_exe": true,
+            "icon": "\ud83d\uddbc\ufe0f",
+            "runner_args": [
+              "--gtest_filter=*-RadiantViewTest.Doom*"
+            ]
+          },
+          {
+            "source": "test/test_layout_fuzzy_gtest.cpp",
+            "name": "Layout Fuzzy Tests",
+            "dependencies": [
+              "lambda-lib"
+            ],
+            "binary": "test_layout_fuzzy_gtest.exe",
+            "libraries": [
+              "gtest",
+              "gtest_main"
+            ],
+            "requires_lambda_exe": true,
+            "icon": "\ud83d\udd00"
           }
         ],
         "type": "library"
@@ -5937,48 +6038,6 @@
             "icon": "\ud83d\udc11"
           },
           {
-            "source": "test/test_ui_automation_gtest.cpp",
-            "name": "UI Automation Tests",
-            "dependencies": [
-              "lambda-data"
-            ],
-            "binary": "test_ui_automation_gtest.exe",
-            "libraries": [
-              "gtest",
-              "gtest_main"
-            ],
-            "requires_lambda_exe": true,
-            "icon": "\ud83d\uddb1\ufe0f"
-          },
-          {
-            "source": "test/test_page_load_gtest.cpp",
-            "name": "Page Load Tests",
-            "dependencies": [
-              "lambda-lib"
-            ],
-            "binary": "test_page_load_gtest.exe",
-            "libraries": [
-              "gtest",
-              "gtest_main"
-            ],
-            "requires_lambda_exe": true,
-            "icon": "\ud83d\udcc4"
-          },
-          {
-            "source": "test/test_radiant_view_gtest.cpp",
-            "name": "Radiant View Tests",
-            "dependencies": [
-              "lambda-lib"
-            ],
-            "binary": "test_radiant_view_gtest.exe",
-            "libraries": [
-              "gtest",
-              "gtest_main"
-            ],
-            "requires_lambda_exe": true,
-            "icon": "\ud83d\uddbc\ufe0f"
-          },
-          {
             "source": "test/test_radiant_online_view_gtest.cpp",
             "name": "Radiant Online View Tests",
             "dependencies": [],
@@ -5991,18 +6050,53 @@
             "icon": "\ud83c\udf10"
           },
           {
-            "source": "test/test_layout_fuzzy_gtest.cpp",
-            "name": "Layout Fuzzy Tests",
-            "dependencies": [
-              "lambda-lib"
+            "source": "test/test_view_reuse_gtest.cpp",
+            "name": "Extended View Reuse Tests",
+            "runner_only": true,
+            "runner_name": "test_view_reuse_extended_gtest",
+            "runner_args": [
+              "--gtest_filter=*-SecondaryViewTest.*:PagedCssTest.*:TypesetTest.*:ViewModelOptionsTest.*:FontPathTest.*:FontMetricTest.*:ResourceAdmissionTest.*"
             ],
-            "binary": "test_layout_fuzzy_gtest.exe",
+            "binary": "test_view_reuse_gtest.exe",
             "libraries": [
               "gtest",
               "gtest_main"
             ],
-            "requires_lambda_exe": true,
-            "icon": "\ud83d\udd00"
+            "parallel": false,
+            "icon": "\u267b\ufe0f"
+          },
+          {
+            "source": "test/test_ui_automation_gtest.cpp",
+            "name": "Extended UI Automation Tests",
+            "runner_only": true,
+            "runner_name": "test_ui_automation_extended_gtest",
+            "runner_args": [
+              "--suite",
+              "all"
+            ],
+            "binary": "test_ui_automation_gtest.exe",
+            "libraries": [
+              "gtest",
+              "gtest_main"
+            ],
+            "parallel": false,
+            "icon": "\ud83d\uddb1\ufe0f"
+          },
+          {
+            "source": "test/test_radiant_view_gtest.cpp",
+            "name": "Radiant View Doom Tests",
+            "runner_only": true,
+            "runner_name": "test_radiant_view_doom_gtest",
+            "runner_args": [
+              "--gtest_filter=RadiantViewTest.Doom*"
+            ],
+            "binary": "test_radiant_view_gtest.exe",
+            "libraries": [
+              "gtest",
+              "gtest_main"
+            ],
+            "parallel": false,
+            "icon": "\ud83d\uddbc\ufe0f"
           }
         ],
         "type": "extended",
@@ -6085,6 +6179,50 @@
         "uses_build_config": true,
         "requires_lambda_exe": true,
         "parallel": true
+      }
+    ],
+    "script_tests": [
+      {
+        "runner_name": "test_test_run",
+        "name": "Test Runner Contracts",
+        "suite": "library",
+        "category": "baseline",
+        "script": "test/test_test_run.js",
+        "args": [],
+        "parallel": false
+      },
+      {
+        "runner_name": "test_radiant_layout_baseline",
+        "name": "Layout Baseline Tests",
+        "suite": "radiant",
+        "category": "baseline",
+        "script": "test/run_radiant_checks.js",
+        "args": [
+          "layout"
+        ],
+        "parallel": false
+      },
+      {
+        "runner_name": "test_radiant_page_snapshot",
+        "name": "Layout Page Suite Snapshot",
+        "suite": "radiant",
+        "category": "baseline",
+        "script": "test/run_radiant_checks.js",
+        "args": [
+          "snapshot"
+        ],
+        "parallel": false
+      },
+      {
+        "runner_name": "test_radiant_render_baseline",
+        "name": "Render Visual Baseline Tests",
+        "suite": "radiant",
+        "category": "baseline",
+        "script": "test/run_radiant_checks.js",
+        "args": [
+          "render"
+        ],
+        "parallel": false
       }
     ]
   }

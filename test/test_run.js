@@ -20,6 +20,8 @@ let excludeTests = new Set();
 let rawOutput = false;
 let parallelExecution = true;
 let inputResultsFile = '';
+let listTests = false;
+let listBuildTargets = false;
 
 function addExcludedTests(value) {
     if (!value) return;
@@ -46,6 +48,8 @@ for (let i = 0; i < args.length; i++) {
     else if (arg === '--raw')              rawOutput = true;
     else if (arg === '--sequential')       parallelExecution = false;
     else if (arg === '--parallel')         parallelExecution = true;
+    else if (arg === '--list')             listTests = true;
+    else if (arg === '--list-build-targets') listBuildTargets = true;
     else if (arg === '-h' || arg === '--help') {
         console.log(`Usage: node test/test_run.js [OPTIONS]
   --target=SUITE       Run only tests from specified suite (library, input, mir, lambda, validator, radiant, jube, extended)
@@ -55,10 +59,13 @@ for (let i = 0; i < args.length; i++) {
   --raw                Show raw test output without formatting
   --sequential         Run tests sequentially (default: parallel)
   --parallel           Run tests in parallel (default)
+  --list               Print the selected test inventory as JSON without running it
+  --list-build-targets  Print unique native build targets for the selection
   --help               Show this help message
 
 Environment variables:
   LAMBDA_TEST_BIN_DIR       Override the directory containing test executables
+  LAMBDA_TEST_OUTPUT_DIR    Override the directory containing result artifacts
   LAMBDA_TEST_IDLE_TIMEOUT   Override idle timeout in seconds (default: auto-scaled by CPU count/load)
   LAMBDA_TEST_HEAVY_LOAD     Set to 1 to bias idle timeout upward for full-suite parallel runs
   LAMBDA_TEST_MAX_CONCURRENT Cap nested GTest fan-out (default: CPU-scaled, heavy-load caps at 4)
@@ -75,7 +82,9 @@ Environment variables:
 
 const ROOT_DIR   = path.resolve(__dirname, '..');
 const CONFIG_FILE = path.join(ROOT_DIR, 'build_lambda_config.json');
-const TEST_OUTPUT_DIR = path.join(ROOT_DIR, 'test_output');
+const TEST_OUTPUT_DIR = process.env.LAMBDA_TEST_OUTPUT_DIR
+    ? path.resolve(ROOT_DIR, process.env.LAMBDA_TEST_OUTPUT_DIR)
+    : path.join(ROOT_DIR, 'test_output');
 const TEST_BINARY_DIR = process.env.LAMBDA_TEST_BIN_DIR
     ? path.resolve(ROOT_DIR, process.env.LAMBDA_TEST_BIN_DIR)
     : path.join(ROOT_DIR, 'test');
@@ -357,6 +366,8 @@ function discoverTests(config) {
                     icon: t.icon || '🧪',
                     isGtest: baseName.endsWith('_gtest') || libs.includes('gtest') || libs.includes('gtest_main'),
                     runnerArgs: t.runner_args || [],
+                    buildTarget: path.basename(executable, '.exe'),
+                    minimumPassed: t.minimum_passed || 0,
                     // Some GTest binaries launch their own worker processes; respect
                     // config-level serialization so nested async subprocesses are not
                     // starved by the outer suite scheduler.
@@ -366,16 +377,24 @@ function discoverTests(config) {
         }
     }
 
-    for (const scriptTest of SCRIPT_TESTS) {
+    // Script checks share suite/category selection and reporting with native tests.
+    const configuredScripts = (config.test.script_tests || [])
+        .filter(t => !t.disabled)
+        .map(t => ({
+            ...t,
+            baseName: t.runner_name || path.basename(t.script, path.extname(t.script)),
+            displayName: t.name,
+            runner: 'node',
+            exclusive: t.parallel === false,
+        }));
+    for (const scriptTest of [...SCRIPT_TESTS, ...configuredScripts]) {
         const scriptPath = path.join(ROOT_DIR, scriptTest.script);
-        if (fs.existsSync(scriptPath)) {
-            tests.push({
-                ...scriptTest,
-                scriptPath,
-                exePath: scriptPath,
-                isGtest: false,
-            });
-        }
+        tests.push({
+            ...scriptTest,
+            scriptPath,
+            exePath: scriptPath,
+            isGtest: false,
+        });
     }
 
     // Deduplicate by baseName
@@ -526,18 +545,23 @@ function runTest(testInfo) {
         const { baseName, exePath, scriptPath } = testInfo;
         const idleTimeoutMs = getTestIdleTimeoutMs(baseName);
         const testPath = testInfo.runner === 'node' ? scriptPath : exePath;
+        const jsonFile = path.join(TEST_OUTPUT_DIR, `${baseName}_results.json`);
+        const logFile = path.join(TEST_OUTPUT_DIR, `${baseName}.log`);
+        try { fs.unlinkSync(jsonFile); } catch (_) {}
 
         if (!testPath || !fs.existsSync(testPath)) {
+            fs.writeFileSync(logFile, `[${baseName}] ${testArtifactLabel(testInfo)} not found\n`);
+            fs.writeFileSync(jsonFile, JSON.stringify({ summary: { passed: 0, failed: 1, total: 1 },
+                results: [{ name: `${testArtifactLabel(testInfo)} not found`, pass: false }] }));
             resolve({
                 passed: 0, failed: 1, total: 1,
                 status: '❌ ERROR', failedTests: [`[${baseName}] ${testArtifactLabel(testInfo)} not found`],
-                timedOut: false,
+                timedOut: false, logFile,
             });
             return;
         }
 
-        const jsonFile = path.join(TEST_OUTPUT_DIR, `${baseName}_results.json`);
-        try { fs.unlinkSync(jsonFile); } catch (_) {}
+        const log = fs.createWriteStream(logFile);
 
         // Build argv based on test type
         let testArgs = [];
@@ -580,7 +604,7 @@ function runTest(testInfo) {
             if (baseName === 'test_input_roundtrip_gtest') {
                 testArgs.unshift('--gtest_filter=JsonTests.*');
             }
-            if (baseName === 'test_ui_automation_gtest') {
+            if (path.basename(exePath) === 'test_ui_automation_gtest.exe') {
                 const uiJobs = process.env.LAMBDA_UI_TEST_JOBS || '';
                 if (uiJobs) {
                     testArgs.push('--jobs', uiJobs);
@@ -600,6 +624,7 @@ function runTest(testInfo) {
             cwd: ROOT_DIR,
             env,
             stdio: ['ignore', 'pipe', 'pipe'],
+            detached: !IS_WINDOWS,
         });
 
         let outputLines = [];
@@ -614,7 +639,11 @@ function runTest(testInfo) {
                 if (finished) return;
                 timedOut = true;
                 console.error(`   ⏰ ${baseName} idle for ${idleTimeoutMs / 1000}s — killing (stuck?)`)
-                child.kill('SIGKILL');
+                // Script adapters own child runners; reap their process group too.
+                if (IS_WINDOWS) child.kill('SIGKILL');
+                else {
+                    try { process.kill(-child.pid, 'SIGKILL'); } catch (_) { child.kill('SIGKILL'); }
+                }
             }, idleTimeoutMs);
         }
 
@@ -623,6 +652,7 @@ function runTest(testInfo) {
 
         child.stdout.on('data', (data) => {
             resetIdleTimer();
+            log.write(data);
             const lines = data.toString().split('\n');
             outputLines.push(...lines);
             if (rawOutput) process.stdout.write(data);
@@ -630,11 +660,13 @@ function runTest(testInfo) {
 
         child.stderr.on('data', (data) => {
             resetIdleTimer();
+            log.write(data);
             if (rawOutput) process.stderr.write(data);
         });
 
         child.on('error', (err) => {
             finished = true;
+            log.end();
             if (idleTimer) clearTimeout(idleTimer);
             resolve({
                 passed: 0, failed: 1, total: 1,
@@ -643,8 +675,10 @@ function runTest(testInfo) {
             });
         });
 
-        child.on('close', (code) => {
+        child.on('close', (code, signal) => {
+            if (finished) return;
             finished = true;
+            log.end();
             if (idleTimer) clearTimeout(idleTimer);
 
             if (timedOut) {
@@ -671,6 +705,21 @@ function runTest(testInfo) {
                 normalizeGtestCaseTimes(jsonFile);
             }
             const result = parseTestResults(baseName, jsonFile, timedOut, idleTimeoutMs);
+            result.logFile = logFile;
+            // A passing JSON file cannot override a crash or a failing child exit.
+            const errors = [];
+            if (!timedOut && (code !== 0 || signal)) {
+                errors.push(signal ? `terminated by ${signal}` : `exited with code ${code}`);
+            }
+            if (!timedOut && result.total === 0) errors.push('runner returned no tests');
+            if (!timedOut && result.passed < testInfo.minimumPassed) {
+                errors.push(`expected at least ${testInfo.minimumPassed} passing tests, got ${result.passed}`);
+            }
+            if (errors.length) {
+                if (result.failed === 0) { result.failed = 1; result.total++; }
+                result.status = '❌ FAIL';
+                result.failedTests.push(...errors.map(error => `[${baseName}] ${error} (see ${logFile})`));
+            }
             resolve(result);
         });
     });
@@ -689,20 +738,8 @@ function parseTestResults(baseName, jsonFile, timedOut, idleTimeoutMs = IDLE_TIM
     }
 
     let data;
-    // Wait briefly for JSON file to appear (GTest writes after process exit)
-    for (let attempt = 0; attempt < 50; attempt++) {
-        try {
-            if (fs.existsSync(jsonFile)) {
-                data = JSON.parse(fs.readFileSync(jsonFile, 'utf8'));
-                break;
-            }
-        } catch (_) {}
-        // Synchronous small wait — only during result collection, not during test execution
-        if (attempt < 49) {
-            const start = Date.now();
-            while (Date.now() - start < 100) { /* spin */ }
-        }
-    }
+    // Child close follows JSON writes; missing output is an integrity failure.
+    try { data = JSON.parse(fs.readFileSync(jsonFile, 'utf8')); } catch (_) {}
 
     if (!data) {
         return {
@@ -714,6 +751,7 @@ function parseTestResults(baseName, jsonFile, timedOut, idleTimeoutMs = IDLE_TIM
     }
 
     let passed = 0, failed = 0, total = 0;
+    let partial = 0, skipped = 0;
     let failedTests = [];
     let caseTimings = [];
     let capturedCaseDurationMs = 0;
@@ -737,6 +775,8 @@ function parseTestResults(baseName, jsonFile, timedOut, idleTimeoutMs = IDLE_TIM
         passed = data.summary.passed;
         failed = data.summary.failed;
         total = typeof data.summary.total === 'number' ? data.summary.total : passed + failed;
+        partial = data.summary.partial || 0;
+        skipped = data.summary.skipped || 0;
         if (Array.isArray(data.results)) {
             failedTests = data.results
                 .filter(t => t.pass === false)
@@ -752,8 +792,9 @@ function parseTestResults(baseName, jsonFile, timedOut, idleTimeoutMs = IDLE_TIM
         // GTest format: { tests: N, failures: M, disabled: D, testsuites: [...] }
         const disabled = data.disabled || 0;
         total = data.tests - disabled;
+        skipped = data.skipped || 0;
         failed = data.failures || 0;
-        passed = total - failed;
+        passed = total - failed - skipped;
         // Extract failed test names from testsuites
         if (Array.isArray(data.testsuites)) {
             for (const suite of data.testsuites) {
@@ -800,7 +841,9 @@ function parseTestResults(baseName, jsonFile, timedOut, idleTimeoutMs = IDLE_TIM
     }
 
     return {
-        passed, failed, total,
+        passed, failed, total, partial, skipped,
+        details: data.details || '',
+        subResults: data.suites || [],
         status: failed === 0 ? '✅ PASS' : '❌ FAIL',
         failedTests,
         caseTimings: caseTimings.sort((a, b) => b.duration_ms - a.duration_ms),
@@ -931,7 +974,7 @@ function displayResults(config, results) {
     const orderedSuites = ['library', 'input', 'mir', 'lambda', 'lambda-std', 'validator', 'radiant'];
     const allSuites = [...new Set([...orderedSuites, ...suiteMap.keys()])].filter(s => suiteMap.has(s));
 
-    let totalTests = 0, totalPassed = 0, totalFailed = 0;
+    let totalTests = 0, totalPassed = 0, totalFailed = 0, totalPartial = 0, totalSkipped = 0;
     const allFailedTests = [];
     const allCaseTimings = [];
 
@@ -950,11 +993,14 @@ function displayResults(config, results) {
     for (const suiteKey of allSuites) {
         const suite = suiteMap.get(suiteKey);
         let suitePassed = 0, suiteFailed = 0, suiteTotal = 0, suiteDurationMs = 0;
+        let suitePartial = 0, suiteSkipped = 0;
 
         for (const t of suite.tests) {
             suitePassed += t.result.passed;
             suiteFailed += t.result.failed;
             suiteTotal  += t.result.total;
+            suitePartial += t.result.partial || 0;
+            suiteSkipped += t.result.skipped || 0;
             suiteDurationMs += t.result.durationMs || 0;
             allFailedTests.push(...t.result.failedTests);
             for (const caseTiming of (t.result.caseTimings || [])) {
@@ -969,8 +1015,10 @@ function displayResults(config, results) {
         totalTests  += suiteTotal;
         totalPassed += suitePassed;
         totalFailed += suiteFailed;
+        totalPartial += suitePartial;
+        totalSkipped += suiteSkipped;
 
-        suiteResults.push({ suite, suitePassed, suiteFailed, suiteTotal, suiteDurationMs });
+        suiteResults.push({ suite, suitePassed, suiteFailed, suiteTotal, suiteDurationMs, suitePartial, suiteSkipped });
     }
 
     // Save summary JSON
@@ -978,20 +1026,24 @@ function displayResults(config, results) {
         total_tests: totalTests,
         total_passed: totalPassed,
         total_failed: totalFailed,
+        total_partial: totalPartial,
+        total_skipped: totalSkipped,
         failed_test_names: allFailedTests,
         top_slow_tests: allCaseTimings
             .slice()
             .sort((a, b) => b.duration_ms - a.duration_ms)
             .slice(0, 20),
-        level1_test_suites: allSuites.map(key => {
-            const s = suiteMap.get(key);
-            let sp = 0, sf = 0, st = 0, sd = 0;
-            for (const t of s.tests) { sp += t.result.passed; sf += t.result.failed; st += t.result.total; sd += t.result.durationMs || 0; }
-            return { name: s.displayName, total: st, passed: sp, failed: sf, duration_ms: sd, status: sf === 0 ? '✅ PASS' : '❌ FAIL' };
-        }),
+        level1_test_suites: suiteResults.map(s => ({
+            name: s.suite.displayName, total: s.suiteTotal, passed: s.suitePassed, failed: s.suiteFailed,
+            partial: s.suitePartial, skipped: s.suiteSkipped, duration_ms: s.suiteDurationMs,
+            status: s.suiteFailed === 0 ? '✅ PASS' : '❌ FAIL',
+        })),
         level2_c_tests: [...results.entries()].map(([bn, e]) => ({
-            name: e.testInfo.displayName, suite: e.testInfo.suite,
+            test: bn, name: e.testInfo.displayName, suite: e.testInfo.suite,
             total: e.total, passed: e.passed, failed: e.failed,
+            partial: e.partial || 0, skipped: e.skipped || 0,
+            details: e.details || '', suites: e.subResults || [],
+            log_file: e.logFile || '',
             duration_ms: e.durationMs || 0,
             captured_case_duration_ms: e.capturedCaseDurationMs || 0,
             status: e.status,
@@ -1001,6 +1053,10 @@ function displayResults(config, results) {
 
     const summaryFile = path.join(TEST_OUTPUT_DIR, 'test_summary.json');
     fs.writeFileSync(summaryFile, JSON.stringify(summary, null, 4));
+    if (rawOutput) {
+        console.log(`\n📁 Raw output mode - results saved to: ${TEST_OUTPUT_DIR}`);
+        return { totalFailed };
+    }
 
     // Print report
     console.log('');
@@ -1037,6 +1093,10 @@ function displayResults(config, results) {
 
         for (const t of suite.tests) {
             console.log(` └─${t.result.status} (${t.result.passed}/${t.result.total} tests, ${formatDuration(t.result.durationMs || 0)}) ${t.displayName} (${testArtifactLabel(t.result.testInfo)})`);
+            if (t.result.details) console.log(`    ${t.result.details}`);
+            for (const s of (t.result.subResults || [])) {
+                console.log(`    └─${s.status} ${s.name}: ${s.passed} passed, ${s.partial || 0} partial, ${s.failed} failed, ${s.skipped || 0} skipped (${formatDuration(s.duration_ms || 0)})`);
+            }
         }
     }
 
@@ -1068,6 +1128,9 @@ function displayResults(config, results) {
         }
     }
 
+    if (totalPartial) console.log(`   ⚠️  Partially Passing: ${totalPartial}`);
+    if (totalSkipped) console.log(`   ⏭️  Skipped: ${totalSkipped}`);
+
     if (allFailedTests.length > 0) {
         console.log('');
         console.log('🔍 Failed Tests:');
@@ -1094,6 +1157,14 @@ function displayResults(config, results) {
 // ─── Main ───────────────────────────────────────────────────────────────────────
 
 async function main() {
+    const config = loadConfig();
+    let tests = filterTests(discoverTests(config));
+    if (listTests || listBuildTargets) {
+        console.log(listBuildTargets
+            ? [...new Set(tests.map(t => t.buildTarget).filter(Boolean))].join(' ')
+            : JSON.stringify(tests, null, 2));
+        return;
+    }
     console.log('==============================================================');
     console.log('🧪 Lambda Test Suite Runner (Node.js)');
     console.log('==============================================================');
@@ -1105,12 +1176,9 @@ async function main() {
     }
     console.log('==============================================================');
 
-    const config = loadConfig();
     ensureDir(TEST_OUTPUT_DIR);
 
     // Discover and filter tests
-    let tests = discoverTests(config);
-    tests = filterTests(tests);
     tests = scheduleTests(tests);
 
     if (tests.length === 0) {
@@ -1124,19 +1192,9 @@ async function main() {
     // Run tests
     const results = await runScheduledTests(tests);
 
-    // Display and save results
-    if (!rawOutput) {
-        const { totalFailed } = displayResults(config, results);
-        process.exitCode = totalFailed > 0 ? 1 : 0;
-    } else {
-        console.log('');
-        console.log(`📁 Raw output mode - results saved to: ${TEST_OUTPUT_DIR}`);
-        let totalFailed = 0;
-        for (const entry of results.values()) {
-            totalFailed += entry.failed || 0;
-        }
-        process.exitCode = totalFailed > 0 ? 1 : 0;
-    }
+    // Raw output still needs the same persisted summary and final exit verdict.
+    const { totalFailed } = displayResults(config, results);
+    process.exitCode = totalFailed > 0 ? 1 : 0;
 }
 
 main().catch((err) => {
