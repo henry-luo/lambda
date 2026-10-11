@@ -1,0 +1,397 @@
+[
+  {
+    "id": "year-suffix",
+    "style": "<style xmlns=\"http://purl.org/net/xbiblio/csl\" version=\"1.0\" class=\"in-text\" initialize-with=\". \"><info><title>Lambda batch fixture</title><id>urn:lambda:year-suffix</id></info><citation collapse=\"year\" disambiguate-add-year-suffix=\"true\"><layout prefix=\"(\" suffix=\")\" delimiter=\"; \"><group delimiter=\", \"><names variable=\"author\"><name form=\"short\"/></names><date variable=\"issued\"><date-part name=\"year\"/></date></group></layout></citation><bibliography><sort><key variable=\"title\"/></sort><layout suffix=\".\"><text variable=\"title\"/></layout></bibliography></style>",
+    "references": [
+      {
+        "id": "a",
+        "type": "book",
+        "title": "Alpha",
+        "author": [
+          {
+            "family": "Smith",
+            "given": "John"
+          }
+        ],
+        "issued": {
+          "date-parts": [
+            [
+              2020
+            ]
+          ]
+        }
+      },
+      {
+        "id": "b",
+        "type": "book",
+        "title": "Beta",
+        "author": [
+          {
+            "family": "Smith",
+            "given": "John"
+          }
+        ],
+        "issued": {
+          "date-parts": [
+            [
+              2020
+            ]
+          ]
+        }
+      }
+    ],
+    "requests": [
+      {
+        "id": "one",
+        "items": [
+          {
+            "id": "a"
+          },
+          {
+            "id": "b"
+          }
+        ]
+      }
+    ],
+    "nocite": [],
+    "expected": [
+      "(Smith, 2020a, 2020b)"
+    ]
+  },
+  {
+    "id": "explicit-year-suffix",
+    "style": "<style xmlns=\"http://purl.org/net/xbiblio/csl\" version=\"1.0\" class=\"in-text\" initialize-with=\". \"><info><title>Lambda batch fixture</title><id>urn:lambda:explicit-year-suffix</id></info><citation disambiguate-add-year-suffix=\"true\"><layout delimiter=\"; \"><group delimiter=\", \"><names variable=\"author\"><name form=\"short\"/></names><group><date variable=\"issued\"><date-part name=\"year\"/></date><text variable=\"year-suffix\"/></group></group></layout></citation><bibliography><sort><key variable=\"title\"/></sort><layout suffix=\".\"><text variable=\"title\"/></layout></bibliography></style>",
+    "references": [
+      {
+        "id": "a",
+        "type": "book",
+        "title": "Alpha",
+        "author": [
+          {
+            "family": "Smith",
+            "given": "John"
+          }
+        ],
+        "issued": {
+          "date-parts": [
+            [
+              2020
+            ]
+          ]
+        }
+      },
+      {
+        "id": "b",
+        "type": "book",
+        "title": "Beta",
+        "author": [
+          {
+            "family": "Smith",
+            "given": "John"
+          }
+        ],
+        "issued": {
+          "date-parts": [
+            [
+              2020
+            ]
+          ]
+        }
+      }
+    ],
+    "requests": [
+      {
+        "id": "one",
+        "items": [
+          {
+            "id": "a"
+          },
+          {
+            "id": "b"
+          }
+        ]
+      }
+    ],
+    "nocite": [],
+    "expected": [
+      "Smith, 2020a; Smith, 2020b"
+    ]
+  },
+  {
+    "id": "given-initials",
+    "style": "<style xmlns=\"http://purl.org/net/xbiblio/csl\" version=\"1.0\" class=\"in-text\" initialize-with=\". \"><info><title>Lambda batch fixture</title><id>urn:lambda:given-initials</id></info><citation disambiguate-add-givenname=\"true\" givenname-disambiguation-rule=\"primary-name-with-initials\"><layout delimiter=\"; \"><group delimiter=\", \"><names variable=\"author\"><name form=\"short\"/></names><date variable=\"issued\"><date-part name=\"year\"/></date></group></layout></citation><bibliography><sort><key variable=\"title\"/></sort><layout suffix=\".\"><text variable=\"title\"/></layout></bibliography></style>",
+    "references": [
+      {
+        "id": "a",
+        "type": "book",
+        "title": "Alpha",
+        "author": [
+          {
+            "family": "Smith",
+            "given": "John"
+          }
+        ],
+        "issued": {
+          "date-parts": [
+            [
+              2020
+            ]
+          ]
+        }
+      },
+      {
+        "id": "b",
+        "type": "book",
+        "title": "Beta",
+        "author": [
+          {
+            "family": "Smith",
+            "given": "Peter"
+          }
+        ],
+        "issued": {
+          "date-parts": [
+            [
+              2020
+            ]
+          ]
+        }
+      }
+    ],
+    "requests": [
+      {
+        "id": "one",
+        "items": [
+          {
+            "id": "a"
+          },
+          {
+            "id": "b"
+          }
+        ]
+      }
+    ],
+    "nocite": [],
+    "expected": [
+      "J. Smith, 2020; P. Smith, 2020"
+    ]
+  },
+  {
+    "id": "numeric-collapse",
+    "style": "<style xmlns=\"http://purl.org/net/xbiblio/csl\" version=\"1.0\" class=\"in-text\" initialize-with=\". \"><info><title>Lambda batch fixture</title><id>urn:lambda:numeric-collapse</id></info><citation collapse=\"citation-number\"><sort><key variable=\"citation-number\"/></sort><layout prefix=\"[\" suffix=\"]\" delimiter=\", \"><text variable=\"citation-number\"/></layout></citation><bibliography><sort><key variable=\"title\"/></sort><layout suffix=\".\"><text variable=\"title\"/></layout></bibliography></style>",
+    "references": [
+      {
+        "id": "a",
+        "type": "book",
+        "title": "Alpha"
+      },
+      {
+        "id": "b",
+        "type": "book",
+        "title": "Bravo"
+      },
+      {
+        "id": "c",
+        "type": "book",
+        "title": "Charlie"
+      },
+      {
+        "id": "d",
+        "type": "book",
+        "title": "Delta"
+      }
+    ],
+    "requests": [
+      {
+        "id": "one",
+        "items": [
+          {
+            "id": "c"
+          },
+          {
+            "id": "a"
+          },
+          {
+            "id": "d"
+          },
+          {
+            "id": "b"
+          }
+        ]
+      }
+    ],
+    "nocite": [],
+    "expected": [
+      "[1\u20134]"
+    ]
+  },
+  {
+    "id": "note-history",
+    "style": "<style xmlns=\"http://purl.org/net/xbiblio/csl\" version=\"1.0\" class=\"note\" initialize-with=\". \"><info><title>Lambda batch fixture</title><id>urn:lambda:note-history</id></info><citation><layout suffix=\".\"><choose><if position=\"ibid-with-locator\"><text term=\"ibid\" text-case=\"capitalize-first\"/><text variable=\"locator\" prefix=\", \"/></if><else-if position=\"ibid\"><text term=\"ibid\" text-case=\"capitalize-first\"/></else-if><else-if position=\"subsequent\"><text variable=\"title\" form=\"short\"/><text variable=\"first-reference-note-number\" prefix=\" (note \" suffix=\")\"/></else-if><else><text variable=\"title\"/><text variable=\"locator\" prefix=\", \"/></else></choose></layout></citation><bibliography><sort><key variable=\"title\"/></sort><layout suffix=\".\"><text variable=\"title\"/></layout></bibliography></style>",
+    "references": [
+      {
+        "id": "a",
+        "type": "book",
+        "title": "Alpha",
+        "author": [
+          {
+            "family": "Smith",
+            "given": "John"
+          }
+        ],
+        "issued": {
+          "date-parts": [
+            [
+              2020
+            ]
+          ]
+        }
+      },
+      {
+        "id": "b",
+        "type": "book",
+        "title": "Beta",
+        "author": [
+          {
+            "family": "Smith",
+            "given": "John"
+          }
+        ],
+        "issued": {
+          "date-parts": [
+            [
+              2020
+            ]
+          ]
+        }
+      }
+    ],
+    "requests": [
+      {
+        "id": "0",
+        "note_index": 1,
+        "items": [
+          {
+            "id": "a",
+            "locator": "12"
+          }
+        ]
+      },
+      {
+        "id": "1",
+        "note_index": 2,
+        "items": [
+          {
+            "id": "a",
+            "locator": "12"
+          }
+        ]
+      },
+      {
+        "id": "2",
+        "note_index": 3,
+        "items": [
+          {
+            "id": "a",
+            "locator": "15"
+          }
+        ]
+      },
+      {
+        "id": "3",
+        "note_index": 5,
+        "items": [
+          {
+            "id": "b"
+          }
+        ]
+      },
+      {
+        "id": "4",
+        "note_index": 6,
+        "items": [
+          {
+            "id": "a"
+          }
+        ]
+      }
+    ],
+    "nocite": [],
+    "expected": [
+      "Alpha, 12.",
+      "Ibid.",
+      "Ibid., 15.",
+      "Beta.",
+      "Alpha (note 1)."
+    ]
+  },
+  {
+    "id": "nocite-history",
+    "style": "<style xmlns=\"http://purl.org/net/xbiblio/csl\" version=\"1.0\" class=\"note\" initialize-with=\". \"><info><title>Lambda batch fixture</title><id>urn:lambda:nocite-history</id></info><citation><layout><choose><if position=\"ibid\"><text value=\"repeat\"/></if><else><text variable=\"title\"/></else></choose></layout></citation><bibliography><sort><key variable=\"title\"/></sort><layout suffix=\".\"><text variable=\"title\"/></layout></bibliography></style>",
+    "references": [
+      {
+        "id": "a",
+        "type": "book",
+        "title": "Alpha",
+        "author": [
+          {
+            "family": "Smith",
+            "given": "John"
+          }
+        ],
+        "issued": {
+          "date-parts": [
+            [
+              2020
+            ]
+          ]
+        }
+      },
+      {
+        "id": "b",
+        "type": "book",
+        "title": "Beta",
+        "author": [
+          {
+            "family": "Smith",
+            "given": "John"
+          }
+        ],
+        "issued": {
+          "date-parts": [
+            [
+              2020
+            ]
+          ]
+        }
+      }
+    ],
+    "requests": [
+      {
+        "id": "1",
+        "note_index": 1,
+        "items": [
+          {
+            "id": "a"
+          }
+        ]
+      },
+      {
+        "id": "2",
+        "note_index": 2,
+        "items": [
+          {
+            "id": "a"
+          }
+        ]
+      }
+    ],
+    "nocite": [
+      "*"
+    ],
+    "expected": [
+      "Alpha",
+      "repeat"
+    ]
+  }
+]

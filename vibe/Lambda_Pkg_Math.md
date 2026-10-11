@@ -1,7 +1,7 @@
 # Lambda Math Package Design
 
 > **Status:** active design; consolidated and checked against the source tree on
-> 2026-10-10, revision `4f88dbb4f` plus the current radical and finite-wide-accent
+> 2026-10-10, revision `4c8f7eaae` plus the current AMS horizontal-arrow
 > changes. Remaining gaps are recorded in §10.
 > **Scope:** static mathematical typesetting through `lambda.doc.math`.
 > **Formal linkage:** **D7.2.4** — package namespace and distribution;
@@ -499,7 +499,7 @@ a display-style nucleus, ends of `.7` times the text symbol font's
 x-height, a `.2` x-height gap, and rule thickness `ht(\braceld)`. A profile
 without the required TeX extension data reports that limitation. Correct
 annotation placement does not validate the separate brace, group, line-
-segment, harpoon or arrow construction.
+segment or harpoon construction. Verified AMS arrow marks are specified in §6.7.
 
 ### 6.6 Closed multiple integrals
 
@@ -520,6 +520,49 @@ fitted offsets are allowed to remove that difference. Explicit fonts keep
 their own closed-integral glyphs and data. The executable definition is
 [the bundled integral macro](../test/lambda/math/tex_bundled_integrals.tex).
 
+### 6.7 Horizontal arrows and arrow marks
+
+The bundled profile follows
+[AMS](https://github.com/latex3/latex2e/blob/develop/required/amsmath/amsmath.dtx)
+for `\xrightarrow` and `\xleftarrow`, and
+[mathtools](https://github.com/latex3/mathtools/blob/main/mathtools.dtx)
+for `\xleftrightarrow`, `\xRightarrow`, `\xLeftarrow` and
+`\xLeftrightarrow`. Fillers combine existing arrowhead and minus/equal glyphs
+using the package's negative kerns and centered leaders. Heads and repeated
+glyphs retain their natural proportions and baselines. Leader counts and
+centering follow TeX's scaled-point arithmetic, including rounding at an
+exact repeat boundary. Single-line minus boxes are smashed without changing
+their ink; double-line equal signs retain their logical boxes.
+
+Labelled arrows are relations with a compound operator nucleus and stacked
+limits. Build the filler in display style and measure label demand in explicit
+uncramped script style, independently of the surrounding style. Actual upper
+and lower labels use the surrounding style's superscript/subscript policy.
+Retain each command's distinct measurement and attachment kerns. Mathtools'
+double arrows add text-font control spaces even when an authored label is
+empty; those spaces participate in width and limit presence. Empty arguments
+and nonempty zero-width arguments remain distinct after TeX argument scanning.
+
+The six AMS over/under single-arrow marks use explicit uncramped style for
+both the nucleus and filler. Center narrower content within the filler's
+minimum width. Above marks follow the macro's vbox with no interline glue;
+below marks follow its vtop with `1.3\ex@` clearance. `\ex@` is the nonlinear
+text-size-dependent point length defined by
+[amsgen](https://github.com/latex3/latex2e/blob/develop/required/amsmath/amsgen.dtx),
+not font x-height. Preserve the body's baseline. Unbraced following scripts
+attach after the macro's mathchoice; an authored enclosing group instead
+receives ordinary compound-nucleus scripts. Character-accent attachment rules
+do not apply to these macros.
+
+Independent evidence covers these twelve constructions at the default text
+size across all four math styles, with nested/cramped bodies, label presence,
+script attachment and leader boundaries. Separate under-arrow cases cover
+the nonlinear clearance at 19 physical text sizes with matched scaled fonts.
+This does not certify hooks, maps-to,
+harpoons, paired reactions, other profiles or named-size combinations (§10).
+All constructions remain in the package layer (**D7.2.4**), and font/metric
+resources remain acquired through Lambda IO (**D7.1.2v2**).
+
 ## 7. Content and extension surface
 
 The following describes current content/structural support. Entries do not
@@ -535,7 +578,7 @@ remaining obligations.
 | Array style | Small matrices/subarrays use script style; matrices use text style; supported AMS alignment/gathered environments and dcases use display style. Row placement accounts for cell heights/depths and centers the table on the axis. Complete strut/glue/rule derivation remains outstanding. |
 | Equation material | Parsed tags and nonprinting controls are retained. Numbering, references and outer display placement belong to the document layer; standalone math has no general line-breaking engine. |
 | Row separators | `\\` and `\cr` are structural controls, never painted backslashes. They delimit rows in an alignment; accepting them elsewhere does not promise paragraph line breaking. `\backslash` remains a literal symbol. |
-| Annotation arrows | Labeled single and paired reaction arrows retain upper/lower content; shaft extension preserves natural heads where available. General hook/head geometry and package-derived reaction spacing remain incomplete. |
+| Annotation arrows | Six labelled single/double arrows and six AMS over/under single-arrow marks follow §6.7. Paired reaction arrows retain upper/lower content. Other hook/head recipes and package-derived reaction spacing remain incomplete. |
 | CD diagrams | Rows, arrow direction, labels and equalities are represented. Their current dimensions are not certified against amscd. |
 | Boxes and transforms | Phantom variants, smash, overlaps, authored raise/lower dimensions, reflection and axis centering; framed/color boxes and cancel/strike/phase/actuarial forms render. Package-specific padding, stroke and decoration rules still need conformance work. |
 | Color | Scoped foreground paint, background and framed-color boxes are represented. Full xcolor expression evaluation and package-register semantics are not established by these paths. |
@@ -656,13 +699,22 @@ Independent checked-in oracles cover:
   and indices. Rule nuclei isolate the construction from CMU character
   metrics and unavailable italic/skew data; this is not a character-accent
   conformance certificate.
+- [Automated horizontal-arrow checks](../test/lambda/math/tex_arrow_conformance.test.mjs):
+  692 independently shipped TeX boxes cover the twelve constructions in §6.7,
+  empty and nonempty zero-width labels, distinct measurement/attachment styles,
+  leader-count boundaries, braced/unbraced scripts and nested/cramped bodies.
+  Under-arrow clearance is checked at 19 physical text sizes with explicitly
+  matched scaled fonts. Compare component identities, natural sizes, positions,
+  dimensions and rules; retain installed macro/TFM and production-resource
+  hashes. Eight native PNG cases verify natural heads and continuous shafts.
 
 These are independent TeX executions, not a single complete automated
 conformance suite. `\showbox` intentionally emits `! OK` diagnostics and a
 nonzero exit status. A valid run must contain the expected cases and no
 unexpected TeX errors; shell status alone cannot classify it as passed.
-The automated AMS, delimiter and radical checks use successful compilation and shipped
-position records instead of `\showbox`. They run with the comparison-harness tests;
+The automated AMS, delimiter, radical and arrow checks use successful
+compilation and shipped position records instead of `\showbox`.
+They run with the comparison-harness tests;
 automatic checking of the older oracles and wider package coverage remain
 outstanding. Missing pdfLaTeX is an explicit skip, not conformance evidence.
 
@@ -722,15 +774,17 @@ diagnostics; focused math checks are not an all-green system baseline.
 
 | Evidence as of 2026-10-10 | Result and limits |
 |---|---|
-| Focused math run after the radical changes | **29/29**; `temp/math-radicals/focused-final.log`. |
-| Full geometry corpus after the radical changes | **921/921**; `temp/math-radicals/corpus-final.json`. Rendering smoke coverage only. |
+| Focused math run after the arrow changes | **30/30**; `temp/math-arrows/focused-final.log`. |
+| Full geometry corpus after the arrow changes | **921/921**; `temp/math-arrows/corpus-final.json`. Rendering smoke coverage only. |
 | Automated independent AMS/LaTeX relations | **130/130** across **260** TeX boxes; reported `temp/math-conformance-*/evidence.json`. Includes phantom atom classes, middle-boundary binary normalization, shipped numerator positions, source/binary hashes and the installed AMS definition hash. |
 | Automated independent delimiter checks | **820/820** TeX boxes and component-position comparisons; reported `temp/math-delimiter-oracle-*/evidence.json`. Includes source/binary and installed TFM hashes. |
-| Automated independent radical/accent checks | **472/472** TeX box, component and rule comparisons; `temp/math-radical-oracle-CpZbOc/evidence.json`. Includes installed macro/TFM, production resource and source/binary hashes. |
-| Comparison-harness and conformance checks | **1,515/1,515**, no skips; `temp/math-radicals/comparison-tests-final.log`. Includes native painting, logical point-scale checks and pdfLaTeX/Poppler references; no visual-equality claim. |
+| Automated independent radical/accent checks | **472/472** TeX box, component and rule comparisons; `temp/math-radical-oracle-7bgJro/evidence.json`. Includes installed macro/TFM, production resource and source/binary hashes. |
+| Automated independent horizontal-arrow checks | **692/692** TeX box, component and rule comparisons; `temp/math-arrow-oracle-IR4bZt/evidence.json`. Includes all four styles and 19 physical text sizes for under-arrow clearance. Installed AMS/amsgen/mathtools, TFM, production-resource and source/binary hashes are retained. |
+| Comparison-harness and conformance checks | **2,217/2,217**, no skips; `temp/math-arrows/comparison-tests-final.log`. Includes native painting, logical point-scale checks and pdfLaTeX/Poppler references; no visual-equality claim. |
 | Prior independent integral audit | 17 TeX box dumps, **18/18** axis/style/limit relations; retained under `temp/math-closed-integrals/oracle/`. |
 | Prior independent delimiter/logo audits | 27 delimiter boxes plus row-control cases; eight logo boxes. Sources above remain reproducible. |
-| Lambda baseline after the radical changes | **6,583/6,585**: input **2,112/2,112**, runtime **4,471/4,473**. `edit_view_only` fails boolean `disabled` serialization; its math/projection/source assertions pass in this run. `latex_test_latex_phase3_corpus` exceeds the harness's 60-second limit, including when run alone; the previous math package reproduces that timeout on the same host. The earlier source-loss symptom remains unresolved. `temp/math-radicals/baseline.log`, `baseline-initial/`, `latex-timeout-recheck.log` and `latex-head-recheck.log` retain the evidence. |
+| Lambda baseline after the arrow changes | **6,585/6,586**: input **2,112/2,112**, runtime **4,473/4,474**. The sole failure is the existing `edit_view_only` boolean `disabled` serialization mismatch; its math/projection/source assertions pass. The LaTeX sample corpus completes in this run. `temp/math-arrows/baseline.log`, `baseline-final/` and `verification.json` retain the results and exact host/source provenance. |
+| Prior Lambda baseline after the radical changes | **6,583/6,585**: input **2,112/2,112**, runtime **4,471/4,473**. `edit_view_only` fails boolean `disabled` serialization; its math/projection/source assertions pass in that run. `latex_test_latex_phase3_corpus` exceeds the harness's 60-second limit, including when run alone; the previous math package reproduces that timeout on the same host. The earlier source-loss symptom remains unresolved. `temp/math-radicals/baseline.log`, `baseline-initial/`, `latex-timeout-recheck.log` and `latex-head-recheck.log` retain the evidence. |
 
 Older logs from overlapping builds/edits and narrower focused selections are
 not substitute aggregate results. The previous 206-case HTML snapshot scores
@@ -755,7 +809,7 @@ current code, not permission to adopt their present behavior as a new rule.
 
 | Area | Outstanding obligation |
 |---|---|
-| Hook and other extensible horizontal arrows | Replace hand-drawn head/curl/shaft geometry with the supported package's font-component and glue recipe. Correct hook orientation alone does not establish conformance. |
+| Remaining horizontal arrows and profiles | Replace hook, maps-to, harpoon and two-headed constructions with the supported package's font-component and glue recipe. Audit named text sizes, bold and supplied-font profiles. The twelve constructions in §6.7 now have independent bundled-profile evidence; correct hook orientation alone does not establish conformance for the remaining paths. |
 | Paired reaction arrows | Derive minimum width, shortening, separation and annotation spacing from the supported AMS/mathtools/mhchem definition. Natural heads and content regressions do not validate those dimensions. |
 | Remaining delimiters and profiles | Extend beyond the 26 verified bundled delimiter shapes to unmapped special delimiters (`\arrowvert`, `\Arrowvert`, `\bracevert`). Audit named-size/style combinations and bold/supplied-font profiles. |
 | Radicals and wide marks | Complete supplied-font MATH radicals and wide constructions, configurable root-degree adjustments, and package-defined braces/groups/line segments. Bundled radicals and finite CMEX hats/tildes have independent construction evidence; character accents still lack required italic/skew data and broader script/nesting coverage. Whole-glyph stretching in the remaining paths is not conforming. |
@@ -781,7 +835,8 @@ shape, reduced raster diff, or green smoke count cannot close these items.
   expected glyph content, inline baselines, all math styles, profile changes,
   actual font-resource availability and painted geometry need coverage.
 - Extend repeatable independent TeX relations beyond the automated AMS
-  primitives, bundled delimiters, radicals and finite wide accents; integrate the older box oracles and additional package macros.
+  primitives, bundled delimiters, radicals, finite wide accents and horizontal
+  arrows; integrate the older box oracles and additional package macros.
   The present checks remain narrower than a comprehensive conformance suite.
 - Verify full document/editor source preservation and generated-font
   sanitization through UI paths. `edit_view_only` still fails boolean-attribute
@@ -789,9 +844,11 @@ shape, reduced raster diff, or green smoke count cannot close these items.
   run, but earlier full-context imports lost inter-formula text while a
   standalone import/export succeeded; an older HEAD run also recorded a source
   round-trip failure. Identify the cause of this intermittent loss before
-  changing goldens or claiming source preservation. Resolve the full LaTeX
-  sample-corpus timeout, which also reproduces with the preceding math package;
-  neither an all-green baseline nor complete UI verification is claimed here.
+  changing goldens or claiming source preservation. Diagnose the historical
+  full LaTeX sample-corpus timeout, which also reproduced with the preceding
+  math package. That corpus completes in the current baseline, but this does
+  not establish the timeout's cause or resolution. Neither an all-green
+  baseline nor complete UI verification is claimed here.
 - Bound platform-font fallback and standalone portability. A smoke check for
   external font URLs does not prove every resolved platform face is embedded.
   Ordinary-font measurements also retain the host's shaping limitations.
@@ -829,3 +886,4 @@ in this file. Git history retains their detailed implementation records.
 | 2026-10-10 AMS primitive continuation | Replaced fixed modulo/strut behavior with AMS/LaTeX definitions, completed continued-fraction alignment/text struts, sized-delimiter classes and ordinary phantom boxing, and restored bundled verbatim's typewriter selection. Added repeatable TeX box/position relations; broader construction and document-register work remains outstanding. |
 | 2026-10-10 delimiter continuation | Replaced bundled delimiter scaling with original TeX variant/assembly selection, completed middle-boundary demand and atom behavior, and restored parenthesis aliases. Added independent DVI geometry and native assembly checks. Corrected the comparison harness's logical point scale; existing Size3/Size4 fonts were reused without adding resources. |
 | 2026-10-10 radical continuation | Replaced bundled whole-surd stretching with TeX's variant/extension and rule construction, restored default indexed-root kern/raise behavior, and selected finite CMEX hats/tildes. Preserved signed optional rule raises. Added shared independent DVI/rule geometry and native radical/accent checks, reusing the existing fonts and metric files. |
+| 2026-10-10 arrow continuation | Replaced six labelled-arrow and six over/under-arrow approximations with AMS/mathtools glyph-leader, style, label and alignment definitions. Preserved TeX's optional-argument and following-script behavior. Added independent leader-boundary geometry and native shaft-continuity checks without adding fonts or metrics. |

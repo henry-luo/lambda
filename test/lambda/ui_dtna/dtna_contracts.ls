@@ -5,7 +5,7 @@ let field = ui.render(ui.input({id:"field",value:""})^)
 let check = ui.render(ui.checkbox({id:"check",default_checked:false}, "Agree")^)
 let checked = ui.render(ui.checkbox({id:"checked",default_checked:true}, "Agree")^);
 [
-    name(primary), primary.id, primary.class, primary["aria-label"], content(primary)[0],
+    name(primary), primary.id, primary.class, primary["aria-label"], content(content(primary)[0])[0],
     not contains(map(field), 'disabled'), not contains(map(field), 'readonly'), field.value,
     not contains(map(content(check)[0]), 'checked'), contains(map(content(checked)[0]), 'checked'),
     (ui.button({unknown:true}) or null) == null,

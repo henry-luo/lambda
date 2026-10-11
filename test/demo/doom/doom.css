@@ -136,5 +136,6 @@ html, body { margin: 0; background: #111; color: #ddd; font-family: monospace; }
 #overlay h1 { font-size: 64px; margin: 0; color: #ba3924; text-shadow: 3px 3px #642; }
 button, select { font: inherit; padding: 6px 10px; background: #333; color: #ddd; border: 1px solid #666; }
 button:hover { background: #555; }
+#auto-play { margin-left: 8px; border-color: #ba3924; }
 nav { display: flex; gap: 6px; margin-top: 12px; }
 #doom-status { font-size: 11px; line-height: 1.6; min-height: 36px; }

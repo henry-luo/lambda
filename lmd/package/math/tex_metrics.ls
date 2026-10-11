@@ -121,6 +121,11 @@ pub fn delimiters() map | error {
         accents:[for (d in [{cmd:"widehat",slot:0x62},{cmd:"widetilde",slot:0x65}])
             {*:d,chain:character_chain(extension,file,d.slot)^}],
         accent_x_height:parameters_from(extension,file,13)^[4] * 1000.0,
+        text_space:parameters_from(roman,"cmr10.tfm",7)^[1] * 1000.0,
+        arrow_symbols:[for (d in [{ch:"−",slot:0},{ch:"←",slot:0x20},{ch:"→",slot:0x21},
+            {ch:"⇐",slot:0x28},{ch:"⇒",slot:0x29},{ch:"=",slot:0x3D,roman:true}])
+            {codepoint:ord(d.ch),metrics:[for (data in symbols)
+                character_metrics(if (d.roman) roman else data,if (d.roman) "cmr10" else "cmsy",d.slot)^]}],
         pieces:[for (p in encoded) {*:p,codepoint:ord(p.ch),metrics:character_metrics(extension,file,p.slot)^}]}
 }
 

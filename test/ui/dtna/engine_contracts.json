@@ -1,0 +1,164 @@
+{
+  "name": "dtna plain HTML engine contracts",
+  "html": "test/ui/dtna/engine_contracts.ls",
+  "viewport": {
+    "width": 500,
+    "height": 600
+  },
+  "events": [
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#media-probe"
+      },
+      "tolerance": 0.2,
+      "width": 100
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#rtl-child"
+      },
+      "tolerance": 0.2,
+      "x": 200,
+      "y": 30
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#reverse-child"
+      },
+      "tolerance": 0.2,
+      "x": 250,
+      "y": 60
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#double-child"
+      },
+      "tolerance": 0.2,
+      "x": 50,
+      "y": 90
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#column-child"
+      },
+      "tolerance": 0.2,
+      "x": 0,
+      "y": 180
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#retained-input"
+      }
+    },
+    {
+      "type": "key_press",
+      "key": "end"
+    },
+    {
+      "type": "type",
+      "text": "!"
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#retained-input"
+      },
+      "equals": "kept!"
+    },
+    {
+      "type": "resize",
+      "width": 800,
+      "height": 600
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#media-probe"
+      },
+      "tolerance": 0.2,
+      "width": 200
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#retained-input"
+      },
+      "equals": "kept!"
+    },
+    {
+      "type": "assert_focus",
+      "target": {
+        "selector": "#retained-input"
+      }
+    },
+    {
+      "type": "resize",
+      "width": 500,
+      "height": 600
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#media-probe"
+      },
+      "tolerance": 0.2,
+      "width": 100
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#retained-input"
+      },
+      "equals": "kept!"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#disabled-label"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#activations"
+      },
+      "equals": "0"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#legend-button"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#activations"
+      },
+      "equals": "1"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#enabled-button"
+      }
+    },
+    {
+      "type": "key_press",
+      "key": "enter"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#activations"
+      },
+      "equals": "3"
+    }
+  ]
+}

@@ -1,0 +1,273 @@
+{
+  "name": "dtna scoped heading token derivation and retained native editing",
+  "html": "test/ui/dtna/typography_tokens.ls",
+  "viewport": {
+    "width": 600,
+    "height": 900
+  },
+  "events": [
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#font-default"
+      },
+      "property": "font-size",
+      "equals": "38px"
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#font-default"
+      },
+      "height": 46,
+      "tolerance": 0.2
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#font-large"
+      },
+      "property": "font-size",
+      "equals": "54px"
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#font-large"
+      },
+      "height": 62,
+      "tolerance": 0.2
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#font-large-five"
+      },
+      "property": "font-size",
+      "equals": "24px"
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#font-large-five"
+      },
+      "height": 32,
+      "tolerance": 0.2
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#font-inherited"
+      },
+      "property": "font-size",
+      "equals": "54px"
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#font-inherited"
+      },
+      "height": 62,
+      "tolerance": 0.2
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#font-small"
+      },
+      "property": "font-size",
+      "equals": "32px"
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#font-small"
+      },
+      "height": 40,
+      "tolerance": 0.2
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#font-small-five"
+      },
+      "property": "font-size",
+      "equals": "14px"
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#font-small-five"
+      },
+      "height": 22,
+      "tolerance": 0.2
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#font-dynamic"
+      },
+      "property": "font-size",
+      "equals": "28px"
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#font-dynamic"
+      },
+      "height": 36,
+      "tolerance": 0.2
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#font-sibling"
+      },
+      "property": "font-size",
+      "equals": "16px"
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#font-sibling"
+      },
+      "height": 24,
+      "tolerance": 0.2
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#font-draft"
+      },
+      "property": "font-size",
+      "equals": "16px"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#font-draft"
+      }
+    },
+    {
+      "type": "key_press",
+      "key": "end"
+    },
+    {
+      "type": "type",
+      "text": "ab"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#font-dynamic"
+      },
+      "property": "font-size",
+      "equals": "36px"
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#font-dynamic"
+      },
+      "height": 44,
+      "tolerance": 0.2
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#font-draft"
+      },
+      "property": "font-size",
+      "equals": "20px"
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#font-draft"
+      },
+      "equals": "seedab"
+    },
+    {
+      "type": "assert_focus",
+      "target": {
+        "selector": "#font-draft"
+      }
+    },
+    {
+      "type": "assert_caret",
+      "target": {
+        "selector": "#font-draft"
+      },
+      "char_offset": 6
+    },
+    {
+      "type": "key_press",
+      "key": "home"
+    },
+    {
+      "type": "key_press",
+      "key": "end",
+      "mods_str": "shift"
+    },
+    {
+      "type": "key_press",
+      "key": "backspace"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#font-dynamic"
+      },
+      "property": "font-size",
+      "equals": "28px"
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#font-dynamic"
+      },
+      "height": 36,
+      "tolerance": 0.2
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#font-draft"
+      },
+      "property": "font-size",
+      "equals": "16px"
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#font-draft"
+      },
+      "equals": ""
+    },
+    {
+      "type": "assert_focus",
+      "target": {
+        "selector": "#font-draft"
+      }
+    },
+    {
+      "type": "assert_caret",
+      "target": {
+        "selector": "#font-draft"
+      },
+      "char_offset": 0
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#font-sibling"
+      },
+      "property": "font-size",
+      "equals": "16px"
+    },
+    {
+      "type": "render",
+      "file": "temp/ui_dtna/typography_tokens.png"
+    }
+  ]
+}

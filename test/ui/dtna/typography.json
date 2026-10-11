@@ -1,0 +1,16 @@
+{
+  "name":"dtna semantic headings and inline typography decorations",
+  "html":"test/ui/dtna/typography.ls",
+  "viewport":{"width":600,"height":600},
+  "events":[
+    {"type":"assert_count","target":{"selector":"h1#heading-1"},"count":1},
+    {"type":"assert_count","target":{"selector":"h5#heading-5"},"count":1},
+    {"type":"assert_style","target":{"selector":"#heading-1"},"property":"font-size","equals":"38px"},
+    {"type":"assert_count","target":{"selector":"#body strong, #body em, #body u, #body del, #body code, #body mark, #body kbd"},"count":7},
+    {"type":"assert_style","target":{"selector":"#danger"},"property":"color","equals":"rgb(255, 77, 79)"},
+    {"type":"assert_attribute","target":{"selector":"#disabled-link"},"attribute":"aria-disabled","equals":"true"},
+    {"type":"click","target":{"selector":"#disabled-link"}},
+    {"type":"assert_count","target":{"selector":"#disabled-link[href]"},"count":0},
+    {"type":"render","file":"temp/ui_dtna/typography.png"}
+  ]
+}

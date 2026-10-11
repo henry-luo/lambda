@@ -1,0 +1,21 @@
+<?xml version="1.0"?>
+<r:page-document xmlns:r="urn:lambda:radiant:page" style="margin:0;font:10px/20px Arial;orphans:1;widows:1">
+  <r:master-set>
+    <r:page-master name="unequal" style="size:220px 120px;margin:10px">
+      <r:region role="body" name="body">
+        <r:column inline-size="80px" block-size="50px"/>
+        <r:column inline-start="100px" block-start="10px" inline-size="100px" block-size="80px"/>
+      </r:region>
+    </r:page-master>
+  </r:master-set>
+  <r:page-sequence master-reference="unequal" force-page-count="no-force">
+    <r:flow region-name="body">
+      <div style="height:31px;break-inside:avoid;background:red">One</div>
+      <div style="height:31px;break-inside:avoid;background:lime">Two</div>
+      <div style="height:31px;break-inside:avoid;background:blue">Three</div>
+      <div style="height:31px;break-inside:avoid;background:yellow">Four</div>
+      <div style="height:31px;break-inside:avoid;background:magenta">Five</div>
+      <div style="height:31px;break-inside:avoid;background:cyan">Six</div>
+    </r:flow>
+  </r:page-sequence>
+</r:page-document>

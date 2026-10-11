@@ -37,7 +37,7 @@ fn overlay_title(mode) {
 view <superlambda_game> state game: world.new_game() {
   let h = game.hero
   let camera = game.camera;
-  <main id:"superlambda", tabindex:"0", 'data-mode':game.mode,
+  <main id:"superlambda", tabindex:"0", 'data-mode':game.mode, 'data-autoplay':string(game.autoplay),
     'data-x':string(round(h.x)), 'data-y':string(round(h.y)),
     'data-grounded':string(h.grounded), 'data-checkpoint':string(game.checkpoint),
     'data-ticks':string(game.ticks),
@@ -87,6 +87,9 @@ view <superlambda_game> state game: world.new_game() {
               else "Watch the gaps, and jump on enemies from above.">
             <button id:"overlay-action", 'data-command':(if (game.mode == "over" or game.mode == "won") "restart" else "pause"),
               if (game.mode == "ready") "LET'S GO  →" else if (game.mode == "paused") "KEEP GOING  →" else "PLAY AGAIN  →">
+            if (game.mode == "ready" or game.mode == "over" or game.mode == "won") {
+              <button id:"auto-play", 'data-command':"auto", "Auto Play">
+            }
             <p class:"overlay-keys", "← → move   ·   Space jump   ·   Shift run">
           >
         >
@@ -107,11 +110,18 @@ view <superlambda_game> state game: world.new_game() {
     >
     <div class:"progress", 'aria-label':("Level progress: " ++ string(round(h.x / world.GOAL_X * 100)) ++ " percent"),
       <div class:"progress-fill", style:("width:" ++ string(min(100, h.x / world.GOAL_X * 100)) ++ "%;")>>
-    <footer <span "TIP / Tap jump for a short hop. Hold it to reach higher.">
+    <footer <span if (game.autoplay) "AUTO PLAY / Move or jump to take control."
+      else "TIP / Tap jump for a short hop. Hold it to reach higher.">
       <span if (game.checkpoint) "CHECKPOINT ✓" else "THREE LIVES. ONE GREAT ADVENTURE.">>
   >
 }
-on press(evt) { game = world.set_control(game, event_command(evt), true) }
+on press(evt) {
+  let command = event_command(evt)
+  if (game.autoplay and contains(["left", "right", "jump", "run"], command)) {
+    game = {*:world.release_controls(game), autoplay: false}
+  }
+  game = world.set_control(game, command, true)
+}
 on release(evt) { game = world.set_control(game, event_command(evt), false) }
 on releasecontrols(evt) {
   // Releasing a menu click must preserve its target until click is delivered.
@@ -119,16 +129,21 @@ on releasecontrols(evt) {
 }
 on click(evt) {
   let command = event_command(evt)
-  if (command == "pause" or command == "restart") { game = world.action(game, command) }
+  if (contains(["pause", "restart", "auto"], command)) { game = world.action(game, command) }
 }
 on mousedown(evt) {
   let command = event_command(evt)
   if (contains(["left", "right", "jump", "run"], command)) {
+    if (game.autoplay) { game = {*:world.release_controls(game), autoplay: false} }
     game = {*:world.set_control(game, command, true), pointer: true}
     return 'prevent-default'
   }
 }
-on frame(evt) { if (game.mode == "playing") { game = world.tick(game) } }
+on frame(evt) {
+  if (game.mode == "playing") {
+    game = world.tick(if (game.autoplay) world.auto_controls(game) else game)
+  }
+}
 
 // Keep the clock and keyboard receiver outside the changing world subtree.
 view <superlambda_shell> {

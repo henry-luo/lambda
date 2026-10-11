@@ -240,6 +240,26 @@ bundled accents intentionally stop at the original third CMEX design; the
 comparison preamble can select a different reference package's wider design.
 Native raster similarity is separate from the matched-profile TeX oracle.
 
+`tex_arrow_conformance.test.mjs` independently ships 692 AMS/mathtools boxes
+for six labelled single/double arrows and six over/under single-arrow marks.
+Checks include component identity and natural size, dimensions, baselines,
+rules, all four styles, empty/zero-width labels, leader-count boundaries,
+braced/unbraced following scripts, and nested/cramped cases. An additional
+76 of those boxes check AMS under-arrow clearance across 19 physical text
+sizes (1pt–24.88pt), explicitly scaling the matched font profile. The reference
+records its installed AMS, amsgen and mathtools definitions alongside the
+unchanged production font/TFM and source/binary hashes under
+`temp/math-arrow-oracle-*`. Run it alone with:
+
+```sh
+node --test test/lambda/math/tex_arrow_conformance.test.mjs
+```
+
+Eight `arrow_cases.yaml` native cases verify painting of the existing
+single/double heads and centered glyph leaders, including continuous shafts.
+Hooks, maps-to, harpoons, paired reactions, named text sizes and supplied/bold
+font profiles remain outside this independent construction coverage.
+
 The checks also run the comparison pipeline for both image and reaction-arrow
 fixtures. They require a built `lambda.exe`, verify all eight embedded logos in
 native PNG output, and check the rendered arrow glyphs instead of command text.

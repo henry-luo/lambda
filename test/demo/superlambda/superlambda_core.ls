@@ -59,7 +59,7 @@ pub let ENEMIES = [
 ]
 pub fn hero_at(x) => {x: x, y: 360.0, vx: 0.0, vy: 0.0, grounded: true,
   facing: 1, coyote: 4, buffer: 0}
-pub fn new_game() => {hero: hero_at(72.0), mode: "ready", keys: [], pointer: false,
+pub fn new_game() => {hero: hero_at(72.0), mode: "ready", keys: [], pointer: false, autoplay: false,
   enemies: ENEMIES, collected: [], used: [], coins: 0, score: 0,
   lives: 3, checkpoint: false, invincible: 0, ticks: 0, camera: 0.0}
 pub fn camera_x(x) => max(0.0, min(WORLD_WIDTH - VIEW_WIDTH, x - 300.0))
@@ -109,7 +109,8 @@ pub fn lose_life(game) {
     ticks: if (time_left(game) == 0) 0 else game.ticks}
 }
 pub fn action(game, command) {
-  if (command == "restart") {*:new_game(), mode: "playing"}
+  if (command == "restart" or command == "auto")
+    {*:new_game(), mode: "playing", autoplay: command == "auto"}
   else if (command == "pause") {
     if (game.mode == "ready" or game.mode == "paused") {*:game, mode: "playing", keys: [], pointer: false}
     else if (game.mode == "playing") {*:game, mode: "paused", keys: [], pointer: false}
@@ -134,6 +135,23 @@ pub fn set_control(game, command, pressed) {
       else {*:game.hero, vy: max(-5.0, game.hero.vy)}
     {*:game, hero: hero, keys: keys}
   }
+}
+// Look ahead for a wall, enemy or unsupported ground; hold each hop until landing.
+pub fn auto_controls(game) {
+  let h = game.hero
+  let front = h.x + HERO_WIDTH
+  let feet = h.y + HERO_HEIGHT
+  let obstacles = any([for (s in [*TERRAIN, *BLOCKS])
+    s.x >= front and s.x < front + 65 and s.y < feet and s.y + s.h > h.y])
+  let enemies = any([for (e in game.enemies) e.alive and e.x + e.w > h.x and
+    e.x < front + 90 and abs(e.y - h.y) < HERO_HEIGHT + 30])
+  let supported = any([for (s in [*TERRAIN, *BLOCKS])
+    s.x <= front + 65 and s.x + s.w > front + 65 and s.y <= feet and s.y + s.h >= feet])
+  let jump = if (h.grounded) obstacles or enemies or not supported
+    else contains(game.keys, "jump")
+  let moving = set_control(game, "right", true)
+  let released = if (h.grounded) set_control(moving, "jump", false) else moving
+  set_control(released, "jump", jump)
 }
 pub fn tick(game) {
   if (game.mode != "playing") game

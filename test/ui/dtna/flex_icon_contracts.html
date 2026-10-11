@@ -1,0 +1,13 @@
+<!doctype html>
+<style>
+body{margin:0;font:14px Arial}
+.row{display:flex;gap:8px}
+.control{display:inline-flex;align-items:center;gap:8px;font:inherit;padding:4px 15px;border:1px solid #ddd;height:32px;box-sizing:border-box}
+.icon{width:1em;height:1em;flex-shrink:0}
+.label{display:inline-block;width:40px;height:20px}
+</style>
+<div class="row">
+<button id="svg-button" class="control"><svg class="icon" width="1em" height="1em" viewBox="0 0 24 24"><path d="M0 0h24v24H0z"/></svg><span class="label"></span></button>
+<button id="span-button" class="control"><span class="icon"></span><span class="label"></span></button>
+<div id="svg-div" class="control"><svg class="icon" width="1em" height="1em" viewBox="0 0 24 24"><path d="M0 0h24v24H0z"/></svg><span class="label"></span></div>
+</div>

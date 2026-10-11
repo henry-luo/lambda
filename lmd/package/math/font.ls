@@ -119,7 +119,8 @@ pub fn prepare(ast, options) map | error {
     let points = unique([for (ch in chars, style in styles) variant(ch, style)])
     let large_points = [for (ch in sym.large_symbols() where contains(chars, ch)) ord(ch)]
     let delimiter_data = if (use_bundled) tex_metrics.delimiters()^ else null
-    let delimiter_small_points = [for (r in delimiter_data.recipes where len(r.small) > 0) r.codepoint]
+    let delimiter_small_points = unique([*[for (r in delimiter_data.recipes where len(r.small) > 0) r.codepoint],
+        *[for (r in delimiter_data.arrow_symbols) r.codepoint]])
     let native = measure({font_family: family, font_size: UNITS}, points, faces, family)
     if (native == null) error("math: cannot read selected font: " ++ family)
     else {
@@ -233,6 +234,14 @@ pub fn tex_accent(profile, command) {
     let entry = [for (a in profile.delimiter_data.accents where a.cmd == command) a][0];
     if (entry == null) null else {variants:[for (v in entry.chain) tex_piece(profile,v.slot)^],
         x_height:profile.delimiter_data.accent_x_height}
+}
+
+// CMSY10/7/5 and scaled CMR10 share these unchanged KaTeX_Main encodings.
+pub fn tex_arrow_symbol(profile, ch, style) {
+    let entry = [for (s in profile.delimiter_data.arrow_symbols where s.codepoint == ord(ch)) s][0];
+    if (entry == null) null else with_tex_metrics(
+        lookup({points:profile.delimiter_small_points},profile.delimiter_small_facts,entry.codepoint),
+        entry.metrics[if (style == "script") 1 else if (style == "scriptscript") 2 else 0])
 }
 
 fn style_facts(profile, style) => [for (entry in profile.style_faces where entry.style == style) entry.facts][0]

@@ -1,0 +1,16 @@
+{
+  "name":"dtna timeline directions and exact statistic",
+  "html":"test/ui/dtna/timeline_statistic.ls",
+  "viewport":{"width":600,"height":500},
+  "events":[
+    {"type":"assert_count","target":{"selector":"#alternate .dtna-timeline-item"},"count":4},
+    {"type":"assert_count","target":{"selector":"#alternate .dtna-timeline-pending .dtna-icon"},"count":1},
+    {"type":"assert_count","target":{"selector":"#horizontal .dtna-timeline-content"},"count":3},
+    {"type":"assert_text","target":{"selector":"#exact .dtna-statistic-integer"},"equals":"-12,345,678,901,234,567,890"},
+    {"type":"assert_text","target":{"selector":"#exact .dtna-statistic-fraction"},"equals":".98"},
+    {"type":"assert_attribute","target":{"selector":"#pending"},"attribute":"aria-busy","equals":"true"},
+    {"type":"assert_pixel","x":264,"y":60,"min_r":210,"max_r":225,"min_g":210,"max_g":225,"min_b":210,"max_b":225},
+    {"type":"assert_pixel","x":180,"y":229,"min_r":210,"max_r":225,"min_g":210,"max_g":225,"min_b":210,"max_b":225},
+    {"type":"render","file":"temp/ui_dtna/timeline_statistic.png"}
+  ]
+}

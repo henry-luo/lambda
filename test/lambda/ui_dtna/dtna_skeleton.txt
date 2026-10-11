@@ -1,0 +1,1 @@
+[["default loading", true], ["default paragraph", true], ["avatar dimensions", true], ["title width", true], ["row widths", true], ["zero rows", true], ["loading transition", true], ["standalone avatar", true], ["standalone button", true], ["standalone image", true], ["custom node", true], ["invalid options", true], ["invalid dimensions", true], ["invalid flags", true]]

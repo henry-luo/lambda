@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html><head><style>
+body{margin:0;font:14px "Liberation Sans"}#scope{position:absolute;left:20px;top:20px;width:200px;height:100px;background:#ddd}
+#branch{position:absolute;left:10px;top:10px;width:180px;height:60px;background:#ccc}
+#a,#b{position:absolute;top:0;width:60px;height:50px;background:#aaa}#a{left:0}#b{left:70px}
+#outside{position:absolute;left:300px;top:20px;width:80px;height:100px;background:#eee}
+output{display:block;position:absolute;top:150px;overflow-wrap:anywhere}
+</style></head><body>
+<div id="scope"><div id="branch"><span id="a"></span><span id="b"></span></div></div>
+<div id="outside"></div><output id="trace"></output><output id="flags" style="top:220px"></output>
+<script>
+var trace = [];
+['scope','branch','a','b'].forEach(function(id) {
+  var node = document.getElementById(id);
+  ['mouseenter','mouseleave'].forEach(function(type) {
+    node.addEventListener(type, function(event) {
+      trace.push(type + ':' + id + ':' + (event.relatedTarget ? event.relatedTarget.id : 'null'));
+      document.getElementById('trace').textContent = trace.join('|');
+      document.getElementById('flags').textContent = [event.bubbles,event.cancelable,event.composed].join(':');
+    });
+  });
+});
+</script></body></html>

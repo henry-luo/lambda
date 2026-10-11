@@ -545,6 +545,10 @@ fn font_radical(n, c) {
 
 fn accent(n, c, attached = null) {
     let key = command_name(string(n.cmd))
+    let arrow_recipe = if (starts_with(key,"over")) sym.tex_arrow(slice(key,4,len(key)))
+        else if (starts_with(key,"under")) sym.tex_arrow(slice(key,5,len(key))) else null;
+    if (arrow_recipe != null and c.profile.tex != null) arrow_accent(n,c,arrow_recipe,attached)^
+    else {
     let bracket = contains(["overbracket", "underbracket"], key)
     let base = node(n.base, if (bracket) with_style(c,"display")
         else if (key == "underline") c else {*:c, cramped: true})^
@@ -598,6 +602,7 @@ fn accent(n, c, attached = null) {
         if (attached != null and base.character != true) side_scripts(attached, c, result)^ else result
         }
     }
+    }
 }
 
 fn overunder(n, c) {
@@ -609,6 +614,9 @@ fn overunder(n, c) {
 
 fn arrow(n, c) {
     let key = command_name(string(n.cmd))
+    let designed = sym.tex_arrow(slice(key,1,len(key)));
+    if (designed != null and c.profile.tex != null) tex_labelled_arrow(n,c,designed)^
+    else {
     let ch = if (contains(key, "leftright")) "↔" else if (contains(key, "left")) "←" else "→"
     let upper_node = n.upper or n.label or n.above or n.over
     let lower_node = n.lower or n.below or n.under
@@ -623,6 +631,80 @@ fn arrow(n, c) {
                 metric(c, "axis_height"), metric(c, "fraction_rule_thickness"))^
         else arrow_shape(key, max(width, 1.75 * font.UNITS * scale(c)), c);
     limits_box(base, if (lower_node != null) lower else null, if (upper_node != null) upper else null, c)
+    }
+}
+
+fn tex_arrow_fill(recipe, width, c) {
+    let parts = [for (ch in [recipe.left,recipe.middle,recipe.right]) (
+        let b = bx.glyph(font.tex_arrow_symbol(c.profile,ch,c.style)^,scale(c)),
+        // AMS relbar smashes the minus box, retaining the glyph's ink and baseline.
+        if (ch == "−") {*:b,height:0.0,depth:0.0} else b)];
+    stretch.tex_arrow(parts[0],parts[1],parts[2],width,math_quad(c) / 18.0,dimension("1pt",c) / 65536.0)
+}
+
+fn arrow_argument_present(n) {
+    let items = if (n is element) content(n) else [];
+    // TeX strips one enclosing brace group from an entire delimited optional argument.
+    if (n is element and name(n) == 'brack_group' and len(items) == 1 and
+        items[0] is element and name(items[0]) == 'group') arrow_argument_present(items[0])
+    else n != null and (if (n is element and contains(['group','brack_group'],name(n))) len(items) > 0
+        else if (n is array or n is string) len(n) > 0 else true)
+}
+
+fn arrow_label(n, c, recipe, kerns) {
+    let body = node(n,c)^
+    // Math control-space is text-font space, even inside script/scriptscript labels.
+    let space = c.profile.delimiter_data.text_space * text_scale(c)
+    let sp = dimension("1pt",c) / 65536.0
+    let mu = floor(floor(math_quad(c) / sp + 0.5) / 18.0) * sp;
+    bx.row([bx.empty(kerns[0] * mu + recipe.spaces[0] * space),body,
+        bx.empty(kerns[1] * mu + recipe.spaces[1] * space)])
+}
+
+fn tex_labelled_arrow(n, c, recipe) {
+    let upper = n.upper or n.label or n.above or n.over
+    let lower = n.lower or n.below or n.under
+    // ext@arrow measures in explicit scriptstyle, and builds its filler in displaystyle.
+    let measure_context = with_style(c,"script")
+    let width = max([n.min_width or 0.0,arrow_label(upper,measure_context,recipe,recipe.measure)^.width,
+        arrow_label(lower,measure_context,recipe,recipe.measure)^.width])
+    let base = tex_arrow_fill(recipe,width,with_style(c,"display"))^
+    let forced = sum(recipe.spaces) > 0;
+    limits_box(base,
+        if (forced or arrow_argument_present(lower)) arrow_label(lower,{*:script(c),cramped:true},recipe,recipe.attach)^ else null,
+        if (forced or arrow_argument_present(upper)) arrow_label(upper,script(c),recipe,recipe.attach)^ else null,c)
+}
+
+// amsgen compute@ex@: a text-size-dependent point length, not fontdimen5.
+fn ams_ex_fuzz(steps, fuzz = 65536.0) => if (steps <= 0) fuzz
+    // scan_dimen truncates .97 (63570/65536) times an internal dimension.
+    else ams_ex_fuzz(steps - 1,floor(fuzz * 63570.0 / 65536.0))
+
+fn ams_ex(c) {
+    let pt = dimension("1pt",c)
+    let size = floor(font.UNITS * text_scale(c) / pt * 65536.0 + 0.5)
+    let delta = 2.0 * (10.0 * 65536.0 - size)
+    let steps = max(0,int(ceil((abs(delta) - 1000.0) / 65536.0)));
+    pt / 65536.0 * (if (size > 20.0 * 65536.0) 98304.0 else
+        65536.0 + (if (delta > 0.0) -1.0 else 1.0) * (65536.0 - ams_ex_fuzz(steps)))
+}
+
+fn arrow_accent(n, c, recipe, attached) {
+    // mathpalette selects an explicit, uncramped style for both alignment rows.
+    let chosen = with_style(c,c.style)
+    let body = node(n.base,chosen)^
+    let mark = tex_arrow_fill(recipe,body.width,chosen)^
+    let width = max(body.width,mark.width)
+    let above = starts_with(command_name(string(n.cmd)),"over")
+    let sp = dimension("1pt",c) / 65536.0
+    // The macro's 1.3 register multiplier is 85197/65536, truncated to scaled points.
+    let gap = floor(ams_ex(c) / sp * 85197.0 / 65536.0) * sp
+    let y = if (above) 0.0 - body.height - mark.depth else body.depth + gap + mark.height
+    let result = bx.compose([{box:body,x:(width - body.width) / 2.0,y:0.0},
+        {box:mark,x:0.0,y:y}],width);
+    // The macro ends in mathchoice, so unbraced following scripts get an empty noad.
+    // An authored enclosing group instead receives the normal compound-nucleus scripts.
+    if (attached != null) bx.row([result,side_scripts(attached,c,bx.empty())^]) else result
 }
 
 // Shafts grow with the label; hooks and arrowheads keep their em-sized geometry.

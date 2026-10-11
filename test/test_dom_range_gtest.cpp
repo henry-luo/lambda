@@ -92,6 +92,7 @@ protected:
     }
 
     void TearDown() override {
+        // production creators register arena-owned nodes; release their records before the arena.
         dom_lifecycle_destroy(&doc_storage);
         if (arena) arena_destroy(arena);
         tu_teardown_pool(pool);

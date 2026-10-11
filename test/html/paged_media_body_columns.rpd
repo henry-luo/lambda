@@ -1,0 +1,23 @@
+<?xml version="1.0"?>
+<r:page-document xmlns:r="urn:lambda:radiant:page" style="margin:0;font-family:Arial;font-size:10px;line-height:25px;color:black;orphans:1;widows:1" r:line-stacking-strategy="max-height" r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" r:linefeed-treatment="treat-as-space" r:white-space-treatment="ignore-if-surrounding-linefeed" r:white-space-collapse="true" r:wrap-option="wrap">
+  <r:master-set r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics"><r:page-master r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" name="sheet" style="size:240px 180px;margin:15px"><r:region r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" role="body" name="xsl-region-body" style="column-count:2;column-gap:18px;overflow:hidden"/></r:page-master></r:master-set>
+  <r:page-sequence r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" master-reference="sheet" force-page-count="no-force"><r:flow r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" region-name="xsl-region-body">
+    <div r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" r:block-inline-geometry="reference" style="margin:0;background-color:#f2cccc">Column item 1</div>
+    <div r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" r:block-inline-geometry="reference" style="margin:0;background-color:#cce5ff">Column item 2</div>
+    <div r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" r:block-inline-geometry="reference" style="margin:0;background-color:#d5efcd">Column item 3</div>
+    <div r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" r:block-inline-geometry="reference" style="margin:0;background-color:#fff0bd">Column item 4</div>
+    <div r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" r:block-inline-geometry="reference" style="margin:0;background-color:#e8d5f4">Column item 5</div>
+    <div r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" r:block-inline-geometry="reference" style="margin:0;background-color:#ccece8">Column item 6</div>
+    <div r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" r:block-inline-geometry="reference" style="margin:0;background-color:#f2cccc">Column item 7</div>
+    <div r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" r:block-inline-geometry="reference" style="margin:0;background-color:#cce5ff">Column item 8</div>
+    <div r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" r:block-inline-geometry="reference" style="margin:0;background-color:#d5efcd">Column item 9</div>
+    <div r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" r:block-inline-geometry="reference" style="margin:0;background-color:#fff0bd">Column item 10</div>
+    <div r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" r:block-inline-geometry="reference" style="margin:0;background-color:#e8d5f4">Column item 11</div>
+    <div r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" r:block-inline-geometry="reference" style="margin:0;background-color:#ccece8">Column item 12</div>
+    <div r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" r:block-inline-geometry="reference" style="margin:0;background-color:#f2cccc">Column item 13</div>
+    <div r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" r:block-inline-geometry="reference" style="margin:0;background-color:#cce5ff">Column item 14</div>
+    <div r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" r:block-inline-geometry="reference" style="margin:0;background-color:#d5efcd;break-before:column">Column item 15</div>
+    <div r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" r:block-inline-geometry="reference" style="margin:0;background-color:#fff0bd;break-before:page">Column item 16</div>
+    <div r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" r:block-inline-geometry="reference" style="margin:0;background-color:#e8d5f4;break-before:column">Column item 17</div>
+  </r:flow></r:page-sequence>
+</r:page-document>

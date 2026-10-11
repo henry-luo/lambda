@@ -1,0 +1,441 @@
+{
+  "name": "dtna Segmented sizes icons block vertical RTL keyboard controlled requests and form entries",
+  "html": "test/ui/dtna/segmented_modes.ls",
+  "viewport": {
+    "width": 600,
+    "height": 650
+  },
+  "events": [
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#seg-block"
+      },
+      "tolerance": 0.2,
+      "width": 300,
+      "height": 32
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#seg-vertical"
+      },
+      "tolerance": 0.2,
+      "width": 180,
+      "height": 88
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#seg-small"
+      },
+      "tolerance": 0.2,
+      "width": 240,
+      "height": 24
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#seg-large"
+      },
+      "tolerance": 0.2,
+      "width": 320,
+      "height": 40
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#seg-round"
+      },
+      "tolerance": 0.2,
+      "width": 240,
+      "height": 32
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#seg-rtl"
+      },
+      "tolerance": 0.2,
+      "width": 300,
+      "height": 32
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#seg-block-item-0"
+      },
+      "tolerance": 0.2,
+      "relative_to": "#seg-block",
+      "x": 2,
+      "y": 2,
+      "width": 98.66666666666667,
+      "height": 28
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#seg-block-item-2"
+      },
+      "tolerance": 0.2,
+      "relative_to": "#seg-block",
+      "x": 199.33333333333334,
+      "y": 2,
+      "width": 98.66666666666667,
+      "height": 28
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#seg-vertical-item-0"
+      },
+      "tolerance": 0.2,
+      "relative_to": "#seg-vertical",
+      "x": 2,
+      "y": 2,
+      "width": 176,
+      "height": 28
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#seg-vertical-item-2"
+      },
+      "tolerance": 0.2,
+      "relative_to": "#seg-vertical",
+      "x": 2,
+      "y": 58,
+      "width": 176,
+      "height": 28
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#seg-small-item-0"
+      },
+      "tolerance": 0.2,
+      "height": 20
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#seg-large-item-0"
+      },
+      "tolerance": 0.2,
+      "height": 36
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#seg-rtl-item-0"
+      },
+      "tolerance": 0.2,
+      "relative_to": "#seg-rtl",
+      "x": 199.33333333333334,
+      "y": 2,
+      "width": 98.66666666666667,
+      "height": 28
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#seg-rtl-item-2"
+      },
+      "tolerance": 0.2,
+      "relative_to": "#seg-rtl",
+      "x": 2,
+      "y": 2,
+      "width": 98.66666666666667,
+      "height": 28
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#seg-vertical"
+      },
+      "attribute": "aria-orientation",
+      "equals": "vertical"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#seg-block"
+      },
+      "attribute": "role",
+      "equals": "radiogroup"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".dtna-choice-icon svg"
+      },
+      "count": 18
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "[role=radiogroup]"
+      },
+      "count": 9
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".dtna-choice:disabled"
+      },
+      "count": 11
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#seg-block-item-0"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#seg-count"
+      },
+      "equals": "0"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#seg-block-item-2"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#seg-count"
+      },
+      "equals": "1"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#seg-request"
+      },
+      "equals": "seg-block:3"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#seg-type"
+      },
+      "equals": "int"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#seg-block-item-2"
+      },
+      "attribute": "aria-checked",
+      "equals": "true"
+    },
+    {
+      "type": "assert_focus",
+      "target": {
+        "selector": "#seg-block-item-2"
+      }
+    },
+    {
+      "type": "key_press",
+      "key": "left"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#seg-block-item-0"
+      },
+      "attribute": "aria-checked",
+      "equals": "true"
+    },
+    {
+      "type": "assert_focus",
+      "target": {
+        "selector": "#seg-block-item-0"
+      }
+    },
+    {
+      "type": "key_press",
+      "key": "right"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#seg-block-item-2"
+      },
+      "attribute": "aria-checked",
+      "equals": "true"
+    },
+    {
+      "type": "key_press",
+      "key": "home"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#seg-block-item-0"
+      },
+      "attribute": "aria-checked",
+      "equals": "true"
+    },
+    {
+      "type": "key_press",
+      "key": "end"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#seg-block-item-2"
+      },
+      "attribute": "aria-checked",
+      "equals": "true"
+    },
+    {
+      "type": "key_press",
+      "key": "space"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#seg-count"
+      },
+      "equals": "5"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#seg-block-item-1"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#seg-count"
+      },
+      "equals": "5"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#seg-vertical-item-0"
+      }
+    },
+    {
+      "type": "key_press",
+      "key": "down"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#seg-vertical-item-2"
+      },
+      "attribute": "aria-checked",
+      "equals": "true"
+    },
+    {
+      "type": "assert_focus",
+      "target": {
+        "selector": "#seg-vertical-item-2"
+      }
+    },
+    {
+      "type": "key_press",
+      "key": "up"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#seg-vertical-item-0"
+      },
+      "attribute": "aria-checked",
+      "equals": "true"
+    },
+    {
+      "type": "key_press",
+      "key": "end"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#seg-vertical-item-2"
+      },
+      "attribute": "aria-checked",
+      "equals": "true"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#seg-fixed-item-2"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#seg-request"
+      },
+      "equals": "seg-fixed:3"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#seg-fixed-item-0"
+      },
+      "attribute": "aria-checked",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#seg-fixed-item-2"
+      },
+      "attribute": "aria-checked",
+      "equals": "false"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#seg-disabled-item-2"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#seg-count"
+      },
+      "equals": "9"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#seg-named-item-2"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#seg-count"
+      },
+      "equals": "10"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#seg-submit"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#seg-entries"
+      },
+      "equals": "choice:3"
+    },
+    {
+      "type": "render",
+      "file": "temp/ui_dtna/segmented_modes.png"
+    }
+  ]
+}

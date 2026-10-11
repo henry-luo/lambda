@@ -1214,7 +1214,7 @@ String* css_grid_serialize_placement(Pool* pool, const CssGridLineReference line
     return stringbuf_to_string(output);
 }
 
-enum CssValueSearch {CSS_SEARCH_VAR, CSS_SEARCH_PENDING, CSS_SEARCH_LENGTH_UNIT, CSS_SEARCH_DIMENSION, CSS_SEARCH_IMAGE_SET};
+enum CssValueSearch {CSS_SEARCH_VAR, CSS_SEARCH_PENDING, CSS_SEARCH_LENGTH_UNIT, CSS_SEARCH_DIMENSION, CSS_SEARCH_IMAGE_SET, CSS_SEARCH_PERCENTAGE};
 
 static bool css_value_matches_search(const CssValue* value, CssValueSearch search,
     CssUnit first, CssUnit second) {
@@ -1223,6 +1223,7 @@ static bool css_value_matches_search(const CssValue* value, CssValueSearch searc
     if (search == CSS_SEARCH_DIMENSION)
         return value->type == CSS_VALUE_TYPE_LENGTH || value->type == CSS_VALUE_TYPE_PERCENTAGE ||
             value->type == CSS_VALUE_TYPE_ANGLE || value->type == CSS_VALUE_TYPE_TIME;
+    if (search == CSS_SEARCH_PERCENTAGE) return value->type == CSS_VALUE_TYPE_PERCENTAGE;
     if (search == CSS_SEARCH_LENGTH_UNIT)
         return value->type == CSS_VALUE_TYPE_LENGTH &&
             (value->data.length.unit == first || value->data.length.unit == second);
@@ -1273,6 +1274,10 @@ bool css_value_contains_var_reference(const CssValue* value) {
 
 bool css_value_contains_pending_substitution(const CssValue* value) {
     return css_value_contains(CSS_SEARCH_PENDING, value);
+}
+
+bool css_value_contains_percentage(const CssValue* value) {
+    return css_value_contains(CSS_SEARCH_PERCENTAGE, value);
 }
 
 bool css_value_contains_length_unit(const CssValue* value, CssUnit first, CssUnit second) {

@@ -1,0 +1,11 @@
+{
+  starts: true,
+  moves_and_fires: true,
+  combat: true,
+  steering: true,
+  doors: true,
+  fixed_steps: true,
+  pause: true,
+  resume: true,
+  restart_manual: true
+}

@@ -1,0 +1,55 @@
+{
+  "name": "gallery description values stay clear of the next label",
+  "html": "test/ui/dtna_gallery.ls",
+  "viewport": {
+    "width": 1100,
+    "height": 1500
+  },
+  "events": [
+    {
+      "type": "assert_position",
+      "element_a": {
+        "selector": ".dtna-descriptions-grid .dtna-description:nth-child(1) dd"
+      },
+      "element_b": {
+        "selector": ".dtna-descriptions-grid .dtna-description:nth-child(2) dt"
+      },
+      "relation": "left_of",
+      "gap": 16,
+      "tolerance": 0.75
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": ".dtna-descriptions-grid .dtna-description:nth-child(2) dd"
+      },
+      "height": 22,
+      "tolerance": 0.2
+    },
+    {
+      "type": "resize",
+      "width": 900,
+      "height": 1500
+    },
+    {
+      "type": "assert_position",
+      "element_a": {
+        "selector": ".dtna-descriptions-grid .dtna-description:nth-child(1) dd"
+      },
+      "element_b": {
+        "selector": ".dtna-descriptions-grid .dtna-description:nth-child(2) dt"
+      },
+      "relation": "left_of",
+      "gap": 16,
+      "tolerance": 0.75
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": ".dtna-descriptions-grid .dtna-description:nth-child(2) dd"
+      },
+      "height": 22,
+      "tolerance": 0.2
+    }
+  ]
+}

@@ -29036,6 +29036,8 @@ static MIR_reg_t emit_index_value(MirTranspiler* mt, AstNode* field, bool use_na
 
 static MIR_reg_t emit_boxed_index_call(MirTranspiler* mt, AstFieldNode* field_node) {
     MIR_reg_t boxed_obj = transpile_box_item(mt, field_node->object);
+    // even a defect-capable receiver owns `last`; evaluate the receiver once.
+    mt->last_index_item_reg = boxed_obj;
     MIR_reg_t boxed_idx = transpile_box_item(mt, field_node->field);
     return emit_call_2(mt, "fn_index", MIR_T_I64,
         MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_obj),
@@ -29274,11 +29276,11 @@ static MirValue emit_index_result_value(MirTranspiler* mt, AstFieldNode* field_n
         }
         return publish(result, VALUE_REP_ITEM);
     };
+    MirLastIndexScope last_scope(mt, field_node->object);
     if (mir_expr_may_carry_defect(mt, field_node->object)) {
         // a success-only element witness cannot unbox the defect receiver arm
         return publish(emit_boxed_index_call(mt, field_node), VALUE_REP_ITEM);
     }
-    MirLastIndexScope last_scope(mt, field_node->object);
     // Index paths mix direct scalar loads with generic runtime reads.  The
     // descriptor must record the actual producer carrier, not the indexed
     // expression's semantic element type (D2.4.1-D2.4.3).
@@ -48088,55 +48090,14 @@ void lambda_register_mir_view_templates(Script* script) {
 
                     void* func_ptr = find_func(ctx, func_name);
                     if (func_ptr) {
-                        // determine specificity from the pattern
-                        TemplateSpecificity spec = TMPL_SPEC_CATCHALL;
-                        TypeId match_type = LMD_TYPE_ANY;
-                        const char* match_tag = NULL;
-                        int match_tag_len = 0;
-                        const TypeElmt* match_elmt = NULL;
-
-                        if (view->pattern) {
-                            AstNode* pat = view->pattern;
-                            if (pat->type) {
-                                TypeId tid = pat->type->type_id;
-                                if (tid == LMD_TYPE_TYPE) {
-                                    // unwrap TypeType to get the actual matched type
-                                    TypeType* tt = (TypeType*)pat->type;
-                                    if (tt->type && tt->type->type_id != LMD_TYPE_ANY) {
-                                        match_type = tt->type->type_id;
-                                        spec = TMPL_SPEC_SIMPLE_TYPE;
-                                        // extract element tag for element patterns
-                                        if (match_type == LMD_TYPE_ELEMENT) {
-                                            TypeElmt* elmt_type = (TypeElmt*)tt->type;
-                                            if (elmt_type->name.str && elmt_type->name.length > 0) {
-                                                match_tag = elmt_type->name.str;
-                                                match_tag_len = (int)elmt_type->name.length;
-                                                match_elmt = elmt_type;
-                                                spec = elmt_type->length > 0
-                                                    ? TMPL_SPEC_ELMT_ATTR : TMPL_SPEC_ELMT_TAG;
-                                            }
-                                        }
-                                    }
-                                } else if (tid != LMD_TYPE_ANY) {
-                                    match_type = tid;
-                                    spec = TMPL_SPEC_SIMPLE_TYPE;
-                                }
-                            }
-                        }
-
-                        // named templates have highest specificity
-                        if (view->name) spec = TMPL_SPEC_NAMED;
-
                         const char* tmpl_name = view->name ? view->name->chars : NULL;
                         template_registry_add(g_template_registry,
-                            tmpl_name, view->is_edit,
-                            (fn_ptr)func_ptr, spec,
-                            match_type, match_tag, match_tag_len,
-                            0, 0);
+                            tmpl_name, view->is_edit, (fn_ptr)func_ptr,
+                            TMPL_SPEC_CATCHALL, LMD_TYPE_ANY, NULL, 0, 0, 0);
 
                         // get the just-added entry (it's the last one)
                         TemplateEntry* tmpl_entry = g_template_registry->last;
-                        template_registry_set_element_pattern(tmpl_entry, match_elmt);
+                        template_registry_set_view_pattern(tmpl_entry, view);
                         template_registry_set_state_declarations(tmpl_entry, view);
 
                         // set template_ref for state store keying
@@ -48173,7 +48134,7 @@ void lambda_register_mir_view_templates(Script* script) {
 
                         log_debug("registered template '%s' func=%s spec=%d type=%d handlers=%d",
                             tmpl_name ? tmpl_name : "(anonymous)", func_name,
-                            (int)spec, (int)match_type, hidx);
+                            (int)tmpl_entry->specificity, (int)tmpl_entry->match_type_id, hidx);
                     } else {
                         log_error("MIR Direct: view function '%s' not found after JIT", func_name);
                     }

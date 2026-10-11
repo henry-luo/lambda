@@ -1,0 +1,31 @@
+{
+  "name": "declarative dtna gallery applies nested views and retains native interactions",
+  "html": "test/ui/dtna_gallery.ls",
+  "viewport": {"width":1100,"height":2400},
+  "events": [
+    {"type":"assert_count","target":{"selector":"[variant]"},"count":0},
+    {"type":"assert_count","target":{"selector":".dtna-card"},"count":6},
+    {"type":"assert_attribute","target":{"selector":".dtna-progress"},"attribute":"aria-valuenow","equals":"64"},
+    {"type":"assert_count","target":{"selector":".dtna-skeleton-title"},"count":1},
+    {"type":"assert_count","target":{"selector":".dtna-skeleton-line"},"count":2},
+    {"type":"assert_style","target":{"selector":"#gallery-purple"},"property":"background-color","equals":"rgb(114, 46, 209)"},
+    {"type":"assert_style","target":{"selector":"#gallery-square"},"property":"background-color","equals":"rgb(114, 46, 209)"},
+    {"type":"render","file":"temp/ui_dtna/declarative_gallery/gallery.png"},
+    {"type":"type","target":{"selector":"#gallery-name"},"text":"Ada"},
+    {"type":"assert_value","target":{"selector":"#gallery-name"},"equals":"Ada"},
+    {"type":"click","target":{"selector":"#gallery-switch"}},
+    {"type":"assert_checked","target":{"selector":"#gallery-switch"},"checked":true},
+    {"type":"click","target":{"selector":"#gallery-radio-b"}},
+    {"type":"assert_checked","target":{"selector":"#gallery-radio-a"},"checked":false},
+    {"type":"assert_checked","target":{"selector":"#gallery-radio-b"},"checked":true},
+    {"type":"click","target":{"selector":"#gallery-tabs-item-0"}},
+    {"type":"key_press","key":"right"},
+    {"type":"assert_text","target":{"selector":"#gallery-tabs-panel-1"},"equals":"Use arrow keys, Home and End."},
+    {"type":"assert_focus","target":{"selector":"#gallery-tabs-item-1"}},
+    {"type":"click","target":{"selector":"#gallery-pages [aria-label='Next page']"}},
+    {"type":"assert_text","target":{"selector":"#gallery-pages [aria-current=page]"},"equals":"2"},
+    {"type":"click","target":{"selector":"#gallery-alert .dtna-alert-close"}},
+    {"type":"assert_count","target":{"selector":"#gallery-alert"},"count":0},
+    {"type":"assert_value","target":{"selector":"#gallery-name"},"equals":"Ada"}
+  ]
+}

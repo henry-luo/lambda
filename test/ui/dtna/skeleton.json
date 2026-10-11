@@ -1,0 +1,15 @@
+{
+  "name":"dtna skeleton dimensions and loaded content",
+  "html":"test/ui/dtna/skeleton.ls",
+  "viewport":{"width":500,"height":500},
+  "events":[
+    {"type":"assert_count","target":{"selector":"#loading .dtna-skeleton-line"},"count":2},
+    {"type":"assert_attribute","target":{"selector":"#loading"},"attribute":"aria-busy","equals":"true"},
+    {"type":"assert_text","target":{"selector":"#ready"},"contains":"Ready content"},
+    {"type":"assert_rect","target":{"selector":"#avatar .dtna-skeleton-shape"},"width":48,"height":48,"tolerance":0.2},
+    {"type":"assert_rect","target":{"selector":"#input .dtna-skeleton-shape"},"width":160,"height":32,"tolerance":0.2},
+    {"type":"assert_count","target":{"selector":"#image svg"},"count":1},
+    {"type":"assert_text","target":{"selector":"#node"},"contains":"Chart"},
+    {"type":"render","file":"temp/ui_dtna/skeleton.png"}
+  ]
+}

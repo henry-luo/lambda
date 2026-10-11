@@ -1,0 +1,1 @@
+[["simple control", true], ["read only simple", true], ["small mode", true], ["last page range", true], ["zero range", true], ["localized total", true], ["single page hidden", true], ["multiple pages visible", true], ["invalid simple", true], ["invalid total option", true]]

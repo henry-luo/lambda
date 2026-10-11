@@ -124,6 +124,8 @@ let viewport = s.normalize(s.scene([
             <nav class: "controls", 'aria-label': "Scene controls", *[
                 <div class: "control-group", *[
                     <span class: "label", "PLAYBACK">,
+                    <button id: "auto-play", type: "button", 'aria-pressed': "false",
+                        title: "Automatically orbit, pan, tilt and zoom the camera", "Auto Play">,
                     <button id: "play", type: "button", 'aria-pressed': "true", "Pause">,
                     control("rewind", "↺", "Restart animation")
                 ]>,
@@ -144,7 +146,7 @@ let viewport = s.normalize(s.scene([
                     control("top", "Top", "View the rings from above"), control("side", "Side", "View the planet at its equator")
                 ]>
             ]>,
-            <p id: "navigation-help", "Drag to orbit · Pan mode or Shift-drag to move · Scroll to zoom · Arrow keys pan · Shift + arrows tilt · + / − zoom · R resets · Space pauses">,
+            <p id: "navigation-help", "Auto Play tours the camera · Drag to orbit · Pan mode or Shift-drag to move · Scroll to zoom · Arrow keys pan · Shift + arrows tilt · + / − zoom · R resets · Space pauses">,
             viewport,
             <div class: "caption", *[
                 <div *[

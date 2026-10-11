@@ -1,0 +1,12 @@
+{
+  "name":"SVG foreignObject formatting contexts inside flex and grid items",
+  "html":"test/ui/dtna/svg_foreign_flex_contracts.html",
+  "viewport":{"width":200,"height":200},
+  "events":[
+    {"type":"assert_rect","target":{"selector":"#flex-html"},"width":120,"height":80,"tolerance":0.1},
+    {"type":"assert_rect","target":{"selector":"#grid-html"},"width":120,"height":80,"tolerance":0.1},
+    {"type":"assert_pixel","x":10,"y":10,"max_r":0,"max_g":0,"min_b":255},
+    {"type":"assert_pixel","x":10,"y":110,"min_r":255,"max_g":0,"max_b":0},
+    {"type":"render","file":"temp/ui_dtna/svg_foreign_flex_contracts.png"}
+  ]
+}

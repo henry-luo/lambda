@@ -272,6 +272,7 @@ Item dom_engine_form_url(Item a);
 Item dom_engine_hover_index(Item a);
 Item dom_engine_option_count(Item a);
 Item dom_engine_capture_pointer(Item a);
+Item dom_engine_set_canvas_pixels(Item canvas, Item pixels);
 Item dom_engine_audio_open(Item a, Item b);
 Item dom_engine_audio_play(Item a, Item b, Item c);
 Item dom_engine_audio_pause(Item a, Item b);

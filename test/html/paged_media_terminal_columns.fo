@@ -1,0 +1,24 @@
+<?xml version="1.0"?>
+<fo:root xmlns:fo="http://www.w3.org/1999/XSL/Format" font-family="Arial" font-size="7.5pt" line-height="18.75pt">
+  <fo:layout-master-set>
+    <fo:simple-page-master master-name="normal" page-width="180pt" page-height="135pt" margin="11.25pt"><fo:region-body column-count="2" column-gap="13.5pt" overflow="hidden"/></fo:simple-page-master>
+    <fo:simple-page-master master-name="last" page-width="247.5pt" page-height="67.5pt" margin="11.25pt"><fo:region-body column-count="3" column-gap="11.25pt" overflow="hidden"/></fo:simple-page-master>
+    <fo:page-sequence-master master-name="chapter"><fo:repeatable-page-master-alternatives><fo:conditional-page-master-reference master-reference="last" page-position="last"/><fo:conditional-page-master-reference master-reference="normal"/></fo:repeatable-page-master-alternatives></fo:page-sequence-master>
+  </fo:layout-master-set>
+  <fo:page-sequence master-reference="chapter" force-page-count="no-force"><fo:flow flow-name="xsl-region-body">
+    <fo:block background-color="#f2cccc">Sheet 1 item 1</fo:block>
+    <fo:block background-color="#cce5ff">Sheet 1 item 2</fo:block>
+    <fo:block background-color="#d5efcd" break-before="column">Sheet 1 item 3</fo:block>
+    <fo:block background-color="#fff0bd">Sheet 1 item 4</fo:block>
+    <fo:block background-color="#f2cccc" break-before="page">Sheet 2 item 1</fo:block>
+    <fo:block background-color="#cce5ff">Sheet 2 item 2</fo:block>
+    <fo:block background-color="#d5efcd" break-before="column">Sheet 2 item 3</fo:block>
+    <fo:block background-color="#fff0bd">Sheet 2 item 4</fo:block>
+    <fo:block background-color="#f2cccc" break-before="page">Sheet 3 item 1</fo:block>
+    <fo:block background-color="#cce5ff">Sheet 3 item 2</fo:block>
+    <fo:block background-color="#d5efcd">Sheet 3 item 3</fo:block>
+    <fo:block background-color="#fff0bd">Sheet 3 item 4</fo:block>
+    <fo:block background-color="#e8d5f4">Sheet 3 item 5</fo:block>
+    <fo:block background-color="#ccece8">Sheet 3 item 6</fo:block>
+  </fo:flow></fo:page-sequence>
+</fo:root>

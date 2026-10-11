@@ -107,6 +107,11 @@ enum RadiantPageRuleSource : uint8_t { RADIANT_PAGE_CSS, RADIANT_PAGE_NATIVE };
 enum RadiantPageRegionRole : uint8_t { RADIANT_REGION_BEFORE, RADIANT_REGION_AFTER,
     RADIANT_REGION_START, RADIANT_REGION_END, RADIANT_REGION_BODY, RADIANT_REGION_EDGE_COUNT = 4 };
 enum RadiantRegionAlign : uint8_t { RADIANT_REGION_ALIGN_BEFORE, RADIANT_REGION_ALIGN_CENTER, RADIANT_REGION_ALIGN_AFTER };
+struct RadiantPageColumn {
+    DomNodeRef source;
+    const CssValue* geometry[4]; // inline/block start and inline/block size, relative to the body content box
+    RadiantPageColumn* next;
+};
 struct RadiantPageRegion {
     DomNodeRef source;
     const char* name;
@@ -117,6 +122,8 @@ struct RadiantPageRegion {
     RadiantRegionAlign align;
     bool precedence;
     bool zero_box;
+    RadiantPageColumn* columns;
+    uint32_t column_count;
 };
 
 struct RadiantPageRule {

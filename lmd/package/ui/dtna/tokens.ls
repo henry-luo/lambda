@@ -1,18 +1,18 @@
 import c: lambda.ui.core.component
+import math
 
 pub let defaults = {
     primary:"#1677ff", success:"#52c41a", warning:"#faad14", error:"#ff4d4f",
     text:"#1f1f1f", text_secondary:"#666666", border:"#d9d9d9", background:"#ffffff",
     surface:"#fafafa", disabled_background:"#f5f5f5", disabled_text:"#bfbfbf",
     font_family:"-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
-    font_size:14, control_height:32, radius:6, spacing:8, line_height:1.5715
+    font_size:14, control_height:32, radius:6, spacing:8, line_height:22/14
 }
 let digits = "0123456789abcdef"
 fn byte(hex, offset) => index_of(digits, lower(slice(hex, offset, offset + 1))) * 16 +
     index_of(digits, lower(slice(hex, offset + 1, offset + 2)))
 fn hex_byte(value) => slice(digits, int(value / 16), int(value / 16) + 1) ++ slice(digits, value % 16, value % 16 + 1)
-pub fn color(value) bool => if (value is string) len(value) == 7 and starts_with(value, "#") and
-    all([for (i in 1 to 6) (contains(digits, lower(slice(value, i, i + 1))) or false)]) else false
+pub fn color(value) bool => c.hex_color(value)
 // HSV palette schedule follows the published Ant Design light-color algorithm.
 // https://github.com/ant-design/ant-design-colors/blob/main/src/generate.ts
 fn hsv(seed) {
@@ -42,6 +42,28 @@ pub fn palette(seed) array^ {
     else (let base = hsv(seed), [*[for (step in [5,4,3,2,1]) shade(base,step,true)], lower(seed),
         *[for (step in [1,2,3,4]) shade(base,step,false)]])
 }
+// preserve HSL hue/saturation while setting the custom Tag background lightness.
+pub fn color_lightness(seed, lightness) string^ {
+    if (not color(seed) or not c.finite(lightness) or lightness < 0 or lightness > 1)
+        raise c.fail("color_lightness","expected #rrggbb and lightness in [0,1]")
+    else (
+        let base = hsv(seed),
+        let original = base.v*(2-base.s)/2,
+        let denominator = 1-abs(2*original-1),
+        let saturation = if (denominator == 0) 0 else base.v*base.s/denominator,
+        let value = lightness+saturation*min(lightness,1-lightness),
+        rgb_hex(base.h,if (value == 0) 0 else 2*(1-lightness/value),value)
+    )
+}
+// the pinned AntD font scale rounds exponential heading sizes down to even pixels.
+fn heading_tokens(base) {
+    let sizes = map([for (level in 1 to 5)
+        (symbol("font_size_heading_" ++ string(level)),2*floor(base*math.exp((6-level)/5)/2))]);
+    {*:sizes,*:map([for (key,value in sizes) (symbol(replace(string(key),"font_size","font_height")),value+8)])}
+}
+fn palette_tokens(values) => map([for (key in ["primary","error","success","warning"])
+    (let colors = palette(values[key])^,
+        *[for (part,index in {background:0,border:2,hover:4,active:6}) (symbol(key ++ "_" ++ string(part)),colors[index])])])
 pub fn resolve(overrides = {}) map^ {
     if (not (overrides is map)) raise c.fail("tokens", "overrides must be a map")
     else (
@@ -54,24 +76,25 @@ pub fn resolve(overrides = {}) map^ {
             c.finite(result[key]) and (if (key == "radius" or key == "spacing") result[key] >= 0 else result[key] > 0)])) raise c.fail("tokens", "dimensions must be positive numbers")
         else if (not (result.font_family is string) or any([for (char in [";","{","}","\n"]) contains(result.font_family,char)]))
             raise c.fail("tokens","font_family must be a CSS font-family value")
-        else (let primary = palette(result.primary)^,
-            {*:result, primary_hover:primary[4],primary_active:primary[6],primary_background:primary[0],
-                error_background:(palette(result.error)^)[0], success_background:(palette(result.success)^)[0],
-                warning_background:(palette(result.warning)^)[0]})
+        else (let colors = palette_tokens(result)^, let headings = heading_tokens(result.font_size),
+            let line_height = if (c.has(overrides,"line_height")) result.line_height else (result.font_size+8)/result.font_size,
+            if (not c.finite(line_height) or not all([for (key,value in headings) c.finite(value)])) raise c.fail("tokens","derived font dimensions must be finite")
+            else {*:result,line_height:line_height,*:colors,*:headings})
     )
 }
+fn variable(key, value) => "--dtna-" ++ replace(key,"_","-") ++ ":" ++ string(value) ++
+    (if (contains(["font_size","control_height","radius","spacing"],key) or
+        starts_with(key,"font_size_heading_") or starts_with(key,"font_height_heading_")) "px" else "") ++ ";"
 pub fn variables(overrides = {}) string^ {
     let values = resolve(overrides)^;
-    join([for (key, value in values)
-        "--dtna-" ++ replace(string(key), "_", "-") ++ ":" ++ string(value) ++
-        (if (contains(["font_size", "control_height", "radius", "spacing"], string(key))) "px" else "") ++ ";"], "")
+    join([for (key,value in values) variable(string(key),value)],"")
 }
-
 pub fn scoped_variables(overrides = {}) string^ {
     let values = resolve(overrides)^
-    let fields = [*[for (key, value in overrides) string(key)],
-        *[for (key in ["primary", "error", "success", "warning"] where contains(overrides,symbol(key))) key ++ "_background"],
-        *(if (contains(overrides,'primary')) ["primary_hover","primary_active"] else [])];
-    join([for (key in fields) "--dtna-" ++ replace(key,"_","-") ++ ":" ++ string(values[key]) ++
-        (if (contains(["font_size","control_height","radius","spacing"],key)) "px" else "") ++ ";"], "")
+    let fields = [*[for (key,value in overrides) string(key)],
+        *[for (key in ["primary","error","success","warning"] where c.has(overrides,key))
+            *[for (part in ["background","border","hover","active"]) key ++ "_" ++ part]],
+        *(if (c.has(overrides,"font_size")) [*[for (key,value in heading_tokens(values.font_size)) string(key)],
+            *(if (c.has(overrides,"line_height")) [] else ["line_height"])] else [])];
+    join([for (key in fields) variable(key,values[key])],"")
 }

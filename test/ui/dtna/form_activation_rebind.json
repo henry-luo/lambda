@@ -1,0 +1,20 @@
+{
+  "name": "native form activation follows author redraws of nested button hits",
+  "html": "test/ui/dtna/form_activation_rebind.ls",
+  "viewport": {"width": 700, "height": 400},
+  "events": [
+    {"type": "click", "target": {"selector": "#activation-submit span"}},
+    {"type": "assert_text", "target": {"selector": "#activation-clicks"}, "equals": "1"},
+    {"type": "assert_text", "target": {"selector": "#activation-submits"}, "equals": "1"},
+    {"type": "click", "target": {"selector": "#activation-draft"}},
+    {"type": "type", "target": {"selector": "#activation-draft"}, "text": "edit"},
+    {"type": "assert_value", "target": {"selector": "#activation-draft"}, "equals": "seededit"},
+    {"type": "click", "target": {"selector": "#activation-reset span"}},
+    {"type": "assert_text", "target": {"selector": "#activation-clicks"}, "equals": "2"},
+    {"type": "assert_text", "target": {"selector": "#activation-resets"}, "equals": "1"},
+    {"type": "assert_value", "target": {"selector": "#activation-draft"}, "equals": "seed"},
+    {"type": "key_press", "key": "space"},
+    {"type": "assert_text", "target": {"selector": "#activation-clicks"}, "equals": "3"},
+    {"type": "assert_text", "target": {"selector": "#activation-resets"}, "equals": "2"}
+  ]
+}

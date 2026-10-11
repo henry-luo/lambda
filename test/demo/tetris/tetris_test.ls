@@ -90,3 +90,19 @@ let restarted = game.action(topped, "restart")
   restart_fresh: restarted.seed != initial.seed,
   snapshot: sum(playing.board) == 0 and initial.mode == "ready"
 }
+
+let auto = game.action(initial, "auto")
+let auto_well = {*:auto, board: well, piece: game.spawn(0)}
+let auto_clear = reduce([{game: auto_well, plan: null}, *[for (i in 1 to 12) i]],
+  (acc, unused) => game.auto_step(acc.game, acc.plan))
+let auto_round = reduce([{game: auto, plan: null}, *[for (i in 1 to 120) i]],
+  (acc, unused) => game.auto_step(acc.game, acc.plan))
+{
+  auto_starts: auto.autoplay and auto.mode == "playing",
+  auto_uses_rotation_and_clears: auto_clear.game.lines >= 4,
+  auto_builds_and_scores: auto_round.game.score > 0 and auto_round.game.lines > 0,
+  auto_survives: auto_round.game.mode == "playing",
+  auto_pause_freezes: game.auto_step(game.action(auto, "pause")).game.mode == "paused",
+  auto_resume: game.action(game.action(auto, "pause"), "pause").autoplay,
+  auto_restart_manual: not game.action(auto, "restart").autoplay
+}

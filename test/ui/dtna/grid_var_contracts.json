@@ -1,0 +1,13 @@
+{
+  "name":"generic grid placement preserves substituted span tokens",
+  "html":"test/ui/dtna/grid_var_contracts.html",
+  "viewport":{"width":500,"height":200},
+  "events":[
+    {"type":"assert_rect","target":{"selector":"#literal"},"width":240,"tolerance":0.2},
+    {"type":"assert_rect","target":{"selector":"#variable"},"width":240,"tolerance":0.2},
+    {"type":"assert_rect","target":{"selector":"#longhand"},"width":240,"tolerance":0.2},
+    {"type":"assert_rect","target":{"selector":"#responsive"},"width":120,"tolerance":0.2},
+    {"type":"resize","width":800,"height":200},
+    {"type":"assert_rect","target":{"selector":"#responsive"},"width":240,"tolerance":0.2}
+  ]
+}

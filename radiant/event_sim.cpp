@@ -644,7 +644,7 @@ static View* resolve_editing_range_view(DomDocument* doc, SimEvent* ev,
 // ============================================================================
 
 typedef struct {
-    CssSelector* selector;
+    CssSelectorGroup* group;
     SelectorMatcher* matcher;
     View* result;
     int target_index;   // which match to return (0-based)
@@ -656,7 +656,7 @@ static bool sim_selector_visitor(View* view, void* udata) {
     SimSelectorCtx* ctx = (SimSelectorCtx*)udata;
     if (!view->is_element()) return true;
     DomElement* dom_elem = lam::dom_require_element(view);
-    if (selector_matcher_matches(ctx->matcher, ctx->selector, dom_elem, NULL)) {
+    if (selector_matcher_matches_group(ctx->matcher, ctx->group, dom_elem, NULL)) {
         if (ctx->target_index >= 0) {
             if (ctx->current_match == ctx->target_index) {
                 ctx->result = view;
@@ -685,27 +685,14 @@ static void sim_flush_pending_reflow(DomDocument* doc) {
 // Each lookup parses into the caller's scratch query, so repeated automation
 // selectors do not accumulate in the document pool under test.
 static bool sim_parse_selector(DomDocument* doc, const char* selector_text,
-                               SelectorQueryScratch* query,
-                               CssSelector** out_selector) {
-    if (out_selector) *out_selector = nullptr;
-    if (!doc || !selector_text || !query || !out_selector) return false;
-    Pool* pool = query->ensure_pool();
-    if (!pool) return false;
-
-    size_t token_count = 0;
-    CssToken* tokens = css_tokenize(selector_text, strlen(selector_text),
-                                    pool, &token_count);
-    if (!tokens || token_count == 0) return false;
-    int pos = 0;
-    CssSelector* selector = css_parse_selector_with_combinators(
-        tokens, &pos, (int)token_count, pool);
-    css_token_array_release(pool, tokens, token_count);
-    if (!selector) return false;
+                               SelectorQueryScratch* query) {
+    if (!doc || !selector_text || !query) return false;
+    // parse the complete DOM selector list rather than silently ignoring its tail.
+    if (!query->parse_list(selector_text)) return false;
     // Automation assertions must use the DOM resolver so option:selected sees
     // live IDL selectedness rather than only the layout StateStore bit.
-    query->matcher = (SelectorMatcher*)dom_create_selector_matcher_bridge(doc, pool);
+    query->matcher = (SelectorMatcher*)dom_create_selector_matcher_bridge(doc, query->pool);
     if (!query->matcher) return false;
-    *out_selector = selector;
     return true;
 }
 
@@ -716,14 +703,13 @@ static View* find_element_by_selector(DomDocument* doc, const char* selector_tex
     if (flush_reflow) sim_flush_pending_reflow(doc);
 
     SelectorQueryScratch query;
-    CssSelector* selector = nullptr;
-    if (!sim_parse_selector(doc, selector_text, &query, &selector)) {
+    if (!sim_parse_selector(doc, selector_text, &query)) {
         log_error("event_sim: failed to tokenize selector '%s'", selector_text);
         return NULL;
     }
 
     SimSelectorCtx ctx = {0};
-    ctx.selector = selector;
+    ctx.group = query.group;
     ctx.matcher = query.matcher;
     ctx.result = NULL;
     ctx.target_index = index;
@@ -744,11 +730,10 @@ static int count_elements_by_selector(DomDocument* doc, const char* selector_tex
     sim_flush_pending_reflow(doc);
 
     SelectorQueryScratch query;
-    CssSelector* selector = nullptr;
-    if (!sim_parse_selector(doc, selector_text, &query, &selector)) return 0;
+    if (!sim_parse_selector(doc, selector_text, &query)) return 0;
 
     SimSelectorCtx ctx = {0};
-    ctx.selector = selector;
+    ctx.group = query.group;
     ctx.matcher = query.matcher;
     ctx.target_index = -1;
 

@@ -1,0 +1,11 @@
+{"name":"Lambda canvas RGBA bridge","html":"test/demo/photo/tests/_canvas_bridge.ls","viewport":{"width":400,"height":300},"events":[
+ {"type":"assert_attribute","target":{"selector":"#canvas"},"attribute":"width","equals":"2"},
+ {"type":"assert_pixel","x":25,"y":25,"min_r":254,"max_g":1,"max_b":1},
+ {"type":"assert_pixel","x":175,"y":25,"min_g":254,"min_r":126,"max_r":129,"min_b":126,"max_b":129},
+ {"type":"assert_pixel","x":175,"y":175,"min_r":254,"min_g":254,"min_b":254},
+ {"type":"click","target":{"selector":"#swap"}},
+ {"type":"assert_pixel","x":175,"y":25,"min_r":254,"max_g":1,"max_b":1},
+ {"type":"click","target":{"selector":"#reject"}},
+ {"type":"assert_attribute","target":{"selector":"#fixture"},"attribute":"data-rejected","equals":"true"},
+ {"type":"assert_pixel","x":175,"y":25,"min_r":254,"max_g":1,"max_b":1}
+]}

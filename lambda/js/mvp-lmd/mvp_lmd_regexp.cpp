@@ -1,6 +1,7 @@
 #include "mvp_lmd_runtime.h"
 #include "../js_regexp_compile.h"
 #include "../js_bt_regex.h"
+#include "../js_regex_wrapper.h"
 #include "../../runtime/lambda-root-frame.hpp"
 #include "../../runtime/runtime-state.h"
 #include "../../runtime/heap_api.h"
@@ -33,6 +34,31 @@ static StrBuf* regexp_buffer(String* source, bool unicode) {
     }
     return buffer;
 }
+struct MvpLmdRegExpInput {
+    StrBuf view = {};
+    StrBuf* owned = NULL;
+    size_t units = 0;
+    bool ascii = false;
+    MvpLmdRegExpInput(String* source, bool unicode) {
+        if (!source) return;
+        ascii = source->is_ascii;
+        // strings are rooted by the caller; only non-u surrogate splitting needs a copy.
+        if (ascii || unicode) view = {source->chars, source->len, source->len};
+        else {
+            owned = regexp_buffer(source, false);
+            if (owned) view = *owned;
+        }
+        units = ascii ? view.length : utf8_to_utf16_length(view.str, view.length);
+    }
+    ~MvpLmdRegExpInput() { if (owned) strbuf_free(owned); }
+    size_t byte_offset(size_t unit) const {
+        return ascii ? (unit < view.length ? unit : view.length) :
+            utf16_to_utf8_offset(view.str, view.length, unit);
+    }
+    size_t unit_offset(size_t byte) const {
+        return ascii ? byte : utf8_to_utf16_offset(view.str, view.length, byte);
+    }
+};
 extern "C" Item mvp_lmd_regexp_new(MvpLmdLibraryState* state, Item pattern, Item flags) {
     if (!state) return mvp_lmd_fail(LMD_MVP_CAPABILITY, 0);
     RootFrame roots(4);
@@ -103,7 +129,7 @@ extern "C" Item mvp_lmd_regexp_new(MvpLmdLibraryState* state, Item pattern, Item
     return item_is_error(result) ? result : owner.get();
 }
 
-static Item regexp_result(MvpLmdLibraryState* state, Item source, StrBuf* input,
+static Item regexp_result(MvpLmdLibraryState* state, Item source, const MvpLmdRegExpInput* input,
         JsBtRegex* compiled, int* starts, int* ends, int count) {
     RootFrame roots(4);
     if (!roots.valid()) return ItemError;
@@ -113,8 +139,8 @@ static Item regexp_result(MvpLmdLibraryState* state, Item source, StrBuf* input,
     for (int i = 0; i < count; i++) {
         value.set(Item{.item = ITEM_JS_UNDEFINED});
         if (starts[i] >= 0) {
-            size_t a = utf8_to_utf16_offset(input->str, input->length, starts[i]);
-            size_t b = utf8_to_utf16_offset(input->str, input->length, ends[i]);
+            size_t a = input->unit_offset(starts[i]);
+            size_t b = input->unit_offset(ends[i]);
             value.set(mvp_lmd_string_range(original.get(), a, b, 1));
             if (item_is_error(value.get())) return value.get();
         }
@@ -134,14 +160,15 @@ static Item regexp_result(MvpLmdLibraryState* state, Item source, StrBuf* input,
             if (item_is_error(stored)) return stored;
         }
     }
-    Item stored = mvp_lmd_named_set(result.get(), "index", Item{.item = i2it(utf8_to_utf16_offset(input->str, input->length, starts[0]))});
+    Item stored = mvp_lmd_named_set(result.get(), "index", Item{.item = i2it(input->unit_offset(starts[0]))});
     if (item_is_error(stored)) return stored;
     stored = mvp_lmd_named_set(result.get(), "input", original.get());
     if (item_is_error(stored)) return stored;
     stored = mvp_lmd_named_set(result.get(), "groups", groups.get());
     return item_is_error(stored) ? stored : result.get();
 }
-static Item regexp_exec(MvpLmdLibraryState* state, Item regex, Item string, bool test) {
+static Item regexp_exec(MvpLmdLibraryState* state, Item regex, Item string, bool test,
+        const MvpLmdRegExpInput* prepared = NULL) {
     MvpLmdRegExp* object = regexp_record(regex, state);
     if (!object) return mvp_lmd_fail(LMD_MVP_TYPE, 0);
     RootFrame roots(3);
@@ -154,24 +181,25 @@ static Item regexp_exec(MvpLmdLibraryState* state, Item regex, Item string, bool
     double start = it2d(number);
     bool stateful = object->flags.global || object->flags.sticky;
     start = !stateful || isnan(start) || start < 0 ? 0 : floor(start);
-    StrBuf* input = regexp_buffer(source.get().get_string(), object->flags.unicode);
-    if (!input) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
+    MvpLmdRegExpInput local(prepared ? NULL : source.get().get_string(), object->flags.unicode);
+    const MvpLmdRegExpInput* input = prepared ? prepared : &local;
+    if (!input->view.str) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
     int count = js_bt_group_count(object->compiled) + 1;
-    int* matches = (int*)mem_alloc(count * 2 * sizeof(int), MEM_CAT_JS_RUNTIME);
-    if (!matches) { strbuf_free(input); return mvp_lmd_fail(LMD_MVP_MEMORY, 0); }
+    JsRegexScratch<int> scratch(count * 2);
+    if (scratch.count < count * 2) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
+    int* matches = scratch.slots;
     int found = 0;
-    size_t units = utf8_to_utf16_length(input->str, input->length);
-    if (start <= units) found = js_bt_exec(object->compiled, input->str, input->length,
-        utf16_to_utf8_offset(input->str, input->length, (size_t)start), object->flags.sticky,
+    if (start <= input->units) found = js_bt_exec(object->compiled, input->view.str, input->view.length,
+        input->byte_offset((size_t)start), object->flags.sticky,
         matches, matches + count, count);
     if (found < 0) result.set(mvp_lmd_fail(found == JS_BT_EXEC_ALLOCATION_FAILURE ? LMD_MVP_MEMORY : LMD_MVP_RANGE, 0));
     else {
         if (stateful) result.set(mvp_lmd_named_set(held.get(), "lastIndex", Item{.item = i2it(found ?
-            utf8_to_utf16_offset(input->str, input->length, matches[count]) : 0)}));
+            input->unit_offset(matches[count]) : 0)}));
         if (!item_is_error(result.get())) result.set(!found ? (test ? Item{.item = ITEM_FALSE} : ItemNull) :
             test ? Item{.item = ITEM_TRUE} : regexp_result(state, source.get(), input, object->compiled, matches, matches + count, count));
     }
-    mem_free(matches); strbuf_free(input); return result.get();
+    return result.get();
 }
 static Item regexp_construct(Context*, MvpLmdProgram*, Item* args, uint64_t count, Item self, Item, Item target) {
     MvpLmdLibraryState* state = (MvpLmdLibraryState*)((MvpLmdNativeCallable*)self.function)->state;
@@ -309,24 +337,23 @@ extern "C" Item mvp_lmd_regexp_string_method(MvpLmdLibraryState* state, Item sou
     if (item_is_error(records.get())) return records.get();
     MvpLmdRegExp* compiled = regexp_record(regex.get(), state);
     bool global = compiled && compiled->flags.global;
+    MvpLmdRegExpInput input(original.get().get_string(), compiled && compiled->flags.unicode);
+    if (!input.view.str) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
     if (global) {
         result.set(mvp_lmd_named_set(regex.get(), "lastIndex", Item{.item = i2it(0)}));
         if (item_is_error(result.get())) return result.get();
     }
     do {
-        if (compiled) match.set(regexp_exec(state, regex.get(), original.get(), false));
+        if (compiled) match.set(regexp_exec(state, regex.get(), original.get(), false, &input));
         else {
             piece.set(mvp_lmd_primitive_to_string(regex.get()));
             if (item_is_error(piece.get())) return piece.get();
             String* haystack = original.get().get_string(), *needle = piece.get().get_string();
             int64_t start = utf16_find(haystack->chars, haystack->len, needle->chars, needle->len, 0);
             if (start < 0) break;
-            StrBuf* input = regexp_buffer(haystack, false);
-            if (!input) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
-            int a = utf16_to_utf8_offset(input->str, input->length, start);
-            int b = utf16_to_utf8_offset(input->str, input->length, start + utf8_to_utf16_length(needle->chars, needle->len));
-            match.set(regexp_result(state, original.get(), input, NULL, &a, &b, 1));
-            strbuf_free(input);
+            int a = input.byte_offset(start);
+            int b = input.byte_offset(start + utf8_to_utf16_length(needle->chars, needle->len));
+            match.set(regexp_result(state, original.get(), &input, NULL, &a, &b, 1));
         }
         if (item_is_error(match.get())) return match.get();
         if (match.get().item == ITEM_NULL) break;

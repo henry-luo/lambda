@@ -1,0 +1,13 @@
+<!doctype html>
+<style>
+body { margin: 0; font: 16px/1 monospace; }
+.range-row { display: flex; width: 100px; border: 1px solid black; }
+.range-grid { display: grid; border: 1px solid pink; }
+.range-grid input { min-width: 0; justify-self: stretch; margin: 2px; appearance: none; }
+.image-row, .image-grid { display: grid; }
+.image-grid img { height: auto; min-height: 100%; }
+#image-small { min-height: 40px; }
+</style>
+<div class="range-row"><div id="range-flex" class="range-grid"><input type="range"></div>abc</div>
+<div class="image-row"><div class="image-grid"><img id="image-zero" src="../svg_image_assets/large_split.png"></div></div>
+<div class="image-row"><div class="image-grid"><img id="image-small" src="../svg_image_assets/large_split.png"></div></div>

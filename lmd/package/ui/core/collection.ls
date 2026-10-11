@@ -38,5 +38,7 @@ pub fn move(items: array, key, direction) {
     else choices[(here + (if (direction == "ArrowLeft" or direction == "ArrowUp") len(choices) - 1 else 1)) % len(choices)].key
 }
 pub fn page_count(total, page_size) => max(1, int(ceil(total / page_size)))
+// a pager's work is bounded even when the dataset has millions of pages.
+pub fn page_window(page, total) => sort(unique([1,*[for (candidate in (page - 2) to (page + 2) where candidate > 1 and candidate < total) candidate],total]))
 pub fn page_rows(rows: array, current: int, page_size: int) array^ => slice(rows, (current - 1) * page_size, current * page_size)^
 pub fn order_rows(rows: array, key, direction) => if (key == null) rows else sort(rows, {dir:direction, by:(row) => row[key]})

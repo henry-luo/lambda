@@ -1,0 +1,26 @@
+{
+  "name": "native button text stays centered in flow and flex items while authored alignment wins",
+  "html": "test/ui/dtna/button_text_alignment_contracts.html",
+  "viewport": {"width": 650, "height": 300},
+  "events": [
+    {"type":"click","target":{"selector":"#probe"}},
+    {"type":"assert_attribute","target":{"selector":"#flow"},"attribute":"data-text-centered","equals":"true"},
+    {"type":"assert_attribute","target":{"selector":"#row"},"attribute":"data-text-centered","equals":"true"},
+    {"type":"assert_attribute","target":{"selector":"#small"},"attribute":"data-text-centered","equals":"true"},
+    {"type":"assert_attribute","target":{"selector":"#tall"},"attribute":"data-text-centered","equals":"true"},
+    {"type":"assert_attribute","target":{"selector":"#column"},"attribute":"data-text-centered","equals":"true"},
+    {"type":"assert_attribute","target":{"selector":"#stretch"},"attribute":"data-text-centered","equals":"true"},
+    {"type":"assert_attribute","target":{"selector":"#flex-start"},"attribute":"data-text-centered","equals":"false"},
+    {"type":"assert_attribute","target":{"selector":"#grid-start"},"attribute":"data-text-centered","equals":"false"},
+    {"type":"resize","width":600,"height":320},
+    {"type":"click","target":{"selector":"#probe"}},
+    {"type":"assert_attribute","target":{"selector":"#flow"},"attribute":"data-text-centered","equals":"true"},
+    {"type":"assert_attribute","target":{"selector":"#row"},"attribute":"data-text-centered","equals":"true"},
+    {"type":"assert_attribute","target":{"selector":"#small"},"attribute":"data-text-centered","equals":"true"},
+    {"type":"assert_attribute","target":{"selector":"#tall"},"attribute":"data-text-centered","equals":"true"},
+    {"type":"assert_attribute","target":{"selector":"#column"},"attribute":"data-text-centered","equals":"true"},
+    {"type":"assert_attribute","target":{"selector":"#stretch"},"attribute":"data-text-centered","equals":"true"},
+    {"type":"assert_attribute","target":{"selector":"#flex-start"},"attribute":"data-text-centered","equals":"false"},
+    {"type":"assert_attribute","target":{"selector":"#grid-start"},"attribute":"data-text-centered","equals":"false"}
+  ]
+}

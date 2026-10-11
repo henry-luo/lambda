@@ -1,0 +1,69 @@
+{
+  "name": "grid intrinsic contributions retain control minima and replaced natural sizes",
+  "html": "test/ui/dtna/grid_intrinsic_replaced_contracts.html",
+  "viewport": {
+    "width": 1200,
+    "height": 600
+  },
+  "events": [
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#range-flex"
+      },
+      "width": 71.09375,
+      "height": 22,
+      "tolerance": 0.75
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#image-zero"
+      },
+      "width": 160,
+      "height": 80,
+      "tolerance": 0.75
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#image-small"
+      },
+      "width": 160,
+      "height": 80,
+      "tolerance": 0.75
+    },
+    {
+      "type": "resize",
+      "width": 900,
+      "height": 600
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#range-flex"
+      },
+      "width": 71.09375,
+      "height": 22,
+      "tolerance": 0.75
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#image-zero"
+      },
+      "width": 160,
+      "height": 80,
+      "tolerance": 0.75
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#image-small"
+      },
+      "width": 160,
+      "height": 80,
+      "tolerance": 0.75
+    }
+  ]
+}

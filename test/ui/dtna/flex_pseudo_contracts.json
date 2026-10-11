@@ -1,0 +1,98 @@
+{
+  "name": "nested flex and grid materialize generated boxes",
+  "html": "test/ui/dtna/flex_pseudo_contracts.html",
+  "viewport": {
+    "width": 200,
+    "height": 300
+  },
+  "events": [
+    {
+      "type": "assert_pixel",
+      "x": 12,
+      "y": 30,
+      "min_r": 250,
+      "max_g": 5,
+      "max_b": 5
+    },
+    {
+      "type": "assert_pixel",
+      "x": 72,
+      "y": 30,
+      "min_r": 250,
+      "max_g": 5,
+      "max_b": 5
+    },
+    {
+      "type": "assert_pixel",
+      "x": 12,
+      "y": 90,
+      "max_r": 5,
+      "max_g": 5,
+      "min_b": 250
+    },
+    {
+      "type": "assert_pixel",
+      "x": 72,
+      "y": 90,
+      "min_r": 250,
+      "max_g": 5,
+      "max_b": 5
+    },
+    {
+      "type": "assert_pixel",
+      "x": 20,
+      "y": 30,
+      "min_r": 250,
+      "min_g": 250,
+      "min_b": 250
+    },
+    {
+      "type": "assert_pixel",
+      "x": 11,
+      "y": 150,
+      "min_r": 210,
+      "max_r": 225,
+      "min_g": 210,
+      "max_g": 225,
+      "min_b": 210,
+      "max_b": 225
+    },
+    {
+      "type": "assert_pixel",
+      "x": 71,
+      "y": 150,
+      "min_r": 210,
+      "max_r": 225,
+      "min_g": 210,
+      "max_g": 225,
+      "min_b": 210,
+      "max_b": 225
+    },
+    {
+      "type": "assert_pixel",
+      "x": 11,
+      "y": 210,
+      "min_r": 210,
+      "max_r": 225,
+      "min_g": 210,
+      "max_g": 225,
+      "min_b": 210,
+      "max_b": 225
+    },
+    {
+      "type": "assert_pixel",
+      "x": 71,
+      "y": 210,
+      "min_r": 210,
+      "max_r": 225,
+      "min_g": 210,
+      "max_g": 225,
+      "min_b": 210,
+      "max_b": 225
+    },
+    {
+      "type": "render",
+      "file": "temp/ui_dtna/flex_pseudo.png"
+    }
+  ]
+}

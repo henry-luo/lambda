@@ -1,0 +1,1 @@
+[["source identity retained", true], ["document shell", true], ["root theme", true], ["flat page content", true], ["nested native presentation", true], ["scope inheritance", true], ["default direct page", true], ["families coexist", true], ["cross-family child", true], ["constructor direct attributes", true], ["legacy props maps", true]]

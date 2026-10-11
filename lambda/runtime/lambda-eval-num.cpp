@@ -913,7 +913,13 @@ static Item numeric_vector_unary_float(Item item, NumericVectorUnaryOp op,
 
     RootFrame roots(2);
     Rooted<Item> rooted_source(roots, item);
-    Rooted<ArrayNum*> rooted_result(roots, array_float_new(length));
+    int64_t dimensions[LAMBDA_ARRAY_NUM_MAX_NDIM], strides[LAMBDA_ARRAY_NUM_MAX_NDIM];
+    int rank = get_type_id(item) == LMD_TYPE_ARRAY_NUM ?
+        array_num_get_shape_strides(item.array_num, dimensions, strides) : 0;
+    // element-wise unary operations keep N-D geometry, including strided channel views.
+    Rooted<ArrayNum*> rooted_result(roots, rank > 1 ?
+        array_num_new_ndim(ELEM_FLOAT64, length, rank, dimensions) : array_float_new(length));
+    if (!rooted_result.get()) return ItemError;
     for (int64_t i = 0; i < length; i++) {
         Item element = vector_get(rooted_source.get(), i);
         TypeId element_type = get_type_id(element);

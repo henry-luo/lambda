@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><style>
+@font-face{font-family:'Liberation Sans';src:url('../../layout/data/font/LiberationSans-Regular.ttf')}
+body{margin:0;padding:16px;font:14px/22px 'Liberation Sans'}
+.row{display:flex;gap:8px;align-items:center;margin-bottom:8px}
+.column{display:flex;flex-direction:column;align-items:flex-start;margin-bottom:8px}
+.control{font:inherit;box-sizing:border-box;width:80px;height:32px;padding:1px 6px;border:1px solid #ddd}
+.small{height:24px;line-height:20px}.tall{height:40px}
+.stretch{height:48px;align-items:stretch}.stretch .control{height:auto}
+.flex-start{display:flex;align-items:flex-start;justify-content:center}
+.grid-start{display:grid;align-items:start;justify-content:center}
+</style></head><body>
+<div><button id="flow" class="control" data-probe>Flow</button></div>
+<div class="row">
+  <button id="row" class="control" data-probe>Row</button>
+  <button id="small" class="control small" data-probe>Small</button>
+  <button id="tall" class="control tall" data-probe>Tall</button>
+  <button id="flex-start" class="control flex-start" data-probe>Flex start</button>
+  <button id="grid-start" class="control grid-start" data-probe>Grid start</button>
+</div>
+<div class="column"><button id="column" class="control" data-probe>Column</button></div>
+<div class="row stretch"><button id="stretch" class="control" data-probe>Stretch</button></div>
+<button id="probe">Measure text centers</button>
+<script>
+document.getElementById('probe').addEventListener('click', () => {
+    for (const button of document.querySelectorAll('[data-probe]')) {
+        const range = document.createRange();
+        range.selectNodeContents(button);
+        const text = range.getBoundingClientRect();
+        const box = button.getBoundingClientRect();
+        const centered = text.height > 0 && Math.abs(text.y + text.height / 2 - box.y - box.height / 2) < 0.6;
+        button.setAttribute('data-text-centered', String(centered));
+    }
+});
+</script></body></html>

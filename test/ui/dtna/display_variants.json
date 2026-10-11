@@ -1,0 +1,119 @@
+{
+  "name": "dtna badge variants and responsive description rows",
+  "html": "test/ui/dtna/display_variants.ls",
+  "viewport": {
+    "width": 500,
+    "height": 900
+  },
+  "events": [
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#zero-hidden .dtna-badge-count"
+      },
+      "count": 0
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#zero-shown .dtna-badge-count"
+      },
+      "equals": "0"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#overflow-count .dtna-badge-count"
+      },
+      "equals": "99+"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#overflow-count .dtna-badge-count"
+      },
+      "attribute": "aria-label",
+      "equals": "120"
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#processing .dtna-badge-count"
+      },
+      "width": 6,
+      "height": 6,
+      "tolerance": 0.2
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#processing .dtna-badge-count"
+      },
+      "property": "background-color",
+      "equals": "rgb(22, 119, 255)"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#ribbon .dtna-ribbon"
+      },
+      "equals": "New"
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#details .dtna-description:first-child"
+      },
+      "width": 359,
+      "tolerance": 0.2
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#vertical dt"
+      },
+      "contains": "Name"
+    },
+    {
+      "type": "resize",
+      "width": 800,
+      "height": 900
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#details .dtna-description:first-child"
+      },
+      "width": 119.6667,
+      "tolerance": 0.75
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#details .dtna-description:nth-child(2)"
+      },
+      "width": 239.3333,
+      "tolerance": 0.75
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#details .dtna-description:nth-child(3)"
+      },
+      "width": 239.3333,
+      "tolerance": 0.75
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#details .dtna-description:nth-child(4)"
+      },
+      "width": 119.6667,
+      "tolerance": 0.75
+    },
+    {
+      "type": "render",
+      "file": "temp/ui_dtna/display_variants.png"
+    }
+  ]
+}

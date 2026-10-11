@@ -1,0 +1,25 @@
+<?xml version="1.0"?>
+<fo:root xmlns:fo="http://www.w3.org/1999/XSL/Format" font-family="Arial" font-size="7.5pt" line-height="18.75pt">
+  <fo:layout-master-set><fo:simple-page-master master-name="sheet" page-width="180pt" page-height="135pt" margin="11.25pt">
+    <fo:region-body column-count="2" column-gap="13.5pt"/>
+  </fo:simple-page-master></fo:layout-master-set>
+  <fo:page-sequence master-reference="sheet" force-page-count="no-force"><fo:flow flow-name="xsl-region-body">
+    <fo:block background-color="#f2cccc">Column item 1</fo:block>
+    <fo:block background-color="#cce5ff">Column item 2</fo:block>
+    <fo:block background-color="#d5efcd">Column item 3</fo:block>
+    <fo:block background-color="#fff0bd">Column item 4</fo:block>
+    <fo:block background-color="#e8d5f4">Column item 5</fo:block>
+    <fo:block background-color="#ccece8">Column item 6</fo:block>
+    <fo:block background-color="#f2cccc">Column item 7</fo:block>
+    <fo:block background-color="#cce5ff">Column item 8</fo:block>
+    <fo:block background-color="#d5efcd">Column item 9</fo:block>
+    <fo:block background-color="#fff0bd">Column item 10</fo:block>
+    <fo:block background-color="#e8d5f4">Column item 11</fo:block>
+    <fo:block background-color="#ccece8">Column item 12</fo:block>
+    <fo:block background-color="#f2cccc">Column item 13</fo:block>
+    <fo:block background-color="#cce5ff">Column item 14</fo:block>
+    <fo:block background-color="#d5efcd" break-before="column">Column item 15</fo:block>
+    <fo:block background-color="#fff0bd" break-before="page">Column item 16</fo:block>
+    <fo:block background-color="#e8d5f4" break-before="column">Column item 17</fo:block>
+  </fo:flow></fo:page-sequence>
+</fo:root>

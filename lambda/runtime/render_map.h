@@ -44,6 +44,13 @@ void render_map_destroy(void);
 void render_map_record(Item source_item, const char* template_ref,
                        Item result_node, Item parent_result, int child_index);
 
+// Capture the start of a body invocation. Only results recorded after this
+// boundary can be inner applications wrapped by its direct return value.
+uint64_t render_map_invocation_begin(void);
+void render_map_record_invocation(Item source_item, const char* template_ref,
+                                  Item result_node, Item parent_result, int child_index,
+                                  uint64_t invocation_start);
+
 // Record where a content-list template result was flattened into a parent
 // result. Called by list_push after it has appended the fragment's children.
 void render_map_bind_fragment_parent(Item fragment_result, Item parent_result,

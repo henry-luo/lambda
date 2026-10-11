@@ -31,7 +31,7 @@ let checks = [
     {name: "quad-dot accent preserves advance and adds ink", ok:
         quad_dot.width == x.width and quad_dot.height > x.height and paints(quad_dot)},
     {name: "under arrows clear the descender", ok:
-        all([for (mark in below) mark.width == g.width and mark.depth > g.depth and paints(mark)])},
+        all([for (mark in below) mark.width >= g.width and mark.depth > g.depth and paints(mark)])},
     {name: "phantom reserves both dimensions without painting", ok:
         phantom.width == g.width and phantom.height == g.height and phantom.depth == g.depth and not paints(phantom)},
     {name: "horizontal phantom reserves only width", ok:

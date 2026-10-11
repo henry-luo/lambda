@@ -1,0 +1,397 @@
+{
+  "name": "dtna Alert status geometry semantic slots native close and controlled retention",
+  "html": "test/ui/dtna/alert_modes.ls",
+  "viewport": {
+    "width": 600,
+    "height": 950
+  },
+  "events": [
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#alert-default"
+      },
+      "width": 400,
+      "height": 40,
+      "tolerance": 0.2
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#alert-success"
+      },
+      "width": 400,
+      "height": 40,
+      "tolerance": 0.2
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#alert-warning"
+      },
+      "width": 400,
+      "height": 97.140625,
+      "tolerance": 0.2
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#alert-error"
+      },
+      "width": 400,
+      "height": 40,
+      "tolerance": 0.2
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#alert-banner"
+      },
+      "width": 400,
+      "height": 38,
+      "tolerance": 0.2
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#alert-custom"
+      },
+      "width": 400,
+      "height": 42,
+      "tolerance": 0.2
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#alert-retain"
+      },
+      "width": 400,
+      "height": 40,
+      "tolerance": 0.2
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#alert-parts"
+      },
+      "width": 400,
+      "height": 40,
+      "tolerance": 0.2
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#alert-rtl"
+      },
+      "width": 400,
+      "height": 97.140625,
+      "tolerance": 0.2
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#alert-default"
+      },
+      "property": "background-color",
+      "equals": "rgb(230, 244, 255)"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#alert-success"
+      },
+      "property": "background-color",
+      "equals": "rgb(246, 255, 237)"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#alert-warning"
+      },
+      "property": "background-color",
+      "equals": "rgb(255, 251, 230)"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#alert-error"
+      },
+      "property": "background-color",
+      "equals": "rgb(255, 242, 240)"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#alert-default"
+      },
+      "property": "border-color",
+      "equals": "rgb(145, 202, 255)"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#alert-success"
+      },
+      "property": "border-color",
+      "equals": "rgb(183, 235, 143)"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#alert-warning"
+      },
+      "property": "border-color",
+      "equals": "rgb(255, 229, 143)"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#alert-error"
+      },
+      "property": "border-color",
+      "equals": "rgba(0, 0, 0, 0)"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#alert-banner"
+      },
+      "property": "border-radius",
+      "equals": "0px"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#alert-parts"
+      },
+      "property": "border-radius",
+      "equals": "0px"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#alert-default"
+      },
+      "property": "font-size",
+      "equals": "14px"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#alert-default"
+      },
+      "property": "line-height",
+      "equals": "22px"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".dtna-alert[role=\"alert\"]"
+      },
+      "count": 11
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".dtna-alert-icon"
+      },
+      "count": 5
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#alert-parts .authored-title"
+      },
+      "property": "font-weight",
+      "equals": "700"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#alert-retain .dtna-alert-close"
+      },
+      "attribute": "aria-label",
+      "equals": "Keep notice"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#alert-retry"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#alert-count"
+      },
+      "equals": "1"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#alert-request"
+      },
+      "equals": "alert-retry:click"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#alert-error .dtna-alert-close"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#alert-error"
+      },
+      "count": 0
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#alert-count"
+      },
+      "equals": "2"
+    },
+    {
+      "type": "focus",
+      "target": {
+        "selector": "#alert-parts .dtna-alert-close"
+      }
+    },
+    {
+      "type": "key_press",
+      "key": "space"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#alert-parts"
+      },
+      "count": 0
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#alert-count"
+      },
+      "equals": "3"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#alert-retain .dtna-alert-close"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#alert-retain"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#alert-count"
+      },
+      "equals": "4"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#alert-request"
+      },
+      "equals": "alert-retain:close"
+    },
+    {
+      "type": "key_press",
+      "key": "enter"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#alert-retain"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#alert-count"
+      },
+      "equals": "5"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#alert-rtl .dtna-alert-close"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#alert-rtl"
+      },
+      "count": 0
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#alert-count"
+      },
+      "equals": "6"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".alert-inner .dtna-alert-close"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".alert-inner"
+      },
+      "count": 0
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".alert-outer"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#alert-count"
+      },
+      "equals": "7"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".alert-outer > .dtna-alert-close"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".alert-outer"
+      },
+      "count": 0
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#alert-count"
+      },
+      "equals": "8"
+    },
+    {
+      "type": "render",
+      "file": "temp/ui_dtna/alert_increment/native.png"
+    }
+  ]
+}

@@ -54,3 +54,12 @@
   restart_fresh: true,
   snapshot: true
 }
+{
+  auto_starts: true,
+  auto_uses_rotation_and_clears: true,
+  auto_builds_and_scores: true,
+  auto_survives: true,
+  auto_pause_freezes: true,
+  auto_resume: true,
+  auto_restart_manual: true
+}

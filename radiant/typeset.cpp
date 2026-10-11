@@ -263,20 +263,26 @@ TypesetStatus typeset_policy_restore(const TypesetPagePolicy* policy, const Type
     return policy && policy->restore ? policy->restore(policy->context, saved) : TYPESET_OK;
 }
 
+TypesetStatus typeset_page_assemble(const TypesetPagePolicy* policy,
+        const TypesetPageCandidate* candidate, TypesetAssemblyAction* action) {
+    if (!policy || !policy->assemble || !candidate || !action) return TYPESET_INVALID;
+    if (candidate->end.provider != candidate->start.provider || candidate->end.generation != candidate->start.generation ||
+        candidate->end.serial <= candidate->start.serial) return TYPESET_NO_PROGRESS;
+    if (candidate->boundary.legality == TYPESET_BREAK_FORBIDDEN) return TYPESET_INVALID;
+    TypesetAssemblyAction assembly = policy->assemble(policy->context, candidate);
+    if (assembly > TYPESET_ASSEMBLY_REINSERT) return TYPESET_INVALID;
+    *action = assembly;
+    return TYPESET_OK;
+}
+
 TypesetStatus typeset_page_select(const TypesetPagePolicy* policy,
         const TypesetPageCandidate* candidates, size_t count, size_t* selected, TypesetAssemblyAction* action) {
     if (!policy || !policy->choose || !policy->assemble || !candidates || !count || !selected || !action) return TYPESET_INVALID;
     size_t index = policy->choose(policy->context, candidates, count);
     if (index >= count) return TYPESET_UNPLACEABLE;
-    const TypesetPageCandidate& candidate = candidates[index];
-    if (candidate.end.provider != candidate.start.provider || candidate.end.generation != candidate.start.generation ||
-        candidate.end.serial <= candidate.start.serial) return TYPESET_NO_PROGRESS;
-    if (candidate.boundary.legality == TYPESET_BREAK_FORBIDDEN) return TYPESET_INVALID;
-    TypesetAssemblyAction assembly = policy->assemble(policy->context, &candidate);
-    if (assembly > TYPESET_ASSEMBLY_REINSERT) return TYPESET_INVALID;
-    *selected = index;
-    *action = assembly;
-    return TYPESET_OK;
+    TypesetStatus status = typeset_page_assemble(policy, &candidates[index], action);
+    if (status == TYPESET_OK) *selected = index;
+    return status;
 }
 
 static bool typeset_page_metrics_valid(const TypesetPageCandidate& candidate) {

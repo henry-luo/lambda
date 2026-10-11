@@ -2102,8 +2102,8 @@ static void svg_template_chain(SvgInlineRenderContext* ctx, Element* resource,
     }
 }
 
-static const char* svg_template_attribute(SvgInlineRenderContext* ctx, const lam::ArrayList<SvgResourceReference>* chain,
-    const char* name, const char* fallback, bool same_kind = false) {
+static Element* svg_template_attribute_source(SvgInlineRenderContext* ctx,
+    const lam::ArrayList<SvgResourceReference>* chain, const char* name, bool same_kind) {
     SvgInlineRenderContext first = chain->size() ? svg_reference_render_context(ctx, &(*chain)[0]) : *ctx;
     const char* first_tag = chain->size() ? get_element_tag_name(&first, (*chain)[0].element) : nullptr;
     for (size_t i = 0; i < chain->size(); i++) {
@@ -2111,16 +2111,25 @@ static const char* svg_template_attribute(SvgInlineRenderContext* ctx, const lam
         SvgInlineRenderContext source = svg_reference_render_context(ctx, &(*chain)[i]);
         const char* tag = get_element_tag_name(&source, elem);
         if (same_kind && (!tag || !first_tag || strcmp(tag, first_tag) != 0)) continue;
-        const char* value = get_svg_attr(elem, name);
-        if (value) return value;
+        if (get_svg_attr(elem, name) || ElementReader(elem).has_attr(name)) return elem;
     }
-    return fallback;
+    return nullptr;
+}
+
+static const char* svg_template_attribute(SvgInlineRenderContext* ctx, const lam::ArrayList<SvgResourceReference>* chain,
+    const char* name, const char* fallback, bool same_kind = false) {
+    Element* source = svg_template_attribute_source(ctx, chain, name, same_kind);
+    const char* value = source ? get_svg_attr(source, name) : nullptr;
+    return value ? value : fallback;
 }
 
 static float svg_gradient_length(SvgInlineRenderContext* ctx, const lam::ArrayList<SvgResourceReference>* chain,
     const char* name, const char* fallback, const SvgLengthContext* lengths,
     SvgLengthAxis axis) {
-    return svg_resolve_length(svg_template_attribute(ctx, chain, name, fallback, true), lengths, axis, 0.0f);
+    // Lambda SVG builders carry numeric Items; resource inheritance must preserve them.
+    float initial = svg_resolve_length(fallback, lengths, axis, 0.0f);
+    Element* source = svg_template_attribute_source(ctx, chain, name, true);
+    return source ? get_svg_number_attr(source, name, initial, lengths, axis) : initial;
 }
 
 static bool svg_resolve_gradient(SvgInlineRenderContext* ctx, Element* element,
@@ -2141,11 +2150,11 @@ static bool svg_resolve_gradient(SvgInlineRenderContext* ctx, Element* element,
     def->cx = svg_gradient_length(ctx, &chain, "cx", "50%", &lengths, SVG_LENGTH_X);
     def->cy = svg_gradient_length(ctx, &chain, "cy", "50%", &lengths, SVG_LENGTH_Y);
     def->r = svg_gradient_length(ctx, &chain, "r", "50%", &lengths, SVG_LENGTH_DIAGONAL);
-    const char* fx = svg_template_attribute(ctx, &chain, "fx", nullptr, true);
-    const char* fy = svg_template_attribute(ctx, &chain, "fy", nullptr, true);
+    Element* fx = svg_template_attribute_source(ctx, &chain, "fx", true);
+    Element* fy = svg_template_attribute_source(ctx, &chain, "fy", true);
     def->options.has_focal = def->is_radial;
-    def->options.fx = fx ? svg_resolve_length(fx, &lengths, SVG_LENGTH_X, def->cx) : def->cx;
-    def->options.fy = fy ? svg_resolve_length(fy, &lengths, SVG_LENGTH_Y, def->cy) : def->cy;
+    def->options.fx = fx ? get_svg_number_attr(fx, "fx", def->cx, &lengths, SVG_LENGTH_X) : def->cx;
+    def->options.fy = fy ? get_svg_number_attr(fy, "fy", def->cy, &lengths, SVG_LENGTH_Y) : def->cy;
     def->options.fr = svg_gradient_length(ctx, &chain, "fr", "0%", &lengths, SVG_LENGTH_DIAGONAL);
     const char* spread = svg_template_attribute(ctx, &chain, "spreadMethod", "pad");
     def->options.spread = strcmp(spread, "repeat") == 0 ? RDT_GRADIENT_REPEAT
@@ -2184,12 +2193,14 @@ static bool svg_resolve_gradient(SvgInlineRenderContext* ctx, Element* element,
     const char* host_color = svg_style_ancestor_property_value(ctx, element, "color");
     Color current_color = parse_svg_color(host_color);
     float previous_offset = 0.0f;
+    SvgLengthContext offsets = lengths;
+    offsets.viewport_width = offsets.viewport_height = 1.0f;
     for (int64_t j = 0; j < content->length; j++) {
         Element* child = get_child_element_at(content, j);
         const char* tag = child ? get_element_tag_name(&content_context, child) : nullptr;
         if (!tag || strcmp(tag, "stop") != 0) continue;
         RdtGradientStop* stop = &def->stops[def->stop_count++];
-        stop->offset = fmaxf(previous_offset, clamp_unit(parse_svg_pct_or_num(get_svg_attr(child, "offset"), 0.0f)));
+        stop->offset = fmaxf(previous_offset, clamp_unit(get_svg_number_attr(child, "offset", 0.0f, &offsets, SVG_LENGTH_X)));
         previous_offset = stop->offset;
         const char* color_text = svg_style_property_value(&content_context, child, "stop-color");
         const char* own_color = svg_style_property_value(&content_context, child, "color");

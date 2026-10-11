@@ -1,0 +1,14 @@
+{
+  "name":"numeric and inherited SVG gradient coordinates and stops",
+  "html":"test/ui/dtna/svg_numeric_gradients.ls",
+  "viewport":{"width":240,"height":160},
+  "events":[
+    {"type":"assert_pixel","x":15,"y":30,"max_r":5,"max_g":20,"min_b":220},
+    {"type":"assert_pixel","x":60,"y":30,"max_r":10,"min_g":115,"max_b":10},
+    {"type":"assert_pixel","x":105,"y":30,"min_r":220,"max_g":20,"max_b":5},
+    {"type":"assert_pixel","x":60,"y":80,"max_r":10,"min_g":115,"max_b":10},
+    {"type":"assert_pixel","x":155,"y":60,"min_r":235,"max_g":5,"max_b":20},
+    {"type":"assert_pixel","x":190,"y":60,"max_r":5,"max_g":5,"min_b":250},
+    {"type":"render","file":"temp/ui_dtna/svg_numeric_gradients.png"}
+  ]
+}

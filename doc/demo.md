@@ -1,4 +1,4 @@
-# Lambda Demo — Document Viewer
+# Lambda demos
 
 ## Running the demo
 
@@ -7,6 +7,25 @@ From the root of a Lambda checkout or of an unzipped release:
 ```bash
 ./lambda demo
 ```
+
+With no name, this opens the bundled `lambda.doc` viewer and its startup splash
+(D7.2.4). To launch another demo, append its name:
+
+```bash
+./lambda demo tetris
+./lambda demo superlambda
+./lambda demo doom
+./lambda demo photo
+./lambda demo scene3d
+./lambda demo slides
+./lambda demo wordcloud
+./lambda demo --list
+```
+
+Named demos forward to `lambda view` with their entry point under `test/demo/`.
+Viewer options can follow the name, including `--headless`, `--event-file`,
+`--event-result` and `--font-dir`. The [demo catalog](../test/demo/README.md)
+lists all names, paths and controls, including the other native 3D examples.
 
 ## Viewer features
 

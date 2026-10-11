@@ -8255,43 +8255,12 @@ static void interp_register_view_template(Script* script, AstViewNode* view,
         int ordinal) {
     if (!script || !view || !g_template_registry || !view->body) return;
 
-    TemplateSpecificity specificity = TMPL_SPEC_CATCHALL;
-    TypeId match_type = LMD_TYPE_ANY;
-    const char* match_tag = NULL;
-    int match_tag_len = 0;
-    const TypeElmt* match_elmt = NULL;
-    AstNode* pattern = view->pattern;
-    if (pattern && pattern->type) {
-        TypeId tid = pattern->type->type_id;
-        if (tid == LMD_TYPE_TYPE) {
-            TypeType* type_value = (TypeType*)pattern->type;
-            if (type_value->type && type_value->type->type_id != LMD_TYPE_ANY) {
-                match_type = type_value->type->type_id;
-                specificity = TMPL_SPEC_SIMPLE_TYPE;
-                if (match_type == LMD_TYPE_ELEMENT) {
-                    TypeElmt* element_type = (TypeElmt*)type_value->type;
-                    if (element_type->name.str && element_type->name.length > 0) {
-                        match_tag = element_type->name.str;
-                        match_tag_len = (int)element_type->name.length;
-                        match_elmt = element_type;
-                        specificity = element_type->length > 0
-                            ? TMPL_SPEC_ELMT_ATTR : TMPL_SPEC_ELMT_TAG;
-                    }
-                }
-            }
-        } else if (tid != LMD_TYPE_ANY) {
-            match_type = tid;
-            specificity = TMPL_SPEC_SIMPLE_TYPE;
-        }
-    }
-    if (view->name) specificity = TMPL_SPEC_NAMED;
-
     template_registry_add(g_template_registry,
-        view->name ? view->name->chars : NULL, view->is_edit, NULL, specificity,
-        match_type, match_tag, match_tag_len, 0, 0);
+        view->name ? view->name->chars : NULL, view->is_edit, NULL,
+        TMPL_SPEC_CATCHALL, LMD_TYPE_ANY, NULL, 0, 0, 0);
     TemplateEntry* entry = g_template_registry->last;
     if (!entry) return;
-    template_registry_set_element_pattern(entry, match_elmt);
+    template_registry_set_view_pattern(entry, view);
     template_registry_set_state_declarations(entry, view);
     entry->interp_body_func = interp_eval_view_template;
     const char* generated_ref = view->name ? view->name->chars : NULL;
@@ -8312,7 +8281,7 @@ static void interp_register_view_template(Script* script, AstViewNode* view,
         }
     }
     log_debug("interp: registered view ref=%s type=%d state=%d handlers=%d",
-        generated_ref, (int)match_type, view->state ? 1 : 0,
+        generated_ref, (int)entry->match_type_id, view->state ? 1 : 0,
         view->handler ? 1 : 0);
 }
 

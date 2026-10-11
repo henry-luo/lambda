@@ -233,6 +233,8 @@ HPDF_STATUS HPDF_Page_SetLineWidth(HPDF_Page page, float width);
 HPDF_STATUS HPDF_Page_SetLineCap(HPDF_Page page, int cap);
 HPDF_STATUS HPDF_Page_SetLineJoin(HPDF_Page page, int join);
 HPDF_STATUS HPDF_Page_SetMiterLimit(HPDF_Page page, float limit);
+// floating-point user-space dashes; an empty pattern restores solid strokes.
+HPDF_STATUS HPDF_Page_SetDashPattern(HPDF_Page page, const float* lengths, int count, float phase);
 
 /**
  * Create an extended graphics state resource.

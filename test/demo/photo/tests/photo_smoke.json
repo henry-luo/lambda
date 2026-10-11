@@ -1,0 +1,373 @@
+{
+  "name": "Photo Studio smoke",
+  "html": "test/demo/photo/photo.ls",
+  "viewport": {
+    "width": 1280,
+    "height": 820
+  },
+  "events": [
+    {
+      "type": "advance_time",
+      "ms": 50
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photo"
+      },
+      "attribute": "data-error",
+      "equals": ""
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#preview"
+      },
+      "attribute": "width",
+      "equals": "960"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#tool-filters"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#preset-mono"
+      }
+    },
+    {
+      "type": "advance_time",
+      "ms": 50
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photo"
+      },
+      "attribute": "data-preset",
+      "equals": "mono"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photo"
+      },
+      "attribute": "data-history",
+      "equals": "1"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#undo"
+      }
+    },
+    {
+      "type": "advance_time",
+      "ms": 50
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photo"
+      },
+      "attribute": "data-preset",
+      "equals": "original"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#redo"
+      }
+    },
+    {
+      "type": "advance_time",
+      "ms": 50
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photo"
+      },
+      "attribute": "data-preset",
+      "equals": "mono"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#tool-crop"
+      }
+    },
+    {
+      "type": "advance_time",
+      "ms": 50
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photo"
+      },
+      "attribute": "data-tool",
+      "equals": "crop"
+    },
+    {
+      "type": "select_option",
+      "target": {
+        "selector": "#crop-ratio"
+      },
+      "value": "1"
+    },
+    {
+      "type": "advance_time",
+      "ms": 50
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#crop-apply"
+      }
+    },
+    {
+      "type": "advance_time",
+      "ms": 50
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photo"
+      },
+      "attribute": "data-history",
+      "equals": "2"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#preview"
+      },
+      "attribute": "width",
+      "equals": "638"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#preview"
+      },
+      "attribute": "height",
+      "equals": "638"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#undo"
+      }
+    },
+    {
+      "type": "advance_time",
+      "ms": 50
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#preview"
+      },
+      "attribute": "width",
+      "equals": "960"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#tool-adjust"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#control-exposure"
+      }
+    },
+    {
+      "type": "key_press",
+      "key": "right"
+    },
+    {
+      "type": "advance_time",
+      "ms": 50
+    },
+    {
+      "type": "assert_focus",
+      "target": {
+        "selector": "#control-exposure"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#reset"
+      }
+    },
+    {
+      "type": "advance_time",
+      "ms": 50
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photo"
+      },
+      "attribute": "data-preset",
+      "equals": "original"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#recipe"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#recipe-save"
+      }
+    },
+    {
+      "type": "advance_time",
+      "ms": 50
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photo"
+      },
+      "attribute": "data-error",
+      "equals": ""
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#recipe-cancel"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#tool-filters"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#preset-warm"
+      }
+    },
+    {
+      "type": "advance_time",
+      "ms": 50
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photo"
+      },
+      "attribute": "data-preset",
+      "equals": "warm"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#recipe"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#recipe-load"
+      }
+    },
+    {
+      "type": "advance_time",
+      "ms": 50
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photo"
+      },
+      "attribute": "data-preset",
+      "equals": "original"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#export"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#export-confirm"
+      }
+    },
+    {
+      "type": "advance_time",
+      "ms": 50
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photo"
+      },
+      "attribute": "data-error",
+      "equals": ""
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#open"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#sample-mountains"
+      }
+    },
+    {
+      "type": "advance_time",
+      "ms": 50
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photo"
+      },
+      "attribute": "data-history",
+      "equals": "0"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#open"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#sample-coast"
+      }
+    },
+    {
+      "type": "advance_time",
+      "ms": 50
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photo"
+      },
+      "attribute": "data-error",
+      "equals": ""
+    }
+  ]
+}

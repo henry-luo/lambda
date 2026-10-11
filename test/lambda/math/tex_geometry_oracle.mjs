@@ -13,7 +13,7 @@ const ROOT = fileURLToPath(new URL('../../../', import.meta.url));
 export const missing_tex_tools = ['pdflatex', 'kpsewhich'].filter((tool) =>
   spawnSync(tool, ['--version']).status !== 0);
 
-export function tex_geometry(cases, prefix, sourceFiles) {
+export function tex_geometry(cases, prefix, sourceFiles, packages = []) {
   fs.mkdirSync(path.join(ROOT, 'temp'), { recursive: true });
   const dir = fs.mkdtempSync(path.join(ROOT, 'temp', prefix));
   const script = `import math: lambda.doc.math.math
@@ -22,7 +22,7 @@ import svg: ~~.~~.test.lambda.math.mod_svg_snapshot
 let cases = parse(${JSON.stringify(JSON.stringify(cases))}, 'json')^
 format([for (item in cases) (
  let ast = parse(item.source,{type:"math",flavor:"latex"})^,
- let b = math.render_box(ast,{font_size:960.0 / 72.27})^,
+ let b = math.render_box(ast,{font_size:(item.point_size or 10.0) * 96.0 / 72.27})^,
  let p = font.prepare(ast,{})^,
  {width:b.width,height:b.height,depth:b.depth,
  glyphs:[for (g in svg.geometry(b.element) where g.text != "") (
@@ -45,11 +45,20 @@ format([for (item in cases) (
   // Match the declared companion: scaled CM10 roman, CMSY10/7/5, fixed CMEX10.
   const tex = String.raw`\documentclass[10pt]{article}
 \usepackage{amsmath}
+` + packages.map((name) => `\\usepackage{${name}}\n`).join('') + String.raw`
 \font\OracleSeven=cmr10 at7pt
 \font\OracleFive=cmr10 at5pt
 \font\OracleExtension=cmex10 at10pt
 \begin{document}
-` + cases.map((c, i) => `\\setbox0=\\hbox{\\special{lambda-base}$` +
+` + cases.map((c, i) => (c.point_size ?
+    `\\fontsize{${c.point_size}}{12}\\selectfont\n` +
+    [['Roman','cmr10',1],['Seven','cmr10',0.7],['Five','cmr10',0.5],
+      ['Symbols','cmsy10',1],['ScriptSymbols','cmsy7',0.7],['SmallSymbols','cmsy5',0.5],
+      ['Extension','cmex10',1]].map(([name,font,factor]) =>
+      `\\font\\Oracle${name}=${font} at${c.point_size * factor}pt\n`).join('') : '') +
+    `\\setbox0=\\hbox{\\special{lambda-base}$` +
+    (c.point_size ? '\\textfont0=\\OracleRoman \\textfont2=\\OracleSymbols ' +
+      '\\scriptfont2=\\OracleScriptSymbols \\scriptscriptfont2=\\OracleSmallSymbols ' : '') +
     '\\scriptfont0=\\OracleSeven \\scriptscriptfont0=\\OracleFive ' +
     '\\textfont3=\\OracleExtension \\scriptfont3=\\OracleExtension \\scriptscriptfont3=\\OracleExtension ' +
     `${c.source}$}\n\\typeout{DIM:${i}:\\the\\wd0:\\the\\ht0:\\the\\dp0}\n\\shipout\\box0\n`).join('') +
@@ -61,12 +70,14 @@ format([for (item in cases) (
   fs.writeFileSync(path.join(dir, 'pdflatex.log'), texRun.stdout + texRun.stderr);
   assert.ifError(texRun.error); assert.equal(texRun.status, 0, texRun.stdout.slice(-3000) + texRun.stderr);
   const dimensions = new Map([...texRun.stdout.matchAll(/DIM:(\d+):([\d.-]+)pt:([\d.-]+)pt:([\d.-]+)pt/g)]
-    .map((m) => [Number(m[1]), { width: Number(m[2]) / 10, height: Number(m[3]) / 10, depth: Number(m[4]) / 10 }]));
+    .map((m) => { const size = cases[Number(m[1])].point_size || 10;
+      return [Number(m[1]), { width: Number(m[2]) / size, height: Number(m[3]) / size, depth: Number(m[4]) / size }]; }));
   const dvi = read_dvi(path.join(dir, 'reference.dvi'));
   assert.equal(dimensions.size, cases.length); assert.equal(dvi.pages.length, cases.length);
+  for (const [i,page] of dvi.pages.entries()) page.em_sp = (cases[i].point_size || 10) * 65536;
   const hash = (file) => createHash('sha256').update(fs.readFileSync(file)).digest('hex');
-  const referencePackages = ['amsmath.sty', 'fontmath.ltx'].map((name) => {
-    const lookup = spawnSync('kpsewhich', [name], { encoding:'utf8' });
+  const referencePackages = ['amsmath.sty', 'amsgen.sty', 'fontmath.ltx', ...packages.map((name) => `${name}.sty`)].map((name) => {
+    const lookup = spawnSync('kpsewhich', [name], { encoding:'utf8', env:reference_environment(dir) });
     assert.equal(lookup.status, 0, `reference definition ${name}`);
     const file = lookup.stdout.trim();
     return { name, path:file, sha256:hash(file) };
@@ -80,7 +91,7 @@ format([for (item in cases) (
     referencePackages, resources:Object.fromEntries(resources.map((file) => [file,hash(path.join(ROOT,file))])),
     sources: Object.fromEntries(['lambda.exe', 'lmd/package/math/font.ls', 'lmd/package/math/typeset.ls',
       'lmd/package/math/tex_metrics.ls', 'lmd/package/math/stretch.ls', 'lmd/package/math/svg_box.ls',
-      'lmd/package/math/util.ls',
+      'lmd/package/math/util.ls', 'lmd/package/math/symbols.ls',
       'test/lambda/math/tex_geometry_oracle.mjs', 'test/lambda/math/tex_dvi.mjs', ...sourceFiles]
       .map((file) => [file, hash(path.join(ROOT, file))])),
   }, null, 2));
@@ -92,20 +103,21 @@ export function assert_tex_geometry(actual, reference, page, includeRules = fals
     `${name}: Lambda ${a}, TeX ${b}`);
   for (const field of ['width', 'height', 'depth']) close(actual[field], reference[field], field);
   const origin = page.markers.find((m) => m.value === 'lambda-base');
+  const em = page.em_sp || 655360;
   assert.ok(origin, 'shipped baseline marker');
   assert.equal(actual.glyphs.length, page.glyphs.length, 'component count');
   for (const [j, glyph] of actual.glyphs.entries()) {
     const expected = page.glyphs[j];
-    close(glyph.x, (expected.x - origin.x) / 655360, `component ${j} x`);
-    close(glyph.y, (expected.y - origin.y) / 655360, `component ${j} baseline`);
-    close(glyph.size / 1000, expected.size / 655360, `component ${j} size`);
+    close(glyph.x, (expected.x - origin.x) / em, `component ${j} x`);
+    close(glyph.y, (expected.y - origin.y) / em, `component ${j} baseline`);
+    close(glyph.size / 1000, expected.size / em, `component ${j} size`);
     assert.equal(glyph.sx, 1); assert.equal(glyph.sy, 1, 'no anisotropic stretching');
     assert.match(glyph.family, expected.font === 'cmex10' ? /^KaTeX_Size[1-4]$/ : /^(KaTeX_Main|Computer Modern Serif)$/);
   }
   if (includeRules) {
     assert.equal(actual.rules.length, page.rules.length, 'painted rule count');
-    const expected = page.rules.map((r) => ({ x:(r.x - origin.x) / 655360,
-      y:(r.y - origin.y - r.height) / 655360,width:r.width / 655360,height:r.height / 655360 }));
+    const expected = page.rules.map((r) => ({ x:(r.x - origin.x) / em,
+      y:(r.y - origin.y - r.height) / em,width:r.width / em,height:r.height / em }));
     const order = (a, b) => a.x - b.x || a.y - b.y;
     const rules = actual.rules.toSorted(order); expected.sort(order);
     for (const [j, rule] of rules.entries())

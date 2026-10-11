@@ -164,14 +164,14 @@ fn parse_fields(parts, index, macros, path, position, file_text, values, raw_val
     }
 }
 
-fn parse_entry(body, kind, macros, path, position, file_text) {
+fn parse_entry(body, kind, macros, path, position, file_text, entry_types) {
     let parts = util.split_top_level(without_comments(body, 0, 0, false, false, false, ""), ",")
     let key = trim(parts[0])
     let parsed = parse_fields(parts, 1, macros, path, position, file_text, [], [], [])
     let issues = if (key == "")
         [file_issue("missing-bib-key", path, position, file_text,
             "Bibliography entry has no key")] else []
-    let type_issues = if (kind == "xdata" or supported_entry_type(kind)) []
+    let type_issues = if (kind == "xdata" or any([for (item in entry_types) item == kind])) []
         else [file_issue("unsupported-bib-entry-type", path, position, file_text,
             "Unsupported bibliography entry type " ++ kind)]
     {entry: if (key == "" or len(type_issues) > 0) null else
@@ -196,7 +196,7 @@ fn parse_string(body, macros, path, position, file_text) {
     }
 }
 
-fn parse_records(source, path, index, macros, entries, issues) {
+fn parse_records(source, path, index, macros, entries, issues, entry_types) {
     let at = find_at(source, index)
     if (at == null) {macros: macros, entries: entries, diagnostics: issues}
     else {
@@ -214,23 +214,23 @@ fn parse_records(source, path, index, macros, entries, issues) {
             else {
                 let body = slice(source, opening + 1, end)
                 if (kind == "comment" or kind == "preamble")
-                    parse_records(source, path, end + 1, macros, entries, issues)
+                    parse_records(source, path, end + 1, macros, entries, issues, entry_types)
                 else if (kind == "string") {
                     let string_value = parse_string(body, macros, path, at, source)
                     parse_records(source, path, end + 1, string_value.macros, entries,
-                        issues ++ string_value.diagnostics)
+                        issues ++ string_value.diagnostics, entry_types)
                 } else {
-                    let parsed = parse_entry(body, kind, macros, path, at, source)
+                    let parsed = parse_entry(body, kind, macros, path, at, source, entry_types)
                     parse_records(source, path, end + 1, macros,
                         if (parsed.entry == null) entries else entries ++ [parsed.entry],
-                        issues ++ parsed.diagnostics)
+                        issues ++ parsed.diagnostics, entry_types)
                 }
             }
         }
     }
 }
 
-fn resources(node) {
+pub fn resources(node) {
     if (not (node is element)) []
     else if (string(name(node)) == "addbibresource")
         [{source: trim(util.text_of_skip_brack(node)), offset: node.source_offset}]
@@ -242,7 +242,7 @@ fn resources(node) {
 }
 
 // filecontents is a document-local resource; its raw body never reaches the filesystem.
-fn inline_resources(node) {
+pub fn inline_resources(node) {
     if (not (node is element)) []
     else if (string(name(node)) == "filecontents" or
         string(name(node)) == "filecontents*")
@@ -251,12 +251,12 @@ fn inline_resources(node) {
     else [for (child in node, resource in inline_resources(child)) resource]
 }
 
-fn inline_source(inline, name) {
+pub fn inline_source(inline, name) {
     let matches = [for (resource in inline where resource.key == name) resource]
     if (len(matches) == 0) null else matches[0]
 }
 
-fn resource_path(source, base_uri) =>
+pub fn resource_path(source, base_uri) =>
     if (base_uri == null or starts_with(source, "/")) source
     else paths.resolve_path(base_uri, source)
 
@@ -285,7 +285,7 @@ fn load_resources(names, index, base_uri, inline, macros, entries, issues) {
             issues ++ [util.diagnostic("missing-bib-resource", "biblatex",
                 resource.source, "Cannot read bibliography resource " ++ path, resource.offset)])
         else {
-            let parsed = parse_records(source, provenance, 0, macros, [], [])
+            let parsed = parse_records(source, provenance, 0, macros, [], [], ENTRY_TYPES)
             load_resources(names, index + 1, base_uri, inline, parsed.macros,
                 entries ++ parsed.entries, issues ++ parsed.diagnostics)
         }
@@ -374,9 +374,17 @@ fn unique_issues(issues, index, seen, unique) {
 pub fn load(ast, base_uri) {
     let loaded = load_resources(resources(ast), 0, base_uri,
         inline_resources(ast), [], [], [])
-    let unique = dedupe(loaded.entries, 0, [], [], [])
+    finalize(loaded.entries, loaded.diagnostics)
+}
+
+// Shared parsing and inheritance preserve the legacy profile while CSL accepts more types.
+pub fn parse_source(source, path = "<bibliography>", macros = [], entry_types = ENTRY_TYPES) =>
+    parse_records(source, path, 0, macros, [], [], entry_types)
+
+pub fn finalize(entries, issues = []) {
+    let unique = dedupe(entries, 0, [], [], [])
     let inherited = inherited_entries(unique.entries, 0, [], [])
     {entries: inherited.entries,
         diagnostics: unique_issues(
-            loaded.diagnostics ++ unique.diagnostics ++ inherited.diagnostics, 0, [], [])}
+            issues ++ unique.diagnostics ++ inherited.diagnostics, 0, [], [])}
 }

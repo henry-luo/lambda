@@ -17,4 +17,4 @@ on click(evt) {
             string(dom.get_state(field,"readonly")) ++ ":" ++ string(dom.get_state(field,"required"))
     }
 }
-ui.page(<constraints_test>)^
+apply(<dtna.page <constraints_test>>)

@@ -1,0 +1,257 @@
+{
+  "name": "dtna Avatar shape icon numeric sizes and current-breakpoint resets",
+  "html": "test/ui/dtna/avatar_modes.ls",
+  "viewport": {
+    "width": 500,
+    "height": 600
+  },
+  "events": [
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#avatar-default"
+      },
+      "width": 32,
+      "height": 32,
+      "tolerance": 0.2
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#avatar-small"
+      },
+      "width": 24,
+      "height": 24,
+      "tolerance": 0.2
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#avatar-large"
+      },
+      "width": 40,
+      "height": 40,
+      "tolerance": 0.2
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#avatar-number"
+      },
+      "width": 64,
+      "height": 64,
+      "tolerance": 0.2
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#avatar-icon"
+      },
+      "width": 56,
+      "height": 56,
+      "tolerance": 0.2
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#avatar-responsive"
+      },
+      "width": 24,
+      "height": 24,
+      "tolerance": 0.2
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#avatar-custom"
+      },
+      "width": 72,
+      "height": 72,
+      "tolerance": 0.2
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#avatar-default"
+      },
+      "property": "border-radius",
+      "equals": "50%"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#avatar-small"
+      },
+      "property": "border-radius",
+      "equals": "4px"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#avatar-large"
+      },
+      "property": "border-radius",
+      "equals": "8px"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#avatar-number"
+      },
+      "property": "font-size",
+      "equals": "18px"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#avatar-icon"
+      },
+      "property": "font-size",
+      "equals": "28px"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#avatar-responsive"
+      },
+      "property": "font-size",
+      "equals": "12px"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#avatar-default"
+      },
+      "attribute": "aria-label",
+      "equals": "Ada"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".dtna-avatar-icon svg"
+      },
+      "count": 2
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#avatar-custom"
+      },
+      "equals": "Custom"
+    },
+    {
+      "type": "resize",
+      "width": 600,
+      "height": 600
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#avatar-responsive"
+      },
+      "width": 32,
+      "height": 32,
+      "tolerance": 0.2
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#avatar-responsive"
+      },
+      "property": "font-size",
+      "equals": "14px"
+    },
+    {
+      "type": "resize",
+      "width": 800,
+      "height": 600
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#avatar-responsive"
+      },
+      "width": 48,
+      "height": 48,
+      "tolerance": 0.2
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#avatar-responsive"
+      },
+      "property": "font-size",
+      "equals": "24px"
+    },
+    {
+      "type": "resize",
+      "width": 1100,
+      "height": 600
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#avatar-responsive"
+      },
+      "width": 64,
+      "height": 64,
+      "tolerance": 0.2
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#avatar-responsive"
+      },
+      "property": "font-size",
+      "equals": "32px"
+    },
+    {
+      "type": "resize",
+      "width": 1300,
+      "height": 600
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#avatar-responsive"
+      },
+      "width": 32,
+      "height": 32,
+      "tolerance": 0.2
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#avatar-responsive"
+      },
+      "property": "font-size",
+      "equals": "14px"
+    },
+    {
+      "type": "resize",
+      "width": 500,
+      "height": 600
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#avatar-responsive"
+      },
+      "width": 24,
+      "height": 24,
+      "tolerance": 0.2
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#avatar-responsive"
+      },
+      "property": "font-size",
+      "equals": "12px"
+    },
+    {
+      "type": "render",
+      "file": "temp/ui_dtna/avatar_modes.png"
+    }
+  ]
+}

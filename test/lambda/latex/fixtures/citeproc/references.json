@@ -1,0 +1,3 @@
+[
+  {"id":"json-book","type":"book","title":"A <i>JSON</i> Book","author":[{"family":"Doe","given":"Jane"}],"issued":{"date-parts":[[2024]]}}
+]

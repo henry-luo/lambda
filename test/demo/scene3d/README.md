@@ -3,11 +3,11 @@
 From the worktree root:
 
 ```sh
-./lambda.exe view test/demo/scene3d/asset-gallery.ls
-./lambda.exe view test/demo/scene3d/observatory.html
-./lambda.exe view test/demo/scene3d/shared-animation.html
-./lambda.exe view test/demo/scene3d/three-gallery.html
-./lambda.exe view test/demo/scene3d/ringworld.ls
+./lambda.exe demo scene3d
+./lambda.exe demo asset-gallery
+./lambda.exe demo observatory
+./lambda.exe demo shared-animation
+./lambda.exe demo three-gallery
 ```
 
 `three-gallery.html` runs the official, unmodified Three.js 0.186.1
@@ -25,6 +25,10 @@ orbit, tilt, zoom, Top / Side presets and Reset view. Focus the scene for arrow
 key panning, Shift-arrow orbiting, `+` / `-` zoom, `R` reset and Space playback.
 `ringworld.js` reuses unmodified OrbitControls for camera input; rendering stays
 on the native scene path. Camera distance, tilt and pan have bounded limits.
+Auto Play runs a repeating 24-second camera tour with orbit, pan, tilt and zoom,
+starting from the current view. Stop Auto Play holds the view; dragging, scrolling,
+camera keys or a camera toolbar button also stop the tour for manual control.
+Pause / Play and Restart continue to control the planet/moon timeline separately.
 All demo resources are local to this directory; viewing needs no network.
 
 For PNG output with the full native host:

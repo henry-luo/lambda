@@ -1,13 +1,16 @@
 {
   "schema": 1,
   "package": "lambda.ui.dtna",
-  "date": "2026-10-09",
+  "date": "2026-10-10",
   "product_phase": "partial",
   "upstream": {
     "version": "6.6.5",
     "commit": "4a39f54842eade4e565ab336ef6097cd7e723cdd",
     "release_url": "https://github.com/ant-design/ant-design/releases/tag/6.6.5",
-    "status": "tag and commit verified; reference application and pixel captures still pending"
+    "status": "tag/commit and npm integrity verified; locked nineteen-case reference captured and composition/Segmented/Tag/Rate/Alert/Spin/Button interactions passed",
+    "integrity": "sha512-biJB/aORNU2lvZZCX783S/g8atfE8akrEKRjRrsXVttoMtJbSHLf/Z29niv0blzt6H3BgKvhkQgHoUn5MgCx7w==",
+    "reference_app": "test/ui/dtna_reference/app",
+    "reference_provenance": "temp/ui_dtna/reference/provenance.json"
   },
   "native_capture": {
     "viewport": [
@@ -31,21 +34,36 @@
       ],
       "status": "partial",
       "exports": [
-        "button"
+        "button",
+        "button_group"
       ],
-      "owner": "lmd/package/ui/dtna/input.ls",
+      "owner": "lmd/package/ui/dtna/button.ls",
       "implemented": [
-        "Native button, five variants, sizes, disabled/loading/danger/shape/block and action envelope"
+        "Native button and anchor, five appearances, three sizes, four shapes, icon placement, ghost/danger/block, disabled inheritance and typed action envelope",
+        "Boolean/delayed/custom-icon loading with document frame cancellation and removed-owner cleanup; root/icon/content semantic overrides and literal two-character Chinese spacing",
+        "Native Enter/Space and submit/reset activation across containing-template redraws",
+        "Horizontal/vertical/block joined button groups with native disabled inheritance",
+        "Nineteenth pinned reference: 34 geometry/style oracles, semantic parts and keyboard/loading/form/removal observations"
       ],
       "remaining": [
-        "Groups, full icon catalog and timed loading motion"
+        "Modern color/variant surface, component tokens and provider defaults including joined-group size propagation",
+        "Full Chinese/nested-content wrapper parity, loading transition/wave/motion and reference pixel/static-output correspondence",
+        "Native accessibility verification and general presentation identity remain milestone gates"
       ],
       "evidence": [
         "test/ui/dtna_gallery.ls",
         "test/lambda/ui_dtna/dtna_display.ls",
         "test/lambda/ui_dtna/dtna_contracts.ls",
         "test/ui/dtna/controls.json",
-        "test/ui/dtna/styles.json"
+        "test/ui/dtna/styles.json",
+        "test/lambda/ui_dtna/dtna_foundations.ls",
+        "test/ui/dtna/foundation_navigation.json",
+        "test/ui/dtna/flex_icon_contracts.json",
+        "test/ui/dtna/reference_foundation.json",
+        "test/lambda/ui_dtna/dtna_button.ls",
+        "test/ui/dtna/button_modes.json",
+        "test/ui/dtna/form_activation_rebind.json",
+        "test/ui/dtna_reference/check_button_geometry.py"
       ]
     },
     {
@@ -58,12 +76,13 @@
       ],
       "status": "planned",
       "exports": [],
-      "owner": null,
+      "owner": "lmd/package/ui/dtna/overlay.ls",
       "implemented": [],
       "remaining": [
         "Floating action, grouped menu, badges, tooltip, scroll-to-top, correct placement and keyboard reachability"
       ],
-      "evidence": []
+      "evidence": [],
+      "owner_status": "planned module; no implementation claimed"
     },
     {
       "name": "Icon",
@@ -75,18 +94,21 @@
       ],
       "status": "partial",
       "exports": [
-        "icon"
+        "icon",
+        "icon_names"
       ],
-      "owner": "lmd/package/ui/dtna/general.ls",
+      "owner": "lmd/package/ui/dtna/icons.ls",
       "implemented": [
-        "Eight original SVG line icons with names or decorative semantics"
+        "Pinned @ant-design/icons-svg 4.6.0: all 848 variants of 498 names with license and per-source hashes",
+        "Outlined/filled/two-tone SVG, grouped attributes, explicit/derived colors, named/decorative semantics, size, rotation and spin"
       ],
       "remaining": [
-        "Filled/two-tone assets, rotation and upstream icon breadth"
+        "Reference pixel comparison and reduced-motion behavior; automatic secondary-color derivation for CSS colors other than #rrggbb requires explicit secondary_color"
       ],
       "evidence": [
-        "test/ui/dtna_gallery.ls",
-        "test/lambda/ui_dtna/dtna_display.ls"
+        "test/lambda/ui_dtna/dtna_icons.ls",
+        "test/ui/dtna/icons.json",
+        "test/ui/dtna_reference/icons.manifest"
       ]
     },
     {
@@ -104,16 +126,20 @@
         "paragraph",
         "link"
       ],
-      "owner": "lmd/package/ui/dtna/general.ls",
+      "owner": "lmd/package/ui/dtna/typography.ls",
       "implemented": [
-        "Text, paragraphs, links and headings with style/semantic attributes"
+        "Semantic h1\u2013h5 hierarchy, strong/em/u/del/code/mark/kbd decorations, status colors and disabled/external link semantics",
+        "Heading and body font scale derives from scoped font-size tokens; live edits retain native focus/caret"
       ],
       "remaining": [
-        "Copy/edit/ellipsis and full typography decoration"
+        "Copy/edit, expandable ellipsis/tooltips, selection, reference correspondence and semantic-part overrides"
       ],
       "evidence": [
         "test/ui/dtna_gallery.ls",
-        "test/lambda/ui_dtna/dtna_display.ls"
+        "test/lambda/ui_dtna/dtna_display.ls",
+        "test/lambda/ui_dtna/dtna_typography.ls",
+        "test/ui/dtna/typography.json",
+        "test/ui/dtna/typography_tokens.json"
       ]
     },
     {
@@ -128,16 +154,18 @@
       "exports": [
         "divider"
       ],
-      "owner": "lmd/package/ui/dtna/general.ls",
+      "owner": "lmd/package/ui/dtna/layout.ls",
       "implemented": [
-        "Horizontal and vertical separators with content"
+        "Horizontal/vertical separators; start/center/end labels; dashed/plain variants"
       ],
       "remaining": [
-        "Label alignment, dashed/plain variants"
+        "Reference pixel parity, nested RTL and custom spacing audit"
       ],
       "evidence": [
         "test/ui/dtna_gallery.ls",
-        "test/lambda/ui_dtna/dtna_display.ls"
+        "test/lambda/ui_dtna/dtna_display.ls",
+        "test/lambda/ui_dtna/dtna_foundations.ls",
+        "test/ui/dtna/foundation_layout.json"
       ]
     },
     {
@@ -152,16 +180,21 @@
       "exports": [
         "flex"
       ],
-      "owner": "lmd/package/ui/dtna/general.ls",
+      "owner": "lmd/package/ui/dtna/layout.ls",
       "implemented": [
-        "Direction, gap, wrapping and alignment"
+        "Validated direction, two-axis gaps, wrapping and alignment",
+        "Nonnegative CSS-unit gaps and flex grow/shrink/basis; shared dimension validation with Grid, Skeleton and Icon"
       ],
       "remaining": [
-        "Intrinsic constraint and responsive stress coverage"
+        "Intrinsic min/max constraints, responsive stress/reference coverage and semantic-part overrides"
       ],
       "evidence": [
         "test/ui/dtna_gallery.ls",
-        "test/lambda/ui_dtna/dtna_display.ls"
+        "test/lambda/ui_dtna/dtna_display.ls",
+        "test/lambda/ui_dtna/dtna_foundations.ls",
+        "test/ui/dtna/foundation_layout.json",
+        "test/lambda/ui_dtna/dtna_grid_modes.ls",
+        "test/ui/dtna/grid_modes.json"
       ]
     },
     {
@@ -177,16 +210,23 @@
         "row",
         "col"
       ],
-      "owner": "lmd/package/ui/dtna/general.ls",
+      "owner": "lmd/package/ui/dtna/layout.ls",
       "implemented": [
-        "24-column row/column composition and gutter"
+        "24-column spans, offsets/order, span-zero hiding and horizontal/vertical gutters",
+        "Responsive span/offset/order maps and gutter maps at xs/sm/md/lg/xl/xxl/xxxl; live viewport resize; RTL offsets",
+        "String-unit and responsive gutters/alignment; logical push/pull with responsive zero reset; numeric/fixed/responsive flex columns, nesting and resize in both directions"
       ],
       "remaining": [
-        "Offsets, order, responsive breakpoints and complete gutter sizing"
+        "Custom breakpoints, complex CSS expressions for gutters, broader stress/reference coverage and semantic-part overrides"
       ],
       "evidence": [
         "test/ui/dtna_gallery.ls",
-        "test/lambda/ui_dtna/dtna_display.ls"
+        "test/lambda/ui_dtna/dtna_display.ls",
+        "test/lambda/ui_dtna/dtna_foundations.ls",
+        "test/ui/dtna/foundation_layout.json",
+        "test/lambda/ui_dtna/dtna_grid_modes.ls",
+        "test/ui/dtna/grid_modes.json",
+        "test/ui/dtna_reference/check_grid_geometry.py"
       ]
     },
     {
@@ -227,12 +267,13 @@
       ],
       "status": "planned",
       "exports": [],
-      "owner": null,
+      "owner": "lmd/package/ui/dtna/layout.ls",
       "implemented": [],
       "remaining": [
         "Responsive columns, gaps, mixed item heights, stable order, relayout after image/font loading"
       ],
-      "evidence": []
+      "evidence": [],
+      "owner_status": "planned module; no implementation claimed"
     },
     {
       "name": "Space",
@@ -247,16 +288,19 @@
         "space",
         "space_compact"
       ],
-      "owner": "lmd/package/ui/dtna/general.ls",
+      "owner": "lmd/package/ui/dtna/layout.ls",
       "implemented": [
-        "Flex spacing and joined compact controls"
+        "Preserved child slots, separators, wrapping and horizontal/vertical numeric gaps",
+        "Horizontal/vertical/block compact groups with joined logical borders, disabled inheritance and focus stacking"
       ],
       "remaining": [
-        "All compact orientations, splitters and wrap edge cases"
+        "Named/responsive gap presets, mixed-control/RTL focus reference matrix and wrap stress coverage"
       ],
       "evidence": [
         "test/ui/dtna_gallery.ls",
-        "test/lambda/ui_dtna/dtna_display.ls"
+        "test/lambda/ui_dtna/dtna_display.ls",
+        "test/lambda/ui_dtna/dtna_foundations.ls",
+        "test/ui/dtna/foundation_layout.json"
       ]
     },
     {
@@ -269,12 +313,13 @@
       ],
       "status": "planned",
       "exports": [],
-      "owner": null,
+      "owner": "lmd/package/ui/dtna/layout.ls",
       "implemented": [],
       "remaining": [
         "Horizontal/vertical resize, limits, collapse, nested panels, pointer capture and keyboard resize"
       ],
-      "evidence": []
+      "evidence": [],
+      "owner_status": "planned module; no implementation claimed"
     },
     {
       "name": "Anchor",
@@ -286,12 +331,13 @@
       ],
       "status": "planned",
       "exports": [],
-      "owner": null,
+      "owner": "lmd/package/ui/dtna/general.ls",
       "implemented": [],
       "remaining": [
         "Scroll target links, active section, offsets, scroll containers, keyboard use"
       ],
-      "evidence": []
+      "evidence": [],
+      "owner_status": "planned module; no implementation claimed"
     },
     {
       "name": "Breadcrumb",
@@ -327,12 +373,13 @@
       ],
       "status": "planned",
       "exports": [],
-      "owner": null,
+      "owner": "lmd/package/ui/dtna/overlay.ls",
       "implemented": [],
       "remaining": [
         "Click/hover/context activation, nested menus, placement, selection, dismiss and focus"
       ],
-      "evidence": []
+      "evidence": [],
+      "owner_status": "planned module; no implementation claimed"
     },
     {
       "name": "Menu",
@@ -372,15 +419,21 @@
       ],
       "owner": "lmd/package/ui/dtna/navigation.ls",
       "implemented": [
-        "Total/page_size, page controls and emitted requests"
+        "Controlled/default page and size, bounded page window with clickable jump ellipses",
+        "Size changer, Enter quick jumper with clamping and typed requests; explicit en-US/zh-CN labels",
+        "Editable/read-only simple mode; Enter/blur/arrow commits; small sizing, localized/custom total ranges and hide-on-single-page"
       ],
       "remaining": [
-        "Quick jumper, size changer, localization and ellipses"
+        "Responsive/reference coverage, semantic-part overrides and full locale breadth"
       ],
       "evidence": [
         "test/ui/dtna_gallery.ls",
         "test/lambda/ui_dtna/dtna_display.ls",
-        "test/ui/dtna/navigation.json"
+        "test/ui/dtna/navigation.json",
+        "test/lambda/ui_dtna/dtna_foundations.ls",
+        "test/ui/dtna/foundation_navigation.json",
+        "test/lambda/ui_dtna/dtna_pagination_modes.ls",
+        "test/ui/dtna/pagination_modes.json"
       ]
     },
     {
@@ -395,16 +448,19 @@
       "exports": [
         "steps"
       ],
-      "owner": "lmd/package/ui/dtna/general.ls",
+      "owner": "lmd/package/ui/dtna/navigation.ls",
       "implemented": [
-        "Current, completed and pending steps with descriptions"
+        "Controlled/default current, selectable native buttons, disabled steps and typed requests",
+        "Horizontal/vertical and narrow-screen layouts; wait/process/finish/error statuses, icons, subtitles/descriptions and small markers"
       ],
       "remaining": [
-        "Clickable navigation, responsive/vertical variants and status details"
+        "Progress/dot/navigation variants, connectors, full responsive label/reference coverage"
       ],
       "evidence": [
         "test/ui/dtna_gallery.ls",
-        "test/lambda/ui_dtna/dtna_display.ls"
+        "test/lambda/ui_dtna/dtna_display.ls",
+        "test/lambda/ui_dtna/dtna_foundations.ls",
+        "test/ui/dtna/foundation_navigation.json"
       ]
     },
     {
@@ -444,12 +500,13 @@
       ],
       "status": "planned",
       "exports": [],
-      "owner": null,
+      "owner": "lmd/package/ui/dtna/picker.ls",
       "implemented": [],
       "remaining": [
         "Search text, suggestions, groups, async results, keyboard choice, IME-safe completion"
       ],
-      "evidence": []
+      "evidence": [],
+      "owner_status": "planned module; no implementation claimed"
     },
     {
       "name": "Cascader",
@@ -461,12 +518,13 @@
       ],
       "status": "planned",
       "exports": [],
-      "owner": null,
+      "owner": "lmd/package/ui/dtna/picker.ls",
       "implemented": [],
       "remaining": [
         "Hierarchical single/multiple selection, search, lazy children, clear, path labels and disabled nodes"
       ],
-      "evidence": []
+      "evidence": [],
+      "owner_status": "planned module; no implementation claimed"
     },
     {
       "name": "Checkbox",
@@ -482,15 +540,17 @@
       ],
       "owner": "lmd/package/ui/dtna/input.ls",
       "implemented": [
-        "Native checked state, disabled, labels and typed changes"
+        "Controlled/default native checked state, disabled, labels, typed change requests and rejected-change restoration"
       ],
       "remaining": [
-        "Groups, indeterminate API and complete controlled contract"
+        "Groups, indeterminate API and reference correspondence"
       ],
       "evidence": [
         "test/ui/dtna_gallery.ls",
         "test/lambda/ui_dtna/dtna_display.ls",
-        "test/ui/dtna/controls.json"
+        "test/ui/dtna/controls.json",
+        "test/ui/dtna/controlled_controls.json",
+        "test/ui/dtna/regenerated_focus.json"
       ]
     },
     {
@@ -503,12 +563,13 @@
       ],
       "status": "planned",
       "exports": [],
-      "owner": null,
+      "owner": "lmd/package/ui/dtna/picker.ls",
       "implemented": [],
       "remaining": [
         "Palette and custom color, alpha, format conversion, presets, gradients, clear, keyboard-adjustable channels"
       ],
-      "evidence": []
+      "evidence": [],
+      "owner_status": "planned module; no implementation claimed"
     },
     {
       "name": "DatePicker",
@@ -520,12 +581,13 @@
       ],
       "status": "planned",
       "exports": [],
-      "owner": null,
+      "owner": "lmd/package/ui/dtna/picker.ls",
       "implemented": [],
       "remaining": [
         "Date/week/month/quarter/year panels, date-time, multiple/range, bounds, disabled cells, presets and locale"
       ],
-      "evidence": []
+      "evidence": [],
+      "owner_status": "planned module; no implementation claimed"
     },
     {
       "name": "Form",
@@ -570,15 +632,17 @@
       ],
       "owner": "lmd/package/ui/dtna/input.ls",
       "implemented": [
-        "Native editing, authored/default values, labels, placeholder and input/change events"
+        "Native editing, controlled/default values, typed requests, accepted caret preservation and rejected-change restoration including IME"
       ],
       "remaining": [
-        "Clear/reveal/adornments/OTP and complete controlled contract"
+        "Clear/reveal/adornments/OTP, autosize and reference correspondence"
       ],
       "evidence": [
         "test/ui/dtna_gallery.ls",
         "test/lambda/ui_dtna/dtna_display.ls",
-        "test/ui/dtna/controls.json"
+        "test/ui/dtna/controls.json",
+        "test/ui/dtna/controlled_controls.json",
+        "test/ui/dtna/regenerated_focus.json"
       ]
     },
     {
@@ -591,12 +655,13 @@
       ],
       "status": "planned",
       "exports": [],
-      "owner": null,
+      "owner": "lmd/package/ui/dtna/numeric.ls",
       "implemented": [],
       "remaining": [
         "Exact numeric values, draft text, bounds, steps, precision, formatter/parser, keyboard/wheel policy"
       ],
-      "evidence": []
+      "evidence": [],
+      "owner_status": "planned module; no implementation claimed"
     },
     {
       "name": "Mentions",
@@ -608,12 +673,13 @@
       ],
       "status": "planned",
       "exports": [],
-      "owner": null,
+      "owner": "lmd/package/ui/dtna/picker.ls",
       "implemented": [],
       "remaining": [
         "Trigger search, suggestion popup, insertion/range preservation, async data and multiline composition"
       ],
-      "evidence": []
+      "evidence": [],
+      "owner_status": "planned module; no implementation claimed"
     },
     {
       "name": "Radio",
@@ -629,14 +695,16 @@
       ],
       "owner": "lmd/package/ui/dtna/input.ls",
       "implemented": [
-        "Native named groups, disabled and scalar selection events"
+        "Native named groups, typed selection requests, controlled peer restoration, disabled and arrow-key navigation"
       ],
       "remaining": [
-        "Button variants and group facade"
+        "Button variants, group facade and reference correspondence"
       ],
       "evidence": [
         "test/ui/dtna_gallery.ls",
-        "test/lambda/ui_dtna/dtna_display.ls"
+        "test/lambda/ui_dtna/dtna_display.ls",
+        "test/ui/dtna/controlled_controls.json",
+        "test/ui/dtna/regenerated_focus.json"
       ]
     },
     {
@@ -647,14 +715,28 @@
       "required_features": [
         "Full/half values, custom symbols, clear/readonly, keyboard adjustment and labels"
       ],
-      "status": "planned",
-      "exports": [],
-      "owner": null,
-      "implemented": [],
-      "remaining": [
-        "Full/half values, custom symbols, clear/readonly, keyboard adjustment and labels"
+      "status": "partial",
+      "exports": [
+        "rate"
       ],
-      "evidence": []
+      "owner": "lmd/package/ui/dtna/rate.ls",
+      "implemented": [
+        "Controlled/default full and half values, pointer preview/clear, finite bounded count/value validation, disabled/readonly and inherited fieldset disabling",
+        "Native button activation, RTL-aware arrow steps/bounds, named exact-text form value and typed change/hover notifications",
+        "Small/middle/large sizes, per-index custom-character functions, labels and title tooltips; 22 pinned geometry/font oracles and committed browser interactions"
+      ],
+      "remaining": [
+        "Shared Tooltip overlay behavior and semantic-part overrides",
+        "Repeated immutable authored Element characters await the UI-1 presentation-identity decision; callback-generated characters are covered",
+        "Native pixel correspondence, motion/reduced-motion and native accessibility validation"
+      ],
+      "evidence": [
+        "test/lambda/ui_dtna/dtna_rate.ls",
+        "test/ui/dtna/rate_modes.json",
+        "test/ui/dtna/inline_baseline_contracts.json",
+        "test/ui/dtna/hover_boundary_contracts.json",
+        "test/ui/dtna_reference/check_rate_geometry.py"
+      ]
     },
     {
       "name": "Select",
@@ -670,7 +752,7 @@
       ],
       "owner": "lmd/package/ui/dtna/input.ls",
       "implemented": [
-        "Native single select with typed scalar option values"
+        "Native single select with typed scalar option values and controlled rejection restoration"
       ],
       "remaining": [
         "Custom searchable popup, multiple/tags/groups and virtualization"
@@ -678,7 +760,9 @@
       "evidence": [
         "test/ui/dtna_gallery.ls",
         "test/lambda/ui_dtna/dtna_display.ls",
-        "test/ui/dtna/controls.json"
+        "test/ui/dtna/controls.json",
+        "test/ui/dtna/controlled_controls.json",
+        "test/ui/dtna/regenerated_focus.json"
       ]
     },
     {
@@ -691,12 +775,13 @@
       ],
       "status": "planned",
       "exports": [],
-      "owner": null,
+      "owner": "lmd/package/ui/dtna/numeric.ls",
       "implemented": [],
       "remaining": [
         "Single/range, steps, marks, vertical/reverse, tooltips, constrained thumbs, pointer and keyboard input"
       ],
-      "evidence": []
+      "evidence": [],
+      "owner_status": "planned module; no implementation claimed"
     },
     {
       "name": "Switch",
@@ -712,15 +797,17 @@
       ],
       "owner": "lmd/package/ui/dtna/input.ls",
       "implemented": [
-        "Native checkbox semantics with visual track and change action"
+        "Native checkbox semantics, visual track, controlled/default checked state and keyboard/pointer change requests"
       ],
       "remaining": [
-        "Loading/labels and complete controlled contract"
+        "Loading/labels and reference correspondence"
       ],
       "evidence": [
         "test/ui/dtna_gallery.ls",
         "test/lambda/ui_dtna/dtna_display.ls",
-        "test/ui/dtna/controls.json"
+        "test/ui/dtna/controls.json",
+        "test/ui/dtna/controlled_controls.json",
+        "test/ui/dtna/regenerated_focus.json"
       ]
     },
     {
@@ -733,12 +820,13 @@
       ],
       "status": "planned",
       "exports": [],
-      "owner": null,
+      "owner": "lmd/package/ui/dtna/picker.ls",
       "implemented": [],
       "remaining": [
         "Hour/minute/second, 12/24 hour, steps, disabled times, range and confirmation"
       ],
-      "evidence": []
+      "evidence": [],
+      "owner_status": "planned module; no implementation claimed"
     },
     {
       "name": "Transfer",
@@ -750,12 +838,13 @@
       ],
       "status": "planned",
       "exports": [],
-      "owner": null,
+      "owner": "lmd/package/ui/dtna/collection.ls",
       "implemented": [],
       "remaining": [
         "Dual lists, search, pagination, selected/target keys, disabled items and custom list/tree content"
       ],
-      "evidence": []
+      "evidence": [],
+      "owner_status": "planned module; no implementation claimed"
     },
     {
       "name": "TreeSelect",
@@ -767,12 +856,13 @@
       ],
       "status": "planned",
       "exports": [],
-      "owner": null,
+      "owner": "lmd/package/ui/dtna/picker.ls",
       "implemented": [],
       "remaining": [
         "Search, hierarchy, checked/multiple values, label strategy, lazy loading and virtual popup"
       ],
-      "evidence": []
+      "evidence": [],
+      "owner_status": "planned module; no implementation claimed"
     },
     {
       "name": "Upload",
@@ -784,12 +874,13 @@
       ],
       "status": "planned",
       "exports": [],
-      "owner": null,
+      "owner": "lmd/package/ui/dtna/media.ls",
       "implemented": [],
       "remaining": [
         "File selection/drop/paste where supported, lists/previews, filtering, progress, abort/retry and transport adapter"
       ],
-      "evidence": []
+      "evidence": [],
+      "owner_status": "planned module; no implementation claimed"
     },
     {
       "name": "Avatar",
@@ -803,16 +894,23 @@
       "exports": [
         "avatar"
       ],
-      "owner": "lmd/package/ui/dtna/general.ls",
+      "owner": "lmd/package/ui/dtna/avatar.ls",
       "implemented": [
-        "Text/image avatars and custom dimensions"
+        "Text/image/custom-source and icon slots, native alt/srcset/draggable props, circle/square shapes, preset/numeric/responsive sizing and current-breakpoint default restoration",
+        "Native size/corner/font geometry agrees with 23 pinned-reference oracles across six live viewport states",
+        "Verified source/font/browser capture provenance and native pixel comparison on interpreter and JIT at 0.1% mismatch bound for the size/icon fixture on macOS"
       ],
       "remaining": [
-        "Groups, overflow, shape variants and image fallback"
+        "Text auto-fitting, image fallback, groups and overflow",
+        "Pixel coverage for remaining variants and semantic-part customization"
       ],
       "evidence": [
         "test/ui/dtna_gallery.ls",
-        "test/lambda/ui_dtna/dtna_display.ls"
+        "test/lambda/ui_dtna/dtna_display.ls",
+        "test/lambda/ui_dtna/dtna_avatar.ls",
+        "test/ui/dtna/avatar_modes.json",
+        "test/ui/dtna_reference/check_avatar_geometry.py",
+        "test/ui/dtna_reference/check_native_pixels.py"
       ]
     },
     {
@@ -825,18 +923,22 @@
       ],
       "status": "partial",
       "exports": [
-        "badge"
+        "badge",
+        "badge_ribbon"
       ],
-      "owner": "lmd/package/ui/dtna/general.ls",
+      "owner": "lmd/package/ui/dtna/display.ls",
       "implemented": [
-        "Numeric count/overflow and dot content"
+        "Numeric count/overflow and dot content",
+        "Zero suppression/show-zero, standalone and attached counts, status dots/text, full accessible overflow count, two-axis offset, custom color and logical-side ribbon"
       ],
       "remaining": [
-        "Ribbon, positioning/color variants and motion"
+        "Reference geometry/pixels, motion and comprehensive RTL/semantic-part customization"
       ],
       "evidence": [
         "test/ui/dtna_gallery.ls",
-        "test/lambda/ui_dtna/dtna_display.ls"
+        "test/lambda/ui_dtna/dtna_display.ls",
+        "test/lambda/ui_dtna/dtna_display_variants.ls",
+        "test/ui/dtna/display_variants.json"
       ]
     },
     {
@@ -849,12 +951,13 @@
       ],
       "status": "planned",
       "exports": [],
-      "owner": null,
+      "owner": "lmd/package/ui/dtna/picker.ls",
       "implemented": [],
       "remaining": [
         "Month/year views, selection, range/bounds, cell content, first weekday and locale"
       ],
-      "evidence": []
+      "evidence": [],
+      "owner_status": "planned module; no implementation claimed"
     },
     {
       "name": "Card",
@@ -866,18 +969,24 @@
       ],
       "status": "partial",
       "exports": [
-        "card"
+        "card",
+        "card_grid",
+        "card_meta"
       ],
-      "owner": "lmd/package/ui/dtna/general.ls",
+      "owner": "lmd/package/ui/dtna/surfaces.ls",
       "implemented": [
-        "Title/extra/body/actions slots"
+        "Header/extra/cover/actions, border/hover/loading/size/inner variants and grid/metadata slots",
+        "Tab lists reuse shared Tabs, including default/controlled selection and keyboard behavior"
       ],
       "remaining": [
-        "Cover, grid, loading and tab variants"
+        "Reference geometry/pixel correspondence and semantic-part overrides",
+        "Full card tab placement and controlled composition under parent regeneration"
       ],
       "evidence": [
         "test/ui/dtna_gallery.ls",
-        "test/lambda/ui_dtna/dtna_display.ls"
+        "test/lambda/ui_dtna/dtna_display.ls",
+        "test/lambda/ui_dtna/dtna_surfaces.ls",
+        "test/ui/dtna/surfaces.json"
       ]
     },
     {
@@ -890,12 +999,13 @@
       ],
       "status": "planned",
       "exports": [],
-      "owner": null,
+      "owner": "lmd/package/ui/dtna/general.ls",
       "implemented": [],
       "remaining": [
         "Arrows/dots, swipe/drag, autoplay/pause, orientation, transitions and keyboard use"
       ],
-      "evidence": []
+      "evidence": [],
+      "owner_status": "planned module; no implementation claimed"
     },
     {
       "name": "Collapse",
@@ -934,18 +1044,22 @@
       ],
       "status": "partial",
       "exports": [
-        "descriptions"
+        "descriptions",
+        "description_item"
       ],
-      "owner": "lmd/package/ui/dtna/general.ls",
+      "owner": "lmd/package/ui/dtna/display.ls",
       "implemented": [
-        "Label/content rows"
+        "Label/content rows",
+        "Responsive columns/spans with filled and clamped row packing, bordered/horizontal/vertical layouts, sizes, title/extra, colon and per-cell styles"
       ],
       "remaining": [
-        "Spans, grid, borders and responsive modes"
+        "Reference geometry/pixels, comprehensive responsive/RTL and semantic-part customization"
       ],
       "evidence": [
         "test/ui/dtna_gallery.ls",
-        "test/lambda/ui_dtna/dtna_display.ls"
+        "test/lambda/ui_dtna/dtna_display.ls",
+        "test/lambda/ui_dtna/dtna_display_variants.ls",
+        "test/ui/dtna/display_variants.json"
       ]
     },
     {
@@ -960,16 +1074,18 @@
       "exports": [
         "empty"
       ],
-      "owner": "lmd/package/ui/dtna/general.ls",
+      "owner": "lmd/package/ui/dtna/surfaces.ls",
       "implemented": [
-        "Original SVG empty-state illustration, description and child actions"
+        "Pinned default/simple illustrations, custom URL/element, image dimensions, description/action slots and explicit en-US/zh-CN messages"
       ],
       "remaining": [
-        "All upstream presets and localization"
+        "Reference geometry/pixel correspondence and semantic-part overrides"
       ],
       "evidence": [
         "test/ui/dtna_gallery.ls",
-        "test/lambda/ui_dtna/dtna_display.ls"
+        "test/lambda/ui_dtna/dtna_display.ls",
+        "test/lambda/ui_dtna/dtna_surfaces.ls",
+        "test/ui/dtna/surfaces.json"
       ]
     },
     {
@@ -982,12 +1098,13 @@
       ],
       "status": "planned",
       "exports": [],
-      "owner": null,
+      "owner": "lmd/package/ui/dtna/media.ls",
       "implemented": [],
       "remaining": [
         "Loading/fallback, preview, grouped navigation, zoom/pan/rotate and image lifecycle"
       ],
-      "evidence": []
+      "evidence": [],
+      "owner_status": "planned module; no implementation claimed"
     },
     {
       "name": "List",
@@ -999,12 +1116,13 @@
       ],
       "status": "planned",
       "exports": [],
-      "owner": null,
+      "owner": "lmd/package/ui/dtna/collection.ls",
       "implemented": [],
       "remaining": [
         "Conventional rich-item layout, grid, actions, loading, pagination; reuse collection foundation and recommend Listy for new virtual lists"
       ],
-      "evidence": []
+      "evidence": [],
+      "owner_status": "planned module; no implementation claimed"
     },
     {
       "name": "Listy",
@@ -1016,12 +1134,13 @@
       ],
       "status": "planned",
       "exports": [],
-      "owner": null,
+      "owner": "lmd/package/ui/dtna/collection.ls",
       "implemented": [],
       "remaining": [
         "Virtual scrolling, grouped sticky headers, rich rows, infinite loading, drag reorder and scroll-to-item"
       ],
-      "evidence": []
+      "evidence": [],
+      "owner_status": "planned module; no implementation claimed"
     },
     {
       "name": "Popover",
@@ -1033,12 +1152,13 @@
       ],
       "status": "planned",
       "exports": [],
-      "owner": null,
+      "owner": "lmd/package/ui/dtna/overlay.ls",
       "implemented": [],
       "remaining": [
         "Rich content, trigger modes, placement, controlled open state and focus/dismiss rules"
       ],
-      "evidence": []
+      "evidence": [],
+      "owner_status": "planned module; no implementation claimed"
     },
     {
       "name": "QRCode",
@@ -1050,12 +1170,13 @@
       ],
       "status": "planned",
       "exports": [],
-      "owner": null,
+      "owner": "lmd/package/ui/dtna/media.ls",
       "implemented": [],
       "remaining": [
         "Standards-based encoding, error correction, quiet zone, colors/icon, status and SVG/export"
       ],
-      "evidence": []
+      "evidence": [],
+      "owner_status": "planned module; no implementation claimed"
     },
     {
       "name": "Segmented",
@@ -1071,15 +1192,19 @@
       ],
       "owner": "lmd/package/ui/dtna/navigation.ls",
       "implemented": [
-        "Typed keyed choices, disabled and roving keyboard selection"
+        "Typed keyed choices, disabled and roving keyboard selection",
+        "Small/middle/large, full-width and vertical groups, round shape, RTL geometry, icon/label slots, controlled requests, same-selection suppression and named native form entries"
       ],
       "remaining": [
-        "Vertical/block/icon variants and motion"
+        "Repeated ordinary SVG slots fail the pending M0 presentation-identity contract (41/42 native assertions pass)",
+        "Motion, comprehensive reference pixels and semantic-part customization"
       ],
       "evidence": [
         "test/ui/dtna_gallery.ls",
         "test/lambda/ui_dtna/dtna_display.ls",
-        "test/ui/dtna/navigation.json"
+        "test/ui/dtna/navigation.json",
+        "test/lambda/ui_dtna/dtna_segmented.ls",
+        "test/ui/dtna/segmented_modes.json"
       ]
     },
     {
@@ -1094,16 +1219,18 @@
       "exports": [
         "statistic"
       ],
-      "owner": "lmd/package/ui/dtna/general.ls",
+      "owner": "lmd/package/ui/dtna/statistic.ls",
       "implemented": [
-        "Title, value, prefix and suffix"
+        "Title/prefix/suffix/loading, pure formatter, explicit en-US/zh-CN locale validation and custom separators",
+        "Decimal-text grouping and precision truncation/padding preserve full-width integer and decimal digits"
       ],
       "remaining": [
-        "Formatting, timers/countdown and locale support"
+        "Semantic-part overrides and reference correspondence; countdown and cancellation remain M6"
       ],
       "evidence": [
-        "test/ui/dtna_gallery.ls",
-        "test/lambda/ui_dtna/dtna_display.ls"
+        "test/lambda/ui_dtna/dtna_timeline_statistic.ls",
+        "test/ui/dtna/timeline_statistic.json",
+        "test/ui/dtna_reference/app/fixtures.jsx"
       ]
     },
     {
@@ -1148,18 +1275,26 @@
       ],
       "status": "partial",
       "exports": [
-        "tag"
+        "tag",
+        "checkable_tag"
       ],
-      "owner": "lmd/package/ui/dtna/general.ls",
+      "owner": "lmd/package/ui/dtna/tag.ls",
       "implemented": [
-        "Text/status/close action with local template state"
+        "Default filled, outlined and solid variants; thirteen preset colors plus semantic tokens and #rrggbb custom backgrounds; icons, native links and disabled close controls",
+        "Controlled/uncontrolled visibility and boolean selection; close requests can be declined by a controlled owner; native button Enter/Space activation and provider-disabled inheritance",
+        "Thirty-eight native assertions on each tier; sixteen geometry/color oracles and selection/close observations agree with pinned AntD"
       ],
       "remaining": [
-        "Checkable tag, color presets and removal animation"
+        "Filled/outlined custom colors beyond #rrggbb; reference pixel coverage, semantic parts and motion",
+        "Checkable groups and removable-tag lifecycle through rebuilt source identities depend on M0 consultation"
       ],
       "evidence": [
         "test/ui/dtna_gallery.ls",
-        "test/lambda/ui_dtna/dtna_display.ls"
+        "test/lambda/ui_dtna/dtna_display.ls",
+        "test/lambda/ui_dtna/dtna_tag.ls",
+        "test/ui/dtna/tag_modes.json",
+        "test/ui/dtna/flex_strut_contracts.json",
+        "test/ui/dtna_reference/check_tag_geometry.py"
       ]
     },
     {
@@ -1174,16 +1309,20 @@
       "exports": [
         "timeline"
       ],
-      "owner": "lmd/package/ui/dtna/general.ls",
+      "owner": "lmd/package/ui/dtna/timeline.ls",
       "implemented": [
-        "Labels, child content and dot color"
+        "Vertical/horizontal, start/end/alternate, reverse, labelled content, custom/status/loading markers and pending item",
+        "Current title/content/icon/placement names plus legacy label/children/dot/position aliases",
+        "Vertical/horizontal connector pixels, pending dotted rail and original placement retained through reverse"
       ],
       "remaining": [
-        "Alternate/reverse/pending modes and custom indicators"
+        "Reference geometry/pixel correspondence, title-span sizing, variants, semantic-part overrides and RTL/motion verification"
       ],
       "evidence": [
-        "test/ui/dtna_gallery.ls",
-        "test/lambda/ui_dtna/dtna_display.ls"
+        "test/lambda/ui_dtna/dtna_timeline_statistic.ls",
+        "test/ui/dtna/timeline_statistic.json",
+        "test/ui/dtna/flex_pseudo_contracts.json",
+        "test/ui/dtna/flex_pseudo_contracts.json"
       ]
     },
     {
@@ -1196,12 +1335,13 @@
       ],
       "status": "planned",
       "exports": [],
-      "owner": null,
+      "owner": "lmd/package/ui/dtna/overlay.ls",
       "implemented": [],
       "remaining": [
         "Hover/focus/click, delays, arrow/placement, wrapping, disabled triggers and dismiss"
       ],
-      "evidence": []
+      "evidence": [],
+      "owner_status": "planned module; no implementation claimed"
     },
     {
       "name": "Tour",
@@ -1213,12 +1353,13 @@
       ],
       "status": "planned",
       "exports": [],
-      "owner": null,
+      "owner": "lmd/package/ui/dtna/overlay.ls",
       "implemented": [],
       "remaining": [
         "Target geometry, spotlight/mask, steps, scroll-to-target, missing targets and keyboard exit"
       ],
-      "evidence": []
+      "evidence": [],
+      "owner_status": "planned module; no implementation claimed"
     },
     {
       "name": "Tree",
@@ -1261,17 +1402,23 @@
       "exports": [
         "alert"
       ],
-      "owner": "lmd/package/ui/dtna/general.ls",
+      "owner": "lmd/package/ui/dtna/alert.ls",
       "implemented": [
-        "Status, message/description and close action"
+        "Four statuses, outlined/filled variants, banners, native/custom icons, title/message/description/action/child slots",
+        "Native keyboard close, custom close labels/icons, controlled visibility retention, nested close isolation and validated semantic-part overrides"
       ],
       "remaining": [
-        "Banner, custom icon/action, close motion and error boundary"
+        "Close motion and after-close notification, native accessibility and complete pixel correspondence",
+        "Error boundary awaits the reviewed failure-isolation contract (M7)"
       ],
       "evidence": [
         "test/ui/dtna_gallery.ls",
         "test/lambda/ui_dtna/dtna_display.ls",
-        "test/ui/dtna/styles.json"
+        "test/ui/dtna/styles.json",
+        "test/lambda/ui_dtna/dtna_alert.ls",
+        "test/ui/dtna/alert_modes.json",
+        "test/ui/dtna/border_color_cssom_contracts.json",
+        "test/ui/dtna_reference/check_alert_geometry.py"
       ]
     },
     {
@@ -1284,12 +1431,13 @@
       ],
       "status": "planned",
       "exports": [],
-      "owner": null,
+      "owner": "lmd/package/ui/dtna/overlay.ls",
       "implemented": [],
       "remaining": [
         "Four sides, sizes, mask, push/nesting, loading, focus containment and restoration"
       ],
-      "evidence": []
+      "evidence": [],
+      "owner_status": "planned module; no implementation claimed"
     },
     {
       "name": "Message",
@@ -1301,12 +1449,13 @@
       ],
       "status": "planned",
       "exports": [],
-      "owner": null,
+      "owner": "lmd/package/ui/dtna/overlay.ls",
       "implemented": [],
       "remaining": [
         "Status toasts, update by key, duration, stacking, dismissal and inherited configuration"
       ],
-      "evidence": []
+      "evidence": [],
+      "owner_status": "planned module; no implementation claimed"
     },
     {
       "name": "Modal",
@@ -1318,12 +1467,13 @@
       ],
       "status": "planned",
       "exports": [],
-      "owner": null,
+      "owner": "lmd/package/ui/dtna/overlay.ls",
       "implemented": [],
       "remaining": [
         "Dialog slots, confirm variants, pending OK/cancel, mask/Escape, destroy/retain and nested focus"
       ],
-      "evidence": []
+      "evidence": [],
+      "owner_status": "planned module; no implementation claimed"
     },
     {
       "name": "Notification",
@@ -1335,12 +1485,13 @@
       ],
       "status": "planned",
       "exports": [],
-      "owner": null,
+      "owner": "lmd/package/ui/dtna/overlay.ls",
       "implemented": [],
       "remaining": [
         "Rich notices, placements, keyed updates, progress/timing, stacking and cleanup"
       ],
-      "evidence": []
+      "evidence": [],
+      "owner_status": "planned module; no implementation claimed"
     },
     {
       "name": "Popconfirm",
@@ -1352,12 +1503,13 @@
       ],
       "status": "planned",
       "exports": [],
-      "owner": null,
+      "owner": "lmd/package/ui/dtna/overlay.ls",
       "implemented": [],
       "remaining": [
         "Anchored confirmation, buttons, async pending/error, cancellation and focus return"
       ],
-      "evidence": []
+      "evidence": [],
+      "owner_status": "planned module; no implementation claimed"
     },
     {
       "name": "Progress",
@@ -1371,16 +1523,20 @@
       "exports": [
         "progress"
       ],
-      "owner": "lmd/package/ui/dtna/general.ls",
+      "owner": "lmd/package/ui/dtna/progress.ls",
       "implemented": [
-        "Clamped line progress, status, label and range semantics"
+        "Line, circle and dashboard SVG; gap placement/degree, stroke width/cap, clamped percent and success segment",
+        "Discrete steps, per-step color arrays, custom rounding and label functions, status icons and busy-free range semantics",
+        "Validated/sorted CSS line and masked conic ring gradients with explicit resource identity"
       ],
       "remaining": [
-        "Circle/dashboard/steps and multiple segments"
+        "Percent label positioning, semantic-part overrides, reduced-motion inspection and reference correspondence"
       ],
       "evidence": [
-        "test/ui/dtna_gallery.ls",
-        "test/lambda/ui_dtna/dtna_display.ls"
+        "test/lambda/ui_dtna/dtna_progress.ls",
+        "test/ui/dtna/progress.json",
+        "test/ui/dtna_reference/app/fixtures.jsx",
+        "test/ui/dtna/progress_gradients.json"
       ]
     },
     {
@@ -1395,16 +1551,18 @@
       "exports": [
         "result"
       ],
-      "owner": "lmd/package/ui/dtna/general.ls",
+      "owner": "lmd/package/ui/dtna/surfaces.ls",
       "implemented": [
-        "Status icon, title, description and child actions"
+        "Status icons, 403/404/500 illustrations, title/subtitle, extra actions and detail content"
       ],
       "remaining": [
-        "HTTP status illustrations and full variants"
+        "Reference geometry/pixel correspondence and semantic-part overrides"
       ],
       "evidence": [
         "test/ui/dtna_gallery.ls",
-        "test/lambda/ui_dtna/dtna_display.ls"
+        "test/lambda/ui_dtna/dtna_display.ls",
+        "test/lambda/ui_dtna/dtna_surfaces.ls",
+        "test/ui/dtna/surfaces.json"
       ]
     },
     {
@@ -1417,18 +1575,26 @@
       ],
       "status": "partial",
       "exports": [
-        "skeleton"
+        "skeleton",
+        "skeleton_avatar",
+        "skeleton_button",
+        "skeleton_input",
+        "skeleton_image",
+        "skeleton_node"
       ],
-      "owner": "lmd/package/ui/dtna/general.ls",
+      "owner": "lmd/package/ui/dtna/skeleton.ls",
       "implemented": [
-        "Static text rows and busy semantics"
+        "Text/title/paragraph/avatar options, zero or multiple rows, individual widths, round shapes and loading transition",
+        "Standalone avatar/button/input/image/custom-node parts and scoped optional motion CSS"
       ],
       "remaining": [
-        "All shape variants and animation"
+        "Reference geometry/pixel correspondence, active motion and reduced-motion verification, semantic-part overrides"
       ],
       "evidence": [
         "test/ui/dtna_gallery.ls",
-        "test/lambda/ui_dtna/dtna_display.ls"
+        "test/lambda/ui_dtna/dtna_display.ls",
+        "test/lambda/ui_dtna/dtna_skeleton.ls",
+        "test/ui/dtna/skeleton.json"
       ]
     },
     {
@@ -1443,16 +1609,23 @@
       "exports": [
         "spin"
       ],
-      "owner": "lmd/package/ui/dtna/general.ls",
+      "owner": "lmd/package/ui/dtna/spin.ls",
       "implemented": [
-        "Loading icon and busy/status wrapper"
+        "Small/middle/large indicators, description/tip, nested content and fixed fullscreen loading",
+        "Controlled spinning, delayed activation and owner-scoped named-frame cancellation",
+        "Custom string/element/pure-function indicators, bounded manual and automatic percentages",
+        "Validated semantic class/style parts, reduced-motion rules and busy/live status semantics"
       ],
       "remaining": [
-        "Delay, motion, custom indicator and fullscreen modes"
+        "Provider-level size/indicator and component-token propagation awaits the M0 configuration contract",
+        "Repeated authored indicators and state across regenerated alternatives await the M0 presentation contract and UI-1",
+        "Full pixel, motion/static-export and native assistive-technology correspondence remains unverified"
       ],
       "evidence": [
-        "test/ui/dtna_gallery.ls",
-        "test/lambda/ui_dtna/dtna_display.ls"
+        "test/lambda/ui_dtna/dtna_spin.ls",
+        "test/ui/dtna/spin_modes.json",
+        "test/ui/dtna/pointer_events_cssom_contracts.json",
+        "test/ui/dtna_reference/check_spin_geometry.py"
       ]
     },
     {
@@ -1465,12 +1638,13 @@
       ],
       "status": "planned",
       "exports": [],
-      "owner": null,
+      "owner": "lmd/package/ui/dtna/media.ls",
       "implemented": [],
       "remaining": [
         "Repeated text/image, rotation, spacing, multi-line text and deterministic export; decorative treatment, not a security guarantee"
       ],
-      "evidence": []
+      "evidence": [],
+      "owner_status": "planned module; no implementation claimed"
     },
     {
       "name": "Affix",
@@ -1482,12 +1656,13 @@
       ],
       "status": "planned",
       "exports": [],
-      "owner": null,
+      "owner": "lmd/package/ui/dtna/general.ls",
       "implemented": [],
       "remaining": [
         "Top/bottom offsets, custom scroll container, resize and sticky/fixed transition"
       ],
-      "evidence": []
+      "evidence": [],
+      "owner_status": "planned module; no implementation claimed"
     },
     {
       "name": "App",
@@ -1499,12 +1674,13 @@
       ],
       "status": "planned",
       "exports": [],
-      "owner": null,
+      "owner": "lmd/package/ui/dtna/provider.ls",
       "implemented": [],
       "remaining": [
         "Application scope, service hosts, stylesheet installation and cleanup"
       ],
-      "evidence": []
+      "evidence": [],
+      "owner_status": "planned module; no implementation claimed"
     },
     {
       "name": "BorderBeam",
@@ -1516,12 +1692,13 @@
       ],
       "status": "planned",
       "exports": [],
-      "owner": null,
+      "owner": "lmd/package/ui/dtna/media.ls",
       "implemented": [],
       "remaining": [
         "Border-following decoration, gradients, direction/speed/size, multiple beams, hover and reduced motion"
       ],
-      "evidence": []
+      "evidence": [],
+      "owner_status": "planned module; no implementation claimed"
     },
     {
       "name": "ConfigProvider",
@@ -1537,7 +1714,8 @@
       ],
       "owner": "lmd/package/ui/dtna/general.ls",
       "implemented": [
-        "Scoped CSS token overrides, inherited unspecified tokens, direction and native fieldset disabling"
+        "Scoped CSS token overrides, inherited unspecified tokens, direction and native fieldset disabling",
+        "Scoped heading font derivation, nested inheritance and live font updates without losing native input edits/focus"
       ],
       "remaining": [
         "Locale, density/motion, overlay propagation and provider data context"
@@ -1546,7 +1724,8 @@
         "test/ui/dtna_gallery.ls",
         "test/lambda/ui_dtna/dtna_display.ls",
         "test/lambda/ui_dtna/dtna_tokens.ls",
-        "test/ui/dtna/styles.json"
+        "test/ui/dtna/styles.json",
+        "test/ui/dtna/typography_tokens.json"
       ]
     },
     {
@@ -1559,12 +1738,13 @@
       ],
       "status": "planned",
       "exports": [],
-      "owner": null,
+      "owner": "lmd/package/ui/dtna/provider.ls",
       "implemented": [],
       "remaining": [
         "Reference utilities classified individually; responsive/debounce/value helpers where applicable, React hook/ref helpers mapped or marked inapplicable"
       ],
-      "evidence": []
+      "evidence": [],
+      "owner_status": "planned module; no implementation claimed"
     }
   ]
 }

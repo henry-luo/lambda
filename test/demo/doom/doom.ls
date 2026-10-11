@@ -23,6 +23,7 @@ let GAME = sim.initialize(WORLD, {*: game_state.new_game(LEVEL, RULES, VISUALS),
 let SCENE = scene.prepare(WORLD, GAME)
 let PROFILE = sys.proc.self.env.DOOM_PROFILE# == "1"
 
+fn internal_focus(evt) => dom.closest(evt.relatedTarget, "#doom") != null
 pn stop_frame(owner, token) { if (token > 0) dom.cancel_frame(owner, token) }
 pn publish(owner, previous, next, timestamp_ms, reset_clock = false) {
     stop_frame(owner, previous.token)
@@ -47,7 +48,8 @@ pn publish(owner, previous, next, timestamp_ms, reset_clock = false) {
         dom.set_attribute(owner, "data-error", problem)
         present.text(handles.status, problem)
     }
-    if (problem != null or next.game.mode != "playing" or next.game.spectator != "player") dom.set_relative_mouse(owner, false)
+    if (problem != null or next.game.mode != "playing" or next.game.spectator != "player" or next.game.autoplay)
+        dom.set_relative_mouse(owner, false)
     return {*: next, handles: handles, visible: painted, transients: transients, audio: sounds, token: token,
         game: if (problem == null) next.game else {*: next.game, mode: "error", input: controls.empty()},
         clock: if (reset_clock) sim.initial_clock() else next.clock}
@@ -75,7 +77,7 @@ pn action(owner, session_value, command, timestamp_ms) any^ {
         dom.get_state(dom.get_element_by_id(owner, "map-picker"), "value"))^
         else {*: session_value, game: sim.action(session_value.map_data, session_value.game, command, RULES, VISUALS)}
     let committed = publish(owner, session_value, next, timestamp_ms, true)
-    if (committed.game.mode == "playing" and committed.game.spectator == "player" and
+    if (committed.game.mode == "playing" and committed.game.spectator == "player" and not committed.game.autoplay and
         not dom.set_relative_mouse(owner, true)) { raise error("DOOM: relative mouse capture failed") }
     dom.focus_set(owner, false)
     return committed
@@ -131,7 +133,9 @@ on keydown(evt) {
         let next = {*: session, commands: controls.consume(commands)}
         session = if (contains(commands.edges, command)) action(owner, next, command, evt.time_stamp)^ else next
     } else {
-        session = {*: session, game: {*: session.game, input: controls.set_key(session.game.input, evt.key, true, session.game.spectator)}}
+        session = {*: session, game: {*: session.game, autoplay: false,
+            input: controls.set_key(if (session.game.autoplay) controls.empty() else session.game.input,
+                evt.key, true, session.game.spectator)}}
     }
     return 'prevent-default'
 }
@@ -173,7 +177,8 @@ on mousedown(evt) {
     let owner = dom.closest(evt.target, "#doom")
     if (owner == null or dom.closest(evt.target, "#viewport") == null) { return 'pass' }
     if (not dom.set_relative_mouse(owner, true)) { raise error("DOOM: relative mouse capture failed") }
-    session = {*: session, game: {*: session.game, input: controls.set_key(session.game.input, "mouse1", true)}}
+    session = {*: session, game: {*: session.game, autoplay: false,
+        input: controls.set_key(if (session.game.autoplay) controls.empty() else session.game.input, "mouse1", true)}}
     return 'prevent-default'
 }
 on pointerup(evt) { session = {*: session, drag: null}; return 'pass' }
@@ -183,6 +188,8 @@ on mouseup(evt) {
     return 'pass'
 }
 on blur(evt) {
+    // Moving focus to a game button must not pause before that button's click.
+    if (internal_focus(evt)) { return 'pass' }
     let owner = dom.get_element_by_id(dom.root_node(evt.target), "doom")
     if (owner != null and session.game.mode == "playing") { session = action(owner, session, "pause", evt.time_stamp)^ }
     session = {*: session, commands: controls.empty(), drag: null, game: {*: session.game, input: controls.empty()}}
@@ -208,6 +215,7 @@ on closerequest(evt) {
 
 view <doom_document> { ~.rendered }
 on blur(evt) {
+    if (internal_focus(evt)) { return 'pass' }
     let owner = dom.get_element_by_id(dom.root_node(evt.target), "doom")
     if (owner != null) dom.dispatch(owner, "doom_blur")
     return 'pass'

@@ -3388,7 +3388,8 @@
               "radiant/view_clip.cpp",
               "radiant/view_geometry.cpp",
               "radiant/retained_display_list.cpp",
-              "test/test_retained_display_list_stubs.cpp"
+              "test/test_retained_display_list_stubs.cpp",
+              "test/test_unlinked_layout_stubs.cpp"
             ],
             "binary": "test_retained_display_list_gtest.exe",
             "icon": "\ud83e\uddfe"
@@ -3554,7 +3555,8 @@
             "additional_sources": [
               "radiant/layout_custom.cpp",
               "radiant/layout_box.cpp",
-              "radiant/stacking_order.cpp"
+              "radiant/stacking_order.cpp",
+              "test/test_unlinked_layout_stubs.cpp"
             ],
             "binary": "test_layout_custom_gtest.exe",
             "icon": "\ud83d\udcd0"
@@ -4464,7 +4466,8 @@
               "radiant/editing_host.cpp",
               "test/test_dom_range_stubs.cpp",
               "lib/test_utils.c",
-              "lib/test_utils_pool.c"
+              "lib/test_utils_pool.c",
+              "test/test_unlinked_layout_stubs.cpp"
             ],
             "binary": "test_dom_range_gtest.exe",
             "icon": "\ud83c\udfaf"
@@ -4529,7 +4532,8 @@
               "radiant/editing_host.cpp",
               "test/test_dom_range_stubs.cpp",
               "lib/test_utils.c",
-              "lib/test_utils_pool.c"
+              "lib/test_utils_pool.c",
+              "test/test_unlinked_layout_stubs.cpp"
             ],
             "binary": "test_source_pos_bridge_gtest.exe",
             "icon": "\ud83e\udea2"

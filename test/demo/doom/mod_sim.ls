@@ -10,6 +10,7 @@ import ai: .mod_ai
 import events: .mod_events
 import weapons: .mod_weapons
 import camera: .mod_camera
+import autoplay: .mod_autoplay
 
 pub let STEP = 1 / 35
 pub fn initial_clock() => {last_ms: null, remainder: 0.0, dropped: 0.0}
@@ -28,9 +29,10 @@ pub fn initialize(map_data, game) => {*: game, particles: [], actors: [for (entr
 pub fn action(map_data, game, command, rules, visuals) {
     if (command == "restart") initialize(map_data, {*: game_state.new_game(map_data, rules, visuals, game.skill, game.initial_seed or 1),
         mode: "playing", level_name: game.level_name, generation: game.generation + 1})
+    else if (command == "auto") {*: action(map_data, game, "restart", rules, visuals), autoplay: true}
     else if (command == "pause") {*: game, mode: if (game.mode == "playing") "paused"
         else if (game.mode == "ready" or game.mode == "paused") "playing" else game.mode, input: controls.empty()}
-    else if (command == "spectator") camera.cycle(game)
+    else if (command == "spectator") {*: camera.cycle(game), autoplay: false, input: controls.empty()}
     else game
 }
 pub fn step(map_data, game, input_state, dt, rules) {
@@ -58,6 +60,11 @@ pub fn step(map_data, game, input_state, dt, rules) {
 pub fn frame(map_data, game, previous_clock, timestamp_ms, rules) {
     let next_clock = clock_frame(previous_clock, timestamp_ms, game.mode == "playing")
     let stepped = reduce([{game: {*: game, effects: []}, input: game.input}, *[for (i in 1 to next_clock.steps) i]],
-        (acc, unused) => {game: step(map_data, acc.game, acc.input, STEP, rules), input: controls.consume(acc.input)})
+        (acc, unused) => {
+            // Reconsider targets at 7 Hz; movement/combat still run at all 35 ticks.
+            let input_state = if (acc.game.autoplay and acc.game.ticks % 5 == 0)
+                autoplay.decide(map_data, acc.game, STEP * 5, rules) else acc.input
+            {game: step(map_data, acc.game, input_state, STEP, rules), input: controls.consume(input_state)}
+        })
     {clock: next_clock, game: {*: stepped.game, input: if (stepped.game.mode == "playing") stepped.input else controls.empty()}}
 }

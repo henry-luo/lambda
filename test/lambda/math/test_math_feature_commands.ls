@@ -4,6 +4,8 @@ import svg: .mod_svg_snapshot
 fn ast(source) => parse(source,'math')^
 fn box(source, options = null) => math.render_box(ast(source), options)^
 fn paint(source) => svg.painted_text(box(source).element)
+// Annotation-content checks exclude the filler glyphs; the arrow oracle checks those.
+fn annotations_paint(source) => svg.painted_text(box(source).element,"extensible-arrow")
 fn paths(source) => svg.nodes(box(source).element,'path')^
 let cd = "\\begin{CD}A@<a<<B@>>b>C\\\\@|@AcAA@VVdV\\\\D@=E@>>>F\\end{CD}"
 let arrays = "\\begin{array}{|r:c||}a&b\\\\\\hline 1\\over2&3\\\\[1ex]\\hdashline x&y\\end{array}"
@@ -31,9 +33,9 @@ let checks = [
     {name:"bracket and brace annotations stay centered in inline and display math", ok:all([for (a in annotations) a.centered])},
     {name:"stacked annotations clear the bracket and brace", ok:all([for (a in annotations) a.clear])},
     {name:"nolimits still places bracket and brace annotations at the side", ok:all([for (a in annotations) a.side])},
-    {name:"extensible arrows retain both labels", ok:paint("\\xRightarrow[b]{ABC}+\\xhookrightarrow[d]{EF}") == "ABCb+EFd"},
+    {name:"extensible arrows retain both labels", ok:annotations_paint("\\xRightarrow[b]{ABC}+\\xhookrightarrow[d]{EF}") == "ABCb+EFd"},
     {name:"paired harpoon emits both directions", ok:paint("\\xrightleftharpoons[b]{a}") == "⇀↽ab"},
-    {name:"diagram keeps all vertices and arrow labels", ok:paint(cd) == "A←aB→bCcdDE→F"},
+    {name:"diagram keeps all vertices and arrow labels", ok:annotations_paint(cd) == "AaBbCcdDEF"},
     {name:"diagram has vertical arrows and equality", ok:len(paths(cd)) >= 4},
     {name:"mod commands preserve their arguments", ok:paint("a\\bmod2+b\\pod{3}+c\\pmod4") == "amod2+b(3)+c(mod4)"},
     {name:"prime syntax makes superscripts", ok:paint("f'+x'''^2") == "f′+x′′′2"},

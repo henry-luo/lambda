@@ -52,6 +52,7 @@ typedef struct TemplateEntry {
     // (`href`, `type: string` — attribute must be present). Owned by the
     // script's AST, which outlives the registry entry.
     const void* match_elmt_type;
+    const void* match_union_type; // AST-owned alternatives; each keeps its tag/attribute predicates
     int match_literal_attr_count;  // predicates that pin a value (specificity)
     int match_field_count;      // number of map field constraints (for map patterns)
     int definition_order;       // order of definition in script (for tie-breaking)
@@ -130,6 +131,8 @@ void template_registry_add(TemplateRegistry* registry,
 // Attach an element pattern's TypeElmt to an entry, deriving its attribute
 // predicate counts. Call after template_registry_add for element patterns.
 void template_registry_set_element_pattern(TemplateEntry* entry, const void* elmt_type);
+// derive matching metadata once for both interpreted and MIR templates.
+void template_registry_set_view_pattern(TemplateEntry* entry, struct AstViewNode* view);
 void template_registry_set_state_declarations(TemplateEntry* entry,
                                               struct AstViewNode* view);
 const char* template_entry_state_name(TemplateEntry* entry,

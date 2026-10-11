@@ -4,6 +4,7 @@ import data: .bib_data
 import model: .bib_model
 import style: .bib_style
 import registry: .registry
+import csl: ~~.citeproc.adapter
 
 pub fn is_citation_command(tag) => model.is_citation(tag) or tag == "nocite"
 
@@ -197,6 +198,8 @@ fn footcite_number(footnotes, offset) {
 }
 
 pub fn render_citation(node, context, footnotes) {
+    if (context.processor == "csl") csl.render_citation(node, context, footnotes)
+    else {
     let request = model.request_at(context, node.source_offset)
     if (request == null) util.unsupported_element("biblatex",
         "Citation request was not collected", node.source_offset)
@@ -222,6 +225,7 @@ pub fn render_citation(node, context, footnotes) {
             item_piece(context, request, item, request.tag)
         }
     >
+    }
 }
 
 fn external_url(kind, value) {
@@ -285,6 +289,8 @@ fn bibliography_heading(record, settings) {
 }
 
 pub fn render_bibliography(node, context) {
+    if (context.processor == "csl") csl.render_bibliography(node, context)
+    else {
     let record = model.print_at(context, node.source_offset)
     if (record == null) util.unsupported_element("biblatex",
         "Bibliography request was not collected", node.source_offset)
@@ -301,9 +307,12 @@ pub fn render_bibliography(node, context) {
                 bibliography_item(entry, record, context.settings, context.requests)
         >
     >
+    }
 }
 
 pub fn render_footcite_content(node, context) {
+    if (context.processor == "csl") csl.render_content(node, context)
+    else {
     let request = model.request_at(context, node.source_offset)
     if (request == null) util.unsupported_element("biblatex",
         "Footnote citation was not collected", node.source_offset)
@@ -315,4 +324,5 @@ pub fn render_footcite_content(node, context) {
             item_piece(context, request, item, "footcite")
         }
     >
+    }
 }

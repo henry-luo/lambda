@@ -1,0 +1,22 @@
+{
+  "name":"bold gallery presents logical elements with scoped neobrutalist styling",
+  "html":"test/ui/bold_gallery.ls",
+  "viewport":{"width":1100,"height":1900},
+  "events":[
+    {"type":"assert_count","target":{"selector":".bold-root"},"count":1},
+    {"type":"assert_count","target":{"selector":".bold-card"},"count":4},
+    {"type":"assert_style","target":{"selector":"#gallery-start"},"property":"background-color","equals":"rgb(250, 204, 21)"},
+    {"type":"assert_style","target":{"selector":"#gallery-start"},"property":"border-top-width","equals":"2px"},
+    {"type":"assert_style","target":{"selector":"#gallery-pink"},"property":"background-color","equals":"rgb(251, 113, 133)"},
+    {"type":"assert_style","target":{"selector":"#gallery-square"},"property":"background-color","equals":"rgb(251, 113, 133)"},
+    {"type":"assert_style","target":{"selector":"#gallery-square"},"property":"border-top-left-radius","equals":"0px"},
+    {"type":"assert_attribute","target":{"selector":".bold-progress"},"attribute":"aria-valuenow","equals":"68"},
+    {"type":"render","file":"temp/ui_bold/gallery.png"},
+    {"type":"type","target":{"selector":"#gallery-name"},"text":"Ada"},
+    {"type":"assert_value","target":{"selector":"#gallery-name"},"equals":"Ada"},
+    {"type":"click","target":{"selector":"#gallery-switch"}},
+    {"type":"assert_checked","target":{"selector":"#gallery-switch"},"checked":true},
+    {"type":"click","target":{"selector":"#gallery-check"}},
+    {"type":"assert_checked","target":{"selector":"#gallery-check"},"checked":true}
+  ]
+}

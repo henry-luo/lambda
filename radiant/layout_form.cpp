@@ -452,9 +452,10 @@ float form_button_flow_content_intrinsic_width(LayoutContext* lycon,
     FontProp* font = block->font ? block->font : lycon->font.style;
     LayoutFontScope font_scope(lycon);
     if (font && lycon->ui_context) setup_font(lycon->ui_context, &lycon->font, font);
-    return measure_direct_text_children_intrinsic_width(
-        lycon, static_cast<DomElement*>(block), false,
-        layout_inherited_text_transform(block));
+    // buttons lay out real children; a text-only shortcut drops icons, wrappers and gaps.
+    IntrinsicSizes sizes = layout_measure_intrinsic_widths(
+        lycon, static_cast<DomElement*>(block), true);
+    return layout_content_size_from_border_box(block, sizes.max_content, true);
 }
 
 static bool form_button_has_authored_vertical_box(ViewBlock* block) {

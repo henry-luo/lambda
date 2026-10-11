@@ -153,6 +153,21 @@ struct TypesetFlowProvider {
 
 enum TypesetAssemblyAction : uint8_t { TYPESET_ASSEMBLY_FINALIZE, TYPESET_ASSEMBLY_HOLD, TYPESET_ASSEMBLY_REINSERT };
 enum TypesetPageKind : uint8_t { TYPESET_PAGE_FLOW, TYPESET_PAGE_REGION, TYPESET_PAGE_BLANK, TYPESET_PAGE_FIXED, TYPESET_PAGE_EMPTY };
+struct TypesetRegionPlacement;
+struct TypesetRegionSelection {
+    TypesetRegionKind kind;
+    TypesetRegionEdge edge;
+    const TypesetRegionPlacement* placements;
+    size_t count;
+};
+struct TypesetFragmentainerCandidate {
+    RdtLogicalRect rect;
+    TypesetResume start, end;
+    float body_height, note_height, float_height;
+    TypesetBreak boundary;
+    const TypesetRegionSelection* auxiliary;
+    size_t auxiliary_count;
+};
 struct TypesetPageCandidate {
     TypesetResume start, end;
     float body_height, note_height, float_height, available_height;
@@ -161,6 +176,9 @@ struct TypesetPageCandidate {
     const void* trial;
     TypesetPageKind kind;
     uint32_t page_number;
+    // multi-region metrics sum physical capacities; unused trailing regions have equal start/end cursors.
+    const TypesetFragmentainerCandidate* fragmentainers;
+    size_t fragmentainer_count;
 };
 struct TypesetPolicyCheckpoint { uint64_t state[4]; }; // policy-owned stable values, never rewound scratch pointers
 struct TypesetPagePlan;
@@ -185,6 +203,8 @@ TypesetStatus typeset_flow_next(const TypesetFlowProvider* provider, const Types
                                 TypesetContribution* contribution, TypesetResume* next);
 TypesetStatus typeset_page_select(const TypesetPagePolicy* policy,
     const TypesetPageCandidate* candidates, size_t count, size_t* selected, TypesetAssemblyAction* action);
+TypesetStatus typeset_page_assemble(const TypesetPagePolicy* policy,
+    const TypesetPageCandidate* candidate, TypesetAssemblyAction* action);
 
 struct Pool;
 struct hashmap;

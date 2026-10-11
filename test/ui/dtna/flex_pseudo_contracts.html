@@ -1,0 +1,20 @@
+<!doctype html>
+<style>
+body{margin:0;background:white}
+.outer{display:grid;grid-template-columns:60px 60px;width:120px}
+.rail{position:relative;display:flex;width:60px;height:60px}
+.rail:after{content:'';position:absolute;left:10px;top:20px;bottom:0;width:4px;background:#ff0000}
+.row{display:flex;width:120px}
+.grid{display:grid;position:relative;width:60px;height:60px}
+.grid:before{content:'';position:absolute;left:10px;top:20px;bottom:0;width:4px;background:#0000ff}
+:root{--rail-border:#d9d9d9}
+.border:after{width:auto;background:none;border-left:2px solid #d9d9d9}
+.logical:after{width:auto;background:none;left:auto;inset-inline-start:10px;border-inline-start:2px solid var(--rail-border)}
+.stretch{height:60px}.stretch .rail{height:auto}.marker{width:24px;height:24px;background:white;position:relative;z-index:1}
+</style>
+<div class="outer"><div class="rail"><span></span></div><div class="rail"><span></span></div></div>
+<div class="row"><div class="grid"><span></span></div><div class="rail"><span></span></div></div>
+
+<div class="outer"><div class="rail border"><span></span></div><div class="rail logical"><span></span></div></div>
+
+<div class="outer stretch"><div class="rail border"><span class="marker"></span></div><div class="rail logical"><span class="marker"></span></div></div>

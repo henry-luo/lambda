@@ -11,6 +11,18 @@ let reaction_arrows = {
 
 pub fn reaction_arrow(command) => reaction_arrows[command]
 
+// AMS ext@arrow digit arguments; mathtools adds text-font control spaces to double arrows.
+let tex_arrows = {
+    rightarrow:{left:"−",middle:"−",right:"→",measure:[5,9],attach:[0,3],spaces:[0,0]},
+    leftarrow:{left:"←",middle:"−",right:"−",measure:[9,5],attach:[3,0],spaces:[0,0]},
+    leftrightarrow:{left:"←",middle:"−",right:"→",measure:[9,5],attach:[3,0],spaces:[0,0]},
+    Rightarrow:{left:"=",middle:"=",right:"⇒",measure:[5,5],attach:[0,0],spaces:[0,1]},
+    Leftarrow:{left:"⇐",middle:"=",right:"=",measure:[5,5],attach:[0,0],spaces:[1,0]},
+    Leftrightarrow:{left:"⇐",middle:"=",right:"⇒",measure:[5,5],attach:[0,0],spaces:[1,1]}
+}
+
+pub fn tex_arrow(command) => tex_arrows[command]
+
 // ============================================================
 // Greek letters (lowercase)
 // ============================================================

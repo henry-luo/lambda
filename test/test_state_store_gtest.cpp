@@ -9,6 +9,7 @@ extern "C" {
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lambda/input/css/dom_lifecycle.hpp"
 #include "../radiant/event.hpp"
+#include "../radiant/state_store_internal.hpp"
 #include "../radiant/view.hpp"
 
 #include <new>
@@ -416,6 +417,32 @@ TEST_F(StateStoreDomMutationTest, RegeneratedControlAppliesConstraintsAndKeepsNa
     EXPECT_FALSE(form_control_is_required(state(), live));
     EXPECT_STREQ(form_control_get_value(state(), live, nullptr), "typed");
     live->form = orphan->form = nullptr;
+}
+
+TEST_F(StateStoreDomMutationTest, RetiredBlurredTextControlReleasesCanonicalSelection) {
+    state()->transition_depth++;
+    focus_set_programmatic(state(), orphan);
+    state()->transition_depth--;
+    selection_refresh_presentation(state());
+    ASSERT_NE(state()->selection_presentation, nullptr);
+    ASSERT_EQ(state()->dom_selection, nullptr);
+    // this target stubs text-control writers; seed their canonical publication directly.
+    state()->sel.kind = EDIT_SEL_TEXT_CONTROL;
+    state()->sel.control = live;
+    state()->sel.mutation_seq = state()->selection_mutation_seq;
+    ASSERT_EQ(state()->sel.control, live);
+    state()->selection_presentation->caret_visible = true;
+    state()->selection_layout_dirty = true;
+
+    ASSERT_TRUE(root->remove_child(live));
+    EXPECT_GT(state_store_prune_after_reflow(state()), 0u);
+    EXPECT_EQ(focus_get(state()), orphan);
+    EXPECT_NE(state()->sel.control, live);
+    ASSERT_FALSE(caret_is_visible(state()));
+    EXPECT_FALSE(state()->selection_layout_dirty);
+    selection_refresh_presentation(state());
+    state_begin_batch(state());
+    state_end_batch(state());
 }
 
 TEST_F(StateStoreDomMutationTest, DetachedTextControlRetainsValueAcrossReflow) {

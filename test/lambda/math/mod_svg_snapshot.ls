@@ -7,10 +7,11 @@ pub fn normalize(html) => join([for (part in split(html, FontSource, true))
     else part], "")
 
 // inspect painted glyphs without counting accessible titles or embedded font data.
-pub fn painted_text(node) {
+pub fn painted_text(node, ignore_kind = null) {
     if (not (node is element)) ""
+    else if (ignore_kind != null and node["data-math-kind"] == ignore_kind) ""
     else if (name(node) == 'text') util.text_of(node)
-    else if (name(node) == 'g' or name(node) == 'svg') util.children_text(node, painted_text)
+    else if (name(node) == 'g' or name(node) == 'svg') util.children_text(node, (child) => painted_text(child,ignore_kind))
     else ""
 }
 

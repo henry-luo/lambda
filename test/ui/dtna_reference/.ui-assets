@@ -1,0 +1,2 @@
+This directory contains reference applications, lockfiles and coverage metadata.
+Native interaction fixtures belong to test/ui/dtna/ and remain manifest-owned.

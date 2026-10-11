@@ -38,6 +38,34 @@ function assertPaintedRows(png) {
   }
 }
 
+test('native math painting retains AMS arrow leaders and natural heads', {
+  skip: missing.length ? `missing tools: ${missing.join(', ')}` : false,
+}, async (t) => {
+  const names = ['EmptyArrow','WideRightArrow','WideLeftArrow','WideBothArrow',
+    'WideDoubleArrow','OverArrow','UnderArrow','StyleArrows'];
+  const dir = await compareCases(t,names,path.join(ROOT,'test/lambda/math/arrow_cases.yaml'));
+  for (const name of names) await t.test(name, () => {
+    const svg = fs.readFileSync(path.join(dir,`cases/${name}/lambda.svg`),'utf8');
+    const text = paintedText(svg);
+    const png = PNG.sync.read(fs.readFileSync(path.join(dir,`cases/${name}/lambda.png`)));
+    assert.match(svg,/data-math-kind="extensible-arrow"/);
+    assert.ok(text.includes(name === 'WideDoubleArrow' ? '⇒' : name === 'WideLeftArrow' || name === 'UnderArrow' ? '←' : '→'));
+    assert.doesNotMatch(svg,/<(?:path|rect)\b/, 'shafts and heads are existing glyphs');
+    assert.ok(png.data.some((v,i) => i % 4 !== 3 && v < 128), 'glyphs reach native painting');
+    if (name === 'StyleArrows') {
+      assert.equal(text.filter((ch) => ch === '→').length,3);
+      return;
+    }
+    if (name !== 'EmptyArrow') {
+      assert.ok(text.filter((ch) => ch === (name === 'WideDoubleArrow' ? '=' : '−')).length > 3);
+      // Every column of the cropped shaft must paint; this catches leader seams.
+      for (let x = 0; x < png.width; x++)
+        assert.ok(Array.from({length:png.height},(_,y) => (y * png.width + x) * 4)
+          .some((offset) => Math.min(...png.data.subarray(offset,offset + 3)) < 250), `unpainted seam at column ${x}`);
+    }
+  });
+});
+
 test('native math painting retains radical recipes and finite wide accents', {
   skip: missing.length ? `missing tools: ${missing.join(', ')}` : false,
 }, async (t) => {
@@ -186,7 +214,8 @@ test('native math comparison paints formerly missing constructs', {
   assert.match(svg('Arrays'), /stroke-dasharray="150 100"/);
   assert.match(svg('ExtensibleArrows'), /data-math-kind="extensible-arrow"/);
   assert.ok(paint('HorizontalBrackets').includes('note') && paint('HorizontalBrackets').includes('label'));
-  assert.equal(paint('CD'), 'A←aB→bCcdDE→F');
+  // Leader minus glyphs are construction ink; retain every vertex, label and head.
+  assert.equal(paint('CD').replaceAll('−',''), 'A←aB→bCcdDE→F');
   assert.doesNotMatch(paint('TextWithMath'), /\$/);
   assert.ok(paint('Verb').includes('&amp;'), 'verbatim ampersands must survive matrix parsing');
   const verbatimLetters = [...svg('Verb').matchAll(/<text\b([^>]*)>([^<]*)<\/text>/gu)]

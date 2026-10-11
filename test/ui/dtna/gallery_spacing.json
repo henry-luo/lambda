@@ -1,0 +1,35 @@
+{
+  "name": "gallery select and checkbox remain separated",
+  "html": "test/ui/dtna_gallery.ls",
+  "viewport": {
+    "width": 1100,
+    "height": 1600
+  },
+  "events": [
+    {
+      "type": "assert_position",
+      "element_a": {
+        "selector": "#gallery-select"
+      },
+      "element_b": {
+        "selector": ".dtna-checkbox"
+      },
+      "relation": "left_of",
+      "gap": 8,
+      "tolerance": 0.2
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#gallery-check"
+      }
+    },
+    {
+      "type": "assert_checked",
+      "target": {
+        "selector": "#gallery-check"
+      },
+      "checked": true
+    }
+  ]
+}

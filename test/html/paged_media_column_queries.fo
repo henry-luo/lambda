@@ -1,0 +1,14 @@
+<?xml version="1.0"?>
+<fo:root xmlns:fo="http://www.w3.org/1999/XSL/Format" font-family="Arial" font-size="7.5pt" line-height="18.75pt">
+  <fo:layout-master-set><fo:simple-page-master master-name="sheet" page-width="180pt" page-height="135pt" margin="11.25pt" font-size="9pt" column-count="1.5" column-gap="1.5em">
+    <fo:region-body font-size="22.5pt" column-count="from-parent(column-count)" column-gap="from-parent(column-gap)" overflow="hidden"/>
+  </fo:simple-page-master></fo:layout-master-set>
+  <fo:page-sequence master-reference="sheet" force-page-count="no-force"><fo:flow flow-name="xsl-region-body">
+    <fo:block background-color="#f2cccc" padding-start="from-parent(column-gap)" font-size="from-nearest-specified-value(column-count) * 7.5pt">Parent initial</fo:block>
+    <fo:block background-color="#cce5ff" break-before="column">Owner gap</fo:block>
+    <fo:block background-color="#d5efcd" break-before="page">Page two</fo:block>
+    <fo:block background-color="#fff0bd" break-before="column">Column two</fo:block>
+    <fo:block background-color="#e8d5f4" break-before="page" font-size="from-parent(column-count) * 7.5pt">Number initial</fo:block>
+    <fo:block background-color="#ccece8" break-before="column">Last column</fo:block>
+  </fo:flow></fo:page-sequence>
+</fo:root>

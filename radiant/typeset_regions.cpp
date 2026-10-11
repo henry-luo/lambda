@@ -5,7 +5,8 @@
 #include <string.h>
 
 static bool region_cursor_valid(const TypesetRegionMaterial* material, const TypesetResume& cursor) {
-    return material && material->identity && material->measure &&
+    return material && material->identity && material->measure && material->reference >= TYPESET_REGION_REFERENCE_PAGE &&
+        material->reference <= TYPESET_REGION_REFERENCE_COLUMN &&
         material->source.provider == cursor.provider && material->source.generation == cursor.generation;
 }
 
@@ -116,9 +117,10 @@ TypesetStatus typeset_region_plan(const TypesetRegionQueue* queue,
         if (measured == TYPESET_UNPLACEABLE) {
             // An anchor can wait only when its producer permits deferred placement.
             if ((incoming && !constraints->defer_anchors && !material->defer_anchor) ||
-                (!body_height && !constraints->occupied && !admitted && eligible)) {
+                (!body_height && !constraints->occupied && !admitted && eligible && !constraints->defer_unplaceable)) {
                 status = TYPESET_UNPLACEABLE; break;
             }
+            if (!i && eligible) plan.blocked = true;
             continue;
         }
         if (measured != TYPESET_OK) { status = measured; break; }
@@ -141,9 +143,10 @@ TypesetStatus typeset_region_plan(const TypesetRegionQueue* queue,
         status = material->measure(material->context, &cursor, &region, material->split, plan.scratch, &slice);
         bool can_defer = !incoming || constraints->defer_anchors || material->defer_anchor;
         if (status == TYPESET_UNPLACEABLE && region.retain_tail &&
-            (plan.count || ((body_height > 0.0f || constraints->occupied) && can_defer))) {
+            (plan.count || ((body_height > 0.0f || constraints->occupied || constraints->defer_unplaceable) && can_defer))) {
             // an indivisible tail can wait after an already progressing prefix, preserving its exact cursor.
             plan.pending[plan.pending_count++] = {material, cursor, earliest};
+            if (!plan.count) plan.blocked = true;
             status = TYPESET_OK; break;
         }
         if (status == TYPESET_OK && region.retain_tail && slice.complete) status = TYPESET_NO_PROGRESS;

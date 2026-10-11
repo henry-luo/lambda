@@ -29,6 +29,27 @@ pub fn tex_assembly(recipe, target, scale, atom) {
     {*:result, body:<g 'data-math-kind':"tex-delimiter", result.body>}
 }
 
+// AMS arrowfill@: -7mu end kerns, -2mu leader kerns, TeX82 centered leaders.
+pub fn tex_arrow(left, middle, right, target, mu, sp) {
+    // TeX font dimensions and mu arithmetic are integral scaled points; leader counts
+    // at exact boundaries must use that arithmetic rather than floating em widths.
+    let parts = [for (b in [left,middle,right]) {*:b,
+        width:floor(b.width / sp + 0.5) * sp,height:floor(b.height / sp + 0.5) * sp,
+        depth:floor(b.depth / sp + 0.5) * sp}]
+    let widths = [for (b in parts) floor(b.width / sp + 0.5)]
+    let mu_sp = floor(floor(mu * 18.0 / sp + 0.5) / 18.0)
+    let width = max(floor(target / sp + 0.5),widths[0] + widths[2] - 14.0 * mu_sp)
+    let step = widths[1] - 4.0 * mu_sp
+    // hlist_out adds ten scaled points before computing centered leader count/remainder.
+    let fill = width - widths[0] - widths[2] + 14.0 * mu_sp + 10.0
+    let count = if (step > 0.0) max(0,int(floor(fill / step))) else 0
+    let start = widths[0] - 9.0 * mu_sp + floor((fill - count * step) / 2.0)
+    let result = bx.compose([{box:parts[0],x:0.0,y:0.0},
+        *[for (i in 0 to (count - 1)) {box:parts[1],x:(start + i * step) * sp,y:0.0}],
+        {box:parts[2],x:(width - widths[2]) * sp,y:0.0}],width * sp,"mrel");
+    {*:result,body:<g 'data-math-kind':"extensible-arrow", result.body>}
+}
+
 // Ordinary fonts have no arrow assembly: extend the shaft without distorting the head.
 pub fn arrow(g, target, scale, right, axis, thickness) map | error {
     if (len(g.horizontal.parts) > 0 or len(g.horizontal.variants) > 0)

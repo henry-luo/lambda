@@ -1,0 +1,321 @@
+{
+  "name": "dtna Grid and Flex modes",
+  "html": "test/ui/dtna/grid_modes.ls",
+  "viewport": {
+    "width": 500,
+    "height": 700
+  },
+  "events": [
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#units-row"
+      },
+      "tolerance": 0.2,
+      "x": -8,
+      "width": 416,
+      "height": 20,
+      "relative_to": "#grid-main"
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#units-left"
+      },
+      "tolerance": 0.2,
+      "x": 0,
+      "width": 208,
+      "relative_to": "#units-row"
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#units-inner"
+      },
+      "tolerance": 0.2,
+      "x": 8,
+      "width": 192,
+      "relative_to": "#units-left"
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#align-cell"
+      },
+      "tolerance": 0.2,
+      "x": 0,
+      "y": 0,
+      "width": 100,
+      "height": 20,
+      "relative_to": "#align-row"
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#push-cell"
+      },
+      "tolerance": 0.2,
+      "x": 133.33333333333334,
+      "width": 133.33333333333334,
+      "relative_to": "#shift-row"
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#pull-cell"
+      },
+      "tolerance": 0.2,
+      "x": 0,
+      "width": 133.33333333333334,
+      "relative_to": "#shift-row"
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#rtl-push"
+      },
+      "tolerance": 0.2,
+      "x": 133.33333333333334,
+      "width": 133.33333333333334,
+      "relative_to": "#rtl-shift-row"
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#rtl-pull"
+      },
+      "tolerance": 0.2,
+      "x": 266.6666666666667,
+      "width": 133.33333333333334,
+      "relative_to": "#rtl-shift-row"
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#fixed-flex"
+      },
+      "tolerance": 0.2,
+      "width": 100
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#one-flex"
+      },
+      "tolerance": 0.2,
+      "width": 100
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#two-flex"
+      },
+      "tolerance": 0.2,
+      "width": 200
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#responsive-flex-one"
+      },
+      "tolerance": 0.2,
+      "width": 80
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#responsive-flex-three"
+      },
+      "tolerance": 0.2,
+      "width": 320
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#nested-row"
+      },
+      "tolerance": 0.2,
+      "width": 416
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#nested-col"
+      },
+      "tolerance": 0.2,
+      "width": 208
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#nested-inner-row"
+      },
+      "tolerance": 0.2,
+      "width": 200
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#nested-inner-col"
+      },
+      "tolerance": 0.2,
+      "width": 100
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#flex-growing"
+      },
+      "tolerance": 0.2,
+      "x": 96,
+      "width": 304,
+      "relative_to": "#flex-container"
+    },
+    {
+      "type": "resize",
+      "width": 800,
+      "height": 700
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#units-row"
+      },
+      "tolerance": 0.2,
+      "x": -12,
+      "width": 424,
+      "relative_to": "#grid-main"
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#units-inner"
+      },
+      "tolerance": 0.2,
+      "x": 12,
+      "width": 188,
+      "relative_to": "#units-left"
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#align-cell"
+      },
+      "tolerance": 0.2,
+      "x": 150,
+      "y": 30,
+      "relative_to": "#align-row"
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#push-cell"
+      },
+      "tolerance": 0.2,
+      "x": 0,
+      "relative_to": "#shift-row"
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#pull-cell"
+      },
+      "tolerance": 0.2,
+      "x": 133.33333333333334,
+      "relative_to": "#shift-row"
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#rtl-push"
+      },
+      "tolerance": 0.2,
+      "x": 266.6666666666667,
+      "relative_to": "#rtl-shift-row"
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#rtl-pull"
+      },
+      "tolerance": 0.2,
+      "x": 133.33333333333334,
+      "relative_to": "#rtl-shift-row"
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#responsive-flex-one"
+      },
+      "tolerance": 0.2,
+      "width": 100
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#responsive-flex-three"
+      },
+      "tolerance": 0.2,
+      "width": 300
+    },
+    {
+      "type": "resize",
+      "width": 1100,
+      "height": 700
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#align-cell"
+      },
+      "tolerance": 0.2,
+      "x": 300,
+      "y": 60,
+      "relative_to": "#align-row"
+    },
+    {
+      "type": "resize",
+      "width": 500,
+      "height": 700
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#units-row"
+      },
+      "tolerance": 0.2,
+      "width": 416
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#align-cell"
+      },
+      "tolerance": 0.2,
+      "x": 0,
+      "y": 0,
+      "relative_to": "#align-row"
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#push-cell"
+      },
+      "tolerance": 0.2,
+      "x": 133.33333333333334,
+      "relative_to": "#shift-row"
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#responsive-flex-one"
+      },
+      "tolerance": 0.2,
+      "width": 80
+    },
+    {
+      "type": "render",
+      "file": "temp/ui_dtna/grid_increment/grid_modes.png"
+    }
+  ]
+}
