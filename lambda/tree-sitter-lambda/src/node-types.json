@@ -1634,6 +1634,10 @@
           "named": true
         },
         {
+          "type": "grammar_stam",
+          "named": true
+        },
+        {
           "type": "import_module",
           "named": true
         },
@@ -1900,6 +1904,10 @@
         },
         {
           "type": "for_expr",
+          "named": true
+        },
+        {
+          "type": "grammar_stam",
           "named": true
         },
         {
@@ -2848,6 +2856,42 @@
           {
             "type": "primary_expr",
             "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
+    "type": "grammar_stam",
+    "named": true,
+    "fields": {
+      "body": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "grammar_body",
+            "named": true
+          }
+        ]
+      },
+      "name": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "identifier",
+            "named": true
+          }
+        ]
+      },
+      "pub": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "pub",
+            "named": false
           }
         ]
       }
@@ -6234,6 +6278,14 @@
   {
     "type": "function",
     "named": false
+  },
+  {
+    "type": "grammar",
+    "named": false
+  },
+  {
+    "type": "grammar_body",
+    "named": true
   },
   {
     "type": "group",

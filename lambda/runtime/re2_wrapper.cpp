@@ -401,6 +401,33 @@ bool pattern_is_char_set(AstNode* node) {
     return ok;
 }
 
+bool pattern_is_literal_set(AstNode* node, bool (*byte_ok)(char)) {
+    if (!node) return false;
+    switch (node->node_type) {
+    case AST_NODE_PRIMARY: {
+        AstPrimaryNode* primary = (AstPrimaryNode*)node;
+        if (primary->expr || !primary->type || (primary->type->type_id != LMD_TYPE_STRING &&
+                primary->type->type_id != LMD_TYPE_SYMBOL)) return false;
+        StrView text = pattern_literal_text(primary->type);
+        if (!text.length) return false;
+        for (size_t i = 0; byte_ok && i < text.length; i++) {
+            if (!byte_ok(text.str[i])) return false;
+        }
+        return true;
+    }
+    case AST_NODE_LIST_TYPE:
+        return pattern_is_literal_set(((AstListNode*)node)->item, byte_ok) &&
+            !((AstListNode*)node)->item->next;
+    case AST_NODE_BINARY_TYPE: {
+        AstBinaryNode* binary = (AstBinaryNode*)node;
+        return binary->op == OPERATOR_UNION && pattern_is_literal_set(binary->left, byte_ok) &&
+            pattern_is_literal_set(binary->right, byte_ok);
+    }
+    default:
+        return false;
+    }
+}
+
 // class members print as themselves when alphanumeric, as \x{…} otherwise
 static void char_set_emit_codepoint(StrBuf* regex, uint32_t codepoint) {
     if ((codepoint >= '0' && codepoint <= '9') || (codepoint >= 'A' && codepoint <= 'Z') ||
@@ -1024,6 +1051,22 @@ bool pattern_full_match_chars(TypePattern* pattern, const char* chars, size_t le
 
     re2::StringPiece input(chars, len);
     return re2::RE2::FullMatch(input, *pattern->re2);
+}
+
+// A grammar token (GM5v2) matches at a fixed offset and reports where it ends;
+// leftmost-first like every other pattern match. The unanchored regex is the
+// one find/replace use, anchored here at `pos` only.
+bool pattern_match_prefix_at(TypePattern* pattern, const char* text, size_t len,
+        size_t pos, size_t* end) {
+    if (!pattern || !text || pos > len) return false;
+    re2::RE2* re = pattern_get_unanchored(pattern);
+    if (!re) return false;
+    re2::StringPiece input(text, len);
+    re2::StringPiece match;
+    if (!re->Match(input, pos, len, re2::RE2::ANCHOR_START, &match, 1)) return false;
+    // an empty match may carry no data pointer; it ends where it began
+    if (end) *end = match.data() ? (size_t)(match.data() - text) + match.size() : pos;
+    return true;
 }
 
 // Match string against pattern (partial match)

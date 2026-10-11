@@ -681,6 +681,17 @@ struct PrintItemVisitor {
             else strbuf_append_str(strbuf, "type");
             return;
         }
+        // GM5v2: a grammar prints by name, a rule as `grammar.rule`
+        if (TypeGrammar* grammar = lambda_type_grammar(value)) {
+            strbuf_append_str_n(strbuf, grammar->name->chars, grammar->name->len);
+            return;
+        }
+        if (TypeGrammarRule* rule = lambda_type_grammar_rule(value)) {
+            strbuf_append_str_n(strbuf, rule->grammar->name->chars, rule->grammar->name->len);
+            strbuf_append_char(strbuf, '.');
+            strbuf_append_str_n(strbuf, rule->name->chars, rule->name->len);
+            return;
+        }
         TypeType* type = (TypeType*)value;
         if (const char* alias = type_alias_name(type->type)) {
             strbuf_append_str(strbuf, alias);

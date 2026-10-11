@@ -150,7 +150,7 @@ issue fixes.
 ## 7. Detailed design (`doc/dev/`)
 
 `doc/dev` captures the "final", detailed design of each subsystem — the
-distilled architecture documents (`lambda/LR_00`–`LR_13`,
+distilled architecture documents (`lambda/LR_00`–`LR_14`,
 `radiant/RAD_00`–`RAD_22`, `js/JS_00`–`JS_16`, each set indexed by its `_00`
 overview) plus developer guides (`C_Plus_Convention.md`, `Make_Guide.md`,
 `Developer_Guide.md`, …).

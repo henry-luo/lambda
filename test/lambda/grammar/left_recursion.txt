@@ -1,0 +1,72 @@
+<expr
+  <expr
+    <expr
+      <expr
+        "f">
+      "("
+      <args
+        <expr
+          "a">>
+      ")">
+    "("
+    <args
+      <expr
+        "b">
+      ","
+      <expr
+        "c">>
+    ")">
+  "["
+  <expr
+    "0">
+  "]">
+<expr
+  <expr
+    "a">
+  "?"
+  <expr
+    <expr
+      "b">
+    "?"
+    <expr
+      "c">
+    ":"
+    <expr
+      "d">>
+  ":"
+  <expr
+    "e">>
+<expr
+  <expr
+    "a">
+  "?"
+  <expr
+    "b">
+  ":"
+  <expr
+    <expr
+      "c">
+    "+"
+    <expr
+      "d">>>
+<sum
+  <sum
+    <sum
+      "1">
+    "+2">
+  "+3">
+<rel
+  <rel
+    <rel
+      "1">
+    "<"
+    <rel
+      "2">>
+  "and"
+  <rel
+    <rel
+      "2">
+    "<"
+    <rel
+      "3">>>
+"parse: grammar 'cmp': expected "and" or end of input at 1:7, found "<""

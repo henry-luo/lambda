@@ -1120,6 +1120,9 @@ Parse a string into Lambda data structures. Like `input()` but operates on strin
 |----------|-------------|--------|
 | `parse(str)` | Parse string (auto-detect format) | `parse("{\"x\": 1}")` |
 | `parse(str, format)` | Parse string with specified format | `parse(str, 'json')` |
+| `parse(str, g)` | Parse with grammar `g` from its first rule | `parse("1 + 2", calc)` |
+| `parse(str, g, 'rule')` | Parse with grammar `g` from the named rule | `parse("(1)", calc, 'primary')` |
+| `parse(str, g.rule)` | Parse from a rule given as a type | `parse("42", calc.number)` |
 
 **Supported Formats**: Same as `input()` — `json`, `xml`, `html`, `yaml`, `toml`, `markdown`, `csv`, `latex`, `css`, `ini`, `math`, `obj`, `mtl`, `gltf`, `a3d`
 
@@ -1138,6 +1141,27 @@ let expr = parse("x^2 + y", {type: 'math', flavor: 'latex'})^
 // Parse CSV, falling back to an empty list on failure
 let csv = parse("name,age\nAlice,30\nBob,25", 'csv') ^ { [] }
 ```
+
+**Grammars**: a `grammar Name { ... }` declaration defines a language — `:=`
+rules are string-pattern tokens, `=` rules are PEG rules with ordered choice
+`|`, comma sequences, repetition, lookahead and `prec`/`prec.left`/`prec.right`
+for left-recursive operators — and `parse` turns text in that language into
+an element per rule. Literal tokens and `"..."` token rules appear as
+strings, `'...'` token rules as symbols; a `space := ...` rule is skipped
+between tokens. A failed parse raises E407 with the furthest position
+reached and what was expected there.
+
+```lambda
+grammar calc {
+    expr   = prec.left(1, expr, "+", expr) | prec.left(2, expr, "*", expr) | number
+    number := "\d"+
+    space  := " "*
+}
+parse("1 + 2 * 3", calc)^       // <expr <expr "1"> "+" <expr <expr "2"> "*" <expr "3">>>
+"1 +" is calc                   // false: the first rule must parse the whole text
+```
+
+Design: `vibe/Lambda_Design_Grammar_Parser.md`.
 
 **Source positions** (`parse()` only): with `sourcepos: true` in the options
 map, each top-level block of a markup document (Markdown and the other
@@ -1792,7 +1816,7 @@ The [Photo Studio demo](../test/demo/photo/README.md) uses this bridge.
 | Function | Args | Description |
 |----------|------|-------------|
 | `input` | 1-2 | Parse file/URL; raises `T^E` on failure |
-| `parse` | 1-2 | Parse string content |
+| `parse` | 1-3 | Parse string content (a format, or a grammar and rule) |
 | `exists` | 1 | Check if target exists |
 | `format` | 1-2 | Format data as string |
 

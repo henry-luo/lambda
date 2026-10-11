@@ -1079,6 +1079,9 @@ SysFuncInfo sys_func_defs[] = {
     {SYSFUNC_PARSE2, "parse", 2, &TYPE_ANY, false, true, true, LMD_TYPE_STRING, true,
      C_RET_ITEM, NULL, "fn_parse2", FPTR(fn_parse2), NULL, NULL, false, 0},
 
+    {SYSFUNC_PARSE3, "parse", 3, &TYPE_ANY, false, true, true, LMD_TYPE_STRING, true,
+     C_RET_ITEM, NULL, "fn_parse3", FPTR(fn_parse3), NULL, NULL, false, 0},
+
     {SYSFUNC_PARSE_HTML_FRAGMENT, "parse_html_fragment", 1, &TYPE_ANY, false, true, true, LMD_TYPE_STRING, false,
         C_RET_ITEM, NULL, "fn_parse_html_fragment1", FPTR(fn_parse_html_fragment1), NULL, NULL, false, 0,
         false, &TYPE_ANY, true},

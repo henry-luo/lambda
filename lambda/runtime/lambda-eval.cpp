@@ -24,6 +24,7 @@
 #include "../../lib/str.h"
 #include "../core/utf_string.h"
 #include "re2_wrapper.hpp"
+#include "grammar/grammar.hpp"
 #include "../input/markup/markup_highlight.hpp"
 #include <utf8proc.h>
 #include <mpdecimal.h>  // needed for inline decimal operations
@@ -2864,6 +2865,16 @@ Bool fn_is(Item a, Item b) {
             return BOOL_FALSE;
         }
         return pattern_full_match_chars(pattern, a.get_chars(), a.get_len()) ? BOOL_TRUE : BOOL_FALSE;
+    }
+
+    // GM5.3: a string is in a grammar (or rule) when the rule parses all of it
+    if (b_type->kind == TYPE_KIND_GRAMMAR || b_type->kind == TYPE_KIND_GRAMMAR_RULE) {
+        TypeGrammar* grammar = lambda_type_grammar(b_type);
+        TypeGrammarRule* rule = lambda_type_grammar_rule(b_type);
+        if (rule) grammar = rule->grammar;
+        if (!grammar || get_type_id(a) != LMD_TYPE_STRING) return BOOL_FALSE;
+        return grammar_accepts(grammar, rule ? rule->index : grammar->entry_rule,
+            a.get_chars(), a.get_len()) ? BOOL_TRUE : BOOL_FALSE;
     }
 
     // S11.4.6: a first-class constrained type value carries no predicate in
@@ -6165,8 +6176,72 @@ static bool parse_tex_options(Map* options_map, InputParseOptions* options,
     return options->tex_expand || options->tex_ini || options->tex_base || options->tex_adapter_count;
 }
 
+// GM5.1: `parse(text, g)` runs the first rule of grammar g, `parse(text, g,
+// 'rule')` the named one; a rule type (`g.rule`) names its own entry. A failure
+// raises like every input parser's (GM5.2).
+static Item fn_parse_grammar(Item str_item, Type* type, Item rule_item) {
+    TypeGrammar* grammar = lambda_type_grammar(type);
+    uint32_t entry = GRAMMAR_NO_RULE;
+    if (grammar) {
+        entry = grammar->entry_rule;
+    } else if (TypeGrammarRule* rule = lambda_type_grammar_rule(type)) {
+        grammar = rule->grammar;
+        entry = rule->index;
+    }
+    if (!grammar) {
+        set_runtime_error(ERR_TYPE_MISMATCH, "parse: 2nd argument must be a grammar");
+        return ItemError;
+    }
+    TypeId rule_type = get_type_id(rule_item);
+    if (rule_type != LMD_TYPE_NULL) {
+        if (!is_text_type_id(rule_type) || !lambda_type_grammar(type)) {
+            set_runtime_error(ERR_TYPE_MISMATCH,
+                "parse: the rule is named by a symbol, after a grammar: parse(text, g, 'rule')");
+            return ItemError;
+        }
+        entry = grammar_find_rule(grammar, rule_item.get_chars(), rule_item.get_len());
+        if (entry == GRAMMAR_NO_RULE) {
+            set_runtime_error(ERR_PARSE_ERROR, "parse: grammar '%.*s' has no rule '%.*s'",
+                (int)grammar->name->len, grammar->name->chars,
+                (int)rule_item.get_len(), rule_item.get_chars());
+            return ItemError;
+        }
+    }
+    if (get_type_id(str_item) != LMD_TYPE_STRING) {
+        set_runtime_error(ERR_TYPE_MISMATCH, "parse: 1st argument must be a string, got type: %s",
+            get_type_name(get_type_id(str_item)));
+        return ItemError;
+    }
+    Url* dummy_url = url_parse("parse://grammar");
+    Input* input = dummy_url ? InputManager::create_input(dummy_url) : NULL;
+    if (!input) {
+        set_runtime_error(ERR_OUT_OF_MEMORY, "parse: failed to allocate grammar parser input");
+        return ItemError;
+    }
+    if (!grammar_parse(grammar, entry, input, str_item.get_chars(), str_item.get_len())) {
+        set_input_parse_error("parse", input, NULL);
+        return ItemError;
+    }
+    return input->root;
+}
+
+Item fn_parse3(Item str_item, Item grammar_item, Item rule_item) {
+    GUARD_ERROR3(str_item, grammar_item, rule_item);
+    if (get_type_id(grammar_item) != LMD_TYPE_TYPE) {
+        set_runtime_error(ERR_TYPE_MISMATCH,
+            "parse: the 3-argument form is parse(text, grammar, 'rule'), got type: %s",
+            get_type_name(get_type_id(grammar_item)));
+        return ItemError;
+    }
+    return fn_parse_grammar(str_item, grammar_item.type, rule_item);
+}
+
 Item fn_parse2(Item str_item, Item type) {
     GUARD_ERROR2(str_item, type);
+    if (get_type_id(type) == LMD_TYPE_TYPE &&
+            (lambda_type_grammar(type.type) || lambda_type_grammar_rule(type.type))) {
+        return fn_parse_grammar(str_item, type.type, ItemNull);
+    }
 
     // parse the 2nd argument (format symbol or options map) - same logic as fn_input2
     String* type_str = NULL;
@@ -7144,6 +7219,12 @@ Item fn_member(Item item, Item key) {
         return ItemNull;
     }
     case LMD_TYPE_TYPE: {
+        // GM5v2: a grammar's rules are its members, and each is a type
+        if (TypeGrammar* grammar = lambda_type_grammar(item.type)) {
+            Type* rule = is_text_type_id(key._type_id)
+                ? grammar_rule_type(grammar, key.get_chars(), key.get_len()) : NULL;
+            return rule ? (Item){.item = (uint64_t)(uintptr_t)rule} : ItemNull;
+        }
         // S2.2.2v2: `symbol.empty` names the one zero-length symbol
         TypeType* type_value = (TypeType*)item.type;
         if (type_value && type_value->type && type_value->type->type_id == LMD_TYPE_SYMBOL &&

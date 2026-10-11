@@ -156,6 +156,9 @@ static const char* const error_expected_type_alias_name = "expected a type alias
 static const char* const error_type_alias_equals = "expected '=' after type alias name";
 static const char* const error_expected_type_name = "expected a type name";
 static const char* const error_expected_inherited_type_name = "expected an inherited type name";
+static const char* const error_expected_grammar_name = "expected a grammar name";
+static const char* const error_grammar_body_open = "expected '{' after the grammar name";
+static const char* const error_grammar_body_close = "expected '}' closing the grammar body";
 static const char* const error_object_type_separator = "object-type members are separated by ',', not ';'";
 static const char* const error_object_field_colon = "expected ':' after object-type field name";
 static const char* const error_expected_object_type_member = "expected an object type field, content type, or method";
@@ -457,7 +460,7 @@ static bool token_is_name_word(LambdaTokenKind kind) {
         // `<del>` and an `open:` object-type field all still read.
         kind == LAMBDA_TOK_PUT || kind == LAMBDA_TOK_DEL ||
         kind == LAMBDA_TOK_COMMIT || kind == LAMBDA_TOK_ROLLBACK ||
-        kind == LAMBDA_TOK_OPEN;
+        kind == LAMBDA_TOK_OPEN || kind == LAMBDA_TOK_GRAMMAR;
 }
 
 static bool token_is_key(LambdaTokenKind kind) {
@@ -2354,6 +2357,45 @@ static LambdaParseValue parse_type_declaration(LambdaRdParser* parser, bool is_p
     return parser_reduce_tokens(parser, LAMBDA_REDUCE_DECLARATION, LAMBDA_REDUCTION_FORM_TYPE_OBJECT, span, name, (LambdaToken){0}, is_public ? LAMBDA_REDUCTION_FLAG_PUBLIC : 0u, NULL, 0);
 }
 
+// GM5v2: `grammar Name { ... }`. The body is a sub-language with its own
+// tokens (`:=`, island escapes such as `"\d"`), so it is not lexed here: the
+// lexer skips to the matching brace and the reduction carries the body span,
+// which the grammar loader parses when the declaration resolves (D8.2.2: one
+// declaration node, the body as data).
+static LambdaParseValue parse_grammar_declaration(LambdaRdParser* parser, bool is_public) {
+    LambdaToken first = parser->current;
+    parser_advance(parser);
+    LambdaToken name;
+    if (!parser_take_name(parser, token_is_key, error_expected_grammar_name, &name)) return 0;
+    if (parser->current.kind != LAMBDA_TOK_LBRACE) {
+        return parser_fail(parser, error_grammar_body_open, LAMBDA_TOK_LBRACE);
+    }
+    // `next` was lexed with ordinary rules; rewind to just after `{`
+    LambdaToken open = parser->current;
+    parser->lexer.offset = open.span.end_byte;
+    parser->lexer.line = open.line;
+    parser->lexer.column = open.column + 1;
+    parser->lexer.after_step_dot = false;
+    if (!lambda_lexer_skip_block_body(&parser->lexer)) {
+        // an unterminated body at end of input stays INCOMPLETE for the REPL
+        parser->current = lambda_lexer_next(&parser->lexer);
+        if (parser->lexer.offset >= parser->lexer.length) {
+            parser->current.kind = LAMBDA_TOK_EOF;
+        }
+        return parser_fail(parser, error_grammar_body_close, LAMBDA_TOK_RBRACE);
+    }
+    LambdaToken body = open;
+    body.span.start_byte = open.span.end_byte;
+    body.span.end_byte = (uint32_t)parser->lexer.offset;
+    parser->current = lambda_lexer_next(&parser->lexer);
+    parser->next = parser_next_significant(parser);
+    if (!parser_expect_message(parser, LAMBDA_TOK_RBRACE, error_grammar_body_close)) return 0;
+    SourceSpan span = {first.span.start_byte, parser->current.span.start_byte};
+    return parser_reduce_tokens(parser, LAMBDA_REDUCE_DECLARATION,
+        LAMBDA_REDUCTION_FORM_GRAMMAR, span, name, body,
+        is_public ? LAMBDA_REDUCTION_FLAG_PUBLIC : 0u, NULL, 0);
+}
+
 static LambdaParseValue parse_var_statement(LambdaRdParser* parser) {
     LambdaToken first = parser->current;
     parser_advance(parser);
@@ -2613,6 +2655,9 @@ static LambdaParseValue parse_statement(LambdaRdParser* parser) {
         if (parser->current.kind == LAMBDA_TOK_TYPE && parser->next.kind != LAMBDA_TOK_LPAREN && !parser->next.nl_before && parser->next.kind != LAMBDA_TOK_SEMICOLON && parser->next.kind != LAMBDA_TOK_EOF) {
             return parse_type_declaration(parser, is_public);
         }
+        if (parser->current.kind == LAMBDA_TOK_GRAMMAR) {
+            return parse_grammar_declaration(parser, is_public);
+        }
         if (parser->current.kind == LAMBDA_TOK_VAR) {
             return parse_var_statement(parser);
         }
@@ -2778,7 +2823,7 @@ static LambdaParseValue parse_content(LambdaRdParser* parser, LambdaTokenKind te
         parser_add_content(parser, &content, &has_content, &content_start, statement_token, statement);
         if (parser->current.kind == terminator || parser->current.kind == LAMBDA_TOK_EOF) break;
         bool closed_tail =
-            statement_first == LAMBDA_TOK_BREAK || statement_first == LAMBDA_TOK_CONTINUE || statement_first == LAMBDA_TOK_IMPORT || (parser->prev_kind == LAMBDA_TOK_RBRACE && (statement_first == LAMBDA_TOK_FN || statement_first == LAMBDA_TOK_PN || statement_declares_function || statement_first == LAMBDA_TOK_TYPE || statement_first == LAMBDA_TOK_VIEW || statement_first == LAMBDA_TOK_EDIT || statement_first == LAMBDA_TOK_WHILE || statement_first == LAMBDA_TOK_MATCH || statement_first == LAMBDA_TOK_IF || statement_first == LAMBDA_TOK_FOR || statement_first == LAMBDA_TOK_PUB ||
+            statement_first == LAMBDA_TOK_BREAK || statement_first == LAMBDA_TOK_CONTINUE || statement_first == LAMBDA_TOK_IMPORT || (parser->prev_kind == LAMBDA_TOK_RBRACE && (statement_first == LAMBDA_TOK_FN || statement_first == LAMBDA_TOK_PN || statement_declares_function || statement_first == LAMBDA_TOK_TYPE || statement_first == LAMBDA_TOK_GRAMMAR || statement_first == LAMBDA_TOK_VIEW || statement_first == LAMBDA_TOK_EDIT || statement_first == LAMBDA_TOK_WHILE || statement_first == LAMBDA_TOK_MATCH || statement_first == LAMBDA_TOK_IF || statement_first == LAMBDA_TOK_FOR || statement_first == LAMBDA_TOK_PUB ||
             // PTH68v3 (§7.14): the transaction block ends in a braced body that
             // admits no postfix, so it is a CLOSED tail like `while` and `match`.
             statement_first == LAMBDA_TOK_OPEN));

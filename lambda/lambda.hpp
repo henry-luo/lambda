@@ -29,6 +29,10 @@ enum TypeKind {
     // module-local Type graphs remain relocatable (D3.1.1v4).
     TYPE_KIND_BINDER,
     TYPE_KIND_BOUND_REF,
+    // GM5v2: a grammar is a type and so is each of its syntax rules; both
+    // extend TypeType (runtime/grammar/grammar.hpp). `kind` is 4 bits wide.
+    TYPE_KIND_GRAMMAR,
+    TYPE_KIND_GRAMMAR_RULE,
 };
 
 // Name - a qualified name with optional namespace

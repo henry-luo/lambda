@@ -1,0 +1,24 @@
+calc
+type
+calc.expr
+type
+\(("\d")+)
+true
+arith
+<sum
+  <sum
+    <sum
+      "1">
+    "+"
+    <sum
+      "2">>
+  "+"
+  <sum
+    "3">>
+<sum
+  <sum
+    "4">
+  "+"
+  <sum
+    "5">>
+"123"

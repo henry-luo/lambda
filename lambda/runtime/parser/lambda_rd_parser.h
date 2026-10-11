@@ -70,6 +70,9 @@ typedef enum LambdaTokenKind {
     LAMBDA_TOK_COMMIT,
     LAMBDA_TOK_ROLLBACK,
     LAMBDA_TOK_OPEN,
+    // GM5v2: `grammar Name { ... }` declares a grammar type; barred as a
+    // binding name like `type` (S16.10.1v2), still a data name (S16.10.2)
+    LAMBDA_TOK_GRAMMAR,
     LAMBDA_TOK_APPLY,
     LAMBDA_TOK_NOT,
     LAMBDA_TOK_DIV,
@@ -326,6 +329,8 @@ typedef enum LambdaReductionForm {
     LAMBDA_REDUCTION_FORM_BREAK,
     LAMBDA_REDUCTION_FORM_CONTINUE,
     LAMBDA_REDUCTION_FORM_TYPE_ALIAS_BEGIN,
+    // GM5v2: `grammar Name { body }`; detail = name, secondary = body span
+    LAMBDA_REDUCTION_FORM_GRAMMAR,
 } LambdaReductionForm;
 
 enum {
@@ -391,6 +396,12 @@ typedef struct LambdaParseSink {
 
 void lambda_lexer_init(LambdaLexer* lexer, const char* source, size_t length);
 LambdaToken lambda_lexer_next(LambdaLexer* lexer);
+// Skip a brace-delimited body from just after its `{` to the matching `}`
+// (left unconsumed). False when the body is unterminated or a quote is bad.
+bool lambda_lexer_skip_block_body(LambdaLexer* lexer);
+// A byte that may continue an identifier: ASCII alnum, `_`, `$`, or any byte
+// of a multi-byte UTF-8 sequence. The grammar module's word boundary uses it.
+bool lambda_lexer_is_ident_continue_byte(char ch);
 // Re-reads a dot-led number (`.1`) as a `.` step introducer and returns that
 // DOT token; the lexer resumes after the dot. The parser calls it after a
 // leading root `/`, the one place only syntax can tell a step from a float.

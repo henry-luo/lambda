@@ -102,6 +102,7 @@ typedef enum LambdaSyntaxForm : uint8_t {
     LSF_TYPE_STAM,            // TYPE_STAM / PUB_STAM of a type alias
     LSF_PATTERN_DEF,          // STRING_PATTERN / SYMBOL_PATTERN
     LSF_TYPE_ALIAS,           // VARIABLE_DECLARATOR of `type Name = T`
+    LSF_GRAMMAR,              // VARIABLE_DECLARATOR of `grammar Name { ... }`
     LSF_OBJECT_TYPE,          // OBJECT_TYPE
     LSF_OBJECT_FIELD,         // KEY_EXPR field of an object type
     LSF_OBJECT_CONTENT,       // CONTENT_TYPE of an object type
