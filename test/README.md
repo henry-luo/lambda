@@ -48,6 +48,8 @@ Case logs and individual GTest reports are under `test_output/test_radiant_view_
 
 A test is killed only after it produces no output for the idle timeout. With `--category=baseline` the runner passes `--baseline` to `test_js_gtest`, `test_wpt_html_parser_gtest` and `test_markdown_gtest`.
 
+UI automation uses a memory-weighted queue. Manifest suites and individual fixtures can set `worker_mb`; baseline/DTNA reserve 1024 MiB, and the indexed-math editor fixture reserves 1536 MiB. Other suites retain the 2048 MiB default for large editor/JS bundles. These budgets follow a full release profile: the indexed-math case peaked at 1179 MiB, all other cases below 900 MiB. Reservations collectively use at most half of physical RAM, with at least one case admitted on smaller hosts. `LAMBDA_UI_TEST_JOBS` and `LAMBDA_TEST_MAX_CONCURRENT` cap workers; `LAMBDA_UI_TEST_WORKER_MB` overrides reservations. Subprocess durations and per-view phase timings are retained in the shared report. A separate `<gtest-json-path>.timings.json` file supplies scheduling hints for later runs; every fixture still executes and produces a fresh result. `RADIANT_TEST_EXECUTABLE` selects an alternate host executable for isolated release comparisons.
+
 | `--target` | Category | Binaries | Notable members |
 |---|---|---|---|
 | `library` | baseline, +1 script | 52 | `test/lib/test_*` (str, arena, gc_heap, mempool, url, font…), `test_rdb_gtest`, `test_serve_gtest`, `test_avl_tree_perf`; runner contracts: `node test/test_test_run.js` |

@@ -4388,6 +4388,42 @@ void element_dom_map_remove(HashMap* map, Element* elem) {
 static const int MAX_DOM_BUILD_DEPTH = 512;
 static thread_local int g_dom_build_depth = 0;
 
+struct UiOccurrenceEntry {
+    List* value;
+    bool active;
+};
+typedef TypedHashMap<UiOccurrenceEntry,
+    HashMapPointerMemberKeyOps<UiOccurrenceEntry, &UiOccurrenceEntry::value>> UiOccurrenceMap;
+
+static bool dom_materialize_ui_occurrences(Item* item, DomDocument* doc, HashMap* seen, int depth) {
+    if (depth > MAX_DOM_BUILD_DEPTH) return false;
+    TypeId type = get_type_id(*item);
+    if (type != LMD_TYPE_ELEMENT && type != LMD_TYPE_ARRAY) return true;
+    List* children = (List*)item->container;
+    if (!children || (children->length > 0 && !children->items)) return false;
+    UiOccurrenceEntry entry = {children, true};
+    const UiOccurrenceEntry* prior = UiOccurrenceMap::get(seen, entry);
+    // reject content cycles before a forced deep copy can recurse into them.
+    if (prior && prior->active) return false;
+    if (prior) {
+        // shared pure values need distinct mutable DOM occurrences, including shared arrays (S12.1.3).
+        MarkBuilder builder(doc->input);
+        Item copy = builder.deep_copy(*item, true);
+        if (get_type_id(copy) != type) return false;
+        *item = copy;
+        children = (List*)copy.container;
+        entry.value = children;
+    }
+    UiOccurrenceMap::set(seen, entry);
+    if (hashmap_oom(seen)) return false;
+    for (int64_t i = 0; i < children->length; i++) {
+        if (!dom_materialize_ui_occurrences(&children->items[i], doc, seen, depth + 1)) return false;
+    }
+    entry.active = false;
+    UiOccurrenceMap::set(seen, entry);
+    return true;
+}
+
 struct DomBuildDepthGuard {
     DomBuildDepthGuard() { g_dom_build_depth++; }
     ~DomBuildDepthGuard() { g_dom_build_depth--; }
@@ -4417,6 +4453,14 @@ DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElem
     }
     if (g_dom_build_depth > MAX_DOM_BUILD_DEPTH) {
         return nullptr;
+    }
+    if (g_dom_build_depth == 0 && doc->input && doc->input->ui_mode) {
+        HashMap* seen = UiOccurrenceMap::create(64);
+        if (!seen) return nullptr;
+        Item root = {.element = elem};
+        bool materialized = dom_materialize_ui_occurrences(&root, doc, seen, 0);
+        hashmap_free(seen);
+        if (!materialized) return nullptr;
     }
     DomBuildDepthGuard depth_guard;
 

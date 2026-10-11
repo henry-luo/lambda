@@ -841,9 +841,9 @@ bool MarkBuilder::is_in_arena(Item item) const {
 
 /**
  * Deep copy with smart ownership checking
- * Only copies if data is external to arena chain
+ * Copies external data, or owned data when a distinct occurrence is required.
  */
-Item MarkBuilder::deep_copy(Item item) {
+Item MarkBuilder::deep_copy(Item item, bool force) {
     // Quick check: if item contains no pointers (null, bool, int), just return it
     TypeId type_id = get_type_id(item);
     if (type_id <= LMD_TYPE_INT) {
@@ -851,11 +851,11 @@ Item MarkBuilder::deep_copy(Item item) {
     }
 
     // Optimization: if data already in our arena chain, return as-is
-    if (is_in_arena(item)) {
+    if (!force && is_in_arena(item)) {
         return item;
     }
 
-    // Data is external - perform deep copy
+    // copy external data or explicitly materialize another owned occurrence
     return deep_copy_internal(item);
 }
 

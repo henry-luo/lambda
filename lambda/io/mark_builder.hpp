@@ -259,9 +259,10 @@ public:
      * This enables efficient cross-Input data sharing while ensuring memory safety.
      *
      * @param item The item to potentially copy
-     * @return Original item if already owned, or a deep copy if external
+     * @param force Copy owned values too when a distinct materialized occurrence is required
+     * @return Original item if already owned and not forced, otherwise a deep copy
      */
-    Item deep_copy(Item item);
+    Item deep_copy(Item item, bool force = false);
 
     /**
      * Check if an Item's data is in this Input's arena chain

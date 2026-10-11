@@ -5372,6 +5372,12 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
         case SIM_EVENT_RENDER:
             {
                 log_info("event_sim: render to %s", ev->file_path);
+                // captures must also work in a clean checkout with no prior output directories.
+                if (!sim_create_parent_dirs(ev->file_path)) {
+                    log_error("event_sim: render FAIL - could not create parent for %s", ev->file_path);
+                    ctx->fail_count++;
+                    break;
+                }
                 // Captures must observe the same committed layout as screen paint.
                 render_pending_surface(uicon);
                 // Determine format from extension

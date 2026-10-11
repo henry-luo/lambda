@@ -7,6 +7,7 @@
   "suites": [
     {
       "name": "baseline",
+      "worker_mb": 1024,
       "globs": ["test/ui/*.json"],
       "exclude": [
         "test/ui/dom_*.json",
@@ -27,6 +28,7 @@
     },
     {
       "name": "dtna",
+      "worker_mb": 1024,
       "globs": ["test/ui/dtna/*.json"],
       "tags": ["dtna", "baseline"]
     },
