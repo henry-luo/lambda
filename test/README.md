@@ -42,6 +42,8 @@ Last verified against tree: 2026-10-11
 
 `node test/test_run.js` runs these. Flags: `--target=<suite>`, `--exclude-target=<suite>`, `--category=baseline|extended`,
 `--exclude-test=<name>[,<name>]`, `--raw`, `--sequential`, `--list` (JSON inventory), `--list-build-targets` (unique native projects). Env: `LAMBDA_TEST_BIN_DIR`, `LAMBDA_TEST_OUTPUT_DIR`, `LAMBDA_TEST_IDLE_TIMEOUT` (s), `LAMBDA_TEST_MAX_CONCURRENT`, `LAMBDA_TEST_HEAVY_LOAD=1`, `LAMBDA_UI_TEST_JOBS`.
+Radiant View command tests use up to four subprocess workers by default. `LAMBDA_RADIANT_VIEW_TEST_JOBS=1` provides serial execution; the same setting controls document loads, HTTP language cases, photo replay matrices and CPU demo launches, capped by `LAMBDA_TEST_MAX_CONCURRENT` when set. GPU demos stay serial within that ceiling. Each queued view has its own working directory under `temp/` and logs, event results and phase timings under `test_output/radiant_view/<run>/<launch>/` (or `LAMBDA_TEST_OUTPUT_DIR`). The combined JSON report includes `launch_timings`; pre-executed document checks report subprocess duration instead of their assertion-only time.
+
 A test is killed only after it produces no output for the idle timeout. With `--category=baseline` the runner passes `--baseline` to `test_js_gtest`, `test_wpt_html_parser_gtest` and `test_markdown_gtest`.
 
 | `--target` | Category | Binaries | Notable members |

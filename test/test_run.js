@@ -754,6 +754,7 @@ function parseTestResults(baseName, jsonFile, timedOut, idleTimeoutMs = IDLE_TIM
     let partial = 0, skipped = 0;
     let failedTests = [];
     let caseTimings = [];
+    let launchTimings = [];
     let capturedCaseDurationMs = 0;
 
     if (baseName === 'lambda_test_runner') {
@@ -799,6 +800,22 @@ function parseTestResults(baseName, jsonFile, timedOut, idleTimeoutMs = IDLE_TIM
         if (Array.isArray(data.testsuites)) {
             for (const suite of data.testsuites) {
                 for (const tc of (suite.testsuite || [])) {
+                    // Parallel view launches carry their actual subprocess time, not assertion time.
+                    const properties = Array.isArray(tc.properties) ? tc.properties.map(p => p.key) : [];
+                    for (const key of new Set([...Object.keys(tc), ...properties])) {
+                        const prefix = 'radiant_view_elapsed_ms_';
+                        if (!key.startsWith(prefix)) continue;
+                        const launch = key.slice(prefix.length);
+                        const phasesFile = getTestProperty(tc, `radiant_view_phases_${launch}`);
+                        let phases = {};
+                        try {
+                            phases = Object.fromEntries(fs.readFileSync(phasesFile, 'utf8').trim().split('\n')
+                                .slice(1).map(line => { const [key, value] = line.split('\t'); return [key, Number(value)]; }));
+                        } catch (_) {}
+                        launchTimings.push({ test: `${suite.name}.${tc.name}`, launch,
+                            duration_ms: Number(getTestProperty(tc, key)), phases,
+                            log_file: getTestProperty(tc, `radiant_view_log_${launch}`), phases_file: phasesFile });
+                    }
                     const capturedMs = getCapturedCaseDurationMs(tc);
                     const durationMs = capturedMs > 0 ? capturedMs : parseDurationMs(tc.time);
                     if (durationMs > 0) {
@@ -848,6 +865,7 @@ function parseTestResults(baseName, jsonFile, timedOut, idleTimeoutMs = IDLE_TIM
         failedTests,
         caseTimings: caseTimings.sort((a, b) => b.duration_ms - a.duration_ms),
         capturedCaseDurationMs,
+        launchTimings: launchTimings.sort((a, b) => b.duration_ms - a.duration_ms),
         timedOut: false,
     };
 }
@@ -1046,6 +1064,7 @@ function displayResults(config, results) {
             log_file: e.logFile || '',
             duration_ms: e.durationMs || 0,
             captured_case_duration_ms: e.capturedCaseDurationMs || 0,
+            launch_timings: e.launchTimings || [],
             status: e.status,
             top_slow_tests: (e.caseTimings || []).slice(0, 20),
         })),

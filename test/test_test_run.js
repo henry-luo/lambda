@@ -37,6 +37,16 @@ if (scenario === 'invalid-json') { fs.writeFileSync(output, '{'); process.exit(0
 const data = { tests: scenario === 'empty' ? 0 : 4, failures: 0,
     skipped: scenario === 'skip' ? 1 : 0, args: process.argv.slice(2),
     testsuites: [{ name: 'Fixture', testsuite: [{ name: 'Case', time: '0.001s' }] }] };
+if (scenario === 'launches') {
+    const phases = path.join(path.dirname(output), 'view-phases.tsv');
+    fs.writeFileSync(phases, 'metric\\tmilliseconds\\nload\\t75.5\\ncleanup\\t4.5\\n');
+    data.testsuites[0].testsuite[0].properties = [
+        { key: 'lambda_script_elapsed_ms', value: '125.5' },
+        { key: 'radiant_view_elapsed_ms_fixture', value: '125.5' },
+        { key: 'radiant_view_phases_fixture', value: phases },
+        { key: 'radiant_view_log_fixture', value: 'view.log' },
+    ];
+}
 fs.writeFileSync(output, JSON.stringify(data));
 if (scenario === 'crash') process.kill(process.pid, 'SIGKILL');
 if (scenario === 'timeout') setInterval(() => {}, 1000);
@@ -119,6 +129,17 @@ try {
         assert.equal(child.status, 0);
         assert.equal(summary.total_passed, 3);
         assert.equal(summary.total_skipped, 1);
+    });
+    check('Parallel view subprocess timings and phases reach the shared report', () => {
+        const { child, summary } = runSelected(['test_scene3d_gtest'], 'launches');
+        assert.equal(child.status, 0, child.stderr);
+        const result = summary.level2_c_tests[0];
+        assert.equal(result.top_slow_tests[0].duration_ms, 125.5);
+        assert.equal(result.launch_timings.length, 1);
+        assert.equal(result.launch_timings[0].launch, 'fixture');
+        assert.equal(result.launch_timings[0].duration_ms, 125.5);
+        assert.deepEqual(result.launch_timings[0].phases, { load: 75.5, cleanup: 4.5 });
+        assert.equal(result.launch_timings[0].log_file, 'view.log');
     });
     check('Raw output still saves the final summary', () => {
         const { child, summary } = runSelected(['test_scene3d_gtest'], 'exit', ['--raw']);
