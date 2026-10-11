@@ -576,6 +576,10 @@ static const TierParityFixture kTune27TierParity[] = {
      "AST_NODE_INDEX_ASSIGN_STAM"},
     {"test/lambda/proc/map_external_parent.ls", "test/lambda/proc/map_external_parent.txt",
      "AST_NODE_INDEX_ASSIGN_STAM"},
+    // a type definition read in a function, and a call returning a type value,
+    // give that type; the JIT gave a `pub type` a module slot and unboxed a
+    // type-valued call as the value its type names (`0` for `int`)
+    {"test/lambda/import_type_values.ls", "test/lambda/import_type_values.txt"},
 };
 
 // explicit exclusions used to pass this test by silently executing MIR

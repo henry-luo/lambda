@@ -4010,13 +4010,19 @@ static bool mir_argument_is_module_binding(MirTranspiler* mt, AstNode* node) {
 }
 
 static TypeId mir_decl_type_id(Type* type);
+static TypeId mir_value_type_id(Type* type);
 
 // A value descriptor records the source semantic contract separately from its
 // physical carrier. The existing effective-type query remains a lane-planning
 // tool while legacy producers are retired, so it must not relabel a boxed
 // result as `any` at the descriptor boundary (D2.4.1-D2.4.3).
+// An expression's own static type is not a declaration: the builder unwraps a
+// declaration's TypeType at its binding, so a simple TypeType left on an
+// expression is a type VALUE (`int`, `let t = int`, a call whose body returns
+// `T`). Unwrapping it typed `which()` of `fn which() => T` as an int and
+// unboxed the returned type to 0.
 static TypeId mir_expr_semantic_type(const AstNode* node) {
-    return node ? mir_decl_type_id(node->type) : LMD_TYPE_NULL;
+    return node ? mir_value_type_id(node->type) : LMD_TYPE_NULL;
 }
 
 // T21-1c: a logical operand is a native bool when its contract says so, or
@@ -5748,15 +5754,18 @@ static bool mir_type_is_type_value(Type* type) {
     return type && type->type_id == LMD_TYPE_TYPE && type->kind == TYPE_KIND_SIMPLE;
 }
 
+// A compiler-built TypeType wrapper. On a declaration it wraps the value domain
+// the declaration names; on an expression's own type it is a type VALUE (`int`,
+// `let t = int`, a call returning `T`). `number`/`integer` are compact global
+// meta-types, not wrappers -- unwrapping them would read past their Type
+// prefix -- and on an expression they type an ordinary value (`int(1e10)`).
+static bool mir_type_is_type_wrapper(Type* type) {
+    return type && type->type_id == LMD_TYPE_TYPE && !type_is_global_meta_type(type) &&
+        type->kind == TYPE_KIND_SIMPLE && ((TypeType*)type)->type;
+}
+
 static Type* mir_unwrap_decl_type(Type* type) {
-    if (type && type->type_id == LMD_TYPE_TYPE && !type_is_global_meta_type(type) &&
-            type->kind == TYPE_KIND_SIMPLE) {
-        // `number`/`integer` are compact global meta-types, not TypeType
-        // wrappers; unwrapping them would read past their Type prefix.
-        TypeType* tt = (TypeType*)type;
-        if (tt->type) return tt->type;
-    }
-    return type;
+    return mir_type_is_type_wrapper(type) ? ((TypeType*)type)->type : type;
 }
 
 static Type* mir_unwrap_decl_contract(Type* type) {
@@ -10248,7 +10257,10 @@ static MirValue mir_value_from_reg(MirTranspiler* mt, AstNode* node,
         : node ? node->type : NULL;
     TypeId semantic_type = semantic_override == LMD_TYPE_COUNT
         ? mir_decl_type_id(contract) : semantic_override;
-    if (mir_is_type_value_node(node)) {
+    // a node typed as a type value is one too (mir_expr_semantic_type); its
+    // TypeType must not reach boxing, which would read it as an `int` lane
+    if (mir_is_type_value_node(node) ||
+            (node && contract == node->type && mir_type_is_type_wrapper(contract))) {
         contract = &TYPE_TYPE;
         semantic_type = LMD_TYPE_TYPE;
     }
@@ -11493,9 +11505,11 @@ static TypeId mir_expr_carrier_type(MirTranspiler* mt, AstNode* node) {
     // so callers treat it as a boxed Item (box/unbox correctly) instead of assuming a
     // raw native register — otherwise a match returning ints gets double-boxed.
     if (node->node_type == AST_NODE_MATCH_EXPR) return LMD_TYPE_ANY;
-    if (mir_is_type_value_node(node)) {
+    if (mir_is_type_value_node(node) || mir_type_is_type_wrapper(node->type)) {
         // Type syntax produces a raw Type* Item.  Do not recover the payload
-        // lane here: `case float` is a Type value, not an F64 register.
+        // lane here: `case float` is a Type value, not an F64 register. So is
+        // any expression typed as a type value (a call returning `T`): the
+        // lane resolver below reads contracts and would peel it to `int`.
         return LMD_TYPE_TYPE;
     }
     TypeId tid = mir_value_type_id(node->type);
@@ -46155,6 +46169,13 @@ static void prepass_create_global_vars(MirTranspiler* mt, AstNode* node) {
             AstLetNode* let_node = (AstLetNode*)node;
             AstNode* decl = let_node->declare;
             while (decl) {
+                // `pub type` / `pub grammar` are compile-time bindings with no
+                // slot, as in T0 and the satellite prepass: a slot captured
+                // their reads in functions, and a grammar's was never written
+                if (mir_is_type_definition_binding(decl)) {
+                    decl = decl->next;
+                    continue;
+                }
                 if (decl->node_type == AST_NODE_VARIABLE_DECLARATOR) {
                     AstDeclaratorNode* asn = (AstDeclaratorNode*)decl;
                     char name[128];

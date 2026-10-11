@@ -1,0 +1,20 @@
+int
+string
+true
+false
+true
+false
+true
+false
+type
+true
+int
+int
+float
+[float]
+bool
+bool
+float
+type
+[int, float]
+true
