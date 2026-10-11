@@ -352,6 +352,17 @@ their observable retention policy.
 
 ### 5.3 Runtime identity and durable identity
 
+**Ordinary markup occurrences — ruled 2026-10-11 (D4.5.3).** Only UI/view-mode
+DOM construction deep-copies ordinary Elements and their content with
+MarkBuilder, even when already in the document arena. Reusing one SVG or HTML
+value in several slots therefore produces independent native nodes and child
+chains. Normal Lambda evaluation retains value sharing and the existing
+ownership-based copy optimization. Rooted callables and native handles retain
+their identity. Copying at the DOM boundary preserves template source/result
+keys for event dispatch and regeneration. This settles ordinary markup reuse;
+repeated stateful template applications and durable addressing remain the open
+questions below.
+
 Live source identity supports state lookup and result ownership during a session.
 Stable source paths are the identity spine for persistence and reconstruction
 ([State Management](radiant/Radiant_Design_State_Management.md), **RS7**).

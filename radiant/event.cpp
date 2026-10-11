@@ -3178,7 +3178,20 @@ static bool settle_template_retransform(EventContext* evcon,
             break;
         }
     }
-    if (!any_changed) return false;
+    if (!any_changed) {
+        // skipped rebuilds retain live nodes, but the next update uses new result keys.
+        if (evcon) for (int i = 0; i < reported; i++) {
+            DomDocument* doc = event_context_target_document(evcon);
+            dom_rebind_equal_render_result(doc,
+                results[i].old_result, results[i].new_result);
+            if (doc && doc->root && get_type_id(results[i].new_result) == LMD_TYPE_ELEMENT) {
+                // equal delayed markup still needs its render handler to observe new settings.
+                DomElement* retained = dom_find_element_for_source(doc->root, results[i].new_result.element);
+                if (retained) radiant_queue_template_render_events(doc, retained);
+            }
+        }
+        return false;
+    }
     if (evcon) {
         DocState* state = event_context_target_state(evcon);
         bool had_hover = state && state->hover_target;

@@ -434,6 +434,20 @@
       "equals": "choice:3"
     },
     {
+      "type": "assert_count",
+      "target": {
+        "selector": ".dtna-choice-icon svg"
+      },
+      "count": 18
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".dtna-choice-icon svg rect"
+      },
+      "count": 18
+    },
+    {
       "type": "render",
       "file": "temp/ui_dtna/segmented_modes.png"
     }

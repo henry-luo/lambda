@@ -229,6 +229,7 @@ const char* dom_element_attribute_namespace_uri(DomElement* element,
 #define log_debug(...) log_trace(__VA_ARGS__)
 
 void element_dom_map_remove(HashMap* map, Element* elem);
+DomElement* element_dom_map_lookup(HashMap* map, Element* elem);
 static void dom_element_clear_synthetic_attributes(DomElement* element);
 
 bool dom_document_owns_node_storage(DomDocument* doc, const void* storage) {
@@ -1333,9 +1334,10 @@ void dom_element_release_retired_storage(DomElement* element) {
         dom_attribute_node_detach(element->ext->attribute_nodes);
     Element* backing_source = dom_node_registry_backing_source(
         element->doc, static_cast<DomNode*>(element));
-    if (element->doc->element_dom_map && backing_source) {
+    if (element->doc->element_dom_map && backing_source &&
+            element_dom_map_lookup(element->doc->element_dom_map, backing_source) == element) {
         // Reconcile lookup values are raw DOM pointers; remove the Lambda key
-        // before the arena can repurpose this node generation.
+        // before recycling, without erasing a newer occurrence's mapping.
         element_dom_map_remove(element->doc->element_dom_map,
                                backing_source);
     }
@@ -4414,6 +4416,29 @@ void element_dom_map_remove(HashMap* map, Element* elem) {
     ElementDomMap::erase(map, key);
 }
 
+void dom_rebind_equal_render_result(DomDocument* doc, Item previous, Item current) {
+    // RAW_ITEM_EQ_OK: unchanged evaluator addresses need no identity handoff.
+    if (!doc || !doc->element_dom_map || previous.item == current.item) return;
+    TypeId kind = get_type_id(previous);
+    if (kind != get_type_id(current)) return;
+    if (kind == LMD_TYPE_ELEMENT) {
+        DomElement* node = element_dom_map_lookup(doc->element_dom_map, previous.element);
+        if (node && dom_element_render_source(node) == previous.element) {
+            // a no-op rerender still replaces evaluator identities (D4.5.3).
+            element_dom_map_remove(doc->element_dom_map, previous.element);
+            dom_node_registry_set_backing_source(doc, node, current.element);
+            element_dom_map_insert(doc->element_dom_map, current.element, node);
+        }
+    } else if (kind != LMD_TYPE_ARRAY) {
+        return;
+    }
+    List* before = (List*)previous.array;
+    List* after = (List*)current.array;
+    if (!before || !after || before->length != after->length) return;
+    for (int64_t i = 0; i < before->length; i++)
+        dom_rebind_equal_render_result(doc, before->items[i], after->items[i]);
+}
+
 static const int MAX_DOM_BUILD_DEPTH = 512;
 static thread_local int g_dom_build_depth = 0;
 
@@ -4439,7 +4464,25 @@ static DomText* dom_rebuild_text_node(DomDocument* doc, DomElement* parent,
     return retained;
 }
 
+static DomElement* build_dom_tree_from_element_impl(Element* elem, Element* source,
+                                                   DomDocument* doc, DomElement* parent);
+
 DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElement* parent) {
+    if (!elem || !doc) return nullptr;
+    Element* source = elem;
+    if (doc->input && doc->input->ui_mode) {
+        // D4.5.3: copy at the DOM boundary, after evaluation/render-map recording,
+        // so each occurrence owns its embedded links without changing Lambda values.
+        MarkBuilder builder(doc->input);
+        Item copied = builder.deep_copy_for_view({.element = elem});
+        if (get_type_id(copied) != LMD_TYPE_ELEMENT) return nullptr;
+        elem = copied.element;
+    }
+    return build_dom_tree_from_element_impl(elem, source, doc, parent);
+}
+
+static DomElement* build_dom_tree_from_element_impl(Element* elem, Element* source,
+                                                   DomDocument* doc, DomElement* parent) {
     if (!elem || !doc) {
         log_debug("build_dom_tree_from_element: Invalid arguments\n");
         return nullptr;
@@ -4483,6 +4526,8 @@ DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElem
         ? DomElement::create_in(retained, doc, tag_name, elem)
         : DomElement::create(doc, tag_name, elem);
     if (!dom_elem) return nullptr;
+    // event dispatch and incremental rebuilds still address the evaluator's result.
+    if (source != elem) dom_node_registry_set_backing_source(doc, dom_elem, source);
 
     // The HTML tree builder creates a direct form child while in table mode
     // solely to retain the form-owner pointer. Chromium keeps that node out of
@@ -4494,7 +4539,7 @@ DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElem
 
     // populate element-to-DOM map if available (for incremental rebuild)
     if (doc->element_dom_map) {
-        element_dom_map_insert(doc->element_dom_map, elem, dom_elem);
+        element_dom_map_insert(doc->element_dom_map, source, dom_elem);
     }
 
     // Extract source line number if tracked during HTML5 parsing
@@ -4659,7 +4704,8 @@ DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElem
             }
 
             log_debug("  Building child element: <%s> for parent <%s> (parent_dom=%p)", child_tag_name, tag_name, (void*)dom_elem);
-            DomElement* child_dom = build_dom_tree_from_element(child_elem, doc, dom_elem);
+            DomElement* child_dom = build_dom_tree_from_element_impl(
+                child_elem, source->items[i].element, doc, dom_elem);
 
             // skip if nullptr (e.g., XML declarations)
             if (!child_dom) {
@@ -4704,6 +4750,7 @@ DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElem
         } else if (child_type == LMD_TYPE_ARRAY) {
             // Array child - flatten into parent (Lambda scripts may produce arrays of elements)
             Array* arr = child_item.array;
+            Array* source_arr = source->items[i].array;
             if (arr) {
                 log_debug("  Flattening array child at index %lld with %lld items", i, (long long)arr->length);
                 for (int64_t j = 0; j < arr->length; j++) {
@@ -4711,7 +4758,8 @@ DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElem
                     TypeId arr_item_type = get_type_id(arr_item);
                     if (arr_item_type == LMD_TYPE_ELEMENT) {
                         Element* child_elem = arr_item.element;
-                        build_dom_tree_from_element(child_elem, doc, dom_elem);
+                        build_dom_tree_from_element_impl(
+                            child_elem, source_arr->items[j].element, doc, dom_elem);
                     } else if (arr_item_type == LMD_TYPE_STRING) {
                         String* text_str = arr_item.get_string();
                         if (text_str && text_str->len > 0) {
@@ -4731,12 +4779,14 @@ DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElem
                     } else if (arr_item_type == LMD_TYPE_ARRAY) {
                         // nested array - flatten recursively by wrapping in a temporary element iteration
                         Array* nested = arr_item.array;
+                        Array* source_nested = source_arr->items[j].array;
                         if (nested) {
                             for (int64_t k = 0; k < nested->length; k++) {
                                 Item nested_item = nested->items[k];
                                 TypeId nested_type = get_type_id(nested_item);
                                 if (nested_type == LMD_TYPE_ELEMENT) {
-                                    build_dom_tree_from_element(nested_item.element, doc, dom_elem);
+                                    build_dom_tree_from_element_impl(nested_item.element,
+                                        source_nested->items[k].element, doc, dom_elem);
                                 } else if (nested_type == LMD_TYPE_STRING) {
                                     String* s = nested_item.get_string();
                                     if (s && s->len > 0) {

@@ -634,6 +634,59 @@ from the matching selection/controlled/disabled interactions. Thirteen reference
 cases passed before the Avatar increment; logs are in
 `temp/ui_dtna/segmented_increment/`.
 
+### Repeated ordinary markup: DOM construction copy — 2026-10-11
+
+The user settled **UI-1** through **D4.5.3**: MarkBuilder deep-copies ordinary
+Elements and their content only at UI/view-mode DOM construction. Copying an
+already-owned value is necessary because lifetime ownership does not provide
+independent native parent/sibling links. Ordinary Lambda evaluation and its
+ownership-based import optimization remain unchanged.
+
+`MarkBuilder::deep_copy_for_view` reuses the recursive copier and bypasses its
+arena-ownership shortcut only in UI mode. The DOM builder copies the complete
+tree once, then walks the copied content alongside its original result tree.
+Lifecycle records and incremental lookup retain the original result keys for
+template handlers and regeneration. Retirement removes a source mapping only
+when it still refers to the retiring occurrence. Rooted callables and host
+handles retain their existing identity.
+
+Full document rebuilds now use the existing subtree-state and frame-owner
+migration helpers before replacing and retiring the old root. SVG geometry and
+filter scope read the live DOM backing rather than the evaluator's source value;
+native attribute mutations remain visible after DOM copying (**D4.5.3**).
+
+When all output is equal, skipped rebuilds hand off their new evaluator keys
+to the existing DOM nodes and queue their render handlers so delayed components
+can observe changed settings even before their markup changes. Otherwise the
+next update misses its old-result lookup, falls back to a full rebuild, and
+loses native callback edits outside the component. The unchanged native map
+tests cover this handoff and now pass **20/20**.
+
+The document-element replacement path also resolves the copied root's source
+when locating it in the parser's `#document` list; the existing
+`select-root-crash` layout fixture covers replacement after `DOMContentLoaded`.
+
+The Segmented fixture now also counts SVGs and their rectangles after keyboard,
+selection and form updates; all **44 assertions** pass. Dedicated MarkBuilder
+and DOM regressions check the UI-only gate, repeated descendants through nested
+arrays, text/attribute independence, parent/sibling links, and lookup retention
+when an old copied subtree retires. This resolves ordinary markup reuse only;
+the stateful-template and durable-addressing questions in the reactive UI
+record remain open.
+
+Verification: MarkBuilder passes **94/94**, deep copy **41/41**, focused DOM
+ownership/copy tests **5/5**, and Segmented/Spin pass **44/44** and **41/41**
+under both interpreter and JIT. The Lambda baseline passes **6647/6647**.
+The complete Radiant baseline exits successfully: **4634** recorded cases,
+**4285** passing and **349** accepted partial results, with zero regressions.
+This includes **503/503** UI automation fixtures and all **211** accepted render
+baselines. Its native pre-gates also pass: **62/62** scene tests, **20/20** map
+tests and **489/489** document/layout unit tests. Logs are
+`temp/ui_copy_lambda_baseline.log` and `temp/ui_copy_radiant_verified.log`.
+The additional full view-reuse unit sweep is **599/603**, retaining the four
+previously documented synthetic-node `StyleEpochTest` failures under
+“Gallery Select/Checkbox overlap”; their assertions remain unchanged.
+
 ### Avatar variants and computed corner radii — 2026-10-10
 
 Avatar now accepts preset, numeric and responsive sizes; circle/square shapes;

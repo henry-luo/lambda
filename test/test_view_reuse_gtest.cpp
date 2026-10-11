@@ -21,6 +21,8 @@
 #include "../lib/font/font_internal.h"
 
 DomElement* build_dom_tree_from_element(Element*, DomDocument*, DomElement*);
+HashMap* element_dom_map_create(void);
+DomElement* element_dom_map_lookup(HashMap*, Element*);
 
 class ViewReuseTest : public ::testing::Test {
 protected:
@@ -1974,6 +1976,66 @@ TEST(DomRetirementOwnerArenaTest, FlattenedArrayTextIsRegisteredAndRetired) {
     EXPECT_EQ(dom_retire_sweep(&doc), 3u);
     EXPECT_EQ(dom_node_ref_validate(&doc, first_ref), nullptr);
     EXPECT_EQ(dom_node_ref_validate(&doc, second_ref), nullptr);
+    doc.destroy();
+    pool_destroy(pool);
+}
+
+TEST(DomViewCopyTest, RepeatedMarkupOwnsLinksAndBackingAcrossRebuilds) {
+    Pool* pool = pool_create();
+    ASSERT_NE(pool, nullptr);
+    Input* input = Input::create(pool, nullptr);
+    ASSERT_NE(input, nullptr);
+    input->ui_mode = true;
+    DomDocument doc;
+    ASSERT_TRUE(doc.init(input));
+    doc.element_dom_map = lam::own(element_dom_map_create());
+    MarkBuilder builder(input);
+    Item leaf = builder.element("span").attr("title", "original").text("shared").final();
+    Item nested = builder.array().append(builder.array().append(leaf).final()).final();
+    Item branch = builder.element("section").child(nested).final();
+    Item source = builder.element("main").child(branch).child(branch).final();
+    DomElement* root = build_dom_tree_from_element(source.element, &doc, nullptr);
+    ASSERT_NE(root, nullptr);
+    doc.root = lam::up(root);
+    DomElement* first = root->first_child->as_element();
+    ASSERT_NE(first->next_sibling, nullptr);
+    DomElement* second = first->next_sibling->as_element();
+    EXPECT_NE(first, second);
+    EXPECT_EQ(first->parent, root);
+    EXPECT_EQ(second->parent, root);
+    EXPECT_EQ(second->prev_sibling, first);
+    EXPECT_EQ(second->next_sibling, nullptr);
+    EXPECT_EQ(root->last_child, second);
+    DomElement* first_leaf = first->first_child->as_element();
+    DomElement* second_leaf = second->first_child->as_element();
+    EXPECT_NE(first_leaf, second_leaf);
+    EXPECT_NE(first_leaf->first_child, second_leaf->first_child);
+    EXPECT_EQ(first_leaf->first_child->parent, first_leaf);
+    EXPECT_EQ(second_leaf->first_child->parent, second_leaf);
+    EXPECT_EQ(dom_element_render_source(first_leaf), leaf.element);
+    EXPECT_EQ(dom_element_render_source(second_leaf), leaf.element);
+    ASSERT_TRUE(first_leaf->set_attribute("title", "changed"));
+    EXPECT_STREQ(second_leaf->get_attribute("title"), "original");
+    EXPECT_STREQ(leaf.element->get_attr("title").string()->chars, "original");
+
+    // retiring the old occurrence must preserve the new source-to-DOM mapping.
+    DomElement* replacement = build_dom_tree_from_element(source.element, &doc, nullptr);
+    ASSERT_NE(replacement, nullptr);
+    EXPECT_NE(replacement, root);
+    doc.root = lam::up(replacement);
+    dom_node_schedule_detached(&doc, root);
+    EXPECT_EQ(dom_retire_sweep(&doc), 7u);
+    EXPECT_EQ(element_dom_map_lookup(doc.element_dom_map, source.element), replacement);
+    EXPECT_NE(replacement->first_child->next_sibling, nullptr);
+    DomElement* live_leaf = replacement->first_child->as_element()->first_child->as_element();
+    ASSERT_TRUE(live_leaf->set_attribute("title", "native edit"));
+    Item equal_result = builder.deep_copy_for_view(source);
+    dom_rebind_equal_render_result(&doc, source, equal_result);
+    EXPECT_EQ(element_dom_map_lookup(doc.element_dom_map, equal_result.element), replacement);
+    EXPECT_EQ(element_dom_map_lookup(doc.element_dom_map, source.element), nullptr);
+    EXPECT_EQ(dom_element_render_source(replacement), equal_result.element);
+    EXPECT_STREQ(live_leaf->get_attribute("title"), "native edit");
+    EXPECT_STREQ(leaf.element->get_attr("title").string()->chars, "original");
     doc.destroy();
     pool_destroy(pool);
 }

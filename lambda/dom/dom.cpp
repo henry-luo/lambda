@@ -15018,6 +15018,8 @@ static bool dom_replace_document_element(DomElement* old_root,
 
     Element* replacement_backing = dom_element_to_element(replacement);
     Element* old_backing = dom_element_to_element(old_root);
+    // D4.5.3: the parser's document list can still name the source of a copied root.
+    Element* old_source = dom_element_render_source(old_root);
     if (!replacement_backing || !old_backing) return false;
 
     Element* input_root = doc->input->root.element;
@@ -15032,12 +15034,12 @@ static bool dom_replace_document_element(DomElement* old_root,
         for (int64_t i = 0; i < input_root->length; i++) {
             Item child = input_root->items[i];
             if (get_type_id(child) == LMD_TYPE_ELEMENT &&
-                child.element == old_backing) {
+                (child.element == old_backing || child.element == old_source)) {
                 old_index = i;
                 break;
             }
         }
-    } else if (input_root == old_backing) {
+    } else if (input_root == old_backing || input_root == old_source) {
         old_index = 0;
     }
     if (old_index < 0) return false;

@@ -4712,6 +4712,22 @@ void rebuild_lambda_doc(UiContext* uicon) {
     }
     auto t_dom = time_now_ns();
 
+    DomElement* old_root = doc->root;
+    if (old_root && old_root != new_root) {
+        // D4.5.3 gives the replacement fresh nodes; migrate native state and
+        // frame owners before retiring the old presentation, as for subtree rebuilds.
+        view_state_preserve_subtree_identity(state, old_root, new_root);
+        radiant_frame_requests_follow_rebuild(doc, old_root, new_root);
+        if (old_root->parent) {
+            if (!dom_node_replace_in_parent(lam::dom_require_element(old_root->parent),
+                    old_root, new_root)) {
+                log_error("rebuild_lambda_doc: failed to replace document root");
+                return;
+            }
+        } else {
+            dom_node_schedule_detached(doc, old_root);
+        }
+    }
     doc->root = lam::up(new_root);
 
     CssStylesheet** inline_sheets = doc->cached_inline_sheets;

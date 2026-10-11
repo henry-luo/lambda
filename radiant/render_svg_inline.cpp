@@ -3017,7 +3017,8 @@ static void svg_path_add_ellipse(RdtPath* path, float cx, float cy,
 bool svg_append_basic_shape_path(DomElement* node, RdtPath* path,
     const SvgLengthContext* lengths, SvgBasicShapeGeometry* geometry) {
     if (!node || !path || !dom_element_is_svg(node)) return false;
-    Element* elem = dom_element_render_source(node);
+    // geometry follows live DOM mutations, not the evaluator's immutable result.
+    Element* elem = dom_element_backing(node);
     if (!elem) elem = dom_element_to_element(node);
     const char* tag = node->local_name();
     SvgBasicShapeGeometry result = {};
@@ -7068,7 +7069,7 @@ RdtSvgFilterProgram* render_css_svg_filter_compile(DomDocument* document, const 
         host->animation_prepared = true;
     }
     SvgInlineRenderContext context = {};
-    context.svg_root = context.id_scope = lam::up(dom_element_render_source(document->root));
+    context.svg_root = context.id_scope = lam::up(dom_element_backing(document->root));
     context.style_context = lam::up(&host->style);
     context.resource_scratch = lam::up(scratch);
     context.current_viewport_w = document->viewport.width;

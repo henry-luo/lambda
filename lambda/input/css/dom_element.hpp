@@ -1501,6 +1501,9 @@ inline const Element* dom_element_render_source(const DomElement* de) {
     return dom_element_render_source(const_cast<DomElement*>(de));
 }
 
+// equal template results retain live DOM storage while adopting the new result keys.
+void dom_rebind_equal_render_result(DomDocument* doc, Item previous, Item current);
+
 // Resolve a parsed/template Element to its live DOM wrapper. The lifecycle
 // registry preserves source identity even when a DomElement owns a copied one.
 inline DomElement* dom_find_element_for_source(DomElement* root,
