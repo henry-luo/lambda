@@ -327,7 +327,7 @@ static bool paint_ir_validate_effect_group(const PaintEffectGroup* group) {
 static bool paint_ir_validate_glyph_run(const PaintGlyphRun* run) {
     if (!run || !isfinite(run->x) || !isfinite(run->baseline_y) || !isfinite(run->font_size)) return false;
     if (run->glyph_ids || run->xs || run->ys || run->count) {
-        if (!run->font || !run->glyph_ids || !run->xs || !run->ys || run->count <= 0) return false;
+        if (!paint_glyph_run_font(run) || !run->glyph_ids || !run->xs || !run->ys || run->count <= 0) return false;
         for (int i = 0; i < run->count; i++)
             if (!isfinite(run->xs.get()[i]) || !isfinite(run->ys.get()[i])) return false;
         return true;
@@ -1073,6 +1073,12 @@ void paint_glyph_run(PaintList* pl, const PaintGlyphRun* glyph_run) {
     PaintCmd* cmd = paint_alloc_cmd(pl, PAINT_GLYPH_RUN);
     if (!cmd) return;
     cmd->glyph_run = *glyph_run;
+    if (const FontBox* font = paint_glyph_run_font(glyph_run)) {
+        // deferred lowering follows the recorded selection after the walker restores its context (D4.5.1v4).
+        cmd->glyph_run.captured_font = *font;
+        cmd->glyph_run.has_captured_font = true;
+        cmd->glyph_run.font = nullptr;
+    }
 }
 
 void paint_begin_semantic_group(PaintList* pl, const RenderSemanticGroup* group) {
@@ -2067,7 +2073,13 @@ static void paint_ir_lower_svg_unchecked(const PaintList* pl, StrBuf* out,
             const char* href = (image && image->url && image->url->href)
                 ? image->url->href->chars
                 : nullptr;
-            // native producers can retain decoded images without a source URL.
+            // data/cache producers can retain an undecoded image without a source URL.
+            if (!href && image && !image->pixels) {
+                const uint32_t* pixels = nullptr;
+                int width = 0, height = 0, stride = 0;
+                render_image_resource_pixels(image, p->dst_w, p->dst_h,
+                    &pixels, &width, &height, &stride);
+            }
             StrBuf* uri = !href && image && image->pixels ? render_encode_surface_data_uri(image) : nullptr;
             if (uri) href = uri->str;
             if (!href) {
@@ -2189,8 +2201,14 @@ static void paint_ir_lower_svg_unchecked(const PaintList* pl, StrBuf* out,
             if (p->italic) {
                 strbuf_append_str(out, " font-style=\"italic\"");
             }
-            if (p->word_spacing > 0.01f) {
-                strbuf_append_format(out, " word-spacing=\"%.2f\"", p->word_spacing);
+            const FontBox* font = paint_glyph_run_font(p);
+            const FontProp* style = font ? font->style.get() : nullptr;
+            float word_spacing = (style ? style->word_spacing : 0.0f) + p->word_spacing;
+            if (fabsf(word_spacing) > 0.01f) {
+                strbuf_append_format(out, " word-spacing=\"%.2f\"", word_spacing);
+            }
+            if (style && fabsf(style->letter_spacing) > 0.01f) {
+                strbuf_append_format(out, " letter-spacing=\"%.2f\"", style->letter_spacing);
             }
             paint_svg_append_cjk_dx(out, p->text, p->text_len,
                                     p->cjk_spacing);

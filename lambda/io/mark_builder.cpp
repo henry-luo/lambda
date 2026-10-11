@@ -859,6 +859,14 @@ Item MarkBuilder::deep_copy(Item item) {
     return deep_copy_internal(item);
 }
 
+Item MarkBuilder::deep_copy_for_view(Item item) {
+    if (!ui_mode_) return deep_copy(item);
+    copying_view_ = true;
+    Item copied = deep_copy_internal(item);
+    copying_view_ = false;
+    return copied;
+}
+
 template<TypeId Tag>
 Item MarkBuilder::deep_copy_typed(lam::ItemOf<Tag> typed) {
     Item item = typed.raw();
@@ -1032,12 +1040,15 @@ Item MarkBuilder::deep_copy_typed(lam::ItemOf<Tag> typed) {
     } else if constexpr (Tag == LMD_TYPE_ANY || Tag == LMD_TYPE_ERROR || Tag == LMD_TYPE_UNDEFINED) {
         return item;
     } else {
+        // opaque callables/host handles retain their separately rooted identity.
+        if (copying_view_) return item;
         log_debug("deep_copy_typed: unsupported type_id=%d, returning null", Tag);
         return ItemNull;
     }
 }
 
 Item MarkBuilder::deep_copy_unknown(Item item) {
+    if (copying_view_) return item;
     TypeId type_id = get_type_id(item);
     log_debug("deep_copy_unknown: unsupported type_id=%d, returning null", type_id);
     return ItemNull;

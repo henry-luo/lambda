@@ -4,7 +4,7 @@
 /**
  * CellOccupancyMatrix - Grid cell occupancy tracking
  *
- * A dynamically sized 2D matrix that tracks which grid cells are occupied
+ * A sparse set of origin-zero rectangles that tracks which grid cells are occupied
  * during auto-placement. Based on Taffy's CellOccupancyMatrix design.
  *
  * Key features:
@@ -29,7 +29,7 @@
 #endif
 
 #include "layout.hpp"
-#include "../lib/mem.h"
+#include "grid_track.hpp"
 
 namespace radiant {
 namespace grid {
@@ -41,357 +41,158 @@ namespace grid {
  * outside the current bounds, creating implicit tracks as needed.
  */
 class CellOccupancyMatrix {
-public:
-    /**
-     * Construct with initial track counts
-     *
-     * @param columns Initial column track counts (can be expanded later)
-     * @param rows Initial row track counts (can be expanded later)
-     */
-    CellOccupancyMatrix(TrackCounts columns, TrackCounts rows)
-        : columns_(columns)
-        , rows_(rows)
-        , row_count_(rows.len())
-        , col_count_(columns.len())
-        , data_(nullptr)
-        , data_count_(0)
-    {
-        allocate_cells(row_count_ * col_count_);
-    }
-
-    /**
-     * Default constructor - empty grid
-     */
-    CellOccupancyMatrix()
-        : columns_()
-        , rows_()
-        , row_count_(0)
-        , col_count_(0)
-        , data_(nullptr)
-        , data_count_(0)
-    {}
-
-    ~CellOccupancyMatrix() {
-        lam::Temp<CellOccupancyState> storage(data_);  // the matrix owns its cell storage
-        data_ = nullptr;
-    }
-
-    CellOccupancyMatrix(const CellOccupancyMatrix&) = delete;
-    CellOccupancyMatrix& operator=(const CellOccupancyMatrix&) = delete;
-
-    // --- Accessors ---
-
-    /**
-     * Get track counts for the specified axis
-     */
-    const TrackCounts& track_counts(AbsoluteAxis axis) const {
-        return axis == AbsoluteAxis::Horizontal ? columns_ : rows_;
-    }
-
-    TrackCounts& track_counts_mut(AbsoluteAxis axis) {
-        return axis == AbsoluteAxis::Horizontal ? columns_ : rows_;
-    }
-
-    size_t rows() const { return row_count_; }
-    size_t cols() const { return col_count_; }
-
-    /**
-     * Get cell state at matrix indices (0-based)
-     * Returns Unoccupied if out of bounds
-     */
-    CellOccupancyState get(size_t row, size_t col) const {
-        if (row >= row_count_ || col >= col_count_) {
-            return CellOccupancyState::Unoccupied;
-        }
-        if (!data_) return CellOccupancyState::Unoccupied;
-        return data_[row * col_count_ + col];
-    }
-
-    /**
-     * Set cell state at matrix indices (0-based)
-     * Silently ignores if out of bounds
-     */
-    void set(size_t row, size_t col, CellOccupancyState state) {
-        if (data_ && row < row_count_ && col < col_count_) {
-            data_[row * col_count_ + col] = state;
-        }
-    }
-
-    // --- Range checks ---
-
-    /**
-     * Check if an area (specified in track indices) fits within current matrix bounds
-     */
-    bool is_area_in_range(
-        AbsoluteAxis primary_axis,
-        int16_t primary_start, int16_t primary_end,
-        int16_t secondary_start, int16_t secondary_end
-    ) const {
-        const TrackCounts& primary_counts = track_counts(primary_axis);
-        const TrackCounts& secondary_counts = track_counts(other_axis(primary_axis));
-
-        if (primary_start < 0 || primary_end > static_cast<int16_t>(primary_counts.len())) {
-            return false;
-        }
-        if (secondary_start < 0 || secondary_end > static_cast<int16_t>(secondary_counts.len())) {
-            return false;
-        }
-        return true;
-    }
-
-    // --- Area operations ---
-
-    /**
-     * Ensure the matrix can fit the specified spans, expanding if necessary.
-     * Does NOT mark cells, just ensures space exists.
-     *
-     * @param primary_axis Which axis is "primary" (determines row vs column orientation)
-     * @param primary_span Span in primary axis (OriginZero coordinates)
-     * @param secondary_span Span in secondary axis (OriginZero coordinates)
-     */
-    void ensure_fits(
-        AbsoluteAxis primary_axis,
-        LineSpan primary_span,
-        LineSpan secondary_span
-    ) {
-        int16_t col_start, col_end, row_start, row_end;
-        resolve_line_area(primary_axis, primary_span, secondary_span,
-                          row_start, row_end, col_start, col_end);
-
-        // Expand if necessary
-        if (!is_area_in_range(AbsoluteAxis::Horizontal, col_start, col_end, row_start, row_end)) {
-            expand_to_fit_range(row_start, row_end, col_start, col_end);
-        }
-    }
-
-    /**
-     * Mark an area as occupied
-     *
-     * @param primary_axis Which axis is "primary" (determines row vs column orientation)
-     * @param primary_span Span in primary axis (OriginZero coordinates)
-     * @param secondary_span Span in secondary axis (OriginZero coordinates)
-     * @param state Occupancy state to set
-     */
-    void mark_area_as(
-        AbsoluteAxis primary_axis,
-        LineSpan primary_span,
-        LineSpan secondary_span,
-        CellOccupancyState state
-    ) {
-        int16_t col_start, col_end, row_start, row_end;
-        resolve_line_area(primary_axis, primary_span, secondary_span,
-                          row_start, row_end, col_start, col_end);
-
-        // Check if we need to expand the grid
-        if (!is_area_in_range(AbsoluteAxis::Horizontal, col_start, col_end, row_start, row_end)) {
-            expand_to_fit_range(row_start, row_end, col_start, col_end);
-            // Re-calculate indices after expansion
-            resolve_line_area(primary_axis, primary_span, secondary_span,
-                              row_start, row_end, col_start, col_end);
-        }
-
-        // Mark cells
-        for (int16_t r = row_start; r < row_end; ++r) {
-            for (int16_t c = col_start; c < col_end; ++c) {
-                if (r >= 0 && c >= 0) {
-                    set(static_cast<size_t>(r), static_cast<size_t>(c), state);
-                }
-            }
-        }
-    }
-
-    /**
-     * Check if an area (in OriginZero coordinates) is entirely unoccupied
-     */
-    bool line_area_is_unoccupied(
-        AbsoluteAxis primary_axis,
-        LineSpan primary_span,
-        LineSpan secondary_span
-    ) const {
-        const TrackCounts& primary_counts = track_counts(primary_axis);
-        const TrackCounts& secondary_counts = track_counts(other_axis(primary_axis));
-
-        int16_t primary_start, primary_end, secondary_start, secondary_end;
-        primary_counts.oz_line_range_to_track_range(primary_span, primary_start, primary_end);
-        secondary_counts.oz_line_range_to_track_range(secondary_span, secondary_start, secondary_end);
-
-        return track_area_is_unoccupied(primary_axis, primary_start, primary_end, secondary_start, secondary_end);
-    }
-
-    /**
-     * Check if an area (in matrix track indices) is entirely unoccupied
-     */
-    bool track_area_is_unoccupied(
-        AbsoluteAxis primary_axis,
-        int16_t primary_start, int16_t primary_end,
-        int16_t secondary_start, int16_t secondary_end
-    ) const {
-        // Convert to row/col ranges
-        int16_t row_start, row_end, col_start, col_end;
-        if (primary_axis == AbsoluteAxis::Horizontal) {
-            col_start = primary_start; col_end = primary_end;
-            row_start = secondary_start; row_end = secondary_end;
-        } else {
-            row_start = primary_start; row_end = primary_end;
-            col_start = secondary_start; col_end = secondary_end;
-        }
-
-        // Check all cells in range
-        for (int16_t r = row_start; r < row_end; ++r) {
-            for (int16_t c = col_start; c < col_end; ++c) {
-                if (r >= 0 && c >= 0 &&
-                    data_ &&
-                    static_cast<size_t>(r) < row_count_ &&
-                    static_cast<size_t>(c) < col_count_) {
-                    if (data_[r * col_count_ + c] != CellOccupancyState::Unoccupied) {
-                        return false;
-                    }
-                }
-            }
-        }
-        return true;
-    }
-
-    /**
-     * Find the last cell of a given type in a track, searching from end to start
-     *
-     * @param track_type Which axis to search along
-     * @param start_at The track to search in (OriginZero coordinate)
-     * @param kind The occupancy state to search for
-     * @return OriginZeroLine of the found cell, or nullopt if not found
-     */
-    bool last_of_type(
-        AbsoluteAxis track_type,
-        OriginZeroLine start_at,
-        CellOccupancyState kind,
-        OriginZeroLine& out_result
-    ) const {
-        if (!data_) return false;
-        const TrackCounts& counts = track_counts(other_axis(track_type));
-        int16_t track_index = counts.oz_line_to_next_track(start_at);
-
-        if (track_type == AbsoluteAxis::Horizontal) {
-            // Search along a row
-            if (track_index < 0 || static_cast<size_t>(track_index) >= row_count_) {
-                return false;
-            }
-            // Search from end to start
-            for (int64_t c = static_cast<int64_t>(col_count_) - 1; c >= 0; --c) {
-                if (data_[track_index * col_count_ + c] == kind) {
-                    out_result = counts.track_to_prev_oz_line(static_cast<uint16_t>(c));
-                    return true;
-                }
-            }
-        } else {
-            // Search along a column
-            if (track_index < 0 || static_cast<size_t>(track_index) >= col_count_) {
-                return false;
-            }
-            // Search from end to start
-            for (int64_t r = static_cast<int64_t>(row_count_) - 1; r >= 0; --r) {
-                if (data_[r * col_count_ + track_index] == kind) {
-                    out_result = counts.track_to_prev_oz_line(static_cast<uint16_t>(r));
-                    return true;
-                }
-            }
-        }
-
-        return false;
-    }
-
-private:
-    void resolve_line_area(AbsoluteAxis primary_axis,
-                           LineSpan primary_span, LineSpan secondary_span,
-                           int16_t& row_start, int16_t& row_end,
-                           int16_t& col_start, int16_t& col_end) const {
-        LineSpan row_span = primary_axis == AbsoluteAxis::Horizontal
-            ? secondary_span : primary_span;
-        LineSpan col_span = primary_axis == AbsoluteAxis::Horizontal
-            ? primary_span : secondary_span;
-        columns_.oz_line_range_to_track_range(col_span, col_start, col_end);
-        rows_.oz_line_range_to_track_range(row_span, row_start, row_end);
-    }
-
-    /**
-     * Expand the grid to fit the specified range (in track indices)
-     * Grid can expand in all 4 directions
-     */
-    void expand_to_fit_range(int16_t row_start, int16_t row_end, int16_t col_start, int16_t col_end) {
-        // Calculate how much expansion is needed in each direction
-        int16_t req_negative_rows = (-row_start > 0) ? static_cast<int16_t>(-row_start) : 0;
-        int16_t rows_len = static_cast<int16_t>(rows_.len());
-        int16_t req_positive_rows = (row_end > rows_len) ? static_cast<int16_t>(row_end - rows_len) : 0;
-        int16_t req_negative_cols = (-col_start > 0) ? static_cast<int16_t>(-col_start) : 0;
-        int16_t cols_len = static_cast<int16_t>(columns_.len());
-        int16_t req_positive_cols = (col_end > cols_len) ? static_cast<int16_t>(col_end - cols_len) : 0;
-
-        size_t old_row_count = row_count_;
-        size_t old_col_count = col_count_;
-        size_t new_row_count = old_row_count + req_negative_rows + req_positive_rows;
-        size_t new_col_count = old_col_count + req_negative_cols + req_positive_cols;
-
-        // guard against excessive grid sizes from extreme span values
-        const size_t MAX_OCCUPANCY_CELLS = 1000000; // 1M cells max
-        if (new_row_count * new_col_count > MAX_OCCUPANCY_CELLS) {
-            if (new_row_count > 1000) new_row_count = 1000;
-            if (new_col_count > 1000) new_col_count = 1000;
-            // recalculate positive expansion to fit the clamped size
-            req_positive_rows = static_cast<int16_t>(new_row_count > old_row_count + req_negative_rows
-                ? new_row_count - old_row_count - req_negative_rows : 0);
-            req_positive_cols = static_cast<int16_t>(new_col_count > old_col_count + req_negative_cols
-                ? new_col_count - old_col_count - req_negative_cols : 0);
-        }
-
-        // Create new data array
-        size_t new_count = new_row_count * new_col_count;
-        CellOccupancyState* new_data = (CellOccupancyState*)mem_calloc(
-            new_count, sizeof(CellOccupancyState), MEM_CAT_LAYOUT); // OBJ_HEAP_OK: CellOccupancyMatrix cell storage; replaced on growth, released by the destructor
-        if (!new_data && new_count > 0) {
-            return;
-        }
-
-        // Copy existing data to new position (offset by negative expansion)
-        for (size_t r = 0; r < old_row_count; ++r) {
-            for (size_t c = 0; c < old_col_count; ++c) {
-                size_t new_r = r + req_negative_rows;
-                size_t new_c = c + req_negative_cols;
-                if (data_) {
-                    new_data[new_r * new_col_count + new_c] = data_[r * old_col_count + c];
-                }
-            }
-        }
-
-        // Update state
-        lam::Temp<CellOccupancyState> previous(data_);  // the grown storage replaces it
-        data_ = new_data;
-        data_count_ = new_count;
-        row_count_ = new_row_count;
-        col_count_ = new_col_count;
-
-        // Update track counts
-        rows_.negative_implicit += static_cast<uint16_t>(req_negative_rows);
-        rows_.positive_implicit += static_cast<uint16_t>(req_positive_rows);
-        columns_.negative_implicit += static_cast<uint16_t>(req_negative_cols);
-        columns_.positive_implicit += static_cast<uint16_t>(req_positive_cols);
-    }
+    struct OccupiedArea {
+        LineSpan row;
+        LineSpan column;
+        CellOccupancyState state;
+    };
 
     TrackCounts columns_;
     TrackCounts rows_;
-    size_t row_count_;
-    size_t col_count_;
-    CellOccupancyState* data_;
-    size_t data_count_;
+    GridArray<OccupiedArea> areas_;
+    bool has_cleared_area_;
 
-    void allocate_cells(size_t count) {
-        data_count_ = count;
-        data_ = nullptr;
-        if (count == 0) return;
-        data_ = (CellOccupancyState*)mem_calloc(count, sizeof(CellOccupancyState), MEM_CAT_LAYOUT);
-        if (!data_) {
-            data_count_ = 0;
-            row_count_ = 0;
-            col_count_ = 0;
+    static bool overlaps(LineSpan first, LineSpan second) {
+        return first.start < second.end && second.start < first.end;
+    }
+
+    static void expand_axis(TrackCounts& counts, LineSpan span) {
+        if (span.start.value < -counts.negative_implicit) {
+            counts.negative_implicit = static_cast<uint16_t>(-span.start.value);
         }
+        if (span.end.value > counts.explicit_count + counts.positive_implicit) {
+            counts.positive_implicit = static_cast<uint16_t>(span.end.value - counts.explicit_count);
+        }
+    }
+
+    static void resolve_area(AbsoluteAxis primary_axis, LineSpan primary, LineSpan secondary,
+                             LineSpan& row, LineSpan& column) {
+        row = primary_axis == AbsoluteAxis::Horizontal ? secondary : primary;
+        column = primary_axis == AbsoluteAxis::Horizontal ? primary : secondary;
+        row = grid_clamp_line_span(row.start.value, row.end.value);
+        column = grid_clamp_line_span(column.start.value, column.end.value);
+    }
+
+public:
+    CellOccupancyMatrix(TrackCounts columns, TrackCounts rows)
+        : columns_(columns), rows_(rows), has_cleared_area_(false) {}
+    CellOccupancyMatrix() : CellOccupancyMatrix(TrackCounts(), TrackCounts()) {}
+    CellOccupancyMatrix(const CellOccupancyMatrix&) = delete;
+    CellOccupancyMatrix& operator=(const CellOccupancyMatrix&) = delete;
+
+    bool good() const { return areas_.good(); }
+    const TrackCounts& track_counts(AbsoluteAxis axis) const {
+        return axis == AbsoluteAxis::Horizontal ? columns_ : rows_;
+    }
+    TrackCounts& track_counts_mut(AbsoluteAxis axis) {
+        return axis == AbsoluteAxis::Horizontal ? columns_ : rows_;
+    }
+    size_t rows() const { return rows_.len(); }
+    size_t cols() const { return columns_.len(); }
+
+    CellOccupancyState get(size_t row, size_t col) const {
+        if (row >= rows() || col >= cols()) return CellOccupancyState::Unoccupied;
+        OriginZeroLine row_line = rows_.track_to_prev_oz_line(static_cast<uint16_t>(row));
+        OriginZeroLine col_line = columns_.track_to_prev_oz_line(static_cast<uint16_t>(col));
+        // later marks override earlier ones, including explicit clears.
+        for (size_t i = areas_.size(); i > 0; i--) {
+            const OccupiedArea& area = areas_[i - 1];
+            if (area.row.start <= row_line && row_line < area.row.end &&
+                area.column.start <= col_line && col_line < area.column.end) return area.state;
+        }
+        return CellOccupancyState::Unoccupied;
+    }
+
+    void set(size_t row, size_t col, CellOccupancyState state) {
+        if (row >= rows() || col >= cols()) return;
+        mark_area_as(AbsoluteAxis::Horizontal,
+                     grid_span_at(columns_.track_to_prev_oz_line(static_cast<uint16_t>(col)), 1),
+                     grid_span_at(rows_.track_to_prev_oz_line(static_cast<uint16_t>(row)), 1), state);
+    }
+
+    bool is_area_in_range(AbsoluteAxis primary_axis,
+                         int16_t primary_start, int16_t primary_end,
+                         int16_t secondary_start, int16_t secondary_end) const {
+        return primary_start >= 0 && secondary_start >= 0 &&
+            primary_end <= track_counts(primary_axis).len() &&
+            secondary_end <= track_counts(other_axis(primary_axis)).len();
+    }
+
+    void ensure_fits(AbsoluteAxis primary_axis, LineSpan primary, LineSpan secondary) {
+        LineSpan row, column;
+        resolve_area(primary_axis, primary, secondary, row, column);
+        // expansion changes counts only; sparse coordinates never shift or allocate a dense grid.
+        expand_axis(rows_, row);
+        expand_axis(columns_, column);
+    }
+
+    void mark_area_as(AbsoluteAxis primary_axis, LineSpan primary, LineSpan secondary,
+                      CellOccupancyState state) {
+        LineSpan row, column;
+        resolve_area(primary_axis, primary, secondary, row, column);
+        ensure_fits(AbsoluteAxis::Horizontal, column, row);
+        if (state == CellOccupancyState::Unoccupied) has_cleared_area_ = true;
+        areas_.push_back(OccupiedArea{row, column, state});
+    }
+
+    bool line_area_is_unoccupied(AbsoluteAxis primary_axis,
+                                LineSpan primary, LineSpan secondary) const {
+        LineSpan row, column;
+        resolve_area(primary_axis, primary, secondary, row, column);
+        if (!has_cleared_area_) {
+            for (const OccupiedArea& area : areas_) {
+                if (overlaps(row, area.row) && overlaps(column, area.column)) return false;
+            }
+            return true;
+        }
+        // clears are uncommon; preserve per-cell overwrite semantics for that path.
+        int16_t row_start, row_end, col_start, col_end;
+        rows_.oz_line_range_to_track_range(row, row_start, row_end);
+        columns_.oz_line_range_to_track_range(column, col_start, col_end);
+        for (int16_t r = row_start; r < row_end; r++) {
+            for (int16_t c = col_start; c < col_end; c++) {
+                if (r >= 0 && c >= 0 && get((size_t)r, (size_t)c) != CellOccupancyState::Unoccupied) {
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
+
+    bool track_area_is_unoccupied(AbsoluteAxis primary_axis,
+                                 int16_t primary_start, int16_t primary_end,
+                                 int16_t secondary_start, int16_t secondary_end) const {
+        const TrackCounts& primary = track_counts(primary_axis);
+        const TrackCounts& secondary = track_counts(other_axis(primary_axis));
+        // clip matrix indices before conversion; out-of-range cells are unoccupied.
+        if (primary_start < 0) primary_start = 0;
+        if (secondary_start < 0) secondary_start = 0;
+        if (primary_end > primary.len()) primary_end = static_cast<int16_t>(primary.len());
+        if (secondary_end > secondary.len()) secondary_end = static_cast<int16_t>(secondary.len());
+        if (primary_end <= primary_start || secondary_end <= secondary_start) return true;
+        return line_area_is_unoccupied(primary_axis,
+            LineSpan(primary.track_to_prev_oz_line(static_cast<uint16_t>(primary_start)),
+                     primary.track_to_prev_oz_line(static_cast<uint16_t>(primary_end))),
+            LineSpan(secondary.track_to_prev_oz_line(static_cast<uint16_t>(secondary_start)),
+                     secondary.track_to_prev_oz_line(static_cast<uint16_t>(secondary_end))));
+    }
+
+    bool last_of_type(AbsoluteAxis axis, OriginZeroLine start_at,
+                      CellOccupancyState kind, OriginZeroLine& out_result) const {
+        const TrackCounts& perpendicular = track_counts(other_axis(axis));
+        int16_t fixed_track = perpendicular.oz_line_to_next_track(start_at);
+        if (fixed_track < 0 || fixed_track >= perpendicular.len()) return false;
+        const TrackCounts& searched = track_counts(axis);
+        for (size_t remaining = searched.len(); remaining > 0; remaining--) {
+            size_t index = remaining - 1;
+            CellOccupancyState state = axis == AbsoluteAxis::Horizontal
+                ? get((size_t)fixed_track, index) : get(index, (size_t)fixed_track);
+            if (state == kind) {
+                out_result = searched.track_to_prev_oz_line(static_cast<uint16_t>(index));
+                return true;
+            }
+        }
+        return false;
     }
 };
 

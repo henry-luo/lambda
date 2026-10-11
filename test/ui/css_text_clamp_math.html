@@ -1,0 +1,45 @@
+<!doctype html><meta charset="utf-8"><style>
+@font-face{font-family:FixtureMono;src:url(../layout/data/font/LiberationMono-Regular.ttf)}
+html,body{margin:0}button{height:24px}.owner{font:20px/24px FixtureMono}.box{width:62px;overflow:hidden;display:-webkit-box;-webkit-box-orient:vertical;word-break:break-all;color:blue}
+</style><button id="check">Check</button><button id="change">Change</button><button id="changed">Changed</button><button id="restore">Restore</button><button id="restored">Restored</button><output id="report"></output>
+<script>
+(function(){
+ var cases=[{"id":"literal","value":"2"},{"id":"decimal","value":"2.0"},{"id":"exponent","value":"2e0"},{"id":"dimension","value":"2px"},{"id":"percentage","value":"2%"},{"id":"zero","value":"0"},{"id":"negative","value":"-1"},{"id":"list","value":"1 2"},{"id":"none","value":"none"},{"id":"round","value":"calc(1.5)"},{"id":"round-down","value":"calc(1.49)"},{"id":"computed-negative","value":"calc(-1)"},{"id":"computed-zero","value":"calc(0)"},{"id":"relative","value":"calc(40px / 1em)"},{"id":"cancel","value":"calc(2em / 1em)"},{"id":"relative-sum","value":"calc(1 + 20px / 1em)"},{"id":"typed-invalid","value":"calc(20px)"},{"id":"typed-divide","value":"calc(20px / 10px)"},{"id":"min","value":"min(1,2)"},{"id":"max","value":"max(-1,0)"},{"id":"clamp","value":"clamp(1,2.5,4)"},{"id":"inherit","value":"inherit","inherited":true},{"id":"initial","value":"2","changed":"initial"},{"id":"unset","value":"2","changed":"unset"},{"id":"revert","value":"2","changed":"revert"},{"id":"revert-layer","value":"2","changed":"revert-layer"},{"id":"variable","value":"var(--count)","variable":"calc(40px / 1em)","changedVariable":"calc(2.5)"},{"id":"invalid-variable","value":"var(--count)","variable":"2","changedVariable":"1px"},{"id":"wide-variable","value":"var(--count)","variable":"2","changedVariable":"initial"},{"id":"inherit-variable","value":"var(--count)","variable":"2","changedVariable":"inherit","inherited":true},{"id":"fallback","value":"var(--missing,calc(40px / 1em))"},{"id":"invalid-mutation","value":"4","changed":"2.0"},{"id":"descendant-visible","value":"none","descendant":"visible"},{"id":"descendant-hidden","value":"none","descendant":"hidden"},{"id":"descendant-flow-root","value":"none","descendant":"flow-root"}];
+ cases.forEach(function(item,index){
+  var owner=document.createElement('div'),box=document.createElement('div');
+  owner.id='owner-'+item.id;owner.className='owner';box.id=item.id;box.className='box';
+  owner.style.position='absolute';owner.style.left=String((index%8)*120)+'px';owner.style.top=String(40+Math.floor(index/8)*180)+'px';
+  var text=document.createElement('span');text.style.color='red';text.textContent='ABCDEFGHIJKLMNOPQRSTUVWXYZabcd';box.appendChild(text);box.style.webkitLineClamp='4';box.style.webkitLineClamp=item.value;
+  if(item.inherited){owner.style.webkitLineClamp='calc(40px / 1em)';box.style.fontSize='30px';}
+  if(item.descendant){
+   owner.style.webkitLineClamp='calc(40px / 1em)';owner.style.display='-webkit-box';owner.style.webkitBoxOrient='vertical';owner.style.width='62px';
+   box.style.display=item.descendant==='flow-root'?'flow-root':'block';box.style.overflow=item.descendant==='hidden'?'hidden':'visible';
+  }
+  if(item.variable)owner.style.setProperty('--count',item.variable);
+  owner.appendChild(box);document.body.appendChild(owner);
+ });
+ function record(prefix){
+  var report=document.getElementById('report');
+  cases.forEach(function(item){
+   var box=document.getElementById(item.id),style=getComputedStyle(box);
+   report.setAttribute('data-'+prefix+item.id+'-specified',box.style.webkitLineClamp);
+   report.setAttribute('data-'+prefix+item.id+'-computed',style.webkitLineClamp);
+   report.setAttribute('data-'+prefix+item.id+'-height',String(box.getBoundingClientRect().height));
+  });
+ }
+ function mutate(restore){
+  cases.forEach(function(item){
+   var owner=document.getElementById('owner-'+item.id),box=document.getElementById(item.id);
+   owner.style.fontSize=restore?'20px':'10px';
+   if(item.changed)box.style.webkitLineClamp=restore?item.value:item.changed;
+   if(item.changedVariable)owner.style.setProperty('--count',restore?item.variable:item.changedVariable);
+  });
+  document.getElementById('report').setAttribute('data-'+(restore?'restored-dirty':'dirty')+'-relative',getComputedStyle(document.getElementById('relative')).webkitLineClamp);
+ }
+ document.getElementById('check').onclick=function(){record('');};
+ document.getElementById('change').onclick=function(){mutate(false);};
+ document.getElementById('changed').onclick=function(){record('changed-');};
+ document.getElementById('restore').onclick=function(){mutate(true);};
+ document.getElementById('restored').onclick=function(){record('restored-');};
+})();
+</script>

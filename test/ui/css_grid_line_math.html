@@ -1,0 +1,82 @@
+<!doctype html><meta charset="utf-8">
+<style>
+html,body{margin:0}button{height:24px}.grid{display:grid;width:120px;grid-template:repeat(4,10px) / [Foo] 10px [Foo] 10px [Foo] 10px [Foo] 10px [Foo];grid-auto-rows:7px;grid-auto-columns:7px;justify-content:start;align-content:start;font-size:10px}.grid>div{min-width:0;grid-column-start:2}
+</style>
+<button id="check">Check</button><button id="change">Change</button><button id="changed">Changed</button><button id="restore">Restore</button><button id="restored">Restored</button><output id="report"></output>
+<script>
+(function(){
+ var cases=[
+  {id:'literal-decimal',value:'1.5'},
+  {id:'round',value:'calc(1.5)'},
+  {id:'zero',value:'calc(0)'},
+  {id:'negative-zero',value:'calc(-0.4)'},
+  {id:'span-zero',value:'span calc(0)'},
+  {id:'relative',value:'calc(20px / 1em)'},
+  {id:'cancel',value:'calc(2em / 1em)'},
+  {id:'sum',value:'calc(1 + 20px / 1em)'},
+  {id:'computed-zero',value:'calc(20px / 1em - 1)'},
+  {id:'cancel-zero',value:'calc((1em - 1em) / 1em)'},
+  {id:'span-relative',value:'span calc(20px / 1em)'},
+  {id:'span-negative',value:'span calc(-20px / 1em)'},
+  {id:'named',value:'calc(20px / 1em) Foo'},
+  {id:'named-span',value:'span calc(20px / 1em) Foo'},
+  {id:'named-span-conflict',property:'gridColumn',value:'span calc(20px / 1em) Foo / span 3'},
+  {id:'numeric-span-conflict',property:'gridColumn',value:'span calc(20px / 1em) / span 3'},
+  {id:'negative',value:'calc(-20px / 1em)'},
+  {id:'column',property:'gridColumn',value:'calc(20px / 1em) / span calc(1.6)'},
+  {id:'row',property:'gridRow',value:'calc(20px / 1em) / span calc(1.6)'},
+  {id:'area',property:'gridArea',value:'calc(20px / 1em) / calc(20px / 1em) / span calc(1.6) / span calc(1.6)'},
+  {id:'inherit',value:'inherit',inherited:true},
+  {id:'inherit-column',property:'gridColumn',value:'inherit',inherited:true},
+  {id:'initial',value:'calc(20px / 1em)',changed:'initial'},
+  {id:'unset',value:'calc(20px / 1em)',changed:'unset'},
+  {id:'revert',value:'calc(20px / 1em)',changed:'revert'},
+  {id:'revert-layer',value:'calc(20px / 1em)',changed:'revert-layer'},
+  {id:'variable',value:'var(--line)',variable:'calc(20px / 1em)',changedVariable:'calc(2.5)'},
+  {id:'invalid-variable',value:'var(--line)',variable:'calc(20px / 1em)',changedVariable:'0'},
+  {id:'invalid-column-variable',property:'gridColumn',value:'var(--line)',variable:'calc(20px / 1em) / span calc(1.6)',changedVariable:'0 / span 2'},
+  {id:'wide-variable',value:'var(--line)',variable:'calc(20px / 1em)',changedVariable:'initial'},
+  {id:'inherit-variable',value:'var(--line)',variable:'calc(20px / 1em)',changedVariable:'inherit',inherited:true},
+  {id:'fallback-variable',value:'var(--missing,calc(20px / 1em))'},
+  {id:'min',value:'min(3,calc(20px / 1em))'},
+  {id:'clamp',value:'clamp(1,calc(25px / 1em),4)'},
+  {id:'infinity',value:'calc(infinity)'},
+  {id:'nan',value:'calc(NaN)'},
+  {id:'typed-invalid',value:'calc(1px)'},
+  {id:'number-invalid',value:'calc(1 + 1px)'}
+ ];
+ cases.forEach(function(item){
+  var grid=document.createElement('div'),child=document.createElement('div');
+  grid.id=item.id;grid.className='grid';item.property=item.property||'gridColumnStart';
+  grid.style[item.property]='calc(20px / 1em) / span calc(1.6)';
+  if(item.property==='gridColumnStart')grid.style[item.property]='calc(20px / 1em)';
+  child.style.fontSize=item.inherited?'30px':'10px';
+  child.style[item.property]='2';
+  if(item.variable)grid.style.setProperty('--line',item.variable);
+  child.style[item.property]=item.value;
+  grid.appendChild(child);document.body.appendChild(grid);
+ });
+ function record(prefix){
+  var report=document.getElementById('report');
+  cases.forEach(function(item){
+   var grid=document.getElementById(item.id),child=grid.firstChild,style=getComputedStyle(child),g=grid.getBoundingClientRect(),r=child.getBoundingClientRect();
+   report.setAttribute('data-'+prefix+item.id+'-specified',child.style[item.property]);
+   report.setAttribute('data-'+prefix+item.id+'-computed',style[item.property]);
+   report.setAttribute('data-'+prefix+item.id+'-rect',[r.x-g.x,r.y-g.y,r.width,r.height].join(','));
+  });
+ }
+ function mutate(restore){
+  cases.forEach(function(item){
+   var grid=document.getElementById(item.id),child=grid.firstChild;
+   if(item.inherited)grid.style.fontSize=restore?'10px':'20px';else child.style.fontSize=restore?'10px':'20px';
+   if(item.changed)child.style[item.property]=restore?item.value:item.changed;
+   if(item.changedVariable)grid.style.setProperty('--line',restore?item.variable:item.changedVariable);
+  });
+ }
+ document.getElementById('check').onclick=function(){record('');};
+ document.getElementById('change').onclick=function(){mutate(false);};
+ document.getElementById('changed').onclick=function(){record('changed-');};
+ document.getElementById('restore').onclick=function(){mutate(true);};
+ document.getElementById('restored').onclick=function(){record('restored-');};
+})();
+</script>

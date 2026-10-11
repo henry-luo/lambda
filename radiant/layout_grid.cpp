@@ -1,6 +1,7 @@
 #include "layout.hpp"
 #include "view.hpp"
 #include "grid_enhanced_adapter.hpp"  // Enhanced grid integration
+#include "view_tree_model.hpp"
 #include "../lib/tagged.hpp"
 
 extern "C" {
@@ -32,6 +33,7 @@ static GridTrackSize* grid_scratch_clone_track(ScratchArena* scratch,
     copy->max_size = NULL;
     copy->repeat_tracks = NULL;
     copy->repeat_track_count = 0;
+    copy->repeat_line_names = {};
 
     LayoutAxisPair<lam::Own<GridTrackSize>*> nested = {&copy->min_size, &copy->max_size};
     LayoutAxisPair<GridTrackSize*> source_nested = {source->min_size, source->max_size};
@@ -51,6 +53,8 @@ static GridTrackSize* grid_scratch_clone_track(ScratchArena* scratch,
             if (!copy->repeat_tracks[i]) return NULL;
         }
     }
+    if (!grid_copy_track_line_names(nullptr, scratch, &copy->repeat_line_names,
+                                    &source->repeat_line_names)) return nullptr;
     return copy;
 }
 
@@ -66,30 +70,21 @@ static GridTrackList* grid_scratch_clone_track_list(ScratchArena* scratch,
     copy->allocated_tracks = capacity;
     copy->tracks = lam::own_arr((GridTrackSize**)scratch_calloc(
         scratch, (size_t)capacity * sizeof(GridTrackSize*)));
-    copy->line_names = lam::own_arr((char**)scratch_calloc(
-        scratch, (size_t)(capacity + 1) * sizeof(char*)));
-    if (!copy->tracks || !copy->line_names) return NULL;
+    if (!copy->tracks) return NULL;
     if (!source) {
         copy->repeat_count = 1;
         return copy;
     }
 
     copy->track_count = source->track_count;
-    copy->line_name_count = source->line_name_count;
     copy->is_repeat = source->is_repeat;
     copy->repeat_count = source->repeat_count;
     for (int i = 0; i < source->track_count; i++) {
         copy->tracks[i] = grid_scratch_clone_track(scratch, source->tracks[i]);
         if (source->tracks[i] && !copy->tracks[i]) return NULL;
     }
-    int source_line_slots = source->allocated_tracks + 1;
-    int copy_line_slots = capacity + 1;
-    int slots = source_line_slots < copy_line_slots ? source_line_slots : copy_line_slots;
-    for (int i = 0; i < slots; i++) {
-        if (!source->line_names || !source->line_names[i]) continue;
-        copy->line_names[i] = grid_scratch_strdup(scratch, source->line_names[i]);
-        if (!copy->line_names[i]) return NULL;
-    }
+    if (!grid_copy_track_line_names(nullptr, scratch, &copy->line_names,
+                                    &source->line_names)) return nullptr;
     return copy;
 }
 
@@ -99,11 +94,8 @@ float layout_grid_row_border_box_extent(ViewBlock* container,
         grid_layout->computed_row_count <= 0) {
         return 0.0f;
     }
-    float content_extent = 0.0f;
-    for (int i = 0; i < grid_layout->computed_row_count; i++) {
-        content_extent += (*grid_layout->computed_rows)[i].base_size;
-    }
-    content_extent += grid_layout->row_gap * (grid_layout->computed_row_count - 1);
+    float content_extent = radiant::grid::spanned_tracks_size(
+        *grid_layout->computed_rows, 0, grid_layout->computed_row_count, grid_layout->row_gap);
     if (grid_layout->row_intrinsic_height > 0.0f) {
         content_extent = grid_layout->row_intrinsic_height;
     }
@@ -129,8 +121,8 @@ void init_grid_container(LayoutContext* lycon, ViewBlock* container) {
         grid->lycon = lam::up(lycon);  // Restore after memcpy
     } else {
         // Set default values using enum names that align with Lexbor constants
-        grid->justify_content = CSS_VALUE_START;
-        grid->align_content = CSS_VALUE_START;
+        grid->justify_content = CSS_VALUE_NORMAL;
+        grid->align_content = CSS_VALUE_NORMAL;
         // Keep the CSS initial normal value so aspect-ratio items can tell it
         // apart from an explicitly requested stretch during self-alignment.
         grid->justify_items = CSS_VALUE_NORMAL;
@@ -195,8 +187,8 @@ void init_grid_container(LayoutContext* lycon, ViewBlock* container) {
     }
 
     int line_capacity = 8 + grid->area_count * 4;
-    if (grid->grid_template_columns) line_capacity += grid->grid_template_columns->line_name_count;
-    if (grid->grid_template_rows) line_capacity += grid->grid_template_rows->line_name_count;
+    if (grid->grid_template_columns) line_capacity += grid->grid_template_columns->line_names.count;
+    if (grid->grid_template_rows) line_capacity += grid->grid_template_rows->line_names.count;
     grid->allocated_line_names = line_capacity;
     grid->line_names = lam::own_arr((GridLineName*)scratch_calloc(&lycon->scratch,
         (size_t)line_capacity * sizeof(GridLineName)));
@@ -213,13 +205,15 @@ void cleanup_grid_container(LayoutContext* lycon) {
     if (!lycon || !lycon->grid_container) return;
     GridContainerLayout* grid = lycon->grid_container;
 
+    if (grid->computed_rows) grid->computed_rows->~TrackArray();
+    if (grid->computed_columns) grid->computed_columns->~TrackArray();
     ScratchMark mark = grid->scratch_mark;
     lycon->grid_container = NULL;
     scratch_restore(&lycon->scratch, mark);
 }
 
 GridLayoutScope::GridLayoutScope(LayoutContext* l, ViewBlock* container)
-    : lycon(l), saved(l ? l->grid_container : NULL), active(l != NULL) {
+    : lycon(l), saved(l ? l->grid_container : NULL), container(container), active(l != NULL) {
     if (lycon && container) {
         init_grid_container(lycon, container);
     }
@@ -232,6 +226,36 @@ GridLayoutScope::~GridLayoutScope() {
 void GridLayoutScope::close() {
     if (!active) return;
     if (lycon->grid_container && lycon->grid_container != saved) {
+        ViewTree* tree = layout_context_view_tree(lycon);
+        if (tree && (!tree->model || !tree->model->committed) && !layout_context_is_measuring(lycon)) {
+            Pool* scratch = pool_create();
+            StringBuf* rows = scratch ? stringbuf_new(scratch) : nullptr;
+            StringBuf* columns = scratch ? stringbuf_new(scratch) : nullptr;
+            if (grid_serialize_used_tracks(rows, lycon->grid_container, false) &&
+                grid_serialize_used_tracks(columns, lycon->grid_container, true)) {
+                // retain final track geometry before the container's scratch mark retires.
+                const char* row_text = stringbuf_to_string(rows)->chars;
+                const char* column_text = stringbuf_to_string(columns)->chars;
+                if (tree->model) {
+                    view_tree_set_grid_track_values(tree, container, row_text, column_text);
+                } else {
+                    alloc_grid_prop(lycon, container);
+                    GridProp* retained = container->embedp()->grid;
+                    size_t row_size = strlen(row_text) + 1, column_size = strlen(column_text) + 1;
+                    Pool* pool = layout_prop_pool(lycon);
+                    char* text = row_size <= SIZE_MAX - column_size
+                        ? (char*)pool_alloc(pool, row_size + column_size) : nullptr;
+                    if (text) {
+                        memcpy(text, row_text, row_size);
+                        memcpy(text + row_size, column_text, column_size);
+                        lam::free_owned(pool, retained->used_track_text);
+                        retained->used_track_text = lam::own(text);
+                        retained->used_columns_offset = row_size;
+                    }
+                }
+            }
+            if (scratch) pool_destroy(scratch);
+        }
         cleanup_grid_container(lycon);
     }
     lycon->grid_container = saved;
@@ -301,6 +325,7 @@ void layout_grid_container(LayoutContext* lycon, ViewBlock* container) {
     int item_count = collect_grid_items(grid_layout, container, &items);
     // Expand auto-fill/auto-fit repeat() tracks now that we know content_width and item_count
     expand_auto_repeat_tracks(grid_layout);
+    if (grid_layout->storage_failed) return;
 
     if (item_count == 0) {
         // Even with no items, we need to resolve explicit track sizes so that:
@@ -308,6 +333,7 @@ void layout_grid_container(LayoutContext* lycon, ViewBlock* container) {
         // 2. The container gets the correct height from explicit grid-template-rows + padding.
         determine_grid_size(grid_layout);
         resolve_track_sizes_enhanced(grid_layout, container);
+        if (grid_layout->storage_failed) return;
         // Update container height from explicit row heights + padding (mirroring the shrink-to-fit path)
         if (!grid_layout->has_explicit_height && grid_layout->computed_row_count > 0) {
             float new_h = layout_grid_row_border_box_extent(container, grid_layout);
@@ -325,51 +351,32 @@ void layout_grid_container(LayoutContext* lycon, ViewBlock* container) {
     for (LayoutAxis axis : layout_axes()) {
         GridTrackList* tracks = template_tracks[axis];
         if (!tracks) continue;
-        for (int i = 0; i <= tracks->track_count && i < tracks->allocated_tracks + 1; i++) {
-            if (tracks->line_names[i]) {
-                add_grid_line_name(grid_layout, tracks->line_names[i], i + 1,
-                                   axis == LAYOUT_AXIS_Y);
-            }
+        for (int i = 0; i < tracks->line_names.count; i++) {
+            const GridNamedLine& line = tracks->line_names.entries[i];
+            add_grid_line_name(grid_layout, line.name, line.line_index + 1,
+                               axis == LAYOUT_AXIS_Y);
         }
     }
     // Generate <area>-start / <area>-end named line aliases from grid-template-areas
     {
-        char name_buf[512];
         for (int a = 0; a < grid_layout->area_count; a++) {
             GridArea* area = &grid_layout->grid_areas[a];
             if (!area->name) continue;
-            snprintf(name_buf, sizeof(name_buf), "%s-start", area->name.get());
-            add_grid_line_name(grid_layout, name_buf, area->column_start, false);
-            add_grid_line_name(grid_layout, name_buf, area->row_start, true);
-            snprintf(name_buf, sizeof(name_buf), "%s-end", area->name.get());
-            add_grid_line_name(grid_layout, name_buf, area->column_end, false);
-            add_grid_line_name(grid_layout, name_buf, area->row_end, true);
+            size_t name_length = strlen(area->name);
+            auto name_buf = lam::temp_array<char>(name_length + sizeof("-start"), MEM_CAT_LAYOUT);
+            if (!name_buf) { grid_layout->storage_failed = true; return; }
+            memcpy(name_buf.get(), area->name.get(), name_length);
+            memcpy(name_buf.get() + name_length, "-start", sizeof("-start"));
+            add_grid_line_name(grid_layout, name_buf.get(), area->column_start, false);
+            add_grid_line_name(grid_layout, name_buf.get(), area->row_start, true);
+            memcpy(name_buf.get() + name_length, "-end", sizeof("-end"));
+            add_grid_line_name(grid_layout, name_buf.get(), area->column_end, false);
+            add_grid_line_name(grid_layout, name_buf.get(), area->row_end, true);
         }
     }
+    if (grid_layout->storage_failed) return;
     // Phase 3: Determine initial grid size from templates (before placement)
     determine_grid_size(grid_layout);
-    // Phase 3.5: Resolve named line references into integer line numbers
-    for (int idx = 0; idx < item_count; idx++) {
-        ViewBlock* item = items[idx];
-        GridItemProp* gi = grid_item_prop(item);
-        if (!gi) continue;
-        if (gi->grid_column_start_name) {
-            int ln = find_grid_line_by_name(grid_layout, gi->grid_column_start_name, false);
-            if (ln > 0) { gi->grid_column_start = ln; gi->has_explicit_grid_column_start = true; }
-        }
-        if (gi->grid_column_end_name) {
-            int ln = find_grid_line_by_name(grid_layout, gi->grid_column_end_name, false);
-            if (ln > 0) { gi->grid_column_end = ln; gi->has_explicit_grid_column_end = true; }
-        }
-        if (gi->grid_row_start_name) {
-            int ln = find_grid_line_by_name(grid_layout, gi->grid_row_start_name, true);
-            if (ln > 0) { gi->grid_row_start = ln; gi->has_explicit_grid_row_start = true; }
-        }
-        if (gi->grid_row_end_name) {
-            int ln = find_grid_line_by_name(grid_layout, gi->grid_row_end_name, true);
-            if (ln > 0) { gi->grid_row_end = ln; gi->has_explicit_grid_row_end = true; }
-        }
-    }
     // Phase 4: Place grid items (using enhanced CellOccupancyMatrix algorithm)
     // Use enhanced placement algorithm with proper collision detection.
     radiant::grid_adapter::place_items_with_occupancy(
@@ -379,6 +386,7 @@ void layout_grid_container(LayoutContext* lycon, ViewBlock* container) {
         grid_layout->grid_auto_flow,
         grid_layout->is_dense_packing
     );
+    if (grid_layout->storage_failed) return;
     // Phase 5: Update grid size after placement (may have grown due to auto-placement)
     // NOTE: place_items_with_occupancy already sets computed_column_count and computed_row_count
     // from the occupancy matrix which correctly accounts for negative implicit tracks.
@@ -532,6 +540,7 @@ void layout_grid_container(LayoutContext* lycon, ViewBlock* container) {
     }
     // Phase 6: Resolve track sizes (using enhanced algorithm with intrinsic sizing)
     resolve_track_sizes_enhanced(grid_layout, container);
+    if (grid_layout->storage_failed) return;
     // An intrinsic width constraint is resolved by the track-sizing result, just like
     // shrink-to-fit; retaining the provisional width makes auto tracks visibly too wide.
     if ((grid_layout->is_shrink_to_fit_width || grid_layout->is_min_content_width ||
@@ -666,6 +675,9 @@ void determine_grid_size(GridContainerLayout* grid_layout) {
                                      grid_layout->grid_template_rows->track_count : 0;
     grid_layout->explicit_column_count = grid_layout->grid_template_columns ?
                                         grid_layout->grid_template_columns->track_count : 0;
+    // area strings contribute explicit tracks even when their cells are unnamed.
+    grid_layout->explicit_row_count = radiant::grid::grid_max_value(grid_layout->explicit_row_count, grid_layout->template_area_rows);
+    grid_layout->explicit_column_count = radiant::grid::grid_max_value(grid_layout->explicit_column_count, grid_layout->template_area_columns);
     // Find maximum implicit tracks needed based on item placement
     int max_row = grid_layout->explicit_row_count;
     int max_column = grid_layout->explicit_column_count;
@@ -714,8 +726,9 @@ static float calculate_track_pattern_size(GridTrackSize** tracks, int track_coun
 }
 
 static bool append_cloned_grid_track(ScratchArena* scratch, GridTrackSize** tracks,
-                                     int* dest, GridTrackSize* source) {
+                                     int* dest, int capacity, GridTrackSize* source) {
     if (!scratch || !tracks || !dest || !source) return false;
+    if (*dest >= capacity) return true;
     GridTrackSize* copy = grid_scratch_clone_track(scratch, source);
     if (!copy) return false;
     tracks[*dest] = copy;
@@ -734,18 +747,18 @@ static GridTrackSize** expand_repeat_track_entries(ScratchArena* scratch,
 
     int dest = 0;
     for (int i = 0; i < repeat_index; i++) {
-        if (!append_cloned_grid_track(scratch, expanded, &dest, tracks->tracks[i])) return NULL;
+        if (!append_cloned_grid_track(scratch, expanded, &dest, new_track_count, tracks->tracks[i])) return NULL;
     }
     *repeat_start = dest;
     for (int i = 0; i < repeat_count; i++) {
         for (int j = 0; j < repeat->repeat_track_count; j++) {
-            if (!append_cloned_grid_track(scratch, expanded, &dest,
+            if (!append_cloned_grid_track(scratch, expanded, &dest, new_track_count,
                                           repeat->repeat_tracks[j])) return NULL;
         }
     }
     *repeat_end = dest;
     for (int i = repeat_index + 1; i < tracks->track_count; i++) {
-        if (!append_cloned_grid_track(scratch, expanded, &dest, tracks->tracks[i])) return NULL;
+        if (!append_cloned_grid_track(scratch, expanded, &dest, new_track_count, tracks->tracks[i])) return NULL;
     }
     return expanded;
 }
@@ -753,8 +766,8 @@ static GridTrackSize** expand_repeat_track_entries(ScratchArena* scratch,
 static bool expand_auto_repeat_axis(GridContainerLayout* grid_layout, bool is_column) {
     lam::Own<GridTrackList>* list_slot = is_column ? &grid_layout->grid_template_columns
                                          : &grid_layout->grid_template_rows;
-    bool* auto_fit_tracks = is_column ? grid_layout->auto_fit_columns
-                                      : grid_layout->auto_fit_rows;
+    lam::OwnArr<bool>* auto_fit_tracks = is_column ? &grid_layout->auto_fit_columns
+                                      : &grid_layout->auto_fit_rows;
     int* auto_fit_count = is_column ? &grid_layout->auto_fit_col_count
                                     : &grid_layout->auto_fit_row_count;
     GridTrackList* tracks = *list_slot;
@@ -792,19 +805,14 @@ static bool expand_auto_repeat_axis(GridContainerLayout* grid_layout, bool is_co
             float repetitions = floorf((available + gap) /
                 (pattern_size + repeat->repeat_track_count * gap));
             // expanded definitions cannot exceed the canonical track storage bound.
-            float capacity = fmaxf(1.0f, (MAX_GRID_TRACKS - fixed_track_count) / (float)repeat->repeat_track_count);
+            float capacity = fmaxf(1.0f, (radiant::grid::GRID_MAX_EXPLICIT_TRACKS - fixed_track_count) / (float)repeat->repeat_track_count);
             repeat_count = (int)fmaxf(1.0f, fminf(repetitions, capacity)); // INT_CAST_OK: CSS repeat count is integral and bounded by track capacity.
         }
-        // Preserve the existing column-only cap until empty auto-fit gutters collapse fully.
-        if (is_column && repeat->is_auto_fit && grid_layout->item_count > 0 &&
-            repeat_count > grid_layout->item_count) {
-            repeat_count = grid_layout->item_count;
-        }
-
         long long expanded = (long long)repeat_count * (long long)repeat->repeat_track_count;
         long long total_tracks = (long long)tracks->track_count - 1 + expanded;
-        if (total_tracks <= 0 || total_tracks != (long long)(int)total_tracks) return false;
-        int new_track_count = (int)total_tracks; // INT_CAST_OK: range equality above proves the count fits.
+        if (total_tracks <= 0) return false;
+        int new_track_count = static_cast<int>(radiant::grid::grid_min_value(
+            total_tracks, (long long)radiant::grid::GRID_MAX_EXPLICIT_TRACKS)); // INT_CAST_OK: bounded explicit track count.
         int auto_fit_start = 0;
         int auto_fit_end = 0;
         GridTrackSize** new_tracks = expand_repeat_track_entries(
@@ -813,23 +821,40 @@ static bool expand_auto_repeat_axis(GridContainerLayout* grid_layout, bool is_co
             &auto_fit_start, &auto_fit_end);
         if (!new_tracks) return false;
 
-        if (repeat->is_auto_fit && new_track_count <= 64) {
+        if (repeat->is_auto_fit) {
+            *auto_fit_tracks = lam::own_arr((bool*)scratch_calloc(
+                &grid_layout->lycon->scratch, (size_t)new_track_count * sizeof(bool)));
+            if (!*auto_fit_tracks) return false;
             for (int i = 0; i < new_track_count; i++) {
-                auto_fit_tracks[i] = i >= auto_fit_start && i < auto_fit_end;
+                (*auto_fit_tracks)[i] = i >= auto_fit_start && i < auto_fit_end;
             }
             *auto_fit_count = new_track_count;
         }
-        // Auto-repeat mutates only the pass-local clone; abandoned generations
-        // remain owned by the container scratch mark and need no free chain.
+        GridLineNames new_names = {};
+        ScratchArena* scratch = &grid_layout->lycon->scratch;
+        for (int i = 0; i < tracks->line_names.count; i++) {
+            const GridNamedLine& name = tracks->line_names.entries[i];
+            int line = name.line_index > repeat_index
+                ? name.line_index + static_cast<int>(expanded) - 1 : name.line_index; // INT_CAST_OK: repeat and pattern counts are bounded before expansion.
+            if (line <= new_track_count &&
+                !grid_add_track_line_name(nullptr, scratch, &new_names, name.name, line)) return false;
+        }
+        for (int i = 0; i < repeat_count; i++) {
+            int offset = repeat_index + i * repeat->repeat_track_count;
+            if (offset > new_track_count) break;
+            for (int j = 0; j < repeat->repeat_line_names.count; j++) {
+                const GridNamedLine& name = repeat->repeat_line_names.entries[j];
+                int line = offset + name.line_index;
+                if (line <= new_track_count &&
+                    !grid_add_track_line_name(nullptr, scratch, &new_names, name.name, line)) return false;
+            }
+        }
+        // expanded names/tracks share the pass mark; retained definitions remain untouched.
         tracks->tracks = lam::own_arr(new_tracks);
         tracks->track_count = new_track_count;
         tracks->allocated_tracks = new_track_count;
         tracks->is_repeat = false;
-        tracks->line_names = lam::own_arr((char**)scratch_calloc(
-            &grid_layout->lycon->scratch,
-            (size_t)(new_track_count + 1) * sizeof(char*)));
-        tracks->line_name_count = 0;
-        if (!tracks->line_names) return false;
+        tracks->line_names = new_names;
         *list_slot = lam::own(tracks);
 
         break; // CSS permits only one auto-repeat per axis.
@@ -838,6 +863,7 @@ static bool expand_auto_repeat_axis(GridContainerLayout* grid_layout, bool is_co
 }
 // Expand auto-fill/auto-fit repeat() tracks based on available space.
 void expand_auto_repeat_tracks(GridContainerLayout* grid_layout) {
-    if (!grid_layout || !expand_auto_repeat_axis(grid_layout, true)) return;
-    expand_auto_repeat_axis(grid_layout, false);
+    if (!grid_layout) return;
+    grid_layout->storage_failed = !expand_auto_repeat_axis(grid_layout, true) ||
+        !expand_auto_repeat_axis(grid_layout, false);
 }

@@ -46,12 +46,11 @@ struct ViewCssContainerState {
 };
 static uint64_t view_css_container_hash(const void* item, uint64_t seed0, uint64_t seed1) {
     const ViewCssContainerEntry* entry = (const ViewCssContainerEntry*)item;
-    return hashmap_hash_bytes(&entry->source.expected_id, sizeof(entry->source.expected_id), seed0, seed1);
+    return dom_node_ref_identity_hash(entry->source, seed0, seed1);
 }
 static int view_css_container_compare(const void* left, const void* right, void*) {
-    uint64_t a = ((const ViewCssContainerEntry*)left)->source.expected_id;
-    uint64_t b = ((const ViewCssContainerEntry*)right)->source.expected_id;
-    return a < b ? -1 : a > b;
+    return dom_node_ref_identity_compare(((const ViewCssContainerEntry*)left)->source,
+        ((const ViewCssContainerEntry*)right)->source);
 }
 
 void view_css_container_state_destroy(ViewTree* tree) {
@@ -508,6 +507,59 @@ static LayoutContext view_css_length_context(ViewTree* tree, const ViewCssStyle*
     return context;
 }
 
+float view_css_contained_intrinsic_size(ViewTree* tree, const ViewCssStyle* style,
+                                        bool horizontal) {
+    size_t axis = horizontal ? 0 : 1;
+    LayoutContext context = view_css_length_context(tree, style, NAN, NAN);
+    float size = style->contain_intrinsic_size[axis];
+    if (style->contain_intrinsic_auto[axis] && view_css_contents_skipped(style))
+        layout_get_last_remembered_size(&context, style->source, horizontal, &size);
+    return fmaxf(0.0f, size);
+}
+
+struct ViewRememberedSizeCommit {
+    ViewTree* tree;
+    LayoutContext* staged;
+};
+
+static bool view_css_commit_remembered_node(DomNode* node, void* context) {
+    if (!node->is_element()) return true;
+    auto* commit = (ViewRememberedSizeCommit*)context;
+    ViewNodeState* state = view_tree_node_state(commit->tree, node, false);
+    ViewCssStyle* style = state ? state->computed_style.get() : nullptr;
+    if (!style || !state->container_measured || style->pseudo_element ||
+        !view_size_containment_applies(style->display)) return true;
+    bool contained = (style->computed_containment & CSS_CONTAIN_SIZE) != 0 ||
+        (style->container_axes & CSS_CONTAINER_BLOCK) != 0 || view_css_contents_skipped(style);
+    LayoutAxisPair<float> size = {state->container_width, state->container_height};
+    for (LayoutAxis axis : layout_axes()) {
+        bool automatic = style->contain_intrinsic_auto[axis];
+        if (automatic && contained) continue;
+        if (!layout_set_last_remembered_size(commit->staged, node->as_element(),
+                axis == LAYOUT_AXIS_X, size[axis], automatic)) return false;
+    }
+    return true;
+}
+
+bool view_css_commit_remembered_sizes(ViewTree* tree) {
+    if (tree->model->page_instances) return true;
+    ViewTree staged = {};
+    if (!layout_content_visibility_clone(&staged, tree, tree->model->document)) return false;
+    LayoutContext context = {};
+    context.doc = tree->model->document;
+    context.selected_view_tree = lam::up(&staged);
+    ViewRememberedSizeCommit commit = {tree, &context};
+    if (!view_geometry_walk_dom_tree(tree->model->document->root, view_css_commit_remembered_node, &commit)) {
+        layout_content_visibility_destroy(&staged);
+        return false;
+    }
+    // publish only after every completed principal measurement has been retained.
+    layout_content_visibility_destroy(tree);
+    tree->content_visibility_state = staged.content_visibility_state;
+    staged.content_visibility_state = nullptr;
+    return true;
+}
+
 static bool view_css_container_value(void* context, const CssValue* value, CssMathResult* result) {
     ViewCssStyle* style = (ViewCssStyle*)context;
     ViewTree* tree = style->view;
@@ -595,6 +647,56 @@ static CssEnum view_css_keyword(ViewTree* tree, ViewCssStyle* style, const char*
     if (css_value_is_inherit(value) || (css_value_is_unset(value) && inherits)) return inherited;
     return value->type == CSS_VALUE_TYPE_KEYWORD && !css_value_is_initial(value) && !css_value_is_unset(value)
         ? value->data.keyword : initial;
+}
+
+bool view_css_contents_skipped(const ViewCssStyle* style) {
+    return style && style->content_visibility == CSS_VALUE_HIDDEN &&
+        view_size_containment_applies(style->display);
+}
+
+static void view_css_intrinsic_sizes(ViewTree* tree, ViewCssStyle* style) {
+    CssDeclaration winners[2] = {};
+    style->contain_intrinsic_size[0] = style->contain_intrinsic_size[1] = -1.0f;
+    const CssPropertyCode candidates[] = {
+        CSS_PROPERTY_CONTAIN_INTRINSIC_SIZE, CSS_PROPERTY_CONTAIN_INTRINSIC_WIDTH,
+        CSS_PROPERTY_CONTAIN_INTRINSIC_HEIGHT, CSS_PROPERTY_CONTAIN_INTRINSIC_INLINE_SIZE,
+        CSS_PROPERTY_CONTAIN_INTRINSIC_BLOCK_SIZE
+    };
+    for (CssPropertyCode candidate : candidates) {
+        uint8_t candidate_axes = css_intrinsic_size_axes(candidate, style->vertical);
+        const CssProperty* property = css_property_get_by_code(candidate);
+        CssDeclaration declaration = {};
+        const CssValue* value = view_css_property(tree, style, property->name, &declaration);
+        if (!declaration.value) continue;
+        CssIntrinsicSizeAxis components[2] = {};
+        bool parsed = css_intrinsic_size_components(value,
+            candidate == CSS_PROPERTY_CONTAIN_INTRINSIC_SIZE, components);
+        for (size_t axis = 0; axis < 2; axis++) {
+            if (!(candidate_axes & (1u << axis)) || (winners[axis].value &&
+                css_declaration_cascade_compare(&declaration, &winners[axis]) <= 0)) continue;
+            winners[axis] = declaration;
+            float size = -1.0f;
+            bool automatic = false;
+            if (css_value_is_inherit(value) && style->parent) {
+                uint8_t parent_axes = css_intrinsic_size_axes(candidate, style->parent->vertical);
+                size_t parent_axis = parent_axes == 3 ? axis : parent_axes == 1 ? 0 : 1;
+                size = style->parent->contain_intrinsic_size[parent_axis];
+                automatic = style->parent->contain_intrinsic_auto[parent_axis];
+            } else if (parsed) {
+                const CssIntrinsicSizeAxis& component = components[
+                    candidate == CSS_PROPERTY_CONTAIN_INTRINSIC_SIZE ? axis : 0];
+                automatic = component.automatic;
+                if (!css_value_is_none(component.size)) {
+                    float resolved = view_css_length(tree, style, component.size,
+                        candidate, NAN, NAN);
+                    if (isfinite(resolved)) size = fmaxf(0.0f, resolved);
+                }
+            }
+            // inherited lengths are computed at their declaration owner, before this edition's children.
+            style->contain_intrinsic_size[axis] = size;
+            style->contain_intrinsic_auto[axis] = automatic;
+        }
+    }
 }
 
 double view_css_number(const CssValue* value, ViewTree* tree, const ViewCssStyle* style) {
@@ -908,6 +1010,8 @@ static ViewCssStyle* view_css_build_style(ViewTree* tree, DomElement* element,
     value = view_css_property(tree, style, "contain");
     style->computed_containment = css_value_is_inherit(value) && parent
         ? parent->computed_containment : css_value_containment_flags(value);
+    style->content_visibility = view_css_keyword(tree, style, "content-visibility", CSS_VALUE_VISIBLE,
+        parent ? parent->content_visibility : CSS_VALUE_VISIBLE);
     value = view_css_property(tree, style, "container-name");
     style->container_names = css_value_is_inherit(value) && parent ? parent->container_names
         : css_value_is_initial(value) || css_value_is_unset(value) ? nullptr : lam::up(value);
@@ -915,6 +1019,7 @@ static ViewCssStyle* view_css_build_style(ViewTree* tree, DomElement* element,
         parent && parent->vertical ? CSS_VALUE_VERTICAL_RL : CSS_VALUE_HORIZONTAL_TB, true);
     style->vertical = writing_mode != CSS_VALUE_HORIZONTAL_TB;
     if (!view_css_font_style(tree, style, parent)) return nullptr;
+    view_css_intrinsic_sizes(tree, style);
     if (!view_css_column_style(tree, style, parent)) return nullptr;
     view_css_box_style(tree, style);
     const char* lengths[] = {"width", "height", "min-width", "max-width", "min-height", "max-height"};

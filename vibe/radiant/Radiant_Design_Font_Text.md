@@ -846,3 +846,241 @@ all platforms are verified.
 | bzip2 | ~80KB | Can be removed if no other users |
 
 **Net binary size reduction:** ~1.2MB (FreeType + HarfBuzz + bzip2).
+
+## 11. Text overflow paint contract (2026-10-11)
+
+This focused delivery extends the existing text pipeline; the migration estimates
+above retain their historical scope. Ownership follows **D4.5.1v4 / D4.1.4v5**
+and shared rendering boundaries follow **D7.3.3–D7.3.4**. No formal ruling changes.
+
+[CSS Overflow 3 §5.1](https://www.w3.org/TR/css-overflow-3/#text-overflow)
+requires ellipsis to affect painting while preserving layout and pointer targets.
+The marker uses the block's style, fits after the remaining visible content, and
+elides whole grapheme clusters. A first cluster that cannot fit is clipped.
+Scrolling, inline-end direction, atomic inlines and transformed content remain
+part of the acceptance surface. Legacy clamping must also fit its final painted
+line and avoid generating a marker when no content was discarded.
+
+The prechange source only marked a clamp's final rectangle and changed its
+width; its source range still includes a glyph that occupies the marker's space.
+Ordinary `text-overflow` has overflow measurement but no shared paint consumer.
+The new explicit-reference fixture fails in PNG/SVG/PDF at both scales; the same
+single-run, mixed-color and clamp references match independently in Chromium.
+
+The implementation derives a temporary paint plan in each concrete block
+children paint phase, using one shared scope/iterator implementation. The generic
+block sequencer stays independent of text/font services. A block scope owns its plan and restores the parent scope on exit;
+nested blocks establish their own applicability. Plan entries borrow the live
+view/rectangle/font identity and copy their scalar projections. They never write
+back to layout rectangles or survive paint. Retained paint commands must copy
+any generated text through their existing payload ownership.
+
+Existing `TextRect::line_number` identifies the block's lines. A single traversal
+collects their text extents, using existing font and grapheme helpers. Atomic
+inline extents remain part of the outstanding acceptance work. Each overflowing line selects its final visible cluster and one marker
+position. The plan supplies a prefix or hidden projection for each affected
+rectangle, plus a separate marker projection with the block's font/color. This
+preserves inline color differences without inheriting an elided run's style.
+Raster, SVG and PDF iterate the same projections through their existing text
+painters; fitting and cluster selection are implemented once. No per-leaf rescan
+of the entire block is permitted.
+
+Acceptance includes independent pixels at 1×/2×, fitting and overflowing content,
+mixed runs, cluster boundaries, direction and atomic inlines, mutation and scroll
+recovery, unchanged geometry/hit targets, and repeated paint/retained-payload
+lifetime controls. The initial three-case reproducer is not complete P1.3 or
+complex-script/bidi qualification; remaining shaping work stays in P2.1.
+
+The first bounded implementation now passes 14 independent Chromium pixel
+references and the same explicit-text pairs in PNG/SVG/PDF at 1×/2×. These cover
+clip/fitting text, mixed colors and fonts, first-cluster clipping, combining
+marks, full uppercase expansion, absolute inline descendants, one/two-line
+clamps and opacity/filter fallback. The live fixture has 20 assertions across
+font/color changes, truncation disabling and override removal/restoration.
+Native tests repeat 256 scopes without modifying source geometry, restore nested
+scope state, and preserve recorded font selection while the command buffer grows.
+
+A recorded glyph run captures its `FontBox` by value and borrows the live
+owner's style under **D4.5.1v4 / D4.1.4v5**. Lowerers use the captured selection
+rather than a mutable walker address. This preserves a marker's block font after
+the iterator restores a differently styled text run. The source control failed
+when an earlier 20px run observed the walker's later 30px selection.
+
+This record does not close P1.3: RTL/bidi/vertical, atomic inlines, scrolling,
+transformed/decorated inline contexts, full shaping/grapheme behavior and broader
+clamp grammar/math/CSS-wide/alias cascade remain outstanding. The support manifest
+therefore records the three truncation properties as bounded **partial** support.
+
+## 12. Clamp integer computation contract (2026-10-11)
+
+The existing numeric clamp subset must distinguish integer-token grammar from
+computed integer math. [CSS Overflow 4 §5.1.1](https://drafts.csswg.org/css-overflow-4/#webkit-line-clamp)
+defines the legacy count as `none | <integer [1,∞]>`. Literal zero, negative,
+decimal/exponent spellings and dimensions are rejected before cascade; calculated
+numbers round at computation and clamp to the positive range. This increment
+retains Radiant's integer representation limit, using the shared typed-math and
+integer serializer rather than a new calculator. Modern shorthand longhands,
+legacy display/orientation applicability and interactions between the two names
+remain separate outstanding work.
+
+Layout computes relative-unit ratios after the owner's font is resolved. CSSOM
+uses its existing owner-font adapter, including dirty declaration reads before
+the next layout pass. Explicit inheritance copies the parent's computed count;
+invalid substituted values and non-inherited CSS-wide resets compute to `none`.
+The computed scalar survives declaration replacement, while temporary parser and
+formatter trees are released after each read (**D4.5.1v4 / D4.1.4v5**). No formal
+ruling changes. Acceptance includes invalid declarations preserving an earlier
+winner, calculated rounding, causal font/custom-value changes and restoration,
+visible clamp effects and repeated-read memory stability. Immediate dirty geometry
+reads remain a distinct P0 dependency; computed strings alone do not qualify them.
+
+Ancestor clamp counters stop at independent formatting contexts, using the same
+BFC classifier as floats and margin collapse ([CSS Overflow 4 §5.2](https://drafts.csswg.org/css-overflow-4/#max-lines)).
+The transient propagation state is distinct from the descendant's computed clamp
+declaration; CSSOM reads must never serialize a borrowed ancestor counter. The bounded legacy
+display/orientation contract is recorded in §13; broader legacy mappings remain open.
+
+## 13. Legacy box clamp applicability contract (2026-10-11)
+
+[CSS Overflow 4 §5.1.1](https://drafts.csswg.org/css-overflow-4/#webkit-line-clamp)
+limits the legacy clamp mode to `display:-webkit-box`/`-webkit-inline-box` with
+vertical `-webkit-box-orient`. Computed counts remain observable on other boxes
+without affecting their layout. The vertical clamped block computes to
+`flow-root`; its inline counterpart computes to `inline-block`. Other legacy
+boxes retain their legacy computed spelling and use the existing flex consumer.
+The [Compatibility Standard mappings](https://compat.spec.whatwg.org/#css-property-mappings)
+acknowledge historical compatibility differences; the bounded implementation
+uses the Overflow contract and independently captured Chromium behavior.
+
+Register orientation through the ordinary property/name/IDL catalogs, with
+non-inherited `horizontal` initial state, explicit inheritance/defaults, pending
+substitution and strict four-keyword grammar. `inline-axis`/`block-axis` compute
+to horizontal/vertical. Display computation, CSSOM and clamp setup must share
+the same resolved state, including dirty reads and inherited computed display.
+Keep computed legacy spelling and used flex routing distinct. Orientation affects
+the existing flex direction consumer without overwriting the authored computed
+`flex-direction` value.
+
+The native cascade serializer and clamp-winner lookup are shared module helpers,
+not copied resolvers. Temporary computation is scratch-owned; scalar display
+flags carry no borrowed declaration pointers (**D4.5.1v4 / D4.1.4v5**). Acceptance
+requires live display/orientation/count changes and restoration, variable/default
+and inheritance cases, same-context/BFC descendants, real geometry/marker paint,
+export references and repeated-read lifetime controls. Full legacy flex property
+mappings, modern clamp shorthand/longhands and shaping contexts remain distinct
+tasks; registering orientation alone does not qualify those features.
+
+The added catalog entry preserves every existing NameId (**D4.6.1v4**). Intrinsic
+min-content measurement keeps break-all letters separate while retaining
+punctuation and grapheme restrictions; flex's text fast path passes inherited
+wrap properties through the shared measurement helper. Flex-item flow bypasses
+ordinary block setup, so it shares clamp counter initialization and result
+storage. Its overflow viewport refresh follows final content-height refinement.
+Otherwise a correctly computed two-line box can clip its second line using the
+previous one-line viewport.
+
+The bounded fixture passes 380 live assertions, including 371 Chromium-captured
+attributes and nine marker pixels. The preceding qualified binary fails 196 of
+those assertions. Twenty-two independent visible references match Chromium and
+pass PNG/SVG/PDF at 1×/2×; repeated native computed reads release their scratch.
+These results do not qualify modern clamp components, full legacy flex mappings,
+other writing modes or the remaining P1.3/P2.1 text model.
+
+Per [CSS Sizing 3 §2.1](https://drafts.csswg.org/css-sizing-3/#max-content-inline-size),
+wrapping opportunities change min-content, not unwrapped max-content. The shared
+measurement entry measures whole shaped runs separately when break-all or
+overflow wrapping needs cluster boundaries. Native Arabic joining/lam-alef,
+Latin ligature/kerning and combining-mark controls preserve the normal unwrapped
+advance; this does not establish Arabic/Indic paint or full shaping support.
+
+## 14. Visual-edge overflow projection contract (2026-10-11)
+
+**FT-14 — Fit at the block's visual inline end.**
+[CSS Overflow 3 §6.1](https://drafts.csswg.org/css-overflow-3/#text-overflow)
+selects the ellipsis side from the block direction and removes visual end content.
+Extend the existing scoped paint projection with a retained source byte offset
+and x position. Its shared cluster scan can retain either a prefix or suffix;
+marker placement follows the remaining visual content and keeps the block's font,
+color and baseline. A marker preceding a retained suffix is an independent paint
+segment, so the existing trailing-marker flag must not append it to the text.
+Layout rectangles, geometry, hit testing and selection remain source-owned.
+
+Retained slices initialize capitalization from the preceding source whitespace,
+not from their new paint boundary. The current ASCII whitespace rule is shared by
+fitting, raster, blurred shadows and export serialization; broader Unicode word
+identification stays in P2.1. Computed `text-transform` reads use the shared
+cascade serializer because the lazy layout enum cannot represent combined values.
+The existing keyword-set validator enforces the grammar from
+[CSS Text 3 §2.1](https://drafts.csswg.org/css-text-3/#text-transform-property),
+including exclusive case transforms and invalid substitution defaulting. Accepted
+combined/full-width/math-auto syntax does not qualify its paint consumer.
+
+Use the existing grapheme, transform and font helpers. Paint scratch belongs to
+the scope and contains no retained source pointers after teardown
+(**D4.5.1v4 / D4.1.4v5**). Do not reverse UTF-8 bytes or create a second renderer.
+The existing source-to-glyph/shaping limitations still belong to P2.1; fitting
+physical edges alone does not establish correct mixed-bidi or complex-script
+shaping. Later glyph-cluster transport must preserve this visual-edge contract.
+
+Acceptance includes clipped/fitting text, first-cluster clipping, multiple styled
+runs, inherited/changed direction and restoration, unchanged source geometry,
+marker font/color and repeated nested scopes. Independent Chromium references
+and PNG/SVG/PDF pixels must pass at both output scales. Scrolling, transformed
+runs, atomic content, clamp/bidi interaction and vertical writing need their own
+reproducers before their support status changes.
+
+## 15. Selected-font SVG text contract (2026-10-11)
+
+**FT-15 — Export the font geometry used by layout.** HTML text exported as an SVG
+family name can be substituted by the receiving viewer. A local document font
+then has different advances and ink bounds: the independent RTL fixture shows
+the substituted ellipsis overlapping retained text, although raster and PDF use
+the selected face correctly. Reordering paint to conceal that overlap would leave
+the font defect in place.
+
+Use the existing text-run outline helper, already shared with PDF, for resolved
+HTML text in native SVG output. Preserve the existing glyph-run representation
+for raster effect fallback and unbound paint-IR text. Native SVG uses filled paths
+from the selected face; it sacrifices searchable text for portable font geometry,
+as the existing inline-SVG text exporter does. Decorations, shadows, color glyphs,
+complex-script shaping and missing-outline cases require separate qualification.
+This changes no formal ruling: paths are command-owned until lowering or teardown
+under **D4.5.1v4 / D4.1.4v5**. Each outlined run keeps its visible text as an escaped
+accessible title through the existing semantic-group paint commands. Diagram
+labels must survive outlining without adding hidden font-painted text.
+
+Acceptance requires independent visible-text references through native SVG,
+raster and PDF, including differing font/color runs, transforms, transparency and
+filters, plus repeated command ownership checks. The shared outline helper must
+remain the only source of text-to-path conversion; no exporter-local glyph loop.
+
+
+## 16. Computed spacing in paint (2026-10-11)
+
+**FT-16 — Fit and paint the same computed advances.** Layout already includes
+computed word and letter spacing. Fitting, direct raster paint, recorded glyph
+runs and vector paths must consume those same adjustments after whitespace
+processing, with justification added separately. The eight-case current
+reproducer loses positive/negative word spacing, collapsed/preserved separator
+positions, effects and both ellipsis edges; Chromium matches all eight explicit
+separator references. This is a consumer defect, not a new CSS grammar ruling.
+
+Promote the existing letter-spacing helper into the shared layout header and
+reuse one character-spacing/space-advance calculation in paint. Retain source
+byte offsets while collapsed separators contribute only once; export text
+normalizes the selected source slice using its actual white-space mode. A slice
+starting within a collapsed sequence must not manufacture a new separator.
+Recorded glyph-run word spacing remains the line's extra justification amount;
+authored spacing comes from its captured font style. SVG attributes must include
+negative as well as positive spacing when live text is required.
+
+This follows [CSS Text 3 §4.1](https://www.w3.org/TR/css-text-3/#white-space-rules)
+and [§7](https://www.w3.org/TR/css-text-3/#spacing). Scratch text and captured
+font styles retain **D4.5.1v4 / D4.1.4v5** ownership. Qualification requires
+native source-offset controls, independent visible-pixel references in all three
+output formats, effect fallback and causal inherited-style mutation. Computed
+word-spacing normal/initial serializes as `0px`, including declaration reads
+before a font snapshot. Live tests read style during mutation and geometry
+after its frame commit, preserving the [DOM geometry contract](Radiant_Design_DOM_API.md#34-cssom-layout-and-geometry). Tabs,
+complete Unicode separator/word segmentation, cross-node whitespace/shaping,
+vertical/bidi spacing and decorated text need their own controls.

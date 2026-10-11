@@ -2,6 +2,7 @@
 #include "../lib/log.h"
 #include "../lib/lambda_alloca.h"
 #include <math.h>
+#include <string.h>
 
 // ---------------------------------------------------------------------------
 // Color helpers — Chrome-compatible 3D border color computation
@@ -53,15 +54,6 @@ static void inset_outset_side_colors(Color base, CssEnum style,
     }
 }
 
-RdtPath* render_border_create_centered_stroke_path(const BorderProp* border,
-                                                          Rect rect,
-                                                          float width) {
-    float half_w = width / 2.0f;
-    Rect stroke_rect = {rect.x + half_w, rect.y + half_w,
-                        rect.width - width, rect.height - width};
-    Corner stroke_radius = radiant_corner_inset(&border->radius, half_w, half_w);
-    return render_path_create_rounded_rect(stroke_rect, &stroke_radius);
-}
 
 /**
  * Render an inset/outset border as two trapezoid-filled polygons.
@@ -333,7 +325,26 @@ static BorderImageTileAxis border_image_tile_axis(CssEnum repeat, float start,
     return axis;
 }
 
-static void render_border_image_gradient_tile(RasterRenderContext* rdcon,
+struct BorderImagePaintContext {
+    RasterRenderContext* raster;
+    PaintList* paint;
+    UiContext* ui;
+    float scale;
+    const RdtMatrix* transform;
+};
+
+static void border_image_push_clip(BorderImagePaintContext* context, RdtPath* path,
+                                   const RdtMatrix* transform) {
+    if (context->raster) rc_push_clip(context->raster, path, transform);
+    else paint_push_clip(context->paint, path, transform);
+}
+
+static void border_image_pop_clip(BorderImagePaintContext* context) {
+    if (context->raster) rc_pop_clip(context->raster);
+    else paint_pop_clip(context->paint);
+}
+
+static void render_border_image_gradient_tile(BorderImagePaintContext* context,
                                                Rect source, Rect dest,
                                                RadiantGradientLine line,
                                                float line_length_squared,
@@ -359,21 +370,36 @@ static void render_border_image_gradient_tile(RasterRenderContext* rdcon,
     float ty = (source.height / dest.height) * vy / line_length_squared;
     float slope_squared = tx * tx + ty * ty;
     if (slope_squared > 0.0f) {
-        rc_fill_linear_gradient(rdcon, piece,
-            cx - center_t * tx / slope_squared,
-            cy - center_t * ty / slope_squared,
-            cx + (1.0f - center_t) * tx / slope_squared,
-            cy + (1.0f - center_t) * ty / slope_squared,
-            stops, stop_count, RDT_FILL_WINDING,
-            render_state_current_transform(rdcon));
+        float x1 = cx - center_t * tx / slope_squared;
+        float y1 = cy - center_t * ty / slope_squared;
+        float x2 = cx + (1.0f - center_t) * tx / slope_squared;
+        float y2 = cy + (1.0f - center_t) * ty / slope_squared;
+        if (context->raster) {
+            rc_fill_linear_gradient(context->raster, piece, x1, y1, x2, y2,
+                stops, stop_count, RDT_FILL_WINDING, context->transform);
+        } else {
+            // deferred effect lowering retains both the path and its gradient stops.
+            lam::Temp<RdtGradientStop> retained = lam::temp_array<RdtGradientStop>(
+                (size_t)stop_count, MEM_CAT_RENDER);
+            if (retained) {
+                memcpy(retained.get(), stops, sizeof(RdtGradientStop) * (size_t)stop_count);
+                int index = paint_list_count(context->paint);
+                paint_fill_linear_gradient(context->paint, piece, x1, y1, x2, y2,
+                    retained.get(), stop_count, RDT_FILL_WINDING, nullptr, nullptr);
+                if (paint_list_take_path_payload(context->paint, index,
+                        PAINT_FILL_LINEAR_GRADIENT, retained.get())) {
+                    retained.release(); piece = nullptr;
+                }
+            }
+        }
     }
     rdt_path_free(piece);
 }
 
-static void render_border_image_raster_tile(RasterRenderContext* rdcon,
+static void render_border_image_raster_tile(BorderImagePaintContext* context,
                                              ImageSurface* image,
                                              Rect source, Rect dest) {
-    if (!rdcon || !image || !image->pixels) return;
+    if (!context || !image || !image->pixels) return;
     float decoded_x_scale = image->decoded_width > 0
         ? (float)image->decoded_width / image->width : 1.0f;
     float decoded_y_scale = image->decoded_height > 0
@@ -392,17 +418,18 @@ static void render_border_image_raster_tile(RasterRenderContext* rdcon,
     if (sx1 == sx0 || sy1 == sy0) return;
     int stride = image->pitch / 4;
     const uint32_t* pixels = (const uint32_t*)image->pixels + sy0 * stride + sx0;
-    rc_draw_image(rdcon, pixels, sx1 - sx0, sy1 - sy0, stride,
-                  dest.x, dest.y, dest.width, dest.height, 255,
-                  render_state_current_transform(rdcon), image);
+    if (context->raster) rc_draw_image(context->raster, pixels, sx1 - sx0, sy1 - sy0, stride,
+        dest.x, dest.y, dest.width, dest.height, 255, context->transform, image);
+    else paint_draw_image(context->paint, pixels, sx1 - sx0, sy1 - sy0, stride,
+        dest.x, dest.y, dest.width, dest.height, 255, nullptr, image);
 }
 
-static bool render_border_image(RasterRenderContext* rdcon, BorderProp* border, Rect rect) {
-    if (!rdcon || !border) return false;
+static bool render_border_image_common(BorderImagePaintContext* context, BorderProp* border, Rect rect) {
+    if (!context || !context->ui || !border) return false;
     LinearGradient* gradient = border->border_image_type == GRADIENT_LINEAR
         ? border->border_image_linear_gradient : nullptr;
     ImageSurface* image = border->border_image_url
-        ? load_document_image(rdcon->ui_context->document, rdcon->ui_context, border->border_image_url) : nullptr;
+        ? load_document_image(context->ui->document, context->ui, border->border_image_url) : nullptr;
     if (gradient && gradient->stop_count < 2) return false;
     if (image) {
         image_surface_ensure_decoded(image, image->width, image->height);
@@ -415,7 +442,7 @@ static bool render_border_image(RasterRenderContext* rdcon, BorderProp* border, 
         for (int side = 0; side < 4; side++) {
             outset[side] = border->border_image_outset_number[side]
                 ? border->border_image_outset[side] * border->width.values[side]
-                : border->border_image_outset[side] * rdcon->raster_scale;
+                : border->border_image_outset[side] * context->scale;
         }
         rect.x -= outset[3];
         rect.y -= outset[0];
@@ -435,7 +462,7 @@ static bool render_border_image(RasterRenderContext* rdcon, BorderProp* border, 
 
     float source_width_total = image ? (float)image->width : rect.width;
     float source_height_total = image ? (float)image->height : rect.height;
-    float numeric_slice_scale = image ? 1.0f : rdcon->raster_scale;
+    float numeric_slice_scale = image ? 1.0f : context->scale;
     float source_top = border->has_border_image_slice
         ? (border->border_image_slice_percent[0]
             ? source_height_total * border->border_image_slice[0] / 100.0f
@@ -470,12 +497,13 @@ static bool render_border_image(RasterRenderContext* rdcon, BorderProp* border, 
         widths[side] = !border->has_border_image_width
             ? border->width.values[side]
             : type == BORDER_IMAGE_COMPONENT_AUTO
-                ? (image ? natural_sides[side] * rdcon->raster_scale
+                ? (image ? natural_sides[side] * context->scale /
+                    layout_css_image_density(image, border->border_image_resolution)
                                  : border->width.values[side])
             : type == BORDER_IMAGE_COMPONENT_NUMBER
                 ? value * border->width.values[side]
             : type == BORDER_IMAGE_COMPONENT_LENGTH
-                ? value * rdcon->raster_scale
+                ? value * context->scale
             : value * (side % 2 == 0 ? rect.height : rect.width) / 100.0f;
     }
     float top = widths[0];
@@ -509,8 +537,8 @@ static bool render_border_image(RasterRenderContext* rdcon, BorderProp* border, 
     float vy = line.y2 - line.y1;
     float length_squared = gradient ? vx * vx + vy * vy : 1.0f;
 
-    RdtPath* clip = render_path_create_clip_path(rdcon);
-    rc_push_clip(rdcon, clip, NULL);
+    RdtPath* clip = context->raster ? render_path_create_clip_path(context->raster) : nullptr;
+    if (clip) border_image_push_clip(context, clip, nullptr);
     for (int row = 0; row < 3; row++) {
         for (int column = 0; column < 3; column++) {
             if (row == 1 && column == 1 && !border->border_image_slice_fill)
@@ -548,7 +576,8 @@ static bool render_border_image(RasterRenderContext* rdcon, BorderProp* border, 
             if (!region_clip) continue;
             rdt_path_add_rect(region_clip, dest_x[column], dest_y[row],
                               dest_width, dest_height, 0.0f, 0.0f);
-            rc_push_clip(rdcon, region_clip, NULL);
+            // slice clips move with their tiles; the inherited outer clip is already projected.
+            border_image_push_clip(context, region_clip, context->transform);
             Rect source = {source_x[column], source_y[row],
                            source_width, source_height};
             for (int iy = 0; iy < y_axis.count; iy++) {
@@ -557,20 +586,32 @@ static bool render_border_image(RasterRenderContext* rdcon, BorderProp* border, 
                                         y_axis.first + iy * y_axis.step,
                                         x_axis.size, y_axis.size};
                     if (gradient) {
-                        render_border_image_gradient_tile(rdcon, source, destination,
+                        render_border_image_gradient_tile(context, source, destination,
                             line, length_squared, stops, stop_count);
                     } else {
-                        render_border_image_raster_tile(rdcon, image, source, destination);
+                        render_border_image_raster_tile(context, image, source, destination);
                     }
                 }
             }
-            rc_pop_clip(rdcon);
+            border_image_pop_clip(context);
             rdt_path_free(region_clip);
         }
     }
-    rc_pop_clip(rdcon);
-    rdt_path_free(clip);
+    if (clip) { border_image_pop_clip(context); rdt_path_free(clip); }
     return true;
+}
+
+static bool render_border_image(RasterRenderContext* raster, BorderProp* border, Rect rect) {
+    if (!raster) return false;
+    BorderImagePaintContext context = {raster, nullptr, raster->ui_context,
+        raster->raster_scale, render_state_current_transform(raster)};
+    return render_border_image_common(&context, border, rect);
+}
+
+bool render_paint_border_image(PaintList* paint, UiContext* ui, BorderProp* border, Rect rect) {
+    if (!paint) return false;
+    BorderImagePaintContext context = {nullptr, paint, ui, 1.0f, nullptr};
+    return render_border_image_common(&context, border, rect);
 }
 
 /**

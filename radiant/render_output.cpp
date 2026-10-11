@@ -516,11 +516,12 @@ static bool render_export_session_begin_internal(
 bool render_export_session_begin(RenderExportSession* session, const char* html_file,
                                  int viewport_width, int viewport_height,
                                  int fallback_width, int fallback_height, float output_scale,
-                                 bool print_media, bool paged) {
+                                 bool print_media, bool paged, float device_scale) {
     RenderExportHtmlRequest request = {html_file, INPUT_RESOURCE_ALLOW_NETWORK, paged};
+    // explicit device environments select assets independently of vector export density (RSC6–RSC7).
     return render_export_session_begin_internal(session,
         viewport_width, viewport_height, fallback_width, fallback_height,
-        output_scale, 1.0f, false, print_media, paged,
+        output_scale, device_scale, false, print_media, paged,
         render_export_load_html_document, &request);
 }
 
@@ -1346,10 +1347,10 @@ static int render_output_render_html_file_to_target(const char* html_file,
     switch (target->kind) {
         case RENDER_OUTPUT_PDF:
             return render_html_to_pdf(html_file, target->output_file,
-                                      viewport_width, viewport_height, output_scale, target->paged);
+                                      viewport_width, viewport_height, output_scale, target->paged, device_scale);
         case RENDER_OUTPUT_SVG:
             return render_html_to_svg(html_file, target->output_file,
-                                      viewport_width, viewport_height, output_scale);
+                                      viewport_width, viewport_height, output_scale, device_scale);
         case RENDER_OUTPUT_PNG:
         case RENDER_OUTPUT_TILED_PNG:
             return render_html_to_png(html_file, target->output_file,
@@ -1389,10 +1390,10 @@ static int render_output_render_document_transform_to_target(const char* documen
     switch (target->kind) {
         case RENDER_OUTPUT_PDF:
             return render_document_transform_to_pdf(document_file, transform, options,
-                option_count, target->output_file, viewport_width, viewport_height, output_scale, target->paged);
+                option_count, target->output_file, viewport_width, viewport_height, output_scale, target->paged, device_scale);
         case RENDER_OUTPUT_SVG:
             return render_document_transform_to_svg(document_file, transform, options,
-                option_count, target->output_file, viewport_width, viewport_height, output_scale);
+                option_count, target->output_file, viewport_width, viewport_height, output_scale, device_scale);
         case RENDER_OUTPUT_PNG:
         case RENDER_OUTPUT_TILED_PNG:
             return render_document_transform_to_png(document_file, transform, options,

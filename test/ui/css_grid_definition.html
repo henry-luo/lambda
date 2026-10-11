@@ -1,0 +1,195 @@
+<!doctype html><meta charset="utf-8">
+<style>html,body{margin:0}button{height:24px}</style>
+<button id="check">Check</button><output id="report"></output><div id="box"></div>
+<script>
+(function(){
+    var cases=[
+        {
+                "property": "grid-template",
+                "value": "none"
+        },
+        {
+                "property": "grid-template",
+                "value": "none / none"
+        },
+        {
+                "property": "grid-template",
+                "value": "none / 20px"
+        },
+        {
+                "property": "grid-template",
+                "value": "10px / none"
+        },
+        {
+                "property": "grid-template",
+                "value": "10px / 20px"
+        },
+        {
+                "property": "grid-template",
+                "value": "\"a b\""
+        },
+        {
+                "property": "grid-template",
+                "value": "\"a b\" 10px \"c d\" 20px / 30px 40px"
+        },
+        {
+                "property": "grid-template",
+                "value": "[top] \"a a\" 10px [mid] [next] \"b b\" [end] / [l] 20px [m] 30px [r]"
+        },
+        {
+                "property": "grid-template",
+                "value": "\"a b\" / repeat(2,20px)"
+        },
+        {
+                "property": "grid-template",
+                "value": "\"a b\" / none"
+        },
+        {
+                "property": "grid-template",
+                "value": "\"a a\" \"a .\""
+        },
+        {
+                "property": "grid-template",
+                "value": "10px"
+        },
+        {
+                "property": "grid-template",
+                "value": "10px /"
+        },
+        {
+                "property": "grid-template",
+                "value": "/ 20px"
+        },
+        {
+                "property": "grid-template",
+                "value": "auto-flow / 20px"
+        },
+        {
+                "property": "grid-template",
+                "value": "initial"
+        },
+        {
+                "property": "grid-template",
+                "value": "inherit"
+        },
+        {
+                "property": "grid-template",
+                "value": "var(--definition)"
+        },
+        {
+                "property": "grid",
+                "value": "none"
+        },
+        {
+                "property": "grid",
+                "value": "none / none"
+        },
+        {
+                "property": "grid",
+                "value": "none / 20px"
+        },
+        {
+                "property": "grid",
+                "value": "10px / none"
+        },
+        {
+                "property": "grid",
+                "value": "10px / 20px"
+        },
+        {
+                "property": "grid",
+                "value": "\"a b\""
+        },
+        {
+                "property": "grid",
+                "value": "\"a b\" 10px \"c d\" 20px / 30px 40px"
+        },
+        {
+                "property": "grid",
+                "value": "[top] \"a a\" 10px [mid] [next] \"b b\" [end] / [l] 20px [m] 30px [r]"
+        },
+        {
+                "property": "grid",
+                "value": "\"a b\" / repeat(2,20px)"
+        },
+        {
+                "property": "grid",
+                "value": "\"a b\" / none"
+        },
+        {
+                "property": "grid",
+                "value": "\"a a\" \"a .\""
+        },
+        {
+                "property": "grid",
+                "value": "10px"
+        },
+        {
+                "property": "grid",
+                "value": "10px /"
+        },
+        {
+                "property": "grid",
+                "value": "/ 20px"
+        },
+        {
+                "property": "grid",
+                "value": "auto-flow / 20px"
+        },
+        {
+                "property": "grid",
+                "value": "initial"
+        },
+        {
+                "property": "grid",
+                "value": "inherit"
+        },
+        {
+                "property": "grid",
+                "value": "var(--definition)"
+        },
+        {
+                "property": "grid",
+                "value": "auto-flow 10px 20px / 30px"
+        },
+        {
+                "property": "grid",
+                "value": "dense auto-flow minmax(10px,20px) / repeat(2,30px)"
+        },
+        {
+                "property": "grid",
+                "value": "10px 20px / auto-flow dense 30px"
+        },
+        {
+                "property": "grid",
+                "value": "auto-flow / auto-flow"
+        },
+        {
+                "property": "grid",
+                "value": "dense / 20px"
+        },
+        {
+                "property": "grid",
+                "value": "auto-flow 20px dense / 30px"
+        }
+],
+        fields=["grid", "grid-template", "grid-template-rows", "grid-template-columns", "grid-template-areas", "grid-auto-rows", "grid-auto-columns", "grid-auto-flow"],
+        style=document.getElementById('box').style,report=document.getElementById('report');
+    function record(name){report.setAttribute(name,fields.map(function(field){return style.getPropertyValue(field);}).join('|'));}
+    document.getElementById('check').onclick=function(){
+        cases.forEach(function(item,index){
+            style.cssText='grid-auto-rows:7px;grid-auto-columns:9px;grid-auto-flow:column dense;grid-template:10px / 20px';
+            style.setProperty(item.property,item.value);record('data-case-'+index);
+        });
+        ['grid-template','grid'].forEach(function(property,index){
+            style.cssText='--definition:"a b" 10px / 20px 30px';style.setProperty(property,'var(--definition)');
+            record('data-pending-'+index+'-initial');
+            style.gridTemplateColumns='40px';record('data-pending-'+index+'-override');
+            style.removeProperty('grid-template-columns');record('data-pending-'+index+'-removed');
+        });
+        ['row dense','dense row','dense','row','column dense'].forEach(function(value,index){
+            style.cssText='';style.gridAutoFlow=value;record('data-flow-'+index);
+        });
+    };
+})();
+</script>

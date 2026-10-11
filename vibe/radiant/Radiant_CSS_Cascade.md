@@ -743,10 +743,12 @@ and the pinned WPT `css/css-contain/counter-scoping-*` / `quote-scoping-*`
 cases. This contract does not claim complete non-principal containment or
 `content-visibility: auto` relevance handling.
 
-### 3.16 Content visibility delivery contract (implementation pending)
+### 3.16 Content visibility delivery contract (partially implemented)
 
 The computed `visible`, `hidden`, and `auto` states remain distinct from the
-used skipped state. Hidden/auto always imply layout, style and paint
+used skipped state. Applicability follows size-containment boxes: principal
+tables, internal table/ruby boxes and non-atomic inline boxes are excluded;
+table captions remain eligible. Hidden/auto imply layout, style and paint
 containment; skipped contents additionally imply size containment. A skipped
 subtree contributes neither descendant paint/hits nor outer counter effects.
 Hidden contents cannot be focused, selected or reached by tab navigation.
@@ -756,8 +758,12 @@ selected, in the top layer, or near/intersecting an applicable scroll viewport.
 Relevance and remembered inner sizes belong to the selected view. Reuse the
 existing last-remembered-size computation and containment measurement helpers,
 while removing their assumption that a DOM-wide default-view size is suitable
-for every view. State keys include validated DOM identity; detach, adoption,
-view reset and teardown must retire stale state under **D4.5.1v4 / D4.1.4v5**.
+for every view. State keys include validated DOM identity. Geometry reset
+preserves committed history in the same edition. Disconnection immediately resets
+proximity/event history, including a synchronous remove-and-reinsert. Remembered
+sizes survive that brief disconnection, but a rendering update while disconnected
+retires the entry. Adoption and teardown retire stale references under
+**D4.5.1v4 / D4.1.4v5**.
 Before first geometry exists, auto contents are measured. Subsequent layout
 settles relevance and placeholder geometry with a checked pass budget. An
 explicit activation margin is a user-agent policy, rather than an authored
@@ -774,12 +780,183 @@ sizes, quote/counter changes or new motion timelines. Skipping and activation
 suppress transition creation for the associated style change, while existing
 animation phase/lifetime follows the shared motion owner.
 
+Remembered sizing is independent per physical axis: removing that axis's `auto`
+clears its memory when an eligible box is updated, including a skipped box.
+No box or an unrendered ancestor preserves the old memory. Only final,
+uncontained, non-skipped geometry can replace it; explicit size containment
+must not turn a fallback into remembered content dimensions. These controls
+follow [CSS Sizing 4 §5.2.1](https://drafts.csswg.org/css-sizing-4/#last-remembered)
+and pinned WPT `contain-intrinsic-size/auto-006.html` / `auto-009.html`.
+The current Chromium reference overwrites memory during ordinary size
+containment; retain that difference as qualification evidence against the
+draft instead of making a browser comparison a substitute for the contract.
+
 Acceptance must exercise visible clipping/BFC/counters, initially offscreen
 placeholders, activation by scroll/focus, remembered-size changes, nested
 scrollports, live auto/hidden/visible switches, and independent-view printing.
-The rules follow [CSS Containment 2 §4](https://www.w3.org/TR/css-contain-2/#content-visibility)
-and [CSS Sizing 4 §5](https://www.w3.org/TR/css-sizing-4/#intrinsic-size-override).
-This contract is pending implementation and does not promote the support row.
+The rules follow [CSS Containment 2 §4](https://drafts.csswg.org/css-contain-2/#content-visibility)
+and [CSS Sizing 4 §5](https://drafts.csswg.org/css-sizing-4/#intrinsic-size-override).
+The browsing increment retains auto descendants' geometry for user-agent
+queries while suppressing their external sizing, paint and hit effects. The
+activation margin is one viewport extent, and the checked convergence budget
+is 256 passes per layout. These are explicit user-agent policies. History is
+view-owned and survives the loader's geometry allocator replacement; ordinary
+view destruction releases it. Query trials and skipped ancestors cannot
+refresh committed intrinsic-size memory. Resize observations retain their last
+delivered size; intersections remain empty, including within a skipped root.
+Rendered text excludes skipped contents while raw textContent stays available.
+
+Intrinsic-size components share strict axis grammar across validation and
+consumers. `none` clears the fallback on its axis; `auto none` retains remembered
+size behavior with no explicit fallback. Browsing intrinsic measurement and
+used sizing share component cascade winners across shorthand and logical axes;
+inheritance copies computed owner lengths. Typed math uses the common length
+resolver. Final flex content refinement cannot reintroduce a contained height.
+Explicit skipped-motion reads refresh existing endpoints from current owner
+declarations and fonts without advancing their lifecycle or creating effects.
+Skipped effects retain clock service. The current dirty-callback regression
+covers opacity with inherited variable endpoints; complete font/leading/SVG
+query contexts remain unqualified.
+
+The independent-view increment stores computed visibility and intrinsic
+axis fallbacks in `ViewCssStyle`, using that edition's cascade, fonts and length
+context. Hidden block contents, including pseudos, produce no children while
+their own placeholder and decorations remain. Printable auto content remains
+relevant independently of browsing position. Counter boundaries use the same
+visibility applicability; no temporary default-view geometry is published
+(**D4.5.1v4 / D4.1.4v5**).
+
+Independent remembered sizes use the same weak-identity history owner as
+browsing, with each edition retaining its own dimensions. Final model commit
+stages a checked copy of valid history, applies completed principal inner-box
+measurements, and publishes it only when the complete update succeeds. Failed
+composition, reference/container trials and open model checkpoints cannot
+publish memory. Hidden placeholder consumers consult committed memory only
+for axes retaining `auto`; computed fallback/inheritance remains unchanged.
+Retained page leases keep their immutable geometry/fonts while sizing history
+follows the stable active edition across arena replacement. Page instances
+do not publish a second copy of source measurements. Complete fragmentation
+and applicability controls remain separate qualification work.
+
+Committed browsing auto states queue typed `ContentVisibilityAutoStateChangeEvent`
+notifications using the existing traced timer owner. The readonly `skipped`
+accessor uses a branded native payload; constructor/dictionary conversion,
+subclassing and getter exceptions have a JS golden. Initial observation,
+scroll changes, inline handlers, removal and reinsertion have a live fixture.
+The queued target is validated again and detached targets are discarded;
+callbacks run after layout unwinds (**D5.3.3 / D4.3.3**). A connected element
+retains proximity history while auto is disabled or its box is absent.
+Chromium differs on initial notifications and native event flags; these remain explicit
+qualification limits against [CSS Containment 2 §4.4](https://drafts.csswg.org/css-contain-2/#contentvisibilityautostatechange).
+`scrollIntoView()` consumes placeholder geometry inside the final convergence
+loop, then settles any post-scroll relevance changes before publishing motion,
+remembered sizes, geometry and paint. It cannot rely on a subsequent author
+mutation to activate contents. A container/descendant scroll fixture checks
+used sizes, viewport position and real pixels; browser deactivation hysteresis
+remains a documented user-agent policy difference.
+
+Broader independent size-memory lifecycle and paged fragmentation,
+top-layer relevance, complete event/task-order interoperability and complete applicability,
+forced-geometry, explicit motion-query contexts and lifetime qualification
+remain open. The support row stays partial.
+
+### 3.17 CSS image selection and retained paint payloads (partially implemented)
+
+**CI-17** follows [CSS Images 4 §2.4](https://drafts.csswg.org/css-images-4/#image-set-notation):
+validate every `image-set()` option before cascade, including optional resolution
+and `type()` descriptors, their order and uniqueness, and forbidden direct or
+indirect nesting. Omitted resolution is 1x. Unsupported MIME types are removed
+before equal-resolution candidates are considered; the first remaining candidate
+at each resolution wins. Zero-resolution options are invalid images. Typed
+resolution math uses the shared evaluator and its range rules.
+
+Use the selected view's device scale. The current selection policy is the
+smallest sufficient density, otherwise the largest available; share that policy
+with HTML responsive-image selection. CSS consumers compare canonical densities
+at the precision they retain, including equivalent dpi/dpcm/dppx/x forms. Raster
+natural dimensions are divided by the selected resolution; vector natural
+dimensions keep their CSS Images sizing rules. A resource's own format remains
+the authority for that distinction, independently of an author's MIME hint.
+
+A selection result borrows parsed values only during computation. Retain its
+resolved URL or resolved gradient in the consuming view's owner, under
+**D4.5.1v4 / D4.1.4v5**. Explicit background inheritance clones owned gradient
+objects, stop arrays and layer arrays. Retiring either parent's or child's
+payload cannot invalidate the other. Image-only inheritance preserves the
+child's independent color and background geometry. Replacement releases the
+previous payload after the complete replacement is available.
+
+Generated replacement images use the same source admission and resource cache
+as HTML images. Revalidate document policy before warm-cache reuse, and retain
+the selected source independently of transient declarations. Candidate/URL
+changes refresh the borrowed surface and natural dimensions before sizing.
+Generated content must not force valid automatic image dimensions to zero.
+Resolved URL scratch is released after admission retains the selected source;
+reflow must not accumulate a new view-pool copy on each visit.
+
+A single image in `content` replaces an element or pseudo-element, as specified
+by [CSS Content 3](https://drafts.csswg.org/css-content-3/#content-property).
+The draft records the historical browser treatment of `::before`/`::after` as
+inline content and the unresolved [CSSWG issue 2889](https://github.com/w3c/csswg-drafts/issues/2889).
+Chromium 152's image pseudo has a two-CSS-pixel inline baseline offset in the
+bounded export fixture, while Radiant's replaced pseudo agrees with the explicit
+replacement reference. Retain this interoperability difference in qualification;
+the image-selection result alone does not establish pseudo-layout parity.
+
+An explicitly requested export device environment reaches SVG/PDF sessions as
+well as raster sessions. Export density remains independent of asset selection
+([RSC6–RSC7](Radiant_Scale.md#rsc6--paint-semantics-are-logical-raster-lowering-is-physical)).
+URL-less decoded/encoded raster resources use the common inline image payload
+when exported to SVG; an absent source URL cannot suppress the image.
+Fallback glyph advances and bitmap placement convert physical font resources
+to CSS coordinates exactly once. The same conversion feeds SVG/PDF text-width
+and emphasis calculations; explicit device density cannot enlarge logical text.
+
+Raster, SVG and PDF image backgrounds share positioning/paint boxes and the
+tile-size/position/repeat plan. Vector exports record owned clips and the common
+image resource/picture paint commands, so deferred effects retain their clip
+lifetime and selected image dimensions. This does not establish complete
+multilayer ordering, blending, transformed sampling or standalone-resource
+qualification. URL list/border images use the same selector and retain raster
+density in their used natural size and `border-image-width:auto`. Resolve their
+URLs against the declaration's stylesheet base. A valid marker image precedes
+the marker string, including `list-style-type:none`, per
+[CSS Lists 3 §3.2–3.3](https://drafts.csswg.org/css-lists-3/#content-property).
+Explicit image `none` terminates inheritance. Retained markers refresh their
+borrowed computed image/cache surface and generated-content suppression after
+style changes. An absent marker leaves the rendered tree while retaining its
+owner until ordinary generated-node retirement (**D4.5.1v4**).
+Retained marker fonts keep their element owner; the optional temporary font
+owner starts empty when reuse needs no allocation (**D4.1.4v5**).
+
+Explicit border-image inheritance owns independent URL/gradient/stop copies;
+replacement releases the previous owner after constructing the new payload.
+Raster, SVG and PDF share nine-slice geometry, region clips and source crops.
+Deferred gradient tiles own their paths and stop arrays. The solid boundary
+fast path must yield to an image source, including its resource-load fallback.
+URL marker export shares its used image rectangle and resource producer.
+Native physical marker painting scales logical dimensions once under RSC6.
+URL marker painting consumes the active transform. Border slice clips use their
+tiles' transform; inherited viewport clips already occupy projected coordinates.
+Export extents compose the same transform matrices for boxes and overflow clips
+before integral surface allocation. Bounded translation controls cover these
+consumers; broader transformed sampling and projective export remain open.
+
+Selection occurs when the CSS image recomputes. A pure device-scale repaint may
+retain its earlier selected density under CSS Images' UA selection policy;
+subsequent declaration changes use the current environment. This preserves
+[RSC10](Radiant_Scale.md#rsc10--scale-changes-do-not-automatically-imply-reflow).
+Chromium agrees with the 54 causal mutation/density/translation controls. Outside URL-marker
+placement remains different in the bounded browser probe, despite matching
+selected dimensions; do not credit that probe as placement parity. PDF profiles,
+edge rasterization and per-format canvas padding differ. Exact image references
+are compared within each output format, with independent selected-color coverage
+to exclude matching omissions.
+
+Complete image-function/gradient-body grammar, gradient marker export, radial/
+conic and SVG URL border sources, multilayer descriptors, generated-gradient
+replacement, CSSOM serialization, registered values, transformed sampling and
+independent/paged CSS-image producers retain separate acceptance controls.
 
 ## 4. Instrumentation and decision criteria
 

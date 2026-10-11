@@ -1,0 +1,1252 @@
+{
+  "name": "Computed word spacing survives collapse, effects, overflow and inherited mutation",
+  "html": "test/ui/css_text_spacing_paint.html",
+  "viewport": {
+    "width": 900,
+    "height": 600
+  },
+  "events": [
+    {
+      "type": "click",
+      "target": {
+        "selector": "#check"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-initial-word-spacing",
+      "equals": "10px"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-initial-word-white-space",
+      "equals": "nowrap"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-initial-negative-spacing",
+      "equals": "-5px"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-initial-negative-white-space",
+      "equals": "nowrap"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-initial-collapsed-spacing",
+      "equals": "10px"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-initial-collapsed-white-space",
+      "equals": "nowrap"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-initial-preserved-spacing",
+      "equals": "10px"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-initial-preserved-white-space",
+      "equals": "pre"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-initial-opacity-spacing",
+      "equals": "10px"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-initial-opacity-white-space",
+      "equals": "nowrap"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-initial-filter-spacing",
+      "equals": "10px"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-initial-filter-white-space",
+      "equals": "nowrap"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-initial-rtl-spacing",
+      "equals": "10px"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-initial-rtl-white-space",
+      "equals": "nowrap"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-initial-ltr-spacing",
+      "equals": "10px"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-initial-ltr-white-space",
+      "equals": "nowrap"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-initial-word-width",
+      "equals": "70"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-initial-negative-width",
+      "equals": "55"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-initial-collapsed-width",
+      "equals": "70"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-initial-preserved-width",
+      "equals": "114"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-initial-opacity-width",
+      "equals": "70"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-initial-filter-width",
+      "equals": "70"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-initial-rtl-width",
+      "equals": "140"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-initial-ltr-width",
+      "equals": "140"
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#word",
+        "offset_x": 67,
+        "offset_y": 4
+      },
+      "search_radius": 0,
+      "min_r": 220,
+      "max_g": 60,
+      "max_b": 60
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#negative",
+        "offset_x": 52,
+        "offset_y": 4
+      },
+      "search_radius": 0,
+      "min_r": 220,
+      "max_g": 60,
+      "max_b": 60
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#collapsed",
+        "offset_x": 67,
+        "offset_y": 4
+      },
+      "search_radius": 0,
+      "min_r": 220,
+      "max_g": 60,
+      "max_b": 60
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#preserved",
+        "offset_x": 111,
+        "offset_y": 4
+      },
+      "search_radius": 0,
+      "min_r": 220,
+      "max_g": 60,
+      "max_b": 60
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#opacity",
+        "offset_x": 67,
+        "offset_y": 4
+      },
+      "search_radius": 0,
+      "min_r": 220,
+      "max_g": 170,
+      "max_b": 170
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#filter",
+        "offset_x": 67,
+        "offset_y": 4
+      },
+      "search_radius": 0,
+      "min_r": 220,
+      "max_g": 60,
+      "max_b": 60
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#rtl",
+        "offset_x": 52,
+        "offset_y": 4
+      },
+      "search_radius": 0,
+      "min_r": 220,
+      "max_g": 60,
+      "max_b": 60
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#ltr",
+        "offset_x": 47,
+        "offset_y": 16
+      },
+      "search_radius": 0,
+      "min_b": 220,
+      "max_r": 60,
+      "max_g": 60
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#change"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-increased-word-spacing",
+      "equals": "20px"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-increased-word-white-space",
+      "equals": "nowrap"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-increased-negative-spacing",
+      "equals": "-5px"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-increased-negative-white-space",
+      "equals": "nowrap"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-increased-collapsed-spacing",
+      "equals": "10px"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-increased-collapsed-white-space",
+      "equals": "nowrap"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-increased-preserved-spacing",
+      "equals": "10px"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-increased-preserved-white-space",
+      "equals": "pre"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-increased-opacity-spacing",
+      "equals": "10px"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-increased-opacity-white-space",
+      "equals": "nowrap"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-increased-filter-spacing",
+      "equals": "10px"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-increased-filter-white-space",
+      "equals": "nowrap"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-increased-rtl-spacing",
+      "equals": "10px"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-increased-rtl-white-space",
+      "equals": "nowrap"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-increased-ltr-spacing",
+      "equals": "10px"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-increased-ltr-white-space",
+      "equals": "nowrap"
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#word",
+        "offset_x": 77,
+        "offset_y": 4
+      },
+      "search_radius": 0,
+      "min_r": 220,
+      "max_g": 60,
+      "max_b": 60
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#check"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-increased-word-width",
+      "equals": "80"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-increased-negative-width",
+      "equals": "55"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-increased-collapsed-width",
+      "equals": "70"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-increased-preserved-width",
+      "equals": "114"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-increased-opacity-width",
+      "equals": "70"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-increased-filter-width",
+      "equals": "70"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-increased-rtl-width",
+      "equals": "140"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-increased-ltr-width",
+      "equals": "140"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#negative_change"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-negative-word-spacing",
+      "equals": "-5px"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-negative-word-white-space",
+      "equals": "nowrap"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-negative-negative-spacing",
+      "equals": "-5px"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-negative-negative-white-space",
+      "equals": "nowrap"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-negative-collapsed-spacing",
+      "equals": "10px"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-negative-collapsed-white-space",
+      "equals": "nowrap"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-negative-preserved-spacing",
+      "equals": "10px"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-negative-preserved-white-space",
+      "equals": "pre"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-negative-opacity-spacing",
+      "equals": "10px"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-negative-opacity-white-space",
+      "equals": "nowrap"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-negative-filter-spacing",
+      "equals": "10px"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-negative-filter-white-space",
+      "equals": "nowrap"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-negative-rtl-spacing",
+      "equals": "10px"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-negative-rtl-white-space",
+      "equals": "nowrap"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-negative-ltr-spacing",
+      "equals": "10px"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-negative-ltr-white-space",
+      "equals": "nowrap"
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#word",
+        "offset_x": 52,
+        "offset_y": 4
+      },
+      "search_radius": 0,
+      "min_r": 220,
+      "max_g": 60,
+      "max_b": 60
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#check"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-negative-word-width",
+      "equals": "55"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-negative-negative-width",
+      "equals": "55"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-negative-collapsed-width",
+      "equals": "70"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-negative-preserved-width",
+      "equals": "114"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-negative-opacity-width",
+      "equals": "70"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-negative-filter-width",
+      "equals": "70"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-negative-rtl-width",
+      "equals": "140"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-negative-ltr-width",
+      "equals": "140"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#reset"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-reset-word-spacing",
+      "equals": "0px"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-reset-word-white-space",
+      "equals": "nowrap"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-reset-negative-spacing",
+      "equals": "-5px"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-reset-negative-white-space",
+      "equals": "nowrap"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-reset-collapsed-spacing",
+      "equals": "10px"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-reset-collapsed-white-space",
+      "equals": "nowrap"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-reset-preserved-spacing",
+      "equals": "10px"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-reset-preserved-white-space",
+      "equals": "pre"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-reset-opacity-spacing",
+      "equals": "10px"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-reset-opacity-white-space",
+      "equals": "nowrap"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-reset-filter-spacing",
+      "equals": "10px"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-reset-filter-white-space",
+      "equals": "nowrap"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-reset-rtl-spacing",
+      "equals": "10px"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-reset-rtl-white-space",
+      "equals": "nowrap"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-reset-ltr-spacing",
+      "equals": "10px"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-reset-ltr-white-space",
+      "equals": "nowrap"
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#word",
+        "offset_x": 57,
+        "offset_y": 4
+      },
+      "search_radius": 0,
+      "min_r": 220,
+      "max_g": 60,
+      "max_b": 60
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#check"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-reset-word-width",
+      "equals": "60"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-reset-negative-width",
+      "equals": "55"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-reset-collapsed-width",
+      "equals": "70"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-reset-preserved-width",
+      "equals": "114"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-reset-opacity-width",
+      "equals": "70"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-reset-filter-width",
+      "equals": "70"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-reset-rtl-width",
+      "equals": "140"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-reset-ltr-width",
+      "equals": "140"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#restore"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-restored-word-spacing",
+      "equals": "10px"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-restored-word-white-space",
+      "equals": "nowrap"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-restored-negative-spacing",
+      "equals": "-5px"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-restored-negative-white-space",
+      "equals": "nowrap"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-restored-collapsed-spacing",
+      "equals": "10px"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-restored-collapsed-white-space",
+      "equals": "nowrap"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-restored-preserved-spacing",
+      "equals": "10px"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-restored-preserved-white-space",
+      "equals": "pre"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-restored-opacity-spacing",
+      "equals": "10px"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-restored-opacity-white-space",
+      "equals": "nowrap"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-restored-filter-spacing",
+      "equals": "10px"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-restored-filter-white-space",
+      "equals": "nowrap"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-restored-rtl-spacing",
+      "equals": "10px"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-restored-rtl-white-space",
+      "equals": "nowrap"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-restored-ltr-spacing",
+      "equals": "10px"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-restored-ltr-white-space",
+      "equals": "nowrap"
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#word",
+        "offset_x": 67,
+        "offset_y": 4
+      },
+      "search_radius": 0,
+      "min_r": 220,
+      "max_g": 60,
+      "max_b": 60
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#negative",
+        "offset_x": 52,
+        "offset_y": 4
+      },
+      "search_radius": 0,
+      "min_r": 220,
+      "max_g": 60,
+      "max_b": 60
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#collapsed",
+        "offset_x": 67,
+        "offset_y": 4
+      },
+      "search_radius": 0,
+      "min_r": 220,
+      "max_g": 60,
+      "max_b": 60
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#preserved",
+        "offset_x": 111,
+        "offset_y": 4
+      },
+      "search_radius": 0,
+      "min_r": 220,
+      "max_g": 60,
+      "max_b": 60
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#opacity",
+        "offset_x": 67,
+        "offset_y": 4
+      },
+      "search_radius": 0,
+      "min_r": 220,
+      "max_g": 170,
+      "max_b": 170
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#filter",
+        "offset_x": 67,
+        "offset_y": 4
+      },
+      "search_radius": 0,
+      "min_r": 220,
+      "max_g": 60,
+      "max_b": 60
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#rtl",
+        "offset_x": 52,
+        "offset_y": 4
+      },
+      "search_radius": 0,
+      "min_r": 220,
+      "max_g": 60,
+      "max_b": 60
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#ltr",
+        "offset_x": 47,
+        "offset_y": 16
+      },
+      "search_radius": 0,
+      "min_b": 220,
+      "max_r": 60,
+      "max_g": 60
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#check"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-restored-word-width",
+      "equals": "70"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-restored-negative-width",
+      "equals": "55"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-restored-collapsed-width",
+      "equals": "70"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-restored-preserved-width",
+      "equals": "114"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-restored-opacity-width",
+      "equals": "70"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-restored-filter-width",
+      "equals": "70"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-restored-rtl-width",
+      "equals": "140"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-restored-ltr-width",
+      "equals": "140"
+    }
+  ]
+}

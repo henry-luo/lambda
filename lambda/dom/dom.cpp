@@ -1247,11 +1247,6 @@ static inline void dom_post_insert(DomNode* parent, DomNode* node,
     }
 }
 
-static bool dom_is_generated_pseudo_node(DomNode* node) {
-    if (!node || !node->is_element()) return false;
-    DomElement* elem = node->as_element();
-    return elem->tag_name && elem->tag_name[0] == ':' && elem->tag_name[1] == ':';
-}
 
 static bool dom_is_anonymous_table_wrapper(DomNode* node) {
     if (!node || !node->is_element()) return false;
@@ -5054,6 +5049,7 @@ static int dom_default_tab_index(DomElement* elem) {
 
 static bool dom_is_script_focusable(DomElement* elem) {
     if (!elem || !dom_node_is_connected((DomNode*)elem)) return false;
+    if (dom_engine_content_hidden_for_user_agent(elem)) return false;
     if (elem->has_attribute("hidden")) return false;
     if (dom_is_disabled_for_focus(elem)) return false;
 
@@ -7424,6 +7420,7 @@ static Item dom_focus_method(DomElement* elem, bool focus,
     if (!elem) return make_js_undefined();
     DocState* state = elem->doc ? elem->doc->state : dom_current_state();
     if (focus) {
+        dom_ensure_geometry_snapshot(elem->doc);
         if (dom_is_script_focusable(elem)) {
             View* old_focus = state ? focus_get(state) : nullptr;
             js_document_active_element = elem;
@@ -10252,7 +10249,16 @@ extern "C" Item dom_get_property_impl(Item elem_item, Item prop_name) {
         return dom_fp_text_content(elem_item);
     }
 
-    // textContent / innerText (recursive text extraction)
+    // innerText reads rendered contents; detached/non-rendered elements use textContent.
+    if (prop_id == JS_DOM_PROP_INNER_TEXT) {
+        dom_ensure_geometry_snapshot(elem->doc);
+        char* rendered = dom_engine_element_inner_text(elem);
+        if (rendered) {
+            Item result = js_name_item(rendered);
+            mem_free(rendered);
+            return result;
+        }
+    }
     if (prop_id == JS_DOM_PROP_TEXT_CONTENT || prop_id == JS_DOM_PROP_INNER_TEXT) {
         return dom_fp_text_content(elem_item);
     }
@@ -12832,7 +12838,8 @@ static RdtMatrix dom_svg_ctm(DomElement* elem, bool screen_space) {
     if (screen_space && outermost_svg) {
         RdtMatrix layout_transform;
         if (!view_get_foreign_object_matrix(static_cast<View*>(outermost_svg), &layout_transform, false)) {
-            RdtLogicalPoint origin = view_geometry_node_viewport_origin(static_cast<View*>(outermost_svg));
+            RdtLogicalPoint origin = {};
+            dom_engine_element_viewport_origin(outermost_svg, &origin.x, &origin.y);
             layout_transform = rdt_matrix_translate(origin.x, origin.y);
         }
         matrix = rdt_matrix_multiply(&layout_transform, &matrix);
@@ -14185,8 +14192,8 @@ static DomElement* dom_shadow_element_from_document_point_walk(DomNode* node,
     }
     if (!elem->shadow_root_element()) return nullptr;
 
-    RdtLogicalPoint host = view_geometry_node_viewport_origin(
-        static_cast<View*>(elem));
+    RdtLogicalPoint host = {};
+    dom_engine_element_viewport_origin(elem, &host.x, &host.y);
     DomElement* hit = dom_shadow_element_from_point_walk((DomNode*)elem->shadow_root_element(),
         host.x, host.y, px, py);
     if (hit) return hit;
@@ -15011,6 +15018,8 @@ static bool dom_replace_document_element(DomElement* old_root,
 
     Element* replacement_backing = dom_element_to_element(replacement);
     Element* old_backing = dom_element_to_element(old_root);
+    // D4.5.3: the parser's document list can still name the source of a copied root.
+    Element* old_source = dom_element_render_source(old_root);
     if (!replacement_backing || !old_backing) return false;
 
     Element* input_root = doc->input->root.element;
@@ -15025,12 +15034,12 @@ static bool dom_replace_document_element(DomElement* old_root,
         for (int64_t i = 0; i < input_root->length; i++) {
             Item child = input_root->items[i];
             if (get_type_id(child) == LMD_TYPE_ELEMENT &&
-                child.element == old_backing) {
+                (child.element == old_backing || child.element == old_source)) {
                 old_index = i;
                 break;
             }
         }
-    } else if (input_root == old_backing) {
+    } else if (input_root == old_backing || input_root == old_source) {
         old_index = 0;
     }
     if (old_index < 0) return false;

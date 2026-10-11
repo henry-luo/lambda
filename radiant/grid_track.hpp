@@ -14,7 +14,7 @@
  * 3. Track kind (Track vs Gutter) for gap handling
  * 4. Better fit-content() support
  *
- * Uses C+ style sizing helpers and fixed-capacity arrays for layout scratch
+ * Uses C+ style sizing helpers and scoped growable arrays for layout scratch
  * storage.
  */
 
@@ -25,6 +25,7 @@
 
 #include "../lib/log.h"
 #include "../lib/ownership.hpp"
+#include "../lib/arraylist.hpp"
 
 struct CssValue;
 namespace radiant { float resolve_computed_length_percentage(const CssValue*, float); }
@@ -406,51 +407,82 @@ struct EnhancedGridTrack {
 };
 
 // ============================================================================
-// TrackArray - fixed-size EnhancedGridTrack storage
+// Scoped growable storage shared by tracks, indices, placements and contributions.
 // ============================================================================
 
-/** Maximum number of tracks (content + gutter) in one axis. */
-#define MAX_GRID_TRACKS 64
+template<typename T>
+struct GridArray : lam::ArrayList<T> {
+    using Base = lam::ArrayList<T>;
+    bool complete;
+    bool* owner_complete;
 
-/**
- * Fixed-capacity array of EnhancedGridTrack.
- * Capacity is MAX_GRID_TRACKS which safely handles 16×16 grids with all gaps.
- */
-struct TrackArray {
-    EnhancedGridTrack data[MAX_GRID_TRACKS];  // LARGE_ARRAY_OK: fixed-capacity struct field; bound = MAX_GRID_TRACKS (64) × ~64 B ≈ 4 KiB; layout-pass scratch.
-    size_t count;
-    bool truncation_logged;
-
-    TrackArray() : count(0), truncation_logged(false) {}
-
-    size_t size() const { return count; }
-    bool empty() const { return count == 0; }
-
-    EnhancedGridTrack& operator[](size_t i) { return data[i]; }
-    const EnhancedGridTrack& operator[](size_t i) const { return data[i]; }
-
-    void push_back(const EnhancedGridTrack& t) {
-        if (count < MAX_GRID_TRACKS) {
-            data[count++] = t;
-            return;
-        }
-        if (!truncation_logged) {
-            log_warn("[RAD_CAP_GRID_TRACKS] dropping grid track beyond MAX_GRID_TRACKS=%d", MAX_GRID_TRACKS);
-            truncation_logged = true;
-        }
+    explicit GridArray(bool* owner = nullptr)
+        : Base(MEM_CAT_LAYOUT, 0), complete(true), owner_complete(owner) {}
+    GridArray(const GridArray& source) : GridArray(source.owner_complete) { copy_from(source); }
+    GridArray(GridArray&& source) noexcept
+        : Base(static_cast<Base&&>(source)), complete(source.complete), owner_complete(source.owner_complete) {}
+    GridArray& operator=(const GridArray& source) {
+        if (this != &source) copy_from(source);
+        return *this;
     }
-
-    void reserve(size_t) {} // no-op (pre-allocated)
-
-    /** Remove all elements (reset count, don't destruct — trivially reset) */
-    void clear() { count = 0; truncation_logged = false; }
-
-    // Iterator support for range-based for
-    EnhancedGridTrack* begin() { return data; }
-    EnhancedGridTrack* end()   { return data + count; }
-    const EnhancedGridTrack* begin() const { return data; }
-    const EnhancedGridTrack* end()   const { return data + count; }
+    bool good() const { return complete; }
+    void fail(const char* owner) {
+        complete = false;
+        if (owner_complete) *owner_complete = false;
+        log_error("grid_storage: allocation failed in %s", owner);
+    }
+    bool reserve(size_t count) {
+        if (!complete) return false;
+        if (!Base::reserve(count)) { fail("reserve"); return false; }
+        return true;
+    }
+    bool push_back(const T& value) {
+        if (!complete) return false;
+        if (!Base::push_back(value)) { fail("append"); return false; }
+        return true;
+    }
+    void clear() { Base::clear(); complete = true; }
+    bool copy_from(const GridArray& source) {
+        if (!complete) return false;
+        Base::clear();
+        if (!source.good()) { fail("copy source"); return false; }
+        if (!reserve(source.size())) return false;
+        for (const T& value : source) if (!push_back(value)) return false;
+        return true;
+    }
 };
+
+struct TrackArray : GridArray<EnhancedGridTrack> {};
+
+inline int grid_live_track_count(const TrackArray& tracks, size_t start, size_t span) {
+    if (start >= tracks.size()) return 0;
+    size_t end = span > tracks.size() - start ? tracks.size() : start + span;
+    int count = 0;
+    for (size_t index = start; index < end; index++) {
+        if (tracks[index].kind == GridTrackKind::Track && !tracks[index].is_collapsed) count++;
+    }
+    return count;
+}
+
+// collapsed gutters overlap: keep one gutter between surviving tracks, none at the edges.
+inline bool grid_track_has_gutter_after(const TrackArray& tracks, size_t index) {
+    return index < tracks.size() && !tracks[index].is_collapsed &&
+        tracks[index].kind == GridTrackKind::Track &&
+        grid_live_track_count(tracks, index + 1, tracks.size()) > 0;
+}
+
+inline float grid_track_gaps(const TrackArray& tracks, size_t start, size_t span, float gap) {
+    int count = grid_live_track_count(tracks, start, span);
+    return count > 1 ? (count - 1) * gap : 0.0f;
+}
+
+inline float spanned_tracks_size(const TrackArray& tracks, size_t start, size_t span, float gap) {
+    if (start >= tracks.size()) return 0.0f;
+    size_t end = span > tracks.size() - start ? tracks.size() : start + span;
+    float size = grid_track_gaps(tracks, start, span, gap);
+    for (size_t index = start; index < end; index++) size += tracks[index].base_size;
+    return size;
+}
 
 /** A track is definite when both sizing bounds resolve without content measurement. */
 inline bool grid_track_is_definite(const EnhancedGridTrack& track) {
@@ -472,49 +504,16 @@ inline bool grid_track_allows_content_growth(const EnhancedGridTrack& track) {
         max_type == SizingFunctionType::Fr;
 }
 
-/**
- * Fixed-capacity array of track indices (size_t).
- */
-struct IndexArray {
-    size_t data[MAX_GRID_TRACKS];  // LARGE_ARRAY_OK: fixed-capacity struct field; bound = MAX_GRID_TRACKS (64) × 8 B = 512 B; layout-pass scratch.
-    size_t count;
-    bool truncation_logged;
-
-    IndexArray() : count(0), truncation_logged(false) {}
-
-    size_t size() const { return count; }
-    bool empty() const { return count == 0; }
-
-    void push_back(size_t v) {
-        if (count < MAX_GRID_TRACKS) {
-            data[count++] = v;
-            return;
-        }
-        if (!truncation_logged) {
-            log_warn("[RAD_CAP_GRID_INDEX] dropping grid index beyond MAX_GRID_TRACKS=%d", MAX_GRID_TRACKS);
-            truncation_logged = true;
-        }
-    }
-    void clear() { count = 0; truncation_logged = false; }
-
-    // Filter in-place (replaces erase–remove_if idiom)
+struct IndexArray : GridArray<size_t> {
+    explicit IndexArray(bool* owner = nullptr) : GridArray<size_t>(owner) {}
     template<typename Predicate>
-    void erase_if(Predicate pred) {
-        size_t new_count = 0;
-        for (size_t i = 0; i < count; i++) {
-            if (!pred(data[i]))
-                data[new_count++] = data[i];
+    void erase_if(Predicate predicate) {
+        size_t kept = 0;
+        for (size_t i = 0; i < size(); i++) {
+            if (!predicate((*this)[i])) (*this)[kept++] = (*this)[i];
         }
-        count = new_count;
+        remove_range(kept, size() - kept);
     }
-
-    size_t* begin() { return data; }
-    size_t* end()   { return data + count; }
-    const size_t* begin() const { return data; }
-    const size_t* end()   const { return data + count; }
-
-    size_t& operator[](size_t i) { return data[i]; }
-    const size_t& operator[](size_t i) const { return data[i]; }
 };
 
 } // namespace grid

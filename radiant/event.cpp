@@ -1200,7 +1200,9 @@ void target_block_view(EventContext* evcon, ViewBlock* block) {
             return; // a singular transform has no hittable painted area.
         }
     }
-    evcon->block.x = pa_block.x + block->x;  evcon->block.y = pa_block.y + block->y;
+    RdtLogicalPoint fixed = view_geometry_fixed_scroll_adjustment(block);
+    evcon->block.x = pa_block.x + block->x + fixed.x;
+    evcon->block.y = pa_block.y + block->y + fixed.y;
     MousePositionEvent* event = &evcon->event.mouse_position;
     bool pointer_events_none = event_view_pointer_events_none(
         static_cast<View*>(block));
@@ -1268,7 +1270,7 @@ void target_block_view(EventContext* evcon, ViewBlock* block) {
 
     // children, positioned ones included, paint inside the clip; the block's
     // own border box stays hittable below
-    if (clipped_out) goto RETURN;
+    if (clipped_out || view_contents_are_skipped(block)) goto RETURN;
 
     // Positioned content paints after a custom layout's local signed-z sequence.
     // Hit testing must consume those same layers in exact reverse paint order.
@@ -3176,7 +3178,20 @@ static bool settle_template_retransform(EventContext* evcon,
             break;
         }
     }
-    if (!any_changed) return false;
+    if (!any_changed) {
+        // skipped rebuilds retain live nodes, but the next update uses new result keys.
+        if (evcon) for (int i = 0; i < reported; i++) {
+            DomDocument* doc = event_context_target_document(evcon);
+            dom_rebind_equal_render_result(doc,
+                results[i].old_result, results[i].new_result);
+            if (doc && doc->root && get_type_id(results[i].new_result) == LMD_TYPE_ELEMENT) {
+                // equal delayed markup still needs its render handler to observe new settings.
+                DomElement* retained = dom_find_element_for_source(doc->root, results[i].new_result.element);
+                if (retained) radiant_queue_template_render_events(doc, retained);
+            }
+        }
+        return false;
+    }
     if (evcon) {
         DocState* state = event_context_target_state(evcon);
         bool had_hover = state && state->hover_target;
@@ -8647,24 +8662,29 @@ static Item radiant_deliver_timing_event(Item env_item) {
     Rooted<Item> target_root(roots, env[0]);
     Rooted<Item> event_root(roots, env[1]);
     // document teardown invalidates wrappers and cancels its queued timer jobs.
-    if (!dom_unwrap_element(target_root.get())) return make_js_undefined();
+    DomElement* target = (DomElement*)dom_unwrap_element(target_root.get());
+    if (!target) return make_js_undefined();
+    // queued relevance notifications are discarded if their element was removed.
+    if (radiant_dom_event_type_is(event_root.get(), "contentvisibilityautostatechange") &&
+            !dom_element_is_connected(target)) return make_js_undefined();
     return dom_dispatch_event(target_root.get(), event_root.get());
 }
 
-static void radiant_queue_timing_event(UiContext* uicon, DomElement* target,
+static bool radiant_queue_timing_event(UiContext* uicon, DomElement* target,
     RadiantJsEventBuilder build, void* userdata, const char* css_event_type = nullptr) {
-    if (!uicon || !target || !target->doc) return;
+    if (!uicon || !target || !target->doc) return false;
     EventContext evcon = {};
     evcon.ui_context = uicon; evcon.target_document = target->doc;
     JsCtxScope scope = {};
     bool entered_scope = radiant_js_ctx_enter(&scope, &evcon);
-    if (!entered_scope && (!context || dom_get_document() != target->doc)) return;
+    if (!entered_scope && (!context || dom_get_document() != target->doc)) return false;
     // Lambda documents need no JS timer/closure for an unobserved CSS event.
     // JS realms remain conservative because inline handlers may not be indexed
     // until their DOM wrappers are initialized. Lambda author masks are live.
     bool observed = !css_event_type || dom_document_has_js_realm(target->doc) ||
         dom_event_type_has_js_listeners(css_event_type) ||
         template_registry_has_author_handler(g_template_registry, css_event_type);
+    bool queued = true;
     if (observed) {
         // D5.3.3: target-wrapper allocation and callbacks can collect either argument.
         RootFrame roots(2);
@@ -8672,13 +8692,25 @@ static void radiant_queue_timing_event(UiContext* uicon, DomElement* target,
         Rooted<Item> event_root(roots, build(userdata));
         Item values[2] = {target_root.get(), event_root.get()};
         // listeners may mutate style; the traced task owns its arguments until layout has unwound.
-        js_schedule_native_env_timeout(radiant_deliver_timing_event, 0,
-            (Item){.item = i2it(0)}, values, 2);
+        queued = dom_unwrap_element(target_root.get()) && radiant_dom_event_is(event_root.get()) &&
+            !item_is_error(js_schedule_native_env_timeout(radiant_deliver_timing_event, 0,
+                (Item){.item = i2it(0)}, values, 2));
     }
     if (entered_scope) {
         input_context = scope.saved_input_ctx;
         scope.active = false;
     }
+    return queued;
+}
+
+static Item radiant_build_content_visibility_event(void* userdata) {
+    return js_create_native_content_visibility_event(*(bool*)userdata);
+}
+
+bool radiant_queue_content_visibility_event(UiContext* uicon, DomElement* target,
+        bool skipped) {
+    return radiant_queue_timing_event(uicon, target, radiant_build_content_visibility_event,
+        &skipped, "contentvisibilityautostatechange");
 }
 
 struct RadiantTimingEventData {
@@ -11295,6 +11327,8 @@ static bool dropdown_click_is_outside(EventContext* evcon, float mouse_x, float 
  */
 bool is_view_focusable(View* view) {
     if (!view) return false;
+    if (view->is_element() &&
+        view_content_visibility_hides(view->as_element(), CONTENT_VISIBILITY_USER_AGENT)) return false;
 
     // Elements that are focusable by default:
     // - <a> with href
@@ -11359,6 +11393,8 @@ bool is_view_focusable(View* view) {
 }
 
 bool is_view_programmatically_focusable(View* view) {
+    if (view && view->is_element() &&
+        view_content_visibility_hides(view->as_element(), CONTENT_VISIBILITY_USER_AGENT)) return false;
     if (is_view_focusable(view)) return true;
     if (!view || !view->is_element()) return false;
     ViewElement* elem = lam::view_require_element(view);
@@ -14438,10 +14474,9 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             // End selection mode
             if (selection_has_projection(state)) {
                 dispatch_selectionchange(&evcon, state, evcon.target);
-                selection_transition(state, SELECTION_TRANSITION_END_POINTER_SELECTION, NULL);
-                EditingControllerHooks hooks = editing_controller_hooks();
-                editing_controller_drag_autoscroll_stop(state, &hooks);
             }
+            // a click handler may clear the range; mouse-up still ends its pointer gesture.
+            selection_transition(state, SELECTION_TRANSITION_END_POINTER_SELECTION, NULL);
             EditingControllerHooks hooks = editing_controller_hooks();
             editing_controller_drag_autoscroll_stop(state, &hooks);
         }

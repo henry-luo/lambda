@@ -15915,6 +15915,19 @@ JS_DEFINE_HOST_CTOR_BODY_2(transition_event, js_ctor_transition_event_fn)
 JS_DEFINE_HOST_CTOR_BODY_2(animation_event, js_ctor_animation_event_fn)
 JS_DEFINE_HOST_CTOR_BODY_2(webgl_context_event, js_ctor_webgl_context_event_fn)
 
+Item js_intrinsic_ctor_content_visibility_auto_state_change_event_construct_body(
+        Item, Item* args, int argc, Item new_target, uint64_t*) {
+    if (argc < 1)
+        return js_throw_type_error("ContentVisibilityAutoStateChangeEvent requires a type argument");
+    RootFrame roots(2);
+    Rooted<Item> target(roots, new_target);
+    Rooted<Item> result(roots, js_ctor_content_visibility_auto_state_change_event(args[0],
+        argc > 1 ? args[1] : make_js_undefined()));
+    JS_RETURN_IF_ERROR(result.get());
+    return js_apply_constructed_default_prototype(result.get(), target.get(),
+        JS_CLASS_CONTENT_VISIBILITY_AUTO_STATE_CHANGE_EVENT);
+}
+
 Item js_intrinsic_ctor_message_event_construct_body(Item callee, Item* args,
         int argc, Item new_target, uint64_t* result_home) {
     if (argc < 1) return js_throw_type_error("MessageEvent requires a type argument");
@@ -16121,7 +16134,7 @@ static void js_proto_snapshot_bootstrap_constructors() {
         JS_CLASS_INPUT_EVENT, JS_CLASS_POINTER_EVENT, JS_CLASS_TOUCH_EVENT,
         JS_CLASS_STATIC_RANGE,
         JS_CLASS_TRANSITION_EVENT, JS_CLASS_ANIMATION_EVENT, JS_CLASS_WEBGL_CONTEXT_EVENT,
-        JS_CLASS_MESSAGE_EVENT,
+        JS_CLASS_MESSAGE_EVENT, JS_CLASS_CONTENT_VISIBILITY_AUTO_STATE_CHANGE_EVENT,
         0
     };
     for (int i = 0; intrinsic_classes[i]; i++) {
@@ -16863,13 +16876,15 @@ static Item js_create_constructor(const JsBuiltinGlobalSpec* spec) {
         js_function_root_item_if_needed(event_ctor, &event_ctor->prototype);
     }
     // Populate static methods as own properties for all constructors
-    if (ctor_id == JS_CTOR_MESSAGE_EVENT) {
+    if (ctor_id == JS_CTOR_MESSAGE_EVENT ||
+            ctor_id == JS_CTOR_CONTENT_VISIBILITY_AUTO_STATE_CHANGE_EVENT) {
         RootFrame roots(1);
         Rooted<Item> prototype(roots, js_new_object());
         js_initialize_native_constructor_prototype(fn_item, prototype.get());
         js_set_key_cstr(prototype.get(), "constructor", fn_item);
         js_mark_non_enumerable(prototype.get(), js_name_item("constructor"));
-        js_message_event_install_prototype(prototype.get());
+        if (ctor_id == JS_CTOR_MESSAGE_EVENT) js_message_event_install_prototype(prototype.get());
+        else js_content_visibility_event_install_prototype(prototype.get());
     }
     js_populate_constructor_statics(fn_item, name, strlen(name));
     // TypedArray constructors: set up per-type prototype with constructor + BYTES_PER_ELEMENT
@@ -16931,6 +16946,7 @@ static JsClass js_intrinsic_prototype_parent_class(JsClass cls) {
         case JS_CLASS_UI_EVENT:
         case JS_CLASS_TRANSITION_EVENT:
         case JS_CLASS_ANIMATION_EVENT:
+        case JS_CLASS_CONTENT_VISIBILITY_AUTO_STATE_CHANGE_EVENT:
         case JS_CLASS_WEBGL_CONTEXT_EVENT:
         case JS_CLASS_MESSAGE_EVENT:
             return JS_CLASS_EVENT;

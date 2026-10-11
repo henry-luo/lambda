@@ -11,6 +11,7 @@
 #include "../../runtime/lambda-root-frame.hpp"
 #include "../../runtime/root_vector.h"
 #include "../../jube/jube_registry.h"
+#include "radiant_dom_bridge.hpp"
 #include "../../../lib/mem.h"
 #include "../../../lib/str.h"
 #include <math.h>
@@ -49,7 +50,6 @@ struct JsAnimationHost : DomDocumentResourceData {
 struct JsAnimationWrapper { uint64_t id; };
 static JsAnimationHost* animation_hosts;
 static uint64_t animation_host_id=1;
-extern __thread EvalContext* context;
 static void animation_wrapper_destroy(void* data) { mem_free(data); }
 static const JubeTypeDef animation_host_type={"animation_host",JUBE_TYPE_OWNING_NATIVE,nullptr,animation_wrapper_destroy};
 static JsAnimationHost* animation_host(Item receiver) {
@@ -375,16 +375,18 @@ static int animation_host_operate(Item receiver,Item* args,int argc,Item* out) {
 static Item animation_host_construct(Item,Item* args,int argc,Item,uint64_t*) {
     RootFrame roots(2);Rooted<Item> target(roots,argc?args[0]:ItemNull),wrapper(roots,ItemNull);
     auto* element=(DomElement*)dom_unwrap_element(target.get());if(!element||!element->doc||(element->tag()!=MARKUP_NAME_CANVAS&&strcmp(element->tag_name,"scene3d"))) return dom_realm_throw_type_error("Animation host requires its document canvas or scene element");
+    Context* owner=radiant_dom_resource_owner(element->doc);
+    if(!owner) return dom_realm_throw_type_error("Animation host requires a document evaluator");
     unsigned count=0;for(auto* host=animation_hosts;host;host=host->next) count++;
     if(count>=64) return dom_realm_throw_type_error("Animation host limit exceeded");
     auto* host=(JsAnimationHost*)mem_calloc(1,sizeof(JsAnimationHost),MEM_CAT_RENDER);if(!host) return ItemNull;
     host->document=element->doc;host->target=dom_node_ref(element);host->id=animation_host_id++;host->next_binding=1;
-    root_vector_init(&host->roots,(Context*)context,"native animation bindings");
+    root_vector_init(&host->roots,owner,"native animation bindings");
     if(!root_vector_push(&host->roots,ItemNull)||!root_vector_push(&host->roots,ItemNull)) {
         root_vector_destroy(&host->roots);mem_free(host);return ItemNull;
     }
     host->mixer=animation_mixer_create(host,{animation_binding_read,animation_binding_write,animation_binding_event});
-    if(!host->mixer||!dom_document_add_resource(host->document,host,animation_host_destroy)) {animation_host_destroy(host);return ItemNull;}
+    if(!host->mixer||!dom_document_add_resource(host->document,host,animation_host_destroy,host->roots.owner)) {animation_host_destroy(host);return ItemNull;}
     host->next=animation_hosts;animation_hosts=host;
     wrapper.set(vmap_new());auto* data=(JsAnimationWrapper*)mem_alloc(sizeof(JsAnimationWrapper),MEM_CAT_JS_RUNTIME);
     if(!data||get_type_id(wrapper.get())!=LMD_TYPE_VMAP) {mem_free(data);dom_document_release_resource(host->document,host);return ItemNull;}

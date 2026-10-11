@@ -44,6 +44,250 @@
         "test/test_pdf_render_visual_gtest.cpp#StyleContainedGeneratedTextMatchesLiteralPseudosAcrossOutputs"
       ],
       "limits": "complete stacking/depth ordering and non-principal/table/ruby applicability; complete intrinsic-size/visibility interactions; secondary-view geometry/paint containment"
+    },
+    {
+      "properties": [
+        "content-visibility"
+      ],
+      "qualification": "partial",
+      "scope": "distinct computed visible/hidden/auto and used skipping; browsing viewport/nested-scrollport, focus and selection relevance; per-view committed intrinsic-size memory; descendant paint/hit suppression; deferred CSS motion with explicit dirty-callback opacity sampling, resize/intersection observers and innerText filtering; independent hidden block placeholders/pseudo suppression and print auto contents; flat PNG/SVG/PDF and paged preview/physical-PDF comparisons; live changes; queued typed auto-state-change events with readonly skipped, initial/scroll observation, inline handlers and removal/reinsertion; scrollIntoView settles post-scroll relevance before publication; connected proximity history survives disabling auto/display-none; disconnect resets event history while brief reinsertion retains sizing memory; independent hidden placeholders use edition-local committed inner sizes, with failed-composition preservation and retained-generation pixel controls at 1x/2x",
+      "evidence": [
+        "test/ui/css_content_visibility_relevance.json",
+        "test/ui/css_content_visibility_motion.json",
+        "test/ui/css_content_visibility_selection.json",
+        "test/ui/css_content_visibility_observers.json",
+        "test/test_css_animation_gtest.cpp#RememberedContainmentSizesBelongToCommittedSelectedViews",
+        "test/test_css_animation_gtest.cpp#SkippedEffectsDeferLifecycleAndCatchUpOnActivation",
+        "test/test_css_animation_gtest.cpp#SkippedComputedReadsRefreshInheritedEndpointsAndPreserveEvents",
+        "test/test_css_animation_gtest.cpp#VisibilityApplicabilityFollowsSizeContainmentBoxes",
+        "test/test_dom_range_gtest.cpp#InnerTextTrimsAtomicInlineEdgesAndOmitsSkippedContents",
+        "test/test_view_tree_model_gtest.cpp#ContentVisibilityKeepsPagedPlaceholdersAndPrintsAutoContents",
+        "test/test_pdf_render_visual_gtest.cpp#ContentVisibilityKeepsHiddenBoxesAndPrintsAutoContentsAcrossOutputs",
+        "test/ui/css_content_visibility_events.json",
+        "test/js/dom_content_visibility_events.js",
+        "test/ui/css_content_visibility_scroll_into_view.json",
+        "test/ui/css_content_visibility_memory.json",
+        "test/test_view_tree_model_gtest.cpp#RememberedIntrinsicSizesFollowCommittedEditionsAndRetainedPageLeases"
+      ],
+      "limits": "auto retains descendant layout for UA geometry access; broader independent memory lifecycle and fragmentation, top-layer relevance and complete applicability/forced-geometry/lifetime qualification remain open; explicit skipped-motion sampling is bounded to tested opacity endpoints, with font/leading/SVG and other contexts still unqualified; state-change event flags, initial notification interop and complete rendering-task order remain unqualified"
+    },
+    {
+      "properties": [
+        "contain-intrinsic-size",
+        "contain-intrinsic-width",
+        "contain-intrinsic-height",
+        "contain-intrinsic-inline-size",
+        "contain-intrinsic-block-size"
+      ],
+      "qualification": "partial",
+      "scope": "shared strict axis grammar, none/auto none, owner-relative math, shorthand/physical/logical priority, computed inheritance and live writing-mode/font/default resets; intrinsic flex measurement and contained cross-size preservation; independent edition fallbacks and hidden-box export pixels; per-axis automatic-memory removal, explicit size-containment preservation, display-none ancestors and brief/one-update detach controls; independent edition memory publishes at final commit and survives retained-page arena replacement",
+      "evidence": [
+        "test/ui/css_containment_intrinsic_cascade.json",
+        "test/ui/css_content_visibility_relevance.json",
+        "test/test_css_animation_gtest.cpp#IntrinsicSizeGrammarRejectsExtraAxesAndPreservesAutoNone",
+        "test/test_css_animation_gtest.cpp#IntrinsicSizeNoneClearsFallbackWithoutDiscardingAutomaticMemory",
+        "test/test_css_animation_gtest.cpp#IntrinsicSizeMathUsesComputedFontAndClampsNegativeResults",
+        "test/test_css_animation_gtest.cpp#IntrinsicMeasurementsSharePhysicalLogicalCascadeAndComputedInheritance",
+        "test/test_view_tree_model_gtest.cpp#ContentVisibilityKeepsPagedPlaceholdersAndPrintsAutoContents",
+        "test/test_pdf_render_visual_gtest.cpp#ContentVisibilityKeepsHiddenBoxesAndPrintsAutoContentsAcrossOutputs",
+        "test/ui/css_content_visibility_memory.json",
+        "test/test_view_tree_model_gtest.cpp#RememberedIntrinsicSizesFollowCommittedEditionsAndRetainedPageLeases"
+      ],
+      "limits": "complete CSSOM computed serialization, auto-fallback intrinsic measurement, broader independent memory lifecycle and table/ruby/replaced/fragmentation interactions remain unqualified"
+    },
+    {
+      "properties": [
+        "grid-template-columns",
+        "grid-template-rows",
+        "grid-auto-columns",
+        "grid-auto-rows"
+      ],
+      "qualification": "partial",
+      "scope": "typed mixed track math, full inner-box percentage bases, computed inherited lengths, explicit/implicit and cyclic row sizing; post-placement auto-fit collapse on both axes, negative implicit offsets, overlapping collapsed gutters, surviving-track alignment and zero-size intrinsic contributions; browsing frame-settled resize/font/variable/insertion/removal mutations; independent absolute-reference PNG/SVG/PDF pixels at 1x/2x; multiple decoded aliases, fixed/automatic-repeat boundary unions, positive/negative occurrences, anchored named spans and implicit-name fallback, with area/axis/longhand placement and causal retargeting; shared numeric/named start/end span and conflict resolution; growable track/index/item/contribution storage, sparse occupancy, retained full-length area names and dimensions; explicit origin-zero extent [-10000,10000] with clipped crossing areas and one-track edge placement for wholly outside areas, checked repeat counts and allocation-failure propagation; generation-owned resolved track CSSOM snapshots, full-length used values including implicit/collapsed tracks and merged decoded names; computed non-grid owner-font/math/repeat reads; shared placement grammar, integer math, canonical shorthand projection and mutation with retained pending-shorthand grammar; integer-token repeat grammar and typed calculated counts, computation-time rounding/range clamping, nonfinite controls, dimension cancellation with preserved specified grouping, owner-font/custom-property/inherited mutation and caller-pool scratch retirement; empty explicit grids derive their implicit extent from definite positions before automatic spans; calculated-count PNG/SVG/PDF absolute-reference pixels at 1x/2x",
+      "evidence": [
+        "test/ui/css_grid_track_math.json",
+        "test/ui/css_grid_auto_fit.json",
+        "test/test_view_reuse_gtest.cpp#IntrinsicGridUsesResolvedTracksInsteadOfAuthoredLineNames",
+        "test/test_view_reuse_gtest.cpp#GridTrackCloneOwnsMathAndNamesAfterSourcePoolRetirement",
+        "test/test_pdf_render_visual_gtest.cpp#GridTrackMathMatchesLiteralSizesAcrossOutputs",
+        "test/test_pdf_render_visual_gtest.cpp#GridAutoFitCollapsesTracksAndGuttersAcrossOutputs",
+        "test/ui/css_grid_named_lines.json",
+        "test/test_pdf_render_visual_gtest.cpp#GridNamedLinesRetainAliasesAndOccurrencesAcrossOutputs",
+        "test/ui/css_grid_capacity.json",
+        "test/ui/css_grid_extent_policy.json",
+        "test/test_view_reuse_gtest.cpp#SparseOccupancyRetainsNegativeExpansionAndOverwrites",
+        "test/test_view_reuse_gtest.cpp#PlacementRetainsEveryItemBeyondPreviousCapacityInBothFlows",
+        "test/test_view_reuse_gtest.cpp#ExtentClipsCrossingAreasAndMovesWhollyOutsideAreas",
+        "test/test_view_reuse_gtest.cpp#AllocationFailureRetainsExistingEntriesAndPropagatesToSizingOwner",
+        "test/test_view_reuse_gtest.cpp#GridAreasRetainLongNamesAndFullDimensions",
+        "test/test_pdf_render_visual_gtest.cpp#GridCapacityRetainsTracksAndAreaGeometryAcrossOutputs",
+        "test/ui/css_grid_computed.json",
+        "test/test_view_reuse_gtest.cpp#PlacementAndTrackListsRejectInvalidDeclarationsBeforeCascade",
+        "test/test_view_reuse_gtest.cpp#PendingGridProjectionRetainsGrammarAfterSourcePoolRetirement",
+        "test/test_view_reuse_gtest.cpp#GridComputedReadsDoNotRetainProjectionScratch",
+        "test/test_view_tree_model_gtest.cpp#GridUsedTracksRetainOwnerTextAcrossEditionsAndRollback",
+        "test/ui/css_grid_repeat_math.json",
+        "test/ui/css_grid_repeat_structure.json",
+        "test/ui/css_grid_repeat_mutation.json",
+        "test/test_view_reuse_gtest.cpp#RepeatMathRoundsAtComputationAndChecksLiteralGrammar",
+        "test/test_view_reuse_gtest.cpp#EmptyExplicitGridUsesOnlyTheDefiniteNegativeTrackInBothFlows",
+        "test/test_pdf_render_visual_gtest.cpp#GridCalculatedRepeatCountsReachEveryOutput"
+      ],
+      "limits": "pseudo-element CSSOM serialization, broader track grammar and owner-unit contexts, broader intrinsic/alignment/logical-axis cases and independent paged grid remain open; host-turn geometry reads retain the documented non-forcing snapshot contract; area and grid-definition shorthand qualifications are recorded separately; broader extent interactions and export/paged coverage remain bounded to the attached cases; Chromium 152 omits a trailing auto-repeat line-name set without a leading name: three computed-string comparisons remain explicit reference differences, while the normative fixture retains the names per CSS Grid 2 section 7.2.5"
+    },
+    {
+      "properties": [
+        "grid-template-areas"
+      ],
+      "qualification": "partial",
+      "scope": "decoded nonempty equal-width string rows and complete rectangular named areas; dot-run null cells, case-sensitive Unicode/digit-leading names and escaped whitespace; shared parse-time/post-substitution validation and specified/computed canonical serialization; inline and rule mutation/defaulting/restoration with real track geometry; invalid/defaulted/decoded-area PNG/SVG/PDF absolute-reference pixels at 1x/2x",
+      "evidence": [
+        "test/ui/css_grid_area_grammar.json",
+        "test/test_view_reuse_gtest.cpp#AreaRowsValidateDecodedRectanglesAndCanonicalizeCells",
+        "test/test_view_reuse_gtest.cpp#GridAreasRetainLongNamesAndFullDimensions",
+        "test/test_pdf_render_visual_gtest.cpp#GridAreaValidationAndDecodedCellsReachEveryOutput"
+      ],
+      "limits": "pseudo/independent paged contexts remain open; live width/reference cases do not qualify every named-area placement interaction; grid-definition shorthand qualification is recorded separately"
+    },
+    {
+      "properties": [
+        "grid-template",
+        "grid",
+        "grid-auto-flow"
+      ],
+      "qualification": "partial",
+      "scope": "shared grid-definition grammar for explicit tracks, decoded area rows with omitted auto sizes and merged boundary line names, and row/column dense auto-flow with cyclic auto tracks; shorthand reset/preservation and component cascade including importance, inheritance and layer rollback; specified CSSOM decomposition/recomposition, pending-variable member overrides/removal and inline/rule mutations; computed template track functions and legacy resolved grid longhand order, canonical dense flow; owner-pool projection retirement and bounded repeated-read scratch; seven independent absolute-reference PNG/SVG/PDF cases at 1x/2x; calculated repeat counts and actual-grid repeat-boundary name projection, with non-grid computed lists preserving their original name groups; flow-selected secondary-axis locking and primary-axis cursor traversal, sparse locked-item ordering without backfilling, dense packing and order-modified placement; live density/flow-direction changes and restoration with geometry/computed track checks",
+      "evidence": [
+        "test/ui/css_grid_definition.json",
+        "test/ui/css_grid_definition_geometry.json",
+        "test/test_view_reuse_gtest.cpp#DefinitionFormsShareTracksAndOwnProjectedAreaNames",
+        "test/test_view_reuse_gtest.cpp#PendingGridProjectionRetainsGrammarAfterSourcePoolRetirement",
+        "test/test_view_reuse_gtest.cpp#GridComputedReadsDoNotRetainProjectionScratch",
+        "test/test_pdf_render_visual_gtest.cpp#GridDefinitionShorthandsReachEveryOutput",
+        "test/ui/css_grid_repeat_math.json",
+        "test/ui/css_grid_repeat_structure.json",
+        "test/ui/css_grid_repeat_mutation.json",
+        "test/ui/css_grid_flow.json",
+        "test/test_view_reuse_gtest.cpp#LockedAxisPackingAndCursorTransposeAcrossBothFlows",
+        "test/test_pdf_render_visual_gtest.cpp#GridLockedAxesAndSparseCursorReachEveryOutput"
+      ],
+      "limits": "pseudo-element grid shorthand/variable scopes, broader track/owner-unit grammar, additional placement/intrinsic/alignment/logical-axis contexts and independent paged grid remain open"
+    },
+    {
+      "properties": [
+        "grid-area",
+        "grid-row",
+        "grid-column",
+        "grid-row-start",
+        "grid-row-end",
+        "grid-column-start",
+        "grid-column-end"
+      ],
+      "qualification": "partial",
+      "scope": "typed integer math retains specified expressions and owned shorthand projections until owner-font computation; rounding and deferred-zero/span range handling; whole-property CSS-wide defaults cannot name implicit lines; placement components share cascade priority across shorthands, longhands, all and rollback; parent computed inheritance without native grid-item storage, variable rejection/defaulting and causal font/value changes with restoration; anchored names and unanchored named/numeric span conflict handling; caller-pool repeated-read stability and parser-pool retirement; eight independent absolute-reference PNG/SVG/PDF cases at 1x/2x",
+      "evidence": [
+        "test/ui/css_grid_line_math.json",
+        "test/test_view_reuse_gtest.cpp#PlacementMathRetainsExpressionsAcrossProjectionAndOwnerChanges",
+        "test/test_view_reuse_gtest.cpp#GridComputedReadsDoNotRetainProjectionScratch",
+        "test/test_pdf_render_visual_gtest.cpp#GridLineMathAndDefaultingReachEveryOutput"
+      ],
+      "limits": "pseudo-element CSSOM, broader owner-unit/line grammar, logical-axis/alignment/intrinsic interactions and independent paged placement remain open; infinity follows documented INT_MAX computed and origin-zero [-10000,10000] used-placement limits, with six explicit Chromium 152 reference differences"
+    },
+    {
+      "properties": [
+        "text-overflow",
+        "line-clamp",
+        "-webkit-line-clamp",
+        "-webkit-box-orient"
+      ],
+      "qualification": "partial",
+      "scope": "horizontal LTR text paint preserves source rectangles; shared fitting across inline runs, block-styled markers, combining clusters, first-cluster clipping, full case expansion, fitting content and one/two-line clamps; computed reads and live inherited font/color changes, disabling and stylesheet restoration; 14 independent pixel references in Chromium and PNG/SVG/PDF at 1x/2x, including mixed-font opacity/filter fallback; scoped scratch and captured glyph-run font selection survive repeated painting and command-buffer growth; positive-integer clamp grammar rejects decimal/exponent/dimension tokens before cascade, shares typed integer rounding and owner-font computation, copies computed inheritance, defaults invalid substitution and CSS-wide resets, and keeps ancestor counters within their formatting context; 320 live assertions and 16 further independent PNG/SVG/PDF count references at 1x/2x; legacy clamp applies only to a vertical legacy box, with canonical orientation/display computation, explicit inheritance/defaulting and live display/orientation/count changes; unclamped legacy boxes use their orientation without overwriting computed flex-direction; break-all min-content reaches blockified flex/grid spans while unwrapped max-content retains whole-run shaping, and flex-item clamp setup/finalization and overflow refresh share the block-flow contract; 380 live checks and 22 independent visible references at both output scales; horizontal RTL overflow projects retained suffix offsets and marker positions, preserves source capitalization boundaries and supports causal inherited direction/font/color changes, disabling and restoration; 114 live checks include 98 Chromium attributes and 16 paint checks, with 14 additional Chromium and PNG/SVG/PDF visible references at 1x/2x; native SVG plain text shares selected-font outlines with PDF to prevent receiving-viewer font substitution",
+      "evidence": [
+        "test/ui/css_text_overflow_paint.json",
+        "test/test_rdt_vector_gtest.cpp#ScopedProjectionPreservesSourceAndRestoresNestedState",
+        "test/test_rdt_vector_gtest.cpp#RecordedGlyphRunsRetainFontSelectionAfterPaintContextChanges",
+        "test/test_pdf_render_visual_gtest.cpp#OverflowEllipsisAndClampMatchExplicitTextAcrossOutputs",
+        "test/ui/css_text_clamp_math.json",
+        "test/test_view_reuse_gtest.cpp#RejectsNonIntegerTokensAndRetainsCalculatedCounts",
+        "test/test_view_reuse_gtest.cpp#LineClampComputedCountsUseDeclarationOwnersWithoutRetainedScratch",
+        "test/test_pdf_render_visual_gtest.cpp#CalculatedLineClampCountsMatchLiteralCountsAcrossOutputs",
+        "test/ui/css_text_clamp_legacy.json",
+        "test/test_view_reuse_gtest.cpp#OrientationAndDisplayRejectInvalidTokens",
+        "test/test_view_reuse_gtest.cpp#LegacyBoxComputedReadsUseLiveDeclarationsAndReleaseScratch",
+        "test/test_view_reuse_gtest.cpp#BreakAllRetainsPunctuationAndMaxContentWidth",
+        "test/test_pdf_render_visual_gtest.cpp#LegacyBoxClampApplicabilityMatchesVisibleReferences",
+        "test/test_view_reuse_gtest.cpp#BreakAllKeepsShapedMaxContentAdvance",
+        "test/ui/css_text_overflow_rtl.json",
+        "test/test_rdt_vector_gtest.cpp#CapitalizedSlicesPreserveSourceWordBoundaries",
+        "test/test_pdf_render_visual_gtest.cpp#RtlOverflowMatchesVisibleSuffixesAcrossOutputs",
+        "test/test_pdf_render_visual_gtest.cpp#OutlinedHtmlTextRetainsAccessibleNamesWithoutViewerFonts"
+      ],
+      "limits": "mixed-bidi/vertical and RTL clamp, atomic inlines, scrolling and transformed/decorated inline contexts remain unqualified; full grapheme/shaping, modern clamp shorthand/longhands, broader legacy flex mappings and writing-mode applicability, alias component cascade and broader owner-unit/pseudo contexts remain open; the bounded horizontal cases do not complete P1.3 or P2.1"
+    },
+    {
+      "properties": [
+        "text-transform"
+      ],
+      "qualification": "partial",
+      "scope": "strict keyword-set grammar rejects unknown, duplicate and mutually exclusive case tokens before cascade; substituted invalid tokens inherit instead of exposing an earlier declaration; CSS-wide/default and combined-token computed reads use shared cascade serialization; 256 repeated reads per native style retain no document-pool growth; retained paint suffixes preserve source word-start state in fitting, raster, blurred shadows and export; lowercase/uppercase expansion/capitalize and invalid-value RTL consumers have live and independent visible-reference output controls",
+      "evidence": [
+        "test/test_view_reuse_gtest.cpp#TextTransformComputedReadsFollowInheritanceAndReleaseScratch",
+        "test/test_rdt_vector_gtest.cpp#CapitalizedSlicesPreserveSourceWordBoundaries",
+        "test/ui/css_text_overflow_rtl.json",
+        "test/test_pdf_render_visual_gtest.cpp#RtlOverflowMatchesVisibleSuffixesAcrossOutputs"
+      ],
+      "limits": "combined/full-width/math-auto paint, language-sensitive case mapping and general Unicode word identification, source-to-glyph shaping transport and pseudo/vertical contexts remain unqualified"
+    },
+    {
+      "properties": [
+        "word-spacing"
+      ],
+      "qualification": "partial",
+      "scope": "horizontal ASCII separators use computed spacing after collapse/preservation in raster, overflow fitting, recorded effect fallback and native SVG/PDF outlines; positive and negative absolute lengths, inherited live changes, normal/initial/defaulting reads; eight independent references at 1x/2x and 139 browser-derived style/settled-geometry/pixel assertions",
+      "evidence": [
+        "test/ui/css_text_spacing_paint.json",
+        "test/test_rdt_vector_gtest.cpp#SpacingProjectionKeepsComputedAdvancesAndCollapsedByteOffsets",
+        "test/test_rdt_vector_gtest.cpp#ExportSlicesKeepTheirWhitespaceProcessingContext",
+        "test/test_view_reuse_gtest.cpp#TextTransformComputedReadsFollowInheritanceAndReleaseScratch",
+        "test/test_pdf_render_visual_gtest.cpp#TextSpacingSurvivesCollapseOverflowAndEffectsAcrossOutputs"
+      ],
+      "limits": "tabs, complete Unicode separators, cross-node whitespace and shaping, bidi/vertical spacing, complete relative-unit/math/pseudo consumers and decoration placement remain unqualified; interactive geometry follows the documented frame-committed snapshot contract"
+    },
+    {
+      "properties": [
+        "background",
+        "background-image",
+        "content"
+      ],
+      "qualification": "partial",
+      "scope": "single image-set URL/string selection uses the selected view device scale, supported MIME filtering before equal-density source order, shared responsive-image density preference, default/dpi/dpcm/dppx/x and typed math descriptors; invalid descriptors reject before cascade; raster natural sizes divide by selected density; source changes revalidate admission before warm reuse; inherited background gradients and stop/layer arrays retain independent ownership; 44 causal live assertions, 20 selected-image references at two device scales through PNG/SVG/PDF, and logical glyph bitmap/advance conversion in vector effects",
+      "evidence": [
+        "test/ui/css_image_set_selection.json",
+        "test/test_view_tree_model_gtest.cpp#CssImageSetsSelectDensityAfterTypeFilteringAndPreserveSourceOrder",
+        "test/test_view_tree_model_gtest.cpp#CssImageSetInvalidDescriptorsRejectBeforeCascade",
+        "test/test_view_tree_model_gtest.cpp#CssImageSetReplacementDoesNotRetireAnInheritedGradientOwner",
+        "test/test_view_tree_model_gtest.cpp#CssImageSetResourceChangesRevalidateAdmissionBeforeWarmReuse",
+        "test/test_pdf_render_visual_gtest.cpp#CssImageSetsMatchSelectedNaturalImageSizesAcrossOutputs",
+        "test/test_rdt_vector_gtest.cpp#EffectGlyphBitmapsAndAdvancesUseLogicalPaintCoordinates"
+      ],
+      "limits": "multilayer ordering, per-layer descriptors/blending, transformed sampling, generated-gradient replacement, computed serialization and registered values, broader border/list image consumers and independent/paged CSS-image producers remain unqualified; Chromium agrees on 18/20 export references and 44 live assertions, while both pseudo-image export references retain the CSS Content draft versus historical inline-baseline compatibility difference (CI-17)"
+    },
+    {
+      "properties": [
+        "list-style",
+        "list-style-image",
+        "border-image",
+        "border-image-source"
+      ],
+      "qualification": "partial",
+      "scope": "shared image-kind recognition and density/type selection for URL list/border images; stylesheet-relative sources retain their base; raster marker natural dimensions and border auto widths respect selected density; valid list images override a none marker string; explicit none stops image inheritance; retained markers refresh source and suppression on mutations and safely reuse their element-owned fonts; 256 repeated resolutions and independent border URL/gradient inheritance/replacement cycles retain bounded pool ownership; shared nine-slice raster/SVG/PDF geometry with owned deferred gradient stops; 54 causal live assertions at two device scales; untranslated and translated marker/image/clip paint and export extents; 28 visible image/linear-gradient references through three outputs",
+      "evidence": [
+        "test/ui/css_image_set_parts.json",
+        "test/test_view_tree_model_gtest.cpp#CssImageSetListAndBorderConsumersRetainDensityAndStylesheetBase",
+        "test/test_view_tree_model_gtest.cpp#BorderImageReplacementPreservesInheritedOwnerAndReleasesEachPayload",
+        "test/test_pdf_render_visual_gtest.cpp#CssImageSetMarkersAndBordersKeepVisiblePixelsAcrossOutputs"
+      ],
+      "limits": "outside URL-marker placement differs from Chromium although selected natural size agrees; generated-gradient marker export, radial/conic and SVG URL border sources, broader image grammar/defaulting/CSSOM, broader transformed sampling and projective export, and independent/paged producers remain unqualified; pure device-scale repaint can retain its previous selection under CSS Images UA policy/RSC10; causal declaration changes after the transition are qualified; PDF profile/edge rasterization and per-format canvas padding differ, so exact pixel references are within each output format and independent selected-color coverage excludes omitted images"
     }
   ]
 }

@@ -1,5 +1,7 @@
 #include "radiant_history.hpp"
-#include "radiant_host_api.hpp"
+#include "radiant_dom_bridge.hpp"
+#include "../../runtime/root_vector.h"
+#include "../../runtime/heap_api.h"
 #include "../../input/css/dom_element.hpp"
 #include "../../../lib/arraylist.h"
 #include "../../../lib/log.h"
@@ -10,11 +12,12 @@
 typedef struct RadiantHistoryEntry {
     Item state;
     Url* url;
-    bool rooted;
+    RootVector roots;
 } RadiantHistoryEntry;
 
 typedef struct RadiantHistoryState : DomDocumentResourceData {
     DomDocument* document;
+    Context* owner;
     ArrayList* entries;
     int index;
     bool manual_scroll_restoration;
@@ -27,9 +30,7 @@ static Url* history_copy_url(const Url* url) {
 
 static void history_entry_destroy(RadiantHistoryEntry* entry) {
     if (!entry) return;
-    if (entry->rooted && radiant_host_api && radiant_host_api->gc) {
-        radiant_host_api->gc->unregister_root(&entry->state.item);
-    }
+    root_vector_destroy(&entry->roots);
     if (entry->url) url_destroy(entry->url);
     mem_free(entry);
 }
@@ -46,6 +47,25 @@ static void history_state_destroy(DomDocumentResourceData* data) {
     mem_free(history);
 }
 
+static void history_retire_runtime(DomDocumentResourceData* data) {
+    auto* history = (RadiantHistoryState*)data;
+    for (int i = 0; history->entries && i < history->entries->length; i++) {
+        auto* entry = (RadiantHistoryEntry*)arraylist_get(history->entries, i);
+        root_vector_destroy(&entry->roots);
+        entry->state = ItemNull;
+    }
+    // session history URLs survive the realm; heap-backed state cannot (D5.3.3).
+    history->owner = nullptr;
+}
+
+static bool history_bind_runtime(RadiantHistoryState* history) {
+    Context* owner = radiant_dom_resource_owner(history->document);
+    if (!owner) return true;
+    if (!dom_document_bind_resource_runtime(history->document, history, owner, history_retire_runtime)) return false;
+    history->owner = owner;
+    return true;
+}
+
 static RadiantHistoryState* history_find(DomDocument* document) {
     if (!document) return nullptr;
     for (DomDocumentResource* resource = document->resources;
@@ -57,7 +77,7 @@ static RadiantHistoryState* history_find(DomDocument* document) {
     return nullptr;
 }
 
-static RadiantHistoryEntry* history_entry_create(Item state, Url* url) {
+static RadiantHistoryEntry* history_entry_create(RadiantHistoryState* history, Item state, Url* url) {
     if (!url) return nullptr;
     RadiantHistoryEntry* entry = (RadiantHistoryEntry*)mem_calloc(
         1, sizeof(RadiantHistoryEntry), MEM_CAT_JS_RUNTIME);
@@ -65,12 +85,13 @@ static RadiantHistoryEntry* history_entry_create(Item state, Url* url) {
         url_destroy(url);
         return nullptr;
     }
-    entry->state = state;
+    entry->state = ItemNull;
     entry->url = url;
-    if (radiant_host_api && radiant_host_api->gc) {
-        radiant_host_api->gc->register_root(&entry->state.item);
-        entry->rooted = true;
-    }
+    if (history->owner && heap_generation_for(history->owner)) {
+        root_vector_bind_external(&entry->roots, history->owner, &entry->state, 1, "document history state");
+        if (!root_vector_ensure_external(&entry->roots)) { history_entry_destroy(entry); return nullptr; }
+    } else if (state.item != ItemNull.item) { history_entry_destroy(entry); return nullptr; }
+    entry->state = state;
     return entry;
 }
 
@@ -79,7 +100,7 @@ static bool history_seed_initial_entry(RadiantHistoryState* history,
     if (!history || !history->entries || history->entries->length > 0 ||
         !document || !document->url) return false;
     RadiantHistoryEntry* initial = history_entry_create(
-        ItemNull, history_copy_url(document->url));
+        history, ItemNull, history_copy_url(document->url));
     if (!initial || !arraylist_append(history->entries, initial)) {
         history_entry_destroy(initial);
         return false;
@@ -91,6 +112,7 @@ static bool history_seed_initial_entry(RadiantHistoryState* history,
 static RadiantHistoryState* history_get(DomDocument* document) {
     RadiantHistoryState* history = history_find(document);
     if (history) {
+        if (!history_bind_runtime(history)) return nullptr;
         // The JS realm can bind the document before its final URL is assigned;
         // seed the retained history state once that URL becomes available.
         history_seed_initial_entry(history, document);
@@ -111,6 +133,7 @@ static RadiantHistoryState* history_get(DomDocument* document) {
         return nullptr;
     }
 
+    if (!history_bind_runtime(history)) { dom_document_release_resource(document, history); return nullptr; }
     history_seed_initial_entry(history, document);
     return history;
 }
@@ -185,7 +208,8 @@ extern "C" int radiant_history_length(DomDocument* document) {
 
 extern "C" Item radiant_history_state(DomDocument* document) {
     RadiantHistoryEntry* entry = history_current(history_get(document));
-    return entry ? entry->state : ItemNull;
+    Item* value = entry ? root_vector_external_at(&entry->roots, 0) : nullptr;
+    return value ? *value : ItemNull;
 }
 
 extern "C" const char* radiant_history_scroll_restoration(DomDocument* document) {
@@ -199,7 +223,7 @@ extern "C" bool radiant_history_push_state(
     Url* resolved = history_resolve_url(document, url_text);
     if (!history || !resolved) return false;
 
-    RadiantHistoryEntry* entry = history_entry_create(cloned_state, resolved);
+    RadiantHistoryEntry* entry = history_entry_create(history, cloned_state, resolved);
     if (!entry) return false;
     history_truncate_forward(history);
     if (!arraylist_append(history->entries, entry)) {
@@ -221,7 +245,7 @@ extern "C" bool radiant_history_replace_state(
         return false;
     }
 
-    RadiantHistoryEntry* replacement = history_entry_create(cloned_state, resolved);
+    RadiantHistoryEntry* replacement = history_entry_create(history, cloned_state, resolved);
     if (!replacement) return false;
     arraylist_set(history->entries, history->index, replacement);
     history_entry_destroy(current);
@@ -242,7 +266,8 @@ extern "C" bool radiant_history_go(
     if (!next_entry || !history_apply_document_url(document, next_entry->url)) return false;
     history->index = next_index;
     if (traversal) {
-        traversal->state = next_entry->state;
+        Item* value = root_vector_external_at(&next_entry->roots, 0);
+        traversal->state = value ? *value : ItemNull;
         traversal->old_url = url_get_href(old_entry->url);
         traversal->new_url = url_get_href(next_entry->url);
         traversal->hash_changed = history_fragments_differ(old_entry->url, next_entry->url);
@@ -270,7 +295,7 @@ extern "C" bool radiant_history_set_location(
         return false;
     }
 
-    RadiantHistoryEntry* entry = history_entry_create(ItemNull, resolved);
+    RadiantHistoryEntry* entry = history_entry_create(history, ItemNull, resolved);
     if (!entry) return false;
     history_truncate_forward(history);
     if (!arraylist_append(history->entries, entry)) {

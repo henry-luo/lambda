@@ -9,6 +9,31 @@
 #include <math.h>
 #include <string.h>
 
+static Rect marker_image_rect(ViewSpan* marker, const MarkerProp* prop,
+                              float origin_x, float origin_y, float font_size, float scale) {
+    float width = (prop->content_width > 0.0f ? prop->content_width : prop->width) * scale;
+    float height = prop->height * scale;
+    float x = origin_x + marker->x * scale;
+    if (prop->is_outside) x += prop->width * scale - font_size - width / 2.0f;
+    return {x, origin_y + (marker->y + marker->height / 2.0f) * scale - height / 2.0f,
+        width, height};
+}
+
+bool render_paint_marker_image(PaintList* paint, UiContext* ui, ViewSpan* marker,
+                              float origin_x, float origin_y, FontBox* font) {
+    if (!paint || !ui || !marker || !marker->is_element()) return false;
+    DomElement* element = lam::dom_require_element(lam::view_dom_node(marker));
+    MarkerProp* prop = element->marker_prop();
+    if (!prop || !prop->image.url || strcmp(prop->image.url, "none") == 0) return false;
+    ImageSurface* image = load_document_image(ui->document, ui, prop->image.url);
+    if (!image) return false;
+    float font_size = element->font ? font_prop_used_size(element->font)
+        : font && font->style ? font_prop_used_size(font->style) : 16.0f;
+    Rect rect = marker_image_rect(marker, prop, origin_x, origin_y, font_size, 1.0f);
+    PaintImageBox box = {lam::up(image), ui->font_ctx, rect, rect, 1.0f, 255, true};
+    return render_paint_image_box(paint, &box);
+}
+
 void render_marker_view(RasterRenderContext* rdcon, ViewSpan* marker) {
     if (!marker || !marker->is_element()) return;
 
@@ -21,24 +46,28 @@ void render_marker_view(RasterRenderContext* rdcon, ViewSpan* marker) {
         ? FontBox{lam::up(elem->font), font_prop_used_size(elem->font)} : rdcon->font;
     FontBox* marker_font = &marker_font_box;
 
-    float x = rdcon->block.x + marker->x;
-    float y = rdcon->block.y + marker->y;
-    float width = marker_prop->width;
+    // layout marker geometry is logical; this legacy raster painter consumes physical coordinates.
+    float scale = rdcon->raster_scale;
+    float x = rdcon->block.x + marker->x * scale;
+    float y = rdcon->block.y + marker->y * scale;
+    float width = marker_prop->width * scale;
+    float marker_height = marker->height * scale;
+    float image_height = marker_prop->height * scale;
     float content_width = marker_prop->content_width > 0.0f
-        ? marker_prop->content_width : width;
-    float bullet_size = marker_prop->bullet_size;
+        ? marker_prop->content_width * scale : width;
+    float bullet_size = marker_prop->bullet_size * scale;
     CssEnum marker_type = marker_prop->marker_type;
     Color color = marker_prop->has_color ? marker_prop->color : rdcon->color;
     const FontMetrics* marker_metrics = font_box_handle(marker_font)
         ? font_get_metrics(font_box_handle(marker_font)) : NULL;
     float marker_font_size = marker_metrics
-        ? font_handle_get_physical_size_px(font_box_handle(marker_font)) : 16.0f;
+        ? font_handle_get_physical_size_px(font_box_handle(marker_font)) : 16.0f * scale;
 
 
     if (marker_prop->is_image_marker) {
         Rect image_rect = {
-            x, y + (marker->height - marker_prop->height) / 2.0f,
-            content_width, marker_prop->height
+            x, y + (marker_height - image_height) / 2.0f,
+            content_width, image_height
         };
         switch (marker_prop->image.gradient_type) {
             case GRADIENT_LINEAR:
@@ -82,26 +111,21 @@ void render_marker_view(RasterRenderContext* rdcon, ViewSpan* marker) {
             image_surface_ensure_decoded(img, img->width, img->height);
             // Paint the decoded source into the used marker box; raw pixels
             // would leave intrinsic images unzoomed after layout scales them.
-            float img_w = content_width > 0.0f ? content_width : (float)img->width;
-            float img_h = marker_prop->height > 0.0f ? marker_prop->height : (float)img->height;
-            float ix = x;
-            if (marker_prop->is_outside) {
-                // outside image markers align to the font-relative marker field;
-                // placing them at the box start incorrectly anchors post-image space.
-                ix = x + width - marker_font_size - img_w / 2.0f;
-            }
-            float iy = y + marker->height / 2.0f - img_h / 2.0f;
+            Rect rect = marker_image_rect(marker, marker_prop, rdcon->block.x, rdcon->block.y,
+                marker_font_size, scale);
             // display-list image replay expects decoded dimensions and uint32_t row stride.
             int src_w = img->decoded_width > 0 ? img->decoded_width : img->width;
             int src_h = img->decoded_height > 0 ? img->decoded_height : img->height;
+            // image markers follow the active transform of their originating list item.
             rc_draw_image(rdcon, (uint32_t*)img->pixels, src_w, src_h,
-                          img->pitch / 4, ix, iy, img_w, img_h, 255, nullptr, img);
+                          img->pitch / 4, rect.x, rect.y, rect.width, rect.height, 255,
+                          render_state_current_transform(rdcon), img);
             return;
         }
     }
 
     float marker_cx = x + width - marker_font_size;
-    float marker_cy = y + marker->height / 2.0f;
+    float marker_cy = y + marker_height / 2.0f;
 
     switch (marker_type) {
         case CSS_VALUE_DISC: {
@@ -116,7 +140,7 @@ void render_marker_view(RasterRenderContext* rdcon, ViewSpan* marker) {
 
         case CSS_VALUE_CIRCLE: {
             float radius = bullet_size / 2.0f;
-            float stroke_width = 1.0f;
+            float stroke_width = scale;
 
             RdtPath* p = rdt_path_new();
             rdt_path_add_circle(p, marker_cx, marker_cy, radius - stroke_width/2, radius - stroke_width/2);
@@ -190,7 +214,7 @@ void render_marker_view(RasterRenderContext* rdcon, ViewSpan* marker) {
                     total_text_width += glyph ? glyph->advance_x + marker_font->style->letter_spacing * s : (marker_font->style->space_width * s);
                 }
 
-                float tx = x + (width * s) - total_text_width;
+                float tx = x + width - total_text_width;
                 p = marker_prop->text_content;
                 while (p < marker_end) {
                     uint32_t cp;

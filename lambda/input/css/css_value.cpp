@@ -10,10 +10,15 @@ extern "C" {
 }
 #include "css_value.hpp"
 #include "css_style.hpp"
+#include "css_style_node.hpp"
+#include "css_formatter.hpp"
 
 #include "../../../lib/color.h"
 #include "../../../lib/strbuf.h"
 #include "../../../lib/arraylist.h"
+#include "../../../lib/arraylist.hpp"
+#include "../../../lib/hashmap_typed.hpp"
+#include "../../../lib/math_checked.hpp"
 #include <math.h>
 
 static double css_color_clamp(double value, double maximum = 1.0) {
@@ -444,6 +449,78 @@ bool css_dimension_to_canonical(CssUnit unit, double value, CssUnit* canonical_u
     return true;
 }
 
+CssImageKind css_value_image_kind(const CssValue* value) {
+    if (!value) return CSS_IMAGE_NONE;
+    if (value->type == CSS_VALUE_TYPE_URL) return CSS_IMAGE_URL;
+    if (value->type != CSS_VALUE_TYPE_FUNCTION || !value->data.function) return CSS_IMAGE_NONE;
+    static const struct { const char* name; CssImageKind kind; } functions[] = {
+        {"url", CSS_IMAGE_URL},
+        {"linear-gradient", CSS_IMAGE_LINEAR_GRADIENT},
+        {"repeating-linear-gradient", CSS_IMAGE_LINEAR_GRADIENT},
+        {"radial-gradient", CSS_IMAGE_RADIAL_GRADIENT},
+        {"repeating-radial-gradient", CSS_IMAGE_RADIAL_GRADIENT},
+        {"conic-gradient", CSS_IMAGE_CONIC_GRADIENT},
+        {"repeating-conic-gradient", CSS_IMAGE_CONIC_GRADIENT},
+        {"image-set", CSS_IMAGE_SET}, {"-webkit-image-set", CSS_IMAGE_SET}
+    };
+    for (const auto& function : functions)
+        if (css_function_name_is(value->data.function, function.name)) return function.kind;
+    return CSS_IMAGE_NONE;
+}
+
+bool css_value_is_image_set(const CssValue* value) {
+    return css_value_image_kind(value) == CSS_IMAGE_SET;
+}
+
+static bool css_value_contains_image_set(const CssValue* value);
+
+bool css_image_set_option(const CssValue* value, CssImageSetOption* option) {
+    if (!value || !option) return false;
+    const bool list = value->type == CSS_VALUE_TYPE_LIST;
+    const int count = list ? value->data.list.count : 1;
+    if (count <= 0 || (list && (!value->data.list.values || value->data.list.comma_separated))) return false;
+    auto part = [&](int index) { return list ? value->data.list.values[index] : value; };
+    const CssValue* image = part(0);
+    if (!image || css_value_contains_image_set(image)) return false;
+    if (image->type != CSS_VALUE_TYPE_STRING && css_value_image_kind(image) == CSS_IMAGE_NONE)
+        return false;
+    CssImageSetOption result = {image, nullptr, 1.0};
+    const CssMathEvaluationContext context = {};
+    bool has_resolution = false;
+    for (int index = 1; index < count; index++) {
+        const CssValue* descriptor = part(index);
+        if (!descriptor) return false;
+        if (descriptor->type == CSS_VALUE_TYPE_FUNCTION && descriptor->data.function &&
+                css_function_name_is(descriptor->data.function, "type")) {
+            const CssFunction* function = descriptor->data.function;
+            if (result.type || function->arg_count != 1 || !function->args || !function->args[0] ||
+                    function->args[0]->type != CSS_VALUE_TYPE_STRING) return false;
+            result.type = function->args[0]->data.string;
+        } else {
+            CssMathResult resolution = css_math_evaluate(descriptor, &context);
+            if (has_resolution || !resolution.resolved || resolution.type != CSS_MATH_RESOLUTION ||
+                    !isfinite(resolution.value)) return false;
+            if (descriptor->type == CSS_VALUE_TYPE_LENGTH && resolution.value < 0.0) return false;
+            // computed math is range-clamped; a zero-density option is an invalid image.
+            result.resolution = fmax(0.0, resolution.value);
+            has_resolution = true;
+        }
+    }
+    *option = result;
+    return true;
+}
+
+bool css_image_set_valid(const CssValue* value) {
+    if (!css_value_is_image_set(value)) return false;
+    const CssFunction* function = value->data.function;
+    if (!function->args || function->arg_count <= 0) return false;
+    for (int index = 0; index < function->arg_count; index++) {
+        CssImageSetOption option;
+        if (!css_image_set_option(function->args[index], &option)) return false;
+    }
+    return true;
+}
+
 bool css_viewport_length_to_px(CssUnit unit, double value, double width,
                                double height, bool vertical_inline_axis,
                                double* pixels) {
@@ -482,11 +559,670 @@ const char* css_math_token_name(const CssValue* value) {
     return NULL;
 }
 
-enum CssValueSearch {CSS_SEARCH_VAR, CSS_SEARCH_PENDING, CSS_SEARCH_LENGTH_UNIT, CSS_SEARCH_PERCENTAGE};
+struct CssGridAreaIndex {
+    const char* name;
+    size_t name_length;
+    size_t index;
+};
+
+struct CssGridAreaParseState {
+    TypedHashMap<CssGridAreaIndex, HashMapLenStrMemberKeyOps<CssGridAreaIndex,
+        &CssGridAreaIndex::name, &CssGridAreaIndex::name_length>> names = {};
+    lam::ArrayList<CssGridAreaBounds> areas{MEM_CAT_INPUT_CSS, 0};
+    CssGridAreaDimensions dimensions = {};
+    size_t serialization_capacity = 5;
+    ~CssGridAreaParseState() { names.destroy(); }
+
+    bool add(const char* name, size_t length, size_t row, size_t column) {
+        if (!names.initialized() && !names.init(16)) return false;
+        CssGridAreaIndex key{name, length, areas.size()};
+        CssGridAreaIndex* existing = names.get(key);
+        if (!existing) {
+            if (!areas.push_back(CssGridAreaBounds{name, length, row, row, column, column, 1})) return false;
+            names.set(key);
+            return !names.oom();
+        }
+        CssGridAreaBounds& area = areas[existing->index];
+        area.last_row = row;
+        if (column < area.first_column) area.first_column = column;
+        if (column > area.last_column) area.last_column = column;
+        return lam::checked_add(area.cells, 1, &area.cells);
+    }
+};
+
+// CSS Grid §7.3 splits decoded cell tokens; a dot run occupies one null cell.
+static bool css_grid_next_area_cell(const char** cursor, const char** name, size_t* length) {
+    while (css_is_whitespace((unsigned char)**cursor)) (*cursor)++;
+    *name = *cursor;
+    unsigned char first = (unsigned char)**cursor;
+    if (first == '.') {
+        while (**cursor == '.') (*cursor)++;
+        *name = nullptr;
+    } else if (css_is_name_char(first)) {
+        while (**cursor && css_is_name_char((unsigned char)**cursor)) (*cursor)++;
+    } else return false;
+    *length = *name ? (size_t)(*cursor - *name) : 0;
+    return true;
+}
+
+static const CssValue* css_grid_area_row(const CssValue* value, size_t row) {
+    return value->type == CSS_VALUE_TYPE_LIST ? value->data.list.values[row] : value;
+}
+
+static bool css_grid_parse_template_areas(const CssValue* value, CssGridAreaParseState* parsed) {
+    if (!value) return false;
+    if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_NONE) return true;
+    size_t rows = 1;
+    if (value->type == CSS_VALUE_TYPE_LIST) {
+        if (value->data.list.comma_separated || value->data.list.count <= 0 || !value->data.list.values) return false;
+        rows = (size_t)value->data.list.count;
+    }
+    for (size_t row = 0; row < rows; row++) {
+        const CssValue* line = css_grid_area_row(value, row);
+        if (!line || line->type != CSS_VALUE_TYPE_STRING || !line->data.string) return false;
+        const char* cursor = line->data.string;
+        size_t column = 0, capacity = 0;
+        if (!lam::checked_mul_add(strlen(cursor), 2, 4, &capacity) ||
+            !lam::checked_add(parsed->serialization_capacity, capacity, &parsed->serialization_capacity)) return false;
+        while (true) {
+            while (css_is_whitespace((unsigned char)*cursor)) cursor++;
+            if (!*cursor) break;
+            const char* name;
+            size_t length;
+            if (!css_grid_next_area_cell(&cursor, &name, &length) ||
+                (name && !parsed->add(name, length, row, column))) return false;
+            column++;
+        }
+        if (!column || (row && column != parsed->dimensions.columns)) return false;
+        parsed->dimensions.columns = column;
+    }
+    // distinct cells fill an area's bounding rectangle exactly iff its cardinality agrees.
+    for (const CssGridAreaBounds& area : parsed->areas) {
+        size_t rectangle;
+        if (!lam::checked_mul(area.last_row - area.first_row + 1,
+            area.last_column - area.first_column + 1, &rectangle) || rectangle != area.cells) return false;
+    }
+    parsed->dimensions.rows = rows;
+    return true;
+}
+
+bool css_grid_visit_template_areas(const CssValue* value, CssGridAreaDimensions* dimensions,
+        CssGridAreaVisitor visitor, void* context) {
+    if (dimensions) *dimensions = {};
+    CssGridAreaParseState parsed;
+    if (!css_grid_parse_template_areas(value, &parsed)) return false;
+    if (visitor) for (const CssGridAreaBounds& area : parsed.areas)
+        if (!visitor(area, context)) return false;
+    if (dimensions) *dimensions = parsed.dimensions;
+    return true;
+}
+
+String* css_grid_serialize_template_areas(Pool* pool, const CssValue* value) {
+    CssGridAreaParseState parsed;
+    if (!pool || !css_grid_parse_template_areas(value, &parsed)) return nullptr;
+    StringBuf* output = stringbuf_new_cap(pool, parsed.serialization_capacity);
+    if (!output) return nullptr;
+    if (!parsed.dimensions.rows) stringbuf_append_str(output, "none");
+    for (size_t row = 0; row < parsed.dimensions.rows; row++) {
+        if (row) stringbuf_append_char(output, ' ');
+        stringbuf_append_char(output, '"');
+        const char* cursor = css_grid_area_row(value, row)->data.string;
+        for (size_t column = 0; column < parsed.dimensions.columns; column++) {
+            const char* name;
+            size_t length;
+            if (!css_grid_next_area_cell(&cursor, &name, &length)) return nullptr;
+            if (column) stringbuf_append_char(output, ' ');
+            if (name) stringbuf_append_str_n(output, name, length);
+            else stringbuf_append_char(output, '.');
+        }
+        stringbuf_append_char(output, '"');
+    }
+    return stringbuf_to_string(output);
+}
+
+static const char* css_grid_named_line(const CssValue* value) {
+    const char* name = css_math_token_name(value);
+    // CSS-wide defaults apply to the whole property and cannot name implicit lines.
+    if (!name || css_value_is_global_keyword(value) || str_ieq_cstr(name, "span") || strcmp(name, "/") == 0 ||
+        name[0] == '[' || name[0] == ']' ||
+        (value->type == CSS_VALUE_TYPE_KEYWORD && str_ieq_cstr(name, "auto"))) {
+        return nullptr;
+    }
+    return name;
+}
+
+bool css_grid_line_reference(const CssValue* const* parts, size_t count,
+                                    CssGridLineReference* reference, const CssMathEvaluationContext* math_context) {
+    *reference = {};
+    if (!parts || !count || count > 3) return false;
+    bool math_number = false;
+    bool number_resolved = true;
+    for (size_t i = 0; i < count; i++) {
+        const CssValue* part = parts[i];
+        if (!part) return false;
+        const char* identifier = css_math_token_name(part);
+        if (identifier && str_ieq_cstr(identifier, "span")) {
+            if (reference->span || (i != 0 && i != count - 1)) return false;
+            reference->span = true;
+        } else if (part->type == CSS_VALUE_TYPE_NUMBER || part->type == CSS_VALUE_TYPE_FUNCTION) {
+            if (reference->has_number) return false;
+            if (!css_integer_value_valid(part)) return false;
+            double number = 0;
+            math_number = part->type == CSS_VALUE_TYPE_FUNCTION;
+            CssMathEvaluationContext empty = {};
+            number_resolved = css_compute_integer_value(part, math_context ? math_context : &empty,
+                -(double)INT_MAX, (double)INT_MAX, &number);
+            // relative units are valid syntax before an owner font exists; defer their computation.
+            if (!number_resolved && (math_context || !math_number)) return false;
+            if (number_resolved) reference->number = (int)number;
+            reference->number_expression = math_number && !math_context ? part : nullptr;
+            reference->has_number = true;
+        } else if (identifier && str_ieq_cstr(identifier, "auto")) {
+            return count == 1;
+        } else {
+            const char* name = css_grid_named_line(part);
+            if (!name || reference->name) return false;
+            reference->name = name;
+        }
+    }
+    if (reference->span) {
+        if (!reference->has_number && !reference->name) return false;
+        if (reference->has_number && number_resolved && reference->number <= 0) {
+            if (!math_number) return false;
+            reference->number = 1;
+        }
+    } else if (reference->has_number && number_resolved && reference->number == 0) {
+        // deferred math clamps to a permitted line; a literal zero remains invalid syntax.
+        if (!math_context || !math_number) return false;
+        reference->number = 1;
+    }
+    if (!reference->has_number) reference->number = 1;
+    return reference->span || reference->name || reference->has_number;
+}
+
+const CssPropertyCode css_grid_property_members[CSS_GRID_PROPERTY_MEMBER_COUNT] = {CSS_PROPERTY_GRID_ROW_START,
+    CSS_PROPERTY_GRID_COLUMN_START, CSS_PROPERTY_GRID_ROW_END, CSS_PROPERTY_GRID_COLUMN_END,
+    CSS_PROPERTY_GRID_TEMPLATE_ROWS, CSS_PROPERTY_GRID_TEMPLATE_COLUMNS, CSS_PROPERTY_GRID_TEMPLATE_AREAS,
+    CSS_PROPERTY_GRID_AUTO_ROWS, CSS_PROPERTY_GRID_AUTO_COLUMNS, CSS_PROPERTY_GRID_AUTO_FLOW};
+
+CssPropertyCode css_grid_placement_member(unsigned index) {
+    return index < 4 ? css_grid_property_members[index] : CSS_PROPERTY_UNKNOWN;
+}
+
+CssPropertyCode css_grid_property_member(unsigned index) {
+    return index < CSS_GRID_PROPERTY_MEMBER_COUNT ? css_grid_property_members[index] : CSS_PROPERTY_UNKNOWN;
+}
+
+unsigned css_grid_property_mask(CssPropertyCode property) {
+    if (property == CSS_PROPERTY_GRID_TEMPLATE) return 0x70;
+    if (property == CSS_PROPERTY_GRID) return 0x3f0;
+    for (unsigned i = 4; i < CSS_GRID_PROPERTY_MEMBER_COUNT; i++)
+        if (css_grid_property_members[i] == property) return 1u << i;
+    return css_grid_placement_mask(property);
+}
+
+struct CssGridDefinitionParts {
+    CssValue none = {}, automatic = {}, flow = {}, lists[6] = {};
+    const CssValue* components[6] = {};
+    CssValue* flow_components[2] = {};
+    lam::ArrayList<CssValue*> rows{MEM_CAT_INPUT_CSS, 0}, areas{MEM_CAT_INPUT_CSS, 0};
+
+    CssGridDefinitionParts() {
+        none.type = automatic.type = flow.type = CSS_VALUE_TYPE_KEYWORD;
+        none.data.keyword = CSS_VALUE_NONE;
+        automatic.data.keyword = CSS_VALUE_AUTO;
+        flow.data.keyword = CSS_VALUE_ROW;
+        for (unsigned i = 0; i < 3; i++) components[i] = &none;
+        components[3] = components[4] = &automatic;
+        components[5] = &flow;
+    }
+
+    bool set_list(unsigned member, CssValue* const* values, size_t count) {
+        if (!count || count > INT_MAX) return false;
+        if (count == 1) { components[member] = values[0]; return true; }
+        CssValue& list = lists[member];
+        list.type = CSS_VALUE_TYPE_LIST;
+        list.data.list = {const_cast<CssValue**>(values), (int)count, false};
+        components[member] = &list;
+        return true;
+    }
+};
+
+static bool css_grid_token_is(const CssValue* value, const char* name) {
+    const char* token = css_math_token_name(value);
+    return token && str_ieq_cstr(token, name);
+}
+
+static bool css_grid_append_value_range(lam::ArrayList<CssValue*>* target,
+        CssValue* const* values, size_t begin, size_t end, bool merge_names = false) {
+    if (begin < end && merge_names && !target->empty() &&
+        css_grid_token_is(target->back(), "]") && css_grid_token_is(values[begin], "[")) {
+        target->remove(target->size() - 1);
+        begin++;
+    }
+    for (size_t i = begin; i < end; i++) if (!target->push_back(values[i])) return false;
+    return true;
+}
+
+CssValue* css_grid_project_resolved_template_tracks(Pool* pool, const CssValue* value) {
+    CssValue* copy = css_value_clone_owned(value, pool);
+    if (!copy || css_grid_token_is(copy, "none")) return copy;
+    if (!css_grid_track_list_valid(copy, true, true)) return nullptr;
+    CssValue* single[] = {copy};
+    CssValue** values = copy->type == CSS_VALUE_TYPE_LIST ? copy->data.list.values : single;
+    size_t count = copy->type == CSS_VALUE_TYPE_LIST ? (size_t)copy->data.list.count : 1;
+    lam::ArrayList<CssValue*> output{MEM_CAT_INPUT_CSS, 0}, pending{MEM_CAT_INPUT_CSS, 0};
+    for (size_t i = 0; i < count; i++) {
+        if (css_grid_token_is(values[i], "[")) {
+            size_t begin = i;
+            while (i < count && !css_grid_token_is(values[i], "]")) i++;
+            if (i == count || !css_grid_append_value_range(&pending, values, begin, i + 1, true)) return nullptr;
+            continue;
+        }
+        CssFunction* repeat = values[i]->type == CSS_VALUE_TYPE_FUNCTION ? values[i]->data.function : nullptr;
+        if (repeat && repeat->name && !strcmp(repeat->name, "repeat") && repeat->arg_count == 2 &&
+            repeat->args[0]->type == CSS_VALUE_TYPE_NUMBER) {
+            CssValue* pattern = repeat->args[1];
+            CssValue* pattern_single[] = {pattern};
+            CssValue** parts = pattern->type == CSS_VALUE_TYPE_LIST ? pattern->data.list.values : pattern_single;
+            size_t length = pattern->type == CSS_VALUE_TYPE_LIST ? (size_t)pattern->data.list.count : 1;
+            size_t leading = 0, trailing = length;
+            if (length && css_grid_token_is(parts[0], "[")) {
+                while (leading < length && !css_grid_token_is(parts[leading++], "]")) {}
+            }
+            if (length && css_grid_token_is(parts[length - 1], "]")) {
+                do { trailing--; } while (trailing && !css_grid_token_is(parts[trailing], "["));
+            }
+            if (!css_grid_append_value_range(&pending, parts, 0, leading, true) ||
+                !css_grid_append_value_range(&output, pending.data(), 0, pending.size())) return nullptr;
+            lam::ArrayList<CssValue*> body{MEM_CAT_INPUT_CSS, 0};
+            if (!css_grid_append_value_range(&body, pending.data(), 0, pending.size()) ||
+                !css_grid_append_value_range(&body, parts, leading, trailing) ||
+                !css_grid_append_value_range(&body, parts, trailing, length, true)) return nullptr;
+            // legacy grid-template serialization retains repeat() with its resolved boundary names.
+            if (repeat->args[0]->data.number.value > 1.0 &&
+                !css_grid_append_value_range(&body, parts, 0, leading, true)) return nullptr;
+            repeat->args[1] = css_value_create_list(pool, body.data(), body.size());
+            if (!repeat->args[1] || !output.push_back(values[i])) return nullptr;
+            pending.clear();
+            if (!css_grid_append_value_range(&pending, parts, trailing, length)) return nullptr;
+        } else {
+            if (!css_grid_append_value_range(&output, pending.data(), 0, pending.size()) ||
+                !output.push_back(values[i])) return nullptr;
+            pending.clear();
+        }
+    }
+    if (!css_grid_append_value_range(&output, pending.data(), 0, pending.size())) return nullptr;
+    return css_value_create_list(pool, output.data(), output.size());
+}
+
+static bool css_grid_definition_tracks(CssGridDefinitionParts* parsed, unsigned member,
+        CssValue* const* values, size_t count, bool explicit_tracks, bool none, bool repeats) {
+    if (!parsed->set_list(member, values, count)) return false;
+    const CssValue* value = parsed->components[member];
+    return (none && css_grid_token_is(value, "none")) ||
+        css_grid_track_list_valid(value, explicit_tracks, repeats);
+}
+
+static bool css_grid_definition_names(CssGridDefinitionParts* parsed, CssValue* const* values,
+        size_t end, size_t* cursor) {
+    if (*cursor == end || !css_grid_token_is(values[*cursor], "[")) return true;
+    size_t begin = (*cursor)++;
+    while (*cursor < end && !css_grid_token_is(values[*cursor], "]")) {
+        const CssValue* name = values[*cursor];
+        if (!css_value_is_custom_ident(name) || css_grid_token_is(name, "auto") ||
+            css_grid_token_is(name, "span")) return false;
+        (*cursor)++;
+    }
+    if (*cursor == end) return false;
+    (*cursor)++;
+    // adjacent row-boundary groups become one line-name group (CSS Grid §7.4).
+    return css_grid_append_value_range(&parsed->rows, values, begin, *cursor, true);
+}
+
+static bool css_grid_definition_flow_prefix(CssValue* const* values, size_t begin, size_t end,
+        size_t* after, CssValue** dense) {
+    *after = begin; *dense = nullptr;
+    if (begin == end) return false;
+    if (css_grid_token_is(values[begin], "dense")) {
+        if (begin + 1 == end || !css_grid_token_is(values[begin + 1], "auto-flow")) return false;
+        *dense = values[begin]; *after = begin + 2;
+    } else if (css_grid_token_is(values[begin], "auto-flow")) {
+        *after = begin + 1;
+        if (*after < end && css_grid_token_is(values[*after], "dense")) *dense = values[(*after)++];
+    } else return false;
+    return true;
+}
+
+static bool css_grid_parse_definition(const CssValue* value, CssPropertyCode property,
+        CssGridDefinitionParts* parsed) {
+    if (!value || (property != CSS_PROPERTY_GRID_TEMPLATE && property != CSS_PROPERTY_GRID)) return false;
+    if (css_grid_token_is(value, "none")) return true;
+    CssValue* single[] = {const_cast<CssValue*>(value)};
+    CssValue* const* values = value->type == CSS_VALUE_TYPE_LIST ? value->data.list.values : single;
+    size_t count = value->type == CSS_VALUE_TYPE_LIST && value->data.list.count > 0
+        ? (size_t)value->data.list.count : value->type == CSS_VALUE_TYPE_LIST ? 0 : 1;
+    if (!values || !count || (value->type == CSS_VALUE_TYPE_LIST && value->data.list.comma_separated)) return false;
+    size_t slash = count;
+    for (size_t i = 0; i < count; i++) if (css_grid_token_is(values[i], "/")) {
+        if (slash != count) return false;
+        slash = i;
+    }
+    if (slash < count && (!slash || slash + 1 == count)) return false;
+    size_t left_after, right_after;
+    CssValue* left_dense; CssValue* right_dense;
+    bool left_flow = css_grid_definition_flow_prefix(values, 0, slash, &left_after, &left_dense);
+    bool right_flow = slash < count && css_grid_definition_flow_prefix(values, slash + 1, count,
+        &right_after, &right_dense);
+    if (left_flow || right_flow) {
+        if (property != CSS_PROPERTY_GRID || slash == count || (left_flow && right_flow)) return false;
+        unsigned explicit_member = left_flow ? 1 : 0, automatic_member = left_flow ? 3 : 4;
+        size_t explicit_begin = left_flow ? slash + 1 : 0, explicit_end = left_flow ? count : slash;
+        size_t automatic_begin = left_flow ? left_after : right_after, automatic_end = left_flow ? slash : count;
+        if (!css_grid_definition_tracks(parsed, explicit_member, values + explicit_begin,
+            explicit_end - explicit_begin, true, true, true)) return false;
+        if (automatic_begin < automatic_end && !css_grid_definition_tracks(parsed, automatic_member,
+            values + automatic_begin, automatic_end - automatic_begin, false, false, false)) return false;
+        parsed->flow.data.keyword = left_flow ? CSS_VALUE_ROW : CSS_VALUE_COLUMN;
+        CssValue* dense = left_flow ? left_dense : right_dense;
+        if (dense && left_flow) {
+            // canonical dense flow omits the default row axis in specified and computed values.
+            parsed->components[5] = dense;
+        } else if (dense) {
+            parsed->flow_components[0] = &parsed->flow; parsed->flow_components[1] = dense;
+            if (!parsed->set_list(5, parsed->flow_components, 2)) return false;
+        }
+        return true;
+    }
+    bool area_rows = false;
+    for (size_t i = 0; i < slash; i++) if (values[i] && values[i]->type == CSS_VALUE_TYPE_STRING) area_rows = true;
+    if (!area_rows) {
+        return slash < count && css_grid_definition_tracks(parsed, 0, values, slash, true, true, true) &&
+            css_grid_definition_tracks(parsed, 1, values + slash + 1, count - slash - 1, true, true, true);
+    }
+    size_t cursor = 0;
+    while (cursor < slash) {
+        if (!css_grid_definition_names(parsed, values, slash, &cursor) || cursor == slash ||
+            !values[cursor] || values[cursor]->type != CSS_VALUE_TYPE_STRING ||
+            !parsed->areas.push_back(values[cursor++])) return false;
+        CssValue* size = &parsed->automatic;
+        if (cursor < slash && values[cursor] && values[cursor]->type != CSS_VALUE_TYPE_STRING &&
+            !css_grid_token_is(values[cursor], "[")) {
+            if (!css_grid_track_list_valid(values[cursor], false, false)) return false;
+            size = values[cursor++];
+        }
+        if (!parsed->rows.push_back(size) || !css_grid_definition_names(parsed, values, slash, &cursor)) return false;
+    }
+    if (!parsed->set_list(0, parsed->rows.data(), parsed->rows.size()) ||
+        !parsed->set_list(2, parsed->areas.data(), parsed->areas.size()) ||
+        !css_grid_visit_template_areas(parsed->components[2])) return false;
+    return slash == count || css_grid_definition_tracks(parsed, 1, values + slash + 1,
+        count - slash - 1, true, false, false);
+}
+
+bool css_grid_definition_valid(const CssValue* value, CssPropertyCode property) {
+    CssGridDefinitionParts parsed;
+    return css_grid_parse_definition(value, property, &parsed);
+}
+
+const CssValue* css_grid_shorthand_longhand(Pool* pool, const CssValue* value,
+        CssPropertyCode shorthand, CssPropertyCode longhand) {
+    unsigned target = css_grid_property_mask(longhand);
+    if (!value || !target || (target & (target - 1)) || !(target & css_grid_property_mask(shorthand))) return nullptr;
+    if (css_value_is_global_keyword(value)) return value;
+    if (css_grid_placement_mask(shorthand)) return css_grid_placement_longhand(pool, value, shorthand, longhand);
+    if (shorthand == longhand) return value;
+    CssGridDefinitionParts parsed;
+    if (!pool || !css_grid_parse_definition(value, shorthand, &parsed)) return nullptr;
+    unsigned index = 4;
+    while (!(target & (1u << index))) index++;
+    return css_value_clone_owned(parsed.components[index - 4], pool);
+}
+
+static bool css_grid_definition_format_leaf(CssFormatter* formatter, CssValue* value, bool, void*) {
+    if (value->type == CSS_VALUE_TYPE_STRING) {
+        String* text = css_grid_serialize_template_areas(formatter->pool, value);
+        if (!text) return false;
+        stringbuf_append_str_n(formatter->output, text->chars, text->len);
+    } else css_format_value(formatter, value);
+    return true;
+}
+
+String* css_grid_serialize_shorthand(Pool* pool,
+        const CssValue* const members[CSS_GRID_PROPERTY_MEMBER_COUNT], CssPropertyCode property) {
+    unsigned mask = css_grid_property_mask(property);
+    if (!pool || !members || !mask || !(mask & (mask - 1))) return nullptr;
+    const CssValue* global = nullptr;
+    for (unsigned i = 0; i < CSS_GRID_PROPERTY_MEMBER_COUNT; i++) if (mask & (1u << i)) {
+        const CssValue* value = members[i];
+        if (!value || css_value_contains_pending_substitution(value)) return nullptr;
+        if (css_value_is_global_keyword(value)) {
+            if (global && global->data.keyword != value->data.keyword) return nullptr;
+            global = value;
+        }
+    }
+    if (global) {
+        for (unsigned i = 0; i < CSS_GRID_PROPERTY_MEMBER_COUNT; i++)
+            if ((mask & (1u << i)) && (!css_value_is_global_keyword(members[i]) ||
+                global->data.keyword != members[i]->data.keyword)) return nullptr;
+        CssFormatter* formatter = css_formatter_create(pool, CSS_FORMAT_COMPACT);
+        if (!formatter) return nullptr;
+        css_format_value(formatter, const_cast<CssValue*>(global));
+        return stringbuf_to_string(formatter->output);
+    }
+    if (mask < 16) {
+        CssGridLineReference lines[4] = {};
+        for (unsigned i = 0; i < 4; i++) if (mask & (1u << i)) {
+            CssGridLineReference parsed[4] = {};
+            if (!css_grid_parse_placement(members[i], css_grid_property_member(i), parsed)) return nullptr;
+            lines[i] = parsed[i];
+        }
+        return css_grid_serialize_placement(pool, lines, property);
+    }
+    for (unsigned i = 4; i < CSS_GRID_PROPERTY_MEMBER_COUNT; i++)
+        if ((mask & (1u << i)) && !css_property_validate_value(css_grid_property_member(i), members[i])) return nullptr;
+    CssFormatter* formatter = css_formatter_create(pool, CSS_FORMAT_COMPACT);
+    if (!formatter) return nullptr;
+    StringBuf* output = formatter->output;
+    auto append_track = [&](const CssValue* value) {
+        return css_format_grid_track_value(formatter, const_cast<CssValue*>(value));
+    };
+    if (property == CSS_PROPERTY_GRID) {
+        bool column = css_value_has_identifier(members[9], "column");
+        bool dense = css_value_has_identifier(members[9], "dense");
+        bool defaults = !column && !dense && css_grid_token_is(members[7], "auto") &&
+            css_grid_token_is(members[8], "auto");
+        if (!defaults) {
+            if (!css_grid_token_is(members[6], "none") ||
+                !css_grid_token_is(members[column ? 5 : 4], "none") ||
+                !css_grid_token_is(members[column ? 7 : 8], "auto")) return nullptr;
+            if (column && !append_track(members[4])) return nullptr;
+            stringbuf_append_str(output, column ? " / auto-flow" : "auto-flow");
+            if (dense) stringbuf_append_str(output, " dense");
+            const CssValue* automatic = members[column ? 8 : 7];
+            if (!css_grid_token_is(automatic, "auto")) {
+                stringbuf_append_char(output, ' ');
+                if (!append_track(automatic)) return nullptr;
+            }
+            if (!column) {
+                stringbuf_append_str(output, " / ");
+                if (!append_track(members[5])) return nullptr;
+            }
+            return stringbuf_to_string(output);
+        }
+    }
+    if (css_grid_token_is(members[6], "none")) {
+        if (css_grid_token_is(members[4], "none") && css_grid_token_is(members[5], "none"))
+            stringbuf_append_str(output, "none");
+        else {
+            if (!append_track(members[4])) return nullptr;
+            stringbuf_append_str(output, " / ");
+            if (!append_track(members[5])) return nullptr;
+        }
+        return stringbuf_to_string(output);
+    }
+    CssGridAreaDimensions dimensions = {};
+    if (!css_grid_visit_template_areas(members[6], &dimensions) ||
+        !css_grid_track_list_valid(members[4], true, false) ||
+        (!css_grid_token_is(members[5], "none") && !css_grid_track_list_valid(members[5], true, false))) return nullptr;
+    const CssValue* row_values = members[4];
+    size_t count = row_values->type == CSS_VALUE_TYPE_LIST ? (size_t)row_values->data.list.count : 1;
+    lam::ArrayList<CssValue*> combined{MEM_CAT_INPUT_CSS, 0};
+    bool names = false;
+    size_t row = 0;
+    for (size_t i = 0; i < count; i++) {
+        const CssValue* component = row_values->type == CSS_VALUE_TYPE_LIST ? row_values->data.list.values[i] : row_values;
+        bool open = css_grid_token_is(component, "["), close = css_grid_token_is(component, "]");
+        if (!names && !open && !close) {
+            if (row == dimensions.rows || !combined.push_back(const_cast<CssValue*>(css_grid_area_row(members[6], row++))))
+                return nullptr;
+            if (css_grid_token_is(component, "auto")) continue;
+        }
+        if (!combined.push_back(const_cast<CssValue*>(component))) return nullptr;
+        if (open || close) names = open;
+    }
+    if (row != dimensions.rows || combined.size() > INT_MAX) return nullptr;
+    CssValue rows = {};
+    rows.type = CSS_VALUE_TYPE_LIST;
+    rows.data.list = {combined.data(), (int)combined.size(), false};
+    if (!css_format_grid_track_value(formatter, &rows, css_grid_definition_format_leaf)) return nullptr;
+    if (!css_grid_token_is(members[5], "none")) {
+        stringbuf_append_str(output, " / ");
+        if (!append_track(members[5])) return nullptr;
+    }
+    return stringbuf_to_string(output);
+}
+
+String* css_grid_serialize_definition_value(Pool* pool, const CssValue* value, CssPropertyCode property) {
+    CssGridDefinitionParts parsed;
+    if (!css_grid_parse_definition(value, property, &parsed)) return nullptr;
+    const CssValue* members[CSS_GRID_PROPERTY_MEMBER_COUNT] = {};
+    for (unsigned i = 4; i < CSS_GRID_PROPERTY_MEMBER_COUNT; i++) members[i] = parsed.components[i - 4];
+    return css_grid_serialize_shorthand(pool, members, property);
+}
+
+static CssGridLineReference css_grid_omitted_line(const CssGridLineReference& source) {
+    return source.name && !source.span && !source.has_number ? source : CssGridLineReference{};
+}
+
+unsigned css_grid_placement_mask(CssPropertyCode property) {
+    if (property == CSS_PROPERTY_GRID_AREA) return 15;
+    if (property == CSS_PROPERTY_GRID_ROW) return 5;
+    if (property == CSS_PROPERTY_GRID_COLUMN) return 10;
+    for (unsigned i = 0; i < 4; i++) if (property == css_grid_property_members[i]) return 1u << i;
+    return 0;
+}
+
+bool css_grid_parse_placement(const CssValue* value, CssPropertyCode property, CssGridLineReference lines[4],
+    const CssMathEvaluationContext* math_context) {
+    if (!value || !lines || !css_grid_placement_mask(property)) return false;
+    memset(lines, 0, sizeof(CssGridLineReference) * 4);
+    if (value->type == CSS_VALUE_TYPE_LIST && value->data.list.comma_separated) return false;
+    const CssValue* single[] = {value};
+    const CssValue* const* parts = value->type == CSS_VALUE_TYPE_LIST ? value->data.list.values : single;
+    size_t count = value->type == CSS_VALUE_TYPE_LIST ? value->data.list.count : 1;
+    if (!parts || !count) return false;
+    size_t limit = property == CSS_PROPERTY_GRID_AREA ? 4
+        : property == CSS_PROPERTY_GRID_ROW || property == CSS_PROPERTY_GRID_COLUMN ? 2 : 1;
+    CssGridLineReference parsed[4] = {};
+    size_t begin = 0, segments = 0;
+    for (size_t i = 0; i <= count; i++) {
+        const char* token = i < count ? css_value_identifier_name(parts[i]) : nullptr;
+        if (i < count && (!token || strcmp(token, "/"))) continue;
+        if (segments == limit || !css_grid_line_reference(parts + begin, i - begin, &parsed[segments++],math_context)) return false;
+        begin = i + 1;
+    }
+    if (property == CSS_PROPERTY_GRID_AREA) {
+        for (size_t i = 0; i < 4; i++) {
+            const CssGridLineReference& source = parsed[i < segments ? i : i == 3 ? 1 : 0];
+            parsed[i] = i < segments ? source : css_grid_omitted_line(source);
+        }
+        memcpy(lines, parsed, sizeof(parsed));
+    } else {
+        unsigned mask = css_grid_placement_mask(property);
+        size_t index = 0;
+        for (unsigned i = 0; i < 4; i++) if (mask & (1u << i)) {
+            const CssGridLineReference& source = parsed[index < segments ? index : 0];
+            lines[i] = index < segments ? source : css_grid_omitted_line(source);
+            index++;
+        }
+    }
+    return true;
+}
+
+const CssValue* css_grid_placement_longhand(Pool* pool, const CssValue* value,
+        CssPropertyCode shorthand, CssPropertyCode longhand) {
+    if (css_value_is_global_keyword(value)) return value;
+    unsigned mask = css_grid_placement_mask(longhand);
+    if (!(mask & css_grid_placement_mask(shorthand))) return nullptr;
+    CssGridLineReference lines[4] = {};
+    if (!css_grid_parse_placement(value, shorthand, lines)) return nullptr;
+    unsigned index = 0;
+    while (!(mask & (1u << index))) index++;
+    const CssGridLineReference& reference = lines[index];
+    CssValue parts[3] = {}, list = {};
+    CssValue* items[3] = {};
+    int count = 0;
+    auto append = [&](CssValue value) { parts[count] = value; items[count] = &parts[count]; count++; };
+    if (reference.span) { CssValue span = {}; span.type = CSS_VALUE_TYPE_CUSTOM;
+        span.data.custom_property.name = (char*)"span"; append(span); }
+    if (reference.has_number) {
+        if (reference.number_expression) append(*reference.number_expression);
+        else { CssValue number = {}; number.type = CSS_VALUE_TYPE_NUMBER;
+            number.data.number = {(double)reference.number, true}; append(number); }
+    }
+    if (reference.name) { CssValue name = {}; name.type = CSS_VALUE_TYPE_CUSTOM;
+        name.data.custom_property.name = const_cast<char*>(reference.name); append(name); }
+    if (!count) { parts[0].type = CSS_VALUE_TYPE_KEYWORD; parts[0].data.keyword = CSS_VALUE_AUTO; count = 1; items[0] = &parts[0]; }
+    list.type = CSS_VALUE_TYPE_LIST; list.data.list.values = items; list.data.list.count = count;
+    return css_value_clone_owned(count == 1 ? items[0] : &list, pool);
+}
+
+static bool css_grid_line_equal(const CssGridLineReference& left, const CssGridLineReference& right) {
+    return left.span == right.span && left.has_number == right.has_number &&
+        (!left.has_number || left.number == right.number) &&
+        ((!left.name && !right.name) || (left.name && right.name && !strcmp(left.name, right.name)));
+}
+
+String* css_grid_serialize_placement(Pool* pool, const CssGridLineReference lines[4], CssPropertyCode property) {
+    unsigned mask = css_grid_placement_mask(property);
+    if (!pool || !lines || !mask) return nullptr;
+    CssGridLineReference selected[4] = {};
+    size_t count = 0;
+    for (unsigned i = 0; i < 4; i++) if (mask & (1u << i)) selected[count++] = lines[i];
+    while (count > 1 && css_grid_line_equal(selected[count - 1], css_grid_omitted_line(selected[count == 4 ? 1 : 0]))) count--;
+    StringBuf* output = stringbuf_new(pool);
+    if (!output) return nullptr;
+    for (size_t i = 0; i < count; i++) {
+        if (i) stringbuf_append_str(output, " / ");
+        const CssGridLineReference& line = selected[i];
+        if (!line.span && !line.name && !line.has_number) { stringbuf_append_str(output, "auto"); continue; }
+        if (line.span) stringbuf_append_str(output, "span");
+        if (line.has_number && !(line.span && line.name && line.number == 1 && !line.number_expression)) {
+            if (line.span) stringbuf_append_char(output,' ');
+            if (line.number_expression) {
+                String* text = css_serialize_integer_math(pool,line.number_expression);
+                if (!text) return nullptr;
+                stringbuf_append_str_n(output,text->chars,text->len);
+            } else if (!stringbuf_append_format(output,"%d",line.number)) return nullptr;
+        }
+        if (line.name) {
+            if (line.span || line.has_number) stringbuf_append_str(output, " ");
+            css_append_identifier(output, line.name, strlen(line.name));
+        }
+    }
+    return stringbuf_to_string(output);
+}
+
+enum CssValueSearch {CSS_SEARCH_VAR, CSS_SEARCH_PENDING, CSS_SEARCH_LENGTH_UNIT, CSS_SEARCH_DIMENSION, CSS_SEARCH_IMAGE_SET, CSS_SEARCH_PERCENTAGE};
 
 static bool css_value_matches_search(const CssValue* value, CssValueSearch search,
     CssUnit first, CssUnit second) {
     if (!value) return false;
+    if (search == CSS_SEARCH_IMAGE_SET) return css_value_is_image_set(value);
+    if (search == CSS_SEARCH_DIMENSION)
+        return value->type == CSS_VALUE_TYPE_LENGTH || value->type == CSS_VALUE_TYPE_PERCENTAGE ||
+            value->type == CSS_VALUE_TYPE_ANGLE || value->type == CSS_VALUE_TYPE_TIME;
     if (search == CSS_SEARCH_PERCENTAGE) return value->type == CSS_VALUE_TYPE_PERCENTAGE;
     if (search == CSS_SEARCH_LENGTH_UNIT)
         return value->type == CSS_VALUE_TYPE_LENGTH &&
@@ -528,6 +1264,10 @@ static bool css_value_contains(CssValueSearch search, const CssValue* value,
     return found;
 }
 
+static bool css_value_contains_image_set(const CssValue* value) {
+    return css_value_contains(CSS_SEARCH_IMAGE_SET, value);
+}
+
 bool css_value_contains_var_reference(const CssValue* value) {
     return css_value_contains(CSS_SEARCH_VAR, value);
 }
@@ -542,6 +1282,109 @@ bool css_value_contains_percentage(const CssValue* value) {
 
 bool css_value_contains_length_unit(const CssValue* value, CssUnit first, CssUnit second) {
     return css_value_contains(CSS_SEARCH_LENGTH_UNIT, value, first, second);
+}
+
+bool css_value_contains_dimension(const CssValue* value) {
+    return css_value_contains(CSS_SEARCH_DIMENSION, value);
+}
+
+struct CssSpecifiedMathUnits { CssUnit unit = CSS_UNIT_NONE; bool mixed = false; };
+
+static bool css_specified_math_leaf(void* data, const CssValue* value, double* result) {
+    auto* units = (CssSpecifiedMathUnits*)data;
+    if (value->type != CSS_VALUE_TYPE_LENGTH && value->type != CSS_VALUE_TYPE_ANGLE &&
+        value->type != CSS_VALUE_TYPE_TIME) return false;
+    CssUnit unit = value->data.length.unit;
+    if (!css_dimension_to_canonical(unit, value->data.length.value, &unit, result))
+        *result = value->data.length.value;
+    if (units->unit != CSS_UNIT_NONE && units->unit != unit) units->mixed = true;
+    units->unit = unit;
+    return true;
+}
+
+static CssValue* css_math_fold_specified(Pool* pool, CssValue* value) {
+    CssSpecifiedMathUnits units;
+    CssMathEvaluationContext context = {css_specified_math_leaf, &units, 1.0, true};
+    CssMathResult math = css_math_evaluate(value, &context);
+    if (!math.resolved || units.mixed) return nullptr;
+    if (math.type == CSS_MATH_NUMBER)
+        return css_value_contains_dimension(value) ? nullptr : css_value_create_number(pool, math.value);
+    if (math.type == CSS_MATH_PERCENT && isfinite(math.percentage))
+        return css_value_create_percentage(pool, math.percentage);
+    if ((math.type == CSS_MATH_LENGTH || math.type == CSS_MATH_ANGLE || math.type == CSS_MATH_TIME ||
+        math.type == CSS_MATH_RESOLUTION) && isfinite(math.value) && units.unit != CSS_UNIT_NONE)
+        return css_value_create_length(pool, math.value, units.unit);
+    return nullptr;
+}
+
+static CssValue* css_simplify_math_owned(Pool* pool, CssValue* value, unsigned depth) {
+    if (!value || depth > 32) return nullptr;
+    if (value->type == CSS_VALUE_TYPE_FUNCTION && value->data.function) {
+        CssFunction* function = value->data.function;
+        for (int i = 0; i < function->arg_count; i++) {
+            function->args[i] = css_simplify_math_owned(pool, function->args[i], depth + 1);
+            if (!function->args[i]) return nullptr;
+        }
+        if (function->name && !strcmp(function->name, "calc") && function->arg_count == 1 &&
+            (function->args[0]->type == CSS_VALUE_TYPE_NUMBER || function->args[0]->type == CSS_VALUE_TYPE_LENGTH ||
+             function->args[0]->type == CSS_VALUE_TYPE_PERCENTAGE || function->args[0]->type == CSS_VALUE_TYPE_ANGLE ||
+             function->args[0]->type == CSS_VALUE_TYPE_TIME)) return function->args[0];
+        if (!css_value_contains_dimension(value)) {
+            CssValue* folded = css_math_fold_specified(pool, value);
+            if (folded) return folded;
+        }
+        return value;
+    }
+    if (value->type != CSS_VALUE_TYPE_LIST) return value;
+    lam::ArrayList<CssValue*> values{MEM_CAT_INPUT_CSS, 0};
+    for (int i = 0; i < value->data.list.count; i++) {
+        CssValue* item = value->data.list.values[i];
+        if (css_grid_token_is(item, "(")) {
+            int begin = i + 1, nesting = 1;
+            while (nesting && ++i < value->data.list.count) {
+                if (css_grid_token_is(value->data.list.values[i], "(")) nesting++;
+                if (css_grid_token_is(value->data.list.values[i], ")")) nesting--;
+            }
+            if (nesting) return nullptr;
+            // nested lists preserve unresolved grouping; a reduced scalar needs no grouping tokens.
+            CssValue* group = css_value_create_list(pool, value->data.list.values + begin, (size_t)(i - begin));
+            group = css_simplify_math_owned(pool, group, depth + 1);
+            if (!group) return nullptr;
+            if (!values.push_back(group)) return nullptr;
+        } else {
+            item = css_simplify_math_owned(pool, item, depth + 1);
+            if (!item || !values.push_back(item)) return nullptr;
+        }
+    }
+    for (unsigned pass = 0; pass < 2; pass++) {
+        lam::ArrayList<CssValue*> reduced{MEM_CAT_INPUT_CSS, 0};
+        for (size_t i = 0; i < values.size(); i++) {
+            if (!reduced.push_back(values[i])) return nullptr;
+            size_t size = reduced.size();
+            if (size < 3) continue;
+            const char* op = css_math_token_name(reduced[size - 2]);
+            bool product = op && (!strcmp(op, "*") || !strcmp(op, "/"));
+            bool sum = op && (!strcmp(op, "+") || !strcmp(op, "-"));
+            if ((pass == 0 && !product) || (pass == 1 && (!sum || size != 3))) continue;
+            if (pass == 1 && i + 1 < values.size() &&
+                (css_grid_token_is(values[i + 1], "*") || css_grid_token_is(values[i + 1], "/"))) continue;
+            if (pass == 0 && size > 3 && !css_grid_token_is(reduced[size - 4], "+") &&
+                !css_grid_token_is(reduced[size - 4], "-")) continue;
+            CssValue expression = {};
+            expression.type = CSS_VALUE_TYPE_LIST;
+            expression.data.list = {reduced.data() + size - 3, 3, false};
+            CssValue* folded = css_math_fold_specified(pool, &expression);
+            // retain an expression node at typed cancellation; subsequent products keep left association.
+            if (!folded && pass == 0) folded = css_value_create_list(pool, expression.data.list.values, 3);
+            if (folded) { reduced.remove(size - 1); reduced.remove(size - 2); reduced[size - 3] = folded; }
+        }
+        values = static_cast<lam::ArrayList<CssValue*>&&>(reduced);
+    }
+    return values.size() == 1 ? values[0] : css_value_create_list(pool, values.data(), values.size());
+}
+
+CssValue* css_simplify_math_value(Pool* pool, const CssValue* value) {
+    return css_simplify_math_owned(pool, css_value_clone_owned(value, pool), 0);
 }
 
 float css_font_size_keyword_px(CssEnum keyword) {
@@ -1388,6 +2231,7 @@ static const CssUnitEntry css_unit_table[] = {
     {"dpi",  3, CSS_UNIT_DPI},
     {"dpcm", 4, CSS_UNIT_DPCM},
     {"dppx", 4, CSS_UNIT_DPPX},
+    {"x",    1, CSS_UNIT_DPPX},
     // flex units
     {"fr",   2, CSS_UNIT_FR},
     // percentage

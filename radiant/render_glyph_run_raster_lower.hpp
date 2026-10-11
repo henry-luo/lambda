@@ -21,8 +21,9 @@ static inline void render_glyph_run_raster_lower(const PaintGlyphRun* run,
     }
     if (!run->text) return;
 
-    FontBox* font = (FontBox*)run->font;
+    const FontBox* font = paint_glyph_run_font(run);
     FontHandle* font_handle = font ? font_box_handle(font) : nullptr;
+    float metric_scale = render_font_pixel_to_css(font_handle);
     FontProp* style = font ? font->style : nullptr;
     FontStyleDesc style_desc = {};
     if (style) {
@@ -36,8 +37,7 @@ static inline void render_glyph_run_raster_lower(const PaintGlyphRun* run,
     if (text_len <= 0) return;
 
     float space_width = style ? style->space_width : 4.0f;
-    float adjusted_space_width = space_width + run->word_spacing;
-    if (adjusted_space_width < 0.0f) adjusted_space_width = space_width;
+    float adjusted_space_width = text_space_advance(style, run->word_spacing);
 
     float x = run->x;
     const char* cursor = run->text;
@@ -83,12 +83,23 @@ static inline void render_glyph_run_raster_lower(const PaintGlyphRun* run,
             continue;
         }
 
-        int glyph_x = (int)lroundf(x + (float)glyph->bitmap.bearing_x); // INT_CAST_OK: glyph bitmap destination is an integer pixel coordinate.
-        int glyph_y = (int)lroundf(run->baseline_y - (float)glyph->bitmap.bearing_y); // INT_CAST_OK: glyph bitmap destination is an integer pixel coordinate.
-        dl_draw_glyph(dl, &glyph->bitmap, glyph_x, glyph_y,
-                      run->color, glyph->bitmap.pixel_mode == GLYPH_PIXEL_BGRA, nullptr,
-                      run->has_transform ? &run->transform : nullptr,
-                      0);
-        x += glyph->advance_x;
+        // effect paint coordinates are CSS pixels; cached glyphs follow the font context's physical density (RSC6).
+        GlyphBitmap bitmap = glyph->bitmap;
+        float bitmap_scale = render_font_pixel_to_css(font_handle, &bitmap);
+        int glyph_x = (int)lroundf(x + (float)bitmap.bearing_x * bitmap_scale); // INT_CAST_OK: glyph bitmap destination is an integer pixel coordinate.
+        int glyph_y = (int)lroundf(run->baseline_y - (float)bitmap.bearing_y * bitmap_scale); // INT_CAST_OK: glyph bitmap destination is an integer pixel coordinate.
+        bool color = bitmap.pixel_mode == GLYPH_PIXEL_BGRA;
+        RdtMatrix placement;
+        const RdtMatrix* transform = run->has_transform ? &run->transform : nullptr;
+        if (color) bitmap.bitmap_scale = bitmap_scale;
+        else if (bitmap_scale != 1.0f) {
+            placement = {bitmap_scale, 0.0f, (float)glyph_x,
+                0.0f, bitmap_scale, (float)glyph_y, 0.0f, 0.0f, 1.0f};
+            if (run->has_transform) placement = rdt_matrix_multiply(&run->transform, &placement);
+            transform = &placement;
+            glyph_x = glyph_y = 0;
+        }
+        dl_draw_glyph(dl, &bitmap, glyph_x, glyph_y, run->color, color, nullptr, transform, 0);
+        x += glyph->advance_x * metric_scale + text_character_spacing(style, codepoint);
     }
 }

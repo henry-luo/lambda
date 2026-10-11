@@ -52,6 +52,16 @@ extern "C" bool vmap_backing_set(VMap* vm, Item key, Item value);
 extern Item js_make_number(double value);
 extern __thread EvalContext* context;
 
+Context* radiant_dom_resource_owner(DomDocument* document) {
+    if (!document) return nullptr;
+    Runtime* runtime = dom_document_script_runtime(document);
+    if (runtime) return (Context*)runtime_get_eval_context(runtime);
+    // bootstrap can precede publication of js.runtime; an iframe's ambient
+    // evaluator cannot own roots retained by another document (D5.3.3).
+    return context && context->runtime && context->runtime->dom_doc == document
+        ? (Context*)context : nullptr;
+}
+
 extern "C" void* dom_retain_backing_root(DomDocument* doc, Item* root, void* owner) {
     gc_heap_t* gc = static_cast<gc_heap_t*>(owner);
     if (!gc) {

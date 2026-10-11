@@ -12,6 +12,8 @@
 struct DomDocument;
 struct StrBuf;
 
+Context* radiant_dom_resource_owner(DomDocument* document);
+
 // Canvas owns document-lifetime pixels in Radiant.  DOM bindings pass only a
 // native DOM-node handle through this waist; the backing surface never crosses
 // into the script value domain (D7.4.1v2, D7.5.3).

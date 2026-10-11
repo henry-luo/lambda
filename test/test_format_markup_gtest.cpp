@@ -170,6 +170,20 @@ TEST_F(FormatMarkupTest, HtmlEscapingAcceptsStringAbiAlignment) {
     EXPECT_STREQ(output->str->chars, "&lt;tag&gt;");
 }
 
+TEST_F(FormatMarkupTest, HtmlEmptyBooleanAttributesKeepPresenceWithoutLosingOrdinaryValues) {
+    Item item = mb_->element("input")
+        .attr("disabled", "").attr("checked", "").attr("multiple", true)
+        .attr("autofocus", false).attr("title", "").attr("value", "")
+        .attr("readonly", "readonly").final();
+    String* output = format_html(pool_, item);
+    ASSERT_NE(output, nullptr);
+    EXPECT_NE(strstr(output->chars,
+        "<input disabled checked multiple title=\"\" value=\"\" readonly=\"readonly\">"), nullptr);
+    ItemReader disabled = ElementReader(item.element).get_attr("disabled");
+    ASSERT_TRUE(disabled.isString());
+    EXPECT_EQ(disabled.asString()->len, 0u);
+}
+
 // ==============================================================================
 // Markdown Tests
 // ==============================================================================

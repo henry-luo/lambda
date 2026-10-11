@@ -1,0 +1,66 @@
+<!doctype html><meta charset="utf-8">
+<style>
+html,body{margin:0;background:white}
+button{height:24px}
+#fixtures{position:absolute;top:40px;left:0}
+.grid{display:grid;width:200px;height:40px;justify-content:start;align-content:start;grid-auto-columns:20px;grid-auto-rows:20px;margin-bottom:5px}
+.grid>div{min-width:0;min-height:0;height:20px;background:green}
+</style>
+<button id="check">Check</button><button id="change">Change</button><button id="changed">Changed</button><button id="retarget">Retarget</button><button id="retargeted">Retargeted</button><button id="restore">Restore</button><button id="restored">Restored</button><output id="report"></output><div id="fixtures"></div>
+<script>
+(function(){
+    var fixtures=document.getElementById('fixtures'),report=document.getElementById('report'),grids={};
+    function grid(name,style,placements){
+        var element=document.createElement('div');element.id=name;element.className='grid';element.style.cssText=style;
+        placements.forEach(function(placement){var child=document.createElement('div');child.style.cssText=placement;element.appendChild(child);});
+        fixtures.appendChild(element);grids[name]=element;return element;
+    }
+    function record(name){
+        var element=grids[name],parent=element.getBoundingClientRect(),values=[];
+        for(var i=0;i<element.children.length;i++){
+            var r=element.children[i].getBoundingClientRect();
+            [r.x-parent.x,r.y-parent.y,r.width,r.height].forEach(function(v){values.push(Math.round(v*100)/100);});
+        }
+        report.setAttribute('data-'+name,values.join(','));
+    }
+    grid("aliases","grid-template-columns:[a b]40px[c d]50px[e f]",["grid-column:d / f"]);
+    grid("boundary","grid-template-columns:[a]repeat(2,[b]40px[c])[d]",["grid-column:a / c;grid-row:1", "grid-column:b 2 / d;grid-row:1"]);
+    grid("positive","grid-template-columns:repeat(3,[s]40px[e])",["grid-column:s 2 / s 3"]);
+    grid("negative","grid-template-columns:repeat(3,[s]40px[e])",["grid-column:s -2 / s -1"]);
+    grid("number-first","grid-template-columns:repeat(3,[s]40px[e])",["grid-column:2 s / 3 s"]);
+    grid("span-end","grid-template-columns:repeat(3,[s]40px[e])",["grid-column:s / span 2 s"]);
+    grid("span-start","grid-template-columns:repeat(3,[s]40px[e])",["grid-column:span 2 s / s -1"]);
+    grid("implicit-positive","grid-template-columns:repeat(3,[s]40px[e])",["grid-column:s 5 / span 1"]);
+    grid("implicit-negative","grid-template-columns:repeat(3,[s]40px[e])",["grid-column:s -5 / span 1"]);
+    grid("unknown-positive","grid-template-columns:40px 40px 40px",["grid-column:unknown / span 1"]);
+    grid("unknown-negative","grid-template-columns:40px 40px 40px",["grid-column:unknown -1 / span 1"]);
+    grid("auto-outer","column-gap:10px;grid-template-columns:[start]20px[repeat-start]repeat(auto-fill,[s]40px[e])[repeat-end]30px[end]",["grid-column:repeat-end / end"]);
+    grid("auto-inner","column-gap:10px;grid-template-columns:[start]20px repeat(auto-fill,[s]40px[e])30px[end]",["grid-column:s 2 / e 2"]);
+    grid("auto-fit","column-gap:10px;grid-template-columns:repeat(auto-fit,[s]40px[e])",["grid-column:s 3 / e 3"]);
+    grid("rows","height:90px;grid-template-columns:40px;grid-template-rows:repeat(3,[s]30px[e])",["grid-row:s 2 / s 3;height:auto"]);
+    grid("area-duplicate","grid-template-columns:[a-start a-start]40px[a-end]40px;grid-template-areas:\"a .\"",["grid-column:a-start 2 / span 1"]);
+    grid("longhand","grid-template-columns:repeat(3,[s]40px[e])",["grid-column-start:s 2;grid-column-end:s 3"]);
+    grid("variable","--track:40px;column-gap:10px;grid-template-columns:repeat(auto-fill,[s]var(--track)[e])",["grid-column:s -1 / e -1"]);
+    grid("font","font-size:20px;column-gap:10px;grid-template-columns:repeat(auto-fill,[s]2em[e])",["grid-column:s -1 / e -1"]);
+    grid("escaped","grid-template-columns:[foo\\ bar]40px[end]50px",["grid-column:foo\\ bar / end"]);
+    grid("case-sensitive","grid-template-columns:[S]40px[s]50px[end]",["grid-column:s / end"]);
+    grid("keyword-alias","grid-template-columns:[left right]40px[end]50px",["grid-column:right / end"]);
+    grid("multi-pattern","grid-template-columns:repeat(2,[a]20px[b c]30px[d])",["grid-column:a 2 / d 2"]);
+    grid("bare-area","grid-template-columns:[hero-start]30px[hero-end]40px;grid-template-rows:[hero-start]20px[hero-end]20px",["grid-area:hero;height:auto"]);
+    grid("area-occurrence","grid-template-columns:repeat(3,[c]40px[end]);grid-template-rows:repeat(3,[r]20px[end])",["grid-area:r 2 / c 2 / r 3 / c 3"]);
+    grid("span-implicit","grid-template-columns:[a]40px[a]40px",["grid-column:a 2 / span 3 a"]);
+    grid("span-opposite","grid-template-columns:40px",["grid-column:span unknown / 4"]);
+    grid("numeric-span-auto","grid-template-columns:repeat(3,40px)",["grid-column:span 2;grid-row:1", "grid-column:span 2;grid-row:2"]);
+    grid("numeric-span-end","grid-template-columns:repeat(3,40px)",["grid-column:span 2 / 4"]);
+    grid("numeric-end-only","grid-template-columns:repeat(3,40px)",["grid-column:auto / 3"]);
+    grid("numeric-negative-end","grid-template-columns:repeat(3,40px)",["grid-column:auto / -1"]);
+    grid("numeric-reversed","grid-template-columns:repeat(3,40px)",["grid-column:3 / 1"]);
+    document.getElementById('check').onclick=function(){Object.keys(grids).forEach(record);};
+    document.getElementById('change').onclick=function(){grids.variable.style.setProperty('--track','50px');grids.variable.style.width='250px';grids.font.style.fontSize='30px';};
+    document.getElementById('changed').onclick=function(){record('variable');record('font');};
+    document.getElementById('retarget').onclick=function(){grids.variable.children[0].style.gridColumn='2 / 3';grids.positive.style.gridTemplateColumns='repeat(2,[new]50px[last])';grids.positive.children[0].style.gridColumn='new 2 / last 2';};
+    document.getElementById('retargeted').onclick=function(){record('variable');record('positive');};
+    document.getElementById('restore').onclick=function(){grids.variable.style.setProperty('--track','40px');grids.variable.style.width='200px';grids.font.style.fontSize='20px';grids.variable.children[0].style.gridColumn='s -1 / e -1';grids.positive.style.gridTemplateColumns='repeat(3,[s]40px[e])';grids.positive.children[0].style.gridColumn='s 2 / s 3';};
+    document.getElementById('restored').onclick=function(){record('variable');record('font');record('positive');};
+})();
+</script>

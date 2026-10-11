@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include "../radiant/render.hpp"
+#include "../radiant/render_glyph_run_raster_lower.hpp"
 #include "../radiant/event.hpp"
 #include "../radiant/svg_animation.hpp"
 #include "../radiant/radiant.hpp"
@@ -68,6 +69,243 @@ TEST(ClipGeometry, PaintContainmentClipsWithoutAllocatingAScrollPane) {
     EXPECT_FALSE(render_clip_overflow_geometry(block, &clip, &radius));
     boundary.border = nullptr;
     block->blk = nullptr; block->bound = nullptr;
+}
+
+TEST(TextOverflowPaint, ScopedProjectionPreservesSourceAndRestoresNestedState) {
+    FontContextConfig config = {}; config.pixel_ratio = 1;
+    FontContext* fonts = font_context_create(&config);
+    ASSERT_NE(fonts, nullptr);
+    font_context_add_scan_directory(fonts, "test/layout/data/font");
+    FontStyleDesc description = {"Liberation Mono", 20, FONT_WEIGHT_NORMAL, FONT_SLANT_NORMAL, nullptr};
+    FontHandle* handle = font_resolve(fonts, &description);
+    ASSERT_NE(handle, nullptr);
+    FontProp font = FONT_PROP_DEFAULT;
+    font.font_handle = lam::counted(handle); font.font_size = 20;
+    FontBox box = {lam::up(&font), 20};
+    UiContext ui = {}; ui.font_ctx = lam::up(fonts);
+    RenderContext context = {}; context.ui_context = lam::up(&ui);
+    context.font = box; context.color = {.r=20, .g=40, .b=60, .a=255};
+    DomElement owner = {}, nested = {};
+    owner.node_type = nested.node_type = DOM_NODE_ELEMENT;
+    owner.set_synthetic(true); nested.set_synthetic(true);
+    owner.view_type = nested.view_type = RDT_VIEW_BLOCK;
+    BlockProp properties = BLOCK_PROP_DEFAULT;
+    ScrollProp scroll = SCROLL_PROP_DEFAULT;
+    properties.text_overflow = CSS_VALUE_ELLIPSIS; scroll.overflow_x = CSS_VALUE_HIDDEN;
+    owner.blk = lam::view_prop(&properties); owner.scroller = lam::view_prop(&scroll);
+    float advance = font_measure_char(handle, 'A');
+    owner.width = advance * 4.25f + font_measure_char(handle, 0x2026);
+    owner.height = 24;
+    DomText text = {}; text.node_type = DOM_NODE_TEXT; text.view_type = RDT_VIEW_TEXT;
+    text.text = lam::up("ÁBCDEFGHIJ"); text.length = strlen(text.text);
+    text.parent = lam::up(&owner); owner.first_child = lam::own<DomNode>(&text);
+    TextRect source = {}; source.width = advance * 10; source.height = 24;
+    source.length = (int)text.length; // bounded fixture UTF-8 byte count
+    text.rect = lam::view_prop(&source);
+    const CssEnum directions[] = {CSS_VALUE_LTR, CSS_VALUE_RTL};
+    for (CssEnum direction : directions) {
+        bool rtl = direction == CSS_VALUE_RTL;
+        properties.direction = direction;
+        source.x = rtl ? owner.width - source.width : 0.0f;
+        for (int iteration = 0; iteration < 256; iteration++) {
+            {
+                RenderTextPaintScope paint(&context, lam::view_as_block(&owner), &box, &context.color);
+                ASSERT_NE(context.text_paint, nullptr);
+                RenderTextPaintData* outer = context.text_paint;
+                {
+                    RenderTextPaintScope child(&context, lam::view_as_block(&nested), &box, &context.color);
+                    EXPECT_EQ(context.text_paint, nullptr);
+                }
+                EXPECT_EQ(context.text_paint, outer);
+                RenderTextPaintIterator iterator(&context, lam::view_require_text(&text));
+                TextRect* projected = iterator.next(); ASSERT_NE(projected, nullptr);
+                EXPECT_EQ(projected->length, rtl ? 4 : 6);
+                if (projected->length != (rtl ? 4 : 6)) break;
+                EXPECT_EQ(projected->start_index, rtl ? 8 : 0);
+                EXPECT_EQ(projected->has_trailing_ellipsis, !rtl);
+                lam::Temp<char> visible(render_text_create_export_segment(
+                    text.text_data(), projected, CSS_VALUE_NONE, true));
+                EXPECT_STREQ(visible.get(), rtl ? "GHIJ" : "ÁBCD…");
+                if (rtl) {
+                    float visible_x = projected->x;
+                    TextRect* marker = iterator.next();
+                    EXPECT_NE(marker, nullptr);
+                    if (marker) {
+                        EXPECT_EQ(marker->length, 0);
+                        EXPECT_TRUE(marker->has_trailing_ellipsis);
+                        EXPECT_NEAR(marker->x + marker->width, visible_x, 0.01f);
+                    }
+                }
+                EXPECT_EQ(iterator.next(), nullptr);
+            }
+            EXPECT_EQ(context.text_paint, nullptr);
+            EXPECT_EQ(context.font.style, &font);
+            EXPECT_EQ(context.color.c, (Color{.r=20, .g=40, .b=60, .a=255}).c);
+            EXPECT_EQ(source.length, (int)text.length);
+            EXPECT_FLOAT_EQ(source.width, advance * 10);
+            EXPECT_FLOAT_EQ(source.x, rtl ? owner.width - source.width : 0.0f);
+            EXPECT_FALSE(source.has_trailing_ellipsis);
+            EXPECT_EQ(source.next, nullptr);
+        }
+    }
+    text.rect = nullptr; owner.first_child = nullptr; text.parent = nullptr;
+    owner.blk = nullptr; owner.scroller = nullptr;
+    font_handle_release(handle); font_context_destroy(fonts);
+}
+
+TEST(TextOverflowPaint, SpacingProjectionKeepsComputedAdvancesAndCollapsedByteOffsets) {
+    FontContextConfig config = {}; config.pixel_ratio = 1;
+    FontContext* fonts = font_context_create(&config);
+    ASSERT_NE(fonts, nullptr);
+    font_context_add_scan_directory(fonts, "test/layout/data/font");
+    FontStyleDesc description = {"Liberation Mono", 20, FONT_WEIGHT_NORMAL, FONT_SLANT_NORMAL, nullptr};
+    FontHandle* handle = font_resolve(fonts, &description);
+    ASSERT_NE(handle, nullptr);
+    FontProp font = FONT_PROP_DEFAULT;
+    font.font_handle = lam::counted(handle); font.font_size = 20;
+    float advance = font_measure_char(handle, 'a');
+    font.space_width = font_measure_char(handle, ' ');
+    font.word_spacing = 10;
+    FontBox box = {lam::up(&font), 20};
+    UiContext ui = {}; ui.font_ctx = lam::up(fonts);
+    RenderContext context = {}; context.ui_context = lam::up(&ui); context.font = box;
+    DomElement owner = {}; owner.node_type = DOM_NODE_ELEMENT; owner.set_synthetic(true);
+    owner.view_type = RDT_VIEW_BLOCK; owner.width = 62; owner.height = 24;
+    BlockProp properties = BLOCK_PROP_DEFAULT; properties.text_overflow = CSS_VALUE_ELLIPSIS;
+    properties.white_space = CSS_VALUE_NOWRAP;
+    ScrollProp scroll = SCROLL_PROP_DEFAULT; scroll.overflow_x = CSS_VALUE_HIDDEN;
+    owner.blk = lam::view_prop(&properties); owner.scroller = lam::view_prop(&scroll);
+    DomText text = {}; text.node_type = DOM_NODE_TEXT; text.view_type = RDT_VIEW_TEXT;
+    text.parent = lam::up(&owner); owner.first_child = lam::own<DomNode>(&text);
+    TextRect source = {}; source.width = advance * 8 + (font.space_width + 10) * 2;
+    source.height = 24; text.rect = lam::view_prop(&source);
+    const char* sources[] = {"ab cd efgh", "ab   cd efgh"};
+    const CssEnum directions[] = {CSS_VALUE_LTR, CSS_VALUE_RTL};
+    for (const char* input : sources) {
+        text.text = lam::up(input); text.length = strlen(input);
+        source.length = (int)text.length; // INT_CAST_OK: bounded fixture byte count.
+        for (CssEnum direction : directions) {
+            SCOPED_TRACE(input);
+            SCOPED_TRACE(direction);
+            properties.direction = direction;
+            bool rtl = direction == CSS_VALUE_RTL;
+            source.x = rtl ? owner.width - source.width : 0.0f;
+            RenderTextPaintScope paint(&context, lam::view_as_block(&owner), &box, &context.color);
+            RenderTextPaintIterator iterator(&context, lam::view_require_text(&text));
+            TextRect* visible = iterator.next(); ASSERT_NE(visible, nullptr);
+            EXPECT_EQ(visible->start_index, rtl ? (int)text.length - 4 : 0);
+            EXPECT_EQ(visible->length, rtl ? 4 : (int)text.length - 7);
+            // matching LTR styles combine the marker into the projected rectangle.
+            EXPECT_NEAR(visible->width, rtl ? advance * 4 : advance * 2 + font.space_width +
+                10 + font_measure_char(handle, 0x2026), .01f);
+            EXPECT_NEAR(visible->x, rtl ? owner.width - advance * 4 : 0, .01f);
+            EXPECT_EQ(source.length, (int)text.length);
+            EXPECT_NEAR(source.width, advance * 8 + (font.space_width + 10) * 2, .01f);
+        }
+    }
+    text.rect = nullptr; owner.first_child = nullptr; text.parent = nullptr;
+    owner.blk = nullptr; owner.scroller = nullptr;
+    font_handle_release(handle); font_context_destroy(fonts);
+}
+
+TEST(TextOverflowPaint, ExportSlicesKeepTheirWhitespaceProcessingContext) {
+    const struct Case { int start; int length; CssEnum white_space; CssEnum transform; const char* expected; } cases[] = {
+        {0, 7, CSS_VALUE_NOWRAP, CSS_VALUE_NONE, "ab cd"},
+        {0, 7, CSS_VALUE_PRE, CSS_VALUE_NONE, "ab   cd"},
+        {3, 4, CSS_VALUE_NOWRAP, CSS_VALUE_NONE, "cd"},
+        {3, 4, CSS_VALUE_PRE, CSS_VALUE_NONE, "  cd"},
+        {0, 7, CSS_VALUE_NOWRAP, CSS_VALUE_UPPERCASE, "AB CD"},
+    };
+    for (const Case& sample : cases) {
+        TextRect slice = {}; slice.start_index = sample.start; slice.length = sample.length;
+        lam::Temp<char> visible(render_text_create_export_segment(
+            (const unsigned char*)"ab   cd", &slice, sample.transform, false, sample.white_space));
+        EXPECT_STREQ(visible.get(), sample.expected);
+    }
+}
+
+TEST(TextOverflowPaint, CapitalizedSlicesPreserveSourceWordBoundaries) {
+    const struct { const char* source; int start; int length; const char* expected; } cases[] = {
+        {"abcdefghij", 0, 4, "Abcd"},
+        {"abcdefghij", 6, 4, "ghij"},
+        {"abc ghij", 4, 4, "Ghij"},
+        {"ághij", 3, 4, "ghij"},
+        {"abc\tghij", 4, 4, "Ghij"},
+    };
+    for (const auto& sample : cases) {
+        SCOPED_TRACE(sample.source);
+        TextRect slice = {}; slice.start_index = sample.start; slice.length = sample.length;
+        lam::Temp<char> visible(render_text_create_export_segment(
+            (const unsigned char*)sample.source, &slice, CSS_VALUE_CAPITALIZE, true));
+        EXPECT_STREQ(visible.get(), sample.expected);
+    }
+}
+
+TEST(TextOverflowPaint, EffectGlyphBitmapsAndAdvancesUseLogicalPaintCoordinates) {
+    for (float density : {1.0f, 2.0f}) {
+        SCOPED_TRACE(density);
+        FontContextConfig config = {}; config.pixel_ratio = density;
+        FontContext* fonts = font_context_create(&config); ASSERT_NE(fonts, nullptr);
+        FontStyleDesc description = {"Liberation Mono", 20, FONT_WEIGHT_NORMAL, FONT_SLANT_NORMAL, nullptr};
+        FontProp style = FONT_PROP_DEFAULT;
+        style.font_handle = lam::counted(font_resolve(fonts, &description));
+        ASSERT_NE(style.font_handle, nullptr);
+        style.font_size = 20; style.space_width = 12; style.letter_spacing = 1;
+        FontBox box = {lam::up(&style), 20};
+        PaintGlyphRun run = {}; run.font = lam::up(&box); run.text = lam::up("A A");
+        run.text_len = 3; run.x = 5; run.baseline_y = 30; run.word_spacing = 2;
+        Arena* arena = arena_create_default(); ASSERT_NE(arena, nullptr);
+        DisplayList list = {}; dl_init(&list, arena);
+        render_glyph_run_raster_lower(&run, &list);
+        ASSERT_EQ(list.item_count(), 2);
+        const DlDrawGlyph& first = list.data()[0].draw_glyph;
+        const DlDrawGlyph& second = list.data()[1].draw_glyph;
+        GlyphInfo glyph = font_get_glyph(style.font_handle, 'A');
+        float expected_gap = glyph.advance_x + 1 + text_space_advance(&style, 2);
+        float first_x = first.has_transform ? first.transform.e13 : (float)first.x;
+        float second_x = second.has_transform ? second.transform.e13 : (float)second.x;
+        EXPECT_FLOAT_EQ(second_x - first_x, roundf(5 + expected_gap) - 5);
+        EXPECT_FLOAT_EQ(first.has_transform ? first.transform.e11 : 1, 1 / density);
+        dl_destroy(&list); arena_destroy(arena);
+        font_handle_release(style.font_handle); font_context_destroy(fonts);
+    }
+}
+
+TEST(TextOverflowPaint, RecordedGlyphRunsRetainFontSelectionAfterPaintContextChanges) {
+    FontContextConfig config = {}; config.pixel_ratio = 1;
+    FontContext* fonts = font_context_create(&config); ASSERT_NE(fonts, nullptr);
+    FontStyleDesc description = {"Liberation Mono", 20, FONT_WEIGHT_NORMAL, FONT_SLANT_NORMAL, nullptr};
+    FontProp original = FONT_PROP_DEFAULT, replacement = FONT_PROP_DEFAULT;
+    original.font_handle = lam::counted(font_resolve(fonts, &description));
+    description.size_px = 30;
+    replacement.font_handle = lam::counted(font_resolve(fonts, &description));
+    original.font_size = 20; replacement.font_size = 30;
+    ASSERT_NE(original.font_handle, nullptr); ASSERT_NE(replacement.font_handle, nullptr);
+    FontBox current = {lam::up(&original), 20}, expected = current;
+    PaintGlyphRun run = {}; run.font = lam::up(&current);
+    run.text = lam::up("A"); run.text_len = 1; run.font_size = 20; run.baseline_y = 40;
+    Arena* arena = arena_create_default(); ASSERT_NE(arena, nullptr);
+    PaintList paint = {}; paint_list_init(&paint, arena);
+    paint_glyph_run(&paint, &run);
+    current = {lam::up(&replacement), 30};
+    // grow the command storage after switching the context; neither event may change earlier runs.
+    for (int index = 0; index < 256; index++) paint_glyph_run(&paint, &run);
+    ASSERT_EQ(paint.item_count(), 257);
+    RdtPath* recorded = render_path_create_text_run(&paint.data()[0].glyph_run, fonts);
+    ASSERT_NE(recorded, nullptr);
+    run.font = lam::up(&expected);
+    RdtPath* reference = render_path_create_text_run(&run, fonts);
+    ASSERT_NE(reference, nullptr);
+    float actual_left, actual_top, actual_right, actual_bottom;
+    float expected_left, expected_top, expected_right, expected_bottom;
+    ASSERT_TRUE(rdt_path_get_bounds(recorded, &actual_left, &actual_top, &actual_right, &actual_bottom));
+    ASSERT_TRUE(rdt_path_get_bounds(reference, &expected_left, &expected_top, &expected_right, &expected_bottom));
+    EXPECT_FLOAT_EQ(actual_left, expected_left); EXPECT_FLOAT_EQ(actual_top, expected_top);
+    EXPECT_FLOAT_EQ(actual_right, expected_right); EXPECT_FLOAT_EQ(actual_bottom, expected_bottom);
+    rdt_path_free(recorded); rdt_path_free(reference);
+    paint_list_destroy(&paint); arena_destroy(arena);
+    font_handle_release(original.font_handle); font_handle_release(replacement.font_handle);
+    font_context_destroy(fonts);
 }
 
 class SvgAnimationLifetimeTest : public ::testing::Test {
