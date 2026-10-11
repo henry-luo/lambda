@@ -30,13 +30,32 @@ const fake = `#!/usr/bin/env node
 const fs = require('fs');
 const path = require('path');
 const name = path.basename(process.argv[1], '.exe');
-const scenario = name === process.env.FAKE_TEST ? process.env.FAKE_SCENARIO : 'pass';
+const requestedScenario = name === process.env.FAKE_TEST ? process.env.FAKE_SCENARIO : 'pass';
+if (process.argv.includes('--gtest_list_tests')) {
+    if (requestedScenario !== 'list-empty') process.stdout.write('Fixture.\\n  Case0\\n  Case1\\n  Case2\\n  Case3\\n  DISABLED_Off\\n');
+    if (requestedScenario === 'list-duplicate') process.stdout.write('  Case0\\n');
+    if (requestedScenario === 'list-crash') process.kill(process.pid, 'SIGKILL');
+    else process.exit(0);
+}
+const filter = process.argv.find(arg => arg.startsWith('--gtest_filter=Fixture.'));
+const workerCase = filter ? filter.slice('--gtest_filter=Fixture.'.length) : '';
+const scenario = !workerCase || workerCase === 'Case1' ? requestedScenario : 'pass';
 const output = process.argv.find(arg => arg.startsWith('--gtest_output=json:')).slice('--gtest_output=json:'.length);
 if (scenario === 'no-json') process.exit(1);
 if (scenario === 'invalid-json') { fs.writeFileSync(output, '{'); process.exit(0); }
 const data = { tests: scenario === 'empty' ? 0 : 4, failures: 0,
     skipped: scenario === 'skip' ? 1 : 0, args: process.argv.slice(2),
     testsuites: [{ name: 'Fixture', testsuite: [{ name: 'Case', time: '0.001s' }] }] };
+if (workerCase) {
+    if (scenario !== 'empty') data.tests = 1;
+    data.testsuites[0].testsuite[0] = { name: scenario === 'wrong-case' ? 'Other' : workerCase,
+        status: 'RUN', result: scenario === 'skip' ? 'SKIPPED' : 'COMPLETED', time: '0.001s' };
+    if (process.env.FAKE_CASE_TRACE_DIR) {
+        const trace = { start: Date.now(), cap: process.env.LAMBDA_TEST_MAX_CONCURRENT, args: process.argv.slice(2) };
+        process.on('exit', () => fs.writeFileSync(path.join(process.env.FAKE_CASE_TRACE_DIR, workerCase + '.json'),
+            JSON.stringify({ ...trace, end: Date.now() })));
+    }
+}
 if (scenario === 'launches') {
     const phases = path.join(path.dirname(output), 'view-phases.tsv');
     fs.writeFileSync(phases, 'metric\\tmilliseconds\\nload\\t75.5\\ncleanup\\t4.5\\n');
@@ -49,7 +68,8 @@ if (scenario === 'launches') {
 }
 fs.writeFileSync(output, JSON.stringify(data));
 if (scenario === 'crash') process.kill(process.pid, 'SIGKILL');
-if (scenario === 'timeout') setInterval(() => {}, 1000);
+if (workerCase && requestedScenario === 'parallel') setTimeout(() => process.exit(0), 200);
+else if (scenario === 'timeout') setInterval(() => {}, 1000);
 else process.exit(scenario === 'exit' ? 7 : 0);
 `;
 for (const test of inventory.filter(t => t.buildTarget)) {
@@ -64,20 +84,23 @@ function check(name, fn) {
     }
 }
 
-function runSelected(names, scenario = 'pass', extra = []) {
+function runSelected(names, scenario = 'pass', extra = [], env = {}, parallel = false) {
     const output = path.join(fixture, 'results-' + results.length);
     fs.mkdirSync(output, { recursive: true });
     // A stale passing artifact must never hide a child that fails to write JSON.
-    fs.writeFileSync(path.join(output, names[0] + '_results.json'), '{"tests":99,"failures":0}');
+    fs.writeFileSync(path.join(output, names[0] + '_results.json'), JSON.stringify({ tests: 99, failures: 0,
+        testsuites: env.FAKE_SLOW_CASE ? [{ name: 'Fixture', testsuite: [{ name: env.FAKE_SLOW_CASE, time: '9s' }] }] : [] }));
     const excluded = inventory.filter(t => !names.includes(t.baseName)).map(t => t.baseName);
     const executable = path.join(fixture, names[0] + '.exe');
     if (scenario === 'missing') fs.unlinkSync(executable);
     let child;
     try {
-        child = invoke(['--target=radiant', '--category=baseline', '--sequential',
+        child = invoke(['--target=radiant', '--category=baseline', ...(parallel ? [] : ['--sequential']),
             '--exclude-test=' + excluded.join(','), ...extra], {
             LAMBDA_TEST_BIN_DIR: fixture, LAMBDA_TEST_OUTPUT_DIR: output,
             LAMBDA_TEST_IDLE_TIMEOUT: '1', FAKE_TEST: names[0], FAKE_SCENARIO: scenario,
+            LAMBDA_RADIANT_VIEW_TEST_JOBS: parallel ? '4' : '1',
+            ...env,
         });
     } finally {
         if (scenario === 'missing') fs.writeFileSync(executable, fake, { mode: 0o755 });
@@ -99,6 +122,8 @@ try {
         assert.ok(inventory.every(t => t.suite === 'radiant' && t.category === 'baseline'));
         const view = inventory.find(t => t.baseName === 'test_radiant_view_gtest');
         assert.ok(view.runnerArgs.includes('--gtest_filter=*-RadiantViewTest.Doom*'));
+        assert.equal(view.caseWorkers, 4);
+        assert.ok(view.caseWorkerArgs.includes('--radiant-case-worker'));
     });
     check('Native build targets deduplicate runner aliases', () => {
         const actual = invoke(['--target=radiant', '--category=baseline', '--list-build-targets']).stdout.trim().split(/\s+/);
@@ -140,6 +165,68 @@ try {
         assert.equal(result.launch_timings[0].duration_ms, 125.5);
         assert.deepEqual(result.launch_timings[0].phases, { load: 75.5, cleanup: 4.5 });
         assert.equal(result.launch_timings[0].log_file, 'view.log');
+    });
+    for (const [limit, parallel] of [[2, true], [4, true], [4, false]]) {
+        check(`View case workers preserve inventory within ${limit} slots with ${parallel ? 'parallel' : 'sequential'} suites`, () => {
+            const trace = path.join(fixture, `trace-${limit}-${parallel}`);
+            fs.mkdirSync(trace);
+            const { child, summary } = runSelected(['test_radiant_view_gtest'], 'parallel', [], {
+                LAMBDA_TEST_MAX_CONCURRENT: String(limit), LAMBDA_RADIANT_VIEW_TEST_JOBS: '4',
+                FAKE_CASE_TRACE_DIR: trace,
+            }, parallel);
+            assert.equal(child.status, 0, child.stderr);
+            assert.equal(summary.total_passed, 4);
+            assert.equal(summary.total_tests, 4);
+            const rows = fs.readdirSync(trace).map(file => JSON.parse(fs.readFileSync(path.join(trace, file), 'utf8')));
+            assert.equal(rows.length, 4);
+            assert.ok(rows.every(row => row.cap === '1' && row.args.includes('--radiant-case-worker')));
+            const events = rows.flatMap(row => [{ time: row.start, delta: 1 }, { time: row.end, delta: -1 }])
+                .sort((a, b) => a.time - b.time || a.delta - b.delta);
+            let active = 0, peak = 0;
+            for (const event of events) { active += event.delta; peak = Math.max(peak, active); }
+            assert.ok(peak > 1 && peak <= limit, `peak workers: ${peak}`);
+        });
+    }
+    for (const scenario of ['exit', 'crash', 'no-json', 'invalid-json', 'empty', 'wrong-case', 'timeout']) {
+        check(`A ${scenario} case worker fails its own case and preserves other cases`, () => {
+            const { child, summary } = runSelected(['test_radiant_view_gtest'], scenario, [], {}, true);
+            assert.equal(child.status, 1, child.stderr);
+            assert.equal(summary.total_tests, 4);
+            assert.equal(summary.total_passed, 3);
+            assert.equal(summary.total_failed, 1);
+            assert.ok(summary.failed_test_names.some(name => name.includes('Fixture.Case1')));
+        });
+    }
+    check('Previous case durations start slow work early without reusing stale results', () => {
+        const trace = path.join(fixture, 'trace-order');
+        fs.mkdirSync(trace);
+        const { child, summary } = runSelected(['test_radiant_view_gtest'], 'parallel', [], {
+            LAMBDA_TEST_MAX_CONCURRENT: '2', FAKE_SLOW_CASE: 'Case3', FAKE_CASE_TRACE_DIR: trace,
+        }, true);
+        assert.equal(child.status, 0, child.stderr);
+        assert.equal(summary.total_passed, 4);
+        const started = fs.readdirSync(trace).map(file => ({ file,
+            ...JSON.parse(fs.readFileSync(path.join(trace, file), 'utf8')) })).sort((a, b) => a.start - b.start);
+        assert.ok(started.slice(0, 2).some(row => row.file === 'Case3.json'));
+    });
+    for (const scenario of ['list-empty', 'list-duplicate', 'list-crash']) {
+        check(`${scenario} discovery remains a suite failure`, () => {
+            const { child, summary } = runSelected(['test_radiant_view_gtest'], scenario, [], {}, true);
+            assert.equal(child.status, 1, child.stderr);
+            assert.equal(summary.total_failed, 1);
+            assert.ok(summary.failed_test_names.some(name => name.includes('discovery')));
+        });
+    }
+    check('Case workers preserve skipped counts and phase properties', () => {
+        const skipped = runSelected(['test_radiant_view_gtest'], 'skip', [], {}, true);
+        assert.equal(skipped.child.status, 0, skipped.child.stderr);
+        assert.equal(skipped.summary.total_passed, 3);
+        assert.equal(skipped.summary.total_skipped, 1);
+        const phases = runSelected(['test_radiant_view_gtest'], 'launches', [], {}, true);
+        assert.equal(phases.child.status, 0, phases.child.stderr);
+        assert.equal(phases.summary.total_passed, 4);
+        assert.equal(phases.summary.level2_c_tests[0].launch_timings.length, 1);
+        assert.deepEqual(phases.summary.level2_c_tests[0].launch_timings[0].phases, { load: 75.5, cleanup: 4.5 });
     });
     check('Raw output still saves the final summary', () => {
         const { child, summary } = runSelected(['test_scene3d_gtest'], 'exit', ['--raw']);

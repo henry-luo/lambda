@@ -354,7 +354,7 @@ static bool test_radiant_view_prepare_run() {
     mem_free(output_path);
     snprintf(g_radiant_view_workspace, sizeof(g_radiant_view_workspace), "%s/temp/radiant-view-%s",
         g_radiant_view_root, g_radiant_view_run_id);
-    // create shared parents before workers start; create_dir can race on mkdir.
+    // create shared artifact and workspace parents before launching workers.
     return create_dir(g_radiant_view_artifacts) && create_dir(g_radiant_view_workspace);
 }
 
@@ -375,6 +375,8 @@ static bool test_radiant_view_prepare_launch(RadiantViewLaunch* launch) {
         snprintf(link, sizeof(link), "%s/%s", launch->cwd, name);
         if (file_exists(source) && !file_exists(link) && file_symlink(source, link) != 0) return false;
     }
+    snprintf(directory, sizeof(directory), "%s/lambda.exe", launch->cwd);
+    if (!file_exists(directory) && file_symlink(g_radiant_view_executable, directory) != 0) return false;
     remove(launch->timing_path);
     remove(launch->event_result);
     return true;
@@ -3220,6 +3222,10 @@ static void test_radiant_view_run_selected_parallel(const size_t* selected,
 int main(int argc, char** argv) {
     const char* filter = test_radiant_view_filter_from_args(argc, argv);
     bool list_only = test_radiant_view_list_tests_requested(argc, argv);
+    bool case_worker = false;
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "--radiant-case-worker") == 0) case_worker = true;
+    }
     ::testing::InitGoogleTest(&argc, argv);
 
     if (!list_only) {
@@ -3237,6 +3243,17 @@ int main(int argc, char** argv) {
         snprintf(g_radiant_view_run_id, sizeof(g_radiant_view_run_id), "%d-%llu",
             process_id, (unsigned long long)time_now_ns());
         if (!test_radiant_view_prepare_run()) return 1;
+        if (case_worker) {
+            // legacy cases use relative temp paths; isolate their entire harness before launching any child.
+            RadiantViewLaunch launch = {};
+            launch.label = "case";
+            if (!test_radiant_view_prepare_launch(&launch)) return 1;
+#ifdef _WIN32
+            if (_chdir(launch.cwd) != 0) return 1;
+#else
+            if (chdir(launch.cwd) != 0) return 1;
+#endif
+        }
         size_t selected[g_radiant_view_case_count];
         size_t selected_count = 0;
         for (size_t i = 0; i < g_radiant_view_case_count; i++) {

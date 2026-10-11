@@ -191,8 +191,8 @@ function getTestIdleTimeoutMs(baseName) {
 }
 
 // Max concurrent tests: scale to CPU count, leave 1 core free (min 1).
-function getMaxConcurrent() {
-    if (!parallelExecution) return 1;
+function getMaxConcurrent(allowParallel = parallelExecution) {
+    if (!allowParallel) return 1;
     const cpuScaled = Math.max(1, os.cpus().length - 1);
     const requested = parseInt(process.env.LAMBDA_TEST_MAX_CONCURRENT || '', 10);
     if (Number.isFinite(requested) && requested > 0) {
@@ -208,6 +208,8 @@ function getMaxConcurrent() {
 }
 
 const MAX_CONCURRENT = getMaxConcurrent();
+// sequential suites still allow bounded workers inside an opted-in test binary.
+const MAX_CASE_CONCURRENT = getMaxConcurrent(true);
 const heartbeatSeconds = parseInt(process.env.LAMBDA_TEST_HEARTBEAT || '30', 10);
 const HEARTBEAT_MS = (Number.isFinite(heartbeatSeconds) ? Math.max(10, heartbeatSeconds) : 30) * 1000;
 
@@ -366,6 +368,9 @@ function discoverTests(config) {
                     icon: t.icon || '🧪',
                     isGtest: baseName.endsWith('_gtest') || libs.includes('gtest') || libs.includes('gtest_main'),
                     runnerArgs: t.runner_args || [],
+                    caseWorkers: t.case_workers || 1,
+                    caseWorkersEnv: t.case_workers_env,
+                    caseWorkerArgs: t.case_worker_args || [],
                     buildTarget: path.basename(executable, '.exe'),
                     minimumPassed: t.minimum_passed || 0,
                     // Some GTest binaries launch their own worker processes; respect
@@ -541,12 +546,19 @@ function scheduleTests(tests) {
  * Returns: { passed, failed, total, status, failedTests[], timedOut }
  */
 function runTest(testInfo) {
+    const requestedWorkers = Number(process.env[testInfo.caseWorkersEnv] || testInfo.caseWorkers || 1);
+    const caseWorkers = Math.max(1, Math.min(MAX_CASE_CONCURRENT, Math.floor(requestedWorkers) || 1));
+    if (testInfo.isGtest && !testInfo.caseWorker && !testInfo.listCases &&
+        !process.env.GTEST_TOTAL_SHARDS && caseWorkers > 1) {
+        return runGtestCases(testInfo, caseWorkers);
+    }
     return new Promise((resolve) => {
         const { baseName, exePath, scriptPath } = testInfo;
         const idleTimeoutMs = getTestIdleTimeoutMs(baseName);
         const testPath = testInfo.runner === 'node' ? scriptPath : exePath;
         const jsonFile = path.join(TEST_OUTPUT_DIR, `${baseName}_results.json`);
         const logFile = path.join(TEST_OUTPUT_DIR, `${baseName}.log`);
+        ensureDir(path.dirname(logFile));
         try { fs.unlinkSync(jsonFile); } catch (_) {}
 
         if (!testPath || !fs.existsSync(testPath)) {
@@ -562,10 +574,11 @@ function runTest(testInfo) {
         }
 
         const log = fs.createWriteStream(logFile);
+        const finish = result => log.end(() => resolve(result));
 
         // Build argv based on test type
         let testArgs = [];
-        let env = { ...process.env };
+        let env = { ...process.env, ...testInfo.env };
 
         // Suppress ASan container-overflow false positives
         const existingAsan = env.ASAN_OPTIONS || '';
@@ -596,6 +609,7 @@ function runTest(testInfo) {
         } else if (testInfo.isGtest) {
             const jsonPath = IS_WINDOWS ? jsonFile.replace(/\//g, '\\') : jsonFile;
             testArgs = [`--gtest_output=json:${jsonPath}`, ...(testInfo.runnerArgs || [])];
+            if (testInfo.listCases) testArgs.push('--gtest_list_tests');
             if (['test_js_gtest', 'test_wpt_html_parser_gtest', 'test_markdown_gtest'].includes(baseName) &&
                 targetCategory === 'baseline') {
                 testArgs.push('--baseline');
@@ -628,6 +642,7 @@ function runTest(testInfo) {
         });
 
         let outputLines = [];
+        let listing = '';
         let idleTimer = null;
         let timedOut = false;
         let finished = false;
@@ -653,6 +668,7 @@ function runTest(testInfo) {
         child.stdout.on('data', (data) => {
             resetIdleTimer();
             log.write(data);
+            if (testInfo.listCases) listing += data.toString();
             const lines = data.toString().split('\n');
             outputLines.push(...lines);
             if (rawOutput) process.stdout.write(data);
@@ -666,20 +682,25 @@ function runTest(testInfo) {
 
         child.on('error', (err) => {
             finished = true;
-            log.end();
             if (idleTimer) clearTimeout(idleTimer);
-            resolve({
+
+            finish({
                 passed: 0, failed: 1, total: 1,
                 status: '❌ ERROR', failedTests: [`[${baseName}] spawn error: ${err.message}`],
-                timedOut: false,
+                timedOut: false, logFile,
             });
         });
 
         child.on('close', (code, signal) => {
             if (finished) return;
             finished = true;
-            log.end();
             if (idleTimer) clearTimeout(idleTimer);
+
+            if (testInfo.listCases) {
+                finish({ listing, failed: timedOut || code !== 0 || signal ? 1 : 0,
+                    timedOut, logFile, exitCode: code, signal });
+                return;
+            }
 
             if (timedOut) {
                 // Write a timeout marker JSON so results aggregation works
@@ -720,9 +741,114 @@ function runTest(testInfo) {
                 result.status = '❌ FAIL';
                 result.failedTests.push(...errors.map(error => `[${baseName}] ${error} (see ${logFile})`));
             }
-            resolve(result);
+            finish(result);
         });
     });
+}
+
+// independent cases own their process group, timeout, artifacts and native working directory.
+async function runGtestCases(testInfo, workers) {
+    const { baseName } = testInfo;
+    const jsonFile = path.join(TEST_OUTPUT_DIR, `${baseName}_results.json`);
+    const logFile = path.join(TEST_OUTPUT_DIR, `${baseName}.log`);
+    const start = Date.now();
+    const previousTimes = new Map();
+    try {
+        const previous = JSON.parse(fs.readFileSync(jsonFile, 'utf8'));
+        for (const suite of (previous.testsuites || [])) for (const tc of (suite.testsuite || [])) {
+            previousTimes.set(`${suite.name}.${tc.name}`, getCapturedCaseDurationMs(tc) || parseDurationMs(tc.time));
+        }
+    } catch (_) {}
+    try { fs.unlinkSync(jsonFile); } catch (_) {}
+    const discovery = await runTest({ ...testInfo, baseName: `${baseName}_cases/list`, listCases: true });
+    fs.copyFileSync(discovery.logFile, logFile);
+    const names = [];
+    let suite = '';
+    const runDisabled = (testInfo.runnerArgs || []).includes('--gtest_also_run_disabled_tests') ||
+        process.env.GTEST_ALSO_RUN_DISABLED_TESTS === '1';
+    for (const line of (discovery.listing || '').split('\n')) {
+        const content = line.split('#')[0].trimEnd();
+        if (/^\S+\.$/.test(content)) suite = content.slice(0, -1);
+        else if (suite && /^\s+\S+$/.test(content)) {
+            const name = `${suite}.${content.trim()}`;
+            if (runDisabled || !/(^|[/.])DISABLED_/.test(name)) names.push(name);
+        }
+    }
+    const errors = [];
+    if (discovery.failed) errors.push('GTest case discovery failed');
+    if (!names.length) errors.push('GTest case discovery returned no tests');
+    if (new Set(names).size !== names.length) errors.push('GTest case discovery returned duplicate tests');
+    if (errors.length) {
+        fs.writeFileSync(jsonFile, JSON.stringify({ summary: { passed: 0, failed: 1, total: 1 },
+            results: [{ name: errors.join('; '), pass: false }] }));
+        return { ...parseTestResults(baseName, jsonFile, false), logFile };
+    }
+    const runnerArgs = [];
+    const originalArgs = testInfo.runnerArgs || [];
+    for (let i = 0; i < originalArgs.length; i++) {
+        if (originalArgs[i] === '--gtest_filter') { i++; continue; }
+        if (!originalArgs[i].startsWith('--gtest_filter=')) runnerArgs.push(originalArgs[i]);
+    }
+    const cases = new Array(names.length);
+    // start expensive cases first, keeping merged reports in discovery order.
+    const queue = names.map((name, index) => ({ name, index })).sort((a, b) =>
+        (previousTimes.get(b.name) || 0) - (previousTimes.get(a.name) || 0));
+    let next = 0;
+    async function worker() {
+        while (next < names.length) {
+            const { name, index } = queue[next++];
+            const workerName = `${baseName}_cases/${index}`;
+            const result = await runTest({ ...testInfo, baseName: workerName, caseWorker: true,
+                minimumPassed: 0, env: { ...testInfo.env, LAMBDA_TEST_MAX_CONCURRENT: '1' },
+                runnerArgs: [...runnerArgs, ...testInfo.caseWorkerArgs, `--gtest_filter=${name}`] });
+            let data;
+            try { data = JSON.parse(fs.readFileSync(path.join(TEST_OUTPUT_DIR, `${workerName}_results.json`), 'utf8')); } catch (_) {}
+            const rows = Array.isArray(data?.testsuites) ? data.testsuites.flatMap(s =>
+                Array.isArray(s.testsuite) ? s.testsuite.map(tc => ({ suite: s.name, tc })) : []) : [];
+            const dot = name.indexOf('.');
+            const suiteName = name.slice(0, dot), caseName = name.slice(dot + 1);
+            const valid = data?.tests === 1 && rows.length === 1 && rows[0].tc?.status === 'RUN' &&
+                `${rows[0].suite}.${rows[0].tc.name}` === name;
+            const tc = valid ? rows[0].tc : { name: caseName, classname: suiteName, time: '0s',
+                status: 'RUN', result: 'COMPLETED' };
+            // a missing, mismatched or crashing child fails its discovered case, even with passing JSON.
+            if (!valid || result.failed) {
+                if (!Array.isArray(tc.failures) || !tc.failures.length) {
+                    tc.failures = [{ failure: (result.failedTests || []).join('\n') ||
+                        `expected exactly ${name} in the worker report (see ${result.logFile})` }];
+                }
+            }
+            cases[index] = { suiteName, tc };
+            fs.appendFileSync(logFile, `\n[case ${index + 1}/${names.length}] ${name}\n` +
+                fs.readFileSync(result.logFile, 'utf8'));
+        }
+    }
+    await Promise.all(Array.from({ length: Math.min(workers, names.length) }, worker));
+    const suites = new Map();
+    for (const { suiteName, tc } of cases) {
+        if (!suites.has(suiteName)) suites.set(suiteName, { name: suiteName, testsuite: [] });
+        suites.get(suiteName).testsuite.push(tc);
+    }
+    const failed = tc => Array.isArray(tc.failures) && tc.failures.length > 0;
+    const skipped = tc => !failed(tc) && tc.result === 'SKIPPED';
+    for (const suite of suites.values()) {
+        suite.tests = suite.testsuite.length;
+        suite.failures = suite.testsuite.filter(failed).length;
+        suite.skipped = suite.testsuite.filter(skipped).length;
+        suite.disabled = 0; suite.errors = 0;
+        suite.time = formatSecondsForGtest(suite.testsuite.reduce((sum, tc) => sum + parseDurationMs(tc.time), 0));
+    }
+    fs.writeFileSync(jsonFile, JSON.stringify({ tests: cases.length,
+        failures: cases.filter(row => failed(row.tc)).length,
+        skipped: cases.filter(row => skipped(row.tc)).length, disabled: 0, errors: 0,
+        timestamp: new Date(start).toISOString(), time: formatSecondsForGtest(Date.now() - start),
+        name: 'AllTests', testsuites: [...suites.values()] }, null, 2));
+    const result = parseTestResults(baseName, jsonFile, false);
+    if (result.passed < testInfo.minimumPassed && !result.failed) {
+        result.failed++; result.total++; result.status = '❌ FAIL';
+        result.failedTests.push(`[${baseName}] expected at least ${testInfo.minimumPassed} passing tests, got ${result.passed}`);
+    }
+    return { ...result, logFile };
 }
 
 // ─── Result parsing ─────────────────────────────────────────────────────────────

@@ -4081,6 +4081,11 @@
           {
             "source": "test/test_radiant_view_gtest.cpp",
             "name": "Radiant View Tests",
+            "case_workers": 4,
+            "case_workers_env": "LAMBDA_RADIANT_VIEW_TEST_JOBS",
+            "case_worker_args": [
+              "--radiant-case-worker"
+            ],
             "dependencies": [
               "lambda-lib"
             ],
