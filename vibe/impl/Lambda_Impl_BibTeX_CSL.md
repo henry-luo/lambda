@@ -50,7 +50,7 @@ These statuses refer to the proposal's complete acceptance gates, not merely the
 | P5: integration | Opt-in render API; commands, sections/segments, print selection, destinations, assets, CSS, processor metadata | Viewer invalidation interaction tests, richer hash/coverage metadata and all auxiliary-command combinations |
 | P6: acceptance | Package goldens, differential acceptance, exploratory slice, rendered preview and broad baseline checks | Full suite, larger bibliographies/performance, more entry types per style and cross-platform/rendered-export gates |
 
-The initial useful milestone is available. P0–P6 are not all marked complete, and the separate Phase IV M4 TeX-style execution proposal is unchanged.
+The initial useful milestone is available. P0–P6 are not all marked complete, and the separate Phase IV M4 TeX-style execution proposal was dropped on 2026-10-12 in favor of mapping guide-level biblatex styles to CSL ([design §7.4](../latex/Lambda_Design_BibTeX_CSL.md#74-biblatex-style-names-mapped-to-csl)); that mapping is not yet built.
 
 ## Validation evidence
 
