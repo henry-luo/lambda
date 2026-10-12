@@ -1,0 +1,9 @@
+<!doctype html><meta charset=utf-8><style>html,body{margin:0;background:white}button{height:24px}#box{position:absolute;left:0;top:72px;width:48px;height:32px;background:red;font-size:4px}#child{position:absolute;right:0;top:0;width:24px;height:32px;background:blue}</style>
+<button id=clear>Clear subtree</button><button id=opaque>Opaque mask</button><button id=math>Math mask</button><button id=font>Resize font</button><button id=wide>Resize box</button><div id=box><div id=child></div></div>
+<script>(function(){var box=document.getElementById('box');function reset(){box.style.width='48px';box.style.fontSize='4px'}
+document.getElementById('clear').onclick=function(){reset();box.style.maskImage='radial-gradient(transparent,transparent)'};
+document.getElementById('opaque').onclick=function(){reset();box.style.maskImage='radial-gradient(black,black)'};
+document.getElementById('math').onclick=function(){reset();box.style.maskImage='radial-gradient(circle 16px,black 0%,black calc(2em),transparent calc(2em),transparent 100%)'};
+document.getElementById('font').onclick=function(){box.style.fontSize='8px'};
+document.getElementById('wide').onclick=function(){box.style.width='96px'};
+})();</script>

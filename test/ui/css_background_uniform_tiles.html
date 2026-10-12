@@ -1,0 +1,11 @@
+<!doctype html><meta charset=utf-8><style>html,body{margin:0;background:white}button{height:24px}#box{position:absolute;left:0;top:40px;width:48px;height:32px;background:blue}</style>
+<button id=phase>Half phase</button><button id=quarter>Quarter phase</button><button id=alpha>Alpha</button><button id=space>Space</button><button id=single>Single space</button><button id=restore>Restore</button><div id=box></div><script>
+var box=document.getElementById('box');
+function setup(color,size,repeat,position){box.style.backgroundImage='linear-gradient('+color+','+color+')';box.style.backgroundSize=size;box.style.backgroundRepeat=repeat;box.style.backgroundPosition=position}
+document.getElementById('phase').onclick=function(){setup('red','8px 4px','repeat','3.5px 5.5px')};
+document.getElementById('quarter').onclick=function(){box.style.backgroundPosition='3.25px 5.25px'};
+document.getElementById('alpha').onclick=function(){box.style.backgroundImage='linear-gradient(rgba(255,0,0,.5),rgba(255,0,0,.5))'};
+document.getElementById('space').onclick=function(){setup('red','20px 4px','space repeat','3.25px 5.25px')};
+document.getElementById('single').onclick=function(){setup('red','30px 20px','space','right bottom')};
+document.getElementById('restore').onclick=function(){setup('red','8px 4px','repeat','3.25px 5.25px')};
+</script>

@@ -39,11 +39,13 @@
 #include <mutex>
 #include <atomic>
 #include <chrono>
+#include <pthread.h>
 
 #include "../lambda/input/input.hpp"
 #include "../lambda/input/input-parsers.h"
 #include "../lambda/core/mark_reader.hpp"
 #include "../lib/mempool.h"
+#include "../lib/memtrack.h"
 
 extern "C" {
 #include "../lib/shell.h"
@@ -57,6 +59,7 @@ extern "C" {
     #include <windows.h>
     #include <io.h>
     #include <direct.h>
+    #include <process.h>
     #define popen  _popen
     #define pclose _pclose
     #define WEXITSTATUS(s) (s)
@@ -106,6 +109,8 @@ struct UiTestInfo {
     int estimated_wait_ms;   // explicit event waits, used only for launch scheduling
     int explicit_wait_count;
     int assertion_count;
+    long previous_elapsed_ms;
+    int worker_mb;
 
     friend std::ostream& operator<<(std::ostream& os, const UiTestInfo& info) {
         return os << info.test_name;
@@ -119,6 +124,7 @@ struct UiSuiteSpec {
     std::string default_page;
     std::vector<std::string> tags;
     bool headless = true;
+    int worker_mb = 2048;
 };
 
 struct UiManifest {
@@ -252,14 +258,25 @@ static bool ui_parse_json_file(const std::string& path, Item* root,
     return true;
 }
 
-static void ui_ensure_result_directory() {
+static void ui_ensure_result_directory(char* directory, size_t capacity) {
 #ifdef _WIN32
     _mkdir("temp");
     _mkdir("temp\\ui-test-results");
+    snprintf(directory, capacity, "temp/ui-test-results/%lu", (unsigned long)_getpid());
+    _mkdir(directory);
 #else
     mkdir("./temp", 0755);
     mkdir("./temp/ui-test-results", 0755);
+    snprintf(directory, capacity, "temp/ui-test-results/%lu", (unsigned long)getpid());
+    mkdir(directory, 0755);
 #endif
+}
+
+static bool ui_read_worker_mb(ItemReader value, int* worker_mb) {
+    if (value.isNull()) return true;
+    if (!value.isInt() || value.asInt() <= 0 || value.asInt() > 65536) return false;
+    *worker_mb = value.asInt32();
+    return true;
 }
 
 static bool ui_parse_manifest(UiManifest* manifest) {
@@ -335,6 +352,11 @@ static bool ui_parse_manifest(UiManifest* manifest) {
             return false;
         }
         suite.name = name.cstring();
+        if (!ui_read_worker_mb(suite_map.get("worker_mb"), &suite.worker_mb)) {
+            g_ui_discovery_error = "manifest suite worker_mb must be a positive memory reservation: " + suite.name;
+            ui_dispose_json_input(pool, input);
+            return false;
+        }
         for (const UiSuiteSpec& prior : manifest->suites) {
             if (prior.name == suite.name) {
                 g_ui_discovery_error = "manifest contains duplicate suite: " + suite.name;
@@ -468,6 +490,12 @@ static bool ui_load_fixture(const std::string& json_path, const UiSuiteSpec& sui
         return false;
     }
     MapReader root_map = root.asMap();
+    info->worker_mb = suite.worker_mb;
+    if (!ui_read_worker_mb(root_map.get("worker_mb"), &info->worker_mb)) {
+        g_ui_discovery_error = "fixture worker_mb must be a positive memory reservation: " + json_path;
+        ui_dispose_json_input(pool, input);
+        return false;
+    }
     ItemReader events_item = root_map.get("events");
     if (!events_item.isArray() && !events_item.isList()) {
         g_ui_discovery_error = "fixture is missing an events array: " + json_path;
@@ -874,7 +902,13 @@ struct UiTestResult {
     long elapsed_ms = 0;
     std::string output;    // combined stdout + stderr
     std::string result_path;
+    char phase_path[512] = {};
 };
+
+static const char* ui_test_executable() {
+    const char* executable = getenv("RADIANT_TEST_EXECUTABLE");
+    return executable && executable[0] ? executable : LAMBDA_EXE;
+}
 
 static bool ui_read_machine_result(const std::string& path, UiTestResult* result) {
     if (!result) return false;
@@ -916,10 +950,18 @@ static UiTestResult run_ui_test(const UiTestInfo& info) {
     UiTestResult result;
     result.executed = true;
     auto t0 = std::chrono::steady_clock::now();
-    ui_ensure_result_directory();
-    std::string result_path = std::string("temp/ui-test-results/") + info.test_name + ".json";
-    remove(result_path.c_str());
+    // separate runner invocations must not remove or replace each other's machine results.
+    char directory[128];
+    ui_ensure_result_directory(directory, sizeof(directory));
+    char result_path[512];
+    snprintf(result_path, sizeof(result_path), "%s/%s.json", directory, info.test_name.c_str());
+    remove(result_path);
     result.result_path = result_path;
+    char* result_directory = file_realpath(directory);
+    snprintf(result.phase_path, sizeof(result.phase_path), "%s/%s.phases.tsv",
+        result_directory ? result_directory : directory, info.test_name.c_str());
+    if (result_directory) mem_free(result_directory);
+    remove(result.phase_path);
 
     // Build command: ./lambda.exe view|edit <document> --event-file <json>
     // The window auto-closes when simulation completes (auto_close=true in EventSimContext).
@@ -953,14 +995,14 @@ static UiTestResult run_ui_test(const UiTestInfo& info) {
     }
     const char* args[16];
     int arg_count = 0;
-    args[arg_count++] = LAMBDA_EXE;
+    args[arg_count++] = ui_test_executable();
     args[arg_count++] = info.edit_command ? "edit" : "view";
     args[arg_count++] = document_path;
     if (info.source_surface) args[arg_count++] = "--source";
     args[arg_count++] = "--event-file";
     args[arg_count++] = info.json_path.c_str();
     args[arg_count++] = "--event-result";
-    args[arg_count++] = result_path.c_str();
+    args[arg_count++] = result_path;
     if (!info.skip_headless) args[arg_count++] = "--headless";
     args[arg_count++] = "--no-log";
     args[arg_count++] = "--font-dir";
@@ -968,13 +1010,13 @@ static UiTestResult run_ui_test(const UiTestInfo& info) {
     args[arg_count] = NULL;
     ShellOptions options = {0};
     options.merge_stderr = true;
-    ShellEnvEntry child_env[5] = {};
+    ShellEnvEntry child_env[6] = {{"RADIANT_VIEW_TIMING_PATH", result.phase_path}};
     for (int i = 0; i < info.env_count; i++) {
-        child_env[i] = {info.env_keys[i], info.env_values[i]};
+        child_env[i + 1] = {info.env_keys[i], info.env_values[i]};
     }
-    if (info.env_count > 0) options.env = child_env;
+    options.env = child_env;
     // Worker threads must launch argv directly; a shell adds process and quoting overhead.
-    ShellResult shell_result = shell_exec(LAMBDA_EXE, args, &options);
+    ShellResult shell_result = shell_exec(ui_test_executable(), args, &options);
     if (shell_result.stdout_buf) {
         result.output.assign(shell_result.stdout_buf, shell_result.stdout_len);
     }
@@ -1029,18 +1071,17 @@ static int ui_memory_job_limit_for(unsigned long long physical_bytes,
     return limit > 0 ? limit : 1;
 }
 
-static int ui_memory_job_limit() {
-    // external JS bundles retain source, transpiler state, and JIT pages at
-    // the same time; the old 1 GiB estimate allowed concurrent MIR builds to
-    // enter an unstable memory-pressure regime before the child could report
-    // a normal test failure.
-    int worker_mb = 2048;
+static int g_ui_worker_mb_override;
+static bool g_ui_memory_oversubscribe;
+
+static int ui_worker_mb_override() {
+    int worker_mb = 0;
     const char* env_worker_mb = getenv("LAMBDA_UI_TEST_WORKER_MB");
     if (env_worker_mb && *env_worker_mb) {
         int requested_mb = atoi(env_worker_mb);
         if (requested_mb > 0) worker_mb = requested_mb;
     }
-    return ui_memory_job_limit_for(ui_physical_memory_bytes(), worker_mb);
+    return worker_mb;
 }
 
 static int ui_memory_safe_jobs(int requested_jobs, int memory_job_limit,
@@ -1080,15 +1121,117 @@ TEST(UIAutomationSchedulerTest, MemoryBudgetClampsCpuDerivedWorkers) {
     EXPECT_EQ(ui_memory_safe_jobs(15, 8, true), 15);
 }
 
+static bool ui_timing_paths(const char** output_path, char* cache_path, size_t capacity) {
+    const char* output = ::testing::GTEST_FLAG(output).c_str();
+    if (strncmp(output, "json:", 5) != 0) return false;
+    *output_path = output + 5;
+    int length = snprintf(cache_path, capacity, "%s.timings.json", *output_path);
+    return length > 0 && (size_t)length < capacity;
+}
+
+static void ui_load_previous_timings() {
+    const char* output_path;
+    char cache_path[1024];
+    if (!ui_timing_paths(&output_path, cache_path, sizeof(cache_path))) return;
+    const char* previous = file_exists(cache_path) ? cache_path : output_path;
+    if (!file_exists(previous)) return;
+    Item root_item;
+    Pool* pool = nullptr;
+    Input* input = nullptr;
+    if (!ui_parse_json_file(previous, &root_item, &pool, &input)) return;
+    MarkReader reader(root_item);
+    ItemReader root = reader.getRoot();
+    ItemReader suites_item = root.isMap() ? root.asMap().get("testsuites") : ItemReader();
+    if (suites_item.isArray()) {
+        ArrayReader suites = suites_item.asArray();
+        for (int64_t i = 0; i < suites.length(); i++) {
+            ItemReader suite = suites.get(i);
+            if (!suite.isMap()) continue;
+            ItemReader cases_item = suite.asMap().get("testsuite");
+            if (!cases_item.isArray()) continue;
+            ArrayReader cases = cases_item.asArray();
+            for (int64_t j = 0; j < cases.length(); j++) {
+                ItemReader test = cases.get(j);
+                if (!test.isMap()) continue;
+                MapReader row = test.asMap();
+                const char* name = row.get("name").cstring();
+                const char* elapsed = row.get("lambda_script_elapsed_ms").cstring();
+                if (!name || strncmp(name, "RunTest/", 8) || !elapsed) continue;
+                long milliseconds = strtol(elapsed, nullptr, 10);
+                for (UiTestInfo& info : g_ui_tests) {
+                    if (sanitize_gtest_param_name(info.test_name) == name + 8 && milliseconds > 0)
+                        info.previous_elapsed_ms = milliseconds;
+                }
+            }
+        }
+    }
+    ui_dispose_json_input(pool, input);
+}
+
+static void ui_save_previous_timings() {
+    const char* output_path;
+    char cache_path[1024];
+    if (!ui_timing_paths(&output_path, cache_path, sizeof(cache_path))) return;
+    // the shared runner deletes old verdicts; retain a separate scheduling hint, never a reusable result.
+    FileCopyOptions options = {true, false};
+    if (file_copy(output_path, cache_path, &options) != 0)
+        log_error("ui timing cache: could not retain durations from %s", output_path);
+}
+
 static int compare_ui_indices_by_estimated_wait(const void* left, const void* right) {
     size_t left_index = *(const size_t*)left;
     size_t right_index = *(const size_t*)right;
-    int left_wait = g_ui_tests[left_index].estimated_wait_ms;
-    int right_wait = g_ui_tests[right_index].estimated_wait_ms;
+    long left_wait = g_ui_tests[left_index].previous_elapsed_ms > 0
+        ? g_ui_tests[left_index].previous_elapsed_ms : g_ui_tests[left_index].estimated_wait_ms;
+    long right_wait = g_ui_tests[right_index].previous_elapsed_ms > 0
+        ? g_ui_tests[right_index].previous_elapsed_ms : g_ui_tests[right_index].estimated_wait_ms;
     if (left_wait < right_wait) return 1;
     if (left_wait > right_wait) return -1;
     return strcmp(g_ui_tests[left_index].test_name.c_str(),
                   g_ui_tests[right_index].test_name.c_str());
+}
+
+struct UiWorkItem {
+    size_t test_index;
+    int reserved_mb;
+    bool claimed;
+};
+
+struct UiMemoryQueue {
+    UiWorkItem* items;
+    size_t count;
+    size_t remaining;
+    int64_t available_mb;
+    bool unbounded;
+    pthread_mutex_t mutex;
+    pthread_cond_t changed;
+};
+
+static UiWorkItem* ui_take_available_job(UiMemoryQueue* queue) {
+    for (size_t i = 0; i < queue->count; i++) {
+        UiWorkItem* item = &queue->items[i];
+        if (item->claimed || (!queue->unbounded && item->reserved_mb > queue->available_mb)) continue;
+        item->claimed = true;
+        queue->remaining--;
+        queue->available_mb -= item->reserved_mb;
+        return item;
+    }
+    return nullptr;
+}
+
+TEST(UIAutomationSchedulerTest, WeightedJobsStayWithinMemoryBudget) {
+    UiWorkItem items[] = {{0, 2048, false}, {1, 2048, false}, {2, 1024, false}, {3, 1024, false}};
+    UiMemoryQueue queue = {items, 4, 4, 4096, false, PTHREAD_MUTEX_INITIALIZER, PTHREAD_COND_INITIALIZER};
+    EXPECT_EQ(ui_take_available_job(&queue), &items[0]);
+    EXPECT_EQ(ui_take_available_job(&queue), &items[1]);
+    EXPECT_EQ(ui_take_available_job(&queue), nullptr);
+    queue.available_mb += items[0].reserved_mb;
+    EXPECT_EQ(ui_take_available_job(&queue), &items[2]);
+    EXPECT_EQ(ui_take_available_job(&queue), &items[3]);
+    EXPECT_EQ(queue.available_mb, 0);
+    EXPECT_EQ(queue.remaining, 0u);
+    pthread_cond_destroy(&queue.changed);
+    pthread_mutex_destroy(&queue.mutex);
 }
 
 static void run_ui_tests_parallel(const std::vector<size_t>& indices, int jobs) {
@@ -1097,16 +1240,36 @@ static void run_ui_tests_parallel(const std::vector<size_t>& indices, int jobs) 
     if (indices.empty()) return;
 
     int num_threads = std::min(jobs, (int)indices.size());
-    std::atomic<size_t> next_idx{0};
+    UiWorkItem* items = (UiWorkItem*)calloc(indices.size(), sizeof(UiWorkItem));
+    if (!items) return;
+    int64_t budget_mb = (int64_t)(ui_physical_memory_bytes() / 2 / (1024 * 1024));
+    int largest_mb = 0;
+    for (size_t i = 0; i < indices.size(); i++) {
+        int reserve = g_ui_worker_mb_override > 0 ? g_ui_worker_mb_override : g_ui_tests[indices[i]].worker_mb;
+        items[i] = {indices[i], reserve, false};
+        if (reserve > largest_mb) largest_mb = reserve;
+    }
+    // even a low-memory host must admit one case; the worker-count clamp serializes it.
+    if (budget_mb < largest_mb) budget_mb = largest_mb;
+    UiMemoryQueue queue = {items, indices.size(), indices.size(), budget_mb, g_ui_memory_oversubscribe,
+        PTHREAD_MUTEX_INITIALIZER, PTHREAD_COND_INITIALIZER};
     std::atomic<size_t> completed{0};
     std::mutex progress_mutex;
 
     auto worker = [&]() {
         while (true) {
-            size_t idx = next_idx.fetch_add(1);
-            if (idx >= indices.size()) break;
-            size_t test_idx = indices[idx];
+            pthread_mutex_lock(&queue.mutex);
+            UiWorkItem* item = nullptr;
+            while (queue.remaining && !(item = ui_take_available_job(&queue)))
+                pthread_cond_wait(&queue.changed, &queue.mutex);
+            pthread_mutex_unlock(&queue.mutex);
+            if (!item) break;
+            size_t test_idx = item->test_index;
             g_ui_results[test_idx] = run_ui_test(g_ui_tests[test_idx]);
+            pthread_mutex_lock(&queue.mutex);
+            queue.available_mb += item->reserved_mb;
+            pthread_cond_broadcast(&queue.changed);
+            pthread_mutex_unlock(&queue.mutex);
 
             const UiTestResult& result = g_ui_results[test_idx];
             size_t done = completed.fetch_add(1) + 1;
@@ -1129,6 +1292,9 @@ static void run_ui_tests_parallel(const std::vector<size_t>& indices, int jobs) 
     for (auto& t : threads) {
         t.join();
     }
+    pthread_cond_destroy(&queue.changed);
+    pthread_mutex_destroy(&queue.mutex);
+    free(items);
 
     // Lambda's input/name pools are process-global; keep machine-result JSON
     // parsing on the coordinator thread after all child workers have joined.
@@ -1169,11 +1335,11 @@ static void run_ui_tests_parallel(const std::vector<size_t>& indices, int jobs) 
 class UIAutomationTest : public ::testing::TestWithParam<size_t> {
 protected:
     void SetUp() override {
-        if (!file_exists(LAMBDA_EXE)) {
+        if (!file_exists(ui_test_executable())) {
             GTEST_SKIP() << "lambda.exe not found - run 'make build' first";
         }
 #ifndef _WIN32
-        if (access(LAMBDA_EXE, X_OK) != 0) {
+        if (access(ui_test_executable(), X_OK) != 0) {
             GTEST_SKIP() << "lambda.exe is not executable";
         }
 #endif
@@ -1205,6 +1371,15 @@ TEST_P(UIAutomationTest, RunTest) {
         g_ui_results[idx] = run_ui_test(info);
     }
     const UiTestResult& result = g_ui_results[idx];
+    char elapsed[32], key[256];
+    snprintf(elapsed, sizeof(elapsed), "%ld", result.elapsed_ms);
+    RecordProperty("lambda_script_elapsed_ms", elapsed);
+    snprintf(key, sizeof(key), "radiant_view_elapsed_ms_%s", info.test_name.c_str());
+    RecordProperty(key, elapsed);
+    if (file_exists(result.phase_path)) {
+        snprintf(key, sizeof(key), "radiant_view_phases_%s", info.test_name.c_str());
+        RecordProperty(key, result.phase_path);
+    }
 
     // Always print assertion summary so we can verify tests actually assert
     int total_assertions = result.assertions_passed + result.assertions_failed;
@@ -1349,13 +1524,10 @@ int main(int argc, char** argv) {
             if (jobs <= 0) jobs = 1;
         }
     }
-    int memory_job_limit = ui_memory_job_limit();
     const char* allow_oversubscribe = getenv("LAMBDA_UI_TEST_ALLOW_OVERSUBSCRIBE");
-    bool oversubscribe = allow_oversubscribe &&
+    g_ui_memory_oversubscribe = allow_oversubscribe &&
         strcmp(allow_oversubscribe, "1") == 0;
-    // Editor bundles peak near 0.7 GiB; reserving 1 GiB per child within half
-    // of physical RAM prevents the CPU-based pool from causing OOM.
-    jobs = ui_memory_safe_jobs(jobs, memory_job_limit, oversubscribe);
+    g_ui_worker_mb_override = ui_worker_mb_override();
 
     std::cout << "\n";
     std::cout << "╔═══════════════════════════════════════════════════════════╗\n";
@@ -1383,8 +1555,17 @@ int main(int argc, char** argv) {
                 selected_indices.push_back(idx);
             }
         }
-        // Explicit-wait scenarios sorted late alphabetically were dominating the
-        // worker tail; longest-estimated-first minimizes idle workers at shutdown.
+        // prior subprocess durations include compilation and rendering, which explicit waits miss.
+        ui_load_previous_timings();
+        int smallest_mb = 65536;
+        for (size_t idx : selected_indices) {
+            int reserve = g_ui_worker_mb_override > 0 ? g_ui_worker_mb_override : g_ui_tests[idx].worker_mb;
+            if (reserve < smallest_mb) smallest_mb = reserve;
+        }
+        int memory_job_limit = ui_memory_job_limit_for(ui_physical_memory_bytes(), smallest_mb);
+        jobs = ui_memory_safe_jobs(jobs, memory_job_limit, g_ui_memory_oversubscribe);
+        const char* global_jobs = getenv("LAMBDA_TEST_MAX_CONCURRENT");
+        if (global_jobs && atoi(global_jobs) > 0 && jobs > atoi(global_jobs)) jobs = atoi(global_jobs);
         if (selected_indices.size() > 1) {
             qsort(selected_indices.data(), selected_indices.size(), sizeof(size_t),
                   compare_ui_indices_by_estimated_wait);
@@ -1441,5 +1622,7 @@ int main(int argc, char** argv) {
         }
     }
 
-    return RUN_ALL_TESTS();
+    int result = RUN_ALL_TESTS();
+    ui_save_previous_timings();
+    return result;
 }

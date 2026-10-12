@@ -42,6 +42,21 @@ struct RadiantGradientLine {
     float y2;
 };
 
+struct RadiantGradientCenter { float x, y; };
+
+template<class G> inline RadiantGradientCenter radiant_gradient_center(const G* gradient, Rect rect) {
+    float x = gradient->cx_is_px ? gradient->cx : rect.width * gradient->cx;
+    float y = gradient->cy_is_px ? gradient->cy : rect.height * gradient->cy;
+    const CssValue* horizontal = gradient_geometry_parameter(gradient->computed_geometry.get(), GRADIENT_GEOMETRY_CENTER_X);
+    const CssValue* vertical = gradient_geometry_parameter(gradient->computed_geometry.get(), GRADIENT_GEOMETRY_CENTER_Y);
+    // the center has no object size; edge offsets use the whole gradient box as their percentage basis.
+    if (horizontal) x = radiant::resolve_computed_length_percentage(horizontal, rect.width);
+    if (vertical) y = radiant::resolve_computed_length_percentage(vertical, rect.height);
+    if (gradient->cx_from_end) x = rect.width - x;
+    if (gradient->cy_from_end) y = rect.height - y;
+    return {rect.x + x, rect.y + y};
+}
+
 struct RadiantRadialGeometry { float cx, cy, rx, ry; };
 RadiantRadialGeometry radiant_radial_gradient_geometry(const RadialGradient* gradient, Rect rect);
 
@@ -152,6 +167,11 @@ typedef struct {
     float offset;          // 0.0 – 1.0
     uint8_t r, g, b, a;
 } RdtGradientStop;
+
+Color render_gradient_stop_color(const RdtGradientStop& stop);
+Color render_sample_gradient_stops(const RdtGradientStop* stops, int count, float position, float stop_scale);
+bool render_normalize_linear_gradient_range(RadiantGradientLine* line, RdtGradientStop* stops, int count);
+bool render_normalize_radial_gradient_range(RadiantRadialGeometry* geometry, RdtGradientStop* stops, int* count);
 
 bool render_copy_gradient_stops(const GradientStop* source, int source_count,
                                 float gradient_length, RdtGradientStop* stops,
@@ -294,6 +314,9 @@ RdtPath* rdt_path_clone(const RdtPath* src);
 // Returns false when the path has no drawable geometry.
 bool rdt_path_get_bounds(const RdtPath* p, float* left, float* top,
                          float* right, float* bottom);
+
+// accept one sharp rectangle primitive or closed contour under an axis-aligned transform.
+bool rdt_path_get_rect_bound(const RdtPath* path, const RdtMatrix* transform, Bound* bound);
 
 // Visit a path's portable command stream. Returns false when the path cannot
 // be inspected by the active backend or when the callback aborts traversal.
@@ -1587,6 +1610,7 @@ typedef struct PaintEffectGroup {
     lam::Up<FilterProp> backdrop_filter;  // backdrop-filter; null = none
     bool shadow;             // box-shadow present
     bool isolation;          // forced isolation
+    RadialMaskPaint mask;    // frame-local style facts; masked display lists remain unretainable.
 } PaintEffectGroup;
 
 // A nested SVG subscene (Phase F). Carries the inheritance + geometry that
@@ -1855,7 +1879,9 @@ void paint_end_semantic_group(PaintList* pl);
 // ---------------------------------------------------------------------------
 
 void paint_ir_lower_raster(const PaintList* pl, DisplayList* dl);
-void paint_ir_lower_raster_fragment(const PaintList* pl, DisplayList* dl);
+void paint_ir_lower_raster_transformed(const PaintList* pl, DisplayList* dl, const RdtMatrix* root_transform);
+void paint_ir_lower_raster_fragment(const PaintList* pl, DisplayList* dl,
+    const RdtMatrix* root_transform = nullptr);
 
 // ---------------------------------------------------------------------------
 // SVG lowering: PaintIR -> SVG fragment
@@ -2949,6 +2975,7 @@ typedef void (*RadiantVideoWakeCallback)(void* user_data);
 
 void radiant_video_set_wake_callback(RadiantVideoWakeCallback callback, void* user_data);
 void radiant_video_notify_frame_ready(DocState* state);
+bool radiant_video_events_pending(DocState* state);
 
 // ===== stacking_order.hpp =====
 bool radiant_stack_is_positive_z_positioned(View* view);
@@ -3724,8 +3751,6 @@ uint32_t render_pixel_bilinear_mix(const uint8_t* p11, const uint8_t* p21,
                                   float fx, float fy, bool round_channels, bool premultiply_samples = false);
 void render_pixel_source_over_coverage(uint8_t* destination, Color color,
                                        uint32_t coverage);
-void render_pixel_source_over_opaque_bytes(uint8_t* destination, uint32_t source,
-                                           uint8_t opacity);
 
 void render_composite_source_over_premul(ImageSurface* surface, const uint32_t* backdrop,
                                          int x0, int y0, int width, int height, uint8_t opacity = 255);
@@ -3864,13 +3889,10 @@ ImageSurface* render_surface_create_budgeted(MemContext* memory, float width, fl
 // ===== render_background.hpp =====
 // Background rendering functions
 void render_background(RasterRenderContext* rdcon, ViewBlock* view, Rect rect);
-bool render_paint_background_image(PaintList* paint, UiContext* ui, ViewBlock* view, Rect rect);
-void render_list_marker_linear_gradient(RasterRenderContext* rdcon,
-                                        LinearGradient* gradient, Rect rect);
-void render_list_marker_radial_gradient(RasterRenderContext* rdcon,
-                                        RadialGradient* gradient, Rect rect);
-void render_list_marker_conic_gradient(RasterRenderContext* rdcon,
-                                       ConicGradient* gradient, Rect rect);
+bool render_paint_background(PaintList* paint, UiContext* ui, ViewBlock* view, Rect rect,
+                             RenderExportTargetKind target);
+bool render_paint_gradient_image(PaintList* paint, const ListStyleImage* image, Rect rect,
+                                float pixel_ratio, const RdtMatrix* transform = nullptr);
 
 // Box shadow rendering
 void render_box_shadow(RasterRenderContext* rdcon, ViewBlock* view, Rect rect);
@@ -3915,6 +3937,13 @@ void render_outer_shadow_blur_composite(
     int clip_type, const float* clip_params);
 
 // ===== render_border.hpp =====
+// CSS border shading/dashing belongs to geometry, without a raster context.
+inline constexpr float BORDER_DARKEN_FACTOR = 2.0f / 3.0f;
+inline constexpr float BORDER_LIGHTEN_FACTOR = 1.0f / 3.0f;
+Color render_border_darken_color(Color color, float factor = BORDER_DARKEN_FACTOR);
+Color render_border_lighten_color(Color color, float factor = BORDER_LIGHTEN_FACTOR);
+void render_border_inset_outset_colors(Color base, CssEnum style, Color* top, Color* right, Color* bottom, Color* left);
+int render_border_dash_pattern(CssEnum style, float width, float* dash, RdtStrokeCap* cap);
 // Border rendering functions
 // borrowed stroke parameters are valid only during the callback; a null stroke denotes a fill.
 struct RenderBorderStroke {
@@ -4011,6 +4040,8 @@ StrBuf* render_encode_surface_data_uri(ImageSurface* surface);
 // display-list commands/bounds are physical; secondary snapshots apply density to logical paint input.
 ImageSurface* render_display_list_snapshot(DisplayList* list, MemContext* memory,
     Bound physical_bounds, float raster_scale, Color backdrop = Color{0});
+ImageSurface* render_display_list_snapshot_with_backdrop(DisplayList* list, MemContext* memory,
+    Bound physical_bounds, float raster_scale, Color backdrop, DisplayList* backdrop_list);
 ImageSurface* render_secondary_view_snapshot(ViewTree* tree, float raster_scale = 1.0f,
     Color backdrop = Color{0xffe8e8e8u});
 // physical page numbers ignore the preview root's selection, placement and scale.
@@ -4082,6 +4113,12 @@ struct PaintImageBox {
 };
 bool render_paint_image_box(PaintList* paint, const PaintImageBox* box);
 
+// Synchronous document-owned borrows; retained paint commands snapshot pixels.
+ImageSurface* render_canvas_surface(ViewBlock* view);
+ImageSurface* render_media_image_surface(ViewBlock* view);
+void render_media_image_content(RasterRenderContext* rdcon, ViewBlock* view);
+bool render_media_paint_image_content(PaintList* paint, UiContext* ui, ViewBlock* view,
+                                     const Rect* content_rect);
 Rect render_media_image_rect(ViewBlock* view, ImageSurface* image, Rect content_rect, float raster_scale);
 Rect render_media_object_rect(const EmbedProp* embed, ImageSurface* image, Rect content_rect, float raster_scale);
 Rect render_media_positioned_rect(const EmbedProp* embed, Rect viewport, float width, float height, float raster_scale);
@@ -4187,6 +4224,12 @@ bool render_export_session_begin_document_transform(RenderExportSession* session
     float output_scale, float device_scale, bool raster_surface, bool paged = false,
     bool print_media = false);
 void render_export_session_end(RenderExportSession* session);
+int render_export_session_to_png(RenderExportSession* session, const char* filename);
+int render_export_session_to_jpeg(RenderExportSession* session, const char* filename, int quality);
+int render_export_session_to_svg(RenderExportSession* session, const char* filename);
+int render_export_session_to_pdf(RenderExportSession* session, const char* filename);
+int render_html_source_to_output_target(const char* html_source, RenderOutputTarget* target,
+    const char* base_url = nullptr, bool block_remote_resources = false);
 int render_output_render_view_tree_to_target(UiContext* uicon, ViewTree* view_tree,
                                              RenderOutputTarget* target);
 int render_html_to_output_target(const char* html_file, const char* output_file,

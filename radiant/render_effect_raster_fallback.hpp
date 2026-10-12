@@ -32,7 +32,7 @@ static inline bool render_effect_group_needs_raster_fallback(
     return group &&
            (group->has_clip || group->blend_mode != 0 || group->filter ||
             group->backdrop || group->backdrop_filter ||
-            group->shadow || group->isolation);
+            group->shadow || group->isolation || group->mask.gradient);
 }
 
 static inline bool render_effect_group_needs_page_backdrop(
@@ -59,7 +59,7 @@ static inline bool render_paint_list_effect_groups_balanced(
 
 static inline void render_effect_record_page_backdrop_paint_list(
         bool page_backdrop_ready, DisplayList* page_backdrop,
-        const PaintList* paint_list, PaintGlyphRunRasterLowerFn glyph_lowerer) {
+        const PaintList* paint_list, PaintGlyphRunRasterLowerFn glyph_lowerer, float density) {
     if (!page_backdrop_ready || !page_backdrop || !paint_list ||
         paint_list_count(paint_list) <= 0 ||
         !render_paint_list_effect_groups_balanced(paint_list)) {
@@ -67,7 +67,9 @@ static inline void render_effect_record_page_backdrop_paint_list(
     }
     render_svg_inline_register_paint_ir_lowerers();
     paint_ir_register_glyph_run_raster_lowerer(glyph_lowerer);
-    paint_ir_lower_raster(paint_list, page_backdrop);
+    // vector callbacks can stream clip scopes across fragments; apply export density once.
+    RdtMatrix scale = rdt_matrix_scale(density, density);
+    paint_ir_lower_raster_fragment(paint_list, page_backdrop, &scale);
 }
 
 static inline void render_effect_raster_begin(
@@ -82,103 +84,56 @@ static inline void render_effect_raster_begin(
     paint_begin_effect_group(&fallback->paint_list, group);
 }
 
-static inline bool render_effect_raster_bounds(const Bound* bounds,
-                                               float viewport_width,
-                                               float viewport_height,
-                                               int* x0,
-                                               int* y0,
-                                               int* w,
-                                               int* h) {
-    if (!x0 || !y0 || !w || !h) return false;
-    float left = bounds ? floorf(bounds->left) : 0.0f;
-    float top = bounds ? floorf(bounds->top) : 0.0f;
-    float right = bounds ? ceilf(bounds->right) : viewport_width;
-    float bottom = bounds ? ceilf(bounds->bottom) : viewport_height;
-    if (right <= left || bottom <= top) {
-        left = 0.0f;
-        top = 0.0f;
-        right = viewport_width;
-        bottom = viewport_height;
-    }
-    if (right <= left || bottom <= top) return false;
-    *x0 = (int)left; // INT_CAST_OK: raster fallback capture bounds are integral pixel tiles.
-    *y0 = (int)top; // INT_CAST_OK: raster fallback capture bounds are integral pixel tiles.
-    *w = (int)(right - left); // INT_CAST_OK: raster fallback capture width is an integer pixel tile.
-    *h = (int)(bottom - top); // INT_CAST_OK: raster fallback capture height is an integer pixel tile.
-    return *w > 0 && *h > 0;
-}
-
-static inline void render_effect_raster_fill_surface(ImageSurface* surface,
-                                                     uint32_t color) {
-    if (!surface || !surface->pixels) return;
-    uint32_t* pixels = (uint32_t*)surface->pixels;
-    int count = surface->width * surface->height;
-    for (int i = 0; i < count; i++) {
-        pixels[i] = color;
-    }
-}
-
 static inline bool render_effect_rasterize_paint_list(const PaintList* paint_list,
                                                       DisplayList* backdrop_display_list,
                                                       const Bound* bounds,
                                                       float viewport_width,
                                                       float viewport_height,
                                                       bool opaque_background,
+                                                      float density,
                                                       RenderEffectRasterImage* out,
                                                       const char* log_prefix) {
     if (!paint_list || !out) return false;
     memset(out, 0, sizeof(RenderEffectRasterImage));
 
-    int x0 = 0, y0 = 0, w = 0, h = 0;
-    if (!render_effect_raster_bounds(bounds, viewport_width, viewport_height,
-                                     &x0, &y0, &w, &h)) {
+    if (!isfinite(density) || density <= 0.0f) return false;
+    Bound capture = bounds ? *bounds : Bound{0.0f, 0.0f, viewport_width, viewport_height};
+    if (capture.right <= capture.left || capture.bottom <= capture.top)
+        capture = Bound{0.0f, 0.0f, viewport_width, viewport_height};
+    capture = Bound{floorf(capture.left * density), floorf(capture.top * density),
+        ceilf(capture.right * density), ceilf(capture.bottom * density)};
+    size_t bytes = 0;
+    if (!isfinite(capture.left) || !isfinite(capture.top) ||
+        !render_surface_allocation_size(capture.right - capture.left, capture.bottom - capture.top, &bytes)) {
         log_error("%s invalid raster fallback bounds", log_prefix ? log_prefix : "[EFFECT_RASTER]");
         return false;
-    }
-
-    ImageSurface* surface = image_surface_create(w, h);
-    if (!surface) {
-        log_error("%s failed to allocate raster fallback surface %dx%d",
-                  log_prefix ? log_prefix : "[EFFECT_RASTER]", w, h);
-        return false;
-    }
-    if (opaque_background) {
-        render_effect_raster_fill_surface(surface, 0xffffffffu);
     }
 
     OffscreenRenderArenas arenas;
     if (!arenas.init("render.effect.raster", "render.effect.list_arena",
                      "render.effect.scratch_arena")) {
-        image_surface_destroy(surface);
         return false;
     }
 
     DisplayList dl = {};
-    ScratchArena scratch = {};
     dl_init(&dl, arenas.list_arena);
-    mem_scratch_init(NULL, &scratch, arenas.scratch_arena, MEM_ROLE_RENDER, "render.effect.scratch");
+    RdtMatrix scale = rdt_matrix_scale(density, density);
+    // export PaintIR is logical; replay and filter regions use the page's physical density once.
+    paint_ir_lower_raster_transformed(paint_list, &dl, &scale);
+    ImageSurface* surface = render_display_list_snapshot_with_backdrop(&dl,
+        mem_context_process(MEM_ROLE_RENDER), capture, density,
+        Color{opaque_background ? 0xffffffffu : 0u}, backdrop_display_list);
 
-    RdtVector vec = {};
-    rdt_vector_init(&vec, (uint32_t*)surface->pixels, w, h, w);
-    if (backdrop_display_list) {
-        dl_replay_tile(backdrop_display_list, &vec, surface, &scratch,
-                       (float)x0, (float)y0, (float)w, (float)h, 1.0f);
-    }
-    paint_ir_lower_raster(paint_list, &dl);
-    dl_replay_tile(&dl, &vec, surface, &scratch,
-                   (float)x0, (float)y0, (float)w, (float)h, 1.0f);
-    rdt_vector_destroy(&vec);
-
-    scratch_release(&scratch);
     // effect rasterization is one-shot; dl_clear() retains the heap-grown item
     // buffer and leaked it when the backing arena was destroyed immediately after.
     dl_destroy(&dl);
     arenas.destroy();
 
+    if (!surface) return false;
     out->surface = surface;
-    out->x = (float)x0;
-    out->y = (float)y0;
-    out->width = (float)w;
-    out->height = (float)h;
+    out->x = capture.left / density;
+    out->y = capture.top / density;
+    out->width = (float)surface->width / density;
+    out->height = (float)surface->height / density;
     return true;
 }

@@ -1,0 +1,528 @@
+{
+  "name": "Radial masks flatten the complete subtree, keep computed owner stop lengths and whole-box geometry through live font/box/DPR changes",
+  "html": "test/ui/css_radial_masks.html",
+  "viewport": {
+    "width": 640,
+    "height": 192
+  },
+  "events": [
+    {
+      "type": "set_device_scale",
+      "scale": 1
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#clear"
+      }
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#box",
+        "offset_x": 20,
+        "offset_y": 16
+      },
+      "search_radius": 0,
+      "min_r": 255,
+      "max_r": 255,
+      "min_g": 255,
+      "max_g": 255,
+      "min_b": 255,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#box",
+        "offset_x": 30,
+        "offset_y": 16
+      },
+      "search_radius": 0,
+      "min_r": 255,
+      "max_r": 255,
+      "min_g": 255,
+      "max_g": 255,
+      "min_b": 255,
+      "max_b": 255
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#opaque"
+      }
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#box",
+        "offset_x": 20,
+        "offset_y": 16
+      },
+      "search_radius": 0,
+      "min_r": 255,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 0,
+      "max_b": 0
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#box",
+        "offset_x": 30,
+        "offset_y": 16
+      },
+      "search_radius": 0,
+      "min_r": 0,
+      "max_r": 0,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 255,
+      "max_b": 255
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#math"
+      }
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#box",
+        "offset_x": 20,
+        "offset_y": 16
+      },
+      "search_radius": 0,
+      "min_r": 255,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 0,
+      "max_b": 0
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#box",
+        "offset_x": 30,
+        "offset_y": 16
+      },
+      "search_radius": 0,
+      "min_r": 0,
+      "max_r": 0,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 255,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#box",
+        "offset_x": 2,
+        "offset_y": 2
+      },
+      "search_radius": 0,
+      "min_r": 255,
+      "max_r": 255,
+      "min_g": 255,
+      "max_g": 255,
+      "min_b": 255,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#box",
+        "offset_x": 14,
+        "offset_y": 16
+      },
+      "search_radius": 0,
+      "min_r": 255,
+      "max_r": 255,
+      "min_g": 255,
+      "max_g": 255,
+      "min_b": 255,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#box",
+        "offset_x": 36,
+        "offset_y": 16
+      },
+      "search_radius": 0,
+      "min_r": 255,
+      "max_r": 255,
+      "min_g": 255,
+      "max_g": 255,
+      "min_b": 255,
+      "max_b": 255
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#font"
+      }
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#box",
+        "offset_x": 14,
+        "offset_y": 16
+      },
+      "search_radius": 0,
+      "min_r": 255,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 0,
+      "max_b": 0
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#box",
+        "offset_x": 36,
+        "offset_y": 16
+      },
+      "search_radius": 0,
+      "min_r": 0,
+      "max_r": 0,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 255,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#box",
+        "offset_x": 2,
+        "offset_y": 2
+      },
+      "search_radius": 0,
+      "min_r": 255,
+      "max_r": 255,
+      "min_g": 255,
+      "max_g": 255,
+      "min_b": 255,
+      "max_b": 255
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#wide"
+      }
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#box",
+        "offset_x": 44,
+        "offset_y": 16
+      },
+      "search_radius": 0,
+      "min_r": 255,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 0,
+      "max_b": 0
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#box",
+        "offset_x": 20,
+        "offset_y": 16
+      },
+      "search_radius": 0,
+      "min_r": 255,
+      "max_r": 255,
+      "min_g": 255,
+      "max_g": 255,
+      "min_b": 255,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#box",
+        "offset_x": 78,
+        "offset_y": 16
+      },
+      "search_radius": 0,
+      "min_r": 255,
+      "max_r": 255,
+      "min_g": 255,
+      "max_g": 255,
+      "min_b": 255,
+      "max_b": 255
+    },
+    {
+      "type": "set_device_scale",
+      "scale": 2
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#clear"
+      }
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#box",
+        "offset_x": 20,
+        "offset_y": 16
+      },
+      "search_radius": 0,
+      "min_r": 255,
+      "max_r": 255,
+      "min_g": 255,
+      "max_g": 255,
+      "min_b": 255,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#box",
+        "offset_x": 30,
+        "offset_y": 16
+      },
+      "search_radius": 0,
+      "min_r": 255,
+      "max_r": 255,
+      "min_g": 255,
+      "max_g": 255,
+      "min_b": 255,
+      "max_b": 255
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#opaque"
+      }
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#box",
+        "offset_x": 20,
+        "offset_y": 16
+      },
+      "search_radius": 0,
+      "min_r": 255,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 0,
+      "max_b": 0
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#box",
+        "offset_x": 30,
+        "offset_y": 16
+      },
+      "search_radius": 0,
+      "min_r": 0,
+      "max_r": 0,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 255,
+      "max_b": 255
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#math"
+      }
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#box",
+        "offset_x": 20,
+        "offset_y": 16
+      },
+      "search_radius": 0,
+      "min_r": 255,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 0,
+      "max_b": 0
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#box",
+        "offset_x": 30,
+        "offset_y": 16
+      },
+      "search_radius": 0,
+      "min_r": 0,
+      "max_r": 0,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 255,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#box",
+        "offset_x": 2,
+        "offset_y": 2
+      },
+      "search_radius": 0,
+      "min_r": 255,
+      "max_r": 255,
+      "min_g": 255,
+      "max_g": 255,
+      "min_b": 255,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#box",
+        "offset_x": 14,
+        "offset_y": 16
+      },
+      "search_radius": 0,
+      "min_r": 255,
+      "max_r": 255,
+      "min_g": 255,
+      "max_g": 255,
+      "min_b": 255,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#box",
+        "offset_x": 36,
+        "offset_y": 16
+      },
+      "search_radius": 0,
+      "min_r": 255,
+      "max_r": 255,
+      "min_g": 255,
+      "max_g": 255,
+      "min_b": 255,
+      "max_b": 255
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#font"
+      }
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#box",
+        "offset_x": 14,
+        "offset_y": 16
+      },
+      "search_radius": 0,
+      "min_r": 255,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 0,
+      "max_b": 0
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#box",
+        "offset_x": 36,
+        "offset_y": 16
+      },
+      "search_radius": 0,
+      "min_r": 0,
+      "max_r": 0,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 255,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#box",
+        "offset_x": 2,
+        "offset_y": 2
+      },
+      "search_radius": 0,
+      "min_r": 255,
+      "max_r": 255,
+      "min_g": 255,
+      "max_g": 255,
+      "min_b": 255,
+      "max_b": 255
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#wide"
+      }
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#box",
+        "offset_x": 44,
+        "offset_y": 16
+      },
+      "search_radius": 0,
+      "min_r": 255,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 0,
+      "max_b": 0
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#box",
+        "offset_x": 20,
+        "offset_y": 16
+      },
+      "search_radius": 0,
+      "min_r": 255,
+      "max_r": 255,
+      "min_g": 255,
+      "max_g": 255,
+      "min_b": 255,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#box",
+        "offset_x": 78,
+        "offset_y": 16
+      },
+      "search_radius": 0,
+      "min_r": 255,
+      "max_r": 255,
+      "min_g": 255,
+      "max_g": 255,
+      "min_b": 255,
+      "max_b": 255
+    }
+  ]
+}

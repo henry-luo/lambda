@@ -61,7 +61,7 @@ static void render_raster_dispatch_block(RasterRenderContext* rdcon, ViewBlock* 
         BlockBlot parent_block = rdcon->block;
         RenderTransformScope transform_scope =
             render_state_push_transform(rdcon, block, &parent_block);
-        if (block->bound) render_bound(rdcon, block);
+        if (!view_visibility_is_hidden(block) && block->bound) render_bound(rdcon, block);
         render_raster_profile_block(rdcon, block, render_inline_svg, RENDER_PROFILE_SVG);
         render_state_pop_transform(&transform_scope);
         return;

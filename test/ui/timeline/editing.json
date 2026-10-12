@@ -1,0 +1,198 @@
+{
+  "name": "Timeline drag previews, cancellation, commit, and retained source updates",
+  "html": "test/ui/timeline/editing.ls",
+  "viewport": {
+    "width": 900,
+    "height": 650
+  },
+  "events": [
+    {
+      "type": "click",
+      "target": {
+        "selector": "#arm"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "[data-timeline-edit-handle]"
+      },
+      "count": 3
+    },
+    {
+      "type": "mouse_drag",
+      "target": {
+        "selector": "[data-timeline-edit-handle='move']"
+      },
+      "dx": 120,
+      "dy": 0
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#proposal"
+      },
+      "equals": "40/60"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".lambda-timeline-edit-preview"
+      },
+      "count": 1
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-timeline-command='edit_cancel']"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".lambda-timeline-edit-preview"
+      },
+      "count": 0
+    },
+    {
+      "type": "mouse_drag",
+      "target": {
+        "selector": "[data-timeline-edit-handle='move']"
+      },
+      "dx": 120,
+      "dy": 0
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-timeline-command='edit_accept']"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#commits"
+      },
+      "equals": "1"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".lambda-timeline-edit-preview"
+      },
+      "count": 0
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "[data-timeline-id='a'] .lambda-timeline-card-date"
+      },
+      "equals": "40"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-timeline-edit-handle='move']"
+      }
+    },
+    {
+      "type": "key_press",
+      "key": "ArrowRight"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#proposal"
+      },
+      "equals": "45/65"
+    },
+    {
+      "type": "key_press",
+      "key": "ArrowRight"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#proposal"
+      },
+      "equals": "50/70"
+    },
+    {
+      "type": "key_press",
+      "key": "Escape"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".lambda-timeline-edit-preview"
+      },
+      "count": 0
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "[data-timeline-id='a'] .lambda-timeline-card-date"
+      },
+      "equals": "40"
+    },
+    {
+      "type": "key_press",
+      "key": "ArrowRight"
+    },
+    {
+      "type": "key_press",
+      "key": "Enter"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#commits"
+      },
+      "equals": "2"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "[data-timeline-id='a'] .lambda-timeline-card-date"
+      },
+      "equals": "45"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-timeline-id='a'] [data-timeline-command='remove']"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-timeline-command='edit_accept']"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#commits"
+      },
+      "equals": "3"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".lambda-timeline-overlay-card"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#errors"
+      },
+      "equals": "0"
+    },
+    {
+      "type": "render",
+      "file": "temp/timeline-references/editing.png"
+    }
+  ]
+}

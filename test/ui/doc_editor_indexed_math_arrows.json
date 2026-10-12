@@ -1,6 +1,7 @@
 {
   "name": "Document editor renders indexed math arrow SVGs",
   "html": "test/ui/doc_editor.ls",
+  "worker_mb": 1536,
   "viewport": {"width": 1280, "height": 1800},
   "description": "Target the Arrows section and its glyphs; font-driven TeX metrics may change SVG viewBoxes and choose text instead of outline paths.",
   "events": [

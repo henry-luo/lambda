@@ -26,6 +26,10 @@ extern "C" {
 
 typedef struct RdtVideo RdtVideo;
 
+// Service one nonblocking native event turn on the host thread.
+void rdt_video_pump_events(void);
+bool rdt_video_events_pending(RdtVideo* video);
+
 typedef enum {
     RDT_VIDEO_STATE_IDLE,
     RDT_VIDEO_STATE_LOADING,

@@ -1,0 +1,1 @@
+[["chart history SVG", true], ["element grammar", true], ["canonical identity", true], ["separate animation vocabulary", true], ["x channel chronology alias", true], ["x2 duration alias", true], ["concat composes presenter", true], ["source data immutable", true], ["invalid options diagnosed", true]]

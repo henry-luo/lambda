@@ -317,6 +317,8 @@ bool create_dir(const char* dir_path) {
     ret = mkdir(dir_path, 0755);
     #endif
     if (ret) {
+        // another creator may have won after stat; only an existing directory is success.
+        if (errno == EEXIST && stat(dir_path, &st) == 0 && S_ISDIR(st.st_mode)) return true;
         log_error("file: failed to create directory %s: %s", dir_path, strerror(errno));
         return false;
     }

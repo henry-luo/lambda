@@ -408,8 +408,7 @@ bool layout_inline_is_collapsed_whitespace_only(ViewSpan* span) {
         BackgroundProp* background = span->boundary()->background;
         if (background->color.a > 0 || background->image ||
             background->gradient_type != GRADIENT_NONE ||
-            background->linear_layer_count > 0 ||
-            background->radial_layer_count > 0) {
+            background->layer_count > 0) {
             return false;
         }
     }

@@ -899,12 +899,158 @@ static bool cssom_append_computed_math(CssFormatter* formatter, const CssValue* 
     return true;
 }
 
+static CssValue* cssom_clone_computed_length(CssFormatter* formatter, const CssValue* input,
+        const SvgLengthContext* svg, CssMathLeafResolver leaf, void* lengths) {
+    CssValue* value = css_value_clone_owned(input, formatter->pool);
+    SvgLengthContext unused_svg = {};
+    return value && svg_normalize_length_value(value, svg ? svg : &unused_svg, SVG_LENGTH_DIAGONAL,
+        true, leaf, lengths) ? value : nullptr;
+}
+
+struct CssomBackgroundWriter {
+    CssBackgroundWinner winner;
+    DomElement* owner;
+    int pseudo_type;
+    CssomFontState root, font;
+    CssomFontMathContext lengths;
+};
+
+static CssomBackgroundWriter cssom_background_source(Pool* scratch, DomElement* element,
+        CssPropertyCode property, int pseudo_type) {
+    CssomBackgroundWriter result = {};
+    while (element) {
+        result.winner = background_component_winner(element, scratch, property, pseudo_type);
+        result.owner = element; result.pseudo_type = pseudo_type;
+        if (!css_value_keyword_equals(result.winner.value, CSS_VALUE_INHERIT)) break;
+        element = cssom_inherited_source(element, &pseudo_type);
+    }
+    return result;
+}
+
+static bool cssom_background_lengths(Pool* scratch, CssomBackgroundWriter* writer) {
+    if (!cssom_resolve_font_state(scratch, writer->owner, writer->pseudo_type, &writer->root, &writer->font, true)) return false;
+    writer->lengths = {writer->owner, writer->font.font.size_px, writer->root.font.size_px,
+        &writer->font, &writer->font, &writer->root, writer->font.vertical};
+    return true;
+}
+
+static const CssValue* cssom_background_item(CssFormatter* formatter, CssomBackgroundWriter& writer,
+        CssPropertyCode property, int index) {
+    const CssValue* value = background_winner_component(formatter->pool, writer.winner, property, index);
+    return css_value_is_global_keyword(value) ? nullptr : value;
+}
+
+static bool cssom_append_background_size(CssFormatter* formatter, CssomBackgroundWriter& writer, int index) {
+    const CssValue* value = cssom_background_item(formatter, writer, CSS_PROPERTY_BACKGROUND_SIZE, index);
+    const CssValue* axes[2] = {}; CssEnum mode;
+    if (!value) { stringbuf_append_str(formatter->output, property_initial(CSS_PROPERTY_BACKGROUND_SIZE)); return true; }
+    if (!css_background_size_components(value, axes, &mode)) return false;
+    if (mode) { stringbuf_append_str(formatter->output, css_enum_info(mode)->name); return true; }
+    bool automatic[2] = {!axes[0] || css_value_keyword_equals(axes[0], CSS_VALUE_AUTO),
+        !axes[1] || css_value_keyword_equals(axes[1], CSS_VALUE_AUTO)};
+    CssMathEvaluationContext math = {cssom_font_math_leaf, &writer.lengths, 1.0, true};
+    for (size_t axis = 0; axis < (automatic[0] && automatic[1] ? 1u : 2u); axis++) {
+        if (axis) stringbuf_append_str(formatter->output, " ");
+        if (automatic[axis]) stringbuf_append_str(formatter->output, "auto");
+        else {
+            CssValue* computed = cssom_clone_computed_length(formatter, axes[axis], nullptr, cssom_font_math_leaf, &writer.lengths);
+            if (!computed || !cssom_append_computed_math(formatter, computed, &math, true)) return false;
+        }
+    }
+    return true;
+}
+
+static bool cssom_append_background_axis(CssFormatter* formatter, CssomBackgroundWriter& writer,
+        int index, bool horizontal) {
+    CssPropertyCode property = horizontal ? CSS_PROPERTY_BACKGROUND_POSITION_X : CSS_PROPERTY_BACKGROUND_POSITION_Y;
+    const CssValue* value = cssom_background_item(formatter, writer, property, index);
+    CssPositionAxis axes[2] = {{CSS_VALUE_LEFT, nullptr}, {CSS_VALUE_TOP, nullptr}};
+    CssDeclaration* declaration = writer.winner.declaration;
+    bool shorthand = declaration && (declaration->property_code == CSS_PROPERTY_BACKGROUND ||
+        declaration->property_code == CSS_PROPERTY_BACKGROUND_POSITION);
+    bool quirky = declaration && declaration->property_code == CSS_PROPERTY_BACKGROUND_POSITION &&
+        dom_element_uses_quirks_css(writer.owner);
+    if (value && !css_position_components(value, axes, true, shorthand ? -1 : horizontal ? 0 : 1, quirky)) return false;
+    const CssPositionAxis& axis = axes[horizontal ? 0 : 1];
+    double origin = background_position_keyword(axis.origin, horizontal);
+    if (!axis.offset) return stringbuf_append_format(formatter->output, "%.6g%%", origin);
+    CssValue* offset = cssom_clone_computed_length(formatter, axis.offset, nullptr, cssom_font_math_leaf, &writer.lengths);
+    if (!offset) return false;
+    CssMathEvaluationContext context = {cssom_font_math_leaf, &writer.lengths, 1.0, true};
+    CssMathResult math = css_math_evaluate(offset, &context);
+    double sign = axis.origin == CSS_VALUE_RIGHT || axis.origin == CSS_VALUE_BOTTOM ? -1.0 : 1.0;
+    if (math.resolved) {
+        double percent = origin + sign * math.percentage, length = sign * math.value;
+        if (math.type == CSS_MATH_PERCENT || (math.type == CSS_MATH_LENGTH_PERCENT && length == 0.0))
+            return stringbuf_append_format(formatter->output, "%.6g%%", percent);
+        if (percent == 0.0 && math.type != CSS_MATH_LENGTH_PERCENT)
+            return stringbuf_append_format(formatter->output, "%.6gpx", length);
+        if (length == 0.0) return stringbuf_append_format(formatter->output, "%.6g%%", percent);
+        return stringbuf_append_format(formatter->output, "calc(%.6g%% %c %.6gpx)", percent, length < 0.0 ? '-' : '+', fabs(length));
+    }
+    if (origin == 0.0 && sign > 0.0) { css_format_value(formatter, offset); return true; }
+    stringbuf_append_format(formatter->output, "calc(%.6g%% %c ", origin, sign < 0.0 ? '-' : '+');
+    css_format_value(formatter, offset);
+    stringbuf_append_str(formatter->output, ")");
+    return true;
+}
+
+static bool cssom_append_background_keyword(CssFormatter* formatter, CssomBackgroundWriter& writer,
+        CssPropertyCode property, int index) {
+    const CssValue* value = cssom_background_item(formatter, writer, property, index);
+    if (property == CSS_PROPERTY_BACKGROUND_REPEAT) {
+        CssEnum axes[2] = {CSS_VALUE_REPEAT, CSS_VALUE_REPEAT};
+        if (value && !css_background_repeat_components(value, axes)) return false;
+        if (axes[0] == CSS_VALUE_REPEAT && axes[1] == CSS_VALUE_NO_REPEAT) { stringbuf_append_str(formatter->output, "repeat-x"); return true; }
+        if (axes[1] == CSS_VALUE_REPEAT && axes[0] == CSS_VALUE_NO_REPEAT) { stringbuf_append_str(formatter->output, "repeat-y"); return true; }
+        stringbuf_append_str(formatter->output, css_enum_info(axes[0])->name);
+        if (axes[0] != axes[1]) stringbuf_append_all(formatter->output, 2, " ", css_enum_info(axes[1])->name);
+        return true;
+    }
+    if (value) { css_format_value(formatter, (CssValue*)value); return true; }
+    stringbuf_append_str(formatter->output, property_initial(property));
+    return true;
+}
+
+static bool serialize_background_components(const CssPropAccessor* accessor, DomElement* element,
+        int pseudo_type, StringBuf* output) {
+    Pool* scratch = output->pool;
+    CssFormatter* formatter = css_formatter_create(scratch, CSS_FORMAT_COMPACT);
+    if (!formatter) return false;
+    CssomBackgroundWriter images = cssom_background_source(scratch, element, CSS_PROPERTY_BACKGROUND_IMAGE, pseudo_type);
+    int count = background_list_count(images.winner.value);
+    bool position = accessor->id == CSS_PROPERTY_BACKGROUND_POSITION;
+    bool axis = position || accessor->id == CSS_PROPERTY_BACKGROUND_POSITION_X || accessor->id == CSS_PROPERTY_BACKGROUND_POSITION_Y;
+    CssomBackgroundWriter writers[2] = {};
+    for (size_t component = 0; component < (position ? 2u : 1u); component++) {
+        CssPropertyCode property = position ? component == 0 ? CSS_PROPERTY_BACKGROUND_POSITION_X : CSS_PROPERTY_BACKGROUND_POSITION_Y : accessor->id;
+        writers[component] = cssom_background_source(scratch, element, property, pseudo_type);
+        if ((axis || accessor->id == CSS_PROPERTY_BACKGROUND_SIZE) && !cssom_background_lengths(scratch, &writers[component])) return false;
+    }
+    // project original independent periods only at the receiving element; inheritance keeps its declaration owner's units (CI-18).
+    for (int index = 0; index < count; index++) {
+        if (index) stringbuf_append_str(formatter->output, ", ");
+        bool valid = axis ? cssom_append_background_axis(formatter, writers[0], index,
+            accessor->id != CSS_PROPERTY_BACKGROUND_POSITION_Y)
+            : accessor->id == CSS_PROPERTY_BACKGROUND_SIZE ? cssom_append_background_size(formatter, writers[0], index)
+            : cssom_append_background_keyword(formatter, writers[0], accessor->id, index);
+        if (!valid) return false;
+        if (position) {
+            stringbuf_append_str(formatter->output, " ");
+            if (!cssom_append_background_axis(formatter, writers[1], index, false)) return false;
+        }
+    }
+    String* value = stringbuf_to_string(formatter->output);
+    return value && copy_text(output, value->chars);
+}
+
+
 static bool cssom_append_svg_length(const CssValue* input, void* data) {
     CssomSvgScalarWriter* writer = (CssomSvgScalarWriter*)data;
     // normalization writes only to the caller-owned projection, never retained declaration values (D4.5.1v4).
-    CssValue* value = css_value_clone_owned(input, writer->formatter->pool);
-    if (!value || !svg_normalize_length_value(value, &writer->lengths.svg, SVG_LENGTH_DIAGONAL,
-        true, cssom_svg_length_leaf, &writer->lengths)) return false;
+    CssValue* value = cssom_clone_computed_length(writer->formatter, input, &writer->lengths.svg,
+        cssom_svg_length_leaf, &writer->lengths);
+    if (!value) return false;
     CssMathEvaluationContext context = {cssom_svg_length_leaf, &writer->lengths, 1.0, true};
     if (writer->comma && writer->written) stringbuf_append_str(writer->formatter->output, ", ");
     writer->written = true;
@@ -924,10 +1070,9 @@ static bool cssom_append_grid_leaf(CssFormatter* formatter, CssValue* value,
     bool length = value->type == CSS_VALUE_TYPE_LENGTH && value->data.length.unit != CSS_UNIT_FR;
     bool zero = !repeat_count && value->type == CSS_VALUE_TYPE_NUMBER && value->data.number.value == 0.0;
     if (length || zero || (function && !repeat_count)) {
-        SvgLengthContext unused_svg = {};
         // shared math normalization preserves percentages while computing lengths at their declaration owner.
-        if (!svg_normalize_length_value(value, &unused_svg, SVG_LENGTH_DIAGONAL, true,
-                cssom_font_math_leaf, lengths)) return false;
+        value = cssom_clone_computed_length(formatter, value, nullptr, cssom_font_math_leaf, lengths);
+        if (!value) return false;
         CssMathEvaluationContext math = {cssom_font_math_leaf, lengths, 1.0, true};
         return cssom_append_computed_math(formatter, value, &math, false);
     }
@@ -1745,6 +1890,24 @@ static const CssPropAccessor CSS_PROP_ROWS[] = {
     // This longhand can be supplied by the retained background shorthand.
     DERIVED_ROW(CSS_PROPERTY_BACKGROUND_COLOR, serialize_background_color,
                 CSS_PROP_ACCESSOR_CASCADE_RESOLVED),
+    DERIVED_ROW(CSS_PROPERTY_BACKGROUND_POSITION, serialize_background_components,
+                CSS_PROP_ACCESSOR_CASCADE_RESOLVED | CSS_PROP_ACCESSOR_PSEUDO_RESOLVED),
+    DERIVED_ROW(CSS_PROPERTY_BACKGROUND_POSITION_X, serialize_background_components,
+                CSS_PROP_ACCESSOR_CASCADE_RESOLVED | CSS_PROP_ACCESSOR_PSEUDO_RESOLVED),
+    DERIVED_ROW(CSS_PROPERTY_BACKGROUND_POSITION_Y, serialize_background_components,
+                CSS_PROP_ACCESSOR_CASCADE_RESOLVED | CSS_PROP_ACCESSOR_PSEUDO_RESOLVED),
+    DERIVED_ROW(CSS_PROPERTY_BACKGROUND_SIZE, serialize_background_components,
+                CSS_PROP_ACCESSOR_CASCADE_RESOLVED | CSS_PROP_ACCESSOR_PSEUDO_RESOLVED),
+    DERIVED_ROW(CSS_PROPERTY_BACKGROUND_REPEAT, serialize_background_components,
+                CSS_PROP_ACCESSOR_CASCADE_RESOLVED | CSS_PROP_ACCESSOR_PSEUDO_RESOLVED),
+    DERIVED_ROW(CSS_PROPERTY_BACKGROUND_ATTACHMENT, serialize_background_components,
+                CSS_PROP_ACCESSOR_CASCADE_RESOLVED | CSS_PROP_ACCESSOR_PSEUDO_RESOLVED),
+    DERIVED_ROW(CSS_PROPERTY_BACKGROUND_ORIGIN, serialize_background_components,
+                CSS_PROP_ACCESSOR_CASCADE_RESOLVED | CSS_PROP_ACCESSOR_PSEUDO_RESOLVED),
+    DERIVED_ROW(CSS_PROPERTY_BACKGROUND_CLIP, serialize_background_components,
+                CSS_PROP_ACCESSOR_CASCADE_RESOLVED | CSS_PROP_ACCESSOR_PSEUDO_RESOLVED),
+    DERIVED_ROW(CSS_PROPERTY_BACKGROUND_BLEND_MODE, serialize_background_components,
+                CSS_PROP_ACCESSOR_CASCADE_RESOLVED | CSS_PROP_ACCESSOR_PSEUDO_RESOLVED),
     DERIVED_ROW(CSS_PROPERTY_BORDER_TOP_WIDTH, serialize_border_component, 0),
     // serialize computed corners, preserving percentages and ignoring paint overlap constraints.
     DERIVED_ROW(CSS_PROPERTY_BORDER_RADIUS, serialize_corner_radius, CSS_PROP_ACCESSOR_USED_VALUE),
@@ -1954,7 +2117,8 @@ static bool serialize_computed(DomElement* element, CssPropertyCode id,
         }
         return serialize_decl(accessor, element, pseudo_type, out);
     }
-    if (pseudo_type != 0) return serialize_decl(accessor, element, pseudo_type, out);
+    if (pseudo_type != 0 && !(accessor->flags & CSS_PROP_ACCESSOR_PSEUDO_RESOLVED))
+        return serialize_decl(accessor, element, pseudo_type, out);
     return accessor->serialize && accessor->serialize(accessor, element, pseudo_type,
                                                       out);
 }

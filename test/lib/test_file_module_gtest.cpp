@@ -29,6 +29,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #include <climits>
+#include <pthread.h>
 #ifdef _WIN32
 #include <windows.h>
 static inline char* realpath(const char* path, char* resolved) {
@@ -1194,4 +1195,68 @@ TEST_F(FileEdgeTest, CreateDirIdempotent) {
     EXPECT_TRUE(create_dir(path.c_str()));
     EXPECT_TRUE(create_dir(path.c_str())); // second call should succeed
     EXPECT_TRUE(file_is_dir(path.c_str()));
+}
+
+struct ConcurrentDirectoryGate {
+    pthread_mutex_t mutex;
+    pthread_cond_t changed;
+    size_t ready;
+    bool start;
+    const char* path;
+};
+
+struct ConcurrentDirectoryJob {
+    ConcurrentDirectoryGate* gate;
+    bool success;
+};
+
+static void* create_directory_together(void* argument) {
+    ConcurrentDirectoryJob* job = (ConcurrentDirectoryJob*)argument;
+    ConcurrentDirectoryGate* gate = job->gate;
+    pthread_mutex_lock(&gate->mutex);
+    gate->ready++;
+    pthread_cond_broadcast(&gate->changed);
+    while (!gate->start) pthread_cond_wait(&gate->changed, &gate->mutex);
+    pthread_mutex_unlock(&gate->mutex);
+    job->success = create_dir(gate->path);
+    return nullptr;
+}
+
+TEST_F(FileEdgeTest, CreateDirAcceptsConcurrentCreators) {
+    // release creators together so the stat/mkdir race reaches both parents and leaves.
+    constexpr size_t count = 8;
+    for (size_t round = 0; round < 16; round++) {
+        char path[256];
+        snprintf(path, sizeof(path), "%s/concurrent_%zu/parent/child/leaf", TEST_DIR, round);
+        ConcurrentDirectoryGate gate = {PTHREAD_MUTEX_INITIALIZER, PTHREAD_COND_INITIALIZER, 0, false, path};
+        pthread_t threads[count];
+        ConcurrentDirectoryJob jobs[count] = {};
+        size_t created = 0;
+        for (; created < count; created++) {
+            jobs[created].gate = &gate;
+            if (pthread_create(&threads[created], nullptr, create_directory_together, &jobs[created]) != 0) break;
+        }
+        pthread_mutex_lock(&gate.mutex);
+        while (gate.ready < created) pthread_cond_wait(&gate.changed, &gate.mutex);
+        gate.start = true;
+        pthread_cond_broadcast(&gate.changed);
+        pthread_mutex_unlock(&gate.mutex);
+        for (size_t i = 0; i < created; i++) {
+            pthread_join(threads[i], nullptr);
+            EXPECT_TRUE(jobs[i].success) << path;
+        }
+        pthread_cond_destroy(&gate.changed);
+        pthread_mutex_destroy(&gate.mutex);
+        ASSERT_EQ(created, count);
+        EXPECT_TRUE(file_is_dir(path));
+    }
+}
+
+TEST_F(FileEdgeTest, CreateDirRejectsExistingFile) {
+    char path[256];
+    snprintf(path, sizeof(path), "%s/occupied", TEST_DIR);
+    ASSERT_EQ(write_binary_file(path, "x", 1), 0);
+    EXPECT_FALSE(create_dir(path));
+    snprintf(path, sizeof(path), "%s/occupied/child", TEST_DIR);
+    EXPECT_FALSE(create_dir(path));
 }

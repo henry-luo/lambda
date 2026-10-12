@@ -841,9 +841,9 @@ bool MarkBuilder::is_in_arena(Item item) const {
 
 /**
  * Deep copy with smart ownership checking
- * Only copies if data is external to arena chain
+ * Copies external data, or owned data when a distinct occurrence is required.
  */
-Item MarkBuilder::deep_copy(Item item) {
+Item MarkBuilder::deep_copy(Item item, bool force) {
     // Quick check: if item contains no pointers (null, bool, int), just return it
     TypeId type_id = get_type_id(item);
     if (type_id <= LMD_TYPE_INT) {
@@ -851,11 +851,11 @@ Item MarkBuilder::deep_copy(Item item) {
     }
 
     // Optimization: if data already in our arena chain, return as-is
-    if (is_in_arena(item)) {
+    if (!force && is_in_arena(item)) {
         return item;
     }
 
-    // Data is external - perform deep copy
+    // copy external data or explicitly materialize another owned occurrence
     return deep_copy_internal(item);
 }
 
@@ -989,12 +989,43 @@ Item MarkBuilder::deep_copy_typed(lam::ItemOf<Tag> typed) {
         // Copy attributes using ElementReader
         // ElementReader.get_attr() handles proper Item reconstruction from stored data
         TypeElmt* elem_type = (TypeElmt*)elem->type;
+        TypeElmt* view_type = nullptr;
+        ShapeEntry* view_attr = nullptr;
+        if (copying_view_) {
+            // D4.5.3 copies values without erasing nominal, qualified, or declared field contracts.
+            Element* occurrence = elem_builder.final().element;
+            if (!occurrence) return ItemNull;
+            TypeElmt* allocated_type = (TypeElmt*)occurrence->type;
+            occurrence->type = elem_type;
+            view_type = elmt_clone_type_for_mutation(occurrence, pool_, true);
+            if (!view_type) return ItemNull;
+            view_type->name = allocated_type->name;
+            view_type->name_id = allocated_type->name_id;
+            // runtime element fields can have no reserve metadata; the shape owns their footprint.
+            occurrence->data_cap = elem->data_cap > elem_type->byte_size
+                ? elem->data_cap : elem_type->byte_size;
+            occurrence->data = occurrence->data_cap > 0
+                ? pool_calloc(pool_, (size_t)occurrence->data_cap) : nullptr;
+            if (occurrence->data_cap > 0 && !occurrence->data) return ItemNull;
+            view_attr = view_type->shape;
+        }
         if (elem_type->length > 0) {
             lam::ShapeRef attr = lam::shape_borrow(elem_type->shape);
             while (attr) {
                 Item attr_item = map_shape_field_to_item(elem->data, attr.get());
                 Item copied_item = deep_copy_internal(attr_item);
-                if (attr->name) {
+                if (view_type) {
+                    if (attr->name) {
+                        String* owned_name = createName(attr->name->str, attr->name->length);
+                        StrView* name = (StrView*)pool_alloc(pool_, sizeof(StrView));
+                        if (!owned_name || !name) return ItemNull;
+                        *name = {owned_name->chars, owned_name->len};
+                        view_attr->name = name;
+                        view_attr->name_id = name_ref_id(owned_name);
+                    }
+                    set_field_value(view_attr, map_field_ptr(elem_builder.final().element->data, view_attr), copied_item);
+                    view_attr = typemap_next_field(view_type, view_attr);
+                } else if (attr->name) {
                     // Copy attribute name bytes from external NamePool
                     String* attr_name = createName(attr->name->str, attr->name->length);
                     elem_builder.attr(attr_name, copied_item);
@@ -1005,6 +1036,7 @@ Item MarkBuilder::deep_copy_typed(lam::ItemOf<Tag> typed) {
                 attr = lam::shape_next(elem_type, attr);
             }
         }
+        if (view_type) typemap_hash_build(view_type, pool_);
 
         // copy children
         for (int i = 0; i < reader.childCount(); i++) {

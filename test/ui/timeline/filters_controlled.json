@@ -1,0 +1,22 @@
+{
+  "name":"Controlled filters and query retain authoritative control values",
+  "html":"test/ui/timeline/filters_controlled.ls",
+  "viewport":{"width":900,"height":900},
+  "events":[
+    {"type":"click","target":{"selector":"[data-timeline-filter='groups']"}},
+    {"type":"assert_count","target":{"selector":".lambda-timeline-item"},"count":2},
+    {"type":"assert_checked","target":{"selector":"[data-timeline-filter='groups']"},"checked":true},
+    {"type":"assert_text","target":{"selector":"#requests"},"equals":"1"},
+    {"type":"click","target":{"selector":"[data-timeline-filter='from']"}},
+    {"type":"type","text":"20"},
+    {"type":"key_press","key":"Tab"},
+    {"type":"assert_count","target":{"selector":".lambda-timeline-item"},"count":2},
+    {"type":"assert_value","target":{"selector":"[data-timeline-filter='from']"},"equals":""},
+    {"type":"assert_text","target":{"selector":"#requests"},"equals":"2"},
+    {"type":"click","target":{"selector":"[data-timeline-search]"}},
+    {"type":"type","text":"B"},
+    {"type":"assert_count","target":{"selector":".lambda-timeline-item"},"count":2},
+    {"type":"assert_value","target":{"selector":"[data-timeline-search]"},"equals":""},
+    {"type":"assert_text","target":{"selector":"#requests"},"equals":"3"}
+  ]
+}

@@ -1,0 +1,858 @@
+{
+  "name": "Visibility paint and hit results follow causal parent and child mutations at both densities",
+  "html": "test/ui/css_visibility_paint.html",
+  "viewport": {
+    "width": 640,
+    "height": 192
+  },
+  "events": [
+    {
+      "type": "set_device_scale",
+      "scale": 1
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#scroll"
+      }
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#pane",
+        "offset_x": 2,
+        "offset_y": 2
+      },
+      "search_radius": 0,
+      "min_r": 0,
+      "max_r": 0,
+      "min_g": 255,
+      "max_g": 255,
+      "min_b": 0,
+      "max_b": 0
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#pane",
+        "offset_x": 16,
+        "offset_y": 16
+      },
+      "search_radius": 0,
+      "min_r": 0,
+      "max_r": 0,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 255,
+      "max_b": 255
+    },
+    {
+      "type": "assert_hit_test",
+      "x": 162,
+      "y": 74,
+      "expected_selector": "#panebase"
+    },
+    {
+      "type": "assert_hit_test",
+      "x": 176,
+      "y": 88,
+      "expected_selector": "#panec"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#hide"
+      }
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#box",
+        "offset_x": 2,
+        "offset_y": 2
+      },
+      "search_radius": 0,
+      "min_r": 0,
+      "max_r": 0,
+      "min_g": 255,
+      "max_g": 255,
+      "min_b": 0,
+      "max_b": 0
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#box",
+        "offset_x": 16,
+        "offset_y": 16
+      },
+      "search_radius": 0,
+      "min_r": 0,
+      "max_r": 0,
+      "min_g": 255,
+      "max_g": 255,
+      "min_b": 0,
+      "max_b": 0
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#item",
+        "offset_x": 4,
+        "offset_y": 10
+      },
+      "search_radius": 0,
+      "min_r": 255,
+      "max_r": 255,
+      "min_g": 255,
+      "max_g": 255,
+      "min_b": 255,
+      "max_b": 255
+    },
+    {
+      "type": "assert_hit_test",
+      "x": 2,
+      "y": 74,
+      "expected_selector": "#base"
+    },
+    {
+      "type": "assert_hit_test",
+      "x": 16,
+      "y": 88,
+      "expected_selector": "#base"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#report"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-parent",
+      "equals": "hidden"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-child",
+      "equals": "hidden"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-hit",
+      "equals": "base"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#show"
+      }
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#box",
+        "offset_x": 2,
+        "offset_y": 2
+      },
+      "search_radius": 0,
+      "min_r": 255,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 0,
+      "max_b": 0
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#box",
+        "offset_x": 16,
+        "offset_y": 16
+      },
+      "search_radius": 0,
+      "min_r": 0,
+      "max_r": 0,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 255,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#item",
+        "offset_x": 4,
+        "offset_y": 10
+      },
+      "search_radius": 0,
+      "min_r": 255,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 0,
+      "max_b": 0
+    },
+    {
+      "type": "assert_hit_test",
+      "x": 2,
+      "y": 74,
+      "expected_selector": "#box"
+    },
+    {
+      "type": "assert_hit_test",
+      "x": 16,
+      "y": 88,
+      "expected_selector": "#child"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#report"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-parent",
+      "equals": "visible"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-child",
+      "equals": "visible"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-hit",
+      "equals": "box"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#childonly"
+      }
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#box",
+        "offset_x": 2,
+        "offset_y": 2
+      },
+      "search_radius": 0,
+      "min_r": 0,
+      "max_r": 0,
+      "min_g": 255,
+      "max_g": 255,
+      "min_b": 0,
+      "max_b": 0
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#box",
+        "offset_x": 16,
+        "offset_y": 16
+      },
+      "search_radius": 0,
+      "min_r": 0,
+      "max_r": 0,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 255,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#item",
+        "offset_x": 4,
+        "offset_y": 10
+      },
+      "search_radius": 0,
+      "min_r": 255,
+      "max_r": 255,
+      "min_g": 255,
+      "max_g": 255,
+      "min_b": 255,
+      "max_b": 255
+    },
+    {
+      "type": "assert_hit_test",
+      "x": 2,
+      "y": 74,
+      "expected_selector": "#base"
+    },
+    {
+      "type": "assert_hit_test",
+      "x": 16,
+      "y": 88,
+      "expected_selector": "#child"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#report"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-parent",
+      "equals": "hidden"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-child",
+      "equals": "visible"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-hit",
+      "equals": "base"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#collapse"
+      }
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#box",
+        "offset_x": 2,
+        "offset_y": 2
+      },
+      "search_radius": 0,
+      "min_r": 0,
+      "max_r": 0,
+      "min_g": 255,
+      "max_g": 255,
+      "min_b": 0,
+      "max_b": 0
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#box",
+        "offset_x": 16,
+        "offset_y": 16
+      },
+      "search_radius": 0,
+      "min_r": 0,
+      "max_r": 0,
+      "min_g": 255,
+      "max_g": 255,
+      "min_b": 0,
+      "max_b": 0
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#item",
+        "offset_x": 4,
+        "offset_y": 10
+      },
+      "search_radius": 0,
+      "min_r": 255,
+      "max_r": 255,
+      "min_g": 255,
+      "max_g": 255,
+      "min_b": 255,
+      "max_b": 255
+    },
+    {
+      "type": "assert_hit_test",
+      "x": 2,
+      "y": 74,
+      "expected_selector": "#base"
+    },
+    {
+      "type": "assert_hit_test",
+      "x": 16,
+      "y": 88,
+      "expected_selector": "#base"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#report"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-parent",
+      "equals": "collapse"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-child",
+      "equals": "collapse"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-hit",
+      "equals": "base"
+    },
+    {
+      "type": "set_device_scale",
+      "scale": 2
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#scroll"
+      }
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#pane",
+        "offset_x": 2,
+        "offset_y": 2
+      },
+      "search_radius": 0,
+      "min_r": 0,
+      "max_r": 0,
+      "min_g": 255,
+      "max_g": 255,
+      "min_b": 0,
+      "max_b": 0
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#pane",
+        "offset_x": 16,
+        "offset_y": 16
+      },
+      "search_radius": 0,
+      "min_r": 0,
+      "max_r": 0,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 255,
+      "max_b": 255
+    },
+    {
+      "type": "assert_hit_test",
+      "x": 162,
+      "y": 74,
+      "expected_selector": "#panebase"
+    },
+    {
+      "type": "assert_hit_test",
+      "x": 176,
+      "y": 88,
+      "expected_selector": "#panec"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#hide"
+      }
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#box",
+        "offset_x": 2,
+        "offset_y": 2
+      },
+      "search_radius": 0,
+      "min_r": 0,
+      "max_r": 0,
+      "min_g": 255,
+      "max_g": 255,
+      "min_b": 0,
+      "max_b": 0
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#box",
+        "offset_x": 16,
+        "offset_y": 16
+      },
+      "search_radius": 0,
+      "min_r": 0,
+      "max_r": 0,
+      "min_g": 255,
+      "max_g": 255,
+      "min_b": 0,
+      "max_b": 0
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#item",
+        "offset_x": 4,
+        "offset_y": 10
+      },
+      "search_radius": 0,
+      "min_r": 255,
+      "max_r": 255,
+      "min_g": 255,
+      "max_g": 255,
+      "min_b": 255,
+      "max_b": 255
+    },
+    {
+      "type": "assert_hit_test",
+      "x": 2,
+      "y": 74,
+      "expected_selector": "#base"
+    },
+    {
+      "type": "assert_hit_test",
+      "x": 16,
+      "y": 88,
+      "expected_selector": "#base"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#report"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-parent",
+      "equals": "hidden"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-child",
+      "equals": "hidden"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-hit",
+      "equals": "base"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#show"
+      }
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#box",
+        "offset_x": 2,
+        "offset_y": 2
+      },
+      "search_radius": 0,
+      "min_r": 255,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 0,
+      "max_b": 0
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#box",
+        "offset_x": 16,
+        "offset_y": 16
+      },
+      "search_radius": 0,
+      "min_r": 0,
+      "max_r": 0,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 255,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#item",
+        "offset_x": 4,
+        "offset_y": 10
+      },
+      "search_radius": 0,
+      "min_r": 255,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 0,
+      "max_b": 0
+    },
+    {
+      "type": "assert_hit_test",
+      "x": 2,
+      "y": 74,
+      "expected_selector": "#box"
+    },
+    {
+      "type": "assert_hit_test",
+      "x": 16,
+      "y": 88,
+      "expected_selector": "#child"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#report"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-parent",
+      "equals": "visible"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-child",
+      "equals": "visible"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-hit",
+      "equals": "box"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#childonly"
+      }
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#box",
+        "offset_x": 2,
+        "offset_y": 2
+      },
+      "search_radius": 0,
+      "min_r": 0,
+      "max_r": 0,
+      "min_g": 255,
+      "max_g": 255,
+      "min_b": 0,
+      "max_b": 0
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#box",
+        "offset_x": 16,
+        "offset_y": 16
+      },
+      "search_radius": 0,
+      "min_r": 0,
+      "max_r": 0,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 255,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#item",
+        "offset_x": 4,
+        "offset_y": 10
+      },
+      "search_radius": 0,
+      "min_r": 255,
+      "max_r": 255,
+      "min_g": 255,
+      "max_g": 255,
+      "min_b": 255,
+      "max_b": 255
+    },
+    {
+      "type": "assert_hit_test",
+      "x": 2,
+      "y": 74,
+      "expected_selector": "#base"
+    },
+    {
+      "type": "assert_hit_test",
+      "x": 16,
+      "y": 88,
+      "expected_selector": "#child"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#report"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-parent",
+      "equals": "hidden"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-child",
+      "equals": "visible"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-hit",
+      "equals": "base"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#collapse"
+      }
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#box",
+        "offset_x": 2,
+        "offset_y": 2
+      },
+      "search_radius": 0,
+      "min_r": 0,
+      "max_r": 0,
+      "min_g": 255,
+      "max_g": 255,
+      "min_b": 0,
+      "max_b": 0
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#box",
+        "offset_x": 16,
+        "offset_y": 16
+      },
+      "search_radius": 0,
+      "min_r": 0,
+      "max_r": 0,
+      "min_g": 255,
+      "max_g": 255,
+      "min_b": 0,
+      "max_b": 0
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#item",
+        "offset_x": 4,
+        "offset_y": 10
+      },
+      "search_radius": 0,
+      "min_r": 255,
+      "max_r": 255,
+      "min_g": 255,
+      "max_g": 255,
+      "min_b": 255,
+      "max_b": 255
+    },
+    {
+      "type": "assert_hit_test",
+      "x": 2,
+      "y": 74,
+      "expected_selector": "#base"
+    },
+    {
+      "type": "assert_hit_test",
+      "x": 16,
+      "y": 88,
+      "expected_selector": "#base"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#report"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-parent",
+      "equals": "collapse"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-child",
+      "equals": "collapse"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-hit",
+      "equals": "base"
+    }
+  ]
+}

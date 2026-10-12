@@ -146,7 +146,6 @@ bool layout_has_style_containment(const ViewSpan* span) {
             view_size_containment_applies(span->display)));
 }
 
-
 struct CounterCheckpointState {
     lam::Up<CounterScope> scope;
     lam::Own<HashMap> original, copy;

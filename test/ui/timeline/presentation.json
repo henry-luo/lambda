@@ -1,0 +1,104 @@
+{
+  "name": "Timeline custom parts, marker appearance, RTL range selection, and keyboard focus",
+  "html": "test/ui/timeline/presentation.ls",
+  "viewport": {
+    "width": 900,
+    "height": 600
+  },
+  "events": [
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".custom-heading"
+      },
+      "count": 3
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "[data-timeline-id='a'] svg path"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": ".lambda-timeline-content"
+      },
+      "property": "width",
+      "equals": "220px"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-timeline-id='a']"
+      }
+    },
+    {
+      "type": "key_press",
+      "key": "ArrowLeft"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": ".lambda-timeline-chart"
+      },
+      "attribute": "data-timeline-active",
+      "equals": "b"
+    },
+    {
+      "type": "assert_focus",
+      "target": {
+        "selector": "[data-timeline-id='b']"
+      }
+    },
+    {
+      "type": "key_press",
+      "key": "Home"
+    },
+    {
+      "type": "assert_focus",
+      "target": {
+        "selector": "[data-timeline-id='a']"
+      }
+    },
+    {
+      "type": "key_press",
+      "key": "ArrowLeft",
+      "mods_str": "shift"
+    },
+    {
+      "type": "key_press",
+      "key": "ArrowLeft",
+      "mods_str": "shift"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "[data-timeline-id='a']"
+      },
+      "attribute": "aria-selected",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "[data-timeline-id='b']"
+      },
+      "attribute": "aria-selected",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "[data-timeline-id='c']"
+      },
+      "attribute": "aria-selected",
+      "equals": "true"
+    },
+    {
+      "type": "render",
+      "file": "temp/timeline-references/presentation.png"
+    }
+  ]
+}

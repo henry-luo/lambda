@@ -8319,13 +8319,15 @@ static NameEntry* interp_view_scope_entry(NameScope* scope, String* name) {
     return interp_view_scope_entry(scope->parent, name);
 }
 
-static const char* interp_view_template_ref(AstViewNode* view) {
+static const char* interp_view_template_ref(Script* module, AstViewNode* view) {
     if (!view) return NULL;
     if (view->name) return view->name->chars;
     if (!g_template_registry) return NULL;
     for (TemplateEntry* entry = g_template_registry->first; entry;
             entry = entry->next) {
-        if (entry->interp_view == view) return entry->template_ref;
+        // cached ASTs can back several imports; state must use this execution's ref.
+        if (entry->interp_view == view && entry->interp_module == module)
+            return entry->template_ref;
     }
     return NULL;
 }
@@ -8370,7 +8372,7 @@ static Item interp_eval_view_activation(Context* host, Script* module,
     Scratch model_slot(frame);
     model_slot.set(model);
     InterpContextGuard occurrence(st, model_slot.home(), NULL);
-    const char* template_ref = interp_view_template_ref(view);
+    const char* template_ref = interp_view_template_ref(module, view);
     if (!template_ref) {
         log_error("interp: view has no registered template reference");
         st->ctx->consts = saved_consts;

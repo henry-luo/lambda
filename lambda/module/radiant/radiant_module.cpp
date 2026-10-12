@@ -7,6 +7,8 @@
 #include "../../runtime/transpiler.hpp"
 #include "radiant_host_api.hpp"
 #include "radiant_dom_bridge.hpp"
+#include "radiant_webgl_bridge.hpp"
+#include "../../dom/dom_style.h"
 #include "radiant_input_value.hpp"
 #include "../../../lib/tagged.hpp"
 #include "../../../radiant/layout.hpp"
@@ -17,6 +19,7 @@
 #include "../../../radiant/event.hpp"
 #include "../../../radiant/radiant.hpp"
 #include "../../../radiant/audio.hpp"
+#include "../../../radiant/rdt_video.h"
 #include "../../../lib/log.h"
 #include "../../../lib/mem.h"
 #include "../../../lib/mem_context.h"
@@ -1226,36 +1229,8 @@ static DomDocument* radiant_load_html_source(const char* html_source, int viewpo
         return nullptr;
     }
 
-    Url* source_url = get_current_dir();
-    Pool* doc_pool = mem_pool_create(NULL, MEM_ROLE_LAYOUT, "radiant.render.document");
-    if (!source_url || !doc_pool) {
-        log_error("JUBE_RADIANT_%s: failed to create in-memory document inputs", func_name);
-        if (source_url) url_destroy(source_url);
-        if (doc_pool) pool_destroy(doc_pool);
-        return nullptr;
-    }
-
-    DomDocument* doc = load_lambda_html_doc(source_url, NULL, viewport_width,
-                                            viewport_height, doc_pool, html_source,
-                                            false, false);
-    if (!doc) {
-        log_error("JUBE_RADIANT_%s: failed to parse in-memory HTML", func_name);
-        url_destroy(source_url);
-        pool_destroy(doc_pool);
-        return nullptr;
-    }
-
-    // Transient measurement/render documents must release their loader pool too.
-    if (!dom_document_finalize_loader_pool(doc, doc_pool)) {
-        log_error("JUBE_RADIANT_%s: failed to transfer in-memory document pool", func_name);
-        free_document(doc);
-        return nullptr;
-    }
-    if (!doc->root) {
-        log_error("JUBE_RADIANT_%s: in-memory document has no root element", func_name);
-        free_document(doc);
-        return nullptr;
-    }
+    DomDocument* doc = load_html_source_doc(html_source, viewport_width, viewport_height);
+    if (!doc) log_error("JUBE_RADIANT_%s: failed to load in-memory HTML", func_name);
     return doc;
 }
 
@@ -1343,6 +1318,9 @@ static bool radiant_layout_document(DomDocument* doc, UiContext* uicon,
     ui_context_create_surface(uicon, viewport_width, viewport_height);
     uicon->window_width = viewport_width;
     uicon->window_height = viewport_height;
+    // layout consumes the logical viewport, independently of surface/window size.
+    uicon->viewport_width = viewport_width;
+    uicon->viewport_height = viewport_height;
     uicon->document = lam::up(doc);
     process_document_font_faces(uicon, doc);
     // custom layout callbacks run only during an explicit layout pass; geometry
@@ -2446,6 +2424,56 @@ RADIANT_C_API Item fn_radiant_audio_pause(Item node, Item token) { return radian
 RADIANT_C_API Item fn_radiant_audio_close(Item node, Item token) { return radiant_audio_operation(node, token, AUDIO_CLOSE); }
 RADIANT_C_API Item fn_radiant_audio_state(Item node, Item token) { return radiant_audio_operation(node, token, AUDIO_STATE); }
 
+RADIANT_C_API Item fn_radiant_media_info(Item node) {
+    DomElement* elem = radiant_dom_element_from_item(node, "MEDIA_INFO");
+    MediaViewState* media = elem && elem->doc
+        ? media_view_state_get(elem->doc->state, static_cast<View*>(elem)) : nullptr;
+    if (!media || !media->player) return ItemNull;
+    static const char* states[] = {"idle", "loading", "ready", "playing", "paused", "ended", "error"};
+    RdtVideo* player = media->player;
+    RootFrame roots(1);
+    Rooted<Item> result(roots, radiant_obj_new());
+    radiant_rooted_obj_set(result, "state", radiant_string_item(states[rdt_video_get_state(player)]));
+    radiant_rooted_obj_set(result, "current_time", radiant_float_item(rdt_video_get_current_time(player)));
+    radiant_rooted_obj_set(result, "duration", radiant_float_item(rdt_video_get_duration(player)));
+    radiant_rooted_obj_set(result, "volume", radiant_float_item(rdt_video_get_volume(player)));
+    radiant_rooted_obj_set(result, "has_audio", radiant_bool_item(rdt_video_has_audio(player)));
+    radiant_rooted_obj_set(result, "width", radiant_int_item(rdt_video_get_width(player)));
+    radiant_rooted_obj_set(result, "height", radiant_int_item(rdt_video_get_height(player)));
+    return result.get();
+}
+
+RADIANT_C_API Item fn_radiant_media_command(Item node, Item command, Item value) {
+    DomElement* elem = radiant_dom_element_from_item(node, "MEDIA_COMMAND");
+    MediaViewState* media = elem && elem->doc
+        ? media_view_state_get(elem->doc->state, static_cast<View*>(elem)) : nullptr;
+    const char* action = get_type_id(command) == LMD_TYPE_STRING ? fn_to_cstr(command) : nullptr;
+    if (!media || !media->player || !action) return radiant_bool_item(false);
+    RdtVideo* player = media->player;
+    double number = 0;
+    bool numeric = item_try_to_double(value, &number);
+    if (strcmp(action, "play") == 0) {
+        if (value.item != ITEM_NULL && (!numeric || !isfinite(number) || number < 0)) return radiant_bool_item(false);
+        if (!media->opened) media->opened = rdt_video_open_file(player, media->source) == 0;
+        if (!media->opened || rdt_video_get_state(player) == RDT_VIDEO_STATE_ERROR) return radiant_bool_item(false);
+        if (numeric && isfinite(number) && number >= 0) rdt_video_seek(player, number);
+        else if (rdt_video_get_state(player) == RDT_VIDEO_STATE_ENDED) rdt_video_seek(player, 0);
+        rdt_video_play(player);
+    } else if (strcmp(action, "pause") == 0 || strcmp(action, "stop") == 0) {
+        rdt_video_pause(player);
+        if (strcmp(action, "stop") == 0) rdt_video_seek(player, 0);
+    } else if (strcmp(action, "seek") == 0 && numeric && isfinite(number) && number >= 0) {
+        rdt_video_seek(player, number);
+    } else if (strcmp(action, "volume") == 0 && numeric && isfinite(number) && number >= 0 && number <= 1) {
+        rdt_video_set_volume(player, (float)number);
+    } else if (strcmp(action, "muted") == 0 && get_type_id(value) == LMD_TYPE_BOOL) {
+        rdt_video_set_muted(player, value.item == ITEM_TRUE);
+    } else if (strcmp(action, "loop") == 0 && get_type_id(value) == LMD_TYPE_BOOL) {
+        rdt_video_set_loop(player, value.item == ITEM_TRUE);
+    } else return radiant_bool_item(false);
+    return radiant_bool_item(true);
+}
+
 RADIANT_C_API Item fn_radiant_set_relative_mouse(Item node, Item enabled) {
     DomElement* owner = radiant_dom_element_from_item(node, "SET_RELATIVE_MOUSE");
     return radiant_bool_item(get_type_id(enabled) == LMD_TYPE_BOOL &&
@@ -3026,8 +3054,8 @@ RADIANT_C_API Item fn_radiant_replace_range(Item node_item, Item start_item,
 RADIANT_C_API Item fn_radiant_value_at_focus(Item node_item) {
     DomElement* elem = radiant_dom_element_from_item(node_item, "VALUE_AT_FOCUS");
     FormControlProp* f = elem ? elem->form_control() : nullptr;
-    if (!f || !f->value_at_focus) return ItemNull;
-    return radiant_string_item(f->value_at_focus);
+    const char* value = f ? form_control_get_focus_value(f->state_ref, static_cast<View*>(elem)) : nullptr;
+    return value ? radiant_string_item(value) : ItemNull;
 }
 
 // Counts change requests. The engine samples it across the commit hook so the
@@ -3061,6 +3089,24 @@ RADIANT_C_API Item fn_radiant_cancel_frame(Item owner, Item token) {
     bool cancelled = elem && id > 0 && radiant_host_api && radiant_host_api->dom_catalog &&
         radiant_host_api->dom_catalog->frame_cancel_native(elem, (uint64_t)id);
     return (Item){.item = b2it(cancelled)};
+}
+
+RADIANT_C_API Item fn_radiant_watch_window(Item owner, Item event_name, Item enabled) {
+    DomElement* elem = radiant_dom_element_from_item(owner, "WATCH_WINDOW");
+    const char* name = get_type_id(event_name) == LMD_TYPE_STRING ? fn_to_cstr(event_name) : nullptr;
+    bool watched = elem && name && *name && get_type_id(enabled) == LMD_TYPE_BOOL &&
+        radiant_host_api && radiant_host_api->dom_catalog &&
+        radiant_host_api->dom_catalog->window_watch_native(elem, name, enabled.item == ITEM_TRUE);
+    return (Item){.item = b2it(watched)};
+}
+
+RADIANT_C_API Item fn_radiant_history_traverse(Item owner, Item delta) {
+    DomElement* elem = radiant_dom_element_from_item(owner, "HISTORY_TRAVERSE");
+    int64_t amount = get_type_id(delta) == LMD_TYPE_INT ? it2i(delta) : 0;
+    bool traversed = elem && amount >= INT32_MIN && amount <= INT32_MAX && amount != 0 &&
+        radiant_host_api && radiant_host_api->dom_catalog &&
+        radiant_host_api->dom_catalog->history_traverse_native(elem, (int)amount);
+    return (Item){.item = b2it(traversed)};
 }
 
 RADIANT_C_API Item fn_radiant_viewport_size(Item owner) {
@@ -3740,7 +3786,12 @@ RADIANT_C_API Item fn_radiant_geomap_svg(Item model_item, Item width_item, Item 
 }
 
 RADIANT_C_API Item fn_radiant_render_svg(Item html_item, Item width_item, Item height_item) {
-    const char* html_source = fn_to_cstr(html_item);
+    if (get_type_id(html_item) != LMD_TYPE_STRING) return ItemNull;
+    RootFrame source_roots(1);
+    Rooted<Item> source(source_roots, html_item);
+    // registered layout callbacks may collect while the transient document is built.
+    lam::Temp<char> html_source(mem_strdup(fn_to_cstr(source.get()), MEM_CAT_RENDER));
+    if (!html_source) return ItemNull;
     int viewport_width = 0;
     int viewport_height = 0;
     if (!radiant_item_to_int(width_item, &viewport_width) ||
@@ -3753,7 +3804,7 @@ RADIANT_C_API Item fn_radiant_render_svg(Item html_item, Item width_item, Item h
         return ItemNull;
     }
 
-    DomDocument* doc = radiant_load_html_source(html_source, viewport_width,
+    DomDocument* doc = radiant_load_html_source(html_source.get(), viewport_width,
                                                 viewport_height, "RENDER_SVG");
     if (!doc) return ItemNull;
 
@@ -3777,8 +3828,71 @@ RADIANT_C_API Item fn_radiant_render_svg(Item html_item, Item width_item, Item h
     return result;
 }
 
+// Procedural output reuses the CLI's encoders and document/resource lifetime.
+RADIANT_C_API Item fn_radiant_export_document(Item html_item, Item path_item, Item options_item) {
+    RootFrame roots(4);
+    Rooted<Item> html(roots, html_item), path(roots, path_item), options(roots, options_item), base(roots, ItemNull);
+    if (get_type_id(html.get()) != LMD_TYPE_STRING || get_type_id(path.get()) != LMD_TYPE_STRING ||
+        (get_type_id(options.get()) != LMD_TYPE_MAP && get_type_id(options.get()) != LMD_TYPE_VMAP))
+        return radiant_string_item("render export: expected HTML source, destination path, and options map");
+    double width = 800, height = 600, density = 1, device_scale = 1, quality = 85;
+    const char* keys[] = {"width", "height", "scale", "device_scale", "quality"};
+    double* values[] = {&width, &height, &density, &device_scale, &quality};
+    for (size_t i = 0; i < sizeof(keys) / sizeof(keys[0]); i++) {
+        Item value = radiant_obj_get(options.get(), keys[i]);
+        if (value.item != ItemNull.item && (!item_try_to_double(value, values[i]) || !isfinite(*values[i]) || *values[i] <= 0))
+            return radiant_string_item("render export: expected positive finite dimensions, density, and quality");
+    }
+    if (width != floor(width) || height != floor(height) || width > INT_MAX || height > INT_MAX ||
+        !isfinite((float)density) || (float)density <= 0 || !isfinite((float)device_scale) || (float)device_scale <= 0 ||
+        width * density * device_scale > INT_MAX || height * density * device_scale > INT_MAX ||
+        quality != floor(quality) || quality > 100)
+        return radiant_string_item("render export: invalid integral viewport, raster extent, or JPEG quality");
+    Item format = radiant_obj_get(options.get(), "format");
+    const char* kind = format.item == ItemNull.item ? nullptr : fn_to_cstr(format);
+    RenderOutputKind output_kind;
+    if (kind && strcmp(kind, "png") == 0) output_kind = RENDER_OUTPUT_PNG;
+    else if (kind && (strcmp(kind, "jpeg") == 0 || strcmp(kind, "jpg") == 0)) output_kind = RENDER_OUTPUT_JPEG;
+    else if (kind && strcmp(kind, "svg") == 0) output_kind = RENDER_OUTPUT_SVG;
+    else if (kind && strcmp(kind, "pdf") == 0) output_kind = RENDER_OUTPUT_PDF;
+    else return radiant_string_item("render export: format must be png, jpeg, svg, or pdf");
+    Item pagination = radiant_obj_get(options.get(), "pagination");
+    bool paged = get_type_id(pagination) == LMD_TYPE_BOOL && it2b(pagination);
+    if (pagination.item != ItemNull.item && get_type_id(pagination) != LMD_TYPE_BOOL)
+        return radiant_string_item("render export: pagination must be boolean");
+    Item local = radiant_obj_get(options.get(), "local_resources");
+    if (local.item != ItemNull.item && get_type_id(local) != LMD_TYPE_BOOL)
+        return radiant_string_item("render export: local_resources must be boolean");
+    base.set(radiant_obj_get(options.get(), "base_url"));
+    if (base.get().item != ItemNull.item && get_type_id(base.get()) != LMD_TYPE_STRING)
+        return radiant_string_item("render export: base_url must be a string");
+    // Layout callbacks can allocate Lambda values; encoder strings need native ownership.
+    lam::Temp<char> source(mem_strdup(fn_to_cstr(html.get()), MEM_CAT_RENDER));
+    lam::Temp<char> filename(mem_strdup(fn_to_cstr(path.get()), MEM_CAT_RENDER));
+    lam::Temp<char> base_url(base.get().item == ItemNull.item ? nullptr : mem_strdup(fn_to_cstr(base.get()), MEM_CAT_RENDER));
+    if (!source || !filename || !filename.get()[0] || (base.get().item != ItemNull.item && !base_url))
+        return radiant_string_item("render export: missing source/path or allocation failed");
+    RenderOutputTarget target;
+    render_output_target_init(&target, output_kind, filename.get());
+    target.viewport_width = (int)width; // INT_CAST_OK: validated encoder viewport argument.
+    target.viewport_height = (int)height; // INT_CAST_OK: validated encoder viewport argument.
+    target.output_scale = (float)density;
+    target.device_scale = (float)device_scale;
+    target.jpeg_quality = (int)quality; // INT_CAST_OK: validated JPEG encoder quality.
+    target.paged = paged;
+    int status = render_html_source_to_output_target(source.get(), &target, base_url.get(),
+        get_type_id(local) == LMD_TYPE_BOOL && it2b(local));
+    return status == 0 ? radiant_bool_item(true) : radiant_string_item("render export: layout, resource, encoding, or destination write failed");
+}
+
 // Batch intrinsic measurements use the same CSS/font/fallback path as rendering.
 RADIANT_C_API Item fn_radiant_measure_html(Item html_item, Item width_item, Item height_item) {
+    if (get_type_id(html_item) != LMD_TYPE_STRING) return ItemNull;
+    RootFrame source_roots(1);
+    Rooted<Item> source(source_roots, html_item);
+    // retain source bytes across user layout callbacks, independently of the GC heap.
+    lam::Temp<char> html_source(mem_strdup(fn_to_cstr(source.get()), MEM_CAT_RENDER));
+    if (!html_source) return ItemNull;
     int viewport_width = 0;
     int viewport_height = 0;
     if (!radiant_item_to_int(width_item, &viewport_width) ||
@@ -3787,7 +3901,7 @@ RADIANT_C_API Item fn_radiant_measure_html(Item html_item, Item width_item, Item
         log_error("JUBE_RADIANT_MEASURE_HTML: expected positive viewport dimensions");
         return ItemNull;
     }
-    DomDocument* doc = radiant_load_html_source(fn_to_cstr(html_item),
+    DomDocument* doc = radiant_load_html_source(html_source.get(),
         viewport_width, viewport_height, "MEASURE_HTML");
     if (!doc) return ItemNull;
     RadiantLayoutResource* resource = radiant_layout_resource_for_document(doc, "MEASURE_HTML");
@@ -4591,9 +4705,18 @@ RADIANT_C_API Item fn_radiant_velmt_padding(Item velmt_item) {
     return radiant_obj_get(velmt_item, "padding");
 }
 
+RADIANT_C_API Item fn_radiant_with_content(Item element, Item children) {
+    return radiant_host_api->value->element_with_content(element, children);
+}
+
+RADIANT_C_API Item fn_radiant_present_content(Item element, Item children) {
+    return radiant_host_api->value->element_present_content(element, children);
+}
+
 static int radiant_module_init(const JubeHostAPI* host) {
     if (!host || host->api_version != JUBE_HOST_API_VERSION ||
-        !host->gc || !host->value || !host->script || !host->dom_catalog || !host->realm) {
+        !host->gc || !host->value || !host->value->element_with_content || !host->value->element_present_content ||
+        !host->script || !host->dom_catalog || !host->realm) {
         log_error("JUBE_RADIANT: missing host API during module init");
         return -1;
     }
@@ -4829,6 +4952,10 @@ RADIANT_C_API const void* radiant_dom_css_rule_list_host_type(void) {
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wcast-function-type-mismatch"
 static const JubeFuncDef radiant_functions[] = {
+    {"with_content", "fn(source: element, children: array) -> element|error", (fn_ptr)fn_radiant_with_content, JUBE_FN_NONE,
+     "Item fn_radiant_with_content(Item element, Item children)", (fn_ptr)fn_radiant_with_content},
+    {"present_content", "fn(source: element, children: array) -> element|error", (fn_ptr)fn_radiant_present_content, JUBE_FN_NONE,
+     "Item fn_radiant_present_content(Item element, Item children)", (fn_ptr)fn_radiant_present_content},
     // F5 editing waist — all offsets in codepoints
     {"free", "fn(node: dom_node) -> null", (fn_ptr)fn_radiant_free, JUBE_FN_NONE,
      "Item fn_radiant_free(Item node)", (fn_ptr)fn_radiant_free},
@@ -4836,6 +4963,8 @@ static const JubeFuncDef radiant_functions[] = {
      "Item fn_radiant_layout(Item node)", (fn_ptr)fn_radiant_layout},
     {"render_svg", "fn(html: string, width: int, height: int) -> string|null", (fn_ptr)fn_radiant_render_svg, JUBE_FN_NONE,
      "Item fn_radiant_render_svg(Item html, Item width, Item height)", (fn_ptr)fn_radiant_render_svg},
+    {"export_document", "pn(html: string, destination: string, options: map) -> bool|string", (fn_ptr)fn_radiant_export_document, JUBE_FN_NONE,
+     "Item fn_radiant_export_document(Item html, Item destination, Item options)", (fn_ptr)fn_radiant_export_document},
     {"geomap_validate_layer", "fn(layer: element) -> string|null", (fn_ptr)fn_radiant_geomap_validate_layer, JUBE_FN_NONE,
      "Item fn_radiant_geomap_validate_layer(Item layer)", (fn_ptr)fn_radiant_geomap_validate_layer},
     {"geomap_eval_layer", "fn(layer: element, feature: map, zoom: number) -> map|string", (fn_ptr)fn_radiant_geomap_eval_layer, JUBE_FN_NONE,
@@ -4912,6 +5041,11 @@ extern const char radiant_dom_interface_decl[];
 extern const JubeTypeBinding radiant_dom_type_bindings[];
 extern const int32_t radiant_dom_type_binding_count;
 
+static const JubeModuleRequirements radiant_requirements = {
+    sizeof(JubeModuleRequirements), JUBE_HOST_API_VERSION, sizeof(JubeHostAPI),
+    0, 0, 0, 0, sizeof(JubeHostValueAPI), sizeof(JubeHostScriptAPI), 0,
+};
+
 static const JubeModuleDef radiant_module = {
     JUBE_ABI_VERSION,
     sizeof(JubeModuleDef),
@@ -4931,12 +5065,40 @@ static const JubeModuleDef radiant_module = {
     radiant_dom_type_binding_count,
     NULL,
     radiant_custom_layout_heap_cleanup,
+    &radiant_requirements,
 };
 
 extern "C" void dom_webgl_register_static(void);
 extern "C" void radiant_animation_register_static(void);
 
+// Registration precedes module init: importing dom alone still needs native
+// providers, including on cold workers (D7.3.3–D7.3.4, D7.5.3).
+static const DomCanvasEngineOps radiant_canvas_operations = {
+#define RADIANT_CANVAS_ENTRY(result, name, parameters) radiant_canvas_##name,
+    DOM_CANVAS_ENGINE_OPERATIONS(RADIANT_CANVAS_ENTRY)
+#undef RADIANT_CANVAS_ENTRY
+};
+static const DomWebGlEngineOps radiant_webgl_operations = {
+#define RADIANT_WEBGL_ENTRY(result, name, parameters) radiant_webgl_##name,
+    DOM_WEBGL_ENGINE_OPERATIONS(RADIANT_WEBGL_ENTRY)
+#undef RADIANT_WEBGL_ENTRY
+};
+static const DomStyleEngineOps radiant_style_operations = {
+    dom_ensure_computed,
+    css_prop_serialize_computed_value,
+    css_prop_serialize_custom_property,
+    css_compute_element_custom_property,
+    css_transition_capture_before_change,
+    radiant_set_cssom_used_value_sync
+};
+
 RADIANT_C_API void radiant_jube_register_static(void) {
+    if (!dom_canvas_register_engine(&radiant_canvas_operations) ||
+        !dom_webgl_register_engine(&radiant_webgl_operations) ||
+        !dom_style_register_engine(&radiant_style_operations)) {
+        log_error("DOM provider registration rejected a conflicting native provider");
+        return;
+    }
     dom_webgl_register_static();
     radiant_animation_register_static();
     jube_register_static_module(&radiant_module);
@@ -4970,6 +5132,8 @@ RADIANT_PROVIDE_ENGINE_1(request_change, fn_radiant_request_change)
 RADIANT_PROVIDE_ENGINE_2(request_frame, fn_radiant_request_frame)
 RADIANT_PROVIDE_ENGINE_1(viewport_size, fn_radiant_viewport_size)
 RADIANT_PROVIDE_ENGINE_2(cancel_frame, fn_radiant_cancel_frame)
+RADIANT_PROVIDE_ENGINE_3(watch_window, fn_radiant_watch_window)
+RADIANT_PROVIDE_ENGINE_2(history_traverse, fn_radiant_history_traverse)
 RADIANT_PROVIDE_ENGINE_1(focused, fn_radiant_focused)
 RADIANT_PROVIDE_ENGINE_2(focus_set, fn_radiant_focus_set)
 RADIANT_PROVIDE_ENGINE_1(clear_editing_focus, fn_radiant_clear_editing_focus)
@@ -5082,6 +5246,8 @@ RADIANT_PROVIDE_ENGINE_3(audio_play, fn_radiant_audio_play)
 RADIANT_PROVIDE_ENGINE_2(audio_pause, fn_radiant_audio_pause)
 RADIANT_PROVIDE_ENGINE_2(audio_close, fn_radiant_audio_close)
 RADIANT_PROVIDE_ENGINE_2(audio_state, fn_radiant_audio_state)
+RADIANT_PROVIDE_ENGINE_1(media_info, fn_radiant_media_info)
+RADIANT_PROVIDE_ENGINE_3(media_command, fn_radiant_media_command)
 RADIANT_PROVIDE_ENGINE_2(set_relative_mouse, fn_radiant_set_relative_mouse)
 RADIANT_PROVIDE_ENGINE_1(relative_mouse_active, fn_radiant_relative_mouse_active)
 RADIANT_PROVIDE_ENGINE_2(input_operation, fn_radiant_input_operation)

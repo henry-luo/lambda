@@ -1240,6 +1240,44 @@ TEST_F(Scene3dTest, WebGl2ApiAndMultipleCanvasPixels) {
     ASSERT_EQ(render_output_render_view_tree_to_target(&ui,page->view_tree,&target),0);
     pixel(ui.surface,32,64,255,0,0);pixel(ui.surface,192,64,0,255,0);
 }
+
+TEST_F(Scene3dTest, WebGlVectorPaintRefreshesSnapshotsAndPreservesRetainedPixels) {
+    ASSERT_NE(load_page("test/webgl/api.html"), nullptr);
+    DomElement* canvas = dom_find_element_by_id(page->root->as_element(), "first");
+    ASSERT_NE(canvas, nullptr);
+    auto* view = (ViewBlock*)canvas;
+    // Export first: no raster pass may supply the missing GPU snapshot for this control.
+    lam::Temp<char> svg(render_view_tree_to_svg(&ui, page->view_tree->root, 320, 240, page->state));
+    ASSERT_NE(svg.get(), nullptr);
+    EXPECT_NE(strstr(svg.get(), "data:image/png;base64,"), nullptr);
+    ImageSurface* previous = render_canvas_surface(view);
+    ASSERT_NE(previous, nullptr);
+    pixel(previous, 32, 64, 255, 0, 0);
+    for (unsigned iteration = 0; iteration < 8; ++iteration) {
+        uint64_t generation = previous->generation;
+        EXPECT_EQ(render_canvas_surface(view), previous);
+        radiant_canvas_prepare_document(page);
+        EXPECT_EQ(render_canvas_surface(view), previous);
+        EXPECT_EQ(previous->generation, generation);
+        ImageSurface* retained = image_surface_snapshot_retain(previous);
+        ASSERT_EQ(retained, previous);
+        bool green = iteration % 2 == 0;
+        EXPECT_FALSE(item_is_error(run_js(green
+            ? "(()=>{const g=document.getElementById('first').getContext('webgl2');g.disable(g.SCISSOR_TEST);g.clearColor(0,1,0,1);g.clear(g.COLOR_BUFFER_BIT);return true})()"
+            : "(()=>{const g=document.getElementById('first').getContext('webgl2');g.disable(g.SCISSOR_TEST);g.clearColor(0,0,1,1);g.clear(g.COLOR_BUFFER_BIT);return true})()")));
+        ImageSurface* current = render_canvas_surface(view);
+        EXPECT_NE(current, nullptr);
+        EXPECT_NE(current, retained);
+        EXPECT_GT(retained->generation, generation);
+        pixel(current, 32, 64, 0, green ? 255 : 0, green ? 0 : 255);
+        pixel(retained, 32, 64, iteration == 0 ? 255 : 0,
+            iteration > 0 && !green ? 255 : 0, iteration > 0 && green ? 255 : 0);
+        image_surface_snapshot_release(retained);
+        if (!current) return;
+        previous = current;
+    }
+}
+
 TEST_F(Scene3dTest, PinnedUnmodifiedThreeRendererAndAddonProduceRealPixels) {
     ASSERT_NE(load_page("test/demo/scene3d/three-gallery.html",848,650),nullptr);
     DomElement* status=dom_find_element_by_id(page->root->as_element(),"status");ASSERT_NE(status,nullptr);
