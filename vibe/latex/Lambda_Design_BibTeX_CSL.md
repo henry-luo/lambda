@@ -4,7 +4,7 @@
 
 **Consolidation:** On 2026-10-12, §2.1 absorbed the built-in biblatex profile from the retired `Lambda_Pkg_Latex3.md`, and §4.1 was checked against the implemented API. The overall package design is [Lambda_Pkg_Latex.md](../Lambda_Pkg_Latex.md); the TeX engine, including the deferred biblatex style-file path, is [Lambda_Design_TeX_Engine.md](Lambda_Design_TeX_Engine.md).
 
-**Ruling (USER, 2026-10-12):** Phase IV M4, running biblatex style files on the TeX engine, is dropped. Documents that name a guide-level biblatex style reach the matching CSL style through the alias table in §7.4. That mapping is designed but not yet built.
+**Ruling (USER, 2026-10-12):** Phase IV M4, running biblatex style files on the TeX engine, is dropped. Documents that name a guide-level biblatex style reach the matching CSL style through the alias table in §7.4. That mapping is implemented; its admission fixtures are outstanding (§7.4).
 
 **Confirmed direction:** Use a CSL + citeproc pipeline comparable to Pandoc's. Implement the processor in **Lambda script**, as part of **`lambda.latex`**. Existing libraries may inform the implementation and supply reference results; they are not production runtime dependencies.
 
@@ -331,6 +331,8 @@ Contributed biblatex styles implement published style guides, and CSL styles imp
 - Style options that a CSL style fixes in its XML (`maxnames`, `giveninits`, `uniquename`, `sorting`, the `doi`/`url`/`isbn` toggles) are diagnosed as conflicting unless an explicit, tested translation exists, per §7.1.
 - Document-level TeX customization of the style (`\DeclareFieldFormat`, `\renewbibmacro`, `\DeclareNameFormat`, sorting templates) has no CSL counterpart and is diagnosed.
 - Any other style name keeps the `unsupported-bib-style` diagnostic.
+
+**Implementation (2026-10-12).** Implemented on 2026-10-12 in `citeproc/aliases.ls`; the reference fixtures that the admission rule below requires are still outstanding, because the pinned biblatex toolchain with the contributed style packages is not installed here. The alias table lives in `citeproc/aliases.ls`, and `latex.render_result` turns a selected alias into the CSL request when no `citeproc` option is given. Under an alias the biblatex style is the request rather than a conflict, so the legacy-option conflict check sees no options; the alias reports what CSL cannot follow instead. The diagnostics are `csl-style-alias` (the substitution, naming the CSL style), `csl-alias-option-ignored` (one per CSL-fixed option) and `csl-alias-customization` (one per style-customization command). The `unsupported-bib-style` report for the aliased name is dropped, and `result.metadata.bibliography.biblatex_style` records the biblatex name. `biblatex-chicago` is a registry entry that implies a `biblatex` declaration with `style=chicago-authordate` or `chicago-notes` (its default); loading it beside `biblatex` reports `conflicting-bibliography-packages`. `test_latex_csl_alias` covers the four aliases, ignored options and customization, an explicit `citeproc` option beside a biblatex style, a split citation and bibliography style, a standard style, an unmapped style and the double load.
 
 ## 8. References and reuse policy
 

@@ -111,3 +111,10 @@ The last exploratory command intentionally exits nonzero while differences remai
 6. Add general work limits and release-build scaling measurements for larger bibliographies before considering a default migration.
 
 These are outstanding compatibility and production-readiness work. No default migration or complete CSL compliance is claimed by the delivered opt-in implementation.
+
+## 2026-10-12: biblatex style aliases (design §7.4)
+
+- **Delivered.** `lmd/package/latex/citeproc/aliases.ls` maps `apa`, `ieee`, `chicago-authordate` and `chicago-notes` to the bundled `apa`, `ieee`, `chicago-author-date` and `chicago-fullnote-bibliography` styles. `latex.render_result` uses the alias as the CSL request when the caller passes no `citeproc` option. `packages/registry.ls` gains `biblatex-chicago`, which implies `biblatex` with the Chicago style named by its option (default `notes`).
+- **Diagnostics.** `csl-style-alias` names the substitution; `csl-alias-option-ignored` and `csl-alias-customization` report what CSL cannot follow; the aliased name's `unsupported-bib-style` report is dropped. `result.metadata.bibliography.biblatex_style` records the biblatex name.
+- **Tests.** New `test_latex_csl_alias` (ten cases). `test_latex_biblatex_negative` used `style=apa` as its unsupported style; its fixture now uses the unmapped `style=mla`, so its golden is unchanged. All 59 `test/lambda/latex` scripts and the two LaTeX UI fixtures pass.
+- **Outstanding.** The admission fixtures that compare each alias with the biblatex package's own output need biber and the biblatex-apa, biblatex-ieee and biblatex-chicago packages, none of which is installed locally.
