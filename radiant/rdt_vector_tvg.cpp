@@ -1786,11 +1786,97 @@ static void tvg_draw_gradient(RdtVector* vec, RdtPath* path, bool radial,
     }
 }
 
+static bool rdt_fill_linear_gradient_analytic(RdtVector* vec, RdtPath* path,
+        float x1, float y1, float x2, float y2, const RdtGradientStop* stops, int count,
+        RdtFillRule rule, const RdtMatrix* transform, const RdtMatrix* gradient_transform,
+        const RdtGradientOptions* requested) {
+    if (!vec || !vec->impl || !path || !stops || count < 2) return true;
+    RdtGradientOptions options = requested ? *requested : RdtGradientOptions{};
+    if (!rdt_gradient_options_valid(&options)) return true;
+    if (options.stroke_width > 0.0f) return false;
+    double vx = (double)x2 - x1, vy = (double)y2 - y1;
+    double extent = vx * vx + vy * vy;
+    if (!(extent > 0.0) || !isfinite(extent)) return false;
+    RdtMatrix frame = transform ? *transform : rdt_matrix_identity();
+    if (gradient_transform) frame = rdt_matrix_multiply(&frame, gradient_transform);
+    // projective gradients retain the backend path until inverse-perspective sampling is shared.
+    if (frame.e31 != 0.0f || frame.e32 != 0.0f || frame.e33 != 1.0f) return false;
+    RdtMatrix inverse;
+    if (!rdt_matrix_invert_affine(&frame, &inverse)) return false;
+    RdtVectorImpl* impl = vec->impl;
+    Bound bounds;
+    bool bounded = rdt_path_get_bounds(path, &bounds.left, &bounds.top, &bounds.right, &bounds.bottom);
+    if (bounded && transform) bounded = rdt_matrix_project_rect_bounds(transform,
+        bounds.left, bounds.top, bounds.right, bounds.bottom,
+        &bounds.left, &bounds.top, &bounds.right, &bounds.bottom);
+    // keep the caller's pixel lattice, including fractional capture origins.
+    float left = 0.0f, top = 0.0f, right = (float)impl->width, bottom = (float)impl->height;
+    if (bounded && isfinite(bounds.left) && isfinite(bounds.top) &&
+            isfinite(bounds.right) && isfinite(bounds.bottom)) {
+        left = fmaxf(left, floorf(bounds.left - impl->tile_offset_x));
+        top = fmaxf(top, floorf(bounds.top - impl->tile_offset_y));
+        right = fminf(right, ceilf(bounds.right - impl->tile_offset_x));
+        bottom = fminf(bottom, ceilf(bounds.bottom - impl->tile_offset_y));
+    }
+    if (right <= left || bottom <= top) return true;
+    size_t width = (size_t)(right - left), height = (size_t)(bottom - top);
+    size_t first_column = (size_t)left, first_row = (size_t)top;
+    size_t count_pixels, bytes;
+    if (!math_checked_mul(width, height, &count_pixels) ||
+        !math_checked_mul(count_pixels, sizeof(uint32_t), &bytes) ||
+        !render_memory_allow_allocation(nullptr, bytes)) return false;
+    lam::Temp<uint32_t> coverage = lam::temp_array<uint32_t>(count_pixels, MEM_CAT_RENDER);
+    if (!coverage) return false;
+    memset(coverage.get(), 0, bytes);
+    rdt_vector_flush_batch(vec);
+    RdtVector mask = {};
+    rdt_vector_init(&mask, coverage.get(), (int)width, (int)height, (int)width); // INT_CAST_OK: bounded raster pixel counts fit the caller's integer target
+    if (!mask.impl) return false;
+    float origin_x = impl->tile_offset_x + left, origin_y = impl->tile_offset_y + top;
+    rdt_vector_set_tile_offset_x(&mask, origin_x);
+    rdt_vector_set_tile_offset_y(&mask, origin_y);
+    // vector paths and the active clip stack still determine antialiased coverage.
+    rdt_fill_path(&mask, path, Color{0xffffffffu}, rule, transform);
+    rdt_vector_flush_batch(&mask); rdt_vector_destroy(&mask);
+    auto sample_color = [&](size_t column, size_t row) {
+        float gx, gy;
+        rdt_matrix_transform_point(&inverse, (float)column + 0.5f + origin_x,
+            (float)row + 0.5f + origin_y, &gx, &gy);
+        float position = (float)(((gx - (double)x1) * vx + (gy - (double)y1) * vy) / extent);
+        if (options.spread == RDT_GRADIENT_REPEAT) position = math_wrap_positive_f(position, 1.0f);
+        else if (options.spread == RDT_GRADIENT_REFLECT) {
+            position = math_wrap_positive_f(position, 2.0f);
+            if (position > 1.0f) position = 2.0f - position;
+        }
+        return render_sample_gradient_stops(stops, count, position, 1.0f);
+    };
+    lam::Temp<uint32_t> row_colors;
+    // axis-aligned gradients reuse colors across scanlines; curved coverage remains per pixel.
+    if (height > 1 && ((vy == 0.0 && inverse.e12 == 0.0f) ||
+            (vx == 0.0 && inverse.e22 == 0.0f)) &&
+            render_memory_allow_allocation(nullptr, width * sizeof(uint32_t))) {
+        row_colors = lam::temp_array<uint32_t>(width, MEM_CAT_RENDER);
+        if (row_colors) for (size_t column = 0; column < width; column++)
+            row_colors[column] = sample_color(column, 0).c;
+    }
+    for (size_t row = 0; row < height; row++) for (size_t column = 0; column < width; column++) {
+        uint8_t alpha = (uint8_t)(coverage[row * width + column] >> 24);
+        if (!alpha) continue;
+        Color color = row_colors ? Color{row_colors[column]} : sample_color(column, row);
+        uint32_t source = render_pixel_scale_premultiplied(render_pixel_premultiply_abgr(color.c), alpha);
+        uint32_t* destination = impl->pixels + (row + first_row) * (size_t)impl->stride + column + first_column;
+        *destination = render_pixel_source_over_premultiplied_pair(*destination, source);
+    }
+    return true;
+}
+
 void rdt_fill_linear_gradient(RdtVector* vec, RdtPath* path,
                               float x1, float y1, float x2, float y2,
                               const RdtGradientStop* stops, int stop_count,
                               RdtFillRule rule, const RdtMatrix* transform,
                               const RdtMatrix* gradient_transform, const RdtGradientOptions* options) {
+    if (rdt_fill_linear_gradient_analytic(vec, path, x1, y1, x2, y2, stops, stop_count,
+            rule, transform, gradient_transform, options)) return;
     float values[4] = {x1, y1, x2, y2};
     tvg_draw_gradient(vec, path, false, values, stops, stop_count, rule,
         transform, gradient_transform, options);

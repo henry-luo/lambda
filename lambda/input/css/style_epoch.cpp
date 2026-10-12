@@ -400,6 +400,9 @@ static void style_builder_add(StyleEpochManager* manager,
         manager->doc->document_pool, sizeof(StyleRecipeBuilder));
     if (!builder) return;
     builder->element = element;
+    // replacement applies to this subtree; unrelated highlight cascades stay live.
+    if (manager->cascade_mode == STYLE_EPOCH_CASCADE_REPLACE)
+        style_epoch_selection_clear_element(element);
     builder->eligible = !element->specified_style_borrowed() &&
         element->css_variables == nullptr &&
         (element->specified_style_shared() ||
@@ -947,9 +950,6 @@ static bool style_epoch_cascade_begin_mode(DomDocument* doc, DomElement* root,
     if (global_change) manager->pending_global_change = true;
     if (manager->pending_global_change &&
         !style_epoch_start_new(manager, mode_key)) return false;
-    if (mode == STYLE_EPOCH_CASCADE_REPLACE) {
-        style_selection_clear_all(manager);
-    }
 
     size_t bucket_count = 64;
     size_t desired = doc->services.element_count > 0

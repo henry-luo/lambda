@@ -4293,10 +4293,15 @@ static void resolve_selection_pseudo_style(DomElement* element,
                                            LayoutContext* lycon) {
     if (!element || !lycon) return;
     ViewSpan* span = lam::view_as_element(lycon->view);
-    if (!span || !span->in_line) return;
-    InlineProp* inline_prop = span->in_line;
+    if (!span) return;
     DomElement* parent = dom_parent_element(element);
     const InlineProp* inherited = parent && parent->in_line ? parent->inl() : nullptr;
+    CssSelectionStyle* selection = style_epoch_selection_style(element, false);
+    if (!span->in_line && !selection && (!inherited ||
+            (!inherited->has_selection_color && !inherited->has_selection_background_color))) return;
+    // controls and block hosts may have no ordinary inline traits before highlight computation.
+    InlineProp* inline_prop = span->ensure_inline(lycon);
+    if (!inline_prop) return;
     inline_prop->has_selection_color = inherited && inherited->has_selection_color;
     inline_prop->has_selection_background_color =
         inherited && inherited->has_selection_background_color;
@@ -4312,7 +4317,6 @@ static void resolve_selection_pseudo_style(DomElement* element,
         inline_prop->selection_background_color = Color{0};
     }
 
-    CssSelectionStyle* selection = style_epoch_selection_style(element, false);
     const CssSelectionCascadeValue* declarations[2] = {
         selection ? &selection->color : nullptr,
         selection ? &selection->background_color : nullptr

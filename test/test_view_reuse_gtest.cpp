@@ -10,6 +10,7 @@
 #include "../lambda/input/css/dom_lifecycle.hpp"
 #include "../lambda/input/css/style_epoch.hpp"
 #include "../lambda/input/css/css_engine.hpp"
+#include "../lambda/input/css/selector_matcher.hpp"
 #include "../lambda/input/css/css_parser.hpp"
 #include "../lambda/input/css/css_formatter.hpp"
 #include "../lambda/input/css/css_style_node.hpp"
@@ -2414,6 +2415,36 @@ TEST_F(StyleEpochTest, ReplaceModeRebuildsWithoutPriorRecipeBase) {
 
     EXPECT_EQ(dom_element_get_specified_value(child, CSS_PROPERTY_WIDTH), nullptr);
     EXPECT_NE(dom_element_get_specified_value(child, CSS_PROPERTY_HEIGHT), nullptr);
+}
+
+TEST_F(StyleEpochTest, SubtreeReplacementPreservesUnrelatedSelectionCascades) {
+    DomElement* left = append("left"); DomElement* right = append("right");
+    DomElement* leaf = authored_element("leaf");
+    ASSERT_TRUE(left->append_child(leaf));
+    install_stylesheet("left::selection{color:red}right::selection{color:blue}leaf::selection{color:green}");
+    CssRule** rules = doc.stylesheets[0]->rules;
+    ASSERT_TRUE(style_epoch_cascade_begin_replace(&doc, document_root, &engine));
+    for (size_t index = 0; index < 3; index++) {
+        DomElement* hosts[] = {left, right, leaf};
+        ASSERT_EQ(dom_element_apply_pseudo_element_rule(hosts[index], rules[index], {}, PSEUDO_ELEMENT_SELECTION), 1);
+    }
+    style_epoch_cascade_end(&doc);
+    CssDeclaration* sibling_color = dom_element_get_pseudo_element_value(right, CSS_PROPERTY_COLOR, PSEUDO_ELEMENT_SELECTION);
+    ASSERT_NE(sibling_color, nullptr);
+    for (size_t iteration = 0; iteration < 64; iteration++) {
+        dom_element_clear_cascaded_styles(left); dom_element_clear_cascaded_styles(leaf);
+        ASSERT_TRUE(style_epoch_cascade_begin_replace(&doc, left, &engine));
+        EXPECT_EQ(dom_element_get_pseudo_element_value(left, CSS_PROPERTY_COLOR, PSEUDO_ELEMENT_SELECTION), nullptr);
+        EXPECT_EQ(dom_element_get_pseudo_element_value(leaf, CSS_PROPERTY_COLOR, PSEUDO_ELEMENT_SELECTION), nullptr);
+        EXPECT_EQ(dom_element_get_pseudo_element_value(right, CSS_PROPERTY_COLOR, PSEUDO_ELEMENT_SELECTION), sibling_color);
+        ASSERT_EQ(dom_element_apply_pseudo_element_rule(left, rules[0], {}, PSEUDO_ELEMENT_SELECTION), 1);
+        ASSERT_EQ(dom_element_apply_pseudo_element_rule(leaf, rules[2], {}, PSEUDO_ELEMENT_SELECTION), 1);
+        style_epoch_cascade_end(&doc);
+        EXPECT_EQ(dom_element_get_pseudo_element_value(right, CSS_PROPERTY_COLOR, PSEUDO_ELEMENT_SELECTION), sibling_color);
+    }
+    ASSERT_TRUE(style_epoch_cascade_begin_replace(&doc, document_root, &engine));
+    EXPECT_EQ(dom_element_get_pseudo_element_value(right, CSS_PROPERTY_COLOR, PSEUDO_ELEMENT_SELECTION), nullptr);
+    style_epoch_cascade_end(&doc);
 }
 
 TEST_F(StyleEpochTest, InvalidLaterDeclarationPreservesLastValidValue) {
