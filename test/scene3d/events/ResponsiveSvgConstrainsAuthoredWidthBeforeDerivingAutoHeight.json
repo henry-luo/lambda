@@ -1,0 +1,196 @@
+{
+  "name": "ResponsiveSvgConstrainsAuthoredWidthBeforeDerivingAutoHeight",
+  "viewport": {
+    "width": 386,
+    "height": 360
+  },
+  "input_turn_ms": 0,
+  "event_interval_ms": 0,
+  "events": [
+    {
+      "type": "assert_render_stats",
+      "source": "view",
+      "target": "#responsive",
+      "fields": {
+        "width": {
+          "eq": 326,
+          "tolerance": 0.02
+        },
+        "height": {
+          "eq": 251.4857142857143,
+          "tolerance": 0.02
+        }
+      }
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "view",
+      "target": "#css-width",
+      "fields": {
+        "width": {
+          "eq": 326,
+          "tolerance": 0.02
+        },
+        "height": {
+          "eq": 251.4857142857143,
+          "tolerance": 0.02
+        }
+      }
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "view",
+      "target": "#percent-width",
+      "fields": {
+        "width": {
+          "eq": 326,
+          "tolerance": 0.02
+        },
+        "height": {
+          "eq": 251.4857142857143,
+          "tolerance": 0.02
+        }
+      }
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "view",
+      "target": "#both-auto",
+      "fields": {
+        "width": {
+          "eq": 326,
+          "tolerance": 0.02
+        },
+        "height": {
+          "eq": 251.4857142857143,
+          "tolerance": 0.02
+        }
+      }
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "view",
+      "target": "#fixed-height",
+      "fields": {
+        "width": {
+          "eq": 326,
+          "tolerance": 0.02
+        },
+        "height": {
+          "eq": 270,
+          "tolerance": 0.02
+        }
+      }
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "view",
+      "target": "#min-wins",
+      "fields": {
+        "width": {
+          "eq": 360,
+          "tolerance": 0.02
+        },
+        "height": {
+          "eq": 277.7142857142857,
+          "tolerance": 0.02
+        }
+      }
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "view",
+      "target": "#unconstrained",
+      "fields": {
+        "width": {
+          "eq": 350,
+          "tolerance": 0.02
+        },
+        "height": {
+          "eq": 270,
+          "tolerance": 0.02
+        }
+      }
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "view",
+      "target": "#content-box",
+      "fields": {
+        "width": {
+          "eq": 224,
+          "tolerance": 0.02
+        },
+        "height": {
+          "eq": 178.28571428571428,
+          "tolerance": 0.02
+        }
+      }
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "view",
+      "target": "#border-box",
+      "fields": {
+        "width": {
+          "eq": 200,
+          "tolerance": 0.02
+        },
+        "height": {
+          "eq": 159.77142857142857,
+          "tolerance": 0.02
+        }
+      }
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "view",
+      "target": "#zero",
+      "fields": {
+        "width": {
+          "eq": 0,
+          "tolerance": 0.02
+        },
+        "height": {
+          "eq": 0,
+          "tolerance": 0.02
+        }
+      }
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "view",
+      "target": "#intrinsic-min-wins",
+      "fields": {
+        "width": {
+          "eq": 100,
+          "tolerance": 0.02
+        },
+        "height": {
+          "eq": 100,
+          "tolerance": 0.02
+        }
+      }
+    },
+    {
+      "type": "assert_surface",
+      "source": "page",
+      "pixels": [
+        [
+          350,
+          60,
+          0,
+          0,
+          255
+        ],
+        [
+          365,
+          60,
+          255,
+          255,
+          255
+        ]
+      ]
+    }
+  ]
+}

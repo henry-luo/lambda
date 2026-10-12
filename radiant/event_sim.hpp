@@ -86,6 +86,8 @@
 struct GLFWwindow;
 struct Pool;
 struct Arena;
+struct EventSimRenderCommand;
+struct EventSimRenderState;
 
 // Event simulation command types
 enum SimEventType {
@@ -158,6 +160,7 @@ enum SimEventType {
     SIM_EVENT_ASSERT_FILE,       // verify a local file's existence / content (edit-mode saves)
     SIM_EVENT_ASSERT_WINDOW_CLOSED, // verify the edit application's close decision
     SIM_EVENT_ASSERT_SNAPSHOT,   // pixel-compare rendered surface against browser reference PNG
+    SIM_EVENT_ASSERT_RENDER,     // renderer diagnostics, retained surfaces and script assertions
     // Mutation helpers
     SIM_EVENT_SCROLL_TO,         // scroll to absolute position or element
     SIM_EVENT_ADVANCE_TIME,      // advance animation scheduler clock deterministically
@@ -174,6 +177,7 @@ enum SimEventType {
     SIM_EVENT_WINDOW_CLOSE,    // platform close request (close button / application quit)
     SIM_EVENT_WINDOW_FOCUS,    // native focus/blur delivery, including capture release
     SIM_EVENT_WRITE_FILE,      // write a ./temp/ file, e.g. an external change to an edited file
+    SIM_EVENT_RENDER_COMMAND,  // explicit rendering/animation/GC controls
     // Webview commands
     SIM_EVENT_WEBVIEW_EVAL_JS,      // execute JS in a webview element
     SIM_EVENT_WEBVIEW_WAIT_LOAD,    // wait for webview navigation to complete
@@ -398,6 +402,7 @@ struct SimEvent {
     bool expected_exists;
     bool expected_closed;
     int expected_close_requests; // -1 = not checked
+    EventSimRenderCommand* render_command;
 };
 
 // Event simulation context
@@ -418,6 +423,8 @@ struct EventSimContext {
     float device_scale;          // device pixels per logical pixel; default 1
     int default_timeout;         // default assertion timeout in ms (0 = no retry)
     double input_turn_ms;        // virtual latency per input primitive; zero uses explicit waits only
+    double event_interval_ms;    // delay between commands; zero supports exact-time rendering checks
+    bool initial_render;        // export fixtures may assert vector paint before the first raster pass
     double current_time;         // deterministic host clock in seconds
     // Assertion retries must yield to the host loop so queued JS and layout work
     // can make the condition true instead of sleeping inside event_sim_update().
@@ -449,6 +456,7 @@ struct EventSimContext {
     float replay_expected_scroll_y;
     bool replay_has_scroll;
     ArrayList* state_store_snapshots;
+    EventSimRenderState* render_state;
 };
 
 // Load events from JSON file

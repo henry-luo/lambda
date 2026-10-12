@@ -84,8 +84,6 @@ These libraries and tools are required on every platform.
 | **tree-sitter-lambda** | Built from `lambda/tree-sitter-lambda/` | Optional Lambda reference grammar for the `lambda-cst` differential verifier |
 | **tree-sitter-javascript** | Built from `lambda/tree-sitter-javascript/` | JavaScript/JSX reference grammar for `lambda-cst` only |
 | **tree-sitter-typescript** | Built from `lambda/tree-sitter-typescript/` | TypeScript reference grammar for `lambda-cst` only |
-| **tree-sitter-latex** | Built from `lambda/tree-sitter-latex/` | LaTeX document parsing |
-| **tree-sitter-latex-math** | Built from `lambda/tree-sitter-latex-math/` | LaTeX math expression parsing |
 | **MIR** | Built from `mac-deps/mir/` | JIT compiler backend (Medium Internal Representation) |
 | **RE2** | Vendored at `lib/re2/` (`lib/re2/VENDOR.md`), built into `build_temp/re2_build/` | Regular expression engine (pinned 2023-03-01, no Abseil dependency) |
 | **utf8proc** | Built from `build_temp/utf8proc/` | Unicode text processing and normalization |
@@ -356,15 +354,14 @@ The grammar (`grammar.js`) defines:
 
 ### Additional Grammars
 
-Lambda also includes Tree-sitter grammars for document parsing and isolated
-language-reference checks:
+Lambda also includes Tree-sitter grammars for isolated language-reference
+checks (LaTeX and LaTeX math are parsed by the direct C parsers in
+`lambda/input/input-latex-c.cpp`):
 
 | Grammar | Location | Purpose |
 |---------|----------|---------|
 | JavaScript | `lambda/tree-sitter-javascript/` | `lambda-cst` JavaScript/JSX reference grammar |
 | TypeScript | `lambda/tree-sitter-typescript/` | `lambda-cst` TypeScript reference grammar |
-| LaTeX | `lambda/tree-sitter-latex/` | LaTeX document parsing |
-| LaTeX Math | `lambda/tree-sitter-latex-math/` | LaTeX math expression parsing |
 
 These follow the same `grammar.js` → `parser.c` pattern. The JS/TS archives
 are built only by `lambda-cst`; normal Lambda builds use the first-party C

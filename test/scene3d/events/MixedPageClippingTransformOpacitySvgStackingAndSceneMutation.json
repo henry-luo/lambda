@@ -1,0 +1,195 @@
+{
+  "name": "MixedPageClippingTransformOpacitySvgStackingAndSceneMutation",
+  "viewport": {
+    "width": 320,
+    "height": 240
+  },
+  "input_turn_ms": 0,
+  "event_interval_ms": 0,
+  "events": [
+    {
+      "type": "script",
+      "js": "const c=document.getElementById('canvas').getContext('2d');c.fillStyle='#ff0000';c.fillRect(0,0,128,128)"
+    },
+    {
+      "type": "assert_surface",
+      "source": "page",
+      "pixels": [
+        [
+          10,
+          10,
+          255,
+          255,
+          255
+        ],
+        [
+          80,
+          30,
+          128,
+          128,
+          128,
+          255,
+          4
+        ],
+        [
+          120,
+          84,
+          255,
+          128,
+          128,
+          255,
+          4
+        ],
+        [
+          140,
+          70,
+          255,
+          255,
+          255
+        ],
+        [
+          132,
+          84,
+          0,
+          0,
+          255
+        ],
+        [
+          180,
+          30,
+          255,
+          255,
+          255
+        ],
+        [
+          200,
+          30,
+          255,
+          128,
+          128,
+          255,
+          4
+        ]
+      ]
+    },
+    {
+      "type": "snapshot_render_stats",
+      "source": "scene3d",
+      "target": "#viewport",
+      "name": "before"
+    },
+    {
+      "type": "script",
+      "js": "document.getElementById('color').setAttribute('color','#00ff00');const c=document.getElementById('canvas').getContext('2d');c.fillStyle='#0000ff';c.fillRect(0,0,128,128)"
+    },
+    {
+      "type": "assert_surface",
+      "source": "page",
+      "pixels": [
+        [
+          120,
+          84,
+          128,
+          255,
+          128,
+          255,
+          4
+        ],
+        [
+          200,
+          30,
+          128,
+          128,
+          255,
+          255,
+          4
+        ]
+      ]
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "scene3d",
+      "target": "#viewport",
+      "fields": {
+        "snapshot_generation": {
+          "baseline": "before",
+          "min": 1
+        }
+      }
+    },
+    {
+      "type": "snapshot_render_stats",
+      "source": "scene3d",
+      "target": "#viewport",
+      "name": "after"
+    },
+    {
+      "type": "assert_surface",
+      "source": "page",
+      "pixels": [
+        [
+          120,
+          84,
+          128,
+          255,
+          128,
+          255,
+          4
+        ]
+      ]
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "scene3d",
+      "target": "#viewport",
+      "fields": {
+        "graphics.frames": {
+          "baseline": "after",
+          "eq": 0
+        }
+      }
+    },
+    {
+      "type": "set_device_scale",
+      "scale": 2
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "scene3d",
+      "target": "#viewport",
+      "fields": {
+        "raster_width": 256,
+        "raster_height": 256,
+        "camera_aspect": 1,
+        "snapshot_generation": {
+          "baseline": "after",
+          "min": 1
+        }
+      }
+    },
+    {
+      "type": "assert_surface",
+      "source": "page",
+      "pixels": [
+        [
+          240,
+          168,
+          128,
+          255,
+          128,
+          255,
+          4
+        ],
+        [
+          400,
+          60,
+          128,
+          128,
+          255,
+          255,
+          4
+        ]
+      ]
+    }
+  ]
+}

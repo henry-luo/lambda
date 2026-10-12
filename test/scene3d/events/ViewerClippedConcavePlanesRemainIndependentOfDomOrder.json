@@ -1,0 +1,111 @@
+{
+  "name": "ViewerClippedConcavePlanesRemainIndependentOfDomOrder",
+  "viewport": {
+    "width": 1280,
+    "height": 336
+  },
+  "input_turn_ms": 0,
+  "event_interval_ms": 0,
+  "events": [
+    {
+      "type": "assert_surface",
+      "source": "page",
+      "pixels": [
+        [
+          100,
+          30,
+          0,
+          128,
+          0
+        ],
+        [
+          740,
+          30,
+          0,
+          128,
+          0
+        ],
+        [
+          120,
+          140,
+          0,
+          0,
+          255
+        ],
+        [
+          760,
+          140,
+          0,
+          0,
+          255
+        ],
+        [
+          320,
+          200,
+          26,
+          26,
+          58
+        ],
+        [
+          960,
+          200,
+          26,
+          26,
+          58
+        ]
+      ]
+    },
+    {
+      "type": "set_device_scale",
+      "scale": 2
+    },
+    {
+      "type": "assert_surface",
+      "source": "page",
+      "pixels": [
+        [
+          200,
+          60,
+          0,
+          128,
+          0
+        ],
+        [
+          1480,
+          60,
+          0,
+          128,
+          0
+        ],
+        [
+          240,
+          280,
+          0,
+          0,
+          255
+        ],
+        [
+          1520,
+          280,
+          0,
+          0,
+          255
+        ],
+        [
+          640,
+          400,
+          26,
+          26,
+          58
+        ],
+        [
+          1920,
+          400,
+          26,
+          26,
+          58
+        ]
+      ]
+    }
+  ]
+}

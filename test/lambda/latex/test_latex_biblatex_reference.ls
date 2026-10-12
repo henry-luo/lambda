@@ -1,4 +1,4 @@
-// Reference text captured with BibLaTeX 3.20 and Biber 2.20; see proposal §7.3.
+// Reference text captured with BibLaTeX 3.20 and Biber 2.20; see Lambda_Design_BibTeX_CSL §2.1.
 import latex: lambda.latex.latex
 import html_ser: lambda.latex.to_html
 

@@ -1,1396 +1,347 @@
-# Lambda LaTeX Package Proposal
+# Lambda LaTeX Package Design
 
-> **Location:** `lambda/latex/`
-> **References:** Math package (`lambda/doc/math/`), LaTeX.js (`ref/latex-js/`), LaTeXML (`ref/latexml/`), C++ implementation (`lambda/input/input-latex-ts.cpp`, `lambda/tex/`)
-> **Goal:** Full LaTeX document → HTML conversion, written entirely in Lambda Script, reusing the existing tree-sitter LaTeX parser for AST generation
+**Status:** Active design. Consolidated on 2026-10-12 from `Lambda_Pkg_Latex.md` (original proposal), `Lambda_Pkg_Latex2.md` (Phase 2) and `Lambda_Pkg_Latex3.md` (package compatibility, Phases I–IV), plus the retired notes under `vibe/latex/`, and checked against HEAD `1df04d4e4`. Implemented behavior and the bounded profiles are current; §11 lists the decisions and work still open. No formal ruling is changed by this document.
 
----
+**Scope:** The `lambda.latex` package: turning a LaTeX document into semantic HTML elements, package support, and the HTML, SVG and PDF outputs reached through Radiant. Math typesetting is out of scope here and has its own design.
 
-## 1. Project Goals & Scope
+**Formal linkage:** **D7.2.1–D7.2.4** place shipped packages in source modules with immutable bindings under the `lambda.*` namespace and make package selection a static registry. **S16.9.8** governs imports. **S1.8** forbids executing a runtime string as Lambda code. **S12.1.1v2** and **S12.4.1** make rendering a pure transform over eagerly acquired input. **D7.1.2v2** and **D7.5.2** govern resource acquisition. **S7.4.1–S7.4.4** govern diagnostics. **S2.6.3–S2.6.5** and **D2.6.5v4** govern the command-argument content contract recorded in [Input_Latex.md](input/Input_Latex.md).
 
-### 1.1 Primary Goal
+**Detailed designs:**
 
-Build a **pure Lambda Script package** at `lambda/latex/` that converts a LaTeX document AST (produced by tree-sitter-latex + tree-sitter-latex-math via the existing C++ parser) into semantic HTML elements. The package takes parsed Lambda elements as input and produces an `<html>` element tree as output, serializable via `format(result, 'html')`.
+| Topic | Document |
+|---|---|
+| Math typesetting (`lambda.doc.math`) | [Lambda_Pkg_Math.md](Lambda_Pkg_Math.md) |
+| TeX expansion engine, kernel, bundled packages, local `.sty`/`.cls` | [latex/Lambda_Design_TeX_Engine.md](latex/Lambda_Design_TeX_Engine.md) |
+| Bibliographies: biblatex/natbib profile and CSL citeproc | [latex/Lambda_Design_BibTeX_CSL.md](latex/Lambda_Design_BibTeX_CSL.md) |
+| TikZ, PGF and PGFPlots drawing (`lambda.doc.tikz`) | [Lambda_Pkg_Tikz.md](Lambda_Pkg_Tikz.md) |
+| PDF reading for `\includegraphics` | [Lambda_Pkg_PDF.md](Lambda_Pkg_PDF.md) |
+| LaTeX parser and AST contract | [input/Input_Latex.md](input/Input_Latex.md) |
 
-### 1.2 Why Migrate from C++ to Lambda Script?
+Implementation records: [Lambda_Impl_Latex_Phase4.md](impl/Lambda_Impl_Latex_Phase4.md), [Lambda_Impl_BibTeX_CSL.md](impl/Lambda_Impl_BibTeX_CSL.md), [Lambda_Impl_Tikz_Phase4.md](impl/Lambda_Impl_Tikz_Phase4.md).
 
-The current C++ LaTeX-to-HTML pipeline spans **~20,600 lines** across 16 files (`input-latex-ts.cpp`, `tex_document_model.*`, `tex_doc_model_html.cpp`, `tex_latex_bridge.*`, `tex_html_render.cpp`, etc.). A Lambda Script package offers:
+## 1. Purpose and scope
 
-| Benefit | Detail |
-|---------|--------|
-| **Prototyping velocity** | Iterate on rendering logic without recompiling (~20× faster edit-test cycle) |
-| **User extensibility** | Users can import, override, or extend LaTeX commands — impossible with compiled C++ |
-| **Proven pattern** | The math package (2,523 lines Lambda) already replaced ~5,000 lines of C++ math-to-HTML rendering |
-| **Declarative mapping** | LaTeX command → HTML element mappings are naturally expressed as Lambda maps and `match` dispatchers |
-| **Consistency** | Follows the same module pattern as `math` and `chart` packages |
-| **Maintainability** | Lambda's functional style eliminates the memory management, pointer arithmetic, and StrBuf bookkeeping that dominate the C++ implementation |
-| **Language showcase** | A non-trivial real-world package validates Lambda's maturity for production use |
+`lambda.latex` converts LaTeX documents into semantic HTML element trees that Radiant lays out and paints, and that serialize to HTML strings. It aims at comprehensive support for real documents, including their packages, without becoming a second TeX typesetter.
 
-### 1.3 Scope
+**What support means.** A package or command is *supported* when its documented bounded profile works after the corresponding `\usepackage` and has a checked output path. *Partial* means the behavior is available with a stated limit or substitution. Anything else is *unsupported* and produces a located diagnostic or a visible unsupported element. Recognizing a command, or being able to render its arguments, is never counted as support. Support never means byte-identical TeX output.
 
-| In Scope | Out of Scope |
-|----------|-------------|
-| LaTeX document AST → HTML element tree | Parsing LaTeX source (stays in C++ tree-sitter) |
-| Document structure (sections, lists, tables, text) | TeX typesetting pipeline (DVI/PDF/SVG output) |
-| Inline & display math (delegate to `math` package) | Interactive editing |
-| Text formatting (`\textbf`, `\emph`, font commands) | Full TeX macro expansion (`\def`, `\expandafter`) |
-| Environments (itemize, enumerate, quote, verbatim, etc.) | TikZ / PGF graphics |
-| Cross-references (`\label`, `\ref`, `\cite`) — basic | Full bibliography processing (BibTeX) |
-| CSS stylesheet generation | Custom document classes beyond article/book/report |
-| Table of contents, figure/table captions | Index generation |
-| Diacritics and special characters | Custom font loading |
-| Macro definitions (`\newcommand`) — basic expansion | `\catcode` changes and TeX primitives |
+**Out of scope:** TeX's paragraph and page builders and TeX-exact typography; running Lua, Biber, BibTeX `.bst` programs, PGF sources or the shell; loading anything from a TeX installation or the network; MathML and speech output; interactive editing of LaTeX source.
 
-### 1.4 Replaces C++ HTML Pipeline
+## 2. Design decisions
 
-This package **replaces** the C++ document-to-HTML pipeline:
+**Parse natively, transform in Lambda script.** Syntax is recovered by Lambda-owned native code at the input boundary. Every decision about what a construct means lives in editable, user-extensible Lambda script modules. This keeps the edit-test cycle fast, lets users import and override handlers, and follows **D7.2.1–D7.2.4**. Native code changes are limited to neutral syntax preservation and neutral host capabilities; package policy never moves into C/C++.
 
-| C++ Component | Lines | Replaced By |
-|---------------|-------|-------------|
-| `tex_document_model.cpp` | 7,684 | `latex/render.ls`, `latex/structure.ls` |
-| `tex_doc_model_html.cpp` | 1,349 | `latex/html.ls`, `latex/elements/` |
-| `tex_doc_model_struct.cpp` | 1,017 | `latex/structure.ls` |
-| `tex_doc_model_text.cpp` | 372 | `latex/text.ls` |
-| `tex_doc_model_commands.cpp` | 396 | `latex/commands.ls` |
-| `tex_latex_bridge.cpp/.hpp` | 2,317 | Not needed (direct AST → HTML) |
-| `tex_html_render.cpp/.hpp` | 2,776 | Reused via `math` package |
-| `tex_document_model.hpp` | 823 | Implicit in Lambda types |
-| `math_symbols.cpp/.hpp` | 448 | `latex/symbols.ls` (extended from `math/symbols.ls`) |
-| `input-common.cpp` | 191 | `latex/util.ls` |
-| `format-latex.cpp` | 214 | Out of scope (LaTeX output formatter) |
-| **Total replaced** | **~17,600** | **Est. ~4,000–5,000 lines Lambda** |
+**Expand like TeX, never typeset like TeX.** Real package code runs on a Lambda-owned TeX expansion engine, so document-local classes and packages and the programming packages they need work as written. Typesetting stops there: Radiant owns line breaking, pagination and painting, and emitting semantic elements is the point of the package. The [engine design](latex/Lambda_Design_TeX_Engine.md) gives the full argument and the LaTeXML lineage.
 
-The C++ tree-sitter parser (`input-latex-ts.cpp`, 3,052 lines) is **retained** — it remains the LaTeX → Lambda AST conversion layer. The C++ typesetter pipeline (`tex_*` files for DVI/PDF) also remains for publication-quality rendering.
+**One reading of the source.** The direct parser is the only producer of the LaTeX Mark AST. The engine feeds it a reconstructed source rather than a second token-stream front end. The target is that every entry point expands (§4.3).
 
----
+**Semantic adapters in a static registry.** Each supported CTAN package has a script adapter selected by name from a static catalogue. Package names are data, never import paths, and no document text becomes Lambda code (**S1.8**).
 
-## 2. Prior Art Analysis
+**Explicit diagnostics over approximation.** An unknown package, an unsupported option, command or target feature, a missing resource and an unresolved reference each produce a located diagnostic with a stable code. A command is never approximated merely because its arguments can be rendered.
 
-### 2.1 Reference Implementations
+**Pure, two-pass transform.** Resources (images, `.bib` files, CSL styles, local packages) are acquired at the input boundary, relative to the document. Rendering is a pure function of the AST and options. Numbering, labels and citations are computed in an analysis pass before rendering, so forward references resolve without mutation.
 
-Three implementations were studied to inform the design:
+**Delegate math and drawing.** Math goes through the math package and drawing through the TikZ package. The LaTeX package owns their document context (numbering, labels, figure placement), never their layout.
 
-#### LaTeX.js (`ref/latex-js/`) — Lightweight, Single-Pass
+## 3. Architecture and ownership
 
-| Aspect | Detail |
-|--------|--------|
-| **Architecture** | PEG.js parser → JavaScript generator (single-pass, inline DOM creation) |
-| **Size** | ~3,750 lines (core) |
-| **Math** | Delegates entirely to KaTeX |
-| **Packages** | ~13 reimplemented (color, graphicx, hyperref, etc.) |
-| **Strength** | Speed, simplicity, runs in browser |
-| **Weakness** | No intermediate AST, no `\def`/`\if`, limited extensibility |
-
-**Key takeaway:** The argument-type system (`g`, `o?`, `i`, `kv?`) and CSS-variable approach for page geometry are elegant. The group-stack model for font attribute inheritance maps well to Lambda's functional context passing.
-
-#### LaTeXML (`ref/latexml/`) — Full TeX Emulation
-
-| Aspect | Detail |
-|--------|--------|
-| **Architecture** | 5-phase pipeline: Mouth → Gullet → Stomach → Document → Post-processing |
-| **Size** | ~50,000+ lines Perl |
-| **Math** | Full semantic math parser → Content + Presentation MathML |
-| **Packages** | 452 `.ltxml` binding files |
-| **Strength** | Most complete LaTeX→XML/HTML converter in existence (used by arXiv, NIST DLMF) |
-| **Weakness** | Very complex, slow, Perl-only |
-
-**Key takeaway:** The **declarative binding system** (`DefConstructor`, `DefMath`, `DefEnvironment`) is a powerful pattern that Lambda maps can replicate. The post-processing pipeline (chain of independent transformers) maps directly to Lambda's pipe operator.
-
-#### Existing C++ Implementation (`lambda/tex/`)
-
-| Aspect | Detail |
-|--------|--------|
-| **Architecture** | Tree-sitter parse → Lambda Element AST → TexDocumentModel → HTML string output |
-| **Size** | ~20,600 lines C++ |
-| **Math** | Full TeX typesetter (hlist/vlist/mathlist → HTML via tex_html_render.cpp) |
-| **Strength** | Deep integration with Lambda runtime, publication-quality math typesetting |
-| **Weakness** | Hard to extend, requires recompilation, memory management overhead |
-
-**Key takeaway:** The two-grammar architecture (text-mode + math-mode) is sound and should be preserved. The `NODE_CLASSIFICATION` table approach for dispatch is directly expressible as a Lambda `match`.
-
-### 2.2 Design Choice: AST-Based Transformation (Best of Both Worlds)
-
-The proposed design combines strengths from all three references:
-
-| Design Decision | Inspired By | Rationale |
-|-----------------|-------------|-----------|
-| **Two-phase: parse (C++) + transform (Lambda)** | Existing C++ | Tree-sitter parsing stays fast and reliable; transformation moves to Lambda for extensibility |
-| **Tag-dispatch via `match`** | Math package | Proven pattern in Lambda — 65+ node types in the math package use it successfully |
-| **Context stack (immutable maps)** | LaTeX.js | Font attributes, counters, labels inherited through scope; matches Lambda's functional style |
-| **Declarative command registry** | LaTeXML | Command → handler mappings as Lambda maps; users can override/extend |
-| **Post-processing pipeline** | LaTeXML | Pipe operator chains: `raw_html | resolve_refs | add_toc | wrap_document` |
-| **Math delegation to `math` package** | LaTeX.js (KaTeX) | Don't reinvent — the math package already handles LaTeX math → HTML |
-| **CSS class-based styling** | LaTeX.js | Clean DOM, themeable output |
-
----
-
-## 3. Architecture Design
-
-### 3.1 Overall Pipeline
-
-```
-  LaTeX Source (.tex)
-        │
-        ▼
-  ┌─────────────────────────────┐
-  │  C++ Layer (retained)       │
-  │  input("doc.tex", 'latex)   │
-  │  tree-sitter-latex parser   │
-  │  tree-sitter-latex-math     │
-  │  → Lambda Element AST       │
-  └─────────────┬───────────────┘
-                │
-                ▼
-  ┌─────────────────────────────┐
-  │  Lambda Package (new)       │
-  │  latex.render(ast, options) │
-  │                             │
-  │  Phase 1: Normalize AST     │
-  │  Phase 2: Expand macros     │
-  │  Phase 3: Render to HTML    │
-  │  Phase 4: Post-process      │
-  │  → HTML Element Tree        │
-  └─────────────┬───────────────┘
-                │
-                ▼
-  format(result, 'html')
-        │
-        ▼
-  HTML5 Document String
+```mermaid
+flowchart TD
+    src[LaTeX source and files beside it] --> eng[TeX expansion engine]
+    eng --> dig[DirectLatexParser digester]
+    dig --> ast[LaTeX Mark AST]
+    ast --> reg[Package registry: activation and options]
+    reg --> ana[Analysis pass: counters, labels, citations]
+    ana --> ren[Render pass: dispatch to core and adapters]
+    ren --> math[lambda.doc.math]
+    ren --> tikz[lambda.doc.tikz]
+    ren --> fin[Finalize: render_result]
+    fin --> html[HTML string via to_html]
+    fin --> rad[Radiant DOM: layout, SVG, PDF]
 ```
 
-### 3.2 Transformation Phases
-
-#### Phase 1: AST Normalization (`normalize.ls`)
-
-Cleans up the raw tree-sitter AST for easier processing:
-- Merge adjacent text nodes
-- Flatten trivial wrappers (single-child groups)
-- Normalize whitespace (collapse multiple spaces, handle `~` → nbsp)
-- Convert ligatures (`---` → `\u2014`, `''` → `\u201D`, etc.)
-- Strip comment nodes
-
-```lambda
-pub fn normalize(ast) {
-    ast | normalize_node
-}
-
-fn normalize_node(node) {
-    if (node is string) normalize_text(node)
-    else if (node is element) {
-        let tag = name(node)
-        match tag {
-            case 'ligature':    resolve_ligature(node)
-            case 'nbsp':        "\u00A0"
-            case 'space':       " "
-            default:            normalize_children(node)
-        }
-    }
-    else node
-}
-```
-
-#### Phase 2: Macro Expansion (`macros.ls`)
-
-Handles `\newcommand` and `\def` at the Lambda level:
-
-```lambda
-// registry of user-defined macros
-// key: command name, value: {params: int, default: string|null, body: element}
-fn collect_macros(ast) {
-    ast?<newcommand> | ~
-        | {name: get_macro_name(~), params: get_param_count(~), body: get_macro_body(~)}
-}
-
-fn expand_macros(node, macros) {
-    if (node is string) node
-    else if (node is element) {
-        let tag = name(node)
-        let cmd_name = if (tag == 'command') node.name else null
-        if (cmd_name != null and macros[cmd_name] != null)
-            apply_macro(macros[cmd_name], node, macros)
-        else
-            // recurse into children with macro env
-            expand_children(node, macros)
-    }
-    else node
-}
-```
-
-#### Phase 3: HTML Rendering (`render.ls`)
-
-The core transformation — dispatches on AST element tags to produce HTML elements:
-
-```lambda
-pub fn render_node(node, ctx) {
-    if (node is string) render_text(node, ctx)
-    else if (node is element) dispatch_element(node, ctx)
-    else null
-}
-
-fn dispatch_element(node, ctx) {
-    let tag = name(node)
-    match tag {
-        // document structure
-        case 'latex_document':  structure.render_document(node, ctx, render_node)
-        case 'document':        structure.render_body(node, ctx, render_node)
-        case 'section':         structure.render_heading(node, ctx, 2, render_node)
-        case 'subsection':      structure.render_heading(node, ctx, 3, render_node)
-        case 'subsubsection':   structure.render_heading(node, ctx, 4, render_node)
-        case 'paragraph':       text.render_paragraph(node, ctx, render_node)
-
-        // text formatting
-        case 'textbf':          text.render_styled(node, ctx, "b", render_node)
-        case 'textit':          text.render_styled(node, ctx, "i", render_node)
-        case 'emph':            text.render_styled(node, ctx, "em", render_node)
-        case 'underline':       text.render_styled(node, ctx, "u", render_node)
-        case 'texttt':          text.render_code_inline(node, ctx, render_node)
-        case 'verb_command':    text.render_verbatim_inline(node, ctx)
-
-        // math (delegate to math package)
-        case 'inline_math':     math_bridge.render_inline(node, ctx)
-        case 'display_math':    math_bridge.render_display(node, ctx)
-        case 'equation':        math_bridge.render_equation(node, ctx)
-        case 'align':           math_bridge.render_align(node, ctx)
-
-        // environments
-        case 'itemize':         envs.render_list(node, ctx, "ul", render_node)
-        case 'enumerate':       envs.render_list(node, ctx, "ol", render_node)
-        case 'description':     envs.render_description(node, ctx, render_node)
-        case 'quote':           envs.render_blockquote(node, ctx, render_node)
-        case 'quotation':       envs.render_blockquote(node, ctx, render_node)
-        case 'center':          envs.render_alignment(node, ctx, "center", render_node)
-        case 'verbatim':        envs.render_verbatim(node, ctx)
-        case 'tabular':         tables.render_tabular(node, ctx, render_node)
-        case 'figure':          envs.render_figure(node, ctx, render_node)
-        case 'abstract':        envs.render_abstract(node, ctx, render_node)
-        case 'multicols':       envs.render_multicol(node, ctx, render_node)
-
-        // references
-        case 'label':           refs.record_label(node, ctx)
-        case 'ref':             refs.render_ref(node, ctx)
-        case 'footnote':        refs.render_footnote(node, ctx, render_node)
-
-        // spacing & breaks
-        case 'linebreak_command': <br>
-        case 'hskip':          spacing.render_hskip(node)
-        case 'vspace':         spacing.render_vspace(node)
-        case 'parbreak':       null  // handled by paragraph grouping
-
-        // fallback
-        default:               render_default(node, ctx, render_node)
-    }
-}
-```
-
-#### Phase 4: Post-Processing (`postprocess.ls`)
-
-Chain of independent transformers applied after HTML generation:
-
-```lambda
-pub fn postprocess(html, ctx) {
-    html
-    | resolve_cross_refs(~, ctx.labels)
-    | insert_toc(~, ctx.headings)
-    | insert_footnotes(~, ctx.footnotes)
-    | wrap_standalone(~, ctx.options)
-}
-```
-
-### 3.3 Module Structure
-
-```
-lambda/latex/
-├── latex.ls              # Main entry point: pub fn render(ast, options)    (146 lines) ✅ Done
-├── render.ls            # Core dispatcher: AST tag → handler (stateless)  (1,162 lines) ✅ Done
-├── analyze.ls            # Pass 1: counters, headings, labels, theorems    (355 lines) ✅ Done
-├── normalize.ls          # Phase 1: AST cleanup and normalization          (206 lines) ✅ Done
-├── macros.ls             # Phase 2: \newcommand expansion                  (262 lines) ✅ Done
-├── math_bridge.ls        # Bridge to math package for inline/display math  (47 lines) ✅ Done
-├── symbols.ls            # LaTeX commands → Unicode/HTML entities          (169 lines) ✅ Done
-├── css.ls                # CSS stylesheet (article theme)                  (137 lines) ✅ Done
-├── util.ls               # Shared helpers (string, element utilities)      (213 lines) ✅ Done
-├── to_html.ls            # Custom HTML serializer (bypasses format/html)   (155 lines) ✅ Done
-├── elements/
-│   └── spacing.ls        # \hspace, \vspace, \hskip, line/page breaks     (105 lines) ✅ Done
-└── test_latex_pkg.ls     # Integration test script                         (58 lines) ✅ Done
-```
-
-**Removed legacy modules** (replaced by render.ls + analyze.ls two-pass architecture):
-- ~~`render.ls`~~ — legacy stateful dispatcher (superseded by render.ls)
-- ~~`context.ls`~~ — legacy context threading (superseded by analyze.ls)
-- ~~`structure.ls`~~ — legacy document structure (merged into render.ls)
-- ~~`text.ls`~~ — legacy text formatting (merged into render.ls)
-- ~~`elements/lists.ls`~~ — legacy list rendering (merged into render.ls)
-- ~~`elements/environments.ls`~~ — legacy environments (merged into render.ls)
-- ~~`elements/tables.ls`~~ — legacy tables (merged into render.ls)
-- ~~`elements/figures.ls`~~ — never created, logic is in render.ls
-- ~~`elements/refs.ls`~~ — never created, logic is in render.ls
-
-**Not yet created:**
-- `docclass/article.ls`, `book.ls`, `report.ls` — document class modules
-- `postprocess.ls` — footnote section post-processing (footnotes currently rendered inline)
-
-**Current size:** ~3,015 lines across 12 source files.
-
-### 3.4 Data Flow Detail
-
-```lambda
-// User API
-import latex: .lambda.latex.latex
-
-// Parse LaTeX source → AST (C++ tree-sitter, unchanged)
-let ast = input("paper.tex", 'latex)
-
-// Convert AST → HTML element tree (Lambda package, new)
-let html = latex.render(ast, {
-    docclass: 'article,
-    standalone: true,        // include <html>, <head>, CSS
-    math_display: 'html,    // 'html (via math package), 'mathml, or 'katex
-    toc: true,               // generate table of contents
-    numbering: true          // section numbering
-})
-
-// Serialize to HTML string
-format(html, 'html)
-```
-
-### 3.5 Core Abstractions
-
-#### Context (`context.ls`)
-
-Immutable rendering context threaded through recursion:
-
-```lambda
-pub fn make_context(options) => {
-    // document state
-    docclass: options.docclass or 'article,
-    standalone: options.standalone or false,
-
-    // font state (inherited via scope)
-    font_family: 'roman,   // roman | sans | mono
-    font_weight: 'normal,  // normal | bold
-    font_style: 'upright,  // upright | italic
-    font_size: 'normalsize,
-
-    // counters
-    counters: {
-        chapter: 0, section: 0, subsection: 0,
-        figure: 0, table: 0, equation: 0,
-        footnote: 0, enumi: 0, enumii: 0
-    },
-
-    // accumulated state (for post-processing)
-    labels: {},       // label_name → {type, number, text}
-    headings: [],     // [{level, number, text, id}]
-    footnotes: [],    // [{number, content}]
-
-    // options
-    math_display: options.math_display or 'html,
-    numbering: options.numbering or true
-}
-
-// derive a child context with overrides
-pub fn derive(parent, overrides) => {
-    // ... merge parent with overrides
-}
-```
-
-#### Math Bridge (`math_bridge.ls`)
-
-Delegates math rendering to the existing `math` package:
-
-```lambda
-import math: .lambda.doc.math.math
-
-pub fn render_inline(node, ctx) {
-    let math_ast = node.ast  // pre-parsed by tree-sitter-latex-math in C++
-    if (math_ast != null)
-        math.render_inline(math_ast)
-    else
-        <span class: "math-inline"; node.source>
-}
-
-pub fn render_display(node, ctx) {
-    let math_ast = node.ast
-    let math_html = if (math_ast != null)
-        math.render_display(math_ast)
-    else
-        <span class: "math-display"; node.source>
-
-    <div class: "math-display-container"; math_html>
-}
-
-pub fn render_equation(node, ctx) {
-    let math_html = render_display(node, ctx)
-    let number = if (ctx.numbering) ctx.counters.equation else null
-    <div class: "equation";
-        math_html
-        if (number != null) <span class: "eq-number"; "(" ++ string(number) ++ ")">
-    >
-}
-```
-
-#### Element Construction Patterns
-
-Lambda's native element syntax makes HTML generation natural:
-
-```lambda
-// Section heading
-fn render_heading(node, ctx, level, render_fn) {
-    let title_content = node.title | render_fn(~, ctx)
-    let id = slugify(text_content(node.title))
-    let number = format_section_number(ctx, level)
-
-    let heading = match level {
-        case 1: <h1 id: id; if (number) <span class: "sec-num"; number> title_content>
-        case 2: <h2 id: id; if (number) <span class: "sec-num"; number> title_content>
-        case 3: <h3 id: id; if (number) <span class: "sec-num"; number> title_content>
-        case 4: <h4 id: id; if (number) <span class: "sec-num"; number> title_content>
-        default: <h5 id: id; title_content>
-    }
-
-    // render children after the heading
-    let body = render_children(node, ctx, render_fn)
-    (heading, body)
-}
-
-// List environment
-fn render_list(node, ctx, list_tag, render_fn) {
-    let items = node?<item>
-    let rendered_items = for (item in items)
-        <li; for (child in item[element]) render_fn(child, ctx)>
-
-    if (list_tag == "ul") <ul; rendered_items>
-    else <ol; rendered_items>
-}
-
-// Tabular environment
-fn render_tabular(node, ctx, render_fn) {
-    let rows = split_by_row_sep(node)
-    <table class: "tabular";
-        for (row in rows)
-            <tr; for (cell in split_by_col_sep(row))
-                <td; for (child in cell) render_fn(child, ctx)>
-            >
-    >
-}
-```
-
----
-
-## 4. Feasibility Analysis
-
-### 4.1 What Lambda Already Provides
-
-| Capability | Status | Evidence |
-|-----------|--------|---------|
-| **Tree-sitter LaTeX parser** | ✅ Ready | `input("file.tex", 'latex)` produces full AST with 44 text-mode + 51 math-mode node types |
-| **Element construction** | ✅ Ready | Native `<tag attr: val; children>` syntax — direct HTML construction |
-| **Pattern matching** | ✅ Ready | `match` on element tag names — math package dispatches 65+ node types |
-| **Module system** | ✅ Ready | `import`/`pub` proven by math (18 modules) and chart (12 modules) packages |
-| **HTML formatter** | ✅ Ready | `format(element, 'html')` serializes element trees |
-| **Element traversal** | ✅ Ready | `name(el)`, `el.attr`, `el[i]`, `len(el)`, `el?<tag>` (recursive query) |
-| **Higher-order transforms** | ✅ Ready | Pipe `\|`, `where`, `for` comprehensions — natural for tree walking |
-| **String operations** | ✅ Ready | `++`, `replace`, `split`, `trim`, `contains`, `starts_with`, `upper`/`lower`, `slice`, `chars` |
-| **Map construction** | ✅ Ready | Static `{k: v}` and dynamic `map([k,v,...])` — ideal for lookup tables and context objects |
-| **Float arithmetic** | ✅ Ready | Needed for spacing calculations |
-| **Recursive functions** | ✅ Ready | Essential for tree walking; tail-call optimized |
-| **Math package** | ✅ Ready | 2,523 lines already handle LaTeX math → HTML; this package simply delegates |
-
-### 4.2 Feature Gap Analysis
-
-| Gap                                  | Severity | Impact on LaTeX Package                                                               | Workaround                                                                                                                                                                       |
-| ------------------------------------ | -------- | ------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **String pattern matching**          | ✅ Available | Lambda has string patterns (equivalent to regex) for matching command names, extracting substrings, etc. | No workaround needed — string patterns cover all pattern-matching use cases for LaTeX command dispatch. |
-| **No mutable maps in `fn`**          | Low      | Counter state (section numbers, equation numbers) must be threaded through recursion. | Return updated context from each render function (functional state threading). The math package already does this with immutable context passing. The entire transformation should remain purely functional. |
-| **No string interpolation**          | Low      | HTML attribute generation requires verbose `++` concatenation.                        | `"section-" ++ string(level) ++ "-" ++ id` works, just more verbose. Acceptable for a package.                                                                                   |
-| **No `reduce`/`fold` built-in**      | Low      | Accumulating state across a list of nodes (counters, labels).                         | Implement as a recursive `fn`. Keeps the entire transformation purely functional.                                                                                                |
-| **No `try`/`catch`**                 | Low      | Graceful error recovery on malformed LaTeX.                                           | Error-as-value model (`T^E` return types). Tree-sitter already handles parse error recovery at the grammar level.                                                                |
-| **Limited element mutation in `fn`** | Low      | Can't modify element attributes in pure functions.                                    | Construct new elements with desired attributes. Functional construction is idiomatic in Lambda anyway.                                                                           |
-
-### 4.3 Good-to-Have Language Enhancements
-
-These features would significantly improve the LaTeX package implementation quality, though none are blockers:
-
-| Feature                               | Impact | Use Case                                                                                                                                               |
-| ------------------------------------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **`str_repeat(s, n)` built-in**       | Low    | Constructing indentation, repeated separators. Already available as recursive helper.                                                                  |
-| **Mutable counter in `fn` scope**     | Medium | Section/equation numbering across siblings. Currently requires threading updated counter maps through every call.                                      |
-| **`find(array, predicate)` built-in** | Low    | Finding specific child elements. Achievable with `where` + index-0.                                                                                    |
-| **Dynamic element tag construction**  | Medium | Creating `<h1>` through `<h6>` from a variable. Currently requires match arms for each level. Consider: `element(tag_name, attrs, children)` function. |
-| **Map merge operator**                | ✅ Available | `{parent_ctx, counter: new_val}` — merges parent context with overrides. Spread `{*parent_ctx, counter: new_val}` also works but is not needed.       |
-| **Multi-line raw strings**            | Low    | Embedding CSS stylesheets. Already supported via `++` concatenation of string literals.                                                                |
-
-### 4.4 Risk Assessment
-
-| Risk | Likelihood | Mitigation |
-|------|-----------|------------|
-| **Performance on large documents** | Medium | Lambda JIT (MIR) compiles to native code. The math package handles complex expressions without issues. A 50-page paper should process in < 1 second. Profile early with a benchmark document. |
-| **Counter/state threading complexity** | Medium | The biggest architectural challenge. LaTeX's stateful counter model (`\refstepcounter`, `\setcounter`) clashes with pure functional style. Use a two-pass approach: first pass collects all counters/labels, second pass renders with complete state. |
-| **AST coverage gaps** | Low | The tree-sitter LaTeX grammar covers all common constructs. The C++ `input-latex-ts.cpp` already maps 44+ node types for text mode and 51+ for math mode. Any AST gap is a tree-sitter grammar issue, not a Lambda package issue. |
-| **Edge cases in macro expansion** | Medium | Only basic `\newcommand` expansion is in scope. Complex TeX macros (`\def` with `\expandafter`, `\csname`) are not supported — this is consistent with LaTeX.js's pragmatic approach and covers 95% of real documents. |
-
----
-
-## 5. Detailed Design
-
-### 5.1 AST Input Format
-
-The C++ parser (`input-latex-ts.cpp`) produces a tree of Lambda elements. The latex package consumes this tree directly. Key node types and their attributes:
-
-**Document structure:**
-
-```
-<latex_document;
-    <documentclass; "article">         // preamble
-    <usepackage name: "amsmath">
-    <newcommand; "\mycmd" <curly_group; "definition">>
-    <document;                          // \begin{document}...\end{document}
-        <section title: <curly_group; "Introduction">;
-            <paragraph; "Text here" <textbf; "bold"> "more text.">
-            <paragraph; "Second paragraph with " <inline_math source: "x^2", ast: <math ...>>>
-        >
-        <section title: <curly_group; "Methods">;
-            <itemize;
-                <item; "First item">
-                <item; "Second item">
-            >
-        >
-    >
->
-```
-
-**Math nodes** (pre-parsed by tree-sitter-latex-math):
-
-```
-<inline_math source: "x^2 + y^2 = z^2", ast: <math;
-    <subsup base: <symbol; "x">, sup: <number; "2">>
-    <operator; "+">
-    <subsup base: <symbol; "y">, sup: <number; "2">>
-    <relation; "=">
-    <subsup base: <symbol; "z">, sup: <number; "2">>
->>
-```
-
-### 5.2 HTML Output Format
-
-The package produces semantic HTML5 with CSS classes:
-
-```html
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <title>Paper Title</title>
-    <style>/* LaTeX-like CSS */</style>
-</head>
-<body>
-<article class="latex-document latex-article">
-    <header class="latex-title">
-        <h1 class="title">Paper Title</h1>
-        <div class="author">Author Name</div>
-        <div class="date">2026</div>
-    </header>
-
-    <section id="sec-introduction">
-        <h2><span class="sec-num">1</span> Introduction</h2>
-        <p>Text here <strong>bold</strong> more text.</p>
-        <p>Second paragraph with <span class="ML__latex">...</span></p>
-    </section>
-
-    <section id="sec-methods">
-        <h2><span class="sec-num">2</span> Methods</h2>
-        <ul>
-            <li>First item</li>
-            <li>Second item</li>
-        </ul>
-    </section>
-</article>
-</body>
-</html>
-```
-
-### 5.3 CSS Design
-
-The package generates a self-contained CSS stylesheet that approximates LaTeX's typographic conventions:
-
-```lambda
-// css.ls
-pub let STYLESHEET = "
-.latex-document {
-    max-width: 800px;
-    margin: 0 auto;
-    padding: 2em;
-    font-family: 'Computer Modern Serif', 'Latin Modern Roman', Georgia, serif;
-    font-size: 12pt;
-    line-height: 1.5;
-}
-.latex-title .title { font-size: 1.7em; font-weight: bold; text-align: center; }
-.latex-title .author { text-align: center; font-size: 1.1em; margin: 0.5em 0; }
-.sec-num { margin-right: 0.5em; }
-.latex-abstract { margin: 1em 3em; font-size: 0.95em; }
-.latex-abstract .abstract-title { font-weight: bold; text-align: center; }
-.latex-blockquote { margin: 1em 2em; }
-.latex-verbatim { font-family: monospace; white-space: pre; background: #f5f5f5; padding: 0.5em; }
-.latex-footnote-ref { vertical-align: super; font-size: 0.8em; }
-table.tabular { border-collapse: collapse; margin: 1em auto; }
-table.tabular td, table.tabular th { padding: 0.3em 0.8em; }
-table.tabular .hline { border-bottom: 1px solid black; }
-.math-display-container { text-align: center; margin: 1em 0; }
-.equation { display: flex; align-items: center; justify-content: center; }
-.eq-number { margin-left: auto; }
-.multicol { column-count: 2; column-gap: 2em; }
-"
-
-pub fn wrap_with_css(body, options) {
-    <html lang: "en";
-        <head;
-            <meta charset: "UTF-8">
-            <title; options.title or "LaTeX Document">
-            <style; STYLESHEET>
-            <style; math.stylesheet()>  // math package CSS
-        >
-        <body; body>
-    >
-}
-```
-
-### 5.4 Document Class System
-
-Following LaTeX.js's approach, document class-specific behavior is encapsulated in separate modules:
-
-```lambda
-// docclass/article.ls
-pub let SECTION_HIERARCHY = ['section, 'subsection, 'subsubsection, 'paragraph, 'subparagraph]
-pub let TOP_LEVEL_HEADING = 2  // <h2> for \section
-
-pub fn format_section_number(counters, level) {
-    match level {
-        case 0: string(counters.section)
-        case 1: string(counters.section) ++ "." ++ string(counters.subsection)
-        case 2: string(counters.section) ++ "." ++ string(counters.subsection) ++ "." ++ string(counters.subsubsection)
-        default: null
-    }
-}
-
-// docclass/book.ls
-pub let SECTION_HIERARCHY = ['chapter, 'section, 'subsection, 'subsubsection, 'paragraph]
-pub let TOP_LEVEL_HEADING = 1  // <h1> for \chapter
-
-pub fn format_section_number(counters, level) {
-    match level {
-        case 0: string(counters.chapter)
-        case 1: string(counters.chapter) ++ "." ++ string(counters.section)
-        // ...
-        default: null
-    }
-}
-```
-
-### 5.5 Cross-Reference Resolution
-
-Cross-references require a two-pass approach:
-
-```lambda
-// Pass 1: Collect all labels and their numbering context
-fn collect_labels(ast, ctx) {
-    // walk tree, accumulate {label_name: {type, number, id}} into ctx.labels
-}
-
-// Pass 2: Resolve \ref commands using collected labels
-fn resolve_refs(html, labels) {
-    // walk HTML tree, replace <ref target: "name"> with <a href: "#id">number</a>
-}
-```
-
-### 5.6 Command Registry Pattern
-
-Extensible command handling via map-based dispatch:
-
-```lambda
-// commands.ls — built-in command handlers
-let SIMPLE_COMMANDS = {
-    "textbf":       fn(node, ctx, rf) => <strong; render_children(node, ctx, rf)>,
-    "textit":       fn(node, ctx, rf) => <em; render_children(node, ctx, rf)>,
-    "emph":         fn(node, ctx, rf) => <em; render_children(node, ctx, rf)>,
-    "underline":    fn(node, ctx, rf) => <u; render_children(node, ctx, rf)>,
-    "texttt":       fn(node, ctx, rf) => <code; render_children(node, ctx, rf)>,
-    "textsf":       fn(node, ctx, rf) => <span class: "sf"; render_children(node, ctx, rf)>,
-    "textsc":       fn(node, ctx, rf) => <span class: "sc"; render_children(node, ctx, rf)>,
-    "textrm":       fn(node, ctx, rf) => <span class: "rm"; render_children(node, ctx, rf)>,
-    "textsl":       fn(node, ctx, rf) => <span class: "sl"; render_children(node, ctx, rf)>,
-    "centering":    fn(node, ctx, rf) => <div class: "center"; render_children(node, ctx, rf)>,
-    "raggedright":  fn(node, ctx, rf) => <div class: "flushleft"; render_children(node, ctx, rf)>,
-    "raggedleft":   fn(node, ctx, rf) => <div class: "flushright"; render_children(node, ctx, rf)>,
-    "tiny":         fn(node, ctx, rf) => <span class: "tiny"; render_children(node, ctx, rf)>,
-    "small":        fn(node, ctx, rf) => <span class: "small"; render_children(node, ctx, rf)>,
-    "large":        fn(node, ctx, rf) => <span class: "large"; render_children(node, ctx, rf)>,
-    "Large":        fn(node, ctx, rf) => <span class: "Large"; render_children(node, ctx, rf)>,
-    "huge":         fn(node, ctx, rf) => <span class: "huge"; render_children(node, ctx, rf)>,
-    "Huge":         fn(node, ctx, rf) => <span class: "Huge"; render_children(node, ctx, rf)>,
-}
-
-// Users can extend:
-// let custom_commands = {(SIMPLE_COMMANDS), "mycommand": fn(n,c,r) => <div; ...>}
-```
-
----
-
-## 6. Implementation Roadmap
-
-### Phase 1: Core Document Structure (MVP) — ✅ DONE
-
-**Goal:** Render a basic LaTeX article to readable HTML.
-
-| Module | Features | Lines | Status |
-|--------|----------|-------|--------|
-| `latex.ls` | Entry point, API | 146 | ✅ Done |
-| `render.ls` | Core dispatcher (90+ tags, stateless two-pass) | 1,162 | ✅ Done |
-| `analyze.ls` | Pass 1: counters, headings, labels, figures, tables, theorems, bibitems | 355 | ✅ Done |
-| `normalize.ls` | AST cleanup, ligatures, whitespace | 206 | ✅ Done |
-| `math_bridge.ls` | Delegate to math package | 47 | ✅ Done |
-| `symbols.ls` | Diacritics, special characters | 169 | ✅ Done |
-| `css.ls` | Article stylesheet | 137 | ✅ Done |
-| `util.ls` | Helpers (slugify, text_content, etc.) | 213 | ✅ Done |
-| `to_html.ls` | Custom HTML serializer | 155 | ✅ Done |
-| **Phase 1 Total** | | **~2,590** | ✅ |
-
-**Milestone test:** ✅ Renders `\documentclass{article}\begin{document}\section{Hello}\textbf{World}\end{document}` to valid HTML.
-
-### Phase 2: Environments & Lists — ✅ DONE (merged into render.ls)
-
-| Module | Features | Status |
-|--------|----------|--------|
-| Lists (in render.ls) | itemize, enumerate, description | ✅ Done |
-| Environments (in render.ls) | quote, center, verbatim, abstract, multicols, minipage | ✅ Done |
-| Tables (in render.ls) | tabular (basic row/cell splitting) | ✅ Done |
-| Figures (in render.ls) | figure, caption, includegraphics, auto-numbering | ✅ Done |
-| Table floats (in render.ls) | table environment, caption, auto-numbering | ✅ Done |
-| Theorem environments (in render.ls) | theorem, lemma, corollary, proposition, definition, example, remark, proof (8 types with auto-numbering) | ✅ Done |
-| Spacing (`elements/spacing.ls`) | hspace, vspace, breaks | ✅ Done |
-
-**Note:** These were implemented directly in render.ls rather than separate element modules, since the two-pass architecture eliminated the need for context-threading callbacks.
-
-### Phase 3: Cross-References & Post-Processing — ✅ DONE
-
-| Module | Features | Status |
-|--------|----------|--------|
-| Cross-refs (in render.ls + analyze.ls) | `\label`, `\ref`, `\href`, `\url`, `\footnote` | ✅ Done |
-| `macros.ls` | `\newcommand` basic expansion (single/multi-param, optional args, nested) | ✅ Done (262 lines) |
-| Footnotes (in latex.ls) | Footnote section appended at end of document | ✅ Done |
-
-### Phase 4: Document Classes & Polish — ✅ Done
-
-| Module | Features | Status |
-|--------|----------|--------|
-| `docclass/article.ls` | Section numbering (1, 1.1, 1.1.1), caption labels, no chapters | ✅ Done |
-| `docclass/book.ls` | Chapters, parts (roman numerals), front/back matter, chapter-prefixed numbering | ✅ Done |
-| `docclass/report.ls` | Like book but no parts, separate-page abstract | ✅ Done |
-| Additional CSS themes | Part/chapter headings, book/report title, theorem/proof, table spans | ✅ Done |
-
-### Phase 5: Advanced Features — ✅ Done
-
-| Feature | Status |
-|---------|--------|
-| Tabular with column alignment (`l`/`c`/`r`), `\hline` handling | ✅ Done |
-| Bibliography (`\cite` → `[N]` links, `\thebibliography`, `\bibitem`) | ✅ Done |
-| Hyperlinks (`\href`, `\url`) | ✅ Done |
-| Figure/table auto-numbering (analyze pass) | ✅ Done |
-| Theorem environments with auto-numbering (8 types) | ✅ Done |
-| Tabular `\multicolumn` → `<td colspan>`, `\multirow` → `<td rowspan>` | ✅ Done |
-| Custom macro expansion (multi-parameter) | ✅ Done (in macros.ls) |
-| Error recovery and warnings | ✅ Done (graceful fallback via render_node default) |
-
-### Grand Total
-
-| Phase | Lines | Status |
-|-------|-------|--------|
-| Phase 1: Core (latex, render2, analyze, normalize, math_bridge, symbols, css, util, to_html) | 2,590 | ✅ Done |
-| Phase 2: Environments (merged into render.ls + elements/spacing.ls) | 105 | ✅ Done |
-| Phase 3: Cross-Refs & Macros (macros.ls) | 262 | ✅ Done |
-| Phase 4: Doc Classes (docclass/article, book, report + CSS) | 284 | ✅ Done |
-| Phase 5: Advanced (tabular multicolumn/multirow, bibliography, theorems) | — | ✅ Done |
-| Integration test (test_latex_pkg.ls) | 58 | ✅ Done |
-| **Actual Total** | **3,444** | **15 files** |
-
-**Actual: 3,444 lines** of Lambda Script across 15 source files. Well within the original estimate of ~4,000–5,000 lines, with all planned features implemented.
-
----
-
-## 7. Testing Strategy
-
-### 7.1 Unit Tests
-
-Each module gets a test script under `test/lambda/`:
-
-```
-test/lambda/
-├── test_latex_pkg_structure.ls      # Section numbering, headings, title
-├── test_latex_pkg_text.ls           # Text formatting commands
-├── test_latex_pkg_lists.ls          # List environments
-├── test_latex_pkg_tables.ls         # Tabular rendering
-├── test_latex_pkg_math.ls           # Math bridge (inline, display, equation)
-├── test_latex_pkg_refs.ls           # Cross-references, footnotes
-├── test_latex_pkg_macros.ls         # Macro expansion
-├── test_latex_pkg_normalize.ls      # AST normalization
-└── test_latex_pkg_e2e.ls            # End-to-end: .tex source → HTML output
-```
-
-### 7.2 Snapshot Tests
-
-Compare HTML output against reference files:
-
-```lambda
-// test_latex_pkg_e2e.ls
-let ast = input("test/latex/fixtures/article_basic.tex", 'latex)
-let html = latex.render(ast, {standalone: true})
-let result = format(html, 'html)
-let expected = input("test/latex/fixtures/article_basic.html")
-assert(result == expected, "article_basic HTML mismatch")
-```
-
-### 7.3 Regression Against C++ Output
-
-During migration, validate Lambda output against existing C++ output:
-
-```bash
-# C++ path
-./lambda.exe convert test.tex -t html -o output_cpp.html
-
-# Lambda path
-./lambda.exe -e 'import latex: .lambda.latex.latex
-let ast = input("test.tex", 'latex)
-format(latex.render(ast, {standalone: true}), 'html)' > output_lambda.html
-
-# Compare
-diff output_cpp.html output_lambda.html
-```
-
----
-
-## 8. Migration Plan
-
-### 8.1 Coexistence Strategy
-
-The Lambda package and C++ pipeline will coexist during migration:
-
-1. **Phase 1–3:** Lambda package developed independently. C++ pipeline remains the default for `convert ... -t html`.
-2. **Phase 4:** Add a CLI flag or option to select the Lambda pipeline: `--engine=lambda` vs `--engine=cpp`.
-3. **Phase 5:** Lambda pipeline becomes default. C++ HTML pipeline deprecated (C++ DVI/PDF pipeline retained).
-
-### 8.2 C++ Runtime Integration
-
-The Lambda package needs the following from the C++ runtime:
-
-| Requirement | Status | Notes |
-|-------------|--------|-------|
-| `input(file, 'latex)` → AST | ✅ Exists | Uses tree-sitter-latex + tree-sitter-latex-math |
-| `format(el, 'html)` → string | ✅ Exists | Standard HTML formatter |
-| `math.render_math(ast)` → HTML | ✅ Exists | Math package already operational |
-| Module import system | ✅ Exists | Proven by math and chart packages |
-
-No new C++ runtime features are required.
-
----
-
-## 9. Comparison Summary
-
-| Aspect | C++ (current) | Lambda (proposed) | LaTeX.js | LaTeXML |
-|--------|---------------|-------------------|----------|---------|
-| **Language** | C++ | Lambda Script | JavaScript | Perl |
-| **Lines of code** | ~20,600 | 3,015 (actual) | ~3,750 | ~50,000+ |
-| **Parser** | Tree-sitter (compiled) | Same (reused) | PEG.js | Full TeX emulator |
-| **Math rendering** | TeX typesetter → HTML | Math package (Lambda) | KaTeX | Own MathML |
-| **Extensibility** | Recompile required | Import & override | JS classes | `.ltxml` bindings |
-| **Package support** | N/A | Extensible via Lambda | ~13 packages | 452 packages |
-| **Edit-test cycle** | ~30s (compile + run) | ~1s (interpret) | ~1s | ~5s |
-| **Output quality** | Publication-grade | Web-grade (semantic HTML) | Web-grade | Publication-grade |
-| **Macro expansion** | None | Basic `\newcommand` | None | Full TeX |
-
----
-
-## 10. Conclusion
-
-The migration from C++ to Lambda Script for LaTeX-to-HTML conversion is **feasible and well-motivated**:
-
-1. **Proven pattern** — The math package successfully replaced 5,000 lines of C++ with 2,523 lines of Lambda Script for math rendering.
-2. **No parser changes** — The existing tree-sitter LaTeX grammars and C++ parser are retained unchanged.
-3. **Language readiness** — Lambda has all essential features: element construction, pattern matching, module system, pipes, recursion, and string processing.
-4. **6:1 code reduction** — 3,015 lines of Lambda (and growing) replacing ~17,600 lines of C++ for the HTML path, exceeding the original 4:1 estimate.
-5. **User extensibility** — Users can import the package and override command handlers, add custom environments, or modify the stylesheet.
-6. **Low risk** — C++ pipeline is retained for DVI/PDF output. Migration is incremental and reversible.
-
-**Current status (as of implementation):** All 5 phases complete. The package handles document structure, text formatting, math, lists, environments, figures, tables, theorems, bibliography, cross-references, macro expansion, tabular rendering with column alignment and multicolumn/multirow support, and document class formatting (article/book/report). 434/434 baseline tests pass. 3,444 lines across 15 source files.
-
----
-
-## 11. Issues Encountered While Working with Lambda
-
-This section documents Lambda language issues discovered during the LaTeX package implementation. These are real bugs or surprising behaviors that required workarounds. Each is categorized as **Fixed** (resolved in Lambda), **Worked Around** (still present, code uses alternative approach), or **Outstanding** (still affecting development).
-
-### 11.1 Operator Precedence: `is` binds tighter than `and`
-
-**Status:** Fixed (grammar.js — moved `and`/`or` below `is`/`in` in precedence table)  
-**Severity:** High — caused silent logic errors
-
-`is` and `in` previously had lower precedence than `and`/`or`, so `x is element and len(x) > 0` was parsed as `x is (element and len(x) > 0)`. Fixed by reordering the precedence list in `grammar.js` so that `is`/`in` bind tighter than `and`/`or`.
-
-```lambda
-// NOW CORRECT — parsed as: (node is element) and (name(node) == 'section')
-if (node is element and name(node) == 'section') ...
-
-// Explicit parentheses still work and improve readability
-if ((node is element) and name(node) == 'section') ...
-```
-
-**Resolution:** The existing parenthesized code in macros.ls and render.ls remains correct and is kept for readability.
-
-**Precedent in other languages:** The fix aligns with the universal convention — every mainstream language puts type-check/membership operators above logical operators:
-
-| Language | `is`/`in` precedence | `and`/`or` precedence | Order |
-|----------|---------------------|----------------------|-------|
-| **Python** | `is`, `in`, `not in` at comparison level | `and` below, `or` below `and` | `is` > `and` > `or` |
-| **Kotlin** | `is`, `in` at relational level (`<`, `>`) | `&&` below comparisons, `\|\|` below `&&` | `is` > `&&` > `\|\|` |
-| **C#** | `is` at relational level | `&&` two levels below, `\|\|` below that | `is` > `&&` > `\|\|` |
-| **TypeScript** | `instanceof`, `in` at relational level | `&&` below equality, `\|\|` below `&&` | `in` > `&&` > `\|\|` |
-| **Dart** | `is` at relational level | `&&` below equality, `\|\|` below `&&` | `is` > `&&` > `\|\|` |
-| **Swift** | `is` at cast level (above comparison) | `&&` below ternary, `\|\|` below `&&` | `is` > `&&` > `\|\|` |
-
-The rationale is that `x is T and y > 0` should naturally read as two independent conditions joined by `and` — type-check and membership operators group with comparisons/relationals, which always bind tighter than logical connectives.
-
-### 11.2 Inline `++` in Map Spread Produces Null
-
-**Status:** Fixed (runtime — `_map_get` rewritten with last-writer-wins semantics)  
-**Severity:** High — produced null map entries silently
-
-Using the array concatenation operator `++` inline within a map literal that also uses spread caused the overridden entry to return the original (spread) value instead of the new one:
-
-```lambda
-// WAS BROKEN — new_info.items returned [1, 2, 3] instead of [1, 2, 3, 4]
-let new_info = {info, items: info.items ++ [new_item]}
-
-// NOW WORKS — explicit field overrides spread, matching JS semantics
-let new_info = {info, items: info.items ++ [new_item]}
-new_info.items   // [1, 2, 3, 4] ✓
-```
-
-**Root cause:** `_map_get()` in `lambda-data-runtime.cpp` scanned shape entries linearly. When it hit a spread (unnamed field), it recursed into the nested map and returned immediately if the key was found — before ever checking later explicit named fields meant to override it.
-
-**Fix:** Rewrote `_map_get()` as a single-pass **last-writer-wins** scan. All shape entries (both named fields and spread/nested maps) are checked in declaration order, and the last match wins. This matches JavaScript/TypeScript spread semantics:
-
-```js
-// JavaScript semantics (now matched by Lambda):
-{ ...obj, key: val }   // explicit val wins (later)
-{ key: val, ...obj }   // obj.key wins (later)
-```
-
-**Impact:** The workaround `let` bindings in analyze.ls are no longer required but remain harmless.
-
-### 11.3 `type` as Map Key Conflicts with Built-in
-
-**Status:** Fixed (grammar — `map_item` accepts `base_type` as key name)  
-**Severity:** Medium — was a parse error
-
-`type` and other type-name keywords (`int`, `float`, `string`, `map`, `element`, etc.) previously could not be used as map keys. The grammar was updated to allow `base_type` tokens as map key names:
-
-```lambda
-// NOW WORKS — type names accepted as map keys
-let info = {type: "section", number: 1}
-info.type    // "section"
-
-let m = {int: 10, float: 3.14, string: "hello"}
-m.int        // 10
-```
-
-**Impact:** The `kind` workaround in analyze.ls and render.ls is no longer necessary but remains harmless.
-
-### 11.4 `name()` Returns a Symbol, Not a String
-
-**Status:** Mitigated (compile-time type error now catches symbol vs string comparisons)  
-**Severity:** High — caused silent comparison failures
-
-The `name(element)` function returns a **symbol** (single-quoted), not a string (double-quoted). Comparing with a double-quoted string silently fails — no error, just always `false`:
-
-```lambda
-// BROKEN — name() returns 'paragraph (symbol), "paragraph" is a string, never equal
-if (name(child) == "paragraph") ...   // always false, no error
-
-// CORRECT — compare with a symbol literal (single-quoted)
-if (name(child) == 'paragraph') ...    // correct
-```
-
-A **compile-time type check** has been added to the AST builder (`build_ast.cpp`) that detects `symbol == string` and `string == symbol` comparisons, reporting a hard error:
-
-```
-error[E201]: comparing 'symbol' with 'string' will always be false
-  — did you mean to use a symbol literal?
-```
-
-The check fires when at least one operand has a literal type and the other is statically known to be the opposite string/symbol type. Dynamic (`any`) types are not flagged to avoid false positives.
-
-**Impact:** This was the root cause of the tabular rendering producing empty output. The `find_tabular_content` function couldn't find the `paragraph` child because every `name()` comparison silently failed. The compile-time check now prevents this class of bug entirely.
-
-### 11.5 ~~Indexed `for` Comprehension Broken for Arrays~~ (NOT A BUG)
-
-**Status:** Resolved — was a misdiagnosis  
-**Severity:** N/A
-
-Originally believed that `for (idx, item in arr)` produced garbage values. Re-testing confirms indexed `for` works correctly on both arrays and element children with mixed types:
-
-```lambda
-// ALL CORRECT:
-for (i, v in [10, 20, 30]) string(i) ++ ":" ++ string(v)
-// ["0:10", "1:20", "2:30"]
-
-for (i, v in ["a", "b", "c"]) if (i == 2) "Z" else v
-// ["a", "b", "Z"]
-```
-
-The original failures were caused by **11.4** (`name()` returning symbols, not strings), which made child-matching logic silently fail and was misattributed to indexed `for`. The recursive `build_tds` workaround in render.ls has been simplified back to an indexed `for` comprehension.
-
-**Note:** Indexed `for` over elements with only string children does produce unexpected results because Lambda merges adjacent string children into a single text node during element construction. This is element construction behavior, not a `for` bug.
-
-### 11.6 `trim()` Empty String Comparison Broken
-
-**Status:** Fixed  
-**Severity:** Medium — incorrect boolean result
-
-`trim()` on an all-whitespace string previously returned a zero-length string instead of `null`. In Lambda, empty strings should be normalized to `null`. This caused `trim("\n") == ""` to return `false` (zero-length string ≠ empty string literal) and phantom rows in tabular output.
-
-**Fix:** `trim()`, `trim_start()`, and `trim_end()` now return `ItemNull` when the trimmed result would be zero-length, consistent with Lambda's null-normalization semantics.
-
-```lambda
-trim(" ")       // null (was: zero-length string)
-trim("\n\t")    // null
-trim(" hello ") // "hello" (unchanged)
-```
-
-**Impact:** Caused trailing empty rows in tabular output. The whitespace-only strings between `\hline` and `\end{tabular}` were trimmed to zero-length but not recognized as empty, creating phantom table rows.
-
-### 11.7 ~~`if-else` Inside `for` Comprehension Produces Nulls~~ (NOT A BUG)
-
-**Status:** Resolved — was a misdiagnosis  
-**Severity:** N/A
-
-Originally believed that `if-else` inside `for` comprehensions produced all-null results. Re-testing confirms this works correctly:
-
-```lambda
-// ALL CORRECT:
-for (item in [1, 2, 3]) if (item == 2) "found" else "not"
-// ["not", "found", "not"]
-
-for (i, v in [10, 20, 30]) if (i == 1) "mid" else string(v)
-// ["10", "mid", "30"]
-```
-
-The original failures were likely caused by other issues in the surrounding code (e.g., **11.4** symbol vs string comparisons) rather than the `for` comprehension itself. Helper function extraction is still a valid style choice for readability but is not required as a workaround.
-
-### 11.8 Map Literal After `if` Parsed as Block
-
-**Status:** By Design — use parentheses to disambiguate  
-**Severity:** Medium — parse ambiguity
-
-A map literal `{key: val}` immediately after `if (condition)` is parsed as a block statement rather than a map expression. This is inherent to C-family grammar design where `{` after `if` begins a block.
-
-```lambda
-// BROKEN — {...} parsed as a block, not a map
-if (has_caption)
-    {info, figure_count: info.figure_count + 1}
-else
-    info
-
-// CORRECT — wrap the map in parentheses to force expression parsing
-if (has_caption)
-    ({info, figure_count: info.figure_count + 1})
-else
-    info
-```
-
-**Impact:** When returning a map literal from an `if`-expression branch, wrap it in `(...)` to disambiguate from block syntax. This is a low-cost, consistent pattern.
-
-### 11.9 Map Keys Are Always Literal Identifiers
-
-**Status:** By Design — use `map()` for dynamic keys  
-**Severity:** Medium — causes silent logic errors
-
-Map literal syntax `{key: value}` always treats `key` as a literal identifier name, never as a variable reference. There is no way to use a variable to compute a map key in a map literal:
-
-```lambda
-let k = "mykey"
-let m = {k: 42}
-m.k       // 42 — "k" is the literal key
-m.mykey   // null — variable k's value was NOT used
-
-// WORKAROUND — use map() constructor for dynamic keys
-let entry = map([k, 42])   // creates {"mykey": 42}
-let merged = {existing_map, entry}  // merge dynamic entry into existing map
-```
-
-**Impact:** This was the root cause of failures in `analyze.ls` where heading numbers, labels, and footnote maps all needed dynamic keys — e.g., using a slugified heading text or a `\label` name as the map key. Required introducing a `set_key()` helper throughout:
-
-```lambda
-fn set_key(m, k, v) {
-    let entry = map([k, v])
-    {m, entry}
-}
-
-// Usage in analyze.ls:
-set_key(state.heading_nums, slug, sec_num)     // dynamic slug key
-set_key(state.labels, label_name, entry)        // dynamic label key
-set_key(state.footnote_map, fn_key, entry)      // dynamic footnote key
-```
-
-This pattern is necessary any time a map key must be computed at runtime. Without it, all dynamic keys silently become unused literal identifiers, and the map lookups later return `null`.
-
-### 11.10 `#N` Placeholder Nodes Are Symbols, Not Elements
-
-**Status:** Fixed — `string(type())` now handles `Type` values; `is symbol` works for dispatch  
-**Severity:** Medium — confusing runtime behavior, silent data loss in tree traversal
-
-The C++ LaTeX parser (`input-latex-ts.cpp` line 1408) constructs `#1`, `#2`, etc. (macro parameter references inside `\newcommand` bodies) as **symbols** via `y2it(builder.createSymbol(source + start, len))`. This means these nodes are an unexpected third type among element children — neither string nor element:
-
-```lambda
-let body = newcommand_node[2]   // curly_group body of \newcommand{\greeting}[1]{Hello, #1!}
-// body children:
-//   body[0] is_str=true  is_el=false is_sym=false  name=null    ← "Hello, " (string)
-//   body[1] is_str=false is_el=false is_sym=true   name='#1'    ← #1 placeholder (SYMBOL)
-//   body[2] is_str=true  is_el=false is_sym=false  name=null    ← "!" (string)
-```
-
-The `is symbol` check works correctly. Previously, `string(type(x))` on these nodes returned `null` because `fn_string()` lacked a `LMD_TYPE_TYPE` case — this has been **fixed** by adding the missing case to `fn_string()` in `lambda-eval.cpp`. Now `string(type(x))` correctly returns `"symbol"`, `"string"`, `"element"`, etc. for all element children.
-
-**Root cause:** The C++ parser embeds symbols as direct children of elements alongside strings. Lambda's standard tree-traversal patterns assume children are either strings or elements. Symbols are a third case that must be explicitly handled.
-
-**Workaround:** Check `is symbol` or inspect `name()` to detect parameter references:
-
-```lambda
-fn is_param_ref(node) {
-    if (node is symbol) {
-        let tag = name(node)
-        if (tag != null) check_param_tag(string(tag)) else false
-    } else false
-}
-
-fn check_param_tag(tag) {
-    if len(tag) > 1 { slice(tag, 0, 1) == "#" } else { false }
-}
-```
-
-**Note on `name()`:** For symbols, `name()` returns the symbol itself (e.g., `'#1'`). Since `name()` returns a symbol, string comparisons like `name(x) == "#1"` will fail silently (issue **11.4**). Use `name(x) == '#1'` with symbol literals, or convert via `string(name(x)) == "#1"`.
-
-**Impact:** Macro parameter substitution in `macros.ls` was completely broken until this workaround was added. `\newcommand{\greeting}[1]{Hello, #1!}` followed by `\greeting{World}` produced `Hello, #1!` instead of `Hello, World!` because the `#1` symbol node fell through the `if (x is string) ... else if (x is element) ...` dispatch and was silently dropped.
-
-**Fix applied:** The `type()` function always returned the correct `Type` value, but `string()` did not handle `Type` values (type id `LMD_TYPE_TYPE`). A `case LMD_TYPE_TYPE` was added to `fn_string()` in `lambda-eval.cpp` that extracts the inner type name via `get_type_name()`. Now `string(type(123))` → `"int"`, `string(type('sym'))` → `"symbol"`, etc. Unit tests for `string(type(...))` covering all basic types were added to `test/lambda/string_funcs.ls`.
-
-### 11.11 `"expected a map, got data of type map"` Runtime Warning
-
-**Status:** Outstanding  
-**Severity:** Low — cosmetic, no impact on correctness
-
-The runtime emits repeated `expected a map, got data of type map` warnings during LaTeX package execution (typically 15–30 per document). The message is self-contradictory — the data IS a map, yet the runtime check reports it isn't. This appears to be a type-check in the runtime that doesn't correctly handle spread-constructed maps or certain map subtypes.
-
-```
-20:24:47 [ERR!] expected a map, got data of type map
-20:24:47 [ERR!] expected a map, got data of type map
-... (repeated ~15 times)
-```
-
-**Impact:** Log noise only. The HTML output is correct despite the warnings. The warnings likely originate from map field access on spread-constructed maps where the runtime's internal shape representation differs from what the type checker expects.
-
-### 11.12 `run_script_mir()` Requires Explicit `current_dir` for Import Resolution
-
-**Status:** Fixed — set `current_dir` on new `Runtime` instances  
-**Severity:** High — prevents any script with imports from running
-
-When creating a new `Runtime` instance programmatically (e.g., in the `convert` command handler) to execute a Lambda script, the `current_dir` field defaults to `NULL`. Relative imports like `.lambda.latex.latex` are resolved by prepending `current_dir`, producing paths like `(null)lambda/latex/latex.ls`:
-
-```cpp
-// BROKEN — current_dir is NULL after runtime_init
-Runtime lambda_runtime;
-runtime_init(&lambda_runtime);
-run_script_mir(&lambda_runtime, nullptr, script_path, false);
-// Error: Error opening file: (null)lambda/latex/latex.ls
-
-// FIXED — set current_dir before running any script with imports
-Runtime lambda_runtime;
-runtime_init(&lambda_runtime);
-lambda_runtime.current_dir = const_cast<char*>("./");
-run_script_mir(&lambda_runtime, nullptr, script_path, false);
-// Imports resolve correctly: ./lambda/latex/latex.ls
-```
-
-**Root cause:** `runtime_init()` zero-initializes the struct, leaving `current_dir = NULL`. The main CLI path (`main.cpp` line 829) sets `runtime.current_dir = "./"`, but any additional `Runtime` instances (e.g., for the `convert` command) must set it manually.
-
-**Impact:** Blocked the `convert` command from using the Lambda LaTeX package until the fix was applied. Any C++ code creating a `Runtime` to run Lambda scripts with relative imports must remember to set `current_dir`.
-
-**Recommendation:** `runtime_init()` should default `current_dir` to `"./"` rather than `NULL`, making import resolution work out of the box.
-
-### 11.13 Summary Table
-
-| #     | Issue                         | Severity | Status        | Workaround Cost                          |
-| ----- | ----------------------------- | -------- | ------------- | ---------------------------------------- |
-| 11.1  | `is`/`and` precedence         | High     | Fixed         | Grammar fix — reordered precedence       |
-| 11.2  | `++` in map spread → null     | High     | Fixed         | Runtime fix — last-writer-wins `_map_get` |
-| 11.3  | `type` as map key             | Medium   | Fixed         | Grammar fix — `base_type` as key         |
-| 11.4  | `name()` returns symbol       | High     | Mitigated     | Compile-time type error added            |
-| 11.5  | ~~Indexed `for` broken~~      | N/A      | Not a Bug     | N/A — works correctly                    |
-| 11.6  | `trim() == ""` false          | Medium   | Fixed         | Trim returns null for empty result       |
-| 11.7  | ~~`if-else` in `for`~~        | N/A      | Not a Bug     | N/A — works correctly                    |
-| 11.8  | Map literal after `if`        | Medium   | By Design     | Low — wrap map in parentheses            |
-| 11.9  | Map keys always literal       | Medium   | By Design     | Medium — `map([k,v])` helper required    |
-| 11.10 | `#N` placeholders are symbols  | Medium   | Fixed | `string(type())` fix + `is symbol` checks |
-| 11.11 | "expected a map" warning      | Low      | Outstanding   | None — cosmetic only                     |
-| 11.12 | `run_script_mir` `current_dir`| High     | Fixed         | One-line fix in C++                      |
-
-**Overall assessment:** Despite these issues, Lambda proved viable for a non-trivial package (3,444 lines across 15 files). The workarounds are manageable — mostly requiring explicit parentheses, let bindings, or helper functions. Issues **11.5** and **11.7** were originally reported as critical bugs but re-testing confirmed they work correctly — the original failures were misattributed symptoms of **11.4** (`name()` returning symbols). Issues **11.1**, **11.2**, **11.3**, **11.6**, and **11.12** have been fixed in the language or runtime. Issue **11.4** is mitigated by a compile-time type check. Issues **11.8** and **11.9** are by design — requiring parenthesization and the `map()` constructor respectively. Issue **11.10** (placeholder symbols) is resolved — `string(type())` now works after adding the missing `LMD_TYPE_TYPE` case to `fn_string()`. Issue **11.11** remains outstanding but has no functional impact.
-
----
-
-## Appendix A: Comparison with LaTeX.js and LaTeXML
-
-This appendix compares the Lambda LaTeX package with two established LaTeX-to-HTML/XML converters: [LaTeX.js](https://latex.js.org/) (JavaScript, browser-oriented) and [LaTeXML](https://math.nist.gov/~BMiller/LaTeXML/) (Perl, NIST-maintained).
-
-### A.1 Architecture Overview
-
-| Aspect | Lambda Package | LaTeX.js | LaTeXML |
+| Owner | Responsibility |
+|---|---|
+| TeX engine (`lambda/input/input-tex-*.cpp`) | Catcodes, expansion and TeX state; the LaTeX2e programming kernel; bundled programming packages; local `.sty`/`.cls` files; reconstructed source with an offset map |
+| Digester (`DirectLatexParser`, `lambda/input/input-latex-c.cpp`) | The AST: commands and environments with stars, raw argument groups, offsets, raw islands, pre-parsed math |
+| Script package (`lmd/package/latex/`) | Package activation, analysis, rendering, bibliography, diagnostics, stylesheet assembly |
+| Math and TikZ packages | Math boxes and SVG; drawing scenes and SVG |
+| Radiant | DOM, CSS cascade, layout, painting, SVG and PDF export, links, outlines and metadata |
+
+The package source lives under `lmd/package/latex/` and is imported as `lambda.latex.*`. Its parts:
+
+- `latex.ls`: public API, activation, result assembly.
+- `analyze.ls`: the analysis pass.
+- `render.ls`: the render dispatcher.
+- `macros.ls`: user-macro substitution, to be retired (§5.4).
+- `to_html.ls`: escaping serializer.
+- `util.ls`, `symbols.ls`, `css.ls`, `math_bridge.ls`, `tikz_bridge.ls`: shared helpers, symbol tables, the core stylesheet and the two bridges.
+- `docclass/`: per-class numbering.
+- `elements/`: boxes, color, font declarations, picture, spacing.
+- `packages/`: the registry and the adapters.
+- `citeproc/`: the CSL processor.
+- `tex/`: the bundled vendored TeX files.
+- `fonts/`: CMU web fonts.
+
+## 4. Front end
+
+### 4.1 The AST contract
+
+The digester produces a `<latex_document>` root. Elements are named after their command or environment, and block content sits in `<paragraph>` elements. Each command keeps `source_offset`, `starred` and an ordered `argument_groups` list of required, optional and parenthesized groups with their raw text and offsets. Consecutive string arguments become a non-spreading array child under **S2.6.3–S2.6.5, D2.6.5v4**, read through `util.command_args`. Raw-text environments (`verbatim`, `comment`, `lstlisting`, `filecontents`, `luacode*`) and `tikzpicture` keep their exact source. Math elements carry both `source` and a pre-parsed math `ast`. The details are in [Input_Latex.md](input/Input_Latex.md).
+
+The parser grows only where a source distinction is otherwise unrecoverable, and only with neutral preservation. It never encodes package semantics.
+
+### 4.2 Expansion before digestion
+
+When expansion is requested, the engine runs first. Definitions, local packages and bundled programming packages execute as TeX. Document constructs pass through as constructors, arguments of passed-through commands expand in argument mode, and registry-declared raw commands (bussproofs, `semantic`) keep their arguments token for token. Definition commands are executed and also echoed, so adapters that read definitions as data still see them. Engine diagnostics reach the script on the AST root and are reported under the `tex` package. See the [engine design](latex/Lambda_Design_TeX_Engine.md) §2.
+
+### 4.3 Entry points and the one-front-end direction
+
+`latex.parse_source(src, base)` and `latex.parse_file(path)` request expansion, passing the registry's adapter names and raw commands. Every `render_file*` and `render_string*` entry uses them. The native document transform, `lambda convert`, Radiant's LaTeX loader and the doc viewer instead call `input(path, "latex")`, which parses without expansion. On that path `\def` is unsupported and only the script's partial macro substitution applies.
+
+The direction is to make expansion the only front end and delete the raw parse branch, so one file always yields one AST (engine design §6). Until then, the two paths can differ for documents that define macros.
+
+## 5. Document pipeline
+
+### 5.1 Stages
+
+`render_result(ast, options)` runs these stages:
+
+1. **Activation.** `registry.collect` reads `\documentclass` and the ordered `\usepackage` declarations. It validates names and options, applies implications (`subcaption` loads `caption`), and records conflicts (`natbib` with `biblatex`), duplicate loads and late declarations as diagnostics.
+2. **Analysis.** One recursive walk threads an immutable state through the document. It records the document class, title data, headings and their numbers, labels, footnotes, figure, table, listing, subfloat and equation numbers, theorem definitions and counters, `\bibitem` entries, enumerate starts, `secnumdepth`, custom colors and the page color.
+3. **Bibliography preparation.** CSL processing when `citeproc` is requested; otherwise the `biblatex` or `natbib` preparation (§8.2).
+4. **Render.** The dispatcher walks the AST with an info record: the analysis result plus macros, active packages, language, TikZ declarations, caption, listing and hyperref settings, math operators and font settings. Declarations that change state for following siblings, such as `\definecolor`, `\captionsetup`, `\selectlanguage`, `\fontsize`, `\lstset`, `\boldmath` and `\begingroup`, thread the info record left to right.
+5. **Finalize.** Append the footnote section, wrap the body, assemble the stylesheet, metadata, asset list and diagnostics, and optionally wrap a standalone HTML document.
+
+`render_result` returns `{body, elements, stylesheet, metadata, packages, diagnostics, assets}`. The options it reads are `standalone`, `base_uri` (or `source_path` when `base_uri` is absent), `target` (`html`, `svg` or `pdf`, which selects target-specific diagnostics), `paged`, `citeproc` and `language`. `render`, `render_document`, `render_to_html` and the file and string variants are projections of this result.
+
+### 5.2 Numbering, labels and references
+
+Counters are an immutable map stepped functionally with LaTeX's reset chain: a new chapter resets the section counter, and so on. Section numbers come from the document class's `format_section_number`. `\numberwithin` is applied by comparing the identity of the enclosing heading. `secnumdepth` and `\appendix` change numbering, and `\newtheorem` supports shared and section-scoped counters plus starred, unnumbered forms. A `\label` binds to the enclosing numbered context's type and number, including subfloat letters.
+
+At render time `\label` becomes an anchor, and `\ref`, `\autoref`, `\nameref` and `\cref` become links whose text comes from the analysis. An unresolved reference renders `??` with class `latex-unresolved` and is reported. Analysis results are stored as entry lists in which the last write wins. Figures, equations, listings and subfloats are keyed by source offset. Headings are keyed by title slug and footnotes by content slug, which causes the collisions listed in §11.2.
+
+### 5.3 Dispatch and fallback
+
+The dispatcher tries, in order:
+
+1. A citation handler, when a bibliography context is active.
+2. Core handlers for structure, text, lists, tables, floats and math.
+3. Package-gated handlers, which apply only when the owning package is active.
+4. Extended handlers: skipped declarations, `\includegraphics`, amsmath environments, `siunitx`, margin notes and extended symbols.
+5. A user macro, then a `\newtheorem` environment.
+6. The fallback.
+
+The fallback emits `<span class="latex-unsupported" data-latex-error=... data-latex-offset=... data-latex-package=...>` and attributes the command to its owning package when that package is active. Finalization turns every such element into an `unsupported-output` diagnostic. Lua constructs (`\directlua`, `luacode`) always take this path.
+
+### 5.4 User macros
+
+Without expansion, `macros.get_defs` collects `\newcommand`-family definitions with optional-argument defaults, and `render_generic` substitutes the raw argument text into the definition, re-parses it and renders the result, with a depth limit. This is a weak subset of TeX: it has no `\def`, no delimited parameters, no grouping and no `\let`, and the first definition of a name wins. Under expansion the engine has already expanded document macros, so this path is reached only by commands the engine passed through deliberately. It retires with the one-front-end change. The definition table then remains only for adapters that read definitions as data.
+
+### 5.5 Diagnostics
+
+Each diagnostic carries a stable code, a message, a package, a source offset and a severity. They are gathered from the engine, the registry, bibliography preparation, font selection, hyperref, microtype, reference resolution and target checks, and from `data-latex-error` elements in the output. About forty codes exist, such as `unknown-package`, `unsupported-option`, `conflicting-package-options`, `unsupported-output`, `unresolved-reference`, `font-substitution`, `unsupported-lua` and `tex-no-base`. A preview may show unsupported output inline, while a strict consumer can treat any error as failure (**S7.4.1–S7.4.4**).
+
+## 6. Package model
+
+### 6.1 The registry
+
+`packages/registry.ls` holds the static `CATALOG` of script adapters, the built-in class profiles (`article`, `report`, `book`, `amsart`, `standalone`) and three aliases (`pgf` to `tikz`, `amsfonts` to `amssymb`, `color` to `xcolor`). Each entry records its option schema. A package without declared options reports any option as `unsupported-option`, and value checks are package-specific (geometry, microtype, biblatex, caption, TikZ libraries). `RAW_ARGUMENT_COMMANDS` names the commands whose arguments the engine must pass token for token. The registry also tells the engine which names are adapters (`adapter_names`), so it remains the single list (**D7.2.4**).
+
+### 6.2 Resolution
+
+A declared name resolves to one of four things:
+
+- **A bundled programming package.** It runs on the engine. If it is also an adapter, its declaration passes through to the adapter as well.
+- **A script adapter.** The registry activates it and validates its options.
+- **A `.sty` or `.cls` beside the document.** It runs on the engine, but only when the name is not an adapter.
+- **Nothing.** The registry reports `unknown-package` at the declaration.
+
+The engine design §5 gives the exact order and the open decision about it. A local file never replaces an adapter, because the adapter owns HTML semantics that TeX typesetting code cannot supply.
+
+### 6.3 Four kinds of package support
+
+The right mechanism depends on what a package does.
+
+- **Programming packages** emit no typeset output: `etoolbox`, `xkeyval`, `kvoptions`, `calc`, `ifthen`, expl3 and the like. The original, unmodified source runs on the engine. Widening this set is vendor and test work, not design work.
+- **Semantic packages** define what document constructs mean: theorems, tables, citations, graphics, references, languages. They get script adapters, because their meaning must become HTML elements. Most of the catalogue is of this kind.
+- **Thin bindings** suit packages whose user commands are mostly option handling and argument parsing over a few output points. Such a package can be bound by a small Lambda-owned `.sty` on the engine, with the script adapter keeping the semantics, rather than by reimplementing its macro layer in script. This is the direction for growth and has not been applied to a package yet.
+- **Native and script subsystems** cover what Lambda owns outright: math rendering (`lambda.doc.math`), PGF/TikZ drawing (`lambda.doc.tikz`), document-class semantics (sectioning, title blocks, floats and numbering in script), and everything that touches fonts, microtype or page layout (Radiant). Their upstream TeX implementations (`amsmath`, `pgf`, `microtype`, the standard classes and so on) are never run: those names are script adapters or built-in class profiles, so a bundled or local file with the same name is skipped, and their commands reach the owning subsystem as constructors. Running them would make the engine a second typesetter (§2) and give drawing or math two owners.
+
+Real-world classes also redefine document commands through LaTeX kernel internals such as `\@startsection`, `\@maketitle`, `\@float` and `\@makecaption`. Exposing those internals as constructors in the engine's kernel lets such classes still produce semantic headings and floats (engine design §10).
+
+## 7. Output model
+
+### 7.1 HTML conventions
+
+Output is semantic HTML5 with a single `latex-` class prefix. It follows neither latex.js's short classes nor LaTeXML's `ltx_` classes.
+
+- **Root and title.** The root is `<article class="latex-document latex-<class>" lang=...>`, and the title block is `<header class="latex-title">`.
+- **Headings.** `\part` and `\chapter` become `<h1>`, `\section` becomes `<h2>`, and so on. Headings are flat siblings, not wrapped in `<section>`. The number sits in `<span class="sec-num">`. The `id` is a slug of the title text, deduplicated with `-N` suffixes in analysis.
+- **Text.** `\textbf`, `\textit`, `\emph` and `\underline` become `<strong>`, `<em>`, `<em>` and `<u>`. `\texttt` becomes `<code>`. Quotations become `<blockquote>`. `---` and `--` become U+2014 and U+2013 at render time, `\,` becomes U+2009 and `\enspace` U+2002. The `\TeX` and `\LaTeX` logos are built from `<sup>`/`<sub>`.
+- **Structure.** Lists are `ul.latex-itemize`, `ol.latex-enumerate` and `dl.latex-description`. Tables are `table.latex-tabular` with `thead`/`tbody`/`tfoot`. Floats are `figure.latex-figure`, and theorems use `.latex-theorem`. The table of contents is `nav.latex-toc`, footnote references are `sup.latex-footnote-ref`, and footnotes collect in `section.latex-footnotes`.
+- **Declarations and boxes.** Font and alignment declarations, size switches and boxes (`\mbox`, `\fbox`, `\makebox`, `\parbox`, `\raisebox`, `\llap`, `\rlap`, `\smash`, phantoms) carry their geometry as inline style, so the output does not depend on a companion stylesheet for them.
+- **References and links.** These are real `<a href="#id">` links, which Radiant turns into PDF link annotations and destinations.
+- **PDF hints.** `data-pdf-outline-title` and `data-pdf-outline-level` attributes, and `string-set` styles for running heads, carry outline and page-style information to the PDF writer.
+
+### 7.2 Stylesheet and fonts
+
+The stylesheet is the core `css.ls` stylesheet plus package stylesheets: CSL, geometry, fullpage, microtype, hyperref, running headers and cellspace. Body text uses the bundled CMU (Computer Modern Unicode) web fonts under the SIL Open Font License, linked through `fonts/cmu-combined.css`. Math fonts belong to the math package. Font requests for faces Lambda does not ship (Helvetica, Computer Modern Bright, GFS Porson, Euler) are mapped to available substitutes with a `font-substitution` diagnostic.
+
+### 7.3 Targets and host capabilities
+
+HTML is the primary target. SVG and PDF are produced by Radiant from the same element tree; the package's `target` option only selects target-specific diagnostics. Several neutral host capabilities exist for LaTeX features, while their option policy stays in script:
+
+- **Document-relative resources.** `base_uri` or `source_path` resolve images, PDFs, `.bib` files and local packages.
+- **PDF links and metadata.** Anchors become link annotations and destinations, head metadata becomes the PDF Info dictionary, and non-ASCII strings are written as UTF-16BE.
+- **PDF outlines.** Heading and explicit bookmarks become hierarchical outlines with Unicode titles.
+- **Vector clipping.** Supported CSS `clip-path` shapes clip SVG and PDF output, which `graphicx` trim and clip use.
+- **Fixed print geometry.** PDF export honors the active `@page` paper size and margins on one fixed page.
+- **Paged export.** A bounded paged PDF path supports running text, marks and page counters.
+
+The host capabilities still missing are in §11.3.
+
+## 8. Subsystems
+
+### 8.1 Math
+
+`math_bridge.ls` hands inline and display math, which arrives pre-parsed in the AST, to `lambda.doc.math` and wraps the resulting SVG. The LaTeX package owns equation numbering, `\tag`, `\label` and alignment-row numbering for the amsmath environments. It also owns operator declarations (`\DeclareMathOperator`) and the document-level font requests passed to the math package. Everything about math layout is in [Lambda_Pkg_Math.md](Lambda_Pkg_Math.md).
+
+### 8.2 Bibliography
+
+The package offers four bibliography paths, in order of preference:
+
+- **CSL processing** through the Lambda-script citeproc, when `citeproc` is requested.
+- **The built-in biblatex profile** with six styles.
+- **natbib and BibTeX** with named-style approximations.
+- **In-document `thebibliography`.**
+
+All four share resource loading, citation collection, scopes and links. The design and the built-in profile are in [Lambda_Design_BibTeX_CSL.md](latex/Lambda_Design_BibTeX_CSL.md). Biblatex style files on the TeX engine remain a separate, deferred path (engine design §10).
+
+### 8.3 Graphics and drawing
+
+All vector graphics become inline SVG.
+
+- **`picture`.** The environment is rendered in script: Y is flipped, `\unitlength` sets the scale, and `\line`, `\vector`, `\circle`, `\oval`, `\qbezier`, `\multiput` and line thickness are supported.
+- **TikZ and PGFPlots.** The `tikz`, `pgfplots` and `tikzpeople` adapters hand `tikzpicture` and `axis` islands to `lambda.doc.tikz` and expand the document's TikZ styles and macros first. The LaTeX package owns the figure context; the TikZ package owns drawing and its bounded profile ([Lambda_Pkg_Tikz.md](Lambda_Pkg_Tikz.md)).
+- **`graphicx`.** Document-relative raster images and PDF pages are supported. A `.pdf` is read through `lambda.pdf.pdf`, and the selected page is embedded with its CropBox and rotation. Width, height, scale, angle, `keepaspectratio`, and `trim` with `clip` map to CSS.
+- **EPS.** It is diagnosed (§11.4).
+
+### 8.4 Tables
+
+One shared table model serves `tabular`, the `array` column types, `multirow`, `makecell`, the diagonal headers of `slashbox` and `diagbox`, `tabularx` `X` widths, `booktabs` rules, `cellspace`, `siunitx` `S` columns, and `longtable`/`xltabular` heads and feet. Column spans, cell labels and references survive. Continuous output selects the first head and last foot of long tables; repeated headers on real pages need shared pagination (§11.3).
+
+### 8.5 Languages and fonts
+
+`babel` selects English, German, French, Spanish, Russian or Greek. Local language spans set the HTML `lang`, choose localized strings, and convert polytonic LGR input. `polyglossia` and font-selection declarations cover the used Thai profile through CSS. `vietnam` covers UTF-8 Vietnamese. Unicode text in PDF output uses the selected font's glyph outlines. Thai renders with correct glyphs but without complex-script shaping or dictionary line breaking, and both limits are diagnosed.
+
+### 8.6 Page styles
+
+`geometry` and `fullpage` become CSS page size and margins. `fancyhdr` and `lastpage` provide left, center and right running slots, chapter and section marks, page counts and page references on the paged PDF path. Continuous output shows `?` for page-dependent values and reports why.
+
+## 9. Compatibility matrix
+
+The matrix was checked on 2026-10-07; the engine, bibliography, natbib and corpus tests were rerun and pass on 2026-10-12. The adapter catalogue has 62 entries. The rows below cover the packages with active behavior. The remaining catalogue entries are declarations with defined effects, each accepted under the contract of its row or listed in the last row.
+
+| Package | Supported in HTML | PDF/SVG | Explicitly unsupported |
 |---|---|---|---|
-| **Language** | Lambda Script (functional) | JavaScript | Perl |
-| **Codebase size** | ~3,400 lines (LaTeX) + ~1,500 lines (math) | ~15,000 lines | ~100,000+ lines |
-| **Parser** | Tree-sitter (C++, shared) | Custom PEG parser | Custom TeX-compatible parser |
-| **Output** | HTML string or element tree | HTML DOM | XML → HTML/MathML/EPUB |
-| **Math rendering** | HTML/CSS (MathLive-style spans) | HTML/CSS (KaTeX-style) | MathML |
-| **Pipeline** | Parse → Normalize → Analyze → Render → Serialize | Parse → Render (single-pass) | Parse → XML → XSLT → HTML |
-| **Passes** | 2-pass (counters/labels first, then render) | Single-pass with deferred refs | Multi-pass with binding |
+| `amsmath`, `amssymb` | `equation`, `align`, `gather`, `multline` and starred forms; row labels, `\tag`, `\tag*`, `\notag`, `\nonumber`; unstarred `\DeclareMathOperator`; AMS symbols | Partial: math boxes; TeX alignment spacing unclaimed | Complex alignment and `\intertext`, starred operators, malformed row annotations |
+| `graphicx` | `\includegraphics` with `width`, `height`, `scale`, `angle`, `keepaspectratio`, `page`, `trim` with `clip`; raster files and PDF pages | CSS trim clipping in vector export | EPS, invalid dimensions or pages, missing files, unresolved embedded PDF image handles |
+| `hyperref` | `\href`, `\url`, `\ref`, `\autoref`, `\nameref`, anchors, `\hypersetup` colors and metadata, `pdfusetitle`, heading and `\pdfbookmark` outlines | Links, destinations, Info metadata, Unicode outlines; `ocgcolorlinks` as diagnosed CSS colors | Unknown setup keys, TeX bookmark-title syntax, `\bookmark`, optional-content groups |
+| `geometry`, `fullpage` | A4, A5, Letter and Legal; orientation; physical margins and paper dimensions | Active `@page` size and insets on one fixed page | `\newgeometry`/`\restoregeometry`, relative page dimensions, automatic page breaks in fixed export |
+| `xcolor` | Named colors; validated `HTML`, `rgb`, `RGB`, `gray` and `named` definitions; `A!p!B` mixes; scoped `\color`; color boxes; `\pagecolor` | Partial: CSS color | Other models, color series, mid-document page-color changes |
+| `booktabs` | `\toprule`, `\midrule`, `\bottomrule`, `\cmidrule(lr){m-n}`, `\addlinespace` | Partial: CSS borders | Invalid ranges or trims; TeX rule spacing |
+| `biblatex`, `natbib`, BibTeX | See [Lambda_Design_BibTeX_CSL.md](latex/Lambda_Design_BibTeX_CSL.md) §2.1 | Links and anchors become PDF links; backrefs name source locations, not page numbers | Biber, `.bst`, arbitrary style files, exact Biber/CLDR collation |
+| `enumitem` | Per-list `label`, `start`, `resume` per depth, `leftmargin`, `topsep`, `itemsep`, `parsep`, `nosep`, `\item[label]` | Partial: CSS layout | `\setlist`, label geometry, other options |
+| `microtype` | `kerning`, `tracking`, `spacing` as CSS | Partial: renderer-dependent | Protrusion and expansion (§11.4) |
+| `siunitx` | `\num`, `\si`/`\unit`, `\SI`/`\qty`, common units and prefixes, uncertainty, scientific notation, measured decimal `S[table-format=n.m]` | Partial: decimal grid in CSS | Other options, advanced `S` models, malformed numbers |
+| `tikz`, `pgf`, `pgfplots` | The bounded profile of [Lambda_Pkg_Tikz.md](Lambda_Pkg_Tikz.md); allowed libraries `patterns`, `decorations.pathmorphing`, `lindenmayersystems`, `backgrounds`, `positioning`, `calc`, `shapes.geometric`, `arrows.meta`, `math` | Vector geometry in SVG/PDF; labels through the math bridge | Full PGF/PGFPlots, other libraries, unbounded programs |
+| `tikzpeople` | 29 named shapes, pins, colors, accessories, mirroring, demo commands | Simplified silhouettes, diagnosed as approximations | Exact artwork, unknown shapes |
+| `amsthm`, `bussproofs`, `semantic`, `IEEEtrantools`; `amsart`, `standalone` | Theorem styles, shared and section counters, proofs and QED; proof trees; inference diagrams; used `IEEEeqnarray*` forms; bounded class profiles | CSS and math approximation | TeX alignment, arbitrary theorem macros; `amscd`, `cancel`, `mathabx` are unknown packages |
+| `array`, `multirow`, `makecell`, `slashbox`, `diagbox`, `tabularx`, `cellspace` | Shared table model (§8.4) | Continuous tables | Arbitrary column programs, TeX cell geometry |
+| `longtable`, `xltabular` | First and continued heads and feet preserved | HTML/SVG `continuous-table-approximation`; PDF `unsupported-pagination` | Paged rows and repeated headers |
+| `babel`, `polyglossia`, `vietnam` | §8.5 | Unicode glyph outlines; Thai `complex-script-layout-approximation` | Shaping and dictionary breaking; other languages; searchable PDF text needs ToUnicode |
+| `fancyhdr`, `lastpage` | §8.6 | Paged PDF counters and marks; continuous output diagnosed | Per-page style changes, full fancyhdr geometry, mixed fonts in PDF margins |
+| `caption`, `subcaption` | Caption options, `\captionof`, starred captions, subfigures and subtables, numbering, `\subref` | Linked references in all targets | TeX float placement, unknown keys |
+| `cleveref` | `\cref`/`\Cref` with typed English names, lists and ranges | Shared link semantics | Other languages, name-format customization |
+| `listings` | `lstlisting`, `\lstinline`, captions, labels, line numbers, bounded frames and styles | Literal code, unhighlighted | Syntax highlighting, arbitrary keys |
+| `tcolorbox`, `todonotes`, `multicol`, `csquotes` | Bounded boxes, notes and list of todos, CSS columns, quotes | Continuous layout; paged blocks diagnosed | Box libraries, paged columns |
+| Declarations with defined effects | `url`, `doi`, `fontenc`, `inputenc` (UTF-8), `lmodern`, `cmbright`, `helvet`, `gfsporson`, `eucal`, `mathrsfs`, `cmap`, `enumerate`, `psfrag`, `ifthen`, `cite`, `preview`, `filecontents`, `comment`, `verbatim`, `upquote` | Font requests report substitutions | Options outside each declared schema |
 
-### A.2 Feature Comparison
+## 10. Verification
 
-| Feature | Lambda | LaTeX.js | LaTeXML |
-|---|---|---|---|
-| **Document structure** | | | |
-| `\documentclass` (article/book/report) | Yes (3 classes) | Yes (3 classes) | Yes (100+ classes) |
-| `\title`, `\author`, `\date`, `\maketitle` | Yes | Yes | Yes |
-| `\tableofcontents` | Yes (auto-generated) | Yes | Yes |
-| `\begin{document}` | Yes | Yes | Yes |
-| **Sectioning** | | | |
-| `\part` through `\subparagraph` (7 levels) | All, auto-numbered | All, auto-numbered | All, auto-numbered |
-| Per-class numbering (Roman parts, chapter-prefixed) | Yes (article/book/report modules) | Yes | Yes |
-| `\section*` (unnumbered) | Yes | Yes | Yes |
-| **Text formatting** | | | |
-| `\textbf`, `\textit`, `\emph`, `\underline` | Yes | Yes | Yes |
-| `\texttt`, `\verb` | Yes | Yes | Yes |
-| `\textsf`, `\textsc`, `\textsl`, `\textrm` | Yes | Yes | Yes |
-| Font sizes (`\tiny` through `\Huge`) | All 10 | All 10 | All 10 |
-| **Math** | | | |
-| Inline `$...$`, `\(...\)` | Yes | Yes | Yes |
-| Display `$$...$$`, `\[...\]` | Yes | Yes | Yes |
-| `equation`, `align`, `gather`, `multline` | Yes | Yes | Yes |
-| Fractions (`\frac`, `\dfrac`, `\tfrac`) | Yes | Yes | Yes |
-| Sub/superscripts | Yes | Yes | Yes |
-| Radicals (`\sqrt`) | Yes | Yes | Yes |
-| Matrices (`pmatrix`, `bmatrix`, etc.) | Yes | Yes | Yes |
-| Big operators (`\sum`, `\int`, `\prod`) with limits | Yes | Yes | Yes |
-| Delimiters (`\left`, `\right`, sized) | Yes | Yes | Yes |
-| Accents (`\hat`, `\bar`, `\vec`, etc.) | Yes | Yes | Yes |
-| Math fonts (`\mathbf`, `\mathcal`, etc.) | Yes | Yes | Yes |
-| `\text{}` in math | Yes | Yes | Yes |
-| Equation numbering | Yes | Yes | Yes |
-| **Lists** | | | |
-| `itemize`, `enumerate`, `description` | Yes | Yes | Yes |
-| Custom item labels `\item[...]` | Yes | Yes | Yes |
-| Nested lists | Yes | Yes | Yes |
-| `enumitem` package (custom counters, labels) | No | Partial | Yes |
-| **Environments** | | | |
-| `quote`, `quotation`, `verse` | Yes | Yes | Yes |
-| `center`, `flushleft`, `flushright` | Yes | Yes | Yes |
-| `verbatim`, `lstlisting` | Yes | Yes | Yes |
-| `abstract` | Yes | Yes | Yes |
-| `minipage` | Yes | Yes | Yes |
-| `multicols` | Yes | Partial | Yes |
-| **Theorem-like environments** | | | |
-| `theorem`, `lemma`, `corollary`, `proposition` | Yes (auto-numbered) | Yes | Yes |
-| `definition`, `example`, `remark` | Yes (auto-numbered) | Yes | Yes |
-| `proof` (with QED □) | Yes | Yes | Yes |
-| `\newtheorem` (custom) | No | No | Yes |
-| **Tables** | | | |
-| `tabular` with `l/c/r` alignment | Yes | Yes | Yes |
-| `\multicolumn` | Yes | Yes | Yes |
-| `\multirow` | Yes | Yes | Yes |
-| `table` float with `\caption` | Yes (auto-numbered) | Yes | Yes |
-| `\hline`, `\cline` | Recognized (CSS borders) | Yes | Yes |
-| `booktabs` (`\toprule`, `\midrule`) | No | No | Yes |
-| `longtable` | No | No | Yes |
-| **Figures** | | | |
-| `figure` float with `\caption` | Yes (auto-numbered) | Yes | Yes |
-| `\includegraphics` | Yes (`<img>`) | Yes | Yes |
-| `\includegraphics` options (width, scale) | No | Partial | Yes |
-| `subfigure`/`subcaption` | No | No | Yes |
-| **Cross-references** | | | |
-| `\label`, `\ref` (resolved to numbers) | Yes | Yes | Yes |
-| `\href`, `\url` | Yes | Yes | Yes |
-| `\autoref`, `\nameref` | No | No | Yes |
-| `hyperref` package | No | Partial | Yes |
-| **Bibliography** | | | |
-| `thebibliography`, `\bibitem`, `\cite` | Yes | Yes | Yes |
-| BibTeX/BibLaTeX integration | No | No | Yes |
-| `\citep`, `\citet` (natbib) | No | No | Yes |
-| **Footnotes** | Yes (with back-refs ↩) | Yes | Yes |
-| **Diacritics** | 15 commands, pre-composed Unicode | Similar | Comprehensive |
-| **Ligatures** | `---`, `--`, `` `` ``, `''` | Same | Same |
-| **Custom macros** | | | |
-| `\newcommand` with `#1`–`#9` | Yes | Yes | Yes |
-| `\renewcommand`, `\providecommand` | Yes | Yes | Yes |
-| `\def` (TeX primitives) | Parsed only | No | Yes |
-| Optional arguments `[default]` | Parsed only | Yes | Yes |
-| **Spacing** | | | |
-| `\\`, `\newline` | Yes | Yes | Yes |
-| `\hspace`, `\vspace` | Yes | Yes | Yes |
-| `\quad`, `\qquad` | Yes | Yes | Yes |
-| `\newpage`, `\clearpage` | Yes (as `<hr>`) | Yes | Yes |
-| **Counters & lengths** | | | |
-| `\setcounter`, `\addtocounter` | Skipped | Partial | Full |
-| `\setlength`, `\newlength` | Skipped | Partial | Full |
-| Custom counter manipulation | No | Limited | Full |
-| **Package support** | | | |
-| Built-in package emulation | None | ~10 packages | 200+ packages |
-| `geometry` | No | Basic | Yes |
-| `graphicx` | Basic (`\includegraphics`) | Partial | Full |
-| `amsmath`, `amssymb` | Math rendering only | Yes | Yes |
-| `hyperref` | No | Partial | Yes |
-| `color`/`xcolor` | `\textcolor` only | Partial | Yes |
-| `tikz`/`pgf` | No | No | Partial |
-| **Output modes** | | | |
-| HTML fragment | Yes | Yes | Yes |
-| Standalone HTML (with CSS) | Yes | Yes | Yes |
-| PDF | No (separate tex/ pipeline) | No | Via LaTeXML post |
-| EPUB | No | No | Yes |
-| **Error handling** | Graceful fallback + `<span>` wrapper | Graceful fallback | Graceful fallback |
+- **Script tests.** `test/lambda/latex/` holds 58 scripts, each with its `.txt` golden, run by `test_lambda_gtest` and therefore by `make test-lambda-baseline`. They cover the core, the adapters (12 Phase III tests, natbib among them), bibliography (4 biblatex and 6 citeproc), TikZ (10), the engine (4 Phase IV tests plus the conformance corpus) and the 31-document corpus. The fixtures are in `test/lambda/latex/fixtures/`.
+- **Engine conformance.** 151 trace records are compared against pdfTeX (engine design §9).
+- **Bibliography reference.** Six styles are pinned to BibLaTeX 3.20 with Biber 2.20.
+- **Sample corpus.** The 31 Overleaf samples in `test/latex/samples/`, one of them LuaLaTeX, produce 93 of 93 successful parse and serialization records across HTML, SVG and PDF. They yield no unsupported-output elements and 62 of 62 native SVG/PDF exports. Per-sample status is in [COMPATIBILITY.md](../test/latex/samples/COMPATIBILITY.md): in HTML, 16 supported, 14 partial and the Lua sample unsupported. Pinned TeX Live 2025 references for selected samples are recorded under `test/latex/reference/phase3/`.
+- **Rules for new work.** Every new test script has its golden. A claim of support needs passing and failing fixtures and a checked output path for each claimed target. A successful parse or zero diagnostics is never sufficient, and §9 is updated only from checked results.
 
-### A.3 Strengths and Trade-offs
+## 11. Outstanding work
 
-**Lambda Package strengths:**
-- **Compact and readable**: ~4,900 lines of functional code vs 15K (LaTeX.js) or 100K+ (LaTeXML)
-- **2-pass architecture**: Pre-computes all counters, labels, and cross-references before rendering, avoiding forward-reference issues
-- **Native integration**: Shares the Lambda runtime's tree-sitter LaTeX parser — no separate parsing step
-- **Pure functional style**: Immutable data flow, no global state, easy to reason about
-- **Math package**: Dedicated Lambda math package (~1,500 lines) produces MathLive-compatible HTML/CSS
+### 11.1 Decisions
 
-**Lambda Package limitations vs LaTeX.js:**
-- No package emulation (LaTeX.js handles ~10 common packages)
-- No `\newtheorem` for user-defined theorem types
-- No optional argument defaults in `\newcommand`
-- No `\includegraphics` size options (width, height, scale)
+- **Make expansion the only front end** and retire the raw parse branch and script macro substitution (§4.3, §5.4; engine design §6).
+- **Ratify the engine boundary** as a D7 ruling, and confirm its package resolution order (engine design §10).
+- **Keep or drop biblatex style files on the engine (M4).** The CSL design recommends deferring it.
 
-**Lambda Package limitations vs LaTeXML:**
-- No BibTeX/BibLaTeX integration
-- No counter/length manipulation (`\setcounter`, `\setlength`)
-- No custom document classes beyond article/book/report
-- No package loading (LaTeXML supports 200+ packages)
-- No MathML output (Lambda uses HTML/CSS for math)
-- No EPUB or multi-format output pipeline
+### 11.2 Correctness gaps in the script package
 
-### A.4 Positioning
+These were reproduced on 2026-10-12.
 
-The Lambda LaTeX package occupies a pragmatic middle ground: **~85-90% feature parity with LaTeX.js** in a fraction of the code, handling the most common LaTeX document patterns (academic papers, technical articles, textbooks) correctly. It covers the **"80% of documents with 20% of complexity"** design point — sufficient for standard documents but not for heavily-customized ones with exotic packages or complex counter manipulation.
+- **Duplicate heading titles.** They share one `id` and the first heading's number. Analysis deduplicates slugs, but rendering looks them up by the raw title slug.
+- **Identical footnote text.** Both references point to the first footnote and duplicate its back-reference `id`.
+- **Label context leaking out of floats.** A `\label` after `\end{figure}` resolves to the figure's number, because the figure and table walks do not restore the enclosing context.
+- **Appendices in book and report.** `\appendix` resets only section counters, so the first appendix chapter is lettered after the preceding chapters.
+- **Counter and length commands.** `\setcounter` honors only `secnumdepth`, and `\addtocounter`, `\stepcounter`, `\newcounter`, `\newlength` and `\newenvironment` are silent no-ops without expansion.
+- **Fixed English strings.** The contents heading and theorem names are fixed English strings, and chapters have no "Chapter N" label.
+- **Doc viewer.** It renders without the package stylesheet, and the CLI's `font_option` is passed but never read.
 
-For comparison: LaTeX.js targets browser-based rendering with similar scope, while LaTeXML is a near-complete TeX reimplementation targeting archival-quality XML/HTML conversion for digital libraries (notably used by arXiv for HTML papers).
+### 11.3 Host capabilities
+
+- **Paged tables and complex blocks.** These need table-row fragmentation with retained column geometry, repeated heads and feet, and cell links and counters carried across pages. Columns, display math and replaced SVG also need admission to paged composition.
+- **Complex scripts.** Thai and other complex scripts need consistent cluster shaping across layout, paint and export, plus language-aware dictionary line breaking.
+- **Searchable Unicode PDF.** This needs font embedding with ToUnicode maps.
+- **Locale-exact bibliography collation.** This would need a general Unicode collation service, to be added only if fixtures show that script ordering cannot meet a stated profile.
+
+### 11.4 Deferred features
+
+- **Full `microtype`.** Character protrusion places selected glyph edges, especially punctuation, beyond the text block at each final line edge. Font expansion slightly widens or narrows glyphs, and the line breaker must account for that. Both need per-glyph tables plus shaping, line-breaking and painting controls in Radiant. Paragraph-level CSS spacing cannot reproduce either. Until then, `microtype` stays a CSS approximation, and explicit protrusion or expansion requests are diagnosed.
+- **EPS graphics.** These would need a neutral EPS import capability that reuses the `graphicx` sizing and clipping logic. Until then, an EPS source receives an unsupported-format diagnostic.
+
+## Appendix A. Brief implementation history
+
+| Period | Step |
+|---|---|
+| Until 2026-03 | A C++ pipeline under `lambda/tex/` (about 20,600 lines) parsed with tree-sitter and produced HTML from a document model, plus a DVI/PDF typesetter. It was removed on 2026-03-04. |
+| 2026-02 (Phase 1) | HTML output moved to this script package: document structure, lists, tables, floats, theorems, references, footnotes, `\newcommand` and three document classes. |
+| 2026-02 (Phase 2) | Phase 2 reached LaTeX.js parity on its showcase document: extended symbols, boxes, spacing, font declarations, `\appendix` and counters, color, enhanced lists, the `picture` environment as SVG, `\includegraphics` options, `\newtheorem`, booktabs, `\newcommand` defaults, `\autoref` and `\nameref`. |
+| 2026-08-31 | The direct C++ parser replaced the tree-sitter LaTeX parser. The tree-sitter LaTeX and LaTeX-math grammars were removed on 2026-10-12; the `lambda-cst` verifier never used them. |
+| 2026-10-06 (Phase I) | The package registry, `render_result`, preserved argument groups and offsets, and the first adapters: amsmath, graphicx with PDF pages, hyperref, geometry, xcolor, booktabs, enumitem, microtype, siunitx and the TikZ adapter. The PDF links, clipping and fixed-geometry host capabilities landed. |
+| 2026-10-06 (Phase 2 biblatex) | The bounded biblatex profile, pinned to BibLaTeX 3.20 with Biber 2.20. |
+| 2026-10-07 (Phase III) | Thirty-one Overleaf samples drove the shared table and theorem models, natbib, caption, cleveref, listings, language and page-style profiles, PDF outlines, raw-body parser preservation and the no-Lua rule. All samples parse and export. |
+| 2026-10-07 (Phase IV) | The TeX expansion engine, pdfTeX conformance, bundled programming packages and expl3, and six native PGF/PGFPlots slices. |
+| 2026-10-10 | The Lambda-script CSL citeproc, opt-in. |
+| 2026-10-12 | This consolidation. The retired documents, all recoverable from git, are listed below. |
+| 2026-10-12 cleanup | Removed the unused LaTeX.js-era `css/` stylesheets and `js/base.js`, the unused document-class exports and dead macro helpers. The appendix-letter helper moved to `util.upper_alph`. |
+
+The retired documents are:
+
+- `Lambda_Pkg_Latex2.md` and `Lambda_Pkg_Latex3.md`.
+- In `vibe/latex/`: `LaTeX_Ref.md`, `Latex_Command_Tracking.md` and `latex-feature-tracking.json`, `Latex_Design.md`, `Latex_Html_Enhancement_Proposal.md`, `Latex_Html_Mapping.md`, `Latex_Pipeline_Analysis.md`, `Latex_Pipeline_Design.md`, `Latex_TeX_Primitives_Impl.md`, `Latex_Typeset_Design1.md` to `Latex_Typeset_Design5_Graphics.md`, `Latexml.md` and the `latex-grammar/` notes.
+- The `vibe/latex/` math notes, retired into [Lambda_Pkg_Math.md](Lambda_Pkg_Math.md).
+
+The original proposals also logged Lambda language issues met while building the package, such as `is`/`and` precedence, map spread, `name()` returning a symbol, and JIT branch typing. Those were fixed in the language or worked around at the time; the notes remain in git history.
+
+## Appendix B. Superseded rulings
+
+- ~~The tree-sitter LaTeX parser is retained unchanged as the conversion layer, and no parser changes are needed.~~ Replaced by the Lambda-owned direct parser with neutral argument and raw-body preservation (§4.1).
+- ~~The C++ typesetter is retained for DVI and PDF output.~~ Removed; PDF and SVG come from Radiant (§7.3).
+- ~~Full TeX macro expansion, `\catcode` changes, TikZ and BibTeX are out of scope.~~ Expansion runs on the TeX engine (§4.2); TikZ and bibliographies have adapters (§8).
+- ~~`\usepackage` never executes `.sty` content; packages are script adapters only (**S1.8**).~~ Replaced 2026-10-07: bundled and beside-document packages run on the engine. Adapters stay static, and no text becomes Lambda code (§6).
+- ~~Math produces MathLive/KaTeX-compatible HTML spans.~~ Math produces measured SVG ([Lambda_Pkg_Math.md](Lambda_Pkg_Math.md)).
+- ~~Headings are wrapped in `<section>` elements with `sec-N` identifiers, and references are resolved by a post-processing pass over the HTML.~~ Headings are flat with title-slug identifiers, and references are resolved from the analysis pass (§5.2, §7.1).
+
+## Appendix C. Prior art
+
+- **LaTeX.js** is a single-pass PEG parser and generator with about a dozen reimplemented packages. Two ideas carried over: argument-type signatures, and group-stack inheritance of font state, which maps onto the functional info record. Its showcase document set the Phase 2 parity target.
+- **LaTeXML** emulates TeX's expansion faithfully and binds about 450 packages declaratively. Its stages map onto this design: Mouth and Gullet are the TeX engine, the Stomach is the single digester, and `DefConstructor` bindings are script adapters chosen from a static registry. LaTeXML produces archival XML and MathML. Lambda instead targets semantic HTML laid out by its own engine.

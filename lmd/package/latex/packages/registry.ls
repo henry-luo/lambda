@@ -85,7 +85,7 @@ pub let CATALOG = {
 // classes with a script profile; a beside-document .cls of another name runs on the engine
 pub let CLASSES = ["article", "report", "book", "amsart", "standalone"]
 
-// names the TeX engine leaves to the script adapters (Lambda_Pkg_Latex3 §9.4)
+// names the TeX engine leaves to the script adapters (Lambda_Design_TeX_Engine §5)
 pub fn adapter_names() => [for (k, v in CATALOG) string(k)] ++ CLASSES ++ ["pgf", "amsfonts", "color"]
 
 // adapter commands that read their arguments as tokens, as the CTAN packages

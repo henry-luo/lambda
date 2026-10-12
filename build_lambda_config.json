@@ -106,22 +106,6 @@
       "link": "static"
     },
     {
-      "name": "tree-sitter-latex",
-      "version": "0.6.0",
-      "description": "Tree-sitter LaTeX parser library",
-      "include": "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
-      "lib": "lambda/tree-sitter-latex/libtree-sitter-latex.a",
-      "link": "static"
-    },
-    {
-      "name": "tree-sitter-latex-math",
-      "version": "0.1.0",
-      "description": "Tree-sitter LaTeX math mode parser library",
-      "include": "lambda/tree-sitter-latex-math/bindings/c",
-      "lib": "lambda/tree-sitter-latex-math/libtree-sitter-latex-math.a",
-      "link": "static"
-    },
-    {
       "name": "mir",
       "version": "1.0.0",
       "include": "lambda/mir",
@@ -916,7 +900,7 @@
     },
     {
       "name": "lambda-cst",
-      "description": "Tree-sitter Lambda/JS/TS/LaTeX/Math CST differential verifier",
+      "description": "Tree-sitter Lambda/JS/TS CST differential verifier",
       "lang": "c++17",
       "source_files": [
         "test/lambda_parser_poc_diff.c",
@@ -932,8 +916,6 @@
         "tree-sitter-lambda",
         "tree-sitter-javascript",
         "tree-sitter-typescript",
-        "tree-sitter-latex",
-        "tree-sitter-latex-math",
         "utf8proc"
       ],
       "target_name": "lambda-cst",
@@ -3447,10 +3429,9 @@
             "icon": "\ud83e\uddfe"
           },
           {
-            "source": "test/test_scene3d_gtest.cpp",
-            "name": "Native Scene3D Tests",
+            "source": "test/test_scene3d_unit_gtest.cpp",
+            "name": "Scene3D Native Unit Tests",
             "case_workers": 2,
-            "case_workers_env": "LAMBDA_SCENE3D_TEST_JOBS",
             "dependencies": [
               "lambda-rt",
               "node-core",
@@ -3481,7 +3462,7 @@
                 "WebKit"
               ]
             },
-            "binary": "test_scene3d_gtest.exe",
+            "binary": "test_scene3d_unit_gtest.exe",
             "icon": "\ud83c\udfa8"
           },
           {
@@ -4105,6 +4086,9 @@
           {
             "source": "test/test_radiant_view_gtest.cpp",
             "name": "Radiant View Tests",
+            "additional_sources": [
+              "test/test_radiant_view_scene3d.cpp"
+            ],
             "case_workers": 3,
             "case_workers_env": "LAMBDA_RADIANT_VIEW_TEST_JOBS",
             "case_worker_args": [

@@ -35,7 +35,7 @@ import caption: .packages.caption
 // Public API — HTML string output
 // ============================================================
 
-// §9.2: the TeX engine expands the document, and the package files beside
+// Lambda_Design_TeX_Engine §2: the TeX engine expands the document, and the package files beside
 // it, before the direct parser builds the AST
 pub fn parse_source(latex_source, base) =>
     parse(latex_source, {type: "latex", expand: true, base: base,
@@ -69,7 +69,7 @@ pub fn render_to_html(ast, options) {
 // ============================================================
 
 // render a LaTeX AST (already parsed) to HTML elements
-// options: {docclass, standalone, numbering, toc}
+// options: {standalone, base_uri, source_path, target, paged, citeproc, language}
 pub fn render(ast, options) {
     render_result(ast, options).elements
 }
@@ -208,7 +208,7 @@ fn document_language(options, packages, polyglossia) {
     else language_profile.babel_default(registry.options_for(packages, "babel"))
 }
 
-// §9.7: TeX engine errors are located diagnostics of the `tex` package
+// Lambda_Design_TeX_Engine §8: TeX engine errors are located diagnostics of the `tex` package
 fn engine_diagnostics(ast) {
     let issues = if (ast == null or ast.tex_diagnostics == null) [] else ast.tex_diagnostics;
     [for (issue in issues) util.diagnostic(issue.code, "tex", issue.file, issue.message, issue.offset)]

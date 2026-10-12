@@ -1,0 +1,212 @@
+{
+  "name": "ViewBoxFramingMeetNoneSliceOriginAndDensity",
+  "viewport": {
+    "width": 320,
+    "height": 240
+  },
+  "input_turn_ms": 0,
+  "event_interval_ms": 0,
+  "events": [
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#scene",
+      "width": 200,
+      "height": 100,
+      "pixels": [
+        [
+          100,
+          50,
+          255,
+          0,
+          0
+        ],
+        [
+          60,
+          50,
+          0,
+          0,
+          0,
+          0
+        ]
+      ]
+    },
+    {
+      "type": "script",
+      "js": "document.getElementById(\"scene\").setAttribute(\"preserveAspectRatio\",\"xMaxYMax meet\")"
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#scene",
+      "width": 200,
+      "height": 100,
+      "pixels": [
+        [
+          150,
+          50,
+          255,
+          0,
+          0
+        ],
+        [
+          100,
+          50,
+          0,
+          0,
+          0,
+          0
+        ]
+      ]
+    },
+    {
+      "type": "script",
+      "js": "document.getElementById(\"scene\").setAttribute(\"preserveAspectRatio\",\"xMinYMin meet\")"
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#scene",
+      "width": 200,
+      "height": 100,
+      "pixels": [
+        [
+          50,
+          50,
+          255,
+          0,
+          0
+        ],
+        [
+          100,
+          50,
+          0,
+          0,
+          0,
+          0
+        ]
+      ]
+    },
+    {
+      "type": "script",
+      "js": "document.getElementById(\"scene\").setAttribute(\"preserveAspectRatio\",\"none\")"
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#scene",
+      "width": 200,
+      "height": 100,
+      "pixels": [
+        [
+          80,
+          50,
+          255,
+          0,
+          0
+        ]
+      ]
+    },
+    {
+      "type": "script",
+      "js": "document.getElementById(\"scene\").setAttribute(\"preserveAspectRatio\",\"xMidYMid slice\")"
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#scene",
+      "width": 200,
+      "height": 100,
+      "pixels": [
+        [
+          100,
+          30,
+          255,
+          0,
+          0
+        ]
+      ]
+    },
+    {
+      "type": "script",
+      "js": "document.getElementById(\"scene\").setAttribute(\"viewBox\",\"25 0 100 100\")"
+    },
+    {
+      "type": "script",
+      "js": "document.getElementById(\"scene\").setAttribute(\"preserveAspectRatio\",\"none\")"
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#scene",
+      "width": 200,
+      "height": 100,
+      "pixels": [
+        [
+          50,
+          50,
+          255,
+          0,
+          0
+        ],
+        [
+          110,
+          50,
+          0,
+          0,
+          0,
+          0
+        ]
+      ]
+    },
+    {
+      "type": "scene3d",
+      "op": "snapshot",
+      "target": "#scene",
+      "width": 200,
+      "height": 100,
+      "scale": 2
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "scene3d",
+      "target": "#scene",
+      "fields": {
+        "raster_width": 400,
+        "raster_height": 200,
+        "camera_aspect": 1
+      }
+    },
+    {
+      "type": "script",
+      "js": "document.getElementById(\"scene\").setAttribute(\"viewBox\",\"0 0 0 100\")"
+    },
+    {
+      "type": "scene3d",
+      "op": "snapshot",
+      "target": "#scene",
+      "width": 200,
+      "height": 100,
+      "success": false
+    },
+    {
+      "type": "script",
+      "js": "document.getElementById(\"scene\").setAttribute(\"viewBox\",\"0 0 -100 100\")"
+    },
+    {
+      "type": "scene3d",
+      "op": "snapshot",
+      "target": "#scene",
+      "width": 200,
+      "height": 100
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "scene3d",
+      "target": "#scene",
+      "fields": {
+        "camera_aspect": 2
+      }
+    }
+  ]
+}

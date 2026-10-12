@@ -6188,7 +6188,7 @@ static Item fn_parse_highlight_spans(bool html, Item src_item, Item window_item,
     return {.array = result.get()};
 }
 
-// latex/tex options for the TeX expansion engine (Lambda_Pkg_Latex3 §9): the
+// latex/tex options for the TeX expansion engine (Lambda_Design_TeX_Engine): the
 // names stay owned by the caller's map for the duration of the parse
 static void collect_names(Map* options_map, const char* key, ArrayList* names) {
     bool is_found = false;

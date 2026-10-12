@@ -291,10 +291,14 @@ void module_descriptor_set_cjs_module(ModuleDescriptor* desc, Item module) {
 ModuleDescriptor* module_get_for_runtime(Runtime* runtime, const char* path) {
     ModuleRegistry* registry = module_registry_for_runtime(runtime);
     if (!path || !registry) return NULL;
+    // linked imports already use registry keys; resolving every read repeats filesystem IO.
+    RegistryEntry lookup = { .path = path, .desc = NULL };
+    const RegistryEntry* found = RegistryMap::get(registry->map, lookup);
+    if (found) return found->desc;
     char* key_path = module_registry_key_dup(path);
     if (!key_path) return NULL;
-    RegistryEntry lookup = { .path = key_path, .desc = NULL };
-    const RegistryEntry* found = RegistryMap::get(registry->map, lookup);
+    lookup.path = key_path;
+    found = RegistryMap::get(registry->map, lookup);
     mem_free(key_path);
     return found ? found->desc : NULL;
 }

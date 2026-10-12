@@ -1,6 +1,6 @@
 # Lambda TikZ Package — PGFPlots and LaTeX Graphics
 
-**Status:** Initial native subset implemented in the working tree; the Phase IV additions of [Lambda_Pkg_Latex3 §9.6](Lambda_Pkg_Latex3.md#96-extended-pgfpgfplots-native) listed in §12 are implemented in the working tree (2026-10-07, uncommitted); the broader profile below remains a proposal.
+**Status:** Initial native subset implemented in the working tree; the Phase IV additions listed in §12 are implemented on master (708fb6633, 2026-10-07); the broader profile below remains a proposal.
 
 **Date:** 2026-09-28; §12 added 2026-10-07.
 
@@ -56,7 +56,7 @@ PGF is the underlying graphics macro system; TikZ is its drawing syntax, and PGF
 | Serialization | [`latex/to_html.ls`](../lmd/package/latex/to_html.ls), `to_html`, serializes element trees; [`format-latex.cpp`](../lambda/format/format-latex.cpp), `format_latex_element`, has a generic command fallback. | Verify SVG names/attributes in HTML, and add explicit graphics-source round trips if emitting LaTeX. |
 | Packaging | [`build_ast.cpp`](../lambda/runtime/build_ast.cpp), `append_shipped_package_module_path`, maps `lambda.*` to the package tree; [`prepare_release.sh`](../utils/prepare_release.sh) copies that tree. | Ship ordinary `.ls` sources; no new loader, registry, or package manager is needed. |
 
-The repository contains [`test/latex/fixtures/tikz/`](../test/latex/fixtures/tikz/) and an earlier [LaTeX graphics proposal](latex/Latex_Typeset_Design5_Graphics.md). Some older tracking text names a `tex_pgf_driver.cpp` and partial TikZ support. This review found no corresponding active implementation under `lambda/` or `radiant/`. Treat those documents as historical design context and the fixtures as candidate inputs, not evidence of current conformance. Several fixtures use advanced libraries such as `spy`; they should initially exercise unsupported-feature reporting.
+The repository contains [`test/latex/fixtures/tikz/`](../test/latex/fixtures/tikz/) and, in git history, an earlier LaTeX graphics proposal (`vibe/latex/Latex_Typeset_Design5_Graphics.md`, retired 2026-10-12). Some older tracking text names a `tex_pgf_driver.cpp` and partial TikZ support. This review found no corresponding active implementation under `lambda/` or `radiant/`. Treat those documents as historical design context and the fixtures as candidate inputs, not evidence of current conformance. Several fixtures use advanced libraries such as `spy`; they should initially exercise unsupported-feature reporting.
 
 ## 3. Package boundary and reuse
 
@@ -339,9 +339,28 @@ When implementation begins, every new Lambda `*.ls` test must have its correspon
 
 These are proposed delivery boundaries, not an implementation progress ledger or a schedule commitment. A detailed implementation plan belongs in `vibe/impl/` after the design is accepted.
 
-## 12. Phase IV profile additions (Latex3 §9.6)
+## 12. Phase IV profile
 
-The rows below extend the native profile with six bounded slices from [Lambda_Pkg_Latex3 §9.6](Lambda_Pkg_Latex3.md#96-extended-pgfpgfplots-native). The ownership split of §3.2 is unchanged: `input-tikz.cpp` keeps syntax (option order, raw calc bodies, table text, handler definitions), and every semantic decision is made in `lmd/package/doc/tikz/` script modules under **D7.2.1–D7.2.4**. No second renderer was added: named-node pictures still lay out through the measured-child Radiant layout, direct drawings through `render_drawing`, and plots through the PGFPlots axis renderer and the chart scale/SVG helpers. Unsupported forms are raised errors (**S7.4.2**) that the LaTeX bridge turns into the existing source-bearing placeholder; parser errors carry the exact island line and column.
+The LaTeX Phase IV scope, set by the user on 2026-10-07, grows PGF/PGFPlots coverage in this native script profile, never by running PGF's TeX sources on the [TeX expansion engine](latex/Lambda_Design_TeX_Engine.md). Running the real `pgf`/`pgfplots` sources would need the GPL/LPPL sources vendored and TeX typesetting of node text, and would give drawing two owners. The engine's only drawing role is island expansion of document-defined macros, which is designed but not built (see that document's §7).
+
+### 12.1 Target profile
+
+Each row needs passing and failing fixtures before it counts as supported.
+
+| Area | Phase IV additions |
+|---|---|
+| TikZ libraries | `positioning`, `calc`, `shapes.geometric`/`.misc`/`.arrows`/`.multipart`, `arrows.meta` tip specs, `fit`, `backgrounds`/layers, `matrix`, `trees`, `intersections`, `decorations.pathmorphing`/`.markings`/`.text`, `patterns.meta`, `shadings`/`shadows`, `quotes`, `angles`, `3d` |
+| Programming | `.style`/`.style 2 args` with parameters and `.default`, `pic` definitions, `\foreach` with `evaluate`/`count`/`remember`, and `\pgfmathsetmacro`/`\pgfmathparse`/`\pgfmathdeclarefunction`, all inside the bounded evaluator |
+| Basic layer | `\pgfpathmoveto`/`lineto`/`curveto`/`closepath`/`rectangle`/`circle`, `\pgfusepath`, `\pgfpoint*`, `\pgfnode`, `\pgftext`, `\pgftransform*`, and the `\pgfset*` stroke and fill settings |
+| PGFPlots plot types | `ybar`/`xbar` including stacked and interval forms, stacked and area plots, `const plot`/`jump mark`, error bars, `scatter` with `point meta` and colormaps, `quiver`, and `\addplot3` with `mesh`/`surf`/`view`/`colorbar` and pre-computed contours |
+| PGFPlots data and axes | `table` sources, inline or in a file beside the document, with column selection and `x expr`/`y expr`; `\pgfplotstableread`; symbolic and date coordinates; `groupplots`; secondary axes; `fillbetween`; `enlargelimits`; `axis equal`; `nodes near coords`; legend placement and columns; `/pgf/number format` tick labels |
+| Outside | `gnuplot`, shell and `\addplot lua` sources, `contour gnuplot`, the `external` library, `remember picture`/`overlay` page overlays, and the `spy` library |
+
+Acceptance classifies the ten files in [`test/latex/fixtures/tikz/`](../test/latex/fixtures/tikz/) and a new pinned PGF/PGFPlots corpus by row, asserting scene semantics first and comparing visually second against pinned PGF 3.1.x/PGFPlots 1.18.x references (§11).
+
+### 12.2 Admitted slices
+
+The rows below extend the native profile with six bounded slices of §12.1. The ownership split of §3.2 is unchanged: `input-tikz.cpp` keeps syntax (option order, raw calc bodies, table text, handler definitions), and every semantic decision is made in `lmd/package/doc/tikz/` script modules under **D7.2.1–D7.2.4**. No second renderer was added: named-node pictures still lay out through the measured-child Radiant layout, direct drawings through `render_drawing`, and plots through the PGFPlots axis renderer and the chart scale/SVG helpers. Unsupported forms are raised errors (**S7.4.2**) that the LaTeX bridge turns into the existing source-bearing placeholder; parser errors carry the exact island line and column.
 
 | Row | Admitted | Semantics and boundary | Diagnosed |
 |---|---|---|---|
@@ -362,7 +381,7 @@ The rows below extend the native profile with six bounded slices from [Lambda_Pk
 - `registry.ls` (`tikz_library_issues`) still reports `calc` and `shapes.geometric` as unsupported libraries.
 - Default line widths still differ by renderer: named-node pictures keep their original 1.2 px (a render-parity test depends on it), direct drawings use 0.6 px, and TikZ's 0.4pt is 0.53 px. Arrow-tip sizes follow the effective line width, so the two renderers draw different default tips.
 - Bars and areas use the cycle colour for `\addplot[…]` as the existing line plots do; PGFPlots' distinction between `\addplot[…]` and `\addplot+[…]` (§6.2) is still not modelled.
-- Everything else in §9.6 (e.g. `fit`, `matrix`, decorations, `const plot`, `scatter`/colormaps, `\addplot3`, secondary axes, `nodes near coords`, `x expr`, `\pgfplotstableread`, date coordinates, legend columns) remains outside the profile and is diagnosed.
+- Everything else in §12.1 (e.g. `fit`, `matrix`, decorations, `const plot`, `scatter`/colormaps, `\addplot3`, secondary axes, `nodes near coords`, `x expr`, `\pgfplotstableread`, date coordinates, legend columns) remains outside the profile and is diagnosed.
 
 ## Appendix A. Likely implementation touchpoints
 

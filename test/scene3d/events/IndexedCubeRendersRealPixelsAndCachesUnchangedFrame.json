@@ -1,0 +1,95 @@
+{
+  "name": "IndexedCubeRendersRealPixelsAndCachesUnchangedFrame",
+  "viewport": {
+    "width": 320,
+    "height": 240
+  },
+  "input_turn_ms": 0,
+  "event_interval_ms": 0,
+  "events": [
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#scene",
+      "width": 128,
+      "height": 128,
+      "pixels": [
+        [
+          64,
+          64,
+          255,
+          0,
+          0
+        ],
+        [
+          4,
+          4,
+          32,
+          48,
+          64
+        ]
+      ]
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "scene3d",
+      "target": "#scene",
+      "fields": {
+        "graphics.gpu_bytes": {
+          "min": 1
+        },
+        "graphics.cpu_bytes": {
+          "min": 1
+        },
+        "projection_bytes": {
+          "min": 1
+        },
+        "snapshot_bytes": 65536,
+        "graphics.draws": {
+          "min": 1
+        },
+        "graphics.resources": {
+          "min": 1
+        },
+        "graphics.driver_present": 1
+      }
+    },
+    {
+      "type": "snapshot_render_stats",
+      "source": "scene3d",
+      "target": "#scene",
+      "name": "before"
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#scene",
+      "width": 128,
+      "height": 128,
+      "pixels": [
+        [
+          64,
+          64,
+          255,
+          0,
+          0
+        ]
+      ]
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "scene3d",
+      "target": "#scene",
+      "fields": {
+        "snapshot_generation": {
+          "baseline": "before",
+          "eq": 0
+        },
+        "graphics.frames": {
+          "baseline": "before",
+          "eq": 0
+        }
+      }
+    }
+  ]
+}

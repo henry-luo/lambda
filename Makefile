@@ -227,8 +227,6 @@ TREE_SITTER_JAVASCRIPT_LIB = lambda/tree-sitter-javascript/libtree-sitter-javasc
 TREE_SITTER_BASH_LIB = lambda/tree-sitter-bash/libtree-sitter-bash.a
 TREE_SITTER_TYPESCRIPT_LIB = lambda/tree-sitter-typescript/libtree-sitter-typescript.a
 TREE_SITTER_RUBY_LIB = lambda/tree-sitter-ruby/libtree-sitter-ruby.a
-TREE_SITTER_LATEX_LIB = lambda/tree-sitter-latex/libtree-sitter-latex.a
-TREE_SITTER_LATEX_MATH_LIB = lambda/tree-sitter-latex-math/libtree-sitter-latex-math.a
 # RE2 is vendored in-tree at lib/re2 (see lib/re2/VENDOR.md), pinned to the last
 # release before upstream required Abseil. It is built out of tree with its own
 # CMake so the vendored directory stays clean. Like MIR, the patches under
@@ -274,16 +272,6 @@ TS_GRAMMAR_JS = lambda/tree-sitter-typescript/grammar.js
 TS_PARSER_C = lambda/tree-sitter-typescript/src/parser.c
 TS_SCANNER_C = lambda/tree-sitter-typescript/src/scanner.c
 TS_SCANNER_H = lambda/tree-sitter-typescript/scanner_v2.h
-
-# LaTeX grammar dependencies
-LATEX_GRAMMAR_JS = lambda/tree-sitter-latex/grammar.js
-LATEX_PARSER_C = lambda/tree-sitter-latex/src/parser.c
-LATEX_GRAMMAR_JSON = lambda/tree-sitter-latex/src/grammar.json
-LATEX_NODE_TYPES_JSON = lambda/tree-sitter-latex/src/node-types.json
-
-# LaTeX Math grammar dependencies
-LATEX_MATH_GRAMMAR_JS = lambda/tree-sitter-latex-math/grammar.js
-LATEX_MATH_PARSER_C = lambda/tree-sitter-latex-math/src/parser.c
 
 # Quietly build lambda/tree-sitter-$(1)'s static lib: run the sub-make with its
 # output captured and shown only on failure, so a successful parser build is a
@@ -346,23 +334,6 @@ $(TREE_SITTER_TYPESCRIPT_LIB): $(TS_PARSER_C) $(TS_SCANNER_C) $(TS_SCANNER_H)
 $(TREE_SITTER_RUBY_LIB): $(RUBY_GRAMMAR_JS) $(RUBY_SCANNER_C)
 	$(call ts_generate,ruby,--abi 14)
 	$(call ts_lib_build,ruby,)
-
-# Generate LaTeX parser from grammar.js when it changes
-$(LATEX_PARSER_C) $(LATEX_GRAMMAR_JSON) $(LATEX_NODE_TYPES_JSON): $(LATEX_GRAMMAR_JS)
-	@out=$$(cd lambda/tree-sitter-latex && $(TREE_SITTER_CLI) generate --abi 14 2>&1) || { printf '%s\n' "$$out"; exit 1; }
-
-# Build tree-sitter-latex library (depends on parser generation)
-$(TREE_SITTER_LATEX_LIB): $(LATEX_PARSER_C)
-	$(call ts_lib_build,latex,)
-
-# Generate LaTeX Math parser from grammar.js when it changes.
-# ABI 14, like the other vendored grammars (see TREE_SITTER_CLI).
-$(LATEX_MATH_PARSER_C): $(LATEX_MATH_GRAMMAR_JS)
-	@out=$$(cd lambda/tree-sitter-latex-math && $(TREE_SITTER_CLI) generate --abi 14 2>&1) || { printf '%s\n' "$$out"; exit 1; }
-
-# Build tree-sitter-latex-math library (depends on parser generation)
-$(TREE_SITTER_LATEX_MATH_LIB): $(LATEX_MATH_PARSER_C)
-	$(call ts_lib_build,latex-math,)
 
 # Build re2 library (reconfigures cmake if CMakeCache is stale/wrong platform)
 # On Windows/CLANG64: must pass explicit compiler flags so cmake uses clang++
@@ -585,8 +556,8 @@ define run_make_with_error_summary
 endef
 
 # All Tree-sitter grammars are reference-only and build exclusively for the
-# CST differential verifier, including Lambda/JS/TS and LaTeX/Math grammars.
-tree-sitter-cst-libs: $(TREE_SITTER_LIB) $(TREE_SITTER_LAMBDA_LIB) $(TREE_SITTER_JAVASCRIPT_LIB) $(TREE_SITTER_TYPESCRIPT_LIB) $(TREE_SITTER_LATEX_LIB) $(TREE_SITTER_LATEX_MATH_LIB)
+# CST differential verifier: the Lambda, JS and TS grammars.
+tree-sitter-cst-libs: $(TREE_SITTER_LIB) $(TREE_SITTER_LAMBDA_LIB) $(TREE_SITTER_JAVASCRIPT_LIB) $(TREE_SITTER_TYPESCRIPT_LIB)
 
 # Jube-only parser archives (Bash, Ruby) are built outside the host.
 tree-sitter-jube-libs: $(TREE_SITTER_LIB) $(TREE_SITTER_BASH_LIB) $(TREE_SITTER_RUBY_LIB)
@@ -664,7 +635,7 @@ help:
 	@echo "  test-js-parser-diff - JS/TS C parser versus Tree-sitter CST reference"
 	@echo "  generate-names - Regenerate immutable NameId catalogs from the Python source list"
 	@echo "  tree-sitter-libs - Build Tree-sitter libraries for Jube modules"
-	@echo "  tree-sitter-cst-libs - Build the isolated Lambda/JS/TS/LaTeX/Math reference grammars"
+	@echo "  tree-sitter-cst-libs - Build the isolated Lambda/JS/TS reference grammars"
 	@echo "                     Automatically regenerates reference parsers if grammar.js changes"
 	@echo ""
 	@echo "Development:"
@@ -1596,8 +1567,6 @@ clean-all: clean-premake clean-test
 	@rm -f lambda/tree-sitter-bash/libtree-sitter-bash.a lambda/tree-sitter-bash/src/*.o
 	@rm -f lambda/tree-sitter-typescript/libtree-sitter-typescript.a lambda/tree-sitter-typescript/src/*.o
 	@rm -f lambda/tree-sitter-ruby/libtree-sitter-ruby.a lambda/tree-sitter-ruby/src/*.o
-	@rm -f lambda/tree-sitter-latex/libtree-sitter-latex.a lambda/tree-sitter-latex/src/*.o
-	@rm -f lambda/tree-sitter-latex-math/libtree-sitter-latex-math.a lambda/tree-sitter-latex-math/src/*.o
 	@rm -rf $(RE2_BUILD_DIR)
 	@$(MAKE) --no-print-directory clean-mir
 	@echo "All build directories and tree-sitter libraries cleaned."
@@ -2169,7 +2138,8 @@ test-radiant-baseline: build-radiant-baseline
 
 .PHONY: test-scene3d
 test-scene3d: build-radiant-baseline
-	@./test/test_scene3d_gtest.exe
+	@./test/test_radiant_view_gtest.exe --gtest_filter='Scene3dTest.*:EventSimRenderTest.*'
+	@./test/test_scene3d_unit_gtest.exe
 
 .PHONY: test-map
 test-map: build-radiant-baseline

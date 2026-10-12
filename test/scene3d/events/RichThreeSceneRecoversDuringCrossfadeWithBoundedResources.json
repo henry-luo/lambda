@@ -1,0 +1,168 @@
+{
+  "name": "RichThreeSceneRecoversDuringCrossfadeWithBoundedResources",
+  "viewport": {
+    "width": 848,
+    "height": 650
+  },
+  "input_turn_ms": 0,
+  "event_interval_ms": 0,
+  "events": [
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#status"
+      },
+      "attribute": "data-ready",
+      "equals": "true"
+    },
+    {
+      "type": "script",
+      "js": "\n        const audit=observatory;\n        const alternate=audit.clip.clone();alternate.name='crossfade';alternate.duration=4;\n        audit.sample(1.25);\n        audit.mixer.clipAction(alternate).play().crossFadeFrom(audit.mixer.clipAction(audit.clip),.6,true);\n        audit.mixer.update(.3);audit.render();\n        globalThis.recoveryTime=audit.mixer.time;\n        globalThis.recoveryPose=audit.scene.getObjectByName('outer').quaternion.toArray().join();\n        const extension=audit.renderer.getContext().getExtension('WEBGL_lose_context');\n        audit.renderer.domElement.addEventListener('webglcontextlost',event=> {\n            event.preventDefault();setTimeout(()=>extension.restoreContext(),0);\n        });\n        globalThis.beginRecovery=()=>extension.loseContext();\n        globalThis.checkRecovery=()=> {\n            if(audit.mixer.time!==recoveryTime||audit.scene.getObjectByName('outer').quaternion.toArray().join()!==recoveryPose)\n                throw new Error('restoration advanced or reset CPU playback');\n            audit.render();if(audit.renderer.getContext().getError())throw new Error('restored PBR GL error');\n            const previous=audit.composer.readBuffer.clone();audit.renderer.setRenderTarget(previous);\n            audit.composer.render(0);\n            if(audit.renderer.getRenderTarget()!==previous)throw new Error('composer did not restore application target');\n            audit.renderer.setRenderTarget(null);previous.dispose();\n        };\n    "
+    },
+    {
+      "type": "snapshot_render_stats",
+      "source": "webgl",
+      "target": "#observatory",
+      "name": "before"
+    },
+    {
+      "type": "script",
+      "js": "beginRecovery()"
+    },
+    {
+      "type": "wait",
+      "ms": 8
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#status"
+      },
+      "attribute": "data-restored",
+      "equals": "1"
+    },
+    {
+      "type": "script",
+      "js": "checkRecovery()"
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "webgl",
+      "target": "#observatory",
+      "fields": {
+        "graphics.resources": {
+          "baseline": "before",
+          "max": 12
+        },
+        "graphics.gpu_bytes": {
+          "baseline": "before",
+          "max": 1048576
+        },
+        "graphics.cpu_bytes": {
+          "baseline": "before",
+          "max": 1048576
+        }
+      }
+    },
+    {
+      "type": "script",
+      "js": "beginRecovery()"
+    },
+    {
+      "type": "wait",
+      "ms": 8
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#status"
+      },
+      "attribute": "data-restored",
+      "equals": "2"
+    },
+    {
+      "type": "script",
+      "js": "checkRecovery()"
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "webgl",
+      "target": "#observatory",
+      "fields": {
+        "graphics.resources": {
+          "baseline": "before",
+          "max": 12
+        },
+        "graphics.gpu_bytes": {
+          "baseline": "before",
+          "max": 1048576
+        },
+        "graphics.cpu_bytes": {
+          "baseline": "before",
+          "max": 1048576
+        }
+      }
+    },
+    {
+      "type": "script",
+      "js": "beginRecovery()"
+    },
+    {
+      "type": "wait",
+      "ms": 8
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#status"
+      },
+      "attribute": "data-restored",
+      "equals": "3"
+    },
+    {
+      "type": "script",
+      "js": "checkRecovery()"
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "webgl",
+      "target": "#observatory",
+      "fields": {
+        "graphics.resources": {
+          "baseline": "before",
+          "max": 12
+        },
+        "graphics.gpu_bytes": {
+          "baseline": "before",
+          "max": 1048576
+        },
+        "graphics.cpu_bytes": {
+          "baseline": "before",
+          "max": 1048576
+        }
+      }
+    },
+    {
+      "type": "script",
+      "js": "\n        const second=document.createElement('canvas');document.body.appendChild(second);\n        const secondStatus=document.createElement('span');document.body.appendChild(secondStatus);\n        globalThis.secondObservatory=createObservatory(second,secondStatus,document.createElement('button'));\n        globalThis.secondCanvas=second;globalThis.secondStatus=secondStatus;\n    "
+    },
+    {
+      "type": "wait",
+      "ms": 8
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "webgl",
+      "target": "#observatory",
+      "fields": {
+        "graphics.resources": {
+          "max": 8
+        },
+        "graphics.gpu_bytes": {
+          "max": 1024
+        }
+      },
+      "js": "\n        if(secondStatus.getAttribute('data-ready')!=='true')throw new Error('second PBR scene did not load');\n        if(secondObservatory.renderer.getContext()===observatory.renderer.getContext())throw new Error('shared contexts');\n        for(let i=0;i<4;i++) {secondObservatory.resize(400,250,i%2+1);secondObservatory.sample(i*.2);}\n        secondObservatory.dispose();observatory.dispose();\n    "
+    }
+  ]
+}
