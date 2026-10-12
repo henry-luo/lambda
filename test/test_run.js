@@ -190,10 +190,11 @@ function getTestIdleTimeoutMs(baseName) {
     return IDLE_TIMEOUT_MS;
 }
 
-// Max concurrent tests: scale to CPU count, leave 1 core free (min 1).
+// Radiant subprocesses mix compilation, rendering and event waits; allow modest overlap.
 function getMaxConcurrent(allowParallel = parallelExecution) {
     if (!allowParallel) return 1;
-    const cpuScaled = Math.max(1, os.cpus().length - 1);
+    const cpuScaled = Math.max(1, targetSuite === 'radiant'
+        ? Math.floor(os.cpus().length * 1.25) : os.cpus().length - 1);
     const requested = parseInt(process.env.LAMBDA_TEST_MAX_CONCURRENT || '', 10);
     if (Number.isFinite(requested) && requested > 0) {
         return Math.min(cpuScaled, requested);
@@ -371,6 +372,9 @@ function discoverTests(config) {
                     caseWorkers: t.case_workers || 1,
                     caseWorkersEnv: t.case_workers_env,
                     caseWorkerArgs: t.case_worker_args || [],
+                    workerSlots: t.worker_slots || t.case_workers || 1,
+                    workerSlotsEnv: t.worker_slots_env || t.case_workers_env,
+                    workerArgs: t.worker_args || [],
                     buildTarget: path.basename(executable, '.exe'),
                     minimumPassed: t.minimum_passed || 0,
                     // Some GTest binaries launch their own worker processes; respect
@@ -431,7 +435,20 @@ function parseDurationMs(value) {
     return Number.isFinite(numeric) ? Math.max(0, numeric * 1000) : 0;
 }
 
+let previousSuiteDurations;
 function getPreviousDurationMs(baseName) {
+    if (!previousSuiteDurations) {
+        previousSuiteDurations = new Map();
+        try {
+            const summary = JSON.parse(fs.readFileSync(path.join(TEST_OUTPUT_DIR, 'test_summary.json'), 'utf8'));
+            for (const test of (summary.level2_c_tests || [])) {
+                previousSuiteDurations.set(test.test, test.duration_ms);
+            }
+        } catch (_) {}
+    }
+    // GTest assertion time omits subprocess pre-runs, especially the UI fixture pool.
+    const elapsed = previousSuiteDurations.get(baseName);
+    if (Number.isFinite(elapsed) && elapsed > 0) return elapsed;
     const jsonFile = path.join(TEST_OUTPUT_DIR, `${baseName}_results.json`);
     try {
         if (!fs.existsSync(jsonFile)) return 0;
@@ -547,7 +564,8 @@ function scheduleTests(tests) {
  */
 function runTest(testInfo) {
     const requestedWorkers = Number(process.env[testInfo.caseWorkersEnv] || testInfo.caseWorkers || 1);
-    const caseWorkers = Math.max(1, Math.min(MAX_CASE_CONCURRENT, Math.floor(requestedWorkers) || 1));
+    const caseWorkers = Math.max(1, Math.min(MAX_CASE_CONCURRENT,
+        testInfo.allocatedSlots || MAX_CASE_CONCURRENT, Math.floor(requestedWorkers) || 1));
     if (testInfo.isGtest && !testInfo.caseWorker && !testInfo.listCases &&
         !process.env.GTEST_TOTAL_SHARDS && caseWorkers > 1) {
         return runGtestCases(testInfo, caseWorkers);
@@ -579,6 +597,7 @@ function runTest(testInfo) {
         // Build argv based on test type
         let testArgs = [];
         let env = { ...process.env, ...testInfo.env };
+        if (testInfo.allocatedSlots) env.LAMBDA_TEST_MAX_CONCURRENT = String(testInfo.allocatedSlots);
 
         // Suppress ASan container-overflow false positives
         const existingAsan = env.ASAN_OPTIONS || '';
@@ -623,6 +642,9 @@ function runTest(testInfo) {
                 if (uiJobs) {
                     testArgs.push('--jobs', uiJobs);
                 }
+            }
+            if (testInfo.workerArgs?.length && testInfo.allocatedSlots) {
+                testArgs.push(...testInfo.workerArgs, String(testInfo.allocatedSlots));
             }
             spawnArgs = testArgs;
         } else if (baseName === 'test_flex_standalone') {
@@ -799,7 +821,8 @@ async function runGtestCases(testInfo, workers) {
             const { name, index } = queue[next++];
             const workerName = `${baseName}_cases/${index}`;
             const result = await runTest({ ...testInfo, baseName: workerName, caseWorker: true,
-                minimumPassed: 0, env: { ...testInfo.env, LAMBDA_TEST_MAX_CONCURRENT: '1' },
+                minimumPassed: 0, allocatedSlots: 1,
+                env: { ...testInfo.env, LAMBDA_TEST_MAX_CONCURRENT: '1' },
                 runnerArgs: [...runnerArgs, ...testInfo.caseWorkerArgs, `--gtest_filter=${name}`] });
             let data;
             try { data = JSON.parse(fs.readFileSync(path.join(TEST_OUTPUT_DIR, `${workerName}_results.json`), 'utf8')); } catch (_) {}
@@ -998,9 +1021,22 @@ function parseTestResults(baseName, jsonFile, timedOut, idleTimeoutMs = IDLE_TIM
 
 // ─── Parallel execution with concurrency limit ─────────────────────────────────
 
+function testWorkerSlots(testInfo) {
+    const requested = Number(process.env[testInfo.workerSlotsEnv] || testInfo.workerSlots || 1);
+    return Math.max(1, Math.min(MAX_CASE_CONCURRENT, Math.floor(requested) || 1));
+}
+
+async function runTimedTest(testInfo) {
+    const startMs = Date.now();
+    const result = await runTest(testInfo);
+    const endMs = Date.now();
+    return { ...result, startMs, endMs, durationMs: endMs - startMs, testInfo };
+}
+
 async function runAllTests(tests, labelOffset = 0, labelTotal = tests.length) {
     const results = new Map(); // baseName -> result + testInfo
-    let nextIndex = 0;
+    const pending = tests.map((testInfo, index) => ({ testInfo, index, slots: testWorkerSlots(testInfo) }));
+    let availableSlots = MAX_CONCURRENT;
     const running = new Map();
     let heartbeat = null;
 
@@ -1019,31 +1055,35 @@ async function runAllTests(tests, labelOffset = 0, labelTotal = tests.length) {
         }
 
         function finishIfDone() {
-            if (running.size === 0 && nextIndex >= tests.length) {
+            if (running.size === 0 && pending.length === 0) {
                 if (heartbeat) clearInterval(heartbeat);
                 resolveAll(results);
             }
         }
 
         function startNext() {
-            while (running.size < MAX_CONCURRENT && nextIndex < tests.length) {
-                const idx = nextIndex++;
-                const testInfo = tests[idx];
+            // nested pools reserve slots too; backfill with smaller suites while a pool is busy.
+            while (pending.length) {
+                const next = pending.findIndex(entry => Math.min(entry.slots, MAX_CONCURRENT) <= availableSlots);
+                if (next < 0) break;
+                const { testInfo: original, index: idx, slots } = pending.splice(next, 1)[0];
+                const testInfo = { ...original, allocatedSlots: slots };
+                const reservedSlots = Math.min(slots, MAX_CONCURRENT);
+                availableSlots -= reservedSlots;
                 const label = `[${labelOffset + idx + 1}/${labelTotal}]`;
 
                 if (!rawOutput) {
                     console.log(`   ${label} Starting ${testInfo.baseName}...`);
                 }
 
-                const promise = runTest(testInfo).then((result) => {
-                    const entry = running.get(promise);
-                    const durationMs = entry ? Date.now() - entry.startMs : 0;
+                const promise = runTimedTest(testInfo).then((result) => {
                     running.delete(promise);
-                    results.set(testInfo.baseName, { ...result, durationMs, testInfo });
+                    availableSlots += reservedSlots;
+                    results.set(testInfo.baseName, result);
 
                     if (!rawOutput) {
                         const icon = result.status.includes('PASS') ? '✓' : '✗';
-                        console.log(`   ${icon} Completed ${testInfo.baseName} (${result.passed}/${result.total} passed, ${formatDuration(durationMs)})`);
+                        console.log(`   ${icon} Completed ${testInfo.baseName} (${result.passed}/${result.total} passed, ${formatDuration(result.durationMs)})`);
                     }
 
                     startNext();
@@ -1077,14 +1117,12 @@ async function runScheduledTests(tests) {
             console.log(`   ${label} Starting ${testInfo.baseName}...`);
         }
 
-        const startMs = Date.now();
-        const result = await runTest(testInfo);
-        const durationMs = Date.now() - startMs;
-        results.set(testInfo.baseName, { ...result, durationMs, testInfo });
+        const result = await runTimedTest({ ...testInfo, allocatedSlots: MAX_CASE_CONCURRENT });
+        results.set(testInfo.baseName, result);
 
         if (!rawOutput) {
             const icon = result.status.includes('PASS') ? '✓' : '✗';
-            console.log(`   ${icon} Completed ${testInfo.baseName} (${result.passed}/${result.total} passed, ${formatDuration(durationMs)})`);
+            console.log(`   ${icon} Completed ${testInfo.baseName} (${result.passed}/${result.total} passed, ${formatDuration(result.durationMs)})`);
         }
     }
 
@@ -1093,7 +1131,7 @@ async function runScheduledTests(tests) {
 
 // ─── Display results ────────────────────────────────────────────────────────────
 
-function displayResults(config, results) {
+function displayResults(config, results, durationMs) {
     // Aggregate by suite
     const suiteMap = new Map(); // suite -> { name, tests: [{ baseName, displayName, icon, result }] }
 
@@ -1136,7 +1174,7 @@ function displayResults(config, results) {
     const suiteResults = [];
     for (const suiteKey of allSuites) {
         const suite = suiteMap.get(suiteKey);
-        let suitePassed = 0, suiteFailed = 0, suiteTotal = 0, suiteDurationMs = 0;
+        let suitePassed = 0, suiteFailed = 0, suiteTotal = 0, suiteWorkMs = 0;
         let suitePartial = 0, suiteSkipped = 0;
 
         for (const t of suite.tests) {
@@ -1145,7 +1183,7 @@ function displayResults(config, results) {
             suiteTotal  += t.result.total;
             suitePartial += t.result.partial || 0;
             suiteSkipped += t.result.skipped || 0;
-            suiteDurationMs += t.result.durationMs || 0;
+            suiteWorkMs += t.result.durationMs || 0;
             allFailedTests.push(...t.result.failedTests);
             for (const caseTiming of (t.result.caseTimings || [])) {
                 allCaseTimings.push({
@@ -1162,11 +1200,15 @@ function displayResults(config, results) {
         totalPartial += suitePartial;
         totalSkipped += suiteSkipped;
 
-        suiteResults.push({ suite, suitePassed, suiteFailed, suiteTotal, suiteDurationMs, suitePartial, suiteSkipped });
+        // overlapping checks contribute once to elapsed time; retain their accumulated work separately.
+        const suiteDurationMs = Math.max(...suite.tests.map(t => t.result.endMs)) -
+            Math.min(...suite.tests.map(t => t.result.startMs));
+        suiteResults.push({ suite, suitePassed, suiteFailed, suiteTotal, suiteDurationMs, suiteWorkMs, suitePartial, suiteSkipped });
     }
 
     // Save summary JSON
     const summary = {
+        duration_ms: durationMs,
         total_tests: totalTests,
         total_passed: totalPassed,
         total_failed: totalFailed,
@@ -1180,6 +1222,7 @@ function displayResults(config, results) {
         level1_test_suites: suiteResults.map(s => ({
             name: s.suite.displayName, total: s.suiteTotal, passed: s.suitePassed, failed: s.suiteFailed,
             partial: s.suitePartial, skipped: s.suiteSkipped, duration_ms: s.suiteDurationMs,
+            work_duration_ms: s.suiteWorkMs,
             status: s.suiteFailed === 0 ? '✅ PASS' : '❌ FAIL',
         })),
         level2_c_tests: [...results.entries()].map(([bn, e]) => ({
@@ -1189,6 +1232,7 @@ function displayResults(config, results) {
             details: e.details || '', suites: e.subResults || [],
             log_file: e.logFile || '',
             duration_ms: e.durationMs || 0,
+            worker_slots: e.testInfo.allocatedSlots || 1,
             captured_case_duration_ms: e.capturedCaseDurationMs || 0,
             launch_timings: e.launchTimings || [],
             status: e.status,
@@ -1335,10 +1379,11 @@ async function main() {
     console.log('');
 
     // Run tests
+    const startMs = Date.now();
     const results = await runScheduledTests(tests);
 
     // Raw output still needs the same persisted summary and final exit verdict.
-    const { totalFailed } = displayResults(config, results);
+    const { totalFailed } = displayResults(config, results, Date.now() - startMs);
     process.exitCode = totalFailed > 0 ? 1 : 0;
 }
 

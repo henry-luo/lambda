@@ -66,6 +66,8 @@ LAYOUT_TEST_ENV ?= LAMBDA_AUTO_CLOSE=1 LAMBDA_POST_LOAD_SETTLE_MS=200
 # known-failure inventories are not part of the fast Radiant baseline gate.
 # Derive native build projects from the same suite selection used for execution.
 RADIANT_BASELINE_TEST_PROJECTS = $(shell node test/test_run.js --target=radiant --category=baseline --list-build-targets)
+# Native runners can use release code for whole-gate performance measurements.
+RADIANT_TEST_CONFIG ?= debug_native
 # These are the native projects selected by test-lambda-baseline. Keep this
 # list aligned with the runner's non-extended config projects; otherwise a
 # clean baseline run reports a missing executable. The concurrency and Node
@@ -2060,7 +2062,8 @@ LAYOUT_BASELINE_SUITES ?= form wpt-css-box wpt-css-text wpt-css-inline wpt-css-s
 # baseline regressions.
 # Keep one shared layout context per 100-file batch; the runner resets
 # document-scoped caches between files and reaps timed-out workers.
-LAYOUT_BASELINE_RUNNER = $(LAYOUT_TEST_ENV) node test/layout/test_radiant_layout.js --baseline-only --batch-size 100 --concurrency 1
+LAYOUT_BASELINE_CONCURRENCY ?= 4
+LAYOUT_BASELINE_RUNNER = $(LAYOUT_TEST_ENV) node test/layout/test_radiant_layout.js --baseline-only --batch-size 100 --concurrency $(LAYOUT_BASELINE_CONCURRENCY)
 # Layout categories clear temp/ before each batch; keep aggregate records outside
 # that workspace so a later suite cannot erase an earlier suite's result.
 LAYOUT_BASELINE_RESULTS = test_output/_layout_baseline_results.txt
@@ -2216,9 +2219,9 @@ test-svg-smil: build
 	@node test/svg/test_svg_smil.cjs $(ARGS)
 
 # All Radiant checks use the shared runner's JSON artifacts and final report.
-# Keep suite execution sequential: layout categories reuse and clear temp/.
+# Independent native suites share a worker budget; artifact-sharing checks remain exclusive.
 run-radiant-baseline:
-	@RADIANT_RENDER_JOBS=$(RADIANT_RENDER_JOBS) node test/test_run.js --target=radiant --category=baseline --sequential $(ARGS)
+	@RADIANT_RENDER_JOBS=$(RADIANT_RENDER_JOBS) node test/test_run.js --target=radiant --category=baseline $(ARGS)
 
 # Run only the shared layout baseline inventory; page snapshots belong to the
 # full Radiant baseline target.
@@ -3287,7 +3290,7 @@ build-radiant-baseline:
 	$(MAKE) generate-premake
 	cd build/premake && PATH="/clang64/bin:$$PATH" $(PREMAKE5) gmake --file=../../$(PREMAKE_FILE)
 	@echo "Building lambda-data static archive with $(TEST_JOBS) parallel jobs..."
-	$(MAKE) -C build/premake config=debug_native lambda-data-cpp -j$(TEST_JOBS) CC="$(CC)" CXX="$(CXX)" AR="$(AR)" RANLIB="$(RANLIB)"
+	$(MAKE) -C build/premake config=$(RADIANT_TEST_CONFIG) lambda-data-cpp -j$(TEST_JOBS) CC="$(CC)" CXX="$(CXX)" AR="$(AR)" RANLIB="$(RANLIB)"
 	@if [ -f .lambda_release_build ]; then \
 		echo "Rebuilding lambda.exe in release mode (incremental)..."; \
 		$(MAKE) -C build/premake config=release_native lambda -j$(TEST_JOBS) CC="$(CC)" CXX="$(CXX)" AR="$(AR)" RANLIB="$(RANLIB)"; \
@@ -3296,8 +3299,8 @@ build-radiant-baseline:
 		rm -f lambda.exe; \
 		$(MAKE) -C build/premake config=debug_native lambda -j$(TEST_JOBS) CC="$(CC)" CXX="$(CXX)" AR="$(AR)" RANLIB="$(RANLIB)"; \
 	fi
-	@echo "Building Radiant baseline test executables (debug mode, $(TEST_JOBS) jobs)..."
-	PATH="/clang64/bin:$$PATH" $(MAKE) -C build/premake config=debug_native $(RADIANT_BASELINE_TEST_PROJECTS) -j$(TEST_JOBS) CC="$(CC)" CXX="$(CXX)" AR="$(AR)" RANLIB="$(RANLIB)"
+	@echo "Building Radiant baseline test executables ($(RADIANT_TEST_CONFIG), $(TEST_JOBS) jobs)..."
+	PATH="/clang64/bin:$$PATH" $(MAKE) -C build/premake config=$(RADIANT_TEST_CONFIG) $(RADIANT_BASELINE_TEST_PROJECTS) -j$(TEST_JOBS) CC="$(CC)" CXX="$(CXX)" AR="$(AR)" RANLIB="$(RANLIB)"
 
 # Capture browser layout references using Puppeteer
 # Usage:

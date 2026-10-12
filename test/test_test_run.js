@@ -6,6 +6,7 @@ const assert = require('assert/strict');
 const { spawnSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
 const { snapshot_result } = require('./run_radiant_checks.js');
 
 const ROOT = path.resolve(__dirname, '..');
@@ -41,6 +42,12 @@ const filter = process.argv.find(arg => arg.startsWith('--gtest_filter=Fixture.'
 const workerCase = filter ? filter.slice('--gtest_filter=Fixture.'.length) : '';
 const scenario = !workerCase || workerCase === 'Case1' ? requestedScenario : 'pass';
 const output = process.argv.find(arg => arg.startsWith('--gtest_output=json:')).slice('--gtest_output=json:'.length);
+if (process.env.FAKE_SUITE_TRACE_DIR) {
+    const trace = { name, case: workerCase, start: Date.now(), cap: Number(process.env.LAMBDA_TEST_MAX_CONCURRENT),
+        args: process.argv.slice(2) };
+    process.on('exit', () => fs.writeFileSync(path.join(process.env.FAKE_SUITE_TRACE_DIR,
+        name + '-' + (workerCase || path.basename(output)) + '.json'), JSON.stringify({ ...trace, end: Date.now() })));
+}
 if (scenario === 'no-json') process.exit(1);
 if (scenario === 'invalid-json') { fs.writeFileSync(output, '{'); process.exit(0); }
 const data = { tests: scenario === 'empty' ? 0 : 4, failures: 0,
@@ -68,7 +75,8 @@ if (scenario === 'launches') {
 }
 fs.writeFileSync(output, JSON.stringify(data));
 if (scenario === 'crash') process.kill(process.pid, 'SIGKILL');
-if (workerCase && requestedScenario === 'parallel') setTimeout(() => process.exit(0), 200);
+if (process.env.FAKE_SUITE_TRACE_DIR) setTimeout(() => process.exit(0), 200);
+else if (workerCase && requestedScenario === 'parallel') setTimeout(() => process.exit(0), 200);
 else if (scenario === 'timeout') setInterval(() => {}, 1000);
 else process.exit(scenario === 'exit' ? 7 : 0);
 `;
@@ -84,12 +92,15 @@ function check(name, fn) {
     }
 }
 
-function runSelected(names, scenario = 'pass', extra = [], env = {}, parallel = false) {
+function runSelected(names, scenario = 'pass', extra = [], env = {}, parallel = false, previousSummary = null) {
     const output = path.join(fixture, 'results-' + results.length);
     fs.mkdirSync(output, { recursive: true });
     // A stale passing artifact must never hide a child that fails to write JSON.
     fs.writeFileSync(path.join(output, names[0] + '_results.json'), JSON.stringify({ tests: 99, failures: 0,
+        time: env.FAKE_SLOW_CASE ? '9s' : '0s',
         testsuites: env.FAKE_SLOW_CASE ? [{ name: 'Fixture', testsuite: [{ name: env.FAKE_SLOW_CASE, time: '9s' }] }] : [] }));
+    if (previousSummary) fs.writeFileSync(path.join(output, 'test_summary.json'),
+        JSON.stringify({ level2_c_tests: previousSummary }));
     const excluded = inventory.filter(t => !names.includes(t.baseName)).map(t => t.baseName);
     const executable = path.join(fixture, names[0] + '.exe');
     if (scenario === 'missing') fs.unlinkSync(executable);
@@ -100,6 +111,7 @@ function runSelected(names, scenario = 'pass', extra = [], env = {}, parallel = 
             LAMBDA_TEST_BIN_DIR: fixture, LAMBDA_TEST_OUTPUT_DIR: output,
             LAMBDA_TEST_IDLE_TIMEOUT: '1', FAKE_TEST: names[0], FAKE_SCENARIO: scenario,
             LAMBDA_RADIANT_VIEW_TEST_JOBS: parallel ? '4' : '1',
+            LAMBDA_SCENE3D_TEST_JOBS: '1',
             ...env,
         });
     } finally {
@@ -122,7 +134,7 @@ try {
         assert.ok(inventory.every(t => t.suite === 'radiant' && t.category === 'baseline'));
         const view = inventory.find(t => t.baseName === 'test_radiant_view_gtest');
         assert.ok(view.runnerArgs.includes('--gtest_filter=*-RadiantViewTest.Doom*'));
-        assert.equal(view.caseWorkers, 4);
+        assert.equal(view.caseWorkers, 3);
         assert.ok(view.caseWorkerArgs.includes('--radiant-case-worker'));
     });
     check('Native build targets deduplicate runner aliases', () => {
@@ -166,12 +178,15 @@ try {
         assert.deepEqual(result.launch_timings[0].phases, { load: 75.5, cleanup: 4.5 });
         assert.equal(result.launch_timings[0].log_file, 'view.log');
     });
-    for (const [limit, parallel] of [[2, true], [4, true], [4, false]]) {
-        check(`View case workers preserve inventory within ${limit} slots with ${parallel ? 'parallel' : 'sequential'} suites`, () => {
-            const trace = path.join(fixture, `trace-${limit}-${parallel}`);
+    for (const [runner, jobsEnv, workerArg] of [
+        ['test_radiant_view_gtest', 'LAMBDA_RADIANT_VIEW_TEST_JOBS', '--radiant-case-worker'],
+        ['test_scene3d_gtest', 'LAMBDA_SCENE3D_TEST_JOBS', null],
+    ]) for (const [limit, parallel] of [[2, true], [4, true], [4, false]]) {
+        check(`${runner} case workers preserve inventory within ${limit} slots with ${parallel ? 'parallel' : 'sequential'} suites`, () => {
+            const trace = path.join(fixture, `trace-${runner}-${limit}-${parallel}`);
             fs.mkdirSync(trace);
-            const { child, summary } = runSelected(['test_radiant_view_gtest'], 'parallel', [], {
-                LAMBDA_TEST_MAX_CONCURRENT: String(limit), LAMBDA_RADIANT_VIEW_TEST_JOBS: '4',
+            const { child, summary } = runSelected([runner], 'parallel', [], {
+                LAMBDA_TEST_MAX_CONCURRENT: String(limit), [jobsEnv]: '4',
                 FAKE_CASE_TRACE_DIR: trace,
             }, parallel);
             assert.equal(child.status, 0, child.stderr);
@@ -179,7 +194,7 @@ try {
             assert.equal(summary.total_tests, 4);
             const rows = fs.readdirSync(trace).map(file => JSON.parse(fs.readFileSync(path.join(trace, file), 'utf8')));
             assert.equal(rows.length, 4);
-            assert.ok(rows.every(row => row.cap === '1' && row.args.includes('--radiant-case-worker')));
+            assert.ok(rows.every(row => row.cap === '1' && (!workerArg || row.args.includes(workerArg))));
             const events = rows.flatMap(row => [{ time: row.start, delta: 1 }, { time: row.end, delta: -1 }])
                 .sort((a, b) => a.time - b.time || a.delta - b.delta);
             let active = 0, peak = 0;
@@ -248,9 +263,68 @@ try {
             assert.equal(data.args[data.args.indexOf('--suite') + 1], suite);
         }
     });
+    for (const budget of [5, 12]) check(`Nested pools share ${budget} slots, backfill light suites, and leave exclusive checks alone`, () => {
+        const trace = path.join(fixture, `trace-suites-${budget}`);
+        fs.mkdirSync(trace);
+        const names = ['test_ui_automation_gtest', 'test_radiant_view_gtest', 'test_rdt_vector_gtest', 'test_map_gtest'];
+        const { child, summary } = runSelected(names, 'pass', [], {
+            LAMBDA_TEST_MAX_CONCURRENT: String(budget), FAKE_SUITE_TRACE_DIR: trace,
+        }, true);
+        assert.equal(child.status, 0, child.stderr);
+        assert.equal(summary.level2_c_tests.length, names.length);
+        const rows = fs.readdirSync(trace).map(file => JSON.parse(fs.readFileSync(path.join(trace, file), 'utf8')));
+        const events = rows.flatMap(row => [{ time: row.start, delta: row.cap, name: row.name },
+            { time: row.end, delta: -row.cap, name: row.name }])
+            .sort((a, b) => a.time - b.time || a.delta - b.delta);
+        let active = 0, peak = 0, parallelPeak = 0;
+        for (const event of events) {
+            active += event.delta;
+            peak = Math.max(peak, active);
+            if (event.name !== 'test_map_gtest') parallelPeak = Math.max(parallelPeak, active);
+        }
+        assert.equal(active, 0);
+        const ceiling = Math.min(budget, Math.max(1, Math.floor(os.cpus().length * 1.25)));
+        assert.equal(peak, ceiling, `peak reserved workers: ${peak}`);
+        assert.ok(parallelPeak <= ceiling);
+        if (ceiling >= 5) {
+            const light = rows.find(row => row.name === 'test_rdt_vector_gtest');
+            assert.ok(rows.some(row => ['test_ui_automation_gtest', 'test_radiant_view_gtest'].includes(row.name) &&
+                row.start < light.end && light.start < row.end));
+        }
+        const graphics = rows.find(row => row.name === 'test_map_gtest');
+        assert.ok(rows.filter(row => row !== graphics).every(row => row.end <= graphics.start));
+        const suite = summary.level1_test_suites[0];
+        assert.ok(suite.duration_ms < suite.work_duration_ms);
+        assert.ok(summary.duration_ms >= suite.duration_ms);
+    });
+    check('Suite ordering uses subprocess wall time before assertion time', () => {
+        const trace = path.join(fixture, 'trace-suite-order');
+        fs.mkdirSync(trace);
+        const names = ['test_radiant_view_gtest', 'test_ui_automation_gtest'];
+        const { child } = runSelected(names, 'pass', [], {
+            LAMBDA_TEST_MAX_CONCURRENT: '4', FAKE_SUITE_TRACE_DIR: trace, FAKE_SLOW_CASE: 'Case3',
+        }, true, [{ test: names[0], duration_ms: 1000 }, { test: names[1], duration_ms: 10000 }]);
+        assert.equal(child.status, 0, child.stderr);
+        const rows = fs.readdirSync(trace).map(file => JSON.parse(fs.readFileSync(path.join(trace, file), 'utf8')));
+        const ui = rows.find(row => row.name === names[1]);
+        assert.ok(rows.filter(row => row.name === names[0]).every(row => row.start >= ui.end));
+    });
+    check('Native subprocess pools receive their allocated jobs', () => {
+        const names = ['test_page_load_gtest', 'test_layout_fuzzy_gtest'];
+        const { child, output, summary } = runSelected(names, 'pass', [], {
+            LAMBDA_TEST_MAX_CONCURRENT: '3',
+        }, true);
+        assert.equal(child.status, 0, child.stderr);
+        for (const name of names) {
+            const data = JSON.parse(fs.readFileSync(path.join(output, name + '_results.json'), 'utf8'));
+            assert.equal(data.args[data.args.indexOf('--jobs') + 1], '2');
+            assert.equal(summary.level2_c_tests.find(row => row.test === name).worker_slots, 2);
+        }
+    });
     // Keep adapter tests independent of native binaries and the external corpus.
     fs.writeFileSync(path.join(fixture, 'make'), `#!/usr/bin/env node
 const fs = require('fs');
+if (process.env.FAKE_LAYOUT_ARGS) fs.writeFileSync(process.env.FAKE_LAYOUT_ARGS, JSON.stringify(process.argv.slice(2)));
 const output = process.argv.find(arg => arg.startsWith('LAYOUT_BASELINE_RESULTS=')).slice('LAYOUT_BASELINE_RESULTS='.length);
 if (process.env.FAKE_LAYOUT === 'missing') process.exit(0);
 fs.writeFileSync(output, 'form|✅ PASS|3|2|0|1|2\\n');
@@ -274,6 +348,17 @@ process.exit(process.env.FAKE_LAYOUT === 'exit' ? 7 : 0);
             }
         });
     }
+    check('Layout batch workers obey the shared process ceiling', () => {
+        const output = path.join(fixture, 'layout-budget.json');
+        const trace = path.join(fixture, 'layout-args.json');
+        const child = spawnSync(process.execPath, ['test/run_radiant_checks.js', 'layout', '--report', output], {
+            cwd: ROOT, encoding: 'utf8', timeout: 15000,
+            env: { ...process.env, PATH: fixture + path.delimiter + process.env.PATH, FAKE_LAYOUT: 'pass',
+                FAKE_LAYOUT_ARGS: trace, LAMBDA_TEST_MAX_CONCURRENT: '1', LAYOUT_BASELINE_CONCURRENCY: '8' },
+        });
+        assert.equal(child.status, 0, child.stderr);
+        assert.ok(JSON.parse(fs.readFileSync(trace, 'utf8')).includes('LAYOUT_BASELINE_CONCURRENCY=1'));
+    });
     check('Snapshot comparator owns the aggregate regression verdict', () => {
         const result = snapshot_result({ code: 1, signal: null },
             { code: 0, signal: null, output: 'Current: 51 tests, avg elements 92.1%, avg text 92.6%\n' });

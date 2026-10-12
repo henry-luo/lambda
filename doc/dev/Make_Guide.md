@@ -1,6 +1,6 @@
 # Make Targets Guide
 
-> **Last verified against tree:** 2026-10-11 *(Radiant baseline targets)*
+> **Last verified against tree:** 2026-10-12 *(Radiant baseline targets)*
 
 Complete reference for all `make` targets in the Lambda project.
 
@@ -110,7 +110,7 @@ When `grammar.js` is modified, the Lambda CST parser artifacts are regenerated b
 | `test-all-baseline` | Run ALL baseline test suites. **Must pass 100%.** |
 | `test-lambda-baseline` | Run Lambda engine baseline tests only. **Must pass 100%.** |
 | `test-input-baseline` | Run input parser baselines: HTML5 WPT, CommonMark, YAML, ASCII Math, LaTeX Math. |
-| `test-radiant-baseline` | Build and run the `radiant` suite baseline through `test/test_run.js`: native tests, layout baselines, page snapshot, UI/DOM fixtures and render visual checks, with one console/JSON report. Native build targets come from the same configured selection. |
+| `test-radiant-baseline` | Build and run the `radiant` suite baseline through `test/test_run.js`: native tests, layout baselines, page snapshot, UI/DOM fixtures and render visual checks, with one console/JSON report. Native build targets come from the same configured selection. Independent checks share a worker budget; artifact-sharing checks remain exclusive. `RADIANT_TEST_CONFIG=release_native` selects optimized native runners after `make build-release-compile`; the default remains `debug_native`. |
 | `run-radiant-baseline` | Run the same selection without rebuilding. `ARGS` accepts shared runner options; `--list` prints its inventory. |
 | `test-radiant-online` | Build the standard release package and standalone online launcher; load real URLs with ABI-matched bundled modules and check shutdown allocations with `MEMTRACK_MODE=STATS` by default (D4.2.5v3). |
 | `test-layout-baseline` | Run Radiant layout baseline tests. **Must pass 100%.** |

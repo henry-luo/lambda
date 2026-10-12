@@ -34,13 +34,21 @@ function count(output, pattern) {
     return match ? Number(match[1]) : 0;
 }
 
+function checkJobs(requested) {
+    const limit = Number(process.env.LAMBDA_TEST_MAX_CONCURRENT);
+    const ceiling = Number.isInteger(limit) && limit > 0 ? limit : Math.max(1, os.cpus().length - 1);
+    const jobs = Number(requested);
+    return Math.min(ceiling, Number.isInteger(jobs) && jobs > 0 ? jobs : ceiling);
+}
+
 async function layout(report) {
     // The layout-only Make target owns baseline selection and classification.
     // Its records live outside temp/, which each category clears before running.
     const resultFile = path.join(path.dirname(report), '_layout_baseline_results.txt');
     fs.rmSync(resultFile, { force: true });
     const child = await run('make', ['--no-print-directory', 'run-layout-baseline-suites',
-        `LAYOUT_BASELINE_RESULTS=${resultFile}`]);
+        `LAYOUT_BASELINE_RESULTS=${resultFile}`,
+        `LAYOUT_BASELINE_CONCURRENCY=${checkJobs(process.env.LAYOUT_BASELINE_CONCURRENCY || 4)}`]);
     const suites = fs.readFileSync(resultFile, 'utf8').trim().split('\n').filter(Boolean).map(line => {
         const [name, status, passed, partial, failed, skipped, elapsed] = line.split('|');
         const numbers = [passed, partial, failed, skipped, elapsed].map(Number);
@@ -63,7 +71,7 @@ async function layout(report) {
 
 async function snapshot() {
     const measured = await run(process.execPath, ['test/layout/test_radiant_layout.js',
-        '--engine', 'lambda-css', '-c', 'page', '--json', '-j', '5']);
+        '--engine', 'lambda-css', '-c', 'page', '--json', '-j', String(checkJobs(5))]);
     const checked = await run(process.execPath, ['test/layout/layout_suite_snapshot.js',
         '--check', 'page'], { input: measured.output });
     return snapshot_result(measured, checked);
@@ -80,7 +88,7 @@ function snapshot_result(measured, checked) {
 }
 
 async function render() {
-    const jobs = process.env.RADIANT_RENDER_JOBS || String(Math.max(1, os.cpus().length - 1));
+    const jobs = String(checkJobs(process.env.RADIANT_RENDER_JOBS));
     const child = await run(process.execPath, ['test_radiant_render.js', '-j', jobs, '--baseline'],
         { cwd: path.join(ROOT, 'test/render') });
     const line = child.output.split('\n').reverse().find(line => line.startsWith('Results:')) || '';

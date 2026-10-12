@@ -11,6 +11,7 @@ import search: .search
 import editing: .edit
 import media_playback: .media_playback
 import bookmark: .bookmark
+import index: .index
 
 let fields=["active_id","selected_ids","window","collapsed_groups","expanded_events","query","filters","view","theme"]
 
@@ -57,17 +58,17 @@ pub fn reconcile(spec, current) {
     let source=if (current==null) initial(spec) else current;
     let controlled=map([for (field in fields where c.has(spec.value,field)) (field,spec.value[field])]);
     let merged={*:source,*:controlled};
-    let ids=spec.events |> ~.id;
-    let groups=spec.groups |> ~.id;
-    let visible=story.items(spec,merged);
-    let active=if (c.has(spec.value,"active_id") or merged.active_id==null or contains(visible |> ~.id,merged.active_id)) merged.active_id
-        else visible_neighbor(spec,merged,visible |> ~.id);
+    let indexed=spec._timeline!=null and spec.events==spec._timeline.index.events;
+    let ids=if (indexed) [] else spec.events |> ~.id;
+    let groups=if (indexed) [] else spec.groups |> ~.id;
+    let active=if (c.has(spec.value,"active_id") or merged.active_id==null or story.contains_item(spec,merged,merged.active_id)) merged.active_id
+        else visible_neighbor(spec,merged,story.items(spec,merged) |> ~.id);
     {*:merged,active_id:active,revision:spec.source.revision,
         draft:if (source.revision!=spec.source.revision) null else merged.draft,
         edit_gesture:if (source.revision!=spec.source.revision) null else merged.edit_gesture,
-        selected_ids:[for (id in c.items(merged.selected_ids) where contains(ids,id)) id],
-        expanded_events:[for (id in c.items(merged.expanded_events) where contains(ids,id)) id],
-        collapsed_groups:[for (id in c.items(merged.collapsed_groups) where contains(groups,id)) id]}
+        selected_ids:[for (id in c.items(merged.selected_ids) where if (indexed) index.event(spec._timeline.index,id)!=null else contains(ids,id)) id],
+        expanded_events:[for (id in c.items(merged.expanded_events) where if (indexed) index.event(spec._timeline.index,id)!=null else contains(ids,id)) id],
+        collapsed_groups:[for (id in c.items(merged.collapsed_groups) where if (indexed) index.group(spec._timeline.index,id)!=null else contains(groups,id)) id]}
 }
 
 fn notification(spec, action, field, old, value, revision) => {

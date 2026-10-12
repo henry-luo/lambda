@@ -1,6 +1,6 @@
 # Lambda Timeline Chart Package — Proposal
 
-> **Status:** proposed, 2026-10-11. The user selected the package namespace,
+> **Status:** partially implemented; scope revised 2026-10-12. The user selected the package namespace,
 > comprehensive feature scope, and absorption of dtna Timeline; the schema and
 > detailed contracts below are proposals, not claims of implemented support.
 > **Package:** `lambda.chart.timeline`.
@@ -13,7 +13,7 @@
 |---|---|---|
 | Shipped source package and import path | **D7.2.1–D7.2.4, D7.2.6** | Use ordinary modules under `lmd/package/chart/`; no resolver exception or native timeline widget. |
 | Logical elements and presentation | **S2.4.3v3, S12.1.3** | Qualified timeline elements are ordinary data, presented by imported views. |
-| Pure rendering and procedural effects | **S12.1.1v2–S12.1.3** | Rendering consumes explicit inputs; handlers own input, loading, playback, and export effects. |
+| Pure rendering and procedural effects | **S12.1.1v2–S12.1.3** | Rendering consumes explicit inputs; handlers own input and playback effects. |
 | State, captures, and value semantics | **S9.1.4, S9.1.7, S9.2.4v2, S9.3.1; D6.2.3v2** | State belongs to each live source/template instance, with immutable specifications and no mutable package singleton. |
 | Ordering and errors | **S6.2.2v3–S6.2.3, S7.4.1–S7.4.2** | Preserve exact comparisons and stable ties; diagnose invalid specifications through the documented error channel. |
 | Native ownership and host boundary | **D4.5.1v4, D5.3.3, D7.5.3** | Reuse general Radiant mechanisms through the established boundary; precisely root retained values. |
@@ -21,14 +21,14 @@
 
 The formal specifications remain authoritative. This proposal introduces package
 contracts within those rulings; it does not ratify a new language, identity,
-calendar, accessibility, or host-capability contract.
+calendar or host-capability contract.
 
 ## 1. Product contract
 
 Provide one timeline package that combines the timeline capabilities of
 **React Chrono, TimelineJS, vis-timeline, and amCharts 5 Timeline**, expressed as
 Lambda elements and functions. The target is their combined user-visible timeline
-feature set, including the controls needed to configure it. JavaScript object
+feature set within the scope exclusions below, including its configuration controls. JavaScript object
 models, React hooks, framework packaging, and vendor-specific method spellings
 receive Lambda equivalents rather than becoming new language requirements.
 
@@ -51,14 +51,20 @@ equally spaced cards must never imply that equal distances represent equal
 elapsed time. A time-scaled timeline keeps its date mapping while labels and
 cards move to avoid collisions.
 
-The initial live host is **native Radiant**. Static HTML, SVG, PNG, JPEG, and PDF
-are supported presentations or exports with explicit resource and snapshot
-policies. Interactive browser distribution is a separate host adapter and remains
-in the full feature target; serializing HTML does not preserve Lambda handlers.
-Engine or host gaps remain visible requirements, rather than being counted as
-implemented because a placeholder renders.
+The live host is **native Radiant**. On 2026-10-12 the user removed interactive
+browser delivery, automatic resource lifecycle management, export, and
+accessibility/localization requirements from this proposal. Existing helpers and
+compatibility fields for these facilities may remain; they do not gate acceptance.
+Application procedures may supply already loaded data and media. Playback and
+immutable source replacement remain in scope (S12.1.1v2/S12.1.3, S9.1.4/S9.3.1).
+
+The active implementation tranche is scalability and keyed animation. Other
+retained feature families keep their existing open acceptance records.
 
 ## 2. Proposed element schema
+
+Existing `locale`, `messages`, resource-loading, and `export` fields/APIs are
+optional compatibility facilities, outside this proposal's acceptance requirements.
 
 ### 2.1 Authoring example
 
@@ -423,7 +429,7 @@ revision, and a session token; restarting, seeking, source replacement, and a ne
 repeat cycle retire the old session. Pure reduction returns commands for the
 host/application to execute (**S12.1.1v2/S12.1.3, S13.1.1v2–S13.1.5**).
 
-### 2.8 Media and resource schema
+### 2.8 Media and application-supplied data
 
 `<timeline.media>` accepts `id`, `kind`, `src`, `mime`, `provider`, `poster`,
 `thumbnail`, `alt`, `caption`, `credit`, `link`, `target`, dimensions, fit/alignment,
@@ -431,10 +437,10 @@ controls, muted/autoplay/loop, and start/end offsets. Its body may provide an
 already constructed element or a fallback. Kinds are `'image'`, `'video'`,
 `'audio'`, `'document'`, `'map'`, `'embed'`, and `'element'`.
 
-`<timeline.media_options>` configures lazy/eager loading, prefetch distance,
-concurrency, timeout/retry, active-event playback, pause-on-deactivate, aspect
-ratio reservation, fullscreen/lightbox behavior, providers, and error/fallback
-presentations. Providers normalize resource descriptions; they do not inject
+`<timeline.media_options>` configures active-event playback, pause-on-deactivate,
+aspect ratio reservation, fullscreen/lightbox behavior, providers, and fallback
+presentations. Automatic fetch, prefetch, retry, timeout and disposal are outside
+the revised requirements. Providers normalize resource descriptions; they do not inject
 JavaScript into pure Lambda evaluation. Images, self-hosted audio/video, video
 services, audio services, document services, maps, encyclopedic content, social
 embeds, and generic hosted HTML have an adapter/capability inventory.
@@ -518,10 +524,9 @@ classes through this same interface. The core has no dependency on dtna.
 
 ## 3. Feature inventory
 
-Every row below is in the requested **full-scope target**. The references identify
+Every row below is in the revised **in-scope target**. The references identify
 the origin of a capability; the proposed API is Lambda's own. Delivery stages
-sequence the work without discarding difficult rows. Historical uncertainty,
-cross-format export, and deterministic native presentation additionally strengthen
+sequence the work without discarding difficult rows. Historical uncertainty and deterministic native presentation additionally strengthen
 the combined design.
 
 Reference abbreviations: **RC** React Chrono, **KL** Knight Lab TimelineJS,
@@ -545,7 +550,7 @@ They are source labels, not a new design-ruling ledger.
 | Selection | Single/multiple, modifier/range/contiguous/per-group selection, deselection, hover, tooltips, item visibility and disablement. | `interaction`, event flags | VT, RC |
 | Search and filters | Search across configured fields, highlighting, match navigation/counts, empty results, tags/groups/time filtering, quick jump. | `search`, `toolbar` | RC; Lambda extension |
 | Editing | Create/update/delete, move date/group, resize duration, group changes, snapping, drag/drop, permission overrides, confirmation and validation. | `edit`, requests | VT |
-| Live data | Add/remove/reorder/update by ID, immutable source revisions, retain state, avoid stale validation/resource completions. | `convert`, `update`, resource state | VT, RC |
+| Live data | Add/remove/reorder/update by ID, immutable source revisions, retain state, reject stale edit validation. | `convert`, `update`, resource state | VT, RC |
 | Multimedia | Images, video/audio, captions/credits/alt text, media links, poster/thumbnail, lazy loading, fit/alignment, active-player handling. | `media`, `media_options` | RC, KL |
 | Hosted content | Video/audio/document/map/social providers, generic embeds, custom content, per-provider status and fallback. | Provider adapters | KL, RC |
 | Presentation controls | Toolbar order/position/sticky sizing, custom labels/icons, quick-jump, fullscreen, lightbox, layout/theme switches. | `toolbar`, `media_options` | RC |
@@ -554,14 +559,30 @@ They are source labels, not a new design-ruling ledger.
 | Shape vocabulary | Straight, serpentine, spiral, arbitrary path/points, smoothing, levels/angles/radii, tangent labels, lane offsets. | `coordinate` | AC |
 | Quantitative overlays | Multiple scales/axes/series; line/step/area/column/point, fills, stacking, legend toggles, cursors and annotations. | `series`, `axis` | AC |
 | Visual customization | Theme presets, dark/high-contrast, semantic classes/styles/renderers, per-element typography, custom fonts, visual states. | `theme`, `parts` | RC, KL, VT, AC |
-| Accessibility | Semantic chronological list, labelled controls, keyboard/focus, screen-reader descriptions, contrast, non-color cues, motion preference. | Root, messages, presenters | RC; Lambda requirement |
-| Localization | Dates/numbers/era labels, timezone, RTL, every control/status/help string, formatter callbacks and message interpolation. | `messages`, `scale`, root | RC, KL, VT |
 | Authoring/import | Element/map forms, records/encoding, JSON, CSV/TSV, Google Sheets, named datasets, supported upstream data adapters. | `data`, `source`, `convert` | KL, VT, RC |
 | Composition | Shared chart parameters, linked views, annotations, dashboard panels, chart grammar SVG adapter, reusable render callbacks. | `series`, chart adapter | AC, VT; chart reuse |
-| Snapshot/export | Static HTML, SVG/PNG/JPEG/PDF, print/full-domain/current-window views, expanded content, JSON/CSV/XLSX/HTML/PDF data export, deterministic time/font/media inputs. | `export`, explicit presenter | AC; Lambda requirement |
-| Scale and diagnostics | Windowed rendering, media prefetch, level-of-detail clusters, bounded work, capability reports, explicit empty/error/loading states. | `cluster`, resources, layout | VT, RC; Lambda requirement |
+| Scale and diagnostics | Indexed window queries, cached visibility, clustering before rich-card measurement, bounded work, release benchmarks and capability reports. | `cluster`, resources, layout | VT, RC; Lambda requirement |
 
-### 3.1 Parity accounting
+### 3.1 Scalability and animation contract
+
+Retained preparation builds an immutable exact interval index and caches visibility
+by source, query, filters, and collapsed groups. Window updates query that index;
+selection and playback do not renormalize the source. Clustering occurs before
+rich-card measurement. A layout reports examined candidates and measured cards so
+bounded-work assertions accompany release timing and memory measurements.
+Exact interval ordering and window endpoints follow S6.2.2v3/S6.2.3.
+
+`animate: true` enables keyed enter/update/exit. A map configures nonnegative
+`duration` (default 300 ms), `delay` (default 0), `easing` (shared chart easing or a
+pure callback), and boolean `enter`, `update`, `exit`, `guides` switches. Omission
+or false disables these transitions. `motion: reduced/none` settles immediately.
+The retained displayed geometry and SVG are the source of an interrupted
+transition. Exiting cards are passive and retire at completion. Frame work stops
+when animation and playback settle. `render_frame` accepts `{time_ms, previous}`,
+where `previous` is `{plan, svg}`, for deterministic explicit sampling
+(S12.1.1v2/S12.1.3, S9.1.4/S9.3.1, D7.5.3).
+
+### 3.2 Parity accounting
 
 Before implementation, freeze each upstream reference to a release/commit and
 capture its complete timeline option and example inventory. Each public option,
@@ -595,15 +616,11 @@ or keyboard support. Later upstream additions require an explicit scope update;
 | `timeline.apply_edit(spec, request)` | Revalidate a proposed immutable edit against the current source revision, stable IDs, permissions, and schema; return the candidate source or a value error. |
 | `timeline.bookmark(spec, id)` | Encode a stable chart/event URL fragment, including an authored introduction. |
 | `timeline.convert(data, format, options = {})` | Pure adapter into canonical events/groups/configuration. |
-| `timeline.capabilities(host)` | Explicit capability description for providers, playback, fullscreen, browser behavior, and export. |
-| `timeline.export_data(spec, format = "json", options = {}, snapshot = null)` | Pure source JSON, CSV text, XLSX filesystem tree, or accessible HTML/PDF table source; stable IDs and authored date precision survive export. |
-| `timeline.export_document(spec, format = "html", viewport = null, options = {}, snapshot = null)` | Pure frozen HTML/SVG source for a selected window, dataset scope, animation time, expansion, and explicit media/resource policy. |
-| `timeline.save(spec, destination, format = null, viewport = null, options = {}, snapshot = null)` | Procedural encoding/writing through shared output services; raised errors follow S12.1.1v2/S7.4.2. |
+| `timeline.capabilities(host)` | Explicit native capability description for providers, playback and fullscreen. |
 
 All new chart-facing functions use **value errors (S7.4.1)**, matching the chart
 facade. The dtna constructor retains its existing raised-error API and converts a
-core diagnostic at that boundary (**S7.4.2**). Procedural application resource and
-export operations engage their own raised errors normally; no error is swallowed
+core diagnostic at that boundary (**S7.4.2**). Procedural application operations engage their own raised errors normally; no error is swallowed
 to make an unsupported feature appear successful.
 
 The controllable state projection contains `active_id`, `selected_ids`, `window`,
@@ -611,17 +628,17 @@ The controllable state projection contains `active_id`, `selected_ids`, `window`
 Pending gestures, measured geometry, resource status, slideshow phase, request
 tokens, and focus bookkeeping are instance internals, not serialized source data.
 Controlled fields emit change requests; uncontrolled fields commit through the
-same reducer. Snapshot/export accepts a plain immutable projection.
+same reducer. Explicit frame sampling accepts a plain immutable projection.
 Control is determined by field presence, not truthiness: `active_id:null` clears a
 controlled active event and `selected_ids:[]` clears selection. Omitted fields
 remain instance-owned. This preserves Lambda's null/empty-value distinctions.
 
 Public actions include activate/focus, first/previous/next/last, select/toggle/clear,
 set-window/pan/zoom/fit, search/filter, collapse/expand, set-view/set-theme,
-play/pause/resume/seek/stop, edit-request/accept/reject/cancel, and resource-result.
+play/pause/resume/seek/stop and edit-request/accept/reject/cancel.
 The live template emits `timeline_activate`, `timeline_select`,
 `timeline_window_change`, `timeline_search`, `timeline_edit_request`,
-`timeline_edit_commit`, `timeline_playback`, `timeline_media`, `timeline_resource`, and
+`timeline_edit_commit`, `timeline_playback`, `timeline_media`, and
 `timeline_error`. Each payload includes chart ID, affected stable IDs, source
 revision, action origin, and the relevant old/new values. Per-frame animation
 notifications are opt-in so they cannot flood normal change listeners.
@@ -714,50 +731,13 @@ content works inside `foreignObject`. Pure callbacks are measured with the same
 fonts/resources used for painting, and cache invalidation follows explicit source,
 theme, viewport, resource, and font revisions.
 
-### 6.2 Accessibility and localization
-
-Provide an accessible chronological list and grouped headings even for a spiral
-or dense graphical view. Visual positioning must not scramble reading order.
-Use semantic buttons and inputs for controls, labelled time windows/cursors,
-visible focus, non-color-only state cues, and descriptive media/cluster summaries.
-Virtualization retains a focusable active event and a way to navigate to events
-outside the painted window; it cannot remove the only accessible representation.
-
-Arrow keys follow orientation; Home/End navigate to first/last; Enter activates;
-Escape cancels a gesture or exits a modal/fullscreen view. Nested text inputs
-and media controls retain their normal keys. Zoom/pan have keyboard equivalents.
-Slideshow does not steal focus or announce every animation frame. Accessibility
-conformance is tested behavior, not an inherited claim from an upstream README.
-
-All controls, status messages, date labels, era labels, search counts, help, and
-export text use the locale/message model. RTL mirrors presentation and logical
-start/end while preserving the intended chronology and keyboard mapping. English
-fallbacks and explicit formatting callbacks are deterministic.
-
-Messages accept a string, a pure callback receiving the raw interpolation
-parameters, or plural forms `{zero?, one?, two?, few?, many?, other}`. The locale
-selects the form from `count`; `other` is the fallback. String interpolation
-formats numeric parameters with locale digits. Authored messages override bundled
-translations, and unsupported languages use English fallbacks. The current bundle
-provides English, Chinese, French, and Arabic; additional reference languages
-remain part of the parity inventory. This is explicit package data, not an ambient
-locale service (**S12.1.1v2/S12.1.3**).
-
-Scale formatters receive `(date_record, {locale, timezone, precision})`. Explicit
-`display_date` overrides generated labels. Date patterns support Gregorian year,
-month/day names, weekdays, 12/24-hour clocks, milliseconds, offsets, era labels,
-and `[literal text]`; literal digits remain authored. Canonical calendar records
-always retain astronomical years. `numbering` selects display numbering; adapters
-perform input conversion. Exact default numeric labels retain integer/decimal
-coordinates; explicit number patterns reuse the chart numeric formatter.
-
-### 6.3 Host/media readiness
+### 6.2 Native host/media readiness
 
 The current [support matrix](../doc/HTML_CSS_SVG_Support.md) describes local
 audio/video as partial, macOS-specific support, with empty static render boxes;
 the [media/webview design](../doc/dev/radiant/RAD_22_Media_Webview.md) describes
 the relevant host mechanisms. Therefore native multimedia, cross-platform
-playback, provider embeds, fullscreen, posters, and static media snapshots need
+playback, provider embeds, fullscreen and posters need
 explicit capability tests and potentially general engine work. Their full
 requirements remain in scope.
 
@@ -766,30 +746,6 @@ tags, ad hoc JavaScript engine, direct `lambda-rt`→Radiant link, vendor patch,
 conservative stack scanning is introduced. General engine fixes require a root
 cause and focused regression evidence, with retained data owned according to
 **D4.5.1v4/D5.3.3**.
-
-### 6.4 Static and browser output
-
-Static export records window/full-domain selection, active event, expansion,
-explicit animation time, locale/zone, fonts, loaded-resource revision, and page
-size. Media use a chosen frame, poster, authored fallback, or a visible unsupported
-diagnostic. Arbitrary rich content requires an explicit conversion, snapshot, or
-error policy; it is never quietly omitted. Full-domain export bypasses viewport
-virtualization and clusters only if requested. Long card histories can paginate
-with repeated headings and controlled event splitting.
-
-Browser delivery requires a tested event/state host adapter or a deliberately
-selected compatibility renderer. Native Lambda handlers do not survive static
-HTML serialization. A browser adapter must preserve this schema, state model,
-and feature manifest; embedding an upstream demo is not implementation of the
-Lambda package. Source/data export includes stable IDs, source metadata, and
-original date precision, independent of visual snapshots.
-
-Data export supports JSON, CSV, XLSX, HTML tables, and PDF tables, including field
-selection/order, localized headings, date formatting, filename, and current versus
-complete dataset. Use shared format/export services; a missing XLSX writer or host
-print capability is a tracked dependency, not a reason to remove that format from
-the full feature target. Export menus and programmatic export issue the same
-procedural request.
 
 ## 7. Prior art and reference sources
 
@@ -865,9 +821,9 @@ shared helpers when appropriate rather than copying the network clustering code.
 | Foundation | Pin references; machine-readable feature manifest; schema/ID/date normalization; namespace migration; basic cards/axis SVG. | No animation regression; element/map equivalence; exact/stable date ordering and diagnostics. |
 | dtna absorption | Shared core layout/presenter; dtna adapter and skin; pending/reverse/aliases; source-preserving state delegation. | Existing dtna goldens, interactions, pixels, classes, and repeated-parent-render state retention. |
 | Time exploration | Windows/axes, groups/subgroups, stacking, selection, search, clusters, navigation, linked parameters, editing. | Pointer/keyboard/touch/reducer equivalence; dense-event and stale-request cases. |
-| Narrative and media | Story/navigation/bookmarks, nested histories, media providers/resources, slideshow, accessibility and locale coverage. | Live capabilities tested per host; no unsupported player or blocked resource counted complete. |
+| Narrative and media | Story/navigation/bookmarks, nested histories, media providers and slideshow. | Live capabilities tested per host; no unsupported player or blocked resource counted complete. |
 | Curved timelines | Shared arc-distance projection/inversion, serpentine/spiral/custom path, overlays and guide/legend integration. | Geometry/picking agreement and readable measured labels across shapes and zoom. |
-| Full parity and distribution | Full-domain/static/data export, browser host adapter, scalability work, complete reference manifest and documentation. | Every in-scope upstream feature has a working equivalent and acceptance evidence, or remains visibly incomplete. |
+| Full parity and distribution | Scalability and keyed motion, complete retained reference manifest and documentation. | Every retained upstream feature has a working equivalent and acceptance evidence, or remains visibly incomplete. |
 
 Full-scope completion requires all stages; stage boundaries do not redefine the
 requested feature set. Detailed implementation plans/progress belong in a future
@@ -890,25 +846,18 @@ requested feature set. Detailed implementation plans/progress belong in a future
 5. **Ownership:** two independent timelines, repeated parent renders, source/data
    replacement, resize/layout-mode changes, pending completion after removal,
    precise-root GC stress, interruption and reduced motion, T0/AUTO/MIR agreement.
-6. **Accessibility:** chronological reading order, names/roles, keyboard-only
-   operation, screen-reader summaries, visible focus, virtualized navigation,
-   reduced motion, and translated messages. Test against concrete criteria;
-   never claim certification from visual similarity.
-7. **Export:** explicit-time determinism, full versus current domain, pagination,
-   expanded/filtered states, offline/local resources, posters/fallbacks, invalid
-   rich-content policies, and preserved IDs/precision in data round trips.
-8. **Reference parity:** pinned official examples exercised in isolated reference
-   harnesses, with screenshots, actions, outputs, source hashes, fonts, viewport,
-   locale/zone, and motion settings. Use Puppeteer's headless shell on macOS and
+6. **Reference parity:** pinned official examples exercised in isolated reference
+   harnesses, with screenshots, actions, outputs, source hashes, fonts, viewport, zone, and motion settings; evaluate native equivalents of
+   retained capabilities only. Use Puppeteer's headless shell on macOS and
    keep all generated captures under `./temp/`.
-9. **Scalability:** release-build benchmarks at 100, 1,000, 10,000, and 100,000
+7. **Scalability:** release-build benchmarks at 100, 1,000, 10,000, and 100,000
    events, including identical timestamps, many groups, expensive cards, and large
    year magnitudes. Measure normalization, layout, viewport updates, memory, and
    interaction latency; establish budgets from measurements rather than inventing
    unverified performance claims. Window queries should scale with visible data
    plus index lookup, not rescan/measure all offscreen cards on every frame.
 
-New Lambda test scripts receive matching golden `.txt` files. Package changes
+Removed requirements do not gate the revised scope. New Lambda test scripts receive matching golden `.txt` files. Package changes
 run the Lambda baseline; changes to Radiant run its baseline and applicable
 layout lint. Engine defects are fixed at their root or reported as open; tests
 and capability results must not be weakened to manufacture feature parity.

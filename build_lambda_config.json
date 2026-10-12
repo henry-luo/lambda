@@ -3442,6 +3442,8 @@
           {
             "source": "test/test_scene3d_gtest.cpp",
             "name": "Native Scene3D Tests",
+            "case_workers": 2,
+            "case_workers_env": "LAMBDA_SCENE3D_TEST_JOBS",
             "dependencies": [
               "lambda-rt",
               "node-core",
@@ -3473,8 +3475,7 @@
               ]
             },
             "binary": "test_scene3d_gtest.exe",
-            "icon": "\ud83c\udfa8",
-            "parallel": false
+            "icon": "\ud83c\udfa8"
           },
           {
             "source": "test/test_map_gtest.cpp",
@@ -4025,6 +4026,8 @@
           {
             "source": "test/test_ui_automation_gtest.cpp",
             "name": "UI Automation Tests",
+            "worker_slots": 7,
+            "worker_slots_env": "LAMBDA_UI_TEST_JOBS",
             "dependencies": [
               "lambda-data"
             ],
@@ -4043,6 +4046,8 @@
           {
             "source": "test/test_ui_automation_gtest.cpp",
             "name": "Radiant View UI Fixtures",
+            "worker_slots": 2,
+            "worker_slots_env": "LAMBDA_UI_TEST_JOBS",
             "runner_only": true,
             "runner_name": "test_radiant_view_ui_gtest",
             "runner_args": [
@@ -4054,12 +4059,13 @@
               "gtest",
               "gtest_main"
             ],
-            "parallel": false,
             "icon": "\ud83d\uddb1\ufe0f"
           },
           {
             "source": "test/test_ui_automation_gtest.cpp",
             "name": "DOM UI Integration Tests",
+            "worker_slots": 2,
+            "worker_slots_env": "LAMBDA_UI_TEST_JOBS",
             "runner_only": true,
             "runner_name": "test_dom_ui_gtest",
             "runner_args": [
@@ -4071,12 +4077,13 @@
               "gtest",
               "gtest_main"
             ],
-            "parallel": false,
             "icon": "\ud83d\uddb1\ufe0f"
           },
           {
             "source": "test/test_page_load_gtest.cpp",
             "name": "Page Load Tests",
+            "worker_slots": 2,
+            "worker_args": ["--jobs"],
             "dependencies": [
               "lambda-lib"
             ],
@@ -4091,7 +4098,7 @@
           {
             "source": "test/test_radiant_view_gtest.cpp",
             "name": "Radiant View Tests",
-            "case_workers": 4,
+            "case_workers": 3,
             "case_workers_env": "LAMBDA_RADIANT_VIEW_TEST_JOBS",
             "case_worker_args": [
               "--radiant-case-worker"
@@ -4113,6 +4120,8 @@
           {
             "source": "test/test_layout_fuzzy_gtest.cpp",
             "name": "Layout Fuzzy Tests",
+            "worker_slots": 2,
+            "worker_args": ["--jobs"],
             "dependencies": [
               "lambda-lib"
             ],
