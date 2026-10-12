@@ -1,0 +1,29 @@
+<!doctype html><meta charset=utf-8><title>Selected list and border images survive mutation and density changes</title>
+<style>html,body{margin:0;background:white}.row{width:120px;height:40px;padding-left:32px;box-sizing:border-box}ul{margin:0;padding:0}li{font:12px/12px monospace;height:40px;list-style-type:none}.border{width:54px;height:24px;border:3px solid transparent;border-image-slice:25%;border-image-width:auto}.controls{position:absolute;left:160px;top:0}#inherited{list-style-image:inherit}#explicit-none{list-style-image:none}</style>
+<div class=controls><button id=change>Change</button><button id=restore>Restore</button><button id=clear>Clear</button><button id=transform>Transform</button></div>
+<div class=row id=list-row><ul><li id=list></li></ul></div>
+<div class=row id=shorthand-row><ul><li id=shorthand></li></ul></div>
+<div class=row id=inherited-row><ul><li id=inherited></li></ul></div>
+<div class=row id=explicit-none-row><ul><li id=explicit-none></li></ul></div>
+<div class=row id=border-row><div class=border id=border></div></div>
+<div class=row id=border-short-row><div class=border id=border-short></div></div>
+<script>const normal="image-set(url(\"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAwAAAAMCAIAAADZF8uwAAAAFUlEQVR4nGP4z8BAEBFWMapoABQBAPuQj3FCf3VbAAAAAElFTkSuQmCC\") 1x,url(\"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABgAAAAYCAIAAABvFaqvAAAAHklEQVR4nGNgaGCgDho1aNSgUYNGDRo1aNSggTcIAMCPIBDDI1JSAAAAAElFTkSuQmCC\") 2x)",changed="image-set(url(\"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACQAAAAkCAIAAABuYg/PAAAAKUlEQVR4nO3NMQ0AAAjAsPk3DS44SJP+reaQTCaTyWQymUwmk8lkb7IFG1ELPFY7v9sAAAAASUVORK5CYII=\") 1x,url(\"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAADAAAAAwCAIAAADYYG7QAAAAPklEQVR4nO3OQQ0AMAgAMfybZi64PZpUQGd3vtIPhISEhOqBkJCQUD0QEhISqgdCQkJC9UBISEioHggJCR17q37vAH1Yni8AAAAASUVORK5CYII=\") 2x)";
+function apply(image){
+ document.getElementById('list').style.listStyleImage=image;
+ document.getElementById('shorthand').style.listStyle=image+' outside none';
+ document.getElementById('inherited').parentElement.style.listStyleImage=image;
+ document.getElementById('explicit-none').parentElement.style.listStyleImage=image;
+ document.getElementById('border').style.borderImageSource=image;
+ document.getElementById('border-short').style.borderImage=image+' 25% / auto';
+}
+apply(normal);
+document.getElementById('change').onclick=function(){apply(changed)};
+document.getElementById('restore').onclick=function(){apply(normal)};
+document.getElementById('clear').onclick=function(){apply('none')};
+let translated=false;
+document.getElementById('transform').onclick=function(){
+ translated=!translated;
+ const elements=document.querySelectorAll('.row > ul, .border');
+ for(let index=0;index<elements.length;index++) elements[index].style.transform=translated?'translate(8px,4px)':'none';
+};
+</script>

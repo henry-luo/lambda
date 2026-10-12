@@ -121,8 +121,9 @@ static bool render_walk_block_begin(RenderPaintBlockDriver* ctx, ViewBlock* bloc
         }
     }
 
-    state->x = p->pa_x + block->x;
-    state->y = p->pa_y + block->y;
+    RdtLogicalPoint fixed = view_geometry_fixed_scroll_adjustment(block);
+    state->x = p->pa_x + block->x + fixed.x;
+    state->y = p->pa_y + block->y + fixed.y;
     if (backend->visit_element) {
         backend->visit_element(backend->ctx, block, state->x, state->y);
     }
@@ -165,6 +166,10 @@ static bool render_walk_block_paint_self(RenderPaintBlockDriver* ctx, ViewBlock*
         state->color = block->inl()->color;
     }
     if (hidden) return true;
+    if (view_contents_are_skipped(block)) {
+        p->stop_after_self = true;
+        return false;
+    }
 
     if (block->tag_id == MARKUP_NAME_GEOMAP) {
         if (backend->render_geomap) backend->render_geomap(backend->ctx, block, state->x, state->y);
@@ -201,6 +206,7 @@ static double render_walk_block_paint_children(RenderPaintBlockDriver* ctx, View
 
     RenderBackend* backend = driver->backend;
     RenderWalkState* state = driver->state;
+    RenderTextPaintScope text_paint(backend->ctx, block, &state->font, &state->color);
     if (block->first_child || block->custom_layout_paint_prop()) {
         // overflow and containment clip descendants after the box's own boundary paint.
         bool content_clip = backend->begin_clip && backend->end_clip &&

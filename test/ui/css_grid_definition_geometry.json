@@ -1,0 +1,788 @@
+{
+  "name": "Grid shorthand cascade, geometry, inheritance, rollback and causal mutation",
+  "html": "test/ui/css_grid_definition_geometry.html",
+  "viewport": {
+    "width": 640,
+    "height": 640
+  },
+  "events": [
+    {
+      "type": "click",
+      "target": {
+        "selector": "#check"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-area-rect",
+      "equals": "0,10,70,20"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-area-values",
+      "equals": "\"a a\" 10px \"b b\" 20px / 30px 40px|10px 20px / 30px 40px / \"a a\" \"b b\" / row / auto / auto|\"a a\" \"b b\"|auto|auto|row"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-only-rect",
+      "equals": "20,0,20,10"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-only-values",
+      "equals": "\"a b\" / 20px 20px|10px / 20px 20px / \"a b\" / row / auto / 20px|\"a b\"|auto|20px|row"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-rows-rect",
+      "equals": "0,10,30,20"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-rows-values",
+      "equals": "10px 20px / 30px 40px|10px 20px / 30px 40px / none / row / 10px 20px / auto|none|10px 20px|auto|row"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-columns-rect",
+      "equals": "30,0,40,10"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-columns-values",
+      "equals": "10px 20px / 30px 40px|10px 20px / 30px 40px / none / column dense / auto / 30px 40px|none|auto|30px 40px|column dense"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-priority-rect",
+      "equals": "0,0,50,10"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-priority-values",
+      "equals": "10px / 50px|10px / 50px / none / row / auto / auto|none|auto|auto|row"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-keeps-rect",
+      "equals": "9,0,9,10"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-keeps-values",
+      "equals": "\"a b\" / 9px 9px|10px / 9px 9px / \"a b\" / column dense / 7px / 9px|\"a b\"|7px|9px|column dense"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-resets-rect",
+      "equals": "60,0,10,20"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-resets-values",
+      "equals": "\"a a\" 20px / 30px 30px|20px / 30px 30px 0px 10px / \"a a\" / row / auto / auto|\"a a\"|auto|auto|row"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-pending-rect",
+      "equals": "0,0,50,10"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-pending-values",
+      "equals": "\"a a\" 10px / 20px 30px|10px / 20px 30px / \"a a\" / row / auto / auto|\"a a\"|auto|auto|row"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-inherited-rect",
+      "equals": "0,0,50,10"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-inherited-values",
+      "equals": "\"a a\" 10px / 20px 30px|10px / 20px 30px / \"a a\" / row / auto / auto|\"a a\"|auto|auto|row"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-rollback-rect",
+      "equals": "0,0,60,20"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-rollback-values",
+      "equals": "20px / 60px|20px / 60px / none / row / auto / auto|none|auto|auto|row"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-ruled-rect",
+      "equals": "20,0,30,10"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-ruled-values",
+      "equals": "\"a b\" 10px / 20px 30px|10px / 20px 30px / \"a b\" / row / auto / auto|\"a b\"|auto|auto|row"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-pending-inline",
+      "equals": "var(--definition)||||"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#change"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#changed"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-changed-area-rect",
+      "equals": "40,0,50,15"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-changed-area-values",
+      "equals": "\"a b\" 15px \"c d\" 25px / 40px 50px|15px 25px / 40px 50px / \"a b\" \"c d\" / row / auto / auto|\"a b\" \"c d\"|auto|auto|row"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-changed-only-rect",
+      "equals": "20,0,20,10"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-changed-only-values",
+      "equals": "\"a b\" / 20px 20px|10px / 20px 20px / \"a b\" / row / auto / 20px|\"a b\"|auto|20px|row"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-changed-rows-rect",
+      "equals": "0,20,50,20"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-changed-rows-values",
+      "equals": "20px 20px / 50px 60px|20px 20px / 50px 60px / none / dense / 20px / auto|none|20px|auto|dense"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-changed-columns-rect",
+      "equals": "30,0,40,10"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-changed-columns-values",
+      "equals": "10px 20px / 30px 40px|10px 20px / 30px 40px / none / column dense / auto / 30px 40px|none|auto|30px 40px|column dense"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-changed-priority-rect",
+      "equals": "0,0,50,10"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-changed-priority-values",
+      "equals": "10px / 50px|10px / 50px / none / row / auto / auto|none|auto|auto|row"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-changed-keeps-rect",
+      "equals": "9,0,9,10"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-changed-keeps-values",
+      "equals": "\"a b\" / 9px 9px|10px / 9px 9px / \"a b\" / column dense / 7px / 9px|\"a b\"|7px|9px|column dense"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-changed-resets-rect",
+      "equals": "60,0,10,20"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-changed-resets-values",
+      "equals": "\"a a\" 20px / 30px 30px|20px / 30px 30px 0px 10px / \"a a\" / row / auto / auto|\"a a\"|auto|auto|row"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-changed-pending-rect",
+      "equals": "0,0,90,10"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-changed-pending-values",
+      "equals": "\"a a\" 10px / 40px 50px|10px / 40px 50px / \"a a\" / row / auto / auto|\"a a\"|auto|auto|row"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-changed-inherited-rect",
+      "equals": "0,0,50,10"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-changed-inherited-values",
+      "equals": "\"a a\" 10px / 20px 30px|10px / 20px 30px / \"a a\" / row / auto / auto|\"a a\"|auto|auto|row"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-changed-rollback-rect",
+      "equals": "0,0,60,20"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-changed-rollback-values",
+      "equals": "20px / 60px|20px / 60px / none / row / auto / auto|none|auto|auto|row"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-changed-ruled-rect",
+      "equals": "40,0,50,10"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-changed-ruled-values",
+      "equals": "\"a b\" 10px / 40px 50px|10px / 40px 50px / \"a b\" / row / auto / auto|\"a b\"|auto|auto|row"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-changed-pending-inline",
+      "equals": "|||40px 50px|"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#remove"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#removed"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-removed-area-rect",
+      "equals": "0,0,0,0"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-removed-area-values",
+      "equals": "0px 0px / 0px 0px|0px 0px / 0px 0px / none / row / auto / auto|none|auto|auto|row"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-removed-only-rect",
+      "equals": "20,0,20,10"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-removed-only-values",
+      "equals": "\"a b\" / 20px 20px|10px / 20px 20px / \"a b\" / row / auto / 20px|\"a b\"|auto|20px|row"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-removed-rows-rect",
+      "equals": "0,20,50,20"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-removed-rows-values",
+      "equals": "20px 20px / 50px 60px|20px 20px / 50px 60px / none / dense / 20px / auto|none|20px|auto|dense"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-removed-columns-rect",
+      "equals": "30,0,40,10"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-removed-columns-values",
+      "equals": "10px 20px / 30px 40px|10px 20px / 30px 40px / none / column dense / auto / 30px 40px|none|auto|30px 40px|column dense"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-removed-priority-rect",
+      "equals": "0,0,50,10"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-removed-priority-values",
+      "equals": "10px / 50px|10px / 50px / none / row / auto / auto|none|auto|auto|row"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-removed-keeps-rect",
+      "equals": "9,0,9,10"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-removed-keeps-values",
+      "equals": "\"a b\" / 9px 9px|10px / 9px 9px / \"a b\" / column dense / 7px / 9px|\"a b\"|7px|9px|column dense"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-removed-resets-rect",
+      "equals": "60,0,10,20"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-removed-resets-values",
+      "equals": "\"a a\" 20px / 30px 30px|20px / 30px 30px 0px 10px / \"a a\" / row / auto / auto|\"a a\"|auto|auto|row"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-removed-pending-rect",
+      "equals": "0,0,0,10"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-removed-pending-values",
+      "equals": "\"a a\" 10px / 0px 0px|10px / 0px 0px / \"a a\" / row / auto / auto|\"a a\"|auto|auto|row"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-removed-inherited-rect",
+      "equals": "0,0,50,10"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-removed-inherited-values",
+      "equals": "\"a a\" 10px / 20px 30px|10px / 20px 30px / \"a a\" / row / auto / auto|\"a a\"|auto|auto|row"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-removed-rollback-rect",
+      "equals": "0,0,60,20"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-removed-rollback-values",
+      "equals": "20px / 60px|20px / 60px / none / row / auto / auto|none|auto|auto|row"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-removed-ruled-rect",
+      "equals": "40,0,50,10"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-removed-ruled-values",
+      "equals": "\"a b\" 10px / 40px 50px|10px / 40px 50px / \"a b\" / row / auto / auto|\"a b\"|auto|auto|row"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-removed-pending-inline",
+      "equals": "||||"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#restore"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#restored"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-restored-area-rect",
+      "equals": "0,10,70,20"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-restored-area-values",
+      "equals": "\"a a\" 10px \"b b\" 20px / 30px 40px|10px 20px / 30px 40px / \"a a\" \"b b\" / row / auto / auto|\"a a\" \"b b\"|auto|auto|row"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-restored-only-rect",
+      "equals": "20,0,20,10"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-restored-only-values",
+      "equals": "\"a b\" / 20px 20px|10px / 20px 20px / \"a b\" / row / auto / 20px|\"a b\"|auto|20px|row"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-restored-rows-rect",
+      "equals": "0,10,30,20"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-restored-rows-values",
+      "equals": "10px 20px / 30px 40px|10px 20px / 30px 40px / none / row / 10px 20px / auto|none|10px 20px|auto|row"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-restored-columns-rect",
+      "equals": "30,0,40,10"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-restored-columns-values",
+      "equals": "10px 20px / 30px 40px|10px 20px / 30px 40px / none / column dense / auto / 30px 40px|none|auto|30px 40px|column dense"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-restored-priority-rect",
+      "equals": "0,0,50,10"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-restored-priority-values",
+      "equals": "10px / 50px|10px / 50px / none / row / auto / auto|none|auto|auto|row"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-restored-keeps-rect",
+      "equals": "9,0,9,10"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-restored-keeps-values",
+      "equals": "\"a b\" / 9px 9px|10px / 9px 9px / \"a b\" / column dense / 7px / 9px|\"a b\"|7px|9px|column dense"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-restored-resets-rect",
+      "equals": "60,0,10,20"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-restored-resets-values",
+      "equals": "\"a a\" 20px / 30px 30px|20px / 30px 30px 0px 10px / \"a a\" / row / auto / auto|\"a a\"|auto|auto|row"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-restored-pending-rect",
+      "equals": "0,0,50,10"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-restored-pending-values",
+      "equals": "\"a a\" 10px / 20px 30px|10px / 20px 30px / \"a a\" / row / auto / auto|\"a a\"|auto|auto|row"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-restored-inherited-rect",
+      "equals": "0,0,50,10"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-restored-inherited-values",
+      "equals": "\"a a\" 10px / 20px 30px|10px / 20px 30px / \"a a\" / row / auto / auto|\"a a\"|auto|auto|row"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-restored-rollback-rect",
+      "equals": "0,0,60,20"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-restored-rollback-values",
+      "equals": "20px / 60px|20px / 60px / none / row / auto / auto|none|auto|auto|row"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-restored-ruled-rect",
+      "equals": "20,0,30,10"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-restored-ruled-values",
+      "equals": "\"a b\" 10px / 20px 30px|10px / 20px 30px / \"a b\" / row / auto / auto|\"a b\"|auto|auto|row"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-restored-pending-inline",
+      "equals": "var(--definition)||||"
+    }
+  ]
+}

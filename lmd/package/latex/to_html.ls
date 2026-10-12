@@ -2,6 +2,8 @@
 // Handles array children flattening, HTML escaping, void elements, and attributes.
 // This bypasses format('html') which wraps arrays in ul/li tags.
 
+import util: .util
+
 // ============================================================
 // Public API
 // ============================================================
@@ -20,39 +22,13 @@ fn serialize(node) {
     else if (node is string) { escape_html(node) }
     else if (node is int or node is float) { string(node) }
     else if (node is element) { serialize_element(node) }
-    else if (node is array) { serialize_array(node) }
-    else if (node is list) { serialize_list(node) }
+    else if (node is array or node is list) { serialize_sequence(node) }
     else { string(node) }
 }
 
-fn serialize_array(arr) {
-    let n = len(arr)
-    if (n == 0) { "" }
-    else { serialize_array_rec(arr, 0, n, "") }
-}
-
-fn serialize_array_rec(arr, i, n, acc) {
-    if (i >= n) { acc }
-    else {
-        let child = arr[i]
-        let s = serialize(child)
-        serialize_array_rec(arr, i + 1, n, acc ++ s)
-    }
-}
-
-fn serialize_list(lst) {
-    let n = len(lst)
-    if (n == 0) { "" }
-    else { serialize_list_rec(lst, 0, n, "") }
-}
-
-fn serialize_list_rec(lst, i, n, acc) {
-    if (i >= n) { acc }
-    else {
-        let child = lst[i]
-        let s = serialize(child)
-        serialize_list_rec(lst, i + 1, n, acc ++ s)
-    }
+// balanced joins avoid retaining every growing prefix of large embedded resources.
+fn serialize_sequence(items) {
+    util.str_join([for (child in items) serialize(child)], "")
 }
 
 // ============================================================
@@ -74,18 +50,7 @@ fn serialize_element(el) {
 }
 
 fn serialize_children(el) {
-    let n = len(el)
-    if (n == 0) { "" }
-    else { serialize_children_rec(el, 0, n, "") }
-}
-
-fn serialize_children_rec(el, i, n, acc) {
-    if (i >= n) { acc }
-    else {
-        let child = el[i]
-        let s = serialize(child)
-        serialize_children_rec(el, i + 1, n, acc ++ s)
-    }
+    serialize_sequence(content(el))
 }
 
 // ============================================================
@@ -93,18 +58,7 @@ fn serialize_children_rec(el, i, n, acc) {
 // ============================================================
 
 fn serialize_attrs(el) {
-    let pairs = [for (k:symbol, v in el) {key: k, val: v}]
-    if (len(pairs) == 0) { "" }
-    else { serialize_attrs_rec(pairs, 0, len(pairs), "") }
-}
-
-fn serialize_attrs_rec(pairs, i, n, acc) {
-    if (i >= n) { acc }
-    else {
-        let pair = pairs[i]
-        let attr_str = format_attr(pair.key, pair.val)
-        serialize_attrs_rec(pairs, i + 1, n, acc ++ attr_str)
-    }
+    util.str_join([for (k:symbol, v in el) format_attr(k, v)], "")
 }
 
 fn format_attr(key, val) {

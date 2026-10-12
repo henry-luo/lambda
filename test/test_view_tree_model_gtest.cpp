@@ -690,6 +690,28 @@ TEST(TypesetTest, StyleCounterScopesKeepReadsAndIsolateNestedMutations) {
     counter_context_destroy(counters); mem_arena_destroy(arena);
 }
 
+TEST(TypesetTest, SiblingResetsExportNewNamesAndKeepAncestorInstances) {
+    Arena* arena = mem_arena_create(nullptr, MEM_ROLE_LAYOUT, "test.counter.sibling");
+    ASSERT_NE(arena, nullptr);
+    CounterContext* counters = counter_context_create(arena); ASSERT_NE(counters, nullptr);
+    counter_reset(counters, "C 7");
+    ASSERT_TRUE(counter_push_scope(counters));
+    counter_reset(counters, "C 0 New 5");
+    counter_increment(counters, "C");
+    EXPECT_EQ(counter_get_value(counters, "C"), 1);
+    counter_pop_scope_propagate(counters, true);
+    EXPECT_EQ(counter_get_value(counters, "C"), 7);
+    EXPECT_EQ(counter_get_value(counters, "New"), 5);
+    ASSERT_TRUE(counter_push_scope(counters));
+    counter_increment(counters, "C");
+    counter_reset(counters, "New 10");
+    EXPECT_EQ(counter_get_value(counters, "C"), 8);
+    counter_pop_scope_propagate(counters, true);
+    EXPECT_EQ(counter_get_value(counters, "C"), 8);
+    EXPECT_EQ(counter_get_value(counters, "New"), 10);
+    counter_context_destroy(counters); mem_arena_destroy(arena);
+}
+
 TEST(TypesetTest, CounterMeasurementCheckpointsRestoreValuesResetsAndUnfinishedFrames) {
     Arena* arena = mem_arena_create(nullptr, MEM_ROLE_LAYOUT, "test.counter.checkpoint"); ASSERT_NE(arena, nullptr);
     CounterContext* counters = counter_context_create(arena); ASSERT_NE(counters, nullptr);
@@ -1205,6 +1227,274 @@ TEST_F(SecondaryViewTest, ResponsiveCandidatesNormalizeSizesAndRecoverInvalidDes
         lam::Temp<char> selected(layout_resolve_replaced_image_source(img, engine, &density));
         ASSERT_NE(selected.get(), nullptr); EXPECT_STREQ(selected.get(), row.url); EXPECT_FLOAT_EQ(density, row.density);
     }
+}
+
+TEST_F(SecondaryViewTest, CssImageSetsSelectDensityAfterTypeFilteringAndPreserveSourceOrder) {
+    const struct Case { const char* value; float scale; const char* url; float density; } cases[] = {
+        {"image-set(url(one.png) 1x,url(two.png) 2x)", 1, "one.png", 1},
+        {"image-set(url(one.png) 1x,url(two.png) 2x)", 1.5f, "two.png", 2},
+        {"image-set(url(one.png) 1x,url(two.png) 2x)", 3, "two.png", 2},
+        {"image-set(url(two.png) 2x,url(one.png) 1x)", 1, "one.png", 1},
+        {"image-set(url(two.png) 2x,url(one.png) 1x)", 2, "two.png", 2},
+        {"image-set('one.png', 'two.png' 2x)", 1, "one.png", 1},
+        {"image-set('one.png', 'two.png' 2x)", 2, "two.png", 2},
+        {"image-set(url(bad.png) 1x type('image/unsupported'),url(one.png) 1x type('image/png'))", 1, "one.png", 1},
+        {"image-set(url(first.png) 2x,url(duplicate.png) 2x)", 2, "first.png", 2},
+        {"image-set(url(one.png) 96dpi,url(two.png) 192dpi)", 2, "two.png", 2},
+        {"image-set(url(one.png) 37.79527559055118dpcm,url(two.png) 2dppx)", 1, "one.png", 1},
+        {"image-set(url(two.png) calc(1x + 96dpi))", 2, "two.png", 2},
+        {"image-set(url(one.png) type('IMAGE/PNG') 1x)", 1, "one.png", 1},
+        {"image-set(url(zero.png) 0x,url(two.png) 2x)", 1, "two.png", 2},
+        {"-webkit-image-set(url(one.png) 1x,url(two.png) 2x)", 2, "two.png", 2}
+    };
+    for (const Case& row : cases) {
+        SCOPED_TRACE(row.value);
+        StrBuf* text = strbuf_new(); ASSERT_NE(text, nullptr);
+        strbuf_append_str(text, "background-image:"); strbuf_append_str(text, row.value);
+        CssDeclaration* declaration = css_parse_declaration_text(text->str, text->length, doc.document_pool);
+        strbuf_free(text); ASSERT_NE(declaration, nullptr); ASSERT_NE(declaration->value, nullptr);
+        CssImageChoice choice = {};
+        ASSERT_TRUE(layout_select_css_image(declaration->value, row.scale, &choice));
+        EXPECT_STREQ(choice.url, row.url); EXPECT_FLOAT_EQ(choice.resolution, row.density);
+        PoolStats warm = {}; pool_get_detailed_stats(doc.document_pool, &warm);
+        for (size_t index = 0; index < 256; index++) {
+            ASSERT_TRUE(layout_select_css_image(declaration->value, row.scale, &choice));
+            EXPECT_STREQ(choice.url, row.url);
+        }
+        PoolStats repeated = {}; pool_get_detailed_stats(doc.document_pool, &repeated);
+        EXPECT_EQ(warm.live_bytes, repeated.live_bytes);
+    }
+    ViewTree* dense = secondary(); ASSERT_NE(dense, nullptr);
+    dense->model->environment.device_scale = 2.0f;
+    UiContext ui = {}; ui.device_scale = 1.0f;
+    LayoutContext context = {}; context.doc = lam::up(&doc); context.ui_context = lam::up(&ui);
+    context.selected_view_tree = lam::up(dense);
+    EXPECT_FLOAT_EQ(layout_image_device_scale(&context), 2);
+    context.selected_view_tree = nullptr;
+    EXPECT_FLOAT_EQ(layout_image_device_scale(&context), 1);
+}
+
+TEST_F(SecondaryViewTest, CssImageSetInvalidDescriptorsRejectBeforeCascade) {
+    const char* invalid[] = {
+        "image-set()", "image-set(url(one.png) -1x)", "image-set(url(one.png) 1px)",
+        "image-set(url(one.png) 1x 2x)", "image-set(url(one.png) type('image/png') type('image/png'))",
+        "image-set(url(one.png) type(image/png))", "image-set(2x)",
+        "image-set(image-set(url(one.png) 1x) 2x)",
+        "image-set(linear-gradient(image-set(url(one.png)),red) 1x)",
+        "image-set(url(one.png) calc(3 * 4))", "image-set(url(one.png) calc(2x - 1))"
+    };
+    for (const char* value : invalid) {
+        SCOPED_TRACE(value);
+        StrBuf* text = strbuf_new(); ASSERT_NE(text, nullptr);
+        strbuf_append_str(text, "background-image:"); strbuf_append_str(text, value);
+        EXPECT_EQ(css_parse_declaration_text(text->str, text->length, doc.document_pool), nullptr);
+        strbuf_free(text);
+    }
+    CssDeclaration* unsupported = css_parse_declaration_text(
+        "background-image:image-set(url(one.png) type('image/unsupported'))",
+        strlen("background-image:image-set(url(one.png) type('image/unsupported'))"), doc.document_pool);
+    ASSERT_NE(unsupported, nullptr);
+    CssImageChoice choice = {};
+    EXPECT_FALSE(layout_select_css_image(unsupported->value, 1, &choice));
+    EXPECT_EQ(choice.image, nullptr); EXPECT_EQ(choice.url, nullptr);
+}
+
+TEST_F(SecondaryViewTest, CssImageSetReplacementDoesNotRetireAnInheritedGradientOwner) {
+    DomElement* parent = block(nullptr); ASSERT_NE(parent, nullptr);
+    DomElement* child = block(nullptr, nullptr, "div", parent); ASSERT_NE(child, nullptr);
+    LayoutContext context = {}; context.doc = lam::up(&doc);
+    context.pool = lam::up(doc.view_tree->prop_pool.get());
+    context.selected_view_tree = lam::up(doc.view_tree.get());
+    auto apply = [&](DomElement* element, const char* text) {
+        CssDeclaration* declaration = css_parse_declaration_text(text, strlen(text), doc.document_pool);
+        EXPECT_NE(declaration, nullptr);
+        if (!declaration) return;
+        context.view = lam::up((View*)element); context.elmt = lam::up(element);
+        resolve_css_property(declaration->property_code, declaration, &context);
+    };
+    auto independent = [](const auto* source, const auto* inherited) {
+        ASSERT_NE(source, nullptr); ASSERT_NE(inherited, nullptr);
+        EXPECT_NE(source, inherited); EXPECT_NE(source->stops.get(), inherited->stops.get());
+        EXPECT_EQ(source->stop_count, inherited->stop_count);
+        EXPECT_EQ(source->stops[0].color.c, inherited->stops[0].color.c);
+    };
+    const char* backgrounds[] = {
+        "background:linear-gradient(red,blue)", "background:radial-gradient(red,blue)",
+        "background:conic-gradient(red,blue)",
+        "background:linear-gradient(red,blue),radial-gradient(blue,red),white"
+    };
+    for (const char* background : backgrounds) {
+        SCOPED_TRACE(background); apply(parent, background); apply(child, "background:inherit");
+        ASSERT_NE(parent->boundary(), nullptr); ASSERT_NE(child->boundary(), nullptr);
+        BackgroundProp* original = parent->boundary()->background;
+        BackgroundProp* inherited = child->boundary()->background;
+        ASSERT_NE(original, nullptr); ASSERT_NE(inherited, nullptr);
+        if (original->linear_gradient) independent(original->linear_gradient.get(), inherited->linear_gradient.get());
+        if (original->radial_gradient) independent(original->radial_gradient.get(), inherited->radial_gradient.get());
+        if (original->conic_gradient) independent(original->conic_gradient.get(), inherited->conic_gradient.get());
+        EXPECT_EQ(original->linear_layer_count, inherited->linear_layer_count);
+        EXPECT_EQ(original->radial_layer_count, inherited->radial_layer_count);
+        for (int index = 0; index < original->linear_layer_count; index++)
+            independent(original->linear_layers[index].get(), inherited->linear_layers[index].get());
+        for (int index = 0; index < original->radial_layer_count; index++)
+            independent(original->radial_layers[index].get(), inherited->radial_layers[index].get());
+        // the child's retained stops remain readable after the originating payload retires.
+        apply(parent, "background-image:none");
+        if (inherited->linear_gradient) EXPECT_GT(inherited->linear_gradient->stop_count, 0);
+        if (inherited->radial_gradient) EXPECT_GT(inherited->radial_gradient->stop_count, 0);
+        if (inherited->conic_gradient) EXPECT_GT(inherited->conic_gradient->stop_count, 0);
+        apply(child, "background-image:image-set(url(one.png) 1x,url(two.png) 2x)");
+        EXPECT_EQ(inherited->gradient_type, GRADIENT_NONE);
+        EXPECT_EQ(inherited->linear_gradient, nullptr); EXPECT_EQ(inherited->radial_gradient, nullptr);
+        EXPECT_EQ(inherited->conic_gradient, nullptr); EXPECT_EQ(inherited->linear_layer_count, 0);
+        EXPECT_EQ(inherited->radial_layer_count, 0);
+        apply(child, "background-image:none");
+    }
+    apply(parent, "background:linear-gradient(red,blue)");
+    apply(child, "background-color:green");
+    apply(child, "background-image:inherit");
+    BackgroundProp* inherited = child->boundary()->background;
+    EXPECT_EQ(inherited->color.g, 128); EXPECT_EQ(inherited->color.r, 0);
+    independent(parent->boundary()->background->linear_gradient.get(), inherited->linear_gradient.get());
+    apply(child, "background-image:none");
+    // preparse declarations so repeated payload replacement alone is measured.
+    CssDeclaration* inherit = css_parse_declaration_text("background-image:inherit", 24, doc.document_pool);
+    CssDeclaration* clear = css_parse_declaration_text("background-image:none", 21, doc.document_pool);
+    ASSERT_NE(inherit, nullptr); ASSERT_NE(clear, nullptr);
+    PoolStats warm = {}; pool_get_detailed_stats(doc.view_tree->prop_pool, &warm);
+    for (size_t index = 0; index < 256; index++) {
+        resolve_css_property(CSS_PROPERTY_BACKGROUND_IMAGE, inherit, &context);
+        resolve_css_property(CSS_PROPERTY_BACKGROUND_IMAGE, clear, &context);
+    }
+    PoolStats repeated = {}; pool_get_detailed_stats(doc.view_tree->prop_pool, &repeated);
+    EXPECT_EQ(warm.live_bytes, repeated.live_bytes);
+}
+
+TEST_F(SecondaryViewTest, CssImageSetListAndBorderConsumersRetainDensityAndStylesheetBase) {
+    DomElement* element = block(nullptr); ASSERT_NE(element, nullptr);
+    UiContext ui = {}; ui.device_scale = 2.0f;
+    LayoutContext context = {}; context.doc = lam::up(&doc); context.ui_context = lam::up(&ui);
+    context.pool = lam::up(doc.view_tree->prop_pool.get());
+    context.selected_view_tree = lam::up(doc.view_tree.get());
+    context.view = lam::up((View*)element); context.elmt = lam::up(element);
+    const char* declarations[] = {
+        "list-style-image:image-set(url(one.png) 1x,url(two.png) 2x)",
+        "border-image-source:image-set(url(one.png) 1x,url(two.png) 2x)"
+    };
+    CssDeclaration* parsed[2] = {};
+    for (size_t index = 0; index < 2; index++) {
+        const char* text = declarations[index];
+        CssDeclaration* declaration = css_parse_declaration_text(text, strlen(text), doc.document_pool);
+        ASSERT_NE(declaration, nullptr);
+        parsed[index] = declaration;
+        declaration->source_file = "/assets/styles/main.css";
+        resolve_css_property(declaration->property_code, declaration, &context);
+    }
+    ASSERT_NE(element->block(), nullptr);
+    EXPECT_STREQ(element->block()->list_style_image.url, "/assets/styles/two.png");
+    EXPECT_FLOAT_EQ(element->block()->list_style_image.resolution, 2.0f);
+    ASSERT_NE(element->boundary(), nullptr); ASSERT_NE(element->boundary()->border, nullptr);
+    EXPECT_STREQ(element->boundary()->border->border_image_url, "/assets/styles/two.png");
+    EXPECT_FLOAT_EQ(element->boundary()->border->border_image_resolution, 2.0f);
+    // reuse parsed declarations to isolate retained payload and canonical-URL growth.
+    PoolStats warm = {}; pool_get_detailed_stats(doc.view_tree->prop_pool, &warm);
+    for (size_t cycle = 0; cycle < 256; cycle++) {
+        for (CssDeclaration* declaration : parsed)
+            resolve_css_property(declaration->property_code, declaration, &context);
+    }
+    PoolStats repeated = {}; pool_get_detailed_stats(doc.view_tree->prop_pool, &repeated);
+    EXPECT_EQ(warm.live_bytes, repeated.live_bytes);
+    EXPECT_STREQ(element->block()->list_style_image.url, "/assets/styles/two.png");
+    EXPECT_STREQ(element->boundary()->border->border_image_url, "/assets/styles/two.png");
+    // shorthand expansion must recognize the image atom before assigning its other longhands.
+    const char* shorthand = "list-style:image-set(url(one.png) 1x,url(two.png) 2x) outside";
+    CssDeclaration* declaration = css_parse_declaration_text(shorthand, strlen(shorthand), doc.document_pool);
+    ASSERT_NE(declaration, nullptr);
+    const CssValue* image = layout_list_style_longhand(declaration->value,
+        CSS_PROPERTY_LIST_STYLE_IMAGE, doc.document_pool);
+    EXPECT_TRUE(css_value_is_image_set(image));
+    const char* border = "border-image:image-set(url(one.png) 1x,url(two.png) 2x) 25% / auto";
+    declaration = css_parse_declaration_text(border, strlen(border), doc.document_pool);
+    ASSERT_NE(declaration, nullptr);
+    CssBorderImageComponents parts = {};
+    ASSERT_TRUE(css_split_border_image_shorthand(declaration->value, &parts));
+    EXPECT_TRUE(css_value_is_image_set(parts.source));
+    EXPECT_EQ(parts.slice_count, 1); EXPECT_EQ(parts.width_count, 1);
+    EXPECT_EQ(parts.width[0]->data.keyword, CSS_VALUE_AUTO);
+}
+
+TEST_F(SecondaryViewTest, BorderImageReplacementPreservesInheritedOwnerAndReleasesEachPayload) {
+    DomElement* parent = block(nullptr); ASSERT_NE(parent, nullptr);
+    DomElement* child = block(nullptr, nullptr, "div", parent); ASSERT_NE(child, nullptr);
+    LayoutContext context = {}; context.doc = lam::up(&doc);
+    context.pool = lam::up(doc.view_tree->prop_pool.get());
+    context.selected_view_tree = lam::up(doc.view_tree.get());
+    auto parse = [&](const char* text) {
+        return css_parse_declaration_text(text, strlen(text), doc.document_pool);
+    };
+    CssDeclaration* gradient = parse("border-image-source:linear-gradient(red,blue)");
+    CssDeclaration* inherit = parse("border-image-source:inherit");
+    CssDeclaration* set = parse("border-image-source:image-set(url(one.png) 1x,url(two.png) 2x)");
+    CssDeclaration* none = parse("border-image-source:none");
+    ASSERT_NE(gradient, nullptr); ASSERT_NE(inherit, nullptr); ASSERT_NE(set, nullptr); ASSERT_NE(none, nullptr);
+    auto apply = [&](DomElement* element, CssDeclaration* declaration) {
+        context.view = lam::up((View*)element); context.elmt = lam::up(element);
+        resolve_css_property(declaration->property_code, declaration, &context);
+    };
+    apply(parent, gradient); apply(child, inherit);
+    BorderProp* original = parent->boundary()->border;
+    BorderProp* inherited = child->boundary()->border;
+    ASSERT_NE(original->border_image_linear_gradient, nullptr);
+    ASSERT_NE(inherited->border_image_linear_gradient, nullptr);
+    EXPECT_NE(original->border_image_linear_gradient, inherited->border_image_linear_gradient);
+    EXPECT_NE(original->border_image_linear_gradient->stops, inherited->border_image_linear_gradient->stops);
+    apply(parent, none);
+    EXPECT_EQ(inherited->border_image_linear_gradient->stops[0].color.r, 255);
+    apply(child, set);
+    EXPECT_EQ(inherited->border_image_linear_gradient, nullptr);
+    apply(child, none);
+    // pre-parsed gradient, URL and empty replacements isolate retained pool ownership.
+    PoolStats warm = {}; pool_get_detailed_stats(doc.view_tree->prop_pool, &warm);
+    for (size_t index = 0; index < 256; index++) {
+        apply(child, gradient); apply(child, set); apply(child, none);
+    }
+    PoolStats repeated = {}; pool_get_detailed_stats(doc.view_tree->prop_pool, &repeated);
+    EXPECT_EQ(warm.live_bytes, repeated.live_bytes);
+    UiContext ui = {}; ui.device_scale = 2.0f; context.ui_context = lam::up(&ui);
+    apply(parent, set); apply(child, inherit);
+    EXPECT_FLOAT_EQ(inherited->border_image_resolution, 2.0f);
+    EXPECT_NE(original->border_image_url, inherited->border_image_url);
+    apply(parent, none);
+    EXPECT_NE(strstr(inherited->border_image_url, "two.png"), nullptr);
+}
+
+TEST_F(SecondaryViewTest, CssImageSetResourceChangesRevalidateAdmissionBeforeWarmReuse) {
+    DomElement* element = block(nullptr); ASSERT_NE(element, nullptr);
+    UiContext ui = {}; ui.document = lam::up(&doc);
+    LayoutContext context = {}; context.doc = lam::up(&doc); context.ui_context = lam::up(&ui);
+    context.selected_view_tree = lam::up(doc.view_tree.get());
+    ViewBlock* view = lam::unsafe_view_block_element_storage(element);
+    const char* first_url = "http://example.test/first.png";
+    const char* second_url = "http://example.test/second.png";
+    doc.url = lam::own(url_parse(first_url)); ASSERT_NE(doc.url, nullptr);
+    ImageSurface* first = image_surface_create(12, 12); ASSERT_NE(first, nullptr);
+    ImageSurface* second = image_surface_create(24, 24); ASSERT_NE(second, nullptr);
+    ASSERT_EQ(image_cache_adopt(&ui, first_url, first), first);
+    ASSERT_EQ(image_cache_adopt(&ui, second_url, second), second);
+    EXPECT_EQ(layout_admit_replaced_image_surface(&context, view, first_url, 1), first);
+    EXPECT_STREQ(view->embedp()->selected_image_source, first_url);
+    EXPECT_EQ(layout_admit_replaced_image_surface(&context, view, second_url, 2), second);
+    EXPECT_STREQ(view->embedp()->selected_image_source, second_url);
+    EXPECT_FLOAT_EQ(view->embedp()->content_image_resolution, 2);
+    doc.resource_policy = INPUT_RESOURCE_LOCAL_ONLY;
+    EXPECT_EQ(layout_admit_replaced_image_surface(&context, view, second_url, 2), nullptr);
+    EXPECT_EQ(view->embedp()->img, nullptr);
+    doc.resource_policy = INPUT_RESOURCE_ALLOW_NETWORK;
+    EXPECT_EQ(layout_admit_replaced_image_surface(&context, view, first_url, 1), first);
+    EXPECT_EQ(layout_admit_replaced_image_surface(&context, view, nullptr, 1), nullptr);
+    EXPECT_EQ(view->embedp()->selected_image_source, nullptr);
+    image_cache_cleanup(&ui);
+    url_destroy(doc.url); doc.url = nullptr;
 }
 
 TEST_F(SecondaryViewTest, PictureSourcesUseTheSelectedEnvironmentAndOnlyPrecedingSupportedSources) {
@@ -2505,6 +2795,36 @@ TEST_F(SecondaryViewTest, SharedPropertyAllocationBelongsToTheExplicitlySelected
     context.selected_view_tree = nullptr;
     void* default_property = alloc_prop(&context, 8); ASSERT_NE(default_property, nullptr);
     EXPECT_TRUE(pool_owns(doc.view_tree->prop_pool, default_property));
+}
+
+TEST_F(SecondaryViewTest, GridUsedTracksRetainOwnerTextAcrossEditionsAndRollback) {
+    ViewTree* tree = secondary(); ViewTree* sibling = secondary();
+    ASSERT_NE(tree, nullptr); ASSERT_NE(sibling, nullptr);
+    char rows[] = "10px 20px", columns[] = "[first] 30px [last]";
+    ASSERT_TRUE(view_tree_set_grid_track_values(tree, source, rows, columns));
+    ASSERT_TRUE(view_tree_set_grid_track_values(sibling, source, "40px", "50px"));
+    rows[0] = '9'; columns[0] = 'x';
+    ViewNodeState* state = view_tree_node_state(tree, source, false); ASSERT_NE(state, nullptr);
+    const ViewNodeState* independent = view_tree_node_state(sibling, source, false); ASSERT_NE(independent, nullptr);
+    EXPECT_STREQ(state->grid_used_rows, "10px 20px");
+    EXPECT_STREQ(state->grid_used_columns, "[first] 30px [last]");
+    const char* kept = state->grid_used_columns;
+    ASSERT_TRUE(view_tree_set_grid_track_values(tree, source, "10px 20px", "[first] 30px [last]"));
+    EXPECT_EQ(state->grid_used_columns.get(), kept);
+    ViewModelCheckpoint* checkpoint = view_tree_model_checkpoint(tree); ASSERT_NE(checkpoint, nullptr);
+    ASSERT_TRUE(view_tree_set_grid_track_values(tree, source, "60px", "70px 80px"));
+    EXPECT_STREQ(state->grid_used_columns, "70px 80px");
+    ASSERT_TRUE(view_tree_model_restore(tree, checkpoint));
+    EXPECT_EQ(state->grid_used_columns.get(), kept);
+    EXPECT_STREQ(state->grid_used_rows, "10px 20px");
+    EXPECT_STREQ(independent->grid_used_rows, "40px");
+    EXPECT_STREQ(independent->grid_used_columns, "50px");
+    ASSERT_TRUE(view_tree_model_commit(tree));
+    EXPECT_FALSE(view_tree_set_grid_track_values(tree, source, "90px", "100px"));
+    EXPECT_STREQ(state->grid_used_columns, "[first] 30px [last]");
+    ASSERT_TRUE(view_tree_model_reset(tree));
+    EXPECT_EQ(view_tree_node_state(tree, source, false), nullptr);
+    EXPECT_STREQ(independent->grid_used_columns, "50px");
 }
 
 TEST_F(SecondaryViewTest, ModelRollbackRestoresNestedLinksAndNeverReusesDiscardedHandles) {
@@ -5813,6 +6133,127 @@ TEST_F(SecondaryViewTest, StyleContainmentScopesCountersAndQuotesInIndependentVi
     StrBuf* text = strbuf_new(); ASSERT_NE(text, nullptr); append_fragment_text(box, text);
     EXPECT_STREQ(text->str, "8A18.2Z"); strbuf_free(text);
     EXPECT_STREQ(view_css_resolve_pseudo(tree, tail, PSEUDO_ELEMENT_BEFORE)->generated_text, "8");
+}
+
+TEST_F(SecondaryViewTest, ContentVisibilityKeepsPagedPlaceholdersAndPrintsAutoContents) {
+    stylesheet("@page { size: 240px 240px; margin: 10px } p { counter-reset: N 0 } "
+        "p, div { margin: 0; font: 10px/12px Arial } "
+        ".hidden { content-visibility: hidden; width: 80px; padding: 2px; border: 1px solid blue; "
+        "contain-intrinsic-size: none calc(1em + 1em); counter-increment: N 10 } "
+        ".hidden::before { content: 'Suppressed pseudo' } "
+        ".tail::before { content: counter(N) } @media print { .hidden { font-size: 20px } }");
+    DomElement* hidden = block(nullptr); ASSERT_NE(hidden, nullptr);
+    ASSERT_TRUE(hidden->set_attribute("class", "hidden"));
+    DomElement* omitted = block("Suppressed child", "counter-increment:N 100", "div", hidden);
+    ASSERT_NE(omitted, nullptr);
+    DomElement* automatic = block("Auto", "content-visibility:auto;counter-increment:N 1");
+    ASSERT_NE(automatic, nullptr);
+    ASSERT_NE(block("Visible child", "counter-increment:N 100", "div", automatic), nullptr);
+    DomElement* tail = block("Tail"); ASSERT_NE(tail, nullptr);
+    ASSERT_TRUE(tail->set_attribute("class", "tail"));
+    for (bool print : {false, true}) {
+        ViewEnvironment environment = view_environment_default(VIEW_PRESENTATION_PAGED);
+        environment.print_media = print;
+        ViewTree* tree = view_tree_secondary_create(&doc, &environment); ASSERT_NE(tree, nullptr);
+        PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
+        ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+        LayoutViewNode* box = source_fragment(tree, hidden, VIEW_FRAGMENT_BODY, true); ASSERT_NE(box, nullptr);
+        EXPECT_FLOAT_EQ(box->rect.width, 86.0f);
+        EXPECT_FLOAT_EQ(box->rect.height, print ? 46.0f : 26.0f);
+        EXPECT_EQ(source_fragment(tree, omitted, VIEW_FRAGMENT_BODY, true), nullptr);
+        StrBuf* text = strbuf_new(); ASSERT_NE(text, nullptr);
+        append_fragment_text(tree->model->root, text);
+        EXPECT_STREQ(text->str, "AutoVisible child11Tail"); strbuf_free(text);
+        EXPECT_FLOAT_EQ(source->height, 91.75f);
+    }
+}
+
+TEST_F(SecondaryViewTest, RememberedIntrinsicSizesFollowCommittedEditionsAndRetainedPageLeases) {
+    init_vector_engine();
+    stylesheet("@page { size: 240px 240px; margin: 10px } p, div { margin: 0; font: 10px/12px Arial } "
+        ".memory { width: 100px; padding: 2px; border: 1px solid blue; contain-intrinsic-size: auto 7px } "
+        ".child { height: 40px; background: green } @media print { .child { height: 80px } }");
+    DomElement* memory = block(nullptr); ASSERT_NE(memory, nullptr);
+    ASSERT_TRUE(memory->set_attribute("class", "memory"));
+    DomElement* child = block(nullptr, nullptr, "div", memory); ASSERT_NE(child, nullptr);
+    ASSERT_TRUE(child->set_attribute("class", "child"));
+    ViewTree* editions[2] = {};
+    PagedLayoutOptions options = paged_layout_options_default();
+    auto compose = [&](ViewTree* tree) {
+        if (tree->model->committed && !view_tree_model_reset(tree)) return TYPESET_INVALID;
+        return layout_secondary_view(tree, &options, nullptr);
+    };
+    auto height = [&](ViewTree* tree) {
+        LayoutViewNode* box = source_fragment(tree, memory, VIEW_FRAGMENT_BODY, true);
+        EXPECT_NE(box, nullptr);
+        return box ? box->rect.height : -1.0f;
+    };
+    auto remembered = [&](ViewTree* tree, float expected) {
+        LayoutContext context = {}; context.doc = lam::up(&doc); context.selected_view_tree = lam::up(tree);
+        float size = -1.0f;
+        EXPECT_TRUE(layout_get_last_remembered_size(&context, memory, false, &size));
+        EXPECT_FLOAT_EQ(size, expected);
+    };
+    for (size_t i = 0; i < 2; i++) {
+        ViewEnvironment environment = view_environment_default(VIEW_PRESENTATION_PAGED);
+        environment.print_media = i != 0;
+        editions[i] = view_tree_secondary_create(&doc, &environment); ASSERT_NE(editions[i], nullptr);
+        ASSERT_EQ(compose(editions[i]), TYPESET_OK);
+        EXPECT_FLOAT_EQ(height(editions[i]), i ? 86.0f : 46.0f);
+        remembered(editions[i], i ? 80.0f : 40.0f);
+    }
+    ViewPreviewOptions preview_options = view_preview_options_default();
+    ViewTree* retained = view_tree_page_instances_create(editions[0], nullptr, &preview_options);
+    ASSERT_NE(retained, nullptr);
+    ViewPageBox* old_page = editions[0]->model->pages.get()[0];
+    ASSERT_TRUE(memory->set_attribute("style", "content-visibility:hidden"));
+    for (size_t i = 0; i < 2; i++) {
+        ASSERT_EQ(compose(editions[i]), TYPESET_OK);
+        EXPECT_FLOAT_EQ(height(editions[i]), i ? 86.0f : 46.0f);
+        remembered(editions[i], i ? 80.0f : 40.0f);
+        EXPECT_EQ(source_fragment(editions[i], child, VIEW_FRAGMENT_BODY, true), nullptr);
+    }
+    EXPECT_EQ(view_tree_page_material(retained, retained->model->pages.get()[0]), old_page);
+    for (float scale : {1.0f, 2.0f}) {
+        for (ViewTree* tree : {retained, editions[0]}) {
+            ImageSurface* pixels = render_secondary_page_snapshot(tree, 1, scale); ASSERT_NE(pixels, nullptr);
+            size_t position = (size_t)(20.0f * scale);
+            EXPECT_EQ(snapshot_pixel(pixels, position, position),
+                tree == retained ? 0xff008000u : 0xffffffffu);
+            image_surface_destroy(pixels);
+        }
+    }
+    ViewTree* fresh = secondary(); ASSERT_NE(fresh, nullptr);
+    ASSERT_EQ(compose(fresh), TYPESET_OK);
+    EXPECT_FLOAT_EQ(height(fresh), 13.0f);
+
+    ASSERT_TRUE(child->set_attribute("style", "height:120px"));
+    ASSERT_EQ(compose(editions[0]), TYPESET_OK);
+    EXPECT_FLOAT_EQ(height(editions[0]), 46.0f);
+    ASSERT_TRUE(memory->set_attribute("style", "content-visibility:visible"));
+    ASSERT_EQ(compose(editions[0]), TYPESET_OK);
+    EXPECT_FLOAT_EQ(height(editions[0]), 126.0f);
+    remembered(editions[0], 120.0f);
+    remembered(editions[1], 80.0f);
+
+    // failed composition retains the previous successful edition's sizing memory.
+    ASSERT_TRUE(child->set_attribute("style", "height:160px"));
+    ASSERT_TRUE(view_tree_model_reset(editions[0]));
+    PagedLayoutOptions limited = options; limited.max_block_trials = 1;
+    EXPECT_EQ(layout_secondary_view(editions[0], &limited, nullptr), TYPESET_BUDGET_EXHAUSTED);
+    EXPECT_FALSE(editions[0]->model->committed);
+    remembered(editions[0], 120.0f);
+    ASSERT_TRUE(child->set_attribute("style", "height:120px"));
+    ASSERT_TRUE(view_tree_model_reset(editions[0]));
+    ASSERT_EQ(compose(editions[0]), TYPESET_OK);
+
+    ASSERT_TRUE(memory->set_attribute("style", "content-visibility:hidden;contain-intrinsic-size:7px"));
+    ASSERT_EQ(compose(editions[0]), TYPESET_OK);
+    EXPECT_FLOAT_EQ(height(editions[0]), 13.0f);
+    ASSERT_TRUE(memory->set_attribute("style", "content-visibility:hidden"));
+    ASSERT_EQ(compose(editions[0]), TYPESET_OK);
+    EXPECT_FLOAT_EQ(height(editions[0]), 13.0f);
+    EXPECT_FLOAT_EQ(source->height, 91.75f);
 }
 
 TEST_F(SecondaryViewTest, CounterResetsReachFollowingSiblingsWithoutEscapingTheirParent) {

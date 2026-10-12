@@ -1,0 +1,50 @@
+<!doctype html><meta charset="utf-8">
+<style>
+html,body{margin:0;background:white}button{height:24px}
+#fixtures{position:absolute;top:40px;left:0}
+.grid{display:grid;width:500px;height:2px;justify-content:start;align-content:start;margin-bottom:10px}
+.grid>div{min-width:0;min-height:0;height:1px;background:green}
+</style>
+<button id="check">Check</button><button id="change">Change</button><button id="changed">Changed</button><button id="restore">Restore</button><button id="restored">Restored</button><output id="report"></output><div id="fixtures"></div>
+<script>
+(function(){
+    var grids={},report=document.getElementById('report');
+    function grid(name,style,count,placement){
+        var element=document.createElement('div');element.id=name;element.className='grid';element.style.cssText=style;
+        for(var i=0;i<count;i++){var child=document.createElement('div');child.style.cssText=placement||'';element.appendChild(child);}
+        document.getElementById('fixtures').appendChild(element);grids[name]=element;return element;
+    }
+    function record(name,element,first){
+        var parent=element.getBoundingClientRect(),child=(first?element.firstChild:element.lastChild).getBoundingClientRect();
+        report.setAttribute('data-'+name,[child.x-parent.x,child.y-parent.y,child.width,child.height].map(function(value){return Math.round(value*100)/100;}).join(','));
+    }
+    grid('explicit','grid-template-columns:repeat(80,3px)',1,'grid-column:75');
+    grid('automatic','width:350px;grid-template-columns:repeat(auto-fill,1px)',1,'grid-column:350');
+    var items=grid('items','grid-template-columns:20px;grid-auto-rows:1px',300,'');
+    var contributions=grid('contributions','grid-template-columns:auto',300,'grid-column:1;grid-row:1');contributions.lastChild.style.minWidth='200px';
+    grid('repeat-count','grid-template-columns:repeat(1500,1px)',1,'grid-column:1499');
+    grid('pattern','grid-template-columns:repeat(20,1px 1px 1px 1px 1px 1px 1px 1px 1px 1px 1px 1px 1px 1px 1px 1px 1px 1px 1px 1px)',1,'grid-column:399');
+    grid('sparse','grid-template-columns:repeat(1100,1px);grid-template-rows:repeat(1100,1px);grid-auto-columns:1px;grid-auto-rows:1px',1,'grid-column:1101;grid-row:1101');
+    var negative=grid('negative','grid-template-columns:1px;grid-auto-columns:1px',2,'grid-row:1');negative.firstChild.style.gridColumn='-1001';negative.lastChild.style.gridColumn='1';
+    grid('span','grid-template-columns:1px;grid-auto-columns:1px',1,'grid-column:span 80');
+    grid('flex','width:800px;grid-template-columns:repeat(80,minmax(0,1fr))',1,'grid-column:80');
+    grid('fit','width:350px;grid-template-columns:repeat(auto-fit,minmax(1px,1fr))',1,'grid-column:350');
+    grid('column-items','grid-auto-flow:column;grid-template-rows:1px;grid-auto-columns:1px',300,'');
+    grid('named','grid-template-columns:repeat(120,[foo bar] 1px)',1,'grid-column:bar 100');
+    grid('row-tracks','grid-template-columns:1px;grid-template-rows:repeat(90,1px)',1,'grid-row:85');
+    var areaNames=[];for(var areaIndex=0;areaIndex<40;areaIndex++)areaNames.push('cell'+areaIndex);
+    grid('areas-wide','grid-template-areas:"'+areaNames.join(' ')+'";grid-auto-columns:1px',1,'grid-area:cell39');
+    var areaRows=[];for(var rowIndex=0;rowIndex<20;rowIndex++)areaRows.push('"row'+rowIndex+'"');
+    grid('areas-tall','grid-template-areas:'+areaRows.join(' ')+';grid-auto-rows:1px;grid-auto-columns:1px',1,'grid-area:row19');
+    var longName='area_'+Array(601).join('x');
+    grid('areas-long','grid-template-areas:"'+longName+'";grid-auto-columns:1px',1,'grid-area:'+longName);
+    grid('areas-dots','grid-template-areas:"a...b";grid-auto-columns:1px',1,'grid-area:b');
+    grid('areas-null-tail','grid-template-areas:"a . . .";grid-auto-columns:1px',1,'grid-column:-2');
+    grid('areas-extra-sizing','grid-template-areas:"'+areaNames.join(' ')+'";grid-template-columns:2px 3px;grid-auto-columns:4px 5px',1,'grid-area:cell39');
+    document.getElementById('check').onclick=function(){Object.keys(grids).forEach(function(name){record(name,grids[name],name==='contributions');});};
+    document.getElementById('change').onclick=function(){items.lastChild.style.gridRow='330';contributions.lastChild.style.minWidth='240px';};
+    document.getElementById('changed').onclick=function(){record('moved',items);record('resized-contribution',contributions,true);};
+    document.getElementById('restore').onclick=function(){items.lastChild.style.removeProperty('grid-row');contributions.lastChild.style.minWidth='200px';};
+    document.getElementById('restored').onclick=function(){record('restored-items',items);record('restored-contribution',contributions,true);};
+})();
+</script>

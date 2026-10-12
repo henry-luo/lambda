@@ -37,15 +37,15 @@ pub fn text_of(node) {
 }
 
 fn text_of_element(el) {
-    let n = len(el)
-    if (n == 0) ""
-    else if (n == 1) text_of(el[0])
-    else join_children_text(el, 0, n, "")
+    join_children_text(el)
 }
 
-fn join_children_text(el, i, n, acc) {
-    if (i >= n) acc
-    else join_children_text(el, i + 1, n, acc ++ text_of(el[i]))
+fn join_children_text(el, rich = false, skip_brack = false) {
+    let children = if (el is element) content(el) else el
+    // embedded SVG resources can be large; join without retaining every prefix.
+    str_join([for (child in children)
+        if (skip_brack and child is element and string(name(child)) == "brack_group") ""
+        else if (rich) rich_text_of(child) else text_of(child)], "")
 }
 
 // extract text with common symbol commands resolved
@@ -56,7 +56,7 @@ pub fn rich_text_of(node) {
     else if (node is float) { string(node) }
     else if (node is symbol) { string(node) }
     else if (node is element) { rich_text_of_element(node) }
-    else if (node is array) { join_rich_children(node, 0, len(node), "") }
+    else if (node is array) { join_children_text(node, true) }
     else { string(node) }
 }
 
@@ -64,9 +64,7 @@ fn rich_text_of_element(el) {
     let resolved = resolve_symbol_cmd(el)
     if (resolved != null) { resolved }
     else {
-        let n = len(el)
-        if (n == 0) { "" }
-        else { join_rich_children(el, 0, n, "") }
+        join_children_text(el, true)
     }
 }
 
@@ -92,11 +90,6 @@ fn resolve_symbol_cmd(el) {
         case "O": "\u00D8"
         default: null
     }
-}
-
-fn join_rich_children(el, i, n, acc) {
-    if (i >= n) { acc }
-    else { join_rich_children(el, i + 1, n, acc ++ rich_text_of(el[i])) }
 }
 
 // ============================================================
@@ -477,20 +470,7 @@ fn raw_argument_at(groups, kind, ordinal, i) {
 
 // extract text from element children, skipping brack_group elements
 pub fn text_of_skip_brack(el) {
-    let n = len(el)
-    join_skip_brack(el, 0, n, "")
-}
-
-fn join_skip_brack(el, i, n, acc) {
-    if (i >= n) { acc }
-    else {
-        let child = el[i]
-        if (child is element and string(name(child)) == "brack_group") {
-            join_skip_brack(el, i + 1, n, acc)
-        } else {
-            join_skip_brack(el, i + 1, n, acc ++ text_of(child))
-        }
-    }
+    join_children_text(el, false, true)
 }
 
 // ============================================================

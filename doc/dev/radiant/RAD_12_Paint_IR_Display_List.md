@@ -132,6 +132,12 @@ The two seams coexist deliberately. The **raster** backend uses full-node overri
 
 ---
 
+## 10. Captured glyph-run font selection (2026-10-11)
+
+**D4.5.1v4 / D4.1.4v5** require deferred commands to outlive temporary paint state. `paint_glyph_run()` copies the selected `FontBox` into `PaintGlyphRun::captured_font` and clears the pointer to the mutable walker context. `paint_glyph_run_font()` selects that copied box for validation, glyph outlines and raster lowering. Its style remains borrowed from the live document/native owner during the paint pass. A value snapshot remains valid when the command buffer grows; storing a pointer to the snapshot's old command address would not.
+
+`TextOverflowPaint.RecordedGlyphRunsRetainFontSelectionAfterPaintContextChanges` verifies that switching the walker from 20px to 30px and growing the command buffer leaves earlier glyph outlines at their recorded font. The original pointer-only path failed this control. Generated ellipsis text uses the existing owned text payload when an effect group defers lowering.
+
 ## Appendix A — Source map
 
 | File | Responsibility (this doc) |

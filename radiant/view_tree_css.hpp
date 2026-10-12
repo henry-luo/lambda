@@ -40,6 +40,9 @@ struct ViewCssStyle {
     lam::Up<const CssValue> container_names;
     uint8_t container_axes;
     uint8_t computed_containment;
+    CssEnum content_visibility;
+    float contain_intrinsic_size[2];
+    bool contain_intrinsic_auto[2];
     bool vertical;
     FontProp font;
     FontBox font_box;
@@ -156,6 +159,10 @@ bool view_css_container_pass_end(ViewTree* tree, bool* settled);
 bool view_css_container_pass_reset(ViewTree* tree);
 void view_css_container_state_destroy(ViewTree* tree);
 ViewCssStyle* view_css_resolve(ViewTree* tree, DomElement* element);
+bool view_css_contents_skipped(const ViewCssStyle* style);
+float view_css_contained_intrinsic_size(ViewTree* tree, const ViewCssStyle* style,
+                                        bool horizontal);
+bool view_css_commit_remembered_sizes(ViewTree* tree);
 ViewCssStyle* view_css_resolve_pseudo(ViewTree* tree, DomElement* element, uint8_t pseudo_element);
 ViewCssStyle* view_css_anonymous_style(ViewTree* tree, ViewCssStyle* parent, DisplayValue display);
 const ViewCssStyle* view_css_common_ancestor(const ViewCssStyle* left, const ViewCssStyle* right);

@@ -391,6 +391,9 @@ static bool model_prepare_reset(ViewTree* tree) {
     fresh->model->presentation_generation = model->presentation_generation;
     fresh->html_version = tree->html_version;
     fresh->canonical_prop_cap_bytes = tree->canonical_prop_cap_bytes;
+    // immutable leased pages retain geometry; sizing history belongs to the active edition.
+    fresh->content_visibility_state = tree->content_visibility_state;
+    tree->content_visibility_state = nullptr;
     DomDocument* document = model->document;
     page_generation_detach(tree);
     lam::Own<ViewTree> next = tree->next_secondary;
@@ -493,6 +496,25 @@ ViewNodeState* view_tree_node_state(ViewTree* tree, DomNode* source, bool create
     ViewNodeState* state = model_source_state(tree, {{0, 0, ref.expected_id}, nullptr}, create);
     if (state && !state->source.address) state->source = ref;
     return state;
+}
+
+bool view_tree_set_grid_track_values(ViewTree* tree, DomNode* source,
+        const char* rows, const char* columns) {
+    if (!rows || !columns || !view_tree_model_source_valid(tree) || tree->model->committed) return false;
+    ViewNodeState* state = view_tree_node_state(tree, source, true);
+    if (!state) return false;
+    if (state->grid_used_rows && state->grid_used_columns &&
+        strcmp(state->grid_used_rows, rows) == 0 && strcmp(state->grid_used_columns, columns) == 0) return true;
+    size_t row_size = strlen(rows) + 1, column_size = strlen(columns) + 1;
+    if (row_size > SIZE_MAX - column_size || !view_tree_model_record(tree, state, sizeof(*state))) return false;
+    char* text = (char*)arena_alloc(tree->model->arena, row_size + column_size);
+    if (!text) return false;
+    memcpy(text, rows, row_size);
+    memcpy(text + row_size, columns, column_size);
+    // rollback and leased editions retain the prior arena payload until their generation retires (D4.5.1v4).
+    state->grid_used_rows = lam::up<const char>(text);
+    state->grid_used_columns = lam::up<const char>(text + row_size);
+    return true;
 }
 
 const ViewNodeState* view_tree_native_state(ViewTree* tree, const TypesetSource* source) {
@@ -659,6 +681,7 @@ ViewPageBox* view_tree_page_append(ViewTree* tree, float width, float height,
 
 bool view_tree_model_commit(ViewTree* tree) {
     if (!view_tree_model_source_valid(tree) || !tree->model->root || tree->model->checkpoint) return false;
+    if (!view_css_commit_remembered_sizes(tree)) return false;
     tree->model->committed = true;
     return true;
 }

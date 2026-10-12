@@ -40,6 +40,15 @@ static void render_raster_retained_media(RasterRenderContext* rdcon, ViewBlock* 
 static void render_raster_dispatch_block(RasterRenderContext* rdcon, ViewBlock* block,
                                          bool skip_positioned_in_normal_flow) {
     if (!rdcon || !block) return;
+    RdtLogicalPoint fixed = view_geometry_fixed_scroll_adjustment(block);
+    struct FixedFrameScope {
+        RasterRenderContext* context;
+        BlockBlot saved;
+        bool active;
+        ~FixedFrameScope() { if (active) context->block = saved; }
+    } fixed_frame = {rdcon, rdcon->block, fixed.x != 0.0f || fixed.y != 0.0f};
+    rdcon->block.x += fixed.x * rdcon->raster_scale;
+    rdcon->block.y += fixed.y * rdcon->raster_scale;
     render_profiler_increment(rdcon->profiler, RENDER_PROFILE_DISPATCH);
 
     if (block->tag_id == MARKUP_NAME_SVG) {

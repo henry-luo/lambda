@@ -131,6 +131,9 @@ Item js_ctor_animation_event_fn(Item type, Item init);
 Item js_ctor_webgl_context_event_fn(Item type, Item init);
 Item js_ctor_message_event_fn(Item type, Item init);
 void js_message_event_install_prototype(Item prototype);
+Item js_ctor_content_visibility_auto_state_change_event(Item type, Item init);
+void js_content_visibility_event_install_prototype(Item prototype);
+Item js_create_native_content_visibility_event(bool skipped);
 Item js_create_message_event(const char* type, Item data, Item source, Item origin);
 Item js_ctor_static_range_fn(Item init);
 

@@ -115,6 +115,12 @@ extern "C" bool root_vector_ensure_external(RootVector* v) {
     return root_vector_sync_heap(v);
 }
 
+extern "C" Item* root_vector_external_at(RootVector* v, int64_t index) {
+    if (!v || !v->external_slots || !v->heap_generation || index < 0 || index >= v->external_count) return NULL;
+    root_vector_observe_heap(v);
+    return v->heap_generation ? v->external_slots + index : NULL;
+}
+
 extern "C" void root_vector_clear_external(RootVector* v) {
     if (!v) return;
     root_vector_observe_heap(v);
@@ -124,8 +130,7 @@ extern "C" void root_vector_clear_external(RootVector* v) {
 extern "C" void root_vector_unbind_external(RootVector* v) {
     if (!v) return;
     Context* owner = root_vector_owner(v);
-    bool live = heap_generation_for(owner) == v->heap_generation &&
-        v->heap_generation != 0;
+    bool live = v->heap_generation != 0 && heap_generation_for(owner) == v->heap_generation;
     if (live && v->external_slots && v->external_count > 0) {
         heap_unregister_gc_root_range_for(owner, (uint64_t*)v->external_slots);
     }
@@ -194,7 +199,8 @@ extern "C" void root_vector_destroy(RootVector* v) {
     Context* owner = root_vector_owner(v);
     // unregister only from the heap the blocks are registered with; an older
     // heap's registry died with it
-    bool live = heap_generation_for(owner) == v->heap_generation && v->heap_generation != 0;
+    // an already-unregistered vector needs no access to its retired context (D5.3.3).
+    bool live = v->heap_generation != 0 && heap_generation_for(owner) == v->heap_generation;
     for (int i = 0; i < v->block_count; i++) {
         if (live) heap_unregister_gc_root_range_for(owner, v->blocks[i]->slots);
         mem_free(v->blocks[i]);

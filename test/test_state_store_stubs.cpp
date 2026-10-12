@@ -60,6 +60,16 @@ extern "C" void heap_unregister_gc_root(uint64_t* slot) {
     (void)slot;
 }
 
+extern "C" void heap_unregister_gc_root_for(Context* owner, uint64_t* slot) {
+    (void)owner;
+    heap_unregister_gc_root(slot);
+}
+
+void layout_content_visibility_invalidate(DocState* state) {
+    // this target has no layout pipeline; relevance projection is tested in view/UI fixtures.
+    (void)state;
+}
+
 // Retained DOM deltas live in the production editing waist, which this
 // pool-backed StateStore target deliberately does not link. The fixture never
 // creates one, so its teardown seam only needs to preserve that ownership

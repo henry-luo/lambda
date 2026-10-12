@@ -1,0 +1,34 @@
+<!doctype html><meta charset=utf-8><style>
+html,body {margin:0;background:white;font:14px sans-serif}
+#spacer {height:2000px}
+#auto {content-visibility:auto;contain-intrinsic-size:auto 40px;width:100px}
+#child {height:120px;background:green}
+#controls {position:fixed;left:240px;top:0;z-index:20}
+#controls button {display:block;width:110px;height:22px}
+#pane {position:fixed;left:120px;top:140px;width:100px;height:100px;overflow:auto;background:white}
+#pane-spacer {height:600px}
+#nested {content-visibility:auto;contain-intrinsic-size:auto none}
+#nested-child {height:70px;background:green}
+#hidden {position:fixed;left:0;top:140px;width:100px;height:40px;background:blue}
+#hidden-child {height:40px;background:green}
+#hidden-focus {position:absolute;left:0;top:0;width:100px;height:20px}
+</style>
+<div id=controls><button id=down>scroll down</button><button id=up>scroll up</button>
+<button id=grow>grow content</button><button id=hide>hide contents</button><button id=show>show contents</button>
+<button id=focus-auto>focus auto</button><button id=focus-hidden>focus hidden</button>
+<button id=pane-down>scroll pane</button><button id=pane-up>reset pane</button></div>
+<div id=hidden><div id=hidden-child><button id=hidden-focus>hidden focus</button></div></div>
+<div id=pane><div id=pane-spacer></div><div id=nested><div id=nested-child></div></div></div>
+<div id=spacer></div><div id=auto><div id=child><button id=auto-focus>auto focus</button></div></div>
+<script>
+function byId(id) {return document.getElementById(id)}
+byId('down').onclick=function(){window.scrollTo(0,1950)};
+byId('up').onclick=function(){window.scrollTo(0,0)};
+byId('grow').onclick=function(){byId('child').style.height='160px'};
+byId('hide').onclick=function(){byId('hidden').style.contentVisibility='hidden'};
+byId('show').onclick=function(){byId('hidden').style.contentVisibility='visible'};
+byId('focus-auto').onclick=function(){byId('auto-focus').focus({preventScroll:true})};
+byId('focus-hidden').onclick=function(){byId('hidden-focus').focus({preventScroll:true})};
+byId('pane-down').onclick=function(){byId('pane').scrollTop=580};
+byId('pane-up').onclick=function(){byId('pane').scrollTop=0};
+</script>

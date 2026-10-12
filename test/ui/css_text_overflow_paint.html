@@ -1,0 +1,22 @@
+<!doctype html><meta charset="utf-8"><style>
+@font-face{font-family:FixtureMono;src:url(../layout/data/font/LiberationMono-Regular.ttf)}
+html,body{margin:0;background:white}button{height:24px}
+#owner{color:blue;text-overflow:ellipsis}.box{position:absolute;left:0;width:62px;height:24px;font:20px/24px FixtureMono;overflow:hidden;white-space:nowrap;text-overflow:inherit}
+#ellipsis{top:40px}#clamp{top:80px;text-overflow:clip;white-space:normal;word-break:break-all;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:1}
+.source{color:red}
+</style><button id="check">Check</button><button id="change">Change</button><button id="changed">Changed</button><button id="restore">Restore</button><button id="restored">Restored</button><button id="disable">Disable</button><button id="disabled">Disabled</button><button id="enable">Enable</button><button id="enabled">Enabled</button><output id="report"></output>
+<div id="owner"><div id="ellipsis" class="box"><span class="source">ABCDEFGHIJ</span></div><div id="clamp" class="box"><span class="source">ABCDEFGHIJ</span></div></div>
+<script>
+(function(){
+ function record(prefix){var report=document.getElementById('report');['ellipsis','clamp'].forEach(function(id){var box=document.getElementById(id),s=getComputedStyle(box),r=box.getBoundingClientRect();report.setAttribute('data-'+prefix+id,[s.textOverflow,s.fontSize,s.color,s.webkitLineClamp,r.width,r.height].join('|'));});}
+ document.getElementById('check').onclick=function(){record('');};
+ document.getElementById('change').onclick=function(){document.getElementById('owner').style.color='green';['ellipsis','clamp'].forEach(function(id){document.getElementById(id).style.fontSize='10px';});};
+ document.getElementById('changed').onclick=function(){record('changed-');};
+ document.getElementById('restore').onclick=function(){document.getElementById('owner').style.color='blue';['ellipsis','clamp'].forEach(function(id){document.getElementById(id).style.fontSize='20px';});};
+ document.getElementById('restored').onclick=function(){record('restored-');};
+ document.getElementById('disable').onclick=function(){document.getElementById('owner').style.textOverflow='clip';document.getElementById('clamp').style.webkitLineClamp='none';};
+ document.getElementById('disabled').onclick=function(){record('disabled-');};
+ document.getElementById('enable').onclick=function(){document.getElementById('owner').style.removeProperty('text-overflow');document.getElementById('clamp').style.removeProperty('-webkit-line-clamp');};
+ document.getElementById('enabled').onclick=function(){record('enabled-');};
+})();
+</script>

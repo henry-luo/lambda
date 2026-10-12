@@ -112,11 +112,13 @@ inline void restore_grid_percentage_tracks(TrackArray& tracks, const TrackArray&
  * This prevents accumulated truncation errors (e.g. 4×17.5 → 158 instead of 160).
  */
 inline void finalize_track_used_sizes(TrackArray& tracks) {
+    if (tracks.empty()) return;
     int track_count = static_cast<int>(tracks.size()); // INT_CAST_OK: bounded track count
     float float_total = 0.0f;
     int floor_total = 0;
     struct FracEntry { float frac; int idx; };
-    FracEntry fracs[MAX_GRID_TRACKS];  // LARGE_ARRAY_OK: bound = MAX_GRID_TRACKS (64) × 8 B = 512 B; layout-pass scratch.
+    auto fracs = lam::temp_array<FracEntry>(tracks.size(), MEM_CAT_LAYOUT);
+    if (!fracs) { tracks.fail("fracs"); return; }
     size_t frac_count = 0;
     fracs[0] = {};
     for (int i = 0; i < track_count; i++) {
@@ -160,30 +162,6 @@ inline void finalize_track_used_sizes(TrackArray& tracks) {
 // ============================================================================
 
 /**
- * Get span from start/end values
- * @param start Start line number
- * @param end End line number
- * @param end_is_span True if negative end value means "span N", false if it's a negative line number
- */
-inline int get_span_value_ex(int start, int end, bool end_is_span) {
-    if (start > 0 && end > 0) {
-        return end - start;
-    } else if (start > 0 && end < 0) {
-        if (end_is_span) {
-            return -end;  // end is negative span value (e.g., "span 2" stored as -2)
-        } else {
-            // end is negative line number (e.g., -1 = last line)
-            // For now, return span 1 - actual resolution happens later in resolve_negative_lines()
-            // This is a placeholder; the real span will be calculated after implicit grid is known
-            return 1;
-        }
-    } else if (end < 0 && end_is_span) {
-        return -end;  // span only (auto start)
-    }
-    return 1;  // default span
-}
-
-/**
  * Resolve a negative line number against the total track count.
  * CSS Grid spec: -1 = last line, -2 = second to last, etc.
  * With N tracks, there are N+1 lines numbered 1 to N+1.
@@ -204,6 +182,54 @@ inline int resolve_negative_line(int negative_line, int total_track_count) {
     return resolved;
 }
 
+// resolve numeric/named edges and spans locally; authored references survive every pass.
+inline GridPlacement grid_axis_placement(GridContainerLayout* grid, bool is_row, int tracks,
+                                                int start, int end,
+                                                const char* start_name, const char* end_name,
+                                                int start_occurrence, int end_occurrence,
+                                                bool start_span, bool end_span,
+                                                bool has_start, bool has_end) {
+    int64_t resolved_start = start;
+    int64_t resolved_end = end;
+    bool definite_start = has_start && !start_span;
+    bool definite_end = has_end && !end_span;
+    if (definite_start) resolved_start = start_name
+        ? find_grid_line_by_name(grid, start_name, is_row, start_occurrence)
+        : start < 0 ? (int64_t)tracks + 2 + start : start;
+    if (definite_end) resolved_end = end_name
+        ? find_grid_line_by_name(grid, end_name, is_row, end_occurrence, true)
+        : end < 0 ? (int64_t)tracks + 2 + end : end;
+    if (start_span && definite_end) {
+        resolved_start = start_name ? find_grid_line_by_name(grid, start_name, is_row,
+            start_occurrence, false, static_cast<int>(resolved_end), -1) // INT_CAST_OK: definite authored edge or bounded named line fits int.
+            : resolved_end + start;
+        definite_start = true;
+    }
+    if (end_span && definite_start) {
+        resolved_end = end_name ? find_grid_line_by_name(grid, end_name, is_row,
+            end_occurrence, true, static_cast<int>(resolved_start), 1) // INT_CAST_OK: definite authored edge or bounded named line fits int.
+            : resolved_start - end;
+        definite_end = true;
+    }
+    if (!definite_start && !definite_end) {
+        // an unanchored named span becomes one; named occurrences need a definite opposite edge.
+        int64_t span = start_span ? (start_name ? 1 : -(int64_t)start)
+            : end_span && !end_name ? -(int64_t)end : 1;
+        if (span < 1) span = 1;
+        if (span > GRID_MAX_EXPLICIT_TRACKS) span = GRID_MAX_EXPLICIT_TRACKS;
+        return GridPlacement::Auto(static_cast<uint16_t>(span));
+    }
+    if (!definite_start) resolved_start = resolved_end - 1;
+    if (!definite_end) resolved_end = resolved_start + 1;
+    LineSpan bounded = grid_clamp_line_span(resolved_start - 1, resolved_end - 1);
+    GridPlacement placement = GridPlacement::FromStartSpan(
+        bounded.start.value + 1, bounded.span());
+    // line zero is definite before the explicit grid; negative lines are already resolved.
+    placement.is_definite = true;
+    placement.has_negative_start = false;
+    return placement;
+}
+
 /**
  * Extract GridItemInfo from ViewBlock with GridItemProp
  * @param item The ViewBlock to extract info from
@@ -212,7 +238,8 @@ inline int resolve_negative_line(int negative_line, int total_track_count) {
  * @param explicit_row_count Number of explicit rows (for resolving negative lines)
  */
 inline GridItemInfo extract_grid_item_info(ViewBlock* item, int item_index,
-                                           int explicit_col_count = 0, int explicit_row_count = 0) {
+                                           int explicit_col_count = 0, int explicit_row_count = 0,
+                                           GridContainerLayout* grid = nullptr) {
     GridItemInfo info;
     info.item_index = item_index;
 
@@ -224,65 +251,20 @@ inline GridItemInfo extract_grid_item_info(ViewBlock* item, int item_index,
         return info;
     }
 
-    // Column placement
-    int col_start = gi->grid_column_start;
-    int col_end = gi->grid_column_end;
-    bool col_end_is_span = gi->grid_column_end_is_span;
-    bool col_start_is_span = gi->grid_column_start_is_span;
-
-    if (col_start < 0 && col_end < 0 && !col_end_is_span && !col_start_is_span) {
-        // "-N / -M" - both start and end are negative line numbers
-        // Defer resolution until we know the grid size
-        info.column = GridPlacement::FromNegativeLines(
-            static_cast<int16_t>(col_start),
-            static_cast<int16_t>(col_end));
-    } else if (col_start > 0 && col_end < 0 && !col_end_is_span) {
-        // "N / -M" - explicit start, negative line number end
-        // Defer resolution until we know the grid size
-        info.column = GridPlacement::FromStartNegativeEnd(
-            static_cast<int16_t>(col_start),
-            static_cast<int16_t>(col_end));
-    } else if (col_start != 0 && !col_start_is_span) {
-        // Definite start position (positive line number)
-        int col_span = get_span_value_ex(col_start, col_end, col_end_is_span);
-        info.column = GridPlacement::FromStartSpan(static_cast<int16_t>(col_start),
-                                                    static_cast<uint16_t>(col_span));
-    } else if (col_end < 0 && col_end_is_span) {
-        // span only - auto placement with span
-        info.column = GridPlacement::Auto(static_cast<uint16_t>(-col_end));
-    } else {
-        info.column = GridPlacement::Auto(1);
-    }
-
-    // Row placement
-    int row_start = gi->grid_row_start;
-    int row_end = gi->grid_row_end;
-    bool row_end_is_span = gi->grid_row_end_is_span;
-    bool row_start_is_span = gi->grid_row_start_is_span;
-
-    if (row_start < 0 && row_end < 0 && !row_end_is_span && !row_start_is_span) {
-        // "-N / -M" - both start and end are negative line numbers
-        // Defer resolution until we know the grid size
-        info.row = GridPlacement::FromNegativeLines(
-            static_cast<int16_t>(row_start),
-            static_cast<int16_t>(row_end));
-    } else if (row_start > 0 && row_end < 0 && !row_end_is_span) {
-        // "N / -M" - explicit start, negative line number end
-        // Defer resolution until we know the grid size
-        info.row = GridPlacement::FromStartNegativeEnd(
-            static_cast<int16_t>(row_start),
-            static_cast<int16_t>(row_end));
-    } else if (row_start != 0 && !row_start_is_span) {
-        // Definite start position (positive line number)
-        int row_span = get_span_value_ex(row_start, row_end, row_end_is_span);
-        info.row = GridPlacement::FromStartSpan(static_cast<int16_t>(row_start),
-                                                 static_cast<uint16_t>(row_span));
-    } else if (row_end < 0 && row_end_is_span) {
-        // span only - auto placement with span
-        info.row = GridPlacement::Auto(static_cast<uint16_t>(-row_end));
-    } else {
-        info.row = GridPlacement::Auto(1);
-    }
+    info.column = grid_axis_placement(grid, false, explicit_col_count,
+        gi->grid_column_start, gi->grid_column_end,
+        gi->grid_column_start_name, gi->grid_column_end_name,
+        gi->grid_column_start_occurrence, gi->grid_column_end_occurrence,
+        gi->grid_column_start_is_span, gi->grid_column_end_is_span,
+        gi->has_explicit_grid_column_start || gi->grid_column_start != 0,
+        gi->has_explicit_grid_column_end || gi->grid_column_end != 0);
+    info.row = grid_axis_placement(grid, true, explicit_row_count,
+        gi->grid_row_start, gi->grid_row_end,
+        gi->grid_row_start_name, gi->grid_row_end_name,
+        gi->grid_row_start_occurrence, gi->grid_row_end_occurrence,
+        gi->grid_row_start_is_span, gi->grid_row_end_is_span,
+        gi->has_explicit_grid_row_start || gi->grid_row_start != 0,
+        gi->has_explicit_grid_row_end || gi->grid_row_end != 0);
 
     return info;
 }
@@ -442,11 +424,15 @@ inline void place_items_with_occupancy(
 
     // Extract item info
     ItemInfoArray item_infos;
-    item_infos.reserve(item_count);
+    if (!item_infos.reserve((size_t)item_count)) { grid_layout->storage_failed = true; return; }
     int explicit_col_count = grid_layout->explicit_column_count;
     int explicit_row_count = grid_layout->explicit_row_count;
     for (int i = 0; i < item_count; i++) {
-        item_infos.push_back(extract_grid_item_info(items[i], i, explicit_col_count, explicit_row_count));
+        if (!item_infos.push_back(extract_grid_item_info(items[i], i, explicit_col_count,
+                                                       explicit_row_count, grid_layout))) {
+            grid_layout->storage_failed = true;
+            return;
+        }
         GridItemInfo& info = item_infos.back();
         log_debug("[GRID EXTRACT] item %d: col start=%d end=%d span=%d definite=%d neg_start=%d neg_end=%d | row start=%d end=%d span=%d definite=%d neg_start=%d neg_end=%d",
                  i, info.column.start, info.column.end, info.column.span, info.column.is_definite,
@@ -457,33 +443,14 @@ inline void place_items_with_occupancy(
 
     // Step 1: Resolve negative line numbers against the EXPLICIT grid only
     // CSS Grid spec §8.3: "Numeric indices count from the edges of the EXPLICIT grid."
-    // If there's no explicit grid (0 tracks), -1 = line 1, -2 and beyond clamp to line 1.
-    // This is the CORRECT spec behavior - negative lines NEVER reference implicit grid.
+    // with no explicit tracks, -1 is line 1 and earlier indices create negative implicit tracks.
     int resolve_cols = explicit_col_count;  // Use explicit count, can be 0
     int resolve_rows = explicit_row_count;  // Use explicit count, can be 0
     resolve_negative_lines_in_items(item_infos, resolve_cols, resolve_rows);
 
-    // Per CSS Grid spec: If there's no explicit grid-template-columns,
-    // the grid defaults to a single column. Items flow row-by-row.
     uint16_t effective_col_count = static_cast<uint16_t>(grid_layout->explicit_column_count);
     uint16_t effective_row_count = static_cast<uint16_t>(grid_layout->explicit_row_count);
-
-    // When auto-flow is row (default), we need at least 1 column to start
-    // When auto-flow is column, we need at least 1 row to start
-    if (auto_flow != CSS_VALUE_COLUMN && effective_col_count == 0) {
-        effective_col_count = 1;  // Default to single column for row-flow
-    }
-    if (auto_flow == CSS_VALUE_COLUMN && effective_row_count == 0) {
-        effective_row_count = 1;  // Default to single row for column-flow
-    }
-    // For column-flow: if no explicit columns but we have grid-auto-columns,
-    // set effective_col_count to 0 to allow implicit expansion
-    if (auto_flow == CSS_VALUE_COLUMN && effective_col_count == 0 &&
-        grid_layout->grid_auto_columns && grid_layout->grid_auto_columns->track_count > 0) {
-        // Leave effective_col_count as 0 - the matrix will create implicit columns
-    }
-
-    // Create initial track counts from effective grid
+    // automatic spans establish implicit tracks in step 3; never invent an explicit track for `none`.
     TrackCounts col_counts(0, effective_col_count, 0);
     TrackCounts row_counts(0, effective_row_count, 0);
 
@@ -498,6 +465,8 @@ inline void place_items_with_occupancy(
         effective_row_count,
         effective_col_count
     );
+
+    if (!matrix.good()) { grid_layout->storage_failed = true; return; }
 
     // Get final track counts from matrix (includes negative implicit tracks)
     TrackCounts final_col_counts = matrix.track_counts(AbsoluteAxis::Horizontal);
@@ -589,7 +558,10 @@ inline ContribArray collect_item_contributions(
     ContribArray contributions;
     if (!grid_layout || !items || item_count <= 0) return contributions;
 
-    contributions.reserve(item_count);
+    if (!contributions.reserve((size_t)item_count)) {
+        grid_layout->storage_failed = true;
+        return contributions;
+    }
 
     for (int i = 0; i < item_count; i++) {
         ViewBlock* item = items[i];
@@ -713,10 +685,12 @@ inline ContribArray collect_item_contributions(
             contrib.max_content_contribution - margin_contribution,
             contrib.is_scroll_container) + margin_contribution;
 
-        // Only add if the contribution is meaningful
-        if (contrib.track_span > 0 &&
-            (contrib.min_content_contribution > 0 || contrib.max_content_contribution > 0)) {
-            contributions.push_back(contrib);
+        // a zero contribution still resolves an empty intrinsic track's finite growth limit.
+        if (contrib.track_span > 0) {
+            if (!contributions.push_back(contrib)) {
+            grid_layout->storage_failed = true;
+            return contributions;
+        }
         }
     }
 
@@ -757,24 +731,39 @@ inline void run_enhanced_track_sizing(
               container_width, container_height,
               grid_layout->computed_column_count, grid_layout->computed_row_count);
 
-    if (!grid_layout->computed_columns || !grid_layout->computed_rows) return;
+    if (!grid_layout->computed_columns || !grid_layout->computed_rows) {
+        grid_layout->storage_failed = true;
+        return;
+    }
     TrackArray& col_tracks = *grid_layout->computed_columns;
     TrackArray& row_tracks = *grid_layout->computed_rows;
-    auto collapse_auto_fit = [&](TrackArray& tracks, const bool* flags, int limit, bool horizontal) { // CSS Grid §7.2.3.2
-        for (int i = 0; i < limit && i < tracks.size(); i++) if (flags[i]) {
+    auto collapse_auto_fit = [&](TrackArray& tracks, const bool* flags, int limit,
+                                 int explicit_offset, bool horizontal) { // CSS Grid §7.2.3.2
+        for (size_t i = 0; i < tracks.size(); i++) {
+            // collapse flags index the explicit template; placement can prepend implicit tracks.
+            if (i < (size_t)explicit_offset || i - explicit_offset >= (size_t)limit ||
+                !flags[i - explicit_offset]) continue;
             bool occupied = false;
+            int line = static_cast<int>(i) + 1; // INT_CAST_OK: the grid extent policy bounds track indices to 20000.
             for (int j = 0; j < item_count && !occupied; j++) {
                 GridItemProp* item = grid_item_prop(items[j]);
-                occupied = item && (horizontal ? item->computed_grid_column_start : item->computed_grid_row_start) <= i + 1 &&
-                    (horizontal ? item->computed_grid_column_end : item->computed_grid_row_end) > i + 1;
+                occupied = item && (horizontal ? item->computed_grid_column_start : item->computed_grid_row_start) <= line &&
+                    (horizontal ? item->computed_grid_column_end : item->computed_grid_row_end) > line;
             }
             if (!occupied) tracks[i].collapse();
         }
     };
-    collapse_auto_fit(col_tracks, grid_layout->auto_fit_columns, grid_layout->auto_fit_col_count, true); collapse_auto_fit(row_tracks, grid_layout->auto_fit_rows, grid_layout->auto_fit_row_count, false);
+    collapse_auto_fit(col_tracks, grid_layout->auto_fit_columns, grid_layout->auto_fit_col_count,
+                      grid_layout->negative_implicit_column_count, true);
+    collapse_auto_fit(row_tracks, grid_layout->auto_fit_rows, grid_layout->auto_fit_row_count,
+                      grid_layout->negative_implicit_row_count, false);
     // Percentage sizing temporarily rewrites functions; preserve only the pass input definitions.
     TrackArray col_track_definitions = col_tracks;
     TrackArray row_track_definitions = row_tracks;
+    if (!col_track_definitions.good() || !row_track_definitions.good()) {
+        grid_layout->storage_failed = true;
+        return;
+    }
 
     log_debug("  converted col_tracks.size=%zu, row_tracks.size=%zu",
               col_tracks.size(), row_tracks.size());
@@ -789,12 +778,8 @@ inline void run_enhanced_track_sizing(
     }
 
     // Calculate gap-adjusted available space (gaps reduce available space for tracks)
-    float col_gap_total = (grid_layout->computed_column_count > 1)
-        ? (grid_layout->computed_column_count - 1) * effective_col_gap
-        : 0.0f;
-    float row_gap_total = (grid_layout->computed_row_count > 1)
-        ? (grid_layout->computed_row_count - 1) * grid_layout->row_gap
-        : 0.0f;
+    float col_gap_total = grid_track_gaps(col_tracks, 0, col_tracks.size(), effective_col_gap);
+    float row_gap_total = grid_track_gaps(row_tracks, 0, row_tracks.size(), grid_layout->row_gap);
 
     // a zero-sized box and a box exhausted by gaps still have definite percentage bases.
     float col_available = container_width >= 0.0f ? fmaxf(0.0f, container_width - col_gap_total) : -1.0f;
@@ -816,6 +801,7 @@ inline void run_enhanced_track_sizing(
         // 11.5 Resolve Intrinsic Track Sizes
         ContribArray col_contributions =
             collect_item_contributions(grid_layout, items, item_count, true /* is_column_axis */);
+        if (grid_layout->storage_failed) return;
 
         // When the container has definite width, cap auto track growth limits to prevent
         // Phase 2 (max-content sizing) from overflowing the container.
@@ -847,8 +833,10 @@ inline void run_enhanced_track_sizing(
                 if (per_auto > 0.0f) {
                     // Find per-track min-content and max-content floors from single-span items
                     // For scroll containers, the effective minimum is 0 (CSS Grid §6.6)
-                    float track_min_floor[MAX_GRID_TRACKS];  // LARGE_ARRAY_OK: bound = MAX_GRID_TRACKS (64) × 4 B = 256 B; layout-pass scratch.
-                    float track_max_floor[MAX_GRID_TRACKS];  // LARGE_ARRAY_OK: bound = MAX_GRID_TRACKS (64) × 4 B = 256 B; layout-pass scratch.
+                    auto track_min_floor = lam::temp_array<float>(col_tracks.size(), MEM_CAT_LAYOUT);
+                    if (!track_min_floor) { grid_layout->storage_failed = true; return; }
+                    auto track_max_floor = lam::temp_array<float>(col_tracks.size(), MEM_CAT_LAYOUT);
+                    if (!track_max_floor) { grid_layout->storage_failed = true; return; }
                     size_t n_col = col_tracks.size();
                     for (size_t i = 0; i < n_col; ++i) { track_min_floor[i] = 0.0f; track_max_floor[i] = 0.0f; }
                     for (const auto& contrib : col_contributions) {
@@ -900,10 +888,9 @@ inline void run_enhanced_track_sizing(
                          col_contributions[ci].max_content_contribution,
                          col_contributions[ci].minimum_contribution,
                          col_contributions[ci].is_scroll_container);
-            resolve_intrinsic_track_sizes(col_tracks, col_contributions, effective_col_gap, container_width,
-                                          column_min_content_constraint,
-                                          column_max_content_constraint);
         }
+        resolve_intrinsic_track_sizes(col_tracks, col_contributions, effective_col_gap, container_width,
+                                      column_min_content_constraint, column_max_content_constraint);
 
         for (size_t _di = 0; _di < col_tracks.size(); _di++)
             log_debug("[GRID COL] post-resolve col[%zu]: base=%.2f gl=%.2f",
@@ -931,7 +918,7 @@ inline void run_enhanced_track_sizing(
             log_debug("  DBG post-expand col[%zu]: base=%.2f gl=%.2f", _di, col_tracks[_di].base_size, col_tracks[_di].growth_limit);
 
         // 11.8 Stretch auto Tracks
-        stretch_auto_tracks(col_tracks, 0.0f, col_available);
+        stretch_auto_tracks(col_tracks, 0.0f, col_available, grid_layout->justify_content);
 
         for (size_t _di = 0; _di < col_tracks.size(); _di++)
             log_debug("  DBG post-stretch col[%zu]: base=%.2f gl=%.2f", _di, col_tracks[_di].base_size, col_tracks[_di].growth_limit);
@@ -959,20 +946,15 @@ inline void run_enhanced_track_sizing(
             }
 
             // Recompute gap total and available space with resolved gap
-            float col_gap_total2 = (grid_layout->computed_column_count > 1)
-                ? (grid_layout->computed_column_count - 1) * resolved_col_gap
-                : 0.0f;
+            float col_gap_total2 = grid_track_gaps(col_tracks, 0, col_tracks.size(), resolved_col_gap);
             float col_available2 = first_total - col_gap_total2;
 
             restore_grid_percentage_tracks(col_tracks, col_track_definitions, first_total);
 
             // Re-run all phases with pct tracks now definite and resolved gap
             initialize_track_sizes(col_tracks, first_total);
-            if (!col_contributions.empty()) {
-                resolve_intrinsic_track_sizes(col_tracks, col_contributions, resolved_col_gap, first_total,
-                                              column_min_content_constraint,
-                                              column_max_content_constraint);
-            }
+            resolve_intrinsic_track_sizes(col_tracks, col_contributions, resolved_col_gap, first_total,
+                                          column_min_content_constraint, column_max_content_constraint);
             // For shrink-to-fit containers: use indefinite semantics for maximize
             // so that only finite-gl tracks grow to their gl (no free-space distribution).
             float max_avail = (container_width < 0) ? -1.0f : col_available2;
@@ -983,7 +965,7 @@ inline void run_enhanced_track_sizing(
                                    column_min_content_constraint);
             // For shrink-to-fit: no stretching (container size = content, no free space)
             if (container_width >= 0)
-                stretch_auto_tracks(col_tracks, 0.0f, col_available2);
+                stretch_auto_tracks(col_tracks, 0.0f, col_available2, grid_layout->justify_content);
         }
         // Canonical consumers observe the same integer-pixel distribution as the legacy copy seam.
         finalize_track_used_sizes(col_tracks);
@@ -1002,9 +984,8 @@ inline void run_enhanced_track_sizing(
         // NOTE: This uses grid_layout->computed_columns which was just updated above
         ContribArray row_contributions =
             collect_item_contributions(grid_layout, items, item_count, false /* is_column_axis */);
-        if (!row_contributions.empty()) {
-            resolve_intrinsic_track_sizes(row_tracks, row_contributions, grid_layout->row_gap, row_percentage_base);
-        }
+        if (grid_layout->storage_failed) return;
+        resolve_intrinsic_track_sizes(row_tracks, row_contributions, grid_layout->row_gap, row_percentage_base);
 
         // 11.6 also runs for an indefinite grid: finite growth limits define the
         // max-content track size needed before cyclic item percentages resolve.
@@ -1018,13 +999,12 @@ inline void run_enhanced_track_sizing(
                                    row_contributions, grid_layout->row_gap);
 
             // 11.8 Stretch auto Tracks
-            stretch_auto_tracks(row_tracks, 0.0f, row_available);
+            stretch_auto_tracks(row_tracks, 0.0f, row_available, grid_layout->align_content);
         }
 
         // Second pass for percentage row tracks in indefinite containers
         if (needs_row_second_pass) {
-            float first_row_total = (grid_layout->computed_row_count > 1)
-                ? (grid_layout->computed_row_count - 1) * grid_layout->row_gap : 0.0f;
+            float first_row_total = row_gap_total;
             for (const auto& t : row_tracks) first_row_total += t.base_size;
 
             // Expose the intrinsic row height for the caller (container height should not exceed this)
@@ -1034,17 +1014,16 @@ inline void run_enhanced_track_sizing(
 
             float row_available2 = first_row_total - row_gap_total;
             initialize_track_sizes(row_tracks, row_available2);
-            if (!row_contributions.empty()) {
-                resolve_intrinsic_track_sizes(row_tracks, row_contributions, grid_layout->row_gap, first_row_total);
-            }
+            resolve_intrinsic_track_sizes(row_tracks, row_contributions, grid_layout->row_gap, first_row_total);
             maximize_tracks(row_tracks, row_available2, row_available2);
             expand_flexible_tracks(row_tracks, 0.0f, row_available2, row_available2,
                                    row_contributions, grid_layout->row_gap);
-            stretch_auto_tracks(row_tracks, 0.0f, row_available2);
+            stretch_auto_tracks(row_tracks, 0.0f, row_available2, grid_layout->align_content);
         }
         finalize_track_used_sizes(row_tracks);
         compute_track_offsets(row_tracks, grid_layout->row_gap);
     }
+    grid_layout->storage_failed = !col_tracks.good() || !row_tracks.good();
 }
 
 } // namespace grid_adapter

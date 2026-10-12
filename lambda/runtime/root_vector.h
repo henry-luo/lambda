@@ -49,6 +49,7 @@ void root_vector_init(RootVector* v, Context* owner, const char* name);
 void root_vector_bind_external(RootVector* v, Context* owner, Item* slots,
                                int64_t count, const char* name);
 bool root_vector_ensure_external(RootVector* v);
+Item* root_vector_external_at(RootVector* v, int64_t index); // observes heap replacement without registering.
 void root_vector_clear_external(RootVector* v);
 void root_vector_unbind_external(RootVector* v);
 bool root_vector_push(RootVector* v, Item value);        // may allocate a block

@@ -8,21 +8,24 @@ extern "C" {
 #include "../lib/memtrack.h"
 }
 
-static void initialize_grid_axis(lam::Up<radiant::grid::TrackArray>* destination, int track_count,
+static bool initialize_grid_axis(lam::Up<radiant::grid::TrackArray>* destination, int track_count,
                                  int explicit_count, int negative_implicit_count,
                                  GridTrackList* template_tracks,
                                  GridTrackList* automatic_tracks,
                                  ScratchArena* scratch,
                                  const char* axis_name) {
+    if (*destination) (*destination)->~TrackArray();
     void* storage = scratch_alloc(scratch, sizeof(radiant::grid::TrackArray));
     *destination = lam::up(storage ? new (storage) radiant::grid::TrackArray() : nullptr); // NEW_DELETE_OK: scratch-owned pass state.
     if (!*destination) {
         log_error("grid_sizing: unable to allocate %d %s scratch tracks", track_count, axis_name);
-        return;
+        return false;
     }
-    if (track_count <= 0) return;
+    if (track_count <= 0) return true;
+    if (!(*destination)->reserve((size_t)track_count)) return false;
     int explicit_start = negative_implicit_count;
     int explicit_end = explicit_start + explicit_count;
+    int sized_explicit_end = explicit_start + (template_tracks ? template_tracks->track_count : 0);
 
     for (int index = 0; index < track_count; index++) {
         GridTrackSize* parsed_size = nullptr;
@@ -34,7 +37,7 @@ static void initialize_grid_axis(lam::Up<radiant::grid::TrackArray>* destination
                 int auto_count = automatic_tracks->track_count;
                 int auto_index = index < explicit_start
                     ? (auto_count - ((explicit_start - index) % auto_count)) % auto_count
-                    : (index - explicit_end) % auto_count;
+                    : (index - sized_explicit_end) % auto_count;
                 parsed_size = automatic_tracks->tracks[auto_index];
             }
         }
@@ -42,6 +45,7 @@ static void initialize_grid_axis(lam::Up<radiant::grid::TrackArray>* destination
         (*destination)->push_back(radiant::grid::EnhancedGridTrack(
             radiant::grid_adapter::convert_to_track_sizing(parsed_size)));
     }
+    return (*destination)->good();
 }
 
 // Initialize track sizes
@@ -53,21 +57,17 @@ void initialize_track_sizes(GridContainerLayout* grid_layout) {
     }
 
 
-    // Allocate computed tracks (clamp to prevent excessive allocation)
-    // The sizing algorithm's canonical storage has one shared bound; counts must match it.
-    if (grid_layout->computed_row_count > MAX_GRID_TRACKS) grid_layout->computed_row_count = MAX_GRID_TRACKS;
-    if (grid_layout->computed_column_count > MAX_GRID_TRACKS) grid_layout->computed_column_count = MAX_GRID_TRACKS;
-
-    initialize_grid_axis(&grid_layout->computed_rows, grid_layout->computed_row_count,
+    bool rows_ready = initialize_grid_axis(&grid_layout->computed_rows, grid_layout->computed_row_count,
                          grid_layout->explicit_row_count,
                          grid_layout->negative_implicit_row_count,
                          grid_layout->grid_template_rows, grid_layout->grid_auto_rows,
                          &grid_layout->lycon->scratch, "row");
-    initialize_grid_axis(&grid_layout->computed_columns, grid_layout->computed_column_count,
+    bool columns_ready = initialize_grid_axis(&grid_layout->computed_columns, grid_layout->computed_column_count,
                          grid_layout->explicit_column_count,
                          grid_layout->negative_implicit_column_count,
                          grid_layout->grid_template_columns,
                          grid_layout->grid_auto_columns, &grid_layout->lycon->scratch, "column");
+    grid_layout->storage_failed = !rows_ready || !columns_ready;
 
 }
 
@@ -79,6 +79,7 @@ void resolve_track_sizes_enhanced(GridContainerLayout* grid_layout, ViewBlock* c
 
     // Phase 1: Initialize track sizes (still needed for memory allocation)
     initialize_track_sizes(grid_layout);
+    if (grid_layout->storage_failed) return;
 
     // For shrink-to-fit containers, use indefinite width (-1) so tracks size to content
     // rather than expanding to fill available space
@@ -107,6 +108,8 @@ void resolve_track_sizes_enhanced(GridContainerLayout* grid_layout, ViewBlock* c
         grid_layout->is_max_content_width
     );
 
+    if (grid_layout->storage_failed) return;
+
     // Store row intrinsic height for container height capping
     if (row_intrinsic_height > 0.0f) {
         grid_layout->row_intrinsic_height = row_intrinsic_height;
@@ -119,14 +122,9 @@ void resolve_track_sizes_enhanced(GridContainerLayout* grid_layout, ViewBlock* c
     // is determined by the non-pct content (CSS Grid §12.5).
     if ((grid_layout->is_shrink_to_fit_width || grid_layout->is_min_content_width ||
          grid_layout->is_max_content_width) && grid_layout->computed_column_count > 0) {
-        float total_column_width = 0;
-        for (int i = 0; i < grid_layout->computed_column_count; i++) {
-            total_column_width += (*grid_layout->computed_columns)[i].base_size;
-        }
-        // Add gaps between columns
-        if (grid_layout->computed_column_count > 1) {
-            total_column_width += grid_layout->column_gap * (grid_layout->computed_column_count - 1);
-        }
+        float total_column_width = radiant::grid::spanned_tracks_size(
+            *grid_layout->computed_columns, 0, grid_layout->computed_column_count,
+            grid_layout->column_gap);
         // Cap at the intrinsic (pre-pct-re-resolution) width when pct tracks would inflate it.
         // Also use the intrinsic width when pct tracks caused columns to shrink below it —
         // the container's shrink-to-fit width is the max-content of its tracks in the first pass.

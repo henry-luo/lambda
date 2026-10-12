@@ -15,7 +15,7 @@
 
 ## Archive index
 
-This archive contains **182 historical records**: 177 fixed or resolved entries,
+This archive contains **183 historical records**: 178 fixed or resolved entries,
 one CLOSED design decision, and four records CLOSED by consolidation into
 [LR12-24](Lambda_Issue_Ledger.md#lr12-24). LR03-11, LR07-16, LR07-17 and LR10-7, from the
 wrong-value group, were fixed on 2026-09-25 (see the central ledger's
@@ -2974,6 +2974,32 @@ live ancestor-class swaps and synchronous pseudo values. The complete-stylesheet
 probe improves from 0/2 to 2/2 clicks; Spin passes 41 assertions on each execution
 tier (**D8.1.1v17**). Evidence is in `temp/ui_dtna/spin_increment/`; full aggregate
 reruns remain separate gates. No formal semantics or design ruling changes.
+
+<a id="ui-1"></a>**UI-1 · Repeated ordinary markup moves its embedded native node between presentation slots · FIXED 2026-10-11 (found 2026-10-10)**
+
+`let image = <svg ...>; <div image><div image>` produced one native SVG rather
+than two occurrences. The Segmented fixture found one SVG in eighteen icon
+slots, passing 41/42 assertions. `build_dom_tree_from_element` reused the
+ordinary Element's embedded DomElement, and `dom_detach_rebuilt_child` moved
+it out of the earlier parent. This was independent of the component package;
+`fn_apply1` correctly passed unmatched ordinary markup through unchanged.
+
+The user settled the pending ordinary-markup presentation contract as
+**D4.5.3**: MarkBuilder recursively copies Elements and their content at
+UI/view-mode DOM construction, even for already-owned values. Normal Lambda
+evaluation keeps ownership-based sharing. The DOM copies retain original
+source/result keys; full rebuilds migrate native state/frame owners, and SVG
+paint reads live DOM backing. Rooted callables/native handles keep identity.
+Stateful repeated-template and durable-addressing questions remain open.
+
+Segmented now passes **44/44 assertions**, including SVG and rectangle counts
+after native interactions. MarkBuilder and DOM unit regressions cover the
+UI-only copy gate, nested/repeated content, independent attributes/text/links,
+and replacement lookup lifetime. See the 2026-10-11 record in
+[Lambda_Impl_UI_Dtna](impl/Lambda_Impl_UI_Dtna.md).
+The full UI automation gate passes **503/503**; Lambda baseline **6647/6647**
+and the complete Radiant baseline both pass. Segmented and Spin also pass
+under interpreter and JIT.
 
 <a id="ui-2-r"></a>**UI-2-R · Non-stretch column flex height measurement subtracted decorations twice · FIXED 2026-10-10**
 

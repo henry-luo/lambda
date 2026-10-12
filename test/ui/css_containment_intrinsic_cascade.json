@@ -1,0 +1,17 @@
+{
+  "name": "Intrinsic containment honors cascade priority, logical axes and computed inheritance",
+  "html": "test/ui/css_containment_intrinsic_cascade.html",
+  "viewport": {"width": 320, "height": 240},
+  "events": [
+    {"type": "assert_rect", "target": {"selector": "#important"}, "width": 80, "height": 20},
+    {"type": "assert_rect", "target": {"selector": "#logical"}, "width": 70, "height": 25},
+    {"type": "assert_rect", "target": {"selector": "#inherited"}, "width": 30, "height": 40},
+    {"type": "assert_rect", "target": {"selector": "#reset"}, "width": 90, "height": 35},
+    {"type": "click", "target": {"selector": "#mutate"}},
+    {"type": "assert_rect", "target": {"selector": "#important"}, "width": 90, "height": 20},
+    {"type": "assert_rect", "target": {"selector": "#logical"}, "width": 40, "height": 70},
+    {"type": "assert_rect", "target": {"selector": "#inherited"}, "width": 36, "height": 48},
+    {"type": "click", "target": {"selector": "#clear"}},
+    {"type": "assert_rect", "target": {"selector": "#reset"}, "width": 0, "height": 0}
+  ]
+}

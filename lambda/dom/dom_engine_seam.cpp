@@ -57,6 +57,15 @@ DOM_ENGINE_WEAK void* dom_engine_subtree_element_from_point(DomElement* root, fl
 DOM_ENGINE_WEAK bool dom_engine_hit_test_skips_subtree(DomElement* element) {
     (void)element; return false;
 }
+DOM_ENGINE_WEAK bool dom_engine_content_hidden_for_user_agent(DomElement* element) {
+    (void)element; return false;
+}
+DOM_ENGINE_WEAK bool dom_engine_content_is_skipped(DomElement* element, bool include_self) {
+    (void)element; (void)include_self; return false;
+}
+DOM_ENGINE_WEAK char* dom_engine_element_inner_text(DomElement* element) {
+    (void)element; return nullptr;
+}
 DOM_ENGINE_WEAK void dom_engine_svg_timing_event(DomElement* target, const char* type, bool bubbles, double detail) {
     (void)target; (void)type; (void)bubbles; (void)detail;
 }
@@ -66,6 +75,12 @@ DOM_ENGINE_WEAK void dom_engine_svg_timing_key(DomElement* target, const char* k
 DOM_ENGINE_WEAK bool dom_engine_layout_active(DomDocument* d) { (void)d; return false; }
 DOM_ENGINE_WEAK bool dom_engine_element_css_boxes(DomElement* e, DomCssBoxSizes* s) {
     (void)e; (void)s; return false;
+}
+DOM_ENGINE_WEAK bool dom_engine_element_viewport_origin(DomElement* e, float* x, float* y) {
+    (void)e;
+    if (x) *x = 0.0f;
+    if (y) *y = 0.0f;
+    return false;
 }
 DOM_ENGINE_WEAK bool dom_engine_attribute_has_relational_css_dependency(DomDocument* d, const char* n) {
     (void)d; (void)n; return true;

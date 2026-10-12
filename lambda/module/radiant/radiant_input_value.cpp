@@ -1,5 +1,6 @@
 #include "radiant_input_value.hpp"
-#include "radiant_host_api.hpp"
+#include "radiant_dom_bridge.hpp"
+#include "../../runtime/root_vector.h"
 #include "../../input/css/dom_element.hpp"
 #include "../../input/css/css_style.hpp"
 #include "../../../lib/arraylist.h"
@@ -15,7 +16,7 @@ typedef struct RadiantInputStateEntry {
     DomElement* element;
     char* value;
     Item files;
-    bool files_rooted;
+    RootVector file_roots;
 } RadiantInputStateEntry;
 
 typedef struct RadiantInputState : DomDocumentResourceData {
@@ -507,9 +508,7 @@ extern "C" bool radiant_input_value_step(const char* type, const char* value,
 
 static void riv_entry_destroy(RadiantInputStateEntry* entry) {
     if (!entry) return;
-    if (entry->files_rooted && radiant_host_api && radiant_host_api->gc) {
-        radiant_host_api->gc->unregister_root(&entry->files.item);
-    }
+    root_vector_destroy(&entry->file_roots);
     mem_free(entry->value);
     mem_free(entry);
 }
@@ -523,6 +522,16 @@ static void riv_state_destroy(DomDocumentResourceData* data) {
         arraylist_free(state->entries);
     }
     mem_free(state);
+}
+
+static void riv_state_retire_runtime(DomDocumentResourceData* data) {
+    auto* state = (RadiantInputState*)data;
+    for (int i = 0; state->entries && i < state->entries->length; i++) {
+        auto* entry = (RadiantInputStateEntry*)arraylist_get(state->entries, i);
+        root_vector_destroy(&entry->file_roots);
+        entry->files = ItemNull;
+    }
+    // sanitized input text belongs to the document after JS file values retire.
 }
 
 static RadiantInputState* riv_state_get(DomDocument* document, bool create) {
@@ -610,18 +619,21 @@ extern "C" void radiant_input_type_changed(DomElement* element) {
 
 extern "C" Item radiant_input_files(DomElement* element) {
     RadiantInputStateEntry* entry = riv_entry_get(element, true);
-    return entry ? entry->files : ItemNull;
+    Item* value = entry ? root_vector_external_at(&entry->file_roots, 0) : nullptr;
+    return value ? *value : ItemNull;
 }
 
 extern "C" void radiant_input_set_files(DomElement* element, Item files) {
     RadiantInputStateEntry* entry = riv_entry_get(element, true);
     if (!entry) return;
-    if (entry->files_rooted && radiant_host_api && radiant_host_api->gc)
-        radiant_host_api->gc->unregister_root(&entry->files.item);
-    entry->files = files;
-    entry->files_rooted = false;
-    if (files.item != ITEM_NULL && radiant_host_api && radiant_host_api->gc) {
-        radiant_host_api->gc->register_root(&entry->files.item);
-        entry->files_rooted = true;
+    if (files.item == ItemNull.item) {
+        root_vector_destroy(&entry->file_roots);
+        entry->files = ItemNull;
+        return;
     }
+    RadiantInputState* state = riv_state_get(element->doc, false);
+    Context* owner = radiant_dom_resource_owner(element->doc);
+    if (!owner || !dom_document_bind_resource_runtime(element->doc, state, owner, riv_state_retire_runtime)) return;
+    root_vector_bind_external(&entry->file_roots, owner, &entry->files, 1, "document input files");
+    if (root_vector_ensure_external(&entry->file_roots)) entry->files = files;
 }

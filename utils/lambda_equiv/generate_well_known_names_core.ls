@@ -52,6 +52,7 @@ pn catalogs() {
     let tags = split(between(source, "MARKUP_TAGS = \"\"\"", "\"\"\""), null)
     let css = split(between(source, "CSS_PROPERTY_SPELLINGS = \"\"\"", "\"\"\""), null)
     let extra = tuple_entries(between(source, "MARKUP_EXTRA_ENTRIES = [", "]"))
+    let trailing = tuple_entries(between(source, "MARKUP_TRAILING_ENTRIES = [", "]"))
     let lambda_entries = tuple_entries(between(source, "1: (\"lambda\", [", "]),"))
     let js_entries = tuple_entries(between(source, "2: (\"js\", [", "]),"))
 
@@ -66,12 +67,14 @@ pn catalogs() {
         markup = markup ++ [entry]
         owners[entry.spelling] = entry.symbol
     }
+    for (entry in trailing) { owners[entry.spelling] = entry.symbol }
     for (spelling in css) {
         if (owners[spelling] == null) {
             markup = markup ++ [{symbol: "CSS_" ++ css_symbol(spelling),
                                  spelling: spelling, kind: "STRING"}]
         }
     }
+    markup = markup ++ trailing
     return {pools: [
         {pool: 0, label: "markup", entries: markup},
         {pool: 1, label: "lambda", entries: lambda_entries},

@@ -22,8 +22,6 @@ extern int64_t g_text_layout_count;
 static void clear_slice_inline_start_edge(LayoutContext* lycon, DomNode* text_node);
 static void record_inline_box_decoration_fragment(LayoutContext* lycon, DomNode* text_node);
 static CssEnum inline_box_decoration_break_value(DomElement* parent);
-static inline float text_letter_spacing(FontProp* font, uint32_t cp,
-                                        bool collapse_spaces);
 
 // CSS layout comparisons use subpixel coordinates; keep a run on the line
 // when its measured edge differs only by the 1/64px layout-unit quantization.
@@ -1463,19 +1461,6 @@ static inline bool is_other_space_separator(uint32_t cp) {
            cp == 0x3000;                        // IDEOGRAPHIC SPACE
 }
 
-static inline float text_letter_spacing(FontProp* font, uint32_t cp,
-                                        bool collapse_spaces) {
-    (void)collapse_spaces;
-    if (font && utf_is_cursive_script(cp)) {
-        utf8proc_category_t category = utf8proc_category(cp);
-        // CSS Text 4 §8.2.1: cursive letter units cannot be separated by tracking.
-        if ((category >= UTF8PROC_CATEGORY_LU && category <= UTF8PROC_CATEGORY_ME) ||
-            (category >= UTF8PROC_CATEGORY_ND && category <= UTF8PROC_CATEGORY_NO)) {
-            return 0.0f;
-        }
-    }
-    return font ? font->letter_spacing : 0.0f;
-}
 
 /**
  * CSS Text 3 §5.2: Check if a character is a "typographic letter unit" for
@@ -1484,10 +1469,24 @@ static inline float text_letter_spacing(FontProp* font, uint32_t cp,
  * their original line-break behavior.
  * Typographic letter units = Unicode General Category L* (letters) and N* (numbers).
  */
-static inline bool is_typographic_letter_unit(uint32_t cp) {
+bool is_typographic_letter_unit(uint32_t cp) {
     utf8proc_category_t cat = utf8proc_category(cp);
     return (cat >= UTF8PROC_CATEGORY_LU && cat <= UTF8PROC_CATEGORY_LO) ||  // L*: letters
            (cat >= UTF8PROC_CATEGORY_ND && cat <= UTF8PROC_CATEGORY_NO);    // N*: numbers
+}
+
+bool layout_text_allows_letter_break(uint32_t current, uint32_t next,
+                                      CssEnum line_break, bool zwj_preceded,
+                                      bool cj_non_starter) {
+    if (line_break == CSS_VALUE_ANYWHERE) return true;
+    if (zwj_preceded || is_line_break_op(current) || next == 0x200D) return false;
+    if (!next) return true;
+    if (is_line_break_cl(next) || is_line_break_ns(next) ||
+        (cj_non_starter && is_line_break_cj(next))) return false;
+    if (is_line_break_ex_is_sy(next) &&
+        !(line_break == CSS_VALUE_LOOSE && is_fullwidth_ex(next))) return false;
+    return !is_other_space_separator(next) ||
+        next == 0x00A0 || next == 0x202F || next == 0x3000;
 }
 
 static inline bool control_fallback_keeps_primary_line_metrics(uint32_t cp) {
@@ -2632,13 +2631,8 @@ void line_break(LayoutContext* lycon) {
 
     if (reached_line_clamp) {
         if (lycon->line.last_text_rect && font_box_handle(&lycon->font)) {
-            float ellipsis_w = layout_text_overflow_ellipsis_width(
-                font_box_handle(&lycon->font), lycon->font.current_font_size);
             TextRect* tr = lycon->line.last_text_rect;
-            float max_w = lycon->line.right - tr->x;
-            if (tr->width + ellipsis_w > max_w && max_w > ellipsis_w) {
-                tr->width = max_w - ellipsis_w;
-            }
+            // fitting is paint-only: retain the source fragment's layout geometry.
             tr->has_trailing_ellipsis = true;
         }
         lycon->block.line_clamped = true;
@@ -4793,36 +4787,11 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
             str = next_ch;
             mark_line_non_space(&lycon->line);
 
-            bool allow_break = true;
-            // CSS Text 3 §5.2: line-break: anywhere overrides standard UAX#14 prohibitions.
-            if (line_break_val != CSS_VALUE_ANYWHERE) {
-            if (zwj_preceded) allow_break = false;
-            // CSS Text 3 §5.2: No break after OP characters (OP stays with following content)
-            if (allow_break && is_line_break_op(codepoint)) allow_break = false;
-            if (allow_break) {
-                uint32_t next_cp = peek_codepoint(str);
-                if (next_cp == 0) next_cp = peek_next_inline_codepoint(text_node);
-                if (next_cp == 0x200D) {
-                    allow_break = false;  // ZWJ follows: suppress break
-                } else if (next_cp > 0) {
-                    bool is_loose = (line_break_val == CSS_VALUE_LOOSE);
-                    if (is_line_break_cl(next_cp)) {
-                        allow_break = false;
-                    }
-                    // CSS Text 3 §6.2: CJ → NS for Japanese (normal/strict), CJ → ID for
-                    else if (is_line_break_ns(next_cp) || (cj_is_non_starter && is_line_break_cj(next_cp))) {
-                        allow_break = false;
-                    }
-                    else if (is_line_break_ex_is_sy(next_cp) && !(is_loose && is_fullwidth_ex(next_cp))) {
-                        allow_break = false;
-                    }
-                    else if (is_other_space_separator(next_cp)
-                             && next_cp != 0x00A0 && next_cp != 0x202F && next_cp != 0x3000) {
-                        allow_break = false;
-                    }
-                }
-            }
-            } // end if not line-break: anywhere
+            uint32_t next_cp = peek_codepoint(str);
+            if (!next_cp) next_cp = peek_next_inline_codepoint(text_node);
+            bool allow_break = layout_text_allows_letter_break(
+                codepoint, next_cp, line_break_val, zwj_preceded,
+                cj_is_non_starter);
             zwj_preceded = false;  // consumed
             if (allow_break) {
                 record_line_break_opportunity(

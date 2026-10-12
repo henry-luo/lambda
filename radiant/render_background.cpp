@@ -24,7 +24,7 @@ static void render_background_color(RasterRenderContext* rdcon, ViewBlock* view,
 static void render_background_gradient(RasterRenderContext* rdcon, ViewBlock* view,
                                        BackgroundProp* bg, Rect rect);
 static void render_background_image(RasterRenderContext* rdcon, ViewBlock* view,
-                                    BackgroundProp* bg, Rect rect);
+                                    BackgroundProp* bg, Rect position_rect, Rect paint_rect);
 static void render_linear_gradient(RasterRenderContext* rdcon, ViewBlock* view,
                                    LinearGradient* gradient, Rect rect);
 static void render_radial_gradient(RasterRenderContext* rdcon, ViewBlock* view,
@@ -83,6 +83,41 @@ static Corner background_corner_inset_box(const Corner* radius, CssEnum box,
     return radiant_corner_inset_edges(&out, insets[0], insets[1], insets[2], insets[3]);
 }
 
+static void background_layer_rects(UiContext* ui, ViewBlock* view, BackgroundProp* bg,
+        Rect rect, float s, Rect* position_rect, Rect* paint_rect) {
+    BorderProp* border = view->boundary()->border;
+    const Spacing* padding = &view->boundary()->padding;
+    // Determine positioning area (bg-origin, default: padding-box)
+    // Controls where background-position and background-size are calculated relative to.
+    CssEnum origin = bg->bg_origin ? bg->bg_origin : CSS_VALUE_PADDING_BOX;
+    *position_rect = render_geometry_adjust_box_rect(rect, origin, s, border, padding);
+    if (bg->bg_attachment == CSS_VALUE_FIXED && ui) {
+        // Fixed image layers use the initial containing block as their positioning area.
+        (*position_rect) = {0.0f, 0.0f,
+            ui->viewport_width * s,
+            ui->viewport_height * s};
+    } else if (bg->bg_attachment == CSS_VALUE_LOCAL && view->scroller &&
+               view->scroll()->pane && ui &&
+               ui->document) {
+        float scroll_x = 0.0f, scroll_y = 0.0f;
+        float max_x = 0.0f, max_y = 0.0f;
+        scroll_state_get_position_for_view(
+            (DocState*)ui->document->state, (View*)view,
+            view->scroll()->pane, &scroll_x, &scroll_y, &max_x, &max_y);
+        // Local layers size against scrollable overflow and move with its content.
+        (*position_rect).x -= scroll_x * s;
+        (*position_rect).y -= scroll_y * s;
+        (*position_rect).width += max_x * s;
+        (*position_rect).height += max_y * s;
+    }
+
+    // Determine paint area (bg-clip, default: border-box)
+    // Controls where the background is visually clipped.
+    CssEnum clip_box = bg->bg_clip ? bg->bg_clip : CSS_VALUE_BORDER_BOX;
+    *paint_rect = render_geometry_adjust_box_rect(rect, clip_box, s, border, padding);
+
+}
+
 void render_background(RasterRenderContext* rdcon, ViewBlock* view, Rect rect) {
     if (!view->bound || !view->boundary()->background) return;
 
@@ -97,34 +132,8 @@ void render_background(RasterRenderContext* rdcon, ViewBlock* view, Rect rect) {
     BorderProp* border  = view->boundary()->border;
     Spacing*    padding = &view->boundary_mut()->padding;
 
-    // Determine positioning area (bg-origin, default: padding-box)
-    // Controls where background-position and background-size are calculated relative to.
-    CssEnum origin = bg->bg_origin ? bg->bg_origin : CSS_VALUE_PADDING_BOX;
-    Rect pos_rect = render_geometry_adjust_box_rect(rect, origin, s, border, padding);
-    if (bg->bg_attachment == CSS_VALUE_FIXED && rdcon->ui_context) {
-        // Fixed image layers use the initial containing block as their positioning area.
-        pos_rect = {0.0f, 0.0f,
-            rdcon->ui_context->viewport_width * s,
-            rdcon->ui_context->viewport_height * s};
-    } else if (bg->bg_attachment == CSS_VALUE_LOCAL && view->scroller &&
-               view->scroll()->pane && rdcon->ui_context &&
-               rdcon->ui_context->document) {
-        float scroll_x = 0.0f, scroll_y = 0.0f;
-        float max_x = 0.0f, max_y = 0.0f;
-        scroll_state_get_position_for_view(
-            (DocState*)rdcon->ui_context->document->state, (View*)view,
-            view->scroll()->pane, &scroll_x, &scroll_y, &max_x, &max_y);
-        // Local layers size against scrollable overflow and move with its content.
-        pos_rect.x -= scroll_x * s;
-        pos_rect.y -= scroll_y * s;
-        pos_rect.width += max_x * s;
-        pos_rect.height += max_y * s;
-    }
-
-    // Determine paint area (bg-clip, default: border-box)
-    // Controls where the background is visually clipped.
-    CssEnum clip_box = bg->bg_clip ? bg->bg_clip : CSS_VALUE_BORDER_BOX;
-    Rect paint_rect = render_geometry_adjust_box_rect(rect, clip_box, s, border, padding);
+    Rect pos_rect = {}, paint_rect = {};
+    background_layer_rects(rdcon->ui_context, view, bg, rect, s, &pos_rect, &paint_rect);
 
     // Narrow the active clip to the paint area (intersect with existing viewport clip).
     // Skip clip tightening when a CSS transform is active — the transform displaces
@@ -139,6 +148,7 @@ void render_background(RasterRenderContext* rdcon, ViewBlock* view, Rect rect) {
     bool swapped_radius = false;
     if (border && corner_has_radius(&border->radius)) {
         orig_radius = border->radius;
+        CssEnum clip_box = bg->bg_clip ? bg->bg_clip : CSS_VALUE_BORDER_BOX;
         border->radius = background_corner_inset_box(&orig_radius, clip_box, border, padding, s);
         constrain_corner_radii(&border->radius, paint_rect.width, paint_rect.height);
         swapped_radius = true;
@@ -184,7 +194,7 @@ void render_background(RasterRenderContext* rdcon, ViewBlock* view, Rect rect) {
 
     // Render background image positioned within pos_rect, painted within paint_rect (via clip)
     if (bg->image) {
-        render_background_image(rdcon, view, bg, pos_rect);
+        render_background_image(rdcon, view, bg, pos_rect, paint_rect);
     }
 
     // Render all linear gradient layers (stacked bottom-to-top)
@@ -1529,6 +1539,54 @@ static void background_for_each_tile(const BackgroundTilePlan* plan,
     }
 }
 
+struct BackgroundImagePaintContext {
+    PaintList* paint;
+    UiContext* ui;
+    ImageSurface* image;
+    Rect clip;
+};
+
+static void paint_background_image_tile(const Rect* tile, void* data) {
+    BackgroundImagePaintContext* context = (BackgroundImagePaintContext*)data;
+    if (!render_media_paint_svg_image(context->paint, context->image, *tile, &context->clip,
+            ui_context_raster_scale(context->ui), context->ui->font_ctx, context->ui)) {
+        paint_draw_image_resource(context->paint, context->image, tile->x, tile->y,
+            tile->width, tile->height, 255, nullptr);
+    }
+}
+
+bool render_paint_background_image(PaintList* paint, UiContext* ui, ViewBlock* view, Rect rect) {
+    if (!paint || !ui || !view || !view->bound) return false;
+    BackgroundProp* bg = view->boundary()->background;
+    if (!bg || !bg->image || bg->bg_clip == CSS_VALUE_TEXT) return false;
+    ImageSurface* image = load_document_image(ui->document, ui, bg->image);
+    if (!image) return false;
+    float density = layout_css_image_density(image, bg->image_resolution);
+    Rect position = {}, clip = {};
+    background_layer_rects(ui, view, bg, rect, 1.0f, &position, &clip);
+    BackgroundTilePlan plan = {};
+    if (!compute_background_tile_plan(bg, position, clip, (float)image->width / density,
+            (float)image->height / density, &plan, 1.0f)) return false;
+    BorderProp* border = view->boundary()->border;
+    RdtPath* path = nullptr;
+    if (border && corner_has_radius(&border->radius)) {
+        CssEnum box = bg->bg_clip ? bg->bg_clip : CSS_VALUE_BORDER_BOX;
+        Corner radius = background_corner_inset_box(&border->radius, box, border,
+            &view->boundary()->padding, 1.0f);
+        constrain_corner_radii(&radius, clip.width, clip.height);
+        path = render_path_create_rounded_rect(clip, &radius);
+    } else path = background_rect_path(clip);
+    if (!path) return false;
+    int count = paint_list_count(paint);
+    paint_push_clip(paint, path, nullptr); rdt_path_free(path);
+    if (paint_list_count(paint) == count) return false;
+    // the common tile plan and owned clip survive deferred SVG/PDF effect lowering.
+    BackgroundImagePaintContext context = {paint, ui, image, clip};
+    background_for_each_tile(&plan, position, clip, paint_background_image_tile, &context);
+    paint_pop_clip(paint);
+    return true;
+}
+
 typedef struct {
     RasterRenderContext* rdcon;
     ViewBlock* view;
@@ -1686,7 +1744,7 @@ static void render_background_image_tile_cb(const Rect* tile_rect, void* userdat
 /**
  * Render background image with background-size, background-position, and background-repeat.
  */
-static void render_background_image(RasterRenderContext* rdcon, ViewBlock* view, BackgroundProp* bg, Rect rect) {
+static void render_background_image(RasterRenderContext* rdcon, ViewBlock* view, BackgroundProp* bg, Rect rect, Rect paint_rect) {
     const char* image_url = bg->image;
 
     // Load image via the image cache
@@ -1698,8 +1756,9 @@ static void render_background_image(RasterRenderContext* rdcon, ViewBlock* view,
         return;
     }
 
-    float img_w = (float)img->width;
-    float img_h = (float)img->height;
+    float density = layout_css_image_density(img, bg->image_resolution);
+    float img_w = (float)img->width / density;
+    float img_h = (float)img->height / density;
     if (img_w <= 0 || img_h <= 0) {
         log_error("[BG-IMAGE] Image has zero dimensions");
         return;
@@ -1708,7 +1767,7 @@ static void render_background_image(RasterRenderContext* rdcon, ViewBlock* view,
     float s = rdcon->raster_scale;
 
     BackgroundTilePlan plan = {};
-    if (!compute_background_tile_plan(bg, rect, rect, img_w * s, img_h * s, &plan, s)) {
+    if (!compute_background_tile_plan(bg, rect, paint_rect, img_w * s, img_h * s, &plan, s)) {
         return;
     }
 
@@ -1769,6 +1828,6 @@ static void render_background_image(RasterRenderContext* rdcon, ViewBlock* view,
     BackgroundImageTileContext tile_ctx = {
         rdcon, view, img, is_svg, tile_scale_mode, clip_shape_stack, clip_shape_depth
     };
-    background_for_each_tile(&plan, rect, rect, render_background_image_tile_cb, &tile_ctx);
+    background_for_each_tile(&plan, rect, paint_rect, render_background_image_tile_cb, &tile_ctx);
 
 }

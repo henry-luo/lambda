@@ -121,6 +121,7 @@ enum JsClass : uint8_t {
     JS_CLASS_IMMEDIATE,
     JS_CLASS_TRANSITION_EVENT,
     JS_CLASS_ANIMATION_EVENT,
+    JS_CLASS_CONTENT_VISIBILITY_AUTO_STATE_CHANGE_EVENT,
     JS_CLASS_FILE_LIST,
     JS_CLASS_PROXY,
     JS_CLASS_STRING_ITERATOR,
@@ -295,6 +296,10 @@ static inline JsClass js_class_from_name(const char* nm, int nl) {
             if (!strncmp(nm, "FinalizationRegistry", 20)) return JS_CLASS_FINALIZATION_REGISTRY;
             if (!strncmp(nm, "CountQueuingStrategy", 20)) return JS_CLASS_COUNT_QUEUING_STRATEGY;
             break;
+        case 37:
+            if (!strncmp(nm, "ContentVisibilityAutoStateChangeEvent", 37))
+                return JS_CLASS_CONTENT_VISIBILITY_AUTO_STATE_CHANGE_EVENT;
+            break;
         case 25:
             if (!strncmp(nm, "ByteLengthQueuingStrategy", 25)) return JS_CLASS_BYTE_LENGTH_QUEUING_STRATEGY;
             break;
@@ -413,6 +418,7 @@ static inline const char* js_class_to_name(JsClass cls) {
         // materialization, so their class-name mapping must be total (D6.2.2v2).
         case JS_CLASS_TRANSITION_EVENT: return "TransitionEvent";
         case JS_CLASS_ANIMATION_EVENT: return "AnimationEvent";
+        case JS_CLASS_CONTENT_VISIBILITY_AUTO_STATE_CHANGE_EVENT: return "ContentVisibilityAutoStateChangeEvent";
         case JS_CLASS_WEBGL_CONTEXT_EVENT: return "WebGLContextEvent";
         case JS_CLASS_PROCESS_ENV: return "ProcessEnv";
         case JS_CLASS_CSS_NAMESPACE: return "CSS";
@@ -458,6 +464,7 @@ static inline bool js_class_is_event_like(JsClass cls) {
         // inherit from UIEvent in the DOM interface hierarchy.
         case JS_CLASS_TRANSITION_EVENT:
         case JS_CLASS_ANIMATION_EVENT:
+        case JS_CLASS_CONTENT_VISIBILITY_AUTO_STATE_CHANGE_EVENT:
         case JS_CLASS_WEBGL_CONTEXT_EVENT:
             return true;
         default:

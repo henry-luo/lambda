@@ -21,6 +21,16 @@ LayoutTextRun flex_measure_prepare_text_run(DomNode* text_node, const char* text
             ? LAYOUT_TEXT_RUN_COLLAPSE : LAYOUT_TEXT_RUN_RAW);
 }
 
+static TextIntrinsicWidths flex_measure_text_widths(LayoutContext* lycon,
+                                                     DomNode* node,
+                                                     const LayoutTextRun& run) {
+    CssEnum overflow_wrap, word_break;
+    layout_resolve_inherited_text_wrap(node, &overflow_wrap, &word_break);
+    return measure_text_intrinsic_widths(lycon, run.text, run.length,
+        layout_inherited_text_transform(node), CSS_VALUE_NONE,
+        get_white_space_value(node), overflow_wrap, word_break);
+}
+
 static void flex_store_intrinsic_sizes(ViewElement* item, float min_width, float max_width,
                                        float min_height, float max_height) {
     item->fi->intrinsic_width.min_content = min_width;
@@ -543,7 +553,8 @@ void measure_flex_child_content(LayoutContext* lycon, DomNode* child) {
     if (child->is_text()) {
         const char* text = (const char*)child->text_data();
         size_t length = text ? strlen(text) : 0;
-        TextIntrinsicWidths sizes = measure_text_intrinsic_widths(lycon, text, length);
+        LayoutTextRun run = flex_measure_prepare_text_run(child, text, length);
+        TextIntrinsicWidths sizes = flex_measure_text_widths(lycon, child, run);
         measured_width = content_width = sizes.max_content;
         float line_height = lycon->font.style && lycon->font.style->font_size > 0.0f
             ? lycon->font.style->font_size : 20.0f;
@@ -809,7 +820,7 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
                 // Look up the inherited text-transform before measuring text widths.
                 CssEnum text_transform = layout_inherited_text_transform(item);
                 // Use accurate backend font measurement
-                TextIntrinsicWidths widths = measure_text_intrinsic_widths(lycon, run.text, run.length, text_transform);
+                TextIntrinsicWidths widths = flex_measure_text_widths(lycon, child, run);
                 min_width = widths.min_content;
                 max_width = widths.max_content;
                 // CSS Generated Content: add ::before/::after pseudo-element content widths.
@@ -979,9 +990,7 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
                     if (lycon) {
                         LayoutTextRun run = flex_measure_prepare_text_run(c, text, text_len);
 
-                        CssEnum text_transform = layout_inherited_text_transform(item);
-
-                        TextIntrinsicWidths widths = measure_text_intrinsic_widths(lycon, run.text, run.length, text_transform);
+                        TextIntrinsicWidths widths = flex_measure_text_widths(lycon, c, run);
                         text_min_width = widths.min_content;
                         text_max_width = widths.max_content;
                         // text height follows font metrics when no CSS line-height is set.

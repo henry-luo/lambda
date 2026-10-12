@@ -4940,64 +4940,6 @@ static bool lambda_lookup_import_metadata(const char* name,
 // Variadic call helpers for map_fill, elmt_fill, list_fill
 // ============================================================================
 
-// Emit a variadic call with a fixed prefix followed by the variable arguments.
-static MIR_reg_t emit_vararg_call_common(MirTranspiler* mt, const char* fn_name,
-    MIR_type_t ret_type, int nres, int n_mandatory,
-    MIR_var_t* mandatory_vars, MIR_op_t* mandatory_ops,
-    int n_varargs, MIR_op_t* vararg_ops) {
-    // Create unique vararg proto name per call site
-    char proto_name[160];
-    snprintf(proto_name, sizeof(proto_name), "%s_vp%d", fn_name, mt->em.label_counter++);
-
-    MIR_type_t res_types[1] = { ret_type };
-    MIR_item_t proto = MIR_new_vararg_proto_arr(mt->ctx, proto_name, nres,
-        res_types, n_mandatory, mandatory_vars);
-
-    // Import
-    MirImportCacheEntry key;
-    memset(&key, 0, sizeof(key));
-    key.name = mir_em_persist_cstr(&mt->em, fn_name).str;
-    MirImportCacheEntry* found = (MirImportCacheEntry*)hashmap_get(mt->em.import_cache, &key);
-    MIR_item_t imp;
-    if (found) {
-        imp = found->entry.import;
-    } else {
-        imp = MIR_new_import(mt->ctx, fn_name);
-        // Cache only the import, not proto (proto is unique per call)
-        MirImportCacheEntry new_entry;
-        memset(&new_entry, 0, sizeof(new_entry));
-        new_entry.name = mir_em_persist_cstr(&mt->em, fn_name).str;
-        new_entry.entry.import = imp;
-        new_entry.entry.proto = proto; // store last proto
-        hashmap_set(mt->em.import_cache, &new_entry);
-    }
-
-    // Build call: proto, import, [result], mandatory prefix, varargs...
-    int nops = (nres > 0 ? 3 : 2) + n_mandatory + n_varargs;
-    MIR_op_t* ops = LAMBDA_ALLOCA(nops, MIR_op_t);
-    int oi = 0;
-    ops[oi++] = MIR_new_ref_op(mt->ctx, proto);
-    ops[oi++] = MIR_new_ref_op(mt->ctx, imp);
-    MIR_reg_t result = 0;
-    if (nres > 0) {
-        result = new_reg(mt, fn_name, ret_type);
-        ops[oi++] = MIR_new_reg_op(mt->ctx, result);
-    }
-    for (int i = 0; i < n_mandatory; i++) {
-        ops[oi++] = mandatory_ops[i];
-    }
-    for (int i = 0; i < n_varargs; i++) {
-        ops[oi++] = vararg_ops[i];
-    }
-
-    // map/element/object fill helpers consume each Item into destination-owned
-    // field storage before returning, so activation-home scalar arguments do
-    // not escape this variadic boundary.
-    em_emit_destination_owned_call(&mt->em, fn_name,
-        MIR_new_insn_arr(mt->ctx, MIR_CALL, oi, ops));
-    return result;
-}
-
 // Emit a variadic call: fn_name(mandatory_arg, vararg1, vararg2, ...).
 static MIR_reg_t emit_vararg_call(MirTranspiler* mt, const char* fn_name,
     MIR_type_t ret_type, int nres,
@@ -5005,7 +4947,7 @@ static MIR_reg_t emit_vararg_call(MirTranspiler* mt, const char* fn_name,
     int n_varargs, MIR_op_t* vararg_ops) {
     MIR_var_t mandatory_vars[1] = {{mandatory_type, "m", 0}};
     MIR_op_t mandatory_ops[1] = {mandatory_op};
-    return emit_vararg_call_common(mt, fn_name, ret_type, nres, 1,
+    return em_emit_vararg_call(&mt->em, fn_name, ret_type, nres, 1,
         mandatory_vars, mandatory_ops, n_varargs, vararg_ops);
 }
 
@@ -5017,7 +4959,7 @@ static MIR_reg_t emit_vararg_call_2(MirTranspiler* mt, const char* fn_name,
     int n_varargs, MIR_op_t* vararg_ops) {
     MIR_var_t mandatory_vars[2] = {{m1_type, "m1", 0}, {m2_type, "m2", 0}};
     MIR_op_t mandatory_ops[2] = {m1_op, m2_op};
-    return emit_vararg_call_common(mt, fn_name, ret_type, nres, 2,
+    return em_emit_vararg_call(&mt->em, fn_name, ret_type, nres, 2,
         mandatory_vars, mandatory_ops, n_varargs, vararg_ops);
 }
 
@@ -12725,7 +12667,7 @@ static MIR_reg_t mir_emit_string_concat_tree(MirTranspiler* mt, AstNode* node,
     MIR_op_t values[] = {MIR_new_int_op(mt->ctx, owner != NULL), MIR_new_int_op(mt->ctx, count)};
     MIR_reg_t ptr = owner ? mir_emit_owned_string_concat_fixed(mt, count, args) : 0;
     if (!ptr) {
-        ptr = emit_vararg_call_common(mt, "fn_strcat_many", MIR_T_P, 1,
+        ptr = em_emit_vararg_call(&mt->em, "fn_strcat_many", MIR_T_P, 1,
             2, mandatory, values, count, args);
     }
     MIR_reg_t boxed = emit_box_string(mt, ptr);

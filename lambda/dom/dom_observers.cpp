@@ -853,11 +853,19 @@ extern "C" void dom_observers_post_layout(void) {
         if (observer->kind == JS_OBSERVER_MUTATION) continue;
         for (int j = 0; j < observer->target_count; j++) {
             JsObserverTarget* target = &observer->targets[j];
+            DomDocument* document = target->node->is_element()
+                ? target->node->as_element()->doc.get() : target->owner_doc;
+            // registration before first layout must not publish a synthetic zero-size sample.
+            if (!document || !document->view_tree || !document->view_tree->root) continue;
             RootFrame roots(5);
             Rooted<Item> target_root(roots, dom_wrap_element(target->node));
             float x = 0.0f, y = 0.0f, width = 0.0f, height = 0.0f;
             Rooted<Item> rect_root(roots, observer_rect(target_root.get(),
                 &x, &y, &width, &height));
+            // the first geometry read can establish the layout that determines skipping.
+            bool skipped = target->node->is_element() &&
+                dom_engine_content_is_skipped(target->node->as_element(), false);
+            if (skipped && observer->kind == JS_OBSERVER_RESIZE) continue;
             Rooted<Item> entry_root(roots, ItemNull);
             Rooted<Item> boxes_root(roots, ItemNull);
             Rooted<Item> intersection_root(roots, ItemNull);
@@ -907,6 +915,8 @@ extern "C" void dom_observers_post_layout(void) {
             float top = y > root_top ? y : root_top;
             float right = x + width < root_right ? x + width : root_right;
             float bottom = y + height < root_bottom ? y + height : root_bottom;
+            // even a root inside the same skipped subtree cannot intersect its descendants.
+            if (skipped) left = top = right = bottom = 0.0f;
             float intersection_width = right > left ? right - left : 0.0f;
             float intersection_height = bottom > top ? bottom - top : 0.0f;
             float area = width * height;

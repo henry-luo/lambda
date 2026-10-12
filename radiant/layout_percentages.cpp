@@ -282,7 +282,7 @@ bool layout_block_inline_axis_is_vertical(ViewBlock* block) {
 
 bool layout_block_has_size_containment_in_axis(ViewBlock* block, bool horizontal) {
     if (!block || !block->blk) return false;
-    if (block->block()->contain_size || block->block()->content_visibility_hidden) return true;
+    if (block->block()->contain_size || block->block()->content_visibility_skipped) return true;
     if (!block->block()->contain_inline_size) return false;
 
     bool inline_axis_is_vertical = layout_block_inline_axis_is_vertical(block);
@@ -294,7 +294,7 @@ bool layout_block_has_size_containment_in_axis(ViewBlock* block, bool horizontal
 float layout_block_empty_content_size_in_axis(ViewBlock* block, bool horizontal) {
     if (!block) return 0.0f;
 
-    if (block->form && block->block()->content_visibility_hidden &&
+    if (block->form && block->block()->content_visibility_skipped &&
         block->form->control_type == FORM_CONTROL_SELECT) {
         bool is_listbox = block->form->multiple || block->has_attribute("multiple") ||
             block->form->select_size > 1;

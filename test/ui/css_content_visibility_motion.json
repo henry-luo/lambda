@@ -1,0 +1,28 @@
+{
+  "name": "Skipped content defers motion and activation does not create transitions",
+  "html": "test/ui/css_content_visibility_motion.html",
+  "viewport": {"width": 340, "height": 260},
+  "events": [
+    {"type":"advance_time","ms":100,"steps":2},
+    {"type":"assert_attribute","target":{"selector":"#running"},"attribute":"data-animationstart","equals":"1"},
+    {"type":"assert_attribute","target":{"selector":"#deferred"},"attribute":"data-animationstart","equals":"0"},
+    {"type":"click","target":{"selector":"#hide"}},
+    {"type":"click","target":{"selector":"#mutate"}},
+    {"type":"advance_time","ms":1200,"steps":12},
+    {"type":"assert_attribute","target":{"selector":"#running"},"attribute":"data-animationend","equals":"0"},
+    {"type":"assert_attribute","target":{"selector":"#deferred"},"attribute":"data-animationend","equals":"0"},
+    {"type":"assert_attribute","target":{"selector":"#transition"},"attribute":"data-transitionrun","equals":"0"},
+    {"type":"click","target":{"selector":"#probe"}},
+    {"type":"assert_attribute","target":{"selector":"#running"},"attribute":"data-sampled-opacity","equals":"0.6"},
+    {"type":"assert_attribute","target":{"selector":"#running"},"attribute":"data-animationend","equals":"0"},
+    {"type":"click","target":{"selector":"#show"}},
+    {"type":"advance_time","ms":50,"steps":1},
+    {"type":"assert_attribute","target":{"selector":"#running"},"attribute":"data-animationend","equals":"1"},
+    {"type":"assert_attribute","target":{"selector":"#transition"},"attribute":"data-transitionrun","equals":"0"},
+    {"type":"assert_style","target":{"selector":"#transition"},"property":"opacity","equals":"0.2","animated":true,"tolerance":0.01},
+    {"type":"click","target":{"selector":"#down"}},
+    {"type":"advance_time","ms":100,"steps":2},
+    {"type":"assert_attribute","target":{"selector":"#deferred"},"attribute":"data-animationstart","equals":"1"},
+    {"type":"assert_attribute","target":{"selector":"#deferred"},"attribute":"data-animationend","equals":"0"}
+  ]
+}

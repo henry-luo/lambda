@@ -24,6 +24,7 @@ extern "C" {
 #include "../lambda/lambda-data.hpp"
 #include "../lambda/dom/dom_observers.h"
 #include "../lambda/dom/dom.h"
+#include "../lambda/dom/dom_engine.h"
 
 double g_style_resolve_time = 0;
 
@@ -73,6 +74,271 @@ float layout_effective_zoom(View* view) {
         }
     }
     return effective_zoom;
+}
+
+struct ContentVisibilityEntry {
+    DomNodeRef source;
+    bool skipped;
+    bool motion_skipped;
+    bool auto_observed;
+    bool auto_skipped;
+    LayoutAxisPair<bool> has_remembered_size;
+    LayoutAxisPair<float> remembered_size;
+};
+
+struct ContentVisibilityState {
+    lam::Own<HashMap> entries;
+};
+
+static uint64_t content_visibility_hash(const void* item, uint64_t seed0, uint64_t seed1) {
+    return dom_node_ref_identity_hash(((const ContentVisibilityEntry*)item)->source, seed0, seed1);
+}
+
+static int content_visibility_compare(const void* left, const void* right, void*) {
+    return dom_node_ref_identity_compare(((const ContentVisibilityEntry*)left)->source,
+        ((const ContentVisibilityEntry*)right)->source);
+}
+
+void layout_content_visibility_destroy(ViewTree* tree) {
+    ContentVisibilityState* state = tree ? tree->content_visibility_state.get() : nullptr;
+    if (!state) return;
+    if (state->entries) hashmap_free(state->entries);
+    mem_free(state);
+    tree->content_visibility_state = nullptr;
+}
+
+static bool content_visibility_forget_node(DomNode* node, void*) {
+    DomElement* element = node->as_element();
+    DomDocument* document = element ? element->doc.get() : nullptr;
+    if (!document) return true;
+    ContentVisibilityEntry key = {}; key.source = dom_node_ref(element);
+    ViewTree* primary = document->view_tree;
+    for (ViewTree* tree = primary ? primary : document->secondary_view_trees.get(); tree;
+            tree = tree == primary ? document->secondary_view_trees.get() : tree->next_secondary.get()) {
+        ContentVisibilityState* state = tree->content_visibility_state;
+        if (!state || !state->entries) continue;
+        const auto* stored = (const ContentVisibilityEntry*)hashmap_get(state->entries, &key);
+        if (!stored) continue;
+        ContentVisibilityEntry entry = *stored;
+        // a synchronous reinsertion keeps sizing memory, but starts new proximity history.
+        entry.skipped = entry.motion_skipped = entry.auto_observed = entry.auto_skipped = false;
+        hashmap_set(state->entries, &entry);
+    }
+    return true;
+}
+
+void layout_content_visibility_forget_subtree(DomNode* root) {
+    // disconnection resets proximity even when reinsertion precedes the next layout.
+    view_geometry_walk_dom_tree(root, content_visibility_forget_node, nullptr);
+}
+
+static ContentVisibilityState* content_visibility_state(LayoutContext* lycon, bool create) {
+    ViewTree* tree = layout_context_view_tree(lycon);
+    if (!tree) return nullptr;
+    if (!tree->content_visibility_state && create) {
+        // per-view history survives the loader's replacement of geometry allocators.
+        ContentVisibilityState* state = (ContentVisibilityState*)mem_calloc(1, sizeof(ContentVisibilityState), MEM_CAT_LAYOUT); // OBJ_HEAP_OK: ViewTree owns history until layout_content_visibility_destroy.
+        if (!state) return nullptr;
+        tree->content_visibility_state = lam::own(state);
+    }
+    ContentVisibilityState* state = tree->content_visibility_state;
+    if (state && !state->entries && create) {
+        state->entries = lam::own(hashmap_new(sizeof(ContentVisibilityEntry), 16, 0, 0,
+            content_visibility_hash, content_visibility_compare, nullptr, nullptr));
+    }
+    return state && state->entries ? state : nullptr;
+}
+
+static ContentVisibilityEntry content_visibility_entry(LayoutContext* lycon, DomElement* element) {
+    ContentVisibilityEntry key = {}; key.source = dom_node_ref(element);
+    ContentVisibilityState* state = content_visibility_state(lycon, false);
+    const ContentVisibilityEntry* entry = state ? (const ContentVisibilityEntry*)hashmap_get(state->entries, &key) : nullptr;
+    return entry ? *entry : key;
+}
+
+bool layout_content_visibility_clone(ViewTree* destination, const ViewTree* source,
+                                     DomDocument* document) {
+    if (!destination || destination->content_visibility_state || !document) return false;
+    const ContentVisibilityState* original = source ? source->content_visibility_state.get() : nullptr;
+    if (!original || !original->entries) return true;
+    LayoutContext context = {};
+    context.doc = lam::up(document);
+    context.selected_view_tree = lam::up(destination);
+    ContentVisibilityState* staged = content_visibility_state(&context, true);
+    if (staged) {
+        size_t cursor = 0; void* item = nullptr;
+        while (hashmap_iter(original->entries, &cursor, &item)) {
+            const auto* entry = (const ContentVisibilityEntry*)item;
+            DomNode* node = dom_node_ref_validate(document, entry->source);
+            // a rendering update retires disconnected and generation-stale identities.
+            if (!node || !node->is_element() || !dom_element_is_connected(node->as_element())) continue;
+            hashmap_set(staged->entries, entry);
+            if (hashmap_oom(staged->entries)) break;
+        }
+        if (!hashmap_oom(staged->entries)) return true;
+    }
+    layout_content_visibility_destroy(destination);
+    return false;
+}
+
+bool layout_content_visibility_is_skipped(LayoutContext* lycon, DomElement* element) {
+    return element && content_visibility_entry(lycon, element).skipped;
+}
+
+bool layout_content_visibility_suppresses_transition(LayoutContext* lycon, DomElement* element) {
+    return element && (view_content_visibility_hides(element, CONTENT_VISIBILITY_PAINT) ||
+        content_visibility_entry(lycon, element).motion_skipped);
+}
+
+static bool content_visibility_commit_motion(DomNode* node, void* context) {
+    if (!node->is_element()) return true;
+    auto* lycon = (LayoutContext*)context;
+    DomElement* element = node->as_element();
+    ContentVisibilityEntry entry = content_visibility_entry(lycon, element);
+    bool skipped = view_content_visibility_hides(element, CONTENT_VISIBILITY_PAINT);
+    ViewBlock* block = lam::view_as_block(element);
+    bool automatic = block && block->blk && block->block()->content_visibility == CSS_VALUE_AUTO &&
+        view_size_containment_applies(block->display);
+    bool state_changed = automatic && (!entry.auto_observed || entry.auto_skipped != entry.skipped);
+    if (entry.motion_skipped == skipped && !state_changed) return true;
+    ContentVisibilityState* state = content_visibility_state(lycon, true);
+    if (!state) return false;
+    entry.motion_skipped = skipped;
+    // only final relevance is observable; convergence and measurement passes cannot enqueue events.
+    if (state_changed && radiant_queue_content_visibility_event(lycon->ui_context, element, entry.skipped)) {
+        entry.auto_observed = true;
+        entry.auto_skipped = entry.skipped;
+    }
+    // a connected element keeps its proximity history while auto is disabled.
+    hashmap_set(state->entries, &entry);
+    return !hashmap_oom(state->entries);
+}
+
+static bool content_visibility_has_declaration(DomNode* node, void* context) {
+    if (node->is_element() && style_tree_get_declaration(
+            node->as_element()->specified_style, CSS_PROPERTY_CONTENT_VISIBILITY)) {
+        *(bool*)context = true;
+    }
+    return true;
+}
+
+bool layout_get_last_remembered_size(LayoutContext* lycon, DomElement* element,
+                                     bool horizontal, float* size) {
+    if (!element || !size) return false;
+    ContentVisibilityEntry entry = content_visibility_entry(lycon, element);
+    LayoutAxis axis = horizontal ? LAYOUT_AXIS_X : LAYOUT_AXIS_Y;
+    if (!entry.has_remembered_size[axis]) return false;
+    *size = entry.remembered_size[axis];
+    return true;
+}
+
+bool layout_set_last_remembered_size(LayoutContext* lycon, DomElement* element,
+                                     bool horizontal, float size, bool available) {
+    if (!element) return false;
+    ContentVisibilityEntry entry = content_visibility_entry(lycon, element);
+    LayoutAxis axis = horizontal ? LAYOUT_AXIS_X : LAYOUT_AXIS_Y;
+    // removing an absent axis must not allocate history for every ordinary element.
+    if (!available && !entry.has_remembered_size[axis]) return true;
+    ContentVisibilityState* state = content_visibility_state(lycon, available);
+    if (!state) return false;
+    entry.remembered_size[axis] = available ? size : 0.0f;
+    entry.has_remembered_size[axis] = available;
+    hashmap_set(state->entries, &entry);
+    return !hashmap_oom(state->entries);
+}
+
+void layout_content_visibility_invalidate(DocState* state) {
+    DomDocument* doc = state && state->owner_store ? state->owner_store->document : nullptr;
+    ViewTree* tree = doc ? doc->view_tree.get() : nullptr;
+    if (!tree || !tree->content_visibility_state || dom_engine_layout_active(doc)) return;
+    // scroll and focus change relevance without changing any authored declaration.
+    doc_state_request_reflow(state);
+}
+
+static bool content_visibility_relevant(LayoutContext* lycon, ViewBlock* block) {
+    CssEngine* engine = (CssEngine*)lycon->doc->services.cached_css_engine;
+    if (engine && engine->context.print_media) return true;
+    DocState* state = (DocState*)lycon->doc->state;
+    if (state) {
+        View* focus = focus_get(state);
+        if (focus && view_geometry_is_descendant(focus, block)) return true;
+        // selection can span an entire skipped subtree without either endpoint inside it.
+        if (state->dom_selection && !dom_selection_is_collapsed(state->dom_selection) &&
+            dom_selection_contains_node(state->dom_selection, block, true)) return true;
+        View* anchor = nullptr; View* extent = nullptr;
+        if (selection_get_extent_views(state, &anchor, &extent) &&
+            ((anchor && view_geometry_is_descendant(anchor, block)) ||
+             (extent && view_geometry_is_descendant(extent, block)))) return true;
+    }
+    float width = lycon->width;
+    float height = lycon->height;
+    if (width <= 0.0f || height <= 0.0f) return true;
+    ViewTree* tree = layout_context_view_tree(lycon);
+    float margin = tree->content_visibility_activation_margin;
+    Rect viewport = {-width * margin, -height * margin,
+        width * (1.0f + 2.0f * margin), height * (1.0f + 2.0f * margin)};
+    Rect box = {};
+    view_get_visual_bounds(block, &box.x, &box.y, &box.width, &box.height);
+    if (!view_geometry_bounds_intersect(view_geometry_rect_to_bound(box), view_geometry_rect_to_bound(viewport))) return false;
+    for (View* parent = block->parent_view(); parent; parent = parent->parent_view()) {
+        ViewBlock* ancestor = lam::view_as_block(parent);
+        // the root scrollport is the viewport already tested above, not the scrolled root box.
+        if (ancestor == lycon->doc->view_tree->root) continue;
+        if (!ancestor || !ancestor->scroller || !ancestor->scroll()->has_clip) continue;
+        Rect port = {};
+        view_get_visual_bounds(parent, &port.x, &port.y, &port.width, &port.height);
+        port.x -= port.width * margin; port.y -= port.height * margin;
+        port.width *= 1.0f + 2.0f * margin; port.height *= 1.0f + 2.0f * margin;
+        if (!view_geometry_bounds_intersect(view_geometry_rect_to_bound(box), view_geometry_rect_to_bound(port))) return false;
+    }
+    return true;
+}
+
+struct ContentVisibilitySettle {
+    LayoutContext* lycon;
+    bool changed;
+};
+
+static bool content_visibility_measure(DomNode* node, void* context) {
+    ContentVisibilitySettle* pass = (ContentVisibilitySettle*)context;
+    ViewBlock* block = lam::view_as_block(node);
+    if (!block || !block->blk || block->block()->content_visibility != CSS_VALUE_AUTO) return true;
+    if (!view_size_containment_applies(block->display)) return true;
+    ContentVisibilityState* state = content_visibility_state(pass->lycon, true);
+    if (!state) return false;
+    ContentVisibilityEntry entry = content_visibility_entry(pass->lycon, block->as_element());
+    bool relevant = content_visibility_relevant(pass->lycon, block);
+    bool skipped = !relevant;
+    if (entry.skipped != skipped) pass->changed = true;
+    entry.skipped = skipped;
+    hashmap_set(state->entries, &entry);
+    return !hashmap_oom(state->entries);
+}
+
+bool layout_content_visibility_settle(LayoutContext* lycon, DomNode* root, bool* changed) {
+    if (changed) *changed = false;
+    if (!lycon || !lycon->doc || !lycon->doc->view_tree) return true;
+    ViewTree* tree = lycon->doc->view_tree;
+    ContentVisibilityState* state = tree->content_visibility_state;
+    ContentVisibilitySettle pass = {lycon, false};
+    if (!view_geometry_walk_dom_tree(root, content_visibility_measure, &pass)) return false;
+    state = tree->content_visibility_state;
+    if (state) {
+        ScratchScope scratch(&lycon->scratch);
+        size_t count = hashmap_count(state->entries), removed = 0;
+        ContentVisibilityEntry* stale = count ? scratch.array<ContentVisibilityEntry>(count) : nullptr;
+        if (count && !stale) return false;
+        size_t cursor = 0; void* item = nullptr;
+        while (hashmap_iter(state->entries, &cursor, &item)) {
+            const ContentVisibilityEntry* entry = (const ContentVisibilityEntry*)item;
+            DomNode* source = dom_node_ref_validate(lycon->doc, entry->source);
+            if (!source || !source->is_element() || !dom_element_is_connected(source->as_element()))
+                stale[removed++] = *entry;
+        }
+        for (size_t i = 0; i < removed; i++) hashmap_delete(state->entries, &stale[i]);
+    }
+    if (changed) *changed = pass.changed;
+    return true;
 }
 
 static void layout_refresh_font_used_zoom(View* view, LayoutContext* lycon) {
@@ -469,7 +735,8 @@ static bool layout_resolve_pending_scroll_into_view(LayoutContext* lycon,
 
     // A zero-area inline has no scrollable target rectangle. In particular,
     // focusable empty spans must not reset their ancestor's current scroll.
-    if (if_needed && (target->width <= 0.0f || target->height <= 0.0f)) {
+    if (view_content_visibility_hides(target, CONTENT_VISIBILITY_USER_AGENT) ||
+        (if_needed && (target->width <= 0.0f || target->height <= 0.0f))) {
         dom_node_unpin(doc, target_ref, DOM_NODE_PIN_RECONCILE);
         return false;
     }
@@ -478,6 +745,10 @@ static bool layout_resolve_pending_scroll_into_view(LayoutContext* lycon,
     float target_y = layout_scroll_document_coord(target, false);
     const ScrollProp* target_scroll_style = target->scroll();
     DomElement* root_elem = lam::dom_require_element(static_cast<View*>(root_block));
+    bool viewport_fixed = false;
+    for (DomElement* ancestor = target; ancestor; ancestor = ancestor->parent_view()) {
+        if (view_is_viewport_fixed(ancestor)) { viewport_fixed = true; break; }
+    }
     // Layout coordinates omit ancestor scroll offsets. Subtract each applied
     // offset before aligning the target in the next outer scrollport.
     for (DomElement* scroll_container = layout_nearest_scroll_container(target, root_elem);
@@ -548,7 +819,8 @@ static bool layout_resolve_pending_scroll_into_view(LayoutContext* lycon,
                  scroll_container->tag_name ? scroll_container->tag_name : "?");
     }
     bool smooth_viewport = false;
-    {
+    // fixed viewport descendants can scroll inner panes without moving the document.
+    if (!viewport_fixed) {
         float old_viewport_x = doc->pending_viewport_scroll_x;
         float old_viewport_y = doc->pending_viewport_scroll_y;
         float current_scroll_x = 0.0f;
@@ -2038,7 +2310,8 @@ void dom_node_resolve_style(DomNode* node, LayoutContext* lycon) {
 
             // finalize HTML defaults before capturing or sampling animation values.
             css_web_animation_resolve(dom_elem, lycon);
-            if (lycon->css_query_probe) {
+            if (lycon->css_query_probe ||
+                view_content_visibility_hides(dom_elem, CONTENT_VISIBILITY_PAINT)) {
                 css_motion_sample_existing(dom_elem, lycon);
             } else if (lycon->ui_context) {
                 css_animation_resolve(dom_elem, lycon);
@@ -5279,12 +5552,14 @@ static void layout_store_last_remembered_sizes(LayoutContext* lycon, DomNode* no
     if (!lycon || !node || !node->is_element()) return;
 
     DomElement* element = node->as_element();
+    // no boxes are generated for this subtree, so rendering cannot update its memory.
+    if (element->display.outer == CSS_VALUE_NONE) return;
     // Replaced elements do not all finish through block-flow finalization.
     // Visit their completed view boxes before a later content-visibility pass
     // needs the CSS Sizing 4 auto intrinsic-size memory.
     if (element->view_type != RDT_VIEW_MARKER && element->blk) {
         layout_store_last_remembered_size(
-            lycon, lam::unsafe_view_block_element_storage(element));
+            lycon, lam::unsafe_view_block_element_storage(element), true);
     }
     for (DomNode* child = element->first_child; child; child = child->next_sibling) {
         layout_store_last_remembered_sizes(lycon, child);
@@ -5386,6 +5661,38 @@ static LayoutContainerMeasurements layout_container_measurements(DomNode* root) 
     return result;
 }
 
+static void layout_finish_scroll_positions(LayoutContext* lycon, DomDocument* doc) {
+    if (doc->view_tree && doc->view_tree->root && doc->view_tree->root->view_type == RDT_VIEW_BLOCK) {
+        ViewBlock* root_block = lam::view_require_block(doc->view_tree->root);
+        layout_finalize_static_positioned_abs_descendants(root_block);
+        bool has_scroll_into_view_target = doc->pending_scroll_into_view_target.address != nullptr;
+        // CSSOM View scrollIntoView uses the target's current bounding box;
+        // viewport scroll requests must resolve first so sticky layout sees the
+        // post-scroll position instead of accumulating a pre-scroll translation.
+        if (has_scroll_into_view_target) {
+            layout_apply_sticky_positions(lycon, static_cast<View*>(root_block));
+        }
+        bool smooth_viewport_scroll = layout_resolve_pending_scroll_into_view(
+            lycon, doc, root_block);
+        if (root_block->scroller && root_block->scroll_mut()->pane) {
+            ScrollPane* pane = root_block->scroll()->pane;
+            float target_x = doc->pending_viewport_scroll_x;
+            float target_y = doc->pending_viewport_scroll_y;
+            DocState* state = (DocState*)doc->state;
+            if (!smooth_viewport_scroll) {
+                scroll_snap_adjust_position(root_block, &target_x, &target_y,
+                                            has_scroll_into_view_target);
+            }
+            scroll_state_set_position_for_view(state, static_cast<View*>(root_block), pane, target_x, target_y, true);
+            scroll_state_get_position_for_view(state, (View*)root_block, pane,
+                                               &target_x, &target_y, NULL, NULL);
+            log_info("layout_html_doc: applied viewport scroll (%.1f, %.1f)",
+                     target_x, target_y);
+        }
+        layout_apply_sticky_positions(lycon, static_cast<View*>(root_block));
+    }
+}
+
 static bool layout_clear_dirty_visitor(DomNode* node, void*) {
     node->layout_dirty = false;
     return true;
@@ -5469,64 +5776,69 @@ void layout_html_doc(UiContext* uicon, DomDocument *doc, bool is_reflow) {
     LayoutContainerMeasurements previous = engine && engine->container_dependencies
         ? layout_container_measurements(root_node) : LayoutContainerMeasurements{};
     LayoutPassScope layout_scope(&lycon, doc, uicon);
-    lycon.css_query_probe = engine && engine->container_dependencies;
+    bool visibility_dependencies = false;
+    view_geometry_walk_dom_tree(root_node, content_visibility_has_declaration, &visibility_dependencies);
+    // relevance measurement must settle before styles can create motion timelines.
+    lycon.css_query_probe = (engine && engine->container_dependencies) || visibility_dependencies;
 
     uint64_t t_init = time_now_ns();
     size_t container_pass = 0;
+    size_t visibility_pass = 0;
     for (;;) {
         layout_html_root(&lycon, root_node);
+        ViewBlock* viewport = lam::view_as_block(doc->view_tree->root);
+        if (viewport && viewport->scroller && viewport->scroll()->pane) {
+            // a rebuilt viewport pane must restore scroll before relevance reads its geometry.
+            scroll_state_set_position_for_view((DocState*)doc->state, viewport,
+                viewport->scroll()->pane, doc->pending_viewport_scroll_x,
+                doc->pending_viewport_scroll_y, true);
+        }
+        bool visibility_changed = false;
+        if (!layout_content_visibility_settle(&lycon, root_node, &visibility_changed)) {
+            log_error("content visibility: cannot retain selected-view relevance measurements");
+            return;
+        }
         if (engine) engine->context.vertical_viewport = layout_element_inline_axis_is_vertical(doc->root);
-        if (!engine || !engine->container_dependencies) break;
-        LayoutContainerMeasurements current = layout_container_measurements(root_node);
+        bool container_dependencies = engine && engine->container_dependencies;
+        LayoutContainerMeasurements current = container_dependencies
+            ? layout_container_measurements(root_node) : LayoutContainerMeasurements{};
         bool stable = current.key == previous.key;
-        if (stable && !lycon.css_query_probe) break;
+        if ((!container_dependencies || stable) && !lycon.css_query_probe && !visibility_changed) {
+            layout_finish_scroll_positions(&lycon, doc);
+            // scrollIntoView consumes placeholder geometry, then relevance must settle before paint.
+            if (!layout_content_visibility_settle(&lycon, root_node, &visibility_changed)) {
+                log_error("content visibility: cannot retain post-scroll relevance");
+                return;
+            }
+            if (!visibility_changed) break;
+        }
+        if (visibility_changed && ++visibility_pass > doc->view_tree->max_content_visibility_passes) {
+            log_error("content visibility: relevance dependencies failed to converge after %zu passes", visibility_pass);
+            return;
+        }
         // strict-ancestor size dependencies can advance at most one source level per pass.
-        if (++container_pass > current.elements + 1) {
+        if (container_dependencies && !visibility_changed && ++container_pass > current.elements + 1) {
             log_error("container-layout: size dependencies failed to converge after %zu passes", container_pass);
             return;
         }
         previous = current;
-        if (!stable) {
+        if (!stable || visibility_changed) {
             radiant_recascade_document_styles(doc, doc->root);
         }
         layout_cleanup(&lycon);
         view_pool_reset_retained(doc->view_tree);
         reset_float_prelaid_flags(root_node);
         layout_init(&lycon, doc, uicon);
-        lycon.css_query_probe = !stable;
+        lycon.css_query_probe = container_dependencies && !stable;
     }
 
     layout_store_last_remembered_sizes(&lycon, root_node);
-
-    if (doc->view_tree && doc->view_tree->root && doc->view_tree->root->view_type == RDT_VIEW_BLOCK) {
-        ViewBlock* root_block = lam::view_require_block(doc->view_tree->root);
-        layout_finalize_static_positioned_abs_descendants(root_block);
-        bool has_scroll_into_view_target = doc->pending_scroll_into_view_target.address != nullptr;
-        // CSSOM View scrollIntoView uses the target's current bounding box;
-        // viewport scroll requests must resolve first so sticky layout sees the
-        // post-scroll position instead of accumulating a pre-scroll translation.
-        if (has_scroll_into_view_target) {
-            layout_apply_sticky_positions(&lycon, static_cast<View*>(root_block));
-        }
-        bool smooth_viewport_scroll = layout_resolve_pending_scroll_into_view(
-            &lycon, doc, root_block);
-        if (root_block->scroller && root_block->scroll_mut()->pane) {
-            ScrollPane* pane = root_block->scroll()->pane;
-            float target_x = doc->pending_viewport_scroll_x;
-            float target_y = doc->pending_viewport_scroll_y;
-            DocState* state = (DocState*)doc->state;
-            if (!smooth_viewport_scroll) {
-                scroll_snap_adjust_position(root_block, &target_x, &target_y,
-                                            has_scroll_into_view_target);
-            }
-            scroll_state_set_position_for_view(state, static_cast<View*>(root_block), pane, target_x, target_y, true);
-            scroll_state_get_position_for_view(state, (View*)root_block, pane,
-                                               &target_x, &target_y, NULL, NULL);
-            log_info("layout_html_doc: applied viewport scroll (%.1f, %.1f)",
-                     target_x, target_y);
-        }
-        layout_apply_sticky_positions(&lycon, static_cast<View*>(root_block));
+    // retain skipped-to-active transition suppression only after the final style pass.
+    if (!view_geometry_walk_dom_tree(root_node, content_visibility_commit_motion, &lycon)) {
+        log_error("content visibility: cannot retain committed motion relevance");
+        return;
     }
+
     uint64_t t_layout = time_now_ns();
     double layout_ms = time_elapsed_ms_f(t_init, t_layout);
     if (lycon.profiler.enabled) {

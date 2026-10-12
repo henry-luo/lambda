@@ -7611,16 +7611,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
     #undef GRID
 }
 
-bool is_table_internal_display(CssEnum display) {
-    return display == CSS_VALUE_TABLE_CELL ||
-           display == CSS_VALUE_TABLE_ROW ||
-           display == CSS_VALUE_TABLE_ROW_GROUP ||
-           display == CSS_VALUE_TABLE_HEADER_GROUP ||
-           display == CSS_VALUE_TABLE_FOOTER_GROUP ||
-           display == CSS_VALUE_TABLE_COLUMN ||
-           display == CSS_VALUE_TABLE_COLUMN_GROUP ||
-           display == CSS_VALUE_TABLE_CAPTION;
-}
+
 
 bool layout_element_contains_table_internal(DomElement* element) {
     if (!element) return false;

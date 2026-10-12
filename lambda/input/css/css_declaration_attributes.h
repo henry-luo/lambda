@@ -413,6 +413,7 @@
     X(color_interpolation) \
     X(color_interpolation_filters) \
     X(text_anchor) \
+    X(_webkit_box_orient) \
     X(css_float)
 
 #define CSS_STYLE_PROPERTIES_ATTRIBUTES(X) \
@@ -1182,6 +1183,9 @@
     X(color_interpolation_filters, "color-interpolation-filters", "color-interpolation-filters") \
     X(text_anchor, "textAnchor", "text-anchor") \
     X(text_anchor, "text-anchor", "text-anchor") \
+    X(_webkit_box_orient, "WebkitBoxOrient", "-webkit-box-orient") \
+    X(_webkit_box_orient, "-webkit-box-orient", "-webkit-box-orient") \
+    X(_webkit_box_orient, "webkitBoxOrient", "-webkit-box-orient") \
     X(css_float, "cssFloat", "float")
 
 #define CSS_FONT_FACE_DESCRIPTORS_FIELDS(X) \

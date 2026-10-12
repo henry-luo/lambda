@@ -441,6 +441,14 @@ bool animation_scheduler_tick(AnimationScheduler* scheduler, double now,
         }
 
         bool css_animation = anim->type == ANIM_CSS_ANIMATION;
+        // skipped descendants retain effect clocks and defer sampling/events until activation.
+        if ((css_animation || anim->type == ANIM_CSS_TRANSITION) && anim->target &&
+            view_content_visibility_hides((DomElement*)anim->target, CONTENT_VISIBILITY_PAINT)) {
+            // retain clock service while sampling is deferred; explicit reads use that clock.
+            any_active |= anim->play_state != ANIM_PLAY_FINISHED;
+            anim = next;
+            continue;
+        }
         bool paused = anim->play_state == ANIM_PLAY_PAUSED;
         if (paused && (!css_animation || (anim->sampled && !force_css_sample))) {
             any_active = true;

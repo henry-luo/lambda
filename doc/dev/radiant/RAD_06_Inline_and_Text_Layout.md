@@ -1,6 +1,6 @@
 # Radiant — Inline & Text Layout
 
-> **Last verified against tree:** 2026-07-14 *(initial stamp from git history)*
+> **Last verified against tree:** 2026-10-11 *(§11 clamp/ellipsis, intrinsic wrapping and computed paint spacing; other sections retain their prior verification scope)*
 
 > **Part of the [Radiant detailed-design set](RAD_00_Overview.md).** This document covers how Radiant turns a run of DOM text plus inline elements (`<span>`, `<br>`, `<wbr>`, inline-block, images) into positioned line boxes. It describes the inline formatting entry (`layout_inline`), the single-function streaming line-breaker (`layout_text`) with its per-character `do…while` loop and `goto` back-edge, the `Linebox` break-cursor model tagged by `BreakKind`, whitespace collapsing / trailing / hanging spaces, the ASCII-Latin measurement fast path versus the per-codepoint glyph loop, codepoint-based kerning, and the two-pass vertical alignment performed in `line_break`. The actual font engine (rasterization, cache, fallback, GPOS tables) is a separate concern — see [RAD_07 — Fonts](RAD_07_Fonts.md).
 >
@@ -151,6 +151,59 @@ Rendering does **not** consume a shaped buffer from layout. `render_text.cpp` re
 10. **`layout_text` is a single ~1370-line function.** The overflow/wrap cascade and break-recording tail are long and deeply nested; correctness depends on many interacting `Linebox` flags. There is no unit-level test of individual branches — regressions surface only through the layout suite.
 
 ---
+
+## 11. Horizontal overflow paint projection (2026-10-11)
+
+Under **D4.5.1v4 / D4.1.4v5** and **D7.3.3–D7.3.4**, layout keeps the original `TextRect` byte range and geometry. Reaching a clamp boundary records a candidate marker; paint checks that content was discarded before fitting that line. `RenderTextPaintScope` collects block-local lines once and `RenderTextPaintIterator` supplies temporary visible prefixes/suffixes or block-styled markers to raster/SVG/PDF. Fitting respects the existing grapheme helper and case expansion; the first visual cluster is clipped when necessary. Horizontal RTL overflow retains a source byte offset and x position, with an independent marker before the suffix. Mixed bidi, RTL clamp, vertical/atomic/scroll and broader shaping remain open in P1.3/P2.1.
+
+`layout_inline` now restores the containing block's definite width/height immediately after resolving a non-replaced inline's style. Letting the child's style resolution clear those dimensions caused absolute boxes to expand to overflowing span text after their inner layout. The absolute multi-run export reference and live fixture retain the authored width.
+
+Clamp counts use the shared positive-integer grammar and typed numeric evaluator.
+The post-font style pass computes owner-relative ratios; CSSOM uses the existing
+owner-font adapter even before relayout. Explicit inheritance copies the parent's
+computed scalar, while invalid substituted values and non-inherited resets
+compute to `none`. Declaration-backed serialization keeps transient ancestor
+counters out of CSSOM. The shared propagation helper stops at independent
+formatting contexts ([CSS Overflow 4 §5.2](https://drafts.csswg.org/css-overflow-4/#max-lines)).
+Repeated computed reads release their scratch pools (**D4.5.1v4 / D4.1.4v5**).
+The bounded grammar/math fixture has 320 assertions, with 16 further literal-count
+references in PNG/SVG/PDF at 1×/2×. The legacy display/orientation gate now
+shares computed state between CSSOM and layout, including inherited display,
+strict four-keyword orientation grammar and dirty variable/default reads.
+Unclamped legacy boxes retain their computed spelling and use orientation for
+the flex axis without rewriting computed flex-direction.
+
+Break-all now contributes letter/grapheme boundaries to min-content measurement;
+flex's fast text path supplies inherited wrap properties. Unwrapped max-content
+retains whole-run shaping independently of the added wrap opportunities. Flex-item flow shares
+block clamp initialization/result storage, and refreshes its overflow viewport
+after final height refinement. The 380-check live fixture covers causal changes
+and restoration; 22 further Chromium references match PNG/SVG/PDF at 1×/2×.
+Modern shorthand/longhands, broader legacy mappings and writing modes remain open.
+Ownership and stable catalog identity follow **D4.5.1v4 / D4.1.4v5 / D4.6.1v4**.
+
+The RTL fixture adds 114 live assertions, including 98 Chromium attributes and
+16 paint checks; 14 independent suffix references pass PNG/SVG/PDF at 1×/2×.
+Retained slices preserve capitalization state from the original source whitespace
+in fitting, raster, blurred shadows and export. `text-transform` computed reads
+use the shared cascade serializer instead of the lazy layout enum, and shared
+keyword-set grammar rejects invalid/duplicate/conflicting tokens. Combined and
+language-sensitive transform paint remains partial. The contracts are
+[FT-14 and FT-15](../../../vibe/radiant/Radiant_Design_Font_Text.md#14-visual-edge-overflow-projection-contract-2026-10-11).
+
+Fitting and paint now reuse `text_character_spacing` and `text_space_advance`
+from `layout.hpp`, including signed authored word spacing and the existing
+letter-spacing suppression. Export slices retain their source whitespace context:
+collapsed separators advance once, while preserved separators keep each advance.
+Source byte offsets remain unchanged when fitting a prefix or suffix. Recorded
+glyph-run spacing stores only extra justification; the captured font style owns
+authored spacing (**D4.5.1v4 / D4.1.4v5**). Eight independent spacing references
+pass PNG/SVG/PDF at both densities, and 139 live assertions cover causal inherited
+changes, computed reads, committed geometry and pixels. Geometry follows the
+non-forcing DOM frame contract in [DOM API §3.4](../../../vibe/radiant/Radiant_Design_DOM_API.md#34-cssom-layout-and-geometry).
+Tabs, complete Unicode separators, cross-node/shaping/vertical spacing and
+decoration placement remain open; see [FT-16](../../../vibe/radiant/Radiant_Design_Font_Text.md#16-computed-spacing-in-paint-2026-10-11).
+
 
 ## Appendix A — Source map
 

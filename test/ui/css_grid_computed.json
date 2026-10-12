@@ -1,0 +1,440 @@
+{
+  "name": "Grid resolved track lists retain used geometry and full computed reads",
+  "html": "test/ui/css_grid_computed.html",
+  "viewport": {
+    "width": 640,
+    "height": 480
+  },
+  "events": [
+    {
+      "type": "click",
+      "target": {
+        "selector": "#check"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-pending",
+      "equals": "1 / 1 / 2 / 3"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-pending-width",
+      "equals": "50"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-pending-inline",
+      "equals": "||var(--areas)"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-placement-inline",
+      "equals": "2 / Bar / span 3 / 4"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-plain",
+      "equals": "[start] 20px [middle] 280px [end]"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-repeated",
+      "equals": "[pre a] 20px [b a] 20px [b a] 20px [b post]"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-fit",
+      "equals": "[a] 300px [b a] 0px [b a] 0px [b a] 0px [b]"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-implicit",
+      "equals": "5px 5px [a] 20px [b] 5px 5px 5px"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-areas",
+      "equals": "10px 10px"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-empty",
+      "equals": "[first] 40px [last]"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-nongrid",
+      "equals": "[a] 20px minmax(0px, 1fr)"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-long",
+      "equals": "999,200,10px 10px"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-rows",
+      "equals": "10px"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-nogridrepeat",
+      "equals": "repeat(2, [Red blue] 10px [tail])"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-inherited",
+      "equals": "[Em] 20px 25%"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-keywordnames",
+      "equals": "[Red] 20px [red] 30px [tail]"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-keyword-width",
+      "equals": "20"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-adjacent",
+      "equals": "none"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-math",
+      "equals": "minmax(15px, 2fr) fit-content(calc(25% + 10px))"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-flow",
+      "equals": "column dense"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-line",
+      "equals": "span 2 Foo"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-placement",
+      "equals": "2 / Bar / span 3 / 4"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-placement-copy",
+      "equals": "Name"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-placement-var",
+      "equals": "Foo / 3"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-decimal",
+      "equals": "2"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-badspan",
+      "equals": "Foo"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-mathline",
+      "equals": "2"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-mathspan",
+      "equals": "span 1"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-area-invalid",
+      "equals": "Foo / Bar"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-bare-span",
+      "equals": "2"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-placement-inherited",
+      "equals": "Foo / Bar"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-placement-width",
+      "equals": "50"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#change"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#changed"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-changed-placement",
+      "equals": "2 / auto / span 3 / 4"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-changed-placement-var",
+      "equals": "Bar / 4"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-changed-placement-width",
+      "equals": "80"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-changed-pending",
+      "equals": "1 / auto / 2 / 3"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-changed-pending-width",
+      "equals": "30"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-changed-pending-inline",
+      "equals": "||"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-changed-placement-inline",
+      "equals": ""
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-changed-plain",
+      "equals": "[start] 20px [middle] 380px [end]"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-changed-nogridrepeat",
+      "equals": "repeat(2, [Red blue] 20px [tail])"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#restore"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#restored"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-restored-placement",
+      "equals": "2 / Bar / span 3 / 4"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-restored-placement-var",
+      "equals": "Foo / 3"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-restored-placement-width",
+      "equals": "50"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-restored-pending",
+      "equals": "1 / 1 / 2 / 3"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-restored-pending-width",
+      "equals": "50"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-restored-pending-inline",
+      "equals": "||var(--areas)"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-restored-placement-inline",
+      "equals": "2 / Bar / span 3 / 4"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-restored-plain",
+      "equals": "[start] 20px [middle] 280px [end]"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-restored-nogridrepeat",
+      "equals": "repeat(2, [Red blue] 10px [tail])"
+    }
+  ]
+}

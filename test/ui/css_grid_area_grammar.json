@@ -1,0 +1,568 @@
+{
+  "name": "Grid area grammar validates rectangles and preserves CSSOM rejection versus computed defaulting",
+  "html": "test/ui/css_grid_area_grammar.html",
+  "viewport": {
+    "width": 640,
+    "height": 480
+  },
+  "events": [
+    {
+      "type": "click",
+      "target": {
+        "selector": "#check"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-canonical",
+      "equals": "\"a . b\" \"a . b\""
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-invalid",
+      "equals": "\"a a\""
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-names",
+      "equals": "\"1st \u00e9 \ud83d\ude00\""
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-inline",
+      "equals": "\"a . b\" \"a . b\""
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-escape",
+      "equals": "\"a b\""
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-reject-0",
+      "equals": "\"a a\""
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-reject-1",
+      "equals": "\"a a\""
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-reject-2",
+      "equals": "\"a a\""
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-reject-3",
+      "equals": "\"a a\""
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-reject-4",
+      "equals": "\"a a\""
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-reject-5",
+      "equals": "\"a a\""
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-reject-6",
+      "equals": "\"a a\""
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-reject-7",
+      "equals": "\"a a\""
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-reject-8",
+      "equals": "\"a a\""
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-canonical-width",
+      "equals": "60"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-invalid-width",
+      "equals": "40"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-names-width",
+      "equals": "60"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-variable",
+      "equals": "\"a a\""
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-variable-width",
+      "equals": "40"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-ruled",
+      "equals": "\"a a\""
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-rule",
+      "equals": "\"a a\""
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-ruled-width",
+      "equals": "40"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#change"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#changed"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-changed-canonical",
+      "equals": "\"a . b\" \"a . b\""
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-changed-invalid",
+      "equals": "\"a a\""
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-changed-names",
+      "equals": "\"1st \u00e9 \ud83d\ude00\""
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-changed-inline",
+      "equals": "\"a . b\" \"a . b\""
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-changed-escape",
+      "equals": "\"a b\""
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-changed-reject-0",
+      "equals": "\"a a\""
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-changed-reject-1",
+      "equals": "\"a a\""
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-changed-reject-2",
+      "equals": "\"a a\""
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-changed-reject-3",
+      "equals": "\"a a\""
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-changed-reject-4",
+      "equals": "\"a a\""
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-changed-reject-5",
+      "equals": "\"a a\""
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-changed-reject-6",
+      "equals": "\"a a\""
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-changed-reject-7",
+      "equals": "\"a a\""
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-changed-reject-8",
+      "equals": "\"a a\""
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-changed-canonical-width",
+      "equals": "60"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-changed-invalid-width",
+      "equals": "40"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-changed-names-width",
+      "equals": "60"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-changed-variable",
+      "equals": "none"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-changed-variable-width",
+      "equals": "20"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-changed-ruled",
+      "equals": "\"b c d\""
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-changed-rule",
+      "equals": "\"b c d\""
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-changed-ruled-width",
+      "equals": "60"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#restore"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#restored"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-restored-canonical",
+      "equals": "\"a . b\" \"a . b\""
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-restored-invalid",
+      "equals": "\"a a\""
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-restored-names",
+      "equals": "\"1st \u00e9 \ud83d\ude00\""
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-restored-inline",
+      "equals": "\"a . b\" \"a . b\""
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-restored-escape",
+      "equals": "\"a b\""
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-restored-reject-0",
+      "equals": "\"a a\""
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-restored-reject-1",
+      "equals": "\"a a\""
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-restored-reject-2",
+      "equals": "\"a a\""
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-restored-reject-3",
+      "equals": "\"a a\""
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-restored-reject-4",
+      "equals": "\"a a\""
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-restored-reject-5",
+      "equals": "\"a a\""
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-restored-reject-6",
+      "equals": "\"a a\""
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-restored-reject-7",
+      "equals": "\"a a\""
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-restored-reject-8",
+      "equals": "\"a a\""
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-restored-canonical-width",
+      "equals": "60"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-restored-invalid-width",
+      "equals": "40"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-restored-names-width",
+      "equals": "60"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-restored-variable",
+      "equals": "\"b b\""
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-restored-variable-width",
+      "equals": "40"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-restored-ruled",
+      "equals": "\"a a\""
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-restored-rule",
+      "equals": "\"a a\""
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-restored-ruled-width",
+      "equals": "40"
+    }
+  ]
+}

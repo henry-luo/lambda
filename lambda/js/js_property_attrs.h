@@ -73,6 +73,9 @@ static inline void jspd_set_accessor(ShapeEntry* se, bool a) {
 // may be ItemNull (representing absent get / absent set per ES spec).
 JsAccessorPair* js_alloc_accessor_pair(Item getter, Item setter);
 
+// physical storage only; caller validates semantics and roots the cell until publication.
+bool js_map_store_accessor(Map* map, String* key, JsAccessorPair* pair, uint8_t attrs, Pool* pool);
+
 // Recover the accessor directly from its descriptor owner. `byte_offset == -1`
 // is the virtual-field invariant; a non-null cell with any physical offset is
 // a corrupted shape rather than an alternate storage representation.

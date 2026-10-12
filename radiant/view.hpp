@@ -87,6 +87,8 @@ bool css_prop_serialize_computed(DomElement* element, CssPropertyCode id,
                                  int pseudo_type, char* out, size_t out_size);
 String* css_prop_serialize_computed_value(Pool* pool, DomElement* element,
     CssPropertyCode id, int pseudo_type);
+bool css_prop_serialize_cascaded_value(DomElement* element, CssPropertyCode id,
+    int pseudo_type, StringBuf* out, bool preserve_color_model = false);
 bool css_prop_compute_numeric_value(DomElement* element, const CssValue* value, CssMathResult* result);
 String* css_prop_serialize_svg_value(Pool* pool, DomElement* declaring,
     CssPropertyCode id, const CssValue* value);
@@ -368,6 +370,13 @@ static inline void rdt_matrix4_transform_point(const RdtMatrix4* matrix,
 bool view_get_transform_matrix(View* view, RdtMatrix* out_matrix);
 enum BackfaceCheck { BACKFACE_SELF, BACKFACE_SUBTREE, BACKFACE_HIT_TEST };
 bool view_backface_is_hidden(View* view, BackfaceCheck check = BACKFACE_SELF);
+bool view_size_containment_applies(DisplayValue display);
+bool view_contents_are_skipped(const View* view);
+enum ContentVisibilityCheck { CONTENT_VISIBILITY_PAINT, CONTENT_VISIBILITY_USER_AGENT };
+bool view_content_visibility_hides(DomElement* element, ContentVisibilityCheck check,
+                                    bool include_self = false);
+bool view_is_viewport_fixed(View* view);
+RdtLogicalPoint view_geometry_fixed_scroll_adjustment(View* view);
 bool rdt_matrix4_backface_visible(const RdtMatrix4* matrix);
 bool view_get_foreign_object_matrix(View* view, RdtMatrix* out_matrix, bool include_self_transform = true);
 // inverse of the painted CSS plane, including ancestor scroll, transforms and perspective.
@@ -898,6 +907,11 @@ struct GridItemProp {
     lam::Own<const char> grid_column_end_name;
     lam::Own<const char> grid_row_start_name;
     lam::Own<const char> grid_row_end_name;
+    // retain authored occurrences independently of pass-local resolved line numbers.
+    int grid_column_start_occurrence;
+    int grid_column_end_occurrence;
+    int grid_row_start_occurrence;
+    int grid_row_end_occurrence;
     int justify_self;            // Item-specific justify alignment (CSS_VALUE_*)
     int align_self_grid;         // Item-specific align alignment for grid (CSS_VALUE_*)
     int order;                   // CSS order property (affects placement order)
@@ -1198,6 +1212,7 @@ typedef struct {
     GradientType border_image_type;
     lam::Own<LinearGradient> border_image_linear_gradient;
     lam::Own<char> border_image_url;
+    float border_image_resolution; // selected raster density; zero means 1x.
     float border_image_width[4];
     uint8_t border_image_width_type[4];
     bool has_border_image_width;
@@ -1210,6 +1225,8 @@ typedef struct {
     bool border_image_slice_fill;
     CssEnum border_image_repeat[2]; // horizontal, vertical
 } BorderProp;
+
+void view_release_border_image(ViewTree* tree, BorderProp* border);
 
 // physical side access is shared by cascade, layout, and table border code;
 // keeping the value and specificity lanes together prevents side updates from
@@ -1446,12 +1463,14 @@ typedef struct {
     lam::Shared<LinearGradient> linear_gradient;
     lam::Shared<RadialGradient> radial_gradient;
     lam::Shared<ConicGradient> conic_gradient;
+    float resolution; // selected raster density; zero means 1x.
 } ListStyleImage;
 
 // tier-2: view-pool, rebuilt each relayout
 typedef struct {
     Color color; // background color
     char* image; // background image path
+    float image_resolution; // selected raster image-set density; 0 means the default 1x.
     // Background-size: auto | <length> | <percentage> | cover | contain
     CssEnum bg_size_type;   // CSS_VALUE_AUTO (default), CSS_VALUE_COVER, CSS_VALUE_CONTAIN, or 0 for explicit
     float bg_size_width;    // explicit width (px or %)
@@ -1487,6 +1506,9 @@ typedef struct {
     int linear_layer_count;
     CssEnum blend_mode;  // CSS background-blend-mode (CSS_VALUE_NORMAL default, CSS_VALUE_MULTIPLY, etc.)
 } BackgroundProp;
+
+float layout_css_image_density(const ImageSurface* image, float resolution);
+void view_release_background_images(ViewTree* tree, BackgroundProp* background);
 
 inline float background_position_offset(const BackgroundProp* background, bool horizontal,
                                          float available, float raster_scale = 1.0f) {
@@ -1863,6 +1885,7 @@ typedef struct MarkerProp {
     bool is_outside;         // true = outside position (rendered in margin area, no inline advance)
     bool reserves_first_line; // outside marker has no parent list gutter to occupy
     bool has_explicit_content; // ::marker content overrides the list-style marker
+    bool suppressed;         // retained marker currently has no generated contents
     bool trailing_space_trimmed; // marker-only lines have discarded the separator
 } MarkerProp;
 
@@ -2218,7 +2241,8 @@ typedef struct BlockProp {
     uint8_t computed_containment; // inherited CSS value excludes containment implied by container-type
     uint8_t container_axes; // logical size-query eligibility, independent of authored contain
     lam::Own<CssValue> container_names;
-    bool content_visibility_hidden;
+    CssEnum content_visibility; // computed visible/hidden/auto remains distinct from used relevance
+    bool content_visibility_skipped;
     float given_min_width_percent;   // Raw percentage if min-width: X% (NaN if not percentage)
     float given_max_width_percent;   // Raw percentage if max-width: X% (NaN if not percentage)
     float given_min_height_percent;  // Raw percentage if min-height: X% (NaN if not percentage)
@@ -2242,6 +2266,7 @@ typedef struct BlockProp {
     bool vertical_auto_inline_size_constrained; // transient: auto height resolved from the vertical inline-size CB
     CssEnum text_overflow;  // CSS_VALUE_CLIP (default 0) | CSS_VALUE_ELLIPSIS
     int line_clamp;         // -webkit-line-clamp: max visible lines (0 = no clamp)
+    bool line_clamp_legacy; // legacy counts apply only to a vertical legacy box
     bool line_clamp_inherited; // transient: this block is consuming an ancestor clamp
     bool line_clamped;      // transient: layout hit this block's active line clamp
     float line_clamp_advance_y; // transient: content advance at clamp boundary
@@ -2410,12 +2435,15 @@ typedef struct GridProp {
     lam::Own<GridTrackList> grid_auto_rows;
     lam::Own<GridTrackList> grid_auto_columns;
 
-    int computed_row_count;
-    int computed_column_count;
+    int template_area_rows;
+    int template_area_columns;
     // Grid areas
     lam::OwnArr<GridArea> grid_areas;
     int area_count;
     int allocated_areas;
+
+    lam::Own<char> used_track_text; // browsing view property pool owns the combined row/column snapshot
+    size_t used_columns_offset;
 
     // Advanced features
     bool is_dense_packing;       // grid-auto-flow: dense
@@ -2494,9 +2522,17 @@ bool view_geometry_dom_is_descendant(const DomNode* node, const DomNode* ancesto
                                      bool include_ancestor = true);
 RdtLogicalPoint view_geometry_local_to_block_document(
     View* view, RdtLogicalPoint local);
-RdtLogicalPoint view_geometry_node_viewport_origin(
-    View* view, ViewGeometryScrollResolver resolve_scroll = nullptr,
-    void* context = nullptr);
+RdtLogicalPoint view_geometry_node_viewport_origin_resolved(
+    View* view, ViewGeometryScrollResolver resolve_scroll, void* context);
+inline RdtLogicalPoint view_geometry_node_viewport_origin(
+        View* view, ViewGeometryScrollResolver resolve_scroll = nullptr,
+        void* context = nullptr) {
+    if (resolve_scroll) return view_geometry_node_viewport_origin_resolved(view, resolve_scroll, context);
+    // the committed-view adapter uses containing blocks; DOM-only geometry has no layout owner.
+    RdtLogicalPoint point = {};
+    view_get_layout_position(view, nullptr, &point.x, &point.y);
+    return point;
+}
 RdtLogicalPoint view_geometry_block_viewport_origin(
     View* view, ViewGeometryScrollResolver resolve_scroll = nullptr,
     void* context = nullptr);
@@ -2907,6 +2943,9 @@ typedef struct CanonicalPropStats {
 // tier-2: view-pool, rebuilt each relayout
 struct ViewTree {
     lam::Own<struct ViewTreeModel> model; // Secondary geometry; null for the DOM-backed default.
+    lam::Own<struct ContentVisibilityState> content_visibility_state;
+    float content_visibility_activation_margin; // viewport multiples, an explicit user-agent policy
+    size_t max_content_visibility_passes;
     lam::Own<ViewTree> next_secondary;   // Document-owned secondary registry chain.
     lam::Own<Pool> prop_pool;       // Mutable element-owned view props; survives retained reflow.
     lam::Own<Arena> canonical_prop_arena; // Immutable shared props; survives ordinary style/layout generations.
@@ -3907,7 +3946,7 @@ void css_animation_finish(AnimationInstance* anim);
 // Process animation properties during style resolution and start animations
 // if animation-name references valid @keyframes. Called after resolve_css_styles.
 void css_animation_resolve(DomElement* element, LayoutContext* lycon);
-void css_motion_sample_existing(DomElement* element, LayoutContext* lycon);
+bool css_motion_sample_existing(DomElement* element, LayoutContext* lycon);
 const CssValue* css_motion_computed_value(Pool* pool, DomElement* element,
     CssPropertyCode property);
 
@@ -4013,6 +4052,9 @@ DisplayValue resolve_display_value(void* child);
 DisplayValue css_default_display_for_element(DomElement* element, DomNode* node);
 bool css_resolve_display_css_value(DomElement* element, const CssValue* value,
                                    DisplayValue* out_display);
+DisplayValue css_legacy_box_display(DomElement* element, uint8_t kind);
+DisplayValue css_inherit_display_value(DomElement* element, DisplayValue parent);
+const char* css_display_special_name(DisplayValue display);
 bool css_display_contents_suppresses_element(DomElement* element);
 bool css_display_element_is_replaced(DomElement* element);
 bool css_content_value_has_image_url(const CssValue* value);
