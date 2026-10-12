@@ -531,7 +531,27 @@ static Item js_test262_execute_batch_source(Runtime* runtime,
         const char* filename, bool inline_module_source,
         bool test262_native_harness,
         const JsPreambleState* preamble, bool has_preamble,
-        uint64_t* result_home, volatile long* harness_us) {
+        uint64_t* result_home, volatile long* harness_us, bool mvp_lmd) {
+    if (mvp_lmd) {
+        if (inline_module_source || has_preamble || ast_harness || test262_native_harness) {
+            fputs("MVP_FAILURE admission -\nMVP batch requires a complete classic source\n", stdout);
+            return ItemError;
+        }
+        MvpLmdHost host = {0, NULL, stdout, true};
+        MvpLmdExecution* execution = mvp_lmd_execute(source, source_len, NULL, &host);
+        MvpLmdFailurePhase phase;
+        const char* type = NULL;
+        const char* diagnostic = mvp_lmd_diagnostic(execution, &phase, &type);
+        if (diagnostic) {
+            const char* phases[] = {"success", "parse", "admission", "runtime", "internal"};
+            fputs("MVP_FAILURE ", stdout); fputs(phases[phase], stdout);
+            fputc(' ', stdout); fputs(type ? type : "-", stdout); fputc('\n', stdout);
+            fputs(diagnostic, stdout); fputc('\n', stdout);
+        }
+        bool failed = diagnostic != NULL;
+        mvp_lmd_destroy(execution);
+        return failed ? ItemError : ItemNull;
+    }
     if (ast_harness) {
         if (ast_harness->prepare_failed || !ast_harness->script) {
             return js_throw_syntax_error(js_name_item(
@@ -4692,12 +4712,15 @@ static int lambda_main_impl(int argc, char *argv[]) {
         bool lifecycle_timing = lifecycle_env && lifecycle_env[0] &&
                                 strcmp(lifecycle_env, "0") != 0;
         bool hot_reload = true; // persistent heap between tests (default: on)
+        bool mvp_lmd = false;
         for (int i = 2; i < argc; i++) {
             if (strncmp(argv[i], "--timeout=", 10) == 0) {
                 batch_timeout = atoi(argv[i] + 10);
                 if (batch_timeout <= 0) batch_timeout = 10;
             } else if (strcmp(argv[i], "--no-hot-reload") == 0) {
                 hot_reload = false;
+            } else if (strcmp(argv[i], "--runtime=mvp-lmd") == 0) {
+                mvp_lmd = true;
             } else if (strncmp(argv[i], "--opt-level=", 12) == 0) {
                 int level = atoi(argv[i] + 12);
                 if (level >= 0 && level <= 3) g_js_mir_optimize_level = (unsigned int)level;
@@ -4710,6 +4733,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
         Runtime runtime;
         runtime_init(&runtime);
         lambda_stack_init();
+        if (mvp_lmd) hot_reload = false; // each MVP execution owns its context and heap.
 
 #ifndef _WIN32
         // Set up alternate signal stack for SIGSEGV/SIGBUS recovery.
@@ -4779,6 +4803,11 @@ static int lambda_main_impl(int argc, char *argv[]) {
             // preamble and recreates the hot heap before the next manifest.
             if (strncmp(line, "batch-boundary:", 15) == 0) {
                 const char* boundary_id = line + 15;
+                if (mvp_lmd) {
+                    fputs("\x01" "BATCH_MANIFEST_END ", stdout);
+                    fputs(boundary_id, stdout); fputc('\n', stdout); fflush(stdout);
+                    continue;
+                }
                 js_test262_clear_preamble(&preamble, &has_preamble, &preamble_var_checkpoint,
                                           &saved_harness_src, &saved_harness_len);
                 if (hot_reload) {
@@ -4807,6 +4836,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
             // The next source job gets a fresh DOM realm.  Its harness stays
             // worker-scoped, so WPT does not recompile testharness.js per file.
             if (strncmp(line, "document:", 9) == 0) {
+                if (mvp_lmd) { fputs("MVP document batches are unsupported\n", stderr); break; }
                 const char* document_path = line + 9;
                 size_t document_len = strlen(document_path);
                 if (document_len == 0 || document_len >= sizeof(batch_document_path)) {
@@ -4819,6 +4849,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
             }
 
             if (strncmp(line, "native-harness:", 15) == 0) {
+                if (mvp_lmd) { fputs("MVP requires the JS harness source\n", stderr); break; }
                 // The runner emits this only for its conservative AST-native
                 // subset. Keep the flag manifest-scoped so no helper state
                 // leaks into the next batch boundary.
@@ -4830,6 +4861,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
             // Compiles harness source once as preamble; function objects persist as module vars.
             bool harness_includes = strncmp(line, "harness-includes:", 17) == 0;
             if (strncmp(line, "harness:", 8) == 0 || harness_includes) {
+                if (mvp_lmd) { fputs("MVP requires a combined harness/test source\n", stderr); break; }
                 size_t harness_len = (size_t)atol(line + (harness_includes ? 17 : 8));
                 if (harness_len == 0 || harness_len > 10 * 1024 * 1024) continue;
                 char* harness_src = (char*)mem_alloc(harness_len + 1, MEM_CAT_SYSTEM);
@@ -5028,8 +5060,10 @@ static int lambda_main_impl(int argc, char *argv[]) {
             const char* batch_js_argv_store[2];
             batch_js_argv_store[0] = argv[0];
             batch_js_argv_store[1] = script_exec_path;
-            js_store_process_argv(2, batch_js_argv_store);
-            js_store_process_exec_argv(0, NULL);
+            if (!mvp_lmd) {
+                js_store_process_argv(2, batch_js_argv_store);
+                js_store_process_exec_argv(0, NULL);
+            }
             // test262 inline/harness batches share one worker process, so suppress
             // per-script Node process lifecycle only there. File-backed Node tests
             // depend on process.on('exit') flushing expected output.
@@ -5037,12 +5071,12 @@ static int lambda_main_impl(int argc, char *argv[]) {
             // The AST selector registers every classic source as a retained
             // JsScript. Raw/native jobs have no harness checkpoint, so capture
             // their own generation before dispatch as well.
-            bool ast_test_generation_active = js_ast_interpreter_requested() &&
+            bool ast_test_generation_active = !mvp_lmd && js_ast_interpreter_requested() &&
                 !inline_module_source;
             int ast_test_script_checkpoint = runtime.scripts ? runtime.scripts->length : 0;
             uint32_t ast_test_module_state_checkpoint = runtime.next_module_state_id;
 
-            if (!batch_context->side_root_base &&
+            if (!mvp_lmd && !batch_context->side_root_base &&
                 !lambda_side_stack_bind()) {
                 log_error("batch side-stack: failed to initialize execution regions");
             }
@@ -5093,7 +5127,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
                             js_source, js_source_len, script_exec_path, inline_module_source,
                             test262_native_harness,
                             &preamble, has_preamble, &result_home,
-                            lifecycle_timing ? &harness_us : NULL);
+                            lifecycle_timing ? &harness_us : NULL, mvp_lmd);
                         alarm(0);
                         batch_timeout_active = 0;
                         mir_error_active = 0;
@@ -5123,7 +5157,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
                         js_source, js_source_len, script_exec_path, inline_module_source,
                         test262_native_harness,
                         &preamble, has_preamble, &result_home,
-                        lifecycle_timing ? &harness_us : NULL);
+                        lifecycle_timing ? &harness_us : NULL, mvp_lmd);
                     mir_error_active = 0;
                     if (item_is_error(res)) {
                         batch_error = res;
@@ -5141,7 +5175,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
                 js_source, js_source_len, script_exec_path, inline_module_source,
                 test262_native_harness,
                 &preamble, has_preamble, &result_home,
-                lifecycle_timing ? &harness_us : NULL);
+                lifecycle_timing ? &harness_us : NULL, mvp_lmd);
             if (item_is_error(res)) {
                 batch_error = res;
                 result = 1;
@@ -5158,7 +5192,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
             }
             fflush(stdout);
 
-            if (result == 0 &&
+            if (!mvp_lmd && result == 0 &&
                 js_test262_global_flag_is_true("__lambda_test262_async_required") &&
                 !js_test262_global_flag_is_true("__lambda_test262_async_done")) {
                 batch_error = js_throw_type_error("async test did not call $DONE");
@@ -5166,7 +5200,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
             }
 
             // Print uncaught exception to stdout for batch capture
-            if (result == 1 && item_is_error(batch_error)) {
+            if (!mvp_lmd && result == 1 && item_is_error(batch_error)) {
                 char exc_msg[1024];
                 js_error_lane_format(batch_error, exc_msg, sizeof(exc_msg));
                 if (exc_msg[0]) printf("Uncaught %s\n", exc_msg);
@@ -5175,8 +5209,8 @@ static int lambda_main_impl(int argc, char *argv[]) {
 
             // Crash, timeout, and MIR-error longjmps bypass generated
             // epilogues, so every batch path returns to its test watermark.
-            lambda_recovery_checkpoint_restore(&batch_recovery_checkpoint);
-            if (result >= 128 || result == 124) {
+            if (!mvp_lmd) lambda_recovery_checkpoint_restore(&batch_recovery_checkpoint);
+            if (!mvp_lmd && (result >= 128 || result == 124)) {
                 // A recovery jump bypasses the compiler epilogue; abandon the
                 // active owner before the next reset can observe it.
                 jm_abandon_active_mir_after_signal();
@@ -5227,6 +5261,19 @@ static int lambda_main_impl(int argc, char *argv[]) {
             JsBatchLifecycleTiming lifecycle = {lifecycle_timing, lifecycle_start,
                 lifecycle_timing ? time_now_us() : 0,
                 js_realm_init_time_us() - realm_start, harness_us};
+
+            if (mvp_lmd) {
+                // recovery can bypass the MVP owner. Retire this worker rather
+                // than entering LJS cleanup with an interrupted MVP context.
+                if (result == 124 || result >= 128) {
+#ifndef _WIN32
+                    _exit(0);
+#else
+                    return lambda_main_finish(0);
+#endif
+                }
+                continue;
+            }
 
             // Memory management: each SIGSEGV/SIGBUS crash recovery via longjmp
             // leaks ~55MB (MIR code pages, AST, temporaries that skip cleanup).
