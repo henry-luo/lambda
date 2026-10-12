@@ -1,0 +1,1 @@
+[["measure visible events", true], ["full source retained", true], ["offscreen count", true], ["semantic chronology bounded", true], ["offscreen summary", true], ["activation follows event", true], ["follow preserves span", true], ["new window rendered", true], ["auto scroll opt out", true], ["point at boundary retained", true], ["overlapping range retained", true]]

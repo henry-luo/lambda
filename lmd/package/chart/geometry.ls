@@ -35,13 +35,15 @@ pub fn intersects(a, b, c, d) {
     (ac * ad < 0 and ca * cb < 0) or on_segment(a, b, c) or on_segment(a, b, d) or on_segment(c, d, a) or on_segment(c, d, b)
 }
 
-pub fn distance_segment(point, a, b) {
+pub fn nearest_segment(point, a, b) {
     let length = (b[0]-a[0])**2 + (b[1]-a[1])**2;
     let t = if (length == 0) 0.0 else max(0.0, min(1.0,
         ((point[0]-a[0])*(b[0]-a[0])+(point[1]-a[1])*(b[1]-a[1])) / length));
     let nearest = interpolate(a,b,t);
-    sqrt((point[0]-nearest[0])**2+(point[1]-nearest[1])**2)
+    {t:t, point:nearest, distance:sqrt((point[0]-nearest[0])**2+(point[1]-nearest[1])**2)}
 }
+
+pub fn distance_segment(point, a, b) => nearest_segment(point, a, b).distance
 
 pub fn contains_point(points, point) => len([for (i, a in points, let b=points[(i+1)%len(points)]
     where (a[1]>point[1]) != (b[1]>point[1]) and point[0] <

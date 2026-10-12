@@ -67,8 +67,9 @@ static inline void render_effect_record_page_backdrop_paint_list(
     }
     render_svg_inline_register_paint_ir_lowerers();
     paint_ir_register_glyph_run_raster_lowerer(glyph_lowerer);
+    // vector callbacks can stream clip scopes across fragments; apply export density once.
     RdtMatrix scale = rdt_matrix_scale(density, density);
-    paint_ir_lower_raster_transformed(paint_list, page_backdrop, &scale);
+    paint_ir_lower_raster_fragment(paint_list, page_backdrop, &scale);
 }
 
 static inline void render_effect_raster_begin(

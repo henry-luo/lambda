@@ -1,0 +1,17 @@
+{
+  "name":"Timeline native pointer capture and click-to-use pan",
+  "html":"test/ui/timeline/gestures.ls",
+  "viewport":{"width":1000,"height":650},
+  "events":[
+    {"type":"assert_attribute","target":{"selector":"#gestures"},"attribute":"data-timeline-engaged","equals":"false"},
+    {"type":"mouse_drag","target":{"selector":".lambda-timeline-canvas","offset_x":400,"offset_y":200},"dx":80,"dy":0},
+    {"type":"assert_attribute","target":{"selector":"#gestures"},"attribute":"data-timeline-window-from","equals":"0"},
+    {"type":"click","target":{"selector":".lambda-timeline-canvas","offset_x":400,"offset_y":200}},
+    {"type":"assert_attribute","target":{"selector":"#gestures"},"attribute":"data-timeline-engaged","equals":"true"},
+    {"type":"mouse_down","target":{"selector":".lambda-timeline-canvas","offset_x":400,"offset_y":200},"button":0},
+    {"type":"mouse_move","target":{"selector":".lambda-timeline-canvas","offset_x":480,"offset_y":200}},
+    {"type":"mouse_up","target":{"selector":".lambda-timeline-canvas","offset_x":480,"offset_y":200},"button":0},
+    {"type":"assert_attribute","target":{"selector":"#gestures"},"attribute":"data-timeline-window-from","equals":"-10.0"},
+    {"type":"assert_attribute","target":{"selector":"#gestures"},"attribute":"data-timeline-window-to","equals":"90.0"}
+  ]
+}

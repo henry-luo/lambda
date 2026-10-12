@@ -485,6 +485,10 @@ struct JubeHostValueAPI {
     // Creating a registered type activates its owning module before publication.
     Item (*native_object_new)(const JubeTypeDef* type, void* payload);
     void* (*native_object_data)(Item object, const JubeTypeDef* type);
+    // Pure reconstruction under the source element's complete TypeElmt contract.
+    Item (*element_with_content)(Item element, Item children);
+    // New structural presentation with the same qualified tag and attribute values.
+    Item (*element_present_content)(Item element, Item children);
 };
 
 typedef Item (*JubeNativeP0)(void);

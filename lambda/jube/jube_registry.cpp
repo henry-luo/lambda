@@ -953,6 +953,8 @@ static const JubeHostValueAPI jube_host_value_api = {
     jube_host_value_number_to_int64_exact,
     jube_host_value_native_object_new,
     jube_host_value_native_object_data,
+    lambda_element_with_content,
+    lambda_element_present_content,
 };
 
 static Item jube_host_script_new_function(JubeNativeFunctionSpec spec) {

@@ -408,7 +408,7 @@ static void release_media_prop(EmbedProp* embed) {
         return;
     }
 
-    rdt_video_destroy(embed->video);
+    // Layout props borrow the decoder; the owning ViewState releases it on node retirement.
     embed->video = nullptr;
 }
 

@@ -1,0 +1,20 @@
+{
+  "name":"Timeline toolbar settings share the reducer and retain activation",
+  "html":"test/ui/timeline/controls.ls",
+  "viewport":{"width":900,"height":600},
+  "events":[
+    {"type":"assert_count","target":{"selector":".lambda-timeline-toolbar select"},"count":3},
+    {"type":"assert_text","target":{"selector":"[data-timeline-command='zoom_in']"},"contains":"Magnify"},
+    {"type":"assert_count","target":{"selector":".zoom-icon"},"count":1},
+    {"type":"select_option","target":{"selector":"[data-timeline-setting='quick_jump']"},"value":"c"},
+    {"type":"assert_attribute","target":{"selector":".lambda-timeline-chart"},"attribute":"data-timeline-active","equals":"c"},
+    {"type":"click","target":{"selector":"[data-timeline-command='zoom_in']"}},
+    {"type":"click","target":{"selector":"[data-timeline-command='reset']"}},
+    {"type":"assert_attribute","target":{"selector":".lambda-timeline-chart"},"attribute":"data-timeline-window-from","equals":"0"},
+    {"type":"select_option","target":{"selector":"[data-timeline-setting='layout']"},"value":"story"},
+    {"type":"assert_count","target":{"selector":".lambda-timeline-story"},"count":1},
+    {"type":"select_option","target":{"selector":"[data-timeline-setting='theme']"},"value":"dark"},
+    {"type":"assert_attribute","target":{"selector":".lambda-timeline-chart"},"attribute":"data-timeline-active","equals":"c"},
+    {"type":"render","file":"temp/timeline-references/controls.png"}
+  ]
+}

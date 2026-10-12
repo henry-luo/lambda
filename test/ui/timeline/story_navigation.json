@@ -1,0 +1,123 @@
+{
+  "name": "Timeline title slide, shared narrative ordering, and keyboard focus",
+  "html": "test/ui/timeline/story_navigation.ls",
+  "viewport": {
+    "width": 900,
+    "height": 650
+  },
+  "input_turn_ms": 0,
+  "events": [
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": ".lambda-timeline-chart"
+      },
+      "attribute": "data-timeline-active",
+      "equals": "intro"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".lambda-timeline-story"
+      },
+      "contains": "An introduction"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-timeline-command='next']"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": ".lambda-timeline-chart"
+      },
+      "attribute": "data-timeline-active",
+      "equals": "c"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-timeline-command='last']"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".lambda-timeline-story"
+      },
+      "contains": "Second"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-timeline-command='previous']"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": ".lambda-timeline-chart"
+      },
+      "attribute": "data-timeline-active",
+      "equals": "a"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-timeline-command='first']"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": ".lambda-timeline-story"
+      },
+      "attribute": "data-timeline-introduction",
+      "equals": "true"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".lambda-timeline-story"
+      }
+    },
+    {
+      "type": "key_press",
+      "key": "ArrowRight"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": ".lambda-timeline-chart"
+      },
+      "attribute": "data-timeline-active",
+      "equals": "c"
+    },
+    {
+      "type": "assert_focus",
+      "target": {
+        "selector": ".lambda-timeline-story"
+      }
+    },
+    {
+      "type": "key_press",
+      "key": "Home"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": ".lambda-timeline-chart"
+      },
+      "attribute": "data-timeline-active",
+      "equals": "intro"
+    },
+    {
+      "type": "assert_focus",
+      "target": {
+        "selector": ".lambda-timeline-story"
+      }
+    }
+  ]
+}

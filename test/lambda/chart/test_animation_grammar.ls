@@ -1,7 +1,7 @@
 // Explicit frames verify geometry, timing, identity and playback without a wall clock (S12.1.1v2).
 import chart: lambda.chart.chart
 import animation: lambda.chart.animation
-import timeline: lambda.chart.timeline
+import timeline: lambda.chart.playback
 import affine: lambda.chart.svg_transform
 import coord: lambda.chart.coordinate
 fn check(label, valid) => if (valid) null else label

@@ -6,7 +6,7 @@ import projection:lambda.chart.projection
 import behavior:lambda.chart.behavior
 import parameter:lambda.chart.parameter
 import animation:lambda.chart.animation
-import timeline:lambda.chart.timeline
+import timeline:lambda.chart.playback
 import picking:lambda.chart.picking
 import util:lambda.chart.util
 fn check(label,valid)=>if (valid) null else label

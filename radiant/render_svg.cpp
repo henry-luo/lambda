@@ -1412,7 +1412,7 @@ bool save_svg_to_file(const char* svg_content, const char* filename) {
     return true;
 }
 
-static int render_export_session_to_svg(RenderExportSession* session, const char* svg_file) {
+int render_export_session_to_svg(RenderExportSession* session, const char* svg_file) {
     if (!session) return 1;
     UiContext* ui_context = session->ui_context;
     DomDocument* doc = session->document;

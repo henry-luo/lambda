@@ -166,6 +166,28 @@ TEST_F(DomIntegrationTest, DomElementAttributes) {
     EXPECT_FALSE(element->has_attribute("data-test"));
 }
 
+TEST_F(DomIntegrationTest, InertUsesAssignedSlotAndShadowHostAncestry) {
+    DomElement* host = create_dom_element("div");
+    DomElement* shadow = create_dom_element("#document-fragment");
+    DomElement* slot = create_dom_element("slot");
+    DomElement* light = create_dom_element("button");
+    ASSERT_TRUE(host && shadow && slot && light);
+    host->set_shadow_root_element(shadow);
+    shadow->set_shadow_host_element(host);
+    shadow->append_child(slot);
+    host->append_child(light);
+    EXPECT_EQ(dom_flat_tree_parent(light), slot);
+    EXPECT_FALSE(dom_node_is_inert(light));
+    ASSERT_TRUE(slot->set_attribute("inert", ""));
+    EXPECT_TRUE(dom_node_is_inert(light));
+    ASSERT_TRUE(slot->remove_attribute("inert"));
+    ASSERT_TRUE(host->set_attribute("inert", "false"));
+    // a present boolean attribute applies even when its text spells false.
+    EXPECT_TRUE(dom_node_is_inert(light));
+    ASSERT_TRUE(host->remove_attribute("inert"));
+    EXPECT_FALSE(dom_node_is_inert(light));
+}
+
 TEST_F(DomIntegrationTest, DomElementIdAttribute) {
     DomElement* element = create_dom_element("div");
     ASSERT_NE(element, nullptr);
@@ -1836,6 +1858,74 @@ TEST_F(DomIntegrationTest, CRUD_AttributeAndContent_Simultaneous) {
     EXPECT_EQ(root->get_attribute("data-priority"), nullptr);
     EXPECT_EQ(dom_element_to_element(root)->length, 1);
     EXPECT_STREQ(dom_element_to_element(root)->items[0].get_string()->chars, "Updated body text");
+}
+
+TEST_F(DomIntegrationTest, UiRepeatedValuesHaveIndependentDomOccurrences) {
+    input->ui_mode = true;
+    MarkBuilder builder(input);
+    Item icon = builder.element("svg").child(builder.element("rect").attr("width", 10).final()).final();
+    Item left = builder.element("div").child(icon).child(icon).final();
+    Item right = builder.element("div").child(icon).final();
+    Item tree = builder.element("main").child(left).child(right).final();
+    input->root = tree;
+    DomElement* root = build_dom_tree_from_element(tree.element, doc, nullptr);
+    ASSERT_NE(root, nullptr);
+    ASSERT_NE(root->first_child, nullptr);
+    DomElement* first_parent = root->first_child->as_element();
+    ASSERT_NE(first_parent, nullptr);
+    ASSERT_NE(first_parent->next_sibling, nullptr);
+    DomElement* second_parent = first_parent->next_sibling->as_element();
+    ASSERT_NE(second_parent, nullptr);
+    ASSERT_NE(first_parent->first_child, nullptr);
+    DomElement* first = first_parent->first_child->as_element();
+    ASSERT_NE(first, nullptr);
+    ASSERT_NE(first->next_sibling, nullptr);
+    DomElement* second = first->next_sibling->as_element();
+    ASSERT_NE(second, nullptr);
+    ASSERT_NE(second_parent->first_child, nullptr);
+    DomElement* third = second_parent->first_child->as_element();
+    ASSERT_NE(third, nullptr);
+    EXPECT_NE(first, second);
+    EXPECT_NE(first, third);
+    EXPECT_NE(second, third);
+    EXPECT_NE(first->first_child, second->first_child);
+    EXPECT_NE(first->first_child, third->first_child);
+    EXPECT_EQ(first->parent, first_parent);
+    EXPECT_EQ(second->parent, first_parent);
+    EXPECT_EQ(third->parent, second_parent);
+    EXPECT_EQ(second->next_sibling, nullptr);
+    EXPECT_EQ(third->next_sibling, nullptr);
+
+    // later builds retain the materialized occurrences instead of stealing or cloning them again.
+    EXPECT_EQ(build_dom_tree_from_element(tree.element, doc, nullptr), root);
+    EXPECT_EQ(root->first_child->as_element()->first_child, first);
+    EXPECT_EQ(first->next_sibling, second);
+    EXPECT_EQ(root->last_child->as_element()->first_child, third);
+}
+
+TEST_F(DomIntegrationTest, UiRepeatedArraysMaterializeTheirChildOccurrences) {
+    input->ui_mode = true;
+    MarkBuilder builder(input);
+    Item icon = builder.element("svg").child(builder.element("rect").final()).final();
+    Item group = builder.array().append(icon).final();
+    Item left = builder.element("div").child(group).final();
+    Item right = builder.element("div").child(group).final();
+    Item tree = builder.element("main").child(left).child(right).final();
+    input->root = tree;
+    DomElement* root = build_dom_tree_from_element(tree.element, doc, nullptr);
+    ASSERT_NE(root, nullptr);
+    ASSERT_NE(root->first_child, nullptr);
+    ASSERT_NE(root->last_child, nullptr);
+    DomElement* first_parent = root->first_child->as_element();
+    DomElement* second_parent = root->last_child->as_element();
+    ASSERT_NE(first_parent, nullptr);
+    ASSERT_NE(second_parent, nullptr);
+    EXPECT_NE(first_parent, second_parent);
+    ASSERT_NE(first_parent->first_child, nullptr);
+    ASSERT_NE(second_parent->first_child, nullptr);
+    EXPECT_NE(first_parent->first_child, second_parent->first_child);
+    EXPECT_NE(first_parent->first_child->as_element()->first_child,
+              second_parent->first_child->as_element()->first_child);
 }
 
 TEST_F(DomIntegrationTest, UiChildRelinkRetainsCommentIdentity) {

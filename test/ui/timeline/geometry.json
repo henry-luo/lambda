@@ -1,0 +1,15 @@
+{
+  "name":"Timeline native curved axes, uncertainty, eras and compressed intervals",
+  "html":"test/ui/timeline/geometry.ls",
+  "viewport":{"width":1000,"height":750},
+  "events":[
+    {"type":"assert_count","target":{"selector":".lambda-timeline-axis"},"count":2},
+    {"type":"assert_count","target":{"selector":".lambda-timeline-minor-tick"},"min":1},
+    {"type":"assert_count","target":{"selector":".lambda-timeline-uncertainty"},"count":1},
+    {"type":"assert_count","target":{"selector":".lambda-timeline-era"},"count":1},
+    {"type":"assert_count","target":{"selector":".lambda-timeline-annotation"},"count":2},
+    {"type":"assert_count","target":{"selector":".lambda-timeline-hidden-interval"},"count":1},
+    {"type":"assert_count","target":{"selector":".lambda-timeline-overlay-card"},"count":3},
+    {"type":"render","file":"temp/timeline-references/geometry.png"}
+  ]
+}

@@ -574,6 +574,8 @@ TEST_F(MarkBuilderDeepCopyTest, ViewCopyDuplicatesOwnedElementsAndContentOnlyInU
     MarkBuilder view(input1);
     // ownership alone still suffices for ordinary data imports in UI evaluation.
     EXPECT_EQ(view.deep_copy(source).element, source.element);
+    // runtime elements use their shape footprint even when no reserve capacity is recorded.
+    source.element->data_cap = 0;
     Item copied = view.deep_copy_for_view(source);
     ASSERT_EQ(get_type_id(copied), LMD_TYPE_ELEMENT);
     EXPECT_NE(copied.element, source.element);

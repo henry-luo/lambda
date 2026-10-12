@@ -37,7 +37,7 @@ The struct groups its fields by concern:
 - **`::placeholder` style**: a resolved `FontProp*` plus color/opacity, so the placeholder pseudo-element paints with author styling.
 - **Flex/grid item props**: because a form control uses `FormControlProp` in the view's item-property union slot, its flex fields (`flex_grow/shrink/basis`) are duplicated here, and the original `GridItemProp*` is stashed in `grid_item` (`view.hpp`) after the union is switched to `FORM`.
 - **Text-control selection state** ([§4](#4-the-text-control-value-and-selection-idl)): `current_value` is a borrowed cache of `ViewState.data.form.current_value`, with cached byte/UTF-16 lengths; `selection_start`/`selection_end` (UTF-16), `selection_direction`, `tc_initialized`, plus the `selectionchange` coalescing link `tc_sc_next_pending`.
-- **Editing state**: `custom_validity_msg`, the change-on-blur snapshot `value_at_focus`, the opaque undo ring `history` (`EditHistory*`), auto-scroll (`scroll_x/y`), caret blink (`caret_blink_t`/`caret_on`), password reveal, and the IME preedit trio (`preedit_utf8`/`preedit_len`/`preedit_caret`, `view.hpp`).
+- **Editing state**: the change-on-blur snapshot `value_at_focus` and undo history belong to `ViewState.data.form` (`event.hpp`, D4.5.2). The prop retains `custom_validity_msg`, an opaque borrowed undo-ring cache, auto-scroll (`scroll_x/y`), caret blink (`caret_blink_t`/`caret_on`), password reveal, and the IME preedit trio (`preedit_utf8`/`preedit_len`/`preedit_caret`, `view.hpp`).
 
 ---
 
@@ -83,7 +83,19 @@ The undo store is a bounded ring, `struct EditHistory` (`event.hpp`), of `EditHi
 
 ### 5.3 Change-on-blur
 
-`te_focus_capture_value` copies `current_value` into `value_at_focus` on focus; `te_blur_should_dispatch_change` (`text_edit.cpp:370`) compares them on blur and returns whether a `change` event is warranted (HTML §4.10.5.5), always clearing the snapshot afterward. A missing snapshot is treated as no-change to avoid spurious `change` firings.
+`te_focus_capture_value` copies the current value into retained form state on
+focus. The package's `editing.commit_change` compares `dom.value_at_focus` with
+the current value during `edit_commit`, before native dispatches `change` and
+`blur` (D7.2.5). A missing snapshot means no change. Same-identity regeneration
+retains the baseline together with the edited value; a changed authored default
+starts a fresh baseline when native restores focus (D4.5.2).
+
+Focus event sequences retain node leases while callbacks run. Reactive subtree
+replacement rebases pending old/new targets through the same correspondence as
+form state, frames, pointer capture, and navigation. Thus a `change` handler that
+rebuilds its component still receives the following `blur`/`focusout` on the
+retained control identity; a genuinely removed target is not replaced by an
+unrelated control (D4.5.2/D7.2.5).
 
 ### 5.4 IME preedit composition
 

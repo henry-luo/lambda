@@ -1,0 +1,24 @@
+{
+  "name":"Story fades retain an inert outgoing card and use a poster instead of a second native player",
+  "html":"test/ui/timeline/story_motion.ls",
+  "viewport":{"width":900,"height":650},
+  "input_turn_ms":0,
+  "events":[
+    {"type":"click","target":{"selector":"[data-timeline-command='play']"}},
+    {"type":"advance_time","ms":120,"steps":12},
+    {"type":"assert_attribute","target":{"selector":".lambda-timeline-story"},"attribute":"data-timeline-id","equals":"b"},
+    {"type":"assert_style","target":{"selector":".lambda-timeline-story"},"property":"opacity","equals":"0.5"},
+    {"type":"assert_attribute","target":{"selector":".lambda-timeline-story-outgoing"},"attribute":"data-timeline-outgoing","equals":"a"},
+    {"type":"assert_attribute","target":{"selector":".lambda-timeline-story-outgoing"},"attribute":"aria-hidden","equals":"true"},
+    {"type":"assert_style","target":{"selector":".lambda-timeline-story-outgoing"},"property":"opacity","equals":"0.5"},
+    {"type":"assert_count","target":{"selector":".lambda-timeline-story-outgoing img"},"count":1},
+    {"type":"assert_count","target":{"selector":"[data-timeline-player]"},"count":0},
+    {"type":"click","target":{"selector":"[data-timeline-command='pause']"}},
+    {"type":"advance_time","ms":100,"steps":4},
+    {"type":"assert_style","target":{"selector":".lambda-timeline-story-outgoing"},"property":"opacity","equals":"0.5"},
+    {"type":"click","target":{"selector":"[data-timeline-command='resume']"}},
+    {"type":"advance_time","ms":20,"steps":2},
+    {"type":"assert_count","target":{"selector":".lambda-timeline-story-outgoing"},"count":0},
+    {"type":"assert_style","target":{"selector":".lambda-timeline-story"},"property":"opacity","equals":"1"}
+  ]
+}

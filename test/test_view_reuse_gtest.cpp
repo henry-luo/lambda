@@ -14,6 +14,7 @@
 #include "../lambda/input/css/css_formatter.hpp"
 #include "../lambda/input/css/css_style_node.hpp"
 #include "../lambda/io/mark_builder.hpp"
+#include "../lambda/core/mark_reader.hpp"
 #include "../lambda/runtime/transpiler.hpp"
 #include "../lambda/runtime/gc/gc_heap.h"
 #include "../lib/mem_grow.hpp"
@@ -2068,6 +2069,173 @@ TEST(DomAttributeValueTest, RepeatedValuesReuseInputStorageAndPreserveSnapshots)
     EXPECT_STREQ(saved, "true");
     EXPECT_STREQ(element->get_attribute("aria-hidden"), "true");
     EXPECT_STREQ(element->get_attribute("id"), "kept");
+    doc.destroy();
+    pool_destroy(pool);
+}
+
+TEST(DomRetirementOwnerArenaTest, SharedUiSourceSurvivesMutationRetirementAndRedisplay) {
+    Pool* pool = pool_create();
+    ASSERT_NE(pool, nullptr);
+    Input* input = Input::create(pool, nullptr);
+    ASSERT_NE(input, nullptr);
+    input->ui_mode = true;
+    DomDocument doc;
+    ASSERT_TRUE(doc.init(input));
+    MarkBuilder builder(input);
+    String* text = builder.createDomTextString("Retained history", 16);
+    ASSERT_NE(text, nullptr);
+    Item nested = builder.element("span").child(Item{.item = s2it(text)}).final();
+    Item source = builder.element("p").attr("title", "original").child(nested).final();
+    source.element->cow_state |= COW_STATE_SHARED;
+    auto* source_type = (TypeElmt*)source.element->type;
+    Target ns = {};
+    TypeNominal nominal = {};
+    // D2.6.6v2 resolves nominal tags through their declared type name.
+    nominal.type_name = source_type->name;
+    source_type->ns = &ns;
+    source_type->nominal = &nominal;
+    source_type->is_nominal = true;
+    Item* source_items = source.element->items;
+    void* source_data = source.element->data;
+
+    DomElement* root = DomElement::create(&doc, "root", nullptr);
+    ASSERT_NE(root, nullptr);
+    doc.root = lam::up(root);
+    DomElement* occurrence = build_dom_tree_from_element(source.element, &doc, root);
+    ASSERT_NE(occurrence, nullptr);
+    EXPECT_NE(dom_element_to_element(occurrence), source.element);
+    EXPECT_EQ(dom_node_registry_backing_source(&doc, occurrence), source.element);
+    auto* occurrence_type = (TypeElmt*)occurrence->elmt.type;
+    EXPECT_NE(occurrence_type, source_type);
+    EXPECT_EQ(occurrence_type->ns, &ns);
+    EXPECT_EQ(occurrence_type->nominal, &nominal);
+    ASSERT_TRUE(occurrence->set_attribute("title", "edited"));
+    ASSERT_TRUE(occurrence->set_attribute("data-added", "new"));
+    DomElement* nested_dom = occurrence->first_child->as_element();
+    ASSERT_NE(nested_dom, nullptr);
+    EXPECT_NE(dom_element_to_element(nested_dom), nested.element);
+    EXPECT_EQ(occurrence->elmt.items[0].element, dom_element_to_element(nested_dom));
+    ASSERT_TRUE(nested_dom->set_attribute("data-child-edit", "visible"));
+    String* edited_child = ElementReader(occurrence->elmt.items[0].element).get_string_attr("data-child-edit");
+    ASSERT_NE(edited_child, nullptr);
+    EXPECT_STREQ(edited_child->chars, "visible");
+    EXPECT_FALSE(nested.element->has_attr("data-child-edit"));
+    ASSERT_TRUE(root->remove_child(occurrence));
+    EXPECT_EQ(dom_retire_sweep(&doc), 3u);
+
+    EXPECT_EQ(source.element->type_id, LMD_TYPE_ELEMENT);
+    EXPECT_EQ(source.element->type, source_type);
+    EXPECT_EQ(source.element->items, source_items);
+    EXPECT_EQ(source.element->data, source_data);
+    EXPECT_EQ(source.element->length, 1);
+    EXPECT_FALSE(source.element->has_attr("data-added"));
+    String* original_title = ElementReader(source.element).get_string_attr("title");
+    ASSERT_NE(original_title, nullptr);
+    EXPECT_STREQ(original_title->chars, "original");
+    EXPECT_EQ(nested.element->type_id, LMD_TYPE_ELEMENT);
+    EXPECT_EQ(text->len, 16u);
+    EXPECT_STREQ(text->chars, "Retained history");
+
+    DomElement* redisplayed = build_dom_tree_from_element(source.element, &doc, root);
+    ASSERT_NE(redisplayed, nullptr);
+    EXPECT_STREQ(redisplayed->get_attribute("title"), "original");
+    ASSERT_NE(redisplayed->first_child, nullptr);
+    DomNode* redisplayed_text = redisplayed->first_child->as_element()->first_child;
+    ASSERT_NE(redisplayed_text, nullptr);
+    EXPECT_STREQ(redisplayed_text->as_text()->text, "Retained history");
+    doc.destroy();
+    pool_destroy(pool);
+}
+
+TEST(DomRetirementOwnerArenaTest, RetiringAnOldOccurrenceKeepsTheCurrentSourceLookup) {
+    Pool* pool = pool_create();
+    ASSERT_NE(pool, nullptr);
+    Input* input = Input::create(pool, nullptr);
+    ASSERT_NE(input, nullptr);
+    input->ui_mode = true;
+    DomDocument doc;
+    ASSERT_TRUE(doc.init(input));
+    doc.element_dom_map = lam::own(element_dom_map_create());
+    ASSERT_NE(doc.element_dom_map, nullptr);
+    MarkBuilder builder(input);
+    Item source = builder.element("p").text("Retained source").final();
+    DomElement* root = DomElement::create(&doc, "root", nullptr);
+    ASSERT_NE(root, nullptr);
+    doc.root = lam::up(root);
+    DomElement* old_occurrence = build_dom_tree_from_element(source.element, &doc, root);
+    DomElement* current_occurrence = build_dom_tree_from_element(source.element, &doc, root);
+    ASSERT_NE(old_occurrence, nullptr);
+    ASSERT_NE(current_occurrence, nullptr);
+    ASSERT_NE(old_occurrence, current_occurrence);
+    EXPECT_EQ(element_dom_map_lookup(doc.element_dom_map, source.element), current_occurrence);
+    ASSERT_TRUE(root->remove_child(old_occurrence));
+    EXPECT_EQ(dom_retire_sweep(&doc), 2u);
+    EXPECT_EQ(element_dom_map_lookup(doc.element_dom_map, source.element), current_occurrence);
+    ASSERT_TRUE(root->remove_child(current_occurrence));
+    EXPECT_EQ(dom_retire_sweep(&doc), 2u);
+    EXPECT_EQ(element_dom_map_lookup(doc.element_dom_map, source.element), nullptr);
+    doc.destroy();
+    pool_destroy(pool);
+}
+
+TEST(DomRetirementOwnerArenaTest, ParsedHtmlRetainsItsMutableElementAndTextStorage) {
+    Pool* pool = pool_create();
+    ASSERT_NE(pool, nullptr);
+    Input* input = Input::create(pool, nullptr);
+    ASSERT_NE(input, nullptr);
+    input->ui_mode = true;
+    DomDocument doc;
+    ASSERT_TRUE(doc.init(input));
+    doc.page_kind = DOM_PAGE_KIND_HTML;
+    MarkBuilder builder(input);
+    String* text = builder.createDomTextString("HTML source", 11);
+    ASSERT_NE(text, nullptr);
+    Item source = builder.element("p").attr("title", "original").child(Item{.item=s2it(text)}).final();
+    // normalized content owns the string produced by ElementBuilder's child writer.
+    text = source.element->items[0].get_string();
+    DomElement* occurrence = build_dom_tree_from_element(source.element, &doc, nullptr);
+    ASSERT_NE(occurrence, nullptr);
+    doc.root = lam::up(occurrence);
+    EXPECT_EQ(dom_element_to_element(occurrence), source.element);
+    ASSERT_NE(occurrence->first_child, nullptr);
+    EXPECT_EQ(occurrence->first_child, string_to_dom_text(text));
+    ASSERT_TRUE(occurrence->set_attribute("title", "DOM edit"));
+    EXPECT_STREQ(ElementReader(source.element).get_string_attr("title")->chars, "DOM edit");
+    doc.destroy();
+    pool_destroy(pool);
+}
+
+TEST(DomRetirementOwnerArenaTest, UiNestedArraysRetainValuesAndUseMutableChildOccurrencesWithoutShareMark) {
+    Pool* pool = pool_create();
+    ASSERT_NE(pool, nullptr);
+    Input* input = Input::create(pool, nullptr);
+    ASSERT_NE(input, nullptr);
+    input->ui_mode = true;
+    DomDocument doc;
+    ASSERT_TRUE(doc.init(input));
+    MarkBuilder builder(input);
+    Item child = builder.element("span").attr("title", "source").final();
+    Item nested = builder.array().append(child).final();
+    Item middle = builder.array().append(nested).final();
+    Item outer = builder.array().append(middle).final();
+    Item source = builder.element("div").child(outer).final();
+    DomElement* occurrence = build_dom_tree_from_element(source.element, &doc, nullptr);
+    ASSERT_NE(occurrence, nullptr);
+    doc.root = lam::up(occurrence);
+    DomElement* child_dom = occurrence->first_child->as_element();
+    ASSERT_NE(child_dom, nullptr);
+    ASSERT_TRUE(child_dom->set_attribute("title", "edited"));
+    Array* copied_outer = occurrence->elmt.items[0].array;
+    ASSERT_NE(copied_outer, outer.array);
+    Array* copied_middle = copied_outer->items[0].array;
+    ASSERT_NE(copied_middle, middle.array);
+    Array* copied_nested = copied_middle->items[0].array;
+    ASSERT_NE(copied_nested, nested.array);
+    EXPECT_EQ(copied_nested->items[0].element, dom_element_to_element(child_dom));
+    EXPECT_EQ(nested.array->items[0].element, child.element);
+    EXPECT_EQ(source.element->items[0].array, outer.array);
+    EXPECT_STREQ(ElementReader(child.element).get_string_attr("title")->chars, "source");
+    EXPECT_STREQ(ElementReader(copied_nested->items[0].element).get_string_attr("title")->chars, "edited");
     doc.destroy();
     pool_destroy(pool);
 }

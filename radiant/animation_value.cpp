@@ -1,5 +1,5 @@
 #include "animation_value.hpp"
-#include "view.hpp"
+#include "../lambda/input/css/css_style.hpp"
 #include "../lib/math_utils.h"
 #include <math.h>
 #include <string.h>

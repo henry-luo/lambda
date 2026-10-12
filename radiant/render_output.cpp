@@ -75,7 +75,7 @@ static bool render_export_has_page_rule(DomDocument* doc) {
 }
 static void render_output_render_html_doc(UiContext* uicon, ViewTree* view_tree,
                                           const char* output_file);
-static void render_output_render_tiled_png(UiContext* uicon, ViewTree* view_tree,
+static bool render_output_render_tiled_png(UiContext* uicon, ViewTree* view_tree,
                                            const char* output_file,
                                            int total_width, int total_height);
 
@@ -96,6 +96,25 @@ typedef struct RenderExportTransformRequest {
     int option_count;
     InputResourcePolicy resource_policy;
 } RenderExportTransformRequest;
+
+struct RenderExportSourceRequest {
+    const char* source;
+    const char* base_url;
+    bool block_remote_resources;
+};
+static DomDocument* render_export_load_html_source(RenderExportSession* session,
+        int layout_width, int layout_height, void* request) {
+    RenderExportSourceRequest* source = (RenderExportSourceRequest*)request;
+    DocumentJsHostConfig config = {};
+    config.ui_context = session->ui_context;
+    config.resource_policy = source->block_remote_resources ? INPUT_RESOURCE_LOCAL_ONLY : INPUT_RESOURCE_ALLOW_NETWORK;
+    Url* base = source->base_url ? url_parse_with_base(source->base_url, session->base_url) : nullptr;
+    if (source->base_url && !base) return nullptr;
+    DomDocument* doc = load_html_source_doc(source->source, layout_width, layout_height,
+        &config, session->print_media, base ? base : session->base_url.get());
+    if (base) url_destroy(base);
+    return doc;
+}
 
 static DomDocument* render_export_load_html_document(RenderExportSession* session,
         int layout_width, int layout_height, void* request) {
@@ -1112,16 +1131,19 @@ static RenderOutputReplayResult render_output_replay_display_list(RasterRenderCo
     return result;
 }
 
-static void render_output_save_surface(ImageSurface* surface, const char* output_file) {
+static bool render_output_save_surface(ImageSurface* surface, const char* output_file,
+        RenderOutputKind kind, int quality) {
     if (!surface || !output_file) {
-        return;
+        return false;
     }
 
-    const char* ext = file_path_ext(output_file);
-    if (ext && (strcmp(ext, ".jpg") == 0 || strcmp(ext, ".jpeg") == 0)) {
-        save_surface_to_jpeg(surface, output_file, 85);
+    if (kind == RENDER_OUTPUT_JPEG) {
+        return save_surface_to_jpeg(surface, output_file, quality > 0 ? quality : 85);
     } else {
-        save_surface_to_png(surface, output_file);
+        StrBuf* encoded = render_encode_surface_png(surface);
+        bool ok = encoded && write_binary_file(output_file, encoded->str, encoded->length) == 0;
+        if (encoded) strbuf_free(encoded);
+        return ok;
     }
 }
 
@@ -1220,13 +1242,10 @@ static int render_output_render_raster_target(UiContext* uicon, ViewTree* view_t
     render_output_trace_retained_stats(&trace, rdcon.retained_dl_cache);
     render_profiler_emit_path_trace(rdcon.profiler, uicon, rstate, &trace);
 
-    if (target->kind == RENDER_OUTPUT_JPEG && target->output_file) {
-        save_surface_to_jpeg(rdcon.ui_context->surface, target->output_file,
-                             target->jpeg_quality > 0 ? target->jpeg_quality : 85);
-    } else if (target->kind == RENDER_OUTPUT_PNG && target->output_file) {
-        save_surface_to_png(rdcon.ui_context->surface, target->output_file);
-    } else {
-        render_output_save_surface(rdcon.ui_context->surface, target->output_file);
+    // Encoder and write failures must reach procedural callers and CLI exit status.
+    if (target->output_file && !render_output_save_surface(rdcon.ui_context->surface, target->output_file,
+        target->kind, target->jpeg_quality)) {
+        return 1;
     }
 
     uint64_t t_save = time_now_ns();
@@ -1259,9 +1278,8 @@ int render_output_render_view_tree_to_target(UiContext* uicon, ViewTree* view_tr
         case RENDER_OUTPUT_JPEG:
             return render_output_render_raster_target(uicon, view_tree, target);
         case RENDER_OUTPUT_TILED_PNG:
-            render_output_render_tiled_png(uicon, view_tree, target->output_file,
-                                           target->width, target->height);
-            return 0;
+            return render_output_render_tiled_png(uicon, view_tree, target->output_file,
+                target->width, target->height) ? 0 : 1;
         case RENDER_OUTPUT_PDF:
         case RENDER_OUTPUT_SVG:
             log_error("render_output_render_view_tree_to_target: PDF/SVG targets require file-level export");
@@ -1382,6 +1400,28 @@ static int render_output_render_html_file_to_target(const char* html_file,
     return 1;
 }
 
+int render_html_source_to_output_target(const char* html_source, RenderOutputTarget* target,
+        const char* base_url, bool block_remote_resources) {
+    if (!html_source || !target || !target->output_file || target->kind == RENDER_OUTPUT_SCREEN) return 1;
+    RenderExportSourceRequest request = {html_source, base_url, block_remote_resources};
+    if (target->paged) return render_output_paged_file(target, render_export_load_html_source, &request);
+    bool raster = target->kind == RENDER_OUTPUT_PNG || target->kind == RENDER_OUTPUT_JPEG;
+    RenderExportSession session = {};
+    if (!render_export_session_begin_internal(&session, target->viewport_width, target->viewport_height,
+        800, 600, target->output_scale, target->device_scale, raster, target->kind == RENDER_OUTPUT_PDF,
+        false, render_export_load_html_source, &request)) return 1;
+    int result = 1;
+    switch (target->kind) {
+        case RENDER_OUTPUT_PNG: result = render_export_session_to_png(&session, target->output_file); break;
+        case RENDER_OUTPUT_JPEG: result = render_export_session_to_jpeg(&session, target->output_file, target->jpeg_quality); break;
+        case RENDER_OUTPUT_SVG: result = render_export_session_to_svg(&session, target->output_file); break;
+        case RENDER_OUTPUT_PDF: result = render_export_session_to_pdf(&session, target->output_file); break;
+        default: break;
+    }
+    render_export_session_end(&session);
+    return result;
+}
+
 static int render_output_render_document_transform_to_target(const char* document_file,
         const LambdaDocumentTransformConfig* transform,
         const LambdaDocumentTransformOption* options, int option_count,
@@ -1491,7 +1531,7 @@ static void render_output_render_html_doc(UiContext* uicon, ViewTree* view_tree,
  * Streaming rows into libpng keeps peak pixel memory bounded by the strip
  * height rather than the full page height.
  */
-static void render_output_render_tiled_png(UiContext* uicon, ViewTree* view_tree,
+static bool render_output_render_tiled_png(UiContext* uicon, ViewTree* view_tree,
                                            const char* output_file,
                                            int total_width, int total_height) {
     uint64_t t_start = time_now_ns();
@@ -1510,15 +1550,15 @@ static void render_output_render_tiled_png(UiContext* uicon, ViewTree* view_tree
     FILE* fp = fopen(output_file, "wb");
     if (!fp) {
         log_error("render_output_render_tiled_png: cannot open output file: %s", output_file);
-        return;
+        return false;
     }
     png_structp png = png_create_write_struct(PNG_LIBPNG_VER_STRING, NULL, NULL, NULL);
-    if (!png) { fclose(fp); return; }
+    if (!png) { fclose(fp); return false; }
     png_infop info = png_create_info_struct(png);
-    if (!info) { png_destroy_write_struct(&png, NULL); fclose(fp); return; }
+    if (!info) { png_destroy_write_struct(&png, NULL); fclose(fp); return false; }
     if (setjmp(png_jmpbuf(png))) {
         log_error("render_output_render_tiled_png: PNG error during write");
-        png_destroy_write_struct(&png, &info); fclose(fp); return;
+        png_destroy_write_struct(&png, &info); fclose(fp); return false;
     }
     png_init_io(png, fp);
     png_set_IHDR(png, info, total_width, total_height,
@@ -1542,7 +1582,7 @@ static void render_output_render_tiled_png(UiContext* uicon, ViewTree* view_tree
             total_width, first_h);
         png_destroy_write_struct(&png, &info);
         fclose(fp);
-        return;
+        return false;
     }
 
     uicon->surface = lam::up(rec_surf);
@@ -1572,9 +1612,10 @@ static void render_output_render_tiled_png(UiContext* uicon, ViewTree* view_tree
         uicon->window_height = saved_window_height;
         png_destroy_write_struct(&png, &info);
         fclose(fp);
-        return;
+        return false;
     }
 
+    bool complete = true;
     for (int tile_y = 0; tile_y < total_height; tile_y += TILE_H) {
         int tile_h = (tile_y + TILE_H <= total_height) ? TILE_H : (total_height - tile_y);
 
@@ -1583,6 +1624,7 @@ static void render_output_render_tiled_png(UiContext* uicon, ViewTree* view_tree
         if (!tile_surf) {
             log_error("render_output_render_tiled_png: failed to allocate tile surface %dx%d at y=%d",
                 total_width, tile_h, tile_y);
+            complete = false;
             break;
         }
 
@@ -1637,13 +1679,14 @@ static void render_output_render_tiled_png(UiContext* uicon, ViewTree* view_tree
     uicon->surface = lam::up(saved_surface);
     uicon->window_height = saved_window_height;
 
-    png_write_end(png, NULL);
+    if (complete) png_write_end(png, NULL);
     png_destroy_write_struct(&png, &info);
-    fclose(fp);
+    complete = fclose(fp) == 0 && complete;
 
     uint64_t t_end = time_now_ns();
     log_info("[TIMING] render_output_render_tiled_png total: %.1fms (%dx%d)",
         time_elapsed_ms_f(t_start, t_end), total_width, total_height);
+    return complete;
 }
 
 void render_html_doc(UiContext* uicon, ViewTree* view_tree, const char* output_file) {
@@ -1653,6 +1696,6 @@ void render_html_doc(UiContext* uicon, ViewTree* view_tree, const char* output_f
 void render_html_doc_tiled(UiContext* uicon, ViewTree* view_tree,
                            const char* output_file,
                            int total_width, int total_height) {
-    render_output_render_tiled_png(uicon, view_tree, output_file,
-                                   total_width, total_height);
+    if (!render_output_render_tiled_png(uicon, view_tree, output_file, total_width, total_height))
+        uicon->render_failed = true;
 }

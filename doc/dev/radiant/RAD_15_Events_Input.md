@@ -116,6 +116,34 @@ while a handler is still running cannot run the callback and logs
 
 ---
 
+### 4.2 Retained window subscriptions and navigation requests
+
+`dom.watch_window(owner, event_name, enabled)` registers an idempotent,
+document-owned subscription for a connected element. It shares the named-frame
+target registry and logical-owner remapping, while persistent subscriptions do
+not count as animation work. Disabling a subscription cancels future delivery;
+removed owners are discarded. Window delivery snapshots its registration
+watermark, so subscriptions created by callbacks wait for the next notification.
+The watermark is captured before the ordinary body/window callback. Logical
+owner correspondence uses sibling IDs or `data-focus-key` before positional
+fallback, preserving subscriptions/captures/media when an earlier sibling is
+removed; a differently keyed node cannot inherit that state.
+The ordinary page body/window handler still runs. Subscribers receive fresh,
+non-bubbling records; history notifications retain `state`, `oldURL`, and `newURL`
+through their delivery boundary (S12.1.3, D4.5.1v4/D5.3.3, D7.5.3).
+
+Package navigation requests retain precise node leases and follow corresponding
+nodes across full and incremental rebuilds. The host consumes them after handlers
+and state batches have returned at the common event-loop pump. This also covers
+button, keyboard, and frame callbacks. `dom.history_traverse(owner, delta)` uses
+that same queue; native fragment changes publish hash notifications, and history
+traversal publishes popstate followed by hashchange when the fragment changed.
+JavaScript uses its existing queued history task delivery (D5.4.1, D7.5.3).
+
+Evidence: `test/ui/window_subscriptions.{ls,json}`,
+`test/ui/dom/native_fragment_events.{html,json}`, and
+`test/ui/timeline/bookmarks.{ls,json}`.
+
 ## 5. Mouse and drag-and-drop
 
 `RDT_EVENT_MOUSE_MOVE` (`event.cpp:6702`) hit-tests, updates hover via `update_hover_state`, updates dropdown hover, dispatches `mousemove` to the bridge, then fires the stack. It also advances the drag-and-drop state machine: a pending drag becomes active once movement exceeds a 5px threshold (`dx*dx + dy*dy > 25.0f`, `event.cpp:6741`), at which point `dragstart` fires to both the Lambda bridge and a real JS `DragEvent` (`radiant_dispatch_drag_event`, `event.cpp:6754`), and drop targets are resolved by walking up for a `dropzone` attribute (`event.cpp:6759-6775`). The native `DragDropState` survives handler-driven DOM mutation via fallback retention so JS drag-and-drop rides on it directly.

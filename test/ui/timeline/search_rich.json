@@ -1,0 +1,23 @@
+{
+  "name": "Timeline rich Unicode highlighting retains inline content and attributes",
+  "html": "test/ui/timeline/search_rich.ls",
+  "viewport": {"width": 800, "height": 650},
+  "events": [
+    {"type": "assert_count", "target": {"selector": "#authored-rich mark"}, "count": 0},
+    {"type": "click", "target": {"selector": "[data-timeline-search]"}},
+    {"type": "type", "text": "ecole"},
+    {"type": "assert_text", "target": {"selector": ".lambda-timeline-search-status"}, "equals": "1 matching event"},
+    {"type": "assert_count", "target": {"selector": "#authored-rich mark"}, "count": 2},
+    {"type": "assert_text", "target": {"selector": "#authored-rich > mark"}, "equals": "É"},
+    {"type": "assert_text", "target": {"selector": "#authored-rich em.emphasis > mark"}, "equals": "cole"},
+    {"type": "assert_attribute", "target": {"selector": "#authored-rich"}, "attribute": "title", "equals": "Authored tooltip"},
+    {"type": "assert_count", "target": {"selector": "#authored-rich ul"}, "count": 0},
+    {"type": "key_press", "key": "Backspace"},
+    {"type": "key_press", "key": "Backspace"},
+    {"type": "key_press", "key": "Backspace"},
+    {"type": "key_press", "key": "Backspace"},
+    {"type": "key_press", "key": "Backspace"},
+    {"type": "assert_count", "target": {"selector": "#authored-rich mark"}, "count": 0},
+    {"type": "assert_text", "target": {"selector": "#authored-rich em.emphasis"}, "equals": "cole"}
+  ]
+}

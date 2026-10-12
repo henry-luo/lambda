@@ -38,6 +38,7 @@
 #include "../lambda/dom/dom.h"      // dom_set_document for HTML event handlers
 #include "../lambda/dom/dom_cssom.h" // live <style> stylesheet synchronization
 #include "../lambda/dom/dom_events.h" // dom_dispatch_event + native event factories
+#include "../lambda/dom/dom_history.h"
 #include "../lambda/js/js_runtime.h"   // js_new_object / js_set_key_default / js_array_new / js_array_push
 #include "../lambda/js/js_runtime_state.hpp"
 #include "../lambda/js/js_event_loop.h"
@@ -942,7 +943,8 @@ void target_children(EventContext* evcon, View* view) {
 }
 
 void target_text_view(EventContext* evcon, ViewText* text) {
-    if (view_visibility_is_hidden(text) || event_view_pointer_events_none(static_cast<View*>(text))) return;
+    if (dom_node_is_inert(text) || view_visibility_is_hidden(text) ||
+        event_view_pointer_events_none(static_cast<View*>(text))) return;
     unsigned char* str = text->text_data();
     TextRect *text_rect = text->rect;
     MousePositionEvent* event = &evcon->event.mouse_position;
@@ -1133,6 +1135,7 @@ static void find_editable_margin_text_hit(EventContext* evcon, View* view,
 }
 
 void target_inline_view(EventContext* evcon, ViewSpan* view_span) {
+    if (dom_node_is_inert(view_span)) return;
     log_enter();
     FontBox pa_font = evcon->font;
     View* view = view_span->first_child;
@@ -1157,6 +1160,7 @@ static bool event_block_is_top_level_viewport(ViewBlock* block) {
 }
 
 void target_block_view(EventContext* evcon, ViewBlock* block) {
+    if (dom_node_is_inert(block)) return;
     log_enter();
     if (view_backface_is_hidden(block, BACKFACE_HIT_TEST)) {
         log_leave();
@@ -1458,6 +1462,9 @@ void target_html_doc(EventContext* evcon, ViewTree* view_tree) {
     evcon->viewport_pointer_y = evcon->event.mouse_position.y;
     View* root_view = view_tree->root;
     if (root_view && root_view->view_type == RDT_VIEW_BLOCK) {
+        // Pointer hits start in this tree, independently of keyboard focus in an iframe.
+        evcon->target_document = lam::view_require_block(root_view)->doc;
+        evcon->iframe_container = nullptr;
         log_debug("target root view");
         FontBox pa_font = evcon->font;
         FontProp* default_font = view_tree->html_version == HTML5 ? &evcon->ui_context->default_font : &evcon->ui_context->legacy_default_font;
@@ -3172,28 +3179,17 @@ static bool settle_template_retransform(EventContext* evcon,
         TemplateUiAllocationScope render_scope(context, true);
         count = render_map_retransform_with_results(results, 16);
     }
-    bool any_changed = false;
-    int reported = count <= 16 ? count : 16;
-    for (int i = 0; i < reported; i++) {
-        if (!item_deep_equal(results[i].old_result, results[i].new_result)) {
-            any_changed = true;
-            break;
+    int available = count <= 16 ? count : 16;
+    int reported = 0;
+    for (int i = 0; i < available; i++) {
+        // A template returning the same value keeps its live imperative DOM edits.
+        if (results[i].old_result.item != results[i].new_result.item) { // RAW_ITEM_EQ_OK: presentation identity determines whether DOM ownership moved.
+            results[reported++] = results[i];
         }
     }
-    if (!any_changed) {
-        // skipped rebuilds retain live nodes, but the next update uses new result keys.
-        if (evcon) for (int i = 0; i < reported; i++) {
-            DomDocument* doc = event_context_target_document(evcon);
-            dom_rebind_equal_render_result(doc,
-                results[i].old_result, results[i].new_result);
-            if (doc && doc->root && get_type_id(results[i].new_result) == LMD_TYPE_ELEMENT) {
-                // equal delayed markup still needs its render handler to observe new settings.
-                DomElement* retained = dom_find_element_for_source(doc->root, results[i].new_result.element);
-                if (retained) radiant_queue_template_render_events(doc, retained);
-            }
-        }
-        return false;
-    }
+    // The render map already published new source identities, even for equal values.
+    // Commit their DOM ownership together or the next redraw cannot find its old result.
+    if (!reported) return false;
     if (evcon) {
         DocState* state = event_context_target_state(evcon);
         bool had_hover = state && state->hover_target;
@@ -4167,13 +4163,15 @@ void radiant_run_autofocus(UiContext* uicon, DomDocument* doc) {
     // layout pass so their recascade uses the same viewport and document.
     evcon.ui_context = uicon;
     evcon.target_document = doc;
-    View* previous_focus = focus_get((DocState*)doc->state);
+    RootFrame roots(1);
+    Rooted<Item> chosen(roots, ItemNull);
+    Item candidate = ItemNull;
     dispatch_behavior_handler(&evcon, static_cast<View*>(doc->root),
-                              "focusinit", nullptr, nullptr);
-    View* next_focus = focus_get((DocState*)doc->state);
-    if (next_focus && next_focus != previous_focus) {
-        radiant_dispatch_focus_event(&evcon, next_focus, "focus", previous_focus);
-        radiant_dispatch_focus_event(&evcon, next_focus, "focusin", previous_focus);
+                              "focusinit", nullptr, nullptr, &candidate);
+    chosen.set(candidate);
+    DomNode* node = static_cast<DomNode*>(radiant_dom_unwrap_node(chosen.get()));
+    if (node && node->is_element()) {
+        update_focus_state(&evcon, static_cast<View*>(node), false);
     }
 }
 
@@ -8630,8 +8628,13 @@ static bool dispatch_contenteditable_composition_event(
     return true;
 }
 
-void radiant_dispatch_window_event(UiContext* uicon, DomDocument* doc, const char* type) {
+static void dispatch_window_subscribers(DomDocument* doc, const char* type,
+    RadiantJsEventBuilder build_event, void* userdata, uint64_t watermark);
+
+static void dispatch_window_notification(UiContext* uicon, DomDocument* doc, const char* type,
+    RadiantJsEventBuilder build_event = nullptr, void* userdata = nullptr) {
     if (!uicon || !doc || !type || !type[0]) return;
+    uint64_t watermark = dom_engine_window_event_watermark(doc);
     EventContext evcon = {};
     evcon.ui_context = uicon;
     evcon.target_document = doc;
@@ -8641,7 +8644,9 @@ void radiant_dispatch_window_event(UiContext* uicon, DomDocument* doc, const cha
         JsCtxScope scope = {};
         if (!evcon.target || !radiant_js_ctx_enter(&scope, &evcon)) return;
         uint64_t started = time_now_ns();
-        dispatch_lambda_handler(&evcon, evcon.target, type, nullptr, nullptr, false);
+        dispatch_lambda_handler(&evcon, evcon.target, type, nullptr, nullptr, false,
+                                build_event, userdata);
+        dispatch_window_subscribers(doc, type, build_event, userdata, watermark);
         radiant_js_ctx_exit(&scope, &evcon, started);
         return;
     }
@@ -8649,12 +8654,85 @@ void radiant_dispatch_window_event(UiContext* uicon, DomDocument* doc, const cha
     if (!dispatch_scope.active) return;
     // Native window notifications use the canonical global EventTarget, which
     // is also the key used by window.addEventListener in the module bridge.
-    Item event_item = js_create_event(type, false, false);
-    dom_dispatch_event(js_get_global_this(), event_item);
+    RootFrame roots(2);
+    Rooted<Item> window(roots, js_get_global_this());
+    Rooted<Item> event_item(roots, build_event ? build_event(userdata) : js_create_event(type, false, false));
+    dom_dispatch_event(window.get(), event_item.get());
+    dispatch_window_subscribers(doc, type, build_event, userdata, watermark);
     if (strcmp(type, "resize") == 0) dom_match_media_notify_resize();
     if (strcmp(type, "resize") == 0 || strcmp(type, "scroll") == 0) {
         dom_observers_post_layout();
     }
+}
+
+static Item window_subscriber_event(void* userdata) {
+    Item original = *static_cast<Item*>(userdata);
+    RootFrame roots(1);
+    const char* type = fn_to_cstr(dom_realm_get_cstr(original, "type"));
+    Rooted<Item> event(roots, js_create_event(type, false, false));
+    // Each subscriber gets a fresh dispatch record; target cleanup cannot mutate its peers.
+    const char* fields[] = {"state", "oldURL", "newURL"};
+    for (const char* field : fields) {
+        Item value = dom_realm_get_cstr(original, field);
+        if (get_type_id(value) != LMD_TYPE_UNDEFINED) dom_realm_set_cstr(event.get(), field, value);
+    }
+    return event.get();
+}
+
+extern "C" void dom_engine_window_event_subscribers(DomDocument* doc, const char* type, Item event, uint64_t watermark) {
+    dispatch_window_subscribers(doc, type, window_subscriber_event, &event, watermark);
+}
+
+void radiant_dispatch_window_event(UiContext* uicon, DomDocument* doc, const char* type) {
+    dispatch_window_notification(uicon, doc, type);
+}
+
+struct HistoryWindowEvent {
+    const char* type;
+    const RadiantHistoryTraversal* traversal;
+};
+
+static Item build_history_window_event(void* userdata) {
+    HistoryWindowEvent* data = static_cast<HistoryWindowEvent*>(userdata);
+    RootFrame roots(2);
+    Rooted<Item> state(roots, data->traversal->state);
+    Rooted<Item> event(roots, js_create_event(data->type, false, false));
+    if (strcmp(data->type, "popstate") == 0) {
+        dom_realm_set_cstr(event.get(), "state", state.get());
+    } else {
+        dom_realm_set_cstr(event.get(), "oldURL", make_string_item(data->traversal->old_url));
+        dom_realm_set_cstr(event.get(), "newURL", make_string_item(data->traversal->new_url));
+    }
+    return event.get();
+}
+
+static void dispatch_history_window_events(UiContext* uicon, DomDocument* doc,
+    const RadiantHistoryTraversal* traversal, bool popstate) {
+    EventContext evcon = {};
+    evcon.ui_context = uicon;
+    evcon.target_document = doc;
+    JsCtxScope scope = {};
+    if (!radiant_js_ctx_enter(&scope, &evcon)) return;
+    uint64_t started = time_now_ns();
+    RootFrame roots(1);
+    Rooted<Item> state(roots, traversal->state);
+    RadiantHistoryTraversal retained = *traversal;
+    // A popstate handler can truncate history before the following hashchange is built.
+    retained.old_url = mem_strdup(traversal->old_url ? traversal->old_url : "", MEM_CAT_LAYOUT);
+    retained.new_url = mem_strdup(traversal->new_url ? traversal->new_url : "", MEM_CAT_LAYOUT);
+    if (dom_document_has_js_realm(doc)) {
+        dom_history_queue_events(&retained, popstate);
+    } else {
+        HistoryWindowEvent data = {"popstate", &retained};
+        if (popstate) dispatch_window_notification(uicon, doc, data.type,
+                                                   build_history_window_event, &data);
+        data.type = "hashchange";
+        if (traversal->hash_changed) dispatch_window_notification(uicon, doc, data.type,
+                                                   build_history_window_event, &data);
+    }
+    mem_free((void*)retained.old_url);
+    mem_free((void*)retained.new_url);
+    radiant_js_ctx_exit(&scope, &evcon, started);
 }
 
 
@@ -8972,6 +9050,16 @@ static View* native_pointer_capture_target(DomDocument* doc) {
     DomNode* target = dom_node_ref_validate(doc, capture->pending);
     if (!target) target = dom_node_ref_validate(doc, capture->current);
     return target && dom_is_connected(target) ? (View*)target : nullptr;
+}
+void radiant_pointer_capture_follow_rebuild(DomDocument* doc, DomNode* old_root,
+                                            DomNode* new_root) {
+    NativePointerCapture* capture = native_pointer_capture(doc, false);
+    if (!capture || old_root == new_root) return;
+    DomNodeRef* owners[] = {&capture->pending, &capture->current};
+    for (DomNodeRef* owner : owners) {
+        // a retained template owner keeps capture across its presentation commit.
+        view_state_ref_follow_rebuild(doc, owner, old_root, new_root);
+    }
 }
 extern "C" int dom_engine_pointer_capture(DomElement* element,int32_t id,unsigned operation) {
     auto* capture=element?native_pointer_capture(element->doc,false):nullptr;
@@ -10566,8 +10654,8 @@ static bool run_link_activation(EventContext* evcon, View* target) {
     if (!dispatch_behavior_handler(evcon, anchor, "linkactivation", nullptr, nullptr)) {
         return false;
     }
-    DomDocument* document = event_context_target_document(evcon);
-    return radiant_execute_pending_navigation(evcon->ui_context, document);
+    // all package navigation executes at the host pump's quiescent boundary.
+    return true;
 }
 
 // ES25/ES26: trusted and script-created clicks settle one UA default tier.
@@ -10820,6 +10908,7 @@ struct RadiantFrameRequest {
     StrBuf* name;
     bool pending;
     bool delivering;
+    bool window_event;
     RadiantFrameRequest* next;
 };
 
@@ -10897,7 +10986,54 @@ extern "C" uint64_t dom_engine_frame_request(void* owner, const char* event_name
     request->owner = dom_node_ref(elem);
     request->token = ++queue->next_token;
     request->pending = true;
+    request->window_event = false;
     return request->token;
+}
+
+extern "C" bool dom_engine_window_watch(void* owner, const char* event_name, bool enabled) {
+    DomElement* elem = static_cast<DomElement*>(owner);
+    if (!elem || !elem->doc || !event_name || !*event_name || !dom_is_connected(elem)) return false;
+    RadiantFrameQueue* queue = frame_queue_for_document(elem->doc, enabled);
+    DomNodeRef ref = dom_node_ref(elem);
+    for (RadiantFrameRequest* request = queue ? queue->requests : nullptr; request; request = request->next) {
+        if (request->window_event && request->pending && request->owner.address == ref.address &&
+            request->owner.expected_id == ref.expected_id && strcmp(request->name->str, event_name) == 0) {
+            request->pending = enabled;
+            return true;
+        }
+    }
+    if (!enabled) return true;
+    uint64_t token = dom_engine_frame_request(elem, event_name);
+    if (!token) return false;
+    queue->tail->window_event = true;
+    return true;
+}
+
+extern "C" uint64_t dom_engine_window_event_watermark(DomDocument* doc) {
+    RadiantFrameQueue* queue = frame_queue_for_document(doc, false);
+    return queue ? queue->next_token : 0;
+}
+
+static void dispatch_window_subscribers(DomDocument* doc, const char* type,
+    RadiantJsEventBuilder build_event, void* userdata, uint64_t watermark) {
+    RadiantFrameQueue* queue = frame_queue_for_document(doc, false);
+    if (!queue) return;
+    RootFrame roots(2);
+    Rooted<Item> target(roots, ItemNull), event(roots, ItemNull);
+    for (RadiantFrameRequest* request = queue->requests; request; request = request->next) {
+        if (!request->window_event || !request->pending || request->token > watermark ||
+            strcmp(request->name->str, type) != 0) continue;
+        if (!dom_node_ref_validate(doc, request->owner) || !dom_is_connected(request->owner.address)) {
+            request->pending = false;
+            continue;
+        }
+        // Rebuilds retain the logical owner; callbacks may cancel peers but cannot reuse this slot.
+        request->delivering = true;
+        target.set(dom_wrap_element(request->owner.address));
+        event.set(build_event ? build_event(userdata) : js_create_event(type, false, false));
+        radiant_dispatch_synthetic_dom_event(target.get(), event.get());
+        request->delivering = false;
+    }
 }
 
 extern "C" bool dom_engine_frame_cancel(void* owner, uint64_t token) {
@@ -10965,9 +11101,6 @@ void radiant_queue_template_render_events(DomDocument* doc, DomNode* root) {
     }
 }
 
-// The nesting a frame owner may have below a rebuilt template result.
-static const int FRAME_OWNER_MAX_DEPTH = 256;
-
 // A reactive rebuild replaces a template's result subtree
 // (rebuild_lambda_doc_incremental), so an owner inside it would be skipped as
 // detached and a template could never keep a frame it requested from its own
@@ -10981,31 +11114,7 @@ void radiant_frame_requests_follow_rebuild(DomDocument* doc, DomNode* old_root,
     if (!queue || !old_root || !new_root || old_root == new_root) return;
     for (RadiantFrameRequest* request = queue->requests; request; request = request->next) {
         if (!request->pending || !dom_node_ref_validate(doc, request->owner)) continue;
-        // the owner's child indexes below old_root, innermost first
-        int path[FRAME_OWNER_MAX_DEPTH];
-        int depth = 0;
-        DomNode* node = request->owner.address;
-        while (node && node != old_root && depth < FRAME_OWNER_MAX_DEPTH) {
-            int index = 0;
-            for (DomNode* sibling = node->prev_sibling; sibling; sibling = sibling->prev_sibling) index++;
-            path[depth++] = index;
-            node = node->parent;
-        }
-        if (node != old_root) continue;
-        DomNode* old_node = old_root;
-        DomNode* new_node = new_root;
-        while (view_state_nodes_correspond(old_node, new_node) && depth > 0) {
-            int index = path[--depth];
-            old_node = old_node->is_element() ? old_node->as_element()->first_child : nullptr;
-            new_node = new_node->is_element() ? new_node->as_element()->first_child : nullptr;
-            for (int i = 0; i < index && old_node && new_node; i++) {
-                old_node = old_node->next_sibling;
-                new_node = new_node->next_sibling;
-            }
-        }
-        if (depth == 0 && view_state_nodes_correspond(old_node, new_node) && new_node->is_element()) {
-            request->owner = dom_node_ref(new_node);
-        }
+        view_state_ref_follow_rebuild(doc, &request->owner, old_root, new_root);
     }
 }
 
@@ -11013,7 +11122,7 @@ bool radiant_document_has_pending_frames(DomDocument* doc) {
     RadiantFrameQueue* queue = frame_queue_for_document(doc, false);
     if (!queue) return false;
     for (RadiantFrameRequest* request = queue->requests; request; request = request->next) {
-        if (!request->pending) continue;
+        if (!request->pending || request->window_event) continue;
         if (!dom_node_ref_validate(doc, request->owner) || !dom_is_connected(request->owner.address)) {
             request->pending = false;
         } else return true;
@@ -11043,7 +11152,7 @@ extern "C" bool dom_engine_frame_tick(DomDocument* doc, double timestamp_ms) {
     uint32_t delivered_count = 0;
     uint32_t layout_before = doc->view_tree ? doc->view_tree->layout_generation : 0;
     for (RadiantFrameRequest* request = queue->requests; request; request = request->next) {
-        if (!request->pending || request->token > watermark) continue;
+        if (!request->pending || request->window_event || request->token > watermark) continue;
         request->pending = false;
         if (!dom_node_ref_validate(doc, request->owner) || !dom_is_connected(request->owner.address)) continue;
         request->delivering = true;
@@ -11328,7 +11437,7 @@ static bool dropdown_click_is_outside(EventContext* evcon, float mouse_x, float 
  * Check if an element is focusable
  */
 bool is_view_focusable(View* view) {
-    if (!view) return false;
+    if (!view || dom_node_is_inert(view)) return false;
     if (view->is_element() &&
         view_content_visibility_hides(view->as_element(), CONTENT_VISIBILITY_USER_AGENT)) return false;
 
@@ -11395,6 +11504,7 @@ bool is_view_focusable(View* view) {
 }
 
 bool is_view_programmatically_focusable(View* view) {
+    if (view && dom_node_is_inert(view)) return false;
     if (view && view->is_element() &&
         view_content_visibility_hides(view->as_element(), CONTENT_VISIBILITY_USER_AGENT)) return false;
     if (is_view_focusable(view)) return true;
@@ -11403,6 +11513,43 @@ bool is_view_programmatically_focusable(View* view) {
     // A negative tabindex excludes sequential focus only; HTMLElement.focus()
     // must still accept the target so keyboard events reach modal-style widgets.
     return elem->get_attribute("tabindex") != NULL;
+}
+
+struct FocusDispatchScope {
+    DocState* state;
+    DomDocument* document;
+    FocusDispatchScope* previous;
+    DomNodeRef from, to, original_from, original_to;
+
+    FocusDispatchScope(DocState* owner, View* before, View* after)
+        : state(owner), document(owner->owner_store->document), previous(owner->focus_dispatch),
+          from(dom_node_ref(static_cast<DomNode*>(before))), to(dom_node_ref(static_cast<DomNode*>(after))),
+          original_from(from), original_to(to) {
+        if (original_from.address && !dom_node_pin(document, original_from, DOM_NODE_PIN_EVENT_QUEUE)) original_from = from = {};
+        if (original_to.address && !dom_node_pin(document, original_to, DOM_NODE_PIN_EVENT_QUEUE)) original_to = to = {};
+        state->focus_dispatch = this;
+    }
+    ~FocusDispatchScope() {
+        state->focus_dispatch = previous;
+        if (original_from.address) dom_node_unpin(document, original_from, DOM_NODE_PIN_EVENT_QUEUE);
+        if (original_to.address) dom_node_unpin(document, original_to, DOM_NODE_PIN_EVENT_QUEUE);
+    }
+    View* resolve(DomNodeRef ref) {
+        DomNode* node = dom_node_ref_validate(document, ref);
+        return node && dom_is_connected(node) ? static_cast<View*>(node) : nullptr;
+    }
+    View* before() { return resolve(from); }
+    View* after() { return resolve(to); }
+};
+
+void radiant_focus_events_follow_rebuild(DomDocument* doc, DomNode* old_root,
+                                         DomNode* new_root) {
+    DocState* state = doc ? static_cast<DocState*>(doc->state) : nullptr;
+    for (FocusDispatchScope* scope = state ? state->focus_dispatch : nullptr; scope; scope = scope->previous) {
+        // D4.5.2: pending events follow retained identity; original call-stack pointers stay leased.
+        view_state_ref_follow_rebuild(doc, &scope->from, old_root, new_root);
+        view_state_ref_follow_rebuild(doc, &scope->to, old_root, new_root);
+    }
 }
 
 static bool prepare_previous_focus_blur(EventContext* evcon,
@@ -11442,10 +11589,13 @@ static void dispatch_focus_blur_observed(EventContext* evcon,
                                          View* target,
                                          View* related_target) {
     if (!evcon || !target) return;
-    radiant_dispatch_focus_event(evcon, target, "blur", related_target);
+    DocState* state = event_context_target_state(evcon);
+    if (!state) return;
+    FocusDispatchScope sequence(state, target, related_target);
+    radiant_dispatch_focus_event(evcon, sequence.before(), "blur", sequence.after());
     sm_observe_action(event_context_target_state(evcon),
                       SM_ACT_DISPATCH_BLUR);
-    radiant_dispatch_focus_event(evcon, target, "focusout", related_target);
+    if (sequence.before()) radiant_dispatch_focus_event(evcon, sequence.before(), "focusout", sequence.after());
 }
 
 /**
@@ -11480,8 +11630,13 @@ void update_focus_state(EventContext* evcon, View* new_focus, bool from_keyboard
     View* prev_focus = focus_get(state);
 
     if (prev_focus == new_focus) return;  // no change
+    if (new_focus && (!dom_is_connected(new_focus) || !is_view_programmatically_focusable(new_focus))) return;
+    FocusDispatchScope sequence(state, prev_focus, new_focus);
     bool should_dispatch_change =
         prepare_previous_focus_blur(evcon, state, prev_focus);
+    prev_focus = sequence.before();
+    new_focus = sequence.after();
+    if (focus_get(state) != prev_focus || (sequence.original_to.address && !new_focus)) return;
 
     // Use the focus API to handle all state updates
     if (new_focus) {
@@ -11493,16 +11648,22 @@ void update_focus_state(EventContext* evcon, View* new_focus, bool from_keyboard
             // the mouse policy can choose tabindex=-1; only Tab uses sequential eligibility.
             focus_set_programmatic(state, new_focus, from_keyboard);
             if (should_dispatch_change) {
-                dispatch_focus_change_observed(evcon, prev_focus);
+                dispatch_focus_change_observed(evcon, sequence.before());
             }
-            dispatch_focus_blur_observed(evcon, prev_focus, new_focus);
+            dispatch_focus_blur_observed(evcon, sequence.before(), sequence.after());
             sm_guard.commit();
         } else {
             focus_set_programmatic(state, new_focus, from_keyboard);
         }
 
-        radiant_dispatch_focus_event(evcon, new_focus, "focus", prev_focus);
-        radiant_dispatch_focus_event(evcon, new_focus, "focusin", prev_focus);
+        new_focus = sequence.after();
+        if (!new_focus || focus_get(state) != new_focus) return;
+        radiant_dispatch_focus_event(evcon, new_focus, "focus", sequence.before());
+        new_focus = sequence.after();
+        if (!new_focus || focus_get(state) != new_focus) return;
+        radiant_dispatch_focus_event(evcon, new_focus, "focusin", sequence.before());
+        new_focus = sequence.after();
+        if (!new_focus || focus_get(state) != new_focus) return;
 
         // F1 (Radiant_Design_Form_Input.md §3.1): snapshot the value at
         // focus time so a later blur can decide whether to fire `change`.
@@ -11536,9 +11697,9 @@ void update_focus_state(EventContext* evcon, View* new_focus, bool from_keyboard
                 prev_focus);
             focus_clear(state);
             if (should_dispatch_change) {
-                dispatch_focus_change_observed(evcon, prev_focus);
+                dispatch_focus_change_observed(evcon, sequence.before());
             }
-            dispatch_focus_blur_observed(evcon, prev_focus, nullptr);
+            dispatch_focus_blur_observed(evcon, sequence.before(), nullptr);
             sm_guard.commit();
         } else {
             focus_clear(state);
@@ -11593,11 +11754,16 @@ typedef struct RadiantNavigationRequest {
     char* url;
     char* target_name;
     RadiantNavigationTargetKind target_kind;
+    int history_delta;
 } RadiantNavigationRequest;
 
 typedef struct RadiantNavigationQueue : DomDocumentResourceData {
     Queue requests;
+    DomDocument* document;
+    RadiantNavigationQueue* next;
 } RadiantNavigationQueue;
+
+static RadiantNavigationQueue* navigation_queues;
 
 static void navigation_request_destroy(RadiantNavigationRequest* request) {
     if (!request) return;
@@ -11621,9 +11787,12 @@ static void navigation_request_destroy(RadiantNavigationRequest* request) {
 static void navigation_queue_destroy(DomDocumentResourceData* data) {
     RadiantNavigationQueue* queue = (RadiantNavigationQueue*)data;
     if (!queue) return;
-    QueueNode* link = NULL;
-    while ((link = queue_pop(&queue->requests))) {
-        RadiantNavigationRequest* request = (RadiantNavigationRequest*)link;
+    RadiantNavigationQueue** link = &navigation_queues;
+    while (*link && *link != queue) link = &(*link)->next;
+    if (*link) *link = queue->next;
+    QueueNode* entry = NULL;
+    while ((entry = queue_pop(&queue->requests))) {
+        RadiantNavigationRequest* request = (RadiantNavigationRequest*)entry;
         navigation_request_destroy(request);
     }
     mem_free(queue);
@@ -11645,7 +11814,31 @@ static RadiantNavigationQueue* navigation_queue_for_document(DomDocument* doc,
         if (queue) mem_free(queue);
         return nullptr;
     }
+    queue->next = navigation_queues;
+    queue->document = doc;
+    navigation_queues = queue;
     return queue;
+}
+
+static void navigation_ref_follow_rebuild(DomDocument* document, DomNodeRef* ref,
+                                          DomNode* old_root, DomNode* new_root) {
+    view_state_ref_follow_rebuild(document, ref, old_root, new_root, DOM_NODE_PIN_EVENT_QUEUE);
+}
+
+void radiant_navigation_requests_follow_rebuild(DomDocument* doc, DomNode* old_root,
+                                                DomNode* new_root) {
+    if (!doc || old_root == new_root) return;
+    for (RadiantNavigationQueue* queue = navigation_queues; queue; queue = queue->next) {
+        for (QueueNode* entry = queue->requests.first; entry; entry = entry->next) {
+            RadiantNavigationRequest* request = (RadiantNavigationRequest*)entry;
+            if (request->source_document == doc)
+                navigation_ref_follow_rebuild(doc, &request->source_ref, old_root, new_root);
+            if (request->target_document == doc)
+                navigation_ref_follow_rebuild(doc, &request->target_ref, old_root, new_root);
+            if (request->fragment_document == doc)
+                navigation_ref_follow_rebuild(doc, &request->fragment_ref, old_root, new_root);
+        }
+    }
 }
 
 static bool navigation_request_pin(DomDocument* document, DomElement* element,
@@ -11656,12 +11849,12 @@ static bool navigation_request_pin(DomDocument* document, DomElement* element,
            dom_node_pin(document, *out_ref, DOM_NODE_PIN_EVENT_QUEUE);
 }
 
-bool radiant_queue_navigation_request(DomElement* source, const char* url,
+static bool navigation_queue_operation(DomElement* source, const char* url,
                                       DomElement* target,
                                       RadiantNavigationTargetKind target_kind,
                                       const char* target_name,
-                                      DomElement* fragment_target) {
-    if (!source || !source->doc || !url || !url[0]) return false;
+                                      DomElement* fragment_target, int history_delta) {
+    if (!source || !source->doc || (!history_delta && (!url || !url[0]))) return false;
     if ((target_kind == RADIANT_NAVIGATION_TARGET_EXISTING && !target) ||
         (target_kind == RADIANT_NAVIGATION_TARGET_NEW && target)) {
         return false;
@@ -11672,11 +11865,12 @@ bool radiant_queue_navigation_request(DomElement* source, const char* url,
     if (!request) return false;
     request->source_document = source->doc;
     request->target_kind = target_kind;
-    request->url = mem_strdup(url, MEM_CAT_LAYOUT);
+    request->history_delta = history_delta;
+    request->url = url ? mem_strdup(url, MEM_CAT_LAYOUT) : nullptr;
     if (target_name && target_name[0]) {
         request->target_name = mem_strdup(target_name, MEM_CAT_LAYOUT);
     }
-    if (!request->url || (target_name && target_name[0] && !request->target_name) ||
+    if ((!history_delta && !request->url) || (target_name && target_name[0] && !request->target_name) ||
         !navigation_request_pin(request->source_document, source,
                                 &request->source_ref)) {
         navigation_request_destroy(request);
@@ -11703,6 +11897,18 @@ bool radiant_queue_navigation_request(DomElement* source, const char* url,
     }
     queue_push(&queue->requests, &request->link);
     return true;
+}
+
+bool radiant_queue_navigation_request(DomElement* source, const char* url,
+    DomElement* target, RadiantNavigationTargetKind target_kind,
+    const char* target_name, DomElement* fragment_target) {
+    return navigation_queue_operation(source, url, target, target_kind, target_name, fragment_target, 0);
+}
+
+extern "C" bool dom_engine_history_traverse_native(void* owner, int delta) {
+    DomElement* elem = static_cast<DomElement*>(owner);
+    return elem && elem->doc && delta != 0 && navigation_queue_operation(elem, nullptr,
+        elem->doc->root, RADIANT_NAVIGATION_TARGET_EXISTING, nullptr, nullptr, delta);
 }
 
 static RadiantNavigationRequest* navigation_queue_take(DomDocument* doc) {
@@ -11782,12 +11988,12 @@ static void navigation_clear_target_state(DomNode* node, DocState* state) {
     }
 }
 
-static bool navigation_apply_fragment(DomDocument* document,
+static bool navigation_apply_fragment(UiContext* uicon, DomDocument* document,
                                       DomElement* fragment,
                                       const char* resolved_url) {
     if (!document || !document->root || !resolved_url) return false;
     RadiantHistoryTraversal traversal = {};
-    radiant_history_set_location(document, resolved_url, &traversal);
+    bool changed = radiant_history_set_location(document, resolved_url, &traversal);
     DocState* state = (DocState*)document->state;
     if (!state) return false;
     navigation_clear_target_state((DomNode*)document->root, state);
@@ -11797,6 +12003,7 @@ static bool navigation_apply_fragment(DomDocument* document,
         dom_scroll_into_view_bridge(fragment);
     }
     doc_state_request_repaint(state);
+    if (changed) dispatch_history_window_events(uicon, document, &traversal, false);
     return true;
 }
 
@@ -12318,6 +12525,15 @@ bool radiant_execute_pending_navigation(UiContext* uicon, DomDocument* source) {
     DomElement* fragment_elem = nullptr;
     bool live = navigation_request_is_live(request, &source_elem, &target_elem,
                                            &fragment_elem);
+    if (request->history_delta) {
+        int delta = request->history_delta;
+        DomDocument* doc = source_elem ? source_elem->doc : nullptr;
+        navigation_request_destroy(request);
+        RadiantHistoryTraversal traversal = {};
+        bool changed = live && radiant_history_go(doc, delta, &traversal);
+        if (changed) dispatch_history_window_events(uicon, doc, &traversal, true);
+        return changed;
+    }
     Url* resolved = nullptr;
     bool resolved_ok = live && navigation_url_resolve(source_elem->doc, request->url,
                                                        &resolved);
@@ -12353,7 +12569,7 @@ bool radiant_execute_pending_navigation(UiContext* uicon, DomDocument* source) {
                !fragment_is_target_document) {
         log_warn("navigation-exec: package supplied an invalid resolved target");
     } else if (fragment_destination) {
-        executed = navigation_apply_fragment(destination_document, fragment_elem,
+        executed = navigation_apply_fragment(uicon, destination_document, fragment_elem,
                                              owned_href);
     } else if (target_is_iframe) {
         executed = navigation_execute_iframe_target(uicon, target_elem, owned_href);
@@ -12365,6 +12581,23 @@ bool radiant_execute_pending_navigation(UiContext* uicon, DomDocument* source) {
     }
     mem_free(owned_href);
     if (executed) to_repaint();
+    return executed;
+}
+
+bool radiant_commit_navigation_requests(UiContext* uicon) {
+    if (!uicon || (context && context->execution_depth != 0)) return false;
+    size_t budget = 0;
+    for (RadiantNavigationQueue* queue = navigation_queues; queue; queue = queue->next)
+        budget += queue->requests.count;
+    bool executed = false;
+    // callbacks may replace documents/queues; revisit the live registry after every request.
+    while (budget > 0) {
+        budget--;
+        RadiantNavigationQueue* queue = navigation_queues;
+        while (queue && !queue->requests.first) queue = queue->next;
+        if (!queue) break;
+        executed = radiant_execute_pending_navigation(uicon, queue->document) || executed;
+    }
     return executed;
 }
 
@@ -12823,6 +13056,9 @@ struct EventDocumentScope {
     }
 
     void activate_target(EventContext* evcon) {
+        DomElement* target = view_geometry_nearest_dom_element(evcon->target, 0);
+        // Pointer capture may replace the hit with a node from another document.
+        if (target && target->doc) evcon->target_document = target->doc;
         DomDocument* target_doc = event_context_target_document(evcon);
         Runtime* runtime = dom_document_script_runtime(target_doc);
         if (!runtime) return;
@@ -14687,7 +14923,6 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             if (!tab_prevented) {
                 DomDocument* focus_doc = evcon.target_document ? evcon.target_document : doc;
                 if (focus_doc && focus_doc->view_tree && focus_doc->view_tree->root) {
-                    View* previous_focus = focus_get(state);
                     DomElement* focus_root = radiant_document_body_element(focus_doc);
                     if (!focus_root) focus_root = focus_doc->root;
                     InputIntent focus_key_intent = {};
@@ -14695,17 +14930,16 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     focus_key_intent.mods = key_event->mods;
                     // S12.1.3/ES30: sequential-focus policy is package-only;
                     // an unclaimed hook performs no default action.
+                    RootFrame focus_roots(1);
+                    Rooted<Item> chosen(focus_roots, ItemNull);
+                    Item candidate = ItemNull;
                     dispatch_behavior_handler(&evcon, static_cast<View*>(focus_root),
-                                              "focuskey", &focus_key_intent, nullptr);
-                    View* next_focus = focus_get(state);
-                    if (next_focus && next_focus != previous_focus) {
-                        // Sequential focus navigation must emit focusin so
-                        // script focus traps can redirect an escaped Tab.
-                        dispatch_focus_blur_observed(&evcon, previous_focus, next_focus);
-                        radiant_dispatch_focus_event(&evcon, next_focus,
-                                                     "focus", previous_focus);
-                        radiant_dispatch_focus_event(&evcon, next_focus,
-                                                     "focusin", previous_focus);
+                                              "focuskey", &focus_key_intent, nullptr, &candidate);
+                    chosen.set(candidate);
+                    DomNode* node = static_cast<DomNode*>(radiant_dom_unwrap_node(chosen.get()));
+                    if (node && node->is_element()) {
+                        // D7.2.5: package policy chooses; the shared transition commits and dispatches.
+                        update_focus_state(&evcon, static_cast<View*>(node), true);
                     }
                 }
             }

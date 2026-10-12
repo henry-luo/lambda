@@ -647,6 +647,150 @@ The viewable gallery at `test/demo/wordcloud.ls` compares four configurations:
 `./lambda.exe view test/demo/wordcloud.ls`. Export it with
 `./lambda.exe render test/demo/wordcloud.ls -o temp/wordcloud_gallery.png`.
 
+### 4.5 Historical and event timelines
+
+`lambda.chart.timeline` presents historical events as chronological cards, a
+time axis, or an active story. It uses the ordinary source-package and view
+mechanisms (**D7.2.1–D7.2.4/D7.2.6, S2.4.3v3/S12.1.3**).
+Implementation is in progress against the
+[timeline proposal](../vibe/Lambda_Pkg_Chart_Timeline.md); the
+[acceptance inventory](../test/timeline/reference_inventory.json) records open
+features and host coverage. Native Radiant is the current interactive host.
+
+```lambda
+import timeline: lambda.chart.timeline
+
+timeline.render({id:"project-history",view:"cards",placement:"alternate",
+    events:[
+        {id:"idea",at:"2019-03",title:"The idea",content:"A small beginning."},
+        {id:"launch",at:"2022-09",title:"Launch",content:"The first public release."}
+    ]})
+```
+
+Elements use `<timeline.chart>` with qualified children such as
+`<timeline.event>`, `<timeline.scale>`, and `<timeline.cards>`. Maps and elements
+normalize to the same schema. The package supports astronomical BCE/CE dates,
+partial dates, exact numeric deep time, explicit timezones, duration events,
+eras, nested groups, hidden intervals, curved coordinates, and quantitative
+chart overlays. Rendering consumes explicit state and resource results;
+procedural handlers own effects (**S12.1.1v2, S9.1.4/S9.3.1**).
+
+`search.highlight: true` preserves rich inline elements and their attributes,
+including matches split across element boundaries. Case and diacritic options
+retain authored Unicode text. Clearing the query restores the source content.
+Adjacent rich children and scalar text share the same offsets for matching and
+highlighting; separate tags never form a combined match. Script, style, and
+template contents are excluded. Render callbacks receive the same chart/locale
+context as cards; callback errors and non-boolean predicate results are diagnosed.
+The pure host helper `radiant.with_content(source, children)` replaces only an
+element's normalized content, retaining its qualified name, nominal identity,
+and full attribute contracts. Declared content patterns still apply; invalid
+replacements return a value error. `radiant.present_content(source, children)`
+instead constructs a structural presentation with the same qualified tag and
+attribute values; its new content is unconstrained. Highlighting uses that
+operation so string-only source types can render marks without changing their
+source or claiming that the presentation is still a nominal instance
+(**S2.1.4, S2.6.2–S2.6.4, S17.4.1, D4.5.2**).
+
+Filtering immediately reconciles the active event, keeps selection, and restores
+the nearest visible event after an empty result. Collapsing a focused group moves
+focus to its visible group header. Controlled fields remain authoritative and
+emit change requests (**S9.1.4/S9.3.1, S12.1.3**).
+
+`locale` controls bundled English, Chinese, French, and Arabic messages, dates,
+era labels, numeric interpolation, export headings, and default writing direction.
+`direction` overrides the locale; a scale's `locale` overrides inherited date
+formatting. `messages` supports strings, pure callbacks, and plural form maps;
+`scale.format` and `scale.formatter` customize labels without changing chronology.
+Unsupported languages use deterministic English fallbacks; further reference
+language coverage remains open (**S12.1.1v2/S12.1.3**).
+
+| Entry point | Purpose |
+|---|---|
+| `validate(spec)` | Normalize and validate an element or map; return a value error on invalid input. |
+| `render(spec, viewport?, snapshot?)` | Pure HTML/SVG presentation. |
+| `model(spec, viewport?, options?)` | Stable logical source for `apply()` and native interaction. |
+| `interactive(spec, viewport?, options?)` | Apply a model with instance-owned interaction state. |
+| `initial_state(spec)`, `update(state, action, context)` | Immutable state and a shared reducer returning state, notifications, and requests. |
+| `apply_edit(spec, request)` | Recheck permissions, token source revision, and the proposed patch; return a validated immutable source candidate. |
+| `bookmark(spec, id)` | Encode a stable event/introduction address for the chart's URL fragment. |
+| `layout(spec, viewport, snapshot?, resources?)` | Measured geometry and chronology projection. |
+| `render_svg(spec, viewport, snapshot?, options?)` | Chart-vector presentation with an explicit rich-content conversion policy. |
+| `render_frame(spec, frame, viewport?, snapshot?)` | Presentation at an explicit slideshow time in milliseconds. |
+| `convert(data, format, options?)` | Convert already loaded TimelineJS, React Chrono, vis, JSON, CSV/TSV, or spreadsheet records. |
+| `capabilities(host?)` | Report host/media capabilities. |
+| `load(request, options?)` | Procedurally fetch a requested resource, retaining its token and revision. |
+| `export_data(spec, format?, options?, snapshot?)` | JSON records, CSV text, XLSX ZIP tree, or accessible HTML table. |
+| `export_document(spec, format?, viewport?, options?, snapshot?)` | Frozen HTML or SVG source; HTML also supplies PNG/JPEG/PDF rendering. |
+| `save(spec, destination, format?, viewport?, options?, snapshot?)` | Procedurally write HTML, SVG, PNG, JPEG, PDF, JSON, CSV, or XLSX. |
+
+Exports select `scope: "full"`, `"current"`, `"window"`, or `"selected"` and
+accept explicit state/time, expansion, field order, headings, and media frames.
+Live media needs a poster, recorded frame, authored fallback, explicit external
+resource policy, or `unsupported: "text"|"omit"`. Source export retains authored
+date precision and exact metadata. Native vector export preserves the rich card
+presentation; the direct chart-vector API keeps its explicit conversion policy.
+
+Story mode uses one sequence for initialization, first/previous/next/last,
+quick jump, keyboard navigation, and slideshow playback. `story.order` is an
+array of unique event IDs. `story.title_slide: true` uses the chart title and
+description; an event record supplies a custom introduction, rich content, and
+media. Its default ID is `"__title__"`; give it another ID if an event uses that
+name. Introductions have no chronology coordinate and stay outside exported
+event records. `story.panel_order` orders the `"text"`, `"media"`, and
+`"children"` sections. Slideshow `delay` and `transition_duration` are
+milliseconds; frozen frames use the same delay, easing, and transition sample
+as live playback (**S12.1.1v2/S12.1.3**).
+
+`story.bookmarks: true` requires an authored chart ID and stable event IDs. Links
+use `#timeline=<encoded-chart-id>/<encoded-event-id>`; UTF-8 and reserved
+characters are form-encoded. Native hosts restore external fragment changes
+and back/forward traversal automatically. A pure `{type:"bookmark",fragment:...}`
+action uses the same resolver; unrelated chart fragments are ignored, and an
+unknown event in this chart's address returns a value error. Controlled active
+state emits a change request before a committed activation can write the URL.
+
+`slideshow.media_end: true` waits for audio/video completion at a slide boundary.
+`media_timeout` bounds the wait (default 30,000 ms), and pause freezes its budget.
+`media_command` requests carry event/media IDs, a session token, and source
+revision. An application player replies with a `media_event` action containing
+those same fields and `status:"ended"|"error"`. Retired tokens are ignored.
+`media_options.active_playback` can start active media independently of slideshow
+playback. Native hosts execute local audio/video commands after DOM rendering,
+poll completion and authored clip ends, and report `timeline_media` notifications
+with the accepted session identity and status. Native decoder state survives
+rerenders and resize; source changes replace it. `model(spec, viewport, {media:false})`
+leaves command execution to the application. Inferred or explicit remote
+providers use application controllers. Native decoding remains macOS-specific;
+cross-platform and hosted-player parity are still open (**D7.5.3, D4.5.1v4**).
+
+A retained native model accepts a dispatched `timeline_action` with
+`{type:"source_update", spec:next_spec, expected_revision:old_revision}`.
+The chart ID must stay the same. Resource requests carry revision/token guards,
+deadlines, and explicit cancellation requests; refresh keeps the last valid
+dataset while its replacement loads. Applications currently own asynchronous
+execution and disposal of those requests (**S9.1.4, S13.1.1v2–S13.1.5**).
+
+The pure `update` API accepts the same source action and returns the accepted
+`source` alongside state, requests, and notifications. A stale expected revision
+returns the existing state before validating the replacement. Removed activation
+chooses the nearest surviving event in the previous chronology; selection prunes
+removed IDs and emits its normal notification. Focus follows a removed focused
+event while external control focus stays in place. A retained playing/paused
+slide keeps its fractional playhead when order or duration changes, and moving
+an active dated event can scroll the unchanged window span into view.
+Loaded-data completions use the same policy; subsequent actions resolve IDs from
+the recorded dataset. Changed records retire pending edits even when their
+authored revision is unchanged, preventing a late validation from applying an
+obsolete proposal.
+
+The DTNA timeline translates its compatibility props and supplies its skin over
+this package. Its `timeline_options` property exposes the shared specification.
+Animation keyframes belong to `lambda.chart.playback`; the seven previous
+animation functions exported from `lambda.chart.timeline` remain forwarding
+aliases. Historical `<timeline.chart>` and contextual chart `<timeline>`
+keyframes have distinct schemas.
+
 ---
 
 ## 5. `graph` — Graph Layout and Diagrams

@@ -87,6 +87,13 @@ Radiant-internal seams that no JS listener can observe. Each exists because the 
 
 ### 2.4 Key policy and snapshot DOM navigation (ES30)
 
+Sequential `focuskey` and initial `focusinit` policy return the chosen DOM node
+through the behavior result. Native commits that choice through the shared
+focus transition, preserving the keyboard origin and delivering edit commit,
+`change`, `blur`/`focusout`, and `focus`/`focusin` as appropriate (D7.2.5).
+The policy must not write focus before returning its choice, because doing so
+would hide the previous control from that transition.
+
 **Ruling (user direction, 2026-09-01).** The dom package owns all
 **keyboard default-action policy**: sequential focus, selection/caret command
 choice, keyboard scrolling, keyboard activation, and clipboard-command

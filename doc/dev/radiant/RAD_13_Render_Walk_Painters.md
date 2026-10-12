@@ -148,6 +148,32 @@ Each PDF callback (`pdf_cb_render_bound` `:1709`, `pdf_cb_render_text` `:1820`, 
 
 Two capability structures decide native-vs-fallback. **Runtime** `RenderBackendCaps` (`== RdtVectorCaps`, `render.hpp`), queried via `render_backend_get_caps` (`render_backend_caps.cpp:5`), reports what the *live* vector rasterizer can do (vector_paths, gradients, nested_clips, gaussian_blur, color_matrix_filters, native_text_runs, tile_offsets…). `render_backend_supports_filter_chain` (`render_backend_caps.cpp:17`) walks a `FilterProp` chain against those caps and always rejects `DROP_SHADOW`/`URL`. **Static** `RenderExportTargetCaps` (`render.hpp`) is a compile-time feature matrix for SVG vs PDF; both mark `blend_modes`/`filters`/`shadows` as false (`:49-51`, `:67-69`), which is what deterministically forces the PDF/SVG lowering into raster fallback rather than dropping the effect.
 
+### 8.2 Procedural in-memory document export
+
+`radiant.export_document(html, destination, options)` is a procedural native
+module operation (D7.5.3/S12.1.1v2). Its required `format` selects `png`, `jpeg`,
+`svg`, or `pdf`; optional positive integral `width`/`height`, `scale`,
+`device_scale`, JPEG `quality`, `pagination`, `base_url`, and `local_resources`
+configure the same export sessions as the CLI. It returns `true` or a diagnostic
+string; package facades convert diagnostics to raised errors (S7.4.2).
+
+`load_html_source_doc` transfers the source URL/parser-pool owner to the transient
+document; it disables embedded scripts. `render_html_source_to_output_target`
+shares font admission, continuous/paged layout, and existing encoders. Native
+copies keep source/path strings valid across allocating layout callbacks
+(D4.5.1v4/D5.3.3). Normal and strip PNG/JPEG encoder failures reach the caller.
+The procedural timeline export regression checks valid encodings and invalid
+destinations in `test/lambda/proc/timeline_export.ls`.
+
+In-memory measurement/SVG layout sets both physical surface dimensions and the
+logical viewport; CSS viewport units therefore use the caller's dimensions.
+Decoded images with no URL are admitted by the existing PaintIR image lowering
+path, which embeds their pixel bytes in SVG. Page backdrop recording uses raster
+fragment lowering: clip/transform scopes can span multiple streamed callbacks,
+so a fragment cannot be validated as a complete balanced PaintList. The owning
+render walk supplies those scopes. Focused viewport, recorded-image, and
+cross-fragment clipping regressions pass (verified 2026-10-11).
+
 ---
 
 ## 9. Profiling and path traces

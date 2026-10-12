@@ -1,0 +1,1 @@
+[["shape construction", true], ["arc distance roundtrip", true], ["straight origin", true], ["lane normal", true], ["reversed path", true], ["trimmed path", true], ["vertical path", true], ["zero length rejected", true], ["discontinuous path rejected", true], ["invalid levels rejected", true], ["invalid radii rejected", true], ["missing curve rejected", true]]

@@ -64,8 +64,8 @@ DOM_UI_JOBS ?= $(shell n=$(NPROCS); if [ "$$n" -gt 1 ]; then echo $$((n - 1)); e
 LAYOUT_TEST_ENV ?= LAMBDA_AUTO_CLOSE=1 LAMBDA_POST_LOAD_SETTLE_MS=200
 # Ranges and reflection remain extended `make test` coverage; their large
 # known-failure inventories are not part of the fast Radiant baseline gate.
-RADIANT_BASELINE_TEST_PROJECTS := test_scene3d_gtest test_map_gtest test_ui_automation_gtest test_page_load_gtest test_css_cascade_memory_gtest test_radiant_view_gtest test_rdt_vector_gtest test_layout_fuzzy_gtest test_wpt_css_syntax_gtest test_wpt_input_events_gtest test_view_reuse_gtest
-RADIANT_DOM2_WPT_RUNNERS := input_events
+# Derive native build projects from the same suite selection used for execution.
+RADIANT_BASELINE_TEST_PROJECTS = $(shell node test/test_run.js --target=radiant --category=baseline --list-build-targets)
 # These are the native projects selected by test-lambda-baseline. Keep this
 # list aligned with the runner's non-extended config projects; otherwise a
 # clean baseline run reports a missing executable. The concurrency and Node
@@ -676,7 +676,7 @@ help:
 	@echo "  test-input-baseline - Run HTML5 WPT, CommonMark, YAML, ASCII Math, and LaTeX Math parser tests"
 	@echo "  test-math-corpus - Run the font-driven SVG math formula corpus"
 	@echo "  test-mathcmp     - Compare Lambda math PNGs against pdfLaTeX (ARGS='--case Functions')"
-	@echo "  test-radiant-baseline - Run shared layout baselines ($(LAYOUT_BASELINE_SUITES)) + render visual + other checks"
+	@echo "  test-radiant-baseline - Run the radiant suite baseline (native, layout, UI/DOM, render), with one report"
 	@echo "  test-ui-dtna        - Run dtna catalog, tier contracts and native interaction tests"
 	@echo "  test-ui-bold        - Run bold package contracts and native interaction tests across tiers"
 	@echo "  test-map            - Run native geomap rendering/input and Lambda package tests"
@@ -2162,9 +2162,6 @@ run-layout-baseline-suites:
 	if [ $$any_failed -gt 0 ]; then exit 1; fi
 
 test-radiant-baseline: build-radiant-baseline
-	@./test/test_scene3d_gtest.exe
-	@./test/test_map_gtest.exe
-	@./test/test_view_reuse_gtest.exe --gtest_filter='SecondaryViewTest.*:PagedCssTest.*:TypesetTest.*:ViewModelOptionsTest.*:FontPathTest.*:FontMetricTest.*:ResourceAdmissionTest.*'
 	@$(MAKE) --no-print-directory run-radiant-baseline
 
 .PHONY: test-scene3d
@@ -2218,312 +2215,10 @@ test-svg-paint: build
 test-svg-smil: build
 	@node test/svg/test_svg_smil.cjs $(ARGS)
 
-# Run radiant tests without rebuilding (use when test executables are already built).
-# Commands wait directly on their child process; periodic polling used to round
-# every short phase up to the next second and accumulated substantial tail time.
-# Suite boundaries are timed here because the heterogeneous runners do not expose
-# a common elapsed-time field in their result summaries.
-# Layout details are retained in the parent shell because later child processes
-# reuse the shared temp directory and may remove earlier runner artifacts.
-# A crashed layout category must fail the gate instead of disappearing from its totals.
-# Raw CSS Syntax failures also fail the gate above its passing-file floor.
-# Doom gameplay and forced-GC replays remain in the extended Radiant View runner.
+# All Radiant checks use the shared runner's JSON artifacts and final report.
+# Keep suite execution sequential: layout categories reuse and clear temp/.
 run-radiant-baseline:
-	@ui_passed=0; ui_failed=0; ui_status="⏭️  SKIP"; \
-	ui_elapsed=0; \
-	dom_ui_passed=0; dom_ui_failed=0; dom_ui_status="⏭️  SKIP"; \
-	dom_ui_elapsed=0; \
-	radiant_view_passed=0; radiant_view_failed=0; radiant_view_status="⏭️  SKIP"; \
-	radiant_view_elapsed=0; \
-	vector_passed=0; vector_failed=0; vector_status="⏭️  SKIP"; \
-	vector_elapsed=0; \
-	page_passed=0; page_failed=0; page_status="⏭️  SKIP"; \
-	page_elapsed=0; \
-	css_memory_passed=0; css_memory_failed=0; css_memory_status="⏭️  SKIP"; \
-	css_memory_elapsed=0; \
-	fuzzy_passed=0; fuzzy_failed=0; fuzzy_status="⏭️  SKIP"; \
-	fuzzy_elapsed=0; \
-	render_passed=0; render_failed=0; render_total=0; render_xpassed=0; render_xfailed=0; render_skipped=0; render_errors=0; render_regressions=0; render_details="not run"; render_status="⏭️  SKIP"; \
-	render_elapsed=0; \
-	snapshot_passed=0; snapshot_failed=0; snapshot_status="⏭️  SKIP"; \
-	snapshot_elapsed=0; \
-	any_failed=0; \
-	layout_total_passed=0; layout_total_partial=0; layout_total_failed=0; layout_total_skipped=0; \
-	layout_elapsed=0; \
-	layout_overall_status="✅ PASS"; \
-	mkdir -p temp; \
-	$(DEFINE_TEST_DURATION_FORMATTER) \
-	run_logged() { \
-		log_file="$$1"; shift; \
-		rm -f "$$log_file"; \
-		run_logged_start=$$(date +%s); \
-		"$$@" > "$$log_file" 2>&1; \
-		run_logged_exit=$$?; \
-		run_logged_elapsed=$$(($$(date +%s) - run_logged_start)); \
-		return $$run_logged_exit; \
-	}; \
-	\
-	echo ""; \
-	echo "=============================================================="; \
-	echo "🧪 RADIANT BASELINE TEST SUITE"; \
-	echo "=============================================================="; \
-	\
-	layout_run_exit=0; \
-	layout_start=$$(date +%s); \
-	$(MAKE) --no-print-directory run-layout-baseline-suites || layout_run_exit=$$?; \
-	layout_elapsed=$$(($$(date +%s) - layout_start)); \
-	$(COLLECT_LAYOUT_BASELINE_RESULTS) \
-	if [ -f test/layout/snapshot/page.json ]; then \
-		echo ""; \
-		echo "📦 Layout Page Suite Regression:"; \
-		snapshot_exit=0; \
-		snapshot_start=$$(date +%s); \
-		snap_output=$$($(LAYOUT_TEST_ENV) node test/layout/test_radiant_layout.js --engine lambda-css -c page --json -j 5 2>/dev/null \
-			| node test/layout/layout_suite_snapshot.js --check page 2>&1) || snapshot_exit=$$?; \
-		snapshot_elapsed=$$(($$(date +%s) - snapshot_start)); \
-		echo "$$snap_output" | tail -5; \
-		$(call CLASSIFY_LAYOUT_SNAPSHOT_RESULT,snap_output) \
-	fi; \
-	\
-	echo ""; \
-	echo "📦 UI Automation Tests:"; \
-	if [ -f "test/test_ui_automation_gtest.exe" ]; then \
-		ui_exit=0; \
-		run_logged "temp/_radiant_ui_automation.log" ./test/test_ui_automation_gtest.exe --suite baseline,dtna $(ARGS) || ui_exit=$$?; \
-		ui_elapsed=$$run_logged_elapsed; \
-		output=$$(cat "temp/_radiant_ui_automation.log"); \
-		echo "$$output" | grep -E "^\[|tests executed" | tail -5; \
-		ui_result_line=$$(echo "$$output" | grep -E "^UI fixture results:" | tail -1); \
-		ui_passed=$$(echo "$$ui_result_line" | grep -oE "[0-9]+ passed" | grep -oE "[0-9]+" || echo "0"); \
-		ui_failed=$$(echo "$$ui_result_line" | grep -oE "[0-9]+ failed" | grep -oE "[0-9]+" || echo "0"); \
-		ui_passed=$${ui_passed:-0}; ui_failed=$${ui_failed:-0}; \
-		if [ $$ui_exit -ne 0 ] && [ $$ui_failed -eq 0 ]; then ui_failed=1; fi; \
-		if [ "$$ui_failed" = "0" ] || [ -z "$$ui_failed" ]; then ui_status="✅ PASS"; ui_failed=0; else ui_status="❌ FAIL"; any_failed=1; fi; \
-	else \
-		echo "   ⚠️  test/test_ui_automation_gtest.exe not found"; \
-	fi; \
-	\
-	echo ""; \
-	echo "📦 Radiant View Command Tests:"; \
-	if [ -f "test/test_radiant_view_gtest.exe" ]; then \
-		run_logged "temp/_radiant_view_cmd.log" ./test/test_radiant_view_gtest.exe --gtest_filter='*-RadiantViewTest.Doom*' || true; \
-		radiant_view_elapsed=$$run_logged_elapsed; \
-		output=$$(cat "temp/_radiant_view_cmd.log"); \
-		echo "$$output" | grep -E "^\[|tests executed" | tail -5; \
-		radiant_view_passed=$$(echo "$$output" | grep -E "^\[  PASSED  \]" | grep -oE "[0-9]+" | head -1 || echo "0"); \
-		radiant_view_failed=$$(echo "$$output" | grep -E "^\[  FAILED  \][[:space:]]+[0-9]+ test" | head -1 | grep -oE "[0-9]+" | head -1 || echo "0"); \
-		radiant_view_passed=$${radiant_view_passed:-0}; radiant_view_failed=$${radiant_view_failed:-0}; \
-		if [ "$$radiant_view_failed" = "0" ] || [ -z "$$radiant_view_failed" ]; then radiant_view_status="✅ PASS"; radiant_view_failed=0; else radiant_view_status="❌ FAIL"; any_failed=1; fi; \
-	else \
-		echo "   ⚠️  test/test_radiant_view_gtest.exe not found"; \
-	fi; \
-	\
-	echo "📦 Vector Backend Tests:"; \
-	if [ -f "test/test_rdt_vector_gtest.exe" ]; then \
-		vector_exit=0; \
-		run_logged "temp/_radiant_vector.log" ./test/test_rdt_vector_gtest.exe || vector_exit=$$?; \
-		vector_elapsed=$$run_logged_elapsed; \
-		output=$$(cat "temp/_radiant_vector.log"); \
-		echo "$$output" | grep -E "^\[" | tail -5; \
-		vector_passed=$$(echo "$$output" | grep -E "^\[  PASSED  \]" | grep -oE "[0-9]+" | head -1 || echo "0"); \
-		vector_failed=$$(echo "$$output" | grep -E "^\[  FAILED  \][[:space:]]+[0-9]+ test" | head -1 | grep -oE "[0-9]+" | head -1 || echo "0"); \
-		vector_passed=$${vector_passed:-0}; vector_failed=$${vector_failed:-0}; \
-		if [ $$vector_exit -ne 0 ] && [ $$vector_failed -eq 0 ]; then vector_failed=1; fi; \
-		if [ $$vector_failed -eq 0 ]; then vector_status="✅ PASS"; else vector_status="❌ FAIL"; any_failed=1; fi; \
-	else \
-		echo "   ⚠️  test/test_rdt_vector_gtest.exe not found"; \
-	fi; \
-	\
-	echo "📦 Radiant View UI Fixtures:"; \
-	view_ui_exit=0; \
-	if [ -f "test/test_ui_automation_gtest.exe" ]; then \
-		run_logged "temp/_radiant_view_ui.log" ./test/test_ui_automation_gtest.exe --suite view $(ARGS) || view_ui_exit=$$?; \
-		view_ui_elapsed=$$run_logged_elapsed; \
-		output=$$(cat "temp/_radiant_view_ui.log"); \
-		echo "$$output" | grep -E "^UI fixture results:|^\[  (PASSED|FAILED)  \]" | tail -5; \
-		view_ui_result_line=$$(echo "$$output" | grep -E "^UI fixture results:" | tail -1); \
-		view_ui_passed=$$(echo "$$view_ui_result_line" | grep -oE "[0-9]+ passed" | grep -oE "[0-9]+" || echo "0"); \
-		view_ui_failed=$$(echo "$$view_ui_result_line" | grep -oE "[0-9]+ failed" | grep -oE "[0-9]+" || echo "0"); \
-		view_ui_passed=$${view_ui_passed:-0}; view_ui_failed=$${view_ui_failed:-0}; \
-		view_ui_total=$$((view_ui_passed + view_ui_failed)); \
-		if [ $$view_ui_exit -ne 0 ] && [ $$view_ui_failed -eq 0 ]; then view_ui_failed=1; fi; \
-		if [ $$view_ui_exit -eq 0 ] && [ $$view_ui_total -gt 0 ]; then view_ui_status="✅ PASS"; else view_ui_status="❌ FAIL"; any_failed=1; fi; \
-	else \
-		view_ui_elapsed=0; view_ui_passed=0; view_ui_failed=1; view_ui_status="❌ FAIL"; any_failed=1; \
-	fi; \
-	\
-	echo ""; \
-	echo "📦 View Page and Markdown (Headless) Tests:"; \
-	if [ -f "test/test_page_load_gtest.exe" ]; then \
-		run_logged "temp/_radiant_page_load.log" ./test/test_page_load_gtest.exe || true; \
-		page_elapsed=$$run_logged_elapsed; \
-		output=$$(cat "temp/_radiant_page_load.log"); \
-		echo "$$output" | grep -E "^\[|pages loaded" | tail -5; \
-		page_passed=$$(echo "$$output" | grep -E "^\[  PASSED  \]" | grep -oE "[0-9]+" | head -1 || echo "0"); \
-		page_failed=$$(echo "$$output" | grep -E "^\[  FAILED  \][[:space:]]+[0-9]+ test" | head -1 | grep -oE "[0-9]+" | head -1 || echo "0"); \
-		page_passed=$${page_passed:-0}; page_failed=$${page_failed:-0}; \
-		if [ "$$page_failed" = "0" ] || [ -z "$$page_failed" ]; then page_status="✅ PASS"; page_failed=0; else page_status="❌ FAIL"; any_failed=1; fi; \
-	else \
-		echo "   ⚠️  test/test_page_load_gtest.exe not found"; \
-	fi; \
-	\
-	echo ""; \
-	echo "📦 CSS Cascade Memory Regression:"; \
-	if [ -f "test/test_css_cascade_memory_gtest.exe" ]; then \
-		css_memory_exit=0; \
-		run_logged "temp/_radiant_css_cascade_memory.log" ./test/test_css_cascade_memory_gtest.exe || css_memory_exit=$$?; \
-		css_memory_elapsed=$$run_logged_elapsed; \
-		output=$$(cat "temp/_radiant_css_cascade_memory.log"); \
-		echo "$$output" | grep -E "^\[|CSS cascade" | tail -5; \
-		css_memory_passed=$$(echo "$$output" | grep -E "^\[  PASSED  \]" | grep -oE "[0-9]+" | head -1 || echo "0"); \
-		css_memory_failed=$$(echo "$$output" | grep -E "^\[  FAILED  \][[:space:]]+[0-9]+ test" | head -1 | grep -oE "[0-9]+" | head -1 || echo "0"); \
-		css_memory_passed=$${css_memory_passed:-0}; css_memory_failed=$${css_memory_failed:-0}; \
-		if [ $$css_memory_exit -ne 0 ] && [ $$css_memory_failed -eq 0 ]; then css_memory_failed=1; fi; \
-		if [ $$css_memory_exit -eq 0 ] && [ $$css_memory_passed -gt 0 ]; then css_memory_status="✅ PASS"; else css_memory_status="❌ FAIL"; any_failed=1; fi; \
-	else \
-		echo "   ⚠️  test/test_css_cascade_memory_gtest.exe not found"; \
-		css_memory_failed=1; css_memory_status="❌ FAIL"; any_failed=1; \
-	fi; \
-	\
-	echo ""; \
-	echo "📦 Fuzzy Crash Tests:"; \
-	if [ -f "test/test_layout_fuzzy_gtest.exe" ]; then \
-		fuzzy_start=$$(date +%s); \
-		output=$$(./test/test_layout_fuzzy_gtest.exe 2>&1) || true; \
-		fuzzy_elapsed=$$(($$(date +%s) - fuzzy_start)); \
-		echo "$$output" | grep -E "^\[|fuzzy files tested" | tail -5; \
-		fuzzy_passed=$$(echo "$$output" | grep -E "^\[  PASSED  \]" | grep -oE "[0-9]+" | head -1 || echo "0"); \
-		fuzzy_failed=$$(echo "$$output" | grep -E "^\[  FAILED  \][[:space:]]+[0-9]+ test" | head -1 | grep -oE "[0-9]+" | head -1 || echo "0"); \
-		fuzzy_passed=$${fuzzy_passed:-0}; fuzzy_failed=$${fuzzy_failed:-0}; \
-		if [ "$$fuzzy_failed" = "0" ] || [ -z "$$fuzzy_failed" ]; then fuzzy_status="✅ PASS"; fuzzy_failed=0; else fuzzy_status="❌ FAIL"; any_failed=1; fi; \
-	else \
-		echo "   ⚠️  test/test_layout_fuzzy_gtest.exe not found"; \
-	fi; \
-	\
-	echo ""; \
-	echo "📦 Render Visual Tests:"; \
-	if [ -f "test/render/test_radiant_render.js" ]; then \
-		echo "   workers: $(RADIANT_RENDER_JOBS)"; \
-		run_logged "temp/_radiant_render_visual.log" sh -c 'cd test/render && LAMBDA_ROOT="$(CURDIR)" node test_radiant_render.js -j $(RADIANT_RENDER_JOBS) --baseline' || true; \
-		render_elapsed=$$run_logged_elapsed; \
-		output=$$(cat "temp/_radiant_render_visual.log"); \
-		echo "$$output" | grep -E "PASS|FAIL|ERROR|Results:|Baseline Regressions|baseline tests passed" | tail -15; \
-		render_line=$$(echo "$$output" | grep "^Results:" | tail -1); \
-		render_passed=$$(echo "$$render_line" | grep -oE "^Results: [0-9]+" | grep -oE "[0-9]+" || echo "0"); \
-		render_total=$$(echo "$$render_line" | grep -oE "^Results: [0-9]+/[0-9]+" | grep -oE "/[0-9]+" | tr -d "/" || echo "0"); \
-		render_xpassed=$$(echo "$$render_line" | grep -oE "[0-9]+ new passes" | grep -oE "[0-9]+" || echo "0"); \
-		render_xfailed=$$(echo "$$render_line" | grep -oE "[0-9]+ expected failures" | grep -oE "[0-9]+" || echo "0"); \
-		render_skipped=$$(echo "$$render_line" | grep -oE "[0-9]+ skipped" | grep -oE "[0-9]+" || echo "0"); \
-		render_errors=$$(echo "$$render_line" | grep -oE "[0-9]+ errors" | grep -oE "[0-9]+" || echo "0"); \
-		render_passed=$${render_passed:-0}; render_total=$${render_total:-0}; render_xpassed=$${render_xpassed:-0}; render_xfailed=$${render_xfailed:-0}; render_skipped=$${render_skipped:-0}; render_errors=$${render_errors:-0}; \
-		render_details="$${render_passed}/$${render_total} passed"; \
-		if [ $$render_xpassed -gt 0 ]; then render_details="$$render_details, $$render_xpassed new passes"; fi; \
-		if [ $$render_xfailed -gt 0 ]; then render_details="$$render_details, $$render_xfailed expected failures"; fi; \
-		if [ $$render_skipped -gt 0 ]; then render_details="$$render_details, $$render_skipped skipped"; fi; \
-		if [ $$render_errors -gt 0 ]; then render_details="$$render_details, $$render_errors errors"; fi; \
-		render_failed=0; \
-		if echo "$$output" | grep -q "Baseline Regressions"; then \
-			render_regressions=$$(echo "$$output" | grep "Baseline Regressions" | grep -oE "[0-9]+" | head -1); render_regressions=$${render_regressions:-0}; \
-			render_failed=$$render_regressions; \
-			render_details="$$render_details, $$render_regressions baseline regressions"; \
-			render_status="❌ FAIL"; any_failed=1; \
-		else \
-			render_status="✅ PASS"; \
-		fi; \
-	else \
-		echo "   ⚠️  test/render/test_radiant_render.js not found"; \
-	fi; \
-	\
-	echo ""; \
-	echo "📦 DOM UI Integration:"; \
-	dom_ui_exit=0; \
-	run_logged "temp/_radiant_dom_ui.log" $(MAKE) --no-print-directory dom-ui-run || dom_ui_exit=$$?; \
-	dom_ui_elapsed=$$run_logged_elapsed; \
-	output=$$(cat "temp/_radiant_dom_ui.log"); \
-	echo "$$output" | tail -5; \
-	dom_ui_result_line=$$(echo "$$output" | grep -E "^UI fixture results:" | tail -1); \
-	dom_ui_passed=$$(echo "$$dom_ui_result_line" | grep -oE "[0-9]+ passed" | grep -oE "[0-9]+" || echo "0"); \
-	dom_ui_failed=$$(echo "$$dom_ui_result_line" | grep -oE "[0-9]+ failed" | grep -oE "[0-9]+" || echo "0"); \
-	dom_ui_passed=$${dom_ui_passed:-0}; dom_ui_failed=$${dom_ui_failed:-0}; \
-	dom_ui_total=$$((dom_ui_passed + dom_ui_failed)); \
-	if [ $$dom_ui_exit -eq 0 ] && [ $$dom_ui_total -gt 0 ]; then dom_ui_status="✅ PASS"; else dom_ui_status="❌ FAIL"; if [ $$dom_ui_failed -eq 0 ]; then dom_ui_failed=1; fi; any_failed=1; fi; \
-	\
-	wpt_syntax_passed=0; wpt_syntax_failed=0; wpt_syntax_status="⏭️  SKIP"; wpt_syntax_elapsed=0; \
-	echo ""; \
-	echo "📦 WPT CSS Syntax Conformance:"; \
-	if [ -f "test/test_wpt_css_syntax_gtest.exe" ]; then \
-		wpt_syntax_exit=0; \
-		run_logged "temp/_radiant_wpt_css_syntax.log" ./test/test_wpt_css_syntax_gtest.exe || wpt_syntax_exit=$$?; \
-		wpt_syntax_elapsed=$$run_logged_elapsed; \
-		output=$$(cat "temp/_radiant_wpt_css_syntax.log"); \
-		echo "$$output" | grep -E "^\[  PASSED|^\[  FAILED|^\[  SKIPPED" | tail -5; \
-		wpt_syntax_passed=$$(echo "$$output" | grep -E "^\[  PASSED  \]" | grep -oE "[0-9]+" | head -1 || echo "0"); \
-		wpt_syntax_failed=$$(echo "$$output" | grep -E "^[[:space:]]*[0-9]+ FAILED TEST" | grep -oE "[0-9]+" | head -1 || echo "0"); \
-		wpt_syntax_passed=$${wpt_syntax_passed:-0}; wpt_syntax_failed=$${wpt_syntax_failed:-0}; \
-		wpt_syntax_baseline=25; \
-		if [ $$wpt_syntax_exit -eq 0 ] && [ "$$wpt_syntax_failed" -eq 0 ] && [ "$$wpt_syntax_passed" -ge "$$wpt_syntax_baseline" ] 2>/dev/null; then wpt_syntax_status="✅ PASS"; else wpt_syntax_status="❌ FAIL"; any_failed=1; fi; \
-	else \
-		echo "   ⚠️  test/test_wpt_css_syntax_gtest.exe not found"; \
-	fi; \
-	\
-	wpt_dom2_passed=0; wpt_dom2_failed=0; wpt_dom2_status="✅ PASS"; wpt_dom2_elapsed=0; \
-	echo ""; \
-	echo "📦 WPT DOM2 Conformance:"; \
-	for runner in $(RADIANT_DOM2_WPT_RUNNERS); do \
-		exe="test/test_wpt_$${runner}_gtest.exe"; \
-		if [ ! -f "$$exe" ]; then echo "   ⚠️  $$exe not found"; wpt_dom2_failed=$$((wpt_dom2_failed + 1)); wpt_dom2_status="❌ FAIL"; any_failed=1; continue; fi; \
-		runner_exit=0; log_file="temp/_radiant_wpt_$${runner}.log"; \
-		run_logged "$$log_file" "$$exe" || runner_exit=$$?; \
-		wpt_dom2_elapsed=$$((wpt_dom2_elapsed + run_logged_elapsed)); \
-		output=$$(cat "$$log_file"); \
-		passed=$$(echo "$$output" | grep -E "^\[  PASSED  \]" | grep -oE "[0-9]+" | head -1 || echo "0"); passed=$${passed:-0}; \
-		failed=$$(echo "$$output" | grep -E "^\[  FAILED  \][[:space:]]+[0-9]+ test" | head -1 | grep -oE "[0-9]+" | head -1 || echo "0"); failed=$${failed:-0}; \
-		if [ $$runner_exit -ne 0 ] && [ $$failed -eq 0 ]; then failed=1; fi; \
-		wpt_dom2_passed=$$((wpt_dom2_passed + passed)); wpt_dom2_failed=$$((wpt_dom2_failed + failed)); \
-		if [ $$failed -eq 0 ]; then echo "   ✅ $$runner ($$passed passing files)"; else echo "   ❌ $$runner ($$failed regressions)"; wpt_dom2_status="❌ FAIL"; any_failed=1; fi; \
-	done; \
-	\
-	total_passed=$$((layout_total_passed + snapshot_passed + ui_passed + dom_ui_passed + radiant_view_passed + vector_passed + view_ui_passed + page_passed + css_memory_passed + fuzzy_passed + render_passed + wpt_syntax_passed + wpt_dom2_passed)); \
-	total_failed=$$((layout_total_failed + snapshot_failed + ui_failed + dom_ui_failed + radiant_view_failed + vector_failed + view_ui_failed + page_failed + css_memory_failed + fuzzy_failed + render_failed + wpt_syntax_failed + wpt_dom2_failed)); \
-	total_skipped=$$layout_total_skipped; \
-	total_tests=$$((total_passed + layout_total_partial + total_failed)); \
-	\
-	echo ""; \
-	echo "=============================================================="; \
-	echo "🏁 RADIANT BASELINE TEST RESULTS BREAKDOWN"; \
-	echo "=============================================================="; \
-	echo ""; \
-	echo "📊 Test Results by Suite:"; \
-	echo "   ├── Layout Baseline     $$layout_overall_status  ($$(format_duration "$$layout_elapsed"), $$layout_total_passed passed, $$layout_total_partial partially passing, $$layout_total_failed failed, $$layout_total_skipped skipped)"; \
-	$(PRINT_LAYOUT_BASELINE_SUITE_RESULTS) \
-	echo "   ├── Layout Page Suite   $$snapshot_status  ($$(format_duration "$$snapshot_elapsed"), $$snapshot_passed passed, $$snapshot_failed failed) (layout_suite_snapshot.js --check page)"; \
-	echo "   ├── UI Automation       $$ui_status  ($$(format_duration "$$ui_elapsed"), $$ui_passed passed, $$ui_failed failed) (test_ui_automation_gtest.exe)"; \
-	echo "   ├── DOM UI Integration  $$dom_ui_status  ($$(format_duration "$$dom_ui_elapsed"), $$dom_ui_passed passed, $$dom_ui_failed failed) (dom-ui-run)"; \
-	echo "   ├── Radiant View Cmd    $$radiant_view_status  ($$(format_duration "$$radiant_view_elapsed"), $$radiant_view_passed passed, $$radiant_view_failed failed) (test_radiant_view_gtest.exe)"; \
-	echo "   ├── Vector Backend      $$vector_status  ($$(format_duration "$$vector_elapsed"), $$vector_passed passed, $$vector_failed failed) (test_rdt_vector_gtest.exe)"; \
-	echo "   ├── View UI Fixtures    $$view_ui_status  ($$(format_duration "$$view_ui_elapsed"), $$view_ui_passed passed, $$view_ui_failed failed) (test_ui_automation_gtest.exe --suite view)"; \
-	echo "   ├── View Page & Markdown $$page_status  ($$(format_duration "$$page_elapsed"), $$page_passed passed, $$page_failed failed) (test_page_load_gtest.exe)"; \
-	echo "   ├── CSS Cascade Memory $$css_memory_status  ($$(format_duration "$$css_memory_elapsed"), $$css_memory_passed passed, $$css_memory_failed failed) (test_css_cascade_memory_gtest.exe)"; \
-	echo "   ├── Fuzzy Crash         $$fuzzy_status  ($$(format_duration "$$fuzzy_elapsed"), $$fuzzy_passed passed, $$fuzzy_failed failed) (test_layout_fuzzy_gtest.exe)"; \
-	echo "   ├── Render Visual       $$render_status  ($$(format_duration "$$render_elapsed"), $$render_details) (test_radiant_render.js --baseline)"; \
-	echo "   ├── WPT CSS Syntax      $$wpt_syntax_status  ($$(format_duration "$$wpt_syntax_elapsed"), $$wpt_syntax_passed passed, $$wpt_syntax_failed failed) (test_wpt_css_syntax_gtest.exe)"; \
-	echo "   └── WPT DOM2            $$wpt_dom2_status  ($$(format_duration "$$wpt_dom2_elapsed"), $$wpt_dom2_passed passed, $$wpt_dom2_failed failed) ($(RADIANT_DOM2_WPT_RUNNERS))"; \
-	echo ""; \
-	echo "📊 Overall Results:"; \
-	echo "   Total Tests: $$total_tests"; \
-	echo "   ✅ Passed:   $$total_passed"; \
-	if [ $$layout_total_partial -gt 0 ]; then \
-		echo "   ⚠️  Partially Passing: $$layout_total_partial"; \
-	fi; \
-	if [ $$total_failed -gt 0 ]; then \
-		echo "   ❌ Failed:   $$total_failed"; \
-	fi; \
-	if [ $$total_skipped -gt 0 ]; then \
-		echo "   ⏭️  Skipped:  $$total_skipped"; \
-	fi; \
-	echo "=============================================================="; \
-	rm -f $(LAYOUT_BASELINE_RESULTS); \
-	if [ $$any_failed -gt 0 ]; then exit 1; fi
+	@RADIANT_RENDER_JOBS=$(RADIANT_RENDER_JOBS) node test/test_run.js --target=radiant --category=baseline --sequential $(ARGS)
 
 # Run only the shared layout baseline inventory; page snapshots belong to the
 # full Radiant baseline target.

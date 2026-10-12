@@ -1,0 +1,26 @@
+{
+  "name":"Timeline story delay, frozen fade, progress, and resume",
+  "html":"test/ui/timeline/story_timing.ls",
+  "viewport":{"width":900,"height":650},
+  "input_turn_ms":0,
+  "events":[
+    {"type":"click","target":{"selector":"[data-timeline-command='play']"}},
+    {"type":"advance_time","ms":20,"steps":2},
+    {"type":"assert_attribute","target":{"selector":".lambda-timeline-chart"},"attribute":"data-timeline-active","equals":"a"},
+    {"type":"assert_attribute","target":{"selector":".lambda-timeline-progress"},"attribute":"value","equals":"0"},
+    {"type":"advance_time","ms":50,"steps":5},
+    {"type":"assert_style","target":{"selector":".lambda-timeline-story"},"property":"opacity","equals":"0.5"},
+    {"type":"assert_attribute","target":{"selector":".lambda-timeline-progress"},"attribute":"value","equals":"0.2"},
+    {"type":"click","target":{"selector":"[data-timeline-command='pause']"}},
+    {"type":"advance_time","ms":100,"steps":4},
+    {"type":"assert_style","target":{"selector":".lambda-timeline-story"},"property":"opacity","equals":"0.5"},
+    {"type":"click","target":{"selector":"[data-timeline-command='resume']"}},
+    {"type":"advance_time","ms":80,"steps":8},
+    {"type":"assert_attribute","target":{"selector":".lambda-timeline-chart"},"attribute":"data-timeline-active","equals":"b"},
+    {"type":"assert_style","target":{"selector":".lambda-timeline-story"},"property":"opacity","equals":"0"},
+    {"type":"advance_time","ms":100,"steps":10},
+    {"type":"assert_attribute","target":{"selector":".lambda-timeline-chart"},"attribute":"data-timeline-playback","equals":"ended"},
+    {"type":"assert_style","target":{"selector":".lambda-timeline-story"},"property":"opacity","equals":"1"},
+    {"type":"assert_attribute","target":{"selector":".lambda-timeline-overall-progress"},"attribute":"value","equals":"1"}
+  ]
+}

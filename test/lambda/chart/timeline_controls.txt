@@ -1,0 +1,1 @@
+[["zoom controls", true], ["zoom out inverse", true], ["reset initial window", true], ["controlled zoom requests", true], ["view retains activation", true], ["invalid view spacing diagnosed", true], ["message interpolation", true], ["message callback", true], ["custom toolbar parts", true]]

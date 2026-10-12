@@ -369,13 +369,17 @@ TEST_F(StateStoreDomMutationTest, RegeneratedTextControlKeepsNativeValueOnlyForS
     live->form = lam::view_prop(&old_prop);
     orphan->form = lam::view_prop(&new_prop);
     ASSERT_TRUE(form_control_store_text_value(state(), live, "typed", 5, 5));
+    ASSERT_TRUE(form_control_store_focus_value(state(), live, "", 0));
     ViewState* before = view_state_get(state(), live);
     ASSERT_NE(before, nullptr);
 
     view_state_preserve_subtree_identity(state(), live, orphan);
     EXPECT_EQ(view_state_get(state(), orphan), before);
     EXPECT_STREQ(form_control_get_value(state(), orphan, nullptr), "typed");
+    // A retained empty baseline still distinguishes typing from an unchanged value.
+    EXPECT_STREQ(form_control_get_focus_value(state(), orphan), "");
     EXPECT_EQ(view_state_get(state(), live), nullptr);
+    EXPECT_EQ(form_control_get_focus_value(state(), live), nullptr);
 
     // a same-position control with another authored id is a different owner.
     live->id = lam::up("other-field");
@@ -383,6 +387,119 @@ TEST_F(StateStoreDomMutationTest, RegeneratedTextControlKeepsNativeValueOnlyForS
     EXPECT_EQ(view_state_get(state(), orphan), before);
     EXPECT_EQ(view_state_get(state(), live), nullptr);
     live->form = orphan->form = nullptr;
+}
+
+struct MediaLifetimeProbe { unsigned released, paused; };
+
+TEST_F(StateStoreDomMutationTest, RebuiltEventOwnerTransfersLeaseOnlyForSameIdentity) {
+    live->tag_name = orphan->tag_name = lam::up("input");
+    live->id = orphan->id = lam::up("field");
+    ASSERT_TRUE(dom_lifecycle_init(&doc));
+    ASSERT_TRUE(dom_node_registry_register(&doc, live, sizeof(DomElement), false));
+    ASSERT_TRUE(dom_node_registry_register(&doc, orphan, sizeof(DomElement), false));
+    DomNodeRef owner = dom_node_ref(live);
+    ASSERT_TRUE(dom_node_pin(&doc, owner, DOM_NODE_PIN_EVENT_QUEUE));
+    ASSERT_TRUE(view_state_ref_follow_rebuild(&doc, &owner, live, orphan, DOM_NODE_PIN_EVENT_QUEUE));
+    EXPECT_EQ(dom_node_ref_validate(&doc, owner), orphan);
+    EXPECT_EQ(dom_node_pin_count(&doc, dom_node_ref(live), DOM_NODE_PIN_EVENT_QUEUE), 0u);
+    EXPECT_EQ(dom_node_pin_count(&doc, owner, DOM_NODE_PIN_EVENT_QUEUE), 1u);
+    live->id = lam::up("different-field");
+    EXPECT_FALSE(view_state_ref_follow_rebuild(&doc, &owner, orphan, live, DOM_NODE_PIN_EVENT_QUEUE));
+    EXPECT_EQ(dom_node_ref_validate(&doc, owner), orphan);
+    EXPECT_EQ(dom_node_pin_count(&doc, owner, DOM_NODE_PIN_EVENT_QUEUE), 1u);
+    EXPECT_TRUE(dom_node_unpin(&doc, owner, DOM_NODE_PIN_EVENT_QUEUE));
+}
+
+static void release_media_probe(RdtVideo* player) {
+    reinterpret_cast<MediaLifetimeProbe*>(player)->released++;
+}
+static void pause_media_probe(RdtVideo* player) {
+    reinterpret_cast<MediaLifetimeProbe*>(player)->paused++;
+}
+
+TEST_F(StateStoreDomMutationTest, KeyedOwnerSurvivesRemovalOfItsEarlierSibling) {
+    DomElement* replacement = make_element();
+    DomElement* retained = make_element();
+    root->tag_name = replacement->tag_name = lam::up("div");
+    orphan->tag_name = retained->tag_name = lam::up("video");
+    orphan->id = retained->id = lam::up("retained-player");
+    ASSERT_TRUE(static_cast<DomNode*>(replacement)->append_child(retained));
+    MediaLifetimeProbe probe{};
+    MediaViewState* before = media_view_state_get(state(), orphan, true);
+    before->player = reinterpret_cast<RdtVideo*>(&probe);
+    before->destroy = release_media_probe;
+    EXPECT_EQ(view_state_corresponding_node(orphan, root, replacement), retained);
+    EXPECT_EQ(view_state_corresponding_node(live, root, replacement), nullptr);
+    view_state_preserve_subtree_identity(state(), root, replacement);
+    EXPECT_EQ(media_view_state_get(state(), retained), before);
+    EXPECT_EQ(media_view_state_get(state(), orphan), nullptr);
+    media_view_state_reset(before);
+    EXPECT_EQ(probe.released, 1u);
+    ASSERT_TRUE(replacement->remove_child(retained));
+    delete retained;
+    delete replacement;
+}
+
+TEST_F(StateStoreDomMutationTest, DetachedRegisteredMediaPausesOnceAndRetainsItsDecoder) {
+    MediaLifetimeProbe probe{};
+    ASSERT_TRUE(dom_lifecycle_init(&doc));
+    ASSERT_TRUE(dom_node_registry_register(&doc, orphan, sizeof(DomElement), false));
+    MediaViewState* media = media_view_state_get(state(), orphan, true);
+    ASSERT_NE(media, nullptr);
+    media->player = reinterpret_cast<RdtVideo*>(&probe);
+    media->destroy = release_media_probe;
+    media->pause = pause_media_probe;
+    media->connected = true;
+    ASSERT_TRUE(root->remove_child(orphan));
+    state_store_prune_after_reflow(state());
+    EXPECT_EQ(probe.paused, 1u);
+    EXPECT_EQ(probe.released, 0u);
+    EXPECT_EQ(media_view_state_get(state(), orphan), media);
+    state_store_prune_after_reflow(state());
+    EXPECT_EQ(probe.paused, 1u);
+    ASSERT_TRUE(static_cast<DomNode*>(root)->append_child(orphan));
+    state_store_prune_after_reflow(state());
+    ASSERT_TRUE(root->remove_child(orphan));
+    state_store_prune_after_reflow(state());
+    EXPECT_EQ(probe.paused, 2u);
+    media_view_state_reset(media);
+    EXPECT_EQ(probe.released, 1u);
+}
+
+TEST_F(StateStoreDomMutationTest, MediaOwnerSurvivesRebuildAndReleasesOnRetirement) {
+    MediaLifetimeProbe probe{};
+    live->tag_name = orphan->tag_name = lam::up("video");
+    live->tag_id = orphan->tag_id = MARKUP_NAME_VIDEO;
+    MediaViewState* before = media_view_state_get(state(), live, true);
+    ASSERT_NE(before, nullptr);
+    before->player = reinterpret_cast<RdtVideo*>(&probe);
+    before->destroy = release_media_probe;
+    before->opened = true;
+    view_state_preserve_subtree_identity(state(), live, orphan);
+    EXPECT_EQ(media_view_state_get(state(), live), nullptr);
+    EXPECT_EQ(media_view_state_get(state(), orphan), before);
+    EXPECT_TRUE(before->opened);
+    EXPECT_EQ(probe.released, 0u);
+    ASSERT_TRUE(root->remove_child(orphan));
+    state_store_prune_after_reflow(state());
+    EXPECT_EQ(probe.released, 1u);
+    state_store_prune_after_reflow(state());
+    EXPECT_EQ(probe.released, 1u);
+}
+
+TEST_F(StateStoreDomMutationTest, MediaSourceResetReleasesExactlyOnce) {
+    MediaLifetimeProbe probe{};
+    MediaViewState* media = media_view_state_get(state(), live, true);
+    ASSERT_NE(media, nullptr);
+    media->player = reinterpret_cast<RdtVideo*>(&probe);
+    media->destroy = release_media_probe;
+    media->opened = true;
+    media_view_state_reset(media);
+    EXPECT_EQ(probe.released, 1u);
+    EXPECT_EQ(media->player, nullptr);
+    EXPECT_FALSE(media->opened);
+    media_view_state_reset(media);
+    EXPECT_EQ(probe.released, 1u);
 }
 
 TEST_F(StateStoreDomMutationTest, RegeneratedControlAppliesConstraintsAndKeepsNativeEdits) {

@@ -4,11 +4,14 @@
 #include <math.h>
 #include <string.h>
 
+// ---------------------------------------------------------------------------
+// Color helpers — Chrome-compatible 3D border color computation
+// Chrome: DarkenColor() multiplies RGB by 2/3, LightenColor() blends 1/3 toward white
+// ---------------------------------------------------------------------------
+
 static void render_straight_border(RasterRenderContext* rdcon, ViewBlock* view, Rect rect);
 static void render_rounded_border(RasterRenderContext* rdcon, ViewBlock* view, Rect rect);
 static bool render_border_image(RasterRenderContext* rdcon, BorderProp* border, Rect rect);
-
-
 
 /**
  * Render an inset/outset border as two trapezoid-filled polygons.
@@ -53,10 +56,6 @@ static void render_inset_outset_trapezoid(RasterRenderContext* rdcon, Rect rect,
     log_debug("[BORDER] inset/outset trapezoid tl=#%02x%02x%02x br=#%02x%02x%02x",
               tl_color.r, tl_color.g, tl_color.b, br_color.r, br_color.g, br_color.b);
 }
-
-/**
- * Render each border side independently using trapezoid fills.
- */
 
 static bool border_raster_emit_path(void* context, RdtPath* path, Color color, const RenderBorderStroke* stroke) {
     RasterRenderContext* rdcon = (RasterRenderContext*)context;
@@ -577,8 +576,8 @@ static void render_rounded_border(RasterRenderContext* rdcon, ViewBlock* view, R
             float half_w = w / 2.0f;
             float quarter_w = w / 4.0f;
 
-            Color dark_c  = render_border_darken_color(c);
-            Color light_c = render_border_lighten_color(c);
+            Color dark_c  = render_border_darken_color(c, BORDER_DARKEN_FACTOR);
+            Color light_c = render_border_lighten_color(c, BORDER_LIGHTEN_FACTOR);
 
             bool groove = (style == CSS_VALUE_GROOVE);
             Color outer_c = groove ? dark_c : light_c;

@@ -105,7 +105,8 @@ bool focus_transition(DocState* state,
         switch (kind) {
             case FOCUS_TRANSITION_FOCUS_ELEMENT:
                 if (args && args->programmatic) {
-                    focus_set_programmatic(state, args->target);
+                    // preserve the input origin across the transition boundary.
+                    focus_set_programmatic(state, args->target, args->from_keyboard);
                 } else {
                     focus_set(state, args ? args->target : NULL,
                               args ? args->from_keyboard : false);
@@ -906,6 +907,11 @@ static void validate_view_state_registry(DocState* state,
                 }
                 break;
             }
+            case VIEW_STATE_MEDIA:
+                if (view_state->data.media.player && !view_state->data.media.destroy) {
+                    report_fail(report, "media ViewState has no decoder release function");
+                }
+                break;
             case VIEW_STATE_CUSTOM:
                 break;
             default:
