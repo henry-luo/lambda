@@ -141,6 +141,14 @@ pub fn render_italcorr_el() {
     null
 }
 
+// ============================================================
+// \slash — a solidus that permits a line break after it
+// ============================================================
+
+pub fn render_slash_el() {
+    <span class: "latex-slash", "/" <wbr>>
+}
+
 // element-returning versions for two-pass rendering
 pub fn render_hspace_el(node) {
     let amount = get_length_arg(node)

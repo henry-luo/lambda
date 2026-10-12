@@ -444,7 +444,20 @@ void do_unexpandable_prim(Engine* e, const Token& t, const Meaning& m) {
 static void arg_mode(Engine* e, bool bracket) {
     int depth = bracket ? 0 : 1;
     Token t;
-    while (!e->aborted && get_x_token(e, &t)) {
+    while (!e->aborted && get_token(e, &t)) {
+        if (!(t.flags & TF_NOEXPAND)) {
+            // a package-redefined \setlength passes through like the kernel's,
+            // instead of expanding into assignments that arguments never run
+            if (latex_redefined_echo(e, t)) {
+                emit_token(e, t);
+                continue;
+            }
+            Meaning xm = token_meaning(e, t);
+            if (is_expandable(xm)) {
+                expand(e, t, xm);
+                continue;
+            }
+        }
         if (t.flags & TF_NOEXPAND) {
             t.flags &= (uint16_t)~TF_NOEXPAND;
             emit_token(e, t);
@@ -538,7 +551,20 @@ void pass_constructor_args(Engine* e, bool raw) {
 
 void main_control(Engine* e) {
     Token t;
-    while (!e->aborted && !e->stop_requested && get_x_token(e, &t)) {
+    while (!e->aborted && !e->stop_requested && get_token(e, &t)) {
+        if (!(t.flags & TF_NOEXPAND)) {
+            // expansion as get_x_token does, after routing a document call of a
+            // length/counter command that a package redefined (calc)
+            if (latex_redefined_echo(e, t)) {
+                latex_echo_redefined(e, t);
+                continue;
+            }
+            Meaning xm = token_meaning(e, t);
+            if (is_expandable(xm)) {
+                expand(e, t, xm);
+                continue;
+            }
+        }
         if (t.flags & TF_NOEXPAND) {
             t.flags &= (uint16_t)~TF_NOEXPAND;
             emit_token(e, t);

@@ -19,7 +19,8 @@ let makebox_el = <makebox <brack_group "3cm"> <brack_group "c"> "centered">
 "7. makebox tag:"; name(boxes.render_makebox(makebox_el, ["centered"]))
 "8. makebox class:"; boxes.render_makebox(makebox_el, ["centered"]).class
 "9. makebox style has width:"; contains(boxes.render_makebox(makebox_el, ["centered"]).style, "width:3cm")
-"10. makebox style has center:"; contains(boxes.render_makebox(makebox_el, ["centered"]).style, "text-align:center")
+// [c] anchors the content at the box centre, so it overflows both sides as in TeX
+"10. makebox style has center:"; contains(boxes.render_makebox(makebox_el, ["centered"])[0].style, "translateX(-50%)")
 
 // ---- framebox ----
 let framebox_el = <framebox <brack_group "5cm"> <brack_group "l"> "left text">

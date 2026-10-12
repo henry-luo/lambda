@@ -27,6 +27,8 @@ array entry as a separate braced argument. MarkBuilder retains ordinary
 arrays verbatim while normalizing element content; no format flag controls
 merging.
 
+**Additions (2026-10-12).** A parenthesized group counts as a command argument when a braced or bracketed group follows it, or when its content is a picture coordinate pair: two comma-separated numbers such as `(0,0)` or `(-1.2,-0.05)`. This captures `\multiput(0,0)(5,0){6}{…}` and `\qbezier(0,0)(5,5)(10,0)`, whose coordinates chain without a following brace, while prose such as `\LaTeX (2e)` stays text. The picture renderer reads every command's coordinates and body from these attributes. `\begin{multicols}{n}[preface][skip]` keeps its header out of the first column: the parser records the groups in `argument_groups`, stores the count as a `columns` attribute, and parses the preface as block content into a leading `multicols_preface` child, so the analysis pass numbers its headings in source order.
+
 The unused Tree-sitter-era `latex/normalize.ls` phase, its import and the
 unused reconstruction helper `util.rebuild_with_children` are retired. The
 direct parser supplies normalized content; the package reads the current
