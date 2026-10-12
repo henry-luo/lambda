@@ -294,7 +294,6 @@ These were reproduced on 2026-10-12.
 - **Counter and length commands.** `\setcounter` honors only `secnumdepth`, and `\addtocounter`, `\stepcounter`, `\newcounter`, `\newlength` and `\newenvironment` are silent no-ops without expansion.
 - **Fixed English strings.** The contents heading and theorem names are fixed English strings, and chapters have no "Chapter N" label.
 - **Doc viewer.** It renders without the package stylesheet, and the CLI's `font_option` is passed but never read.
-- **Unused verifier link.** `lambda/tree-sitter-latex` and `tree-sitter-latex-math` are linked only into the `lambda-cst` verifier, which references neither; removing them is a separate decision.
 
 ### 11.3 Host capabilities
 
@@ -315,7 +314,7 @@ These were reproduced on 2026-10-12.
 | Until 2026-03 | A C++ pipeline under `lambda/tex/` (about 20,600 lines) parsed with tree-sitter and produced HTML from a document model, plus a DVI/PDF typesetter. It was removed on 2026-03-04. |
 | 2026-02 (Phase 1) | HTML output moved to this script package: document structure, lists, tables, floats, theorems, references, footnotes, `\newcommand` and three document classes. |
 | 2026-02 (Phase 2) | Phase 2 reached LaTeX.js parity on its showcase document: extended symbols, boxes, spacing, font declarations, `\appendix` and counters, color, enhanced lists, the `picture` environment as SVG, `\includegraphics` options, `\newtheorem`, booktabs, `\newcommand` defaults, `\autoref` and `\nameref`. |
-| 2026-08-31 | The direct C++ parser replaced the tree-sitter LaTeX parser. Tree-sitter-latex now builds only for the isolated `lambda-cst` verifier. |
+| 2026-08-31 | The direct C++ parser replaced the tree-sitter LaTeX parser. The tree-sitter LaTeX and LaTeX-math grammars were removed on 2026-10-12; the `lambda-cst` verifier never used them. |
 | 2026-10-06 (Phase I) | The package registry, `render_result`, preserved argument groups and offsets, and the first adapters: amsmath, graphicx with PDF pages, hyperref, geometry, xcolor, booktabs, enumitem, microtype, siunitx and the TikZ adapter. The PDF links, clipping and fixed-geometry host capabilities landed. |
 | 2026-10-06 (Phase 2 biblatex) | The bounded biblatex profile, pinned to BibLaTeX 3.20 with Biber 2.20. |
 | 2026-10-07 (Phase III) | Thirty-one Overleaf samples drove the shared table and theorem models, natbib, caption, cleveref, listings, language and page-style profiles, PDF outlines, raw-body parser preservation and the no-Lua rule. All samples parse and export. |

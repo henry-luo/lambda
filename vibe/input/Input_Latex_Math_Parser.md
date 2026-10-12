@@ -2,6 +2,8 @@
 
 > **Status:** proposal with direct-parser implementation in worktree (2026-08-31)
 >
+> **Update (2026-10-12):** the two Tree-sitter grammars (`lambda/tree-sitter-latex/`, `lambda/tree-sitter-latex-math/`) were removed. The `lambda-cst` verifier linked them but never ran a LaTeX or math differential, so the retention clauses below are superseded.
+>
 > **Scope:** replace the production Tree-sitter LaTeX and LaTeX-math input
 > parsers with direct C parsers.  Reuse the existing Input parsing, diagnostics,
 > and Mark-construction framework.  Retain the two Tree-sitter grammars only

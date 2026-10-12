@@ -106,22 +106,6 @@
       "link": "static"
     },
     {
-      "name": "tree-sitter-latex",
-      "version": "0.6.0",
-      "description": "Tree-sitter LaTeX parser library",
-      "include": "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
-      "lib": "lambda/tree-sitter-latex/libtree-sitter-latex.a",
-      "link": "static"
-    },
-    {
-      "name": "tree-sitter-latex-math",
-      "version": "0.1.0",
-      "description": "Tree-sitter LaTeX math mode parser library",
-      "include": "lambda/tree-sitter-latex-math/bindings/c",
-      "lib": "lambda/tree-sitter-latex-math/libtree-sitter-latex-math.a",
-      "link": "static"
-    },
-    {
       "name": "mir",
       "version": "1.0.0",
       "include": "lambda/mir",
@@ -916,7 +900,7 @@
     },
     {
       "name": "lambda-cst",
-      "description": "Tree-sitter Lambda/JS/TS/LaTeX/Math CST differential verifier",
+      "description": "Tree-sitter Lambda/JS/TS CST differential verifier",
       "lang": "c++17",
       "source_files": [
         "test/lambda_parser_poc_diff.c",
@@ -932,8 +916,6 @@
         "tree-sitter-lambda",
         "tree-sitter-javascript",
         "tree-sitter-typescript",
-        "tree-sitter-latex",
-        "tree-sitter-latex-math",
         "utf8proc"
       ],
       "target_name": "lambda-cst",
