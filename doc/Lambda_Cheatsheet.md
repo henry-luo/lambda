@@ -312,7 +312,8 @@ Type & Set:
 
 | Operator | Meaning | Operator | Meaning |
 |---|---|---|---|
-| `is` | type check | `in` | membership |
+| `is` | type check | `in` | value membership |
+| `at` | name membership (`'a' at m`) | `of` | position membership (`i of arr`, S8.1.1v2) |
 | `to` | range | `\|` | union |
 | `&` | intersection | `!` | exclusion |
 
@@ -439,7 +440,9 @@ match input {
 | `[for (i in 1 to 2) for (j in 1 to 2) i*j]` | `[1, 2, 2, 4]` | nested for-expressions flatten |
 | `[for (x in []) x]` | `[]` | empty for produces spreadable null, which is skipped |
 | `for (k at {a: 1, b: 2}) k` | `['a', 'b']` | iterate a map by key |
-| `for (k, v at {a: 1, b: 2}) k ++ v` | `['a1', 'b2']` | key and value (S8.1.3) |
+| `for (k, v at {a: 1, b: 2}) k ++ v` | `['a1', 'b2']` | key and value (S8.1.3v2) |
+| `for (i of [10, 20]) i` | `[0, 1]` | iterate positions — `of` binds the index, not the value (S8.1.1v2) |
+| `for (i, x of <d a: 1, "c">) [i, x]` | `[[0, "c"]]` | position and child; attributes are the `at` axis |
 
 For Expression Clauses: `let`, `where`, `group by`, `order by`, `limit`, `offset`
 ```lambda
@@ -728,7 +731,7 @@ pn main() {
 9. `&` - Type intersection
 10. `!` - Type exclusion
 11. `|` - Type union
-12. `is` `in` `at` `<:` - Type test, value and key membership, subtype (`is nan` for NaN detection)
+12. `is` `in` `at` `of` `<:` - Type test, value, name and position membership, subtype (`is nan` for NaN detection)
 13. `not` - Logical NOT: `not a == b` is `not (a == b)`
 14. `and` - Logical AND
 15. `or` - Logical OR

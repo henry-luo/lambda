@@ -226,6 +226,7 @@ typedef enum Operator {
     OPERATOR_IS_NAN,
     OPERATOR_IN,
     OPERATOR_AT,
+    OPERATOR_OF,        // position membership: the IntKey axis (S8.1.1v2)
 
     // pipe operators
     OPERATOR_PIPE,

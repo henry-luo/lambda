@@ -1,7 +1,7 @@
 '=== at membership ==='
 // 8.0.1: `at` tests NAME presence, and a name is a symbol key only. An array
 // keys its items by index, so it has no names and every `at` below is false --
-// by design, not by bounds. An index bound is written `i < len(xs)`.
+// by design, not by bounds. Positions are the `of` axis: `i of xs` (S8.1.1v2).
 let xs = [10, 20, 30]
 0 at xs
 2 at xs

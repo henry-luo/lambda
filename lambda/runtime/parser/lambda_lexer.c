@@ -217,7 +217,8 @@ static const struct LexerKeyword lexer_keywords[] = {
         {"div", LAMBDA_TOK_DIV}, {"and", LAMBDA_TOK_AND},
         {"or", LAMBDA_TOK_OR}, {"to", LAMBDA_TOK_TO},
         {"is", LAMBDA_TOK_IS}, {"in", LAMBDA_TOK_IN},
-        {"at", LAMBDA_TOK_AT}, {"that", LAMBDA_TOK_THAT},
+        {"at", LAMBDA_TOK_AT}, {"of", LAMBDA_TOK_OF},
+        {"that", LAMBDA_TOK_THAT},
         {"where", LAMBDA_TOK_WHERE}, {"order", LAMBDA_TOK_ORDER},
         {"by", LAMBDA_TOK_BY}, {"group", LAMBDA_TOK_GROUP},
         {"into", LAMBDA_TOK_INTO}, {"limit", LAMBDA_TOK_LIMIT},
@@ -287,7 +288,7 @@ bool lambda_lexer_word_bars_binding(const char* text, size_t length) {
     case LAMBDA_TOK_WHERE: case LAMBDA_TOK_THAT:
     // infix word operators — they take a left operand, so they never lead
     case LAMBDA_TOK_AND: case LAMBDA_TOK_OR: case LAMBDA_TOK_TO:
-    case LAMBDA_TOK_IS: case LAMBDA_TOK_IN: case LAMBDA_TOK_AT:
+    case LAMBDA_TOK_IS: case LAMBDA_TOK_IN: case LAMBDA_TOK_AT: case LAMBDA_TOK_OF:
     case LAMBDA_TOK_DIV: case LAMBDA_TOK_EQ_WORD: case LAMBDA_TOK_NE_WORD:
     case LAMBDA_TOK_LT_WORD: case LAMBDA_TOK_LE_WORD: case LAMBDA_TOK_GE_WORD:
     case LAMBDA_TOK_GT_WORD:

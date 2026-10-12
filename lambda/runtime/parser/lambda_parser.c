@@ -111,7 +111,7 @@ static const char* const error_unbraced_else_body =
     "is an expression - write 'else { ... }'";
 static const char* const error_expected_for_binding_name = "expected a for binding name";
 static const char* const error_expected_for_value_name = "expected a for value name";
-static const char* const error_expected_for_binding_source = "expected 'in' or 'at' after for binding";
+static const char* const error_expected_for_binding_source = "expected 'in', 'at' or 'of' after for binding";
 static const char* const error_expected_for_let_name = "expected a for-let name";
 static const char* const error_expected_group_alias = "expected a group alias";
 static const char* const error_expected_group_binding_name = "expected a group binding name";
@@ -436,7 +436,7 @@ static bool token_is_identifier_like(LambdaTokenKind kind) {
     // every use. `else`/`case`/`default` are continuation-only (S16.2.2v2),
     // so the enclosing `if`/`match` claims them before an expression is ever
     // parsed here — the clause reading keeps priority by construction.
-    return kind == LAMBDA_TOK_IDENTIFIER || kind == LAMBDA_TOK_DIV || kind == LAMBDA_TOK_STATE || kind == LAMBDA_TOK_APPLY || kind == LAMBDA_TOK_ELSE || kind == LAMBDA_TOK_CASE || kind == LAMBDA_TOK_DEFAULT || kind == LAMBDA_TOK_VIEW || kind == LAMBDA_TOK_EDIT || kind == LAMBDA_TOK_ON || kind == LAMBDA_TOK_AND || kind == LAMBDA_TOK_OR || kind == LAMBDA_TOK_TO || kind == LAMBDA_TOK_IS || kind == LAMBDA_TOK_IN || kind == LAMBDA_TOK_AT || kind == LAMBDA_TOK_THAT || kind == LAMBDA_TOK_WHERE || kind == LAMBDA_TOK_ORDER || kind == LAMBDA_TOK_BY || kind == LAMBDA_TOK_GROUP || kind == LAMBDA_TOK_INTO || kind == LAMBDA_TOK_LIMIT || kind == LAMBDA_TOK_OFFSET || kind == LAMBDA_TOK_ASC || kind == LAMBDA_TOK_DESC || kind == LAMBDA_TOK_AS || kind == LAMBDA_TOK_EQ_WORD || kind == LAMBDA_TOK_NE_WORD || kind == LAMBDA_TOK_LT_WORD || kind == LAMBDA_TOK_LE_WORD || kind == LAMBDA_TOK_GE_WORD || kind == LAMBDA_TOK_GT_WORD;
+    return kind == LAMBDA_TOK_IDENTIFIER || kind == LAMBDA_TOK_DIV || kind == LAMBDA_TOK_STATE || kind == LAMBDA_TOK_APPLY || kind == LAMBDA_TOK_ELSE || kind == LAMBDA_TOK_CASE || kind == LAMBDA_TOK_DEFAULT || kind == LAMBDA_TOK_VIEW || kind == LAMBDA_TOK_EDIT || kind == LAMBDA_TOK_ON || kind == LAMBDA_TOK_AND || kind == LAMBDA_TOK_OR || kind == LAMBDA_TOK_TO || kind == LAMBDA_TOK_IS || kind == LAMBDA_TOK_IN || kind == LAMBDA_TOK_AT || kind == LAMBDA_TOK_OF || kind == LAMBDA_TOK_THAT || kind == LAMBDA_TOK_WHERE || kind == LAMBDA_TOK_ORDER || kind == LAMBDA_TOK_BY || kind == LAMBDA_TOK_GROUP || kind == LAMBDA_TOK_INTO || kind == LAMBDA_TOK_LIMIT || kind == LAMBDA_TOK_OFFSET || kind == LAMBDA_TOK_ASC || kind == LAMBDA_TOK_DESC || kind == LAMBDA_TOK_AS || kind == LAMBDA_TOK_EQ_WORD || kind == LAMBDA_TOK_NE_WORD || kind == LAMBDA_TOK_LT_WORD || kind == LAMBDA_TOK_LE_WORD || kind == LAMBDA_TOK_GE_WORD || kind == LAMBDA_TOK_GT_WORD;
 }
 
 static bool token_is_identifier(LambdaTokenKind kind) {
@@ -1483,10 +1483,14 @@ static LambdaParseValue parse_for_binding(LambdaRdParser* parser) {
                 error_expected_for_value_name, &name)) return 0;
     }
     if (parser_accept(parser, LAMBDA_TOK_QUESTION)) flags |= LAMBDA_REDUCTION_FLAG_OPTIONAL;
-    if (parser->current.kind != LAMBDA_TOK_IN && parser->current.kind != LAMBDA_TOK_AT) {
+    // S8.1.1v2: the axis word picks the key class -- `at` the names, `of` the
+    // positions, `in` both -- and is one of three spellings here
+    if (parser->current.kind != LAMBDA_TOK_IN && parser->current.kind != LAMBDA_TOK_AT &&
+            parser->current.kind != LAMBDA_TOK_OF) {
         return parser_fail(parser, error_expected_for_binding_source, LAMBDA_TOK_IN);
     }
     if (parser->current.kind == LAMBDA_TOK_AT) flags |= LAMBDA_REDUCTION_FLAG_KEY_ONLY;
+    if (parser->current.kind == LAMBDA_TOK_OF) flags |= LAMBDA_REDUCTION_FLAG_INT_ONLY;
     parser_advance(parser);
     LambdaParseValue source;
     if (!parser_parse_expression_value(parser, 0, &source)) return 0;
@@ -1843,7 +1847,8 @@ static const int infix_bp[LAMBDA_TOK_ELLIPSIS + 1] = {
     [LAMBDA_TOK_THAT] = LAMBDA_BP_PIPE,
     [LAMBDA_TOK_OR] = LAMBDA_BP_OR, [LAMBDA_TOK_AND] = LAMBDA_BP_AND,
     [LAMBDA_TOK_IS] = LAMBDA_BP_MEMBERSHIP, [LAMBDA_TOK_IN] = LAMBDA_BP_MEMBERSHIP,
-    [LAMBDA_TOK_AT] = LAMBDA_BP_MEMBERSHIP, [LAMBDA_TOK_SUBTYPE] = LAMBDA_BP_MEMBERSHIP,
+    [LAMBDA_TOK_AT] = LAMBDA_BP_MEMBERSHIP, [LAMBDA_TOK_OF] = LAMBDA_BP_MEMBERSHIP,
+    [LAMBDA_TOK_SUBTYPE] = LAMBDA_BP_MEMBERSHIP,
     [LAMBDA_TOK_PIPE] = LAMBDA_BP_SET,
     [LAMBDA_TOK_AMPERSAND] = LAMBDA_BP_SET, [LAMBDA_TOK_BANG] = LAMBDA_BP_SET,
     [LAMBDA_TOK_TO] = LAMBDA_BP_SET, [LAMBDA_TOK_EQ_EQ] = LAMBDA_BP_EQUALITY,

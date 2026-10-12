@@ -1649,6 +1649,7 @@ static Item eval_binary(InterpFrame* f, AstBinaryNode* node) {
     case OPERATOR_IS_NAN:    return (Item){.item = b2it(fn_is_nan(left))};
     case OPERATOR_IN:        return (Item){.item = b2it(fn_in(left, right))};
     case OPERATOR_AT:        return (Item){.item = b2it(fn_at(left, right))};
+    case OPERATOR_OF:        return (Item){.item = b2it(fn_of(left, right))};
     default:
         log_error("interp: unhandled binary operator %d", (int)node->op);
         return ItemError;

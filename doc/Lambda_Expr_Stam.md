@@ -795,7 +795,40 @@ for (k, v at {a: 1, b: 5, c: 2} where v > 2) k
 // ['b']
 ```
 
-> **Note**: Use `in` to iterate over arrays; use `at` to iterate over maps.
+> **Note**: The three axes pick a key class (S8.1.1v2): `in` walks every member's value, `at` walks name keys, `of` walks integer positions.
+
+#### Position Iteration with `of`
+
+Use `of` to iterate over the **integer keys** of a container — an array's, list's, range's or string's positions, or an element's child positions. The one-name form binds the **position**, not the value; the values are what `for (x in c)` gives. This is the opposite of JavaScript's `for...of`, by design: in Lambda the one-name form always binds what the axis is named after (S8.1.3v2).
+
+```lambda
+for (i of [10, 20, 30]) i          // [0, 1, 2]
+for (i, x of [10, 20, 30]) i * x   // [0, 20, 60]
+for (i of "abc") i                 // [0, 1, 2]
+```
+
+On an element `of` walks the children only, the mirror of `at` walking the attributes only (S8.1.2v3):
+
+```lambda
+let e = <div id: "main", "a" <b "x">>
+[for (i, c of e) i]     // [0, 1]
+[for (k at e) k]        // ['id']
+[for (k, v in e) k]     // ['id', 0, 1]
+```
+
+A structural map has no integer keys, so `for (i of {a: 1}) i` is empty, exactly as `for (k at [1, 2]) k` is. An index annotation names a key class: on `in` it narrows the walk, so `for (i: int, x in c)` is `for (i, x of c)`; on `of` or `at` it must agree with the axis, and `for (i: symbol, x of c)` is a compile error.
+
+Each axis is also a membership operator with the same meaning: `i of arr` is true when `i` is a position of `arr`, which makes it the index-bound test:
+
+```lambda
+let xs = [10, 20, 30]
+2 of xs        // true
+3 of xs        // false
+1.0 of xs      // true — normalizes as a subscript does (S8.2.1v4)
+-1 of xs       // false
+20 of xs       // false — `of` tests keys, `in` tests values
+'a' of {a: 1}  // false — a name is not a position; use `at`
+```
 
 #### Spreadable Array Behavior
 
@@ -1305,7 +1338,7 @@ From highest to lowest:
 | 9          | `&`                        | Type intersection |
 | 10         | `!`                        | Type exclusion  |
 | 11         | `\|`                       | Type union      |
-| 12         | `is`, `in`, `at`, `<:`     | Type test, value membership, key membership, subtype |
+| 12         | `is`, `in`, `at`, `of`, `<:` | Type test, value membership, name membership, position membership, subtype |
 | 13         | `not`                      | Logical NOT     |
 | 14         | `and`                      | Logical AND     |
 | 15         | `or`                       | Logical OR      |
@@ -1368,7 +1401,9 @@ position `!T` is the complement type, as in `x is !null`. The type operators
 | `is` | Type check | `42 is int` | `true` |
 | `is` | Value comparison | `42 is 42` | `true` |
 | `is nan` | NaN check | `nan is nan` | `true` |
-| `in` | Membership | `2 in [1, 2, 3]` | `true` |
+| `in` | Value membership | `2 in [1, 2, 3]` | `true` |
+| `at` | Name membership | `'a' at {a: 1}` | `true` |
+| `of` | Position membership | `2 of [1, 2, 3]` | `true` |
 | `to` | Range | `1 to 5` | `[1, 2, 3, 4, 5]` |
 
 ### Pipe and Filter Operators
