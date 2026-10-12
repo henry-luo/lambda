@@ -1,0 +1,68 @@
+{
+  "name": "PinnedUnmodifiedThreeRendererAndAddonProduceRealPixels",
+  "viewport": {
+    "width": 848,
+    "height": 650
+  },
+  "input_turn_ms": 0,
+  "event_interval_ms": 0,
+  "events": [
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#status"
+      },
+      "attribute": "data-ready",
+      "equals": "true"
+    },
+    {
+      "type": "assert_surface",
+      "source": "page",
+      "pixels": [
+        [
+          40,
+          130,
+          8,
+          15,
+          34
+        ]
+      ]
+    },
+    {
+      "type": "assert_surface",
+      "source": "page",
+      "region": [
+        160,
+        180,
+        520,
+        360
+      ],
+      "rgba": [
+        [
+          0,
+          255
+        ],
+        [
+          81,
+          255
+        ],
+        [
+          81,
+          255
+        ]
+      ],
+      "count": {
+        "min": 20001
+      }
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "webgl",
+      "target": "#garden",
+      "fields": {
+        "graphics.draws": 4,
+        "graphics.shader_normalize_calls": 8
+      }
+    }
+  ]
+}

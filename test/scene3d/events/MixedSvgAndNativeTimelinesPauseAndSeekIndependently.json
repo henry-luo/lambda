@@ -1,0 +1,124 @@
+{
+  "name": "MixedSvgAndNativeTimelinesPauseAndSeekIndependently",
+  "viewport": {
+    "width": 500,
+    "height": 720
+  },
+  "input_turn_ms": 0,
+  "event_interval_ms": 0,
+  "events": [
+    {
+      "type": "script",
+      "js": "document.getElementById('native-pause').click();document.getElementById('svg-pause').click()"
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "svg_animation",
+      "target": "#wave",
+      "fields": {
+        "paused": 1
+      }
+    },
+    {
+      "type": "script",
+      "js": "document.getElementById('native-seek').click();document.getElementById('svg-seek').click()"
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "animation",
+      "target": "#deformation",
+      "fields": {
+        "time": 1
+      },
+      "clip": "bend"
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "svg_animation",
+      "target": "#wave",
+      "fields": {
+        "time": 0.5
+      }
+    },
+    {
+      "type": "script",
+      "js": "document.getElementById('native-play').click()"
+    },
+    {
+      "type": "animation_tick",
+      "seconds": 0.25
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "animation",
+      "target": "#deformation",
+      "fields": {
+        "time": 1.25
+      },
+      "clip": "bend"
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "svg_animation",
+      "target": "#wave",
+      "fields": {
+        "time": 0.5
+      }
+    },
+    {
+      "type": "script",
+      "js": "document.getElementById('native-pause').click();document.getElementById('svg-play').click()"
+    },
+    {
+      "type": "animation_tick",
+      "seconds": 0.25
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "animation",
+      "target": "#deformation",
+      "fields": {
+        "time": 1.25
+      },
+      "clip": "bend"
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "svg_animation",
+      "target": "#wave",
+      "fields": {
+        "time": 0.75
+      }
+    },
+    {
+      "type": "script",
+      "js": "document.getElementById('native-pause').click();document.getElementById('deformation').addEventListener('finished',event=>document.getElementById('deformation').setAttribute('data-finished',event.clip+':'+event.direction))"
+    },
+    {
+      "type": "scene3d",
+      "op": "configure",
+      "target": "#deformation",
+      "clip": "bend",
+      "once": true,
+      "clamp": true
+    },
+    {
+      "type": "scene3d",
+      "op": "update",
+      "target": "#deformation",
+      "seconds": 1
+    },
+    {
+      "type": "wait",
+      "ms": 8
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#deformation"
+      },
+      "attribute": "data-finished",
+      "equals": "bend:1"
+    }
+  ]
+}

@@ -1,12 +1,13 @@
 # Selected native WebGL2 gate
 
 The existing Radiant baseline includes these fixtures through
-`test_scene3d_gtest`. Native rendering is required: missing graphics fails the
+`test_scene3d_gtest`, which launches `lambda.exe` with event-sim fixtures. The 19 low-level native unit tests run separately in `test_scene3d_unit_gtest`; both targets remain in the Radiant baseline and `make test-scene3d`. Native rendering is required: missing graphics fails the
 test instead of counting blank output as a pass.
 
 ```sh
 make test-scene3d
-./test/test_scene3d_gtest.exe --gtest_filter='*WebGl*:*Three*:*Khronos*:*Es100*'
+./test/test_scene3d_gtest.exe --gtest_filter='*WebGl*:*Three*:*Khronos*'
+./test/test_scene3d_unit_gtest.exe --gtest_filter='*WebGl*:*Es100*'
 ```
 
 | Fixture | Evidence |
@@ -66,8 +67,7 @@ the selected profile. Unsupported methods/extensions are not stubs.
 
 The native fixture additionally verifies default-FBO resolve state,
 immutable snapshot lifetime, lazy drawing-buffer discard and ES100/300 shader
-adaptation. CPU/GPU-accounting and normalization timings are GTest XML
-properties in a release run; debug runs are correctness checks only.
+adaptation. CPU/GPU-accounting, shader normalization counts and retained surface generations are asserted through `assert_render_stats`; debug runs are correctness checks only.
 
 Phase III adds `images.html` (PNG quadrants, dynamic CanvasTexture, alpha,
 unpack preservation, source rectangles, detached dimensions, 24 queued images
@@ -91,13 +91,35 @@ pin. Reproduce the 144-frame release measurement with:
 
 ```sh
 make build-release-compile
-make -C build/premake config=release_native test_scene3d_gtest
+make -C build/premake config=release_native lambda test_scene3d_gtest
 LAMBDA_SCENE3D_MEASURE_FRAMES=1 ./test/test_scene3d_gtest.exe \
   --gtest_filter=Scene3dTest.ThreePbrEnvironmentShadowsAndMultipassProduceRealPixels \
   --gtest_output=xml:temp/webgl3/release.xml
 ```
 
-Debug measurements are rejected. Never run `make release` in a worktree.
-[Validation and raw metrics](../demo/scene3d/reference/phase3/validation.json)
-record the current cost and bounded owned storage; the rich PBR demo currently
-runs at about 3 FPS on the measured M4.
+The optional 144-frame benchmark now runs inside `lambda.exe` through the `measure_frames` event. Its `pbr-metrics.json` artifact lives beside the per-case `events.json` and `viewer.log` under `temp/scene3d/`; it records frame/sampling p50 and p95, vector-cache metadata and final CPU/GPU accounting. The same cache and resource growth bounds remain asserted. `LAMBDA_SCENE3D_CAPTURE_DIR` still captures the PBR samples and imported model poses. Debug measurements are rejected by the host executable. Never run `make release` in a worktree.
+[Historical validation and raw metrics](../demo/scene3d/reference/phase3/validation.json)
+record the earlier cost and bounded owned storage.
+
+On 2026-10-12, three paired release runs on the M4 under shared load reduced the
+44 integration cases from 60.482/59.445/57.151 seconds to
+22.234/20.811/20.750 seconds (median 59.445 → 20.811 seconds, 65% lower).
+Each run retained all 779 event-sim assertions. CPU sampling identified repeated
+filesystem canonicalization while reading loaded Three.js imports; registry
+lookups now probe existing canonical keys before resolving aliases. The native
+Scene3D, WebGL context-loss, pixel, resource-growth and retained-surface checks
+remain in the same cases. The unified runner completed the integration target
+(44 cases plus 10 negative controls) and 19 native unit tests in 12.106 seconds
+with the existing worker configuration; all 73 passed. Reproduce serial suite
+timing with a release host:
+
+```sh
+RADIANT_TEST_EXECUTABLE=./lambda.exe ./test/test_scene3d_gtest.exe \
+  --gtest_filter='Scene3dTest.*' --gtest_output=json:temp/scene3d-timing.json
+```
+
+The unchanged 144-frame PBR benchmark reduced frame p50/p95 from
+265.879/275.879 ms to 38.920/45.099 ms; animation sampling p50 fell from
+2.853 ms to 0.324 ms. Vector-cache entry growth and CPU/GPU byte growth were
+zero in both runs. These are local measurements under shared load, not CI
+timing thresholds.

@@ -1,0 +1,915 @@
+{
+  "name": "WebGlVectorPaintRefreshesSnapshotsAndPreservesRetainedPixels",
+  "viewport": {
+    "width": 320,
+    "height": 240
+  },
+  "input_turn_ms": 0,
+  "event_interval_ms": 0,
+  "events": [
+    {
+      "type": "render",
+      "file": "temp/scene3d-vector-first.svg"
+    },
+    {
+      "type": "assert_file",
+      "path": "temp/scene3d-vector-first.svg",
+      "contains": "data:image/png;base64,"
+    },
+    {
+      "type": "assert_surface",
+      "source": "canvas",
+      "target": "#first",
+      "pixels": [
+        [
+          32,
+          64,
+          255,
+          0,
+          0
+        ]
+      ]
+    },
+    {
+      "type": "snapshot_surface",
+      "source": "canvas",
+      "target": "#first",
+      "name": "previous"
+    },
+    {
+      "type": "snapshot_render_stats",
+      "source": "surface",
+      "surface": "previous",
+      "name": "previous-stats"
+    },
+    {
+      "type": "snapshot_surface",
+      "source": "canvas",
+      "target": "#first",
+      "name": "unchanged"
+    },
+    {
+      "type": "prepare_canvas"
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "surface",
+      "target": "#scene",
+      "fields": {
+        "surface_id": {
+          "baseline": "previous-stats",
+          "eq": 0
+        },
+        "generation": {
+          "baseline": "previous-stats",
+          "eq": 0
+        }
+      },
+      "surface": "unchanged"
+    },
+    {
+      "type": "release_surface",
+      "name": "unchanged"
+    },
+    {
+      "type": "script",
+      "js": "const g=document.getElementById('first').getContext('webgl2');g.disable(g.SCISSOR_TEST);g.clearColor(0,1,0,1);g.clear(g.COLOR_BUFFER_BIT)"
+    },
+    {
+      "type": "snapshot_surface",
+      "source": "canvas",
+      "target": "#first",
+      "name": "current"
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "surface",
+      "target": "#scene",
+      "fields": {
+        "surface_id": {
+          "baseline": "previous-stats",
+          "ne": 0
+        }
+      },
+      "surface": "current"
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "surface",
+      "target": "#scene",
+      "fields": {
+        "immutable": 1,
+        "generation": {
+          "baseline": "previous-stats",
+          "min": 1
+        }
+      },
+      "surface": "previous"
+    },
+    {
+      "type": "assert_surface",
+      "surface": "current",
+      "pixels": [
+        [
+          32,
+          64,
+          0,
+          255,
+          0
+        ]
+      ]
+    },
+    {
+      "type": "assert_surface",
+      "surface": "previous",
+      "pixels": [
+        [
+          32,
+          64,
+          255,
+          0,
+          0
+        ]
+      ]
+    },
+    {
+      "type": "release_surface",
+      "name": "previous"
+    },
+    {
+      "type": "release_surface",
+      "name": "current"
+    },
+    {
+      "type": "snapshot_surface",
+      "source": "canvas",
+      "target": "#first",
+      "name": "previous"
+    },
+    {
+      "type": "snapshot_render_stats",
+      "source": "surface",
+      "surface": "previous",
+      "name": "previous-stats"
+    },
+    {
+      "type": "snapshot_surface",
+      "source": "canvas",
+      "target": "#first",
+      "name": "unchanged"
+    },
+    {
+      "type": "prepare_canvas"
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "surface",
+      "target": "#scene",
+      "fields": {
+        "surface_id": {
+          "baseline": "previous-stats",
+          "eq": 0
+        },
+        "generation": {
+          "baseline": "previous-stats",
+          "eq": 0
+        }
+      },
+      "surface": "unchanged"
+    },
+    {
+      "type": "release_surface",
+      "name": "unchanged"
+    },
+    {
+      "type": "script",
+      "js": "const g=document.getElementById('first').getContext('webgl2');g.disable(g.SCISSOR_TEST);g.clearColor(0,0,1,1);g.clear(g.COLOR_BUFFER_BIT)"
+    },
+    {
+      "type": "snapshot_surface",
+      "source": "canvas",
+      "target": "#first",
+      "name": "current"
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "surface",
+      "target": "#scene",
+      "fields": {
+        "surface_id": {
+          "baseline": "previous-stats",
+          "ne": 0
+        }
+      },
+      "surface": "current"
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "surface",
+      "target": "#scene",
+      "fields": {
+        "immutable": 1,
+        "generation": {
+          "baseline": "previous-stats",
+          "min": 1
+        }
+      },
+      "surface": "previous"
+    },
+    {
+      "type": "assert_surface",
+      "surface": "current",
+      "pixels": [
+        [
+          32,
+          64,
+          0,
+          0,
+          255
+        ]
+      ]
+    },
+    {
+      "type": "assert_surface",
+      "surface": "previous",
+      "pixels": [
+        [
+          32,
+          64,
+          0,
+          255,
+          0
+        ]
+      ]
+    },
+    {
+      "type": "release_surface",
+      "name": "previous"
+    },
+    {
+      "type": "release_surface",
+      "name": "current"
+    },
+    {
+      "type": "snapshot_surface",
+      "source": "canvas",
+      "target": "#first",
+      "name": "previous"
+    },
+    {
+      "type": "snapshot_render_stats",
+      "source": "surface",
+      "surface": "previous",
+      "name": "previous-stats"
+    },
+    {
+      "type": "snapshot_surface",
+      "source": "canvas",
+      "target": "#first",
+      "name": "unchanged"
+    },
+    {
+      "type": "prepare_canvas"
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "surface",
+      "target": "#scene",
+      "fields": {
+        "surface_id": {
+          "baseline": "previous-stats",
+          "eq": 0
+        },
+        "generation": {
+          "baseline": "previous-stats",
+          "eq": 0
+        }
+      },
+      "surface": "unchanged"
+    },
+    {
+      "type": "release_surface",
+      "name": "unchanged"
+    },
+    {
+      "type": "script",
+      "js": "const g=document.getElementById('first').getContext('webgl2');g.disable(g.SCISSOR_TEST);g.clearColor(0,1,0,1);g.clear(g.COLOR_BUFFER_BIT)"
+    },
+    {
+      "type": "snapshot_surface",
+      "source": "canvas",
+      "target": "#first",
+      "name": "current"
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "surface",
+      "target": "#scene",
+      "fields": {
+        "surface_id": {
+          "baseline": "previous-stats",
+          "ne": 0
+        }
+      },
+      "surface": "current"
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "surface",
+      "target": "#scene",
+      "fields": {
+        "immutable": 1,
+        "generation": {
+          "baseline": "previous-stats",
+          "min": 1
+        }
+      },
+      "surface": "previous"
+    },
+    {
+      "type": "assert_surface",
+      "surface": "current",
+      "pixels": [
+        [
+          32,
+          64,
+          0,
+          255,
+          0
+        ]
+      ]
+    },
+    {
+      "type": "assert_surface",
+      "surface": "previous",
+      "pixels": [
+        [
+          32,
+          64,
+          0,
+          0,
+          255
+        ]
+      ]
+    },
+    {
+      "type": "release_surface",
+      "name": "previous"
+    },
+    {
+      "type": "release_surface",
+      "name": "current"
+    },
+    {
+      "type": "snapshot_surface",
+      "source": "canvas",
+      "target": "#first",
+      "name": "previous"
+    },
+    {
+      "type": "snapshot_render_stats",
+      "source": "surface",
+      "surface": "previous",
+      "name": "previous-stats"
+    },
+    {
+      "type": "snapshot_surface",
+      "source": "canvas",
+      "target": "#first",
+      "name": "unchanged"
+    },
+    {
+      "type": "prepare_canvas"
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "surface",
+      "target": "#scene",
+      "fields": {
+        "surface_id": {
+          "baseline": "previous-stats",
+          "eq": 0
+        },
+        "generation": {
+          "baseline": "previous-stats",
+          "eq": 0
+        }
+      },
+      "surface": "unchanged"
+    },
+    {
+      "type": "release_surface",
+      "name": "unchanged"
+    },
+    {
+      "type": "script",
+      "js": "const g=document.getElementById('first').getContext('webgl2');g.disable(g.SCISSOR_TEST);g.clearColor(0,0,1,1);g.clear(g.COLOR_BUFFER_BIT)"
+    },
+    {
+      "type": "snapshot_surface",
+      "source": "canvas",
+      "target": "#first",
+      "name": "current"
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "surface",
+      "target": "#scene",
+      "fields": {
+        "surface_id": {
+          "baseline": "previous-stats",
+          "ne": 0
+        }
+      },
+      "surface": "current"
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "surface",
+      "target": "#scene",
+      "fields": {
+        "immutable": 1,
+        "generation": {
+          "baseline": "previous-stats",
+          "min": 1
+        }
+      },
+      "surface": "previous"
+    },
+    {
+      "type": "assert_surface",
+      "surface": "current",
+      "pixels": [
+        [
+          32,
+          64,
+          0,
+          0,
+          255
+        ]
+      ]
+    },
+    {
+      "type": "assert_surface",
+      "surface": "previous",
+      "pixels": [
+        [
+          32,
+          64,
+          0,
+          255,
+          0
+        ]
+      ]
+    },
+    {
+      "type": "release_surface",
+      "name": "previous"
+    },
+    {
+      "type": "release_surface",
+      "name": "current"
+    },
+    {
+      "type": "snapshot_surface",
+      "source": "canvas",
+      "target": "#first",
+      "name": "previous"
+    },
+    {
+      "type": "snapshot_render_stats",
+      "source": "surface",
+      "surface": "previous",
+      "name": "previous-stats"
+    },
+    {
+      "type": "snapshot_surface",
+      "source": "canvas",
+      "target": "#first",
+      "name": "unchanged"
+    },
+    {
+      "type": "prepare_canvas"
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "surface",
+      "target": "#scene",
+      "fields": {
+        "surface_id": {
+          "baseline": "previous-stats",
+          "eq": 0
+        },
+        "generation": {
+          "baseline": "previous-stats",
+          "eq": 0
+        }
+      },
+      "surface": "unchanged"
+    },
+    {
+      "type": "release_surface",
+      "name": "unchanged"
+    },
+    {
+      "type": "script",
+      "js": "const g=document.getElementById('first').getContext('webgl2');g.disable(g.SCISSOR_TEST);g.clearColor(0,1,0,1);g.clear(g.COLOR_BUFFER_BIT)"
+    },
+    {
+      "type": "snapshot_surface",
+      "source": "canvas",
+      "target": "#first",
+      "name": "current"
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "surface",
+      "target": "#scene",
+      "fields": {
+        "surface_id": {
+          "baseline": "previous-stats",
+          "ne": 0
+        }
+      },
+      "surface": "current"
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "surface",
+      "target": "#scene",
+      "fields": {
+        "immutable": 1,
+        "generation": {
+          "baseline": "previous-stats",
+          "min": 1
+        }
+      },
+      "surface": "previous"
+    },
+    {
+      "type": "assert_surface",
+      "surface": "current",
+      "pixels": [
+        [
+          32,
+          64,
+          0,
+          255,
+          0
+        ]
+      ]
+    },
+    {
+      "type": "assert_surface",
+      "surface": "previous",
+      "pixels": [
+        [
+          32,
+          64,
+          0,
+          0,
+          255
+        ]
+      ]
+    },
+    {
+      "type": "release_surface",
+      "name": "previous"
+    },
+    {
+      "type": "release_surface",
+      "name": "current"
+    },
+    {
+      "type": "snapshot_surface",
+      "source": "canvas",
+      "target": "#first",
+      "name": "previous"
+    },
+    {
+      "type": "snapshot_render_stats",
+      "source": "surface",
+      "surface": "previous",
+      "name": "previous-stats"
+    },
+    {
+      "type": "snapshot_surface",
+      "source": "canvas",
+      "target": "#first",
+      "name": "unchanged"
+    },
+    {
+      "type": "prepare_canvas"
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "surface",
+      "target": "#scene",
+      "fields": {
+        "surface_id": {
+          "baseline": "previous-stats",
+          "eq": 0
+        },
+        "generation": {
+          "baseline": "previous-stats",
+          "eq": 0
+        }
+      },
+      "surface": "unchanged"
+    },
+    {
+      "type": "release_surface",
+      "name": "unchanged"
+    },
+    {
+      "type": "script",
+      "js": "const g=document.getElementById('first').getContext('webgl2');g.disable(g.SCISSOR_TEST);g.clearColor(0,0,1,1);g.clear(g.COLOR_BUFFER_BIT)"
+    },
+    {
+      "type": "snapshot_surface",
+      "source": "canvas",
+      "target": "#first",
+      "name": "current"
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "surface",
+      "target": "#scene",
+      "fields": {
+        "surface_id": {
+          "baseline": "previous-stats",
+          "ne": 0
+        }
+      },
+      "surface": "current"
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "surface",
+      "target": "#scene",
+      "fields": {
+        "immutable": 1,
+        "generation": {
+          "baseline": "previous-stats",
+          "min": 1
+        }
+      },
+      "surface": "previous"
+    },
+    {
+      "type": "assert_surface",
+      "surface": "current",
+      "pixels": [
+        [
+          32,
+          64,
+          0,
+          0,
+          255
+        ]
+      ]
+    },
+    {
+      "type": "assert_surface",
+      "surface": "previous",
+      "pixels": [
+        [
+          32,
+          64,
+          0,
+          255,
+          0
+        ]
+      ]
+    },
+    {
+      "type": "release_surface",
+      "name": "previous"
+    },
+    {
+      "type": "release_surface",
+      "name": "current"
+    },
+    {
+      "type": "snapshot_surface",
+      "source": "canvas",
+      "target": "#first",
+      "name": "previous"
+    },
+    {
+      "type": "snapshot_render_stats",
+      "source": "surface",
+      "surface": "previous",
+      "name": "previous-stats"
+    },
+    {
+      "type": "snapshot_surface",
+      "source": "canvas",
+      "target": "#first",
+      "name": "unchanged"
+    },
+    {
+      "type": "prepare_canvas"
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "surface",
+      "target": "#scene",
+      "fields": {
+        "surface_id": {
+          "baseline": "previous-stats",
+          "eq": 0
+        },
+        "generation": {
+          "baseline": "previous-stats",
+          "eq": 0
+        }
+      },
+      "surface": "unchanged"
+    },
+    {
+      "type": "release_surface",
+      "name": "unchanged"
+    },
+    {
+      "type": "script",
+      "js": "const g=document.getElementById('first').getContext('webgl2');g.disable(g.SCISSOR_TEST);g.clearColor(0,1,0,1);g.clear(g.COLOR_BUFFER_BIT)"
+    },
+    {
+      "type": "snapshot_surface",
+      "source": "canvas",
+      "target": "#first",
+      "name": "current"
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "surface",
+      "target": "#scene",
+      "fields": {
+        "surface_id": {
+          "baseline": "previous-stats",
+          "ne": 0
+        }
+      },
+      "surface": "current"
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "surface",
+      "target": "#scene",
+      "fields": {
+        "immutable": 1,
+        "generation": {
+          "baseline": "previous-stats",
+          "min": 1
+        }
+      },
+      "surface": "previous"
+    },
+    {
+      "type": "assert_surface",
+      "surface": "current",
+      "pixels": [
+        [
+          32,
+          64,
+          0,
+          255,
+          0
+        ]
+      ]
+    },
+    {
+      "type": "assert_surface",
+      "surface": "previous",
+      "pixels": [
+        [
+          32,
+          64,
+          0,
+          0,
+          255
+        ]
+      ]
+    },
+    {
+      "type": "release_surface",
+      "name": "previous"
+    },
+    {
+      "type": "release_surface",
+      "name": "current"
+    },
+    {
+      "type": "snapshot_surface",
+      "source": "canvas",
+      "target": "#first",
+      "name": "previous"
+    },
+    {
+      "type": "snapshot_render_stats",
+      "source": "surface",
+      "surface": "previous",
+      "name": "previous-stats"
+    },
+    {
+      "type": "snapshot_surface",
+      "source": "canvas",
+      "target": "#first",
+      "name": "unchanged"
+    },
+    {
+      "type": "prepare_canvas"
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "surface",
+      "target": "#scene",
+      "fields": {
+        "surface_id": {
+          "baseline": "previous-stats",
+          "eq": 0
+        },
+        "generation": {
+          "baseline": "previous-stats",
+          "eq": 0
+        }
+      },
+      "surface": "unchanged"
+    },
+    {
+      "type": "release_surface",
+      "name": "unchanged"
+    },
+    {
+      "type": "script",
+      "js": "const g=document.getElementById('first').getContext('webgl2');g.disable(g.SCISSOR_TEST);g.clearColor(0,0,1,1);g.clear(g.COLOR_BUFFER_BIT)"
+    },
+    {
+      "type": "snapshot_surface",
+      "source": "canvas",
+      "target": "#first",
+      "name": "current"
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "surface",
+      "target": "#scene",
+      "fields": {
+        "surface_id": {
+          "baseline": "previous-stats",
+          "ne": 0
+        }
+      },
+      "surface": "current"
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "surface",
+      "target": "#scene",
+      "fields": {
+        "immutable": 1,
+        "generation": {
+          "baseline": "previous-stats",
+          "min": 1
+        }
+      },
+      "surface": "previous"
+    },
+    {
+      "type": "assert_surface",
+      "surface": "current",
+      "pixels": [
+        [
+          32,
+          64,
+          0,
+          0,
+          255
+        ]
+      ]
+    },
+    {
+      "type": "assert_surface",
+      "surface": "previous",
+      "pixels": [
+        [
+          32,
+          64,
+          0,
+          255,
+          0
+        ]
+      ]
+    },
+    {
+      "type": "release_surface",
+      "name": "previous"
+    },
+    {
+      "type": "release_surface",
+      "name": "current"
+    }
+  ],
+  "initial_render": false
+}

@@ -1,0 +1,227 @@
+{
+  "name": "NativeClipAnimatesTransformAndMaterialWithoutRebuildingGeometry",
+  "viewport": {
+    "width": 320,
+    "height": 240
+  },
+  "input_turn_ms": 0,
+  "event_interval_ms": 0,
+  "events": [
+    {
+      "type": "scene3d",
+      "op": "snapshot",
+      "target": "#scene"
+    },
+    {
+      "type": "scene3d",
+      "op": "play",
+      "target": "#scene",
+      "clip": "travel"
+    },
+    {
+      "type": "scene3d",
+      "op": "seek",
+      "target": "#scene",
+      "seconds": 0
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#scene",
+      "width": 128,
+      "height": 128,
+      "pixels": [
+        [
+          40,
+          64,
+          255,
+          0,
+          0
+        ],
+        [
+          88,
+          64,
+          0,
+          0,
+          0,
+          0
+        ]
+      ]
+    },
+    {
+      "type": "snapshot_render_stats",
+      "source": "scene3d",
+      "target": "#scene",
+      "name": "before"
+    },
+    {
+      "type": "snapshot_render_stats",
+      "source": "animation",
+      "target": "#scene",
+      "name": "action",
+      "clip": "travel"
+    },
+    {
+      "type": "scene3d",
+      "op": "seek",
+      "target": "#scene",
+      "seconds": 1
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#scene",
+      "width": 128,
+      "height": 128,
+      "pixels": [
+        [
+          88,
+          64,
+          0,
+          255,
+          0
+        ],
+        [
+          40,
+          64,
+          0,
+          0,
+          0,
+          0
+        ]
+      ]
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "scene3d",
+      "target": "#scene",
+      "fields": {
+        "projection_generation": {
+          "baseline": "before",
+          "eq": 0
+        },
+        "graphics.allocated_bytes": {
+          "baseline": "before",
+          "eq": 0
+        },
+        "snapshot_generation": {
+          "baseline": "before",
+          "min": 1
+        }
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "!document.getElementById('object').hasAttribute('position')&&document.getElementById('object-material').getAttribute('color')==='#ff0000'"
+    },
+    {
+      "type": "scene3d",
+      "op": "lose_context",
+      "target": "#scene"
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#scene",
+      "width": 128,
+      "height": 128,
+      "pixels": [
+        [
+          88,
+          64,
+          0,
+          255,
+          0
+        ]
+      ]
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "animation",
+      "target": "#scene",
+      "fields": {
+        "action_id": {
+          "baseline": "action",
+          "eq": 0
+        }
+      },
+      "clip": "travel"
+    },
+    {
+      "type": "scene3d",
+      "op": "stop",
+      "target": "#scene",
+      "clip": "travel"
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#scene",
+      "width": 128,
+      "height": 128,
+      "pixels": [
+        [
+          64,
+          64,
+          255,
+          0,
+          0
+        ]
+      ]
+    },
+    {
+      "type": "script",
+      "js": "document.getElementById(\"object-material\").setAttribute(\"color\",\"#0000ff\")"
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#scene",
+      "width": 128,
+      "height": 128,
+      "pixels": [
+        [
+          64,
+          64,
+          0,
+          0,
+          255
+        ]
+      ]
+    },
+    {
+      "type": "scene3d",
+      "op": "play",
+      "target": "#scene",
+      "clip": "travel"
+    },
+    {
+      "type": "scene3d",
+      "op": "seek",
+      "target": "#scene",
+      "seconds": 0.5
+    },
+    {
+      "type": "scene3d",
+      "op": "stop",
+      "target": "#scene",
+      "clip": "travel"
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#scene",
+      "width": 128,
+      "height": 128,
+      "pixels": [
+        [
+          64,
+          64,
+          0,
+          0,
+          255
+        ]
+      ]
+    }
+  ]
+}

@@ -1,0 +1,120 @@
+{
+  "name": "NativeBoneAndMorphPoseChangePixelsWithoutReallocatingGeometry",
+  "viewport": {
+    "width": 500,
+    "height": 560
+  },
+  "input_turn_ms": 0,
+  "event_interval_ms": 0,
+  "events": [
+    {
+      "type": "scene3d",
+      "op": "snapshot",
+      "target": "#deformation",
+      "width": 400,
+      "height": 260
+    },
+    {
+      "type": "scene3d",
+      "op": "seek",
+      "target": "#deformation",
+      "seconds": 0
+    },
+    {
+      "type": "snapshot_surface",
+      "name": "pose",
+      "source": "scene3d",
+      "target": "#deformation",
+      "width": 400,
+      "height": 260
+    },
+    {
+      "type": "snapshot_render_stats",
+      "source": "scene3d",
+      "target": "#deformation",
+      "name": "before"
+    },
+    {
+      "type": "scene3d",
+      "op": "seek",
+      "target": "#deformation",
+      "seconds": 1
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#deformation",
+      "width": 400,
+      "height": 260,
+      "reference": "pose",
+      "region": [
+        0,
+        0,
+        200,
+        260
+      ],
+      "count": {
+        "min": 601
+      }
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#deformation",
+      "width": 400,
+      "height": 260,
+      "reference": "pose",
+      "region": [
+        200,
+        0,
+        200,
+        260
+      ],
+      "count": {
+        "min": 601
+      }
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "scene3d",
+      "target": "#deformation",
+      "fields": {
+        "projection_generation": {
+          "baseline": "before",
+          "eq": 0
+        },
+        "graphics.allocated_bytes": {
+          "baseline": "before",
+          "eq": 0
+        },
+        "graphics.resources": {
+          "baseline": "before",
+          "eq": 0
+        }
+      }
+    },
+    {
+      "type": "scene3d",
+      "op": "lose_context",
+      "target": "#deformation"
+    },
+    {
+      "type": "scene3d",
+      "op": "snapshot",
+      "target": "#deformation",
+      "width": 400,
+      "height": 260
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "scene3d",
+      "target": "#deformation",
+      "fields": {
+        "animation_id": {
+          "baseline": "before",
+          "eq": 0
+        }
+      }
+    }
+  ]
+}
