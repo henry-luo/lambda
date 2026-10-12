@@ -1008,7 +1008,7 @@ ImageSurface* scene3d_snapshot(DomElement* root, UiContext* ui, float width, flo
     ImageSurface* snapshot=rendered?native_gl_snapshot(entry->graphics,entry->target):nullptr;
     if (!snapshot) { scene3d_fail(entry,native_gl_diagnostic(entry->graphics));scene3d_retire_snapshot(entry);return nullptr; }
     // retire the generation while leases keep old pixels available to in-flight/retained consumers.
-    scene3d_retire_snapshot(entry);snapshot->snapshot_refs=1;entry->snapshot=snapshot;entry->snapshot_generation++;
+    scene3d_retire_snapshot(entry);image_surface_snapshot_publish(snapshot);entry->snapshot=snapshot;entry->snapshot_generation++;
     entry->width=width;entry->height=height;entry->scale=raster_scale;entry->mutation_epoch=root->doc->mutation_epoch;
     entry->animated_generation=scene3d_animation_generation(entry->animation);
     entry->stats.projection_generation=entry->projection_generation;entry->stats.snapshot_generation=entry->snapshot_generation;

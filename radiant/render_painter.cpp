@@ -16,7 +16,7 @@
 // flushes while preserving paint order.
 // ---------------------------------------------------------------------------
 
-static inline PaintRecordTarget rc_record_target(RasterRenderContext* rdcon) {
+PaintRecordTarget rc_record_target(RasterRenderContext* rdcon) {
     PaintRecordTarget target = {
         rdcon ? rdcon->paint_list : nullptr,
         rdcon ? rdcon->dl : nullptr,
@@ -212,6 +212,9 @@ void rc_apply_filter(RasterRenderContext* rdcon, float x, float y, float w, floa
     for (FilterFunction* function = filter ? filter->functions.get() : nullptr; function; function = function->next) {
         if (function->svg) { function->svg->paint_x = x; function->svg->paint_y = y; }
     }
+    filter = dl_capture_filter_lengths(rdcon ? rdcon->dl.get() : nullptr,
+        filter, rdcon ? rdcon->raster_scale : 1.0f);
+    if (!filter) { log_error("[FILTER_DENSITY] native filter length capture failed"); return; }
     PaintRecordTarget target = rc_record_target(rdcon);
     paint_record_apply_filter(&target, "rc_apply_filter", x, y, w, h, filter, clip);
 }
@@ -327,6 +330,10 @@ void render_painter_fill_surface_rect(RasterRenderContext* rdcon, ImageSurface* 
                                    color, clip, clip_shapes, clip_depth);
 }
 
+bool render_painter_can_blit_surface(const RasterRenderContext* context) {
+    return context && !context->has_transform && !context->css3d_context && context->vector_clip_depth == 0;
+}
+
 void render_painter_blit_surface_scaled(RasterRenderContext* rdcon,
                                         ImageSurface* src, Rect* src_rect,
                                         ImageSurface* dst, Rect* dst_rect, Bound* clip,
@@ -336,7 +343,7 @@ void render_painter_blit_surface_scaled(RasterRenderContext* rdcon,
     (void)src_rect;
     (void)dst;
     if (!src || !dst_rect) return;
-    if (rdcon->has_transform || rdcon->css3d_context || rdcon->vector_clip_depth > 0) {
+    if (!render_painter_can_blit_surface(rdcon)) {
         // CPU blits have no homography or vector clip stack. Record images
         // through the same transformed, resource-owned path as replaced media.
         ImageSurfaceReadScope read_scope;

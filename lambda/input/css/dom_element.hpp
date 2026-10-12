@@ -1632,6 +1632,8 @@ bool dom_document_finalize_loader_pool(DomDocument* document, Pool* pool);
  * @return New DomElement or NULL on failure
  */
 DomElement* dom_element_create(DomDocument* doc, const char* tag_name, Element* native_element);
+// detached, unbacked fragment nodes share the document lifetime (D4.5.1v4).
+extern "C" DomElement* dom_document_fragment_create(DomDocument* doc);
 DomElement* build_dom_tree_from_element(Element* element, DomDocument* document, DomElement* parent);
 
 /**

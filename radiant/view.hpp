@@ -386,6 +386,7 @@ bool view_get_transform_matrix(View* view, RdtMatrix* out_matrix);
 enum BackfaceCheck { BACKFACE_SELF, BACKFACE_SUBTREE, BACKFACE_HIT_TEST };
 bool view_backface_is_hidden(View* view, BackfaceCheck check = BACKFACE_SELF);
 bool view_visibility_is_hidden(const View* view);
+bool view_focus_is_hidden(View* view);
 bool view_size_containment_applies(DisplayValue display);
 bool view_contents_are_skipped(const View* view);
 enum ContentVisibilityCheck { CONTENT_VISIBILITY_PAINT, CONTENT_VISIBILITY_USER_AGENT };
@@ -754,6 +755,7 @@ extern ImageSurface* image_surface_alloc(void);
 // point, when no read scope is open anywhere.
 extern ImageSurface* image_surface_lookup(lam::Handle<ImageSurface> handle);
 // immutable snapshot leases retain storage across replacement/removal (D4.5.1v4).
+extern void image_surface_snapshot_publish(ImageSurface* surface);
 extern ImageSurface* image_surface_snapshot_retain(ImageSurface* surface);
 extern void image_surface_snapshot_release(ImageSurface* surface);
 // Invalidates every handle to `surface` and returns its slot at once (only for

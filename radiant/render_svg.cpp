@@ -312,25 +312,32 @@ static void render_text_view_svg(SvgRenderContext* ctx, ViewText* text) {
     bool has_text_shadow = parent_elem && parent_elem->font &&
                            parent_elem->fontp()->text_shadow;
 
-    if (!has_text_deco && !has_text_shadow) {
-        PaintGlyphRun run = {};
-        run.font = lam::up(&ctx->font);
-        run.color = ctx->color;
-        run.text = lam::up(text_content.get());
-        run.text_len = (int)strlen(text_content.get()); // INT_CAST_OK: UTF-8 text run byte length is bounded by TextRect input.
+    PaintGlyphRun run = {};
+    run.font = lam::up(&ctx->font);
+    run.color = ctx->color;
+    run.text = lam::up(text_content.get());
+    run.text_len = (int)strlen(text_content.get()); // INT_CAST_OK: UTF-8 text run byte length is bounded by TextRect input.
+    run.font_family = lam::up(font_box_handle(&ctx->font)
+        ? font_handle_get_family_name(font_box_handle(&ctx->font))
+        : "Arial");
+    run.font_size = font_size;
+    run.x = x;
+    run.baseline_y = baseline_y;
+    run.word_spacing = word_spacing;
+    run.cjk_spacing = cjk_spacing;
+    run.font_weight = font_weight;
+    run.italic = italic;
+    if (parent_elem && render_paint_text_background(svg_active_paint_list(ctx), ctx->ui_context,
+            parent_elem, &run, {ctx->block.x, ctx->block.y, parent_elem->width, parent_elem->height})) {
+        svg_lower_paint_list(ctx);
+    }
+    if (has_text_shadow && render_paint_text_shadows(svg_active_paint_list(ctx), ctx->ui_context,
+            &run, parent_elem->fontp()->text_shadow)) svg_lower_paint_list(ctx);
+    // background glyph geometry is shared by ordinary, decorated and shadowed text.
+    if (!has_text_deco) {
         // effect fallback retains commands until rasterization, so its paint list
         // must own text that immediate SVG lowering would otherwise consume.
         if (ctx->effect_fallback.active) run.owned_text = lam::own((const char*)text_content.release());
-        run.font_family = lam::up(font_box_handle(&ctx->font)
-            ? font_handle_get_family_name(font_box_handle(&ctx->font))
-            : "Arial");
-        run.font_size = font_size;
-        run.x = x;
-        run.baseline_y = baseline_y;
-        run.word_spacing = word_spacing;
-        run.cjk_spacing = cjk_spacing;
-        run.font_weight = font_weight;
-        run.italic = italic;
         // a receiving SVG viewer may substitute this face and change fitted glyph bounds (FT-15).
         RdtPath* outline = !ctx->effect_fallback.active
             ? render_path_create_text_run(&run, ctx->ui_context ? ctx->ui_context->font_ctx.get() : nullptr)

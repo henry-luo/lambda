@@ -6,12 +6,18 @@
 #include "dom_engine.h"
 #include "dom_graphics.h"
 #include "dom_style.h"
+#include "dom_host_engine.h"
+#include "dom_collection_types.h"
+#include "dom_event_host.h"
 
 // Native providers belong to the lower runtime; native module registration
 // publishes immutable process-lifetime tables without an upward link (D7.1.3).
 static const DomCanvasEngineOps* canvas_engine_operations = nullptr;
 static const DomWebGlEngineOps* webgl_engine_operations = nullptr;
 static const DomStyleEngineOps* style_engine_operations = nullptr;
+static const DomHostEngineOps* host_engine_operations = nullptr;
+static const DomCollectionHostTypes* collection_host_types = nullptr;
+static const DomEventHostOps* event_host_operations = nullptr;
 
 template<class Operations, class... Fields>
 static bool dom_provider_register(const Operations** slot, const Operations* operations, Fields... fields) {
@@ -45,6 +51,27 @@ extern "C" bool dom_style_register_engine(const DomStyleEngineOps* operations) {
     return dom_provider_register(&style_engine_operations, operations
         DOM_STYLE_ENGINE_OPERATIONS(DOM_PROVIDER_MEMBER));
 }
+#define DOM_HOST_MEMBER(result, name, parameters, arguments, absence) , &Operations::name
+extern "C" bool dom_host_register_engine(const DomHostEngineOps* operations) {
+    using Operations = DomHostEngineOps;
+    return dom_provider_register(&host_engine_operations, operations
+        DOM_HOST_ENGINE_OPERATIONS(DOM_HOST_MEMBER));
+}
+#undef DOM_HOST_MEMBER
+#define DOM_COLLECTION_MEMBER(name) , &Operations::name
+extern "C" bool dom_collection_register_types(const DomCollectionHostTypes* types) {
+    using Operations = DomCollectionHostTypes;
+    return dom_provider_register(&collection_host_types, types
+        DOM_COLLECTION_HOST_TYPES(DOM_COLLECTION_MEMBER));
+}
+#undef DOM_COLLECTION_MEMBER
+#define DOM_EVENT_MEMBER(result, name, parameters, arguments, absence) , &Operations::name
+extern "C" bool dom_event_register_host(const DomEventHostOps* operations) {
+    using Operations = DomEventHostOps;
+    return dom_provider_register(&event_host_operations, operations
+        DOM_EVENT_HOST_OPERATIONS(DOM_EVENT_MEMBER));
+}
+#undef DOM_EVENT_MEMBER
 #undef DOM_PROVIDER_MEMBER
 
 extern "C" const DomCanvasEngineOps* dom_canvas_engine_ops(void) {
@@ -58,6 +85,43 @@ extern "C" const DomWebGlEngineOps* dom_webgl_engine_ops(void) {
 extern "C" const DomStyleEngineOps* dom_style_engine_ops(void) {
     return dom_provider_load(&style_engine_operations);
 }
+
+extern "C" const DomHostEngineOps* dom_host_engine_ops(void) {
+    return dom_provider_load(&host_engine_operations);
+}
+
+// lower-owned catalog wrappers preserve absence without upward native imports.
+#define DOM_HOST_DEFINE(result, name, parameters, arguments, absence) \
+    extern "C" result dom_engine_##name parameters { \
+        const DomHostEngineOps* operations = dom_host_engine_ops(); \
+        return operations ? operations->name arguments : absence; \
+    }
+DOM_HOST_ENGINE_OPERATIONS(DOM_HOST_DEFINE)
+#undef DOM_HOST_DEFINE
+
+extern "C" const DomCollectionHostTypes* dom_collection_host_types(void) {
+    return dom_provider_load(&collection_host_types);
+}
+
+#define DOM_COLLECTION_GET(name) \
+    extern "C" const void* dom_##name##_host_type(void) { \
+        const DomCollectionHostTypes* types = dom_collection_host_types(); \
+        return types ? types->name : nullptr; \
+    }
+DOM_COLLECTION_HOST_TYPES(DOM_COLLECTION_GET)
+#undef DOM_COLLECTION_GET
+
+extern "C" const DomEventHostOps* dom_event_host_ops(void) {
+    return dom_provider_load(&event_host_operations);
+}
+
+#define DOM_EVENT_DEFINE(result, name, parameters, arguments, absence) \
+    extern "C" result dom_event_host_##name parameters { \
+        const DomEventHostOps* operations = dom_event_host_ops(); \
+        return operations ? operations->name arguments : absence; \
+    }
+DOM_EVENT_HOST_OPERATIONS(DOM_EVENT_DEFINE)
+#undef DOM_EVENT_DEFINE
 
 #define DOM_ENGINE_WEAK extern "C" __attribute__((weak))
 

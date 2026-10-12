@@ -1,0 +1,16 @@
+<!doctype html><meta charset=utf-8><body id=body>
+<style>body{margin:0}button{height:24px}.targets{position:absolute;top:96px}#visible_child{visibility:visible}</style>
+<button id=run_display>Hide display</button><button id=run_visibility>Hide visibility</button><button id=run_ancestor>Hide ancestor</button><button id=run_visible>Keep visible child</button>
+<div class=targets><button id=display_target>Display</button><button id=visibility_target>Visibility</button><div id=ancestor><button id=ancestor_child>Child</button></div><div id=visible_host><button id=visible_child>Visible child</button></div></div>
+<script>
+(function(){
+ var rows=[['display','display_target','display_target','display','none'],['visibility','visibility_target','visibility_target','visibility','hidden'],['ancestor','ancestor_child','ancestor','display','none'],['visible','visible_child','visible_host','visibility','hidden']];
+ rows.forEach(function(row){
+  var runner=document.getElementById('run_'+row[0]),target=document.getElementById(row[1]),owner=document.getElementById(row[2]);
+  var events=[];
+  function capture(){runner.setAttribute('data-events',events.join(','));runner.setAttribute('data-active',document.activeElement.id);runner.setAttribute('data-focus',''+target.matches(':focus'))}
+  target.addEventListener('blur',function(){events.push('blur');capture()});target.addEventListener('focusout',function(){events.push('focusout');capture()});
+  runner.onclick=function(){owner.style[row[3]]='';events=[];target.focus();owner.style[row[3]]=row[4];capture()};
+ });
+})();
+</script></body>

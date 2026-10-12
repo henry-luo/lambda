@@ -1767,13 +1767,90 @@ retaining explicit visible descendants. Raster/export text, images, markers,
 outlines, column rules and scrollbars share that predicate; inline-SVG retains
 its internal visibility renderer. Hidden-overflow hit coordinates use stored
 programmatic offsets independently of scrollbar presence. Sixty PNG/SVG/PDF
-comparisons and72 causal live assertions pass at1x/2x. Frozen58-input normal
+comparisons and 72 causal live assertions pass at 1x/2x. Frozen58-input normal
 `014f13f760232055dc4768963c01101fff97550b1fa415cc1fc14aa859bf11c2`
 and132-input ASan
 `2d540b2f9c2dafee507407cc98289cc1b43648f4964d241bb2188422116f4a8b`
 pass6647 core/input,4305 full/349 partial Radiant,1098 sanitizer native and342
 live assertions per runtime. All20 focused groups and the Canvas golden pass;
-full exports242/243 retain only two old ordered2x PDF edges. Boundary226/89 is
+full exports242/243 retain only two old ordered 2x PDF edges. Boundary226/89 is
 unchanged. Owners retain **D4.5.1v4 /D4.1.4v5**. Table collapse layout, focus,
 link annotations and broader paged/effect consumers remain open. Evidence:
 `temp/css_support_p1/background_layers/visibility22q_*`,73 protected artifacts.
+
+
+**CI-18 clip/focus/provider checkpoint (2026-10-12):** Owning-box clip origins
+survive scroll adjustment, affine scale/reflection and rounded/nested vector
+scopes. Shared SVG path serialization preserves fractional contours. Eighteen
+transformed and 36 sharp PNG/SVG/PDF comparisons plus 40 Chromium/native live
+pixels pass at 1x/2x. Focus reads the live cascade and owned flat-tree display
+ancestry, with native-default fallback for empty pre-render projections.
+Committed hiding clears focus through the existing event/identity transition;
+104 further Chromium/native focus assertions and 4,096 stable-pool reads pass.
+The existing owned-root invariant test is unchanged and passes. Owners follow
+**D4.5.1v4 /D4.1.4v5**; pending identity remains **D4.5.2**. Protected
+`consumer30q_*` passes6,765 core/input, 5,368 full /353 partial /one skipped
+Radiant, 1,106 matching sanitizer cases and 506 live assertions per runtime;
+full exports 243/245 preserve19 range comparisons and two ordered PDF edges.
+The 133-input sanitizer source snapshot matches the 81 primary plus one
+supplemental normal inputs. Seventeen host/collection imports are removed
+through lower-owned immutable providers (**D7.1.3 /D7.5.3**); boundary 213/76
+remains a failed strict gate with no allowance increase. Hidden PDF links,
+clipped gradient text, complete axis/clip-margin/paged/effect consumers and the
+broader family limits remain open.
+
+
+**Follow-up qualification (2026-10-12, CI-18 /D7.1.3 /D7.5.3):** Protected
+`consumer31q_*` qualifies flat hidden/collapsed own PDF link suppression and
+preserves existing visible-descendant links under **D4.5.1v4 /D4.1.4v5**.
+Ten normal/sanitizer annotation controls pass at 1x/2x; Chromium's print behavior
+for a visible descendant differs from its browsing activation. Two more Item
+host wrappers move behind the established lower-owned provider, preserving
+implementations and values. Fresh required gates, 1,106 matching sanitizer cases
+and 506 live assertions per runtime pass; exports 244/246 retain nineteen range
+comparisons and two ordered PDF boundaries. The first boundary link finds stale
+objects containing the moved wrappers. Their provenance and raw failure remain;
+rebuilding just those objects measures 211 deferred /74 unapproved with no new
+imports or allowance changes. Strict boundary closure remains open under
+**D7.3.3–D7.3.4**; no formal ruling changes.
+
+
+**Event provider qualification (2026-10-12, D7.1.3 /D7.5.3):** Protected
+`events32q_*` moves eighteen event host calls behind a lower-owned immutable
+provider while preserving native implementation, public module names, traced
+payloads and dispatch identity (**D4.5.1v4 /D4.5.2**). Five provider tests cover
+all mandatory fields, operation/argument routing, eight creation-flag combinations
+and 200,000 concurrent event calls. Fresh required gates pass 6,765 Lambda/input
+and 5,368 full /353 partial /one skipped Radiant; 1,107 matching sanitizer cases,
+525 live assertions per runtime and the Canvas golden pass. Full exports remain
+244/246, preserving nineteen gradient-range comparisons and two ordered PDF
+boundaries. Ninety normal and 136 sanitizer source inputs match their protected
+binaries. The four strict DSOs build; the raw boundary removes 18 imports from
+211/74 to 193 deferred /56 unapproved with no additions and an unchanged 165
+allowance. Thirty-seven imports are removed since 230/93; remaining strict
+closure follows **D7.3.3–D7.3.4**. The clipped-text draft stays unapplied and
+unqualified at the vector edges. No formal ruling changes.
+
+
+**Event workflow qualification (2026-10-12, D7.1.3 /D7.5.3):** Protected
+`workflow33q_*` removes four remaining synthetic/author-template imports through
+the existing event provider, preserving implementations and dispatch identity
+(**D4.5.1v4 /D4.5.2**). Required gates, 1,107 matching sanitizer cases, 525 live
+assertions per runtime and Canvas golden pass; exports 244/246 retain the same
+nineteen range comparisons and two ordered PDF edges. Ninety-one normal and 136
+sanitizer inputs match protected binaries. The raw boundary improves 193/56 to
+189 deferred /52 unapproved with no additions or allowance change; 41 imports
+are removed since 230/93. Strict closure remains open (**D7.3.3–D7.3.4**).
+
+
+**Editing/factory/context ownership qualification (2026-10-12):** Protected
+`ownership34q_*` qualifies two editing host callbacks, the lower shared fragment
+factory and runtime-owned evaluator transfer (**D7.1.3 / D7.5.3 / D7.2.5 / D5.4.1**).
+Required gates pass 6,766 Lambda/input and 5,368 full /353 partial /one skipped
+Radiant cases; seven matching sanitizer runners pass 1,144 cases and eighteen
+live fixtures pass 534 assertions per runtime. Canvas golden passes; exports
+244/246 preserve nineteen range comparisons and two ordered PDF edges. Ninety-nine
+normal and 140 sanitizer inputs match protected binaries. The raw boundary is
+185 deferred /48 unapproved, four fewer with no additions or allowance change;
+45 imports are removed since 230/93. Strict closure remains open
+(**D7.3.3–D7.3.4**). No formal ruling or CSS-family promotion changes.

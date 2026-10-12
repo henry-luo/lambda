@@ -182,14 +182,14 @@ RenderEffectGroup render_effect_group_begin(RasterRenderContext* rdcon,
         {effect_x0, effect_y0, effect_x1 - effect_x0, effect_y1 - effect_y0});
     if (group.has_filter) {
         render_filter_prepare_urls(rdcon, block->filter_prop());
-        float expand = render_geometry_filter_effect_expand(block->filter_prop());
+        float expand = render_geometry_filter_effect_expand(block->filter_prop()) * scale;
         Rect border = render_geometry_block_border_rect(parent_block, block, scale);
         expand = fmaxf(expand, render_filter_reference_box(block->filter_prop(), border,
             render_state_current_transform(rdcon)));
         float backdrop_expand = 0;
         render_effect_filter_backdrop_info(block->filter_prop(), &group.has_filter_backdrop, &backdrop_expand);
         group.filter_rect = render_effect_project_rect(rdcon,
-            view_geometry_expand_rect(border, fmaxf(expand, backdrop_expand)));
+            view_geometry_expand_rect(border, fmaxf(expand, backdrop_expand * scale)));
         float left = fminf(effect_rect.x, group.filter_rect.x), top = fminf(effect_rect.y, group.filter_rect.y);
         float right = fmaxf(effect_rect.x + effect_rect.width, group.filter_rect.x + group.filter_rect.width);
         float bottom = fmaxf(effect_rect.y + effect_rect.height, group.filter_rect.y + group.filter_rect.height);

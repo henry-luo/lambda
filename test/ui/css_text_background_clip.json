@@ -1,0 +1,150 @@
+{
+  "name": "Text tiled glyph backgrounds preserve ancestor clips and recorded image leases",
+  "html": "test/ui/css_text_background_clip.html",
+  "viewport": {
+    "width": 800,
+    "height": 240
+  },
+  "events": [
+    {
+      "type": "set_device_scale",
+      "scale": 1
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#tiles"
+      }
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#box",
+        "offset_x": 8,
+        "offset_y": 30
+      },
+      "search_radius": 0,
+      "min_r": 255,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 0,
+      "max_b": 0
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#box",
+        "offset_x": 56,
+        "offset_y": 30
+      },
+      "search_radius": 0,
+      "min_r": 255,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 0,
+      "max_b": 0
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#box",
+        "offset_x": 8,
+        "offset_y": 64
+      },
+      "search_radius": 0,
+      "min_r": 255,
+      "max_r": 255,
+      "min_g": 255,
+      "max_g": 255,
+      "min_b": 255,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#box",
+        "offset_x": 56,
+        "offset_y": 64
+      },
+      "search_radius": 0,
+      "min_r": 255,
+      "max_r": 255,
+      "min_g": 255,
+      "max_g": 255,
+      "min_b": 255,
+      "max_b": 255
+    },
+    {
+      "type": "set_device_scale",
+      "scale": 2
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#tiles"
+      }
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#box",
+        "offset_x": 8,
+        "offset_y": 30
+      },
+      "search_radius": 0,
+      "min_r": 255,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 0,
+      "max_b": 0
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#box",
+        "offset_x": 56,
+        "offset_y": 30
+      },
+      "search_radius": 0,
+      "min_r": 255,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 0,
+      "max_b": 0
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#box",
+        "offset_x": 8,
+        "offset_y": 64
+      },
+      "search_radius": 0,
+      "min_r": 255,
+      "max_r": 255,
+      "min_g": 255,
+      "max_g": 255,
+      "min_b": 255,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#box",
+        "offset_x": 56,
+        "offset_y": 64
+      },
+      "search_radius": 0,
+      "min_r": 255,
+      "max_r": 255,
+      "min_g": 255,
+      "max_g": 255,
+      "min_b": 255,
+      "max_b": 255
+    }
+  ]
+}

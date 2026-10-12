@@ -1,3 +1,4 @@
+#include "dom_event_host.h"
 #include "dom_webgl.h"
 #include "dom.h"
 #include "dom_graphics.h"
@@ -157,9 +158,9 @@ static Item webgl_loss_task(Item callee,Item,Item*,int,uint64_t*) {
     dom_realm_set_name(init.get(),"statusMessage",js_name_item(restore?"":"WebGL context lost"));
     Rooted<Item> type(roots,js_name_item(restore?"webglcontextrestored":"webglcontextlost"));
     Rooted<Item> event(roots,js_ctor_webgl_context_event_fn(type.get(),init.get()));
-    radiant_dom_event_set_trusted(event.get(),true);
+    dom_event_host_set_trusted(event.get(),true);
     Item result=dom_dispatch_event(canvas.get(),event.get());
-    if(!restore) { object->loss_delivered=true;object->restore_allowed=radiant_dom_event_default_prevented(event.get()); }
+    if(!restore) { object->loss_delivered=true;object->restore_allowed=dom_event_host_default_prevented(event.get()); }
     else { object->loss_delivered=false;object->restore_allowed=false; }
     return item_is_error(result)?result:make_js_undefined();
 }

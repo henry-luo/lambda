@@ -8,6 +8,7 @@
  * DomNode pointer. Avoids modifying the DomNode struct.
  */
 
+#include "dom_event_host.h"
 #include "dom_events.h"
 #include "dom_core.h"
 #include "realm/dom_realm.h"
@@ -42,18 +43,10 @@
 extern Item js_make_number(double d);
 
 struct EventContext;
-extern "C" bool radiant_synthetic_dom_dispatch_is_reentry(Item event_item);
-extern "C" Item radiant_dispatch_synthetic_dom_event(Item target_item,
-                                                      Item event_item);
 extern "C" bool dom_engine_author_template_event_live(const char* event_name);
-extern "C" bool radiant_author_template_dispatch_begin(Item event);
-extern "C" void radiant_author_template_dispatch_end(Item event);
 extern "C" void dom_engine_dispatch_author_template_participant(void* dom_node,
                                                                Item event,
                                                                const char* event_name);
-extern "C" void radiant_dom_event_set_lambda_dispatch_position(
-    Item event, Item current_target, int event_phase);
-extern "C" void radiant_dom_event_clear_lambda_dispatch_position(Item event);
 
 // Forward decls used by Event helpers below (signatures from js_runtime.h /
 // dom.h, declared here under extern "C" to avoid header coupling).
@@ -163,7 +156,7 @@ static void event_apply_new_target_prototype(Item event) {
         TypeId proto_type = get_type_id(proto);
         if (proto_type == LMD_TYPE_MAP || proto_type == LMD_TYPE_FUNC ||
             proto_type == LMD_TYPE_ARRAY || proto_type == LMD_TYPE_ELEMENT) {
-            radiant_dom_event_set_prototype_override(event, proto);
+            dom_event_host_set_prototype_override(event, proto);
         }
     }
 }
@@ -1082,9 +1075,9 @@ static void event_set_value(Item event, const char* key, Item value) {
     // field write realm-dependent -- js_set_key_default reaches for the realm's
     // map_put before it consults the host -- which is why a Lambda script with
     // no realm could not dispatch at all (ESO110).
-    if (radiant_dom_event_is(event)) {
+    if (dom_event_host_is(event)) {
         Item out = ItemNull;
-        if (radiant_dom_event_named_set(event, js_name_item(key), value, &out)) return;
+        if (dom_event_host_named_set(event, js_name_item(key), value, &out)) return;
     }
     dom_realm_set_name(event, key, value);
 }
@@ -1109,25 +1102,25 @@ static void event_mark_non_writable(Item event, const char* key) {
 // Get the current event flag values from per-event slots stored on the event
 // object itself (so nested dispatches don't trample each other).
 static Item event_get_item(Item event, const char* key) {
-    if (radiant_dom_event_is(event)) {
+    if (dom_event_host_is(event)) {
         Item v = ItemNull;
-        if (radiant_dom_event_named_get(event, js_name_item(key), &v)) return v;
+        if (dom_event_host_named_get(event, js_name_item(key), &v)) return v;
         return ItemNull;
     }
     return dom_realm_get_name(event, key);
 }
 
 static bool event_flag_get(Item event, const char* key) {
-    if (radiant_dom_event_is(event)) {
+    if (dom_event_host_is(event)) {
         Item v = ItemNull;
-        if (radiant_dom_event_named_get(event, js_name_item(key), &v)) return js_is_truthy(v);
+        if (dom_event_host_named_get(event, js_name_item(key), &v)) return js_is_truthy(v);
         return false;
     }
     return js_is_truthy(dom_realm_get(event, js_name_item(key)));
 }
 
 static bool js_event_is_object(Item event) {
-    return radiant_dom_event_is(event);
+    return dom_event_host_is(event);
 }
 
 // Per-event state and standard methods live on the native record, including
@@ -1148,7 +1141,7 @@ extern "C" Item js_event_init_event(Item type_arg, Item b_arg, Item c_arg) {
     if (!js_event_is_object(ev)) return make_js_undefined();
     Item args[] = {type_arg, b_arg, c_arg};
     Item result = ItemNull;
-    radiant_dom_event_call(ev, "initEvent", args, 3, &result);
+    dom_event_host_call(ev, "initEvent", args, 3, &result);
     return make_js_undefined();
 }
 
@@ -1171,7 +1164,7 @@ extern "C" Item js_event_init_time_event(Item type_arg, Item view_arg, Item deta
     Item initialized = js_event_init_event(type.get(), Item{.item = ITEM_FALSE}, Item{.item = ITEM_FALSE});
     if (item_is_error(initialized)) return initialized;
     if (!view.get().item || get_type_id(view.get()) == LMD_TYPE_UNDEFINED) view.set(ItemNull);
-    radiant_dom_event_set_time_values(event.get(), view.get(), js_make_number(detail));
+    dom_event_host_set_time_values(event.get(), view.get(), js_make_number(detail));
     return make_js_undefined();
 }
 
@@ -1229,7 +1222,7 @@ extern "C" Item js_event_init_text_event(Item type_arg, Item b_arg,
 static Item js_create_event_init_with_class(const char* type, bool bubbles,
         bool cancelable, bool composed, JsClass class_id) {
     RootFrame roots(3);
-    Rooted<Item> event_root(roots, radiant_dom_event_create(type, bubbles,
+    Rooted<Item> event_root(roots, dom_event_host_create(type, bubbles,
         cancelable, composed, (int)class_id));
     Rooted<Item> init_key_root(roots, ItemNull);
     Rooted<Item> init_function_root(roots, ItemNull);
@@ -1240,7 +1233,7 @@ static Item js_create_event_init_with_class(const char* type, bool bubbles,
     // The host carrier has no realm until JS constructs it. Capture the
     // intrinsic class prototype now, so Lambda-only dispatch never causes the
     // bridge to lazily construct JS intrinsics without a JS Input.
-    radiant_dom_event_set_prototype_override(event,
+    dom_event_host_set_prototype_override(event,
         dom_realm_intrinsic_prototype((int)class_id));
 
     event_set_int(event, "eventPhase", 0);  // NONE initially
@@ -1278,7 +1271,7 @@ Item js_create_time_event_init(const char* type, double detail, Item view) {
     Rooted<Item> key(roots, js_name_item("initTimeEvent"));
     Rooted<Item> method(roots, dom_realm_new_function(js_event_init_time_event));
     dom_realm_set(event.get(), key.get(), method.get());
-    radiant_dom_event_set_time_values(event.get(), view_root.get(), js_make_number(detail));
+    dom_event_host_set_time_values(event.get(), view_root.get(), js_make_number(detail));
     return event.get();
 }
 
@@ -1790,13 +1783,13 @@ Item js_ctor_content_visibility_auto_state_change_event(Item type_arg, Item init
     event.set(js_create_event_init_with_class(fn_to_cstr(type.get()), values[0],
         values[1], values[2], JS_CLASS_CONTENT_VISIBILITY_AUTO_STATE_CHANGE_EVENT));
     // D5.3.3: keep the receiver rooted while attaching its traced readonly payload.
-    if (!radiant_dom_event_set_payload(event.get(), Item{.item = b2it(values[3])}))
+    if (!dom_event_host_set_payload(event.get(), Item{.item = b2it(values[3])}))
         return ItemError;
     return event.get();
 }
 
 static Item content_visibility_event_skipped(Item, Item receiver, Item*, int, uint64_t*) {
-    Item value = radiant_dom_event_payload(receiver, JS_CLASS_CONTENT_VISIBILITY_AUTO_STATE_CHANGE_EVENT);
+    Item value = dom_event_host_payload(receiver, JS_CLASS_CONTENT_VISIBILITY_AUTO_STATE_CHANGE_EVENT);
     return get_type_id(value) == LMD_TYPE_BOOL ? value
         : dom_realm_throw_type_error("Illegal ContentVisibilityAutoStateChangeEvent receiver");
 }
@@ -1816,7 +1809,7 @@ enum MessageEventSlot {
 static const char* message_event_fields[] = {"data", "origin", "lastEventId", "source", "ports"};
 
 static Item message_event_state(Item receiver) {
-    Item state = radiant_dom_event_payload(receiver, JS_CLASS_MESSAGE_EVENT);
+    Item state = dom_event_host_payload(receiver, JS_CLASS_MESSAGE_EVENT);
     if (get_type_id(state) != LMD_TYPE_ARRAY || js_array_length(state) != MESSAGE_SLOT_COUNT)
         return dom_realm_throw_type_error("Illegal MessageEvent receiver");
     return state;
@@ -1886,8 +1879,8 @@ static Item message_event_init(Item, Item receiver, Item* args, int argc, uint64
         Item init_args[] = {type.get(), argc > 1 ? args[1] : make_js_undefined(),
             argc > 2 ? args[2] : make_js_undefined()};
         Item ignored = ItemNull;
-        radiant_dom_event_call(event.get(), "initEvent", init_args, 3, &ignored);
-        if (!radiant_dom_event_set_payload(event.get(), state.get())) return ItemError;
+        dom_event_host_call(event.get(), "initEvent", init_args, 3, &ignored);
+        if (!dom_event_host_set_payload(event.get(), state.get())) return ItemError;
     }
     return make_js_undefined();
 }
@@ -1940,7 +1933,7 @@ Item js_ctor_message_event_fn(Item type_arg, Item init_arg) {
     event.set(js_create_event_init_with_class(fn_to_cstr(type.get()), flags[0],
         flags[1], flags[2], JS_CLASS_MESSAGE_EVENT));
     JS_RETURN_IF_ERROR(event.get());
-    if (!radiant_dom_event_set_payload(event.get(), state.get())) return ItemError;
+    if (!dom_event_host_set_payload(event.get(), state.get())) return ItemError;
     return event.get();
 }
 
@@ -2400,7 +2393,7 @@ static void set_event_dispatch_position(void* key, bool key_is_dom, Item event,
                                         int phase, int reported_phase = 0) {
     int visible_phase = reported_phase ? reported_phase : phase;
     // One native write: currentTarget and eventPhase both live in the record.
-    radiant_dom_event_set_position_key(event, path_key_of(key, key_is_dom), visible_phase);
+    dom_event_host_set_position_key(event, path_key_of(key, key_is_dom), visible_phase);
 }
 
 static void fire_listeners(void* key, const char* type, Item event, int phase,
@@ -2487,7 +2480,7 @@ static void fire_listeners(void* key, const char* type, Item event, int phase,
         } else if (live->is_idl_handler &&
                    get_type_id(result_root.get()) == LMD_TYPE_BOOL &&
                    !it2b(result_root.get())) {
-            radiant_dom_event_prevent_default(event_root.get());
+            dom_event_host_prevent_default(event_root.get());
         }
 
         // restore previous passive context
@@ -2527,10 +2520,10 @@ Item dom_dispatch_event(Item elem_item, Item event_item) {
     // F19/ES25: direct DOM dispatch enters the same native scope as trusted
     // input. The re-entry guard keeps the shared propagation walk below as the
     // single engine for both paths instead of creating a JS-only default tier.
-    if (radiant_dom_event_is(event_item) &&
-        !radiant_synthetic_dom_dispatch_is_reentry(event_item) &&
+    if (dom_event_host_is(event_item) &&
+        !dom_event_host_synthetic_dispatch_is_reentry(event_item) &&
         dom_unwrap_element(elem_item)) {
-        Item unified_result = radiant_dispatch_synthetic_dom_event(elem_item,
+        Item unified_result = dom_event_host_dispatch_synthetic(elem_item,
                                                                     event_item);
         if (unified_result.item != ITEM_NULL) return unified_result;
     }
@@ -2551,7 +2544,7 @@ Item dom_dispatch_event(Item elem_item, Item event_item) {
     // dispatch retargets constructor null placeholders on every dispatch.
     // The target is native in the record (srcElement is its alias), so this
     // needs no realm -- which is what lets a Lambda script dispatch at all.
-    radiant_dom_event_set_target(event_item, elem_item);
+    dom_event_host_set_target(event_item, elem_item);
 
     // Mark event as dispatching.
     event_set_bool(event_item, "__dispatch_flag", true);
@@ -2591,7 +2584,7 @@ Item dom_dispatch_event(Item elem_item, Item event_item) {
     int path_len = build_path(elem_item, path, path_is_dom, 128);
 
     if (path_len == 0) {
-        radiant_dom_event_clear_path(event_item);
+        dom_event_host_clear_path(event_item);
         event_set_bool(event_item, "__dispatch_flag", false);
         return (Item){.item = ITEM_TRUE};
     }
@@ -2602,7 +2595,7 @@ Item dom_dispatch_event(Item elem_item, Item event_item) {
     // keys and projected to Items only when composedPath() is called.
     RadiantEvtKey path_keys[128];
     for (int i = 0; i < path_len; i++) path_keys[i] = path_key_of(path[i], path_is_dom[i]);
-    radiant_dom_event_set_path(event_item, path_keys, path_len);
+    dom_event_host_set_path(event_item, path_keys, path_len);
 
     // Legacy IE-style `window.event`: set to the in-flight event for the
     // duration of dispatch, restored to its prior value (typically
@@ -2626,7 +2619,7 @@ Item dom_dispatch_event(Item elem_item, Item event_item) {
     bool js_live = dom_event_type_has_js_listeners(type);
     bool author_live = dom_engine_author_template_event_live(type);
     bool author_cascade = author_live &&
-        radiant_author_template_dispatch_begin(event_item);
+        dom_event_host_author_template_dispatch_begin(event_item);
     if (!author_cascade) author_live = false;
 
     // path[0] = target, path[1] = parent, ... path[n-1] = window
@@ -2671,7 +2664,7 @@ Item dom_dispatch_event(Item elem_item, Item event_item) {
         }
     }
 
-    if (author_cascade) radiant_author_template_dispatch_end(event_item);
+    if (author_cascade) dom_event_host_author_template_dispatch_end(event_item);
     #undef _STOP_IMM
     #undef _STOP_PROP
 
@@ -2679,7 +2672,7 @@ Item dom_dispatch_event(Item elem_item, Item event_item) {
     event_set_int(event_item, "eventPhase", 0);
 
     // currentTarget is reset to null after dispatch (per spec).
-    radiant_dom_event_clear_lambda_dispatch_position(event_item);
+    dom_event_host_clear_lambda_dispatch_position(event_item);
 
     // Per DOM spec §2.10 step 26: at the end of dispatch, unset stop
     // propagation flag, stop immediate propagation flag, and dispatch flag.
@@ -2690,7 +2683,7 @@ Item dom_dispatch_event(Item elem_item, Item event_item) {
 
     // Clear dispatching flag.
     event_set_bool(event_item, "__dispatch_flag", false);
-    radiant_dom_event_clear_path(event_item);
+    dom_event_host_clear_path(event_item);
 
     // Restore the previous `window.event` value (legacy IE-style).
     if (publish_global_event) {

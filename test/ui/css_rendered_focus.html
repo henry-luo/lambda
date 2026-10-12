@@ -1,0 +1,29 @@
+<!doctype html><meta charset=utf-8>
+<style>html,body{margin:0}button{height:24px}#none,#host{display:none}#override[hidden],#hidden_host[hidden]{display:block}#transparent{opacity:0}#zero{width:0;height:0;padding:0;border:0}#targets{position:absolute;left:0;top:96px}</style>
+<button id=run>Probe rendered focus</button><button id=tab_reset>Reset keyboard order</button><button id=tab_start>Start</button>
+<div id=targets><button id=none>None</button><div id=host><button id=child>Child</button></div><button id=plain_hidden hidden>Hidden</button><button id=override hidden>Override</button><div id=hidden_host hidden><button id=hidden_child>Hidden child</button></div><button id=transparent>Transparent</button><button id=zero>Zero</button><div id=negative tabindex=-1>Widget</div></div>
+<script>
+(function(){
+ var ids=['none','host','plain_hidden','override','hidden_host','transparent','zero','negative'];
+ var elements={};ids.forEach(function(id){elements[id]=document.getElementById(id)});
+ var run=document.getElementById('run');
+ function probe(name,target,change){run.focus();if(change)change();document.getElementById(target).focus();run.setAttribute('data-'+name,document.activeElement.id)}
+ document.getElementById('tab_reset').onclick=function(){ids.forEach(function(id){elements[id].style.display='';elements[id].style.visibility=''});document.getElementById('tab_start').focus()};
+ run.onclick=function(){
+  ids.forEach(function(id){elements[id].style.display='';elements[id].style.visibility=''});
+  probe('none','none');probe('descendant','child');probe('hidden','plain_hidden');
+  probe('override','override');probe('ancestor_override','hidden_child');
+  probe('transparent','transparent');probe('zero','zero');probe('negative','negative');
+  probe('show','none',function(){elements.none.style.display='block'});
+  probe('hide','none',function(){elements.none.style.display='none'});
+  probe('show_host','child',function(){elements.host.style.display='block'});
+  probe('hide_host','child',function(){elements.host.style.display='none'});
+  probe('hide_override','override',function(){elements.override.style.display='none'});
+  probe('show_override','override',function(){elements.override.style.display='block'});
+  probe('hide_ancestor_override','hidden_child',function(){elements.hidden_host.style.display='none'});
+  probe('show_ancestor_override','hidden_child',function(){elements.hidden_host.style.display='block'});
+  probe('hide_visibility','negative',function(){elements.negative.style.visibility='hidden'});
+  probe('show_visibility','negative',function(){elements.negative.style.visibility='visible'});
+ };
+})();
+</script>
