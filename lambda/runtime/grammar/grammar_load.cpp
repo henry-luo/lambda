@@ -36,6 +36,13 @@ struct GTok {
     size_t len;
 };
 
+struct GrammarImport {
+    String* name;
+    SourceSpan span;
+    uint32_t rules_before;      // named local rules written before the import
+    String* entry_name;         // the imported grammar's entry rule
+};
+
 struct Loader {
     Transpiler* tp;
     const char* begin;          // body text, inside the braces
@@ -46,6 +53,7 @@ struct Loader {
     ArrayList* rules;           // GrammarRule*
     ArrayList* refs;            // GrammarExpr* (GX_RULE) awaiting resolution
     NameScope* token_scope;     // `:=` rules already compiled, for later islands
+    ArrayList* imports;         // GrammarImport*, in source order
     bool failed;                // a syntax error ended the body parse
 };
 
@@ -54,6 +62,13 @@ const char* const modifier_words[] = {"memo", "nospace", "hidden"};
 // the Lambda lexer's identifier bytes decide what a "word" is
 bool word_char(char c) {
     return lambda_lexer_is_ident_continue_byte(c);
+}
+
+// A literal is keyword-like — and so matches whole words only (§4.2) — when it
+// is made of these. `$` continues a Lambda identifier but is punctuation in the
+// guest languages (`$x` in XPath), so it never makes a literal keyword-like.
+bool keyword_char(char c) {
+    return c != '$' && word_char(c);
 }
 
 bool word_start(char c) {
@@ -144,9 +159,15 @@ GTok peek_tok(Loader* L) {
     return scan_tok(L->p, L->end);
 }
 
-// `[memo|nospace|hidden]* name (= | :=)` begins at `p`.
+// A statement of the body begins at `p`: a rule head `[memo|nospace|hidden]*
+// name (= | :=)`, or an `import name` (§4.5).
 bool rule_head_at(const char* p, const char* end) {
     GTok t = scan_tok(p, end);
+    if (tok_is(t, "import") && scan_tok(t.p + t.len, end).kind == GT_WORD) {
+        GTok name = scan_tok(t.p + t.len, end);
+        GTok after = scan_tok(name.p + name.len, end);
+        if (after.kind != GT_EQ && after.kind != GT_DEFINE) return true;
+    }
     while (t.kind == GT_WORD) {
         GTok after = scan_tok(t.p + t.len, end);
         if (after.kind == GT_EQ || after.kind == GT_DEFINE) return true;
@@ -210,6 +231,40 @@ uint32_t rule_count(Loader* L) {
     return (uint32_t)L->rules->length;
 }
 
+// A token rule named inside another rule's island is used (lint): walk the
+// island's resolved references to the token scope's definitions.
+// A sequence's items chain through `next`; any other island node has none.
+void mark_island_refs(Loader* L, AstNode* node) {
+    for (; node; node = node->next) {
+        switch (node->node_type) {
+        case AST_NODE_IDENT: {
+            NameEntry* entry = ((AstIdentNode*)node)->entry;
+            if (entry && entry->scope == L->token_scope) {
+                for (uint32_t i = 0; i < rule_count(L); i++) {
+                    if (rule_at(L, i)->name == entry->name) rule_at(L, i)->used = true;
+                }
+            }
+            break;
+        }
+        case AST_NODE_PATTERN_SEQ:
+            mark_island_refs(L, ((AstPatternSeqNode*)node)->first);
+            break;
+        case AST_NODE_BINARY_TYPE:
+            mark_island_refs(L, ((AstBinaryNode*)node)->left);
+            mark_island_refs(L, ((AstBinaryNode*)node)->right);
+            break;
+        case AST_NODE_UNARY_TYPE:
+            mark_island_refs(L, ((AstUnaryNode*)node)->operand);
+            break;
+        case AST_NODE_LIST_TYPE:
+            mark_island_refs(L, ((AstListNode*)node)->item);
+            break;
+        default:
+            break;
+        }
+    }
+}
+
 // Compile one island body as a token rule. Earlier `:=` rules are in scope, so
 // `ident := "\a" word*` names a sibling exactly as a pattern names a pattern.
 // The island's domain is the rule's (GM4.2): `"..."` emits strings, `'...'`
@@ -244,6 +299,7 @@ TypePattern* compile_token_body(Loader* L, const char* from, const char* to,
     }
     // compile the offset matcher now, not lazily from a running parse
     pattern_get_unanchored(pattern);
+    mark_island_refs(L, ((AstPatternIslandNode*)island)->pattern);
     if (body_out) *body_out = ((AstPatternIslandNode*)island)->pattern;
     return pattern;
 }
@@ -315,6 +371,22 @@ bool decode_literal(Loader* L, const GTok& tok, StrBuf* out, bool* is_class) {
 
 GrammarExpr* parse_choice(Loader* L);
 
+// The name a `'quoted'` symbol spells (GM4.3), with Lambda's quoted escapes.
+String* quoted_name(Loader* L) {
+    StrBuf* text = strbuf_new();
+    bool is_class = false;
+    String* name = NULL;
+    if (decode_literal(L, L->tok, text, &is_class)) {
+        if (is_class || !text->length) {
+            syntax_error(L, L->tok, "a quoted name holds no class escape and is not empty");
+        } else {
+            name = intern(L, text->str, text->length);
+        }
+    }
+    strbuf_free(text);
+    return name;
+}
+
 GrammarExpr* rule_ref(Loader* L, String* name, const char* from) {
     GrammarExpr* e = new_expr(L, GX_RULE, from);
     e->text = name;
@@ -357,7 +429,7 @@ GrammarExpr* parse_literal(Loader* L) {
         e->text = intern(L, text->str ? text->str : "", text->length);
         bool word = e->text->len > 0;
         for (uint32_t i = 0; i < e->text->len; i++) {
-            if (!word_char(e->text->chars[i])) { word = false; break; }
+            if (!keyword_char(e->text->chars[i])) { word = false; break; }
         }
         e->word_boundary = word;
     }
@@ -369,12 +441,15 @@ GrammarExpr* parse_literal(Loader* L) {
 GrammarExpr* parse_prec(Loader* L) {
     const char* from = L->tok.p;
     GrammarAssoc assoc = GM_ASSOC_NONE;
+    bool explicit_none = false;
     next_tok(L);  // `prec`
     if (L->tok.kind == GT_DOT) {
         next_tok(L);
         if (tok_is(L->tok, "left")) assoc = GM_ASSOC_LEFT;
         else if (tok_is(L->tok, "right")) assoc = GM_ASSOC_RIGHT;
-        else { syntax_error(L, L->tok, "expected 'left' or 'right' after 'prec.'"); return NULL; }
+        // GM6.1: explicitly non-associative — bare `prec` without the warning
+        else if (tok_is(L->tok, "none")) explicit_none = true;
+        else { syntax_error(L, L->tok, "expected 'left', 'right' or 'none' after 'prec.'"); return NULL; }
         next_tok(L);
     }
     if (!expect(L, GT_LPAREN, "expected '(' after prec")) return NULL;
@@ -388,6 +463,7 @@ GrammarExpr* parse_prec(Loader* L) {
     e->prec = level;
     e->assoc = assoc;
     e->annotated = true;
+    e->explicit_none = explicit_none;
     return e;
 }
 
@@ -396,14 +472,14 @@ GrammarExpr* parse_atom(Loader* L) {
     switch (L->tok.kind) {
     case GT_STRING:
         return parse_literal(L);
-    case GT_SYMBOL:
-        // GM4.1: single quotes keep their Lambda meaning; a symbol is not a token
-        record_semantic_error_span(L->tp, tok_span(L, L->tok), ERR_INVALID_LITERAL,
-            "grammar '%.*s': a symbol is never a token; write \"%.*s\"",
-            (int)L->grammar->name->len, L->grammar->name->chars,
-            (int)(L->tok.len > 2 ? L->tok.len - 2 : 0), L->tok.p + 1);
-        L->failed = true;
-        return NULL;
+    case GT_SYMBOL: {
+        // GM4.3: single quotes keep their Lambda meaning — a symbol is a name,
+        // so `'x'` refers to the rule named x, as a bare `x` does
+        String* name = quoted_name(L);
+        if (!name) return NULL;
+        next_tok(L);
+        return rule_ref(L, name, from);
+    }
     case GT_LPAREN: {
         next_tok(L);
         GrammarExpr* inner = parse_choice(L);
@@ -478,8 +554,9 @@ GrammarExpr* parse_prefixed(Loader* L) {
         GrammarExpr* operand = parse_prefixed(L);
         return operand ? wrap_expr(L, kind, operand, from) : NULL;
     }
-    if (L->tok.kind == GT_WORD && peek_tok(L).kind == GT_COLON) {
-        String* label = intern(L, L->tok.p, L->tok.len);
+    if ((L->tok.kind == GT_WORD || L->tok.kind == GT_SYMBOL) && peek_tok(L).kind == GT_COLON) {
+        String* label = L->tok.kind == GT_WORD ? intern(L, L->tok.p, L->tok.len) : quoted_name(L);
+        if (!label) return NULL;
         next_tok(L);
         next_tok(L);
         GrammarExpr* operand = parse_prefixed(L);
@@ -578,7 +655,13 @@ void parse_rule(Loader* L) {
             &island_body);
         if (rule->pattern) {
             rule->type = (Type*)rule->pattern;
-            rule->word_boundary = pattern_is_literal_set(island_body, word_char);
+            rule->word_boundary = pattern_is_literal_set(island_body, keyword_char);
+            // `_lparen := "("` reads as `"("` in an error, not as its name
+            String* source = rule->pattern->source;
+            if (island_body && island_body->node_type == AST_NODE_PRIMARY &&
+                    pattern_is_literal_set(island_body, NULL) && source && source->len > 3) {
+                rule->display = intern(L, source->chars + 2, source->len - 3);
+            }
             publish_token_rule(L, rule, island_body);
         }
         L->p = to;
@@ -606,6 +689,91 @@ void parse_rule(Loader* L) {
     if (L->tok.kind != GT_END && L->tok.kind != GT_SEMI &&
             !(L->tok.kind == GT_WORD && rule_head_at(L->tok.p, L->end))) {
         syntax_error(L, L->tok, "expected ',' or '|' between items, or the next rule");
+    }
+}
+
+// --- composition (§4.5) ----------------------------------------------------
+
+// `import g` inside a body: g's rules join this grammar unless a local rule of
+// the same name overrides them. Statements are collected while parsing and
+// composed once every local rule is known.
+void parse_import(Loader* L) {
+    GTok head = L->tok;
+    next_tok(L);
+    GrammarImport* import = (GrammarImport*)pool_calloc(L->tp->pool, sizeof(GrammarImport));
+    import->name = intern(L, L->tok.p, L->tok.len);
+    import->span = span_of(L, head.p, L->tok.p + L->tok.len);
+    for (uint32_t i = 0; i < rule_count(L); i++) {
+        if (!rule_at(L, i)->anonymous) import->rules_before++;
+    }
+    arraylist_append(L->imports, import);
+    next_tok(L);
+}
+
+// A copy of an imported expression tree for re-analysis in this grammar: the
+// import's own analysis (implied prec wrappers, call modes, resolved indexes)
+// is undone, and references resolve again by name, so a local override also
+// changes what the imported rules call.
+GrammarExpr* clone_expr(Loader* L, GrammarExpr* e, SourceSpan span) {
+    if (e->kind == GX_PREC && !e->annotated) return clone_expr(L, e->items[0], span);
+    GrammarExpr* copy = (GrammarExpr*)pool_alloc(L->tp->pool, sizeof(GrammarExpr));
+    *copy = *e;
+    copy->span = span;
+    copy->call_mode = GM_CALL_PLAIN;
+    copy->lr_alt = false;
+    copy->trailing_self = false;
+    if (copy->kind == GX_RULE) {
+        copy->prec = 0;
+        copy->rule_index = GRAMMAR_NO_RULE;
+        arraylist_append(L->refs, copy);
+    }
+    if (e->item_count) {
+        copy->items = (GrammarExpr**)pool_calloc(L->tp->pool, sizeof(GrammarExpr*) * e->item_count);
+        for (uint32_t i = 0; i < e->item_count; i++) copy->items[i] = clone_expr(L, e->items[i], span);
+    }
+    return copy;
+}
+
+int32_t find_rule_index(Loader* L, String* name) {
+    for (uint32_t i = 0; i < rule_count(L); i++) {
+        if (rule_at(L, i)->name == name) return (int32_t)i;
+    }
+    return -1;
+}
+
+void compose_imports(Loader* L) {
+    uint32_t local_count = rule_count(L);
+    for (int i = 0; i < L->imports->length; i++) {
+        GrammarImport* import = (GrammarImport*)L->imports->data[i];
+        NameEntry* entry = lookup_name(L->tp, (StrView){import->name->chars, import->name->len});
+        AstNode* node = entry ? entry->node : NULL;
+        TypeGrammar* other = node && node->node_type == AST_NODE_VARIABLE_DECLARATOR
+            ? lambda_type_grammar(node->type) : NULL;
+        if (!other || other == L->grammar) {
+            record_semantic_error_span(L->tp, import->span, ERR_UNDEFINED_TYPE,
+                "grammar '%.*s': no grammar named '%.*s' to import",
+                (int)L->grammar->name->len, L->grammar->name->chars,
+                (int)import->name->len, import->name->chars);
+            continue;
+        }
+        if (other->entry_rule != GRAMMAR_NO_RULE) import->entry_name = other->rules[other->entry_rule]->name;
+        for (uint32_t k = 0; k < other->rule_count; k++) {
+            GrammarRule* source = other->rules[k];
+            int32_t existing = find_rule_index(L, source->name);
+            if (existing >= 0 && (uint32_t)existing < local_count) continue;
+            GrammarRule* copy = (GrammarRule*)pool_alloc(L->tp->pool, sizeof(GrammarRule));
+            *copy = *source;
+            copy->body = source->body ? clone_expr(L, source->body, import->span) : NULL;
+            copy->type = source->is_token ? source->type : NULL;
+            copy->span = import->span;
+            copy->imported = true;
+            copy->used = true;
+            copy->nullable = false;
+            copy->left_recursive = false;
+            // a later import overrides an earlier one, as a local rule does
+            if (existing >= 0) L->rules->data[existing] = copy;
+            else arraylist_append(L->rules, copy);
+        }
     }
 }
 
@@ -741,15 +909,17 @@ void classify_left_recursion(Loader* L, uint32_t index, GrammarRule** rules) {
                 tail->call_mode = GM_CALL_TRAILING;
                 tail->prec = alt->assoc == GM_ASSOC_RIGHT ? alt->prec : alt->prec + 1;
                 alt->trailing_self = true;
-                if (lr && alt->annotated && alt->assoc == GM_ASSOC_NONE) {
+                if (lr && alt->annotated && alt->assoc == GM_ASSOC_NONE && !alt->explicit_none &&
+                        !rule->imported) {
                     warn(L, alt->span, ERR_SEMANTIC_ERROR, rule->name->chars,
                         "prec(%u, ...) has no associativity, so a chain such as `a op b op c` "
-                        "will not parse; use prec.left or prec.right", alt->prec);
+                        "will not parse; use prec.left or prec.right, or prec.none if that "
+                        "is intended", alt->prec);
                 }
             }
         }
     }
-    if (annotated && implied) {
+    if (annotated && implied && !rule->imported) {
         warn(L, rule->span, ERR_SEMANTIC_ERROR, rule->name->chars,
             "left-recursive alternatives without prec are read as prec.left(0); "
             "the precedence ladder may be incomplete");
@@ -896,10 +1066,10 @@ bool expr_has_literal(GrammarExpr* e) {
 void resolve_refs(Loader* L) {
     for (int i = 0; i < L->refs->length; i++) {
         GrammarExpr* ref = (GrammarExpr*)L->refs->data[i];
-        for (uint32_t k = 0; k < rule_count(L); k++) {
-            GrammarRule* rule = rule_at(L, k);
-            if (!rule->anonymous && rule->name == ref->text) { ref->rule_index = k; break; }
-        }
+        // an anonymous rule's name is its quoted spelling, so it never meets
+        // a word name; cloned references to one resolve by that spelling
+        int32_t found = find_rule_index(L, ref->text);
+        if (found >= 0) ref->rule_index = (uint32_t)found;
         if (ref->rule_index == GRAMMAR_NO_RULE) {
             // GM5v2: rules are types, so an unknown rule is an unknown type
             record_semantic_error_span(L->tp, ref->span, ERR_UNDEFINED_TYPE,
@@ -961,7 +1131,8 @@ void lint(Loader* L) {
     bool literals = false, syntax = false;
     for (uint32_t i = 0; i < g->rule_count; i++) {
         GrammarRule* rule = g->rules[i];
-        if (rule->anonymous) continue;
+        // an imported rule was linted where its grammar was declared
+        if (rule->anonymous || rule->imported) continue;
         if (!rule->is_token) {
             syntax = true;
             literals = literals || expr_has_literal(rule->body);
@@ -1003,14 +1174,17 @@ TypeGrammar* grammar_compile(Transpiler* tp, String* name, SourceSpan body) {
     L.refs = arraylist_new(32);
     L.token_scope = (NameScope*)pool_calloc(tp->pool, sizeof(NameScope));
     L.token_scope->parent = tp->current_scope;
+    L.imports = arraylist_new(2);
 
     int errors_before = tp->error_count;
     next_tok(&L);
     while (!L.failed && L.tok.kind != GT_END) {
         if (L.tok.kind == GT_SEMI) { next_tok(&L); continue; }
         if (L.tok.kind == GT_BAD) { syntax_error(&L, L.tok, "unexpected character"); break; }
+        if (tok_is(L.tok, "import") && peek_tok(&L).kind == GT_WORD) { parse_import(&L); continue; }
         parse_rule(&L);
     }
+    if (!L.failed) compose_imports(&L);
 
     grammar->rule_count = rule_count(&L);
     grammar->rules = (GrammarRule**)pool_calloc(tp->pool,
@@ -1032,6 +1206,14 @@ TypeGrammar* grammar_compile(Transpiler* tp, String* name, SourceSpan body) {
             rule->type = (Type*)type;
         }
     }
+    // GM5.1 with composition: an import written before every local rule puts
+    // its grammar's entry first (or the local rule that overrides it)
+    if (L.imports->length) {
+        GrammarImport* first = (GrammarImport*)L.imports->data[0];
+        int32_t entry = first->rules_before == 0 && first->entry_name
+            ? find_rule_index(&L, first->entry_name) : -1;
+        if (entry >= 0) grammar->entry_rule = (uint32_t)entry;
+    }
     if (!L.failed && grammar->entry_rule == GRAMMAR_NO_RULE) {
         record_semantic_error_span(tp, body, ERR_SYNTAX_ERROR,
             "grammar '%.*s' has no rules", (int)name->len, name->chars);
@@ -1044,6 +1226,7 @@ TypeGrammar* grammar_compile(Transpiler* tp, String* name, SourceSpan body) {
     }
     arraylist_free(L.rules);
     arraylist_free(L.refs);
+    arraylist_free(L.imports);
     arraylist_append(tp->type_list, grammar);
     return grammar;
 }

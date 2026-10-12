@@ -1,7 +1,7 @@
 # Grammar Module — Implementation Plan
 
 **Date:** 2026-10-11
-**Status:** IN PROGRESS — **P0–P3 implemented 2026-10-11** (§7 records what landed, where it departs from the phase text, and the evidence); P4 and P5 to do. Q1–Q6 ruled by USER on 2026-10-11 (§6), which rewrote §2 from a VMap handle to the type path; GM4.2 ruled during P2 (design §0).
+**Status:** IN PROGRESS — **P0–P3 implemented 2026-10-11** (§7), **P4 and P5 the same day** (§8: composition, spans, quoted names, and `lambda.grammar.xpath`, scoped by USER to parsing only). Q1–Q6 ruled by USER on 2026-10-11 (§6), which rewrote §2 from a VMap handle to the type path; GM4.2 ruled during P2 (design §0).
 **Design:** [Lambda_Design_Grammar_Parser.md](../Lambda_Design_Grammar_Parser.md) — GM1–GM4, GM4.1, GM5v2, GM5.1, GM5.2 ruled (USER 2026-10-11); GM6–GM12 proposed; GM-O1–O3, O5–O7 open. The design doc holds the reasoning; this plan holds the seams, the phases and the tests.
 **Rulings touched:** none yet. GM-O1 decides where `grammar` lands in the formal spec (proposed: an S16.9 declaration ruling for the surface, a new D8.3 for the engine, one line in S15 naming `parse(text, grammar)` as the second producer of trees that reach `compile`). S16.10.1v2's barred list grows by one word (`grammar`) — Appendix K of Lambda_Design_Syntax.md is regenerated, not hand-edited.
 **Scope:** the `grammar` declaration, the loader + lint, the PEG interpreter with bounded left recursion, the `parse`/`input` surface, and the first guest (XPath 3.1) as the acceptance test. jq, XQuery and RELAX NG compact follow once the engine is proven; they are listed for sequencing only.
@@ -267,4 +267,38 @@ Build: `lambda/runtime/grammar` added to the top-level `source_dirs`, `lambda-rt
 - **JIT type-alias reads in imported modules** (found here, not grammar-specific): under forced JIT a module-level type alias read inside a function of an *imported* module was wrong (`0`/`null`), so a `pub grammar` used there read `null` (2026-10-06 builds onward). Fixed the same day by a separate session in `transpile-mir.cpp` (local master b6fa56bfb) (an expression typed as a type value is no longer unwrapped to its payload lane; fixture `test/lambda/import_type_values.ls`). `types.ls` covers the grammar case (`sum_tree` in `mod_arith.ls`) on all three tiers.
 - `text is g.rule` does not parse (the type sub-language reads no dotted names); design GM-O8.
 - `make build-test` fails to link two Radiant test executables (`render_paint_boundary.o`, `layout_counters.o` undefined symbols) — unrelated to this change; `test_lambda_gtest` and `test_lambda_errors_gtest` build and pass.
+
+## 8. P4 and P5 record (2026-10-11)
+
+USER rulings first: GM4.3 (`'x'` in a `=` rule is a rule name), GM5.4 (`text is g.rule` is not valid syntax — `let r = g.rule; text is r`; `input(target, g)` not supported), GM11v2 (spans via a third-argument options map), and the P5 scope (the XPath guest only parses into a Lambda tree, Tree-sitter style; no evaluation, no `lm.` lowering — `compile`, S15.3, is unimplemented).
+
+### 8.1 What landed
+
+| Item | Result |
+|---|---|
+| GM4.3 | `quoted_name` in `grammar_load.cpp`: a `'symbol'` atom is a rule reference, and before `:` a label. The old "a symbol is never a token" error is gone; `grammar_symbol_literal.ls` became `grammar_quoted_rule_name.ls` (an unknown quoted name is E204). |
+| GM5.4 | Verified on T0 and JIT: `let r = calc.expr` then `"1 + 2" is r` (fixture `types.ls`). Nothing to build. |
+| GM11v2 | `fn_parse_grammar` reads `{rule, spans}` from a map third argument; `grammar_parse(…, spans)` adds `start`/`end` attributes in `convert`. An element's start is its first child's start (`wrap`), so leading whitespace is excluded. |
+| Composition | `parse_import` / `compose_imports` / `clone_expr`: imported rules are cloned with their analysis undone (implied `prec` wrappers unwrapped, call modes and indexes reset) and their references resolved again by name, so local overrides reach them; a later import overrides an earlier one; an import written before every local rule supplies the entry; only local rules are linted and imported spans report at the `import`. `rule_head_at` treats `import name` as a statement boundary. |
+| REPL | Multi-line grammar entries continue (`..`) and evaluate; `g`, `g.x`, `parse` work across entries. `.env` lists the grammar as `null`, as it does for every `type` alias (pre-existing). |
+| P5 | `lmd/package/grammar/xpath.ls` → `import lambda.grammar.xpath` gives `pub grammar xpath`. One left-recursive `Expr` with 18 levels (or … postfix), `left`/`op`/`right`, `operand`, `base`+`predicate`/`args`/`lookup` labels; operators and keywords as symbol tokens; structural punctuation hidden; named nodes for steps, literals, function calls, FLWOR-lite, constructors, types and kind tests. Comparisons and `to` use `prec.none` (non-associative, as the spec requires). |
+
+### 8.2 Found while doing it
+
+- **`prec.none` (GM6.1, design GM-O10).** XPath's comparisons are deliberately non-associative, and the lint warned on every import of the package. `prec.none(n, …)` means bare `prec` without the warning.
+- **`$` made literals keyword-like.** `$` is a Lambda identifier byte, so `"$"` got the word boundary and failed before a name (`$x`). `keyword_char` excludes it.
+- **Island references did not count as uses.** A token rule named only inside another rule's island (`space := ("\s" | xcomment)+`) was reported unused; `mark_island_refs` walks the resolved island.
+- **Error messages named hidden helpers** (`_lparen`). A single-literal token rule now displays as its literal (`"("`, `'or'`); the expected-set cap rose from 16 to 32 so a decisive entry (`'return'`) is not cut.
+
+### 8.3 Evidence
+
+- `test/lambda/grammar/{compose,xpath}.ls` new; `tokens.ls` (quoted names) and `types.ls` (GM5.4 idiom) extended; all 9 grammar fixtures green under `interp`, `jit` and `auto`.
+- `NegativeScriptTest.Grammar*`: 11/11 (adds `GrammarImportUnknownGrammar`, renames to `GrammarQuotedNameIsARuleName`).
+- `make test-lambda-baseline` (LANG=en_US.UTF-8): 6,665/6,666; the one failure is `edit_view_only`, which fails identically on fa339486d.
+- `xpath.ls` identical under `LAMBDA_GC_FORCE_EVERY=1`.
+- XPath sweep (63 expressions in `xpath.ls`): paths, axes, abbreviations, wildcards, `Q{}` names, literals, all operator levels, arrows, FLWOR-lite, quantifiers, `if`, inline functions, maps, arrays, lookups, kind tests, comments; six spec violations rejected with furthest-failure messages.
+
+### 8.4 Still open
+
+GM-O1 (formal-spec placement), GM-O2 (explicit levels), GM-O5 (packrat default), GM-O6 (semantic predicates), local `:=` rules naming imported `:=` rules, nested XPath comments, and the guests after XPath (jq, XQuery, RELAX NG compact).
 

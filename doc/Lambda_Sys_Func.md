@@ -1123,6 +1123,7 @@ Parse a string into Lambda data structures. Like `input()` but operates on strin
 | `parse(str, g)` | Parse with grammar `g` from its first rule | `parse("1 + 2", calc)` |
 | `parse(str, g, 'rule')` | Parse with grammar `g` from the named rule | `parse("(1)", calc, 'primary')` |
 | `parse(str, g.rule)` | Parse from a rule given as a type | `parse("42", calc.number)` |
+| `parse(str, g, options)` | Options map: `rule` (a symbol) and `spans` (bool: `start`/`end` byte offsets on every element) | `parse(s, calc, {rule: 'expr', spans: true})` |
 
 **Supported Formats**: Same as `input()` — `json`, `xml`, `html`, `yaml`, `toml`, `markdown`, `csv`, `latex`, `css`, `ini`, `math`, `obj`, `mtl`, `gltf`, `a3d`
 
@@ -1159,7 +1160,14 @@ grammar calc {
 }
 parse("1 + 2 * 3", calc)^       // <expr <expr "1"> "+" <expr <expr "2"> "*" <expr "3">>>
 "1 +" is calc                   // false: the first rule must parse the whole text
+let e = calc.expr               // a rule is a type; bind it to test membership
+"2 * 3" is e                    // true
 ```
+
+A grammar can `import` another grammar's rules (local rules of the same name
+override them), and a quoted name such as `'word'` in a rule refers to the
+rule `word`. Bundled grammars live in the `grammar` package
+([Lambda_Packages.md](Lambda_Packages.md) §12).
 
 Design: `vibe/Lambda_Design_Grammar_Parser.md`.
 

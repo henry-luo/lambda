@@ -34,3 +34,5 @@ false
   <item
     "a,">
   "b">
+<pair data-value: "b",
+  "a=">

@@ -1424,9 +1424,14 @@ TEST_F(NegativeScriptTest, GrammarDuplicateRule) {
         "error[E209]: grammar 'g': rule 'a' is defined twice");
 }
 
-TEST_F(NegativeScriptTest, GrammarSymbolIsNeverALiteralToken) {
-    ExpectErrorMessage("test/lambda/negative/semantic/grammar_symbol_literal.ls",
-        "a symbol is never a token; write \"x\"");
+TEST_F(NegativeScriptTest, GrammarQuotedNameIsARuleName) {
+    ExpectErrorMessage("test/lambda/negative/semantic/grammar_quoted_rule_name.ls",
+        "error[E204]: grammar 'g': no rule named 'x'");
+}
+
+TEST_F(NegativeScriptTest, GrammarImportUnknownGrammar) {
+    ExpectErrorMessage("test/lambda/negative/semantic/grammar_import_unknown.ls",
+        "error[E204]: grammar 'g': no grammar named 'nope' to import");
 }
 
 TEST_F(NegativeScriptTest, GrammarSpaceRuleIsATokenRule) {

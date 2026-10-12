@@ -25,7 +25,7 @@ namespace {
 
 // the same nesting bound the Lambda parser uses (LAMBDA_RD_MAX_DEPTH)
 const uint32_t GRAMMAR_MAX_DEPTH = 1000;
-const uint32_t GRAMMAR_MAX_EXPECTED = 16;
+const uint32_t GRAMMAR_MAX_EXPECTED = 32;
 
 enum : uint8_t { PN_ELEMENT, PN_TEXT };
 
@@ -77,6 +77,7 @@ struct ParseState {
     Arena* arena;
     ArrayList* stack;           // PNode* under construction
     struct hashmap* memo;
+    bool spans;                 // GM11: elements carry start/end offsets
 };
 
 // the Lambda lexer's identifier bytes decide what a "word" is
@@ -138,6 +139,8 @@ PNode* new_text(ParseState* S, size_t start, size_t end, uint32_t rule) {
     return node;
 }
 
+size_t token_start(ParseState* S, size_t pos);
+
 // Wrap everything pushed since `mark` into one element node for `rule`.
 PNode* wrap(ParseState* S, uint32_t rule, int mark, size_t start) {
     PNode* node = (PNode*)arena_calloc(S->arena, sizeof(PNode));
@@ -150,6 +153,7 @@ PNode* wrap(ParseState* S, uint32_t rule, int mark, size_t start) {
         node->children = (PNode**)arena_alloc(S->arena, sizeof(PNode*) * node->count);
         memcpy(node->children, &S->stack->data[mark], sizeof(PNode*) * node->count);
     }
+    if (S->spans) node->start = (uint32_t)token_start(S, start);
     stack_truncate(S, mark);
     return node;
 }
@@ -186,6 +190,17 @@ void skip_space(ParseState* S) {
     }
 }
 
+// Where a rule entered at `pos` began its first token: a token skips `space`
+// before it, and a hidden token leaves no node to take the position from.
+size_t token_start(ParseState* S, size_t pos) {
+    size_t saved = S->pos;
+    S->pos = pos;
+    skip_space(S);
+    size_t start = S->pos < saved ? S->pos : saved;
+    S->pos = saved;
+    return start;
+}
+
 bool match_literal(ParseState* S, GrammarExpr* e) {
     skip_space(S);
     size_t n = e->text->len;
@@ -210,7 +225,7 @@ bool match_token(ParseState* S, uint32_t index, bool emit) {
         S->pos = end;
         return true;
     }
-    note_failure(S, rule->name, false);
+    note_failure(S, rule->display ? rule->display : rule->name, false);
     return false;
 }
 
@@ -598,6 +613,10 @@ Item convert(ParseState* S, MarkBuilder& builder, PNode* root) {
             }
             element.attr(child->label, values.final());
         }
+        if (S->spans) {
+            element.attr("start", (int64_t)node->start);
+            element.attr("end", (int64_t)node->end);
+        }
         node->item = element.final();
         node->built = true;
         work->length--;
@@ -624,10 +643,11 @@ void state_release(ParseState* S) {
 }  // namespace
 
 bool grammar_parse(TypeGrammar* grammar, uint32_t entry, Input* input,
-        const char* src, size_t len) {
+        const char* src, size_t len, bool spans) {
     if (!grammar || !input || entry >= grammar->rule_count) return false;
     ParseState S;
     state_init(&S, grammar, src, len);
+    S.spans = spans;
     bool ok = run(&S, entry);
     if (ok) {
         MarkBuilder builder(input);

@@ -38,3 +38,11 @@ grammar lists {
 }
 parse("a, b, c", lists)^
 parse("a, b", lists)^
+
+// GM4.3: a quoted symbol in a rule body is a name — a rule, or a label
+grammar quoted {
+    pair   = 'key', "=", 'data-value': key
+    key    := "\a"+
+    space  := " "*
+}
+parse("a = b", quoted)^

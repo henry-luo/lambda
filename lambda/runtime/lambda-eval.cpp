@@ -6177,8 +6177,9 @@ static bool parse_tex_options(Map* options_map, InputParseOptions* options,
 }
 
 // GM5.1: `parse(text, g)` runs the first rule of grammar g, `parse(text, g,
-// 'rule')` the named one; a rule type (`g.rule`) names its own entry. A failure
-// raises like every input parser's (GM5.2).
+// 'rule')` the named one; a rule type (`g.rule`) names its own entry. GM11: the
+// third argument may instead be an options map, `{rule: 'expr', spans: true}`.
+// A failure raises like every input parser's (GM5.2).
 static Item fn_parse_grammar(Item str_item, Type* type, Item rule_item) {
     TypeGrammar* grammar = lambda_type_grammar(type);
     uint32_t entry = GRAMMAR_NO_RULE;
@@ -6192,11 +6193,27 @@ static Item fn_parse_grammar(Item str_item, Type* type, Item rule_item) {
         set_runtime_error(ERR_TYPE_MISMATCH, "parse: 2nd argument must be a grammar");
         return ItemError;
     }
+    bool spans = false;
+    if (get_type_id(rule_item) == LMD_TYPE_MAP) {
+        Map* options = rule_item.map;
+        bool found = false;
+        Item rule_option = _map_get((TypeMap*)options->type, options->data, "rule", &found);
+        Item spans_option = _map_get((TypeMap*)options->type, options->data, "spans", &found);
+        if (found && get_type_id(spans_option) != LMD_TYPE_NULL) {
+            if (get_type_id(spans_option) != LMD_TYPE_BOOL) {
+                set_runtime_error(ERR_TYPE_MISMATCH, "parse: the spans option is a bool");
+                return ItemError;
+            }
+            spans = it2b(spans_option);
+        }
+        rule_item = rule_option;
+    }
     TypeId rule_type = get_type_id(rule_item);
     if (rule_type != LMD_TYPE_NULL) {
         if (!is_text_type_id(rule_type) || !lambda_type_grammar(type)) {
             set_runtime_error(ERR_TYPE_MISMATCH,
-                "parse: the rule is named by a symbol, after a grammar: parse(text, g, 'rule')");
+                "parse: the rule is named by a symbol, after a grammar: parse(text, g, 'rule') "
+                "or parse(text, g, {rule: 'rule'})");
             return ItemError;
         }
         entry = grammar_find_rule(grammar, rule_item.get_chars(), rule_item.get_len());
@@ -6218,7 +6235,7 @@ static Item fn_parse_grammar(Item str_item, Type* type, Item rule_item) {
         set_runtime_error(ERR_OUT_OF_MEMORY, "parse: failed to allocate grammar parser input");
         return ItemError;
     }
-    if (!grammar_parse(grammar, entry, input, str_item.get_chars(), str_item.get_len())) {
+    if (!grammar_parse(grammar, entry, input, str_item.get_chars(), str_item.get_len(), spans)) {
         set_input_parse_error("parse", input, NULL);
         return ItemError;
     }

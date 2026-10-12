@@ -55,6 +55,7 @@ typedef struct GrammarExpr {
     bool annotated;                 // GX_PREC written by the author (not implied)
     bool lr_alt;                    // GX_PREC: an alternative that grows the seed
     bool trailing_self;             // GX_PREC: ends with a reference to its own rule
+    bool explicit_none;             // GX_PREC written `prec.none` (GM6.1): no lint warning
     uint32_t min, max;              // GX_REPEAT; max 0 = unbounded
     uint32_t prec;                  // GX_PREC; GX_RULE with GM_CALL_TRAILING: the level
     uint32_t rule_index;            // GX_RULE
@@ -74,6 +75,8 @@ typedef struct GrammarRule {
     bool used;                      // referenced by another rule (lint)
     bool anonymous;                 // a class literal such as "\d" in a `=` rule
     bool word_boundary;             // a literal-only word token such as `for := 'for'`
+    bool imported;                  // cloned from an `import`ed grammar (§4.5)
+    String* display;                // a single-literal token shown as its literal in errors
     bool nullable;                  // analysis
     bool left_recursive;            // direct left recursion (GM6)
     GrammarExpr* body;              // syntax rules
@@ -98,10 +101,11 @@ uint32_t grammar_find_rule(TypeGrammar* grammar, const char* name, size_t len);
 Type* grammar_rule_type(TypeGrammar* grammar, const char* name, size_t len);
 
 // Engine (grammar_parse.cpp). Parses the whole of `src` from `entry` and builds
-// the tree into `input` (GM4). On failure returns false and leaves the
+// the tree into `input` (GM4); with `spans`, every element also carries `start`
+// and `end` byte offsets (GM11). On failure returns false and leaves the
 // furthest-failure message in `input->parse_error_message` (GM5.2).
 bool grammar_parse(TypeGrammar* grammar, uint32_t entry, Input* input,
-    const char* src, size_t len);
+    const char* src, size_t len, bool spans);
 
 // Membership for `text is g` / `text is g.rule` (GM5.3): the rule parses the
 // whole text. No tree is built.

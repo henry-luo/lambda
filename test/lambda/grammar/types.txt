@@ -4,6 +4,7 @@ calc.expr
 type
 \(("\d")+)
 true
+[true, false, true, false]
 arith
 <sum
   <sum

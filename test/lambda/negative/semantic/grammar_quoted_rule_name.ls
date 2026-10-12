@@ -1,4 +1,5 @@
-// GM4.1: single quotes keep their Lambda meaning; a symbol is not a literal token
+// GM4.3: a quoted symbol in a rule body is a rule name, so an unknown one is
+// an unknown rule (E204), exactly as a bare name is
 grammar g {
     a = 'x'
 }

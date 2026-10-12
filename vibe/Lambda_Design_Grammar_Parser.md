@@ -1,12 +1,14 @@
 # Lambda Grammar Module — Design
 
-**Revision:** 2 (2026-10-11)
+**Revision:** 3 (2026-10-11)
 **Status:** GM1–GM4, GM4.1, GM4.2, GM5v2, GM5.1, GM5.2 ruled by USER on
 2026-10-11 (see §0); GM6–GM12 proposed. **Implemented 2026-10-11** (P0–P3 of
 [the plan](impl/Lambda_Impl_Grammar_Parser.md)): declaration, loader, lint,
 engine with left recursion, `parse(text, g[, 'rule'])`, and GM5.3's
 `text is g`. Implementation found two corrections, recorded in §4.2
-(keyword-token boundaries) and §5.2 (the growth cap). Open rulings in §9.
+(keyword-token boundaries) and §5.2 (the growth cap). Revision 3, the same
+day: GM4.3, GM5.4, GM11v2 and the P5 scope ruled; composition (§4.5), spans
+and the `lambda.grammar.xpath` package implemented (P4, P5). Open rulings in §9.
 **Formal linkage:** [D1.1](../doc/Lambda_Formal_Design.md#d1-architecture-principles)
 (a guest is a grammar + AST builder + LangProfile), [S15.1 / S15.3](../doc/Lambda_Formal_Semantics.md#s15-metaprogramming)
 (the `lm.` AST is an element tree; `compile(ast)` is the only way from data
@@ -39,6 +41,10 @@ string patterns, U = unified AST).
 | **GM5v2** | **A grammar is a type**, declared and carried exactly like `type`: a `Type` of a new kind, compile-time only, owned by its module. **Each of its rules is a type too**: a `:=` rule is the string-pattern type it already is (S11.1.2v4); a `=` rule is a rule type that knows its grammar. `grammar` is a declaration keyword, barred like `type` (S16.10.1v2). `type(calc)` is `type`, as for any type value (S2.1.2). *(v1 had proposed a value of a new nominal kind reporting `grammar`.)* |
 | **GM5.1** | **`parse(text, g)` and `parse(text, g, 'rule')`** are the V1 surface; with no rule named, **the first rule in the block** is the entry. `input(target, g[, 'rule'])` is the file form. |
 | **GM4.2** | **A `:=` rule's quote domain decides what its match emits**: a `'...'` rule (`for := 'for'`) emits a **symbol**, a `"..."` rule (`word := "\a"+`) a **string**. The island's domain rules apply unchanged (S11.1.2v4: one domain per island, mixed quotes are a compile error). Literal tokens in `=` rules stay strings (GM4.1). Ruled while choosing how tokens appear in the tree, because element content merges adjacent strings (S2.6.4, §7). |
+| **GM4.3** | **`'x'` in a `=` rule is a name and resolves to a rule name** (closes GM-O3): `'word'` refers to the rule `word`, as a bare `word` does. As a name it also spells a label: `'data-x': word` gives an attribute `data-x`. A symbol is never a literal token. |
+| **GM5.4** | **`text is g.rule` is not valid syntax** (closes GM-O8): bind the rule first — `let r = g.rule` then `text is r`. **`input(target, g)` is not a supported usage** (closes GM-O9). |
+| **GM11v2** | **Spans and the entry rule go in a third-argument options map**: `parse(text, g, {rule: 'expr', spans: true})`; `parse(text, g, 'rule')` stays. *(v1 wrote `{'spans': true}` alone.)* |
+| **P5 scope** | **A guest grammar only parses**: `lambda.grammar.xpath` turns XPath into a Lambda element tree; evaluating it, and lowering to `lm.` (whose `compile`, S15.3, is unimplemented), are out of this phase. The XPath grammar is written **Tree-sitter style** — one directly left-recursive `Expr` with a precedence ladder and labels — rather than as a line-by-line EBNF transcription, which would make every precedence level a node. |
 | **GM5.2** | **Diagnostics align with the existing parsers**: compile-time grammar errors use the script parser's E-code scheme and reporters; a failed `parse` is the same `ERR_PARSE_ERROR` every input parser raises, with the furthest-failure message as its `parse_error_message`; lint warnings go through the warning channel the script compiler already uses. No new catalog, no new tags. |
 
 USER also asked whether Tree-sitter-style precedence rules (`prec.left(n, …)`
@@ -194,12 +200,13 @@ grammar <name> {
   | `a \| b` | ordered choice — first match wins (GM2) |
   | `a?` `a*` `a+` `a{n}` `a{n+}` `a{n,m}` | greedy, possessive repetition (same counting syntax as S16.8.6v3) |
   | `"lit"` | literal token — the same lexical form as a one-fragment `:=` body, so `"\s"` and friends mean what S11.1.2v4 says; the longest-literal rule of §4.2 applies (GM4.1) |
-  | `'name'` | a symbol, as everywhere in Lambda (GM4.1) — never a token. Its one proposed use in a rule body is the quoted-name escape for a rule whose name is a word the grammar surface claims (`'space'`, `'prec'`), per S15.1's quoted-symbol orthogonality; see GM-O3 |
+  | `'name'` | a name (GM4.3): a reference to the rule `name`, or a label (`'data-x': e`) — never a literal token |
   | `tok` | reference to a `:=` rule — matches one token |
   | `rule` | reference to a `=` rule — produces a child element |
   | `( … )` | grouping |
   | `&a` / `!a` | positive / negative lookahead (zero width) |
-  | `prec(n, …)` `prec.left(n, …)` `prec.right(n, …)` | precedence-annotated alternative (§5) |
+  | `prec(n, …)` `prec.left(n, …)` `prec.right(n, …)` `prec.none(n, …)` | precedence-annotated alternative (§5); `prec.none` is bare `prec` without the non-associative lint warning (GM6.1) |
+  | `import g` | a statement of the body, not an expression: compose grammar `g` (§4.5) |
   | `name: a` | field label on the child (becomes an attribute, §7) |
   | `_a` or `hidden(a)` | inline: the rule's children splice into the parent, no element of its own |
 
@@ -242,7 +249,9 @@ the raw text. Consequences:
   compiles to RE2 and has no lookahead (Rev 1 suggested `!"\w"`, which inside
   an island consumes one non-word character). Any other `:=` rule has no
   implicit boundary; its pattern is greedy, so `word := "\a"+` already ends
-  at a word boundary.
+  at a word boundary. Word characters are the Lambda lexer's identifier
+  bytes, except that `$` never makes a literal keyword-like: it is
+  punctuation in the guest languages (`"$"` before a name in XPath).
 - **Trade-off accepted:** every token is re-recognized on backtracking. With
   `memo` on the few rules that backtrack heavily this is negligible for the
   inputs in scope (scripts, not documents).
@@ -261,8 +270,10 @@ rule. `space` is implicitly a `nospace` rule.
 existing `parse(str, format)` surface, Lambda_Sys_Func.md) run the named
 rule — by default **the first rule in the block** — and require it to
 consume the whole input after a final `space` run; otherwise the result is an
-error (§8). `input(target, g[, 'rule'])` is the file form. Both return
-`element^E`, following S7.10's sys-func return contract. The lint warns when
+error (§8). It returns `element^E`, following S7.10's sys-func return
+contract. The third argument may instead be an options map (GM11v2):
+`parse(text, g, {rule: 'expr', spans: true})`. There is no file form
+(GM5.4). The lint warns when
 the implicit entry is the `space` rule (§6), since a grammar that starts with
 `space :=` almost never means to parse whitespace.
 
@@ -270,8 +281,9 @@ Because a rule is a type (GM5v2), two further forms follow without new
 mechanism and are proposed for after V1: `parse(text, calc.expr)` names the
 entry rule as a type instead of a symbol, and `text is calc.expr` is true
 exactly when the rule parses the whole text — the same `fn_is` branch that
-already serves string patterns. **GM5.3 (proposed):** both forms are
-admitted once GM5.1 ships; neither is needed by a guest.
+already serves string patterns. **GM5.3 (proposed, implemented):** both
+forms work. `is` takes a type in type position, where `g.rule` is not valid
+syntax (GM5.4), so a rule is bound first: `let r = g.rule` then `text is r`.
 
 ### 4.5 Composition
 
@@ -281,6 +293,18 @@ a rule defined locally with the same name **overrides** the imported one
 else changes). Imported `space` is overridden the same way. This is the XPath-
 in-XQuery and XPath-in-XSLT case; nothing fancier (parameterized grammars,
 mixins) is proposed until a target needs it.
+
+As implemented (P4): `g` is a grammar binding in scope — declared earlier in
+the module, or a `pub grammar` brought in by `import`. Its rules are copied
+into this grammar and their references resolve again by name, so a local
+override also changes what the imported rules call (an XQuery that overrides
+`PrimaryExpr` changes every XPath rule that reaches it). Among imports a later
+one overrides an earlier one. The entry follows GM5.1 in written order: an
+`import` before every local rule contributes the imported entry (or the local
+rule overriding it); otherwise the first local rule is the entry. Only local
+rules are linted — the imported ones were linted where they were declared.
+Not yet: a local `:=` rule cannot name an imported `:=` rule inside its island
+(an island inlines only definitions it can see as patterns); `=` rules can.
 
 ### 4.6 Memoization
 
@@ -445,8 +469,9 @@ nothing.
 <expr left: <expr "1">, op: "+", right: <expr "2">>
 ```
 
-**GM11** — Source positions are attributes, on request: `parse(text, g,
-{'spans': true})` adds `start` and `end` byte offsets to every element. They
+**GM11v2** — Source positions are attributes, on request: `parse(text, g,
+{spans: true})` adds `start` and `end` byte offsets to every element. An
+element starts at its first token, not at whitespace skipped before it. They
 are not on by default because the tree is meant to be read and transformed
 with ordinary element operations (`for`, `match`, member access), and a
 transpiler that does not need positions should not pay for them in memory or
@@ -478,8 +503,10 @@ want: `expected ")" or "+" at 1:7`. It is raised the way every input parser
 raises one (GM5.2): the same parse-error code, the message as the input's
 parse-error message, the same `^` discharge (S7.6). Internally every failure
 is cheap (a flag and the position); only the furthest one keeps its
-expected-set. There is no error recovery in V1: a guest script with a syntax
-error does not run, so a partial tree has no consumer.
+expected-set. A token rule that is a single literal (`_lparen := "("`,
+`or := 'or'`) is shown as that literal, not by its rule name; up to 32
+expected tokens are listed. There is no error recovery in V1: a guest script
+with a syntax error does not run, so a partial tree has no consumer.
 
 ## 9. Open rulings
 
@@ -487,9 +514,10 @@ error does not run, so a partial tree has no consumer.
 |---|---|---|
 | **GM-O1** | Does `grammar` go into the formal spec as a new S16.9 declaration ruling (syntax) plus a D-ruling for the engine (likely a new D8.3), or only as a D-ruling with the syntax folded into S15 metaprogramming? | S16.9 for the surface (it is a declaration like `type`), D8 for the engine; S15 gains one line pointing at `parse(text, grammar)` as the second producer of trees that reach `compile` |
 | **GM-O2** | Explicit level references in the grammar surface (`expr@3`) for authors who want to call a rule above a given precedence | **not in V1**; the ladder is private to the rule. Add if a target spec needs it |
-| **GM-O3** | *Narrowed by GM4.1 and GM4.2 (USER, 2026-10-11: `"+"` is the literal token; `'name'` and `name` stay a symbol and a name; a `'...'` `:=` rule emits symbols).* What remains: is a symbol in a `=` rule body (a) still an error, as implemented (`write "x"`), (b) an inline symbol token emitting a symbol — the `=`-rule counterpart of GM4.2, which would let `'for', name: id, 'in'` stay apart without a named rule — or (c) the quoted-name escape for a rule reference (`'prec'` naming a rule called `prec`)? | (b): it reads as GM4.2 does and removes the most common S2.6.4 merge; (c) is rarely needed since rules can be renamed |
-| **GM-O8** | `text is g.rule` and `x: g.rule` in type position: the type sub-language reads no dotted names after `is`, so GM5.3 works today for a whole grammar (`text is g`) and for a rule only through `parse(text, g.rule)` | extend the type parser's name to a dotted path when the head is a grammar binding; needs a type-syntax ruling (S11) |
-| **GM-O9** | `input(target, g[, 'rule'])`, the file form of GM5.1 | add with the options-map form (P4) |
+| **GM-O3** | *Closed by GM4.3 (USER, 2026-10-11): `'x'` in a `=` rule is a rule name.* | closed |
+| **GM-O8** | *Closed by GM5.4: `text is g.rule` is not valid syntax; bind the rule first.* | closed |
+| **GM-O9** | *Closed by GM5.4: `input(target, g)` is not a supported usage.* | closed |
+| **GM-O10** | `prec.none(n, …)` (GM6.1, implemented with P5): an explicitly non-associative alternative, identical to bare `prec` but without the lint warning, so a grammar that means it (XPath comparisons and `to`) compiles clean. | keep: a shipped grammar must not print warnings into every importing script |
 | **GM-O4** | *Ruled by GM5.1 (USER, 2026-10-11).* `parse` takes the grammar as a type value and the entry rule as a symbol (`parse(text, g, 'rule')`); no grammar-by-name string form, which keeps S15.3's "strings are never code" clean and makes `pub grammar` the one sharing mechanism | closed |
 | **GM-O5** | Packrat by default (memoize every rule) vs. opt-in `memo` | opt-in, as ruled in §4.6; measure on the XQuery grammar before revisiting |
 | **GM-O6** | Semantic predicates (`&{ expr }`) in rules | **no**; context-sensitivity that parser-driven lexing and lookahead cannot express goes into the transpiler, which keeps the grammar a pure description |
@@ -502,10 +530,9 @@ error does not run, so a partial tree has no consumer.
    choice, repetition, lookahead, `space`, literal reordering, error report.
 2. **M2 left recursion**: GM6–GM8 with a test that pins every row of the
    §5.3 table and the two §5.2 traces as goldens.
-3. **M3 XPath 3.1**: transcribed from the W3C EBNF, with a transpiler to
-   `lm.` for the path-and-predicate subset that maps onto Lambda paths
-   (S2.4) and `|:`. This is the acceptance test for "the spec transcribes
-   nearly line by line".
+3. **M3 XPath 3.1** *(done 2026-10-11, P5)*: `lambda.grammar.xpath`, written
+   Tree-sitter style per the P5 ruling; parsing only. Rev 1 planned an EBNF
+   transcription plus a transpiler to `lm.`; both were ruled out of scope.
 4. **M4 jq**: ported from jq's bison grammar — the acceptance test for §5.
 5. **M5 XQuery and RELAX NG compact**: composition (§4.5) and `nospace`
    regions are exercised here; XQuery is the stress test for parser-driven
