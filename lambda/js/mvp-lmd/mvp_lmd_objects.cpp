@@ -1293,16 +1293,16 @@ extern "C" Item mvp_lmd_object_project(Item owner, int64_t projection) {
     if (fields) pool_free(context->pool, fields);
     return Item{.array = result.get()};
 }
-extern "C" Item mvp_lmd_object_copy(Item target, Item source, int64_t assign) {
+extern "C" Item mvp_lmd_object_copy(Item target, Item source, int64_t assign, Item excluded) {
     TypeId type = get_type_id(source);
     if (type != LMD_TYPE_MAP && type != LMD_TYPE_ARRAY && type != LMD_TYPE_FUNC && type != LMD_TYPE_STRING) return target;
-    RootFrame roots(5);
+    RootFrame roots(6);
     if (!roots.valid()) return ItemError;
     Rooted<Item> output(roots, target), input(roots, source), keys(roots, ItemNull), key(roots, ItemNull), value(roots, ItemNull);
+    Rooted<Item> omitted(roots, excluded);
     if (type == LMD_TYPE_FUNC) {
         Item ready = mvp_lmd_function_prepare(input.get());
         if (item_is_error(ready)) return ready;
-        input.set(mvp_lmd_class_values(mvp_lmd_class_record(input.get()))[2]);
     }
     if (type != LMD_TYPE_STRING) {
         keys.set(mvp_lmd_object_project(input.get(), 5));
@@ -1313,6 +1313,11 @@ extern "C" Item mvp_lmd_object_copy(Item target, Item source, int64_t assign) {
     for (int64_t i = 0; i < length; i++) {
         key.set(type == LMD_TYPE_STRING ? mvp_lmd_number_to_string(i) : keys.get().array->items[i]);
         if (item_is_error(key.get())) return key.get();
+        // CopyDataProperties excludes keys before descriptor/getter effects, retaining Symbol identity.
+        bool skip = false;
+        if (omitted.get().item != ITEM_NULL) for (int64_t j = 0; j < omitted.get().array->length; j++)
+            if (mvp_lmd_property_key_equal(key.get(), omitted.get().array->items[j])) { skip = true; break; }
+        if (skip) continue;
         if (type != LMD_TYPE_STRING) {
             JsPropertyDescriptor descriptor = {};
             Item status = mvp_lmd_get_own_property(input.get(), key.get(), &descriptor);

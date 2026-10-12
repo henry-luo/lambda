@@ -16,7 +16,7 @@ static Item proxy_trap(Item handler, const char* name) {
     if (trap.item == ITEM_NULL || trap.item == ITEM_JS_UNDEFINED) return Item{.item = ITEM_JS_UNDEFINED};
     return mvp_lmd_is_callable(trap) ? trap : mvp_lmd_fail(LMD_MVP_TYPE, 0);
 }
-static bool proxy_key_equal(Item left, Item right) {
+bool mvp_lmd_property_key_equal(Item left, Item right) {
     String* a = left.get_string(); String* b = right.get_string();
     if (property_key_requires_identity(a) || property_key_requires_identity(b))
         return name_ref_id(a) == name_ref_id(b);
@@ -116,7 +116,7 @@ Item mvp_lmd_proxy_property(Item owner, Item name, Item input, Item actual_recei
         for (int64_t i = 0; i < result.get().array->length; i++) {
             key.set(mvp_lmd_property_key(result.get().array->items[i]));
             if (item_is_error(key.get())) return key.get();
-            for (int64_t j = 0; j < i; j++) if (proxy_key_equal(key.get(), result.get().array->items[j]))
+            for (int64_t j = 0; j < i; j++) if (mvp_lmd_property_key_equal(key.get(), result.get().array->items[j]))
                 return mvp_lmd_fail(LMD_MVP_TYPE, 0);
             Item stored = mvp_lmd_array_store(result.get(), i, key.get());
             if (item_is_error(stored)) return stored;
@@ -132,7 +132,7 @@ Item mvp_lmd_proxy_property(Item owner, Item name, Item input, Item actual_recei
             if (item_is_error(found)) return found;
             bool included = false;
             for (int64_t j = 0; j < result.get().array->length; j++)
-                if (proxy_key_equal(key.get(), result.get().array->items[j])) { included = true; break; }
+                if (mvp_lmd_property_key_equal(key.get(), result.get().array->items[j])) { included = true; break; }
             // enumerate every target descriptor before deciding the invariant failure.
             mismatch |= !included && (!extensible_value || (found.item == ITEM_TRUE && !js_pd_is_configurable(&current)));
         }

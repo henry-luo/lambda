@@ -51,6 +51,180 @@ protected:
         return read_text_file(path);
     }
 };
+TEST_F(JsMvpLmd, NestedBindingPatterns) {
+    boolean(R"JS(
+        let [a,,{b:[c=3,...tail]},...rest]=[1,2,{b:[undefined,4,5]},6,7];
+        let {x:{y=8}={},...other}={z:9};
+        function f([x,{y=2},...tail]=[1,{}],{z=3,...other}={}) {
+            return [x,y,z,tail.length,Object.keys(other).length];
+        }
+        function g(...[x,...tail]) {return x+tail.length;}
+        let caught=0;
+        try {throw [10,{n:11}]} catch([x,{n}]) {caught=x+n;}
+        a===1 && c===3 && tail.join(',')==='4,5' && rest.join(',')==='6,7' &&
+            y===8 && other.z===9 && f().join(',')==='1,2,3,0,0' && g(4,5,6)===6 && caught===21;
+    )JS");
+    boolean(R"JS(
+        let closures=[];
+        for(let [a,{b=2},...rest] of [[1,{},3],[4,{b:5},6,7]]) closures.push(()=>a+b+rest.length);
+        let x='',y='';for([x,y] of ['ab']) {}
+        closures[0]()===4 && closures[1]()===11 && x==='a' && y==='b';
+    )JS");
+    error("let [x]=null;", "TypeError");
+    error("let []={length:0};", "TypeError");
+    error("[]=1;", "TypeError");
+    error("[,]=true;", "TypeError");
+    error("[]=Symbol();", "TypeError");
+    error("let [x=x]=[];", "ReferenceError");
+    error("function f([x=y],y=1){}f([])", "ReferenceError");
+    boolean(R"JS(
+        let [a=function(){},b=()=>{},c=(function(){}),d=(0,function(){}),e=function explicit(){}]=[];
+        let {f=function*(){}}={};
+        function g(h=()=>{}) {return h.name}
+        let descriptor=Object.getOwnPropertyDescriptor(a,'name');
+        a.name==='a' && b.name==='b' && c.name==='c' && d.name==='' && e.name==='explicit' &&
+            f.name==='f' && g()==='h' && !descriptor.writable && !descriptor.enumerable && descriptor.configurable;
+    )JS");
+}
+TEST_F(JsMvpLmd, PatternIteratorEffectsAndClose) {
+    boolean(R"JS(
+        let prototype=Object.getPrototypeOf([].values()),closed=0;
+        prototype.return=function(){closed++;return {}};
+        function f(){let a;[a]=[1,2];return a;}
+        let total=0,map=new Map([[1,2],[3,4]]);
+        for(let [key,value] of map)total+=key+value;
+        f()===1 && total===10 && closed===3;
+    )JS");
+    boolean(R"JS(
+        let log='',n=0;
+        let source={[Symbol.iterator](){log+='i';return {
+            next(){log+='n';return {get done(){log+='d';return false},get value(){log+='v';return ++n}}},
+            return(){log+='r';return {}}
+        }}};
+        let [,x]=source;
+        let first=log==='indndvr' && x===1;
+        log='';let []=source;
+        first && log==='ir';
+    )JS");
+    boolean(R"JS(
+        let marker={},close={},count=0,ok=true;
+        function fail(){throw marker}
+        for(let mode of ['next','done','value','bind']) {
+            let source={[Symbol.iterator](){return {
+                next(){if(mode==='next')fail();return {
+                    get done(){if(mode==='done')fail();return false},
+                    get value(){if(mode==='value')fail();return undefined}
+                }},return(){count++;throw close}
+            }}};
+            try {let [x=fail()]=source;ok=false} catch(e){ok=ok && e===marker}
+        }
+        ok && count===1;
+    )JS");
+    boolean(R"JS(
+        let log='',marker={};
+        let inner={[Symbol.iterator](){return {next(){throw marker},return(){log+='i';return {}}}}};
+        let outer={[Symbol.iterator](){return {next(){return {value:inner,done:false}},return(){log+='o';return {}}}}};
+        try {let [[x]]=outer;} catch(e) {e===marker && log==='o'}
+    )JS");
+    error("let [x]={[Symbol.iterator](){return {next(){return {value:1}},return(){return 1}}}}", "TypeError");
+    boolean(R"JS(
+        let closed=0,source={[Symbol.iterator](){return {return(){closed++;return {}}}}};
+        function* g(){[...{}[yield 1]]=source;}
+        let iterator=g();let first=iterator.next();let last=iterator.return(2);
+        first.value===1 && !first.done && last.value===2 && last.done && closed===1;
+    )JS");
+    boolean(R"JS(
+        let receiver=false,called=false;
+        Object.defineProperty(Number.prototype,Symbol.iterator,{get(){'use strict';receiver=this===7;
+            return function(){'use strict';called=this===7;return {next(){return {value:9,done:false}},return(){return {}}}}}});
+        let [x]=7;receiver && called && x===9;
+    )JS");
+}
+TEST_F(JsMvpLmd, PatternAssignmentOrder) {
+    boolean(R"JS(
+        let log='',target={},n=0;
+        function key(){log+='k';return 'x'}
+        function fallback(){log+='f';return 5}
+        let source={[Symbol.iterator](){return {
+            next(){log+='n';return {value:undefined,done:n++>0}},return(){log+='r';return {}}
+        }}};
+        [target[key()]=fallback()]=source;
+        let ok=log==='knfr' && target.x===5;
+        log='';n=0;[...target[key()]]=source;
+        ok=ok && log==='knn' && target.x.length===1;
+        log='';({get a(){log+='g';return undefined}});
+        ({a:target[key()]=fallback()}={get a(){log+='g';return undefined}});
+        ok && log==='kgf' && target.x===5;
+    )JS");
+    boolean("let a=0,b=0;let source=[1,2];let value=([a,b]=source);value===source && a===1 && b===2");
+    boolean(R"JS(let x,y;[x,y]='\u{1F600}a';x==='\u{1F600}' && y==='a')JS");
+    boolean("let x,y;[x,{a:y=3}]=[1,{}];x===1 && y===3");
+    boolean(R"JS(
+        let saved=[];
+        for(let [x,y] of [[1,2],'ab',[3],['c','d']]) saved.push(()=>[x,y]);
+        let first=saved[0](),second=saved[1](),third=saved[2](),fourth=saved[3]();
+        first[0]===1 && first[1]===2 && second[0]==='a' && second[1]==='b' &&
+            third[0]===3 && third[1]===undefined && fourth[0]==='c' && fourth[1]==='d';
+    )JS");
+    error("for(let [x,y] of [1]);", "TypeError");
+    boolean(R"JS(
+        let log='',target={},source={[Symbol.iterator](){return {
+            next(){log+='n';return {}},return(){log+='r';return {}}
+        }}};
+        function key(){log+='e';return {toString(){log+='k';return 'x'}}}
+        [target[key()]=(log+='f',1)]=source;
+        let ok=log==='enfkr' && target.x===1;
+        log='';try {[null[key()]]=source} catch(e){ok=ok && e instanceof TypeError}
+        ok && log==='enr';
+    )JS");
+}
+TEST_F(JsMvpLmd, ObjectRestPropertySemantics) {
+    boolean(R"JS(
+        let log='',s=Symbol('s'),t=Symbol('s'),source={a:1,b:2,[s]:3,[t]:4};
+        Object.defineProperty(source,'hidden',{value:5});
+        let proxy=new Proxy(source,{
+            ownKeys(o){log+='k';return Reflect.ownKeys(o)},
+            getOwnPropertyDescriptor(o,k){log+=typeof k==='symbol'?'s':k;return Reflect.getOwnPropertyDescriptor(o,k)},
+            get(o,k,r){log+=typeof k==='symbol'?'S':k.toUpperCase();return Reflect.get(o,k,r)}
+        });
+        let {a,[s]:symbol,...rest}=proxy;
+        let descriptor=Object.getOwnPropertyDescriptor(rest,'b');
+        a===1 && symbol===3 && rest.b===2 && rest[t]===4 && !Object.hasOwn(rest,s) &&
+            !Object.hasOwn(rest,'a') && !Object.hasOwn(rest,'hidden') &&
+            descriptor.writable && descriptor.enumerable && descriptor.configurable && log==='ASkbBhiddensS';
+    )JS");
+    boolean(R"JS(
+        let source={get a(){delete this.b;this.c=3;return 1},b:2};
+        let {...rest}=source;
+        let {[{toString(){return 'x'}}]:x,...other}={x:1,y:2};
+        let {0:first,...chars}='abc';
+        rest.a===1 && !Object.hasOwn(rest,'b') && !Object.hasOwn(rest,'c') &&
+            x===1 && other.y===2 && !Object.hasOwn(other,'x') && first==='a' && chars[1]==='b';
+    )JS");
+    boolean(R"JS(
+        function source(){};
+        Object.defineProperty(source,'x',{enumerable:true,get(){return this===source}});
+        let {...rest}=source;rest.x;
+    )JS");
+}
+TEST_F(JsMvpLmd, PatternEarlyErrors) {
+    const char* sources[] = {"for ({x:y?.z=42} of [{}]);", "for ({x:y?.z=42} in {});",
+        "([x?.y]=[1]);", "({x:y?.z=1}={});", "[null]=[1];", "let [null.x]=[];",
+        "[...x,]=[];", "({...x,}={});", "({cl\\u0061ss}={});", "function* f(){[yield]=[]}",
+        "'use strict';({x=yield}={});", "'use strict';[...x[yield]]=[];",
+        "for([...x,] of [[]]);", "for([...x,,] in {});",
+        "for(const [x]=1 of []);", "for(var {x}=1 of []);", "for(var [x]=1 in {});"};
+    for (const char* source : sources) {
+        mvp_lmd_destroy(execution); execution=mvp_lmd_execute(source, strlen(source));
+        MvpLmdFailurePhase phase; const char* type=nullptr;
+        mvp_lmd_diagnostic(execution,&phase,&type);
+        EXPECT_EQ(phase,MVP_LMD_PARSE_FAILURE) << source;
+        EXPECT_STREQ(type,"SyntaxError") << source;
+    }
+    boolean("let x={};[patternGlobal]=[2];({a:x.x}={a:3});patternGlobal===2 && x.x===3");
+    boolean("'use strict';function f(){return arguments[0]}f(true)");
+    boolean("let x=[0];for([x][0][0] of [3]);x[0]===3");
+}
 TEST_F(JsMvpLmd, ErrorConstructorsAndDescriptors) {
     boolean(R"JS(
         let constructors=[Error,EvalError,RangeError,ReferenceError,SyntaxError,TypeError,URIError];

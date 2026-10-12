@@ -1522,29 +1522,38 @@ pinned-MIR self-timing evidence. Carry forward §31's unresolved Raytrace3D gap;
 the four jq timings remain historical-only. Existing LJS exclusions and general
 Node/DOM expansion stay outside this parity target.
 
-The latest increment adds Function reflection and retained-source `toString`,
-mapped/unmapped arguments, separate arguments bindings for default-parameter
-closures, and `Math.pow`. It reuses Lambda nominal Maps, scalar homes and the
-existing mutable capture cells. Dynamic `eval` and Function bodies still
-await the interpreter bridge. MVP checks pass **176/176** normally and with
-forced GC. The final selected canonical comparison improves **815 → 1,224
-of 2,574 IDs**, with **409 gains and zero lost passes**, including **43/43**
-mapped-arguments cases. The plan records the exact entry build, isolated
-replays and performance evidence. The earlier full MVP inventory of
-**8,888/40,261** remains diagnostic, not a final parity result.
+Implemented increments now cover intrinsic errors/wrappers, Function reflection
+and retained-source `toString`, mapped/unmapped arguments, and general
+array/object destructuring. The latest P2 increment adds nested/rest/default
+patterns, member assignment targets and bindings in parameters, catch and loop
+heads. Iterator closing, evaluation order, primitive iterator receivers, Symbol
+exclusions and default function names follow JS semantics over existing Lambda
+storage (**S1.11**, **D5.2–D5.3**). Simple closed array swaps and intrinsic
+Map-pair loops retain their fast paths (**D8.4.1v2**).
 
-Complete intrinsic/environment support and P3–P9 remain open. The shared
-Lambda gate passes **6,784/6,784**, including the previous LaTeX timeout case;
-the shared LJS gate passes **40,261/40,261** at the recorded checkpoint.
-The earlier **2.1% Navier–Stokes**, **1.17% three-way merge** and §31 Raytrace3D
-performance gaps remain open. Fresh performance attribution uses a rebuilt
-control from this increment's exact entry HEAD. The four jq workloads retain
-historical evidence only.
+Latest correctness results:
 
-All **84 non-jq workload contracts pass**. Arguments-related named-property
-overhead was reduced; the final 31-round Hashmap median is **+0.38%**, with its
-confidence interval spanning parity. Timing overlaps another checkout's
-benchmark work, so performance sign-off still needs a quiet-host comparison.
+- **181/181 MVP groups**, normally and under forced GC/poisoning.
+- Selected canonical patterns: **603 → 1,913 of 1,949**, with **1,310 gains and
+  zero lost passes**. The 36 remaining cases require class expressions or static
+  blocks. This is a selected population, not the full MVP parity score.
+- Shared gates: **6,793/6,793 Lambda** and **40,261/40,261 full LJS**. The plan
+  preserves earlier failed checkpoints and their subsequent validation.
+
+Global/with environments, tagged templates and the interpreter bridge remain
+open P2/P3 work; class/async patterns and typed-array reflection retain their
+later phase dependencies. Eval and Function bodies still await the shared
+interpreter bridge (**D8.1.3v24**). No normality flag or whole-unit fallback is
+added. Full parity remains open.
+
+The final pinned MIR release passes **84/84 non-jq output contracts** and
+completes a 30-workload timing screen. The severe Fasta allocation regression is fixed;
+its 31-round result is **0.909 vs 0.894 ms (+1.68%)**. **Performance acceptance
+remains open:** competing host workloads leave the smaller Fasta and noisy
+screen differences unresolved. Detailed timings and provenance are in plan §11.
+Earlier controls still have the **2.1% Navier–Stokes**, **1.17% three-way merge**
+and §31 Raytrace3D gaps; this entry comparison cannot close them. The four jq
+workloads retain historical evidence only. Results3–9 are unchanged.
 
 Dependencies, interpreter boundary, reuse inventory, helper disclosure and
 acceptance gates: [implementation plan](../impl/JS_MVP_Lmd_Test262_Parity.md).
