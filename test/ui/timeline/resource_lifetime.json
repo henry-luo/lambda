@@ -1,0 +1,29 @@
+{
+  "name":"Timeline source cancellation, stale results, deadlines, and bounded retry",
+  "html":"test/ui/timeline/resource_lifetime.ls",
+  "viewport":{"width":900,"height":450},
+  "input_turn_ms":0,
+  "events":[
+    {"type":"assert_text","target":{"selector":"#starts"},"equals":"1"},
+    {"type":"click","target":{"selector":"#revise"}},
+    {"type":"assert_text","target":{"selector":"#starts"},"equals":"2"},
+    {"type":"assert_text","target":{"selector":"#cancels"},"equals":"1"},
+    {"type":"click","target":{"selector":"#stale"}},
+    {"type":"assert_count","target":{"selector":".lambda-timeline-card-title"},"count":0},
+    {"type":"assert_text","target":{"selector":"#completions"},"equals":"0"},
+    {"type":"click","target":{"selector":"#deliver"}},
+    {"type":"assert_text","target":{"selector":".lambda-timeline-card-title"},"equals":"Current history"},
+    {"type":"assert_text","target":{"selector":"#completions"},"equals":"1"},
+    {"type":"click","target":{"selector":"#expire"}},
+    {"type":"assert_text","target":{"selector":"#starts"},"equals":"3"},
+    {"type":"advance_time","ms":100,"steps":5},
+    {"type":"assert_text","target":{"selector":"#starts"},"equals":"4"},
+    {"type":"assert_text","target":{"selector":"#deadlines"},"equals":"1"},
+    {"type":"assert_text","target":{"selector":"#cancels"},"equals":"2"},
+    {"type":"advance_time","ms":100,"steps":5},
+    {"type":"assert_text","target":{"selector":"#deadlines"},"equals":"2"},
+    {"type":"assert_text","target":{"selector":"#cancels"},"equals":"3"},
+    {"type":"advance_time","ms":400,"steps":5},
+    {"type":"assert_text","target":{"selector":"#starts"},"equals":"4"}
+  ]
+}

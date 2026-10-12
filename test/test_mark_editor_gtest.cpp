@@ -1671,6 +1671,49 @@ TEST_F(MarkEditorTest, ElementUpdateAttrKeepsSharedTypeAndTagId) {
     EXPECT_EQ(shared->length, 1);
 }
 
+TEST_F(MarkEditorTest, ElementShapeEditsPreserveUnionAndNullableContracts) {
+    MarkBuilder builder(input);
+    Type* contracts[] = {mk_union(pool, &TYPE_STRING, &TYPE_INT), mk_optional(pool, &TYPE_STRING)};
+    for (Type* contract : contracts) {
+        Item element = builder.element("select").attr("data-setting", "quick_jump").final();
+        TypeElmt* type = (TypeElmt*)alloc_type(pool, LMD_TYPE_ELEMENT, sizeof(TypeElmt));
+        memcpy(type, element.element->type, sizeof(TypeElmt));
+        ShapeEntry* field = (ShapeEntry*)pool_calloc(pool, sizeof(ShapeEntry));
+        *field = *type->shape;
+        field->chain_next = nullptr;
+        shape_entry_set_type(field, contract);
+        type->shape = type->last = field;
+        type->byte_size = shape_entry_storage_size(field);
+        type->is_transition_shared_shape = false;
+        type->is_private_clone = true;
+        type->transitions = nullptr;
+        typemap_hash_build(type, pool);
+        element.element->type = type;
+        element.element->data = pool_calloc(pool, type->byte_size);
+        element.element->data_cap = type->byte_size;
+        String* value = builder.createString("quick_jump");
+        if (shape_entry_storage(field)->kind == LANE_STORAGE_TYPED_ITEM) {
+            uint8_t tag = LMD_TYPE_STRING;
+            memcpy(element.element->data, &tag, sizeof(tag));
+            memcpy((char*)element.element->data + sizeof(tag), &value, sizeof(value));
+        } else {
+            memcpy(element.element->data, &value, sizeof(value));
+        }
+
+        MarkEditor editor(input, EDIT_MODE_INLINE);
+        Item updated = editor.elmt_update_attr(element, "aria-invalid", builder.createStringItem("false"));
+        ASSERT_EQ(get_type_id(updated), LMD_TYPE_ELEMENT);
+        const ShapeEntry* kept = ((TypeMap*)updated.element->type)->shape;
+        ASSERT_EQ(kept->type, contract);
+        EXPECT_EQ(shape_entry_storage_size(kept), shape_entry_storage_size(field));
+        EXPECT_STREQ(ElementReader(updated).get_attr_string("data-setting"), "quick_jump");
+        EXPECT_STREQ(ElementReader(updated).get_attr_string("aria-invalid"), "false");
+        updated = editor.elmt_delete_attr(updated, "aria-invalid");
+        EXPECT_EQ(((TypeMap*)updated.element->type)->shape->type, contract);
+        EXPECT_STREQ(ElementReader(updated).get_attr_string("data-setting"), "quick_jump");
+    }
+}
+
 TEST_F(MarkEditorTest, RepeatedInlineShapeEditsReleaseDraftStorage) {
     MarkBuilder builder(input);
     Item element = builder.element("div").attr("id", "kept").final();

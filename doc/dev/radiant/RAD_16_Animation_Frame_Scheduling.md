@@ -148,7 +148,8 @@ until the following frame. Requests are delivered in registration order; an
 owner callback may cancel a later request in the same batch. Detached/stale
 owners are skipped. A reactive template rebuild replaces its result subtree, so
 `radiant_frame_requests_follow_rebuild` (called from
-`rebuild_lambda_doc_incremental` beside `view_state_preserve_subtree_identity`)
+both incremental and full `rebuild_lambda_doc` paths beside
+`view_state_preserve_subtree_identity`)
 moves a pending request to the structurally corresponding node of the
 replacement (same node type and tag along the same child path); without it a
 template could never keep a frame it requested from its own result, since
@@ -156,6 +157,15 @@ storing the token in its state causes that rebuild. Transformed documents
 (`lambda edit`) receive the viewer's host config like other loads, so a frame
 handler's re-render has a UI context. Document teardown releases every queue resource, without
 retaining a Lambda closure or `Item` in native storage.
+
+Native pointer capture follows the same retained presentation correspondence
+through `radiant_pointer_capture_follow_rebuild`, using the shared
+`view_state_corresponding_node` path helper (D7.5.3/S9.1.4). Both pending and
+current capture owners move before the old result is retired. Explicit DOM
+removal still releases capture normally. The timeline editing fixture verifies a
+drag across repeated live redraws, intentional clicks after dragging, keyboard
+previews, cancellation, and committed source replacement (16/16 assertions in
+T0 and MIR Direct, verified 2026-10-11).
 
 `radiant_document_has_pending_frames` contributes to the existing window wake
 gate. `tick_document_animation_tree` services Lambda frame events alongside the

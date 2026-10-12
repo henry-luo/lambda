@@ -1,0 +1,15 @@
+{
+  "name":"Cached anonymous template ASTs retain execution module state identity",
+  "html":"test/ui/lambda_template_shared_import.ls",
+  "viewport":{"width":500,"height":300},
+  "events":[
+    {"type":"assert_text","target":{"selector":"#first-counter"},"equals":"0"},
+    {"type":"click","target":{"selector":"#first-counter"}},
+    {"type":"assert_text","target":{"selector":"#first-counter"},"equals":"1"},
+    {"type":"assert_text","target":{"selector":"#second-counter"},"equals":"0"},
+    {"type":"click","target":{"selector":"#second-counter"}},
+    {"type":"assert_text","target":{"selector":"#second-counter"},"equals":"1"},
+    {"type":"click","target":{"selector":"#first-counter"}},
+    {"type":"assert_text","target":{"selector":"#first-counter"},"equals":"2"}
+  ]
+}

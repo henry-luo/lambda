@@ -6,8 +6,8 @@ import util: .util
 import behavior: .behavior
 
 pn dom_element(node) { if (node == null or dom.node_type(node) == 1) node else dom.parent_element(node) }
-pn closest(node, selector) { if (node == null) null else dom.closest(dom_element(node), selector) }
-pn attribute(node, key) { if (node == null) null else dom.get_attribute(node, key) }
+pub pn closest(node, selector) { if (node == null) null else dom.closest(dom_element(node), selector) }
+pub pn attribute(node, key) { if (node == null) null else dom.get_attribute(node, key) }
 pn metadata(node, key) {
     let carrier = closest(node, "[" ++ key ++ "]");
     let text = attribute(carrier, key);

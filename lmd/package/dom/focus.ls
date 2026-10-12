@@ -60,8 +60,8 @@ pub pn navigate(root, evt) {
     let target = next_candidate(dom.focus_candidates(dom.document_element(root)), forward);
     if (target == null) { 'pass' }
     else {
-        dom.focus_set(target.node, true)
         dom.scroll_into_view(target.node)
+        target.node
     }
 }
 
@@ -69,8 +69,8 @@ pub pn autofocus(root) {
     let target = autofocus_candidate(dom.focus_candidates(dom.document_element(root)), 0);
     if (target == null) { 'pass' }
     else {
-        dom.focus_set(target.node, false)
         dom.scroll_into_view(target.node)
+        target.node
     }
 }
 

@@ -26,7 +26,6 @@ static const char* counter_name_from_reversed_value(const CssValue* item) {
     }
     return layout_css_counter_name(item, false);
 }
-
 static const CssValue* list_counter_property(DomElement* elem, CssPropertyCode property,
                                            const LayoutListCounterQuery* query) {
     if (query) return query->property(query->context, elem, property);
@@ -784,6 +783,7 @@ void process_list_item(LayoutContext* lycon, ViewBlock* block, DomNode* elmt,
     }
 }
 
+// layout-specific counter scopes stay with list/pseudo-content processing.
 bool LayoutCounterScope::enter(LayoutContext* lycon, ViewSpan* span,
                                DomElement* element, DisplayValue display) {
     if (!lycon || !lycon->counter_context) return true;

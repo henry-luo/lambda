@@ -1,5 +1,6 @@
 #include "geomap.hpp"
 #include "geomap_style.hpp"
+#include "event.hpp"
 #include "../lambda/core/mark_reader.hpp"
 #include "../lambda/io/mark_builder.hpp"
 #include "../lambda/input/input.hpp"
@@ -455,6 +456,19 @@ static GeoMapEntry* geomap_entry(DomElement* root,bool create) {
     entry->root=ref;entry->epoch=UINT64_MAX;entry->next=registry->entries;registry->entries=entry;return entry;
 }
 GeoMapFrame* geomap_displayed_frame(DomElement* root) {auto* entry=geomap_entry(root,false);return entry && entry->valid?entry->frame:nullptr;}
+void geomap_follow_rebuild(DomDocument* document, DomNode* old_root, DomNode* new_root) {
+    auto* registry = geomap_registry(document, false);
+    if (!registry || !old_root || !new_root || old_root == new_root) return;
+    for (auto* entry = registry->entries; entry; entry = entry->next) {
+        DomNode* owner = dom_node_ref_validate(document, entry->root);
+        DomNode* replacement = view_state_corresponding_node(owner, old_root, new_root);
+        if (!replacement || !replacement->is_element() ||
+            replacement->as_element()->tag_id != MARKUP_NAME_GEOMAP) continue;
+        // Input queries keep the last displayed frame until the replacement actually paints.
+        entry->root = dom_node_ref(replacement);
+        entry->epoch = UINT64_MAX;
+    }
+}
 bool geomap_paint(PaintList* paint,DomElement* root,Rect viewport,char* diagnostic,size_t capacity) {
     auto* entry=geomap_entry(root,true);if(!entry) return false;
     if(entry->epoch!=root->doc->mutation_epoch || entry->style_epoch!=root->doc->style_query_epoch || entry->width!=viewport.width || entry->height!=viewport.height) {

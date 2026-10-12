@@ -10,6 +10,8 @@ void js_history_install_globals(void);
 void dom_history_install_interface(Item prototype);
 Item js_history_set_location(Item value);
 void js_history_reset(void);
+struct RadiantHistoryTraversal;
+bool dom_history_queue_events(const struct RadiantHistoryTraversal* traversal, bool popstate);
 
 #ifdef __cplusplus
 }

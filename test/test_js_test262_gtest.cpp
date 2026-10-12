@@ -130,8 +130,11 @@ static const char* SPECIAL_PREAMBLE_FILE = "test/js262/special_premble.txt";
 static const char* SLOW_TEST_FILE = "test/js262/t262_slow.txt";
 static const char* TEST262_RUN_LOCK_FILE = "temp/test_js_test262_gtest.lock";
 static bool g_use_stripped = false;  // use comment-stripped test files from TEST262_SOURCE_DIR
+static bool g_mvp_lmd = false;
+static const char* g_lambda_exe = "./lambda.exe";
 
 static bool test262_native_harness_is_available(bool ast_backend) {
+    if (g_mvp_lmd) return false; // MVP executes the canonical assertion source.
     // AST installs an equivalent native helper object in each fresh realm.
     // Keep MIR's release policy unchanged until it is separately validated.
 #ifndef NDEBUG
@@ -991,7 +994,7 @@ struct Test262Prepared {
 };
 
 static void add_batch_local_include_preambles(Test262Prepared* prepared) {
-    if (!prepared) return;
+    if (!prepared || g_mvp_lmd) return;
     // retain the entire ordered include set when caching AST helpers, so a
     // helper's captured primordials and dependencies keep their source order.
     bool cache_ast_includes = prepared->ast_backend && !prepared->is_negative;
@@ -1558,10 +1561,11 @@ static bool g_hybrid_backend_routing = false;
 // Single-backend parity runs (--ast-only / --mir-only) measure one tier against
 // the hybrid baseline; they must not rewrite the hybrid runner's partial list.
 static bool test262_single_backend(void) {
-    return g_ast_only || g_mir_only;
+    return g_ast_only || g_mir_only || g_mvp_lmd;
 }
 
 static const char* test262_partial_output_path(void) {
+    if (g_mvp_lmd) return "temp/_t262_partial_mvp_lmd.txt";
     if (g_ast_only) return "temp/_t262_partial_ast.txt";
     if (g_mir_only) return "temp/_t262_partial_mir.txt";
     return "test/js262/t262_partial.txt";
@@ -1589,7 +1593,7 @@ static long slow_threshold_for_test(const std::string& test_name) {
 }
 
 static bool test262_should_use_ast_backend(const Test262Prepared& prepared) {
-    if (g_mir_only) return false;
+    if (g_mir_only || g_mvp_lmd) return false;
     if (g_ast_only) return true;
     // Raw, async, and module jobs retain the established MIR path; exact test
     // names and metadata feature tags can also force a synchronous test to MIR.
@@ -1954,6 +1958,12 @@ static const char* classify_failure_kind(Test262Result result, const std::string
     if (result == T262_TIMEOUT) return "timeout";
     if (result == T262_CRASH) return "crash";
     if (message.find("not found in batch") != std::string::npos) return "missing";
+    if (g_mvp_lmd) {
+        if (message.find("MVP_FAILURE admission ") != message.npos) return "admission";
+        if (message.find("MVP_FAILURE internal ") != message.npos) return "internal";
+        if (message.find("MVP_FAILURE parse ") != message.npos) return "parse";
+        if (message.find("MVP_FAILURE runtime ") != message.npos) return "runtime";
+    }
     if (message.find("SyntaxError") != std::string::npos ||
         message.find("parse") != std::string::npos ||
         message.find("parser") != std::string::npos) return "parse";
@@ -2719,11 +2729,15 @@ static int run_t262_sub_batch(
                  T262_PHASE4_RETRY_TIMEOUT_SECS);
         worker_timeout_arg = slow_timeout_arg;
     }
-    std::string cmd = std::string("lambda.exe js-test-batch ") + worker_timeout_arg;
-    if (g_no_hot_reload) cmd += " --no-hot-reload";
-    if (g_opt_level >= 0) cmd += std::string(" ") + g_opt_level_arg;
-    if (g_mir_interp) cmd += " --mir-interp";
-    if (g_diagnose_mode) cmd += " --diagnose";
+    char cmd[8192];
+    int cmd_length = snprintf(cmd, sizeof(cmd), "\"%s\" js-test-batch %s%s %s%s%s%s",
+        g_lambda_exe, worker_timeout_arg, g_no_hot_reload ? " --no-hot-reload" : "",
+        g_opt_level >= 0 ? g_opt_level_arg : "", g_mir_interp ? " --mir-interp" : "",
+        g_diagnose_mode ? " --diagnose" : "", g_mvp_lmd ? " --runtime=mvp-lmd" : "");
+    if (cmd_length < 0 || (size_t)cmd_length >= sizeof(cmd)) {
+        CloseHandle(manifest_h); CloseHandle(pipe_rd); CloseHandle(pipe_wr);
+        return -1;
+    }
 
     STARTUPINFOA si = {};
     si.cb = sizeof(si);
@@ -2733,7 +2747,6 @@ static int run_t262_sub_batch(
     si.hStdError  = pipe_wr;
 
     PROCESS_INFORMATION pi = {};
-    std::string cmd_copy = cmd;
     bool process_created = false;
     {
         std::lock_guard<std::mutex> lock(g_backend_spawn_mutex);
@@ -2741,7 +2754,7 @@ static int run_t262_sub_batch(
         bool had_previous_backend = previous_backend != NULL;
         char* saved_backend = previous_backend ? _strdup(previous_backend) : NULL;
         _putenv_s("JS_EXEC_BACKEND", ast_backend ? "ast" : "mir");
-        process_created = CreateProcessA(NULL, &cmd_copy[0], NULL, NULL, TRUE, 0,
+        process_created = CreateProcessA(NULL, cmd, NULL, NULL, TRUE, 0,
                                          NULL, NULL, &si, &pi) != 0;
         if (had_previous_backend) {
             _putenv_s("JS_EXEC_BACKEND", saved_backend ? saved_backend : "");
@@ -2891,7 +2904,7 @@ static int run_t262_sub_batch(
         worker_timeout_arg = slow_timeout_arg;
     }
     char* argv[10] = {
-        (char*)"lambda.exe", (char*)"js-test-batch", (char*)worker_timeout_arg, NULL, NULL, NULL, NULL, NULL, NULL, NULL
+        (char*)g_lambda_exe, (char*)"js-test-batch", (char*)worker_timeout_arg, NULL, NULL, NULL, NULL, NULL, NULL, NULL
     };
     int argi = 3;
     if (g_no_hot_reload) {
@@ -2906,6 +2919,7 @@ static int run_t262_sub_batch(
     if (g_diagnose_mode) {
         argv[argi++] = (char*)"--diagnose";
     }
+    if (g_mvp_lmd) argv[argi++] = (char*)"--runtime=mvp-lmd";
     extern char** environ;
     pid_t pid;
     int ret;
@@ -2915,7 +2929,7 @@ static int run_t262_sub_batch(
         bool had_previous_backend = previous_backend != NULL;
         char* saved_backend = previous_backend ? strdup(previous_backend) : NULL;
         setenv("JS_EXEC_BACKEND", ast_backend ? "ast" : "mir", 1);
-        ret = posix_spawn(&pid, "./lambda.exe", &file_actions, NULL, argv, environ);
+        ret = posix_spawn(&pid, g_lambda_exe, &file_actions, NULL, argv, environ);
         if (had_previous_backend) {
             setenv("JS_EXEC_BACKEND", saved_backend ? saved_backend : "", 1);
         } else {
@@ -3036,7 +3050,7 @@ static bool write_t262_sub_batch_manifest(
         // evaluation; no mutable JS harness objects cross test boundaries.
         fprintf(mf, "native-harness:ast\n");
     }
-    if (!native_harness && !batch.module) {
+    if (!native_harness && !batch.module && !g_mvp_lmd) {
         // JS-harness batch: send harness preamble via harness: protocol
         const auto& special_includes = js_groups[batch.group].special_includes;
         preamble_include_set = make_preamble_include_set(special_includes);
@@ -3065,11 +3079,17 @@ static bool write_t262_sub_batch_manifest(
     for (size_t idx = batch.start; idx < batch.end; idx++) {
         size_t pi = idx_vec[idx];
         const auto& p = prepared[pi];
-        std::string test_src = batch.module
+        auto test_src = batch.module
             ? assemble_module_test_source(p)
             : native_harness
             ? assemble_native_test_source(p)
             : assemble_test_source(p, &preamble_include_set);
+        if (g_mvp_lmd && !batch.module && !p.is_raw) {
+            // MVP currently owns one source/realm per execution. Keep the original
+            // harness and all requested includes in that same compilation unit.
+            test_src = (p.is_strict ? "\"use strict\";\n" : "") +
+                assemble_harness_source() + assemble_test_source(p);
+        }
         fprintf(mf, "%s:%s:%s:%zu\n",
                 batch.module ? "module-source" : "source",
                 p.test_name.c_str(), p.test_path.c_str(), test_src.size());
@@ -3115,7 +3135,7 @@ static int run_t262_persistent_sub_batches(
     posix_spawn_file_actions_addclose(&file_actions, stdout_pipe[1]);
 
     char* argv[10] = {
-        (char*)"lambda.exe", (char*)"js-test-batch", g_js_timeout_arg, NULL, NULL, NULL, NULL, NULL, NULL, NULL
+        (char*)g_lambda_exe, (char*)"js-test-batch", g_js_timeout_arg, NULL, NULL, NULL, NULL, NULL, NULL, NULL
     };
     int argi = 3;
     if (g_no_hot_reload) {
@@ -3130,9 +3150,10 @@ static int run_t262_persistent_sub_batches(
     if (g_diagnose_mode) {
         argv[argi++] = (char*)"--diagnose";
     }
+    if (g_mvp_lmd) argv[argi++] = (char*)"--runtime=mvp-lmd";
     extern char** environ;
     pid_t pid;
-    int ret = posix_spawn(&pid, "./lambda.exe", &file_actions, NULL, argv, environ);
+    int ret = posix_spawn(&pid, g_lambda_exe, &file_actions, NULL, argv, environ);
     posix_spawn_file_actions_destroy(&file_actions);
 
     close(manifest_fd);
@@ -3607,7 +3628,19 @@ static Test262RunResult evaluate_batch_result(
 
     const BatchResult& br = it->second;
 
-    if (prep.is_negative) {
+    if (g_mvp_lmd && prep.is_negative && br.exit_code < 124) {
+        // a capability rejection, crash, or wrong-phase throw is never a
+        // negative pass. Match only the runtime's structured failure record.
+        char expected[128];
+        auto metadata = parse_metadata(read_file_contents(prep.test_path));
+        const char* phase = metadata.negative_phase == "parse" || metadata.negative_phase == "early" ? "parse" :
+            metadata.negative_phase == "resolution" ? "resolution" : "runtime";
+        snprintf(expected, sizeof(expected), "MVP_FAILURE %s %s\n",
+            phase, prep.negative_type.c_str());
+        if (br.exit_code == 1 && br.output.find(expected) != br.output.npos) return {T262_PASS, ""};
+        return {T262_FAIL, "MVP negative phase/type mismatch: " + br.output.substr(0, 200)};
+    }
+    if (prep.is_negative && !g_mvp_lmd) {
         if (br.exit_code != 0 || br.output.find("Error") != std::string::npos ||
             br.output.find("error") != std::string::npos) {
             return {T262_PASS, ""};
@@ -4699,6 +4732,8 @@ static void print_test262_help(const char* program) {
     printf("  --mir-interp              Run Lambda through MIR interpreter mode.\n");
     printf("  --ast-only                Run every selected job through the AST interpreter.\n");
     printf("  --mir-only                Run every selected job through pinned whole-module MIR.\n");
+    fputs("  --mvp-lmd                 Run canonical harness/tests through MVP MIR.\n"
+          "                            LAMBDA_TEST262_EXE pins the child executable.\n", stdout);
     printf("                            Single-backend runs write their partial list under temp/\n");
     printf("                            and reject --update-baseline.\n");
     printf("  --no-stripped             Use canonical test files instead of stripped files.\n");
@@ -4742,11 +4777,13 @@ int main(int argc, char** argv) {
 #endif
 
     testing::InitGoogleTest(&argc, argv);
+    const char* pinned_exe = getenv("LAMBDA_TEST262_EXE");
+    if (pinned_exe && *pinned_exe) g_lambda_exe = pinned_exe;
 
 #ifndef _WIN32
     // Kill any stale lambda.exe processes from previous runs to avoid
     // CPU contention that skews timing results.
-    {
+    if (!pinned_exe || !*pinned_exe) {
         FILE* fp = popen("pgrep -x lambda.exe 2>/dev/null", "r");
         if (fp) {
             char buf[64];
@@ -4808,6 +4845,10 @@ int main(int argc, char** argv) {
             // Pinned whole-module MIR (JS_EXEC_BACKEND=mir) for every
             // selected job, including the sync tests hybrid routes to AST.
             g_mir_only = true;
+        }
+        if (strcmp(argv[i], "--mvp-lmd") == 0) {
+            g_mvp_lmd = true;
+            g_no_stripped = true;
         }
         if (strcmp(argv[i], "--no-stripped") == 0) {
             g_no_stripped = true;  // explicit disable
@@ -4935,13 +4976,13 @@ int main(int argc, char** argv) {
                 g_metadata_cache.size(), METADATA_CACHE_FILE);
     }
 
-    if (g_ast_only && g_mir_only) {
-        fprintf(stderr, "[test262] Error: --ast-only and --mir-only are mutually exclusive\n");
+    if ((g_ast_only && g_mir_only) || (g_mvp_lmd && (g_ast_only || g_mir_only || g_mir_interp))) {
+        fputs("[test262] Error: AST, MIR and MVP backend selectors are mutually exclusive\n", stderr);
         return 1;
     }
     if (test262_single_backend() && g_update_baseline) {
         // the baseline records the hybrid runner's passing set
-        fprintf(stderr, "[test262] Error: --update-baseline is not allowed with --ast-only/--mir-only\n");
+        fputs("[test262] Error: --update-baseline is not allowed for a single-backend run\n", stderr);
         return 1;
     }
     if (!load_test_name_allowlist(MIR_LIST_FILE, g_mir_allowlist)) {
@@ -4949,7 +4990,9 @@ int main(int argc, char** argv) {
         return 1;
     }
     g_hybrid_backend_routing = !test262_single_backend();
-    if (g_ast_only) {
+    if (g_mvp_lmd) {
+        fputs("[test262] MVP mode: canonical sources and JS harness, pinned MIR, no LJS fallback\n", stderr);
+    } else if (g_ast_only) {
         fprintf(stderr, "[test262] AST-only mode: all selected jobs use AST batches of %zu\n",
                 T262_AST_BATCH_CHUNK_SIZE);
     } else if (g_mir_only) {

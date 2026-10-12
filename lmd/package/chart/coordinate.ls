@@ -43,7 +43,7 @@ pub fn configure(options, width, height) {
         start_angle: -util.PI / 2.0, end_angle: 3.0 * util.PI / 2.0, precision: 0.75,
         turns: [0.0, 3.0], track_width: 0.1, transform: [], *:settings};
     let invalid = util.first_error([
-        if (not contains(["cartesian", "polar", "theta", "radial", "parallel", "radar", "helix", "geo"], model.type))
+        if (not contains(["cartesian", "polar", "theta", "radial", "parallel", "radar", "helix", "geo", "custom"], model.type))
             error("chart: unsupported coordinate family"),
         if (not util.finite_number(width) or width <= 0 or not util.finite_number(height) or height <= 0)
             error("chart: coordinate requires positive finite dimensions"),
@@ -55,6 +55,8 @@ pub fn configure(options, width, height) {
         if (model.type == "helix" and (not pair(model.turns) or model.turns[0] >= model.turns[1] or
             not util.finite_number(model.track_width) or model.track_width <= 0 or model.track_width > model.outer_radius - model.inner_radius))
             error("chart: helix requires increasing turns and a positive bounded track width"),
+        if (model.type=="custom" and not (model.project is fn)) error("chart: custom coordinate requires a pure normalized-point projection"),
+        if (model.type=="custom" and model.invert!=null and not (model.invert is fn)) error("chart: custom coordinate inverse must be pure"),
         if (not (model.transform is array)) error("chart: coordinate transforms must be an ordered array")
             else for (step in model.transform) transform_error(step)]);
     if (invalid is error) invalid else model
@@ -102,7 +104,8 @@ pub fn project(model, normalized) {
     let radius = min(model.width, model.height) / 2.0 * (if (model.type == "helix") model.inner_radius +
         (model.outer_radius - model.inner_radius - model.track_width) * u + model.track_width * v
         else util.lerp(model.inner_radius, model.outer_radius, v));
-    if (model is error) model else if (model.type == "cartesian") [point[0] * model.width, (1.0 - point[1]) * model.height]
+    if (model is error) model else if (model.type=="custom") model.project(point)
+    else if (model.type == "cartesian") [point[0] * model.width, (1.0 - point[1]) * model.height]
     else [model.width / 2.0 + radius * math.cos(angle), model.height / 2.0 + radius * math.sin(angle)]
 }
 
@@ -119,11 +122,12 @@ pub fn invert(model, displayed) {
     let wrapped = turns - floor(turns);
     let u = wrapped * util.TAU / abs(span);
     let radius = math.sqrt(dx * dx + dy * dy) / (min(model.width, model.height) / 2.0);
-    let point = if (model.type == "cartesian") [displayed[0] / model.width, 1.0 - displayed[1] / model.height]
+    let point = if (model.type=="custom" and model.invert is fn) model.invert(displayed)
+        else if (model.type == "cartesian") [displayed[0] / model.width, 1.0 - displayed[1] / model.height]
         else [if (span > 0) u else (if (u == 0) 0.0 else util.TAU / abs(span) - u),
             util.inv_lerp(model.inner_radius, model.outer_radius, radius)];
     let unswapped = if (contains(["theta", "radial"], model.type) and model.direct_polar != true) reverse(point) else point;
-    if (model is error) model else if (singular or contains(["parallel", "radar", "helix", "geo"], model.type))
+    if (model is error) model else if (singular or contains(["parallel", "radar", "helix", "geo"], model.type) or model.type=="custom" and not (model.invert is fn))
         error("chart: coordinate does not provide a unique two-dimensional inverse")
     else transforms(unswapped, reverse(model.transform), 0, true)
 }

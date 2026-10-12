@@ -1,0 +1,62 @@
+".  =>  <Program body: <Exp <Term <Identity>>>>
+..  =>  <Program body: <Exp <Term <Recurse>>>>
+.a.b  =>  <Program body: <Exp <Term base: <Term field: "a">, field: "b">>>
+.a .b  =>  <Program body: <Exp <Term base: <Term field: "a">, field: "b">>>
+."x y"  =>  <Program body: <Exp <Term field: <String "x y">>>>
+.[0]  =>  <Program body: <Exp <Term base: <Term <Identity>>, index: <Exp <Term <Number "0">>>>>>
+.a.[0]  =>  <Program body: <Exp <Term base: <Term field: "a">, index: <Exp <Term <Number "0">>>>>>
+.[2:4]  =>  <Program body: <Exp <Term base: <Term <Identity>>, slice: <Slice from: <Exp <Term <Number "2">>>, to: <Exp <Term <Number "4">>>>>>>
+.[:-1]  =>  <Program body: <Exp <Term base: <Term <Identity>>, slice: <Slice to: <Exp op: '-', operand: <Exp <Term <Number "1">>>>>>>>
+.[]?  =>  <Program body: <Exp <Term base: <Term <Identity>>, iterate: <Iterate>, optional: '?'>>>
+.a?.b?  =>  <Program body: <Exp <Term base: <Term field: "a", optional: '?'>, field: "b", optional: '?'>>>
+$x[0]  =>  <Program body: <Exp <Term base: <Term <Variable name: "$x">>, index: <Exp <Term <Number "0">>>>>>
+1.5e3  =>  <Program body: <Exp <Term <Number "1.5e3">>>>
+.5  =>  <Program body: <Exp <Term <Number ".5">>>>
+""  =>  <Program body: <Exp <Term <String>>>>
+"a\"b \u00e9"  =>  <Program body: <Exp <Term <String "a\\\"b \\u00e9">>>>
+"x \(.a + 1) y"  =>  <Program body: <Exp <Term <String "x " <Interpolation <Exp left: <Exp <Term field: "a">>, op: '+', right: <Exp <Term <Number "1">>>>> " y">>>>
+@base64 "a\(.)"  =>  <Program body: <Exp <Term <String format: "@base64", "a" <Interpolation <Exp <Term <Identity>>>>>>>>
+@csv  =>  <Program body: <Exp <Term <Format name: "@csv">>>>
+$__loc__  =>  <Program body: <Exp <Term <Loc>>>>
+$__loc__x  =>  <Program body: <Exp <Term <Variable name: "$__loc__x">>>>
+1 + 2 * 3  =>  <Program body: <Exp left: <Exp <Term <Number "1">>>, op: '+', right: <Exp left: <Exp <Term <Number "2">>>, op: '*', right: <Exp <Term <Number "3">>>>>>
+-1 + 2  =>  <Program body: <Exp left: <Exp op: '-', operand: <Exp <Term <Number "1">>>>, op: '+', right: <Exp <Term <Number "2">>>>>
+-1 * 2  =>  <Program body: <Exp op: '-', operand: <Exp left: <Exp <Term <Number "1">>>, op: '*', right: <Exp <Term <Number "2">>>>>>
+-.a?  =>  <Program body: <Exp op: '-', operand: <Exp <Term field: "a", optional: '?'>>>>
+1, 2 | . * 10  =>  <Program body: <Exp left: <Exp left: <Exp <Term <Number "1">>>, op: ',', right: <Exp <Term <Number "2">>>>, op: '|', right: <Exp left: <Exp <Term <Identity>>>, op: '*', right: <Exp <Term <Number "10">>>>>>
+.a // .b // .c  =>  <Program body: <Exp left: <Exp <Term field: "a">>, op: '//', right: <Exp left: <Exp <Term field: "b">>, op: '//', right: <Exp <Term field: "c">>>>>
+.a |= . + 1  =>  <Program body: <Exp left: <Exp <Term field: "a">>, op: '|=', right: <Exp left: <Exp <Term <Identity>>>, op: '+', right: <Exp <Term <Number "1">>>>>>
+a and b or c  =>  <Program body: <Exp left: <Exp left: <Exp <Term <FunctionCall name: "a">>>, op: 'and', right: <Exp <Term <FunctionCall name: "b">>>>, op: 'or', right: <Exp <Term <FunctionCall name: "c">>>>>
+.[] | select(.age > 30) | {name, age}  =>  <Program body: <Exp left: <Exp <Term base: <Term <Identity>>, iterate: <Iterate>>>, op: '|', right: <Exp left: <Exp <Term <FunctionCall name: "select", <Exp left: <Exp <Term field: "age">>, op: '>', right: <Exp <Term <Number "30">>>>>>>, op: '|', right: <Exp <Term <Object <Pair key: "name"> <Pair key: "age">>>>>>>
+{a: .x | .y, "b": 1, (.k): 2, $v, if: 3, and}  =>  <Program body: <Exp <Term <Object <Pair key: "a", value: <ObjVal left: <ObjVal <Term field: "x">>, op: '|', right: <ObjVal <Term field: "y">>>> <Pair key: <String "b">, value: <ObjVal <Term <Number "1">>>> <Pair key: <Exp <Term field: "k">>, value: <ObjVal <Term <Number "2">>>> <Pair key: <Variable name: "$v">> <Pair key: "if", value: <ObjVal <Term <Number "3">>>> <Pair key: "and">>>>>
+[.[] | . * 2]  =>  <Program body: <Exp <Term <Array <Exp left: <Exp <Term base: <Term <Identity>>, iterate: <Iterate>>>, op: '|', right: <Exp left: <Exp <Term <Identity>>>, op: '*', right: <Exp <Term <Number "2">>>>>>>>>
+[]  =>  <Program body: <Exp <Term <Array>>>>
+def f: 1; f | g  =>  <Program body: <Exp def: <FuncDef name: "f", body: <Exp <Term <Number "1">>>>, body: <Exp left: <Exp <Term <FunctionCall name: "f">>>, op: '|', right: <Exp <Term <FunctionCall name: "g">>>>>>
+def f(g; $x): g + $x; f(.a; 1)  =>  <Program body: <Exp def: <FuncDef name: "f", body: <Exp left: <Exp <Term <FunctionCall name: "g">>>, op: '+', right: <Exp <Term <Variable name: "$x">>>>, <Param name: "g"> <Param name: "$x">>, body: <Exp <Term <FunctionCall name: "f", <Exp <Term field: "a">> <Exp <Term <Number "1">>>>>>>>
+def f: 1; def g: 2;  =>  <Program <FuncDef name: "f", body: <Exp <Term <Number "1">>>> <FuncDef name: "g", body: <Exp <Term <Number "2">>>>>
+reduce .[] as $x (0; . + $x)  =>  <Program body: <Exp <Reduce source: <Term base: <Term <Identity>>, iterate: <Iterate>>, init: <Exp <Term <Number "0">>>, update: <Exp left: <Exp <Term <Identity>>>, op: '+', right: <Exp <Term <Variable name: "$x">>>>, <Variable name: "$x">>>>
+foreach .[] as [$a, $b] (0; . + $a; [., $b])  =>  <Program body: <Exp <Foreach source: <Term base: <Term <Identity>>, iterate: <Iterate>>, init: <Exp <Term <Number "0">>>, update: <Exp left: <Exp <Term <Identity>>>, op: '+', right: <Exp <Term <Variable name: "$a">>>>, extract: <Exp <Term <Array <Exp left: <Exp <Term <Identity>>>, op: ',', right: <Exp <Term <Variable name: "$b">>>>>>>, <ArrayPattern <Variable name: "$a"> <Variable name: "$b">>>>>
+if . == 0 then "zero" elif . == 1 then "one" else "many" end  =>  <Program body: <Exp <If condition: <Exp left: <Exp <Term <Identity>>>, op: '==', right: <Exp <Term <Number "0">>>>, then: <Exp <Term <String "zero">>>, else: <Exp <Term <String "many">>>, <Elif condition: <Exp left: <Exp <Term <Identity>>>, op: '==', right: <Exp <Term <Number "1">>>>, then: <Exp <Term <String "one">>>>>>>
+if . then 1 end  =>  <Program body: <Exp <If condition: <Exp <Term <Identity>>>, then: <Exp <Term <Number "1">>>>>>
+try error("x") catch .  =>  <Program body: <Exp body: <Exp <Term <FunctionCall name: "error", <Exp <Term <String "x">>>>>>, catch: <Exp <Term <Identity>>>>>
+try .a | .b  =>  <Program body: <Exp left: <Exp body: <Exp <Term field: "a">>>, op: '|', right: <Exp <Term field: "b">>>>
+try (1/0) catch . | length  =>  <Program body: <Exp left: <Exp body: <Exp <Term <Parenthesized <Exp left: <Exp <Term <Number "1">>>, op: '/', right: <Exp <Term <Number "0">>>>>>>, catch: <Exp <Term <Identity>>>>, op: '|', right: <Exp <Term <FunctionCall name: "length">>>>>
+.a?  =>  <Program body: <Exp <Term field: "a", optional: '?'>>>
+. as [$a, {b: $c}] | $a  =>  <Program body: <Exp source: <Term <Identity>>, body: <Exp <Term <Variable name: "$a">>>, <ArrayPattern <Variable name: "$a"> <ObjectPattern <PatternEntry key: "b", value: <Variable name: "$c">>>>>>
+. as {a: $x} ?// [$x] | $x  =>  <Program body: <Exp source: <Term <Identity>>, body: <Exp <Term <Variable name: "$x">>>, <ObjectPattern <PatternEntry key: "a", value: <Variable name: "$x">>> <ArrayPattern <Variable name: "$x">>>>
+label $out | .[] | if . > 1 then break $out else . end  =>  <Program body: <Exp label: "$out", body: <Exp left: <Exp <Term base: <Term <Identity>>, iterate: <Iterate>>>, op: '|', right: <Exp <If condition: <Exp left: <Exp <Term <Identity>>>, op: '>', right: <Exp <Term <Number "1">>>>, then: <Exp <Term <Break label: "$out">>>, else: <Exp <Term <Identity>>>>>>>>
+import "m" as m; m::f  =>  <Program body: <Exp <Term <FunctionCall name: "m::f">>>, <Import path: <String "m">, alias: "m">>
+include "lib"; f  =>  <Program body: <Exp <Term <FunctionCall name: "f">>>, <Import path: <String "lib">>>
+module {name: "x"}; def f: 1;  =>  <Program <Module metadata: <Exp <Term <Object <Pair key: "name", value: <ObjVal <Term <String "x">>>>>>>> <FuncDef name: "f", body: <Exp <Term <Number "1">>>>>
+# comment
+.a # trailing
+| .b  =>  <Program body: <Exp left: <Exp <Term field: "a">>, op: '|', right: <Exp <Term field: "b">>>>
+  =>  <Program>
+1 == 2 == 3  =>  parse: grammar 'jq': expected 'def', number, ".", "..", format, "\"", "(", "[", "{", '$__loc__', binding, 'break', ident, 'label', 'reduce', 'foreach', 'if', 'try' or '-' at 1:9, found "="
+.a = 1 = 2  =>  parse: grammar 'jq': expected ".", "[", 'as', 'or', 'and', compare, additive, multiplicative, '?', '|', ',', '//' or end of input at 1:8, found "="
+{a: 1 + 2}  =>  parse: grammar 'jq': expected ".", "[", '|', "," or "}" at 1:7, found "+"
+. as $x  =>  parse: grammar 'jq': expected "?//" or "|" at 1:8, found end of input
+reduce .[] as $x (0; .)[0]  =>  parse: grammar 'jq': expected '|', ',', '//', assign, 'or', 'and', compare, additive, multiplicative, '?' or end of input at 1:24, found "[0]"
+. a  =>  parse: grammar 'jq': expected format, "\"", ".", "[", 'as', '|', ',', '//', assign, 'or', 'and', compare, additive, multiplicative, '?' or end of input at 1:3, found "a"
+{@base64}  =>  parse: grammar 'jq': expected "\"" at 1:9, found "}"
+"

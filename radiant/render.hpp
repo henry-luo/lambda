@@ -1880,7 +1880,8 @@ void paint_end_semantic_group(PaintList* pl);
 
 void paint_ir_lower_raster(const PaintList* pl, DisplayList* dl);
 void paint_ir_lower_raster_transformed(const PaintList* pl, DisplayList* dl, const RdtMatrix* root_transform);
-void paint_ir_lower_raster_fragment(const PaintList* pl, DisplayList* dl);
+void paint_ir_lower_raster_fragment(const PaintList* pl, DisplayList* dl,
+    const RdtMatrix* root_transform = nullptr);
 
 // ---------------------------------------------------------------------------
 // SVG lowering: PaintIR -> SVG fragment
@@ -2974,6 +2975,7 @@ typedef void (*RadiantVideoWakeCallback)(void* user_data);
 
 void radiant_video_set_wake_callback(RadiantVideoWakeCallback callback, void* user_data);
 void radiant_video_notify_frame_ready(DocState* state);
+bool radiant_video_events_pending(DocState* state);
 
 // ===== stacking_order.hpp =====
 bool radiant_stack_is_positive_z_positioned(View* view);
@@ -3935,6 +3937,13 @@ void render_outer_shadow_blur_composite(
     int clip_type, const float* clip_params);
 
 // ===== render_border.hpp =====
+// CSS border shading/dashing belongs to geometry, without a raster context.
+inline constexpr float BORDER_DARKEN_FACTOR = 2.0f / 3.0f;
+inline constexpr float BORDER_LIGHTEN_FACTOR = 1.0f / 3.0f;
+Color render_border_darken_color(Color color, float factor = BORDER_DARKEN_FACTOR);
+Color render_border_lighten_color(Color color, float factor = BORDER_LIGHTEN_FACTOR);
+void render_border_inset_outset_colors(Color base, CssEnum style, Color* top, Color* right, Color* bottom, Color* left);
+int render_border_dash_pattern(CssEnum style, float width, float* dash, RdtStrokeCap* cap);
 // Border rendering functions
 // borrowed stroke parameters are valid only during the callback; a null stroke denotes a fill.
 struct RenderBorderStroke {
@@ -4215,6 +4224,12 @@ bool render_export_session_begin_document_transform(RenderExportSession* session
     float output_scale, float device_scale, bool raster_surface, bool paged = false,
     bool print_media = false);
 void render_export_session_end(RenderExportSession* session);
+int render_export_session_to_png(RenderExportSession* session, const char* filename);
+int render_export_session_to_jpeg(RenderExportSession* session, const char* filename, int quality);
+int render_export_session_to_svg(RenderExportSession* session, const char* filename);
+int render_export_session_to_pdf(RenderExportSession* session, const char* filename);
+int render_html_source_to_output_target(const char* html_source, RenderOutputTarget* target,
+    const char* base_url = nullptr, bool block_remote_resources = false);
 int render_output_render_view_tree_to_target(UiContext* uicon, ViewTree* view_tree,
                                              RenderOutputTarget* target);
 int render_html_to_output_target(const char* html_file, const char* output_file,

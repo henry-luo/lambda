@@ -11470,6 +11470,78 @@ static Item cow_clone_map_like_one_level(Item source_item) {
     return rooted_copy.get();
 }
 
+static Item element_with_replacement_content(Item element, Item children,
+                                             bool presentation) {
+    if (get_type_id(element) != LMD_TYPE_ELEMENT ||
+            get_type_id(children) != LMD_TYPE_ARRAY || !element.element ||
+            !element.element->type || !children.array) {
+        return runtime_error_item(ERR_TYPE_MISMATCH,
+            "with_content: expected an element and an array of children", nullptr);
+    }
+    RootFrame roots(3);
+    Rooted<Item> source(roots, element);
+    Rooted<Item> content(roots, children);
+    Rooted<Item> result(roots, ItemNull);
+    TypeElmt* contract = (TypeElmt*)source.get().element->type;
+    int count = (int)contract->length;
+    RootSpan attributes((size_t)(count > 0 ? count : 1));
+    int index = 0;
+    FOR_EACH_MAP_FIELD(contract, field) {
+        attributes.items()[index++] = map_shape_field_to_item(
+            source.get().element->data, field);
+        cow_capture_value(attributes.items()[index - 1]);
+    }
+    // Use the ordinary literal allocator/fill so UI storage and GC roots obey
+    // the same ownership boundary as authored elements (D4.5.2, D3.4.5).
+    Element* copy = elmt_with_type(contract);
+    if (!copy) return runtime_error_item(ERR_OUT_OF_MEMORY,
+        "with_content: could not allocate the element", nullptr);
+    result.set({.element = copy});
+    if (!elmt_fill_items(result.get().element, attributes.items(), count))
+        return runtime_error_item(ERR_OUT_OF_MEMORY,
+            "with_content: could not copy the attributes", nullptr);
+    if (presentation && (contract->nominal || contract->content_list)) {
+        // A presentation is a new structural value, not an altered nominal instance (S2.1.4).
+        contract = elmt_clone_type_for_mutation(result.get().element, context->pool, true);
+        if (!contract) return runtime_error_item(ERR_OUT_OF_MEMORY,
+            "present_content: could not allocate the presentation shape", nullptr);
+        contract->nominal = nullptr;
+        contract->is_nominal = false;
+        contract->has_named_shape = false;
+        contract->struct_name = nullptr;
+        contract->type_index = -1;
+        contract->content_list = nullptr;
+    }
+    for (int64_t at = 0; at < content.get().array->length; at++) {
+        Item child = content.get().array->items[at];
+        cow_capture_value(child);
+        list_push_spread((List*)result.get().element, child);
+    }
+    // A new content sequence must still satisfy a declared element pattern;
+    // nominal identity alone does not prove the replacement's content.
+    if (contract->content_list) {
+        if (!context || !context->validator) return ItemError;
+        context->validator->set_fast_mode(true);
+        ValidationResult* verdict = validate_against_element_type(
+            context->validator, result.get().to_const(), contract);
+        context->validator->set_fast_mode(false);
+        if (!verdict || !verdict->valid) return runtime_error_item(ERR_TYPE_MISMATCH,
+            "with_content: replacement violates the element content contract", nullptr);
+    }
+    if (contract->nominal && !lambda_type_matches(result.get(), (Type*)contract))
+        return runtime_error_item(ERR_TYPE_MISMATCH,
+            "with_content: replacement violates the element constraint", nullptr);
+    return result.get();
+}
+
+Item lambda_element_with_content(Item element, Item children) {
+    return element_with_replacement_content(element, children, false);
+}
+
+Item lambda_element_present_content(Item element, Item children) {
+    return element_with_replacement_content(element, children, true);
+}
+
 static Item cow_clone_one_level(Item source) {
     switch (get_type_id(source)) {
     case LMD_TYPE_ARRAY: return cow_clone_array_one_level(source.array);

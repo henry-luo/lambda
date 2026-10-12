@@ -1,0 +1,15 @@
+{
+  "name":"Native HTML audio reports clip completion and unavailable-source failure before advancement",
+  "html":"test/ui/timeline/native_media.ls",
+  "viewport":{"width":900,"height":650},
+  "input_turn_ms":0,
+  "events":[
+    {"type":"assert_attribute","target":{"selector":"audio"},"attribute":"data-timeline-player-id","equals":"clip"},
+    {"type":"click","target":{"selector":"[data-timeline-command='play']"}},
+    {"type":"advance_time","ms":250},
+    {"type":"assert_text","target":{"selector":"#ended"},"equals":"1"},
+    {"type":"assert_text","target":{"selector":"#failures"},"equals":"1"},
+    {"type":"assert_text","target":{"selector":"#timeouts"},"equals":"0"},
+    {"type":"assert_attribute","target":{"selector":".lambda-timeline-chart"},"attribute":"data-timeline-active","equals":"b"}
+  ]
+}

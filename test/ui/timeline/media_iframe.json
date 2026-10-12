@@ -1,0 +1,15 @@
+{
+  "name":"Iframe media resolves against its own document and retains settings across rebuild",
+  "html":"test/ui/timeline/media_iframe.html",
+  "viewport":{"width":900,"height":650},
+  "input_turn_ms":0,
+  "events":[
+    {"type":"switch_frame","selector":"#frame"},
+    {"type":"click","target":{"selector":"#read"}},
+    {"type":"assert_text","target":{"selector":"#volume"},"equals":"1"},
+    {"type":"click","target":{"selector":"#quiet"}},
+    {"type":"click","target":{"selector":"#rerender"}},
+    {"type":"click","target":{"selector":"#read"}},
+    {"type":"assert_text","target":{"selector":"#volume"},"equals":"0.25"}
+  ]
+}

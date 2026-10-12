@@ -55,6 +55,10 @@ Item dom_core_dispatch_op(Item n, Item event);
 Item dom_engine_request_frame(Item n, Item event_name);
 Item dom_engine_viewport_size(Item n);
 Item dom_engine_cancel_frame(Item n, Item token);
+Item dom_engine_watch_window(Item n, Item event_name, Item enabled);
+Item dom_engine_history_traverse(Item n, Item delta);
+Item dom_engine_media_info(Item n);
+Item dom_engine_media_command(Item n, Item command, Item value);
 
 // CharacterData rows (bodies in dom.cpp, beside the dom_text_*_method calls).
 Item dom_core_replace_data(Item n, Item offset, Item count, Item data);

@@ -1535,8 +1535,9 @@ void paint_ir_lower_raster_transformed(const PaintList* pl, DisplayList* dl,
     paint_ir_lower_raster_internal(pl, dl, root_transform);
 }
 
-void paint_ir_lower_raster_fragment(const PaintList* pl, DisplayList* dl) {
-    paint_ir_lower_raster_internal(pl, dl);
+void paint_ir_lower_raster_fragment(const PaintList* pl, DisplayList* dl,
+        const RdtMatrix* root_transform) {
+    paint_ir_lower_raster_internal(pl, dl, root_transform);
 }
 
 // ---------------------------------------------------------------------------

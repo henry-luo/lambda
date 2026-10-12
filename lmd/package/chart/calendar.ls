@@ -19,8 +19,8 @@ fn month_start(index, zone) {
     float(date(year, index - year * 12 + 1, 1).unix) - float(zone) * 60000.0
 }
 
-fn interval(count, span) {
-    if (count is map) {unit: count.interval, step: if (count.step != null) count.step else 1}
+pub fn interval(count, span) {
+    if (count is map) {unit: count.interval, step: if (count.step != null) count.step else 1,week_start:count.week_start}
     else {
         let target = abs(span) / max([1.0, float(count)]);
         let choices = [
@@ -38,7 +38,8 @@ fn interval(count, span) {
 }
 
 fn valid_interval(chosen) => contains(["millisecond", "second", "minute", "hour", "day", "week", "month", "year"], chosen.unit) and
-    chosen.step is number and util.finite_number(chosen.step) and chosen.step >= 1 and floor(chosen.step) == chosen.step
+    chosen.step is number and util.finite_number(chosen.step) and chosen.step >= 1 and floor(chosen.step) == chosen.step and
+    (chosen.week_start==null or chosen.week_start is number and floor(chosen.week_start)==chosen.week_start and chosen.week_start>=0 and chosen.week_start<=6)
 
 fn unit_ms(unit) => if (unit == "second") 1000.0 else if (unit == "minute") 60000.0
     else if (unit == "hour") 3600000.0 else if (unit == "day") 86400000.0
@@ -50,8 +51,8 @@ fn fixed_floor(value, chosen, zone) {
     else if (chosen.unit == "month") month_start(int(floor(float(dt.year * 12 + dt.month - 1) / float(chosen.step))) * chosen.step, zone)
     else {
         let shift = float(zone) * 60000.0;
-        // 1970-01-04 is Sunday, the boundary for week intervals.
-        let anchor = if (chosen.unit == "week") 259200000.0 else 0.0;
+        // 1970-01-04 is Sunday; explicit week starts shift that local boundary.
+        let anchor = if (chosen.unit == "week") 259200000.0+(if (chosen.week_start!=null) chosen.week_start else 0)*86400000.0 else 0.0;
         let step = unit_ms(chosen.unit) * chosen.step;
         floor((value + shift - anchor) / step) * step + anchor - shift
     }

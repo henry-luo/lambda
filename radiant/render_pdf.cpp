@@ -1865,7 +1865,7 @@ bool render_secondary_view_to_pdf(ViewTree* tree, const char* filename,
     return ok;
 }
 
-static int render_export_session_to_pdf(RenderExportSession* session, const char* pdf_file) {
+int render_export_session_to_pdf(RenderExportSession* session, const char* pdf_file) {
     if (!session) return 1;
     if (session->paged_view) {
         bool ok = render_secondary_view_to_pdf(session->paged_view, pdf_file, nullptr, session->ui_context);

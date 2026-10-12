@@ -1,0 +1,19 @@
+{
+  "name":"Timeline rich cards, responsive orientation, expansion, search and dtna delegation",
+  "html":"test/ui/timeline/cards.ls",
+  "viewport":{"width":1000,"height":800},
+  "events":[
+    {"type":"assert_count","target":{"selector":"#neutral .lambda-timeline-vertical"},"count":1},
+    {"type":"assert_count","target":{"selector":"#neutral h2.lambda-timeline-card-title"},"count":2},
+    {"type":"click","target":{"selector":"#neutral [data-timeline-id='a'] [data-timeline-command='expand']"}},
+    {"type":"assert_attribute","target":{"selector":"#neutral [data-timeline-id='a'] [data-timeline-command='collapse']"},"attribute":"aria-expanded","equals":"true"},
+    {"type":"click","target":{"selector":"#neutral [data-timeline-search]"}},
+    {"type":"type","target":{"selector":"#neutral [data-timeline-search]"},"text":"Beta"},
+    {"type":"assert_count","target":{"selector":"#neutral .lambda-timeline-item"},"count":1},
+    {"type":"assert_text","target":{"selector":"#neutral .lambda-timeline-card-title"},"equals":"Beta"},
+    {"type":"assert_attribute","target":{"selector":"#skinned .lambda-timeline-chart"},"attribute":"data-timeline-active","equals":"a"},
+    {"type":"click","target":{"selector":"#skinned [data-timeline-command='next']"}},
+    {"type":"assert_attribute","target":{"selector":"#skinned .lambda-timeline-chart"},"attribute":"data-timeline-active","equals":"b"},
+    {"type":"assert_count","target":{"selector":"#skinned .dtna-timeline"},"count":1}
+  ]
+}

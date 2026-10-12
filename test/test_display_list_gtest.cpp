@@ -709,12 +709,24 @@ TEST_F(PaintIrParityTest, RasterScopesComposeNestedPlacementAndLocalTransforms) 
     ASSERT_EQ(lowered.data()[0].op, DL_PUSH_CLIP);
     RdtMatrix expected_clip = rdt_matrix_translate(14.0f, 25.0f);
     expect_matrix_eq(lowered.data()[0].push_clip.transform, expected_clip);
-    ASSERT_EQ(lowered.data()[1].op, DL_FILL_PATH);
-    RdtMatrix expected_nested = {2, 0, 10, 0, 3, 20, 0, 0, 1};
-    expect_matrix_eq(lowered.data()[1].fill_path.transform, expected_nested);
+    // scale/translation retain rectangle commands and bake the composed placement into bounds.
+    ASSERT_EQ(lowered.data()[1].op, DL_FILL_RECT);
+    EXPECT_FLOAT_EQ(lowered.data()[1].fill_rect.x, 12.0f);
+    EXPECT_FLOAT_EQ(lowered.data()[1].fill_rect.y, 26.0f);
+    EXPECT_FLOAT_EQ(lowered.data()[1].fill_rect.w, 6.0f);
+    EXPECT_FLOAT_EQ(lowered.data()[1].fill_rect.h, 12.0f);
+    EXPECT_EQ(lowered.data()[1].fill_rect.color.c, color.c);
     RdtMatrix expected_local = {2, 0, 18, 0, 3, 35, 0, 0, 1};
+    ASSERT_EQ(lowered.data()[2].op, DL_FILL_PATH);
     expect_matrix_eq(lowered.data()[2].fill_path.transform, expected_local);
-    expect_matrix_eq(lowered.data()[3].fill_path.transform, parent);
+    ASSERT_EQ(lowered.data()[3].op, DL_FILL_ROUNDED_RECT);
+    EXPECT_FLOAT_EQ(lowered.data()[3].fill_rounded_rect.x, 11.0f);
+    EXPECT_FLOAT_EQ(lowered.data()[3].fill_rounded_rect.y, 22.0f);
+    EXPECT_FLOAT_EQ(lowered.data()[3].fill_rounded_rect.w, 3.0f);
+    EXPECT_FLOAT_EQ(lowered.data()[3].fill_rounded_rect.h, 4.0f);
+    EXPECT_FLOAT_EQ(lowered.data()[3].fill_rounded_rect.rx, 1.0f);
+    EXPECT_FLOAT_EQ(lowered.data()[3].fill_rounded_rect.ry, 1.0f);
+    EXPECT_EQ(lowered.data()[3].fill_rounded_rect.color.c, color.c);
     EXPECT_EQ(lowered.data()[4].op, DL_POP_CLIP);
     EXPECT_EQ(lowered.data()[5].op, DL_FILL_RECT);
     expect_matrix_eq(pl.data()[4].fill_path.transform, local);
@@ -1118,6 +1130,32 @@ TEST_F(PaintIrParityTest, RasterEffectFragmentsMatchDirect) {
     expect_lists_equal(lowered, direct);
 }
 
+TEST_F(PaintIrParityTest, RasterClipFragmentsMatchDirect) {
+    RdtPath* path = (RdtPath*)0x1200;
+    test_display_list_stub_set_path_bounds(path, true, 0.0f, 0.0f, 30.0f, 20.0f);
+    RdtMatrix transform = rdt_matrix_identity();
+    const float densities[] = {1.0f, 2.0f};
+    for (float density : densities) {
+        paint_list_clear(&pl);
+        dl_clear(&lowered);
+        dl_clear(&direct);
+        RdtMatrix scale = rdt_matrix_scale(density, density);
+        // vector callbacks share clip scopes; export density must apply to every fragment.
+        paint_push_clip(&pl, path, &transform);
+        paint_ir_lower_raster_fragment(&pl, &lowered, &scale);
+        paint_list_clear(&pl);
+        paint_fill_rect(&pl, 0.0f, 0.0f, 40.0f, 40.0f, test_color(0xff112233));
+        paint_ir_lower_raster_fragment(&pl, &lowered, &scale);
+        paint_list_clear(&pl);
+        paint_pop_clip(&pl);
+        paint_ir_lower_raster_fragment(&pl, &lowered, &scale);
+        dl_push_clip(&direct, path, &scale);
+        dl_fill_rect(&direct, 0.0f, 0.0f, 40.0f * density, 40.0f * density, test_color(0xff112233));
+        dl_pop_clip(&direct);
+        expect_lists_equal(lowered, direct);
+    }
+}
+
 TEST_F(PaintIrParityTest, RasterShadowOpsMatchDirect) {
     float clip_params[RDT_CLIP_PARAM_COUNT] = {1.0f, 2.0f, 30.0f, 40.0f, 4.0f, 5.0f, 6.0f, 7.0f};
     float exclude_params[RDT_CLIP_PARAM_COUNT] = {8.0f, 9.0f, 50.0f, 60.0f, 10.0f, 11.0f, 12.0f, 13.0f};
@@ -1300,6 +1338,30 @@ TEST_F(PaintIrParityTest, SimpleBoundaryHelperEmitsOpaqueUniformRoundedBorder) {
     expect_lists_equal(lowered, direct);
 }
 
+TEST_F(PaintIrParityTest, BoundaryHelperEmitsDashedSide) {
+    ViewBlock view = {};
+    BoundaryProp bound = {};
+    BorderProp border = {};
+    view.bound = lam::view_prop(&bound);
+    view.width = 100.0f;
+    view.height = 50.0f;
+    bound.border = lam::own(&border);
+    border.width.top = 2.0f;
+    border.top_style = CSS_VALUE_DASHED;
+    border.top_color = test_color(0xff112233);
+    ASSERT_TRUE(render_paint_boundary_emit_simple(&pl, &view, 0.0f, 0.0f));
+    lower();
+    ASSERT_EQ(lowered.item_count(), 1);
+    const DisplayItem& item = lowered.data()[0];
+    ASSERT_EQ(item.op, DL_STROKE_PATH);
+    EXPECT_EQ(item.stroke_path.color.c, border.top_color.c);
+    EXPECT_FLOAT_EQ(item.stroke_path.width, 2.0f);
+    EXPECT_EQ(item.stroke_path.dash_count, 2);
+    EXPECT_FLOAT_EQ(item.stroke_path.dash_array[0], 4.0f);
+    EXPECT_GT(item.stroke_path.dash_array[1], 0.0f);
+    EXPECT_EQ(item.stroke_path.cap, RDT_CAP_BUTT);
+}
+
 TEST_F(PaintIrParityTest, SimpleBoundaryHelperRejectsFallbackCases) {
     ViewBlock view = {};
     BoundaryProp bound = {};
@@ -1317,10 +1379,7 @@ TEST_F(PaintIrParityTest, SimpleBoundaryHelperRejectsFallbackCases) {
 
     bg.gradient_type = GRADIENT_NONE;
     border.width.top = 1.0f;
-    border.top_style = CSS_VALUE_DASHED;
     border.top_color = test_color(0xff000000);
-    EXPECT_FALSE(render_paint_boundary_emit_simple(&pl, &view, 0.0f, 0.0f));
-
     border.top_style = CSS_VALUE_SOLID;
     border.radius.top_left = 2.0f;
     EXPECT_FALSE(render_paint_boundary_emit_simple(&pl, &view, 0.0f, 0.0f));

@@ -1,0 +1,14 @@
+{
+  "name": "Timeline curved quantitative overlays and named value axis",
+  "html": "test/ui/timeline/series.ls",
+  "viewport": {"width": 900, "height": 650},
+  "events": [
+    {"type": "assert_count", "target": {"selector": ".lambda-timeline-series"}, "count": 2},
+    {"type": "assert_count", "target": {"selector": ".lambda-timeline-value-axis"}, "count": 1},
+    {"type": "assert_count", "target": {"selector": ".lambda-timeline-series .marks"}, "count": 2},
+    {"type": "assert_count", "target": {"selector": ".lambda-timeline-series-legends .legend-entry"}, "count": 1},
+    {"type": "click", "target": {"selector": "[data-timeline-command='last']"}},
+    {"type": "assert_attribute", "target": {"selector": ".lambda-timeline-chart"}, "attribute": "data-timeline-active", "equals": "last"},
+    {"type": "render", "file": "temp/timeline-references/series.png"}
+  ]
+}

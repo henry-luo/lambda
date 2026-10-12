@@ -162,6 +162,18 @@ DOM_ENGINE_WEAK uint64_t dom_engine_frame_request(void* n, const char* e) {
 DOM_ENGINE_WEAK bool dom_engine_frame_cancel(void* n, uint64_t t) {
     (void)n; (void)t; return false;
 }
+DOM_ENGINE_WEAK bool dom_engine_window_watch(void* n, const char* e, bool enabled) {
+    (void)n; (void)e; (void)enabled; return false;
+}
+DOM_ENGINE_WEAK uint64_t dom_engine_window_event_watermark(DomDocument* d) {
+    (void)d; return 0;
+}
+DOM_ENGINE_WEAK void dom_engine_window_event_subscribers(DomDocument* d, const char* e, Item event, uint64_t watermark) {
+    (void)d; (void)e; (void)event; (void)watermark;
+}
+DOM_ENGINE_WEAK bool dom_engine_history_traverse_native(void* n, int delta) {
+    (void)n; (void)delta; return false;
+}
 DOM_ENGINE_WEAK bool dom_engine_frame_tick(DomDocument* d, double t) {
     (void)d; (void)t; return false;
 }

@@ -518,7 +518,8 @@ extern "C" Item mvp_lmd_class_invoke(Item callee, Item receiver, Item* arguments
             if (cls->constructor_id < 0) return self.get();
         }
     } else if (new_target.item != ITEM_JS_UNDEFINED && fn->native_constructor) {
-        if (new_target.item != callee.item && fn->ptr != (fn_ptr)mvp_lmd_function_bound) return mvp_lmd_fail(LMD_MVP_CAPABILITY, 0);
+        if (new_target.item != callee.item && !fn->custom_new_target && fn->ptr != (fn_ptr)mvp_lmd_function_bound)
+            return mvp_lmd_fail(LMD_MVP_CAPABILITY, 0);
     } else if (new_target.item != ITEM_JS_UNDEFINED) {
         if (fn->non_constructible) return mvp_lmd_fail(LMD_MVP_TYPE, 0);
         const AstFuncNode* ast = (const AstFuncNode*)fn->def;

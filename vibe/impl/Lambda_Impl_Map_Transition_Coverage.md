@@ -150,6 +150,14 @@ Timing used ABBA-ordered pairs of release runs measuring user+sys CPU (9 pairs; 
 
 **Implemented 2026-10-06.** `type_tree_retype_field` (input.cpp) mints the target as a copy of the parent's entries with the one field's lane replaced, so a `number` or union contract on another field survives (a replay through `type_tree_follow` would have reset every field to its TypeId's canonical type, which `map_rebuild_for_type_change` deliberately avoids); the target is keyed in the external table by the parent's fingerprint plus (field position, new type), repacked from offset 0 as the rebuild packs a private chain, and is an ordinary tree node afterwards. `map_rebuild_for_type_change` was split so its data move (`container_move_to_type`) serves both the private rebuild and the tree target. Contract admission's reification initially kept the private rebuild. Completed 2026-10-09 under D3.4.3v5/D3.4.5: `type_tree_retype_contract` installs and compares the full contract pointer on the existing bounded retype edge, preserving distinct contracts that share a coarse TypeId. Repeated admission now reuses the layout; a declined edge still rebuilds privately. The dedicated admission regression checks 4,096 repeats without arena/type-list growth. `TransitionTreeRetypeTest` (2) and the retype/flip cases added to `map_runtime_shape_tree.ls`, whose output matches the pre-P0 binary.
 
+**MarkEditor contract preservation (2026-10-11, D3.4.5):** attribute additions,
+removals, and retypes now retain unchanged full contracts when copying shape
+entries. Coarse TypeId tree replay declines union, nullable, and default-bearing
+entries that it cannot reproduce. This fixes a union-valued select attribute
+being repacked into a pointer-width slot and corrupting the following attribute.
+`ElementShapeEditsPreserveUnionAndNullableContracts` checks union/nullable values
+through attribute insertion and removal; all 57 MarkEditor cases pass.
+
 - `lambda-eval.cpp`: in `fn_map_set`, before `map_rebuild_for_type_change`, the retype edge for plain Lambda maps, sharing P1's child minting with the one entry's lane replaced.
 - Tests: extend `map_runtime_shape_tree.ls` (the "retype" block) so two maps retyped alike share a type and a retyped sibling's reads are unchanged; forced-GC run of the same.
 - Gates: Lambda baseline; GC stress; JIT sweep; MIR ratchet; `test_js_gtest` and test262 unchanged (the branch must be unreachable for JS maps).

@@ -1461,6 +1461,17 @@ TEST_F(NegativeScriptTest, GrammarUnterminatedBody) {
         "expected '}' closing the grammar body");
 }
 
+// GM13: `~` marks a token, whose first character the space is kept away from
+TEST_F(NegativeScriptTest, GrammarImmediateMarksATokenRule) {
+    ExpectErrorMessage("test/lambda/negative/semantic/grammar_immediate_syntax_rule.ls",
+        "error[E200]: grammar 'g': `~` marks a literal or a `:=` rule, and 'b' is a `=` rule");
+}
+
+TEST_F(NegativeScriptTest, GrammarImmediateMarksOneAtom) {
+    ExpectErrorMessage("test/lambda/negative/syntax/grammar_immediate_group.ls",
+        "error[E100]: grammar 'g': `~` marks a literal or a rule name");
+}
+
 TEST_F(NegativeScriptTest, GrammarLintWarnsWithoutFailing) {
     ScriptResult result = run_lambda_script("test/lambda/negative/semantic/grammar_lint.ls");
     EXPECT_EQ(result.exit_code, 0) << result.output;

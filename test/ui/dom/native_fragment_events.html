@@ -1,0 +1,15 @@
+<!doctype html>
+<html><body>
+  <a id="one" href="#one">One</a>
+  <button id="back" type="button">Back</button>
+  <output id="status">initial</output>
+  <script>
+    let changes = 0;
+    window.addEventListener('hashchange', function (event) {
+      changes++;
+      document.getElementById('status').textContent = changes + ':' + location.hash +
+        ':' + event.oldURL.endsWith('#one') + ':' + event.newURL.endsWith('#one') + ':' + history.length;
+    });
+    document.getElementById('back').addEventListener('click', function () { history.back(); });
+  </script>
+</body></html>

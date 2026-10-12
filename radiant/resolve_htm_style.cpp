@@ -4,6 +4,7 @@
 #include "event.hpp"
 #include "render.hpp"
 #include "../lambda/module/radiant/radiant_input_value.hpp"
+#include "../lambda/dom/dom.h"
 #include "../lib/str.h"
 #include "../lib/strview.h"
 #include "../lib/memtrack.h"
@@ -485,42 +486,63 @@ static void initialize_html_media(LayoutContext* lycon, DomNode* element,
                                   ViewBlock* block, bool is_video) {
     DomElement* media_element = element && element->is_element()
         ? element->as_element() : nullptr;
-    DomDocument* doc = lycon->ui_context ? lycon->ui_context->document : nullptr;
+    DomDocument* doc = lycon->doc;
     if (!doc || !doc->url || doc->services.svg_image_document) return;
 
     if (!block->embed) {
         block->ensure_embed(lycon);
     }
-    if (block->embedp()->video) return;
-
     const char* preload = is_video ? element->get_attribute("preload") : nullptr;
     bool preload_none = preload && strcmp(preload, "none") == 0;
-    RdtVideo* media = nullptr;
-    lam::Temp<char> selected_file_path;
+    MediaViewState* retained = media_view_state_get(doc->state, block, true);
+    if (!retained) return;
+    StrBuf* sources = strbuf_new();
+    if (!sources) return;
     DomNode* source_cursor = nullptr;
     const char* src = nullptr;
     while ((src = html_media_next_source(media_element, &source_cursor))) {
-        Url* abs_url = parse_url(doc->url, src);
-        lam::Temp<char> file_path(abs_url ? url_to_local_path(abs_url) : nullptr);
-        if (abs_url) url_destroy(abs_url);
-        if (!file_path) continue;
-
-        RdtVideo* candidate = rdt_video_create(&media_callbacks, doc->state);
-        if (!candidate) continue;
-        if (!preload_none && rdt_video_open_file(candidate, file_path.get()) != 0) {
-            rdt_video_destroy(candidate);
-            continue;
-        }
-        media = candidate;
-        selected_file_path.reset(file_path.release());
-        break;
+        strbuf_append_format(sources, "%zu:", strlen(src));
+        strbuf_append_str(sources, src);
     }
+    if (!retained->sources || strcmp(retained->sources->str, sources->str) != 0) {
+        // The decoder is retained interaction state; only an authored source change retires it.
+        media_view_state_reset(retained);
+        retained->sources = sources;
+    } else strbuf_free(sources);
+    bool created = !retained->player;
+    if (created) {
+        source_cursor = nullptr;
+        while ((src = html_media_next_source(media_element, &source_cursor))) {
+            Url* abs_url = parse_url(doc->url, src);
+            lam::Temp<char> file_path(abs_url ? url_to_local_path(abs_url) : nullptr);
+            if (abs_url) url_destroy(abs_url);
+            if (!file_path) continue;
+
+            RdtVideo* candidate = rdt_video_create(&media_callbacks, doc->state);
+            if (!candidate) continue;
+            if (!preload_none && rdt_video_open_file(candidate, file_path.get()) != 0) {
+                rdt_video_destroy(candidate);
+                continue;
+            }
+            retained->player = candidate;
+            retained->destroy = rdt_video_destroy;
+            retained->pause = rdt_video_pause;
+            retained->source = file_path.release();
+            retained->opened = !preload_none;
+            break;
+        }
+    }
+    RdtVideo* media = retained->player;
     if (!media) return;
+    retained->connected = dom_is_connected(media_element);
 
     {
-        if (element->has_attribute("loop")) rdt_video_set_loop(media, true);
-        if (element->has_attribute("muted")) rdt_video_set_muted(media, true);
-        block->embed->video = lam::own(media);
+        bool loop = element->has_attribute("loop");
+        bool muted = element->has_attribute("muted");
+        bool autoplay = element->has_attribute("autoplay");
+        if (created || loop != retained->default_loop) rdt_video_set_loop(media, loop);
+        if (created || muted != retained->default_muted) rdt_video_set_muted(media, muted);
+        block->embed->video = lam::up(media);
 
         if (is_video) {
             block->embed->has_controls = element->has_attribute("controls");
@@ -530,11 +552,16 @@ static void initialize_html_media(LayoutContext* lycon, DomNode* element,
             }
         }
 
-        if (element->has_attribute("autoplay")) {
-            if (preload_none) rdt_video_open_file(media, selected_file_path.get());
+        if ((autoplay && (created || !retained->default_autoplay)) || (!preload_none && !retained->opened)) {
+            if (!retained->opened) retained->opened = rdt_video_open_file(media, retained->source) == 0;
+        }
+        if (autoplay && (created || !retained->default_autoplay) && retained->opened) {
             rdt_video_play(media);
             if (doc->state) doc->state->has_active_video = true;
         }
+        retained->default_loop = loop;
+        retained->default_muted = muted;
+        retained->default_autoplay = autoplay;
     }
 }
 

@@ -1,0 +1,13 @@
+{
+  "name":"Timeline native cluster expansion exposes every original event",
+  "html":"test/ui/timeline/cluster.ls",
+  "viewport":{"width":1000,"height":650},
+  "events":[
+    {"type":"assert_count","target":{"selector":".lambda-timeline-overlay-card"},"count":2},
+    {"type":"assert_text","target":{"selector":".lambda-timeline-overlay-card[data-timeline-cluster] button"},"equals":"3 events"},
+    {"type":"click","target":{"selector":".lambda-timeline-overlay-card[data-timeline-cluster] button"}},
+    {"type":"assert_count","target":{"selector":".lambda-timeline-overlay-card"},"count":4},
+    {"type":"assert_count","target":{"selector":"[data-timeline-cluster]"},"count":0},
+    {"type":"assert_text","target":{"selector":".lambda-timeline-overlay-card[data-timeline-id='b'] .lambda-timeline-card-title"},"equals":"Beta"}
+  ]
+}

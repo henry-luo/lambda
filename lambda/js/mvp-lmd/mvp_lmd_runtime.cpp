@@ -7,6 +7,7 @@
 #include "../../runtime/ast-core.hpp"
 #include "../../../lib/utf.h"
 #include "../../../lib/str.h"
+#include "../../../lib/strbuf.h"
 #include "../../../lib/mem.h"
 
 extern "C" int64_t mvp_lmd_truthy(Item value) {
@@ -26,6 +27,14 @@ extern "C" Item mvp_lmd_fail(int64_t kind, int64_t site) {
     SourceLocation location = {};
     location.column = (int)site + 1;
     if (kind < 0 || kind > LMD_MVP_SYNTAX) kind = LMD_MVP_CAPABILITY;
+    if (kind == LMD_MVP_CAPABILITY || kind == LMD_MVP_MEMORY) {
+        MvpLmdLibraryState* state = mvp_lmd_program_library();
+        // an engine admission/allocation failure is not a JS throw that finally may replace.
+        if (state && !state->abort_kind) {
+            state->abort_kind = (int)kind + 1;
+            state->abort_site = site;
+        }
+    }
     char message[96];
     snprintf(message, sizeof(message), "%s at byte %lld", messages[kind], (long long)site);
     LambdaError* error = err_create_heap(codes[kind], message, &location);
@@ -96,7 +105,7 @@ extern "C" double mvp_lmd_parse_integer(String* string, int64_t radix) {
     return negative ? -result : result;
 }
 
-extern "C" double mvp_lmd_parse_number(String* string, int64_t prefix) {
+void mvp_lmd_numeric_string_span(String* string, const char** bytes, size_t* length) {
     Utf16Iterator iter = {(const unsigned char*)string->chars, string->len, 0, -1};
     int64_t start = -1, end = 0;
     uint16_t unit;
@@ -108,9 +117,14 @@ extern "C" double mvp_lmd_parse_number(String* string, int64_t prefix) {
             end = iter.pos;
         }
     }
-    if (start < 0) return prefix ? NAN : 0.0;
-    const char* s = string->chars + start;
-    size_t n = (size_t)(end - start), i = 0;
+    *bytes = string->chars + (start < 0 ? 0 : start);
+    *length = start < 0 ? 0 : (size_t)(end - start);
+}
+extern "C" double mvp_lmd_parse_number(String* string, int64_t prefix) {
+    const char* s; size_t n;
+    mvp_lmd_numeric_string_span(string, &s, &n);
+    if (!n) return prefix ? NAN : 0.0;
+    size_t i = 0;
     if (s[i] == '+' || s[i] == '-') i++;
     if ((prefix ? n - i >= 8 : n - i == 8) && memcmp(s + i, "Infinity", 8) == 0)
         return s[0] == '-' ? -INFINITY : INFINITY;
@@ -187,17 +201,17 @@ extern "C" Item mvp_lmd_number_to_fixed(double value, double digits) {
     return result ? Item{.item = s2it(result)} : mvp_lmd_fail(LMD_MVP_MEMORY, 0);
 }
 
-extern "C" Item mvp_lmd_primitive_to_number(Item value) {
+extern "C" Item mvp_lmd_primitive_to_number(Item value, int64_t explicit_number) {
     TypeId type = get_type_id(value);
     if (type == LMD_TYPE_SYMBOL) return mvp_lmd_fail(LMD_MVP_TYPE, 0);
     if (type == LMD_TYPE_MAP || type == LMD_TYPE_ARRAY || type == LMD_TYPE_FUNC || type == LMD_TYPE_ARRAY_NUM) {
         RootFrame roots(1);
         if (!roots.valid()) return ItemError;
         Rooted<Item> primitive(roots, mvp_lmd_to_primitive(value, 1));
-        return item_is_error(primitive.get()) ? primitive.get() : mvp_lmd_primitive_to_number(primitive.get());
+        return item_is_error(primitive.get()) ? primitive.get() : mvp_lmd_primitive_to_number(primitive.get(), explicit_number);
     }
     if (type == LMD_TYPE_INT || type == LMD_TYPE_FLOAT) return value;
-    if (type == LMD_TYPE_DECIMAL) return mvp_lmd_fail(LMD_MVP_TYPE, 0);
+    if (type == LMD_TYPE_DECIMAL) return explicit_number ? push_d(bigint_to_double(value)) : mvp_lmd_fail(LMD_MVP_TYPE, 0);
     if (type == LMD_TYPE_STRING) return push_d(mvp_lmd_string_to_number(value.get_string()));
     if (type == LMD_TYPE_NULL) return Item{.item = i2it(0)};
     if (type == LMD_TYPE_BOOL) return Item{.item = i2it(value.bool_val)};
@@ -206,13 +220,24 @@ extern "C" Item mvp_lmd_primitive_to_number(Item value) {
 }
 extern "C" Item mvp_lmd_primitive_to_string(Item value, int64_t library_objects) {
     TypeId type = get_type_id(value);
-    if (type == LMD_TYPE_SYMBOL) return mvp_lmd_fail(LMD_MVP_TYPE, 0);
+    if (type == LMD_TYPE_SYMBOL) {
+        if (!(library_objects & 2)) return mvp_lmd_fail(LMD_MVP_TYPE, 0);
+        StrBuf* buffer = strbuf_new();
+        if (!buffer) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
+        strbuf_append_str(buffer, "Symbol(");
+        strbuf_append_str_n(buffer, value.get_symbol()->chars, value.get_symbol()->len);
+        strbuf_append_char(buffer, ')');
+        String* result = heap_strcpy(buffer->str, buffer->length); strbuf_free(buffer);
+        return result ? Item{.item = s2it(result)} : mvp_lmd_fail(LMD_MVP_MEMORY, 0);
+    }
     if (type == LMD_TYPE_STRING) return value;
     if (type == LMD_TYPE_MAP || type == LMD_TYPE_ARRAY || type == LMD_TYPE_FUNC || type == LMD_TYPE_ARRAY_NUM) {
         RootFrame roots(1);
         if (!roots.valid()) return ItemError;
-        Rooted<Item> primitive(roots, mvp_lmd_to_primitive(value, 2, library_objects));
-        return item_is_error(primitive.get()) ? primitive.get() : mvp_lmd_primitive_to_string(primitive.get(), library_objects);
+        Rooted<Item> primitive(roots, mvp_lmd_to_primitive(value, 2, library_objects & 1));
+        // String(symbol) permits only a directly supplied Symbol; an object's
+        // ToPrimitive result still undergoes ordinary ToString.
+        return item_is_error(primitive.get()) ? primitive.get() : mvp_lmd_primitive_to_string(primitive.get(), library_objects & 1);
     }
     if (type == LMD_TYPE_DECIMAL) return mvp_lmd_bigint_to_string(value, 10);
     if (type == LMD_TYPE_INT || type == LMD_TYPE_FLOAT) return mvp_lmd_number_to_string(it2d(value));
