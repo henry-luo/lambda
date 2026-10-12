@@ -13,7 +13,7 @@ true
 "7. has enumerate:"
 true
 "8. has quote:"
-false
+true
 "9. has verbatim:"
 true
 "10. has table:"

@@ -245,8 +245,8 @@ fn render_element(el, info) {
 
         // ---- environments ----
         case 'quote': render_env_block(el, info, "blockquote", "latex-quote")
-        case 'quotation': render_env_block(el, info, "blockquote", "latex-quote")
-        case 'verse': render_env_block(el, info, "blockquote", "latex-quote")
+        case 'quotation': render_env_block(el, info, "blockquote", "latex-quote latex-quotation")
+        case 'verse': render_env_block(el, info, "blockquote", "latex-quote latex-verse")
         case 'center': render_env_div(el, info, "latex-center", "text-align:center")
         case 'flushleft': render_env_div(el, info, "latex-flushleft", "text-align:left")
         case 'flushright': render_env_div(el, info, "latex-flushright", "text-align:right")
@@ -913,9 +913,17 @@ fn render_paragraph(el, info) {
                 if (len(parts) == 1) parts[0]
                 else parts
             }
+            else if (starts_with_noindent(el)) { <p style: "text-indent:0", for c in items { c }> }
             else { <p for c in items { c }> }
         }
     }
+}
+
+// \noindent at the start of a paragraph removes its indentation
+fn starts_with_noindent(el) {
+    let leading = [for (item in util.command_args(el)
+        where not (item is string and trim(item) == "")) item]
+    len(leading) > 0 and leading[0] is element and string(name(leading[0])) == "noindent"
 }
 
 fn has_parbreak(el, i, n) {

@@ -22,12 +22,13 @@ let multicols = render("\\begin{multicols}{3}[\\subsection{Spread}]\nBody text.\
 let plain_cols = render("\\begin{multicols}{2}\nOnly body.\n\\end{multicols}")
 let ligatures = render("f\\/i and a\\slash b")
 let symbols = render("\\textomikron \\textOmikron \\perthousand \\textcopyright")
+let boxes = render("\\noindent\\fbox{\\verb|\\mbox{|x\\verb|}|}\n\n\\framebox[2cm][r]{Bummer, I am too wide}")
 
 ;[
     {name: "framed picture has no unsupported output", ok: framed.unsupported == []},
     {name: "framed picture uses the frame's unit length", ok: contains(framed.html, "viewBox=\"0 0 200 100\"")},
     {name: "framed picture draws its line", ok: contains(framed.html, "<line")},
-    {name: "frame is a box around the picture", ok: contains(framed.html, "display:inline-block;border:1px solid")},
+    {name: "frame is a box around the picture", ok: contains(framed.html, "class=\"latex-frame\" style=\"display:inline-block;")},
     {name: "top-level calc setlength reaches the picture", ok: contains(top.html, "viewBox=\"0 0 200 100\"")},
     {name: "multicols preface spans the columns", ok: contains(multicols.html,
         "<div class=\"latex-multicols-preface\"><h3")},
@@ -38,5 +39,8 @@ let symbols = render("\\textomikron \\textOmikron \\perthousand \\textcopyright"
         not contains(plain_cols.html, "latex-multicols-preface")},
     {name: "italic correction renders nothing", ok: contains(ligatures.html, "fi and a") and ligatures.unsupported == []},
     {name: "slash renders a breakable solidus", ok: contains(ligatures.html, "<span class=\"latex-slash\">/<wbr></span>")},
-    {name: "textgreek, textcomp and gensymb symbols", ok: symbols.unsupported == [] and contains(symbols.html, "ο Ο ‰ ©")}
+    {name: "textgreek, textcomp and gensymb symbols", ok: symbols.unsupported == [] and contains(symbols.html, "ο Ο ‰ ©")},
+    {name: "noindent removes the paragraph indent", ok: contains(boxes.html, "<p style=\"text-indent:0\">")},
+    {name: "a sized box is its width from the outside", ok: contains(boxes.html, "box-sizing:border-box")},
+    {name: "[r] content overflows to the left", ok: contains(boxes.html, "left:100%;transform:translateX(-100%)")}
 ]

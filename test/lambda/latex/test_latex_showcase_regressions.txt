@@ -37,4 +37,13 @@
   }, {
     name: "textgreek, textcomp and gensymb symbols",
     ok: true
+  }, {
+    name: "noindent removes the paragraph indent",
+    ok: true
+  }, {
+    name: "a sized box is its width from the outside",
+    ok: true
+  }, {
+    name: "[r] content overflows to the left",
+    ok: true
   }]

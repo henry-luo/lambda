@@ -25,6 +25,13 @@ pub let STYLESHEET = ".latex-document {
 .latex-document h4 + p {
   text-indent: 0;
 }
+/* quote and verse set listparindent to 0; quotation indents every paragraph */
+.latex-document .latex-quote p {
+  text-indent: 0;
+}
+.latex-document .latex-quotation p {
+  text-indent: 1.5em;
+}
 .latex-running-header, .latex-running-footer {
   display: grid; grid-template-columns: 1fr 1fr 1fr;
   align-items: center; font-size: 0.85em; line-height: 1.2;
@@ -82,10 +89,6 @@ pre.latex-verbatim {
 .latex-boldmath { font-weight: 700; }
 code.latex-code {
   font-family: 'Computer Modern Typewriter', 'Latin Modern Mono', monospace;
-  background: #f5f5f5;
-  padding: 0.1em 0.3em;
-  border-radius: 2px;
-  font-size: 0.9em;
 }
 .latex-footnote-ref {
   vertical-align: super;

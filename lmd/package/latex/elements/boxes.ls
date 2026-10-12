@@ -7,6 +7,10 @@ import util: lambda.latex.util
 // Simple boxes (take pre-rendered items)
 // ============================================================
 
+// TeX boxes are horizontal lists: text-indent is inherited in CSS, so a box
+// inside an indented paragraph would otherwise indent its own first line
+let BOX_BASE = "display:inline-block;text-indent:0;white-space:nowrap"
+
 // \mbox{text} — prevent line breaks within text
 pub fn render_mbox(items) {
     <span class: "latex-mbox", style: "white-space:nowrap", for c in items { c }>
@@ -15,12 +19,12 @@ pub fn render_mbox(items) {
 // \fbox{text} — framed box; a TeX box, so the border encloses tall content
 // such as a picture instead of only the text line
 pub fn render_fbox(items) {
-    <span class: "latex-fbox", style: "display:inline-block;border:1px solid;padding:3pt", for c in items { c }>
+    <span class: "latex-fbox", style: BOX_BASE ++ ";border:1px solid;padding:3pt", for c in items { c }>
 }
 
 // \frame{text} — frame with no padding (TeX primitive)
 pub fn render_frame(items) {
-    <span class: "latex-frame", style: "display:inline-block;border:1px solid", for c in items { c }>
+    <span class: "latex-frame", style: BOX_BASE ++ ";border:1px solid", for c in items { c }>
 }
 
 // ============================================================
@@ -31,15 +35,26 @@ pub fn render_frame(items) {
 // el children: [brack_group(width)?, brack_group(pos)?, ...content]
 pub fn render_makebox(el, content_items) {
     let parsed = parse_brack_args(el)
-    let style = build_makebox_style(parsed.width, parsed.pos);
-    <span class: "latex-makebox", style: style, for c in content_items { c }>
+    sized_box("latex-makebox", parsed, "", content_items)
 }
 
 // \framebox[width][pos]{text} — like makebox with a border
 pub fn render_framebox(el, content_items) {
     let parsed = parse_brack_args(el)
-    let style = build_makebox_style(parsed.width, parsed.pos) ++ ";border:1px solid;padding:3pt";
-    <span class: "latex-framebox", style: style, for c in content_items { c }>
+    sized_box("latex-framebox", parsed, ";border:1px solid;padding:3pt", content_items)
+}
+
+// A sized TeX box is exactly its width and never wraps: content wider than the
+// box sticks out on the left for [r], both sides for [c] and the right for [l].
+// The inner box is offset relative to the box and then by its own width, which
+// anchors it the way TeX does whether it is narrower or wider than the box.
+fn sized_box(class_name, parsed, frame, content_items) {
+    if (parsed.width == null)
+        <span class: class_name, style: BOX_BASE ++ frame, for c in content_items { c }>
+    else
+        <span class: class_name, style: build_makebox_style(parsed.width) ++ frame,
+            <span class: "latex-box-content", style: box_content_anchor(parsed.pos),
+                for c in content_items { c }>>
 }
 
 // \parbox[pos]{width}{text}
@@ -151,16 +166,23 @@ fn find_first_non_brack_text(el, i, n) {
 // Style builders
 // ============================================================
 
-fn build_makebox_style(width, pos) {
-    let base = "display:inline-block"
-    let w = if (width != null) base ++ ";width:" ++ width else base
+// the width is seen from the outside, frame included (border-box)
+fn build_makebox_style(width) {
+    BOX_BASE ++ ";box-sizing:border-box;vertical-align:baseline;text-align:left;width:" ++ width
+}
+
+// LaTeX centers the content when no position is given; spread is not
+// reproducible in HTML and anchors like [l]
+fn box_content_anchor(pos) {
     let align = resolve_pos(pos)
-    let result = if (align != null) w ++ ";text-align:" ++ align else w
-    result
+    let anchor = if (align == "right") ";left:100%;transform:translateX(-100%)"
+        else if (align == "left" or align == "justify") ""
+        else ";left:50%;transform:translateX(-50%)"
+    "display:inline-block;position:relative" ++ anchor
 }
 
 fn build_parbox_style(width, pos) {
-    let base = "display:inline-block"
+    let base = "display:inline-block;text-indent:0"
     let w = if (width != null) base ++ ";width:" ++ width else base
     let valign = resolve_vertical_pos(pos)
     let result = if (valign != null) w ++ ";vertical-align:" ++ valign else w
