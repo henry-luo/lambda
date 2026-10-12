@@ -3946,6 +3946,12 @@ struct RenderBorderStroke {
 };
 // the callback takes ownership of path, including on failure (D4.5.1v4).
 using RenderBorderPathCallback = bool (*)(void* context, RdtPath* path, Color color, const RenderBorderStroke* stroke);
+// shared style helpers serve both backend-independent paths and raster borders.
+Color render_border_darken_color(Color color, float factor = 2.0f / 3.0f);
+Color render_border_lighten_color(Color color, float factor = 1.0f / 3.0f);
+void render_border_inset_outset_colors(Color base, CssEnum style,
+    Color* out_top, Color* out_right, Color* out_bottom, Color* out_left);
+int render_border_dash_pattern(CssEnum style, float width, float* out_dash, RdtStrokeCap* out_cap);
 bool render_border_style_supported(CssEnum style);
 bool render_border_emit_side(Rect rect, const BorderProp* border, size_t side, bool rounded,
                              RenderBorderPathCallback emit, void* context);

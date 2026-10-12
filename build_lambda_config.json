@@ -3645,7 +3645,8 @@
               "gtest_main"
             ],
             "additional_sources": [
-              "radiant/animation.cpp"
+              "radiant/animation.cpp",
+              "radiant/layout_tags.cpp"
             ],
             "binary": "test_animation_gtest.exe",
             "icon": "\ud83c\udfac"
@@ -3749,6 +3750,7 @@
               "radiant/animation.cpp",
               "radiant/image_surface_generation.cpp",
               "radiant/gif_player.cpp",
+              "radiant/layout_tags.cpp",
               "lib/image.c",
               "test/test_media_player_stubs.cpp"
             ],
@@ -3815,6 +3817,7 @@
               "radiant/animation.cpp",
               "radiant/image_surface_generation.cpp",
               "radiant/lottie_player.cpp",
+              "radiant/layout_tags.cpp",
               "test/test_media_player_stubs.cpp"
             ],
             "binary": "test_lottie_player_gtest.exe",
@@ -4442,7 +4445,7 @@
               "lambda/input/css/selector_matcher.cpp",
               "radiant/symbol_resolver.cpp",
               "radiant/layout_counters.cpp",
-              "radiant/layout_counters.cpp"
+              "radiant/layout_tags.cpp"
             ],
             "binary": "test_lambda_domnode_gtest.exe",
             "icon": "\ud83d\udd17"
@@ -4806,7 +4809,8 @@
               "lambda/input/css/dom_element.cpp",
               "lambda/input/css/selector_matcher.cpp",
               "radiant/symbol_resolver.cpp",
-              "radiant/layout_counters.cpp"
+              "radiant/layout_counters.cpp",
+              "radiant/layout_tags.cpp"
             ],
             "binary": "test_css_dom_integration.exe",
             "icon": "\ud83c\udf10"
@@ -4833,7 +4837,8 @@
               "lambda/input/css/dom_element.cpp",
               "lambda/input/css/selector_matcher.cpp",
               "radiant/symbol_resolver.cpp",
-              "radiant/layout_counters.cpp"
+              "radiant/layout_counters.cpp",
+              "radiant/layout_tags.cpp"
             ],
             "binary": "test_css_dom_crud.exe",
             "icon": "\u270f\ufe0f"
@@ -4860,7 +4865,8 @@
               "lambda/input/css/dom_element.cpp",
               "lambda/input/css/selector_matcher.cpp",
               "radiant/symbol_resolver.cpp",
-              "radiant/layout_counters.cpp"
+              "radiant/layout_counters.cpp",
+              "radiant/layout_tags.cpp"
             ],
             "binary": "test_css_style_application_gtest.exe",
             "icon": "\ud83c\udfa8"
@@ -4891,6 +4897,7 @@
               "lambda/input/css/selector_matcher.cpp",
               "radiant/symbol_resolver.cpp",
               "radiant/layout_counters.cpp",
+              "radiant/layout_tags.cpp",
               "lib/test_utils.c",
               "lib/test_utils_pool.c"
             ],

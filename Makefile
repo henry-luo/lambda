@@ -3547,7 +3547,9 @@ check-module-boundary:
 	$(PYTHON) utils/check_module_boundary.py
 	@echo "✅ module-boundary validation completed (Class-F ratcheted deferment)"
 
-build-test: build-lambda-data build-windows-host-import test-premake-generator
+# the generated all target includes rdb-drivers, whose pinned client libraries
+# must be prepared before the aggregate build.
+build-test: build-lambda-data build-windows-host-import build-rdb-drivers test-premake-generator
 	@if [ "$(TEST_BUILD_QUIET)" != "1" ]; then echo "Building tests using Premake5..."; fi
 	@if [ "$(TEST_BUILD_QUIET)" != "1" ]; then echo "Building configurations..."; fi
 	@mkdir -p build/premake
