@@ -3,7 +3,7 @@
 Where every test lives, which gate covers which change, and how to run or add one test.
 Written for coding agents; build and Make details live in [`doc/dev/Make_Guide.md`](../doc/dev/Make_Guide.md).
 
-Last verified against tree: 2026-10-11
+Last verified against tree: 2026-10-11; Radiant baseline runner: 2026-10-12
 
 ## Ground rules
 
@@ -42,7 +42,9 @@ Last verified against tree: 2026-10-11
 
 `node test/test_run.js` runs these. Flags: `--target=<suite>`, `--exclude-target=<suite>`, `--category=baseline|extended`,
 `--exclude-test=<name>[,<name>]`, `--raw`, `--sequential`, `--list` (JSON inventory), `--list-build-targets` (unique native projects). Env: `LAMBDA_TEST_BIN_DIR`, `LAMBDA_TEST_OUTPUT_DIR`, `LAMBDA_TEST_IDLE_TIMEOUT` (s), `LAMBDA_TEST_MAX_CONCURRENT`, `LAMBDA_TEST_HEAVY_LOAD=1`, `LAMBDA_UI_TEST_JOBS`.
-The shared runner executes Radiant View tests in up to four isolated GTest case workers, configured by `case_workers`, `case_workers_env` and `case_worker_args` in the build config. It discovers cases using the configured GTest filter, starts previously slow cases first when the prior report is available, then merges every case into the usual JSON report. Each worker caps nested viewer launches at one, so the slow document checks can overlap other cases within the same process ceiling. GPU demos remain serial within their catalog case. `--sequential` keeps suites sequential while allowing these case workers, including in `make test-radiant-baseline`. `LAMBDA_RADIANT_VIEW_TEST_JOBS=1` provides serial case execution; `LAMBDA_TEST_MAX_CONCURRENT` caps the worker count. Direct binary invocations use the same View setting for subprocess groups.
+The shared runner executes Radiant View tests in three isolated GTest case workers by default, configured by `case_workers`, `case_workers_env` and `case_worker_args` in the build config. It discovers cases using the configured GTest filter, starts previously slow cases first when the prior report is available, then merges every case into the usual JSON report. Each worker caps nested viewer launches at one, so the slow document checks can overlap other cases within the same process ceiling. GPU demos remain serial within their catalog case. `--sequential` keeps suites sequential while allowing these case workers. `LAMBDA_RADIANT_VIEW_TEST_JOBS=1` provides serial case execution; `LAMBDA_TEST_MAX_CONCURRENT` caps the worker count. Direct binary invocations use the same View setting for subprocess groups.
+
+Independent Radiant suites run concurrently within one worker budget, defaulting to 125% of logical CPUs for their mix of compilation, rendering and event waits. `LAMBDA_TEST_MAX_CONCURRENT` lowers this ceiling, and heavy-load mode still defaults to at most four. Scheduling starts previously slow suites first using their measured wall time, which includes subprocess work before GTest assertions. `worker_slots` reserves capacity for a native subprocess pool; `worker_slots_env` selects an override and `worker_args` passes the granted count to runners with a jobs option. GTest case pools reserve their `case_workers` count. UI baseline workers reserve seven slots, View/DOM UI aliases two each, and page-load/fuzzy runners two each. Child pools inherit their allocation through `LAMBDA_TEST_MAX_CONCURRENT`. Layout, snapshots, render and checks with shared artifacts remain exclusive. Scene3D uses two isolated case workers; `LAMBDA_SCENE3D_TEST_JOBS=1` selects serial case execution. Layout uses four 100-file batch workers, configurable with `LAYOUT_BASELINE_CONCURRENCY` and capped by the shared process ceiling. Reports retain both elapsed `duration_ms` and accumulated `work_duration_ms` at suite level.
 
 Case logs and individual GTest reports are under `test_output/test_radiant_view_gtest_cases/`. Working directories are under `temp/`; queued viewer logs, event results and phase timings are under `test_output/radiant_view/<run>/<launch>/` (output paths honor `LAMBDA_TEST_OUTPUT_DIR`). The combined JSON report includes `launch_timings`; document checks report subprocess duration instead of their assertion-only time. Discovery errors, missing cases, crashes and timeouts remain failures in the merged report.
 
@@ -51,6 +53,8 @@ A test is killed only after it produces no output for the idle timeout. With `--
 UI automation uses a memory-weighted queue. Manifest suites and individual fixtures can set `worker_mb`; baseline/DTNA/timeline reserve 1024 MiB, and the indexed-math editor fixture reserves 1536 MiB. Other suites retain the 2048 MiB default for large editor/JS bundles. These budgets follow a full release profile: the indexed-math case peaked at 1179 MiB, all other cases below 900 MiB. Reservations collectively use at most half of physical RAM, with at least one case admitted on smaller hosts. `LAMBDA_UI_TEST_JOBS` and `LAMBDA_TEST_MAX_CONCURRENT` cap workers; `LAMBDA_UI_TEST_WORKER_MB` overrides reservations. Subprocess durations and per-view phase timings are retained in the shared report. A separate `<gtest-json-path>.timings.json` file supplies scheduling hints for later runs; every fixture still executes and produces a fresh result. `RADIANT_TEST_EXECUTABLE` selects an alternate host executable for isolated release comparisons.
 
 Headless assertion retries give pending native document and media work wall time to complete, including AVFoundation loading and playback transitions.
+
+For performance measurements, select a release host with `make build-release-compile`, then run `make test-radiant-baseline RADIANT_TEST_CONFIG=release_native`. The normal native runner build remains `debug_native`. `make run-radiant-baseline ARGS=--sequential` provides a serialized comparison without rebuilding.
 
 | `--target` | Category | Binaries | Notable members |
 |---|---|---|---|
@@ -71,7 +75,7 @@ Headless assertion retries give pending native document and media work wall time
 | `make test-lambda-baseline` | `test-input-baseline`, then `lambda` suite baseline (excludes `test_node_prelim_gtest`, `test_lambda_concurrency_gtest`), one merged report |
 | `make test-lambda-full` | the above plus concurrency, `test_lambda_extended_gtest`, `test_lambda_domnode_gtest`, `test_validator_input_gtest` |
 | `make test-input-baseline` | `test_wpt_html_parser_gtest --baseline`, `test_markdown_gtest --baseline`, `test_yaml_suite_gtest`, `test_math_ascii_gtest`, `test_math_gtest` |
-| `make test-radiant-baseline` | builds the native projects selected by `--target=radiant --category=baseline`, then runs that selection sequentially through `test/test_run.js`. All native checks, layout suites, page snapshot, UI/DOM fixtures and render visual checks appear in the shared console/JSON report; layout partials, skips and baseline verdicts are retained |
+| `make test-radiant-baseline` | builds the native projects selected by `--target=radiant --category=baseline`, then runs independent checks concurrently through `test/test_run.js` within a shared worker budget. All native checks, layout suites, page snapshot, UI/DOM fixtures and render visual checks appear in the shared console/JSON report; layout partials, skips and baseline verdicts are retained |
 | `make run-radiant-baseline` | the same Radiant checks with no rebuild |
 | `make test-layout-baseline` | layout baseline suites only |
 

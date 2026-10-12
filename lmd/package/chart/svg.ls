@@ -267,6 +267,7 @@ pub fn rebuild(tag, attrs, children) {
     else if (tag == 'tspan') <tspan *:attrs, *children>
     else if (tag == 'image') <image *:attrs, *children>
     else if (tag == 'title') <title *:attrs, *children>
+    else if (tag == 'desc') <desc *:attrs, *children>
     else if (tag == 'defs') <defs *:attrs, *children>
     else if (tag == 'clipPath') <clipPath *:attrs, *children>
     else if (tag == 'linearGradient') <linearGradient *:attrs, *children>

@@ -49,7 +49,7 @@ A run of `lambda script.ls` threads through these stages (full detail in [LR_01]
 
 1. **Dispatch.** `main` parses CLI args and selects the run path; `run_script_file` → `run_script_mir`.
 2. **Load.** `load_script` reads the source, de-duplicates and circular-checks imports, and precompiles them in parallel.
-3. **Parse.** The first-party C lexer and recursive-descent/Pratt parser reduce source directly through `lambda/runtime/parse.c` ([LR_02](LR_02_Parsing_AST.md)).
+3. **Parse.** The first-party C lexer and recursive-descent/Pratt parser reduce source directly through `lambda/runtime/parser/lambda_lexer.c` and `lambda_parser.c` ([LR_02](LR_02_Parsing_AST.md)).
 4. **Build AST.** The span-based sink in `lambda/runtime/build_ast.cpp` constructs the typed AST and infers expression types as it goes ([LR_02](LR_02_Parsing_AST.md)).
 5. **Transpile.** `compile_script_as_mir_direct` lowers the AST to a MIR module — inline boxing, register-type tracking, and root/number side-frame emission ([LR_07](LR_07_MIR_Transpiler_JIT.md)). The removed C2MIR implementation is retained only as a historical design record in [LR_06](LR_06_C_Transpiler.md).
 6. **Link & generate.** `mir.c` resolves runtime-function imports, links the module, and runs `MIR_gen` to native code; module-level globals are registered as GC roots post-link.

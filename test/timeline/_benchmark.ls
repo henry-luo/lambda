@@ -49,12 +49,12 @@ pub pn run(count: int, scenario: string) map | error {
     }
     let before_cache=clock();
     for (step in 1 to 100) {
-        let next=prepared.source(raw,{*:current,query:string(step)},cache);
+        let next=prepared.source(raw,{*:current,selected_ids:["event-" ++ string(step)]},cache);
         checksum=checksum+len(next.normalized.events)
     }
     let cache_ms=(clock()-before_cache)*1000.0;
     return {count:count,scenario:scenario,normalized_count:len(cache.normalized.events),
-        visible:len(first.visible_events),cards:len(first.events),checksum:checksum,
+        visible:len(first.visible_events),cards:len(first.events),work:first.work,checksum:checksum,
         generate_ms:(generated-start)*1000.0,normalize_ms:(normalized-generated)*1000.0,
         initialize_ms:(initialized-normalized)*1000.0,layout_ms:(laid_out-initialized)*1000.0,
         viewport_updates_ms:samples,cached_source_100_ms:cache_ms}

@@ -11958,7 +11958,7 @@ static TypeId mir_expr_carrier_type(MirTranspiler* mt, AstNode* node) {
             if (op_ck == OPERATOR_EQ || op_ck == OPERATOR_NE ||
                 op_ck == OPERATOR_IS || op_ck == OPERATOR_SUBTYPE ||
                 op_ck == OPERATOR_IS_NAN ||
-                op_ck == OPERATOR_IN || op_ck == OPERATOR_AT)
+                op_ck == OPERATOR_IN || op_ck == OPERATOR_AT || op_ck == OPERATOR_OF)
                 return LMD_TYPE_BOOL;
             if (op_ck >= OPERATOR_LT && op_ck <= OPERATOR_GE) {
                 // Native consumers may reopen a closed integer tree; use the
@@ -12025,7 +12025,7 @@ static TypeId mir_expr_carrier_type(MirTranspiler* mt, AstNode* node) {
             if (is_elementwise_comparison_op(op))
                 return LMD_TYPE_ANY;
             if (op == OPERATOR_IS || op == OPERATOR_SUBTYPE || op == OPERATOR_IS_NAN ||
-                op == OPERATOR_IN || op == OPERATOR_AT)
+                op == OPERATOR_IN || op == OPERATOR_AT || op == OPERATOR_OF)
                 return LMD_TYPE_BOOL;
             // AND/OR is handled above because non-bool results stay boxed.
         }
@@ -15339,6 +15339,7 @@ static MirValue emit_binary_value_body(MirTranspiler* mt, AstBinaryNode* bi,
         case OPERATOR_SUBTYPE:
         case OPERATOR_IN:
         case OPERATOR_AT:
+        case OPERATOR_OF:
         case OPERATOR_EQ:
         case OPERATOR_REF_EQ:
         case OPERATOR_NE:
@@ -16182,10 +16183,12 @@ static MirValue emit_binary_value_body(MirTranspiler* mt, AstBinaryNode* bi,
         // before a native branch observes unspecified upper return bits.
         return publish(emit_uext8(mt, result), VALUE_REP_I64);
     }
-    if (bi->op == OPERATOR_AT) {
+    if (bi->op == OPERATOR_AT || bi->op == OPERATOR_OF) {
+        // S8.1.1v2: name membership (`at`) and position membership (`of`) share
+        // one lowering shape; only the builtin differs
         MIR_reg_t boxl = transpile_box_item(mt, bi->left);
         MIR_reg_t boxr = transpile_box_item(mt, bi->right);
-        MIR_reg_t result = emit_call_2(mt, "fn_at", MIR_T_I64,
+        MIR_reg_t result = emit_call_2(mt, bi->op == OPERATOR_AT ? "fn_at" : "fn_of", MIR_T_I64,
             MIR_T_I64, MIR_new_reg_op(mt->ctx, boxl),
             MIR_T_I64, MIR_new_reg_op(mt->ctx, boxr));
         // c Bool returns only define the low byte; normalize the imported i64

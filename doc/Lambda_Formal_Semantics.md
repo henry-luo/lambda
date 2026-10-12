@@ -1,6 +1,6 @@
 # Lambda Formal Semantics — Specification
 
-**Spec version:** 60.0.1 (2026-10-09)
+**Spec version:** 60.1.0 (2026-10-12)
 
 **Status:** normative — the single source of truth for Lambda language semantics.
 This document records what Lambda's semantics **is by decision**, not what any
@@ -1108,26 +1108,47 @@ cardinality, and keep failure on a separate channel.* [RF1–RF6, §7.7 record]
 
 ## S8 Membership and Iteration
 
-### S8.1 The `in`/`at` axis
+### S8.1 The `in`/`at`/`of` axis
 
-- **S8.1.1** `in` is value membership; `at` is key-name membership — used
+- **S8.1.1v2** **Three axes, one key class each.** `in` is value membership
+  over every member; `at` is name membership — the `NameKey` class; `of` is
+  position membership — the `IntKey` class (S8.2.1v4). Each axis is used
   identically in iteration and membership: `for (x in coll)` ↔ `x in coll`;
-  `for (k at m)` ↔ `k at m`. Operand order: member left, container right.
-  *Whatever `for…in` walks, `in` tests.* [C5.3a]
-- **S8.1.2v2** On elements and objects, `in` ranges over attribute values
-  then children; `at` ranges over attribute keys — one meaning across the
-  map/list duality. [OB4]
-- **S8.1.3*** **Axis and arity are independent.** The axis (`in`/`at`) selects
-  WHICH members are walked; the arity of the binding selects the PROJECTION
-  over those same members. One name binds the axis's own element — `for (x in
-  c)` a value, `for (k at c)` a name. Two names bind `(key, value)` of each
-  walked member, on either axis: `for (k, v in c)` and `for (k, v at c)`.
-  The axis still decides membership, so the paired forms are not synonyms —
-  on an element `for (k, v at e)` yields attribute pairs only, while
-  `for (k, v in e)` also walks children; on an array `for (k, v at a)` is
-  empty because an `IntKey` is not a name (S8.2.2v3). S8.1.1's mirror law is
-  unaffected: it equates the single-name iteration with membership on the same
-  axis, and the paired form walks that identical member set. [C5.3a]
+  `for (k at m)` ↔ `k at m`; `for (i of a)` ↔ `i of a`. Operand order:
+  member left, container right. `of` tests a key, never a value: `i of c`
+  holds iff `i` normalizes to an `IntKey` that `c` holds — `1.0 of [10, 20]`
+  is true; `-1 of [10, 20]`, `"1" of [10, 20]` and `0 of {a: 1}` are false —
+  so `i of arr` is the index-bound test. *Whatever `for…in` walks, `in`
+  tests; whatever `for…at` walks, `at` tests; whatever `for…of` walks, `of`
+  tests.* The one-name form always binds what the axis is named after — a
+  value, a name, a position — so `for (x of a)` yields positions where
+  JavaScript's `for (x of a)` yields values; the values are `for (x in a)`.
+  (Revised 2026-10-12, v2: added the `of` axis; `in` and `at` are unchanged.)
+  [C5.3a, C22]
+- **S8.1.2v3** On elements and objects, `in` ranges over attribute values
+  then children; `at` ranges over attribute keys; `of` ranges over content
+  positions — one meaning across the map/list duality. On a structural map
+  `of` walks nothing, as `at` walks nothing on an array (S8.1.3v2); on a VMap
+  `of` walks its `IntKey` entries, which are keys rather than positions and
+  may be negative (S8.2.1v4). (Revised 2026-10-12, v3: `of`.) [OB4, C22]
+- **S8.1.3v2** **Axis and arity are independent.** The axis (`in`/`at`/`of`)
+  selects WHICH members are walked; the arity of the binding selects the
+  PROJECTION over those same members. One name binds the axis's own element —
+  `for (x in c)` a value, `for (k at c)` a name, `for (i of c)` a position.
+  Two names bind `(key, value)` of each walked member, on any axis:
+  `for (k, v in c)`, `for (k, v at c)` and `for (i, x of c)`. The axis still
+  decides membership, so the paired forms are not synonyms — on an element
+  `for (k, v at e)` yields attribute pairs only and `for (i, x of e)` child
+  pairs only, while `for (k, v in e)` walks both; on an array `for (k, v at
+  a)` is empty because an `IntKey` is not a name, and on a map `for (i, x of
+  m)` is empty because a name is not an `IntKey` (S8.2.2v6). An index
+  annotation names a key class, so on `in` it narrows the walk —
+  `for (i: int, x in c)` ≡ `for (i, x of c)`, `for (k: symbol, v in c)` ≡
+  `for (k, v at c)` — while on `at` or `of` it must restate the axis:
+  `for (i: symbol, x of c)` is a compile error. S8.1.1v2's mirror law is
+  unaffected: it equates the single-name iteration with membership on the
+  same axis, and the paired form walks that identical member set. (Revised
+  2026-10-12, v2: `of`.) [C5.3a, C22]
 
 ### S8.2 The key space
 
@@ -1154,7 +1175,7 @@ cardinality, and keep failure on a separate channel.* [RF1–RF6, §7.7 record]
   reaching the type's methods before yielding `null`.
   `for (k, v in c)` exposes the resulting canonical key uniformly
   (`[for (k, v in [10,20]) k]` → `[0, 1]`). [C5.3b, C8.6a]
-- **S8.2.2v5*** **One name space, keyed by namespace and normalized
+- **S8.2.2v6*** **One name space, keyed by namespace and normalized
   spelling.** A *name* is a `NameKey`. Lambda spells a key three ways — a bare
   name (`a`, `ns.a`), a symbol literal (`'a'`, S16.8.7) and a string (`"a"`,
   as a subscript or a key carried by data; a map literal admits only a name
@@ -1180,17 +1201,19 @@ cardinality, and keep failure on a separate channel.* [RF1–RF6, §7.7 record]
   `for (k, v in {"": 1})` yields `k == symbol.empty` and `len` still counts
   every name the walk yields; `m[symbol.empty]` reads it. `at` ranges over
   names, so `1 at [10, 20, 30]` is **false** — the narrower reading is what
-  lets `for (k at e)` give an element's attributes without its children; an
-  index bound is written `i < len(arr)`. *An implementation identity — an
+  lets `for (k at e)` give an element's attributes without its children;
+  positions are the `of` axis, so an index bound is written `i of arr`
+  (S8.1.1v2). *An implementation identity — an
   interned id, a pooled pointer — may prove two keys equal; it never proves
   them different (D3.4.4v4).* (Revised 2026-10-06, v4: v3 normalized string
   and symbol spellings by contents but left bare names and namespaces
-  unstated, so the design layer had taken interned ids as identity.) [C5.3b,
-  C1.6b, C21; §8.0.1 record]
+  unstated, so the design layer had taken interned ids as identity. v6,
+  2026-10-12: the index-bound idiom is `i of arr`, not `i < len(arr)`.)
+  [C5.3b, C1.6b, C21, C22; §8.0.1 record]
 - **S8.2.3*** **Methods are members of the type, never of the value.** An
   object's key domain is its attributes and content; its methods live on the
-  type value `T`. Everything that walks the key domain — `in`, `at`,
-  `for … in`/`for … at`, `len`, `keys`/`values`/`names`, `==`, the total
+  type value `T`. Everything that walks the key domain — `in`, `at`, `of`,
+  `for … in`/`for … at`/`for … of`, `len`, `keys`/`values`/`names`, `==`, the total
   order, formatting — sees attributes and content only: `"m" at obj` is
   false even when `obj.m` resolves a method, exactly as `"sum" at {a: 1}`
   is false today while `{a: 1}.sum()` calls the builtin. `"m" at T` may be
@@ -2370,7 +2393,7 @@ below by its section.
   from value expressions; `!` keeps its type-level roles (infix exclusion,
   complement) and is therefore a pure infix token (S16.2.2v2).
   [Design_Syntax §7.1]
-- **S16.8.2** **`not` binds loose** — below comparisons and `is`/`in`/`at`,
+- **S16.8.2** **`not` binds loose** — below comparisons and `is`/`in`/`at`/`of`,
   above `and`/`or`: `not a == b` ≡ `not (a == b)`, the Python placement.
   [Design_Syntax §7.2]
 - **S16.8.3** **Numeric spelling.** Sized floats accept integer spellings
@@ -2472,7 +2495,7 @@ below by its section.
 
 ### S16.10 Keywords as names
 
-- **S16.10.1v2*** **Keywords never name bindings — where they could
+- **S16.10.1v3*** **Keywords never name bindings — where they could
   capture.** A word is barred as a binding name when it can **begin a
   construct**: declaration and statement keywords (`let` `var` `fn` `pn`
   `type` `view` `edit` `if` `for` `while` `match` `return` `import` `apply`
@@ -2483,7 +2506,7 @@ below by its section.
   that can never begin a construct stay **legal** as binding names:
   for-header clause words (`order` `by` `group` `into` `limit` `offset`
   `asc` `desc` `where` `as`), infix word operators (`and` `or` `to`
-  `is` `in` `at` `div` `that` `eq` `ne` `lt` `le` `ge` `gt`), and the
+  `is` `in` `at` `of` `div` `that` `eq` `ne` `lt` `le` `ge` `gt`), and the
   continuation-only words `else` `case` `default` (S16.2.2v2) together with
   `on`. **Where both readings fit, the clause wins** — an enclosing `if`,
   `match`, `for`, or view claims its clause word before an expression is
@@ -2501,7 +2524,8 @@ below by its section.
   standalone word (`expr is state`), and the namespace root `lambda`, so the
   `lambda.sys.*` escape of S17.2.2 can never itself be shadowed. The barred
   and allowed words are enumerated in
-  [Design_Syntax Appendix K](../vibe/Lambda_Design_Syntax.md).
+  [Design_Syntax Appendix K](../vibe/Lambda_Design_Syntax.md). (v3,
+  2026-10-12: `of` joins the infix word operators — bindable, never leading.)
   [Design_Syntax §7.24]
 - **S16.10.2*** **Data names admit keywords.** Container name positions —
   map keys, element tags, and attribute names — accept keywords:
@@ -2690,6 +2714,7 @@ Status of `*`-marked rulings as of 2026-08-24. Conformance plans:
 | S8.2.1v4, S8.2.2v3, S9.1.6 | Core MIR Direct and AST-interpreter computed access now enforce fixed array/map/element key domains (the v4 object face is not built — see the S2.1.3v2 row), including exact integral float/decimal normalization, empty-string names, and no array-to-map promotion. VMap additionally admits its two canonical NameKey/IntKey classes and rejects fractional/poison keys. Specialized editor/host access sites still need the same audit. Empty-string map keys are semantically valid and round-trip through JSON; since 2026-09-30 every key walk (`for … in`/`at`, host VMap/VElmt keys) yields the empty name as `symbol.empty`, so `len` and iteration agree (`test/lambda/symbol_empty.ls`). `at` membership now conforms: `1 at [10,20,30]` is false, matching S8.2.2v3 (this row previously recorded it as still true). |
 | S8.2.2v5 | **Canonical encoding clarified 2026-10-07; shared NamePool and map boundaries implemented; namespace coverage remains partial.** See [JS_MVP_Lmd](../vibe/jube/JS_MVP_Lmd.md#103-shared-canonical-utf-8-key-identity). **Ruled 2026-10-06 (USER); partially conformant.** Strings, symbol literals and bare names already compare by their decoded characters at every map and element access (`fn_map_set`, `_map_get_keyed`, `shape_field_name_equals`), and interned ids are only ever a fast path there. Namespaces: element attribute reads and map/element equality compare the namespace (`map_find_matching_field`, the element attribute getter, `target_equal`), but a namespaced symbol written through `fn_map_set` or read through `map_get` on a map is matched by its local characters alone, so `ns.a` and `a` collide there — [LR03-40](../vibe/Lambda_Issue_Ledger.md#lr03-40). Qualified keys are not yet represented as (namespace, name) anywhere: an element literal's `ns.attr: v` is desugared to the nested map `ns: {attr: v}`, parsed XML keeps `prefix:local` as a flat name and resolves no `xmlns:` declaration, and a source symbol's characters include its prefix — all ruled wrong on 2026-10-06 and listed in that entry. The transition trees' edges still split one spelling by name pool and by pooled versus unpooled key, so maps with identical fields do not share a type across those seams; that is D3.4.4v4's gap, closed by [Impl_Map_Transition_Coverage](../vibe/impl/Lambda_Impl_Map_Transition_Coverage.md) P0. Ruling record: `Lambda_Semantics_Formal2.md` C21. |
 | S8.1.3 | **Conformant as of 2026-08-24.** The paired `at` form bound both names to the key (a silent wrong answer); fixed in `build_ast`, one fix covering both tiers. Full record: [LR02-R9](../vibe/Lambda_Issue_Ledger.md). |
+| S8.1.1v2, S8.1.2v3, S8.1.3v2, S8.2.2v6, S16.10.1v3 (the `of` axis) | **Ruled and implemented 2026-10-12, both tiers identical.** `of` is a third membership operator (`fn_of`) and for-binding axis in the C parser, the reference grammar and the procedural `for` statement; the loop walk reuses the `LOOP_KEY_INT` filter the typed index already had, and a contradicting index annotation is a compile error. The VMap arm of `at` was tightened to names only, matched by contents (`1 at map([1, "one"])` was true, `'a' at` it false). Fixture `of_axis.ls` (both tiers), negative `for_of_axis_conflict.ls`; S16 reference-grammar harness 397/397; whole-corpus compile scan unchanged (187 pre-existing failures, none new); Lambda baseline 6726/6731 with the five failures environmental (locale, unlinked corpora). **Residue:** a VMap's `IntKey` entries are walked by no axis — its `keys` vtable yields hash-strings (Type_Vmap, *Iteration*) — so `for (i of vmap)` is empty while `i of vmap` answers; the gap pre-dates `of` (`for (k, v in vmap)` shows the same strings). Record: [C22](../vibe/Lambda_Semantics_Formal2.md). |
 | S8.3.2 | Streams (and hence stream `len`) not implemented. |
 | S9.1.3, S9.1.4, S9.2.2–S9.2.4 | COW Stage 1 landed (`let`-finality real for Array/Map/Object/Element/VMap — **and, as of CW32v2 2026-08-29 on `nm-impl-work`, for plain ArrayNum**: binding aliases are O(1) mark-and-share, the eager bind clone is retired, marked roots' lane stores consult the shared bit once per store, and mask writes go through a preparing wrapper; fixture `cow_arraynum_alias.ls`, exact tier parity; mutable write-through views deliberately excluded — open/todo). Stage 2 pending: exclusivity checks (faces 1+3+4 landed, face 2 unreachable behind `E229`), capture-assignment compile errors, view-borrow confinement. The **module-`var` half of S9.2.4 needs no work** — it is vacuous by construction (S9.2.4v2); only the view-state half is outstanding. `var` params parse and mutate the caller's value today, but a *plain* param does so too — the snapshot half of S9.1.3 is **UNCONDITIONAL since the 2026-08-29 flip** (escape hatch retired; `is_proc_param` deleted) (CW29, COW doc §11.9; current tree): both tiers snapshot mutated plain params — flat, nested-path, and array writes all stay local (fixture `cow_param_snapshot.ls`); `var` is the sole write-through construct. Migration outcome: the 88-script sweep ceiling collapsed to **13 actual reliance sites** (7 ABI-pinning proc tests, 6 benchmarks — the SOM PRNG/out-param idiom), all migrated to `var` with goldens unchanged. **Mutated place-copy binds mark their value** (`var row = m.rows[i]` followed by a write through `row` is a true S9.1.2 snapshot on both tiers: the first write detaches), closing the get-modify aliasing half of C4.1; an UNMUTATED place copy stays a borrow — observationally identical to a copy (P6) — and expression-position reads still borrow, unobservable since no write occurs through an unnamed temporary. With CW32v2 landed, ArrayNum-through-plain-param snapshots too (probed both tiers); the residual write-through is only the declared typed-array *native-witness* path, whose raw pointer feeds a native body. |
 | S9.2.3 | **Implemented on both tiers (CW30, 2026-08-29; on worktree branch `nm-impl-work`, pending merge).** The decision is compile-time and tier-shared (`AstLoopNode::snapshot_collection`, computed once at for-node completion): only a loop whose source roots at a mutable binding AND whose body may write that root pays — a head share-mark plus, in MIR, an independent rooted handle the loop walks (the call's result register, which is what dissolves the earlier register-aliasing blocker: the binding's register is free to take the detached replacement). Non-mutating loops emit nothing on either tier. Fixture: `test/lambda/proc/cow_snapshot_iteration.ls` (element write, push, map field, `var`-borrow-in-body, multi-level, clean loop) — identical output on JIT and T0; pre-change behavior was live iteration (`99` observed). |
@@ -2870,7 +2895,7 @@ findings B1–B13 cited as `[B#]`, and from the `OI-#` ledger in
 | S5 equality | C8, C8.5, C8.5a, C8.6, C8.6-R, C8.7, C9-4; OB4, OB10, OB16, OB19 | `Lambda_Semantics_Formal2.md`, `Lambda_Expr_Eq.md` (rationale only), `Lambda_Type_Object.md` |
 | S6 ordering | C11, C11.4, C11.5; OB13 | `Lambda_Semantics_Formal2.md`, `Lambda_Type_Object.md` |
 | S7 absence/errors | C5, C5.3, C5.3b, C14, C14a, C15, C15a/b; TE-4, TE-9, TE-13, TE-15–TE-18; RF1–RF6; ER-D1–PD13; REH-D1–REH-D14; RA1 (S7.6.7v4, S7.11.2v2) | `Lambda_Design_Type_Enforcement.md`, `Lambda_Design_Sys_Func.md`, `Lambda_Design_Exec_Recovery.md`, `Lambda_Design_Runtime_Error_Handling.md`, `Lambda_Design_Runtime_Async.md` |
-| S8 membership | C5.3a, C5.3b, C21 (S8.2.2v4); §8.0–8.3 records; OB4–OB5; Expr_Query §4.1 (S8.2.4v3) | `Lambda_Semantics_Formal2.md`, `Lambda_Type_Object.md`, `Lambda_Expr_Query.md` |
+| S8 membership | C5.3a, C5.3b, C21 (S8.2.2v4), C22 (the `of` axis); §8.0–8.3 records; OB4–OB5; Expr_Query §4.1 (S8.2.4v3) | `Lambda_Semantics_Formal2.md`, `Lambda_Type_Object.md`, `Lambda_Expr_Query.md` |
 | S9 mutability | C4, C4.2a/b/c/e, C4.3, C5.3b, C12; CW16–CW28; RG14 | `Lambda_Semantics_Formal.md`, `Lambda_Semantics_Formal2.md`, `Lambda_Design_Runtime_COW.md`, `Lambda_Design_Nested_Mutation.md`, `Lambda_Design_Runtime_Globals.md` |
 | S10 operators | C6, C6.2–C6.4, C10; Design_Syntax §7.27; PTH3, PTH5–PTH6, PTH9–PTH10, PTH25–PTH29; Expr_Pipe §F.1–§F.7 (`|:` filter stage, `that` proviso, result kind, implicit fields) | `Lambda_Semantics_Formal2.md`, `Lambda_Design_Syntax.md`, `Lambda_Type_Path.md`, `Lambda_Expr_Pipe.md` |
 | S11 types | C7, C8.5c, C20; TE-1–TE-20; OB13; Type_Pattern §1.3; Design_Syntax §7.28; SP1–SP21 | ibid.; `Lambda_Design_Type_Enforcement.md`, `Lambda_Type_Object.md`, `Lambda_Type_Pattern.md`, `Lambda_Design_Syntax.md`, `Lambda_Design_String_Pattern.md`, `Lambda_Expr_String_Pattern.md` |

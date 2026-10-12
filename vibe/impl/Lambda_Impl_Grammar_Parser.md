@@ -333,7 +333,7 @@ USER ruling first: **GM13** — `~x` matches `x` where the previous token ended 
 
 ### 10.3 Evidence
 
-- Fixtures `test/lambda/grammar/{jq,rnc,xquery}.ls` (52, 12 and 37 inputs, plus 7, 4 and 5 error cases); `tokens.ls` gains `~` cases; `NegativeScriptTest.GrammarImmediateMarksATokenRule` and `GrammarImmediateMarksOneAtom`. All 14 grammar fixtures green under `interp`, `jit` and `auto`, and identical under `LAMBDA_GC_FORCE_EVERY=1`; `NegativeScriptTest.Grammar*` 13/13; `xpath.txt` unchanged by the `_ExprSingle` hook.
+- Fixtures `test/lambda/grammar/{jq,rnc,xquery}.ls` (52, 12 and 37 inputs, plus 7, 4 and 5 error cases); `tokens.ls` gains `~` cases; `NegativeScriptTest.GrammarImmediateMarksATokenRule` and `GrammarImmediateMarksOneAtom`. All 14 grammar fixtures green under `interp`, `jit` and `auto`, and identical under `LAMBDA_GC_FORCE_EVERY=1`; `NegativeScriptTest.Grammar*` 13/13; `xpath.txt` unchanged by the `_ExprSingle` hook. `make test-lambda-baseline` (LANG=en_US.UTF-8): 5,849/5,850; the one failure, `run_math_corpus`, was a SIGKILL while peer sessions' test runs shared the machine, and passes 921/921 when rerun alone.
 
 ### 10.4 Still open
 

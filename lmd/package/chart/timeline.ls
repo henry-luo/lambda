@@ -14,10 +14,11 @@ import exports: .timeline.export
 import editing: .timeline.edit
 import bookmarks: .timeline.bookmark
 import prepared: .timeline.prepared
+import motion: .timeline.motion
 
 pub fn validate(spec) => schema.validate(spec)
 pub fn render(spec, viewport = null, snapshot = null) {
-    let normalized = resource.normalize(spec,snapshot);
+    let normalized = prepared.source(spec,snapshot).normalized;
     if (normalized is error) normalized else present.html(normalized,viewport,snapshot)
 }
 pub fn render_spec(spec, viewport = null, snapshot = null) => render(spec,viewport,snapshot)
@@ -31,14 +32,18 @@ pub fn bookmark(spec, id) {
 pub fn convert(data, format, options = {}) => adapters.convert(data,format,options)
 pub fn capabilities(host = "native") => media.capabilities(host)
 pub fn render_frame(spec, frame, viewport = null, snapshot = null) {
-    let normalized=resource.normalize(spec,snapshot);
+    let normalized=prepared.source(spec,snapshot).normalized;
     let elapsed=if (frame is number) frame else frame.time_ms;
     let frozen=if (normalized is error) normalized else story.sample(story.plan(normalized,snapshot),elapsed);
-    if (frozen is error) frozen else present.html(normalized,viewport,{*:snapshot_map(snapshot),*:frozen,story_frame:frozen,sample_time_ms:elapsed})
+    let sampled_state={*:snapshot_map(snapshot),*:frozen,story_frame:frozen,sample_time_ms:elapsed};
+    let target=if (frame.previous!=null and not (normalized is error)) geometry.normalized(normalized,viewport,sampled_state) else null;
+    let sampled=if (target!=null and not (target is error)) motion.sample(frame.previous,
+        {plan:target,svg:vector.render(target,sampled_state,{unsupported:"omit",cards:normalized.view=="story"})},elapsed,normalized) else target;
+    if (frozen is error) frozen else if (sampled is error) sampled else present.html(normalized,viewport,sampled_state,sampled)
 }
 fn snapshot_map(value) => if (value is map) value else {}
 pub fn layout(spec, viewport, snapshot = null, resources = {}) {
-    let normalized=resource.normalize(spec,snapshot);
+    let normalized=prepared.source(spec,snapshot).normalized;
     if (normalized is error) normalized else geometry.normalized(normalized,viewport,snapshot,resources)
 }
 pub fn render_svg(spec, viewport, snapshot = null, options = {}) {

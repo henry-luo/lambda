@@ -75,7 +75,7 @@ Lambda uses **tagged pointers/values** in 64-bit `Item` type:
 Access type with `get_type_id(Item)` - handles all variants uniformly.
 
 ### Core System Architecture
-- **Parser**: Direct C lexer/parser (`lambda/runtime/parser/lambda_lexer.c`, `lambda_parser.c`; `lambda/runtime/parse.c` is only an include shim); Tree-sitter grammar is retained only for the isolated `lambda-cst` verifier
+- **Parser**: Direct C lexer/parser (`lambda/runtime/parser/lambda_lexer.c`, `lambda_parser.c`); Tree-sitter grammar is retained only for the isolated `lambda-cst` verifier
 - **AST Builder**: `lambda/runtime/build_ast.cpp` - constructs typed AST from parser reductions
 - **Transpiler**: `lambda/runtime/transpile-mir.cpp` - MIR Direct JIT, the only back end (the C-text transpiler is removed, see rule 14)
 - **Execution**: tiered per D8.1.1 — `lambda/runtime/interp.cpp` is the T0 AST-walking interpreter; hot definitions promote to MIR JIT (`lambda/runtime/mir.c`)

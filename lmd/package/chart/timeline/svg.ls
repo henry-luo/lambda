@@ -30,7 +30,7 @@ fn reference(plan, item, skin) {
     let point=projected.point;
     let color=c.option(item,"color",skin.primary);
     let appearance=c.attrs(item.appearance);
-    <g class:"lambda-timeline-annotation",'data-timeline-annotation':item.id,
+    <g class:"lambda-timeline-annotation",'data-timeline-annotation':item.id,'data-chart-key':"annotation-" ++ item.id,
         <title layout.plain(item.title)>
         if (item.kind=="band") <path d:range_path(plan,item,offset),fill:"none",stroke:color,
             'stroke-width':c.option(appearance,"width",32),opacity:c.option(appearance,"opacity",0.2)>
@@ -43,8 +43,9 @@ fn reference(plan, item, skin) {
 }
 fn chronology_axis(plan, model, skin) {
     let cross=min(plan.box.width,plan.box.height);
-    <g class:"lambda-timeline-axis",'data-timeline-axis':model.id,
+    <g class:"lambda-timeline-axis",'data-timeline-axis':model.id,'data-chart-key':"axis-" ++ model.id,
         *[for (tick in [*model.ticks,*model.minor]) <g class:"lambda-timeline-tick" ++ (if (tick.major) " lambda-timeline-major-tick" else " lambda-timeline-minor-tick"),
+            'data-chart-key':util.binding_key([tick.value,tick.major]),
             if (model.config.grid==true and tick.major) <line class:"lambda-timeline-grid",x1:tick.point[0]-tick.normal[0]*cross/2.0,
                 y1:tick.point[1]-tick.normal[1]*cross/2.0,x2:tick.point[0]+tick.normal[0]*cross/2.0,y2:tick.point[1]+tick.normal[1]*cross/2.0,
                 stroke:skin.border,opacity:0.5>;
@@ -52,7 +53,7 @@ fn chronology_axis(plan, model, skin) {
                 x2:tick.point[0]+tick.normal[0]*(if (tick.major) 5 else 3)*side,
                 y2:tick.point[1]+tick.normal[1]*(if (tick.major) 5 else 3)*side,stroke:skin.muted>]>];
         *[for (entry in model.labels) label(entry.x,entry.y,entry.label,plan.font,
-            {class:"lambda-timeline-tick-label",fill:skin.muted,'text-anchor':"middle",
+            {class:"lambda-timeline-tick-label",'data-chart-key':"label-" ++ c.text(entry.value),fill:skin.muted,'text-anchor':"middle",
                 transform:"rotate(" ++ c.text(entry.angle) ++ " " ++ c.text(entry.x) ++ " " ++ c.text(entry.y) ++ ")"})];
         if (model.title!=null) label(model.title_point[0],model.title_point[1],
             model.title,plan.font,{class:"lambda-timeline-axis-title",fill:skin.text,'text-anchor':"middle"});
@@ -64,7 +65,7 @@ pub fn render(plan, snapshot = null, options = {}) {
     let spec=plan.spec;
     let skin=theme.tokens(spec,snapshot);
     let policy=c.text(c.option(options,"unsupported","error"));
-    let rich=any([for (item in spec.events) unsupported(item.content) or len(item.media)>0 or item.marker!=null or item.children!=null]);
+    let rich=policy!="omit" and any([for (item in plan.events) unsupported(item.event.content) or len(item.event.media)>0 or item.event.marker!=null or item.event.children!=null]);
     let overlays=[for (model in plan.series) series.render(model)];
     let legends=series.render_legends(plan.series,plan);
     let failure=util.first_error([*overlays,legends,
@@ -107,6 +108,7 @@ pub fn render(plan, snapshot = null, options = {}) {
                 let card=item.bounds,let title=layout.plain(event.title),
                 let fitted=text.fit([title],plan.font,max(1,card.right-card.left-16)))
                 <g class:"lambda-timeline-event" ++ (if (active) " lambda-timeline-active" else "") ++ (if (selected) " lambda-timeline-selected" else ""),
+                    'data-chart-key':item.id,opacity:c.option(item,"opacity",1.0),
                     *:(if (item.cluster!=true) {'data-timeline-id':item.id} else {'data-timeline-cluster':item.id,
                         *:map([(if (spec.cluster.expand_on=="dblclick") "data-timeline-double-action" else "data-timeline-action",
                             format({type:"cluster_expand",id:item.id,ids:item.ids},'json'))])}),
