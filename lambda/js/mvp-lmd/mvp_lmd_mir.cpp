@@ -24,17 +24,18 @@ enum LmdIntrinsic { I_UNDEFINED = 1, I_NAN, I_INFINITY, I_MAP, I_OBJECT,
     I_MATH, I_INT32_ARRAY, I_UINT8_ARRAY, I_FLOAT64_ARRAY, I_ARRAY, I_STRING, I_ERROR,
     I_NUMBER, I_PARSE_INT, I_IS_NAN, I_PERFORMANCE, I_CONSOLE, I_PROCESS, I_REQUIRE, I_JSON, I_DATE, I_REGEXP, I_GLOBAL_THIS, I_SYMBOL, I_SET, I_REFLECT, I_PROXY,
     I_EVAL_ERROR, I_RANGE_ERROR, I_REFERENCE_ERROR, I_SYNTAX_ERROR, I_TYPE_ERROR, I_URI_ERROR, I_AGGREGATE_ERROR,
-    I_BOOLEAN, I_BIGINT, I_COUNT };
+    I_BOOLEAN, I_BIGINT, I_FUNCTION, I_COUNT };
 static const char* intrinsic_names[] = {"undefined", "NaN", "Infinity", "Map", "Object",
     "Math", "Int32Array", "Uint8Array", "Float64Array", "Array", "String", "Error",
     "Number", "parseInt", "isNaN", "performance", "console", "process", "require", "JSON", "Date", "RegExp", "globalThis", "Symbol", "Set", "Reflect", "Proxy",
-    "EvalError", "RangeError", "ReferenceError", "SyntaxError", "TypeError", "URIError", "AggregateError", "Boolean", "BigInt"};
+    "EvalError", "RangeError", "ReferenceError", "SyntaxError", "TypeError", "URIError", "AggregateError", "Boolean", "BigInt", "Function"};
 static const ArrayNumElemType typed_lanes[] = {ELEM_INT32, ELEM_UINT8, ELEM_FLOAT64};
 static const struct { const char* name; const char* native; int arity;
-    double (*unary)(double); double (*binary)(double, double); } math_operations[] = {
+    double (*unary)(double); double (*binary)(double, double); bool binary_once = false; } math_operations[] = {
     {"sqrt", "sqrt", 1, sqrt}, {"sin", "sin", 1, sin}, {"floor", "floor", 1, floor}, {"trunc", "trunc", 1, trunc},
     {"abs", "fn_abs_f", 1, fn_abs_f}, {"min", "fn_min2_u", 2, NULL, fn_min2_u}, {"max", "fn_max2_u", 2, NULL, fn_max2_u},
-    {"ceil", "ceil", 1, ceil}, {"cos", "cos", 1, cos}, {"round", "floor", 1, floor}, {"random", "math_splitmix64", 0}};
+    {"ceil", "ceil", 1, ceil}, {"cos", "cos", 1, cos}, {"round", "floor", 1, floor}, {"random", "math_splitmix64", 0},
+    {"pow", "mvp_lmd_number_pow", 2, NULL, mvp_lmd_number_pow, true}};
 struct LmdRange { double lower = 0, upper = 0; unsigned state = 0; };
 // lane bits follow typed_lanes; ITEMS admits only proven unchanged numeric literals.
 enum { LMD_ARRAY_ITEMS = 8, LMD_ARRAY_UNKNOWN = 16 };
@@ -122,6 +123,9 @@ struct LmdFunction {
     bool observes_receiver;
     bool owns_captures;
     bool complex_params;
+    LmdBinding* arguments_binding;
+    LmdBinding* body_arguments_binding;
+    bool mapped_arguments;
     bool object_home;
     bool lexical_super;
     LmdNumericRegion* numeric_region;
@@ -195,6 +199,13 @@ struct MvpLmdExecution {
 static Item math_call(Context*, MvpLmdProgram* program, Item* args, uint64_t count, Item self, Item, Item) {
     const auto& operation = math_operations[(intptr_t)((MvpLmdNativeCallable*)self.function)->state];
     if (!operation.arity) return push_d(math_splitmix64(&program->random_state));
+    if (operation.binary_once) {
+        Item first = mvp_lmd_primitive_to_number(count ? args[0] : Item{.item = ITEM_JS_UNDEFINED});
+        if (item_is_error(first)) return first;
+        double left = it2d(first);
+        Item second = mvp_lmd_primitive_to_number(count > 1 ? args[1] : Item{.item = ITEM_JS_UNDEFINED});
+        return item_is_error(second) ? second : push_d(operation.binary(left, it2d(second)));
+    }
     double value = operation.arity == 2 ? (!strcmp(operation.name, "min") ? INFINITY : -INFINITY) : NAN;
     for (uint64_t i = 0; i < (operation.arity == 1 ? (count ? 1 : 0) : count); i++) {
         Item converted = mvp_lmd_primitive_to_number(args[i]);
@@ -613,12 +624,44 @@ static void walk(AstNode* n, LmdWalk* state) {
                 p->global_receiver = true;
         }
         if (ast->is_generator) { activate_library(p, n); p->iterators = true; }
-        if (ast->is_async ||
-                (facts.observations & JS_AST_OBSERVES_ARGUMENTS) ||
-                facts.has_direct_eval || facts.has_with)
+        if (ast->is_async || facts.has_direct_eval || facts.has_with)
             diagnostic(p, n, "function needs features outside scalar/dense-array scope");
         inner.owner = f;
         collect_scope(p, f, ast->vars);
+        if (!state->facts && !arrow && (facts.observations & JS_AST_OBSERVES_ARGUMENTS)) {
+            String* name = name_pool_create_len(p->frontend->name_pool, "arguments", 9);
+            NameEntry* entry = name_scope_lookup_name(ast->vars, name);
+            bool shadowed = entry && (entry->is_parameter || (!f->complex_params &&
+                (entry->is_lexical || (entry->node && entry->node->node_type == AST_NODE_FUNC))));
+            if (!shadowed) {
+                activate_library(p, n); p->property_callbacks = true; p->iterators = true;
+                if (entry && f->complex_params && !entry->is_lexical &&
+                        (!entry->node || entry->node->node_type != AST_NODE_FUNC)) {
+                    f->body_arguments_binding = binding(p, entry);
+                    f->body_arguments_binding->kinds |= K_OBJECT;
+                    f->body_arguments_binding->external = true;
+                }
+                if (!entry || f->complex_params) {
+                    // defaults close over the parameter binding, before body var/function declarations exist.
+                    entry = (NameEntry*)pool_calloc(p->frontend->pool, sizeof(NameEntry));
+                    if (!entry) { diagnostic(p, n, "arguments binding allocation"); return; }
+                    entry->name = name; entry->scope = ast->vars; entry->is_mutable = true;
+                    LmdBinding* local = (LmdBinding*)mem_calloc(1, sizeof(LmdBinding), MEM_CAT_TEMP);
+                    if (!local) { diagnostic(p, n, "arguments binding allocation"); return; }
+                    local->entry = entry; local->owner = f; arraylist_append(p->bindings, local);
+                }
+                f->arguments_binding = binding(p, entry);
+                f->arguments_binding->kinds = K_OBJECT;
+                f->arguments_binding->external = true;
+                f->mapped_arguments = !f->complex_params && !ast->has_use_strict_directive && !(ast->vars && ast->vars->strict);
+                if (f->mapped_arguments) for (AstNode* parameter = ast->params; parameter; parameter = parameter->next) {
+                    LmdBinding* local = binding(p, js_ast_parameter_binding_identifier(parameter)->entry);
+                    // indexed writes and escaped aliases use the same precise closure cell.
+                    local->captured = local->external = local->implicit_write = true;
+                    local->kinds = K_ANY; f->owns_captures = true;
+                }
+            }
+        }
         for (AstNode* param = ast->params; param; param = param->next)
             if (!js_ast_parameter_binding_identifier(param)) {
                 activate_library(p, param); collect_pattern_binding(param, p);
@@ -631,6 +674,7 @@ static void walk(AstNode* n, LmdWalk* state) {
                 if (b->target && b->target != f) b->assigned = true;
                 b->target = f;
                 b->kinds |= K_FUNCTION;
+                if (f->arguments_binding) b->observed = true;
                 // the Annex B publication exposes this identity even without a local read.
                 if (b->entry->annex_b_outer_binding) b->observed = true;
             }
@@ -674,7 +718,24 @@ static void walk(AstNode* n, LmdWalk* state) {
     }
     case AST_NODE_IDENT: {
         AstIdentNode* id = (AstIdentNode*)n;
-        if (!id->entry && (named(id->name, "eval") || named(id->name, "Function"))) {
+        if (named(id->name, "arguments")) {
+            LmdBinding* existing = binding(p, id->entry);
+            for (LmdFunction* owner = state->owner; owner; owner = owner->parent) {
+                if (existing && existing->owner == owner) {
+                    if (!owner->arguments_binding) break;
+                    bool in_body = false;
+                    for (AstNode* parent = n; parent && parent != (AstNode*)owner->ast;
+                            parent = ast_index_parent(&p->frontend->ast_index, parent))
+                        if (parent == owner->ast->body) { in_body = true; break; }
+                    if (!existing->entry->is_function_name_binding &&
+                            (!owner->complex_params || in_body)) break;
+                }
+                // the implicit local shadows an outer explicit binding; arrows retain nearer locals.
+                if (owner->arguments_binding) { id->entry = owner->arguments_binding->entry; break; }
+                if (owner->ast && owner->ast->node_type != AST_NODE_ARROW_FUNC) break;
+            }
+        }
+        if (!id->entry && named(id->name, "eval")) {
             // these standard globals require D8.1.3v24's interpreter bridge;
             // an unimplemented intrinsic must not masquerade as ReferenceError.
             diagnostic(p, n, "dynamic source requires the shared interpreter bridge"); return;
@@ -728,6 +789,10 @@ static void walk(AstNode* n, LmdWalk* state) {
                         activate_library(p, n); p->primitives = true;
                     }
                     if (i + 1 == I_BIGINT) p->bigints = true;
+                } else if (i + 1 == I_FUNCTION) {
+                    activate_library(p, n); p->property_callbacks = true;
+                    p->intrinsics[i].kinds = K_FUNCTION;
+                    p->intrinsics[i].slot = p->library_slot + LMD_LIBRARY_FUNCTION;
                 } else if (i + 1 == I_IS_NAN) activate_library(p, n);
                 else if (i + 1 == I_MATH && (!state->parent ||
                         state->parent->node_type != AST_NODE_MEMBER_EXPR)) {
@@ -4452,7 +4517,7 @@ static void inline_budget(AstNode* node, void* opaque) {
     if (budget->allowed) js_ast_visit_children(node, inline_budget, budget);
 }
 static void plan_numeric_region(MvpLmdProgram* p, LmdFunction* f, bool calls = false) {
-    if (!p->receiver_abi || p->property_callbacks || !f->ast || f->complex_params || f->owns_captures || f->lexical_receiver ||
+    if (!p->receiver_abi || p->property_callbacks || !f->ast || f->arguments_binding || f->complex_params || f->owns_captures || f->lexical_receiver ||
             f->receiver_captured || (f->captures && f->captures->length) ||
             (f->home && f->id == f->home->constructor_id) ||
             js_ast_collect_parameter_facts(f->ast->params).has_duplicate_param_names) return;
@@ -4555,7 +4620,7 @@ static void guard_numeric_region(LmdCompiler* c, LmdInlineFrame& frame, LmdValue
 static bool inline_body(LmdCompiler* c, LmdFunction* f, LmdInlineBody* body,
         bool guarded_method = false, bool constructor = false, bool numeric = false) {
     MvpLmdProgram* p = c->program;
-    if (!f || f->complex_params || (!f->closed_calls && !guarded_method) ||
+    if (!f || f->arguments_binding || f->complex_params || (!f->closed_calls && !guarded_method) ||
             ast_linked_node_count(f->ast->params) > LAMBDA_MAX_FUNCTION_ARGS) return false;
     if (f->observes_receiver && !f->home) return false;
     if (guarded_method && (f->owns_captures || (!constructor && f->home && f->id == f->home->constructor_id))) return false;
@@ -4810,7 +4875,12 @@ static LmdValue call(LmdCompiler* c, AstCallNode* n, LmdCallCapture* captured = 
                 result = em_call_2(&c->em, "copysign", MIR_T_D, MIR_T_D, reg(c, result), MIR_T_D, reg(c, argument), true);
             }
         }
-        else {
+        else if (operation.binary_once) {
+            MIR_reg_t left = to_number(c, count ? values[0] : number(c, NAN));
+            MIR_reg_t right = to_number(c, count > 1 ? values[1] : number(c, NAN));
+            result = em_call_2(&c->em, operation.native, MIR_T_D,
+                MIR_T_D, reg(c, left), MIR_T_D, reg(c, right), true);
+        } else {
             result = to_number(c, count ? values[0] : number(c, !strcmp(operation.name, "min") ? INFINITY : -INFINITY));
             for (int i = 1; i < count; i++) result = em_call_2(&c->em, operation.native, MIR_T_D,
                 MIR_T_D, reg(c, result), MIR_T_D, reg(c, to_number(c, values[i])), true);
@@ -6075,7 +6145,8 @@ static void scope_capture_initialize(LmdCompiler* c, NameScope* scope) {
     // install all cells before creating hoisted closures that can reference later declarations.
     for (NameEntry* e = scope ? scope->first : NULL; e; e = e->next) {
         LmdBinding* b = binding(c->program, e);
-        if (b && b->owner == c->function && b->captured && !e->is_parameter) initialize_capture(c, b, false);
+        if (b && b->owner == c->function && b != c->function->arguments_binding && b->captured && !e->is_parameter)
+            initialize_capture(c, b, false);
     }
 }
 static void scope_initialize(LmdCompiler* c, NameScope* scope, bool captures = true) {
@@ -6083,6 +6154,7 @@ static void scope_initialize(LmdCompiler* c, NameScope* scope, bool captures = t
     for (NameEntry* e = scope ? scope->first : NULL; e; e = e->next) {
         LmdBinding* b = binding(c->program, e);
         if (!b || (b->owner != c->function && !inline_slot(c, b)) || e->is_parameter || b->native || b->intrinsic) continue;
+        if (b == c->function->arguments_binding) continue;
         if (!b->reflected_global && b->shape_hint && b->shape_hint->scalar_binding == b) continue;
         LmdScalarField* local = inline_slot(c, b);
         if (local && !is_boxed(local->value)) continue;
@@ -6092,6 +6164,8 @@ static void scope_initialize(LmdCompiler* c, NameScope* scope, bool captures = t
                    b->target->ast->entry == e && !e->is_annex_b_companion) {
             if (b->observed || b->assigned || b->target->captures || b->target->lexical_receiver || b->target->ast->is_generator)
                 write_binding(c, b, new_function(c, b->target), e->node, true);
+        } else if (b == c->function->body_arguments_binding) {
+            write_binding(c, b, boxed(c, binding_item(c, c->function->arguments_binding), K_OBJECT), e->node, true);
         } else write_binding(c, b, boxed(c, constant(c, e->is_lexical ? ITEM_JS_TDZ : ITEM_JS_UNDEFINED)), e->node, true);
     }
 }
@@ -6915,6 +6989,8 @@ static const LmdImport imports[] = {
     {"mvp_lmd_iterator_collect", (void*)mvp_lmd_iterator_collect, {JIT_EFFECT_MAY_GC, JIT_REENTRY_YES, ITEM, ARG(0,RAW_PTR)|ARG(1,ITEM)|ARG(2,ITEM)|ARG(3,ITEM)|ARG(4,ITEM), JIT_IMPORT_SCALAR_RESULT(SCALAR_RETURN_NONE)|JIT_IMPORT_NUMBER_STACK_PRESERVES|JIT_IMPORT_ARGS_BORROWED_AUDITED, JIT_EXCEPTION_PRESERVES, 0}},
     {"mvp_lmd_call_array", (void*)mvp_lmd_call_array, {JIT_EFFECT_MAY_GC, JIT_REENTRY_YES, ITEM, ARG(0,ITEM)|ARG(1,ITEM)|ARG(2,ITEM)|ARG(3,ITEM), JIT_IMPORT_SCALAR_RESULT(SCALAR_RETURN_F64)|JIT_IMPORT_ARGS_BORROWED_AUDITED, JIT_EXCEPTION_PRESERVES, 0}},
     {"mvp_lmd_function_new", (void*)mvp_lmd_function_new, AUDIT(JIT_EFFECT_MAY_GC, ITEM, ARG(0,SCALAR)|ARG(1,RAW_PTR))},
+    {"mvp_lmd_arguments_new", (void*)mvp_lmd_arguments_new, AUDIT(JIT_EFFECT_MAY_GC, ITEM,
+        ARG(0,ITEM)|ARG(1,RAW_PTR)|ARG(2,SCALAR)|ARG(3,ITEM)|ARG(4,SCALAR))},
     COERCION_IMPORT(mvp_lmd_property_key, ARG(0,ITEM)),
     {"mvp_lmd_object_new", (void*)mvp_lmd_object_new, AUDIT(JIT_EFFECT_MAY_GC, ITEM, ARG(0,RAW_PTR)|ARG(1,SCALAR))},
     {"mvp_lmd_property_get", (void*)mvp_lmd_property_get, REENTRY(JIT_EFFECT_MAY_GC, ITEM, ARG(0,ITEM)|ARG(1,ITEM)|ARG(2,SCALAR))},
@@ -7086,6 +7162,30 @@ static bool compile_function(MvpLmdProgram* p, LmdFunction* f) {
             if (b->captured) initialize_capture(&c, b, false);
             if (f->complex_params) write_binding(&c, b, boxed(&c, constant(&c, ITEM_JS_TDZ)), b->entry->node, true);
         }
+        if (f->arguments_binding) {
+            LmdValue cells = boxed(&c, constant(&c, ITEM_NULL), K_NULL);
+            if (f->mapped_arguments) {
+                MIR_reg_t table = em_call_1(&c.em, "mvp_lmd_array_new", MIR_T_I64, MIR_T_I64,
+                    integer(&c, ast_linked_node_count(f->ast->params)), true);
+                check_error(&c, table); cells = boxed(&c, table, K_ARRAY);
+                int index = 0;
+                for (AstNode* a = f->ast->params; a; a = a->next, index++) {
+                    NameEntry* entry = js_ast_parameter_binding_identifier(a)->entry;
+                    bool last = true;
+                    for (AstNode* next = a->next; next; next = next->next)
+                        if (js_ast_parameter_binding_identifier(next)->entry == entry) last = false;
+                    if (last) array_index_write(&c, {NULL, cells, constant(&c, index)},
+                        boxed(&c, binding_cell(&c, binding(p, entry)), K_ARRAY), true);
+                }
+            }
+            LmdBinding* b = f->arguments_binding;
+            if (b->captured) initialize_capture(&c, b, false);
+            MIR_reg_t object = em_call_5(&c.em, "mvp_lmd_arguments_new", MIR_T_I64,
+                MIR_T_I64, reg(&c, c.self), MIR_T_P, reg(&c, c.arguments), MIR_T_I64, reg(&c, c.argc),
+                MIR_T_I64, reg(&c, cells.reg), MIR_T_I64, integer(&c, !f->mapped_arguments), true);
+            check_error(&c, object);
+            write_binding(&c, b, boxed(&c, object, K_OBJECT), (AstNode*)f->ast, true);
+        }
         uint64_t i = 0;
         for (AstNode* a = f->ast->params; a; a = a->next, i++) {
             AstIdentNode* id = js_ast_parameter_binding_identifier(a);
@@ -7199,6 +7299,26 @@ static bool compile_function(MvpLmdProgram* p, LmdFunction* f) {
     return !p->diagnostic[0];
 }
 static bool plan_shape_field(MvpLmdProgram*, TypeMap*, String*, TypeId, uint8_t);
+Item mvp_lmd_function_source(Context*, MvpLmdProgram*, Item*, uint64_t, Item, Item receiver, Item) {
+    if (!mvp_lmd_is_callable(receiver)) return mvp_lmd_fail(LMD_MVP_TYPE, 0);
+    if (!mvp_lmd_is_proxy(receiver)) {
+        MvpLmdCallable* function = (MvpLmdCallable*)receiver.function;
+        AstNode* definition = function->constructor && function->home && function->home->ast ?
+            (AstNode*)function->home->ast : (AstNode*)function->def;
+        if (definition) {
+            JsTranspiler* source = function->program->frontend;
+            SourceSpan span = definition->source_span;
+            if (span.end_byte > source->source_length || span.end_byte < span.start_byte)
+                return mvp_lmd_fail(LMD_MVP_CAPABILITY, 0);
+            String* result = heap_strcpy(source->source + span.start_byte, span.end_byte - span.start_byte);
+            return result ? Item{.item = s2it(result)} : mvp_lmd_fail(LMD_MVP_MEMORY, 0);
+        }
+    }
+    // bound and proxy callables never expose their target's retained source.
+    const char native[] = "function () { [native code] }";
+    String* result = heap_strcpy(native, sizeof(native) - 1);
+    return result ? Item{.item = s2it(result)} : mvp_lmd_fail(LMD_MVP_MEMORY, 0);
+}
 extern "C" Item mvp_lmd_function_prepare(Item owner) {
     Function* function = owner.function;
     if (function->entry_abi != FN_ENTRY_ABI_MVP_LMD || !function->requires_runtime_context)
@@ -7553,7 +7673,7 @@ static int representation_pass(void* opaque) {
                 initialized_function = false;
         }
         if (initialized_function) b->target = function(p, b->initializer);
-        if (b->target && !b->target->ast->is_generator && !b->target->complex_params && !b->target->observes_receiver && !b->target->captures && !b->target->lexical_receiver &&
+        if (b->target && !b->target->arguments_binding && !b->target->ast->is_generator && !b->target->complex_params && !b->target->observes_receiver && !b->target->captures && !b->target->lexical_receiver &&
                 !b->target->owns_captures && !b->assigned && !b->observed && b->entry->node &&
                 (b->entry->node->node_type == AST_NODE_FUNC || initialized_function) && !b->entry->is_annex_b_companion)
             b->target->closed_calls = true;

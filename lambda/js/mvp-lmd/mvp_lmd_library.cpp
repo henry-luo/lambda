@@ -496,6 +496,8 @@ static Item object_string(Context*, MvpLmdProgram*, Item*, uint64_t, Item self, 
         else if (nominal == &state->regexp.nominal) tag = "[object RegExp]";
         else if (state->errors) for (int i = 0; i < LMD_ERROR_COUNT; i++)
             if (nominal == &state->errors[i].nominal) { tag = "[object Error]"; break; }
+        if (state->arguments_key && typemap_hash_lookup_key((TypeMap*)receiver.map->type, state->arguments_key))
+            tag = "[object Arguments]";
         TypeId primitive = get_type_id(primitive_payload(receiver));
         if (primitive != LMD_TYPE_UNDEFINED)
             tag = primitive == LMD_TYPE_STRING ? "[object String]" : primitive == LMD_TYPE_BOOL ? "[object Boolean]" :

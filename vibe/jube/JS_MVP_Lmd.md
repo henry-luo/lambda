@@ -1485,7 +1485,7 @@ Full dependencies, reuse/helper inventory, acceptance fixtures and commands:
 
 ## 32. Test262 parity with full LambdaJS
 
-**Implementation in progress (2026-10-12); P0 captured, P1 partial.** Match the same
+**Implementation in progress (2026-10-12); P0 captured, P1/P2 partial.** Match the same
 **40,261 passing baseline tests** as full LJS, with the pinned corpus, harness,
 variants and exclusions. Establish an MVP-specific result first; the shared
 LambdaJS gate is not evidence of MVP conformance. Retain existing feature
@@ -1522,22 +1522,29 @@ pinned-MIR self-timing evidence. Carry forward §31's unresolved Raytrace3D gap;
 the four jq timings remain historical-only. Existing LJS exclusions and general
 Node/DOM expansion stay outside this parity target.
 
-The first increment adds the canonical MVP Test262 route, native error
-families/cause/AggregateError, primitive wrappers, generic array-like `apply`
-and observable `bind` metadata using shared Lambda storage. Final focused
-groups pass **172/172** normally and under forced GC. The Error/primitive
-subset improves **324 → 669/1,750**; NativeErrors/apply/bind improves
-**21 → 78/231**, both with no lost passes. The initial full MVP inventory
-reported **8,888/40,261**, but predates stricter completion/admission checks
-and is diagnostic only. No final aggregate MVP parity run is claimed.
+The latest increment adds Function reflection and retained-source `toString`,
+mapped/unmapped arguments, separate arguments bindings for default-parameter
+closures, and `Math.pow`. It reuses Lambda nominal Maps, scalar homes and the
+existing mutable capture cells. Dynamic `eval` and Function bodies still
+await the interpreter bridge. MVP checks pass **176/176** normally and with
+forced GC. The final selected canonical comparison improves **815 → 1,224
+of 2,574 IDs**, with **409 gains and zero lost passes**, including **43/43**
+mapped-arguments cases. The plan records the exact entry build, isolated
+replays and performance evidence. The earlier full MVP inventory of
+**8,888/40,261** remains diagnostic, not a final parity result.
 
-Full intrinsic/environment completion, the interpreter bridge and P2–P9
-remain open. Paired release measurements confirm **2.1% Navier–Stokes** and
-**1.17% three-way merge regressions** against this phase's control; the
-performance gate remains open.
-The shared LJS gate passes **40,261/40,261** at the recorded checkpoint; the
-Lambda gate has one debug LaTeX timeout, with that case passing on both release
-binaries. The plan records exact candidates, separate populations and limits.
+Complete intrinsic/environment support and P3–P9 remain open. The shared
+Lambda gate passes **6,784/6,784**, including the previous LaTeX timeout case;
+the shared LJS gate passes **40,261/40,261** at the recorded checkpoint.
+The earlier **2.1% Navier–Stokes**, **1.17% three-way merge** and §31 Raytrace3D
+performance gaps remain open. Fresh performance attribution uses a rebuilt
+control from this increment's exact entry HEAD. The four jq workloads retain
+historical evidence only.
+
+All **84 non-jq workload contracts pass**. Arguments-related named-property
+overhead was reduced; the final 31-round Hashmap median is **+0.38%**, with its
+confidence interval spanning parity. Timing overlaps another checkout's
+benchmark work, so performance sign-off still needs a quiet-host comparison.
 
 Dependencies, interpreter boundary, reuse inventory, helper disclosure and
 acceptance gates: [implementation plan](../impl/JS_MVP_Lmd_Test262_Parity.md).

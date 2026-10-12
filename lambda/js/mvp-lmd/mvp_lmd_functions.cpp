@@ -125,11 +125,73 @@ static Item function_method(Context*, MvpLmdProgram* program, Item* args, uint64
     if (item_is_error(defined)) return defined;
     return bound.get();
 }
-static Item function_prototype(Context*, MvpLmdProgram*, Item*, uint64_t, Item, Item, Item) {
+static Item function_prototype(Context*, MvpLmdProgram*, Item*, uint64_t, Item self, Item, Item) {
+    // reflection is available before P3's interpreter-only dynamic body bridge.
+    MvpLmdLibraryState* state = mvp_lmd_program_library();
+    if (self.item == state->values[LMD_LIBRARY_FUNCTION].item) return mvp_lmd_fail(LMD_MVP_CAPABILITY, 0);
     return Item{.item = ITEM_JS_UNDEFINED};
+}
+static Item function_throw_type(Context*, MvpLmdProgram*, Item*, uint64_t, Item, Item, Item) {
+    return mvp_lmd_fail(LMD_MVP_TYPE, 0);
 }
 static Item function_has_instance(Context*, MvpLmdProgram*, Item* args, uint64_t count, Item, Item receiver, Item) {
     return mvp_lmd_instanceof(count ? args[0] : Item{.item = ITEM_JS_UNDEFINED}, receiver, 1);
+}
+Item mvp_lmd_arguments_cell(Item owner, String* key, bool detach) {
+    // only indexed properties can alias parameters; ordinary named writes need no context lookup.
+    int64_t index = mvp_lmd_string_key(key);
+    if (index < 0) return Item{.item = ITEM_JS_UNDEFINED};
+    MvpLmdLibraryState* state = mvp_lmd_program_library();
+    if (!state || !state->arguments_key || get_type_id(owner) != LMD_TYPE_MAP || mvp_lmd_is_proxy(owner))
+        return Item{.item = ITEM_JS_UNDEFINED};
+    ShapeEntry* field = typemap_hash_lookup_key((TypeMap*)owner.map->type, state->arguments_key);
+    if (!field) return Item{.item = ITEM_JS_UNDEFINED};
+    Item mapping = map_shape_field_to_item(owner.map->data, field);
+    if (index >= mapping.array->length) return Item{.item = ITEM_JS_UNDEFINED};
+    Item cell = mapping.array->items[index];
+    // the alias table contains only cell pointers/null; unlinking cannot allocate.
+    if (detach) mapping.array->items[index] = ItemNull;
+    return get_type_id(cell) == LMD_TYPE_ARRAY ? cell : Item{.item = ITEM_JS_UNDEFINED};
+}
+extern "C" Item mvp_lmd_arguments_new(Item function, Item* values, uint64_t count, Item cells, int64_t unmapped) {
+    MvpLmdLibraryState* state = mvp_lmd_program_library();
+    RootFrame roots(4);
+    if (!roots.valid()) return ItemError;
+    Rooted<Item> callee(roots, function), mapping(roots, cells), object(roots, ItemNull), key(roots, ItemNull);
+    object.set(mvp_lmd_object_new(state->object_shape, 0));
+    if (item_is_error(object.get())) return object.get();
+    if (!state->arguments_key)
+        state->arguments_key = name_pool_create_unique_private(context->name_pool, {"MVP [[ParameterMap]]", 20});
+    if (!state->arguments_key) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
+    if (get_type_id(mapping.get()) != LMD_TYPE_ARRAY) mapping.set(mvp_lmd_array_new(0));
+    if (item_is_error(mapping.get())) return mapping.get();
+    // absent actual arguments never alias a later parameter assignment.
+    for (int64_t i = count; i < mapping.get().array->length; i++) mapping.get().array->items[i] = ItemNull;
+    if (!map_shape_set(object.get().map, state->arguments_key, mapping.get())) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
+    for (uint64_t i = 0; i < count; i++) {
+        key.set(mvp_lmd_number_to_string(i));
+        if (item_is_error(key.get())) return key.get();
+        Item stored = mvp_lmd_named_set(object.get(), key.get().get_string()->chars, values[i], 0);
+        if (item_is_error(stored)) return stored;
+    }
+    Item status = mvp_lmd_named_set(object.get(), "length", Item{.item = i2it(count)}, JSPD_NON_ENUMERABLE);
+    if (item_is_error(status)) return status;
+    JsPropertyDescriptor descriptor = {};
+    descriptor.flags = JS_PD_HAS_VALUE | JS_PD_HAS_WRITABLE | JS_PD_WRITABLE |
+        JS_PD_HAS_ENUMERABLE | JS_PD_HAS_CONFIGURABLE;
+    js_pd_set_configurable(&descriptor, true);
+    descriptor.value = state->values[LMD_LIBRARY_SEQUENCE_ITERATOR];
+    status = mvp_lmd_define_own_property(object.get(), Item{.item = s2it(well_known_name_ref(JS_SYMBOL_ITERATOR))}, &descriptor);
+    if (item_is_error(status)) return status;
+    if (!unmapped) {
+        status = mvp_lmd_named_set(object.get(), "callee", callee.get(), JSPD_NON_ENUMERABLE);
+        return item_is_error(status) ? status : object.get();
+    }
+    descriptor = {};
+    descriptor.flags = JS_PD_HAS_GET | JS_PD_HAS_SET | JS_PD_HAS_ENUMERABLE | JS_PD_HAS_CONFIGURABLE;
+    descriptor.getter = descriptor.setter = state->values[LMD_LIBRARY_THROW_TYPE];
+    status = mvp_lmd_define_own_property(object.get(), Item{.item = s2it(heap_create_name("callee", 6))}, &descriptor);
+    return item_is_error(status) ? status : object.get();
 }
 Item mvp_lmd_function_initialize(MvpLmdProgram* program, MvpLmdLibraryState* state) {
     for (int i = LMD_LIBRARY_CALL; i <= LMD_LIBRARY_BIND; i++) {
@@ -142,18 +204,47 @@ Item mvp_lmd_function_initialize(MvpLmdProgram* program, MvpLmdLibraryState* sta
         if (item_is_error(prototype)) return prototype;
         Item ready = mvp_lmd_function_prepare(prototype);
         if (item_is_error(ready)) return ready;
-        Map* map = mvp_lmd_property_map(prototype);
+        state->values[LMD_LIBRARY_FUNCTION] = mvp_lmd_native_function(program, state, function_prototype, 1, "Function");
+        if (item_is_error(state->values[LMD_LIBRARY_FUNCTION])) return state->values[LMD_LIBRARY_FUNCTION];
+        MvpLmdCallable* constructor = (MvpLmdCallable*)state->values[LMD_LIBRARY_FUNCTION].function;
+        constructor->native_constructor = constructor->custom_new_target = true;
+        ready = mvp_lmd_named_set(state->values[LMD_LIBRARY_FUNCTION], "prototype", prototype,
+            JSPD_NON_WRITABLE | JSPD_NON_ENUMERABLE | JSPD_NON_CONFIGURABLE);
+        if (item_is_error(ready)) return ready;
+        ready = mvp_lmd_named_set(prototype, "constructor", state->values[LMD_LIBRARY_FUNCTION], JSPD_NON_ENUMERABLE);
+        if (item_is_error(ready)) return ready;
         const char* names[] = {"call", "apply", "bind"};
         for (int i = 0; i < 3; i++) {
-            Item stored = mvp_lmd_named_set(Item{.map = map}, names[i], state->values[LMD_LIBRARY_CALL + i]);
+            Item method = state->values[LMD_LIBRARY_CALL + i];
+            Item stored = mvp_lmd_named_set(method, "name",
+                Item{.item = s2it(heap_create_name(names[i], strlen(names[i])))}, JSPD_NON_ENUMERABLE | JSPD_NON_WRITABLE);
+            if (!item_is_error(stored)) stored = mvp_lmd_named_set(prototype, names[i], method, JSPD_NON_ENUMERABLE);
             if (item_is_error(stored)) return stored;
-            ShapeEntry* field = typemap_hash_lookup((TypeMap*)map->type, names[i], strlen(names[i]));
-            TypeMap* shape = type_tree_reflag_field(runtime_shape_tree(), (TypeMap*)map->type, field, JSPD_NON_ENUMERABLE);
-            if (!shape) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
-            map->type = shape;
+        }
+        state->values[LMD_LIBRARY_FUNCTION_STRING] = mvp_lmd_native_function(program, state, mvp_lmd_function_source, 0, "toString");
+        ready = mvp_lmd_named_set(prototype, "toString", state->values[LMD_LIBRARY_FUNCTION_STRING], JSPD_NON_ENUMERABLE);
+        if (item_is_error(ready)) return ready;
+        Item& poison = state->values[LMD_LIBRARY_THROW_TYPE];
+        poison = mvp_lmd_native_function(program, state, function_throw_type, 0, "");
+        if (item_is_error(poison)) return poison;
+        for (const char* name : {"name", "length"}) {
+            ready = mvp_lmd_named_set(poison, name, !strcmp(name, "name") ?
+                Item{.item = s2it(heap_create_name("", 0))} : Item{.item = i2it(0)},
+                JSPD_NON_ENUMERABLE | JSPD_NON_WRITABLE | JSPD_NON_CONFIGURABLE);
+            if (item_is_error(ready)) return ready;
+        }
+        ready = mvp_lmd_object_extensible(poison, true);
+        if (item_is_error(ready)) return ready;
+        for (const char* name : {"caller", "arguments"}) {
+            JsPropertyDescriptor descriptor = {};
+            descriptor.flags = JS_PD_HAS_GET | JS_PD_HAS_SET | JS_PD_HAS_ENUMERABLE | JS_PD_HAS_CONFIGURABLE;
+            js_pd_set_configurable(&descriptor, true);
+            descriptor.getter = descriptor.setter = poison;
+            ready = mvp_lmd_define_own_property(prototype, Item{.item = s2it(heap_create_name(name, strlen(name)))}, &descriptor);
+            if (item_is_error(ready)) return ready;
         }
         Item key = {.item = s2it(well_known_name_ref(JS_SYMBOL_HAS_INSTANCE))};
-        Item callable = mvp_lmd_native_function(program, state, function_has_instance, 1);
+        Item callable = mvp_lmd_native_function(program, state, function_has_instance, 1, "[Symbol.hasInstance]");
         if (item_is_error(callable)) return callable;
         JsPropertyDescriptor descriptor = {};
         descriptor.flags = JS_PD_HAS_VALUE; descriptor.value = callable;
