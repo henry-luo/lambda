@@ -14,6 +14,9 @@ struct RdtVideo {
 
 extern "C" {
 
+void rdt_video_pump_events(void) {}
+bool rdt_video_events_pending(RdtVideo*) { return false; }
+
 // the C++-only test archive and platforms without a media backend share these stubs.
 RdtAudio* rdt_audio_open_bytes(const void*, size_t) { return nullptr; }
 void rdt_audio_destroy(RdtAudio*) {}

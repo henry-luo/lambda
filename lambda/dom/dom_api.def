@@ -749,12 +749,20 @@ DOM_OP(CORE, remove_named_attribute, attr, 4, "pn(n: any, namespace: any, name: 
 DOM_OP(CORE, get_data, attr, 2, "fn(n: any, name: string) -> any", dom_core_get_data, DOM_F_NEUTRAL, "", none, "", "")
 DOM_RAW(window_is_closed, window, bool, (void* ui_context), dom_engine_window_is_closed, DOM_F_NATIVE)
 
+// Retained components observe window events without replacing the page body handler.
+DOM_OP(CORE, watch_window, window, 3, "pn(n: any, event_name: string, enabled: bool) -> bool", dom_engine_watch_window, DOM_F_ENGINE | DOM_F_NEUTRAL | DOM_F_MUTATES, "", none, "", "")
+DOM_RAW(window_watch_native, window, bool, (void* owner, const char* event_name, bool enabled), dom_engine_window_watch, DOM_F_NATIVE)
+DOM_OP(CORE, history_traverse, navigation, 2, "pn(n: any, delta: int) -> bool", dom_engine_history_traverse, DOM_F_ENGINE | DOM_F_NEUTRAL | DOM_F_MUTATES, "", none, "", "")
+DOM_RAW(history_traverse_native, navigation, bool, (void* owner, int delta), dom_engine_history_traverse_native, DOM_F_NATIVE)
+
 // Byte-backed audio appends to the engine seam; resource acquisition stays in lambda-io.
 DOM_OP(CORE, audio_open, media, 2, "pn(n: any, data: binary) -> int|null", dom_engine_audio_open, DOM_F_ENGINE | DOM_F_NEUTRAL | DOM_F_MUTATES, "", none, "", "")
 DOM_OP(CORE, audio_play, media, 3, "pn(n: any, token: int, volume: float) -> bool", dom_engine_audio_play, DOM_F_ENGINE | DOM_F_NEUTRAL | DOM_F_MUTATES, "", none, "", "")
 DOM_OP(CORE, audio_pause, media, 2, "pn(n: any, token: int) -> bool", dom_engine_audio_pause, DOM_F_ENGINE | DOM_F_NEUTRAL | DOM_F_MUTATES, "", none, "", "")
 DOM_OP(CORE, audio_close, media, 2, "pn(n: any, token: int) -> bool", dom_engine_audio_close, DOM_F_ENGINE | DOM_F_NEUTRAL | DOM_F_MUTATES, "", none, "", "")
 DOM_OP(CORE, audio_state, media, 2, "fn(n: any, token: int) -> string|null", dom_engine_audio_state, DOM_F_ENGINE | DOM_F_NEUTRAL, "", none, "", "")
+DOM_OP(CORE, media_info, media, 1, "fn(n: any) -> map|null", dom_engine_media_info, DOM_F_ENGINE | DOM_F_NEUTRAL, "", none, "", "")
+DOM_OP(CORE, media_command, media, 3, "pn(n: any, command: string, value: any) -> bool", dom_engine_media_command, DOM_F_ENGINE | DOM_F_NEUTRAL | DOM_F_MUTATES, "", none, "", "")
 
 DOM_OP(CORE, set_pointer_capture, input, 2, "pn(n: any, pointer_id: int) -> bool", dom_core_set_pointer_capture, DOM_F_NEUTRAL | DOM_F_MUTATES, "", none, "", "")
 DOM_OP(CORE, release_pointer_capture, input, 2, "pn(n: any, pointer_id: int) -> bool", dom_core_release_pointer_capture, DOM_F_NEUTRAL | DOM_F_MUTATES, "", none, "", "")

@@ -199,7 +199,7 @@ void render_inline_view(RasterRenderContext* rdcon, ViewSpan* view_span) {
     render_profiler_increment(rdcon->profiler, RENDER_PROFILE_INLINE);
     FontBox pa_font = rdcon->font;  Color pa_color = rdcon->color;
 
-    bool self_hidden = view_span->in_line && view_span->inl()->visibility == VIS_HIDDEN;
+    bool self_hidden = view_visibility_is_hidden(view_span);
 
     // Render border/outline for inline elements.
     // Background is rendered per-line-fragment in render_text_view so that

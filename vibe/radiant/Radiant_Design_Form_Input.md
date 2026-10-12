@@ -125,8 +125,6 @@ struct FormControlProp {
 
     // Editor extensions
     EditHistory*  history;        // lazy
-    char*         value_at_focus; // for `change` event diff
-    uint32_t      value_at_focus_len;
 
     // Visual viewport (for auto-scroll)
     float         scroll_x;       // px, single-line
@@ -140,6 +138,15 @@ struct FormControlProp {
     uint32_t      preedit_caret;  // codepoint offset within preedit
 };
 ```
+
+The change-on-blur baseline (`value_at_focus` and byte length) belongs to
+`ViewState.data.form`, alongside the retained value and undo history, rather
+than the pooled `FormControlProp` (D4.5.2). Rebuilding a focused control with the
+same identity and authored default retains that baseline; a changed default
+starts a fresh baseline. `dom.value_at_focus` reads it without creating state.
+The pending focus-event sequence also retains its original node leases and
+follows same-identity rebuilds between callbacks, so `change` cannot strand the
+subsequent `blur` on a retired presentation node (D4.5.2/D7.2.5).
 
 **Rationale:** `ViewState.data.form.current_value` is canonical and shared with `js_dom.cpp`; the form prop only caches its pointer. The undo ring snapshots the *whole* value; for typical input sizes (< a few KB) memory is negligible and rollback is O(1) on the buffer side.
 

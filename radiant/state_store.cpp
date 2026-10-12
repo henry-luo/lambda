@@ -2458,12 +2458,12 @@ View* view_state_entry_resolve_view(DocState* state, const ViewStateEntry* entry
         DomNodeRef owner_ref = { static_cast<DomNode*>(entry->owner_address), entry->owner_id };
         DomNode* owner = dom_node_ref_validate(doc, owner_ref);
         if (owner && owner->id == entry->view_id) {
-            // A detached form control remains usable through its JS node and
-            // keeps its ViewState value until the document retires the node.
+            // Registered controls and media keep durable values until node retirement.
             if (entry->kind == VIEW_STATE_FORM_CONTROL && owner->is_element()) {
                 DomElement* element = lam::dom_require_element(owner);
                 if (element && (element->form || is_form_control(element))) return static_cast<View*>(owner);
             }
+            if (entry->kind == VIEW_STATE_MEDIA && owner->is_element()) return static_cast<View*>(owner);
             // layout may wrap the DOM root in a synthetic view; connection is
             // established by reaching doc->root anywhere on the parent path.
             return view_state_view_is_connected(doc, static_cast<View*>(owner))
@@ -2534,6 +2534,9 @@ ViewState* view_state_get(DocState* state, View* view) {
     ViewState* scroll_state = view_state_get_for_kind(state, view, VIEW_STATE_SCROLL);
     if (scroll_state) return view_state_primary_cache(view, scroll_state);
 
+    ViewState* media_state = view_state_get_for_kind(state, view, VIEW_STATE_MEDIA);
+    if (media_state) return view_state_primary_cache(view, media_state);
+
     ViewState* base_state = view_state_get_for_kind(state, view, VIEW_STATE_BASE);
     if (base_state) return view_state_primary_cache(view, base_state);
 
@@ -2544,6 +2547,58 @@ ViewState* view_state_get(DocState* state, View* view) {
     return NULL;
 }
 
+struct RebuildChildEntry {
+    const char* key;
+    bool focus_key;
+    DomNode* node;
+    bool matched;
+};
+struct RebuildChildKeyOps {
+    static uint64_t hash(const RebuildChildEntry& entry, uint64_t first, uint64_t second) {
+        return hashmap_hash_cstr(entry.key, first, second + entry.focus_key);
+    }
+    static bool equals(const RebuildChildEntry& left, const RebuildChildEntry& right) {
+        return left.focus_key == right.focus_key && strcmp(left.key, right.key) == 0;
+    }
+};
+using RebuildChildMap = TypedHashMap<RebuildChildEntry, RebuildChildKeyOps>;
+
+static RebuildChildEntry rebuild_child_key(const DomNode* node) {
+    const DomElement* element = node && node->is_element() ? node->as_element() : nullptr;
+    if (!element) return {};
+    const char* id = element->id;
+    if (id && *id) return {id, false, nullptr};
+    const char* focus_key = const_cast<DomElement*>(element)->get_attribute("data-focus-key");
+    return {focus_key && *focus_key ? focus_key : nullptr, true, nullptr};
+}
+
+// A sibling insertion must not transfer a decoder, capture, or subscription to another keyed owner.
+struct RebuildChildIndex {
+    HashMap* entries = nullptr;
+    explicit RebuildChildIndex(DomNode* parent) {
+        for (DomNode* child = parent && parent->is_element() ? parent->as_element()->first_child : nullptr;
+             child; child = child->next_sibling) {
+            RebuildChildEntry key = rebuild_child_key(child);
+            if (!key.key) continue;
+            if (!entries) entries = RebuildChildMap::create(16);
+            if (!entries) continue;
+            key.node = RebuildChildMap::get(entries, key) ? nullptr : child;
+            RebuildChildMap::set(entries, key);
+        }
+    }
+    ~RebuildChildIndex() { if (entries) hashmap_free(entries); }
+    DomNode* match(DomNode* before, DomNode* positional) const {
+        RebuildChildEntry key = rebuild_child_key(before);
+        if (!key.key) return positional;
+        const RebuildChildEntry* found = entries ? RebuildChildMap::get(entries, key) : nullptr;
+        if (!found || found->matched) return nullptr;
+        key = *found;
+        key.matched = true;
+        RebuildChildMap::set(entries, key);
+        return key.node;
+    }
+};
+
 bool view_state_nodes_correspond(const DomNode* old_node,
                                  const DomNode* new_node) {
     if (!old_node || !new_node || old_node->node_type != new_node->node_type) {
@@ -2552,8 +2607,56 @@ bool view_state_nodes_correspond(const DomNode* old_node,
     if (!old_node->is_element()) return true;
     const DomElement* old_elem = old_node->as_element();
     const DomElement* new_elem = new_node->as_element();
+    RebuildChildEntry before = rebuild_child_key(old_node), after = rebuild_child_key(new_node);
+    if ((before.key || after.key) && (!before.key || !after.key || !RebuildChildKeyOps::equals(before, after))) return false;
     return old_elem && new_elem && old_elem->tag_name && new_elem->tag_name &&
         strcmp(old_elem->tag_name, new_elem->tag_name) == 0;
+}
+
+DomNode* view_state_corresponding_node(DomNode* owner, DomNode* old_root,
+                                      DomNode* new_root) {
+    if (!owner || !old_root || !new_root) return nullptr;
+    const int max_depth = 256;
+    int path[max_depth];
+    int depth = 0;
+    DomNode* node = owner;
+    while (node && node != old_root && depth < max_depth) {
+        int index = 0;
+        for (DomNode* sibling = node->prev_sibling; sibling; sibling = sibling->prev_sibling) index++;
+        path[depth++] = index;
+        node = node->parent;
+    }
+    if (node != old_root) return nullptr;
+    DomNode* old_node = old_root;
+    DomNode* new_node = new_root;
+    while (view_state_nodes_correspond(old_node, new_node) && depth > 0) {
+        int index = path[--depth];
+        RebuildChildIndex children(new_node);
+        old_node = old_node->is_element() ? old_node->as_element()->first_child : nullptr;
+        new_node = new_node->is_element() ? new_node->as_element()->first_child : nullptr;
+        for (int i = 0; i < index; i++) {
+            if (old_node) old_node = old_node->next_sibling;
+            if (new_node) new_node = new_node->next_sibling;
+        }
+        new_node = children.match(old_node, new_node);
+    }
+    return depth == 0 && view_state_nodes_correspond(old_node, new_node) ? new_node : nullptr;
+}
+
+bool view_state_ref_follow_rebuild(DomDocument* doc, DomNodeRef* owner,
+    DomNode* old_root, DomNode* new_root, DomNodePinReason reason) {
+    if (!doc || !owner || old_root == new_root) return false;
+    DomNode* node = dom_node_ref_validate(doc, *owner);
+    DomNode* replacement = view_state_corresponding_node(node, old_root, new_root);
+    if (!replacement || replacement == node) return false;
+    DomNodeRef next = dom_node_ref(replacement);
+    // D4.5.2: acquire the new lease before releasing the old presentation node.
+    if (reason < DOM_NODE_PIN_REASON_COUNT) {
+        if (!dom_node_pin(doc, next, reason)) return false;
+        dom_node_unpin(doc, *owner, reason);
+    }
+    *owner = next;
+    return true;
 }
 
 static bool view_state_is_text_control(View* view) {
@@ -2655,10 +2758,11 @@ static void view_state_preserve_subtree_identity_impl(DocState* state,
 
     DomNode* old_child = old_node->as_element()->first_child;
     DomNode* new_child = new_node->as_element()->first_child;
-    while (old_child && new_child) {
-        view_state_preserve_subtree_identity_impl(state, old_child, new_child);
+    RebuildChildIndex children(new_node);
+    while (old_child) {
+        view_state_preserve_subtree_identity_impl(state, old_child, children.match(old_child, new_child));
         old_child = old_child->next_sibling;
-        new_child = new_child->next_sibling;
+        if (new_child) new_child = new_child->next_sibling;
     }
 }
 
@@ -3090,6 +3194,16 @@ uint32_t view_state_prune_orphans(DocState* state) {
                 found_orphan = true;
                 break;
             }
+            if (entry->kind == VIEW_STATE_MEDIA) {
+                MediaViewState* media = &entry->state->data.media;
+                bool connected = view_state_view_is_connected(doc, key_live);
+                // Stable-state removal pauses playback even when a script wrapper retains the decoder.
+                if (media->connected && !connected && media->player && media->pause) {
+                    media->pause(media->player);
+                    owner_changes++;
+                }
+                media->connected = connected;
+            }
             // Relayout can replace a form's pass-local cache while its durable registry entry survives.
             view_state_primary_cache(key_live, entry->state);
             if (key_live->is_element()) {
@@ -3214,6 +3328,20 @@ static ViewState* view_state_get_or_create(DocState* state, View* view, ViewStat
         .owner_address = static_cast<DomNode*>(view), .owner_id = view_id };
     hashmap_set(state->view_state_map, &entry);
     return view_state_primary_cache(view, created);
+}
+
+MediaViewState* media_view_state_get(DocState* state, View* view, bool create) {
+    ViewState* entry = create ? view_state_get_or_create(state, view, VIEW_STATE_MEDIA)
+                             : view_state_get_for_kind(state, view, VIEW_STATE_MEDIA);
+    return entry ? &entry->data.media : nullptr;
+}
+
+void media_view_state_reset(MediaViewState* media) {
+    if (!media) return;
+    if (media->player && media->destroy) media->destroy(media->player);
+    strbuf_free(media->sources);
+    mem_free(media->source);
+    memset(media, 0, sizeof(*media));
 }
 
 typedef enum {
@@ -3577,6 +3705,9 @@ static void view_state_release_form_payload(ViewState* view_state) {
     view_state->data.form.current_value_len = 0;
     view_state->data.form.current_value_u16_len = 0;
     view_state->data.form.has_current_value = 0;
+    mem_free(view_state->data.form.value_at_focus);
+    view_state->data.form.value_at_focus = NULL;
+    view_state->data.form.value_at_focus_len = 0;
     if (view_state->data.form.history) {
         te_history_free((EditHistory*)view_state->data.form.history);
         view_state->data.form.history = NULL;
@@ -3587,6 +3718,8 @@ static void view_state_release_payload(ViewState* view_state) {
     if (!view_state) return;
     if (view_state->kind == VIEW_STATE_FORM_CONTROL) {
         view_state_release_form_payload(view_state);
+    } else if (view_state->kind == VIEW_STATE_MEDIA) {
+        media_view_state_reset(&view_state->data.media);
     }
 }
 
@@ -4778,6 +4911,23 @@ bool scroll_state_is_dragging_for_view(DocState* state, View* view) {
     ScrollInteractionState interaction;
     scroll_state_get_interaction_for_view(state, view, &interaction);
     return interaction.h_dragging || interaction.v_dragging;
+}
+
+const char* form_control_get_focus_value(DocState* state, View* view) {
+    ViewState* view_state = form_view_state_get(state, view);
+    return view_state ? view_state->data.form.value_at_focus : nullptr;
+}
+
+bool form_control_store_focus_value(DocState* state, View* view,
+                                    const char* value, uint32_t value_len) {
+    ViewState* view_state = form_view_state_get_or_create(state, view, form_prop_for_view(view));
+    if (!view_state) return false;
+    char* copy = mem_dup_n(value ? value : "", value ? value_len : 0, MEM_CAT_DOM);
+    if (!copy) return false;
+    mem_free(view_state->data.form.value_at_focus);
+    view_state->data.form.value_at_focus = copy;
+    view_state->data.form.value_at_focus_len = value ? value_len : 0;
+    return true;
 }
 
 const char* form_control_get_value(DocState* state, View* view, uint32_t* out_len) {

@@ -1,0 +1,26 @@
+{
+  "name":"Timeline search agrees with typed rich content, scalar text and tag boundaries",
+  "html":"test/ui/timeline/search_content.ls",
+  "viewport":{"width":900,"height":1100},
+  "events":[
+    {"type":"click","target":{"selector":"[data-timeline-search]"}},
+    {"type":"type","text":"ecole"},
+    {"type":"assert_text","target":{"selector":".lambda-timeline-search-status"},"equals":"1 matching event"},
+    {"type":"assert_text","target":{"selector":"#typed-content mark"},"equals":"École"},
+    {"type":"assert_attribute","target":{"selector":"#typed-content"},"attribute":"kind","equals":"history"},
+    {"type":"click","target":{"selector":"#numbers"}},
+    {"type":"assert_text","target":{"selector":".lambda-timeline-search-status"},"equals":"1 matching event"},
+    {"type":"assert_count","target":{"selector":"#mixed-content mark"},"count":2},
+    {"type":"assert_text","target":{"selector":"#mixed-content"},"equals":"A42trueZ"},
+    {"type":"assert_text","target":{"selector":"#mixed-content em"},"equals":"Z"},
+    {"type":"click","target":{"selector":"#joined-tags"}},
+    {"type":"assert_text","target":{"selector":".lambda-timeline-search-status"},"equals":"No matching events"},
+    {"type":"click","target":{"selector":"#tag"}},
+    {"type":"assert_text","target":{"selector":".lambda-timeline-search-status"},"equals":"1 matching event"},
+    {"type":"click","target":{"selector":"#callback"}},
+    {"type":"assert_text","target":{"selector":".lambda-timeline-search-status"},"equals":"1 matching event"},
+    {"type":"click","target":{"selector":"#clear"}},
+    {"type":"assert_count","target":{"selector":".lambda-timeline-match"},"count":0},
+    {"type":"assert_text","target":{"selector":"#typed-content"},"equals":"École opens"}
+  ]
+}

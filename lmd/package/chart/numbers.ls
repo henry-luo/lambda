@@ -47,17 +47,23 @@ fn scientific(value, digits) {
         (if (rounded.exponent >= 0) "+" else "-") ++ string(abs(rounded.exponent))
 }
 
-fn grouped(text) {
+pub fn group_digits(text, separator = ",") {
     let parts = split(text, ".");
     let whole = parts[0];
     join([for (i in 0 to (len(whole) - 1))
-        (if (i > 0 and (len(whole) - i) % 3 == 0) "," else "") ++ slice(whole, i, i + 1)], "") ++
+        (if (i > 0 and (len(whole) - i) % 3 == 0) separator else "") ++ slice(whole, i, i + 1)], "") ++
         (if (len(parts) > 1) "." ++ parts[1] else "")
 }
 
 fn trim_fraction(text) {
     if (ends_with(text, "0") and contains(text, ".")) trim_fraction(slice(text, 0, len(text) - 1))
     else if (ends_with(text, ".")) slice(text, 0, len(text) - 1) else text
+}
+
+// Trim only the mantissa; exponent digits and exact decimal values stay intact.
+pub fn concise_number(value) {
+    let parts = split(string(value), "e");
+    trim_fraction(parts[0]) ++ (if (len(parts) > 1) "e" ++ parts[1] else "")
 }
 
 pub fn format_number(value, pattern) {
@@ -80,13 +86,11 @@ pub fn format_number(value, pattern) {
                 else if (kind == "g" and (rounded.exponent < -6 or rounded.exponent >= precision)) scientific(magnitude, precision - 1)
                 else if (significant_kind) decimal_shift(fixed(rounded.mantissa, precision - 1), rounded.exponent - si_exponent)
                 else fixed(magnitude, if (kind == "d") 0 else precision);
-            let concise = if (contains(pattern, "~")) (
-                let parts = split(text, "e"),
-                trim_fraction(parts[0]) ++ (if (len(parts) > 1) "e" ++ parts[1] else "")) else text;
+            let concise = if (contains(pattern, "~")) concise_number(text) else text;
             let sign = if (value < 0) (if (contains(pattern, "(")) "(" else "-")
                 else if (contains(pattern, "+")) "+" else if (starts_with(pattern, " ")) " " else "";
             sign ++ (if (contains(pattern, "$")) "$" else "") ++
-                (if (contains(pattern, ",") and not contains(concise, "e")) grouped(concise) else concise) ++ suffix ++
+                (if (contains(pattern, ",") and not contains(concise, "e")) group_digits(concise) else concise) ++ suffix ++
                 (if (value < 0 and contains(pattern, "(")) ")" else "")
         }
     }

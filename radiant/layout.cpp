@@ -950,22 +950,16 @@ static float root_child_float_only_extent(ViewBlock* block, bool* has_float, boo
     return extent;
 }
 
-static void reset_background_style_cache(ViewSpan* view) {
+static void reset_background_style_cache(LayoutContext* lycon, ViewSpan* view) {
     if (!view) return;
     if (!view->bound) return;
 
     if (view->boundary()->background) {
         BackgroundProp* bg = view->boundary()->background;
         bg->color = {};
-        radiant_clear_background_image(bg);
-        bg->gradient_type = GRADIENT_NONE;
-        bg->linear_gradient = NULL;
-        bg->radial_gradient = NULL;
-        bg->conic_gradient = NULL;
-        bg->linear_layers = NULL;
-        bg->linear_layer_count = 0;
-        bg->radial_layers = NULL;
-        bg->radial_layer_count = 0;
+        // retained recascade retires the old ordered payload before rebuilding style.
+        view_release_background_images(layout_context_view_tree(lycon), bg);
+        static_cast<BackgroundGeometry&>(*bg) = {};
     }
 }
 
@@ -980,7 +974,7 @@ void layout_reset_color_background_style_cache(LayoutContext* lycon, ViewSpan* v
         }
     }
 
-    reset_background_style_cache(view);
+    reset_background_style_cache(lycon, view);
 }
 
 static void reset_position_style_cache(LayoutContext* lycon, ViewSpan* view) {
@@ -1029,7 +1023,7 @@ static void reset_non_inherited_style_cache(LayoutContext* lycon, ViewSpan* view
         reset_position_style_cache(lycon, view);
     }
 
-    reset_background_style_cache(view);
+    reset_background_style_cache(lycon, view);
 
     if (!view->bound) return;
 

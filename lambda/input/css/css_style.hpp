@@ -189,6 +189,25 @@ CssMathResult css_math_evaluate(const CssValue* value,
     const CssMathEvaluationContext* context, int depth = 0);
 CssMathType css_math_value_type(const CssValue* value, int depth = 0);
 
+struct CssGradientStopParts {
+    const CssValue* color; // null for a transition hint.
+    const CssValue* positions[2];
+    int position_count;
+};
+bool css_gradient_stop_components(const CssValue* value, bool angular, CssGradientStopParts* parts);
+bool css_gradient_stop_list_valid(const CssValue* value);
+
+struct CssPositionAxis {
+    CssEnum origin;
+    const CssValue* offset; // borrowed syntax; the computed consumer owns deferred math.
+};
+// physical positions share keyword ordering/edge offsets; background also permits three values.
+bool css_position_components(const CssValue* value, CssPositionAxis axes[2],
+    bool allow_three_values = true, int single_axis = -1, bool allow_quirky_length = false);
+bool css_value_is_position_offset(const CssValue* value, bool allow_quirky_length = false);
+bool css_background_size_components(const CssValue* value, const CssValue* axes[2], CssEnum* mode);
+bool css_value_is_background_size_component(const CssValue* value);
+
 struct CssImageSetOption {
     const CssValue* image; // borrowed from the computed declaration owner.
     const char* type;
@@ -199,6 +218,7 @@ enum CssImageKind {
     CSS_IMAGE_RADIAL_GRADIENT, CSS_IMAGE_CONIC_GRADIENT, CSS_IMAGE_SET
 };
 CssImageKind css_value_image_kind(const CssValue* value);
+bool css_value_is_repeating_gradient(const CssValue* value);
 bool css_value_is_image_set(const CssValue* value);
 bool css_image_set_option(const CssValue* value, CssImageSetOption* option);
 bool css_image_set_valid(const CssValue* value);
@@ -1074,6 +1094,39 @@ typedef struct CssMotionShorthandParts {
 bool css_parse_motion_shorthand(CssPropertyCode shorthand, const CssValue* group,
     CssMotionShorthandParts* parts);
 bool css_motion_longhand_accepts(CssPropertyCode property, const CssValue* value);
+struct CssBackgroundParts {
+    const CssValue* image;
+    const CssValue* position[4];
+    int position_count;
+    const CssValue* size[2];
+    int size_count;
+    const CssValue* repeat[2];
+    int repeat_count;
+    const CssValue* attachment;
+    const CssValue* origin;
+    const CssValue* clip;
+    const CssValue* color;
+};
+enum RadialShape { RADIAL_SHAPE_ELLIPSE = 0, RADIAL_SHAPE_CIRCLE };
+enum RadialSize {
+    RADIAL_SIZE_FARTHEST_CORNER = 0, RADIAL_SIZE_CLOSEST_SIDE,
+    RADIAL_SIZE_CLOSEST_CORNER, RADIAL_SIZE_FARTHEST_SIDE
+};
+struct CssRadialGradientParts {
+    RadialShape shape;
+    RadialSize size;
+    const CssValue* radii[2]; // borrowed; computed descriptors retain owner-normalized copies.
+    const CssValue* prelude;
+    int radius_count;
+    int at_index;
+    int first_stop;
+};
+bool css_radial_gradient_components(const CssValue* value, CssRadialGradientParts* parts);
+bool css_gradient_position_components(const CssValue* prelude, int at_index, CssPositionAxis axes[2]);
+// grouped tokens remain borrowed; consumers materialize their scratch lists before computation.
+bool css_background_layer_components(const CssValue* value, bool final_layer, CssBackgroundParts* parts);
+bool css_background_repeat_components(const CssValue* value, CssEnum axes[2]);
+
 typedef struct CssBorderImageComponents {
     const CssValue* source;
     const CssValue* slice[5];

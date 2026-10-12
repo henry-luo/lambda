@@ -3,17 +3,6 @@
 #include <string.h>
 
 
-// border geometry is shared by semantic paint and raster callers.
-RdtPath* render_border_create_centered_stroke_path(const BorderProp* border,
-                                                          Rect rect,
-                                                          float width) {
-    float half_w = width / 2.0f;
-    Rect stroke_rect = {rect.x + half_w, rect.y + half_w,
-                        rect.width - width, rect.height - width};
-    Corner stroke_radius = radiant_corner_inset(&border->radius, half_w, half_w);
-    return render_path_create_rounded_rect(stroke_rect, &stroke_radius);
-}
-
 RdtMatrix rdt_matrix_scale(float sx, float sy) {
     RdtMatrix m = { sx, 0, 0,  0, sy, 0,  0, 0, 1 };
     return m;

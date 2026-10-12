@@ -1,0 +1,175 @@
+{
+  "name": "Timeline encoded bookmarks, automatic fragment restoration, and back/forward",
+  "html": "test/ui/timeline/bookmarks.ls",
+  "viewport": {
+    "width": 900,
+    "height": 650
+  },
+  "input_turn_ms": 0,
+  "events": [
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": ".lambda-timeline-bookmark"
+      },
+      "attribute": "href",
+      "equals": "#timeline=bookmarks/intro"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-timeline-command='next']"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": ".lambda-timeline-chart"
+      },
+      "attribute": "data-timeline-active",
+      "equals": "a"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#read"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#fragment"
+      },
+      "equals": "#timeline=bookmarks/a"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-timeline-command='next']"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#read"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#fragment"
+      },
+      "equals": "#timeline=bookmarks/b"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#restore"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": ".lambda-timeline-chart"
+      },
+      "attribute": "data-timeline-active",
+      "equals": "intro"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#read"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#fragment"
+      },
+      "equals": "#timeline=bookmarks/intro"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#external"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": ".lambda-timeline-chart"
+      },
+      "attribute": "data-timeline-active",
+      "equals": "a"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#read"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#fragment"
+      },
+      "equals": "#timeline=bookmarks/a"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#back"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": ".lambda-timeline-chart"
+      },
+      "attribute": "data-timeline-active",
+      "equals": "intro"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#back"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": ".lambda-timeline-chart"
+      },
+      "attribute": "data-timeline-active",
+      "equals": "b"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#forward"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": ".lambda-timeline-chart"
+      },
+      "attribute": "data-timeline-active",
+      "equals": "intro"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#forward"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": ".lambda-timeline-chart"
+      },
+      "attribute": "data-timeline-active",
+      "equals": "a"
+    }
+  ]
+}

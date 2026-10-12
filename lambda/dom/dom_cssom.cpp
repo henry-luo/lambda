@@ -6,6 +6,7 @@
  */
 
 #include "dom_cssom.h"
+#include "dom_style.h"
 #include "dom_core.h"
 #include "realm/dom_realm.h"
 #include "dom.h"
@@ -33,7 +34,6 @@
 #include "../../lib/hashmap_helpers.h"
 #include "../../lib/arraylist.h"
 #include "../../lib/arraylist.hpp"
-#include "../../radiant/view.hpp"
 #include "../input/css/dom_element.hpp"
 #include "../input/css/dom_node.hpp"
 #include "../input/css/dom_lifecycle.hpp"
@@ -1871,7 +1871,8 @@ static bool cssom_computed_custom_name(CssomComputedNames* data, StrView name) {
     for (size_t i = 0; i < data->names->size(); i++)
         if (strview_eq(&(*data->names)[i], &name)) return true;
     // empty computed token lists are valid; only the guaranteed-invalid value is omitted.
-    return !css_compute_element_custom_property(data->scratch, data->element, name.str, name.length) ||
+    return !dom_provider_call(dom_style_engine_ops(), &DomStyleEngineOps::compute_custom_property,
+        data->scratch, data->element, name.str, name.length, false) ||
         data->names->append(name);
 }
 
@@ -1889,7 +1890,7 @@ static void cssom_computed_names(Item receiver, lam::ArrayList<StrView>* names) 
     Pool* scratch = pool_create();
     if (!scratch) return;
     CssomComputedNames data = {element, scratch, names};
-    dom_ensure_computed(element, false);
+    dom_provider_call(dom_style_engine_ops(), &DomStyleEngineOps::ensure_computed, element, false);
     for (DomElement* ancestor = element; ancestor; ancestor = dom_parent_element(ancestor))
         for (CssCustomProp* variable = ancestor->css_variables; variable; variable = variable->next)
             cssom_computed_custom_name(&data, variable->declaration
@@ -1997,7 +1998,7 @@ static void cssom_decl_commit(CssomDeclarationView* view, StrView name) {
     String* text = cssom_decl_text(view->rule, view->serialization_pool());
     if (!text) return;
     CssPropertyCode property = name.str ? css_property_code_from_name(name.str) : CSS_PROPERTY_UNKNOWN;
-    css_transition_capture_before_change(view->element, property);
+    dom_provider_call(dom_style_engine_ops(), &DomStyleEngineOps::capture_transition, view->element, property);
     if (dom_element_commit_inline_declarations(view->element, view->rule, text->chars))
         dom_notify_mutation(dom_style_mutation_kind(property), view->element, view->element->parent);
 }

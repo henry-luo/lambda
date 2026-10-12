@@ -1,11 +1,12 @@
 #include "render.hpp"
 #include "view.hpp"
+#include "render_effect_raster_fallback.hpp"
 #include "../lib/log.h"
-#include "../lib/lambda_alloca.h"
 #include "../lib/memtrack.h"
 #include "../lib/str.h"
 #include "../lambda/input/css/css_value.hpp"
 #include <assert.h>
+#include <limits.h>
 #include <math.h>
 
 /**
@@ -13,27 +14,12 @@
  */
 
 static RdtPath* background_image_clip_path(RasterRenderContext* rdcon, ViewBlock* view);
-static void render_linear_gradient_layer(RasterRenderContext* rdcon, ViewBlock* view,
-                                         BackgroundProp* bg, LinearGradient* gradient,
-                                         Rect position_rect, Rect paint_rect);
-static void render_radial_gradient_layer(RasterRenderContext* rdcon, ViewBlock* view,
-                                         BackgroundProp* bg, RadialGradient* gradient,
-                                         Rect position_rect, Rect paint_rect);
-static void render_background_color(RasterRenderContext* rdcon, ViewBlock* view,
-                                    Color color, Rect rect);
-static void render_background_gradient(RasterRenderContext* rdcon, ViewBlock* view,
-                                       BackgroundProp* bg, Rect rect);
 static void render_background_image(RasterRenderContext* rdcon, ViewBlock* view,
-                                    BackgroundProp* bg, Rect position_rect, Rect paint_rect);
-static void render_linear_gradient(RasterRenderContext* rdcon, ViewBlock* view,
-                                   LinearGradient* gradient, Rect rect);
-static void render_radial_gradient(RasterRenderContext* rdcon, ViewBlock* view,
-                                   RadialGradient* gradient, Rect rect);
-static void render_conic_gradient(RasterRenderContext* rdcon, ViewBlock* view,
-                                  ConicGradient* gradient, Rect rect);
-static void render_repeating_radial_gradient(RasterRenderContext* rdcon, ViewBlock* view,
-                                             RadialGradient* gradient, Rect rect,
-                                             float cx, float cy, float radius);
+                                    BackgroundLayer* bg, Rect position_rect, Rect paint_rect);
+static bool record_background(PaintList* paint, UiContext* ui, ViewBlock* view, Rect rect,
+                              float pixel_ratio, const RdtMatrix* transform, RasterRenderContext* raster);
+static lam::Temp<RdtGradientStop> background_repeat_linear_stops(
+    const RdtGradientStop* stops, int count, float physical_length, int* expanded_count);
 
 static bool background_rounded_radius(ViewBlock* view, Rect rect, Corner* out_radius) {
     BorderProp* border = (view && view->bound) ? view->boundary()->border : nullptr;
@@ -47,23 +33,6 @@ static RdtPath* background_rect_path(Rect rect) {
     RdtPath* path = rdt_path_new();
     rdt_path_add_rect(path, rect.x, rect.y, rect.width, rect.height, 0, 0);
     return path;
-}
-
-static RdtPath* background_rounded_rect_path(ViewBlock* view, Rect rect) {
-    Corner radius;
-    if (background_rounded_radius(view, rect, &radius)) {
-        return render_path_create_rounded_rect(rect, &radius);
-    }
-    return background_rect_path(rect);
-}
-
-static RdtPath* background_border_rect_path(ViewBlock* view, Rect rect) {
-    BorderProp* border = (view && view->bound) ? view->boundary()->border : nullptr;
-    if (border && corner_has_radius(&border->radius)) {
-        constrain_border_radii(border, rect.width, rect.height);
-        return render_path_create_rounded_rect(rect, &border->radius);
-    }
-    return background_rect_path(rect);
 }
 
 static Corner background_corner_inset_box(const Corner* radius, CssEnum box,
@@ -83,7 +52,7 @@ static Corner background_corner_inset_box(const Corner* radius, CssEnum box,
     return radiant_corner_inset_edges(&out, insets[0], insets[1], insets[2], insets[3]);
 }
 
-static void background_layer_rects(UiContext* ui, ViewBlock* view, BackgroundProp* bg,
+static void background_layer_rects(UiContext* ui, ViewBlock* view, BackgroundGeometry* bg,
         Rect rect, float s, Rect* position_rect, Rect* paint_rect) {
     BorderProp* border = view->boundary()->border;
     const Spacing* padding = &view->boundary()->padding;
@@ -119,348 +88,256 @@ static void background_layer_rects(UiContext* ui, ViewBlock* view, BackgroundPro
 }
 
 void render_background(RasterRenderContext* rdcon, ViewBlock* view, Rect rect) {
-    if (!view->bound || !view->boundary()->background) return;
-
-    BackgroundProp* bg = view->boundary()->background;
-
-
-    if (bg->bg_clip == CSS_VALUE_TEXT) {
-        return;
-    }
-
-    float s = rdcon->raster_scale;
-    BorderProp* border  = view->boundary()->border;
-    Spacing*    padding = &view->boundary_mut()->padding;
-
-    Rect pos_rect = {}, paint_rect = {};
-    background_layer_rects(rdcon->ui_context, view, bg, rect, s, &pos_rect, &paint_rect);
-
-    // Narrow the active clip to the paint area (intersect with existing viewport clip).
-    // Skip clip tightening when a CSS transform is active — the transform displaces
-    // rendered content beyond the static layout box, so tightening to the untransformed
-    // paint area would clip the transformed content (e.g. translateX causes half-circles).
-    Bound orig_clip = rdcon->block.clip;
-    if (!rdcon->has_transform) {
-        rdcon->block.clip = view_geometry_intersect_bound_rect(orig_clip, paint_rect);
-    }
-
-    Corner orig_radius = {};
-    bool swapped_radius = false;
-    if (border && corner_has_radius(&border->radius)) {
-        orig_radius = border->radius;
-        CssEnum clip_box = bg->bg_clip ? bg->bg_clip : CSS_VALUE_BORDER_BOX;
-        border->radius = background_corner_inset_box(&orig_radius, clip_box, border, padding, s);
-        constrain_corner_radii(&border->radius, paint_rect.width, paint_rect.height);
-        swapped_radius = true;
-    }
-
-    // The paint box clips background tiles even when their transformed size
-    // exceeds the element; the viewport bound alone cannot enforce that box.
-    bool transformed_clip = rdcon->has_transform || rdcon->css3d_context;
-    if (transformed_clip) {
-        RdtPath* path = background_rounded_rect_path(view, paint_rect);
-        rc_push_clip(rdcon, path, render_state_current_transform(rdcon));
-        rdt_path_free(path);
-    }
-
-    // Render base color first (if any), clipped to paint area
-    if (bg->color.a > 0) {
-        render_background_color(rdcon, view, bg->color, paint_rect);
-    }
-
-    // Check if background-blend-mode requires special compositing
-    bool has_blend = (bg->blend_mode != 0 && bg->blend_mode != CSS_VALUE_NORMAL);
-    bool has_upper_layers = bg->image ||
-        (bg->radial_layers && bg->radial_layer_count > 0) ||
-        (bg->linear_layers && bg->linear_layer_count > 0) ||
-        (bg->gradient_type != GRADIENT_NONE &&
-         (bg->linear_gradient || bg->radial_gradient || bg->conic_gradient));
-
-    // Save backdrop (background-color) before rendering upper layers if blend mode is active.
-    // In display-list mode, use DL_SAVE_BACKDROP/DL_APPLY_BLEND_MODE so the blending
-    // happens during replay when surface pixels are available.
-    ImageSurface* surface = rdcon->ui_context->surface;
-    int blend_x0 = 0, blend_y0 = 0, blend_w = 0, blend_h = 0;
-    if (has_blend && has_upper_layers) {
-        IRect blend_bounds = render_geometry_clip_to_pixel_bounds(rdcon->block.clip, surface);
-        blend_x0 = blend_bounds.x;
-        blend_y0 = blend_bounds.y;
-        blend_w = blend_bounds.w;
-        blend_h = blend_bounds.h;
-        if (!render_geometry_pixel_bounds_empty(blend_bounds)) {
-            rc_save_backdrop(rdcon, blend_x0, blend_y0, blend_w, blend_h);
-        }
-    }
-
-    // Render background image positioned within pos_rect, painted within paint_rect (via clip)
-    if (bg->image) {
-        render_background_image(rdcon, view, bg, pos_rect, paint_rect);
-    }
-
-    // Render all linear gradient layers (stacked bottom-to-top)
-    if (bg->linear_layers && bg->linear_layer_count > 0) {
-        for (int i = 0; i < bg->linear_layer_count; i++) {
-            if (bg->linear_layers[i]) {
-                render_linear_gradient_layer(rdcon, view, bg, bg->linear_layers[i], pos_rect, paint_rect);
-            }
-        }
-    }
-
-    // Render all radial gradient layers (stacked bottom-to-top)
-    if (bg->radial_layers && bg->radial_layer_count > 0) {
-        for (int i = 0; i < bg->radial_layer_count; i++) {
-            if (bg->radial_layers[i]) {
-                render_radial_gradient_layer(rdcon, view, bg, bg->radial_layers[i], pos_rect, paint_rect);
-            }
-        }
-    }
-
-    // Render main gradient (if any), clipped to paint area
-    if (bg->gradient_type != GRADIENT_NONE &&
-        (bg->linear_gradient || bg->radial_gradient || bg->conic_gradient)) {
-        if (bg->gradient_type == GRADIENT_LINEAR && bg->linear_gradient) {
-            render_linear_gradient_layer(rdcon, view, bg, bg->linear_gradient, pos_rect, paint_rect);
-        } else if (bg->gradient_type == GRADIENT_RADIAL && bg->radial_gradient) {
-            render_radial_gradient_layer(rdcon, view, bg, bg->radial_gradient, pos_rect, paint_rect);
-        } else {
-            render_background_gradient(rdcon, view, bg, paint_rect);
-        }
-    }
-
-    // Apply background-blend-mode: composite upper layers onto saved backdrop
-    if (has_blend && has_upper_layers && blend_w > 0 && blend_h > 0) {
-        rc_apply_blend_mode(rdcon, blend_x0, blend_y0, blend_w, blend_h,
-                            bg->blend_mode);
-    }
-
-    // Restore original clip
-    if (transformed_clip) rc_pop_clip(rdcon);
-    if (swapped_radius) {
-        border->radius = orig_radius;
-    }
-    rdcon->block.clip = orig_clip;
-}
-
-/**
- * Render solid color background
- * Handles border-radius by using ThorVG if needed
- */
-static void render_background_color(RasterRenderContext* rdcon, ViewBlock* view, Color color, Rect rect) {
-    bool has_radius = false;
-    BorderProp* border = nullptr;
-    if (view->bound && view->boundary_mut()->border) {
-        border = view->boundary()->border;
-        has_radius = corner_has_radius(&border->radius);
-    }
-
-    bool needs_rounded_clip = rdcon->block.has_clip_radius;
-
-    if (has_radius || needs_rounded_clip || rdcon->has_transform || rdcon->clip_shape_depth > 0) {
-        const RdtMatrix* xform = render_state_current_transform(rdcon);
-
-        RdtPath* p = nullptr;
-        if (has_radius && border) {
-            constrain_border_radii(border, rect.width, rect.height);
-            p = render_path_create_rounded_rect(rect, &border->radius);
-        } else {
-            p = rdt_path_new();
-            rdt_path_add_rect(p, rect.x, rect.y, rect.width, rect.height, 0, 0);
-        }
-
-        RdtPath* clip = render_path_create_clip_path(rdcon);
-        rc_push_clip(rdcon, clip, NULL);
-        rc_fill_path(rdcon, p, color, RDT_FILL_WINDING, xform);
-        rc_pop_clip(rdcon);
-        rdt_path_free(clip);
-        rdt_path_free(p);
-    } else {
-        render_painter_fill_surface_rect(rdcon, rdcon->ui_context->surface, &rect, color.c, &rdcon->block.clip,
-            rdcon->clip_shapes, rdcon->clip_shape_depth);
-    }
-}
-
-/**
- * Render linear gradient
- */
-static RdtPath* background_gradient_clip_path(ViewBlock* view, Rect clip_rect) {
-    return background_rounded_rect_path(view, clip_rect);
-}
-
-static void render_linear_gradient_tile(RasterRenderContext* rdcon, ViewBlock* view,
-                                        LinearGradient* gradient, Rect tile_rect,
-                                        Rect clip_rect) {
-    if (!gradient || gradient->stop_count < 2) {
-        return;
-    }
-
-
-    const RdtMatrix* xform = render_state_current_transform(rdcon);
-
-    bool same_rect = fabsf(tile_rect.x - clip_rect.x) < 0.001f &&
-                     fabsf(tile_rect.y - clip_rect.y) < 0.001f &&
-                     fabsf(tile_rect.width - clip_rect.width) < 0.001f &&
-                     fabsf(tile_rect.height - clip_rect.height) < 0.001f;
-    RdtPath* p = same_rect ? background_rounded_rect_path(view, tile_rect)
-                           : background_rect_path(tile_rect);
-
-    // Calculate gradient line
-    RadiantGradientLine line = radiant_linear_gradient_line(
-        tile_rect, radiant_linear_gradient_used_angle(gradient, tile_rect));
-    float x1 = line.x1, y1 = line.y1, x2 = line.x2, y2 = line.y2;
-
-    // Build gradient stops
-    int stop_count = gradient->stop_count;
-    // gradient stop counts come from parsed CSS; use render scratch to avoid attacker-sized stack frames.
-    ScratchScope scope(&rdcon->scratch);
-    RdtGradientStop* stops = scope.array_zero<RdtGradientStop>((size_t)stop_count);
-    if (!stops) {
-        log_error("[GRADIENT] failed to allocate %d linear gradient stops", stop_count);
-        rdt_path_free(p);
-        return;
-    }
-    render_copy_gradient_stops(gradient->stops, gradient->stop_count,
-        hypotf(x2 - x1, y2 - y1), stops, stop_count, nullptr);
-
-    // Handle repeating-linear-gradient: convert px positions and replicate stops
-    RdtGradientStop* final_stops = stops;
-    int final_stop_count = stop_count;
-    if (gradient->is_repeating && stop_count >= 2) {
-        float first_pos = stops[0].offset;
-        float last_pos = stops[stop_count - 1].offset;
-        float unit = last_pos - first_pos;
-        if (unit > 0.001f && unit < 0.999f) {
-            // replicate stops to fill 0.0 - 1.0 range
-            int start_rep = (int)floorf((0.0f - first_pos) / unit);
-            int end_rep = (int)ceilf((1.0f - first_pos) / unit);
-            int num_reps = end_rep - start_rep;
-            int max_stops = num_reps * stop_count;
-            RdtGradientStop* rep_stops = LAMBDA_ALLOCA(max_stops, RdtGradientStop);
-            int idx = 0;
-            for (int r = start_rep; r < end_rep; r++) {
-                for (int i = 0; i < stop_count; i++) {
-                    float offset = stops[i].offset + r * unit;
-                    if (offset < -0.001f || offset > 1.001f) continue;
-                    rep_stops[idx] = stops[i];
-                    rep_stops[idx].offset = fmaxf(0.0f, fminf(1.0f, offset));
-                    idx++;
-                }
-            }
-            if (idx >= 2) {
-                final_stops = rep_stops;
-                final_stop_count = idx;
-            }
-        }
-    }
-
-    RdtPath* clip = same_rect ? render_path_create_clip_path(rdcon)
-                              : background_gradient_clip_path(view, clip_rect);
-    rc_push_clip(rdcon, clip, NULL);
-    rc_fill_linear_gradient(rdcon, p, x1, y1, x2, y2, final_stops, final_stop_count,
-                             RDT_FILL_WINDING, xform);
-    rc_pop_clip(rdcon);
-    rdt_path_free(clip);
-    rdt_path_free(p);
-}
-
-static void render_linear_gradient(RasterRenderContext* rdcon, ViewBlock* view, LinearGradient* gradient, Rect rect) {
-    render_linear_gradient_tile(rdcon, view, gradient, rect, rect);
-}
-
-/**
- * Render radial gradient
- */
-static void render_radial_gradient(RasterRenderContext* rdcon, ViewBlock* view, RadialGradient* gradient, Rect rect) {
-    if (!gradient || gradient->stop_count < 2) {
-        return;
-    }
-
-    float local_cx = gradient->cx_is_px ? gradient->cx : rect.width * gradient->cx;
-    float local_cy = gradient->cy_is_px ? gradient->cy : rect.height * gradient->cy;
-    float cx = rect.x + local_cx;
-    float cy = rect.y + local_cy;
-    float radius = radiant_radial_gradient_geometry(gradient, rect).rx;
-
-    if (gradient->shape == RADIAL_SHAPE_ELLIPSE) {
-        radius = fmaxf(rect.width, rect.height) * 0.5f;
-    }
-
-    if (gradient->is_repeating) {
-        render_repeating_radial_gradient(rdcon, view, gradient, rect,
-                                         local_cx, local_cy, radius);
-        return;
-    }
-
-    const RdtMatrix* xform = render_state_current_transform(rdcon);
-    RdtPath* p = background_border_rect_path(view, rect);
-
-    // gradient stop counts come from parsed CSS; use render scratch to avoid attacker-sized stack frames.
-    ScratchScope scope(&rdcon->scratch);
-    RdtGradientStop* stops = scope.array_zero<RdtGradientStop>((size_t)gradient->stop_count);
-    if (!stops) {
-        log_error("[GRADIENT] failed to allocate %d radial gradient stops", gradient->stop_count);
-        rdt_path_free(p);
-        return;
-    }
-    render_copy_gradient_stops(gradient->stops, gradient->stop_count,
-        radius, stops, gradient->stop_count, nullptr);
-
+    if (!rdcon || !rdcon->paint_list || !rdcon->dl || !view || !view->bound ||
+            !view->boundary()->background) return;
+    float scale = rdcon->raster_scale;
+    if (scale <= 0.0f) return;
+    Rect logical = {rect.x / scale, rect.y / scale, rect.width / scale, rect.height / scale};
+    RdtMatrix density = rdt_matrix_scale(scale, scale);
+    const RdtMatrix* active = render_state_current_transform(rdcon);
+    RdtMatrix transform = active ? rdt_matrix_multiply(active, &density) : density;
     RdtPath* clip = render_path_create_clip_path(rdcon);
-    rc_push_clip(rdcon, clip, NULL);
-    rc_fill_radial_gradient(rdcon, p, cx, cy, radius, stops, gradient->stop_count,
-                             RDT_FILL_WINDING, xform);
+    rc_push_clip(rdcon, clip, nullptr);
+    // background descriptors stay logical; only this raster adapter adds output density.
+    record_background(rdcon->paint_list, rdcon->ui_context, view, logical, scale, &transform, rdcon);
+    paint_ir_lower_raster_fragment(rdcon->paint_list, rdcon->dl);
+    paint_list_clear(rdcon->paint_list);
     rc_pop_clip(rdcon);
     rdt_path_free(clip);
-    rdt_path_free(p);
 }
 
-void render_list_marker_linear_gradient(RasterRenderContext* rdcon,
-                                        LinearGradient* gradient, Rect rect) {
-    render_linear_gradient_tile(rdcon, nullptr, gradient, rect, rect);
+static Color gradient_image_average_color(const RdtGradientStop* stops, int count) {
+    double extent = (double)stops[count - 1].offset - stops[0].offset;
+    double red = 0.0, green = 0.0, blue = 0.0, alpha = 0.0;
+    for (int index = 1; index < count; index++) {
+        const RdtGradientStop& before = stops[index - 1];
+        const RdtGradientStop& after = stops[index];
+        // CSS Images 3 §3.3 spaces zero-period stops equally before premultiplied averaging.
+        double weight = extent > 0.0 ? ((double)after.offset - before.offset) / (2.0 * extent)
+            : 0.5 / (count - 1);
+        alpha += weight * (before.a + after.a);
+        red += weight * ((double)before.r * before.a + (double)after.r * after.a);
+        green += weight * ((double)before.g * before.a + (double)after.g * after.a);
+        blue += weight * ((double)before.b * before.a + (double)after.b * after.a);
+    }
+    return Color{render_pixel_pack_abgr(
+        clamp_byte_round(alpha > 0.0 ? (float)(red / alpha) : 0.0f),
+        clamp_byte_round(alpha > 0.0 ? (float)(green / alpha) : 0.0f),
+        clamp_byte_round(alpha > 0.0 ? (float)(blue / alpha) : 0.0f),
+        clamp_byte_round((float)alpha))};
 }
 
-void render_list_marker_radial_gradient(RasterRenderContext* rdcon,
-                                        RadialGradient* gradient, Rect rect) {
-    render_radial_gradient(rdcon, nullptr, gradient, rect);
-}
-
-void render_list_marker_conic_gradient(RasterRenderContext* rdcon,
-                                       ConicGradient* gradient, Rect rect) {
-    render_conic_gradient(rdcon, nullptr, gradient, rect);
-}
-
-/**
- * Interpolate between two colors
- */
-static Color lerp_color(Color c1, Color c2, float t) {
-    Color result;
-    result.r = (uint8_t)(c1.r + (c2.r - c1.r) * t);
-    result.g = (uint8_t)(c1.g + (c2.g - c1.g) * t);
-    result.b = (uint8_t)(c1.b + (c2.b - c1.b) * t);
-    result.a = (uint8_t)(c1.a + (c2.a - c1.a) * t);
-    return result;
-}
-
-/**
- * Get color at position in gradient stops
- */
-static Color get_gradient_color_at(GradientStop* stops, int stop_count, float position) {
-    Color transparent;
-    transparent.r = 0; transparent.g = 0; transparent.b = 0; transparent.a = 255;
-    if (stop_count == 0) return transparent;
-    if (stop_count == 1) return stops[0].color;
-    if (position <= stops[0].position) return stops[0].color;
-    if (position >= stops[stop_count - 1].position) return stops[stop_count - 1].color;
-
-    // Find the two stops we're between
-    for (int i = 0; i < stop_count - 1; i++) {
-        if (position >= stops[i].position && position <= stops[i + 1].position) {
-            float range = stops[i + 1].position - stops[i].position;
-            float t = (range > 0) ? (position - stops[i].position) / range : 0;
-            return lerp_color(stops[i].color, stops[i + 1].color, t);
+static lam::Temp<RdtGradientStop> background_repeat_linear_stops(
+        const RdtGradientStop* stops, int count, float physical_length, int* expanded_count) {
+    if (!stops || count < 2 || !expanded_count) return {};
+    float first = stops[0].offset, period = stops[count - 1].offset - first;
+    if (!isfinite(first) || !isfinite(period)) return {};
+    // a period shorter than one output pixel cannot be resolved by that device.
+    if (period <= 0.0f || (isfinite(physical_length) && period * physical_length < 1.0f)) {
+        lam::Temp<RdtGradientStop> solid = lam::temp_array<RdtGradientStop>(2, MEM_CAT_RENDER);
+        if (!solid) return {};
+        Color average = gradient_image_average_color(stops, count);
+        solid[0] = solid[1] = {0.0f, average.r, average.g, average.b, average.a};
+        solid[0].offset = 0.0f; solid[1].offset = 1.0f;
+        *expanded_count = 2;
+        return solid;
+    }
+    double begin = floor(-(double)first / period);
+    double end = ceil((1.0 - (double)first) / period);
+    double capacity = (end - begin + 1.0) * count + 2.0;
+    if (!isfinite(capacity) || capacity < 2.0 || capacity > INT_MAX) return {};
+    size_t bytes = 0;
+    if (!math_checked_mul((size_t)capacity, sizeof(RdtGradientStop), &bytes) ||
+        !render_memory_allow_allocation(nullptr, bytes)) return {};
+    lam::Temp<RdtGradientStop> expanded = lam::temp_array<RdtGradientStop>((size_t)capacity, MEM_CAT_RENDER);
+    if (!expanded) return {};
+    auto endpoint = [&](float position) {
+        Color color = render_sample_gradient_stops(stops, count,
+            first + math_wrap_positive_f(position - first, period), 1.0f);
+        return RdtGradientStop{position, color.r, color.g, color.b, color.a};
+    };
+    int used = 0;
+    expanded[used++] = endpoint(0.0f);
+    // ordinals are counts; double arithmetic avoids cancellation for a distant first stop.
+    for (double repeat = begin; repeat <= end; repeat += 1.0) {
+        for (int index = 0; index < count; index++) {
+            float offset = (float)((double)stops[index].offset + repeat * period);
+            if (offset < 0.0f || offset > 1.0f) continue;
+            expanded[used] = stops[index]; expanded[used++].offset = offset;
         }
     }
+    expanded[used++] = endpoint(1.0f);
+    *expanded_count = used;
+    return expanded;
+}
 
-    return stops[stop_count - 1].color;
+static void gradient_image_sample_pixels(uint32_t* pixels, int width, int height, int stride,
+        float density, float cx, float cy, float rx, float ry, float from,
+        bool conic, bool repeating, const RdtGradientStop* stops, int count) {
+    // radial repeats wrap in used length space, avoiding cancellation around coincident px stops.
+    float stop_scale = conic ? 1.0f : rx;
+    float first = stops[0].offset * stop_scale, period = stops[count - 1].offset * stop_scale - first;
+    Color average = repeating && period <= 0.0f ? gradient_image_average_color(stops, count) : Color{};
+    for (int row = 0; row < height; row++) {
+        for (int column = 0; column < width; column++) {
+            float dx = (float)column / density - cx;
+            float dy = (float)row / density - cy;
+            float position = conic
+                ? math_wrap_positive_f(atan2f(dy, dx) - from, math_tau_f()) / math_tau_f()
+                : rx > 0.0f && ry > 0.0f ? hypotf(dx, dy * (rx / ry)) : rx;
+            if (repeating && period > 0.0f)
+                position = first + math_wrap_positive_f(position - first, period);
+            Color color = repeating && period <= 0.0f
+                ? average
+                : render_sample_gradient_stops(stops, count, position, stop_scale);
+            pixels[(size_t)row * (size_t)stride + (size_t)column] = render_pixel_premultiply_abgr(color.c);
+        }
+    }
+}
+
+static bool gradient_image_record_pixels(PaintList* paint, const ListStyleImage* image,
+        Rect rect, float density, const RdtGradientStop* stops, int count,
+        const RdtMatrix* transform) {
+    float pixel_width = ceilf(rect.width * density);
+    float pixel_height = ceilf(rect.height * density);
+    size_t bytes;
+    if (!render_surface_allocation_size(pixel_width, pixel_height, &bytes)) return false;
+    // INT_CAST_OK: the checked sample extents index a raster image buffer.
+    int width = (int)pixel_width, height = (int)pixel_height;
+    ImageSurface* surface = image_surface_create(width, height);
+    if (!surface) return false;
+    const ConicGradient* conic = image->conic_gradient;
+    const RadialGradient* radial = image->radial_gradient;
+    RadiantRadialGeometry geometry = radial ? radiant_radial_gradient_geometry(radial, rect)
+        : RadiantRadialGeometry{};
+    RadiantGradientCenter center = conic ? radiant_gradient_center(conic, rect)
+        : RadiantGradientCenter{geometry.cx, geometry.cy};
+    float cx = center.x - rect.x, cy = center.y - rect.y;
+    float from = conic ? math_degrees_to_radians(conic->from_angle - 90.0f) : 0.0f;
+    bool repeating = conic ? conic->is_repeating : radial->is_repeating;
+    gradient_image_sample_pixels((uint32_t*)surface->pixels, width, height, surface->pitch / 4,
+        density, cx, cy, geometry.rx, geometry.ry, from, conic != nullptr, repeating, stops, count);
+    int index = paint_list_count(paint);
+    // semantic commands own generated pixels until every deferred lowerer has consumed them.
+    paint_draw_image_resource(paint, surface, rect.x, rect.y, rect.width, rect.height,
+        255, transform, image_surface_destroy);
+    return paint_list_count(paint) == index + 1;
+}
+
+static bool gradient_stops_uniform_color(const GradientStop* stops, int count, Color* color) {
+    if (!stops || count < 2) return false;
+    for (int index = 1; index < count; index++)
+        if (stops[index].color.c != stops[0].color.c) return false;
+    if (color) *color = stops[0].color;
+    return true;
+}
+
+template<typename G> static bool gradient_image_needs_sampling(const G* gradient) {
+    return gradient && !gradient_stops_uniform_color(gradient->stops, gradient->stop_count, nullptr);
+}
+
+struct GradientImageParts {
+    const LinearGradient* linear;
+    const RadialGradient* radial;
+    const ConicGradient* conic;
+    const GradientStop* stops;
+    int count;
+};
+
+static GradientImageParts gradient_image_parts(const ListStyleImage* image) {
+    GradientImageParts parts = {};
+    parts.linear = image->gradient_type == GRADIENT_LINEAR ? image->linear_gradient : nullptr;
+    parts.radial = image->gradient_type == GRADIENT_RADIAL ? image->radial_gradient : nullptr;
+    parts.conic = image->gradient_type == GRADIENT_CONIC ? image->conic_gradient : nullptr;
+    parts.stops = parts.linear ? parts.linear->stops : parts.radial ? parts.radial->stops : parts.conic ? parts.conic->stops : nullptr;
+    parts.count = parts.linear ? parts.linear->stop_count : parts.radial ? parts.radial->stop_count : parts.conic ? parts.conic->stop_count : 0;
+    return parts;
+}
+
+static bool gradient_interval_is_uniform(const RdtGradientStop* stops, int count,
+        float first, float last, Color* color) {
+    for (int index = 0; index < count; index++) if (!isfinite(stops[index].offset)) return false;
+    for (int index = 1; index < count; index++) {
+        const RdtGradientStop& before = stops[index - 1];
+        const RdtGradientStop& after = stops[index];
+        bool intersects = after.offset > before.offset && after.offset > first && before.offset < last;
+        if (intersects && render_gradient_stop_color(before).c != render_gradient_stop_color(after).c) return false;
+    }
+    *color = render_sample_gradient_stops(stops, count, first, 1.0f);
+    for (int index = 0; index < count; index++)
+        if (stops[index].offset > first && stops[index].offset < last &&
+            render_gradient_stop_color(stops[index]).c != color->c) return false;
+    return true;
+}
+
+bool render_paint_gradient_image(PaintList* paint, const ListStyleImage* image, Rect rect,
+                                float pixel_ratio, const RdtMatrix* transform) {
+    if (!paint || !image || !isfinite(rect.x) || !isfinite(rect.y) ||
+        !isfinite(rect.width) || !isfinite(rect.height) || rect.width <= 0.0f || rect.height <= 0.0f ||
+        !isfinite(pixel_ratio) || pixel_ratio <= 0.0f) return false;
+    GradientImageParts parts = gradient_image_parts(image);
+    const LinearGradient* linear = parts.linear;
+    const RadialGradient* radial = parts.radial;
+    const ConicGradient* conic = parts.conic;
+    const GradientStop* source = parts.stops;
+    int count = parts.count;
+    if (!source || count < 2) return false;
+    RadiantGradientLine line = linear ? radiant_linear_gradient_line(rect,
+        radiant_linear_gradient_used_angle(linear, rect)) : RadiantGradientLine{};
+    RadiantRadialGeometry geometry = radial ? radiant_radial_gradient_geometry(radial, rect)
+        : RadiantRadialGeometry{};
+    float length = linear ? hypotf(line.x2 - line.x1, line.y2 - line.y1) : radial ? geometry.rx : 1.0f;
+    lam::Temp<RdtGradientStop> stops = lam::temp_array<RdtGradientStop>((size_t)count, MEM_CAT_RENDER);
+    if (!stops || !render_copy_gradient_stops(source, count, length, stops.get(), count, nullptr)) return false;
+    if (conic || (radial && radial->is_repeating))
+        return gradient_image_record_pixels(paint, image, rect, pixel_ratio, stops.get(), count, transform);
+    Color uniform_color = {};
+    bool uniform_image = false;
+    if ((linear && !linear->is_repeating) || (radial && geometry.rx > 0.0f && geometry.ry > 0.0f)) {
+        float last = radial ? hypotf(
+            fmaxf(fabsf(rect.x - geometry.cx), fabsf(rect.x + rect.width - geometry.cx)) / geometry.rx,
+            fmaxf(fabsf(rect.y - geometry.cy), fabsf(rect.y + rect.height - geometry.cy)) / geometry.ry) : 1.0f;
+        // stops outside the painted interval can make a multicolor source a solid image.
+        uniform_image = gradient_interval_is_uniform(stops.get(), count, 0.0f, last, &uniform_color);
+    }
+    RdtPath* path = background_rect_path(rect);
+    if (!path) return false;
+    int index = paint_list_count(paint);
+    PaintOp op = linear ? PAINT_FILL_LINEAR_GRADIENT : PAINT_FILL_RADIAL_GRADIENT;
+    if (uniform_image || (radial && (geometry.rx <= 0.0f || geometry.ry <= 0.0f))) {
+        // constant intervals and degenerate radial images need no gradient sampling.
+        op = PAINT_FILL_PATH;
+        paint_fill_path(paint, path, uniform_image ? uniform_color : render_gradient_stop_color(stops[count - 1]),
+            RDT_FILL_WINDING, transform);
+    } else if (linear) {
+        if (linear->is_repeating) {
+            float physical_x1 = line.x1 * pixel_ratio, physical_y1 = line.y1 * pixel_ratio;
+            float physical_x2 = line.x2 * pixel_ratio, physical_y2 = line.y2 * pixel_ratio;
+            if (transform) {
+                rdt_matrix_transform_point(transform, line.x1, line.y1, &physical_x1, &physical_y1);
+                rdt_matrix_transform_point(transform, line.x2, line.y2, &physical_x2, &physical_y2);
+            }
+            lam::Temp<RdtGradientStop> repeated = background_repeat_linear_stops(stops.get(), count,
+                hypotf(physical_x2 - physical_x1, physical_y2 - physical_y1), &count);
+            if (!repeated) { rdt_path_free(path); return false; }
+            stops.reset(repeated.release());
+        }
+        if (!render_normalize_linear_gradient_range(&line, stops.get(), count)) { rdt_path_free(path); return false; }
+        paint_fill_linear_gradient(paint, path, line.x1, line.y1, line.x2, line.y2,
+            stops.get(), count, RDT_FILL_WINDING, transform, nullptr);
+    } else {
+        if (!render_normalize_radial_gradient_range(&geometry, stops.get(), &count)) { rdt_path_free(path); return false; }
+        float ratio = geometry.rx > 0.0f ? geometry.ry / geometry.rx : 1.0f;
+        RdtMatrix ellipse = {1, 0, 0, 0, ratio, geometry.cy * (1.0f - ratio), 0, 0, 1};
+        paint_fill_radial_gradient(paint, path, geometry.cx, geometry.cy, geometry.rx,
+            stops.get(), count, RDT_FILL_WINDING, transform, &ellipse);
+    }
+    if (paint_list_take_path_payload(paint, index, op, op == PAINT_FILL_PATH ? nullptr : stops.get())) {
+        if (op != PAINT_FILL_PATH) stops.release();
+        return true;
+    }
+    rdt_path_free(path);
+    return false;
 }
 
 static uint32_t* background_gradient_pixel_buffer(RasterRenderContext* rdcon, Rect rect,
@@ -480,118 +357,6 @@ static uint32_t* background_gradient_pixel_buffer(RasterRenderContext* rdcon, Re
     *width = w;
     *height = h;
     return pixels;
-}
-
-static void background_paint_gradient_pixels(RasterRenderContext* rdcon, ViewBlock* view,
-                                              Rect rect, uint32_t* pixels,
-                                              int width, int height) {
-    bool pushed_clip = false;
-    RdtPath* clip_path = nullptr;
-    Corner radius;
-    if (background_rounded_radius(view, rect, &radius)) {
-        clip_path = render_path_create_rounded_rect(rect, &radius);
-        rc_push_clip(rdcon, clip_path, NULL);
-        pushed_clip = true;
-    }
-    // rc_draw_image records uint32_t row stride; the generated buffer is tightly packed.
-    rc_draw_image(rdcon, pixels, width, height, width,
-                  rect.x, rect.y, rect.width, rect.height, 255, NULL);
-    if (pushed_clip) {
-        rc_pop_clip(rdcon);
-        rdt_path_free(clip_path);
-    }
-}
-
-static void render_repeating_radial_gradient(RasterRenderContext* rdcon, ViewBlock* view,
-                                             RadialGradient* gradient, Rect rect,
-                                             float cx, float cy, float radius) {
-    int width = 0, height = 0;
-    uint32_t* pixels = background_gradient_pixel_buffer(rdcon, rect, &width, &height);
-    if (!pixels) return;
-    float first = gradient->stops[0].position;
-    float period = gradient->stops[gradient->stop_count - 1].position - first;
-    for (int py = 0; py < height; py++) {
-        for (int px = 0; px < width; px++) {
-            float distance = hypotf((float)px - cx, (float)py - cy);
-            float position = radius > 0.0f ? distance / radius : 1.0f;
-            if (period > 0.0f) {
-                position = first + math_wrap_positive_f(position - first, period);
-            }
-            Color color = period <= 0.0f
-                ? gradient->stops[gradient->stop_count - 1].color
-                : get_gradient_color_at(gradient->stops, gradient->stop_count, position);
-            pixels[py * width + px] = render_pixel_pack_abgr(
-                color.r, color.g, color.b, color.a);
-        }
-    }
-    background_paint_gradient_pixels(rdcon, view, rect, pixels, width, height);
-}
-
-/**
- * Render conic gradient using software rendering
- * ThorVG doesn't support conic gradients directly, so we render pixel-by-pixel
- */
-static void render_conic_gradient(RasterRenderContext* rdcon, ViewBlock* view, ConicGradient* gradient, Rect rect) {
-    if (!rdcon || !rdcon->dl || !gradient || gradient->stop_count < 2) {
-        return;
-    }
-
-    int w = 0, h = 0;
-    uint32_t* pixels = background_gradient_pixel_buffer(rdcon, rect, &w, &h);
-    if (!pixels) return;
-
-    float cx = gradient->cx_is_px ? gradient->cx : w * gradient->cx;
-    float cy = gradient->cy_is_px ? gradient->cy : h * gradient->cy;
-    float from_rad = math_degrees_to_radians(gradient->from_angle - 90.0f);
-    float first_stop = gradient->stops[0].position;
-    float repeat_period = gradient->stops[gradient->stop_count - 1].position - first_stop;
-
-    for (int py = 0; py < h; py++) {
-        for (int px = 0; px < w; px++) {
-            float dx = px - cx;
-            float dy = py - cy;
-            float angle = atan2f(dy, dx) - from_rad;
-            float position = math_wrap_positive_f(angle, math_tau_f()) / math_tau_f();
-            if (gradient->is_repeating && repeat_period > 0.0f) {
-                position = first_stop + math_wrap_positive_f(
-                    position - first_stop, repeat_period);
-            }
-
-            // A zero-length repeat has only the final stop's color.
-            Color color = gradient->is_repeating && repeat_period <= 0.0f
-                ? gradient->stops[gradient->stop_count - 1].color
-                : get_gradient_color_at(gradient->stops, gradient->stop_count, position);
-            pixels[py * w + px] = render_pixel_pack_abgr(
-                color.r, color.g, color.b, color.a);
-        }
-    }
-
-    background_paint_gradient_pixels(rdcon, view, rect, pixels, w, h);
-}
-
-/**
- * Render background gradient (dispatch to type-specific function)
- */
-static void render_background_gradient(RasterRenderContext* rdcon, ViewBlock* view, BackgroundProp* bg, Rect rect) {
-    switch (bg->gradient_type) {
-        case GRADIENT_LINEAR:
-            if (bg->linear_gradient) {
-                render_linear_gradient(rdcon, view, bg->linear_gradient, rect);
-            }
-            break;
-        case GRADIENT_RADIAL:
-            if (bg->radial_gradient) {
-                render_radial_gradient(rdcon, view, bg->radial_gradient, rect);
-            }
-            break;
-        case GRADIENT_CONIC:
-            if (bg->conic_gradient) {
-                render_conic_gradient(rdcon, view, bg->conic_gradient, rect);
-            }
-            break;
-        default:
-            break;
-    }
 }
 
 /**
@@ -1328,10 +1093,11 @@ void render_box_shadow_inset(RasterRenderContext* rdcon, ViewBlock* view, Rect r
  * Compute background image dimensions based on background-size property.
  * Returns the computed width and height of the background image in physical pixels.
  */
-static bool background_size_unspecified(BackgroundProp* bg);
+static bool background_size_unspecified(BackgroundGeometry* bg);
 
-static void compute_bg_image_size(BackgroundProp* bg, float img_w, float img_h,
-                                   float box_w, float box_h, float* out_w, float* out_h, float raster_scale) {
+static void compute_bg_image_size(BackgroundGeometry* bg, float img_w, float img_h,
+                                   float box_w, float box_h, float* out_w, float* out_h,
+                                   float raster_scale, bool intrinsic_ratio) {
     float aspect = (img_h > 0) ? img_w / img_h : 1.0f;
 
     if (background_size_unspecified(bg)) {
@@ -1366,20 +1132,20 @@ static void compute_bg_image_size(BackgroundProp* bg, float img_w, float img_h,
         bool h_auto = bg->bg_size_height_auto;
 
         if (!w_auto) {
-            w = bg->bg_size_width_is_percent ? (bg->bg_size_width / 100.0f) * box_w : bg->bg_size_width * raster_scale;
+            w = background_size_dimension(bg, true, box_w, raster_scale);
         }
         if (!h_auto) {
-            h = bg->bg_size_height_is_percent ? (bg->bg_size_height / 100.0f) * box_h : bg->bg_size_height * raster_scale;
+            h = background_size_dimension(bg, false, box_h, raster_scale);
         }
 
         if (w_auto && !h_auto) {
             // auto <height>: width scales proportionally
             *out_h = h;
-            *out_w = h * aspect;
+            *out_w = intrinsic_ratio ? h * aspect : box_w;
         } else if (!w_auto && h_auto) {
             // <width> auto: height scales proportionally
             *out_w = w;
-            *out_h = w / aspect;
+            *out_h = intrinsic_ratio ? w / aspect : box_h;
         } else {
             // Both explicit
             *out_w = w;
@@ -1392,7 +1158,7 @@ static void compute_bg_image_size(BackgroundProp* bg, float img_w, float img_h,
  * Compute background image position based on background-position property.
  * Per CSS spec: percentage position = (container_size - image_size) * percentage / 100
  */
-static void compute_bg_image_position(BackgroundProp* bg, float img_w, float img_h,
+static void compute_bg_image_position(BackgroundGeometry* bg, float img_w, float img_h,
                                        float box_w, float box_h, float* out_x, float* out_y, float raster_scale) {
     if (!bg->bg_position_set) {
         // Default: 0% 0% (top-left)
@@ -1405,8 +1171,8 @@ static void compute_bg_image_position(BackgroundProp* bg, float img_w, float img
     *out_y = background_position_offset(bg, false, box_h - img_h, raster_scale);
 }
 
-static bool background_size_unspecified(BackgroundProp* bg) {
-    return !bg->bg_size_type &&
+static bool background_size_unspecified(BackgroundGeometry* bg) {
+    return !bg->bg_size_set && !bg->bg_size_type &&
            !bg->bg_size_width_auto &&
            !bg->bg_size_height_auto &&
            !bg->bg_size_width_is_percent &&
@@ -1430,9 +1196,9 @@ typedef struct {
     CssEnum repeat_y;
 } BackgroundTilePlan;
 
-static bool compute_background_tile_plan(BackgroundProp* bg, Rect position_rect, Rect coverage_rect,
+static bool compute_background_tile_plan(BackgroundGeometry* bg, Rect position_rect, Rect coverage_rect,
                                          float intrinsic_w, float intrinsic_h,
-                                         BackgroundTilePlan* plan, float raster_scale) {
+                                         BackgroundTilePlan* plan, float raster_scale, bool intrinsic_ratio = true) {
     if (!bg || !plan ||
         position_rect.width <= 0.0f || position_rect.height <= 0.0f ||
         coverage_rect.width <= 0.0f || coverage_rect.height <= 0.0f) {
@@ -1441,7 +1207,7 @@ static bool compute_background_tile_plan(BackgroundProp* bg, Rect position_rect,
 
     compute_bg_image_size(bg, intrinsic_w, intrinsic_h,
                           position_rect.width, position_rect.height,
-                          &plan->tile_w, &plan->tile_h, raster_scale);
+                          &plan->tile_w, &plan->tile_h, raster_scale, intrinsic_ratio);
     if (plan->tile_w <= 0.0f || plan->tile_h <= 0.0f) return false;
 
     float pos_x = 0.0f;
@@ -1500,18 +1266,37 @@ static bool compute_background_tile_plan(BackgroundProp* bg, Rect position_rect,
 
 static void background_tile_rect(const BackgroundTilePlan* plan, Rect rect,
                                  int row, int col, Rect* tile_rect) {
-    if (plan->repeat_x == CSS_VALUE_SPACE) {
+    // space respects the authored position on an axis where fewer than two tiles fit.
+    if (plan->repeat_x == CSS_VALUE_SPACE && plan->end_col > 0) {
         tile_rect->x = rect.x + col * (plan->tile_w + plan->space_gap_x);
     } else {
         tile_rect->x = plan->origin_x + col * plan->tile_w;
     }
-    if (plan->repeat_y == CSS_VALUE_SPACE) {
+    if (plan->repeat_y == CSS_VALUE_SPACE && plan->end_row > 0) {
         tile_rect->y = rect.y + row * (plan->tile_h + plan->space_gap_y);
     } else {
         tile_rect->y = plan->origin_y + row * plan->tile_h;
     }
     tile_rect->width = plan->tile_w;
     tile_rect->height = plan->tile_h;
+}
+
+static void background_merge_solid_axis(float begin, float end, float gap, CssEnum* repeat,
+        float* origin, float* length, int* first, int* last) {
+    if (*first == *last || (*repeat == CSS_VALUE_SPACE && gap != 0.0f)) return;
+    *origin = begin; *length = end - begin;
+    *first = *last = 0; *repeat = CSS_VALUE_NO_REPEAT;
+}
+
+static void background_merge_solid_tiles(BackgroundTilePlan* plan, Rect basis) {
+    Rect first, last;
+    background_tile_rect(plan, basis, plan->start_row, plan->start_col, &first);
+    background_tile_rect(plan, basis, plan->end_row, plan->end_col, &last);
+    // touching uniform tiles form one continuous surface; separate draws expose antialiased seams.
+    background_merge_solid_axis(first.x, last.x + last.width, plan->space_gap_x, &plan->repeat_x,
+        &plan->origin_x, &plan->tile_w, &plan->start_col, &plan->end_col);
+    background_merge_solid_axis(first.y, last.y + last.height, plan->space_gap_y, &plan->repeat_y,
+        &plan->origin_y, &plan->tile_h, &plan->start_row, &plan->end_row);
 }
 
 static bool background_tile_outside_rect(const Rect* tile_rect, const Rect* rect) {
@@ -1539,108 +1324,214 @@ static void background_for_each_tile(const BackgroundTilePlan* plan,
     }
 }
 
-struct BackgroundImagePaintContext {
+struct BackgroundPaintContext {
     PaintList* paint;
     UiContext* ui;
+    ViewBlock* view;
+    RasterRenderContext* raster;
+    float pixel_ratio;
+    const RdtMatrix* transform;
     ImageSurface* image;
+    ListStyleImage gradient;
     Rect clip;
+    Color solid_color;
+    bool solid_tiles;
+    bool rectangular_tiles;
 };
 
-static void paint_background_image_tile(const Rect* tile, void* data) {
-    BackgroundImagePaintContext* context = (BackgroundImagePaintContext*)data;
+static bool background_record_solid_rect(PaintList* paint, Rect rect, Color color, const RdtMatrix* transform) {
+    int before = paint_list_count(paint);
+    if (transform) paint_push_transform(paint, transform);
+    // keep the rectangle primitive's exact source-over and canonical vector export; image consumers retain their image/gradient operation.
+    paint_fill_rect(paint, rect.x, rect.y, rect.width, rect.height, color);
+    if (transform) paint_pop_transform(paint);
+    return paint_list_count(paint) == before + (transform ? 3 : 1);
+}
+
+static void paint_background_tile(const Rect* tile, void* data) {
+    BackgroundPaintContext* context = (BackgroundPaintContext*)data;
+    if (context->solid_tiles) {
+        Rect visible = *tile;
+        if (context->rectangular_tiles) {
+            Bound bounds = view_geometry_intersect_bound_rect(view_geometry_rect_to_bound(context->clip), *tile);
+            visible = {bounds.left, bounds.top, bounds.right - bounds.left, bounds.bottom - bounds.top};
+        }
+        // rectangular clipping is exact geometry, avoiding a second coverage operation at the same edge.
+        background_record_solid_rect(context->paint, visible, context->solid_color, context->transform);
+        return;
+    }
+    if (context->gradient.gradient_type != GRADIENT_NONE) {
+        render_paint_gradient_image(context->paint, &context->gradient, *tile,
+            context->pixel_ratio, context->transform);
+        return;
+    }
     if (!render_media_paint_svg_image(context->paint, context->image, *tile, &context->clip,
             ui_context_raster_scale(context->ui), context->ui->font_ctx, context->ui)) {
         paint_draw_image_resource(context->paint, context->image, tile->x, tile->y,
-            tile->width, tile->height, 255, nullptr);
+            tile->width, tile->height, 255, context->transform);
     }
 }
 
-bool render_paint_background_image(PaintList* paint, UiContext* ui, ViewBlock* view, Rect rect) {
-    if (!paint || !ui || !view || !view->bound) return false;
-    BackgroundProp* bg = view->boundary()->background;
-    if (!bg || !bg->image || bg->bg_clip == CSS_VALUE_TEXT) return false;
-    ImageSurface* image = load_document_image(ui->document, ui, bg->image);
-    if (!image) return false;
-    float density = layout_css_image_density(image, bg->image_resolution);
-    Rect position = {}, clip = {};
-    background_layer_rects(ui, view, bg, rect, 1.0f, &position, &clip);
-    BackgroundTilePlan plan = {};
-    if (!compute_background_tile_plan(bg, position, clip, (float)image->width / density,
-            (float)image->height / density, &plan, 1.0f)) return false;
-    BorderProp* border = view->boundary()->border;
+static RdtPath* background_layer_clip(ViewBlock* view, const BackgroundGeometry* layer, Rect clip) {
+    const BorderProp* border = view->boundary()->border;
     RdtPath* path = nullptr;
     if (border && corner_has_radius(&border->radius)) {
-        CssEnum box = bg->bg_clip ? bg->bg_clip : CSS_VALUE_BORDER_BOX;
+        CssEnum box = layer->bg_clip ? layer->bg_clip : CSS_VALUE_BORDER_BOX;
         Corner radius = background_corner_inset_box(&border->radius, box, border,
             &view->boundary()->padding, 1.0f);
         constrain_corner_radii(&radius, clip.width, clip.height);
         path = render_path_create_rounded_rect(clip, &radius);
     } else path = background_rect_path(clip);
+    return path;
+}
+
+static bool background_push_layer_clip(BackgroundPaintContext* context,
+                                      const BackgroundGeometry* layer, Rect clip) {
+    RdtPath* path = background_layer_clip(context->view, layer, clip);
     if (!path) return false;
-    int count = paint_list_count(paint);
-    paint_push_clip(paint, path, nullptr); rdt_path_free(path);
-    if (paint_list_count(paint) == count) return false;
-    // the common tile plan and owned clip survive deferred SVG/PDF effect lowering.
-    BackgroundImagePaintContext context = {paint, ui, image, clip};
-    background_for_each_tile(&plan, position, clip, paint_background_image_tile, &context);
-    paint_pop_clip(paint);
+    if (context->raster) rc_push_clip(context->raster, path, context->transform);
+    else paint_push_clip(context->paint, path, context->transform);
+    rdt_path_free(path);
     return true;
 }
 
-typedef struct {
-    RasterRenderContext* rdcon;
-    ViewBlock* view;
-    LinearGradient* gradient;
-    Rect paint_rect;
-} LinearGradientTileContext;
-
-static void render_linear_gradient_tile_cb(const Rect* tile_rect, void* userdata) {
-    LinearGradientTileContext* ctx = (LinearGradientTileContext*)userdata;
-    render_linear_gradient_tile(ctx->rdcon, ctx->view, ctx->gradient,
-                                *tile_rect, ctx->paint_rect);
+static void background_pop_layer_clip(BackgroundPaintContext* context) {
+    if (context->raster) rc_pop_clip(context->raster);
+    else paint_pop_clip(context->paint);
 }
 
-typedef struct {
-    RasterRenderContext* rdcon;
-    ViewBlock* view;
-    RadialGradient* gradient;
-} RadialGradientTileContext;
-
-static void render_radial_gradient_tile_cb(const Rect* tile_rect, void* userdata) {
-    RadialGradientTileContext* ctx = (RadialGradientTileContext*)userdata;
-    render_radial_gradient(ctx->rdcon, ctx->view, ctx->gradient, *tile_rect);
+static IRect background_blend_bounds(BackgroundPaintContext* context, Rect clip) {
+    float left = clip.x, top = clip.y, right = clip.x + clip.width, bottom = clip.y + clip.height;
+    if (context->transform && !rdt_matrix_project_rect_bounds(context->transform,
+            left, top, right, bottom, &left, &top, &right, &bottom)) return {};
+    return render_geometry_clip_to_pixel_bounds({floorf(left), floorf(top), ceilf(right), ceilf(bottom)},
+        context->raster ? context->ui->surface : nullptr);
 }
 
-static void render_linear_gradient_layer(RasterRenderContext* rdcon, ViewBlock* view,
-                                         BackgroundProp* bg, LinearGradient* gradient,
-                                         Rect position_rect, Rect paint_rect) {
-    if (!gradient) return;
-    Rect tile_basis_rect = gradient->is_repeating ? position_rect : paint_rect;
-    BackgroundTilePlan plan = {};
-    if (!compute_background_tile_plan(bg, tile_basis_rect, paint_rect,
-                                      tile_basis_rect.width, tile_basis_rect.height, &plan, rdcon->raster_scale)) {
-        return;
+static bool background_has_blend(const BackgroundProp* background) {
+    int count = background->layer_count > 0 ? background->layer_count : 1;
+    for (int index = 0; index < count; index++) {
+        const BackgroundLayer* layer = background->layer_count > 0 ? &background->layers[index] : background;
+        if (layer->blend_mode && layer->blend_mode != CSS_VALUE_NORMAL) return true;
     }
-
-    LinearGradientTileContext tile_ctx = {rdcon, view, gradient, paint_rect};
-    background_for_each_tile(&plan, tile_basis_rect, paint_rect,
-                             render_linear_gradient_tile_cb, &tile_ctx);
+    return false;
 }
 
-static void render_radial_gradient_layer(RasterRenderContext* rdcon, ViewBlock* view,
-                                         BackgroundProp* bg, RadialGradient* gradient,
-                                         Rect position_rect, Rect paint_rect) {
-    if (!gradient) return;
-    (void)position_rect;
-    BackgroundTilePlan plan = {};
-    if (!compute_background_tile_plan(bg, paint_rect, paint_rect,
-                                      paint_rect.width, paint_rect.height, &plan, rdcon->raster_scale)) {
-        return;
+static bool record_background(PaintList* paint, UiContext* ui, ViewBlock* view, Rect rect,
+                              float pixel_ratio, const RdtMatrix* transform, RasterRenderContext* raster) {
+    if (!paint || !ui || !view || !view->bound || !view->boundary()->background) return false;
+    BackgroundProp* background = view->boundary()->background;
+    BackgroundPaintContext context = {paint, ui, view, raster, pixel_ratio, transform, nullptr, {}, {}};
+    int count = background->layer_count > 0 ? background->layer_count : 1;
+    BackgroundLayer* bottom = background->layer_count > 0 ? &background->layers[count - 1] : background;
+    bool recorded = false;
+    bool isolated = background_has_blend(background);
+    if (isolated) {
+        IRect bounds = background_blend_bounds(&context, rect);
+        PaintEffectGroup group = {};
+        group.bounds = {(float)bounds.x, (float)bounds.y, (float)(bounds.x + bounds.w), (float)(bounds.y + bounds.h)};
+        group.opacity = 1.0f; group.isolation = true;
+        // background blending sees only this box's layers and color, independently of page content.
+        paint_begin_effect_group(paint, &group);
     }
+    Rect position = {}, clip = {};
+    if (background->color.a && bottom->bg_clip != CSS_VALUE_TEXT) {
+        background_layer_rects(ui, view, bottom, rect, 1.0f, &position, &clip);
+        const BorderProp* border = view->boundary()->border;
+        if (!border || !corner_has_radius(&border->radius)) {
+            recorded = background_record_solid_rect(paint, clip, background->color, transform);
+        } else {
+            RdtPath* path = background_layer_clip(view, bottom, clip);
+            if (path) {
+                int index = paint_list_count(paint);
+                paint_fill_path(paint, path, background->color, RDT_FILL_WINDING, transform);
+                if (!paint_list_take_path_payload(paint, index, PAINT_FILL_PATH)) rdt_path_free(path);
+                recorded = true;
+            }
+        }
+    }
+    // one authored-order walk feeds native raster and both vector backends (CI-18).
+    for (int index = count - 1; index >= 0; index--) {
+        BackgroundLayer* layer = background->layer_count > 0 ? &background->layers[index] : background;
+        if (layer->bg_clip == CSS_VALUE_TEXT || (!layer->image && layer->gradient_type == GRADIENT_NONE)) continue;
+        background_layer_rects(ui, view, layer, rect, 1.0f, &position, &clip);
+        context.image = layer->image ? load_document_image(ui->document, ui, layer->image) : nullptr;
+        if (layer->image && !context.image) continue;
+        context.gradient = {};
+        context.gradient.gradient_type = layer->gradient_type;
+        context.gradient.linear_gradient = lam::shared(layer->linear_gradient.get());
+        context.gradient.radial_gradient = lam::shared(layer->radial_gradient.get());
+        context.gradient.conic_gradient = lam::shared(layer->conic_gradient.get());
+        context.clip = clip;
+        float density = context.image ? layout_css_image_density(context.image, layer->image_resolution) : 1.0f;
+        BackgroundTilePlan plan = {};
+        if (!compute_background_tile_plan(layer, position, clip,
+                context.image ? (float)context.image->width / density : position.width,
+                context.image ? (float)context.image->height / density : position.height, &plan, 1.0f,
+                context.image != nullptr)) continue;
+        GradientImageParts parts = gradient_image_parts(&context.gradient);
+        context.solid_tiles = gradient_stops_uniform_color(parts.stops, parts.count, &context.solid_color);
+        const BorderProp* border = view->boundary()->border;
+        bool rounded = border && corner_has_radius(&border->radius);
+        context.rectangular_tiles = context.solid_tiles && !rounded;
+        if (context.solid_tiles) background_merge_solid_tiles(&plan, position);
+        Rect single_tile = {};
+        bool one_tile = plan.start_col == plan.end_col && plan.start_row == plan.end_row;
+        if (one_tile) background_tile_rect(&plan, position, plan.start_row, plan.start_col, &single_tile);
+        bool needs_clip = !context.rectangular_tiles && (!one_tile || rounded ||
+            !view_geometry_rect_contains_rect(clip, single_tile, 0.0f));
+        // a coincident rectangular clip compounds PDF coverage already supplied by the tile.
+        if (needs_clip && !background_push_layer_clip(&context, layer, clip)) continue;
+        bool blend = layer->blend_mode && layer->blend_mode != CSS_VALUE_NORMAL;
+        IRect blend_bounds = blend ? background_blend_bounds(&context, clip) : IRect{};
+        if (blend && !render_geometry_pixel_bounds_empty(blend_bounds)) {
+            PaintEffectGroup group = {};
+            group.bounds = {(float)blend_bounds.x, (float)blend_bounds.y,
+                (float)(blend_bounds.x + blend_bounds.w), (float)(blend_bounds.y + blend_bounds.h)};
+            group.opacity = 1.0f; group.blend_mode = layer->blend_mode;
+            paint_begin_effect_group(paint, &group);
+        }
+        if (raster && context.image) {
+            float scale = raster->raster_scale;
+            Rect physical_position = {position.x * scale, position.y * scale,
+                position.width * scale, position.height * scale};
+            Rect physical_clip = {clip.x * scale, clip.y * scale, clip.width * scale, clip.height * scale};
+            render_background_image(raster, view, layer, physical_position, physical_clip);
+        } else background_for_each_tile(&plan, position, clip, paint_background_tile, &context);
+        if (blend && !render_geometry_pixel_bounds_empty(blend_bounds)) paint_end_effect_group(paint);
+        if (needs_clip) background_pop_layer_clip(&context);
+        recorded = true;
+    }
+    if (isolated) paint_end_effect_group(paint);
+    return recorded;
+}
 
-    RadialGradientTileContext tile_ctx = {rdcon, view, gradient};
-    background_for_each_tile(&plan, paint_rect, paint_rect,
-                             render_radial_gradient_tile_cb, &tile_ctx);
+bool render_paint_background(PaintList* paint, UiContext* ui, ViewBlock* view, Rect rect,
+                             RenderExportTargetKind target) {
+    if (!paint || !ui || !view || !view->bound || !view->boundary()->background) return false;
+    const BackgroundProp* background = view->boundary()->background;
+    float density = ui_context_raster_scale(ui);
+    bool composite = background_has_blend(background);
+    if (target == RENDER_EXPORT_TARGET_PDF && background->layer_count > 0) {
+        for (int index = 0; index < background->layer_count; index++) {
+            const BackgroundLayer& layer = background->layers[index];
+            composite |= layer.image || gradient_image_needs_sampling(layer.linear_gradient.get()) ||
+                gradient_image_needs_sampling(layer.radial_gradient.get()) ||
+                gradient_image_needs_sampling(layer.conic_gradient.get());
+        }
+    }
+    if (!composite) return record_background(paint, ui, view, rect, density, nullptr, nullptr);
+    PaintList layers;
+    if (!record_background(&layers, ui, view, rect, density, nullptr, nullptr)) return false;
+    RenderEffectRasterImage image = {};
+    Bound bounds = {rect.x, rect.y, rect.x + rect.width, rect.y + rect.height};
+    // PDF gradient fallbacks must composite the layers before the viewer reconstructs edge coverage.
+    if (!render_effect_rasterize_paint_list(&layers, nullptr, &bounds, rect.width, rect.height,
+            false, density, &image, "[BACKGROUND_COMPOSITE]") || !image.surface) return false;
+    int index = paint_list_count(paint);
+    paint_draw_image_resource(paint, image.surface, image.x, image.y, image.width, image.height,
+        255, nullptr, image_surface_destroy);
+    return paint_list_count(paint) == index + 1;
 }
 
 /**
@@ -1744,7 +1635,7 @@ static void render_background_image_tile_cb(const Rect* tile_rect, void* userdat
 /**
  * Render background image with background-size, background-position, and background-repeat.
  */
-static void render_background_image(RasterRenderContext* rdcon, ViewBlock* view, BackgroundProp* bg, Rect rect, Rect paint_rect) {
+static void render_background_image(RasterRenderContext* rdcon, ViewBlock* view, BackgroundLayer* bg, Rect rect, Rect paint_rect) {
     const char* image_url = bg->image;
 
     // Load image via the image cache

@@ -42,7 +42,7 @@ Lambda ships a set of **packages**: libraries written in Lambda Script itself, d
 | `math` | `lambda.doc.math.math` | Library | Typesets LaTeX math as HTML | Markdown math in `lambda view`, `layout` and `render`; math inside LaTeX documents |
 | `latex` | `lambda.latex.latex` | Library | Renders LaTeX documents as HTML | `lambda convert x.tex -t html`; `lambda view`, `layout` and `render` on `.tex`/`.latex` |
 | `pdf` | `lambda.pdf.pdf` | Library, experimental | Renders PDF pages as SVG, and whole documents as HTML | `lambda view`, `layout` and `render` on `.pdf` |
-| `grammar` | `lambda.grammar.xpath` | Library, experimental | Grammars for other languages, written as Lambda `grammar` declarations: XPath 3.1 parses to a Lambda element tree | None |
+| `grammar` | `lambda.grammar.xpath`, `lambda.grammar.xquery`, `lambda.grammar.jq`, `lambda.grammar.rnc` | Library, experimental | Grammars for other languages, written as Lambda `grammar` declarations: XPath 3.1, XQuery 3.1, jq 1.7.1 and RELAX NG compact parse to Lambda element trees | None |
 | `openapi` | `lambda.openapi.openapi`, `lambda.openapi.server` | Experimental | Route listing, Lambda type generation, validation and Swagger UI pages for OpenAPI specs | None |
 | `slide` | `lambda.slide` | Library, experimental | Slide elements, cues/effects, presenter console/navigation tools, themes/layouts/masters, snapshots and handouts; see [Slide Presentations](Lambda_Slide.md) | `lambda view deck.slides` |
 | `doc` | `lambda.doc.doc_viewer` | Engine internal | The document viewer and project browser, with its startup splash and icon font | Bare `lambda view`; `lambda demo` adds the startup splash |
@@ -647,6 +647,150 @@ The viewable gallery at `test/demo/wordcloud.ls` compares four configurations:
 `./lambda.exe view test/demo/wordcloud.ls`. Export it with
 `./lambda.exe render test/demo/wordcloud.ls -o temp/wordcloud_gallery.png`.
 
+### 4.5 Historical and event timelines
+
+`lambda.chart.timeline` presents historical events as chronological cards, a
+time axis, or an active story. It uses the ordinary source-package and view
+mechanisms (**D7.2.1–D7.2.4/D7.2.6, S2.4.3v3/S12.1.3**).
+Implementation is in progress against the
+[timeline proposal](../vibe/Lambda_Pkg_Chart_Timeline.md); the
+[acceptance inventory](../test/timeline/reference_inventory.json) records open
+features and host coverage. Native Radiant is the current interactive host.
+
+```lambda
+import timeline: lambda.chart.timeline
+
+timeline.render({id:"project-history",view:"cards",placement:"alternate",
+    events:[
+        {id:"idea",at:"2019-03",title:"The idea",content:"A small beginning."},
+        {id:"launch",at:"2022-09",title:"Launch",content:"The first public release."}
+    ]})
+```
+
+Elements use `<timeline.chart>` with qualified children such as
+`<timeline.event>`, `<timeline.scale>`, and `<timeline.cards>`. Maps and elements
+normalize to the same schema. The package supports astronomical BCE/CE dates,
+partial dates, exact numeric deep time, explicit timezones, duration events,
+eras, nested groups, hidden intervals, curved coordinates, and quantitative
+chart overlays. Rendering consumes explicit state and resource results;
+procedural handlers own effects (**S12.1.1v2, S9.1.4/S9.3.1**).
+
+`search.highlight: true` preserves rich inline elements and their attributes,
+including matches split across element boundaries. Case and diacritic options
+retain authored Unicode text. Clearing the query restores the source content.
+Adjacent rich children and scalar text share the same offsets for matching and
+highlighting; separate tags never form a combined match. Script, style, and
+template contents are excluded. Render callbacks receive the same chart/locale
+context as cards; callback errors and non-boolean predicate results are diagnosed.
+The pure host helper `radiant.with_content(source, children)` replaces only an
+element's normalized content, retaining its qualified name, nominal identity,
+and full attribute contracts. Declared content patterns still apply; invalid
+replacements return a value error. `radiant.present_content(source, children)`
+instead constructs a structural presentation with the same qualified tag and
+attribute values; its new content is unconstrained. Highlighting uses that
+operation so string-only source types can render marks without changing their
+source or claiming that the presentation is still a nominal instance
+(**S2.1.4, S2.6.2–S2.6.4, S17.4.1, D4.5.2**).
+
+Filtering immediately reconciles the active event, keeps selection, and restores
+the nearest visible event after an empty result. Collapsing a focused group moves
+focus to its visible group header. Controlled fields remain authoritative and
+emit change requests (**S9.1.4/S9.3.1, S12.1.3**).
+
+`locale` controls bundled English, Chinese, French, and Arabic messages, dates,
+era labels, numeric interpolation, export headings, and default writing direction.
+`direction` overrides the locale; a scale's `locale` overrides inherited date
+formatting. `messages` supports strings, pure callbacks, and plural form maps;
+`scale.format` and `scale.formatter` customize labels without changing chronology.
+Unsupported languages use deterministic English fallbacks; further reference
+language coverage remains open (**S12.1.1v2/S12.1.3**).
+
+| Entry point | Purpose |
+|---|---|
+| `validate(spec)` | Normalize and validate an element or map; return a value error on invalid input. |
+| `render(spec, viewport?, snapshot?)` | Pure HTML/SVG presentation. |
+| `model(spec, viewport?, options?)` | Stable logical source for `apply()` and native interaction. |
+| `interactive(spec, viewport?, options?)` | Apply a model with instance-owned interaction state. |
+| `initial_state(spec)`, `update(state, action, context)` | Immutable state and a shared reducer returning state, notifications, and requests. |
+| `apply_edit(spec, request)` | Recheck permissions, token source revision, and the proposed patch; return a validated immutable source candidate. |
+| `bookmark(spec, id)` | Encode a stable event/introduction address for the chart's URL fragment. |
+| `layout(spec, viewport, snapshot?, resources?)` | Measured geometry and chronology projection. |
+| `render_svg(spec, viewport, snapshot?, options?)` | Chart-vector presentation with an explicit rich-content conversion policy. |
+| `render_frame(spec, frame, viewport?, snapshot?)` | Presentation at an explicit slideshow time in milliseconds. |
+| `convert(data, format, options?)` | Convert already loaded TimelineJS, React Chrono, vis, JSON, CSV/TSV, or spreadsheet records. |
+| `capabilities(host?)` | Report host/media capabilities. |
+| `load(request, options?)` | Procedurally fetch a requested resource, retaining its token and revision. |
+| `export_data(spec, format?, options?, snapshot?)` | JSON records, CSV text, XLSX ZIP tree, or accessible HTML table. |
+| `export_document(spec, format?, viewport?, options?, snapshot?)` | Frozen HTML or SVG source; HTML also supplies PNG/JPEG/PDF rendering. |
+| `save(spec, destination, format?, viewport?, options?, snapshot?)` | Procedurally write HTML, SVG, PNG, JPEG, PDF, JSON, CSV, or XLSX. |
+
+Exports select `scope: "full"`, `"current"`, `"window"`, or `"selected"` and
+accept explicit state/time, expansion, field order, headings, and media frames.
+Live media needs a poster, recorded frame, authored fallback, explicit external
+resource policy, or `unsupported: "text"|"omit"`. Source export retains authored
+date precision and exact metadata. Native vector export preserves the rich card
+presentation; the direct chart-vector API keeps its explicit conversion policy.
+
+Story mode uses one sequence for initialization, first/previous/next/last,
+quick jump, keyboard navigation, and slideshow playback. `story.order` is an
+array of unique event IDs. `story.title_slide: true` uses the chart title and
+description; an event record supplies a custom introduction, rich content, and
+media. Its default ID is `"__title__"`; give it another ID if an event uses that
+name. Introductions have no chronology coordinate and stay outside exported
+event records. `story.panel_order` orders the `"text"`, `"media"`, and
+`"children"` sections. Slideshow `delay` and `transition_duration` are
+milliseconds; frozen frames use the same delay, easing, and transition sample
+as live playback (**S12.1.1v2/S12.1.3**).
+
+`story.bookmarks: true` requires an authored chart ID and stable event IDs. Links
+use `#timeline=<encoded-chart-id>/<encoded-event-id>`; UTF-8 and reserved
+characters are form-encoded. Native hosts restore external fragment changes
+and back/forward traversal automatically. A pure `{type:"bookmark",fragment:...}`
+action uses the same resolver; unrelated chart fragments are ignored, and an
+unknown event in this chart's address returns a value error. Controlled active
+state emits a change request before a committed activation can write the URL.
+
+`slideshow.media_end: true` waits for audio/video completion at a slide boundary.
+`media_timeout` bounds the wait (default 30,000 ms), and pause freezes its budget.
+`media_command` requests carry event/media IDs, a session token, and source
+revision. An application player replies with a `media_event` action containing
+those same fields and `status:"ended"|"error"`. Retired tokens are ignored.
+`media_options.active_playback` can start active media independently of slideshow
+playback. Native hosts execute local audio/video commands after DOM rendering,
+poll completion and authored clip ends, and report `timeline_media` notifications
+with the accepted session identity and status. Native decoder state survives
+rerenders and resize; source changes replace it. `model(spec, viewport, {media:false})`
+leaves command execution to the application. Inferred or explicit remote
+providers use application controllers. Native decoding remains macOS-specific;
+cross-platform and hosted-player parity are still open (**D7.5.3, D4.5.1v4**).
+
+A retained native model accepts a dispatched `timeline_action` with
+`{type:"source_update", spec:next_spec, expected_revision:old_revision}`.
+The chart ID must stay the same. Resource requests carry revision/token guards,
+deadlines, and explicit cancellation requests; refresh keeps the last valid
+dataset while its replacement loads. Applications currently own asynchronous
+execution and disposal of those requests (**S9.1.4, S13.1.1v2–S13.1.5**).
+
+The pure `update` API accepts the same source action and returns the accepted
+`source` alongside state, requests, and notifications. A stale expected revision
+returns the existing state before validating the replacement. Removed activation
+chooses the nearest surviving event in the previous chronology; selection prunes
+removed IDs and emits its normal notification. Focus follows a removed focused
+event while external control focus stays in place. A retained playing/paused
+slide keeps its fractional playhead when order or duration changes, and moving
+an active dated event can scroll the unchanged window span into view.
+Loaded-data completions use the same policy; subsequent actions resolve IDs from
+the recorded dataset. Changed records retire pending edits even when their
+authored revision is unchanged, preventing a late validation from applying an
+obsolete proposal.
+
+The DTNA timeline translates its compatibility props and supplies its skin over
+this package. Its `timeline_options` property exposes the shared specification.
+Animation keyframes belong to `lambda.chart.playback`; the seven previous
+animation functions exported from `lambda.chart.timeline` remain forwarding
+aliases. Historical `<timeline.chart>` and contextual chart `<timeline>`
+keyframes have distinct schemas.
+
 ---
 
 ## 5. `graph` — Graph Layout and Diagrams
@@ -1106,6 +1250,78 @@ holding one `Expr` per comma-separated item.
 Known differences from the spec: `(: … :)` comments do not nest, and the
 parser accepts a few forms the spec restricts (an ExprSingle such as `for`
 as an operand of a binary operator; chained `instance of`).
+
+### 12.2 `lambda.grammar.xquery` — XQuery 3.1
+
+```lambda
+import lambda.grammar.xquery
+
+parse("for $b in //book order by $b/title return <t>{ $b/title }</t>", xquery)^
+```
+
+The grammar imports `lambda.grammar.xpath`, so every XPath shape in §12.1
+appears unchanged inside an XQuery tree. The whole query is
+`<Module <VersionDecl …>? <MainModule …>>` or `<LibraryModule <ModuleDecl …> …>`;
+a main module holds its prolog declarations, then `<QueryBody <Expr …>…>`.
+
+| XQuery | Tree |
+|--------|------|
+| `for … let … where … group by … order by … count … return` | `<FLWORExpr <ForClause <ForBinding var: "x", in: …>> <LetClause <LetBinding var:, value:>> <WhereClause …> <GroupByClause <GroupingSpec …>> <OrderByClause <OrderSpec direction: 'descending', …>> <CountClause var:> return: …>`; window clauses are `<TumblingWindowClause …>` / `<SlidingWindowClause …>` with `start:`/`end:` conditions |
+| `switch`, `typeswitch`, `try` | `<SwitchExpr operand: …, <SwitchCaseClause case: …, return: …> default: …>`, `<TypeswitchExpr operand: …, <CaseClause var:?, <SequenceType …>, return:> default:>`, `<TryCatchExpr body: …, <CatchClause <NameTest …> body: …>>` |
+| `<a href="x{1}">t {e} u</a>` | `<DirElemConstructor name: "a", end: "a", <DirAttribute name: "href", value: <DirAttributeValue "x" <EnclosedExpr …>>> "t " <EnclosedExpr …> " u">`; content text keeps its whitespace and stays as written (`&amp;`, `{{`); comments, PIs and CDATA are `<DirCommentConstructor "<!--…-->">`, `<DirPIConstructor …>`, `<CDataSection …>` |
+| `element n { }`, `attribute`, `text`, `document`, … | `<CompElemConstructor name: "n", body: <EnclosedExpr …>>` (a computed name is `name: <EnclosedExpr …>`), and likewise for the other computed constructors |
+| ``` ``[a `{ e }` b]`` ``` | `<StringConstructor "``[a `{" <StringInterpolation <Expr …>> "}` b]``">`: the text pieces keep their delimiters |
+| prolog | `<NamespaceDecl prefix:, uri:>`, `<VarDecl name:, type:?, value:>`, `<FunctionDecl name:, <Annotation …> <Param …> return:?, body:>`, `<ModuleImport prefix:?, uri:, location:?>`, and one element per setter |
+
+Known differences from the spec: comments do not nest; an end tag is not
+checked against its start tag; whitespace between attributes is optional.
+
+### 12.3 `lambda.grammar.jq` — jq 1.7.1
+
+```lambda
+import lambda.grammar.jq
+
+parse(".[] | select(.age > 30) | {name, age}", jq)^
+```
+
+Ported from jq's own bison grammar: one `Exp` node per operator, in jq's
+precedence order (`|` loosest, then `,`, `//`, assignments, `or`, `and`,
+comparisons, `+ -`, `* / %`, postfix `?`, `try`).
+
+| jq | Tree |
+|----|------|
+| `a \| b`, `a + b`, `a // b`, `.x \|= f` | `<Exp left: <Exp …>, op: '\|', right: <Exp …>>` (every binary operator) |
+| `-a`, `a?` | `<Exp op: '-', operand: …>`, `<Exp operand: …, op: '?'>` |
+| `.`, `..`, `.a`, `."k"`, `.[0]`, `.[1:2]`, `.[]`, `.a?` | `<Term <Identity>>`, `<Term <Recurse>>`, `<Term field: "a">`, `<Term field: <String "k">>`, `<Term base: <Term …>, index: <Exp …>>`, `slice: <Slice from:, to:>`, `iterate: <Iterate>`, `optional: '?'` |
+| literals, `$x`, `f(a; b)`, `@csv` | `<Number "1">`, `<String "a" <Interpolation <Exp …>> "b">`, `<Variable name: "$x">`, `<FunctionCall name: "f", <Exp …> <Exp …>>`, `<Format name: "@csv">` |
+| `[e]`, `{a, "b": 1, (.k): v}` | `<Array <Exp …>>`, `<Object <Pair key: "a"> <Pair key: <String "b">, value: <ObjVal …>> …>` |
+| `def f(g; $x): e; body` | `<Exp def: <FuncDef name: "f", <Param name: "g"> <Param name: "$x">, body: …>, body: …>` |
+| `e as $x \| body`, `reduce`, `foreach`, `if`, `try`, `label` | `<Exp source: <Term …>, <Variable …>, body: …>`, `<Reduce source:, init:, update:>`, `<Foreach … extract:?>`, `<If condition:, then:, <Elif …>, else:?>`, `<Exp body:, catch:?>`, `<Exp label: "$out", body:>` |
+
+The program is `<Program <Module …>? <Import …>* body: <Exp …>>` (a library
+holds `<FuncDef …>` children instead). String text is raw: escapes are not
+decoded.
+
+### 12.4 `lambda.grammar.rnc` — RELAX NG compact syntax
+
+```lambda
+import lambda.grammar.rnc
+
+parse("start = element doc { attribute id { xsd:ID }, text* }", rnc)^
+```
+
+| RNC | Tree |
+|-----|------|
+| `p, q`, `p & q`, `p \| q` | `<Group …>`, `<Interleave …>`, `<Choice …>`; the three do not mix without parentheses, and parentheses leave no node |
+| `p?`, `p*`, `p+` | `<Repeat pattern: …, op: '?'>` |
+| `element n { p }`, `attribute n { p }` | `<Element name: <Name "n">, …>`; name classes are `<Name …>`, `<NsName prefix: "ns">`, `<AnyName except: …>`, `<NameChoice …>` |
+| `xsd:int { minInclusive = "1" } - "5"`, `"v"`, `string "v"` | `<Data type: "xsd:int", <Param name:, value:> except: …>`, `<Value value: <Literal "v">>`, `<Value type: "string", value: …>` |
+| `start = p`, `name \|= p`, `div`, `include` | `<Start assign: '=', …>`, `<Define name: "name", assign: '\|=', …>`, `<Div …>`, `<Include uri:, inherit:?, …>` |
+| declarations | `<NamespaceDecl prefix:, uri:>`, `<DefaultNamespaceDecl …>`, `<DatatypesDecl …>` |
+| annotations, `##` | `<Annotations <AnnotationAttribute …> <AnnotationElement …>>`, `<FollowAnnotation …>`, `<Documentation "## …">`, wrapped with the pattern in `<Annotated pattern: …>` |
+
+A `<Literal>` holds the joined text of its `~` segments without quotes. Not
+supported: `\x{…}` escapes.
 
 ## 13. Tests
 

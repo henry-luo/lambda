@@ -1,0 +1,21 @@
+{
+  "name": "Timeline Unicode search, match navigation and overview",
+  "html": "test/ui/timeline/search_overview.ls",
+  "viewport": {"width": 800, "height": 650},
+  "events": [
+    {"type": "assert_count", "target": {"selector": ".lambda-timeline-navigator"}, "count": 1},
+    {"type": "assert_count", "target": {"selector": "[data-timeline-window-handle]"}, "count": 2},
+    {"type": "click", "target": {"selector": "[data-timeline-search]"}},
+    {"type": "type", "text": "ecole"},
+    {"type": "assert_text", "target": {"selector": ".lambda-timeline-search-status"}, "equals": "2 matching events"},
+    {"type": "assert_text", "target": {"selector": ".lambda-timeline-overlay-card[data-timeline-id='a'] mark"}, "equals": "École"},
+    {"type": "click", "target": {"selector": "[data-timeline-command='next_match']"}},
+    {"type": "assert_attribute", "target": {"selector": ".lambda-timeline-chart"}, "attribute": "data-timeline-active", "equals": "c"},
+    {"type": "assert_count", "target": {"selector": ".lambda-timeline-overlay-card[data-timeline-id='c']"}, "count": 1},
+    {"type": "assert_attribute", "target": {"selector": ".lambda-timeline-chart"}, "attribute": "data-timeline-window-to", "equals": "100"},
+    {"type": "click", "target": {"selector": "[data-timeline-window-handle='from']"}},
+    {"type": "key_press", "key": "Home"},
+    {"type": "assert_attribute", "target": {"selector": ".lambda-timeline-chart"}, "attribute": "data-timeline-window-from", "equals": "0"},
+    {"type": "render", "file": "temp/timeline-references/search-overview.png"}
+  ]
+}

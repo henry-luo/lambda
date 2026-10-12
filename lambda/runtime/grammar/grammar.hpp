@@ -16,6 +16,7 @@
 #include "../source_span.h"
 
 struct Transpiler;
+struct AstNode;
 
 #define GRAMMAR_NO_RULE UINT32_MAX
 
@@ -56,6 +57,7 @@ typedef struct GrammarExpr {
     bool lr_alt;                    // GX_PREC: an alternative that grows the seed
     bool trailing_self;             // GX_PREC: ends with a reference to its own rule
     bool explicit_none;             // GX_PREC written `prec.none` (GM6.1): no lint warning
+    bool immediate;                 // GX_LITERAL / token GX_RULE written `~x` (GM13): no space before it
     uint32_t min, max;              // GX_REPEAT; max 0 = unbounded
     uint32_t prec;                  // GX_PREC; GX_RULE with GM_CALL_TRAILING: the level
     uint32_t rule_index;            // GX_RULE
@@ -81,6 +83,7 @@ typedef struct GrammarRule {
     bool left_recursive;            // direct left recursion (GM6)
     GrammarExpr* body;              // syntax rules
     TypePattern* pattern;           // token rules (string domain)
+    AstNode* pattern_body;          // token rules: the island AST a later island inlines by name
     Type* type;                     // the rule as a type: TypePattern or TypeGrammarRule
     SourceSpan span;
 } GrammarRule;

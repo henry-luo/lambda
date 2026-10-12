@@ -1,0 +1,8 @@
+<!doctype html><meta charset=utf-8><style>
+html,body{margin:0;background:white}button{height:24px}#pane{position:absolute;left:20px;top:60px;width:48px;height:32px;overflow:auto;background-color:white;background-image:url("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg=="),linear-gradient(blue,blue),radial-gradient(green,green);background-size:8px 4px;background-position:3px 10px,15px 10px,43px 70px;background-repeat:no-repeat;background-attachment:local,scroll,fixed}#content{height:96px}
+</style><button id=check>Reset pane</button><button id=invalidvar>Scroll pane</button><button id=recover>Restore pane</button><output id=report></output><div id=pane><div id=content></div></div><script>
+var pane=document.getElementById('pane'),report=document.getElementById('report');
+document.getElementById('check').onclick=function(){pane.scrollTop=0;report.setAttribute('data-scroll',String(pane.scrollTop))};
+document.getElementById('invalidvar').onclick=function(){pane.scrollTop=8;report.setAttribute('data-scroll',String(pane.scrollTop))};
+document.getElementById('recover').onclick=function(){pane.scrollTop=0;report.setAttribute('data-scroll',String(pane.scrollTop))};
+</script>

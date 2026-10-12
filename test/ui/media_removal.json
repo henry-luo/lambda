@@ -1,0 +1,15 @@
+{
+  "name":"Removed media pauses even while a retained DOM wrapper keeps its decoder alive",
+  "html":"test/ui/media_removal.ls",
+  "viewport":{"width":800,"height":500},
+  "input_turn_ms":0,
+  "events":[
+    {"type":"click","target":{"selector":"#play"}},
+    {"type":"wait","ms":100},
+    {"type":"assert_text","target":{"selector":"#state"},"equals":"playing"},
+    {"type":"click","target":{"selector":"#remove"}},
+    {"type":"assert_count","target":{"selector":"#player"},"count":0},
+    {"type":"click","target":{"selector":"#read"}},
+    {"type":"assert_text","target":{"selector":"#state"},"equals":"paused"}
+  ]
+}

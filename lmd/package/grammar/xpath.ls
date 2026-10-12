@@ -41,7 +41,7 @@ pub grammar xpath {
          | prec(18, base: Expr, predicate: Predicate)
          | prec(18, base: Expr, args: ArgumentList)
          | prec(18, base: Expr, lookup: Lookup)
-         | ForExpr | LetExpr | QuantifiedExpr | IfExpr
+         | _ExprSingle
          | _Primary
          | AxisStep
          | root: slash
@@ -50,7 +50,8 @@ pub grammar xpath {
     _Multiplicative = star | multiplicative
     _Union = union | pipe
 
-    // ExprSingle forms
+    // ExprSingle forms; lambda.grammar.xquery overrides `_ExprSingle` (§4.5)
+    _ExprSingle = ForExpr | LetExpr | QuantifiedExpr | IfExpr
     ForExpr = _for, Binding, (_comma, Binding)*, _return, return: Expr
     LetExpr = _let, LetBinding, (_comma, LetBinding)*, _return, return: Expr
     QuantifiedExpr = quantifier: quantifier, Binding, (_comma, Binding)*, _satisfies, satisfies: Expr

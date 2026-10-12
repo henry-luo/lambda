@@ -18,6 +18,17 @@ make test-scene3d
 | `three-lifecycle.html` | Unmodified Three.js startup, indexed geometry, bitmap resize, density, two renderers, resource disposal and native error checks |
 | `../demo/scene3d/three-gallery.html` | Unmodified pinned WebGLRenderer/addon, Lambert/basic materials, indexed geometry, texture/transparency, instancing and image output |
 
+`Scene3dTest.WebGlVectorPaintRefreshesSnapshotsAndPreservesRetainedPixels` also
+uses `api.html`: vector paint runs before raster setup, unchanged reads retain
+the surface, and eight redraws preserve leased old pixels while retiring their
+generation under **D4.5.1v4 / D4.1.4v5** in the [formal design](../../doc/Lambda_Formal_Design.md).
+
+`CanvasWebGlExportTest.PixelsAlphaAndEffectsReachEveryOutput` generates independent
+red/blue PNG references and checks 96 Canvas pairs across PNG/SVG/PDF, alpha
+modes, preserved/discarded buffers, CSS effects and 1x/2x density. The control
+explicitly enables the full native host's existing `LAMBDA_HEADLESS_GLFW_WINDOW=1`
+option. Default null-host context absence remains covered by `unavailable.html`.
+
 `conformance-manifest.json` pins upstream paths/revision/hashes and identifies
 the exact assertion ports. `LICENSE.Khronos.txt` preserves their license.
 These selected slices do **not** establish complete Khronos or WPT conformance.
@@ -44,7 +55,7 @@ It writes screenshots and an audited call/query/shader manifest under the
 chosen output directory. The checked-in reference is under
 `test/demo/scene3d/reference/`, alongside all gallery resources.
 
-The partial API is declared in `lambda/module/radiant/webgl_methods.def`;
+The partial API is declared in `lambda/dom/webgl_methods.def`;
 `webgl_constants.def` and `webgl_parameters.def` define constants and query
 result shapes. The advertised extensions are `WEBGL_lose_context`, and, after actual float-target capability probes,
 `EXT_color_buffer_float` and `OES_texture_float_linear`. Phase III adds local

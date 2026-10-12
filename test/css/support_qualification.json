@@ -257,10 +257,18 @@
       "properties": [
         "background",
         "background-image",
-        "content"
+        "content",
+        "background-position",
+        "background-size",
+        "background-repeat",
+        "background-origin",
+        "background-clip",
+        "background-attachment",
+        "background-blend-mode",
+        "background-color"
       ],
       "qualification": "partial",
-      "scope": "single image-set URL/string selection uses the selected view device scale, supported MIME filtering before equal-density source order, shared responsive-image density preference, default/dpi/dpcm/dppx/x and typed math descriptors; invalid descriptors reject before cascade; raster natural sizes divide by selected density; source changes revalidate admission before warm reuse; inherited background gradients and stop/layer arrays retain independent ownership; 44 causal live assertions, 20 selected-image references at two device scales through PNG/SVG/PDF, and logical glyph bitmap/advance conversion in vector effects",
+      "scope": "single image-set URL/string selection uses the selected view device scale, supported MIME filtering before equal-density source order, shared responsive-image density preference, default/dpi/dpcm/dppx/x and typed math descriptors; invalid descriptors reject before cascade; raster natural sizes divide by selected density; source changes revalidate admission before warm reuse; inherited background gradients and stop/layer arrays retain independent ownership; 44 causal live assertions, 20 selected-image references at two device scales through PNG/SVG/PDF, and logical glyph bitmap/advance conversion in vector effects; background-specific ordered URL/selected-image/linear/radial/conic/none layers, independent component periods and computed inheritance, owner-unit position/size/radius/center/stop math, shared used-line color-stop fixup, full component getter strings, typed shorthand/longhand rejection and computed fallback, native clone/retirement and stable-pool controls, sharp tile/overflow intersections and causal font/box/scroll/DPR mutations through actual PNG/SVG/PDF paint (CI-18 / D4.5.1v4 / D4.1.4v5)",
       "evidence": [
         "test/ui/css_image_set_selection.json",
         "test/test_view_tree_model_gtest.cpp#CssImageSetsSelectDensityAfterTypeFilteringAndPreserveSourceOrder",
@@ -268,9 +276,20 @@
         "test/test_view_tree_model_gtest.cpp#CssImageSetReplacementDoesNotRetireAnInheritedGradientOwner",
         "test/test_view_tree_model_gtest.cpp#CssImageSetResourceChangesRevalidateAdmissionBeforeWarmReuse",
         "test/test_pdf_render_visual_gtest.cpp#CssImageSetsMatchSelectedNaturalImageSizesAcrossOutputs",
-        "test/test_rdt_vector_gtest.cpp#EffectGlyphBitmapsAndAdvancesUseLogicalPaintCoordinates"
+        "test/test_rdt_vector_gtest.cpp#EffectGlyphBitmapsAndAdvancesUseLogicalPaintCoordinates",
+        "test/ui/css_background_layers.json",
+        "test/ui/css_background_shorthand.json",
+        "test/ui/css_background_longhands.json",
+        "test/ui/css_background_attachments.json",
+        "test/ui/css_background_uniform_tiles.json",
+        "test/ui/cssom_background_components.json",
+        "test/ui/css_radial_radii.json",
+        "test/ui/css_gradient_centers.json",
+        "test/ui/css_gradient_stops.json",
+        "test/test_pdf_render_visual_gtest.cpp#BackgroundComputedComponentReadsReachAuthoredPaintAcrossOutputs",
+        "test/test_pdf_render_visual_gtest.cpp#GradientStopMathAndUsedFixupReachEveryImageOutput"
       ],
-      "limits": "multilayer ordering, per-layer descriptors/blending, transformed sampling, generated-gradient replacement, computed serialization and registered values, broader border/list image consumers and independent/paged CSS-image producers remain unqualified; Chromium agrees on 18/20 export references and 44 live assertions, while both pseudo-image export references retain the CSS Content draft versus historical inline-baseline compatibility difference (CI-17)"
+      "limits": "full image/prelude/angle-percentage grammar and transition hints, outside-range vector stop positions, computed image/effect serialization, broad transformed/attachment/independent/paged consumers, generated-gradient replacement and the complete image family remain open; two ordered 2x PDF reader-edge assertions are preserved; selected generated-image controls retain the CI-17 CSS Content draft versus historical inline-baseline compatibility difference"
     },
     {
       "properties": [
@@ -280,14 +299,43 @@
         "border-image-source"
       ],
       "qualification": "partial",
-      "scope": "shared image-kind recognition and density/type selection for URL list/border images; stylesheet-relative sources retain their base; raster marker natural dimensions and border auto widths respect selected density; valid list images override a none marker string; explicit none stops image inheritance; retained markers refresh source and suppression on mutations and safely reuse their element-owned fonts; 256 repeated resolutions and independent border URL/gradient inheritance/replacement cycles retain bounded pool ownership; shared nine-slice raster/SVG/PDF geometry with owned deferred gradient stops; 54 causal live assertions at two device scales; untranslated and translated marker/image/clip paint and export extents; 28 visible image/linear-gradient references through three outputs",
+      "scope": "shared image-kind recognition and density/type selection for URL list/border images; stylesheet-relative sources retain their base; raster marker natural dimensions and border auto widths respect selected density; valid list images override a none marker string; explicit none stops image inheritance; retained markers refresh source and suppression on mutations and safely reuse their element-owned fonts; 256 repeated resolutions and independent border URL/gradient inheritance/replacement cycles retain bounded pool ownership; shared nine-slice raster/SVG/PDF geometry with owned deferred gradient stops; 54 causal live assertions at two device scales; untranslated and translated marker/image/clip paint and export extents; 28 visible image/linear-gradient references through three outputs; shared linear/radial/conic and repeating/degenerate gradient marker paint, owned paths/stops/software samples survive 1536 source-release cycles; live selected-gradient replacement/font/transform/filter and DPR causal mutations; hard stops, specified premultiplied zero-period averages and distance-weighted unresolved linear periods, transparent colors, page-density effect snapshots and straight-alpha PDF images compare with independent PNG references; lazy file raster decode and relocatable SVG embedding",
       "evidence": [
         "test/ui/css_image_set_parts.json",
         "test/test_view_tree_model_gtest.cpp#CssImageSetListAndBorderConsumersRetainDensityAndStylesheetBase",
         "test/test_view_tree_model_gtest.cpp#BorderImageReplacementPreservesInheritedOwnerAndReleasesEachPayload",
-        "test/test_pdf_render_visual_gtest.cpp#CssImageSetMarkersAndBordersKeepVisiblePixelsAcrossOutputs"
+        "test/test_pdf_render_visual_gtest.cpp#CssImageSetMarkersAndBordersKeepVisiblePixelsAcrossOutputs",
+        "test/ui/css_gradient_markers.json",
+        "test/test_rdt_vector_gtest.cpp#SourceReplacementAndRecordingReleasePreserveDeferredPixels",
+        "test/test_rdt_vector_gtest.cpp#RepeatExpansionAveragesUnresolvedPeriodsAndChecksCapacity",
+        "test/test_pdf_render_visual_gtest.cpp#GradientMarkersKeepPixelsAndTransformsAcrossOutputs"
       ],
-      "limits": "outside URL-marker placement differs from Chromium although selected natural size agrees; generated-gradient marker export, radial/conic and SVG URL border sources, broader image grammar/defaulting/CSSOM, broader transformed sampling and projective export, and independent/paged producers remain unqualified; pure device-scale repaint can retain its previous selection under CSS Images UA policy/RSC10; causal declaration changes after the transition are qualified; PDF profile/edge rasterization and per-format canvas padding differ, so exact pixel references are within each output format and independent selected-color coverage excludes omitted images"
+      "limits": "outside URL-marker placement, gradient-marker default size/baseline and specified zero-period averages differ from Chromium; bounded native gradient default size follows CSS Lists 3; complete gradient grammar, broader color/alpha interpolation, subpixel radial/conic periods, accumulated-ancestor magnification and non-identity sampling remain unqualified; radial/conic and SVG URL border sources, broader image grammar/defaulting/CSSOM, broader transformed sampling and projective export, and independent/paged producers remain unqualified; pure device-scale repaint can retain its previous selection under CSS Images UA policy/RSC10; causal declaration changes after the transition are qualified; PDF profile/edge rasterization and per-format canvas padding differ, so exact pixel references are within each output format and independent selected-color coverage excludes omitted images"
+    },
+    {
+      "properties": [
+        "mask-image"
+      ],
+      "qualification": "partial",
+      "scope": "existing radial circle mask flattens the styled subtree, resolves owner radius/center/stop syntax and samples coverage once with opacity before blending; shared PNG/SVG/PDF effect capture at 1x/2x, positive paint and cleared-content checks, nested native opacity/clips, density/translation and rejected borrowed-payload retention; causal font/box/DPR changes (CI-18 / D4.5.1v4 / D4.1.4v5)",
+      "evidence": [
+        "test/ui/css_radial_masks.json",
+        "test/test_rdt_vector_gtest.cpp#SemanticMasksApplyOnceAcrossDensityTransformsAndRejectRetention",
+        "test/test_pdf_render_visual_gtest.cpp#RadialMaskGroupsReachEveryImageOutput"
+      ],
+      "limits": "radial approximation only; full mask property grammar, URL/linear/multilayer mask images, broad inline/independent/paged/effect/ellipse consumers remain unqualified"
+    },
+    {
+      "properties": [
+        "visibility"
+      ],
+      "qualification": "partial",
+      "scope": "computed self visibility suppresses hidden and ordinary non-table collapsed box/text/replaced-image/marker/outline/column-rule/scrollbar paint while explicitly visible descendants retain traversal; native pointer targets and programmatically scrolled hidden-overflow descendants use the same per-axis hit coordinates; ten PNG/SVG/PDF controls at1x/2x with positive paint and cleared own pixels, inherited/live parent-child changes, computed reads and72 causal live assertions; inline-SVG internal visibility stays covered (CI-18 / D4.5.1v4 / D4.1.4v5)",
+      "evidence": [
+        "test/ui/css_visibility_paint.json",
+        "test/test_pdf_render_visual_gtest.cpp#HiddenAndCollapsedBoxesPreserveVisibleDescendantsAcrossOutputs"
+      ],
+      "limits": "table collapse layout, focusability/keyboard order, hidden PDF link annotations, broader independent/paged/effect/3D interactions remain unqualified"
     }
   ]
 }

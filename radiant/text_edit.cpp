@@ -256,15 +256,8 @@ void te_focus_capture_value(DomElement* elem) {
     uint32_t blen = 0;
     const char* buf = tc_buffer(f, &blen);
 
-    // Free previous snapshot (if any) and replace with a fresh copy.
-    if (f->value_at_focus) { mem_free(f->value_at_focus); f->value_at_focus = nullptr; }
-    f->value_at_focus_len = 0;
-    if (buf) {
-        f->value_at_focus = mem_dup_n(buf, blen, MEM_CAT_DOM);
-        if (f->value_at_focus) {
-            f->value_at_focus_len = blen;
-        }
-    }
+    // D4.5.2: a focus session belongs to retained state, not a rebuilt form prop.
+    form_control_store_focus_value(f->state_ref, static_cast<View*>(elem),buf,blen);
     log_debug("text_edit: focus_capture elem=%p len=%u", elem, blen);
 
     // F4: also seed the undo history with the at-focus state so the user

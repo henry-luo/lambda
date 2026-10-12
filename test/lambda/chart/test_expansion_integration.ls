@@ -6,7 +6,7 @@ import scale:lambda.chart.scale
 import picking:lambda.chart.picking
 import animation:lambda.chart.animation
 import density:lambda.chart.field
-import timeline:lambda.chart.timeline
+import timeline:lambda.chart.playback
 import projection:lambda.chart.projection
 import interaction:lambda.chart.interaction
 import coordinate:lambda.chart.coordinate

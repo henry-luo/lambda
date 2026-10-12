@@ -20,6 +20,8 @@ let excludeTests = new Set();
 let rawOutput = false;
 let parallelExecution = true;
 let inputResultsFile = '';
+let listTests = false;
+let listBuildTargets = false;
 
 function addExcludedTests(value) {
     if (!value) return;
@@ -46,6 +48,8 @@ for (let i = 0; i < args.length; i++) {
     else if (arg === '--raw')              rawOutput = true;
     else if (arg === '--sequential')       parallelExecution = false;
     else if (arg === '--parallel')         parallelExecution = true;
+    else if (arg === '--list')             listTests = true;
+    else if (arg === '--list-build-targets') listBuildTargets = true;
     else if (arg === '-h' || arg === '--help') {
         console.log(`Usage: node test/test_run.js [OPTIONS]
   --target=SUITE       Run only tests from specified suite (library, input, mir, lambda, validator, radiant, jube, extended)
@@ -55,10 +59,13 @@ for (let i = 0; i < args.length; i++) {
   --raw                Show raw test output without formatting
   --sequential         Run tests sequentially (default: parallel)
   --parallel           Run tests in parallel (default)
+  --list               Print the selected test inventory as JSON without running it
+  --list-build-targets  Print unique native build targets for the selection
   --help               Show this help message
 
 Environment variables:
   LAMBDA_TEST_BIN_DIR       Override the directory containing test executables
+  LAMBDA_TEST_OUTPUT_DIR    Override the directory containing result artifacts
   LAMBDA_TEST_IDLE_TIMEOUT   Override idle timeout in seconds (default: auto-scaled by CPU count/load)
   LAMBDA_TEST_HEAVY_LOAD     Set to 1 to bias idle timeout upward for full-suite parallel runs
   LAMBDA_TEST_MAX_CONCURRENT Cap nested GTest fan-out (default: CPU-scaled, heavy-load caps at 4)
@@ -75,7 +82,9 @@ Environment variables:
 
 const ROOT_DIR   = path.resolve(__dirname, '..');
 const CONFIG_FILE = path.join(ROOT_DIR, 'build_lambda_config.json');
-const TEST_OUTPUT_DIR = path.join(ROOT_DIR, 'test_output');
+const TEST_OUTPUT_DIR = process.env.LAMBDA_TEST_OUTPUT_DIR
+    ? path.resolve(ROOT_DIR, process.env.LAMBDA_TEST_OUTPUT_DIR)
+    : path.join(ROOT_DIR, 'test_output');
 const TEST_BINARY_DIR = process.env.LAMBDA_TEST_BIN_DIR
     ? path.resolve(ROOT_DIR, process.env.LAMBDA_TEST_BIN_DIR)
     : path.join(ROOT_DIR, 'test');
@@ -182,8 +191,8 @@ function getTestIdleTimeoutMs(baseName) {
 }
 
 // Max concurrent tests: scale to CPU count, leave 1 core free (min 1).
-function getMaxConcurrent() {
-    if (!parallelExecution) return 1;
+function getMaxConcurrent(allowParallel = parallelExecution) {
+    if (!allowParallel) return 1;
     const cpuScaled = Math.max(1, os.cpus().length - 1);
     const requested = parseInt(process.env.LAMBDA_TEST_MAX_CONCURRENT || '', 10);
     if (Number.isFinite(requested) && requested > 0) {
@@ -199,6 +208,8 @@ function getMaxConcurrent() {
 }
 
 const MAX_CONCURRENT = getMaxConcurrent();
+// sequential suites still allow bounded workers inside an opted-in test binary.
+const MAX_CASE_CONCURRENT = getMaxConcurrent(true);
 const heartbeatSeconds = parseInt(process.env.LAMBDA_TEST_HEARTBEAT || '30', 10);
 const HEARTBEAT_MS = (Number.isFinite(heartbeatSeconds) ? Math.max(10, heartbeatSeconds) : 30) * 1000;
 
@@ -357,6 +368,11 @@ function discoverTests(config) {
                     icon: t.icon || '🧪',
                     isGtest: baseName.endsWith('_gtest') || libs.includes('gtest') || libs.includes('gtest_main'),
                     runnerArgs: t.runner_args || [],
+                    caseWorkers: t.case_workers || 1,
+                    caseWorkersEnv: t.case_workers_env,
+                    caseWorkerArgs: t.case_worker_args || [],
+                    buildTarget: path.basename(executable, '.exe'),
+                    minimumPassed: t.minimum_passed || 0,
                     // Some GTest binaries launch their own worker processes; respect
                     // config-level serialization so nested async subprocesses are not
                     // starved by the outer suite scheduler.
@@ -366,16 +382,24 @@ function discoverTests(config) {
         }
     }
 
-    for (const scriptTest of SCRIPT_TESTS) {
+    // Script checks share suite/category selection and reporting with native tests.
+    const configuredScripts = (config.test.script_tests || [])
+        .filter(t => !t.disabled)
+        .map(t => ({
+            ...t,
+            baseName: t.runner_name || path.basename(t.script, path.extname(t.script)),
+            displayName: t.name,
+            runner: 'node',
+            exclusive: t.parallel === false,
+        }));
+    for (const scriptTest of [...SCRIPT_TESTS, ...configuredScripts]) {
         const scriptPath = path.join(ROOT_DIR, scriptTest.script);
-        if (fs.existsSync(scriptPath)) {
-            tests.push({
-                ...scriptTest,
-                scriptPath,
-                exePath: scriptPath,
-                isGtest: false,
-            });
-        }
+        tests.push({
+            ...scriptTest,
+            scriptPath,
+            exePath: scriptPath,
+            isGtest: false,
+        });
     }
 
     // Deduplicate by baseName
@@ -522,26 +546,39 @@ function scheduleTests(tests) {
  * Returns: { passed, failed, total, status, failedTests[], timedOut }
  */
 function runTest(testInfo) {
+    const requestedWorkers = Number(process.env[testInfo.caseWorkersEnv] || testInfo.caseWorkers || 1);
+    const caseWorkers = Math.max(1, Math.min(MAX_CASE_CONCURRENT, Math.floor(requestedWorkers) || 1));
+    if (testInfo.isGtest && !testInfo.caseWorker && !testInfo.listCases &&
+        !process.env.GTEST_TOTAL_SHARDS && caseWorkers > 1) {
+        return runGtestCases(testInfo, caseWorkers);
+    }
     return new Promise((resolve) => {
         const { baseName, exePath, scriptPath } = testInfo;
         const idleTimeoutMs = getTestIdleTimeoutMs(baseName);
         const testPath = testInfo.runner === 'node' ? scriptPath : exePath;
+        const jsonFile = path.join(TEST_OUTPUT_DIR, `${baseName}_results.json`);
+        const logFile = path.join(TEST_OUTPUT_DIR, `${baseName}.log`);
+        ensureDir(path.dirname(logFile));
+        try { fs.unlinkSync(jsonFile); } catch (_) {}
 
         if (!testPath || !fs.existsSync(testPath)) {
+            fs.writeFileSync(logFile, `[${baseName}] ${testArtifactLabel(testInfo)} not found\n`);
+            fs.writeFileSync(jsonFile, JSON.stringify({ summary: { passed: 0, failed: 1, total: 1 },
+                results: [{ name: `${testArtifactLabel(testInfo)} not found`, pass: false }] }));
             resolve({
                 passed: 0, failed: 1, total: 1,
                 status: '❌ ERROR', failedTests: [`[${baseName}] ${testArtifactLabel(testInfo)} not found`],
-                timedOut: false,
+                timedOut: false, logFile,
             });
             return;
         }
 
-        const jsonFile = path.join(TEST_OUTPUT_DIR, `${baseName}_results.json`);
-        try { fs.unlinkSync(jsonFile); } catch (_) {}
+        const log = fs.createWriteStream(logFile);
+        const finish = result => log.end(() => resolve(result));
 
         // Build argv based on test type
         let testArgs = [];
-        let env = { ...process.env };
+        let env = { ...process.env, ...testInfo.env };
 
         // Suppress ASan container-overflow false positives
         const existingAsan = env.ASAN_OPTIONS || '';
@@ -572,6 +609,7 @@ function runTest(testInfo) {
         } else if (testInfo.isGtest) {
             const jsonPath = IS_WINDOWS ? jsonFile.replace(/\//g, '\\') : jsonFile;
             testArgs = [`--gtest_output=json:${jsonPath}`, ...(testInfo.runnerArgs || [])];
+            if (testInfo.listCases) testArgs.push('--gtest_list_tests');
             if (['test_js_gtest', 'test_wpt_html_parser_gtest', 'test_markdown_gtest'].includes(baseName) &&
                 targetCategory === 'baseline') {
                 testArgs.push('--baseline');
@@ -580,7 +618,7 @@ function runTest(testInfo) {
             if (baseName === 'test_input_roundtrip_gtest') {
                 testArgs.unshift('--gtest_filter=JsonTests.*');
             }
-            if (baseName === 'test_ui_automation_gtest') {
+            if (path.basename(exePath) === 'test_ui_automation_gtest.exe') {
                 const uiJobs = process.env.LAMBDA_UI_TEST_JOBS || '';
                 if (uiJobs) {
                     testArgs.push('--jobs', uiJobs);
@@ -600,9 +638,11 @@ function runTest(testInfo) {
             cwd: ROOT_DIR,
             env,
             stdio: ['ignore', 'pipe', 'pipe'],
+            detached: !IS_WINDOWS,
         });
 
         let outputLines = [];
+        let listing = '';
         let idleTimer = null;
         let timedOut = false;
         let finished = false;
@@ -614,7 +654,11 @@ function runTest(testInfo) {
                 if (finished) return;
                 timedOut = true;
                 console.error(`   ⏰ ${baseName} idle for ${idleTimeoutMs / 1000}s — killing (stuck?)`)
-                child.kill('SIGKILL');
+                // Script adapters own child runners; reap their process group too.
+                if (IS_WINDOWS) child.kill('SIGKILL');
+                else {
+                    try { process.kill(-child.pid, 'SIGKILL'); } catch (_) { child.kill('SIGKILL'); }
+                }
             }, idleTimeoutMs);
         }
 
@@ -623,6 +667,8 @@ function runTest(testInfo) {
 
         child.stdout.on('data', (data) => {
             resetIdleTimer();
+            log.write(data);
+            if (testInfo.listCases) listing += data.toString();
             const lines = data.toString().split('\n');
             outputLines.push(...lines);
             if (rawOutput) process.stdout.write(data);
@@ -630,22 +676,31 @@ function runTest(testInfo) {
 
         child.stderr.on('data', (data) => {
             resetIdleTimer();
+            log.write(data);
             if (rawOutput) process.stderr.write(data);
         });
 
         child.on('error', (err) => {
             finished = true;
             if (idleTimer) clearTimeout(idleTimer);
-            resolve({
+
+            finish({
                 passed: 0, failed: 1, total: 1,
                 status: '❌ ERROR', failedTests: [`[${baseName}] spawn error: ${err.message}`],
-                timedOut: false,
+                timedOut: false, logFile,
             });
         });
 
-        child.on('close', (code) => {
+        child.on('close', (code, signal) => {
+            if (finished) return;
             finished = true;
             if (idleTimer) clearTimeout(idleTimer);
+
+            if (testInfo.listCases) {
+                finish({ listing, failed: timedOut || code !== 0 || signal ? 1 : 0,
+                    timedOut, logFile, exitCode: code, signal });
+                return;
+            }
 
             if (timedOut) {
                 // Write a timeout marker JSON so results aggregation works
@@ -671,9 +726,129 @@ function runTest(testInfo) {
                 normalizeGtestCaseTimes(jsonFile);
             }
             const result = parseTestResults(baseName, jsonFile, timedOut, idleTimeoutMs);
-            resolve(result);
+            result.logFile = logFile;
+            // A passing JSON file cannot override a crash or a failing child exit.
+            const errors = [];
+            if (!timedOut && (code !== 0 || signal)) {
+                errors.push(signal ? `terminated by ${signal}` : `exited with code ${code}`);
+            }
+            if (!timedOut && result.total === 0) errors.push('runner returned no tests');
+            if (!timedOut && result.passed < testInfo.minimumPassed) {
+                errors.push(`expected at least ${testInfo.minimumPassed} passing tests, got ${result.passed}`);
+            }
+            if (errors.length) {
+                if (result.failed === 0) { result.failed = 1; result.total++; }
+                result.status = '❌ FAIL';
+                result.failedTests.push(...errors.map(error => `[${baseName}] ${error} (see ${logFile})`));
+            }
+            finish(result);
         });
     });
+}
+
+// independent cases own their process group, timeout, artifacts and native working directory.
+async function runGtestCases(testInfo, workers) {
+    const { baseName } = testInfo;
+    const jsonFile = path.join(TEST_OUTPUT_DIR, `${baseName}_results.json`);
+    const logFile = path.join(TEST_OUTPUT_DIR, `${baseName}.log`);
+    const start = Date.now();
+    const previousTimes = new Map();
+    try {
+        const previous = JSON.parse(fs.readFileSync(jsonFile, 'utf8'));
+        for (const suite of (previous.testsuites || [])) for (const tc of (suite.testsuite || [])) {
+            previousTimes.set(`${suite.name}.${tc.name}`, getCapturedCaseDurationMs(tc) || parseDurationMs(tc.time));
+        }
+    } catch (_) {}
+    try { fs.unlinkSync(jsonFile); } catch (_) {}
+    const discovery = await runTest({ ...testInfo, baseName: `${baseName}_cases/list`, listCases: true });
+    fs.copyFileSync(discovery.logFile, logFile);
+    const names = [];
+    let suite = '';
+    const runDisabled = (testInfo.runnerArgs || []).includes('--gtest_also_run_disabled_tests') ||
+        process.env.GTEST_ALSO_RUN_DISABLED_TESTS === '1';
+    for (const line of (discovery.listing || '').split('\n')) {
+        const content = line.split('#')[0].trimEnd();
+        if (/^\S+\.$/.test(content)) suite = content.slice(0, -1);
+        else if (suite && /^\s+\S+$/.test(content)) {
+            const name = `${suite}.${content.trim()}`;
+            if (runDisabled || !/(^|[/.])DISABLED_/.test(name)) names.push(name);
+        }
+    }
+    const errors = [];
+    if (discovery.failed) errors.push('GTest case discovery failed');
+    if (!names.length) errors.push('GTest case discovery returned no tests');
+    if (new Set(names).size !== names.length) errors.push('GTest case discovery returned duplicate tests');
+    if (errors.length) {
+        fs.writeFileSync(jsonFile, JSON.stringify({ summary: { passed: 0, failed: 1, total: 1 },
+            results: [{ name: errors.join('; '), pass: false }] }));
+        return { ...parseTestResults(baseName, jsonFile, false), logFile };
+    }
+    const runnerArgs = [];
+    const originalArgs = testInfo.runnerArgs || [];
+    for (let i = 0; i < originalArgs.length; i++) {
+        if (originalArgs[i] === '--gtest_filter') { i++; continue; }
+        if (!originalArgs[i].startsWith('--gtest_filter=')) runnerArgs.push(originalArgs[i]);
+    }
+    const cases = new Array(names.length);
+    // start expensive cases first, keeping merged reports in discovery order.
+    const queue = names.map((name, index) => ({ name, index })).sort((a, b) =>
+        (previousTimes.get(b.name) || 0) - (previousTimes.get(a.name) || 0));
+    let next = 0;
+    async function worker() {
+        while (next < names.length) {
+            const { name, index } = queue[next++];
+            const workerName = `${baseName}_cases/${index}`;
+            const result = await runTest({ ...testInfo, baseName: workerName, caseWorker: true,
+                minimumPassed: 0, env: { ...testInfo.env, LAMBDA_TEST_MAX_CONCURRENT: '1' },
+                runnerArgs: [...runnerArgs, ...testInfo.caseWorkerArgs, `--gtest_filter=${name}`] });
+            let data;
+            try { data = JSON.parse(fs.readFileSync(path.join(TEST_OUTPUT_DIR, `${workerName}_results.json`), 'utf8')); } catch (_) {}
+            const rows = Array.isArray(data?.testsuites) ? data.testsuites.flatMap(s =>
+                Array.isArray(s.testsuite) ? s.testsuite.map(tc => ({ suite: s.name, tc })) : []) : [];
+            const dot = name.indexOf('.');
+            const suiteName = name.slice(0, dot), caseName = name.slice(dot + 1);
+            const valid = data?.tests === 1 && rows.length === 1 && rows[0].tc?.status === 'RUN' &&
+                `${rows[0].suite}.${rows[0].tc.name}` === name;
+            const tc = valid ? rows[0].tc : { name: caseName, classname: suiteName, time: '0s',
+                status: 'RUN', result: 'COMPLETED' };
+            // a missing, mismatched or crashing child fails its discovered case, even with passing JSON.
+            if (!valid || result.failed) {
+                if (!Array.isArray(tc.failures) || !tc.failures.length) {
+                    tc.failures = [{ failure: (result.failedTests || []).join('\n') ||
+                        `expected exactly ${name} in the worker report (see ${result.logFile})` }];
+                }
+            }
+            cases[index] = { suiteName, tc };
+            fs.appendFileSync(logFile, `\n[case ${index + 1}/${names.length}] ${name}\n` +
+                fs.readFileSync(result.logFile, 'utf8'));
+        }
+    }
+    await Promise.all(Array.from({ length: Math.min(workers, names.length) }, worker));
+    const suites = new Map();
+    for (const { suiteName, tc } of cases) {
+        if (!suites.has(suiteName)) suites.set(suiteName, { name: suiteName, testsuite: [] });
+        suites.get(suiteName).testsuite.push(tc);
+    }
+    const failed = tc => Array.isArray(tc.failures) && tc.failures.length > 0;
+    const skipped = tc => !failed(tc) && tc.result === 'SKIPPED';
+    for (const suite of suites.values()) {
+        suite.tests = suite.testsuite.length;
+        suite.failures = suite.testsuite.filter(failed).length;
+        suite.skipped = suite.testsuite.filter(skipped).length;
+        suite.disabled = 0; suite.errors = 0;
+        suite.time = formatSecondsForGtest(suite.testsuite.reduce((sum, tc) => sum + parseDurationMs(tc.time), 0));
+    }
+    fs.writeFileSync(jsonFile, JSON.stringify({ tests: cases.length,
+        failures: cases.filter(row => failed(row.tc)).length,
+        skipped: cases.filter(row => skipped(row.tc)).length, disabled: 0, errors: 0,
+        timestamp: new Date(start).toISOString(), time: formatSecondsForGtest(Date.now() - start),
+        name: 'AllTests', testsuites: [...suites.values()] }, null, 2));
+    const result = parseTestResults(baseName, jsonFile, false);
+    if (result.passed < testInfo.minimumPassed && !result.failed) {
+        result.failed++; result.total++; result.status = '❌ FAIL';
+        result.failedTests.push(`[${baseName}] expected at least ${testInfo.minimumPassed} passing tests, got ${result.passed}`);
+    }
+    return { ...result, logFile };
 }
 
 // ─── Result parsing ─────────────────────────────────────────────────────────────
@@ -689,20 +864,8 @@ function parseTestResults(baseName, jsonFile, timedOut, idleTimeoutMs = IDLE_TIM
     }
 
     let data;
-    // Wait briefly for JSON file to appear (GTest writes after process exit)
-    for (let attempt = 0; attempt < 50; attempt++) {
-        try {
-            if (fs.existsSync(jsonFile)) {
-                data = JSON.parse(fs.readFileSync(jsonFile, 'utf8'));
-                break;
-            }
-        } catch (_) {}
-        // Synchronous small wait — only during result collection, not during test execution
-        if (attempt < 49) {
-            const start = Date.now();
-            while (Date.now() - start < 100) { /* spin */ }
-        }
-    }
+    // Child close follows JSON writes; missing output is an integrity failure.
+    try { data = JSON.parse(fs.readFileSync(jsonFile, 'utf8')); } catch (_) {}
 
     if (!data) {
         return {
@@ -714,8 +877,10 @@ function parseTestResults(baseName, jsonFile, timedOut, idleTimeoutMs = IDLE_TIM
     }
 
     let passed = 0, failed = 0, total = 0;
+    let partial = 0, skipped = 0;
     let failedTests = [];
     let caseTimings = [];
+    let launchTimings = [];
     let capturedCaseDurationMs = 0;
 
     if (baseName === 'lambda_test_runner') {
@@ -737,6 +902,8 @@ function parseTestResults(baseName, jsonFile, timedOut, idleTimeoutMs = IDLE_TIM
         passed = data.summary.passed;
         failed = data.summary.failed;
         total = typeof data.summary.total === 'number' ? data.summary.total : passed + failed;
+        partial = data.summary.partial || 0;
+        skipped = data.summary.skipped || 0;
         if (Array.isArray(data.results)) {
             failedTests = data.results
                 .filter(t => t.pass === false)
@@ -752,12 +919,29 @@ function parseTestResults(baseName, jsonFile, timedOut, idleTimeoutMs = IDLE_TIM
         // GTest format: { tests: N, failures: M, disabled: D, testsuites: [...] }
         const disabled = data.disabled || 0;
         total = data.tests - disabled;
+        skipped = data.skipped || 0;
         failed = data.failures || 0;
-        passed = total - failed;
+        passed = total - failed - skipped;
         // Extract failed test names from testsuites
         if (Array.isArray(data.testsuites)) {
             for (const suite of data.testsuites) {
                 for (const tc of (suite.testsuite || [])) {
+                    // Parallel view launches carry their actual subprocess time, not assertion time.
+                    const properties = Array.isArray(tc.properties) ? tc.properties.map(p => p.key) : [];
+                    for (const key of new Set([...Object.keys(tc), ...properties])) {
+                        const prefix = 'radiant_view_elapsed_ms_';
+                        if (!key.startsWith(prefix)) continue;
+                        const launch = key.slice(prefix.length);
+                        const phasesFile = getTestProperty(tc, `radiant_view_phases_${launch}`);
+                        let phases = {};
+                        try {
+                            phases = Object.fromEntries(fs.readFileSync(phasesFile, 'utf8').trim().split('\n')
+                                .slice(1).map(line => { const [key, value] = line.split('\t'); return [key, Number(value)]; }));
+                        } catch (_) {}
+                        launchTimings.push({ test: `${suite.name}.${tc.name}`, launch,
+                            duration_ms: Number(getTestProperty(tc, key)), phases,
+                            log_file: getTestProperty(tc, `radiant_view_log_${launch}`), phases_file: phasesFile });
+                    }
                     const capturedMs = getCapturedCaseDurationMs(tc);
                     const durationMs = capturedMs > 0 ? capturedMs : parseDurationMs(tc.time);
                     if (durationMs > 0) {
@@ -800,11 +984,14 @@ function parseTestResults(baseName, jsonFile, timedOut, idleTimeoutMs = IDLE_TIM
     }
 
     return {
-        passed, failed, total,
+        passed, failed, total, partial, skipped,
+        details: data.details || '',
+        subResults: data.suites || [],
         status: failed === 0 ? '✅ PASS' : '❌ FAIL',
         failedTests,
         caseTimings: caseTimings.sort((a, b) => b.duration_ms - a.duration_ms),
         capturedCaseDurationMs,
+        launchTimings: launchTimings.sort((a, b) => b.duration_ms - a.duration_ms),
         timedOut: false,
     };
 }
@@ -931,7 +1118,7 @@ function displayResults(config, results) {
     const orderedSuites = ['library', 'input', 'mir', 'lambda', 'lambda-std', 'validator', 'radiant'];
     const allSuites = [...new Set([...orderedSuites, ...suiteMap.keys()])].filter(s => suiteMap.has(s));
 
-    let totalTests = 0, totalPassed = 0, totalFailed = 0;
+    let totalTests = 0, totalPassed = 0, totalFailed = 0, totalPartial = 0, totalSkipped = 0;
     const allFailedTests = [];
     const allCaseTimings = [];
 
@@ -950,11 +1137,14 @@ function displayResults(config, results) {
     for (const suiteKey of allSuites) {
         const suite = suiteMap.get(suiteKey);
         let suitePassed = 0, suiteFailed = 0, suiteTotal = 0, suiteDurationMs = 0;
+        let suitePartial = 0, suiteSkipped = 0;
 
         for (const t of suite.tests) {
             suitePassed += t.result.passed;
             suiteFailed += t.result.failed;
             suiteTotal  += t.result.total;
+            suitePartial += t.result.partial || 0;
+            suiteSkipped += t.result.skipped || 0;
             suiteDurationMs += t.result.durationMs || 0;
             allFailedTests.push(...t.result.failedTests);
             for (const caseTiming of (t.result.caseTimings || [])) {
@@ -969,8 +1159,10 @@ function displayResults(config, results) {
         totalTests  += suiteTotal;
         totalPassed += suitePassed;
         totalFailed += suiteFailed;
+        totalPartial += suitePartial;
+        totalSkipped += suiteSkipped;
 
-        suiteResults.push({ suite, suitePassed, suiteFailed, suiteTotal, suiteDurationMs });
+        suiteResults.push({ suite, suitePassed, suiteFailed, suiteTotal, suiteDurationMs, suitePartial, suiteSkipped });
     }
 
     // Save summary JSON
@@ -978,22 +1170,27 @@ function displayResults(config, results) {
         total_tests: totalTests,
         total_passed: totalPassed,
         total_failed: totalFailed,
+        total_partial: totalPartial,
+        total_skipped: totalSkipped,
         failed_test_names: allFailedTests,
         top_slow_tests: allCaseTimings
             .slice()
             .sort((a, b) => b.duration_ms - a.duration_ms)
             .slice(0, 20),
-        level1_test_suites: allSuites.map(key => {
-            const s = suiteMap.get(key);
-            let sp = 0, sf = 0, st = 0, sd = 0;
-            for (const t of s.tests) { sp += t.result.passed; sf += t.result.failed; st += t.result.total; sd += t.result.durationMs || 0; }
-            return { name: s.displayName, total: st, passed: sp, failed: sf, duration_ms: sd, status: sf === 0 ? '✅ PASS' : '❌ FAIL' };
-        }),
+        level1_test_suites: suiteResults.map(s => ({
+            name: s.suite.displayName, total: s.suiteTotal, passed: s.suitePassed, failed: s.suiteFailed,
+            partial: s.suitePartial, skipped: s.suiteSkipped, duration_ms: s.suiteDurationMs,
+            status: s.suiteFailed === 0 ? '✅ PASS' : '❌ FAIL',
+        })),
         level2_c_tests: [...results.entries()].map(([bn, e]) => ({
-            name: e.testInfo.displayName, suite: e.testInfo.suite,
+            test: bn, name: e.testInfo.displayName, suite: e.testInfo.suite,
             total: e.total, passed: e.passed, failed: e.failed,
+            partial: e.partial || 0, skipped: e.skipped || 0,
+            details: e.details || '', suites: e.subResults || [],
+            log_file: e.logFile || '',
             duration_ms: e.durationMs || 0,
             captured_case_duration_ms: e.capturedCaseDurationMs || 0,
+            launch_timings: e.launchTimings || [],
             status: e.status,
             top_slow_tests: (e.caseTimings || []).slice(0, 20),
         })),
@@ -1001,6 +1198,10 @@ function displayResults(config, results) {
 
     const summaryFile = path.join(TEST_OUTPUT_DIR, 'test_summary.json');
     fs.writeFileSync(summaryFile, JSON.stringify(summary, null, 4));
+    if (rawOutput) {
+        console.log(`\n📁 Raw output mode - results saved to: ${TEST_OUTPUT_DIR}`);
+        return { totalFailed };
+    }
 
     // Print report
     console.log('');
@@ -1037,6 +1238,10 @@ function displayResults(config, results) {
 
         for (const t of suite.tests) {
             console.log(` └─${t.result.status} (${t.result.passed}/${t.result.total} tests, ${formatDuration(t.result.durationMs || 0)}) ${t.displayName} (${testArtifactLabel(t.result.testInfo)})`);
+            if (t.result.details) console.log(`    ${t.result.details}`);
+            for (const s of (t.result.subResults || [])) {
+                console.log(`    └─${s.status} ${s.name}: ${s.passed} passed, ${s.partial || 0} partial, ${s.failed} failed, ${s.skipped || 0} skipped (${formatDuration(s.duration_ms || 0)})`);
+            }
         }
     }
 
@@ -1068,6 +1273,9 @@ function displayResults(config, results) {
         }
     }
 
+    if (totalPartial) console.log(`   ⚠️  Partially Passing: ${totalPartial}`);
+    if (totalSkipped) console.log(`   ⏭️  Skipped: ${totalSkipped}`);
+
     if (allFailedTests.length > 0) {
         console.log('');
         console.log('🔍 Failed Tests:');
@@ -1094,6 +1302,14 @@ function displayResults(config, results) {
 // ─── Main ───────────────────────────────────────────────────────────────────────
 
 async function main() {
+    const config = loadConfig();
+    let tests = filterTests(discoverTests(config));
+    if (listTests || listBuildTargets) {
+        console.log(listBuildTargets
+            ? [...new Set(tests.map(t => t.buildTarget).filter(Boolean))].join(' ')
+            : JSON.stringify(tests, null, 2));
+        return;
+    }
     console.log('==============================================================');
     console.log('🧪 Lambda Test Suite Runner (Node.js)');
     console.log('==============================================================');
@@ -1105,12 +1321,9 @@ async function main() {
     }
     console.log('==============================================================');
 
-    const config = loadConfig();
     ensureDir(TEST_OUTPUT_DIR);
 
     // Discover and filter tests
-    let tests = discoverTests(config);
-    tests = filterTests(tests);
     tests = scheduleTests(tests);
 
     if (tests.length === 0) {
@@ -1124,19 +1337,9 @@ async function main() {
     // Run tests
     const results = await runScheduledTests(tests);
 
-    // Display and save results
-    if (!rawOutput) {
-        const { totalFailed } = displayResults(config, results);
-        process.exitCode = totalFailed > 0 ? 1 : 0;
-    } else {
-        console.log('');
-        console.log(`📁 Raw output mode - results saved to: ${TEST_OUTPUT_DIR}`);
-        let totalFailed = 0;
-        for (const entry of results.values()) {
-            totalFailed += entry.failed || 0;
-        }
-        process.exitCode = totalFailed > 0 ? 1 : 0;
-    }
+    // Raw output still needs the same persisted summary and final exit verdict.
+    const { totalFailed } = displayResults(config, results);
+    process.exitCode = totalFailed > 0 ? 1 : 0;
 }
 
 main().catch((err) => {

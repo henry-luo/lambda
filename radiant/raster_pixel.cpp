@@ -225,29 +225,3 @@ void render_pixel_source_over_coverage(uint8_t* destination, Color color,
     destination[2] = (uint8_t)(blue > 255 ? 255 : blue);
     destination[3] = (uint8_t)(result_a > 255 ? 255 : result_a);
 }
-
-void render_pixel_source_over_opaque_bytes(uint8_t* destination, uint32_t source,
-                                           uint8_t opacity) {
-    if (!destination) return;
-    uint8_t source_alpha = (uint8_t)((source >> 24) & 0xFFu);
-    if (opacity < 255 && source_alpha > 0) {
-        source_alpha = (uint8_t)((source_alpha * opacity + 127u) / 255u);
-    }
-    if (source_alpha == 0) return;
-    uint8_t source_red = (uint8_t)(source & 0xFFu);
-    uint8_t source_green = (uint8_t)((source >> 8) & 0xFFu);
-    uint8_t source_blue = (uint8_t)((source >> 16) & 0xFFu);
-    if (source_alpha == 255) {
-        destination[0] = source_red;
-        destination[1] = source_green;
-        destination[2] = source_blue;
-        destination[3] = 255;
-        return;
-    }
-    float alpha = source_alpha / 255.0f;
-    float inverse = 1.0f - alpha;
-    destination[0] = (uint8_t)(source_red * alpha + destination[0] * inverse);
-    destination[1] = (uint8_t)(source_green * alpha + destination[1] * inverse);
-    destination[2] = (uint8_t)(source_blue * alpha + destination[2] * inverse);
-    destination[3] = (uint8_t)(source_alpha + destination[3] * inverse);
-}

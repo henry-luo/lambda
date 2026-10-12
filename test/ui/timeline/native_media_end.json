@@ -1,0 +1,14 @@
+{
+  "name":"Native AVFoundation end notification advances the timeline without an authored clip end",
+  "html":"test/ui/timeline/native_media_end.ls",
+  "viewport":{"width":900,"height":650},
+  "input_turn_ms":0,
+  "events":[
+    {"type":"click","target":{"selector":"[data-timeline-command='play']"}},
+    {"type":"advance_time","ms":110,"steps":11},
+    {"type":"assert_text","target":{"selector":"#ended"},"equals":"1"},
+    {"type":"assert_text","target":{"selector":"#errors"},"equals":"0"},
+    {"type":"assert_text","target":{"selector":"#timeouts"},"equals":"0"},
+    {"type":"assert_attribute","target":{"selector":".lambda-timeline-chart"},"attribute":"data-timeline-active","equals":"b"}
+  ]
+}

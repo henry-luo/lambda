@@ -1,0 +1,16 @@
+{
+  "name": "Timeline group controls preserve hidden selections and isolate hierarchy",
+  "html": "test/ui/timeline/groups.ls",
+  "viewport": {"width": 1000, "height": 650},
+  "events": [
+    {"type": "assert_count", "target": {"selector": ".lambda-timeline-item"}, "count": 2},
+    {"type": "assert_count", "target": {"selector": "button[data-timeline-group]"}, "count": 2},
+    {"type": "click", "target": {"selector": "button[data-timeline-group='parent']"}},
+    {"type": "assert_attribute", "target": {"selector": "button[data-timeline-group='parent']"}, "attribute": "aria-expanded", "equals": "false"},
+    {"type": "assert_count", "target": {"selector": ".lambda-timeline-item"}, "count": 1},
+    {"type": "assert_count", "target": {"selector": "button[data-timeline-group]"}, "count": 1},
+    {"type": "click", "target": {"selector": "button[data-timeline-group='parent']"}},
+    {"type": "assert_count", "target": {"selector": ".lambda-timeline-item"}, "count": 2},
+    {"type": "assert_count", "target": {"selector": "button[data-timeline-group]"}, "count": 2}
+  ]
+}

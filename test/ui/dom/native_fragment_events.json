@@ -1,0 +1,11 @@
+{
+  "name":"Native fragment activation queues JavaScript hashchange with original URLs",
+  "html":"test/ui/dom/native_fragment_events.html",
+  "viewport":{"width":600,"height":400},
+  "events":[
+    {"type":"click","target":{"selector":"#one"}},
+    {"type":"assert_text","target":{"selector":"#status"},"equals":"1:#one:false:true:2"},
+    {"type":"click","target":{"selector":"#back"}},
+    {"type":"assert_text","target":{"selector":"#status"},"equals":"2::true:false:2"}
+  ]
+}

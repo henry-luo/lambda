@@ -1,6 +1,6 @@
 # Radiant — Media & Embedded Webview
 
-> **Last verified against tree:** 2026-09-29
+> **Last verified against tree:** 2026-10-11 (§2.4 retained media); 2026-09-29
 
 > **Part of the [Radiant detailed-design set](RAD_00_Overview.md).** This document covers the two subsystems that push *external* content into a Radiant document: animated media (GIF, Lottie, video) and native embedded web views (`<webview>`). Their code lives in separate files but they are the same design: content that Radiant does not lay out or paint itself is decoded/rendered by an outside engine into an `ImageSurface`, then composited into the window surface at a layout-computed rect. Both share the `#ifdef`-selected mac/linux/stub platform-abstraction pattern and the same main-loop dirty-poll/wake hooks. This doc describes that unifying pattern, each media player, the placeholder-plus-post-composite render split, and the webview child-window/layer modes.
 >
@@ -64,6 +64,34 @@ The macOS backend (`struct RdtVideo`, `rdt_video_avf.mm:27`) is a no-ARC Objecti
 State is tracked via KVO on `AVPlayerItem.status` and `AVPlayer.timeControlStatus` (`RdtVideoObserver`, `rdt_video_avf.mm:118`), with a fallback that polls those same properties in `rdt_video_get_state` (`rdt_video_avf.mm:373`) because KVO may not fire without a run loop. The `RdtVideoState` enum (`rdt_video.h:22`) and the `RdtVideoCallbacks` struct (`rdt_video.h:40`, four callbacks: state/frame/duration/size) are the entire cross-platform contract. A `addPeriodicTimeObserver` block throttled to ~30 fps (`rdt_video_avf.mm:285-301`, gated on `current_ms - last_ms >= 33`) sets `has_new_frame` and fires `on_frame_ready` — the wake trigger of [§5](#5-the-frame-ready-wake-and-post-composite-flow).
 
 ---
+
+### 2.4 Retained HTML media and procedural control
+
+`MediaViewState` owns an HTML audio/video decoder, its source signature and
+selected local path. `EmbedProp::video` borrows it for a layout pass. Rebuilding
+or resizing an unchanged logical owner preserves playback/settings; changing
+the authored source list retires the decoder. Layout resolves sources against
+its own document, including iframe documents (**D4.5.1v4, D7.5.3**).
+Removing a connected media element pauses it at the stable-state reconciliation
+boundary even if a retained script wrapper keeps its decoder alive. Retirement
+releases the decoder. This follows the
+[HTML media removal steps](https://html.spec.whatwg.org/multipage/media.html#playing-the-media-resource).
+The shared host pump services one nonblocking native media event turn; macOS uses
+[CFRunLoopRunInMode with zero duration](https://developer.apple.com/documentation/corefoundation/cfrunloopruninmode%28_%3A_%3A_%3A%29).
+Headless playback therefore receives AVFoundation readiness/end callbacks too.
+
+`dom.media_info(node)` returns state, time, duration, volume, dimensions, and
+audio availability, or null without a decoder. Procedural
+`dom.media_command(node, command, value)` handles play/pause/stop/seek, volume,
+muting, and looping through that retained owner (**S12.1.3**). Generic timeline
+controllers retain session IDs rather than native handles. Remote/provider
+controllers and non-macOS decoders remain separate acceptance work.
+
+Evidence: `test/ui/media_owner.{ls,json}`,
+`test/ui/timeline/media_iframe.{html,json}`,
+`test/ui/timeline/native_media.{ls,json}`,
+`test/ui/timeline/native_media_end.{ls,json}`,
+`test/ui/media_removal.{ls,json}`, and `test/test_state_store_gtest.cpp`.
 
 ## 3. Embedded webview — a native web engine as a child or a layer
 

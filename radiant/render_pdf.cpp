@@ -28,6 +28,12 @@ extern "C" {
 #define PDF_PAINT_TRANSFORM_STACK_MAX 64
 #define PDF_PAINT_EFFECT_STACK_MAX 64
 
+struct PdfPaintRectClip {
+    Bound bound;
+    bool rectangular;
+    lam::Own<PdfPaintRectClip> previous;
+};
+
 typedef struct PdfPaintLoweringState {
     int active_transform_depth;
     int skipped_transform_depth;
@@ -35,6 +41,8 @@ typedef struct PdfPaintLoweringState {
     int passthrough_effect_depth;
     int active_clip_depth;
     int skipped_clip_depth;
+    lam::Own<PdfPaintRectClip> rect_clip;
+    int untracked_rect_clip_depth;
     RdtMatrix current_transform;
     RdtMatrix transform_stack[PDF_PAINT_TRANSFORM_STACK_MAX];
     float current_opacity;
@@ -171,6 +179,45 @@ static bool pdf_collect_outlines(PdfRenderContext* ctx, DomElement* element) {
     return true;
 }
 
+static void pdf_pop_rect_clip(PdfPaintLoweringState* state) {
+    if (state->untracked_rect_clip_depth > 0) { state->untracked_rect_clip_depth--; return; }
+    PdfPaintRectClip* clip = state->rect_clip;
+    if (!clip) return;
+    state->rect_clip = clip->previous;
+    mem_free(clip);
+}
+
+static void pdf_release_rect_clips(PdfPaintLoweringState* state) {
+    state->untracked_rect_clip_depth = 0;
+    while (state->rect_clip) pdf_pop_rect_clip(state);
+}
+
+static void pdf_push_rect_clip(PdfPaintLoweringState* state, const RdtPath* path, const RdtMatrix* transform) {
+    if (state->untracked_rect_clip_depth > 0) { state->untracked_rect_clip_depth++; return; }
+    PdfPaintRectClip* clip = (PdfPaintRectClip*)mem_calloc(1, sizeof(PdfPaintRectClip), MEM_CAT_RENDER); // OBJ_HEAP_OK: the PDF clip stack releases each entry on pop or context teardown.
+    if (!clip) { state->untracked_rect_clip_depth = 1; return; }
+    clip->rectangular = rdt_path_get_rect_bound(path, transform, &clip->bound);
+    clip->previous = state->rect_clip;
+    state->rect_clip = lam::own(clip);
+}
+
+static bool pdf_intersect_rect_clips(const PdfPaintLoweringState* state, const PaintFillRect* rect,
+        const RdtMatrix* transform, Rect* result) {
+    if (!state->rect_clip || state->untracked_rect_clip_depth > 0 ||
+            (transform && !rdt_matrix_is_scale_translation(transform))) return false;
+    Bound bound = {rect->x, rect->y, rect->x + rect->w, rect->y + rect->h};
+    if (transform && !rdt_matrix_project_rect_bounds(transform, bound.left, bound.top, bound.right, bound.bottom,
+            &bound.left, &bound.top, &bound.right, &bound.bottom)) return false;
+    for (const PdfPaintRectClip* clip = state->rect_clip; clip; clip = clip->previous) {
+        if (!clip->rectangular) return false;
+        bound = view_geometry_intersect_bound_rect(bound,
+            {clip->bound.left, clip->bound.top, clip->bound.right - clip->bound.left, clip->bound.bottom - clip->bound.top});
+    }
+    // trim geometry before native clipping so coincident fill/clip edges do not rasterize twice.
+    *result = {bound.left, bound.top, fmaxf(0.0f, bound.right - bound.left), fmaxf(0.0f, bound.bottom - bound.top)};
+    return true;
+}
+
 static void pdf_paint_lowering_state_init(PdfPaintLoweringState* state) {
     if (!state) return;
     memset(state, 0, sizeof(PdfPaintLoweringState));
@@ -197,7 +244,7 @@ static bool pdf_effect_group_is_opacity_only(const RenderExportTargetCaps* caps,
            !group->backdrop &&
            group->backdrop_filter == nullptr &&
            !group->shadow &&
-           !group->isolation;
+           !group->isolation && !group->mask.gradient;
 }
 
 static void pdf_record_page_backdrop_paint_list(PdfRenderContext* ctx,
@@ -205,7 +252,7 @@ static void pdf_record_page_backdrop_paint_list(PdfRenderContext* ctx,
     if (!ctx) return;
     render_effect_record_page_backdrop_paint_list(
         ctx->page_backdrop_ready, &ctx->page_backdrop_dl, paint_list,
-        render_glyph_run_raster_lower);
+        render_glyph_run_raster_lower, ctx->ui_context ? ui_context_raster_scale(ctx->ui_context) : 1.0f);
 }
 
 // Helper function to get PDF font name from system font
@@ -555,7 +602,7 @@ static bool pdf_draw_abgr_image_impl(PdfRenderContext* ctx,
                                      float dst_w, float dst_h,
                                      uint8_t opacity,
                                      const RdtMatrix* transform,
-                                     bool preserve_alpha) {
+                                     bool straight_alpha) {
     if (!ctx || !pixels || src_w <= 0 || src_h <= 0 || dst_w <= 0.0f || dst_h <= 0.0f) {
         return false;
     }
@@ -563,8 +610,20 @@ static bool pdf_draw_abgr_image_impl(PdfRenderContext* ctx,
 
     int stride_pixels = pdf_image_stride_pixels(src_w, src_stride);
     bool opaque = pdf_image_pixels_are_opaque(pixels, src_w, src_h, stride_pixels);
-    if (!opaque && !preserve_alpha) {
-        return false;
+    lam::Temp<uint32_t> straight;
+    if (!opaque && !straight_alpha) {
+        size_t count = 0, bytes = 0;
+        if (!math_checked_mul((size_t)src_w, (size_t)src_h, &count) ||
+            !math_checked_mul(count, sizeof(uint32_t), &bytes) ||
+            !render_memory_allow_allocation(nullptr, bytes)) return false;
+        straight = lam::temp_array<uint32_t>(count, MEM_CAT_RENDER);
+        if (!straight) return false;
+        // PDF stores straight RGB beside a soft alpha mask; replay buffers are premultiplied.
+        for (int row = 0; row < src_h; row++) for (int column = 0; column < src_w; column++)
+            straight[(size_t)row * (size_t)src_w + (size_t)column] =
+                render_pixel_unpremultiply_abgr(pixels[(size_t)row * (size_t)stride_pixels + (size_t)column]);
+        pixels = straight.get();
+        stride_pixels = src_w;
     }
 
     float x0 = 0.0f, y0 = 0.0f;
@@ -593,10 +652,11 @@ static bool pdf_draw_abgr_image_impl(PdfRenderContext* ctx,
 static bool pdf_draw_abgr_image(PdfRenderContext* ctx, const uint32_t* pixels,
                                 int src_w, int src_h, int src_stride,
                                 float dst_x, float dst_y, float dst_w, float dst_h,
-                                uint8_t opacity, const RdtMatrix* transform) {
+                                uint8_t opacity, const RdtMatrix* transform,
+                                bool straight_alpha = false) {
     return pdf_draw_abgr_image_impl(ctx, pixels, src_w, src_h, src_stride,
                                     dst_x, dst_y, dst_w, dst_h, opacity,
-                                    transform, false);
+                                    transform, straight_alpha);
 }
 
 static bool pdf_draw_abgr_image_preserve_alpha(PdfRenderContext* ctx,
@@ -650,6 +710,7 @@ static void pdf_finish_effect_raster_fallback(PdfRenderContext* ctx) {
         ctx->page_width,
         ctx->page_height,
         false,
+        ctx->ui_context ? ui_context_raster_scale(ctx->ui_context) : 1.0f,
         &image,
         "[PDF_PAINT_IR]");
     ctx->paint_state.command_count += paint_list_count(&ctx->effect_fallback.paint_list);
@@ -705,49 +766,6 @@ static void pdf_render_glyph_run(PdfRenderContext* ctx, const PaintGlyphRun* run
     if (path) rdt_path_free(path);
 }
 
-static Color pdf_gradient_composite_opaque(Color src) {
-    if (src.a == 255) return src;
-    Color out = {};
-    uint32_t a = src.a;
-    out.r = (uint8_t)((src.r * a + 255u * (255u - a)) / 255u);
-    out.g = (uint8_t)((src.g * a + 255u * (255u - a)) / 255u);
-    out.b = (uint8_t)((src.b * a + 255u * (255u - a)) / 255u);
-    out.a = 255;
-    return out;
-}
-
-static Color pdf_gradient_sample_stops(const RdtGradientStop* stops, int stop_count,
-                                       float t) {
-    Color out = {};
-    out.a = 255;
-    if (!stops || stop_count <= 0) return out;
-    if (t <= stops[0].offset || stop_count == 1) {
-        out.r = stops[0].r;
-        out.g = stops[0].g;
-        out.b = stops[0].b;
-        out.a = stops[0].a;
-        return pdf_gradient_composite_opaque(out);
-    }
-    for (int i = 1; i < stop_count; i++) {
-        const RdtGradientStop* prev = &stops[i - 1];
-        const RdtGradientStop* next = &stops[i];
-        if (t > next->offset) continue;
-        float span = next->offset - prev->offset;
-        float local_t = span > 1e-6f ? (t - prev->offset) / span : 0.0f;
-        local_t = clamp_unit(local_t);
-        out.r = (uint8_t)(prev->r + (next->r - prev->r) * local_t);
-        out.g = (uint8_t)(prev->g + (next->g - prev->g) * local_t);
-        out.b = (uint8_t)(prev->b + (next->b - prev->b) * local_t);
-        out.a = (uint8_t)(prev->a + (next->a - prev->a) * local_t);
-        return pdf_gradient_composite_opaque(out);
-    }
-    out.r = stops[stop_count - 1].r;
-    out.g = stops[stop_count - 1].g;
-    out.b = stops[stop_count - 1].b;
-    out.a = stops[stop_count - 1].a;
-    return pdf_gradient_composite_opaque(out);
-}
-
 static bool pdf_gradient_path_bounds(RdtPath* path, float* left, float* top,
                                      float* width, float* height) {
     if (!path || !left || !top || !width || !height) return false;
@@ -766,98 +784,51 @@ static bool pdf_gradient_path_bounds(RdtPath* path, float* left, float* top,
     return true;
 }
 
-static bool pdf_draw_gradient_surface(PdfRenderContext* ctx, RdtPath* path,
-                                      const RdtMatrix* transform,
-                                      ImageSurface* surface,
-                                      float left, float top,
-                                      float width, float height) {
-    if (!ctx || !path || !surface || !surface->pixels) return false;
-    bool clipped = pdf_push_clip_path(ctx, path, transform);
-    if (!clipped) return false;
-    bool ok = pdf_draw_abgr_image(ctx, (const uint32_t*)surface->pixels,
-                                  surface->width, surface->height,
-                                  surface->width,
-                                  left, top, width, height,
-                                  255, transform);
-    HPDF_Page_GRestore(ctx->current_page);
-    return ok;
-}
-
-typedef float (*PdfGradientPosition)(const void* paint, float x, float y);
-
-static float pdf_linear_gradient_position(const void* paint, float x, float y) {
-    const PaintFillLinearGradient* p = (const PaintFillLinearGradient*)paint;
-    float dx = p->x2 - p->x1;
-    float dy = p->y2 - p->y1;
-    float denom = dx * dx + dy * dy;
-    return denom > 1e-6f
-        ? ((x - p->x1) * dx + (y - p->y1) * dy) / denom : 0.0f;
-}
-
-static float pdf_radial_gradient_position(const void* paint, float x, float y) {
-    const PaintFillRadialGradient* p = (const PaintFillRadialGradient*)paint;
-    return hypotf(x - p->cx, y - p->cy) / p->r;
-}
-
 static bool pdf_raster_fallback_gradient(PdfRenderContext* ctx,
-                                         RdtPath* path,
-                                         const RdtGradientStop* stops,
-                                         int stop_count,
-                                         const RdtMatrix* transform,
-                                         const void* paint,
-                                         PdfGradientPosition position,
-                                         const char* kind) {
+                                         const PaintCmd* command,
+                                         const RdtMatrix* transform) {
+    if (!ctx || !command) return false;
+    RdtPath* path = command->op == PAINT_FILL_LINEAR_GRADIENT
+        ? command->fill_linear_gradient.path : command->fill_radial_gradient.path;
     float left = 0.0f;
     float top = 0.0f;
     float width = 0.0f;
     float height = 0.0f;
     if (!pdf_gradient_path_bounds(path, &left, &top, &width, &height)) return false;
 
-    int surface_w = (int)ceilf(width); // INT_CAST_OK: PDF gradient fallback surface dimensions are integer pixels.
-    int surface_h = (int)ceilf(height); // INT_CAST_OK: PDF gradient fallback surface dimensions are integer pixels.
-    if (surface_w <= 0 || surface_h <= 0) return false;
-    ImageSurface* surface = image_surface_create(surface_w, surface_h);
-    if (!surface) return false;
-
-    uint32_t* pixels = (uint32_t*)surface->pixels;
-    for (int py = 0; py < surface_h; py++) {
-        float y = top + ((float)py + 0.5f) * height / (float)surface_h;
-        for (int px = 0; px < surface_w; px++) {
-            float x = left + ((float)px + 0.5f) * width / (float)surface_w;
-            float t = position(paint, x, y);
-            t = clamp_unit(t);
-            pixels[py * surface_w + px] =
-                pdf_gradient_sample_stops(stops, stop_count, t).c;
-        }
+    float density = ctx->ui_context ? ui_context_raster_scale(ctx->ui_context) : 1.0f;
+    PaintList paint;
+    RdtMatrix scale = rdt_matrix_scale(density, density);
+    paint_push_transform(&paint, &scale);
+    // shared replay preserves spread, ellipse/focal transforms, clipping and transparent stops.
+    if (command->op == PAINT_FILL_LINEAR_GRADIENT) {
+        const PaintFillLinearGradient& p = command->fill_linear_gradient;
+        paint_fill_linear_gradient(&paint, path, p.x1, p.y1, p.x2, p.y2,
+            p.stops, p.stop_count, p.rule, nullptr,
+            pdf_optional_transform(p.has_gradient_transform, &p.gradient_transform), &p.options);
+    } else {
+        const PaintFillRadialGradient& p = command->fill_radial_gradient;
+        paint_fill_radial_gradient(&paint, path, p.cx, p.cy, p.r,
+            p.stops, p.stop_count, p.rule, nullptr,
+            pdf_optional_transform(p.has_gradient_transform, &p.gradient_transform), &p.options);
     }
-
-    log_info("[PDF_PAINT_IR] raster fallback %s gradient %.1fx%.1f to %dx%d",
-             kind, width, height, surface_w, surface_h);
-    bool ok = pdf_draw_gradient_surface(ctx, path, transform, surface,
-                                        left, top, width, height);
+    paint_pop_transform(&paint);
+    OffscreenRenderArenas arenas;
+    if (!arenas.init("render.pdf.gradient", "render.pdf.gradient.list", "render.pdf.gradient.scratch")) return false;
+    DisplayList dl = {}; dl_init(&dl, arenas.list_arena);
+    paint_ir_lower_raster(&paint, &dl);
+    Bound bounds = {left * density, top * density, (left + width) * density, (top + height) * density};
+    ImageSurface* surface = render_display_list_snapshot(&dl,
+        mem_context_process(MEM_ROLE_RENDER), bounds, density);
+    dl_destroy(&dl);
+    arenas.destroy();
+    if (!surface) return false;
+    // the snapshot already clips the path; clipping again adds a second antialiased edge.
+    bool ok = pdf_draw_abgr_image_preserve_alpha(ctx, (const uint32_t*)surface->pixels,
+        surface->width, surface->height, surface->pitch / 4, left, top,
+        (float)surface->width / density, (float)surface->height / density, 255, transform);
     image_surface_destroy(surface);
     return ok;
-}
-
-static bool pdf_raster_fallback_linear_gradient(PdfRenderContext* ctx,
-                                                const PaintFillLinearGradient* p,
-                                                const RdtMatrix* transform) {
-    if (!ctx || !p || !p->path || !p->stops || p->stop_count <= 0) return false;
-    return pdf_raster_fallback_gradient(ctx, p->path, p->stops, p->stop_count,
-                                        transform, p,
-                                        pdf_linear_gradient_position, "linear");
-}
-
-static bool pdf_raster_fallback_radial_gradient(PdfRenderContext* ctx,
-                                                const PaintFillRadialGradient* p,
-                                                const RdtMatrix* transform) {
-    if (!ctx || !p || !p->path || !p->stops || p->stop_count <= 0 ||
-        p->r <= 0.0f) {
-        return false;
-    }
-    return pdf_raster_fallback_gradient(ctx, p->path, p->stops, p->stop_count,
-                                        transform, p,
-                                        pdf_radial_gradient_position, "radial");
 }
 
 static void pdf_lower_paint_list(PdfRenderContext* ctx, PaintList* commands = nullptr);
@@ -887,6 +858,7 @@ static bool pdf_export_paint_consume(PaintList* paint, void* context) {
     local.paint_state.current_opacity = source->paint_state.current_opacity;
     pdf_lower_paint_list(&local, paint);
     source->paint_state.emitted_count += local.paint_state.emitted_count;
+    pdf_release_rect_clips(&local.paint_state);
     return true;
 }
 
@@ -1072,6 +1044,7 @@ static void pdf_lower_paint_list(PdfRenderContext* ctx, PaintList* commands) {
                 }
                 if (pdf_push_clip_path(ctx, p->clip_path,
                                        effective_transform, p->rule)) {
+                    pdf_push_rect_clip(state, p->clip_path, effective_transform);
                     state->active_clip_depth++;
                 } else {
                     state->skipped_clip_depth++;
@@ -1083,6 +1056,7 @@ static void pdf_lower_paint_list(PdfRenderContext* ctx, PaintList* commands) {
                     state->skipped_clip_depth--;
                 } else if (state->active_clip_depth > 0) {
                     HPDF_Page_GRestore(ctx->current_page);
+                    pdf_pop_rect_clip(state);
                     state->active_clip_depth--;
                 }
                 return true;
@@ -1094,6 +1068,13 @@ static void pdf_lower_paint_list(PdfRenderContext* ctx, PaintList* commands) {
         case PAINT_FILL_RECT: {
             if (!caps || !caps->rects) break;
             PaintFillRect* p = &cmd->fill_rect;
+            Rect intersection;
+            if (pdf_intersect_rect_clips(state, p, stack_transform, &intersection)) {
+                if (intersection.width > 0.0f && intersection.height > 0.0f)
+                    pdf_render_rect(ctx, intersection.x, intersection.y, intersection.width, intersection.height, p->color, true);
+                state->emitted_count++;
+                break;
+            }
             if (!stack_transform) {
                 pdf_render_rect(ctx, p->x, p->y, p->w, p->h, p->color, true);
                 state->emitted_count++;
@@ -1152,22 +1133,16 @@ static void pdf_lower_paint_list(PdfRenderContext* ctx, PaintList* commands) {
             }
             break;
         }
-        case PAINT_FILL_LINEAR_GRADIENT: {
-            if (!caps || !caps->gradients) break;
-            PaintFillLinearGradient* p = &cmd->fill_linear_gradient;
-            if (!resolve_command_transform(p->has_transform, &p->transform)) break;
-            pdf_paint_record_fallback(state,
-                                      pdf_raster_fallback_linear_gradient(ctx, p, effective_transform),
-                                      "[PDF_PAINT_IR] failed linear gradient raster fallback");
-            break;
-        }
+        case PAINT_FILL_LINEAR_GRADIENT:
         case PAINT_FILL_RADIAL_GRADIENT: {
             if (!caps || !caps->gradients) break;
-            PaintFillRadialGradient* p = &cmd->fill_radial_gradient;
-            if (!resolve_command_transform(p->has_transform, &p->transform)) break;
-            pdf_paint_record_fallback(state,
-                                      pdf_raster_fallback_radial_gradient(ctx, p, effective_transform),
-                                      "[PDF_PAINT_IR] failed radial gradient raster fallback");
+            bool has_transform = cmd->op == PAINT_FILL_LINEAR_GRADIENT
+                ? cmd->fill_linear_gradient.has_transform : cmd->fill_radial_gradient.has_transform;
+            const RdtMatrix* local = cmd->op == PAINT_FILL_LINEAR_GRADIENT
+                ? &cmd->fill_linear_gradient.transform : &cmd->fill_radial_gradient.transform;
+            if (!resolve_command_transform(has_transform, local)) break;
+            pdf_paint_record_fallback(state, pdf_raster_fallback_gradient(ctx, cmd, effective_transform),
+                "[PDF_PAINT_IR] failed gradient raster fallback");
             break;
         }
         case PAINT_DRAW_IMAGE: {
@@ -1176,7 +1151,8 @@ static void pdf_lower_paint_list(PdfRenderContext* ctx, PaintList* commands) {
             if (!resolve_command_transform(p->has_transform, &p->transform)) break;
             pdf_draw_abgr_image(ctx, p->pixels, p->src_w, p->src_h, p->src_stride,
                                 p->dst_x, p->dst_y, p->dst_w, p->dst_h,
-                                p->opacity, effective_transform);
+                                p->opacity, effective_transform,
+                                p->resource_owner && p->resource_owner->alpha_mode == IMAGE_ALPHA_STRAIGHT);
             state->emitted_count++;
             break;
         }
@@ -1198,7 +1174,7 @@ static void pdf_lower_paint_list(PdfRenderContext* ctx, PaintList* commands) {
                                 src_w, src_h, src_stride,
                                 p->dst_x, p->dst_y, p->dst_w, p->dst_h,
                                 p->opacity,
-                                effective_transform);
+                                effective_transform, img->alpha_mode == IMAGE_ALPHA_STRAIGHT);
             state->emitted_count++;
             break;
         }
@@ -1236,25 +1212,7 @@ static void pdf_paint_fill_rect(PdfRenderContext* ctx,
     pdf_lower_paint_list(ctx);
 }
 
-static bool pdf_paint_fill_path(PdfRenderContext* ctx, RdtPath* path, Color color) {
-    PaintList* list = pdf_active_paint_list(ctx);
-    int index = list ? list->item_count() : -1;
-    paint_fill_path(list, path, color, RDT_FILL_WINDING, nullptr);
-    bool owns_path = ctx->effect_fallback.active &&
-        paint_list_take_path_payload(list, index, PAINT_FILL_PATH);
-    pdf_lower_paint_list(ctx);
-    return owns_path;
-}
 
-static void pdf_paint_draw_image(PdfRenderContext* ctx, ImageSurface* img,
-                                 Rect* dst_rect) {
-    if (!ctx || !img || !dst_rect) return;
-    paint_draw_image_resource(pdf_active_paint_list(ctx), img,
-                              dst_rect->x, dst_rect->y,
-                              dst_rect->width, dst_rect->height,
-                              255, nullptr);
-    pdf_lower_paint_list(ctx);
-}
 
 static bool pdf_paint_stroke_path(PdfRenderContext* ctx, RdtPath* path,
                                   Color color, float width) {
@@ -1266,39 +1224,6 @@ static bool pdf_paint_stroke_path(PdfRenderContext* ctx, RdtPath* path,
         paint_list_take_path_payload(list, index, PAINT_STROKE_PATH);
     pdf_lower_paint_list(ctx);
     return owns_path;
-}
-
-static bool pdf_paint_fill_linear_gradient(PdfRenderContext* ctx,
-                                           BoundaryLinearGradientPaint* gradient,
-                                           RdtGradientStop* stops) {
-    if (!gradient) return false;
-    PaintList* list = pdf_active_paint_list(ctx);
-    int index = list ? list->item_count() : -1;
-    paint_fill_linear_gradient(list, gradient->path,
-                               gradient->x1, gradient->y1,
-                               gradient->x2, gradient->y2,
-                               gradient->stops, gradient->stop_count,
-                               RDT_FILL_WINDING, nullptr, nullptr);
-    bool owns_payload = ctx->effect_fallback.active &&
-        paint_list_take_path_payload(list, index, PAINT_FILL_LINEAR_GRADIENT, stops);
-    pdf_lower_paint_list(ctx);
-    return owns_payload;
-}
-
-static bool pdf_paint_fill_radial_gradient(PdfRenderContext* ctx,
-                                           BoundaryRadialGradientPaint* gradient,
-                                           RdtGradientStop* stops) {
-    if (!gradient) return false;
-    PaintList* list = pdf_active_paint_list(ctx);
-    int index = list ? list->item_count() : -1;
-    paint_fill_radial_gradient(list, gradient->path,
-                               gradient->cx, gradient->cy, gradient->r,
-                               gradient->stops, gradient->stop_count,
-                               RDT_FILL_WINDING, nullptr, nullptr);
-    bool owns_payload = ctx->effect_fallback.active &&
-        paint_list_take_path_payload(list, index, PAINT_FILL_RADIAL_GRADIENT, stops);
-    pdf_lower_paint_list(ctx);
-    return owns_payload;
 }
 
 static bool pdf_has_border_radius(const BorderProp* border) {
@@ -1412,68 +1337,8 @@ static void pdf_cb_render_bound(RenderContext* vctx, ViewBlock* view, float abs_
         render_paint_boundary_emit_outer_shadows(pdf_active_paint_list(ctx), view, abs_x, abs_y);
     }
 
-    // Background
-    if (view->boundary_mut()->background && view->boundary_mut()->background->color.a > 0) {
-        if (pdf_has_border_radius(view->boundary()->border)) {
-            Corner background_radius = view->boundary()->border->radius;
-            constrain_corner_radii(&background_radius, width, height);
-            Rect background_rect = {abs_x, abs_y, width, height};
-            RdtPath* background_path =
-                render_path_create_rounded_rect(background_rect, &background_radius);
-            if (background_path) {
-                bool owns_path =
-                    pdf_paint_fill_path(ctx, background_path, view->boundary()->background->color);
-                if (!owns_path) rdt_path_free(background_path);
-            } else {
-                pdf_paint_fill_rect(ctx, abs_x, abs_y, width, height, view->boundary()->background->color);
-            }
-        } else {
-            pdf_paint_fill_rect(ctx, abs_x, abs_y, width, height, view->boundary()->background->color);
-        }
-    }
-
-    if (view->boundary()->background &&
-        view->boundary()->background->gradient_type == GRADIENT_LINEAR &&
-        view->boundary()->background->linear_gradient &&
-        view->boundary()->background->linear_gradient->stop_count >= 2) {
-        int stop_count = view->boundary()->background->linear_gradient->stop_count;
-        lam::Temp<RdtGradientStop> stops = lam::temp_array<RdtGradientStop>(
-            (size_t)stop_count, MEM_CAT_RENDER);
-        BoundaryLinearGradientPaint gradient = {};
-        if (stops &&
-            render_paint_boundary_build_linear_gradient(view, abs_x, abs_y,
-                                                        stops.get(), stop_count,
-                                                        &gradient)) {
-            // on success the PDF paint list takes the stops and the path
-            if (pdf_paint_fill_linear_gradient(ctx, &gradient, stops.get())) {
-                stops.release();
-            } else {
-                rdt_path_free(gradient.path);
-            }
-        }
-    } else if (view->boundary()->background &&
-               view->boundary()->background->gradient_type == GRADIENT_RADIAL &&
-               view->boundary()->background->radial_gradient &&
-               view->boundary()->background->radial_gradient->stop_count >= 2) {
-        int stop_count = view->boundary()->background->radial_gradient->stop_count;
-        lam::Temp<RdtGradientStop> stops = lam::temp_array<RdtGradientStop>(
-            (size_t)stop_count, MEM_CAT_RENDER);
-        BoundaryRadialGradientPaint gradient = {};
-        if (stops &&
-            render_paint_boundary_build_radial_gradient(view, abs_x, abs_y,
-                                                        stops.get(), stop_count,
-                                                        &gradient)) {
-            // on success the PDF paint list takes the stops and the path
-            if (pdf_paint_fill_radial_gradient(ctx, &gradient, stops.get())) {
-                stops.release();
-            } else {
-                rdt_path_free(gradient.path);
-            }
-        }
-    }
-
-    if (render_paint_background_image(pdf_active_paint_list(ctx), ctx->ui_context, view,
-            {abs_x, abs_y, width, height})) pdf_lower_paint_list(ctx);
+    if (render_paint_background(pdf_active_paint_list(ctx), ctx->ui_context, view,
+            {abs_x, abs_y, width, height}, RENDER_EXPORT_TARGET_PDF)) pdf_lower_paint_list(ctx);
 
     if (render_paint_border_image(pdf_active_paint_list(ctx), ctx->ui_context,
             view->boundary()->border, {abs_x, abs_y, width, height})) {
@@ -1512,18 +1377,16 @@ static void pdf_cb_render_text(RenderContext* vctx, ViewText* text, float abs_x,
 
 static void pdf_cb_render_image(RenderContext* vctx, ViewBlock* block, float abs_x, float abs_y) {
     PdfRenderContext* ctx = (PdfRenderContext*)vctx;
-    if (!ctx || !block || !block->embed || !block->embedp()->img) return;
-    ImageSurface* img = block->embedp()->img;
+    if (!ctx || !block) return;
+    ImageSurface* img = render_media_image_surface(block);
+    if (!img) return;
 
     BlockBlot image_block = {};
     image_block.x = abs_x - block->x;
     image_block.y = abs_y - block->y;
     Rect content_rect = render_geometry_block_content_rect(&image_block, block, 1.0f);
-    if (render_media_paint_svg_picture(pdf_active_paint_list(ctx), ctx->ui_context, block, &content_rect)) {
+    if (render_media_paint_image_content(pdf_active_paint_list(ctx), ctx->ui_context, block, &content_rect)) {
         pdf_lower_paint_list(ctx);
-    } else {
-        Rect image_rect = render_media_image_rect(block, img, content_rect, 1.0f);
-        pdf_paint_draw_image(ctx, img, &image_rect);
     }
     pdf_record_link_rect(ctx, pdf_nearest_link(block), abs_x, abs_y,
         block->width, block->height);
@@ -1816,6 +1679,7 @@ static RenderBackend pdf_make_backend(PdfRenderContext* ctx) {
 }
 
 static void pdf_context_destroy(PdfRenderContext* ctx) {
+    pdf_release_rect_clips(&ctx->paint_state);
     paint_list_destroy(&ctx->paint_list);
     paint_list_destroy(&ctx->effect_fallback.paint_list);
     if (ctx->page_backdrop_ready) dl_destroy(&ctx->page_backdrop_dl);
@@ -1853,6 +1717,7 @@ static bool pdf_page_begin(PdfRenderContext* ctx, float width, float height, flo
     ctx->page_backdrop_arena = nullptr;
     paint_list_clear(&ctx->paint_list);
     paint_list_clear(&ctx->effect_fallback.paint_list);
+    pdf_release_rect_clips(&ctx->paint_state);
     pdf_paint_lowering_state_init(&ctx->paint_state);
     ctx->current_page = HPDF_AddPage(ctx->pdf_doc);
     if (!ctx->current_page || HPDF_Page_SetWidth(ctx->current_page, width * scale) != HPDF_OK ||
@@ -2000,7 +1865,7 @@ bool render_secondary_view_to_pdf(ViewTree* tree, const char* filename,
     return ok;
 }
 
-static int render_export_session_to_pdf(RenderExportSession* session, const char* pdf_file) {
+int render_export_session_to_pdf(RenderExportSession* session, const char* pdf_file) {
     if (!session) return 1;
     if (session->paged_view) {
         bool ok = render_secondary_view_to_pdf(session->paged_view, pdf_file, nullptr, session->ui_context);

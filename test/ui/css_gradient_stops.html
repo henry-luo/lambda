@@ -1,0 +1,14 @@
+<!doctype html><meta charset=utf-8><style>html,body{margin:0;background:white}button{height:24px}#parent{position:absolute;left:0;top:72px;font-size:4px}#box{width:48px;height:32px;font-size:30px;background-color:blue}</style>
+<button id=inherit>Inherit stops</button><button id=font>Resize owner</button><button id=wide>Resize box</button><button id=min>Minimum stop</button><button id=max>Maximum stop</button><button id=conic>Angle math</button><button id=radial>Radial stop</button><button id=invalid>Invalid stop</button><div id=parent><div id=box></div></div>
+<script>(function(){var parent=document.getElementById('parent'),box=document.getElementById('box');
+function reset(){box.style.width='48px';box.style.height='32px';box.style.fontSize='4px'}
+function linear(position){return 'linear-gradient(to right,red 0%,red '+position+',blue '+position+',blue 100%)'}
+document.getElementById('inherit').onclick=function(){reset();parent.style.fontSize='4px';parent.style.backgroundImage=linear('calc(6em)');box.style.fontSize='30px';box.style.backgroundImage='inherit'};
+document.getElementById('font').onclick=function(){parent.style.fontSize='8px'};
+document.getElementById('wide').onclick=function(){box.style.width='96px'};
+document.getElementById('min').onclick=function(){reset();box.style.backgroundImage=linear('min(50%,24px)')};
+document.getElementById('max').onclick=function(){reset();box.style.backgroundImage=linear('max(50%,24px)')};
+document.getElementById('conic').onclick=function(){reset();box.style.backgroundImage='conic-gradient(at center,red 0deg,red calc(.25turn),blue calc(90deg),blue 360deg)'};
+document.getElementById('radial').onclick=function(){reset();box.style.backgroundImage='radial-gradient(circle 16px at center,red 0%,red calc(2em),blue calc(50%),blue 100%)'};
+document.getElementById('invalid').onclick=function(){box.style.backgroundImage='radial-gradient(circle 16px at center,red calc(30deg),blue 100%)'};
+})();</script>

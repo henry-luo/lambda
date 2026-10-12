@@ -13,16 +13,15 @@
 
 #include "../js/js_runtime.h"
 #include "dom.h"
+#include "dom_graphics.h"
 #include "dom_canvas.h"
 #include "dom_webgl.h"
-#include "../module/radiant/radiant_webgl_bridge.hpp"
 #include "realm/dom_realm.h"
 #include "../js/js_runtime_state.hpp"
 #include "../js/js_class.h"
 #include "../lambda-data.hpp"
 #include "../lambda.hpp"
 #include "../runtime/heap_api.h"
-#include "../module/radiant/radiant_dom_bridge.hpp"
 #include "../input/css/css_style.hpp"
 #include "dom_observers.h"
 #include "../../lib/font/font.h"
@@ -152,7 +151,7 @@ static Item js_canvas_context_save(Item callee, Item this_value,
     (void)callee; (void)args; (void)argc; (void)result_home;
     void* element = js_canvas_context_element(this_value);
     if (!element) return dom_realm_throw_type_error("CanvasRenderingContext2D receiver required");
-    return radiant_canvas_save(element) ? make_js_undefined() : js_canvas_draw_failed();
+    return dom_provider_call(dom_canvas_engine_ops(), &DomCanvasEngineOps::save, element) ? make_js_undefined() : js_canvas_draw_failed();
 }
 
 static Item js_canvas_context_restore(Item callee, Item this_value,
@@ -160,7 +159,7 @@ static Item js_canvas_context_restore(Item callee, Item this_value,
     (void)callee; (void)args; (void)argc; (void)result_home;
     void* element = js_canvas_context_element(this_value);
     if (!element) return dom_realm_throw_type_error("CanvasRenderingContext2D receiver required");
-    if (!radiant_canvas_restore(element)) return js_canvas_draw_failed();
+    if (!dom_provider_call(dom_canvas_engine_ops(), &DomCanvasEngineOps::restore, element)) return js_canvas_draw_failed();
     js_canvas_apply_native_state(this_value);
     return make_js_undefined();
 }
@@ -176,7 +175,7 @@ static Item js_canvas_context_scale(Item callee, Item this_value,
     if (!js_canvas_numbers_are_finite(values, 2)) return make_js_undefined();
     void* element = js_canvas_context_element(this_value);
     if (!element) return dom_realm_throw_type_error("CanvasRenderingContext2D receiver required");
-    return radiant_canvas_scale(element, values[0], values[1])
+    return dom_provider_call(dom_canvas_engine_ops(), &DomCanvasEngineOps::scale, element, values[0], values[1])
         ? make_js_undefined() : js_canvas_draw_failed();
 }
 
@@ -191,7 +190,7 @@ static Item js_canvas_context_translate(Item callee, Item this_value,
     if (!js_canvas_numbers_are_finite(values, 2)) return make_js_undefined();
     void* element = js_canvas_context_element(this_value);
     if (!element) return dom_realm_throw_type_error("CanvasRenderingContext2D receiver required");
-    return radiant_canvas_translate(element, values[0], values[1])
+    return dom_provider_call(dom_canvas_engine_ops(), &DomCanvasEngineOps::translate, element, values[0], values[1])
         ? make_js_undefined() : js_canvas_draw_failed();
 }
 
@@ -204,7 +203,7 @@ static Item js_canvas_context_rotate(Item callee, Item this_value,
     if (!isfinite(radians)) return make_js_undefined();
     void* element = js_canvas_context_element(this_value);
     if (!element) return dom_realm_throw_type_error("CanvasRenderingContext2D receiver required");
-    return radiant_canvas_rotate(element, radians) ? make_js_undefined() : js_canvas_draw_failed();
+    return dom_provider_call(dom_canvas_engine_ops(), &DomCanvasEngineOps::rotate, element, radians) ? make_js_undefined() : js_canvas_draw_failed();
 }
 
 static Item js_canvas_context_begin_path(Item callee, Item this_value,
@@ -212,7 +211,7 @@ static Item js_canvas_context_begin_path(Item callee, Item this_value,
     (void)callee; (void)args; (void)argc; (void)result_home;
     void* element = js_canvas_context_element(this_value);
     if (!element) return dom_realm_throw_type_error("CanvasRenderingContext2D receiver required");
-    return radiant_canvas_begin_path(element) ? make_js_undefined() : js_canvas_draw_failed();
+    return dom_provider_call(dom_canvas_engine_ops(), &DomCanvasEngineOps::begin_path, element) ? make_js_undefined() : js_canvas_draw_failed();
 }
 
 static Item js_canvas_context_close_path(Item callee, Item this_value,
@@ -220,7 +219,7 @@ static Item js_canvas_context_close_path(Item callee, Item this_value,
     (void)callee; (void)args; (void)argc; (void)result_home;
     void* element = js_canvas_context_element(this_value);
     if (!element) return dom_realm_throw_type_error("CanvasRenderingContext2D receiver required");
-    return radiant_canvas_close_path(element) ? make_js_undefined() : js_canvas_draw_failed();
+    return dom_provider_call(dom_canvas_engine_ops(), &DomCanvasEngineOps::close_path, element) ? make_js_undefined() : js_canvas_draw_failed();
 }
 
 static Item js_canvas_context_move_to(Item callee, Item this_value,
@@ -234,7 +233,7 @@ static Item js_canvas_context_move_to(Item callee, Item this_value,
     if (!js_canvas_numbers_are_finite(values, 2)) return make_js_undefined();
     void* element = js_canvas_context_element(this_value);
     if (!element) return dom_realm_throw_type_error("CanvasRenderingContext2D receiver required");
-    return radiant_canvas_move_to(element, values[0], values[1])
+    return dom_provider_call(dom_canvas_engine_ops(), &DomCanvasEngineOps::move_to, element, values[0], values[1])
         ? make_js_undefined() : js_canvas_draw_failed();
 }
 
@@ -249,7 +248,7 @@ static Item js_canvas_context_line_to(Item callee, Item this_value,
     if (!js_canvas_numbers_are_finite(values, 2)) return make_js_undefined();
     void* element = js_canvas_context_element(this_value);
     if (!element) return dom_realm_throw_type_error("CanvasRenderingContext2D receiver required");
-    return radiant_canvas_line_to(element, values[0], values[1])
+    return dom_provider_call(dom_canvas_engine_ops(), &DomCanvasEngineOps::line_to, element, values[0], values[1])
         ? make_js_undefined() : js_canvas_draw_failed();
 }
 
@@ -264,7 +263,7 @@ static Item js_canvas_context_bezier_curve_to(Item callee, Item this_value,
     if (!js_canvas_numbers_are_finite(values, 6)) return make_js_undefined();
     void* element = js_canvas_context_element(this_value);
     if (!element) return dom_realm_throw_type_error("CanvasRenderingContext2D receiver required");
-    return radiant_canvas_bezier_curve_to(element, values[0], values[1], values[2],
+    return dom_provider_call(dom_canvas_engine_ops(), &DomCanvasEngineOps::bezier_curve_to, element, values[0], values[1], values[2],
                                           values[3], values[4], values[5])
         ? make_js_undefined() : js_canvas_draw_failed();
 }
@@ -281,7 +280,7 @@ static Item js_canvas_context_quadratic_curve_to(Item callee, Item this_value,
     if (!js_canvas_numbers_are_finite(values, 4)) return make_js_undefined();
     void* element = js_canvas_context_element(this_value);
     if (!element) return dom_realm_throw_type_error("CanvasRenderingContext2D receiver required");
-    return radiant_canvas_quadratic_curve_to(element, values[0], values[1],
+    return dom_provider_call(dom_canvas_engine_ops(), &DomCanvasEngineOps::quadratic_curve_to, element, values[0], values[1],
                                               values[2], values[3])
         ? make_js_undefined() : js_canvas_draw_failed();
 }
@@ -297,7 +296,7 @@ static Item js_canvas_context_path_rect(Item callee, Item this_value,
     if (!js_canvas_numbers_are_finite(values, 4)) return make_js_undefined();
     void* element = js_canvas_context_element(this_value);
     if (!element) return dom_realm_throw_type_error("CanvasRenderingContext2D receiver required");
-    return radiant_canvas_rect(element, values[0], values[1], values[2], values[3])
+    return dom_provider_call(dom_canvas_engine_ops(), &DomCanvasEngineOps::rect, element, values[0], values[1], values[2], values[3])
         ? make_js_undefined() : js_canvas_draw_failed();
 }
 
@@ -314,7 +313,7 @@ static Item js_canvas_context_arc(Item callee, Item this_value,
     bool counter_clockwise = args && argc > 5 && js_is_truthy(args[5]);
     void* element = js_canvas_context_element(this_value);
     if (!element) return dom_realm_throw_type_error("CanvasRenderingContext2D receiver required");
-    return radiant_canvas_arc(element, values[0], values[1], values[2], values[3],
+    return dom_provider_call(dom_canvas_engine_ops(), &DomCanvasEngineOps::arc, element, values[0], values[1], values[2], values[3],
                               values[4], counter_clockwise)
         ? make_js_undefined() : js_canvas_draw_failed();
 }
@@ -324,7 +323,7 @@ static Item js_canvas_context_fill(Item callee, Item this_value,
     (void)callee; (void)args; (void)argc; (void)result_home;
     void* element = js_canvas_context_element(this_value);
     if (!element) return dom_realm_throw_type_error("CanvasRenderingContext2D receiver required");
-    if (!radiant_canvas_fill(element)) return js_canvas_draw_failed();
+    if (!dom_provider_call(dom_canvas_engine_ops(), &DomCanvasEngineOps::fill, element)) return js_canvas_draw_failed();
     js_canvas_note_paint(element);
     return make_js_undefined();
 }
@@ -334,7 +333,7 @@ static Item js_canvas_context_stroke(Item callee, Item this_value,
     (void)callee; (void)args; (void)argc; (void)result_home;
     void* element = js_canvas_context_element(this_value);
     if (!element) return dom_realm_throw_type_error("CanvasRenderingContext2D receiver required");
-    if (!radiant_canvas_stroke(element)) return js_canvas_draw_failed();
+    if (!dom_provider_call(dom_canvas_engine_ops(), &DomCanvasEngineOps::stroke, element)) return js_canvas_draw_failed();
     js_canvas_note_paint(element);
     return make_js_undefined();
 }
@@ -350,7 +349,7 @@ static Item js_canvas_context_clip(Item callee, Item this_value,
     }
     void* element = js_canvas_context_element(this_value);
     if (!element) return dom_realm_throw_type_error("CanvasRenderingContext2D receiver required");
-    return radiant_canvas_clip(element) ? make_js_undefined() : js_canvas_draw_failed();
+    return dom_provider_call(dom_canvas_engine_ops(), &DomCanvasEngineOps::clip, element) ? make_js_undefined() : js_canvas_draw_failed();
 }
 
 static Item js_canvas_context_rect(Item callee, Item this_value,
@@ -365,11 +364,11 @@ static Item js_canvas_context_rect(Item callee, Item this_value,
     if (!js_canvas_numbers_are_finite(values, 4)) return make_js_undefined();
     void* element = js_canvas_context_element(this_value);
     if (!element) return dom_realm_throw_type_error("CanvasRenderingContext2D receiver required");
-    bool drawn = clear ? radiant_canvas_clear_rect(element, values[0], values[1],
+    bool drawn = clear ? dom_provider_call(dom_canvas_engine_ops(), &DomCanvasEngineOps::clear_rect, element, values[0], values[1],
                                                     values[2], values[3])
-        : stroke ? radiant_canvas_stroke_rect(element, values[0], values[1],
+        : stroke ? dom_provider_call(dom_canvas_engine_ops(), &DomCanvasEngineOps::stroke_rect, element, values[0], values[1],
                                                values[2], values[3])
-        : radiant_canvas_fill_rect(element, values[0], values[1],
+        : dom_provider_call(dom_canvas_engine_ops(), &DomCanvasEngineOps::fill_rect, element, values[0], values[1],
                                    values[2], values[3]);
     if (!drawn) return js_canvas_draw_failed();
     js_canvas_note_paint(element);
@@ -425,7 +424,7 @@ static Item js_canvas_context_fill_text(Item callee, Item this_value,
         !state->font_handles[handle_id]) {
         return js_throw_range_error("Canvas font resource is unavailable");
     }
-    if (!radiant_canvas_fill_text(element, state->font_handles[handle_id], text->chars,
+    if (!dom_provider_call(dom_canvas_engine_ops(), &DomCanvasEngineOps::fill_text, element, state->font_handles[handle_id], text->chars,
                                   text->len, values[0], values[1], max_width)) {
         return js_canvas_draw_failed();
     }
@@ -517,7 +516,7 @@ static Item js_canvas_2d_context_for(Item canvas) {
     if (js_canvas_is_2d_context(cached_root.get())) return cached_root.get();
 
     if (dom_is_html_canvas_element(canvas_root.get()) &&
-        !radiant_canvas_ensure(dom_unwrap_element(canvas_root.get()))) {
+        !dom_provider_call(dom_canvas_engine_ops(), &DomCanvasEngineOps::ensure, dom_unwrap_element(canvas_root.get()))) {
         return ItemNull;
     }
 
@@ -564,7 +563,7 @@ static Item js_canvas_get_context(Item callee, Item this_value,
         ? it2s(identifier_root.get()) : nullptr;
     if (identifier && identifier->len==6 && memcmp(identifier->chars,"webgl2",6)==0)
         return dom_webgl_context_for(canvas_root.get(),argc>1?args[1]:ItemNull);
-    if (dom_is_html_canvas_element(canvas_root.get()) && radiant_webgl_has_context(dom_unwrap_element(canvas_root.get()))) return ItemNull;
+    if (dom_is_html_canvas_element(canvas_root.get()) && dom_provider_call(dom_webgl_engine_ops(), &DomWebGlEngineOps::has_context, dom_unwrap_element(canvas_root.get()))) return ItemNull;
     if (!identifier || identifier->len != 2 ||
         memcmp(identifier->chars, "2d", 2) != 0) {
         return ItemNull;
@@ -584,7 +583,7 @@ static Item js_canvas_to_data_url(Item callee, Item this_value,
         ? js_to_string(args[0]) : js_name_item("image/png"));
     if (item_is_error(type_root.get())) return type_root.get();
     // HTML serialization falls back to PNG for unsupported MIME types.
-    StrBuf* bytes = radiant_canvas_to_data_url(dom_unwrap_element(canvas_root.get()));
+    StrBuf* bytes = dom_provider_call(dom_canvas_engine_ops(), &DomCanvasEngineOps::to_data_url, dom_unwrap_element(canvas_root.get()));
     if (!bytes) return make_string_item("data:,");
     Item result = make_string_item(bytes->str, (int)bytes->length);
     strbuf_free(bytes);
@@ -823,7 +822,7 @@ extern "C" void js_canvas_ctx_set_font(Item ctx_obj, Item font_val) {
     if (!s || s->len == 0) return;
 
     void* element = js_canvas_context_element(ctx_obj);
-    if (element) radiant_canvas_set_font(element, s->chars, s->len);
+    if (element) dom_provider_call(dom_canvas_engine_ops(), &DomCanvasEngineOps::set_font, element, s->chars, s->len);
 
     FontHandle* handle = parse_css_font_shorthand(s->chars, s->len);
     if (handle) {
@@ -834,8 +833,8 @@ extern "C" void js_canvas_ctx_set_font(Item ctx_obj, Item font_val) {
 
 static void js_canvas_apply_native_state(Item context) {
     void* element = js_canvas_context_element(context);
-    RadiantCanvasStateSnapshot state = {};
-    if (!element || !radiant_canvas_get_state(element, &state)) return;
+    DomCanvasStateSnapshot state = {};
+    if (!element || !dom_provider_call(dom_canvas_engine_ops(), &DomCanvasEngineOps::get_state, element, &state)) return;
     RootFrame roots(2);
     Rooted<Item> context_root(roots, context);
     Rooted<Item> font_root(roots, js_name_item(state.font));
@@ -927,8 +926,8 @@ extern "C" bool js_canvas_property_set_intercept(Item obj, Item key, Item value)
                 color.type != CSS_COLOR_CURRENT;
             if (valid) {
                 valid = fill
-                    ? radiant_canvas_set_fill_color(element, color.r, color.g, color.b, color.a)
-                    : radiant_canvas_set_stroke_color(element, color.r, color.g, color.b, color.a);
+                    ? dom_provider_call(dom_canvas_engine_ops(), &DomCanvasEngineOps::set_fill_color, element, color.r, color.g, color.b, color.a)
+                    : dom_provider_call(dom_canvas_engine_ops(), &DomCanvasEngineOps::set_stroke_color, element, color.r, color.g, color.b, color.a);
             }
         }
         if (valid) dom_realm_set_name(obj, fill ? "fillStyle" : "strokeStyle", value);
@@ -945,7 +944,7 @@ extern "C" bool js_canvas_property_set_intercept(Item obj, Item key, Item value)
             width = type == LMD_TYPE_INT ? (float)it2i(numeric)
                 : type == LMD_TYPE_INT64 ? (float)it2l(numeric)
                 : type == LMD_TYPE_FLOAT ? (float)it2d(numeric) : NAN;
-            valid = radiant_canvas_set_line_width(element, width);
+            valid = dom_provider_call(dom_canvas_engine_ops(), &DomCanvasEngineOps::set_line_width, element, width);
         }
         if (valid) dom_realm_set_name(obj, "lineWidth", flt2it(width));
         s_in_canvas_property_intercept = false;
@@ -961,7 +960,7 @@ extern "C" bool js_canvas_property_set_intercept(Item obj, Item key, Item value)
             alpha = type == LMD_TYPE_INT ? (float)it2i(numeric)
                 : type == LMD_TYPE_INT64 ? (float)it2l(numeric)
                 : type == LMD_TYPE_FLOAT ? (float)it2d(numeric) : NAN;
-            valid = radiant_canvas_set_global_alpha(element, alpha);
+            valid = dom_provider_call(dom_canvas_engine_ops(), &DomCanvasEngineOps::set_global_alpha, element, alpha);
         }
         if (valid) dom_realm_set_name(obj, "globalAlpha", flt2it(alpha));
         s_in_canvas_property_intercept = false;
@@ -975,7 +974,7 @@ extern "C" bool js_canvas_property_set_intercept(Item obj, Item key, Item value)
         if (text && text->len == 5 && memcmp(text->chars, "round", 5) == 0) cap = 1;
         else if (text && text->len == 6 && memcmp(text->chars, "square", 6) == 0) cap = 2;
         else if (!text || text->len != 4 || memcmp(text->chars, "butt", 4) != 0) valid = false;
-        valid = valid && radiant_canvas_set_line_cap(element, cap);
+        valid = valid && dom_provider_call(dom_canvas_engine_ops(), &DomCanvasEngineOps::set_line_cap, element, cap);
         if (valid) dom_realm_set_name(obj, "lineCap", js_name_item(js_canvas_line_cap_name(cap)));
         s_in_canvas_property_intercept = false;
         return true;
@@ -988,7 +987,7 @@ extern "C" bool js_canvas_property_set_intercept(Item obj, Item key, Item value)
         if (text && text->len == 5 && memcmp(text->chars, "round", 5) == 0) join = 1;
         else if (text && text->len == 5 && memcmp(text->chars, "bevel", 5) == 0) join = 2;
         else if (!text || text->len != 5 || memcmp(text->chars, "miter", 5) != 0) valid = false;
-        valid = valid && radiant_canvas_set_line_join(element, join);
+        valid = valid && dom_provider_call(dom_canvas_engine_ops(), &DomCanvasEngineOps::set_line_join, element, join);
         if (valid) dom_realm_set_name(obj, "lineJoin", js_name_item(js_canvas_line_join_name(join)));
         s_in_canvas_property_intercept = false;
         return true;
@@ -1003,7 +1002,7 @@ extern "C" bool js_canvas_property_set_intercept(Item obj, Item key, Item value)
         else if (text && text->len == 5 && memcmp(text->chars, "right", 5) == 0) align = 3;
         else if (text && text->len == 6 && memcmp(text->chars, "center", 6) == 0) align = 4;
         else if (!text || text->len != 5 || memcmp(text->chars, "start", 5) != 0) valid = false;
-        valid = valid && radiant_canvas_set_text_align(element, align);
+        valid = valid && dom_provider_call(dom_canvas_engine_ops(), &DomCanvasEngineOps::set_text_align, element, align);
         if (valid) dom_realm_set_name(obj, "textAlign", js_name_item(js_canvas_text_align_name(align)));
         s_in_canvas_property_intercept = false;
         return true;

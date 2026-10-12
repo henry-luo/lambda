@@ -45,6 +45,7 @@ struct GeoMapFrame {
 };
 GeoMapFrame* geomap_plan(Element* model, float width, float height, char* diagnostic, size_t capacity);
 GeoMapFrame* geomap_displayed_frame(DomElement* root);
+void geomap_follow_rebuild(DomDocument* document, DomNode* old_root, DomNode* new_root);
 void geomap_frame_retain(GeoMapFrame* frame);
 void geomap_frame_release(GeoMapFrame* frame);
 void geomap_frame_paint(PaintList* paint, const GeoMapFrame* frame, Rect viewport);

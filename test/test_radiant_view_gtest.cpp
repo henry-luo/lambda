@@ -11,15 +11,17 @@ extern "C" {
 #include "../lib/shell.h"
 #include "../lib/file.h"
 #include "../lib/strbuf.h"
+#include "../lib/thread_pool.h"
+#include "../lib/time_util.h"
+#include "../lib/mem.h"
 }
 
 #ifdef _WIN32
 #include <direct.h>
 #include <io.h>
-#include <windows.h>
+#include <process.h>
 #else
 #include <arpa/inet.h>
-#include <pthread.h>
 #include <signal.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
@@ -45,6 +47,9 @@ struct RadiantViewCaseResult {
     bool has_clean_memtrack;
     int exit_code;
     char message[512];
+    double elapsed_ms;
+    char log_path[1024];
+    char timing_path[1024];
 };
 
 static const RadiantViewCase g_radiant_view_cases[] = {
@@ -311,6 +316,138 @@ static bool test_radiant_view_profile_shifted_reuse_at(const char* path,
     return found;
 }
 
+// each subprocess owns its downloads, cache and outputs; only fixtures are shared.
+static char* g_radiant_view_root;
+static char* g_radiant_view_executable;
+static char* g_radiant_view_home;
+static char g_radiant_view_run_id[64];
+static char g_radiant_view_artifacts[1024];
+static char g_radiant_view_workspace[1024];
+static int test_radiant_view_default_jobs();
+
+struct RadiantViewLaunch {
+    const char* label;
+    const char* page;
+    const char* event_path;
+    const ShellEnvEntry* env;
+    const char* command = "view";
+    bool graphics = false;
+    bool quiet = false;
+    int timeout_ms = 30000;
+    char cwd[1024];
+    char log_path[1024];
+    char viewer_log_path[1024];
+    char timing_path[1024];
+    char event_result[1024];
+    ShellResult result = {-1};
+    double elapsed_ms = 0;
+};
+
+static bool test_radiant_view_prepare_run() {
+    const char* output = getenv("LAMBDA_TEST_OUTPUT_DIR");
+    if (!output || !output[0]) output = "test_output";
+    if (!create_dir(output)) return false;
+    char* output_path = file_realpath(output);
+    if (!output_path) return false;
+    snprintf(g_radiant_view_artifacts, sizeof(g_radiant_view_artifacts), "%s/radiant_view/%s",
+        output_path, g_radiant_view_run_id);
+    mem_free(output_path);
+    snprintf(g_radiant_view_workspace, sizeof(g_radiant_view_workspace), "%s/temp/radiant-view-%s",
+        g_radiant_view_root, g_radiant_view_run_id);
+    // create shared artifact and workspace parents before launching workers.
+    return create_dir(g_radiant_view_artifacts) && create_dir(g_radiant_view_workspace);
+}
+
+static bool test_radiant_view_prepare_launch(RadiantViewLaunch* launch) {
+    char directory[1024];
+    snprintf(directory, sizeof(directory), "%s/%s", g_radiant_view_artifacts, launch->label);
+    if (!create_dir(directory)) return false;
+    snprintf(launch->log_path, sizeof(launch->log_path), "%s/stdout.log", directory);
+    snprintf(launch->viewer_log_path, sizeof(launch->viewer_log_path), "%s/view.log", directory);
+    snprintf(launch->timing_path, sizeof(launch->timing_path), "%s/phases.tsv", directory);
+    snprintf(launch->event_result, sizeof(launch->event_result), "%s/events.json", directory);
+    snprintf(launch->cwd, sizeof(launch->cwd), "%s/%s", g_radiant_view_workspace, launch->label);
+    snprintf(directory, sizeof(directory), "%s/temp", launch->cwd);
+    if (!create_dir(directory)) return false;
+    for (const char* name : {"test", "lmd", "ref", "modules", "log.conf"}) {
+        char source[1024], link[1024];
+        snprintf(source, sizeof(source), "%s/%s", g_radiant_view_root, name);
+        snprintf(link, sizeof(link), "%s/%s", launch->cwd, name);
+        if (file_exists(source) && !file_exists(link) && file_symlink(source, link) != 0) return false;
+    }
+    snprintf(directory, sizeof(directory), "%s/lambda.exe", launch->cwd);
+    if (!file_exists(directory) && file_symlink(g_radiant_view_executable, directory) != 0) return false;
+    remove(launch->timing_path);
+    remove(launch->event_result);
+    return true;
+}
+
+static ShellResult test_radiant_view_run_logged_headless(const char*, const char*,
+    const ShellEnvEntry*, const char*, const char* const*, int, const char*, const char*, const char*);
+
+static void test_radiant_view_launch(void* argument) {
+    RadiantViewLaunch* launch = (RadiantViewLaunch*)argument;
+    ShellEnvEntry environment[32] = {
+        {"LAMBDA_HOME", g_radiant_view_home}, {"LAMBDA_LOG_FILE", launch->viewer_log_path},
+        {"RADIANT_VIEW_TIMING_PATH", launch->timing_path},
+    };
+    size_t env_count = 3;
+    if (launch->env) for (const ShellEnvEntry* entry = launch->env; entry->key; entry++) {
+        size_t index = 0;
+        while (index < env_count && strcmp(environment[index].key, entry->key) != 0) index++;
+        if (index < env_count) { environment[index] = *entry; continue; }
+        if (env_count + 1 >= sizeof(environment) / sizeof(environment[0])) return;
+        environment[env_count++] = *entry;
+    }
+    const char* extra[] = {"--event-result", launch->event_result,
+        launch->quiet ? "--no-log" : nullptr, nullptr};
+    uint64_t start = time_now_ns();
+    launch->result = test_radiant_view_run_logged_headless(launch->page, launch->event_path,
+        environment, nullptr, extra, launch->timeout_ms, g_radiant_view_executable,
+        launch->command, launch->cwd);
+    launch->elapsed_ms = time_elapsed_ms_f(start, time_now_ns());
+    write_binary_file(launch->log_path, launch->result.stdout_buf ? launch->result.stdout_buf : "",
+        launch->result.stdout_len);
+}
+
+static void test_radiant_view_record_launch(const char* label, double elapsed_ms,
+                                           const char* log_path, const char* timing_path) {
+    char key[256], elapsed[64];
+    snprintf(elapsed, sizeof(elapsed), "%.3f", elapsed_ms);
+    snprintf(key, sizeof(key), "radiant_view_elapsed_ms_%s", label);
+    ::testing::Test::RecordProperty(key, elapsed);
+    snprintf(key, sizeof(key), "radiant_view_log_%s", label);
+    ::testing::Test::RecordProperty(key, log_path);
+    snprintf(key, sizeof(key), "radiant_view_phases_%s", label);
+    ::testing::Test::RecordProperty(key, timing_path);
+}
+
+static void test_radiant_view_launch_all(RadiantViewLaunch* launches, size_t count) {
+    int jobs = test_radiant_view_default_jobs();
+    bool has_graphics = false;
+    for (size_t i = 0; i < count; i++) has_graphics |= launches[i].graphics;
+    // reserve a slot for the caller's serial GPU lane within the same ceiling.
+    int workers = has_graphics ? jobs - 1 : jobs;
+    if ((size_t)workers > count) workers = (int)count;
+    ThreadPool* pool = workers > 0 && jobs > 1 ? tp_create(workers) : nullptr;
+    // keep GPU contexts serial while independent CPU launches use the bounded pool.
+    for (size_t i = 0; i < count; i++) {
+        if (launches[i].graphics) continue;
+        if (!pool || !tp_submit(pool, test_radiant_view_launch, &launches[i])) {
+            if (pool) tp_wait_all(pool);
+            test_radiant_view_launch(&launches[i]);
+        }
+    }
+    for (size_t i = 0; i < count; i++) {
+        if (launches[i].graphics) test_radiant_view_launch(&launches[i]);
+    }
+    if (pool) tp_destroy(pool);
+    for (size_t i = 0; i < count; i++) {
+        test_radiant_view_record_launch(launches[i].label, launches[i].elapsed_ms,
+            launches[i].log_path, launches[i].timing_path);
+    }
+}
+
 static ShellResult test_radiant_view_run_logged_headless(const char* page,
                                                          const char* event_path,
                                                          const ShellEnvEntry* env,
@@ -318,7 +455,8 @@ static ShellResult test_radiant_view_run_logged_headless(const char* page,
                                                          const char* const* preview_options = nullptr,
                                                          int timeout_ms = 0,
                                                          const char* executable = "./lambda.exe",
-                                                         const char* command = "view") {
+                                                         const char* command = "view",
+                                                         const char* cwd = nullptr) {
     const char* args[32] = {};
     int arg_count = 0;
     args[arg_count++] = executable;
@@ -336,6 +474,7 @@ static ShellResult test_radiant_view_run_logged_headless(const char* page,
     options.env = env;
     options.merge_stderr = true;
     options.timeout_ms = timeout_ms;
+    options.cwd = cwd;
     return shell_exec(executable, args, &options);
 }
 
@@ -360,11 +499,14 @@ TEST(RadiantViewTest, DemoCommandListsNamesAndRejectsUnknownNames) {
 
 TEST(RadiantViewTest, DemoCommandLaunchesCatalogAndPreservesViewerOptions) {
     test_radiant_view_ensure_temp_dir();
-    const char* events = "./temp/test_demo_launch_events.json";
-    const char* result_path = "./temp/test_demo_launch_result.json";
-    const char* custom_home = "./temp/test_demo_home";
-    ASSERT_TRUE(create_dir("./temp/test_demo_home/package/doc"));
-    write_text_file("./temp/test_demo_home/package/doc/doc_viewer.html", "<main id='demo-home-splash'>Custom viewer</main>");
+    char custom_home[1024], custom_viewer[1024];
+    snprintf(custom_home, sizeof(custom_home), "%s/temp/test_demo_home_%s",
+        g_radiant_view_root, g_radiant_view_run_id);
+    snprintf(custom_viewer, sizeof(custom_viewer), "%s/package/doc/doc_viewer.html", custom_home);
+    char custom_doc[1024];
+    snprintf(custom_doc, sizeof(custom_doc), "%s/package/doc", custom_home);
+    ASSERT_TRUE(create_dir(custom_doc));
+    write_text_file(custom_viewer, "<main id='demo-home-splash'>Custom viewer</main>");
     struct DemoCase {
         const char* name; const char* selector;
         bool graphics = false; const char* home = "./lmd";
@@ -384,28 +526,41 @@ TEST(RadiantViewTest, DemoCommandLaunchesCatalogAndPreservesViewerOptions) {
         {"wordcloud", ".gallery .card"},
         {nullptr, "#demo-home-splash", false, custom_home},
     };
-    for (const DemoCase& demo : cases) {
-        SCOPED_TRACE(demo.name ? demo.name : demo.home);
+    constexpr size_t count = sizeof(cases) / sizeof(cases[0]);
+    RadiantViewLaunch launches[count] = {};
+    char labels[count][64], events[count][1024], homes[count][1024];
+    ShellEnvEntry environments[count][3] = {};
+    for (size_t i = 0; i < count; i++) {
+        const DemoCase& demo = cases[i];
+        snprintf(labels[i], sizeof(labels[i]), "demo_%zu", i);
+        RadiantViewLaunch& launch = launches[i];
+        launch.label = labels[i]; launch.page = demo.name; launch.command = "demo";
+        launch.graphics = demo.graphics; launch.quiet = true;
+        ASSERT_TRUE(test_radiant_view_prepare_launch(&launch));
+        snprintf(events[i], sizeof(events[i]), "%s/replay.json", launch.cwd);
         StrBuf* replay = strbuf_new();
         strbuf_append_format(replay,
             "{\"input_turn_ms\":0,\"events\":["
             "{\"type\":\"assert_count\",\"target\":{\"selector\":\"%s\"},\"min\":1},"
             "{\"type\":\"window_close\"},{\"type\":\"assert_window_closed\",\"closed\":true}]}", demo.selector);
-        write_text_file(events, replay->str);strbuf_free(replay);
-        remove(result_path);
-        // text measurement uses worker-owned windowless contexts; only GPU demos need GLFW.
-        const ShellEnvEntry env[] = {
-            {"LAMBDA_HOME", demo.home}, {"LAMBDA_HEADLESS_GLFW_WINDOW", demo.graphics ? "1" : nullptr}, {nullptr, nullptr},
-        };
-        const char* options[] = {"--event-result", result_path, "--no-log", nullptr};
-        ShellResult result = test_radiant_view_run_logged_headless(demo.name, events, env,
-            nullptr, options, 30000, "./lambda.exe", "demo");
+        ASSERT_EQ(write_binary_file(events[i], replay->str, replay->length), 0); strbuf_free(replay);
+        launch.event_path = events[i];
+        snprintf(homes[i], sizeof(homes[i]), "%s", demo.home == custom_home ? custom_home : "");
+        if (demo.home != custom_home) snprintf(homes[i], sizeof(homes[i]), "%s/lmd", g_radiant_view_root);
+        environments[i][0] = {"LAMBDA_HOME", homes[i]};
+        // only the GPU demos need GLFW; CPU text measurement is windowless.
+        environments[i][1] = {"LAMBDA_HEADLESS_GLFW_WINDOW", demo.graphics ? "1" : nullptr};
+        launch.env = environments[i];
+    }
+    test_radiant_view_launch_all(launches, count);
+    for (size_t i = 0; i < count; i++) {
+        SCOPED_TRACE(cases[i].name ? cases[i].name : cases[i].home);
+        ShellResult& result = launches[i].result;
         EXPECT_FALSE(result.timed_out);
         EXPECT_EQ(result.exit_code, 0) << (result.stdout_buf ? result.stdout_buf : "");
-        EXPECT_TRUE(test_radiant_view_file_contains(result_path, "\"result\":\"PASS\""));
+        EXPECT_TRUE(test_radiant_view_file_contains(launches[i].event_result, "\"result\":\"PASS\""));
         shell_result_free(&result);
     }
-    remove(events);remove(result_path);
     ASSERT_TRUE(file_delete_recursive(custom_home) == 0);
 }
 
@@ -484,21 +639,31 @@ TEST(RadiantViewTest, DocumentLanguageUsesOnlyFinalHttpResponseAndMetadataPreced
         {"MEMTRACK_MODE", "STATS"}, {"VIEW_MEM_STAGES", "1"},
         {"LAMBDA_GC_FORCE_EVERY", "1"}, {"LAMBDA_GC_POISON_FREED", "1"}, {nullptr, nullptr},
     };
-    const char* executable = getenv("RADIANT_TEST_EXECUTABLE");
-    if (!executable) executable = "./lambda.exe";
-    for (const auto& row : rows) {
-        SCOPED_TRACE(row.path);
-        char remote[160];
-        ASSERT_GT(snprintf(remote, sizeof(remote), "http://127.0.0.1:%d/%s.html", server.port, row.path), 0);
-        ShellResult result = test_radiant_view_run_logged_headless(remote, events, env,
-            nullptr, nullptr, 0, executable);
+    RadiantViewLaunch launches[count] = {};
+    char remote[count][160], labels[count][64];
+    char* event_path = file_realpath(events);
+    ASSERT_NE(event_path, nullptr);
+    for (size_t i = 0; i < count; i++) {
+        ASSERT_GT(snprintf(remote[i], sizeof(remote[i]), "http://127.0.0.1:%d/%s.html",
+            server.port, rows[i].path), 0);
+        snprintf(labels[i], sizeof(labels[i]), "language_%s", rows[i].path);
+        launches[i].label = labels[i]; launches[i].page = remote[i];
+        launches[i].event_path = event_path; launches[i].env = env;
+        ASSERT_TRUE(test_radiant_view_prepare_launch(&launches[i]));
+    }
+    test_radiant_view_launch_all(launches, count);
+    for (size_t i = 0; i < count; i++) {
+        SCOPED_TRACE(rows[i].path);
+        ShellResult& result = launches[i].result;
         const char* output = result.stdout_buf ? result.stdout_buf : "";
+        EXPECT_FALSE(result.timed_out);
         EXPECT_EQ(result.exit_code, 0) << output;
         EXPECT_NE(strstr(output, "Result: PASS"), nullptr) << output;
         EXPECT_NE(strstr(output, "Assertions: 4 passed, 0 failed"), nullptr) << output;
         EXPECT_NE(strstr(output, "[MEMTRACK_LIVE] bytes=0 count=0"), nullptr) << output;
         shell_result_free(&result);
     }
+    mem_free(event_path);
     remove(events);
 #endif
 }
@@ -623,48 +788,27 @@ static void test_radiant_view_run_case(size_t index) {
     }
     test_radiant_view_ensure_temp_dir();
 
-    char log_path[256];
-    int log_written = snprintf(log_path, sizeof(log_path),
-        "./temp/test_radiant_view_%s.log", view_case->label);
-    if (log_written <= 0 || log_written >= (int)sizeof(log_path)) {
-        snprintf(result->message, sizeof(result->message),
-                 "failed to build log path for %s", view_case->label);
+    const ShellEnvEntry memtrack_env[] = {{"VIEW_MEM_STAGES", "1"}, {nullptr, nullptr}};
+    RadiantViewLaunch launch = {};
+    launch.label = view_case->label; launch.page = view_case->path; launch.quiet = true;
+    launch.env = view_case->requires_clean_memtrack ? memtrack_env : nullptr;
+    launch.timeout_ms = 180000;
+    launch.event_path = view_case->event_path ? file_realpath(view_case->event_path) : nullptr;
+    if (!test_radiant_view_prepare_launch(&launch)) {
+        snprintf(result->message, sizeof(result->message), "could not prepare isolated view: %s", view_case->label);
+        mem_free((void*)launch.event_path);
         result->executed = true;
         return;
     }
-
-    const char* args[10];
-    int arg_count = 0;
-    args[arg_count++] = "./lambda.exe";
-    args[arg_count++] = "view";
-    args[arg_count++] = view_case->path;
-    if (view_case->event_path) {
-        args[arg_count++] = "--event-file";
-        args[arg_count++] = view_case->event_path;
-    }
-    args[arg_count++] = "--headless";
-    args[arg_count++] = "--no-log";
-    args[arg_count] = nullptr;
-
-    const ShellEnvEntry memtrack_env[] = {
-        {"VIEW_MEM_STAGES", "1"},
-        {NULL, NULL},
-    };
-    ShellOptions options = {0};
-    if (view_case->requires_clean_memtrack) options.env = memtrack_env;
-    options.merge_stderr = true;
-    // system() serialized worker-thread launches on macOS; direct argv spawning
-    // preserves the parallel work queue and avoids shell quoting entirely.
-    ShellResult shell_result = shell_exec("./lambda.exe", args, &options);
-    result->exit_code = shell_result.exit_code;
-
+    test_radiant_view_launch(&launch);
+    mem_free((void*)launch.event_path);
+    result->exit_code = launch.result.exit_code;
+    result->elapsed_ms = launch.elapsed_ms;
+    snprintf(result->log_path, sizeof(result->log_path), "%s", launch.log_path);
+    snprintf(result->timing_path, sizeof(result->timing_path), "%s", launch.timing_path);
+    const char* log_path = result->log_path;
+    ShellResult& shell_result = launch.result;
     const char* output = shell_result.stdout_buf ? shell_result.stdout_buf : "";
-    FILE* log_file = fopen(log_path, "wb");
-    if (log_file) {
-        fwrite(output, 1, shell_result.stdout_len, log_file);
-        fclose(log_file);
-    }
-
     result->has_layout_prof = strstr(output, "[LAYOUT_PROF]") != nullptr;
     result->has_render_prof = strstr(output, "[RENDER_PROF]") != nullptr;
     result->has_peak_footprint = strstr(output, "[PEAK_FOOTPRINT]") != nullptr;
@@ -698,6 +842,12 @@ static void test_radiant_view_expect_case(size_t index) {
     }
     const RadiantViewCase* view_case = &g_radiant_view_cases[index];
     const RadiantViewCaseResult* result = &g_radiant_view_results[index];
+
+    char elapsed[64];
+    snprintf(elapsed, sizeof(elapsed), "%.3f", result->elapsed_ms);
+    ::testing::Test::RecordProperty("lambda_script_elapsed_ms", elapsed);
+    test_radiant_view_record_launch(view_case->label, result->elapsed_ms,
+        result->log_path, result->timing_path);
 
     EXPECT_FALSE(result->missing_path) << result->message;
     EXPECT_EQ(0, result->exit_code) << view_case->path << ": " << result->message;
@@ -2654,29 +2804,48 @@ TEST(RadiantViewTest, PhotoCanvasCopiesRgbaAndReleasesItAcrossGc) {
         "test/demo/photo/tests/_canvas_bridge.ls", "test/demo/photo/tests/canvas_bridge.json", env, true);
 }
 
-TEST(RadiantViewTest, PhotoEditorRetainsCanvasAcrossEditsAndHistory) {
-    for (const char* tier : {"auto", "jit"}) {
-        SCOPED_TRACE(tier);
-        const ShellEnvEntry env[] = {{"LAMBDA_EXEC_BACKEND", tier}, {nullptr, nullptr}};
-        test_radiant_view_expect_replay(
-            "test/demo/photo/photo.ls", "test/demo/photo/tests/photo_smoke.json", env);
+static void test_radiant_view_photo_replays(const char* const* replays,
+                                           size_t replay_count, const char* source) {
+    const char* tiers[] = {"auto", "jit"};
+    RadiantViewLaunch launches[6] = {};
+    char labels[6][64];
+    ShellEnvEntry environments[6][3] = {};
+    ASSERT_LE(replay_count * 2, sizeof(launches) / sizeof(launches[0]));
+    for (size_t tier = 0; tier < 2; tier++) for (size_t replay = 0; replay < replay_count; replay++) {
+        size_t i = tier * replay_count + replay;
+        snprintf(labels[i], sizeof(labels[i]), "photo_%s_%s", tiers[tier], replays[replay]);
+        launches[i].label = labels[i]; launches[i].page = "test/demo/photo/photo.ls";
+        launches[i].timeout_ms = 180000;
+        char path[1024];
+        snprintf(path, sizeof(path), "%s/test/demo/photo/tests/%s.json", g_radiant_view_root, replays[replay]);
+        launches[i].event_path = file_realpath(path);
+        ASSERT_NE(launches[i].event_path, nullptr);
+        environments[i][0] = {"LAMBDA_EXEC_BACKEND", tiers[tier]};
+        environments[i][1] = {"PHOTO_SOURCE", source};
+        launches[i].env = environments[i];
+        ASSERT_TRUE(test_radiant_view_prepare_launch(&launches[i]));
+    }
+    test_radiant_view_launch_all(launches, replay_count * 2);
+    for (size_t i = 0; i < replay_count * 2; i++) {
+        SCOPED_TRACE(launches[i].label);
+        ShellResult& result = launches[i].result;
+        const char* output = result.stdout_buf ? result.stdout_buf : "";
+        EXPECT_FALSE(result.timed_out) << output;
+        EXPECT_EQ(result.exit_code, 0) << output;
+        EXPECT_NE(strstr(output, "Result: PASS"), nullptr) << output;
+        shell_result_free(&result);
+        mem_free((void*)launches[i].event_path);
     }
 }
 
+TEST(RadiantViewTest, PhotoEditorRetainsCanvasAcrossEditsAndHistory) {
+    const char* replays[] = {"photo_smoke"};
+    test_radiant_view_photo_replays(replays, 1, nullptr);
+}
+
 TEST(RadiantViewTest, PhotoCropDraftAndKeyboardCompare) {
-    for (const char* tier : {"auto", "jit"}) {
-        SCOPED_TRACE(tier);
-        const ShellEnvEntry env[] = {
-            {"LAMBDA_EXEC_BACKEND", tier},
-            {"PHOTO_SOURCE", "test/demo/photo/tests/rgba.png"}, {nullptr, nullptr},
-        };
-        for (const char* replay : {"test/demo/photo/tests/photo_gestures.json",
-                                   "test/demo/photo/tests/photo_responsive.json"}) {
-            SCOPED_TRACE(replay);
-            test_radiant_view_expect_replay(
-                "test/demo/photo/photo.ls", replay, env);
-        }
-    }
+    const char* replays[] = {"photo_gestures", "photo_responsive"};
+    test_radiant_view_photo_replays(replays, 2, "test/demo/photo/tests/rgba.png");
 }
 
 TEST(RadiantViewTest, PhotoToolButtonsPreserveContainerAlignment) {
@@ -2925,72 +3094,28 @@ TEST(RadiantViewTest, BatchDocumentFontFaceOverridesSystemCache) {
         result_path, "\"content\": \"HHHH\""));
 }
 
-struct RadiantViewWorkQueue {
-    const size_t* selected;
-    size_t selected_count;
-    size_t next;
-#ifdef _WIN32
-    CRITICAL_SECTION mutex;
-#else
-    pthread_mutex_t mutex;
-#endif
-};
-
-static size_t test_radiant_view_claim_work(RadiantViewWorkQueue* queue) {
-#ifdef _WIN32
-    EnterCriticalSection(&queue->mutex);
-#else
-    pthread_mutex_lock(&queue->mutex);
-#endif
-    size_t selected_pos = queue->next++;
-#ifdef _WIN32
-    LeaveCriticalSection(&queue->mutex);
-#else
-    pthread_mutex_unlock(&queue->mutex);
-#endif
-    if (selected_pos >= queue->selected_count) return g_radiant_view_case_count;
-    return queue->selected[selected_pos];
-}
-
-#ifdef _WIN32
-static DWORD WINAPI test_radiant_view_worker(LPVOID data) {
-#else
-static void* test_radiant_view_worker(void* data) {
-#endif
-    RadiantViewWorkQueue* queue = (RadiantViewWorkQueue*)data;
-    while (true) {
-        size_t case_index = test_radiant_view_claim_work(queue);
-        if (case_index >= g_radiant_view_case_count) break;
-        test_radiant_view_run_case(case_index);
-    }
-#ifdef _WIN32
-    return 0;
-#else
-    return nullptr;
-#endif
-}
-
-static int test_radiant_view_cpu_count() {
-#ifdef _WIN32
-    SYSTEM_INFO info;
-    GetSystemInfo(&info);
-    return info.dwNumberOfProcessors > 0 ? (int)info.dwNumberOfProcessors : 1;
-#else
-    long nprocs = sysconf(_SC_NPROCESSORS_ONLN);
-    return nprocs > 0 ? (int)nprocs : 1;
-#endif
-}
-
 static int test_radiant_view_default_jobs() {
-    int jobs = test_radiant_view_cpu_count();
+    int jobs = tp_hardware_threads();
     if (jobs > 1) jobs--;
+    if (jobs > 4) jobs = 4;
     if (jobs < 1) jobs = 1;
-    const char* env_jobs = getenv("LAMBDA_RADIANT_VIEW_TEST_JOBS");
-    if (env_jobs && env_jobs[0]) {
-        int parsed = atoi(env_jobs);
-        if (parsed > 0) jobs = parsed;
+    for (const char* key : {"LAMBDA_RADIANT_VIEW_TEST_JOBS", "LAMBDA_TEST_MAX_CONCURRENT"}) {
+        const char* value = getenv(key);
+        if (value && value[0]) {
+            char* end = nullptr;
+            long parsed = strtol(value, &end, 10);
+            if (end != value && !*end && parsed > 0 && parsed <= 64) {
+                if (strcmp(key, "LAMBDA_TEST_MAX_CONCURRENT") == 0) {
+                    if (parsed < jobs) jobs = (int)parsed;
+                } else jobs = (int)parsed;
+            }
+        }
     }
     return jobs;
+}
+
+static void test_radiant_view_selected_case(void* selected) {
+    test_radiant_view_run_case(*(const size_t*)selected);
 }
 
 static bool test_radiant_view_wildcard_match(const char* pattern, const char* text) {
@@ -3081,56 +3206,54 @@ static bool test_radiant_view_list_tests_requested(int argc, char** argv) {
 }
 
 static void test_radiant_view_run_selected_parallel(const size_t* selected,
-                                                    size_t selected_count,
-                                                    int jobs) {
-    if (!selected || selected_count == 0) return;
-    if (jobs < 1) jobs = 1;
+                                                    size_t selected_count, int jobs) {
+    if (!selected_count) return;
     if ((size_t)jobs > selected_count) jobs = (int)selected_count;
-
-    RadiantViewWorkQueue queue;
-    queue.selected = selected;
-    queue.selected_count = selected_count;
-    queue.next = 0;
-#ifdef _WIN32
-    InitializeCriticalSection(&queue.mutex);
-    HANDLE* threads = (HANDLE*)malloc(sizeof(HANDLE) * (size_t)jobs);
-    if (!threads) {
-        for (size_t i = 0; i < selected_count; i++) test_radiant_view_run_case(selected[i]);
-        DeleteCriticalSection(&queue.mutex);
-        return;
+    ThreadPool* pool = jobs > 1 ? tp_create(jobs) : nullptr;
+    for (size_t i = 0; i < selected_count; i++) {
+        if (!pool || !tp_submit(pool, test_radiant_view_selected_case, (void*)&selected[i])) {
+            if (pool) tp_wait_all(pool);
+            test_radiant_view_run_case(selected[i]);
+        }
     }
-    for (int i = 0; i < jobs; i++) {
-        threads[i] = CreateThread(nullptr, 0, test_radiant_view_worker, &queue, 0, nullptr);
-    }
-    WaitForMultipleObjects((DWORD)jobs, threads, TRUE, INFINITE);
-    for (int i = 0; i < jobs; i++) CloseHandle(threads[i]);
-    free(threads);
-    DeleteCriticalSection(&queue.mutex);
-#else
-    pthread_mutex_init(&queue.mutex, nullptr);
-    pthread_t* threads = (pthread_t*)malloc(sizeof(pthread_t) * (size_t)jobs);
-    if (!threads) {
-        for (size_t i = 0; i < selected_count; i++) test_radiant_view_run_case(selected[i]);
-        pthread_mutex_destroy(&queue.mutex);
-        return;
-    }
-    for (int i = 0; i < jobs; i++) {
-        pthread_create(&threads[i], nullptr, test_radiant_view_worker, &queue);
-    }
-    for (int i = 0; i < jobs; i++) {
-        pthread_join(threads[i], nullptr);
-    }
-    free(threads);
-    pthread_mutex_destroy(&queue.mutex);
-#endif
+    if (pool) tp_destroy(pool);
 }
 
 int main(int argc, char** argv) {
     const char* filter = test_radiant_view_filter_from_args(argc, argv);
     bool list_only = test_radiant_view_list_tests_requested(argc, argv);
+    bool case_worker = false;
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "--radiant-case-worker") == 0) case_worker = true;
+    }
     ::testing::InitGoogleTest(&argc, argv);
 
     if (!list_only) {
+        g_radiant_view_root = file_getcwd();
+        const char* executable = getenv("RADIANT_TEST_EXECUTABLE");
+        g_radiant_view_executable = file_realpath(executable ? executable : "./lambda.exe");
+        const char* home = getenv("LAMBDA_HOME");
+        g_radiant_view_home = file_realpath(home && home[0] ? home : "./lmd");
+        if (!g_radiant_view_root || !g_radiant_view_executable || !g_radiant_view_home) return 1;
+#ifdef _WIN32
+        int process_id = _getpid();
+#else
+        int process_id = getpid();
+#endif
+        snprintf(g_radiant_view_run_id, sizeof(g_radiant_view_run_id), "%d-%llu",
+            process_id, (unsigned long long)time_now_ns());
+        if (!test_radiant_view_prepare_run()) return 1;
+        if (case_worker) {
+            // legacy cases use relative temp paths; isolate their entire harness before launching any child.
+            RadiantViewLaunch launch = {};
+            launch.label = "case";
+            if (!test_radiant_view_prepare_launch(&launch)) return 1;
+#ifdef _WIN32
+            if (_chdir(launch.cwd) != 0) return 1;
+#else
+            if (chdir(launch.cwd) != 0) return 1;
+#endif
+        }
         size_t selected[g_radiant_view_case_count];
         size_t selected_count = 0;
         for (size_t i = 0; i < g_radiant_view_case_count; i++) {
@@ -3142,5 +3265,9 @@ int main(int argc, char** argv) {
                                                 test_radiant_view_default_jobs());
     }
 
-    return RUN_ALL_TESTS();
+    int result = RUN_ALL_TESTS();
+    mem_free(g_radiant_view_executable);
+    mem_free(g_radiant_view_root);
+    mem_free(g_radiant_view_home);
+    return result;
 }

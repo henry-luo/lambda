@@ -1,0 +1,19 @@
+{
+  "name": "Timeline locale changes dates, controls, result messages and RTL navigation",
+  "html": "test/ui/timeline/locale.ls",
+  "viewport": {"width": 900, "height": 850},
+  "events": [
+    {"type":"assert_attribute","target":{"selector":"[data-timeline-host='arabic']"},"attribute":"dir","equals":"rtl"},
+    {"type":"assert_focus","target":{"selector":"[data-timeline-host='arabic'] [data-timeline-id='a']"}},
+    {"type":"key_press","key":"ArrowLeft"},
+    {"type":"assert_attribute","target":{"selector":"[data-timeline-host='arabic']"},"attribute":"data-timeline-active","equals":"b"},
+    {"type":"assert_focus","target":{"selector":"[data-timeline-host='arabic'] [data-timeline-id='b']"}},
+    {"type":"assert_text","target":{"selector":"[data-timeline-host='arabic'] [data-timeline-id='b']"},"contains":"٢٠٢٦"},
+    {"type":"assert_attribute","target":{"selector":"[data-timeline-host='french'] [data-timeline-command='first']"},"attribute":"aria-label","equals":"Premier"},
+    {"type":"assert_text","target":{"selector":"[data-timeline-host='french'] [data-timeline-id='a']"},"contains":"11/10/2026"},
+    {"type":"click","target":{"selector":"[data-timeline-host='french'] [data-timeline-search]"}},
+    {"type":"type","text":"Beta"},
+    {"type":"assert_text","target":{"selector":"[data-timeline-host='french'] .lambda-timeline-search-status"},"equals":"1 événement correspondant"},
+    {"type":"assert_focus","target":{"selector":"[data-timeline-host='french'] [data-timeline-search]"}}
+  ]
+}

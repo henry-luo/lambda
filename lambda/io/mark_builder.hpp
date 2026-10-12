@@ -260,9 +260,10 @@ public:
      * This enables efficient cross-Input data sharing while ensuring memory safety.
      *
      * @param item The item to potentially copy
-     * @return Original item if already owned, or a deep copy if external
+     * @param force Copy owned values too when a distinct materialized occurrence is required
+     * @return Original item if already owned and not forced, otherwise a deep copy
      */
-    Item deep_copy(Item item);
+    Item deep_copy(Item item, bool force = false);
 
     // DOM construction needs independent elements/content even within one arena
     // (D4.5.3); ordinary evaluation keeps deep_copy's ownership optimization.

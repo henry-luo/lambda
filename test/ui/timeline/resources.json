@@ -1,0 +1,14 @@
+{
+  "name":"Timeline source requests, immutable completion and parent rerenders",
+  "html":"test/ui/timeline/resources.ls",
+  "viewport":{"width":900,"height":450},
+  "events":[
+    {"type":"assert_text","target":{"selector":"#requested"},"equals":"requested"},
+    {"type":"click","target":{"selector":"#deliver"}},
+    {"type":"assert_text","target":{"selector":".lambda-timeline-card-title"},"equals":"Loaded history"},
+    {"type":"assert_attribute","target":{"selector":".lambda-timeline-chart"},"attribute":"data-timeline-active","equals":"loaded"},
+    {"type":"assert_text","target":{"selector":"#received"},"equals":"1"},
+    {"type":"click","target":{"selector":"#deliver"}},
+    {"type":"assert_text","target":{"selector":"#received"},"equals":"1"}
+  ]
+}

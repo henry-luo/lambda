@@ -23,20 +23,6 @@ static bool render_media_push_content_clip(RasterRenderContext* rdcon, const Rec
     return true;
 }
 
-static bool render_media_view_has_dom_element(ViewBlock* view) {
-    if (!view) return false;
-    DomNode* node = lam::view_dom_node(static_cast<View*>(view));
-    return node && node->node_type == DOM_NODE_ELEMENT;
-}
-
-static uint8_t render_media_content_opacity(ViewBlock* view) {
-    if (!view || !view->in_line) return 255;
-    float opacity = view->inl()->opacity;
-    if (opacity >= 1.0f) return 255;
-    if (opacity <= 0.0f) return 0;
-    return clamp_byte_round(opacity * 255.0f);
-}
-
 static float render_media_object_position_offset(float box_size, float rendered_size,
                                                  float position, bool is_percent,
                                                  float scale) {
@@ -136,6 +122,13 @@ Rect render_media_image_rect(ViewBlock* view, ImageSurface* image, Rect rect, fl
     return render_media_object_rect(view && view->embed ? view->embedp() : nullptr, image, rect, scale);
 }
 
+ImageSurface* render_media_image_surface(ViewBlock* view) {
+    if (!view) return nullptr;
+    // Canvas backing pixels live in document state, outside the image embed slot.
+    if (view->tag_id == MARKUP_NAME_CANVAS) return render_canvas_surface(view);
+    return view->embed ? view->embedp()->img : nullptr;
+}
+
 bool render_media_paint_svg_image(PaintList* paint, ImageSurface* image, Rect rect,
         const Rect* content_rect, float raster_scale, FontContext* fonts, UiContext* ui, uint8_t opacity) {
     if (!paint || !content_rect) return false;
@@ -173,6 +166,22 @@ bool render_media_paint_svg_picture(PaintList* paint, UiContext* ui, ViewBlock* 
         ui_context_raster_scale(ui), ui ? ui->font_ctx.get() : nullptr, ui);
 }
 
+bool render_media_paint_image_content(PaintList* paint, UiContext* ui, ViewBlock* view,
+                                     const Rect* content_rect) {
+    ImageSurface* image = render_media_image_surface(view);
+    if (!paint || !image || !content_rect) return false;
+    if (render_media_paint_svg_picture(paint, ui, view, content_rect)) return true;
+    // Decode before the owned paint snapshot; effect replay cannot load a later borrow.
+    PaintImageBox box = {};
+    box.image = lam::up(image);
+    box.fonts = lam::up(ui ? ui->font_ctx.get() : nullptr);
+    box.content_rect = *content_rect;
+    box.image_rect = render_media_image_rect(view, image, *content_rect, 1.0f);
+    box.raster_scale = ui_context_raster_scale(ui);
+    box.opacity = 255;
+    return render_paint_image_box(paint, &box);
+}
+
 bool render_paint_image_box(PaintList* paint, const PaintImageBox* box) {
     if (!paint || !box || !box->image) return false;
     if (!box->overflow_visible && (box->content_rect.width <= 0.0f || box->content_rect.height <= 0.0f)) return true;
@@ -180,7 +189,13 @@ bool render_paint_image_box(PaintList* paint, const PaintImageBox* box) {
         return render_media_paint_svg_image(paint, box->image, box->image_rect,
             box->overflow_visible ? &box->image_rect : &box->content_rect, box->raster_scale, box->fonts, nullptr, box->opacity);
     }
-    if (!box->overflow_visible) {
+    // retained/export consumers can receive a file image before raster paint requested its pixels.
+    image_surface_ensure_decoded(box->image, box->image->width, box->image->height);
+    // an image inside its content box already has bounded coverage; a second
+    // coincident PDF clip compounds edge antialiasing differently from a background tile.
+    bool clip_content = !box->overflow_visible &&
+        !view_geometry_rect_contains_rect(box->content_rect, box->image_rect, 0.01f);
+    if (clip_content) {
         RdtPath* clip = rdt_path_new();
         if (!clip) return false;
         rdt_path_add_rect(clip, box->content_rect.x, box->content_rect.y,
@@ -189,20 +204,21 @@ bool render_paint_image_box(PaintList* paint, const PaintImageBox* box) {
     }
     paint_draw_image_resource(paint, box->image, box->image_rect.x, box->image_rect.y,
         box->image_rect.width, box->image_rect.height, box->opacity, nullptr);
-    if (!box->overflow_visible) paint_pop_clip(paint);
+    if (clip_content) paint_pop_clip(paint);
     return true;
 }
 
-static void render_image_content(RasterRenderContext* rdcon, ViewBlock* view) {
-    if (!view->embed || !view->embedp()->img) return;
-
-    ImageSurface* img = view->embedp()->img;
+void render_media_image_content(RasterRenderContext* rdcon, ViewBlock* view) {
+    if (!rdcon || !view) return;
+    ImageSurface* img = render_media_image_surface(view);
+    if (!img) return;
     Rect border_rect = render_geometry_block_border_rect(&rdcon->block, view, rdcon->raster_scale);
     Rect rect = render_geometry_block_content_rect(&rdcon->block, view, rdcon->raster_scale);
     float s = rdcon->raster_scale;
 
     Rect img_rect = render_media_image_rect(view, img, rect, s);
-    uint8_t content_opacity = render_media_content_opacity(view);
+    // The enclosing block group applies CSS opacity to decorations and pixels once.
+    const uint8_t content_opacity = 255;
     Bound image_clip = rdcon->has_transform
         ? rdcon->block.clip
         : view_geometry_intersect_bound_rect(rdcon->block.clip, rect);
@@ -260,33 +276,8 @@ static void render_image_content(RasterRenderContext* rdcon, ViewBlock* view) {
 }
 
 void render_image_view(RasterRenderContext* rdcon, ViewBlock* view) {
-    log_enter();
-    if (render_block_dirty_misses(rdcon, view)) {
-        log_leave();
-        return;
-    }
-    if (render_block_try_retained_fragment(rdcon, view)) {
-        log_leave();
-        return;
-    }
-
-    RenderElementMarkerScope marker_scope = render_element_marker_begin(rdcon, view);
-    BlockBlot parent_block = rdcon->block;
-
-    if (render_media_view_has_dom_element(view)) {
-        // render border and background, etc. under the outer image marker so the
-        // marker bounds include the replaced content recorded below.
-        rdcon->element_marker_suppression_depth++;
-        render_block_view(rdcon, view);
-        rdcon->element_marker_suppression_depth--;
-    }
-
-    // render the image content after any DOM-backed block decorations.
-    RenderTransformScope content_transform_scope = render_state_push_transform(rdcon, view, &parent_block);
-    render_image_content(rdcon, view);
-    render_state_pop_transform(&content_transform_scope);
-    render_element_marker_end(rdcon, &marker_scope);
-    log_leave();
+    // Replaced content shares the box's visibility, clip, transform and effect scope.
+    render_block_view_content(rdcon, view, render_media_image_content);
 }
 
 bool render_media_is_webview_layer(ViewBlock* view) {

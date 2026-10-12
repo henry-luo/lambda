@@ -1,0 +1,26 @@
+{
+  "name":"Window subscriptions retain owners across rebuilds, cancellation, and removal",
+  "html":"test/ui/window_subscriptions.ls",
+  "viewport":{"width":700,"height":450},
+  "input_turn_ms":0,
+  "events":[
+    {"type":"click","target":{"selector":"#one"}},
+    {"type":"assert_text","target":{"selector":"#first-count"},"equals":"1"},
+    {"type":"assert_text","target":{"selector":"#second-count"},"equals":"1"},
+    {"type":"assert_text","target":{"selector":"#body-count"},"equals":"1"},
+    {"type":"assert_text","target":{"selector":"#late-count"},"equals":"0"},
+    {"type":"click","target":{"selector":"#first-toggle"}},
+    {"type":"click","target":{"selector":"#two"}},
+    {"type":"assert_text","target":{"selector":"#first-count"},"equals":"1"},
+    {"type":"assert_text","target":{"selector":"#second-count"},"equals":"2"},
+    {"type":"click","target":{"selector":"#remove"}},
+    {"type":"click","target":{"selector":"#three"}},
+    {"type":"assert_text","target":{"selector":"#body-count"},"equals":"3"},
+    {"type":"assert_text","target":{"selector":"#first-count"},"equals":"1"},
+    {"type":"click","target":{"selector":"#first-toggle"}},
+    {"type":"click","target":{"selector":"#four"}},
+    {"type":"assert_text","target":{"selector":"#first-count"},"equals":"2"},
+    {"type":"assert_text","target":{"selector":"#body-count"},"equals":"4"},
+    {"type":"assert_text","target":{"selector":"#late-count"},"equals":"3"}
+  ]
+}
