@@ -46,3 +46,31 @@ grammar quoted {
     space  := " "*
 }
 parse("a = b", quoted)^
+
+// GM13: `~x` matches x where the previous token ended, with no space skipped
+// first (Tree-sitter's token.immediate), so text after `}` keeps its space,
+// while the expression inside the braces skips space as usual
+grammar tmpl {
+    Text  = _q, (~chunk | Hole)*, ~_q
+    Hole  = ~"{", Sum, "}"
+    Sum   = prec.left(1, left: Sum, op: plus, right: Sum) | num
+    chunk := !("\"" | "{")+
+    num   := "\d"+
+    plus  := '+'
+    _q    := "\""
+    space := " "*
+}
+parse("\"a { 1 + 2 } b\"", tmpl)^
+parse("\" lead\"", tmpl)^
+// `~` on a token: no space between `<` and the name
+grammar tag {
+    open = _lt, name: ~name, _gt, ~"!"?
+    name := "\a"+
+    _lt  := "<"
+    _gt  := ">"
+    space := " "*
+}
+parse("<a >", tag)^
+parse("<a>!", tag)^
+parse("<a> !", tag) ^ { ^.message }
+parse("< a>", tag) ^ { ^.message }

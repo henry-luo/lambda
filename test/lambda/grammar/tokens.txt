@@ -36,3 +36,18 @@ false
   "b">
 <pair data-value: "b",
   "a=">
+<Text
+  "a "
+  <Hole
+    "{"
+    <Sum left: <Sum
+        "1">, op: '+', right: <Sum
+        "2">>
+    "}">
+  " b">
+<Text
+  " lead">
+<open name: "a">
+<open name: "a",
+  "!">
+"parse: grammar 'tag': expected end of input at 1:5, found "!"parse: grammar 'tag': expected name at 1:2, found " a>""

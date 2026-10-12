@@ -42,7 +42,7 @@ Lambda ships a set of **packages**: libraries written in Lambda Script itself, d
 | `math` | `lambda.doc.math.math` | Library | Typesets LaTeX math as HTML | Markdown math in `lambda view`, `layout` and `render`; math inside LaTeX documents |
 | `latex` | `lambda.latex.latex` | Library | Renders LaTeX documents as HTML | `lambda convert x.tex -t html`; `lambda view`, `layout` and `render` on `.tex`/`.latex` |
 | `pdf` | `lambda.pdf.pdf` | Library, experimental | Renders PDF pages as SVG, and whole documents as HTML | `lambda view`, `layout` and `render` on `.pdf` |
-| `grammar` | `lambda.grammar.xpath` | Library, experimental | Grammars for other languages, written as Lambda `grammar` declarations: XPath 3.1 parses to a Lambda element tree | None |
+| `grammar` | `lambda.grammar.xpath`, `lambda.grammar.xquery`, `lambda.grammar.jq`, `lambda.grammar.rnc` | Library, experimental | Grammars for other languages, written as Lambda `grammar` declarations: XPath 3.1, XQuery 3.1, jq 1.7.1 and RELAX NG compact parse to Lambda element trees | None |
 | `openapi` | `lambda.openapi.openapi`, `lambda.openapi.server` | Experimental | Route listing, Lambda type generation, validation and Swagger UI pages for OpenAPI specs | None |
 | `slide` | `lambda.slide` | Library, experimental | Slide elements, cues/effects, presenter console/navigation tools, themes/layouts/masters, snapshots and handouts; see [Slide Presentations](Lambda_Slide.md) | `lambda view deck.slides` |
 | `doc` | `lambda.doc.doc_viewer` | Engine internal | The document viewer and project browser, with its startup splash and icon font | Bare `lambda view`; `lambda demo` adds the startup splash |
@@ -1106,6 +1106,78 @@ holding one `Expr` per comma-separated item.
 Known differences from the spec: `(: … :)` comments do not nest, and the
 parser accepts a few forms the spec restricts (an ExprSingle such as `for`
 as an operand of a binary operator; chained `instance of`).
+
+### 12.2 `lambda.grammar.xquery` — XQuery 3.1
+
+```lambda
+import lambda.grammar.xquery
+
+parse("for $b in //book order by $b/title return <t>{ $b/title }</t>", xquery)^
+```
+
+The grammar imports `lambda.grammar.xpath`, so every XPath shape in §12.1
+appears unchanged inside an XQuery tree. The whole query is
+`<Module <VersionDecl …>? <MainModule …>>` or `<LibraryModule <ModuleDecl …> …>`;
+a main module holds its prolog declarations, then `<QueryBody <Expr …>…>`.
+
+| XQuery | Tree |
+|--------|------|
+| `for … let … where … group by … order by … count … return` | `<FLWORExpr <ForClause <ForBinding var: "x", in: …>> <LetClause <LetBinding var:, value:>> <WhereClause …> <GroupByClause <GroupingSpec …>> <OrderByClause <OrderSpec direction: 'descending', …>> <CountClause var:> return: …>`; window clauses are `<TumblingWindowClause …>` / `<SlidingWindowClause …>` with `start:`/`end:` conditions |
+| `switch`, `typeswitch`, `try` | `<SwitchExpr operand: …, <SwitchCaseClause case: …, return: …> default: …>`, `<TypeswitchExpr operand: …, <CaseClause var:?, <SequenceType …>, return:> default:>`, `<TryCatchExpr body: …, <CatchClause <NameTest …> body: …>>` |
+| `<a href="x{1}">t {e} u</a>` | `<DirElemConstructor name: "a", end: "a", <DirAttribute name: "href", value: <DirAttributeValue "x" <EnclosedExpr …>>> "t " <EnclosedExpr …> " u">`; content text keeps its whitespace and stays as written (`&amp;`, `{{`); comments, PIs and CDATA are `<DirCommentConstructor "<!--…-->">`, `<DirPIConstructor …>`, `<CDataSection …>` |
+| `element n { }`, `attribute`, `text`, `document`, … | `<CompElemConstructor name: "n", body: <EnclosedExpr …>>` (a computed name is `name: <EnclosedExpr …>`), and likewise for the other computed constructors |
+| ``` ``[a `{ e }` b]`` ``` | `<StringConstructor "``[a `{" <StringInterpolation <Expr …>> "}` b]``">`: the text pieces keep their delimiters |
+| prolog | `<NamespaceDecl prefix:, uri:>`, `<VarDecl name:, type:?, value:>`, `<FunctionDecl name:, <Annotation …> <Param …> return:?, body:>`, `<ModuleImport prefix:?, uri:, location:?>`, and one element per setter |
+
+Known differences from the spec: comments do not nest; an end tag is not
+checked against its start tag; whitespace between attributes is optional.
+
+### 12.3 `lambda.grammar.jq` — jq 1.7.1
+
+```lambda
+import lambda.grammar.jq
+
+parse(".[] | select(.age > 30) | {name, age}", jq)^
+```
+
+Ported from jq's own bison grammar: one `Exp` node per operator, in jq's
+precedence order (`|` loosest, then `,`, `//`, assignments, `or`, `and`,
+comparisons, `+ -`, `* / %`, postfix `?`, `try`).
+
+| jq | Tree |
+|----|------|
+| `a \| b`, `a + b`, `a // b`, `.x \|= f` | `<Exp left: <Exp …>, op: '\|', right: <Exp …>>` (every binary operator) |
+| `-a`, `a?` | `<Exp op: '-', operand: …>`, `<Exp operand: …, op: '?'>` |
+| `.`, `..`, `.a`, `."k"`, `.[0]`, `.[1:2]`, `.[]`, `.a?` | `<Term <Identity>>`, `<Term <Recurse>>`, `<Term field: "a">`, `<Term field: <String "k">>`, `<Term base: <Term …>, index: <Exp …>>`, `slice: <Slice from:, to:>`, `iterate: <Iterate>`, `optional: '?'` |
+| literals, `$x`, `f(a; b)`, `@csv` | `<Number "1">`, `<String "a" <Interpolation <Exp …>> "b">`, `<Variable name: "$x">`, `<FunctionCall name: "f", <Exp …> <Exp …>>`, `<Format name: "@csv">` |
+| `[e]`, `{a, "b": 1, (.k): v}` | `<Array <Exp …>>`, `<Object <Pair key: "a"> <Pair key: <String "b">, value: <ObjVal …>> …>` |
+| `def f(g; $x): e; body` | `<Exp def: <FuncDef name: "f", <Param name: "g"> <Param name: "$x">, body: …>, body: …>` |
+| `e as $x \| body`, `reduce`, `foreach`, `if`, `try`, `label` | `<Exp source: <Term …>, <Variable …>, body: …>`, `<Reduce source:, init:, update:>`, `<Foreach … extract:?>`, `<If condition:, then:, <Elif …>, else:?>`, `<Exp body:, catch:?>`, `<Exp label: "$out", body:>` |
+
+The program is `<Program <Module …>? <Import …>* body: <Exp …>>` (a library
+holds `<FuncDef …>` children instead). String text is raw: escapes are not
+decoded.
+
+### 12.4 `lambda.grammar.rnc` — RELAX NG compact syntax
+
+```lambda
+import lambda.grammar.rnc
+
+parse("start = element doc { attribute id { xsd:ID }, text* }", rnc)^
+```
+
+| RNC | Tree |
+|-----|------|
+| `p, q`, `p & q`, `p \| q` | `<Group …>`, `<Interleave …>`, `<Choice …>`; the three do not mix without parentheses, and parentheses leave no node |
+| `p?`, `p*`, `p+` | `<Repeat pattern: …, op: '?'>` |
+| `element n { p }`, `attribute n { p }` | `<Element name: <Name "n">, …>`; name classes are `<Name …>`, `<NsName prefix: "ns">`, `<AnyName except: …>`, `<NameChoice …>` |
+| `xsd:int { minInclusive = "1" } - "5"`, `"v"`, `string "v"` | `<Data type: "xsd:int", <Param name:, value:> except: …>`, `<Value value: <Literal "v">>`, `<Value type: "string", value: …>` |
+| `start = p`, `name \|= p`, `div`, `include` | `<Start assign: '=', …>`, `<Define name: "name", assign: '\|=', …>`, `<Div …>`, `<Include uri:, inherit:?, …>` |
+| declarations | `<NamespaceDecl prefix:, uri:>`, `<DefaultNamespaceDecl …>`, `<DatatypesDecl …>` |
+| annotations, `##` | `<Annotations <AnnotationAttribute …> <AnnotationElement …>>`, `<FollowAnnotation …>`, `<Documentation "## …">`, wrapped with the pattern in `<Annotated pattern: …>` |
+
+A `<Literal>` holds the joined text of its `~` segments without quotes. Not
+supported: `\x{…}` escapes.
 
 ## 13. Tests
 

@@ -1,7 +1,7 @@
 # Grammar Module — Implementation Plan
 
 **Date:** 2026-10-11
-**Status:** IN PROGRESS — **P0–P3 implemented 2026-10-11** (§7), **P4 and P5 the same day** (§8: composition, spans, quoted names, and `lambda.grammar.xpath`, scoped by USER to parsing only). Q1–Q6 ruled by USER on 2026-10-11 (§6), which rewrote §2 from a VMap handle to the type path; GM4.2 ruled during P2 (design §0).
+**Status:** IN PROGRESS — **P0–P3 implemented 2026-10-11** (§7), **P4 and P5 the same day** (§8: composition, spans, quoted names, and `lambda.grammar.xpath`, scoped by USER to parsing only); imported tokens in local islands and cross-module composition 2026-10-12 (§9); **M4 jq and M5 XQuery and RELAX NG compact 2026-10-12** (§10, with GM13 `~x`). Q1–Q6 ruled by USER on 2026-10-11 (§6), which rewrote §2 from a VMap handle to the type path; GM4.2 ruled during P2 (design §0).
 **Design:** [Lambda_Design_Grammar_Parser.md](../Lambda_Design_Grammar_Parser.md) — GM1–GM4, GM4.1, GM5v2, GM5.1, GM5.2 ruled (USER 2026-10-11); GM6–GM12 proposed; GM-O1–O3, O5–O7 open. The design doc holds the reasoning; this plan holds the seams, the phases and the tests.
 **Rulings touched:** none yet. GM-O1 decides where `grammar` lands in the formal spec (proposed: an S16.9 declaration ruling for the surface, a new D8.3 for the engine, one line in S15 naming `parse(text, grammar)` as the second producer of trees that reach `compile`). S16.10.1v2's barred list grows by one word (`grammar`) — Appendix K of Lambda_Design_Syntax.md is regenerated, not hand-edited.
 **Scope:** the `grammar` declaration, the loader + lint, the PEG interpreter with bounded left recursion, the `parse`/`input` surface, and the first guest (XPath 3.1) as the acceptance test. jq, XQuery and RELAX NG compact follow once the engine is proven; they are listed for sequencing only.
@@ -300,5 +300,41 @@ USER rulings first: GM4.3 (`'x'` in a `=` rule is a rule name), GM5.4 (`text is 
 
 ### 8.4 Still open
 
-GM-O1 (formal-spec placement), GM-O2 (explicit levels), GM-O5 (packrat default), GM-O6 (semantic predicates), local `:=` rules naming imported `:=` rules, nested XPath comments, and the guests after XPath (jq, XQuery, RELAX NG compact).
+GM-O1 (formal-spec placement), GM-O2 (explicit levels), GM-O5 (packrat default), GM-O6 (semantic predicates), ~~local `:=` rules naming imported `:=` rules~~ (done 2026-10-12, §9), nested XPath comments, and the guests after XPath (jq, XQuery, RELAX NG compact).
 
+## 9. Follow-up: imported token rules in local islands (2026-10-12)
+
+| Item | Result |
+|---|---|
+| Local `:=` naming an imported `:=` | Local `:=` rules no longer compile while the body parses: `parse_rule` queues them (`PendingToken`), and `compile_token_rules` runs after `compose_imports`. It first publishes every imported `:=` copy left in the composed table (exactly those no local rule overrides) into the private token scope, from the island AST each rule now keeps (`GrammarRule::pattern_body`, set by `publish_token_rule`), then compiles the local ones in source order. So an island sees the imports wherever the `import` is written, the local rules written before it, and a local override instead of the imported rule. |
+| Composition across modules (found by this fix) | Name lookups compare interned pointers, and each module has its own name pool, so `import g` of a grammar declared in another module (`import lambda.grammar.xpath`, then `grammar xq { import xpath … }`) could neither reference an imported rule by name (E204 "no rule named 'integer'"), nor override one, nor find the imported entry. P4 tested composition within one module only. `compose_imports` and `clone_expr` now intern imported rule names, references and the entry name into the importer's pool. |
+| Still open | A local override does not reach the islands of imported `:=` rules: those were compiled where declared and inline the declaring grammar's definitions (design §4.5). |
+
+Evidence: `compose.ls` gains `tagged` (override then reference), `tag_first` (a `:=` written before the import), `two_imports` (a later import's token wins) and `xq` (a cross-module XQuery-shaped extension: an overridden `IntegerLiteral`, an `ExtensionExpr` inside an overridden `ParenthesizedExpr`, and `qname := ncname ":" ncname` over XPath's token). All grammar fixtures green under `interp`, `jit` and `auto`; `compose.ls` identical under `LAMBDA_GC_FORCE_EVERY=1`; `NegativeScriptTest.Grammar*` 11/11. The full Lambda baseline was not rerun: the change is confined to `grammar_compile`.
+
+## 10. M4 jq and M5 XQuery, RELAX NG compact (2026-10-12)
+
+USER ruling first: **GM13** — `~x` matches `x` where the previous token ended (Tree-sitter's `token.immediate`), for jq's string interpolation and XQuery's direct constructors. It was chosen after comparing with Tree-sitter over the two `nospace` alternatives (a `spaced` exit modifier, per-rule `nospace`); USER picked the `~` spelling over `immediate(x)`. The three guests follow the P5 scope (parse into a Lambda tree, Tree-sitter style; no evaluation).
+
+### 10.1 What landed
+
+| Item | Result |
+|---|---|
+| GM13 `~x` | Loader: `GT_TILDE`; `parse_postfix` marks the atom (`GrammarExpr::immediate`), accepting only a literal or a rule name (a group is E100), and `resolve_refs` rejects `~` on a `=` rule (E200). Engine: `match_literal` and `match_token(…, immediate)` skip no `space` for a marked reference. A token has no memo entry, so the mark lives on the call site and the memo keys are unchanged. |
+| `lambda.grammar.jq` | `lmd/package/grammar/jq.ls`, from jq 1.7.1's `parser.y` and `lexer.l`. One left-recursive `Exp` whose levels are bison's precedence lines in order (FUNCDEF 1 … `try`/`catch` 13–14); `Term` is jq's Term (postfix chain with optional `?`); `ObjVal` is ExpD; `Program`, `Module`, `Import`, `FuncDef`, destructuring with `?//`, `reduce`/`foreach`/`if`/`try`/`label`. Strings: `_dq, (~text \| Interpolation)*, ~_dq`. Keywords are excluded from identifiers by `!keyword`; `$__loc__` by `!~"\w"`. |
+| `lambda.grammar.rnc` | `lmd/package/grammar/rnc.ls`, from the OASIS compact-syntax spec. `Group` / `Interleave` / `Choice` are repetitions over a memoized `_Particle` (the spec forbids mixing them without parentheses; without `memo` the three-way retry is exponential in nesting depth); name classes, datatypes with parameters and `-` exceptions, `grammar`/`div`/`include`/`external`/`parent`, annotations, follow annotations, documentation comments, `\keyword` identifiers. A literal's segments are `~` text tokens between hidden quotes, so `"a" ~ 'b'` merges to `"ab"` by S2.6.4. |
+| `lambda.grammar.xquery` | `lmd/package/grammar/xquery.ls`: `import lambda.grammar.xpath`, then `grammar xquery { Module = …; import xpath; … }` (a local rule before the import keeps `Module` the entry). Overrides `_ExprSingle` (a hidden hook added to `xpath.ls`; XPath's tree is unchanged), `_Primary`, `Binding`, `LetBinding`, `InlineFunctionExpr`. Prolog (setters, namespaces, imports, then declarations), full FLWOR with window clauses, switch, typeswitch, try/catch, direct constructors with `~` text, computed constructors, ordered/unordered, validate, pragmas, string constructors. |
+
+### 10.2 Found while doing it
+
+- **String-constructor text cannot be a separate token.** Its delimiters (``]``` `` and `` `{ ``) start with characters the text may contain, and a greedy text token overshoots (`a]]``` read `a]]`` as text). The pieces include their delimiters (`sc_start := "``[" chars "`{"`), with the text written as an automaton for "contains neither delimiter" so RE2 finds the boundary inside one token. CDATA, comments and PIs are single tokens for the same reason.
+- **Word boundaries use Lambda's identifier bytes**, which exclude `-` and `.`; RNC and XQuery names contain both. Identifier exclusion therefore checks the following byte itself (`!(keyword, !~name_char)` in RNC); structural keywords match the front of a name like `element-x` and recover by backtracking.
+- **jq's `try A catch B`**: the body is a middle self-reference, read at level 0 (§5.2 step 4), so the grammar accepts `try a | b catch c`, which jq rejects. Every program jq accepts parses the same way.
+
+### 10.3 Evidence
+
+- Fixtures `test/lambda/grammar/{jq,rnc,xquery}.ls` (52, 12 and 37 inputs, plus 7, 4 and 5 error cases); `tokens.ls` gains `~` cases; `NegativeScriptTest.GrammarImmediateMarksATokenRule` and `GrammarImmediateMarksOneAtom`. All 14 grammar fixtures green under `interp`, `jit` and `auto`, and identical under `LAMBDA_GC_FORCE_EVERY=1`; `NegativeScriptTest.Grammar*` 13/13; `xpath.txt` unchanged by the `_ExprSingle` hook.
+
+### 10.4 Still open
+
+Nested `(: :)` comments in XPath and XQuery (needs a recursive `space`); end-tag names checked against start tags (no backreferences; GM-O6); string text and references kept raw (no decoding); RNC `\x{…}` escapes; the local-override-in-imported-island limit (§9).

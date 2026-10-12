@@ -1,6 +1,6 @@
 # Lambda Grammar Module — Design
 
-**Revision:** 3 (2026-10-11)
+**Revision:** 4 (2026-10-12)
 **Status:** GM1–GM4, GM4.1, GM4.2, GM5v2, GM5.1, GM5.2 ruled by USER on
 2026-10-11 (see §0); GM6–GM12 proposed. **Implemented 2026-10-11** (P0–P3 of
 [the plan](impl/Lambda_Impl_Grammar_Parser.md)): declaration, loader, lint,
@@ -8,7 +8,11 @@ engine with left recursion, `parse(text, g[, 'rule'])`, and GM5.3's
 `text is g`. Implementation found two corrections, recorded in §4.2
 (keyword-token boundaries) and §5.2 (the growth cap). Revision 3, the same
 day: GM4.3, GM5.4, GM11v2 and the P5 scope ruled; composition (§4.5), spans
-and the `lambda.grammar.xpath` package implemented (P4, P5). Open rulings in §9.
+and the `lambda.grammar.xpath` package implemented (P4, P5). Revision 4
+(2026-10-12): local `:=` rules see imported ones and composition works across
+modules (§4.5); GM13 (`~x`, no space before a token) ruled and implemented
+(§4.3); M4 `lambda.grammar.jq` and M5 `lambda.grammar.xquery` and
+`lambda.grammar.rnc` done (§10). Open rulings in §9.
 **Formal linkage:** [D1.1](../doc/Lambda_Formal_Design.md#d1-architecture-principles)
 (a guest is a grammar + AST builder + LangProfile), [S15.1 / S15.3](../doc/Lambda_Formal_Semantics.md#s15-metaprogramming)
 (the `lm.` AST is an element tree; `compile(ast)` is the only way from data
@@ -45,6 +49,7 @@ string patterns, U = unified AST).
 | **GM5.4** | **`text is g.rule` is not valid syntax** (closes GM-O8): bind the rule first — `let r = g.rule` then `text is r`. **`input(target, g)` is not a supported usage** (closes GM-O9). |
 | **GM11v2** | **Spans and the entry rule go in a third-argument options map**: `parse(text, g, {rule: 'expr', spans: true})`; `parse(text, g, 'rule')` stays. *(v1 wrote `{'spans': true}` alone.)* |
 | **P5 scope** | **A guest grammar only parses**: `lambda.grammar.xpath` turns XPath into a Lambda element tree; evaluating it, and lowering to `lm.` (whose `compile`, S15.3, is unimplemented), are out of this phase. The XPath grammar is written **Tree-sitter style** — one directly left-recursive `Expr` with a precedence ladder and labels — rather than as a line-by-line EBNF transcription, which would make every precedence level a node. |
+| **GM13** (2026-10-12) | **`~x` matches `x` where the previous token ended**: no `space` is skipped before it — Tree-sitter's `token.immediate`. It marks one literal or `:=` rule reference (`~(a \| b)` and `~rule` on a `=` rule are errors), so `~x*` is `(~x)*`. It is how a space-sensitive position is written inside spaced text: jq's string text after an interpolation, XQuery's element content and attribute values around `{ … }`. Ruled over an exit from `nospace` regions (a `spaced` modifier) and over per-rule `nospace`, after comparing with Tree-sitter, which has no regions: whether space may precede something belongs to that token. `nospace` stays for whole space-free regions. |
 | **GM5.2** | **Diagnostics align with the existing parsers**: compile-time grammar errors use the script parser's E-code scheme and reporters; a failed `parse` is the same `ERR_PARSE_ERROR` every input parser raises, with the furthest-failure message as its `parse_error_message`; lint warnings go through the warning channel the script compiler already uses. No new catalog, no new tags. |
 
 USER also asked whether Tree-sitter-style precedence rules (`prec.left(n, …)`
@@ -205,6 +210,7 @@ grammar <name> {
   | `rule` | reference to a `=` rule — produces a child element |
   | `( … )` | grouping |
   | `&a` / `!a` | positive / negative lookahead (zero width) |
+  | `~tok` / `~"lit"` | immediate (GM13): the token starts where the previous one ended, with no `space` skipped first |
   | `prec(n, …)` `prec.left(n, …)` `prec.right(n, …)` `prec.none(n, …)` | precedence-annotated alternative (§5); `prec.none` is bare `prec` without the non-associative lint warning (GM6.1) |
   | `import g` | a statement of the body, not an expression: compose grammar `g` (§4.5) |
   | `name: a` | field label on the child (becomes an attribute, §7) |
@@ -264,6 +270,25 @@ This is how string-literal bodies, XQuery direct element content and
 RELAX NG's `\` escapes are written without lexing them in one giant `:=`
 rule. `space` is implicitly a `nospace` rule.
 
+A region cannot let space back in below it, so a space-sensitive position
+*inside* spaced text is written with `~` instead (GM13, 2026-10-12): only the
+marked token loses the skip. XQuery's element content is the case that
+decided it — in `<a>x {1} y</a>` the text after `}` must keep its leading
+space, while the expression inside the braces skips space and comments:
+
+```
+DirElemConstructor = _lt, name: ~qname, DirAttribute*,
+                     (_empty_close | _gt, _DirElemContent*, _lt_slash, end: ~qname, _gt)
+_DirElemContent    = ~elem_text | _DirectConstructor | EnclosedExpr
+```
+
+`~` cannot help where a text piece ends at a *multi-character* delimiter and
+the delimiter starts with a character the text may contain (XQuery's
+string constructor ``…`{`` and ``…]``` ``): a separate text token is
+matched on its own and cannot see the delimiter that follows, so those
+pieces are tokens that include their delimiter (``sc_start := "``[" chars
+"`{"``).
+
 ### 4.4 Entry rule and the `parse` call
 
 `parse(text, g)` and `parse(text, g, 'rule')` (GM5.1; extending the
@@ -303,8 +328,14 @@ one overrides an earlier one. The entry follows GM5.1 in written order: an
 `import` before every local rule contributes the imported entry (or the local
 rule overriding it); otherwise the first local rule is the entry. Only local
 rules are linted — the imported ones were linted where they were declared.
-Not yet: a local `:=` rule cannot name an imported `:=` rule inside its island
-(an island inlines only definitions it can see as patterns); `=` rules can.
+A local `:=` island names imported `:=` rules as it names its local siblings
+(2026-10-12): it sees every imported `:=` rule that no local rule overrides,
+wherever the `import` is written, plus the local `:=` rules written before it;
+a local override hides the imported rule of that name. Names resolve the same
+way for a grammar imported from another module. Not yet: a local override does
+not reach the islands *of* imported `:=` rules, which were compiled where they
+were declared (XPath's `eqname` keeps XPath's `ncname` even when an importer
+overrides `ncname`); `=` rules have no such limit.
 
 ### 4.6 Memoization
 
@@ -533,10 +564,17 @@ with a syntax error does not run, so a partial tree has no consumer.
 3. **M3 XPath 3.1** *(done 2026-10-11, P5)*: `lambda.grammar.xpath`, written
    Tree-sitter style per the P5 ruling; parsing only. Rev 1 planned an EBNF
    transcription plus a transpiler to `lm.`; both were ruled out of scope.
-4. **M4 jq**: ported from jq's bison grammar — the acceptance test for §5.
-5. **M5 XQuery and RELAX NG compact**: composition (§4.5) and `nospace`
-   regions are exercised here; XQuery is the stress test for parser-driven
-   lexing.
+4. **M4 jq** *(done 2026-10-12)*: `lambda.grammar.jq`, ported from jq
+   1.7.1's bison grammar — the acceptance test for §5: bison's `%right` /
+   `%left` / `%nonassoc` / `%precedence` lines became the levels of one
+   left-recursive `Exp` without reordering. String interpolation uses `~`.
+5. **M5 XQuery and RELAX NG compact** *(done 2026-10-12)*:
+   `lambda.grammar.xquery` composes over `lambda.grammar.xpath` (§4.5),
+   overriding `_ExprSingle`, `_Primary` and three bindings; its direct
+   constructors are what decided GM13. `lambda.grammar.rnc` needed neither
+   `nospace` nor `~` beyond literal segments: the spec's no-mixing rule for
+   `,` `&` `|` is three repetitions, not a precedence ladder. All three
+   parse only, as P5 does.
 
 Each milestone adds `test/lambda/grammar_*.ls` fixtures with goldens
 (AGENTS.md rule 8) and the grammar lint has its own gtest.
