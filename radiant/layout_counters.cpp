@@ -142,7 +142,8 @@ void CounterStyleScope::close() {
 bool layout_has_style_containment(const ViewSpan* span) {
     const BlockProp* block = span && span->blk ? span->block() : nullptr;
     return block && ((block->computed_containment & CSS_CONTAIN_STYLE) ||
-        block->container_axes || block->content_visibility_hidden);
+        block->container_axes || (block->content_visibility != CSS_VALUE_VISIBLE &&
+            view_size_containment_applies(span->display)));
 }
 
 struct CounterCheckpointState {
@@ -199,6 +200,19 @@ void CounterCheckpoint::close() {
     context = nullptr;
 }
 
+static CounterScope* counter_find_scope(CounterScope* scope,
+        CounterValue* search_key, CounterScope** creation_scope = nullptr) {
+    while (scope) {
+        if (CounterMap::get(scope->counters, *search_key)) return scope;
+        if (creation_scope && scope->style_boundary) {
+            *creation_scope = scope;
+            return nullptr;
+        }
+        scope = scope->parent;
+    }
+    return nullptr;
+}
+
 void CounterContext::pop_scope() {
     if (!frame_stack || frame_stack->size() == 0) return;
     size_t index = frame_stack->size() - 1;
@@ -221,6 +235,8 @@ void CounterContext::pop_scope_propagate(bool propagate_resets, bool preserve_re
     CounterScope* scope = frame.element_scope;
     CounterScope* entry = frame.entry_scope;
     bool has_reset = false;
+    bool preserve_scope = preserve_reset_scope ||
+        (scope && (scope->reset_replaces_sibling || scope->pseudo_reset_for_descendants));
 
     if (scope && scope->counters) {
         size_t iter = 0;
@@ -231,14 +247,13 @@ void CounterContext::pop_scope_propagate(bool propagate_resets, bool preserve_re
             }
         }
 
-        // A counter created by increment/set without an inherited instance belongs
-        // to this element's temporary scope; expose it to following siblings when
-        // the element did not create a nested reset scope of its own.
-        if (propagate_resets && !has_reset && entry && entry->counters) {
+        // new names reach following siblings; inherited ancestor names keep their own instance.
+        if (propagate_resets && (!has_reset || !preserve_scope) && entry && entry->counters) {
             iter = 0;
             while (CounterMap::next(scope->counters, &iter, &cv)) {
-                if (cv->created_by_reset) continue;
                 CounterValue search_key = {lam::up((const char*)cv->name), 0, false, false};
+                // an ancestor's same-name instance outranks a preceding sibling's nested reset.
+                if (cv->created_by_reset && counter_find_scope(entry, &search_key)) continue;
                 CounterValue* entry_cv = CounterMap::get(entry->counters, search_key);
                 if (entry_cv) {
                     entry_cv->value = cv->value;
@@ -253,9 +268,6 @@ void CounterContext::pop_scope_propagate(bool propagate_resets, bool preserve_re
 
     // CSS Lists 3 §4.4.1: retain a generated counter scope only while it is the
     // preceding flattened-tree source for the originating element's children.
-    bool preserve_scope = preserve_reset_scope ||
-        (scope && (scope->reset_replaces_sibling ||
-                   scope->pseudo_reset_for_descendants));
     current_scope = lam::up((propagate_resets && has_reset && preserve_scope) ? scope : entry);
     frame_stack->remove(index);
 }
@@ -349,18 +361,6 @@ static void parse_counter_spec(const char* spec,
 }
 // Counter Operations
 
-static CounterScope* counter_find_scope(CounterScope* scope,
-        CounterValue* search_key, CounterScope** creation_scope = nullptr) {
-    while (scope) {
-        if (CounterMap::get(scope->counters, *search_key)) return scope;
-        if (creation_scope && scope->style_boundary) {
-            *creation_scope = scope;
-            return nullptr;
-        }
-        scope = scope->parent;
-    }
-    return nullptr;
-}
 
 static CounterValue* counter_find(CounterScope* scope, CounterValue* search_key,
                                   CounterScope** creation_scope = nullptr) {

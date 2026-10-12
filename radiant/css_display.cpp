@@ -2,10 +2,66 @@
 #include "view.hpp"
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lib/str.h"
+#include "../lib/stringbuf.h"
 #include <string.h>
+
+static bool css_legacy_box_is_vertical(DomElement* element) {
+    Pool* scratch = pool_create();
+    if (!scratch) return false;
+    StringBuf* output = stringbuf_new(scratch);
+    bool vertical = output && css_prop_serialize_cascaded_value(element,
+        CSS_PROPERTY_WEBKIT_BOX_ORIENT, 0, output) && output->str &&
+        strcmp(output->str->chars, "vertical") == 0;
+    pool_destroy(scratch);
+    return vertical;
+}
+
+DisplayValue css_legacy_box_display(DomElement* element, uint8_t kind) {
+    DisplayValue display = {kind == 2 ? CSS_VALUE_INLINE_BLOCK : CSS_VALUE_BLOCK, CSS_VALUE_FLEX};
+    display.legacy_box = kind;
+    display.legacy_vertical = css_legacy_box_is_vertical(element);
+    if (!display.legacy_vertical) return display;
+    CssPropertyCode property;
+    if (!layout_cascaded_line_clamp_declaration(element, &property)) return display;
+    Pool* scratch = pool_create();
+    if (!scratch) return display;
+    StringBuf* output = stringbuf_new(scratch);
+    bool clamped = output && css_prop_serialize_cascaded_value(element, property, 0, output) &&
+        output->str && strtod(output->str->chars, nullptr) > 0.0;
+    if (clamped) {
+        // css overflow 4 §5.3 converts a vertical clamped legacy box to a flow formatting context.
+        display.inner = CSS_VALUE_FLOW_ROOT;
+        display.legacy_box = 0;
+        display.legacy_clamp = true;
+    }
+    pool_destroy(scratch);
+    return display;
+}
+
+DisplayValue css_inherit_display_value(DomElement* element, DisplayValue parent) {
+    if (parent.legacy_box) return css_legacy_box_display(element, parent.legacy_box);
+    // inherit copies computed flow-root/inline-block, not the parent's legacy applicability.
+    parent.legacy_clamp = false;
+    parent.legacy_vertical = false;
+    return parent;
+}
+
+const char* css_display_special_name(DisplayValue display) {
+    if (display.legacy_box) return display.legacy_box == 2 ? "-webkit-inline-box" : "-webkit-box";
+    if (display.list_item && display.outer == CSS_VALUE_INLINE &&
+        (display.inner == CSS_VALUE_FLOW || display.inner == CSS_VALUE_FLOW_ROOT)) {
+        return display.inner == CSS_VALUE_FLOW_ROOT ? "inline flow-root list-item" : "inline list-item";
+    }
+    if (display.inner == CSS_VALUE_FLOW_ROOT) {
+        if (display.outer == CSS_VALUE_INLINE || display.outer == CSS_VALUE_INLINE_BLOCK) return "inline-block";
+        return display.list_item ? "flow-root list-item" : "flow-root";
+    }
+    return nullptr;
+}
 
 bool css_content_value_has_image_url(const CssValue* value) {
     if (!value) return false;
+    if (css_value_is_image_set(value)) return css_image_set_valid(value);
     if (value->type == CSS_VALUE_TYPE_URL) return true;
     if (value->type == CSS_VALUE_TYPE_FUNCTION && value->data.function &&
         value->data.function->name) {
@@ -72,7 +128,7 @@ bool css_display_element_is_replaced(DomElement* dom_elem) {
         CssDeclaration* content_decl = style_tree_get_declaration(
             dom_elem->specified_style, CSS_PROPERTY_CONTENT);
         if (content_decl && css_content_value_has_image_url(content_decl->value)) {
-            // image-set() must not assign its intrinsic size to the DOM element.
+            // CSS Content 3: selected image-set content has the same replaced-box sizing as url().
             is_replaced = true;
         }
     }
@@ -235,6 +291,12 @@ static bool css_display_list_value(const CssValue* value, bool is_replaced,
 bool css_resolve_display_css_value(DomElement* element, const CssValue* value,
                                    DisplayValue* out_display) {
     if (!element || !value || !out_display) return false;
+    if (value->type == CSS_VALUE_TYPE_CUSTOM &&
+        css_display_legacy_keyword_supported(value->data.custom_property.name)) {
+        *out_display = css_legacy_box_display(element,
+            strcmp(value->data.custom_property.name, "-webkit-inline-box") == 0 ? 2 : 1);
+        return true;
+    }
     bool is_replaced = css_display_element_is_replaced(element);
     bool is_mathml = css_is_mathml_element(element);
     if (value->type == CSS_VALUE_TYPE_KEYWORD) {

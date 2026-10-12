@@ -3448,7 +3448,7 @@ BEGIN a construct, so a binding of that name could not be read back where the
 construct starts. A word is **allowed** when it only ever appears after
 something else.
 
-### K.1 Barred from binding names (65)
+### K.1 Barred from binding names (66)
 
 Using one is `error[E201]` at the declaration site. This covers `let`/`var`
 names, parameters, `fn`/`pn`/`type`/`view` declaration names, and import
@@ -3458,11 +3458,15 @@ binding is a syntax error rather than E201.
 
 | Group | Words |
 |---|---|
-| Declaration & statement keywords (21) | `let` `pub` `var` `type` `fn` `pn` `view` `edit` `state` `if` `match` `for` `while` `break` `continue` `return` `raise` `import` `apply` `not` `last` |
+| Declaration & statement keywords (22) | `let` `pub` `var` `type` `grammar` `fn` `pn` `view` `edit` `state` `if` `match` `for` `while` `break` `continue` `return` `raise` `import` `apply` `not` `last` |
 | Tier-3 statement keywords (5) | `put` `del` `commit` `rollback` `open` |
 | Base-type names (35) | `null` `any` `bool` `int` `integer` `float` `f64` `f32` `f16` `complex` `decimal` `number` `none` `datetime` `date` `time` `binary` `range` `list` `array` `map` `element` `object` `function` `error` `string` `symbol` `i8` `i16` `i32` `i64` `u8` `u16` `u32` `u64` |
 | Named values (4) | `true` `false` `inf` `nan` |
 
+`grammar` joined the declaration row on 2026-10-11 (GM5v2,
+[Lambda_Design_Grammar_Parser.md](Lambda_Design_Grammar_Parser.md)); like the
+Tier-3 heads it stays a data name (`{grammar: 1}`, `<grammar>`, `.grammar`),
+verified against the running engine the same day.
 The Tier-3 row joined with PTH55–PTH80 (2026-09-18); the five stay data names
 (S16.10.2). `entity` left the base-type row on 2026-09-03 (S2.1.1v2, OB1): it
 never named a type, and `object` is the one nominal kind. The C lexer and the

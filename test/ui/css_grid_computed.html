@@ -1,0 +1,55 @@
+<!doctype html><meta charset="utf-8">
+<style>html,body{margin:0}.grid{display:grid;width:300px;grid-template-rows:10px;align-content:start;justify-content:start}button{height:24px}</style>
+<button id="check">Check</button><button id="change">Change</button><button id="changed">Changed</button><button id="restore">Restore</button><button id="restored">Restored</button><output id="report"></output>
+<div id="plain" class="grid" style="grid-template-columns:[start] 20px [middle] minmax(0,1fr) [end]"><div></div></div>
+<div id="repeated" class="grid" style="grid-template-columns:[pre] repeat(3,[a] 20px [b]) [post]"><div></div></div>
+<div id="fit" class="grid" style="grid-template-columns:repeat(auto-fit,[a] minmax(60px,1fr) [b]);column-gap:10px"><div></div></div>
+<div id="implicit" class="grid" style="grid-template-columns:[a] 20px [b];grid-auto-columns:5px"><div style="grid-column:-4"></div><div style="grid-column:4"></div></div>
+<div id="areas" class="grid" style='grid-template-areas:"a b";grid-auto-columns:10px'><div style="grid-area:b"></div></div>
+<div id="empty" class="grid" style="grid-template-columns:[first] 40px [last]"></div>
+<div id="nongrid" style="font-size:10px;grid-template-columns:[a] 2em minmax(0,1fr)"></div>
+<div id="nogridrepeat" style="font-size:10px;grid-template-columns:repeat(2,[Red blue] 1em [tail])"></div>
+<div id="trackmath" style="font-size:10px;grid-auto-columns:minmax(calc(1em + 5px),2fr) fit-content(calc(25% + 1em))"></div>
+<div style="font-size:10px;grid-template-columns:[Em] 2em 25%"><div id="inherited" style="font-size:30px;grid-template-columns:inherit"></div></div>
+<div id="keywordnames" class="grid" style="grid-template-columns:[Red] 20px [red] 30px [tail]"><div style="grid-column:Red / red"></div></div>
+<div id="adjacent" style="grid-template-columns:[a][b] 10px [c][d]"></div>
+<div id="flow" style="grid-auto-flow:dense column;grid-column-start:Foo 2 span"></div>
+<div id="placement" style="grid-area:2 / Foo / span 3 / 4;grid-column-start:Bar"></div>
+<div id="placement-copy" style="grid-area:Name"></div>
+<div class="grid" style="grid-template-columns:[Foo] 20px [Bar] 30px [end] 50px"><div id="placement-var" style="--line:Foo / 3;grid-column:var(--line)"></div></div>
+<div id="decimal" style="grid-column-start:2;grid-column-start:2.0"></div>
+<div id="badspan" style="grid-column-start:Foo;grid-column-start:Foo span 2"></div>
+<div id="mathline" style="grid-column-start:calc(1.6)"></div>
+<div id="mathspan" style="grid-column-start:span calc(0)"></div>
+<div id="area-invalid" style="grid-area:Foo / Bar;grid-area:Foo / / 3"></div>
+<div id="bare-span" style="grid-column:2;grid-column:span"></div>
+<div style="grid-area:Foo / Bar"><div id="placement-inherited" style="grid-area:inherit"></div></div>
+<div class="grid" style="grid-template-columns:20px 30px 50px"><div id="pending" style="--areas:1 / 1 / 2 / 3;grid-area:var(--areas)"></div></div>
+<div id="long" class="grid" style="grid-template-columns:repeat(200,10px)"></div>
+<script>
+(function(){
+    var report=document.getElementById('report');
+    function record(prefix){
+        ['plain','repeated','fit','implicit','areas','empty','nongrid','nogridrepeat','inherited','keywordnames','adjacent'].forEach(function(id){report.setAttribute('data-'+prefix+id,getComputedStyle(document.getElementById(id)).gridTemplateColumns);});
+        report.setAttribute('data-'+prefix+'math',getComputedStyle(document.getElementById('trackmath')).gridAutoColumns);
+        report.setAttribute('data-'+prefix+'flow',getComputedStyle(document.getElementById('flow')).gridAutoFlow);
+        report.setAttribute('data-'+prefix+'line',getComputedStyle(document.getElementById('flow')).gridColumnStart);
+        report.setAttribute('data-'+prefix+'keyword-width',String(document.getElementById('keywordnames').firstChild.getBoundingClientRect().width));
+        var fields={'placement':'gridArea','placement-copy':'gridArea','placement-var':'gridColumn','decimal':'gridColumnStart','badspan':'gridColumnStart','mathline':'gridColumnStart','mathspan':'gridColumnStart','area-invalid':'gridArea','bare-span':'gridColumn','placement-inherited':'gridArea','pending':'gridArea'};
+        Object.keys(fields).forEach(function(id){report.setAttribute('data-'+prefix+id,getComputedStyle(document.getElementById(id))[fields[id]]);});
+        report.setAttribute('data-'+prefix+'placement-width',String(document.getElementById('placement-var').getBoundingClientRect().width));
+        var pending=document.getElementById('pending');
+        report.setAttribute('data-'+prefix+'pending-width',String(pending.getBoundingClientRect().width));
+        report.setAttribute('data-'+prefix+'pending-inline',[pending.style.gridRowStart,pending.style.gridColumnStart,pending.style.gridArea].join('|'));
+        report.setAttribute('data-'+prefix+'placement-inline',document.getElementById('placement').style.gridArea);
+        var style=getComputedStyle(document.getElementById('long')).gridTemplateColumns;
+        report.setAttribute('data-'+prefix+'long',String(style.length)+','+String(style.split(' ').length)+','+style.slice(-9));
+        report.setAttribute('data-'+prefix+'rows',getComputedStyle(document.getElementById('plain')).gridTemplateRows);
+    }
+    document.getElementById('check').onclick=function(){record('');};
+    document.getElementById('change').onclick=function(){document.getElementById('plain').style.width='400px';document.getElementById('nogridrepeat').style.fontSize='20px';document.getElementById('placement-var').style.setProperty('--line','Bar / 4');document.getElementById('placement').style.removeProperty('grid-column-start');var pending=document.getElementById('pending');pending.style.gridColumnStart='4';pending.style.removeProperty('grid-column-start');};
+    document.getElementById('changed').onclick=function(){record('changed-');};
+    document.getElementById('restore').onclick=function(){document.getElementById('plain').style.width='300px';document.getElementById('nogridrepeat').style.fontSize='10px';document.getElementById('placement-var').style.setProperty('--line','Foo / 3');document.getElementById('placement').style.gridColumnStart='Bar';document.getElementById('pending').style.gridArea='var(--areas)';};
+    document.getElementById('restored').onclick=function(){record('restored-');};
+})();
+</script>

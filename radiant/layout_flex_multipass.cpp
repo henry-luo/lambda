@@ -544,7 +544,7 @@ static void layout_flex_abs_after_child(LayoutContext* lycon, ViewBlock* contain
 
 
     FlexProp* flex = container->embed ? container->embedp()->flex : nullptr;
-    int flex_direction = flex ? flex->direction : CSS_VALUE_ROW;
+    CssEnum flex_direction = layout_flex_direction(container);
     bool is_row = flex_direction == CSS_VALUE_ROW || flex_direction == CSS_VALUE_ROW_REVERSE;
     bool is_reverse = flex_direction == CSS_VALUE_ROW_REVERSE ||
                       flex_direction == CSS_VALUE_COLUMN_REVERSE;
@@ -782,9 +782,8 @@ bool flex_height_is_parent_constrained(ViewBlock* container,
     DomElement* parent_element = container->parent->as_element();
     if (!parent_element || parent_element->display.inner != CSS_VALUE_FLEX) return false;
     ViewBlock* parent = lam::view_as_block(parent_element);
-    int direction = parent && parent->embed && parent->embedp()->flex
-        ? parent->embedp()->flex->direction : DIR_ROW;
-    bool parent_is_row = direction == DIR_ROW || direction == DIR_ROW_REVERSE;
+    CssEnum direction = layout_flex_direction(parent);
+    bool parent_is_row = direction == CSS_VALUE_ROW || direction == CSS_VALUE_ROW_REVERSE;
     if (container->fi->main_size_from_flex || container->fi->flex_grow > 0.0f) {
         return true;
     }
@@ -951,6 +950,8 @@ static void flex_apply_content_height_after_layout(
     if (!lycon || !flex_item || !parent_flex || flex_item->content_height <= 0.0f) {
         return;
     }
+    // size containment replaces descendant contributions even after the final flex content pass.
+    if (layout_block_has_size_containment_in_axis(flex_item, false)) return;
     bool column_parent = !is_main_axis_horizontal(parent_flex);
     bool has_explicit_height = flex_item->blk &&
         flex_item->block_mut()->given_height >= 0;
@@ -1003,6 +1004,10 @@ void layout_flex_item_content(LayoutContext* lycon, ViewBlock* flex_item) {
     log_enter();
 
     LayoutContext saved_context = *lycon;
+    // inherited text and style queries must start at this item throughout its content pass.
+    lycon->view = lam::up(flex_item);
+    lycon->elmt = lam::up(static_cast<DomNode*>(flex_item));
+    lycon->block.parent = lam::up(&saved_context.block);
     // final flex item layout bypasses layout_block, including its generated-content scope.
     LayoutCounterScope counter_scope;
     if (!counter_scope.enter(lycon, flex_item, flex_item->as_element(), flex_item->display)) {
@@ -1166,6 +1171,8 @@ void layout_flex_item_content(LayoutContext* lycon, ViewBlock* flex_item) {
             flex_item->height = flex_border_height;
         }
     } else {
+        // flex-item flow bypasses setup_inline, so initialize its own clamp counter here.
+        layout_setup_line_clamp(lycon, flex_item, &saved_context.block);
         // CRITICAL FIX: Generate pseudo-element content for flex items with ::before/::after
         if (flex_item->is_element()) {
             layout_materialize_pseudo_content(lycon, flex_item);
@@ -1214,12 +1221,11 @@ void layout_flex_item_content(LayoutContext* lycon, ViewBlock* flex_item) {
     if (flex_item->display.inner != RDT_DISPLAY_REPLACED &&
         !use_multicol_flex_path) {
         flex_item->content_width = lycon->block.max_width;
-        flex_item->content_height = lycon->block.advance_y - content_y_offset;
-    }
-    if (flex_item->scroller) {
-        // Flex items bypass finalize_block_flow(), so refresh overflow after
-        // their flow descendants establish the final content extent.
-        update_scroller(flex_item, flex_item->content_width, flex_item->content_height);
+        float content_end = lycon->block.line_clamped &&
+                lycon->block.line_clamp_advance_y >= 0.0f
+            ? lycon->block.line_clamp_advance_y : lycon->block.advance_y;
+        flex_item->content_height = content_end - content_y_offset;
+        layout_finalize_line_clamp(lycon, flex_item);
     }
     if (flex_item_vertical && flex_item->display.inner == CSS_VALUE_FLOW &&
         flex_item->first_child) {
@@ -1257,6 +1263,10 @@ void layout_flex_item_content(LayoutContext* lycon, ViewBlock* flex_item) {
     // CRITICAL FIX: For column flex items without explicit height,
     FlexContainerLayout* parent_flex = saved_context.flex_container;
     flex_apply_content_height_after_layout(lycon, flex_item, parent_flex);
+    if (flex_item->scroller) {
+        // the overflow viewport uses the final flex-refined height, including a clamped flow item.
+        update_scroller(flex_item, flex_item->content_width, flex_item->content_height);
+    }
     // flex items bypass block finalization; center native labels after their used height settles.
     layout_center_button_text(flex_item);
 
@@ -1534,7 +1544,7 @@ void layout_final_flex_content(LayoutContext* lycon, ViewBlock* flex_container) 
             if (p && p->is_element()) {
                 ViewElement* pe = lam::view_require_element(p);
                 if (pe->embed && pe->embedp()->flex) {
-                    int dir = pe->embedp()->flex->direction;
+                    CssEnum dir = layout_flex_direction(pe);
                     if (dir == CSS_VALUE_COLUMN || dir == CSS_VALUE_COLUMN_REVERSE) {
                         has_explicit_height = flex_container->fi->main_size_from_flex ||
                             flex_container->fi->flex_grow > 0.0f;

@@ -13,6 +13,9 @@
 #include "../lambda/js/js_event_loop.h"
 #include "../lambda/dom/realm/dom_realm.h"
 #include "../lambda/runtime/lambda-root-frame.hpp"
+#include "../lambda/runtime/root_vector.h"
+#include "../lambda/runtime/heap_api.h"
+#include "../lambda/runtime/runtime-state.h"
 #include "../lambda/dom/dom.h"
 #include "../lambda/input/input.hpp"
 #include "../lambda/core/mark_reader.hpp"
@@ -23,6 +26,8 @@
 #include "../lambda/input/css/css_parser.hpp"
 #include "../lambda/io/mark_builder.hpp"
 #include "../lambda/module/radiant/radiant_dom_bridge.hpp"
+#include "../lambda/module/radiant/radiant_history.hpp"
+#include "../lambda/module/radiant/radiant_input_value.hpp"
 #include "../lambda/module/radiant/radiant_webgl_bridge.hpp"
 #include "../lib/mem.h"
 #include "../lib/mem_factory.h"
@@ -436,6 +441,101 @@ TEST_F(Scene3dTest, MixedSvgAndNativeTimelinesPauseAndSeekIndependently) {
     action->loop=ANIMATION_LOOP_ONCE;action->clamp=true;
     ASSERT_TRUE(scene3d_animation_update(animation,1));pump_js();
     EXPECT_STREQ(scene->get_attribute("data-finished"),"bend:1");
+}
+
+struct ScriptResourceRetirementProbe : DomDocumentResourceData {
+    RootVector roots;
+    bool* released;
+    uint64_t* released_generation;
+};
+
+static void script_resource_retirement_probe_destroy(DomDocumentResourceData* data) {
+    auto* probe = (ScriptResourceRetirementProbe*)data;
+    *probe->released_generation = heap_generation_for(probe->roots.owner);
+    *probe->released = true;
+    root_vector_destroy(&probe->roots);
+    mem_free(probe);
+}
+
+TEST_F(Scene3dTest, NativeDocumentRootsDoNotBorrowAnotherDocumentsEvaluator) {
+    ASSERT_NE(load_page("test/demo/scene3d/shared-animation.html",500,720),nullptr);
+    Runtime* runtime = page->js.runtime;
+    ASSERT_NE(runtime,nullptr);
+    Context* owner = (Context*)runtime_get_eval_context(runtime);
+    ASSERT_EQ(radiant_dom_resource_owner(page),owner);
+    EXPECT_EQ(radiant_dom_resource_owner(nullptr),nullptr);
+    EXPECT_EQ(radiant_dom_resource_owner(&doc),nullptr);
+    ASSERT_TRUE(radiant_history_initialize(&doc));
+    EXPECT_EQ(radiant_history_length(&doc),1);
+    for (auto* resource = doc.resources.get(); resource; resource = resource->next)
+        EXPECT_EQ(resource->runtime_owner,nullptr);
+
+    // script bootstrap binds its own runtime before publishing the JS alias.
+    page->js.runtime = nullptr;
+    Context* bootstrap_owner = radiant_dom_resource_owner(page);
+    page->js.runtime = runtime;
+    EXPECT_EQ(bootstrap_owner,owner);
+    script_runner_cleanup_js_state(page);
+    EXPECT_EQ(radiant_history_length(&doc),1);
+    EXPECT_EQ(radiant_history_state(&doc).item,ItemNull.item);
+}
+
+TEST_F(Scene3dTest, NativeAnimationRootsRetireBeforeStandaloneJsRuntime) {
+    ASSERT_NE(load_page("test/demo/scene3d/shared-animation.html",500,720),nullptr);
+    Runtime* runtime = page->js.runtime;
+    ASSERT_NE(runtime,nullptr);
+    ASSERT_NE(runtime,page->lambda_runtime);
+    Context* owner = (Context*)runtime_get_eval_context(runtime);
+    uint64_t generation = heap_generation_for(owner);
+    ASSERT_NE(generation,0u);
+    bool animation_resources = false;
+    for (auto* resource = page->resources.get(); resource; resource = resource->next)
+        animation_resources |= resource->runtime_owner == owner;
+    ASSERT_TRUE(animation_resources);
+    ASSERT_FALSE(item_is_error(run_js("history.pushState({tag:'retained'},'', '#retained')")));
+    int history_length = radiant_history_length(page);
+    ASSERT_GT(history_length,1);
+    DomElement* input_element = DomElement::create(page,"input",nullptr);
+    ASSERT_NE(input_element,nullptr);
+    ASSERT_TRUE(page->root->as_element()->append_child(input_element));
+    radiant_input_set_live_value(input_element,"native text survives");
+    radiant_input_set_files(input_element,js_new_object());
+    ASSERT_NE(radiant_input_files(input_element).item,ItemNull.item);
+    state_set(page->state,input_element,"retained-script-value",js_new_object());
+    ASSERT_NE(state_get(page->state,input_element,"retained-script-value").item,ItemNull.item);
+
+    bool released = false;
+    uint64_t released_generation = 0;
+    auto* probe = (ScriptResourceRetirementProbe*)mem_calloc(1,sizeof(ScriptResourceRetirementProbe),MEM_CAT_LAYOUT);
+    ASSERT_NE(probe,nullptr);
+    probe->released = &released;
+    probe->released_generation = &released_generation;
+    root_vector_init(&probe->roots,owner,"scene3d teardown probe");
+    ASSERT_TRUE(root_vector_push(&probe->roots,make_string_item("retained until owner teardown")));
+    ASSERT_TRUE(dom_document_add_resource(page,probe,script_resource_retirement_probe_destroy,owner));
+
+    script_runner_cleanup_js_state(page);
+    EXPECT_TRUE(released);
+    EXPECT_EQ(released_generation,generation);
+    EXPECT_EQ(page->js.runtime,nullptr);
+    EXPECT_EQ(context,nullptr);
+    if (page->state_store) EXPECT_EQ(page->state_store->semantic_context,nullptr);
+    EXPECT_EQ(state_get(page->state,input_element,"retained-script-value").item,ItemNull.item);
+    EXPECT_EQ(radiant_history_length(page),history_length);
+    EXPECT_EQ(radiant_history_state(page).item,ItemNull.item);
+    EXPECT_STREQ(url_get_hash(page->url),"#retained");
+    EXPECT_STREQ(radiant_input_live_value(input_element),"native text survives");
+    EXPECT_EQ(radiant_input_files(input_element).item,ItemNull.item);
+    for (auto* resource = page->resources.get(); resource; resource = resource->next)
+        EXPECT_NE(resource->runtime_owner,owner);
+    // a surviving document can still tick native timelines after its JS drivers retire.
+    auto* scheduler = page->state->animation_scheduler;
+    EXPECT_NE(scheduler,nullptr);
+    if (scheduler) animation_scheduler_tick(scheduler,scheduler->current_time+.25,nullptr);
+    script_runner_cleanup_js_state(page);
+    free_document(page);
+    page = nullptr;
+    EXPECT_EQ(context,nullptr);
 }
 TEST_F(Scene3dTest, RingworldAnimatesAndKeepsOrbitPanZoomIndependent) {
     ASSERT_NE(load_page("test/demo/scene3d/ringworld.ls",1120,900),nullptr);
@@ -1140,6 +1240,44 @@ TEST_F(Scene3dTest, WebGl2ApiAndMultipleCanvasPixels) {
     ASSERT_EQ(render_output_render_view_tree_to_target(&ui,page->view_tree,&target),0);
     pixel(ui.surface,32,64,255,0,0);pixel(ui.surface,192,64,0,255,0);
 }
+
+TEST_F(Scene3dTest, WebGlVectorPaintRefreshesSnapshotsAndPreservesRetainedPixels) {
+    ASSERT_NE(load_page("test/webgl/api.html"), nullptr);
+    DomElement* canvas = dom_find_element_by_id(page->root->as_element(), "first");
+    ASSERT_NE(canvas, nullptr);
+    auto* view = (ViewBlock*)canvas;
+    // Export first: no raster pass may supply the missing GPU snapshot for this control.
+    lam::Temp<char> svg(render_view_tree_to_svg(&ui, page->view_tree->root, 320, 240, page->state));
+    ASSERT_NE(svg.get(), nullptr);
+    EXPECT_NE(strstr(svg.get(), "data:image/png;base64,"), nullptr);
+    ImageSurface* previous = render_canvas_surface(view);
+    ASSERT_NE(previous, nullptr);
+    pixel(previous, 32, 64, 255, 0, 0);
+    for (unsigned iteration = 0; iteration < 8; ++iteration) {
+        uint64_t generation = previous->generation;
+        EXPECT_EQ(render_canvas_surface(view), previous);
+        radiant_canvas_prepare_document(page);
+        EXPECT_EQ(render_canvas_surface(view), previous);
+        EXPECT_EQ(previous->generation, generation);
+        ImageSurface* retained = image_surface_snapshot_retain(previous);
+        ASSERT_EQ(retained, previous);
+        bool green = iteration % 2 == 0;
+        EXPECT_FALSE(item_is_error(run_js(green
+            ? "(()=>{const g=document.getElementById('first').getContext('webgl2');g.disable(g.SCISSOR_TEST);g.clearColor(0,1,0,1);g.clear(g.COLOR_BUFFER_BIT);return true})()"
+            : "(()=>{const g=document.getElementById('first').getContext('webgl2');g.disable(g.SCISSOR_TEST);g.clearColor(0,0,1,1);g.clear(g.COLOR_BUFFER_BIT);return true})()")));
+        ImageSurface* current = render_canvas_surface(view);
+        EXPECT_NE(current, nullptr);
+        EXPECT_NE(current, retained);
+        EXPECT_GT(retained->generation, generation);
+        pixel(current, 32, 64, 0, green ? 255 : 0, green ? 0 : 255);
+        pixel(retained, 32, 64, iteration == 0 ? 255 : 0,
+            iteration > 0 && !green ? 255 : 0, iteration > 0 && green ? 255 : 0);
+        image_surface_snapshot_release(retained);
+        if (!current) return;
+        previous = current;
+    }
+}
+
 TEST_F(Scene3dTest, PinnedUnmodifiedThreeRendererAndAddonProduceRealPixels) {
     ASSERT_NE(load_page("test/demo/scene3d/three-gallery.html",848,650),nullptr);
     DomElement* status=dom_find_element_by_id(page->root->as_element(),"status");ASSERT_NE(status,nullptr);

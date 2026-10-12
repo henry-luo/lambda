@@ -10,6 +10,7 @@
 #include "../lambda/input/css/css_style_node.hpp"
 #include "../lambda/dom/dom.h"
 #include "../lib/memtrack.h"
+#include "../lib/mem_grow.hpp"
 #include "../lib/math_utils.h"
 #include "../lib/color.h"
 #include "../lib/str.h"
@@ -20,7 +21,6 @@
 #include <sys/stat.h>
 #include <cmath>
 
-#define MAX_GRID_SPAN 1000
 
 // Forward declaration for CSS variable lookup
 Color resolve_color_value(LayoutContext* lycon, const CssValue* value);
@@ -47,6 +47,54 @@ static BackgroundProp* parent_computed_background(LayoutContext* lycon) {
     DomElement* parent = dom_parent_element(element);
     return (parent && parent->bound) ? parent->boundary()->background : nullptr;
 }
+
+// inherited image payloads keep independent ownership when either view recascades.
+template<class G> static G* clone_gradient_value(LayoutContext* context, const G* source) {
+    if (!context || !source || source->stop_count < 0 ||
+            (source->stop_count && !source->stops)) return nullptr;
+    G* copy = (G*)alloc_prop(context, sizeof(G));
+    if (!copy) return nullptr;
+    *copy = *source;
+    copy->stops = nullptr;
+    copy->stop_count = 0;
+    copy->computed_geometry = lam::own(css_value_clone_owned(source->computed_geometry.get(), layout_prop_pool(context)));
+    if (source->computed_geometry && !copy->computed_geometry) {
+        view_release_gradient_value(layout_prop_pool(context), copy); return nullptr;
+    }
+    if (source->stop_count) {
+        size_t bytes = sizeof(GradientStop) * (size_t)source->stop_count;
+        copy->stops = lam::own_arr((GradientStop*)alloc_prop(context, bytes));
+        if (!copy->stops) { view_release_gradient_value(layout_prop_pool(context), copy); return nullptr; }
+        for (int index = 0; index < source->stop_count; index++) {
+            const GradientStop& original = source->stops[index];
+            GradientStop& stop = copy->stops[index];
+            stop.color = original.color; stop.position = original.position;
+            stop.position_is_px = original.position_is_px;
+            stop.position_expression = lam::own(css_value_clone_owned(original.position_expression.get(), layout_prop_pool(context)));
+            copy->stop_count++;
+            if (original.position_expression && !stop.position_expression) {
+                view_release_gradient_value(layout_prop_pool(context), copy); return nullptr;
+            }
+        }
+    }
+    return copy;
+}
+
+static bool clone_background_layer(LayoutContext* context, const BackgroundLayer* source,
+                                   BackgroundLayer* target) {
+    if (!source || !target) return false;
+    *target = *source;
+    target->linear_gradient = lam::own(clone_gradient_value(context, source->linear_gradient.get()));
+    target->radial_gradient = lam::own(clone_gradient_value(context, source->radial_gradient.get()));
+    target->conic_gradient = lam::own(clone_gradient_value(context, source->conic_gradient.get()));
+    return (!source->linear_gradient || target->linear_gradient) &&
+        (!source->radial_gradient || target->radial_gradient) &&
+        (!source->conic_gradient || target->conic_gradient);
+}
+
+static void resolve_background_style(DomElement* element, LayoutContext* context);
+static void resolve_background_declaration(LayoutContext* context, ViewSpan* span,
+                                           const CssDeclaration* declaration, const CssValue* value);
 
 typedef struct FilterAmountSpec {
     const char* name;
@@ -418,6 +466,14 @@ void layout_compute_math_lengths(LayoutContext* context, CssValue* value,
     }
 }
 
+CssValue* layout_clone_computed_math(LayoutContext* context, const CssValue* value,
+                                    CssPropertyCode property, Pool* pool) {
+    CssValue* computed = css_value_clone_owned(value, pool);
+    // substituted syntax may be scratch-owned; normalize lengths before the owner's context retires (D4.5.1v4).
+    if (computed) layout_compute_math_lengths(context, computed, property);
+    return computed;
+}
+
 bool resolve_individual_transform_value(LayoutContext* lycon,
     CssPropertyCode property, const CssValue* value, TransformFunction* out) {
     if (!value || !out || !css_property_validate_value(property, value)) return false;
@@ -490,10 +546,8 @@ static TransformFunction* resolve_transform_function(LayoutContext* lycon,
         if (!term) { radiant::destroy_transform_function_payload(pool, &function); return nullptr; }
         function.translate_math[axis] = lam::own(term);
         term->coefficient = 1.0f;
-        term->expression = lam::own(css_value_clone_owned(argument, pool));
+        term->expression = lam::own(layout_clone_computed_math(lycon, argument, CSS_PROPERTY_TRANSFORM, pool));
         if (!term->expression) { radiant::destroy_transform_function_payload(pool, &function); return nullptr; }
-        // D4.5.1v4: copied computed trees cannot retain variable-substitution scratch values.
-        layout_compute_math_lengths(lycon, term->expression);
     }
     TransformFunction* stored = document_pool
         ? (TransformFunction*)pool_calloc(document_pool, sizeof(TransformFunction))
@@ -704,65 +758,76 @@ void resolve_counter_property(LayoutContext* lycon, const CssValue* value,
     stringbuf_free(buffer);
 }
 
-struct CssBackgroundComponent {
-    float value;
-    bool is_percent;
-    bool is_auto;
-};
-
-static float background_position_keyword(CssEnum keyword, bool horizontal) {
+float background_position_keyword(CssEnum keyword, bool horizontal) {
     if (keyword == CSS_VALUE_CENTER) return 50.0f;
     if (horizontal) return keyword == CSS_VALUE_RIGHT ? 100.0f : 0.0f;
     return keyword == CSS_VALUE_BOTTOM ? 100.0f : 0.0f;
 }
 
-static CssBackgroundComponent resolve_background_position_component(
-    LayoutContext* lycon, CssPropertyCode property, const CssValue* value,
-    float initial_value, bool initial_percent, bool horizontal) {
-    CssBackgroundComponent result = {initial_value, initial_percent, false};
-    if (!value) return result;
-    if (value->type == CSS_VALUE_TYPE_LENGTH) {
-        result.value = resolve_length_value(lycon, property, value);
-        result.is_percent = false;
-    } else if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
-        result.value = value->data.percentage.value;
-        result.is_percent = true;
-    } else if (value->type == CSS_VALUE_TYPE_KEYWORD) {
-        result.value = background_position_keyword(value->data.keyword, horizontal);
-        result.is_percent = true;
-    }
-    return result;
+static const CssValue* retain_background_computed_expression(LayoutContext* context,
+        BackgroundProp* owner, const CssValue* value, CssPropertyCode property, bool compute) {
+    Pool* pool = layout_prop_pool(context);
+    CssValue* stored = compute ? layout_clone_computed_math(context, value, property, pool)
+                              : css_value_clone_owned(value, pool);
+    if (!stored) return nullptr;
+    BackgroundComputedExpression* node = (BackgroundComputedExpression*)alloc_prop(context,
+        sizeof(BackgroundComputedExpression));
+    if (!node) { css_value_destroy_owned(stored, pool); return nullptr; }
+    node->value = lam::own(stored); node->next = owner->computed_expressions;
+    owner->computed_expressions = lam::own(node);
+    return stored;
 }
 
-static void resolve_background_position_axis(LayoutContext* lycon,
-                                             CssPropertyCode property,
-                                             const CssValue* value,
-                                             BackgroundProp* background,
-                                             bool horizontal) {
-    if (value->type == CSS_VALUE_TYPE_KEYWORD) {
-        CssEnum keyword = value->data.keyword;
-        bool valid = keyword == CSS_VALUE_CENTER ||
-            (horizontal && (keyword == CSS_VALUE_LEFT || keyword == CSS_VALUE_RIGHT)) ||
-            (!horizontal && (keyword == CSS_VALUE_TOP || keyword == CSS_VALUE_BOTTOM));
-        if (!valid) return;
+struct CssBackgroundMath {
+    float percentage, length;
+    const CssValue* expression;
+};
+
+static bool compute_background_math(LayoutContext* context, BackgroundProp* owner,
+        const CssValue* value, CssPropertyCode property, CssBackgroundMath* result) {
+    *result = {};
+    if (!value) return true;
+    CssMathResult math = layout_evaluate_css_math(context, property, value, false, true);
+    if (math.resolved) {
+        result->percentage = (float)math.percentage;
+        result->length = (float)math.value;
+        return true;
     }
-    float initial = horizontal ? background->bg_position_x : background->bg_position_y;
-    bool initial_percent = horizontal ? background->bg_position_x_is_percent
-                                      : background->bg_position_y_is_percent;
-    CssBackgroundComponent result = resolve_background_position_component(
-        lycon, property, value, initial, initial_percent, horizontal);
-    if (value->type != CSS_VALUE_TYPE_LENGTH && value->type != CSS_VALUE_TYPE_PERCENTAGE &&
-        value->type != CSS_VALUE_TYPE_KEYWORD) return;
+    // position and size share computed ownership; their percentage bases are supplied only at paint time.
+    result->expression = owner ? retain_background_computed_expression(context, owner, value, property, true) : nullptr;
+    return result->expression != nullptr;
+}
+
+static bool store_background_position_axis(LayoutContext* context, CssPropertyCode property,
+        const CssPositionAxis& position, BackgroundGeometry* background, bool horizontal,
+        BackgroundProp* owner) {
+    float percentage = background_position_keyword(position.origin, horizontal), length = 0.0f;
+    bool from_end = position.origin == CSS_VALUE_RIGHT || position.origin == CSS_VALUE_BOTTOM;
+    CssBackgroundMath math;
+    if (!compute_background_math(context, owner, position.offset, property, &math)) return false;
+    float sign = from_end ? -1.0f : 1.0f;
+    percentage += sign * math.percentage; length = sign * math.length;
+    // linear math uses scalar storage; nonlinear percentage math retains its independently owned computed tree.
+    float value = percentage == 0.0f ? length : percentage;
+    float extra_length = percentage == 0.0f ? 0.0f : length;
     if (horizontal) {
-        background->bg_position_x = result.value;
-        background->bg_position_x_is_percent = result.is_percent;
-        background->bg_position_x_length = 0.0f;
+        background->bg_position_x = value; background->bg_position_x_length = extra_length;
+        background->bg_position_x_is_percent = percentage != 0.0f;
+        background->bg_position_x_expression = lam::up(math.expression); background->bg_position_x_from_end = from_end;
     } else {
-        background->bg_position_y = result.value;
-        background->bg_position_y_is_percent = result.is_percent;
-        background->bg_position_y_length = 0.0f;
+        background->bg_position_y = value; background->bg_position_y_length = extra_length;
+        background->bg_position_y_is_percent = percentage != 0.0f;
+        background->bg_position_y_expression = lam::up(math.expression); background->bg_position_y_from_end = from_end;
     }
     background->bg_position_set = true;
+    return true;
+}
+
+static bool resolve_background_position_axis(LayoutContext* context, CssPropertyCode property,
+        const CssValue* value, BackgroundGeometry* background, bool horizontal, BackgroundProp* owner) {
+    CssPositionAxis axes[2];
+    return css_position_components(value, axes, true, horizontal ? 0 : 1) &&
+        store_background_position_axis(context, property, axes[horizontal ? 0 : 1], background, horizontal, owner);
 }
 
 static BorderProp* parent_border_prop(LayoutContext* lycon) {
@@ -1152,11 +1217,23 @@ static void replace_view_pool_layout_string(LayoutContext* lycon, Field* target,
     *target = lam::own(duplicate_view_pool_layout_string(lycon, value));
 }
 
+struct CssLayoutMathContext {LayoutContext* layout; uintptr_t property; bool computed_units;};
+static bool css_layout_math_leaf(void* data, const CssValue* value, double* result);
+
+static bool layout_compute_css_integer(LayoutContext* lycon, CssPropertyCode property,
+        const CssValue* value, double minimum, double maximum, double* result) {
+    CssLayoutMathContext leaves = {lycon, property, true};
+    CssMathEvaluationContext math = {css_layout_math_leaf, &leaves, 1.0, false};
+    return css_compute_integer_value(value, &math, minimum, maximum, result);
+}
+
 struct CssGridAxisSlots {
     int* start;
     int* end;
     lam::Own<const char>* start_name;
     lam::Own<const char>* end_name;
+    int* start_occurrence;
+    int* end_occurrence;
     bool* has_start;
     bool* has_end;
     bool* start_is_span;
@@ -1167,218 +1244,62 @@ static CssGridAxisSlots css_grid_axis_slots(GridItemProp* item, bool is_row) {
     if (is_row) {
         return {&item->grid_row_start, &item->grid_row_end,
                 &item->grid_row_start_name, &item->grid_row_end_name,
+                &item->grid_row_start_occurrence, &item->grid_row_end_occurrence,
                 &item->has_explicit_grid_row_start, &item->has_explicit_grid_row_end,
                 &item->grid_row_start_is_span, &item->grid_row_end_is_span};
     }
     return {&item->grid_column_start, &item->grid_column_end,
             &item->grid_column_start_name, &item->grid_column_end_name,
+            &item->grid_column_start_occurrence, &item->grid_column_end_occurrence,
             &item->has_explicit_grid_column_start, &item->has_explicit_grid_column_end,
             &item->grid_column_start_is_span, &item->grid_column_end_is_span};
 }
 
-static const char* css_grid_identifier(const CssValue* value) {
-    if (!value) return nullptr;
-    if (value->type == CSS_VALUE_TYPE_KEYWORD) {
-        const CssEnumInfo* info = css_enum_info(value->data.keyword);
-        return info ? info->name : nullptr;
-    }
-    if (value->type == CSS_VALUE_TYPE_CUSTOM) {
-        return value->data.custom_property.name;
-    }
-    return nullptr;
-}
-
-static bool css_grid_is_separator(const CssValue* value) {
-    const char* text = value->type == CSS_VALUE_TYPE_STRING
-        ? value->data.string : css_grid_identifier(value);
-    return text && strcmp(text, "/") == 0;
-}
-
-static const char* css_grid_named_line(const CssValue* value) {
-    const char* name = css_grid_identifier(value);
-    if (!name || strcmp(name, "span") == 0 || strcmp(name, "/") == 0 ||
-        name[0] == '[' || name[0] == ']' ||
-        (value->type == CSS_VALUE_TYPE_KEYWORD && strcmp(name, "auto") == 0)) {
-        return nullptr;
-    }
-    return name;
-}
-
-static bool css_grid_span_value(const CssValue* value, int* span_value) {
-    if (!value || !span_value) return false;
-    if (value->type == CSS_VALUE_TYPE_FUNCTION && value->data.function &&
-        value->data.function->name &&
-        strcmp(value->data.function->name, "span") == 0 &&
-        value->data.function->arg_count > 0 && value->data.function->args[0] &&
-        value->data.function->args[0]->type == CSS_VALUE_TYPE_NUMBER) {
-        *span_value = (int)value->data.function->args[0]->data.number.value;
-        return true;
-    }
-    if (value->type != CSS_VALUE_TYPE_LIST) return false;
-    bool saw_span = false;
-    int parsed = 1;
-    for (int i = 0; i < value->data.list.count; i++) {
-        CssValue* part = value->data.list.values[i];
-        if (css_grid_is_separator(part)) return false;
-        const char* identifier = css_grid_identifier(part);
-        if (identifier && strcmp(identifier, "span") == 0) {
-            saw_span = true;
-        } else if (part && part->type == CSS_VALUE_TYPE_NUMBER) {
-            parsed = (int)part->data.number.value; // INT_CAST_OK: grid span is discrete.
-        }
-    }
-    if (!saw_span) return false;
-    *span_value = parsed;
-    return true;
-}
-
-static bool css_grid_line_value(const CssValue* value, int* line,
-                                bool* has_explicit, bool* is_span) {
-    if (!line || !has_explicit || !is_span || !value) return false;
-    *line = 0;
-    *has_explicit = false;
-    *is_span = false;
-    if (value->type == CSS_VALUE_TYPE_NUMBER) {
-        *line = (int)value->data.number.value; // INT_CAST_OK: grid line is discrete.
-        *has_explicit = true;
-        return true;
-    }
-    if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_AUTO) {
-        return true;
-    }
-    int span_value = 0;
-    if (!css_grid_span_value(value, &span_value)) return false;
-    if (span_value > MAX_GRID_SPAN) span_value = MAX_GRID_SPAN;
-    *line = -span_value;
-    *has_explicit = true;
-    *is_span = true;
-    return true;
-}
-
-static void resolve_grid_axis_shorthand(LayoutContext* lycon, ViewSpan* span,
-                                        const CssValue* value, bool is_row) {
-    GridItemProp* item = alloc_grid_item_prop(lycon, span);
-    if (!item) return;
-    CssGridAxisSlots axis = css_grid_axis_slots(item, is_row);
-    if (value->type == CSS_VALUE_TYPE_NUMBER) {
-        int line = (int)value->data.number.value; // INT_CAST_OK: grid lines are discrete indices.
-        *axis.start = line;
-        *axis.has_start = true;
-        item->is_grid_auto_placed = false;
-        return;
-    }
-    if (value->type != CSS_VALUE_TYPE_LIST || value->data.list.count == 0) return;
-    size_t count = value->data.list.count;
-    CssValue** values = value->data.list.values;
-    bool has_separator = false;
-    for (size_t i = 0; i < count; i++) {
-        if (css_grid_is_separator(values[i])) {
-            has_separator = true;
-            break;
-        }
-    }
-    if (!has_separator) {
-        int span_value = 1;
-        int line_value = 0;
-        bool is_span = css_grid_span_value(value, &span_value);
-        if (!is_span) {
-            for (size_t i = 0; i < count; i++) {
-                CssValue* part = values[i];
-                if (part && part->type == CSS_VALUE_TYPE_NUMBER) {
-                    line_value = (int)part->data.number.value; // INT_CAST_OK: grid line is discrete.
-                }
-            }
-        }
-        if (is_span) {
-            *axis.start = 0;
-            *axis.end = -span_value;
-            *axis.has_end = true;
-            *axis.end_is_span = true;
-        } else if (line_value != 0) {
-            *axis.start = line_value;
-            *axis.has_start = true;
-        }
-    } else {
-        int value_index = 0;
-        bool saw_span = false;
-        for (size_t i = 0; i < count; i++) {
-            CssValue* part = values[i];
-            if (css_grid_is_separator(part)) {
-                value_index = 1;
-                saw_span = false;
-                continue;
-            }
-            const char* identifier = css_grid_identifier(part);
-            if (identifier && strcmp(identifier, "span") == 0) {
-                saw_span = true;
-                continue;
-            }
-            if (part->type == CSS_VALUE_TYPE_NUMBER) {
-                int number = (int)part->data.number.value; // INT_CAST_OK: grid lines and spans are discrete indices.
-                int* line = value_index == 0 ? axis.start : axis.end;
-                bool* has_line = value_index == 0 ? axis.has_start : axis.has_end;
-                bool* line_is_span = value_index == 0 ? axis.start_is_span : axis.end_is_span;
-                *line = saw_span ? -number : number;
-                *has_line = true;
-                if (saw_span) *line_is_span = true;
-                saw_span = false;
-                continue;
-            }
-            const char* line_name = css_grid_named_line(part);
-            if (line_name) {
-                lam::Own<const char>* name_slot = value_index == 0 ? axis.start_name : axis.end_name;
-                bool* has_line = value_index == 0 ? axis.has_start : axis.has_end;
-                replace_view_pool_layout_string(lycon, name_slot, line_name);
-                *has_line = true;
-            }
-        }
-    }
-    item->is_grid_auto_placed = false;
-}
-
-static void resolve_grid_line_longhand(LayoutContext* lycon, ViewSpan* span,
-                                       const CssValue* value, bool is_row,
-                                       bool is_end) {
-    GridItemProp* item = alloc_grid_item_prop(lycon, span);
-    if (!item) return;
-    CssGridAxisSlots axis = css_grid_axis_slots(item, is_row);
+static void css_grid_apply_line_reference(LayoutContext* lycon, GridItemProp* item,
+                                          CssGridAxisSlots axis, bool is_end,
+                                          const CssGridLineReference& reference) {
     int* line = is_end ? axis.end : axis.start;
-    lam::Own<const char>* line_name = is_end ? axis.end_name : axis.start_name;
-    bool* has_line = is_end ? axis.has_end : axis.has_start;
-    bool* line_is_span = is_end ? axis.end_is_span : axis.start_is_span;
-    if (css_grid_line_value(value, line, has_line, line_is_span)) {
-        if (!*has_line) return;
-        item->is_grid_auto_placed = false;
-    } else {
-        const char* name = css_grid_named_line(value);
-        if (name) {
-            replace_view_pool_layout_string(lycon, line_name, name);
-            *has_line = true;
-        }
-    }
-    if (*has_line) {
-        item->is_grid_auto_placed = false;
-    }
+    int* occurrence = is_end ? axis.end_occurrence : axis.start_occurrence;
+    lam::Own<const char>* name = is_end ? axis.end_name : axis.start_name;
+    bool* explicit_line = is_end ? axis.has_end : axis.has_start;
+    bool* span = is_end ? axis.end_is_span : axis.start_is_span;
+    *explicit_line = reference.name || reference.span || reference.has_number;
+    *span = reference.span;
+    *line = !*explicit_line ? 0 : reference.span ? -reference.number :
+        reference.has_number ? reference.number : 0;
+    *occurrence = reference.has_number ? reference.number : 0;
+    *name = nullptr;
+    if (reference.name) replace_view_pool_layout_string(lycon, name, reference.name);
+    item->is_grid_auto_placed = !item->has_explicit_grid_row_start && !item->has_explicit_grid_row_end &&
+        !item->has_explicit_grid_column_start && !item->has_explicit_grid_column_end;
 }
 
 static void resolve_grid_placement_property(LayoutContext* lycon, ViewSpan* span,
-                                             CssPropertyCode property,
-                                             const CssValue* value) {
-    switch (property) {
-        case CSS_PROPERTY_GRID_COLUMN_START:
-            resolve_grid_line_longhand(lycon, span, value, false, false); break;
-        case CSS_PROPERTY_GRID_COLUMN_END:
-            resolve_grid_line_longhand(lycon, span, value, false, true); break;
-        case CSS_PROPERTY_GRID_ROW_START:
-            resolve_grid_line_longhand(lycon, span, value, true, false); break;
-        case CSS_PROPERTY_GRID_ROW_END:
-            resolve_grid_line_longhand(lycon, span, value, true, true); break;
-        case CSS_PROPERTY_GRID_COLUMN:
-            resolve_grid_axis_shorthand(lycon, span, value, false); break;
-        case CSS_PROPERTY_GRID_ROW:
-            resolve_grid_axis_shorthand(lycon, span, value, true); break;
-        default: break;
+                                             CssPropertyCode property, const CssValue* value) {
+    GridItemProp* item = alloc_grid_item_prop(lycon, span);
+    CssGridLineReference lines[4] = {};
+    if (!item) return;
+    unsigned mask = css_grid_placement_mask(property);
+    CssLayoutMathContext leaves = {lycon,property,true};
+    CssMathEvaluationContext math = {css_layout_math_leaf,&leaves,1.0,false};
+    if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_INHERIT) {
+        DomElement* parent = dom_parent_element(lam::dom_require_element(lycon->view));
+        Pool* scratch = lycon->css_value_scratch ? lycon->css_value_scratch.get() : layout_prop_pool(lycon);
+        for (unsigned i = 0; parent && i < 4; i++) if (mask & (1u << i)) {
+            CssPropertyCode member = css_grid_placement_member(i);
+            // inherit the parent's computed line even when it has no applicable native grid-item storage.
+            String* text = css_prop_serialize_computed_value(scratch,parent,member,0);
+            const CssValue* inherited = text ? css_parse_component_value_text(text->chars,text->len,scratch) : nullptr;
+            CssGridLineReference projected[4] = {};
+            if (inherited && css_grid_parse_placement(inherited,member,projected,&math)) lines[i] = projected[i];
+        }
+    } else if (!css_grid_parse_placement(value,property,lines,&math)) {
+        // invalid computed values and non-inherited CSS-wide defaults reset every winning component to auto.
+        memset(lines,0,sizeof(lines));
     }
+    for (unsigned i = 0; i < 4; i++) if (mask & (1u << i))
+        css_grid_apply_line_reference(lycon, item, css_grid_axis_slots(item, i % 2 == 0), i >= 2, lines[i]);
+    if (property == CSS_PROPERTY_GRID_AREA) item->grid_area = nullptr;
 }
 
 static GridProp* resolve_grid_prop(LayoutContext* lycon, ViewBlock* block) {
@@ -1391,32 +1312,6 @@ static EmbedProp* resolve_embed_prop(LayoutContext* lycon, ViewBlock* block) {
     if (!block) return nullptr;
     if (!block->embed) block->ensure_embed(lycon);
     return block->embed;
-}
-
-// The joined string lives in the caller's scope.
-static char* css_join_grid_template_area_strings(const CssValue* value,
-                                                 ScratchScope* scope) {
-    size_t total_len = 0;
-    for (int i = 0; i < value->data.list.count; i++) {
-        const CssValue* part = value->data.list.values[i];
-        if (part->type == CSS_VALUE_TYPE_STRING) total_len += strlen(part->data.string) + 4;
-    }
-    if (!total_len) return nullptr;
-    char* combined = scope->array<char>(total_len + 1);
-    if (!combined) return nullptr;
-    combined[0] = '\0';
-    size_t combined_len = 0;
-    for (int i = 0; i < value->data.list.count; i++) {
-        const CssValue* part = value->data.list.values[i];
-        if (part->type != CSS_VALUE_TYPE_STRING) continue;
-        if (combined_len > 0) combined_len = str_cat(
-            combined, combined_len, total_len + 1, " ", 1);
-        combined_len = str_cat(combined, combined_len, total_len + 1, "\"", 1);
-        combined_len = str_cat(combined, combined_len, total_len + 1,
-            part->data.string, strlen(part->data.string));
-        combined_len = str_cat(combined, combined_len, total_len + 1, "\"", 1);
-    }
-    return combined;
 }
 
 static void css_store_content_alignment(LayoutContext* lycon, ViewBlock* block,
@@ -1597,8 +1492,7 @@ static const char* css_join_font_family_parts(LayoutContext* lycon,
     const char* prefix) {
     if (!lycon || !list || list->type != CSS_VALUE_TYPE_LIST) return nullptr;
     // File exports can resolve a secondary view before the DOM-backed browsing tree exists.
-    ViewTree* tree = lycon->selected_view_tree ? lycon->selected_view_tree.get() :
-        lycon->doc ? lycon->doc->view_tree.get() : nullptr;
+    ViewTree* tree = layout_context_view_tree(lycon);
     if (!tree || !tree->prop_pool) return nullptr;
     size_t count = (size_t)list->data.list.count;
     if (end > count) end = count;
@@ -1701,54 +1595,16 @@ static bool css_value_is_slash(const CssValue* value) {
 static bool resolve_nonnegative_css_length(LayoutContext* lycon, uintptr_t property,
                                            const CssValue* value, float* out_length) {
     if (!value || !out_length) return false;
-    if (value->type == CSS_VALUE_TYPE_LENGTH || value->type == CSS_VALUE_TYPE_NUMBER) {
-        float length = resolve_length_value(lycon, property, value);
-        if (isnan(length)) return false;
-        *out_length = max(length, 0.0f);
-        return true;
-    }
-    return false;
+    // the intrinsic-size grammar also admits typed math; resolve it through the same owner context.
+    float length = resolve_length_value(lycon, property, value);
+    if (!isfinite(length)) return false;
+    *out_length = max(length, 0.0f);
+    return true;
 }
 
-static void css_distribute_missing_gradient_positions(GradientStop* stops,
-                                                      int stop_count) {
-    if (!stops || stop_count <= 0) return;
-    for (int i = 0; i < stop_count; i++) {
-        if (!isnan(stops[i].position)) continue;
-        stops[i].position = stop_count > 1
-            ? (float)i / (float)(stop_count - 1) : 0.0f;
-    }
-}
-
-static void css_fixup_angular_gradient_stops(GradientStop* stops, int stop_count) {
-    if (!stops || stop_count <= 0) return;
-    if (isnan(stops[0].position)) stops[0].position = 0.0f;
-    if (isnan(stops[stop_count - 1].position)) stops[stop_count - 1].position = 1.0f;
-    float previous = stops[0].position;
-    for (int i = 1; i < stop_count; i++) {
-        if (isnan(stops[i].position)) continue;
-        if (stops[i].position < previous) stops[i].position = previous;
-        previous = stops[i].position;
-    }
-    for (int i = 1; i < stop_count - 1; i++) {
-        if (!isnan(stops[i].position)) continue;
-        int next = i + 1;
-        while (next < stop_count && isnan(stops[next].position)) next++;
-        float start = stops[i - 1].position;
-        float step = (stops[next].position - start) / (float)(next - i + 1);
-        for (int fill = i; fill < next; fill++) {
-            stops[fill].position = start + step * (float)(fill - i + 1);
-        }
-        i = next - 1;
-    }
-}
-
-static void css_normalize_gradient_stops(GradientStop* stops, int stop_count,
-                                         bool distribute);
-static int resolve_gradient_stops(LayoutContext* lycon, CssFunction* func,
-                                  int first_stop, GradientStop* stops, int capacity,
-                                  bool strict_color, bool allow_second_position, bool angular,
-                                  bool* stops_in_px);
+static void css_normalize_gradient_colors(GradientStop* stops, int stop_count);
+static bool resolve_gradient_stops(LayoutContext* lycon, CssFunction* func,
+    int first_stop, GradientStop* stops, int capacity, bool angular, int* stop_count, bool* stops_in_px);
 
 static bool resolve_linear_gradient_value(LayoutContext* lycon, const CssValue* value,
                                           LinearGradient** out_gradient) {
@@ -1759,8 +1615,8 @@ static bool resolve_linear_gradient_value(LayoutContext* lycon, const CssValue* 
         return false;
     }
     CssFunction* func = value->data.function;
-    bool repeating = strcmp(func->name, "repeating-linear-gradient") == 0;
-    if (strcmp(func->name, "linear-gradient") != 0 && !repeating) {
+    bool repeating = css_value_is_repeating_gradient(value);
+    if (css_value_image_kind(value) != CSS_IMAGE_LINEAR_GRADIENT) {
         return false;
     }
     LinearGradient* lg = (LinearGradient*)alloc_prop(lycon, sizeof(LinearGradient));
@@ -1805,89 +1661,67 @@ static bool resolve_linear_gradient_value(LayoutContext* lycon, const CssValue* 
     }
     lg->angle = angle;
     int color_count = func->arg_count - arg_idx;
-    if (color_count < 2) return false;
-    lg->stop_count = color_count * 2;
-    lg->stops = lam::own_arr((GradientStop*)alloc_prop(lycon, sizeof(GradientStop) * lg->stop_count));
-    if (!lg->stops) return false;
+    int capacity = color_count * 2;
+    if (color_count >= 2) lg->stops = lam::own_arr((GradientStop*)alloc_prop(lycon, sizeof(GradientStop) * capacity));
     bool stops_in_px = false;
-    lg->stop_count = resolve_gradient_stops(
-        lycon, func, arg_idx, lg->stops, lg->stop_count, true, true, false,
-        &stops_in_px);
+    if (!lg->stops || !resolve_gradient_stops(lycon, func, arg_idx, lg->stops, capacity,
+            false, &lg->stop_count, &stops_in_px)) {
+        view_release_gradient_value(layout_prop_pool(lycon), lg); return false;
+    }
     lg->stops_in_px = stops_in_px;
-    if (lg->stop_count < 2) return false;
-    css_normalize_gradient_stops(lg->stops, lg->stop_count, !lg->stops_in_px);
+    css_normalize_gradient_colors(lg->stops, lg->stop_count);
     *out_gradient = lg;
     return true;
 }
 
-static float css_gradient_stop_position(LayoutContext* lycon, const CssValue* value, bool* is_px,
-                                        bool angular) {
-    if (!value) return NAN;
+static bool css_gradient_stop_position(LayoutContext* context, const CssValue* value,
+        bool angular, GradientStop* stop) {
+    stop->position = NAN;
+    if (!value) return true;
     if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
-        return (float)value->data.percentage.value / 100.0f;
-    }
-    if (value->type == CSS_VALUE_TYPE_NUMBER) {
-        return angular ? (value->data.number.value == 0.0 ? 0.0f : NAN)
-                       : (float)value->data.number.value / 100.0f;
-    }
-    if (angular) {
-        float degrees = 0.0f;
-        return resolve_css_angle_degrees(value, &degrees) ? degrees / 360.0f : NAN;
-    }
-    if (value->type == CSS_VALUE_TYPE_LENGTH) {
-        if (is_px) *is_px = true;
-        return resolve_length_value(lycon, CSS_PROPERTY_BACKGROUND, value);
-    }
-    return NAN;
+        stop->position = (float)value->data.percentage.value / 100.0f;
+    } else if (value->type == CSS_VALUE_TYPE_NUMBER && value->data.number.value == 0.0) {
+        stop->position = 0.0f;
+    } else if (angular && css_math_value_type(value) == CSS_MATH_ANGLE) {
+        const CssMathEvaluationContext math = {};
+        CssMathResult result = css_math_evaluate(value, &math);
+        if (!result.resolved) return false;
+        stop->position = (float)result.value / 360.0f;
+    } else if (!angular && value->type == CSS_VALUE_TYPE_LENGTH) {
+        stop->position_is_px = true;
+        stop->position = resolve_length_value(context, CSS_PROPERTY_BACKGROUND, value);
+    } else if (value->type == CSS_VALUE_TYPE_FUNCTION) {
+        // font and viewport leaves compute in the image owner; paint supplies the gradient-line basis.
+        stop->position_expression = lam::own(layout_clone_computed_math(context, value,
+            CSS_PROPERTY_BACKGROUND, layout_prop_pool(context)));
+        if (!stop->position_expression) return false;
+    } else return false;
+    return true;
 }
 
-static int resolve_gradient_stops(LayoutContext* lycon, CssFunction* func,
-                                  int first_stop, GradientStop* stops, int capacity,
-                                  bool strict_color, bool allow_second_position, bool angular,
-                                  bool* stops_in_px) {
-    if (!lycon || !func || !stops || capacity <= 0) return 0;
-    int stop_count = 0;
-    for (int i = first_stop; i < func->arg_count && stop_count < capacity; i++) {
-        CssValue* arg = func->args ? func->args[i] : nullptr;
-        if (!arg) continue;
-
-        CssValue* color = arg;
-        CssValue* position = nullptr;
-        if (arg->type == CSS_VALUE_TYPE_LIST && arg->data.list.count >= 1) {
-            color = arg->data.list.values[0];
-            if (arg->data.list.count >= 2) position = arg->data.list.values[1];
-        } else if (strict_color && !css_value_is_background_color_candidate(arg)) {
-            continue;
-        }
-        if (!color || (strict_color && !css_value_is_background_color_candidate(color))) {
-            continue;
-        }
-
-        stops[stop_count].color = resolve_color_value(lycon, color);
-        bool is_px = false;
-        stops[stop_count].position = css_gradient_stop_position(lycon, position, &is_px, angular);
-        stops[stop_count].position_is_px = is_px;
-        if (is_px && stops_in_px) *stops_in_px = true;
-        stop_count++;
-        if (allow_second_position && arg->type == CSS_VALUE_TYPE_LIST &&
-            arg->data.list.count >= 3 && stop_count < capacity) {
-            bool second_is_px = false;
-            float second_position = css_gradient_stop_position(lycon,
-                arg->data.list.values[2], &second_is_px, angular);
-            stops[stop_count].color = stops[stop_count - 1].color;
-            stops[stop_count].position = second_position;
-            stops[stop_count].position_is_px = second_is_px;
-            if (second_is_px && stops_in_px) *stops_in_px = true;
-            stop_count++;
+static bool resolve_gradient_stops(LayoutContext* lycon, CssFunction* func,
+        int first_stop, GradientStop* stops, int capacity, bool angular, int* stop_count, bool* stops_in_px) {
+    if (!lycon || !func || !stops || !stop_count || capacity <= 0) return false;
+    *stop_count = 0;
+    for (int index = first_stop; index < func->arg_count; index++) {
+        CssGradientStopParts parts;
+        if (!css_gradient_stop_components(func->args[index], angular, &parts)) return false;
+        if (!parts.color) continue; // transition-hint interpolation remains a separate paint increment.
+        int positions = parts.position_count ? parts.position_count : 1;
+        Color color = resolve_color_value(lycon, parts.color);
+        for (int position = 0; position < positions; position++) {
+            if (*stop_count >= capacity) return false;
+            GradientStop* stop = &stops[(*stop_count)++];
+            stop->color = color;
+            if (!css_gradient_stop_position(lycon, parts.positions[position], angular, stop)) return false;
+            if (stop->position_is_px && stops_in_px) *stops_in_px = true;
         }
     }
-    return stop_count;
+    return *stop_count >= 2;
 }
 
-static void css_normalize_gradient_stops(GradientStop* stops, int stop_count,
-                                         bool distribute) {
+static void css_normalize_gradient_colors(GradientStop* stops, int stop_count) {
     if (!stops || stop_count <= 0) return;
-    if (distribute) css_distribute_missing_gradient_positions(stops, stop_count);
     for (int i = 0; i < stop_count; i++) {
         GradientStop* stop = &stops[i];
         if (stop->color.a != 0 || stop->color.r != 0 ||
@@ -1903,65 +1737,30 @@ static void css_normalize_gradient_stops(GradientStop* stops, int stop_count,
     }
 }
 
-static const char* css_gradient_component_name(const CssValue* value) {
-    if (!value) return nullptr;
-    if (value->type == CSS_VALUE_TYPE_KEYWORD) {
-        const CssEnumInfo* info = css_enum_info(value->data.keyword);
-        return info ? info->name : nullptr;
-    }
-    return value->type == CSS_VALUE_TYPE_CUSTOM
-        ? value->data.custom_property.name : nullptr;
-}
-
-static void resolve_gradient_center(LayoutContext* lycon, const CssValue* prelude,
-                                    int at_index, float* cx, float* cy,
-                                    bool* cx_set, bool* cy_set,
-                                    bool* cx_is_px, bool* cy_is_px) {
-    if (!prelude || prelude->type != CSS_VALUE_TYPE_LIST || at_index < 0) return;
-    for (int i = at_index + 1; i < prelude->data.list.count; i++) {
-        const CssValue* item = prelude->data.list.values[i];
-        if (!item) continue;
-        const char* name = css_gradient_component_name(item);
-        bool horizontal = name && (strcmp(name, "left") == 0 || strcmp(name, "right") == 0);
-        bool vertical = name && (strcmp(name, "top") == 0 || strcmp(name, "bottom") == 0);
-        bool center = name && strcmp(name, "center") == 0;
-        bool numeric = item->type == CSS_VALUE_TYPE_PERCENTAGE ||
-                       (item->type == CSS_VALUE_TYPE_LENGTH &&
-                        css_unit_is_length(item->data.length.unit)) ||
-                       (item->type == CSS_VALUE_TYPE_NUMBER &&
-                        item->data.number.value == 0.0);
-        if (!horizontal && !vertical && !center && !numeric) continue;
-        bool use_x = horizontal || (!vertical && !*cx_set);
-        if (use_x ? *cx_set : *cy_set) continue;
-        CssBackgroundComponent component = numeric &&
-            item->type == CSS_VALUE_TYPE_NUMBER
-            ? CssBackgroundComponent{0.0f, false, false}
-            : resolve_background_position_component(
-                lycon, CSS_PROPERTY_BACKGROUND_IMAGE, item, 50.0f, true, use_x);
-        // A percentage remains relative to each gradient's painted rectangle.
-        float resolved = component.is_percent ? component.value / 100.0f : component.value;
-        if (use_x) {
-            *cx = resolved;
-            *cx_set = true;
-            *cx_is_px = !component.is_percent;
-        } else {
-            *cy = resolved;
-            *cy_set = true;
-            *cy_is_px = !component.is_percent;
-        }
-    }
-}
-
-static bool resolve_radial_gradient_keyword(RadialGradient* gradient, const char* name) {
-    if (!name) return false;
-    if (strcmp(name, "circle") == 0) gradient->shape = RADIAL_SHAPE_CIRCLE;
-    else if (strcmp(name, "ellipse") == 0) gradient->shape = RADIAL_SHAPE_ELLIPSE;
-    else if (strcmp(name, "closest-side") == 0) gradient->size = RADIAL_SIZE_CLOSEST_SIDE;
-    else if (strcmp(name, "farthest-side") == 0) gradient->size = RADIAL_SIZE_FARTHEST_SIDE;
-    else if (strcmp(name, "closest-corner") == 0) gradient->size = RADIAL_SIZE_CLOSEST_CORNER;
-    else if (strcmp(name, "farthest-corner") == 0) gradient->size = RADIAL_SIZE_FARTHEST_CORNER;
-    else return false;
-    return true;
+template<class G> static bool resolve_gradient_geometry(LayoutContext* context, G* gradient,
+        const CssValue* prelude, int at_index, const CssValue* const* radii = nullptr, int radius_count = 0) {
+    CssPositionAxis axes[2];
+    if (!css_gradient_position_components(prelude, at_index, axes)) return false;
+    gradient->cx = background_position_keyword(axes[0].origin, true) / 100.0f;
+    gradient->cy = background_position_keyword(axes[1].origin, false) / 100.0f;
+    gradient->cx_set = gradient->cy_set = at_index >= 0;
+    gradient->cx_is_px = axes[0].offset != nullptr;
+    gradient->cy_is_px = axes[1].offset != nullptr;
+    gradient->cx_from_end = axes[0].offset && axes[0].origin == CSS_VALUE_RIGHT;
+    gradient->cy_from_end = axes[1].offset && axes[1].origin == CSS_VALUE_BOTTOM;
+    const CssValue* parameters[GRADIENT_GEOMETRY_PARAMETER_COUNT] = {};
+    for (int axis = 0; axis < radius_count; axis++) parameters[axis] = radii[axis];
+    parameters[GRADIENT_GEOMETRY_CENTER_X] = axes[0].offset;
+    parameters[GRADIENT_GEOMETRY_CENTER_Y] = axes[1].offset;
+    if (!radius_count && !axes[0].offset && !axes[1].offset) return true;
+    CssValue geometry = {};
+    geometry.type = CSS_VALUE_TYPE_LIST;
+    geometry.data.list.values = const_cast<CssValue**>(parameters);
+    geometry.data.list.count = GRADIENT_GEOMETRY_PARAMETER_COUNT;
+    // owner-normalized geometry stays independent of both the declaration scratch and the receiving tile.
+    gradient->computed_geometry = lam::own(layout_clone_computed_math(context, &geometry,
+        CSS_PROPERTY_BACKGROUND_IMAGE, layout_prop_pool(context)));
+    return gradient->computed_geometry != nullptr;
 }
 
 static bool resolve_radial_gradient_value(LayoutContext* lycon, const CssValue* value,
@@ -1971,8 +1770,8 @@ static bool resolve_radial_gradient_value(LayoutContext* lycon, const CssValue* 
         value->type != CSS_VALUE_TYPE_FUNCTION || !value->data.function ||
         !value->data.function->name) return false;
     CssFunction* func = value->data.function;
-    bool repeating = strcmp(func->name, "repeating-radial-gradient") == 0;
-    if (strcmp(func->name, "radial-gradient") != 0 && !repeating) return false;
+    bool repeating = css_value_is_repeating_gradient(value);
+    if (css_value_image_kind(value) != CSS_IMAGE_RADIAL_GRADIENT) return false;
 
     RadialGradient* gradient = (RadialGradient*)alloc_prop(lycon, sizeof(RadialGradient));
     if (!gradient) return false;
@@ -1986,43 +1785,27 @@ static bool resolve_radial_gradient_value(LayoutContext* lycon, const CssValue* 
     gradient->cy_is_px = false;
     gradient->is_repeating = repeating;
 
-    int first_stop = 0;
-    CssValue* first = func->arg_count > 0 && func->args ? func->args[0] : nullptr;
-    if (first && first->type == CSS_VALUE_TYPE_KEYWORD) {
-        const CssEnumInfo* info = css_enum_info(first->data.keyword);
-        const char* name = info ? info->name : nullptr;
-        if (resolve_radial_gradient_keyword(gradient, name)) first_stop = 1;
-    } else if (first && first->type == CSS_VALUE_TYPE_LIST) {
-        int at_index = -1;
-        bool has_prelude = false;
-        for (int i = 0; i < first->data.list.count; i++) {
-            CssValue* item = first->data.list.values[i];
-            if (!item) continue;
-            const char* name = css_gradient_component_name(item);
-            if (!name) continue;
-            if (resolve_radial_gradient_keyword(gradient, name)) has_prelude = true;
-            else if (strcmp(name, "at") == 0) {
-                at_index = i;
-                has_prelude = true;
-            }
-        }
-        if (has_prelude) {
-            resolve_gradient_center(lycon, first, at_index, &gradient->cx, &gradient->cy,
-                                    &gradient->cx_set, &gradient->cy_set,
-                                    &gradient->cx_is_px, &gradient->cy_is_px);
-            first_stop = 1;
-        }
+    CssRadialGradientParts parts;
+    if (!css_radial_gradient_components(value, &parts)) {
+        view_release_gradient_value(layout_prop_pool(lycon), gradient); return false;
     }
+    gradient->shape = parts.shape;
+    gradient->size = parts.size;
+    if (!resolve_gradient_geometry(lycon, gradient, parts.prelude, parts.at_index, parts.radii, parts.radius_count)) {
+        view_release_gradient_value(layout_prop_pool(lycon), gradient); return false;
+    }
+    int first_stop = parts.first_stop;
 
     // a color with two positions contributes two stops, including mask plateaus.
     int capacity = (func->arg_count - first_stop) * 2;
     if (capacity < 2) capacity = 2;
     gradient->stops = lam::own_arr((GradientStop*)alloc_prop(
         lycon, sizeof(GradientStop) * capacity));
-    if (!gradient->stops) return false;
-    gradient->stop_count = resolve_gradient_stops(
-        lycon, func, first_stop, gradient->stops, capacity, true, true, false, nullptr);
-    css_normalize_gradient_stops(gradient->stops, gradient->stop_count, true);
+    if (!gradient->stops) { view_release_gradient_value(layout_prop_pool(lycon), gradient); return false; }
+    if (!resolve_gradient_stops(lycon, func, first_stop, gradient->stops, capacity, false, &gradient->stop_count, nullptr)) {
+        view_release_gradient_value(layout_prop_pool(lycon), gradient); return false;
+    }
+    css_normalize_gradient_colors(gradient->stops, gradient->stop_count);
     *out_gradient = gradient;
     return true;
 }
@@ -2034,8 +1817,8 @@ static bool resolve_conic_gradient_value(LayoutContext* lycon, const CssValue* v
         value->type != CSS_VALUE_TYPE_FUNCTION || !value->data.function ||
         !value->data.function->name) return false;
     CssFunction* func = value->data.function;
-    bool repeating = strcmp(func->name, "repeating-conic-gradient") == 0;
-    if (strcmp(func->name, "conic-gradient") != 0 && !repeating) return false;
+    bool repeating = css_value_is_repeating_gradient(value);
+    if (css_value_image_kind(value) != CSS_IMAGE_CONIC_GRADIENT) return false;
 
     ConicGradient* gradient = (ConicGradient*)alloc_prop(lycon, sizeof(ConicGradient));
     if (!gradient) return false;
@@ -2049,6 +1832,8 @@ static bool resolve_conic_gradient_value(LayoutContext* lycon, const CssValue* v
     gradient->is_repeating = repeating;
 
     int first_stop = 0;
+    int center_at_index = -1;
+    const CssValue* center_prelude = nullptr;
     CssValue* first = func->arg_count > 0 && func->args ? func->args[0] : nullptr;
     if (first && first->type == CSS_VALUE_TYPE_LIST) {
         int at_index = -1;
@@ -2056,83 +1841,38 @@ static bool resolve_conic_gradient_value(LayoutContext* lycon, const CssValue* v
         for (int i = 0; i < first->data.list.count; i++) {
             CssValue* item = first->data.list.values[i];
             if (!item) continue;
-            const char* name = css_gradient_component_name(item);
-            if (name && strcmp(name, "at") == 0) {
+            if (css_value_identifier_is(item, "at")) {
                 at_index = i;
                 has_prelude = true;
-            } else if (name && strcmp(name, "from") == 0 && i + 1 < first->data.list.count) {
+            } else if (css_value_identifier_is(item, "from") && i + 1 < first->data.list.count) {
                 CssValue* angle = first->data.list.values[++i];
                 resolve_css_angle_degrees(angle, &gradient->from_angle);
                 has_prelude = true;
             }
         }
         if (has_prelude) {
-            resolve_gradient_center(lycon, first, at_index, &gradient->cx, &gradient->cy,
-                                    &gradient->cx_set, &gradient->cy_set,
-                                    &gradient->cx_is_px, &gradient->cy_is_px);
+            center_prelude = first;
+            center_at_index = at_index;
             first_stop = 1;
         }
     } else if (first && resolve_css_angle_degrees(first, &gradient->from_angle)) {
         first_stop = 1;
     }
 
+    if (!resolve_gradient_geometry(lycon, gradient, center_prelude, center_at_index)) {
+        view_release_gradient_value(layout_prop_pool(lycon), gradient); return false;
+    }
+
     int capacity = (func->arg_count - first_stop) * 2;
     if (capacity < 2) capacity = 2;
     gradient->stops = lam::own_arr((GradientStop*)alloc_prop(
         lycon, sizeof(GradientStop) * capacity));
-    if (!gradient->stops) return false;
-    gradient->stop_count = resolve_gradient_stops(
-        lycon, func, first_stop, gradient->stops, capacity, false, true, true, nullptr);
-    css_fixup_angular_gradient_stops(gradient->stops, gradient->stop_count);
+    if (!gradient->stops || !resolve_gradient_stops(lycon, func, first_stop, gradient->stops, capacity, true, &gradient->stop_count, nullptr)) {
+        view_release_gradient_value(layout_prop_pool(lycon), gradient); return false;
+    }
+    css_normalize_gradient_colors(gradient->stops, gradient->stop_count);
     *out_gradient = gradient;
     return true;
-}
-
-static bool resolve_contain_intrinsic_length(LayoutContext* lycon, uintptr_t property,
-                                             const CssValue* value, float* out_length) {
-    if (!value || !out_length) return false;
-    if (resolve_nonnegative_css_length(lycon, property, value, out_length)) return true;
-    if (value->type == CSS_VALUE_TYPE_LIST) {
-        bool found = false;
-        for (int i = 0; i < value->data.list.count; i++) {
-            CssValue* item = value->data.list.values ? value->data.list.values[i] : nullptr;
-            float length = 0.0f;
-            if (resolve_nonnegative_css_length(lycon, property, item, &length)) {
-                *out_length = length;
-                found = true;
-            }
-        }
-        return found;
-    }
-    return false;
-}
-
-static void resolve_contain_intrinsic_axis(LayoutContext* lycon, ViewBlock* block,
-                                           CssPropertyCode property,
-                                           const CssValue* value, bool horizontal) {
-    if (!block || !value) return;
-    float length = -1.0f;
-    if (!resolve_contain_intrinsic_length(lycon, property, value, &length)) return;
-    block->ensure_block(lycon);
-    bool is_auto = css_value_has_identifier(value, "auto");
-    if (horizontal) {
-        block->blk->contain_intrinsic_width = length;
-        block->blk->contain_intrinsic_width_auto = is_auto;
-    } else {
-        block->blk->contain_intrinsic_height = length;
-        block->blk->contain_intrinsic_height_auto = is_auto;
-    }
-}
-
-static void resolve_contain_intrinsic_logical_axis(LayoutContext* lycon,
-                                                   ViewBlock* block,
-                                                   CssPropertyCode property,
-                                                   const CssValue* value,
-                                                   bool inline_axis) {
-    if (!block || !value) return;
-    bool vertical = layout_element_inline_axis_is_vertical(block->as_element());
-    resolve_contain_intrinsic_axis(lycon, block, property, value,
-                                   inline_axis ? !vertical : vertical);
 }
 
 static bool css_content_visibility_value_is_hidden(const CssValue* value) {
@@ -2215,65 +1955,58 @@ CssDeclaration* layout_specified_physical_minmax_size_declaration(DomElement* el
     return layout_select_physical_size_alias(element, physical_property, logical_property);
 }
 
-static bool resolve_contain_intrinsic_size_value(LayoutContext* lycon, const CssValue* value,
-                                                 float* out_width, float* out_height,
-                                                 bool* out_auto_width, bool* out_auto_height) {
-    if (!value || !out_width || !out_height || !out_auto_width || !out_auto_height) return false;
-    *out_width = -1.0f;
-    *out_height = -1.0f;
-    *out_auto_width = false;
-    *out_auto_height = false;
-    if (value->type != CSS_VALUE_TYPE_LIST) {
-        resolve_contain_intrinsic_length(lycon, CSS_PROPERTY_CONTAIN_INTRINSIC_SIZE,
-                                         value, out_width);
-        *out_height = *out_width;
-        return *out_width >= 0.0f || *out_height >= 0.0f;
-    }
-    int count = value->data.list.count;
-    CssValue** values = value->data.list.values;
-    if (count <= 0 || !values) return false;
-    float component_size[2] = {-1.0f, -1.0f};
-    bool component_auto[2] = {false, false};
-    int component_count = 0;
-    int index = 0;
-    while (index < count && component_count < 2) {
-        bool is_auto = false;
-        CssValue* item = values[index];
-        if (css_value_identifier_is(item, "auto")) {
-            is_auto = true;
-            index++;
-            if (index >= count) break;
-            item = values[index];
+struct ContainIntrinsicComputedAxis {float size; bool automatic;};
+
+static ContainIntrinsicComputedAxis resolve_contain_intrinsic_component(LayoutContext* lycon,
+        DomElement* element, CssPropertyCode source, const CssValue* value, size_t axis) {
+    ContainIntrinsicComputedAxis result = {-1.0f, false};
+    if (css_value_keyword_equals(value, CSS_VALUE_INHERIT)) {
+        DomElement* parent = dom_parent_element(element);
+        if (parent && parent->blk) {
+            uint8_t parent_axes = css_intrinsic_size_axes(source,
+                layout_element_inline_axis_is_vertical(parent));
+            bool horizontal = parent_axes == 3 ? axis == 0 : parent_axes == 1;
+            result.size = horizontal ? parent->block()->contain_intrinsic_width
+                : parent->block()->contain_intrinsic_height;
+            result.automatic = horizontal ? parent->block()->contain_intrinsic_width_auto
+                : parent->block()->contain_intrinsic_height_auto;
         }
-        if (css_value_identifier_is(item, "none")) {
-            component_count++;
-            index++;
-            continue;
-        }
-        float length = -1.0f;
-        if (!resolve_contain_intrinsic_length(lycon, CSS_PROPERTY_CONTAIN_INTRINSIC_SIZE,
-                                              item, &length)) {
-            index++;
-            continue;
-        }
-        component_size[component_count] = length;
-        component_auto[component_count] = is_auto;
-        component_count++;
-        index++;
+        return result;
     }
-    if (component_count > 0) {
-        *out_width = component_size[0];
-        *out_auto_width = component_auto[0] && *out_width >= 0.0f;
-    }
-    if (component_count > 1) {
-        *out_height = component_size[1];
-        *out_auto_height = component_auto[1] && *out_height >= 0.0f;
-    } else if (component_count == 1) {
-        *out_height = *out_width;
-        *out_auto_height = *out_auto_width;
-    }
-    return *out_width >= 0.0f || *out_height >= 0.0f;
+    CssIntrinsicSizeAxis components[2] = {};
+    if (!css_intrinsic_size_components(value, source == CSS_PROPERTY_CONTAIN_INTRINSIC_SIZE,
+            components)) return result;
+    const CssIntrinsicSizeAxis& component = components[source == CSS_PROPERTY_CONTAIN_INTRINSIC_SIZE ? axis : 0];
+    result.automatic = component.automatic;
+    if (!css_value_keyword_equals(component.size, CSS_VALUE_NONE))
+        resolve_nonnegative_css_length(lycon, source, component.size, &result.size);
+    return result;
 }
+
+static void resolve_contain_intrinsic_property(LayoutContext* lycon, ViewBlock* block,
+        CssPropertyCode property, const CssDeclaration* declaration, const CssValue* value) {
+    if (!block || !value) return;
+    DomElement* element = block->as_element();
+    uint8_t axes = css_intrinsic_size_axes(property, layout_element_inline_axis_is_vertical(element));
+    CssPropertyCode source = declaration->property_code == CSS_PROPERTY_ALL
+        ? property : declaration->property_code;
+    block->ensure_block(lycon);
+    for (size_t axis = 0; axis < 2; axis++) {
+        if (!(axes & (1u << axis))) continue;
+        ContainIntrinsicComputedAxis computed = resolve_contain_intrinsic_component(
+            lycon, element, source, value, axis);
+        if (axis == 0) {
+            block->blk->contain_intrinsic_width = computed.size;
+            block->blk->contain_intrinsic_width_auto = computed.automatic;
+        } else {
+            block->blk->contain_intrinsic_height = computed.size;
+            block->blk->contain_intrinsic_height_auto = computed.automatic;
+        }
+    }
+}
+
+static ContainIntrinsicComputedAxis resolve_contain_intrinsic_declaration(LayoutContext* lycon,
+    DomElement* element, const CssDeclaration* declaration, CssPropertyCode property, size_t axis);
 
 bool layout_resolve_contain_intrinsic_size(LayoutContext* lycon, DomElement* element,
                                            float* out_width, float* out_height) {
@@ -2282,40 +2015,29 @@ bool layout_resolve_contain_intrinsic_size(LayoutContext* lycon, DomElement* ele
     *out_height = -1.0f;
     if (!lycon || !element || !element->specified_style) return false;
     ViewBlock* block = lam::unsafe_view_block_element_storage(element);
+    if (!view_size_containment_applies(block->display)) return false;
     CssDeclaration* content_visibility_decl = style_tree_get_declaration(
         element->specified_style, CSS_PROPERTY_CONTENT_VISIBILITY);
-    bool content_visibility_hidden = (block && block->blk &&
-        block->block()->content_visibility_hidden) ||
+    bool content_visibility_skipped = (block && block->blk &&
+        block->block()->content_visibility_skipped) ||
         (content_visibility_decl &&
          css_content_visibility_value_is_hidden(content_visibility_decl->value));
     CssDeclaration* contain_decl = style_tree_get_declaration(
         element->specified_style, CSS_PROPERTY_CONTAIN);
-    bool contains_size = content_visibility_hidden ||
+    bool contains_size = content_visibility_skipped ||
         (block && block->blk && block->block()->contain_size) ||
         (contain_decl && (css_value_containment_flags(contain_decl->value) & CSS_CONTAIN_SIZE));
     bool contains_inline_size = (block && block->blk && block->block()->contain_inline_size) ||
         (contain_decl && (css_value_containment_flags(contain_decl->value) & CSS_CONTAIN_INLINE_SIZE));
     if (!contains_size && !contains_inline_size) return false;
-    CssDeclaration* size_decl = style_tree_get_declaration(
-        element->specified_style, CSS_PROPERTY_CONTAIN_INTRINSIC_SIZE);
-    if (size_decl) {
-        bool auto_width = false;
-        bool auto_height = false;
-        resolve_contain_intrinsic_size_value(lycon, size_decl->value,
-                                             out_width, out_height,
-                                             &auto_width, &auto_height);
-    }
-    CssDeclaration* width_decl = style_tree_get_declaration(
-        element->specified_style, CSS_PROPERTY_CONTAIN_INTRINSIC_WIDTH);
-    if (width_decl && (!size_decl || width_decl->source_order > size_decl->source_order)) {
-        resolve_contain_intrinsic_length(lycon, CSS_PROPERTY_CONTAIN_INTRINSIC_WIDTH,
-                                         width_decl->value, out_width);
-    }
-    CssDeclaration* height_decl = style_tree_get_declaration(
-        element->specified_style, CSS_PROPERTY_CONTAIN_INTRINSIC_HEIGHT);
-    if (height_decl && (!size_decl || height_decl->source_order > size_decl->source_order)) {
-        resolve_contain_intrinsic_length(lycon, CSS_PROPERTY_CONTAIN_INTRINSIC_HEIGHT,
-                                         height_decl->value, out_height);
+    float* sizes[] = {out_width, out_height};
+    for (size_t axis = 0; axis < 2; axis++) {
+        CssPropertyCode property = axis == 0 ? CSS_PROPERTY_CONTAIN_INTRINSIC_WIDTH
+            : CSS_PROPERTY_CONTAIN_INTRINSIC_HEIGHT;
+        CssDeclaration* declaration = layout_cascaded_physical_declaration(element, property);
+        if (!declaration) continue;
+        *sizes[axis] = resolve_contain_intrinsic_declaration(
+            lycon, element, declaration, property, axis).size;
     }
     if (!contains_size) {
         if (layout_element_inline_axis_is_vertical(element)) {
@@ -2421,108 +2143,13 @@ void resolve_object_position_value(LayoutContext* lycon, const CssValue* value, 
     }
 }
 
-static bool css_text_has_top_level_comma(const char* text, size_t len) {
-    return text && strn_scan_top_level(text, text + len, ",", '(', ')', "\"'", true) < text + len;
-}
-
-const char* css_background_url_value(const CssValue* value);
-
-static bool resolve_background_url_value(LayoutContext* lycon, const CssDeclaration* decl, const CssValue* value) {
-    if (!css_background_url_value(value)) return false;
-    // the parser's canonical URL and legacy url() function share the same image longhand.
-    lam::CssTempDecl img_decl(decl, CSS_PROPERTY_BACKGROUND_IMAGE, (CssValue*)value);
-    img_decl.resolve(lycon);
-    return true;
-}
-
-static const CssValue* css_find_background_function(const CssValue* value,
-                                                    const char* const* names,
-                                                    int name_count) {
-    if (!value || !names || name_count <= 0) return nullptr;
-    if (value->type == CSS_VALUE_TYPE_FUNCTION && value->data.function &&
-        value->data.function->name) {
-        const char* fn = value->data.function->name;
-        size_t fn_len = strlen(fn);
-        for (int i = 0; i < name_count; i++) {
-            if (names[i] && str_ieq_const(fn, fn_len, names[i])) {
-                return value;
-            }
-        }
-    }
-    if (value->type != CSS_VALUE_TYPE_LIST || !value->data.list.values) return nullptr;
-    for (int i = 0; i < value->data.list.count; i++) {
-        const CssValue* found = css_find_background_function(value->data.list.values[i],
-                                                            names, name_count);
-        if (found) return found;
-    }
-    return nullptr;
-}
-
-static const CssValue* css_find_background_url_layer(const CssValue* value) {
-    if (!value) return nullptr;
-    if (value->type == CSS_VALUE_TYPE_URL || value->type == CSS_VALUE_TYPE_STRING) {
-        return value;
-    }
-    static const char* const names[] = {"url"};
-    const CssValue* found = css_find_background_function(value, names, 1);
-    if (found || value->type != CSS_VALUE_TYPE_LIST || !value->data.list.values) {
-        return found;
-    }
-    for (int i = 0; i < value->data.list.count; i++) {
-        found = css_find_background_url_layer(value->data.list.values[i]);
-        if (found) return found;
-    }
-    return nullptr;
-}
-
-static const CssValue* css_find_background_gradient_layer(const CssValue* value,
-                                                          GradientType type) {
-    static const char* const linear_names[] = {
-        "linear-gradient", "repeating-linear-gradient"};
-    static const char* const radial_names[] = {
-        "radial-gradient", "repeating-radial-gradient"};
-    static const char* const conic_names[] = {
-        "conic-gradient", "repeating-conic-gradient"};
-    const char* const* names = type == GRADIENT_LINEAR ? linear_names
-        : type == GRADIENT_RADIAL ? radial_names : conic_names;
-    return css_find_background_function(value, names, 2);
-}
-
 static GradientType css_background_gradient_type(const CssValue* value) {
-    if (!value || value->type != CSS_VALUE_TYPE_FUNCTION || !value->data.function ||
-        !value->data.function->name) return GRADIENT_NONE;
-    const char* name = value->data.function->name;
-    if (strcmp(name, "linear-gradient") == 0 ||
-        strcmp(name, "repeating-linear-gradient") == 0) return GRADIENT_LINEAR;
-    if (strcmp(name, "radial-gradient") == 0 ||
-        strcmp(name, "repeating-radial-gradient") == 0) return GRADIENT_RADIAL;
-    if (strcmp(name, "conic-gradient") == 0 ||
-        strcmp(name, "repeating-conic-gradient") == 0) return GRADIENT_CONIC;
-    return GRADIENT_NONE;
-}
-
-static bool resolve_background_gradient_value(LayoutContext* lycon, ViewSpan* span,
-                                              const CssValue* value) {
-    GradientType type = css_background_gradient_type(value);
-    if (type == GRADIENT_NONE) return false;
-
-    LinearGradient* linear = nullptr;
-    RadialGradient* radial = nullptr;
-    ConicGradient* conic = nullptr;
-    bool resolved = type == GRADIENT_LINEAR
-        ? resolve_linear_gradient_value(lycon, value, &linear)
-        : type == GRADIENT_RADIAL
-            ? resolve_radial_gradient_value(lycon, value, &radial)
-            : resolve_conic_gradient_value(lycon, value, &conic);
-    if (!resolved) return true;
-
-    layout_ensure_background(lycon, span);
-    BackgroundProp* background = span->boundary_mut()->background;
-    background->gradient_type = type;
-    if (type == GRADIENT_LINEAR) background->linear_gradient = lam::own(linear);
-    else if (type == GRADIENT_RADIAL) background->radial_gradient = lam::own(radial);
-    else background->conic_gradient = lam::own(conic);
-    return true;
+    switch (css_value_image_kind(value)) {
+        case CSS_IMAGE_LINEAR_GRADIENT: return GRADIENT_LINEAR;
+        case CSS_IMAGE_RADIAL_GRADIENT: return GRADIENT_RADIAL;
+        case CSS_IMAGE_CONIC_GRADIENT: return GRADIENT_CONIC;
+        default: return GRADIENT_NONE;
+    }
 }
 
 const char* css_background_url_value(const CssValue* value) {
@@ -2549,8 +2176,7 @@ static void resolve_css_mask_image(LayoutContext* lycon, ViewSpan* span,
     if (!mask) return;
     // style replacement reclaims the previous gradient rather than retaining a stale mask.
     if (mask->radial_gradient) {
-        pool_free(layout_prop_pool(lycon), mask->radial_gradient->stops);
-        pool_free(layout_prop_pool(lycon), mask->radial_gradient);
+        view_release_gradient_value(layout_prop_pool(lycon), mask->radial_gradient.get());
     }
     mask->radial_gradient = nullptr;
     RadialGradient* gradient = nullptr;
@@ -2563,24 +2189,11 @@ static bool css_value_is_background_color_candidate(const CssValue* value) {
     return css_color_compute(value, &color);
 }
 
-static bool css_background_layer_has_plain_color(const CssValue* value) {
-    return css_background_color_component(value) != nullptr;
-}
-
-static bool css_value_is_background_position_candidate(const CssValue* value) {
-    if (!value) return false;
-    if (value->type == CSS_VALUE_TYPE_LENGTH || value->type == CSS_VALUE_TYPE_PERCENTAGE) return true;
-    if (value->type != CSS_VALUE_TYPE_KEYWORD) return false;
-    CssEnum keyword = value->data.keyword;
-    return keyword == CSS_VALUE_LEFT || keyword == CSS_VALUE_RIGHT || keyword == CSS_VALUE_TOP ||
-           keyword == CSS_VALUE_BOTTOM || keyword == CSS_VALUE_CENTER;
-}
 
 char* resolve_css_resource_url(LayoutContext* lycon, const CssDeclaration* decl, const char* url, bool canonical) {
     if (!lycon || !url) return nullptr;
     size_t url_len = strlen(url);
-    ViewTree* tree = lycon->selected_view_tree ? lycon->selected_view_tree.get()
-        : (lycon->doc ? lycon->doc->view_tree.get() : nullptr);
+    ViewTree* tree = layout_context_view_tree(lycon);
     const char* source_file = decl ? decl->source_file : nullptr;
     bool has_stylesheet_base = source_file && source_file[0] && strcmp(source_file, "<inline-style>") != 0;
     const char* base_path = has_stylesheet_base ? source_file : nullptr;
@@ -2607,46 +2220,6 @@ char* resolve_css_resource_url(LayoutContext* lycon, const CssDeclaration* decl,
     str_copy(copy, resolved_len + 1, resolved.get(), resolved_len);
     return copy;
 }
-
-static void resolve_background_layer_component(LayoutContext* lycon,
-                                               const CssDeclaration* decl,
-                                               CssValue* item) {
-    if (!lycon || !decl || !item) return;
-    if (resolve_background_url_value(lycon, decl, item)) return;
-    if (css_value_identifier_is(item, "repeat-x") || css_value_identifier_is(item, "repeat-y")) {
-        lam::CssTempDecl repeat_decl(decl, CSS_PROPERTY_BACKGROUND_REPEAT, item);
-        repeat_decl.resolve(lycon);
-        return;
-    }
-    if (item->type == CSS_VALUE_TYPE_FUNCTION && item->data.function &&
-        item->data.function->name) {
-        if (css_background_gradient_type(item) != GRADIENT_NONE) {
-            lam::CssTempDecl gradient_decl(decl, CSS_PROPERTY_BACKGROUND, item);
-            gradient_decl.resolve(lycon);
-        } else if (css_value_is_background_color_candidate(item)) {
-            lam::CssTempDecl color_decl(decl, CSS_PROPERTY_BACKGROUND_COLOR, item);
-            color_decl.resolve(lycon);
-        }
-    } else if (css_value_is_background_color_candidate(item)) {
-        lam::CssTempDecl color_decl(decl, CSS_PROPERTY_BACKGROUND_COLOR, item);
-        color_decl.resolve(lycon);
-    } else if (item->type == CSS_VALUE_TYPE_KEYWORD) {
-        CssEnum keyword = item->data.keyword;
-        if (keyword == CSS_VALUE_REPEAT || keyword == CSS_VALUE_NO_REPEAT ||
-            keyword == CSS_VALUE_ROUND || keyword == CSS_VALUE_SPACE) {
-            lam::CssTempDecl repeat_decl(decl, CSS_PROPERTY_BACKGROUND_REPEAT, item);
-            repeat_decl.resolve(lycon);
-        } else if (keyword == CSS_VALUE_COVER || keyword == CSS_VALUE_CONTAIN) {
-            lam::CssTempDecl size_decl(decl, CSS_PROPERTY_BACKGROUND_SIZE, item);
-            size_decl.resolve(lycon);
-        } else if (keyword == CSS_VALUE_SCROLL || keyword == CSS_VALUE_FIXED ||
-                   keyword == CSS_VALUE_LOCAL) {
-            lam::CssTempDecl attachment_decl(decl, CSS_PROPERTY_BACKGROUND_ATTACHMENT, item);
-            attachment_decl.resolve(lycon);
-        }
-    }
-}
-
 
 static bool css_line_decoration_style(CssEnum keyword) {
     return keyword == CSS_VALUE_SOLID || keyword == CSS_VALUE_DOTTED ||
@@ -2919,6 +2492,9 @@ static bool css_property_consumes_substitution(CssPropertyCode property) {
         case CSS_PROPERTY_MASK_IMAGE:
         case CSS_PROPERTY_BACKGROUND_POSITION:
         case CSS_PROPERTY_BACKGROUND_POSITION_X: case CSS_PROPERTY_BACKGROUND_POSITION_Y:
+        case CSS_PROPERTY_CONTAIN_INTRINSIC_SIZE:
+        case CSS_PROPERTY_CONTAIN_INTRINSIC_WIDTH: case CSS_PROPERTY_CONTAIN_INTRINSIC_HEIGHT:
+        case CSS_PROPERTY_CONTAIN_INTRINSIC_INLINE_SIZE: case CSS_PROPERTY_CONTAIN_INTRINSIC_BLOCK_SIZE:
             return true;
         default: return false;
     }
@@ -2942,6 +2518,24 @@ struct CssComputedValueScratch {
         if (owned) pool_destroy(owned);
     }
 };
+
+static ContainIntrinsicComputedAxis resolve_contain_intrinsic_declaration(LayoutContext* lycon,
+        DomElement* element, const CssDeclaration* declaration, CssPropertyCode property, size_t axis) {
+    CssPropertyCode source = declaration->property_code == CSS_PROPERTY_ALL ? property : declaration->property_code;
+    LayoutContext owner = *lycon;
+    owner.view = lam::up(static_cast<View*>(element)); owner.elmt = lam::up(element);
+    if (element->font) {
+        owner.font.style = lam::up(element->font);
+        owner.font.current_font_size = element->font->font_size;
+    }
+    // intrinsic probes borrow geometry but substitute against the measured element in bounded scratch.
+    CssComputedValueScratch scratch(&owner, source, declaration->value);
+    const CssValue* value = css_resolve_element_var_value(owner.css_value_scratch
+        ? owner.css_value_scratch.get() : owner.pool.get(), element, declaration->value, source);
+    return css_property_validate_value(source, value)
+        ? resolve_contain_intrinsic_component(&owner, element, source, value, axis)
+        : ContainIntrinsicComputedAxis{-1.0f, false};
+}
 
 const CssValue* resolve_var_function(LayoutContext* lycon, const CssValue* value) {
     if (!lycon || !lycon->pool) return nullptr;
@@ -3208,6 +2802,7 @@ DisplayValue blockify_display(DisplayValue display) {
     }
     if (display.outer == CSS_VALUE_INLINE_BLOCK) {
         display.outer = CSS_VALUE_BLOCK;
+        if (display.legacy_box) display.legacy_box = 1;
     }
     if (display.outer == CSS_VALUE_INLINE && display.inner == CSS_VALUE_TABLE) {
         display.outer = CSS_VALUE_BLOCK;  // inline-table -> table
@@ -3345,7 +2940,7 @@ static DisplayValue resolve_variable_display_value(DomElement* element,
         if (value->type == CSS_VALUE_TYPE_KEYWORD &&
             value->data.keyword == CSS_VALUE_INHERIT) {
             DomElement* parent = dom_parent_element(element);
-            if (parent) resolved = resolve_display_value(parent);
+            if (parent) resolved = css_inherit_display_value(element, resolve_display_value(parent));
         } else if (custom_layout_name_from_css_value(value)) {
             resolved = {CSS_VALUE_BLOCK, CSS_VALUE_FLOW};
         } else {
@@ -3517,18 +3112,13 @@ static DisplayValue resolve_display_value_raw(void* child,
                             display.inner = CSS_VALUE_FLOW;
                             return needs_blockify ? blockify_display(display) : display;
                         }
-                        if (decl->value && decl->value->type == CSS_VALUE_TYPE_CUSTOM &&
-                            css_display_legacy_keyword_supported(
-                                decl->value->data.custom_property.name)) {
-                            display.outer = CSS_VALUE_INLINE_BLOCK;
-                            display.inner = is_replaced ? RDT_DISPLAY_REPLACED : CSS_VALUE_FLOW;
-                            return needs_blockify ? blockify_display(display) : display;
-                        } else if (decl->value && decl->value->type == CSS_VALUE_TYPE_KEYWORD &&
+                        if (decl->value && decl->value->type == CSS_VALUE_TYPE_KEYWORD &&
                                    decl->value->data.keyword == CSS_VALUE_INHERIT) {
                             // CSS 2.1 §9.2.4: inherit from the parent's computed display.
                             DomElement* parent_elem = dom_parent_element(dom_elem);
                             if (parent_elem) {
-                                DisplayValue parent_display = resolve_display_value((void*)parent_elem);
+                                DisplayValue parent_display = css_inherit_display_value(
+                                    dom_elem, resolve_display_value((void*)parent_elem));
                                 return needs_blockify ? blockify_display(parent_display) : parent_display;
                             }
                         } else if (css_resolve_display_css_value(
@@ -3636,8 +3226,6 @@ static void resolve_current_font_size(LayoutContext* lycon) {
 
 static float resolve_length_value_mode(LayoutContext* lycon, uintptr_t property,
     const CssValue* value, bool computed_units);
-
-struct CssLayoutMathContext {LayoutContext* layout; uintptr_t property; bool computed_units;};
 
 static bool css_layout_math_leaf(void* data, const CssValue* value, double* result) {
     CssLayoutMathContext* context = (CssLayoutMathContext*)data;
@@ -4164,12 +3752,12 @@ static GridTrackSize* parse_grid_length_percentage(LayoutContext* lycon,
     track->fit_content_limit = track->value;
     if (percentage) {
         // D4.5.1v4: substituted trees can be scratch-owned; retain computed lengths before inheritance.
-        track->expression_owner = lam::own(css_value_clone_owned(value, pool));
+        track->expression_owner = lam::own(layout_clone_computed_math(lycon, value,
+            CSS_PROPERTY_GRID_TEMPLATE_COLUMNS, pool));
         if (!track->expression_owner) {
             destroy_grid_track_size(pool, track);
             return nullptr;
         }
-        layout_compute_math_lengths(lycon, track->expression_owner, CSS_PROPERTY_GRID_TEMPLATE_COLUMNS);
         track->expression = lam::up((const CssValue*)track->expression_owner.get());
     }
     return track;
@@ -4218,6 +3806,26 @@ static const CssValue* grid_repeat_track_value_at(const CssFunction* func,
     return nullptr;
 }
 
+// brackets belong to the surrounding track sequence, including repeat() arguments.
+int grid_consume_track_line_name(Pool* pool, GridLineNames* names,
+                                        int line_index, const CssValue* value,
+                                        bool* in_names) {
+    const char* name = css_math_token_name(value);
+    if (name && strcmp(name, "[") == 0) { *in_names = true; return 1; }
+    if (name && strcmp(name, "]") == 0) { *in_names = false; return 1; }
+    if (!*in_names) return 0;
+    if (line_index > radiant::grid::GRID_MAX_EXPLICIT_TRACKS) return 1;
+    return !name || grid_add_track_line_name(pool, nullptr, names, name, line_index) ? 1 : -1;
+}
+
+static int grid_fixed_repeat_count(LayoutContext* lycon, const CssValue* value) {
+    double count;
+    // one extra iteration distinguishes an authored line beyond the truncated grid.
+    if (!layout_compute_css_integer(lycon, CSS_PROPERTY_GRID_TEMPLATE_COLUMNS, value, 1.0,
+        radiant::grid::GRID_MAX_EXPLICIT_TRACKS + 1.0, &count)) return 0;
+    return static_cast<int>(count); // INT_CAST_OK: finite integral repeat count bounded above.
+}
+
 static GridTrackSize* parse_repeat_function(LayoutContext* lycon, const CssValue* val) {
     if (!val || val->type != CSS_VALUE_TYPE_FUNCTION) return NULL;
     if (!val->data.function->name || strcmp(val->data.function->name, "repeat") != 0) return NULL;
@@ -4232,11 +3840,8 @@ static GridTrackSize* parse_repeat_function(LayoutContext* lycon, const CssValue
         } else if (count_val->data.keyword == CSS_VALUE_AUTO_FIT) {
             is_auto_fit = true;
         }
-    } else if (count_val->type == CSS_VALUE_TYPE_NUMBER) {
-        repeat_count = (int)count_val->data.number.value; // INT_CAST_OK: CSS repeat count is integral
-        if (repeat_count > MAX_GRID_SPAN) {
-            repeat_count = MAX_GRID_SPAN;
-        }
+    } else {
+        repeat_count = grid_fixed_repeat_count(lycon, count_val);
     }
     if (!is_auto_fill && !is_auto_fit && repeat_count <= 0) {
         return NULL;
@@ -4251,24 +3856,31 @@ static GridTrackSize* parse_repeat_function(LayoutContext* lycon, const CssValue
         pool, (size_t)track_count * sizeof(GridTrackSize*));
     if (!repeat_tracks) return NULL;
     int actual_track_count = 0;
+    GridLineNames line_names = {};
+    bool in_names = false;
+    bool names_valid = true;
     for (int i = 0; i < track_count; i++) {
-        GridTrackSize* ts = parse_css_value_to_track_size(lycon,
-            grid_repeat_track_value_at(val->data.function, i));
-        if (ts) {
-            repeat_tracks[actual_track_count++] = ts;
-        }
+        const CssValue* value = grid_repeat_track_value_at(val->data.function, i);
+        int name = grid_consume_track_line_name(pool, &line_names, actual_track_count,
+                                               value, &in_names);
+        if (name < 0) { names_valid = false; break; }
+        if (name > 0) continue;
+        GridTrackSize* ts = parse_css_value_to_track_size(lycon, value);
+        if (ts) repeat_tracks[actual_track_count++] = ts;
     }
-    GridTrackSize* track_size = actual_track_count > 0
+    GridTrackSize* track_size = names_valid && actual_track_count > 0
         ? create_grid_track_size(pool, GRID_TRACK_SIZE_REPEAT, 0) : nullptr;
     if (!track_size) {
         // the parsed children were leaked here before they moved to the pool
         for (int i = 0; i < actual_track_count; i++) destroy_grid_track_size(pool, repeat_tracks[i]);
         pool_free(pool, repeat_tracks);
+        grid_destroy_track_line_names(pool, &line_names);
         return NULL;
     }
     track_size->repeat_count = repeat_count;
     track_size->repeat_tracks = lam::own_arr(repeat_tracks);
     track_size->repeat_track_count = actual_track_count;
+    track_size->repeat_line_names = line_names;
     track_size->is_auto_fill = is_auto_fill;
     track_size->is_auto_fit = is_auto_fit;
 
@@ -4342,201 +3954,97 @@ static bool css_value_can_be_grid_track_size(const CssValue* val) {
                    val->type == CSS_VALUE_TYPE_FUNCTION);
 }
 
-static void append_grid_track_size(Pool* pool, GridTrackList* track_list, GridTrackSize* track_size) {
-    if (!track_size) return;
-    // The first pass estimates capacity from parsed CSS values; keep this guard
-    if (!track_list || track_list->track_count >= track_list->allocated_tracks) {
-        destroy_grid_track_size(pool, track_size);
-        return;
+static bool append_grid_track_value(LayoutContext* lycon, GridTrackList* tracks,
+                                     const CssValue* value, int* authored_line) {
+    if (*authored_line > radiant::grid::GRID_MAX_EXPLICIT_TRACKS) return true;
+    Pool* pool = layout_prop_pool(lycon);
+    GridTrackSize* track = parse_css_value_to_track_size(lycon, value);
+    if (!track) return !css_value_can_be_grid_track_size(value);
+    if ((*authored_line)++ >= radiant::grid::GRID_MAX_EXPLICIT_TRACKS) {
+        destroy_grid_track_size(pool, track);
+        return true;
     }
-    track_list->tracks[track_list->track_count++] = track_size;
+    if (!lam::pool_grow_array(pool, &tracks->tracks, &tracks->allocated_tracks,
+                              tracks->track_count + 1, 4)) {
+        destroy_grid_track_size(pool, track);
+        return false;
+    }
+    tracks->tracks[tracks->track_count++] = track;
+    return true;
 }
 
-static int grid_fixed_repeat_count(const CssValue* value) {
-    if (!value || value->type != CSS_VALUE_TYPE_NUMBER) return 0;
-    int count = (int)value->data.number.value; // INT_CAST_OK: CSS repeat count.
-    return count > MAX_GRID_SPAN ? MAX_GRID_SPAN : count;
-}
-
-static void append_grid_repeated_track_values(LayoutContext* lycon,
+static bool append_grid_repeated_track_values(LayoutContext* lycon,
                                               GridTrackList* track_list,
                                               const CssValue* const* values,
                                               const CssFunction* func,
-                                              int value_count, int repeat_count) {
+                                              int value_count, int repeat_count,
+                                              int* authored_line) {
     Pool* pool = layout_prop_pool(lycon);
-    if (!track_list || (!values && !func) ||
-        value_count <= 0 || repeat_count <= 0) return;
+    if (!track_list || (!values && !func) || value_count <= 0 || repeat_count <= 0) return false;
     for (int repeat = 0; repeat < repeat_count; repeat++) {
+        bool in_names = false;
         for (int value = 0; value < value_count; value++) {
-            if (track_list->track_count >= track_list->allocated_tracks) return;
-            const CssValue* item = func
-                ? grid_repeat_track_value_at(func, value) : values[value];
-            GridTrackSize* track = parse_css_value_to_track_size(lycon, item);
-            if (track) append_grid_track_size(pool, track_list, track);
+            if (*authored_line > radiant::grid::GRID_MAX_EXPLICIT_TRACKS) return true;
+            const CssValue* item = func ? grid_repeat_track_value_at(func, value) : values[value];
+            int name = grid_consume_track_line_name(pool, &track_list->line_names,
+                                                    *authored_line, item, &in_names);
+            if (name < 0) return false;
+            if (name == 0 && !append_grid_track_value(lycon, track_list, item, authored_line)) return false;
         }
     }
+    return true;
 }
 
-// Parse grid track list from CSS value list, handling repeat() functions
-// Parse grid track list from CSS value list
+// expand only retained tracks; authored positions keep names beyond the cap from moving inward.
 static void parse_grid_track_list(LayoutContext* lycon, const CssValue* value,
                                   lam::Own<GridTrackList>* track_list_ptr) {
     Pool* pool = layout_prop_pool(lycon);
     if (!value || value->type != CSS_VALUE_TYPE_LIST || !track_list_ptr) return;
     int count = value->data.list.count;
     CssValue** values = value->data.list.values;
-
-
-    int total_tracks = 0;
-    for (int i = 0; i < count; i++) {
-        CssValue* val = values[i];
-        if (!val) continue;
-        if (val->type == CSS_VALUE_TYPE_FUNCTION) {
-            const char* func_name = val->data.function->name;
-            if (func_name && strcmp(func_name, "repeat") == 0) {
-                CssValue* count_val = val->data.function->arg_count > 0 ? val->data.function->args[0] : NULL;
-                if (count_val && count_val->type == CSS_VALUE_TYPE_NUMBER) {
-                    // Fixed repeat count - expand
-                    int repeat_count = grid_fixed_repeat_count(count_val);
-                    int track_vals = grid_repeat_track_value_count(val->data.function);
-                    total_tracks += repeat_count * (track_vals > 0 ? track_vals : 1);
-                } else {
-                    total_tracks += 1;
-                }
-            } else {
-                total_tracks += 1;
-            }
-        } else if (css_value_can_be_grid_track_size(val)) {
-            total_tracks++;
-        }
-        else if (val->type == CSS_VALUE_TYPE_CUSTOM && val->data.custom_property.name) {
-            const char* name = val->data.custom_property.name;
-            if (strncmp(name, "repeat(", 7) == 0 || strcmp(name, "repeat") == 0) {
-                if (i + 1 < count && values[i + 1] && values[i + 1]->type == CSS_VALUE_TYPE_NUMBER) {
-                    int repeat_count = grid_fixed_repeat_count(values[i + 1]);
-                    int track_values = 0;
-                    for (int j = i + 2; j < count; j++) {
-                        CssValue* tv = values[j];
-                        if (!tv || tv->type == CSS_VALUE_TYPE_CUSTOM) break;
-                        if (css_value_can_be_grid_track_size(tv)) {
-                            track_values++;
-                        }
-                    }
-                    total_tracks += repeat_count * (track_values > 0 ? track_values : 1);
-                }
-            }
-        }
-    }
-    if (total_tracks == 0) {
-        return;
-    }
-    // Replace previous tracks. CSS can be resolved repeatedly for the same DOM
-    *track_list_ptr = lam::own(replace_grid_track_list(pool, track_list_ptr, total_tracks));
-    GridTrackList* track_list = *track_list_ptr;
-    if (!track_list) {
-        return;
-    }
-
-
-    int i = 0;
-    while (i < count) {
-        CssValue* val = values[i];
-        if (!val) { i++; continue; }
-        if (val->type == CSS_VALUE_TYPE_FUNCTION) {
-            const char* func_name = val->data.function->name;
-            if (func_name && strcmp(func_name, "repeat") == 0) {
-                // Check if auto-fill/auto-fit or fixed count
-                CssValue* count_val = val->data.function->arg_count > 0 ? val->data.function->args[0] : NULL;
-                bool is_auto = count_val && count_val->type == CSS_VALUE_TYPE_KEYWORD &&
-                               (count_val->data.keyword == CSS_VALUE_AUTO_FILL ||
-                                count_val->data.keyword == CSS_VALUE_AUTO_FIT);
-                if (is_auto) {
-                    GridTrackSize* ts = parse_repeat_function(lycon, val);
-                    if (ts) {
-                        append_grid_track_size(pool, track_list, ts);
-                        track_list->is_repeat = true;
-                    }
-                } else if (count_val && count_val->type == CSS_VALUE_TYPE_NUMBER) {
-                    // Fixed repeat count - expand inline
-                    append_grid_repeated_track_values(lycon, track_list,
-                        nullptr, val->data.function,
-                        grid_repeat_track_value_count(val->data.function),
-                        grid_fixed_repeat_count(count_val));
-                }
-            } else {
-                GridTrackSize* ts = parse_css_value_to_track_size(lycon, val);
-                if (ts) {
-                    append_grid_track_size(pool, track_list, ts);
-                }
-            }
-            i++;
-            continue;
-        }
-        if (val->type == CSS_VALUE_TYPE_CUSTOM && val->data.custom_property.name) {
-            const char* name = val->data.custom_property.name;
-            if (strcmp(name, "[") == 0) {
-                int line_idx = track_list->track_count; // this name belongs at the current line position
-                while (++i < count) {
-                    CssValue* nv = values[i];
-                    if (!nv) continue;
-                    if (nv->type == CSS_VALUE_TYPE_CUSTOM && nv->data.custom_property.name &&
-                            strcmp(nv->data.custom_property.name, "]") == 0) {
-                        i++; // advance past "]"
-                        break;
-                    }
-                    if (nv->type == CSS_VALUE_TYPE_KEYWORD) {
-                        const CssEnumInfo* ki = css_enum_info(nv->data.keyword);
-                        if (ki && ki->name && line_idx <= track_list->allocated_tracks && !track_list->line_names[line_idx]) {
-                            track_list->line_names[line_idx] = pool_strdup(pool, ki->name);
-                            track_list->line_name_count++;
-                        }
-                        continue;
-                    }
-                    if (nv->type == CSS_VALUE_TYPE_CUSTOM && nv->data.custom_property.name) {
-                        const char* nn = nv->data.custom_property.name;
-                        if (strcmp(nn, "[") == 0) break; // malformed nested bracket
-                        if (line_idx <= track_list->allocated_tracks && !track_list->line_names[line_idx]) {
-                            track_list->line_names[line_idx] = pool_strdup(pool, nn);
-                            track_list->line_name_count++;
-                        }
-                    }
-                }
+    GridTrackList* tracks = replace_grid_track_list(pool, track_list_ptr, 4);
+    if (!tracks) return;
+    int authored_line = 0;
+    bool in_names = false;
+    bool complete = true;
+    for (int i = 0; i < count && complete; i++) {
+        const CssValue* item = values[i];
+        if (!item) continue;
+        int name = grid_consume_track_line_name(pool, &tracks->line_names,
+                                                authored_line, item, &in_names);
+        if (name < 0) { complete = false; break; }
+        if (name > 0) continue;
+        if (item->type == CSS_VALUE_TYPE_FUNCTION && item->data.function &&
+            item->data.function->name && strcmp(item->data.function->name, "repeat") == 0) {
+            const CssFunction* function = item->data.function;
+            const CssValue* repetitions = function->arg_count > 0 ? function->args[0] : nullptr;
+            if (css_integer_value_valid(repetitions)) {
+                complete = append_grid_repeated_track_values(lycon, tracks, nullptr, function,
+                    grid_repeat_track_value_count(function), grid_fixed_repeat_count(lycon, repetitions),
+                    &authored_line);
                 continue;
             }
-            if (strcmp(name, "]") == 0) { i++; continue; } // stray closing bracket
-            if (strncmp(name, "repeat(", 7) == 0 || strcmp(name, "repeat") == 0) {
-                i++; // Move past "repeat("
-                if (i >= count || !values[i] || values[i]->type != CSS_VALUE_TYPE_NUMBER) {
-                    continue;
-                }
-                int repeat_count = grid_fixed_repeat_count(values[i]);
-                i++; // Move past count
-                const CssValue* repeat_tracks[16];
-                int repeat_track_count = 0;
-                while (i < count && repeat_track_count < 16) {
-                    CssValue* tv = values[i];
-                    if (!tv) break;
-                    if (tv->type == CSS_VALUE_TYPE_CUSTOM) { i++; break; }
-                    if (css_value_can_be_grid_track_size(tv)) {
-                        repeat_tracks[repeat_track_count++] = tv;
-                    }
-                    i++;
-                }
-                append_grid_repeated_track_values(
-                    lycon, track_list, repeat_tracks, nullptr,
-                    repeat_track_count, repeat_count);
+            tracks->is_repeat = true;
+        } else if (item->type == CSS_VALUE_TYPE_CUSTOM && item->data.custom_property.name) {
+            const char* identifier = item->data.custom_property.name;
+            if (strncmp(identifier, "repeat(", 7) == 0 || strcmp(identifier, "repeat") == 0) {
+                if (++i >= count || !values[i] || values[i]->type != CSS_VALUE_TYPE_NUMBER) continue;
+                int repeats = grid_fixed_repeat_count(lycon, values[i]);
+                int begin = ++i;
+                while (i < count && values[i] && values[i]->type != CSS_VALUE_TYPE_CUSTOM) i++;
+                complete = append_grid_repeated_track_values(lycon, tracks, values + begin, nullptr,
+                                                             i - begin, repeats, &authored_line);
                 continue;
             }
-            i++;
             continue;
         }
-        GridTrackSize* ts = parse_css_value_to_track_size(lycon, val);
-        if (ts) {
-            append_grid_track_size(pool, track_list, ts);
-        }
-        i++;
+        complete = append_grid_track_value(lycon, tracks, item, &authored_line);
     }
-
+    if (!complete) {
+        log_error("grid_track_parse: failed to retain the complete bounded track list");
+        destroy_grid_track_list(pool, tracks);
+        *track_list_ptr = nullptr;
+    }
 }
 
 static void apply_grid_template_track_value(LayoutContext* lycon,
@@ -4562,115 +4070,14 @@ static void apply_grid_template_track_value(LayoutContext* lycon,
         value->type != CSS_VALUE_TYPE_PERCENTAGE) {
         return;
     }
-    GridTrackSize* track_size = parse_css_value_to_track_size(lycon, value);
-    if (!track_size) return;
-    bool expand_repeat = track_size->type == GRID_TRACK_SIZE_REPEAT &&
-        !track_size->is_auto_fill && !track_size->is_auto_fit &&
-        track_size->repeat_count > 0;
-    if (expand_repeat) {
-        int total = track_size->repeat_count * track_size->repeat_track_count;
-        *track_list_ptr = lam::own(replace_grid_track_list(pool, track_list_ptr, total));
-        if (!*track_list_ptr) {
-            destroy_grid_track_size(pool, track_size);
-            return;
-        }
-        for (int repeat = 0; repeat < track_size->repeat_count; repeat++) {
-            for (int track = 0; track < track_size->repeat_track_count; track++) {
-                GridTrackSize* clone = clone_grid_track_size(pool, track_size->repeat_tracks[track]);
-                if (clone) {
-                    (*track_list_ptr)->tracks[(*track_list_ptr)->track_count++] = clone;
-                }
-            }
-        }
-        destroy_grid_track_size(pool, track_size);
-    } else {
-        *track_list_ptr = lam::own(replace_grid_track_list(pool, track_list_ptr, 1));
-        if (!*track_list_ptr) {
-            destroy_grid_track_size(pool, track_size);
-            return;
-        }
-        (*track_list_ptr)->tracks[0] = track_size;
-        (*track_list_ptr)->track_count = 1;
-        if (track_size->type == GRID_TRACK_SIZE_REPEAT) {
-            (*track_list_ptr)->is_repeat = true;
-        }
-    }
-
+    // single repeat() values and lists must share name merging and expansion.
+    CssValue* values[] = {const_cast<CssValue*>(value)};
+    CssValue list = {};
+    list.type = CSS_VALUE_TYPE_LIST;
+    list.data.list.values = values;
+    list.data.list.count = 1;
+    parse_grid_track_list(lycon, &list, track_list_ptr);
 }
-
-static bool grid_template_track_slice_is_supported(CssValue** values, int count) {
-    if (!values || count <= 0) return false;
-    bool has_track_size = false;
-    for (int i = 0; i < count; i++) {
-        CssValue* value = values[i];
-        if (!value) return false;
-        if (css_value_can_be_grid_track_size(value)) {
-            has_track_size = true;
-            continue;
-        }
-        if (value->type != CSS_VALUE_TYPE_CUSTOM) return false;
-    }
-    return has_track_size;
-}
-
-static void clear_grid_template_track_list(Pool* pool, lam::Own<GridTrackList>* track_list_ptr) {
-    if (!track_list_ptr || !*track_list_ptr) return;
-    destroy_grid_track_list(pool, *track_list_ptr);
-    *track_list_ptr = nullptr;
-}
-
-static bool apply_grid_template_shorthand(LayoutContext* lycon,
-                                          const CssValue* value, GridProp* grid) {
-    Pool* pool = layout_prop_pool(lycon);
-    if (!value || !grid) return false;
-    if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_NONE) {
-        clear_grid_template_track_list(pool, &grid->grid_template_rows);
-        clear_grid_template_track_list(pool, &grid->grid_template_columns);
-        clear_grid_template_areas(pool, grid);
-        return true;
-    }
-    if (value->type != CSS_VALUE_TYPE_LIST || value->data.list.comma_separated) return false;
-    CssValue** values = value->data.list.values;
-    int value_count = value->data.list.count;
-    int separator_index = -1;
-    for (int i = 0; i < value_count; i++) {
-        if (!css_grid_is_separator(values[i])) continue;
-        if (separator_index >= 0) return false;
-        separator_index = i;
-    }
-    if (separator_index <= 0 || separator_index >= value_count - 1 ||
-        !grid_template_track_slice_is_supported(values, separator_index) ||
-        !grid_template_track_slice_is_supported(values + separator_index + 1,
-                                                value_count - separator_index - 1)) {
-        return false;
-    }
-    CssValue rows = {};
-    rows.type = CSS_VALUE_TYPE_LIST;
-    rows.data.list.values = values;
-    rows.data.list.count = separator_index;
-    CssValue columns = {};
-    columns.type = CSS_VALUE_TYPE_LIST;
-    columns.data.list.values = values + separator_index + 1;
-    columns.data.list.count = value_count - separator_index - 1;
-    // CSS Grid §7.2: the slash form assigns row then column tracks and resets
-    apply_grid_template_track_value(lycon, &rows, &grid->grid_template_rows, "grid-template rows");
-    apply_grid_template_track_value(lycon, &columns, &grid->grid_template_columns, "grid-template columns");
-    clear_grid_template_areas(pool, grid);
-    return true;
-}
-
-static bool apply_grid_shorthand(LayoutContext* lycon,
-                                 const CssValue* value, GridProp* grid) {
-    Pool* pool = layout_prop_pool(lycon);
-    if (!apply_grid_template_shorthand(lycon, value, grid)) return false;
-    // The `<grid-template>` branch of `grid` resets the implicit grid; otherwise
-    clear_grid_template_track_list(pool, &grid->grid_auto_rows);
-    clear_grid_template_track_list(pool, &grid->grid_auto_columns);
-    grid->grid_auto_flow = CSS_VALUE_ROW;
-    grid->is_dense_packing = false;
-    return true;
-}
-
 
 static bool css_property_is_font(CssPropertyCode property) {
     const CssPropertyRuntimeMetadata* metadata = css_property_runtime_metadata(property);
@@ -4681,6 +4088,7 @@ static bool resolve_property_callback(AvlNode* node, void* context, bool font_pa
     LayoutContext* lycon = (LayoutContext*)context;
     StyleNode* style_node = (StyleNode*)node->declaration;
     CssPropertyCode prop_id = (CssPropertyCode)node->property_id;
+    if (css_grid_property_mask(prop_id)) return true;
     if (prop_id == CSS_PROPERTY_CONTAINER || prop_id == CSS_PROPERTY_CONTAINER_NAME ||
         prop_id == CSS_PROPERTY_CONTAINER_TYPE) return true;
     if (css_property_is_font(prop_id) != font_pass) return true;
@@ -5432,6 +4840,47 @@ static CssEnum overflow_axis_value(LayoutContext* lycon,
     return keyword;
 }
 
+static void resolve_grid_components(DomElement* element, LayoutContext* lycon) {
+    StyleTree* style = element ? element->specified_style : nullptr;
+    if (!style || !style->tree) return;
+    const CssPropertyCode shorthands[] = {CSS_PROPERTY_GRID, CSS_PROPERTY_GRID_TEMPLATE,
+        CSS_PROPERTY_GRID_AREA, CSS_PROPERTY_GRID_ROW, CSS_PROPERTY_GRID_COLUMN, CSS_PROPERTY_ALL};
+    bool present = false;
+    for (CssPropertyCode property : shorthands)
+        if (avl_tree_search(style->tree,property)) { present = true; break; }
+    for (unsigned i = 0; !present && i < CSS_GRID_PROPERTY_MEMBER_COUNT; i++)
+        present = avl_tree_search(style->tree, css_grid_property_member(i)) != nullptr;
+    if (!present) return;
+    // resolve each component across both overlapping shorthands, including rollback layers.
+    for (unsigned i = 0; i < CSS_GRID_PROPERTY_MEMBER_COUNT; i++) {
+        CssPropertyCode property = css_grid_property_member(i);
+        CssDeclaration* winner = layout_cascaded_physical_declaration(element, property);
+        if (winner) resolve_css_property(property, winner, lycon);
+    }
+}
+
+CssDeclaration* layout_cascaded_line_clamp_declaration(DomElement* element,
+                                                       CssPropertyCode* property) {
+    const CssPropertyCode properties[] = {CSS_PROPERTY_LINE_CLAMP, CSS_PROPERTY_WEBKIT_LINE_CLAMP};
+    CssDeclaration* winner = nullptr;
+    *property = CSS_PROPERTY_LINE_CLAMP;
+    for (CssPropertyCode candidate_property : properties) {
+        CssDeclaration* candidate = layout_cascaded_physical_declaration(element, candidate_property);
+        if (candidate && (!winner || css_declaration_cascade_compare(candidate, winner) > 0)) {
+            winner = candidate;
+            *property = candidate_property;
+        }
+    }
+    return winner;
+}
+
+static void resolve_line_clamp_count(DomElement* element, LayoutContext* lycon) {
+    CssPropertyCode property;
+    CssDeclaration* winner = layout_cascaded_line_clamp_declaration(element, &property);
+    // both numeric clamp forms target the same count; evaluate after the owner's font, including all/rollback.
+    if (winner) resolve_css_property(property, winner, lycon);
+}
+
 static void resolve_overflow_axes(DomElement* element, LayoutContext* lycon) {
     ViewBlock* block = lam::view_as_block(lycon->view);
     if (!block || !element->specified_style) return;
@@ -5786,7 +5235,10 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
         dom_elem->blk->contain_positioning = false;
         dom_elem->blk->contain_paint = false;
         dom_elem->blk->computed_containment = 0;
-        dom_elem->blk->content_visibility_hidden = false;
+        dom_elem->blk->content_visibility_skipped = false;
+        dom_elem->blk->content_visibility = CSS_VALUE_VISIBLE;
+        dom_elem->blk->contain_intrinsic_width = dom_elem->blk->contain_intrinsic_height = -1.0f;
+        dom_elem->blk->contain_intrinsic_width_auto = dom_elem->blk->contain_intrinsic_height_auto = false;
     }
 
     // rebuild retained leading before shorthand/inheritance resolution, while
@@ -5927,6 +5379,12 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
         }
     }
     avl_tree_foreach_inorder(style_tree->tree, resolve_non_font_property_callback, lycon);
+    // intrinsic measurement and used sizing share the winner across shorthand and logical aliases.
+    const CssPropertyCode intrinsic_parts[] = {CSS_PROPERTY_CONTAIN_INTRINSIC_WIDTH, CSS_PROPERTY_CONTAIN_INTRINSIC_HEIGHT};
+    for (CssPropertyCode property : intrinsic_parts) {
+        CssDeclaration* winner = layout_cascaded_physical_declaration(dom_elem, property);
+        if (winner) resolve_css_property(property, winner, lycon);
+    }
     // query eligibility and names use the same shorthand/longhand rollback winner.
     const CssPropertyCode container_parts[] = {CSS_PROPERTY_CONTAINER_NAME, CSS_PROPERTY_CONTAINER_TYPE};
     for (CssPropertyCode part : container_parts) {
@@ -5934,6 +5392,14 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
         if (winner) resolve_css_property(part, winner, lycon);
     }
     if (dom_elem->blk) {
+        // visibility containment persists while auto contents are relevant; skipping adds size containment.
+        bool visibility_applies = view_size_containment_applies(dom_elem->display);
+        if (!visibility_applies) dom_elem->blk->content_visibility_skipped = false;
+        if (visibility_applies && dom_elem->blk->content_visibility != CSS_VALUE_VISIBLE) {
+            dom_elem->blk->contain_positioning = true;
+            dom_elem->blk->contain_paint = true;
+        }
+        dom_elem->blk->contain_size |= dom_elem->blk->content_visibility_skipped;
         dom_elem->blk->contain_size |= (dom_elem->blk->container_axes & CSS_CONTAINER_BLOCK) != 0;
         dom_elem->blk->contain_inline_size |= (dom_elem->blk->container_axes & CSS_CONTAINER_INLINE) != 0;
     }
@@ -6221,6 +5687,9 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
         }
     }
     radiant_compute_stored_line_height(lycon, lam::view_require_element(lycon->view));
+    resolve_background_style(dom_elem, lycon);
+    resolve_grid_components(dom_elem, lycon);
+    resolve_line_clamp_count(dom_elem, lycon);
     resolve_text_align_longhands(dom_elem, lycon);
     resolve_overflow_axes(dom_elem, lycon);
     resolve_overscroll_axes(dom_elem, lycon);
@@ -6641,17 +6110,6 @@ static void css_store_hyphenate_character(LayoutContext* lycon, ViewSpan* span,
     str_copy(span->blk->hyphenate_character, length + 1, character, length);
 }
 
-static const char* css_list_style_image_url(const CssValue* value) {
-    if (!value) return nullptr;
-    if (value->type == CSS_VALUE_TYPE_URL) return value->data.url;
-    if (value->type != CSS_VALUE_TYPE_FUNCTION || !value->data.function ||
-        !value->data.function->name || strcmp(value->data.function->name, "url") != 0 ||
-        value->data.function->arg_count <= 0 || !value->data.function->args[0]) return nullptr;
-    CssValue* argument = value->data.function->args[0];
-    return argument->type == CSS_VALUE_TYPE_STRING ? argument->data.string
-        : argument->type == CSS_VALUE_TYPE_URL ? argument->data.url : nullptr;
-}
-
 const CssValue* layout_list_style_longhand(const CssValue* value, CssPropertyCode property, Pool* pool) {
     const CssValue* type = nullptr; const CssValue* position = nullptr; const CssValue* image = nullptr;
     bool none = false;
@@ -6660,7 +6118,7 @@ const CssValue* layout_list_style_longhand(const CssValue* value, CssPropertyCod
         const char* name = css_value_identifier_name(item); CssEnum ignored;
         if (css_value_is_none(item)) none = true;
         else if (name && css_list_style_custom_position(name, &ignored)) position = item;
-        else if (css_list_style_image_url(item) || css_background_gradient_type(item) != GRADIENT_NONE) image = item;
+        else if (css_value_image_kind(item) != CSS_IMAGE_NONE) image = item;
         else type = item;
     }
     // omitted longhands reset to their initial value; none suppresses both unspecified marker sources.
@@ -6670,13 +6128,22 @@ const CssValue* layout_list_style_longhand(const CssValue* value, CssPropertyCod
 }
 
 static bool css_store_list_style_image(LayoutContext* lycon, ViewSpan* span,
-                                       const CssValue* value) {
-    const char* url = css_list_style_image_url(value);
-    if (url) {
-        size_t length = strlen(url);
+                                       const CssDeclaration* decl, const CssValue* value) {
+    CssImageChoice choice = {};
+    if (!layout_select_css_image(value, layout_image_device_scale(lycon), &choice)) {
+        if (!css_value_is_image_set(value)) return false;
+        // a valid set with no supported candidate has no marker image.
         span->blk->list_style_image = {};
-        span->blk->list_style_image.url = lam::shared((char*)alloc_prop(lycon, length + 1));
-        str_copy(span->block()->list_style_image.url, length + 1, url, length);
+        span->blk->list_style_image.url = lam::shared((char*)view_tree_canonical_string(
+            layout_context_view_tree(lycon), "none", 4));
+        return true;
+    }
+    value = choice.image;
+    const char* url = choice.url;
+    if (url) {
+        span->blk->list_style_image = {};
+        span->blk->list_style_image.url = lam::shared(resolve_css_resource_url(lycon, decl, url, true));
+        span->blk->list_style_image.resolution = choice.resolution;
         return true;
     }
 
@@ -6704,7 +6171,7 @@ static bool css_store_list_style_image(LayoutContext* lycon, ViewSpan* span,
 }
 
 static void css_apply_list_style_component(LayoutContext* lycon, ViewSpan* span,
-                                           const CssValue* value, bool list_member) {
+                                           const CssDeclaration* decl, const CssValue* value, bool list_member) {
     if (!value) return;
     if (value->type == CSS_VALUE_TYPE_KEYWORD) {
         css_apply_list_style_keyword(lycon, span, value->data.keyword, list_member);
@@ -6716,7 +6183,7 @@ static void css_apply_list_style_component(LayoutContext* lycon, ViewSpan* span,
             span->blk->list_style_position = position;
         }
     } else if (value->type == CSS_VALUE_TYPE_URL || value->type == CSS_VALUE_TYPE_FUNCTION) {
-        css_store_list_style_image(lycon, span, value);
+        css_store_list_style_image(lycon, span, decl, value);
     }
 }
 
@@ -6857,38 +6324,12 @@ static void resolve_gap_property(LayoutContext* lycon, ViewBlock* block,
     }
 }
 
-static bool css_background_repeat_keyword(CssEnum keyword) {
-    return keyword == CSS_VALUE_REPEAT || keyword == CSS_VALUE_NO_REPEAT ||
-           keyword == CSS_VALUE_ROUND || keyword == CSS_VALUE_SPACE;
-}
 
-static void resolve_background_repeat_property(ViewSpan* span, const CssValue* value) {
-    if (!span || !value) return;
-    BackgroundProp* background = span->boundary()->background;
-    // Axis aliases are identifiers rather than members of the common repeat enum.
-    bool repeat_x = css_value_identifier_is(value, "repeat-x");
-    if (repeat_x || css_value_identifier_is(value, "repeat-y")) {
-        background->bg_repeat_x = repeat_x ? CSS_VALUE_REPEAT : CSS_VALUE_NO_REPEAT;
-        background->bg_repeat_y = repeat_x ? CSS_VALUE_NO_REPEAT : CSS_VALUE_REPEAT;
-        return;
-    }
-    if (value->type == CSS_VALUE_TYPE_KEYWORD) {
-        if (css_background_repeat_keyword(value->data.keyword)) {
-            background->bg_repeat_x = background->bg_repeat_y = value->data.keyword;
-        }
-        return;
-    }
-    if (value->type != CSS_VALUE_TYPE_LIST || value->data.list.count < 2) return;
-    CssValue* x = value->data.list.values[0];
-    CssValue* y = value->data.list.values[1];
-    if (x && x->type == CSS_VALUE_TYPE_KEYWORD &&
-        css_background_repeat_keyword(x->data.keyword)) {
-        background->bg_repeat_x = x->data.keyword;
-    }
-    if (y && y->type == CSS_VALUE_TYPE_KEYWORD &&
-        css_background_repeat_keyword(y->data.keyword)) {
-        background->bg_repeat_y = y->data.keyword;
-    }
+static void resolve_background_repeat_property(BackgroundGeometry* background, const CssValue* value) {
+    CssEnum axes[2];
+    if (!background || !css_background_repeat_components(value, axes)) return;
+    background->bg_repeat_x = axes[0];
+    background->bg_repeat_y = axes[1];
 }
 
 static MultiColumnProp* resolve_multicol_prop(LayoutContext* lycon, ViewBlock* block) {
@@ -7021,9 +6462,14 @@ static void resolve_containment_property(LayoutContext* lycon, ViewSpan* block,
         css_value_destroy_owned(block->blk->container_names, pool);
         block->blk->container_names = lam::own(copy);
     } else if (property == CSS_PROPERTY_CONTENT_VISIBILITY) {
-        block->blk->content_visibility_hidden =
-            inherits ? parent && parent->blk && parent->block()->content_visibility_hidden
-                : css_content_visibility_value_is_hidden(value);
+        block->blk->content_visibility = inherits
+            ? parent && parent->blk ? parent->block()->content_visibility : CSS_VALUE_VISIBLE
+            : value->type == CSS_VALUE_TYPE_KEYWORD &&
+                (value->data.keyword == CSS_VALUE_HIDDEN || value->data.keyword == CSS_VALUE_AUTO)
+                ? value->data.keyword : CSS_VALUE_VISIBLE;
+        block->blk->content_visibility_skipped = block->blk->content_visibility == CSS_VALUE_HIDDEN ||
+            (block->blk->content_visibility == CSS_VALUE_AUTO &&
+                layout_content_visibility_is_skipped(lycon, block->as_element()));
     }
 }
 
@@ -7681,10 +7127,10 @@ static void resolve_background_keyword_property(LayoutContext* lycon, ViewSpan* 
         return;
     }
     const CssKeywordSlotSpec slots[] = {
-        {CSS_PROPERTY_BACKGROUND_ATTACHMENT, offsetof(BackgroundProp, bg_attachment)},
-        {CSS_PROPERTY_BACKGROUND_ORIGIN, offsetof(BackgroundProp, bg_origin)},
-        {CSS_PROPERTY_BACKGROUND_CLIP, offsetof(BackgroundProp, bg_clip)},
-        {CSS_PROPERTY_BACKGROUND_BLEND_MODE, offsetof(BackgroundProp, blend_mode)}
+        {CSS_PROPERTY_BACKGROUND_ATTACHMENT, offsetof(BackgroundGeometry, bg_attachment)},
+        {CSS_PROPERTY_BACKGROUND_ORIGIN, offsetof(BackgroundGeometry, bg_origin)},
+        {CSS_PROPERTY_BACKGROUND_CLIP, offsetof(BackgroundGeometry, bg_clip)},
+        {CSS_PROPERTY_BACKGROUND_BLEND_MODE, offsetof(BackgroundGeometry, blend_mode)}
     };
     CssEnum* slot = css_keyword_slot(
         background, slots, sizeof(slots) / sizeof(*slots), property);
@@ -7746,19 +7192,6 @@ static bool resolve_border_image_sides(LayoutContext* lycon,
     return true;
 }
 
-static LinearGradient* clone_border_image_gradient(LayoutContext* lycon,
-                                                    const LinearGradient* source) {
-    if (!lycon || !source || source->stop_count <= 0) return nullptr;
-    LinearGradient* copy = (LinearGradient*)alloc_prop(lycon, sizeof(LinearGradient));
-    if (!copy) return nullptr;
-    *copy = *source;
-    copy->stops = lam::own_arr((GradientStop*)alloc_prop(lycon,
-        sizeof(GradientStop) * (size_t)source->stop_count));
-    if (!copy->stops) return nullptr;
-    memcpy(copy->stops, source->stops,
-           sizeof(GradientStop) * (size_t)source->stop_count);
-    return copy;
-}
 
 static void resolve_border_image_property(LayoutContext* lycon, ViewSpan* span,
                                           CssPropertyCode property,
@@ -7819,14 +7252,24 @@ static void resolve_border_image_property(LayoutContext* lycon, ViewSpan* span,
             const BorderProp* inherited = keyword == CSS_VALUE_INHERIT &&
                 parent && parent->boundary() ? parent->boundary()->border : nullptr;
             if (property == CSS_PROPERTY_BORDER_IMAGE_SOURCE) {
-                border->border_image_type = inherited
-                    ? inherited->border_image_type : GRADIENT_NONE;
-                border->border_image_linear_gradient = lam::own(inherited
-                    ? clone_border_image_gradient(
-                        lycon, inherited->border_image_linear_gradient) : nullptr);
-                const char* url = inherited ? inherited->border_image_url : nullptr;
-                border->border_image_url = lam::own(url ? resolve_css_resource_url(lycon, nullptr, url)
-                                               : nullptr);
+                LinearGradient* gradient = inherited
+                    ? clone_gradient_value(lycon, inherited->border_image_linear_gradient.get()) : nullptr;
+                const char* source = inherited ? inherited->border_image_url.get() : nullptr;
+                char* url = source ? resolve_css_resource_url(lycon, nullptr, source) : nullptr;
+                if ((inherited && inherited->border_image_linear_gradient && !gradient) ||
+                        (source && !url)) {
+                    BorderProp discarded = {};
+                    discarded.border_image_linear_gradient = lam::own(gradient);
+                    discarded.border_image_url = lam::own(url);
+                    view_release_border_image(layout_context_view_tree(lycon), &discarded);
+                    return;
+                }
+                // inheritance owns a clone; replacing the child must not retire the parent's image.
+                view_release_border_image(layout_context_view_tree(lycon), border);
+                border->border_image_type = inherited ? inherited->border_image_type : GRADIENT_NONE;
+                border->border_image_linear_gradient = lam::own(gradient);
+                border->border_image_url = lam::own(url);
+                border->border_image_resolution = inherited ? inherited->border_image_resolution : 0.0f;
             } else if (property == CSS_PROPERTY_BORDER_IMAGE_SLICE) {
                 border->has_border_image_slice = inherited && inherited->has_border_image_slice;
                 border->border_image_slice_fill = inherited && inherited->border_image_slice_fill;
@@ -7862,21 +7305,25 @@ static void resolve_border_image_property(LayoutContext* lycon, ViewSpan* span,
         }
     }
     if (property == CSS_PROPERTY_BORDER_IMAGE_SOURCE) {
-        LinearGradient* gradient = nullptr;
-        if (resolve_linear_gradient_value(lycon, value, &gradient)) {
-            border->border_image_type = GRADIENT_LINEAR;
-            border->border_image_linear_gradient = lam::own(gradient);
-            border->border_image_url = nullptr;
-        } else if (const char* url = css_background_url_value(value)) {
-            border->border_image_url = lam::own(resolve_css_resource_url(lycon, decl, url));
-            border->border_image_type = GRADIENT_NONE;
-            border->border_image_linear_gradient = nullptr;
-        } else if (value->type == CSS_VALUE_TYPE_KEYWORD &&
-                   value->data.keyword == CSS_VALUE_NONE) {
-            border->border_image_type = GRADIENT_NONE;
-            border->border_image_linear_gradient = nullptr;
-            border->border_image_url = nullptr;
+        CssImageChoice choice = {};
+        bool selected = layout_select_css_image(value, layout_image_device_scale(lycon), &choice);
+        if (!selected && !css_value_is_image_set(value) && !css_value_is_none(value)) return;
+        BorderProp replacement = {};
+        if (selected && choice.url) {
+            replacement.border_image_url = lam::own(resolve_css_resource_url(lycon, decl, choice.url));
+            if (!replacement.border_image_url) return;
+        } else if (selected) {
+            LinearGradient* gradient = nullptr;
+            if (!resolve_linear_gradient_value(lycon, choice.image, &gradient)) return;
+            replacement.border_image_type = GRADIENT_LINEAR;
+            replacement.border_image_linear_gradient = lam::own(gradient);
         }
+        replacement.border_image_resolution = choice.resolution;
+        view_release_border_image(layout_context_view_tree(lycon), border);
+        border->border_image_type = replacement.border_image_type;
+        border->border_image_linear_gradient = replacement.border_image_linear_gradient;
+        border->border_image_url = replacement.border_image_url;
+        border->border_image_resolution = replacement.border_image_resolution;
     } else if (property == CSS_PROPERTY_BORDER_IMAGE_WIDTH ||
                property == CSS_PROPERTY_BORDER_IMAGE_SLICE ||
                property == CSS_PROPERTY_BORDER_IMAGE_OUTSET) {
@@ -7918,7 +7365,7 @@ static void resolve_border_image_property(LayoutContext* lycon, ViewSpan* span,
 
 static void resolve_list_style_longhand(LayoutContext* lycon, ViewSpan* span,
                                         CssPropertyCode property,
-                                        const CssValue* value) {
+                                        const CssDeclaration* decl, const CssValue* value) {
     span->ensure_block(lycon);
     if (property == CSS_PROPERTY_LIST_STYLE_TYPE) {
         if (value->type == CSS_VALUE_TYPE_KEYWORD) {
@@ -7938,7 +7385,7 @@ static void resolve_list_style_longhand(LayoutContext* lycon, ViewSpan* span,
                 span->blk->list_style_position = position;
             }
         }
-    } else if (!css_store_list_style_image(lycon, span, value) &&
+    } else if (!css_store_list_style_image(lycon, span, decl, value) &&
                value->type == CSS_VALUE_TYPE_KEYWORD &&
                value->data.keyword == CSS_VALUE_NONE) {
         span->blk->list_style_image = {};
@@ -8037,134 +7484,403 @@ static void resolve_line_count_property(LayoutContext* lycon, ViewBlock* block,
                                         CssPropertyCode property, const CssValue* value) {
     if (!block) return;
     block->ensure_block(lycon);
-    if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_NONE) {
-        block->blk->line_clamp = 0;
-        return;
-    }
-    if (value->type != CSS_VALUE_TYPE_NUMBER && value->type != CSS_VALUE_TYPE_LENGTH) return;
-    float raw = value->type == CSS_VALUE_TYPE_NUMBER
-        ? (float)value->data.number.value : (float)value->data.length.value;
-    if (raw > 0.0f) block->blk->line_clamp = (int)raw; // INT_CAST_OK: line count.
-}
-
-static CssBackgroundComponent resolve_background_size_component(
-    LayoutContext* lycon, CssPropertyCode property, const CssValue* value,
-    float initial_value, bool initial_percent, bool initial_auto) {
-    CssBackgroundComponent result = {initial_value, initial_percent, initial_auto};
-    if (!value) return result;
-    if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_AUTO) {
-        result.is_auto = true;
-    } else if (value->type == CSS_VALUE_TYPE_LENGTH) {
-        result.value = resolve_length_value(lycon, property, value);
-        result.is_percent = false;
-        result.is_auto = false;
-    } else if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
-        result.value = value->data.percentage.value;
-        result.is_percent = true;
-        result.is_auto = false;
-    }
-    return result;
-}
-
-static void css_store_background_axis(BackgroundProp* background, bool horizontal,
-                                      CssBackgroundComponent component, bool size) {
-    if (size) {
-        if (horizontal) {
-            background->bg_size_width = component.value;
-            background->bg_size_width_is_percent = component.is_percent;
-            background->bg_size_width_auto = component.is_auto;
-        } else {
-            background->bg_size_height = component.value;
-            background->bg_size_height_is_percent = component.is_percent;
-            background->bg_size_height_auto = component.is_auto;
-        }
-    } else if (horizontal) {
-        background->bg_position_x = component.value;
-        background->bg_position_x_is_percent = component.is_percent;
-        background->bg_position_x_length = 0.0f;
-    } else {
-        background->bg_position_y = component.value;
-        background->bg_position_y_is_percent = component.is_percent;
-        background->bg_position_y_length = 0.0f;
-    }
-}
-
-static void resolve_background_size(LayoutContext* lycon, ViewSpan* span,
-                                    const CssValue* value, CssPropertyCode property) {
-    layout_ensure_background(lycon, span);
-    BackgroundProp* background = span->boundary()->background;
+    block->blk->line_clamp = 0;
+    block->blk->line_clamp_legacy = property == CSS_PROPERTY_WEBKIT_LINE_CLAMP;
     if (value->type == CSS_VALUE_TYPE_KEYWORD) {
-        CssEnum keyword = value->data.keyword;
-        if (keyword == CSS_VALUE_COVER || keyword == CSS_VALUE_CONTAIN) {
-            background->bg_size_type = keyword;
-        } else if (keyword == CSS_VALUE_AUTO) {
-            background->bg_size_type = CSS_VALUE_AUTO;
-            background->bg_size_width_auto = true;
-            background->bg_size_height_auto = true;
+        if (value->data.keyword != CSS_VALUE_INHERIT) return;
+        DomElement* parent = dom_parent_element(lam::dom_require_element(lycon->view));
+        Pool* scratch = lycon->css_value_scratch ? lycon->css_value_scratch.get() : layout_prop_pool(lycon);
+        // copy the parent's computed scalar rather than re-evaluating its expression at the child's font.
+        String* text = parent ? css_prop_serialize_computed_value(scratch, parent, property, 0) : nullptr;
+        value = text ? css_parse_component_value_text(text->chars, text->len, scratch) : nullptr;
+    }
+    double count;
+    if (layout_compute_css_integer(lycon, property, value, 1.0, (double)INT_MAX, &count))
+        block->blk->line_clamp = static_cast<int>(count); // INT_CAST_OK: finite positive line count bounded by INT_MAX.
+}
+
+static bool resolve_background_size(LayoutContext* context, BackgroundGeometry* background,
+        const CssValue* value, CssPropertyCode property, BackgroundProp* owner) {
+    const CssValue* axes[2]; CssEnum mode;
+    if (!css_background_size_components(value, axes, &mode)) return false;
+    background->bg_size_type = mode;
+    background->bg_size_set = true;
+    for (int axis = 0; axis < 2; axis++) {
+        bool automatic = !axes[axis] || css_value_keyword_equals(axes[axis], CSS_VALUE_AUTO);
+        CssBackgroundMath math;
+        if (!compute_background_math(context, owner, automatic ? nullptr : axes[axis], property, &math)) return false;
+        float scalar = math.percentage != 0.0f ? math.percentage : math.length;
+        float length = math.percentage != 0.0f ? math.length : 0.0f;
+        if (!axis) {
+            background->bg_size_width = scalar; background->bg_size_width_length = length;
+            background->bg_size_width_is_percent = math.percentage != 0.0f;
+            background->bg_size_width_auto = automatic;
+            background->bg_size_width_expression = lam::up(math.expression);
+        } else {
+            background->bg_size_height = scalar; background->bg_size_height_length = length;
+            background->bg_size_height_is_percent = math.percentage != 0.0f;
+            background->bg_size_height_auto = automatic;
+            background->bg_size_height_expression = lam::up(math.expression);
         }
-    } else if (value->type == CSS_VALUE_TYPE_LENGTH ||
-               value->type == CSS_VALUE_TYPE_PERCENTAGE) {
-        background->bg_size_type = (CssEnum)0;
-        CssBackgroundComponent width = resolve_background_size_component(
-            lycon, property, value, background->bg_size_width,
-            background->bg_size_width_is_percent, background->bg_size_width_auto);
-        css_store_background_axis(background, true, width, true);
-        background->bg_size_height_auto = true;
-    } else if (css_value_count(value, 2) >= 2) {
-        background->bg_size_type = (CssEnum)0;
-        CssBackgroundComponent width = resolve_background_size_component(
-            lycon, property, css_value_at(value, 0), background->bg_size_width,
-            background->bg_size_width_is_percent, background->bg_size_width_auto);
-        CssBackgroundComponent height = resolve_background_size_component(
-            lycon, property, css_value_at(value, 1), background->bg_size_height,
-            background->bg_size_height_is_percent, background->bg_size_height_auto);
-        css_store_background_axis(background, true, width, true);
-        css_store_background_axis(background, false, height, true);
+    }
+    return true;
+}
+
+static const CssValue* background_component_list(Pool* pool, const CssValue* const* values, int count) {
+    return count == 1 ? values[0] : count > 1
+        ? css_value_create_list(pool, const_cast<CssValue**>(values), (size_t)count) : nullptr;
+}
+
+static CssBackgroundParts background_shorthand_parts(const CssValue* value) {
+    CssBackgroundParts parts = {};
+    return css_background_layer_components(value, true, &parts) ? parts : CssBackgroundParts{};
+}
+
+static const CssValue* background_parts_component(Pool* scratch, const CssBackgroundParts& parts,
+                                                  CssPropertyCode property) {
+    switch (property) {
+        case CSS_PROPERTY_BACKGROUND_IMAGE: return parts.image;
+        case CSS_PROPERTY_BACKGROUND_POSITION:
+        case CSS_PROPERTY_BACKGROUND_POSITION_X:
+        case CSS_PROPERTY_BACKGROUND_POSITION_Y: return background_component_list(scratch, parts.position, parts.position_count);
+        case CSS_PROPERTY_BACKGROUND_SIZE: return background_component_list(scratch, parts.size, parts.size_count);
+        case CSS_PROPERTY_BACKGROUND_REPEAT: return background_component_list(scratch, parts.repeat, parts.repeat_count);
+        case CSS_PROPERTY_BACKGROUND_ATTACHMENT: return parts.attachment;
+        case CSS_PROPERTY_BACKGROUND_ORIGIN: return parts.origin;
+        case CSS_PROPERTY_BACKGROUND_CLIP: return parts.clip;
+        case CSS_PROPERTY_BACKGROUND_COLOR: return parts.color;
+        default: return nullptr;
     }
 }
 
-static void resolve_background_position(LayoutContext* lycon, ViewSpan* span,
-                                        const CssValue* value, CssPropertyCode property) {
-    layout_ensure_background(lycon, span);
-    BackgroundProp* background = span->boundary()->background;
-    background->bg_position_set = true;
-    background->bg_position_x_length = background->bg_position_y_length = 0.0f;
-    if (css_value_count(value, 2) >= 2) {
-        CssBackgroundComponent x = resolve_background_position_component(
-            lycon, property, css_value_at(value, 0), background->bg_position_x,
-            background->bg_position_x_is_percent, true);
-        CssBackgroundComponent y = resolve_background_position_component(
-            lycon, property, css_value_at(value, 1), background->bg_position_y,
-            background->bg_position_y_is_percent, false);
-        css_store_background_axis(background, true, x, false);
-        css_store_background_axis(background, false, y, false);
-        return;
+int background_list_count(const CssValue* value) {
+    return value && value->type == CSS_VALUE_TYPE_LIST && value->data.list.comma_separated
+        ? value->data.list.count : 1;
+}
+
+static const CssValue* background_list_item(const CssValue* value, int index) {
+    if (!value || value->type != CSS_VALUE_TYPE_LIST || !value->data.list.comma_separated) return value;
+    return value->data.list.values && value->data.list.count > 0
+        ? value->data.list.values[index % value->data.list.count] : nullptr;
+}
+
+CssBackgroundWinner background_component_winner(DomElement* element, Pool* scratch,
+                                                       CssPropertyCode property, int pseudo_type) {
+    StyleTree* style = pseudo_type ? dom_element_get_pseudo_style(element, pseudo_type) : element->specified_style.get();
+    const CssPropertyCode sources[] = {property, CSS_PROPERTY_BACKGROUND, CSS_PROPERTY_ALL};
+    const CssPropertyCode blend_sources[] = {property, CSS_PROPERTY_ALL};
+    const CssPropertyCode position_sources[] = {property, CSS_PROPERTY_BACKGROUND_POSITION,
+        CSS_PROPERTY_BACKGROUND, CSS_PROPERTY_ALL};
+    bool position_axis = property == CSS_PROPERTY_BACKGROUND_POSITION_X ||
+        property == CSS_PROPERTY_BACKGROUND_POSITION_Y;
+    CssDeclaration* declaration = property == CSS_PROPERTY_BACKGROUND_BLEND_MODE
+        ? style_tree_get_component_declaration(style, blend_sources, 2)
+        : position_axis ? style_tree_get_component_declaration(style, position_sources, 4)
+        : style_tree_get_component_declaration(style, sources, 3);
+    const CssValue* value = declaration ? css_resolve_element_var_value(scratch,
+        element, declaration->value, declaration->property_code) : nullptr;
+    if (value && !css_property_validate_value_mode(declaration->property_code, value,
+            dom_element_uses_quirks_css(element))) value = nullptr;
+    return {declaration, value};
+}
+
+const CssValue* background_winner_component(Pool* scratch, const CssBackgroundWinner& winner,
+        CssPropertyCode property, int index) {
+    const CssValue* value = background_list_item(winner.value, index);
+    return winner.declaration && winner.declaration->property_code == CSS_PROPERTY_BACKGROUND &&
+        !css_value_is_global_keyword(value)
+        ? background_parts_component(scratch, background_shorthand_parts(value), property) : value;
+}
+
+static const BackgroundLayer* background_parent_layer(LayoutContext* context, int index) {
+    BackgroundProp* parent = parent_computed_background(context);
+    return !parent ? nullptr : parent->layer_count > 0
+        ? &parent->layers[index % parent->layer_count] : parent;
+}
+
+static bool compute_background_image(LayoutContext* context, const CssDeclaration* declaration,
+                                     const CssValue* value, BackgroundLayer* layer) {
+    if (!value || css_value_keyword_equals(value, CSS_VALUE_NONE)) return true;
+    CssImageChoice choice = {};
+    if (css_value_is_image_set(value)) {
+        if (!layout_select_css_image(value, layout_image_device_scale(context), &choice)) return true;
+        value = choice.image;
+        layer->image_resolution = choice.resolution;
     }
-    if (value->type == CSS_VALUE_TYPE_LENGTH || value->type == CSS_VALUE_TYPE_PERCENTAGE) {
-        CssBackgroundComponent x = resolve_background_position_component(
-            lycon, property, value, background->bg_position_x,
-            background->bg_position_x_is_percent, true);
-        css_store_background_axis(background, true, x, false);
-        background->bg_position_y = 50.0f;
-        background->bg_position_y_is_percent = true;
-    } else if (value->type == CSS_VALUE_TYPE_KEYWORD) {
-        CssEnum keyword = value->data.keyword;
-        if (keyword == CSS_VALUE_TOP || keyword == CSS_VALUE_BOTTOM) {
-            background->bg_position_x = 50.0f;
-            background->bg_position_x_is_percent = true;
-            CssBackgroundComponent y = resolve_background_position_component(
-                lycon, property, value, background->bg_position_y,
-                background->bg_position_y_is_percent, false);
-            css_store_background_axis(background, false, y, false);
-        } else {
-            CssBackgroundComponent x = resolve_background_position_component(
-                lycon, property, value, background->bg_position_x,
-                background->bg_position_x_is_percent, true);
-            css_store_background_axis(background, true, x, false);
-            background->bg_position_y = 50.0f;
-            background->bg_position_y_is_percent = true;
+    layer->gradient_type = css_background_gradient_type(value);
+    if (layer->gradient_type == GRADIENT_LINEAR) {
+        LinearGradient* gradient = nullptr;
+        bool valid = resolve_linear_gradient_value(context, value, &gradient);
+        layer->linear_gradient = lam::own(gradient);
+        return valid;
+    }
+    if (layer->gradient_type == GRADIENT_RADIAL) {
+        RadialGradient* gradient = nullptr;
+        bool valid = resolve_radial_gradient_value(context, value, &gradient);
+        layer->radial_gradient = lam::own(gradient);
+        return valid;
+    }
+    if (layer->gradient_type == GRADIENT_CONIC) {
+        ConicGradient* gradient = nullptr;
+        bool valid = resolve_conic_gradient_value(context, value, &gradient);
+        layer->conic_gradient = lam::own(gradient);
+        return valid;
+    }
+    const char* url = css_background_url_value(value);
+    if (url) layer->image = resolve_css_resource_url(context, declaration, url, true);
+    return !url || layer->image;
+}
+
+static void copy_background_component(BackgroundGeometry* target, const BackgroundGeometry* source,
+                                      CssPropertyCode property) {
+    BackgroundGeometry initial = {};
+    if (!source) source = &initial;
+    switch (property) {
+        case CSS_PROPERTY_BACKGROUND_POSITION_X:
+            target->bg_position_x = source->bg_position_x;
+            target->bg_position_x_length = source->bg_position_x_length;
+            target->bg_position_x_is_percent = source->bg_position_x_is_percent;
+            target->bg_position_x_expression = source->bg_position_x_expression;
+            target->bg_position_x_from_end = source->bg_position_x_from_end;
+            target->bg_position_set |= source->bg_position_set;
+            break;
+        case CSS_PROPERTY_BACKGROUND_POSITION_Y:
+            target->bg_position_y = source->bg_position_y;
+            target->bg_position_y_length = source->bg_position_y_length;
+            target->bg_position_y_is_percent = source->bg_position_y_is_percent;
+            target->bg_position_y_expression = source->bg_position_y_expression;
+            target->bg_position_y_from_end = source->bg_position_y_from_end;
+            target->bg_position_set |= source->bg_position_set;
+            break;
+        case CSS_PROPERTY_BACKGROUND_SIZE:
+            target->bg_size_type = source->bg_size_type;
+            target->bg_size_width = source->bg_size_width; target->bg_size_height = source->bg_size_height;
+            target->bg_size_width_is_percent = source->bg_size_width_is_percent;
+            target->bg_size_height_is_percent = source->bg_size_height_is_percent;
+            target->bg_size_width_auto = source->bg_size_width_auto;
+            target->bg_size_height_auto = source->bg_size_height_auto;
+            target->bg_size_width_length = source->bg_size_width_length;
+            target->bg_size_height_length = source->bg_size_height_length;
+            target->bg_size_width_expression = source->bg_size_width_expression;
+            target->bg_size_height_expression = source->bg_size_height_expression;
+            target->bg_size_set = source->bg_size_set;
+            break;
+        case CSS_PROPERTY_BACKGROUND_REPEAT:
+            target->bg_repeat_x = source->bg_repeat_x; target->bg_repeat_y = source->bg_repeat_y; break;
+        case CSS_PROPERTY_BACKGROUND_ATTACHMENT: target->bg_attachment = source->bg_attachment; break;
+        case CSS_PROPERTY_BACKGROUND_ORIGIN: target->bg_origin = source->bg_origin; break;
+        case CSS_PROPERTY_BACKGROUND_CLIP: target->bg_clip = source->bg_clip; break;
+        case CSS_PROPERTY_BACKGROUND_BLEND_MODE: target->blend_mode = source->blend_mode; break;
+        default: break;
+    }
+}
+
+static bool compute_background_component(LayoutContext* context, BackgroundGeometry* layer,
+        const CssValue* value, CssPropertyCode property, bool position_shorthand, BackgroundProp* owner,
+        bool allow_quirky_length) {
+    if (!value) return true;
+    if (css_value_is_initial(value) || css_value_keyword_equals(value, CSS_VALUE_UNSET)) {
+        copy_background_component(layer, nullptr, property);
+        return true;
+    }
+    if (property == CSS_PROPERTY_BACKGROUND_POSITION_X || property == CSS_PROPERTY_BACKGROUND_POSITION_Y) {
+        if (position_shorthand) {
+            CssPositionAxis axes[2];
+            bool horizontal = property == CSS_PROPERTY_BACKGROUND_POSITION_X;
+            return css_position_components(value, axes, true, -1, allow_quirky_length) && store_background_position_axis(context,
+                property, axes[horizontal ? 0 : 1], layer, horizontal, owner);
+        } else return resolve_background_position_axis(context, property, value, layer,
+            property == CSS_PROPERTY_BACKGROUND_POSITION_X, owner);
+    }
+    else if (property == CSS_PROPERTY_BACKGROUND_SIZE)
+        return resolve_background_size(context, layer, value, property, owner);
+    else if (property == CSS_PROPERTY_BACKGROUND_REPEAT)
+        resolve_background_repeat_property(layer, value);
+    else {
+        const CssKeywordSlotSpec slots[] = {
+            {CSS_PROPERTY_BACKGROUND_ATTACHMENT, offsetof(BackgroundGeometry, bg_attachment)},
+            {CSS_PROPERTY_BACKGROUND_ORIGIN, offsetof(BackgroundGeometry, bg_origin)},
+            {CSS_PROPERTY_BACKGROUND_CLIP, offsetof(BackgroundGeometry, bg_clip)},
+            {CSS_PROPERTY_BACKGROUND_BLEND_MODE, offsetof(BackgroundGeometry, blend_mode)}
+        };
+        CssEnum* slot = css_keyword_slot(layer, slots, sizeof(slots) / sizeof(*slots), property);
+        if (slot) resolve_keyword_slot(value, slot);
+    }
+    return true;
+}
+
+static const CssPropertyCode background_layer_properties[] = {
+    CSS_PROPERTY_BACKGROUND_IMAGE, CSS_PROPERTY_BACKGROUND_POSITION_X, CSS_PROPERTY_BACKGROUND_POSITION_Y,
+    CSS_PROPERTY_BACKGROUND_SIZE,
+    CSS_PROPERTY_BACKGROUND_REPEAT, CSS_PROPERTY_BACKGROUND_ATTACHMENT, CSS_PROPERTY_BACKGROUND_ORIGIN,
+    CSS_PROPERTY_BACKGROUND_CLIP, CSS_PROPERTY_BACKGROUND_BLEND_MODE
+};
+
+static_assert(sizeof(background_layer_properties) / sizeof(*background_layer_properties) ==
+    BACKGROUND_COMPONENT_COUNT + 1, "background component projection must match the owned periods");
+
+static const BackgroundGeometry* background_component_at(const BackgroundProp* background,
+                                                         size_t component, int index) {
+    if (!background) return nullptr;
+    int count = background->component_counts[component];
+    return count > 1 && background->component_values
+        ? &background->component_values[index % count] : background;
+}
+
+static bool compute_background_periods(LayoutContext* context, Pool* scratch,
+        const CssBackgroundWinner* winners, BackgroundProp* result, const BackgroundProp* previous) {
+    // retain each axis's original list before cycling it over images; inheritance can change image counts (CI-18).
+    const BackgroundProp* parent = parent_computed_background(context);
+    int maximum = 1;
+    for (size_t component = 0; component < BACKGROUND_COMPONENT_COUNT; component++) {
+        const CssBackgroundWinner& winner = winners[component + 1];
+        const BackgroundProp* source = css_value_keyword_equals(winner.value, CSS_VALUE_INHERIT)
+            ? parent : !winner.declaration ? previous : nullptr;
+        int count = source ? max(1, source->component_counts[component]) : background_list_count(winner.value);
+        if (count <= 0 || (size_t)count > SIZE_MAX / sizeof(BackgroundGeometry)) return false;
+        result->component_counts[component] = count;
+        maximum = max(maximum, count);
+    }
+    if (maximum > 1) {
+        result->component_values = lam::own_arr((BackgroundGeometry*)alloc_prop(context,
+            sizeof(BackgroundGeometry) * (size_t)maximum));
+        if (!result->component_values) return false;
+        result->component_value_count = maximum;
+    }
+    for (size_t component = 0; component < BACKGROUND_COMPONENT_COUNT; component++) {
+        CssPropertyCode property = background_layer_properties[component + 1];
+        const CssBackgroundWinner& winner = winners[component + 1];
+        bool inherited = css_value_keyword_equals(winner.value, CSS_VALUE_INHERIT);
+        const BackgroundProp* source = inherited ? parent : !winner.declaration ? previous : nullptr;
+        for (int index = 0; index < result->component_counts[component]; index++) {
+            BackgroundGeometry* geometry = result->component_values ? &result->component_values[index] : result;
+            if (source || inherited) {
+                copy_background_component(geometry, background_component_at(source, component, index), property);
+                lam::Up<const CssValue>* expressions[2] = {};
+                if (property == CSS_PROPERTY_BACKGROUND_POSITION_X) expressions[0] = &geometry->bg_position_x_expression;
+                else if (property == CSS_PROPERTY_BACKGROUND_POSITION_Y) expressions[0] = &geometry->bg_position_y_expression;
+                else if (property == CSS_PROPERTY_BACKGROUND_SIZE) {
+                    expressions[0] = &geometry->bg_size_width_expression;
+                    expressions[1] = &geometry->bg_size_height_expression;
+                }
+                for (lam::Up<const CssValue>* expression : expressions) if (expression && *expression) {
+                    // inheritance copies computed px leaves without applying the child's units or zoom again.
+                    *expression = lam::up(retain_background_computed_expression(context, result, *expression, property, false));
+                    if (!*expression) return false;
+                }
+            } else {
+                const CssValue* value = background_winner_component(scratch, winner, property, index);
+                bool position_shorthand = winner.declaration &&
+                    (winner.declaration->property_code == CSS_PROPERTY_BACKGROUND ||
+                     winner.declaration->property_code == CSS_PROPERTY_BACKGROUND_POSITION);
+                bool quirky = winner.declaration && winner.declaration->property_code == CSS_PROPERTY_BACKGROUND_POSITION &&
+                    dom_element_uses_quirks_css(lam::dom_require<DOM_NODE_ELEMENT>(context->elmt));
+                if (!compute_background_component(context, geometry, value, property, position_shorthand, result, quirky)) return false;
+            }
+            if (!index && geometry != result) copy_background_component(result, geometry, property);
         }
     }
+    return true;
+}
+
+static bool compute_background_winners(LayoutContext* context,
+        Pool* scratch, const CssBackgroundWinner* winners, CssBackgroundWinner color,
+        BackgroundProp* result, const BackgroundProp* previous) {
+    if (!compute_background_periods(context, scratch, winners, result, previous)) return false;
+    BackgroundGeometry first_components = *result;
+    const CssBackgroundWinner& images = winners[0];
+    bool inherit_images = css_value_keyword_equals(images.value, CSS_VALUE_INHERIT);
+    const BackgroundProp* parent = parent_computed_background(context);
+    int count = inherit_images && parent ? max(1, parent->layer_count)
+        : !images.declaration && previous ? max(1, previous->layer_count) : background_list_count(images.value);
+    if (count <= 0 || (size_t)count > SIZE_MAX / sizeof(BackgroundLayer)) return false;
+    if (count > 1) {
+        result->layers = lam::own_arr((BackgroundLayer*)alloc_prop(context,
+            sizeof(BackgroundLayer) * (size_t)count));
+        if (!result->layers) return false;
+        result->layer_count = count;
+    }
+    for (int index = 0; index < count; index++) {
+        BackgroundLayer* layer = count > 1 ? &result->layers[index] : result;
+        const BackgroundLayer* parent_layer = background_parent_layer(context, index);
+        if (inherit_images && parent_layer) {
+            if (!clone_background_layer(context, parent_layer, layer)) return false;
+        } else if (!images.declaration && previous) {
+            const BackgroundLayer* source = previous->layer_count > 0 ? &previous->layers[index] : previous;
+            if (!clone_background_layer(context, source, layer)) return false;
+        } else {
+            const CssValue* value = background_winner_component(scratch, images, CSS_PROPERTY_BACKGROUND_IMAGE, index);
+            if (!compute_background_image(context, images.declaration, value, layer)) return false;
+        }
+        static_cast<BackgroundGeometry&>(*layer) = first_components;
+        for (size_t component = 0; component < BACKGROUND_COMPONENT_COUNT; component++) {
+            if (result->component_counts[component] > 1)
+                copy_background_component(layer, background_component_at(result, component, index),
+                    background_layer_properties[component + 1]);
+        }
+    }
+    if (count > 1) static_cast<BackgroundGeometry&>(*result) = result->layers[0];
+    const CssValue* color_value = color.value;
+    if (color.declaration && color.declaration->property_code == CSS_PROPERTY_BACKGROUND &&
+            !css_value_keyword_equals(color_value, CSS_VALUE_INHERIT))
+        color_value = background_shorthand_parts(
+            background_list_item(color_value, background_list_count(color_value) - 1)).color;
+    result->color = !color.declaration && previous ? previous->color
+        : css_value_keyword_equals(color_value, CSS_VALUE_INHERIT) ? inherit_background_color(context)
+        : color_value ? resolve_color_value(context, color_value) : Color{};
+    return true;
+}
+
+static void publish_computed_background(ViewTree* tree, BackgroundProp* current,
+                                        const BackgroundProp* replacement) {
+    // publish the complete ordered owner before retiring its predecessor (D4.5.1v4).
+    BackgroundProp retired = *current;
+    *current = *replacement;
+    view_release_background_images(tree, &retired);
+}
+
+static void resolve_background_style(DomElement* element, LayoutContext* context) {
+    ViewSpan* span = lam::view_require_element(context->view);
+    if (!span || !span->bound || !span->boundary()->background) return;
+    Pool* scratch = pool_create();
+    if (!scratch) return;
+    BackgroundProp replacement = {};
+    BackgroundProp* previous = span->boundary()->background;
+    CssBackgroundWinner winners[sizeof(background_layer_properties) / sizeof(*background_layer_properties)] = {};
+    for (size_t index = 0; index < sizeof(background_layer_properties) / sizeof(*background_layer_properties); index++)
+        winners[index] = background_component_winner(element, scratch, background_layer_properties[index]);
+    CssBackgroundWinner color = background_component_winner(element, scratch, CSS_PROPERTY_BACKGROUND_COLOR);
+    bool valid = compute_background_winners(context, scratch, winners, color, &replacement, previous);
+    pool_destroy(scratch);
+    ViewTree* tree = layout_context_view_tree(context);
+    if (!valid) { view_release_background_images(tree, &replacement); return; }
+    publish_computed_background(tree, previous, &replacement);
+}
+
+static void resolve_background_declaration(LayoutContext* context, ViewSpan* span,
+                                           const CssDeclaration* declaration, const CssValue* value) {
+    BackgroundProp* previous = layout_ensure_background(context, span);
+    if (!previous || !declaration || !value) return;
+    Pool* scratch = pool_create();
+    if (!scratch) return;
+    BackgroundProp replacement = {};
+    CssBackgroundWinner winners[sizeof(background_layer_properties) / sizeof(*background_layer_properties)] = {};
+    bool shorthand = declaration->property_code == CSS_PROPERTY_BACKGROUND;
+    for (size_t index = 0; index < sizeof(background_layer_properties) / sizeof(*background_layer_properties); index++) {
+        CssPropertyCode property = background_layer_properties[index];
+        bool position = declaration->property_code == CSS_PROPERTY_BACKGROUND_POSITION &&
+            (property == CSS_PROPERTY_BACKGROUND_POSITION_X || property == CSS_PROPERTY_BACKGROUND_POSITION_Y);
+        if (property == declaration->property_code || position ||
+                (shorthand && property != CSS_PROPERTY_BACKGROUND_BLEND_MODE))
+            winners[index] = {const_cast<CssDeclaration*>(declaration), value};
+    }
+    CssBackgroundWinner color = shorthand ? CssBackgroundWinner{const_cast<CssDeclaration*>(declaration), value}
+        : CssBackgroundWinner{};
+    bool valid = compute_background_winners(context, scratch, winners, color, &replacement, previous);
+    pool_destroy(scratch);
+    ViewTree* tree = layout_context_view_tree(context);
+    if (!valid) { view_release_background_images(tree, &replacement); return; }
+    publish_computed_background(tree, previous, &replacement);
 }
 
 static bool css_text_box_trim_value(CssEnum value, uint8_t* trim) {
@@ -8638,6 +8354,9 @@ int css_logical_corner_index(CssPropertyCode property, DomElement* element) {
 
 static CssPropertyCode css_physical_size_alias(CssPropertyCode property,
                                                 bool vertical_inline_axis) {
+    uint8_t intrinsic_axes = css_intrinsic_size_axes(property, vertical_inline_axis);
+    if (intrinsic_axes == 1) return CSS_PROPERTY_CONTAIN_INTRINSIC_WIDTH;
+    if (intrinsic_axes == 2) return CSS_PROPERTY_CONTAIN_INTRINSIC_HEIGHT;
     static const CssPropertyCode width[] = {
         CSS_PROPERTY_WIDTH, CSS_PROPERTY_MIN_WIDTH, CSS_PROPERTY_MAX_WIDTH
     };
@@ -8687,9 +8406,14 @@ static bool collect_component_cascade_source(StyleNode* node, void* context) {
     if (source <= CSS_PROPERTY_UNKNOWN || source >= CSS_PROPERTY_COUNT) return true;
     bool matches = source == query->property ||
         css_physical_size_alias(source, query->vertical_inline_axis) == query->property;
+    // placement shorthands have noncontiguous members; share CSSOM's component mask.
+    matches |= (css_grid_property_mask(source) & css_grid_property_mask(query->property)) != 0;
     if (source == CSS_PROPERTY_ALL && query->property != CSS_PROPERTY_DIRECTION &&
         query->property != CSS_PROPERTY_UNICODE_BIDI) matches = true;
     if (query->property == CSS_PROPERTY_BACKGROUND_COLOR && source == CSS_PROPERTY_BACKGROUND)
+        matches = true;
+    if ((query->property == CSS_PROPERTY_CONTAIN_INTRINSIC_WIDTH ||
+         query->property == CSS_PROPERTY_CONTAIN_INTRINSIC_HEIGHT) && source == CSS_PROPERTY_CONTAIN_INTRINSIC_SIZE)
         matches = true;
     if (query->family) {
         CssBoxSide side = radiant_css_box_side(query->property);
@@ -8728,6 +8452,12 @@ void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, L
     if (!decl || !lycon || !lycon->view) {
         return;
     }
+    unsigned grid_mask = css_grid_property_mask(prop_id);
+    if (grid_mask > 15 && (grid_mask & (grid_mask - 1))) {
+        for (unsigned i = 4; i < CSS_GRID_PROPERTY_MEMBER_COUNT; i++)
+            if (grid_mask & (1u << i)) resolve_css_property(css_grid_property_member(i), decl, lycon);
+        return;
+    }
     const CssValue* value = decl->value;
     if (!value) { log_debug("No value in declaration");  return; }
     int64_t specificity = get_style_pass_cascade_priority(lycon, decl);
@@ -8759,8 +8489,9 @@ void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, L
     WritingMode current_writing_mode = layout_element_writing_mode(current_element);
     bool vertical_block_start_is_right = current_writing_mode == WM_VERTICAL_RL;
     prop_id = css_physical_size_alias(prop_id, inline_axis_is_vertical);
-    CssPropertyCode value_property = decl->property_code == CSS_PROPERTY_CONTAINER
-        ? CSS_PROPERTY_CONTAINER : prop_id;
+    bool grid_projection = grid_mask && (css_grid_property_mask(decl->property_code) & grid_mask) && decl->property_code != prop_id;
+    CssPropertyCode value_property = decl->pending_shorthand_code > 0 ? decl->pending_shorthand_code : grid_projection ? decl->property_code : decl->property_code == CSS_PROPERTY_CONTAINER ||
+        decl->property_code == CSS_PROPERTY_CONTAIN_INTRINSIC_SIZE ? decl->property_code : prop_id;
     CssComputedValueScratch value_scope(lycon, value_property, value);
     Pool* value_pool = lycon->css_value_scratch ? lycon->css_value_scratch.get() : lycon->pool.get();
     const CssValue* substituted = css_resolve_element_var_value(value_pool, current_element, value, value_property);
@@ -8779,6 +8510,10 @@ void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, L
         }
     }
     ViewSpan* span = lam::view_require_element(lycon->view);
+    if (decl->pending_shorthand_code > 0 || grid_projection) {
+        value = css_grid_shorthand_longhand(value_pool, value, value_property, prop_id);
+        if (!value) return;
+    }
     if (value_property == CSS_PROPERTY_CONTAINER) {
         value = css_container_shorthand_longhand(value, prop_id, value_pool);
         if (!value) return;
@@ -9314,29 +9049,9 @@ void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, L
             span->boundary_mut()->background->color = resolve_color_value(lycon, value);
             break;
         }
-        case CSS_PROPERTY_BACKGROUND_IMAGE: {
-            layout_ensure_background(lycon, span);
-            static const char* const gradient_names[] = {
-                "linear-gradient", "repeating-linear-gradient", "radial-gradient",
-                "repeating-radial-gradient", "conic-gradient", "repeating-conic-gradient"
-            };
-            const CssValue* gradient = css_find_background_function(
-                value, gradient_names, 6);
-            const char* url = css_background_url_value(value);
-            if (gradient) {
-                resolve_css_property(CSS_PROPERTY_BACKGROUND, decl, lycon);
-            } else if (url) {
-                char* image_path = resolve_css_resource_url(lycon, decl, url, true);
-                if (image_path) {
-                    radiant_retain_background_image(
-                        span->boundary()->background, lam::PoolPtr<char>(image_path));
-                }
-            } else if (value->type == CSS_VALUE_TYPE_KEYWORD &&
-                       value->data.keyword == CSS_VALUE_NONE) {
-                radiant_clear_background_image(span->boundary()->background);
-            }
+        case CSS_PROPERTY_BACKGROUND_IMAGE:
+            resolve_background_declaration(lycon, span, decl, value);
             break;
-        }
         case CSS_PROPERTY_MASK_IMAGE:
             resolve_css_mask_image(lycon, span, value);
             break;
@@ -9347,24 +9062,19 @@ void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, L
             resolve_background_keyword_property(lycon, span, prop_id, value);
             break;
         case CSS_PROPERTY_BACKGROUND_POSITION_X:
-        case CSS_PROPERTY_BACKGROUND_POSITION_Y: {
-            layout_ensure_background(lycon, span);
-            resolve_background_position_axis(
-                lycon, prop_id, value, span->boundary()->background,
-                prop_id == CSS_PROPERTY_BACKGROUND_POSITION_X);
+        case CSS_PROPERTY_BACKGROUND_POSITION_Y:
+        case CSS_PROPERTY_BACKGROUND_POSITION: {
+            resolve_background_declaration(lycon, span, decl, value);
             break;
         }
         case CSS_PROPERTY_BACKGROUND_SIZE:
-            resolve_background_size(lycon, span, value, prop_id);
+            resolve_background_declaration(lycon, span, decl, value);
             break;
         case CSS_PROPERTY_BACKGROUND_REPEAT: {
             layout_ensure_background(lycon, span);
-            resolve_background_repeat_property(span, value);
+            resolve_background_repeat_property(span->boundary()->background, value);
             break;
         }
-        case CSS_PROPERTY_BACKGROUND_POSITION:
-            resolve_background_position(lycon, span, value, prop_id);
-            break;
         case CSS_PROPERTY_BOX_SHADOW: {
             span->ensure_boundary(lycon);
             if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_NONE) {
@@ -9874,6 +9584,9 @@ void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, L
         case CSS_PROPERTY_WEBKIT_LINE_CLAMP:
             resolve_line_count_property(lycon, block, prop_id, value);
             break;
+        case CSS_PROPERTY_WEBKIT_BOX_ORIENT:
+            // display and legacy flex routing consume the cascaded orientation directly.
+            break;
         case CSS_PROPERTY_TAB_SIZE: {
             span->ensure_block(lycon);
             DomElement* parent = dom_parent_element(
@@ -10001,80 +9714,26 @@ void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, L
             apply_grid_template_track_value(lycon, value, track_list_ptr, property_name);
             break;
         }
-        case CSS_PROPERTY_GRID_TEMPLATE: {
-            GridProp* grid = resolve_grid_prop(lycon, block);
-            if (grid) apply_grid_template_shorthand(lycon, value, grid);
+        case CSS_PROPERTY_GRID_TEMPLATE:
+        case CSS_PROPERTY_GRID:
             break;
-        }
-        case CSS_PROPERTY_GRID: {
-            GridProp* grid = resolve_grid_prop(lycon, block);
-            if (grid) apply_grid_shorthand(lycon, value, grid);
-            break;
-        }
         case CSS_PROPERTY_GRID_TEMPLATE_AREAS: {
             GridProp* grid = resolve_grid_prop(lycon, block);
             if (!grid) break;
-            if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_NONE) {
-                clear_grid_template_areas(layout_prop_pool(lycon), grid);
+            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
+                DomElement* current = lam::dom_require_element(lycon->view);
+                DomElement* parent = dom_parent_element(current);
+                GridProp* inherited = value->data.keyword == CSS_VALUE_INHERIT && parent && parent->embed
+                    ? parent->embedp()->grid.get() : nullptr;
+                copy_grid_template_areas(layout_prop_pool(lycon), grid, inherited);
                 break;
             }
-            if (value->type == CSS_VALUE_TYPE_STRING) {
-                parse_grid_template_areas(layout_prop_pool(lycon), grid, value->data.string, &lycon->scratch);
-            }
-            else if (value->type == CSS_VALUE_TYPE_LIST) {
-                ScratchScope join_scope(&lycon->scratch);
-                char* combined = css_join_grid_template_area_strings(value, &join_scope);
-                if (combined) {
-                    parse_grid_template_areas(layout_prop_pool(lycon), grid, combined, &lycon->scratch);
-                }
-            }
+            parse_grid_template_areas(layout_prop_pool(lycon), grid, value);
             break;
         }
-        case CSS_PROPERTY_GRID_AREA: {
-            GridItemProp* item = alloc_grid_item_prop(lycon, span);
-            if (!item) break;
-            if (value->type == CSS_VALUE_TYPE_STRING) {
-                replace_view_pool_layout_string(lycon, &item->grid_area, value->data.string);
-            }
-            else if (value->type == CSS_VALUE_TYPE_CUSTOM) {
-                if (value->data.custom_property.name) {
-                    replace_view_pool_layout_string(lycon, &item->grid_area, value->data.custom_property.name);
-                }
-            }
-            else if (value->type == CSS_VALUE_TYPE_KEYWORD) {
-                const char* name = css_enum_info(value->data.keyword)->name;
-                if (value->data.keyword != CSS_VALUE_AUTO) {
-                    replace_view_pool_layout_string(lycon, &item->grid_area, name);
-                }
-            }
-            else if (value->type == CSS_VALUE_TYPE_LIST) {
-                int count = value->data.list.count;
-                CssValue* components[4] = {};
-                int component_count = 0;
-                for (int i = 0; i < count && component_count < 4; i++) {
-                    if (!css_grid_is_separator(value->data.list.values[i])) {
-                        components[component_count++] = value->data.list.values[i];
-                    }
-                }
-                int* lines[] = {&item->grid_row_start,
-                                &item->grid_column_start,
-                                &item->grid_row_end,
-                                &item->grid_column_end};
-                bool* has_lines[] = {&item->has_explicit_grid_row_start,
-                                     &item->has_explicit_grid_column_start,
-                                     &item->has_explicit_grid_row_end,
-                                     &item->has_explicit_grid_column_end};
-                bool* line_spans[] = {&item->grid_row_start_is_span,
-                                      &item->grid_column_start_is_span,
-                                      &item->grid_row_end_is_span,
-                                      &item->grid_column_end_is_span};
-                for (int i = 0; i < component_count; i++) {
-                    css_grid_line_value(components[i], lines[i], has_lines[i],
-                                        line_spans[i]);
-                }
-            }
+        case CSS_PROPERTY_GRID_AREA:
+            resolve_grid_placement_property(lycon, span, CSS_PROPERTY_GRID_AREA, value);
             break;
-        }
         case CSS_PROPERTY_GRID_COLUMN_START:
         case CSS_PROPERTY_GRID_COLUMN_END:
         case CSS_PROPERTY_GRID_ROW_START:
@@ -10267,7 +9926,7 @@ void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, L
         case CSS_PROPERTY_LIST_STYLE_TYPE:
         case CSS_PROPERTY_LIST_STYLE_POSITION:
         case CSS_PROPERTY_LIST_STYLE_IMAGE:
-            resolve_list_style_longhand(lycon, span, prop_id, value);
+            resolve_list_style_longhand(lycon, span, prop_id, decl, value);
             break;
         case CSS_PROPERTY_LIST_STYLE: {
             span->ensure_block(lycon);
@@ -10294,10 +9953,10 @@ void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, L
             }
             if (value->type == CSS_VALUE_TYPE_LIST && value->data.list.count > 0) {
                 for (int i = 0; i < value->data.list.count; i++) {
-                    css_apply_list_style_component(lycon, span, value->data.list.values[i], true);
+                    css_apply_list_style_component(lycon, span, decl, value->data.list.values[i], true);
                 }
             } else {
-                css_apply_list_style_component(lycon, span, value, false);
+                css_apply_list_style_component(lycon, span, decl, value, false);
             }
             if (span->block()->list_style_type == 0) {
                 span->blk->list_style_type = CSS_VALUE_DISC;
@@ -10319,165 +9978,9 @@ void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, L
                                      prop_id == CSS_PROPERTY_COUNTER_RESET);
             break;
         }
-       case CSS_PROPERTY_BACKGROUND: {
-            if (value->type == CSS_VALUE_TYPE_FUNCTION && value->data.function &&
-                value->data.function->name && strcmp(value->data.function->name, "var") == 0) {
-                const CssValue* resolved = resolve_var_function(lycon, value);
-                if (resolved && resolved != value) {
-                    lam::CssTempDecl resolved_decl(decl, CSS_PROPERTY_BACKGROUND, const_cast<CssValue*>(resolved));
-                    resolved_decl.resolve(lycon);
-                    return;
-                }
-            }
-            if (value->type == CSS_VALUE_TYPE_KEYWORD &&
-                value->data.keyword == CSS_VALUE_INHERIT) {
-                layout_ensure_background(lycon, span);
-                BackgroundProp* parent_bg = parent_computed_background(lycon);
-                if (parent_bg) {
-                    *span->bound->background = *parent_bg;
-                } else {
-                    memset(span->boundary()->background, 0, sizeof(BackgroundProp));
-                }
-                return;
-            }
-            if (value->type == CSS_VALUE_TYPE_KEYWORD &&
-                (value->data.keyword == CSS_VALUE_NONE || value->data.keyword == CSS_VALUE_TRANSPARENT)) {
-                layout_ensure_background(lycon, span);
-                span->boundary_mut()->background->color.r = 0;
-                span->boundary_mut()->background->color.g = 0;
-                span->boundary_mut()->background->color.b = 0;
-                span->boundary_mut()->background->color.a = 0;  // fully transparent
-                return;
-            }
-            bool has_top_level_comma = decl && decl->value_text &&
-                css_text_has_top_level_comma(decl->value_text, decl->value_text_len);
-            if (value->type == CSS_VALUE_TYPE_LIST && value->data.list.count > 1 && has_top_level_comma) {
-                CssValue** layers = value->data.list.values;
-                int count = value->data.list.count;
-                // Per CSS Backgrounds, background-color is allowed only in the
-                // must not paint the last color over children.
-                for (int i = 0; i < count - 1; i++) {
-                    if (css_background_layer_has_plain_color(layers[i])) {
-                        return;
-                    }
-                }
-                layout_ensure_background(lycon, span);
-                BackgroundProp* bg = span->boundary()->background;
-                CssValue* last_layer = layers[count - 1];
-                if (last_layer) {
-                    const CssValue* color = css_background_color_component(last_layer);
-                    if (color) {
-                        bg->color = resolve_color_value(lycon, color);
-                    }
-                }
-                int radial_count = 0;
-                int linear_count = 0;
-                for (int i = 0; i < count - 1; i++) {  // exclude last layer (base color)
-                    CssValue* layer = layers[i];
-                    if (css_find_background_gradient_layer(layer, GRADIENT_RADIAL)) radial_count++;
-                    else if (css_find_background_gradient_layer(layer, GRADIENT_LINEAR)) linear_count++;
-                }
-                if (css_find_background_gradient_layer(last_layer, GRADIENT_LINEAR)) linear_count++;
-                else if (css_find_background_gradient_layer(last_layer, GRADIENT_RADIAL)) radial_count++;
-                if (radial_count > 0) {
-                    bg->radial_layers = lam::own_arr((lam::Own<RadialGradient>*)alloc_prop(lycon, sizeof(lam::Own<RadialGradient>) * radial_count));
-                    bg->radial_layer_count = 0;
-                }
-                if (linear_count > 0) {
-                    bg->linear_layers = lam::own_arr((lam::Own<LinearGradient>*)alloc_prop(lycon, sizeof(lam::Own<LinearGradient>) * linear_count));
-                    bg->linear_layer_count = 0;
-                }
-                for (int i = count - 1; i >= 0; i--) {
-                    CssValue* layer = layers[i];
-                    const CssValue* radial_layer = css_find_background_gradient_layer(layer, GRADIENT_RADIAL);
-                    const CssValue* linear_layer = css_find_background_gradient_layer(layer, GRADIENT_LINEAR);
-                    const CssValue* conic_layer = css_find_background_gradient_layer(layer, GRADIENT_CONIC);
-                    const CssValue* url_layer = css_find_background_url_layer(layer);
-                    if (radial_layer) {
-                        lam::CssTempDecl gradient_decl(decl, CSS_PROPERTY_BACKGROUND, (CssValue*)radial_layer);
-                        gradient_decl.resolve(lycon);
-                        if (bg->radial_gradient && bg->radial_layer_count < radial_count) {
-                            bg->radial_layers[bg->radial_layer_count++] = bg->radial_gradient;
-                            bg->radial_gradient = nullptr;
-                        }
-                    } else if (linear_layer) {
-                        lam::CssTempDecl gradient_decl(decl, CSS_PROPERTY_BACKGROUND, (CssValue*)linear_layer);
-                        gradient_decl.resolve(lycon);
-                        if (bg->linear_gradient && bg->linear_layer_count < linear_count) {
-                            bg->linear_layers[bg->linear_layer_count++] = bg->linear_gradient;
-                            bg->linear_gradient = nullptr;
-                            bg->gradient_type = GRADIENT_NONE;
-                        }
-                    } else if (conic_layer) {
-                        if (!bg->conic_gradient) {
-                            lam::CssTempDecl gradient_decl(decl, CSS_PROPERTY_BACKGROUND, (CssValue*)conic_layer);
-                            gradient_decl.resolve(lycon);
-                        }
-                    } else if (url_layer) {
-                        if (!bg->image) {
-                            resolve_background_url_value(lycon, decl, url_layer);
-                        }
-                    }
-                }
-                return;
-            }
-            if (value->type == CSS_VALUE_TYPE_LIST && value->data.list.count > 0) {
-                for (int i = 0; i < value->data.list.count; i++) {
-                    CssValue* item = value->data.list.values[i];
-                    if (!item) continue;
-                    if (css_value_is_slash(item) && i + 1 < value->data.list.count) {
-                        CssValue* size_values[2] = {};
-                        int size_count = 0;
-                        int j = i + 1;
-                        while (j < value->data.list.count && size_count < 2) {
-                            CssValue* size_item = value->data.list.values[j];
-                            if (!size_item || css_value_is_slash(size_item)) break;
-                            if (size_item->type == CSS_VALUE_TYPE_LENGTH ||
-                                size_item->type == CSS_VALUE_TYPE_PERCENTAGE ||
-                                (size_item->type == CSS_VALUE_TYPE_KEYWORD &&
-                                 (size_item->data.keyword == CSS_VALUE_AUTO ||
-                                  size_item->data.keyword == CSS_VALUE_COVER ||
-                                  size_item->data.keyword == CSS_VALUE_CONTAIN))) {
-                                size_values[size_count++] = size_item;
-                                j++;
-                                continue;
-                            }
-                            break;
-                        }
-                        if (size_count > 0) {
-                            lam::CssTempListDecl<2> size_decl(decl, CSS_PROPERTY_BACKGROUND_SIZE);
-                            for (int k = 0; k < size_count; k++) size_decl.append(size_values[k]);
-                            size_decl.resolve(lycon);
-                            i = j - 1;
-                        }
-                        continue;
-                    }
-                    if (css_value_is_background_position_candidate(item)) {
-                        lam::CssTempListDecl<2> position_decl(decl, CSS_PROPERTY_BACKGROUND_POSITION);
-                        position_decl.append(item);
-                        if (i + 1 < value->data.list.count) {
-                            CssValue* next_item = value->data.list.values[i + 1];
-                            if (css_value_is_background_position_candidate(next_item)) {
-                                position_decl.append(next_item);
-                                i++;
-                            }
-                        }
-                        position_decl.resolve(lycon);
-                        continue;
-                    }
-                    resolve_background_layer_component(lycon, decl, item);
-                }
-                return;
-            }
-            if (css_value_is_background_color_candidate(value)) {
-                lam::CssTempDecl color_decl(decl, CSS_PROPERTY_BACKGROUND_COLOR, value);
-                color_decl.resolve(lycon);
-                return;
-            }
-            if (resolve_background_url_value(lycon, decl, value)) return;
-            if (resolve_background_gradient_value(lycon, span, value)) return;
-            return;
-        }
+        case CSS_PROPERTY_BACKGROUND:
+            resolve_background_declaration(lycon, span, decl, value);
+            break;
         case CSS_PROPERTY_GRID_GAP:
         case CSS_PROPERTY_GAP: {
             const CssValue* row_value = value;
@@ -10506,34 +10009,11 @@ void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, L
         }
         case CSS_PROPERTY_CONTAIN_INTRINSIC_WIDTH:
         case CSS_PROPERTY_CONTAIN_INTRINSIC_HEIGHT:
-            resolve_contain_intrinsic_axis(lycon, block, prop_id, value,
-                prop_id == CSS_PROPERTY_CONTAIN_INTRINSIC_WIDTH);
-            break;
         case CSS_PROPERTY_CONTAIN_INTRINSIC_INLINE_SIZE:
         case CSS_PROPERTY_CONTAIN_INTRINSIC_BLOCK_SIZE:
-            resolve_contain_intrinsic_logical_axis(
-                lycon, block, prop_id, value,
-                prop_id == CSS_PROPERTY_CONTAIN_INTRINSIC_INLINE_SIZE);
+        case CSS_PROPERTY_CONTAIN_INTRINSIC_SIZE:
+            resolve_contain_intrinsic_property(lycon, block, prop_id, decl, value);
             break;
-        case CSS_PROPERTY_CONTAIN_INTRINSIC_SIZE: {
-            if (!block || !value) break;
-            float first = -1.0f;
-            float second = -1.0f;
-            bool auto_first = false;
-            bool auto_second = false;
-            resolve_contain_intrinsic_size_value(lycon, value, &first, &second,
-                                                 &auto_first, &auto_second);
-            if (first >= 0.0f || second >= 0.0f) {
-                // A `none <length>` shorthand overrides only the block axis;
-                // do not discard that valid one-axis intrinsic-size fallback.
-                block->ensure_block(lycon);
-                block->blk->contain_intrinsic_width = first;
-                block->blk->contain_intrinsic_height = second;
-                block->blk->contain_intrinsic_width_auto = auto_first;
-                block->blk->contain_intrinsic_height_auto = auto_second;
-            }
-            break;
-        }
         case CSS_PROPERTY_OBJECT_FIT: {
             EmbedProp* embed = resolve_embed_prop(lycon, block);
             if (embed && value->type == CSS_VALUE_TYPE_KEYWORD) {

@@ -94,4 +94,9 @@ let entries = [{key: "a", val: 1}, {key: "b", val: 2}, {key: "a", val: 3}]
 "50. lookup missing:"; util.lookup(entries, "z") == null
 "51. lookup null:"; util.lookup(null, "x") == null
 
+// ---- shared text joining preserves content and command/filter semantics ----
+"52. content only:"; util.text_of(<div title: "ignored", "a" <b "b"> 3>) == "ab3"
+"53. rich array:"; util.rich_text_of(["a", <span <TeX> <ldots>>, 3]) == "aTeX…3"
+"54. skip brackets:"; util.text_of_skip_brack(<div "a" <brack_group "ignored"> <b "b">>) == "ab"
+
 "===== ALL LATEX UTIL TESTS DONE ====="

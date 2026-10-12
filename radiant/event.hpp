@@ -72,6 +72,8 @@ void radiant_dispatch_scene_animation_event(UiContext* uicon,DomElement* target,
     const char* clip,uint64_t action,double detail,double seconds);
 void radiant_dispatch_svg_time_event(UiContext* uicon, DomElement* target,
     const char* type, double detail, double seconds);
+bool radiant_queue_content_visibility_event(UiContext* uicon, DomElement* target,
+    bool skipped);
 extern "C" bool radiant_dispatch_event_sim_pointer(UiContext* uicon, View* target,
     const char* type, double client_x, double client_y, int button, int buttons,
     int mods, const char* pointer_type);
@@ -901,6 +903,7 @@ char* dom_range_to_string(const DomRange* r);
 typedef enum {
     DOM_STRINGIFY_RAW = 0,
     DOM_STRINGIFY_RENDERED = 1,
+    DOM_STRINGIFY_INNER_TEXT = 2, // rendered text includes user-select:none contents
 } DomStringifyMode;
 char* dom_range_to_string_ex(const DomRange* r, DomStringifyMode mode);
 
@@ -2510,6 +2513,8 @@ typedef struct StateStore {
     void destroy();
     struct DocState* state() const;
 } StateStore;
+
+void state_store_retire_runtime(DomDocument* document, EvalContext* owner);
 
 #ifndef RADIANT_EVENT_CORE_ONLY
 // Resolves a ViewState entry to its rendered node or a still-live detached

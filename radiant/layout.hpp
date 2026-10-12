@@ -12,6 +12,8 @@
 #include "../lib/arraylist.hpp"
 #include "../lib/hashmap.h"
 #include "../lib/scratch_arena.h"
+#include "../lib/utf.h"
+#include <utf8proc.h>
 #include <cassert>
 #include <cstdint>
 #include <stdarg.h>
@@ -331,6 +333,8 @@ CssDeclaration* layout_specified_physical_minmax_size_declaration(DomElement* el
                                                                    bool minimum);
 CssDeclaration* layout_cascaded_physical_declaration(DomElement* element,
                                                      CssPropertyCode property);
+CssDeclaration* layout_cascaded_line_clamp_declaration(DomElement* element,
+    CssPropertyCode* property);
 bool layout_axis_size_is_percentage(ViewBlock* block, bool horizontal);
 bool layout_axis_size_is_percentage(DomElement* element, bool horizontal);
 CssEnum layout_intrinsic_preferred_size_keyword(ViewBlock* block, bool horizontal);
@@ -366,6 +370,10 @@ bool layout_utf8_next_codepoint(const unsigned char** cursor,
                                 uint32_t* codepoint);
 void layout_resolve_inherited_text_wrap(DomNode* node, CssEnum* overflow_wrap,
                                          CssEnum* word_break = nullptr);
+bool is_typographic_letter_unit(uint32_t codepoint);
+bool layout_text_allows_letter_break(uint32_t current, uint32_t next,
+                                      CssEnum line_break, bool zwj_preceded,
+                                      bool cj_non_starter);
 bool layout_text_autospace_pair(uint8_t flags, uint32_t previous, uint32_t current);
 float layout_text_autospace_advance(LayoutContext* lycon);
 bool layout_get_grapheme_cluster_bytes(const unsigned char* cluster_start,
@@ -572,11 +580,22 @@ float layout_used_preferred_aspect_ratio(ViewBlock* block);
 void layout_apply_preferred_ratio_to_replaced_auto_axes(LayoutContext* lycon,
                                                         ViewBlock* block);
 bool layout_image_type_supported(const char* type);
+struct CssImageChoice {
+    const CssValue* image; // borrowed until the consumer retains its URL or resolved payload.
+    const char* url;
+    float resolution;
+};
+float layout_image_device_scale(const LayoutContext* context);
+bool layout_select_css_image(const CssValue* value, float device_scale, CssImageChoice* choice,
+    bool (*supports_type)(const char*) = nullptr);
 // the caller owns the returned URL; density and dimension hints belong to the selected view.
 char* layout_resolve_replaced_image_source(DomElement* element, CssEngine* engine = nullptr,
     float* density = nullptr, DomElement** dimension_source = nullptr,
     bool (*supports_type)(const char*) = nullptr);
 bool layout_aspect_ratio_uses_content_box(ViewBlock* block);
+// all replaced-image sources revalidate document policy before warm-cache reuse.
+ImageSurface* layout_admit_replaced_image_surface(LayoutContext* context, ViewBlock* block,
+    const char* source, float density);
 ImageSurface* layout_ensure_replaced_image_surface(LayoutContext* lycon,
                                                    ViewBlock* block,
                                                    DomElement* element);
@@ -1323,6 +1342,18 @@ struct CounterStyleScope {
     ~CounterStyleScope() { close(); }
 };
 bool layout_has_style_containment(const ViewSpan* span);
+bool layout_content_visibility_is_skipped(LayoutContext* lycon, DomElement* element);
+bool layout_content_visibility_suppresses_transition(LayoutContext* lycon, DomElement* element);
+bool layout_content_visibility_settle(LayoutContext* lycon, DomNode* root, bool* changed);
+void layout_content_visibility_destroy(ViewTree* tree);
+bool layout_content_visibility_clone(ViewTree* destination, const ViewTree* source,
+                                     DomDocument* document);
+void layout_content_visibility_forget_subtree(DomNode* root);
+void layout_content_visibility_invalidate(DocState* state);
+bool layout_get_last_remembered_size(LayoutContext* lycon, DomElement* element,
+                                     bool horizontal, float* size);
+bool layout_set_last_remembered_size(LayoutContext* lycon, DomElement* element,
+                                     bool horizontal, float size, bool available = true);
 struct LayoutCounterScope {
     CounterContext* context = nullptr;
     CounterStyleScope style;
@@ -1613,6 +1644,32 @@ inline bool white_space_preserves_space_advance(CssEnum white_space) {
         white_space == CSS_VALUE_PRE_WRAP ||
         white_space == CSS_VALUE_BREAK_SPACES;
 }
+inline float text_letter_spacing(const FontProp* font, uint32_t cp,
+                                        bool collapse_spaces) {
+    (void)collapse_spaces;
+    if (font && utf_is_cursive_script(cp)) {
+        utf8proc_category_t category = utf8proc_category(cp);
+        // CSS Text 4 §8.2.1: cursive letter units cannot be separated by tracking.
+        if ((category >= UTF8PROC_CATEGORY_LU && category <= UTF8PROC_CATEGORY_ME) ||
+            (category >= UTF8PROC_CATEGORY_ND && category <= UTF8PROC_CATEGORY_NO)) {
+            return 0.0f;
+        }
+    }
+    return font ? font->letter_spacing : 0.0f;
+}
+
+// CSS Text 3 §7: authored spacing precedes any line justification adjustment.
+inline float text_character_spacing(const FontProp* font, uint32_t codepoint,
+                                     bool collapse_spaces = false) {
+    return text_letter_spacing(font, codepoint, collapse_spaces) +
+        (font && (codepoint == 0x20 || codepoint == 0xA0) ? font->word_spacing : 0.0f);
+}
+
+inline float text_space_advance(const FontProp* font, float extra_spacing = 0.0f) {
+    return (font ? font->space_width + text_character_spacing(font, 0x20) : 4.0f) +
+        extra_spacing;
+}
+
 CssEnum layout_inherited_text_transform(DomNode* node);
 bool layout_text_combine_upright_applies(DomNode* text_node);
 float layout_inline_end_edge(ViewSpan* span);
@@ -2481,6 +2538,7 @@ float flex_column_item_content_extent(LayoutContext* lycon,
                                       ViewElement* item,
                                       FlexContainerLayout* flex_layout);
 float flex_column_content_contribution(LayoutContext* lycon, ViewElement* container);
+CssEnum layout_flex_direction(ViewElement* container);
 void apply_anonymous_flex_text_geometry(FlexContainerLayout* flex_layout);
 float flex_measure_intrinsic_max_height(LayoutContext* lycon, DomNode* node, float width,
                                         float percentage_containing_width = -1.0f);
@@ -3147,6 +3205,12 @@ enum class CellOccupancyState : uint8_t {
     AutoPlaced = 2
 };
 // tier-3: layout-transient, valid within pass
+enum {
+    // CSS Grid 2 §5.4: one extent policy applies before placement narrows its indices.
+    GRID_MIN_TRACK_LINE = -10000,
+    GRID_MAX_TRACK_LINE = 10000,
+    GRID_MAX_EXPLICIT_TRACKS = 10000
+};
 struct OriginZeroLine {
     int16_t value;
 
@@ -3199,6 +3263,21 @@ struct LineSpan {
         return diff > 0 ? static_cast<uint16_t>(diff) : 0;
     }
 };
+
+inline LineSpan grid_clamp_line_span(int64_t start, int64_t end) {
+    if (start > end) { int64_t swap = start; start = end; end = swap; }
+    if (start >= GRID_MAX_TRACK_LINE) start = GRID_MAX_TRACK_LINE - 1;
+    if (end <= GRID_MIN_TRACK_LINE) end = GRID_MIN_TRACK_LINE + 1;
+    if (start < GRID_MIN_TRACK_LINE) start = GRID_MIN_TRACK_LINE;
+    if (end > GRID_MAX_TRACK_LINE) end = GRID_MAX_TRACK_LINE;
+    if (end <= start) end = start + 1;
+    return LineSpan(OriginZeroLine(static_cast<int16_t>(start)),
+                    OriginZeroLine(static_cast<int16_t>(end)));
+}
+
+inline LineSpan grid_span_at(OriginZeroLine start, uint16_t span) {
+    return grid_clamp_line_span(start.value, (int64_t)start.value + span);
+}
 // tier-3: layout-transient, valid within pass
 struct TrackCounts {
     uint16_t negative_implicit;
@@ -3266,7 +3345,16 @@ typedef enum GridTrackSizeType {
     GRID_TRACK_SIZE_MINMAX,
     GRID_TRACK_SIZE_REPEAT
 } GridTrackSizeType;
-// tier-3: layout-transient, valid within pass
+struct GridNamedLine {
+    lam::Own<char> name;
+    int line_index;
+};
+struct GridLineNames {
+    lam::OwnArr<GridNamedLine> entries;
+    int count;
+    int capacity;
+};
+// retained definitions use their property pool; layout clones use the container scratch mark.
 typedef struct GridTrackSize {
     GridTrackSizeType type;
     float value;
@@ -3280,6 +3368,7 @@ typedef struct GridTrackSize {
     int repeat_count;
     lam::OwnArr<struct GridTrackSize*> repeat_tracks;
     int repeat_track_count;
+    GridLineNames repeat_line_names;
     bool is_auto_fill;
     bool is_auto_fit;
 } GridTrackSize;
@@ -3288,8 +3377,7 @@ typedef struct GridTrackList {
     lam::OwnArr<GridTrackSize*> tracks;
     int track_count;
     int allocated_tracks;
-    lam::OwnArr<char*> line_names;
-    int line_name_count;
+    GridLineNames line_names;
     bool is_repeat;
     int repeat_count;
 } GridTrackList;
@@ -3309,6 +3397,8 @@ typedef struct GridLineName {
 } GridLineName;
 // tier-3: layout-transient, valid within pass
 typedef struct GridContainerLayout : GridProp {
+    int computed_row_count;
+    int computed_column_count;
     lam::Up<radiant::grid::TrackArray> computed_rows;
     lam::Up<radiant::grid::TrackArray> computed_columns;
     lam::OwnArr<struct ViewBlock*> grid_items;
@@ -3334,10 +3424,11 @@ typedef struct GridContainerLayout : GridProp {
     bool is_max_content_width;
     float row_intrinsic_height;
     lam::Up<struct LayoutContext> lycon;
-    bool auto_fit_columns[64];
-    bool auto_fit_rows[64];
+    lam::OwnArr<bool> auto_fit_columns;
+    lam::OwnArr<bool> auto_fit_rows;
     int auto_fit_col_count;
     int auto_fit_row_count;
+    bool storage_failed;
     // pass-local grid state lives above this mark and is released together.
     ScratchMark scratch_mark;
 } GridContainerLayout;
@@ -3352,6 +3443,7 @@ float layout_grid_row_border_box_extent(struct ViewBlock* container,
 struct GridLayoutScope {
     lam::Up<LayoutContext> lycon;
     lam::Up<GridContainerLayout> saved;
+    lam::Up<ViewBlock> container;
     bool active;
 
     GridLayoutScope(LayoutContext* l, ViewBlock* container);
@@ -3373,7 +3465,18 @@ void destroy_grid_track_size(Pool* pool, GridTrackSize* track_size);
 char* grid_scratch_strdup(ScratchArena* scratch, const char* source);
 void destroy_grid_area(Pool* pool, GridArea* area);
 void add_grid_line_name(GridContainerLayout* grid, const char* name, int line_number, bool is_row);
-int find_grid_line_by_name(GridContainerLayout* grid, const char* name, bool is_row);
+bool grid_add_track_line_name(Pool* pool, ScratchArena* scratch, GridLineNames* names,
+                              const char* name, int line_index);
+bool grid_copy_track_line_names(Pool* pool, ScratchArena* scratch, GridLineNames* destination,
+                                const GridLineNames* source, int offset = 0);
+void grid_destroy_track_line_names(Pool* pool, GridLineNames* names);
+int grid_consume_track_line_name(Pool* pool, GridLineNames* names,
+    int line_index, const CssValue* value, bool* in_names);
+bool grid_append_track_line_names(StringBuf* output, const GridLineNames* names,
+    int line_index, bool leading_space);
+int find_grid_line_by_name(GridContainerLayout* grid, const char* name, bool is_row,
+                           int occurrence = 0, bool is_end = false,
+                           int anchor = 0, int direction = 0);
 int collect_grid_item_nodes(LayoutContext* lycon, struct ViewBlock* container,
                             DomNode* first_child, DomNode** nodes, int capacity,
                             bool initialize_contents);
@@ -3385,7 +3488,9 @@ void position_grid_items(GridContainerLayout* grid_layout, struct ViewBlock* con
 void align_grid_items(GridContainerLayout* grid_layout);
 void align_grid_item(struct ViewBlock* item, GridContainerLayout* grid_layout);
 void clear_grid_template_areas(Pool* pool, GridProp* grid_layout);
-void parse_grid_template_areas(Pool* pool, GridProp* grid_layout, const char* areas_string, ScratchArena* sa);
+void parse_grid_template_areas(Pool* pool, GridProp* grid_layout, const CssValue* value);
+bool copy_grid_template_areas(Pool* pool, GridProp* target, const GridProp* source);
+bool grid_serialize_used_tracks(StringBuf* output, const GridContainerLayout* grid, bool columns);
 IntrinsicSizes calculate_grid_item_intrinsic_sizes(LayoutContext* lycon, ViewBlock* item, bool is_row_axis);
 void layout_grid_container(LayoutContext* lycon, ViewBlock* container);
 void layout_grid_content(LayoutContext* lycon, ViewBlock* grid_container);
@@ -3477,6 +3582,11 @@ typedef struct LayoutContext {
 } LayoutContext;
 // LayoutContext Run Mode Helpers
 
+inline ViewTree* layout_context_view_tree(const LayoutContext* context) {
+    return context && context->selected_view_tree ? context->selected_view_tree.get()
+        : context && context->doc ? context->doc->view_tree.get() : nullptr;
+}
+
 /**
  * Check if layout is in measurement mode (only computing sizes)
  */
@@ -3497,6 +3607,8 @@ CssMathResult layout_evaluate_css_math(LayoutContext* context, uintptr_t propert
 // compute length terms at their owner while retaining percentage terms for the used box.
 void layout_compute_math_lengths(LayoutContext* context, CssValue* value,
     CssPropertyCode property = CSS_PROPERTY_TRANSFORM);
+CssValue* layout_clone_computed_math(LayoutContext* context, const CssValue* value,
+    CssPropertyCode property, Pool* pool);
 bool layout_resolve_deferred_percentage(float percent, float percentage_base, float* out);
 bool layout_apply_deferred_percentage(float percent, float percentage_base, float* target, float* resolved);
 float layout_block_used_content_size(ViewBlock* block, bool horizontal, bool require_positive);
@@ -4213,7 +4325,8 @@ void layout_sticky_positioned(LayoutContext* lycon, ViewBlock* block);
 void layout_apply_sticky_positions(LayoutContext* lycon, View* root);
 // re-solve sticky boxes after a scroll moved (paint and hit-testing call it)
 void layout_resolve_scrolled_sticky(ViewTree* view_tree);
-void layout_store_last_remembered_size(LayoutContext* lycon, ViewBlock* block);
+void layout_store_last_remembered_size(LayoutContext* lycon, ViewBlock* block,
+                                      bool final_pass = false);
 bool element_has_float(ViewBlock* block);
 ViewBlock* find_initial_containing_view_block(ViewBlock* element);
 ViewBlock* find_positioned_containing_block(ViewElement* view);
@@ -4749,6 +4862,9 @@ void setup_line_height(LayoutContext* lycon, ViewBlock* block);
 void layout_setup_block_font_metrics(LayoutContext* lycon);
 // Initializes the local inline formatting state for a block's content box.
 void setup_inline(LayoutContext* lycon, ViewBlock* block);
+void layout_setup_line_clamp(LayoutContext* lycon, ViewBlock* block,
+                              const BlockContext* parent);
+void layout_finalize_line_clamp(LayoutContext* lycon, ViewBlock* block);
 // ViewSpan bounding box computation
 void compute_span_bounding_box(ViewSpan* span, bool is_multi_line = false, struct FontHandle* fallback_fh = nullptr);
 void recompute_span_bounding_box_after_line_layout(

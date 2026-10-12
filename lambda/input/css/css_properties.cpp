@@ -304,7 +304,7 @@ static CssProperty property_definitions[] = {
     {CSS_PROPERTY_PLACE_SELF, "place-self", PROP_TYPE_LIST, PROP_INHERIT_NO, "auto", false, true, NULL, 0, validate_keyword, NULL},
 
     // Additional Grid Properties
-    {CSS_PROPERTY_GRID_TEMPLATE, "grid-template", PROP_TYPE_LIST, PROP_INHERIT_NO, "none", false, true, NULL, 0, validate_string, NULL},
+    {CSS_PROPERTY_GRID_TEMPLATE, "grid-template", PROP_TYPE_LIST, PROP_INHERIT_NO, "none", false, true, css_grid_property_members + 4, 3, validate_string, NULL},
     {CSS_PROPERTY_GRID_TEMPLATE_AREAS, "grid-template-areas", PROP_TYPE_STRING, PROP_INHERIT_NO, "none", false, false, NULL, 0, validate_string, NULL},
     {CSS_PROPERTY_GRID_AUTO_ROWS, "grid-auto-rows", PROP_TYPE_LIST, PROP_INHERIT_NO, "auto", false, false, NULL, 0, validate_string, NULL},
     {CSS_PROPERTY_GRID_AUTO_COLUMNS, "grid-auto-columns", PROP_TYPE_LIST, PROP_INHERIT_NO, "auto", false, false, NULL, 0, validate_string, NULL},
@@ -374,7 +374,7 @@ static CssProperty property_definitions[] = {
     {CSS_PROPERTY_PADDING, "padding", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "0", true, true, padding_longhands, 4, validate_length, NULL},
     {CSS_PROPERTY_BORDER, "border", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "none", false, true, border_longhands, 12, validate_keyword, NULL},
     {CSS_PROPERTY_FLEX, "flex", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "0 1 auto", false, true, NULL, 0, validate_keyword, NULL},
-    {CSS_PROPERTY_GRID, "grid", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "none", false, true, NULL, 0, validate_keyword, NULL},
+    {CSS_PROPERTY_GRID, "grid", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "none", false, true, css_grid_property_members + 4, 6, validate_keyword, NULL},
 
     // Multi-column Layout Properties
     {CSS_PROPERTY_COLUMN_WIDTH, "column-width", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "auto", true, false, NULL, 0, validate_length, NULL},
@@ -584,8 +584,9 @@ static CssProperty property_definitions[] = {
     {CSS_PROPERTY_TRANSITION_TIMING_FUNCTION, "transition-timing-function", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "ease", false, false, NULL, 0, validate_keyword, NULL},
     {CSS_PROPERTY_WRAP_FLOW, "wrap-flow", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "auto", false, false, NULL, 0, validate_keyword, NULL},
     {CSS_PROPERTY_WRAP_THROUGH, "wrap-through", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "wrap", false, false, NULL, 0, validate_keyword, NULL},
-    {CSS_PROPERTY_LINE_CLAMP, "line-clamp", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "none", false, false, NULL, 0, validate_length, NULL},
-    {CSS_PROPERTY_WEBKIT_LINE_CLAMP, "-webkit-line-clamp", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "none", false, false, NULL, 0, validate_length, NULL},
+    {CSS_PROPERTY_LINE_CLAMP, "line-clamp", PROP_TYPE_NUMBER, PROP_INHERIT_NO, "none", false, false, NULL, 0, validate_integer, NULL},
+    {CSS_PROPERTY_WEBKIT_LINE_CLAMP, "-webkit-line-clamp", PROP_TYPE_NUMBER, PROP_INHERIT_NO, "none", false, false, NULL, 0, validate_integer, NULL},
+    {CSS_PROPERTY_WEBKIT_BOX_ORIENT, "-webkit-box-orient", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "horizontal", false, false, NULL, 0, validate_keyword, NULL},
     {CSS_PROPERTY_ALL, "all", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "initial", false, false, NULL, 0, validate_keyword, NULL}
 };
 
@@ -938,6 +939,31 @@ CssMathType css_math_value_type(const CssValue* value, int depth) {
     return css_math_evaluate(value, nullptr, depth).type;
 }
 
+bool css_integer_value_valid(const CssValue* value) {
+    if (!value) return false;
+    if (value->type == CSS_VALUE_TYPE_NUMBER)
+        return value->data.number.is_integer && isfinite(value->data.number.value) &&
+            value->data.number.value == floor(value->data.number.value);
+    return value->type == CSS_VALUE_TYPE_FUNCTION && css_math_value_type(value) == CSS_MATH_NUMBER;
+}
+
+static bool css_positive_integer_value_valid(const CssValue* value) {
+    // literal range failures reject the declaration; calculated ranges are applied after evaluation.
+    return css_integer_value_valid(value) &&
+        (value->type != CSS_VALUE_TYPE_NUMBER || value->data.number.value >= 1.0);
+}
+
+bool css_compute_integer_value(const CssValue* value, const CssMathEvaluationContext* context,
+        double minimum, double maximum, double* result) {
+    if (!result || !css_integer_value_valid(value)) return false;
+    CssMathResult math = css_math_evaluate(value, context);
+    if (!math.resolved || math.type != CSS_MATH_NUMBER) return false;
+    // math rounds ties toward positive infinity before the property's range is applied.
+    double number = value->type == CSS_VALUE_TYPE_FUNCTION ? floor(math.value + 0.5) : math.value;
+    *result = fmax(minimum, fmin(maximum, isnan(number) ? 0.0 : number));
+    return true;
+}
+
 bool css_compute_line_height_value(const CssValue* value,
     const CssMathEvaluationContext* context, CssValue* computed) {
     if (!value || !computed) return false;
@@ -1106,7 +1132,7 @@ static bool css_value_is_text_indent_amount(const CssValue* value) {
 }
 
 bool css_display_legacy_keyword_supported(const char* name) {
-    return name && strcmp(name, "-webkit-inline-box") == 0;
+    return name && (strcmp(name, "-webkit-box") == 0 || strcmp(name, "-webkit-inline-box") == 0);
 }
 
 uint8_t css_text_decoration_line_flag(CssEnum keyword) {
@@ -1142,6 +1168,18 @@ static bool css_value_is_supported_color(const CssValue* value) {
     if (css_value_is_global_keyword(value) || css_value_contains_pending_substitution(value)) return true;
     CssComputedColor color;
     return css_color_compute(value, &color);
+}
+
+static bool css_value_is_supported_image(const CssValue* value, bool allow_none = false) {
+    if (!value) return false;
+    if (allow_none && css_value_keyword_equals(value, CSS_VALUE_NONE)) return true;
+    if (!css_gradient_stop_list_valid(value)) return false;
+    if (css_value_image_kind(value) == CSS_IMAGE_RADIAL_GRADIENT) {
+        CssRadialGradientParts parts;
+        return css_value_contains_pending_substitution(value) || css_radial_gradient_components(value, &parts);
+    }
+    return css_value_image_kind(value) != CSS_IMAGE_NONE &&
+        (!css_value_is_image_set(value) || css_image_set_valid(value));
 }
 
 bool css_property_is_svg_paint(CssPropertyCode id) {
@@ -1320,16 +1358,7 @@ static bool css_registered_atom_matches(const CssPropertySyntaxComponent* compon
         case CSS_SYNTAX_STRING: return value->type == CSS_VALUE_TYPE_STRING;
         case CSS_SYNTAX_COLOR: return css_value_is_supported_color(value);
         case CSS_SYNTAX_URL: return value->type == CSS_VALUE_TYPE_URL;
-        case CSS_SYNTAX_IMAGE:
-            return value->type == CSS_VALUE_TYPE_URL || (value->type == CSS_VALUE_TYPE_FUNCTION &&
-                value->data.function && value->data.function->name &&
-                (strcmp(value->data.function->name, "linear-gradient") == 0 ||
-                 strcmp(value->data.function->name, "repeating-linear-gradient") == 0 ||
-                 strcmp(value->data.function->name, "radial-gradient") == 0 ||
-                 strcmp(value->data.function->name, "repeating-radial-gradient") == 0 ||
-                 strcmp(value->data.function->name, "conic-gradient") == 0 ||
-                 strcmp(value->data.function->name, "repeating-conic-gradient") == 0 ||
-                 strcmp(value->data.function->name, "image-set") == 0));
+        case CSS_SYNTAX_IMAGE: return css_value_is_supported_image(value);
         case CSS_SYNTAX_TRANSFORM_FUNCTION:
         case CSS_SYNTAX_TRANSFORM_LIST: return css_registered_transform_matches(value);
     }
@@ -1864,20 +1893,7 @@ bool css_split_border_image_shorthand(const CssValue* value,
             continue;
         }
         if (section == 0) {
-            bool source = item->type == CSS_VALUE_TYPE_URL ||
-                (item->type == CSS_VALUE_TYPE_KEYWORD &&
-                 item->data.keyword == CSS_VALUE_NONE);
-            if (item->type == CSS_VALUE_TYPE_FUNCTION && item->data.function &&
-                item->data.function->name) {
-                const char* name = item->data.function->name;
-                source = str_ieq_cstr(name, "url") ||
-                    str_ieq_cstr(name, "linear-gradient") ||
-                    str_ieq_cstr(name, "repeating-linear-gradient") ||
-                    str_ieq_cstr(name, "radial-gradient") ||
-                    str_ieq_cstr(name, "repeating-radial-gradient") ||
-                    str_ieq_cstr(name, "conic-gradient") ||
-                    str_ieq_cstr(name, "repeating-conic-gradient");
-            }
+            bool source = css_value_is_supported_image(item, true);
             if (source && !parts->source) {
                 parts->source = item;
             } else if (item->type == CSS_VALUE_TYPE_KEYWORD &&
@@ -2228,8 +2244,8 @@ static bool css_grid_repeat_is_auto(const CssFunction* function) {
         (count->data.keyword == CSS_VALUE_AUTO_FILL || count->data.keyword == CSS_VALUE_AUTO_FIT);
 }
 
-static bool css_grid_track_list_valid(const CssValue* value, bool line_names,
-                                       bool repeats, bool fixed_required = false) {
+bool css_grid_track_list_valid(const CssValue* value, bool line_names,
+                                       bool repeats, bool fixed_required) {
     if (!value) return false;
     int count = value->type == CSS_VALUE_TYPE_LIST ? value->data.list.count : 1;
     if (count <= 0 || (value->type == CSS_VALUE_TYPE_LIST &&
@@ -2241,19 +2257,20 @@ static bool css_grid_track_list_valid(const CssValue* value, bool line_names,
     }
     if (auto_repeats > 1) return false;
     fixed_required = fixed_required || auto_repeats > 0;
-    bool inside_names = false;
+    bool inside_names = false, previous_names = false;
     int tracks = 0;
     for (int index = 0; index < count; index++) {
         const CssValue* item = value->type == CSS_VALUE_TYPE_LIST ? value->data.list.values[index] : value;
         const char* name = css_value_identifier_name(item);
         if (name && strcmp(name, "[") == 0) {
-            if (!line_names || inside_names) return false;
+            if (!line_names || inside_names || previous_names) return false;
             inside_names = true;
             continue;
         }
         if (name && strcmp(name, "]") == 0) {
             if (!inside_names) return false;
             inside_names = false;
+            previous_names = true;
             continue;
         }
         if (inside_names) {
@@ -2261,13 +2278,12 @@ static bool css_grid_track_list_valid(const CssValue* value, bool line_names,
                 str_ieq_cstr(name, "auto") || str_ieq_cstr(name, "span")) return false;
             continue;
         }
+        previous_names = false;
         const CssFunction* repeat = css_grid_repeat_function(item);
         if (repeat) {
             if (!repeats || repeat->arg_count != 2 || !repeat->args) return false;
             const CssValue* amount = repeat->args[0];
-            if (!css_grid_repeat_is_auto(repeat) && (!amount || amount->type != CSS_VALUE_TYPE_NUMBER ||
-                !isfinite(amount->data.number.value) || amount->data.number.value <= 0.0 ||
-                floor(amount->data.number.value) != amount->data.number.value)) return false;
+            if (!css_grid_repeat_is_auto(repeat) && !css_positive_integer_value_valid(amount)) return false;
             // repeat() patterns share the track grammar, but cannot contain another repeat().
             if (!css_grid_track_list_valid(repeat->args[1], true, false, fixed_required)) return false;
         } else if (!css_grid_track_size_valid(item, fixed_required)) return false;
@@ -2283,6 +2299,388 @@ static const CssValue* css_space_list_item(const CssValue* value, size_t index) 
 static size_t css_space_list_count(const CssValue* value) {
     return !value ? 0 : value->type == CSS_VALUE_TYPE_LIST
         ? value->data.list.comma_separated ? 0 : (size_t)value->data.list.count : 1;
+}
+
+bool css_value_is_background_size_component(const CssValue* value) {
+    return css_value_keyword_equals(value, CSS_VALUE_AUTO) ||
+        css_value_keyword_equals(value, CSS_VALUE_COVER) ||
+        css_value_keyword_equals(value, CSS_VALUE_CONTAIN) ||
+        css_value_is_nonnegative_length_percentage(value);
+}
+
+bool css_background_size_components(const CssValue* value, const CssValue* axes[2], CssEnum* mode) {
+    if (!axes || !mode) return false;
+    axes[0] = axes[1] = nullptr;
+    *mode = (CssEnum)0;
+    size_t count = css_space_list_count(value);
+    if (!count || count > 2) return false;
+    const CssValue* first = css_space_list_item(value, 0);
+    if (css_value_keyword_equals(first, CSS_VALUE_COVER) || css_value_keyword_equals(first, CSS_VALUE_CONTAIN)) {
+        *mode = first->data.keyword;
+        return count == 1;
+    }
+    for (size_t axis = 0; axis < count; axis++) {
+        const CssValue* component = css_space_list_item(value, axis);
+        if (!css_value_keyword_equals(component, CSS_VALUE_AUTO) &&
+                !css_value_is_nonnegative_length_percentage(component)) return false;
+        axes[axis] = component;
+    }
+    return true;
+}
+
+bool css_value_is_position_offset(const CssValue* value, bool allow_quirky_length) {
+    if (!value) return false;
+    if (value->type == CSS_VALUE_TYPE_NUMBER) return value->data.number.value == 0.0 || allow_quirky_length;
+    CssMathType type = css_math_value_type(value);
+    return type == CSS_MATH_LENGTH || type == CSS_MATH_PERCENT || type == CSS_MATH_LENGTH_PERCENT;
+}
+
+static int css_position_keyword_axis(const CssValue* value) {
+    if (!value || value->type != CSS_VALUE_TYPE_KEYWORD) return -2;
+    switch (value->data.keyword) {
+        case CSS_VALUE_LEFT: case CSS_VALUE_RIGHT: return 0;
+        case CSS_VALUE_TOP: case CSS_VALUE_BOTTOM: return 1;
+        case CSS_VALUE_CENTER: return -1;
+        default: return -2;
+    }
+}
+
+bool css_position_components(const CssValue* value, CssPositionAxis axes[2],
+        bool allow_three_values, int single_axis, bool allow_quirky_length) {
+    if (!axes) return false;
+    size_t count = css_space_list_count(value);
+    if (!count || count > 4 || (count == 3 && !allow_three_values)) return false;
+    axes[0] = axes[1] = {CSS_VALUE_CENTER, nullptr};
+    if (single_axis >= 0) {
+        if (single_axis > 1 || count > 2) return false;
+        const CssValue* first = css_space_list_item(value, 0);
+        int axis = css_position_keyword_axis(first);
+        if (count == 1 && css_value_is_position_offset(first, allow_quirky_length)) {
+            axes[single_axis] = {single_axis ? CSS_VALUE_TOP : CSS_VALUE_LEFT, first};
+            return true;
+        }
+        if (axis != single_axis && axis != -1) return false;
+        axes[single_axis].origin = first->data.keyword;
+        if (count == 1) return true;
+        const CssValue* offset = css_space_list_item(value, 1);
+        if (axis < 0 || !css_value_is_position_offset(offset, allow_quirky_length)) return false;
+        axes[single_axis].offset = offset;
+        return true;
+    }
+    if (count <= 2) {
+        const CssValue* first = css_space_list_item(value, 0);
+        const CssValue* second = count == 2 ? css_space_list_item(value, 1) : nullptr;
+        int first_axis = css_position_keyword_axis(first), second_axis = css_position_keyword_axis(second);
+        if (count == 1) {
+            if (first_axis >= -1) axes[first_axis == 1 ? 1 : 0].origin = first->data.keyword;
+            else if (css_value_is_position_offset(first, allow_quirky_length)) axes[0] = {CSS_VALUE_LEFT, first};
+            else return false;
+            return true;
+        }
+        // two keyword axes can reorder; a numeric component keeps its horizontal/vertical slot.
+        bool swap = first_axis == 1 || second_axis == 0;
+        const CssValue* parts[] = {swap ? second : first, swap ? first : second};
+        if (swap && (first_axis < -1 || second_axis < -1)) return false;
+        for (int axis = 0; axis < 2; axis++) {
+            int keyword_axis = css_position_keyword_axis(parts[axis]);
+            if (keyword_axis == axis || keyword_axis == -1) axes[axis].origin = parts[axis]->data.keyword;
+            else if (keyword_axis == -2 && css_value_is_position_offset(parts[axis], allow_quirky_length))
+                axes[axis] = {axis ? CSS_VALUE_TOP : CSS_VALUE_LEFT, parts[axis]};
+            else return false;
+        }
+        return true;
+    }
+    CssPositionAxis components[2] = {};
+    int component_axes[2] = {}, component_count = 0;
+    for (size_t index = 0; index < count;) {
+        if (component_count == 2) return false;
+        const CssValue* keyword = css_space_list_item(value, index++);
+        int axis = css_position_keyword_axis(keyword);
+        if (axis < -1) return false;
+        CssPositionAxis component = {keyword->data.keyword, nullptr};
+        if (index < count && css_value_is_position_offset(css_space_list_item(value, index), allow_quirky_length)) {
+            if (axis < 0) return false;
+            component.offset = css_space_list_item(value, index++);
+        }
+        components[component_count] = component;
+        component_axes[component_count++] = axis;
+    }
+    if (component_count != 2 || component_axes[0] == component_axes[1]) return false;
+    if (component_axes[0] < 0) component_axes[0] = 1 - component_axes[1];
+    if (component_axes[1] < 0) component_axes[1] = 1 - component_axes[0];
+    axes[component_axes[0]] = components[0]; axes[component_axes[1]] = components[1];
+    return true;
+}
+
+static bool css_background_repeat_keyword(CssEnum keyword) {
+    return keyword == CSS_VALUE_REPEAT || keyword == CSS_VALUE_NO_REPEAT ||
+        keyword == CSS_VALUE_ROUND || keyword == CSS_VALUE_SPACE;
+}
+
+bool css_background_repeat_components(const CssValue* value, CssEnum axes[2]) {
+    if (!value || !axes) return false;
+    bool repeat_x = css_value_identifier_is(value, "repeat-x");
+    if (repeat_x || css_value_identifier_is(value, "repeat-y")) {
+        axes[0] = repeat_x ? CSS_VALUE_REPEAT : CSS_VALUE_NO_REPEAT;
+        axes[1] = repeat_x ? CSS_VALUE_NO_REPEAT : CSS_VALUE_REPEAT;
+        return true;
+    }
+    size_t count = css_space_list_count(value);
+    if (!count || count > 2 || (value->type == CSS_VALUE_TYPE_LIST && !value->data.list.values)) return false;
+    for (size_t axis = 0; axis < count; axis++) {
+        const CssValue* item = css_space_list_item(value, axis);
+        if (!item || item->type != CSS_VALUE_TYPE_KEYWORD || !css_background_repeat_keyword(item->data.keyword)) return false;
+        axes[axis] = item->data.keyword;
+    }
+    if (count == 1) axes[1] = axes[0];
+    return true;
+}
+
+static bool css_background_box_keyword(CssEnum keyword) {
+    return keyword == CSS_VALUE_BORDER_BOX || keyword == CSS_VALUE_PADDING_BOX || keyword == CSS_VALUE_CONTENT_BOX;
+}
+
+static bool css_background_repeat_component(const CssValue* value) {
+    return value && ((value->type == CSS_VALUE_TYPE_KEYWORD &&
+        css_background_repeat_keyword(value->data.keyword)) ||
+        css_value_identifier_is(value, "repeat-x") || css_value_identifier_is(value, "repeat-y"));
+}
+
+static bool css_background_position_component(const CssValue* value) {
+    return css_position_keyword_axis(value) >= -1 || css_value_is_position_offset(value);
+}
+
+static const CssValue* css_background_group_view(CssValue* group,
+        const CssValue* const* values, int count) {
+    if (count == 1) return values[0];
+    *group = {};
+    group->type = CSS_VALUE_TYPE_LIST;
+    group->data.list.values = const_cast<CssValue**>(values);
+    group->data.list.count = count;
+    return group;
+}
+
+// stop syntax is shared by declaration validation, selected images and computed consumers.
+bool css_gradient_stop_components(const CssValue* value, bool angular, CssGradientStopParts* parts) {
+    if (!value || !parts || (value->type == CSS_VALUE_TYPE_LIST && value->data.list.comma_separated)) return false;
+    *parts = {};
+    size_t count = css_space_list_count(value);
+    if (!count || count > 3) return false;
+    const CssValue* first = css_space_list_item(value, 0);
+    CssComputedColor color;
+    if (first && !css_value_is_global_keyword(first) && css_color_compute(first, &color)) parts->color = first;
+    else if (count != 1) return false;
+    size_t begin = parts->color ? 1 : 0;
+    for (size_t index = begin; index < count; index++) {
+        const CssValue* position = css_space_list_item(value, index);
+        if (!position) return false;
+        CssMathType type = css_math_value_type(position);
+        bool zero = position->type == CSS_VALUE_TYPE_NUMBER && position->data.number.value == 0.0;
+        if (!zero && type != CSS_MATH_PERCENT && (angular ? type != CSS_MATH_ANGLE
+                : type != CSS_MATH_LENGTH && type != CSS_MATH_LENGTH_PERCENT)) return false;
+        parts->positions[parts->position_count++] = position;
+    }
+    return true;
+}
+
+bool css_gradient_stop_list_valid(const CssValue* value) {
+    CssImageKind kind = css_value_image_kind(value);
+    if (kind != CSS_IMAGE_LINEAR_GRADIENT && kind != CSS_IMAGE_RADIAL_GRADIENT && kind != CSS_IMAGE_CONIC_GRADIENT) return true;
+    if (css_value_contains_pending_substitution(value)) return true;
+    const CssFunction* function = value->data.function;
+    if (!function || !function->args || function->arg_count < 2) return false;
+    bool angular = kind == CSS_IMAGE_CONIC_GRADIENT;
+    CssGradientStopParts parts;
+    const CssValue* token = css_space_list_item(function->args[0], 0);
+    CssComputedColor first_color;
+    int first = token && !css_value_is_global_keyword(token) && css_color_compute(token, &first_color) ? 0 : 1;
+    int colors = 0;
+    bool previous_hint = false;
+    for (int index = first; index < function->arg_count; index++) {
+        if (!css_gradient_stop_components(function->args[index], angular, &parts)) return false;
+        bool hint = !parts.color;
+        if (hint && (index == first || index == function->arg_count - 1 || previous_hint)) return false;
+        if (!hint) colors++;
+        previous_hint = hint;
+    }
+    return colors >= 2;
+}
+
+bool css_gradient_position_components(const CssValue* prelude, int at_index, CssPositionAxis axes[2]) {
+    if (!axes) return false;
+    axes[0] = axes[1] = {CSS_VALUE_CENTER, nullptr};
+    if (at_index < 0) return true;
+    size_t count = css_space_list_count(prelude);
+    size_t first = (size_t)at_index + 1;
+    if (first >= count || count - first > 4 ||
+        !css_value_identifier_is(css_space_list_item(prelude, first - 1), "at")) return false;
+    const CssValue* position[4] = {};
+    int position_count = 0;
+    for (size_t next = first; next < count; next++) position[position_count++] = css_space_list_item(prelude, next);
+    CssValue group;
+    return css_position_components(css_background_group_view(&group, position, position_count), axes, false);
+}
+
+bool css_radial_gradient_components(const CssValue* value, CssRadialGradientParts* parts) {
+    if (!parts || css_value_image_kind(value) != CSS_IMAGE_RADIAL_GRADIENT ||
+        !value->data.function || value->data.function->arg_count < 2 || !value->data.function->args) return false;
+    *parts = {};
+    parts->shape = RADIAL_SHAPE_ELLIPSE;
+    parts->size = RADIAL_SIZE_FARTHEST_CORNER;
+    parts->at_index = -1;
+    const CssValue* first = value->data.function->args[0];
+    if (!first) return false;
+    // a color stop has no geometry prelude, including grouped colors with stop positions.
+    const CssValue* first_token = css_space_list_item(first, 0);
+    if (first_token && !css_value_is_global_keyword(first_token) && css_value_is_supported_color(first_token)) return true;
+    if (first->type == CSS_VALUE_TYPE_LIST && first->data.list.comma_separated) return false;
+    bool shape_set = false, size_set = false, radii_closed = false;
+    size_t count = css_space_list_count(first);
+    for (size_t index = 0; index < count; index++) {
+        const CssValue* token = css_space_list_item(first, index);
+        if (css_value_identifier_is(token, "at")) {
+            if (index + 1 >= count || count - index - 1 > 4) return false;
+            parts->at_index = (int)index;
+            CssPositionAxis axes[2];
+            if (!css_gradient_position_components(first, parts->at_index, axes)) return false;
+            break;
+        }
+        if ((css_value_identifier_is(token, "circle") || css_value_identifier_is(token, "ellipse"))) {
+            if (shape_set) return false;
+            shape_set = true;
+            radii_closed = parts->radius_count > 0;
+            parts->shape = css_value_identifier_is(token, "circle") ? RADIAL_SHAPE_CIRCLE : RADIAL_SHAPE_ELLIPSE;
+        } else if ((css_value_identifier_is(token, "closest-side") || css_value_identifier_is(token, "farthest-side") ||
+            css_value_identifier_is(token, "closest-corner") || css_value_identifier_is(token, "farthest-corner"))) {
+            if (size_set || parts->radius_count) return false;
+            size_set = true;
+            parts->size = css_value_identifier_is(token, "closest-side") ? RADIAL_SIZE_CLOSEST_SIDE :
+                css_value_identifier_is(token, "farthest-side") ? RADIAL_SIZE_FARTHEST_SIDE :
+                css_value_identifier_is(token, "closest-corner") ? RADIAL_SIZE_CLOSEST_CORNER : RADIAL_SIZE_FARTHEST_CORNER;
+        } else {
+            if (size_set || radii_closed || parts->radius_count == 2 || !css_value_is_nonnegative_length_percentage(token)) return false;
+            parts->radii[parts->radius_count++] = token;
+        }
+    }
+    if (parts->radius_count) {
+        if (!shape_set) parts->shape = parts->radius_count == 1 ? RADIAL_SHAPE_CIRCLE : RADIAL_SHAPE_ELLIPSE;
+        if (parts->radius_count != (parts->shape == RADIAL_SHAPE_CIRCLE ? 1 : 2)) return false;
+        if (parts->shape == RADIAL_SHAPE_CIRCLE &&
+            css_math_value_type(parts->radii[0]) != CSS_MATH_LENGTH &&
+            !(parts->radii[0]->type == CSS_VALUE_TYPE_NUMBER && parts->radii[0]->data.number.value == 0)) return false;
+    }
+    parts->prelude = first;
+    parts->first_stop = 1;
+    return value->data.function->arg_count > 2;
+}
+
+bool css_background_layer_components(const CssValue* value, bool final_layer, CssBackgroundParts* parts) {
+    if (!value || !parts || (value->type == CSS_VALUE_TYPE_LIST &&
+            (value->data.list.count <= 0 || !value->data.list.values))) return false;
+    *parts = {};
+    size_t count = css_space_list_count(value);
+    if (!count) return false;
+    int box_count = 0;
+    bool text_clip = false;
+    for (size_t index = 0; index < count;) {
+        const CssValue* item = css_space_list_item(value, index);
+        if (!item || css_value_is_global_keyword(item)) return false;
+        CssEnum keyword = item->type == CSS_VALUE_TYPE_KEYWORD ? item->data.keyword : (CssEnum)0;
+        // compound position/size and repeat terms must stay contiguous within the layer.
+        if (css_background_position_component(item)) {
+            if (parts->position_count) return false;
+            while (index < count && css_background_position_component(css_space_list_item(value, index))) {
+                if (parts->position_count == 4) return false;
+                parts->position[parts->position_count++] = css_space_list_item(value, index++);
+            }
+            CssValue group; CssPositionAxis axes[2];
+            if (!css_position_components(css_background_group_view(&group, parts->position,
+                    parts->position_count), axes)) return false;
+            if (index < count && css_value_identifier_is(css_space_list_item(value, index), "/")) {
+                index++;
+                while (index < count && css_value_is_background_size_component(css_space_list_item(value, index))) {
+                    if (parts->size_count == 2) return false;
+                    parts->size[parts->size_count++] = css_space_list_item(value, index++);
+                }
+                const CssValue* size_axes[2]; CssEnum mode;
+                if (!parts->size_count || !css_background_size_components(
+                        css_background_group_view(&group, parts->size, parts->size_count), size_axes, &mode)) return false;
+            }
+            continue;
+        }
+        if (css_background_repeat_component(item)) {
+            if (parts->repeat_count) return false;
+            while (index < count && css_background_repeat_component(css_space_list_item(value, index))) {
+                if (parts->repeat_count == 2) return false;
+                parts->repeat[parts->repeat_count++] = css_space_list_item(value, index++);
+            }
+            CssValue group; CssEnum axes[2];
+            if (!css_background_repeat_components(css_background_group_view(&group, parts->repeat,
+                    parts->repeat_count), axes)) return false;
+            continue;
+        }
+        index++;
+        if (css_value_is_supported_image(item, true)) {
+            if (parts->image) return false;
+            parts->image = item;
+        } else if (keyword == CSS_VALUE_SCROLL || keyword == CSS_VALUE_FIXED || keyword == CSS_VALUE_LOCAL) {
+            if (parts->attachment) return false;
+            parts->attachment = item;
+        } else if (css_background_box_keyword(keyword)) {
+            if (++box_count > (text_clip ? 1 : 2)) return false;
+            if (box_count == 1) parts->origin = item;
+            if (!text_clip) parts->clip = item;
+        } else if (keyword == CSS_VALUE_TEXT) {
+            if (text_clip || box_count > 1) return false;
+            text_clip = true;
+            parts->clip = item;
+        } else {
+            CssComputedColor color;
+            if (!final_layer || parts->color || !css_color_compute(item, &color)) return false;
+            parts->color = item;
+        }
+    }
+    return true;
+}
+
+uint8_t css_intrinsic_size_axes(CssPropertyCode property, bool vertical) {
+    switch (property) {
+        case CSS_PROPERTY_CONTAIN_INTRINSIC_SIZE: return 3;
+        case CSS_PROPERTY_CONTAIN_INTRINSIC_WIDTH: return 1;
+        case CSS_PROPERTY_CONTAIN_INTRINSIC_HEIGHT: return 2;
+        case CSS_PROPERTY_CONTAIN_INTRINSIC_INLINE_SIZE: return vertical ? 2 : 1;
+        case CSS_PROPERTY_CONTAIN_INTRINSIC_BLOCK_SIZE: return vertical ? 1 : 2;
+        default: return 0;
+    }
+}
+
+bool css_intrinsic_size_components(const CssValue* value, bool shorthand,
+                                    CssIntrinsicSizeAxis axes[2]) {
+    if (!value || !axes) return false;
+    axes[0] = axes[1] = {};
+    size_t count = css_space_list_count(value), index = 0, components = 0;
+    if (!count || count > (shorthand ? 4u : 2u) ||
+        (value->type == CSS_VALUE_TYPE_LIST && !value->data.list.values)) return false;
+    while (index < count && components < (shorthand ? 2u : 1u)) {
+        CssIntrinsicSizeAxis axis = {};
+        const CssValue* item = css_space_list_item(value, index++);
+        if (css_value_keyword_equals(item, CSS_VALUE_AUTO)) {
+            axis.automatic = true;
+            if (index == count) return false;
+            item = css_space_list_item(value, index++);
+        }
+        bool length = item && (item->type == CSS_VALUE_TYPE_LENGTH
+            ? isfinite(item->data.length.value) && item->data.length.value >= 0.0 &&
+                css_unit_is_length(item->data.length.unit)
+            : item->type == CSS_VALUE_TYPE_NUMBER ? item->data.number.value == 0.0
+            : css_value_is_length_expression(item, false, false));
+        if (!length && !css_value_keyword_equals(item, CSS_VALUE_NONE)) return false;
+        axis.size = item;
+        axes[components++] = axis;
+    }
+    if (index != count || !components) return false;
+    if (components == 1) axes[1] = axes[0];
+    return true;
 }
 
 struct CssKeywordSetItem { const char* name; uint32_t bit; bool alone; };
@@ -2303,6 +2701,38 @@ static bool css_keyword_set_valid(const CssValue* value, size_t first, size_t co
         seen |= option->bit;
     }
     return true;
+}
+
+struct CssPropertyKeywordSet {
+    CssPropertyCode property;
+    const CssKeywordSetItem* options;
+    size_t count;
+    uint32_t exclusive;
+};
+
+static const CssPropertyKeywordSet* css_property_keyword_set(CssPropertyCode property) {
+    static const CssKeywordSetItem orientation[] = {
+        {"horizontal", 1, true}, {"vertical", 2, true},
+        {"inline-axis", 4, true}, {"block-axis", 8, true}
+    };
+    static const CssKeywordSetItem containment[] = {
+        {"none", 1, true}, {"strict", 2, true}, {"content", 4, true},
+        {"size", 8, false}, {"inline-size", 16, false}, {"layout", 32, false},
+        {"style", 64, false}, {"paint", 128, false}
+    };
+    static const CssKeywordSetItem text_transform[] = {
+        {"none", 1, true}, {"capitalize", 2, false}, {"uppercase", 4, false},
+        {"lowercase", 8, false}, {"full-width", 16, false},
+        {"full-size-kana", 32, false}, {"math-auto", 64, true}
+    };
+    static const CssPropertyKeywordSet sets[] = {
+        {CSS_PROPERTY_WEBKIT_BOX_ORIENT, orientation, sizeof(orientation) / sizeof(*orientation), 0},
+        {CSS_PROPERTY_CONTAIN, containment, sizeof(containment) / sizeof(*containment), 8 | 16},
+        {CSS_PROPERTY_TEXT_TRANSFORM, text_transform, sizeof(text_transform) / sizeof(*text_transform), 2 | 4 | 8}
+    };
+    for (const CssPropertyKeywordSet& set : sets)
+        if (set.property == property) return &set;
+    return nullptr;
 }
 
 static bool css_container_items_valid(const CssValue* value, size_t first, size_t count, bool type) {
@@ -2378,25 +2808,138 @@ const CssValue* css_container_shorthand_longhand(const CssValue* value,
     return result;
 }
 
+enum CssBackgroundValueKind {
+    CSS_BACKGROUND_LAYER, CSS_BACKGROUND_IMAGE, CSS_BACKGROUND_POSITION,
+    CSS_BACKGROUND_SIZE, CSS_BACKGROUND_REPEAT, CSS_BACKGROUND_ATTACHMENT,
+    CSS_BACKGROUND_ORIGIN, CSS_BACKGROUND_CLIP, CSS_BACKGROUND_BLEND
+};
+
+struct CssBackgroundValueSpec {
+    CssPropertyCode property;
+    CssBackgroundValueKind kind;
+    int axis;
+};
+
+static const CssBackgroundValueSpec* css_background_value_spec(CssPropertyCode property) {
+    static const CssBackgroundValueSpec specs[] = {
+        {CSS_PROPERTY_BACKGROUND, CSS_BACKGROUND_LAYER, -1},
+        {CSS_PROPERTY_BACKGROUND_IMAGE, CSS_BACKGROUND_IMAGE, -1},
+        {CSS_PROPERTY_BACKGROUND_POSITION, CSS_BACKGROUND_POSITION, -1},
+        {CSS_PROPERTY_BACKGROUND_POSITION_X, CSS_BACKGROUND_POSITION, 0},
+        {CSS_PROPERTY_BACKGROUND_POSITION_Y, CSS_BACKGROUND_POSITION, 1},
+        {CSS_PROPERTY_BACKGROUND_SIZE, CSS_BACKGROUND_SIZE, -1},
+        {CSS_PROPERTY_BACKGROUND_REPEAT, CSS_BACKGROUND_REPEAT, -1},
+        {CSS_PROPERTY_BACKGROUND_ATTACHMENT, CSS_BACKGROUND_ATTACHMENT, -1},
+        {CSS_PROPERTY_BACKGROUND_ORIGIN, CSS_BACKGROUND_ORIGIN, -1},
+        {CSS_PROPERTY_BACKGROUND_CLIP, CSS_BACKGROUND_CLIP, -1},
+        {CSS_PROPERTY_BACKGROUND_BLEND_MODE, CSS_BACKGROUND_BLEND, -1}
+    };
+    for (const CssBackgroundValueSpec& spec : specs) if (spec.property == property) return &spec;
+    return nullptr;
+}
+
+static bool css_background_value_valid(const CssBackgroundValueSpec* spec,
+        const CssValue* value, bool quirks_mode) {
+    if (css_value_is_global_keyword(value) || css_value_contains_pending_substitution(value)) return true;
+    int count = css_value_comma_count(value);
+    if (count <= 0) return false;
+    // every image and longhand shares complete per-layer validation; global keywords apply to the whole declaration.
+    for (int index = 0; index < count; index++) {
+        const CssValue* item = css_value_comma_at(value, index);
+        if (!item || css_value_is_global_keyword(item)) return false;
+        switch (spec->kind) {
+            case CSS_BACKGROUND_LAYER: {
+                CssBackgroundParts parts;
+                if (!css_background_layer_components(item, index == count - 1, &parts)) return false;
+                break;
+            }
+            case CSS_BACKGROUND_IMAGE:
+                if (!css_value_is_supported_image(item, true)) return false;
+                break;
+            case CSS_BACKGROUND_POSITION: {
+                CssPositionAxis axes[2];
+                // unitless quirks lengths apply only to background-position, outside functions and shorthands.
+                bool quirky = quirks_mode && spec->property == CSS_PROPERTY_BACKGROUND_POSITION;
+                if (!css_position_components(item, axes, true, spec->axis, quirky)) return false;
+                break;
+            }
+            case CSS_BACKGROUND_SIZE: {
+                const CssValue* axes[2]; CssEnum mode;
+                if (!css_background_size_components(item, axes, &mode)) return false;
+                break;
+            }
+            case CSS_BACKGROUND_REPEAT: {
+                CssEnum axes[2];
+                if (!css_background_repeat_components(item, axes)) return false;
+                break;
+            }
+            default: {
+                if (item->type != CSS_VALUE_TYPE_KEYWORD) return false;
+                CssEnum keyword = item->data.keyword;
+                const CssEnumInfo* info = css_enum_info(keyword);
+                bool valid = spec->kind == CSS_BACKGROUND_ATTACHMENT
+                    ? keyword == CSS_VALUE_SCROLL || keyword == CSS_VALUE_FIXED || keyword == CSS_VALUE_LOCAL
+                    : spec->kind == CSS_BACKGROUND_ORIGIN || spec->kind == CSS_BACKGROUND_CLIP
+                    ? css_background_box_keyword(keyword) || (spec->kind == CSS_BACKGROUND_CLIP && keyword == CSS_VALUE_TEXT)
+                    : keyword == CSS_VALUE_NORMAL || (info && info->group == CSS_VALUE_GROUP_BGROUND_BLEND);
+                if (!valid) return false;
+                break;
+            }
+        }
+    }
+    return true;
+}
+
 bool css_property_validate_value_mode(CssPropertyCode id,
                                       const CssValue* value,
                                       bool quirks_mode) {
     if (!value) return false;
-    if (id == CSS_PROPERTY_CONTAIN) {
+    if (const CssBackgroundValueSpec* spec = css_background_value_spec(id))
+        return css_background_value_valid(spec, value, quirks_mode);
+    if ((id == CSS_PROPERTY_CONTENT || id == CSS_PROPERTY_LIST_STYLE || id == CSS_PROPERTY_LIST_STYLE_IMAGE ||
+            id == CSS_PROPERTY_BORDER_IMAGE || id == CSS_PROPERTY_BORDER_IMAGE_SOURCE) &&
+            !css_value_is_global_keyword(value) && !css_value_contains_pending_substitution(value) &&
+            !css_value_visit_list_items(value, [](const CssValue* item, void*) {
+                return !css_value_is_image_set(item) || css_image_set_valid(item);
+            }, nullptr)) return false;
+    if (const CssPropertyKeywordSet* set = css_property_keyword_set(id)) {
         if (css_value_is_global_keyword(value) || css_value_contains_pending_substitution(value)) return true;
-        static const CssKeywordSetItem options[] = {
-            {"none", 1, true}, {"strict", 2, true}, {"content", 4, true},
-            {"size", 8, false}, {"inline-size", 16, false}, {"layout", 32, false},
-            {"style", 64, false}, {"paint", 128, false}
-        };
-        return css_keyword_set_valid(value, 0, css_space_list_count(value), options,
-            sizeof(options) / sizeof(*options), 8 | 16);
+        return css_keyword_set_valid(value, 0, css_space_list_count(value),
+            set->options, set->count, set->exclusive);
+    }
+    if (id == CSS_PROPERTY_LINE_CLAMP || id == CSS_PROPERTY_WEBKIT_LINE_CLAMP) {
+        return css_value_is_global_keyword(value) || css_value_contains_pending_substitution(value) ||
+            (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_NONE) ||
+            css_positive_integer_value_valid(value);
+    }
+    if (id == CSS_PROPERTY_CONTAIN_INTRINSIC_SIZE || id == CSS_PROPERTY_CONTAIN_INTRINSIC_WIDTH ||
+        id == CSS_PROPERTY_CONTAIN_INTRINSIC_HEIGHT || id == CSS_PROPERTY_CONTAIN_INTRINSIC_INLINE_SIZE ||
+        id == CSS_PROPERTY_CONTAIN_INTRINSIC_BLOCK_SIZE) {
+        if (css_value_is_global_keyword(value) || css_value_contains_pending_substitution(value)) return true;
+        CssIntrinsicSizeAxis axes[2] = {};
+        return css_intrinsic_size_components(value, id == CSS_PROPERTY_CONTAIN_INTRINSIC_SIZE, axes);
     }
     if (id == CSS_PROPERTY_CONTAINER || id == CSS_PROPERTY_CONTAINER_NAME || id == CSS_PROPERTY_CONTAINER_TYPE) {
         if (css_value_is_global_keyword(value) || css_value_contains_pending_substitution(value)) return true;
         size_t split = 0, count = 0;
         return id == CSS_PROPERTY_CONTAINER ? css_container_parts(value, &split, &count)
             : css_container_items_valid(value, 0, css_space_list_count(value), id == CSS_PROPERTY_CONTAINER_TYPE);
+    }
+
+    if (id == CSS_PROPERTY_GRID_TEMPLATE || id == CSS_PROPERTY_GRID) {
+        if (css_value_is_global_keyword(value) || css_value_contains_pending_substitution(value)) return true;
+        return css_grid_definition_valid(value, id);
+    }
+
+    if (id == CSS_PROPERTY_GRID_TEMPLATE_AREAS) {
+        if (css_value_is_global_keyword(value) || css_value_contains_pending_substitution(value)) return true;
+        return css_grid_visit_template_areas(value);
+    }
+
+    if (css_grid_placement_mask(id)) {
+        if (css_value_is_global_keyword(value) || css_value_contains_pending_substitution(value)) return true;
+        CssGridLineReference lines[4] = {};
+        return css_grid_parse_placement(value, id, lines);
     }
 
     if (id == CSS_PROPERTY_GRID_TEMPLATE_COLUMNS || id == CSS_PROPERTY_GRID_TEMPLATE_ROWS ||
@@ -2724,18 +3267,6 @@ bool css_property_validate_value_mode(CssPropertyCode id,
                 } else return false;
             }
             return true;
-        }
-        case CSS_PROPERTY_BACKGROUND_ATTACHMENT: {
-            if (value->type == CSS_VALUE_TYPE_VAR) return true;
-            if (value->type == CSS_VALUE_TYPE_FUNCTION && value->data.function &&
-                value->data.function->name &&
-                strcmp(value->data.function->name, "var") == 0) return true;
-            if (value->type != CSS_VALUE_TYPE_KEYWORD) return false;
-            CssEnum keyword = value->data.keyword;
-            const CssEnumInfo* info = css_enum_info(keyword);
-            return keyword == CSS_VALUE_SCROLL || keyword == CSS_VALUE_FIXED ||
-                keyword == CSS_VALUE_LOCAL ||
-                (info && info->group == CSS_VALUE_GROUP_GLOBAL);
         }
         case CSS_PROPERTY_BORDER_WIDTH:
         case CSS_PROPERTY_BORDER_STYLE:

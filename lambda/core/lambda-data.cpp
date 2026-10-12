@@ -1182,7 +1182,10 @@ Item typeditem_to_item(TypedItem *titem) {
 }
 
 Item map_shape_field_to_item(void* map_data, const ShapeEntry* field) {
-    if (!map_data || !field || field->byte_offset < 0) return ItemNull;
+    if (!field) return ItemNull;
+    // S12.1.1v2: passive Lambda storage reads cannot execute a guest accessor.
+    if (field->flags & JSPD_IS_ACCESSOR) return ItemError;
+    if (!map_data || field->byte_offset < 0) return ItemNull;
     void* field_ptr = map_field_ptr(map_data, field);
     if (!field->name) {
         // spread fields store a raw nested Map*, not a TypedItem; treating the
@@ -1190,7 +1193,6 @@ Item map_shape_field_to_item(void* map_data, const ShapeEntry* field) {
         Map* nested = map_shape_field_to_map(map_data, field);
         return nested ? (Item){.map = nested} : ItemNull;
     }
-    if (field->flags & JSPD_IS_ACCESSOR) return ItemNull;
     LaneStorageDesc lane = {};
     if (shape_entry_uses_native_lane(field, &lane)) {
         if (lane.kind == LANE_STORAGE_INT) {

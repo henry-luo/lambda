@@ -1,0 +1,34 @@
+<!doctype html><meta charset=utf-8><style>
+body {margin:0}
+#controls {position:fixed;top:0;left:180px;z-index:20}
+button {display:block;width:130px;height:18px}
+#memory {width:100px;contain-intrinsic-size:auto 40px}
+#child {height:120px;background:green}
+</style>
+<div id=controls><button id=contain>size containment</button><button id=hide>hide contents</button>
+<button id=cycle>reconnect</button><button id=show>show contents</button>
+<button id=drop>drop automatic memory</button><button id=reset>restart while hidden</button>
+<button id=width>observe with one auto axis</button><button id=hide-box>remove box</button>
+<button id=show-box>restore box</button><button id=detach>detach until next update</button>
+<button id=restore>restore after update</button></div>
+<div id=parent><div id=memory><div id=child></div></div></div>
+<script>
+var memory=document.getElementById('memory'),child=document.getElementById('child'),parent=document.getElementById('parent');
+document.getElementById('contain').onclick=function(){memory.style.contain='size';};
+document.getElementById('hide').onclick=function(){
+    memory.style.contentVisibility='hidden';memory.style.containIntrinsicHeight='auto 40px';
+};
+document.getElementById('cycle').onclick=function(){memory.remove();parent.appendChild(memory);};
+document.getElementById('show').onclick=function(){memory.style.contain='none';memory.style.contentVisibility='visible';};
+document.getElementById('drop').onclick=function(){memory.style.containIntrinsicSize='40px';};
+document.getElementById('reset').onclick=function(){
+    child.style.height='200px';memory.style.containIntrinsicSize='auto 40px';memory.style.contentVisibility='hidden';
+};
+document.getElementById('width').onclick=function(){
+    memory.style.contentVisibility='visible';memory.style.containIntrinsicSize='auto 40px 40px';child.style.height='220px';
+};
+document.getElementById('hide-box').onclick=function(){parent.style.display='none';};
+document.getElementById('show-box').onclick=function(){parent.style.display='block';};
+document.getElementById('detach').onclick=function(){memory.remove();};
+document.getElementById('restore').onclick=function(){parent.appendChild(memory);};
+</script>

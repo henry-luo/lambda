@@ -1,0 +1,32 @@
+<!doctype html><meta charset="utf-8">
+<style>html,body{margin:0;background:white}button{height:24px}#box{position:absolute;left:0;top:40px;width:48px;height:32px}</style>
+<button id="check">Check grammar</button><button id="invalidvar">Invalid variable</button><button id="recover">Recover variable</button>
+<output id="report"></output><div id="box"></div><script>
+(function(){
+var invalid=[["nonfinal_color", "red,linear-gradient(blue,blue)"], ["duplicate_image", "linear-gradient(blue,blue) linear-gradient(green,green)"], ["duplicate_position_axis", "left right"], ["extra_size", "left/8px 4px 3px"], ["cover_pair", "left/cover auto"], ["missing_size", "left/"], ["missing_position", "/8px 4px"], ["split_position", "left no-repeat right"], ["split_repeat", "no-repeat border-box repeat"], ["duplicate_attachment", "fixed local"], ["extra_boxes", "border-box padding-box content-box"], ["duplicate_color", "red blue"], ["negative_size", "left/-8px 4px"], ["mixed_global", "linear-gradient(blue,blue),inherit"]];
+var valid=["text", "border-box text", "text border-box", "content-box text red", "padding-box no-repeat border-box", "red left top / 8px 4px fixed no-repeat border-box content-box", "linear-gradient(blue,blue) center / calc(50% + 2px) min(8px,25%) round space local padding-box content-box red"];
+var base="linear-gradient(red,red) left top/8px 4px no-repeat,radial-gradient(blue,blue) green";
+var box=document.getElementById('box'),report=document.getElementById('report');
+document.getElementById('check').onclick=function(){
+    for(var index=0;index<invalid.length;index++){
+        box.style.background=base;
+        var previous=box.style.background;
+        box.style.setProperty('background',invalid[index][1],'important');
+        report.setAttribute('data-invalid-'+index,String(box.style.background===previous&&box.style.getPropertyPriority('background')===''));
+    }
+    for(var index=0;index<valid.length;index++){
+        box.style.background='';box.style.background=valid[index];
+        report.setAttribute('data-valid-'+index,String(box.style.background!==''));
+    }
+    box.style.background=base;
+};
+document.getElementById('invalidvar').onclick=function(){
+    box.style.setProperty('--bg','linear-gradient(blue,blue) left no-repeat right blue');box.style.background='var(--bg)';
+    report.setAttribute('data-color',getComputedStyle(box).backgroundColor);
+};
+document.getElementById('recover').onclick=function(){
+    box.style.setProperty('--bg',base);
+    report.setAttribute('data-color',getComputedStyle(box).backgroundColor);
+};
+})();
+</script>

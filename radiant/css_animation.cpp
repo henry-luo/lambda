@@ -27,27 +27,6 @@ extern "C" {
 // Property Interpolation
 // ============================================================================
 
-static inline uint8_t lerp_u8(uint8_t a, uint8_t b, float t) {
-    float v = (float)a + ((float)b - (float)a) * t;
-    return clamp_byte_round(v);
-}
-
-Color css_interpolate_color(Color a, Color b, float t) {
-    Color result = {};
-    // transparent endpoints contribute no color in premultiplied sRGB.
-    float alpha = css_interpolate_float((float)a.a, (float)b.a, t);
-    if (alpha > 0.0f) {
-        result.r = clamp_byte_round(css_interpolate_float((float)a.r * a.a,
-            (float)b.r * b.a, t) / alpha);
-        result.g = clamp_byte_round(css_interpolate_float((float)a.g * a.a,
-            (float)b.g * b.a, t) / alpha);
-        result.b = clamp_byte_round(css_interpolate_float((float)a.b * a.a,
-            (float)b.b * b.a, t) / alpha);
-    }
-    result.a = lerp_u8(a.a, b.a, t);
-    return result;
-}
-
 // ============================================================================
 // Keyframe Content Parsing
 // ============================================================================
@@ -1431,7 +1410,10 @@ static bool apply_animated_value(DomElement* element, CssAnimatedProp* prop) {
             if (resolved) {
                 layout_changed = element->display.outer != display.outer ||
                     element->display.inner != display.inner ||
-                    element->display.list_item != display.list_item;
+                    element->display.list_item != display.list_item ||
+                    element->display.legacy_box != display.legacy_box ||
+                    element->display.legacy_clamp != display.legacy_clamp ||
+                    element->display.legacy_vertical != display.legacy_vertical;
                 element->display = display;
                 element->set_animated_display(display);
             }
@@ -2456,32 +2438,42 @@ bool css_animation_needs_computed_sample(DomElement* element, CssPropertyCode pr
     return needs_sample;
 }
 
-void css_motion_sample_existing(DomElement* element, LayoutContext* lycon) {
+bool css_motion_sample_existing(DomElement* element, LayoutContext* lycon) {
     DomDocument* document = element ? element->doc.get() : nullptr;
     DocState* state = document ? (DocState*)document->state : nullptr;
     AnimationScheduler* scheduler = state ? state->animation_scheduler : nullptr;
-    if (!scheduler || document->disable_css_animations) return;
+    if (!scheduler || document->disable_css_animations) return false;
+    bool sampled = false;
     for (AnimationInstance* instance = scheduler->first; instance; instance = instance->next) {
         if (instance->target != element || instance->scheduler_removed) continue;
         if (instance->type == ANIM_CSS_ANIMATION && instance->state) {
             CssAnimState* sample = (CssAnimState*)instance->state;
+            css_animation_refresh_priority(sample);
             css_animation_refresh_value_samples(sample, lycon);
             bool suppressed = sample->suppress_events;
             sample->suppress_events = true;
             animation_instance_sample(instance, scheduler->current_time, true);
             sample->suppress_events = suppressed;
+            sampled = true;
         } else if (instance->type == ANIM_CSS_TRANSITION) {
             animation_instance_sample(instance, scheduler->current_time, true);
+            sampled = true;
         }
     }
-    if (element->blk) {
+    if (lycon && element->blk) {
         lycon->block.given_width = element->block()->given_width;
         lycon->block.given_height = element->block()->given_height;
     }
+    return sampled;
 }
 
 void css_animation_resolve(DomElement* element, LayoutContext* lycon) {
     if (!element || !lycon || !lycon->ui_context) return;
+    if (lycon->css_query_probe ||
+        view_content_visibility_hides(element, CONTENT_VISIBILITY_PAINT)) {
+        css_motion_sample_existing(element, lycon);
+        return;
+    }
     DomDocument* doc = lycon->ui_context->document;
     if (!doc || doc->disable_css_animations) return;
     DocState* state = (DocState*)doc->state;
@@ -3038,6 +3030,8 @@ void css_transition_resolve(DomElement* element, LayoutContext* lycon) {
     if (!rs || !rs->animation_scheduler) return;
     AnimationScheduler* scheduler = rs->animation_scheduler;
     Pool* pool = doc->document_pool;
+    if (lycon->css_query_probe) return;
+    bool allow_start = !layout_content_visibility_suppresses_transition(lycon, element);
 
     // Resolve the transition config. Even if no transition is declared we still
     // maintain the used-value snapshot below (so a later declaration starts from
@@ -3096,7 +3090,13 @@ void css_transition_resolve(DomElement* element, LayoutContext* lycon) {
                 : fabsf(active->to.value.aspect_ratio.value - new_ratio) <= .0001f;
             // Retained relayout resets view properties, not the DOM-owned
             // transition. Preserve the new target before restoring the old sample.
-            animation_scheduler_tick(scheduler, now, nullptr, false, running);
+            if (same_target || allow_start) {
+                animation_scheduler_tick(scheduler, now, nullptr, false, running);
+            } else {
+                // activation adopts changed targets without starting a replacement transition.
+                animation_scheduler_cancel(scheduler, running);
+                running = nullptr;
+            }
             if (same_target) {
                 if (element->blk) {
                     lycon->block.given_width = element->block()->given_width;
@@ -3133,7 +3133,7 @@ void css_transition_resolve(DomElement* element, LayoutContext* lycon) {
             }
         }
 
-        if ((changed || running) && covered) {
+        if (allow_start && (changed || running) && covered) {
             if (!track->has_snapshot && track->has_pending_from) {
                 // Preserve the pre-change style when this script turn defers its
                 // first layout until after the DOM mutation batch.

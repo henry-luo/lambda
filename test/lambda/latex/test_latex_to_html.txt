@@ -4,4 +4,10 @@ true
 true
 "10. empty div:<div></div>11. multi:<p>a<em>b</em>c</p>12. id attr:"
 true
+"13. sequences:"
+true
+"14. attrs:"
+true
+"15. raw style:"
+true
 "===== ALL LATEX TO_HTML TESTS DONE ====="

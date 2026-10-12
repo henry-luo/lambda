@@ -39,9 +39,9 @@ let canonical_normalized = normalize.normalize(canonical_round)
 let canonical_signature = signature(canonical)
 let round_signature = signature(canonical_normalized.graph)
 
-let grammar = (input("test/lambda/graph/graphviz/grammar.dot",
+let dot_grammar = (input("test/lambda/graph/graphviz/grammar.dot",
   {type: "graph", flavor: "dot"})) ^ { null }
-let grammar_text = format(grammar, {type: "graph", flavor: "dot"})
+let grammar_text = format(dot_grammar, {type: "graph", flavor: "dot"})
 let grammar_round = (parse(grammar_text,
   {type: "graph", flavor: "dot"})) ^ { null }
 

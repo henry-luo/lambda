@@ -1,4 +1,6 @@
 #include "mvp_lmd_runtime.h"
+#include "../js_runtime.h"
+#include "../../input/input.hpp"
 #include "../../runtime/lambda-root-frame.hpp"
 #include "../../runtime/lambda-error.h"
 #include "../../core/lambda-decimal.hpp"
@@ -160,6 +162,11 @@ extern "C" Item mvp_lmd_number_to_radix_string(double value, double radix) {
 }
 
 extern "C" Item mvp_lmd_number_to_string(double value) {
+    // small array keys share Lambda's immortal ASCII strings, including -0 -> "0".
+    if (value >= 0 && value <= 9 && value == (int)value) {
+        String* digit = get_ascii_char_string((unsigned char)('0' + (int)value));
+        if (digit) return Item{.item = s2it(digit)};
+    }
     char buffer[64];
     const char* text = buffer;
     if (isnan(value)) text = "NaN";
@@ -336,12 +343,40 @@ extern "C" Item mvp_lmd_string_at(Item value, double index, int64_t mode) {
     return result ? Item{.item = s2it(result)} : mvp_lmd_fail(LMD_MVP_MEMORY, 0);
 }
 
+static bool mvp_lmd_array_prepare_sparse(Array* array) {
+    if (container_js_elements_kind(array) == JS_ELEMENTS_SPARSE_TAGGED) return true;
+    RootFrame roots(1);
+    if (!roots.valid()) return false;
+    Rooted<Array*> owner(roots, array);
+    Map* properties = js_array_has_props(array) ? js_array_props(array) : array;
+    SparseArrayMap* sparse = js_sparse_array_map_new(properties, type_tree_map_root(runtime_shape_tree()));
+    if (!sparse) return false;
+    js_elements_set_props(owner.get(), sparse);
+    if (js_array_props(owner.get()) != sparse) return false;
+    array = owner.get();
+    for (int64_t i = array->length; i < container_dense_capacity(array); i++)
+        array->items[i].item = ITEM_JS_DELETED_SENTINEL;
+    container_set_js_elements_kind(array, JS_ELEMENTS_SPARSE_TAGGED);
+    return true;
+}
+Item mvp_lmd_array_own_item(Array* array, int64_t index) {
+    if (index < 0 || index >= array->length) return Item{.item = ITEM_JS_DELETED_SENTINEL};
+    Item value;
+    if (container_js_elements_kind(array) == JS_ELEMENTS_SPARSE_TAGGED && js_array_sparse_get(array, index, &value)) return value;
+    return index < container_dense_capacity(array) ? array->items[index] : Item{.item = ITEM_JS_DELETED_SENTINEL};
+}
 extern "C" Item mvp_lmd_array_new(int64_t length) {
     if (length < 0 || length > UINT32_MAX) return mvp_lmd_fail(LMD_MVP_RANGE, 0);
     RootFrame roots(1);
     if (!roots.valid()) return ItemError;
     Rooted<Array*> result(roots, array());
-    if (!result.get() || !array_reserve_append_slots(result.get(), length))
+    if (!result.get()) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
+    if (js_array_should_keep_length_sparse(result.get(), length)) {
+        if (!mvp_lmd_array_prepare_sparse(result.get())) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
+        result.get()->length = length;
+        return Item{.array = result.get()};
+    }
+    if (!array_reserve_append_slots(result.get(), length))
         return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
     // reuse the shared non-value sentinel; explicit undefined remains an own element.
     for (int64_t i = 0; i < length; i++) result.get()->items[i].item = ITEM_JS_DELETED_SENTINEL;
@@ -354,6 +389,22 @@ extern "C" Item mvp_lmd_array_resize(Item owner, int64_t length) {
     if (!roots.valid()) return ItemError;
     Rooted<Item> held(roots, owner);
     int64_t old_length = owner.array->length;
+    if (container_js_elements_kind(owner.array) == JS_ELEMENTS_SPARSE_TAGGED ||
+            js_array_should_keep_length_sparse(owner.array, length)) {
+        if (!mvp_lmd_array_prepare_sparse(held.get().array)) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
+        if (length < old_length) {
+            int64_t count = js_array_sparse_collect_indices(held.get(), length, old_length, NULL, 0);
+            int64_t* indices = count ? (int64_t*)mem_alloc(count * sizeof(int64_t), MEM_CAT_TEMP) : NULL;
+            if (count && !indices) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
+            js_array_sparse_collect_indices(held.get(), length, old_length, indices, count);
+            for (int64_t i = 0; i < count; i++) js_array_sparse_delete_index(held.get(), indices[i]);
+            mem_free(indices);
+            int64_t end = container_dense_capacity(held.get().array);
+            for (int64_t i = length; i < end; i++) held.get().array->items[i].item = ITEM_JS_DELETED_SENTINEL;
+        }
+        held.get().array->length = length;
+        return held.get();
+    }
     if (length > old_length) {
         if (!array_reserve_append_slots(held.get().array, length - old_length))
             return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
@@ -365,19 +416,27 @@ extern "C" Item mvp_lmd_array_resize(Item owner, int64_t length) {
     return held.get();
 }
 
-static Item flatten_into(Item output, Item source, double depth, int nesting) {
+static Item flatten_into(Item output, Item source, double depth, int nesting, int64_t length = -1) {
     // nested arrays remain roots across destination growth; holes have no flattened element.
     if (nesting > 512) return mvp_lmd_fail(LMD_MVP_RANGE, 0);
-    RootFrame roots(2);
+    RootFrame roots(3);
     if (!roots.valid()) return ItemError;
-    Rooted<Item> target(roots, output), input(roots, source);
-    int64_t length = source.array->length;
+    Rooted<Item> target(roots, output), input(roots, source), element(roots, ItemNull);
+    if (length < 0) {
+        Item extent = mvp_lmd_sequence_length(input.get());
+        if (item_is_error(extent)) return extent;
+        length = it2i(extent);
+    }
     for (int64_t i = 0; i < length; i++) {
-        Item value = input.get().array->items[i];
+        Item value = mvp_lmd_array_index_property(input.get(), i, ItemNull, LMD_PROP_PRESENT);
+        if (item_is_error(value)) return value;
         if (value.item == ITEM_JS_DELETED_SENTINEL) continue;
+        element.set(value);
+        Item nested = depth > 0 ? mvp_lmd_array_is_array(element.get()) : Item{.item = ITEM_FALSE};
+        if (item_is_error(nested)) return nested;
         Item result;
-        if (depth > 0 && get_type_id(value) == LMD_TYPE_ARRAY)
-            result = flatten_into(target.get(), value, depth - 1, nesting + 1);
+        if (nested.item == ITEM_TRUE)
+            result = flatten_into(target.get(), element.get(), depth - 1, nesting + 1);
         else {
             if (target.get().array->length >= UINT32_MAX) return mvp_lmd_fail(LMD_MVP_RANGE, 0);
             result = mvp_lmd_array_store(target.get(), target.get().array->length, value);
@@ -386,13 +445,18 @@ static Item flatten_into(Item output, Item source, double depth, int nesting) {
     }
     return target.get();
 }
-extern "C" Item mvp_lmd_array_flatten(Item source, double depth) {
+extern "C" Item mvp_lmd_array_flatten(Item source, double depth, int64_t length) {
     RootFrame roots(1);
     if (!roots.valid()) return ItemError;
     Rooted<Item> input(roots, source);
-    Item output = mvp_lmd_array_new(0);
+    if (length < 0) {
+        Item extent = mvp_lmd_sequence_length(input.get());
+        if (item_is_error(extent)) return extent;
+        length = it2i(extent);
+    }
+    Item output = mvp_lmd_array_species_create(input.get(), 0);
     if (item_is_error(output)) return output;
-    return flatten_into(output, input.get(), isnan(depth) ? 0 : fmax(0, trunc(depth)), 0);
+    return flatten_into(output, input.get(), isnan(depth) ? 0 : fmax(0, trunc(depth)), 0, length);
 }
 
 extern "C" double mvp_lmd_number_pow(double base, double exponent) {
@@ -475,11 +539,30 @@ static Item array_store_owned(Item owner, uint32_t index, Item value) {
 
 extern "C" Item mvp_lmd_array_store(Item owner, uint32_t index, Item value) {
     Array* immediate = owner.array;
-    if (!lambda_item_uses_scalar_home(value) && index <= (uint64_t)immediate->length &&
+    bool sparse = container_js_elements_kind(immediate) == JS_ELEMENTS_SPARSE_TAGGED;
+    // existing dense slots and an append within capacity require no density scan.
+    if (!sparse && index <= (uint64_t)immediate->length &&
             index < (uint64_t)(immediate->capacity - immediate->extra)) {
+        if (lambda_item_uses_scalar_home(value)) return array_store_owned(owner, index, value);
         immediate->items[index] = value;
         if (index == immediate->length) immediate->length++;
         return value;
+    }
+    if (sparse ||
+            js_array_should_store_sparse_for_index(owner.array, index)) {
+        RootFrame roots(2);
+        if (!roots.valid()) return ItemError;
+        uint64_t home = 0;
+        Rooted<Item> held(roots, owner), item(roots, lambda_item_adopt_scalar_home(value, &home));
+        if (!mvp_lmd_array_prepare_sparse(held.get().array)) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
+        if (value.item == ITEM_JS_DELETED_SENTINEL) js_array_sparse_delete_index(held.get(), index);
+        else if (!js_sparse_array_map_set((SparseArrayMap*)js_array_props(held.get().array), index, item.get()))
+            return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
+        Array* array = held.get().array;
+        if (index < container_dense_capacity(array)) array->items[index].item = ITEM_JS_DELETED_SENTINEL;
+        if (index >= array->length) array->length = (int64_t)index + 1;
+        js_array_try_promote_sparse_dense(held.get(), true);
+        return lambda_item_uses_scalar_home(item.get()) ? push_d(it2d(item.get())) : item.get();
     }
     return array_store_owned(owner, index, value);
 }

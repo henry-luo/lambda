@@ -1,0 +1,64 @@
+<!doctype html><meta charset="utf-8">
+<style>
+html,body{margin:0;background:white}
+button{height:24px}
+#fixtures{position:absolute;top:40px;left:0}
+.grid{display:grid;width:320px;height:60px;gap:10px;grid-template-columns:repeat(auto-fit,60px);justify-content:start;align-content:start;margin-bottom:10px}
+.grid>div{min-width:0;min-height:0;height:20px;background:green}
+</style>
+<button id="check">Check</button><button id="change">Change</button><button id="changed">Changed</button><button id="restore">Restore</button><button id="restored">Restored</button><output id="report"></output><div id="fixtures"></div>
+<script>
+(function(){
+    var fixtures=document.getElementById('fixtures'),report=document.getElementById('report');
+    function grid(name,style,placements){
+        var element=document.createElement('div');element.id=name;element.className='grid';element.style.cssText=style;
+        placements.forEach(function(placement){var child=document.createElement('div');child.style.cssText=placement;element.appendChild(child);});
+        fixtures.appendChild(element);return element;
+    }
+    function near(a,b){return Math.abs(a-b)<0.1;}
+    function geometry(element,expected){
+        var parent=element.getBoundingClientRect();
+        return element.children.length===expected.length&&expected.every(function(item,index){
+            var rect=element.children[index].getBoundingClientRect();
+            return near(rect.x-parent.x,item[0])&&near(rect.y-parent.y,item[1])&&near(rect.width,item[2])&&near(rect.height,item[3]);
+        });
+    }
+    var checks=[];
+    function check(name,style,placements,expected){
+        var element=grid(name,style,placements);
+        checks.push(function(){report.setAttribute('data-'+name,String(geometry(element,expected)));});return element;
+    }
+    check('last','',['grid-column:4'],[[0,0,60,20]]);
+    check('separated','',['grid-column:1','grid-column:4'],[[0,0,60,20],[70,0,60,20]]);
+    var flex=check('flex','grid-template-columns:repeat(auto-fit,minmax(60px,1fr))',['grid-column:4;grid-row:1'],[[0,0,320,20]]);
+    check('negative','',['grid-column:-2'],[[0,0,60,20]]);
+    check('span','',['grid-column:1 / 4'],[[0,0,200,20]]);
+    check('row','width:60px;height:320px;grid-template-columns:60px;grid-template-rows:repeat(auto-fit,60px)',['grid-row:4'],[[0,0,60,20]]);
+    check('negative-implicit','',['grid-column:-6','grid-column:4'],[[0,0,0,20],[10,0,60,20]]);
+    check('normal-implicit','justify-content:normal',['grid-column:-6','grid-column:4'],[[0,0,250,20],[260,0,60,20]]);
+    check('between','justify-content:space-between',['grid-column:1','grid-column:4'],[[0,0,60,20],[260,0,60,20]]);
+    check('around','justify-content:space-around',['grid-column:1','grid-column:4'],[[47.5,0,60,20],[212.5,0,60,20]]);
+    check('percentage-gap','column-gap:10%',['grid-column:3'],[[0,0,60,20]]);
+    check('neighbors','grid-template-columns:40px repeat(auto-fit,60px) 30px',['grid-column:-2'],[[50,0,30,20]]);
+    check('pattern','grid-template-columns:repeat(auto-fit,60px 40px)',['grid-column:4'],[[0,0,40,20]]);
+    var font=check('font','font-size:10px;grid-template-columns:repeat(auto-fit,6em)',['grid-column:-2'],[[0,0,60,20]]);
+    var variable=check('variable','--track:60px;grid-template-columns:repeat(auto-fit,var(--track))',['grid-column:-2'],[[0,0,60,20]]);
+    var inserted=null;
+    document.getElementById('check').addEventListener('click',function(){checks.forEach(function(run){run();});});
+    document.getElementById('change').addEventListener('click',function(){
+        inserted=document.createElement('div');inserted.style.cssText='grid-column:1;grid-row:1';flex.appendChild(inserted);flex.style.width='400px';
+        font.style.fontSize='20px';variable.style.setProperty('--track','80px');
+    });
+    document.getElementById('changed').addEventListener('click',function(){
+        report.setAttribute('data-insert-resize',String(geometry(flex,[[205,0,195,20],[0,0,195,20]])));
+        report.setAttribute('data-font-change',String(geometry(font,[[0,0,120,20]])));
+        report.setAttribute('data-variable-change',String(geometry(variable,[[0,0,80,20]])));
+    });
+    document.getElementById('restore').addEventListener('click',function(){
+        flex.removeChild(inserted);flex.style.width='320px';font.style.fontSize='10px';variable.style.setProperty('--track','60px');
+    });
+    document.getElementById('restored').addEventListener('click',function(){
+        report.setAttribute('data-remove-restore',String(geometry(flex,[[0,0,320,20]])&&geometry(font,[[0,0,60,20]])&&geometry(variable,[[0,0,60,20]])));
+    });
+})();
+</script>

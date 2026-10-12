@@ -1,4 +1,6 @@
 #include "animation_value.hpp"
+#include "../lambda/input/css/css_style.hpp"
+#include "../lib/math_utils.h"
 #include <math.h>
 #include <string.h>
 
@@ -199,4 +201,26 @@ bool animation_track_sample(const AnimationTrackView& track, double time, double
 
 float css_interpolate_float(float a, float b, float t) {
     return a + (b - a) * t;
+}
+
+// gradient paint and CSS effects share the same premultiplied interpolation.
+static inline uint8_t lerp_u8(uint8_t a, uint8_t b, float t) {
+    float v = (float)a + ((float)b - (float)a) * t;
+    return clamp_byte_round(v);
+}
+
+Color css_interpolate_color(Color a, Color b, float t) {
+    Color result = {};
+    // transparent endpoints contribute no color in premultiplied sRGB.
+    float alpha = css_interpolate_float((float)a.a, (float)b.a, t);
+    if (alpha > 0.0f) {
+        result.r = clamp_byte_round(css_interpolate_float((float)a.r * a.a,
+            (float)b.r * b.a, t) / alpha);
+        result.g = clamp_byte_round(css_interpolate_float((float)a.g * a.a,
+            (float)b.g * b.a, t) / alpha);
+        result.b = clamp_byte_round(css_interpolate_float((float)a.b * a.a,
+            (float)b.b * b.a, t) / alpha);
+    }
+    result.a = lerp_u8(a.a, b.a, t);
+    return result;
 }

@@ -720,6 +720,13 @@ const char* dom_element_language(DomElement* element) {
     return dom_document_default_language(element->doc);
 }
 
+static void dom_document_destroy_resource(lam::Own<DomDocumentResource>* link) {
+    DomDocumentResource* resource = *link;
+    *link = resource->next;
+    if (resource->destroy) resource->destroy(resource->data);
+    mem_free(resource);
+}
+
 void DomDocument::destroy() {
     dom_retire_begin_destroy(this);
     mem_free(services.preferred_languages); services.preferred_languages = nullptr;
@@ -753,14 +760,7 @@ void DomDocument::destroy() {
     dom_lifecycle_release_backing_roots(this);
     // Runtime-backed extension values must release their GC roots while the
     // document's retained Lambda runtime is still alive.
-    DomDocumentResource* resource = resources;
-    while (resource) {
-        DomDocumentResource* next = resource->next;
-        if (resource->destroy) resource->destroy(resource->data);
-        mem_free(resource);
-        resource = next;
-    }
-    resources = nullptr;
+    while (resources) dom_document_destroy_resource(&resources);
 
     if (lambda_runtime) {
         if (g_runtime_cleanup_hook) g_runtime_cleanup_hook(lambda_runtime);
@@ -803,13 +803,16 @@ void DomDocument::destroy() {
 }
 
 bool dom_document_add_resource(DomDocument* document, DomDocumentResourceData* data,
-                               DomDocumentResourceDestroyFn destroy) {
+                               DomDocumentResourceDestroyFn destroy, Context* runtime_owner,
+                               DomDocumentResourceDestroyFn retire_runtime) {
     if (!document || !data || !destroy) return false;
     DomDocumentResource* resource = (DomDocumentResource*)mem_calloc(
         1, sizeof(DomDocumentResource), MEM_CAT_LAYOUT);
     if (!resource) return false;
     resource->data = lam::own(data);
     resource->destroy = destroy;
+    resource->runtime_owner = lam::up(runtime_owner);
+    resource->retire_runtime = retire_runtime;
     resource->next = document->resources;
     document->resources = lam::own(resource);
     return true;
@@ -821,14 +824,40 @@ bool dom_document_release_resource(DomDocument* document, DomDocumentResourceDat
     while (*link) {
         DomDocumentResource* resource = *link;
         if (resource->data == data) {
-            *link = resource->next;
-            if (resource->destroy) resource->destroy(resource->data);
-            mem_free(resource);
+            dom_document_destroy_resource(link);
             return true;
         }
         link = &resource->next;
     }
     return false;
+}
+
+bool dom_document_bind_resource_runtime(DomDocument* document, DomDocumentResourceData* data,
+        Context* runtime_owner, DomDocumentResourceDestroyFn retire_runtime) {
+    if (!document || !data || !runtime_owner) return false;
+    for (DomDocumentResource* resource = document->resources; resource; resource = resource->next) {
+        if (resource->data != data) continue;
+        if (resource->runtime_owner && resource->runtime_owner != runtime_owner) return false;
+        resource->runtime_owner = lam::up(runtime_owner);
+        resource->retire_runtime = retire_runtime;
+        return true;
+    }
+    return false;
+}
+
+void dom_document_release_runtime_resources(DomDocument* document, Context* runtime_owner) {
+    if (!document || !runtime_owner) return;
+    lam::Own<DomDocumentResource>* link = &document->resources;
+    while (*link) {
+        DomDocumentResource* resource = *link;
+        if (resource->runtime_owner == runtime_owner) {
+            if (!resource->retire_runtime) { dom_document_destroy_resource(link); continue; }
+            // clear the binding before callbacks so repeated retirement cannot unroot twice.
+            resource->runtime_owner = nullptr;
+            resource->retire_runtime(resource->data);
+        }
+        link = &resource->next;
+    }
 }
 
 bool dom_document_set_embedding(DomDocument* embedded, DomDocument* parent,
@@ -1337,9 +1366,9 @@ void dom_element_release_retired_storage(DomElement* element) {
     Element* backing_source = dom_node_registry_backing_source(
         element->doc, static_cast<DomNode*>(element));
     if (element->doc->element_dom_map && backing_source &&
-        element_dom_map_lookup(element->doc->element_dom_map, backing_source) == element) {
+            element_dom_map_lookup(element->doc->element_dom_map, backing_source) == element) {
         // Reconcile lookup values are raw DOM pointers; remove the Lambda key
-        // only while it still names this occurrence, never its replacement.
+        // before recycling, without erasing a newer occurrence's mapping.
         element_dom_map_remove(element->doc->element_dom_map,
                                backing_source);
     }
@@ -2302,7 +2331,7 @@ const char* dom_inline_style_declaration_end(const char* text) {
     return p;
 }
 
-static bool dom_element_uses_quirks_css(const DomElement* element) {
+bool dom_element_uses_quirks_css(const DomElement* element) {
     return element && element->doc &&
         is_quirks_mode((HtmlVersion)element->doc->html_version);
 }
@@ -2862,20 +2891,8 @@ int dom_element_apply_pseudo_element_rule(DomElement* element, CssRule* rule,
     return applied_count;
 }
 
-CssDeclaration* dom_element_get_pseudo_element_value(DomElement* element,
-                                                     CssPropertyCode property_code, int pseudo_element) {
-    if (!element) {
-        return NULL;
-    }
-    if (pseudo_element == PSEUDO_ELEMENT_SELECTION) {
-        CssSelectionStyle* selection = style_epoch_selection_style(element, false);
-        if (!selection) return nullptr;
-        return property_code == CSS_PROPERTY_COLOR
-            ? selection->color.source
-            : property_code == CSS_PROPERTY_BACKGROUND_COLOR
-                ? selection->background_color.source : nullptr;
-    }
-
+StyleTree* dom_element_get_pseudo_style(DomElement* element, int pseudo_element) {
+    if (!element) return nullptr;
     StyleTree* style = nullptr;
 
     if (pseudo_element == 1) {  // PSEUDO_ELEMENT_BEFORE
@@ -2895,6 +2912,25 @@ CssDeclaration* dom_element_get_pseudo_element_value(DomElement* element,
     } else if (pseudo_element == 9) {  // PSEUDO_ELEMENT_FILE_SELECTOR_BUTTON
         style = element->pseudo_style(PSEUDO_STYLE_FILE_SELECTOR_BUTTON);
     }
+
+    return style;
+}
+
+CssDeclaration* dom_element_get_pseudo_element_value(DomElement* element,
+                                                     CssPropertyCode property_code, int pseudo_element) {
+    if (!element) {
+        return NULL;
+    }
+    if (pseudo_element == PSEUDO_ELEMENT_SELECTION) {
+        CssSelectionStyle* selection = style_epoch_selection_style(element, false);
+        if (!selection) return nullptr;
+        return property_code == CSS_PROPERTY_COLOR
+            ? selection->color.source
+            : property_code == CSS_PROPERTY_BACKGROUND_COLOR
+                ? selection->background_color.source : nullptr;
+    }
+
+    StyleTree* style = dom_element_get_pseudo_style(element, pseudo_element);
 
     if (!style) {
         return NULL;
@@ -4412,11 +4448,34 @@ void element_dom_map_remove(HashMap* map, Element* elem) {
     ElementDomMap::erase(map, key);
 }
 
+void dom_rebind_equal_render_result(DomDocument* doc, Item previous, Item current) {
+    // RAW_ITEM_EQ_OK: unchanged evaluator addresses need no identity handoff.
+    if (!doc || !doc->element_dom_map || previous.item == current.item) return;
+    TypeId kind = get_type_id(previous);
+    if (kind != get_type_id(current)) return;
+    if (kind == LMD_TYPE_ELEMENT) {
+        DomElement* node = element_dom_map_lookup(doc->element_dom_map, previous.element);
+        if (node && dom_element_render_source(node) == previous.element) {
+            // a no-op rerender still replaces evaluator identities (D4.5.3).
+            element_dom_map_remove(doc->element_dom_map, previous.element);
+            dom_node_registry_set_backing_source(doc, node, current.element);
+            element_dom_map_insert(doc->element_dom_map, current.element, node);
+        }
+    } else if (kind != LMD_TYPE_ARRAY) {
+        return;
+    }
+    List* before = (List*)previous.array;
+    List* after = (List*)current.array;
+    if (!before || !after || before->length != after->length) return;
+    for (int64_t i = 0; i < before->length; i++)
+        dom_rebind_equal_render_result(doc, before->items[i], after->items[i]);
+}
+
 static const int MAX_DOM_BUILD_DEPTH = 512;
 static thread_local int g_dom_build_depth = 0;
 
-static bool dom_element_has_embedded_html_storage(DomDocument* doc, Element* elem) {
-    if (!doc || doc->page_kind != DOM_PAGE_KIND_HTML || !elem) return false;
+static bool dom_element_has_embedded_storage(DomDocument* doc, Element* elem) {
+    if (!doc || !elem || doc->page_kind != DOM_PAGE_KIND_HTML) return false;
     DomElement* storage = element_to_dom_element(elem);
     return dom_document_owns_node_storage(doc, storage) &&
         storage->node_type == DOM_NODE_ELEMENT;
@@ -4432,21 +4491,25 @@ struct DomBuildDepthGuard {
     ~DomBuildDepthGuard() { g_dom_build_depth--; }
 };
 
-static bool dom_build_content_occurrence(Item* slot, DomDocument* doc,
-        DomElement* parent, int depth) {
+static DomElement* build_dom_tree_from_element_impl(Element* elem, Element* source,
+                                                   DomDocument* doc, DomElement* parent, bool copied_for_view);
+
+static bool dom_build_content_occurrence(Item* slot, Item source, DomDocument* doc,
+        DomElement* parent, int depth, bool copied_for_view) {
     if (depth > MAX_DOM_BUILD_DEPTH) return false;
     Item child = *slot;
     TypeId type = get_type_id(child);
     if (type == LMD_TYPE_ELEMENT) {
-        Element* source = child.element;
-        if (!source || !source->type) return false;
-        const char* tag = ((TypeElmt*)source->type)->name.str;
+        Element* value = child.element;
+        if (!value || !value->type) return false;
+        const char* tag = ((TypeElmt*)value->type)->name.str;
         if (dom_is_comment_tag(tag)) {
-            DomComment* comment = DomComment::create(source, parent);
+            DomComment* comment = DomComment::create(value, parent);
             if (comment) dom_append_to_sibling_chain(parent, comment);
             return comment != nullptr;
         }
-        DomElement* occurrence = build_dom_tree_from_element(source, doc, parent);
+        // MarkBuilder already copied the whole graph; retain each evaluator source alongside it.
+        DomElement* occurrence = build_dom_tree_from_element_impl(value, source.element, doc, parent, copied_for_view);
         // DOM readers must observe descendant edits through the mutable occurrence graph.
         if (occurrence && doc->input && doc->input->ui_mode)
             *slot = {.element = dom_element_to_element(occurrence)};
@@ -4473,30 +4536,33 @@ static bool dom_build_content_occurrence(Item* slot, DomDocument* doc,
     if (type == LMD_TYPE_ARRAY) {
         Array* items = child.array;
         if (!items || (items->length > 0 && !items->items)) return false;
-        if (doc->input && doc->input->ui_mode) {
-            // arrays are value children too; rewiring their entries must leave the source intact.
-            Array* copy = (Array*)arena_alloc(doc->input->arena, sizeof(Array));
-            if (!copy) return false;
-            *copy = *items;
-            if (copy->capacity > 0) {
-                copy->items = (Item*)arena_alloc(doc->input->arena,
-                    (size_t)copy->capacity * sizeof(Item));
-                if (!copy->items) return false;
-                memcpy(copy->items, items->items, (size_t)copy->capacity * sizeof(Item));
-            }
-            copy->is_heap = copy->is_static = copy->is_immortal = false;
-            copy->cow_state = 0;
-            *slot = {.array = copy};
-            items = copy;
-        }
         for (int64_t index = 0; index < items->length; index++) {
-            if (!dom_build_content_occurrence(&items->items[index], doc, parent, depth + 1)) return false;
+            if (!dom_build_content_occurrence(&items->items[index], source.array->items[index],
+                    doc, parent, depth + 1, copied_for_view)) return false;
         }
     }
     return true;
 }
 
 DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElement* parent) {
+    if (!elem || !doc) return nullptr;
+    Element* source = elem;
+    bool copied_for_view = false;
+    if (doc->input && doc->input->ui_mode &&
+            !(doc->page_kind == DOM_PAGE_KIND_HTML && dom_element_has_embedded_storage(doc, elem))) {
+        // D4.5.3: copy at the DOM boundary, after evaluation/render-map recording,
+        // so each occurrence owns its embedded links without changing Lambda values.
+        MarkBuilder builder(doc->input);
+        Item copied = builder.deep_copy_for_view({.element = elem});
+        if (get_type_id(copied) != LMD_TYPE_ELEMENT) return nullptr;
+        elem = copied.element;
+        copied_for_view = true;
+    }
+    return build_dom_tree_from_element_impl(elem, source, doc, parent, copied_for_view);
+}
+
+static DomElement* build_dom_tree_from_element_impl(Element* elem, Element* source,
+                                                   DomDocument* doc, DomElement* parent, bool copied_for_view) {
     if (!elem || !doc) {
         log_debug("build_dom_tree_from_element: Invalid arguments\n");
         return nullptr;
@@ -4531,7 +4597,8 @@ DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElem
     // The render map is another observer even when the source's COW bit is clear.
     // Keep pure render values separate from mutable/recyclable DOM occurrences (S12.1.3).
     DomElement* dom_elem;
-    if (dom_element_has_embedded_html_storage(doc, elem)) {
+    // only parsed HTML or a known view copy proves the allocation includes DOM storage.
+    if (copied_for_view || dom_element_has_embedded_storage(doc, elem)) {
         dom_elem = element_to_dom_element(elem);
         dom_move_source_occurrence(dom_elem, parent);
         dom_elem = DomElement::create_in(dom_elem, doc, tag_name, elem);
@@ -4539,6 +4606,8 @@ DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElem
         dom_elem = DomElement::create(doc, tag_name, elem);
     }
     if (!dom_elem) return nullptr;
+    // event dispatch and incremental rebuilds still address the evaluator's result.
+    if (source != elem) dom_node_registry_set_backing_source(doc, dom_elem, source);
 
     // The HTML tree builder creates a direct form child while in table mode
     // solely to retain the form-owner pointer. Chromium keeps that node out of
@@ -4550,7 +4619,7 @@ DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElem
 
     // populate element-to-DOM map if available (for incremental rebuild)
     if (doc->element_dom_map) {
-        element_dom_map_insert(doc->element_dom_map, elem, dom_elem);
+        element_dom_map_insert(doc->element_dom_map, source, dom_elem);
     }
 
     // Extract source line number if tracked during HTML5 parsing
@@ -4670,7 +4739,8 @@ DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElem
     Element* backing = dom_element_to_element(dom_elem);
     if (backing->length > 0 && !backing->items) return nullptr;
     for (int64_t index = 0; index < backing->length; index++) {
-        if (!dom_build_content_occurrence(&backing->items[index], doc, dom_elem, 0)) return nullptr;
+        if (!dom_build_content_occurrence(&backing->items[index], source->items[index],
+                doc, dom_elem, 0, copied_for_view)) return nullptr;
     }
 
     return dom_elem;

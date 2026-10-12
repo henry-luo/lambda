@@ -212,6 +212,10 @@
         },
         {
           "type": "SYMBOL",
+          "name": "grammar_stam"
+        },
+        {
+          "type": "SYMBOL",
           "name": "assign_stam"
         },
         {
@@ -299,6 +303,10 @@
         {
           "type": "SYMBOL",
           "name": "type_stam"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "grammar_stam"
         },
         {
           "type": "SYMBOL",
@@ -2112,6 +2120,10 @@
         {
           "type": "STRING",
           "value": "open"
+        },
+        {
+          "type": "STRING",
+          "value": "grammar"
         },
         {
           "type": "SYMBOL",
@@ -11163,6 +11175,99 @@
         }
       ]
     },
+    "grammar_stam": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "CHOICE",
+          "members": [
+            {
+              "type": "FIELD",
+              "name": "pub",
+              "content": {
+                "type": "STRING",
+                "value": "pub"
+              }
+            },
+            {
+              "type": "BLANK"
+            }
+          ]
+        },
+        {
+          "type": "STRING",
+          "value": "grammar"
+        },
+        {
+          "type": "FIELD",
+          "name": "name",
+          "content": {
+            "type": "SYMBOL",
+            "name": "identifier"
+          }
+        },
+        {
+          "type": "FIELD",
+          "name": "body",
+          "content": {
+            "type": "SYMBOL",
+            "name": "grammar_body"
+          }
+        }
+      ]
+    },
+    "grammar_body": {
+      "type": "TOKEN",
+      "content": {
+        "type": "SEQ",
+        "members": [
+          {
+            "type": "STRING",
+            "value": "{"
+          },
+          {
+            "type": "REPEAT",
+            "content": {
+              "type": "CHOICE",
+              "members": [
+                {
+                  "type": "PATTERN",
+                  "value": "[^{}\"'\\/]+"
+                },
+                {
+                  "type": "PATTERN",
+                  "value": "\"([^\"\\\\\\n]|\\\\.)*\""
+                },
+                {
+                  "type": "PATTERN",
+                  "value": "'([^'\\\\\\n]|\\\\.)*'"
+                },
+                {
+                  "type": "PATTERN",
+                  "value": "\\/\\/[^\\n]*"
+                },
+                {
+                  "type": "PATTERN",
+                  "value": "\\/\\*([^*]|\\*+[^*\\/])*\\*+\\/"
+                },
+                {
+                  "type": "PATTERN",
+                  "value": "\\/"
+                },
+                {
+                  "type": "PATTERN",
+                  "value": "\\{[^{}]*\\}"
+                }
+              ]
+            }
+          },
+          {
+            "type": "STRING",
+            "value": "}"
+          }
+        ]
+      }
+    },
     "that_constraint": {
       "type": "PREC_RIGHT",
       "value": 0,
@@ -12383,6 +12488,10 @@
       {
         "type": "STRING",
         "value": "open"
+      },
+      {
+        "type": "STRING",
+        "value": "grammar"
       },
       {
         "type": "STRING",

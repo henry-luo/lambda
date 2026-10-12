@@ -38,6 +38,7 @@
 #include <gtest/gtest.h>
 #include "../lib/file.h"
 #include "../lib/mem.h"
+#include "../lib/windows_compat.h"
 
 #include <ctype.h>
 #include <dirent.h>
@@ -286,11 +287,11 @@ static CommandResult run_html_fixture_script(const char* html_path, const char* 
     return run_command_capture(command);
 }
 
-static bool rasterize_fixture_pdf(const char* pdf_path, const char* png_path) {
+static bool rasterize_fixture_pdf(const char* pdf_path, const char* png_path, float pixel_ratio = 1.0f) {
     char qpdf[PATH_MAX + 8], qpng[PATH_MAX + 8], command[PATH_MAX * 3 + 128];
     shell_quote(pdf_path, qpdf, sizeof(qpdf));
     shell_quote(png_path, qpng, sizeof(qpng));
-    if (command_exists("sips")) {
+    if (pixel_ratio == 1.0f && command_exists("sips")) {
         snprintf(command, sizeof(command), "sips -s format png %s --out %s >/dev/null 2>&1", qpdf, qpng);
     } else if (command_exists("pdftoppm")) {
         char prefix[PATH_MAX], qprefix[PATH_MAX + 8];
@@ -299,7 +300,8 @@ static bool rasterize_fixture_pdf(const char* pdf_path, const char* png_path) {
         if (length < 4 || strcmp(prefix + length - 4, ".png") != 0) return false;
         prefix[length - 4] = '\0';
         shell_quote(prefix, qprefix, sizeof(qprefix));
-        snprintf(command, sizeof(command), "pdftoppm -png -f 1 -l 1 -singlefile -r 72 %s %s >/dev/null 2>&1", qpdf, qprefix);
+        snprintf(command, sizeof(command), "pdftoppm -png -f 1 -l 1 -singlefile -r %g %s %s >/dev/null 2>&1",
+                 72.0f * pixel_ratio, qpdf, qprefix);
     } else return false;
     int status = system(command);
     return WIFEXITED(status) && WEXITSTATUS(status) == 0;
@@ -711,6 +713,7 @@ static void compare_pngs(const char* reference_path, const char* lambda_path,
 }
 
 static void expect_pngs_exactly_equal(const char* expected_path, const char* actual_path) {
+    SCOPED_TRACE(actual_path);
     ImageData expected;
     ImageData actual;
     ASSERT_TRUE(load_png_rgba(expected_path, &expected))
@@ -747,6 +750,21 @@ static void expect_pngs_exactly_equal(const char* expected_path, const char* act
     image_free(actual.pixels);
 }
 
+static void expect_png_channel_coverage(const char* path, unsigned channel,
+        unsigned comparison_mask, size_t minimum) {
+    ImageData image; ASSERT_TRUE(load_png_rgba(path, &image));
+    size_t colored = 0;
+    for (size_t pixel = 0; pixel < (size_t)image.width * image.height; pixel++) {
+        const unsigned char* color = image.pixels + pixel * 4;
+        bool selected = color[3] != 0;
+        for (unsigned other = 0; other < 3; other++)
+            if ((comparison_mask & (1u << other)) && color[channel] <= color[other]) selected = false;
+        if (selected) colored++;
+    }
+    image_free(image.pixels);
+    EXPECT_GE(colored, minimum) << path;
+}
+
 static bool render_paged_parity_variant(const char* stem, const char* html,
         char* preview, PdfFileInfo* pdf, const char* preview_options = "--paged --block-remote-resources --page-grid 1x6") {
     char path[PATH_MAX]; snprintf(path, sizeof(path), "temp/render_output_parity/%s.html", stem);
@@ -771,34 +789,85 @@ static void expect_paged_pair_output_parity(char previews[2][PATH_MAX], PdfFileI
     }
 }
 
-static void expect_html_pair_output_parity(const char* name, const char* actual, const char* reference) {
+static void expect_html_pair_output_parity(const char* name, const char* actual, const char* reference,
+        bool svg_pixels = false, int pixel_ratio = 1) {
     ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
     const char* sources[] = {actual, reference};
     char png_paths[2][PATH_MAX], pdf_png_paths[2][PATH_MAX], svg_paths[2][PATH_MAX];
     bool pdf_available = command_exists("sips") || command_exists("pdftoppm");
+    char options[64];
+    snprintf(options, sizeof(options), "--pixel-ratio %d", pixel_ratio);
     for (size_t i = 0; i < 2; i++) {
         char html_path[PATH_MAX], pdf_path[PATH_MAX];
         const char* suffix = i ? "_reference" : "";
         snprintf(html_path, sizeof(html_path), "temp/render_output_parity/%s%s.html", name, suffix);
         snprintf(png_paths[i], sizeof(png_paths[i]), "temp/render_output_parity/%s%s.png", name, suffix);
         snprintf(svg_paths[i], sizeof(svg_paths[i]), "temp/render_output_parity/%s%s.svg", name, suffix);
-        ASSERT_TRUE(render_html_fixture(html_path, png_paths[i], sources[i]));
-        ASSERT_TRUE(render_document_fixture(html_path, svg_paths[i]));
+        ASSERT_TRUE(render_html_fixture(html_path, png_paths[i], sources[i], options));
+        ASSERT_TRUE(render_document_fixture(html_path, svg_paths[i], options));
         if (pdf_available) {
             snprintf(pdf_path, sizeof(pdf_path), "temp/render_output_parity/%s%s.pdf", name, suffix);
             snprintf(pdf_png_paths[i], sizeof(pdf_png_paths[i]), "temp/render_output_parity/%s%s_pdf.png", name, suffix);
-            ASSERT_TRUE(render_document_fixture(html_path, pdf_path));
-            ASSERT_TRUE(rasterize_fixture_pdf(pdf_path, pdf_png_paths[i]));
+            ASSERT_TRUE(render_document_fixture(html_path, pdf_path, options));
+            ASSERT_TRUE(rasterize_fixture_pdf(pdf_path, pdf_png_paths[i], (float)pixel_ratio));
         }
     }
     expect_pngs_exactly_equal(png_paths[1], png_paths[0]);
     if (pdf_available) expect_pngs_exactly_equal(pdf_png_paths[1], pdf_png_paths[0]);
+    if (svg_pixels) {
+        // hidden contents may remove an empty group without changing exported pixels.
+        ASSERT_TRUE(command_exists("rsvg-convert"));
+        char paths[2][PATH_MAX];
+        for (size_t i = 0; i < 2; i++) {
+            snprintf(paths[i], sizeof(paths[i]), "temp/render_output_parity/%s_%zu_svg.png", name, i);
+            char command[PATH_MAX * 2 + 64];
+            snprintf(command, sizeof(command), "rsvg-convert -z %d '%s' -o '%s'", pixel_ratio, svg_paths[i], paths[i]);
+            CommandResult result = run_command_capture(command);
+            ASSERT_EQ(result.exit_code, 0) << result.output;
+        }
+        expect_pngs_exactly_equal(paths[1], paths[0]);
+        return;
+    }
     char* svg[2] = {};
     ASSERT_TRUE(file_read_all(svg_paths[0], MEM_CAT_TEMP, &svg[0], nullptr));
     ASSERT_TRUE(file_read_all(svg_paths[1], MEM_CAT_TEMP, &svg[1], nullptr));
     EXPECT_STREQ(svg[0], svg[1]);
     mem_free(svg[0]);
     mem_free(svg[1]);
+}
+
+static void expect_html_css_override_output_parity(const char* name, const char* actual,
+        const char* literal_css) {
+    StrBuf* reference = strbuf_new(); ASSERT_NE(reference, nullptr);
+    strbuf_append_str(reference, actual);
+    strbuf_append_str(reference, "<style>");
+    strbuf_append_str(reference, literal_css);
+    strbuf_append_str(reference, "</style>");
+    // literal computed values verify paint independently of SVG's text/path representation.
+    expect_html_pair_output_parity(name, actual, reference->str, true);
+    strbuf_free(reference);
+}
+
+static void expect_css_pair_flat_and_paged_parity(const char* name, const char* const stems[2],
+        const char* common, const char* const variants[2], const char* body,
+        int pages, const char* preview_options, bool svg_pixels = false) {
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
+    ASSERT_TRUE(ensure_dir(PDF_REF_DIR)); ASSERT_TRUE(command_exists("pdftoppm"));
+    StrBuf* html[2] = {strbuf_new(), strbuf_new()};
+    ASSERT_NE(html[0], nullptr); ASSERT_NE(html[1], nullptr);
+    char previews[2][PATH_MAX]; PdfFileInfo pdfs[2] = {};
+    bool rendered = true;
+    for (size_t i = 0; i < 2; i++) {
+        strbuf_append_str(html[i], common);
+        strbuf_append_str(html[i], variants[i]);
+        strbuf_append_str(html[i], body);
+        bool success = render_paged_parity_variant(stems[i], html[i]->str,
+            previews[i], &pdfs[i], preview_options);
+        EXPECT_TRUE(success); rendered &= success;
+    }
+    if (rendered) expect_paged_pair_output_parity(previews, pdfs, pages, pages);
+    expect_html_pair_output_parity(name, html[0]->str, html[1]->str, svg_pixels);
+    strbuf_free(html[0]); strbuf_free(html[1]);
 }
 
 static void report_pdf_failures(const PdfPageResult* results, int result_count) {
@@ -1899,9 +1968,6 @@ TEST(RenderOutputParity, PagedPercentageHeightsPreserveAutoAndDefiniteContaining
 }
 
 TEST(RenderOutputParity, SizeContainersMatchExplicitGeometryInFlatAndFragmentedExports) {
-    ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
-    ASSERT_TRUE(ensure_dir(PDF_REF_DIR));
-    ASSERT_TRUE(command_exists("pdftoppm"));
     const char* common = "<!doctype html><style>@page{size:180px 80px;margin:0}"
         "html,body,div{margin:0;padding:0}"
         "#outer{container:card / size;width:120px;height:140px;padding:4px;"
@@ -1920,25 +1986,12 @@ TEST(RenderOutputParity, SizeContainersMatchExplicitGeometryInFlatAndFragmentedE
     };
     const char* body = "</style><div id='outer'><div id='target'></div><div id='units'></div>"
         "<div id='inner'><div id='leaf'></div></div></div>";
-    StrBuf* html[2] = {strbuf_new(), strbuf_new()};
-    ASSERT_NE(html[0], nullptr); ASSERT_NE(html[1], nullptr);
-    char previews[2][PATH_MAX]; PdfFileInfo pdfs[2] = {};
     const char* stems[] = {"paged_size_containers", "paged_size_containers_explicit"};
-    for (size_t variant = 0; variant < 2; variant++) {
-        strbuf_append_str(html[variant], common);
-        strbuf_append_str(html[variant], variants[variant]);
-        strbuf_append_str(html[variant], body);
-        EXPECT_TRUE(render_paged_parity_variant(stems[variant], html[variant]->str,
-            previews[variant], &pdfs[variant], "--paged --block-remote-resources --page-grid 1x3"));
-    }
-    expect_paged_pair_output_parity(previews, pdfs, 2, 2);
-    expect_html_pair_output_parity("size_containers", html[0]->str, html[1]->str);
-    strbuf_free(html[0]); strbuf_free(html[1]);
+    expect_css_pair_flat_and_paged_parity("size_containers", stems, common, variants, body, 2,
+        "--paged --block-remote-resources --page-grid 1x3");
 }
 
 TEST(RenderOutputParity, StyleContainedGeneratedTextMatchesLiteralPseudosAcrossOutputs) {
-    ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
-    ASSERT_TRUE(ensure_dir(PDF_REF_DIR)); ASSERT_TRUE(command_exists("pdftoppm"));
     const char* common = "<!doctype html><style>@page{size:180px 40px;margin:0}"
         "html,body,div{margin:0;padding:0;font:14px/20px monospace}body{counter-reset:N 7}"
         ".c{contain:style;counter-increment:N;quotes:'A' 'Z' '1' '9';height:20px}"
@@ -1952,18 +2005,31 @@ TEST(RenderOutputParity, StyleContainedGeneratedTextMatchesLiteralPseudosAcrossO
         ".c span::before{content:'1'}.tail::before{content:'11'}"};
     const char* body = "</style><div class=c><span></span></div><div class=c><span></span></div>"
         "<div class=c><span></span></div><div class=c><span></span></div><div class=tail></div>";
-    StrBuf* html[2] = {strbuf_new(), strbuf_new()};
-    ASSERT_NE(html[0], nullptr); ASSERT_NE(html[1], nullptr);
-    char previews[2][PATH_MAX]; PdfFileInfo pdfs[2] = {};
     const char* stems[] = {"style_containment", "style_containment_literal"};
-    for (size_t i = 0; i < 2; i++) {
-        strbuf_append_str(html[i], common); strbuf_append_str(html[i], overrides[i]); strbuf_append_str(html[i], body);
-        EXPECT_TRUE(render_paged_parity_variant(stems[i], html[i]->str, previews[i], &pdfs[i],
-            "--paged --block-remote-resources --page-grid 1x3"));
-    }
-    expect_paged_pair_output_parity(previews, pdfs, 3, 3);
-    expect_html_pair_output_parity("style_containment", html[0]->str, html[1]->str);
-    strbuf_free(html[0]); strbuf_free(html[1]);
+    expect_css_pair_flat_and_paged_parity("style_containment", stems, common, overrides, body, 3,
+        "--paged --block-remote-resources --page-grid 1x3");
+}
+
+TEST(RenderOutputParity, ContentVisibilityKeepsHiddenBoxesAndPrintsAutoContentsAcrossOutputs) {
+    const char* common = "<!doctype html><style>@page{size:180px 140px;margin:0}"
+        "html,body,section,div{margin:0;padding:0;font:10px/20px Arial}body{counter-reset:N 0}"
+        ".hidden{content-visibility:hidden;width:80px;padding:2px;border:1px solid blue;"
+        "contain-intrinsic-size:none calc(1em + 1em);counter-increment:N 10}"
+        ".hidden::before{content:'Suppressed pseudo'}.hidden div{counter-increment:N 100}"
+        ".automatic{content-visibility:auto;counter-increment:N 1}"
+        ".automatic div{counter-increment:N 100;background:green}"
+        ".tail::before{content:counter(N)}section+section{break-before:page}"
+        "@media print{.hidden{font-size:20px}}";
+    const char* variants[] = {"", ".hidden{content-visibility:visible;height:2em;contain-intrinsic-size:none}"
+        ".hidden>* ,.hidden::before{display:none}.automatic{contain:style}"
+        "section:nth-child(1) .tail::before{content:'11'}section:nth-child(2) .tail::before{content:'22'}"};
+    const char* body = "</style><section><div class=hidden><div>Suppressed child</div></div>"
+        "<div class=automatic>Auto<div>Visible child</div></div><div class=tail>Tail</div></section>"
+        "<section><div class=hidden><div>Suppressed child</div></div>"
+        "<div class=automatic>Auto<div>Visible child</div></div><div class=tail>Tail</div></section>";
+    const char* stems[] = {"paged_content_visibility", "paged_content_visibility_explicit"};
+    expect_css_pair_flat_and_paged_parity("content_visibility", stems, common, variants, body, 2,
+        "--paged --block-remote-resources --page-grid 1x2", true);
 }
 
 TEST(RenderOutputParity, ResponsivePicturePrintSelectionRetainsDensityAndPhysicalPageGeometry) {
@@ -3528,10 +3594,9 @@ TEST(RenderOutputParity, AllInheritUsesParentComputedBoxAndTextValues) {
         "x=\"7.00\" y=\"7.00\" width=\"94.00\" height=\"54.00\" fill=\"rgb(0,128,0)\""));
     EXPECT_TRUE(file_contains_text(svg_path,
         "points=\"7.00,7.00 101.00,7.00 99.00,9.00 9.00,9.00\" fill=\"rgb(0,0,255)\""));
-    EXPECT_TRUE(file_contains_text(svg_path,
-        "fill=\"rgb(255,0,0)\">x</text>"));
-    EXPECT_TRUE(file_contains_text(svg_path,
-        "fill=\"rgb(255,0,0)\">y</text>"));
+    expect_html_css_override_output_parity("all_inherit_literal", html,
+        "#child{display:block;width:80px;height:40px;padding:5px;border:2px solid blue;"
+        "background:green;color:red}#explicit{color:red}");
     EXPECT_FALSE(file_contains_text(svg_path, "data-radiant-fallback=\"effect-raster\""));
 }
 
@@ -3552,8 +3617,9 @@ TEST(RenderOutputParity, AllInheritOpacityAndAllRevertPaint) {
     ASSERT_TRUE(render_html_fixture(html_path, svg_path, html));
     EXPECT_TRUE(file_contains_text(svg_path,
         "<g opacity=\"0.5000\">\n            <rect x=\"0.00\" y=\"0.00\" width=\"20.00\" height=\"20.00\" fill=\"rgb(0,0,255)\""));
-    EXPECT_TRUE(file_contains_text(svg_path,
-        "fill=\"rgb(0,0,0)\">r</text>"));
+    expect_html_css_override_output_parity("all_opacity_revert_literal", html,
+        "#child{display:block;width:20px;height:20px;opacity:.5}"
+        "#revert{display:block;color:black;background:transparent;width:auto;height:auto}");
     EXPECT_FALSE(file_contains_text(svg_path,
         "width=\"30.00\" height=\"10.00\" fill=\"rgb(255,0,0)\""));
 }
@@ -4607,8 +4673,12 @@ TEST(RenderOutputParity, MarkerPseudoFontSizesMeasuredAndPaintedGlyphs) {
     ASSERT_TRUE(render_html_fixture(html_path, svg_path, html));
     EXPECT_TRUE(file_contains_text(svg_path,
         "font-size=\"30\" fill=\"rgb(0,128,0)\" font-weight=\"700\""));
-    EXPECT_TRUE(file_contains_text(svg_path,
-        "font-size=\"10.00\" fill=\"rgb(255,0,0)\">Item</text>"));
+    const char* reference =
+        "<!doctype html><style>html,body{margin:0}"
+        "ol{margin:0;padding-left:80px}li{font:10px Arial;color:red}"
+        "li::marker{font-size:30px;font-weight:bold;color:green}</style>"
+        "<ol><li><span style='font:10px Arial;color:red'>Item</span></li></ol>";
+    expect_html_pair_output_parity("marker_font_literal", html, reference, true);
 
     ASSERT_TRUE(render_html_fixture(html_path, png_path, html));
     ImageData image = {};
@@ -4778,6 +4848,968 @@ TEST(RenderOutputParity, GridTrackMathMatchesLiteralSizesAcrossOutputs) {
     }
 }
 
+struct GridReferenceCase {
+    const char* name;
+    const char* grid;
+    const char* placement;
+    int count;
+    float left[3], width[3];
+    float top[3] = {};
+    float height[3] = {20,20,20};
+};
+
+static void expect_grid_absolute_references(const GridReferenceCase* cases, size_t count) {
+    // absolute boxes independently check used placement, sizing and collapsed gutters.
+    const char* format = "<!doctype html><style>html,body{margin:0}"
+        "#grid{position:relative;display:%s;width:320px;height:60px;gap:10px;"
+        "grid-template-columns:repeat(auto-fit,60px);justify-content:start;align-content:start;%s}"
+        "#grid>div{min-width:0;min-height:0;height:20px}#a{background:green}#b{background:blue}#c{background:red}%s"
+        "</style><div id='grid'>%s</div>";
+    for (size_t index = 0; index < count; index++) {
+        const GridReferenceCase& fixture = cases[index];
+        char actual[4096], reference[4096];
+        StrBuf* nodes = strbuf_new(), *placement = strbuf_new();
+        ASSERT_NE(nodes,nullptr); ASSERT_NE(placement,nullptr);
+        ASSERT_GE(fixture.count,1); ASSERT_LE(fixture.count,3);
+        for (int item = 0; item < fixture.count; item++) {
+            strbuf_append_format(nodes,"<div id='%c'></div>",'a'+item);
+            strbuf_append_format(placement,
+                "#grid>#%c{position:absolute;left:%gpx;top:%gpx;width:%gpx;height:%gpx}",
+                'a'+item,fixture.left[item],fixture.top[item],fixture.width[item],fixture.height[item]);
+        }
+        snprintf(actual, sizeof(actual), format, "grid", fixture.grid, fixture.placement, nodes->str);
+        snprintf(reference, sizeof(reference), format, "block", fixture.grid, placement->str, nodes->str);
+        strbuf_free(nodes); strbuf_free(placement);
+        for (int scale = 1; scale <= 2; scale++) {
+            char name[128];
+            snprintf(name, sizeof(name), "grid_%s_%dx", fixture.name, scale);
+            SCOPED_TRACE(name);
+            expect_html_pair_output_parity(name, actual, reference, true, scale);
+        }
+    }
+}
+
+TEST(RenderOutputParity, GridAutoFitCollapsesTracksAndGuttersAcrossOutputs) {
+    const GridReferenceCase cases[] = {
+        {"last", "", "#a{grid-column:4}", 1, {0}, {60}},
+        {"separated", "", "#a{grid-column:1}#b{grid-column:4}", 2, {0,70}, {60,60}},
+        {"flex", "grid-template-columns:repeat(auto-fit,minmax(60px,1fr));", "#a{grid-column:4}", 1, {0}, {320}},
+        {"negative", "", "#a{grid-column:-2}", 1, {0}, {60}},
+        {"implicit", "", "#a{grid-column:-6}#b{grid-column:4}", 2, {0,10}, {0,60}},
+        {"normal", "justify-content:normal;", "#a{grid-column:-6}#b{grid-column:4}", 2, {0,260}, {250,60}},
+        {"between", "justify-content:space-between;", "#a{grid-column:1}#b{grid-column:4}", 2, {0,260}, {60,60}},
+        {"pattern", "grid-template-columns:repeat(auto-fit,60px 40px);", "#a{grid-column:4}", 1, {0}, {40}},
+        {"row", "width:60px;height:320px;grid-template-columns:60px;grid-template-rows:repeat(auto-fit,60px);", "#a{grid-row:4}", 1, {0}, {60}}
+    };
+    expect_grid_absolute_references(cases, sizeof(cases) / sizeof(cases[0]));
+}
+
+TEST(RenderOutputParity, GridNamedLinesRetainAliasesAndOccurrencesAcrossOutputs) {
+    const GridReferenceCase cases[] = {
+        {"names_aliases", "gap:0;grid-template-columns:[a b]40px[c d]50px[e f];", "#a{grid-column:d / f}", 1, {40}, {50}},
+        {"names_boundary", "gap:0;grid-template-columns:[a]repeat(2,[b]40px[c])[d];", "#a{grid-column:a / c;grid-row:1}#b{grid-column:b 2 / d;grid-row:1}", 2, {0,40}, {40,40}},
+        {"names_positive", "gap:0;grid-template-columns:repeat(3,[s]40px[e]);", "#a{grid-column:s 2 / s 3}", 1, {40}, {40}},
+        {"names_negative", "gap:0;grid-template-columns:repeat(3,[s]40px[e]);", "#a{grid-column:s -2 / s -1}", 1, {40}, {40}},
+        {"names_span", "gap:0;grid-template-columns:repeat(3,[s]40px[e]);", "#a{grid-column:s / span 2 s}", 1, {0}, {80}},
+        {"names_auto_outer", "width:200px;grid-template-columns:[start]20px repeat(auto-fill,[s]40px[e])[repeat-end]30px[end];", "#a{grid-column:repeat-end / end}", 1, {130}, {30}},
+        {"names_auto_fit", "width:200px;grid-template-columns:repeat(auto-fit,[s]40px[e]);", "#a{grid-column:s 3 / e 3}", 1, {0}, {40}},
+        {"names_rows", "gap:0;height:90px;grid-template-columns:40px;grid-template-rows:repeat(3,[s]30px[e]);", "#a{grid-row:s 2 / s 3}", 1, {0}, {40}, {30}},
+        {"names_area", "gap:0;grid-template-columns:[hero-start]30px[hero-end]40px;grid-template-rows:[hero-start]20px[hero-end]20px;", "#a{grid-area:hero}", 1, {0}, {30}}
+    };
+    expect_grid_absolute_references(cases, sizeof(cases) / sizeof(cases[0]));
+}
+
+TEST(RenderOutputParity, GridCapacityRetainsTracksAndAreaGeometryAcrossOutputs) {
+    const GridReferenceCase cases[] = {
+        {"capacity_fixed", "gap:0;grid-template-columns:repeat(80,2px);", "#a{grid-column:75}", 1, {148}, {2}},
+        {"capacity_fill", "gap:0;width:300px;grid-template-columns:repeat(auto-fill,3px);", "#a{grid-column:100}", 1, {297}, {3}},
+        {"capacity_flex", "gap:0;grid-template-columns:repeat(80,minmax(0,1fr));", "#a{grid-column:80}", 1, {316}, {4}},
+        {"capacity_fit", "gap:0;grid-template-columns:repeat(auto-fit,minmax(1px,1fr));", "#a{grid-column:200}", 1, {0}, {320}},
+        {"capacity_areas", "gap:0;grid-template-columns:repeat(20,10px);grid-template-areas:'a b c d e f g h i j k l m n o p q r s t';", "#a{grid-area:t}", 1, {190}, {10}},
+        {"capacity_null", "gap:0;grid-template-columns:none;grid-template-areas:'a . . .';grid-auto-columns:10px;", "#a{grid-column:-2}", 1, {30}, {10}}
+    };
+    expect_grid_absolute_references(cases, sizeof(cases) / sizeof(cases[0]));
+}
+
+TEST(RenderOutputParity, GridAreaValidationAndDecodedCellsReachEveryOutput) {
+    const GridReferenceCase cases[] = {
+        {"areas_rejected", "gap:0;grid-template-columns:none;grid-auto-columns:20px;grid-template-areas:'a a';grid-template-areas:'a a' 'a .';", "#a{grid-column:1/-1}", 1, {0}, {40}},
+        {"areas_computed_invalid", "gap:0;grid-template-columns:none;grid-auto-columns:20px;--areas:'a . a';grid-template-areas:'a a';grid-template-areas:var(--areas);", "#a{grid-column:1/-1}", 1, {0}, {20}},
+        {"areas_decoded_cells", "gap:0;grid-template-columns:none;grid-auto-columns:20px;grid-template-areas:'a...b';", "#a{grid-area:b}", 1, {40}, {20}}
+    };
+    expect_grid_absolute_references(cases, sizeof(cases) / sizeof(cases[0]));
+}
+
+TEST(RenderOutputParity, GridDefinitionShorthandsReachEveryOutput) {
+    const GridReferenceCase cases[] = {
+        {"definition_area", "gap:0;grid:'a b'20px / 30px 40px;", "#a{grid-area:b}", 1, {30}, {40}},
+        {"definition_names", "gap:0;grid-template:[top]'a a'20px[mid][next]'b b'20px[end]/30px 40px;", "#a{grid-row:next / end;grid-column:2}", 1, {30}, {40}, {20}},
+        {"definition_row_flow", "gap:0;grid:auto-flow 20px / 30px 40px;", "", 2, {0,30}, {30,40}},
+        {"definition_column_flow", "gap:0;grid:20px / auto-flow 30px 40px;", "", 2, {0,30}, {30,40}},
+        {"definition_rejected", "gap:0;grid-template:20px / 30px 40px;grid-template:'a . a';", "#a{grid-column:2}", 1, {30}, {40}},
+        {"definition_keeps_auto", "gap:0;grid-auto-rows:7px;grid-auto-columns:9px;grid-auto-flow:column dense;grid-template:'a b';", "#a{grid-area:b}", 1, {9}, {9}},
+        {"definition_resets_auto", "gap:0;grid-auto-rows:7px;grid-auto-columns:9px;grid-auto-flow:column dense;grid:'a a'20px / 30px 30px;", "#a{grid-column:4;width:10px}", 1, {60}, {10}}
+    };
+    expect_grid_absolute_references(cases, sizeof(cases) / sizeof(cases[0]));
+}
+
+TEST(RenderOutputParity, GridCalculatedRepeatCountsReachEveryOutput) {
+    const GridReferenceCase cases[] = {
+        {"repeat_round", "gap:0;grid-template-columns:repeat(calc(1.5),10px);", "#a{grid-column:-2}", 1, {10}, {10}},
+        {"repeat_clamp", "gap:0;grid-template-columns:repeat(calc(-2),10px);", "#a{grid-column:-2}", 1, {0}, {10}},
+        {"repeat_nan", "gap:0;grid-template-columns:repeat(calc(0 / 0),10px);", "#a{grid-column:-2}", 1, {0}, {10}},
+        {"repeat_minmax", "gap:0;grid-template-columns:repeat(clamp(1,2.6,4),10px);", "#a{grid-column:-2}", 1, {20}, {10}},
+        {"repeat_owner_units", "gap:0;font-size:10px;grid-template-columns:repeat(calc(20px / 1em),1em);", "#a{grid-column:-2}", 1, {10}, {10}},
+        {"repeat_variable", "gap:0;--amount:calc(2.5);grid-template-columns:repeat(var(--amount),[s]10px[e]);", "#a{grid-column:s 3 / e 3}", 1, {20}, {10}},
+        {"repeat_literal_rejected", "gap:0;grid-template-columns:40px 40px;grid-template-columns:repeat(2.0,10px);", "#a{grid-column:-2}", 1, {40}, {40}},
+        {"repeat_computed_invalid", "gap:0;grid-auto-columns:7px;--amount:2px;grid-template-columns:40px 40px;grid-template-columns:repeat(var(--amount),10px);", "#a{grid-column:-2}", 1, {0}, {7}},
+        {"repeat_computed_invalid_rows", "gap:0;width:10px;grid-auto-flow:column;grid-auto-rows:7px;--amount:2px;grid-template-columns:10px;grid-template-rows:40px 40px;grid-template-rows:repeat(var(--amount),10px);", "#grid>div{height:auto}#a{grid-row:-2}", 1, {0}, {10}, {0}, {7}}
+    };
+    expect_grid_absolute_references(cases, sizeof(cases) / sizeof(cases[0]));
+}
+
+TEST(RenderOutputParity, GridLockedAxesAndSparseCursorReachEveryOutput) {
+    const char* rows = "gap:2px;width:120px;height:120px;grid-auto-rows:10px;grid-auto-columns:10px;grid-template:repeat(2,10px) / repeat(3,10px);";
+    const char* columns = "gap:2px;width:120px;height:120px;grid-auto-rows:10px;grid-auto-columns:10px;grid-auto-flow:column;grid-template:repeat(3,10px) / repeat(2,10px);";
+    const char* row_locked = "#grid>div{height:auto}#a{grid-area:1/2}#b{grid-row:1;grid-column:span 2}#c{grid-row:1}";
+    const char* row_cursor = "#grid>div{height:auto}#a{grid-area:1/2}#b{grid-column:span 2}#c{grid-column:3}";
+    const char* column_locked = "#grid>div{height:auto}#a{grid-area:2/1}#b{grid-column:1;grid-row:span 2}#c{grid-column:1}";
+    const char* column_cursor = "#grid>div{height:auto}#a{grid-area:2/1}#b{grid-row:span 2}#c{grid-row:3}";
+    const GridReferenceCase cases[] = {
+        {"flow_row_locked",rows,row_locked,3,{12,24,48},{10,22,10},{0,0,0},{10,10,10}},
+        {"flow_row_cursor",rows,row_cursor,3,{12,0,24},{10,22,10},{0,12,12},{10,10,10}},
+        {"flow_column_locked",columns,column_locked,3,{0,0,0},{10,10,10},{12,24,48},{10,22,10}},
+        {"flow_column_cursor",columns,column_cursor,3,{0,12,12},{10,10,10},{12,0,24},{10,22,10}}
+    };
+    expect_grid_absolute_references(cases, sizeof(cases) / sizeof(cases[0]));
+}
+
+TEST(RenderOutputParity, GridLineMathAndDefaultingReachEveryOutput) {
+    const char* tracks = "gap:0;font-size:10px;grid-template:repeat(4,10px) / [Foo]10px[Foo]10px[Foo]10px[Foo]10px[Foo];";
+    const GridReferenceCase cases[] = {
+        {"line_math_owner",tracks,"#a{font-size:20px;grid-column-start:calc(20px / 1em)}",1,{0},{10}},
+        {"line_math_column",tracks,"#a{grid-column-start:3;grid-column:calc(20px / 1em) / span calc(1.6)}",1,{10},{20}},
+        {"line_math_area",tracks,"#grid>div{height:auto}#a{grid-area:calc(20px / 1em) / calc(20px / 1em) / span calc(1.6) / span calc(1.6)}",1,{10},{20},{10},{20}},
+        {"line_math_inherit",tracks,"#grid{grid-column:calc(20px / 1em) / span calc(1.6)}#a{font-size:30px;grid-column:inherit}",1,{10},{20}},
+        {"line_math_variable_invalid",tracks,"#a{--line:0;grid-column:3 / span 2;grid-column:var(--line)}",1,{0},{10}},
+        {"line_math_zero",tracks,"#a{font-size:20px;grid-column-start:calc(20px / 1em - 1)}",1,{0},{10}},
+        {"line_math_unanchored_name",tracks,"#a{grid-column-start:span calc(20px / 1em) Foo}",1,{0},{10}},
+        {"line_math_initial",tracks,"#a{grid-column-start:3;grid-column-start:initial}",1,{0},{10}}
+    };
+    expect_grid_absolute_references(cases,sizeof(cases)/sizeof(cases[0]));
+}
+
+TEST(RenderOutputParity, OverflowEllipsisAndClampMatchExplicitTextAcrossOutputs) {
+    struct Case {const char* name; const char* style; const char* actual; const char* reference; const char* box_style = "";};
+    const Case cases[] = {
+        {"text_overflow_single","text-overflow:ellipsis","ABCDEFGHIJ","ABCD…"},
+        {"text_overflow_mixed","text-overflow:ellipsis",
+            "<span style='color:red'>ABCD</span><span style='color:blue'>EFGHIJ</span>",
+            "<span style='color:red'>ABCD</span>…"},
+        {"text_overflow_clamp","white-space:normal;word-break:break-all;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:1",
+            "ABCDEFGHIJ","ABCD…"},
+        {"text_overflow_clip","text-overflow:clip","ABCDEFGHIJ","ABCDEFGHIJ"},
+        {"text_overflow_fits","text-overflow:ellipsis","ABCD","ABCD"},
+        {"text_overflow_clamp_fits","white-space:normal;word-break:break-all;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:1",
+            "ABCD","ABCD"},
+        {"text_overflow_grapheme","text-overflow:ellipsis","ÁBCDEFGHIJ","ÁBCD…"},
+        {"text_overflow_first_cluster","text-overflow:ellipsis","ABCDEFGHIJ","A","width:8px"},
+        {"text_overflow_block_color","text-overflow:ellipsis","<span style='color:red'>ABCDEFGHIJ</span>","<span style='color:red'>ABCD</span>…","color:blue"},
+        {"text_overflow_absolute_runs","text-overflow:ellipsis",
+            "<span style='color:red;width:999px'>ABCD</span><span style='color:blue'>EFGHIJ</span>",
+            "<span style='color:red'>ABCD</span>…","position:absolute;left:0;top:0"},
+        {"text_overflow_clamp_two_lines","white-space:normal;word-break:break-all;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2",
+            "ABCDEFGHIJKLMNO","ABCDE<br>FGHI…","height:48px"},
+        {"text_overflow_full_transform","text-overflow:ellipsis;text-transform:uppercase","ßabcdefghij","SSAB…"},
+        {"text_overflow_mixed_font_opacity","text-overflow:ellipsis",
+            "<span style='color:red;font-size:30px'>ABCDEFGHIJ</span>",
+            "<span style='color:red;font-size:30px'>AB</span>…","opacity:0.5"},
+        {"text_overflow_mixed_font_filter","text-overflow:ellipsis",
+            "<span style='color:red;font-size:30px'>ABCDEFGHIJ</span>",
+            "<span style='color:red;font-size:30px'>AB</span>…","filter:brightness(1)"}
+    };
+    const char* format = "<!doctype html><meta charset='utf-8'><style>"
+        "@font-face{font-family:FixtureMono;src:url(../../test/layout/data/font/LiberationMono-Regular.ttf)}"
+        "html,body{margin:0;background:white}.box{width:62px;height:24px;"
+        "font:20px/24px FixtureMono;color:black;background:white;overflow:hidden;white-space:nowrap;%s;%s}"
+        "</style><div class=box>%s</div>";
+    for (const Case& item : cases) {
+        char actual[2048], reference[2048];
+        snprintf(actual,sizeof(actual),format,item.box_style,item.style,item.actual);
+        snprintf(reference,sizeof(reference),format,item.box_style,"",item.reference);
+        for (int scale = 1; scale <= 2; scale++) {
+            char name[128];snprintf(name,sizeof(name),"%s_%dx",item.name,scale);
+            SCOPED_TRACE(name);
+            expect_html_pair_output_parity(name,actual,reference,true,scale);
+        }
+    }
+}
+
+TEST(RenderOutputParity, OutlinedHtmlTextRetainsAccessibleNamesWithoutViewerFonts) {
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
+    const char* html_path = "temp/render_output_parity/outlined_html_label.html";
+    const char* svg_path = "temp/render_output_parity/outlined_html_label.svg";
+    const char* html = "<!doctype html><meta charset=utf-8><style>"
+        "@font-face{font-family:PrivateFixture;src:url(../../test/layout/data/font/LiberationMono-Regular.ttf)}"
+        "body{margin:0;font:20px PrivateFixture}</style><span>A &amp; B &lt; C</span>";
+    ASSERT_TRUE(render_html_fixture(html_path, svg_path, html));
+    EXPECT_TRUE(file_contains_text(svg_path, "<title>A &amp; B &lt; C</title>"));
+    EXPECT_TRUE(file_contains_text(svg_path, "<path d=\""));
+    EXPECT_FALSE(file_contains_text(svg_path, "<text "));
+    EXPECT_FALSE(file_contains_text(svg_path, "font-family="));
+}
+
+TEST(RenderOutputParity, OrderedBackgroundLayersAndComponentsAcrossOutputs) {
+    const char* prefix = "<!doctype html><meta charset=utf-8><style>html,body{margin:0;background:white}"
+        ".box{position:relative;width:48px;height:32px;box-sizing:border-box}.patch{position:absolute}</style>";
+    struct Case { const char* name; const char* actual; const char* reference; const char* parent_style = ""; };
+    const Case cases[] = {
+        {"linear_radial", "background:linear-gradient(red,red),radial-gradient(blue,blue)", "background:red"},
+        {"radial_linear", "background:radial-gradient(blue,blue),linear-gradient(red,red)", "background:blue"},
+        {"image_linear_radial", "background-image:linear-gradient(red,red),radial-gradient(blue,blue)", "background:red"},
+        {"image_radial_linear", "background-image:radial-gradient(blue,blue),linear-gradient(red,red)", "background:blue"},
+        {"linear_conic", "background:linear-gradient(red,red),conic-gradient(blue,blue)", "background:red"},
+        {"conic_linear", "background:conic-gradient(blue,blue),linear-gradient(red,red)", "background:blue"},
+        {"multiply", "background:linear-gradient(red,red),radial-gradient(blue,blue);background-blend-mode:multiply", "background:black"},
+        {"isolated_multiply", "background:linear-gradient(red,red);background-blend-mode:multiply", "background:red", "background:blue"},
+        {"nonconstant", "background:linear-gradient(red,blue),radial-gradient(green,green)", "background:linear-gradient(red,blue)"},
+    };
+    for (int scale = 1; scale <= 2; scale++) {
+        for (const Case& item : cases) {
+            char name[128], actual[2048], reference[2048];
+            snprintf(name, sizeof(name), "background_layers_%s_%dx", item.name, scale);
+            SCOPED_TRACE(name);
+            snprintf(actual, sizeof(actual), "%s<div style='%s'><div class=box style='%s'></div></div>", prefix, item.parent_style, item.actual);
+            snprintf(reference, sizeof(reference), "%s<div style='%s'><div class=box style='%s'></div></div>", prefix, item.parent_style, item.reference);
+            expect_html_pair_output_parity(name, actual, reference, true, scale);
+        }
+        const char* geometries[] = {
+            "background:linear-gradient(red,red) left top/12px 12px no-repeat,radial-gradient(blue,blue)",
+            "background-image:none,linear-gradient(red,red),radial-gradient(blue,blue);"
+                "background-size:12px 12px,18px 12px;background-position:0 0,12px 0;background-repeat:no-repeat",
+            "background:none content-box,none padding-box;background-color:red;border:2px solid transparent;padding:4px",
+        };
+        const char* references[] = {
+            "<div class=box style='background:blue'><div class=patch style='left:0;top:0;width:12px;height:12px;background:red'></div></div>",
+            "<div class=box><div class=patch style='left:0;top:0;width:12px;height:12px;background:blue'></div>"
+                "<div class=patch style='left:12px;top:0;width:18px;height:12px;background:red'></div></div>",
+            "<div class=box><div class=patch style='left:2px;top:2px;width:44px;height:28px;background:red'></div></div>",
+        };
+        for (size_t index = 0; index < sizeof(geometries) / sizeof(*geometries); index++) {
+            char name[128], actual[2048], reference[2048];
+            snprintf(name, sizeof(name), "background_components_%zu_%dx", index, scale);
+            SCOPED_TRACE(name);
+            snprintf(actual, sizeof(actual), "%s<div class=box style='%s'></div>", prefix, geometries[index]);
+            snprintf(reference, sizeof(reference), "%s%s", prefix, references[index]);
+            expect_html_pair_output_parity(name, actual, reference, true, scale);
+        }
+    }
+}
+
+TEST(RenderOutputParity, BackgroundShorthandValidationReachesPaintAndComputedFallback) {
+    const char* prefix = "<!doctype html><style>html,body{margin:0;background:white}"
+        ".box{position:relative;width:48px;height:32px}.patch{position:absolute;left:3px;top:5px;"
+        "width:8px;height:4px;background:red}</style>";
+    struct Case { const char* name; const char* declaration; bool transparent; };
+    const Case cases[] = {
+        {"duplicate_images", "background:radial-gradient(green,green) conic-gradient(red,red)!important", false},
+        {"split_position", "background:conic-gradient(green,green) top no-repeat bottom!important", false},
+        {"nonfinal_color", "background:linear-gradient(red,red),blue,radial-gradient(green,green)!important", false},
+        {"invalid_defined_variable", "--bg:linear-gradient(blue,blue) radial-gradient(green,green) red;"
+            "background:var(--bg,linear-gradient(red,red))", true},
+        {"missing_layered_fallback", "background:var(--missing,linear-gradient(red,red) "
+            "3px 5px/8px 4px no-repeat,radial-gradient(blue,blue))", false}
+    };
+    for (const Case& item : cases) for (int scale = 1; scale <= 2; scale++) {
+        char name[128], actual[4096], reference[2048];
+        snprintf(name, sizeof(name), "background_grammar_%s_%dx", item.name, scale);
+        SCOPED_TRACE(name);
+        snprintf(actual, sizeof(actual), "%s<div class=box style='background:linear-gradient(red,red) "
+            "3px 5px/8px 4px no-repeat,radial-gradient(blue,blue);%s'></div>", prefix, item.declaration);
+        snprintf(reference, sizeof(reference), "%s%s", prefix, item.transparent ? "<div class=box></div>" :
+            "<div class=box style='background:blue'><div class=patch></div></div>");
+        expect_html_pair_output_parity(name, actual, reference, true, scale);
+    }
+}
+
+TEST(RenderOutputParity, BackgroundLonghandValidationReachesPaintAndComputedFallback) {
+    const char* prefix = "<!doctype html><style>html,body{margin:0;background:white}"
+        ".box{position:relative;width:48px;height:32px}.patch{position:absolute;left:3px;top:5px;"
+        "width:8px;height:4px;background:red}</style>";
+    struct Case { const char* name; const char* declaration; bool repeated; };
+    const Case cases[] = {
+        {"repeat_alias_pair", "background-repeat:repeat-x round!important", false},
+        {"image_extra_source", "background-image:radial-gradient(green,green) conic-gradient(black,black)!important", false},
+        {"clip_extra_box", "background-clip:text content-box!important", false},
+        {"defined_invalid_repeat", "--repeat:no-repeat none;background-repeat:var(--repeat,no-repeat)", true},
+        {"missing_repeat_fallback", "background-repeat:var(--missing,no-repeat)", false}
+    };
+    for (const Case& item : cases) for (int scale = 1; scale <= 2; scale++) {
+        char name[128], actual[4096], reference[2048];
+        snprintf(name, sizeof(name), "background_longhand_%s_%dx", item.name, scale);
+        SCOPED_TRACE(name);
+        snprintf(actual, sizeof(actual), "%s<div class=box style='background:linear-gradient(red,red) "
+            "3px 5px/8px 4px no-repeat blue;%s'></div>", prefix, item.declaration);
+        snprintf(reference, sizeof(reference), "%s%s", prefix, item.repeated ?
+            "<div class=box style='background:red'></div>" :
+            "<div class=box style='background:blue'><div class=patch></div></div>");
+        expect_html_pair_output_parity(name, actual, reference, true, scale);
+    }
+    for (int scale = 1; scale <= 2; scale++) {
+        char name[128], actual[4096], reference[2048];
+        snprintf(name, sizeof(name), "background_attachment_list_%dx", scale);
+        SCOPED_TRACE(name);
+        snprintf(actual, sizeof(actual), "%s<div class=box style='left:10px;top:8px;"
+            "background-image:linear-gradient(red,red),radial-gradient(blue,blue);"
+            "background-position:12px 10px,0 0;background-size:8px 4px,auto;"
+            "background-repeat:no-repeat;background-attachment:fixed,scroll'></div>", prefix);
+        snprintf(reference, sizeof(reference), "%s<div class=box style='left:10px;top:8px;background:blue'>"
+            "<div class=patch style='left:2px;top:2px'></div></div>", prefix);
+        expect_html_pair_output_parity(name, actual, reference, true, scale);
+    }
+}
+
+TEST(RenderOutputParity, UniformBackgroundTilesPreserveCoverageAndSpaceGapsAcrossOutputs) {
+    const char* full = "<div class=patch style='left:0;top:0;width:48px;height:32px'></div>";
+    const char* row = "<div class=patch style='left:0;top:5px;width:48px;height:4px'></div>";
+    const char* column = "<div class=patch style='left:3px;top:0;width:8px;height:32px'></div>";
+    struct Case { const char* name; const char* kind; const char* size; const char* repeat;
+        const char* position; const char* patches; bool alpha; };
+    const Case cases[] = {
+        {"integer", "linear", "8px 4px", "repeat", "3px 5px", full, false},
+        {"fractional", "linear", "8px 4px", "repeat", "3.5px 5.5px", full, false},
+        {"repeat_x", "linear", "8px 4px", "repeat-x", "3px 5px", row, false},
+        {"repeat_y", "linear", "8px 4px", "repeat-y", "3px 5px", column, false},
+        {"integer_alpha", "linear", "8px 4px", "repeat", "3px 5px", full, true},
+        {"fractional_alpha", "linear", "8px 4px", "repeat", "3.5px 5.5px", full, true},
+        {"repeat_x_alpha", "linear", "8px 4px", "repeat-x", "3px 5px", row, true},
+        {"repeat_y_alpha", "linear", "8px 4px", "repeat-y", "3px 5px", column, true},
+        {"radial", "radial", "8px 4px", "repeat", "3.5px 5.5px", full, false},
+        {"conic", "conic", "8px 4px", "repeat", "3.5px 5.5px", full, false},
+        {"single_space_x", "linear", "30px 4px", "space no-repeat", "right top",
+            "<div class=patch style='left:18px;top:0;width:30px;height:4px'></div>", false},
+        {"single_space_y", "linear", "8px 20px", "no-repeat space", "left bottom",
+            "<div class=patch style='left:0;top:12px;width:8px;height:20px'></div>", false},
+        {"single_space_both", "linear", "30px 20px", "space", "right bottom",
+            "<div class=patch style='left:18px;top:12px;width:30px;height:20px'></div>", false},
+        {"space_columns", "linear", "20px 4px", "space repeat", "3.5px 5.5px",
+            "<div class=patch style='left:0;top:0;width:20px;height:32px'></div>"
+            "<div class=patch style='left:28px;top:0;width:20px;height:32px'></div>", false},
+        {"space_rows", "linear", "8px 12px", "repeat space", "3.5px 5.5px",
+            "<div class=patch style='left:0;top:0;width:48px;height:12px'></div>"
+            "<div class=patch style='left:0;top:20px;width:48px;height:12px'></div>", false}
+    };
+    for (const Case& item : cases) for (int scale = 1; scale <= 2; scale++) {
+        char name[128], prefix[512], actual[2048], reference[2048];
+        const char* color = item.alpha ? "rgba(255,0,0,.5)" : "red";
+        snprintf(name, sizeof(name), "background_uniform_%s_%dx", item.name, scale);
+        SCOPED_TRACE(name);
+        snprintf(prefix, sizeof(prefix), "<!doctype html><style>html,body{margin:0;background:white}"
+            ".box{position:relative;width:48px;height:32px;background:blue}"
+            ".patch{position:absolute;background:%s}</style>", color);
+        snprintf(actual, sizeof(actual), "%s<div class=box style='background-image:%s-gradient(%s,%s);"
+            "background-size:%s;background-repeat:%s;background-position:%s'></div>",
+            prefix, item.kind, color, color, item.size, item.repeat, item.position);
+        snprintf(reference, sizeof(reference), "%s<div class=box>%s</div>", prefix, item.patches);
+        expect_html_pair_output_parity(name, actual, reference, true, scale);
+    }
+}
+
+TEST(RenderOutputParity, RectangularOverflowFillsUseIntersectedGeometryAcrossOutputs) {
+    const char* prefix = "<!doctype html><style>html,body{margin:0;background:white}"
+        ".box{position:relative;width:48px;height:32px;overflow:hidden;background:blue}"
+        ".patch{position:absolute;background:red}</style>";
+    const struct Case { const char* name; const char* actual; const char* reference; } cases[] = {
+        {"right", "<div class=patch style='left:43px;top:23px;width:8px;height:4px'></div>",
+            "<div class=patch style='left:43px;top:23px;width:5px;height:4px'></div>"},
+        {"left", "<div class=patch style='left:-3px;top:5px;width:8px;height:4px'></div>",
+            "<div class=patch style='left:0;top:5px;width:5px;height:4px'></div>"},
+        {"bottom", "<div class=patch style='left:3px;top:30px;width:8px;height:4px'></div>",
+            "<div class=patch style='left:3px;top:30px;width:8px;height:2px'></div>"},
+        {"corner", "<div class=patch style='left:43px;top:30px;width:8px;height:4px'></div>",
+            "<div class=patch style='left:43px;top:30px;width:5px;height:2px'></div>"},
+        {"empty", "<div class=patch style='left:50px;top:5px;width:8px;height:4px'></div>", ""},
+        {"nested", "<div style='position:absolute;left:4px;top:4px;width:40px;height:24px;overflow:hidden'>"
+            "<div class=patch style='left:35px;top:18px;width:8px;height:10px'></div></div>",
+            "<div class=patch style='left:39px;top:22px;width:5px;height:6px'></div>"}
+    };
+    for (const Case& item : cases) for (int scale = 1; scale <= 2; scale++) {
+        char name[128], actual[2048], reference[2048];
+        snprintf(name, sizeof(name), "rectangular_overflow_%s_%dx", item.name, scale);
+        SCOPED_TRACE(name);
+        snprintf(actual, sizeof(actual), "%s<div class=box>%s</div>", prefix, item.actual);
+        snprintf(reference, sizeof(reference), "%s<div class=box>%s</div>", prefix, item.reference);
+        expect_html_pair_output_parity(name, actual, reference, true, scale);
+    }
+}
+
+TEST(RenderOutputParity, BackgroundComputedComponentReadsReachAuthoredPaintAcrossOutputs) {
+    const char* prefix = "<!doctype html><style>html,body{margin:0;background:white}"
+        ".box{position:relative;width:48px;height:32px;background:blue}"
+        ".patch{position:absolute;background:red}#source{display:none}</style>";
+    const struct Case { const char* name; const char* source; const char* script; const char* patches; } cases[] = {
+        {"shorthand", "font-size:4px;background:linear-gradient(red,red) right 3px bottom 5px/2em 1em no-repeat blue",
+            "box.style.backgroundSize=c.backgroundSize;box.style.backgroundPosition=c.backgroundPosition;box.style.backgroundRepeat=c.backgroundRepeat",
+            "<div class=patch style='left:37px;top:23px;width:8px;height:4px'></div>"},
+        {"owner_resize", "font-size:4px;background-size:2em 1em",
+            "source.style.fontSize='8px';box.style.backgroundSize=c.backgroundSize;box.style.backgroundRepeat='no-repeat'",
+            "<div class=patch style='left:0;top:0;width:16px;height:8px'></div>"},
+        {"nonlinear", "font-size:4px;background-size:max(25%,2em) min(50%,1em);background-position:right max(10%,1em) bottom 1em",
+            "box.style.backgroundSize=c.backgroundSize;box.style.backgroundPosition=c.backgroundPosition;box.style.backgroundRepeat='no-repeat'",
+            "<div class=patch style='left:32px;top:24px;width:12px;height:4px'></div>"},
+        {"invalid_variable", "--repeat:no-repeat none;background-size:8px 4px;background-repeat:var(--repeat,no-repeat)",
+            "box.style.backgroundSize=c.backgroundSize;box.style.backgroundRepeat=c.backgroundRepeat",
+            "<div class=patch style='left:0;top:0;width:48px;height:32px'></div>"}
+    };
+    for (const Case& item : cases) for (int scale = 1; scale <= 2; scale++) {
+        char name[128], actual[3072], reference[2048];
+        snprintf(name, sizeof(name), "background_computed_reads_%s_%dx", item.name, scale);
+        SCOPED_TRACE(name);
+        snprintf(actual, sizeof(actual), "%s<div id=source style='%s'></div>"
+            "<div id=box class=box style='font-size:40px;background-image:linear-gradient(red,red)'></div>"
+            "<script>var source=document.getElementById('source'),box=document.getElementById('box'),c=getComputedStyle(source);%s;</script>",
+            prefix, item.source, item.script);
+        snprintf(reference, sizeof(reference), "%s<div class=box>%s</div>", prefix, item.patches);
+        expect_html_pair_output_parity(name, actual, reference, true, scale);
+    }
+}
+
+TEST(RenderOutputParity, BackgroundAxisPeriodsReachInheritedPaintAcrossOutputs) {
+    const char* prefix = "<!doctype html><meta charset=utf-8><style>html,body{margin:0;background:white}"
+        ".box{position:relative;width:48px;height:32px}.patch{position:absolute;width:4px;height:4px}</style>";
+    const char* positions[] = {"background-position:inherit",
+        "background-position-x:inherit;background-position-y:inherit"};
+    for (int scale = 1; scale <= 2; scale++) for (size_t index = 0; index < 2; index++) {
+        char name[128], actual[2048], reference[2048];
+        snprintf(name, sizeof(name), "background_axis_inherit_%zu_%dx", index, scale);
+        SCOPED_TRACE(name);
+        snprintf(actual, sizeof(actual), "%s<div style='background-image:none,none,none;"
+            "background-position-x:3px,13px;background-position-y:5px,19px,25px'>"
+            "<div class=box style='background-image:linear-gradient(red,red),radial-gradient(blue,blue),"
+            "conic-gradient(green,green),linear-gradient(black,black);background-size:4px 4px;"
+            "background-repeat:no-repeat;%s'></div></div>", prefix, positions[index]);
+        snprintf(reference, sizeof(reference), "%s<div class=box>"
+            "<div class=patch style='left:3px;top:5px;background:red'></div>"
+            "<div class=patch style='left:13px;top:19px;background:blue'></div>"
+            "<div class=patch style='left:3px;top:25px;background:green'></div>"
+            "<div class=patch style='left:13px;top:5px;background:black'></div></div>", prefix);
+        expect_html_pair_output_parity(name, actual, reference, true, scale);
+    }
+}
+
+TEST(RenderOutputParity, BackgroundPositionsAndMathUseTileFreeSpaceAcrossOutputs) {
+    const char* prefix = "<!doctype html><meta charset=utf-8><style>html,body{margin:0;background:white}"
+        ".box{position:relative;width:48px;height:32px;overflow:hidden}"
+        ".patch{position:absolute;width:8px;height:4px;background:red}</style>";
+    struct Case { const char* name; const char* declaration; float x; float y; };
+    const Case cases[] = {
+        {"keyword_order", "background-position:top right", 40, 0},
+        {"keyword_center", "background-position:bottom center", 20, 28},
+        {"four_values", "background-position:right 3px bottom 5px", 37, 23},
+        {"three_values", "background-position:bottom 5px right", 40, 23},
+        {"mixed_math", "background-position:calc(50% + 3px) calc(100% - 5px)", 23, 23},
+        {"axis_offsets", "background-position-x:right 3px;background-position-y:bottom 5px", 37, 23},
+        {"negative_edge", "background-position:right -3px bottom 5px", 43, 23},
+        {"numeric", "background-position:37px 23px", 37, 23},
+        {"nonlinear", "background-position:min(50%,23px) max(25%,10px)", 20, 10},
+        {"nonlinear_edge", "background-position:right min(50%,23px) bottom max(25%,10px)", 20, 18},
+        {"shorthand_edge", "background:linear-gradient(red,red) right 3px bottom 5px/8px 4px no-repeat,none", 37, 23},
+        {"shorthand_math", "background:linear-gradient(red,red) calc(50% + 3px) calc(100% - 5px)/8px 4px no-repeat,none", 23, 23}
+    };
+    for (int scale = 1; scale <= 2; scale++) for (const Case& item : cases) {
+        char name[128], actual[2048], reference[2048];
+        snprintf(name, sizeof(name), "background_position_%s_%dx", item.name, scale);
+        SCOPED_TRACE(name);
+        snprintf(actual, sizeof(actual), "%s<div class=box style='background-image:linear-gradient(red,red),none;"
+            "background-size:8px 4px;background-repeat:no-repeat;%s'></div>", prefix, item.declaration);
+        snprintf(reference, sizeof(reference), "%s<div class=box><div class=patch style='left:%gpx;top:%gpx'></div></div>",
+            prefix, item.x, item.y);
+        expect_html_pair_output_parity(name, actual, reference, true, scale);
+    }
+}
+
+TEST(RenderOutputParity, BackgroundSizesAndMathUsePositioningAreaAcrossOutputs) {
+    const char* prefix = "<!doctype html><meta charset=utf-8><style>html,body{margin:0;background:white}"
+        ".box{position:relative;width:48px;height:32px;font-size:4px;overflow:hidden}"
+        ".patch{position:absolute;left:0;top:0;background:red}</style>";
+    struct Case { const char* name; const char* declaration; float width; float height; const char* geometry = ""; };
+    const Case cases[] = {
+        {"mixed_math", "background-size:calc(50% - 16px) calc(50% - 12px)", 8, 4},
+        {"nonlinear", "background-size:min(50%,8px) max(10%,4px)", 8, 4},
+        {"font_math", "background-size:calc(2em) 4px", 8, 4},
+        {"shorthand_math", "background:linear-gradient(red,red) left top/calc(50% - 16px) calc(50% - 12px) no-repeat,none", 8, 4},
+        {"shorthand_nonlinear", "background:linear-gradient(red,red) left top/min(50%,8px) max(10%,4px) no-repeat,none", 8, 4},
+        {"numeric", "background-size:8px 4px", 8, 4},
+        {"single_auto", "background-size:calc(2em)", 8, 32},
+        {"width_auto", "background-size:auto calc(1em)", 48, 4},
+        {"zero", "background-size:0 0", 0, 0},
+        {"negative_math", "background-size:calc(50% - 30px) 4px", 0, 4},
+        {"clamp", "background-size:clamp(4px,50%,8px) calc(1em)", 8, 4},
+        {"padding_basis", "padding:4px;background-size:calc(50% - 20px) calc(50% - 16px)", 8, 4, "padding:4px"}
+    };
+    for (int scale = 1; scale <= 2; scale++) for (const Case& item : cases) {
+        char name[128], actual[2048], reference[2048];
+        snprintf(name, sizeof(name), "background_size_%s_%dx", item.name, scale);
+        SCOPED_TRACE(name);
+        snprintf(actual, sizeof(actual), "%s<div class=box style='background-image:linear-gradient(red,red),none;"
+            "background-repeat:no-repeat;%s'></div>", prefix, item.declaration);
+        // the reference keeps the same positioning area; a zero-sized image is represented by an absent patch.
+        snprintf(reference, sizeof(reference), "%s<div class=box style='%s'><div class=patch style='display:%s;width:%gpx;height:%gpx'></div></div>",
+            prefix, item.geometry, item.width > 0.0f && item.height > 0.0f ? "block" : "none", item.width, item.height);
+        expect_html_pair_output_parity(name, actual, reference, true, scale);
+    }
+}
+
+TEST(RenderOutputParity, CssImageSetsMatchSelectedNaturalImageSizesAcrossOutputs) {
+    const char* sources[] = {
+        "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAwAAAAMCAIAAADZF8uwAAAAFUlEQVR4nGP4z8BAEBFWMapoABQBAPuQj3FCf3VbAAAAAElFTkSuQmCC",
+        "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABgAAAAYCAIAAABvFaqvAAAAHklEQVR4nGNgaGCgDho1aNSgUYNGDRo1aNSggTcIAMCPIBDDI1JSAAAAAElFTkSuQmCC",
+        "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACQAAAAkCAIAAABuYg/PAAAAKUlEQVR4nO3NMQ0AAAjAsPk3DS44SJP+reaQTCaTyWQymUwmk8lkb7IFG1ELPFY7v9sAAAAASUVORK5CYII="
+    };
+    enum Target { Background, Shorthand, Variable, Content, Pseudo, Inherited };
+    const char* normal = "image-set(url(\"%s\") 1x,url(\"%s\") 2x)";
+    const struct Case { const char* name; const char* pattern; Target target; size_t first = 0, second = 1, third = 2; } cases[] = {
+        {"density", normal, Background},
+        {"reversed", "image-set(url(\"%s\") 2x,url(\"%s\") 1x)", Background, 1, 0},
+        {"unsupported", "image-set(url(\"%s\") 1x type(\"image/unsupported\"),url(\"%s\") 1x type(\"image/png\"),url(\"%s\") 2x type(\"image/png\"))", Background, 2, 0, 1},
+        {"units", "image-set(url(\"%s\") 96dpi,url(\"%s\") 192dpi)", Background},
+        {"default", "image-set(url(\"%s\"),url(\"%s\") 2x)", Background},
+        {"shorthand", normal, Shorthand}, {"variable", normal, Variable},
+        {"content", normal, Content}, {"pseudo", normal, Pseudo}, {"inherited", normal, Inherited}
+    };
+    const char* prefix = "<!doctype html><meta charset=utf-8><style>"
+        "html,body{margin:0;background:white}.box{width:60px;height:30px;background-repeat:no-repeat}"
+        "img{display:block}</style>";
+    for (const Case& item : cases) {
+        for (int scale = 1; scale <= 2; scale++) {
+            char name[128], image[2048], actual[4096], reference[2048];
+            snprintf(image, sizeof(image), item.pattern, sources[item.first], sources[item.second], sources[item.third]);
+            snprintf(name, sizeof(name), "css_image_set_%s_%dx", item.name, scale);
+            SCOPED_TRACE(name);
+            if (item.target == Content) {
+                snprintf(actual, sizeof(actual), "%s<div class=box><div style='content:%s'></div></div>", prefix, image);
+            } else if (item.target == Pseudo) {
+                snprintf(actual, sizeof(actual), "%s<style>#image::before{display:block;content:%s}</style><div class=box id=image></div>", prefix, image);
+            } else if (item.target == Inherited) {
+                snprintf(actual, sizeof(actual), "%s<div class=box style='background-image:%s'><div class=box style='background-image:inherit'></div></div>", prefix, image);
+            } else {
+                const char* property = item.target == Shorthand ? "background" : "background-image";
+                const char* suffix = item.target == Shorthand ? " no-repeat" : "";
+                if (item.target == Variable) {
+                    snprintf(actual, sizeof(actual), "%s<div class=box style='--image:%s;background-image:var(--image)'></div>", prefix, image);
+                } else snprintf(actual, sizeof(actual), "%s<div class=box style='%s:%s%s'></div>", prefix, property, image, suffix);
+            }
+            snprintf(reference, sizeof(reference), "%s<div class=box><img width=12 height=12 src='%s'></div>", prefix, sources[scale - 1]);
+            expect_html_pair_output_parity(name, actual, reference, true, scale);
+        }
+    }
+}
+
+TEST(RenderOutputParity, CssImageSetMarkersAndBordersKeepVisiblePixelsAcrossOutputs) {
+    const char* sources[] = {
+        "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAwAAAAMCAIAAADZF8uwAAAAFUlEQVR4nGP4z8BAEBFWMapoABQBAPuQj3FCf3VbAAAAAElFTkSuQmCC",
+        "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABgAAAAYCAIAAABvFaqvAAAAHklEQVR4nGNgaGCgDho1aNSgUYNGDRo1aNSggTcIAMCPIBDDI1JSAAAAAElFTkSuQmCC"
+    };
+    const char* marker_references[] = {sources[0], "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAwAAAAMCAIAAADZF8uwAAAAEklEQVR4nGNgaGAgjEYVDUZFAHVeSAFOg4vRAAAAAElFTkSuQmCC"};
+    const char* prefix = "<!doctype html><meta charset=utf-8><style>html,body{margin:0;background:white}"
+        ".pair{width:120px;height:40px;padding-left:32px;box-sizing:border-box}ul{margin:0;padding:0}"
+        "li{font:20px/40px monospace;height:40px}.border{width:54px;height:24px;border:3px solid blue}"
+        "</style>";
+    const char* names[] = {"list_longhand", "list_shorthand", "list_none", "border_longhand", "border_shorthand", "border_gradient", "border_gradient_filter"};
+    for (bool translated : {false, true}) for (int scale = 1; scale <= 2; scale++) {
+        char image[1024];
+        snprintf(image, sizeof(image), "image-set(url(\"%s\") 1x,url(\"%s\") 2x)", sources[0], sources[1]);
+        for (size_t index = 0; index < sizeof(names) / sizeof(names[0]); index++) {
+            char name[128], actual[4096], reference[4096];
+            snprintf(name, sizeof(name), "css_image_set_parts_%s%s_%dx", names[index],
+                translated ? "_translated" : "", scale);
+            SCOPED_TRACE(name);
+            if (index < 3) {
+                const char* property = index == 1 ? "list-style" : "list-style-image";
+                const char* type = index == 2 ? "list-style-type:none;" : "";
+                snprintf(actual, sizeof(actual), "%s<div class=pair><ul><li style='%s%s:%s'></li></ul></div>",
+                    prefix, type, property, image);
+                snprintf(reference, sizeof(reference), "%s<div class=pair><ul><li style='list-style-image:url(\"%s\")'></li></ul></div>",
+                    prefix, marker_references[scale - 1]);
+            } else {
+                const char* property = index == 3 ? "border-image-source" : "border-image";
+                const char* source = index < 5 ? image :
+                    "image-set(linear-gradient(red,red) 1x,linear-gradient(green,green) 2x)";
+                const char* tail = index == 3 ? ";border-image-slice:25%;border-image-width:auto" : " 25% / auto";
+                snprintf(actual, sizeof(actual), "%s<div class=pair><div class=border style='%s:%s%s'></div></div>",
+                    prefix, property, source, tail);
+                snprintf(reference, sizeof(reference), "%s<div class=pair><div class=border style='border-image-source:url(\"%s\");border-image-slice:25%%;border-image-width:auto'></div></div>",
+                    prefix, marker_references[scale - 1]);
+            }
+            // independent offsets test paint transforms without sharing their implementation.
+            const char* position[] = {
+                translated ? ".pair>ul,.border{transform:translate(8px,4px)}" : "",
+                translated ? ".pair>ul,.border{position:relative;left:8px;top:4px}" : ""
+            };
+            char* documents[] = {actual, reference};
+            for (size_t document = 0; document < 2; document++) {
+                size_t used = strlen(documents[document]);
+                // a retained effect group must keep generated gradient paths and stops alive.
+                snprintf(documents[document] + used, sizeof(actual) - used, "<style>%s%s</style>",
+                    index == 6 ? ".border{filter:brightness(1)}" : "", position[document]);
+            }
+            expect_html_pair_output_parity(name, actual, reference, true, scale);
+            // matching two omitted images is insufficient: every output must retain the selected color area.
+            const char* formats[] = {".png", "_0_svg.png", "_pdf.png"};
+            for (const char* format : formats) {
+                if (strcmp(format, "_pdf.png") == 0 &&
+                        !command_exists("sips") && !command_exists("pdftoppm")) continue;
+                char path[PATH_MAX];
+                snprintf(path, sizeof(path), "temp/render_output_parity/%s%s", name, format);
+                // PDF profiles preserve the selected primary channel's order.
+                expect_png_channel_coverage(path, scale == 1 ? 0 : 1, scale == 1 ? 6 : 5,
+                    (size_t)(index < 3 ? 144 : 504) * scale * scale);
+            }
+        }
+    }
+}
+
+TEST(RenderOutputParity, GradientMarkersKeepPixelsAndTransformsAcrossOutputs) {
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
+    const char* red = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABQAAAAUCAIAAAAC64paAAAAG0lEQVR4nGP4z8BANiJf56jmUc2jmkc1U0UzADHNjoAymaoJAAAAAElFTkSuQmCC";
+    const char* prefix = "<!doctype html><meta charset=utf-8><style>html,body{margin:0;background:white}"
+        "ul{margin:0;padding:0;width:120px;height:40px}"
+        "li{height:40px;font:20px/40px monospace;list-style-position:inside;list-style-type:none}</style>";
+    const char* gradients[] = {
+        "linear-gradient(red,red)", "radial-gradient(red,red)", "conic-gradient(red,red)",
+        "repeating-linear-gradient(red 0px,red 5px)",
+        "repeating-radial-gradient(red 0px,red 5px)",
+        "repeating-conic-gradient(red 0deg,red 45deg)",
+        "repeating-linear-gradient(blue 10px,red 10px)",
+        "repeating-radial-gradient(blue 10px,red 10px)",
+        "repeating-conic-gradient(blue 45deg,red 45deg)",
+        "repeating-linear-gradient(to right,red 0px,red 5px,blue 5px,blue 10px)",
+        "repeating-radial-gradient(circle at 0px 0px,red 0px,red 5px,blue 5px,blue 10px)",
+        "repeating-conic-gradient(red 0deg,red 90deg,blue 90deg,blue 180deg)",
+        "linear-gradient(rgba(255,0,0,.5),rgba(255,0,0,.5))",
+        "radial-gradient(rgba(255,0,0,.5),rgba(255,0,0,.5))",
+        "conic-gradient(rgba(255,0,0,.5),rgba(255,0,0,.5))",
+        "repeating-linear-gradient(rgba(255,0,0,.5) 0px,rgba(255,0,0,.5) 5px)",
+        "repeating-radial-gradient(rgba(255,0,0,.5) 0px,rgba(255,0,0,.5) 5px)",
+        "repeating-conic-gradient(rgba(255,0,0,.5) 0deg,rgba(255,0,0,.5) 45deg)",
+        "repeating-linear-gradient(red 0px,white 0px,blue 0px)",
+        "repeating-radial-gradient(red 0px,white 0px,blue 0px)",
+        "repeating-conic-gradient(red 0deg,white 0deg,blue 0deg)",
+        "repeating-linear-gradient(rgba(0,0,255,0) 0px,red 0px)",
+        "repeating-radial-gradient(rgba(0,0,255,0) 0px,red 0px)",
+        "repeating-conic-gradient(rgba(0,0,255,0) 0deg,red 0deg)",
+        "repeating-linear-gradient(red 0px,white .0025px,blue .01px)"
+    };
+    const char* effects[] = {"", "transform:translate(8px,4px)", "filter:brightness(1)", "backdrop-filter:brightness(1)"};
+    for (size_t kind = 0; kind < sizeof(gradients) / sizeof(*gradients); kind++)
+        for (size_t effect = 0; effect < sizeof(effects) / sizeof(*effects); effect++)
+            for (int scale = 1; scale <= 2; scale++) {
+                char name[96], actual[2048], reference[2048], image[512];
+                snprintf(name, sizeof(name), "gradient_marker_%zu_%zu_%dx", kind, effect, scale);
+                SCOPED_TRACE(name);
+                bool transparent = (kind >= 12 && kind < 18) || (kind >= 21 && kind < 24);
+                const char* backdrop = transparent ? "<style>html,body{background:lime}</style>" : "";
+                snprintf(actual, sizeof(actual), "%s%s<ul><li style='%s;list-style-image:%s'></li></ul>",
+                    prefix, backdrop, effects[effect], gradients[kind]);
+                // independent positioning controls exclude a shared omitted transform.
+                const char* reference_effect = effect == 1 ? "position:relative;left:8px;top:4px" : effects[effect];
+                if (kind >= 6) {
+                    unsigned char pixels[40 * 40 * 4];
+                    for (int y = 0; y < 20 * scale; y++) for (int x = 0; x < 20 * scale; x++) {
+                        float distance = kind == 9 ? (float)x / scale : hypotf((float)x, (float)y) / scale;
+                        bool is_red = kind >= 12 || (kind == 11 ? ((x >= 10 * scale && y < 10 * scale) ||
+                            (x <= 10 * scale && y > 10 * scale))
+                            : fmodf(distance, 10.0f) < 5.0f);
+                        size_t index = ((size_t)y * (size_t)(20 * scale) + (size_t)x) * 4;
+                        // CSS Images 3 averages coincident repeating stops in premultiplied sRGBA.
+                        pixels[index] = kind < 9 ? 128 : kind < 18 ? is_red ? 255 : 0
+                            : kind < 21 ? 191 : kind < 24 ? 255 : 159;
+                        pixels[index + 1] = (kind >= 18 && kind < 21) || kind == 24 ? 128 : 0;
+                        pixels[index + 2] = kind < 9 ? 128 : kind < 18 ? is_red ? 0 : 255
+                            : kind < 21 ? 191 : kind < 24 ? 0 : 223;
+                        pixels[index + 3] = transparent ? 128 : 255;
+                    }
+                    char path[160];
+                    snprintf(path, sizeof(path), "temp/render_output_parity/gradient_marker_pattern_%zu_%dx.png", kind, scale);
+                    ASSERT_TRUE(write_png_rgba(path, pixels, 20 * scale, 20 * scale));
+                    snprintf(image, sizeof(image), "image-set(url(\"gradient_marker_pattern_%zu_%dx.png\") %dx)", kind, scale, scale);
+                } else snprintf(image, sizeof(image), "url(\"%s\")", red);
+                snprintf(reference, sizeof(reference), "%s%s<ul><li style='%s;list-style-image:%s'></li></ul>",
+                    prefix, backdrop, reference_effect, image);
+                expect_html_pair_output_parity(name, actual, reference, true, scale);
+                for (const char* suffix : {".png", "_0_svg.png", "_pdf.png"}) {
+                    char path[PATH_MAX]; snprintf(path, sizeof(path), "temp/render_output_parity/%s%s", name, suffix);
+                    // red remains distinct from white/blue and the transparent controls' green backdrop.
+                    expect_png_channel_coverage(path, 0, transparent ? 4 : kind >= 18 || (kind >= 6 && kind < 9) ? 2 : 6,
+                        (size_t)(kind >= 9 && kind <= 11 ? 150 : 320) * scale * scale);
+                }
+            }
+}
+
+static void expect_canvas_pixels_and_effects(const char* family, const char* draw_script) {
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
+    const struct Effect { const char* actual; const char* reference; bool half_opacity; } effects[] = {
+        {"", "", false},
+        {"transform:translate(4px,4px)", "position:relative;left:4px;top:4px", false},
+        {"filter:brightness(1)", "filter:brightness(1)", false},
+        {"opacity:.5", "", true},
+        {"transform:translate(4px,4px);opacity:.5", "position:relative;left:4px;top:4px", true},
+        {"filter:brightness(1);opacity:.5", "filter:brightness(1)", true}
+    };
+    const char* prefix = "<!doctype html><style>html,body{margin:0;width:60px;height:40px;background:lime}"
+        "canvas,img{display:block;width:48px;height:32px}</style>";
+    for (unsigned alpha : {255u, 128u}) {
+        unsigned char pixels[48 * 32 * 4];
+        for (size_t y = 0; y < 32; ++y) for (size_t x = 0; x < 48; ++x) {
+            size_t index = (y * 48 + x) * 4;
+            pixels[index] = x < 24 ? 255 : 0;
+            pixels[index + 1] = 0;
+            pixels[index + 2] = x < 24 ? 0 : 255;
+            pixels[index + 3] = alpha;
+        }
+        char image_path[160];
+        snprintf(image_path, sizeof(image_path), "temp/render_output_parity/canvas_reference_%u.png", alpha);
+        ASSERT_TRUE(write_png_rgba(image_path, pixels, 48, 32));
+    }
+    for (unsigned alpha : {255u, 128u}) {
+        for (size_t effect = 0; effect < sizeof(effects) / sizeof(*effects); ++effect)
+            for (int density = 1; density <= 2; ++density) {
+                char name[96], actual[2048], reference[1024], script[1024];
+                snprintf(name, sizeof(name), "%s_%u_%zu_%dx", family, alpha, effect, density);
+                SCOPED_TRACE(name);
+                snprintf(script, sizeof(script), draw_script, alpha == 255 ? "1" : ".5");
+                snprintf(actual, sizeof(actual), "%s<canvas id=c width=48 height=32 style='%s'></canvas>"
+                    "<script>%s</script>", prefix, effects[effect].actual, script);
+                // Opaque sources use baked alpha; Poppler rounds a translucent soft mask
+                // plus constant alpha differently from their pre-multiplied mask byte.
+                unsigned reference_alpha = effects[effect].half_opacity && alpha == 255 ? 128 : alpha;
+                snprintf(reference, sizeof(reference), "%s<img src='canvas_reference_%u.png' width=48 height=32 style='%s;%s'>",
+                    prefix, reference_alpha, effects[effect].reference,
+                    effects[effect].half_opacity && alpha == 128 ? "opacity:.5" : "");
+                expect_html_pair_output_parity(name, actual, reference, true, density);
+                for (const char* suffix : {".png", "_0_svg.png", "_pdf.png"}) {
+                    char path[PATH_MAX];
+                    snprintf(path, sizeof(path), "temp/render_output_parity/%s%s", name, suffix);
+                    expect_png_channel_coverage(path, 0, reference_alpha == 255 ? 6 : 4, 600 * density * density);
+                    expect_png_channel_coverage(path, 2, reference_alpha == 255 ? 3 : 1, 600 * density * density);
+                }
+            }
+    }
+}
+
+TEST(RenderOutputParity, Canvas2DPixelsStateAndTransformsAcrossOutputs) {
+    expect_canvas_pixels_and_effects("canvas_pixels",
+        "const ctx=document.getElementById('c').getContext('2d');"
+        "ctx.globalAlpha=%s;ctx.fillStyle='red';ctx.fillRect(0,0,24,32);"
+        "ctx.save();ctx.translate(24,0);ctx.fillStyle='blue';ctx.fillRect(0,0,24,32);ctx.restore();"
+        "if(ctx.fillStyle!=='#ff0000')throw new Error('Canvas restore failed');");
+}
+
+class CanvasWebGlExportTest : public ::testing::Test {
+    char* previous_host = nullptr;
+    void SetUp() override {
+        const char* previous = getenv("LAMBDA_HEADLESS_GLFW_WINDOW");
+        if (previous) {
+            previous_host = (char*)malloc(strlen(previous) + 1);
+            ASSERT_NE(previous_host, nullptr);
+            memcpy(previous_host, previous, strlen(previous) + 1);
+        }
+        // The full native host explicitly permits a hidden GPU context in export processes.
+        ASSERT_EQ(setenv("LAMBDA_HEADLESS_GLFW_WINDOW", "1", 1), 0);
+    }
+    void TearDown() override {
+        if (previous_host) setenv("LAMBDA_HEADLESS_GLFW_WINDOW", previous_host, 1);
+        else unsetenv("LAMBDA_HEADLESS_GLFW_WINDOW");
+        free(previous_host);
+    }
+};
+
+TEST_F(CanvasWebGlExportTest, PixelsAlphaAndEffectsReachEveryOutput) {
+    for (bool premultiplied : {false, true}) for (bool preserved : {false, true}) {
+        char name[64], draw[1024];
+        snprintf(name, sizeof(name), "webgl_pixels_%u_%u", premultiplied, preserved);
+        snprintf(draw, sizeof(draw),
+            "const alpha=%%s;const channel=%s;"
+            "const gl=document.getElementById('c').getContext('webgl2',"
+            "{antialias:false,premultipliedAlpha:%s,preserveDrawingBuffer:%s});"
+            "if(!gl)throw new Error('WebGL context unavailable');"
+            "gl.clearColor(channel,0,0,alpha);gl.clear(gl.COLOR_BUFFER_BIT);"
+            "gl.enable(gl.SCISSOR_TEST);gl.scissor(24,0,24,32);"
+            "gl.clearColor(0,0,channel,alpha);gl.clear(gl.COLOR_BUFFER_BIT);"
+            "if(gl.getError()!==gl.NO_ERROR)throw new Error('WebGL drawing failed');",
+            premultiplied ? "alpha" : "1", premultiplied ? "true" : "false", preserved ? "true" : "false");
+        expect_canvas_pixels_and_effects(name, draw);
+    }
+}
+
+TEST(RenderOutputParity, TextSpacingSurvivesCollapseOverflowAndEffectsAcrossOutputs) {
+    // keep visible glyph groups identical so independent rasterizers compare spacing, not path grouping.
+    const struct Case { const char* name; const char* style; const char* actual; const char* reference; } cases[] = {
+        {"word", "word-spacing:10px", "ab<span> </span>cd", "ab<span class=gap style=\"width:calc(1ch + 10px)\"></span>cd"},
+        {"negative", "word-spacing:-5px", "ab<span> </span>cd", "ab<span class=gap style=\"width:calc(1ch - 5px)\"></span>cd"},
+        {"collapsed", "word-spacing:10px", "ab<span>   </span>cd", "ab<span class=gap style=\"width:calc(1ch + 10px)\"></span>cd"},
+        {"preserved", "white-space:pre;word-spacing:10px", "ab<span>   </span>cd", "ab<span class=gap style=\"width:calc(3ch + 30px)\"></span>cd"},
+        {"opacity", "word-spacing:10px;opacity:.5", "ab<span> </span>cd", "ab<span class=gap style=\"width:calc(1ch + 10px)\"></span>cd"},
+        {"filter", "word-spacing:10px;filter:brightness(1)", "ab<span> </span>cd", "ab<span class=gap style=\"width:calc(1ch + 10px)\"></span>cd"},
+        {"rtl", "width:62px;word-spacing:10px;direction:rtl;text-overflow:ellipsis;color:blue", "<span style=color:red>ab cd efgh</span>", "<span dir=ltr>…<span style=color:red>efgh</span></span>"},
+        {"ltr", "width:62px;word-spacing:10px;text-overflow:ellipsis;color:blue", "<span style=color:red>ab cd efgh</span>", "<span style=color:red>ab<span class=gap style=\"width:calc(1ch + 10px)\"></span></span>…"},
+    };
+    const char* format = "<!doctype html><meta charset=utf-8><style>"
+        "@font-face{font-family:FixtureMono;src:url(../../test/layout/data/font/LiberationMono-Regular.ttf)}"
+        "html,body{margin:0;background:white}.box{width:240px;height:24px;"
+        "font:20px/24px FixtureMono;white-space:nowrap;color:red;overflow:hidden;%s;%s}"
+        ".gap{display:inline-block}</style><div class=box>%s</div>";
+    for (const Case& item : cases) {
+        char actual[2048], reference[2048];
+        snprintf(actual, sizeof(actual), format, item.style, "", item.actual);
+        snprintf(reference, sizeof(reference), format, item.style,
+            "word-spacing:0;text-overflow:clip", item.reference);
+        for (int scale = 1; scale <= 2; scale++) {
+            char name[128]; snprintf(name, sizeof(name), "text_spacing_%s_%dx", item.name, scale);
+            SCOPED_TRACE(name);
+            expect_html_pair_output_parity(name, actual, reference, true, scale);
+        }
+    }
+}
+
+TEST(RenderOutputParity, RtlOverflowMatchesVisibleSuffixesAcrossOutputs) {
+    const struct Case { const char* name; const char* style; const char* actual; const char* reference; } cases[] = {
+        {"basic", "", "<span class=source>ABCDEFGHIJ</span>", "<span dir=ltr>…<span class=source>GHIJ</span></span>"},
+        {"padded", "padding:5px;border:3px solid green", "<span class=source>ABCDEFGHIJ</span>", "<span dir=ltr>…<span class=source>GHIJ</span></span>"},
+        {"fits", "", "<span class=source>ABC</span>", "<span class=source>ABC</span>"},
+        {"clip", "text-overflow:clip", "<span class=source>ABCDEFGHIJ</span>", "<span class=source>ABCDEFGHIJ</span>"},
+        {"first_cluster", "width:8px", "<span class=source>ABCDEFGHIJ</span>", "<span class=source>J</span>"},
+        {"colors", "", "<span style=\"color:green\">ABCDEFGH</span><span class=source>IJ</span>", "<span dir=ltr>…<span style=\"color:green\">GH</span><span class=source>IJ</span></span>"},
+        {"combining", "", "<span class=source>ÁB́ĆD́ÉF́ǴH́ÍJ́</span>", "<span dir=ltr>…<span class=source>ǴH́ÍJ́</span></span>"},
+        {"uppercase", "text-transform:uppercase", "<span class=source>abcdßfghij</span>", "<span dir=ltr>…<span class=source>GHIJ</span></span>"},
+        {"capitalize", "text-transform:capitalize", "<span class=source>abcdefghij</span>", "<span dir=ltr>…<span class=source>ghij</span></span>"},
+        {"word_start", "text-transform:capitalize", "<span class=source>abc ghij</span>", "<span dir=ltr>…<span class=source>Ghij</span></span>"},
+        {"invalid_variable", "text-transform:uppercase;--case:invalid;text-transform:var(--case)", "<span class=source>abcdefghij</span>", "<span dir=ltr>…<span class=source>ghij</span></span>"},
+        {"invalid_literal", "text-transform:lowercase;text-transform:invalid", "<span class=source>ABCDEFGHIJ</span>", "<span dir=ltr>…<span class=source>ghij</span></span>"},
+        {"opacity", "opacity:0.5", "<span class=source>ABCDEFGHIJ</span>", "<span dir=ltr>…<span class=source>GHIJ</span></span>"},
+        {"filter", "filter:brightness(1)", "<span class=source>ABCDEFGHIJ</span>", "<span dir=ltr>…<span class=source>GHIJ</span></span>"},
+    };
+    const char* format = "<!doctype html><meta charset=utf-8><style>"
+        "@font-face{font-family:FixtureMono;src:url(../../test/layout/data/font/LiberationMono-Regular.ttf)}"
+        "html,body{margin:0;background:white}.box{width:62px;height:24px;direction:rtl;"
+        "font:20px/24px FixtureMono;color:blue;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;%s;%s}"
+        ".source{color:red}</style><div class=box>%s</div>";
+    for (const Case& item : cases) {
+        char actual[2048], reference[2048];
+        snprintf(actual, sizeof(actual), format, item.style, "", item.actual);
+        snprintf(reference, sizeof(reference), format, item.style,
+            "text-overflow:clip;text-transform:none", item.reference);
+        for (int scale = 1; scale <= 2; scale++) {
+            char name[128]; snprintf(name, sizeof(name), "rtl_ellipsis_%s_%dx", item.name, scale);
+            SCOPED_TRACE(name);
+            expect_html_pair_output_parity(name, actual, reference, true, scale);
+        }
+    }
+}
+
+TEST(RenderOutputParity, CalculatedLineClampCountsMatchLiteralCountsAcrossOutputs) {
+    const struct Case {
+        const char* name; const char* declaration; const char* count;
+        const char* owner = ""; const char* child = "";
+    } cases[] = {
+        {"rounded", "calc(1.5)", "2"},
+        {"rounded_down", "calc(1.49)", "1"},
+        {"negative_math", "calc(-1)", "1"},
+        {"relative", "calc(40px / 1em)", "2"},
+        {"changed_font", "calc(40px / 1em)", "4", "font-size:10px"},
+        {"cancel_units", "calc(2em / 1em)", "2"},
+        {"typed_division", "calc(20px / 10px)", "2"},
+        {"minimum", "min(1,2)", "1"},
+        {"maximum", "max(-1,0)", "1"},
+        {"clamped", "clamp(1,2.5,4)", "3"},
+        {"invalid_literal", "2.0", "4"},
+        {"invalid_dimension", "2px", "4"},
+        {"variable", "var(--count)", "2", "--count:calc(40px / 1em)"},
+        {"invalid_variable", "var(--count)", "none", "--count:1px"},
+        {"fallback", "var(--missing,calc(40px / 1em))", "2"},
+        {"inherit_owner", "inherit", "2", "-webkit-line-clamp:calc(40px / 1em)", "font-size:30px"}
+    };
+    const char* format = "<!doctype html><meta charset='utf-8'><style>"
+        "@font-face{font-family:FixtureMono;src:url(../../test/layout/data/font/LiberationMono-Regular.ttf)}"
+        "html,body{margin:0;background:white}.owner{font:20px/24px FixtureMono;%s}"
+        ".box{width:62px;overflow:hidden;word-break:break-all;color:blue;"
+        "display:-webkit-box;-webkit-box-orient:vertical;%s;"
+        "-webkit-line-clamp:4;-webkit-line-clamp:%s}"
+        "</style><div class=owner><div class=box><span style='color:red'>"
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcd</span></div></div>";
+    for (const Case& item : cases) {
+        char actual[2048], reference[2048];
+        snprintf(actual,sizeof(actual),format,item.owner,item.child,item.declaration);
+        snprintf(reference,sizeof(reference),format,item.owner,item.child,item.count);
+        for (int scale = 1; scale <= 2; scale++) {
+            char name[128];snprintf(name,sizeof(name),"clamp_math_%s_%dx",item.name,scale);
+            SCOPED_TRACE(name);
+            expect_html_pair_output_parity(name,actual,reference,true,scale);
+        }
+    }
+}
+
+TEST(RenderOutputParity, LegacyBoxClampApplicabilityMatchesVisibleReferences) {
+    const char* full_text = "<span style='color:red'>ABCDEFGHIJKLMNOPQRSTUVWXYZabcd</span>";
+    const char* clamped_text = "<span style='color:red'>ABCDE<br>FGHI</span>…";
+    const struct Case {
+        const char* name; const char* style; bool clamped;
+        const char* reference_display = "block";
+        const char* owner = "";
+        const char* reference_owner = "";
+        const char* content = nullptr;
+        const char* reference_style = "";
+    } cases[] = {
+        {"block", "display:block;-webkit-box-orient:vertical", false},
+        {"default", "display:-webkit-box", false},
+        {"vertical", "display:-webkit-box;-webkit-box-orient:vertical", true},
+        {"horizontal", "display:-webkit-box;-webkit-box-orient:horizontal", false},
+        {"inline", "display:-webkit-inline-box;-webkit-box-orient:vertical", true, "inline-block"},
+        {"flow_root", "display:flow-root;-webkit-box-orient:vertical", false},
+        {"flex", "display:flex;-webkit-box-orient:vertical", false},
+        {"grid", "display:grid;-webkit-box-orient:vertical", false},
+        {"variable", "display:-webkit-box;--axis:vertical;-webkit-box-orient:var(--axis)", true},
+        {"invalid_variable", "display:-webkit-box;--axis:invalid;-webkit-box-orient:var(--axis)", false},
+        {"inline_axis", "display:-webkit-box;-webkit-box-orient:inline-axis", false},
+        {"block_axis", "display:-webkit-box;-webkit-box-orient:block-axis", true},
+        {"inherit_axis", "display:-webkit-box;-webkit-box-orient:inherit", true,
+            "block", "-webkit-box-orient:vertical"},
+        {"unset_axis", "display:-webkit-box;-webkit-box-orient:unset", false,
+            "block", "-webkit-box-orient:vertical"},
+        {"initial_axis", "display:-webkit-box;-webkit-box-orient:initial", false,
+            "block", "-webkit-box-orient:vertical"},
+        {"invalid_declaration", "display:-webkit-box;-webkit-box-orient:vertical;-webkit-box-orient:row", true},
+        {"display_variable", "--display:-webkit-box;display:var(--display);-webkit-box-orient:vertical", true},
+        {"count_none", "display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:none", false},
+        {"inherit_box", "display:inherit;-webkit-box-orient:vertical", true, "block",
+            "display:-webkit-box;-webkit-box-orient:horizontal", "display:flex"},
+        {"children_horizontal", "display:-webkit-box;-webkit-box-orient:horizontal;-webkit-line-clamp:none",
+            false, "flex", "", "", "<i></i><i></i><i></i>", "flex-direction:row"},
+        {"children_vertical", "display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:none",
+            false, "flex", "", "", "<i></i><i></i><i></i>", "flex-direction:column"},
+        {"children_direction", "display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:none;flex-direction:row-reverse",
+            false, "flex", "", "", "<i></i><i></i><i></i>", "flex-direction:column"}
+    };
+    const char* format = "<!doctype html><meta charset='utf-8'><style>"
+        "@font-face{font-family:FixtureMono;src:url(../../test/layout/data/font/LiberationMono-Regular.ttf)}"
+        "html,body{margin:0;background:white}.owner{width:100px;font:20px/24px FixtureMono;%s}"
+        ".box{width:62px;overflow:hidden;word-break:break-all;color:blue;"
+        "-webkit-line-clamp:2;%s}.box>i{display:block;width:20px;height:10px;background:red;flex-shrink:0}"
+        "</style><div class=owner><div class=box>%s</div></div>";
+    for (const Case& item : cases) {
+        char actual[2048], reference[2048], reference_style[128];
+        snprintf(actual,sizeof(actual),format,item.owner,item.style,item.content ? item.content : full_text);
+        snprintf(reference_style,sizeof(reference_style),"display:%s;-webkit-line-clamp:none;%s",item.reference_display,item.reference_style);
+        snprintf(reference,sizeof(reference),format,item.reference_owner,reference_style,
+            item.content ? item.content : item.clamped ? clamped_text : full_text);
+        for (int scale = 1; scale <= 2; scale++) {
+            char name[128];snprintf(name,sizeof(name),"clamp_legacy_%s_%dx",item.name,scale);
+            SCOPED_TRACE(name);
+            expect_html_pair_output_parity(name,actual,reference,true,scale);
+        }
+    }
+}
+
 TEST(RenderOutputParity, FocusedCaretPaintsAuthoredAndInheritedColors) {
     if (!file_exists(LAMBDA_EXE) || access(LAMBDA_EXE, X_OK) != 0) {
         GTEST_SKIP() << "lambda.exe is unavailable";
@@ -4908,12 +5940,9 @@ TEST(RenderOutputParity, UaMonospaceKeepsRelativeHeadingAndPreSizes) {
         "<pre>PRE</pre><h3><code>HEADING</code></h3>"
         "<div style='font-size:20px'><code>FIXED</code></div>";
     ASSERT_TRUE(render_html_fixture(html_path, svg_path, html));
-    EXPECT_TRUE(file_contains_text(svg_path,
-        "font-size=\"13.00\" fill=\"rgb(0,0,0)\">PRE</text>"));
-    EXPECT_TRUE(file_contains_text(svg_path,
-        "font-size=\"15.21\" fill=\"rgb(0,0,0)\" font-weight=\"700\">HEADING</text>"));
-    EXPECT_TRUE(file_contains_text(svg_path,
-        "font-size=\"20.00\" fill=\"rgb(0,0,0)\">FIXED</text>"));
+    // the fixed/default ratio is 13/16; keep its fractional precision in the reference.
+    expect_html_css_override_output_parity("ua_monospace_literal", html,
+        "pre{font-size:13px}h3 code{font-size:81.25%;font-weight:700}div code{font-size:20px}");
 }
 
 TEST(RenderOutputParity, TextUnderlineOffsetMovesRasterLineAndSurvivesSvg) {
@@ -6798,6 +7827,9 @@ TEST(RenderOutputParity, AnimationNeutralEndpointsAndPropertyIntervalsReachPaint
     const char* html_path = "temp/render_output_parity/animation_neutral.html";
     const char* svg = "temp/render_output_parity/animation_neutral.svg";
     bool rendered = render_html_fixture(html_path, svg, html->str);
+    expect_html_css_override_output_parity("animation_neutral_colors_literal", html->str,
+        "#color_to{animation:none;color:rgb(0,64,128)}"
+        "#color_default{animation:none;color:rgb(0,0,128)}");
     strbuf_free(html);
     ASSERT_TRUE(rendered);
     for (size_t index = 0; index < sizeof(cases) / sizeof(cases[0]); index++) {
@@ -6812,8 +7844,6 @@ TEST(RenderOutputParity, AnimationNeutralEndpointsAndPropertyIntervalsReachPaint
     EXPECT_TRUE(file_contains_text(svg, "opacity=\"0.5000\""));
     EXPECT_TRUE(file_contains_text(svg, "transform=\"matrix(1 0 0 1 10 0)\""));
     EXPECT_TRUE(file_contains_text(svg, "transform=\"matrix(1 0 0 1 15 0)\""));
-    EXPECT_TRUE(file_contains_text(svg, "font-size=\"16.00\" fill=\"rgb(0,64,128)\">X</text>"));
-    EXPECT_TRUE(file_contains_text(svg, "font-size=\"16.00\" fill=\"rgb(0,0,128)\">X</text>"));
 
     const char* js_path = "temp/render_output_parity/animation_neutral.js";
     const char* script =
@@ -6867,16 +7897,14 @@ TEST(RenderOutputParity, AnimationTypedOpacityAndColorReachPaintAndCssom) {
     const char* html_path = "temp/render_output_parity/animation_typed_scalar_color.html";
     const char* svg = "temp/render_output_parity/animation_typed_scalar_color.svg";
     bool rendered = render_html_fixture(html_path, svg, html->str);
+    expect_html_css_override_output_parity("animation_typed_colors_literal", html->str,
+        "#color_var{animation:none;color:rgb(128,0,128)}"
+        "#color_current{animation:none;color:rgb(0,0,128)}"
+        "#color_modern{animation:none;color:rgba(128,0,128,.5)}");
     strbuf_free(html);
     ASSERT_TRUE(rendered);
     EXPECT_TRUE(file_contains_text(svg, "opacity=\"0.5000\""));
     EXPECT_TRUE(file_contains_text(svg, "opacity=\"0.4000\""));
-    const char* colors[] = {"rgb(128,0,128)", "rgb(0,0,128)", "rgba(128,0,128,0.502)"};
-    for (const char* color : colors) {
-        char expected[160];
-        snprintf(expected, sizeof(expected), "font-size=\"16.00\" fill=\"%s\">X</text>", color);
-        EXPECT_TRUE(file_contains_text(svg, expected)) << color;
-    }
     const char* js_path = "temp/render_output_parity/animation_typed_scalar_color.js";
     const char* script =
         "for(const id of ['percent','variable','math','hint','clipped_low','clipped_high',"
@@ -9056,4 +10084,236 @@ int main(int argc, char** argv) {
     parse_pdf_render_args(&argc, argv);
     ::testing::InitGoogleTest(&argc, argv);
     return RUN_ALL_TESTS();
+}
+
+TEST(RenderOutputParity, ExplicitRadialRadiiReachEveryImageOutput) {
+    const char* prefix = "<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px;font-size:4px}</style>";
+    const struct { const char* name; const char* prelude; const char* reference; bool repeating; bool selected; } cases[] = {
+        {"ellipse_px", "ellipse 24px 16px", "ellipse closest-side", false, false},
+        {"ellipse_percent", "ellipse 50% 50%", "ellipse closest-side", false, false},
+        {"ellipse_em", "ellipse 6em 4em", "ellipse closest-side", false, false},
+        {"ellipse_math", "ellipse calc(6em) calc(4em)", "ellipse closest-side", false, false},
+        {"ellipse_inferred", "24px 16px", "ellipse closest-side", false, false},
+        {"size_then_shape", "24px 16px ellipse", "ellipse closest-side", false, false},
+        {"circle_px", "circle 16px", "circle closest-side", false, false},
+        {"circle_em", "circle 4em", "circle closest-side", false, false},
+        {"circle_math", "circle calc(4em)", "circle closest-side", false, false},
+        {"circle_inferred", "16px", "circle closest-side", false, false},
+        {"nonlinear_percent", "ellipse min(50%,50%) max(50%,50%)", "ellipse closest-side", false, false},
+        {"nonlinear_length", "ellipse min(6em,24px) max(4em,16px)", "ellipse closest-side", false, false},
+        {"repeat_circle", "circle 16px", "circle closest-side", true, false},
+        {"selected_ellipse", "ellipse 24px 16px", "ellipse closest-side", false, true}
+    };
+    for (const auto& item : cases) for (int scale = 1; scale <= 2; scale++) {
+        char name[128], actual[2048], reference[2048];
+        snprintf(name, sizeof(name), "radial_explicit_%s_%dx", item.name, scale); SCOPED_TRACE(name);
+        const char* function = item.repeating ? "repeating-radial-gradient" : "radial-gradient";
+        const char* stops = item.repeating ? "red 0%,blue 25%" : "red,blue";
+        snprintf(actual, sizeof(actual), "%s<div class=box style='background-image:%s%s(%s at center,%s)%s'></div>",
+            prefix, item.selected ? "image-set(" : "", function, item.prelude, stops, item.selected ? " 1x)" : "");
+        snprintf(reference, sizeof(reference), "%s<div class=box style='background-image:%s(%s at center,%s)'></div>",
+            prefix, function, item.reference, stops);
+        expect_html_pair_output_parity(name, actual, reference, true, scale);
+    }
+}
+
+TEST(RenderOutputParity, GradientCentersReachEveryImageOutput) {
+    const struct { const char* name; const char* actual; const char* reference; } cases[] = {
+        {"radial_edges", "<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:radial-gradient(circle 16px at right 3px bottom 5px,red,blue)\"></div>", "<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:radial-gradient(circle 16px at 45px 27px,red,blue)\"></div>"},
+        {"radial_edges_swapped", "<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:radial-gradient(ellipse 24px 16px at bottom 5px right 3px,red,blue)\"></div>", "<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:radial-gradient(ellipse 24px 16px at 45px 27px,red,blue)\"></div>"},
+        {"radial_percent_edges", "<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:radial-gradient(ellipse 24px 16px at right 50% bottom 50%,red,blue)\"></div>", "<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:radial-gradient(ellipse 24px 16px at center,red,blue)\"></div>"},
+        {"radial_math_center", "<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:radial-gradient(ellipse 24px 16px at calc(25% + 4px) calc(25% + 4px),red,blue)\"></div>", "<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:radial-gradient(ellipse 24px 16px at 16px 12px,red,blue)\"></div>"},
+        {"radial_nonlinear_center", "<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:radial-gradient(ellipse 24px 16px at min(25%,24px) max(25%,4px),red,blue)\"></div>", "<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:radial-gradient(ellipse 24px 16px at 12px 8px,red,blue)\"></div>"},
+        {"radial_owner_edges", "<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:radial-gradient(circle 16px at right calc(1em) bottom calc(2em),red,blue)\"></div>", "<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:radial-gradient(circle 16px at 44px 24px,red,blue)\"></div>"},
+        {"conic_edges", "<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:conic-gradient(from 30deg at right 3px bottom 5px,red,blue,red)\"></div>", "<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:conic-gradient(from 30deg at 45px 27px,red,blue,red)\"></div>"},
+        {"conic_percent_edges", "<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:conic-gradient(at right 50% bottom 50%,red,blue,red)\"></div>", "<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:conic-gradient(at center,red,blue,red)\"></div>"},
+        {"conic_math_center", "<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:conic-gradient(at calc(25% + 4px) calc(25% + 4px),red,blue,red)\"></div>", "<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:conic-gradient(at 16px 12px,red,blue,red)\"></div>"},
+        {"conic_nonlinear_center", "<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:conic-gradient(at min(25%,24px) max(25%,4px),red,blue,red)\"></div>", "<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:conic-gradient(at 12px 8px,red,blue,red)\"></div>"},
+    };
+    for (const auto& item : cases) for (int scale = 1; scale <= 2; scale++) {
+        char name[128]; snprintf(name, sizeof(name), "gradient_center_%s_%dx", item.name, scale);
+        SCOPED_TRACE(name);
+        expect_html_pair_output_parity(name, item.actual, item.reference, true, scale);
+    }
+}
+
+TEST(RenderOutputParity, GradientFunctionAndPreludeCaseReachEveryOutput) {
+    const struct { const char* name; const char* actual; const char* reference; } cases[] = {
+        {"linear", "<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px}</style><div class=box style=\"background-image:LINEAR-GRADIENT(red,blue)\"></div>", "<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px}</style><div class=box style=\"background-image:linear-gradient(red,blue)\"></div>"},
+        {"linear_repeat", "<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px}</style><div class=box style=\"background-image:REPEATING-LINEAR-GRADIENT(red 0%,blue 25%)\"></div>", "<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px}</style><div class=box style=\"background-image:repeating-linear-gradient(red 0%,blue 25%)\"></div>"},
+        {"radial", "<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px}</style><div class=box style=\"background-image:RADIAL-GRADIENT(CIRCLE 16px AT RIGHT 3px BOTTOM 5px,red,blue)\"></div>", "<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px}</style><div class=box style=\"background-image:radial-gradient(circle 16px at 45px 27px,red,blue)\"></div>"},
+        {"radial_repeat", "<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px}</style><div class=box style=\"background-image:REPEATING-RADIAL-GRADIENT(ELLIPSE 24px 16px AT CENTER,red 0%,blue 25%)\"></div>", "<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px}</style><div class=box style=\"background-image:repeating-radial-gradient(ellipse closest-side at center,red 0%,blue 25%)\"></div>"},
+        {"conic", "<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px}</style><div class=box style=\"background-image:CONIC-GRADIENT(FROM 30deg AT RIGHT 3px BOTTOM 5px,red,blue,red)\"></div>", "<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px}</style><div class=box style=\"background-image:conic-gradient(from 30deg at 45px 27px,red,blue,red)\"></div>"},
+        {"conic_repeat", "<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px}</style><div class=box style=\"background-image:REPEATING-CONIC-GRADIENT(AT CENTER,red 0deg,blue 90deg)\"></div>", "<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px}</style><div class=box style=\"background-image:repeating-conic-gradient(at center,red 0deg,blue 90deg)\"></div>"},
+    };
+    for (const auto& item : cases) for (int scale = 1; scale <= 2; scale++) {
+        char name[128]; snprintf(name, sizeof(name), "gradient_case_%s_%dx", item.name, scale);
+        SCOPED_TRACE(name);
+        expect_html_pair_output_parity(name, item.actual, item.reference, true, scale);
+    }
+}
+
+TEST(RenderOutputParity, GradientStopMathAndUsedFixupReachEveryImageOutput) {
+    const struct { const char* name; const char* actual; const char* reference; } cases[] = {
+        {"linear_percent","<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:linear-gradient(to right,red calc(50%),blue 100%)\"></div>","<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:linear-gradient(to right,red 50%,blue 100%)\"></div>"},
+        {"linear_px","<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:linear-gradient(to right,red calc(24px),blue 100%)\"></div>","<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:linear-gradient(to right,red 24px,blue 100%)\"></div>"},
+        {"linear_em","<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:linear-gradient(to right,red calc(6em),blue 100%)\"></div>","<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:linear-gradient(to right,red 24px,blue 100%)\"></div>"},
+        {"linear_mixed","<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:linear-gradient(to right,red calc(25% + 12px),blue 100%)\"></div>","<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:linear-gradient(to right,red 50%,blue 100%)\"></div>"},
+        {"linear_negative","<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:linear-gradient(to right,red calc(-24px),blue 100%)\"></div>","<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:linear-gradient(to right,red -24px,blue 100%)\"></div>"},
+        {"radial_percent","<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:radial-gradient(circle 16px at center,red calc(50%),blue 100%)\"></div>","<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:radial-gradient(circle 16px at center,red 50%,blue 100%)\"></div>"},
+        {"radial_px","<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:radial-gradient(circle 16px at center,red calc(8px),blue 100%)\"></div>","<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:radial-gradient(circle 16px at center,red 8px,blue 100%)\"></div>"},
+        {"conic_angle","<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:conic-gradient(at center,red calc(180deg),blue 360deg)\"></div>","<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:conic-gradient(at center,red 180deg,blue 360deg)\"></div>"},
+        {"conic_turn","<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:conic-gradient(at center,red calc(.5turn),blue 360deg)\"></div>","<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:conic-gradient(at center,red 180deg,blue 360deg)\"></div>"},
+        {"omitted_run","<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:linear-gradient(to right,red calc(24px),white,black,blue)\"></div>","<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:linear-gradient(to right,red 50%,white 66.6666666667%,black 83.3333333333%,blue 100%)\"></div>"},
+        {"backward_mixed","<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:linear-gradient(to right,red 40px,white calc(25%),black,blue 48px)\"></div>","<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:linear-gradient(to right,red 40px,white 40px,black 44px,blue 48px)\"></div>"},
+        {"nonlinear_min","<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"width:96px;background-image:linear-gradient(to right,red min(50%,6em),blue)\"></div>","<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"width:96px;background-image:linear-gradient(to right,red 25%,blue 100%)\"></div>"},
+        {"nonlinear_max","<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:linear-gradient(to right,red max(25%,6em),blue)\"></div>","<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:linear-gradient(to right,red 50%,blue 100%)\"></div>"},
+        {"angular_min","<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:conic-gradient(at center,red min(.5turn,180deg),blue)\"></div>","<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:conic-gradient(at center,red 180deg,blue 360deg)\"></div>"},
+        {"conic_percent","<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:conic-gradient(at center,red calc(25%),blue)\"></div>","<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:conic-gradient(at center,red 90deg,blue 360deg)\"></div>"},
+        {"selected_math","<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:image-set(linear-gradient(to right,red calc(6em),blue 100%) 1x)\"></div>","<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:linear-gradient(to right,red 24px,blue 100%)\"></div>"},
+        {"invalid_dimension","<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:linear-gradient(red,red);background-image:linear-gradient(to right,red calc(30deg),blue)\"></div>","<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:linear-gradient(red,red);background-image:linear-gradient(red,red)\"></div>"},
+        {"invalid_selected","<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:linear-gradient(red,red);background-image:image-set(radial-gradient(circle 16px,red calc(1s),blue) 1x)\"></div>","<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:linear-gradient(red,red);background-image:linear-gradient(red,red)\"></div>"},
+        {"invalid_first_stop","<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:linear-gradient(red,red);background-image:linear-gradient(red calc(30deg),white,blue)\"></div>","<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-image:linear-gradient(red,red);background-image:linear-gradient(red,red)\"></div>"},
+        {"marker_stop","<!doctype html><style>html,body{margin:0;background:white}ul{margin:0;padding-left:24px}li{font-size:20px;line-height:24px}</style><ul><li style=\"list-style-image:linear-gradient(to right,red calc(50%),blue 100%)\">X</li></ul>","<!doctype html><style>html,body{margin:0;background:white}ul{margin:0;padding-left:24px}li{font-size:20px;line-height:24px}</style><ul><li style=\"list-style-image:linear-gradient(to right,red 50%,blue 100%)\">X</li></ul>"},
+        {"border_stop","<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"border:4px solid transparent;border-image-slice:1 fill;border-image-source:linear-gradient(to right,red calc(50%),blue 100%)\"></div>","<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"border:4px solid transparent;border-image-slice:1 fill;border-image-source:linear-gradient(to right,red 50%,blue 100%)\"></div>"},
+    };
+    for (const auto& item : cases) for (int scale = 1; scale <= 2; scale++) {
+        char name[128]; snprintf(name, sizeof(name), "gradient_stop_math_%s_%dx", item.name, scale);
+        SCOPED_TRACE(name);
+        expect_html_pair_output_parity(name, item.actual, item.reference, true, scale);
+        char path[PATH_MAX];
+        snprintf(path, sizeof(path), "temp/render_output_parity/%s.png", name);
+        expect_png_channel_coverage(path, 0, 2, 1);
+        snprintf(path, sizeof(path), "temp/render_output_parity/%s_0_svg.png", name);
+        expect_png_channel_coverage(path, 0, 2, 1);
+        if (command_exists("sips") || command_exists("pdftoppm")) {
+            snprintf(path, sizeof(path), "temp/render_output_parity/%s_pdf.png", name);
+            expect_png_channel_coverage(path, 0, 2, 1);
+        }
+    }
+}
+
+TEST(RenderOutputParity, GradientStopMathReachesRasterMasksAndText) {
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
+    const struct { const char* name; const char* actual; const char* reference; bool mask; } cases[] = {
+        {"mask_stop","<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background:red;mask-image:radial-gradient(circle 16px,black calc(8px),transparent calc(100%))\"></div>","<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background:red;mask-image:radial-gradient(circle 16px,black 8px,transparent 100%)\"></div>",true},
+        {"text_stop","<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-clip:text;color:transparent;background-image:linear-gradient(to right,red calc(2em),blue calc(2em),blue 100%)\">MMMM</div>","<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px;font-size:4px}</style><div class=box style=\"background-clip:text;color:transparent;background-image:linear-gradient(to right,red 8px,blue 8px,blue 100%)\">MMMM</div>",false},
+    };
+    for (const auto& item : cases) for (int scale = 1; scale <= 2; scale++) {
+        char paths[2][PATH_MAX];
+        const char* sources[] = {item.actual, item.reference};
+        for (int variant = 0; variant < 2; variant++) {
+            char html[PATH_MAX], options[64];
+            snprintf(html, sizeof(html), "temp/render_output_parity/gradient_stop_raster_%s_%dx_%d.html", item.name, scale, variant);
+            snprintf(paths[variant], sizeof(paths[variant]), "temp/render_output_parity/gradient_stop_raster_%s_%dx_%d.png", item.name, scale, variant);
+            snprintf(options, sizeof(options), "--pixel-ratio %d", scale);
+            ASSERT_TRUE(render_html_fixture(html, paths[variant], sources[variant], options));
+        }
+        SCOPED_TRACE(paths[0]);
+        expect_pngs_exactly_equal(paths[1], paths[0]);
+        expect_png_channel_coverage(paths[0], 0, 6, 1);
+        if (item.mask) {
+            ImageData image; ASSERT_TRUE(load_png_rgba(paths[0], &image));
+            // a masked corner must clear to the white page, excluding an unmasked red rectangle.
+            EXPECT_EQ(image.pixels[0], 255); EXPECT_EQ(image.pixels[1], 255); EXPECT_EQ(image.pixels[2], 255);
+            image_free(image.pixels);
+        } else expect_png_channel_coverage(paths[0], 2, 3, 1);
+    }
+}
+
+TEST(RenderOutputParity, RadialMaskGroupsReachEveryImageOutput) {
+    const struct { const char* name; const char* actual; const char* reference; bool transparent; bool red; } cases[] = {
+        {"transparent_subtree","<!doctype html><style>html,body{margin:0;background:white}.box{position:relative;width:48px;height:32px;background:red;font-size:4px}.child{position:absolute;right:0;top:0;width:24px;height:32px;background:blue}</style><div class=box style=\"mask-image:radial-gradient(transparent,transparent)\"><div class=child></div></div>","<!doctype html><style>html,body{margin:0;background:white}</style><div style=\"width:48px;height:32px\"></div>",true,false},
+        {"stop_math","<!doctype html><style>html,body{margin:0;background:white}.box{position:relative;width:48px;height:32px;background:red;font-size:4px}.child{position:absolute;right:0;top:0;width:24px;height:32px;background:blue}</style><div class=box style=\"mask-image:radial-gradient(circle 16px,black 0%,black calc(2em),transparent calc(2em),transparent 100%)\"><div class=child></div></div>","<!doctype html><style>html,body{margin:0;background:white}.box{position:relative;width:48px;height:32px;background:red;font-size:4px}.child{position:absolute;right:0;top:0;width:24px;height:32px;background:blue}</style><div class=box style=\"mask-image:radial-gradient(circle 16px,black 0%,black 8px,transparent 8px,transparent 100%)\"><div class=child></div></div>",false,true},
+        {"center_math","<!doctype html><style>html,body{margin:0;background:white}.box{position:relative;width:48px;height:32px;background:red;font-size:4px}.child{position:absolute;right:0;top:0;width:24px;height:32px;background:blue}</style><div class=box style=\"mask-image:radial-gradient(circle 16px at right calc(1em) bottom calc(2em),black 0%,black 50%,transparent 50%,transparent 100%)\"><div class=child></div></div>","<!doctype html><style>html,body{margin:0;background:white}.box{position:relative;width:48px;height:32px;background:red;font-size:4px}.child{position:absolute;right:0;top:0;width:24px;height:32px;background:blue}</style><div class=box style=\"mask-image:radial-gradient(circle 16px at 44px 24px,black 0%,black 50%,transparent 50%,transparent 100%)\"><div class=child></div></div>",false,false},
+        {"opacity_math","<!doctype html><style>html,body{margin:0;background:white}.box{position:relative;width:48px;height:32px;background:red;font-size:4px}.child{position:absolute;right:0;top:0;width:24px;height:32px;background:blue}</style><div class=box style=\"opacity:.5;mask-image:radial-gradient(circle 16px,black 0%,black calc(2em),transparent calc(2em),transparent 100%)\"><div class=child></div></div>","<!doctype html><style>html,body{margin:0;background:white}.box{position:relative;width:48px;height:32px;background:red;font-size:4px}.child{position:absolute;right:0;top:0;width:24px;height:32px;background:blue}</style><div class=box style=\"opacity:.5;mask-image:radial-gradient(circle 16px,black 0%,black 8px,transparent 8px,transparent 100%)\"><div class=child></div></div>",false,true},
+        {"transformed_math","<!doctype html><style>html,body{margin:0;background:white}.box{position:relative;width:48px;height:32px;background:red;font-size:4px}.child{position:absolute;right:0;top:0;width:24px;height:32px;background:blue}</style><div class=box style=\"transform:translate(4px,4px) scale(1.25);transform-origin:0 0;mask-image:radial-gradient(circle 16px,black 0%,black calc(2em),transparent calc(2em),transparent 100%)\"><div class=child></div></div>","<!doctype html><style>html,body{margin:0;background:white}.box{position:relative;width:48px;height:32px;background:red;font-size:4px}.child{position:absolute;right:0;top:0;width:24px;height:32px;background:blue}</style><div class=box style=\"transform:translate(4px,4px) scale(1.25);transform-origin:0 0;mask-image:radial-gradient(circle 16px,black 0%,black 8px,transparent 8px,transparent 100%)\"><div class=child></div></div>",false,true},
+    };
+    for (const auto& item : cases) for (int scale = 1; scale <= 2; scale++) {
+        char name[128]; snprintf(name, sizeof(name), "radial_mask_group_%s_%dx", item.name, scale);
+        SCOPED_TRACE(name);
+        expect_html_pair_output_parity(name, item.actual, item.reference, true, scale);
+        const char* suffixes[] = {".png", "_0_svg.png", "_pdf.png"};
+        for (const char* suffix : suffixes) {
+            if (strcmp(suffix, "_pdf.png") == 0 && !command_exists("sips") && !command_exists("pdftoppm")) continue;
+            char path[PATH_MAX]; snprintf(path, sizeof(path), "temp/render_output_parity/%s%s", name, suffix);
+            ImageData image; ASSERT_TRUE(load_png_rgba(path, &image));
+            // test the translated content corner as well; a white page margin would miss an omitted mask.
+            size_t corner = strcmp(item.name, "transformed_math") == 0 ? 4u * (unsigned)scale : 0;
+            ASSERT_LT(corner, (size_t)image.width); ASSERT_LT(corner, (size_t)image.height);
+            size_t offset = (corner * (size_t)image.width + corner) * 4;
+            EXPECT_EQ(image.pixels[offset], 255); EXPECT_EQ(image.pixels[offset + 1], 255); EXPECT_EQ(image.pixels[offset + 2], 255);
+            image_free(image.pixels);
+            if (!item.transparent) {
+                if (item.red) expect_png_channel_coverage(path, 0, 6, 1);
+                expect_png_channel_coverage(path, 2, 3, 1);
+            }
+        }
+    }
+}
+
+TEST(RenderOutputParity, HiddenAndCollapsedBoxesPreserveVisibleDescendantsAcrossOutputs) {
+    const struct { const char* name; const char* actual; const char* reference; bool blue; } cases[] = {
+        {"hidden_box", "<!doctype html><style>html,body{margin:0;width:60px;height:40px;background:white} .box{width:48px;height:32px;position:relative} .box{background:red;visibility:hidden}</style><div class=box></div>", "<!doctype html><style>html,body{margin:0;width:60px;height:40px;background:white} .box{width:48px;height:32px;position:relative} .box{background:transparent}</style><div class=box></div>", false},
+        {"visible_descendant", "<!doctype html><style>html,body{margin:0;width:60px;height:40px;background:white} .box{width:48px;height:32px;position:relative} .box{background:red;visibility:hidden}.child{position:absolute;left:8px;top:8px;width:16px;height:16px;background:blue;visibility:visible}</style><div class=box><div class=child></div></div>", "<!doctype html><style>html,body{margin:0;width:60px;height:40px;background:white} .box{width:48px;height:32px;position:relative} .box{background:transparent}.child{position:absolute;left:8px;top:8px;width:16px;height:16px;background:blue}</style><div class=box><div class=child></div></div>", true},
+        {"collapse_box", "<!doctype html><style>html,body{margin:0;width:60px;height:40px;background:white} .box{width:48px;height:32px;position:relative} .box{background:red;visibility:collapse}</style><div class=box></div>", "<!doctype html><style>html,body{margin:0;width:60px;height:40px;background:white} .box{width:48px;height:32px;position:relative} .box{background:transparent}</style><div class=box></div>", false},
+        {"hidden_text", "<!doctype html><style>html,body{margin:0;width:60px;height:40px;background:white} .box{width:48px;height:32px;position:relative} .box{font:20px Arial;color:red;visibility:hidden}</style><div class=box>MASK</div>", "<!doctype html><style>html,body{margin:0;width:60px;height:40px;background:white} .box{width:48px;height:32px;position:relative} .box{font:20px Arial;color:transparent}</style><div class=box>MASK</div>", false},
+        {"hidden_inline", "<!doctype html><style>html,body{margin:0;width:60px;height:40px;background:white} .box{width:48px;height:32px;position:relative} .box{font:20px Arial}.hide{visibility:hidden;color:red}</style><div class=box><span class=hide>AB</span><span style=\"color:blue\">C</span></div>", "<!doctype html><style>html,body{margin:0;width:60px;height:40px;background:white} .box{width:48px;height:32px;position:relative} .box{font:20px Arial}.hide{color:transparent}</style><div class=box><span class=hide>AB</span><span style=\"color:blue\">C</span></div>", true},
+        {"visible_inline_descendant", "<!doctype html><style>html,body{margin:0;width:60px;height:40px;background:white} .box{width:48px;height:32px;position:relative} .box{font:20px Arial;visibility:hidden;color:red}.child{visibility:visible;color:blue}</style><div class=box>A<span class=child>B</span>C</div>", "<!doctype html><style>html,body{margin:0;width:60px;height:40px;background:white} .box{width:48px;height:32px;position:relative} .box{font:20px Arial;color:transparent}.child{color:blue}</style><div class=box>A<span class=child>B</span>C</div>", true},
+        {"hidden_outline", "<!doctype html><style>html,body{margin:0;width:60px;height:40px;background:white} .box{width:48px;height:32px;position:relative} .box{margin:4px;width:40px;height:24px;outline:4px solid red;visibility:hidden}</style><div class=box></div>", "<!doctype html><style>html,body{margin:0;width:60px;height:40px;background:white} .box{width:48px;height:32px;position:relative} .box{margin:4px;width:40px;height:24px;outline:4px solid transparent}</style><div class=box></div>", false},
+        {"hidden_marker", "<!doctype html><style>html,body{margin:0;width:60px;height:40px;background:white} .box{width:48px;height:32px;position:relative} ul{margin:0;padding:0;list-style-position:inside}li{height:32px;width:48px;list-style-image:linear-gradient(red,red);visibility:hidden}</style><ul><li></li></ul>", "<!doctype html><style>html,body{margin:0;width:60px;height:40px;background:white} .box{width:48px;height:32px;position:relative} ul{margin:0;padding:0;list-style-position:inside}li{height:32px;width:48px;list-style-image:linear-gradient(transparent,transparent)}</style><ul><li></li></ul>", false},
+        {"hidden_svg_with_visible_descendant", "<!doctype html><style>html,body{margin:0;width:60px;height:40px;background:white}.box{width:48px;height:32px;position:relative}.box{visibility:hidden}</style><div class=\"box\"><svg width=\"48\" height=\"32\"><rect width=\"48\" height=\"32\" fill=\"red\"/><rect x=\"8\" y=\"8\" width=\"16\" height=\"16\" fill=\"blue\" style=\"visibility:visible\"/></svg></div>", "<!doctype html><style>html,body{margin:0;width:60px;height:40px;background:white}.box{width:48px;height:32px;position:relative}</style><div class=\"box\"><svg width=\"48\" height=\"32\"><rect width=\"48\" height=\"32\" fill=\"none\"/><rect x=\"8\" y=\"8\" width=\"16\" height=\"16\" fill=\"blue\" style=\"visibility:visible\"/></svg></div>", true},
+        {"hidden_replaced_image", "<!doctype html><style>html,body{margin:0;width:60px;height:40px;background:white}.box{width:48px;height:32px}.box{visibility:hidden}</style><img class=box src=\"../../test/ui/svg_image_assets/split.png\">", "<!doctype html><style>html,body{margin:0;width:60px;height:40px;background:white}.box{width:48px;height:32px}.box{opacity:0}</style><img class=box src=\"../../test/ui/svg_image_assets/split.png\">", false},
+    };
+    for (const auto& item : cases) for (int scale = 1; scale <= 2; scale++) {
+        char name[128]; snprintf(name, sizeof(name), "visibility_%s_%dx", item.name, scale);
+        SCOPED_TRACE(name);
+        expect_html_pair_output_parity(name, item.actual, item.reference, true, scale);
+        const char* suffixes[] = {".png", "_0_svg.png", "_pdf.png"};
+        for (const char* suffix : suffixes) {
+            if (strcmp(suffix, "_pdf.png") == 0 && !command_exists("sips") && !command_exists("pdftoppm")) continue;
+            char path[PATH_MAX]; snprintf(path, sizeof(path), "temp/render_output_parity/%s%s", name, suffix);
+            ImageData image; ASSERT_TRUE(load_png_rgba(path, &image));
+            // own invisible paint must clear the content corner, including outlines and markers.
+            EXPECT_EQ(image.pixels[0], 255); EXPECT_EQ(image.pixels[1], 255); EXPECT_EQ(image.pixels[2], 255);
+            image_free(image.pixels);
+            if (item.blue) expect_png_channel_coverage(path, 2, 3, 1);
+        }
+    }
+}
+
+TEST(RenderOutputParity, OutsideGradientStopsPreserveColorsAcrossOutputs) {
+    const struct { const char* name; const char* actual; const char* reference; unsigned channel; } cases[] = {
+        {"linear_negative", "<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px}</style><div class=box style=\"background-image:linear-gradient(to right,red -24px,blue 100%)\"></div>", "<!doctype html><style>html,body{margin:0;background:white}.frame{width:48px;height:32px;position:relative;overflow:hidden}.source{width:72px;height:32px;position:absolute;left:-24px;background-image:linear-gradient(to right,red 0%,blue 100%)}</style><div class=frame><div class=source></div></div>", 2},
+        {"linear_overshoot", "<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px}</style><div class=box style=\"background-image:linear-gradient(to right,red 0%,blue 200%)\"></div>", "<!doctype html><style>html,body{margin:0;background:white}.frame{width:48px;height:32px;position:relative;overflow:hidden}.source{width:96px;height:32px;position:absolute;left:0;background-image:linear-gradient(to right,red 0%,blue 100%)}</style><div class=frame><div class=source></div></div>", 2},
+        {"radial_negative", "<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px}</style><div class=box style=\"background-image:radial-gradient(circle 16px,red -8px,blue 100%)\"></div>", "<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px}</style><div class=box style=\"background-image:radial-gradient(circle 16px,rgb(170,0,85) 0%,blue 100%)\"></div>", 2},
+        {"linear_both", "<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px}</style><div class=box style=\"background-image:linear-gradient(to right,red -100%,blue 200%);\"></div>", "<!doctype html><style>html,body{margin:0;background:white}.frame{width:48px;height:32px;position:relative;overflow:hidden;}.source{width:144px;height:32px;position:absolute;left:-48px;top:0px;background-image:linear-gradient(to right,red,blue)}</style><div class=frame><div class=source></div></div>", 2},
+        {"linear_left", "<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px}</style><div class=box style=\"background-image:linear-gradient(to left,red -50%,blue 100%);\"></div>", "<!doctype html><style>html,body{margin:0;background:white}.frame{width:48px;height:32px;position:relative;overflow:hidden;}.source{width:72px;height:32px;position:absolute;left:0px;top:0px;background-image:linear-gradient(to left,red,blue)}</style><div class=frame><div class=source></div></div>", 2},
+        {"linear_vertical", "<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px}</style><div class=box style=\"background-image:linear-gradient(to bottom,red -50%,blue 100%);\"></div>", "<!doctype html><style>html,body{margin:0;background:white}.frame{width:48px;height:32px;position:relative;overflow:hidden;}.source{width:48px;height:48px;position:absolute;left:0px;top:-16px;background-image:linear-gradient(to bottom,red,blue)}</style><div class=frame><div class=source></div></div>", 2},
+        {"linear_transform", "<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px}</style><div class=box style=\"background-image:linear-gradient(to right,red -50%,blue 150%);transform:translate(4px,4px) scale(1.25);transform-origin:0 0;\"></div>", "<!doctype html><style>html,body{margin:0;background:white}.frame{width:48px;height:32px;position:relative;overflow:hidden;transform:translate(4px,4px) scale(1.25);transform-origin:0 0;}.source{width:96px;height:32px;position:absolute;left:-24px;top:0px;background-image:linear-gradient(to right,red,blue)}</style><div class=frame><div class=source></div></div>", 2},
+        {"linear_hard", "<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px}</style><div class=box style=\"background-image:linear-gradient(to right,red -50%,red 50%,blue 50%,blue 150%);\"></div>", "<!doctype html><style>html,body{margin:0;background:white}.frame{width:48px;height:32px;position:relative;overflow:hidden;}.source{width:96px;height:32px;position:absolute;left:-24px;top:0px;background-image:linear-gradient(to right,red 0%,red 50%,blue 50%,blue 100%)}</style><div class=frame><div class=source></div></div>", 2},
+        {"linear_all_before", "<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px}</style><div class=box style=\"background-image:linear-gradient(to right,red -100%,blue -50%)\"></div>", "<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px}</style><div class=box style=\"background-image:linear-gradient(blue,blue)\"></div>", 2},
+        {"linear_all_after", "<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px}</style><div class=box style=\"background-image:linear-gradient(to right,red 150%,blue 200%)\"></div>", "<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px}</style><div class=box style=\"background-image:linear-gradient(red,red)\"></div>", 0},
+        {"radial_overshoot", "<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px}</style><div class=box style=\"background-image:radial-gradient(circle 16px,red 0%,blue 200%)\"></div>", "<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px}</style><div class=box style=\"background-image:radial-gradient(circle 32px,red 0%,blue 100%)\"></div>", 2},
+        {"radial_all_before", "<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px}</style><div class=box style=\"background-image:radial-gradient(circle 16px,red -200%,blue -100%)\"></div>", "<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px}</style><div class=box style=\"background-image:linear-gradient(blue,blue)\"></div>", 2},
+        {"radial_hard_center", "<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px}</style><div class=box style=\"background-image:radial-gradient(circle 16px,red -50%,red 0%,blue 0%,blue 100%)\"></div>", "<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px}</style><div class=box style=\"background-image:linear-gradient(blue,blue)\"></div>", 2},
+        {"radial_alpha", "<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px}</style><div class=box style=\"background-image:radial-gradient(circle 16px,red -50%,rgba(255,0,0,0) 100%)\"></div>", "<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px}</style><div class=box style=\"background-image:radial-gradient(circle 16px,rgba(255,0,0,0.666666667) 0%,rgba(255,0,0,0) 100%)\"></div>", 0},
+        {"ellipse_overshoot", "<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px}</style><div class=box style=\"background-image:radial-gradient(ellipse 16px 8px,red 0%,blue 200%)\"></div>", "<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px}</style><div class=box style=\"background-image:radial-gradient(ellipse 32px 16px,red 0%,blue 100%)\"></div>", 2},
+        {"ellipse_negative", "<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px}</style><div class=box style=\"background-image:radial-gradient(ellipse 16px 8px,red -50%,blue 100%)\"></div>", "<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px}</style><div class=box style=\"background-image:radial-gradient(ellipse 16px 8px,rgb(170,0,85) 0%,blue 100%)\"></div>", 2},
+        {"repeat_linear_negative", "<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px}</style><div class=box style=\"background-image:repeating-linear-gradient(to right,red -50%,blue 0%)\"></div>", "<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px}</style><div class=box style=\"background-image:repeating-linear-gradient(to right,red 0%,blue 50%)\"></div>", 2},
+        {"marker_negative", "<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px}</style><ul style=\"margin:0;padding:0;list-style-position:inside;list-style-image:linear-gradient(to right,red -50%,blue 100%)\"><li style=\"height:32px;width:48px\"></li></ul>", "<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px}</style><ul style=\"margin:0;padding:0;list-style-position:inside;list-style-image:linear-gradient(to right,rgb(170,0,85) 0%,blue 100%)\"><li style=\"height:32px;width:48px\"></li></ul>", 2},
+        {"border_negative", "<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px}</style><div class=box style=\"border:4px solid transparent;border-image-slice:1 fill;border-image-source:linear-gradient(to right,red -50%,blue 100%)\"></div>", "<!doctype html><style>html,body{margin:0;background:white}.box{width:48px;height:32px}</style><div class=box style=\"border:4px solid transparent;border-image-slice:1 fill;border-image-source:linear-gradient(to right,rgb(170,0,85) 0%,blue 100%)\"></div>", 2},
+    };
+    for (const auto& item : cases) for (int scale = 1; scale <= 2; scale++) {
+        char name[128]; snprintf(name, sizeof(name), "gradient_range_%s_%dx", item.name, scale);
+        SCOPED_TRACE(name);
+        expect_html_pair_output_parity(name, item.actual, item.reference, true, scale);
+        char path[PATH_MAX];
+        const char* suffixes[] = {".png", "_0_svg.png", "_pdf.png"};
+        for (const char* suffix : suffixes) {
+            if (!strcmp(suffix, "_pdf.png") && !command_exists("sips") && !command_exists("pdftoppm")) continue;
+            snprintf(path, sizeof(path), "temp/render_output_parity/%s%s", name, suffix);
+            expect_png_channel_coverage(path, item.channel, 2, 1);
+        }
+    }
 }

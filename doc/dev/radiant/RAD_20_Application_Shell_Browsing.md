@@ -37,6 +37,24 @@ The CLI entry points live in `lambda/main.cpp`: `strcmp(argv[1], "layout")` rout
 
 `free_document` (`ui_context.cpp:248`) is the per-document teardown: it cancels or abandons the document's JS timers (choosing `js_event_loop_abandon_document_timers` when the JS batch-cleanup guard tripped, [RAD_21](RAD_21_JS_Scripting_Integration.md)), cleans up retained JS state, destroys the `DocState`, frees DOM-owned embed image surfaces, destroys the view tree/pool ([RAD_01](RAD_01_View_and_DOM_Model.md)), and destroys the `Url` and the `DomDocument` arena.
 
+Document resources that retain script values bind their `EvalContext` owner
+(**D5.3.3 / D5.4.1**). `script_runner_cleanup_js_state` retires standalone-JS
+resources before destroying that evaluator: animation hosts disappear, while
+history/input retirement callbacks clear precisely rooted JS values and keep
+their native URLs and text. The same retirement detaches `StateStore`’s cached
+evaluator, script model/template/render values and editor roots, so later
+native teardown cannot rebind a freed evaluator. Resources borrowing the retained Lambda evaluator
+remain attached until document destruction. This ordering also applies to
+one-shot script execution, where JS cleanup can precede layout and native
+document teardown; a later destructor must never inspect a freed context.
+
+The shared resource-owner lookup uses the document's canonical runtime. During
+script bootstrap it may use the active evaluator only when that runtime names
+the same document. Merely dispatching an event into a script-less iframe does
+not grant its native history ownership of the parent evaluator. Unbound native
+history keeps its initial URL and null state until the document acquires its own
+evaluator; it cannot retain roots into a different document (**D5.3.3**).
+
 ---
 
 ## 3. Window lifecycle and headless-windowless default

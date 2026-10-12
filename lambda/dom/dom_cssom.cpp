@@ -6,6 +6,7 @@
  */
 
 #include "dom_cssom.h"
+#include "dom_style.h"
 #include "dom_core.h"
 #include "realm/dom_realm.h"
 #include "dom.h"
@@ -33,7 +34,6 @@
 #include "../../lib/hashmap_helpers.h"
 #include "../../lib/arraylist.h"
 #include "../../lib/arraylist.hpp"
-#include "../../radiant/view.hpp"
 #include "../input/css/dom_element.hpp"
 #include "../input/css/dom_node.hpp"
 #include "../input/css/dom_lifecycle.hpp"
@@ -724,7 +724,8 @@ static void append_rule_declaration_text(StringBuf* buf, CssDeclaration* decl, P
     StrView authored_name = decl->property_name ? css_declaration_name(decl) : strview_from_cstr(name);
     css_append_identifier(buf, authored_name.str, authored_name.length);
     stringbuf_append_str(buf, ": ");
-    stringbuf_append_str(buf, css_serialize_declaration_value(decl, pool));
+    if (decl->pending_shorthand_code <= 0)
+        stringbuf_append_str(buf, css_serialize_declaration_value(decl, pool));
     if (decl->important) {
         stringbuf_append_str(buf, " !important");
     }
@@ -1523,7 +1524,10 @@ static CssDeclaration* cssom_decl_find(CssRule* rule, StrView name) {
     bool identity = group && group->identity_shorthand;
     for (size_t i = 0; i < rule->data.style_rule.declaration_count; i++) {
         CssDeclaration* declaration = rule->data.style_rule.declarations[i];
-        bool projected = declaration && identity && declaration->property_code == group->code;
+        unsigned grid = css_grid_property_mask(requested);
+        unsigned source_grid = declaration ? css_grid_property_mask(declaration->property_code) : 0;
+        bool projected_grid = grid && !(grid & (grid - 1)) && (source_grid & grid);
+        bool projected = declaration && ((identity && declaration->property_code == group->code) || projected_grid);
         if ((cssom_decl_matches(declaration, name) || projected) &&
             (!selected || !selected->important || declaration->important)) selected = declaration;
     }
@@ -1569,36 +1573,118 @@ static const char* cssom_decl_value(CssRule* rule, StrView name, Pool* output, b
         }
         return priority ? important ? "important" : "" : selected ? selected : "";
     }
+    unsigned grid = css_grid_property_mask(requested);
+    if (grid && (grid & (grid - 1))) {
+        const CssValue* values[CSS_GRID_PROPERTY_MEMBER_COUNT] = {};
+        const char* pending_text = nullptr;
+        const char* global = nullptr;
+        bool important = false, first = true, pending = false;
+        for (unsigned i = 0; i < CSS_GRID_PROPERTY_MEMBER_COUNT; i++) if (grid & (1u << i)) {
+            CssPropertyCode target = css_grid_property_member(i);
+            CssDeclaration* member = cssom_decl_find(rule, strview_from_cstr(css_property_spelling_from_code(target)));
+            if (!member || (!first && member->important != important)) return "";
+            important = member->important;
+            if (priority) { first = false; continue; }
+            CssPropertyCode origin = member->pending_shorthand_code > 0
+                ? member->pending_shorthand_code : member->property_code;
+            bool member_pending = member->pending_identity_shorthand ||
+                (member->property_code != target && css_value_contains_pending_substitution(member->value));
+            if (!first && pending != member_pending) return "";
+            pending = member_pending;
+            if (pending) {
+                const char* text = css_serialize_declaration_value(member, output);
+                if (origin != requested || (pending_text && strcmp(pending_text, text))) return "";
+                pending_text = text;
+            } else {
+                const CssValue* value = member->property_code == target ? member->value
+                    : css_grid_shorthand_longhand(output, member->value, member->property_code, target);
+                if (css_value_is_global_keyword(value)) {
+                    const char* text = css_value_identifier_name(value);
+                    if (!first && (!global || strcmp(global, text))) return "";
+                    global = text;
+                } else {
+                    if (global) return "";
+                    if (!value) return "";
+                    values[i] = value;
+                }
+            }
+            first = false;
+        }
+        if (priority) return important ? "important" : "";
+        if (pending) return pending_text ? pending_text : "";
+        if (global) return global;
+        String* text = css_grid_serialize_shorthand(output, values, requested);
+        return text ? text->chars : "";
+    }
     CssDeclaration* declaration = cssom_decl_find(rule, name);
-    return priority ? declaration && declaration->important ? "important" : "" : serialize(declaration, false);
+    if (priority) return declaration && declaration->important ? "important" : "";
+    if (grid && declaration && declaration->property_code != requested) {
+        if (css_value_contains_pending_substitution(declaration->value)) return "";
+        CssDeclaration projected = *declaration;
+        projected.property_code = requested;
+        projected.value = (CssValue*)css_grid_shorthand_longhand(output, declaration->value, declaration->property_code, requested);
+        projected.value_text = nullptr; projected.value_text_len = 0;
+        return serialize(&projected, false);
+    }
+    return serialize(declaration, false);
 }
 
-static bool cssom_decl_expand_identity(CssRule* rule, CssPropertyCode member) {
+static bool cssom_decl_expand_members(CssRule* rule, CssPropertyCode member) {
     CssPropertyCode shorthand = css_property_cascade_shorthand(member);
     const CssProperty* property = css_property_get_by_code(shorthand);
-    if (!property || !property->identity_shorthand) return true;
-    size_t count = rule->data.style_rule.declaration_count;
-    size_t expanded_count = count;
-    for (size_t i = 0; i < count; i++)
-        if (rule->data.style_rule.declarations[i]->property_code == shorthand)
-            expanded_count += property->longhand_count - 1;
+    unsigned requested_grid = css_grid_property_mask(member);
+    auto members = [&](CssDeclaration* source, CssPropertyCode grid_members[CSS_GRID_PROPERTY_MEMBER_COUNT], const CssPropertyCode** selected) -> size_t {
+        unsigned source_grid = css_grid_property_mask(source->property_code);
+        if (source_grid && (source_grid & (source_grid - 1)) && (source_grid & requested_grid) &&
+                (source_grid & requested_grid) != source_grid) {
+            size_t count = 0;
+            for (unsigned i = 0; i < CSS_GRID_PROPERTY_MEMBER_COUNT; i++) if (source_grid & (1u << i)) grid_members[count++] = css_grid_property_member(i);
+            *selected = grid_members;
+            return count;
+        }
+        if (property && property->identity_shorthand && source->property_code == shorthand) {
+            *selected = property->longhand_props;
+            return (size_t)property->longhand_count;
+        }
+        return 0;
+    };
+    size_t count = rule->data.style_rule.declaration_count, expanded_count = count;
+    for (size_t i = 0; i < count; i++) {
+        CssPropertyCode grid_members[CSS_GRID_PROPERTY_MEMBER_COUNT]; const CssPropertyCode* selected = nullptr;
+        size_t added = members(rule->data.style_rule.declarations[i], grid_members, &selected);
+        if (added > 0) { if (expanded_count > SIZE_MAX - added + 1) return false; expanded_count += added - 1; }
+    }
     if (count == expanded_count) return true;
+    if (expanded_count > SIZE_MAX / sizeof(CssDeclaration*)) return false;
     CssDeclaration** expanded = (CssDeclaration**)pool_calloc(rule->pool, expanded_count * sizeof(CssDeclaration*));
     if (!expanded) return false;
     size_t next = 0;
     for (size_t i = 0; i < count; i++) {
         CssDeclaration* source = rule->data.style_rule.declarations[i];
-        if (source->property_code != shorthand) { expanded[next++] = source; continue; }
-        for (int j = 0; j < property->longhand_count; j++) {
+        CssPropertyCode grid_members[CSS_GRID_PROPERTY_MEMBER_COUNT]; const CssPropertyCode* selected = nullptr;
+        size_t length = members(source, grid_members, &selected);
+        if (!length) { expanded[next++] = source; continue; }
+        bool grid = css_grid_property_mask(source->property_code) != 0;
+        bool pending = css_value_contains_pending_substitution(source->value);
+        for (size_t j = 0; j < length; j++) {
             CssDeclaration* copy = (CssDeclaration*)pool_calloc(rule->pool, sizeof(CssDeclaration));
             if (!copy) return false;
-            // the view borrows immutable payloads; inline commit makes owned snapshots (D4.5.1v4).
+            // inline commit owns these projections; rule records retain their pool (D4.5.1v4).
             *copy = *source;
-            copy->property_code = property->longhand_props[j];
+            copy->property_code = selected[j];
             copy->name_id = css_property_name_id(copy->property_code);
             copy->property_name = css_property_spelling_from_code(copy->property_code);
             copy->property_name_length = strlen(copy->property_name);
-            copy->pending_identity_shorthand = css_value_contains_pending_substitution(source->value);
+            copy->pending_identity_shorthand = pending;
+            if (grid) {
+                copy->pending_shorthand_code = pending ? source->property_code : (CssPropertyCode)0;
+                if (!pending) {
+                    copy->value = (CssValue*)css_grid_shorthand_longhand(rule->pool, source->value,
+                        source->property_code, copy->property_code);
+                    if (!copy->value) return false;
+                    copy->value_text = nullptr; copy->value_text_len = 0;
+                }
+            }
             copy->owns_payload = false; copy->tree_owned_record = false;
             expanded[next++] = copy;
         }
@@ -1675,13 +1761,17 @@ static bool cssom_decl_store(CssRule* rule, StrView name, CssDeclaration* replac
     CssPropertyCode requested = css_property_code_from_name(name.str);
     bool identity = css_property_is_identity_shorthand(requested);
     // replacing one member preserves its siblings and replaces their inherited priority independently.
-    if (!identity && !cssom_decl_expand_identity(rule, requested)) return false;
+    if (!cssom_decl_expand_members(rule, requested)) return false;
+    unsigned grid_request = css_grid_property_mask(requested);
     size_t count = rule->data.style_rule.declaration_count;
     CssDeclaration** declarations = rule->data.style_rule.declarations;
     bool found = false;
     size_t retained = 0;
     for (size_t i = 0; i < count; i++) {
-        if (cssom_decl_matches(declarations[i], name) || (identity &&
+        unsigned grid_source = css_grid_property_mask(declarations[i]->property_code);
+        bool grid_member = grid_request && (grid_request & (grid_request - 1)) && grid_source &&
+            (grid_source & grid_request) == grid_source;
+        if (cssom_decl_matches(declarations[i], name) || grid_member || (identity &&
             css_property_shorthand_contains(requested, declarations[i]->property_code))) {
             // A setter replaces every duplicate while retaining the first property's slot.
             if (!found && replacement) declarations[retained++] = replacement;
@@ -1781,7 +1871,8 @@ static bool cssom_computed_custom_name(CssomComputedNames* data, StrView name) {
     for (size_t i = 0; i < data->names->size(); i++)
         if (strview_eq(&(*data->names)[i], &name)) return true;
     // empty computed token lists are valid; only the guaranteed-invalid value is omitted.
-    return !css_compute_element_custom_property(data->scratch, data->element, name.str, name.length) ||
+    return !dom_provider_call(dom_style_engine_ops(), &DomStyleEngineOps::compute_custom_property,
+        data->scratch, data->element, name.str, name.length, false) ||
         data->names->append(name);
 }
 
@@ -1799,7 +1890,7 @@ static void cssom_computed_names(Item receiver, lam::ArrayList<StrView>* names) 
     Pool* scratch = pool_create();
     if (!scratch) return;
     CssomComputedNames data = {element, scratch, names};
-    dom_ensure_computed(element, false);
+    dom_provider_call(dom_style_engine_ops(), &DomStyleEngineOps::ensure_computed, element, false);
     for (DomElement* ancestor = element; ancestor; ancestor = dom_parent_element(ancestor))
         for (CssCustomProp* variable = ancestor->css_variables; variable; variable = variable->next)
             cssom_computed_custom_name(&data, variable->declaration
@@ -1907,7 +1998,7 @@ static void cssom_decl_commit(CssomDeclarationView* view, StrView name) {
     String* text = cssom_decl_text(view->rule, view->serialization_pool());
     if (!text) return;
     CssPropertyCode property = name.str ? css_property_code_from_name(name.str) : CSS_PROPERTY_UNKNOWN;
-    css_transition_capture_before_change(view->element, property);
+    dom_provider_call(dom_style_engine_ops(), &DomStyleEngineOps::capture_transition, view->element, property);
     if (dom_element_commit_inline_declarations(view->element, view->rule, text->chars))
         dom_notify_mutation(dom_style_mutation_kind(property), view->element, view->element->parent);
 }

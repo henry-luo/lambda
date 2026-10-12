@@ -1,0 +1,25 @@
+<!doctype html><meta charset=utf-8><style>
+html,body {margin:0;font:10px/12px Arial;background:white}
+#flex {display:flex;width:300px;align-items:flex-start}
+#important,#logical {contain:size;flex:0 0 auto;background:green}
+#important {contain-intrinsic-width:80px!important;contain-intrinsic-size:30px 20px;contain-intrinsic-inline-size:60px}
+#logical {contain-intrinsic-size:40px 25px;contain-intrinsic-inline-size:70px}
+#basis {font-size:10px;contain-intrinsic-size:3em 4em}
+#inherited {contain:size;font-size:20px;width:max-content;contain-intrinsic-size:inherit;background:blue}
+#reset {contain:size;width:max-content;contain-intrinsic-size:90px 35px;background:red}
+#controls {position:fixed;left:200px;top:130px}
+#controls button {display:block;width:90px;height:22px}
+</style>
+<div id=flex><div id=important><div>Ignored intrinsic contribution</div></div><div id=logical></div></div>
+<div id=basis><div id=inherited></div></div><div id=reset></div>
+<div id=controls><button id=mutate>change axes</button><button id=clear>clear fallback</button></div>
+<script>
+document.getElementById('mutate').onclick=function(){
+  document.getElementById('important').style.setProperty('contain-intrinsic-width','90px','important');
+  document.getElementById('logical').style.writingMode='vertical-rl';
+  document.getElementById('basis').style.fontSize='12px';
+};
+document.getElementById('clear').onclick=function(){
+  document.getElementById('reset').style.containIntrinsicSize='initial';
+};
+</script>

@@ -1,6 +1,6 @@
 # Lambda Formal Design — Specification
 
-**Spec version:** 29.1.1 (2026-10-08)
+**Spec version:** 29.2.0 (2026-10-11)
 
 **Status:** normative — the single source of truth for the design and
 implementation decisions that realize the semantics in
@@ -1049,6 +1049,13 @@ that carries them.
   alive (script-identity values such as a `FileList` or a Selection wrapper).
   *Radiant storage is invisible to the collector (D4.1.1v2): borrow to read,
   copy or root to keep.* [Memory_Safety_Template §2.3]
+- **D4.5.3** **UI/view-mode DOM construction deep-copies ordinary Elements
+  and their content through MarkBuilder**, including values already owned by
+  the document arena. Each presentation occurrence owns its native parent and
+  sibling links. Normal Lambda evaluation retains ordinary value sharing and
+  ownership-based copy elision; rooted callables and native handles keep their
+  existing identity. DOM copies preserve the evaluator's source/result mapping.
+  [Reactive_UI §5.3; user, 2026-10-11]
 
 ### D4.6 Name identity
 

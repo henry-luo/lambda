@@ -42,6 +42,21 @@ struct RadiantGradientLine {
     float y2;
 };
 
+struct RadiantGradientCenter { float x, y; };
+
+template<class G> inline RadiantGradientCenter radiant_gradient_center(const G* gradient, Rect rect) {
+    float x = gradient->cx_is_px ? gradient->cx : rect.width * gradient->cx;
+    float y = gradient->cy_is_px ? gradient->cy : rect.height * gradient->cy;
+    const CssValue* horizontal = gradient_geometry_parameter(gradient->computed_geometry.get(), GRADIENT_GEOMETRY_CENTER_X);
+    const CssValue* vertical = gradient_geometry_parameter(gradient->computed_geometry.get(), GRADIENT_GEOMETRY_CENTER_Y);
+    // the center has no object size; edge offsets use the whole gradient box as their percentage basis.
+    if (horizontal) x = radiant::resolve_computed_length_percentage(horizontal, rect.width);
+    if (vertical) y = radiant::resolve_computed_length_percentage(vertical, rect.height);
+    if (gradient->cx_from_end) x = rect.width - x;
+    if (gradient->cy_from_end) y = rect.height - y;
+    return {rect.x + x, rect.y + y};
+}
+
 struct RadiantRadialGeometry { float cx, cy, rx, ry; };
 RadiantRadialGeometry radiant_radial_gradient_geometry(const RadialGradient* gradient, Rect rect);
 
@@ -152,6 +167,11 @@ typedef struct {
     float offset;          // 0.0 – 1.0
     uint8_t r, g, b, a;
 } RdtGradientStop;
+
+Color render_gradient_stop_color(const RdtGradientStop& stop);
+Color render_sample_gradient_stops(const RdtGradientStop* stops, int count, float position, float stop_scale);
+bool render_normalize_linear_gradient_range(RadiantGradientLine* line, RdtGradientStop* stops, int count);
+bool render_normalize_radial_gradient_range(RadiantRadialGeometry* geometry, RdtGradientStop* stops, int* count);
 
 bool render_copy_gradient_stops(const GradientStop* source, int source_count,
                                 float gradient_length, RdtGradientStop* stops,
@@ -295,6 +315,9 @@ RdtPath* rdt_path_clone(const RdtPath* src);
 bool rdt_path_get_bounds(const RdtPath* p, float* left, float* top,
                          float* right, float* bottom);
 
+// accept one sharp rectangle primitive or closed contour under an axis-aligned transform.
+bool rdt_path_get_rect_bound(const RdtPath* path, const RdtMatrix* transform, Bound* bound);
+
 // Visit a path's portable command stream. Returns false when the path cannot
 // be inspected by the active backend or when the callback aborts traversal.
 bool rdt_path_visit(const RdtPath* p, RdtPathVisitFn fn, void* context);
@@ -333,6 +356,7 @@ bool render_path_metrics_project(const RdtPathMetrics* metrics, float x, float y
 // append baseline-relative font outlines, or outer bitmap-coverage contours.
 // shared decoration geometry; wavy_fill closes a ribbon for SVG fill/stroke paint.
 RdtPath* render_path_create_decoration(const Rect* rect, CssEnum style, bool wavy_fill = false);
+float render_font_pixel_to_css(FontHandle* font, const GlyphBitmap* bitmap = nullptr);
 bool render_path_append_font_glyph(RdtPath* path, FontHandle* font, uint32_t codepoint,
     float x, float y, float scale_x, Arena* arena, bool* color_bitmap = nullptr);
 bool render_path_append_font_glyph_index(RdtPath* path, FontHandle* font, uint32_t glyph,
@@ -1586,6 +1610,7 @@ typedef struct PaintEffectGroup {
     lam::Up<FilterProp> backdrop_filter;  // backdrop-filter; null = none
     bool shadow;             // box-shadow present
     bool isolation;          // forced isolation
+    RadialMaskPaint mask;    // frame-local style facts; masked display lists remain unretainable.
 } PaintEffectGroup;
 
 // A nested SVG subscene (Phase F). Carries the inheritance + geometry that
@@ -1629,6 +1654,8 @@ void paint_ir_register_svg_subscene_lowerers(PaintSvgSubsceneRasterLowerFn raste
 // A semantic glyph run. Positions/text/font, not rasterised bitmaps.
 typedef struct PaintGlyphRun {
     lam::Up<FontBox> font;
+    FontBox captured_font; // records the selected style without borrowing a mutable paint context
+    bool has_captured_font; // a captured empty font box still differs from an absent box
     Color color;
     lam::Up<const char> text;       // optional native text payload; UTF-8, borrowed, or owned_text
     int text_len;            // bytes; 0 means empty, negative means strlen(text)
@@ -1636,7 +1663,7 @@ typedef struct PaintGlyphRun {
     lam::Up<const char> font_family; // borrowed; optional for vector text lowering
     float font_size;
     float x, baseline_y;
-    float word_spacing;
+    float word_spacing;     // line justification in addition to the captured font's authored spacing
     float cjk_spacing;      // extra spacing before an adjacent ideograph
     int font_weight;         // CSS numeric weight; 0 = omit
     bool italic;
@@ -1648,6 +1675,10 @@ typedef struct PaintGlyphRun {
     RdtMatrix transform;
     Bound clip;
 } PaintGlyphRun;
+
+inline const FontBox* paint_glyph_run_font(const PaintGlyphRun* run) {
+    return !run ? nullptr : run->has_captured_font ? &run->captured_font : run->font.get();
+}
 
 // caller owns the outline; all targets share the selected glyph IDs and offsets.
 RdtPath* render_path_create_glyph_run(const PaintGlyphRun* run);
@@ -1848,7 +1879,9 @@ void paint_end_semantic_group(PaintList* pl);
 // ---------------------------------------------------------------------------
 
 void paint_ir_lower_raster(const PaintList* pl, DisplayList* dl);
-void paint_ir_lower_raster_fragment(const PaintList* pl, DisplayList* dl);
+void paint_ir_lower_raster_transformed(const PaintList* pl, DisplayList* dl, const RdtMatrix* root_transform);
+void paint_ir_lower_raster_fragment(const PaintList* pl, DisplayList* dl,
+    const RdtMatrix* root_transform = nullptr);
 
 // ---------------------------------------------------------------------------
 // SVG lowering: PaintIR -> SVG fragment
@@ -1962,11 +1995,14 @@ typedef struct PaintList PaintList;
 
 // The state every render backend's walk carries. The raster painter and the
 // SVG and PDF exporters derive from it; RenderBackend::ctx points at it.
+struct RenderTextPaintData;
+struct RenderTextPaintEntry;
 struct RenderContext {
     FontBox font;  // current font style
     BlockBlot block;
     Color color;
     lam::Up<UiContext> ui_context;
+    lam::Up<RenderTextPaintData> text_paint; // borrowed from the current block paint scope
 };
 
 struct Css3dPaintContext;
@@ -3715,8 +3751,6 @@ uint32_t render_pixel_bilinear_mix(const uint8_t* p11, const uint8_t* p21,
                                   float fx, float fy, bool round_channels, bool premultiply_samples = false);
 void render_pixel_source_over_coverage(uint8_t* destination, Color color,
                                        uint32_t coverage);
-void render_pixel_source_over_opaque_bytes(uint8_t* destination, uint32_t source,
-                                           uint8_t opacity);
 
 void render_composite_source_over_premul(ImageSurface* surface, const uint32_t* backdrop,
                                          int x0, int y0, int width, int height, uint8_t opacity = 255);
@@ -3855,12 +3889,10 @@ ImageSurface* render_surface_create_budgeted(MemContext* memory, float width, fl
 // ===== render_background.hpp =====
 // Background rendering functions
 void render_background(RasterRenderContext* rdcon, ViewBlock* view, Rect rect);
-void render_list_marker_linear_gradient(RasterRenderContext* rdcon,
-                                        LinearGradient* gradient, Rect rect);
-void render_list_marker_radial_gradient(RasterRenderContext* rdcon,
-                                        RadialGradient* gradient, Rect rect);
-void render_list_marker_conic_gradient(RasterRenderContext* rdcon,
-                                       ConicGradient* gradient, Rect rect);
+bool render_paint_background(PaintList* paint, UiContext* ui, ViewBlock* view, Rect rect,
+                             RenderExportTargetKind target);
+bool render_paint_gradient_image(PaintList* paint, const ListStyleImage* image, Rect rect,
+                                float pixel_ratio, const RdtMatrix* transform = nullptr);
 
 // Box shadow rendering
 void render_box_shadow(RasterRenderContext* rdcon, ViewBlock* view, Rect rect);
@@ -4008,6 +4040,8 @@ StrBuf* render_encode_surface_data_uri(ImageSurface* surface);
 // display-list commands/bounds are physical; secondary snapshots apply density to logical paint input.
 ImageSurface* render_display_list_snapshot(DisplayList* list, MemContext* memory,
     Bound physical_bounds, float raster_scale, Color backdrop = Color{0});
+ImageSurface* render_display_list_snapshot_with_backdrop(DisplayList* list, MemContext* memory,
+    Bound physical_bounds, float raster_scale, Color backdrop, DisplayList* backdrop_list);
 ImageSurface* render_secondary_view_snapshot(ViewTree* tree, float raster_scale = 1.0f,
     Color backdrop = Color{0xffe8e8e8u});
 // physical page numbers ignore the preview root's selection, placement and scale.
@@ -4060,6 +4094,9 @@ int cmd_render_batch(int argc, char** argv);
 struct RasterRenderContext;
 
 void render_marker_view(struct RasterRenderContext* rdcon, ViewSpan* marker);
+bool render_paint_marker_image(PaintList* paint, UiContext* ui, ViewSpan* marker,
+    float origin_x, float origin_y, FontBox* font);
+bool render_paint_border_image(PaintList* paint, UiContext* ui, BorderProp* border, Rect rect);
 void render_litem_view(struct RasterRenderContext* rdcon, ViewBlock* list_item);
 void render_list_view(struct RasterRenderContext* rdcon, ViewBlock* view);
 
@@ -4076,6 +4113,12 @@ struct PaintImageBox {
 };
 bool render_paint_image_box(PaintList* paint, const PaintImageBox* box);
 
+// Synchronous document-owned borrows; retained paint commands snapshot pixels.
+ImageSurface* render_canvas_surface(ViewBlock* view);
+ImageSurface* render_media_image_surface(ViewBlock* view);
+void render_media_image_content(RasterRenderContext* rdcon, ViewBlock* view);
+bool render_media_paint_image_content(PaintList* paint, UiContext* ui, ViewBlock* view,
+                                     const Rect* content_rect);
 Rect render_media_image_rect(ViewBlock* view, ImageSurface* image, Rect content_rect, float raster_scale);
 Rect render_media_object_rect(const EmbedProp* embed, ImageSurface* image, Rect content_rect, float raster_scale);
 Rect render_media_positioned_rect(const EmbedProp* embed, Rect viewport, float width, float height, float raster_scale);
@@ -4170,7 +4213,7 @@ void render_output_target_apply_session(RenderOutputTarget* target,
 bool render_export_session_begin(RenderExportSession* session, const char* html_file,
                                  int viewport_width, int viewport_height,
                                  int fallback_width, int fallback_height, float output_scale,
-                                 bool print_media = false, bool paged = false);
+                                 bool print_media = false, bool paged = false, float device_scale = 1.0f);
 bool render_export_session_begin_raster(RenderExportSession* session, const char* html_file,
                                         int viewport_width, int viewport_height,
                                         float output_scale, float device_scale);
@@ -4216,11 +4259,11 @@ bool render_secondary_view_to_pdf(ViewTree* tree, const char* filename,
 // Main function to render HTML to PDF
 int render_html_to_pdf(const char* html_file, const char* pdf_file,
                        int viewport_width, int viewport_height,
-                       float scale = 1.0f, bool paged = false);
+                       float scale = 1.0f, bool paged = false, float device_scale = 1.0f);
 int render_document_transform_to_pdf(const char* document_file,
     const LambdaDocumentTransformConfig* transform,
     const LambdaDocumentTransformOption* options, int option_count,
-    const char* pdf_file, int viewport_width, int viewport_height, float scale, bool paged = false);
+    const char* pdf_file, int viewport_width, int viewport_height, float scale, bool paged = false, float device_scale = 1.0f);
 
 // ===== render_raster.hpp =====
 typedef struct RasterPaintContext {
@@ -4249,11 +4292,11 @@ bool render_selection_contains_view(DocState* state, View* view);
 // Main function to layout HTML and render to SVG
 int render_html_to_svg(const char* html_file, const char* svg_file,
                        int viewport_width, int viewport_height,
-                       float scale = 1.0f);
+                       float scale = 1.0f, float device_scale = 1.0f);
 int render_document_transform_to_svg(const char* document_file,
     const LambdaDocumentTransformConfig* transform,
     const LambdaDocumentTransformOption* options, int option_count,
-    const char* svg_file, int viewport_width, int viewport_height, float scale);
+    const char* svg_file, int viewport_width, int viewport_height, float scale, float device_scale = 1.0f);
 
 // Function to render a view tree to SVG string
 char* render_view_tree_to_svg(UiContext* uicon, View* root_view,
@@ -4521,12 +4564,40 @@ void render_custom_svg_subscene(RasterRenderContext* rdcon, Element* svg_element
                                 float viewport_width, float viewport_height);
 
 // ===== render_text.hpp =====
+class RenderTextPaintScope {
+    lam::Up<RenderContext> context;
+    lam::Up<RenderTextPaintData> previous;
+    lam::Own<RenderTextPaintData> data;
+public:
+    RenderTextPaintScope(RenderContext* context, ViewBlock* block,
+                         const FontBox* font, const Color* color);
+    ~RenderTextPaintScope();
+    RenderTextPaintScope(const RenderTextPaintScope&) = delete;
+    RenderTextPaintScope& operator=(const RenderTextPaintScope&) = delete;
+};
+
+class RenderTextPaintIterator {
+    lam::Up<RenderContext> context;
+    lam::Up<TextRect> cursor;
+    lam::Up<RenderTextPaintEntry> pending_marker;
+    TextRect projection;
+    FontBox saved_font;
+    Color saved_color;
+public:
+    RenderTextPaintIterator(RenderContext* context, ViewText* text);
+    ~RenderTextPaintIterator();
+    TextRect* next();
+    RenderTextPaintIterator(const RenderTextPaintIterator&) = delete;
+    RenderTextPaintIterator& operator=(const RenderTextPaintIterator&) = delete;
+};
+
 void render_text_view(RasterRenderContext* rdcon, ViewText* text_view);
 CssEnum render_text_inherited_transform(ViewText* text_view);
 char* render_text_create_export_segment(const unsigned char* text,
                                         const TextRect* text_rect,
                                         CssEnum text_transform,
-                                        bool include_ellipsis);
+                                        bool include_ellipsis,
+                                        CssEnum white_space = CSS_VALUE_PRE);
 
 // ===== render_vector_path.hpp =====
 struct RasterRenderContext;

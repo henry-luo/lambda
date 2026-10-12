@@ -1,8 +1,16 @@
 #include "render.hpp"
 
 RadiantRadialGeometry radiant_radial_gradient_geometry(const RadialGradient* gradient, Rect rect) {
-    float x = gradient->cx_is_px ? gradient->cx : rect.width * gradient->cx;
-    float y = gradient->cy_is_px ? gradient->cy : rect.height * gradient->cy;
+    RadiantGradientCenter center = radiant_gradient_center(gradient, rect);
+    float x = center.x - rect.x, y = center.y - rect.y;
+    const CssValue* radius_x = gradient_geometry_parameter(gradient->computed_geometry.get(), GRADIENT_GEOMETRY_RADIUS_X);
+    if (radius_x) {
+        float rx = fmaxf(0.0f, radiant::resolve_computed_length_percentage(radius_x, rect.width));
+        float ry = gradient->shape == RADIAL_SHAPE_CIRCLE ? rx : fmaxf(0.0f,
+            radiant::resolve_computed_length_percentage(gradient_geometry_parameter(gradient->computed_geometry.get(),
+                GRADIENT_GEOMETRY_RADIUS_Y), rect.height));
+        return {center.x, center.y, rx, ry};
+    }
     float dx[] = {fabsf(x), fabsf(rect.width - x)};
     float dy[] = {fabsf(y), fabsf(rect.height - y)};
     bool closest = gradient->size == RADIAL_SIZE_CLOSEST_SIDE || gradient->size == RADIAL_SIZE_CLOSEST_CORNER;

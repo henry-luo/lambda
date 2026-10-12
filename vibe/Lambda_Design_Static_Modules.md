@@ -436,6 +436,59 @@ B and C remain documented above **for future reference**:
 
 Uniform pattern (the `render_map.h` precedent): the **lower** module owns a hook header — typedef'd function pointers, a `*_register()` call, null-safe defaults — and radiant installs implementations during its init. No `extern` into an upper module, ever.
 
+**2026-10-11 Canvas/WebGL implementation checkpoint (D7.1.3 / D7.5.3).**
+`lambda/dom/dom_graphics.h` owns the plain native operation schemas;
+`lambda/dom/dom_provider.hpp` shares typed, null-safe calls. The runtime's
+`dom_engine_seam.cpp` publishes complete immutable,
+process-lifetime tables with acquire/release atomics; null or incomplete tables
+and conflicting providers are rejected, while repeat registration of the same
+table is idempotent. `radiant-dom` installs its native callbacks during static
+catalog registration, before per-context module initialization. The native
+Canvas state projection and WebGL command/method/constant catalogs now live
+below Radiant. Pixels, fonts, text, commands and replies remain synchronous
+borrows, and encoded Canvas bytes retain caller ownership.
+
+The emitted runtime DSO removes **41 unapproved graphics imports**, from
+**273 deferred / 136 unapproved** to **232 deferred / 95 unapproved**, with no
+new imports and unchanged checker/165-symbol allowance. The strict lib/core/io/
+radiant DSOs still link cleanly. Overall Class-F closure remains outstanding.
+A native DOM runner linked without the graphics provider verifies absence,
+every incomplete-table case, idempotence/conflict rejection and concurrent
+publication; the real Scene/WebGL controls retain pixel and lifecycle checks.
+The dated CSS delivery record carries matching build and gate evidence.
+
+**Native CSS increment (2026-10-11), D7.1.3 / D7.5.3.**
+`lambda/dom/dom_style.h` owns six native CSS operation fields: computed refresh,
+ordinary/custom serialization, custom computation, transition capture and
+used-value synchronization-hook installation. `radiant-dom` publishes its complete
+immutable table before context initialization. Script adapters keep their Items
+and rooting below the boundary. Element/name arguments are synchronous borrows;
+serialized strings use the caller's pool. Computed values may borrow document
+storage and the current lower consumer uses them synchronously (**D4.5.1v4 /
+D4.1.4v5**). The existing synchronization hook's behavior is unchanged.
+
+Publication/validation, acquire loads and typed calls share generic helpers across
+Canvas, WebGL and CSS. Missing callbacks reject the whole table; absent providers
+return false/null/void without output mutation, identical publication is idempotent,
+and a different table is rejected. The provider/range runner links without native
+graphics/CSS implementations and passes **75/75**, including all six incomplete
+CSS tables, absent operations, eight concurrent publishers and 16,000 successful
+void callback invocations. Native vector controls pass **127/127**.
+
+Rebuilt boundary images remove all **six** audited CSS imports, from **232 deferred
+/ 95 unapproved** to **226 deferred / 89 unapproved**, with zero new imports.
+The checker/165-symbol allowance remain unchanged; strict lib/core/io/radiant
+links pass while the overall gate still fails. The CSSOM bridge also drops its
+Radiant view-header include. The full Lambda/input gate passes **6,647/6,647**,
+Radiant passes **4,290 full / 349 partial**, and normal exports pass **227/227**.
+The isolated ASan control passes **1,066 native cases**, the Canvas JS golden and
+**19 export groups**, including the real computed/CSSOM consumers. Matching
+sources/binaries and raw evidence are frozen in
+`temp/css_support_p0/style_provider_checkpoint/`; the [CSS implementation
+record](impl/Radiant_Impl_CSS_Support.md#2026-10-11--p0-native-css-provider-ownership-and-consumer-qualification)
+retains scope and gate debt. Other Class-F ownership and compile-time type
+dependencies remain open.
+
 Inventory to convert (from `headless_stubs.cpp` and direct externs):
 
 | Edge | Today | Target |

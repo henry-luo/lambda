@@ -562,6 +562,43 @@ TEST_F(MarkBuilderDeepCopyTest, CopyNestedElements) {
     EXPECT_EQ(copied_div->length, 1);
 }
 
+TEST_F(MarkBuilderDeepCopyTest, ViewCopyDuplicatesOwnedElementsAndContentOnlyInUiMode) {
+    MarkBuilder ordinary(input1);
+    Item label = ordinary.element("span").text("shared").final();
+    Item attributes = ordinary.map().put("label", label).final();
+    Item children = ordinary.array().append(label).append(label).final();
+    Item source = ordinary.element("div").attr("metadata", attributes).child(children).final();
+    EXPECT_EQ(ordinary.deep_copy_for_view(source).element, source.element);
+
+    input1->ui_mode = true;
+    MarkBuilder view(input1);
+    // ownership alone still suffices for ordinary data imports in UI evaluation.
+    EXPECT_EQ(view.deep_copy(source).element, source.element);
+    // runtime elements use their shape footprint even when no reserve capacity is recorded.
+    source.element->data_cap = 0;
+    Item copied = view.deep_copy_for_view(source);
+    ASSERT_EQ(get_type_id(copied), LMD_TYPE_ELEMENT);
+    EXPECT_NE(copied.element, source.element);
+    EXPECT_NE(copied.element->data, source.element->data);
+    EXPECT_NE(copied.element->items, source.element->items);
+    Array* copied_children = copied.element->items[0].array;
+    ASSERT_EQ(copied_children->length, 2);
+    EXPECT_NE(copied_children, children.array);
+    Element* first = copied_children->items[0].element;
+    Element* second = copied_children->items[1].element;
+    EXPECT_NE(first, label.element);
+    EXPECT_NE(second, label.element);
+    EXPECT_NE(first, second);
+    EXPECT_NE(first->items[0].get_string(), second->items[0].get_string());
+    EXPECT_STREQ(first->items[0].get_string()->chars, "shared");
+    ElementReader reader(copied.element);
+    MapReader metadata(reader.get_attr("metadata").item().map);
+    Element* copied_label = metadata.get("label").item().element;
+    EXPECT_NE(copied_label, label.element);
+    EXPECT_NE(copied_label, first);
+    EXPECT_EQ(ordinary.deep_copy_for_view(source).element, source.element);
+}
+
 // ============================================================================
 // Ownership Chain Tests (Parent Input)
 // ============================================================================

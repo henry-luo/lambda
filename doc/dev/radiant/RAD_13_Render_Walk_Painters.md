@@ -1,6 +1,6 @@
 # Radiant — Render Walk, Painters & Export
 
-> **Last verified against tree:** 2026-07-14 *(initial stamp from git history)*
+> **Last verified against tree:** 2026-10-11 *(§11 text projection, selected-font SVG outlines and computed spacing; §12 selected background/marker/border images, retained marker fonts and export density; other sections retain their prior verification scope)*
 
 > **Part of the [Radiant detailed-design set](RAD_00_Overview.md).** This document covers how a laid-out view tree becomes output. One shared tree walk (`render_walk.cpp`) traverses the tree exactly once and dispatches every drawing decision through a `RenderBackend` vtable; each output target (raster window/PNG/JPEG, PDF, SVG) supplies its own callback set. It describes the walker (z-order, effect groups, transforms), the raster record→lower→replay pipeline, the per-feature painters (`render_bound` and its background/border/shadow/text/image/clip/effect/filter/composite kin), the PDF backend, capability gating, output targets, and the profiler. The *IR machinery itself* — PaintIR shape, the DisplayList, record/replay internals — is [RAD_12](RAD_12_Paint_IR_Display_List.md)'s job; this doc is the walk, the painters, and the export seams.
 >
@@ -193,6 +193,76 @@ cross-fragment clipping regressions pass (verified 2026-10-11).
 7. **Effect-group need vs. capability is decided in two places.** The walker's `render_walk_block_effect_group` (`render_walk.cpp:67`) decides an effect group is *needed*; the backend caps decide it is *supported*. A backend that opens a group it cannot honor relies on flatten/fallback correctness elsewhere — there is no single assertion tying the two together.
 
 ---
+
+## 11. Scoped text overflow and visible export bounds (2026-10-11)
+
+The block children paint phases install a shared `RenderTextPaintScope`; nested block scopes restore their parent's plan on exit. The plan borrows live views/fonts and owns only per-paint scratch, following **D4.5.1v4 / D4.1.4v5**. Raster, SVG and PDF iterate the same projections, including a separate marker when its block font/color differs from the last visible run. Compatible prefixes and markers stay in one run to preserve fractional positioning. PDF now consumes generated ellipsis as well as generated hyphens.
+
+`calculate_content_bounds()` uses document geometry and the existing ancestor overflow-clip helper, retaining float coordinates until conversion to integral export extents. It composes the paint transform matrices before projecting each box and its overflow clip; translated list content therefore contributes its translated bottom edge. Projective rectangles crossing `w=0` retain the prior finite-box fallback and remain unqualified. Clipped text below a clamp no longer enlarges the exported canvas. `OverflowEllipsisAndClampMatchExplicitTextAcrossOutputs` and `RtlOverflowMatchesVisibleSuffixesAcrossOutputs` each check 14 browser-verified references at both densities; mixed bidi, RTL clamp, atomic/scroll/vertical and decorated-inline contexts remain partial. See [the text design contract](../../../vibe/radiant/Radiant_Design_Font_Text.md#11-text-overflow-paint-contract-2026-10-11).
+
+Native SVG plain HTML text now uses `render_path_create_text_run`, the shared PDF
+outline helper, to retain the selected font's advances and ink bounds. Existing
+semantic-group commands preserve escaped accessible titles for outlined labels. A viewer's
+font substitution previously let the ellipsis overlap retained RTL text. Effect
+fallback keeps glyph runs; decorations, shadows and missing-outline fallback can
+still emit live text. Outlined SVG text loses search/selection. Existing command
+path ownership releases temporary outlines after lowering (**D4.5.1v4 / D4.1.4v5**).
+The focused source verification is 2026-10-11; other sections retain their earlier
+verification stamp. See [FT-15](../../../vibe/radiant/Radiant_Design_Font_Text.md#15-selected-font-svg-text-contract-2026-10-11).
+
+Direct raster text, blurred shadows, SVG/PDF outlines and recorded effect text now
+use the shared computed character/space advances. `PaintGlyphRun.word_spacing`
+contains extra justification only; authored spacing is read from its captured
+`FontProp`. Export text normalization follows the source's whitespace mode and
+keeps collapsed-separator context when fitting starts inside a byte range.
+Live SVG text emits negative as well as positive word/letter spacing. The bounded
+controls compare eight explicit references through PNG, independent SVG
+rasterization and PDF at 1×/2×. Tabs, complete Unicode separators, cross-node,
+shaping/vertical and decorated contexts remain partial under
+[FT-16](../../../vibe/radiant/Radiant_Design_Font_Text.md#16-computed-spacing-in-paint-2026-10-11).
+
+## 12. Selected background images and export density (2026-10-11)
+
+`render_paint_background_image()` uses the raster painter's shared positioning,
+origin/clip/attachment rectangles and tile plan. SVG and PDF lower its owned
+rounded clip and common image/picture commands, including natural raster size
+divided by the selected `image-set()` resolution. URL-less raster resources
+embed their decoded pixels in SVG. Retained clips and image payloads follow
+**D4.5.1v4 / D4.1.4v5**. See
+[CI-17](../../../vibe/radiant/Radiant_CSS_Cascade.md#317-css-image-selection-and-retained-paint-payloads-partially-implemented).
+
+`RenderExportSession` receives the caller's explicit device environment for
+asset selection. Physical export density stays independent under
+[RSC6–RSC7](../../../vibe/radiant/Radiant_Scale.md#rsc6--paint-semantics-are-logical-raster-lowering-is-physical).
+`render_font_pixel_to_css()` converts glyph-cache advances and bitmap placement
+to logical coordinates for effect fallback, SVG/PDF width measurement and SVG
+emphasis. `EffectGlyphBitmapsAndAdvancesUseLogicalPaintCoordinates` checks the
+1×/2× boundary; the RTL filtered suffix references pass at both densities.
+
+`CssImageSetsMatchSelectedNaturalImageSizesAcrossOutputs` compares ten selected
+image cases with explicit replacements at both device scales through PNG, SVG
+and PDF. Chromium agrees on eighteen export references; its two pseudo-image
+references have the inline baseline difference recorded in CI-17. Complete
+multilayer ordering/blending, transformed sampling, independent/paged producers
+and standalone file resources remain unqualified.
+
+`render_paint_border_image()` and the raster painter call one nine-slice
+implementation in `render_border.cpp`. Region clips, source crops, auto widths
+and repeated tiles share geometry; deferred linear-gradient tiles retain owned
+paths and stops. `render_paint_boundary_emit_box()` yields its solid-ring fast
+path to an image source. `render_paint_marker_image()` shares URL-marker image
+rectangles with raster and uses the common image resource producer. The raster
+marker painter converts logical marker dimensions once; retained marker source
+and suppression refresh during layout (**D4.5.1v4 / D4.1.4v5**, CI-17).
+
+`CssImageSetMarkersAndBordersKeepVisiblePixelsAcrossOutputs` compares seven
+URL/linear-gradient controls, both untranslated and translated, at two densities (28 references), including filtered gradient
+retention. Exact references remain within each format; independent selected-color
+coverage excludes matching omissions. URL markers consume the current raster paint
+transform, while border slice clips use the same transform as their tiles. The live fixture has 54 Chromium-matching
+assertions. Outside-marker placement, gradient marker export, radial/conic or SVG
+border images, broader transformed sampling, PDF profile/edge rasterization, output
+canvas padding and independent/paged producers remain separate limits.
 
 ## Appendix A — Source map
 

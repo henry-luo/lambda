@@ -1,0 +1,80 @@
+{
+  "name": "Radiant grid extent policy: clamp areas before narrowing indices",
+  "html": "test/ui/css_grid_extent_policy.html",
+  "viewport": {
+    "width": 640,
+    "height": 480
+  },
+  "events": [
+    {
+      "type": "click",
+      "target": {
+        "selector": "#check"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-positive",
+      "equals": "9999,0,1,1"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-crossing",
+      "equals": "9998,0,2,1"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-negative",
+      "equals": "10000,0,1,1"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-negative-crossing",
+      "equals": "0,0,3,1"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-repeat-outside",
+      "equals": "0,0,5,1"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-repeat-edge",
+      "equals": "4,0,9996,1"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-automatic",
+      "equals": "9999,0,1,1"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-named-positive",
+      "equals": "9999,0,1,1"
+    }
+  ]
+}

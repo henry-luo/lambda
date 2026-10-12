@@ -2237,7 +2237,10 @@ Script* load_script(Runtime *runtime, const char* script_path, const char* sourc
             err_print_warning(warning);
             fprintf(stderr, "\n");
         }
-        fprintf(stderr, "%d static warning(s) (--static-warning relaxed mode).\n",
+        // advisory warnings (the grammar lint) share this list with the
+        // downgraded diagnostics of relaxed mode
+        fprintf(stderr, transpiler.static_warning
+            ? "%d warning(s) (--static-warning relaxed mode).\n" : "%d warning(s).\n",
             transpiler.warnings->length);
     }
 

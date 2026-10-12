@@ -695,6 +695,7 @@ typedef enum SysFunc {
     SYSFUNC_EXCEPT,
     SYSPROC_IO_GREP,         // io.grep(source, pattern, options?) - line-oriented file search (lib/grep, GRP26)
     SYSPROC_IO_TEXT_SEARCH,       // io.text_search(source, query, options?) - ranked full-text file search (lib/fts, FTX11)
+    SYSFUNC_PARSE3,         // parse(str, grammar, 'rule') - run a grammar from a named rule (GM5.1)
 } SysFunc;
 
 typedef struct Type {
@@ -3402,6 +3403,7 @@ extern "C" {
     Item fn_open_end(Bool unwinding);
     Item fn_parse1(Item str);
     Item fn_parse2(Item str, Item options);
+    Item fn_parse3(Item str, Item grammar, Item rule);
     Item fn_parse_html_fragment1(Item str);
     Item fn_format1(Item item);
     Item fn_format2(Item item, Item options);

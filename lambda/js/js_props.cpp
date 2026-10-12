@@ -793,12 +793,17 @@ static inline Item js_props_throw_type(const char* msg) {
 }
 
 extern "C" Item js_descriptor_from_object(Item desc_obj, JsPropertyDescriptor* out) {
+    return js_descriptor_from_object_with_reader(desc_obj, out, NULL, NULL);
+}
+extern "C" Item js_descriptor_from_object_with_reader(Item desc_obj, JsPropertyDescriptor* out,
+        const JsDescriptorReader* reader, uint64_t* value_home) {
     if (!out) return js_status_ok();
+    auto fail = reader ? reader->type_error : js_props_throw_type;
     *out = (JsPropertyDescriptor){};
 
     // Reject primitive descriptors per ES §6.2.5.5 step 1 (Type(Obj) is Object).
     if (!js_is_object_value(desc_obj)) {
-        return js_props_throw_type("Property description must be an object");
+        return fail("Property description must be an object");
     }
     RootFrame roots(6);
     Rooted<Item> descriptor_root(roots, desc_obj), key_root(roots, ItemNull);
@@ -821,18 +826,18 @@ extern "C" Item js_descriptor_from_object(Item desc_obj, JsPropertyDescriptor* o
     // each HasProperty/Get pair is observable; later callbacks may collect earlier values.
     for (size_t i = 0; i < sizeof(fields) / sizeof(fields[0]); i++) {
         key_root.set(js_name_item(fields[i].name, fields[i].length));
-        JS_ASSIGN_OR_RETURN(present, js_in(key_root.get(), descriptor_root.get()));
+        JS_ASSIGN_OR_RETURN(present, reader ? reader->property(descriptor_root.get(), key_root.get(), true) : js_in(key_root.get(), descriptor_root.get()));
         if (!it2b(present)) continue;
-        field_root.set(js_get_key_default(descriptor_root.get(), key_root.get()));
+        field_root.set(reader ? reader->property(descriptor_root.get(), key_root.get(), false) : js_get_key_default(descriptor_root.get(), key_root.get()));
         if (item_is_error(field_root.get())) return field_root.get();
         uint8_t flag = fields[i].present_flag;
         descriptor.flags |= flag;
         if (flag == JS_PD_HAS_VALUE) {
-            value_root.set(field_root.get());
+            value_root.set(value_home ? lambda_item_adopt_scalar_home(field_root.get(), value_home) : field_root.get());
         } else if (flag == JS_PD_HAS_GET || flag == JS_PD_HAS_SET) {
             if (get_type_id(field_root.get()) != LMD_TYPE_UNDEFINED &&
-                    !js_is_callable(field_root.get())) {
-                return js_props_throw_type(flag == JS_PD_HAS_GET
+                    !(reader ? reader->callable(field_root.get()) : js_is_callable(field_root.get()))) {
+                return fail(flag == JS_PD_HAS_GET
                     ? "Getter must be a function" : "Setter must be a function");
             }
             if (flag == JS_PD_HAS_GET) getter_root.set(field_root.get());
@@ -844,7 +849,7 @@ extern "C" Item js_descriptor_from_object(Item desc_obj, JsPropertyDescriptor* o
     }
     // conflicting fields are rejected after their required observable reads.
     if (js_pd_is_accessor(&descriptor) && js_pd_is_data(&descriptor)) {
-        return js_props_throw_type(
+        return fail(
             "Invalid property descriptor. Cannot both specify accessors and a value or writable attribute");
     }
     descriptor.value = value_root.get();

@@ -16,6 +16,7 @@
 #include "../../lib/log.h"
 #include "../../lib/memtrack.h"
 #include "../../lib/mem_grow.hpp"
+#include "../../lib/lambda_alloca.h"
 
 struct JsClassEntry;
 struct JubeTypeDef;
@@ -1197,8 +1198,15 @@ static inline MIR_type_t em_numeric_storage_type(ArrayNumElemType type) {
 }
 
 // finite INT primitives require a proven tag/band; guest operators own overflow policy.
-static inline MIR_reg_t em_unbox_finite_int_item(MirEmitter* em, MIR_reg_t item, MIR_reg_t value = 0) {
+static inline MIR_reg_t em_unbox_finite_int_item(MirEmitter* em, MIR_reg_t item,
+        MIR_reg_t value = 0, bool nonnegative = false) {
     if (!value) value = em_new_reg(em, "finite_int", MIR_T_I64);
+    if (nonnegative) {
+        // a proven nonnegative payload needs no sign extension.
+        em_emit_insn(em, MIR_new_insn(em->ctx, MIR_AND, MIR_new_reg_op(em->ctx, value),
+            MIR_new_reg_op(em->ctx, item), MIR_new_uint_op(em->ctx, ITEM_INT_PAYLOAD_MASK)));
+        return value;
+    }
     em_emit_insn(em, MIR_new_insn(em->ctx, MIR_LSH, MIR_new_reg_op(em->ctx, value),
         MIR_new_reg_op(em->ctx, item), MIR_new_int_op(em->ctx, 8)));
     em_emit_insn(em, MIR_new_insn(em->ctx, MIR_RSH, MIR_new_reg_op(em->ctx, value),
@@ -4596,6 +4604,64 @@ static inline void em_emit_borrowed_call(MirEmitter* em,
 static inline void em_emit_destination_owned_call(MirEmitter* em,
         const char* call_name, MIR_insn_t insn) {
     em_emit_unclassified_call(em, call_name, insn, true);
+}
+
+// Emit a variadic call with a fixed prefix followed by the variable arguments.
+static inline MIR_reg_t em_emit_vararg_call(MirEmitter* em, const char* fn_name,
+    MIR_type_t ret_type, int nres, int n_mandatory,
+    MIR_var_t* mandatory_vars, MIR_op_t* mandatory_ops,
+    int n_varargs, MIR_op_t* vararg_ops) {
+    // each MVP function has its own emitter; include its identity in the module-wide name.
+    char proto_name[160];
+    snprintf(proto_name, sizeof(proto_name), "%s_vp%p_%d", fn_name,
+        (void*)em->func_item, em->label_counter++);
+
+    MIR_type_t res_types[1] = { ret_type };
+    MIR_item_t proto = MIR_new_vararg_proto_arr(em->ctx, proto_name, nres,
+        res_types, n_mandatory, mandatory_vars);
+
+    // Import
+    MirImportCacheEntry key;
+    memset(&key, 0, sizeof(key));
+    key.name = mir_em_persist_cstr(em, fn_name).str;
+    MirImportCacheEntry* found = (MirImportCacheEntry*)hashmap_get(em->import_cache, &key);
+    MIR_item_t imp;
+    if (found) {
+        imp = found->entry.import;
+    } else {
+        imp = MIR_new_import(em->ctx, fn_name);
+        // Cache only the import, not proto (proto is unique per call)
+        MirImportCacheEntry new_entry;
+        memset(&new_entry, 0, sizeof(new_entry));
+        new_entry.name = mir_em_persist_cstr(em, fn_name).str;
+        new_entry.entry.import = imp;
+        new_entry.entry.proto = proto; // store last proto
+        hashmap_set(em->import_cache, &new_entry);
+    }
+
+    // Build call: proto, import, [result], mandatory prefix, varargs...
+    int nops = (nres > 0 ? 3 : 2) + n_mandatory + n_varargs;
+    MIR_op_t* ops = LAMBDA_ALLOCA(nops, MIR_op_t);
+    int oi = 0;
+    ops[oi++] = MIR_new_ref_op(em->ctx, proto);
+    ops[oi++] = MIR_new_ref_op(em->ctx, imp);
+    MIR_reg_t result = 0;
+    if (nres > 0) {
+        result = em_new_reg(em, fn_name, ret_type);
+        ops[oi++] = MIR_new_reg_op(em->ctx, result);
+    }
+    for (int i = 0; i < n_mandatory; i++) {
+        ops[oi++] = mandatory_ops[i];
+    }
+    for (int i = 0; i < n_varargs; i++) {
+        ops[oi++] = vararg_ops[i];
+    }
+
+    // callers select helpers that consume arguments into owned storage before
+    // returning (container fills and string joins); no activation home escapes.
+    em_emit_destination_owned_call(em, fn_name,
+        MIR_new_insn_arr(em->ctx, MIR_CALL, oi, ops));
+    return result;
 }
 
 // Resolve (and declare on first use) the import `fn_name` with this signature.

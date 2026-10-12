@@ -943,8 +943,8 @@ void target_children(EventContext* evcon, View* view) {
 }
 
 void target_text_view(EventContext* evcon, ViewText* text) {
-    if (dom_node_is_inert(text)) return;
-    if (event_view_pointer_events_none(static_cast<View*>(text))) return;
+    if (dom_node_is_inert(text) || view_visibility_is_hidden(text) ||
+        event_view_pointer_events_none(static_cast<View*>(text))) return;
     unsigned char* str = text->text_data();
     TextRect *text_rect = text->rect;
     MousePositionEvent* event = &evcon->event.mouse_position;
@@ -1080,6 +1080,7 @@ static void find_editable_margin_text_hit(EventContext* evcon, View* view,
     MousePositionEvent* event = &evcon->event.mouse_position;
 
     if (view->view_type == RDT_VIEW_TEXT) {
+        if (view_visibility_is_hidden(view)) return;
         ViewText* text = lam::view_require_text(view);
         for (TextRect* rect = text->rect; rect; rect = rect->next) {
             if (rect->height <= 0) continue;
@@ -1204,9 +1205,12 @@ void target_block_view(EventContext* evcon, ViewBlock* block) {
             return; // a singular transform has no hittable painted area.
         }
     }
-    evcon->block.x = pa_block.x + block->x;  evcon->block.y = pa_block.y + block->y;
+    RdtLogicalPoint fixed = view_geometry_fixed_scroll_adjustment(block);
+    evcon->block.x = pa_block.x + block->x + fixed.x;
+    evcon->block.y = pa_block.y + block->y + fixed.y;
     MousePositionEvent* event = &evcon->event.mouse_position;
-    bool pointer_events_none = event_view_pointer_events_none(
+    // an invisible box cannot claim the hit; traversal still reaches visible descendants.
+    bool self_unhittable = view_visibility_is_hidden(block) || event_view_pointer_events_none(
         static_cast<View*>(block));
     // Content outside the overflow clip is not painted (setup_scroller), so it
     // must not take the hit either: an overflowing child would claim clicks on
@@ -1223,8 +1227,8 @@ void target_block_view(EventContext* evcon, ViewBlock* block) {
     // target the scrollbars first
     View* view = NULL;
     bool hover = false;
-    if (!pointer_events_none && block->scroller && block->scroll_mut()->pane) {
-        hover = scrollpane_target(evcon, block);
+    if (block->scroller && block->scroll_mut()->pane) {
+        hover = !self_unhittable && scrollpane_target(evcon, block);
         if (hover) {
             log_debug("hit on block scroll: %s", block->node_name());
             evcon->target = static_cast<View*>(block);
@@ -1239,12 +1243,12 @@ void target_block_view(EventContext* evcon, ViewBlock* block) {
         DocState* state = event_view_owner_state(static_cast<View*>(block));
         if (!state) state = event_context_target_state(evcon);
         float scroll_x = 0.0f, scroll_y = 0.0f;
-        // overflow-visible boxes may allocate a pane to record intrinsic overflow,
-        // but that pane does not establish a scrolling coordinate space for hits.
-        if (block->scroll()->has_hz_scroll || block->scroll()->has_vt_scroll) {
-            scroll_state_get_position_for_view(state, static_cast<View*>(block), block->scroll()->pane,
-                                               &scroll_x, &scroll_y, NULL, NULL);
-        }
+        scroll_state_get_position_for_view(state, static_cast<View*>(block), block->scroll()->pane,
+                                           &scroll_x, &scroll_y, NULL, NULL);
+        // hidden overflow scrolls without scrollbars; visible/clip axes do not scroll.
+        const ScrollProp* scroll = block->scroll();
+        if (!scroll->has_hz_scroll && scroll->overflow_x != CSS_VALUE_HIDDEN) scroll_x = 0.0f;
+        if (!scroll->has_vt_scroll && scroll->overflow_y != CSS_VALUE_HIDDEN) scroll_y = 0.0f;
         evcon->block.x -= scroll_x;
         evcon->block.y -= scroll_y;
     }
@@ -1252,7 +1256,7 @@ void target_block_view(EventContext* evcon, ViewBlock* block) {
     // Check if this block is a child-window webview — stop hit-testing here.
     // In child-window mode, the OS delivers events directly to the native web view.
     // Radiant should not process events that land inside the webview area.
-    if (!pointer_events_none && block->embed && block->embedp()->webview &&
+    if (!self_unhittable && block->embed && block->embedp()->webview &&
         block->embedp()->webview->mode == WEBVIEW_MODE_WINDOW) {
         float bx = evcon->block.x, by = evcon->block.y;
         MousePositionEvent* mev = &evcon->event.mouse_position;
@@ -1272,7 +1276,7 @@ void target_block_view(EventContext* evcon, ViewBlock* block) {
 
     // children, positioned ones included, paint inside the clip; the block's
     // own border box stays hittable below
-    if (clipped_out) goto RETURN;
+    if (clipped_out || view_contents_are_skipped(block)) goto RETURN;
 
     // Positioned content paints after a custom layout's local signed-z sequence.
     // Hit testing must consume those same layers in exact reverse paint order.
@@ -1292,7 +1296,7 @@ void target_block_view(EventContext* evcon, ViewBlock* block) {
 
     // Layer-mode webview: Radiant owns events but forwards them to the offscreen web view.
     // Set target to the webview block and inject the mouse event.
-    if (!pointer_events_none && block->embed && block->embedp()->webview &&
+    if (!self_unhittable && block->embed && block->embedp()->webview &&
         block->embedp()->webview->mode == WEBVIEW_MODE_LAYER &&
         block->embedp()->webview->handle) {
         float bx = evcon->block.x, by = evcon->block.y;
@@ -1316,7 +1320,7 @@ void target_block_view(EventContext* evcon, ViewBlock* block) {
 
     // Check if this block contains an embedded iframe document
     // If so, target into the iframe's document instead of treating it as a normal block
-    if (!pointer_events_none && block->embed && block->embedp()->doc) {
+    if (!self_unhittable && block->embed && block->embedp()->doc) {
         DomDocument* iframe_doc = block->embedp()->doc;
         if (iframe_doc->view_tree && iframe_doc->view_tree->root) {
             log_debug("targeting into iframe embedded document: %s", block->node_name());
@@ -1377,7 +1381,7 @@ void target_block_view(EventContext* evcon, ViewBlock* block) {
                 }
             }
         }
-        if (!evcon->target && is_in_rich_editable_subtree(static_cast<View*>(block)) &&
+        if (!self_unhittable && !evcon->target && is_in_rich_editable_subtree(static_cast<View*>(block)) &&
             rich_host_margin_hit_allowed) {
             EditableMarginTextHit margin_hit = { NULL, NULL, 0, 0.0f, 0.0f, -1.0f };
             bool include_vertical_gap = rich_host;
@@ -1417,7 +1421,7 @@ void target_block_view(EventContext* evcon, ViewBlock* block) {
     uintptr_t self_tag = block->tag();
     bool is_replaced_block = layout_tag_is_replaced_content((NameId)self_tag) ||
         self_tag == MARKUP_NAME_HR || self_tag == MARKUP_NAME_OBJECT;
-    if (!pointer_events_none && !evcon->target &&
+    if (!self_unhittable && !evcon->target &&
         (is_replaced_block ||
          !(is_in_rich_editable_subtree(static_cast<View*>(block)) && !is_rich_editable_host(static_cast<View*>(block))))) { // check the block itself
         // use the block's own accumulated position (parent + block offset),
@@ -8738,24 +8742,29 @@ static Item radiant_deliver_timing_event(Item env_item) {
     Rooted<Item> target_root(roots, env[0]);
     Rooted<Item> event_root(roots, env[1]);
     // document teardown invalidates wrappers and cancels its queued timer jobs.
-    if (!dom_unwrap_element(target_root.get())) return make_js_undefined();
+    DomElement* target = (DomElement*)dom_unwrap_element(target_root.get());
+    if (!target) return make_js_undefined();
+    // queued relevance notifications are discarded if their element was removed.
+    if (radiant_dom_event_type_is(event_root.get(), "contentvisibilityautostatechange") &&
+            !dom_element_is_connected(target)) return make_js_undefined();
     return dom_dispatch_event(target_root.get(), event_root.get());
 }
 
-static void radiant_queue_timing_event(UiContext* uicon, DomElement* target,
+static bool radiant_queue_timing_event(UiContext* uicon, DomElement* target,
     RadiantJsEventBuilder build, void* userdata, const char* css_event_type = nullptr) {
-    if (!uicon || !target || !target->doc) return;
+    if (!uicon || !target || !target->doc) return false;
     EventContext evcon = {};
     evcon.ui_context = uicon; evcon.target_document = target->doc;
     JsCtxScope scope = {};
     bool entered_scope = radiant_js_ctx_enter(&scope, &evcon);
-    if (!entered_scope && (!context || dom_get_document() != target->doc)) return;
+    if (!entered_scope && (!context || dom_get_document() != target->doc)) return false;
     // Lambda documents need no JS timer/closure for an unobserved CSS event.
     // JS realms remain conservative because inline handlers may not be indexed
     // until their DOM wrappers are initialized. Lambda author masks are live.
     bool observed = !css_event_type || dom_document_has_js_realm(target->doc) ||
         dom_event_type_has_js_listeners(css_event_type) ||
         template_registry_has_author_handler(g_template_registry, css_event_type);
+    bool queued = true;
     if (observed) {
         // D5.3.3: target-wrapper allocation and callbacks can collect either argument.
         RootFrame roots(2);
@@ -8763,13 +8772,25 @@ static void radiant_queue_timing_event(UiContext* uicon, DomElement* target,
         Rooted<Item> event_root(roots, build(userdata));
         Item values[2] = {target_root.get(), event_root.get()};
         // listeners may mutate style; the traced task owns its arguments until layout has unwound.
-        js_schedule_native_env_timeout(radiant_deliver_timing_event, 0,
-            (Item){.item = i2it(0)}, values, 2);
+        queued = dom_unwrap_element(target_root.get()) && radiant_dom_event_is(event_root.get()) &&
+            !item_is_error(js_schedule_native_env_timeout(radiant_deliver_timing_event, 0,
+                (Item){.item = i2it(0)}, values, 2));
     }
     if (entered_scope) {
         input_context = scope.saved_input_ctx;
         scope.active = false;
     }
+    return queued;
+}
+
+static Item radiant_build_content_visibility_event(void* userdata) {
+    return js_create_native_content_visibility_event(*(bool*)userdata);
+}
+
+bool radiant_queue_content_visibility_event(UiContext* uicon, DomElement* target,
+        bool skipped) {
+    return radiant_queue_timing_event(uicon, target, radiant_build_content_visibility_event,
+        &skipped, "contentvisibilityautostatechange");
 }
 
 struct RadiantTimingEventData {
@@ -11417,6 +11438,8 @@ static bool dropdown_click_is_outside(EventContext* evcon, float mouse_x, float 
  */
 bool is_view_focusable(View* view) {
     if (!view || dom_node_is_inert(view)) return false;
+    if (view->is_element() &&
+        view_content_visibility_hides(view->as_element(), CONTENT_VISIBILITY_USER_AGENT)) return false;
 
     // Elements that are focusable by default:
     // - <a> with href
@@ -11482,6 +11505,8 @@ bool is_view_focusable(View* view) {
 
 bool is_view_programmatically_focusable(View* view) {
     if (view && dom_node_is_inert(view)) return false;
+    if (view && view->is_element() &&
+        view_content_visibility_hides(view->as_element(), CONTENT_VISIBILITY_USER_AGENT)) return false;
     if (is_view_focusable(view)) return true;
     if (!view || !view->is_element()) return false;
     ViewElement* elem = lam::view_require_element(view);
@@ -14687,10 +14712,9 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             // End selection mode
             if (selection_has_projection(state)) {
                 dispatch_selectionchange(&evcon, state, evcon.target);
-                selection_transition(state, SELECTION_TRANSITION_END_POINTER_SELECTION, NULL);
-                EditingControllerHooks hooks = editing_controller_hooks();
-                editing_controller_drag_autoscroll_stop(state, &hooks);
             }
+            // a click handler may clear the range; mouse-up still ends its pointer gesture.
+            selection_transition(state, SELECTION_TRANSITION_END_POINTER_SELECTION, NULL);
             EditingControllerHooks hooks = editing_controller_hooks();
             editing_controller_drag_autoscroll_stop(state, &hooks);
         }

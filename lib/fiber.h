@@ -36,7 +36,8 @@ bool fiber_stack_reserve(FiberStack* stack, size_t usable_bytes, size_t tail_byt
 void fiber_stack_release(FiberStack* stack);
 // Return the committed pages of a stack that is not running to the OS, except
 // `keep_bytes` at the high end (the part every activation touches again).
-void fiber_stack_trim(FiberStack* stack, size_t keep_bytes);
+// if reclaim is false, the owner must reclaim the discarded range before reuse.
+void fiber_stack_trim(FiberStack* stack, size_t keep_bytes, bool reclaim);
 
 // Return the pages covering [addr, addr + len) to the OS while keeping the
 // range reserved; their contents become undefined. Before writing the range

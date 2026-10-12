@@ -8,6 +8,12 @@ typedef struct RenderGlyphPathWriter {
     float x, y, scale_x;
 } RenderGlyphPathWriter;
 
+float render_font_pixel_to_css(FontHandle* font, const GlyphBitmap* bitmap) {
+    float size = font_handle_get_size_px(font), physical = font_handle_get_physical_size_px(font);
+    float scale = size > 0.0f && physical > 0.0f ? size / physical : 1.0f;
+    return scale * (bitmap && bitmap->bitmap_scale > 0.0f ? bitmap->bitmap_scale : 1.0f);
+}
+
 static bool render_font_path_command(void* context, FontPathCommand command,
     const float* values, int count) {
     RenderGlyphPathWriter* writer = (RenderGlyphPathWriter*)context;
@@ -36,7 +42,7 @@ bool render_path_append_font_glyph(RdtPath* path, FontHandle* font, uint32_t cod
     const GlyphBitmap* bitmap = font_render_glyph(font, codepoint, GLYPH_RENDER_NORMAL);
     float size = font_handle_get_size_px(font), physical = font_handle_get_physical_size_px(font);
     if (!bitmap || size <= 0.0f || physical <= 0.0f) return false;
-    float pixel_to_css = size / physical * (bitmap->bitmap_scale > 0.0f ? bitmap->bitmap_scale : 1.0f);
+    float pixel_to_css = render_font_pixel_to_css(font, bitmap);
     if (color_bitmap) *color_bitmap = bitmap->pixel_mode == GLYPH_PIXEL_BGRA;
     return font_visit_bitmap_contours(bitmap, pixel_to_css, render_font_path_command, &writer, arena);
 }
@@ -49,8 +55,8 @@ bool render_path_append_font_glyph_index(RdtPath* path, FontHandle* font, uint32
 }
 
 RdtPath* render_path_create_glyph_run(const PaintGlyphRun* run) {
-    if (!run || !run->font || !run->glyph_ids || !run->xs || !run->ys || run->count <= 0) return nullptr;
-    FontHandle* font = font_box_handle(run->font);
+    if (!run || !paint_glyph_run_font(run) || !run->glyph_ids || !run->xs || !run->ys || run->count <= 0) return nullptr;
+    FontHandle* font = font_box_handle(paint_glyph_run_font(run));
     if (!font) return nullptr;
     RdtPath* path = rdt_path_new();
     Arena* scratch = mem_arena_create(mem_context_process(MEM_ROLE_RENDER), MEM_ROLE_RENDER, "render.glyph_run.outline");
@@ -66,7 +72,7 @@ RdtPath* render_path_create_glyph_run(const PaintGlyphRun* run) {
 }
 
 RdtPath* render_path_create_text_run(const PaintGlyphRun* run, FontContext* font_context) {
-    FontBox* box = run ? (FontBox*)run->font : nullptr;
+    const FontBox* box = paint_glyph_run_font(run);
     FontHandle* primary = font_box_handle(box);
     if (!run || !run->text || !primary || !box->style) return nullptr;
     FontStyleDesc descriptor = font_style_desc_from_prop(box->style);
@@ -86,7 +92,7 @@ RdtPath* render_path_create_text_run(const PaintGlyphRun* run, FontContext* font
         if (text_justify_cjk_gap(previous, codepoint)) pen += run->cjk_spacing;
         previous = codepoint;
         if (codepoint == ' ') {
-            pen += max(0.0f, box->style->space_width + run->word_spacing) + box->style->letter_spacing;
+            pen += text_space_advance(box->style, run->word_spacing);
             continue;
         }
         uint32_t next = 0;
@@ -96,10 +102,10 @@ RdtPath* render_path_create_text_run(const PaintGlyphRun* run, FontContext* font
             : !font_has_codepoint(primary, codepoint)
                 ? font_resolve_for_codepoint(font_context, &descriptor, codepoint) : nullptr;
         FontHandle* face = fallback ? fallback : primary;
-        // PDF text must use the selected Unicode face, never interpret UTF-8 as WinAnsi bytes.
+        // exported text uses the selected Unicode face instead of a viewer's replacement font.
         ok = font_has_codepoint(face, codepoint) && render_path_append_font_glyph(path, face,
             codepoint, pen, run->baseline_y, 1.0f, scratch, nullptr);
-        pen += font_get_glyph(face, codepoint).advance_x + box->style->letter_spacing;
+        pen += font_get_glyph(face, codepoint).advance_x + text_character_spacing(box->style, codepoint);
         if (fallback) font_handle_release(fallback);
         arena_reset(scratch);
     }

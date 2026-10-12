@@ -535,11 +535,12 @@ static bool render_export_session_begin_internal(
 bool render_export_session_begin(RenderExportSession* session, const char* html_file,
                                  int viewport_width, int viewport_height,
                                  int fallback_width, int fallback_height, float output_scale,
-                                 bool print_media, bool paged) {
+                                 bool print_media, bool paged, float device_scale) {
     RenderExportHtmlRequest request = {html_file, INPUT_RESOURCE_ALLOW_NETWORK, paged};
+    // explicit device environments select assets independently of vector export density (RSC6–RSC7).
     return render_export_session_begin_internal(session,
         viewport_width, viewport_height, fallback_width, fallback_height,
-        output_scale, 1.0f, false, print_media, paged,
+        output_scale, device_scale, false, print_media, paged,
         render_export_load_html_document, &request);
 }
 
@@ -736,20 +737,29 @@ static void render_output_render_view_tree(RasterRenderContext* rdcon, ViewTree*
 }
 
 static bool render_display_list_replay_surface(DisplayList* list, MemContext* memory,
-        ImageSurface* surface, Bound physical_bounds, float raster_scale, Color backdrop) {
+        ImageSurface* surface, Bound physical_bounds, float raster_scale, Color backdrop,
+        DisplayList* backdrop_list = nullptr) {
     if (!list || !isfinite(raster_scale) || raster_scale <= 0.0f ||
         !isfinite(physical_bounds.left) || !isfinite(physical_bounds.top) ||
         !isfinite(physical_bounds.right) || !isfinite(physical_bounds.bottom) ||
-        !surface || !dl_validate_or_log(list, "render_display_list_replay_surface")) return false;
+        !surface || !dl_validate_or_log(list, "render_display_list_replay_surface") ||
+        (backdrop_list && !dl_validate_or_log(backdrop_list, "render_display_list_snapshot_backdrop"))) return false;
     RasterPaintContext raster = raster_paint_context(surface, nullptr, nullptr, 0);
     raster_fill_rect(&raster, nullptr, render_pixel_premultiply_abgr(backdrop.c));
     RdtVector vec = {};
     rdt_vector_init(&vec, (uint32_t*)surface->pixels, surface->width, surface->height, surface->width);
+    Arena* scratch_arena = mem_arena_create(memory, MEM_ROLE_RENDER, "render.snapshot.scratch");
+    if (!scratch_arena) { rdt_vector_destroy(&vec); return false; }
     ScratchArena scratch = {};
-    mem_scratch_init(memory, &scratch, nullptr, MEM_ROLE_RENDER, "render.snapshot.replay");
+    // filters and saved backdrops allocate through scratch; a null backing silently drops both.
+    mem_scratch_init(memory, &scratch, scratch_arena, MEM_ROLE_RENDER, "render.snapshot.replay");
+    // backdrop capture and foreground are distinct passes; their vector batches cannot merge.
+    if (backdrop_list) dl_replay_tile(backdrop_list, &vec, surface, &scratch,
+        physical_bounds.left, physical_bounds.top, (float)surface->width, (float)surface->height, raster_scale);
     dl_replay_tile(list, &vec, surface, &scratch, physical_bounds.left, physical_bounds.top,
         (float)surface->width, (float)surface->height, raster_scale);
     rdt_vector_flush_batch(&vec); rdt_vector_destroy(&vec); scratch_release(&scratch);
+    mem_arena_destroy(scratch_arena);
     // encoders and snapshot callers consume straight channels; vector replay writes premultiplied ABGR.
     for (size_t i = 0, count = (size_t)surface->width * (size_t)surface->height; i < count; i++)
         ((uint32_t*)surface->pixels)[i] = render_pixel_unpremultiply_abgr(((uint32_t*)surface->pixels)[i]);
@@ -759,10 +769,15 @@ static bool render_display_list_replay_surface(DisplayList* list, MemContext* me
 
 ImageSurface* render_display_list_snapshot(DisplayList* list, MemContext* memory,
         Bound physical_bounds, float raster_scale, Color backdrop) {
+    return render_display_list_snapshot_with_backdrop(list, memory, physical_bounds, raster_scale, backdrop, nullptr);
+}
+
+ImageSurface* render_display_list_snapshot_with_backdrop(DisplayList* list, MemContext* memory,
+        Bound physical_bounds, float raster_scale, Color backdrop, DisplayList* backdrop_list) {
     ImageSurface* surface = render_surface_create_budgeted(memory,
         physical_bounds.right - physical_bounds.left, physical_bounds.bottom - physical_bounds.top);
     if (!surface) return nullptr;
-    if (!render_display_list_replay_surface(list, memory, surface, physical_bounds, raster_scale, backdrop)) {
+    if (!render_display_list_replay_surface(list, memory, surface, physical_bounds, raster_scale, backdrop, backdrop_list)) {
         image_surface_destroy(surface);
         return nullptr;
     }
@@ -1364,10 +1379,10 @@ static int render_output_render_html_file_to_target(const char* html_file,
     switch (target->kind) {
         case RENDER_OUTPUT_PDF:
             return render_html_to_pdf(html_file, target->output_file,
-                                      viewport_width, viewport_height, output_scale, target->paged);
+                                      viewport_width, viewport_height, output_scale, target->paged, device_scale);
         case RENDER_OUTPUT_SVG:
             return render_html_to_svg(html_file, target->output_file,
-                                      viewport_width, viewport_height, output_scale);
+                                      viewport_width, viewport_height, output_scale, device_scale);
         case RENDER_OUTPUT_PNG:
         case RENDER_OUTPUT_TILED_PNG:
             return render_html_to_png(html_file, target->output_file,
@@ -1429,10 +1444,10 @@ static int render_output_render_document_transform_to_target(const char* documen
     switch (target->kind) {
         case RENDER_OUTPUT_PDF:
             return render_document_transform_to_pdf(document_file, transform, options,
-                option_count, target->output_file, viewport_width, viewport_height, output_scale, target->paged);
+                option_count, target->output_file, viewport_width, viewport_height, output_scale, target->paged, device_scale);
         case RENDER_OUTPUT_SVG:
             return render_document_transform_to_svg(document_file, transform, options,
-                option_count, target->output_file, viewport_width, viewport_height, output_scale);
+                option_count, target->output_file, viewport_width, viewport_height, output_scale, device_scale);
         case RENDER_OUTPUT_PNG:
         case RENDER_OUTPUT_TILED_PNG:
             return render_document_transform_to_png(document_file, transform, options,

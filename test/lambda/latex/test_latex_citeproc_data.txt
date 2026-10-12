@@ -1,0 +1,4 @@
+["paper-conference", "A CSL Study", "Collected Papers", "Example Press", [[2024]], "101–109", "Cruz", "José", "de la", "Jr", "Research and Development", "thesis", "PhD thesis", ["duplicate-bib-key"]]
+["Gödel and logic with CSL and \\unknownword", ["unsupported-bib-command"], true]
+["A rich CSL title", true, true, true]
+["duplicate-csl-id", "invalid-csl-json", "cyclic-bib-inheritance"]

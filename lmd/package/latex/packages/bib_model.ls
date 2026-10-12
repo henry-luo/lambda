@@ -96,7 +96,7 @@ fn add_keys(keys, additions) {
 
 fn request_keys(request) => [for (item in request.items, key in item.keys) key]
 
-fn selected_keys(requests, entries, section, index, keys) {
+pub fn selected_keys(requests, entries, section, index, keys) {
     if (index >= len(requests)) keys
     else {
         let request = requests[index]
@@ -193,7 +193,7 @@ fn target_id(record, key) {
         string(record.index) ++ "-" ++ key
 }
 
-fn prepare_prints(prints, sections, requests) {
+pub fn prepare_prints(prints, sections, requests) {
     [for (record in prints)
         {*:record, scope_section: print_section(record),
             scope_segment: print_segment(record),
@@ -225,11 +225,16 @@ fn request_issues(requests, entries, settings) {
     [for (request in requests, issue in request_issue(request, entries, settings)) issue]
 }
 
-pub fn prepare(ast, entries, settings) {
-    let walked = walk(ast,
+// Collection is independent of the selected bibliography processor.
+pub fn collect(ast) {
+    walk(ast,
         {requests: [], prints: [], diagnostics: [], next_section: 0,
             segment_counts: []},
         0, 0)
+}
+
+pub fn prepare(ast, entries, settings) {
+    let walked = collect(ast)
     let found = {*:walked, requests: [for (request in walked.requests)
         if (settings.bibtex == true and request.original_tag == "cite")
             {*:request, tag: if (settings.citestyle == "authoryear" and

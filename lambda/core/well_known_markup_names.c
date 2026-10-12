@@ -609,5 +609,6 @@ const WellKnownNameRecord g_well_known_markup_names[] = {
     { { 0x7A126908u, UINT32_MAX, 0, NAME_KEY_STRING, 0, 0x0000025Du }, 11u, 0x05u, "text-anchor" },
     { { 0xD1FAFF4Cu, UINT32_MAX, 0, NAME_KEY_STRING, 0, 0x0000025Eu }, 7u, 0x05u, "scene3d" },
     { { 0xE6F5F12Cu, UINT32_MAX, 0, NAME_KEY_STRING, 0, 0x0000025Fu }, 6u, 0x05u, "geomap" },
+    { { 0x750F8754u, UINT32_MAX, 0, NAME_KEY_STRING, 0, 0x00000260u }, 18u, 0x05u, "-webkit-box-orient" },
 };
 const size_t g_well_known_markup_name_count = sizeof(g_well_known_markup_names) / sizeof(g_well_known_markup_names[0]);

@@ -1,0 +1,2 @@
+grammar g {
+    a = "x"

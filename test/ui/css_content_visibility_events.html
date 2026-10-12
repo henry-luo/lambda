@@ -1,0 +1,58 @@
+<!doctype html><meta charset=utf-8><style>
+body {margin:0}
+#controls {position:fixed;top:0;left:180px;z-index:20}
+button {display:block;width:130px;height:20px}
+.auto {content-visibility:auto;contain-intrinsic-size:40px}
+#near {height:40px}
+#spacer {height:2400px}
+#far {height:40px}
+</style>
+<div id=controls><button id=probe>construct event</button><button id=down>scroll down</button>
+<button id=up>scroll up</button><button id=remove>remove far</button>
+<button id=restore>restore far</button><button id=disable>disable auto</button>
+<button id=enable>enable auto</button><button id=touch>unrelated change</button>
+<button id=cycle>reconnect far</button><button id=hide>hide near</button>
+<button id=show>show near</button></div>
+<div id=report></div><div id=near class=auto></div><div id=spacer></div>
+<div id=far class=auto oncontentvisibilityautostatechange="recordInline(event)"></div>
+<script>
+var near=document.getElementById('near'),far=document.getElementById('far');
+var report=document.getElementById('report'),inline=0,bubbled=0;
+function recordInline(e) {inline++;report.setAttribute('data-inline',String(inline));}
+function record(e) {
+    var target=e.target,trace=target.getAttribute('data-trace')||'';
+    target.setAttribute('data-trace',trace+(e.skipped?'1':'0'));
+    target.setAttribute('data-interface',String(e instanceof ContentVisibilityAutoStateChangeEvent && e instanceof Event));
+    target.setAttribute('data-flags',[e.isTrusted,e.bubbles,e.cancelable,e.composed].join(','));
+}
+near.oncontentvisibilityautostatechange=record;
+far.addEventListener('contentvisibilityautostatechange',record);
+document.body.addEventListener('contentvisibilityautostatechange',function(){bubbled++;});
+document.getElementById('probe').onclick=function(){
+    try {
+        var e=new ContentVisibilityAutoStateChangeEvent('sample',{skipped:true,bubbles:true});
+        e.skipped=false;
+        var d=Object.getOwnPropertyDescriptor(ContentVisibilityAutoStateChangeEvent.prototype,'skipped');
+        report.setAttribute('data-constructor',[e.type,e.skipped,e.bubbles,e.isTrusted,
+            new ContentVisibilityAutoStateChangeEvent('default').skipped,
+            typeof d.get,typeof d.set].join(','));
+        try {ContentVisibilityAutoStateChangeEvent('bad');report.setAttribute('data-new','missing-error');}
+        catch(error) {report.setAttribute('data-new',String(error instanceof TypeError));}
+        try {new ContentVisibilityAutoStateChangeEvent();report.setAttribute('data-argument','missing-error');}
+        catch(error) {report.setAttribute('data-argument',String(error instanceof TypeError));}
+    } catch(error) {report.setAttribute('data-constructor','error:'+String(error));}
+};
+document.getElementById('down').onclick=function(){window.scrollTo(0,2400);};
+document.getElementById('up').onclick=function(){window.scrollTo(0,0);};
+document.getElementById('remove').onclick=function(){far.remove();};
+document.getElementById('restore').onclick=function(){document.body.appendChild(far);};
+document.getElementById('disable').onclick=function(){near.style.contentVisibility='visible';};
+document.getElementById('enable').onclick=function(){near.style.contentVisibility='auto';};
+document.getElementById('cycle').onclick=function(){far.remove();document.body.appendChild(far);};
+document.getElementById('hide').onclick=function(){near.style.display='none';};
+document.getElementById('show').onclick=function(){near.style.display='block';};
+document.getElementById('touch').onclick=function(){
+    document.body.style.backgroundColor='white';
+    report.setAttribute('data-bubbled',String(bubbled));
+};
+</script>

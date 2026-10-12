@@ -49,6 +49,7 @@ private:
     ArrayList* type_list_;      // type registry
 
     bool ui_mode_;              // true = allocate DomElement/DomText (for layout/render/view)
+    bool copying_view_ = false; // DOM occurrences copy owned markup as well as external values
 
 public:
     /**
@@ -263,6 +264,10 @@ public:
      * @return Original item if already owned and not forced, otherwise a deep copy
      */
     Item deep_copy(Item item, bool force = false);
+
+    // DOM construction needs independent elements/content even within one arena
+    // (D4.5.3); ordinary evaluation keeps deep_copy's ownership optimization.
+    Item deep_copy_for_view(Item item);
 
     /**
      * Check if an Item's data is in this Input's arena chain

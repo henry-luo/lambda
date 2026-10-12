@@ -290,7 +290,7 @@ void render_bound(RasterRenderContext* rdcon, ViewBlock* view) {
 }
 
 void render_outline_deferred(RasterRenderContext* rdcon, ViewBlock* view) {
-    if (!view->bound || !view->boundary()->outline) return;
+    if (!view || view_visibility_is_hidden(view) || !view->bound || !view->boundary()->outline) return;
     float s = rdcon->raster_scale;
     BlockBlot saved = rdcon->block;
     RenderTransformScope transform_scope = render_state_push_transform(rdcon, view, &saved);
@@ -416,7 +416,7 @@ static RenderBlockPhase render_block_begin_phase(RasterRenderContext* rdcon, Vie
 
     // CSS 2.1 11.2: visibility:hidden suppresses own rendering but children
     // with visibility:visible should still appear.
-    phase.self_hidden = (block->in_line && block->inl()->visibility == VIS_HIDDEN) ||
+    phase.self_hidden = view_visibility_is_hidden(block) ||
         view_backface_is_hidden(block);
     phase.transform_scope = render_state_push_transform(rdcon, block, &phase.parent_block);
 
@@ -441,11 +441,12 @@ static void render_block_paint_self(RasterRenderContext* rdcon, ViewBlock* block
             time_elapsed_ms_f(tb1, tb2));
     }
 
-    if (!phase->self_hidden && block->vector_path() && block->vector_path()->segments) {
+    if (!phase->self_hidden && !view_contents_are_skipped(block) &&
+        block->vector_path() && block->vector_path()->segments) {
         render_vector_path(rdcon, block);
     }
 
-    if (!phase->self_hidden &&
+    if (!phase->self_hidden && !view_contents_are_skipped(block) &&
         block->form_control()) {
         render_form_control(rdcon, block);
     }
@@ -467,7 +468,7 @@ static void render_block_paint_self(RasterRenderContext* rdcon, ViewBlock* block
 }
 
 static bool block_should_paint_children(ViewBlock* block) {
-    if (!block) return false;
+    if (!block || view_contents_are_skipped(block)) return false;
     if (block->form_control() &&
         block->tag() != MARKUP_NAME_BUTTON) {
         return false;
@@ -511,8 +512,6 @@ static RenderBlockChildrenPhase render_block_begin_children_phase(RasterRenderCo
     if (!phase.has_children) {
         return phase;
     }
-
-    render_block_apply_inherited_color(rdcon, block);
 
     if (block->scroller || (block->blk && block->block()->contain_paint)) {
         setup_scroller(rdcon, block);
@@ -567,11 +566,11 @@ static void render_block_finish_phase(RasterRenderContext* rdcon, ViewBlock* blo
                                       RenderBlockPhase* phase) {
     if (!rdcon || !block || !phase) return;
 
-    if (block->scroller) {
+    if (!phase->self_hidden && block->scroller) {
         render_scroller(rdcon, block, &phase->parent_block);
     }
 
-    if (block->multicol_prop() && block->multicol_prop()->computed_column_count > 1) {
+    if (!phase->self_hidden && block->multicol_prop() && block->multicol_prop()->computed_column_count > 1) {
         render_column_rules(rdcon, block);
     }
 
@@ -613,6 +612,8 @@ static bool raster_block_paint_self(RenderPaintBlockDriver* ctx, ViewBlock* bloc
     RasterBlockPaintDriver* driver = static_cast<RasterBlockPaintDriver*>(ctx);
     if (!driver || !driver->rdcon || !block || !phase) return false;
     render_block_paint_self(driver->rdcon, block, (RenderBlockPhase*)phase);
+    render_block_apply_inherited_color(driver->rdcon, block);
+    if (view_contents_are_skipped(block)) return false;
     if (driver->content) {
         RenderBlockPhase* current=(RenderBlockPhase*)phase;
         if (!current->self_hidden) {
@@ -630,6 +631,8 @@ static double raster_block_paint_children(RenderPaintBlockDriver* ctx, ViewBlock
     (void)phase;
     RasterBlockPaintDriver* driver = static_cast<RasterBlockPaintDriver*>(ctx);
     if (!driver || !driver->rdcon || !block) return 0.0;
+    RenderTextPaintScope text_paint(driver->rdcon, block,
+        &driver->rdcon->font, &driver->rdcon->color);
     return render_block_paint_children(driver->rdcon, block);
 }
 

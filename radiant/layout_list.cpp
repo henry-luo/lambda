@@ -409,7 +409,7 @@ static bool list_style_image_is_none(const ListStyleImage* image) {
 }
 
 static bool list_marker_intrinsic_size(DomElement* parent_elem, ImageSurface* image,
-                                       float effective_zoom, float* width, float* height) {
+                                       float effective_zoom, float resolution, float* width, float* height) {
     if (!image || !image->has_intrinsic_size) return false;
     float image_width = 0.0f;
     float image_height = 0.0f;
@@ -419,7 +419,8 @@ static bool list_marker_intrinsic_size(DomElement* parent_elem, ImageSurface* im
 
     // CSS zoom applies to the used dimensions of an intrinsic marker image;
     // retaining decoded dimensions leaves a dynamically zoomed marker in its old box.
-    float used_zoom = effective_zoom > 0.0f ? effective_zoom : 1.0f;
+    float used_zoom = (effective_zoom > 0.0f ? effective_zoom : 1.0f) /
+        layout_css_image_density(image, resolution);
     *width = image_width * used_zoom;
     *height = image_height * used_zoom;
     return true;
@@ -446,12 +447,26 @@ static bool set_marker_image_geometry(DomElement* parent_elem,
     float image_width = 0.0f;
     float image_height = 0.0f;
     if (list_marker_intrinsic_size(parent_elem, marker_prop->loaded_image,
-                                   effective_zoom, &image_width, &image_height)) {
+                                   effective_zoom, marker_prop->image.resolution, &image_width, &image_height)) {
         marker_prop->content_width = image_width;
         marker_prop->width = image_width + image_gap;
         marker_prop->height = image_height;
     }
     return true;
+}
+
+static void refresh_marker_image(LayoutContext* context, MarkerProp* marker,
+                                 const ListStyleImage* image, bool explicit_content) {
+    // retained markers borrow the current computed image and cache surface, never an earlier style's source.
+    marker->image = {};
+    marker->loaded_image = nullptr;
+    marker->is_image_marker = false;
+    marker->content_width = marker->height = 0.0f;
+    if (explicit_content || list_style_image_is_none(image)) return;
+    marker->image = *image;
+    marker->is_image_marker = image->gradient_type != GRADIENT_NONE;
+    if (!marker->is_image_marker)
+        marker->loaded_image = lam::up(load_document_image(context->doc, context->ui_context, image->url));
 }
 
 // Create a ::marker element with the given properties
@@ -488,23 +503,16 @@ static DomElement* create_marker_element(LayoutContext* lycon, DomElement* paren
         is_quirks_mode(lycon->doc->view_tree->html_version);
     marker_prop->reserves_first_line = is_quirks && is_outside &&
         (!list_parent || !layout_is_html_list_container_tag(list_parent->tag_id));
-    // CSS 2.1 §12.5: list-style-image overrides list-style-type when image loads successfully.
-    if (image && image->gradient_type != GRADIENT_NONE) {
-        marker_prop->image = *image;
-        marker_prop->is_image_marker = true;
-    } else if (image && image->url && strcmp(image->url, "none") != 0) {
-        marker_prop->image.url = lam::shared(lam::promote_to_pool(lycon->pool, image->url).get());
-        marker_prop->loaded_image = lam::up(load_document_image(lycon->doc, lycon->ui_context, marker_prop->image.url));
-    }
+    refresh_marker_image(lycon, marker_prop, image, marker_css_content != nullptr);
 
     if (marker_css_content) {
         // ::marker { content: ... } overrides list-style-type
         radiant_retain_marker_text_content(marker_prop, lam::promote_to_pool(lycon->pool, marker_css_content));
         marker_prop->marker_type = CSS_VALUE_DECIMAL;  // force text rendering
-    } else if (is_string_marker) {
+    } else if (is_string_marker && !marker_prop->is_image_marker && !marker_prop->loaded_image) {
         // CSS Lists 3 §4.1: use the string directly as marker content
         radiant_retain_marker_text_content(marker_prop, lam::promote_to_pool(lycon->pool, string_marker));
-    } else if (!is_bullet_marker) {
+    } else if (!is_bullet_marker && !marker_prop->is_image_marker && !marker_prop->loaded_image) {
         char marker_text[64];
         int marker_len = counter_format(lycon->counter_context, "list-item", marker_style, marker_text, sizeof(marker_text));
         if (marker_len > 0 && marker_len + 2 < (int)sizeof(marker_text)) {
@@ -623,7 +631,18 @@ void process_list_item(LayoutContext* lycon, ViewBlock* block, DomNode* elmt,
     }
     // CSS Lists 3 §4.1: check for string marker value
     const char* string_marker = (block->blk) ? block->block()->list_style_type_string : nullptr;
-    bool has_marker = (effective_list_style != CSS_VALUE_NONE) || (string_marker != nullptr);
+    const ListStyleImage* image = block->blk ? &block->block()->list_style_image : nullptr;
+    // unset values inherit through ancestors; an explicit none terminates the search.
+    for (DomElement* ancestor = dom_elem->parent_element();
+         (!image || (!image->url && image->gradient_type == GRADIENT_NONE)) && ancestor;
+         ancestor = ancestor->parent_element()) {
+        if (ancestor->blk) image = &ancestor->block()->list_style_image;
+    }
+    bool has_image = !list_style_image_is_none(image) &&
+        (image->gradient_type != GRADIENT_NONE ||
+         load_document_image(lycon->doc, lycon->ui_context, image->url) != nullptr);
+    // CSS Lists 3 §3.2: a valid image takes precedence even when the marker string is none.
+    bool has_marker = has_image || (effective_list_style != CSS_VALUE_NONE) || (string_marker != nullptr);
     // Check for ::marker { content: ... } CSS override
     const char* marker_css_content = nullptr;
     DomElement* list_elem = lam::dom_require<DOM_NODE_ELEMENT>(elmt);
@@ -646,7 +665,11 @@ void process_list_item(LayoutContext* lycon, ViewBlock* block, DomNode* elmt,
         }
     }
 
-    if (!has_marker) return;
+    if (!has_marker) {
+        if (block->pseudo && block->pseudo->marker && block->pseudo->marker->marker_prop())
+            block->pseudo->marker->marker_prop()->suppressed = true;
+        return;
+    }
 
     CssEnum marker_style = effective_list_style;
     bool is_string_marker = (string_marker != nullptr);
@@ -672,8 +695,8 @@ void process_list_item(LayoutContext* lycon, ViewBlock* block, DomNode* elmt,
     DomElement* parent_elem = lam::dom_require<DOM_NODE_ELEMENT>(elmt);
     DomElement* current_marker = block->pseudo->marker_generated
         ? block->pseudo->marker : nullptr;
-    // reflows reuse the marker font; keep the unallocated owner empty on that path.
-    lam::Own<FontProp> fresh_font = {};
+    // retained markers already own their font, so the transient owner must start empty.
+    lam::Own<FontProp> fresh_font = nullptr;
     if (!current_marker || !current_marker->font) {
         fresh_font = lam::own((FontProp*)alloc_prop(lycon, sizeof(FontProp)));
     }
@@ -698,6 +721,10 @@ void process_list_item(LayoutContext* lycon, ViewBlock* block, DomNode* elmt,
         // Retained marker boxes outlive style-only reflows, so refresh inherited
         // placement instead of leaving the marker in its pre-mutation mode.
         MarkerProp* marker_prop = block->pseudo->marker->marker_prop();
+        marker_prop->suppressed = false;
+        marker_prop->marker_type = marker_style;
+        marker_prop->has_explicit_content = marker_css_content != nullptr;
+        refresh_marker_image(lycon, marker_prop, image, marker_css_content != nullptr);
         marker_prop->is_outside = is_outside_position;
         if (!set_marker_image_geometry(parent_elem, marker_prop, image_default_size,
                                        image_gap, effective_zoom) && is_bullet_marker) {
@@ -712,15 +739,6 @@ void process_list_item(LayoutContext* lycon, ViewBlock* block, DomNode* elmt,
     }
 
     if (!block->pseudo->marker_generated) {
-        // CSS 2.1 §12.5: list-style-image is inherited; check self then parent
-        const ListStyleImage* image = (block->blk) ? &block->block()->list_style_image : nullptr;
-        if (list_style_image_is_none(image)) {
-            DomElement* pe = dom_elem->parent_element();
-            if (pe && pe->blk) {
-                image = &pe->block()->list_style_image;
-            }
-        }
-
         DomElement* marker_elem = create_marker_element(
             lycon, parent_elem, marker_style, marker_font_size,
             image_default_size, image_gap, effective_zoom,

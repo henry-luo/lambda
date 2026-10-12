@@ -2,6 +2,7 @@
 #include "../lambda/input/css/css_value.hpp"
 #include "../lib/math_utils.h"
 #include <math.h>
+#include <string.h>
 
 static bool boundary_has_radius(const BorderProp* border) {
     return border && radiant_corner_has_radius(&border->radius);
@@ -33,7 +34,7 @@ static bool boundary_background_simple(const BackgroundProp* bg) {
     if (bg->image) return false;
     if (bg->gradient_type != GRADIENT_NONE) return false;
     if (bg->linear_gradient || bg->radial_gradient || bg->conic_gradient) return false;
-    if (bg->linear_layer_count > 0 || bg->radial_layer_count > 0) return false;
+    if (bg->layer_count > 0) return false;
     if (bg->blend_mode && bg->blend_mode != CSS_VALUE_NORMAL) return false;
     return true;
 }
@@ -142,6 +143,9 @@ bool render_paint_boundary_emit_simple(PaintList* paint_list, ViewBlock* view,
 
 bool render_paint_boundary_emit_box(PaintList* paint_list, BoundaryProp* bound, Rect rect) {
     if (!paint_list || !bound) return false;
+    // image borders replace the solid ring; the image producer resolves load fallback.
+    if (bound->border && (bound->border->border_image_url ||
+            bound->border->border_image_type != GRADIENT_NONE)) return false;
     float x = rect.x, y = rect.y, width = rect.width, height = rect.height;
     if (width < 0.0f || height < 0.0f) return false;
 
@@ -275,18 +279,104 @@ bool render_paint_boundary_emit_outer_shadows(PaintList* paint_list, ViewBlock* 
     return emitted;
 }
 
+Color render_gradient_stop_color(const RdtGradientStop& stop) {
+    return Color{render_pixel_pack_abgr(stop.r, stop.g, stop.b, stop.a)};
+}
+
+Color render_sample_gradient_stops(const RdtGradientStop* stops, int count, float position, float stop_scale) {
+    if (!stops || count < 1) return Color{};
+    if (position < stops[0].offset * stop_scale) return render_gradient_stop_color(stops[0]);
+    for (int index = 1; index < count; index++) {
+        const RdtGradientStop& before = stops[index - 1];
+        const RdtGradientStop& after = stops[index];
+        // coincident hard stops select the following color at their boundary.
+        if (position < after.offset * stop_scale) {
+            float start = before.offset * stop_scale, extent = (after.offset - before.offset) * stop_scale;
+            float fraction = extent > 0.0f ? (position - start) / extent : 0.0f;
+            return css_interpolate_color(render_gradient_stop_color(before), render_gradient_stop_color(after), fraction);
+        }
+    }
+    return render_gradient_stop_color(stops[count - 1]);
+}
+
+bool render_normalize_linear_gradient_range(RadiantGradientLine* line,
+        RdtGradientStop* stops, int count) {
+    if (!line || !stops || count < 2) return false;
+    for (int index = 0; index < count; index++) if (!isfinite(stops[index].offset)) return false;
+    double first = fmin(0.0, stops[0].offset);
+    double last = fmax(1.0, stops[count - 1].offset);
+    if (first == 0.0 && last == 1.0) return true;
+    double vx = (double)line->x2 - line->x1, vy = (double)line->y2 - line->y1;
+    RadiantGradientLine expanded = {
+        (float)(line->x1 + first * vx), (float)(line->y1 + first * vy),
+        (float)(line->x1 + last * vx), (float)(line->y1 + last * vy)};
+    if (!isfinite(expanded.x1) || !isfinite(expanded.y1) ||
+        !isfinite(expanded.x2) || !isfinite(expanded.y2)) return false;
+    // css stops extend beyond the box; native offsets must use the extended line.
+    for (int index = 0; index < count; index++)
+        stops[index].offset = (float)(((double)stops[index].offset - first) / (last - first));
+    *line = expanded;
+    return true;
+}
+
+bool render_normalize_radial_gradient_range(RadiantRadialGeometry* geometry,
+        RdtGradientStop* stops, int* count) {
+    if (!geometry || !stops || !count || *count < 2) return false;
+    for (int index = 0; index < *count; index++) if (!isfinite(stops[index].offset)) return false;
+    float extent = fmaxf(1.0f, stops[*count - 1].offset);
+    float rx = geometry->rx * extent, ry = geometry->ry * extent;
+    if (!isfinite(rx) || !isfinite(ry)) return false;
+    int first = 0;
+    while (first < *count && stops[first].offset < 0.0f) first++;
+    if (first == *count) {
+        stops[0] = stops[1] = stops[*count - 1];
+        stops[0].offset = 0.0f; stops[1].offset = 1.0f; *count = 2;
+    } else if (first > 0) {
+        // negative radial positions contribute to the center through interpolation.
+        Color center = render_sample_gradient_stops(stops, *count, 0.0f, 1.0f);
+        memmove(stops + 1, stops + first, (size_t)(*count - first) * sizeof(RdtGradientStop));
+        *count -= first - 1;
+        stops[0] = {0.0f, center.r, center.g, center.b, center.a};
+    }
+    for (int index = 0; index < *count; index++) stops[index].offset /= extent;
+    geometry->rx = rx; geometry->ry = ry;
+    return true;
+}
+
 bool render_copy_gradient_stops(const GradientStop* src, int src_count, float gradient_length,
                                          RdtGradientStop* stops, int stop_capacity,
                                          int* out_count) {
     if (!src || src_count < 2 || !stops || stop_capacity < src_count) return false;
     for (int i = 0; i < src_count; i++) {
         const GradientStop* stop = &src[i];
-        // CSS lengths become relative offsets only after the paint line is known.
-        float pos = !isnan(stop->position)
-            ? (stop->position_is_px && gradient_length > 0.0f
-                ? stop->position / gradient_length : stop->position)
-            : (src_count > 1 ? (float)i / (float)(src_count - 1) : 0.0f);
+        // positions remain unresolved until both computed owner units and the used line are available.
+        float pos = stop->position;
+        if (stop->position_expression) {
+            float used = radiant::resolve_computed_length_percentage(stop->position_expression.get(), gradient_length);
+            if (!isfinite(used)) return false;
+            pos = gradient_length > 0.0f ? used / gradient_length : 0.0f;
+        } else if (stop->position_is_px) {
+            pos = gradient_length > 0.0f ? pos / gradient_length : 0.0f;
+        }
         stops[i] = {pos, stop->color.r, stop->color.g, stop->color.b, stop->color.a};
+    }
+    // CSS Images 3 fixup: endpoints, monotonic specified stops, then each omitted run.
+    if (isnan(stops[0].offset)) stops[0].offset = 0.0f;
+    if (isnan(stops[src_count - 1].offset)) stops[src_count - 1].offset = 1.0f;
+    float previous = stops[0].offset;
+    for (int index = 1; index < src_count; index++) {
+        if (isnan(stops[index].offset)) continue;
+        stops[index].offset = fmaxf(previous, stops[index].offset);
+        previous = stops[index].offset;
+    }
+    for (int index = 1; index < src_count - 1; index++) {
+        if (!isnan(stops[index].offset)) continue;
+        int next = index + 1;
+        while (next < src_count && isnan(stops[next].offset)) next++;
+        float first = stops[index - 1].offset;
+        float step = (stops[next].offset - first) / (float)(next - index + 1);
+        for (int fill = index; fill < next; fill++) stops[fill].offset = first + step * (float)(fill - index + 1);
+        index = next - 1;
     }
     if (out_count) *out_count = src_count;
     return true;
@@ -326,6 +416,7 @@ bool render_paint_boundary_build_linear_gradient(ViewBlock* view, float x, float
     if (!boundary_prepare_gradient(view, x, y, gradient->stops, gradient->stop_count,
                                    gradient_length, stops, stop_capacity, &path, &stop_count)) return false;
 
+    if (!render_normalize_linear_gradient_range(&line, stops, stop_count)) { rdt_path_free(path); return false; }
     out->path = lam::up(path);
     out->x1 = line.x1;
     out->y1 = line.y1;
@@ -351,10 +442,12 @@ bool render_paint_boundary_build_radial_gradient(ViewBlock* view, float x, float
     if (!boundary_prepare_gradient(view, x, y, gradient->stops, gradient->stop_count,
                                    radius, stops, stop_capacity, &path, &stop_count)) return false;
 
+    RadiantRadialGeometry geometry = {
+        x + (gradient->cx_set ? gradient->cx * view->width : view->width * 0.5f),
+        y + (gradient->cy_set ? gradient->cy * view->height : view->height * 0.5f), radius, radius};
+    if (!render_normalize_radial_gradient_range(&geometry, stops, &stop_count)) { rdt_path_free(path); return false; }
     out->path = lam::up(path);
-    out->cx = x + (gradient->cx_set ? gradient->cx * view->width : view->width * 0.5f);
-    out->cy = y + (gradient->cy_set ? gradient->cy * view->height : view->height * 0.5f);
-    out->r = radius;
+    out->cx = geometry.cx; out->cy = geometry.cy; out->r = geometry.rx;
     out->stops = lam::up(stops);
     out->stop_count = stop_count;
     return true;

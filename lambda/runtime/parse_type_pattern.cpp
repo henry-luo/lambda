@@ -35,6 +35,25 @@
 // effects are order-sensitive, so resolution visits children before their
 // parent: the order in which the productions complete.
 
+// Pattern text may carry `//` and `/* */` comments between its tokens. Shared
+// with the grammar loader, whose bodies follow the same comment rules.
+const char* type_pattern_skip_space(const char* p, const char* end) {
+    for (;;) {
+        p = strn_skip_ascii_space(p, end);
+        if (p + 1 < end && p[0] == '/' && p[1] == '/') {
+            while (p < end && *p != '\n') p++;
+            continue;
+        }
+        if (p + 1 < end && p[0] == '/' && p[1] == '*') {
+            p += 2;
+            while (p + 1 < end && !(p[0] == '*' && p[1] == '/')) p++;
+            p = p + 2 < end ? p + 2 : end;
+            continue;
+        }
+        return p;
+    }
+}
+
 namespace {
 
 // syntax facts a type-pattern node carries until it resolves
@@ -81,26 +100,9 @@ void fail_code(Lexer* lx, LambdaErrorCode code, const char* what) {
     record_failure(lx, code, what, what);
 }
 
-// Pattern text may carry `//` and `/* */` comments between its tokens.
-static const char* skip_space_from(const char* p, const char* end) {
-    for (;;) {
-        p = strn_skip_ascii_space(p, end);
-        if (p + 1 < end && p[0] == '/' && p[1] == '/') {
-            while (p < end && *p != '\n') p++;
-            continue;
-        }
-        if (p + 1 < end && p[0] == '/' && p[1] == '*') {
-            p += 2;
-            while (p + 1 < end && !(p[0] == '*' && p[1] == '/')) p++;
-            p = p + 2 < end ? p + 2 : end;
-            continue;
-        }
-        return p;
-    }
-}
 
 void skip_space(Lexer* lx) {
-    if (lx->p) lx->p = skip_space_from(lx->p, lx->end);
+    if (lx->p) lx->p = type_pattern_skip_space(lx->p, lx->end);
 }
 
 bool at(Lexer* lx, char c) { skip_space(lx); return lx->p < lx->end && *lx->p == c; }
@@ -853,7 +855,7 @@ AstNode* parse_fn_type(Lexer* lx, bool is_proc) {
     // A return type takes its own suffix (`fn () int?` returns `int?`), so one
     // left over would bind to the function type -- `fn ()?` against
     // `fn () int?`. The function type takes none; grouping spells it.
-    const char* next = skip_space_from(lx->p, lx->end);
+    const char* next = type_pattern_skip_space(lx->p, lx->end);
     if (next < lx->end && is_suffix_start(*next)) {
         fail_code(lx, ERR_INVALID_LITERAL,
             "a function type takes no suffix: group it, as in `(fn (x: int))?`");
@@ -1713,4 +1715,25 @@ AstNode* parse_type_pattern_syntax(Transpiler* tp, const char* begin,
         return NULL;
     }
     return node;
+}
+
+AstNode* parse_pattern_island_syntax(Transpiler* tp, const char* begin,
+        const char* end, SourceSpan span, TypePatternFailure* failure) {
+    Lexer lx = {tp, begin, end, span, false, {ERR_INVALID_LITERAL, NULL}};
+    AstPatternIslandNode* node = (AstPatternIslandNode*)new_node(&lx,
+        AST_NODE_PATTERN_ISLAND, sizeof(AstPatternIslandNode), LSF_TP_ISLAND);
+    node->is_symbol = false;
+    node->pattern_index = -1;
+    node->pattern = parse_island_body(&lx);
+    if (node->pattern && !lx.failed) {
+        skip_space(&lx);
+        if (lx.p != lx.end) fail(&lx, "trailing pattern input");
+    }
+    if (!node->pattern || lx.failed) {
+        if (failure) *failure = lx.failure;
+        return NULL;
+    }
+    // unlike `\( … )` in a type slot, a literal-only body stays an island:
+    // a grammar token needs the compiled TypePattern, not a literal union
+    return (AstNode*)node;
 }

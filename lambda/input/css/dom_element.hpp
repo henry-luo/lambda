@@ -106,6 +106,7 @@ inline bool is_quirks_mode(HtmlVersion version) {
 inline bool is_limited_quirks_mode(HtmlVersion version) {
     return version == HTML_LIMITED_QUIRKS;
 }
+bool dom_element_uses_quirks_css(const DomElement* element);
 
 typedef enum DomJsMutationKind {
     DOM_JS_MUTATION_UNKNOWN = 0,
@@ -578,12 +579,18 @@ typedef void (*DomDocumentResourceDestroyFn)(struct DomDocumentResourceData* dat
 typedef struct DomDocumentResource {
     lam::Own<struct DomDocumentResourceData> data;   // released by `destroy`
     DomDocumentResourceDestroyFn destroy;
+    lam::Up<Context> runtime_owner; // release before this evaluator's context retires (D5.3.3).
+    DomDocumentResourceDestroyFn retire_runtime; // optional: preserve native state after unrooting.
     lam::Own<DomDocumentResource> next;
 } DomDocumentResource;
 
 bool dom_document_add_resource(DomDocument* document, struct DomDocumentResourceData* data,
-                               DomDocumentResourceDestroyFn destroy);
+                               DomDocumentResourceDestroyFn destroy, Context* runtime_owner = nullptr,
+                               DomDocumentResourceDestroyFn retire_runtime = nullptr);
 bool dom_document_release_resource(DomDocument* document, DomDocumentResourceData* data);
+bool dom_document_bind_resource_runtime(DomDocument* document, DomDocumentResourceData* data,
+    Context* runtime_owner, DomDocumentResourceDestroyFn retire_runtime = nullptr);
+void dom_document_release_runtime_resources(DomDocument* document, Context* runtime_owner);
 
 const char* dom_document_default_language(const DomDocument* document);
 const char* dom_element_language(DomElement* element);
@@ -603,6 +610,9 @@ typedef struct {
     CssEnum outer;
     CssEnum inner;
     bool list_item;  // true when 'list-item' keyword present (generates ::marker)
+    uint8_t legacy_box; // computed legacy flex spelling: 0 none, 1 block, 2 inline
+    bool legacy_clamp; // this element's legacy declaration became a clamped flow box
+    bool legacy_vertical; // used flex axis, independent of computed flex-direction
 } DisplayValue;
 
 typedef struct InlineProp InlineProp;
@@ -1493,6 +1503,9 @@ inline const Element* dom_element_render_source(const DomElement* de) {
     return dom_element_render_source(const_cast<DomElement*>(de));
 }
 
+// equal template results retain live DOM storage while adopting the new result keys.
+void dom_rebind_equal_render_result(DomDocument* doc, Item previous, Item current);
+
 // Resolve a parsed/template Element to its live DOM wrapper. The lifecycle
 // registry preserves source identity even when a DomElement owns a copied one.
 inline DomElement* dom_find_element_for_source(DomElement* root,
@@ -1726,6 +1739,7 @@ CssDeclaration* dom_element_get_specified_value(DomElement* element, CssProperty
  * @param pseudo_element Which pseudo-element (PSEUDO_ELEMENT_BEFORE or PSEUDO_ELEMENT_AFTER)
  * @return Specified CSS declaration or NULL if not set
  */
+StyleTree* dom_element_get_pseudo_style(DomElement* element, int pseudo_element);
 CssDeclaration* dom_element_get_pseudo_element_value(DomElement* element,
                                                      CssPropertyCode property_code, int pseudo_element);
 
@@ -1808,5 +1822,11 @@ void dom_element_get_style_stats(DomElement* element, int* specified_count,
 DomElement* dom_element_clone(DomElement* source, Pool* pool);
 
 DomElement* dom_parent_element(DomElement* element);
+
+inline bool dom_is_generated_pseudo_node(DomNode* node) {
+    if (!node || !node->is_element()) return false;
+    DomElement* element = node->as_element();
+    return element->tag_name && element->tag_name[0] == ':' && element->tag_name[1] == ':';
+}
 
 #endif // DOM_ELEMENT_H

@@ -11,7 +11,7 @@ import table: lambda.chart.export
 import radiant
 import resource: .resource
 import media: .media
-import grammar: lambda.chart.parse
+import chart_parse: lambda.chart.parse
 
 let default_fields=["id","display_date","at","from","to","title","subtitle","content","group","subgroup","tags","metadata"]
 
@@ -82,7 +82,7 @@ fn columns(spec, options) {
         c.fail("export.headings","duplicate headings") else values
 }
 fn table_value(item, field, options) {
-    let value=grammar.channel_value({field:field},item);
+    let value=chart_parse.channel_value({field:field},item);
     if (contains(["at","from","to"],field) and value!=null and options.date_formatter is fn)
         options.date_formatter(value,{event:item,field:field})
     else if (value is map or value is array) format(value,'json') else value

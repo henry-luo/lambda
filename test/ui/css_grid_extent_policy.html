@@ -1,0 +1,14 @@
+<!doctype html><style>html,body{margin:0}.grid{display:grid;width:500px;justify-content:start;align-content:start;margin-bottom:10px}.grid>div{min-width:0;min-height:0;height:1px}</style><button id="check">check</button><output id="report"></output><div id="fixtures"></div><script>
+var grids={},report=document.getElementById('report');
+function grid(name,style,count,placement){var g=document.createElement('div');g.id=name;g.className='grid';g.style.cssText=style;for(var i=0;i<count;i++){var c=document.createElement('div');c.style.cssText=placement||'';g.appendChild(c);}document.getElementById('fixtures').appendChild(g);grids[name]=g;return g;}
+grid("positive","grid-template-columns:1px;grid-auto-columns:1px",1,"grid-column:2147483647");
+grid("crossing","grid-template-columns:1px;grid-auto-columns:1px",1,"grid-column:9999 / 2147483647");
+grid("negative","grid-template-columns:1px;grid-auto-columns:1px",2,"grid-row:1");
+grid("negative-crossing","grid-template-columns:1px;grid-auto-columns:1px",1,"grid-column:-2147483647 / -9999");
+grid("repeat-outside","grid-template-columns:repeat(2147483647,1px) [tail];grid-auto-columns:1px",1,"grid-column:tail -1 / 5");
+grid("repeat-edge","grid-template-columns:repeat(10000,1px) [tail];grid-auto-columns:1px",1,"grid-column:tail -1 / 5");
+grid("automatic","width:20000px;grid-template-columns:repeat(auto-fill,1px)",1,"grid-column:-2");
+grid("named-positive","grid-template-columns:1px;grid-auto-columns:1px",1,"grid-column:missing 2147483647");
+grids.negative.firstChild.style.gridColumn="-2147483647";grids.negative.lastChild.style.gridColumn="1";
+document.getElementById('check').onclick=function(){Object.keys(grids).forEach(function(n){var g=grids[n],p=g.getBoundingClientRect(),c=(n==='contributions'?g.firstChild:g.lastChild).getBoundingClientRect();report.setAttribute('data-'+n,[c.x-p.x,c.y-p.y,c.width,c.height].join(','));});};
+</script>

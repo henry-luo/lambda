@@ -1,0 +1,46 @@
+<!doctype html><meta charset=utf-8><style>
+body {margin:0;background:white}
+#controls {position:fixed;left:220px;top:0;z-index:20}
+button {display:block;width:110px;height:25px}
+#live {position:fixed;left:0;top:80px;width:120px;contain-intrinsic-size:50px}
+#resize {width:50px;height:50px;background:green}
+#text {position:fixed;left:0;top:0}
+#omitted {content-visibility:hidden;display:inline-block}
+#spacer {height:2000px}
+#auto {content-visibility:auto;contain-intrinsic-size:40px;width:100px}
+#auto-child {height:70px;width:50px;background:blue}
+#initial-hidden {content-visibility:hidden}
+</style>
+<div id=controls><button id=hide>hide and resize</button><button id=show>show</button>
+<button id=probe>read text</button><button id=text-show>show text</button>
+<button id=down>scroll down</button><button id=up>scroll up</button>
+<button id=auto-resize>resize auto</button></div>
+<div id=live><div id=resize></div></div>
+<div id=text><span>first </span><span id=omitted>hidden </span><span style="user-select:none">last</span></div>
+<div id=report></div><div id=initial-hidden><div id=never>never rendered</div></div>
+<div id=spacer></div><div id=auto><div id=auto-child></div></div>
+<script>
+function byId(id) {return document.getElementById(id)}
+['resize','auto-child','never'].forEach(function(id) {
+    var target=byId(id);
+    target.setAttribute('data-resize','0');
+    target.setAttribute('data-intersection','unset');
+    new ResizeObserver(function() {
+        target.setAttribute('data-resize',String(Number(target.getAttribute('data-resize'))+1));
+    }).observe(target);
+    new IntersectionObserver(function(entries) {
+        target.setAttribute('data-intersection',String(entries[0].isIntersecting));
+    }).observe(target);
+});
+byId('hide').onclick=function(){byId('live').style.contentVisibility='hidden';byId('resize').style.width='100px'};
+byId('show').onclick=function(){byId('live').style.contentVisibility='visible'};
+byId('probe').onclick=function(){
+    byId('report').setAttribute('data-text',byId('text').innerText);
+    byId('report').setAttribute('data-hidden-text',byId('omitted').innerText);
+    byId('report').setAttribute('data-source-text',byId('omitted').textContent);
+};
+byId('text-show').onclick=function(){byId('omitted').style.contentVisibility='visible'};
+byId('down').onclick=function(){window.scrollTo(0,1950)};
+byId('up').onclick=function(){window.scrollTo(0,0)};
+byId('auto-resize').onclick=function(){byId('auto-child').style.width='75px'};
+</script>

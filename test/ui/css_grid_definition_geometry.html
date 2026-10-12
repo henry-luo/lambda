@@ -1,0 +1,53 @@
+<!doctype html><meta charset="utf-8">
+<style>
+html,body{margin:0}button{height:24px}.grid{display:grid;width:120px;justify-content:start;align-content:start}.grid>div{min-width:0;min-height:0;background:green}
+@layer low,high;@layer low{#rollback{grid:10px / 60px}}@layer high{#rollback{grid-template:20px / 20px;grid-template-columns:revert-layer}}
+</style>
+<style>#ruled{grid:"a b" 10px / 20px 30px}</style>
+<button id="check">Check</button><button id="change">Change</button><button id="changed">Changed</button><button id="remove">Remove</button><button id="removed">Removed</button><button id="restore">Restore</button><button id="restored">Restored</button><output id="report"></output>
+<div id="area" class="grid" style='--definition:"a a" 10px "b b" 20px / 30px 40px;grid-template:var(--definition)'><div style="grid-area:b"></div></div>
+<div id="only" class="grid" style='grid-auto-columns:20px;grid-template:"a b"'><div style="grid-area:b;height:10px"></div></div>
+<div id="rows" class="grid" style="grid:auto-flow 10px 20px / 30px 40px"><div></div><div></div><div></div></div>
+<div id="columns" class="grid" style="grid:10px 20px / auto-flow dense 30px 40px"><div></div><div></div><div></div></div>
+<div id="priority" class="grid" style="grid-template-columns:50px!important;grid-template:10px / 20px"><div></div></div>
+<div id="keeps" class="grid" style='grid-auto-rows:7px;grid-auto-columns:9px;grid-auto-flow:column dense;grid-template:"a b"'><div style="grid-area:b;height:10px"></div></div>
+<div id="resets" class="grid" style='grid-auto-rows:7px;grid-auto-columns:9px;grid-auto-flow:column dense;grid:"a a" 20px / 30px 30px'><div style="grid-column:4;width:10px"></div></div>
+<div id="pending" class="grid" style='--definition:"a a" 10px / 20px 30px;grid:var(--definition)'><div style="grid-column:1/-1"></div></div>
+<div style='font-size:10px;grid:"a a" 1em / 2em 3em'><div id="inherited" class="grid" style="font-size:30px;grid:inherit"><div style="grid-area:a"></div></div></div>
+<div id="rollback" class="grid"><div></div></div>
+<div id="ruled" class="grid"><div style="grid-area:b"></div></div>
+<script>
+(function(){
+    var report=document.getElementById('report'),rule=document.styleSheets[1].cssRules[0];
+    function record(prefix){
+        ['area','only','rows','columns','priority','keeps','resets','pending','inherited','rollback','ruled'].forEach(function(id){
+            var grid=document.getElementById(id),child=(id==='rows'||id==='columns')?grid.lastChild:grid.firstChild;
+            var box=grid.getBoundingClientRect(),rect=child.getBoundingClientRect(),style=getComputedStyle(grid);
+            report.setAttribute('data-'+prefix+id+'-rect',[rect.x-box.x,rect.y-box.y,rect.width,rect.height].join(','));
+            report.setAttribute('data-'+prefix+id+'-values',[style.gridTemplate,style.grid,style.gridTemplateAreas,style.gridAutoRows,style.gridAutoColumns,style.gridAutoFlow].join('|'));
+        });
+        var pending=document.getElementById('pending').style;
+        report.setAttribute('data-'+prefix+'pending-inline',[pending.grid,pending.gridTemplate,pending.gridTemplateRows,pending.gridTemplateColumns,pending.gridTemplateAreas].join('|'));
+    }
+    document.getElementById('check').onclick=function(){record('');};
+    document.getElementById('change').onclick=function(){
+        document.getElementById('area').style.setProperty('--definition','"a b" 15px "c d" 25px / 40px 50px');
+        document.getElementById('rows').style.grid='auto-flow dense 20px / 50px 60px';
+        document.getElementById('pending').style.gridTemplateColumns='40px 50px';
+        rule.style.gridTemplateColumns='40px 50px';
+    };
+    document.getElementById('changed').onclick=function(){record('changed-');};
+    document.getElementById('remove').onclick=function(){
+        document.getElementById('pending').style.removeProperty('grid-template-columns');
+        document.getElementById('area').style.setProperty('--definition','"a . a"');
+    };
+    document.getElementById('removed').onclick=function(){record('removed-');};
+    document.getElementById('restore').onclick=function(){
+        document.getElementById('area').style.setProperty('--definition','"a a" 10px "b b" 20px / 30px 40px');
+        document.getElementById('rows').style.grid='auto-flow 10px 20px / 30px 40px';
+        document.getElementById('pending').style.grid='var(--definition)';
+        rule.style.grid='"a b" 10px / 20px 30px';
+    };
+    document.getElementById('restored').onclick=function(){record('restored-');};
+})();
+</script>

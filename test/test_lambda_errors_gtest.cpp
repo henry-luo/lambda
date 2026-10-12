@@ -1402,6 +1402,82 @@ TEST_F(NegativeScriptTest, OldBareStringPatternSyntaxIsRejected) {
         "Unexpected syntax near");
 }
 
+// GM5v2/GM8/GM9: grammar declarations report through the script compiler's
+// diagnostics (GM5.2); lint warnings never fail the compile.
+TEST_F(NegativeScriptTest, GrammarIndirectLeftRecursion) {
+    ExpectErrorMessage("test/lambda/negative/semantic/grammar_indirect_left_recursion.ls",
+        "error[E215]: grammar 'g': rule 'a' is left-recursive through another rule (a -> b -> a)");
+}
+
+TEST_F(NegativeScriptTest, GrammarNullablePrefixLeftRecursion) {
+    ExpectErrorMessage("test/lambda/negative/semantic/grammar_nullable_left_recursion.ls",
+        "rule 'c' is left-recursive through a nullable prefix or a group");
+}
+
+TEST_F(NegativeScriptTest, GrammarUndefinedRuleIsAnUndefinedType) {
+    ExpectErrorMessage("test/lambda/negative/semantic/grammar_undefined_rule.ls",
+        "error[E204]: grammar 'g': no rule named 'missing'");
+}
+
+TEST_F(NegativeScriptTest, GrammarDuplicateRule) {
+    ExpectErrorMessage("test/lambda/negative/semantic/grammar_duplicate_rule.ls",
+        "error[E209]: grammar 'g': rule 'a' is defined twice");
+}
+
+TEST_F(NegativeScriptTest, GrammarQuotedNameIsARuleName) {
+    ExpectErrorMessage("test/lambda/negative/semantic/grammar_quoted_rule_name.ls",
+        "error[E204]: grammar 'g': no rule named 'x'");
+}
+
+TEST_F(NegativeScriptTest, GrammarImportUnknownGrammar) {
+    ExpectErrorMessage("test/lambda/negative/semantic/grammar_import_unknown.ls",
+        "error[E204]: grammar 'g': no grammar named 'nope' to import");
+}
+
+TEST_F(NegativeScriptTest, GrammarSpaceRuleIsATokenRule) {
+    ExpectErrorMessage("test/lambda/negative/semantic/grammar_space_syntax_rule.ls",
+        "the space rule is a token rule; write `space := ...`");
+}
+
+TEST_F(NegativeScriptTest, GrammarIsABarredBindingName) {
+    ExpectErrorMessage("test/lambda/negative/semantic/grammar_reserved_binding.ls",
+        "'grammar' is a reserved keyword and cannot be used as a name");
+}
+
+TEST_F(NegativeScriptTest, GrammarBodySyntaxError) {
+    ExpectErrorMessage("test/lambda/negative/syntax/grammar_body_syntax.ls",
+        "expected ',' or '|' between items, or the next rule");
+}
+
+TEST_F(NegativeScriptTest, GrammarUnterminatedBody) {
+    ExpectErrorMessage("test/lambda/negative/syntax/grammar_unterminated.ls",
+        "expected '}' closing the grammar body");
+}
+
+TEST_F(NegativeScriptTest, GrammarLintWarnsWithoutFailing) {
+    ScriptResult result = run_lambda_script("test/lambda/negative/semantic/grammar_lint.ls");
+    EXPECT_EQ(result.exit_code, 0) << result.output;
+    static const char* const warnings[] = {
+        "rule 'expr': prec(2, ...) has no associativity",
+        "rule 'expr': left-recursive alternatives without prec are read as prec.left(0)",
+        "rule 'start': alternative 4 can match nothing and always succeeds",
+        "rule 'op': moved \"<=\" before \"<\"",
+        "rule 'op': moved \"<<\" before \"<\"",
+        "rule 'cap': alternative 2 starts with \"<=\", which alternative 1 (\"<\") captures first",
+        "rule 'opt': alternative 1 can match nothing",
+        "rule 'rep': a repetition of something that can match nothing",
+        "rule 'two': alternatives 1 and 2 both begin with 'pair'",
+        "rule 'unused': the rule is never used",
+        "grammar 'lint': the grammar has no `space` rule",
+        "rule 'space': the first rule is the entry of `parse(text, g)`, and it is the space rule",
+    };
+    for (const char* warning : warnings) {
+        EXPECT_NE(strstr(result.output.c_str(), warning), nullptr)
+            << "missing lint warning: " << warning << "\n" << result.output;
+    }
+    EXPECT_NE(strstr(result.output.c_str(), "\"compiled\""), nullptr) << result.output;
+}
+
 // S11.1.2v4: inferred domains are checked on every execution tier.
 
 TEST_F(NegativeScriptTest, PatternDomainlessChar) {

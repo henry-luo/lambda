@@ -4,6 +4,60 @@
 // the benign branch at every call site.
 
 #include "dom_engine.h"
+#include "dom_graphics.h"
+#include "dom_style.h"
+
+// Native providers belong to the lower runtime; native module registration
+// publishes immutable process-lifetime tables without an upward link (D7.1.3).
+static const DomCanvasEngineOps* canvas_engine_operations = nullptr;
+static const DomWebGlEngineOps* webgl_engine_operations = nullptr;
+static const DomStyleEngineOps* style_engine_operations = nullptr;
+
+template<class Operations, class... Fields>
+static bool dom_provider_register(const Operations** slot, const Operations* operations, Fields... fields) {
+    if (!operations || !(... && (operations->*fields))) return false;
+    const Operations* expected = nullptr;
+    return __atomic_compare_exchange_n(slot, &expected, operations, false,
+                                       __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE) ||
+           expected == operations;
+}
+
+template<class Operations>
+static const Operations* dom_provider_load(const Operations* const* slot) {
+    return __atomic_load_n(slot, __ATOMIC_ACQUIRE);
+}
+
+#define DOM_PROVIDER_MEMBER(result, name, parameters) , &Operations::name
+extern "C" bool dom_canvas_register_engine(const DomCanvasEngineOps* operations) {
+    using Operations = DomCanvasEngineOps;
+    return dom_provider_register(&canvas_engine_operations, operations
+        DOM_CANVAS_ENGINE_OPERATIONS(DOM_PROVIDER_MEMBER));
+}
+
+extern "C" bool dom_webgl_register_engine(const DomWebGlEngineOps* operations) {
+    using Operations = DomWebGlEngineOps;
+    return dom_provider_register(&webgl_engine_operations, operations
+        DOM_WEBGL_ENGINE_OPERATIONS(DOM_PROVIDER_MEMBER));
+}
+
+extern "C" bool dom_style_register_engine(const DomStyleEngineOps* operations) {
+    using Operations = DomStyleEngineOps;
+    return dom_provider_register(&style_engine_operations, operations
+        DOM_STYLE_ENGINE_OPERATIONS(DOM_PROVIDER_MEMBER));
+}
+#undef DOM_PROVIDER_MEMBER
+
+extern "C" const DomCanvasEngineOps* dom_canvas_engine_ops(void) {
+    return dom_provider_load(&canvas_engine_operations);
+}
+
+extern "C" const DomWebGlEngineOps* dom_webgl_engine_ops(void) {
+    return dom_provider_load(&webgl_engine_operations);
+}
+
+extern "C" const DomStyleEngineOps* dom_style_engine_ops(void) {
+    return dom_provider_load(&style_engine_operations);
+}
 
 #define DOM_ENGINE_WEAK extern "C" __attribute__((weak))
 
@@ -57,6 +111,15 @@ DOM_ENGINE_WEAK void* dom_engine_subtree_element_from_point(DomElement* root, fl
 DOM_ENGINE_WEAK bool dom_engine_hit_test_skips_subtree(DomElement* element) {
     (void)element; return false;
 }
+DOM_ENGINE_WEAK bool dom_engine_content_hidden_for_user_agent(DomElement* element) {
+    (void)element; return false;
+}
+DOM_ENGINE_WEAK bool dom_engine_content_is_skipped(DomElement* element, bool include_self) {
+    (void)element; (void)include_self; return false;
+}
+DOM_ENGINE_WEAK char* dom_engine_element_inner_text(DomElement* element) {
+    (void)element; return nullptr;
+}
 DOM_ENGINE_WEAK void dom_engine_svg_timing_event(DomElement* target, const char* type, bool bubbles, double detail) {
     (void)target; (void)type; (void)bubbles; (void)detail;
 }
@@ -66,6 +129,12 @@ DOM_ENGINE_WEAK void dom_engine_svg_timing_key(DomElement* target, const char* k
 DOM_ENGINE_WEAK bool dom_engine_layout_active(DomDocument* d) { (void)d; return false; }
 DOM_ENGINE_WEAK bool dom_engine_element_css_boxes(DomElement* e, DomCssBoxSizes* s) {
     (void)e; (void)s; return false;
+}
+DOM_ENGINE_WEAK bool dom_engine_element_viewport_origin(DomElement* e, float* x, float* y) {
+    (void)e;
+    if (x) *x = 0.0f;
+    if (y) *y = 0.0f;
+    return false;
 }
 DOM_ENGINE_WEAK bool dom_engine_attribute_has_relational_css_dependency(DomDocument* d, const char* n) {
     (void)d; (void)n; return true;

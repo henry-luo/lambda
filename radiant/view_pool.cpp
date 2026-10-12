@@ -2,6 +2,7 @@
 #include "geomap.hpp"
 #include "layout.hpp"
 #include "view.hpp"
+#include "../lambda/dom/dom_engine.h"
 #include "render.hpp"
 #include "view_tree_model.hpp"
 #include <assert.h>
@@ -41,22 +42,6 @@ static const char* flex_enum_name(CssEnum value, const char* fallback) {
     if (value == CSS_VALUE_SPACE_EVENLY) return "space-evenly";
     const CssEnumInfo* info = css_enum_info(value);
     return info && info->name ? (const char*)info->name : fallback;
-}
-
-static const char* inline_list_item_display_name(DisplayValue display) {
-    if (!display.list_item || display.outer != CSS_VALUE_INLINE ||
-        (display.inner != CSS_VALUE_FLOW && display.inner != CSS_VALUE_FLOW_ROOT)) {
-        return nullptr;
-    }
-    return display.inner == CSS_VALUE_FLOW_ROOT
-        ? "inline flow-root list-item" : "inline list-item";
-}
-
-static const char* block_display_name(DisplayValue display) {
-    if (display.inner == CSS_VALUE_FLOW_ROOT) {
-        return display.list_item ? "flow-root list-item" : "flow-root";
-    }
-    return nullptr;
 }
 
 // Helper function to get view type name for JSON
@@ -297,34 +282,64 @@ static void free_element_font_payload(DomElement* elem, ViewTree* tree) {
 
 template<class G> static void free_gradient(ViewTree* tree, lam::Own<G>& gradient) {
     if (!gradient) return;
-    view_pool_free(tree, gradient->stops);
-    view_pool_free(tree, gradient);
+    if (tree && tree->prop_pool) {
+        view_release_gradient_value(tree->prop_pool.get(), gradient.get());
+        gradient = nullptr;
+    }
+}
+
+void view_release_background_layer(ViewTree* tree, BackgroundLayer* layer) {
+    if (!layer) return;
+    free_gradient(tree, layer->linear_gradient);
+    free_gradient(tree, layer->radial_gradient);
+    free_gradient(tree, layer->conic_gradient);
+    layer->gradient_type = GRADIENT_NONE;
+    layer->image = nullptr;
+    layer->image_resolution = 0.0f;
+}
+
+void view_release_background_images(ViewTree* tree, BackgroundProp* background) {
+    if (!background) return;
+    view_release_background_layer(tree, background);
+    for (int i = 0; i < background->layer_count; i++) {
+        view_release_background_layer(tree, &background->layers[i]);
+    }
+    view_pool_free(tree, background->layers);
+    background->layer_count = 0;
+    view_pool_free(tree, background->component_values);
+    background->component_value_count = 0;
+    memset(background->component_counts, 0, sizeof(background->component_counts));
+    while (background->computed_expressions) {
+        BackgroundComputedExpression* expression = background->computed_expressions;
+        background->computed_expressions = expression->next;
+        css_value_destroy_owned(expression->value, tree->prop_pool);
+        pool_free(tree->prop_pool, expression);
+    }
+    background->bg_position_x_expression = background->bg_position_y_expression = nullptr;
+    background->bg_size_width_expression = background->bg_size_height_expression = nullptr;
 }
 
 static void free_background_prop(ViewTree* tree, lam::Own<BackgroundProp>& background) {
     if (!background) return;
-    free_gradient(tree, background->linear_gradient);
-    free_gradient(tree, background->radial_gradient);
-    free_gradient(tree, background->conic_gradient);
-    for (int i = 0; i < background->radial_layer_count; i++) {
-        free_gradient(tree, background->radial_layers[i]);
-    }
-    for (int i = 0; i < background->linear_layer_count; i++) {
-        free_gradient(tree, background->linear_layers[i]);
-    }
-    view_pool_free(tree, background->radial_layers);
-    view_pool_free(tree, background->linear_layers);
+    view_release_background_images(tree, background);
     view_pool_free(tree, background);
+}
+
+void view_release_border_image(ViewTree* tree, BorderProp* border) {
+    if (!border) return;
+    free_gradient(tree, border->border_image_linear_gradient);
+    view_pool_free(tree, border->border_image_url);
+    border->border_image_linear_gradient = nullptr;
+    border->border_image_url = nullptr;
+    border->border_image_type = GRADIENT_NONE;
+    border->border_image_resolution = 0.0f;
 }
 
 static void free_boundary_payload(DomElement* elem, ViewTree* tree) {
     if (!elem || !elem->bound) return;
     BoundaryProp* boundary = elem->bound;
     free_background_prop(tree, boundary->background);
-    if (boundary->border) {
-        free_gradient(tree, boundary->border->border_image_linear_gradient);
-        view_pool_free(tree, boundary->border->border_image_url);
-    }
+    view_release_border_image(tree, boundary->border);
     view_pool_free(tree, boundary->border);
     if (boundary->mask) free_gradient(tree, boundary->mask->radial_gradient);
     view_pool_free(tree, boundary->mask);
@@ -401,6 +416,8 @@ static void release_grid_prop(Pool* pool, GridProp* grid) {
     if (!grid) {
         return;
     }
+    lam::free_owned(pool, grid->used_track_text);
+    grid->used_columns_offset = 0;
 
     destroy_grid_track_list(pool, grid->grid_template_rows);
     grid->grid_template_rows = nullptr;
@@ -1046,8 +1063,8 @@ void alloc_grid_prop(LayoutContext* lycon, ViewBlock* block) {
     if (!block->embedp()->grid) {
         GridProp* grid = (GridProp*)alloc_prop(lycon, sizeof(GridProp));
         // Set default values using enum names that align with Lexbor constants
-        grid->justify_content = CSS_VALUE_START;
-        grid->align_content = CSS_VALUE_START;
+        grid->justify_content = CSS_VALUE_NORMAL;
+        grid->align_content = CSS_VALUE_NORMAL;
         // CSS Grid initial self-alignment is normal; aspect-ratio sizing must
         // distinguish it from an explicitly requested stretch.
         grid->justify_items = CSS_VALUE_NORMAL;
@@ -1102,6 +1119,7 @@ void view_tree_release_detached_embedded_documents(ViewTree*, DomNode* root) {
 }
 
 void view_tree_prepare_detached_subtree(DomNode* root) {
+    layout_content_visibility_forget_subtree(root);
     // release private contexts while their document and native subtree identities are live.
     scene3d_release_subtree(root);
     geomap_release_subtree(root);
@@ -1136,6 +1154,9 @@ void ViewTree::init(MemContext* owner) {
     // The document context outlives the view tree: free_document destroys the
     // tree before it releases the document's Input context.
     mem_ctx = lam::up(owner);
+    content_visibility_state = nullptr;
+    content_visibility_activation_margin = 1.0f;
+    max_content_visibility_passes = 256;
     prop_pool = lam::own(mem_pool_create(owner, MEM_ROLE_VIEW, "view_tree.prop_pool"));
     if (!prop_pool) {
         log_error("Failed to initialize view pool");
@@ -1185,6 +1206,7 @@ void view_pool_reset_retained(ViewTree* tree) {
 
 void ViewTree::destroy() {
     if (!view_tree_model_destroy(this)) return;
+    layout_content_visibility_destroy(this);
     destroy_measurement_cache(this);
     if (root) {
         view_teardown_visit_node(this, root,
@@ -1315,6 +1337,24 @@ static ViewBlock* view_document_root_block(View* view) {
     return root && root->is_block() ? lam::view_require_block(root) : nullptr;
 }
 
+bool view_is_viewport_fixed(View* view) {
+    ViewBlock* block = lam::view_as_block(view);
+    ViewBlock* root = view_document_root_block(view);
+    return block && root && block->position && block->positionp()->position == CSS_VALUE_FIXED &&
+        find_containing_block(block, CSS_VALUE_FIXED) == root &&
+        !radiant::transform_establishes_containing_block(root) &&
+        !(root->blk && root->block()->contain_positioning);
+}
+
+RdtLogicalPoint view_geometry_fixed_scroll_adjustment(View* view) {
+    RdtLogicalPoint delta = {};
+    if (view_is_viewport_fixed(view)) {
+        // viewport-fixed boxes exclude root scroll in paint and hit coordinate frames.
+        scroll_state_resolve_view_geometry(view_document_root_block(view), &delta.x, &delta.y, nullptr);
+    }
+    return delta;
+}
+
 static void subtract_block_scroll(ViewBlock* block, float* x, float* y) {
     if (!block || !block->scroller || !block->scroll()->pane) return;
     float scroll_x = 0.0f;
@@ -1336,6 +1376,17 @@ static void subtract_block_scroll(ViewBlock* block, float* x, float* y) {
  * @param out_dy Output: vertical translation offset
  * @return true if a transform offset was calculated, false otherwise
  */
+extern "C" bool dom_engine_element_viewport_origin(DomElement* element, float* x, float* y) {
+    float origin_x = 0.0f, origin_y = 0.0f;
+    if (element) {
+        // committed containing-block/scroll coordinates stay with their engine owner.
+        view_get_layout_position(static_cast<View*>(element), nullptr, &origin_x, &origin_y);
+    }
+    if (x) *x = origin_x;
+    if (y) *y = origin_y;
+    return element != nullptr;
+}
+
 void view_get_layout_position(View* view, TextRect* rect, float* out_x, float* out_y,
                               View* boundary) {
     if (view == boundary) { *out_x = *out_y = 0.0f; return; }
@@ -1564,6 +1615,14 @@ RdtMatrix4 view_accumulated_transform_3d(View* view, bool context_only) {
     return accumulated;
 }
 
+bool view_visibility_is_hidden(const View* view) {
+    if (!view) return false;
+    // text and markers inherit from their originating box; visible descendants keep their own computed value.
+    const DomElement* element = view->is_text() || view->view_type == RDT_VIEW_MARKER
+        ? (view->parent ? view->parent->as_element() : nullptr) : view->as_element();
+    return element && element->inl() && element->inl()->visibility != VIS_VISIBLE;
+}
+
 bool view_backface_is_hidden(View* view, BackfaceCheck check) {
     bool independent_plane = false;
     for (View* current = view; current; current = current->parent_view()) {
@@ -1702,6 +1761,7 @@ static bool view_foreign_object_bounds(View* view, float* x, float* y, float* wi
     apply_matrix_to_bounds(&frame, x, y, width, height);
     return true;
 }
+
 
 void view_get_visual_bounds(View* view, float* out_x, float* out_y,
                             float* out_width, float* out_height) {
@@ -2838,16 +2898,10 @@ void print_block_json(ViewBlock* block, StrBuf* buf, int indent, bool is_root) {
             (parent_elem->display.inner == CSS_VALUE_FLEX ||
              parent_elem->display.inner == CSS_VALUE_GRID);
     }
-    const char* inline_list_item_display = inline_list_item_display_name(block->display);
-    const char* block_flow_root_display = block_display_name(block->display);
-    if (inline_list_item_display) {
-        // CSS Display 3: serialize the computed multi-keyword list-item value;
-        // its used atomic view role must not replace the CSSOM display value.
-        display = inline_list_item_display;
-    } else if (block_flow_root_display) {
-        // CSS Display 3: flow-root is the computed single-keyword form for a
-        // block-level flow-root, including the list-item outer display.
-        display = block_flow_root_display;
+    const char* special_display = css_display_special_name(block->display);
+    if (special_display) {
+        // computed legacy, flow-root and list-item forms share CSSOM's serializer.
+        display = special_display;
     } else if (block->display.inner == CSS_VALUE_GRID) {
         // Flex/grid items are blockified, while standalone legacy inline grid/flex
         // values keep their inline outer display in CSSOM serialization.
@@ -3786,7 +3840,7 @@ void print_inline_json(ViewSpan* span, StrBuf* buf, int indent) {
     if (span->display.outer == CSS_VALUE_CONTENTS) {
         strbuf_append_str(buf, "\"display\": \"contents\"");
     } else {
-        const char* display = inline_list_item_display_name(span->display);
+        const char* display = css_display_special_name(span->display);
         strbuf_append_format(buf, "\"display\": \"%s\"", display ? display : "inline");
     }
 

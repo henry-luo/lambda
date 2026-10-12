@@ -61,8 +61,9 @@ static bool render_walk_block_effect_group(ViewBlock* block, float abs_x, float 
     bool has_filter = render_walk_filter_effective(block->filter_prop());
     bool has_backdrop_filter = render_walk_filter_effective(block->backdrop_filter_prop());
     bool has_shadow = block->bound && block->boundary_mut()->box_shadow;
+    RadialGradient* mask = block->bound && block->boundary()->mask ? block->boundary()->mask->radial_gradient.get() : nullptr;
     if (opacity >= 0.9995f && !blend && !has_filter &&
-        !has_backdrop_filter && !has_shadow) {
+        !has_backdrop_filter && !has_shadow && !mask) {
         return false;
     }
 
@@ -77,6 +78,13 @@ static bool render_walk_block_effect_group(ViewBlock* block, float abs_x, float 
     group->backdrop = has_backdrop_filter;
     group->backdrop_filter = lam::up(has_backdrop_filter ? block->backdrop_filter_prop() : NULL);
     group->shadow = has_shadow;
+    if (mask) {
+        // export captures the same subtree mask before opacity composites the flattened children.
+        group->mask.gradient = lam::up(mask);
+        group->mask.rect = {abs_x, abs_y, block->width, block->height};
+        group->mask.inverse = rdt_matrix_scale(1.0f, 1.0f);
+        group->mask.invertible = true;
+    }
     return true;
 }
 
@@ -121,8 +129,9 @@ static bool render_walk_block_begin(RenderPaintBlockDriver* ctx, ViewBlock* bloc
         }
     }
 
-    state->x = p->pa_x + block->x;
-    state->y = p->pa_y + block->y;
+    RdtLogicalPoint fixed = view_geometry_fixed_scroll_adjustment(block);
+    state->x = p->pa_x + block->x + fixed.x;
+    state->y = p->pa_y + block->y + fixed.y;
     if (backend->visit_element) {
         backend->visit_element(backend->ctx, block, state->x, state->y);
     }
@@ -156,7 +165,8 @@ static bool render_walk_block_paint_self(RenderPaintBlockDriver* ctx, ViewBlock*
     RenderBackend* backend = driver->backend;
     RenderWalkState* state = driver->state;
 
-    bool hidden = view_backface_is_hidden(block);
+    bool backface_hidden = view_backface_is_hidden(block);
+    bool hidden = backface_hidden || view_visibility_is_hidden(block);
     if (!hidden && block->bound && backend->render_bound) {
         backend->render_bound(backend->ctx, block, state->x, state->y);
     }
@@ -164,13 +174,12 @@ static bool render_walk_block_paint_self(RenderPaintBlockDriver* ctx, ViewBlock*
     if (block->in_line && block->inl()->has_color) {
         state->color = block->inl()->color;
     }
-    if (hidden) return true;
-
-    if (block->tag_id == MARKUP_NAME_GEOMAP) {
-        if (backend->render_geomap) backend->render_geomap(backend->ctx, block, state->x, state->y);
+    if (backface_hidden) return true;
+    if (view_contents_are_skipped(block)) {
         p->stop_after_self = true;
         return false;
     }
+
     if (block->tag_id == MARKUP_NAME_SVG) {
         if (backend->render_inline_svg) {
             backend->render_inline_svg(backend->ctx, block, state->x, state->y,
@@ -180,7 +189,15 @@ static bool render_walk_block_paint_self(RenderPaintBlockDriver* ctx, ViewBlock*
         return false;
     }
 
-    if (block->embed && block->embedp()->img && backend->render_image) {
+    // visibility suppresses this box's paint, while visible descendants remain traversable.
+    if (hidden) return true;
+    if (block->tag_id == MARKUP_NAME_GEOMAP) {
+        if (backend->render_geomap) backend->render_geomap(backend->ctx, block, state->x, state->y);
+        p->stop_after_self = true;
+        return false;
+    }
+
+    if (render_media_image_surface(block) && backend->render_image) {
         backend->render_image(backend->ctx, block, state->x, state->y);
     }
 
@@ -201,6 +218,7 @@ static double render_walk_block_paint_children(RenderPaintBlockDriver* ctx, View
 
     RenderBackend* backend = driver->backend;
     RenderWalkState* state = driver->state;
+    RenderTextPaintScope text_paint(backend->ctx, block, &state->font, &state->color);
     if (block->first_child || block->custom_layout_paint_prop()) {
         // overflow and containment clip descendants after the box's own boundary paint.
         bool content_clip = backend->begin_clip && backend->end_clip &&
@@ -261,7 +279,7 @@ static void render_walk_block_finish(RenderPaintBlockDriver* ctx, ViewBlock* blo
     RenderBackend* backend = driver->backend;
     RenderWalkState* state = driver->state;
 
-    if (!p->stop_after_self && !view_backface_is_hidden(block) &&
+    if (!p->stop_after_self && !view_visibility_is_hidden(block) && !view_backface_is_hidden(block) &&
         block->multicol_prop() && block->multicol_prop()->computed_column_count > 1) {
         if (backend->render_column_rules) {
             backend->render_column_rules(backend->ctx, block, state->x, state->y);
@@ -391,7 +409,7 @@ static void render_walk_view(RenderBackend* backend, RenderWalkState* state, Vie
             break;
 
         case RDT_VIEW_TEXT:
-            if (backend->render_text) {
+            if (!view_visibility_is_hidden(view) && backend->render_text) {
                 backend->render_text(backend->ctx, lam::view_require_text(view),
                                      state->x, state->y,
                                      &state->font, state->color);
@@ -399,7 +417,7 @@ static void render_walk_view(RenderBackend* backend, RenderWalkState* state, Vie
             break;
 
         case RDT_VIEW_MARKER:
-            if (backend->render_marker) {
+            if (!view_visibility_is_hidden(view) && backend->render_marker) {
                 backend->render_marker(backend->ctx, lam::view_require_element(view),
                                        state->x, state->y,
                                        &state->font, state->color);

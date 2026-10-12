@@ -9,6 +9,8 @@
  */
 
 #include "dom.h"
+#include "dom_graphics.h"
+#include "dom_style.h"
 #include "../../radiant/svg_animation.hpp"
 #include "dom_core.h"
 #include "realm/dom_realm.h"
@@ -1247,11 +1249,6 @@ static inline void dom_post_insert(DomNode* parent, DomNode* node,
     }
 }
 
-static bool dom_is_generated_pseudo_node(DomNode* node) {
-    if (!node || !node->is_element()) return false;
-    DomElement* elem = node->as_element();
-    return elem->tag_name && elem->tag_name[0] == ':' && elem->tag_name[1] == ':';
-}
 
 static bool dom_is_anonymous_table_wrapper(DomNode* node) {
     if (!node || !node->is_element()) return false;
@@ -2123,7 +2120,8 @@ extern "C" void* dom_document_swap_current_script(void* document,
 extern "C" void dom_set_ui_context(void* ui_context) {
     if (!js_active_runtime_state) return;
     _js_current_ui_context = (UiContext*)ui_context;
-    radiant_set_cssom_used_value_sync(ui_context ? dom_ensure_geometry_snapshot : nullptr);
+    dom_provider_call(dom_style_engine_ops(), &DomStyleEngineOps::set_used_value_sync,
+        ui_context ? dom_ensure_geometry_snapshot : nullptr);
     dom_storage_bind_document();
 }
 
@@ -4615,7 +4613,8 @@ extern "C" Item dom_computed_style_get_property(Item style_item, Item prop_name)
     // Custom names are literal DOM strings: preserve case, length and punctuation before camel-case conversion.
     if (js_prop[0] == '-' && js_prop[1] == '-' && elem->doc && elem->doc->document_pool) {
         size_t name_length = get_type_id(prop_name) == LMD_TYPE_STRING ? it2s(prop_name)->len : strlen(js_prop);
-        String* computed = css_prop_serialize_custom_property(elem->doc->document_pool,
+        String* computed = dom_provider_call(dom_style_engine_ops(), &DomStyleEngineOps::serialize_custom_property,
+            elem->doc->document_pool,
             elem, js_prop, name_length);
         return computed ? js_make_string_len(computed->chars, computed->len) : js_name_item("");
     }
@@ -4651,7 +4650,8 @@ extern "C" Item dom_computed_style_get_property(Item style_item, Item prop_name)
 
     Pool* pool = mem_pool_create(nullptr, MEM_ROLE_CSS, "cssom.dom.computed_value");
     if (!pool) return js_name_item("");
-    String* computed = css_prop_serialize_computed_value(pool, elem, prop_id, pseudo_type);
+    String* computed = dom_provider_call(dom_style_engine_ops(), &DomStyleEngineOps::serialize_computed_value,
+        pool, elem, prop_id, pseudo_type);
     // the JS string copies caller-owned output before the native scratch pool ends.
     Item result = computed ? js_make_string_len(computed->chars, computed->len) : js_name_item("");
     mem_pool_destroy(pool);
@@ -5054,6 +5054,7 @@ static int dom_default_tab_index(DomElement* elem) {
 
 static bool dom_is_script_focusable(DomElement* elem) {
     if (!elem || !dom_node_is_connected((DomNode*)elem)) return false;
+    if (dom_engine_content_hidden_for_user_agent(elem)) return false;
     if (elem->has_attribute("hidden")) return false;
     if (dom_is_disabled_for_focus(elem)) return false;
 
@@ -5437,7 +5438,8 @@ static float dom_computed_css_dimension(DomElement* elem, bool width_axis) {
     Pool* pool = mem_pool_create(nullptr, MEM_ROLE_CSS, "cssom.dom.computed_dimension");
     if (!pool) return 0.0f;
     CssPropertyCode property = width_axis ? CSS_PROPERTY_WIDTH : CSS_PROPERTY_HEIGHT;
-    String* value = css_prop_serialize_computed_value(pool, elem, property, 0);
+    String* value = dom_provider_call(dom_style_engine_ops(), &DomStyleEngineOps::serialize_computed_value,
+        pool, elem, property, 0);
     float result = value ? dom_parse_positive_css_dimension(value->chars) : 0.0f;
     mem_pool_destroy(pool);
     return result;
@@ -7424,6 +7426,7 @@ static Item dom_focus_method(DomElement* elem, bool focus,
     if (!elem) return make_js_undefined();
     DocState* state = elem->doc ? elem->doc->state : dom_current_state();
     if (focus) {
+        dom_ensure_geometry_snapshot(elem->doc);
         if (dom_is_script_focusable(elem)) {
             View* old_focus = state ? focus_get(state) : nullptr;
             js_document_active_element = elem;
@@ -8269,7 +8272,7 @@ extern "C" void dom_after_set_attribute(void* elem_ptr,
         (str_icmp_cstr(attr_name, "width") == 0 || str_icmp_cstr(attr_name, "height") == 0)) {
         // Content-attribute mutations reset exactly like the reflected IDL
         // setters; both replace the authoritative bitmap and context state.
-        if (!radiant_canvas_reset_from_attributes(elem)) {
+        if (!dom_provider_call(dom_canvas_engine_ops(), &DomCanvasEngineOps::reset_from_attributes, elem)) {
             log_error("canvas: could not reset backing surface from %s attribute", attr_name);
         }
         dom_canvas_reset_context(dom_wrap_element(elem));
@@ -8285,7 +8288,7 @@ extern "C" void dom_after_remove_attribute(void* elem_ptr,
     dom_reinit_behavior_if_constraint_attr(elem, attr_name);
     if (elem->tag() == MARKUP_NAME_CANVAS &&
         (str_icmp_cstr(attr_name, "width") == 0 || str_icmp_cstr(attr_name, "height") == 0)) {
-        if (!radiant_canvas_reset_from_attributes(elem)) {
+        if (!dom_provider_call(dom_canvas_engine_ops(), &DomCanvasEngineOps::reset_from_attributes, elem)) {
             log_error("canvas: could not reset backing surface after removing %s", attr_name);
         }
         dom_canvas_reset_context(dom_wrap_element(elem));
@@ -10252,7 +10255,16 @@ extern "C" Item dom_get_property_impl(Item elem_item, Item prop_name) {
         return dom_fp_text_content(elem_item);
     }
 
-    // textContent / innerText (recursive text extraction)
+    // innerText reads rendered contents; detached/non-rendered elements use textContent.
+    if (prop_id == JS_DOM_PROP_INNER_TEXT) {
+        dom_ensure_geometry_snapshot(elem->doc);
+        char* rendered = dom_engine_element_inner_text(elem);
+        if (rendered) {
+            Item result = js_name_item(rendered);
+            mem_free(rendered);
+            return result;
+        }
+    }
     if (prop_id == JS_DOM_PROP_TEXT_CONTENT || prop_id == JS_DOM_PROP_INNER_TEXT) {
         return dom_fp_text_content(elem_item);
     }
@@ -11903,7 +11915,7 @@ extern "C" Item dom_set_property_impl(Item elem_item, Item prop_name, Item value
                 (strcmp(int_attr, "width") == 0 || strcmp(int_attr, "height") == 0);
             if (canvas_dimension) {
                 if ((unsigned long)n > UINT32_MAX ||
-                    !radiant_canvas_set_dimension(elem, strcmp(int_attr, "width") == 0,
+                    !dom_provider_call(dom_canvas_engine_ops(), &DomCanvasEngineOps::set_dimension, elem, strcmp(int_attr, "width") == 0,
                                                   (uint32_t)n)) {
                     return js_throw_range_error("Canvas dimensions exceed Radiant limits");
                 }
@@ -12832,7 +12844,8 @@ static RdtMatrix dom_svg_ctm(DomElement* elem, bool screen_space) {
     if (screen_space && outermost_svg) {
         RdtMatrix layout_transform;
         if (!view_get_foreign_object_matrix(static_cast<View*>(outermost_svg), &layout_transform, false)) {
-            RdtLogicalPoint origin = view_geometry_node_viewport_origin(static_cast<View*>(outermost_svg));
+            RdtLogicalPoint origin = {};
+            dom_engine_element_viewport_origin(outermost_svg, &origin.x, &origin.y);
             layout_transform = rdt_matrix_translate(origin.x, origin.y);
         }
         matrix = rdt_matrix_multiply(&layout_transform, &matrix);
@@ -14185,8 +14198,8 @@ static DomElement* dom_shadow_element_from_document_point_walk(DomNode* node,
     }
     if (!elem->shadow_root_element()) return nullptr;
 
-    RdtLogicalPoint host = view_geometry_node_viewport_origin(
-        static_cast<View*>(elem));
+    RdtLogicalPoint host = {};
+    dom_engine_element_viewport_origin(elem, &host.x, &host.y);
     DomElement* hit = dom_shadow_element_from_point_walk((DomNode*)elem->shadow_root_element(),
         host.x, host.y, px, py);
     if (hit) return hit;
@@ -15011,6 +15024,8 @@ static bool dom_replace_document_element(DomElement* old_root,
 
     Element* replacement_backing = dom_element_to_element(replacement);
     Element* old_backing = dom_element_to_element(old_root);
+    // D4.5.3: the parser's document list can still name the source of a copied root.
+    Element* old_source = dom_element_render_source(old_root);
     if (!replacement_backing || !old_backing) return false;
 
     Element* input_root = doc->input->root.element;
@@ -15025,12 +15040,12 @@ static bool dom_replace_document_element(DomElement* old_root,
         for (int64_t i = 0; i < input_root->length; i++) {
             Item child = input_root->items[i];
             if (get_type_id(child) == LMD_TYPE_ELEMENT &&
-                child.element == old_backing) {
+                (child.element == old_backing || child.element == old_source)) {
                 old_index = i;
                 break;
             }
         }
-    } else if (input_root == old_backing) {
+    } else if (input_root == old_backing || input_root == old_source) {
         old_index = 0;
     }
     if (old_index < 0) return false;

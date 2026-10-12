@@ -1,7 +1,9 @@
 #include "view.hpp"
 #include "layout.hpp"
 #include "render.hpp"
+#include "view_tree_model.hpp"
 #include "../lambda/input/css/css_formatter.hpp"
+#include "../lambda/input/css/css_parser.hpp"
 #include "../lambda/input/css/css_engine.hpp"
 #include "../lambda/input/css/selector_matcher.hpp"
 #include "../lib/log.h"
@@ -9,15 +11,28 @@
 #include "../lib/math_utils.h"
 #include "../lib/mem_factory.h"
 #include "../lib/arraylist.h"
+#include "../lib/tagged.hpp"
 #include "../lambda/dom/dom.h"
 
 #include <assert.h>
+#include <limits.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 static RadiantCssomUsedValueSync s_cssom_used_value_sync = nullptr;
+
+static LayoutContext cssom_value_context(DomElement* element, Pool* scratch) {
+    LayoutContext context = {};
+    context.pool = lam::up(scratch);
+    context.css_value_scratch = lam::up(scratch);
+    context.view = lam::up(static_cast<View*>(element));
+    context.elmt = lam::up(element);
+    context.doc = element ? element->doc : nullptr;
+    context.css_query_probe = true;
+    return context;
+}
 
 size_t font_text_decoration_names(const FontProp* font, char* out, size_t capacity) {
     if (!out || capacity == 0) return 0;
@@ -259,6 +274,8 @@ static CssDeclaration* computed_decl(DomElement* element, CssPropertyCode id, in
     if (pseudo_type == 1 || pseudo_type == 2) {
         return dom_element_get_pseudo_element_value(element, id, pseudo_type);
     }
+    unsigned grid = css_grid_property_mask(id);
+    if (grid > 15 && !(grid & (grid - 1))) return layout_cascaded_physical_declaration(element, id);
     CssDeclaration* declaration = dom_element_get_specified_value(element, id);
     if (!declaration && (id == CSS_PROPERTY_OVERFLOW_X || id == CSS_PROPERTY_OVERFLOW_Y)) {
         declaration = dom_element_get_specified_value(element, CSS_PROPERTY_OVERFLOW);
@@ -355,9 +372,16 @@ static bool format_keyword_set(const CssValue* value, StringBuf* out,
     return written;
 }
 
+static bool format_grid_computed_value(DomElement* element, const CssValue* value, StringBuf* output,
+    CssPropertyCode property = CSS_PROPERTY_UNKNOWN);
+static bool format_clamp_computed_value(DomElement* element, const CssValue* value, StringBuf* output);
+
 static bool format_css_value(DomElement* element, CssPropertyCode id,
                              const CssValue* value, StringBuf* out,
                              Pool* scratch = nullptr) {
+    // word-spacing normal computes to zero even before a pending style obtains a font snapshot.
+    if (id == CSS_PROPERTY_WORD_SPACING && (!value || css_value_has_identifier(value, "normal")))
+        return copy_text(out, "0px");
     if (!value) {
         // initial color names still serialize as computed colors after a rule stops matching.
         const CssProperty* property = css_property_get_by_code(id);
@@ -367,6 +391,23 @@ static bool format_css_value(DomElement* element, CssPropertyCode id,
         if (property && property->type == PROP_TYPE_COLOR &&
             format_color_text(property_initial(id), out)) return true;
         return copy_text(out, property_initial(id));
+    }
+    if (id == CSS_PROPERTY_GRID_TEMPLATE_COLUMNS || id == CSS_PROPERTY_GRID_TEMPLATE_ROWS ||
+        id == CSS_PROPERTY_GRID_AUTO_COLUMNS || id == CSS_PROPERTY_GRID_AUTO_ROWS)
+        return format_grid_computed_value(element, value, out);
+    if (id == CSS_PROPERTY_LINE_CLAMP || id == CSS_PROPERTY_WEBKIT_LINE_CLAMP)
+        return format_clamp_computed_value(element, value, out);
+    if (id == CSS_PROPERTY_WEBKIT_BOX_ORIENT) {
+        return copy_text(out, css_value_has_identifier(value, "vertical") ||
+            css_value_has_identifier(value, "block-axis") ? "vertical" : "horizontal");
+    }
+    if (id == CSS_PROPERTY_GRID_TEMPLATE_AREAS) {
+        String* text = css_grid_serialize_template_areas(out->pool, value);
+        return text && copy_text(out, text->chars);
+    }
+    if (id == CSS_PROPERTY_GRID_COLUMN_START || id == CSS_PROPERTY_GRID_COLUMN_END ||
+        id == CSS_PROPERTY_GRID_ROW_START || id == CSS_PROPERTY_GRID_ROW_END) {
+        return format_grid_computed_value(element,value,out,id);
     }
     // computed keyword sets use grammar order and canonical case, while names retain case.
     if (id == CSS_PROPERTY_CONTAIN) {
@@ -381,9 +422,7 @@ static bool format_css_value(DomElement* element, CssPropertyCode id,
         // numeric opacity math needs a value context, without consuming pending geometry.
         Pool* scratch = pool_create();
         if (!scratch) return false;
-        LayoutContext context = {};
-        context.pool = lam::up(scratch);
-        context.view = lam::up(static_cast<View*>(element));
+        LayoutContext context = cssom_value_context(element, scratch);
         bool result = format_number(out, resolve_css_opacity_value(&context, value), "");
         pool_destroy(scratch);
         return result;
@@ -401,7 +440,8 @@ static bool format_css_value(DomElement* element, CssPropertyCode id,
     CssComputedColor color;
     const CssProperty* property = css_property_get_by_code(id);
     formatter->options.computed_colors = property && property->type == PROP_TYPE_COLOR && css_color_compute(value, &color);
-    css_format_value(formatter, (CssValue*)value);
+    if (id == CSS_PROPERTY_GRID_AUTO_FLOW) css_format_value_with_property(formatter, (CssValue*)value, id);
+    else css_format_value(formatter, (CssValue*)value);
     String* result = stringbuf_to_string(formatter->output);
     return copy_text(out, result ? result->chars : "");
 }
@@ -422,7 +462,18 @@ static bool serialize_inherited_decl(DomElement* element, CssPropertyCode id,
     // walk the complete CSS ancestry without consuming native stack frames.
     while (element) {
         CssDeclaration* declaration = computed_decl(element, id, pseudo_type);
+        unsigned grid_mask = css_grid_property_mask(id);
+        if (grid_mask && grid_mask < 16 && !(grid_mask & (grid_mask - 1))) {
+            const CssPropertyCode shorthands[] = {CSS_PROPERTY_GRID_AREA, CSS_PROPERTY_GRID_ROW, CSS_PROPERTY_GRID_COLUMN};
+            for (CssPropertyCode shorthand : shorthands) {
+                if (!(grid_mask & css_grid_placement_mask(shorthand))) continue;
+                CssDeclaration* candidate = computed_decl(element, shorthand, pseudo_type);
+                if (candidate && (!declaration || css_declaration_cascade_compare(candidate, declaration) > 0))
+                    declaration = candidate;
+            }
+        }
         const CssValue* value = declaration ? declaration->value : nullptr;
+        bool grid_shorthand = grid_mask && declaration && declaration->property_code != id;
         if (pseudo_type == 0 && (css_animation_longhand_index(id) >= 0 ||
             css_transition_longhand_index(id) >= 0)) {
             const CssValue* animation_value = css_motion_computed_value(scratch, element, id);
@@ -455,11 +506,17 @@ static bool serialize_inherited_decl(DomElement* element, CssPropertyCode id,
         }
         if (css_value_contains_pending_substitution(value)) {
             // A live declaration read can precede layout; use the same substitution and validation as layout.
+            CssPropertyCode value_property = declaration && declaration->pending_shorthand_code > 0
+                ? declaration->pending_shorthand_code : grid_shorthand ? declaration->property_code
+                : container_shorthand ? CSS_PROPERTY_CONTAINER : background_shorthand ? CSS_PROPERTY_BACKGROUND : id;
             value = css_resolve_element_var_value(scratch, element, value,
-                container_shorthand ? CSS_PROPERTY_CONTAINER : background_shorthand ? CSS_PROPERTY_BACKGROUND : id);
-            if (!value || !css_property_validate_value(container_shorthand ? CSS_PROPERTY_CONTAINER : background_shorthand ? CSS_PROPERTY_BACKGROUND : id, value))
+                value_property);
+            if (!value || !css_property_validate_value(value_property, value))
                 value = nullptr;
         }
+        if (declaration && declaration->pending_shorthand_code > 0)
+            value = css_grid_shorthand_longhand(scratch, value, declaration->pending_shorthand_code, id);
+        if (grid_shorthand) value = css_grid_shorthand_longhand(scratch, value, declaration->property_code, id);
         if (container_shorthand) value = css_container_shorthand_longhand(value, id, scratch);
         if (cssom_value_inherits(value, id)) {
             DomElement* parent = cssom_inherited_source(element, &pseudo_type);
@@ -489,9 +546,9 @@ static bool serialize_inherited_decl(DomElement* element, CssPropertyCode id,
     return false;
 }
 
-static bool serialize_decl_value(DomElement* element, CssPropertyCode id,
+bool css_prop_serialize_cascaded_value(DomElement* element, CssPropertyCode id,
                                  int pseudo_type, StringBuf* out,
-                                 bool preserve_color_model = false) {
+                                 bool preserve_color_model) {
     Pool* scratch = pool_create();
     if (!scratch) return false;
     bool result = serialize_inherited_decl(element, id, pseudo_type, out, scratch, preserve_color_model);
@@ -501,7 +558,7 @@ static bool serialize_decl_value(DomElement* element, CssPropertyCode id,
 
 static bool serialize_decl(const CssPropAccessor* accessor, DomElement* element,
                            int pseudo_type, StringBuf* out) {
-    return accessor && serialize_decl_value(element, accessor->id, pseudo_type, out);
+    return accessor && css_prop_serialize_cascaded_value(element, accessor->id, pseudo_type, out);
 }
 
 static const CssValue* cssom_declared_font_value(Pool* scratch, DomElement* element,
@@ -750,6 +807,22 @@ bool css_prop_compute_numeric_value(DomElement* element, const CssValue* value, 
     return valid;
 }
 
+static bool format_clamp_computed_value(DomElement* element, const CssValue* value, StringBuf* output) {
+    if (!value || value->type == CSS_VALUE_TYPE_KEYWORD) return copy_text(output, "none");
+    Pool* scratch = pool_create();
+    if (!scratch) return false;
+    CssomFontState root = {}, state = {};
+    bool valid = cssom_resolve_font_state(scratch, element, 0, &root, &state, true);
+    CssomFontMathContext lengths = {element, state.font.size_px, root.font.size_px,
+        &state, &state, &root, state.vertical};
+    CssMathEvaluationContext math = {cssom_font_math_leaf, &lengths, 1.0, false};
+    double count;
+    bool computed = valid && css_compute_integer_value(value, &math, 1.0, (double)INT_MAX, &count);
+    bool result = computed ? stringbuf_append_format(output, "%.0f", count) : copy_text(output, "none");
+    pool_destroy(scratch);
+    return result;
+}
+
 bool css_compute_cascaded_font_size(DomElement* element, float* font_size) {
     if (!font_size) return false;
     Pool* scratch = pool_create();
@@ -809,28 +882,289 @@ struct CssomSvgScalarWriter {
     bool written;
 };
 
+static bool cssom_append_computed_math(CssFormatter* formatter, const CssValue* value,
+        const CssMathEvaluationContext* context, bool nonnegative) {
+    CssMathResult math = css_math_evaluate(value, context);
+    double scalar = isnan(math.value) ? 0.0 : math.value;
+    if (nonnegative) scalar = fmax(0.0, scalar);
+    if (math.resolved && (math.type == CSS_MATH_NUMBER || math.type == CSS_MATH_LENGTH))
+        return stringbuf_append_format(formatter->output, "%.6gpx", scalar);
+    if (math.resolved && math.type == CSS_MATH_PERCENT)
+        return stringbuf_append_format(formatter->output, "%.6g%%",
+            nonnegative ? fmax(0.0, math.percentage) : math.percentage);
+    if (math.resolved && math.type == CSS_MATH_LENGTH_PERCENT)
+        return stringbuf_append_format(formatter->output, "calc(%.6g%% %c %.6gpx)",
+            math.percentage, math.value < 0.0 ? '-' : '+', fabs(math.value));
+    css_format_value(formatter, (CssValue*)value);
+    return true;
+}
+
+static CssValue* cssom_clone_computed_length(CssFormatter* formatter, const CssValue* input,
+        const SvgLengthContext* svg, CssMathLeafResolver leaf, void* lengths) {
+    CssValue* value = css_value_clone_owned(input, formatter->pool);
+    SvgLengthContext unused_svg = {};
+    return value && svg_normalize_length_value(value, svg ? svg : &unused_svg, SVG_LENGTH_DIAGONAL,
+        true, leaf, lengths) ? value : nullptr;
+}
+
+struct CssomBackgroundWriter {
+    CssBackgroundWinner winner;
+    DomElement* owner;
+    int pseudo_type;
+    CssomFontState root, font;
+    CssomFontMathContext lengths;
+};
+
+static CssomBackgroundWriter cssom_background_source(Pool* scratch, DomElement* element,
+        CssPropertyCode property, int pseudo_type) {
+    CssomBackgroundWriter result = {};
+    while (element) {
+        result.winner = background_component_winner(element, scratch, property, pseudo_type);
+        result.owner = element; result.pseudo_type = pseudo_type;
+        if (!css_value_keyword_equals(result.winner.value, CSS_VALUE_INHERIT)) break;
+        element = cssom_inherited_source(element, &pseudo_type);
+    }
+    return result;
+}
+
+static bool cssom_background_lengths(Pool* scratch, CssomBackgroundWriter* writer) {
+    if (!cssom_resolve_font_state(scratch, writer->owner, writer->pseudo_type, &writer->root, &writer->font, true)) return false;
+    writer->lengths = {writer->owner, writer->font.font.size_px, writer->root.font.size_px,
+        &writer->font, &writer->font, &writer->root, writer->font.vertical};
+    return true;
+}
+
+static const CssValue* cssom_background_item(CssFormatter* formatter, CssomBackgroundWriter& writer,
+        CssPropertyCode property, int index) {
+    const CssValue* value = background_winner_component(formatter->pool, writer.winner, property, index);
+    return css_value_is_global_keyword(value) ? nullptr : value;
+}
+
+static bool cssom_append_background_size(CssFormatter* formatter, CssomBackgroundWriter& writer, int index) {
+    const CssValue* value = cssom_background_item(formatter, writer, CSS_PROPERTY_BACKGROUND_SIZE, index);
+    const CssValue* axes[2] = {}; CssEnum mode;
+    if (!value) { stringbuf_append_str(formatter->output, property_initial(CSS_PROPERTY_BACKGROUND_SIZE)); return true; }
+    if (!css_background_size_components(value, axes, &mode)) return false;
+    if (mode) { stringbuf_append_str(formatter->output, css_enum_info(mode)->name); return true; }
+    bool automatic[2] = {!axes[0] || css_value_keyword_equals(axes[0], CSS_VALUE_AUTO),
+        !axes[1] || css_value_keyword_equals(axes[1], CSS_VALUE_AUTO)};
+    CssMathEvaluationContext math = {cssom_font_math_leaf, &writer.lengths, 1.0, true};
+    for (size_t axis = 0; axis < (automatic[0] && automatic[1] ? 1u : 2u); axis++) {
+        if (axis) stringbuf_append_str(formatter->output, " ");
+        if (automatic[axis]) stringbuf_append_str(formatter->output, "auto");
+        else {
+            CssValue* computed = cssom_clone_computed_length(formatter, axes[axis], nullptr, cssom_font_math_leaf, &writer.lengths);
+            if (!computed || !cssom_append_computed_math(formatter, computed, &math, true)) return false;
+        }
+    }
+    return true;
+}
+
+static bool cssom_append_background_axis(CssFormatter* formatter, CssomBackgroundWriter& writer,
+        int index, bool horizontal) {
+    CssPropertyCode property = horizontal ? CSS_PROPERTY_BACKGROUND_POSITION_X : CSS_PROPERTY_BACKGROUND_POSITION_Y;
+    const CssValue* value = cssom_background_item(formatter, writer, property, index);
+    CssPositionAxis axes[2] = {{CSS_VALUE_LEFT, nullptr}, {CSS_VALUE_TOP, nullptr}};
+    CssDeclaration* declaration = writer.winner.declaration;
+    bool shorthand = declaration && (declaration->property_code == CSS_PROPERTY_BACKGROUND ||
+        declaration->property_code == CSS_PROPERTY_BACKGROUND_POSITION);
+    bool quirky = declaration && declaration->property_code == CSS_PROPERTY_BACKGROUND_POSITION &&
+        dom_element_uses_quirks_css(writer.owner);
+    if (value && !css_position_components(value, axes, true, shorthand ? -1 : horizontal ? 0 : 1, quirky)) return false;
+    const CssPositionAxis& axis = axes[horizontal ? 0 : 1];
+    double origin = background_position_keyword(axis.origin, horizontal);
+    if (!axis.offset) return stringbuf_append_format(formatter->output, "%.6g%%", origin);
+    CssValue* offset = cssom_clone_computed_length(formatter, axis.offset, nullptr, cssom_font_math_leaf, &writer.lengths);
+    if (!offset) return false;
+    CssMathEvaluationContext context = {cssom_font_math_leaf, &writer.lengths, 1.0, true};
+    CssMathResult math = css_math_evaluate(offset, &context);
+    double sign = axis.origin == CSS_VALUE_RIGHT || axis.origin == CSS_VALUE_BOTTOM ? -1.0 : 1.0;
+    if (math.resolved) {
+        double percent = origin + sign * math.percentage, length = sign * math.value;
+        if (math.type == CSS_MATH_PERCENT || (math.type == CSS_MATH_LENGTH_PERCENT && length == 0.0))
+            return stringbuf_append_format(formatter->output, "%.6g%%", percent);
+        if (percent == 0.0 && math.type != CSS_MATH_LENGTH_PERCENT)
+            return stringbuf_append_format(formatter->output, "%.6gpx", length);
+        if (length == 0.0) return stringbuf_append_format(formatter->output, "%.6g%%", percent);
+        return stringbuf_append_format(formatter->output, "calc(%.6g%% %c %.6gpx)", percent, length < 0.0 ? '-' : '+', fabs(length));
+    }
+    if (origin == 0.0 && sign > 0.0) { css_format_value(formatter, offset); return true; }
+    stringbuf_append_format(formatter->output, "calc(%.6g%% %c ", origin, sign < 0.0 ? '-' : '+');
+    css_format_value(formatter, offset);
+    stringbuf_append_str(formatter->output, ")");
+    return true;
+}
+
+static bool cssom_append_background_keyword(CssFormatter* formatter, CssomBackgroundWriter& writer,
+        CssPropertyCode property, int index) {
+    const CssValue* value = cssom_background_item(formatter, writer, property, index);
+    if (property == CSS_PROPERTY_BACKGROUND_REPEAT) {
+        CssEnum axes[2] = {CSS_VALUE_REPEAT, CSS_VALUE_REPEAT};
+        if (value && !css_background_repeat_components(value, axes)) return false;
+        if (axes[0] == CSS_VALUE_REPEAT && axes[1] == CSS_VALUE_NO_REPEAT) { stringbuf_append_str(formatter->output, "repeat-x"); return true; }
+        if (axes[1] == CSS_VALUE_REPEAT && axes[0] == CSS_VALUE_NO_REPEAT) { stringbuf_append_str(formatter->output, "repeat-y"); return true; }
+        stringbuf_append_str(formatter->output, css_enum_info(axes[0])->name);
+        if (axes[0] != axes[1]) stringbuf_append_all(formatter->output, 2, " ", css_enum_info(axes[1])->name);
+        return true;
+    }
+    if (value) { css_format_value(formatter, (CssValue*)value); return true; }
+    stringbuf_append_str(formatter->output, property_initial(property));
+    return true;
+}
+
+static bool serialize_background_components(const CssPropAccessor* accessor, DomElement* element,
+        int pseudo_type, StringBuf* output) {
+    Pool* scratch = output->pool;
+    CssFormatter* formatter = css_formatter_create(scratch, CSS_FORMAT_COMPACT);
+    if (!formatter) return false;
+    CssomBackgroundWriter images = cssom_background_source(scratch, element, CSS_PROPERTY_BACKGROUND_IMAGE, pseudo_type);
+    int count = background_list_count(images.winner.value);
+    bool position = accessor->id == CSS_PROPERTY_BACKGROUND_POSITION;
+    bool axis = position || accessor->id == CSS_PROPERTY_BACKGROUND_POSITION_X || accessor->id == CSS_PROPERTY_BACKGROUND_POSITION_Y;
+    CssomBackgroundWriter writers[2] = {};
+    for (size_t component = 0; component < (position ? 2u : 1u); component++) {
+        CssPropertyCode property = position ? component == 0 ? CSS_PROPERTY_BACKGROUND_POSITION_X : CSS_PROPERTY_BACKGROUND_POSITION_Y : accessor->id;
+        writers[component] = cssom_background_source(scratch, element, property, pseudo_type);
+        if ((axis || accessor->id == CSS_PROPERTY_BACKGROUND_SIZE) && !cssom_background_lengths(scratch, &writers[component])) return false;
+    }
+    // project original independent periods only at the receiving element; inheritance keeps its declaration owner's units (CI-18).
+    for (int index = 0; index < count; index++) {
+        if (index) stringbuf_append_str(formatter->output, ", ");
+        bool valid = axis ? cssom_append_background_axis(formatter, writers[0], index,
+            accessor->id != CSS_PROPERTY_BACKGROUND_POSITION_Y)
+            : accessor->id == CSS_PROPERTY_BACKGROUND_SIZE ? cssom_append_background_size(formatter, writers[0], index)
+            : cssom_append_background_keyword(formatter, writers[0], accessor->id, index);
+        if (!valid) return false;
+        if (position) {
+            stringbuf_append_str(formatter->output, " ");
+            if (!cssom_append_background_axis(formatter, writers[1], index, false)) return false;
+        }
+    }
+    String* value = stringbuf_to_string(formatter->output);
+    return value && copy_text(output, value->chars);
+}
+
+
 static bool cssom_append_svg_length(const CssValue* input, void* data) {
     CssomSvgScalarWriter* writer = (CssomSvgScalarWriter*)data;
     // normalization writes only to the caller-owned projection, never retained declaration values (D4.5.1v4).
-    CssValue* value = css_value_clone_owned(input, writer->formatter->pool);
-    if (!value || !svg_normalize_length_value(value, &writer->lengths.svg, SVG_LENGTH_DIAGONAL,
-        true, cssom_svg_length_leaf, &writer->lengths)) return false;
+    CssValue* value = cssom_clone_computed_length(writer->formatter, input, &writer->lengths.svg,
+        cssom_svg_length_leaf, &writer->lengths);
+    if (!value) return false;
     CssMathEvaluationContext context = {cssom_svg_length_leaf, &writer->lengths, 1.0, true};
-    CssMathResult math = css_math_evaluate(value, &context);
     if (writer->comma && writer->written) stringbuf_append_str(writer->formatter->output, ", ");
     writer->written = true;
-    double scalar = isnan(math.value) ? 0.0 : math.value;
-    if (writer->nonnegative) scalar = fmax(0.0, scalar);
-    if (math.resolved && (math.type == CSS_MATH_NUMBER || math.type == CSS_MATH_LENGTH))
-        stringbuf_append_format(writer->formatter->output, "%.6gpx", scalar);
-    else if (math.resolved && math.type == CSS_MATH_PERCENT)
-        stringbuf_append_format(writer->formatter->output, "%.6g%%",
-            writer->nonnegative ? fmax(0.0, math.percentage) : math.percentage);
-    else if (math.resolved && math.type == CSS_MATH_LENGTH_PERCENT)
-        stringbuf_append_format(writer->formatter->output, "calc(%.6g%% %c %.6gpx)",
-            math.percentage, math.value < 0.0 ? '-' : '+', fabs(math.value));
-    else css_format_value(writer->formatter, value);
+    return cssom_append_computed_math(writer->formatter, value, &context, writer->nonnegative);
+}
+
+static bool cssom_append_grid_leaf(CssFormatter* formatter, CssValue* value,
+        bool repeat_count, void* context) {
+    CssomFontMathContext* lengths = (CssomFontMathContext*)context;
+    bool function = value->type == CSS_VALUE_TYPE_FUNCTION && value->data.function;
+    if (repeat_count && function) {
+        CssMathEvaluationContext math = {cssom_font_math_leaf, lengths, 1.0, false};
+        double count;
+        if (!css_compute_integer_value(value, &math, 1.0, (double)INT_MAX, &count)) return false;
+        return stringbuf_append_format(formatter->output, "%.0f", count);
+    }
+    bool length = value->type == CSS_VALUE_TYPE_LENGTH && value->data.length.unit != CSS_UNIT_FR;
+    bool zero = !repeat_count && value->type == CSS_VALUE_TYPE_NUMBER && value->data.number.value == 0.0;
+    if (length || zero || (function && !repeat_count)) {
+        // shared math normalization preserves percentages while computing lengths at their declaration owner.
+        value = cssom_clone_computed_length(formatter, value, nullptr, cssom_font_math_leaf, lengths);
+        if (!value) return false;
+        CssMathEvaluationContext math = {cssom_font_math_leaf, lengths, 1.0, true};
+        return cssom_append_computed_math(formatter, value, &math, false);
+    }
+    css_format_value(formatter, value);
     return true;
+}
+
+static bool format_grid_computed_value(DomElement* element, const CssValue* value, StringBuf* output,
+    CssPropertyCode property) {
+    Pool* scratch = pool_create();
+    if (!scratch) return false;
+    CssomFontState root = {}, state = {};
+    CssFormatter* formatter = css_formatter_create(scratch, CSS_FORMAT_COMPACT);
+    CssValue* copy = css_value_clone_owned(value, scratch);
+    bool valid = formatter && copy && cssom_resolve_font_state(scratch, element, 0, &root, &state, true);
+    if (valid) {
+        CssomFontMathContext lengths = {element, state.font.size_px, root.font.size_px,
+            &state, &state, &root, state.vertical};
+        String* text = nullptr;
+        if (css_grid_placement_mask(property)) {
+            CssMathEvaluationContext math = {cssom_font_math_leaf,&lengths,1.0,false};
+            CssGridLineReference lines[4] = {};
+            if (!css_grid_parse_placement(copy,property,lines,&math)) memset(lines,0,sizeof(lines));
+            text = css_grid_serialize_placement(scratch,lines,property);
+        } else text = css_format_grid_track_value(formatter, copy, cssom_append_grid_leaf, &lengths)
+            ? stringbuf_to_string(formatter->output) : nullptr;
+        valid = text && copy_text(output, text->chars);
+    }
+    pool_destroy(scratch);
+    return valid;
+}
+
+static const char* cssom_grid_used_track_text(DomElement* element,
+        CssPropertyCode property, int pseudo_type) {
+    ViewTree* tree = element && element->doc ? element->doc->view_tree.get() : nullptr;
+    const ViewNodeState* state = tree && pseudo_type == 0 &&
+        element->display.outer != CSS_VALUE_NONE && element->display.inner == CSS_VALUE_GRID
+        ? view_tree_node_state(tree, element, false) : nullptr;
+    const char* used = state ? property == CSS_PROPERTY_GRID_TEMPLATE_COLUMNS
+        ? state->grid_used_columns.get() : state->grid_used_rows.get() : nullptr;
+    if (!used && tree && !tree->model && pseudo_type == 0 &&
+        element->display.outer != CSS_VALUE_NONE && element->display.inner == CSS_VALUE_GRID &&
+        element->embed && element->embedp()->grid && element->embedp()->grid->used_track_text) {
+        const GridProp* grid = element->embedp()->grid;
+        used = grid->used_track_text.get() + (property == CSS_PROPERTY_GRID_TEMPLATE_COLUMNS
+            ? grid->used_columns_offset : 0);
+    }
+    return used;
+}
+
+static bool serialize_grid_tracks(const CssPropAccessor* accessor, DomElement* element,
+        int pseudo_type, StringBuf* output) {
+    const char* used = cssom_grid_used_track_text(element, accessor->id, pseudo_type);
+    return used ? copy_text(output, used) : serialize_decl(accessor, element, pseudo_type, output);
+}
+
+static bool serialize_grid_shorthand(const CssPropAccessor* accessor, DomElement* element,
+        int pseudo_type, StringBuf* output) {
+    unsigned mask = css_grid_property_mask(accessor->id);
+    const CssValue* values[CSS_GRID_PROPERTY_MEMBER_COUNT] = {};
+    String* texts[CSS_GRID_PROPERTY_MEMBER_COUNT] = {};
+    for (unsigned i = 0; i < CSS_GRID_PROPERTY_MEMBER_COUNT; i++) if (mask & (1u << i)) {
+        CssPropertyCode member = css_grid_property_member(i);
+        String* value = nullptr;
+        if (accessor->id == CSS_PROPERTY_GRID_TEMPLATE && (i == 4 || i == 5)) {
+            StringBuf* computed = stringbuf_new(output->pool);
+            if (!computed || !css_prop_serialize_cascaded_value(element, member, pseudo_type, computed)) return false;
+            value = stringbuf_to_string(computed);
+            // grid-template retains computed track functions; an entirely implicit axis uses its resolved list.
+            if (value && strcmp(value->chars, "none") == 0)
+                value = css_prop_serialize_computed_value(output->pool, element, member, pseudo_type);
+        } else value = css_prop_serialize_computed_value(output->pool, element, member, pseudo_type);
+        if (!value) return false;
+        texts[i] = value;
+        values[i] = css_parse_component_value_text(value->chars, value->len, output->pool);
+        if (!values[i]) return false;
+        if (accessor->id == CSS_PROPERTY_GRID_TEMPLATE && (i == 4 || i == 5) &&
+            cssom_grid_used_track_text(element, member, pseudo_type)) {
+            values[i] = css_grid_project_resolved_template_tracks(output->pool, values[i]);
+            if (!values[i]) return false;
+        }
+    }
+    if (accessor->id == CSS_PROPERTY_GRID) {
+        // resolved grid preserves the browser's legacy slash-separated longhand order, including auto defaults.
+        const unsigned order[] = {4, 5, 6, 9, 7, 8};
+        for (unsigned i = 0; i < sizeof(order) / sizeof(*order); i++) {
+            if (!stringbuf_append_format(output, "%s%s", i ? " / " : "", texts[order[i]]->chars)) return false;
+        }
+        return true;
+    }
+    String* text = css_grid_serialize_shorthand(output->pool, values, accessor->id);
+    return text && copy_text(output, text->chars);
 }
 
 String* css_prop_serialize_svg_value(Pool* pool, DomElement* declaring,
@@ -857,9 +1191,7 @@ String* css_prop_serialize_svg_value(Pool* pool, DomElement* declaring,
             if (!css_value_visit_list_items(value, cssom_append_svg_length, &writer)) return nullptr;
         } else if (!cssom_append_svg_length(value, &writer)) return nullptr;
     } else if (css_property_is_svg_opacity(id)) {
-        LayoutContext context = {};
-        context.pool = lam::up(pool);
-        context.view = lam::up(static_cast<View*>(declaring));
+        LayoutContext context = cssom_value_context(declaring, pool);
         stringbuf_append_format(formatter->output, "%.6g", resolve_css_opacity_value(&context, value));
     } else if (id == CSS_PROPERTY_STROKE_MITERLIMIT) {
         CssMathEvaluationContext context = {};
@@ -974,7 +1306,7 @@ static bool serialize_place_alignment(
     CssSelfAlignment justify = {initial_value};
     if (shorthand && (!shorthand->value ||
         !shorthand_parser(shorthand->value, &align, &justify))) {
-        return serialize_decl_value(element, shorthand_id, 0, out);
+        return css_prop_serialize_cascaded_value(element, shorthand_id, 0, out);
     }
     // CSS Cascade expands a shorthand before constituent longhands compete.
     if (!resolve_place_component(shorthand, computed_decl(element, align_id, 0),
@@ -1014,20 +1346,24 @@ static bool serialize_place_content(const CssPropAccessor*, DomElement* element,
 static bool serialize_display(const CssPropAccessor*, DomElement* element, int pseudo_type,
                               StringBuf* out) {
     if (!element || pseudo_type != 0) return false;
-    if (element->display.outer == CSS_VALUE_NONE) return copy_text(out, "none");
-    if (element->display.inner == CSS_VALUE_FLEX) {
+    DisplayValue display = resolve_display_value(element);
+    const char* special = css_display_special_name(display);
+    if (special) return copy_text(out, special);
+    if (display.outer == CSS_VALUE_NONE) return copy_text(out, "none");
+    bool inline_outer = display.outer == CSS_VALUE_INLINE || display.outer == CSS_VALUE_INLINE_BLOCK;
+    if (display.inner == CSS_VALUE_FLEX) {
         return copy_text(out,
-            element->display.outer == CSS_VALUE_INLINE ? "inline-flex" : "flex");
+            inline_outer ? "inline-flex" : "flex");
     }
-    if (element->display.inner == CSS_VALUE_GRID) {
+    if (display.inner == CSS_VALUE_GRID) {
         return copy_text(out,
-            element->display.outer == CSS_VALUE_INLINE ? "inline-grid" : "grid");
+            inline_outer ? "inline-grid" : "grid");
     }
-    if (element->display.inner == CSS_VALUE_TABLE) {
+    if (display.inner == CSS_VALUE_TABLE) {
         return copy_text(out,
-            element->display.outer == CSS_VALUE_INLINE ? "inline-table" : "table");
+            inline_outer ? "inline-table" : "table");
     }
-    const CssEnumInfo* info = css_enum_info(element->display.outer);
+    const CssEnumInfo* info = css_enum_info(display.outer);
     return copy_text(out, info && info->name ? info->name : "block");
 }
 
@@ -1261,7 +1597,7 @@ static bool serialize_background_color(const CssPropAccessor*, DomElement* eleme
     }
 
     // use the common shorthand/substitution/inheritance path before paint has caught up.
-    return serialize_decl_value(element, CSS_PROPERTY_BACKGROUND_COLOR, pseudo_type, out);
+    return css_prop_serialize_cascaded_value(element, CSS_PROPERTY_BACKGROUND_COLOR, pseudo_type, out);
 }
 
 static bool serialize_minmax(const CssPropAccessor* accessor, DomElement* element,
@@ -1410,6 +1746,12 @@ static bool serialize_overscroll_behavior(const CssPropAccessor* accessor,
     return format_text(out, "%s %s", x_name, y_name);
 }
 
+static bool serialize_line_clamp(const CssPropAccessor* accessor, DomElement* element,
+                                  int pseudo_type, StringBuf* out) {
+    // used clamp propagation is not CSS inheritance; declarations also remain observable before layout.
+    return accessor && element && css_prop_serialize_cascaded_value(element, accessor->id, pseudo_type, out);
+}
+
 #define DIRECT_ROW(prop_id, group, type, field, kind, row_flags) \
     {prop_id, group, (uint16_t)offsetof(type, field), kind, row_flags, serialize_direct, nullptr}
 #define DERIVED_ROW(prop_id, fn, row_flags) \
@@ -1417,6 +1759,21 @@ static bool serialize_overscroll_behavior(const CssPropAccessor* accessor,
 #define DECL_ROW(prop_id) DERIVED_ROW(prop_id, serialize_decl, 0)
 
 static const CssPropAccessor CSS_PROP_ROWS[] = {
+    DERIVED_ROW(CSS_PROPERTY_GRID_TEMPLATE_COLUMNS, serialize_grid_tracks, CSS_PROP_ACCESSOR_USED_VALUE | CSS_PROP_ACCESSOR_CASCADE_RESOLVED),
+    DERIVED_ROW(CSS_PROPERTY_GRID_TEMPLATE_ROWS, serialize_grid_tracks, CSS_PROP_ACCESSOR_USED_VALUE | CSS_PROP_ACCESSOR_CASCADE_RESOLVED),
+    DECL_ROW(CSS_PROPERTY_GRID_AUTO_COLUMNS),
+    DECL_ROW(CSS_PROPERTY_GRID_AUTO_ROWS),
+    DERIVED_ROW(CSS_PROPERTY_GRID_TEMPLATE, serialize_grid_shorthand, CSS_PROP_ACCESSOR_CASCADE_RESOLVED),
+    DERIVED_ROW(CSS_PROPERTY_GRID, serialize_grid_shorthand, CSS_PROP_ACCESSOR_CASCADE_RESOLVED),
+    DECL_ROW(CSS_PROPERTY_GRID_TEMPLATE_AREAS),
+    DECL_ROW(CSS_PROPERTY_GRID_AUTO_FLOW),
+    DECL_ROW(CSS_PROPERTY_GRID_COLUMN_START),
+    DECL_ROW(CSS_PROPERTY_GRID_COLUMN_END),
+    DECL_ROW(CSS_PROPERTY_GRID_ROW_START),
+    DECL_ROW(CSS_PROPERTY_GRID_ROW_END),
+    DERIVED_ROW(CSS_PROPERTY_GRID_COLUMN, serialize_grid_shorthand, CSS_PROP_ACCESSOR_CASCADE_RESOLVED),
+    DERIVED_ROW(CSS_PROPERTY_GRID_ROW, serialize_grid_shorthand, CSS_PROP_ACCESSOR_CASCADE_RESOLVED),
+    DERIVED_ROW(CSS_PROPERTY_GRID_AREA, serialize_grid_shorthand, CSS_PROP_ACCESSOR_CASCADE_RESOLVED),
     DERIVED_ROW(CSS_PROPERTY_FILL, serialize_svg_paint, CSS_PROP_ACCESSOR_CASCADE_RESOLVED),
     DERIVED_ROW(CSS_PROPERTY_STROKE, serialize_svg_paint, CSS_PROP_ACCESSOR_CASCADE_RESOLVED),
     DERIVED_ROW(CSS_PROPERTY_STROKE_WIDTH, serialize_svg_paint, CSS_PROP_ACCESSOR_CASCADE_RESOLVED),
@@ -1443,7 +1800,7 @@ static const CssPropAccessor CSS_PROP_ROWS[] = {
     DERIVED_ROW(CSS_PROPERTY_COLOR_INTERPOLATION, serialize_svg_paint, CSS_PROP_ACCESSOR_CASCADE_RESOLVED),
     DERIVED_ROW(CSS_PROPERTY_COLOR_INTERPOLATION_FILTERS, serialize_svg_paint, CSS_PROP_ACCESSOR_CASCADE_RESOLVED),
     DERIVED_ROW(CSS_PROPERTY_TEXT_ANCHOR, serialize_svg_paint, CSS_PROP_ACCESSOR_CASCADE_RESOLVED),
-    DERIVED_ROW(CSS_PROPERTY_DISPLAY, serialize_display, 0),
+    DERIVED_ROW(CSS_PROPERTY_DISPLAY, serialize_display, CSS_PROP_ACCESSOR_CASCADE_RESOLVED),
     DIRECT_ROW(CSS_PROPERTY_POSITION, PROP_GROUP_POSITION, PositionProp, position, CSS_PROP_VALUE_ENUM, 0),
     DERIVED_ROW(CSS_PROPERTY_TOP, serialize_inset, CSS_PROP_ACCESSOR_USED_VALUE),
     DERIVED_ROW(CSS_PROPERTY_RIGHT, serialize_inset, CSS_PROP_ACCESSOR_USED_VALUE),
@@ -1493,6 +1850,12 @@ static const CssPropAccessor CSS_PROP_ROWS[] = {
     DIRECT_ROW(CSS_PROPERTY_LETTER_SPACING, PROP_GROUP_FONT, FontProp, letter_spacing, CSS_PROP_VALUE_PX, 0),
     DIRECT_ROW(CSS_PROPERTY_WORD_SPACING, PROP_GROUP_FONT, FontProp, word_spacing, CSS_PROP_VALUE_PX, 0),
     DIRECT_ROW(CSS_PROPERTY_TEXT_ALIGN, PROP_GROUP_BLOCK, BlockProp, text_align, CSS_PROP_VALUE_ENUM, 0),
+    // the layout slot is lazy and cannot represent a combined transform declaration.
+    DECL_ROW(CSS_PROPERTY_TEXT_TRANSFORM),
+    DIRECT_ROW(CSS_PROPERTY_TEXT_OVERFLOW, PROP_GROUP_BLOCK, BlockProp, text_overflow, CSS_PROP_VALUE_ENUM, 0),
+    DERIVED_ROW(CSS_PROPERTY_LINE_CLAMP, serialize_line_clamp, 0),
+    DERIVED_ROW(CSS_PROPERTY_WEBKIT_LINE_CLAMP, serialize_line_clamp, 0),
+    DECL_ROW(CSS_PROPERTY_WEBKIT_BOX_ORIENT),
     DIRECT_ROW(CSS_PROPERTY_WHITE_SPACE, PROP_GROUP_BLOCK, BlockProp, white_space, CSS_PROP_VALUE_ENUM, 0),
     DIRECT_ROW(CSS_PROPERTY_TEXT_WRAP_MODE, PROP_GROUP_BLOCK, BlockProp, text_wrap_mode, CSS_PROP_VALUE_ENUM, 0),
     DIRECT_ROW(CSS_PROPERTY_TEXT_INDENT, PROP_GROUP_BLOCK, BlockProp, text_indent, CSS_PROP_VALUE_PX, 0),
@@ -1527,6 +1890,24 @@ static const CssPropAccessor CSS_PROP_ROWS[] = {
     // This longhand can be supplied by the retained background shorthand.
     DERIVED_ROW(CSS_PROPERTY_BACKGROUND_COLOR, serialize_background_color,
                 CSS_PROP_ACCESSOR_CASCADE_RESOLVED),
+    DERIVED_ROW(CSS_PROPERTY_BACKGROUND_POSITION, serialize_background_components,
+                CSS_PROP_ACCESSOR_CASCADE_RESOLVED | CSS_PROP_ACCESSOR_PSEUDO_RESOLVED),
+    DERIVED_ROW(CSS_PROPERTY_BACKGROUND_POSITION_X, serialize_background_components,
+                CSS_PROP_ACCESSOR_CASCADE_RESOLVED | CSS_PROP_ACCESSOR_PSEUDO_RESOLVED),
+    DERIVED_ROW(CSS_PROPERTY_BACKGROUND_POSITION_Y, serialize_background_components,
+                CSS_PROP_ACCESSOR_CASCADE_RESOLVED | CSS_PROP_ACCESSOR_PSEUDO_RESOLVED),
+    DERIVED_ROW(CSS_PROPERTY_BACKGROUND_SIZE, serialize_background_components,
+                CSS_PROP_ACCESSOR_CASCADE_RESOLVED | CSS_PROP_ACCESSOR_PSEUDO_RESOLVED),
+    DERIVED_ROW(CSS_PROPERTY_BACKGROUND_REPEAT, serialize_background_components,
+                CSS_PROP_ACCESSOR_CASCADE_RESOLVED | CSS_PROP_ACCESSOR_PSEUDO_RESOLVED),
+    DERIVED_ROW(CSS_PROPERTY_BACKGROUND_ATTACHMENT, serialize_background_components,
+                CSS_PROP_ACCESSOR_CASCADE_RESOLVED | CSS_PROP_ACCESSOR_PSEUDO_RESOLVED),
+    DERIVED_ROW(CSS_PROPERTY_BACKGROUND_ORIGIN, serialize_background_components,
+                CSS_PROP_ACCESSOR_CASCADE_RESOLVED | CSS_PROP_ACCESSOR_PSEUDO_RESOLVED),
+    DERIVED_ROW(CSS_PROPERTY_BACKGROUND_CLIP, serialize_background_components,
+                CSS_PROP_ACCESSOR_CASCADE_RESOLVED | CSS_PROP_ACCESSOR_PSEUDO_RESOLVED),
+    DERIVED_ROW(CSS_PROPERTY_BACKGROUND_BLEND_MODE, serialize_background_components,
+                CSS_PROP_ACCESSOR_CASCADE_RESOLVED | CSS_PROP_ACCESSOR_PSEUDO_RESOLVED),
     DERIVED_ROW(CSS_PROPERTY_BORDER_TOP_WIDTH, serialize_border_component, 0),
     // serialize computed corners, preserving percentages and ignoring paint overlap constraints.
     DERIVED_ROW(CSS_PROPERTY_BORDER_RADIUS, serialize_corner_radius, CSS_PROP_ACCESSOR_USED_VALUE),
@@ -1649,6 +2030,37 @@ bool dom_ensure_computed(DomElement* element, bool needs_used_value) {
     return false;
 }
 
+static bool cssom_sample_skipped_motion(DomElement* element, Pool* scratch) {
+    CssomFontState root = {}, state = {};
+    if (!cssom_resolve_font_state(scratch, element, 0, &root, &state, true)) return false;
+    LayoutContext context = cssom_value_context(element, scratch);
+    DomDocument* document = element->doc;
+    UiContext* host = (UiContext*)document->js.host_ui_context;
+    context.ui_context = lam::up(host);
+    CssEngine* engine = (CssEngine*)document->services.cached_css_engine;
+    context.width = engine ? (float)engine->context.viewport_width : host ? (float)host->viewport_width : NAN;
+    context.height = engine ? (float)engine->context.viewport_height : host ? (float)host->viewport_height : NAN;
+    context.root_font_size = root.font.size_px;
+    FontProp font = {};
+    font.family = lam::up(const_cast<char*>(state.font.family));
+    font.font_size = state.font.size_px;
+    font.used_zoom = element->font ? element->font->used_zoom : 1.0f;
+    font.font_weight_numeric = (int16_t)state.font.weight;
+    font.font_style = state.font.slant == FONT_SLANT_ITALIC ? CSS_VALUE_ITALIC
+        : state.font.slant == FONT_SLANT_OBLIQUE ? CSS_VALUE_OBLIQUE : CSS_VALUE_NORMAL;
+    context.font.style = lam::up(&font);
+    context.font.current_font_size = font_prop_used_size(&font);
+    if (host && host->font_ctx) setup_font(host, &context.font, &font);
+    ViewBlock* parent = lam::view_as_block(dom_flat_tree_parent(element));
+    LayoutContainingBlock containing = parent ? layout_containing_block_for_view(parent) : LayoutContainingBlock{};
+    LayoutContainingBlockScope containing_scope(&context, containing.content_width,
+        containing.content_height, containing.has_definite_height, parent != nullptr);
+    // endpoint computation borrows current declarations and committed geometry, never a layout trial.
+    bool sampled = css_motion_sample_existing(element, &context);
+    font_prop_release_handle(&font);
+    return sampled;
+}
+
 static bool serialize_computed(DomElement* element, CssPropertyCode id,
                                  int pseudo_type, StringBuf* out) {
     if (!element || !out) return false;
@@ -1682,10 +2094,16 @@ static bool serialize_computed(DomElement* element, CssPropertyCode id,
         css_animation_needs_computed_sample(element, id)) {
         computed = dom_ensure_computed(element, true);
     }
+    if (pseudo_type == 0 && metadata && metadata->animation_type != ANIM_VAL_NONE &&
+        view_content_visibility_hides(element, CONTENT_VISIBILITY_PAINT) &&
+        css_animation_needs_computed_sample(element, id)) {
+        // explicit reads refresh owner values without advancing skipped effect events.
+        computed = cssom_sample_skipped_motion(element, out->pool) || computed;
+    }
     const CssProperty* property = css_property_get_by_code(id);
     if (property && property->type == PROP_TYPE_COLOR &&
         !css_animation_needs_computed_sample(element, id) &&
-        serialize_decl_value(element, id, pseudo_type, out, true)) return true;
+        css_prop_serialize_cascaded_value(element, id, pseudo_type, out, true)) return true;
 
     if (!computed) {
         // Before the first UiContext exists, loader scripts can only observe
@@ -1699,7 +2117,8 @@ static bool serialize_computed(DomElement* element, CssPropertyCode id,
         }
         return serialize_decl(accessor, element, pseudo_type, out);
     }
-    if (pseudo_type != 0) return serialize_decl(accessor, element, pseudo_type, out);
+    if (pseudo_type != 0 && !(accessor->flags & CSS_PROP_ACCESSOR_PSEUDO_RESOLVED))
+        return serialize_decl(accessor, element, pseudo_type, out);
     return accessor->serialize && accessor->serialize(accessor, element, pseudo_type,
                                                       out);
 }

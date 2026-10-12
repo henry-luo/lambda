@@ -1,0 +1,21 @@
+\documentclass{article}
+\begin{filecontents*}{refs.bib}
+@article{doe,author={Doe, John and Roe, Jane},title={Test {CSL} title},journal={Science},year={2020},volume={12},number={3},pages={1--9},doi={10.123/test}}
+@book{roe,author={Roe, Jane},title={Another Book},year={2021},publisher={Example Press}}
+@online{unused,title={An Uncited Resource},year={2022},url={https://example.org/resource}}
+\end{filecontents*}
+\usepackage{biblatex}
+\addbibresource{refs.bib}
+\begin{document}
+\section{Citations}
+Parenthetical \parencite{doe}. Textual \textcite{doe}.
+Author \citeauthor{doe}, title \citetitle{doe}, year \citeyear{doe}.
+Ordinary\footnote{A note with \cite{roe}.} and explicit\footcite[12]{doe}.
+Automatic\autocite{roe}.
+\nocite{unused}
+\printbibliography[title={Sources}]
+\begin{refsection}
+Scoped \cite{roe}.
+\printbibliography[title={Section Sources}]
+\end{refsection}
+\end{document}

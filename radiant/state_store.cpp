@@ -9,11 +9,13 @@
 #include "../lib/escape.h"
 #include "../lib/str.h"
 #include "../lambda/input/css/dom_element.hpp"
+#include "../lambda/module/radiant/radiant_input_value.hpp"
 #include "../lambda/input/css/selector_matcher.hpp"
 #include "render.hpp"
 #include "../lambda/runtime/ast.hpp"
 #include "../lambda/runtime/transpiler.hpp"
 #include "../lambda/runtime/runtime-state.h"
+#include "../lambda/runtime/heap_api.h"
 #include "../lambda/lambda-data.hpp"
 #include "../lambda/io/mark_builder.hpp"
 // str.h included via view.hpp
@@ -82,6 +84,32 @@ static void state_store_destroy_model_edit_surface_bindings(DocState* state) {
     }
     state->editing.model_edit_surfaces = nullptr;
     state->editing.next_model_edit_surface_id = 0;
+}
+
+static void state_store_release_script_values(DocState* state, Context* owner) {
+    dom_edit_discard_retained_deltas(state);
+    state_store_destroy_model_edit_surface_bindings(state);
+    if (state->editing.dom_edit_session_rooted) {
+        heap_unregister_gc_root_for(owner, &state->editing.dom_edit_session_root);
+        state->editing.dom_edit_session_rooted = false;
+        state->editing.dom_edit_session_root = ItemNull.item;
+    }
+}
+
+void state_store_retire_runtime(DomDocument* document, EvalContext* owner) {
+    if (!document || !owner) return;
+    StateStore* store = document->state_store;
+    if (store && store->semantic_context && store->semantic_context != owner) return;
+    DocState* state = document->state;
+    if (state) {
+        state_store_release_script_values(state, (Context*)owner);
+        // model values/callbacks belong to the evaluator; native view state remains document-owned.
+        if (state->state_map) hashmap_clear(state->state_map, false);
+        state->template_state_map = nullptr;
+        state->render_map = nullptr;
+    }
+    // later native teardown must not rebind the context after its owner frees it (D5.3.3).
+    if (store) store->semantic_context = nullptr;
 }
 
 typedef struct DumpNodeState {
@@ -1237,6 +1265,7 @@ extern "C" void state_store_note_selection_mutation(DocState* state) {
     state->selection_origin = DOM_SELECTION_ORIGIN_API;
     state->selection_model_revision = 0;
     state->selection_layout_dirty = true;
+    layout_content_visibility_invalidate(state);
 }
 
 extern "C" void state_store_tag_selection_origin(DocState* state,
@@ -1839,14 +1868,7 @@ void DocState::destroy() {
     // The package can retain opaque generic DOM delta ids. Release their
     // document-owned snapshots before this state's DOM/storage dependencies
     // begin teardown (D5.3.3).
-    dom_edit_discard_retained_deltas(this);
-    state_store_destroy_model_edit_surface_bindings(this);
-
-    if (editing.dom_edit_session_rooted) {
-        heap_unregister_gc_root(&editing.dom_edit_session_root);
-        editing.dom_edit_session_rooted = false;
-        editing.dom_edit_session_root = ItemNull.item;
-    }
+    state_store_release_script_values(this, (Context*)context);
 
     // Detach template state map from global store before destroying
     if (template_state_map) {
@@ -4313,7 +4335,10 @@ void doc_state_sync_viewport_scroll(DocState* state, DomDocument* doc,
         doc->pending_viewport_scroll_x = scroll_x;
         doc->pending_viewport_scroll_y = scroll_y;
     }
-    if (changed) state->version++;
+    if (changed) {
+        state->version++;
+        layout_content_visibility_invalidate(state);
+    }
     state_assert_after_mutation(state, "doc_state_sync_viewport_scroll");
 }
 
@@ -4619,7 +4644,10 @@ void scroll_state_set_position_for_view(DocState* state, View* view, void* pane_
         state->is_dirty = true;
         state->needs_repaint = true;
         // sticky offsets depend on every scroller's position (CSS Position 3)
-        if (h_pos != old_x || v_pos != old_y) state->sticky_scroll_stale = true;
+        if (h_pos != old_x || v_pos != old_y) {
+            state->sticky_scroll_stale = true;
+            layout_content_visibility_invalidate(state);
+        }
         if (is_viewport) {
             state->scroll_x = h_pos;
             state->scroll_y = v_pos;
@@ -8141,6 +8169,7 @@ static void focus_set_internal(DocState* state, View* view, bool from_keyboard,
 
     if (old_focus != view) {
         focus_sync_text_control_state(state, view);
+        layout_content_visibility_invalidate(state);
     }
 
     state->needs_repaint = true;
@@ -8691,4 +8720,15 @@ void clipboard_copy_rich(const char* html, const char* plain_text) {
     }
     log_debug("clipboard_copy_rich: wrote html=%zu plain=%zu",
               html ? strlen(html) : 0, strlen(text));
+}
+
+static const char* form_direction_live_value(DomElement* element, void*) {
+    // text values stay StateStore-owned; recascade reads must not initialize another owner (D4.5.1v4).
+    DocState* state = element && element->doc ? (DocState*)element->doc->state : nullptr;
+    const char* value = form_control_get_value(state, static_cast<View*>(element), nullptr);
+    return value ? value : radiant_input_peek_live_value(element);
+}
+
+extern "C" int dom_css_element_directionality(void* element) {
+    return dom_element_directionality((DomElement*)element, form_direction_live_value);
 }

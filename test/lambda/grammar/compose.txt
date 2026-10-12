@@ -1,0 +1,41 @@
+<list
+  <item
+    "a">
+  ","
+  <item
+    "1">
+  ","
+  <item
+    "b">>
+<list
+  <item
+    "a">
+  ","
+  <item
+    <quoted
+      "<q>">>
+  ","
+  <item
+    "2">>
+<list
+  <item
+    "x">
+  ","
+  <item
+    "9">>
+<pair
+  "k="
+  <item
+    "3">>
+false
+true
+<list start: 0, end: 4,
+  <item start: 0, end: 1,
+    "a">
+  ","
+  <item start: 3, end: 4,
+    "1">>
+<list start: 2, end: 3,
+  <item start: 2, end: 3,
+    "a">>
+"7parse: the spans option is a bool"

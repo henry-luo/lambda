@@ -1,0 +1,38 @@
+<stmt name: <id
+    "x">,
+  'for'
+  'in'
+  <id
+    "xs">>
+[element, symbol, symbol, element]
+<id
+  "x">
+<stmt name: <id
+    "format">,
+  'for'
+  'in'
+  <id
+    "fork">>
+false
+<stmt
+  'let'
+  <id
+    "a">
+  "="
+  <id
+    "b">>
+"parse: grammar 'words': expected "go" at 1:1, found "gone""
+<pair
+  "goon">
+<list
+  <item
+    "a,">
+  <item
+    "b,">
+  "c">
+<list
+  <item
+    "a,">
+  "b">
+<pair data-value: "b",
+  "a=">

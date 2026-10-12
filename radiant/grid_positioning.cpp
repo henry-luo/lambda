@@ -20,7 +20,7 @@ static bool grid_item_inline_area_is_definite(const GridItemProp* grid_item,
     if (!grid_item || !grid_layout || !grid_layout->computed_columns) return false;
     int start = grid_item->computed_grid_column_start - 1;
     int end = grid_item->computed_grid_column_end - 1;
-    if (start < 0 || end <= start || end > (int)grid_layout->computed_columns->count) {
+    if (start < 0 || end <= start || end > (int)grid_layout->computed_columns->size()) {
         return false; // INT_CAST_OK: grid line indices are stored as int; track count is bounded.
     }
     for (int index = start; index < end; index++) {
@@ -54,16 +54,6 @@ static float grid_item_placed_axis_size(ViewBlock* item, float track_size,
 }
 
 template <typename Tracks>
-static float grid_track_total(const Tracks* tracks, int count, float gap) {
-    if (!tracks || count <= 0) return 0.0f;
-    float total = 0.0f;
-    for (int index = 0; index < count; index++) {
-        total += (*tracks)[index].base_size;
-    }
-    return total + (count > 1 ? (count - 1) * gap : 0.0f);
-}
-
-template <typename Tracks>
 static void grid_track_positions(const Tracks* tracks, int count, float gap,
                                  float offset, float distribution_spacing,
                                  bool add_distribution_spacing, float* positions,
@@ -75,7 +65,7 @@ static void grid_track_positions(const Tracks* tracks, int count, float gap,
         if (index >= count) continue;
         float track_size = (*tracks)[index].base_size;
         current += track_size;
-        if (index >= count - 1) continue;
+        if (!radiant::grid::grid_track_has_gutter_after(*tracks, index)) continue;
         current += gap;
         if (add_distribution_spacing) current += distribution_spacing;
     }
@@ -116,6 +106,7 @@ void position_grid_items(GridContainerLayout* grid_layout, ViewBlock* container,
     if (grid_layout->computed_row_count <= 0 || grid_layout->computed_column_count <= 0) {
         return;
     }
+    if (!grid_layout->computed_rows || !grid_layout->computed_columns) return;
 
 
     // Calculate track positions
@@ -124,10 +115,10 @@ void position_grid_items(GridContainerLayout* grid_layout, ViewBlock* container,
     float* column_positions = scope.array_zero<float>((size_t)grid_layout->computed_column_count + 1);
 
     // First, calculate the total grid content size (all tracks + gaps)
-    float total_row_size = grid_track_total(
-        grid_layout->computed_rows.get(), grid_layout->computed_row_count, grid_layout->row_gap);
-    float total_column_size = grid_track_total(
-        grid_layout->computed_columns.get(), grid_layout->computed_column_count,
+    float total_row_size = radiant::grid::spanned_tracks_size(
+        *grid_layout->computed_rows, 0, grid_layout->computed_row_count, grid_layout->row_gap);
+    float total_column_size = radiant::grid::spanned_tracks_size(
+        *grid_layout->computed_columns, 0, grid_layout->computed_column_count,
         grid_layout->column_gap);
 
 
@@ -135,12 +126,14 @@ void position_grid_items(GridContainerLayout* grid_layout, ViewBlock* container,
     float extra_column_space = grid_layout->content_width - total_column_size;
     GridContentDistribution justify_distribution = grid_content_distribution(
         grid_layout->justify_content, extra_column_space,
-        grid_layout->computed_column_count);
+        radiant::grid::grid_live_track_count(*grid_layout->computed_columns, 0,
+                                            grid_layout->computed_column_count));
 
     float extra_row_space = grid_layout->content_height - total_row_size;
     GridContentDistribution align_distribution = grid_content_distribution(
         grid_layout->align_content, extra_row_space,
-        grid_layout->computed_row_count);
+        radiant::grid::grid_live_track_count(*grid_layout->computed_rows, 0,
+                                            grid_layout->computed_row_count));
 
     grid_track_positions(
         grid_layout->computed_rows.get(), grid_layout->computed_row_count, grid_layout->row_gap,
@@ -175,24 +168,10 @@ void position_grid_items(GridContainerLayout* grid_layout, ViewBlock* container,
         float item_x = column_positions[col_start];
         float item_y = row_positions[row_start];
 
-        // Calculate track width by summing individual track sizes (not from positions, which include gaps)
-        float track_width = 0;
-        for (int c = col_start; c < col_end; c++) {
-            track_width += (*grid_layout->computed_columns)[c].base_size;
-            // Add gap for interior tracks (not the last one in the span)
-            if (c < col_end - 1) {
-                track_width += grid_layout->column_gap;
-            }
-        }
-
-        float track_height = 0;
-        for (int r = row_start; r < row_end; r++) {
-            track_height += (*grid_layout->computed_rows)[r].base_size;
-            // Add gap for interior tracks (not the last one in the span)
-            if (r < row_end - 1) {
-                track_height += grid_layout->row_gap;
-            }
-        }
+        float track_width = radiant::grid::spanned_tracks_size(
+            *grid_layout->computed_columns, col_start, col_end - col_start, grid_layout->column_gap);
+        float track_height = radiant::grid::spanned_tracks_size(
+            *grid_layout->computed_rows, row_start, row_end - row_start, grid_layout->row_gap);
 
         // a grid area's final size is the containing block for stretch min/max.
         // Resolving during intrinsic track sizing incorrectly turns the keyword into 0.
@@ -433,7 +412,9 @@ void align_grid_items(GridContainerLayout* grid_layout) {
             float row_offset = 0;
             for (int r = 0; r < row_count; r++) {
                 (*grid_layout->computed_rows)[r].offset = row_offset;
-                row_offset += (*grid_layout->computed_rows)[r].base_size + row_gap;
+                row_offset += (*grid_layout->computed_rows)[r].base_size;
+                if (radiant::grid::grid_track_has_gutter_after(*grid_layout->computed_rows, r))
+                    row_offset += row_gap;
             }
 
             // Re-position items based on new row offsets

@@ -1,0 +1,71 @@
+"/  =>  <XPath <Expr root: '/'>>
+/a/b  =>  <XPath <Expr op: '/', right: <Expr left: <Expr <AxisStep test: <NameTest "a">>>, op: '/', right: <Expr <AxisStep test: <NameTest "b">>>>>>
+//book[@year > 2000]/title  =>  <XPath <Expr op: '//', right: <Expr left: <Expr <AxisStep test: <NameTest "book">, <Predicate <Expr left: <Expr <AxisStep abbrev: '@', test: <NameTest "year">>>, op: '>', right: <Expr <IntegerLiteral "2000">>>>>>, op: '/', right: <Expr <AxisStep test: <NameTest "title">>>>>>
+a//b  =>  <XPath <Expr left: <Expr <AxisStep test: <NameTest "a">>>, op: '//', right: <Expr <AxisStep test: <NameTest "b">>>>>
+../x  =>  <XPath <Expr left: <Expr <AxisStep abbrev: '..'>>, op: '/', right: <Expr <AxisStep test: <NameTest "x">>>>>
+@id  =>  <XPath <Expr <AxisStep abbrev: '@', test: <NameTest "id">>>>
+child::a/descendant-or-self::node()  =>  <XPath <Expr left: <Expr <AxisStep axis: 'child', test: <NameTest "a">>>, op: '/', right: <Expr <AxisStep axis: 'descendant-or-self', test: <AnyKindTest>>>>>
+text()  =>  <XPath <Expr <AxisStep test: <TextTest>>>>
+*  =>  <XPath <Expr <AxisStep test: <NameTest "*">>>>
+a:*  =>  <XPath <Expr <AxisStep test: <NameTest "a:*">>>>
+*:b  =>  <XPath <Expr <AxisStep test: <NameTest "*:b">>>>
+ns:name  =>  <XPath <Expr <AxisStep test: <NameTest "ns:name">>>>
+Q{http://x}local  =>  <XPath <Expr <AxisStep test: <NameTest "Q{http://x}local">>>>
+$x  =>  <XPath <Expr <VarRef name: "x">>>
+$x[1]  =>  <XPath <Expr base: <Expr <VarRef name: "x">>, predicate: <Predicate <Expr <IntegerLiteral "1">>>>>
+count(//a)  =>  <XPath <Expr <FunctionCall name: "count", args: <ArgumentList <Expr op: '//', right: <Expr <AxisStep test: <NameTest "a">>>>>>>>
+fn:concat('a', "b")  =>  <XPath <Expr <FunctionCall name: "fn:concat", args: <ArgumentList <Expr <StringLiteral value: "a">> <Expr <StringLiteral value: "b">>>>>>
+f(?, 2)  =>  <XPath <Expr <FunctionCall name: "f", args: <ArgumentList <ArgumentPlaceholder> <Expr <IntegerLiteral "2">>>>>>
+f#2  =>  <XPath <Expr <NamedFunctionRef name: "f", arity: "2">>>
+1.5  =>  <XPath <Expr <DecimalLiteral "1.5">>>
+.5  =>  <XPath <Expr <DecimalLiteral ".5">>>
+1e3  =>  <XPath <Expr <DoubleLiteral "1e3">>>
+'it''s'  =>  <XPath <Expr <StringLiteral value: "it''s">>>
+"q""q"  =>  <XPath <Expr <StringLiteral value: "q\"\"q">>>
+1 to 5  =>  <XPath <Expr left: <Expr <IntegerLiteral "1">>, op: 'to', right: <Expr <IntegerLiteral "5">>>>
+a = b  =>  <XPath <Expr left: <Expr <AxisStep test: <NameTest "a">>>, op: '=', right: <Expr <AxisStep test: <NameTest "b">>>>>
+a eq b  =>  <XPath <Expr left: <Expr <AxisStep test: <NameTest "a">>>, op: 'eq', right: <Expr <AxisStep test: <NameTest "b">>>>>
+a is b  =>  <XPath <Expr left: <Expr <AxisStep test: <NameTest "a">>>, op: 'is', right: <Expr <AxisStep test: <NameTest "b">>>>>
+a << b  =>  <XPath <Expr left: <Expr <AxisStep test: <NameTest "a">>>, op: '<<', right: <Expr <AxisStep test: <NameTest "b">>>>>
+1 < 2 and 2 < 3  =>  <XPath <Expr left: <Expr left: <Expr <IntegerLiteral "1">>, op: '<', right: <Expr <IntegerLiteral "2">>>, op: 'and', right: <Expr left: <Expr <IntegerLiteral "2">>, op: '<', right: <Expr <IntegerLiteral "3">>>>>
+a or b and c  =>  <XPath <Expr left: <Expr <AxisStep test: <NameTest "a">>>, op: 'or', right: <Expr left: <Expr <AxisStep test: <NameTest "b">>>, op: 'and', right: <Expr <AxisStep test: <NameTest "c">>>>>>
+-1 * 2  =>  <XPath <Expr left: <Expr op: '-', operand: <Expr <IntegerLiteral "1">>>, op: '*', right: <Expr <IntegerLiteral "2">>>>
+- - a  =>  <XPath <Expr op: '-', operand: <Expr op: '-', operand: <Expr <AxisStep test: <NameTest "a">>>>>>
+a || b || c  =>  <XPath <Expr left: <Expr left: <Expr <AxisStep test: <NameTest "a">>>, op: '||', right: <Expr <AxisStep test: <NameTest "b">>>>, op: '||', right: <Expr <AxisStep test: <NameTest "c">>>>>
+a | b intersect c  =>  <XPath <Expr left: <Expr <AxisStep test: <NameTest "a">>>, op: '|', right: <Expr left: <Expr <AxisStep test: <NameTest "b">>>, op: 'intersect', right: <Expr <AxisStep test: <NameTest "c">>>>>>
+a ! b ! c  =>  <XPath <Expr left: <Expr left: <Expr <AxisStep test: <NameTest "a">>>, op: '!', right: <Expr <AxisStep test: <NameTest "b">>>>, op: '!', right: <Expr <AxisStep test: <NameTest "c">>>>>
+x instance of xs:integer+  =>  <XPath <Expr left: <Expr <AxisStep test: <NameTest "x">>>, op: 'instance', type: <SequenceType item: <AtomicOrUnionType name: "xs:integer">, occurrence: '+'>>>
+x treat as item()*  =>  <XPath <Expr left: <Expr <AxisStep test: <NameTest "x">>>, op: 'treat', type: <SequenceType item: <ItemTest>, occurrence: '*'>>>
+x cast as xs:string?  =>  <XPath <Expr left: <Expr <AxisStep test: <NameTest "x">>>, op: 'cast', type: <SingleType name: "xs:string", optional: '?'>>>
+x castable as xs:int  =>  <XPath <Expr left: <Expr <AxisStep test: <NameTest "x">>>, op: 'castable', type: <SingleType name: "xs:int">>>
+$s => upper-case() => string-length()  =>  <XPath <Expr left: <Expr left: <Expr <VarRef name: "s">>, op: '=>', function: "upper-case", args: <ArgumentList>>, op: '=>', function: "string-length", args: <ArgumentList>>>
+for $i in 1 to 3, $j in 4 return $i * $j  =>  <XPath <Expr <ForExpr return: <Expr left: <Expr <VarRef name: "i">>, op: '*', right: <Expr <VarRef name: "j">>>, <Binding var: "i", in: <Expr left: <Expr <IntegerLiteral "1">>, op: 'to', right: <Expr <IntegerLiteral "3">>>> <Binding var: "j", in: <Expr <IntegerLiteral "4">>>>>>
+let $x := 1 return $x + 1  =>  <XPath <Expr <LetExpr return: <Expr left: <Expr <VarRef name: "x">>, op: '+', right: <Expr <IntegerLiteral "1">>>, <LetBinding var: "x", value: <Expr <IntegerLiteral "1">>>>>>
+some $x in (1, 2) satisfies $x > 1  =>  <XPath <Expr <QuantifiedExpr quantifier: 'some', satisfies: <Expr left: <Expr <VarRef name: "x">>, op: '>', right: <Expr <IntegerLiteral "1">>>, <Binding var: "x", in: <Expr <ParenthesizedExpr <Expr <IntegerLiteral "1">> <Expr <IntegerLiteral "2">>>>>>>>
+if (a) then b else c  =>  <XPath <Expr <IfExpr condition: <Expr <AxisStep test: <NameTest "a">>>, then: <Expr <AxisStep test: <NameTest "b">>>, else: <Expr <AxisStep test: <NameTest "c">>>>>>
+function($a as xs:int) as xs:int { $a + 1 }  =>  <XPath <Expr <InlineFunctionExpr return: <SequenceType item: <AtomicOrUnionType name: "xs:int">>, body: <EnclosedExpr <Expr left: <Expr <VarRef name: "a">>, op: '+', right: <Expr <IntegerLiteral "1">>>>, <Param name: "a", type: <SequenceType item: <AtomicOrUnionType name: "xs:int">>>>>>
+map { 'a': 1, 'b': 2 }  =>  <XPath <Expr <MapConstructor <MapConstructorEntry key: <Expr <StringLiteral value: "a">>, value: <Expr <IntegerLiteral "1">>> <MapConstructorEntry key: <Expr <StringLiteral value: "b">>, value: <Expr <IntegerLiteral "2">>>>>>
+[1, 2, 3]  =>  <XPath <Expr <SquareArrayConstructor <Expr <IntegerLiteral "1">> <Expr <IntegerLiteral "2">> <Expr <IntegerLiteral "3">>>>>
+array { 1, 2 }  =>  <XPath <Expr <CurlyArrayConstructor <EnclosedExpr <Expr <IntegerLiteral "1">> <Expr <IntegerLiteral "2">>>>>>
+$m?key  =>  <XPath <Expr base: <Expr <VarRef name: "m">>, lookup: <Lookup key: "key">>>
+$a?1  =>  <XPath <Expr base: <Expr <VarRef name: "a">>, lookup: <Lookup key: <IntegerLiteral "1">>>>
+$a?*  =>  <XPath <Expr base: <Expr <VarRef name: "a">>, lookup: <Lookup key: '*'>>>
+?name  =>  <XPath <Expr <UnaryLookup key: "name">>>
+(1, 2, 3)  =>  <XPath <Expr <ParenthesizedExpr <Expr <IntegerLiteral "1">> <Expr <IntegerLiteral "2">> <Expr <IntegerLiteral "3">>>>>
+()  =>  <XPath <Expr <ParenthesizedExpr>>>
+.  =>  <XPath <Expr <ContextItemExpr>>>
+div div div  =>  <XPath <Expr left: <Expr <AxisStep test: <NameTest "div">>>, op: 'div', right: <Expr <AxisStep test: <NameTest "div">>>>>
+a (: comment :) + b  =>  <XPath <Expr left: <Expr <AxisStep test: <NameTest "a">>>, op: '+', right: <Expr <AxisStep test: <NameTest "b">>>>>
+element(foo)  =>  <XPath <Expr <AxisStep test: <ElementTest name: "foo">>>>
+attribute(*, xs:string)  =>  <XPath <Expr <AxisStep test: <AttributeTest name: '*', type: "xs:string">>>>
+document-node(element(x))  =>  <XPath <Expr <AxisStep test: <DocumentTest <ElementTest name: "x">>>>>
+processing-instruction(pi)  =>  <XPath <Expr <AxisStep test: <PITest name: "pi">>>>
+1 < 2 < 3  =>  parse: grammar 'xpath': expected '||', 'to', additive, '*', multiplicative, 'union', '|', intersect_except, 'instance', 'treat', 'castable', 'cast', '=>', '!', slash, "[", "(", "?", 'or', 'and', "," or end of input at 1:7, found "<"
+1 to 2 to 3  =>  parse: grammar 'xpath': expected additive, '*', multiplicative, 'union', '|', intersect_except, 'instance', 'treat', 'castable', 'cast', '=>', '!', slash, "[", "(", "?", 'or', 'and', value_comp, 'is', general_comp, '||', "," or end of input at 1:8, found "to"
+a b  =>  parse: grammar 'xpath': expected "(", "#", "[", 'or', 'and', value_comp, 'is', general_comp, '||', 'to', additive, '*', multiplicative, 'union', '|', intersect_except, 'instance', 'treat', 'castable', 'cast', '=>', '!', slash, "?", "," or end of input at 1:3, found "b"
+for $x in 1  =>  parse: grammar 'xpath': expected 'or', 'and', value_comp, 'is', general_comp, '||', 'to', additive, '*', multiplicative, 'union', '|', intersect_except, 'instance', 'treat', 'castable', 'cast', '=>', '!', slash, "[", "(", "?", "," or 'return' at 1:12, found end of input
+f(  =>  parse: grammar 'xpath': expected "?", additive, slash, 'for', 'let', quantifier, 'if', double, decimal, integer, "\"", "'", "$", "(", ".", eqname, 'function', 'map', "[", 'array', reverse_axis, '..', forward_axis, '@', 'document-node', 'element', 'attribute', 'schema-element', 'schema-attribute', 'processing-instruction', 'comment' or 'text' at 1:3, found end of input
+$  =>  parse: grammar 'xpath': expected eqname at 1:2, found end of input
+"
+[true, false]
+"<XPath start: 0, end: 6, <Expr left: <Expr start: 0, end: 2, <VarRef name: "x", start: 0, end: 2>>, op: '+', right: <Expr start: 5, end: 6, <IntegerLiteral start: 5, end: 6, "1">>, start: 0, end: 6>>"

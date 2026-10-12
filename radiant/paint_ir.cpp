@@ -327,7 +327,7 @@ static bool paint_ir_validate_effect_group(const PaintEffectGroup* group) {
 static bool paint_ir_validate_glyph_run(const PaintGlyphRun* run) {
     if (!run || !isfinite(run->x) || !isfinite(run->baseline_y) || !isfinite(run->font_size)) return false;
     if (run->glyph_ids || run->xs || run->ys || run->count) {
-        if (!run->font || !run->glyph_ids || !run->xs || !run->ys || run->count <= 0) return false;
+        if (!paint_glyph_run_font(run) || !run->glyph_ids || !run->xs || !run->ys || run->count <= 0) return false;
         for (int i = 0; i < run->count; i++)
             if (!isfinite(run->xs.get()[i]) || !isfinite(run->ys.get()[i])) return false;
         return true;
@@ -1073,6 +1073,12 @@ void paint_glyph_run(PaintList* pl, const PaintGlyphRun* glyph_run) {
     PaintCmd* cmd = paint_alloc_cmd(pl, PAINT_GLYPH_RUN);
     if (!cmd) return;
     cmd->glyph_run = *glyph_run;
+    if (const FontBox* font = paint_glyph_run_font(glyph_run)) {
+        // deferred lowering follows the recorded selection after the walker restores its context (D4.5.1v4).
+        cmd->glyph_run.captured_font = *font;
+        cmd->glyph_run.has_captured_font = true;
+        cmd->glyph_run.font = nullptr;
+    }
 }
 
 void paint_begin_semantic_group(PaintList* pl, const RenderSemanticGroup* group) {
@@ -1136,10 +1142,14 @@ static void paint_ir_lower_raster_effect_begin(const PaintEffectGroup* group,
                         group->backdrop_filter,
                         paint_optional_clip(group->has_clip, &clip));
     }
+    if (group->isolation && !group->blend_mode && group->opacity >= 0.9995f && !group->backdrop && !group->mask.gradient) {
+        // a pure isolated group also clears the parent backdrop before its children paint.
+        dl_save_backdrop(dl, x0, y0, w, h);
+    }
     if (group->blend_mode) {
         dl_save_backdrop(dl, x0, y0, w, h);
     }
-    if (group->opacity < 0.9995f) {
+    if (group->opacity < 0.9995f || group->mask.gradient) {
         dl_save_backdrop(dl, x0, y0, w, h);
     }
     if (group->backdrop) {
@@ -1167,13 +1177,17 @@ static void paint_ir_lower_raster_effect_finish(const PaintEffectGroup* group,
         return;
     }
     if (group->backdrop) {
-        dl_composite_opacity(dl, x0, y0, w, h, 1.0f, false);
+        // vector replay stores premultiplied foreground pixels in its isolated region.
+        dl_composite_opacity(dl, x0, y0, w, h, 1.0f, true);
     }
-    if (group->opacity < 0.9995f) {
-        dl_composite_opacity(dl, x0, y0, w, h, group->opacity, false);
+    if (group->opacity < 0.9995f || group->mask.gradient) {
+        dl_composite_opacity(dl, x0, y0, w, h, group->opacity, true, group->mask.gradient ? &group->mask : nullptr);
     }
     if (group->blend_mode) {
         dl_apply_blend_mode(dl, x0, y0, w, h, group->blend_mode);
+    }
+    if (group->isolation && !group->blend_mode && group->opacity >= 0.9995f && !group->backdrop && !group->mask.gradient) {
+        dl_composite_opacity(dl, x0, y0, w, h, 1.0f, true);
     }
 }
 
@@ -1225,6 +1239,12 @@ static void paint_raster_transform_command(PaintCmd* cmd, const RdtMatrix* trans
     case PAINT_BEGIN_EFFECT_GROUP:
         cmd->effect_group.bounds = paint_raster_transform_bounds(cmd->effect_group.bounds, transform);
         paint_raster_concat_transform(&cmd->effect_group, transform);
+        if (cmd->effect_group.mask.gradient) {
+            RdtMatrix inverse;
+            cmd->effect_group.mask.invertible = cmd->effect_group.mask.invertible && rdt_matrix_inverse(transform, &inverse);
+            if (cmd->effect_group.mask.invertible)
+                cmd->effect_group.mask.inverse = rdt_matrix_multiply(&cmd->effect_group.mask.inverse, &inverse);
+        }
         break;
     case PAINT_SVG_SUBSCENE:
         cmd->svg_subscene.transform = rdt_matrix_multiply(transform, &cmd->svg_subscene.transform);
@@ -1238,6 +1258,15 @@ static void paint_raster_transform_command(PaintCmd* cmd, const RdtMatrix* trans
 
 static void paint_raster_lower_rect(DisplayList* dl, float x, float y, float w, float h,
         float rx, float ry, Color color, const RdtMatrix* transform, bool rounded) {
+    if (rdt_matrix_is_scale_translation(transform)) {
+        float left, top, right, bottom;
+        if (rdt_matrix_project_rect_bounds(transform, x, y, x + w, y + h, &left, &top, &right, &bottom)) {
+            // density/translation preserve rectangle geometry and its exact byte-alpha compositor.
+            x = left; y = top; w = right - left; h = bottom - top;
+            rx *= fabsf(transform->e11); ry *= fabsf(transform->e22);
+            transform = nullptr;
+        }
+    }
     if (!transform) {
         if (rounded) dl_fill_rounded_rect(dl, x, y, w, h, rx, ry, color);
         else dl_fill_rect(dl, x, y, w, h, color);
@@ -1250,7 +1279,8 @@ static void paint_raster_lower_rect(DisplayList* dl, float x, float y, float w, 
     rdt_path_free(path);
 }
 
-static void paint_ir_lower_raster_internal(const PaintList* pl, DisplayList* dl) {
+static void paint_ir_lower_raster_internal(const PaintList* pl, DisplayList* dl,
+        const RdtMatrix* root_transform = nullptr) {
     if (!pl || !dl) return;
 
     PaintIrRasterEffectFrame effect_stack[PAINT_IR_RASTER_EFFECT_STACK_MAX];
@@ -1273,7 +1303,12 @@ static void paint_ir_lower_raster_internal(const PaintList* pl, DisplayList* dl)
         if (paint_op_has_flags(cmd->op, PAINT_OP_FLAG_RASTER_NOOP)) {
             continue;
         }
-        const RdtMatrix* transform = transforms.empty() ? nullptr : &transforms.back();
+        RdtMatrix combined = {};
+        const RdtMatrix* transform = transforms.empty() ? root_transform : &transforms.back();
+        if (root_transform && !transforms.empty()) {
+            combined = rdt_matrix_multiply(root_transform, transform);
+            transform = &combined;
+        }
         PaintCmd adjusted = {};
         if (transform) {
             // transform a borrowed copy so later PDF/SVG lowering sees the original source command.
@@ -1490,13 +1525,19 @@ static void paint_ir_lower_raster_internal(const PaintList* pl, DisplayList* dl)
 }
 
 void paint_ir_lower_raster(const PaintList* pl, DisplayList* dl) {
-    if (!pl || !dl) return;
-    if (!paint_ir_validate_or_log(pl, "paint_ir_lower_raster")) return;
-    paint_ir_lower_raster_internal(pl, dl);
+    paint_ir_lower_raster_transformed(pl, dl, nullptr);
 }
 
-void paint_ir_lower_raster_fragment(const PaintList* pl, DisplayList* dl) {
-    paint_ir_lower_raster_internal(pl, dl);
+void paint_ir_lower_raster_transformed(const PaintList* pl, DisplayList* dl,
+        const RdtMatrix* root_transform) {
+    if (!pl || !dl) return;
+    if (!paint_ir_validate_or_log(pl, "paint_ir_lower_raster")) return;
+    paint_ir_lower_raster_internal(pl, dl, root_transform);
+}
+
+void paint_ir_lower_raster_fragment(const PaintList* pl, DisplayList* dl,
+        const RdtMatrix* root_transform) {
+    paint_ir_lower_raster_internal(pl, dl, root_transform);
 }
 
 // ---------------------------------------------------------------------------
@@ -1746,7 +1787,7 @@ static bool paint_svg_caps_allow_opacity_group(const RenderExportTargetCaps* cap
            !group->backdrop &&
            group->backdrop_filter == nullptr &&
            !group->shadow &&
-           !group->isolation;
+           !group->isolation && !group->mask.gradient;
 }
 
 static void paint_svg_append_gradient_stops(StrBuf* out,
@@ -2067,8 +2108,16 @@ static void paint_ir_lower_svg_unchecked(const PaintList* pl, StrBuf* out,
             const char* href = (image && image->url && image->url->href)
                 ? image->url->href->chars
                 : nullptr;
-            // native producers can retain decoded images without a source URL.
-            StrBuf* uri = !href && image && image->pixels ? render_encode_surface_data_uri(image) : nullptr;
+            const uint32_t* pixels = nullptr;
+            int width = 0, height = 0, stride = 0;
+            StrBuf* uri = nullptr;
+            if (image && image->format != IMAGE_FORMAT_SVG &&
+                render_image_resource_pixels(image, p->dst_w, p->dst_h, &pixels, &width, &height, &stride)) {
+                // embed admitted decoded pixels so relocating an SVG never depends on its source file.
+                ImageSurface view = *image;
+                view.width = width; view.height = height; view.pitch = stride * 4;
+                uri = render_encode_surface_data_uri(&view);
+            }
             if (uri) href = uri->str;
             if (!href) {
                 note_unsupported(cmd->op);
@@ -2189,8 +2238,14 @@ static void paint_ir_lower_svg_unchecked(const PaintList* pl, StrBuf* out,
             if (p->italic) {
                 strbuf_append_str(out, " font-style=\"italic\"");
             }
-            if (p->word_spacing > 0.01f) {
-                strbuf_append_format(out, " word-spacing=\"%.2f\"", p->word_spacing);
+            const FontBox* font = paint_glyph_run_font(p);
+            const FontProp* style = font ? font->style.get() : nullptr;
+            float word_spacing = (style ? style->word_spacing : 0.0f) + p->word_spacing;
+            if (fabsf(word_spacing) > 0.01f) {
+                strbuf_append_format(out, " word-spacing=\"%.2f\"", word_spacing);
+            }
+            if (style && fabsf(style->letter_spacing) > 0.01f) {
+                strbuf_append_format(out, " letter-spacing=\"%.2f\"", style->letter_spacing);
             }
             paint_svg_append_cjk_dx(out, p->text, p->text_len,
                                     p->cjk_spacing);

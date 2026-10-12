@@ -690,6 +690,28 @@ TEST(TypesetTest, StyleCounterScopesKeepReadsAndIsolateNestedMutations) {
     counter_context_destroy(counters); mem_arena_destroy(arena);
 }
 
+TEST(TypesetTest, SiblingResetsExportNewNamesAndKeepAncestorInstances) {
+    Arena* arena = mem_arena_create(nullptr, MEM_ROLE_LAYOUT, "test.counter.sibling");
+    ASSERT_NE(arena, nullptr);
+    CounterContext* counters = counter_context_create(arena); ASSERT_NE(counters, nullptr);
+    counter_reset(counters, "C 7");
+    ASSERT_TRUE(counter_push_scope(counters));
+    counter_reset(counters, "C 0 New 5");
+    counter_increment(counters, "C");
+    EXPECT_EQ(counter_get_value(counters, "C"), 1);
+    counter_pop_scope_propagate(counters, true);
+    EXPECT_EQ(counter_get_value(counters, "C"), 7);
+    EXPECT_EQ(counter_get_value(counters, "New"), 5);
+    ASSERT_TRUE(counter_push_scope(counters));
+    counter_increment(counters, "C");
+    counter_reset(counters, "New 10");
+    EXPECT_EQ(counter_get_value(counters, "C"), 8);
+    counter_pop_scope_propagate(counters, true);
+    EXPECT_EQ(counter_get_value(counters, "C"), 8);
+    EXPECT_EQ(counter_get_value(counters, "New"), 10);
+    counter_context_destroy(counters); mem_arena_destroy(arena);
+}
+
 TEST(TypesetTest, CounterMeasurementCheckpointsRestoreValuesResetsAndUnfinishedFrames) {
     Arena* arena = mem_arena_create(nullptr, MEM_ROLE_LAYOUT, "test.counter.checkpoint"); ASSERT_NE(arena, nullptr);
     CounterContext* counters = counter_context_create(arena); ASSERT_NE(counters, nullptr);
@@ -973,6 +995,14 @@ protected:
         doc.stylesheet_count = doc.stylesheet_capacity = 1;
     }
 
+    void resolve_style(DomElement* element, LayoutContext* context) {
+        context->doc = lam::up(&doc);
+        context->pool = lam::up(doc.view_tree->prop_pool.get());
+        context->selected_view_tree = lam::up(doc.view_tree.get());
+        context->view = lam::up((View*)element); context->elmt = lam::up(element);
+        resolve_css_styles(element, context);
+    }
+
     void pages(ViewTree* tree, size_t count, ViewPageSide first = VIEW_PAGE_RIGHT) {
         for (size_t i = 0; i < count; i++) {
             ViewPageSide side = i % 2 ? (first == VIEW_PAGE_RIGHT ? VIEW_PAGE_LEFT : VIEW_PAGE_RIGHT) : first;
@@ -1205,6 +1235,682 @@ TEST_F(SecondaryViewTest, ResponsiveCandidatesNormalizeSizesAndRecoverInvalidDes
         lam::Temp<char> selected(layout_resolve_replaced_image_source(img, engine, &density));
         ASSERT_NE(selected.get(), nullptr); EXPECT_STREQ(selected.get(), row.url); EXPECT_FLOAT_EQ(density, row.density);
     }
+}
+
+TEST_F(SecondaryViewTest, CssImageSetsSelectDensityAfterTypeFilteringAndPreserveSourceOrder) {
+    const struct Case { const char* value; float scale; const char* url; float density; } cases[] = {
+        {"image-set(url(one.png) 1x,url(two.png) 2x)", 1, "one.png", 1},
+        {"image-set(url(one.png) 1x,url(two.png) 2x)", 1.5f, "two.png", 2},
+        {"image-set(url(one.png) 1x,url(two.png) 2x)", 3, "two.png", 2},
+        {"image-set(url(two.png) 2x,url(one.png) 1x)", 1, "one.png", 1},
+        {"image-set(url(two.png) 2x,url(one.png) 1x)", 2, "two.png", 2},
+        {"image-set('one.png', 'two.png' 2x)", 1, "one.png", 1},
+        {"image-set('one.png', 'two.png' 2x)", 2, "two.png", 2},
+        {"image-set(url(bad.png) 1x type('image/unsupported'),url(one.png) 1x type('image/png'))", 1, "one.png", 1},
+        {"image-set(url(first.png) 2x,url(duplicate.png) 2x)", 2, "first.png", 2},
+        {"image-set(url(one.png) 96dpi,url(two.png) 192dpi)", 2, "two.png", 2},
+        {"image-set(url(one.png) 37.79527559055118dpcm,url(two.png) 2dppx)", 1, "one.png", 1},
+        {"image-set(url(two.png) calc(1x + 96dpi))", 2, "two.png", 2},
+        {"image-set(url(one.png) type('IMAGE/PNG') 1x)", 1, "one.png", 1},
+        {"image-set(url(zero.png) 0x,url(two.png) 2x)", 1, "two.png", 2},
+        {"-webkit-image-set(url(one.png) 1x,url(two.png) 2x)", 2, "two.png", 2}
+    };
+    for (const Case& row : cases) {
+        SCOPED_TRACE(row.value);
+        StrBuf* text = strbuf_new(); ASSERT_NE(text, nullptr);
+        strbuf_append_str(text, "background-image:"); strbuf_append_str(text, row.value);
+        CssDeclaration* declaration = css_parse_declaration_text(text->str, text->length, doc.document_pool);
+        strbuf_free(text); ASSERT_NE(declaration, nullptr); ASSERT_NE(declaration->value, nullptr);
+        CssImageChoice choice = {};
+        ASSERT_TRUE(layout_select_css_image(declaration->value, row.scale, &choice));
+        EXPECT_STREQ(choice.url, row.url); EXPECT_FLOAT_EQ(choice.resolution, row.density);
+        PoolStats warm = {}; pool_get_detailed_stats(doc.document_pool, &warm);
+        for (size_t index = 0; index < 256; index++) {
+            ASSERT_TRUE(layout_select_css_image(declaration->value, row.scale, &choice));
+            EXPECT_STREQ(choice.url, row.url);
+        }
+        PoolStats repeated = {}; pool_get_detailed_stats(doc.document_pool, &repeated);
+        EXPECT_EQ(warm.live_bytes, repeated.live_bytes);
+    }
+    ViewTree* dense = secondary(); ASSERT_NE(dense, nullptr);
+    dense->model->environment.device_scale = 2.0f;
+    UiContext ui = {}; ui.device_scale = 1.0f;
+    LayoutContext context = {}; context.doc = lam::up(&doc); context.ui_context = lam::up(&ui);
+    context.selected_view_tree = lam::up(dense);
+    EXPECT_FLOAT_EQ(layout_image_device_scale(&context), 2);
+    context.selected_view_tree = nullptr;
+    EXPECT_FLOAT_EQ(layout_image_device_scale(&context), 1);
+}
+
+TEST_F(SecondaryViewTest, CssImageSetInvalidDescriptorsRejectBeforeCascade) {
+    const char* invalid[] = {
+        "image-set()", "image-set(url(one.png) -1x)", "image-set(url(one.png) 1px)",
+        "image-set(url(one.png) 1x 2x)", "image-set(url(one.png) type('image/png') type('image/png'))",
+        "image-set(url(one.png) type(image/png))", "image-set(2x)",
+        "image-set(image-set(url(one.png) 1x) 2x)",
+        "image-set(linear-gradient(image-set(url(one.png)),red) 1x)",
+        "image-set(url(one.png) calc(3 * 4))", "image-set(url(one.png) calc(2x - 1))"
+    };
+    for (const char* value : invalid) {
+        SCOPED_TRACE(value);
+        StrBuf* text = strbuf_new(); ASSERT_NE(text, nullptr);
+        strbuf_append_str(text, "background-image:"); strbuf_append_str(text, value);
+        EXPECT_EQ(css_parse_declaration_text(text->str, text->length, doc.document_pool), nullptr);
+        strbuf_free(text);
+    }
+    CssDeclaration* unsupported = css_parse_declaration_text(
+        "background-image:image-set(url(one.png) type('image/unsupported'))",
+        strlen("background-image:image-set(url(one.png) type('image/unsupported'))"), doc.document_pool);
+    ASSERT_NE(unsupported, nullptr);
+    CssImageChoice choice = {};
+    EXPECT_FALSE(layout_select_css_image(unsupported->value, 1, &choice));
+    EXPECT_EQ(choice.image, nullptr); EXPECT_EQ(choice.url, nullptr);
+}
+
+TEST_F(SecondaryViewTest, CssImageSetReplacementDoesNotRetireAnInheritedGradientOwner) {
+    DomElement* parent = block(nullptr); ASSERT_NE(parent, nullptr);
+    DomElement* child = block(nullptr, nullptr, "div", parent); ASSERT_NE(child, nullptr);
+    LayoutContext context = {}; context.doc = lam::up(&doc);
+    context.pool = lam::up(doc.view_tree->prop_pool.get());
+    context.selected_view_tree = lam::up(doc.view_tree.get());
+    auto apply = [&](DomElement* element, const char* text) {
+        CssDeclaration* declaration = css_parse_declaration_text(text, strlen(text), doc.document_pool);
+        EXPECT_NE(declaration, nullptr);
+        if (!declaration) return;
+        context.view = lam::up((View*)element); context.elmt = lam::up(element);
+        resolve_css_property(declaration->property_code, declaration, &context);
+    };
+    auto independent = [](const auto* source, const auto* inherited) {
+        ASSERT_NE(source, nullptr); ASSERT_NE(inherited, nullptr);
+        EXPECT_NE(source, inherited); EXPECT_NE(source->stops.get(), inherited->stops.get());
+        EXPECT_EQ(source->stop_count, inherited->stop_count);
+        EXPECT_EQ(source->stops[0].color.c, inherited->stops[0].color.c);
+    };
+    const char* backgrounds[] = {
+        "background:linear-gradient(red,blue)", "background:radial-gradient(red,blue)",
+        "background:conic-gradient(red,blue)",
+        "background:linear-gradient(red,blue),radial-gradient(blue,red),white"
+    };
+    for (const char* background : backgrounds) {
+        SCOPED_TRACE(background); apply(parent, background); apply(child, "background:inherit");
+        ASSERT_NE(parent->boundary(), nullptr); ASSERT_NE(child->boundary(), nullptr);
+        BackgroundProp* original = parent->boundary()->background;
+        BackgroundProp* inherited = child->boundary()->background;
+        ASSERT_NE(original, nullptr); ASSERT_NE(inherited, nullptr);
+        if (original->linear_gradient) independent(original->linear_gradient.get(), inherited->linear_gradient.get());
+        if (original->radial_gradient) independent(original->radial_gradient.get(), inherited->radial_gradient.get());
+        if (original->conic_gradient) independent(original->conic_gradient.get(), inherited->conic_gradient.get());
+        ASSERT_EQ(original->layer_count, inherited->layer_count);
+        if (strstr(background, "),")) ASSERT_EQ(original->layer_count, 3);
+        for (int index = 0; index < original->layer_count; index++) {
+            const BackgroundLayer& source = original->layers[index];
+            const BackgroundLayer& copy = inherited->layers[index];
+            EXPECT_EQ(source.gradient_type, copy.gradient_type);
+            if (source.linear_gradient) independent(source.linear_gradient.get(), copy.linear_gradient.get());
+            if (source.radial_gradient) independent(source.radial_gradient.get(), copy.radial_gradient.get());
+            if (source.conic_gradient) independent(source.conic_gradient.get(), copy.conic_gradient.get());
+        }
+        // the child's retained stops remain readable after the originating payload retires.
+        apply(parent, "background-image:none");
+        if (inherited->linear_gradient) EXPECT_GT(inherited->linear_gradient->stop_count, 0);
+        if (inherited->radial_gradient) EXPECT_GT(inherited->radial_gradient->stop_count, 0);
+        if (inherited->conic_gradient) EXPECT_GT(inherited->conic_gradient->stop_count, 0);
+        for (int index = 0; index < inherited->layer_count; index++) {
+            const BackgroundLayer& layer = inherited->layers[index];
+            if (layer.linear_gradient) EXPECT_EQ(layer.linear_gradient->stops[0].color.r, 255);
+            if (layer.radial_gradient) EXPECT_EQ(layer.radial_gradient->stops[0].color.b, 255);
+        }
+        apply(child, "background-image:image-set(url(one.png) 1x,url(two.png) 2x)");
+        EXPECT_EQ(inherited->gradient_type, GRADIENT_NONE);
+        EXPECT_EQ(inherited->linear_gradient, nullptr); EXPECT_EQ(inherited->radial_gradient, nullptr);
+        EXPECT_EQ(inherited->conic_gradient, nullptr); EXPECT_EQ(inherited->layer_count, 0);
+        apply(child, "background-image:none");
+    }
+    apply(parent, "background:linear-gradient(red,blue)");
+    apply(child, "background-color:green");
+    apply(child, "background-image:inherit");
+    BackgroundProp* inherited = child->boundary()->background;
+    EXPECT_EQ(inherited->color.g, 128); EXPECT_EQ(inherited->color.r, 0);
+    independent(parent->boundary()->background->linear_gradient.get(), inherited->linear_gradient.get());
+    apply(child, "background-image:none");
+    // preparse declarations so repeated payload replacement alone is measured.
+    CssDeclaration* inherit = css_parse_declaration_text("background-image:inherit", 24, doc.document_pool);
+    CssDeclaration* clear = css_parse_declaration_text("background-image:none", 21, doc.document_pool);
+    ASSERT_NE(inherit, nullptr); ASSERT_NE(clear, nullptr);
+    PoolStats warm = {}; pool_get_detailed_stats(doc.view_tree->prop_pool, &warm);
+    for (size_t index = 0; index < 256; index++) {
+        resolve_css_property(CSS_PROPERTY_BACKGROUND_IMAGE, inherit, &context);
+        resolve_css_property(CSS_PROPERTY_BACKGROUND_IMAGE, clear, &context);
+    }
+    PoolStats repeated = {}; pool_get_detailed_stats(doc.view_tree->prop_pool, &repeated);
+    EXPECT_EQ(warm.live_bytes, repeated.live_bytes);
+}
+
+TEST_F(SecondaryViewTest, BackgroundComponentInheritancePreservesAuthoredPeriodsAndSurplusValues) {
+    UiContext ui = {};
+    LayoutContext context = {}; context.doc = lam::up(&doc); context.ui_context = lam::up(&ui);
+    context.pool = lam::up(doc.view_tree->prop_pool.get());
+    context.selected_view_tree = lam::up(doc.view_tree.get());
+    const char* parent_images[] = {"none", "none,none,none"};
+    for (const char* images : parent_images) {
+        SCOPED_TRACE(images);
+        char style[512];
+        snprintf(style, sizeof(style), "background-image:%s;background-size:11px 7px,23px 17px;"
+            "background-position:3px 5px,13px 19px;background-repeat:no-repeat,repeat-x", images);
+        DomElement* parent = block(nullptr, style); ASSERT_NE(parent, nullptr);
+        DomElement* child = block(nullptr, "background-image:linear-gradient(red,blue),none,radial-gradient(blue,red),none;"
+            "background-size:inherit;background-position:inherit;background-repeat:inherit", "div", parent);
+        ASSERT_NE(child, nullptr);
+        resolve_style(parent, &context); resolve_style(child, &context);
+        ASSERT_NE(parent->boundary(), nullptr); ASSERT_NE(child->boundary(), nullptr);
+        BackgroundProp* original = parent->boundary()->background;
+        BackgroundProp* inherited = child->boundary()->background;
+        ASSERT_NE(original, nullptr); ASSERT_NE(inherited, nullptr);
+        EXPECT_EQ(original->component_counts[BACKGROUND_COMPONENT_SIZE], 2);
+        EXPECT_EQ(inherited->component_counts[BACKGROUND_COMPONENT_SIZE], 2);
+        ASSERT_EQ(inherited->layer_count, 4);
+        EXPECT_NE(original->component_values.get(), inherited->component_values.get());
+        for (int index = 0; index < 4; index++) {
+            const BackgroundLayer& layer = inherited->layers[index];
+            EXPECT_FLOAT_EQ(layer.bg_size_width, index % 2 ? 23.0f : 11.0f);
+            EXPECT_FLOAT_EQ(layer.bg_size_height, index % 2 ? 17.0f : 7.0f);
+            EXPECT_FLOAT_EQ(layer.bg_position_x, index % 2 ? 13.0f : 3.0f);
+            EXPECT_FLOAT_EQ(layer.bg_position_y, index % 2 ? 19.0f : 5.0f);
+            EXPECT_EQ(layer.bg_repeat_x, index % 2 ? CSS_VALUE_REPEAT : CSS_VALUE_NO_REPEAT);
+            EXPECT_EQ(layer.bg_repeat_y, CSS_VALUE_NO_REPEAT);
+        }
+        // retire the parent's period storage while the child's independent values remain live.
+        ASSERT_TRUE(parent->set_attribute("style", "background:none")); resolve_style(parent, &context);
+        EXPECT_FLOAT_EQ(inherited->layers[3].bg_size_width, 23.0f);
+        EXPECT_FLOAT_EQ(inherited->component_values[1].bg_position_y, 19.0f);
+        resolve_style(child, &context);
+        PoolStats warm = {}; pool_get_detailed_stats(doc.view_tree->prop_pool, &warm);
+        for (size_t cycle = 0; cycle < 256; cycle++) resolve_style(child, &context);
+        PoolStats repeated = {}; pool_get_detailed_stats(doc.view_tree->prop_pool, &repeated);
+        EXPECT_EQ(warm.live_bytes, repeated.live_bytes);
+        EXPECT_EQ(inherited->component_counts[BACKGROUND_COMPONENT_SIZE], 1);
+        EXPECT_FLOAT_EQ(inherited->layers[3].bg_size_width, 0.0f);
+    }
+}
+
+TEST_F(SecondaryViewTest, BackgroundAxisInheritanceKeepsIndependentPeriodsAcrossImageCountChanges) {
+    const char* inherited_positions[] = {
+        "background-position:inherit",
+        "background-position-x:inherit;background-position-y:inherit"
+    };
+    UiContext ui = {}; LayoutContext context = {}; context.ui_context = lam::up(&ui);
+    for (const char* position : inherited_positions) {
+        SCOPED_TRACE(position);
+        DomElement* parent = block(nullptr, "background-image:none,none,none;background-position:0px 0px;"
+            "background-position-x:3px,13px;background-position-y:5px,19px,29px");
+        ASSERT_NE(parent, nullptr);
+        char style[512];
+        snprintf(style, sizeof(style), "background-image:linear-gradient(red,blue),none,radial-gradient(blue,red),none;%s", position);
+        DomElement* child = block(nullptr, style, "div", parent); ASSERT_NE(child, nullptr);
+        resolve_style(parent, &context); resolve_style(child, &context);
+        ASSERT_NE(child->boundary(), nullptr);
+        BackgroundProp* inherited = child->boundary()->background; ASSERT_NE(inherited, nullptr);
+        ASSERT_EQ(inherited->layer_count, 4);
+        EXPECT_EQ(inherited->component_counts[BACKGROUND_COMPONENT_POSITION_X], 2);
+        EXPECT_EQ(inherited->component_counts[BACKGROUND_COMPONENT_POSITION_Y], 3);
+        const float horizontal[] = {3, 13, 3, 13}, vertical[] = {5, 19, 29, 5};
+        for (int index = 0; index < 4; index++) {
+            EXPECT_FLOAT_EQ(inherited->layers[index].bg_position_x, horizontal[index]);
+            EXPECT_FLOAT_EQ(inherited->layers[index].bg_position_y, vertical[index]);
+        }
+        // the child keeps independent computed periods until it is explicitly restyled.
+        ASSERT_TRUE(parent->set_attribute("style", "background:none;background-position-x:31px;background-position-y:37px"));
+        resolve_style(parent, &context);
+        EXPECT_FLOAT_EQ(inherited->layers[3].bg_position_x, 13);
+        EXPECT_FLOAT_EQ(inherited->layers[3].bg_position_y, 5);
+        resolve_style(child, &context);
+        for (int index = 0; index < 4; index++) {
+            EXPECT_FLOAT_EQ(inherited->layers[index].bg_position_x, 31);
+            EXPECT_FLOAT_EQ(inherited->layers[index].bg_position_y, 37);
+        }
+    }
+}
+
+TEST_F(SecondaryViewTest, BackgroundAxesShareShorthandCascadeAndComputedDefaulting) {
+    UiContext ui = {}; LayoutContext context = {}; context.ui_context = lam::up(&ui);
+    struct Case { const char* style; float x; float y; int x_count; int y_count; };
+    const Case cases[] = {
+        {"background:none,none;background-position-x:3px,13px!important;"
+            "background-position:7px 11px;background-position-y:17px", 3, 17, 2, 1},
+        {"background-position-x:3px,13px;background:none,none 7px 11px", 0, 0, 2, 2},
+        {"background:none,none;--x:3px,13px;background-position-x:var(--x);"
+            "background-position-y:17px", 3, 17, 2, 1},
+        {"background:none,none;background-position-x:3px,13px;"
+            "background-position-x:var(--missing);background-position-y:17px", 0, 17, 1, 1},
+        {"background:none,none;background-position:3px 5px,13px 19px;"
+            "background-position-x:initial", 0, 5, 1, 2},
+    };
+    for (const Case& item : cases) {
+        SCOPED_TRACE(item.style);
+        DomElement* element = block(nullptr, item.style); ASSERT_NE(element, nullptr);
+        resolve_style(element, &context);
+        BackgroundProp* background = element->boundary()->background; ASSERT_NE(background, nullptr);
+        ASSERT_EQ(background->layer_count, 2);
+        EXPECT_FLOAT_EQ(background->layers[0].bg_position_x, item.x);
+        EXPECT_FLOAT_EQ(background->layers[0].bg_position_y, item.y);
+        EXPECT_EQ(background->component_counts[BACKGROUND_COMPONENT_POSITION_X], item.x_count);
+        EXPECT_EQ(background->component_counts[BACKGROUND_COMPONENT_POSITION_Y], item.y_count);
+    }
+}
+
+TEST_F(SecondaryViewTest, BackgroundPositionEdgesKeywordsAndMathUseImageFreeSpace) {
+    UiContext ui = {}; LayoutContext context = {}; context.ui_context = lam::up(&ui);
+    struct Case { const char* position; float x; float y; };
+    const Case cases[] = {
+        {"top right", 40, 0}, {"bottom center", 20, 28},
+        {"right 3px bottom 5px", 37, 23}, {"bottom 5px right", 40, 23},
+        {"calc(50% + 3px) calc(100% - 5px)", 23, 23},
+        {"right -3px bottom 5px", 43, 23}, {"37px 23px", 37, 23},
+        {"min(50%,23px) max(25%,10px)", 20, 10},
+        {"right min(50%,23px) bottom max(25%,10px)", 20, 18}
+    };
+    for (const Case& item : cases) {
+        SCOPED_TRACE(item.position);
+        char style[512]; snprintf(style, sizeof(style), "background-image:linear-gradient(red,red),none;"
+            "background-size:8px 4px;background-repeat:no-repeat;background-position:%s", item.position);
+        DomElement* element = block(nullptr, style); ASSERT_NE(element, nullptr);
+        resolve_style(element, &context);
+        BackgroundProp* background = element->boundary()->background; ASSERT_NE(background, nullptr);
+        ASSERT_EQ(background->layer_count, 2);
+        for (int index = 0; index < 2; index++) {
+            const BackgroundLayer* layer = &background->layers[index];
+            EXPECT_FLOAT_EQ(background_position_offset(layer, true, 40.0f), item.x);
+            EXPECT_FLOAT_EQ(background_position_offset(layer, false, 28.0f), item.y);
+            EXPECT_FLOAT_EQ(background_position_offset(layer, true, 80.0f, 2.0f), item.x * 2.0f);
+        }
+    }
+}
+
+TEST_F(SecondaryViewTest, BackgroundPositionMathInheritanceOwnsComputedLengthsAndSurvivesRetirement) {
+    UiContext ui = {}; LayoutContext context = {}; context.ui_context = lam::up(&ui);
+    DomElement* parent = block(nullptr, "font-size:10px;background:none;"
+        "background-position:min(50%,2em) max(25%,1em)"); ASSERT_NE(parent, nullptr);
+    DomElement* child = block(nullptr, "font-size:30px;background-image:none,none,none,none;"
+        "background-position:inherit", "div", parent); ASSERT_NE(child, nullptr);
+    resolve_style(parent, &context); resolve_style(child, &context);
+    BackgroundProp* original = parent->boundary()->background;
+    BackgroundProp* inherited = child->boundary()->background;
+    ASSERT_NE(original, nullptr); ASSERT_NE(inherited, nullptr); ASSERT_EQ(inherited->layer_count, 4);
+    ASSERT_NE(original->bg_position_x_expression, nullptr);
+    ASSERT_NE(inherited->bg_position_x_expression, nullptr);
+    EXPECT_NE(original->bg_position_x_expression, inherited->bg_position_x_expression);
+    EXPECT_FLOAT_EQ(background_position_offset(&inherited->layers[3], true, 40.0f), 20.0f);
+    EXPECT_FLOAT_EQ(background_position_offset(&inherited->layers[3], false, 28.0f), 10.0f);
+    EXPECT_FLOAT_EQ(background_position_offset(&inherited->layers[3], true, 80.0f), 20.0f);
+    PoolStats warm = {}; pool_get_detailed_stats(doc.view_tree->prop_pool, &warm);
+    for (size_t cycle = 0; cycle < 256; cycle++) resolve_style(child, &context);
+    PoolStats repeated = {}; pool_get_detailed_stats(doc.view_tree->prop_pool, &repeated);
+    EXPECT_EQ(warm.live_bytes, repeated.live_bytes);
+    ASSERT_TRUE(parent->set_attribute("style", "background:none")); resolve_style(parent, &context);
+    EXPECT_FLOAT_EQ(background_position_offset(&inherited->layers[3], true, 80.0f), 20.0f);
+    EXPECT_FLOAT_EQ(background_position_offset(&inherited->layers[3], false, 28.0f), 10.0f);
+    resolve_style(child, &context);
+    EXPECT_EQ(inherited->computed_expressions, nullptr);
+    EXPECT_FLOAT_EQ(background_position_offset(&inherited->layers[3], true, 80.0f), 0.0f);
+}
+
+TEST_F(SecondaryViewTest, InvalidBackgroundPositionsPreserveEarlierDeclarations) {
+    UiContext ui = {}; LayoutContext context = {}; context.ui_context = lam::up(&ui);
+    const char* invalid[] = {"left right", "top bottom", "20% left", "top 20%", "center 5px top",
+        "left 1px top 2px bottom", "calc(1s + 2px) top", "3"};
+    for (const char* position : invalid) {
+        SCOPED_TRACE(position);
+        char style[512]; snprintf(style, sizeof(style), "background:none;"
+            "background-position:7px 11px;background-position:%s", position);
+        DomElement* element = block(nullptr, style); ASSERT_NE(element, nullptr);
+        resolve_style(element, &context);
+        BackgroundProp* background = element->boundary()->background; ASSERT_NE(background, nullptr);
+        EXPECT_FLOAT_EQ(background_position_offset(background, true, 40.0f), 7.0f);
+        EXPECT_FLOAT_EQ(background_position_offset(background, false, 28.0f), 11.0f);
+    }
+}
+
+TEST_F(SecondaryViewTest, BackgroundPositionUnitlessLengthsUseOnlyTheirQuirksContext) {
+    UiContext ui = {}; LayoutContext context = {}; context.ui_context = lam::up(&ui);
+    for (HtmlVersion mode : {HTML5, HTML_QUIRKS}) {
+        doc.html_version = mode; doc.view_tree->html_version = mode;
+        DomElement* element = block(nullptr, "background:none;"
+            "background-position:7px 11px;background-position:13 17"); ASSERT_NE(element, nullptr);
+        resolve_style(element, &context);
+        BackgroundProp* background = element->boundary()->background; ASSERT_NE(background, nullptr);
+        EXPECT_FLOAT_EQ(background_position_offset(background, true, 40.0f), mode == HTML_QUIRKS ? 13.0f : 7.0f);
+        EXPECT_FLOAT_EQ(background_position_offset(background, false, 28.0f), mode == HTML_QUIRKS ? 17.0f : 11.0f);
+        CssValue* number = css_value_create_number(doc.document_pool, 13);
+        ASSERT_NE(number, nullptr);
+        EXPECT_EQ(css_property_validate_value_mode(CSS_PROPERTY_BACKGROUND_POSITION, number, mode == HTML_QUIRKS), mode == HTML_QUIRKS);
+        EXPECT_FALSE(css_property_validate_value(CSS_PROPERTY_BACKGROUND_POSITION, number));
+        const char* computed = "background-position:calc(13)";
+        EXPECT_EQ(css_parse_declaration_text(computed, strlen(computed), doc.document_pool), nullptr);
+    }
+}
+
+TEST_F(SecondaryViewTest, BackgroundSizeMathUsesPositioningAreaAndClampsAtUsedTime) {
+    UiContext ui = {}; LayoutContext context = {}; context.ui_context = lam::up(&ui);
+    struct Case { const char* size; float width; float height; };
+    const Case cases[] = {
+        {"calc(50% - 16px) calc(50% - 12px)", 8, 4},
+        {"min(50%,8px) max(10%,4px)", 8, 4},
+        {"clamp(4px,50%,8px) calc(1em)", 8, 4},
+        {"calc(2em) 4px", 8, 4}, {"0 0", 0, 0},
+        {"calc(50% - 30px) 4px", 0, 4}, {"calc(-8px) 4px", 0, 4}
+    };
+    for (const Case& item : cases) {
+        SCOPED_TRACE(item.size);
+        char style[512]; snprintf(style, sizeof(style), "font-size:4px;background-image:linear-gradient(red,red),none;"
+            "background-size:%s;background-repeat:no-repeat", item.size);
+        DomElement* element = block(nullptr, style); ASSERT_NE(element, nullptr);
+        resolve_style(element, &context);
+        BackgroundProp* background = element->boundary()->background; ASSERT_NE(background, nullptr);
+        ASSERT_EQ(background->layer_count, 2);
+        for (int index = 0; index < 2; index++) {
+            const BackgroundLayer* layer = &background->layers[index];
+            EXPECT_TRUE(layer->bg_size_set);
+            EXPECT_FLOAT_EQ(background_size_dimension(layer, true, 48.0f), item.width);
+            EXPECT_FLOAT_EQ(background_size_dimension(layer, false, 32.0f), item.height);
+            EXPECT_FLOAT_EQ(background_size_dimension(layer, true, 96.0f, 2.0f), item.width * 2.0f);
+            EXPECT_FLOAT_EQ(background_size_dimension(layer, false, 64.0f, 2.0f), item.height * 2.0f);
+        }
+    }
+}
+
+TEST_F(SecondaryViewTest, BackgroundSizeInheritanceOwnsComputedMathAndOriginalPeriods) {
+    UiContext ui = {}; LayoutContext context = {}; context.ui_context = lam::up(&ui);
+    DomElement* parent = block(nullptr, "font-size:4px;background:none;"
+        "background-size:min(50%,2em) max(10%,1em),calc(50% - 16px) 4px"); ASSERT_NE(parent, nullptr);
+    DomElement* child = block(nullptr, "font-size:30px;background-image:none,none,none,none;"
+        "background-size:inherit", "div", parent); ASSERT_NE(child, nullptr);
+    resolve_style(parent, &context); resolve_style(child, &context);
+    BackgroundProp* original = parent->boundary()->background;
+    BackgroundProp* inherited = child->boundary()->background;
+    ASSERT_NE(original, nullptr); ASSERT_NE(inherited, nullptr); ASSERT_EQ(inherited->layer_count, 4);
+    EXPECT_EQ(inherited->component_counts[BACKGROUND_COMPONENT_SIZE], 2);
+    ASSERT_NE(original->bg_size_width_expression, nullptr);
+    ASSERT_NE(inherited->bg_size_width_expression, nullptr);
+    EXPECT_NE(original->bg_size_width_expression, inherited->bg_size_width_expression);
+    for (int index = 0; index < 4; index++) {
+        EXPECT_FLOAT_EQ(background_size_dimension(&inherited->layers[index], true, 48.0f), 8.0f);
+        EXPECT_FLOAT_EQ(background_size_dimension(&inherited->layers[index], false, 32.0f), 4.0f);
+        EXPECT_FLOAT_EQ(background_size_dimension(&inherited->layers[index], true, 80.0f), index % 2 ? 24.0f : 8.0f);
+    }
+    PoolStats warm = {}; pool_get_detailed_stats(doc.view_tree->prop_pool, &warm);
+    for (size_t cycle = 0; cycle < 256; cycle++) resolve_style(child, &context);
+    PoolStats repeated = {}; pool_get_detailed_stats(doc.view_tree->prop_pool, &repeated);
+    EXPECT_EQ(warm.live_bytes, repeated.live_bytes);
+    ASSERT_TRUE(parent->set_attribute("style", "background:none")); resolve_style(parent, &context);
+    EXPECT_FLOAT_EQ(background_size_dimension(&inherited->layers[2], true, 80.0f), 8.0f);
+    EXPECT_FLOAT_EQ(background_size_dimension(&inherited->layers[3], true, 80.0f), 24.0f);
+    resolve_style(child, &context);
+    EXPECT_EQ(inherited->computed_expressions, nullptr);
+    EXPECT_FALSE(inherited->bg_size_set);
+}
+
+TEST_F(SecondaryViewTest, InvalidBackgroundSizesPreserveEarlierDeclarations) {
+    UiContext ui = {}; LayoutContext context = {}; context.ui_context = lam::up(&ui);
+    const char* invalid[] = {"cover auto", "contain 4px", "8px 4px 1px", "-8px 4px", "-50% 4px",
+        "3 4px", "calc(13) 4px", "calc(1s + 2px) 4px", "center", "none", "8px 4px,cover auto"};
+    for (const char* size : invalid) {
+        SCOPED_TRACE(size);
+        char style[512]; snprintf(style, sizeof(style), "background:none;background-size:8px 4px;background-size:%s", size);
+        DomElement* element = block(nullptr, style); ASSERT_NE(element, nullptr);
+        resolve_style(element, &context);
+        BackgroundProp* background = element->boundary()->background; ASSERT_NE(background, nullptr);
+        EXPECT_FLOAT_EQ(background_size_dimension(background, true, 48.0f), 8.0f);
+        EXPECT_FLOAT_EQ(background_size_dimension(background, false, 32.0f), 4.0f);
+    }
+}
+
+TEST_F(SecondaryViewTest, InvalidBackgroundShorthandsPreserveEarlierComputedLayers) {
+    UiContext ui = {}; LayoutContext context = {}; context.ui_context = lam::up(&ui);
+    const char* invalid[] = {
+        "red,linear-gradient(blue,blue)", "linear-gradient(blue,blue) linear-gradient(green,green)",
+        "left right", "left/8px 4px 3px", "left/cover auto", "left/", "/8px 4px",
+        "left no-repeat right", "no-repeat border-box repeat", "fixed local",
+        "border-box padding-box content-box", "red blue", "left/-8px 4px",
+        "linear-gradient(blue,blue),inherit"
+    };
+    for (const char* value : invalid) {
+        SCOPED_TRACE(value);
+        char style[1024];
+        snprintf(style, sizeof(style), "background:linear-gradient(red,red) 3px 5px/8px 4px no-repeat,"
+            "radial-gradient(blue,blue) green;background:%s!important", value);
+        DomElement* element = block(nullptr, style); ASSERT_NE(element, nullptr);
+        resolve_style(element, &context);
+        BackgroundProp* background = element->boundary()->background; ASSERT_NE(background, nullptr);
+        ASSERT_EQ(background->layer_count, 2);
+        EXPECT_EQ(background->color.g, 128); EXPECT_EQ(background->color.a, 255);
+        const BackgroundLayer& first = background->layers[0];
+        const BackgroundLayer& last = background->layers[1];
+        ASSERT_NE(first.linear_gradient, nullptr); ASSERT_NE(last.radial_gradient, nullptr);
+        EXPECT_EQ(first.linear_gradient->stops[0].color.r, 255);
+        EXPECT_EQ(last.radial_gradient->stops[0].color.b, 255);
+        EXPECT_FLOAT_EQ(first.bg_position_x, 3); EXPECT_FLOAT_EQ(first.bg_position_y, 5);
+        EXPECT_FLOAT_EQ(background_size_dimension(&first, true, 48), 8);
+        EXPECT_FLOAT_EQ(background_size_dimension(&first, false, 32), 4);
+        EXPECT_EQ(first.bg_repeat_x, CSS_VALUE_NO_REPEAT); EXPECT_EQ(first.bg_repeat_y, CSS_VALUE_NO_REPEAT);
+    }
+}
+
+TEST_F(SecondaryViewTest, InvalidBackgroundLonghandsPreserveComputedLayerComponents) {
+    UiContext ui = {}; LayoutContext context = {}; context.ui_context = lam::up(&ui);
+    const char* invalid[] = {
+        "background-image:linear-gradient(green,green) conic-gradient(black,black)",
+        "background-repeat:repeat-x round", "background-attachment:fixed scroll",
+        "background-origin:padding-box border-box", "background-clip:text content-box",
+        "background-blend-mode:screen multiply"
+    };
+    for (const char* declaration : invalid) {
+        SCOPED_TRACE(declaration);
+        char style[1024];
+        snprintf(style, sizeof(style), "background:linear-gradient(red,red),radial-gradient(blue,blue);"
+            "background-repeat:no-repeat;background-attachment:fixed;background-origin:content-box;"
+            "background-clip:padding-box;background-blend-mode:multiply;%s!important", declaration);
+        DomElement* element = block(nullptr, style); ASSERT_NE(element, nullptr);
+        resolve_style(element, &context);
+        BackgroundProp* background = element->boundary()->background; ASSERT_NE(background, nullptr);
+        ASSERT_EQ(background->layer_count, 2);
+        ASSERT_NE(background->layers[0].linear_gradient, nullptr);
+        ASSERT_NE(background->layers[1].radial_gradient, nullptr);
+        EXPECT_EQ(background->layers[0].linear_gradient->stops[0].color.r, 255);
+        EXPECT_EQ(background->layers[1].radial_gradient->stops[0].color.b, 255);
+        for (int index = 0; index < 2; index++) {
+            const BackgroundLayer& layer = background->layers[index];
+            EXPECT_EQ(layer.bg_repeat_x, CSS_VALUE_NO_REPEAT); EXPECT_EQ(layer.bg_repeat_y, CSS_VALUE_NO_REPEAT);
+            EXPECT_EQ(layer.bg_attachment, CSS_VALUE_FIXED); EXPECT_EQ(layer.bg_origin, CSS_VALUE_CONTENT_BOX);
+            EXPECT_EQ(layer.bg_clip, CSS_VALUE_PADDING_BOX); EXPECT_EQ(layer.blend_mode, CSS_VALUE_MULTIPLY);
+        }
+    }
+}
+
+TEST_F(SecondaryViewTest, BackgroundKeywordListsInheritIndependentPeriodsAndStorage) {
+    UiContext ui = {}; LayoutContext context = {}; context.ui_context = lam::up(&ui);
+    DomElement* parent = block(nullptr, "background:none;background-attachment:scroll,fixed,local;"
+        "background-repeat:repeat-x,round space;background-origin:border-box,content-box;"
+        "background-clip:padding-box,text,content-box;background-blend-mode:multiply,screen,normal");
+    ASSERT_NE(parent, nullptr);
+    DomElement* child = block(nullptr, "background-image:none,none,none,none;"
+        "background-attachment:inherit;background-repeat:inherit;background-origin:inherit;"
+        "background-clip:inherit;background-blend-mode:inherit", "div", parent); ASSERT_NE(child, nullptr);
+    resolve_style(parent, &context); resolve_style(child, &context);
+    BackgroundProp* original = parent->boundary()->background;
+    BackgroundProp* inherited = child->boundary()->background;
+    ASSERT_NE(original, nullptr); ASSERT_NE(inherited, nullptr); ASSERT_EQ(inherited->layer_count, 4);
+    EXPECT_EQ(inherited->component_counts[BACKGROUND_COMPONENT_ATTACHMENT], 3);
+    EXPECT_EQ(inherited->component_counts[BACKGROUND_COMPONENT_REPEAT], 2);
+    EXPECT_NE(original->component_values, inherited->component_values);
+    const CssEnum attachment[] = {CSS_VALUE_SCROLL, CSS_VALUE_FIXED, CSS_VALUE_LOCAL};
+    const CssEnum clip[] = {CSS_VALUE_PADDING_BOX, CSS_VALUE_TEXT, CSS_VALUE_CONTENT_BOX};
+    const CssEnum blend[] = {CSS_VALUE_MULTIPLY, CSS_VALUE_SCREEN, CSS_VALUE_NORMAL};
+    for (int index = 0; index < 4; index++) {
+        const BackgroundLayer& layer = inherited->layers[index];
+        EXPECT_EQ(layer.bg_attachment, attachment[index % 3]); EXPECT_EQ(layer.bg_clip, clip[index % 3]);
+        EXPECT_EQ(layer.blend_mode, blend[index % 3]);
+        EXPECT_EQ(layer.bg_origin, index % 2 ? CSS_VALUE_CONTENT_BOX : CSS_VALUE_BORDER_BOX);
+        EXPECT_EQ(layer.bg_repeat_x, index % 2 ? CSS_VALUE_ROUND : CSS_VALUE_REPEAT);
+        EXPECT_EQ(layer.bg_repeat_y, index % 2 ? CSS_VALUE_SPACE : CSS_VALUE_NO_REPEAT);
+    }
+    PoolStats warm = {}; pool_get_detailed_stats(doc.view_tree->prop_pool, &warm);
+    for (size_t cycle = 0; cycle < 256; cycle++) resolve_style(child, &context);
+    PoolStats repeated = {}; pool_get_detailed_stats(doc.view_tree->prop_pool, &repeated);
+    EXPECT_EQ(warm.live_bytes, repeated.live_bytes);
+    ASSERT_TRUE(parent->set_attribute("style", "background:none")); resolve_style(parent, &context);
+    EXPECT_EQ(inherited->layers[1].bg_attachment, CSS_VALUE_FIXED);
+    resolve_style(child, &context);
+    EXPECT_EQ(inherited->component_counts[BACKGROUND_COMPONENT_ATTACHMENT], 1);
+    // omitted components store zero; the paint consumer treats this attachment as initial scroll.
+    EXPECT_EQ(inherited->layers[1].bg_attachment, (CssEnum)0);
+}
+
+TEST_F(SecondaryViewTest, BackgroundShorthandKeepsUnorderedBoxesAndTextClip) {
+    UiContext ui = {}; LayoutContext context = {}; context.ui_context = lam::up(&ui);
+    struct Case { const char* value; CssEnum origin; CssEnum clip; };
+    const Case cases[] = {
+        {"text", (CssEnum)0, CSS_VALUE_TEXT},
+        {"border-box text", CSS_VALUE_BORDER_BOX, CSS_VALUE_TEXT},
+        {"text border-box", CSS_VALUE_BORDER_BOX, CSS_VALUE_TEXT},
+        {"content-box text red", CSS_VALUE_CONTENT_BOX, CSS_VALUE_TEXT},
+        {"padding-box no-repeat border-box", CSS_VALUE_PADDING_BOX, CSS_VALUE_BORDER_BOX},
+        {"red left top/8px 4px fixed no-repeat border-box content-box", CSS_VALUE_BORDER_BOX, CSS_VALUE_CONTENT_BOX}
+    };
+    for (const Case& item : cases) {
+        SCOPED_TRACE(item.value);
+        char style[1024]; snprintf(style, sizeof(style), "background:blue;background:%s", item.value);
+        DomElement* element = block(nullptr, style); ASSERT_NE(element, nullptr);
+        resolve_style(element, &context);
+        BackgroundProp* background = element->boundary()->background; ASSERT_NE(background, nullptr);
+        EXPECT_EQ(background->bg_origin, item.origin); EXPECT_EQ(background->bg_clip, item.clip);
+    }
+}
+
+TEST_F(SecondaryViewTest, CssImageSetListAndBorderConsumersRetainDensityAndStylesheetBase) {
+    DomElement* element = block(nullptr); ASSERT_NE(element, nullptr);
+    UiContext ui = {}; ui.device_scale = 2.0f;
+    LayoutContext context = {}; context.doc = lam::up(&doc); context.ui_context = lam::up(&ui);
+    context.pool = lam::up(doc.view_tree->prop_pool.get());
+    context.selected_view_tree = lam::up(doc.view_tree.get());
+    context.view = lam::up((View*)element); context.elmt = lam::up(element);
+    const char* declarations[] = {
+        "list-style-image:image-set(url(one.png) 1x,url(two.png) 2x)",
+        "border-image-source:image-set(url(one.png) 1x,url(two.png) 2x)"
+    };
+    CssDeclaration* parsed[2] = {};
+    for (size_t index = 0; index < 2; index++) {
+        const char* text = declarations[index];
+        CssDeclaration* declaration = css_parse_declaration_text(text, strlen(text), doc.document_pool);
+        ASSERT_NE(declaration, nullptr);
+        parsed[index] = declaration;
+        declaration->source_file = "/assets/styles/main.css";
+        resolve_css_property(declaration->property_code, declaration, &context);
+    }
+    ASSERT_NE(element->block(), nullptr);
+    EXPECT_STREQ(element->block()->list_style_image.url, "/assets/styles/two.png");
+    EXPECT_FLOAT_EQ(element->block()->list_style_image.resolution, 2.0f);
+    ASSERT_NE(element->boundary(), nullptr); ASSERT_NE(element->boundary()->border, nullptr);
+    EXPECT_STREQ(element->boundary()->border->border_image_url, "/assets/styles/two.png");
+    EXPECT_FLOAT_EQ(element->boundary()->border->border_image_resolution, 2.0f);
+    // reuse parsed declarations to isolate retained payload and canonical-URL growth.
+    PoolStats warm = {}; pool_get_detailed_stats(doc.view_tree->prop_pool, &warm);
+    for (size_t cycle = 0; cycle < 256; cycle++) {
+        for (CssDeclaration* declaration : parsed)
+            resolve_css_property(declaration->property_code, declaration, &context);
+    }
+    PoolStats repeated = {}; pool_get_detailed_stats(doc.view_tree->prop_pool, &repeated);
+    EXPECT_EQ(warm.live_bytes, repeated.live_bytes);
+    EXPECT_STREQ(element->block()->list_style_image.url, "/assets/styles/two.png");
+    EXPECT_STREQ(element->boundary()->border->border_image_url, "/assets/styles/two.png");
+    // shorthand expansion must recognize the image atom before assigning its other longhands.
+    const char* shorthand = "list-style:image-set(url(one.png) 1x,url(two.png) 2x) outside";
+    CssDeclaration* declaration = css_parse_declaration_text(shorthand, strlen(shorthand), doc.document_pool);
+    ASSERT_NE(declaration, nullptr);
+    const CssValue* image = layout_list_style_longhand(declaration->value,
+        CSS_PROPERTY_LIST_STYLE_IMAGE, doc.document_pool);
+    EXPECT_TRUE(css_value_is_image_set(image));
+    const char* border = "border-image:image-set(url(one.png) 1x,url(two.png) 2x) 25% / auto";
+    declaration = css_parse_declaration_text(border, strlen(border), doc.document_pool);
+    ASSERT_NE(declaration, nullptr);
+    CssBorderImageComponents parts = {};
+    ASSERT_TRUE(css_split_border_image_shorthand(declaration->value, &parts));
+    EXPECT_TRUE(css_value_is_image_set(parts.source));
+    EXPECT_EQ(parts.slice_count, 1); EXPECT_EQ(parts.width_count, 1);
+    EXPECT_EQ(parts.width[0]->data.keyword, CSS_VALUE_AUTO);
+}
+
+TEST_F(SecondaryViewTest, BorderImageReplacementPreservesInheritedOwnerAndReleasesEachPayload) {
+    DomElement* parent = block(nullptr); ASSERT_NE(parent, nullptr);
+    DomElement* child = block(nullptr, nullptr, "div", parent); ASSERT_NE(child, nullptr);
+    LayoutContext context = {}; context.doc = lam::up(&doc);
+    context.pool = lam::up(doc.view_tree->prop_pool.get());
+    context.selected_view_tree = lam::up(doc.view_tree.get());
+    auto parse = [&](const char* text) {
+        return css_parse_declaration_text(text, strlen(text), doc.document_pool);
+    };
+    CssDeclaration* gradient = parse("border-image-source:linear-gradient(red,blue)");
+    CssDeclaration* inherit = parse("border-image-source:inherit");
+    CssDeclaration* set = parse("border-image-source:image-set(url(one.png) 1x,url(two.png) 2x)");
+    CssDeclaration* none = parse("border-image-source:none");
+    ASSERT_NE(gradient, nullptr); ASSERT_NE(inherit, nullptr); ASSERT_NE(set, nullptr); ASSERT_NE(none, nullptr);
+    auto apply = [&](DomElement* element, CssDeclaration* declaration) {
+        context.view = lam::up((View*)element); context.elmt = lam::up(element);
+        resolve_css_property(declaration->property_code, declaration, &context);
+    };
+    apply(parent, gradient); apply(child, inherit);
+    BorderProp* original = parent->boundary()->border;
+    BorderProp* inherited = child->boundary()->border;
+    ASSERT_NE(original->border_image_linear_gradient, nullptr);
+    ASSERT_NE(inherited->border_image_linear_gradient, nullptr);
+    EXPECT_NE(original->border_image_linear_gradient, inherited->border_image_linear_gradient);
+    EXPECT_NE(original->border_image_linear_gradient->stops, inherited->border_image_linear_gradient->stops);
+    apply(parent, none);
+    EXPECT_EQ(inherited->border_image_linear_gradient->stops[0].color.r, 255);
+    apply(child, set);
+    EXPECT_EQ(inherited->border_image_linear_gradient, nullptr);
+    apply(child, none);
+    // pre-parsed gradient, URL and empty replacements isolate retained pool ownership.
+    PoolStats warm = {}; pool_get_detailed_stats(doc.view_tree->prop_pool, &warm);
+    for (size_t index = 0; index < 256; index++) {
+        apply(child, gradient); apply(child, set); apply(child, none);
+    }
+    PoolStats repeated = {}; pool_get_detailed_stats(doc.view_tree->prop_pool, &repeated);
+    EXPECT_EQ(warm.live_bytes, repeated.live_bytes);
+    UiContext ui = {}; ui.device_scale = 2.0f; context.ui_context = lam::up(&ui);
+    apply(parent, set); apply(child, inherit);
+    EXPECT_FLOAT_EQ(inherited->border_image_resolution, 2.0f);
+    EXPECT_NE(original->border_image_url, inherited->border_image_url);
+    apply(parent, none);
+    EXPECT_NE(strstr(inherited->border_image_url, "two.png"), nullptr);
+}
+
+TEST_F(SecondaryViewTest, CssImageSetResourceChangesRevalidateAdmissionBeforeWarmReuse) {
+    DomElement* element = block(nullptr); ASSERT_NE(element, nullptr);
+    UiContext ui = {}; ui.document = lam::up(&doc);
+    LayoutContext context = {}; context.doc = lam::up(&doc); context.ui_context = lam::up(&ui);
+    context.selected_view_tree = lam::up(doc.view_tree.get());
+    ViewBlock* view = lam::unsafe_view_block_element_storage(element);
+    const char* first_url = "http://example.test/first.png";
+    const char* second_url = "http://example.test/second.png";
+    doc.url = lam::own(url_parse(first_url)); ASSERT_NE(doc.url, nullptr);
+    ImageSurface* first = image_surface_create(12, 12); ASSERT_NE(first, nullptr);
+    ImageSurface* second = image_surface_create(24, 24); ASSERT_NE(second, nullptr);
+    ASSERT_EQ(image_cache_adopt(&ui, first_url, first), first);
+    ASSERT_EQ(image_cache_adopt(&ui, second_url, second), second);
+    EXPECT_EQ(layout_admit_replaced_image_surface(&context, view, first_url, 1), first);
+    EXPECT_STREQ(view->embedp()->selected_image_source, first_url);
+    EXPECT_EQ(layout_admit_replaced_image_surface(&context, view, second_url, 2), second);
+    EXPECT_STREQ(view->embedp()->selected_image_source, second_url);
+    EXPECT_FLOAT_EQ(view->embedp()->content_image_resolution, 2);
+    doc.resource_policy = INPUT_RESOURCE_LOCAL_ONLY;
+    EXPECT_EQ(layout_admit_replaced_image_surface(&context, view, second_url, 2), nullptr);
+    EXPECT_EQ(view->embedp()->img, nullptr);
+    doc.resource_policy = INPUT_RESOURCE_ALLOW_NETWORK;
+    EXPECT_EQ(layout_admit_replaced_image_surface(&context, view, first_url, 1), first);
+    EXPECT_EQ(layout_admit_replaced_image_surface(&context, view, nullptr, 1), nullptr);
+    EXPECT_EQ(view->embedp()->selected_image_source, nullptr);
+    image_cache_cleanup(&ui);
+    url_destroy(doc.url); doc.url = nullptr;
 }
 
 TEST_F(SecondaryViewTest, PictureSourcesUseTheSelectedEnvironmentAndOnlyPrecedingSupportedSources) {
@@ -2505,6 +3211,36 @@ TEST_F(SecondaryViewTest, SharedPropertyAllocationBelongsToTheExplicitlySelected
     context.selected_view_tree = nullptr;
     void* default_property = alloc_prop(&context, 8); ASSERT_NE(default_property, nullptr);
     EXPECT_TRUE(pool_owns(doc.view_tree->prop_pool, default_property));
+}
+
+TEST_F(SecondaryViewTest, GridUsedTracksRetainOwnerTextAcrossEditionsAndRollback) {
+    ViewTree* tree = secondary(); ViewTree* sibling = secondary();
+    ASSERT_NE(tree, nullptr); ASSERT_NE(sibling, nullptr);
+    char rows[] = "10px 20px", columns[] = "[first] 30px [last]";
+    ASSERT_TRUE(view_tree_set_grid_track_values(tree, source, rows, columns));
+    ASSERT_TRUE(view_tree_set_grid_track_values(sibling, source, "40px", "50px"));
+    rows[0] = '9'; columns[0] = 'x';
+    ViewNodeState* state = view_tree_node_state(tree, source, false); ASSERT_NE(state, nullptr);
+    const ViewNodeState* independent = view_tree_node_state(sibling, source, false); ASSERT_NE(independent, nullptr);
+    EXPECT_STREQ(state->grid_used_rows, "10px 20px");
+    EXPECT_STREQ(state->grid_used_columns, "[first] 30px [last]");
+    const char* kept = state->grid_used_columns;
+    ASSERT_TRUE(view_tree_set_grid_track_values(tree, source, "10px 20px", "[first] 30px [last]"));
+    EXPECT_EQ(state->grid_used_columns.get(), kept);
+    ViewModelCheckpoint* checkpoint = view_tree_model_checkpoint(tree); ASSERT_NE(checkpoint, nullptr);
+    ASSERT_TRUE(view_tree_set_grid_track_values(tree, source, "60px", "70px 80px"));
+    EXPECT_STREQ(state->grid_used_columns, "70px 80px");
+    ASSERT_TRUE(view_tree_model_restore(tree, checkpoint));
+    EXPECT_EQ(state->grid_used_columns.get(), kept);
+    EXPECT_STREQ(state->grid_used_rows, "10px 20px");
+    EXPECT_STREQ(independent->grid_used_rows, "40px");
+    EXPECT_STREQ(independent->grid_used_columns, "50px");
+    ASSERT_TRUE(view_tree_model_commit(tree));
+    EXPECT_FALSE(view_tree_set_grid_track_values(tree, source, "90px", "100px"));
+    EXPECT_STREQ(state->grid_used_columns, "[first] 30px [last]");
+    ASSERT_TRUE(view_tree_model_reset(tree));
+    EXPECT_EQ(view_tree_node_state(tree, source, false), nullptr);
+    EXPECT_STREQ(independent->grid_used_columns, "50px");
 }
 
 TEST_F(SecondaryViewTest, ModelRollbackRestoresNestedLinksAndNeverReusesDiscardedHandles) {
@@ -5813,6 +6549,127 @@ TEST_F(SecondaryViewTest, StyleContainmentScopesCountersAndQuotesInIndependentVi
     StrBuf* text = strbuf_new(); ASSERT_NE(text, nullptr); append_fragment_text(box, text);
     EXPECT_STREQ(text->str, "8A18.2Z"); strbuf_free(text);
     EXPECT_STREQ(view_css_resolve_pseudo(tree, tail, PSEUDO_ELEMENT_BEFORE)->generated_text, "8");
+}
+
+TEST_F(SecondaryViewTest, ContentVisibilityKeepsPagedPlaceholdersAndPrintsAutoContents) {
+    stylesheet("@page { size: 240px 240px; margin: 10px } p { counter-reset: N 0 } "
+        "p, div { margin: 0; font: 10px/12px Arial } "
+        ".hidden { content-visibility: hidden; width: 80px; padding: 2px; border: 1px solid blue; "
+        "contain-intrinsic-size: none calc(1em + 1em); counter-increment: N 10 } "
+        ".hidden::before { content: 'Suppressed pseudo' } "
+        ".tail::before { content: counter(N) } @media print { .hidden { font-size: 20px } }");
+    DomElement* hidden = block(nullptr); ASSERT_NE(hidden, nullptr);
+    ASSERT_TRUE(hidden->set_attribute("class", "hidden"));
+    DomElement* omitted = block("Suppressed child", "counter-increment:N 100", "div", hidden);
+    ASSERT_NE(omitted, nullptr);
+    DomElement* automatic = block("Auto", "content-visibility:auto;counter-increment:N 1");
+    ASSERT_NE(automatic, nullptr);
+    ASSERT_NE(block("Visible child", "counter-increment:N 100", "div", automatic), nullptr);
+    DomElement* tail = block("Tail"); ASSERT_NE(tail, nullptr);
+    ASSERT_TRUE(tail->set_attribute("class", "tail"));
+    for (bool print : {false, true}) {
+        ViewEnvironment environment = view_environment_default(VIEW_PRESENTATION_PAGED);
+        environment.print_media = print;
+        ViewTree* tree = view_tree_secondary_create(&doc, &environment); ASSERT_NE(tree, nullptr);
+        PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
+        ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+        LayoutViewNode* box = source_fragment(tree, hidden, VIEW_FRAGMENT_BODY, true); ASSERT_NE(box, nullptr);
+        EXPECT_FLOAT_EQ(box->rect.width, 86.0f);
+        EXPECT_FLOAT_EQ(box->rect.height, print ? 46.0f : 26.0f);
+        EXPECT_EQ(source_fragment(tree, omitted, VIEW_FRAGMENT_BODY, true), nullptr);
+        StrBuf* text = strbuf_new(); ASSERT_NE(text, nullptr);
+        append_fragment_text(tree->model->root, text);
+        EXPECT_STREQ(text->str, "AutoVisible child11Tail"); strbuf_free(text);
+        EXPECT_FLOAT_EQ(source->height, 91.75f);
+    }
+}
+
+TEST_F(SecondaryViewTest, RememberedIntrinsicSizesFollowCommittedEditionsAndRetainedPageLeases) {
+    init_vector_engine();
+    stylesheet("@page { size: 240px 240px; margin: 10px } p, div { margin: 0; font: 10px/12px Arial } "
+        ".memory { width: 100px; padding: 2px; border: 1px solid blue; contain-intrinsic-size: auto 7px } "
+        ".child { height: 40px; background: green } @media print { .child { height: 80px } }");
+    DomElement* memory = block(nullptr); ASSERT_NE(memory, nullptr);
+    ASSERT_TRUE(memory->set_attribute("class", "memory"));
+    DomElement* child = block(nullptr, nullptr, "div", memory); ASSERT_NE(child, nullptr);
+    ASSERT_TRUE(child->set_attribute("class", "child"));
+    ViewTree* editions[2] = {};
+    PagedLayoutOptions options = paged_layout_options_default();
+    auto compose = [&](ViewTree* tree) {
+        if (tree->model->committed && !view_tree_model_reset(tree)) return TYPESET_INVALID;
+        return layout_secondary_view(tree, &options, nullptr);
+    };
+    auto height = [&](ViewTree* tree) {
+        LayoutViewNode* box = source_fragment(tree, memory, VIEW_FRAGMENT_BODY, true);
+        EXPECT_NE(box, nullptr);
+        return box ? box->rect.height : -1.0f;
+    };
+    auto remembered = [&](ViewTree* tree, float expected) {
+        LayoutContext context = {}; context.doc = lam::up(&doc); context.selected_view_tree = lam::up(tree);
+        float size = -1.0f;
+        EXPECT_TRUE(layout_get_last_remembered_size(&context, memory, false, &size));
+        EXPECT_FLOAT_EQ(size, expected);
+    };
+    for (size_t i = 0; i < 2; i++) {
+        ViewEnvironment environment = view_environment_default(VIEW_PRESENTATION_PAGED);
+        environment.print_media = i != 0;
+        editions[i] = view_tree_secondary_create(&doc, &environment); ASSERT_NE(editions[i], nullptr);
+        ASSERT_EQ(compose(editions[i]), TYPESET_OK);
+        EXPECT_FLOAT_EQ(height(editions[i]), i ? 86.0f : 46.0f);
+        remembered(editions[i], i ? 80.0f : 40.0f);
+    }
+    ViewPreviewOptions preview_options = view_preview_options_default();
+    ViewTree* retained = view_tree_page_instances_create(editions[0], nullptr, &preview_options);
+    ASSERT_NE(retained, nullptr);
+    ViewPageBox* old_page = editions[0]->model->pages.get()[0];
+    ASSERT_TRUE(memory->set_attribute("style", "content-visibility:hidden"));
+    for (size_t i = 0; i < 2; i++) {
+        ASSERT_EQ(compose(editions[i]), TYPESET_OK);
+        EXPECT_FLOAT_EQ(height(editions[i]), i ? 86.0f : 46.0f);
+        remembered(editions[i], i ? 80.0f : 40.0f);
+        EXPECT_EQ(source_fragment(editions[i], child, VIEW_FRAGMENT_BODY, true), nullptr);
+    }
+    EXPECT_EQ(view_tree_page_material(retained, retained->model->pages.get()[0]), old_page);
+    for (float scale : {1.0f, 2.0f}) {
+        for (ViewTree* tree : {retained, editions[0]}) {
+            ImageSurface* pixels = render_secondary_page_snapshot(tree, 1, scale); ASSERT_NE(pixels, nullptr);
+            size_t position = (size_t)(20.0f * scale);
+            EXPECT_EQ(snapshot_pixel(pixels, position, position),
+                tree == retained ? 0xff008000u : 0xffffffffu);
+            image_surface_destroy(pixels);
+        }
+    }
+    ViewTree* fresh = secondary(); ASSERT_NE(fresh, nullptr);
+    ASSERT_EQ(compose(fresh), TYPESET_OK);
+    EXPECT_FLOAT_EQ(height(fresh), 13.0f);
+
+    ASSERT_TRUE(child->set_attribute("style", "height:120px"));
+    ASSERT_EQ(compose(editions[0]), TYPESET_OK);
+    EXPECT_FLOAT_EQ(height(editions[0]), 46.0f);
+    ASSERT_TRUE(memory->set_attribute("style", "content-visibility:visible"));
+    ASSERT_EQ(compose(editions[0]), TYPESET_OK);
+    EXPECT_FLOAT_EQ(height(editions[0]), 126.0f);
+    remembered(editions[0], 120.0f);
+    remembered(editions[1], 80.0f);
+
+    // failed composition retains the previous successful edition's sizing memory.
+    ASSERT_TRUE(child->set_attribute("style", "height:160px"));
+    ASSERT_TRUE(view_tree_model_reset(editions[0]));
+    PagedLayoutOptions limited = options; limited.max_block_trials = 1;
+    EXPECT_EQ(layout_secondary_view(editions[0], &limited, nullptr), TYPESET_BUDGET_EXHAUSTED);
+    EXPECT_FALSE(editions[0]->model->committed);
+    remembered(editions[0], 120.0f);
+    ASSERT_TRUE(child->set_attribute("style", "height:120px"));
+    ASSERT_TRUE(view_tree_model_reset(editions[0]));
+    ASSERT_EQ(compose(editions[0]), TYPESET_OK);
+
+    ASSERT_TRUE(memory->set_attribute("style", "content-visibility:hidden;contain-intrinsic-size:7px"));
+    ASSERT_EQ(compose(editions[0]), TYPESET_OK);
+    EXPECT_FLOAT_EQ(height(editions[0]), 13.0f);
+    ASSERT_TRUE(memory->set_attribute("style", "content-visibility:hidden"));
+    ASSERT_EQ(compose(editions[0]), TYPESET_OK);
+    EXPECT_FLOAT_EQ(height(editions[0]), 13.0f);
+    EXPECT_FLOAT_EQ(source->height, 91.75f);
 }
 
 TEST_F(SecondaryViewTest, CounterResetsReachFollowingSiblingsWithoutEscapingTheirParent) {
@@ -14661,4 +15518,315 @@ TEST_F(SecondaryViewTest, NativeFixedPagesPreserveFullSequencesAndRollbackLateBu
     EXPECT_EQ(tree->model->page_count, 0u); EXPECT_EQ(tree->model->node_count, 1u); EXPECT_FALSE(tree->model->committed);
     ASSERT_TRUE(view_tree_model_reset(tree)); options = paged_layout_options_default();
     ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK); EXPECT_EQ(tree->model->page_count, 53u);
+}
+
+TEST_F(SecondaryViewTest, RadialPreludeGrammarPreservesEarlierImagesAndSelectedCandidates) {
+    const char* invalid[] = {"circle 50%", "ellipse 16px", "circle 24px 16px", "ellipse 24px 16px 8px",
+        "circle circle", "ellipse closest-side 24px 16px", "24px ellipse 16px", "circle -1px",
+        "ellipse 50% -1%", "circle calc(50%)", "circle calc(4em + 1%)",
+        "ellipse 24px 16px at right 3px bottom", "ellipse 24px 16px at", "circle 16px at left right"};
+    UiContext ui = {}; LayoutContext context = {}; context.ui_context = lam::up(&ui);
+    for (const char* prelude : invalid) for (bool selected : {false, true}) {
+        SCOPED_TRACE(prelude);
+        SCOPED_TRACE(selected);
+        char style[1024];
+        snprintf(style, sizeof(style), "background-image:radial-gradient(red,red);background-image:%sradial-gradient(%s,red,blue)%s!important",
+            selected ? "image-set(" : "", prelude, selected ? " 1x)" : "");
+        DomElement* element = block(nullptr, style); ASSERT_NE(element, nullptr);
+        resolve_style(element, &context);
+        ASSERT_NE(element->boundary()->background, nullptr);
+        ASSERT_NE(element->boundary()->background->radial_gradient, nullptr);
+        EXPECT_EQ(element->boundary()->background->radial_gradient->stops[0].color.r, 255);
+        EXPECT_EQ(element->boundary()->background->radial_gradient->stops[1].color.r, 255);
+    }
+    const char* valid[] = {"ellipse 24px 16px", "24px 16px ellipse", "24px 16px", "circle 16px",
+        "16px circle", "16px", "ellipse 50% 50%", "ellipse min(50%,24px) max(25%,16px)",
+        "circle calc(4em)", "circle calc(-1px)", "circle 0", "ellipse 0 0",
+        "ellipse 24px 16px at right 3px bottom 5px"};
+    for (const char* prelude : valid) {
+        SCOPED_TRACE(prelude);
+        char declaration[512]; snprintf(declaration, sizeof(declaration), "background-image:radial-gradient(%s,red,blue)", prelude);
+        EXPECT_NE(css_parse_declaration_text(declaration, strlen(declaration), doc.document_pool), nullptr);
+    }
+}
+
+TEST_F(SecondaryViewTest, RadialExplicitRadiiUseOwnerMathAndIndependentTileAxes) {
+    UiContext ui = {}; LayoutContext context = {}; context.ui_context = lam::up(&ui);
+    const struct { const char* prelude; float rx, ry, wide_rx, wide_ry; } cases[] = {
+        {"ellipse 24px 16px", 24, 16, 24, 16}, {"24px 16px ellipse", 24, 16, 24, 16},
+        {"ellipse 50% 50%", 24, 16, 48, 32}, {"ellipse 6em 4em", 24, 16, 24, 16},
+        {"ellipse calc(6em) calc(4em)", 24, 16, 24, 16},
+        {"ellipse min(50%,6em) max(25%,4em)", 24, 16, 24, 16},
+        {"ellipse calc(25% + 3em) calc(25% + 2em)", 24, 16, 36, 24},
+        {"circle 16px", 16, 16, 16, 16}, {"16px", 16, 16, 16, 16},
+        {"circle 4em", 16, 16, 16, 16}, {"circle calc(4em)", 16, 16, 16, 16},
+        {"circle calc(-1px)", 0, 0, 0, 0}
+    };
+    for (const auto& item : cases) {
+        SCOPED_TRACE(item.prelude);
+        char style[512]; snprintf(style, sizeof(style), "font-size:4px;background-image:radial-gradient(%s at center,red,blue)", item.prelude);
+        DomElement* element = block(nullptr, style); ASSERT_NE(element, nullptr); resolve_style(element, &context);
+        RadialGradient* gradient = element->boundary()->background->radial_gradient; ASSERT_NE(gradient, nullptr);
+        ASSERT_NE(gradient->computed_geometry, nullptr); EXPECT_EQ(gradient->stop_count, 2);
+        RadiantRadialGeometry narrow = radiant_radial_gradient_geometry(gradient, {3, 5, 48, 32});
+        EXPECT_FLOAT_EQ(narrow.cx, 27); EXPECT_FLOAT_EQ(narrow.cy, 21);
+        EXPECT_FLOAT_EQ(narrow.rx, item.rx); EXPECT_FLOAT_EQ(narrow.ry, item.ry);
+        RadiantRadialGeometry wide = radiant_radial_gradient_geometry(gradient, {3, 5, 96, 64});
+        EXPECT_FLOAT_EQ(wide.rx, item.wide_rx); EXPECT_FLOAT_EQ(wide.ry, item.wide_ry);
+    }
+}
+
+TEST_F(SecondaryViewTest, RadialInheritedMathOwnsItsSyntaxAcrossRecascadeAndRetirement) {
+    UiContext ui = {}; LayoutContext context = {}; context.ui_context = lam::up(&ui);
+    const char* source = "font-size:4px;background-image:radial-gradient(ellipse min(50%,6em) max(25%,4em),red,blue)";
+    DomElement* parent = block(nullptr, source); ASSERT_NE(parent, nullptr);
+    DomElement* child = block(nullptr, "font-size:30px;background-image:inherit", "div", parent); ASSERT_NE(child, nullptr);
+    resolve_style(parent, &context); resolve_style(child, &context);
+    RadialGradient* original = parent->boundary()->background->radial_gradient;
+    RadialGradient* inherited = child->boundary()->background->radial_gradient;
+    ASSERT_NE(original, nullptr); ASSERT_NE(inherited, nullptr);
+    EXPECT_NE(original, inherited); EXPECT_NE(original->stops, inherited->stops);
+    ASSERT_NE(original->computed_geometry, nullptr); ASSERT_NE(inherited->computed_geometry, nullptr);
+    EXPECT_NE(original->computed_geometry, inherited->computed_geometry);
+    EXPECT_NE(original->computed_geometry->data.list.values[0], inherited->computed_geometry->data.list.values[0]);
+    PoolStats warm = {}; pool_get_detailed_stats(doc.view_tree->prop_pool, &warm);
+    for (size_t cycle = 0; cycle < 256; cycle++) resolve_style(child, &context);
+    PoolStats repeated = {}; pool_get_detailed_stats(doc.view_tree->prop_pool, &repeated);
+    EXPECT_EQ(warm.live_bytes, repeated.live_bytes); EXPECT_EQ(warm.allocation_count - warm.free_count, repeated.allocation_count - repeated.free_count);
+    inherited = child->boundary()->background->radial_gradient;
+    ASSERT_TRUE(parent->set_attribute("style", "font-size:4px;background:none")); resolve_style(parent, &context);
+    RadiantRadialGeometry geometry = radiant_radial_gradient_geometry(inherited, {0, 0, 96, 32});
+    EXPECT_FLOAT_EQ(geometry.rx, 24); EXPECT_FLOAT_EQ(geometry.ry, 16);
+    EXPECT_EQ(inherited->stops[0].color.r, 255);
+    ASSERT_TRUE(parent->set_attribute("style", "font-size:8px;background-image:radial-gradient(ellipse min(50%,6em) max(25%,4em),red,blue)"));
+    resolve_style(parent, &context); resolve_style(child, &context);
+    geometry = radiant_radial_gradient_geometry(child->boundary()->background->radial_gradient, {0, 0, 96, 32});
+    EXPECT_FLOAT_EQ(geometry.rx, 48); EXPECT_FLOAT_EQ(geometry.ry, 32);
+}
+
+TEST_F(SecondaryViewTest, RadialMaskReplacementReclaimsComputedRadiusPayloads) {
+    DomElement* element = block(nullptr); ASSERT_NE(element, nullptr);
+    LayoutContext context = {}; context.doc = lam::up(&doc); context.pool = lam::up(doc.view_tree->prop_pool.get());
+    context.selected_view_tree = lam::up(doc.view_tree.get()); context.view = lam::up((View*)element); context.elmt = lam::up(element);
+    const char* text = "mask-image:radial-gradient(ellipse min(50%,24px) max(25%,16px),black,transparent)";
+    CssDeclaration* gradient = css_parse_declaration_text(text, strlen(text), doc.document_pool); ASSERT_NE(gradient, nullptr);
+    CssDeclaration* none = css_parse_declaration_text("mask-image:none", strlen("mask-image:none"), doc.document_pool); ASSERT_NE(none, nullptr);
+    resolve_css_property(CSS_PROPERTY_MASK_IMAGE, gradient, &context);
+    ASSERT_NE(element->boundary()->mask, nullptr); ASSERT_NE(element->boundary()->mask->radial_gradient, nullptr);
+    ASSERT_NE(element->boundary()->mask->radial_gradient->computed_geometry, nullptr);
+    resolve_css_property(CSS_PROPERTY_MASK_IMAGE, none, &context);
+    PoolStats warm = {}; pool_get_detailed_stats(doc.view_tree->prop_pool, &warm);
+    for (size_t cycle = 0; cycle < 256; cycle++) {
+        resolve_css_property(CSS_PROPERTY_MASK_IMAGE, gradient, &context);
+        resolve_css_property(CSS_PROPERTY_MASK_IMAGE, none, &context);
+    }
+    PoolStats repeated = {}; pool_get_detailed_stats(doc.view_tree->prop_pool, &repeated);
+    EXPECT_EQ(warm.live_bytes, repeated.live_bytes); EXPECT_EQ(warm.allocation_count - warm.free_count, repeated.allocation_count - repeated.free_count);
+}
+
+TEST_F(SecondaryViewTest, GradientCenterMathUsesWholeBoxAxesAndEdgeOrigins) {
+    UiContext ui = {}; LayoutContext context = {}; context.ui_context = lam::up(&ui);
+    const struct { const char* position; float x, y, wide_x, wide_y; } cases[] = {
+        {"right 3px bottom 5px", 45, 27, 93, 59},
+        {"bottom 5px right 3px", 45, 27, 93, 59},
+        {"right 50% bottom 50%", 24, 16, 48, 32},
+        {"calc(25% + 4px) calc(25% + 4px)", 16, 12, 28, 20},
+        {"min(25%,24px) max(25%,4px)", 12, 8, 24, 16},
+        {"right calc(1em) bottom calc(2em)", 44, 24, 92, 56},
+        {"left -3px top -5px", -3, -5, -3, -5}
+    };
+    for (bool conic : {false, true}) for (const auto& item : cases) {
+        SCOPED_TRACE(item.position);
+        SCOPED_TRACE(conic);
+        char style[1024]; snprintf(style, sizeof(style), "font-size:4px;background-image:%s(%s at %s,red,blue)",
+            conic ? "conic-gradient" : "radial-gradient", conic ? "from 30deg" : "circle 16px", item.position);
+        DomElement* element = block(nullptr, style); ASSERT_NE(element, nullptr); resolve_style(element, &context);
+        BackgroundProp* background = element->boundary()->background; ASSERT_NE(background, nullptr);
+        ASSERT_TRUE(conic ? background->conic_gradient != nullptr : background->radial_gradient != nullptr);
+        RadiantGradientCenter narrow = conic ? radiant_gradient_center(background->conic_gradient.get(), {3,5,48,32})
+            : radiant_gradient_center(background->radial_gradient.get(), {3,5,48,32});
+        EXPECT_FLOAT_EQ(narrow.x, item.x + 3); EXPECT_FLOAT_EQ(narrow.y, item.y + 5);
+        RadiantGradientCenter wide = conic ? radiant_gradient_center(background->conic_gradient.get(), {3,5,96,64})
+            : radiant_gradient_center(background->radial_gradient.get(), {3,5,96,64});
+        EXPECT_FLOAT_EQ(wide.x, item.wide_x + 3); EXPECT_FLOAT_EQ(wide.y, item.wide_y + 5);
+    }
+}
+
+TEST_F(SecondaryViewTest, InheritedGradientCentersKeepOwnerFontsAndReclaimGeometry) {
+    UiContext ui = {}; LayoutContext context = {}; context.ui_context = lam::up(&ui);
+    for (bool conic : {false, true}) {
+        SCOPED_TRACE(conic);
+        char source[1024]; snprintf(source, sizeof(source), "font-size:4px;background-image:%s(%s at right calc(1em) bottom calc(2em),red,blue)",
+            conic ? "conic-gradient" : "radial-gradient", conic ? "from 30deg" : "circle 16px");
+        DomElement* parent = block(nullptr, source); ASSERT_NE(parent, nullptr);
+        DomElement* child = block(nullptr, "font-size:30px;background-image:inherit", "div", parent); ASSERT_NE(child, nullptr);
+        resolve_style(parent, &context); resolve_style(child, &context);
+        auto parameters = [&](BackgroundProp* background) -> CssValue* {
+            return conic ? background->conic_gradient->computed_geometry.get() : background->radial_gradient->computed_geometry.get();
+        };
+        auto center = [&](BackgroundProp* background) -> RadiantGradientCenter {
+            return conic ? radiant_gradient_center(background->conic_gradient.get(), {0,0,48,32})
+                : radiant_gradient_center(background->radial_gradient.get(), {0,0,48,32});
+        };
+        CssValue* original = parameters(parent->boundary()->background);
+        CssValue* inherited = parameters(child->boundary()->background);
+        ASSERT_NE(original, nullptr); ASSERT_NE(inherited, nullptr); EXPECT_NE(original, inherited);
+        EXPECT_NE(original->data.list.values[GRADIENT_GEOMETRY_CENTER_X], inherited->data.list.values[GRADIENT_GEOMETRY_CENTER_X]);
+        RadiantGradientCenter position = center(child->boundary()->background);
+        EXPECT_FLOAT_EQ(position.x, 44); EXPECT_FLOAT_EQ(position.y, 24);
+        PoolStats warm = {}; pool_get_detailed_stats(doc.view_tree->prop_pool, &warm);
+        for (size_t cycle = 0; cycle < 256; cycle++) resolve_style(child, &context);
+        PoolStats repeated = {}; pool_get_detailed_stats(doc.view_tree->prop_pool, &repeated);
+        EXPECT_EQ(warm.live_bytes, repeated.live_bytes);
+        EXPECT_EQ(warm.allocation_count - warm.free_count, repeated.allocation_count - repeated.free_count);
+        ASSERT_TRUE(parent->set_attribute("style", "background:none")); resolve_style(parent, &context);
+        position = center(child->boundary()->background); EXPECT_FLOAT_EQ(position.x, 44); EXPECT_FLOAT_EQ(position.y, 24);
+        snprintf(source, sizeof(source), "font-size:8px;background-image:%s(%s at right calc(1em) bottom calc(2em),red,blue)",
+            conic ? "conic-gradient" : "radial-gradient", conic ? "from 30deg" : "circle 16px");
+        ASSERT_TRUE(parent->set_attribute("style", source)); resolve_style(parent, &context); resolve_style(child, &context);
+        position = center(child->boundary()->background); EXPECT_FLOAT_EQ(position.x, 40); EXPECT_FLOAT_EQ(position.y, 16);
+    }
+}
+
+TEST_F(SecondaryViewTest, GradientNamesAndRadialPreludeKeywordsUseCaselessMetadata) {
+    UiContext ui = {}; LayoutContext context = {}; context.ui_context = lam::up(&ui);
+    const struct { const char* value; GradientType type; bool repeating; } cases[] = {
+        {"LINEAR-GRADIENT(red,blue)", GRADIENT_LINEAR, false},
+        {"REPEATING-LINEAR-GRADIENT(red,blue)", GRADIENT_LINEAR, true},
+        {"RADIAL-GRADIENT(CIRCLE 16px AT RIGHT 3px BOTTOM 5px,red,blue)", GRADIENT_RADIAL, false},
+        {"REPEATING-RADIAL-GRADIENT(ELLIPSE 24px 16px AT CENTER,red,blue)", GRADIENT_RADIAL, true},
+        {"CONIC-GRADIENT(FROM 30deg AT RIGHT 3px BOTTOM 5px,red,blue)", GRADIENT_CONIC, false},
+        {"REPEATING-CONIC-GRADIENT(AT CENTER,red,blue)", GRADIENT_CONIC, true}
+    };
+    for (const auto& item : cases) {
+        SCOPED_TRACE(item.value);
+        char style[1024]; snprintf(style, sizeof(style), "background-image:%s", item.value);
+        DomElement* element = block(nullptr, style); ASSERT_NE(element, nullptr); resolve_style(element, &context);
+        BackgroundProp* background = element->boundary()->background; ASSERT_NE(background, nullptr);
+        EXPECT_EQ(background->gradient_type, item.type);
+        auto check = [&](const auto* gradient) {
+            ASSERT_NE(gradient, nullptr);
+            EXPECT_EQ(gradient->is_repeating, item.repeating);
+        };
+        if (item.type == GRADIENT_LINEAR) check(background->linear_gradient.get());
+        if (item.type == GRADIENT_RADIAL) check(background->radial_gradient.get());
+        if (item.type == GRADIENT_CONIC) check(background->conic_gradient.get());
+    }
+}
+
+static const GradientStop* secondary_gradient_stops(BackgroundProp* background, int* count) {
+    if (!background || !count) return nullptr;
+    auto read = [&](const auto* gradient) -> const GradientStop* {
+        *count = gradient ? gradient->stop_count : 0;
+        return gradient ? gradient->stops.get() : nullptr;
+    };
+    if (background->gradient_type == GRADIENT_LINEAR) return read(background->linear_gradient.get());
+    if (background->gradient_type == GRADIENT_RADIAL) return read(background->radial_gradient.get());
+    if (background->gradient_type == GRADIENT_CONIC) return read(background->conic_gradient.get());
+    *count = 0; return nullptr;
+}
+
+TEST_F(SecondaryViewTest, GradientStopMathUsesOwnerUnitsAndTheUsedLineBeforeFixup) {
+    UiContext ui = {}; LayoutContext context = {}; context.ui_context = lam::up(&ui);
+    const struct { const char* image; float line, first, second, third, last; } cases[] = {
+        {"linear-gradient(to right,red calc(25% + 3em),white,black,blue)", 48, .5f, 2.0f/3.0f, 5.0f/6.0f, 1},
+        {"linear-gradient(to right,red calc(25% + 3em),white,black,blue)", 96, .375f, .5833333333f, .7916666667f, 1},
+        {"linear-gradient(to right,red 40px,white calc(25%),black,blue 48px)", 48, 40.0f/48.0f, 40.0f/48.0f, 44.0f/48.0f, 1},
+        {"linear-gradient(to right,red calc(-24px),white,black,blue 100%)", 48, -.5f, 0, .5f, 1},
+        {"linear-gradient(to right,red min(50%,6em),white,black,blue)", 96, .25f, .5f, .75f, 1},
+        {"radial-gradient(circle 16px,red calc(2em),white,black,blue)", 16, .5f, 2.0f/3.0f, 5.0f/6.0f, 1},
+        {"conic-gradient(at center,red calc(.5turn),white,black,blue)", 1, .5f, 2.0f/3.0f, 5.0f/6.0f, 1},
+        {"conic-gradient(at center,red calc(25%),white,black,blue)", 1, .25f, .5f, .75f, 1}
+    };
+    for (const auto& item : cases) {
+        SCOPED_TRACE(item.image);
+        char style[1024]; snprintf(style, sizeof(style), "font-size:4px;background-image:%s", item.image);
+        DomElement* element = block(nullptr, style); ASSERT_NE(element, nullptr); resolve_style(element, &context);
+        int count = 0; const GradientStop* source = secondary_gradient_stops(element->boundary()->background, &count);
+        ASSERT_NE(source, nullptr); ASSERT_EQ(count, 4);
+        RdtGradientStop stops[4]; ASSERT_TRUE(render_copy_gradient_stops(source, count, item.line, stops, 4, nullptr));
+        EXPECT_FLOAT_EQ(stops[0].offset, item.first); EXPECT_FLOAT_EQ(stops[1].offset, item.second);
+        EXPECT_FLOAT_EQ(stops[2].offset, item.third); EXPECT_FLOAT_EQ(stops[3].offset, item.last);
+    }
+}
+
+TEST_F(SecondaryViewTest, InheritedGradientStopMathOwnsItsSyntaxAcrossRetirementAndRecascade) {
+    UiContext ui = {}; LayoutContext context = {}; context.ui_context = lam::up(&ui);
+    const struct { const char* function; const char* prelude; const char* position; float line, initial, resized; } cases[] = {
+        {"linear-gradient", "to right,", "calc(6em)", 96, .25f, .5f},
+        {"radial-gradient", "circle 64px,", "min(75%,6em)", 64, .375f, .75f},
+        {"conic-gradient", "at center,", "calc(25%)", 1, .25f, .25f}
+    };
+    for (const auto& item : cases) {
+        SCOPED_TRACE(item.function);
+        char style[1024]; snprintf(style, sizeof(style), "font-size:4px;background-image:%s(%sred %s,blue)", item.function, item.prelude, item.position);
+        DomElement* parent = block(nullptr, style); ASSERT_NE(parent, nullptr);
+        DomElement* child = block(nullptr, "font-size:30px;background-image:inherit", "div", parent); ASSERT_NE(child, nullptr);
+        resolve_style(parent, &context); resolve_style(child, &context);
+        int count = 0; const GradientStop* original = secondary_gradient_stops(parent->boundary()->background, &count);
+        const GradientStop* inherited = secondary_gradient_stops(child->boundary()->background, &count);
+        ASSERT_NE(original, nullptr); ASSERT_NE(inherited, nullptr); ASSERT_EQ(count, 2);
+        ASSERT_NE(original[0].position_expression, nullptr); ASSERT_NE(inherited[0].position_expression, nullptr);
+        EXPECT_NE(original, inherited); EXPECT_NE(original[0].position_expression, inherited[0].position_expression);
+        EXPECT_NE(original[0].position_expression->data.function, inherited[0].position_expression->data.function);
+        PoolStats warm = {}; pool_get_detailed_stats(doc.view_tree->prop_pool, &warm);
+        for (size_t cycle = 0; cycle < 256; cycle++) resolve_style(child, &context);
+        PoolStats repeated = {}; pool_get_detailed_stats(doc.view_tree->prop_pool, &repeated);
+        EXPECT_EQ(warm.live_bytes, repeated.live_bytes);
+        EXPECT_EQ(warm.allocation_count - warm.free_count, repeated.allocation_count - repeated.free_count);
+        inherited = secondary_gradient_stops(child->boundary()->background, &count);
+        ASSERT_TRUE(parent->set_attribute("style", "background:none")); resolve_style(parent, &context);
+        RdtGradientStop stops[2]; ASSERT_TRUE(render_copy_gradient_stops(inherited, count, item.line, stops, 2, nullptr));
+        EXPECT_FLOAT_EQ(stops[0].offset, item.initial);
+        snprintf(style, sizeof(style), "font-size:8px;background-image:%s(%sred %s,blue)", item.function, item.prelude, item.position);
+        ASSERT_TRUE(parent->set_attribute("style", style)); resolve_style(parent, &context); resolve_style(child, &context);
+        inherited = secondary_gradient_stops(child->boundary()->background, &count);
+        ASSERT_TRUE(render_copy_gradient_stops(inherited, count, item.line, stops, 2, nullptr)); EXPECT_FLOAT_EQ(stops[0].offset, item.resized);
+    }
+}
+
+TEST_F(SecondaryViewTest, InvalidGradientStopDomainsAndBodiesPreserveEarlierImageWinners) {
+    UiContext ui = {}; LayoutContext context = {}; context.ui_context = lam::up(&ui);
+    const char* invalid[] = {
+        "linear-gradient(to right,red calc(30deg),blue)",
+        "radial-gradient(circle 16px,red calc(1s),blue)",
+        "conic-gradient(at center,red calc(3px),blue)",
+        "linear-gradient(to right,red calc(2),blue)",
+        "linear-gradient(to right,red 25% 50% 75%,blue)",
+        "linear-gradient(to right,red,20%,30%,blue)",
+        "radial-gradient(circle 16px,red,calc(20%))",
+        "conic-gradient(at center,90deg,red,blue)",
+        "image-set(linear-gradient(to right,red calc(30deg),blue) 1x)",
+        "linear-gradient(red calc(30deg),white,blue)"
+    };
+    for (const char* image : invalid) {
+        SCOPED_TRACE(image);
+        char style[2048]; snprintf(style, sizeof(style), "background-image:linear-gradient(red,red);background-image:%s", image);
+        DomElement* element = block(nullptr, style); ASSERT_NE(element, nullptr); resolve_style(element, &context);
+        BackgroundProp* background = element->boundary()->background; ASSERT_NE(background, nullptr);
+        EXPECT_EQ(background->gradient_type, GRADIENT_LINEAR);
+        int count = 0; const GradientStop* stops = secondary_gradient_stops(background, &count); ASSERT_NE(stops, nullptr); ASSERT_EQ(count, 2);
+        EXPECT_EQ(stops[0].color.r, 255); EXPECT_EQ(stops[1].color.r, 255); EXPECT_EQ(stops[1].color.b, 0);
+    }
+}
+
+TEST_F(SecondaryViewTest, RadialMaskReplacementReclaimsComputedStopExpressions) {
+    DomElement* element = block(nullptr); ASSERT_NE(element, nullptr);
+    LayoutContext context = {}; context.doc = lam::up(&doc); context.pool = lam::up(doc.view_tree->prop_pool.get());
+    context.selected_view_tree = lam::up(doc.view_tree.get()); context.view = lam::up((View*)element); context.elmt = lam::up(element);
+    const char* text = "mask-image:radial-gradient(circle 16px,black min(50%,8px),transparent calc(100%))";
+    CssDeclaration* gradient = css_parse_declaration_text(text, strlen(text), doc.document_pool); ASSERT_NE(gradient, nullptr);
+    CssDeclaration* none = css_parse_declaration_text("mask-image:none", strlen("mask-image:none"), doc.document_pool); ASSERT_NE(none, nullptr);
+    resolve_css_property(CSS_PROPERTY_MASK_IMAGE, gradient, &context);
+    ASSERT_NE(element->boundary()->mask, nullptr); ASSERT_NE(element->boundary()->mask->radial_gradient, nullptr);
+    ASSERT_NE(element->boundary()->mask->radial_gradient->stops[0].position_expression, nullptr);
+    resolve_css_property(CSS_PROPERTY_MASK_IMAGE, none, &context);
+    PoolStats warm = {}; pool_get_detailed_stats(doc.view_tree->prop_pool, &warm);
+    for (size_t cycle = 0; cycle < 256; cycle++) {
+        resolve_css_property(CSS_PROPERTY_MASK_IMAGE, gradient, &context);
+        resolve_css_property(CSS_PROPERTY_MASK_IMAGE, none, &context);
+    }
+    PoolStats repeated = {}; pool_get_detailed_stats(doc.view_tree->prop_pool, &repeated);
+    EXPECT_EQ(warm.live_bytes, repeated.live_bytes);
+    EXPECT_EQ(warm.allocation_count - warm.free_count, repeated.allocation_count - repeated.free_count);
 }

@@ -64,120 +64,15 @@ static const char* stabilize_custom_layout_name(const char* name, char* storage,
     return storage;
 }
 
-typedef struct CssContentImage {
-    const char* url;
-    float resolution;
-} CssContentImage;
-
-static bool css_image_set_resolution_from_value(const CssValue* value, float* out_resolution) {
-    if (!value || !out_resolution) return false;
-    if (value->type == CSS_VALUE_TYPE_LENGTH) {
-        float resolution = (float)value->data.length.value;
-        if (value->data.length.unit == CSS_UNIT_DPPX) {
-            *out_resolution = resolution;
-            return resolution > 0.0f;
-        }
-        if (value->data.length.unit == CSS_UNIT_DPI) {
-            *out_resolution = resolution / 96.0f;
-            return resolution > 0.0f;
-        }
-        if (value->data.length.unit == CSS_UNIT_DPCM) {
-            *out_resolution = resolution * 2.54f / 96.0f;
-            return resolution > 0.0f;
-        }
-    }
-    if (value->type == CSS_VALUE_TYPE_CUSTOM && value->data.custom_property.name) {
-        const char* text = value->data.custom_property.name;
-        char* end = nullptr;
-        double parsed = strtod(text, &end);
-        if (end && *end == 'x' && end[1] == '\0' && parsed > 0.0) {
-            *out_resolution = (float)parsed;
-            return true;
-        }
-    }
-    return false;
-}
-
-static bool css_image_set_candidate_from_value(const CssValue* value, CssContentImage* out_image) {
-    if (!value || !out_image) return false;
-    const char* url = nullptr;
-    float resolution = 1.0f;
-    if (value->type == CSS_VALUE_TYPE_URL) {
-        url = value->data.url;
-    } else if (value->type == CSS_VALUE_TYPE_FUNCTION && value->data.function &&
-               css_function_name_is(value->data.function, "url") &&
-               value->data.function->arg_count > 0 && value->data.function->args[0]) {
-        url = css_value_identifier_name(value->data.function->args[0]);
-    } else if (value->type == CSS_VALUE_TYPE_LIST && value->data.list.values) {
-        for (int i = 0; i < value->data.list.count; i++) {
-            CssValue* item = value->data.list.values[i];
-            CssContentImage nested = {nullptr, 1.0f};
-            float item_resolution = 1.0f;
-            if (!url && css_image_set_candidate_from_value(item, &nested)) {
-                url = nested.url;
-                resolution = nested.resolution;
-            } else if (css_image_set_resolution_from_value(item, &item_resolution)) {
-                resolution = item_resolution;
-            }
-        }
-    }
-    if (!url || !url[0] || resolution <= 0.0f) return false;
-    out_image->url = url;
-    out_image->resolution = resolution;
-    return true;
-}
-
-static bool css_content_replacement_image(const CssValue* value, CssContentImage* out_image) {
-    if (!value || !out_image) return false;
-    if (value->type == CSS_VALUE_TYPE_URL) {
-        out_image->url = value->data.url;
-        out_image->resolution = 1.0f;
-        return out_image->url && out_image->url[0];
-    }
-    if (value->type == CSS_VALUE_TYPE_FUNCTION && value->data.function &&
-        css_function_name_is(value->data.function, "url") &&
-        value->data.function->arg_count > 0 && value->data.function->args[0]) {
-        out_image->url = css_value_identifier_name(value->data.function->args[0]);
-        out_image->resolution = 1.0f;
-        return out_image->url && out_image->url[0];
-    }
-    if (value->type == CSS_VALUE_TYPE_FUNCTION && value->data.function &&
-        (css_function_name_is(value->data.function, "image-set") ||
-         css_function_name_is(value->data.function, "-webkit-image-set"))) {
-        for (int i = 0; i < value->data.function->arg_count; i++) {
-            if (css_image_set_candidate_from_value(value->data.function->args[i], out_image)) {
-                // CSS Images: a selected image's density converts resource pixels to CSS px.
-                return true;
-            }
-        }
-    }
+static bool css_content_replacement_image(const CssValue* value, LayoutContext* context,
+                                          CssImageChoice* choice) {
+    if (!value || !choice) return false;
     if (value->type == CSS_VALUE_TYPE_LIST) {
-        for (int i = 0; i < value->data.list.count; i++) {
-            if (css_content_replacement_image(value->data.list.values[i], out_image)) return true;
-        }
+        for (int index = 0; index < value->data.list.count; index++)
+            if (css_content_replacement_image(value->data.list.values[index], context, choice)) return true;
+        return false;
     }
-    return false;
-}
-
-static bool css_content_value_is_image_set(const CssValue* value) {
-    return layout_css_value_any(value, [](const CssValue* item) {
-        return item->type == CSS_VALUE_TYPE_FUNCTION && item->data.function &&
-            (css_function_name_is(item->data.function, "image-set") ||
-             css_function_name_is(item->data.function, "-webkit-image-set"));
-    });
-}
-
-static bool block_has_auto_content_image_set(ViewBlock* block) {
-    if (!block || !block->specified_style) return false;
-    CssDeclaration* content_decl = style_tree_get_declaration(block->specified_style, CSS_PROPERTY_CONTENT);
-    if (!content_decl || !css_content_value_is_image_set(content_decl->value)) return false;
-    bool width_auto = !block->blk || block->block()->given_width < 0.0f ||
-        block->block()->given_width_type == CSS_VALUE_AUTO ||
-        block->block()->given_width_type == CSS_VALUE__UNDEF;
-    bool height_auto = !block->blk || block->block()->given_height < 0.0f ||
-        block->block()->given_height_type == CSS_VALUE_AUTO ||
-        block->block()->given_height_type == CSS_VALUE__UNDEF;
-    return width_auto || height_auto;
+    return layout_select_css_image(value, layout_image_device_scale(context), choice) && choice->url;
 }
 
 typedef struct ObjectViewBoxUsedRect {
@@ -366,7 +261,7 @@ static ContainIntrinsicUsedAxes apply_contain_intrinsic_used_size(LayoutContext*
     ContainIntrinsicUsedAxes used_axes = {false, false};
     if (!lycon || !block || !block->blk ||
         (!block->block()->contain_size && !block->block()->contain_inline_size &&
-         !block->block()->content_visibility_hidden)) {
+         !block->block()->content_visibility_skipped)) {
         return used_axes;
     }
     bool width_is_auto = layout_block_has_automatic_size(block, true);
@@ -386,7 +281,7 @@ static ContainIntrinsicUsedAxes apply_contain_intrinsic_used_size(LayoutContext*
     };
     bool has_native_select_intrinsic_size = block->form &&
         block->form->control_type == FORM_CONTROL_SELECT &&
-        !block->block()->content_visibility_hidden;
+        !block->block()->content_visibility_skipped;
     LayoutAxisPair<float> empty_size = layout_axis_pair(
         layout_block_empty_content_size_in_axis(block, true),
         layout_block_empty_content_size_in_axis(block, false)
@@ -412,17 +307,12 @@ static ContainIntrinsicUsedAxes apply_contain_intrinsic_used_size(LayoutContext*
         has_intrinsic.y ? block->block()->contain_intrinsic_height : empty_size.y
     };
     DomElement* element = block->is_element() ? block->as_element() : nullptr;
+    LayoutAxisPair<float> remembered_size = {};
     LayoutAxisPair<bool> uses_remembered_size = {
-        block->block()->content_visibility_hidden &&
-            block->block()->contain_intrinsic_width_auto && element &&
-            element->has_last_remembered_width(),
-        block->block()->content_visibility_hidden &&
-            block->block()->contain_intrinsic_height_auto && element &&
-            element->has_last_remembered_height()
-    };
-    LayoutAxisPair<float> remembered_size = {
-        element ? element->last_remembered_width() : 0.0f,
-        element ? element->last_remembered_height() : 0.0f
+        block->block()->content_visibility_skipped && block->block()->contain_intrinsic_width_auto &&
+            layout_get_last_remembered_size(lycon, element, true, &remembered_size.x),
+        block->block()->content_visibility_skipped && block->block()->contain_intrinsic_height_auto &&
+            layout_get_last_remembered_size(lycon, element, false, &remembered_size.y)
     };
     for (LayoutAxis axis : layout_axes()) {
         if (uses_remembered_size[axis]) {
@@ -449,7 +339,7 @@ static ContainIntrinsicUsedAxes apply_contain_intrinsic_used_size(LayoutContext*
 
 static void apply_canvas_last_remembered_size(LayoutContext* lycon, ViewBlock* block) {
     if (!lycon || !block || block->tag() != MARKUP_NAME_CANVAS || !block->blk ||
-        !block->block()->content_visibility_hidden) {
+        !block->block()->content_visibility_skipped) {
         return;
     }
     LayoutAxisPair<bool> use = {
@@ -717,17 +607,17 @@ static void layout_block_prepare_canvas_auto_size(
     if (has_intrinsic_height_constraint &&
         (intrinsic_width != CSS_VALUE__UNDEF ||
          (block->tag() == MARKUP_NAME_CANVAS && width_is_automatic &&
-          !block->block()->content_visibility_hidden))) {
+          !block->block()->content_visibility_skipped))) {
         width_is_automatic = true;
         height_is_automatic = true;
     }
     if (intrinsic_width != CSS_VALUE__UNDEF &&
-        !block->block()->content_visibility_hidden &&
+        !block->block()->content_visibility_skipped &&
         !contain_intrinsic_used_axes.width) {
         width_is_automatic = true;
     }
     if (intrinsic_height != CSS_VALUE__UNDEF &&
-        !block->block()->content_visibility_hidden &&
+        !block->block()->content_visibility_skipped &&
         !contain_intrinsic_used_axes.height) {
         height_is_automatic = true;
     }
@@ -750,7 +640,7 @@ static void layout_block_prepare_canvas_auto_size(
     float css_preferred_aspect_ratio = layout_preferred_aspect_ratio(block);
     bool canvas_has_css_preferred_ratio = css_preferred_aspect_ratio > 0.0f;
     if (block->tag() == MARKUP_NAME_CANVAS &&
-        !block->block()->content_visibility_hidden &&
+        !block->block()->content_visibility_skipped &&
         !canvas_has_css_preferred_ratio) {
         if (block->block()->given_min_height_type == CSS_VALUE_MIN_CONTENT ||
             block->block()->given_min_height_type == CSS_VALUE_MAX_CONTENT ||
@@ -1039,8 +929,8 @@ static bool pseudo_materialize_content_children(LayoutContext* lycon, DomElement
     for (int i = 0; i < item_count; i++) {
         CssValue* item = (value->type == CSS_VALUE_TYPE_LIST) ? value->data.list.values[i] : value;
         if (!item) continue;
-        CssContentImage content_image = {nullptr, 1.0f};
-        bool has_content_image = css_content_replacement_image(item, &content_image);
+        CssImageChoice content_image = {};
+        bool has_content_image = css_content_replacement_image(item, lycon, &content_image);
         if (has_content_image) {
             if (text_buf->length > 0) {
                 pseudo_append_text_child(pseudo_elem, text_buf->str);
@@ -1050,7 +940,8 @@ static bool pseudo_materialize_content_children(LayoutContext* lycon, DomElement
             }
             DomElement* img_elem = pseudo_create_image_child(lycon, pseudo_elem, content_decl, content_image.url);
             if (img_elem) {
-                img_elem->embed->content_image_resolution = content_image.resolution;
+                img_elem->embed->content_image_resolution = layout_css_image_density(
+                    img_elem->embedp()->img, content_image.resolution);
                 pseudo_append_child(pseudo_elem, static_cast<DomNode*>(img_elem));
                 appended_any = true;
             }
@@ -4075,7 +3966,8 @@ static bool layout_list_item_has_visible_marker(ViewBlock* block) {
     // A generated marker is the used box-tree state after counter/style
     // resolution; retain it even when the HTML table UA pass left the inherited
     // list-style field at its default sentinel.
-    if (block->pseudo && block->pseudo->marker) return true;
+    if (block->pseudo && block->pseudo->marker && block->pseudo->marker->marker_prop() &&
+            !block->pseudo->marker->marker_prop()->suppressed) return true;
     if (block->blk && block->block_mut()->list_style_type == CSS_VALUE_NONE) {
         return false;
     }
@@ -4099,16 +3991,27 @@ static bool layout_empty_editing_host(ViewBlock* block) {
     return editing_host_lookup(element, &host) && host.host == element;
 }
 
-void layout_store_last_remembered_size(LayoutContext* lycon, ViewBlock* block) {
+void layout_store_last_remembered_size(LayoutContext* lycon, ViewBlock* block, bool final_pass) {
     if (!lycon || lycon->run_mode != radiant::RunMode::PerformLayout ||
         !block || !block->is_element() || block->view_type == RDT_VIEW_MARKER ||
-        !block->blk || block->block()->content_visibility_hidden ||
-        (!block->block()->contain_intrinsic_width_auto &&
-         !block->block()->contain_intrinsic_height_auto)) {
+        !block->blk || !final_pass || lycon->css_query_probe ||
+        !view_size_containment_applies(block->display)) {
         return;
     }
 
     DomElement* element = block->as_element();
+    if (view_content_visibility_hides(element, CONTENT_VISIBILITY_PAINT, false)) return;
+    LayoutAxisPair<bool> remember = {block->block()->contain_intrinsic_width_auto,
+        block->block()->contain_intrinsic_height_auto};
+    for (LayoutAxis axis : layout_axes()) {
+        if (!remember[axis] && !layout_set_last_remembered_size(
+                lycon, element, axis == LAYOUT_AXIS_X, 0.0f, false)) {
+            log_error("content visibility: cannot remove the selected view's remembered size");
+        }
+    }
+    // skipped descendants retain their prior geometry and cannot refresh sizing memory.
+    if ((!remember[LAYOUT_AXIS_X] && !remember[LAYOUT_AXIS_Y]) ||
+        block->block()->contain_size || block->block()->content_visibility_skipped) return;
     float remembered_width = block->width;
     float remembered_height = block->height;
     LayoutFragmentBox* fragment = element->layout_fragment_list();
@@ -4124,11 +4027,12 @@ void layout_store_last_remembered_size(LayoutContext* lycon, ViewBlock* block) {
     // final fragment geometry is known, without rescanning the whole document.
     remembered_width = layout_content_size_from_border_box(block, remembered_width, true);
     remembered_height = layout_content_size_from_border_box(block, remembered_height, false);
-    if (block->block()->contain_intrinsic_width_auto) {
-        element->set_last_remembered_width(remembered_width);
-    }
-    if (block->block()->contain_intrinsic_height_auto) {
-        element->set_last_remembered_height(remembered_height);
+    // only committed relevant geometry can replace the selected view's remembered size.
+    LayoutAxisPair<float> size = {remembered_width, remembered_height};
+    for (LayoutAxis axis : layout_axes()) {
+        if (remember[axis] && !layout_set_last_remembered_size(lycon, element, axis == LAYOUT_AXIS_X, size[axis])) {
+            log_error("content visibility: cannot retain the selected view's remembered size");
+        }
     }
 }
 
@@ -4232,19 +4136,12 @@ void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, CssEnum display
                 block_box.padding.bottom;
             flow_height = clamp_content_height + block_box.border.bottom;
             block->content_height = clamp_content_height;
-            lycon->block.last_line_ascender = lycon->block.line_clamp_last_line_ascender;
-            lycon->block.last_line_max_ascender = lycon->block.line_clamp_last_line_max_ascender;
-            lycon->block.last_line_max_descender = lycon->block.line_clamp_last_line_max_descender;
         }
+        layout_finalize_line_clamp(lycon, block);
         block->blk->first_line_max_ascender = lycon->block.first_line_max_ascender;
         block->blk->first_line_max_descender = lycon->block.first_line_max_descender;
         block->blk->last_line_max_ascender = lycon->block.last_line_max_ascender;
         block->blk->last_line_max_descender = lycon->block.last_line_max_descender;
-        block->blk->line_clamped = lycon->block.line_clamped;
-        block->blk->line_clamp_advance_y = lycon->block.line_clamp_advance_y;
-        block->blk->line_clamp_last_line_ascender = lycon->block.line_clamp_last_line_ascender;
-        block->blk->line_clamp_last_line_max_ascender = lycon->block.line_clamp_last_line_max_ascender;
-        block->blk->line_clamp_last_line_max_descender = lycon->block.line_clamp_last_line_max_descender;
         // is restored; an empty table line must not erase those cached sets.
         if (block->view_type == RDT_VIEW_TABLE) {
             if (lycon->block.first_line_ascender > 0.0f) {
@@ -5336,7 +5233,9 @@ void layout_materialize_pseudo_content(LayoutContext* lycon, ViewBlock* block,
             insert_pseudo_into_rendered_tree(element, block->pseudo->after, false);
         }
         bool marker_allowed = include_marker &&
-            (block->display.list_item || block->display.outer == CSS_VALUE_LIST_ITEM);
+            (block->display.list_item || block->display.outer == CSS_VALUE_LIST_ITEM) &&
+            (!block->pseudo->marker || !block->pseudo->marker->marker_prop() ||
+             !block->pseudo->marker->marker_prop()->suppressed);
         if (block->pseudo->marker) {
             if (marker_allowed) {
                 insert_pseudo_into_dom(element, block->pseudo->marker, true);
@@ -5905,7 +5804,10 @@ void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block) {
         block->position->first_abs_child = nullptr;
         block->position->last_abs_child = nullptr;
     }
-    if (block->blk && block->block()->content_visibility_hidden) {
+    // auto descendants remain available to geometry queries, selection and focus;
+    // size containment and the paint/hit owners suppress their external effects.
+    if (block->blk && block->block()->content_visibility_skipped &&
+        block->block()->content_visibility == CSS_VALUE_HIDDEN) {
         return;
     }
     if (block->is_element()) {
@@ -6402,6 +6304,53 @@ static bool layout_block_has_multicol_ancestor(ViewBlock* block) {
     return false;
 }
 
+static void layout_propagate_line_clamp(LayoutContext* lycon, ViewBlock* block,
+                                        const BlockContext* parent) {
+    // css overflow 4 §5.2 counts only descendants in the same formatting context.
+    if (!parent || parent->line_clamp <= 0 || parent->line_clamped ||
+        lycon->block.line_clamp != 0 || !block->blk ||
+        block_context_establishes_bfc(block)) return;
+    lycon->block.line_clamp = parent->line_clamp;
+    lycon->block.line_number = parent->line_number;
+    block->blk->line_clamp_inherited = true;
+}
+
+void layout_finalize_line_clamp(LayoutContext* lycon, ViewBlock* block) {
+    if (!block->blk) return;
+    if (lycon->block.line_clamped) {
+        lycon->block.last_line_ascender = lycon->block.line_clamp_last_line_ascender;
+        lycon->block.last_line_max_ascender = lycon->block.line_clamp_last_line_max_ascender;
+        lycon->block.last_line_max_descender = lycon->block.line_clamp_last_line_max_descender;
+    }
+    block->blk->line_clamped = lycon->block.line_clamped;
+    block->blk->line_clamp_advance_y = lycon->block.line_clamp_advance_y;
+    block->blk->line_clamp_last_line_ascender = lycon->block.line_clamp_last_line_ascender;
+    block->blk->line_clamp_last_line_max_ascender = lycon->block.line_clamp_last_line_max_ascender;
+    block->blk->line_clamp_last_line_max_descender = lycon->block.line_clamp_last_line_max_descender;
+}
+
+void layout_setup_line_clamp(LayoutContext* lycon, ViewBlock* block,
+                              const BlockContext* parent) {
+    lycon->block.line_number = 0;
+    bool own_clamp_applies = block->blk &&
+        (!block->block()->line_clamp_legacy || block->display.legacy_clamp);
+    lycon->block.line_clamp = own_clamp_applies ? block->block()->line_clamp : 0;
+    lycon->block.line_clamped = false;
+    lycon->block.line_clamp_advance_y = -1.0f;
+    lycon->block.line_clamp_last_line_ascender = 0.0f;
+    lycon->block.line_clamp_last_line_max_ascender = 0.0f;
+    lycon->block.line_clamp_last_line_max_descender = 0.0f;
+    if (block->blk) {
+        block->blk->line_clamp_inherited = false;
+        block->blk->line_clamped = false;
+        block->blk->line_clamp_advance_y = -1.0f;
+        block->blk->line_clamp_last_line_ascender = 0.0f;
+        block->blk->line_clamp_last_line_max_ascender = 0.0f;
+        block->blk->line_clamp_last_line_max_descender = 0.0f;
+    }
+    layout_propagate_line_clamp(lycon, block, parent);
+}
+
 void setup_inline(LayoutContext* lycon, ViewBlock* block) {
     float content_width = lycon->block.content_width;
     float line_content_width = content_width;
@@ -6471,13 +6420,7 @@ void setup_inline(LayoutContext* lycon, ViewBlock* block) {
     lycon->block.initial_letter_continuation_cleared = false;
     lycon->block.initial_letter_trimmed_start_candidate = 0.0f;
     lycon->block.initial_letter_trimmed_start_contribution = 0.0f;
-    lycon->block.line_number = 0;
-    lycon->block.line_clamp = (block->blk && block->block_mut()->line_clamp > 0) ? block->block_mut()->line_clamp : 0;
-    lycon->block.line_clamped = false;
-    lycon->block.line_clamp_advance_y = -1.0f;
-    lycon->block.line_clamp_last_line_ascender = 0.0f;
-    lycon->block.line_clamp_last_line_max_ascender = 0.0f;
-    lycon->block.line_clamp_last_line_max_descender = 0.0f;
+    layout_setup_line_clamp(lycon, block, lycon->block.parent);
     CssEnum inherited_text_wrap_style = lycon->block.parent ?
         lycon->block.parent->text_wrap_style : CSS_VALUE_AUTO;
     if (!inherited_text_wrap_style) inherited_text_wrap_style = CSS_VALUE_AUTO;
@@ -6485,20 +6428,6 @@ void setup_inline(LayoutContext* lycon, ViewBlock* block) {
         block->block()->text_wrap_style : inherited_text_wrap_style;
     lycon->block.balance_wrap_active = false;
     lycon->block.balance_wrap_width = 0.0f;
-    if (block->blk) {
-        block->blk->line_clamp_inherited = false;
-        block->blk->line_clamped = false;
-        block->blk->line_clamp_advance_y = -1.0f;
-        block->blk->line_clamp_last_line_ascender = 0.0f;
-        block->blk->line_clamp_last_line_max_ascender = 0.0f;
-        block->blk->line_clamp_last_line_max_descender = 0.0f;
-    }
-    if (lycon->block.parent && lycon->block.parent->line_clamp > 0 &&
-        !lycon->block.parent->line_clamped && lycon->block.line_clamp == 0 && block->blk) {
-        lycon->block.line_clamp = lycon->block.parent->line_clamp;
-        lycon->block.line_number = lycon->block.parent->line_number;
-        block->blk->line_clamp_inherited = true;
-    }
     float resolved_text_indent = 0.0f;
     if (block->blk) {
         if (block->block()->text_indent_calc) {
@@ -7839,7 +7768,7 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
         layout_apply_preferred_ratio_to_replaced_auto_axes(lycon, block);
     }
     if (layout_is_svg_viewport(elmt_name) &&
-        !(block->blk && block->block()->content_visibility_hidden)) {
+        !(block->blk && block->block()->content_visibility_skipped)) {
         SvgAnimationSourceScope animation_sources(block->as_element()->doc);
         layout_apply_svg_animated_dimensions(lycon, block);
         ReplacedIntrinsicFacts svg_facts =
@@ -8002,12 +7931,12 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
     float image_auto_size_css_aspect_ratio = 0.0f;
     bool image_auto_size_css_ratio_uses_content_box = false;
     CssDeclaration* content_replacement_decl = nullptr;
-    CssContentImage content_replacement_image = {nullptr, 1.0f};
+    CssImageChoice content_replacement_image = {};
     if (elmt_name != MARKUP_NAME_IMG && block->display.inner == RDT_DISPLAY_REPLACED &&
         block->specified_style) {
         content_replacement_decl = style_tree_get_declaration(block->specified_style, CSS_PROPERTY_CONTENT);
         if (content_replacement_decl) {
-            css_content_replacement_image(content_replacement_decl->value, &content_replacement_image);
+            css_content_replacement_image(content_replacement_decl->value, lycon, &content_replacement_image);
         }
     }
     bool is_generated_content_image = content_replacement_image.url && content_replacement_image.url[0];
@@ -8026,24 +7955,15 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
             layout_ensure_replaced_image_surface(lycon, block, block->as_element());
         }
         if (is_generated_content_image) {
-            const char *value = content_replacement_image.url;
-            size_t value_len = strlen(value);
-            StrBuf* src = strbuf_new_cap(value_len);
-            strbuf_append_str_n(src, value, value_len);
-            if (!block->embed) {
-                block->ensure_embed(lycon);
-            }
-            block->embed->content_image_resolution = is_generated_content_image ?
-                content_replacement_image.resolution : 0.0f;
-            char* resolved_content_url = is_generated_content_image ?
-                resolve_css_resource_url(lycon, content_replacement_decl, src->str) : nullptr;
-            const char* image_url = resolved_content_url ? resolved_content_url : src->str;
-            ImageSurface* loaded_img = block->embedp()->img ? block->embedp()->img :
-                load_document_image(lycon->doc, lycon->ui_context, image_url);
-            // the image cache owns the surface; the element only borrows it
-            if (loaded_img) block->embed->img = lam::up(loaded_img);
-            strbuf_free(src);
-            if (block->embedp()->img) {
+            char* image_url = resolve_css_resource_url(lycon, content_replacement_decl,
+                content_replacement_image.url);
+            ImageSurface* image = layout_admit_replaced_image_surface(lycon, block, image_url,
+                content_replacement_image.resolution);
+            // admission retains its source and the image cache owns its key; release this resolution scratch.
+            if (image_url) pool_free(layout_prop_pool(lycon), image_url);
+            if (image) {
+                block->embed->content_image_resolution = layout_css_image_density(
+                    image, content_replacement_image.resolution);
                 block->embed->broken_alt_fallback = false;
             }
         } else if (block->embed && block->embedp()->img) {
@@ -8329,19 +8249,6 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
         if (!isnan(block->block()->given_max_width_percent)) {
             block->blk->given_max_width = pa_block->content_width *
                 block->block()->given_max_width_percent / 100.0f;
-        }
-    }
-    if (block_has_auto_content_image_set(block)) {
-        block->ensure_block(lycon);
-        if (lycon->block.given_width < 0.0f &&
-            (block->block()->given_width < 0.0f || block->block()->given_width_type == CSS_VALUE_AUTO ||
-             block->block()->given_width_type == CSS_VALUE__UNDEF)) {
-            layout_store_given_axis(lycon, block, 0.0f, true, true);
-        }
-        if (lycon->block.given_height < 0.0f &&
-            (block->block()->given_height < 0.0f || block->block()->given_height_type == CSS_VALUE_AUTO ||
-             block->block()->given_height_type == CSS_VALUE__UNDEF)) {
-            layout_store_given_axis(lycon, block, 0.0f, false, true);
         }
     }
     ViewBlock* stretch_parent = block->parent_view() && block->parent_view()->is_block()
@@ -9131,12 +9038,7 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
         // authored margin; keep the already-consumed used margin collapsed.
         block->boundary_mut()->margin.top = collapsed_margin_top;
     }
-    if (pa_block && pa_block->line_clamp > 0 && !pa_block->line_clamped &&
-        lycon->block.line_clamp == 0 && block->blk) {
-        lycon->block.line_clamp = pa_block->line_clamp;
-        lycon->block.line_number = pa_block->line_number;
-        block->blk->line_clamp_inherited = true;
-    }
+    layout_propagate_line_clamp(lycon, block, pa_block);
     // CSS 2.1 §10.3.5 (floats) and §10.3.9 (inline-blocks): shrink-to-fit width =
     if ((is_float_auto_width || is_inline_block_auto_width || is_max_content_width ||
          is_min_content_width || is_fit_content_width || block_justify_self_uses_fit_content) &&

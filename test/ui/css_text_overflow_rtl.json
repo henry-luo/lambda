@@ -1,0 +1,1064 @@
+{
+  "name": "RTL ellipsis visual edge, source word boundaries, inherited mutation and restoration",
+  "html": "test/ui/css_text_overflow_rtl.html",
+  "viewport": {
+    "width": 1000,
+    "height": 600
+  },
+  "events": [
+    {
+      "type": "click",
+      "target": {
+        "selector": "#check"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-basic",
+      "equals": "rtl|ellipsis|20px|rgb(0, 0, 255)|none|62|24"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-padded",
+      "equals": "rtl|ellipsis|20px|rgb(0, 0, 255)|none|78|40"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-fits",
+      "equals": "rtl|ellipsis|20px|rgb(0, 0, 255)|none|62|24"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-clip",
+      "equals": "rtl|clip|20px|rgb(0, 0, 255)|none|62|24"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-first_cluster",
+      "equals": "rtl|ellipsis|20px|rgb(0, 0, 255)|none|8|24"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-colors",
+      "equals": "rtl|ellipsis|20px|rgb(0, 0, 255)|none|62|24"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-combining",
+      "equals": "rtl|ellipsis|20px|rgb(0, 0, 255)|none|62|24"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-uppercase",
+      "equals": "rtl|ellipsis|20px|rgb(0, 0, 255)|uppercase|62|24"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-capitalize",
+      "equals": "rtl|ellipsis|20px|rgb(0, 0, 255)|capitalize|62|24"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-word_start",
+      "equals": "rtl|ellipsis|20px|rgb(0, 0, 255)|capitalize|62|24"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-invalid_variable",
+      "equals": "rtl|ellipsis|20px|rgb(0, 0, 255)|none|62|24"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-invalid_literal",
+      "equals": "rtl|ellipsis|20px|rgb(0, 0, 255)|lowercase|62|24"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-opacity",
+      "equals": "rtl|ellipsis|20px|rgb(0, 0, 255)|none|62|24"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-filter",
+      "equals": "rtl|ellipsis|20px|rgb(0, 0, 255)|none|62|24"
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#basic",
+        "offset_x": 4,
+        "offset_y": 17
+      },
+      "search_radius": 2,
+      "min_b": 160,
+      "max_r": 100,
+      "max_g": 100
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#colors",
+        "offset_x": 4,
+        "offset_y": 17
+      },
+      "search_radius": 2,
+      "min_b": 160,
+      "max_r": 100,
+      "max_g": 100
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#combining",
+        "offset_x": 4,
+        "offset_y": 17
+      },
+      "search_radius": 2,
+      "min_b": 160,
+      "max_r": 100,
+      "max_g": 100
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#uppercase",
+        "offset_x": 4,
+        "offset_y": 17
+      },
+      "search_radius": 2,
+      "min_b": 160,
+      "max_r": 100,
+      "max_g": 100
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#capitalize",
+        "offset_x": 4,
+        "offset_y": 17
+      },
+      "search_radius": 2,
+      "min_b": 160,
+      "max_r": 100,
+      "max_g": 100
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#word_start",
+        "offset_x": 4,
+        "offset_y": 17
+      },
+      "search_radius": 2,
+      "min_b": 160,
+      "max_r": 100,
+      "max_g": 100
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#invalid_variable",
+        "offset_x": 4,
+        "offset_y": 17
+      },
+      "search_radius": 2,
+      "min_b": 160,
+      "max_r": 100,
+      "max_g": 100
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#invalid_literal",
+        "offset_x": 4,
+        "offset_y": 17
+      },
+      "search_radius": 2,
+      "min_b": 160,
+      "max_r": 100,
+      "max_g": 100
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#filter",
+        "offset_x": 4,
+        "offset_y": 17
+      },
+      "search_radius": 2,
+      "min_b": 160,
+      "max_r": 100,
+      "max_g": 100
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#padded",
+        "offset_x": 12,
+        "offset_y": 25
+      },
+      "search_radius": 2,
+      "min_b": 160,
+      "max_r": 100,
+      "max_g": 100
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#opacity",
+        "offset_x": 4,
+        "offset_y": 17
+      },
+      "search_radius": 2,
+      "min_b": 180,
+      "max_r": 180,
+      "max_g": 180
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#change"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#changed"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-changed-basic",
+      "equals": "ltr|ellipsis|20px|rgb(0, 128, 0)|none|62|24"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-changed-padded",
+      "equals": "ltr|ellipsis|20px|rgb(0, 128, 0)|none|78|40"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-changed-fits",
+      "equals": "ltr|ellipsis|20px|rgb(0, 128, 0)|none|62|24"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-changed-clip",
+      "equals": "ltr|clip|20px|rgb(0, 128, 0)|none|62|24"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-changed-first_cluster",
+      "equals": "ltr|ellipsis|20px|rgb(0, 128, 0)|none|8|24"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-changed-colors",
+      "equals": "ltr|ellipsis|20px|rgb(0, 128, 0)|none|62|24"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-changed-combining",
+      "equals": "ltr|ellipsis|20px|rgb(0, 128, 0)|none|62|24"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-changed-uppercase",
+      "equals": "ltr|ellipsis|20px|rgb(0, 128, 0)|uppercase|62|24"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-changed-capitalize",
+      "equals": "ltr|ellipsis|20px|rgb(0, 128, 0)|capitalize|62|24"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-changed-word_start",
+      "equals": "ltr|ellipsis|20px|rgb(0, 128, 0)|capitalize|62|24"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-changed-invalid_variable",
+      "equals": "ltr|ellipsis|20px|rgb(0, 128, 0)|none|62|24"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-changed-invalid_literal",
+      "equals": "ltr|ellipsis|20px|rgb(0, 128, 0)|lowercase|62|24"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-changed-opacity",
+      "equals": "ltr|ellipsis|20px|rgb(0, 128, 0)|none|62|24"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-changed-filter",
+      "equals": "ltr|ellipsis|20px|rgb(0, 128, 0)|none|62|24"
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#basic",
+        "offset_x": 51,
+        "offset_y": 17
+      },
+      "search_radius": 2,
+      "min_g": 90,
+      "max_r": 80,
+      "max_b": 80
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#restore"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#restored"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-restored-basic",
+      "equals": "rtl|ellipsis|20px|rgb(0, 0, 255)|none|62|24"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-restored-padded",
+      "equals": "rtl|ellipsis|20px|rgb(0, 0, 255)|none|78|40"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-restored-fits",
+      "equals": "rtl|ellipsis|20px|rgb(0, 0, 255)|none|62|24"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-restored-clip",
+      "equals": "rtl|clip|20px|rgb(0, 0, 255)|none|62|24"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-restored-first_cluster",
+      "equals": "rtl|ellipsis|20px|rgb(0, 0, 255)|none|8|24"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-restored-colors",
+      "equals": "rtl|ellipsis|20px|rgb(0, 0, 255)|none|62|24"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-restored-combining",
+      "equals": "rtl|ellipsis|20px|rgb(0, 0, 255)|none|62|24"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-restored-uppercase",
+      "equals": "rtl|ellipsis|20px|rgb(0, 0, 255)|uppercase|62|24"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-restored-capitalize",
+      "equals": "rtl|ellipsis|20px|rgb(0, 0, 255)|capitalize|62|24"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-restored-word_start",
+      "equals": "rtl|ellipsis|20px|rgb(0, 0, 255)|capitalize|62|24"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-restored-invalid_variable",
+      "equals": "rtl|ellipsis|20px|rgb(0, 0, 255)|none|62|24"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-restored-invalid_literal",
+      "equals": "rtl|ellipsis|20px|rgb(0, 0, 255)|lowercase|62|24"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-restored-opacity",
+      "equals": "rtl|ellipsis|20px|rgb(0, 0, 255)|none|62|24"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-restored-filter",
+      "equals": "rtl|ellipsis|20px|rgb(0, 0, 255)|none|62|24"
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#basic",
+        "offset_x": 4,
+        "offset_y": 17
+      },
+      "search_radius": 2,
+      "min_b": 160,
+      "max_r": 100,
+      "max_g": 100
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#small"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#smaller"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-small-basic",
+      "equals": "rtl|ellipsis|10px|rgb(0, 0, 255)|none|62|24"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-small-padded",
+      "equals": "rtl|ellipsis|10px|rgb(0, 0, 255)|none|78|40"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-small-fits",
+      "equals": "rtl|ellipsis|10px|rgb(0, 0, 255)|none|62|24"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-small-clip",
+      "equals": "rtl|clip|10px|rgb(0, 0, 255)|none|62|24"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-small-first_cluster",
+      "equals": "rtl|ellipsis|10px|rgb(0, 0, 255)|none|8|24"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-small-colors",
+      "equals": "rtl|ellipsis|10px|rgb(0, 0, 255)|none|62|24"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-small-combining",
+      "equals": "rtl|ellipsis|10px|rgb(0, 0, 255)|none|62|24"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-small-uppercase",
+      "equals": "rtl|ellipsis|10px|rgb(0, 0, 255)|uppercase|62|24"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-small-capitalize",
+      "equals": "rtl|ellipsis|10px|rgb(0, 0, 255)|capitalize|62|24"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-small-word_start",
+      "equals": "rtl|ellipsis|10px|rgb(0, 0, 255)|capitalize|62|24"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-small-invalid_variable",
+      "equals": "rtl|ellipsis|10px|rgb(0, 0, 255)|none|62|24"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-small-invalid_literal",
+      "equals": "rtl|ellipsis|10px|rgb(0, 0, 255)|lowercase|62|24"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-small-opacity",
+      "equals": "rtl|ellipsis|10px|rgb(0, 0, 255)|none|62|24"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-small-filter",
+      "equals": "rtl|ellipsis|10px|rgb(0, 0, 255)|none|62|24"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#large"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#larger"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-large-basic",
+      "equals": "rtl|ellipsis|20px|rgb(0, 0, 255)|none|62|24"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-large-padded",
+      "equals": "rtl|ellipsis|20px|rgb(0, 0, 255)|none|78|40"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-large-fits",
+      "equals": "rtl|ellipsis|20px|rgb(0, 0, 255)|none|62|24"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-large-clip",
+      "equals": "rtl|clip|20px|rgb(0, 0, 255)|none|62|24"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-large-first_cluster",
+      "equals": "rtl|ellipsis|20px|rgb(0, 0, 255)|none|8|24"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-large-colors",
+      "equals": "rtl|ellipsis|20px|rgb(0, 0, 255)|none|62|24"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-large-combining",
+      "equals": "rtl|ellipsis|20px|rgb(0, 0, 255)|none|62|24"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-large-uppercase",
+      "equals": "rtl|ellipsis|20px|rgb(0, 0, 255)|uppercase|62|24"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-large-capitalize",
+      "equals": "rtl|ellipsis|20px|rgb(0, 0, 255)|capitalize|62|24"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-large-word_start",
+      "equals": "rtl|ellipsis|20px|rgb(0, 0, 255)|capitalize|62|24"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-large-invalid_variable",
+      "equals": "rtl|ellipsis|20px|rgb(0, 0, 255)|none|62|24"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-large-invalid_literal",
+      "equals": "rtl|ellipsis|20px|rgb(0, 0, 255)|lowercase|62|24"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-large-opacity",
+      "equals": "rtl|ellipsis|20px|rgb(0, 0, 255)|none|62|24"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-large-filter",
+      "equals": "rtl|ellipsis|20px|rgb(0, 0, 255)|none|62|24"
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#basic",
+        "offset_x": 4,
+        "offset_y": 17
+      },
+      "search_radius": 2,
+      "min_b": 160,
+      "max_r": 100,
+      "max_g": 100
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#disable"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#disabled"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-disabled-basic",
+      "equals": "rtl|clip|20px|rgb(0, 0, 255)|none|62|24"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-disabled-padded",
+      "equals": "rtl|clip|20px|rgb(0, 0, 255)|none|78|40"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-disabled-fits",
+      "equals": "rtl|clip|20px|rgb(0, 0, 255)|none|62|24"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-disabled-clip",
+      "equals": "rtl|clip|20px|rgb(0, 0, 255)|none|62|24"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-disabled-first_cluster",
+      "equals": "rtl|clip|20px|rgb(0, 0, 255)|none|8|24"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-disabled-colors",
+      "equals": "rtl|clip|20px|rgb(0, 0, 255)|none|62|24"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-disabled-combining",
+      "equals": "rtl|clip|20px|rgb(0, 0, 255)|none|62|24"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-disabled-uppercase",
+      "equals": "rtl|clip|20px|rgb(0, 0, 255)|uppercase|62|24"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-disabled-capitalize",
+      "equals": "rtl|clip|20px|rgb(0, 0, 255)|capitalize|62|24"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-disabled-word_start",
+      "equals": "rtl|clip|20px|rgb(0, 0, 255)|capitalize|62|24"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-disabled-invalid_variable",
+      "equals": "rtl|clip|20px|rgb(0, 0, 255)|none|62|24"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-disabled-invalid_literal",
+      "equals": "rtl|clip|20px|rgb(0, 0, 255)|lowercase|62|24"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-disabled-opacity",
+      "equals": "rtl|clip|20px|rgb(0, 0, 255)|none|62|24"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-disabled-filter",
+      "equals": "rtl|clip|20px|rgb(0, 0, 255)|none|62|24"
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#basic",
+        "offset_x": 4,
+        "offset_y": 10
+      },
+      "search_radius": 2,
+      "min_r": 160,
+      "max_g": 100,
+      "max_b": 100
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#enable"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#enabled"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-enabled-basic",
+      "equals": "rtl|ellipsis|20px|rgb(0, 0, 255)|none|62|24"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-enabled-padded",
+      "equals": "rtl|ellipsis|20px|rgb(0, 0, 255)|none|78|40"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-enabled-fits",
+      "equals": "rtl|ellipsis|20px|rgb(0, 0, 255)|none|62|24"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-enabled-clip",
+      "equals": "rtl|clip|20px|rgb(0, 0, 255)|none|62|24"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-enabled-first_cluster",
+      "equals": "rtl|ellipsis|20px|rgb(0, 0, 255)|none|8|24"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-enabled-colors",
+      "equals": "rtl|ellipsis|20px|rgb(0, 0, 255)|none|62|24"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-enabled-combining",
+      "equals": "rtl|ellipsis|20px|rgb(0, 0, 255)|none|62|24"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-enabled-uppercase",
+      "equals": "rtl|ellipsis|20px|rgb(0, 0, 255)|uppercase|62|24"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-enabled-capitalize",
+      "equals": "rtl|ellipsis|20px|rgb(0, 0, 255)|capitalize|62|24"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-enabled-word_start",
+      "equals": "rtl|ellipsis|20px|rgb(0, 0, 255)|capitalize|62|24"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-enabled-invalid_variable",
+      "equals": "rtl|ellipsis|20px|rgb(0, 0, 255)|none|62|24"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-enabled-invalid_literal",
+      "equals": "rtl|ellipsis|20px|rgb(0, 0, 255)|lowercase|62|24"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-enabled-opacity",
+      "equals": "rtl|ellipsis|20px|rgb(0, 0, 255)|none|62|24"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-enabled-filter",
+      "equals": "rtl|ellipsis|20px|rgb(0, 0, 255)|none|62|24"
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#basic",
+        "offset_x": 4,
+        "offset_y": 17
+      },
+      "search_radius": 2,
+      "min_b": 160,
+      "max_r": 100,
+      "max_g": 100
+    }
+  ]
+}

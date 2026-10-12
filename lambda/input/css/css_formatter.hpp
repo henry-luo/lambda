@@ -89,6 +89,13 @@ const char* css_format_selector_group(CssFormatter* formatter, CssSelectorGroup*
  * Format a value to string (appends to formatter's output buffer)
  */
 void css_format_value(CssFormatter* formatter, CssValue* value);
+void css_format_value_with_property(CssFormatter* formatter, CssValue* value, CssPropertyCode property_code);
+String* css_serialize_integer_math(Pool* pool, const CssValue* value);
+
+typedef bool (*CssGridTrackLeafFormatter)(CssFormatter* formatter, CssValue* value,
+    bool repeat_count, void* context);
+bool css_format_grid_track_value(CssFormatter* formatter, CssValue* value,
+    CssGridTrackLeafFormatter leaf = nullptr, void* context = nullptr);
 
 /**
  * Serialize a parsed declaration value according to CSSOM rules.

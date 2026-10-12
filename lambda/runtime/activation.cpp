@@ -130,6 +130,8 @@ static __thread ActivationThread activation_thread;
 // and tear down on another, so the pool is process-wide.
 static pthread_mutex_t stack_pool_mutex = PTHREAD_MUTEX_INITIALIZER;
 static ActivationStacks* stack_pool = NULL;
+// one idle stack retains its pages for immediate reuse, bounded by one 3 MiB mapping.
+static ActivationStacks* stack_pool_retained = NULL;
 static int stack_pool_count = 0;
 
 static ActivationAmbientHook ambient_hooks[ACTIVATION_AMBIENT_HOOK_MAX];
@@ -249,14 +251,19 @@ static void stacks_free(ActivationStacks* stacks) {
 
 static ActivationStacks* stacks_acquire(void) {
     pthread_mutex_lock(&stack_pool_mutex);
-    ActivationStacks* pooled = stack_pool;
+    bool retained = stack_pool_retained != NULL;
+    ActivationStacks* pooled = retained ? stack_pool_retained : stack_pool;
     if (pooled) {
-        stack_pool = pooled->next_free;
+        if (retained) stack_pool_retained = NULL;
+        else stack_pool = pooled->next_free;
         stack_pool_count--;
     }
     pthread_mutex_unlock(&stack_pool_mutex);
     if (pooled) {
         pooled->next_free = NULL;
+        // the idle mapping has no live roots; reclaim its discarded regions in one call.
+        if (!retained) fiber_memory_reclaim((void*)pooled->native.low,
+            pooled->native.high - pooled->native.low + pooled->native.tail_bytes);
         return pooled;
     }
     ActivationStacks* stacks = (ActivationStacks*)mem_calloc(
@@ -282,15 +289,22 @@ static ActivationStacks* stacks_acquire(void) {
 
 static void stacks_release(ActivationStacks* stacks) {
     if (!stacks) return;
-    // A pooled stack keeps its mapping but not the pages a deep run touched.
-    fiber_stack_trim(&stacks->native, ACTIVATION_STACK_KEEP_BYTES);
-    LambdaSideStackRegion* regions[2] = {&stacks->root, &stacks->number};
-    for (int i = 0; i < 2; i++) {
-        LambdaSideStackRegion* region = regions[i];
-        size_t bytes = (size_t)((uint8_t*)region->limit - (uint8_t*)region->base);
-        fiber_memory_discard(region->base, bytes);
-        fiber_memory_reclaim(region->base, bytes);
+    pthread_mutex_lock(&stack_pool_mutex);
+    bool full = stack_pool_count >= ACTIVATION_POOL_MAX;
+    if (!full && !stack_pool_retained) {
+        // no live activation owns these slots; acquisition reinstalls the precise root watermarks.
+        stacks->next_free = NULL;
+        stack_pool_retained = stacks;
+        stack_pool_count++;
+        pthread_mutex_unlock(&stack_pool_mutex);
+        return;
     }
+    pthread_mutex_unlock(&stack_pool_mutex);
+    if (full) { stacks_free(stacks); return; }
+    // A pooled stack keeps its mapping but not the pages a deep run touched.
+    fiber_stack_trim(&stacks->native, ACTIVATION_STACK_KEEP_BYTES, false);
+    // both side segments share this contiguous tail; reclaim only when acquired again.
+    fiber_memory_discard(stacks->root.base, stacks->native.tail_bytes);
     pthread_mutex_lock(&stack_pool_mutex);
     bool pooled = stack_pool_count < ACTIVATION_POOL_MAX;
     if (pooled) {
@@ -305,9 +319,12 @@ static void stacks_release(ActivationStacks* stacks) {
 extern "C" void activation_release_pool(void) {
     pthread_mutex_lock(&stack_pool_mutex);
     ActivationStacks* stacks = stack_pool;
+    ActivationStacks* retained = stack_pool_retained;
     stack_pool = NULL;
+    stack_pool_retained = NULL;
     stack_pool_count = 0;
     pthread_mutex_unlock(&stack_pool_mutex);
+    if (retained) stacks_free(retained);
     while (stacks) {
         ActivationStacks* next = stacks->next_free;
         stacks_free(stacks);
@@ -412,9 +429,9 @@ static void activation_compact(Activation* activation) {
     activation->image_native_bytes = extent.native_bytes;
     activation->image_root_words = extent.root_words;
     activation->image_number_words = extent.number_words;
-    discard_span(extent.native_low, extent.native_bytes, false);
-    discard_span((uintptr_t)stacks->root.base, root_bytes, false);
-    discard_span((uintptr_t)stacks->number.base, number_bytes, false);
+    // the intervening side-stack pages lie above the saved watermarks and contain no live state.
+    size_t span_bytes = extent.native_bytes + (number_bytes ? stacks->root.byte_size + number_bytes : root_bytes);
+    discard_span(extent.native_low, span_bytes, false);
 }
 
 static void activation_restore(Activation* activation) {
@@ -424,9 +441,8 @@ static void activation_restore(Activation* activation) {
     size_t root_bytes = activation->image_root_words * sizeof(uint64_t);
     size_t number_bytes = activation->image_number_words * sizeof(uint64_t);
     uintptr_t native_low = stacks->native.high - activation->image_native_bytes;
-    discard_span(native_low, activation->image_native_bytes, true);
-    discard_span((uintptr_t)stacks->root.base, root_bytes, true);
-    discard_span((uintptr_t)stacks->number.base, number_bytes, true);
+    size_t span_bytes = activation->image_native_bytes + (number_bytes ? stacks->root.byte_size + number_bytes : root_bytes);
+    discard_span(native_low, span_bytes, true);
     memcpy((void*)native_low, image, activation->image_native_bytes);
     memcpy(stacks->root.base, image + activation->image_native_bytes, root_bytes);
     memcpy(stacks->number.base, image + activation->image_native_bytes + root_bytes,

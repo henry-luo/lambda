@@ -400,10 +400,21 @@ static gc_bump_block_t* gc_alloc_bump_block(gc_heap_t* gc, size_t block_size) {
 
 typedef struct GcJsArraySparseHashEntry {
     int64_t index;
-    uint64_t value;
+    uint8_t value[9];
 } GcJsArraySparseHashEntry;
 
 void gc_mark_item(gc_heap_t* gc, uint64_t item);
+
+static void gc_trace_typed_value(gc_heap_t* gc, const uint8_t* value) {
+    uint8_t type = value[LAMBDA_GC_OFF_TYPED_ITEM_TYPE_ID];
+    // Numeric payloads are inline; only pointer-bearing storage contains an edge.
+    if (type < LMD_TYPE_INT64_ || type == LMD_TYPE_INT64_ || type == LMD_TYPE_UINT64_ ||
+            type == LMD_TYPE_FLOAT_ || type == LMD_TYPE_BOOL_) return;
+    uint64_t payload;
+    memcpy(&payload, value + LAMBDA_GC_OFF_TYPED_ITEM_VALUE, sizeof(payload));
+    if (type >= LMD_TYPE_RANGE_) gc_mark_item(gc, payload);
+    else gc_mark_object_ptr(gc, (void*)(uintptr_t)payload);
+}
 
 // SparseArrayMap extends Map; on 64-bit the base Map occupies 32 bytes.
 #define GC_SPARSE_ARRAY_MAP_HASH_OFFSET 32
@@ -421,7 +432,7 @@ static void gc_trace_sparse_array_map_entries(gc_heap_t* gc, void* map_obj) {
     void* item = NULL;
     while (hashmap_iter(table, &iter, &item)) {
         GcJsArraySparseHashEntry* entry = (GcJsArraySparseHashEntry*)item;
-        gc_mark_item(gc, entry->value);
+        gc_trace_typed_value(gc, entry->value);
     }
 }
 
@@ -1736,14 +1747,8 @@ static void gc_trace_shape_field(gc_heap_t* gc, const void* shape_entry,
     uint8_t* field_ptr = (uint8_t*)data_ptr + byte_offset;
 
     if (kind == LANE_STORAGE_TYPED_ITEM) {
-        // TypedItem's packed value follows its one-byte runtime TypeId.
-        uint8_t stored_type = *(uint8_t*)(field_ptr + LAMBDA_GC_OFF_TYPED_ITEM_TYPE_ID);
-        if (stored_type < LMD_TYPE_INT64_ || stored_type == LMD_TYPE_BOOL_ ||
-            byte_offset + LAMBDA_GC_OFF_TYPED_ITEM_VALUE + sizeof(uint64_t) > byte_size) return;
-        uint64_t val = *(uint64_t*)(field_ptr + LAMBDA_GC_OFF_TYPED_ITEM_VALUE);
-        if (!val) return;
-        if (stored_type >= LMD_TYPE_RANGE_) gc_mark_item(gc, val);
-        else gc_mark_object_ptr(gc, (void*)(uintptr_t)val);
+        if (byte_offset + LAMBDA_GC_OFF_TYPED_ITEM_VALUE + sizeof(uint64_t) > byte_size) return;
+        gc_trace_typed_value(gc, field_ptr);
         return;
     }
 
@@ -1956,8 +1961,13 @@ static void gc_trace_object(gc_heap_t* gc, gc_header_t* header) {
         if (map_kind == MAP_KIND_ORDERED) {
             gc_mark_object_ptr(gc, ((LambdaGcOrderedMapLayout*)obj)->entries);
         }
+        if (map_kind == MAP_KIND_PROXY) {
+            // both JS front ends share these three inline Item edges (D1.5v2).
+            uint64_t* edges = (uint64_t*)(p + sizeof(LambdaGcMapLayout));
+            for (int i = 0; i < 3; i++) gc_mark_item(gc, edges[i]);
+        }
         if (tag == LMD_TYPE_MAP_ && map_kind != MAP_KIND_ORDERED &&
-                map_kind != MAP_KIND_PLAIN && gc->js_native_trace) {
+                map_kind != MAP_KIND_PLAIN && map_kind != MAP_KIND_PROXY && gc->js_native_trace) {
             // JS trailing carriers own their precise edges through this hook.
             gc->js_native_trace(obj, gc);
         }

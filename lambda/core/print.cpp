@@ -444,6 +444,11 @@ struct PrintItemVisitor {
 
     void operator()(lam::ItemOf<LMD_TYPE_ARRAY> item) const {
         Array* array = item.ptr();
+        // sparse JS storage needs an explicit projection before Lambda serialization.
+        if (container_js_elements_kind(array) == JS_ELEMENTS_SPARSE_TAGGED) {
+            print_item(strbuf, ItemError, depth, indent);
+            return;
+        }
         log_debug("print array: %p, length: %ld", array, array->length);
         strbuf_append_char(strbuf, '[');
         for (int i = 0; i < array->length; i++) {
@@ -679,6 +684,17 @@ struct PrintItemVisitor {
             String* source = ((TypePattern*)value)->source;
             if (source) strbuf_append_str_n(strbuf, source->chars, source->len);
             else strbuf_append_str(strbuf, "type");
+            return;
+        }
+        // GM5v2: a grammar prints by name, a rule as `grammar.rule`
+        if (TypeGrammar* grammar = lambda_type_grammar(value)) {
+            strbuf_append_str_n(strbuf, grammar->name->chars, grammar->name->len);
+            return;
+        }
+        if (TypeGrammarRule* rule = lambda_type_grammar_rule(value)) {
+            strbuf_append_str_n(strbuf, rule->grammar->name->chars, rule->grammar->name->len);
+            strbuf_append_char(strbuf, '.');
+            strbuf_append_str_n(strbuf, rule->name->chars, rule->name->len);
             return;
         }
         TypeType* type = (TypeType*)value;
