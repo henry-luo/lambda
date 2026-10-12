@@ -107,6 +107,10 @@ void dom_engine_animation_frame_prepare(void* document, double timestamp_ms);
 
 // one-shot named frame events; the document owns requests, never script closures
 uint64_t dom_engine_frame_request(void* owner, const char* event_name);
+bool dom_engine_window_watch(void* owner, const char* event_name, bool enabled);
+bool dom_engine_history_traverse_native(void* owner, int delta);
+uint64_t dom_engine_window_event_watermark(DomDocument* doc);
+void dom_engine_window_event_subscribers(DomDocument* doc, const char* event_name, Item event, uint64_t watermark);
 bool dom_engine_frame_cancel(void* owner, uint64_t token);
 bool dom_engine_frame_tick(DomDocument* document, double timestamp_ms);
 bool dom_engine_window_is_closed(void* ui_context);

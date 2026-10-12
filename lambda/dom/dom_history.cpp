@@ -99,18 +99,23 @@ static Item js_history_drain_events(void) {
     JsHistoryEventTask* task =
         (JsHistoryEventTask*)arraylist_get(js_history_event_tasks, 0);
     arraylist_remove(js_history_event_tasks, 0);
-    Item window = dom_realm_global();
+    RootFrame roots(2);
+    Rooted<Item> window(roots, dom_realm_global()), event(roots, ItemNull);
 
     if (task->dispatch_popstate) {
-        Item event = js_create_event("popstate", false, false);
-        dom_realm_set_cstr(event, "state", task->state);
-        dom_dispatch_event(window, event);
+        uint64_t watermark = dom_engine_window_event_watermark(js_history_document());
+        event.set(js_create_event("popstate", false, false));
+        dom_realm_set_cstr(event.get(), "state", task->state);
+        dom_dispatch_event(window.get(), event.get());
+        dom_engine_window_event_subscribers(js_history_document(), "popstate", event.get(), watermark);
     }
     if (task->dispatch_hashchange) {
-        Item event = js_create_event("hashchange", false, false);
-        dom_realm_set_cstr(event, "oldURL", js_history_string(task->old_url));
-        dom_realm_set_cstr(event, "newURL", js_history_string(task->new_url));
-        dom_dispatch_event(window, event);
+        uint64_t watermark = dom_engine_window_event_watermark(js_history_document());
+        event.set(js_create_event("hashchange", false, false));
+        dom_realm_set_cstr(event.get(), "oldURL", js_history_string(task->old_url));
+        dom_realm_set_cstr(event.get(), "newURL", js_history_string(task->new_url));
+        dom_dispatch_event(window.get(), event.get());
+        dom_engine_window_event_subscribers(js_history_document(), "hashchange", event.get(), watermark);
     }
     js_history_task_destroy(task);
 
@@ -122,10 +127,13 @@ static Item js_history_drain_events(void) {
     return make_js_undefined();
 }
 
-static bool js_history_queue_events(const RadiantHistoryTraversal* traversal,
-                                    bool popstate) {
+static void js_history_refresh_object(void);
+
+extern "C" bool dom_history_queue_events(const RadiantHistoryTraversal* traversal,
+                                         bool popstate) {
     if (!traversal) return false;
     if (!js_history_runtime_state_ensure()) return false;
+    js_history_refresh_object();
     if (!js_history_event_tasks) js_history_event_tasks = arraylist_new(4);
     if (!js_history_event_tasks) return false;
 
@@ -210,7 +218,7 @@ static Item js_history_go(Item delta_item) {
     RadiantHistoryTraversal traversal = {};
     if (dom_engine_history_go(document, delta, &traversal)) {
         js_history_refresh_object();
-        js_history_queue_events(&traversal, true);
+        dom_history_queue_events(&traversal, true);
     }
     return make_js_undefined();
 }
@@ -225,7 +233,7 @@ extern "C" Item js_history_set_location(Item value) {
     RadiantHistoryTraversal traversal = {};
     if (dom_engine_history_set_location(document, url_text, &traversal)) {
         js_history_refresh_object();
-        js_history_queue_events(&traversal, false);
+        dom_history_queue_events(&traversal, false);
     }
     return value;
 }

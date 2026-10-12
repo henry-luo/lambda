@@ -19,6 +19,7 @@
 #include "event_sim.hpp"
 #include "render.hpp"
 #include "radiant.hpp"
+#include "rdt_video.h"
 #include "../lambda/network/network_resource_manager.h"
 #include "network_integration.h"
 #include "../lambda/network/network_thread_pool.h"
@@ -72,6 +73,8 @@ typedef enum RadiantJsLoopAction {
 
 static bool radiant_service_js_event_loop(UiContext* uicon, RadiantJsLoopAction action,
                                           int wait_ms, double delta_ms, int frame_steps) {
+    // Headless hosts have no GLFW poll to service the native media event queue.
+    rdt_video_pump_events();
     DomDocument* doc = uicon ? uicon->document : nullptr;
     // CSS/SVG timing jobs use the document evaluator even without page JS.
     Runtime* runtime = dom_document_script_runtime(doc);
@@ -86,7 +89,8 @@ static bool radiant_service_js_event_loop(UiContext* uicon, RadiantJsLoopAction 
         }
         uv_loop_t* loop = lambda_uv_loop();
         if (loop) uv_run(loop, UV_RUN_NOWAIT);
-        return radiant_commit_async_document_loads(uicon) || pumped ||
+        bool navigation = radiant_commit_navigation_requests(uicon);
+        return radiant_commit_async_document_loads(uicon) || navigation || pumped ||
             (action == RADIANT_JS_LOOP_PUMP && wait_ms < 0);
     }
 
@@ -154,6 +158,8 @@ static bool radiant_service_js_event_loop(UiContext* uicon, RadiantJsLoopAction 
         navigated = radiant_execute_location_navigation(uicon, doc, target);
         mem_free(target);
     }
+    // Package requests from input, render, or frame callbacks share location's safe boundary.
+    navigated = radiant_commit_navigation_requests(uicon) || navigated;
     return radiant_commit_async_document_loads(uicon) || navigated || pumped;
 }
 
@@ -1753,9 +1759,9 @@ static int view_doc_in_window_with_events_internal(const char* doc_file,
                 // so a self-rescheduling callback can't spin to the watchdog.
                 if (event_sim_assertion_retry_pending(sim_ctx)) {
                     int retry_wait_ms = event_sim_assertion_retry_wait_ms(sim_ctx);
-                    // Native document workers use wall time even when the JS
-                    // clock is virtual or the page has no JS runtime.
-                    if (radiant_async_document_loads_pending(&ui_context)) {
+                    // native document/media work needs wall time before virtual assertion retries advance.
+                    if (radiant_async_document_loads_pending(&ui_context) ||
+                        radiant_video_events_pending(ui_context.document ? ui_context.document->state : nullptr)) {
                         if (retry_wait_ms > 50) retry_wait_ms = 50;
                         uv_sleep((unsigned int)retry_wait_ms);
                     }

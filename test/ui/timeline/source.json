@@ -1,0 +1,20 @@
+{
+  "name":"Source replacement reconciles activation, selection and focus by identity",
+  "html":"test/ui/timeline/source.ls",
+  "viewport":{"width":900,"height":750},
+  "events":[
+    {"type":"assert_focus","target":{"selector":"li[data-timeline-id='b']"}},
+    {"type":"key_press","key":"x"},
+    {"type":"assert_count","target":{"selector":".lambda-timeline-item"},"count":2},
+    {"type":"assert_attribute","target":{"selector":".lambda-timeline-chart"},"attribute":"data-timeline-active","equals":"c"},
+    {"type":"assert_attribute","target":{"selector":".lambda-timeline-chart"},"attribute":"data-timeline-selected","equals":"[\n  \"a\"\n]"},
+    {"type":"assert_focus","target":{"selector":"li[data-timeline-id='c']"}},
+    {"type":"assert_text","target":{"selector":"#activations"},"equals":"1"},
+    {"type":"assert_text","target":{"selector":"#selections"},"equals":"1"},
+    {"type":"click","target":{"selector":"#empty"}},
+    {"type":"assert_count","target":{"selector":".lambda-timeline-item"},"count":0},
+    {"type":"assert_focus","target":{"selector":"#empty"}},
+    {"type":"assert_text","target":{"selector":"#activations"},"equals":"2"},
+    {"type":"assert_text","target":{"selector":"#selections"},"equals":"2"}
+  ]
+}

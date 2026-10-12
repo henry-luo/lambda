@@ -1,0 +1,18 @@
+<!doctype html>
+<html><body>
+  <button id="before">Before</button>
+  <div id="shell" inert>
+    <button id="blocked" style="pointer-events:auto" tabindex="0">Blocked</button>
+    <a id="link" href="#blocked" tabindex="-1">Blocked link</a>
+  </div>
+  <button id="attempt">Attempt focus</button>
+  <button id="enable">Enable</button>
+  <output id="count">0</output>
+  <script>
+    let count = 0;
+    const blocked = document.getElementById('blocked');
+    blocked.addEventListener('click', function () { document.getElementById('count').textContent = String(++count); });
+    document.getElementById('attempt').addEventListener('click', function () { blocked.focus(); });
+    document.getElementById('enable').addEventListener('click', function () { document.getElementById('shell').removeAttribute('inert'); blocked.focus(); });
+  </script>
+</body></html>

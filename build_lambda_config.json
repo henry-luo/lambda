@@ -3421,6 +3421,7 @@
               "radiant/paint_ir.cpp",
               "radiant/render_paint_block.cpp",
               "radiant/render_paint_boundary.cpp",
+              "radiant/render_border_geometry.cpp",
               "radiant/render_geometry.cpp",
               "radiant/render_path.cpp",
               "radiant/view_length.cpp",

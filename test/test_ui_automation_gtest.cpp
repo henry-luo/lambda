@@ -59,6 +59,7 @@ extern "C" {
     #include <windows.h>
     #include <io.h>
     #include <direct.h>
+    #include <process.h>
     #define popen  _popen
     #define pclose _pclose
     #define WEXITSTATUS(s) (s)
@@ -257,13 +258,17 @@ static bool ui_parse_json_file(const std::string& path, Item* root,
     return true;
 }
 
-static void ui_ensure_result_directory() {
+static void ui_ensure_result_directory(char* directory, size_t capacity) {
 #ifdef _WIN32
     _mkdir("temp");
     _mkdir("temp\\ui-test-results");
+    snprintf(directory, capacity, "temp/ui-test-results/%lu", (unsigned long)_getpid());
+    _mkdir(directory);
 #else
     mkdir("./temp", 0755);
     mkdir("./temp/ui-test-results", 0755);
+    snprintf(directory, capacity, "temp/ui-test-results/%lu", (unsigned long)getpid());
+    mkdir(directory, 0755);
 #endif
 }
 
@@ -945,13 +950,16 @@ static UiTestResult run_ui_test(const UiTestInfo& info) {
     UiTestResult result;
     result.executed = true;
     auto t0 = std::chrono::steady_clock::now();
-    ui_ensure_result_directory();
-    std::string result_path = std::string("temp/ui-test-results/") + info.test_name + ".json";
-    remove(result_path.c_str());
+    // separate runner invocations must not remove or replace each other's machine results.
+    char directory[128];
+    ui_ensure_result_directory(directory, sizeof(directory));
+    char result_path[512];
+    snprintf(result_path, sizeof(result_path), "%s/%s.json", directory, info.test_name.c_str());
+    remove(result_path);
     result.result_path = result_path;
-    char* result_directory = file_realpath("temp/ui-test-results");
+    char* result_directory = file_realpath(directory);
     snprintf(result.phase_path, sizeof(result.phase_path), "%s/%s.phases.tsv",
-        result_directory ? result_directory : "temp/ui-test-results", info.test_name.c_str());
+        result_directory ? result_directory : directory, info.test_name.c_str());
     if (result_directory) mem_free(result_directory);
     remove(result.phase_path);
 
@@ -994,7 +1002,7 @@ static UiTestResult run_ui_test(const UiTestInfo& info) {
     args[arg_count++] = "--event-file";
     args[arg_count++] = info.json_path.c_str();
     args[arg_count++] = "--event-result";
-    args[arg_count++] = result_path.c_str();
+    args[arg_count++] = result_path;
     if (!info.skip_headless) args[arg_count++] = "--headless";
     args[arg_count++] = "--no-log";
     args[arg_count++] = "--font-dir";

@@ -26,6 +26,7 @@
 #include "../../core/mark_reader.hpp"  // For ElementReader
 #include "../../io/mark_editor.hpp"  // For MarkEditor
 #include "../../io/mark_builder.hpp" // For MarkBuilder
+#include "../input.hpp"
 
 DomNode* dom_source_parent(DomNode* node) {
     DomNode* parent = node ? node->parent : nullptr;
@@ -229,6 +230,7 @@ const char* dom_element_attribute_namespace_uri(DomElement* element,
 #define log_debug(...) log_trace(__VA_ARGS__)
 
 void element_dom_map_remove(HashMap* map, Element* elem);
+DomElement* element_dom_map_lookup(HashMap* map, Element* elem);
 static void dom_element_clear_synthetic_attributes(DomElement* element);
 
 bool dom_document_owns_node_storage(DomDocument* doc, const void* storage) {
@@ -314,6 +316,18 @@ DomElement* dom_flat_tree_parent(DomElement* element) {
             if (dom_slot_assignment_matches(parent, child)) return nullptr;
     }
     return parent;
+}
+
+bool dom_node_is_inert(DomNode* node) {
+    if (!node) return false;
+    DomElement* element = node->as_element();
+    if (!element && node->parent) element = node->parent->as_element();
+    // inert follows flat-tree ancestry, including assigned slots and shadow hosts.
+    for (; element; element = dom_flat_tree_parent(element)) {
+        if (!strcmp(dom_element_namespace_uri(element), "http://www.w3.org/1999/xhtml") &&
+            element->get_attribute("inert")) return true;
+    }
+    return false;
 }
 
 static CssEnum dom_html_direction_state(DomElement* element) {
@@ -957,6 +971,24 @@ DomElement* DomElement::create_in(DomElement* element, DomDocument* doc,
         if (reinitializing) element->set_synthetic(false);
         if (native_element != &element->elmt) {
             element->elmt = *native_element;  // shallow copy (items[], type, data pointers are shared)
+            if (doc->input && doc->input->ui_mode) {
+                // S12.1.3/D4.5.1v4: DOM writes and retirement cannot consume a retained pure value.
+                Element* snapshot = &element->elmt;
+                if (!elmt_clone_type_for_mutation(snapshot, doc->input->pool, true)) return nullptr;
+                if (snapshot->data_cap > 0) {
+                    snapshot->data = pool_alloc(doc->input->pool, snapshot->data_cap);
+                    if (!snapshot->data) return nullptr;
+                    memcpy(snapshot->data, native_element->data, snapshot->data_cap);
+                }
+                if (snapshot->capacity > 0) {
+                    snapshot->items = (Item*)arena_alloc(doc->input->arena,
+                        (size_t)snapshot->capacity * sizeof(Item));
+                    if (!snapshot->items) return nullptr;
+                    memcpy(snapshot->items, native_element->items,
+                        (size_t)snapshot->capacity * sizeof(Item));
+                }
+                snapshot->cow_state = 0;
+            }
         }
     }
 
@@ -1304,9 +1336,10 @@ void dom_element_release_retired_storage(DomElement* element) {
         dom_attribute_node_detach(element->ext->attribute_nodes);
     Element* backing_source = dom_node_registry_backing_source(
         element->doc, static_cast<DomNode*>(element));
-    if (element->doc->element_dom_map && backing_source) {
+    if (element->doc->element_dom_map && backing_source &&
+        element_dom_map_lookup(element->doc->element_dom_map, backing_source) == element) {
         // Reconcile lookup values are raw DOM pointers; remove the Lambda key
-        // before the arena can repurpose this node generation.
+        // only while it still names this occurrence, never its replacement.
         element_dom_map_remove(element->doc->element_dom_map,
                                backing_source);
     }
@@ -4355,12 +4388,6 @@ HashMap* element_dom_map_create(void) {
     return ElementDomMap::create(64);
 }
 
-static bool dom_element_has_embedded_ui_storage(DomDocument* doc, Element* elem) {
-    if (!doc || !elem) return false;
-    DomElement* storage = element_to_dom_element(elem);
-    return dom_document_owns_node_storage(doc, storage) &&
-        storage->node_type == DOM_NODE_ELEMENT;
-}
 
 void element_dom_map_insert(HashMap* map, Element* elem, DomElement* dom_elem) {
     if (!map || !elem || !dom_elem) return;
@@ -4388,40 +4415,16 @@ void element_dom_map_remove(HashMap* map, Element* elem) {
 static const int MAX_DOM_BUILD_DEPTH = 512;
 static thread_local int g_dom_build_depth = 0;
 
-struct UiOccurrenceEntry {
-    List* value;
-    bool active;
-};
-typedef TypedHashMap<UiOccurrenceEntry,
-    HashMapPointerMemberKeyOps<UiOccurrenceEntry, &UiOccurrenceEntry::value>> UiOccurrenceMap;
+static bool dom_element_has_embedded_html_storage(DomDocument* doc, Element* elem) {
+    if (!doc || doc->page_kind != DOM_PAGE_KIND_HTML || !elem) return false;
+    DomElement* storage = element_to_dom_element(elem);
+    return dom_document_owns_node_storage(doc, storage) &&
+        storage->node_type == DOM_NODE_ELEMENT;
+}
 
-static bool dom_materialize_ui_occurrences(Item* item, DomDocument* doc, HashMap* seen, int depth) {
-    if (depth > MAX_DOM_BUILD_DEPTH) return false;
-    TypeId type = get_type_id(*item);
-    if (type != LMD_TYPE_ELEMENT && type != LMD_TYPE_ARRAY) return true;
-    List* children = (List*)item->container;
-    if (!children || (children->length > 0 && !children->items)) return false;
-    UiOccurrenceEntry entry = {children, true};
-    const UiOccurrenceEntry* prior = UiOccurrenceMap::get(seen, entry);
-    // reject content cycles before a forced deep copy can recurse into them.
-    if (prior && prior->active) return false;
-    if (prior) {
-        // shared pure values need distinct mutable DOM occurrences, including shared arrays (S12.1.3).
-        MarkBuilder builder(doc->input);
-        Item copy = builder.deep_copy(*item, true);
-        if (get_type_id(copy) != type) return false;
-        *item = copy;
-        children = (List*)copy.container;
-        entry.value = children;
-    }
-    UiOccurrenceMap::set(seen, entry);
-    if (hashmap_oom(seen)) return false;
-    for (int64_t i = 0; i < children->length; i++) {
-        if (!dom_materialize_ui_occurrences(&children->items[i], doc, seen, depth + 1)) return false;
-    }
-    entry.active = false;
-    UiOccurrenceMap::set(seen, entry);
-    return true;
+static void dom_move_source_occurrence(DomNode* node, DomElement* parent) {
+    if (node && parent && node->parent && node->parent != parent)
+        node->parent->remove_child(node);
 }
 
 struct DomBuildDepthGuard {
@@ -4429,21 +4432,68 @@ struct DomBuildDepthGuard {
     ~DomBuildDepthGuard() { g_dom_build_depth--; }
 };
 
-static void dom_detach_rebuilt_child(DomNode* node, DomElement* parent) {
-    // retained fat nodes move to the new tree; the old parent must not retire them.
-    if (node && parent && node->parent && node->parent != parent) {
-        node->parent->remove_child(node);
+static bool dom_build_content_occurrence(Item* slot, DomDocument* doc,
+        DomElement* parent, int depth) {
+    if (depth > MAX_DOM_BUILD_DEPTH) return false;
+    Item child = *slot;
+    TypeId type = get_type_id(child);
+    if (type == LMD_TYPE_ELEMENT) {
+        Element* source = child.element;
+        if (!source || !source->type) return false;
+        const char* tag = ((TypeElmt*)source->type)->name.str;
+        if (dom_is_comment_tag(tag)) {
+            DomComment* comment = DomComment::create(source, parent);
+            if (comment) dom_append_to_sibling_chain(parent, comment);
+            return comment != nullptr;
+        }
+        DomElement* occurrence = build_dom_tree_from_element(source, doc, parent);
+        // DOM readers must observe descendant edits through the mutable occurrence graph.
+        if (occurrence && doc->input && doc->input->ui_mode)
+            *slot = {.element = dom_element_to_element(occurrence)};
+        return true;  // declarations intentionally produce no layout element
     }
-}
-
-static DomText* dom_rebuild_text_node(DomDocument* doc, DomElement* parent,
-                                    String* text, bool ui_mode) {
-    // only arena strings with a proven DOM prefix can retain their text view.
-    DomText* retained = ui_mode ? dom_text_from_fat_string(doc, text) : nullptr;
-    if (!retained) return DomText::create(text, parent);
-    dom_detach_rebuilt_child(retained, parent);
-    retained->parent = lam::up(parent);
-    return retained;
+    if (type == LMD_TYPE_STRING) {
+        String* text = child.get_string();
+        if (!text || !text->len) return true;
+        // Parsed HTML owns its fat values as DOM storage; pure Lambda values do not.
+        DomText* occurrence = doc->page_kind == DOM_PAGE_KIND_HTML
+            ? dom_text_from_fat_string(doc, text) : nullptr;
+        if (occurrence) dom_move_source_occurrence(occurrence, parent);
+        else occurrence = DomText::create(text, parent);
+        if (occurrence) dom_append_to_sibling_chain(parent, occurrence);
+        return occurrence != nullptr;
+    }
+    if (type == LMD_TYPE_SYMBOL) {
+        Symbol* symbol = child.get_symbol();
+        if (!symbol || !symbol->len) return true;
+        DomText* occurrence = DomText::create_symbol(symbol->chars, symbol->len, parent);
+        if (occurrence) dom_append_to_sibling_chain(parent, occurrence);
+        return occurrence != nullptr;
+    }
+    if (type == LMD_TYPE_ARRAY) {
+        Array* items = child.array;
+        if (!items || (items->length > 0 && !items->items)) return false;
+        if (doc->input && doc->input->ui_mode) {
+            // arrays are value children too; rewiring their entries must leave the source intact.
+            Array* copy = (Array*)arena_alloc(doc->input->arena, sizeof(Array));
+            if (!copy) return false;
+            *copy = *items;
+            if (copy->capacity > 0) {
+                copy->items = (Item*)arena_alloc(doc->input->arena,
+                    (size_t)copy->capacity * sizeof(Item));
+                if (!copy->items) return false;
+                memcpy(copy->items, items->items, (size_t)copy->capacity * sizeof(Item));
+            }
+            copy->is_heap = copy->is_static = copy->is_immortal = false;
+            copy->cow_state = 0;
+            *slot = {.array = copy};
+            items = copy;
+        }
+        for (int64_t index = 0; index < items->length; index++) {
+            if (!dom_build_content_occurrence(&items->items[index], doc, parent, depth + 1)) return false;
+        }
+    }
+    return true;
 }
 
 DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElement* parent) {
@@ -4453,14 +4503,6 @@ DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElem
     }
     if (g_dom_build_depth > MAX_DOM_BUILD_DEPTH) {
         return nullptr;
-    }
-    if (g_dom_build_depth == 0 && doc->input && doc->input->ui_mode) {
-        HashMap* seen = UiOccurrenceMap::create(64);
-        if (!seen) return nullptr;
-        Item root = {.element = elem};
-        bool materialized = dom_materialize_ui_occurrences(&root, doc, seen, 0);
-        hashmap_free(seen);
-        if (!materialized) return nullptr;
     }
     DomBuildDepthGuard depth_guard;
 
@@ -4486,17 +4528,16 @@ DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElem
     // Script elements stay in the DOM even though the UA display default is
     // `none`; page libraries query them for their loading URL and metadata.
 
-    // UI-mode MarkBuilder values embed a DomElement, but HTML/XML fragment
-    // parsers still produce plain Elements. Only reuse storage after proving it
-    // is an embedded DOM allocation; reverse-casting a parsed Element corrupts
-    // the preceding allocation and loses its future DOM wrapper.
-    bool ui_mode = doc->input && doc->input->ui_mode;
-    DomElement* retained = ui_mode && dom_element_has_embedded_ui_storage(doc, elem)
-        ? element_to_dom_element(elem) : nullptr;
-    dom_detach_rebuilt_child(retained, parent);
-    DomElement* dom_elem = retained
-        ? DomElement::create_in(retained, doc, tag_name, elem)
-        : DomElement::create(doc, tag_name, elem);
+    // The render map is another observer even when the source's COW bit is clear.
+    // Keep pure render values separate from mutable/recyclable DOM occurrences (S12.1.3).
+    DomElement* dom_elem;
+    if (dom_element_has_embedded_html_storage(doc, elem)) {
+        dom_elem = element_to_dom_element(elem);
+        dom_move_source_occurrence(dom_elem, parent);
+        dom_elem = DomElement::create_in(dom_elem, doc, tag_name, elem);
+    } else {
+        dom_elem = DomElement::create(doc, tag_name, elem);
+    }
     if (!dom_elem) return nullptr;
 
     // The HTML tree builder creates a direct form child while in table mode
@@ -4626,151 +4667,10 @@ DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElem
         dom_element_record_all_attributes(dom_elem);
     }
 
-    // Process all children - including text nodes, comments, and elements
-    // Elements are Lists, so iterate through items
-
-    if (elem->length > 0 && !elem->items) {
-        log_error("build_dom_tree: <%s> has length=%lld but items=NULL", tag_name, (long long)elem->length);
-        return dom_elem;
-    }
-    // Sanity check: reject absurdly large length values
-    if (elem->length > 100000) {
-        log_error("build_dom_tree: <%s> has suspicious length=%lld, skipping", tag_name, (long long)elem->length);
-        return dom_elem;
-    }
-    for (int64_t i = 0; i < elem->length; i++) {
-        Item child_item = elem->items[i];
-        TypeId child_type = get_type_id(child_item);
-        // D7.4.5v2 makes Error the terminal valid TypeId; representation checks
-        // below still admit only the materialized child forms supported here.
-        if (child_type == 0 || child_type > LMD_TYPE_ERROR) {
-            log_error("build_dom_tree: <%s> child %lld has invalid type=%d (raw=0x%llx), skipping",
-                      tag_name, (long long)i, child_type, (unsigned long long)child_item.item);
-            continue;
-        }
-        if (child_type == LMD_TYPE_ELEMENT) {
-            // element node - recursively build
-            Element* child_elem = child_item.element;
-            if (!child_elem || (uintptr_t)child_elem < 0x1000) {
-                log_error("build_dom_tree: <%s> child %lld has invalid element pointer %p", tag_name, (long long)i, (void*)child_elem);
-                continue;
-            }
-            TypeElmt* child_elem_type = (TypeElmt*)child_elem->type;
-            const char* child_tag_name = child_elem_type ? child_elem_type->name.str : "unknown";
-
-            // Check if this is a comment or DOCTYPE
-            // HTML5 parser uses "#comment", CSS/older parsers use "!--"
-            if (dom_is_comment_tag(child_tag_name)) {
-                // Create DomComment node backed by Lambda Element
-                DomComment* comment_node = DomComment::create(child_elem, dom_elem);
-                if (comment_node) {
-                    // Add to DOM sibling chain
-                    dom_append_to_sibling_chain(dom_elem, comment_node);
-
-                    log_debug("  Created comment node at index %lld: '%s'",
-                              i, comment_node->content);
-                }
-                continue;  // Don't try to build as DomElement
-            }
-
-            log_debug("  Building child element: <%s> for parent <%s> (parent_dom=%p)", child_tag_name, tag_name, (void*)dom_elem);
-            DomElement* child_dom = build_dom_tree_from_element(child_elem, doc, dom_elem);
-
-            // skip if nullptr (e.g., XML declarations)
-            if (!child_dom) {
-                log_debug("  Skipped child element: <%s>", child_tag_name);
-                continue;
-            }
-
-            log_debug("  Successfully built child <%s> with parent <%s>. child_dom=%p, child_dom->parent=%p",
-                     child_tag_name, tag_name, (void*)child_dom, (void*)child_dom->parent);
-
-            // append_child() already linked the node during the recursive call,
-            // so the parent-child and sibling relationships are already established correctly.
-            // No manual linking needed!
-
-        } else if (child_type == LMD_TYPE_STRING) {
-            // Text node - create DomText that references Lambda String
-            String* text_str = child_item.get_string();
-            if (text_str && text_str->len > 0) {
-                DomText* text_node = dom_rebuild_text_node(doc, dom_elem, text_str, ui_mode);
-                if (text_node) {
-                    // Add text node to DOM sibling chain
-                    dom_append_to_sibling_chain(dom_elem, text_node);
-
-                    log_debug("  Created text node at index %lld: '%s' (len=%zu)",
-                              i, text_str->chars, text_str->len);
-                }
-            }
-        } else if (child_type == LMD_TYPE_SYMBOL) {
-            // Symbol node (HTML entity or emoji) - create DomText with symbol type
-            Symbol* sym = child_item.get_symbol();
-            if (sym && sym->len > 0) {
-                // Create symbol text node (will be resolved at render time)
-                DomText* text_node = DomText::create_symbol(sym->chars, sym->len, dom_elem);
-                if (text_node) {
-                    // Add symbol node to DOM sibling chain
-                    dom_append_to_sibling_chain(dom_elem, text_node);
-
-                    log_debug("  Created symbol node at index %lld: '%.*s' (len=%u)",
-                              i, (int)sym->len, sym->chars, sym->len);
-                }
-            }
-        } else if (child_type == LMD_TYPE_ARRAY) {
-            // Array child - flatten into parent (Lambda scripts may produce arrays of elements)
-            Array* arr = child_item.array;
-            if (arr) {
-                log_debug("  Flattening array child at index %lld with %lld items", i, (long long)arr->length);
-                for (int64_t j = 0; j < arr->length; j++) {
-                    Item arr_item = arr->items[j];
-                    TypeId arr_item_type = get_type_id(arr_item);
-                    if (arr_item_type == LMD_TYPE_ELEMENT) {
-                        Element* child_elem = arr_item.element;
-                        build_dom_tree_from_element(child_elem, doc, dom_elem);
-                    } else if (arr_item_type == LMD_TYPE_STRING) {
-                        String* text_str = arr_item.get_string();
-                        if (text_str && text_str->len > 0) {
-                            DomText* text_node = dom_rebuild_text_node(doc, dom_elem, text_str, ui_mode);
-                            if (text_node) {
-                                dom_append_to_sibling_chain(dom_elem, text_node);
-                            }
-                        }
-                    } else if (arr_item_type == LMD_TYPE_SYMBOL) {
-                        Symbol* sym = arr_item.get_symbol();
-                        if (sym && sym->len > 0) {
-                            DomText* text_node = DomText::create_symbol(sym->chars, sym->len, dom_elem);
-                            if (text_node) {
-                                dom_append_to_sibling_chain(dom_elem, text_node);
-                            }
-                        }
-                    } else if (arr_item_type == LMD_TYPE_ARRAY) {
-                        // nested array - flatten recursively by wrapping in a temporary element iteration
-                        Array* nested = arr_item.array;
-                        if (nested) {
-                            for (int64_t k = 0; k < nested->length; k++) {
-                                Item nested_item = nested->items[k];
-                                TypeId nested_type = get_type_id(nested_item);
-                                if (nested_type == LMD_TYPE_ELEMENT) {
-                                    build_dom_tree_from_element(nested_item.element, doc, dom_elem);
-                                } else if (nested_type == LMD_TYPE_STRING) {
-                                    String* s = nested_item.get_string();
-                                    if (s && s->len > 0) {
-                                        DomText* tn = dom_rebuild_text_node(doc, dom_elem, s, ui_mode);
-                                        if (tn) dom_append_to_sibling_chain(dom_elem, tn);
-                                    }
-                                } else if (nested_type == LMD_TYPE_SYMBOL) {
-                                    Symbol* sym = nested_item.get_symbol();
-                                    if (sym && sym->len > 0) {
-                                        DomText* tn = DomText::create_symbol(sym->chars, sym->len, dom_elem);
-                                        if (tn) dom_append_to_sibling_chain(dom_elem, tn);
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
+    Element* backing = dom_element_to_element(dom_elem);
+    if (backing->length > 0 && !backing->items) return nullptr;
+    for (int64_t index = 0; index < backing->length; index++) {
+        if (!dom_build_content_occurrence(&backing->items[index], doc, dom_elem, 0)) return nullptr;
     }
 
     return dom_elem;

@@ -49,6 +49,7 @@ bool radiant_queue_navigation_request(DomElement* source, const char* url,
                                       const char* target_name,
                                       DomElement* fragment_target);
 bool radiant_execute_pending_navigation(UiContext* uicon, DomDocument* source);
+bool radiant_commit_navigation_requests(UiContext* uicon);
 bool radiant_execute_location_navigation(UiContext* uicon, DomDocument* source,
                                          const char* url);
 bool radiant_schedule_async_iframe_load(UiContext* uicon, DomElement* iframe,
@@ -1896,7 +1897,7 @@ bool te_replace_byte_range_no_events(DomElement* elem, DocState* state, void* ta
 
 // ---------- change-event commit (F1 §3.1) ------------------------------
 
-// Snapshot current_value into form->value_at_focus. Idempotent. Call from
+// Snapshot current_value into the retained form ViewState. Call from
 // update_focus_state() when a text control gains focus.
 void te_focus_capture_value(DomElement* elem);
 
@@ -2389,8 +2390,25 @@ typedef enum ViewStateKind {
     VIEW_STATE_BASE = 0,
     VIEW_STATE_SCROLL,
     VIEW_STATE_FORM_CONTROL,
+    VIEW_STATE_MEDIA,
     VIEW_STATE_CUSTOM,
 } ViewStateKind;
+
+struct RdtVideo;
+struct StrBuf;
+typedef struct MediaViewState {
+    RdtVideo* player;
+    void (*destroy)(RdtVideo*);
+    void (*pause)(RdtVideo*);
+    StrBuf* sources;
+    char* source;
+    bool opened;
+    bool connected;
+    bool default_muted;
+    bool default_loop;
+    bool default_autoplay;
+    int last_state;
+} MediaViewState;
 
 typedef struct ViewState {
     uint32_t view_id;
@@ -2449,6 +2467,9 @@ typedef struct ViewState {
             char* current_value;
             uint32_t current_value_len;
             uint32_t current_value_u16_len;
+            // Focus-session baseline survives replacement of the rendered control.
+            char* value_at_focus;
+            uint32_t value_at_focus_len;
             // EditHistory*, owned here. The undo ring lives with the rest of
             // the canonical form state rather than on FormControlProp, which is
             // released and rebuilt as views churn — history has to outlive that
@@ -2464,6 +2485,7 @@ typedef struct ViewState {
             uint8_t  password_reveal_active : 1;
             uint8_t  password_reserved : 7;
         } form;
+        MediaViewState media;
     } data;
 } ViewState;
 
@@ -2737,6 +2759,7 @@ typedef struct DocState {
     DomElement*          last_focused_text_control;
     EditingBehavior      editing_behavior;
     FocusState* focus;             // focus state with navigation info
+    struct FocusDispatchScope* focus_dispatch; // active event sequences follow reactive rebuilds
     CursorState* cursor;           // mouse cursor state
     View* hover_target;            // currently hovered element
     View* active_target;           // currently active (pressed) element
@@ -2946,6 +2969,8 @@ bool state_get_bool(DocState* state, void* node, const char* name);
  * Read lazily-created per-view interaction state. Missing ViewState means defaults.
  */
 ViewState* view_state_get(DocState* state, View* view);
+MediaViewState* media_view_state_get(DocState* state, View* view, bool create = false);
+void media_view_state_reset(MediaViewState* media);
 // Retain view-scoped interaction state when an incremental template rebuild
 // replaces a structurally corresponding DOM subtree.
 void view_state_preserve_subtree_identity(DocState* state, DomNode* old_root,
@@ -2953,10 +2978,22 @@ void view_state_preserve_subtree_identity(DocState* state, DomNode* old_root,
 // Whether a rebuilt node stands for the node it replaces: the same node type
 // and, for elements, the same tag.
 bool view_state_nodes_correspond(const DomNode* old_node, const DomNode* new_node);
+// Resolve an owner through the same structural correspondence as retained state.
+DomNode* view_state_corresponding_node(DomNode* owner, DomNode* old_root,
+                                      DomNode* new_root);
+bool view_state_ref_follow_rebuild(DomDocument* doc, DomNodeRef* owner,
+    DomNode* old_root, DomNode* new_root,
+    DomNodePinReason reason = DOM_NODE_PIN_REASON_COUNT);
+void radiant_focus_events_follow_rebuild(DomDocument* doc, DomNode* old_root,
+                                         DomNode* new_root);
 // Pending Lambda frame requests owned inside a rebuilt subtree follow their
 // owners to the corresponding replacement nodes (RAD_16 §8).
 void radiant_frame_requests_follow_rebuild(DomDocument* doc, DomNode* old_root,
                                            DomNode* new_root);
+void radiant_pointer_capture_follow_rebuild(DomDocument* doc, DomNode* old_root,
+                                            DomNode* new_root);
+void radiant_navigation_requests_follow_rebuild(DomDocument* doc, DomNode* old_root,
+                                                DomNode* new_root);
 // queue one deferred render event per template root after a presentation commit.
 void radiant_queue_template_render_events(DomDocument* doc, DomNode* root);
 bool view_state_get_hovered(DocState* state, View* view);
@@ -3503,6 +3540,9 @@ bool scroll_state_is_dragging_for_view(DocState* state, View* view);
  * Returns the UTF-8 encoded string; may be nullptr if not yet set.
  */
 const char* form_control_get_value(DocState* state, View* view, uint32_t* out_len);
+const char* form_control_get_focus_value(DocState* state, View* view);
+bool form_control_store_focus_value(DocState* state, View* view,
+                                    const char* value, uint32_t value_len);
 
 // Replace the canonical ViewState-owned UTF-8 value, then rebind the
 // FormControlProp cache. The caller owns neither the prior nor new buffer.

@@ -1,0 +1,1 @@
+[["rich content controls height", true], ["authored dimensions", true], ["size constraints", true], ["read more measured", true], ["font changes measured", true], ["custom body measured", true], ["date slot present", true], ["empty cards measurable", true], ["measurement uses supplied viewport", true]]

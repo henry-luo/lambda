@@ -23,6 +23,10 @@
 
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
 
+extern "C" void rdt_video_pump_events(void) {
+    CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.0, true);
+}
+
 struct RdtAudio {
     AVAudioPlayer* player;
     id observer;
@@ -569,6 +573,14 @@ RdtVideoState rdt_video_get_state(RdtVideo* video) {
     }
 
     return cur;
+}
+
+bool rdt_video_events_pending(RdtVideo* video) {
+    if (!video || !video->player) return false;
+    // Virtual assertion retries must allow native playback to reach its completion event too.
+    RdtVideoState state = rdt_video_get_state(video);
+    return state == RDT_VIDEO_STATE_LOADING || state == RDT_VIDEO_STATE_PLAYING ||
+        video->player.timeControlStatus == AVPlayerTimeControlStatusWaitingToPlayAtSpecifiedRate;
 }
 
 double rdt_video_get_current_time(RdtVideo* video) {

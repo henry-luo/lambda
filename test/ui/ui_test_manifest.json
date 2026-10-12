@@ -33,6 +33,12 @@
       "tags": ["dtna", "baseline"]
     },
     {
+      "name": "timeline",
+      "worker_mb": 1024,
+      "globs": ["test/ui/timeline/*.json"],
+      "tags": ["timeline", "baseline"]
+    },
+    {
       "name": "bold",
       "globs": ["test/ui/bold/*.json"],
       "tags": ["bold", "baseline"]

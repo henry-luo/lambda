@@ -1,0 +1,21 @@
+{
+  "name":"Native HTML media state survives parent rebuild and layout reset, then resets on source change",
+  "html":"test/ui/media_owner.ls",
+  "viewport":{"width":800,"height":500},
+  "input_turn_ms":0,
+  "events":[
+    {"type":"click","target":{"selector":"#read"}},
+    {"type":"assert_text","target":{"selector":"#volume"},"equals":"1"},
+    {"type":"click","target":{"selector":"#quiet"}},
+    {"type":"click","target":{"selector":"#rerender"}},
+    {"type":"click","target":{"selector":"#read"}},
+    {"type":"assert_text","target":{"selector":"#volume"},"equals":"0.25"},
+    {"type":"assert_text","target":{"selector":"#revision"},"equals":"1"},
+    {"type":"resize","width":900,"height":600},
+    {"type":"click","target":{"selector":"#read"}},
+    {"type":"assert_text","target":{"selector":"#volume"},"equals":"0.25"},
+    {"type":"click","target":{"selector":"#replace"}},
+    {"type":"click","target":{"selector":"#read"}},
+    {"type":"assert_text","target":{"selector":"#volume"},"equals":"1"}
+  ]
+}

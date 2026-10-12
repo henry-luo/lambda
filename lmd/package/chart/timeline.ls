@@ -1,100 +1,95 @@
-// Playback maps an explicit elapsed clock onto ordered keyframes; no ambient time is read.
-import util: .util
-import parse: .parse
-import cfg: .config
+// historical timelines; the seven legacy playback exports remain forwarding aliases.
+import playback: .playback
+import schema: .timeline.schema
+import present: .timeline.present
+import geometry: .timeline.layout
+import vector: .timeline.svg
+import reducer: .timeline.state
+import live: .timeline.events
+import adapters: .timeline.adapters
+import story: .timeline.story
+import media: .timeline.media
+import resource: .timeline.resource
+import exports: .timeline.export
+import editing: .timeline.edit
+import bookmarks: .timeline.bookmark
+import prepared: .timeline.prepared
 
-fn nested(spec) {
-    let node = if (spec is element) parse.parse_top(spec) else spec;
-    node.timeline != null or any([for (child in [*node.children, *node.layer, node.template] where child != null) nested(child)])
+pub fn validate(spec) => schema.validate(spec)
+pub fn render(spec, viewport = null, snapshot = null) {
+    let normalized = resource.normalize(spec,snapshot);
+    if (normalized is error) normalized else present.html(normalized,viewport,snapshot)
 }
-pub fn configure(spec) {
-    let raw = if (spec is element) parse.parse_top(spec) else spec;
-    let options = raw.timeline;
-    let frames = options.keyframes;
-    let repeat = if (options.repeat != null) options.repeat else 1;
-    let direction = if (options.direction != null) options.direction else "normal";
-    let fill = if (options.fill != null) options.fill else "forwards";
-    let length = frames[len(frames) - 1].at;
-    let duration = if (options.duration != null) options.duration else length;
-    let failure = util.first_error([
-        if (not (frames is array) or len(frames) < 1 or frames[0].at != 0) error("chart: timeline keyframes must start at zero"),
-        for (i, frame in frames)
-            if (not util.finite_number(frame.at) or frame.at < 0 or i > 0 and frame.at <= frames[i - 1].at)
-                error("chart: keyframe times must be finite and strictly increasing")
-            else if (not (frame.spec is map or frame.spec is element)) error("chart: keyframe requires a specification")
-            else if (nested(frame.spec)) error("chart: recursive timelines are invalid"),
-        if (repeat != "infinite" and (not util.finite_number(repeat) or repeat < 1 or floor(repeat) != repeat))
-            error("chart: timeline repeat must be a positive integer or infinite"),
-        if (not contains(["normal", "reverse", "alternate", "reverse_alternate"], direction)) error("chart: invalid playback direction"),
-        if (not contains(["forwards", "none"], fill)) error("chart: invalid timeline fill"),
-        if (not util.finite_number(duration) or duration < 0 or len(frames) > 1 and duration == 0)
-            error("chart: timeline duration must be finite and positive")]);
-    if (failure is error) failure else {keyframes: frames, repeat: repeat, direction: direction, fill: fill,
-        duration: duration, length: length, autoplay: options.autoplay == true}
+pub fn render_spec(spec, viewport = null, snapshot = null) => render(spec,viewport,snapshot)
+pub fn initial_state(spec) => reducer.initial_state(spec)
+pub fn update(current, action, context) => reducer.update(current,action,context)
+pub fn apply_edit(spec, request) => editing.apply_edit(spec,request)
+pub fn bookmark(spec, id) {
+    let normalized=schema.validate(spec);
+    if (normalized is error) normalized else bookmarks.address(normalized,id)
 }
-pub fn inherit(base, keyframe) {
-    let spec = if (keyframe is element) parse.parse_top(keyframe) else keyframe;
-    {*:base, *:spec, timeline: null, encoding: {*:parse.attributes(base.encoding), *:parse.attributes(spec.encoding)},
-        config: cfg.inherit(base.config, spec.config)}
+pub fn convert(data, format, options = {}) => adapters.convert(data,format,options)
+pub fn capabilities(host = "native") => media.capabilities(host)
+pub fn render_frame(spec, frame, viewport = null, snapshot = null) {
+    let normalized=resource.normalize(spec,snapshot);
+    let elapsed=if (frame is number) frame else frame.time_ms;
+    let frozen=if (normalized is error) normalized else story.sample(story.plan(normalized,snapshot),elapsed);
+    if (frozen is error) frozen else present.html(normalized,viewport,{*:snapshot_map(snapshot),*:frozen,story_frame:frozen,sample_time_ms:elapsed})
 }
-pub fn target(raw) {
-    let spec = if (raw is element) parse.parse_top(raw) else raw;
-    if (spec.timeline == null) spec else {
-        let plan = configure(spec);
-        if (plan is error) plan else inherit(spec, plan.keyframes[len(plan.keyframes) - 1].spec)
-    }
+fn snapshot_map(value) => if (value is map) value else {}
+pub fn layout(spec, viewport, snapshot = null, resources = {}) {
+    let normalized=resource.normalize(spec,snapshot);
+    if (normalized is error) normalized else geometry.normalized(normalized,viewport,snapshot,resources)
 }
-pub fn position(plan, elapsed) {
-    let completed = plan.repeat != "infinite" and elapsed >= plan.duration * plan.repeat;
-    let cycle = if (plan.duration == 0) 0 else if (completed) plan.repeat - 1 else floor(elapsed / plan.duration);
-    let local = if (plan.duration == 0) 0.0 else if (completed) plan.duration else elapsed - cycle * plan.duration;
-    let reverse = contains(["reverse", "reverse_alternate"], plan.direction) !=
-        (contains(["alternate", "reverse_alternate"], plan.direction) and cycle % 2 == 1);
-    let position = if (completed and plan.fill == "none") 0.0 else
-        (if (reverse) 1.0 - local / (if (plan.duration == 0) 1.0 else plan.duration) else local / (if (plan.duration == 0) 1.0 else plan.duration)) * plan.length;
-    {at: position, complete: completed, cycle: cycle, reversed: reverse}
-}
-pub fn segment(spec, elapsed, exact = false) {
-    let plan = configure(spec);
-    if (plan is error) plan else if (not util.finite_number(elapsed) or elapsed < 0) error("chart: timeline time must be finite and nonnegative") else {
-    let point = if (exact) {at: util.clamp_val(elapsed, 0.0, plan.length), complete: false, cycle: 0}
-        else position(plan, elapsed);
-    let indices = [for (i, frame in plan.keyframes where frame.at <= point.at) i];
-    let index = if (len(indices) > 0) indices[len(indices) - 1] else 0;
-    let first = plan.keyframes[index];
-    let destination = plan.keyframes[min(index + 1, len(plan.keyframes) - 1)];
-    {*:point, source: inherit(spec, first.spec), target: inherit(spec, destination.spec),
-        elapsed: point.at - first.at, duration: destination.at - first.at,
-        progress: if (destination.at == first.at) 1.0 else (point.at - first.at) / (destination.at - first.at)}
-    }
+pub fn render_svg(spec, viewport, snapshot = null, options = {}) {
+    let plan=layout(spec,viewport,snapshot);
+    if (plan is error) plan else vector.render(plan,snapshot,options)
 }
 
-pub fn initial(spec) {
-    let plan = configure(spec);
-    if (plan is error) plan else {phase: if (plan.autoplay) "playing" else "idle", elapsed: 0.0,
-        anchor: null, reversed: false, token: 0, position: null, generation: 0}
+// compatibility boundary for a skin that supplies an existing list root.
+pub fn render_cards(spec, snapshot = null) {
+    let normalized = schema.validate(spec);
+    if (normalized is error) normalized else present.cards(normalized,snapshot)
 }
-pub fn command(playback, action, now, plan) {
-    let command = action.command;
-    let known = contains(["play", "pause", "resume", "seek", "reverse", "cancel", "frame"], command);
-    let elapsed = if (playback.phase == "playing" and playback.anchor != null and util.finite_number(now))
-        max(0.0, playback.elapsed + (now - playback.anchor) * (if (playback.reversed) -1.0 else 1.0)) else playback.elapsed;
-    let requested = if (action.position != null) action.position else if (action.time_ms != null) action.time_ms else action.value;
-    // seek positions use keyframe units; resume retains duration rescaling and cycle direction.
-    let point = position(plan, elapsed);
-    let seek_elapsed = point.cycle * plan.duration + (if (point.reversed) 1.0 - requested / (if (plan.length > 0) plan.length else 1.0)
-        else requested / (if (plan.length > 0) plan.length else 1.0)) * plan.duration;
-    let next = if (command == "cancel") {*:playback, phase: "idle", elapsed: 0.0, position: 0.0, anchor: null}
-        else if (command == "play") {*:playback, phase: "playing", elapsed: 0.0, position: null, anchor: now}
-        else if (command == "pause") {*:playback, phase: "paused", elapsed: elapsed, anchor: null}
-        else if (command == "resume") {*:playback, phase: "playing", position: null, anchor: now}
-        else if (command == "seek") {*:playback, elapsed: seek_elapsed, position: requested, anchor: if (playback.phase == "playing") now else null}
-        else if (command == "reverse") {*:playback, elapsed: elapsed, reversed: not playback.reversed, anchor: if (playback.phase == "playing") now else null, position: null}
-        else {*:playback, elapsed: elapsed, anchor: now, position: null,
-            phase: if (position(plan, elapsed).complete or playback.reversed and elapsed == 0) "ended" else playback.phase};
-    if (not known) error("chart: unknown playback command")
-    else if (command == "seek" and (not util.finite_number(requested) or requested < 0 or requested > plan.length))
-        error("chart: seek position must lie within the timeline")
-    else {*:next, notification: if (command == "frame") (if (next.phase == "ended" and playback.phase != "ended") "end" else null)
-        else if (command == "play") "start" else command}
+
+pub fn model(spec, viewport = null, options = {}) {
+    let validated=schema.validate(spec);
+    if (validated is error) validated else <timeline.chart spec:spec,viewport:viewport,options:options,
+        prepared:prepared.record(spec,null,validated)>
 }
+pub fn interactive(spec, viewport = null, options = {}) => apply(model(spec,viewport,options))
+pub pn load(request, options = {}) { resource.load(request,options) }
+pub fn export_data(spec, format = "json", options = {}, snapshot = null) => exports.data(spec,format,options,snapshot)
+pub fn export_document(spec, format = "html", viewport = null, options = {}, snapshot = null) => exports.document(spec,format,viewport,options,snapshot)
+pub pn save(spec, destination, format = null, viewport = null, options = {}, snapshot = null) {
+    exports.save(spec,destination,format,viewport,options,snapshot)
+}
+// the authored source is stable; mutable view state belongs to its live instance.
+view <timeline.chart> state live_state:{interaction:null,token:0} {
+    live.presentation(~,live_state)
+}
+on render(evt) { live_state=live.handle(~,live_state,evt); live.deliver(live_state,evt) }
+on timeline_frame(evt) { live_state=live.handle(~,live_state,evt); live.deliver(live_state,evt) }
+on click(evt) { live_state=live.handle(~,live_state,evt); live.deliver(live_state,evt) }
+on dblclick(evt) { live_state=live.handle(~,live_state,evt); live.deliver(live_state,evt) }
+on keydown(evt) { live_state=live.handle(~,live_state,evt); live.deliver(live_state,evt) }
+on input(evt) { live_state=live.handle(~,live_state,evt); live.deliver(live_state,evt) }
+on change(evt) { live_state=live.handle(~,live_state,evt); live.deliver(live_state,evt) }
+on wheel(evt) { live_state=live.handle(~,live_state,evt); live.deliver(live_state,evt) }
+on pointerdown(evt) { live_state=live.handle(~,live_state,evt); live.deliver(live_state,evt) }
+on pointermove(evt) { live_state=live.handle(~,live_state,evt); live.deliver(live_state,evt) }
+on pointerup(evt) { live_state=live.handle(~,live_state,evt); live.deliver(live_state,evt) }
+on pointercancel(evt) { live_state=live.handle(~,live_state,evt); live.deliver(live_state,evt) }
+on lostpointercapture(evt) { live_state=live.handle(~,live_state,evt); live.deliver(live_state,evt) }
+on timeline_action(evt) { live_state=live.handle(~,live_state,evt); live.deliver(live_state,evt) }
+on hashchange(evt) { live_state=live.handle(~,live_state,evt); live.deliver(live_state,evt) }
+on popstate(evt) { live_state=live.handle(~,live_state,evt); live.deliver(live_state,evt) }
+
+// deprecated animation API: implementation lives exclusively in chart.playback.
+pub fn configure(spec) => playback.configure(spec)
+pub fn inherit(base, keyframe) => playback.inherit(base,keyframe)
+pub fn target(spec) => playback.target(spec)
+pub fn position(plan, elapsed) => playback.position(plan,elapsed)
+pub fn segment(spec, elapsed, exact = false) => playback.segment(spec,elapsed,exact)
+pub fn initial(spec) => playback.initial(spec)
+pub fn command(current, action, now, plan) => playback.command(current,action,now,plan)

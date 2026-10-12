@@ -166,7 +166,7 @@ static bool render_png_resolve_auto_size(DomDocument* doc, float raster_scale,
     return true;
 }
 
-static int render_export_session_to_png(RenderExportSession* session, const char* png_file) {
+int render_export_session_to_png(RenderExportSession* session, const char* png_file) {
     if (!session) return 1;
     uint64_t t_start = time_now_ns();
 
@@ -206,7 +206,7 @@ static int render_export_session_to_png(RenderExportSession* session, const char
             target.width = output_width;
             target.height = output_height;
             render_output_target_apply_session(&target, session);
-            render_output_render_view_tree_to_target(ui_context, doc->view_tree, &target);
+            if (render_output_render_view_tree_to_target(ui_context, doc->view_tree, &target) != 0) return 1;
             rendered = true;
         } else {
             ui_context_create_surface(ui_context, output_width, output_height);
@@ -220,7 +220,7 @@ static int render_export_session_to_png(RenderExportSession* session, const char
             render_output_target_init(&target, RENDER_OUTPUT_PNG, png_file);
             target.surface = lam::up(ui_context->surface);
             render_output_target_apply_session(&target, session);
-            render_output_render_view_tree_to_target(ui_context, doc->view_tree, &target);
+            if (render_output_render_view_tree_to_target(ui_context, doc->view_tree, &target) != 0) return 1;
         } else {
             return 1;
         }
@@ -260,7 +260,7 @@ int render_document_transform_to_png(const char* document_file,
 
 // Main function to layout HTML and render to JPEG
 // output_scale is export density; device_scale is platform pixel density.
-static int render_export_session_to_jpeg(RenderExportSession* session,
+int render_export_session_to_jpeg(RenderExportSession* session,
         const char* jpeg_file, int quality) {
     if (!session) return 1;
     UiContext* ui_context = session->ui_context;
@@ -272,7 +272,7 @@ static int render_export_session_to_jpeg(RenderExportSession* session,
         target.surface = lam::up(ui_context->surface);
         target.jpeg_quality = quality;
         render_output_target_apply_session(&target, session);
-        render_output_render_view_tree_to_target(ui_context, doc->view_tree, &target);
+        return render_output_render_view_tree_to_target(ui_context, doc->view_tree, &target);
     } else {
         return 1;
     }

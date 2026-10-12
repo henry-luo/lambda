@@ -51,6 +51,7 @@ DomElement* dom_shadow_first_matching_slot(DomNode* root, const char* name);
 bool dom_slot_assignment_matches(DomElement* slot, DomNode* child);
 DomElement* dom_slot_assignment_host(DomElement* slot);
 DomElement* dom_flat_tree_parent(DomElement* element);
+bool dom_node_is_inert(DomNode* node);
 
 typedef const char* (*DomDirectionValueResolver)(DomElement*, void*);
 // Shared HTML first-strong scan used by dir=auto layout and :dir() matching.

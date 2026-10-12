@@ -1,0 +1,17 @@
+{
+  "name": "Timeline native navigation, selection, source identity and isolation",
+  "html": "test/ui/timeline/navigation.ls",
+  "viewport": {"width": 1000, "height": 650},
+  "events": [
+    {"type": "assert_attribute", "target": {"selector": "#first .lambda-timeline-chart"}, "attribute": "data-timeline-active", "equals": "a"},
+    {"type": "click", "target": {"selector": "#first [data-timeline-command='next']"}},
+    {"type": "assert_attribute", "target": {"selector": "#first .lambda-timeline-chart"}, "attribute": "data-timeline-active", "equals": "b"},
+    {"type": "assert_attribute", "target": {"selector": "#second .lambda-timeline-chart"}, "attribute": "data-timeline-active", "equals": "a"},
+    {"type": "click", "target": {"selector": "#parent-rerender"}},
+    {"type": "assert_text", "target": {"selector": "#parent-rerender"}, "equals": "Parent 1"},
+    {"type": "assert_attribute", "target": {"selector": "#first .lambda-timeline-chart"}, "attribute": "data-timeline-active", "equals": "b"},
+    {"type": "click", "target": {"selector": "#first [data-timeline-id='c']"}},
+    {"type": "assert_attribute", "target": {"selector": "#first .lambda-timeline-chart"}, "attribute": "data-timeline-active", "equals": "c"},
+    {"type": "render", "file": "temp/timeline-references/navigation.png"}
+  ]
+}

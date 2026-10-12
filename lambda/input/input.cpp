@@ -393,11 +393,11 @@ TypeMap* map_clone_typemap_for_mutation(Map* mp, Pool* pool) {
     return clone;
 }
 
-static TypeElmt* elmt_clone_type_for_mutation(Element* elmt, Pool* pool) {
+TypeElmt* elmt_clone_type_for_mutation(Element* elmt, Pool* pool, bool force) {
     if (!elmt || !pool) return NULL;
     TypeElmt* tm = (TypeElmt*)elmt->type;
     if (!tm) return NULL;
-    if (tm->is_private_clone) return tm;
+    if (tm->is_private_clone && !force) return tm;
 
     TypeElmt* clone = (TypeElmt*)alloc_type(pool, LMD_TYPE_ELEMENT, sizeof(TypeElmt));
     if (!clone) return NULL;
@@ -406,6 +406,9 @@ static TypeElmt* elmt_clone_type_for_mutation(Element* elmt, Pool* pool) {
     clone->type_index = tm->type_index;
     clone->has_spread = tm->has_spread;  // cloned chain keeps any nameless spread slot
     clone->has_named_shape = tm->has_named_shape;
+    // a private DOM occurrence keeps the source's nominal and qualified identity.
+    clone->nominal = tm->nominal;
+    clone->is_nominal = tm->is_nominal;
     clone->is_trusted_contract = false;
     clone->struct_name = tm->struct_name;
     clone->is_private_clone = true;
@@ -664,7 +667,9 @@ ShapeEntry* shape_entry_copy_as(TypeAlloc alloc, const ShapeEntry* like,
     entry->name_id = like->name_id;
     entry->key_kind = like->key_kind;
     entry->ns = like->ns;
-    shape_entry_set_type(entry, type_info[type_id].type);
+    // unchanged contracts retain their nullable/union storage lanes (D3.4.5).
+    shape_entry_set_type(entry, like->type->type_id == type_id
+        ? like->type : type_info[type_id].type);
     if (prev_entry) prev_entry->chain_next = entry;
     return entry;
 }
@@ -1803,6 +1808,10 @@ TypeMap* type_tree_follow(Input* input, TypeMap* start, const TypeTreeStep* step
         TransitionKey k;
         if (step->like) {
             if (!step->like->name || step->like->flags != 0) return NULL;
+            // replay edges name coarse types; full contracts use the preserving clone.
+            if (step->type_id == step->like->type->type_id &&
+                    (step->like->type != type_info[step->type_id].type ||
+                     step->like->default_value)) return NULL;
             k = transition_key_of_entry(step->like);
         } else {
             if (!step->key) return NULL;

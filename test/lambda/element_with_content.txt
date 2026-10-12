@@ -1,0 +1,1 @@
+[["retained nominal identity", true], ["retained union and nullable attributes", true], ["normalized strings and rich children", true], ["immutable source content", true], ["qualified tag retained", true], ["qualified attribute retained", true], ["qualified child retained", true], ["canonical merging", true], ["declared content rejection", true]]

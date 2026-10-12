@@ -2937,6 +2937,9 @@ extern "C" {
     // returns its input on success and a diagnostic-carrying Error Item on a
     // mismatch; no native lane may be entered before this succeeds.
     bool lambda_type_matches(Item value, Type* expected);
+    // Pure content replacement retains the qualified tag and attribute contract.
+    Item lambda_element_with_content(Item element, Item children);
+    Item lambda_element_present_content(Item element, Item children);
     // S11.1.3: membership in a range type, and its bounds as one inclusive
     // interval (codepoints for a character range). A bound outside the
     // range's domain makes both answer false: that range admits nothing.

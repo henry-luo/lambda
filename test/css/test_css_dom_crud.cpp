@@ -166,6 +166,28 @@ TEST_F(DomIntegrationTest, DomElementAttributes) {
     EXPECT_FALSE(element->has_attribute("data-test"));
 }
 
+TEST_F(DomIntegrationTest, InertUsesAssignedSlotAndShadowHostAncestry) {
+    DomElement* host = create_dom_element("div");
+    DomElement* shadow = create_dom_element("#document-fragment");
+    DomElement* slot = create_dom_element("slot");
+    DomElement* light = create_dom_element("button");
+    ASSERT_TRUE(host && shadow && slot && light);
+    host->set_shadow_root_element(shadow);
+    shadow->set_shadow_host_element(host);
+    shadow->append_child(slot);
+    host->append_child(light);
+    EXPECT_EQ(dom_flat_tree_parent(light), slot);
+    EXPECT_FALSE(dom_node_is_inert(light));
+    ASSERT_TRUE(slot->set_attribute("inert", ""));
+    EXPECT_TRUE(dom_node_is_inert(light));
+    ASSERT_TRUE(slot->remove_attribute("inert"));
+    ASSERT_TRUE(host->set_attribute("inert", "false"));
+    // a present boolean attribute applies even when its text spells false.
+    EXPECT_TRUE(dom_node_is_inert(light));
+    ASSERT_TRUE(host->remove_attribute("inert"));
+    EXPECT_FALSE(dom_node_is_inert(light));
+}
+
 TEST_F(DomIntegrationTest, DomElementIdAttribute) {
     DomElement* element = create_dom_element("div");
     ASSERT_NE(element, nullptr);

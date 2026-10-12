@@ -2433,7 +2433,7 @@ typedef struct EmbedProp {
     CssEnum object_fit; // CSS_VALUE_FILL (default), CSS_VALUE_CONTAIN, CSS_VALUE_COVER, CSS_VALUE_NONE, CSS_VALUE_SCALE_DOWN
     float object_position_x; // percent when object_position_x_is_percent, otherwise CSS px
     float object_position_y; // percent when object_position_y_is_percent, otherwise CSS px
-    lam::Own<struct RdtVideo> video;  // video playback context (NULL for non-video elements)
+    lam::Up<struct RdtVideo> video;  // borrowed from retained MediaViewState across layout resets
     lam::Up<ImageSurface> poster;    // borrowed from the image cache; poster image for <video> (displayed before playback starts)
     bool object_position_set;
     bool object_position_x_is_percent;
@@ -3527,15 +3527,9 @@ struct FormControlProp {
 
     // ------------------------------------------------------------------
     // F1 (Radiant_Design_Form_Input.md §3.1):
-    //   - value_at_focus: snapshot of current_value taken when this text
-    //     control receives focus. Used by te_blur_dispatch_change() to
-    //     decide whether to fire `change` on blur (HTML §4.10.5.5).
-    //   - history: undo/redo ring (lazy-allocated by text_edit.cpp).
-    //     Opaque here; defined in text_edit.hpp.
+    // Focus baseline and undo history are owned by the canonical form ViewState
+    // so template rebuilds preserve change-on-blur and undo behavior.
     // ------------------------------------------------------------------
-    char*    value_at_focus;
-    uint32_t value_at_focus_len;
-    // (the undo ring moved to the form ViewState in DocState — ESO43)
 
     // ------------------------------------------------------------------
     // F4 (Radiant_Design_Form_Input.md §3.1, §3.8):
@@ -3581,7 +3575,7 @@ inline bool form_control_is_textarea(const FormControlProp* form) {
 // scratch — this function only assigns the non-zero defaults.
 void form_control_prop_init(FormControlProp* f);
 
-// Release owned heap pointers (custom_validity_msg, value_at_focus). Clears
+// Release owned heap pointers (custom_validity_msg). Clears
 // the borrowed current_value cache but does not free it or `f` itself.
 void form_control_prop_release(DomElement* elem, FormControlProp* f);
 
@@ -4401,7 +4395,10 @@ typedef struct HtmlLoadPhaseTiming {
 DomDocument* load_lambda_html_doc(Url* html_url, const char* css_filename,
     int viewport_width, int viewport_height, Pool* pool, const char* html_source = nullptr,
     bool track_source_lines = false, bool execute_scripts = true,
-    const DocumentJsHostConfig* host_config = nullptr);
+    const DocumentJsHostConfig* host_config = nullptr, bool print_media = false);
+// in-memory documents transfer their URL and loader pool to the returned owner.
+DomDocument* load_html_source_doc(const char* html_source, int viewport_width, int viewport_height,
+    const DocumentJsHostConfig* host_config = nullptr, bool print_media = false, Url* base_url = nullptr);
 DomDocument* load_html_doc(Url *base, char* doc_filename, int viewport_width, int viewport_height,
                            const DocumentJsHostConfig* js_host_config = nullptr,
                            struct CookieJar* top_level_cookie_jar = nullptr,

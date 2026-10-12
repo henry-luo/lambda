@@ -145,49 +145,6 @@ bool layout_has_style_containment(const ViewSpan* span) {
         block->container_axes || block->content_visibility_hidden);
 }
 
-bool LayoutCounterScope::enter(LayoutContext* lycon, ViewSpan* span,
-                               DomElement* element, DisplayValue display) {
-    if (!lycon || !lycon->counter_context) return true;
-    bool before = element && element->tag_name && strcmp(element->tag_name, "::before") == 0;
-    bool after = element && element->tag_name && strcmp(element->tag_name, "::after") == 0;
-    if (!counter_push_scope(lycon->counter_context, before || after)) return false;
-    context = lycon->counter_context;
-    ViewBlock* block = lam::unsafe_view_block_api_span(span);
-    bool list_item = display.outer == CSS_VALUE_LIST_ITEM || display.list_item;
-    if (before || after) {
-        DomElement* origin = element->parent && element->parent->is_element()
-            ? element->parent->as_element() : nullptr;
-        if (origin) apply_pseudo_counter_ops(lycon,
-            origin->pseudo_style(before ? PSEUDO_STYLE_BEFORE : PSEUDO_STYLE_AFTER));
-    } else {
-        setup_list_container_counters(lycon, block, element);
-        if (span->blk) {
-            if (span->block()->counter_reset) {
-                counter_reset(context, span->block()->counter_reset);
-                compute_reversed_counter_initial(lycon, element);
-            }
-            if (span->block()->counter_increment) counter_increment(context, span->block()->counter_increment);
-            if (span->block()->counter_set) counter_set(context, span->block()->counter_set);
-        }
-        if (list_item) layout_apply_list_item_counter(lycon, block, element);
-    }
-    // the element's own operations precede the boundary; generated children follow it.
-    if (!style.enter(context, layout_has_style_containment(span))) { close(); return false; }
-    if (before || after) layout_update_pseudo_content_with_counters(lycon, element, false);
-    else if (list_item) {
-        process_list_item(lycon, block, element, element, display);
-        if (!span->bound) span->ensure_boundary(lycon);
-    }
-    return true;
-}
-
-void LayoutCounterScope::close() {
-    if (!context) return;
-    style.close();
-    counter_pop_scope_propagate(context, true);
-    context = nullptr;
-}
-
 struct CounterCheckpointState {
     lam::Up<CounterScope> scope;
     lam::Own<HashMap> original, copy;

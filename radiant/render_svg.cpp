@@ -1001,7 +1001,8 @@ static void svg_cb_render_image(RenderContext* vctx, ViewBlock* block, float abs
     PaintList* paint = svg_active_paint_list(ctx);
     if (render_media_paint_svg_picture(paint, ctx->ui_context, block, &content_rect)) {
         svg_lower_paint_list(ctx);
-    } else if (img->url && img->url->href) {
+    } else {
+        // decoded data-URI and native images can own pixels without a source URL.
         Rect image_rect = render_media_image_rect(block, img, content_rect, 1.0f);
         paint_draw_image_resource(paint, img, image_rect.x, image_rect.y,
             image_rect.width, image_rect.height, 255, nullptr);
@@ -1544,7 +1545,7 @@ bool save_svg_to_file(const char* svg_content, const char* filename) {
     return true;
 }
 
-static int render_export_session_to_svg(RenderExportSession* session, const char* svg_file) {
+int render_export_session_to_svg(RenderExportSession* session, const char* svg_file) {
     if (!session) return 1;
     UiContext* ui_context = session->ui_context;
     DomDocument* doc = session->document;

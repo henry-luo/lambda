@@ -1,0 +1,29 @@
+{
+  "name":"Timeline group, tag and exact date filters share the reducer",
+  "html":"test/ui/timeline/filters.ls",
+  "viewport":{"width":900,"height":1000},
+  "events":[
+    {"type":"assert_count","target":{"selector":".lambda-timeline-item"},"count":3},
+    {"type":"click","target":{"selector":"[data-timeline-filter='groups'][data-timeline-filter-value='g1']"}},
+    {"type":"assert_count","target":{"selector":".lambda-timeline-item"},"count":1},
+    {"type":"assert_attribute","target":{"selector":".lambda-timeline-chart"},"attribute":"data-timeline-active","equals":"b"},
+    {"type":"assert_checked","target":{"selector":"[data-timeline-filter='groups'][data-timeline-filter-value='g1']"},"checked":false},
+    {"type":"click","target":{"selector":"[data-timeline-filter='tags'][data-timeline-filter-value='old']"}},
+    {"type":"assert_count","target":{"selector":".lambda-timeline-item"},"count":1},
+    {"type":"click","target":{"selector":".lambda-timeline-filters > button"}},
+    {"type":"assert_count","target":{"selector":".lambda-timeline-item"},"count":3},
+    {"type":"click","target":{"selector":"[data-timeline-filter='from']"}},
+    {"type":"type","text":"20"},
+    {"type":"key_press","key":"Tab"},
+    {"type":"assert_count","target":{"selector":".lambda-timeline-item"},"count":2},
+    {"type":"assert_value","target":{"selector":"[data-timeline-filter='from']"},"equals":"20"},
+    {"type":"click","target":{"selector":"[data-timeline-filter='to']"}},
+    {"type":"type","text":"25"},
+    {"type":"key_press","key":"Tab"},
+    {"type":"assert_count","target":{"selector":".lambda-timeline-item"},"count":1},
+    {"type":"assert_text","target":{"selector":".lambda-timeline-item"},"contains":"Beta"},
+    {"type":"click","target":{"selector":".lambda-timeline-filters > button"}},
+    {"type":"assert_count","target":{"selector":".lambda-timeline-item"},"count":3},
+    {"type":"assert_value","target":{"selector":"[data-timeline-filter='from']"},"equals":""}
+  ]
+}

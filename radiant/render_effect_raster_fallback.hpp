@@ -67,7 +67,8 @@ static inline void render_effect_record_page_backdrop_paint_list(
     }
     render_svg_inline_register_paint_ir_lowerers();
     paint_ir_register_glyph_run_raster_lowerer(glyph_lowerer);
-    paint_ir_lower_raster(paint_list, page_backdrop);
+    // vector callbacks stream clip/transform scopes across several paint fragments.
+    paint_ir_lower_raster_fragment(paint_list, page_backdrop);
 }
 
 static inline void render_effect_raster_begin(

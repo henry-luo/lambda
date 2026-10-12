@@ -96,7 +96,6 @@ void form_control_prop_release(DomElement* elem, FormControlProp* f) {
     f->current_value_u16_len = 0;
     if (f->value == cached_value) f->value = nullptr;
     if (f->custom_validity_msg) { mem_free(f->custom_validity_msg); f->custom_validity_msg = nullptr; }
-    if (f->value_at_focus) { mem_free(f->value_at_focus); f->value_at_focus = nullptr; }
     f->state_ref = nullptr;
 }
 

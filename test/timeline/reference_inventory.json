@@ -1,0 +1,4285 @@
+{
+  "schema_version": 1,
+  "frozen_on": "2026-10-11",
+  "proposal": "vibe/Lambda_Pkg_Chart_Timeline.md",
+  "references": [
+    {
+      "name": "react-chrono",
+      "repository": "prabhuignoto/react-chrono",
+      "commit": "407ffc367de4576adecb2d0e1dab616d0f3ef60d",
+      "committed_at": "2025-12-29T04:37:10Z",
+      "version": "3.3.3",
+      "sources": [
+        {
+          "path": "package.json",
+          "url": "https://raw.githubusercontent.com/prabhuignoto/react-chrono/407ffc367de4576adecb2d0e1dab616d0f3ef60d/package.json",
+          "sha256": "5f7bb3aa8e53370dab84984af99666210f7564f3bb03ab9e87dd81d67bd6ef91",
+          "declared_options": []
+        },
+        {
+          "path": "PROPS-REFERENCE.md",
+          "url": "https://raw.githubusercontent.com/prabhuignoto/react-chrono/407ffc367de4576adecb2d0e1dab616d0f3ef60d/PROPS-REFERENCE.md",
+          "sha256": "0e8fd1d2cd679c8a1398548f07a5c4b422f3340b19b76a1808d2bbef052b3040",
+          "declared_options": [
+            "End",
+            "Enter",
+            "Escape",
+            "Home",
+            "accessibility",
+            "active",
+            "activeItemIndex",
+            "align",
+            "alignment.horizontal",
+            "alignment.vertical",
+            "allCardsVisible",
+            "allowDynamicUpdate",
+            "allowHTML",
+            "autoScroll",
+            "borderLessCards",
+            "borderless",
+            "buttonActiveBgColor",
+            "buttonActiveBorderColor",
+            "buttonActiveIconColor",
+            "buttonBorderColor",
+            "buttonHoverBgColor",
+            "buttonHoverBorderColor",
+            "buttonTexts",
+            "buttonTexts.first",
+            "buttonTexts.last",
+            "buttonTexts.next",
+            "buttonTexts.play",
+            "buttonTexts.previous",
+            "buttonTexts.stop",
+            "cardBgColor",
+            "cardDetailedText",
+            "cardDetailsBackGround",
+            "cardDetailsColor",
+            "cardHeight",
+            "cardHover",
+            "cardLess",
+            "cardMediaBgColor",
+            "cardPositionHorizontal",
+            "cardSubtitle",
+            "cardSubtitleColor",
+            "cardTitle",
+            "cardTitleColor",
+            "cardWidth",
+            "cardsDisabled",
+            "children",
+            "classNames",
+            "classNames.card",
+            "classNames.cardMedia",
+            "classNames.cardSubTitle",
+            "classNames.cardText",
+            "classNames.cardTitle",
+            "classNames.controls",
+            "classNames.timelinePoint",
+            "classNames.timelineTrack",
+            "classNames.title",
+            "compactText",
+            "content",
+            "darkMode",
+            "darkToggleActiveBgColor",
+            "darkToggleActiveBorderColor",
+            "darkToggleActiveIconColor",
+            "darkToggleGlowColor",
+            "date",
+            "dateFormat",
+            "detailsColor",
+            "disableAutoScrollOnClick",
+            "disableClickOnCircle",
+            "disableInteraction",
+            "disableNavOnKey",
+            "disableTimelinePoint",
+            "disableToolbar",
+            "disabled",
+            "display",
+            "elements",
+            "enableBreakPoint",
+            "fit",
+            "flipLayout",
+            "focusActiveItemOnLoad",
+            "focusOnLoad",
+            "fontFamily",
+            "fontSizes",
+            "fontSizes.cardSubtitle",
+            "fontSizes.cardText",
+            "fontSizes.cardTitle",
+            "fontSizes.title",
+            "fullscreen",
+            "glowColor",
+            "height",
+            "highlightCardsOnHover",
+            "i18n",
+            "iconBackgroundColor",
+            "iconColor",
+            "id",
+            "itemWidth",
+            "items",
+            "keyboard",
+            "keyboardNavigation",
+            "layout",
+            "lineWidth",
+            "media",
+            "mediaHeight",
+            "mediaSettings",
+            "mode",
+            "name",
+            "navigation",
+            "onItemSelected",
+            "onRestartSlideshow",
+            "onScrollEnd",
+            "onThemeChange",
+            "parseDetailsAsHTML",
+            "pointClick",
+            "pointShape",
+            "pointSize",
+            "pointsDisabled",
+            "positioning.cardPosition",
+            "positioning.flipLayout",
+            "preconnect",
+            "primary",
+            "quickJump",
+            "readMore",
+            "responsive.breakpoint",
+            "responsive.enabled",
+            "responsiveBreakPoint",
+            "scrollable",
+            "search",
+            "search.ariaLabel",
+            "search.clearLabel",
+            "search.placeholder",
+            "searchHighlightColor",
+            "secondary",
+            "semanticTags",
+            "semanticTags.subtitle",
+            "semanticTags.title",
+            "shadowColor",
+            "showAllCardsHorizontal",
+            "showOverallSlideshowProgress",
+            "showProgressOnSlideshow",
+            "slideItemDuration",
+            "slideShow",
+            "slideShowType",
+            "slideshow.autoStart",
+            "slideshow.duration",
+            "slideshow.enabled",
+            "slideshow.showOverallProgress",
+            "slideshow.showProgress",
+            "slideshow.type",
+            "source.type",
+            "source.url",
+            "status",
+            "textColor",
+            "textDensity",
+            "textOverlay",
+            "theme",
+            "timelineBgColor",
+            "timelineContent",
+            "timelineHeight",
+            "timelinePointDimension",
+            "timelinePointShape",
+            "title",
+            "titleColor",
+            "titleColorActive",
+            "titleDateFormat",
+            "toolbar.enabled",
+            "toolbar.position",
+            "toolbar.search.inputMaxWidth",
+            "toolbar.search.inputWidth",
+            "toolbar.search.maxWidth",
+            "toolbar.search.minWidth",
+            "toolbar.search.width",
+            "toolbar.sticky",
+            "toolbarBgColor",
+            "toolbarBtnBgColor",
+            "toolbarPosition",
+            "toolbarTextColor",
+            "type",
+            "url",
+            "useReadMore",
+            "view",
+            "visible",
+            "weights",
+            "←",
+            "↑"
+          ]
+        },
+        {
+          "path": "src/models/Theme.ts",
+          "url": "https://raw.githubusercontent.com/prabhuignoto/react-chrono/407ffc367de4576adecb2d0e1dab616d0f3ef60d/src/models/Theme.ts",
+          "sha256": "3befbde28953442518dece10a8aaf58fa9ff0a18789f88f3e0e17c9bc1bcaa6f",
+          "declared_options": [
+            "buttonActiveBgColor",
+            "buttonActiveBorderColor",
+            "buttonActiveIconColor",
+            "buttonBorderColor",
+            "buttonHoverBgColor",
+            "buttonHoverBorderColor",
+            "cardBgColor",
+            "cardDetailsBackGround",
+            "cardDetailsColor",
+            "cardMediaBgColor",
+            "cardSubtitleColor",
+            "cardTitleColor",
+            "darkToggleActiveBgColor",
+            "darkToggleActiveBorderColor",
+            "darkToggleActiveIconColor",
+            "darkToggleGlowColor",
+            "detailsColor",
+            "glowColor",
+            "iconBackgroundColor",
+            "iconColor",
+            "nestedCardBgColor",
+            "nestedCardDetailsBackGround",
+            "nestedCardDetailsColor",
+            "nestedCardSubtitleColor",
+            "nestedCardTitleColor",
+            "primary",
+            "searchHighlightColor",
+            "secondary",
+            "shadowColor",
+            "textColor",
+            "timelineBgColor",
+            "titleColor",
+            "titleColorActive",
+            "toolbarBgColor",
+            "toolbarBtnBgColor",
+            "toolbarTextColor"
+          ]
+        },
+        {
+          "path": "src/models/TimelineCardTitleModel.ts",
+          "url": "https://raw.githubusercontent.com/prabhuignoto/react-chrono/407ffc367de4576adecb2d0e1dab616d0f3ef60d/src/models/TimelineCardTitleModel.ts",
+          "sha256": "b36d5ab3155afbc1838d113ffb9d9376aae81ceea8749e6b71572c279f3f0dba",
+          "declared_options": [
+            "active",
+            "align",
+            "classString",
+            "theme",
+            "title"
+          ]
+        },
+        {
+          "path": "src/models/TimelineConfig.ts",
+          "url": "https://raw.githubusercontent.com/prabhuignoto/react-chrono/407ffc367de4576adecb2d0e1dab616d0f3ef60d/src/models/TimelineConfig.ts",
+          "sha256": "afb1d5739dd2c6d5da77d40cdc3507a20b4ad9aa2d7975ce4b0ecb9feb3f8a08",
+          "declared_options": [
+            "align",
+            "alignment",
+            "allCardsVisible",
+            "allowHTML",
+            "ariaLabel",
+            "autoScroll",
+            "autoStart",
+            "borderless",
+            "breakpoint",
+            "buttonTexts",
+            "card",
+            "cardHeight",
+            "cardHover",
+            "cardMedia",
+            "cardPosition",
+            "cardSubTitle",
+            "cardSubtitle",
+            "cardText",
+            "cardTitle",
+            "cardWidth",
+            "cardsDisabled",
+            "classNames",
+            "clearLabel",
+            "compactText",
+            "controls",
+            "dateFormat",
+            "direction",
+            "disabled",
+            "display",
+            "duration",
+            "elements",
+            "enabled",
+            "first",
+            "fit",
+            "flipLayout",
+            "focusOnLoad",
+            "fontFamily",
+            "fontSizes",
+            "googleFonts",
+            "height",
+            "horizontal",
+            "inputMaxWidth",
+            "inputWidth",
+            "itemWidth",
+            "keyboardNavigation",
+            "last",
+            "lineWidth",
+            "locale",
+            "maxWidth",
+            "minWidth",
+            "next",
+            "placeholder",
+            "play",
+            "pointClick",
+            "pointShape",
+            "pointSize",
+            "pointsDisabled",
+            "position",
+            "positioning",
+            "preconnect",
+            "previous",
+            "readMore",
+            "responsive",
+            "scrollable",
+            "scrollbar",
+            "search",
+            "semanticTags",
+            "showOverallProgress",
+            "showProgress",
+            "showToggle",
+            "size",
+            "slideshow",
+            "sticky",
+            "stop",
+            "style",
+            "subtitle",
+            "textOverlay",
+            "texts",
+            "timelineHeight",
+            "timelinePoint",
+            "timelineTrack",
+            "title",
+            "toolbar",
+            "type",
+            "vertical",
+            "weight",
+            "weights",
+            "width"
+          ]
+        },
+        {
+          "path": "src/models/TimelineContentModel.ts",
+          "url": "https://raw.githubusercontent.com/prabhuignoto/react-chrono/407ffc367de4576adecb2d0e1dab616d0f3ef60d/src/models/TimelineContentModel.ts",
+          "sha256": "f141c3ae7eb7ac661da858ce21bf750cfa398fc8778157f4a10fdd74e5729aa9",
+          "declared_options": [
+            "active",
+            "branchDir",
+            "cardTitle",
+            "content",
+            "customContent",
+            "detailedText",
+            "flip",
+            "focusable",
+            "hasFocus",
+            "id",
+            "isNested",
+            "items",
+            "media",
+            "nestedCardHeight",
+            "onClick",
+            "onElapsed",
+            "onShowMore",
+            "slideShowActive",
+            "theme",
+            "timelineContent",
+            "title",
+            "url"
+          ]
+        },
+        {
+          "path": "src/models/TimelineControlModel.ts",
+          "url": "https://raw.githubusercontent.com/prabhuignoto/react-chrono/407ffc367de4576adecb2d0e1dab616d0f3ef60d/src/models/TimelineControlModel.ts",
+          "sha256": "2b4ed381f38612ee5d92b63c70bd11f6c9f80273f0e8203af1f129955ae34ea0",
+          "declared_options": [
+            "activeTimelineItem",
+            "disableLeft",
+            "disableRight",
+            "id",
+            "isDark",
+            "onFirst",
+            "onLast",
+            "onNext",
+            "onPaused",
+            "onPrevious",
+            "onReplay",
+            "onToggleDarkMode",
+            "slideShowEnabled",
+            "slideShowRunning",
+            "totalItems"
+          ]
+        },
+        {
+          "path": "src/models/TimelineHorizontalModel.ts",
+          "url": "https://raw.githubusercontent.com/prabhuignoto/react-chrono/407ffc367de4576adecb2d0e1dab616d0f3ef60d/src/models/TimelineHorizontalModel.ts",
+          "sha256": "6ed74b290949e712eed3b648267f76752c58703f47715833a1befa42c4151175",
+          "declared_options": [
+            "autoScroll",
+            "contentDetailsChildren",
+            "contentHeight",
+            "contentOffset",
+            "handleItemClick",
+            "hasFocus",
+            "iconChildren",
+            "isNested",
+            "itemWidth",
+            "items",
+            "lineWidth",
+            "mode",
+            "nestedCardHeight",
+            "onElapsed",
+            "onOutlineSelection",
+            "pointOffset",
+            "pointWidth",
+            "slideShowRunning",
+            "theme",
+            "timelinePointHeight",
+            "wrapperId"
+          ]
+        },
+        {
+          "path": "src/models/TimelineI18n.ts",
+          "url": "https://raw.githubusercontent.com/prabhuignoto/react-chrono/407ffc367de4576adecb2d0e1dab616d0f3ef60d/src/models/TimelineI18n.ts",
+          "sha256": "4aa19c434325eebefb4ad3ddff59282840c1f9669f5f00a298ec8261505895c4",
+          "declared_options": [
+            "accessibility",
+            "activeItem",
+            "alternating",
+            "ariaLabel",
+            "arrowKeys",
+            "cardInteraction",
+            "clearLabel",
+            "collapse",
+            "compact",
+            "content",
+            "darkMode",
+            "densitySelection",
+            "detailed",
+            "empty",
+            "endKey",
+            "enterFullscreen",
+            "enterKey",
+            "error",
+            "errorMessage",
+            "escapeKey",
+            "exitFullscreen",
+            "expand",
+            "first",
+            "fullscreen",
+            "homeKey",
+            "horizontal",
+            "horizontalAll",
+            "itemPosition",
+            "itemTemplate",
+            "jumpTo",
+            "jumpToAriaLabel",
+            "keyboard",
+            "keyboardHelp",
+            "last",
+            "layout",
+            "layoutSelection",
+            "lightMode",
+            "loading",
+            "navigation",
+            "navigationLabel",
+            "nestedItems",
+            "next",
+            "nextMatch",
+            "noItems",
+            "noResults",
+            "notSupported",
+            "pause",
+            "placeholder",
+            "play",
+            "previous",
+            "previousMatch",
+            "quickJump",
+            "readMore",
+            "resultsCount",
+            "resume",
+            "search",
+            "showLess",
+            "status",
+            "stop",
+            "switchLayout",
+            "tabNavigation",
+            "template",
+            "theme",
+            "timelineCard",
+            "timelineContainer",
+            "timelineItem",
+            "timelineNavigation",
+            "timelinePoint",
+            "toggleDensity",
+            "toggleTheme",
+            "userConfig",
+            "variables",
+            "vertical",
+            "view"
+          ]
+        },
+        {
+          "path": "src/models/TimelineItemModel.ts",
+          "url": "https://raw.githubusercontent.com/prabhuignoto/react-chrono/407ffc367de4576adecb2d0e1dab616d0f3ef60d/src/models/TimelineItemModel.ts",
+          "sha256": "1cb997beb588ad7ac49b482eeb12b467220296064ea901a8c99188e206f16b5a",
+          "declared_options": [
+            "_dayjs",
+            "active",
+            "autoScroll",
+            "cardDetailedText",
+            "cardSubtitle",
+            "cardTitle",
+            "content",
+            "customContent",
+            "date",
+            "hasFocus",
+            "hasNestedItems",
+            "iconChild",
+            "id",
+            "isNested",
+            "items",
+            "media",
+            "onClick",
+            "onElapsed",
+            "position",
+            "slideItemDuration",
+            "slideShowRunning",
+            "theme",
+            "timelineContent",
+            "title",
+            "url",
+            "visible",
+            "wrapperId"
+          ]
+        },
+        {
+          "path": "src/models/TimelineMediaModel.ts",
+          "url": "https://raw.githubusercontent.com/prabhuignoto/react-chrono/407ffc367de4576adecb2d0e1dab616d0f3ef60d/src/models/TimelineMediaModel.ts",
+          "sha256": "897eb8bbd0950e7536d94c7e5789505608d947014bfdc2418ab518b341df17e3",
+          "declared_options": [
+            "active",
+            "cardHeight",
+            "content",
+            "detailsText",
+            "ended",
+            "hideMedia",
+            "id",
+            "media",
+            "name",
+            "onMediaStateChange",
+            "paused",
+            "playing",
+            "progressRef",
+            "remainInterval",
+            "resuming",
+            "showProgressBar",
+            "slideshowActive",
+            "source",
+            "startWidth",
+            "theme",
+            "title",
+            "triangleDir",
+            "type",
+            "url"
+          ]
+        },
+        {
+          "path": "src/models/TimelineModel.ts",
+          "url": "https://raw.githubusercontent.com/prabhuignoto/react-chrono/407ffc367de4576adecb2d0e1dab616d0f3ef60d/src/models/TimelineModel.ts",
+          "sha256": "cec13d5873bbfba042763adb679ff9c3d3de515c36efad25c6d759ae2f7b7e9e",
+          "declared_options": [
+            "activeItemIndex",
+            "activeTimelineItem",
+            "align",
+            "allowDynamicUpdate",
+            "alternating",
+            "borderLessCards",
+            "buttonTexts",
+            "card",
+            "cardHeight",
+            "cardLess",
+            "cardMedia",
+            "cardPositionHorizontal",
+            "cardSubTitle",
+            "cardSubtitle",
+            "cardText",
+            "cardTitle",
+            "cardWidth",
+            "changeDensity",
+            "changeDensityOptions",
+            "changeLayout",
+            "changeLayoutOptions",
+            "children",
+            "classNames",
+            "clearSearch",
+            "contentAlignment",
+            "contentDetailsChildren",
+            "contentDetailsHeight",
+            "controls",
+            "dark",
+            "darkMode",
+            "data",
+            "disableAutoScrollOnClick",
+            "disableClickOnCircle",
+            "disableInteraction",
+            "disableNavOnKey",
+            "disableTimelinePoint",
+            "disableToolbar",
+            "enableBreakPoint",
+            "enableDarkToggle",
+            "enableLayoutSwitch",
+            "enableQuickJump",
+            "first",
+            "fit",
+            "flipLayout",
+            "focusActiveItemOnLoad",
+            "fontSizes",
+            "helpText",
+            "high",
+            "highlightCardsOnHover",
+            "horizontal",
+            "horizontal_all",
+            "iconChildren",
+            "inputMaxWidth",
+            "inputWidth",
+            "isChild",
+            "itemWidth",
+            "items",
+            "jumpTo",
+            "last",
+            "light",
+            "lineWidth",
+            "low",
+            "maxWidth",
+            "mediaHeight",
+            "mediaSettings",
+            "minWidth",
+            "mode",
+            "nestedCardHeight",
+            "next",
+            "nextMatch",
+            "noUniqueId",
+            "onFirst",
+            "onItemSelected",
+            "onLast",
+            "onNext",
+            "onOutlineSelection",
+            "onPaused",
+            "onPrevious",
+            "onRestartSlideshow",
+            "onScrollEnd",
+            "onThemeChange",
+            "onTimelineUpdated",
+            "parseDetailsAsHTML",
+            "play",
+            "previous",
+            "previousMatch",
+            "responsiveBreakPoint",
+            "scrollable",
+            "searchAriaLabel",
+            "searchPlaceholder",
+            "semanticTags",
+            "showAllCardsHorizontal",
+            "showOverallSlideshowProgress",
+            "showProgressOnSlideshow",
+            "slideItemDuration",
+            "slideShow",
+            "slideShowEnabled",
+            "slideShowRunning",
+            "slideShowType",
+            "stickyToolbar",
+            "stop",
+            "text",
+            "textDensity",
+            "textOverlay",
+            "theme",
+            "timelineHeight",
+            "timelinePoint",
+            "timelinePointDimension",
+            "timelinePointShape",
+            "title",
+            "titleDateFormat",
+            "toolbarPosition",
+            "toolbarSearchConfig",
+            "uniqueId",
+            "useReadMore",
+            "vertical",
+            "width"
+          ]
+        },
+        {
+          "path": "src/models/TimelinePropsV2.ts",
+          "url": "https://raw.githubusercontent.com/prabhuignoto/react-chrono/407ffc367de4576adecb2d0e1dab616d0f3ef60d/src/models/TimelinePropsV2.ts",
+          "sha256": "c83f717661412c6e245346ce4bd261e90cff53c64e7c108796aeed9fde857ca4",
+          "declared_options": [
+            "accessibility",
+            "activeItemIndex",
+            "align",
+            "allowDynamicUpdate",
+            "animation",
+            "borderLessCards",
+            "buttonTexts",
+            "card",
+            "cardHeight",
+            "cardLess",
+            "cardMedia",
+            "cardPositionHorizontal",
+            "cardSubTitle",
+            "cardSubtitle",
+            "cardText",
+            "cardTitle",
+            "cardWidth",
+            "children",
+            "classNames",
+            "content",
+            "contentDetailsHeight",
+            "controls",
+            "darkMode",
+            "disableAutoScrollOnClick",
+            "disableClickOnCircle",
+            "disableInteraction",
+            "disableNavOnKey",
+            "disableTimelinePoint",
+            "disableToolbar",
+            "display",
+            "enableBreakPoint",
+            "enableDarkToggle",
+            "enableLayoutSwitch",
+            "enableQuickJump",
+            "first",
+            "fit",
+            "flipLayout",
+            "focusActiveItemOnLoad",
+            "fontSizes",
+            "highlightCardsOnHover",
+            "i18n",
+            "id",
+            "index",
+            "interaction",
+            "isChild",
+            "item",
+            "itemWidth",
+            "items",
+            "last",
+            "layout",
+            "lineWidth",
+            "media",
+            "mediaHeight",
+            "mediaSettings",
+            "mode",
+            "nestedCardHeight",
+            "next",
+            "noUniqueId",
+            "onItemSelected",
+            "onRestartSlideshow",
+            "onScrollEnd",
+            "onThemeChange",
+            "parseDetailsAsHTML",
+            "play",
+            "previous",
+            "responsiveBreakPoint",
+            "scrollable",
+            "semanticTags",
+            "showAllCardsHorizontal",
+            "showOverallSlideshowProgress",
+            "showProgressOnSlideshow",
+            "slideItemDuration",
+            "slideShow",
+            "slideShowType",
+            "stop",
+            "style",
+            "textDensity",
+            "textOverlay",
+            "theme",
+            "timelinePointDimension",
+            "timelinePointShape",
+            "title",
+            "titleDateFormat",
+            "toolbarPosition",
+            "uniqueId",
+            "useReadMore"
+          ]
+        },
+        {
+          "path": "src/models/TimelineVerticalModel.ts",
+          "url": "https://raw.githubusercontent.com/prabhuignoto/react-chrono/407ffc367de4576adecb2d0e1dab616d0f3ef60d/src/models/TimelineVerticalModel.ts",
+          "sha256": "3e7b27623d27eff2bafe6df731ab3670ea9d105dc17dbf24bbf7cdb238359523",
+          "declared_options": [
+            "activeTimelineItem",
+            "alternateCards",
+            "autoScroll",
+            "childrenNode",
+            "contentDetailsChildren",
+            "contentHeight",
+            "contentOffset",
+            "hasFocus",
+            "iconChild",
+            "iconChildren",
+            "index",
+            "isMobile",
+            "items",
+            "media",
+            "onActive",
+            "onClick",
+            "onElapsed",
+            "onFocus",
+            "onKeyDown",
+            "onOutlineSelection",
+            "onShowMore",
+            "pointOffset",
+            "ref",
+            "rovingProps",
+            "slideItemDuration",
+            "slideShowRunning",
+            "tabIndex",
+            "theme",
+            "visible"
+          ]
+        },
+        {
+          "path": "src/models/ToolbarItem.ts",
+          "url": "https://raw.githubusercontent.com/prabhuignoto/react-chrono/407ffc367de4576adecb2d0e1dab616d0f3ef60d/src/models/ToolbarItem.ts",
+          "sha256": "6b3619ad8214b27596ab0ff1bf3ca2cdf7eb0f6fe229b90bde989a4c40e824de",
+          "declared_options": [
+            "icon",
+            "id",
+            "isMinimized",
+            "label",
+            "minimizable",
+            "name",
+            "onSelect",
+            "onToggleMinimize"
+          ]
+        },
+        {
+          "path": "src/models/ToolbarProps.ts",
+          "url": "https://raw.githubusercontent.com/prabhuignoto/react-chrono/407ffc367de4576adecb2d0e1dab616d0f3ef60d/src/models/ToolbarProps.ts",
+          "sha256": "5abcaf4f7c424ccfa19a767dee66ce8c0bb8fcd2a660bfbc0f9f6595cf6660e3",
+          "declared_options": [
+            "children",
+            "items",
+            "style",
+            "theme",
+            "useVeStyles"
+          ]
+        }
+      ],
+      "examples": [
+        {
+          "path": "src/demo/App.css.ts",
+          "url": "https://github.com/prabhuignoto/react-chrono/blob/407ffc367de4576adecb2d0e1dab616d0f3ef60d/src/demo/App.css.ts",
+          "status": "planned",
+          "acceptance": []
+        },
+        {
+          "path": "src/demo/App.tsx",
+          "url": "https://github.com/prabhuignoto/react-chrono/blob/407ffc367de4576adecb2d0e1dab616d0f3ef60d/src/demo/App.tsx",
+          "status": "planned",
+          "acceptance": []
+        },
+        {
+          "path": "src/demo/array-map-dynamic.tsx",
+          "url": "https://github.com/prabhuignoto/react-chrono/blob/407ffc367de4576adecb2d0e1dab616d0f3ef60d/src/demo/array-map-dynamic.tsx",
+          "status": "planned",
+          "acceptance": []
+        },
+        {
+          "path": "src/demo/auto-card-height.tsx",
+          "url": "https://github.com/prabhuignoto/react-chrono/blob/407ffc367de4576adecb2d0e1dab616d0f3ef60d/src/demo/auto-card-height.tsx",
+          "status": "planned",
+          "acceptance": []
+        },
+        {
+          "path": "src/demo/components/DemoPageLayout.tsx",
+          "url": "https://github.com/prabhuignoto/react-chrono/blob/407ffc367de4576adecb2d0e1dab616d0f3ef60d/src/demo/components/DemoPageLayout.tsx",
+          "status": "planned",
+          "acceptance": []
+        },
+        {
+          "path": "src/demo/components/Footer.tsx",
+          "url": "https://github.com/prabhuignoto/react-chrono/blob/407ffc367de4576adecb2d0e1dab616d0f3ef60d/src/demo/components/Footer.tsx",
+          "status": "planned",
+          "acceptance": []
+        },
+        {
+          "path": "src/demo/components/Header.tsx",
+          "url": "https://github.com/prabhuignoto/react-chrono/blob/407ffc367de4576adecb2d0e1dab616d0f3ef60d/src/demo/components/Header.tsx",
+          "status": "planned",
+          "acceptance": []
+        },
+        {
+          "path": "src/demo/components/HeroSection.tsx",
+          "url": "https://github.com/prabhuignoto/react-chrono/blob/407ffc367de4576adecb2d0e1dab616d0f3ef60d/src/demo/components/HeroSection.tsx",
+          "status": "planned",
+          "acceptance": []
+        },
+        {
+          "path": "src/demo/components/HomePage.tsx",
+          "url": "https://github.com/prabhuignoto/react-chrono/blob/407ffc367de4576adecb2d0e1dab616d0f3ef60d/src/demo/components/HomePage.tsx",
+          "status": "planned",
+          "acceptance": []
+        },
+        {
+          "path": "src/demo/components/Sidebar.tsx",
+          "url": "https://github.com/prabhuignoto/react-chrono/blob/407ffc367de4576adecb2d0e1dab616d0f3ef60d/src/demo/components/Sidebar.tsx",
+          "status": "planned",
+          "acceptance": []
+        },
+        {
+          "path": "src/demo/components/ThemeShowcase.tsx",
+          "url": "https://github.com/prabhuignoto/react-chrono/blob/407ffc367de4576adecb2d0e1dab616d0f3ef60d/src/demo/components/ThemeShowcase.tsx",
+          "status": "planned",
+          "acceptance": []
+        },
+        {
+          "path": "src/demo/components/horizontal/AllHorizontal.tsx",
+          "url": "https://github.com/prabhuignoto/react-chrono/blob/407ffc367de4576adecb2d0e1dab616d0f3ef60d/src/demo/components/horizontal/AllHorizontal.tsx",
+          "status": "planned",
+          "acceptance": []
+        },
+        {
+          "path": "src/demo/components/horizontal/BasicHorizontal.tsx",
+          "url": "https://github.com/prabhuignoto/react-chrono/blob/407ffc367de4576adecb2d0e1dab616d0f3ef60d/src/demo/components/horizontal/BasicHorizontal.tsx",
+          "status": "planned",
+          "acceptance": []
+        },
+        {
+          "path": "src/demo/components/horizontal/CardlessHorizontal.tsx",
+          "url": "https://github.com/prabhuignoto/react-chrono/blob/407ffc367de4576adecb2d0e1dab616d0f3ef60d/src/demo/components/horizontal/CardlessHorizontal.tsx",
+          "status": "planned",
+          "acceptance": []
+        },
+        {
+          "path": "src/demo/components/horizontal/InitialSelectedHorizontal.tsx",
+          "url": "https://github.com/prabhuignoto/react-chrono/blob/407ffc367de4576adecb2d0e1dab616d0f3ef60d/src/demo/components/horizontal/InitialSelectedHorizontal.tsx",
+          "status": "planned",
+          "acceptance": []
+        },
+        {
+          "path": "src/demo/components/horizontal/index.ts",
+          "url": "https://github.com/prabhuignoto/react-chrono/blob/407ffc367de4576adecb2d0e1dab616d0f3ef60d/src/demo/components/horizontal/index.ts",
+          "status": "planned",
+          "acceptance": []
+        },
+        {
+          "path": "src/demo/components/index.ts",
+          "url": "https://github.com/prabhuignoto/react-chrono/blob/407ffc367de4576adecb2d0e1dab616d0f3ef60d/src/demo/components/index.ts",
+          "status": "planned",
+          "acceptance": []
+        },
+        {
+          "path": "src/demo/components/vertical/AlternatingNestedVertical.tsx",
+          "url": "https://github.com/prabhuignoto/react-chrono/blob/407ffc367de4576adecb2d0e1dab616d0f3ef60d/src/demo/components/vertical/AlternatingNestedVertical.tsx",
+          "status": "planned",
+          "acceptance": []
+        },
+        {
+          "path": "src/demo/components/vertical/AlternatingVertical.tsx",
+          "url": "https://github.com/prabhuignoto/react-chrono/blob/407ffc367de4576adecb2d0e1dab616d0f3ef60d/src/demo/components/vertical/AlternatingVertical.tsx",
+          "status": "planned",
+          "acceptance": []
+        },
+        {
+          "path": "src/demo/components/vertical/BasicVertical.tsx",
+          "url": "https://github.com/prabhuignoto/react-chrono/blob/407ffc367de4576adecb2d0e1dab616d0f3ef60d/src/demo/components/vertical/BasicVertical.tsx",
+          "status": "planned",
+          "acceptance": []
+        },
+        {
+          "path": "src/demo/components/vertical/CardlessVertical.tsx",
+          "url": "https://github.com/prabhuignoto/react-chrono/blob/407ffc367de4576adecb2d0e1dab616d0f3ef60d/src/demo/components/vertical/CardlessVertical.tsx",
+          "status": "planned",
+          "acceptance": []
+        },
+        {
+          "path": "src/demo/components/vertical/ComprehensiveVertical.tsx",
+          "url": "https://github.com/prabhuignoto/react-chrono/blob/407ffc367de4576adecb2d0e1dab616d0f3ef60d/src/demo/components/vertical/ComprehensiveVertical.tsx",
+          "status": "planned",
+          "acceptance": []
+        },
+        {
+          "path": "src/demo/components/vertical/CustomContentVertical.tsx",
+          "url": "https://github.com/prabhuignoto/react-chrono/blob/407ffc367de4576adecb2d0e1dab616d0f3ef60d/src/demo/components/vertical/CustomContentVertical.tsx",
+          "status": "planned",
+          "acceptance": []
+        },
+        {
+          "path": "src/demo/components/vertical/CustomContentWithIconsVertical.tsx",
+          "url": "https://github.com/prabhuignoto/react-chrono/blob/407ffc367de4576adecb2d0e1dab616d0f3ef60d/src/demo/components/vertical/CustomContentWithIconsVertical.tsx",
+          "status": "planned",
+          "acceptance": []
+        },
+        {
+          "path": "src/demo/components/vertical/MediaShowcaseVertical.tsx",
+          "url": "https://github.com/prabhuignoto/react-chrono/blob/407ffc367de4576adecb2d0e1dab616d0f3ef60d/src/demo/components/vertical/MediaShowcaseVertical.tsx",
+          "status": "planned",
+          "acceptance": []
+        },
+        {
+          "path": "src/demo/components/vertical/MixedVertical.tsx",
+          "url": "https://github.com/prabhuignoto/react-chrono/blob/407ffc367de4576adecb2d0e1dab616d0f3ef60d/src/demo/components/vertical/MixedVertical.tsx",
+          "status": "planned",
+          "acceptance": []
+        },
+        {
+          "path": "src/demo/components/vertical/NestedVertical.tsx",
+          "url": "https://github.com/prabhuignoto/react-chrono/blob/407ffc367de4576adecb2d0e1dab616d0f3ef60d/src/demo/components/vertical/NestedVertical.tsx",
+          "status": "planned",
+          "acceptance": []
+        },
+        {
+          "path": "src/demo/components/vertical/NewMediaVertical.tsx",
+          "url": "https://github.com/prabhuignoto/react-chrono/blob/407ffc367de4576adecb2d0e1dab616d0f3ef60d/src/demo/components/vertical/NewMediaVertical.tsx",
+          "status": "planned",
+          "acceptance": []
+        },
+        {
+          "path": "src/demo/components/vertical/index.ts",
+          "url": "https://github.com/prabhuignoto/react-chrono/blob/407ffc367de4576adecb2d0e1dab616d0f3ef60d/src/demo/components/vertical/index.ts",
+          "status": "planned",
+          "acceptance": []
+        },
+        {
+          "path": "src/demo/custom-theme-example.tsx",
+          "url": "https://github.com/prabhuignoto/react-chrono/blob/407ffc367de4576adecb2d0e1dab616d0f3ef60d/src/demo/custom-theme-example.tsx",
+          "status": "planned",
+          "acceptance": []
+        },
+        {
+          "path": "src/demo/data/basic-timeline.tsx",
+          "url": "https://github.com/prabhuignoto/react-chrono/blob/407ffc367de4576adecb2d0e1dab616d0f3ef60d/src/demo/data/basic-timeline.tsx",
+          "status": "planned",
+          "acceptance": []
+        },
+        {
+          "path": "src/demo/data/index.ts",
+          "url": "https://github.com/prabhuignoto/react-chrono/blob/407ffc367de4576adecb2d0e1dab616d0f3ef60d/src/demo/data/index.ts",
+          "status": "planned",
+          "acceptance": []
+        },
+        {
+          "path": "src/demo/data/media-showcase.ts",
+          "url": "https://github.com/prabhuignoto/react-chrono/blob/407ffc367de4576adecb2d0e1dab616d0f3ef60d/src/demo/data/media-showcase.ts",
+          "status": "planned",
+          "acceptance": []
+        },
+        {
+          "path": "src/demo/data/mixed-timeline.ts",
+          "url": "https://github.com/prabhuignoto/react-chrono/blob/407ffc367de4576adecb2d0e1dab616d0f3ef60d/src/demo/data/mixed-timeline.ts",
+          "status": "planned",
+          "acceptance": []
+        },
+        {
+          "path": "src/demo/data/nested-timeline.ts",
+          "url": "https://github.com/prabhuignoto/react-chrono/blob/407ffc367de4576adecb2d0e1dab616d0f3ef60d/src/demo/data/nested-timeline.ts",
+          "status": "planned",
+          "acceptance": []
+        },
+        {
+          "path": "src/demo/data/technology-evolution.ts",
+          "url": "https://github.com/prabhuignoto/react-chrono/blob/407ffc367de4576adecb2d0e1dab616d0f3ef60d/src/demo/data/technology-evolution.ts",
+          "status": "planned",
+          "acceptance": []
+        },
+        {
+          "path": "src/demo/data/world-history.ts",
+          "url": "https://github.com/prabhuignoto/react-chrono/blob/407ffc367de4576adecb2d0e1dab616d0f3ef60d/src/demo/data/world-history.ts",
+          "status": "planned",
+          "acceptance": []
+        },
+        {
+          "path": "src/demo/dynamic-load.tsx",
+          "url": "https://github.com/prabhuignoto/react-chrono/blob/407ffc367de4576adecb2d0e1dab616d0f3ef60d/src/demo/dynamic-load.tsx",
+          "status": "planned",
+          "acceptance": []
+        },
+        {
+          "path": "src/demo/layout.tsx",
+          "url": "https://github.com/prabhuignoto/react-chrono/blob/407ffc367de4576adecb2d0e1dab616d0f3ef60d/src/demo/layout.tsx",
+          "status": "planned",
+          "acceptance": []
+        },
+        {
+          "path": "src/examples/basic-horizontal.tsx",
+          "url": "https://github.com/prabhuignoto/react-chrono/blob/407ffc367de4576adecb2d0e1dab616d0f3ef60d/src/examples/basic-horizontal.tsx",
+          "status": "planned",
+          "acceptance": []
+        },
+        {
+          "path": "src/examples/basic-slideshow.tsx",
+          "url": "https://github.com/prabhuignoto/react-chrono/blob/407ffc367de4576adecb2d0e1dab616d0f3ef60d/src/examples/basic-slideshow.tsx",
+          "status": "planned",
+          "acceptance": []
+        },
+        {
+          "path": "src/examples/basic-vertical.tsx",
+          "url": "https://github.com/prabhuignoto/react-chrono/blob/407ffc367de4576adecb2d0e1dab616d0f3ef60d/src/examples/basic-vertical.tsx",
+          "status": "planned",
+          "acceptance": []
+        },
+        {
+          "path": "src/examples/data.ts",
+          "url": "https://github.com/prabhuignoto/react-chrono/blob/407ffc367de4576adecb2d0e1dab616d0f3ef60d/src/examples/data.ts",
+          "status": "planned",
+          "acceptance": []
+        },
+        {
+          "path": "src/examples/slideshow-with-overall-progress.tsx",
+          "url": "https://github.com/prabhuignoto/react-chrono/blob/407ffc367de4576adecb2d0e1dab616d0f3ef60d/src/examples/slideshow-with-overall-progress.tsx",
+          "status": "planned",
+          "acceptance": []
+        }
+      ]
+    },
+    {
+      "name": "TimelineJS3",
+      "repository": "NUKnightLab/TimelineJS3",
+      "commit": "12a80199b967394a020f8faa7b001162a71e2494",
+      "committed_at": "2026-09-22T14:35:49Z",
+      "version": "3.9.13",
+      "sources": [
+        {
+          "path": "package.json",
+          "url": "https://raw.githubusercontent.com/NUKnightLab/TimelineJS3/12a80199b967394a020f8faa7b001162a71e2494/package.json",
+          "sha256": "d4351c3b34e42aec864549d309c853b0fa62b4e4c48f1ba6a0a1846ccd1899fb",
+          "declared_options": []
+        },
+        {
+          "path": "src/js/media/Media.js",
+          "url": "https://raw.githubusercontent.com/NUKnightLab/TimelineJS3/12a80199b967394a020f8faa7b001162a71e2494/src/js/media/Media.js",
+          "sha256": "7c3221411bc66d9e0df2c03a32beca91c25d9a766525901eb5ad8b6342ba3e05",
+          "declared_options": [
+            "api_key_embedly",
+            "api_key_flickr",
+            "api_key_googlemaps",
+            "background",
+            "caption",
+            "caption_alternate",
+            "caption_height",
+            "container",
+            "content",
+            "content_container",
+            "content_item",
+            "content_link",
+            "credit",
+            "credit_alternate",
+            "credit_height",
+            "link",
+            "link_target",
+            "loaded",
+            "media_loaded",
+            "parent",
+            "show_meta",
+            "unique_id",
+            "url"
+          ]
+        },
+        {
+          "path": "src/js/media/MediaType.js",
+          "url": "https://raw.githubusercontent.com/NUKnightLab/TimelineJS3/12a80199b967394a020f8faa7b001162a71e2494/src/js/media/MediaType.js",
+          "sha256": "d012ec603a2d70a9897d3983884fcc790aed59a45d2c5e9876a94d1d0e558605",
+          "declared_options": [
+            "cls",
+            "default",
+            "match_str",
+            "name",
+            "type"
+          ]
+        },
+        {
+          "path": "src/js/media/__tests__/MediaType.test.js",
+          "url": "https://raw.githubusercontent.com/NUKnightLab/TimelineJS3/12a80199b967394a020f8faa7b001162a71e2494/src/js/media/__tests__/MediaType.test.js",
+          "sha256": "f67a50a8a51c2128a5f25b72fbaff5e93cb03d1bbd0bc9b51734a21788666789",
+          "declared_options": []
+        },
+        {
+          "path": "src/js/media/types/Audio.js",
+          "url": "https://raw.githubusercontent.com/NUKnightLab/TimelineJS3/12a80199b967394a020f8faa7b001162a71e2494/src/js/media/types/Audio.js",
+          "sha256": "e5dbf0af1dc26a28098a751ff3435ba229873fc461092a086396014c9e4892ce",
+          "declared_options": [
+            "default"
+          ]
+        },
+        {
+          "path": "src/js/media/types/Blockquote.js",
+          "url": "https://raw.githubusercontent.com/NUKnightLab/TimelineJS3/12a80199b967394a020f8faa7b001162a71e2494/src/js/media/types/Blockquote.js",
+          "sha256": "01bcb7fbadb03b901f672c9f39f18854ce8baf18c81773099560f1922d02aeaf",
+          "declared_options": []
+        },
+        {
+          "path": "src/js/media/types/Bluesky.js",
+          "url": "https://raw.githubusercontent.com/NUKnightLab/TimelineJS3/12a80199b967394a020f8faa7b001162a71e2494/src/js/media/types/Bluesky.js",
+          "sha256": "79afaa3c216aaa7b1f017366e91be8c4e3068c8de756513c0811fe14c03fa30e",
+          "declared_options": [
+            "dataType",
+            "error",
+            "success",
+            "type",
+            "url"
+          ]
+        },
+        {
+          "path": "src/js/media/types/DailyMotion.js",
+          "url": "https://raw.githubusercontent.com/NUKnightLab/TimelineJS3/12a80199b967394a020f8faa7b001162a71e2494/src/js/media/types/DailyMotion.js",
+          "sha256": "a527cc5241bfadcca7daa5e54fb49106c06504140f0e92ad2a66219ee1b7ee37",
+          "declared_options": []
+        },
+        {
+          "path": "src/js/media/types/DocumentCloud.js",
+          "url": "https://raw.githubusercontent.com/NUKnightLab/TimelineJS3/12a80199b967394a020f8faa7b001162a71e2494/src/js/media/types/DocumentCloud.js",
+          "sha256": "2d0418812828acab70313f8a5ea69de4dfcda4ba00169410ef45fbc0d10c768d",
+          "declared_options": [
+            "container",
+            "showSidebar"
+          ]
+        },
+        {
+          "path": "src/js/media/types/Flickr.js",
+          "url": "https://raw.githubusercontent.com/NUKnightLab/TimelineJS3/12a80199b967394a020f8faa7b001162a71e2494/src/js/media/types/Flickr.js",
+          "sha256": "4205a373e4d5fba5b573bb5b1453307cb1f8782722751b809d19a189e5eb6dfe",
+          "declared_options": []
+        },
+        {
+          "path": "src/js/media/types/GoogleDoc.js",
+          "url": "https://raw.githubusercontent.com/NUKnightLab/TimelineJS3/12a80199b967394a020f8faa7b001162a71e2494/src/js/media/types/GoogleDoc.js",
+          "sha256": "21d6f3027c69aaf6fb8eb17d439620c89d604442b4e795b1d8ce5d4b85ae8997",
+          "declared_options": []
+        },
+        {
+          "path": "src/js/media/types/GoogleMap.js",
+          "url": "https://raw.githubusercontent.com/NUKnightLab/TimelineJS3/12a80199b967394a020f8faa7b001162a71e2494/src/js/media/types/GoogleMap.js",
+          "sha256": "8b369f48725e576773b886713c11807f2e33595e66c126b38b6dac547b3ed2d7",
+          "declared_options": [
+            "directions",
+            "place",
+            "search",
+            "view"
+          ]
+        },
+        {
+          "path": "src/js/media/types/IFrame.js",
+          "url": "https://raw.githubusercontent.com/NUKnightLab/TimelineJS3/12a80199b967394a020f8faa7b001162a71e2494/src/js/media/types/IFrame.js",
+          "sha256": "59ee72dd3a9bf9d6f13b035df058c9cacebc54af800ee8ae4f1e3e4a3442c58c",
+          "declared_options": [
+            "ADD_ATTR",
+            "ADD_TAGS"
+          ]
+        },
+        {
+          "path": "src/js/media/types/Image.js",
+          "url": "https://raw.githubusercontent.com/NUKnightLab/TimelineJS3/12a80199b967394a020f8faa7b001162a71e2494/src/js/media/types/Image.js",
+          "sha256": "da6c3c2e922702d6ebf35d67d8046aacfc79d9aa74eca4891fe930af54e60aef",
+          "declared_options": []
+        },
+        {
+          "path": "src/js/media/types/Imgur.js",
+          "url": "https://raw.githubusercontent.com/NUKnightLab/TimelineJS3/12a80199b967394a020f8faa7b001162a71e2494/src/js/media/types/Imgur.js",
+          "sha256": "edc4b8da79fcc826083519aa072bac1400568a80a12eea8927c00cf8ff8282fb",
+          "declared_options": [
+            "dataType",
+            "error",
+            "success",
+            "type",
+            "url"
+          ]
+        },
+        {
+          "path": "src/js/media/types/Instagram.js",
+          "url": "https://raw.githubusercontent.com/NUKnightLab/TimelineJS3/12a80199b967394a020f8faa7b001162a71e2494/src/js/media/types/Instagram.js",
+          "sha256": "10ad44966dda7e3db6636ecaae5152ea84c1e3d77c2969aa91ca4ee528b9cf00",
+          "declared_options": [
+            "context",
+            "dataType",
+            "error",
+            "success",
+            "url"
+          ]
+        },
+        {
+          "path": "src/js/media/types/PDF.js",
+          "url": "https://raw.githubusercontent.com/NUKnightLab/TimelineJS3/12a80199b967394a020f8faa7b001162a71e2494/src/js/media/types/PDF.js",
+          "sha256": "3a6e91bfc5304e8d6b9e9e5eb11b9c5d03d92adcd4d94f691bff1312b70205f4",
+          "declared_options": []
+        },
+        {
+          "path": "src/js/media/types/Profile.js",
+          "url": "https://raw.githubusercontent.com/NUKnightLab/TimelineJS3/12a80199b967394a020f8faa7b001162a71e2494/src/js/media/types/Profile.js",
+          "sha256": "f10e19b56d93d5c583a46ac0cd739f3893e25a66fbc2ed4a01716579e7a42f60",
+          "declared_options": []
+        },
+        {
+          "path": "src/js/media/types/SoundCloud.js",
+          "url": "https://raw.githubusercontent.com/NUKnightLab/TimelineJS3/12a80199b967394a020f8faa7b001162a71e2494/src/js/media/types/SoundCloud.js",
+          "sha256": "cf0e4218070eb5eb9750fabf36d04ae2b99aa2c846a30d6d0ff0de630458d1d7",
+          "declared_options": []
+        },
+        {
+          "path": "src/js/media/types/Spotify.js",
+          "url": "https://raw.githubusercontent.com/NUKnightLab/TimelineJS3/12a80199b967394a020f8faa7b001162a71e2494/src/js/media/types/Spotify.js",
+          "sha256": "9e9123afb7feeb885627b0edf135eef5f5b8728b0feaa1b9ce1b546b3a851c3a",
+          "declared_options": []
+        },
+        {
+          "path": "src/js/media/types/Text.js",
+          "url": "https://raw.githubusercontent.com/NUKnightLab/TimelineJS3/12a80199b967394a020f8faa7b001162a71e2494/src/js/media/types/Text.js",
+          "sha256": "9addbc7e1c8ed55852f6f2ce924958d3ae7c9bc520bb1041293b303daa1cf79c",
+          "declared_options": [
+            "container",
+            "content",
+            "content_container",
+            "date",
+            "headline",
+            "headline_container",
+            "text",
+            "title",
+            "unique_id"
+          ]
+        },
+        {
+          "path": "src/js/media/types/TikTok.js",
+          "url": "https://raw.githubusercontent.com/NUKnightLab/TimelineJS3/12a80199b967394a020f8faa7b001162a71e2494/src/js/media/types/TikTok.js",
+          "sha256": "c64c52b041116298561a5ab7a0463997b219c5f04163a1e94dfdc11a7c7e6d38",
+          "declared_options": [
+            "dataType",
+            "error",
+            "success",
+            "type",
+            "url"
+          ]
+        },
+        {
+          "path": "src/js/media/types/Twitter.js",
+          "url": "https://raw.githubusercontent.com/NUKnightLab/TimelineJS3/12a80199b967394a020f8faa7b001162a71e2494/src/js/media/types/Twitter.js",
+          "sha256": "d7ff73e319e91c2e2d8ece9ae58cbaa05efbe54455a5e99d01d798953b0b3a27",
+          "declared_options": [
+            "conversation",
+            "dataType",
+            "error",
+            "linkColor",
+            "success",
+            "theme",
+            "type",
+            "url"
+          ]
+        },
+        {
+          "path": "src/js/media/types/TwitterEmbed.js",
+          "url": "https://raw.githubusercontent.com/NUKnightLab/TimelineJS3/12a80199b967394a020f8faa7b001162a71e2494/src/js/media/types/TwitterEmbed.js",
+          "sha256": "37f77912150042bbbbb0e86fcf134a78561a1758ce022ac9fbe1e3fb60688841",
+          "declared_options": [
+            "conversation",
+            "dataType",
+            "error",
+            "linkColor",
+            "theme",
+            "type",
+            "url"
+          ]
+        },
+        {
+          "path": "src/js/media/types/Video.js",
+          "url": "https://raw.githubusercontent.com/NUKnightLab/TimelineJS3/12a80199b967394a020f8faa7b001162a71e2494/src/js/media/types/Video.js",
+          "sha256": "fa9bf4170752461a7a43a2d78dccbf8dd2a8bc2c5d445b24ebfcc3a8e27b6aaa",
+          "declared_options": [
+            "default"
+          ]
+        },
+        {
+          "path": "src/js/media/types/Vimeo.js",
+          "url": "https://raw.githubusercontent.com/NUKnightLab/TimelineJS3/12a80199b967394a020f8faa7b001162a71e2494/src/js/media/types/Vimeo.js",
+          "sha256": "ab7dce612ae31683edcf755cf6f13d88f53d3f2643d50cb83d8313d4bde33b87",
+          "declared_options": []
+        },
+        {
+          "path": "src/js/media/types/Vine.js",
+          "url": "https://raw.githubusercontent.com/NUKnightLab/TimelineJS3/12a80199b967394a020f8faa7b001162a71e2494/src/js/media/types/Vine.js",
+          "sha256": "52818754838632f4594aba9f808860df177ce232e915248a38f4a2d7a08241d0",
+          "declared_options": []
+        },
+        {
+          "path": "src/js/media/types/Wikipedia.js",
+          "url": "https://raw.githubusercontent.com/NUKnightLab/TimelineJS3/12a80199b967394a020f8faa7b001162a71e2494/src/js/media/types/Wikipedia.js",
+          "sha256": "345cdb63c07bbfcbfa81980c1f5b39d6d90318753b2c49eb6de9c68437c56257",
+          "declared_options": [
+            "dataType",
+            "entry",
+            "error",
+            "extract",
+            "page_image",
+            "paragraphs",
+            "success",
+            "text",
+            "text_array",
+            "title",
+            "type",
+            "url"
+          ]
+        },
+        {
+          "path": "src/js/media/types/WikipediaImage.js",
+          "url": "https://raw.githubusercontent.com/NUKnightLab/TimelineJS3/12a80199b967394a020f8faa7b001162a71e2494/src/js/media/types/WikipediaImage.js",
+          "sha256": "372ee5625596e86fa264c49bf9c15123c7bb33286f069fc0664a68f2ad0c9b20",
+          "declared_options": []
+        },
+        {
+          "path": "src/js/media/types/Wistia.js",
+          "url": "https://raw.githubusercontent.com/NUKnightLab/TimelineJS3/12a80199b967394a020f8faa7b001162a71e2494/src/js/media/types/Wistia.js",
+          "sha256": "b1415119162d21c043f4623aef8ff4fb435640fa4c19ee4b00204ecb9fde66c5",
+          "declared_options": []
+        },
+        {
+          "path": "src/js/media/types/YouTube.js",
+          "url": "https://raw.githubusercontent.com/NUKnightLab/TimelineJS3/12a80199b967394a020f8faa7b001162a71e2494/src/js/media/types/YouTube.js",
+          "sha256": "dc38bb1f4adff60692d2b302005877d59a5c84a2c9b01df57322094a5e273874",
+          "declared_options": [
+            "color",
+            "controls",
+            "enablejsapi",
+            "end",
+            "events",
+            "fs",
+            "onReady",
+            "playerVars",
+            "start",
+            "videoId"
+          ]
+        },
+        {
+          "path": "src/js/media/types/__tests__/Spotify.test.js",
+          "url": "https://raw.githubusercontent.com/NUKnightLab/TimelineJS3/12a80199b967394a020f8faa7b001162a71e2494/src/js/media/types/__tests__/Spotify.test.js",
+          "sha256": "1776df0c8429ad6264a6d00c2747d53e8a57cd1a9ff8c6cbc7f268478d0abeb4",
+          "declared_options": []
+        },
+        {
+          "path": "src/js/media/types/__tests__/WikipediaImage.test.js",
+          "url": "https://raw.githubusercontent.com/NUKnightLab/TimelineJS3/12a80199b967394a020f8faa7b001162a71e2494/src/js/media/types/__tests__/WikipediaImage.test.js",
+          "sha256": "fdf3815bd730646ec6a5f1dd68c396229cb8ce85952c4e1672a7515e999300cc",
+          "declared_options": []
+        },
+        {
+          "path": "src/js/timeline/Timeline.js",
+          "url": "https://raw.githubusercontent.com/NUKnightLab/TimelineJS3/12a80199b967394a020f8faa7b001162a71e2494/src/js/timeline/Timeline.js",
+          "sha256": "b34e2d8c1a299ff5ff3449b3989e9a69cdecab5eed3afeee85166ba28923a8d4",
+          "declared_options": [
+            "base_class",
+            "container",
+            "debug",
+            "default_bg_color",
+            "dragging",
+            "duration",
+            "ease",
+            "easing",
+            "font",
+            "ga_measurement_id",
+            "ga_property_id",
+            "hash_bookmark",
+            "height",
+            "is_embed",
+            "is_full_embed",
+            "language",
+            "layout",
+            "map_type",
+            "marker_height_min",
+            "marker_padding",
+            "marker_width_min",
+            "medium_size",
+            "menubar",
+            "menubar_height",
+            "optimal_tick_width",
+            "scale_factor",
+            "script_path",
+            "sheets_proxy",
+            "skinny_size",
+            "slide_default_fade",
+            "slide_padding_lr",
+            "soundcite",
+            "start_at_end",
+            "start_at_slide",
+            "storyslider",
+            "theme",
+            "timenav",
+            "timenav_height",
+            "timenav_height_min",
+            "timenav_height_percentage",
+            "timenav_mobile_height_percentage",
+            "timenav_position",
+            "top",
+            "trackResize",
+            "track_events",
+            "use_bc",
+            "width",
+            "zoom_sequence"
+          ]
+        },
+        {
+          "path": "src/template/all-media-types.json",
+          "url": "https://raw.githubusercontent.com/NUKnightLab/TimelineJS3/12a80199b967394a020f8faa7b001162a71e2494/src/template/all-media-types.json",
+          "sha256": "ffbd99b822ab4a4d7f26505d664f348b7fd833df642a7e5c4c347b737968de13",
+          "declared_options": [
+            "soundcite",
+            "true"
+          ]
+        },
+        {
+          "path": "website/docs/docs.11tydata.js",
+          "url": "https://raw.githubusercontent.com/NUKnightLab/TimelineJS3/12a80199b967394a020f8faa7b001162a71e2494/website/docs/docs.11tydata.js",
+          "sha256": "5039472d4ddcd41f055ba9cae96d2090a08f85a44971731ba5804f1135b3d79f",
+          "declared_options": [
+            "permalink"
+          ]
+        },
+        {
+          "path": "website/docs/faq.njk",
+          "url": "https://raw.githubusercontent.com/NUKnightLab/TimelineJS3/12a80199b967394a020f8faa7b001162a71e2494/website/docs/faq.njk",
+          "sha256": "6dd5487cc4e3c76937047fa9bb0302dc03f124d263ede4d4e9c4bd914fc4dbdc",
+          "declared_options": [
+            "group",
+            "iframe",
+            "title",
+            "type"
+          ]
+        },
+        {
+          "path": "website/docs/index.njk",
+          "url": "https://raw.githubusercontent.com/NUKnightLab/TimelineJS3/12a80199b967394a020f8faa7b001162a71e2494/website/docs/index.njk",
+          "sha256": "d0101dc82b57c008e460b756d2ddb09333df5de9c9e1c14f5d9a6a422c1352a2",
+          "declared_options": []
+        },
+        {
+          "path": "website/docs/instantiate-a-timeline.njk",
+          "url": "https://raw.githubusercontent.com/NUKnightLab/TimelineJS3/12a80199b967394a020f8faa7b001162a71e2494/website/docs/instantiate-a-timeline.njk",
+          "sha256": "ea5eb83db16679f06e0cc63fef603b44a94fd478c96bc669d1e26ca32608221d",
+          "declared_options": [
+            "TL.Timeline",
+            "es",
+            "font",
+            "link",
+            "script",
+            "script_path",
+            "timeline.css",
+            "timeline.js",
+            "timeline.min.js"
+          ]
+        },
+        {
+          "path": "website/docs/json-format.njk",
+          "url": "https://raw.githubusercontent.com/NUKnightLab/TimelineJS3/12a80199b967394a020f8faa7b001162a71e2494/website/docs/json-format.njk",
+          "sha256": "97b65818eadbed610634d9ccb2b1d7ca4d05de3bdfba334d0cc4f6ffac9ceffa",
+          "declared_options": [
+            "alt",
+            "autolink",
+            "background",
+            "caption",
+            "color",
+            "cosmological",
+            "credit",
+            "day",
+            "display_date",
+            "end_date",
+            "eras",
+            "events",
+            "false",
+            "format",
+            "group",
+            "headline",
+            "hour",
+            "human",
+            "link",
+            "link_target",
+            "media",
+            "millisecond",
+            "minute",
+            "month",
+            "scale",
+            "second",
+            "start_date",
+            "text",
+            "thumbnail",
+            "title",
+            "true",
+            "unique_id",
+            "url",
+            "year"
+          ]
+        },
+        {
+          "path": "website/docs/license.njk",
+          "url": "https://raw.githubusercontent.com/NUKnightLab/TimelineJS3/12a80199b967394a020f8faa7b001162a71e2494/website/docs/license.njk",
+          "sha256": "0263a26fffcba33097a8906b91ceab104d6e04f0b808fcb71cf8ff74b6d74078",
+          "declared_options": []
+        },
+        {
+          "path": "website/docs/media-types.njk",
+          "url": "https://raw.githubusercontent.com/NUKnightLab/TimelineJS3/12a80199b967394a020f8faa7b001162a71e2494/website/docs/media-types.njk",
+          "sha256": "8b4eab777581b83140c985fbba2aa0580eca212d8663a15477ca68e71abb6fdb",
+          "declared_options": [
+            "commons.wikimedia.org",
+            "gif",
+            "i.imgur.com",
+            "jpeg",
+            "jpg",
+            "png"
+          ]
+        },
+        {
+          "path": "website/docs/options.njk",
+          "url": "https://raw.githubusercontent.com/NUKnightLab/TimelineJS3/12a80199b967394a020f8faa7b001162a71e2494/website/docs/options.njk",
+          "sha256": "fb02b5266b8a936f08b9a1083561583cc04d0b1dbada0fe6ecf1d40a51213ca4",
+          "declared_options": [
+            "Name",
+            "TL.Ease.easeInOutQuint",
+            "TL.Timeline",
+            "base_class",
+            "bottom",
+            "contrast",
+            "debug",
+            "default",
+            "default_bg_color",
+            "dragging",
+            "duration",
+            "ease",
+            "false",
+            "font",
+            "ga_measurement_id",
+            "ga_property_id",
+            "hash_bookmark",
+            "height",
+            "initial_zoom",
+            "is_embed",
+            "language",
+            "marker_height_min",
+            "marker_padding",
+            "marker_width_min",
+            "menubar_height",
+            "oldstandard",
+            "optimal_tick_width",
+            "playfair",
+            "pt",
+            "scale_factor",
+            "script_path",
+            "slide_default_fade",
+            "slide_padding_lr",
+            "soundcite",
+            "start_at_end",
+            "start_at_slide",
+            "theme",
+            "this._el.container.offsetHeight",
+            "this._el.container.offsetWidth",
+            "timenav_height",
+            "timenav_height_min",
+            "timenav_height_percentage",
+            "timenav_mobile_height_percentage",
+            "timenav_position",
+            "top",
+            "trackResize",
+            "track_events",
+            "true",
+            "ubuntu",
+            "use_bc",
+            "white",
+            "width",
+            "zoom_sequence"
+          ]
+        },
+        {
+          "path": "website/docs/overriding-styles.njk",
+          "url": "https://raw.githubusercontent.com/NUKnightLab/TimelineJS3/12a80199b967394a020f8faa7b001162a71e2494/website/docs/overriding-styles.njk",
+          "sha256": "14a54cdf3ba142f945300d52c05f3c4b743a0580d626afa8cbd3499eb8af73cc",
+          "declared_options": [
+            "Less",
+            "contrast",
+            "div",
+            "font",
+            "h2",
+            "h3",
+            "headline",
+            "iframe",
+            "npm",
+            "src",
+            "style",
+            "text",
+            "theme"
+          ]
+        },
+        {
+          "path": "website/docs/using-spreadsheets.njk",
+          "url": "https://raw.githubusercontent.com/NUKnightLab/TimelineJS3/12a80199b967394a020f8faa7b001162a71e2494/website/docs/using-spreadsheets.njk",
+          "sha256": "de23fde5ef21b8481d57d65ec1c9d278144f9cf6502e33727ce293702eaad645",
+          "declared_options": [
+            "era",
+            "title"
+          ]
+        }
+      ],
+      "examples": [
+        {
+          "path": "website/examples/_common_example_embed.html",
+          "url": "https://github.com/NUKnightLab/TimelineJS3/blob/12a80199b967394a020f8faa7b001162a71e2494/website/examples/_common_example_embed.html",
+          "status": "planned",
+          "acceptance": []
+        },
+        {
+          "path": "website/examples/embed-test/index.html",
+          "url": "https://github.com/NUKnightLab/TimelineJS3/blob/12a80199b967394a020f8faa7b001162a71e2494/website/examples/embed-test/index.html",
+          "status": "planned",
+          "acceptance": []
+        },
+        {
+          "path": "website/examples/example.json",
+          "url": "https://github.com/NUKnightLab/TimelineJS3/blob/12a80199b967394a020f8faa7b001162a71e2494/website/examples/example.json",
+          "status": "planned",
+          "acceptance": []
+        },
+        {
+          "path": "website/examples/houston/index.html",
+          "url": "https://github.com/NUKnightLab/TimelineJS3/blob/12a80199b967394a020f8faa7b001162a71e2494/website/examples/houston/index.html",
+          "status": "planned",
+          "acceptance": []
+        },
+        {
+          "path": "website/examples/houston/timeline2.json",
+          "url": "https://github.com/NUKnightLab/TimelineJS3/blob/12a80199b967394a020f8faa7b001162a71e2494/website/examples/houston/timeline2.json",
+          "status": "planned",
+          "acceptance": []
+        },
+        {
+          "path": "website/examples/houston/timeline3.json",
+          "url": "https://github.com/NUKnightLab/TimelineJS3/blob/12a80199b967394a020f8faa7b001162a71e2494/website/examples/houston/timeline3.json",
+          "status": "planned",
+          "acceptance": []
+        },
+        {
+          "path": "website/examples/mediatypes/index.html",
+          "url": "https://github.com/NUKnightLab/TimelineJS3/blob/12a80199b967394a020f8faa7b001162a71e2494/website/examples/mediatypes/index.html",
+          "status": "planned",
+          "acceptance": []
+        },
+        {
+          "path": "website/examples/mediatypes/timeline3.json",
+          "url": "https://github.com/NUKnightLab/TimelineJS3/blob/12a80199b967394a020f8faa7b001162a71e2494/website/examples/mediatypes/timeline3.json",
+          "status": "planned",
+          "acceptance": []
+        },
+        {
+          "path": "website/examples/republican/index.html",
+          "url": "https://github.com/NUKnightLab/TimelineJS3/blob/12a80199b967394a020f8faa7b001162a71e2494/website/examples/republican/index.html",
+          "status": "planned",
+          "acceptance": []
+        },
+        {
+          "path": "website/examples/republican/timeline2.json",
+          "url": "https://github.com/NUKnightLab/TimelineJS3/blob/12a80199b967394a020f8faa7b001162a71e2494/website/examples/republican/timeline2.json",
+          "status": "planned",
+          "acceptance": []
+        },
+        {
+          "path": "website/examples/republican/timeline3.json",
+          "url": "https://github.com/NUKnightLab/TimelineJS3/blob/12a80199b967394a020f8faa7b001162a71e2494/website/examples/republican/timeline3.json",
+          "status": "planned",
+          "acceptance": []
+        },
+        {
+          "path": "website/examples/shit-people-say/index.html",
+          "url": "https://github.com/NUKnightLab/TimelineJS3/blob/12a80199b967394a020f8faa7b001162a71e2494/website/examples/shit-people-say/index.html",
+          "status": "planned",
+          "acceptance": []
+        },
+        {
+          "path": "website/examples/shit-people-say/timeline2.json",
+          "url": "https://github.com/NUKnightLab/TimelineJS3/blob/12a80199b967394a020f8faa7b001162a71e2494/website/examples/shit-people-say/timeline2.json",
+          "status": "planned",
+          "acceptance": []
+        },
+        {
+          "path": "website/examples/shit-people-say/timeline3.json",
+          "url": "https://github.com/NUKnightLab/TimelineJS3/blob/12a80199b967394a020f8faa7b001162a71e2494/website/examples/shit-people-say/timeline3.json",
+          "status": "planned",
+          "acceptance": []
+        },
+        {
+          "path": "website/examples/soundcite/index.html",
+          "url": "https://github.com/NUKnightLab/TimelineJS3/blob/12a80199b967394a020f8faa7b001162a71e2494/website/examples/soundcite/index.html",
+          "status": "planned",
+          "acceptance": []
+        },
+        {
+          "path": "website/examples/soundcite/timeline3.json",
+          "url": "https://github.com/NUKnightLab/TimelineJS3/blob/12a80199b967394a020f8faa7b001162a71e2494/website/examples/soundcite/timeline3.json",
+          "status": "planned",
+          "acceptance": []
+        },
+        {
+          "path": "website/examples/timeline3.json",
+          "url": "https://github.com/NUKnightLab/TimelineJS3/blob/12a80199b967394a020f8faa7b001162a71e2494/website/examples/timeline3.json",
+          "status": "planned",
+          "acceptance": []
+        },
+        {
+          "path": "website/examples/twain/index.html",
+          "url": "https://github.com/NUKnightLab/TimelineJS3/blob/12a80199b967394a020f8faa7b001162a71e2494/website/examples/twain/index.html",
+          "status": "planned",
+          "acceptance": []
+        },
+        {
+          "path": "website/examples/twain/marktwain.json",
+          "url": "https://github.com/NUKnightLab/TimelineJS3/blob/12a80199b967394a020f8faa7b001162a71e2494/website/examples/twain/marktwain.json",
+          "status": "planned",
+          "acceptance": []
+        },
+        {
+          "path": "website/examples/user-interface/index.html",
+          "url": "https://github.com/NUKnightLab/TimelineJS3/blob/12a80199b967394a020f8faa7b001162a71e2494/website/examples/user-interface/index.html",
+          "status": "planned",
+          "acceptance": []
+        },
+        {
+          "path": "website/examples/user-interface/timeline2.json",
+          "url": "https://github.com/NUKnightLab/TimelineJS3/blob/12a80199b967394a020f8faa7b001162a71e2494/website/examples/user-interface/timeline2.json",
+          "status": "planned",
+          "acceptance": []
+        },
+        {
+          "path": "website/examples/user-interface/timeline3.json",
+          "url": "https://github.com/NUKnightLab/TimelineJS3/blob/12a80199b967394a020f8faa7b001162a71e2494/website/examples/user-interface/timeline3.json",
+          "status": "planned",
+          "acceptance": []
+        }
+      ]
+    },
+    {
+      "name": "vis-timeline",
+      "repository": "visjs/vis-timeline",
+      "commit": "67b24bb2b80bf5fef510476b2897e0a3e32f3f63",
+      "committed_at": "2026-08-22T14:46:40Z",
+      "version": "0.0.0-no-version",
+      "sources": [
+        {
+          "path": "package.json",
+          "url": "https://raw.githubusercontent.com/visjs/vis-timeline/67b24bb2b80bf5fef510476b2897e0a3e32f3f63/package.json",
+          "sha256": "0f3d7c2f3f1706f9cb5c026e59f973d843af4295cc995906267fcd790b190946",
+          "declared_options": []
+        },
+        {
+          "path": "docs/timeline/index.html",
+          "url": "https://raw.githubusercontent.com/visjs/vis-timeline/67b24bb2b80bf5fef510476b2897e0a3e32f3f63/docs/timeline/index.html",
+          "sha256": "98550cda3e5f0f5bbeeea8ac8cd326a79c3d8c2ab82778d075e9e77ccb0f2c2b",
+          "declared_options": [
+            "Array",
+            "Boolean",
+            "Code",
+            "DataSets",
+            "Date",
+            "Days",
+            "Default",
+            "Description",
+            "Dutch",
+            "English",
+            "French",
+            "Function",
+            "German",
+            "Hours",
+            "IFilterXSSOptions",
+            "Italian",
+            "Language",
+            "Lithuanian",
+            "Method",
+            "Months",
+            "Name",
+            "Norwegian",
+            "Number",
+            "Object",
+            "Polish",
+            "Portuguese",
+            "Properties",
+            "Required",
+            "Russian",
+            "String",
+            "Swedish",
+            "Turkish",
+            "Type",
+            "Ukrainian",
+            "Values",
+            "Week",
+            "Weekday",
+            "Years",
+            "addCustomTime",
+            "align",
+            "autoResize",
+            "axis",
+            "background",
+            "boolean",
+            "byUser",
+            "callback",
+            "changed",
+            "className",
+            "click",
+            "clickToUse",
+            "cluster.clusterCriteria",
+            "cluster.fitOnDoubleClick",
+            "cluster.maxItems",
+            "cluster.showStipes",
+            "cluster.titleTemplate",
+            "configure",
+            "container",
+            "content",
+            "contextmenu",
+            "currentTimeTick",
+            "customTime",
+            "dataAttributes",
+            "de",
+            "de_CH",
+            "de_DE",
+            "doubleClick",
+            "dragover",
+            "drop",
+            "editable",
+            "editable.add",
+            "editable.overrideItems",
+            "editable.remove",
+            "editable.updateGroup",
+            "editable.updateTime",
+            "en",
+            "en_EN",
+            "en_US",
+            "end",
+            "event",
+            "false",
+            "format",
+            "fr",
+            "fr_BE",
+            "fr_CA",
+            "fr_CH",
+            "fr_FR",
+            "function",
+            "group",
+            "groupDragged",
+            "groupEditable",
+            "groupEditable.add",
+            "groupEditable.order",
+            "groupEditable.remove",
+            "groupHeightMode",
+            "groupOrder",
+            "groupOrderSwap",
+            "groupOrderWap",
+            "groupTemplate",
+            "groups",
+            "height",
+            "hiddenDates",
+            "horizontalScroll",
+            "horizontalScrollInvert",
+            "horizontalScrollKey",
+            "id",
+            "it",
+            "it_CH",
+            "it_IT",
+            "item",
+            "itemout",
+            "itemover",
+            "items",
+            "itemsAlwaysDraggable.item",
+            "itemsAlwaysDraggable.range",
+            "limitSize",
+            "locale",
+            "locales",
+            "longSelectPressTime",
+            "lt",
+            "lt_LT",
+            "margin.axis",
+            "margin.item",
+            "margin.item.horizontal",
+            "margin.item.vertical",
+            "markerchange",
+            "markerchanged",
+            "max",
+            "maxHeight",
+            "maxItems",
+            "maxMinorChars",
+            "min",
+            "minHeight",
+            "moment",
+            "mouseDown",
+            "mouseMove",
+            "mouseOver",
+            "mouseUp",
+            "moveable",
+            "multiselect",
+            "multiselectPerGroup",
+            "nb",
+            "nb_NO",
+            "nestedGroups",
+            "nl",
+            "nl_BE",
+            "nl_NL",
+            "nn",
+            "nn_NO",
+            "no",
+            "none",
+            "null",
+            "number",
+            "off",
+            "onAdd",
+            "onAddGroup",
+            "onDropObjectOnItem",
+            "onInitialDrawComplete",
+            "onMove",
+            "onMoveGroup",
+            "onMoving",
+            "onRemove",
+            "onRemoveGroup",
+            "onUpdate",
+            "option",
+            "option.rtl",
+            "options",
+            "options.format",
+            "order",
+            "orientation.axis",
+            "orientation.item",
+            "overrideItems",
+            "pageX",
+            "pageY",
+            "path",
+            "percentage",
+            "pl",
+            "pl_PL",
+            "preferZoom",
+            "properties",
+            "pt",
+            "pt_BR",
+            "pt_PT",
+            "rangechange",
+            "rangechanged",
+            "remove",
+            "rollingMode.follow",
+            "rollingMode.offset",
+            "rtl",
+            "ru",
+            "ru_RU",
+            "scale",
+            "select",
+            "selectable",
+            "sequentialSelection",
+            "setGroups",
+            "setOptions",
+            "setSelection",
+            "showCurrentTime",
+            "showMajorLabels",
+            "showMinorLabels",
+            "showNested",
+            "showTooltips",
+            "showWeekScale",
+            "snap",
+            "snappedTime",
+            "stack",
+            "stackSubgroups",
+            "start",
+            "step",
+            "style",
+            "subgroup",
+            "subgroupOrder",
+            "subgroupStack",
+            "subgroupVisibility",
+            "sv",
+            "sv_SE",
+            "template",
+            "time",
+            "timeAxis.scale",
+            "timeAxis.step",
+            "timechange",
+            "timechanged",
+            "timeline.editable.overrideItems",
+            "title",
+            "tooltip.delay",
+            "tooltip.followMouse",
+            "tooltip.overflowMethod",
+            "tooltip.template",
+            "tooltipOnItemUpdateTime.template",
+            "tr",
+            "tr_TR",
+            "true",
+            "type",
+            "uk",
+            "uk_UA",
+            "undefined",
+            "updateGroup",
+            "updateTime",
+            "verticalScroll",
+            "vis.Timeline",
+            "vis.moment",
+            "visible",
+            "visibleFrameTemplate",
+            "what",
+            "width",
+            "xss.disabled",
+            "xss.filterOptions",
+            "yes",
+            "zoomFriction",
+            "zoomKey",
+            "zoomMax",
+            "zoomMin",
+            "zoomable"
+          ]
+        },
+        {
+          "path": "lib/timeline/optionsTimeline.js",
+          "url": "https://raw.githubusercontent.com/visjs/vis-timeline/67b24bb2b80bf5fef510476b2897e0a3e32f3f63/lib/timeline/optionsTimeline.js",
+          "sha256": "a74542cbb9d759ec579407a0e1906aab5110443d8f12ffe00a7d5f40e6efa449",
+          "declared_options": [
+            "__any__",
+            "__type__",
+            "add",
+            "align",
+            "alignCurrentTime",
+            "autoResize",
+            "axis",
+            "callback",
+            "clickToUse",
+            "cluster",
+            "clusterCriteria",
+            "configure",
+            "container",
+            "dataAttributes",
+            "day",
+            "delay",
+            "direction",
+            "disabled",
+            "editable",
+            "enabled",
+            "end",
+            "filter",
+            "filterOptions",
+            "fitOnDoubleClick",
+            "follow",
+            "followMouse",
+            "format",
+            "global",
+            "groupEditable",
+            "groupHeightMode",
+            "groupOrder",
+            "groupOrderSwap",
+            "groupTemplate",
+            "groupsDraggable",
+            "height",
+            "hiddenDates",
+            "horizontal",
+            "horizontalScroll",
+            "horizontalScrollInvert",
+            "horizontalScrollKey",
+            "hour",
+            "item",
+            "itemsAlwaysDraggable",
+            "limitSize",
+            "loadingScreenTemplate",
+            "locale",
+            "locales",
+            "longSelectPressTime",
+            "majorLabels",
+            "margin",
+            "max",
+            "maxHeight",
+            "maxItems",
+            "maxMinorChars",
+            "millisecond",
+            "min",
+            "minHeight",
+            "minorLabels",
+            "minute",
+            "moment",
+            "month",
+            "moveable",
+            "multiselect",
+            "multiselectPerGroup",
+            "offset",
+            "onAdd",
+            "onAddGroup",
+            "onDropObjectOnItem",
+            "onInitialDrawComplete",
+            "onMove",
+            "onMoveGroup",
+            "onMoving",
+            "onRemove",
+            "onRemoveGroup",
+            "onTimeout",
+            "onUpdate",
+            "order",
+            "orientation",
+            "overflowMethod",
+            "overrideItems",
+            "preferZoom",
+            "range",
+            "remove",
+            "repeat",
+            "rollingMode",
+            "rtl",
+            "scale",
+            "second",
+            "selectable",
+            "sequentialSelection",
+            "showCurrentTime",
+            "showMajorLabels",
+            "showMinorLabels",
+            "showStipes",
+            "showTooltips",
+            "showWeekScale",
+            "snap",
+            "stack",
+            "stackSubgroups",
+            "start",
+            "step",
+            "template",
+            "throttleRedraw",
+            "timeAxis",
+            "timeoutMs",
+            "titleTemplate",
+            "tooltip",
+            "tooltipOnItemUpdateTime",
+            "type",
+            "updateGroup",
+            "updateTime",
+            "vertical",
+            "verticalScroll",
+            "visibleFrameTemplate",
+            "week",
+            "weekday",
+            "width",
+            "xss",
+            "year",
+            "zoomFriction",
+            "zoomKey",
+            "zoomMax",
+            "zoomMin",
+            "zoomable"
+          ]
+        },
+        {
+          "path": "types/index.d.ts",
+          "url": "https://raw.githubusercontent.com/visjs/vis-timeline/67b24bb2b80bf5fef510476b2897e0a3e32f3f63/types/index.d.ts",
+          "sha256": "f88ad98d563eafb31a2890abbb0423287bce9da1e50f277c90982a2fd4a6e164",
+          "declared_options": [
+            "add",
+            "align",
+            "alignZeros",
+            "animation",
+            "autoResize",
+            "axis",
+            "barChart",
+            "callback",
+            "className",
+            "clickToUse",
+            "cluster",
+            "clusterCriteria",
+            "configure",
+            "container",
+            "content",
+            "data",
+            "dataAttributes",
+            "dataAxis",
+            "date",
+            "day",
+            "defaultGroup",
+            "delay",
+            "disabled",
+            "drawPoints",
+            "duration",
+            "easingFunction",
+            "editable",
+            "element",
+            "enabled",
+            "end",
+            "event",
+            "excludeFromLegend",
+            "filterOptions",
+            "firstItem",
+            "fitOnDoubleClick",
+            "follow",
+            "followMouse",
+            "format",
+            "fromGroup",
+            "graphHeight",
+            "group",
+            "groupEditable",
+            "groupHeightMode",
+            "groupOrder",
+            "groupOrderSwap",
+            "groupTemplate",
+            "groupid",
+            "groups",
+            "height",
+            "hiddenDates",
+            "horizontal",
+            "horizontalScroll",
+            "horizontalScrollInvert",
+            "horizontalScrollKey",
+            "hour",
+            "iconSize",
+            "iconSpacing",
+            "iconWidth",
+            "icons",
+            "id",
+            "ids",
+            "inp",
+            "interpolation",
+            "isCluster",
+            "item",
+            "items",
+            "itemsAlwaysDraggable",
+            "labelOffsetX",
+            "labelOffsetY",
+            "language",
+            "left",
+            "legend",
+            "limitSize",
+            "locale",
+            "locales",
+            "longSelectPressTime",
+            "majorLabels",
+            "majorLinesOffset",
+            "margin",
+            "max",
+            "maxHeight",
+            "maxItems",
+            "maxMinorChars",
+            "millisecond",
+            "min",
+            "minHeight",
+            "minWidth",
+            "minorLabels",
+            "minorLinesOffset",
+            "minute",
+            "moment",
+            "month",
+            "moveable",
+            "multiselect",
+            "multiselectPerGroup",
+            "nestedGroups",
+            "offset",
+            "onAdd",
+            "onAddGroup",
+            "onDropObjectOnItem",
+            "onInitialDrawComplete",
+            "onMove",
+            "onMoveGroup",
+            "onMoving",
+            "onRemove",
+            "onRemoveGroup",
+            "onUpdate",
+            "option",
+            "options",
+            "order",
+            "orientation",
+            "overflowMethod",
+            "overrideItems",
+            "pageX",
+            "pageY",
+            "parametrization",
+            "path",
+            "percentage",
+            "position",
+            "preferZoom",
+            "range",
+            "remove",
+            "repeat",
+            "right",
+            "rollingMode",
+            "rtl",
+            "sampling",
+            "scale",
+            "second",
+            "secondItem",
+            "selectable",
+            "sequentialSelection",
+            "shaded",
+            "showCurrentTime",
+            "showMajorLabels",
+            "showMinorLabels",
+            "showNested",
+            "showStipes",
+            "showTooltips",
+            "showWeekScale",
+            "sideBySide",
+            "size",
+            "snap",
+            "snappedTime",
+            "sort",
+            "stack",
+            "stackSubgroups",
+            "start",
+            "step",
+            "strict",
+            "style",
+            "subgroup",
+            "subgroupOrder",
+            "subgroupStack",
+            "subgroupVisibility",
+            "template",
+            "text",
+            "throttleRedraw",
+            "time",
+            "timeAxis",
+            "title",
+            "titleTemplate",
+            "toGroup",
+            "tooltip",
+            "tooltipOnItemUpdateTime",
+            "type",
+            "updateGroup",
+            "updateTime",
+            "vertical",
+            "verticalScroll",
+            "visible",
+            "visibleFrameTemplate",
+            "week",
+            "weekday",
+            "what",
+            "width",
+            "x",
+            "xss",
+            "y",
+            "yAxisOrientation",
+            "year",
+            "zIndex",
+            "zoom",
+            "zoomFriction",
+            "zoomKey",
+            "zoomMax",
+            "zoomMin",
+            "zoomable"
+          ]
+        }
+      ],
+      "examples": [
+        {
+          "path": "examples/timeline/basicUsage.html",
+          "url": "https://github.com/visjs/vis-timeline/blob/67b24bb2b80bf5fef510476b2897e0a3e32f3f63/examples/timeline/basicUsage.html",
+          "status": "planned",
+          "acceptance": []
+        },
+        {
+          "path": "examples/timeline/dataHandling/dataSerialization.html",
+          "url": "https://github.com/visjs/vis-timeline/blob/67b24bb2b80bf5fef510476b2897e0a3e32f3f63/examples/timeline/dataHandling/dataSerialization.html",
+          "status": "planned",
+          "acceptance": []
+        },
+        {
+          "path": "examples/timeline/dataHandling/loadExternalData.html",
+          "url": "https://github.com/visjs/vis-timeline/blob/67b24bb2b80bf5fef510476b2897e0a3e32f3f63/examples/timeline/dataHandling/loadExternalData.html",
+          "status": "planned",
+          "acceptance": []
+        },
+        {
+          "path": "examples/timeline/editing/customSnappingOfItems.html",
+          "url": "https://github.com/visjs/vis-timeline/blob/67b24bb2b80bf5fef510476b2897e0a3e32f3f63/examples/timeline/editing/customSnappingOfItems.html",
+          "status": "planned",
+          "acceptance": []
+        },
+        {
+          "path": "examples/timeline/editing/editingItems.html",
+          "url": "https://github.com/visjs/vis-timeline/blob/67b24bb2b80bf5fef510476b2897e0a3e32f3f63/examples/timeline/editing/editingItems.html",
+          "status": "planned",
+          "acceptance": []
+        },
+        {
+          "path": "examples/timeline/editing/editingItemsCallbacks.html",
+          "url": "https://github.com/visjs/vis-timeline/blob/67b24bb2b80bf5fef510476b2897e0a3e32f3f63/examples/timeline/editing/editingItemsCallbacks.html",
+          "status": "planned",
+          "acceptance": []
+        },
+        {
+          "path": "examples/timeline/editing/individualEditableItems.html",
+          "url": "https://github.com/visjs/vis-timeline/blob/67b24bb2b80bf5fef510476b2897e0a3e32f3f63/examples/timeline/editing/individualEditableItems.html",
+          "status": "planned",
+          "acceptance": []
+        },
+        {
+          "path": "examples/timeline/editing/itemsAlwaysDraggable.html",
+          "url": "https://github.com/visjs/vis-timeline/blob/67b24bb2b80bf5fef510476b2897e0a3e32f3f63/examples/timeline/editing/itemsAlwaysDraggable.html",
+          "status": "planned",
+          "acceptance": []
+        },
+        {
+          "path": "examples/timeline/editing/overrideEditingItems.html",
+          "url": "https://github.com/visjs/vis-timeline/blob/67b24bb2b80bf5fef510476b2897e0a3e32f3f63/examples/timeline/editing/overrideEditingItems.html",
+          "status": "planned",
+          "acceptance": []
+        },
+        {
+          "path": "examples/timeline/editing/tooltipOnItemChange.html",
+          "url": "https://github.com/visjs/vis-timeline/blob/67b24bb2b80bf5fef510476b2897e0a3e32f3f63/examples/timeline/editing/tooltipOnItemChange.html",
+          "status": "planned",
+          "acceptance": []
+        },
+        {
+          "path": "examples/timeline/editing/updateDataOnEvent.html",
+          "url": "https://github.com/visjs/vis-timeline/blob/67b24bb2b80bf5fef510476b2897e0a3e32f3f63/examples/timeline/editing/updateDataOnEvent.html",
+          "status": "planned",
+          "acceptance": []
+        },
+        {
+          "path": "examples/timeline/groups/groups.html",
+          "url": "https://github.com/visjs/vis-timeline/blob/67b24bb2b80bf5fef510476b2897e0a3e32f3f63/examples/timeline/groups/groups.html",
+          "status": "planned",
+          "acceptance": []
+        },
+        {
+          "path": "examples/timeline/groups/groupsEditable.html",
+          "url": "https://github.com/visjs/vis-timeline/blob/67b24bb2b80bf5fef510476b2897e0a3e32f3f63/examples/timeline/groups/groupsEditable.html",
+          "status": "planned",
+          "acceptance": []
+        },
+        {
+          "path": "examples/timeline/groups/groupsOrdering.html",
+          "url": "https://github.com/visjs/vis-timeline/blob/67b24bb2b80bf5fef510476b2897e0a3e32f3f63/examples/timeline/groups/groupsOrdering.html",
+          "status": "planned",
+          "acceptance": []
+        },
+        {
+          "path": "examples/timeline/groups/nestedGroups.html",
+          "url": "https://github.com/visjs/vis-timeline/blob/67b24bb2b80bf5fef510476b2897e0a3e32f3f63/examples/timeline/groups/nestedGroups.html",
+          "status": "planned",
+          "acceptance": []
+        },
+        {
+          "path": "examples/timeline/groups/nestedThreeLevels.html",
+          "url": "https://github.com/visjs/vis-timeline/blob/67b24bb2b80bf5fef510476b2897e0a3e32f3f63/examples/timeline/groups/nestedThreeLevels.html",
+          "status": "planned",
+          "acceptance": []
+        },
+        {
+          "path": "examples/timeline/groups/subgroups.html",
+          "url": "https://github.com/visjs/vis-timeline/blob/67b24bb2b80bf5fef510476b2897e0a3e32f3f63/examples/timeline/groups/subgroups.html",
+          "status": "planned",
+          "acceptance": []
+        },
+        {
+          "path": "examples/timeline/groups/subgroupsVisibility.html",
+          "url": "https://github.com/visjs/vis-timeline/blob/67b24bb2b80bf5fef510476b2897e0a3e32f3f63/examples/timeline/groups/subgroupsVisibility.html",
+          "status": "planned",
+          "acceptance": []
+        },
+        {
+          "path": "examples/timeline/groups/verticalItemsHide.html",
+          "url": "https://github.com/visjs/vis-timeline/blob/67b24bb2b80bf5fef510476b2897e0a3e32f3f63/examples/timeline/groups/verticalItemsHide.html",
+          "status": "planned",
+          "acceptance": []
+        },
+        {
+          "path": "examples/timeline/groups/visibleGroups.html",
+          "url": "https://github.com/visjs/vis-timeline/blob/67b24bb2b80bf5fef510476b2897e0a3e32f3f63/examples/timeline/groups/visibleGroups.html",
+          "status": "planned",
+          "acceptance": []
+        },
+        {
+          "path": "examples/timeline/interaction/animateWindow.html",
+          "url": "https://github.com/visjs/vis-timeline/blob/67b24bb2b80bf5fef510476b2897e0a3e32f3f63/examples/timeline/interaction/animateWindow.html",
+          "status": "planned",
+          "acceptance": []
+        },
+        {
+          "path": "examples/timeline/interaction/clickToUse.html",
+          "url": "https://github.com/visjs/vis-timeline/blob/67b24bb2b80bf5fef510476b2897e0a3e32f3f63/examples/timeline/interaction/clickToUse.html",
+          "status": "planned",
+          "acceptance": []
+        },
+        {
+          "path": "examples/timeline/interaction/eventListeners.html",
+          "url": "https://github.com/visjs/vis-timeline/blob/67b24bb2b80bf5fef510476b2897e0a3e32f3f63/examples/timeline/interaction/eventListeners.html",
+          "status": "planned",
+          "acceptance": []
+        },
+        {
+          "path": "examples/timeline/interaction/limitMoveAndZoom.html",
+          "url": "https://github.com/visjs/vis-timeline/blob/67b24bb2b80bf5fef510476b2897e0a3e32f3f63/examples/timeline/interaction/limitMoveAndZoom.html",
+          "status": "planned",
+          "acceptance": []
+        },
+        {
+          "path": "examples/timeline/interaction/navigationMenu.html",
+          "url": "https://github.com/visjs/vis-timeline/blob/67b24bb2b80bf5fef510476b2897e0a3e32f3f63/examples/timeline/interaction/navigationMenu.html",
+          "status": "planned",
+          "acceptance": []
+        },
+        {
+          "path": "examples/timeline/interaction/rollingMode.html",
+          "url": "https://github.com/visjs/vis-timeline/blob/67b24bb2b80bf5fef510476b2897e0a3e32f3f63/examples/timeline/interaction/rollingMode.html",
+          "status": "planned",
+          "acceptance": []
+        },
+        {
+          "path": "examples/timeline/interaction/sequentialSelection.html",
+          "url": "https://github.com/visjs/vis-timeline/blob/67b24bb2b80bf5fef510476b2897e0a3e32f3f63/examples/timeline/interaction/sequentialSelection.html",
+          "status": "planned",
+          "acceptance": []
+        },
+        {
+          "path": "examples/timeline/interaction/setSelection.html",
+          "url": "https://github.com/visjs/vis-timeline/blob/67b24bb2b80bf5fef510476b2897e0a3e32f3f63/examples/timeline/interaction/setSelection.html",
+          "status": "planned",
+          "acceptance": []
+        },
+        {
+          "path": "examples/timeline/interaction/specificItemSelectable.html",
+          "url": "https://github.com/visjs/vis-timeline/blob/67b24bb2b80bf5fef510476b2897e0a3e32f3f63/examples/timeline/interaction/specificItemSelectable.html",
+          "status": "planned",
+          "acceptance": []
+        },
+        {
+          "path": "examples/timeline/items/backgroundAreas.html",
+          "url": "https://github.com/visjs/vis-timeline/blob/67b24bb2b80bf5fef510476b2897e0a3e32f3f63/examples/timeline/items/backgroundAreas.html",
+          "status": "planned",
+          "acceptance": []
+        },
+        {
+          "path": "examples/timeline/items/backgroundAreasWithGroups.html",
+          "url": "https://github.com/visjs/vis-timeline/blob/67b24bb2b80bf5fef510476b2897e0a3e32f3f63/examples/timeline/items/backgroundAreasWithGroups.html",
+          "status": "planned",
+          "acceptance": []
+        },
+        {
+          "path": "examples/timeline/items/expectedVsActualTimesItems.html",
+          "url": "https://github.com/visjs/vis-timeline/blob/67b24bb2b80bf5fef510476b2897e0a3e32f3f63/examples/timeline/items/expectedVsActualTimesItems.html",
+          "status": "planned",
+          "acceptance": []
+        },
+        {
+          "path": "examples/timeline/items/htmlContents.html",
+          "url": "https://github.com/visjs/vis-timeline/blob/67b24bb2b80bf5fef510476b2897e0a3e32f3f63/examples/timeline/items/htmlContents.html",
+          "status": "planned",
+          "acceptance": []
+        },
+        {
+          "path": "examples/timeline/items/itemOrdering.html",
+          "url": "https://github.com/visjs/vis-timeline/blob/67b24bb2b80bf5fef510476b2897e0a3e32f3f63/examples/timeline/items/itemOrdering.html",
+          "status": "planned",
+          "acceptance": []
+        },
+        {
+          "path": "examples/timeline/items/pointItems.html",
+          "url": "https://github.com/visjs/vis-timeline/blob/67b24bb2b80bf5fef510476b2897e0a3e32f3f63/examples/timeline/items/pointItems.html",
+          "status": "planned",
+          "acceptance": []
+        },
+        {
+          "path": "examples/timeline/items/rangeOverflowItem.html",
+          "url": "https://github.com/visjs/vis-timeline/blob/67b24bb2b80bf5fef510476b2897e0a3e32f3f63/examples/timeline/items/rangeOverflowItem.html",
+          "status": "planned",
+          "acceptance": []
+        },
+        {
+          "path": "examples/timeline/items/tooltip.html",
+          "url": "https://github.com/visjs/vis-timeline/blob/67b24bb2b80bf5fef510476b2897e0a3e32f3f63/examples/timeline/items/tooltip.html",
+          "status": "planned",
+          "acceptance": []
+        },
+        {
+          "path": "examples/timeline/items/tooltipTemplate.html",
+          "url": "https://github.com/visjs/vis-timeline/blob/67b24bb2b80bf5fef510476b2897e0a3e32f3f63/examples/timeline/items/tooltipTemplate.html",
+          "status": "planned",
+          "acceptance": []
+        },
+        {
+          "path": "examples/timeline/items/visibleFrameTemplateContent.html",
+          "url": "https://github.com/visjs/vis-timeline/blob/67b24bb2b80bf5fef510476b2897e0a3e32f3f63/examples/timeline/items/visibleFrameTemplateContent.html",
+          "status": "planned",
+          "acceptance": []
+        },
+        {
+          "path": "examples/timeline/markers/customTimeMarkers.html",
+          "url": "https://github.com/visjs/vis-timeline/blob/67b24bb2b80bf5fef510476b2897e0a3e32f3f63/examples/timeline/markers/customTimeMarkers.html",
+          "status": "planned",
+          "acceptance": []
+        },
+        {
+          "path": "examples/timeline/markers/customTimeMarkersEditable.html",
+          "url": "https://github.com/visjs/vis-timeline/blob/67b24bb2b80bf5fef510476b2897e0a3e32f3f63/examples/timeline/markers/customTimeMarkersEditable.html",
+          "status": "planned",
+          "acceptance": []
+        },
+        {
+          "path": "examples/timeline/markers/markerEvents.html",
+          "url": "https://github.com/visjs/vis-timeline/blob/67b24bb2b80bf5fef510476b2897e0a3e32f3f63/examples/timeline/markers/markerEvents.html",
+          "status": "planned",
+          "acceptance": []
+        },
+        {
+          "path": "examples/timeline/other/biDirectionalScroll.html",
+          "url": "https://github.com/visjs/vis-timeline/blob/67b24bb2b80bf5fef510476b2897e0a3e32f3f63/examples/timeline/other/biDirectionalScroll.html",
+          "status": "planned",
+          "acceptance": []
+        },
+        {
+          "path": "examples/timeline/other/clustering.html",
+          "url": "https://github.com/visjs/vis-timeline/blob/67b24bb2b80bf5fef510476b2897e0a3e32f3f63/examples/timeline/other/clustering.html",
+          "status": "planned",
+          "acceptance": []
+        },
+        {
+          "path": "examples/timeline/other/customTimeBars.html",
+          "url": "https://github.com/visjs/vis-timeline/blob/67b24bb2b80bf5fef510476b2897e0a3e32f3f63/examples/timeline/other/customTimeBars.html",
+          "status": "planned",
+          "acceptance": []
+        },
+        {
+          "path": "examples/timeline/other/customTimeBarsSnap.html",
+          "url": "https://github.com/visjs/vis-timeline/blob/67b24bb2b80bf5fef510476b2897e0a3e32f3f63/examples/timeline/other/customTimeBarsSnap.html",
+          "status": "planned",
+          "acceptance": []
+        },
+        {
+          "path": "examples/timeline/other/customTimeBarsTooltip.html",
+          "url": "https://github.com/visjs/vis-timeline/blob/67b24bb2b80bf5fef510476b2897e0a3e32f3f63/examples/timeline/other/customTimeBarsTooltip.html",
+          "status": "planned",
+          "acceptance": []
+        },
+        {
+          "path": "examples/timeline/other/dataAttributes.html",
+          "url": "https://github.com/visjs/vis-timeline/blob/67b24bb2b80bf5fef510476b2897e0a3e32f3f63/examples/timeline/other/dataAttributes.html",
+          "status": "planned",
+          "acceptance": []
+        },
+        {
+          "path": "examples/timeline/other/dataAttributesAll.html",
+          "url": "https://github.com/visjs/vis-timeline/blob/67b24bb2b80bf5fef510476b2897e0a3e32f3f63/examples/timeline/other/dataAttributesAll.html",
+          "status": "planned",
+          "acceptance": []
+        },
+        {
+          "path": "examples/timeline/other/drag_drop.html",
+          "url": "https://github.com/visjs/vis-timeline/blob/67b24bb2b80bf5fef510476b2897e0a3e32f3f63/examples/timeline/other/drag_drop.html",
+          "status": "planned",
+          "acceptance": []
+        },
+        {
+          "path": "examples/timeline/other/functionLabelFormats.html",
+          "url": "https://github.com/visjs/vis-timeline/blob/67b24bb2b80bf5fef510476b2897e0a3e32f3f63/examples/timeline/other/functionLabelFormats.html",
+          "status": "planned",
+          "acceptance": []
+        },
+        {
+          "path": "examples/timeline/other/groupsPerformance.html",
+          "url": "https://github.com/visjs/vis-timeline/blob/67b24bb2b80bf5fef510476b2897e0a3e32f3f63/examples/timeline/other/groupsPerformance.html",
+          "status": "planned",
+          "acceptance": []
+        },
+        {
+          "path": "examples/timeline/other/hidingPeriods.html",
+          "url": "https://github.com/visjs/vis-timeline/blob/67b24bb2b80bf5fef510476b2897e0a3e32f3f63/examples/timeline/other/hidingPeriods.html",
+          "status": "planned",
+          "acceptance": []
+        },
+        {
+          "path": "examples/timeline/other/horizontalScroll.html",
+          "url": "https://github.com/visjs/vis-timeline/blob/67b24bb2b80bf5fef510476b2897e0a3e32f3f63/examples/timeline/other/horizontalScroll.html",
+          "status": "planned",
+          "acceptance": []
+        },
+        {
+          "path": "examples/timeline/other/horizontalScrollInvert.html",
+          "url": "https://github.com/visjs/vis-timeline/blob/67b24bb2b80bf5fef510476b2897e0a3e32f3f63/examples/timeline/other/horizontalScrollInvert.html",
+          "status": "planned",
+          "acceptance": []
+        },
+        {
+          "path": "examples/timeline/other/loadingScreen.html",
+          "url": "https://github.com/visjs/vis-timeline/blob/67b24bb2b80bf5fef510476b2897e0a3e32f3f63/examples/timeline/other/loadingScreen.html",
+          "status": "planned",
+          "acceptance": []
+        },
+        {
+          "path": "examples/timeline/other/localization.html",
+          "url": "https://github.com/visjs/vis-timeline/blob/67b24bb2b80bf5fef510476b2897e0a3e32f3f63/examples/timeline/other/localization.html",
+          "status": "planned",
+          "acceptance": []
+        },
+        {
+          "path": "examples/timeline/other/localizationCustom.html",
+          "url": "https://github.com/visjs/vis-timeline/blob/67b24bb2b80bf5fef510476b2897e0a3e32f3f63/examples/timeline/other/localizationCustom.html",
+          "status": "planned",
+          "acceptance": []
+        },
+        {
+          "path": "examples/timeline/other/onTimeout.html",
+          "url": "https://github.com/visjs/vis-timeline/blob/67b24bb2b80bf5fef510476b2897e0a3e32f3f63/examples/timeline/other/onTimeout.html",
+          "status": "planned",
+          "acceptance": []
+        },
+        {
+          "path": "examples/timeline/other/performance.html",
+          "url": "https://github.com/visjs/vis-timeline/blob/67b24bb2b80bf5fef510476b2897e0a3e32f3f63/examples/timeline/other/performance.html",
+          "status": "planned",
+          "acceptance": []
+        },
+        {
+          "path": "examples/timeline/other/requirejs/requirejs_example.html",
+          "url": "https://github.com/visjs/vis-timeline/blob/67b24bb2b80bf5fef510476b2897e0a3e32f3f63/examples/timeline/other/requirejs/requirejs_example.html",
+          "status": "planned",
+          "acceptance": []
+        },
+        {
+          "path": "examples/timeline/other/rtl.html",
+          "url": "https://github.com/visjs/vis-timeline/blob/67b24bb2b80bf5fef510476b2897e0a3e32f3f63/examples/timeline/other/rtl.html",
+          "status": "planned",
+          "acceptance": []
+        },
+        {
+          "path": "examples/timeline/other/stressPerformance.html",
+          "url": "https://github.com/visjs/vis-timeline/blob/67b24bb2b80bf5fef510476b2897e0a3e32f3f63/examples/timeline/other/stressPerformance.html",
+          "status": "planned",
+          "acceptance": []
+        },
+        {
+          "path": "examples/timeline/other/timezone.html",
+          "url": "https://github.com/visjs/vis-timeline/blob/67b24bb2b80bf5fef510476b2897e0a3e32f3f63/examples/timeline/other/timezone.html",
+          "status": "planned",
+          "acceptance": []
+        },
+        {
+          "path": "examples/timeline/other/usingReact.html",
+          "url": "https://github.com/visjs/vis-timeline/blob/67b24bb2b80bf5fef510476b2897e0a3e32f3f63/examples/timeline/other/usingReact.html",
+          "status": "planned",
+          "acceptance": []
+        },
+        {
+          "path": "examples/timeline/other/usingReact15AndLess.html",
+          "url": "https://github.com/visjs/vis-timeline/blob/67b24bb2b80bf5fef510476b2897e0a3e32f3f63/examples/timeline/other/usingReact15AndLess.html",
+          "status": "planned",
+          "acceptance": []
+        },
+        {
+          "path": "examples/timeline/other/usingReact16.html",
+          "url": "https://github.com/visjs/vis-timeline/blob/67b24bb2b80bf5fef510476b2897e0a3e32f3f63/examples/timeline/other/usingReact16.html",
+          "status": "planned",
+          "acceptance": []
+        },
+        {
+          "path": "examples/timeline/other/verticalScroll.html",
+          "url": "https://github.com/visjs/vis-timeline/blob/67b24bb2b80bf5fef510476b2897e0a3e32f3f63/examples/timeline/other/verticalScroll.html",
+          "status": "planned",
+          "acceptance": []
+        },
+        {
+          "path": "examples/timeline/peer-build.html",
+          "url": "https://github.com/visjs/vis-timeline/blob/67b24bb2b80bf5fef510476b2897e0a3e32f3f63/examples/timeline/peer-build.html",
+          "status": "planned",
+          "acceptance": []
+        },
+        {
+          "path": "examples/timeline/standalone-build.html",
+          "url": "https://github.com/visjs/vis-timeline/blob/67b24bb2b80bf5fef510476b2897e0a3e32f3f63/examples/timeline/standalone-build.html",
+          "status": "planned",
+          "acceptance": []
+        },
+        {
+          "path": "examples/timeline/styling/axisOrientation.html",
+          "url": "https://github.com/visjs/vis-timeline/blob/67b24bb2b80bf5fef510476b2897e0a3e32f3f63/examples/timeline/styling/axisOrientation.html",
+          "status": "planned",
+          "acceptance": []
+        },
+        {
+          "path": "examples/timeline/styling/customCss.html",
+          "url": "https://github.com/visjs/vis-timeline/blob/67b24bb2b80bf5fef510476b2897e0a3e32f3f63/examples/timeline/styling/customCss.html",
+          "status": "planned",
+          "acceptance": []
+        },
+        {
+          "path": "examples/timeline/styling/dayScaleWithCalendarWeek.html",
+          "url": "https://github.com/visjs/vis-timeline/blob/67b24bb2b80bf5fef510476b2897e0a3e32f3f63/examples/timeline/styling/dayScaleWithCalendarWeek.html",
+          "status": "planned",
+          "acceptance": []
+        },
+        {
+          "path": "examples/timeline/styling/gridStyling.html",
+          "url": "https://github.com/visjs/vis-timeline/blob/67b24bb2b80bf5fef510476b2897e0a3e32f3f63/examples/timeline/styling/gridStyling.html",
+          "status": "planned",
+          "acceptance": []
+        },
+        {
+          "path": "examples/timeline/styling/itemClassNames.html",
+          "url": "https://github.com/visjs/vis-timeline/blob/67b24bb2b80bf5fef510476b2897e0a3e32f3f63/examples/timeline/styling/itemClassNames.html",
+          "status": "planned",
+          "acceptance": []
+        },
+        {
+          "path": "examples/timeline/styling/itemTemplates.html",
+          "url": "https://github.com/visjs/vis-timeline/blob/67b24bb2b80bf5fef510476b2897e0a3e32f3f63/examples/timeline/styling/itemTemplates.html",
+          "status": "planned",
+          "acceptance": []
+        },
+        {
+          "path": "examples/timeline/styling/weekStyling.html",
+          "url": "https://github.com/visjs/vis-timeline/blob/67b24bb2b80bf5fef510476b2897e0a3e32f3f63/examples/timeline/styling/weekStyling.html",
+          "status": "planned",
+          "acceptance": []
+        }
+      ]
+    },
+    {
+      "name": "amcharts5",
+      "repository": "amcharts/amcharts5",
+      "commit": "b3deb0c0b649e3376413efae4f81fee7270d6bdf",
+      "committed_at": "2026-10-08T12:59:31Z",
+      "version": "5.21.0",
+      "sources": [
+        {
+          "path": "package.json",
+          "url": "https://raw.githubusercontent.com/amcharts/amcharts5/b3deb0c0b649e3376413efae4f81fee7270d6bdf/package.json",
+          "sha256": "ca2aa68ed1f41e017087b8592eb51cd2938e65869eeca060935b27fe8b2c2130",
+          "declared_options": []
+        },
+        {
+          "path": "src/.internal/charts/timeline/AxisRendererCurveX.ts",
+          "url": "https://raw.githubusercontent.com/amcharts/amcharts5/b3deb0c0b649e3376413efae4f81fee7270d6bdf/src/.internal/charts/timeline/AxisRendererCurveX.ts",
+          "sha256": "84ce48b4c29a1fa0fbc1dd49640d24c9b48daf57cd2b1acc47a6b986e65377d4",
+          "declared_options": [
+            "autoScale",
+            "axisLength",
+            "centerX",
+            "centerY",
+            "points",
+            "rotateLabels",
+            "scale",
+            "themeTags",
+            "x",
+            "y",
+            "yRenderer"
+          ]
+        },
+        {
+          "path": "src/.internal/charts/timeline/AxisRendererCurveY.ts",
+          "url": "https://raw.githubusercontent.com/amcharts/amcharts5/b3deb0c0b649e3376413efae4f81fee7270d6bdf/src/.internal/charts/timeline/AxisRendererCurveY.ts",
+          "sha256": "d8377f5f87e23d4cafb65ae008ed10155ebee83ccb486a7fda3c52960398e611",
+          "declared_options": [
+            "axisLength",
+            "axisLocation",
+            "rotateLabels",
+            "themeTags",
+            "x",
+            "xRenderer",
+            "y"
+          ]
+        },
+        {
+          "path": "src/.internal/charts/timeline/CurveChart.ts",
+          "url": "https://raw.githubusercontent.com/amcharts/amcharts5/b3deb0c0b649e3376413efae4f81fee7270d6bdf/src/.internal/charts/timeline/CurveChart.ts",
+          "sha256": "c9cefa84a05d291a6e549d26c2470f555caa109ef53d9870196aa7041223c9e7",
+          "declared_options": [
+            "cursor"
+          ]
+        },
+        {
+          "path": "src/.internal/charts/timeline/CurveColumnSeries.ts",
+          "url": "https://raw.githubusercontent.com/amcharts/amcharts5/b3deb0c0b649e3376413efae4f81fee7270d6bdf/src/.internal/charts/timeline/CurveColumnSeries.ts",
+          "sha256": "23b737584d54652cddbf80a09eb43267304ee04cb0646c6ae83fe6b08f95feb4",
+          "declared_options": [
+            "columns",
+            "position",
+            "themeTags",
+            "x",
+            "y"
+          ]
+        },
+        {
+          "path": "src/.internal/charts/timeline/CurveCursor.ts",
+          "url": "https://raw.githubusercontent.com/amcharts/amcharts5/b3deb0c0b649e3376413efae4f81fee7270d6bdf/src/.internal/charts/timeline/CurveCursor.ts",
+          "sha256": "800c13acbbb0c2f371ff87340be3cd2ab3f44bece2e9df477a75ea551dd3115a",
+          "declared_options": [
+            "xAxis",
+            "yAxis"
+          ]
+        },
+        {
+          "path": "src/.internal/charts/timeline/CurveDefaultTheme.ts",
+          "url": "https://raw.githubusercontent.com/amcharts/amcharts5/b3deb0c0b649e3376413efae4f81fee7270d6bdf/src/.internal/charts/timeline/CurveDefaultTheme.ts",
+          "sha256": "4a7f27a4da6d94343d15d399bc7408aa6bd5ee9b9453161c0cb6f7a45a5d811c",
+          "declared_options": [
+            "axisLength",
+            "axisLocation",
+            "cellEndLocation",
+            "cellStartLocation",
+            "centerX",
+            "centerY",
+            "clustered",
+            "endAngle",
+            "endLocation",
+            "height",
+            "innerRadius",
+            "inversed",
+            "levelCount",
+            "minGridDistance",
+            "orientation",
+            "paddingBottom",
+            "paddingLeft",
+            "paddingRight",
+            "paddingTop",
+            "populateText",
+            "radius",
+            "rotateLabels",
+            "startAngle",
+            "startLocation",
+            "text",
+            "textAlign",
+            "textType",
+            "width",
+            "yAxisRadius"
+          ]
+        },
+        {
+          "path": "src/.internal/charts/timeline/CurveLineSeries.ts",
+          "url": "https://raw.githubusercontent.com/amcharts/amcharts5/b3deb0c0b649e3376413efae4f81fee7270d6bdf/src/.internal/charts/timeline/CurveLineSeries.ts",
+          "sha256": "3ac6aa782410c6857bf440afb74424c46f2cf503d4df584aa9136091a1c958e2",
+          "declared_options": [
+            "x",
+            "y"
+          ]
+        },
+        {
+          "path": "src/.internal/charts/timeline/SerpentineChart.ts",
+          "url": "https://raw.githubusercontent.com/amcharts/amcharts5/b3deb0c0b649e3376413efae4f81fee7270d6bdf/src/.internal/charts/timeline/SerpentineChart.ts",
+          "sha256": "f8f267ff0cc35d55962f7d593bee3c9d0f34a2fbfb8942c92bc9ae6987245352",
+          "declared_options": [
+            "endLocation",
+            "levelCount",
+            "orientation",
+            "startLocation",
+            "yAxisRadius"
+          ]
+        },
+        {
+          "path": "src/.internal/charts/timeline/SpiralChart.ts",
+          "url": "https://raw.githubusercontent.com/amcharts/amcharts5/b3deb0c0b649e3376413efae4f81fee7270d6bdf/src/.internal/charts/timeline/SpiralChart.ts",
+          "sha256": "893b3fe8fee24ae7b8ef407105743d9d865110749bf4cb274468c14663d4068a",
+          "declared_options": [
+            "endAngle",
+            "innerRadius",
+            "levelCount",
+            "startAngle",
+            "yAxisRadius"
+          ]
+        },
+        {
+          "path": "src/.internal/plugins/exporting/Exporting.ts",
+          "url": "https://raw.githubusercontent.com/amcharts/amcharts5/b3deb0c0b649e3376413efae4f81fee7270d6bdf/src/.internal/plugins/exporting/Exporting.ts",
+          "sha256": "8888c1fbdcc20db02af3e4237a9434f83e477f83c38fb16a55a795e726988805",
+          "declared_options": [
+            "A0",
+            "A1",
+            "A10",
+            "A2",
+            "A3",
+            "A4",
+            "A5",
+            "A6",
+            "A7",
+            "A8",
+            "A9",
+            "B0",
+            "B1",
+            "B10",
+            "B2",
+            "B3",
+            "B4",
+            "B5",
+            "B6",
+            "B7",
+            "B8",
+            "B9",
+            "C0",
+            "C1",
+            "C10",
+            "C2",
+            "C3",
+            "C4",
+            "C5",
+            "C6",
+            "C7",
+            "C8",
+            "C9",
+            "EXECUTIVE",
+            "FOLIO",
+            "LEGAL",
+            "LETTER",
+            "RA0",
+            "RA1",
+            "RA2",
+            "RA3",
+            "RA4",
+            "SRA0",
+            "SRA1",
+            "SRA2",
+            "SRA3",
+            "SRA4",
+            "SheetNames",
+            "Sheets",
+            "TABLOID",
+            "addBOM",
+            "addColumnNames",
+            "addURL",
+            "align",
+            "alignment",
+            "backgroundColor",
+            "backgroundOpacity",
+            "bold",
+            "bolditalics",
+            "bookSST",
+            "bookType",
+            "bytes",
+            "canvas",
+            "canvasOptions",
+            "cellClass",
+            "charset",
+            "content",
+            "crop",
+            "csvOptions",
+            "data",
+            "dataFields",
+            "dataFieldsOrder",
+            "dataSource",
+            "dataprocessed",
+            "dateFields",
+            "dateFormat",
+            "default",
+            "defaultStyle",
+            "delay",
+            "disabled",
+            "doc",
+            "downloadstarted",
+            "durationFields",
+            "durationFormat",
+            "durationUnit",
+            "emptyAs",
+            "escapeFormulas",
+            "exportfinished",
+            "exportstarted",
+            "extraFonts",
+            "extraImages",
+            "fileName",
+            "filePrefix",
+            "fit",
+            "font",
+            "fontSize",
+            "forceQuotes",
+            "format",
+            "headerClass",
+            "height",
+            "htmlOptions",
+            "image",
+            "imageFormat",
+            "includeData",
+            "indent",
+            "italics",
+            "jpgOptions",
+            "jsonOptions",
+            "left",
+            "maintainPixelRatio",
+            "margin",
+            "marginBottom",
+            "marginLeft",
+            "marginRight",
+            "marginTop",
+            "maxHeight",
+            "maxWidth",
+            "menu",
+            "minHeight",
+            "minWidth",
+            "name",
+            "normal",
+            "numberFormat",
+            "numericFields",
+            "options",
+            "pageMargins",
+            "pageOrientation",
+            "pageSize",
+            "path",
+            "pdfOptions",
+            "pdfdataOptions",
+            "pdfdocready",
+            "pivot",
+            "pngOptions",
+            "position",
+            "precision",
+            "printMethod",
+            "printOptions",
+            "printstarted",
+            "quality",
+            "renameFields",
+            "reverse",
+            "rowClass",
+            "separator",
+            "source",
+            "svg",
+            "svgOptions",
+            "table",
+            "tableClass",
+            "target",
+            "text",
+            "title",
+            "top",
+            "type",
+            "useLocale",
+            "useTimestamps",
+            "width",
+            "workbook",
+            "workbookOptions",
+            "workbookready",
+            "xlsx",
+            "xlsxOptions"
+          ]
+        },
+        {
+          "path": "src/.internal/plugins/exporting/ExportingMenu.ts",
+          "url": "https://raw.githubusercontent.com/amcharts/amcharts5/b3deb0c0b649e3376413efae4f81fee7270d6bdf/src/.internal/plugins/exporting/ExportingMenu.ts",
+          "sha256": "e68dab5831d21a6f5fa216b07533a74a9d37f81a9663939efbc87cc9d432b48a",
+          "declared_options": [
+            "align",
+            "ariaLabel",
+            "autoClose",
+            "callback",
+            "callbackTarget",
+            "container",
+            "deactivateRoot",
+            "element",
+            "exportType",
+            "exporting",
+            "format",
+            "items",
+            "label",
+            "listElement",
+            "menuElement",
+            "sublabel",
+            "target",
+            "type",
+            "useDefaultCSS",
+            "valign"
+          ]
+        }
+      ],
+      "examples": [
+        {
+          "path": "examples/shared/timeline-linear-process-diagram/index.ts",
+          "url": "https://github.com/amcharts/amcharts5/blob/b3deb0c0b649e3376413efae4f81fee7270d6bdf/examples/shared/timeline-linear-process-diagram/index.ts",
+          "status": "planned",
+          "acceptance": []
+        },
+        {
+          "path": "examples/shared/timeline-serpentine-chart/index.ts",
+          "url": "https://github.com/amcharts/amcharts5/blob/b3deb0c0b649e3376413efae4f81fee7270d6bdf/examples/shared/timeline-serpentine-chart/index.ts",
+          "status": "planned",
+          "acceptance": []
+        },
+        {
+          "path": "examples/shared/timeline-spiral-chart/index.ts",
+          "url": "https://github.com/amcharts/amcharts5/blob/b3deb0c0b649e3376413efae4f81fee7270d6bdf/examples/shared/timeline-spiral-chart/index.ts",
+          "status": "planned",
+          "acceptance": []
+        }
+      ]
+    }
+  ],
+  "features": [
+    {
+      "family": "Basic layouts",
+      "requirements": "Vertical, horizontal, alternating, all-cards-visible, flipped direction, scrolling, automatic sizing, responsive switching.",
+      "schema": "Root, `cards`",
+      "references": "RC, DT",
+      "hosts": {
+        "pure": {
+          "status": "partial",
+          "acceptance": [
+            "test/lambda/chart/timeline_layout.ls",
+            "test/lambda/chart/timeline_layout.txt"
+          ],
+          "remaining": "Responsive constraint handling and scrolling/virtualization remain open."
+        },
+        "native": {
+          "status": "partial",
+          "acceptance": [
+            "test/ui/timeline/cards.ls",
+            "test/ui/timeline/cards.json"
+          ],
+          "remaining": "Responsive constraint handling and scrolling/virtualization remain open."
+        },
+        "browser": {
+          "status": "planned",
+          "acceptance": []
+        },
+        "export": {
+          "status": "planned",
+          "acceptance": []
+        }
+      }
+    },
+    {
+      "family": "Scaled chronology",
+      "requirements": "Proportional dates, major/minor axes, configurable tick intervals/format, independent axis/item placement, grid and week numbers.",
+      "schema": "`scale`, `axis`",
+      "references": "VT, AC",
+      "hosts": {
+        "pure": {
+          "status": "partial",
+          "acceptance": [
+            "test/lambda/chart/timeline_time_map.ls",
+            "test/lambda/chart/timeline_time_map.txt"
+          ],
+          "remaining": "Navigator, all axis options, and recurring-window pan policy remain open."
+        },
+        "native": {
+          "status": "partial",
+          "acceptance": [
+            "test/ui/timeline/gestures.ls",
+            "test/ui/timeline/gestures.json"
+          ],
+          "remaining": "Navigator, all axis options, and recurring-window pan policy remain open."
+        },
+        "browser": {
+          "status": "planned",
+          "acceptance": []
+        },
+        "export": {
+          "status": "planned",
+          "acceptance": []
+        }
+      }
+    },
+    {
+      "family": "Historical dating",
+      "requirements": "BCE/CE, partial dates, explicit date labels, eras, date ranges, very distant past/future.",
+      "schema": "DateSpec, `era`",
+      "references": "KL",
+      "hosts": {
+        "pure": {
+          "status": "partial",
+          "acceptance": [
+            "test/lambda/chart/timeline_dates.ls",
+            "test/lambda/chart/timeline_dates.txt"
+          ],
+          "remaining": "Full locale/precision input and uncertainty rendering remain open."
+        },
+        "native": {
+          "status": "planned",
+          "acceptance": []
+        },
+        "browser": {
+          "status": "planned",
+          "acceptance": []
+        },
+        "export": {
+          "status": "planned",
+          "acceptance": []
+        }
+      }
+    },
+    {
+      "family": "Time handling",
+      "requirements": "Fixed/named zones, calendar boundaries, zoom bounds, hidden recurring intervals, current/custom times, follow-current mode.",
+      "schema": "`scale`, `window`, `annotation`",
+      "references": "VT",
+      "hosts": {
+        "pure": {
+          "status": "partial",
+          "acceptance": [
+            "test/lambda/chart/timeline_time_map.ls",
+            "test/lambda/chart/timeline_time_map.txt"
+          ],
+          "remaining": "Week numbering, scale formatting, and alternate-calendar adapters remain open."
+        },
+        "native": {
+          "status": "planned",
+          "acceptance": []
+        },
+        "browser": {
+          "status": "planned",
+          "acceptance": []
+        },
+        "export": {
+          "status": "planned",
+          "acceptance": []
+        }
+      }
+    },
+    {
+      "family": "Rich event cards",
+      "requirements": "Headline/subtitle/body, semantic heading tags, links, rich elements, compact/details, read more, overlays, alignment, borderless mode.",
+      "schema": "`event`, `content`, `cards`",
+      "references": "RC, KL",
+      "hosts": {
+        "pure": {
+          "status": "partial",
+          "acceptance": [
+            "test/lambda/chart/timeline_layout.ls",
+            "test/lambda/chart/timeline_layout.txt",
+            "test/lambda/chart/timeline_cards.ls",
+            "test/lambda/chart/timeline_cards.txt"
+          ],
+          "remaining": "All render slots and visual/overflow variants remain open."
+        },
+        "native": {
+          "status": "partial",
+          "acceptance": [
+            "test/ui/timeline/cards.ls",
+            "test/ui/timeline/cards.json"
+          ],
+          "remaining": "All render slots and visual/overflow variants remain open."
+        },
+        "browser": {
+          "status": "planned",
+          "acceptance": []
+        },
+        "export": {
+          "status": "planned",
+          "acceptance": []
+        }
+      }
+    },
+    {
+      "family": "Narrative stage",
+      "requirements": "Title/introduction, active slide, synchronized navigator, first/previous/next/last, start-at-end, slide IDs and deep links.",
+      "schema": "`story`, `navigator`, `toolbar`",
+      "references": "KL, RC",
+      "hosts": {
+        "pure": {
+          "status": "partial",
+          "acceptance": [
+            "test/lambda/chart/timeline_story.ls",
+            "test/lambda/chart/timeline_story.txt",
+            "test/lambda/chart/timeline_story_navigation.ls",
+            "test/lambda/chart/timeline_bookmarks.ls",
+            "test/lambda/chart/timeline_bookmarks.txt"
+          ],
+          "remaining": "Full pinned narrative option parity and browser-host deep-link delivery remain open."
+        },
+        "native": {
+          "status": "partial",
+          "acceptance": [
+            "test/ui/timeline/slideshow.ls",
+            "test/ui/timeline/slideshow.json",
+            "test/ui/timeline/story_navigation.json",
+            "test/ui/timeline/story_timing.json",
+            "test/ui/timeline/bookmarks.ls",
+            "test/ui/timeline/bookmarks.json",
+            "test/ui/window_subscriptions.ls",
+            "test/ui/window_subscriptions.json"
+          ],
+          "remaining": "Full pinned narrative option parity and browser-host deep-link delivery remain open."
+        },
+        "browser": {
+          "status": "planned",
+          "acceptance": []
+        },
+        "export": {
+          "status": "planned",
+          "acceptance": []
+        }
+      }
+    },
+    {
+      "family": "Markers",
+      "requirements": "Circle/square/diamond, arbitrary icons/elements, image thumbnails, per-event sizes/colors, hide points/cards separately, state feedback.",
+      "schema": "`markers`, event slots",
+      "references": "RC, KL, DT",
+      "hosts": {
+        "pure": {
+          "status": "partial",
+          "acceptance": [
+            "test/lambda/chart/timeline_layout.ls",
+            "test/lambda/chart/timeline_layout.txt"
+          ],
+          "remaining": "Custom marker picking, connectors, and state recipes remain open."
+        },
+        "native": {
+          "status": "partial",
+          "acceptance": [
+            "test/ui/timeline/navigation.ls",
+            "test/ui/timeline/navigation.json"
+          ],
+          "remaining": "Custom marker picking, connectors, and state recipes remain open."
+        },
+        "browser": {
+          "status": "planned",
+          "acceptance": []
+        },
+        "export": {
+          "status": "planned",
+          "acceptance": []
+        }
+      }
+    },
+    {
+      "family": "Continuation",
+      "requirements": "Loading/pending marker and content, custom pending icon, reverse sequence behavior.",
+      "schema": "`pending`",
+      "references": "DT",
+      "hosts": {
+        "pure": {
+          "status": "partial",
+          "acceptance": [
+            "test/lambda/chart/timeline_schema.ls",
+            "test/lambda/chart/timeline_schema.txt"
+          ],
+          "remaining": "Status presentation and resource loading indicator policy remain open."
+        },
+        "native": {
+          "status": "partial",
+          "acceptance": [
+            "test/ui/timeline/cards.ls",
+            "test/ui/timeline/cards.json"
+          ],
+          "remaining": "Status presentation and resource loading indicator policy remain open."
+        },
+        "browser": {
+          "status": "planned",
+          "acceptance": []
+        },
+        "export": {
+          "status": "planned",
+          "acceptance": []
+        }
+      }
+    },
+    {
+      "family": "Groups",
+      "requirements": "Lanes, subgroups, nesting, collapse/visibility, stable order, group labels/templates, height modes and group editing.",
+      "schema": "`group`, `edit`",
+      "references": "VT, KL",
+      "hosts": {
+        "pure": {
+          "status": "partial",
+          "acceptance": [
+            "test/lambda/chart/timeline_groups.ls",
+            "test/lambda/chart/timeline_groups.txt"
+          ],
+          "remaining": "Group reordering/editing, lane overflow, and rich labels remain open."
+        },
+        "native": {
+          "status": "partial",
+          "acceptance": [
+            "test/ui/timeline/groups.ls",
+            "test/ui/timeline/groups.json"
+          ],
+          "remaining": "Group reordering/editing, lane overflow, and rich labels remain open."
+        },
+        "browser": {
+          "status": "planned",
+          "acceptance": []
+        },
+        "export": {
+          "status": "planned",
+          "acceptance": []
+        }
+      }
+    },
+    {
+      "family": "Nested histories",
+      "requirements": "Child timeline cards, independent navigation, inherited visual defaults, expand/collapse.",
+      "schema": "`children`, nested chart",
+      "references": "RC",
+      "hosts": {
+        "pure": {
+          "status": "planned",
+          "acceptance": []
+        },
+        "native": {
+          "status": "planned",
+          "acceptance": []
+        },
+        "browser": {
+          "status": "planned",
+          "acceptance": []
+        },
+        "export": {
+          "status": "planned",
+          "acceptance": []
+        }
+      }
+    },
+    {
+      "family": "Overlap",
+      "requirements": "Stable stacking, subgroup stacking, collision-aware labels, overflow handling, clustering and expansion.",
+      "schema": "`cards`, `cluster`",
+      "references": "VT, AC",
+      "hosts": {
+        "pure": {
+          "status": "partial",
+          "acceptance": [
+            "test/lambda/chart/timeline_layout.ls",
+            "test/lambda/chart/timeline_layout.txt"
+          ],
+          "remaining": "Clustering and bounded rendering remain open."
+        },
+        "native": {
+          "status": "planned",
+          "acceptance": []
+        },
+        "browser": {
+          "status": "planned",
+          "acceptance": []
+        },
+        "export": {
+          "status": "planned",
+          "acceptance": []
+        }
+      }
+    },
+    {
+      "family": "Navigation",
+      "requirements": "Drag pan, wheel/pinch zoom, bounds, modifiers, click-to-activate, horizontal/vertical scroll, fit/focus and viewport notifications.",
+      "schema": "`interaction`, `window`",
+      "references": "VT",
+      "hosts": {
+        "pure": {
+          "status": "partial",
+          "acceptance": [
+            "test/lambda/chart/timeline_gestures.ls",
+            "test/lambda/chart/timeline_gestures.txt",
+            "test/lambda/chart/timeline_navigator.ls",
+            "test/lambda/chart/timeline_navigator.txt"
+          ],
+          "remaining": "Overview handles, scroll preferences, keyboard focus, and wheel/native pinch coverage remain open."
+        },
+        "native": {
+          "status": "partial",
+          "acceptance": [
+            "test/ui/timeline/gestures.ls",
+            "test/ui/timeline/gestures.json",
+            "test/ui/timeline/search_overview.json"
+          ],
+          "remaining": "Overview handles, scroll preferences, keyboard focus, and wheel/native pinch coverage remain open."
+        },
+        "browser": {
+          "status": "planned",
+          "acceptance": []
+        },
+        "export": {
+          "status": "planned",
+          "acceptance": []
+        }
+      }
+    },
+    {
+      "family": "Selection",
+      "requirements": "Single/multiple, modifier/range/contiguous/per-group selection, deselection, hover, tooltips, item visibility and disablement.",
+      "schema": "`interaction`, event flags",
+      "references": "VT, RC",
+      "hosts": {
+        "pure": {
+          "status": "partial",
+          "acceptance": [
+            "test/lambda/chart/timeline_state.ls",
+            "test/lambda/chart/timeline_state.txt"
+          ],
+          "remaining": "Contiguous/per-group selection and complete focus behavior remain open."
+        },
+        "native": {
+          "status": "partial",
+          "acceptance": [
+            "test/ui/timeline/navigation.ls",
+            "test/ui/timeline/navigation.json"
+          ],
+          "remaining": "Contiguous/per-group selection and complete focus behavior remain open."
+        },
+        "browser": {
+          "status": "planned",
+          "acceptance": []
+        },
+        "export": {
+          "status": "planned",
+          "acceptance": []
+        }
+      }
+    },
+    {
+      "family": "Search and filters",
+      "requirements": "Search across configured fields, highlighting, match navigation/counts, empty results, tags/groups/time filtering, quick jump.",
+      "schema": "`search`, `toolbar`",
+      "references": "RC; Lambda extension",
+      "hosts": {
+        "pure": {
+          "status": "partial",
+          "acceptance": [
+            "test/lambda/chart/timeline_state.ls",
+            "test/lambda/chart/timeline_state.txt",
+            "test/lambda/chart/timeline_search.ls",
+            "test/lambda/chart/timeline_search.txt",
+            "test/lambda/element_with_content.ls",
+            "test/lambda/element_with_content.txt",
+            "test/lambda/chart/timeline_locale.ls",
+            "test/lambda/chart/timeline_locale.txt",
+            "test/lambda/chart/timeline_filters.ls",
+            "test/lambda/chart/timeline_filters.txt",
+            "test/lambda/chart/timeline_search_content.ls",
+            "test/lambda/chart/timeline_search_content.txt"
+          ],
+          "remaining": "All pinned locale variants and large-data bounded work remain open."
+        },
+        "native": {
+          "status": "partial",
+          "acceptance": [
+            "test/ui/timeline/cards.ls",
+            "test/ui/timeline/cards.json",
+            "test/ui/timeline/search_overview.json",
+            "test/ui/timeline/search_rich.ls",
+            "test/ui/timeline/search_rich.json",
+            "test/ui/timeline/filter_focus.ls",
+            "test/ui/timeline/filter_focus.json",
+            "test/ui/timeline/locale.ls",
+            "test/ui/timeline/locale.json",
+            "test/ui/timeline/filters.ls",
+            "test/ui/timeline/filters.json",
+            "test/ui/timeline/filters_controlled.ls",
+            "test/ui/timeline/filters_controlled.json",
+            "test/ui/timeline/search_content.ls",
+            "test/ui/timeline/search_content.json"
+          ],
+          "remaining": "All pinned locale variants and bounded large-data interaction remain open."
+        },
+        "browser": {
+          "status": "planned",
+          "acceptance": []
+        },
+        "export": {
+          "status": "planned",
+          "acceptance": []
+        }
+      }
+    },
+    {
+      "family": "Editing",
+      "requirements": "Create/update/delete, move date/group, resize duration, group changes, snapping, drag/drop, permission overrides, confirmation and validation.",
+      "schema": "`edit`, requests",
+      "references": "VT",
+      "hosts": {
+        "pure": {
+          "status": "partial",
+          "acceptance": [
+            "test/lambda/chart/timeline_state.ls",
+            "test/lambda/chart/timeline_state.txt",
+            "test/lambda/chart/timeline_edit.ls",
+            "test/lambda/chart/timeline_edit.txt"
+          ],
+          "remaining": "External drop creation, authoring controls, asynchronous validation presentation, and complete pinned option/example parity remain open."
+        },
+        "native": {
+          "status": "partial",
+          "acceptance": [
+            "test/ui/timeline/editing.ls",
+            "test/ui/timeline/editing.json"
+          ],
+          "remaining": "External drop creation, authoring controls, asynchronous validation presentation, and complete pinned option/example parity remain open."
+        },
+        "browser": {
+          "status": "planned",
+          "acceptance": []
+        },
+        "export": {
+          "status": "planned",
+          "acceptance": []
+        }
+      }
+    },
+    {
+      "family": "Live data",
+      "requirements": "Add/remove/reorder/update by ID, immutable source revisions, retain state, avoid stale validation/resource completions.",
+      "schema": "`convert`, `update`, resource state",
+      "references": "VT, RC",
+      "hosts": {
+        "pure": {
+          "status": "partial",
+          "acceptance": [
+            "test/lambda/chart/timeline_resources.ls",
+            "test/lambda/chart/timeline_resources.txt",
+            "test/lambda/chart/timeline_source.ls",
+            "test/lambda/chart/timeline_source.txt"
+          ],
+          "remaining": "Revision/descriptor cancellation, deadlines, retries, retained refresh data, and explicit status slots have evidence. Automatic asynchronous loading/disposal, media/font resource integration, bounded-work performance, and full pinned parity remain open."
+        },
+        "native": {
+          "status": "partial",
+          "acceptance": [
+            "test/ui/timeline/resources.ls",
+            "test/ui/timeline/resources.json",
+            "test/ui/timeline/reentrant.ls",
+            "test/ui/timeline/reentrant.json",
+            "test/ui/timeline/editing.ls",
+            "test/ui/timeline/editing.json",
+            "test/ui/timeline/resource_lifetime.ls",
+            "test/ui/timeline/resource_lifetime.json",
+            "test/ui/timeline/source.ls",
+            "test/ui/timeline/source.json"
+          ],
+          "remaining": "Native virtual-time cancellation/deadline/retry checks pass. Automatic asynchronous loading/disposal, media/font integration, bounded-work performance, and full pinned parity remain open."
+        },
+        "browser": {
+          "status": "planned",
+          "acceptance": []
+        },
+        "export": {
+          "status": "planned",
+          "acceptance": []
+        }
+      }
+    },
+    {
+      "family": "Multimedia",
+      "requirements": "Images, video/audio, captions/credits/alt text, media links, poster/thumbnail, lazy loading, fit/alignment, active-player handling.",
+      "schema": "`media`, `media_options`",
+      "references": "RC, KL",
+      "hosts": {
+        "pure": {
+          "status": "partial",
+          "acceptance": [
+            "test/lambda/chart/timeline_media.ls",
+            "test/lambda/chart/timeline_media.txt",
+            "test/lambda/chart/timeline_media_playback.ls",
+            "test/lambda/chart/timeline_media_playback.txt"
+          ],
+          "remaining": "Native/provider integration, outgoing/keyed transitions, and full pinned media option parity remain open; session completion and notification contracts have pure evidence."
+        },
+        "native": {
+          "status": "partial",
+          "acceptance": [
+            "test/ui/timeline/media_lifetime.ls",
+            "test/ui/timeline/media_lifetime.json",
+            "test/ui/timeline/native_media.ls",
+            "test/ui/timeline/native_media.json",
+            "test/ui/timeline/media_iframe.html",
+            "test/ui/timeline/media_iframe.json",
+            "test/ui/media_owner.ls",
+            "test/ui/media_owner.json",
+            "test/test_state_store_gtest.cpp",
+            "test/ui/media_removal.ls",
+            "test/ui/media_removal.json",
+            "test/ui/timeline/native_media_end.ls",
+            "test/ui/timeline/native_media_end.json"
+          ],
+          "remaining": "Local macOS audio/video commands, native end notification, explicit clip-end completion, missing-source failure, iframe source ownership, retained settings, and removal pause have evidence. Remote/provider controllers, cross-platform playback, outgoing/keyed transitions, and full pinned parity remain open."
+        },
+        "browser": {
+          "status": "planned",
+          "acceptance": []
+        },
+        "export": {
+          "status": "planned",
+          "acceptance": []
+        }
+      }
+    },
+    {
+      "family": "Hosted content",
+      "requirements": "Video/audio/document/map/social providers, generic embeds, custom content, per-provider status and fallback.",
+      "schema": "Provider adapters",
+      "references": "KL, RC",
+      "hosts": {
+        "pure": {
+          "status": "partial",
+          "acceptance": [
+            "test/lambda/chart/timeline_media.ls",
+            "test/lambda/chart/timeline_media.txt"
+          ],
+          "remaining": "Provider resolution and live host/player parity remain open."
+        },
+        "native": {
+          "status": "planned",
+          "acceptance": []
+        },
+        "browser": {
+          "status": "planned",
+          "acceptance": []
+        },
+        "export": {
+          "status": "planned",
+          "acceptance": []
+        }
+      }
+    },
+    {
+      "family": "Presentation controls",
+      "requirements": "Toolbar order/position/sticky sizing, custom labels/icons, quick-jump, fullscreen, lightbox, layout/theme switches.",
+      "schema": "`toolbar`, `media_options`",
+      "references": "RC",
+      "hosts": {
+        "pure": {
+          "status": "partial",
+          "acceptance": [
+            "test/lambda/chart/timeline_state.ls",
+            "test/lambda/chart/timeline_state.txt",
+            "test/lambda/chart/timeline_controls.ls",
+            "test/lambda/chart/timeline_controls.txt"
+          ],
+          "remaining": "Complete toolbar actions, fullscreen, and quick jump remain open."
+        },
+        "native": {
+          "status": "partial",
+          "acceptance": [
+            "test/ui/timeline/navigation.ls",
+            "test/ui/timeline/navigation.json",
+            "test/ui/timeline/controls.ls",
+            "test/ui/timeline/controls.json"
+          ],
+          "remaining": "Complete toolbar actions, fullscreen, and quick jump remain open."
+        },
+        "browser": {
+          "status": "planned",
+          "acceptance": []
+        },
+        "export": {
+          "status": "planned",
+          "acceptance": []
+        }
+      }
+    },
+    {
+      "family": "Slideshow",
+      "requirements": "Per-slide timing, autoplay, play/pause/resume/seek/stop, repeat/direction, progress, transition effects, media-aware advancement.",
+      "schema": "`slideshow`, `render_frame`",
+      "references": "RC; chart reuse",
+      "hosts": {
+        "pure": {
+          "status": "partial",
+          "acceptance": [
+            "test/lambda/chart/timeline_story.ls",
+            "test/lambda/chart/timeline_story.txt",
+            "test/lambda/chart/timeline_media_playback.ls",
+            "test/lambda/chart/timeline_media_playback.txt",
+            "test/lambda/chart/timeline_source.ls",
+            "test/lambda/chart/timeline_source.txt"
+          ],
+          "remaining": "Native/provider integration, outgoing/keyed transitions, and full pinned media option parity remain open; session completion and notification contracts have pure evidence."
+        },
+        "native": {
+          "status": "partial",
+          "acceptance": [
+            "test/ui/timeline/slideshow.ls",
+            "test/ui/timeline/slideshow.json",
+            "test/ui/timeline/story_timing.ls",
+            "test/ui/timeline/story_timing.json",
+            "test/ui/timeline/media_lifetime.ls",
+            "test/ui/timeline/media_lifetime.json",
+            "test/ui/timeline/native_media.ls",
+            "test/ui/timeline/native_media.json",
+            "test/ui/timeline/media_iframe.html",
+            "test/ui/timeline/media_iframe.json",
+            "test/ui/media_owner.ls",
+            "test/ui/media_owner.json",
+            "test/test_state_store_gtest.cpp",
+            "test/ui/media_removal.ls",
+            "test/ui/media_removal.json",
+            "test/ui/timeline/native_media_end.ls",
+            "test/ui/timeline/native_media_end.json",
+            "test/ui/timeline/source.ls",
+            "test/ui/timeline/source.json"
+          ],
+          "remaining": "Local macOS audio/video commands, native end notification, explicit clip-end completion, missing-source failure, iframe source ownership, retained settings, and removal pause have evidence. Remote/provider controllers, cross-platform playback, outgoing/keyed transitions, and full pinned parity remain open."
+        },
+        "browser": {
+          "status": "planned",
+          "acceptance": []
+        },
+        "export": {
+          "status": "planned",
+          "acceptance": []
+        }
+      }
+    },
+    {
+      "family": "Motion",
+      "requirements": "Keyed enter/update/exit, animated windows/guides, interruption from visible state, reduced motion, explicit frozen samples.",
+      "schema": "Chart animation helpers",
+      "references": "RC, AC; chart reuse",
+      "hosts": {
+        "pure": {
+          "status": "partial",
+          "acceptance": [
+            "test/lambda/chart/timeline_story.ls",
+            "test/lambda/chart/timeline_story.txt"
+          ],
+          "remaining": "Incoming/outgoing story fade, slide/reveal samples, reverse/repeat boundaries, pause/resume, retirement, and reduced motion have evidence. Keyed event enter/update/exit, interrupted windows/guides, and full pinned option/example parity remain open."
+        },
+        "native": {
+          "status": "partial",
+          "acceptance": [
+            "test/ui/timeline/story_timing.ls",
+            "test/ui/timeline/story_timing.json",
+            "test/ui/timeline/story_motion.ls",
+            "test/ui/timeline/story_motion.json",
+            "test/test_view_reuse_gtest.cpp"
+          ],
+          "remaining": "Incoming/outgoing story fade, slide/reveal samples, reverse/repeat boundaries, pause/resume, retirement, and reduced motion have evidence. Keyed event enter/update/exit, interrupted windows/guides, and full pinned option/example parity remain open."
+        },
+        "browser": {
+          "status": "planned",
+          "acceptance": []
+        },
+        "export": {
+          "status": "planned",
+          "acceptance": []
+        }
+      }
+    },
+    {
+      "family": "Shape vocabulary",
+      "requirements": "Straight, serpentine, spiral, arbitrary path/points, smoothing, levels/angles/radii, tangent labels, lane offsets.",
+      "schema": "`coordinate`",
+      "references": "AC",
+      "hosts": {
+        "pure": {
+          "status": "partial",
+          "acceptance": [
+            "test/lambda/chart/timeline_coordinate.ls",
+            "test/lambda/chart/timeline_coordinate.txt"
+          ],
+          "remaining": "Self-intersection policies, tangent labels, and complete path options remain open."
+        },
+        "native": {
+          "status": "planned",
+          "acceptance": []
+        },
+        "browser": {
+          "status": "planned",
+          "acceptance": []
+        },
+        "export": {
+          "status": "planned",
+          "acceptance": []
+        }
+      }
+    },
+    {
+      "family": "Quantitative overlays",
+      "requirements": "Multiple scales/axes/series; line/step/area/column/point, fills, stacking, legend toggles, cursors and annotations.",
+      "schema": "`series`, `axis`",
+      "references": "AC",
+      "hosts": {
+        "pure": {
+          "status": "partial",
+          "acceptance": [
+            "test/lambda/chart/timeline_series.ls",
+            "test/lambda/chart/timeline_series.txt"
+          ]
+        },
+        "native": {
+          "status": "partial",
+          "acceptance": [
+            "test/ui/timeline/series.json"
+          ]
+        },
+        "browser": {
+          "status": "planned",
+          "acceptance": []
+        },
+        "export": {
+          "status": "planned",
+          "acceptance": []
+        }
+      }
+    },
+    {
+      "family": "Visual customization",
+      "requirements": "Theme presets, dark/high-contrast, semantic classes/styles/renderers, per-element typography, custom fonts, visual states.",
+      "schema": "`theme`, `parts`",
+      "references": "RC, KL, VT, AC",
+      "hosts": {
+        "pure": {
+          "status": "partial",
+          "acceptance": [
+            "test/lambda/chart/timeline_layout.ls",
+            "test/lambda/chart/timeline_layout.txt"
+          ],
+          "remaining": "All token/part recipes, presets, renderers, and fonts remain open."
+        },
+        "native": {
+          "status": "partial",
+          "acceptance": [
+            "test/ui/timeline/cards.ls",
+            "test/ui/timeline/cards.json"
+          ],
+          "remaining": "All token/part recipes, presets, renderers, and fonts remain open."
+        },
+        "browser": {
+          "status": "planned",
+          "acceptance": []
+        },
+        "export": {
+          "status": "planned",
+          "acceptance": []
+        }
+      }
+    },
+    {
+      "family": "Accessibility",
+      "requirements": "Semantic chronological list, labelled controls, keyboard/focus, screen-reader descriptions, contrast, non-color cues, motion preference.",
+      "schema": "Root, messages, presenters",
+      "references": "RC; Lambda requirement",
+      "hosts": {
+        "pure": {
+          "status": "planned",
+          "acceptance": []
+        },
+        "native": {
+          "status": "planned",
+          "acceptance": []
+        },
+        "browser": {
+          "status": "planned",
+          "acceptance": []
+        },
+        "export": {
+          "status": "planned",
+          "acceptance": []
+        }
+      }
+    },
+    {
+      "family": "Localization",
+      "requirements": "Dates/numbers/era labels, timezone, RTL, every control/status/help string, formatter callbacks and message interpolation.",
+      "schema": "`messages`, `scale`, root",
+      "references": "RC, KL, VT",
+      "hosts": {
+        "pure": {
+          "status": "partial",
+          "acceptance": [
+            "test/lambda/chart/timeline_locale.ls",
+            "test/lambda/chart/timeline_locale.txt"
+          ],
+          "remaining": "Further pinned reference languages, all provider/modal strings, and full locale/host fixture coverage remain open."
+        },
+        "native": {
+          "status": "partial",
+          "acceptance": [
+            "test/ui/timeline/locale.ls",
+            "test/ui/timeline/locale.json"
+          ],
+          "remaining": "Further pinned reference languages, all provider/modal strings, and full locale/host fixture coverage remain open."
+        },
+        "browser": {
+          "status": "planned",
+          "acceptance": []
+        },
+        "export": {
+          "status": "partial",
+          "acceptance": [
+            "test/lambda/chart/timeline_locale.ls",
+            "test/lambda/chart/timeline_locale.txt"
+          ],
+          "remaining": "Further pinned reference languages, all provider/modal strings, and full locale/host fixture coverage remain open."
+        }
+      }
+    },
+    {
+      "family": "Authoring/import",
+      "requirements": "Element/map forms, records/encoding, JSON, CSV/TSV, Google Sheets, named datasets, supported upstream data adapters.",
+      "schema": "`data`, `source`, `convert`",
+      "references": "KL, VT, RC",
+      "hosts": {
+        "pure": {
+          "status": "partial",
+          "acceptance": [
+            "test/lambda/chart/timeline_adapters.ls",
+            "test/lambda/chart/timeline_adapters.txt"
+          ],
+          "remaining": "Full upstream field/option parity and source variants remain open."
+        },
+        "native": {
+          "status": "planned",
+          "acceptance": []
+        },
+        "browser": {
+          "status": "planned",
+          "acceptance": []
+        },
+        "export": {
+          "status": "planned",
+          "acceptance": []
+        }
+      }
+    },
+    {
+      "family": "Composition",
+      "requirements": "Shared chart parameters, linked views, annotations, dashboard panels, chart grammar SVG adapter, reusable render callbacks.",
+      "schema": "`series`, chart adapter",
+      "references": "AC, VT; chart reuse",
+      "hosts": {
+        "pure": {
+          "status": "partial",
+          "acceptance": [
+            "test/lambda/chart/timeline_chart_adapter.ls",
+            "test/lambda/chart/timeline_chart_adapter.txt"
+          ]
+        },
+        "native": {
+          "status": "planned",
+          "acceptance": []
+        },
+        "browser": {
+          "status": "planned",
+          "acceptance": []
+        },
+        "export": {
+          "status": "planned",
+          "acceptance": []
+        }
+      }
+    },
+    {
+      "family": "Snapshot/export",
+      "requirements": "Static HTML, SVG/PNG/JPEG/PDF, print/full-domain/current-window views, expanded content, JSON/CSV/XLSX/HTML/PDF data export, deterministic time/font/media inputs.",
+      "schema": "`export`, explicit presenter",
+      "references": "AC; Lambda requirement",
+      "hosts": {
+        "pure": {
+          "status": "partial",
+          "acceptance": [
+            "test/lambda/chart/timeline_export.ls",
+            "test/lambda/chart/timeline_export.txt"
+          ],
+          "remaining": "Font/resource admission, full pagination and splitting policy, static rich-content fidelity, full-domain virtualized output acceptance, and all pinned upstream export options."
+        },
+        "native": {
+          "status": "partial",
+          "acceptance": [
+            "test/lambda/proc/timeline_export.ls",
+            "test/lambda/proc/timeline_export.txt"
+          ],
+          "remaining": "Font/resource admission, full pagination and splitting policy, static rich-content fidelity, full-domain virtualized output acceptance, and all pinned upstream export options."
+        },
+        "browser": {
+          "status": "planned",
+          "acceptance": []
+        },
+        "export": {
+          "status": "partial",
+          "acceptance": [
+            "test/lambda/proc/timeline_export.ls",
+            "test/lambda/proc/timeline_export.txt"
+          ],
+          "remaining": "Font/resource admission, full pagination and splitting policy, static rich-content fidelity, full-domain virtualized output acceptance, and all pinned upstream export options."
+        }
+      }
+    },
+    {
+      "family": "Scale and diagnostics",
+      "requirements": "Windowed rendering, media prefetch, level-of-detail clusters, bounded work, capability reports, explicit empty/error/loading states.",
+      "schema": "`cluster`, resources, layout",
+      "references": "VT, RC; Lambda requirement",
+      "hosts": {
+        "pure": {
+          "status": "partial",
+          "acceptance": [
+            "test/lambda/chart/timeline_resources.ls",
+            "test/lambda/chart/timeline_resources.txt"
+          ],
+          "remaining": "Revision/descriptor cancellation, deadlines, retries, retained refresh data, and explicit status slots have evidence. Automatic asynchronous loading/disposal, media/font resource integration, bounded-work performance, and full pinned parity remain open."
+        },
+        "native": {
+          "status": "partial",
+          "acceptance": [
+            "test/ui/timeline/resource_lifetime.ls",
+            "test/ui/timeline/resource_lifetime.json"
+          ],
+          "remaining": "Native virtual-time cancellation/deadline/retry checks pass. Automatic asynchronous loading/disposal, media/font integration, bounded-work performance, and full pinned parity remain open."
+        },
+        "browser": {
+          "status": "planned",
+          "acceptance": []
+        },
+        "export": {
+          "status": "planned",
+          "acceptance": []
+        }
+      }
+    }
+  ]
+}

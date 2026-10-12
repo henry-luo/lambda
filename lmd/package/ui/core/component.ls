@@ -1,4 +1,5 @@
 import elements: lambda.ui.dtna.elements
+import presentation: .presentation
 
 // UI descriptors retain source identity; presentation never owns application data (S12.1.3).
 pub let common_props = ["id", "class", "style", "label", "title", "role", "tabindex"]
@@ -37,15 +38,7 @@ pub fn kind(node) {
 }
 pub fn props(node) => if (node.kind != null and node.props is map) node.props else
     map([for (key,value in map(node) where node.kind == null or string(key) != "kind") (string(key),value)])
-pub fn heading(attributes, children, level) {
-    // explicit HTML tags share their attribute/content contract across families.
-    if (level == 1) <h1 *:attributes,*children>
-    else if (level == 2) <h2 *:attributes,*children>
-    else if (level == 3) <h3 *:attributes,*children>
-    else if (level == 4) <h4 *:attributes,*children>
-    else if (level == 5) <h5 *:attributes,*children>
-    else <h6 *:attributes,*children>
-}
+pub fn heading(attributes, children, level) => presentation.heading(attributes,children,level)
 
 pub fn properties(props, allowed: array, kind, attributes = false, family = "dtna") bool^ {
     if (not (props is map)) raise fail(kind,"props must be a map",family)

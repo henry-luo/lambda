@@ -58,6 +58,7 @@ void log_mem_stage(const char* stage);  // defined in radiant/window.cpp
 #include "../lambda/core/mark_reader.hpp"
 #include "page_fo.hpp"
 #include "layout_paged.hpp"
+#include "geomap.hpp"
 #include "../lambda/input/html5/html5_parser.h"
 #include "../lambda/format/format.h"
 #include "../lambda/runtime/transpiler.hpp"
@@ -2661,11 +2662,36 @@ static DomDocument* load_lambda_html_doc_profiled(Url* html_url, const char* css
 
 DomDocument* load_lambda_html_doc(Url* html_url, const char* css_filename,
     int viewport_width, int viewport_height, Pool* pool, const char* html_source,
-    bool track_source_lines, bool execute_scripts, const DocumentJsHostConfig* host_config) {
+    bool track_source_lines, bool execute_scripts, const DocumentJsHostConfig* host_config, bool print_media) {
     return load_lambda_html_doc_profiled(html_url, css_filename, false,
                                          viewport_width, viewport_height,
                                          pool, html_source, track_source_lines, execute_scripts,
-                                         nullptr, nullptr, host_config, nullptr, false);
+                                         nullptr, nullptr, host_config, nullptr, print_media);
+}
+
+DomDocument* load_html_source_doc(const char* html_source, int viewport_width, int viewport_height,
+        const DocumentJsHostConfig* host_config, bool print_media, Url* base_url) {
+    if (!html_source || !html_source[0]) return nullptr;
+    Url* source_url = base_url ? url_parse(url_get_href(base_url)) : get_current_dir();
+    Pool* pool = mem_pool_create(NULL, MEM_ROLE_LAYOUT, "radiant.render.document");
+    if (!source_url || !pool) {
+        if (source_url) url_destroy(source_url);
+        if (pool) pool_destroy(pool);
+        return nullptr;
+    }
+    DomDocument* doc = load_lambda_html_doc(source_url, nullptr, viewport_width, viewport_height,
+        pool, html_source, false, false, host_config, print_media);
+    if (!doc) {
+        url_destroy(source_url);
+        pool_destroy(pool);
+        return nullptr;
+    }
+    // transient render documents must retain and release their parser allocation owner.
+    if (!dom_document_finalize_loader_pool(doc, pool) || !doc->root) {
+        free_document(doc);
+        return nullptr;
+    }
+    return doc;
 }
 
 static DomDocument* load_lambda_html_doc_with_host_config(
@@ -4646,6 +4672,11 @@ static View* restore_lambda_focus(DomDocument* doc, DocState* state, bool had_fo
     if (focused) {
         // rebuilding preserves programmatic-only targets and their keyboard ring.
         focus_set_programmatic(state, focused, restore->from_keyboard);
+        if (focused->is_element() && tc_is_text_control(focused->as_element()) &&
+            !form_control_get_focus_value(state, focused)) {
+            // An authored default change creates a new editing session baseline.
+            te_focus_capture_value(focused->as_element());
+        }
         if (restore->has_text_selection) {
             // The fresh template value is authoritative, but its form prop
             // starts with a default caret. Keep the live selection state and
@@ -4670,6 +4701,16 @@ static Element* layout_current_html_root(DomDocument* doc) {
         doc->html_root = lam::up(html_root);
     }
     return html_root;
+}
+
+static void layout_preserve_rebuilt_owners(DomDocument* doc, DomNode* old_root,
+                                           DomNode* new_root) {
+    view_state_preserve_subtree_identity((DocState*)doc->state, old_root, new_root);
+    radiant_frame_requests_follow_rebuild(doc, old_root, new_root);
+    radiant_pointer_capture_follow_rebuild(doc, old_root, new_root);
+    radiant_focus_events_follow_rebuild(doc, old_root, new_root);
+    radiant_navigation_requests_follow_rebuild(doc, old_root, new_root);
+    geomap_follow_rebuild(doc, old_root, new_root);
 }
 
 void rebuild_lambda_doc(UiContext* uicon) {
@@ -4701,6 +4742,7 @@ void rebuild_lambda_doc(UiContext* uicon) {
         hashmap_clear(doc->element_dom_map, false);
     }
 
+    DomElement* old_root = doc->root;
     DomElement* new_root = build_dom_tree_from_element(html_elem, doc, nullptr);
     if (!new_root) {
         log_error("rebuild_lambda_doc: failed to rebuild DOM tree");
@@ -4708,6 +4750,21 @@ void rebuild_lambda_doc(UiContext* uicon) {
     }
     auto t_dom = time_now_ns();
 
+    // the full fallback also commits retained templates with new presentation nodes.
+    layout_preserve_rebuilt_owners(doc, old_root, new_root);
+    if (old_root && old_root != new_root) {
+        // Rebase canonical ranges and the retained #document links before old nodes retire.
+        if (state) dom_mutation_pre_remove(state, static_cast<DomNode*>(old_root));
+        DomNode* parent = old_root->parent;
+        if (parent && parent->is_element()) {
+            if (!dom_node_replace_in_parent(parent->as_element(), old_root, new_root)) {
+                log_error("rebuild_lambda_doc: failed to replace the document root");
+                return;
+            }
+        } else {
+            dom_node_schedule_detached(doc, old_root);
+        }
+    }
     doc->root = lam::up(new_root);
 
     CssStylesheet** inline_sheets = doc->cached_inline_sheets;
@@ -4859,10 +4916,7 @@ void rebuild_lambda_doc_incremental(UiContext* uicon, RetransformResult* results
 
         // Reactive templates rebuild result nodes; preserve view state for
         // structurally corresponding descendants before retiring the old tree.
-        view_state_preserve_subtree_identity(state, static_cast<DomNode*>(old_dom),
-                                             static_cast<DomNode*>(new_dom));
-        radiant_frame_requests_follow_rebuild(doc, static_cast<DomNode*>(old_dom),
-                                              static_cast<DomNode*>(new_dom));
+        layout_preserve_rebuilt_owners(doc, old_dom, new_dom);
 
         if (old_dom->is_popover_open() && new_dom->has_attribute("popover")) {
             // Reconciliation replaces the DOM wrapper, but popover openness is

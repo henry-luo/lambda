@@ -2456,6 +2456,7 @@ static const char* event_sim_view_state_kind_name(int kind) {
         case VIEW_STATE_BASE: return "base";
         case VIEW_STATE_SCROLL: return "scroll";
         case VIEW_STATE_FORM_CONTROL: return "form";
+        case VIEW_STATE_MEDIA: return "media";
         case VIEW_STATE_CUSTOM: return "custom";
         default: return "none";
     }
@@ -5068,6 +5069,7 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
                         case VIEW_STATE_BASE: actual_kind = "base"; break;
                         case VIEW_STATE_SCROLL: actual_kind = "scroll"; break;
                         case VIEW_STATE_FORM_CONTROL: actual_kind = "form"; break;
+                        case VIEW_STATE_MEDIA: actual_kind = "media"; break;
                         case VIEW_STATE_CUSTOM: actual_kind = "custom"; break;
                         default: actual_kind = "unknown"; break;
                     }

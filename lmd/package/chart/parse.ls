@@ -79,6 +79,7 @@ pub fn parse_chart(chart_el) {
         timeline: if (chart_el.timeline != null) chart_el.timeline else (
             let node = find_child(chart_el, 'timeline', children_count),
             if (node == null) null else {*:attributes(node), keyframes: [for (child in content(node) where name(child) == 'keyframe') attributes(child)]}),
+        timeline_options: chart_el.timeline_options,
         data: data,
         data_source: attributes(data_el),
         datasets: chart_el.datasets,
@@ -132,7 +133,8 @@ fn parse_encoding(encoding_el) {
     let count = len(content(encoding_el));
     map([for (key in ["x", "y", "color", "size", "opacity", "theta", "text", "stroke", "x_offset",
         "x2", "y2", "detail", "tooltip", "shape", "order", "url", "theta2", "radius", "radius2", "longitude", "latitude",
-        "position", "key", "group_key", "path", "direction", "magnitude", "enter_delay", "enter_duration", "update_delay", "update_duration", "exit_delay", "exit_duration"],
+        "position", "key", "group_key", "path", "direction", "magnitude", "enter_delay", "enter_duration", "update_delay", "update_duration", "exit_delay", "exit_duration",
+        "id", "at", "from", "to", "title", "subtitle", "content", "display_date", "group", "subgroup", "tags", "marker", "media", "link", "priority", "metadata"],
         let child = find_child(encoding_el, symbol(key), count))
         for (part in [key, if (child != null) parse_channel(child) else null]) part])
 }
