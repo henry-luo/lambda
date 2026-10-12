@@ -4117,3 +4117,101 @@ TEST(PaintOwnership, BlurredTextShadowPixelsSurviveFontAndSourceRetirement) {
     }
     rdt_engine_term();
 }
+
+
+TEST(RdtVectorTest, LinearGradientRangeAliasesKeepPixelCenterPrecision) {
+    rdt_engine_init(0);
+    RdtPath* path = rdt_path_new();
+    ASSERT_NE(path, nullptr);
+    rdt_path_add_rect(path, 0, 0, 48, 12, 0, 0);
+    RdtGradientStop authored[] = {{-.5f, 255, 0, 0, 255}, {1, 0, 0, 255, 255}};
+    RdtGradientStop clipped[] = {{0, 170, 0, 85, 255}, {1, 0, 0, 255, 255}};
+    uint32_t pixels[2][48 * 12] = {};
+    for (size_t variant = 0; variant < 2; variant++) {
+        RdtVector vector = {}; rdt_vector_init(&vector, pixels[variant], 48, 12, 48);
+        rdt_fill_linear_gradient(&vector, path, 0, 0, 48, 0,
+            variant ? clipped : authored, 2, RDT_FILL_WINDING, nullptr, nullptr);
+        rdt_vector_destroy(&vector);
+    }
+    EXPECT_EQ(memcmp(pixels[0], pixels[1], sizeof(pixels[0])), 0);
+    EXPECT_EQ(pixels[0][6 * 48], 0xff5700a8u);
+    EXPECT_EQ(pixels[0][6 * 48 + 7], 0xff70008fu);
+    rdt_path_free(path); rdt_engine_term();
+}
+
+TEST(RdtVectorTest, LinearGradientTilesKeepClipsTransformsAndBatchOrder) {
+    rdt_engine_init(0);
+    RdtPath* path = rdt_path_new(); RdtPath* clip = rdt_path_new();
+    ASSERT_NE(path, nullptr); ASSERT_NE(clip, nullptr);
+    rdt_path_add_rect(path, 5.25f, 4.5f, 28, 22, 2, 3);
+    rdt_path_add_circle(clip, 24.5f, 21, 15, 12);
+    RdtMatrix shape = rdt_matrix_identity(); shape.e12 = .25f; shape.e13 = 3.25f;
+    RdtMatrix gradient = rdt_matrix_translate(2.5f, 1.25f);
+    RdtGradientStop stops[] = {{-.5f, 255, 0, 0, 128}, {.35f, 0, 255, 0, 192},
+        {.35f, 0, 0, 255, 255}, {1.5f, 255, 255, 0, 0}};
+    for (RdtGradientSpread spread : {RDT_GRADIENT_PAD, RDT_GRADIENT_REPEAT, RDT_GRADIENT_REFLECT}) {
+        SCOPED_TRACE(spread);
+        uint32_t full[64 * 48] = {}, tile[17 * 13] = {};
+        for (bool tiled : {false, true}) {
+            RdtVector vector = {};
+            rdt_vector_init(&vector, tiled ? tile : full, tiled ? 17 : 64, tiled ? 13 : 48, tiled ? 17 : 64);
+            rdt_vector_set_tile_offset_x(&vector, tiled ? 13.25f : .25f);
+            rdt_vector_set_tile_offset_y(&vector, tiled ? 11.5f : .5f);
+            if (tiled) rdt_vector_begin_batch(&vector);
+            rdt_fill_rect(&vector, 0, 0, 64, 48, Color{0xff808080u});
+            rdt_push_clip(&vector, clip, nullptr);
+            RdtGradientOptions options = {}; options.spread = spread;
+            rdt_fill_linear_gradient(&vector, path, 0, 0, 20, 4, stops, 4,
+                RDT_FILL_WINDING, &shape, &gradient, &options);
+            rdt_pop_clip(&vector);
+            rdt_fill_rect(&vector, 15, 14, 3, 2, Color{0xff00ffffu});
+            if (tiled) rdt_vector_end_batch(&vector);
+            rdt_vector_destroy(&vector);
+        }
+        for (size_t row = 0; row < 13; row++) for (size_t column = 0; column < 17; column++)
+            EXPECT_EQ(tile[row * 17 + column], full[(row + 11) * 64 + column + 13]) << row << ',' << column;
+        EXPECT_NE(full[20 * 64 + 24], 0xff808080u);
+        EXPECT_EQ(full[2 * 64 + 2], 0xff808080u);
+    }
+    rdt_path_free(clip); rdt_path_free(path); rdt_engine_term();
+}
+
+TEST(RdtVectorTest, ConstantLinearGradientRetainsCurvedCoverageAndOffscreenClipping) {
+    rdt_engine_init(0);
+    RdtPath* path = rdt_path_new(); ASSERT_NE(path, nullptr);
+    rdt_path_add_circle(path, 4.25f, 7.5f, 9, 6.25f);
+    uint32_t expected[24 * 20] = {}, actual[24 * 20] = {};
+    RdtGradientStop stops[] = {{0, 0, 0, 255, 255}, {1, 0, 0, 255, 255}};
+    for (bool gradient : {false, true}) {
+        RdtVector vector = {}; rdt_vector_init(&vector, gradient ? actual : expected, 24, 20, 24);
+        if (gradient) rdt_fill_linear_gradient(&vector, path, 0, 0, 24, 0, stops, 2, RDT_FILL_WINDING, nullptr, nullptr);
+        else rdt_fill_path(&vector, path, Color{0xffff0000u}, RDT_FILL_WINDING, nullptr);
+        rdt_vector_destroy(&vector);
+    }
+    EXPECT_EQ(memcmp(expected, actual, sizeof(actual)), 0);
+    EXPECT_EQ(actual[8 * 24 + 4], 0xffff0000u);
+    EXPECT_EQ(actual[18 * 24 + 20], 0u);
+    rdt_path_free(path); rdt_engine_term();
+}
+
+
+TEST(GradientStopSamplingTest, LargeHardStopListsRetainFollowingColorAndLengthScaling) {
+    RdtGradientStop stops[1024];
+    for (size_t interval = 0; interval < 512; interval++) {
+        stops[interval * 2] = {(float)interval / 512, (uint8_t)(interval % 2 ? 0 : 255),
+            0, (uint8_t)(interval % 2 ? 255 : 0), 255};
+        stops[interval * 2 + 1] = stops[interval * 2];
+        stops[interval * 2 + 1].offset = (float)(interval + 1) / 512;
+    }
+    for (float scale : {1.0f, 17.0f}) {
+        for (size_t interval = 0; interval < 512; interval++) {
+            uint32_t expected = interval % 2 ? 0xffff0000u : 0xff0000ffu;
+            EXPECT_EQ(render_sample_gradient_stops(stops, 1024, ((float)interval + .5f) / 512 * scale, scale).c,
+                expected) << interval;
+            EXPECT_EQ(render_sample_gradient_stops(stops, 1024, (float)interval / 512 * scale, scale).c,
+                expected) << interval;
+        }
+        EXPECT_EQ(render_sample_gradient_stops(stops, 1024, -scale, scale).c, 0xff0000ffu);
+        EXPECT_EQ(render_sample_gradient_stops(stops, 1024, 2 * scale, scale).c, 0xffff0000u);
+    }
+}

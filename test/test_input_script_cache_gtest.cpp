@@ -2,6 +2,7 @@
 #include <string.h>
 #include <pthread.h>
 #include <unistd.h>
+#include <time.h>
 
 #include "../lib/file.h"
 #include "../lambda/input/input-script-cache.h"
@@ -59,6 +60,7 @@ typedef struct CacheQueuePrebuildState {
     int generation;
     pthread_mutex_t mutex;
     pthread_cond_t root_discovered_cond;
+    pthread_cond_t progress_cond;
     bool root_discovered;
     int root_resolutions;
     bool slow_discovery_active;
@@ -81,6 +83,16 @@ static bool cache_queue_prebuild_append_specifier(ArrayList* specifiers,
         return false;
     }
     return true;
+}
+
+// coordinate the overlap itself; a fixed sleep races worker scheduling under load.
+static void cache_queue_prebuild_wait_for_flag(CacheQueuePrebuildState* state, const bool* flag) {
+    struct timespec deadline;
+    timespec_get(&deadline, TIME_UTC);
+    deadline.tv_sec += 5;
+    while (!*flag) {
+        if (pthread_cond_timedwait(&state->progress_cond, &state->mutex, &deadline) != 0) break;
+    }
 }
 
 static ArrayList* cache_queue_prebuild_discover(void* opaque,
@@ -107,9 +119,8 @@ static ArrayList* cache_queue_prebuild_discover(void* opaque,
     } else if (strcmp(source, "slow") == 0) {
         pthread_mutex_lock(&state->mutex);
         state->slow_discovery_active = true;
-        pthread_mutex_unlock(&state->mutex);
-        usleep(200000);
-        pthread_mutex_lock(&state->mutex);
+        pthread_cond_broadcast(&state->progress_cond);
+        cache_queue_prebuild_wait_for_flag(state, &state->dependent_built_while_slow_discovery_active);
         state->slow_discovery_active = false;
         pthread_mutex_unlock(&state->mutex);
     }
@@ -146,11 +157,14 @@ static bool cache_queue_prebuild_build(void* opaque, const char* path) {
     } else if (strstr(path, "_left.ls") || strstr(path, "_right.ls")) {
         bool is_left = strstr(path, "_left.ls") != NULL;
         pthread_mutex_lock(&state->mutex);
+        if (!state->dependent_built_while_slow_discovery_active)
+            cache_queue_prebuild_wait_for_flag(state, &state->slow_discovery_active);
         if (is_left) state->left_built_after_shared = state->shared_builds == 1;
         else state->right_built_after_shared = state->shared_builds == 1;
         state->dependent_built_while_slow_discovery_active =
             state->dependent_built_while_slow_discovery_active ||
             state->slow_discovery_active;
+        pthread_cond_broadcast(&state->progress_cond);
         pthread_mutex_unlock(&state->mutex);
     }
     return true;
@@ -321,6 +335,7 @@ TEST(InputScriptCacheTest, PrebuildQueuesNestedImportsWithoutDepthBarrier) {
     state.generation = (int)getpid();
     ASSERT_EQ(pthread_mutex_init(&state.mutex, nullptr), 0);
     ASSERT_EQ(pthread_cond_init(&state.root_discovered_cond, nullptr), 0);
+    ASSERT_EQ(pthread_cond_init(&state.progress_cond, nullptr), 0);
 
     char root_path[160];
     char slow_path[160];
@@ -383,6 +398,7 @@ TEST(InputScriptCacheTest, PrebuildQueuesNestedImportsWithoutDepthBarrier) {
     unlink(left_path);
     unlink(right_path);
     unlink(shared_path);
+    pthread_cond_destroy(&state.progress_cond);
     pthread_cond_destroy(&state.root_discovered_cond);
     pthread_mutex_destroy(&state.mutex);
 }

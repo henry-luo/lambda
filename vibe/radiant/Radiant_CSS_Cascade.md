@@ -1854,3 +1854,20 @@ normal and 140 sanitizer inputs match protected binaries. The raw boundary is
 185 deferred /48 unapproved, four fewer with no additions or allowance change;
 45 imports are removed since 230/93. Strict closure remains open
 (**D7.3.3–D7.3.4**). No formal ruling or CSS-family promotion changes.
+
+
+**CI-18 gradient precision and highlight scope increment (2026-10-12):**
+Affine linear native fills evaluate the shared premultiplied-sRGB stop sampler
+at output pixel centers, using existing vector coverage and clipping. Coverage
+captures preserve the caller's page-space tile origin and pixel lattice and are
+bounded to the visible path. Ordered stop lookup preserves the following color
+at a coincident stop; repeated scanline colors may be shared without sharing
+coverage. Stroke/projective/degenerate backend paths retain separate support.
+
+Highlight declarations remain per element under **D4.5.1v4 / D4.1.4v5**.
+Replacing a subtree's cascade clears highlight entries for that subtree, leaving
+unrelated siblings live. Controls with authored or inherited highlight colors
+acquire inline storage through the existing ownership helper before computation.
+The corrected selection fixture places pixel bounds at event scope, activating
+the original checks. The native/scoped sanitizer and twenty live assertions pass;
+`gradient_selection38q_*` records the pending complete merged-build qualification.

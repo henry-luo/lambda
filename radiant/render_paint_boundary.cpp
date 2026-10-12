@@ -293,15 +293,19 @@ void render_set_uniform_gradient_stops(RdtGradientStop* stops, Color color) {
 Color render_sample_gradient_stops(const RdtGradientStop* stops, int count, float position, float stop_scale) {
     if (!stops || count < 1) return Color{};
     if (position < stops[0].offset * stop_scale) return render_gradient_stop_color(stops[0]);
-    for (int index = 1; index < count; index++) {
-        const RdtGradientStop& before = stops[index - 1];
-        const RdtGradientStop& after = stops[index];
-        // coincident hard stops select the following color at their boundary.
-        if (position < after.offset * stop_scale) {
-            float start = before.offset * stop_scale, extent = (after.offset - before.offset) * stop_scale;
-            float fraction = extent > 0.0f ? (position - start) / extent : 0.0f;
-            return css_interpolate_color(render_gradient_stop_color(before), render_gradient_stop_color(after), fraction);
-        }
+    // fixed-up stops are ordered; upper-bound lookup preserves the following hard-stop color.
+    int first = 1, last = count;
+    while (first < last) {
+        int middle = first + (last - first) / 2;
+        if (position < stops[middle].offset * stop_scale) last = middle;
+        else first = middle + 1;
+    }
+    if (first < count) {
+        const RdtGradientStop& before = stops[first - 1];
+        const RdtGradientStop& after = stops[first];
+        float start = before.offset * stop_scale, extent = (after.offset - before.offset) * stop_scale;
+        float fraction = extent > 0.0f ? (position - start) / extent : 0.0f;
+        return css_interpolate_color(render_gradient_stop_color(before), render_gradient_stop_color(after), fraction);
     }
     return render_gradient_stop_color(stops[count - 1]);
 }

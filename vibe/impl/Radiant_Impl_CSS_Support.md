@@ -1,6 +1,6 @@
 # Radiant CSS Support — Remaining Implementation Plan
 
-**Status:** Stopped at the user’s wrap-up request; P0–P2 implementation on merged `9e0d913f6` (2026-10-12). Protected bounded text-shadow/filter-density and earlier clip/focus/provider/ownership checkpoints pass required gates, 1,149 matching sanitizer cases and 634 live assertions per runtime. The reviewed full exporter passes 249/253 groups; nineteen gradient-range comparisons, two ordered PDF edges and four blurred-shadow PDF edges remain. The SVG gate passes 126 format checks /2,466 assertions. The boundary remains 185 deferred /48 unapproved imports, with 45 removed and no additions. Broader P0–P2 criteria stay open. See §9 for evidence and limits.
+**Status:** Active again at the user’s request; P0–P2 implementation continues from merged `7ada2791e` (2026-10-12). The prior protected text-shadow/filter-density and clip/focus/provider/ownership checkpoint passed required gates, 1,149 matching sanitizer cases and 634 live assertions per runtime. Its reviewed full exporter passed 249/253 groups; nineteen gradient-range comparisons, two ordered PDF edges and four blurred-shadow PDF edges remained. Its SVG gate passed 126 format checks /2,466 assertions, and its boundary audit measured 185 deferred /48 unapproved imports, with 45 removed and no additions. These are checkpoint results; the resumed merged build and isolated gradient trial require fresh qualification. Broader P0–P2 criteria stay open. See §9 for evidence and limits.
 
 **Predecessor:** [CSS selector/property implementation record](<Radiant_Impl_CSS_Selector_Property_Support (retired).md>), closed and retired with unfinished scope transferred here.
 
@@ -3217,3 +3217,60 @@ and frozen sources record the remaining batch/clip/coverage investigation.
 The user requested wrap-up; implementation work stops with the complete P0–P2
 scope outstanding, not marked achieved. Resume from the accepted checkpoint
 and this root-cause evidence rather than applying either draft.
+
+
+### 2026-10-12 — Applied gradient precision and scoped selection fixes; qualification running
+
+The resumed source is merged `7ada2791e`. Affine native linear fills now use the
+shared premultiplied-color sampler at pixel centers rather than the backend's
+quantized lookup table. Coverage remains owned by the vector path/clip rasterizer,
+with buffers bounded to the visible path and the caller's tile lattice preserved.
+The shared stop sampler uses upper-bound lookup for long fixed-up lists, retaining
+the following color at coincident stops. Scanline color reuse keeps horizontal
+long-stop gradients from repeating identical work. Stroke, projective and
+degenerate paths retain their existing backend behavior (**CI-18 / D4.5.1v4**).
+
+The tile-origin fix eliminates the rejected trial's text regressions and all
+eight marker/border byte discrepancies. The six-group isolated exporter has
+five passing groups and eleven unchanged range PDF-reader assertions in its
+remaining failing group. Native vector and matching scoped ASan builds each
+pass 141 cases, including fractional tiles, transforms, curved coverage, batch
+order, range aliases and 1,024-stop hard boundaries. Matched release CLI probes
+show similar small-path and horizontal 256-stop page times; the 1024×768 diagonal
+two-stop page adds about six milliseconds. Those interleaved measurements ran
+alongside exporter work and are indicative, not a general performance claim.
+
+A fresh sweep exposed malformed selection-fixture JSON and color bounds nested
+under `target`, where the event reader did not check them. Correct syntax and
+bound placement activate four failing assertions. Traces identify two consumer
+causes: subtree replacement cleared every document highlight cascade, and text
+controls could lack inline storage before highlight computation. Replacement
+now clears the affected builder subtree; highlight computation uses the existing
+owned inline-property helper. The corrected original four assertions and a
+new twenty-assertion focus/restyle/density fixture pass. Native view and matching
+scoped ASan builds each pass 637 cases, including 64 repeated local replacements
+that preserve a sibling's highlight declaration (**D4.5.1v4 / D4.1.4v5**).
+
+`range_color38/applied_proof.json` protects the nine applied source/test files,
+frozen sources, isolated results and release commands. The restricted full sweep
+completed 252 ordinary groups, retaining the four existing PDF failure groups
+and malformed selection-fixture failure, then stalled in native WebGL setup.
+Its process tree was stopped after the identical WebGL group passed with native
+GPU services in 98.5 seconds; raw logs and termination evidence remain. Fresh
+merged-checkout core, Radiant, full GPU-enabled exporter, sanitizer, live and
+boundary gates are running as `gradient_selection38q_*`. This is an applied
+increment awaiting complete qualification; no P0–P2 tier is closed.
+
+
+The first fresh core run (`gradient_selection38q_lambda_gate.log`) passes
+6,794/6,795 cases and fails only
+`InputScriptCacheTest.PrebuildQueuesNestedImportsWithoutDepthBarrier`. Three
+isolated runs pass. Its fixed 200 ms discovery sleep races worker scheduling;
+a bounded condition-variable handshake now coordinates the required overlap,
+retaining the same shared-dependency, build-order and overlap assertions. The
+sixteen-case cache suite and one hundred fresh-process/four-concurrent stress
+runs pass. No production prebuild behavior or ruling changes (**D8.5.1v7**).
+The failed run, original source digest and test-fix proof are retained in
+`range_color38/core_prebuild_failure/`. Fresh complete qualification restarts as
+`gradient_selection38r_*` with this test source added to provenance; the first
+run is not credited as an all-green gate.
