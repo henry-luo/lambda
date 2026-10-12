@@ -12,7 +12,8 @@ and the `lambda.grammar.xpath` package implemented (P4, P5). Revision 4
 (2026-10-12): local `:=` rules see imported ones and composition works across
 modules (§4.5); GM13 (`~x`, no space before a token) ruled and implemented
 (§4.3); M4 `lambda.grammar.jq` and M5 `lambda.grammar.xquery` and
-`lambda.grammar.rnc` done (§10). Open rulings in §9.
+`lambda.grammar.rnc` done (§10); §5.4 compares the left-recursion mechanism
+with Pratt parsing. Open rulings in §9.
 **Formal linkage:** [D1.1](../doc/Lambda_Formal_Design.md#d1-architecture-principles)
 (a guest is a grammar + AST builder + LangProfile), [S15.1 / S15.3](../doc/Lambda_Formal_Semantics.md#s15-metaprogramming)
 (the `lm.` AST is an element tree; `compile(ast)` is the only way from data
@@ -453,6 +454,68 @@ first non-nullable item of an alternative of A (`a?, b` makes both `a` and
 `b` possible firsts). A self-edge is direct left recursion; a longer cycle is
 GM8's error. Doing this at load time means an author gets a message naming
 the cycle, never a stack overflow mid-parse.
+
+### 5.4 Relation to Pratt parsing
+
+The engine is not a Pratt parser, but for operator rules it computes what
+one computes. Pratt's top-down operator precedence and precedence climbing
+are the same algorithm: a loop that parses a prefix form, then keeps
+extending it with infix and postfix operators whose binding power is at
+least the caller's minimum. GM1's "precedence climbing" is realized by §5.2's
+bounded left recursion with precedence levels, which has the same shape
+(`parse_left_recursive` in `grammar_parse.cpp`, checked 2026-10-12):
+
+| Pratt | This engine |
+|---|---|
+| `parse_expr(min_bp)` | a left-recursive rule called at level *k* |
+| *nud*: atoms and prefix operators, chosen by the current token | the non-left-recursive alternatives, the first that matches being the seed (`Term`, or `prec.left(9, op: minus, operand: Exp)` in jq) |
+| *led*: infix and postfix operators, allowed when their left binding power ≥ `min_bp` | the left-recursive alternatives, allowed when their `prec` ≥ *k*; the leading self-reference takes the seed |
+| right operand parsed at `bp + 1` (left-associative) or `bp` (right-associative) | trailing self-reference called at `n + 1` (`prec.left`, bare `prec`, `prec.none`) or `n` (`prec.right`) |
+| postfix led: no right operand | a left-recursive alternative with no trailing self-reference (`prec(18, base: Expr, args: ArgumentList)`); it sets no cap, so `f(a)(b)[0]` chains |
+| bracketed sub-expression parsed at bp 0 | a middle self-reference called at level 0 (a ternary's middle operand; jq's `try A catch B`) |
+| non-associative: equal binding powers plus an explicit check | the growth cap: after a step at *n* that ends in the rule, later steps of the loop stay at *n* (`prec.left`) or below it |
+| the loop repeats while the next token's binding power is high enough | the growth loop restarts from the first left-recursive alternative after every step that advances |
+
+So `a + b * c`, `-a * b` against `-a ^ b`, right-associative chains,
+postfix chains and the refusal of `a < b < c` all come out as a Pratt parser
+gives them; `calc.ls`, `left_recursion.ls`, `xpath.ls` and `jq.ls` pin these.
+
+Where the two differ:
+
+- **No operator table.** A Pratt parser keeps binding powers in a table, or
+  in code, keyed by token, apart from the productions. Here a level is
+  declared on its alternative (GM6), scoped to its rule (GM7), and an
+  operator is any parsing expression rather than one token: `left: Expr, op:
+  instance, _of, type: SequenceType` and `op: arrow, function: …, args: …`
+  are ordinary alternatives. This is what let XPath's productions and jq's
+  bison precedence lines be written as grammar text without a second table
+  (§10, M3 and M4).
+- **Dispatch by trial, not lookup.** Pratt looks at the next token and finds
+  its led in O(1). A growth step here tries the admissible alternatives in
+  written order until one matches, and every step restarts from the first.
+  For an operator alternative (seed, then an operator token) a failed
+  attempt costs one token match, so a step costs up to one match per
+  alternative: jq's `Exp` has ten. The cost is a constant factor per
+  operator, not a change in complexity.
+- **Memoized.** A left-recursive rule is cached by (rule, level, position),
+  and the cache holds the growing seed while the loop runs. A retry at the
+  same place — the next alternative of an enclosing choice, or jq's
+  `Term as …` seed failing over to the plain `Term` seed — reuses the operand
+  instead of re-parsing it. A Pratt parser needs no cache because it never
+  backtracks.
+- **Ordered seeds.** The prefix forms are an ordered choice like every other
+  choice (GM2): the first seed that matches wins, even where a later one
+  would match more. A Pratt nud is picked by token, so it never has to order
+  alternatives that start alike.
+- **Interpreted, not written.** Lambda's own C parser is hand-written
+  recursive descent plus Pratt (§3, reason 6), so there the binding-power
+  table is code; a guest grammar is data that the engine interprets.
+
+A Pratt-style dispatch could be added without touching the grammar surface:
+precompute, for each left-recursive alternative, the literals or tokens that
+can follow its leading self-reference, and skip an alternative whose
+operator cannot start at the current position. It is not implemented; as
+with packrat-by-default (GM-O5), it waits for a measured need.
 
 ## 6. The lint (GM9)
 
