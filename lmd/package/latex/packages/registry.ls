@@ -14,75 +14,104 @@ import listings: .listings
 import tcolorbox: .tcolorbox
 import caption: .caption
 
+// `commands` names the commands and environments a package owns: they dispatch
+// to its handlers and are attributed to it when unsupported, only while it is
+// active. `conflicts` names packages that cannot be loaded with it.
 pub let CATALOG = {
-    amsmath: {options: []},
+    amsmath: {options: [], commands: ["DeclareMathOperator", "DeclareMathOperator*",
+        "tag", "tag*", "numberwithin", "eqref"]},
     amssymb: {options: []},
-    amsthm: {options: []},
-    bussproofs: {options: []},
+    amsthm: {options: [], commands: ["theoremstyle", "newtheorem", "newtheorem*"]},
+    bussproofs: {options: [], commands: ["prooftree"]},
     semantic: {options: ["inference", "tdiagram"]},
     IEEEtrantools: {options: ["retainorgcmds"]},
     graphicx: {options: []},
-    hyperref: {options: ["colorlinks", "hidelinks", "linkcolor", "urlcolor", "citecolor", "pdfauthor", "pdftitle", "pdfsubject", "pdfkeywords", "pdfusetitle", "ocgcolorlinks", "bookmarks", "bookmarksnumbered"]},
-    cleveref: {options: []},
-    listings: {options: []},
-    tcolorbox: {options: []},
+    hyperref: {options: ["colorlinks", "hidelinks", "linkcolor", "urlcolor", "citecolor", "pdfauthor", "pdftitle", "pdfsubject", "pdfkeywords", "pdfusetitle", "ocgcolorlinks", "bookmarks", "bookmarksnumbered"],
+        commands: ["pdfbookmark", "bookmark", "hypersetup"]},
+    cleveref: {options: [], commands: ["cref", "Cref"]},
+    listings: {options: [], commands: ["lstset", "lstinline", "lstlisting"]},
+    tcolorbox: {options: [], commands: ["tcolorbox"]},
     url: {options: []},
-    geometry: {options: ["a4paper", "a5paper", "letterpaper", "legalpaper", "landscape", "portrait", "margin", "left", "right", "top", "bottom", "inner", "outer", "paperwidth", "paperheight"]},
-    xcolor: {options: ["table", "svgnames", "dvipsnames", "usenames"]},
+    geometry: {options: ["a4paper", "a5paper", "letterpaper", "legalpaper", "landscape", "portrait", "margin", "left", "right", "top", "bottom", "inner", "outer", "paperwidth", "paperheight"],
+        commands: ["newgeometry", "restoregeometry"]},
+    xcolor: {options: ["table", "svgnames", "dvipsnames", "usenames"], commands: ["colorlet", "rowcolor"]},
     booktabs: {options: []},
     array: {options: []},
     multirow: {options: []},
-    makecell: {options: []},
+    makecell: {options: [], commands: ["makecell"]},
     cellspace: {options: []},
-    caption: {options: caption.OPTIONS},
-    subcaption: {options: caption.OPTIONS},
-    slashbox: {options: []},
-    diagbox: {options: []},
+    caption: {options: caption.OPTIONS, commands: ["captionsetup", "captionof"]},
+    subcaption: {options: caption.OPTIONS, commands: ["subfigure", "subtable"]},
+    slashbox: {options: [], commands: ["slashbox", "backslashbox"]},
+    diagbox: {options: [], commands: ["diagbox"]},
     longtable: {options: []},
     tabularx: {options: []},
     xltabular: {options: []},
-    babel: {options: ["english", "german", "ngerman", "french", "spanish", "russian", "greek"]},
-    polyglossia: {options: []},
+    babel: {options: ["english", "german", "ngerman", "french", "spanish", "russian", "greek"],
+        commands: ["selectlanguage", "foreignlanguage", "languageattribute", "spanishdecimal"]},
+    polyglossia: {options: [], commands: ["setdefaultlanguage", "setotherlanguage", "newfontfamily",
+        "renewfontfamily", "XeTeXlinebreaklocale", "textenglish", "otherlanguage"]},
     vietnam: {options: ["utf8"]},
     multicol: {options: []},
     fontenc: {options: ["T1", "OT1", "T2A"]},
     inputenc: {options: ["utf8", "utf8x"]},
     lmodern: {options: []},
-    cmbright: {options: []},
-    helvet: {options: ["scaled"]},
-    gfsporson: {options: []},
-    eucal: {options: ["mathcal", "mathscr"]},
-    mathrsfs: {options: []},
+    // `font` requests a face Lambda does not ship: `role` says which family it
+    // replaces, `css` the substitute stack, and a font-substitution diagnostic names it
+    cmbright: {options: [], font: {face: "Computer Modern Bright", role: "main",
+        css: "'Computer Modern Sans','Latin Modern Sans',sans-serif",
+        message: "CM Bright is not bundled; using bundled Computer Modern Sans"}},
+    helvet: {options: ["scaled"], font: {face: "Helvetica", role: "sans",
+        css: "Helvetica,Arial,sans-serif",
+        message: "Helvetica is not bundled; using a system sans-serif fallback"}},
+    gfsporson: {options: [], commands: ["textporson"], font: {face: "GFS Porson", role: "greek",
+        css: "'GFS Porson','Times New Roman',Georgia,serif",
+        message: "GFS Porson is not bundled; using a Greek-capable serif fallback"}},
+    eucal: {options: ["mathcal", "mathscr"], font: {face: "Euler calligraphic", role: "math",
+        message: "Euler calligraphic is not bundled; using the math calligraphic font"}},
+    mathrsfs: {options: [], font: {face: "Ralph Smith Formal Script", role: "math",
+        message: "RSFS is not bundled; using the available math script font"}},
     cmap: {options: []},
     enumerate: {options: []},
-    psfrag: {options: []},
-    ifthen: {options: []},
+    psfrag: {options: [], commands: ["psfrag"]},
+    ifthen: {options: [], commands: ["ifthenelse", "whiledo", "newboolean", "setboolean"]},
     cite: {options: []},
-    preview: {options: ["graphics", "tightpage", "active"]},
-    fancyhdr: {options: []},
+    preview: {options: ["graphics", "tightpage", "active"], commands: ["PreviewEnvironment"]},
+    fancyhdr: {options: [], commands: ["lhead", "chead", "rhead", "lfoot", "cfoot", "rfoot", "fancyplain"]},
     lastpage: {options: []},
-    csquotes: {options: ["autostyle"]},
+    csquotes: {options: ["autostyle"], commands: ["enquote"]},
     fullpage: {options: []},
-    doi: {options: []},
+    doi: {options: [], commands: ["doi"]},
     filecontents: {options: []},
     comment: {options: []},
     verbatim: {options: []},
     upquote: {options: []},
+    // \NewDocumentCommand is native to the engine's kernel, as in current LaTeX
+    xparse: {options: []},
     todonotes: {options: ["colorinlistoftodos"]},
     biblatex: {options: ["style", "citestyle", "bibstyle", "sorting",
         "maxnames", "minnames", "maxcitenames", "mincitenames",
         "maxbibnames", "minbibnames", "giveninits", "uniquename",
-        "doi", "url", "isbn", "natbib", "backref", "backend"]},
+        "doi", "url", "isbn", "natbib", "backref", "backend"],
+        commands: bib_model.CITATIONS ++ ["nocite", "printbibliography", "addbibresource"]},
     // loads biblatex with its Chicago styles; formatted through CSL (Lambda_Design_BibTeX_CSL §7.4)
     'biblatex-chicago': {options: ["authordate", "notes", "backend"]},
-    natbib: {options: ["numbers", "authoryear", "round", "square", "sort&compress"]},
-    enumitem: {options: []},
+    natbib: {options: ["numbers", "authoryear", "round", "square", "sort&compress"],
+        conflicts: [{package: "biblatex", code: "conflicting-bibliography-packages",
+            message: "Load biblatex with its natbib option instead of loading both packages"}]},
+    enumitem: {options: [], commands: ["setlist"]},
     microtype: {options: ["kerning", "tracking", "spacing", "protrusion", "expansion"]},
-    siunitx: {options: []},
-    tikz: {options: []},
-    tikzpeople: {options: ["demo"]},
+    siunitx: {options: [], commands: ["sisetup", "ang", "num", "si", "unit", "SI", "qty"]},
+    tikz: {options: [], commands: ["usetikzlibrary", "tikzset", "pgfkeys", "pgfmathsetmacro",
+        "pgfmathdeclarefunction"]},
+    tikzpeople: {options: ["demo"], commands: ["alltikzpeople", "alltikzpeople*"]},
     pgfplots: {options: []}
 }
+
+fn commands_of(desc) => if (desc == null or desc.commands == null) [] else desc.commands
+
+// commands owned by any package; the owner among active packages is resolved per call
+let OWNED = map([for (k, v in CATALOG, cmd in commands_of(v), x in [cmd, true]) x])
 
 // classes with a script profile; a beside-document .cls of another name runs on the engine
 pub let CLASSES = ["article", "report", "book", "amsart", "standalone"]
@@ -116,37 +145,38 @@ pub fn offset_for(packages, name) {
     if (len(matching) == 0) null else matching[0]
 }
 
+// the active package that owns a command; a later-loaded package wins, as in LaTeX
+pub fn owner(packages, command) {
+    if (OWNED[command] == null) null
+    else {
+        let owners = [for (entry in packages
+            where contains(commands_of(CATALOG[entry.key]), command)) entry.key]
+        if (len(owners) == 0) null else owners[len(owners) - 1]
+    }
+}
+
+// the handler an active package's table supplies for a command, if any
+pub fn handler(tables, packages, command) {
+    let pkg = owner(packages, command)
+    if (pkg == null) null else tables[pkg][command]
+}
+
+// one font-substitution diagnostic per active package that requests a face
+pub fn font_issues(packages) {
+    [for (entry in packages, let font = CATALOG[entry.key].font where font != null)
+        util.diagnostic("font-substitution", entry.key, font.face, font.message, entry.offset)]
+}
+
+// the substitute CSS stack for a family role (main, sans, greek); the last-loaded package wins
+pub fn font_css(packages, role) {
+    let stacks = [for (entry in packages, let font = CATALOG[entry.key].font
+        where font != null and font.role == role) font.css]
+    if (len(stacks) == 0) null else stacks[len(stacks) - 1]
+}
+
 pub fn package_for_command(command, packages) {
-    let owner = if (command == "DeclareMathOperator" or command == "tag" or
-                    command == "tag*" or command == "numberwithin") "amsmath"
-        else if (command == "selectlanguage" or command == "foreignlanguage" or
-                 command == "languageattribute" or command == "spanishdecimal") "babel"
-        else if (command == "setdefaultlanguage" or command == "setotherlanguage" or
-                 command == "newfontfamily" or command == "renewfontfamily" or
-                 command == "XeTeXlinebreaklocale" or command == "textenglish") "polyglossia"
-        else if (command == "lstset" or command == "lstinline") "listings"
-        else if (command == "theoremstyle" or command == "newtheorem" or
-                 command == "newtheorem*") "amsthm"
-        else if (command == "colorlet" or command == "rowcolor") "xcolor"
-        else if (command == "sisetup" or command == "ang") "siunitx"
-        else if (command == "setlist") "enumitem"
-        else if (command == "newgeometry" or command == "restoregeometry") "geometry"
-        else if (bib_model.is_citation(command) or command == "nocite" or
-            command == "printbibliography" or command == "addbibresource") "biblatex"
-        else if (command == "pdfbookmark" or command == "bookmark") "hyperref"
-        else if (command == "usetikzlibrary" or command == "tikzset" or
-                 command == "pgfkeys" or command == "pgfmathsetmacro" or
-                 command == "pgfmathdeclarefunction") "tikz"
-        else if (command == "alltikzpeople" or command == "alltikzpeople*")
-            "tikzpeople"
-        else if (command == "PreviewEnvironment") "preview"
-        else if (command == "lhead" or command == "chead" or command == "rhead" or
-                 command == "lfoot" or command == "cfoot" or command == "rfoot") "fancyhdr"
-        else if (command == "psfrag") "psfrag"
-        else if (command == "ifthenelse" or command == "whiledo" or
-                 command == "newboolean" or command == "setboolean") "ifthen"
-        else null
-    if (owner != null and active(packages, owner)) owner else "latex"
+    let pkg = owner(packages, command)
+    if (pkg != null) pkg else "latex"
 }
 
 fn diagnostic(code, package, item, message, node) {
@@ -249,7 +279,14 @@ fn add_names(st, names, opts, node, i) {
 
 fn walk(node, st, before_body) {
     if (not (node is element)) st
-    else if (string(name(node)) == "usepackage") {
+    else if (string(name(node)) == "documentclass") {
+        // D7.2.7: a class without a profile or a beside-document .cls is unknown;
+        // the document still renders with the article profile
+        let cls = trim(util.text_of_skip_brack(node))
+        if (cls == "" or contains(CLASSES, cls)) st
+        else {*:st, diagnostics: st.diagnostics ++ [diagnostic("unknown-package", cls, null,
+            "Unknown LaTeX class: " ++ cls, node)]}
+    } else if (string(name(node)) == "usepackage") {
         if (not before_body)
             {*:st, diagnostics: st.diagnostics ++ [diagnostic("late-package", "latex", "usepackage",
                 "usepackage must appear in the preamble", node)]}
@@ -432,11 +469,18 @@ pub fn collect(ast) {
                 offset: offset_for(declared.packages, "subcaption")}]} else declared
     let has_body = ast is element and util.find_child(ast, "document") != null
     {*:loaded, diagnostics: loaded.diagnostics ++ scan(ast, loaded.packages, has_body) ++
-        (if (active(loaded.packages, "natbib") and active(loaded.packages, "biblatex"))
-            [util.diagnostic("conflicting-bibliography-packages", "natbib", "biblatex",
-                "Load biblatex with its natbib option instead of loading both packages",
-                offset_for(loaded.packages, "natbib"))] else [])}
+        conflict_issues(loaded.packages)}
 }
+
+// packages that cannot be loaded together, as declared by each catalogue entry
+fn conflict_issues(packages) {
+    [for (entry in packages, c in conflicts_of(CATALOG[entry.key])
+          where active(packages, c.package))
+        util.diagnostic(if (c.code != null) c.code else "conflicting-packages",
+            entry.key, c.package, c.message, entry.offset)]
+}
+
+fn conflicts_of(desc) => if (desc == null or desc.conflicts == null) [] else desc.conflicts
 
 // HTML keeps a continuous table; the fixed-page PDF writer cannot repeat
 // longtable heads or split rows until the shared pagination path supports it.

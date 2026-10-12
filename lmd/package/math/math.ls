@@ -10,5 +10,9 @@ pub fn render_display(ast) { render_math(ast, {display: true})^ }
 pub fn render_inline(ast) { render_math(ast, {display: false})^ }
 pub fn render_standalone(ast) { render_math(ast, {display: true, standalone: true})^ }
 
+// Generic commands the typesetter has no rendering for; it paints their names,
+// so a caller must report them rather than count the output as success.
+pub fn unmapped_commands(ast) => typeset.unmapped_commands(ast)
+
 // Each SVG carries the font declarations needed by its text glyphs.
 pub fn stylesheet(options = null) { "" }

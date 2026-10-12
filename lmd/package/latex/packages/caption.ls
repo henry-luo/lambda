@@ -1,5 +1,6 @@
 // Caption layout and options share one profile for floats and subfloats.
 import util: ~~.util
+import floats: ~~.floats
 
 pub let OPTIONS = ["font", "labelfont", "textfont", "labelsep", "justification", "skip", "labelformat"]
 let FONTS = {small: "font-size:90%;", footnotesize: "font-size:80%;",
@@ -73,7 +74,7 @@ pub fn render(content, kind, ordinal_text, config, starred, offset) {
     else {
         let label = if (starred or opts.labelformat == "empty") ""
             else if (sub) if (opts.labelformat == "simple") ordinal_text else "(" ++ ordinal_text ++ ")"
-            else (if (kind == "table") "Table " else "Figure ") ++ ordinal_text
+            else floats.KINDS[parent].name ++ " " ++ ordinal_text
         let align = match opts.justification {
             case "raggedright": "left"
             case "raggedleft": "right"

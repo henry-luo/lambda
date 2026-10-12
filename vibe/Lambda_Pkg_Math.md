@@ -122,7 +122,11 @@ expansion facility. This is bounded input support, not a promise to run every
 TeX primitive or arbitrary LaTeX package. Recovery parsing and unknown
 commands also require care: current fallback paths can paint a command name or
 its children. Successful SVG emission alone cannot identify an unsupported
-command; explicit unsupported-feature reporting remains outstanding.
+command. Since 2026-10-13, `maps_command(key)` says whether a generic command
+has a rendering, and `unmapped_commands(ast)` lists the ones that do not. The
+painter and the predicate share the same name lists, and `lambda.latex`
+reports each unmapped command as `unsupported-math-command`. Recovery-parse
+fallbacks and other unavailable constructions are not yet reported.
 
 Plain string input can be rendered as characters; the rendering API does not
 implicitly parse such a string as LaTeX. Applications that accept LaTeX must
@@ -831,9 +835,10 @@ shape, reduced raster diff, or green smoke count cannot close these items.
 
 ### 10.2 Coverage and verification gaps
 
-- Make unsupported commands, generic AST fallthrough and unavailable
-  constructions explicit; prevent fallback command text from being counted
-  as implemented math. Separate expected parse failures from render success.
+- Make generic AST fallthrough and unavailable constructions explicit; prevent
+  fallback command text from being counted as implemented math. Separate
+  expected parse failures from render success. Unmapped generic commands are
+  reported since 2026-10-13 (§3.1).
 - Extend corpus checks beyond forced display style and structural validity:
   expected glyph content, inline baselines, all math styles, profile changes,
   actual font-resource availability and painted geometry need coverage.

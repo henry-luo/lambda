@@ -127,9 +127,9 @@ At render time `\label` becomes an anchor, and `\ref`, `\autoref`, `\nameref` an
 The dispatcher tries, in order:
 
 1. A citation handler, when a bibliography context is active.
-2. Core handlers for structure, text, lists, tables, floats and math.
-3. Package-gated handlers, which apply only when the owning package is active.
-4. Extended handlers: skipped declarations, `\includegraphics`, amsmath environments, `siunitx`, margin notes and extended symbols.
+2. Package handlers. A command that an active package owns (its `CATALOG` `commands`, §6.1) goes to that package's entry in `PACKAGE_RENDER`. These run before the core handlers, so a package can redefine a core command, and a later-loaded package wins. An owned command without a handler falls through. Analysis dispatches the same way through `PACKAGE_WALK`.
+3. Core handlers for structure, text, lists, tables, floats and math.
+4. Extended handlers: skipped declarations, `\includegraphics`, amsmath environments, margin notes, `\listof…` lists and extended symbols.
 5. A user macro, then a `\newtheorem` environment.
 6. The fallback.
 
@@ -143,13 +143,24 @@ The engine echoes `\newcommand`-family definitions into its output, so `macros.g
 
 ### 5.5 Diagnostics
 
-Each diagnostic carries a stable code, a message, a package, a source offset and a severity. They are gathered from the engine, the registry, bibliography preparation, font selection, hyperref, microtype, reference resolution and target checks, and from `data-latex-error` elements in the output. About forty codes exist, such as `unknown-package`, `unsupported-option`, `conflicting-package-options`, `unsupported-output`, `unresolved-reference`, `font-substitution`, `unsupported-lua` and `tex-no-base`. A preview may show unsupported output inline, while a strict consumer can treat any error as failure (**S7.4.1–S7.4.4**).
+Each diagnostic carries a stable code, a message, a package, a source offset and a severity. They are gathered from the engine, the registry, bibliography preparation, font selection, hyperref, microtype, reference resolution and target checks, the unmapped-math scan, and from `data-latex-error` elements in the output. About forty codes exist, such as `unknown-package`, `unsupported-option`, `conflicting-package-options`, `unsupported-output`, `unsupported-math-command`, `unresolved-reference`, `font-substitution`, `unsupported-lua` and `tex-no-base`.
+
+The unmapped-math scan exists because the math typesetter paints a command it cannot map as its name, which looks like success. `math_bridge.issues` therefore reports each such command, located at the formula. It reads amsmath rows as rendering does, and skips math that bussproofs or semantic typesets itself, declared operators, and `\directlua`. A preview may show unsupported output inline, while a strict consumer can treat any error as failure (**S7.4.1–S7.4.4**).
 
 ## 6. Package model
 
 ### 6.1 The registry
 
-`packages/registry.ls` holds the static `CATALOG` of script adapters, the built-in class profiles (`article`, `report`, `book`, `amsart`, `standalone`) and three aliases (`pgf` to `tikz`, `amsfonts` to `amssymb`, `color` to `xcolor`). Each entry records its option schema. A package without declared options reports any option as `unsupported-option`, and value checks are package-specific (geometry, microtype, biblatex, caption, TikZ libraries). `RAW_ARGUMENT_COMMANDS` names the commands whose arguments the engine must pass token for token. The registry also tells the engine which names are adapters (`adapter_names`), so it remains the single list (**D7.2.4**).
+`packages/registry.ls` holds the static `CATALOG` of script adapters, the built-in class profiles (`article`, `report`, `book`, `amsart`, `standalone`) and three aliases (`pgf` to `tikz`, `amsfonts` to `amssymb`, `color` to `xcolor`). The registry also tells the engine which names are adapters (`adapter_names`), so it remains the single list (**D7.2.4**).
+
+Each entry records:
+
+- **`options`**, its option schema. A package without declared options reports any option as `unsupported-option`, and value checks are package-specific (geometry, microtype, biblatex, caption, TikZ libraries).
+- **`commands`**, the commands and environments it owns. They dispatch to its handlers (§5.3) and are attributed to it when unsupported, but only while it is active.
+- **`conflicts`**, packages that cannot be loaded with it.
+- **`font`**, a face Lambda does not ship. It records the family role the face replaces, the substitute CSS stack and the `font-substitution` message.
+
+`RAW_ARGUMENT_COMMANDS` names the commands whose arguments the engine must pass token for token. A `\documentclass` without a profile or a beside-document `.cls` reports the located `unknown-package` diagnostic, as **D7.2.7** rules, and renders with the `article` profile.
 
 ### 6.2 Resolution
 
@@ -269,7 +280,7 @@ The matrix was checked on 2026-10-07; the engine, bibliography, natbib and corpu
 | `cleveref` | `\cref`/`\Cref` with typed English names, lists and ranges | Shared link semantics | Other languages, name-format customization |
 | `listings` | `lstlisting`, `\lstinline`, captions, labels, line numbers, bounded frames and styles | Literal code, unhighlighted | Syntax highlighting, arbitrary keys |
 | `tcolorbox`, `todonotes`, `multicol`, `csquotes` | Bounded boxes, notes and list of todos, CSS columns, quotes | Continuous layout; paged blocks diagnosed | Box libraries, paged columns |
-| Declarations with defined effects | `url`, `doi`, `fontenc`, `inputenc` (UTF-8), `lmodern`, `cmbright`, `helvet`, `gfsporson`, `eucal`, `mathrsfs`, `cmap`, `enumerate`, `psfrag`, `ifthen`, `cite`, `preview`, `filecontents`, `comment`, `verbatim`, `upquote` | Font requests report substitutions | Options outside each declared schema |
+| Declarations with defined effects | `url`, `doi`, `fontenc`, `inputenc` (UTF-8), `lmodern`, `cmbright`, `helvet`, `gfsporson`, `eucal`, `mathrsfs`, `cmap`, `enumerate`, `psfrag`, `ifthen`, `cite`, `preview`, `filecontents`, `comment`, `verbatim`, `upquote`, `xparse` (the kernel's native `\NewDocumentCommand`) | Font requests report substitutions | Options outside each declared schema |
 
 ## 10. Verification
 
@@ -291,9 +302,7 @@ These were reproduced on 2026-10-12.
 
 - **Duplicate heading titles.** They share one `id` and the first heading's number. Analysis deduplicates slugs, but rendering looks them up by the raw title slug.
 - **Identical footnote text.** Both references point to the first footnote and duplicate its back-reference `id`.
-- **Label context leaking out of floats.** A `\label` after `\end{figure}` resolves to the figure's number, because the figure and table walks do not restore the enclosing context.
-- **Appendices in book and report.** `\appendix` resets only section counters, so the first appendix chapter is lettered after the preceding chapters.
-- **Counter and length commands.** `\setcounter` honors only `secnumdepth`, and `\addtocounter`, `\stepcounter`, `\newcounter`, `\newlength` and `\newenvironment` are silent no-ops without expansion.
+- **Length commands.** `\newlength` and `\setlength` change nothing in the script except `\unitlength`. The float-label leak, book and report appendix lettering, and the counter commands were fixed on 2026-10-13 ([Phase V M0.2](impl/Lambda_Impl_Latex_Packages.md#m02-float-kinds-counters-and-list-of)).
 - **Fixed English strings.** The contents heading and theorem names are fixed English strings, and chapters have no "Chapter N" label.
 - **Doc viewer.** It renders without the package stylesheet, and the CLI's `font_option` is passed but never read.
 
@@ -327,6 +336,7 @@ These were reproduced on 2026-10-12.
 | 2026-10-12 (D7.2.7) | Expansion became the only front end: the raw parse branch, the `expand` option, the `LAMBDA_TEX_EXPAND` knob and the script macro substitution were removed, and the native document transform and doc viewer parse through the package. The engine boundary and its resolution order were ratified as **D7.2.7**. |
 | 2026-10-12 | This consolidation. The retired documents, all recoverable from git, are listed below. |
 | 2026-10-12 cleanup | Removed the unused LaTeX.js-era `css/` stylesheets and `js/base.js`, the unused document-class exports and dead macro helpers. The appendix-letter helper moved to `util.upper_alph`. |
+| 2026-10-13 (Phase V M0) | Groundwork for the missing packages ([Lambda_Impl_Latex_Packages.md](impl/Lambda_Impl_Latex_Packages.md)). Command ownership, conflicts and font requests became `CATALOG` data, and package handlers moved into dispatch tables. Unknown classes are reported. The new `floats.ls` holds float kinds; `\listoffigures` and `\listoftables` render; counters are general (`\newcounter`, `\setcounter`, `\addtocounter`, `\stepcounter`, `\refstepcounter`). Environments scope their label context, and book and report appendices letter their chapters. Unmapped math commands are reported as `unsupported-math-command`. `xparse` is accepted. |
 
 The retired documents are:
 

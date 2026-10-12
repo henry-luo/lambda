@@ -26,6 +26,7 @@ import language: .packages.language
 import listings: .packages.listings
 import tcolorbox: .packages.tcolorbox
 import caption: .packages.caption
+import floats: .floats
 import hyperref: .packages.hyperref
 import page_style: .packages.page_style
 
@@ -88,11 +89,71 @@ fn render_symbol(s, info) {
 // Element dispatcher
 // ============================================================
 
+// Handlers for commands a package owns (registry CATALOG `commands`), consulted
+// only while that package is active and before the core arms, so a package can
+// redefine a core command. An owned command without a handler here falls
+// through to the core arms.
+pub let PACKAGE_RENDER = {
+    amsmath: {DeclareMathOperator: render_nothing, 'DeclareMathOperator*': render_nothing,
+        eqref: (el, info) => render_number_ref(el, info, true)},
+    polyglossia: {textenglish: render_textenglish, otherlanguage: render_otherlanguage},
+    gfsporson: {textporson: render_textporson},
+    csquotes: {enquote: render_enquote},
+    listings: {lstinline: (el, info) => listings.render_inline(el), lstset: render_nothing,
+        lstlisting: (el, info) => listings.render_environment(el, info.listing_options,
+            util.lookup(info.listing_nums, string(el.source_offset)))},
+    tcolorbox: {tcolorbox: (el, info) =>
+        tcolorbox.render(el, info.custom_colors, render_children(el, 0, info))},
+    bussproofs: {prooftree: render_prooftree},
+    makecell: {makecell: render_makecell},
+    slashbox: {backslashbox: (el, info) => render_diagonal_cell(el, "backslash"),
+        slashbox: (el, info) => render_diagonal_cell(el, "slash")},
+    diagbox: {diagbox: (el, info) => render_diagonal_cell(el, "backslash")},
+    fancyhdr: {fancyplain: (el, info) => render_children(el, 1, info)},
+    cleveref: {cref: (el, info) => render_cref(el, info, false),
+        Cref: (el, info) => render_cref(el, info, true)},
+    doi: {doi: (el, info) => render_doi(el)},
+    hyperref: {hypersetup: render_nothing},
+    caption: {captionsetup: render_captionsetup},
+    siunitx: {num: render_siunitx, si: render_siunitx, unit: render_siunitx,
+        SI: render_siunitx, qty: render_siunitx}
+}
+
+fn render_nothing(el, info) => null
+
+fn render_siunitx(el, info) => siunitx.render(el)
+
+fn render_prooftree(el, info) {
+    bussproofs.render(el, info.macros) ^ {
+        util.unsupported_element("bussproofs",
+            "Proof tree could not be rendered: " ++ ^.message, el.source_offset)
+    }
+}
+
+// the gallery needs the demo option; without it the command is reported either way
+fn render_alltikzpeople(el, info) {
+    if (registry.active(info.packages, "tikzpeople") and
+        registry.options_for(info.packages, "tikzpeople").demo != null)
+        tikz.render_gallery(el) ^ {
+            util.unsupported_element("tikzpeople", ^.message, el.source_offset)
+        }
+    else util.unsupported_element("tikzpeople",
+        "alltikzpeople requires the tikzpeople demo option", el.source_offset)
+}
+
+fn render_captionsetup(el, info) {
+    if (len(caption.invalid_options(caption.setup(el))) == 0 and
+        (util.optional_raw(el) == null or info.caption_options[trim(util.optional_raw(el))] != null)) null
+    else util.unsupported_element("caption", "Unsupported caption setup", el.source_offset)
+}
+
 fn render_element(el, info) {
     let tag = name(el)
+    let owned = registry.handler(PACKAGE_RENDER, info.packages, string(tag))
     if (info.biblatex_context != null and
         biblatex.is_citation_command(string(tag)))
         biblatex.render_citation(el, info.biblatex_context, info.footnotes)
+    else if (owned != null) owned(el, info)
     else match tag {
         // ---- document structure ----
         case 'latex_document': render_document(el, info)
@@ -124,20 +185,12 @@ fn render_element(el, info) {
         case 'newfontfamily': null
         case 'renewfontfamily': null
         case 'XeTeXlinebreaklocale': null
-        case 'textenglish': if (registry.active(info.packages, "polyglossia"))
-            render_textenglish(el, info) else render_generic_default(el, info)
-        case 'textporson': if (registry.active(info.packages, "gfsporson"))
-            render_textporson(el, info) else render_generic_default(el, info)
         case 'directlua': util.unsupported_element("lua",
             "Embedded Lua is outside the LaTeX package", el.source_offset)
         case 'luacode': util.unsupported_element("lua",
             "Embedded Lua is outside the LaTeX package", el.source_offset)
         case 'luacode*': util.unsupported_element("lua",
             "Embedded Lua is outside the LaTeX package", el.source_offset)
-        case 'DeclareMathOperator': if (registry.active(info.packages, "amsmath")) null
-            else render_generic_default(el, info)
-        case 'DeclareMathOperator*': if (registry.active(info.packages, "amsmath")) null
-            else render_generic_default(el, info)
 
         // ---- title page ----
         case 'maketitle': render_maketitle(info)
@@ -161,14 +214,8 @@ fn render_element(el, info) {
         case 'emph': render_styled(el, info, "em")
         case 'underline': render_styled(el, info, "u")
         case 'texttt': render_code(el, info)
-        case 'enquote': if (registry.active(info.packages, "csquotes"))
-            render_enquote(el, info) else render_generic_default(el, info)
         case 'verb': render_verb(el)
         case 'verb_command': render_verb_command(el)
-        case 'lstinline': if (registry.active(info.packages, "listings"))
-            listings.render_inline(el) else render_generic_default(el, info)
-        case 'lstset': if (registry.active(info.packages, "listings"))
-            null else render_generic_default(el, info)
 
         // ---- font families ----
         case 'textsf': if (info.polyglossia != null and info.language == "thai")
@@ -251,15 +298,8 @@ fn render_element(el, info) {
         case 'flushleft': render_env_div(el, info, "latex-flushleft", "text-align:left")
         case 'flushright': render_env_div(el, info, "latex-flushright", "text-align:right")
         case 'verbatim': render_verbatim_env(el, info)
-        case 'lstlisting': if (registry.active(info.packages, "listings"))
-            listings.render_environment(el, info.listing_options,
-                util.lookup(info.listing_nums, string(el.source_offset)))
-            else render_verbatim_env(el, info)
-        case 'tcolorbox': if (registry.active(info.packages, "tcolorbox"))
-            tcolorbox.render(el, info.custom_colors, render_children(el, 0, info))
-            else render_generic_default(el, info)
-        case 'otherlanguage': if (registry.active(info.packages, "polyglossia"))
-            render_otherlanguage(el, info) else render_generic_default(el, info)
+        // without listings, lstlisting stays a plain verbatim block
+        case 'lstlisting': render_verbatim_env(el, info)
         case 'abstract': render_abstract(el, info)
         case 'figure': render_figure(el, info)
         case 'picture': if (registry.active(info.packages, "semantic") and
@@ -272,29 +312,8 @@ fn render_element(el, info) {
             info.tikz_declarations, info.tikz_math_declarations,
             info.custom_colors, registry.active(info.packages, "tikzpeople"),
             info.base_uri)
-        case 'alltikzpeople': if (registry.active(info.packages, "tikzpeople") and
-            registry.options_for(info.packages, "tikzpeople").demo != null)
-            tikz.render_gallery(el) ^ {
-                util.unsupported_element("tikzpeople", ^.message, el.source_offset)
-            }
-            else util.unsupported_element("tikzpeople",
-                "alltikzpeople requires the tikzpeople demo option",
-                el.source_offset)
-        case 'alltikzpeople*': if (registry.active(info.packages, "tikzpeople") and
-            registry.options_for(info.packages, "tikzpeople").demo != null)
-            tikz.render_gallery(el) ^ {
-                util.unsupported_element("tikzpeople", ^.message, el.source_offset)
-            }
-            else util.unsupported_element("tikzpeople",
-                "alltikzpeople requires the tikzpeople demo option",
-                el.source_offset)
-        case 'prooftree': if (registry.active(info.packages, "bussproofs"))
-            bussproofs.render(el, info.macros) ^ {
-                util.unsupported_element("bussproofs",
-                    "Proof tree could not be rendered: " ++ ^.message,
-                    el.source_offset)
-            }
-            else render_generic_default(el, info)
+        case 'alltikzpeople': render_alltikzpeople(el, info)
+        case 'alltikzpeople*': render_alltikzpeople(el, info)
         case 'minipage': render_env_div(el, info, "latex-minipage", null)
         case 'multicols': render_multicols(el, info)
 
@@ -330,14 +349,6 @@ fn render_element(el, info) {
         case 'longtable': render_tabular(el, info)
         case 'tabularx': render_tabular(el, info)
         case 'xltabular': render_tabular(el, info)
-        case 'makecell': if (registry.active(info.packages, "makecell"))
-            render_makecell(el, info) else render_generic_default(el, info)
-        case 'backslashbox': if (registry.active(info.packages, "slashbox"))
-            render_diagonal_cell(el, "backslash") else render_generic_default(el, info)
-        case 'slashbox': if (registry.active(info.packages, "slashbox"))
-            render_diagonal_cell(el, "slash") else render_generic_default(el, info)
-        case 'diagbox': if (registry.active(info.packages, "diagbox"))
-            render_diagonal_cell(el, "backslash") else render_generic_default(el, info)
 
         // ---- spacing ----
         case 'linebreak': <br>
@@ -367,24 +378,14 @@ fn render_element(el, info) {
         // ---- cross references ----
         case 'label': render_label(el, info)
         case 'ref': render_ref(el, info)
-        case 'eqref': if (registry.active(info.packages, "amsmath"))
-            render_number_ref(el, info, true) else render_generic_default(el, info)
         case 'pageref': render_pageref(el, info)
         case 'thepage': <span class: "latex-page-number">
         case 'leftmark': <span class: "latex-chapter-mark">
         case 'rightmark': <span class: "latex-section-mark">
-        case 'fancyplain': if (registry.active(info.packages, "fancyhdr"))
-            render_children(el, 1, info) else render_generic_default(el, info)
         case 'autoref': render_autoref(el, info)
         case 'nameref': render_nameref(el, info)
-        case 'cref': if (registry.active(info.packages, "cleveref"))
-            render_cref(el, info, false) else render_generic_default(el, info)
-        case 'Cref': if (registry.active(info.packages, "cleveref"))
-            render_cref(el, info, true) else render_generic_default(el, info)
         case 'href': render_href(el, info)
         case 'url': render_url(el)
-        case 'doi': if (registry.active(info.packages, "doi"))
-            render_doi(el) else render_generic_default(el, info)
         case 'cite': render_cite(el, info)
 
         // ---- bibliography ----
@@ -401,7 +402,6 @@ fn render_element(el, info) {
             render_children(el, 0, info) else render_generic_default(el, info)
         case 'refsegment': if (info.biblatex_context.processor == "csl" or registry.active(info.packages, "biblatex"))
             render_children(el, 0, info) else render_generic_default(el, info)
-        case 'hypersetup': if (registry.active(info.packages, "hyperref")) null else render_generic_default(el, info)
 
         // ---- footnotes ----
         case 'footnote': render_footnote(el, info)
@@ -409,11 +409,6 @@ fn render_element(el, info) {
         // Captions render at their source position, preserving nested subfloat ownership.
         case 'caption': render_caption(el, info)
         case 'caption*': render_caption(el, info)
-        case 'captionsetup': if (registry.active(info.packages, "caption"))
-            if (len(caption.invalid_options(caption.setup(el))) == 0 and
-                (util.optional_raw(el) == null or info.caption_options[trim(util.optional_raw(el))] != null)) null
-            else util.unsupported_element("caption", "Unsupported caption setup", el.source_offset)
-            else render_generic_default(el, info)
         case 'captionof': render_captionof(el, info)
         case 'subfigure': render_subfloat(el, info, "subfigure")
         case 'subtable': render_subfloat(el, info, "subtable")
@@ -480,7 +475,7 @@ let SKIP_COMMANDS = {
     'pgfmathsetmacro': true, 'pgfmathdeclarefunction': true,
     'newenvironment': true, 'renewenvironment': true,
     'setcounter': true, 'newcounter': true, 'addtocounter': true,
-    'stepcounter': true, 'comment': true,
+    'stepcounter': true, 'refstepcounter': true, 'comment': true,
     'setlength': true, 'newlength': true,
     // picture sub-commands handled inside picture.render_picture
     'put': true, 'line': true, 'vector': true,
@@ -496,17 +491,12 @@ fn render_extended_or_generic(el, info) {
     if (SKIP_COMMANDS[tag_str] == true) { null }
     // other specific commands
     else if (tag_str == "includegraphics") { render_includegraphics(el, info) }
-    else if (amsmath.is_environment(tag_str) and
-             (registry.active(info.packages, "amsmath") or
-              (starts_with(tag_str, "IEEEeqnarray") and
-               registry.active(info.packages, "IEEEtrantools"))))
+    else if (amsmath.handles(tag_str, info.packages))
         { bold_math(amsmath.render_environment(el,
             util.lookup(info.amsmath_numbers, string(el.source_offset)), info.math_operators),
             info, true) }
-    else if (registry.active(info.packages, "siunitx") and
-             (tag_str == "num" or tag_str == "si" or tag_str == "unit" or
-              tag_str == "SI" or tag_str == "qty")) { siunitx.render(el) }
     else if (tag_str == "marginpar") { render_marginpar(el, info) }
+    else if (floats.kind_for_list(tag_str) != null) { render_float_list(info, floats.kind_for_list(tag_str)) }
     else { resolve_extended_or_generic(tag_str, el, info) }
 }
 
@@ -736,13 +726,14 @@ fn document_style(info) {
     let selected_family = macros.find_macro(info.macros, "familydefault")
     let sans_default = selected_family != null and selected_family.source != null and
         trim(selected_family.source) == "\\sfdefault"
+    // a font package replaces the main family, or the sans family when it is the default
+    let main_css = registry.font_css(info.packages, "main")
+    let sans_css = if (sans_default) registry.font_css(info.packages, "sans") else null
     let font = if (info.polyglossia != null and info.language == "thai")
         language.font_style(info.polyglossia, "thaifont", "serif") ++
             "word-break:normal;overflow-wrap:break-word;"
-        else if (registry.active(info.packages, "cmbright"))
-        "font-family:'Computer Modern Sans','Latin Modern Sans',sans-serif;"
-        else if (registry.active(info.packages, "helvet") and sans_default)
-            "font-family:Helvetica,Arial,sans-serif;"
+        else if (main_css != null) "font-family:" ++ main_css ++ ";"
+        else if (sans_css != null) "font-family:" ++ sans_css ++ ";"
         else ""
     if (background == "" and font == "") null else background ++ font
 }
@@ -801,7 +792,7 @@ fn render_textporson(el, info) {
         util.unsupported_element("gfsporson",
             "textporson currently requires plain LGR text", el.source_offset)
     else <span class: "latex-gfsporson", lang: "el",
-        style: "font-family:'GFS Porson','Times New Roman',Georgia,serif",
+        style: "font-family:" ++ registry.font_css(info.packages, "greek"),
         language.lgr_to_unicode(join(args, ""), info.greek_polytonic)>
 }
 
@@ -1304,7 +1295,7 @@ fn render_abstract(el, info) {
 }
 
 fn render_figure(el, info) {
-    let fig_num = get_figure_num(el, info)
+    let fig_num = get_float_num(el, info, "figure")
     let items = render_children(el, 0, {*:info, caption_type: "figure",
         caption_number: string(fig_num)});
     <figure class: "latex-figure",
@@ -1354,21 +1345,28 @@ fn render_subref(el, info) {
     else <a href: "#" ++ entry.id, entry.subnumber>
 }
 
-fn get_figure_num(el, info) {
-    let exact = [for (entry in info.figures where entry.offset == el.source_offset) entry.number]
-    let fig_text = trim(util.text_of(el))
-    if (len(exact) > 0) exact[0] else find_figure_num(info.figures, fig_text, 0)
+// a float's number from analysis: by source offset, else by its text when offsets are absent
+fn get_float_num(el, info, kind) {
+    let exact = [for (entry in info.floats where entry.kind == kind and
+        entry.offset == el.source_offset) entry.number]
+    let text = trim(util.text_of(el))
+    let by_text = [for (entry in info.floats where entry.kind == kind and
+        entry.content == text) entry.number]
+    if (len(exact) > 0) exact[0] else if (len(by_text) > 0) by_text[0] else 0
 }
 
-fn find_figure_num(figures, text, i) {
-    if (i >= len(figures)) 0
-    else check_figure_match(figures, text, i)
-}
-
-fn check_figure_match(figures, text, i) {
-    let entry = figures[i]
-    if (entry.content == text) entry.number
-    else find_figure_num(figures, text, i + 1)
+// \listoffigures, \listoftables: the captions of one float kind, linked when labelled
+fn render_float_list(info, kind) {
+    let entries = [for (entry in info.floats where entry.kind == kind and entry.caption != null)
+        <li class: "toc-l2",
+            if (entry.id != null) <a href: "#" ++ entry.id,
+                <span class: "sec-num", string(entry.number)> entry.caption>
+            else [<span class: "sec-num", string(entry.number)>, entry.caption]
+        >];
+    <nav class: "latex-toc latex-list-of latex-" ++ floats.KINDS[kind].list,
+        <div class: "toc-title", floats.KINDS[kind].list_title>
+        <ul for item in entries { item }>
+    >
 }
 
 // The parser keeps \begin{multicols}{n}[preface] as a `columns` attribute and a
@@ -1439,7 +1437,7 @@ fn check_theorem_match(theorems, text, env_type, i) {
 // ============================================================
 
 fn render_table_env(el, info) {
-    let tab_num = get_table_num(el, info)
+    let tab_num = get_float_num(el, info, "table")
     let items = render_children(el, 0, {*:info, caption_type: "table",
         caption_number: string(tab_num)});
     <div class: "latex-table-wrapper",
@@ -1447,22 +1445,6 @@ fn render_table_env(el, info) {
     >
 }
 
-fn get_table_num(el, info) {
-    let exact = [for (entry in info.tables where entry.offset == el.source_offset) entry.number]
-    let tab_text = trim(util.text_of(el))
-    if (len(exact) > 0) exact[0] else find_table_num(info.tables, tab_text, 0)
-}
-
-fn find_table_num(tables, text, i) {
-    if (i >= len(tables)) 0
-    else check_table_match(tables, text, i)
-}
-
-fn check_table_match(tables, text, i) {
-    let entry = tables[i]
-    if (entry.content == text) entry.number
-    else find_table_num(tables, text, i + 1)
-}
 
 fn render_tabular(el, info) {
     let content = table_content(el)
@@ -1473,7 +1455,7 @@ fn render_tabular(el, info) {
     <table class: "latex-tabular", style: table_width_style(el),
         if (caption != null) {
             <caption render_caption(caption, {*:info, caption_type: "table",
-                caption_number: string(get_table_num(el, info))})>
+                caption_number: string(get_float_num(el, info, "table"))})>
         }
         if (len(sections.head) > 0) {
             <thead for row in sections.head { row }>

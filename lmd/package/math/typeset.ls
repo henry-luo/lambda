@@ -206,6 +206,29 @@ fn node(n, c) {
     }
 }
 
+// commands rendered by name rather than from the symbol or operator tables
+let NAMED_COMMANDS = ["mathstrut", "KaTeX", "TeX", "LaTeX"]
+let SPACE_COMMANDS = [",", ":", ";", "!", "quad", "qquad", "enspace", "thinspace"]
+
+// Whether a generic command has a rendering. An unmapped one is painted as its
+// name, which looks like success, so callers report it (Lambda_Pkg_Math §3.1).
+pub fn maps_command(key) =>
+    sym.lookup_symbol(key) != null or sym.get_operator_name(key) != null or
+    contains(NAMED_COMMANDS, key) or contains(SPACE_COMMANDS, key) or
+    key == "rule" or key == "genfrac"
+
+// the unmapped generic commands of a math AST, in source order
+pub fn unmapped_commands(n) {
+    if (n is array or n is list) [for (item in n, key in unmapped_commands(item)) key]
+    else if (not (n is element)) []
+    else {
+        let key = if (name(n) == 'command') command_name(string(n.name or n.cmd or "")) else null
+        let own = if (key != null and not maps_command(key)) [key] else [];
+        // element iteration yields attribute values as well as content
+        own ++ [for (child in n, found in unmapped_commands(child)) found]
+    }
+}
+
 fn command(raw, c) {
     let key = command_name(raw)
     let unicode = sym.lookup_symbol(key)
@@ -223,7 +246,7 @@ fn command(raw, c) {
     } else if (key == "mathstrut") phantom(<phantom_command cmd:"\\vphantom", content:"(">,c)^
     else if (key == "KaTeX") katex_logo(c)^
     else if (contains(["TeX", "LaTeX"], key)) text(key, {*:c, text_variant:"normal"}, true)^
-    else if (contains([",", ":", ";", "!", "quad", "qquad", "enspace", "thinspace"], key))
+    else if (contains(SPACE_COMMANDS, key))
         space(<space_command cmd: "\\" ++ key>, c)
     else text(raw, {*:c, variant: "normal"}, true)^
 }
@@ -278,8 +301,7 @@ fn command_node(n, c) {
             left:util.text_of(items[0]), right:util.text_of(items[1]), thickness: util.text_of(items[2])>,
             if (style != null) with_style(c, style) else c)^
     } else if (len(items) > 0) spaced([command(key, c)^, *[for (item in items) node(item, c)^]], c)
-    else command(if (c.text_mode == true and sym.lookup_symbol(key) == null and
-        sym.get_operator_name(key) == null and not contains(["TeX","LaTeX","KaTeX","mathstrut"],key)) "\\" ++ key else key, c)^
+    else command(if (c.text_mode == true and not maps_command(key)) "\\" ++ key else key, c)^
 }
 
 fn style_name(cmd) {

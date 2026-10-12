@@ -1,12 +1,19 @@
 // The document adapter reuses the script math renderer's bounded AST profile.
 import util: ~~.util
 import math: lambda.doc.math.math
+import registry: .registry
 
 let ENVIRONMENTS = ["equation*", "align", "align*", "alignat", "alignat*",
     "aligned", "gather", "gather*", "multline", "multline*", "split",
     "IEEEeqnarray", "IEEEeqnarray*"]
 
 pub fn is_environment(tag) => any([for (name in ENVIRONMENTS) tag == name])
+
+// whether this adapter renders an environment from its row sources: amsmath's
+// (equation included), or IEEEtrantools' IEEEeqnarray
+pub fn handles(tag, packages) =>
+    (is_environment(tag) or tag == "equation") and (registry.active(packages, "amsmath") or
+        ((starts_with(tag, "IEEEeqnarray") or false) and registry.active(packages, "IEEEtrantools")))
 
 fn collect_operators(node, scoped) {
     if (not (node is element)) []
@@ -92,9 +99,14 @@ fn split_tex(source, rows, i, depth, escaped, start, acc) {
     }
 }
 
+fn cell_expression(source, operators) => expand_operators(trim(source), operators, 0, "")
+
+fn parse_cell(expression) =>
+    if (expression == "") null else parse(expression, {type: "math", flavor: "latex"}) ^ { null }
+
 fn math_cell(source, display, operators, offset) {
-    let expression = expand_operators(trim(source), operators, 0, "")
-    let ast = if (expression == "") null else parse(expression, {type: "math", flavor: "latex"}) ^ { null }
+    let expression = cell_expression(source, operators)
+    let ast = parse_cell(expression)
     if (expression == "") ""
     else if (ast == null) util.unsupported_element("amsmath",
         "Cannot parse aligned math cell: " ++ expression, offset)
@@ -102,8 +114,23 @@ fn math_cell(source, display, operators, offset) {
     else math.render_inline(ast)
 }
 
+// gather, multline and equation rows are one cell; alignments split at top-level &
+fn row_cells(source, gathered) =>
+    if (gathered) [source] else split_tex(source, false, 0, 0, false, 0, [])
+
+// the parsed math of every cell, expanded as for rendering, for the unmapped-command scan
+pub fn cell_asts(el, operators) {
+    let tag = string(name(el))
+    let gathered = starts_with(tag, "gather") or starts_with(tag, "multline") or
+        starts_with(tag, "equation")
+    let cells = [for (row in rows_for(el), cell in (if (row.error == null)
+        row_cells(row.math, gathered) else [])) cell];
+    [for (cell in cells, let ast = parse_cell(cell_expression(cell, operators))
+        where ast != null) ast]
+}
+
 fn alignment_row(source, gathered, multline_align, anchor, display, bare_tag, operators, offset) {
-    let cells = if (gathered) [source] else split_tex(source, false, 0, 0, false, 0, []);
+    let cells = row_cells(source, gathered);
     <div class: "latex-align-row", id: anchor,
         for (i, cell in cells)
             <span class: "latex-align-cell",

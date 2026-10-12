@@ -144,7 +144,6 @@ Raw islands (`tikzpicture` and the raw-text environments) are copied as source s
 - Reads through the central IO door.
 - The 2026-10-07 design takes the fixed date and random seed from options; the code fixes them as constants. Determinism (**S12.1.1v2**) holds either way.
 - On-disk format cache; the l3backend loader is still a stub.
-- `\usepackage{xparse}` reports `unknown-package`, although `\NewDocumentCommand` is native; answer `xparse` from the kernel.
 - Island expansion (§7).
 
 **Direction for broader package coverage**

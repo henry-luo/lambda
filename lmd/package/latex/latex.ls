@@ -11,6 +11,7 @@ import macros: .macros
 import dispatcher: .render
 import css: .css
 import math: lambda.doc.math.math
+import math_bridge: .math_bridge
 import html_ser: .to_html
 import registry: .packages.registry
 import geometry: .packages.geometry
@@ -121,26 +122,6 @@ pub fn render_result(ast, options) {
         [util.diagnostic("unsupported-cref-language", "cleveref", language,
             "Cleveref names currently support English", registry.offset_for(
                 loaded.packages, "cleveref"))] else []
-    let font_issues = if (registry.active(loaded.packages, "cmbright"))
-        [util.diagnostic("font-substitution", "cmbright", "Computer Modern Bright",
-            "CM Bright is not bundled; using bundled Computer Modern Sans",
-            registry.offset_for(loaded.packages, "cmbright"))] else []
-    let math_font_issues = if (registry.active(loaded.packages, "eucal"))
-        [util.diagnostic("font-substitution", "eucal", "Euler calligraphic",
-            "Euler calligraphic is not bundled; using the math calligraphic font",
-            registry.offset_for(loaded.packages, "eucal"))] else []
-    let script_font_issues = if (registry.active(loaded.packages, "mathrsfs"))
-        [util.diagnostic("font-substitution", "mathrsfs", "Ralph Smith Formal Script",
-            "RSFS is not bundled; using the available math script font",
-            registry.offset_for(loaded.packages, "mathrsfs"))] else []
-    let greek_font_issues = if (registry.active(loaded.packages, "gfsporson"))
-        [util.diagnostic("font-substitution", "gfsporson", "GFS Porson",
-            "GFS Porson is not bundled; using a Greek-capable serif fallback",
-            registry.offset_for(loaded.packages, "gfsporson"))] else []
-    let helvet_issues = if (registry.active(loaded.packages, "helvet"))
-        [util.diagnostic("font-substitution", "helvet", "Helvetica",
-            "Helvetica is not bundled; using a system sans-serif fallback",
-            registry.offset_for(loaded.packages, "helvet"))] else []
     let link_settings = hyperref.settings(ast, registry.options_for(loaded.packages, "hyperref"))
     let running_style = page_style.prepare(ast,
         registry.active(loaded.packages, "fancyhdr"))
@@ -177,8 +158,9 @@ pub fn render_result(ast, options) {
         else [for (issue in loaded.diagnostics where not (issue.code == "unsupported-bib-style" and
             issue.item == style_alias.biblatex_style)) issue] ++ style_alias.diagnostics
     let diagnostics = engine_diagnostics(ast) ++ package_issues ++ math_operators.diagnostics ++
-        bibliography.diagnostics ++ language_issues ++ cleveref_issues ++ font_issues ++
-        math_font_issues ++ script_font_issues ++ greek_font_issues ++ helvet_issues ++
+        bibliography.diagnostics ++ language_issues ++ cleveref_issues ++
+        registry.font_issues(loaded.packages) ++
+        math_bridge.issues(ast, math_operators.definitions, loaded.packages) ++
         hyperref.issues(link_settings, registry.offset_for(loaded.packages, "hyperref")) ++
         (if (registry.active(loaded.packages, "tikzpeople"))
             [util.diagnostic("tikzpeople-shape-approximation", "tikzpeople", null,

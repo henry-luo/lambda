@@ -2,6 +2,40 @@
 // Delegates math AST rendering to lmd/package/math/math.ls
 
 import math: lambda.doc.math.math
+import util: .util
+import registry: .packages.registry
+import amsmath: .packages.amsmath
+import semantic: .packages.semantic
+
+// ============================================================
+// Unmapped math commands
+// ============================================================
+
+// The math typesetter paints a command it cannot map as its name, which reads as
+// success, so each one is reported (Lambda_Pkg_Math §3.1, §10.2). Declared
+// operators are rendered by name on purpose, and Lua is reported as unsupported-lua.
+pub fn issues(node, operators, packages) {
+    if (not (node is element)) []
+    else {
+        let tag = string(name(node))
+        // amsmath renders its environments from row sources, not the pre-parsed ast
+        let asts = if (adapter_math(node, tag, packages)) []
+            else if (amsmath.handles(tag, packages)) amsmath.cell_asts(node, operators)
+            else if (node.ast != null) [node.ast]
+            else null
+        if (asts == null) [for (child in node, issue in issues(child, operators, packages)) issue]
+        else [for (ast in asts, key in math.unmapped_commands(ast)
+                where key != "directlua" and util.lookup(operators, "\\" ++ key) == null)
+            util.diagnostic("unsupported-math-command", "math", key,
+                "Unsupported math command \\" ++ key, node.source_offset)]
+    }
+}
+
+// math an adapter typesets itself: bussproofs sequents and semantic inference rules
+fn adapter_math(node, tag, packages) =>
+    (tag == "prooftree" and registry.active(packages, "bussproofs")) or
+    (tag == "display_math" and registry.active(packages, "semantic") and
+        semantic.contains_inference(node))
 
 // ============================================================
 // Inline math
