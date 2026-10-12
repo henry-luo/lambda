@@ -322,8 +322,9 @@ fn selected_preview(file) {
       else { pdf.pdf_to_html(parsed, null) ^ { <p class:"preview-error", "Unable to render selected PDF"> } }
     }
     else if (is_latex_document(file["extension"])) {
-      // Pass the selected file's path so local bibliography and image resources resolve.
-      let parsed = input(selected_path, 'latex') ^ { null }
+      // Parse through the package so the TeX engine sees its adapter registry (D7.2.7);
+      // the selected file's path also resolves local packages, bibliographies and images.
+      let parsed = latex.parse_file(selected_path)
       if (parsed == null) { <p class:"preview-error", "Unable to read selected LaTeX"> }
       else { latex.render(parsed, {source_path:absolute_file_path(file["file_path"])}) ^ {
         <p class:"preview-error", "Unable to render selected LaTeX"> } }

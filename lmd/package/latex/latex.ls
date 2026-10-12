@@ -35,10 +35,11 @@ import caption: .packages.caption
 // Public API — HTML string output
 // ============================================================
 
-// Lambda_Design_TeX_Engine §2: the TeX engine expands the document, and the package files beside
-// it, before the direct parser builds the AST
+// D7.2.7: every LaTeX parse expands with the TeX engine before the direct parser
+// builds the AST; the package supplies its adapter registry so local files never
+// shadow an adapter and adapter commands keep raw arguments
 pub fn parse_source(latex_source, base) =>
-    parse(latex_source, {type: "latex", expand: true, base: base,
+    parse(latex_source, {type: "latex", base: base,
         packages: registry.adapter_names(), raw: registry.RAW_ARGUMENT_COMMANDS}) ^ { null }
 
 pub fn parse_file(file_path) {
@@ -143,7 +144,6 @@ pub fn render_result(ast, options) {
                 caption_options: caption.initial(registry.options_for(loaded.packages, "caption"),
                     registry.options_for(loaded.packages, "subcaption")),
                 caption_type: null, caption_number: null,
-                macro_depth: 0,
                 math_bold: false,
                 greek_polytonic: language_profile.greek_polytonic(ast),
                 font_size: null, line_height: null, font_groups: [],
@@ -279,6 +279,16 @@ pub fn render_document(ast, options) {
         else if (options.standalone == null) {*:options, standalone: true}
         else options
     render(ast, effective)
+}
+
+// Path-source entry for the native document transform (CLI convert, Radiant):
+// parsing here, not natively, gives the engine the adapter registry (D7.2.7).
+pub fn render_document_file(file_path, options) any^ {
+    let source = input(file_path, "text") ^ { raise error("could not read " ++ file_path, ^) }
+    let ast = parse_source(source, file_path)
+    if (ast == null) raise error("could not parse LaTeX document " ++ file_path)
+    else render_document(ast, if (options == null) {source_path: file_path}
+        else {*:options, source_path: file_path})
 }
 
 fn is_standalone(options) {

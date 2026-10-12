@@ -16,8 +16,4 @@ false
 true
 "14. empty defs:"
 0
-"15. sub is array:"
-true
-"16. sub length:"
-4
 "===== ALL LATEX MACROS TESTS DONE ====="
