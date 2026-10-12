@@ -69,7 +69,7 @@ static void svg_record_page_backdrop_paint_list(SvgRenderContext* ctx,
     if (!ctx) return;
     render_effect_record_page_backdrop_paint_list(
         ctx->page_backdrop_ready, &ctx->page_backdrop_dl, paint_list,
-        render_glyph_run_raster_lower);
+        render_glyph_run_raster_lower, ctx->ui_context ? ui_context_raster_scale(ctx->ui_context) : 1.0f);
 }
 
 static void svg_lower_paint_list(SvgRenderContext* ctx) {
@@ -142,6 +142,7 @@ static void svg_finish_effect_raster_fallback(SvgRenderContext* ctx) {
         ctx->viewport_width,
         ctx->viewport_height,
         false,
+        ctx->ui_context ? ui_context_raster_scale(ctx->ui_context) : 1.0f,
         &image,
         "[SVG_PAINT_IR]");
     ctx->paint_svg_stats.command_count += paint_list_count(&ctx->effect_fallback.paint_list);
@@ -465,15 +466,7 @@ static bool svg_has_border_radius(BorderProp* border) {
     return border && radiant_corner_has_radius(&border->radius);
 }
 
-static bool svg_get_uniform_border_radius(BorderProp* border, float* radius) {
-    if (!svg_has_border_radius(border)) return false;
-    float value = border->radius.horizontal[0];
-    for (int i = 0; i < 4; i++) {
-        if (border->radius.horizontal[i] != value || border->radius.vertical[i] != value) return false;
-    }
-    if (radius) *radius = value;
-    return true;
-}
+
 
 // ── SVG border style helpers ─────────────────────────────────────────────────
 
@@ -621,75 +614,8 @@ static void render_bound_svg(SvgRenderContext* ctx, ViewBlock* view) {
         render_paint_boundary_emit_outer_shadows(svg_active_paint_list(ctx), view, x, y);
     }
 
-    // Render background
-    if (view->boundary_mut()->background && view->boundary_mut()->background->color.a > 0) {
-        // Check for border radius
-        if (svg_has_border_radius(view->boundary()->border)) {
-            BorderProp* border = view->boundary()->border;
-            float radius = 0.0f;
-            if (svg_get_uniform_border_radius(border, &radius)) {
-                paint_fill_rounded_rect(svg_active_paint_list(ctx), x, y, width, height,
-                                        radius, radius,
-                                        view->boundary()->background->color);
-                svg_lower_paint_list(ctx);
-            } else {
-                Rect rect = {x, y, width, height};
-                RdtPath* path = render_path_create_rounded_rect(rect, &border->radius);
-                int index = paint_list_count(svg_active_paint_list(ctx));
-                paint_fill_path(svg_active_paint_list(ctx), path, view->boundary()->background->color,
-                                RDT_FILL_WINDING, nullptr);
-                svg_lower_owned_path(ctx, index, PAINT_FILL_PATH, path);
-            }
-        } else {
-            paint_fill_rect(svg_active_paint_list(ctx), x, y, width, height,
-                            view->boundary()->background->color);
-            svg_lower_paint_list(ctx);
-        }
-    }
-
-    // Render background gradient (linear or radial)
-    if (view->boundary_mut()->background && view->boundary_mut()->background->gradient_type != GRADIENT_NONE) {
-        BackgroundProp* bg = view->boundary()->background;
-        if (bg->gradient_type == GRADIENT_LINEAR && bg->linear_gradient &&
-            bg->linear_gradient->stop_count >= 2) {
-            int stop_count = bg->linear_gradient->stop_count;
-            lam::Temp<RdtGradientStop> stops = lam::temp_array<RdtGradientStop>(
-                (size_t)stop_count, MEM_CAT_RENDER);
-            BoundaryLinearGradientPaint gradient = {};
-            if (stops &&
-                render_paint_boundary_build_linear_gradient(view, x, y, stops.get(),
-                                                            stop_count, &gradient)) {
-                int index = paint_list_count(svg_active_paint_list(ctx));
-                paint_fill_linear_gradient(svg_active_paint_list(ctx), gradient.path,
-                                           gradient.x1, gradient.y1,
-                                           gradient.x2, gradient.y2,
-                                           gradient.stops, gradient.stop_count,
-                                           RDT_FILL_WINDING, nullptr, nullptr);
-                if (svg_lower_owned_path(ctx, index, PAINT_FILL_LINEAR_GRADIENT,
-                                         gradient.path, stops.get())) stops.release();
-            }
-        } else if (bg->gradient_type == GRADIENT_RADIAL && bg->radial_gradient &&
-                   bg->radial_gradient->stop_count >= 2) {
-            int stop_count = bg->radial_gradient->stop_count;
-            lam::Temp<RdtGradientStop> stops = lam::temp_array<RdtGradientStop>(
-                (size_t)stop_count, MEM_CAT_RENDER);
-            BoundaryRadialGradientPaint gradient = {};
-            if (stops &&
-                render_paint_boundary_build_radial_gradient(view, x, y, stops.get(),
-                                                            stop_count, &gradient)) {
-                int index = paint_list_count(svg_active_paint_list(ctx));
-                paint_fill_radial_gradient(svg_active_paint_list(ctx), gradient.path,
-                                           gradient.cx, gradient.cy, gradient.r,
-                                           gradient.stops, gradient.stop_count,
-                                           RDT_FILL_WINDING, nullptr, nullptr);
-                if (svg_lower_owned_path(ctx, index, PAINT_FILL_RADIAL_GRADIENT,
-                                         gradient.path, stops.get())) stops.release();
-            }
-        }
-    }
-
-    if (render_paint_background_image(svg_active_paint_list(ctx), ctx->ui_context, view,
-            {x, y, width, height})) svg_lower_paint_list(ctx);
+    if (render_paint_background(svg_active_paint_list(ctx), ctx->ui_context, view,
+            {x, y, width, height}, RENDER_EXPORT_TARGET_SVG)) svg_lower_paint_list(ctx);
 
     if (render_paint_border_image(svg_active_paint_list(ctx), ctx->ui_context,
             view->boundary()->border, {x, y, width, height})) {
@@ -908,20 +834,15 @@ static void svg_cb_render_text(RenderContext* vctx, ViewText* text, float abs_x,
 
 static void svg_cb_render_image(RenderContext* vctx, ViewBlock* block, float abs_x, float abs_y) {
     SvgRenderContext* ctx = (SvgRenderContext*)vctx;
-    if (!block->embed || !block->embedp()->img) return;
-    ImageSurface* img = block->embedp()->img;
+    ImageSurface* img = render_media_image_surface(block);
+    if (!img) return;
 
     BlockBlot image_block = {};
     image_block.x = abs_x - block->x;
     image_block.y = abs_y - block->y;
     Rect content_rect = render_geometry_block_content_rect(&image_block, block, 1.0f);
     PaintList* paint = svg_active_paint_list(ctx);
-    if (render_media_paint_svg_picture(paint, ctx->ui_context, block, &content_rect)) {
-        svg_lower_paint_list(ctx);
-    } else {
-        Rect image_rect = render_media_image_rect(block, img, content_rect, 1.0f);
-        paint_draw_image_resource(paint, img, image_rect.x, image_rect.y,
-            image_rect.width, image_rect.height, 255, nullptr);
+    if (render_media_paint_image_content(paint, ctx->ui_context, block, &content_rect)) {
         svg_lower_paint_list(ctx);
     }
 }

@@ -14,7 +14,8 @@ static Rect marker_image_rect(ViewSpan* marker, const MarkerProp* prop,
     float width = (prop->content_width > 0.0f ? prop->content_width : prop->width) * scale;
     float height = prop->height * scale;
     float x = origin_x + marker->x * scale;
-    if (prop->is_outside) x += prop->width * scale - font_size - width / 2.0f;
+    if (prop->is_outside && !prop->is_image_marker)
+        x += prop->width * scale - font_size - width / 2.0f;
     return {x, origin_y + (marker->y + marker->height / 2.0f) * scale - height / 2.0f,
         width, height};
 }
@@ -24,18 +25,21 @@ bool render_paint_marker_image(PaintList* paint, UiContext* ui, ViewSpan* marker
     if (!paint || !ui || !marker || !marker->is_element()) return false;
     DomElement* element = lam::dom_require_element(lam::view_dom_node(marker));
     MarkerProp* prop = element->marker_prop();
-    if (!prop || !prop->image.url || strcmp(prop->image.url, "none") == 0) return false;
-    ImageSurface* image = load_document_image(ui->document, ui, prop->image.url);
-    if (!image) return false;
+    if (!prop) return false;
     float font_size = element->font ? font_prop_used_size(element->font)
         : font && font->style ? font_prop_used_size(font->style) : 16.0f;
     Rect rect = marker_image_rect(marker, prop, origin_x, origin_y, font_size, 1.0f);
+    if (prop->is_image_marker)
+        return render_paint_gradient_image(paint, &prop->image, rect, ui_context_raster_scale(ui));
+    if (!prop->image.url || strcmp(prop->image.url, "none") == 0) return false;
+    ImageSurface* image = load_document_image(ui->document, ui, prop->image.url);
+    if (!image) return false;
     PaintImageBox box = {lam::up(image), ui->font_ctx, rect, rect, 1.0f, 255, true};
     return render_paint_image_box(paint, &box);
 }
 
 void render_marker_view(RasterRenderContext* rdcon, ViewSpan* marker) {
-    if (!marker || !marker->is_element()) return;
+    if (!marker || !marker->is_element() || view_visibility_is_hidden(marker)) return;
 
     DomElement* elem = lam::dom_require_element(lam::view_dom_node(marker));
     MarkerProp* marker_prop = elem->marker_prop();
@@ -52,9 +56,6 @@ void render_marker_view(RasterRenderContext* rdcon, ViewSpan* marker) {
     float y = rdcon->block.y + marker->y * scale;
     float width = marker_prop->width * scale;
     float marker_height = marker->height * scale;
-    float image_height = marker_prop->height * scale;
-    float content_width = marker_prop->content_width > 0.0f
-        ? marker_prop->content_width * scale : width;
     float bullet_size = marker_prop->bullet_size * scale;
     CssEnum marker_type = marker_prop->marker_type;
     Color color = marker_prop->has_color ? marker_prop->color : rdcon->color;
@@ -65,26 +66,23 @@ void render_marker_view(RasterRenderContext* rdcon, ViewSpan* marker) {
 
 
     if (marker_prop->is_image_marker) {
-        Rect image_rect = {
-            x, y + (marker_height - image_height) / 2.0f,
-            content_width, image_height
-        };
-        switch (marker_prop->image.gradient_type) {
-            case GRADIENT_LINEAR:
-                render_list_marker_linear_gradient(
-                    rdcon, marker_prop->image.linear_gradient, image_rect);
-                return;
-            case GRADIENT_RADIAL:
-                render_list_marker_radial_gradient(
-                    rdcon, marker_prop->image.radial_gradient, image_rect);
-                return;
-            case GRADIENT_CONIC:
-                render_list_marker_conic_gradient(
-                    rdcon, marker_prop->image.conic_gradient, image_rect);
-                return;
-            default:
-                break;
+        Rect image_rect = marker_image_rect(marker, marker_prop,
+            rdcon->block.x / scale, rdcon->block.y / scale, marker_font_size / scale, 1.0f);
+        RdtMatrix density = rdt_matrix_scale(scale, scale);
+        const RdtMatrix* active = render_state_current_transform(rdcon);
+        RdtMatrix transform = active ? rdt_matrix_multiply(active, &density) : density;
+        RdtPath* clip = render_path_create_clip_path(rdcon);
+        rc_push_clip(rdcon, clip, nullptr);
+        // all backends record the same gradient image; retained effects own its payloads.
+        bool painted = render_paint_gradient_image(rdcon->paint_list, &marker_prop->image,
+            image_rect, scale, &transform);
+        if (painted) {
+            paint_ir_lower_raster_fragment(rdcon->paint_list, rdcon->dl);
+            paint_list_clear(rdcon->paint_list);
         }
+        rc_pop_clip(rdcon);
+        rdt_path_free(clip);
+        if (painted) return;
     }
 
     if (marker_prop->image.url && strcmp(marker_prop->image.url, "none") != 0) {
@@ -107,8 +105,10 @@ void render_marker_view(RasterRenderContext* rdcon, ViewSpan* marker) {
             }
         }
         ImageSurface* img = marker_prop->loaded_image;
-        if (img && img->pixels && img->width > 0 && img->height > 0) {
+        // file-backed images can reach paint with metadata before their first decode.
+        if (img && img->width > 0 && img->height > 0)
             image_surface_ensure_decoded(img, img->width, img->height);
+        if (img && img->pixels && img->width > 0 && img->height > 0) {
             // Paint the decoded source into the used marker box; raw pixels
             // would leave intrinsic images unzoomed after layout scales them.
             Rect rect = marker_image_rect(marker, marker_prop, rdcon->block.x, rdcon->block.y,

@@ -105,6 +105,7 @@ inline bool is_quirks_mode(HtmlVersion version) {
 inline bool is_limited_quirks_mode(HtmlVersion version) {
     return version == HTML_LIMITED_QUIRKS;
 }
+bool dom_element_uses_quirks_css(const DomElement* element);
 
 typedef enum DomJsMutationKind {
     DOM_JS_MUTATION_UNKNOWN = 0,
@@ -1737,6 +1738,7 @@ CssDeclaration* dom_element_get_specified_value(DomElement* element, CssProperty
  * @param pseudo_element Which pseudo-element (PSEUDO_ELEMENT_BEFORE or PSEUDO_ELEMENT_AFTER)
  * @return Specified CSS declaration or NULL if not set
  */
+StyleTree* dom_element_get_pseudo_style(DomElement* element, int pseudo_element);
 CssDeclaration* dom_element_get_pseudo_element_value(DomElement* element,
                                                      CssPropertyCode property_code, int pseudo_element);
 

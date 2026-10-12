@@ -1,0 +1,27 @@
+<!doctype html><meta charset=utf-8><style>html,body{margin:0;background:white}button{height:24px}#box{position:absolute;left:0;top:40px;width:48px;height:32px}#box::before{content:'';font-size:6px;background:linear-gradient(red,red) right 1em bottom 2em/2em 1em no-repeat,none}#box::after{content:'';font-size:60px;background-image:none,none;background-size:inherit}</style><button id=check>Read background values</button><button id=resize>Resize owner font</button><output id=report></output><div id=box></div><script>
+(function(){var box=document.getElementById('box'),report=document.getElementById('report');
+var cases=[
+ ['shorthand_repeat','background:linear-gradient(red,red) left top/8px 4px no-repeat blue','background-repeat'],
+ ['shorthand_size','background:linear-gradient(red,red) left top/8px 4px no-repeat blue','background-size'],
+ ['shorthand_position','background:linear-gradient(red,red) right 3px bottom 5px/8px 4px no-repeat blue','background-position'],
+ ['shorthand_attachment','background:linear-gradient(red,red) fixed,radial-gradient(blue,blue) local','background-attachment'],
+ ['size_font','font-size:4px;background-image:none,none;background-size:2em 1em,min(50%,2em) max(10%,1em)','background-size'],
+ ['position_font','font-size:4px;background-image:none;background-position:right 1em bottom max(25%,1em)','background-position'],
+ ['repeat_list','background-image:none,none,none;background-repeat:repeat-x,round space,no-repeat','background-repeat'],
+ ['origin_list','background-image:none,none,none;background-origin:border-box,padding-box,content-box','background-origin'],
+ ['clip_list','background-image:none,none,none;background-clip:padding-box,text,content-box','background-clip'],
+ ['attachment_list','background-image:none,none,none;background-attachment:scroll,fixed,local','background-attachment'],
+ ['blend_list','background-image:none,none,none;background-blend-mode:multiply,screen,normal','background-blend-mode'],
+ ['invalid_repeat_variable','background-image:none;--repeat:no-repeat none;background-repeat:var(--repeat,no-repeat)','background-repeat']
+];
+
+document.getElementById('check').onclick=function(){
+ for(var i=0;i<cases.length;i++){box.style.cssText=cases[i][1];report.setAttribute('data-case-'+i,getComputedStyle(box).getPropertyValue(cases[i][2]))}
+ box.parentElement.style.cssText='font-size:4px;background:none;background-size:2em 1em';
+ box.style.cssText='font-size:30px;background-image:none,none;background-size:inherit';
+ report.setAttribute('data-case-12',getComputedStyle(box).backgroundSize);
+ report.setAttribute('data-before-size',getComputedStyle(box,'::before').backgroundSize);
+ box.style.backgroundImage='linear-gradient(red,red),none';box.style.backgroundColor='blue';box.style.backgroundRepeat='no-repeat';
+};
+document.getElementById('resize').onclick=function(){box.parentElement.style.fontSize='8px';report.setAttribute('data-size',getComputedStyle(box).backgroundSize);report.setAttribute('data-after-size',getComputedStyle(box,'::after').backgroundSize)};
+})();</script>

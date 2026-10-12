@@ -4,6 +4,60 @@
 // the benign branch at every call site.
 
 #include "dom_engine.h"
+#include "dom_graphics.h"
+#include "dom_style.h"
+
+// Native providers belong to the lower runtime; native module registration
+// publishes immutable process-lifetime tables without an upward link (D7.1.3).
+static const DomCanvasEngineOps* canvas_engine_operations = nullptr;
+static const DomWebGlEngineOps* webgl_engine_operations = nullptr;
+static const DomStyleEngineOps* style_engine_operations = nullptr;
+
+template<class Operations, class... Fields>
+static bool dom_provider_register(const Operations** slot, const Operations* operations, Fields... fields) {
+    if (!operations || !(... && (operations->*fields))) return false;
+    const Operations* expected = nullptr;
+    return __atomic_compare_exchange_n(slot, &expected, operations, false,
+                                       __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE) ||
+           expected == operations;
+}
+
+template<class Operations>
+static const Operations* dom_provider_load(const Operations* const* slot) {
+    return __atomic_load_n(slot, __ATOMIC_ACQUIRE);
+}
+
+#define DOM_PROVIDER_MEMBER(result, name, parameters) , &Operations::name
+extern "C" bool dom_canvas_register_engine(const DomCanvasEngineOps* operations) {
+    using Operations = DomCanvasEngineOps;
+    return dom_provider_register(&canvas_engine_operations, operations
+        DOM_CANVAS_ENGINE_OPERATIONS(DOM_PROVIDER_MEMBER));
+}
+
+extern "C" bool dom_webgl_register_engine(const DomWebGlEngineOps* operations) {
+    using Operations = DomWebGlEngineOps;
+    return dom_provider_register(&webgl_engine_operations, operations
+        DOM_WEBGL_ENGINE_OPERATIONS(DOM_PROVIDER_MEMBER));
+}
+
+extern "C" bool dom_style_register_engine(const DomStyleEngineOps* operations) {
+    using Operations = DomStyleEngineOps;
+    return dom_provider_register(&style_engine_operations, operations
+        DOM_STYLE_ENGINE_OPERATIONS(DOM_PROVIDER_MEMBER));
+}
+#undef DOM_PROVIDER_MEMBER
+
+extern "C" const DomCanvasEngineOps* dom_canvas_engine_ops(void) {
+    return dom_provider_load(&canvas_engine_operations);
+}
+
+extern "C" const DomWebGlEngineOps* dom_webgl_engine_ops(void) {
+    return dom_provider_load(&webgl_engine_operations);
+}
+
+extern "C" const DomStyleEngineOps* dom_style_engine_ops(void) {
+    return dom_provider_load(&style_engine_operations);
+}
 
 #define DOM_ENGINE_WEAK extern "C" __attribute__((weak))
 

@@ -144,28 +144,22 @@ uint32_t render_composite_blend_pixel(uint32_t backdrop, uint32_t source, CssEnu
     return render_pixel_pack_abgr(rr, rg, rb, new_a);
 }
 
-static float render_radial_mask_alpha(const RadialMaskPaint* mask, float x, float y) {
+static float render_radial_mask_alpha(const RadialMaskPaint* mask, const RadiantRadialGeometry& geometry,
+        const RdtGradientStop* stops, int count, float x, float y) {
     if (!mask || !mask->gradient) return 1.0f;
-    if (!mask->invertible || !rdt_matrix_project_point(&mask->inverse, x, y, &x, &y)) return 0.0f;
+    if (!stops || count < 2 || !mask->invertible || !rdt_matrix_project_point(&mask->inverse, x, y, &x, &y)) return 0.0f;
     Rect rect = mask->rect;
     if (x < rect.x || y < rect.y || x >= rect.x + rect.width || y >= rect.y + rect.height) return 0.0f;
-    RadialGradient* gradient = mask->gradient;
-    if (gradient->stop_count < 2 || !gradient->stops) return 0.0f;
-    RadiantRadialGeometry geometry = radiant_radial_gradient_geometry(gradient, rect);
-    if (geometry.rx <= 0.0f || geometry.ry <= 0.0f) return gradient->stops[gradient->stop_count - 1].color.a / 255.0f;
+    if (geometry.rx <= 0.0f || geometry.ry <= 0.0f) return stops[count - 1].a / 255.0f;
     float distance = hypotf((x - geometry.cx) / geometry.rx, (y - geometry.cy) / geometry.ry);
-    auto position = [&](int index) {
-        const GradientStop& stop = gradient->stops[index];
-        return stop.position_is_px ? stop.position / geometry.rx : stop.position;
-    };
-    float first = position(0), last = position(gradient->stop_count - 1);
-    if (gradient->is_repeating && last > first) distance = first + (distance - first - floorf((distance - first) / (last - first)) * (last - first));
+    float first = stops[0].offset, last = stops[count - 1].offset;
+    if (mask->gradient->is_repeating && last > first) distance = first + (distance - first - floorf((distance - first) / (last - first)) * (last - first));
     float previous = first;
-    float alpha = gradient->stops[0].color.a / 255.0f;
+    float alpha = stops[0].a / 255.0f;
     if (distance < first) return alpha;
-    for (int index = 1; index < gradient->stop_count; index++) {
-        float next = fmaxf(previous, position(index));
-        float target = gradient->stops[index].color.a / 255.0f;
+    for (int index = 1; index < count; index++) {
+        float next = stops[index].offset;
+        float target = stops[index].a / 255.0f;
         if (distance < next) return alpha + (target - alpha) * (distance - previous) / (next - previous);
         previous = next; alpha = target;
     }
@@ -180,6 +174,13 @@ void render_composite_apply_region(ImageSurface* surface, const uint32_t* backdr
                                    const ClipShape* include_shape,
                                    const RadialMaskPaint* mask, float offset_x, float offset_y) {
     if (!surface || !surface->pixels || !backdrop || width <= 0 || height <= 0) return;
+    RadialGradient* gradient = mask ? mask->gradient.get() : nullptr;
+    int stop_count = gradient ? gradient->stop_count : 0;
+    lam::Temp<RdtGradientStop> stops = stop_count > 0 ? lam::temp_array<RdtGradientStop>(stop_count, MEM_CAT_RENDER) : lam::Temp<RdtGradientStop>();
+    RadiantRadialGeometry geometry = gradient ? radiant_radial_gradient_geometry(gradient, mask->rect) : RadiantRadialGeometry{};
+    // one prepared stop list serves every masked pixel in this region.
+    if (gradient && (!stops || !render_copy_gradient_stops(gradient->stops, stop_count, geometry.rx, stops.get(), stop_count, nullptr)))
+        stops.reset(); // an invalid mask supplies zero coverage through the existing sampler.
     uint32_t* pixels = (uint32_t*)surface->pixels;
     int pitch = surface->pitch / 4;
     for (int row = 0; row < height; row++) {
@@ -194,7 +195,7 @@ void render_composite_apply_region(ImageSurface* surface, const uint32_t* backdr
             }
             uint32_t* pixel = &pixels[(y0 + row) * pitch + (x0 + col)];
             uint32_t source = backdrop[row * width + col];
-            uint8_t coverage = mask && mask->gradient ? clamp_byte_round(opacity * render_radial_mask_alpha(mask,
+            uint8_t coverage = mask && mask->gradient ? clamp_byte_round(opacity * render_radial_mask_alpha(mask, geometry, stops.get(), stop_count,
                 x0 + col + offset_x + 0.5f, y0 + row + offset_y + 0.5f)) : opacity;
             if (mode == RENDER_COMPOSITE_REGION_BLEND) {
                 // blend functions use straight channels; native opacity groups retain premultiplied pixels.

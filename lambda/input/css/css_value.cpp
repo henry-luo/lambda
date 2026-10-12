@@ -178,15 +178,10 @@ bool css_color_compute(const CssValue* value, CssComputedColor* result) {
 }
 
 const CssValue* css_background_color_component(const CssValue* value) {
-    if (!value) return nullptr;
-    CssComputedColor color;
-    if (css_color_compute(value, &color)) return value;
-    if (value->type != CSS_VALUE_TYPE_LIST || !value->data.list.values) return nullptr;
-    for (int i = value->data.list.count - 1; i >= 0; i--) {
-        const CssValue* found = css_background_color_component(value->data.list.values[i]);
-        if (found) return found;
-    }
-    return nullptr;
+    CssBackgroundParts parts;
+    int count = css_value_comma_count(value);
+    return count > 0 && css_background_layer_components(css_value_comma_at(value, count - 1), true, &parts)
+        ? parts.color : nullptr;
 }
 
 double css_color_legacy_alpha(uint8_t alpha) {
@@ -449,23 +444,34 @@ bool css_dimension_to_canonical(CssUnit unit, double value, CssUnit* canonical_u
     return true;
 }
 
-CssImageKind css_value_image_kind(const CssValue* value) {
-    if (!value) return CSS_IMAGE_NONE;
-    if (value->type == CSS_VALUE_TYPE_URL) return CSS_IMAGE_URL;
-    if (value->type != CSS_VALUE_TYPE_FUNCTION || !value->data.function) return CSS_IMAGE_NONE;
-    static const struct { const char* name; CssImageKind kind; } functions[] = {
-        {"url", CSS_IMAGE_URL},
-        {"linear-gradient", CSS_IMAGE_LINEAR_GRADIENT},
-        {"repeating-linear-gradient", CSS_IMAGE_LINEAR_GRADIENT},
-        {"radial-gradient", CSS_IMAGE_RADIAL_GRADIENT},
-        {"repeating-radial-gradient", CSS_IMAGE_RADIAL_GRADIENT},
-        {"conic-gradient", CSS_IMAGE_CONIC_GRADIENT},
-        {"repeating-conic-gradient", CSS_IMAGE_CONIC_GRADIENT},
-        {"image-set", CSS_IMAGE_SET}, {"-webkit-image-set", CSS_IMAGE_SET}
+struct CssImageFunctionSpec { const char* name; CssImageKind kind; bool repeating; };
+
+static const CssImageFunctionSpec* css_image_function_spec(const CssValue* value) {
+    if (!value || value->type != CSS_VALUE_TYPE_FUNCTION || !value->data.function) return nullptr;
+    static const CssImageFunctionSpec functions[] = {
+        {"url", CSS_IMAGE_URL, false},
+        {"linear-gradient", CSS_IMAGE_LINEAR_GRADIENT, false},
+        {"repeating-linear-gradient", CSS_IMAGE_LINEAR_GRADIENT, true},
+        {"radial-gradient", CSS_IMAGE_RADIAL_GRADIENT, false},
+        {"repeating-radial-gradient", CSS_IMAGE_RADIAL_GRADIENT, true},
+        {"conic-gradient", CSS_IMAGE_CONIC_GRADIENT, false},
+        {"repeating-conic-gradient", CSS_IMAGE_CONIC_GRADIENT, true},
+        {"image-set", CSS_IMAGE_SET, false}, {"-webkit-image-set", CSS_IMAGE_SET, false}
     };
     for (const auto& function : functions)
-        if (css_function_name_is(value->data.function, function.name)) return function.kind;
-    return CSS_IMAGE_NONE;
+        if (css_function_name_is(value->data.function, function.name)) return &function;
+    return nullptr;
+}
+
+CssImageKind css_value_image_kind(const CssValue* value) {
+    if (value && value->type == CSS_VALUE_TYPE_URL) return CSS_IMAGE_URL;
+    const CssImageFunctionSpec* function = css_image_function_spec(value);
+    return function ? function->kind : CSS_IMAGE_NONE;
+}
+
+bool css_value_is_repeating_gradient(const CssValue* value) {
+    const CssImageFunctionSpec* function = css_image_function_spec(value);
+    return function && function->repeating;
 }
 
 bool css_value_is_image_set(const CssValue* value) {
@@ -484,6 +490,11 @@ bool css_image_set_option(const CssValue* value, CssImageSetOption* option) {
     if (!image || css_value_contains_image_set(image)) return false;
     if (image->type != CSS_VALUE_TYPE_STRING && css_value_image_kind(image) == CSS_IMAGE_NONE)
         return false;
+    if (css_value_image_kind(image) == CSS_IMAGE_RADIAL_GRADIENT) {
+        CssRadialGradientParts parts;
+        if (!css_value_contains_pending_substitution(image) && !css_radial_gradient_components(image, &parts)) return false;
+    }
+    if (!css_gradient_stop_list_valid(image)) return false;
     CssImageSetOption result = {image, nullptr, 1.0};
     const CssMathEvaluationContext context = {};
     bool has_resolution = false;

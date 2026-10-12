@@ -1,0 +1,38 @@
+<!doctype html><meta charset=utf-8><title>Gradient markers retain pixels across mutation and effects</title>
+<style>
+html,body{margin:0;background:white}
+.row{width:120px;height:40px}ul{margin:0;padding:0}
+li{height:40px;font:20px/40px monospace;list-style-position:inside;list-style-type:none}
+.controls{position:absolute;left:180px;top:0}
+</style>
+<div class=controls><button id=change>Change</button><button id=restore>Restore</button><button id=clear>Clear</button></div>
+<div class=row id=linear-row><ul><li id=linear></li></ul></div>
+<div class=row id=radial-row><ul><li id=radial></li></ul></div>
+<div class=row id=conic-row><ul><li id=conic></li></ul></div>
+<div class=row id=linear-repeat-row><ul><li id=linear-repeat></li></ul></div>
+<div class=row id=radial-repeat-row><ul><li id=radial-repeat></li></ul></div>
+<div class=row id=conic-repeat-row><ul><li id=conic-repeat></li></ul></div>
+<script>
+const kinds=['linear','radial','conic'];
+function source(kind,color,repeat){
+ const tail=kind==='conic'?'45deg':'5px';
+ return (repeat?'repeating-':'')+kind+'-gradient('+color+(repeat?' 0,':' ,')+color+(repeat?' '+tail:'')+')';
+}
+function apply(changed){
+ for(let index=0;index<kinds.length;index++)for(let repeat=0;repeat<2;repeat++){
+  const kind=kinds[index],el=document.getElementById(kind+(repeat?'-repeat':''));
+  const first=source(kind,changed?'green':'red',repeat),second=source(kind,changed?'blue':'red',repeat);
+  el.style.listStyleImage='image-set('+first+' 1x,'+second+' 2x)';
+  el.style.fontSize=changed?'30px':'20px';
+  el.style.transform=changed?'translate(8px,4px)':'none';
+  el.style.filter=repeat?'brightness(1)':'none';
+ }
+}
+apply(false);
+document.getElementById('change').onclick=function(){apply(true)};
+document.getElementById('restore').onclick=function(){apply(false)};
+document.getElementById('clear').onclick=function(){
+ const elements=document.querySelectorAll('li');
+ for(let index=0;index<elements.length;index++)elements[index].style.listStyleImage='none';
+};
+</script>

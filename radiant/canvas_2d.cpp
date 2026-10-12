@@ -266,6 +266,8 @@ static bool canvas_replace_surface(CanvasEntry* entry, int width, int height) {
     if (width > 0 && height > 0) {
         replacement = image_surface_create(width, height);
         if (!replacement) return false;
+        // Rdt blends drawing commands into premultiplied backing pixels.
+        replacement->alpha_mode = IMAGE_ALPHA_PREMULTIPLIED;
     }
     if (entry->surface) image_surface_destroy(entry->surface);
     entry->surface = replacement;
@@ -934,13 +936,28 @@ extern "C" bool radiant_canvas_fill_text(void* canvas_element, void* font_handle
     return true;
 }
 
-void render_canvas_content(RasterRenderContext* rdcon, ViewBlock* view) {
-    if (!rdcon || !view || !view->is_element()) return;
+static void canvas_prepare_surface(CanvasEntry* entry) {
+    if (!entry || !entry->graphics) return;
+    ImageSurface* snapshot = native_gl_webgl_snapshot(entry->graphics);
+    if (!snapshot) return;
+    // Dirty GPU pixels must be current before any exporter takes an owned paint snapshot.
+    image_surface_bump_generation(entry->surface);
+    image_surface_snapshot_release(entry->surface);
+    snapshot->snapshot_refs = 1;
+    entry->surface = snapshot;
+}
+
+ImageSurface* render_canvas_surface(ViewBlock* view) {
+    if (!view || !view->is_element()) return nullptr;
     DomElement* element = lam::dom_require_element(lam::view_dom_node(view));
     CanvasEntry* entry = canvas_entry_for_element(element, false);
-    if (!entry || !entry->surface) return;
+    canvas_prepare_surface(entry);
+    return entry ? entry->surface : nullptr;
+}
 
-    render_surface_content(rdcon, view, entry->surface);
+void render_canvas_content(RasterRenderContext* rdcon, ViewBlock* view) {
+    // Reuse image fitting, clipping and pixel-center sampling across outputs.
+    render_media_image_content(rdcon, view);
 }
 
 void render_surface_content(RasterRenderContext* rdcon, ViewBlock* view, ImageSurface* surface) {
@@ -1062,11 +1079,8 @@ extern "C" bool radiant_webgl_image(uint64_t canvas,const WebGlCommand* command,
     mem_free(pixels);if(owned) image_surface_destroy(image);return handled;
 }
 void radiant_canvas_prepare_document(DomDocument* document) {
-    for (CanvasEntry* entry=webgl_canvases;entry;entry=entry->graphics_next) if (entry->element->doc==document) {
-        ImageSurface* snapshot=native_gl_webgl_snapshot(entry->graphics);if (!snapshot) continue;
-        image_surface_bump_generation(entry->surface);image_surface_snapshot_release(entry->surface);
-        snapshot->snapshot_refs=1;entry->surface=snapshot;
-    }
+    for (CanvasEntry* entry=webgl_canvases;entry;entry=entry->graphics_next)
+        if (entry->element->doc==document) canvas_prepare_surface(entry);
 }
 
 extern "C" bool radiant_webgl_lose(uint64_t canvas) {

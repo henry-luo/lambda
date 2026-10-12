@@ -3607,6 +3607,8 @@ CssMathResult layout_evaluate_css_math(LayoutContext* context, uintptr_t propert
 // compute length terms at their owner while retaining percentage terms for the used box.
 void layout_compute_math_lengths(LayoutContext* context, CssValue* value,
     CssPropertyCode property = CSS_PROPERTY_TRANSFORM);
+CssValue* layout_clone_computed_math(LayoutContext* context, const CssValue* value,
+    CssPropertyCode property, Pool* pool);
 bool layout_resolve_deferred_percentage(float percent, float percentage_base, float* out);
 bool layout_apply_deferred_percentage(float percent, float percentage_base, float* target, float* resolved);
 float layout_block_used_content_size(ViewBlock* block, bool horizontal, bool require_positive);

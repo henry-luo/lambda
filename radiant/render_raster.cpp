@@ -67,7 +67,8 @@ void raster_fill_rect(RasterPaintContext* ctx, Rect* rect, uint32_t color) {
     }
 }
 
-static uint32_t raster_area_average(ImageSurface* src, float x0, float y0, float x1, float y1) {
+static uint32_t raster_area_average(ImageSurface* src, float x0, float y0, float x1, float y1,
+                                    bool premultiply_samples) {
     int src_w = (src->decoded_width > 0) ? src->decoded_width : src->width;
     int src_h = (src->decoded_height > 0) ? src->decoded_height : src->height;
     int ix0 = std::max(0, (int)x0);
@@ -98,6 +99,7 @@ static uint32_t raster_area_average(ImageSurface* src, float x0, float y0, float
 
             float w = wx * wy;
             uint32_t pixel = *((uint32_t*)(row + x * 4));
+            if (premultiply_samples) pixel = render_pixel_premultiply_abgr(pixel);
             sum_r += (pixel & 0xFF) * w;
             sum_g += ((pixel >> 8) & 0xFF) * w;
             sum_b += ((pixel >> 16) & 0xFF) * w;
@@ -153,7 +155,7 @@ static uint32_t raster_pixelated_sample(ImageSurface* src, const Rect* src_rect,
     const uint8_t* p12 = pixels + (size_t)sy1 * src->pitch + sx0 * 4;
     const uint8_t* p22 = pixels + (size_t)sy1 * src->pitch + sx1 * 4;
     return render_pixel_bilinear_mix(p11, p21, p12, p22,
-                                     ix - ix0, iy - iy0, false, premultiply);
+                                     ix - ix0, iy - iy0, true, premultiply);
 }
 
 bool render_image_project_pixels(const uint32_t* pixels, int width, int height, int stride,
@@ -267,6 +269,15 @@ bool render_image_project_pixels(const uint32_t* pixels, int width, int height, 
     return true;
 }
 
+static uint32_t raster_image_source_over(uint32_t destination, uint32_t source,
+        uint8_t opacity, bool straight_source, bool premultiplied_destination) {
+    if (straight_source) source = render_pixel_premultiply_abgr(source);
+    source = render_pixel_scale_premultiplied(source, opacity);
+    return premultiplied_destination
+        ? render_pixel_source_over_premultiplied_pair(destination, source)
+        : render_pixel_source_over_premultiplied(destination, source);
+}
+
 void raster_blit_surface_scaled(RasterPaintContext* ctx, ImageSurface* src, Rect* src_rect,
                                 Rect* dst_rect, ScaleMode scale_mode, uint8_t opacity) {
     Rect rect;
@@ -312,6 +323,9 @@ void raster_blit_surface_scaled(RasterPaintContext* ctx, ImageSurface* src, Rect
     int top = (int)std::max(clip->top, dst_rect->y);
     int bottom = (int)std::min(clip->bottom, dst_rect->y + dst_rect->height);
     if (left >= right || top >= bottom) return;
+    // Filter premultiplied texels and preserve the destination's alpha contract.
+    bool straight_source = src->alpha_mode == IMAGE_ALPHA_STRAIGHT;
+    bool premultiplied_destination = dst->alpha_mode == IMAGE_ALPHA_PREMULTIPLIED;
 
     bool need_shape_clip = (clip_depth > 0) &&
         !clip_shapes_rect_inside(clip_shapes, clip_depth,
@@ -342,12 +356,8 @@ void raster_blit_surface_scaled(RasterPaintContext* ctx, ImageSurface* src, Rect
                 // cached layers are mostly clear or solid: skip or copy those outright
                 if (sa == 0) continue;
                 if (sa == 255) { dst_row[j] = source | 0xFF000000u; continue; }
-                uint32_t destination = dst_row[j];
-                uint32_t inv = 255u - sa;
-                dst_row[j] = 0xFF000000u |
-                    (((source & 0xFFu) * sa + (destination & 0xFFu) * inv) / 255u) |
-                    ((((source >> 8) & 0xFFu) * sa + ((destination >> 8) & 0xFFu) * inv) / 255u) << 8 |
-                    ((((source >> 16) & 0xFFu) * sa + ((destination >> 16) & 0xFFu) * inv) / 255u) << 16;
+                dst_row[j] = raster_image_source_over(dst_row[j], source, opacity,
+                    straight_source, premultiplied_destination);
             }
         }
         return;
@@ -368,23 +378,23 @@ void raster_blit_surface_scaled(RasterPaintContext* ctx, ImageSurface* src, Rect
             if (scale_mode == SCALE_MODE_PIXELATED) {
                 src_color = raster_pixelated_sample(src, src_rect, dst_rect,
                     j, i, src_w, src_h,
-                    pixelated_x_multiple, pixelated_y_multiple);
+                    pixelated_x_multiple, pixelated_y_multiple, straight_source);
             } else if (scale_mode == SCALE_MODE_LINEAR && downscaling) {
                 float box_x0 = src_rect->x + (j - dst_rect->x) * x_ratio;
                 float box_y0 = src_rect->y + (i - dst_rect->y) * y_ratio;
                 float box_x1 = box_x0 + x_ratio;
                 float box_y1 = box_y0 + y_ratio;
-                src_color = raster_area_average(src, box_x0, box_y0, box_x1, box_y1);
+                src_color = raster_area_average(src, box_x0, box_y0, box_x1, box_y1, straight_source);
             } else if (scale_mode == SCALE_MODE_LINEAR) {
                 float bx = src_rect->x + (j - dst_rect->x + 0.5f) * x_ratio - 0.5f;
                 float by = src_rect->y + (i - dst_rect->y + 0.5f) * y_ratio - 0.5f;
                 src_color = render_pixel_sample_bilinear(
-                    (const uint8_t*)src->pixels, src_w, src_h, src->pitch, bx, by, false, false);
+                    (const uint8_t*)src->pixels, src_w, src_h, src->pitch, bx, by, false, true, straight_source);
             } else if (scale_mode == SCALE_MODE_LINEAR_WRAP) {
                 float bx = src_rect->x + (j - dst_rect->x + 0.5f) * x_ratio - 0.5f;
                 float by = src_rect->y + (i - dst_rect->y + 0.5f) * y_ratio - 0.5f;
                 src_color = render_pixel_sample_bilinear(
-                    (const uint8_t*)src->pixels, src_w, src_h, src->pitch, bx, by, true, false);
+                    (const uint8_t*)src->pixels, src_w, src_h, src->pitch, bx, by, true, true, straight_source);
             } else {
                 // Nearest sampling chooses the source pixel under the output
                 // pixel center; rounding its left edge shifts a 2x upscale.
@@ -399,9 +409,14 @@ void raster_blit_surface_scaled(RasterPaintContext* ctx, ImageSurface* src, Rect
 
                 uint8_t* src_pixel = (uint8_t*)src->pixels + (int_src_y * src->pitch) + (int_src_x * 4);
                 src_color = *((uint32_t*)src_pixel);
+                if (straight_source) src_color = render_pixel_premultiply_abgr(src_color);
             }
 
-            render_pixel_source_over_opaque_bytes(dst_pixel, src_color, opacity);
+            uint32_t destination;
+            memcpy(&destination, dst_pixel, sizeof(destination));
+            destination = raster_image_source_over(destination, src_color, opacity,
+                false, premultiplied_destination);
+            memcpy(dst_pixel, &destination, sizeof(destination));
         }
     }
 }

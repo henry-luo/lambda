@@ -942,7 +942,7 @@ void target_children(EventContext* evcon, View* view) {
 }
 
 void target_text_view(EventContext* evcon, ViewText* text) {
-    if (event_view_pointer_events_none(static_cast<View*>(text))) return;
+    if (view_visibility_is_hidden(text) || event_view_pointer_events_none(static_cast<View*>(text))) return;
     unsigned char* str = text->text_data();
     TextRect *text_rect = text->rect;
     MousePositionEvent* event = &evcon->event.mouse_position;
@@ -1078,6 +1078,7 @@ static void find_editable_margin_text_hit(EventContext* evcon, View* view,
     MousePositionEvent* event = &evcon->event.mouse_position;
 
     if (view->view_type == RDT_VIEW_TEXT) {
+        if (view_visibility_is_hidden(view)) return;
         ViewText* text = lam::view_require_text(view);
         for (TextRect* rect = text->rect; rect; rect = rect->next) {
             if (rect->height <= 0) continue;
@@ -1204,7 +1205,8 @@ void target_block_view(EventContext* evcon, ViewBlock* block) {
     evcon->block.x = pa_block.x + block->x + fixed.x;
     evcon->block.y = pa_block.y + block->y + fixed.y;
     MousePositionEvent* event = &evcon->event.mouse_position;
-    bool pointer_events_none = event_view_pointer_events_none(
+    // an invisible box cannot claim the hit; traversal still reaches visible descendants.
+    bool self_unhittable = view_visibility_is_hidden(block) || event_view_pointer_events_none(
         static_cast<View*>(block));
     // Content outside the overflow clip is not painted (setup_scroller), so it
     // must not take the hit either: an overflowing child would claim clicks on
@@ -1221,8 +1223,8 @@ void target_block_view(EventContext* evcon, ViewBlock* block) {
     // target the scrollbars first
     View* view = NULL;
     bool hover = false;
-    if (!pointer_events_none && block->scroller && block->scroll_mut()->pane) {
-        hover = scrollpane_target(evcon, block);
+    if (block->scroller && block->scroll_mut()->pane) {
+        hover = !self_unhittable && scrollpane_target(evcon, block);
         if (hover) {
             log_debug("hit on block scroll: %s", block->node_name());
             evcon->target = static_cast<View*>(block);
@@ -1237,12 +1239,12 @@ void target_block_view(EventContext* evcon, ViewBlock* block) {
         DocState* state = event_view_owner_state(static_cast<View*>(block));
         if (!state) state = event_context_target_state(evcon);
         float scroll_x = 0.0f, scroll_y = 0.0f;
-        // overflow-visible boxes may allocate a pane to record intrinsic overflow,
-        // but that pane does not establish a scrolling coordinate space for hits.
-        if (block->scroll()->has_hz_scroll || block->scroll()->has_vt_scroll) {
-            scroll_state_get_position_for_view(state, static_cast<View*>(block), block->scroll()->pane,
-                                               &scroll_x, &scroll_y, NULL, NULL);
-        }
+        scroll_state_get_position_for_view(state, static_cast<View*>(block), block->scroll()->pane,
+                                           &scroll_x, &scroll_y, NULL, NULL);
+        // hidden overflow scrolls without scrollbars; visible/clip axes do not scroll.
+        const ScrollProp* scroll = block->scroll();
+        if (!scroll->has_hz_scroll && scroll->overflow_x != CSS_VALUE_HIDDEN) scroll_x = 0.0f;
+        if (!scroll->has_vt_scroll && scroll->overflow_y != CSS_VALUE_HIDDEN) scroll_y = 0.0f;
         evcon->block.x -= scroll_x;
         evcon->block.y -= scroll_y;
     }
@@ -1250,7 +1252,7 @@ void target_block_view(EventContext* evcon, ViewBlock* block) {
     // Check if this block is a child-window webview — stop hit-testing here.
     // In child-window mode, the OS delivers events directly to the native web view.
     // Radiant should not process events that land inside the webview area.
-    if (!pointer_events_none && block->embed && block->embedp()->webview &&
+    if (!self_unhittable && block->embed && block->embedp()->webview &&
         block->embedp()->webview->mode == WEBVIEW_MODE_WINDOW) {
         float bx = evcon->block.x, by = evcon->block.y;
         MousePositionEvent* mev = &evcon->event.mouse_position;
@@ -1290,7 +1292,7 @@ void target_block_view(EventContext* evcon, ViewBlock* block) {
 
     // Layer-mode webview: Radiant owns events but forwards them to the offscreen web view.
     // Set target to the webview block and inject the mouse event.
-    if (!pointer_events_none && block->embed && block->embedp()->webview &&
+    if (!self_unhittable && block->embed && block->embedp()->webview &&
         block->embedp()->webview->mode == WEBVIEW_MODE_LAYER &&
         block->embedp()->webview->handle) {
         float bx = evcon->block.x, by = evcon->block.y;
@@ -1314,7 +1316,7 @@ void target_block_view(EventContext* evcon, ViewBlock* block) {
 
     // Check if this block contains an embedded iframe document
     // If so, target into the iframe's document instead of treating it as a normal block
-    if (!pointer_events_none && block->embed && block->embedp()->doc) {
+    if (!self_unhittable && block->embed && block->embedp()->doc) {
         DomDocument* iframe_doc = block->embedp()->doc;
         if (iframe_doc->view_tree && iframe_doc->view_tree->root) {
             log_debug("targeting into iframe embedded document: %s", block->node_name());
@@ -1375,7 +1377,7 @@ void target_block_view(EventContext* evcon, ViewBlock* block) {
                 }
             }
         }
-        if (!evcon->target && is_in_rich_editable_subtree(static_cast<View*>(block)) &&
+        if (!self_unhittable && !evcon->target && is_in_rich_editable_subtree(static_cast<View*>(block)) &&
             rich_host_margin_hit_allowed) {
             EditableMarginTextHit margin_hit = { NULL, NULL, 0, 0.0f, 0.0f, -1.0f };
             bool include_vertical_gap = rich_host;
@@ -1415,7 +1417,7 @@ void target_block_view(EventContext* evcon, ViewBlock* block) {
     uintptr_t self_tag = block->tag();
     bool is_replaced_block = layout_tag_is_replaced_content((NameId)self_tag) ||
         self_tag == MARKUP_NAME_HR || self_tag == MARKUP_NAME_OBJECT;
-    if (!pointer_events_none && !evcon->target &&
+    if (!self_unhittable && !evcon->target &&
         (is_replaced_block ||
          !(is_in_rich_editable_subtree(static_cast<View*>(block)) && !is_rich_editable_host(static_cast<View*>(block))))) { // check the block itself
         // use the block's own accumulated position (parent + block offset),

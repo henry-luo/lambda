@@ -1,0 +1,28 @@
+<!doctype html><meta charset="utf-8">
+<style>html,body{margin:0;background:white}button{height:24px}#box{position:absolute;left:0;top:40px;width:48px;height:32px}</style>
+<button id="check">Check longhands</button><button id="invalidvar">Invalid repeat</button><button id="recover">Recover repeat</button>
+<output id="report"></output><div id="box"></div><script>
+(function(){
+var invalid=[["repeat_alias_pair", "background-repeat", "repeat-x round"], ["repeat_extra_axis", "background-repeat", "repeat repeat repeat"], ["repeat_wrong_keyword", "background-repeat", "repeat none"], ["repeat_mixed_global", "background-repeat", "inherit,repeat"], ["origin_extra_box", "background-origin", "padding-box border-box"], ["origin_mixed_global", "background-origin", "border-box,inherit"], ["origin_text", "background-origin", "text"], ["clip_extra_box", "background-clip", "padding-box border-box"], ["clip_box_and_text", "background-clip", "text content-box"], ["clip_mixed_global", "background-clip", "inherit,padding-box"], ["blend_extra_mode", "background-blend-mode", "multiply screen"], ["blend_mixed_global", "background-blend-mode", "multiply,inherit"], ["blend_wrong_keyword", "background-blend-mode", "normal red"], ["image_extra_source", "background-image", "linear-gradient(red,red) radial-gradient(blue,blue)"], ["image_length", "background-image", "10px"], ["image_mixed_global", "background-image", "inherit,linear-gradient(blue,blue)"], ["image_color", "background-image", "red"], ["attachment_extra_term", "background-attachment", "fixed scroll"]];
+var valid=[["attachment_list", "background-attachment", "scroll,fixed,local"], ["repeat_list", "background-repeat", "repeat-x,round space,no-repeat"], ["origin_list", "background-origin", "border-box,padding-box,content-box"], ["clip_list", "background-clip", "padding-box,text,content-box"], ["blend_list", "background-blend-mode", "multiply,screen,normal"], ["image_list", "background-image", "none,linear-gradient(red,red),radial-gradient(blue,blue)"]];
+var box=document.getElementById('box'),report=document.getElementById('report');
+var base='background:linear-gradient(red,red) left top/8px 4px no-repeat blue';
+document.getElementById('check').onclick=function(){
+    for(var index=0;index<invalid.length;index++){
+        box.style.cssText='background:linear-gradient(red,red);background-repeat:no-repeat;background-origin:content-box;background-clip:padding-box;background-blend-mode:multiply;background-attachment:fixed';
+        var previous=box.style.getPropertyValue(invalid[index][1]);
+        box.style.setProperty(invalid[index][1],invalid[index][2],'important');
+        report.setAttribute('data-invalid-'+index,String(box.style.getPropertyValue(invalid[index][1])===previous&&box.style.getPropertyPriority(invalid[index][1])===''));
+    }
+    for(var index=0;index<valid.length;index++){
+        box.style.cssText='';box.style.setProperty(valid[index][1],valid[index][2]);
+        report.setAttribute('data-valid-'+index,String(box.style.getPropertyValue(valid[index][1])!==''));
+    }
+    box.style.cssText=base;
+};
+document.getElementById('invalidvar').onclick=function(){
+    box.style.setProperty('--repeat','no-repeat none');box.style.backgroundRepeat='var(--repeat,no-repeat)';
+};
+document.getElementById('recover').onclick=function(){box.style.setProperty('--repeat','no-repeat')};
+})();
+</script>

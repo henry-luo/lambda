@@ -9,6 +9,8 @@
  */
 
 #include "dom.h"
+#include "dom_graphics.h"
+#include "dom_style.h"
 #include "../../radiant/svg_animation.hpp"
 #include "dom_core.h"
 #include "realm/dom_realm.h"
@@ -2118,7 +2120,8 @@ extern "C" void* dom_document_swap_current_script(void* document,
 extern "C" void dom_set_ui_context(void* ui_context) {
     if (!js_active_runtime_state) return;
     _js_current_ui_context = (UiContext*)ui_context;
-    radiant_set_cssom_used_value_sync(ui_context ? dom_ensure_geometry_snapshot : nullptr);
+    dom_provider_call(dom_style_engine_ops(), &DomStyleEngineOps::set_used_value_sync,
+        ui_context ? dom_ensure_geometry_snapshot : nullptr);
     dom_storage_bind_document();
 }
 
@@ -4610,7 +4613,8 @@ extern "C" Item dom_computed_style_get_property(Item style_item, Item prop_name)
     // Custom names are literal DOM strings: preserve case, length and punctuation before camel-case conversion.
     if (js_prop[0] == '-' && js_prop[1] == '-' && elem->doc && elem->doc->document_pool) {
         size_t name_length = get_type_id(prop_name) == LMD_TYPE_STRING ? it2s(prop_name)->len : strlen(js_prop);
-        String* computed = css_prop_serialize_custom_property(elem->doc->document_pool,
+        String* computed = dom_provider_call(dom_style_engine_ops(), &DomStyleEngineOps::serialize_custom_property,
+            elem->doc->document_pool,
             elem, js_prop, name_length);
         return computed ? js_make_string_len(computed->chars, computed->len) : js_name_item("");
     }
@@ -4646,7 +4650,8 @@ extern "C" Item dom_computed_style_get_property(Item style_item, Item prop_name)
 
     Pool* pool = mem_pool_create(nullptr, MEM_ROLE_CSS, "cssom.dom.computed_value");
     if (!pool) return js_name_item("");
-    String* computed = css_prop_serialize_computed_value(pool, elem, prop_id, pseudo_type);
+    String* computed = dom_provider_call(dom_style_engine_ops(), &DomStyleEngineOps::serialize_computed_value,
+        pool, elem, prop_id, pseudo_type);
     // the JS string copies caller-owned output before the native scratch pool ends.
     Item result = computed ? js_make_string_len(computed->chars, computed->len) : js_name_item("");
     mem_pool_destroy(pool);
@@ -5433,7 +5438,8 @@ static float dom_computed_css_dimension(DomElement* elem, bool width_axis) {
     Pool* pool = mem_pool_create(nullptr, MEM_ROLE_CSS, "cssom.dom.computed_dimension");
     if (!pool) return 0.0f;
     CssPropertyCode property = width_axis ? CSS_PROPERTY_WIDTH : CSS_PROPERTY_HEIGHT;
-    String* value = css_prop_serialize_computed_value(pool, elem, property, 0);
+    String* value = dom_provider_call(dom_style_engine_ops(), &DomStyleEngineOps::serialize_computed_value,
+        pool, elem, property, 0);
     float result = value ? dom_parse_positive_css_dimension(value->chars) : 0.0f;
     mem_pool_destroy(pool);
     return result;
@@ -8266,7 +8272,7 @@ extern "C" void dom_after_set_attribute(void* elem_ptr,
         (str_icmp_cstr(attr_name, "width") == 0 || str_icmp_cstr(attr_name, "height") == 0)) {
         // Content-attribute mutations reset exactly like the reflected IDL
         // setters; both replace the authoritative bitmap and context state.
-        if (!radiant_canvas_reset_from_attributes(elem)) {
+        if (!dom_provider_call(dom_canvas_engine_ops(), &DomCanvasEngineOps::reset_from_attributes, elem)) {
             log_error("canvas: could not reset backing surface from %s attribute", attr_name);
         }
         dom_canvas_reset_context(dom_wrap_element(elem));
@@ -8282,7 +8288,7 @@ extern "C" void dom_after_remove_attribute(void* elem_ptr,
     dom_reinit_behavior_if_constraint_attr(elem, attr_name);
     if (elem->tag() == MARKUP_NAME_CANVAS &&
         (str_icmp_cstr(attr_name, "width") == 0 || str_icmp_cstr(attr_name, "height") == 0)) {
-        if (!radiant_canvas_reset_from_attributes(elem)) {
+        if (!dom_provider_call(dom_canvas_engine_ops(), &DomCanvasEngineOps::reset_from_attributes, elem)) {
             log_error("canvas: could not reset backing surface after removing %s", attr_name);
         }
         dom_canvas_reset_context(dom_wrap_element(elem));
@@ -11909,7 +11915,7 @@ extern "C" Item dom_set_property_impl(Item elem_item, Item prop_name, Item value
                 (strcmp(int_attr, "width") == 0 || strcmp(int_attr, "height") == 0);
             if (canvas_dimension) {
                 if ((unsigned long)n > UINT32_MAX ||
-                    !radiant_canvas_set_dimension(elem, strcmp(int_attr, "width") == 0,
+                    !dom_provider_call(dom_canvas_engine_ops(), &DomCanvasEngineOps::set_dimension, elem, strcmp(int_attr, "width") == 0,
                                                   (uint32_t)n)) {
                     return js_throw_range_error("Canvas dimensions exceed Radiant limits");
                 }

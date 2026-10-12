@@ -452,13 +452,6 @@ static bool render_border_image_common(BorderImagePaintContext* context, BorderP
     int stop_count = gradient ? gradient->stop_count : 0;
     RdtGradientStop* stops = stop_count
         ? LAMBDA_ALLOCA(stop_count, RdtGradientStop) : nullptr;
-    for (int i = 0; i < stop_count; i++) {
-        GradientStop* stop = &gradient->stops[i];
-        float pos = stop->position >= 0.0f
-            ? stop->position
-            : (stop_count > 1 ? (float)i / (float)(stop_count - 1) : 0.0f);
-        stops[i] = {pos, stop->color.r, stop->color.g, stop->color.b, stop->color.a};
-    }
 
     float source_width_total = image ? (float)image->width : rect.width;
     float source_height_total = image ? (float)image->height : rect.height;
@@ -536,6 +529,13 @@ static bool render_border_image_common(BorderImagePaintContext* context, BorderP
     float vx = line.x2 - line.x1;
     float vy = line.y2 - line.y1;
     float length_squared = gradient ? vx * vx + vy * vy : 1.0f;
+    if (gradient && !render_copy_gradient_stops(gradient->stops, stop_count,
+            sqrtf(length_squared) / context->scale, stops, stop_count, nullptr)) return false;
+    if (gradient) {
+        if (!render_normalize_linear_gradient_range(&line, stops, stop_count)) return false;
+        vx = line.x2 - line.x1; vy = line.y2 - line.y1;
+        length_squared = vx * vx + vy * vy;
+    }
 
     RdtPath* clip = context->raster ? render_path_create_clip_path(context->raster) : nullptr;
     if (clip) border_image_push_clip(context, clip, nullptr);

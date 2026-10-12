@@ -1,0 +1,14 @@
+<!doctype html><meta charset=utf-8><style>html,body{margin:0;background:white}button{height:24px}#parent{position:absolute;left:0;top:72px;font-size:4px}#box{width:48px;height:32px;font-size:30px;background-color:blue}</style>
+<button id=edges>Radial edges</button><button id=inherit>Inherit center</button><button id=resize>Resize owner</button><button id=math>Math center</button><button id=nonlinear>Nonlinear center</button><button id=wide>Resize box</button><button id=conic>Conic edges</button><button id=conicinherit>Inherit conic</button><button id=conicresize>Resize conic owner</button><div id=parent><div id=box></div></div>
+<script>(function(){var parent=document.getElementById('parent'),box=document.getElementById('box');var stops='red 0%,red 50%,blue 50%';
+function reset(){box.style.width='48px';box.style.height='32px';box.style.fontSize='4px'}
+document.getElementById('edges').onclick=function(){reset();box.style.backgroundImage='RADIAL-GRADIENT(CIRCLE 16px AT RIGHT 3px BOTTOM 5px,'+stops+')'};
+document.getElementById('inherit').onclick=function(){reset();parent.style.fontSize='4px';parent.style.backgroundImage='radial-gradient(circle 16px at right calc(1em) bottom calc(2em),'+stops+')';box.style.fontSize='30px';box.style.backgroundImage='inherit'};
+document.getElementById('resize').onclick=function(){parent.style.fontSize='8px'};
+document.getElementById('math').onclick=function(){reset();box.style.backgroundImage='radial-gradient(circle 16px at calc(25% + 4px) calc(25% + 4px),'+stops+')'};
+document.getElementById('nonlinear').onclick=function(){reset();box.style.backgroundImage='radial-gradient(circle 16px at min(25%,24px) max(25%,4px),'+stops+')'};
+document.getElementById('wide').onclick=function(){box.style.width='96px';box.style.height='64px'};
+document.getElementById('conic').onclick=function(){reset();box.style.backgroundImage='conic-gradient(at right 3px bottom 5px,red 0deg,red 90deg,blue 90deg,blue 360deg)'};
+document.getElementById('conicinherit').onclick=function(){reset();parent.style.fontSize='4px';parent.style.backgroundImage='conic-gradient(at right calc(1em) bottom calc(2em),red 0deg,red 90deg,blue 90deg,blue 360deg)';box.style.fontSize='30px';box.style.backgroundImage='inherit'};
+document.getElementById('conicresize').onclick=function(){parent.style.fontSize='8px'};
+})();</script>

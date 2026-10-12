@@ -363,7 +363,7 @@ static bool render_text_background_clip_linear_text(RasterRenderContext* rdcon,
                                                     LinearGradient** out_gradient,
                                                     Rect* out_gradient_rect);
 static Color render_text_sample_linear_gradient(LinearGradient* gradient, Rect rect,
-                                                float px, float py);
+                                                float px, float py, float scale);
 
 CssEnum render_text_inherited_transform(ViewText* text_view) {
     if (!text_view) return CSS_VALUE_NONE;
@@ -448,13 +448,7 @@ static bool render_text_rect_misses_clip(RasterRenderContext* rdcon, float x, fl
 
 void render_text_view(RasterRenderContext* rdcon, ViewText* text_view) {
 
-    // CSS 2.1 §11.2: text inherits visibility from parent element
-    if (text_view->parent && text_view->parent->is_element()) {
-        DomElement* parent_elem = lam::dom_require_element(text_view->parent);
-        if (parent_elem->in_line && parent_elem->inl()->visibility == VIS_HIDDEN) {
-            return;
-        }
-    }
+    if (view_visibility_is_hidden(text_view)) return;
 
     if (!font_box_handle(&rdcon->font)) {
         return;
@@ -734,7 +728,7 @@ void render_text_view(RasterRenderContext* rdcon, ViewText* text_view) {
                             float gx_center = x + glyph->bitmap.bearing_x + glyph->bitmap.width * 0.5f;
                             float gy_center = y + ascend - glyph->bitmap.bearing_y + glyph->bitmap.height * 0.5f;
                             rdcon->color = render_text_sample_linear_gradient(
-                                text_gradient, text_gradient_rect, gx_center, gy_center);
+                                text_gradient, text_gradient_rect, gx_center, gy_center, s);
                         }
                         draw_glyph(rdcon, &glyph->bitmap, lroundf(x + glyph->bitmap.bearing_x), lroundf(y + ascend - glyph->bitmap.bearing_y));
                         rdcon->color = glyph_saved_color;
@@ -1091,19 +1085,6 @@ static bool render_text_background_clip_linear_text(RasterRenderContext* rdcon,
     return true;
 }
 
-static float render_text_gradient_stop_position(LinearGradient* gradient, int index) {
-    if (!gradient || index < 0 || index >= gradient->stop_count) {
-        return 0.0f;
-    }
-    float position = gradient->stops[index].position;
-    if (position >= 0.0f) {
-        return position;
-    }
-    return gradient->stop_count > 1
-        ? (float)index / (float)(gradient->stop_count - 1)
-        : 0.0f;
-}
-
 static unsigned char render_text_lerp_channel(unsigned char a, unsigned char b, float t) {
     float v = (float)a + ((float)b - (float)a) * t;
     if (v <= 0.0f) return 0;
@@ -1112,7 +1093,7 @@ static unsigned char render_text_lerp_channel(unsigned char a, unsigned char b, 
 }
 
 static Color render_text_sample_linear_gradient(LinearGradient* gradient, Rect rect,
-                                                float px, float py) {
+                                                float px, float py, float scale) {
     Color fallback = {0};
     fallback.a = 255;
     if (!gradient || gradient->stop_count <= 0 || rect.width <= 0.0f || rect.height <= 0.0f) {
@@ -1127,6 +1108,9 @@ static Color render_text_sample_linear_gradient(LinearGradient* gradient, Rect r
     float vx = line.x2 - line.x1;
     float vy = line.y2 - line.y1;
     float len2 = vx * vx + vy * vy;
+    lam::Temp<RdtGradientStop> stops = lam::temp_array<RdtGradientStop>(gradient->stop_count, MEM_CAT_RENDER);
+    if (!stops || !render_copy_gradient_stops(gradient->stops, gradient->stop_count,
+            sqrtf(len2) / scale, stops.get(), gradient->stop_count, nullptr)) return fallback;
     float pos = len2 > 1e-7f
         ? ((px - line.x1) * vx + (py - line.y1) * vy) / len2
         : 0.0f;
@@ -1134,7 +1118,7 @@ static Color render_text_sample_linear_gradient(LinearGradient* gradient, Rect r
 
     int right = 0;
     while (right < gradient->stop_count &&
-           render_text_gradient_stop_position(gradient, right) < pos) {
+           stops[right].offset < pos) {
         right++;
     }
     if (right <= 0) {
@@ -1144,8 +1128,8 @@ static Color render_text_sample_linear_gradient(LinearGradient* gradient, Rect r
         return gradient->stops[gradient->stop_count - 1].color;
     }
 
-    float left_pos = render_text_gradient_stop_position(gradient, right - 1);
-    float right_pos = render_text_gradient_stop_position(gradient, right);
+    float left_pos = stops[right - 1].offset;
+    float right_pos = stops[right].offset;
     float t = right_pos > left_pos ? (pos - left_pos) / (right_pos - left_pos) : 0.0f;
     Color left = gradient->stops[right - 1].color;
     Color right_color = gradient->stops[right].color;

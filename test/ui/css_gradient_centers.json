@@ -1,0 +1,531 @@
+{
+  "name": "Radial and conic centers compute full edge offsets, owner fonts and nonlinear percentage math across mutations and densities",
+  "html": "test/ui/css_gradient_centers.html",
+  "viewport": {
+    "width": 640,
+    "height": 192
+  },
+  "events": [
+    {
+      "type": "click",
+      "target": {
+        "selector": "#edges"
+      }
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#box",
+        "offset_x": 45,
+        "offset_y": 27
+      },
+      "search_radius": 0,
+      "min_r": 255,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 0,
+      "max_b": 0
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#box",
+        "offset_x": 24,
+        "offset_y": 16
+      },
+      "search_radius": 0,
+      "min_r": 0,
+      "max_r": 0,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 255,
+      "max_b": 255
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#inherit"
+      }
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#box",
+        "offset_x": 44,
+        "offset_y": 24
+      },
+      "search_radius": 0,
+      "min_r": 255,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 0,
+      "max_b": 0
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#box",
+        "offset_x": 40,
+        "offset_y": 16
+      },
+      "search_radius": 0,
+      "min_r": 0,
+      "max_r": 0,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 255,
+      "max_b": 255
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#resize"
+      }
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#box",
+        "offset_x": 40,
+        "offset_y": 16
+      },
+      "search_radius": 0,
+      "min_r": 255,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 0,
+      "max_b": 0
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#box",
+        "offset_x": 44,
+        "offset_y": 24
+      },
+      "search_radius": 0,
+      "min_r": 0,
+      "max_r": 0,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 255,
+      "max_b": 255
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#math"
+      }
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#box",
+        "offset_x": 16,
+        "offset_y": 12
+      },
+      "search_radius": 0,
+      "min_r": 255,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 0,
+      "max_b": 0
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#nonlinear"
+      }
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#box",
+        "offset_x": 12,
+        "offset_y": 8
+      },
+      "search_radius": 0,
+      "min_r": 255,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 0,
+      "max_b": 0
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#wide"
+      }
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#box",
+        "offset_x": 24,
+        "offset_y": 16
+      },
+      "search_radius": 0,
+      "min_r": 255,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 0,
+      "max_b": 0
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#conic"
+      }
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#box",
+        "offset_x": 47,
+        "offset_y": 24
+      },
+      "search_radius": 0,
+      "min_r": 255,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 0,
+      "max_b": 0
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#box",
+        "offset_x": 43,
+        "offset_y": 29
+      },
+      "search_radius": 0,
+      "min_r": 0,
+      "max_r": 0,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 255,
+      "max_b": 255
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#conicinherit"
+      }
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#box",
+        "offset_x": 46,
+        "offset_y": 22
+      },
+      "search_radius": 0,
+      "min_r": 255,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 0,
+      "max_b": 0
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#conicresize"
+      }
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#box",
+        "offset_x": 46,
+        "offset_y": 22
+      },
+      "search_radius": 0,
+      "min_r": 0,
+      "max_r": 0,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 255,
+      "max_b": 255
+    },
+    {
+      "type": "set_device_scale",
+      "scale": 2
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#edges"
+      }
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#box",
+        "offset_x": 45,
+        "offset_y": 27
+      },
+      "search_radius": 0,
+      "min_r": 255,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 0,
+      "max_b": 0
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#box",
+        "offset_x": 24,
+        "offset_y": 16
+      },
+      "search_radius": 0,
+      "min_r": 0,
+      "max_r": 0,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 255,
+      "max_b": 255
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#inherit"
+      }
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#box",
+        "offset_x": 44,
+        "offset_y": 24
+      },
+      "search_radius": 0,
+      "min_r": 255,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 0,
+      "max_b": 0
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#box",
+        "offset_x": 40,
+        "offset_y": 16
+      },
+      "search_radius": 0,
+      "min_r": 0,
+      "max_r": 0,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 255,
+      "max_b": 255
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#resize"
+      }
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#box",
+        "offset_x": 40,
+        "offset_y": 16
+      },
+      "search_radius": 0,
+      "min_r": 255,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 0,
+      "max_b": 0
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#box",
+        "offset_x": 44,
+        "offset_y": 24
+      },
+      "search_radius": 0,
+      "min_r": 0,
+      "max_r": 0,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 255,
+      "max_b": 255
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#math"
+      }
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#box",
+        "offset_x": 16,
+        "offset_y": 12
+      },
+      "search_radius": 0,
+      "min_r": 255,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 0,
+      "max_b": 0
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#nonlinear"
+      }
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#box",
+        "offset_x": 12,
+        "offset_y": 8
+      },
+      "search_radius": 0,
+      "min_r": 255,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 0,
+      "max_b": 0
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#wide"
+      }
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#box",
+        "offset_x": 24,
+        "offset_y": 16
+      },
+      "search_radius": 0,
+      "min_r": 255,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 0,
+      "max_b": 0
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#conic"
+      }
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#box",
+        "offset_x": 47,
+        "offset_y": 24
+      },
+      "search_radius": 0,
+      "min_r": 255,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 0,
+      "max_b": 0
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#box",
+        "offset_x": 43,
+        "offset_y": 29
+      },
+      "search_radius": 0,
+      "min_r": 0,
+      "max_r": 0,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 255,
+      "max_b": 255
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#conicinherit"
+      }
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#box",
+        "offset_x": 46,
+        "offset_y": 22
+      },
+      "search_radius": 0,
+      "min_r": 255,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 0,
+      "max_b": 0
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#conicresize"
+      }
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#box",
+        "offset_x": 46,
+        "offset_y": 22
+      },
+      "search_radius": 0,
+      "min_r": 0,
+      "max_r": 0,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 255,
+      "max_b": 255
+    },
+    {
+      "type": "set_device_scale",
+      "scale": 1
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#box",
+        "offset_x": 46,
+        "offset_y": 22
+      },
+      "search_radius": 0,
+      "min_r": 0,
+      "max_r": 0,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 255,
+      "max_b": 255
+    }
+  ]
+}

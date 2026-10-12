@@ -906,8 +906,11 @@ the image-selection result alone does not establish pseudo-layout parity.
 An explicitly requested export device environment reaches SVG/PDF sessions as
 well as raster sessions. Export density remains independent of asset selection
 ([RSC6–RSC7](Radiant_Scale.md#rsc6--paint-semantics-are-logical-raster-lowering-is-physical)).
-URL-less decoded/encoded raster resources use the common inline image payload
-when exported to SVG; an absent source URL cannot suppress the image.
+Decoded raster resources use the common inline image payload when exported to
+SVG, including admitted file URLs; relocatable output cannot depend on the source
+file remaining beside the exported document. Producers request lazy decoding
+before recording pixels and preserve decoded dimensions independently of natural
+size. An absent source URL cannot suppress a decoded image.
 Fallback glyph advances and bitmap placement convert physical font resources
 to CSS coordinates exactly once. The same conversion feeds SVG/PDF text-width
 and emphasis calculations; explicit device density cannot enlarge logical text.
@@ -942,6 +945,73 @@ Export extents compose the same transform matrices for boxes and overflow clips
 before integral surface allocation. Bounded translation controls cover these
 consumers; broader transformed sampling and projective export remain open.
 
+Gradient list images share the used marker rectangle and image producer across
+raster, SVG and PDF. Linear/radial commands own their path and copied stops;
+conic/repeating-radial commands own generated pixels until all deferred consumers
+release them (**D4.5.1v4**). Coincident stops select the following color at their
+boundary. Software sampling stores premultiplied pixels; SVG encoding and PDF
+soft-mask images receive straight channels. Linear repetitions reuse the checked,
+heap-owned CSS stop expansion. A zero period uses equally spaced stops for the
+premultiplied average; a linear period smaller than one physical output pixel
+uses its distance-weighted average, per
+[CSS Images 3 §3.3](https://drafts.csswg.org/css-images-3/#repeating-gradients).
+Resolved periods retain their stop sequence; capacity/allocation failure must
+not silently substitute an approximate solid color or allocate an attacker-sized
+stack array. Software interpolation reuses the premultiplied sRGB color helper.
+Subpixel radial/conic repetitions and density decisions under accumulated
+ancestor magnification remain unqualified.
+
+Export effect captures lower logical PaintIR and page backdrops at the selected
+page density once, then replay through the shared budgeted snapshot path. Capture
+bounds are physical pixels; their embedded destination stays logical. Snapshot
+replay owns a real scratch arena, so saved backdrops and blur intermediates can
+allocate; a null backing must not silently suppress their work. Effect groups
+composite premultiplied foregrounds before the snapshot returns straight pixels. Shared
+replay preserves gradient spread/ellipse transforms and path clipping in PDF,
+including transparent stops, rather than approximating gradients over white.
+The bounded controls cover constant, hard-stop repeating and degenerate marker
+images, translation, identity brightness, transparent colors and device scales
+1x/2x. This does not qualify complete gradient grammar or color interpolation.
+
+Replaced bitmap images and Canvas pixels share fitting, clipping and the
+semantic image producer. Decode file sources before the owned PaintIR snapshot;
+export effect replay cannot obtain a later borrowed decode. Canvas drawing
+surfaces advertise their premultiplied channels, and CPU blits filter those
+channels before source-over composition while respecting destination alpha.
+Affine and projective vector image replay uses the shared pixel-center sampler.
+The replaced content and its decorations occupy one block effect scope, so CSS
+group opacity is applied once. Document surfaces remain synchronous borrows;
+deferred paint owns snapshots under **D4.5.1v4 / D4.1.4v5**.
+Content clipping uses the same containment test as raster painting; coincident
+image/content edges do not add a second PDF clip that compounds antialiasing.
+
+Acquiring a WebGL Canvas surface refreshes dirty GPU pixels before the semantic
+producer takes its owned snapshot. The document preparation pass calls the same
+helper before retained raster ancestors can bypass traversal. Unchanged reads
+reuse the publication; replacement retires its generation while outstanding
+leases keep the previous pixels alive. Vector output can therefore paint first,
+without depending on a prior raster pass. Native graphics still requires the
+full GLFW host; headless file controls explicitly enable its existing
+`LAMBDA_HEADLESS_GLFW_WINDOW=1` option. Default null-host rendering does not create
+a GPU context. Inactive platform backends and broader resampling need separate
+qualification.
+
+Bounded 2D Canvas controls cover opaque/translucent pixels, saved drawing state,
+translation, identity brightness and group opacity at 1x/2x. PDF comparisons
+retain a precision limit: Poppler's translucent soft mask plus constant alpha
+can differ by one color level from a precombined mask byte. Opaque controls use
+independent baked-alpha PNGs; translucent controls retain the same alpha
+representation for exact comparisons. WebGL controls additionally distinguish
+premultiplied/straight drawing buffers and preserved/discarded buffers; host
+availability and lifetime checks are required alongside matching export pixels.
+
+An image without natural dimensions uses a 1em-square marker default object size,
+per [CSS Lists 3 §3.3](https://drafts.csswg.org/css-lists-3/#list-style-image).
+The current Chromium 152 reference uses a smaller gradient marker and different
+baseline placement. It also returns the final stop for the recorded zero-period
+linear/radial/conic controls, differing from the specified average. Retain those
+browser differences rather than crediting failed assertions as parity.
+
 Selection occurs when the CSS image recomputes. A pure device-scale repaint may
 retain its earlier selected density under CSS Images' UA selection policy;
 subsequent declaration changes use the current environment. This preserves
@@ -953,10 +1023,236 @@ edge rasterization and per-format canvas padding differ. Exact image references
 are compared within each output format, with independent selected-color coverage
 to exclude matching omissions.
 
-Complete image-function/gradient-body grammar, gradient marker export, radial/
-conic and SVG URL border sources, multilayer descriptors, generated-gradient
+Complete image-function/gradient-body grammar, radial/conic and SVG URL border
+sources, multilayer descriptors, generated-gradient
 replacement, CSSOM serialization, registered values, transformed sampling and
 independent/paged CSS-image producers retain separate acceptance controls.
+
+### 3.18 Ordered background layers (delivery contract; implementation pending)
+
+Resolved image objects and stop arrays follow **D4.5.1v4 / D4.1.4v5**;
+deferred PaintIR owns its paths, stops and generated pixels. **CI-18** follows
+[CSS Backgrounds 3 §2.1–2.3](https://www.w3.org/TR/css-backgrounds-3/#layering):
+retain an authored-order image list, including `none` and unavailable images.
+Paint from the last layer to the first, above the single background color.
+Each layer keeps its position, size, repeat, origin, clip and attachment;
+shorter longhand lists repeat from their first entry, while surplus entries
+do not create images. The color uses the last image layer's clip. Shorthand
+omissions reset the corresponding components and compete with longhands
+through the existing cascade, including importance and rollback.
+
+Use one ordered owned descriptor shape for URL, selected image and gradient
+sources. Preserve component-list identity through computation so changing the
+image count does not lose repeated longhand values. Explicit image inheritance
+clones the source payloads independently and preserves the child's other
+background components. Construct a complete replacement before retiring the
+previous owner. `none` retires its image payload while preserving its layer
+index for component-list matching.
+
+Reuse the shared gradient-image producer and tile plan in raster, SVG and PDF.
+No backend may regroup layers by image kind or omit the list in favor of its
+scalar projection. Native physical painting converts logical rectangles and
+the active transform exactly once; deferred exports retain owned clips.
+Keep blend boundaries tied to each authored layer and the background's isolated
+backdrop. Wider gradient grammar and unsupported blend operators need their own
+acceptance evidence.
+
+The frozen pre-implementation mixed-layer probe fails 14/18 comparisons: linear/radial
+ordering fails in both declaration forms, and vector consumers omit all six
+mixed lists. Acceptance requires independent color/position references,
+URL/gradient mixing, empty layer indexes, repeated component lists, cascade
+overrides, live replacement/inheritance, retained release and 1x/2x effects
+through all three outputs. The contract does not promote the support matrix
+until those controls pass.
+
+Implementation progress (2026-10-12; qualification pending): the ordered owner
+and independent computed component periods now feed the common tile/gradient
+producer. The current candidate matches all **18/18** original PNG/SVG/PDF
+ordering references. Six focused native controls pass, including surplus-value
+inheritance when parent/child image counts differ, parent retirement and 256
+replacement cycles. Full native vector and view controls pass **127/127** and
+**604/604**. Constant gradient images record an owned solid path; varying
+gradients retain stop/pixel ownership controls. Background blending uses an
+isolated backdrop and shared raster replay for export composition.
+
+The new 1x/2x export group contains **24 pairs / 72 comparisons**. All raster
+and SVG comparisons pass; **two 2x PDF blend comparisons still fail at the
+reconstructed image boundary**. Transparent-padding and explicit PDF mask
+experiments retain their raw failures and are not part of the source fix.
+The candidate's Radiant gate passed **4,290 full / 349 partial**; the subsequent
+owner-publication ordering cleanup rebuilt and passed **604/604** view controls
+again. Its matching 127-input isolated ASan build passes **1,067 native cases**.
+The next increment fixes axis-list inheritance by retaining independent X/Y
+periods before layer projection. Chromium verifies the two-/three-entry periods
+when a child inherits into four images. Parent retirement, restyling, shorthand
+competition/importance and variable/defaulting controls pass; four visible-tile
+pairs pass **12/12** PNG/SVG/PDF comparisons at 1x/2x. Native suites pass
+**606/606** views and **127/127** vector cases. Its matching 127-input ASan build
+passes **1,069 native cases**, the Canvas JS golden and all 12 axis pixel
+comparisons. The instrumented ordered-background group retains the two PDF
+boundary failures without an ASan report; the ordinary runtime stays unchanged.
+These results do not replace the earlier aggregate's provenance. Full
+positions/math, broader URL/attachment/transformed
+sampling, live changes and motion/serialization still need acceptance evidence.
+These controls do not qualify the complete family.
+
+The full-position follow-up uses a shared physical-position descriptor for
+keyword order, three-/four-value edge offsets and axis longhands. Parsing and
+computation share this descriptor. Linear math retains separate percentage/px
+terms; nonlinear percentage math owns a computed tree and evaluates the remaining
+percentage against each tile's free space (**D4.5.1v4 / D4.1.4v5**, **CI-18**).
+The 21/24 failing predecessor probe improves to 36/36 passing comparisons in an
+extended 12-case probe. Its native view suite passes 609 cases, including inherited
+font-relative lengths and parent retirement. Durable 1x/2x position exports pass
+72/72 comparisons; a document-scoped quirks refinement and fresh ASan/aggregate
+qualification remain in progress. Broader size/gradient geometry, mutation,
+attachment/sampling and motion/serialization acceptance remains open.
+
+The next position revision also confines quirky bare-number lengths to their
+document/property context, retaining standards-mode/function rejection. Its
+native view suite passes 610 cases and position/axis exports pass 84/84
+comparisons. Its Lambda/input aggregate passes 6,647 cases and required Radiant
+passes 4,290 full / 349 partial; the ordinary runtime remains unchanged. Its
+matching 131-input ASan build passes 1,073 native cases, the Canvas JS golden
+and all 84 position/axis export comparisons. The ordered group retains its two
+PDF failures without an ASan report. Edge-offset and nonlinear live UI controls
+pass 44 exact pixel assertions across normal/ASan runs, including image
+clear/restore and a causal 1x-to-2x device-scale change. The nonlinear fixture is
+durable; its fresh required Radiant aggregate passes 4,291 full / 349 partial
+(4,640 cases). All four strict DSOs pass; the raw boundary gate retains the same
+226 deferred / 89 unapproved symbols against the unchanged 165 allowance.
+The two
+blend PDFs and four direct writer image/rectangle controls match exactly under
+Poppler Cairo at 144 dpi, while their existing `pdftoppm` edge failures remain
+preserved. This is evidence of a rasterizer difference, not permission to change
+the runner or qualify the complete family.
+
+
+The size-math follow-up shares the computed-expression owner with positions
+(**D4.5.1v4 / D4.1.4v5**, **CI-18**). Size percentages use the full positioning
+area, while positions use image free space. It validates the per-layer size
+shape, retains linear/nonlinear math, clamps used calculations to the nonnegative
+size range, suppresses explicit zero sizes and resolves a gradient's `auto` axis
+against the positioning area. The 15/18 failing predecessor probe improves to
+18/18 matches. Its frozen candidate passes 613 native view cases, 72 size and
+84 position/axis export comparisons, and 22 live pixel assertions over 35 events.
+Its required Lambda/input aggregate passes 6,647 cases; required Radiant passes
+4,291 full / 349 partial (4,640 cases). Matching ASan freezes 131 source inputs and passes 1,076 native cases, the
+Canvas JS golden, all 156 size/position/axis export comparisons and 22 live pixel
+assertions. The full normal export gate is 225/231: alpha opacity, three SVG
+rectangle-output groups, gradient markers and ordered PDF blend edges remain
+failed. The five groups beyond ordered PDF fail identically on the predecessor
+background candidate and pass on the qualified P0 style-provider runtime.
+The shared solid-background/uniform-gradient path substitution is repaired by
+the subsequent paint increment below. All strict DSOs pass with the same 226 deferred / 89 unapproved imports;
+the unchanged raw boundary gate still fails.
+Broader shorthand/gradient grammar and motion/serialization remain open.
+
+
+The subsequent 23-input paint candidate restores canonical rectangles, preserves
+standalone gradient-image sampling and lowers integral rectangular clip
+intersections through the existing exact source-over compositor (**CI-18**;
+**D4.5.1v4 / D4.1.4v5**). It passes 128 vector / 613 view cases, 22 live pixels and
+both required aggregates (6,647 Lambda/input; 4,292 full / 349 partial Radiant).
+Full exports improve to 230/231: the five earlier paint regression groups pass,
+while exactly two ordered PDF edge assertions remain. Matching 131-input ASan
+passes 1,077 native cases, the Canvas JS golden, 156 size/position/axis and 600
+marker comparisons, the five repaired groups and 22 live pixels, with no ASan
+report and the same two PDF failures. Four strict DSOs pass; the boundary still
+has the identical 226 deferred / 89 unapproved imports. Frozen proof is under
+`temp/css_support_p1/background_layers/asan_sources_12/`. The next reproduced
+shorthand defect now uses one lower layer decoder for validation, computation
+and computed-color extraction (**CI-18**). Its frozen 26-input candidate passes
+615 native views, 14 literal preservation controls, 29 live assertions and 30
+independent PNG/SVG/PDF comparisons at 1×/2×. Matching-source qualification
+passes both required aggregates (6,647 Lambda/input; 4,293 full / 349 partial
+Radiant), 231/232 full export groups and 1,079 ASan native cases. The Canvas JS
+golden, both live fixtures (22 + 29 assertions), 186 background and 600 marker
+comparisons pass; two PDF edge assertions remain without an ASan report. Four
+strict DSOs pass and the unchanged boundary has 226 deferred / 89 unapproved
+imports. Frozen proof is in `ordered_13_sources/`, `asan_sources_13/` and
+`grammar13q_qualification_results.json` below the same work directory. No
+whole-family promotion follows. The next reproduced defect is longhand
+component grammar: 17 invalid replacements and one rejected valid attachment
+list, against 18 invalid and six valid Chromium controls (**CI-18**).
+
+
+The shared component-list validator now preserves all 18 invalid longhand
+controls, accepts six valid lists and passes 30 live assertions, against 19
+failures on the predecessor (**CI-18**). Repeat parsing/computation uses one
+lower descriptor; supported-image recognition is shared with registered values
+and border images. Independent inherited periods/storage and 256 recascades
+retain stable pool bytes (**D4.5.1v4 / D4.1.4v5**). A mixed URL/local, gradient/
+scroll and gradient/fixed page passes 26 live assertions over 1×/2× changes.
+The frozen 30-input candidate passes required aggregates (6,647 Lambda/input;
+4,295 full / 349 partial Radiant), 231/233 full export groups and 1,081 ASan
+native cases. Canvas JS and all three live fixtures (22 + 30 + 26) pass with no
+ASan report. Two bitmap/PDF edge assertions and a new clipped-vector-tile PDF
+assertion remain. Four strict DSOs pass; the boundary retains 226 deferred / 89
+unapproved imports. Frozen proof is in `ordered_14_sources/`, `asan_sources_14/`
+and `grammar14q_qualification_results.json` below the same work directory.
+
+The following coverage repair merges touching uniform-gradient tiles and
+intersects rectangular clip geometry, retaining real space gaps; a single
+`space` tile also uses its authored position (**CI-18**). Predecessor probes fail
+21/36 uniform-tile and all nine single-space output comparisons; Chromium
+confirms all 30 independent reference pairs at 1×/2×. Full qualification of
+this repair and background computed-accessor completion remain pending.
+
+The full coverage candidate passes 232/234 export groups, 1,081 ASan native
+cases and 133 live assertions per runtime, retaining the two ordered bitmap
+PDF assertions and a negative-position PDF clip-edge assertion. The follow-up
+sharp-rectangle intersection repair passes all 234 affected output comparisons;
+the experimental zero-radius primitive conversion passed those export controls but failed the combined Lambda/raster gates. The final repair recognizes the original sharp rectangular contours and preserves their stored path representation. Nine
+computed background component accessors also share layout's winner/substitution
+and shorthand decoding. Owner-font math uses the common SVG/grid length
+normalizer; independent inherited periods project only at the receiving image
+count, and before/after queries compute in their originating font context
+(**CI-18**, **D4.5.1v4 / D4.1.4v5**). The new live fixture passes 20/20 Chromium
+references, all 620 view cases pass, and computed reads reach 24 independent
+export comparisons. The final 37-input combined candidate (`ordered_17d.exe`, `reads17dq_*`) passes both required aggregates (6,647 Lambda/input; 4,299 full / 349 partial Radiant), 235/236 full export groups, 1,086 matching 131-input ASan native cases, 372 background/overflow/read and 600 marker comparisons, six live fixtures (153 assertions per runtime) and the Canvas JS golden. The two original ordered bitmap PDF assertions and unchanged 226 deferred / 89 unapproved imports remain open. Original contour storage also preserves the fractional-alpha and affine controls. Image/shorthand getters, effect sampling and broader image-family acceptance remain open.
+
+
+The subsequent explicit radial-radius repair shares one lower prelude decoder
+with background/registered image validation and selected `image-set()` candidates.
+Shape inference and radius arity follow [CSS Images 3 §3.2.1](https://www.w3.org/TR/css-images-3/#radial-gradients).
+Computed descriptors own owner-normalized radius math; geometry supplies each
+tile's independent width/height percentage basis. Image inheritance deep-clones
+that syntax, and the common release path covers mask replacement (**CI-18**,
+**D4.5.1v4 / D4.1.4v5**). Initial controls pass 624 native view cases, 84 durable
+export comparisons and 26 live Chromium-matched assertions. The frozen 40-input lowercase-radius checkpoint passes both required gates (6,647 Lambda/input; 4,300 full / 349 partial Radiant), 236/237 full exports, 1,090 matching 131-input ASan native cases, 456 background/radius/overflow/read and 600 marker comparisons, 179 live assertions per runtime and the Canvas JS golden (`radial18q_*`). The two ordered bitmap PDF assertions and unchanged 226 deferred / 89 unapproved imports remain open. A follow-up uppercase prelude probe exposes a validator case regression assigned to the next candidate; full radial/conic centers also fail all 30 off-center output comparisons despite 20 exact Chromium reference pairs. Case grammar, full centers, stop hints/interpolation, computed image/shorthand reads and effect sampling remain open.
+
+
+The full-center/case increment now shares the generic position decoder and
+owned geometry across radial/conic producers. Edge offsets use the whole
+gradient box; nonlinear expressions keep their declaration-owner lengths and
+receive each tile's percentage basis at paint. Keyword matching reuses the
+caseless identifier matcher, and all three gradient kinds share one lower
+function/repetition metadata table. The uppercase radius regression is corrected.
+Controls pass 627 native views, 96 durable 1×/2× output comparisons and 27 live
+Chromium assertions. The frozen 42-input normal / 131-input ASan checkpoint passes fresh 6,647 Lambda/input and 4,301 full / 349 partial Radiant cases, 238/239 exports, 1,093 sanitizer cases, 206 live assertions per runtime, the Canvas JS golden and 552 background/geometry/read plus 600 marker comparisons (`centers19q_*`). Two ordered PDF edge assertions and unchanged 226 deferred / 89 unapproved imports remain open. Wider body/stop/hint grammar and computed image/effect consumers remain open (**CI-18**, **D4.5.1v4 / D4.1.4v5**).
+
+The next applied stop-math increment retains per-stop owned computed syntax,
+shares used-line fixup across existing image consumers and validates typed
+stop bodies before choosing literal/selected images. Deep clone/retirement
+controls follow **D4.5.1v4 / D4.1.4v5**. Focused checks pass 631 view/style cases,
+130 vector cases, 126 real-paint all-output comparisons, four raster-only
+mask/text comparisons and 34 Chromium-matched live assertions. The frozen 47-input normal /131-input ASan checkpoint passes both required gates (6,647 Lambda/input; 4,302 full /349 partial Radiant), 240/241 exports, 1,097 sanitizer cases, 240 live assertions per runtime, the Canvas JS golden and all 18 focused groups (678 background/geometry/read, four raster-only mask/text and 600 marker comparisons) in `stops20q_*`. The two ordered PDF edge assertions and unchanged 226 deferred /89 unapproved imports remain open. Existing SVG/PDF mask and clipped-text omissions are
+explicit P2.2 work, excluded from all-output credit; wider prelude grammar,
+angle-percentage math and transition-hint interpolation remain open (**CI-18**).
+
+The existing radial mask now scopes flattened export subtrees through the shared
+`PaintEffectGroup` descriptor and raster capture. Sampling retains whole-box
+geometry and the inverse of effective density/transforms; opacity and masking
+composite once before blend. Borrowed mask display items remain unretainable
+while captured pixels own their storage (**D4.5.1v4 /D4.1.4v5**, **CI-18**).
+Sixteen native nested-opacity/clip/blend/density controls, 30 real-paint output
+comparisons and 30 Chromium-matched live assertions pass. Frozen 51/131-input
+`mask21q_*` passes both required gates (6,647 Lambda/input; 4,304 full /349
+partial Radiant), 241/242 full exports, 1,098 ASan cases, 270 live assertions
+per runtime and all 19 focused export groups. Two prior PDF edge assertions
+and unchanged 226 deferred /89 unapproved imports remain. Full mask grammar,
+visibility and clipped-gradient-text export paths remain separate work.
 
 ## 4. Instrumentation and decision criteria
 
@@ -1463,3 +1759,21 @@ The first implementation should concentrate on the measured condition and
 owned-style retention paths, while preserving the demonstrated plain-recipe
 reuse. Larger representation changes then have a controlled baseline and
 explicit ownership gates.
+
+
+**CI-18 visibility paint/hit checkpoint (2026-10-12):** A shared computed-self
+visibility predicate suppresses own hidden and ordinary collapsed paint while
+retaining explicit visible descendants. Raster/export text, images, markers,
+outlines, column rules and scrollbars share that predicate; inline-SVG retains
+its internal visibility renderer. Hidden-overflow hit coordinates use stored
+programmatic offsets independently of scrollbar presence. Sixty PNG/SVG/PDF
+comparisons and72 causal live assertions pass at1x/2x. Frozen58-input normal
+`014f13f760232055dc4768963c01101fff97550b1fa415cc1fc14aa859bf11c2`
+and132-input ASan
+`2d540b2f9c2dafee507407cc98289cc1b43648f4964d241bb2188422116f4a8b`
+pass6647 core/input,4305 full/349 partial Radiant,1098 sanitizer native and342
+live assertions per runtime. All20 focused groups and the Canvas golden pass;
+full exports242/243 retain only two old ordered2x PDF edges. Boundary226/89 is
+unchanged. Owners retain **D4.5.1v4 /D4.1.4v5**. Table collapse layout, focus,
+link annotations and broader paged/effect consumers remain open. Evidence:
+`temp/css_support_p1/background_layers/visibility22q_*`,73 protected artifacts.

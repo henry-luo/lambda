@@ -7,6 +7,8 @@
 #include "../../runtime/transpiler.hpp"
 #include "radiant_host_api.hpp"
 #include "radiant_dom_bridge.hpp"
+#include "radiant_webgl_bridge.hpp"
+#include "../../dom/dom_style.h"
 #include "radiant_input_value.hpp"
 #include "../../../lib/tagged.hpp"
 #include "../../../radiant/layout.hpp"
@@ -4936,7 +4938,34 @@ static const JubeModuleDef radiant_module = {
 extern "C" void dom_webgl_register_static(void);
 extern "C" void radiant_animation_register_static(void);
 
+// Registration precedes module init: importing dom alone still needs native
+// providers, including on cold workers (D7.3.3–D7.3.4, D7.5.3).
+static const DomCanvasEngineOps radiant_canvas_operations = {
+#define RADIANT_CANVAS_ENTRY(result, name, parameters) radiant_canvas_##name,
+    DOM_CANVAS_ENGINE_OPERATIONS(RADIANT_CANVAS_ENTRY)
+#undef RADIANT_CANVAS_ENTRY
+};
+static const DomWebGlEngineOps radiant_webgl_operations = {
+#define RADIANT_WEBGL_ENTRY(result, name, parameters) radiant_webgl_##name,
+    DOM_WEBGL_ENGINE_OPERATIONS(RADIANT_WEBGL_ENTRY)
+#undef RADIANT_WEBGL_ENTRY
+};
+static const DomStyleEngineOps radiant_style_operations = {
+    dom_ensure_computed,
+    css_prop_serialize_computed_value,
+    css_prop_serialize_custom_property,
+    css_compute_element_custom_property,
+    css_transition_capture_before_change,
+    radiant_set_cssom_used_value_sync
+};
+
 RADIANT_C_API void radiant_jube_register_static(void) {
+    if (!dom_canvas_register_engine(&radiant_canvas_operations) ||
+        !dom_webgl_register_engine(&radiant_webgl_operations) ||
+        !dom_style_register_engine(&radiant_style_operations)) {
+        log_error("DOM provider registration rejected a conflicting native provider");
+        return;
+    }
     dom_webgl_register_static();
     radiant_animation_register_static();
     jube_register_static_module(&radiant_module);

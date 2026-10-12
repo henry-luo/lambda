@@ -4465,6 +4465,8 @@
               "radiant/view_geometry.cpp",
               "radiant/editing_host.cpp",
               "test/test_dom_range_stubs.cpp",
+              "test/test_dom_engine_provider_gtest.cpp",
+              "lambda/dom/dom_engine_seam.cpp",
               "lib/test_utils.c",
               "lib/test_utils_pool.c",
               "test/test_unlinked_layout_stubs.cpp"

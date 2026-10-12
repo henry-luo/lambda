@@ -2074,18 +2074,23 @@ TEST(DomAttributeValueTest, RepeatedValuesReuseInputStorageAndPreserveSnapshots)
 
 class StyleEpochTest : public ::testing::Test {
 protected:
-    Input input = {};
+    Pool* input_pool = nullptr;
+    Input* input = nullptr;
     DomDocument doc;
     CssEngine engine = {};
     CssEngine* stylesheet_engine = nullptr;
     DomElement* document_root = nullptr;
 
     void SetUp() override {
-        ASSERT_TRUE(doc.init(&input));
+        input_pool = pool_create();
+        ASSERT_NE(input_pool, nullptr);
+        input = Input::create(input_pool);
+        ASSERT_NE(input, nullptr);
+        ASSERT_TRUE(doc.init(input));
         engine.context.viewport_width = 1280.0;
         engine.context.viewport_height = 720.0;
         engine.context.device_pixel_ratio = 2.0;
-        document_root = DomElement::create(&doc, "root", nullptr);
+        document_root = authored_element("root");
         ASSERT_NE(document_root, nullptr);
         doc.root = lam::up(document_root);
     }
@@ -2094,10 +2099,19 @@ protected:
         doc.services.cached_css_engine = nullptr;
         if (stylesheet_engine) css_engine_destroy(stylesheet_engine);
         doc.destroy();
+        if (input_pool) pool_destroy(input_pool);
+    }
+
+    DomElement* authored_element(const char* tag) {
+        // null backing denotes layout-only synthetic boxes, excluded from stylesheet matching.
+        MarkBuilder builder(input);
+        Item backing = builder.element(tag).final();
+        EXPECT_NE(backing.element, nullptr);
+        return backing.element ? DomElement::create(&doc, tag, backing.element) : nullptr;
     }
 
     DomElement* append(const char* tag) {
-        DomElement* child = DomElement::create(&doc, tag, nullptr);
+        DomElement* child = authored_element(tag);
         EXPECT_NE(child, nullptr);
         EXPECT_TRUE(document_root->append_child(child));
         return child;
@@ -2461,7 +2475,7 @@ TEST_F(StyleEpochTest, RecascadeRetiresStylesheetCustomPropertyRecords) {
 
 TEST_F(StyleEpochTest, OverlappingMutationRootsCascadeTheFinalTreeOnce) {
     DomElement* child = append("child");
-    DomElement* grandchild = DomElement::create(&doc, "grandchild", nullptr);
+    DomElement* grandchild = authored_element("grandchild");
     ASSERT_NE(grandchild, nullptr);
     ASSERT_TRUE(child->append_child(grandchild));
     install_stylesheet("* { width: 10px; }");
@@ -2497,7 +2511,7 @@ TEST_F(StyleEpochTest, ChildListOutsideStructuralAnchorsPreservesExistingCascade
     style_epoch_get_stats(&doc, &before);
 
     DomElement* inserted = append("inserted");
-    DomElement* nested = DomElement::create(&doc, "nested", nullptr);
+    DomElement* nested = authored_element("nested");
     ASSERT_NE(nested, nullptr);
     ASSERT_TRUE(inserted->append_child(nested));
     ASSERT_TRUE(cascade_mutation(DOM_JS_MUTATION_CHILD_INSERT, inserted, document_root));
@@ -2524,11 +2538,8 @@ TEST_F(StyleEpochTest, PositionAndEmptySelectorsRecascadeChangedParent) {
     ASSERT_TRUE(cascade_mutation(DOM_JS_MUTATION_ATTRIBUTE, document_root, nullptr));
     ASSERT_NE(dom_element_get_specified_value(list, CSS_PROPERTY_HEIGHT), nullptr);
 
-    // CSS position/empty selectors exclude synthetic layout nodes.
-    Element* backing = elmt_arena(doc.node_arena);
-    ASSERT_NE(backing, nullptr);
-    DomElement* first = DomElement::create(&doc, "li", backing);
-    DomElement* second = DomElement::create(&doc, "li", backing);
+    DomElement* first = authored_element("li");
+    DomElement* second = authored_element("li");
     ASSERT_NE(first, nullptr);
     ASSERT_NE(second, nullptr);
     ASSERT_TRUE(list->append_child(first));
@@ -2552,8 +2563,8 @@ TEST_F(StyleEpochTest, PositionAndEmptySelectorsRecascadeChangedParent) {
 TEST_F(StyleEpochTest, SiblingRemovalRecascadesWhenPreviousAnchorIsDetached) {
     DomElement* parent = append("div");
     ASSERT_TRUE(parent->set_attribute("class", "component"));
-    DomElement* before = DomElement::create(&doc, "div", nullptr);
-    DomElement* after = DomElement::create(&doc, "div", nullptr);
+    DomElement* before = authored_element("div");
+    DomElement* after = authored_element("div");
     ASSERT_NE(before, nullptr);
     ASSERT_NE(after, nullptr);
     ASSERT_TRUE(before->set_attribute("class", "before"));
@@ -2894,6 +2905,110 @@ TEST_F(StyleEpochTest, TextTransformComputedReadsFollowInheritanceAndReleaseScra
     }
 }
 
+TEST_F(StyleEpochTest, BackgroundComputedComponentsPreserveOwnersIndependentPeriodsAndDefaults) {
+    ASSERT_TRUE(css_property_system_init(doc.document_pool));
+    DomElement* parent = append("parent");
+    DomElement* child = DomElement::create(&doc, "child", nullptr);
+    ASSERT_NE(child, nullptr); ASSERT_TRUE(parent->append_child(child));
+    ASSERT_TRUE(parent->set_attribute("style", "font-size:4px;background:none;background-size:2em 1em,3em 4em"));
+    const struct Case { const char* style; CssPropertyCode property; const char* expected; } cases[] = {
+        {"background:linear-gradient(red,red) right 3px bottom 5px/8px 4px no-repeat blue", CSS_PROPERTY_BACKGROUND_SIZE, "8px 4px"},
+        {"background:linear-gradient(red,red) right 3px bottom 5px/8px 4px no-repeat blue", CSS_PROPERTY_BACKGROUND_POSITION, "calc(100% - 3px) calc(100% - 5px)"},
+        {"font-size:4px;background-image:none,none;background-size:2em 1em,min(50%,2em) max(10%,1em)", CSS_PROPERTY_BACKGROUND_SIZE, "8px 4px, min(50%, 8px) max(10%, 4px)"},
+        {"font-size:4px;background-position:right 1em bottom max(25%,1em)", CSS_PROPERTY_BACKGROUND_POSITION, "calc(100% - 4px) calc(100% - max(25%, 4px))"},
+        {"background-image:none,none,none,none;background-position-x:3px,13px;background-position-y:5px,19px,25px", CSS_PROPERTY_BACKGROUND_POSITION, "3px 5px, 13px 19px, 3px 25px, 13px 5px"},
+        // inheritance preserves unused original periods rather than the parent's image-count projection (CI-18).
+        {"font-size:30px;background-image:none,none,none,none;background-size:inherit", CSS_PROPERTY_BACKGROUND_SIZE, "8px 4px, 12px 16px, 8px 4px, 12px 16px"},
+        {"background:linear-gradient(red,red) right bottom/8px 4px no-repeat;all:initial", CSS_PROPERTY_BACKGROUND_POSITION, "0% 0%"},
+        {"--repeat:no-repeat none;background-repeat:var(--repeat,no-repeat)", CSS_PROPERTY_BACKGROUND_REPEAT, "repeat"},
+        {"background-blend-mode:multiply;background:none", CSS_PROPERTY_BACKGROUND_BLEND_MODE, "multiply"},
+        {"background-repeat:no-repeat;background-repeat:repeat-x repeat", CSS_PROPERTY_BACKGROUND_REPEAT, "no-repeat"},
+        {"background-position-x:right 3px !important;background:left bottom", CSS_PROPERTY_BACKGROUND_POSITION, "calc(100% - 3px) 100%"},
+        {"background-position:calc(0% + 3px) calc(100% + 0px)", CSS_PROPERTY_BACKGROUND_POSITION, "calc(0% + 3px) 100%"},
+        {"background:linear-gradient(red,red) text", CSS_PROPERTY_BACKGROUND_ORIGIN, "padding-box"},
+        {"background:linear-gradient(red,red) text", CSS_PROPERTY_BACKGROUND_CLIP, "text"}
+    };
+    for (const Case& item : cases) {
+        SCOPED_TRACE(item.style); ASSERT_TRUE(child->set_attribute("style", item.style));
+        auto read = [&]() {
+            Pool* caller = pool_create();
+            String* value = css_prop_serialize_computed_value(caller, child, item.property, 0);
+            EXPECT_NE(value, nullptr);
+            if (value) EXPECT_STREQ(value->chars, item.expected);
+            pool_destroy(caller);
+        };
+        read(); PoolStats warm = {}; pool_get_detailed_stats(doc.document_pool, &warm);
+        for (size_t index = 0; index < 256; index++) read();
+        PoolStats repeated = {}; pool_get_detailed_stats(doc.document_pool, &repeated);
+        EXPECT_EQ(repeated.live_bytes, warm.live_bytes);
+    }
+    ASSERT_TRUE(child->set_attribute("style", "font-size:30px;background-image:none,none;background-size:inherit"));
+    ASSERT_TRUE(parent->set_attribute("style", "font-size:8px;background:none;background-size:2em 1em"));
+    Pool* caller = pool_create();
+    String* value = css_prop_serialize_computed_value(caller, child, CSS_PROPERTY_BACKGROUND_SIZE, 0);
+    ASSERT_NE(value, nullptr); EXPECT_STREQ(value->chars, "16px 8px, 16px 8px");
+    pool_destroy(caller);
+}
+
+TEST_F(StyleEpochTest, BackgroundComputedPseudosKeepOriginatingFontsAndInheritedOwnerLengths) {
+    ASSERT_TRUE(css_property_system_init(doc.document_pool));
+    DomElement* host = append("host");
+    ASSERT_TRUE(host->set_attribute("style", "font-size:4px;background-size:2em 1em"));
+    install_stylesheet("host::before{content:'';font-size:6px;background:linear-gradient(red,red) right 1em bottom 2em/2em 1em no-repeat,none}"
+        "host::after{content:'';font-size:30px;background-image:none,none;background-size:inherit}");
+    ASSERT_TRUE(cascade_mutation(DOM_JS_MUTATION_ATTRIBUTE, document_root, nullptr));
+    const struct Case { int pseudo; CssPropertyCode property; const char* expected; } cases[] = {
+        {1, CSS_PROPERTY_BACKGROUND_SIZE, "12px 6px, auto"},
+        {1, CSS_PROPERTY_BACKGROUND_POSITION, "calc(100% - 6px) calc(100% - 12px), 0% 0%"},
+        {2, CSS_PROPERTY_BACKGROUND_SIZE, "8px 4px, 8px 4px"}
+    };
+    for (const Case& item : cases) {
+        auto read = [&]() {
+            Pool* caller = pool_create();
+            String* value = css_prop_serialize_computed_value(caller, host, item.property, item.pseudo);
+            EXPECT_NE(value, nullptr); if (value) EXPECT_STREQ(value->chars, item.expected);
+            pool_destroy(caller);
+        };
+        read(); PoolStats warm = {}; pool_get_detailed_stats(doc.document_pool, &warm);
+        for (size_t index = 0; index < 256; index++) read();
+        PoolStats repeated = {}; pool_get_detailed_stats(doc.document_pool, &repeated);
+        EXPECT_EQ(repeated.live_bytes, warm.live_bytes);
+    }
+}
+
+TEST_F(StyleEpochTest, BackgroundComputedListsKeepFullLengthAndCallerOwnership) {
+    ASSERT_TRUE(css_property_system_init(doc.document_pool));
+    DomElement* child = append("child");
+    Pool* caller = pool_create();
+    StringBuf* style = stringbuf_new(caller); StringBuf* expected = stringbuf_new(caller);
+    stringbuf_append_str(style, "font-size:4px;--size:2em 1em;background-size:var(--size);background-image:");
+    for (size_t index = 0; index < 128; index++) {
+        if (index) { stringbuf_append_str(style, ","); stringbuf_append_str(expected, ", "); }
+        stringbuf_append_str(style, "none"); stringbuf_append_str(expected, "8px 4px");
+    }
+    ASSERT_TRUE(child->set_attribute("style", stringbuf_to_string(style)->chars));
+    String* value = css_prop_serialize_computed_value(caller, child, CSS_PROPERTY_BACKGROUND_SIZE, 0);
+    ASSERT_NE(value, nullptr); ASSERT_GT(value->len, 511u);
+    // to_string transfers the buffer; retain that caller-owned string across declaration replacement.
+    String* expected_text = stringbuf_to_string(expected);
+    ASSERT_NE(expected_text, nullptr); EXPECT_STREQ(value->chars, expected_text->chars);
+    char bounded[512];
+    EXPECT_FALSE(css_prop_serialize_computed(child, CSS_PROPERTY_BACKGROUND_SIZE, 0, bounded, sizeof(bounded)));
+    EXPECT_STREQ(bounded, "");
+    PoolStats warm = {}; pool_get_detailed_stats(doc.document_pool, &warm);
+    for (size_t index = 0; index < 256; index++) {
+        Pool* projection = pool_create();
+        String* repeated = css_prop_serialize_computed_value(projection, child, CSS_PROPERTY_BACKGROUND_SIZE, 0);
+        ASSERT_NE(repeated, nullptr); EXPECT_STREQ(repeated->chars, value->chars);
+        pool_destroy(projection);
+    }
+    PoolStats after = {}; pool_get_detailed_stats(doc.document_pool, &after);
+    EXPECT_EQ(after.live_bytes, warm.live_bytes);
+    ASSERT_TRUE(child->set_attribute("style", "background:none;background-size:cover"));
+    EXPECT_STREQ(value->chars, expected_text->chars);
+    pool_destroy(caller);
+}
+
 TEST_F(StyleEpochTest, PresentationLayerPreservesAuthoredStateAndCascade) {
     DomElement* child = append("child");
     const char* authored = "opacity:0.3;color:red !important";
@@ -2965,7 +3080,7 @@ TEST_F(StyleEpochTest, PresentationSamplesDoNotGrowRetainedPoolsOrArenas) {
     ASSERT_TRUE(dom_element_set_presentation_style(child, "fill", "#336699", &changed));
     PoolStats warm = {};
     pool_get_detailed_stats(doc.document_pool, &warm);
-    size_t input_used = arena_total_used(input.arena);
+    size_t input_used = arena_total_used(input->arena);
     size_t nodes_used = arena_total_used(doc.node_arena);
     for (size_t i = 0; i < 256; i++) {
         ASSERT_TRUE(dom_element_set_presentation_style(child, "transform", transforms[i % 3], &changed));
@@ -2974,7 +3089,7 @@ TEST_F(StyleEpochTest, PresentationSamplesDoNotGrowRetainedPoolsOrArenas) {
     PoolStats repeated = {};
     pool_get_detailed_stats(doc.document_pool, &repeated);
     EXPECT_LE(repeated.live_bytes, warm.live_bytes + 4096u);
-    EXPECT_EQ(arena_total_used(input.arena), input_used);
+    EXPECT_EQ(arena_total_used(input->arena), input_used);
     EXPECT_EQ(arena_total_used(doc.node_arena), nodes_used);
     EXPECT_EQ(child->get_attribute("style"), nullptr);
     EXPECT_TRUE(dom_element_clear_presentation_style(child));

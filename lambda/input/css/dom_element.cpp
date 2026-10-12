@@ -2300,7 +2300,7 @@ const char* dom_inline_style_declaration_end(const char* text) {
     return p;
 }
 
-static bool dom_element_uses_quirks_css(const DomElement* element) {
+bool dom_element_uses_quirks_css(const DomElement* element) {
     return element && element->doc &&
         is_quirks_mode((HtmlVersion)element->doc->html_version);
 }
@@ -2860,20 +2860,8 @@ int dom_element_apply_pseudo_element_rule(DomElement* element, CssRule* rule,
     return applied_count;
 }
 
-CssDeclaration* dom_element_get_pseudo_element_value(DomElement* element,
-                                                     CssPropertyCode property_code, int pseudo_element) {
-    if (!element) {
-        return NULL;
-    }
-    if (pseudo_element == PSEUDO_ELEMENT_SELECTION) {
-        CssSelectionStyle* selection = style_epoch_selection_style(element, false);
-        if (!selection) return nullptr;
-        return property_code == CSS_PROPERTY_COLOR
-            ? selection->color.source
-            : property_code == CSS_PROPERTY_BACKGROUND_COLOR
-                ? selection->background_color.source : nullptr;
-    }
-
+StyleTree* dom_element_get_pseudo_style(DomElement* element, int pseudo_element) {
+    if (!element) return nullptr;
     StyleTree* style = nullptr;
 
     if (pseudo_element == 1) {  // PSEUDO_ELEMENT_BEFORE
@@ -2893,6 +2881,25 @@ CssDeclaration* dom_element_get_pseudo_element_value(DomElement* element,
     } else if (pseudo_element == 9) {  // PSEUDO_ELEMENT_FILE_SELECTOR_BUTTON
         style = element->pseudo_style(PSEUDO_STYLE_FILE_SELECTOR_BUTTON);
     }
+
+    return style;
+}
+
+CssDeclaration* dom_element_get_pseudo_element_value(DomElement* element,
+                                                     CssPropertyCode property_code, int pseudo_element) {
+    if (!element) {
+        return NULL;
+    }
+    if (pseudo_element == PSEUDO_ELEMENT_SELECTION) {
+        CssSelectionStyle* selection = style_epoch_selection_style(element, false);
+        if (!selection) return nullptr;
+        return property_code == CSS_PROPERTY_COLOR
+            ? selection->color.source
+            : property_code == CSS_PROPERTY_BACKGROUND_COLOR
+                ? selection->background_color.source : nullptr;
+    }
+
+    StyleTree* style = dom_element_get_pseudo_style(element, pseudo_element);
 
     if (!style) {
         return NULL;

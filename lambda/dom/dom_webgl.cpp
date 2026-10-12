@@ -1,5 +1,6 @@
 #include "dom_webgl.h"
 #include "dom.h"
+#include "dom_graphics.h"
 #include "dom_events.h"
 #include "../js/js_event_loop.h"
 #include "../js/js_class.h"
@@ -17,7 +18,6 @@
 #include "../jube/jube.h"
 #include "../jube/jube_interface.h"
 #include "../jube/jube_registry.h"
-#include "../module/radiant/radiant_webgl_bridge.hpp"
 #include "../../lib/mem.h"
 #include <math.h>
 #include <string.h>
@@ -73,7 +73,7 @@ static Item webgl_owner(WebGlObject* object) {
 }
 static Item webgl_wrap(int kind,const WebGlObject& record,Item owner) {
     WebGlRealm* state=webgl_realm();if(!state) return ItemNull;
-    if(root_vector_count(&state->objects)>=32768) { radiant_webgl_error(record.canvas,0x0505);return ItemNull; }
+    if(root_vector_count(&state->objects)>=32768) { dom_provider_call(dom_webgl_engine_ops(), &DomWebGlEngineOps::error, record.canvas,0x0505);return ItemNull; }
     RootFrame roots(2);Rooted<Item> owner_root(roots,owner);Rooted<Item> value(roots,vmap_new());
     if(get_type_id(value.get())!=LMD_TYPE_VMAP) return ItemNull;
     WebGlObject* object=(WebGlObject*)mem_alloc(sizeof(WebGlObject),MEM_CAT_JS_RUNTIME);if(!object) return ItemNull;
@@ -134,7 +134,7 @@ static Item webgl_plain_reply(const WebGlReply& reply) {
 }
 static Item webgl_attributes(WebGlObject* object) {
     WebGlCommand command={};command.op=WEBGL_getContextAttributes;WebGlReply reply={};
-    if(!radiant_webgl_call(object->canvas,&command,&reply)) return ItemNull;
+    if(!dom_provider_call(dom_webgl_engine_ops(), &DomWebGlEngineOps::call, object->canvas,&command,&reply)) return ItemNull;
     RootFrame roots(1);Rooted<Item> result(roots,js_new_object());
     const char* names[]={"alpha","depth","stencil","antialias","premultipliedAlpha","preserveDrawingBuffer","failIfMajorPerformanceCaveat","desynchronized","xrCompatible"};
     bool values[]={reply.n[0]!=0,reply.n[1]!=0,reply.n[2]!=0,reply.n[3]!=0,reply.n[4]!=0,reply.n[5]!=0,false,false,false};
@@ -150,7 +150,7 @@ static Item webgl_loss_task(Item callee,Item,Item*,int,uint64_t*) {
     RootFrame roots(5);Rooted<Item> receiver(roots,*cached);WebGlObject* object=webgl_object(receiver.get(),WEBGL_CONTEXT_KIND);
     if(!object) return make_js_undefined();
     bool restore=(payload&1)!=0;
-    if(restore && (!object->loss_delivered || !object->restore_allowed || !radiant_webgl_restore(object->canvas))) return make_js_undefined();
+    if(restore && (!object->loss_delivered || !object->restore_allowed || !dom_provider_call(dom_webgl_engine_ops(), &DomWebGlEngineOps::restore, object->canvas))) return make_js_undefined();
     Rooted<Item> canvas(roots,webgl_owner(object));
     Rooted<Item> init(roots,js_new_object());
     dom_realm_set_name(init.get(),"cancelable",(Item){.item=b2it(true)});
@@ -168,7 +168,7 @@ static int webgl_loss_request(Item receiver,bool restore,Item* out) {
     RootFrame roots(2);Rooted<Item> owner(roots,webgl_owner(extension));Rooted<Item> callback(roots,ItemNull);
     WebGlObject* object=webgl_object(owner.get(),WEBGL_CONTEXT_KIND);*out=make_js_undefined();
     if(!object) return 1;
-    if(!restore && !radiant_webgl_lose(object->canvas)) return 1;
+    if(!restore && !dom_provider_call(dom_webgl_engine_ops(), &DomWebGlEngineOps::lose, object->canvas)) return 1;
     callback.set(js_new_native_payload_function(webgl_loss_task,((object->owner_slot+1)<<1)|(restore?1:0),0));
     js_setTimeout(callback.get(),(Item){.item=i2it(0)});return 1;
 }
@@ -191,20 +191,20 @@ static Item webgl_invoke(Item receiver,Item* args,int argc,WebGlOp op,const char
             string_root.set(js_to_string(argc?args[0]:make_js_undefined()));if(item_is_error(string_root.get())) return string_root.get();
         }
         WebGlCommand lost={};lost.op=WEBGL_isContextLost;WebGlReply reply={};
-        if(!radiant_webgl_call(object->canvas,&lost,&reply)||reply.n[0]) return ItemNull;
+        if(!dom_provider_call(dom_webgl_engine_ops(), &DomWebGlEngineOps::call, object->canvas,&lost,&reply)||reply.n[0]) return ItemNull;
         const char* names[]={"WEBGL_lose_context","EXT_color_buffer_float","OES_texture_float_linear"};
         if(op==WEBGL_getExtension) {
             const char* name=it2s(string_root.get())->chars;
             for(unsigned i=0;i<3;i++) if(!str_icmp_cstr(name,names[i])) {
                 if(!i) return webgl_extension(receiver_root.get(),object);
-                if(!radiant_webgl_extension_supported(object->canvas,names[i])) return ItemNull;
+                if(!dom_provider_call(dom_webgl_engine_ops(), &DomWebGlEngineOps::extension_supported, object->canvas,names[i])) return ItemNull;
                 WebGlReply extension={};extension.kind=WEBGL_RESOURCE;extension.resource_kind=11;extension.resource=i;
                 return webgl_reply_object(receiver_root.get(),object,extension);
             }
             return ItemNull;
         }
         array_root.set(js_array_new(0));
-        for(unsigned i=0;i<3;i++) if(!i||radiant_webgl_extension_supported(object->canvas,names[i])) {
+        for(unsigned i=0;i<3;i++) if(!i||dom_provider_call(dom_webgl_engine_ops(), &DomWebGlEngineOps::extension_supported, object->canvas,names[i])) {
             value_root.set(js_name_item(names[i]));js_array_push(array_root.get(),value_root.get());
         }
         return array_root.get();
@@ -224,7 +224,7 @@ static Item webgl_invoke(Item receiver,Item* args,int argc,WebGlOp op,const char
         void* source=dom_unwrap_element(args[explicit_image?8:sub?6:5]);
         if(!source) return dom_realm_throw_type_error("WebGL image source must be an HTML image or canvas");
         command.source_dimensions=explicit_image;
-        radiant_webgl_image(object->canvas,&command,source,&reply);
+        dom_provider_call(dom_webgl_engine_ops(), &DomWebGlEngineOps::image, object->canvas,&command,source,&reply);
         return make_js_undefined();
     }
     for(unsigned i=0;signature[i];i++) {
@@ -238,13 +238,13 @@ static Item webgl_invoke(Item receiver,Item* args,int argc,WebGlOp op,const char
             if(!resource) return dom_realm_throw_type_error("Expected a WebGL resource of the declared kind");
             if(resource->canvas!=object->canvas) {
                 if(!strncmp(webgl_op_name(op),"is",2)) return (Item){.item=b2it(false)};
-                radiant_webgl_error(object->canvas,0x0502);return make_js_undefined();
+                dom_provider_call(dom_webgl_engine_ops(), &DomWebGlEngineOps::error, object->canvas,0x0502);return make_js_undefined();
             }
             if(resource->invalidated) {
                 const char* name=webgl_op_name(op);
                 if(!strncmp(name,"is",2)) return (Item){.item=b2it(false)};
                 if(!strncmp(name,"delete",6)) return make_js_undefined();
-                radiant_webgl_error(object->canvas,0x0502);
+                dom_provider_call(dom_webgl_engine_ops(), &DomWebGlEngineOps::error, object->canvas,0x0502);
                 return op==WEBGL_getAttribLocation?(Item){.item=i2it(-1)}:!strncmp(name,"get",3)?ItemNull:make_js_undefined();
             }
             command.resource[i]=resource->resource;
@@ -273,7 +273,7 @@ static Item webgl_invoke(Item receiver,Item* args,int argc,WebGlOp op,const char
         bool size_upload=op==WEBGL_bufferData&&!js_is_object_value(source);
         if(size_upload) {
             Item status=webgl_number_arg(source,'z',&command.n[1]);if(item_is_error(status)) return status;
-            if(command.n[1]<0) { radiant_webgl_error(object->canvas,0x0501);return make_js_undefined(); }
+            if(command.n[1]<0) { dom_provider_call(dom_webgl_engine_ops(), &DomWebGlEngineOps::error, object->canvas,0x0501);return make_js_undefined(); }
             command.bytes=command.n[1];
         } else if(get_type_id(source)!=LMD_TYPE_NULL&&!(source.item==ITEM_JS_UNDEFINED)) {
             if(uniform||op==WEBGL_drawBuffers) {
@@ -303,7 +303,7 @@ static Item webgl_invoke(Item receiver,Item* args,int argc,WebGlOp op,const char
                 int expected=type==0x1400?JS_TYPED_INT8:type==0x1401?JS_TYPED_UINT8:type==0x1402?JS_TYPED_INT16:
                     type==0x1403||type==0x140B?JS_TYPED_UINT16:type==0x1404?JS_TYPED_INT32:type==0x1405?JS_TYPED_UINT32:type==0x1406?JS_TYPED_FLOAT32:-1;
                 if(!js_is_typed_array(source)||(js_typed_array_element_type(source)!=expected&&!(type==0x1401&&js_typed_array_element_type(source)==JS_TYPED_UINT8_CLAMPED))) {
-                    radiant_webgl_error(object->canvas,0x0502);return make_js_undefined();
+                    dom_provider_call(dom_webgl_engine_ops(), &DomWebGlEngineOps::error, object->canvas,0x0502);return make_js_undefined();
                 }
             }
             if(js_is_dataview(source)) {
@@ -321,12 +321,12 @@ static Item webgl_invoke(Item receiver,Item* args,int argc,WebGlOp op,const char
                 double start=0;Item status=webgl_number_arg(args[offset_index],'u',&start);if(item_is_error(status)) return status;
                 unsigned scalar=js_is_typed_array(source)?js_typed_array_element_size((JsTypedArrayType)js_typed_array_element_type(source)):1;
                 offset=(size_t)start*scalar;
-                if(offset>(size_t)length) { radiant_webgl_error(object->canvas,0x0501);return make_js_undefined(); }
+                if(offset>(size_t)length) { dom_provider_call(dom_webgl_engine_ops(), &DomWebGlEngineOps::error, object->canvas,0x0501);return make_js_undefined(); }
                 selected=length-offset;
                 if(argc>(int)offset_index+1) {
                     double count=0;status=webgl_number_arg(args[offset_index+1],'u',&count);if(item_is_error(status)) return status;
                     if(count!=0) selected=(size_t)count*scalar;
-                    if(selected>(size_t)length-offset) { radiant_webgl_error(object->canvas,0x0501);return make_js_undefined(); }
+                    if(selected>(size_t)length-offset) { dom_provider_call(dom_webgl_engine_ops(), &DomWebGlEngineOps::error, object->canvas,0x0501);return make_js_undefined(); }
                 }
                 // coercion can detach/resize: reacquire and validate the current view before borrowing.
                 if(js_is_typed_array(source)&&js_typed_array_is_out_of_bounds_item(source)) return dom_realm_throw_type_error("WebGL upload view was detached during conversion");
@@ -346,7 +346,7 @@ static Item webgl_invoke(Item receiver,Item* args,int argc,WebGlOp op,const char
             command.data=bytes?bytes+offset:nullptr;command.bytes=selected;
         } else if(op==WEBGL_bufferData||op==WEBGL_bufferSubData||op==WEBGL_getBufferSubData||uniform||op==WEBGL_readPixels) return dom_realm_throw_type_error("WebGL data must be a buffer view");
     }
-    bool handled=radiant_webgl_call(object->canvas,&command,&reply);
+    bool handled=dom_provider_call(dom_webgl_engine_ops(), &DomWebGlEngineOps::call, object->canvas,&command,&reply);
     if(!handled) {
         int created_kind=-1;
         switch(op) {
@@ -375,7 +375,7 @@ static Item webgl_invoke(Item receiver,Item* args,int argc,WebGlOp op,const char
 
 #define WEBGL_METHOD(name,js,signature,arity) \
 static int webgl_call_##name(Item receiver,Item* args,int argc,Item* out) { *out=webgl_invoke(receiver,args,argc,WEBGL_##js,signature);return 1; }
-#include "../module/radiant/webgl_methods.def"
+#include "webgl_methods.def"
 #undef WEBGL_METHOD
 static int webgl_canvas_get(Item receiver,Item* out) { *out=webgl_owner(webgl_object(receiver,WEBGL_CONTEXT_KIND));return 1; }
 static int webgl_width_get(Item receiver,Item* out) { *out=dom_realm_get_name(webgl_owner(webgl_object(receiver,WEBGL_CONTEXT_KIND)),"width");return 1; }
@@ -399,10 +399,10 @@ static const char webgl_interface[]=
     "type webgl_capability_extension {}\n"
     "type webgl2_rendering_context {\ncanvas: any, drawing_buffer_width: int, drawing_buffer_height: int,\n"
 #define WEBGL_CONSTANT(name,value) #name ": int = " #value ",\n"
-#include "../module/radiant/webgl_constants.def"
+#include "webgl_constants.def"
 #undef WEBGL_CONSTANT
 #define WEBGL_METHOD(name,js,signature,arity) #name ": fn(" WEBGL_PARAMS_##arity ") any,\n"
-#include "../module/radiant/webgl_methods.def"
+#include "webgl_methods.def"
 #undef WEBGL_METHOD
     "}\n";
 static const JubeMemberBind webgl_members[]={
@@ -410,7 +410,7 @@ static const JubeMemberBind webgl_members[]={
     {"drawing_buffer_width","drawingBufferWidth",webgl_width_get,nullptr,nullptr,nullptr,JUBE_MEMBER_PROTOTYPE},
     {"drawing_buffer_height","drawingBufferHeight",webgl_height_get,nullptr,nullptr,nullptr,JUBE_MEMBER_PROTOTYPE},
 #define WEBGL_METHOD(name,js,signature,arity) {#name,#js,nullptr,nullptr,webgl_call_##name,nullptr,JUBE_MEMBER_PROTOTYPE|JUBE_MEMBER_REQUIRED_ARGS(arity)},
-#include "../module/radiant/webgl_methods.def"
+#include "webgl_methods.def"
 #undef WEBGL_METHOD
 };
 static const JubeMemberBind webgl_loss_members[]={
@@ -467,7 +467,7 @@ Item dom_webgl_context_for(Item canvas,Item options) {
             if(!(value.get().item==ITEM_JS_UNDEFINED)) *fields[i]=js_is_truthy(value.get());
         }
     }
-    uint64_t id=radiant_webgl_create(dom_unwrap_element(canvas_root.get()),&config);if(!id) return ItemNull;
+    uint64_t id=dom_provider_call(dom_webgl_engine_ops(), &DomWebGlEngineOps::create, dom_unwrap_element(canvas_root.get()),&config);if(!id) return ItemNull;
     WebGlObject record={};record.canvas=id;record.options=config;
     return webgl_wrap(WEBGL_CONTEXT_KIND,record,canvas_root.get());
 }

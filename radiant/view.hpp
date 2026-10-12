@@ -16,6 +16,7 @@
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lambda/input/css/css_value.hpp"
 #include "../lambda/input/css/css_style.hpp"
+#include "../lambda/input/css/css_style_node.hpp"
 #include "scale.hpp"
 #include <stdbool.h>
 #include <stddef.h>
@@ -54,6 +55,8 @@ enum CssPropAccessorFlags : uint8_t {
     // The accessor resolves its CSSOM value directly from the cascaded tree,
     // so it remains valid before an initial layout snapshot exists.
     CSS_PROP_ACCESSOR_CASCADE_RESOLVED = 1u << 1,
+    // the callback queries the generated pseudo's cascade and originating font context.
+    CSS_PROP_ACCESSOR_PSEUDO_RESOLVED = 1u << 2,
 };
 
 struct CssPropAccessor;
@@ -80,6 +83,18 @@ struct CssPropAccessor {
     CssPropSerializeFn serialize;
     CssPropDeriveFn derive;
 };
+
+struct CssBackgroundWinner {
+    CssDeclaration* declaration;
+    const CssValue* value;
+};
+// layout and CSSOM share cascade competition, substitution and shorthand decoding.
+CssBackgroundWinner background_component_winner(DomElement* element, Pool* scratch,
+    CssPropertyCode property, int pseudo_type = 0);
+int background_list_count(const CssValue* value);
+const CssValue* background_winner_component(Pool* scratch, const CssBackgroundWinner& winner,
+    CssPropertyCode property, int index);
+float background_position_keyword(CssEnum keyword, bool horizontal);
 
 const CssPropAccessor* css_prop_accessor(CssPropertyCode id);
 const CssPropAccessor* css_prop_accessors(size_t* count);
@@ -370,6 +385,7 @@ static inline void rdt_matrix4_transform_point(const RdtMatrix4* matrix,
 bool view_get_transform_matrix(View* view, RdtMatrix* out_matrix);
 enum BackfaceCheck { BACKFACE_SELF, BACKFACE_SUBTREE, BACKFACE_HIT_TEST };
 bool view_backface_is_hidden(View* view, BackfaceCheck check = BACKFACE_SELF);
+bool view_visibility_is_hidden(const View* view);
 bool view_size_containment_applies(DisplayValue display);
 bool view_contents_are_skipped(const View* view);
 enum ContentVisibilityCheck { CONTENT_VISIBILITY_PAINT, CONTENT_VISIBILITY_USER_AGENT };
@@ -395,6 +411,11 @@ static inline bool rdt_matrix_is_identity(const RdtMatrix* matrix,
         fabsf(matrix->e22 - 1.0f) < epsilon && fabsf(matrix->e23) < epsilon &&
         fabsf(matrix->e31) < epsilon && fabsf(matrix->e32) < epsilon &&
         fabsf(matrix->e33 - 1.0f) < epsilon;
+}
+
+static inline bool rdt_matrix_is_scale_translation(const RdtMatrix* matrix) {
+    return matrix && matrix->e12 == 0.0f && matrix->e21 == 0.0f &&
+        matrix->e31 == 0.0f && matrix->e32 == 0.0f && matrix->e33 == 1.0f;
 }
 
 // multiply two 3x3 affine matrices: result = a * b
@@ -1401,32 +1422,32 @@ typedef struct {
     Color color;
     float position;  // normalized stop coordinate (or CSS pixels); NaN for auto
     bool position_is_px;  // each stop retains its unit until the gradient line is known
+    lam::Own<CssValue> position_expression; // computed owner lengths; percentages await the paint line.
 } GradientStop;
+
+enum GradientGeometryParameter {
+    GRADIENT_GEOMETRY_RADIUS_X, GRADIENT_GEOMETRY_RADIUS_Y,
+    GRADIENT_GEOMETRY_CENTER_X, GRADIENT_GEOMETRY_CENTER_Y,
+    GRADIENT_GEOMETRY_PARAMETER_COUNT
+};
+
+inline const CssValue* gradient_geometry_parameter(const CssValue* geometry, GradientGeometryParameter parameter) {
+    return geometry && geometry->type == CSS_VALUE_TYPE_LIST && parameter >= GRADIENT_GEOMETRY_RADIUS_X &&
+        parameter < geometry->data.list.count
+        ? geometry->data.list.values[parameter] : nullptr;
+}
 
 // Linear gradient data
 // tier-2: view-pool, rebuilt each relayout
 struct LinearGradient {
     float angle;           // in degrees, 0 = to top, 90 = to right
+    lam::Own<CssValue> computed_geometry; // optional view-pool geometry math, cloned with each image.
     lam::OwnArr<GradientStop> stops;   // array of color stops
     int stop_count;
     uint8_t is_repeating : 1;  // true for repeating-linear-gradient
     uint8_t stops_in_px : 1;   // true if stop positions are in px (not fractions)
     uint8_t corner : 3;        // 0: angle/side, 1: top-right, 2: bottom-right, 3: bottom-left, 4: top-left
 };
-
-// Radial gradient shape
-typedef enum {
-    RADIAL_SHAPE_ELLIPSE = 0,
-    RADIAL_SHAPE_CIRCLE
-} RadialShape;
-
-// Radial gradient size keyword
-typedef enum {
-    RADIAL_SIZE_FARTHEST_CORNER = 0,  // default
-    RADIAL_SIZE_CLOSEST_SIDE,
-    RADIAL_SIZE_CLOSEST_CORNER,
-    RADIAL_SIZE_FARTHEST_SIDE
-} RadialSize;
 
 // Radial gradient data
 // tier-2: view-pool, rebuilt each relayout
@@ -1436,7 +1457,9 @@ typedef struct {
     float cx, cy;          // fractions by default, CSS pixels when *_is_px is set
     bool cx_set, cy_set;   // whether center was explicitly set
     bool cx_is_px, cy_is_px;
+    bool cx_from_end, cy_from_end;
     bool is_repeating;
+    lam::Own<CssValue> computed_geometry; // optional view-pool geometry math, cloned with each image.
     lam::OwnArr<GradientStop> stops;   // array of color stops
     int stop_count;
 } RadialGradient;
@@ -1448,10 +1471,22 @@ typedef struct {
     float cx, cy;          // fractions by default, CSS pixels when *_is_px is set
     bool cx_set, cy_set;   // whether center was explicitly set
     bool cx_is_px, cy_is_px;
+    bool cx_from_end, cy_from_end;
     bool is_repeating;
+    lam::Own<CssValue> computed_geometry; // optional view-pool geometry math, cloned with each image.
     lam::OwnArr<GradientStop> stops;   // array of color stops
     int stop_count;
 } ConicGradient;
+
+// each descriptor retires its computed syntax and stops through the same ownership path.
+template<class G> inline void view_release_gradient_value(Pool* pool, G* gradient) {
+    if (!pool || !gradient) return;
+    css_value_destroy_owned(gradient->computed_geometry.get(), pool);
+    if (gradient->stops) for (int index = 0; index < gradient->stop_count; index++)
+        css_value_destroy_owned(gradient->stops[index].position_expression.get(), pool);
+    pool_free(pool, gradient->stops.get());
+    pool_free(pool, gradient);
+}
 
 // CSS image value used by list-style-image.  URL images keep their source
 // string; gradient images keep the already-resolved gradient object so marker
@@ -1467,26 +1502,32 @@ typedef struct {
 } ListStyleImage;
 
 // tier-2: view-pool, rebuilt each relayout
-typedef struct {
-    Color color; // background color
-    char* image; // background image path
-    float image_resolution; // selected raster image-set density; 0 means the default 1x.
-    // Background-size: auto | <length> | <percentage> | cover | contain
+struct BackgroundGeometry {
+    // background-size: auto | <length-percentage> | cover | contain
     CssEnum bg_size_type;   // CSS_VALUE_AUTO (default), CSS_VALUE_COVER, CSS_VALUE_CONTAIN, or 0 for explicit
     float bg_size_width;    // explicit width (px or %)
     float bg_size_height;   // explicit height (px or %)
+    float bg_size_width_length;
+    float bg_size_height_length;
+    lam::Up<const CssValue> bg_size_width_expression;
+    lam::Up<const CssValue> bg_size_height_expression;
     uint8_t bg_size_width_is_percent : 1;
     uint8_t bg_size_height_is_percent : 1;
     uint8_t bg_size_width_auto : 1;   // true if width component is 'auto'
     uint8_t bg_size_height_auto : 1;  // true if height component is 'auto'
+    uint8_t bg_size_set : 1; // explicit zero sizes suppress the image instead of selecting intrinsic sizing.
     // Background-position: <length> | <percentage> | left | center | right | top | bottom
     float bg_position_x;   // x offset (px or %)
     float bg_position_y;   // y offset (px or %)
     float bg_position_x_length; // additional px component of an animated length-percentage
     float bg_position_y_length;
+    lam::Up<const CssValue> bg_position_x_expression; // borrowed from BackgroundProp's computed-expression owner.
+    lam::Up<const CssValue> bg_position_y_expression;
     uint8_t bg_position_x_is_percent : 1;
     uint8_t bg_position_y_is_percent : 1;
     uint8_t bg_position_set : 1;  // true if position was explicitly set
+    uint8_t bg_position_x_from_end : 1;
+    uint8_t bg_position_y_from_end : 1;
     // Background-repeat: repeat | no-repeat | round | space (per axis)
     CssEnum bg_repeat_x;   // CSS_VALUE_REPEAT (default), CSS_VALUE_NO_REPEAT, CSS_VALUE_ROUND, CSS_VALUE_SPACE
     CssEnum bg_repeat_y;
@@ -1494,29 +1535,50 @@ typedef struct {
     CssEnum bg_attachment;  // CSS_VALUE_SCROLL (default) | CSS_VALUE_FIXED | CSS_VALUE_LOCAL
     CssEnum bg_origin;      // CSS_VALUE_PADDING_BOX (default) | CSS_VALUE_BORDER_BOX | CSS_VALUE_CONTENT_BOX
     CssEnum bg_clip;        // CSS_VALUE_BORDER_BOX (default) | CSS_VALUE_PADDING_BOX | CSS_VALUE_CONTENT_BOX
-    // Gradient support
+    CssEnum blend_mode;
+};
+
+struct BackgroundLayer : BackgroundGeometry {
+    char* image; // canonical source owned by the selected view tree
+    float image_resolution;
     GradientType gradient_type;
     lam::Own<LinearGradient> linear_gradient;
     lam::Own<RadialGradient> radial_gradient;
     lam::Own<ConicGradient> conic_gradient;
-    // Multiple gradient layers (for stacked gradients)
-    lam::OwnArr<lam::Own<RadialGradient>> radial_layers;  // array of additional radial gradients
-    int radial_layer_count;
-    lam::OwnArr<lam::Own<LinearGradient>> linear_layers;  // array of additional linear gradients
-    int linear_layer_count;
-    CssEnum blend_mode;  // CSS background-blend-mode (CSS_VALUE_NORMAL default, CSS_VALUE_MULTIPLY, etc.)
-} BackgroundProp;
+};
+
+enum BackgroundComponent {
+    BACKGROUND_COMPONENT_POSITION_X, BACKGROUND_COMPONENT_POSITION_Y,
+    BACKGROUND_COMPONENT_SIZE, BACKGROUND_COMPONENT_REPEAT,
+    BACKGROUND_COMPONENT_ATTACHMENT, BACKGROUND_COMPONENT_ORIGIN, BACKGROUND_COMPONENT_CLIP,
+    BACKGROUND_COMPONENT_BLEND, BACKGROUND_COMPONENT_COUNT
+};
+
+struct BackgroundComputedExpression {
+    lam::Own<CssValue> value;
+    lam::Own<BackgroundComputedExpression> next;
+};
+
+struct BackgroundProp : BackgroundLayer {
+    Color color;
+    // authored order includes empty images; component lists retain these indexes (CI-18).
+    lam::OwnArr<BackgroundLayer> layers;
+    int layer_count;
+    // computed component periods include surplus values needed by later image-list changes/inheritance.
+    lam::OwnArr<BackgroundGeometry> component_values;
+    int component_value_count;
+    int component_counts[BACKGROUND_COMPONENT_COUNT];
+    lam::Own<BackgroundComputedExpression> computed_expressions;
+};
 
 float layout_css_image_density(const ImageSurface* image, float resolution);
 void view_release_background_images(ViewTree* tree, BackgroundProp* background);
+void view_release_background_layer(ViewTree* tree, BackgroundLayer* layer);
 
-inline float background_position_offset(const BackgroundProp* background, bool horizontal,
-                                         float available, float raster_scale = 1.0f) {
-    float value = horizontal ? background->bg_position_x : background->bg_position_y;
-    bool percent = horizontal ? background->bg_position_x_is_percent : background->bg_position_y_is_percent;
-    float length = horizontal ? background->bg_position_x_length : background->bg_position_y_length;
-    return (percent ? available * value / 100.0f : value * raster_scale) + length * raster_scale;
-}
+float background_position_offset(const BackgroundGeometry* background, bool horizontal,
+                                 float available, float raster_scale = 1.0f);
+float background_size_dimension(const BackgroundGeometry* background, bool horizontal,
+                                float available, float raster_scale = 1.0f);
 
 // tier-2: view-pool, rebuilt each relayout
 typedef struct MaskProp {

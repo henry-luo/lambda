@@ -282,27 +282,41 @@ static void free_element_font_payload(DomElement* elem, ViewTree* tree) {
 
 template<class G> static void free_gradient(ViewTree* tree, lam::Own<G>& gradient) {
     if (!gradient) return;
-    view_pool_free(tree, gradient->stops);
-    view_pool_free(tree, gradient);
+    if (tree && tree->prop_pool) {
+        view_release_gradient_value(tree->prop_pool.get(), gradient.get());
+        gradient = nullptr;
+    }
+}
+
+void view_release_background_layer(ViewTree* tree, BackgroundLayer* layer) {
+    if (!layer) return;
+    free_gradient(tree, layer->linear_gradient);
+    free_gradient(tree, layer->radial_gradient);
+    free_gradient(tree, layer->conic_gradient);
+    layer->gradient_type = GRADIENT_NONE;
+    layer->image = nullptr;
+    layer->image_resolution = 0.0f;
 }
 
 void view_release_background_images(ViewTree* tree, BackgroundProp* background) {
     if (!background) return;
-    free_gradient(tree, background->linear_gradient);
-    free_gradient(tree, background->radial_gradient);
-    free_gradient(tree, background->conic_gradient);
-    for (int i = 0; i < background->radial_layer_count; i++) {
-        free_gradient(tree, background->radial_layers[i]);
+    view_release_background_layer(tree, background);
+    for (int i = 0; i < background->layer_count; i++) {
+        view_release_background_layer(tree, &background->layers[i]);
     }
-    for (int i = 0; i < background->linear_layer_count; i++) {
-        free_gradient(tree, background->linear_layers[i]);
+    view_pool_free(tree, background->layers);
+    background->layer_count = 0;
+    view_pool_free(tree, background->component_values);
+    background->component_value_count = 0;
+    memset(background->component_counts, 0, sizeof(background->component_counts));
+    while (background->computed_expressions) {
+        BackgroundComputedExpression* expression = background->computed_expressions;
+        background->computed_expressions = expression->next;
+        css_value_destroy_owned(expression->value, tree->prop_pool);
+        pool_free(tree->prop_pool, expression);
     }
-    view_pool_free(tree, background->radial_layers);
-    view_pool_free(tree, background->linear_layers);
-    background->radial_layer_count = background->linear_layer_count = 0;
-    background->gradient_type = GRADIENT_NONE;
-    background->image = nullptr;
-    background->image_resolution = 0.0f;
+    background->bg_position_x_expression = background->bg_position_y_expression = nullptr;
+    background->bg_size_width_expression = background->bg_size_height_expression = nullptr;
 }
 
 static void free_background_prop(ViewTree* tree, lam::Own<BackgroundProp>& background) {
@@ -1599,6 +1613,14 @@ RdtMatrix4 view_accumulated_transform_3d(View* view, bool context_only) {
         }
     }
     return accumulated;
+}
+
+bool view_visibility_is_hidden(const View* view) {
+    if (!view) return false;
+    // text and markers inherit from their originating box; visible descendants keep their own computed value.
+    const DomElement* element = view->is_text() || view->view_type == RDT_VIEW_MARKER
+        ? (view->parent ? view->parent->as_element() : nullptr) : view->as_element();
+    return element && element->inl() && element->inl()->visibility != VIS_VISIBLE;
 }
 
 bool view_backface_is_hidden(View* view, BackfaceCheck check) {

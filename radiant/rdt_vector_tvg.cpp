@@ -42,6 +42,8 @@ struct RdtVectorImpl {
     ScratchArena projection_scratch;
 };
 
+static bool vector_raster_fill_rect(RdtVectorImpl* impl, float x, float y, float w, float h, Color color);
+
 // Path stores ThorVG path commands for deferred replay
 struct RdtPath {
     // store raw path commands; replay into Tvg_Paint at draw time
@@ -1596,6 +1598,7 @@ void rdt_fill_rect(RdtVector* vec, float x, float y, float w, float h,
                    Color color) {
     if (!vec || !vec->impl) return;
     RdtVectorImpl* impl = vec->impl;
+    if (vector_raster_fill_rect(impl, x, y, w, h, color)) return;
 
     Tvg_Paint shape = tvg_shape_new();
     tvg_shape_append_rect(shape, x, y, w, h, 0, 0, true);
@@ -1946,6 +1949,93 @@ static void tvg_push_draw_remove_clipped(RdtVectorImpl* impl, Tvg_Paint shape) {
     tvg_push_draw_remove(impl, shape);
 }
 
+static bool path_rect_contour_bound(const RdtPath* path, Bound* result) {
+    float corners[4][2] = {}, x = 0.0f, y = 0.0f, start_x = 0.0f, start_y = 0.0f;
+    size_t count = 0;
+    bool started = false, closed = false;
+    for (int index = 0; index < path->count; index++) {
+        const RdtPath::Entry& entry = path->entries[index];
+        if (closed) return false;
+        if (entry.cmd == RdtPath::CMD_MOVE) {
+            if (started) return false;
+            x = start_x = entry.args[0]; y = start_y = entry.args[1]; started = true;
+        } else if (!started) return false;
+        else if (entry.cmd == RdtPath::CMD_CUBIC) {
+            // zero-radius corner arcs contain only repeated endpoints; a curved arc is not a rectangle.
+            for (size_t point = 0; point < 3; point++)
+                if (entry.args[point * 2] != x || entry.args[point * 2 + 1] != y) return false;
+        } else if (entry.cmd == RdtPath::CMD_LINE || entry.cmd == RdtPath::CMD_CLOSE) {
+            float next_x = entry.cmd == RdtPath::CMD_CLOSE ? start_x : entry.args[0];
+            float next_y = entry.cmd == RdtPath::CMD_CLOSE ? start_y : entry.args[1];
+            if (next_x != x || next_y != y) {
+                if ((next_x != x && next_y != y) || count == 4) return false;
+                corners[count][0] = x; corners[count++][1] = y;
+                x = next_x; y = next_y;
+            }
+            closed = entry.cmd == RdtPath::CMD_CLOSE;
+        } else return false;
+    }
+    if (!closed || count != 4) return false;
+    Bound bound = {corners[0][0], corners[0][1], corners[0][0], corners[0][1]};
+    for (size_t index = 1; index < 4; index++) {
+        bound.left = fminf(bound.left, corners[index][0]); bound.right = fmaxf(bound.right, corners[index][0]);
+        bound.top = fminf(bound.top, corners[index][1]); bound.bottom = fmaxf(bound.bottom, corners[index][1]);
+    }
+    if (bound.left >= bound.right || bound.top >= bound.bottom) return false;
+    for (size_t index = 0; index < 4; index++) {
+        if ((corners[index][0] != bound.left && corners[index][0] != bound.right) ||
+                (corners[index][1] != bound.top && corners[index][1] != bound.bottom)) return false;
+        for (size_t previous = 0; previous < index; previous++)
+            if (corners[previous][0] == corners[index][0] && corners[previous][1] == corners[index][1]) return false;
+    }
+    *result = bound;
+    return true;
+}
+
+bool rdt_path_get_rect_bound(const RdtPath* path, const RdtMatrix* transform, Bound* bound) {
+    if (!path || !bound || path->count <= 0) return false;
+    const RdtPath::Entry& entry = path->entries[0];
+    Bound result;
+    if (path->count == 1 && entry.cmd == RdtPath::CMD_RECT) {
+        if (entry.args[4] != 0.0f || entry.args[5] != 0.0f || entry.args[2] <= 0.0f || entry.args[3] <= 0.0f) return false;
+        result = {entry.args[0], entry.args[1], entry.args[0] + entry.args[2], entry.args[1] + entry.args[3]};
+    } else if (!path_rect_contour_bound(path, &result)) return false;
+    if (transform && (!rdt_matrix_is_scale_translation(transform) ||
+            !rdt_matrix_project_rect_bounds(transform, result.left, result.top, result.right, result.bottom,
+                &result.left, &result.top, &result.right, &result.bottom))) return false;
+    if (!isfinite(result.left) || !isfinite(result.top) || !isfinite(result.right) || !isfinite(result.bottom)) return false;
+    *bound = result;
+    return true;
+}
+
+static bool vector_raster_fill_rect(RdtVectorImpl* impl, float x, float y, float w, float h, Color color) {
+    if (color.a == 255 || w <= 0.0f || h <= 0.0f) return false;
+    float left = x, top = y, right = x + w, bottom = y + h;
+    if (!isfinite(left) || !isfinite(top) || !isfinite(right) || !isfinite(bottom)) return false;
+    for (int index = 0; index < s_clip_depth; index++) {
+        const ClipEntry& clip = s_clip_stack[s_clip_base + index];
+        Bound bound;
+        if (!rdt_path_get_rect_bound(clip.path, clip.has_transform ? &clip.transform : nullptr, &bound)) return false;
+        left = fmaxf(left, bound.left); top = fmaxf(top, bound.top);
+        right = fminf(right, bound.right); bottom = fminf(bottom, bound.bottom);
+    }
+    left = fmaxf(left - impl->tile_offset_x, 0.0f);
+    top = fmaxf(top - impl->tile_offset_y, 0.0f);
+    right = fminf(right - impl->tile_offset_x, (float)impl->width);
+    bottom = fminf(bottom - impl->tile_offset_y, (float)impl->height);
+    if (right <= left || bottom <= top) return true;
+    if (floorf(left) != left || floorf(top) != top || floorf(right) != right || floorf(bottom) != bottom) return false;
+    // an integral rectangle intersection needs no coverage rasterization; flush before exact source-over on the borrowed target.
+    tvg_flush_batch_scene(impl);
+    Rect rect = {left, top, right - left, bottom - top};
+    ImageSurface target = {};
+    target.pixels = impl->pixels; target.width = impl->width; target.height = impl->height;
+    target.pitch = impl->stride * 4; target.alpha_mode = IMAGE_ALPHA_PREMULTIPLIED;
+    RasterPaintContext raster = raster_paint_context(&target, nullptr, nullptr, 0);
+    raster_fill_rect(&raster, &rect, color.c);
+    return true;
+}
+
 // ============================================================================
 // Image drawing
 // ============================================================================
@@ -1968,9 +2058,9 @@ void rdt_draw_image(RdtVector* vec, const uint32_t* pixels, int src_w, int src_h
                     uint64_t resource_identity, ScaleMode scale_mode) {
     if (!vec || !vec->impl || !pixels) return;
     RdtVectorImpl* impl = vec->impl;
-    if (matrix_is_projective(transform) || scale_mode != SCALE_MODE_LINEAR) {
-        // ThorVG's image matrix is affine. Sample the homography ourselves,
-        // then retain the ordinary vector clip/composite path for the result.
+    if (transform || scale_mode != SCALE_MODE_LINEAR) {
+        // Use the shared pixel-center sampler for affine and projective images;
+        // native picture scaling otherwise disagrees with CPU image blits.
         uint32_t* projected = nullptr;
         Rect rect;
         Rect viewport = {impl->tile_offset_x, impl->tile_offset_y, (float)impl->width, (float)impl->height};
