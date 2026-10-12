@@ -556,9 +556,34 @@ fn collect_children(el, i, n, acc, info) {
         // track \setlength{\unitlength}{value} updates for picture rendering
         let next_info = next_render_info(child, info)
         let rendered = render_node(child, next_info)
-        let new_acc = if (rendered != null) acc ++ [rendered] else acc
+        let punct = if (i + 1 < n) autopunct_mark(child, el[i + 1], next_info) else null
         let later_info = after_render_info(child, next_info)
-        collect_children(el, i + 1, n, new_acc, later_info)
+        if (punct != null) {
+            // the punctuation moves in front of the note mark; the rest of the text follows it
+            let rest = render_node(slice(el[i + 1], 1, len(el[i + 1])), later_info)
+            let moved = acc ++ [punct] ++ (if (rendered != null) [rendered] else []) ++
+                (if (rest != null) [rest] else [])
+            collect_children(el, i + 2, n, moved, later_info)
+        } else {
+            let new_acc = if (rendered != null) acc ++ [rendered] else acc
+            collect_children(el, i + 1, n, new_acc, later_info)
+        }
+    }
+}
+
+// biblatex's autopunct, on by default: in a note style, \autocite moves the
+// punctuation that follows it in front of the note mark ("First.¹"), as the
+// pinned biblatex references show (Lambda_Design_BibTeX_CSL §7.4)
+fn autopunct_mark(child, next, info) {
+    if (not (child is element) or not (next is string) or len(next) == 0) null
+    else {
+        let tag = string(name(child))
+        let context = info.biblatex_context
+        let note_style = context != null and context.processor == "csl" and
+            context.compiled != null and context.compiled.style.class == "note"
+        let mark = slice(next, 0, 1)
+        if ((tag == "autocite" or tag == "autocites") and note_style and
+            contains(".,;:!?", mark)) mark else null
     }
 }
 
