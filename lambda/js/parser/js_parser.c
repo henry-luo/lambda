@@ -1368,6 +1368,15 @@ static bool js_parser_parser_has_for_head_pattern(JsParser* parser) {
         (parser->current.kind == JS_TOK_IN ||
          parser->current.kind == JS_TOK_OF);
     js_parser_parser_probe_end(parser, &probe);
+    if (!valid) {
+        // a cover array/object can parse as an expression despite invalid pattern syntax;
+        // select the pattern parser so rest commas and elisions retain their parse errors.
+        js_parser_parser_probe_begin(parser, &probe);
+        parser->suppress_assignment_pattern_probes = true;
+        valid = js_parser_parse_primary(parser, NULL) &&
+            (parser->current.kind == JS_TOK_IN || parser->current.kind == JS_TOK_OF);
+        js_parser_parser_probe_end(parser, &probe);
+    }
     return valid;
 }
 
@@ -1401,12 +1410,13 @@ static bool js_parser_parse_assignment_target_pattern(JsParser* parser,
             parser->current.kind != JS_TOK_THIS &&
             parser->current.kind != JS_TOK_SUPER &&
             parser->current.kind != JS_TOK_PRIVATE_IDENTIFIER) {
-        if (parser->current.kind != JS_TOK_LBRACE &&
-                parser->current.kind != JS_TOK_LBRACKET) return false;
         expression_base = true;
     }
     if (expression_base) {
         if (!js_parser_parse_primary(parser, &span)) return false;
+        // destructuring may assign a property of any primary (including null);
+        // the member write supplies its runtime error, while bare literals remain invalid targets.
+        if (parser->current.kind != JS_TOK_DOT && parser->current.kind != JS_TOK_LBRACKET) return false;
     } else {
         js_parser_parser_advance(parser);
         if (!js_parser_parser_reduce(parser, JS_REDUCE_PATTERN, JS_REDUCTION_TOKEN,
@@ -2450,6 +2460,12 @@ static bool js_parser_parse_pattern(JsParser* parser, SourceSpan* js_parser_span
                     break;
                 }
                 flags |= JS_REDUCTION_FLAG_SPREAD;
+                if (parser->current.kind == JS_TOK_COMMA) {
+                    // rest terminates the pattern, including the otherwise permitted trailing comma.
+                    ok = js_parser_parser_fail(parser, JS_PARSE_ERROR_CONTEXT,
+                        "rest element must be last", JS_TOK_RBRACKET);
+                    break;
+                }
             } else {
                 if (!js_parser_parse_pattern(parser, &item_span, NULL)) {
                     ok = false;
@@ -2503,6 +2519,11 @@ static bool js_parser_parse_pattern(JsParser* parser, SourceSpan* js_parser_span
                     break;
                 }
                 property_count++;
+                if (parser->current.kind == JS_TOK_COMMA) {
+                    ok = js_parser_parser_fail(parser, JS_PARSE_ERROR_CONTEXT,
+                        "rest property must be last", JS_TOK_RBRACE);
+                    break;
+                }
             } else {
                 SourceSpan key_span;
                 JsToken key_token = {0};

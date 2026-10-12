@@ -2948,6 +2948,55 @@ TEST_F(StyleEpochTest, GridComputedReadsDoNotRetainProjectionScratch) {
     }
 }
 
+TEST_F(StyleEpochTest, FocusRenderingUsesLiveDisplayAncestryAndReleasesScratch) {
+    ASSERT_TRUE(css_property_system_init(doc.document_pool));
+    DomElement* parent = append("div");
+    DomElement* child = authored_element("button");
+    ASSERT_NE(child, nullptr); ASSERT_TRUE(parent->append_child(child));
+    const struct Case {
+        const char* parent_style;
+        const char* child_style;
+        bool parent_hidden;
+        bool child_hidden;
+        bool excluded;
+    } cases[] = {
+        {"", "", false, false, false},
+        {"", "display:none", false, false, true},
+        {"display:none", "display:block", false, false, true},
+        {"display:block", "display:block", false, false, false},
+        {"", "visibility:hidden", false, false, true},
+        {"", "visibility:collapse", false, false, true},
+        {"visibility:hidden", "", false, false, true},
+        {"visibility:hidden", "visibility:visible", false, false, false},
+        {"", "", false, true, true},
+        {"", "display:block", false, true, false},
+        {"", "", true, false, true},
+        {"display:block", "", true, false, false},
+        {"display:contents", "display:contents", false, false, false},
+        {"", "opacity:0;width:0;height:0", false, false, false},
+        {"", "--box:none;display:var(--box)", false, false, true},
+        {"", "--box:block;display:var(--box)", false, true, false},
+    };
+    for (const Case& item : cases) {
+        SCOPED_TRACE(item.parent_style);
+        SCOPED_TRACE(item.child_style);
+        ASSERT_TRUE(parent->set_attribute("style", item.parent_style));
+        ASSERT_TRUE(child->set_attribute("style", item.child_style));
+        if (item.parent_hidden) ASSERT_TRUE(parent->set_attribute("hidden", ""));
+        else parent->remove_attribute("hidden");
+        if (item.child_hidden) ASSERT_TRUE(child->set_attribute("hidden", ""));
+        else child->remove_attribute("hidden");
+        auto read = [&]() {
+            EXPECT_EQ(view_focus_is_hidden(static_cast<View*>(child)), item.excluded);
+        };
+        read();
+        PoolStats warm = {}; pool_get_detailed_stats(doc.document_pool, &warm);
+        for (size_t index = 0; index < 256; index++) read();
+        PoolStats repeated = {}; pool_get_detailed_stats(doc.document_pool, &repeated);
+        EXPECT_EQ(repeated.live_bytes, warm.live_bytes);
+    }
+}
+
 TEST_F(StyleEpochTest, LineClampComputedCountsUseDeclarationOwnersWithoutRetainedScratch) {
     ASSERT_TRUE(css_property_system_init(doc.document_pool));
     DomElement* parent = append("parent");

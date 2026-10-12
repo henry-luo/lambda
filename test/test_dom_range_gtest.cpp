@@ -699,10 +699,13 @@ static uint32_t child_count(DomElement* e) {
 }
 
 TEST_F(DomRangeTest, DocumentFragmentCreate) {
+    EXPECT_EQ(dom_document_fragment_create(nullptr), nullptr);
     DomElement* frag = dom_document_fragment_create(&doc_storage);
     ASSERT_NE(frag, nullptr);
     EXPECT_TRUE(frag->is_element());
     EXPECT_STREQ(frag->tag_name, "#document-fragment");
+    EXPECT_EQ(frag->doc, &doc_storage);
+    EXPECT_EQ(frag->parent, nullptr);
     EXPECT_EQ(child_count(frag), 0u);
 }
 

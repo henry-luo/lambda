@@ -1,0 +1,51 @@
+[["apa", {
+      processor: "lambda-script-citeproc",
+      biblatex_style: "apa",
+      codes: ["csl-style-alias"],
+      citation: "Parenthetical (Doe & Roe, 2020)."
+    }], ["ieee", {
+      processor: "lambda-script-citeproc",
+      biblatex_style: "ieee",
+      codes: ["csl-style-alias"],
+      citation: "Parenthetical [1]."
+    }], ["chicago authordate", {
+      processor: "lambda-script-citeproc",
+      biblatex_style: "chicago-authordate",
+      codes: ["csl-style-alias"],
+      citation: "Parenthetical (Doe and Roe 2020)."
+    }], ["chicago notes", {
+      processor: "lambda-script-citeproc",
+      biblatex_style: "chicago-notes",
+      codes: ["csl-style-alias"],
+      citation: "Parenthetical John Doe and Jane Roe, “Test CSL Title,” Science 12, no. 3 (2020): 1–9, https://doi.org/10.123/test.."
+    }], ["ignored options", {
+      processor: "lambda-script-citeproc",
+      biblatex_style: "apa",
+      codes: ["csl-style-alias", "csl-alias-option-ignored", "csl-alias-option-ignored", "csl-alias-customization"],
+      citation: "Parenthetical (Doe & Roe, 2020)."
+    }], ["explicit citeproc conflicts", {
+      processor: "lambda-script-citeproc",
+      biblatex_style: null,
+      codes: ["unsupported-bib-style", "conflicting-citation-style", "unsupported-output", "unsupported-output", "unsupported-output", "unsupported-output", "unsupported-output", "unsupported-output", "unsupported-output", "unsupported-output", "unsupported-output", "unsupported-output", "unsupported-output"],
+      citation: "Parenthetical Citation could not be processed."
+    }], ["split style", {
+      processor: null,
+      biblatex_style: null,
+      codes: ["unsupported-bib-style", "unsupported-bib-style", "unsupported-output", "unsupported-output", "unsupported-output", "unsupported-output", "unsupported-output", "unsupported-output", "unsupported-output", "unsupported-output", "unsupported-output", "unsupported-output", "unsupported-output", "unsupported-output", "unsupported-output"],
+      citation: "Parenthetical Unsupported biblatex profile."
+    }], ["standard style", {
+      processor: null,
+      biblatex_style: null,
+      codes: [],
+      citation: "Parenthetical [2]."
+    }], ["unmapped style", {
+      processor: null,
+      biblatex_style: null,
+      codes: ["unsupported-bib-style", "unsupported-output", "unsupported-output", "unsupported-output", "unsupported-output", "unsupported-output", "unsupported-output", "unsupported-output", "unsupported-output", "unsupported-output", "unsupported-output", "unsupported-output", "unsupported-output", "unsupported-output"],
+      citation: "Parenthetical Unsupported biblatex profile."
+    }], ["both packages", {
+      processor: null,
+      biblatex_style: null,
+      codes: ["conflicting-bibliography-packages"],
+      citation: "Parenthetical [2]."
+    }]]

@@ -23,6 +23,8 @@ extern __thread EvalContext* context;
 bool eval_context_init(EvalContext* owner);
 bool eval_context_matches(const EvalContext* owner);
 bool eval_context_shutdown(EvalContext* owner);
+// a document boundary transfers ownership without replace-and-restore (D5.4.1).
+bool eval_context_transfer_thread(EvalContext* target);
 
 // Retained and fresh clients share owner and result-root publication (D8.1.3v10, D5.2.1v3).
 bool runtime_context_bind_retained(Runtime* runtime, EvalContext* owner);

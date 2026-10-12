@@ -31,6 +31,8 @@ static bool boundary_uniform_circular_radius(const BorderProp* border,
 
 static bool boundary_background_simple(const BackgroundProp* bg) {
     if (!bg) return true;
+    // other clip boxes need their shared background destination instead of a full border-box fill.
+    if (bg->bg_clip && bg->bg_clip != CSS_VALUE_BORDER_BOX) return false;
     if (bg->image) return false;
     if (bg->gradient_type != GRADIENT_NONE) return false;
     if (bg->linear_gradient || bg->radial_gradient || bg->conic_gradient) return false;
@@ -283,6 +285,11 @@ Color render_gradient_stop_color(const RdtGradientStop& stop) {
     return Color{render_pixel_pack_abgr(stop.r, stop.g, stop.b, stop.a)};
 }
 
+void render_set_uniform_gradient_stops(RdtGradientStop* stops, Color color) {
+    stops[0] = {0.0f, color.r, color.g, color.b, color.a};
+    stops[1] = stops[0]; stops[1].offset = 1.0f;
+}
+
 Color render_sample_gradient_stops(const RdtGradientStop* stops, int count, float position, float stop_scale) {
     if (!stops || count < 1) return Color{};
     if (position < stops[0].offset * stop_scale) return render_gradient_stop_color(stops[0]);
@@ -329,8 +336,8 @@ bool render_normalize_radial_gradient_range(RadiantRadialGeometry* geometry,
     int first = 0;
     while (first < *count && stops[first].offset < 0.0f) first++;
     if (first == *count) {
-        stops[0] = stops[1] = stops[*count - 1];
-        stops[0].offset = 0.0f; stops[1].offset = 1.0f; *count = 2;
+        render_set_uniform_gradient_stops(stops, render_gradient_stop_color(stops[*count - 1]));
+        *count = 2;
     } else if (first > 0) {
         // negative radial positions contribute to the center through interpolation.
         Color center = render_sample_gradient_stops(stops, *count, 0.0f, 1.0f);

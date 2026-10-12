@@ -943,7 +943,7 @@ static void canvas_prepare_surface(CanvasEntry* entry) {
     // Dirty GPU pixels must be current before any exporter takes an owned paint snapshot.
     image_surface_bump_generation(entry->surface);
     image_surface_snapshot_release(entry->surface);
-    snapshot->snapshot_refs = 1;
+    image_surface_snapshot_publish(snapshot);
     entry->surface = snapshot;
 }
 

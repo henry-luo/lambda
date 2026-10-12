@@ -4,7 +4,7 @@
 
 **Scope:** The `lambda.latex` package: turning a LaTeX document into semantic HTML elements, package support, and the HTML, SVG and PDF outputs reached through Radiant. Math typesetting is out of scope here and has its own design.
 
-**Formal linkage:** **D7.2.1–D7.2.4** place shipped packages in source modules with immutable bindings under the `lambda.*` namespace and make package selection a static registry. **S16.9.8** governs imports. **S1.8** forbids executing a runtime string as Lambda code. **S12.1.1v2** and **S12.4.1** make rendering a pure transform over eagerly acquired input. **D7.1.2v2** and **D7.5.2** govern resource acquisition. **S7.4.1–S7.4.4** govern diagnostics. **S2.6.3–S2.6.5** and **D2.6.5v4** govern the command-argument content contract recorded in [Input_Latex.md](input/Input_Latex.md).
+**Formal linkage:** **D7.2.7** rules the TeX expansion front end: expansion without typesetting, the S1.8 reading, the file gate, package resolution and the single front end. **D7.2.1–D7.2.4** place shipped packages in source modules with immutable bindings under the `lambda.*` namespace and make package selection a static registry. **S16.9.8** governs imports. **S1.8** forbids executing a runtime string as Lambda code. **S12.1.1v2** and **S12.4.1** make rendering a pure transform over eagerly acquired input. **D7.1.2v2** and **D7.5.2** govern resource acquisition. **S7.4.1–S7.4.4** govern diagnostics. **S2.6.3–S2.6.5** and **D2.6.5v4** govern the command-argument content contract recorded in [Input_Latex.md](input/Input_Latex.md).
 
 **Detailed designs:**
 
@@ -33,7 +33,7 @@ Implementation records: [Lambda_Impl_Latex_Phase4.md](impl/Lambda_Impl_Latex_Pha
 
 **Expand like TeX, never typeset like TeX.** Real package code runs on a Lambda-owned TeX expansion engine, so document-local classes and packages and the programming packages they need work as written. Typesetting stops there: Radiant owns line breaking, pagination and painting, and emitting semantic elements is the point of the package. The [engine design](latex/Lambda_Design_TeX_Engine.md) gives the full argument and the LaTeXML lineage.
 
-**One reading of the source.** The direct parser is the only producer of the LaTeX Mark AST. The engine feeds it a reconstructed source rather than a second token-stream front end. The target is that every entry point expands (§4.3).
+**One reading of the source.** The direct parser is the only producer of the LaTeX Mark AST, and every LaTeX parse expands before it runs (**D7.2.7**). The engine feeds the parser a reconstructed source rather than a second token-stream front end, so one file yields one AST whatever the entry point (§4.3).
 
 **Semantic adapters in a static registry.** Each supported CTAN package has a script adapter selected by name from a static catalogue. Package names are data, never import paths, and no document text becomes Lambda code (**S1.8**).
 
@@ -93,13 +93,14 @@ The parser grows only where a source distinction is otherwise unrecoverable, and
 
 ### 4.2 Expansion before digestion
 
-When expansion is requested, the engine runs first. Definitions, local packages and bundled programming packages execute as TeX. Document constructs pass through as constructors, arguments of passed-through commands expand in argument mode, and registry-declared raw commands (bussproofs, `semantic`) keep their arguments token for token. Definition commands are executed and also echoed, so adapters that read definitions as data still see them. Engine diagnostics reach the script on the AST root and are reported under the `tex` package. See the [engine design](latex/Lambda_Design_TeX_Engine.md) §2.
+The engine always runs first (**D7.2.7**). Definitions, local packages and bundled programming packages execute as TeX. Document constructs pass through as constructors, arguments of passed-through commands expand in argument mode, and registry-declared raw commands (bussproofs, `semantic`) keep their arguments token for token. Definition commands are executed and also echoed, so adapters that read definitions as data still see them. Engine diagnostics reach the script on the AST root and are reported under the `tex` package. See the [engine design](latex/Lambda_Design_TeX_Engine.md) §2.
 
-### 4.3 Entry points and the one-front-end direction
+### 4.3 Entry points
 
-`latex.parse_source(src, base)` and `latex.parse_file(path)` request expansion, passing the registry's adapter names and raw commands. Every `render_file*` and `render_string*` entry uses them. The native document transform, `lambda convert`, Radiant's LaTeX loader and the doc viewer instead call `input(path, "latex")`, which parses without expansion. On that path `\def` is unsupported and only the script's partial macro substitution applies.
+Every LaTeX parse expands; there is no unexpanded front end (**D7.2.7**). What differs between entry points is only whether the engine receives the adapter registry:
 
-The direction is to make expansion the only front end and delete the raw parse branch, so one file always yields one AST (engine design §6). Until then, the two paths can differ for documents that define macros.
+- `latex.parse_source(src, base)` and `latex.parse_file(path)` pass the registry's adapter names and raw commands. Every `render_file*` and `render_string*` entry uses them, and so do the native document transform behind `lambda convert` and Radiant's LaTeX loader (`render_document_file`, a path-source transform) and the doc viewer.
+- A bare `input(path, "latex")` or `parse(src, "latex")` also expands, but without the registry. A local file that shares an adapter's name then runs, and adapter commands such as bussproofs' inference rules receive argument-mode rather than raw arguments. The input layer cannot consult the script registry without calling upward (**D7.1.1**), so callers that render with `lambda.latex` parse through it.
 
 ## 5. Document pipeline
 
@@ -136,7 +137,9 @@ The fallback emits `<span class="latex-unsupported" data-latex-error=... data-la
 
 ### 5.4 User macros
 
-Without expansion, `macros.get_defs` collects `\newcommand`-family definitions with optional-argument defaults, and `render_generic` substitutes the raw argument text into the definition, re-parses it and renders the result, with a depth limit. This is a weak subset of TeX: it has no `\def`, no delimited parameters, no grouping and no `\let`, and the first definition of a name wins. Under expansion the engine has already expanded document macros, so this path is reached only by commands the engine passed through deliberately. It retires with the one-front-end change. The definition table then remains only for adapters that read definitions as data.
+The engine expands every document macro before the parser runs, with real TeX semantics: `\def`, delimited parameters, grouping, `\let` and redefinition all behave as in LaTeX. The script no longer substitutes macros itself; the old render-time substitution, which spliced raw arguments into a definition and re-parsed it, retired with the unexpanded front end. An element that reaches the renderer is therefore a command the engine passed through on purpose: a theorem environment, an adapter command, or an unsupported command that the fallback reports.
+
+The engine echoes `\newcommand`-family definitions into its output, so `macros.get_defs` still collects them as data for three readers: TikZ islands, until the engine's island expansion lands; bussproofs labels; and the `\familydefault` font selection.
 
 ### 5.5 Diagnostics
 
@@ -157,7 +160,7 @@ A declared name resolves to one of four things:
 - **A `.sty` or `.cls` beside the document.** It runs on the engine, but only when the name is not an adapter.
 - **Nothing.** The registry reports `unknown-package` at the declaration.
 
-The engine design §5 gives the exact order and the open decision about it. A local file never replaces an adapter, because the adapter owns HTML semantics that TeX typesetting code cannot supply.
+This order is ruled in **D7.2.7**; the engine design §5 gives the details. A local file never replaces an adapter, because the adapter owns HTML semantics that TeX typesetting code cannot supply.
 
 ### 6.3 Four kinds of package support
 
@@ -216,7 +219,7 @@ The package offers four bibliography paths, in order of preference:
 - **natbib and BibTeX** with named-style approximations.
 - **In-document `thebibliography`.**
 
-All four share resource loading, citation collection, scopes and links. The design and the built-in profile are in [Lambda_Design_BibTeX_CSL.md](latex/Lambda_Design_BibTeX_CSL.md). Biblatex style files are never executed. A document that names a guide-level biblatex style, such as `apa`, `ieee` or the biblatex-chicago styles, is formatted by the matching CSL style with a diagnostic naming it ([Lambda_Design_BibTeX_CSL.md](latex/Lambda_Design_BibTeX_CSL.md#74-biblatex-style-names-mapped-to-csl) §7.4). This mapping was decided on 2026-10-12 and is not yet built.
+All four share resource loading, citation collection, scopes and links. The design and the built-in profile are in [Lambda_Design_BibTeX_CSL.md](latex/Lambda_Design_BibTeX_CSL.md). Biblatex style files are never executed. A document that names a guide-level biblatex style, such as `apa`, `ieee` or the biblatex-chicago styles, is formatted by the matching CSL style with a diagnostic naming it ([Lambda_Design_BibTeX_CSL.md](latex/Lambda_Design_BibTeX_CSL.md#74-biblatex-style-names-mapped-to-csl) §7.4). The mapping was implemented on 2026-10-12, and its aliases are admitted against pinned biblatex output, with the differences recorded in `test/latex/reference/csl_alias/`.
 
 ### 8.3 Graphics and drawing
 
@@ -241,7 +244,7 @@ One shared table model serves `tabular`, the `array` column types, `multirow`, `
 
 ## 9. Compatibility matrix
 
-The matrix was checked on 2026-10-07; the engine, bibliography, natbib and corpus tests were rerun and pass on 2026-10-12. The adapter catalogue has 62 entries. The rows below cover the packages with active behavior. The remaining catalogue entries are declarations with defined effects, each accepted under the contract of its row or listed in the last row.
+The matrix was checked on 2026-10-07; the engine, bibliography, natbib and corpus tests were rerun and pass on 2026-10-12. The adapter catalogue has 63 entries. The rows below cover the packages with active behavior. The remaining catalogue entries are declarations with defined effects, each accepted under the contract of its row or listed in the last row.
 
 | Package | Supported in HTML | PDF/SVG | Explicitly unsupported |
 |---|---|---|---|
@@ -280,10 +283,7 @@ The matrix was checked on 2026-10-07; the engine, bibliography, natbib and corpu
 
 ### 11.1 Decisions
 
-- **Make expansion the only front end** and retire the raw parse branch and script macro substitution (§4.3, §5.4; engine design §6).
-- **Ratify the engine boundary** as a D7 ruling, and confirm its package resolution order (engine design §10).
-
-Decided on 2026-10-12 and not yet built: the biblatex-to-CSL style mapping (§8.2).
+- **Chicago author–date edition.** The `chicago-authordate` alias formats with the bundled Chicago 18th-edition CSL style, while biblatex-chicago 3.18b implements the 17th edition; the two differ on *et al.* for three authors and on the place of publication. Keep the 18th edition, or bundle the 17th-edition CSL style for this alias.
 
 ### 11.2 Correctness gaps in the script package
 
@@ -323,6 +323,8 @@ These were reproduced on 2026-10-12.
 | 2026-10-07 (Phase IV) | The TeX expansion engine, pdfTeX conformance, bundled programming packages and expl3, and six native PGF/PGFPlots slices. |
 | 2026-10-10 | The Lambda-script CSL citeproc, opt-in. |
 | 2026-10-12 (ruling) | The user dropped M4, running biblatex style files on the TeX engine, and chose to map guide-level biblatex styles to CSL styles instead. |
+| 2026-10-12 (CSL aliases) | `style=apa`, `style=ieee` and `biblatex-chicago` documents are formatted by the bundled CSL styles through the alias table, with diagnostics, and admitted against pinned biblatex 3.21/biber 2.21 output. A note-style `\autocite` now places its mark after the following punctuation. |
+| 2026-10-12 (D7.2.7) | Expansion became the only front end: the raw parse branch, the `expand` option, the `LAMBDA_TEX_EXPAND` knob and the script macro substitution were removed, and the native document transform and doc viewer parse through the package. The engine boundary and its resolution order were ratified as **D7.2.7**. |
 | 2026-10-12 | This consolidation. The retired documents, all recoverable from git, are listed below. |
 | 2026-10-12 cleanup | Removed the unused LaTeX.js-era `css/` stylesheets and `js/base.js`, the unused document-class exports and dead macro helpers. The appendix-letter helper moved to `util.upper_alph`. |
 
@@ -336,6 +338,7 @@ The original proposals also logged Lambda language issues met while building the
 
 ## Appendix B. Superseded rulings
 
+- ~~Callers may parse without expansion; the script substitutes `\newcommand` macros at render time.~~ Replaced 2026-10-12 by **D7.2.7**: every LaTeX parse expands, and the engine owns macro expansion (§4.3, §5.4).
 - ~~The tree-sitter LaTeX parser is retained unchanged as the conversion layer, and no parser changes are needed.~~ Replaced by the Lambda-owned direct parser with neutral argument and raw-body preservation (§4.1).
 - ~~The C++ typesetter is retained for DVI and PDF output.~~ Removed; PDF and SVG come from Radiant (§7.3).
 - ~~Full TeX macro expansion, `\catcode` changes, TikZ and BibTeX are out of scope.~~ Expansion runs on the TeX engine (§4.2); TikZ and bibliographies have adapters (§8).

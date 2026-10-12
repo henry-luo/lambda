@@ -1231,11 +1231,6 @@ static DomText* dom_text_from_bytes(DomDocument* doc, const char* chars, size_t 
     return DomText::create_detached_copy(doc, chars, byte_len);
 }
 
-DomElement* dom_document_fragment_create(DomDocument* doc) {
-    if (!doc) return nullptr;
-    return DomElement::create(doc, "#document-fragment", nullptr);
-}
-
 DomNode* dom_node_clone(DomNode* node, bool deep) {
     if (!node) return nullptr;
     DomDocument* doc = node_doc(node);

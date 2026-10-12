@@ -1,0 +1,12 @@
+<!doctype html><meta charset=utf-8>
+<style>html,body{margin:0;background:white}button{font:12px Arial;height:24px}#box{position:absolute;left:16px;top:64px;width:80px;height:100px;font:80px/1 Arial;color:transparent;background-image:linear-gradient(to right,red 50%,blue 50%);background-clip:text}</style>
+<button id=transparent>Transparent</button><button id=solid>Shadow</button><button id=list>List</button><button id=ink>Ink</button><button id=blur>Blur</button><button id=reset>Reset</button><div id=box>M</div>
+<script>(function(){var box=document.getElementById('box');
+function reset(){box.style.color='transparent';box.style.textShadow='none';box.style.backgroundImage='linear-gradient(to right,red 50%,blue 50%)'}
+document.getElementById('reset').onclick=reset;
+document.getElementById('transparent').onclick=function(){reset();box.style.textShadow='0 0 4px transparent'};
+document.getElementById('solid').onclick=function(){reset();box.style.textShadow='0 0 lime'};
+document.getElementById('list').onclick=function(){reset();box.style.textShadow='0 0 red,0 0 blue'};
+document.getElementById('ink').onclick=function(){box.style.color='black'};
+document.getElementById('blur').onclick=function(){reset();box.style.backgroundImage='none';box.style.textShadow='0 0 4px lime'};
+})();</script>

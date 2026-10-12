@@ -556,9 +556,34 @@ fn collect_children(el, i, n, acc, info) {
         // track \setlength{\unitlength}{value} updates for picture rendering
         let next_info = next_render_info(child, info)
         let rendered = render_node(child, next_info)
-        let new_acc = if (rendered != null) acc ++ [rendered] else acc
+        let punct = if (i + 1 < n) autopunct_mark(child, el[i + 1], next_info) else null
         let later_info = after_render_info(child, next_info)
-        collect_children(el, i + 1, n, new_acc, later_info)
+        if (punct != null) {
+            // the punctuation moves in front of the note mark; the rest of the text follows it
+            let rest = render_node(slice(el[i + 1], 1, len(el[i + 1])), later_info)
+            let moved = acc ++ [punct] ++ (if (rendered != null) [rendered] else []) ++
+                (if (rest != null) [rest] else [])
+            collect_children(el, i + 2, n, moved, later_info)
+        } else {
+            let new_acc = if (rendered != null) acc ++ [rendered] else acc
+            collect_children(el, i + 1, n, new_acc, later_info)
+        }
+    }
+}
+
+// biblatex's autopunct, on by default: in a note style, \autocite moves the
+// punctuation that follows it in front of the note mark ("First.¹"), as the
+// pinned biblatex references show (Lambda_Design_BibTeX_CSL §7.4)
+fn autopunct_mark(child, next, info) {
+    if (not (child is element) or not (next is string) or len(next) == 0) null
+    else {
+        let tag = string(name(child))
+        let context = info.biblatex_context
+        let note_style = context != null and context.processor == "csl" and
+            context.compiled != null and context.compiled.style.class == "note"
+        let mark = slice(next, 0, 1)
+        if ((tag == "autocite" or tag == "autocites") and note_style and
+            contains(".,;:!?", mark)) mark else null
     }
 }
 
@@ -2502,17 +2527,13 @@ fn render_marginpar(el, info) {
     <span class: "latex-cmd-marginpar", for c in items { c }>
 }
 
+// D7.2.7: the TeX engine has already expanded every user macro, so an element
+// reaching here is a command it passed through on purpose: a custom theorem
+// environment, or an unsupported command that the fallback reports.
 fn render_generic(el, info) {
-    // check if this element is a macro invocation
-    let tag_str = string(name(el))
-    let macro_def = if (info.macros != null) macros.find_macro(info.macros, tag_str) else null
-    if (macro_def != null) { render_macro_invocation(el, info, macro_def) }
-    else {
-        // check if this is a custom theorem environment
-        let thm_def = util.lookup(info.theorem_defs, tag_str)
-        if (thm_def != null) { render_custom_theorem(el, info, thm_def) }
-        else { render_generic_default(el, info) }
-    }
+    let thm_def = util.lookup(info.theorem_defs, string(name(el)))
+    if (thm_def != null) { render_custom_theorem(el, info, thm_def) }
+    else { render_generic_default(el, info) }
 }
 
 fn render_custom_theorem(el, info, thm_def) {
@@ -2528,34 +2549,6 @@ fn render_custom_theorem(el, info, thm_def) {
         " "
         for c in items { c }
     >
-}
-
-fn render_macro_invocation(el, info, macro_def) {
-    if (info.macro_depth >= 32)
-        util.unsupported_element("latex", "Macro expansion depth exceeded",
-            el.source_offset)
-    else if (macro_def.source == null)
-        util.unsupported_element("latex", "Macro source was not preserved",
-            el.source_offset)
-    else {
-        let source = macros.substitute_source(macro_def.source, el, macro_def)
-        let parsed = parse(source, {type: "latex"}) ^ { null }
-        if (parsed == null)
-            util.unsupported_element("latex", "Macro expansion could not be parsed",
-                el.source_offset)
-        else {
-            let top = util.command_args(parsed)
-            // Fragment paragraphs are transparent at an inline macro call site.
-            let items = [for (node in top,
-                item in if (node is element and string(name(node)) == "paragraph")
-                    util.command_args(node) else [node]) item]
-            let rendered = render_items(items, 0, len(items),
-                {*:info, macro_depth: info.macro_depth + 1}, [])
-            if (len(rendered) == 0) null
-            else if (len(rendered) == 1) rendered[0]
-            else <span for c in rendered { c }>
-        }
-    }
 }
 
 fn render_items(items, i, n, info, acc) {

@@ -8,6 +8,7 @@
  * - parseInt, parseFloat, isNaN, isFinite
  * - console.log with multiple arguments
  */
+#include "../dom/dom_event_host.h"
 #include "js_runtime.h"
 #include "js_headers.h"
 #include "js_response.h"
@@ -13550,8 +13551,8 @@ static Item js_message_port_deliver(Item env_item) {
     // dequeuing removes the queue's ownership before envelope construction can collect.
     event.set(js_message_port_make_message_event(msg.get()));
     JS_RETURN_IF_ERROR(event.get());
-    radiant_dom_event_set_target(event.get(), target.get());
-    radiant_dom_event_set_lambda_dispatch_position(event.get(), target.get(), 2);
+    dom_event_host_set_target(event.get(), target.get());
+    dom_event_host_set_lambda_dispatch_position(event.get(), target.get(), 2);
     js_set_key_cstr(event.get(), "__dispatch_flag", (Item){.item = ITEM_TRUE});
     handler.set(js_get_key_cstr(target.get(), "onmessage"));
     if (js_is_callable(handler.get())) {
@@ -13560,7 +13561,7 @@ static Item js_message_port_deliver(Item env_item) {
     }
     Item event_args[1] = {event.get()};
     js_message_port_emit_listener_array(target.get(), "__message_event_listeners__", event_args, 1);
-    radiant_dom_event_clear_lambda_dispatch_position(event.get());
+    dom_event_host_clear_lambda_dispatch_position(event.get());
     js_set_key_cstr(event.get(), "__dispatch_flag", (Item){.item = ITEM_FALSE});
     Item args[1] = {msg.get()};
     js_message_port_emit_listener_array(target.get(), "__message_listeners__", args, 1);

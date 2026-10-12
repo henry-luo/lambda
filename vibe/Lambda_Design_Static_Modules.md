@@ -792,3 +792,73 @@ P0 is observational. P1a/P1b carried the active header/provider and lifetime ris
 6. Windows: per-module export macros + DLL config — deferred until a DLL consumer exists (§1 non-goal).
 7. Complete the §2.2 runtime-native IO inventory: decide whether `js_fetch.cpp`'s reusable curl worker should call io while its JS promise/Response binding remains rt; keep `js_net`/`js_dns`/`js_tls` rt unless a reusable transport API emerges naturally.
 8. Scheduling of §8.1 class F (rt→radiant binding TUs) — deliberately deferred until rt and the layers below are settled; until then the tier-1 rule carries rt→radiant as a ratcheted report-only baseline.
+
+
+**CSS provider ownership evidence (2026-10-12, D7.1.3 /D7.5.3):** Seven Item
+host catalog calls and ten DOM/CSSOM collection metadata getters now belong to
+the lower runtime and dispatch through complete immutable process-lifetime
+providers. Radiant publishes its unchanged implementations/type identities at
+registration. Validation rejects missing fields and conflicting publication;
+provider absence preserves null/empty answers. Shared atomic publication and
+worker helpers avoid copied provider mechanisms. Four lower-provider tests,
+503 fresh JS cases, required gates, 1,106 matching sanitizer cases and 506 live
+assertions per runtime pass at protected `consumer30q_*`. The boundary removes
+seventeen imports from 230/93 to 213 deferred /76 unapproved, with no additions.
+The 165 allowance is unchanged and strict closure remains open under
+**D7.3.3–D7.3.4**. This evidence changes no module-boundary ruling.
+
+
+**Follow-up qualification (2026-10-12, CI-18 /D7.1.3 /D7.5.3):** Protected
+`consumer31q_*` qualifies flat hidden/collapsed own PDF link suppression and
+preserves existing visible-descendant links under **D4.5.1v4 /D4.1.4v5**.
+Ten normal/sanitizer annotation controls pass at 1x/2x; Chromium's print behavior
+for a visible descendant differs from its browsing activation. Two more Item
+host wrappers move behind the established lower-owned provider, preserving
+implementations and values. Fresh required gates, 1,106 matching sanitizer cases
+and 506 live assertions per runtime pass; exports 244/246 retain nineteen range
+comparisons and two ordered PDF boundaries. The first boundary link finds stale
+objects containing the moved wrappers. Their provenance and raw failure remain;
+rebuilding just those objects measures 211 deferred /74 unapproved with no new
+imports or allowance changes. Strict boundary closure remains open under
+**D7.3.3–D7.3.4**; no formal ruling changes.
+
+
+**Event provider qualification (2026-10-12, D7.1.3 /D7.5.3):** Protected
+`events32q_*` moves eighteen event host calls behind a lower-owned immutable
+provider while preserving native implementation, public module names, traced
+payloads and dispatch identity (**D4.5.1v4 /D4.5.2**). Five provider tests cover
+all mandatory fields, operation/argument routing, eight creation-flag combinations
+and 200,000 concurrent event calls. Fresh required gates pass 6,765 Lambda/input
+and 5,368 full /353 partial /one skipped Radiant; 1,107 matching sanitizer cases,
+525 live assertions per runtime and the Canvas golden pass. Full exports remain
+244/246, preserving nineteen gradient-range comparisons and two ordered PDF
+boundaries. Ninety normal and 136 sanitizer source inputs match their protected
+binaries. The four strict DSOs build; the raw boundary removes 18 imports from
+211/74 to 193 deferred /56 unapproved with no additions and an unchanged 165
+allowance. Thirty-seven imports are removed since 230/93; remaining strict
+closure follows **D7.3.3–D7.3.4**. The clipped-text draft stays unapplied and
+unqualified at the vector edges. No formal ruling changes.
+
+
+**Event workflow qualification (2026-10-12, D7.1.3 /D7.5.3):** Protected
+`workflow33q_*` removes four remaining synthetic/author-template imports through
+the existing event provider, preserving implementations and dispatch identity
+(**D4.5.1v4 /D4.5.2**). Required gates, 1,107 matching sanitizer cases, 525 live
+assertions per runtime and Canvas golden pass; exports 244/246 retain the same
+nineteen range comparisons and two ordered PDF edges. Ninety-one normal and 136
+sanitizer inputs match protected binaries. The raw boundary improves 193/56 to
+189 deferred /52 unapproved with no additions or allowance change; 41 imports
+are removed since 230/93. Strict closure remains open (**D7.3.3–D7.3.4**).
+
+
+**Editing/factory/context ownership qualification (2026-10-12):** Protected
+`ownership34q_*` qualifies two editing host callbacks, the lower shared fragment
+factory and runtime-owned evaluator transfer (**D7.1.3 / D7.5.3 / D7.2.5 / D5.4.1**).
+Required gates pass 6,766 Lambda/input and 5,368 full /353 partial /one skipped
+Radiant cases; seven matching sanitizer runners pass 1,144 cases and eighteen
+live fixtures pass 534 assertions per runtime. Canvas golden passes; exports
+244/246 preserve nineteen range comparisons and two ordered PDF edges. Ninety-nine
+normal and 140 sanitizer inputs match protected binaries. The raw boundary is
+185 deferred /48 unapproved, four fewer with no additions or allowance change;
+45 imports are removed since 230/93. Strict closure remains open
+(**D7.3.3–D7.3.4**). No formal ruling or CSS-family promotion changes.

@@ -82,6 +82,7 @@ static const char* JS_RESERVED_KEYWORDS[] = {
     "do", "else", "finally", "for", "function", "if", "in", "instanceof",
     "new", "return", "switch", "this", "throw", "try", "typeof", "var",
     "void", "while", "with",
+    "class", "const", "export", "extends", "import", "super", "null", "true", "false",
     NULL
 };
 
@@ -297,26 +298,27 @@ static bool is_valid_assignment_target(JsAstNode* node, bool strict) {
     }
 }
 
-static void check_strict_target_names(EarlyErrorCtx* ctx, JsAstNode* target);
+static void check_pattern_target(EarlyErrorCtx* ctx, JsAstNode* target);
+static void check_identifier_reserved(EarlyErrorCtx* ctx, JsAstNode* node,
+    bool binding_position = true);
 
-static void check_strict_target_names_child(JsAstNode* child, void* opaque) {
-    check_strict_target_names((EarlyErrorCtx*)opaque, child);
+static void check_pattern_target_child(JsAstNode* child, void* opaque) {
+    check_pattern_target((EarlyErrorCtx*)opaque, child);
 }
 
-// Strict code may not assign `eval` or `arguments` in any target position: a
-// simple, compound, or logical assignment, a destructuring element, or a
-// for-in/of head.
-static void check_strict_target_names(EarlyErrorCtx* ctx, JsAstNode* target) {
-    if (!ctx->in_strict || !target) return;
-    if (target->node_type == AST_NODE_IDENT) {
-        String* name = ((JsIdentifierNode*)target)->name;
-        if (name && (strcmp(name->chars, "eval") == 0 ||
-                strcmp(name->chars, "arguments") == 0)) {
-            ee_error(ctx, target, "Unexpected eval or arguments in strict mode");
-        }
+// all assignment-pattern targets reject optional chains; strict targets also
+// reject eval/arguments. Visit binding children, excluding keys and defaults.
+static void check_pattern_target(EarlyErrorCtx* ctx, JsAstNode* target) {
+    if (!target) return;
+    if (js_ast_has_optional_chain(target)) {
+        ee_error(ctx, target, "Invalid optional chain in assignment target");
         return;
     }
-    js_ast_visit_binding_pattern_children(target, check_strict_target_names_child, ctx);
+    if (target->node_type == AST_NODE_IDENT) {
+        check_identifier_reserved(ctx, target);
+        return;
+    }
+    js_ast_visit_binding_pattern_children(target, check_pattern_target_child, ctx);
 }
 
 static void check_assignment_target(EarlyErrorCtx* ctx, JsAstNode* node) {
@@ -341,7 +343,7 @@ static void check_assignment_target(EarlyErrorCtx* ctx, JsAstNode* node) {
         ee_error(ctx, node, "Invalid left-hand side in assignment");
         return;
     }
-    check_strict_target_names(ctx, lhs);
+    check_pattern_target(ctx, lhs);
 }
 
 static void check_update_target(EarlyErrorCtx* ctx, JsAstNode* node) {
@@ -371,11 +373,16 @@ static void check_update_target(EarlyErrorCtx* ctx, JsAstNode* node) {
 // Check raw source text for unicode escapes in identifiers that resolve
 // to reserved words. Tree-sitter resolves escapes in its AST, so the
 // identifier name may be "break" when the source was "br\u0065ak".
-static void check_identifier_reserved(EarlyErrorCtx* ctx, JsAstNode* node) {
+static void check_identifier_reserved(EarlyErrorCtx* ctx, JsAstNode* node,
+        bool binding_position) {
     if (!node || node->node_type != AST_NODE_IDENT) return;
     JsIdentifierNode* id = (JsIdentifierNode*)node;
     if (!id->name) return;
     const char* name = id->name->chars;
+    // these primary expressions share the identifier AST representation; eval/arguments reads are legal.
+    if (!binding_position && (strcmp(name, "this") == 0 || strcmp(name, "super") == 0 ||
+            strcmp(name, "null") == 0 || strcmp(name, "true") == 0 || strcmp(name, "false") == 0 ||
+            strcmp(name, "import") == 0)) return;
     // check if the name itself is a reserved word
     if (is_reserved_word(name, ctx->in_strict)) {
         ee_error(ctx, node, "'%s' is a reserved word and cannot be used as an identifier", name);
@@ -392,7 +399,7 @@ static void check_identifier_reserved(EarlyErrorCtx* ctx, JsAstNode* node) {
     }
 
     // v17: eval/arguments as binding names in strict mode
-    if (ctx->in_strict) {
+    if (binding_position && ctx->in_strict) {
         if (strcmp(name, "eval") == 0 || strcmp(name, "arguments") == 0) {
             ee_error(ctx, node, "'%s' cannot be used as a binding name in strict mode", name);
             return;
@@ -424,15 +431,9 @@ static void check_identifier_reserved(EarlyErrorCtx* ctx, JsAstNode* node) {
                 if (reserved_hit) {
                     ee_error(ctx, node, "'%s' (via unicode escape) is a reserved word", normalized);
                 }
-                // P7b: contextually-reserved keywords ('await' / 'yield') must
-                // also not be written with escape sequences. The spec is
-                // explicit that escapes don't satisfy IdentifierName-not-
-                // ReservedWord: even in a non-strict / non-async / non-module
-                // context, no parse of `await` may flow into AwaitExpression
-                // / IdentifierReference. Treat the escape form as a hard
-                // SyntaxError so test262's `early-no-escaped-await.js` /
-                // `early-no-escaped-yield.js` family stops crashing.
-                else if (contextual_hit) {
+                // preserve binding validation; references reserve contextual keywords only in their active context.
+                else if (contextual_hit && (binding_position || ctx->in_async ||
+                        ctx->in_generator || ctx->in_strict)) {
                     ee_error(ctx, node, "'%s' may not contain escape sequences", normalized);
                 }
             }
@@ -621,9 +622,8 @@ static void walk_expression(EarlyErrorCtx* ctx, JsAstNode* node) {
         }
 
         case AST_NODE_IDENT:
-            // Reserved word checks are done in binding positions (declarations,
-            // parameters), not in expression (reference) positions. Keywords
-            // like 'this', 'null', 'true' may appear as identifiers in the AST.
+            // defaults and computed targets still contain IdentifierReferences subject to strict syntax.
+            check_identifier_reserved(ctx, node, false);
             check_private_identifier_valid(ctx, node, ((JsIdentifierNode*)node)->name);
             break;
 
@@ -858,10 +858,18 @@ static void walk_statement(EarlyErrorCtx* ctx, JsAstNode* node) {
         case AST_NODE_FOR_OF_STAM:
         case AST_NODE_FOR_IN_STAM: {
             JsForOfNode* fo = (JsForOfNode*)node;
+            // Annex B only permits a sloppy for-in var identifier initializer, never a pattern or for-of initializer.
+            if (fo->init && (node->node_type == AST_NODE_FOR_OF_STAM || ctx->in_strict ||
+                    fo->kind != JS_VAR_VAR || !fo->left || fo->left->node_type != AST_NODE_IDENT))
+                ee_error(ctx, fo->init, "Invalid initializer in iteration declaration");
+            walk_expression(ctx, fo->init);
             walk_statement(ctx, fo->left); // may be var decl
             walk_expression(ctx, fo->left); // may be pattern
             if (fo->left && fo->left->node_type != AST_NODE_VAR_STAM) {
-                check_strict_target_names(ctx, fo->left);
+                // a failed pattern parse can leave an array/object expression; it is not an assignment target.
+                if (!fo->declares_binding && !is_valid_assignment_target(fo->left, ctx->in_strict))
+                    ee_error(ctx, fo->left, "Invalid left-hand side in iteration");
+                check_pattern_target(ctx, fo->left);
             }
             walk_expression(ctx, fo->right);
             bool saved_in_iteration = ctx->in_iteration;

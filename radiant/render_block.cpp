@@ -513,11 +513,12 @@ static RenderBlockChildrenPhase render_block_begin_children_phase(RasterRenderCo
         return phase;
     }
 
+    float origin_x = rdcon->block.x, origin_y = rdcon->block.y;
     if (block->scroller || (block->blk && block->block()->contain_paint)) {
         setup_scroller(rdcon, block);
     }
 
-    phase.overflow_clip_scope = render_clip_push_overflow_scope(rdcon);
+    phase.overflow_clip_scope = render_clip_push_overflow_scope(rdcon, block, origin_x, origin_y);
     return phase;
 }
 

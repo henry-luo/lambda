@@ -450,7 +450,7 @@ static ClipShape* render_clip_parse_css_shape(ScratchArena* scratch, ScratchMark
 }
 
 static bool render_clip_push_shape_scope(RasterRenderContext* rdcon, RenderClipScope* scope,
-                                         ClipShape* shape) {
+                                         ClipShape* shape, const RdtMatrix* transform) {
     if (!rdcon || !scope || !shape) {
         return false;
     }
@@ -458,10 +458,8 @@ static bool render_clip_push_shape_scope(RasterRenderContext* rdcon, RenderClipS
     if (!clip_path) {
         return false;
     }
-    RdtMatrix transform;
-    const RdtMatrix* matrix = shape->transformed && rdt_matrix_inverse(&shape->inverse_transform, &transform)
-        ? &transform : nullptr;
-    rc_push_clip(rdcon, clip_path, matrix);
+    // replay the original matrix; reconstructing it from the CPU inverse moves clip edges.
+    rc_push_clip(rdcon, clip_path, transform);
     rdt_path_free(clip_path);
 
     scope->shape = lam::up(shape);
@@ -479,8 +477,14 @@ static bool render_clip_push_shape_scope(RasterRenderContext* rdcon, RenderClipS
 // On success the clip scope takes over `mem`; on failure `mem` is ended here.
 static bool render_clip_push_owned_shape(RasterRenderContext* rdcon,
                                          RenderClipScope* scope,
-                                         ClipShape* shape, ScratchMark* mem) {
-    if (!shape || !render_clip_push_shape_scope(rdcon, scope, shape)) {
+                                         ClipShape* shape, ScratchMark* mem,
+                                         const RdtMatrix* transform = nullptr) {
+    if (shape && transform) {
+        // vector and CPU clips must use the same owner coordinate system.
+        shape->transformed = rdt_matrix_inverse(transform, &shape->inverse_transform);
+        if (!shape->transformed) shape = nullptr;
+    }
+    if (!shape || !render_clip_push_shape_scope(rdcon, scope, shape, transform)) {
         if (rdcon) scratch_scope_end(&rdcon->scratch, mem);
         return false;
     }
@@ -517,13 +521,8 @@ RenderClipScope render_clip_push_css_scope(RasterRenderContext* rdcon, ViewBlock
     ScratchMark mem = scratch_scope_begin(&rdcon->scratch);
     ClipShape* css_shape = render_clip_parse_css_shape(&rdcon->scratch, &mem, clip_str,
                                                        elem_w, elem_h, abs_x, abs_y);
-    const RdtMatrix* matrix = render_state_current_transform(rdcon);
-    if (css_shape && matrix) {
-        // Keep vector and CPU clips in the same transformed coordinate system.
-        css_shape->transformed = rdt_matrix_inverse(matrix, &css_shape->inverse_transform);
-        if (!css_shape->transformed) css_shape = nullptr;
-    }
-    if (!render_clip_push_owned_shape(rdcon, &scope, css_shape, &mem)) return scope;
+    if (!render_clip_push_owned_shape(rdcon, &scope, css_shape, &mem,
+            render_state_current_transform(rdcon))) return scope;
     log_debug("[CLIP] CSS clip-path: %s on element %s", clip_str, block->node_name());
     return scope;
 }
@@ -605,32 +604,35 @@ RenderClipScope render_clip_push_rect_scope(RasterRenderContext* rdcon, const Bo
     return scope;
 }
 
-RenderClipScope render_clip_push_overflow_scope(RasterRenderContext* rdcon) {
+RenderClipScope render_clip_push_overflow_scope(RasterRenderContext* rdcon, ViewBlock* block,
+                                               float origin_x, float origin_y) {
     RenderClipScope scope = {};
-    if (!rdcon || !rdcon->block.has_clip_radius) {
-        return scope;
-    }
-    Bound* clip = &rdcon->block.clip;
-    Corner* cr = &rdcon->block.clip_radius;
-    float cw = clip->right - clip->left;
-    float ch = clip->bottom - clip->top;
-    if (cw <= 0 || ch <= 0) {
-        return scope;
-    }
+    Bound clip; Corner radius;
+    if (!rdcon || !render_clip_overflow_geometry(block, &clip, &radius)) return scope;
+    // untransformed rectangles already constrain every primitive through the block bound;
+    // a second vector mask changes image edge coverage without adding a constraint.
+    if (!radiant_corner_has_radius(&radius) && !render_state_current_transform(rdcon)) return scope;
+    float scale = rdcon->raster_scale;
+    float cw = (clip.right - clip.left) * scale;
+    float ch = (clip.bottom - clip.top) * scale;
+    if (cw <= 0.0f || ch <= 0.0f) return scope;
+    Corner cr = radiant_corner_scaled(&radius, scale);
 
     ClipShape inline_shape = {};
     inline_shape.type = CLIP_SHAPE_ROUNDED_RECT;
-    inline_shape.rounded_rect = {clip->left, clip->top, cw, ch,
-        cr->top_left, cr->top_right, cr->bottom_right, cr->bottom_left};
+    // retain the owner's shape before scrolling or intersection with ancestor clips.
+    inline_shape.rounded_rect = {origin_x + clip.left * scale, origin_y + clip.top * scale, cw, ch,
+        cr.top_left, cr.top_right, cr.bottom_right, cr.bottom_left};
     ScratchMark mem = scratch_scope_begin(&rdcon->scratch);
     ClipShape* shape = render_clip_clone_shape(&rdcon->scratch, &mem, &inline_shape);
-    if (!render_clip_push_owned_shape(rdcon, &scope, shape, &mem)) return scope;
+    if (!render_clip_push_owned_shape(rdcon, &scope, shape, &mem,
+            render_state_current_transform(rdcon))) return scope;
 
     // Clear the flag so child elements do not redundantly push the same clip.
     rdcon->block.has_clip_radius = false;
     log_debug("[CLIP] pushed overflow vector clip: (%.0f,%.0f) %.0fx%.0f r=[%.0f,%.0f,%.0f,%.0f]",
-        clip->left, clip->top, cw, ch,
-        cr->top_left, cr->top_right, cr->bottom_right, cr->bottom_left);
+        inline_shape.rounded_rect.x, inline_shape.rounded_rect.y, cw, ch,
+        cr.top_left, cr.top_right, cr.bottom_right, cr.bottom_left);
     return scope;
 }
 

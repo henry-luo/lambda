@@ -1,5 +1,5 @@
-// test_latex_macros.ls — Test macro definition parsing and substitution
-// Coverage: macros.ls — get_defs, find_macro, substitute_body
+// test_latex_macros.ls — Test macro definition collection
+// Coverage: macros.ls — get_defs, find_macro (substitution retired with D7.2.7)
 
 import macros: lambda.latex.macros
 
@@ -42,12 +42,5 @@ let defs4 = macros.get_defs(multi)
 let empty = <document "just text">
 let defs_empty = macros.get_defs(empty)
 "14. empty defs:"; len(defs_empty)
-
-// ---- substitute_body ----
-let body = <curly_group "Hello " <param_ref "1"> " and " <param_ref "2">>
-let inv = <greet <curly_group "World"> <curly_group "Lambda">>
-let sub = macros.substitute_body(body, inv)
-"15. sub is array:"; sub is array
-"16. sub length:"; len(sub)
 
 "===== ALL LATEX MACROS TESTS DONE ====="

@@ -21,7 +21,8 @@ let aligned = render("\\usepackage{amsmath}\\begin{equation*}\\begin{split}a&=b\
 let aligned_html = html.to_html(aligned.body) ^ { "" }
 let assets = render("\\usepackage{biblatex}\\begin{filecontents*}{inline.bib}\n@book{k,title={Local},year={2020}}\n\\end{filecontents*}\\addbibresource{inline.bib}\\addbibresource{absent.bib}\\includegraphics{absent.png}",
     {base_uri: "test/latex/samples"}).assets
-{accents: contains(util.text_of(accents.body), "Café ő č"),
+// a control word swallows the following space, as in TeX (D7.2.7): \course \H o is "Caféő"
+{accents: contains(util.text_of(accents.body), "Caféő č"),
  unresolved: issue(missing, "unresolved-citation"),
  invalid_flags: issue(flags, "unsupported-natbib-profile"),
  conflicting_packages: issue(conflict, "conflicting-bibliography-packages"),

@@ -1,0 +1,702 @@
+{
+  "name": "Transformed overflow clips follow owner transforms, radii, scrolling, size and output density",
+  "html": "test/ui/css_transformed_overflow.html",
+  "viewport": {
+    "width": 640,
+    "height": 192
+  },
+  "events": [
+    {
+      "type": "set_device_scale",
+      "scale": 1
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#reset"
+      }
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#stage",
+        "offset_x": 8,
+        "offset_y": 24
+      },
+      "search_radius": 0,
+      "min_r": 0,
+      "max_r": 0,
+      "min_g": 255,
+      "max_g": 255,
+      "min_b": 0,
+      "max_b": 0
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#stage",
+        "offset_x": 16,
+        "offset_y": 24
+      },
+      "search_radius": 0,
+      "min_r": 0,
+      "max_r": 0,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 255,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#stage",
+        "offset_x": 44,
+        "offset_y": 24
+      },
+      "search_radius": 0,
+      "min_r": 255,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 0,
+      "max_b": 0
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#stage",
+        "offset_x": 74,
+        "offset_y": 24
+      },
+      "search_radius": 0,
+      "min_r": 0,
+      "max_r": 0,
+      "min_g": 255,
+      "max_g": 255,
+      "min_b": 0,
+      "max_b": 0
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#move"
+      }
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#stage",
+        "offset_x": 16,
+        "offset_y": 24
+      },
+      "search_radius": 0,
+      "min_r": 0,
+      "max_r": 0,
+      "min_g": 255,
+      "max_g": 255,
+      "min_b": 0,
+      "max_b": 0
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#stage",
+        "offset_x": 40,
+        "offset_y": 24
+      },
+      "search_radius": 0,
+      "min_r": 0,
+      "max_r": 0,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 255,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#stage",
+        "offset_x": 70,
+        "offset_y": 24
+      },
+      "search_radius": 0,
+      "min_r": 255,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 0,
+      "max_b": 0
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#stage",
+        "offset_x": 106,
+        "offset_y": 24
+      },
+      "search_radius": 0,
+      "min_r": 0,
+      "max_r": 0,
+      "min_g": 255,
+      "max_g": 255,
+      "min_b": 0,
+      "max_b": 0
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#round"
+      }
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#stage",
+        "offset_x": 33,
+        "offset_y": 17
+      },
+      "search_radius": 0,
+      "min_r": 0,
+      "max_r": 0,
+      "min_g": 255,
+      "max_g": 255,
+      "min_b": 0,
+      "max_b": 0
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#stage",
+        "offset_x": 40,
+        "offset_y": 32
+      },
+      "search_radius": 0,
+      "min_r": 0,
+      "max_r": 0,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 255,
+      "max_b": 255
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#flip"
+      }
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#stage",
+        "offset_x": 41,
+        "offset_y": 17
+      },
+      "search_radius": 0,
+      "min_r": 0,
+      "max_r": 0,
+      "min_g": 255,
+      "max_g": 255,
+      "min_b": 0,
+      "max_b": 0
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#stage",
+        "offset_x": 76,
+        "offset_y": 24
+      },
+      "search_radius": 0,
+      "min_r": 0,
+      "max_r": 0,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 255,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#stage",
+        "offset_x": 60,
+        "offset_y": 24
+      },
+      "search_radius": 0,
+      "min_r": 255,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 0,
+      "max_b": 0
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#stage",
+        "offset_x": 90,
+        "offset_y": 24
+      },
+      "search_radius": 0,
+      "min_r": 0,
+      "max_r": 0,
+      "min_g": 255,
+      "max_g": 255,
+      "min_b": 0,
+      "max_b": 0
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#reset"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#scroll"
+      }
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#stage",
+        "offset_x": 34,
+        "offset_y": 24
+      },
+      "search_radius": 0,
+      "min_r": 255,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 0,
+      "max_b": 0
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#stage",
+        "offset_x": 44,
+        "offset_y": 24
+      },
+      "search_radius": 0,
+      "min_r": 0,
+      "max_r": 0,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 255,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#stage",
+        "offset_x": 8,
+        "offset_y": 24
+      },
+      "search_radius": 0,
+      "min_r": 0,
+      "max_r": 0,
+      "min_g": 255,
+      "max_g": 255,
+      "min_b": 0,
+      "max_b": 0
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#stage",
+        "offset_x": 74,
+        "offset_y": 24
+      },
+      "search_radius": 0,
+      "min_r": 0,
+      "max_r": 0,
+      "min_g": 255,
+      "max_g": 255,
+      "min_b": 0,
+      "max_b": 0
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#wide"
+      }
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#stage",
+        "offset_x": 74,
+        "offset_y": 24
+      },
+      "search_radius": 0,
+      "min_r": 0,
+      "max_r": 0,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 255,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#stage",
+        "offset_x": 104,
+        "offset_y": 24
+      },
+      "search_radius": 0,
+      "min_r": 0,
+      "max_r": 0,
+      "min_g": 255,
+      "max_g": 255,
+      "min_b": 0,
+      "max_b": 0
+    },
+    {
+      "type": "set_device_scale",
+      "scale": 2
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#reset"
+      }
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#stage",
+        "offset_x": 8,
+        "offset_y": 24
+      },
+      "search_radius": 0,
+      "min_r": 0,
+      "max_r": 0,
+      "min_g": 255,
+      "max_g": 255,
+      "min_b": 0,
+      "max_b": 0
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#stage",
+        "offset_x": 16,
+        "offset_y": 24
+      },
+      "search_radius": 0,
+      "min_r": 0,
+      "max_r": 0,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 255,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#stage",
+        "offset_x": 44,
+        "offset_y": 24
+      },
+      "search_radius": 0,
+      "min_r": 255,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 0,
+      "max_b": 0
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#stage",
+        "offset_x": 74,
+        "offset_y": 24
+      },
+      "search_radius": 0,
+      "min_r": 0,
+      "max_r": 0,
+      "min_g": 255,
+      "max_g": 255,
+      "min_b": 0,
+      "max_b": 0
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#move"
+      }
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#stage",
+        "offset_x": 16,
+        "offset_y": 24
+      },
+      "search_radius": 0,
+      "min_r": 0,
+      "max_r": 0,
+      "min_g": 255,
+      "max_g": 255,
+      "min_b": 0,
+      "max_b": 0
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#stage",
+        "offset_x": 40,
+        "offset_y": 24
+      },
+      "search_radius": 0,
+      "min_r": 0,
+      "max_r": 0,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 255,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#stage",
+        "offset_x": 70,
+        "offset_y": 24
+      },
+      "search_radius": 0,
+      "min_r": 255,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 0,
+      "max_b": 0
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#stage",
+        "offset_x": 106,
+        "offset_y": 24
+      },
+      "search_radius": 0,
+      "min_r": 0,
+      "max_r": 0,
+      "min_g": 255,
+      "max_g": 255,
+      "min_b": 0,
+      "max_b": 0
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#round"
+      }
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#stage",
+        "offset_x": 33,
+        "offset_y": 17
+      },
+      "search_radius": 0,
+      "min_r": 0,
+      "max_r": 0,
+      "min_g": 255,
+      "max_g": 255,
+      "min_b": 0,
+      "max_b": 0
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#stage",
+        "offset_x": 40,
+        "offset_y": 32
+      },
+      "search_radius": 0,
+      "min_r": 0,
+      "max_r": 0,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 255,
+      "max_b": 255
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#flip"
+      }
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#stage",
+        "offset_x": 41,
+        "offset_y": 17
+      },
+      "search_radius": 0,
+      "min_r": 0,
+      "max_r": 0,
+      "min_g": 255,
+      "max_g": 255,
+      "min_b": 0,
+      "max_b": 0
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#stage",
+        "offset_x": 76,
+        "offset_y": 24
+      },
+      "search_radius": 0,
+      "min_r": 0,
+      "max_r": 0,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 255,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#stage",
+        "offset_x": 60,
+        "offset_y": 24
+      },
+      "search_radius": 0,
+      "min_r": 255,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 0,
+      "max_b": 0
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#stage",
+        "offset_x": 90,
+        "offset_y": 24
+      },
+      "search_radius": 0,
+      "min_r": 0,
+      "max_r": 0,
+      "min_g": 255,
+      "max_g": 255,
+      "min_b": 0,
+      "max_b": 0
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#reset"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#scroll"
+      }
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#stage",
+        "offset_x": 34,
+        "offset_y": 24
+      },
+      "search_radius": 0,
+      "min_r": 255,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 0,
+      "max_b": 0
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#stage",
+        "offset_x": 44,
+        "offset_y": 24
+      },
+      "search_radius": 0,
+      "min_r": 0,
+      "max_r": 0,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 255,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#stage",
+        "offset_x": 8,
+        "offset_y": 24
+      },
+      "search_radius": 0,
+      "min_r": 0,
+      "max_r": 0,
+      "min_g": 255,
+      "max_g": 255,
+      "min_b": 0,
+      "max_b": 0
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#stage",
+        "offset_x": 74,
+        "offset_y": 24
+      },
+      "search_radius": 0,
+      "min_r": 0,
+      "max_r": 0,
+      "min_g": 255,
+      "max_g": 255,
+      "min_b": 0,
+      "max_b": 0
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#wide"
+      }
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#stage",
+        "offset_x": 74,
+        "offset_y": 24
+      },
+      "search_radius": 0,
+      "min_r": 0,
+      "max_r": 0,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 255,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#stage",
+        "offset_x": 104,
+        "offset_y": 24
+      },
+      "search_radius": 0,
+      "min_r": 0,
+      "max_r": 0,
+      "min_g": 255,
+      "max_g": 255,
+      "min_b": 0,
+      "max_b": 0
+    }
+  ]
+}

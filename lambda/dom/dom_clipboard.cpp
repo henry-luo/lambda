@@ -23,6 +23,7 @@
  * naturally skip the polyfills when the natives are present.
  */
 
+#include "dom_event_host.h"
 #include "../js/js_runtime.h"
 #include "realm/dom_realm.h"
 #include "../js/js_runtime_state.hpp"
@@ -1091,7 +1092,7 @@ extern "C" bool js_dispatch_clipboard_event_to_element(Item target_item, const c
     ev_root.set(js_create_event(type, /*bubbles=*/1, /*cancelable=*/1));
     dom_realm_set_cstr(ev_root.get(), "clipboardData", dt_root.get());
     dom_dispatch_event(target_root.get(), ev_root.get());
-    bool prevented = radiant_dom_event_default_prevented(ev_root.get());
+    bool prevented = dom_event_host_default_prevented(ev_root.get());
     if (!is_paste) {
         const char* plain = dt_read_record(dt_root.get(), "text/plain");
         const char* html  = dt_read_record(dt_root.get(), "text/html");
@@ -1153,7 +1154,7 @@ extern "C" bool js_dispatch_drag_event_to_element(Item target_item,
     Item ev = js_create_native_drag_event(type, client_x, client_y,
         g_drag_data_transfer, false, false, false, false);
     dom_dispatch_event(target_item, ev);
-    return radiant_dom_event_default_prevented(ev);
+    return dom_event_host_default_prevented(ev);
 }
 
 // =============================================================================

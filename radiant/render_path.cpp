@@ -1,5 +1,7 @@
 #include "render.hpp"
 #include "../lib/mem_grow.h"
+#include "../lib/str.h"
+#include <stdlib.h>
 #include <string.h>
 
 
@@ -44,6 +46,9 @@ void render_path_append_quadratic(RdtPath* path, float sx, float sy,
         x + 2.0f / 3.0f * (qx - x), y + 2.0f / 3.0f * (qy - y), x, y);
 }
 
+static void render_path_append_rounded_rect_contour(RdtPath* path, Rect rect,
+                                                   const Corner* radius, bool clockwise);
+
 static bool render_path_transform_visit(void* context, RdtPathCommand command,
                                          const float* args, int count) {
     RenderPathTransform* writer = (RenderPathTransform*)context;
@@ -69,7 +74,7 @@ static bool render_path_transform_visit(void* context, RdtPathCommand command,
         RdtPath* expanded = rdt_path_new();
         if (!expanded) return false;
         // compact primitives need explicit curves before a general affine transform.
-        render_path_append_rounded_rect(expanded, rect, &radius, true);
+        render_path_append_rounded_rect_contour(expanded, rect, &radius, true);
         writer->transform = &mapping;
         bool result = rdt_path_visit(expanded, render_path_transform_visit, context);
         writer->transform = saved_transform;
@@ -121,6 +126,13 @@ void render_path_append_rounded_rect(RdtPath* path, Rect rect,
         }
         return;
     }
+
+    render_path_append_rounded_rect_contour(path, rect, radius, clockwise);
+}
+
+static void render_path_append_rounded_rect_contour(RdtPath* path, Rect rect,
+                                                   const Corner* radius, bool clockwise) {
+    // expansion must emit vertices even when a zero-radius box has a compact rectangle form.
 
     float x = rect.x;
     float y = rect.y;
@@ -213,50 +225,109 @@ Corner render_path_uniform_corner(float top_left, float top_right,
     return radius;
 }
 
-struct RenderPathSvgWriter {StrBuf* out;int precision;};
+struct RenderPathSvgWriter {
+    StrBuf* out;
+    int precision;
+    bool roundtrip;
+    bool has_command;
+};
+
+static void render_path_svg_number(RenderPathSvgWriter* writer, float value) {
+    char formatted[64];
+    str_fmt(formatted, sizeof(formatted), "%.*f", writer->precision, value);
+    // retain exact short spellings; rounded control points otherwise change curve coverage.
+    if (writer->roundtrip && strtof(formatted, nullptr) != value)
+        strbuf_append_format(writer->out, "%.9g", value);
+    else strbuf_append_str(writer->out, formatted);
+}
+
+static void render_path_svg_command(RenderPathSvgWriter* writer, char code,
+                                     const float* points, int coordinate_count) {
+    if (writer->has_command) strbuf_append_char(writer->out, ' ');
+    strbuf_append_char(writer->out, code);
+    for (int index = 0; index < coordinate_count; index++) {
+        if (index) strbuf_append_char(writer->out, index % 2 ? ',' : ' ');
+        render_path_svg_number(writer, points[index]);
+    }
+    writer->has_command = true;
+}
+
+static void render_path_svg_arc(RenderPathSvgWriter* writer, float rx, float ry,
+                                bool large, bool sweep, float x, float y) {
+    const float radii[] = {rx, ry}, end[] = {x, y};
+    render_path_svg_command(writer, 'A', radii, 2);
+    strbuf_append_str(writer->out, large ? " 0 1 " : " 0 0 ");
+    strbuf_append_char(writer->out, sweep ? '1' : '0');
+    strbuf_append_char(writer->out, ' ');
+    render_path_svg_number(writer, end[0]); strbuf_append_char(writer->out, ',');
+    render_path_svg_number(writer, end[1]);
+}
+
 static bool render_path_svg_visit(void* context, RdtPathCommand command,
                                   const float* args, int arg_count) {
     auto* writer = (RenderPathSvgWriter*)context;
-    StrBuf* out = writer->out;
-    int precision = writer->precision;
-    if (!out) return false;
+    if (!writer || !writer->out) return false;
     if (command == RDT_PATH_CLOSE) {
-        strbuf_append_str(out, " Z");
+        render_path_svg_command(writer, 'Z', nullptr, 0);
         return true;
     }
     if (!args) return false;
-    switch (command) {
-        case RDT_PATH_CLOSE:
-            return true;
-        case RDT_PATH_MOVE:
-            if (arg_count < 2) return false;
-            strbuf_append_format(out, "M%.*f,%.*f", precision, args[0], precision, args[1]);
-            return true;
-        case RDT_PATH_LINE:
-            if (arg_count < 2) return false;
-            strbuf_append_format(out, " L%.*f,%.*f", precision, args[0], precision, args[1]);
-            return true;
-        case RDT_PATH_CUBIC:
-            if (arg_count < 6) return false;
-            strbuf_append_format(out, " C%.*f,%.*f %.*f,%.*f %.*f,%.*f",
-                precision, args[0], precision, args[1], precision, args[2], precision, args[3], precision, args[4], precision, args[5]);
-            return true;
-        case RDT_PATH_RECT:
-            if (arg_count < 4) return false;
-            strbuf_append_format(out, "M%.*f,%.*f L%.*f,%.*f L%.*f,%.*f L%.*f,%.*f Z",
-                precision, args[0], precision, args[1], precision, args[0] + args[2], precision, args[1],
-                precision, args[0] + args[2], precision, args[1] + args[3], precision, args[0], precision, args[1] + args[3]);
-            return true;
-        case RDT_PATH_QUAD:
-        case RDT_PATH_CIRCLE:
-            return false;
+    static const struct { RdtPathCommand command; char code; int coordinates; } points[] = {
+        {RDT_PATH_MOVE, 'M', 2}, {RDT_PATH_LINE, 'L', 2},
+        {RDT_PATH_QUAD, 'Q', 4}, {RDT_PATH_CUBIC, 'C', 6}
+    };
+    for (const auto& entry : points) if (command == entry.command) {
+        if (arg_count < entry.coordinates) return false;
+        render_path_svg_command(writer, entry.code, args, entry.coordinates);
+        return true;
     }
-    return false;
+    switch (command) {
+        case RDT_PATH_RECT: {
+            if (arg_count < 4) return false;
+            float x = args[0], y = args[1], w = args[2], h = args[3];
+            float rx = arg_count >= 6 ? fminf(fmaxf(args[4], 0.0f), w * 0.5f) : 0.0f;
+            float ry = arg_count >= 6 ? fminf(fmaxf(args[5], 0.0f), h * 0.5f) : 0.0f;
+            if (rx <= 0.0f || ry <= 0.0f) {
+                const float vertices[4][2] = {{x, y}, {x + w, y}, {x + w, y + h}, {x, y + h}};
+                for (int index = 0; index < 4; index++)
+                    render_path_svg_command(writer, index ? 'L' : 'M', vertices[index], 2);
+            } else {
+                const float start[] = {x + rx, y};
+                const float corners[4][4] = {
+                    {x + w - rx, y, x + w, y + ry}, {x + w, y + h - ry, x + w - rx, y + h},
+                    {x + rx, y + h, x, y + h - ry}, {x, y + ry, x + rx, y}
+                };
+                render_path_svg_command(writer, 'M', start, 2);
+                for (const auto& corner : corners) {
+                    render_path_svg_command(writer, 'L', corner, 2);
+                    render_path_svg_arc(writer, rx, ry, false, true, corner[2], corner[3]);
+                }
+            }
+            render_path_svg_command(writer, 'Z', nullptr, 0);
+            return true;
+        }
+        case RDT_PATH_CIRCLE: {
+            if (arg_count < 4) return false;
+            const float start[] = {args[0] - args[2], args[1]};
+            render_path_svg_command(writer, 'M', start, 2);
+            for (int index = 0; index < 2; index++)
+                render_path_svg_arc(writer, args[2], args[3], true, false,
+                    args[0] + (index ? -args[2] : args[2]), args[1]);
+            render_path_svg_command(writer, 'Z', nullptr, 0);
+            return true;
+        }
+        default: return false;
+    }
 }
 
 bool render_path_append_svg(StrBuf* out, const RdtPath* path, int precision) {
-    RenderPathSvgWriter writer={out,precision};
+    RenderPathSvgWriter writer = {out, precision, false, false};
     return out && path && precision>=0 && precision<=9 && rdt_path_visit(path, render_path_svg_visit, &writer);
+}
+
+bool render_path_append_svg_roundtrip(StrBuf* out, const RdtPath* path) {
+    RenderPathSvgWriter writer = {out, 2, true, false};
+    return out && path && rdt_path_visit(path, render_path_svg_visit, &writer) && writer.has_command;
 }
 
 void render_path_append_svg_rounded_rect(StrBuf* out, Rect rect,
@@ -264,7 +335,7 @@ void render_path_append_svg_rounded_rect(StrBuf* out, Rect rect,
     if (!out) return;
     RdtPath* path = render_path_create_rounded_rect(rect, radius);
     if (!path) return;
-    render_path_append_svg(out, path);
+    render_path_append_svg_roundtrip(out, path);
     rdt_path_free(path);
 }
 

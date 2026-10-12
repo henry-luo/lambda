@@ -1,0 +1,45 @@
+{
+  "captured": "2026-10-12",
+  "bibliography": "test/lambda/latex/fixtures/csl_alias/refs.bib",
+  "bibliography_sha256": "c342774fa031729e9ed49a4af530f910b710aca3dc29dbc8cc226d19fe7e57a7",
+  "toolchain": {
+    "tex": "TeX Live 2025/basic, pdfTeX 1.40.27",
+    "repository": "https://ftp.math.utah.edu/pub/tex/historic/systems/texlive/2025/tlnet-final",
+    "biblatex": "3.21 (2025/07/10)",
+    "biber": "2.21 (biber.universal-darwin r75738)",
+    "biblatex-apa": "9.20 (2025/08/27)",
+    "biblatex-ieee": "1.4f (2025-08-01)",
+    "biblatex-chicago": "3.18b style files (2022/11/17), TeX Live package 2.3b",
+    "text_extraction": "pdftotext (Poppler 26.04.0) -enc UTF-8"
+  },
+  "files": {
+    "apa": {
+      "source": "test/lambda/latex/fixtures/csl_alias/apa.tex",
+      "source_sha256": "61436eaf7280b3737a270125a419947fe1d5a1cf76c767679e68c13a3338bb80",
+      "pdf": "apa.pdf",
+      "pdf_sha256": "c7a4a93da6c9b7a8f0bb218a49fe6276ce0dae4ba3a380fc38f1061d8879d1f9",
+      "text": "apa.pdftotext.txt"
+    },
+    "ieee": {
+      "source": "test/lambda/latex/fixtures/csl_alias/ieee.tex",
+      "source_sha256": "8c865e7dc97007b30a25a82880023a89a20760426dbac933ce2ceb5c9435a2ef",
+      "pdf": "ieee.pdf",
+      "pdf_sha256": "82a3b41d528da2ccfca1605fac9b49ed64e8a99c068891314a8ba4a2ed07cda9",
+      "text": "ieee.pdftotext.txt"
+    },
+    "chicago_authordate": {
+      "source": "test/lambda/latex/fixtures/csl_alias/chicago_authordate.tex",
+      "source_sha256": "0db556e98dab8c31716a49e22cf8b0b3d2f3518c0fa0b4571bc33eb62ab6f6a3",
+      "pdf": "chicago_authordate.pdf",
+      "pdf_sha256": "d0267d3481609e0aa2d34d970c26b1c532493b58dba499354d739aa5dc212f8e",
+      "text": "chicago_authordate.pdftotext.txt"
+    },
+    "chicago_notes": {
+      "source": "test/lambda/latex/fixtures/csl_alias/chicago_notes.tex",
+      "source_sha256": "8b7052a0c448b7a256fe9024b5acfdbc12efb5485e03df8b17c54bb4af7eaceb",
+      "pdf": "chicago_notes.pdf",
+      "pdf_sha256": "5770c0c9cf1dc67f4c671f82f727277083660596f5b234b1141ca83cc344668c",
+      "text": "chicago_notes.pdftotext.txt"
+    }
+  }
+}

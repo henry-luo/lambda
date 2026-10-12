@@ -201,11 +201,11 @@ static void pdf_push_rect_clip(PdfPaintLoweringState* state, const RdtPath* path
     state->rect_clip = lam::own(clip);
 }
 
-static bool pdf_intersect_rect_clips(const PdfPaintLoweringState* state, const PaintFillRect* rect,
+static bool pdf_intersect_rect_clips(const PdfPaintLoweringState* state, const Rect& rect,
         const RdtMatrix* transform, Rect* result) {
     if (!state->rect_clip || state->untracked_rect_clip_depth > 0 ||
             (transform && !rdt_matrix_is_scale_translation(transform))) return false;
-    Bound bound = {rect->x, rect->y, rect->x + rect->w, rect->y + rect->h};
+    Bound bound = {rect.x, rect.y, rect.x + rect.width, rect.y + rect.height};
     if (transform && !rdt_matrix_project_rect_bounds(transform, bound.left, bound.top, bound.right, bound.bottom,
             &bound.left, &bound.top, &bound.right, &bound.bottom)) return false;
     for (const PdfPaintRectClip* clip = state->rect_clip; clip; clip = clip->previous) {
@@ -640,13 +640,13 @@ static bool pdf_draw_abgr_image_impl(PdfRenderContext* ctx,
     float e = x0;
     float f = pdf_coord_y(ctx, y0);
 
+    // the image owns its destination transform; another box clip changes overlapping edge coverage.
     if (opaque) {
         return HPDF_Page_DrawABGRImage(ctx->current_page, pixels, src_w, src_h,
-                                       stride_pixels, a, b, c, d, e, f) == HPDF_OK;
+            stride_pixels, a, b, c, d, e, f) == HPDF_OK;
     }
-    return HPDF_Page_DrawABGRImageWithAlpha(ctx->current_page, pixels,
-                                            src_w, src_h, stride_pixels,
-                                            a, b, c, d, e, f) == HPDF_OK;
+    return HPDF_Page_DrawABGRImageWithAlpha(ctx->current_page, pixels, src_w, src_h,
+        stride_pixels, a, b, c, d, e, f) == HPDF_OK;
 }
 
 static bool pdf_draw_abgr_image(PdfRenderContext* ctx, const uint32_t* pixels,
@@ -796,6 +796,24 @@ static bool pdf_raster_fallback_gradient(PdfRenderContext* ctx,
     float height = 0.0f;
     if (!pdf_gradient_path_bounds(path, &left, &top, &width, &height)) return false;
 
+    Rect intersection;
+    if (pdf_intersect_rect_clips(&ctx->paint_state, {left, top, width, height}, transform, &intersection)) {
+        if (intersection.width <= 0.0f || intersection.height <= 0.0f) return true;
+        Bound visible = {intersection.x, intersection.y,
+            intersection.x + intersection.width, intersection.y + intersection.height};
+        RdtMatrix inverse;
+        if (transform && (!rdt_matrix_inverse(transform, &inverse) ||
+                !rdt_matrix_project_rect_bounds(&inverse, visible.left, visible.top,
+                    visible.right, visible.bottom, &visible.left, &visible.top,
+                    &visible.right, &visible.bottom))) return false;
+        // use the visible owner coordinates so clipping cannot change gradient sampling phase.
+        float right = left + width, bottom = top + height;
+        left = fmaxf(left, visible.left); top = fmaxf(top, visible.top);
+        width = fminf(right, visible.right) - left;
+        height = fminf(bottom, visible.bottom) - top;
+        if (width <= 0.0f || height <= 0.0f) return true;
+    }
+
     float density = ctx->ui_context ? ui_context_raster_scale(ctx->ui_context) : 1.0f;
     PaintList paint;
     RdtMatrix scale = rdt_matrix_scale(density, density);
@@ -823,7 +841,7 @@ static bool pdf_raster_fallback_gradient(PdfRenderContext* ctx,
     dl_destroy(&dl);
     arenas.destroy();
     if (!surface) return false;
-    // the snapshot already clips the path; clipping again adds a second antialiased edge.
+    // the snapshot already clips the path; another mask changes edge coverage.
     bool ok = pdf_draw_abgr_image_preserve_alpha(ctx, (const uint32_t*)surface->pixels,
         surface->width, surface->height, surface->pitch / 4, left, top,
         (float)surface->width / density, (float)surface->height / density, 255, transform);
@@ -1069,7 +1087,7 @@ static void pdf_lower_paint_list(PdfRenderContext* ctx, PaintList* commands) {
             if (!caps || !caps->rects) break;
             PaintFillRect* p = &cmd->fill_rect;
             Rect intersection;
-            if (pdf_intersect_rect_clips(state, p, stack_transform, &intersection)) {
+            if (pdf_intersect_rect_clips(state, {p->x, p->y, p->w, p->h}, stack_transform, &intersection)) {
                 if (intersection.width > 0.0f && intersection.height > 0.0f)
                     pdf_render_rect(ctx, intersection.x, intersection.y, intersection.width, intersection.height, p->color, true);
                 state->emitted_count++;
@@ -1310,6 +1328,13 @@ static void render_text_view_pdf(PdfRenderContext* ctx, ViewText* text) {
     run.x = base_x;
     run.baseline_y = baseline_y;
     run.word_spacing = adjusted_space_width - space_width;
+    DomElement* parent = text->parent ? text->parent->as_element() : nullptr;
+    if (parent && render_paint_text_background(pdf_active_paint_list(ctx), ctx->ui_context,
+            parent, &run, {ctx->block.x, ctx->block.y, parent->width, parent->height})) {
+        pdf_lower_paint_list(ctx);
+    }
+    if (parent && parent->font && render_paint_text_shadows(pdf_active_paint_list(ctx),
+            ctx->ui_context, &run, parent->fontp()->text_shadow)) pdf_lower_paint_list(ctx);
     paint_glyph_run(pdf_active_paint_list(ctx), &run);
     pdf_lower_paint_list(ctx);
 
@@ -1398,7 +1423,9 @@ static void pdf_cb_visit_element(RenderContext* vctx, ViewElement* view,
     DomElement* element = lam::dom_require_element(lam::view_dom_node(view));
     if (!ctx || !element) return;
     if (element->id) pdf_record_destination(ctx, element->id, abs_x, abs_y);
-    if (view->is_block() && element->tag_id == MARKUP_NAME_A) {
+    // semantic visitation includes hidden boxes so visible descendants keep their destinations.
+    if (view->is_block() && element->tag_id == MARKUP_NAME_A &&
+        !view_visibility_is_hidden(view)) {
         pdf_record_link_rect(ctx, element->get_attribute("href"), abs_x, abs_y,
             view->width, view->height);
     }

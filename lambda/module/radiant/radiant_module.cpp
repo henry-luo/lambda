@@ -9,6 +9,9 @@
 #include "radiant_dom_bridge.hpp"
 #include "radiant_webgl_bridge.hpp"
 #include "../../dom/dom_style.h"
+#include "../../dom/dom_host_engine.h"
+#include "../../dom/dom_collection_types.h"
+#include "../../dom/dom_event_host.h"
 #include "radiant_input_value.hpp"
 #include "../../../lib/tagged.hpp"
 #include "../../../radiant/layout.hpp"
@@ -5083,19 +5086,57 @@ static const DomWebGlEngineOps radiant_webgl_operations = {
     DOM_WEBGL_ENGINE_OPERATIONS(RADIANT_WEBGL_ENTRY)
 #undef RADIANT_WEBGL_ENTRY
 };
+static bool radiant_style_focus_is_hidden(DomElement* element) {
+    return view_focus_is_hidden(static_cast<View*>(element));
+}
+
 static const DomStyleEngineOps radiant_style_operations = {
     dom_ensure_computed,
     css_prop_serialize_computed_value,
     css_prop_serialize_custom_property,
     css_compute_element_custom_property,
     css_transition_capture_before_change,
-    radiant_set_cssom_used_value_sync
+    radiant_set_cssom_used_value_sync,
+    radiant_style_focus_is_hidden
+};
+
+static const DomHostEngineOps radiant_host_operations = {
+    fn_radiant_request_frame,
+    fn_radiant_cancel_frame,
+    fn_radiant_viewport_size,
+    fn_radiant_watch_window,
+    fn_radiant_history_traverse,
+    fn_radiant_media_info,
+    fn_radiant_media_command,
+    fn_radiant_clear_editing_focus,
+    fn_radiant_dom_edit_target,
+    radiant_dom_query_command,
+    radiant_dom_set_design_mode
+};
+
+static const DomCollectionHostTypes radiant_collection_types = {
+#define RADIANT_COLLECTION_TYPE(name) radiant_dom_##name##_host_type(),
+    DOM_COLLECTION_HOST_TYPES(RADIANT_COLLECTION_TYPE)
+#undef RADIANT_COLLECTION_TYPE
+};
+
+static const DomEventHostOps radiant_event_host_operations = {
+#define RADIANT_EVENT_HOST_ENTRY(result, name, parameters, arguments, absence) radiant_dom_event_##name,
+    DOM_EVENT_RECORD_HOST_OPERATIONS(RADIANT_EVENT_HOST_ENTRY)
+#undef RADIANT_EVENT_HOST_ENTRY
+    radiant_dispatch_synthetic_dom_event,
+    radiant_synthetic_dom_dispatch_is_reentry,
+    radiant_author_template_dispatch_begin,
+    radiant_author_template_dispatch_end
 };
 
 RADIANT_C_API void radiant_jube_register_static(void) {
     if (!dom_canvas_register_engine(&radiant_canvas_operations) ||
         !dom_webgl_register_engine(&radiant_webgl_operations) ||
-        !dom_style_register_engine(&radiant_style_operations)) {
+        !dom_style_register_engine(&radiant_style_operations) ||
+        !dom_host_register_engine(&radiant_host_operations) ||
+        !dom_collection_register_types(&radiant_collection_types) ||
+        !dom_event_register_host(&radiant_event_host_operations)) {
         log_error("DOM provider registration rejected a conflicting native provider");
         return;
     }
@@ -5129,14 +5170,8 @@ RADIANT_C_API void radiant_jube_register_static(void) {
 RADIANT_PROVIDE_ENGINE_2(get_state, fn_radiant_get_state)
 RADIANT_PROVIDE_ENGINE_3(set_state, fn_radiant_set_state)
 RADIANT_PROVIDE_ENGINE_1(request_change, fn_radiant_request_change)
-RADIANT_PROVIDE_ENGINE_2(request_frame, fn_radiant_request_frame)
-RADIANT_PROVIDE_ENGINE_1(viewport_size, fn_radiant_viewport_size)
-RADIANT_PROVIDE_ENGINE_2(cancel_frame, fn_radiant_cancel_frame)
-RADIANT_PROVIDE_ENGINE_3(watch_window, fn_radiant_watch_window)
-RADIANT_PROVIDE_ENGINE_2(history_traverse, fn_radiant_history_traverse)
 RADIANT_PROVIDE_ENGINE_1(focused, fn_radiant_focused)
 RADIANT_PROVIDE_ENGINE_2(focus_set, fn_radiant_focus_set)
-RADIANT_PROVIDE_ENGINE_1(clear_editing_focus, fn_radiant_clear_editing_focus)
 RADIANT_PROVIDE_ENGINE_1(mouse_focus, fn_radiant_mouse_focus)
 RADIANT_PROVIDE_ENGINE_1(activate_popover, fn_radiant_activate_popover)
 RADIANT_PROVIDE_ENGINE_1(keyboard_click, fn_radiant_keyboard_click)
@@ -5166,7 +5201,6 @@ RADIANT_PROVIDE_ENGINE_1(ime_preedit, fn_radiant_ime_preedit)
 RADIANT_PROVIDE_ENGINE_1(tc_selection_start, fn_radiant_selection_start)
 RADIANT_PROVIDE_ENGINE_1(tc_selection_end, fn_radiant_selection_end)
 RADIANT_PROVIDE_ENGINE_2(edit_node, fn_radiant_dom_edit_node)
-RADIANT_PROVIDE_ENGINE_2(edit_target, fn_radiant_dom_edit_target)
 RADIANT_PROVIDE_ENGINE_2(edit_start, fn_radiant_dom_edit_start)
 RADIANT_PROVIDE_ENGINE_2(edit_end, fn_radiant_dom_edit_end)
 RADIANT_PROVIDE_ENGINE_2(edit_start_container, fn_radiant_dom_edit_start_container)
@@ -5246,8 +5280,6 @@ RADIANT_PROVIDE_ENGINE_3(audio_play, fn_radiant_audio_play)
 RADIANT_PROVIDE_ENGINE_2(audio_pause, fn_radiant_audio_pause)
 RADIANT_PROVIDE_ENGINE_2(audio_close, fn_radiant_audio_close)
 RADIANT_PROVIDE_ENGINE_2(audio_state, fn_radiant_audio_state)
-RADIANT_PROVIDE_ENGINE_1(media_info, fn_radiant_media_info)
-RADIANT_PROVIDE_ENGINE_3(media_command, fn_radiant_media_command)
 RADIANT_PROVIDE_ENGINE_2(set_relative_mouse, fn_radiant_set_relative_mouse)
 RADIANT_PROVIDE_ENGINE_1(relative_mouse_active, fn_radiant_relative_mouse_active)
 RADIANT_PROVIDE_ENGINE_2(input_operation, fn_radiant_input_operation)

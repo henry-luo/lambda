@@ -7,6 +7,7 @@
 
 #include "dom_cssom.h"
 #include "dom_style.h"
+#include "dom_collection_types.h"
 #include "dom_core.h"
 #include "realm/dom_realm.h"
 #include "dom.h"
@@ -56,8 +57,6 @@ extern "C" const void* radiant_dom_css_rule_host_type(void);
 extern "C" const void* radiant_dom_rule_style_decl_host_type(void);
 extern "C" const void* radiant_dom_inline_style_host_type(void);
 extern "C" const void* radiant_dom_computed_style_host_type(void);
-extern "C" const void* radiant_dom_style_sheet_list_host_type(void);
-extern "C" const void* radiant_dom_css_rule_list_host_type(void);
 extern "C" Item dom_document_proxy_for_doc_bridge(void* doc);
 
 // Forward declaration
@@ -975,7 +974,7 @@ extern "C" Item dom_cssom_stylesheet_get_css_rules(Item sheet_item) {
     CssStylesheet* sheet = unwrap_stylesheet(sheet_item);
     if (!sheet) return ItemNull;
     return cssom_varray_new(sheet_item, CSSOM_VARRAY_RULES,
-        radiant_dom_css_rule_list_host_type());
+        dom_css_rule_list_host_type());
 }
 
 extern "C" Item dom_cssom_stylesheet_get_length(Item sheet_item) {
@@ -1264,7 +1263,7 @@ extern "C" Item dom_cssom_rule_get_css_rules(Item rule_item) {
     CssRule* rule = unwrap_rule(rule_item);
     if (!css_rule_child_list(rule).count) return ItemNull;
     // retain the owner, then read its current child array on each list access.
-    return cssom_varray_new(rule_item, CSSOM_VARRAY_RULES, radiant_dom_css_rule_list_host_type());
+    return cssom_varray_new(rule_item, CSSOM_VARRAY_RULES, dom_css_rule_list_host_type());
 }
 
 extern "C" Item dom_cssom_rule_get_css_text(Item rule_item) {
@@ -2133,7 +2132,7 @@ static Item stylesheets_varray_for(DomDocument* doc, Item owner) {
         owner_root.set(dom_document_proxy_for_doc_bridge(doc));
     }
     return cssom_varray_new(owner_root.get(), CSSOM_VARRAY_STYLE_SHEETS,
-        radiant_dom_style_sheet_list_host_type());
+        dom_style_sheet_list_host_type());
 }
 
 // JS's door: the ambient document, which is realm state.

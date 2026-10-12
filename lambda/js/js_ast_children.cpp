@@ -335,6 +335,14 @@ bool js_ast_any_binding_pattern_child(JsAstNode* node,
         predicate_binding_child, &context);
 }
 
+JsAstNode* js_ast_pattern_reference_target(JsAstNode* pattern) {
+    if (pattern && pattern->node_type == AST_NODE_ASSIGN_PATTERN)
+        pattern = ((JsAssignmentPatternNode*)pattern)->left;
+    return pattern && (pattern->node_type == AST_NODE_IDENT ||
+        pattern->node_type == AST_NODE_MEMBER_EXPR ||
+        pattern->node_type == AST_NODE_INDEX_EXPR) ? pattern : NULL;
+}
+
 JsIdentifierNode* js_ast_parameter_binding_identifier(JsAstNode* parameter) {
     if (!parameter) return NULL;
     if (parameter->node_type == AST_NODE_IDENT) {
