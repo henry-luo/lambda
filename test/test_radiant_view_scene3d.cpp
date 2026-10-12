@@ -1,17 +1,10 @@
 #include <gtest/gtest.h>
+#include "test_radiant_view_helpers.hpp"
 #include "../lib/file.h"
-#include "../lib/shell.h"
 #include "../lib/strbuf.h"
-#include "../lib/time_util.h"
 #include "../lib/mem.h"
-#include "../lib/str.h"
+#include <cstdio>
 #include <cstring>
-#include <cstdlib>
-#ifdef _WIN32
-#include <process.h>
-#else
-#include <unistd.h>
-#endif
 
 struct Scene3dCase {
     const char* name;
@@ -36,49 +29,37 @@ public:
     void TestBody() override {
         ASSERT_TRUE(file_exists(fixture->document)) << fixture->document;
         ASSERT_TRUE(file_exists(fixture->events)) << fixture->events;
-#ifdef _WIN32
-        int process_id = _getpid();
-#else
-        int process_id = getpid();
-#endif
+        RadiantViewLaunch launch = {};
+        launch.label = fixture->name;
+        launch.page = fixture->document;
+        launch.event_path = fixture->events;
+        launch.timeout_ms = 120000;
+        launch.graphics = !fixture->without_graphics;
+        ASSERT_TRUE(test_radiant_view_prepare_launch(&launch));
+        // event-sim artifacts stay relative to the isolated child's scratch directory.
         StrBuf* directory = strbuf_new();
-        strbuf_append_format(directory, "./temp/scene3d/%d-%llu-%s", process_id,
-            (unsigned long long)time_now_ns(), fixture->name);
-        if (!create_dir(directory->str)) {
-            strbuf_free(directory);
-            FAIL() << "Could not create Scene3D output directory";
-        }
-        StrBuf* result_path = strbuf_dup(directory);
-        StrBuf* log_path = strbuf_dup(directory);
-        strbuf_append_str(result_path, "/events.json");
-        strbuf_append_str(log_path, "/viewer.log");
-        const char* executable = getenv("RADIANT_TEST_EXECUTABLE");
-        if (!executable || !executable[0]) executable = "./lambda.exe";
-        const char* args[] = {executable, "view", fixture->document, "--headless",
-            "--event-file", fixture->events, "--event-result", result_path->str, nullptr};
+        strbuf_append_format(directory, "%s/temp/scene3d", launch.cwd);
+        bool created = create_dir(directory->str);
+        RecordProperty("scene3d_artifacts", directory->str);
+        strbuf_free(directory);
+        ASSERT_TRUE(created);
         ShellEnvEntry environment[] = {
             {"LAMBDA_HEADLESS_GLFW_WINDOW", fixture->without_graphics ? nullptr : "1"},
-            {"LAMBDA_LOG_FILE", log_path->str}, {"LAMBDA_EVENT_SIM_OUTPUT_DIR", directory->str},
+            {"LAMBDA_EVENT_SIM_OUTPUT_DIR", "temp/scene3d"},
             {nullptr, nullptr},
         };
-        ShellOptions options = {};
-        options.env = environment;
-        options.merge_stderr = true;
-        options.timeout_ms = 120000;
-        uint64_t start = time_now_ns();
-        ShellResult result = shell_exec(executable, args, &options);
-        double elapsed = time_elapsed_ms_f(start, time_now_ns());
-        char milliseconds[64];
-        str_fmt(milliseconds, sizeof(milliseconds), "%.3f", elapsed);
-        RecordProperty("scene3d_elapsed_ms", milliseconds);
-        RecordProperty("scene3d_log", log_path->str);
+        launch.env = environment;
+        test_radiant_view_launch(&launch);
+        test_radiant_view_record_launch(launch.label, launch.elapsed_ms,
+            launch.viewer_log_path, launch.timing_path);
+        ShellResult& result = launch.result;
         EXPECT_FALSE(result.timed_out) << fixture->name;
         EXPECT_FALSE(result.output_limit_exceeded);
         EXPECT_EQ(result.exit_code, fixture->fails ? 1 : 0) << (result.stdout_buf ? result.stdout_buf : "")
-            << "\nSee " << log_path->str;
-        char* report = file_exists(result_path->str) ? read_text_file(result_path->str) : nullptr;
+            << "\nSee " << launch.viewer_log_path;
+        char* report = file_exists(launch.event_result) ? read_text_file(launch.event_result) : nullptr;
         if (fixture->malformed) EXPECT_EQ(report, nullptr) << "Malformed fixtures must fail before execution";
-        else EXPECT_NE(report, nullptr) << "Missing event-sim result: " << result_path->str;
+        else EXPECT_NE(report, nullptr) << "Missing event-sim result: " << launch.event_result;
         if (report) {
             int version = 0, executed = 0, passed = 0, failed = 0, consumed = 0;
             char verdict[8] = {};
@@ -102,12 +83,10 @@ public:
             mem_free(report);
         }
         shell_result_free(&result);
-        strbuf_free(log_path); strbuf_free(result_path); strbuf_free(directory);
     }
 };
 
-int main(int argc, char** argv) {
-    ::testing::InitGoogleTest(&argc, argv);
+void test_radiant_view_register_scene3d() {
     for (const auto& fixture : scene3d_cases) {
         const Scene3dCase* selected = &fixture;
         ::testing::RegisterTest("Scene3dTest", fixture.name, nullptr, nullptr,
@@ -118,5 +97,4 @@ int main(int argc, char** argv) {
         ::testing::RegisterTest("EventSimRenderTest", fixture.name, nullptr, nullptr,
             __FILE__, __LINE__, [selected]() -> Scene3dTest* { return new Scene3dTest(selected); });
     }
-    return RUN_ALL_TESTS();
 }

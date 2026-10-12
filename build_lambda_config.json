@@ -3429,22 +3429,6 @@
             "icon": "\ud83e\uddfe"
           },
           {
-            "source": "test/test_scene3d_gtest.cpp",
-            "name": "Scene3D Integration Tests",
-            "case_workers": 2,
-            "case_workers_env": "LAMBDA_SCENE3D_TEST_JOBS",
-            "dependencies": [
-              "lambda-lib"
-            ],
-            "libraries": [
-              "gtest",
-              "gtest_main"
-            ],
-            "binary": "test_scene3d_gtest.exe",
-            "icon": "\ud83c\udfa8",
-            "requires_lambda_exe": true
-          },
-          {
             "source": "test/test_scene3d_unit_gtest.cpp",
             "name": "Scene3D Native Unit Tests",
             "case_workers": 2,
@@ -4102,6 +4086,9 @@
           {
             "source": "test/test_radiant_view_gtest.cpp",
             "name": "Radiant View Tests",
+            "additional_sources": [
+              "test/test_radiant_view_scene3d.cpp"
+            ],
             "case_workers": 3,
             "case_workers_env": "LAMBDA_RADIANT_VIEW_TEST_JOBS",
             "case_worker_args": [

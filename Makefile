@@ -2138,7 +2138,7 @@ test-radiant-baseline: build-radiant-baseline
 
 .PHONY: test-scene3d
 test-scene3d: build-radiant-baseline
-	@./test/test_scene3d_gtest.exe
+	@./test/test_radiant_view_gtest.exe --gtest_filter='Scene3dTest.*:EventSimRenderTest.*'
 	@./test/test_scene3d_unit_gtest.exe
 
 .PHONY: test-map

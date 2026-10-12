@@ -6,6 +6,7 @@
 #include <cstddef>
 
 #include "../radiant/script_timeout.hpp"
+#include "test_radiant_view_helpers.hpp"
 
 extern "C" {
 #include "../lib/shell.h"
@@ -325,24 +326,6 @@ static char g_radiant_view_artifacts[1024];
 static char g_radiant_view_workspace[1024];
 static int test_radiant_view_default_jobs();
 
-struct RadiantViewLaunch {
-    const char* label;
-    const char* page;
-    const char* event_path;
-    const ShellEnvEntry* env;
-    const char* command = "view";
-    bool graphics = false;
-    bool quiet = false;
-    int timeout_ms = 30000;
-    char cwd[1024];
-    char log_path[1024];
-    char viewer_log_path[1024];
-    char timing_path[1024];
-    char event_result[1024];
-    ShellResult result = {-1};
-    double elapsed_ms = 0;
-};
-
 static bool test_radiant_view_prepare_run() {
     const char* output = getenv("LAMBDA_TEST_OUTPUT_DIR");
     if (!output || !output[0]) output = "test_output";
@@ -358,7 +341,7 @@ static bool test_radiant_view_prepare_run() {
     return create_dir(g_radiant_view_artifacts) && create_dir(g_radiant_view_workspace);
 }
 
-static bool test_radiant_view_prepare_launch(RadiantViewLaunch* launch) {
+bool test_radiant_view_prepare_launch(RadiantViewLaunch* launch) {
     char directory[1024];
     snprintf(directory, sizeof(directory), "%s/%s", g_radiant_view_artifacts, launch->label);
     if (!create_dir(directory)) return false;
@@ -385,7 +368,7 @@ static bool test_radiant_view_prepare_launch(RadiantViewLaunch* launch) {
 static ShellResult test_radiant_view_run_logged_headless(const char*, const char*,
     const ShellEnvEntry*, const char*, const char* const*, int, const char*, const char*, const char*);
 
-static void test_radiant_view_launch(void* argument) {
+void test_radiant_view_launch(void* argument) {
     RadiantViewLaunch* launch = (RadiantViewLaunch*)argument;
     ShellEnvEntry environment[32] = {
         {"LAMBDA_HOME", g_radiant_view_home}, {"LAMBDA_LOG_FILE", launch->viewer_log_path},
@@ -410,7 +393,7 @@ static void test_radiant_view_launch(void* argument) {
         launch->result.stdout_len);
 }
 
-static void test_radiant_view_record_launch(const char* label, double elapsed_ms,
+void test_radiant_view_record_launch(const char* label, double elapsed_ms,
                                            const char* log_path, const char* timing_path) {
     char key[256], elapsed[64];
     snprintf(elapsed, sizeof(elapsed), "%.3f", elapsed_ms);
@@ -3220,6 +3203,8 @@ static void test_radiant_view_run_selected_parallel(const size_t* selected,
 }
 
 int main(int argc, char** argv) {
+    // register the fixture inventory before GTest discovery or filtered execution.
+    test_radiant_view_register_scene3d();
     const char* filter = test_radiant_view_filter_from_args(argc, argv);
     bool list_only = test_radiant_view_list_tests_requested(argc, argv);
     bool case_worker = false;

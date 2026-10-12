@@ -1135,9 +1135,11 @@ extensions; selected macOS Phase III evidence is recorded
 | Phase III: shared animation | Pinned Three.js clip/track/action/mixer parity, shared SVG/3D evaluator, native animated pixels including bones/morphs, SVG regression coverage, input/lifecycle/forced-GC tests, bounded memory and measured release frame pacing. |
 | Follow-on | Additional native material parity, broader WebGL API coverage, rendered PNG/SVG/PDF export, additional desktops and comprehensive device-reset recovery. |
 
-The focused `test/test_scene3d_gtest.cpp` runner and `test/lambda/scene3d/`
-goldens are wired into their relevant baselines, with rendered scene/page fixtures
-under `test/scene3d/`. `make test-scene3d` runs the native gate. Commands and
+The `test/test_radiant_view_scene3d.cpp` cases run inside the View target;
+`test/test_scene3d_unit_gtest.cpp` keeps native unit probes separate. Both targets
+and the `test/lambda/scene3d/` goldens are wired into their relevant baselines,
+with rendered scene/page fixtures under `test/scene3d/`. `make test-scene3d`
+selects the Scene3D integration cases and runs the native unit gate. Commands and
 evidence are recorded in the implementation plan and `test/README.md`.
 
 Use existing aggregate gates after Phase I implementation:

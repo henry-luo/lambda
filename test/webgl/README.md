@@ -1,12 +1,12 @@
 # Selected native WebGL2 gate
 
 The existing Radiant baseline includes these fixtures through
-`test_scene3d_gtest`, which launches `lambda.exe` with event-sim fixtures. The 19 low-level native unit tests run separately in `test_scene3d_unit_gtest`; both targets remain in the Radiant baseline and `make test-scene3d`. Native rendering is required: missing graphics fails the
+`test_radiant_view_gtest`, where Scene3D cases share the View launcher, case workers and report while launching `lambda.exe` with event-sim fixtures. The 19 low-level native unit tests run separately in `test_scene3d_unit_gtest`; both targets remain in the Radiant baseline and `make test-scene3d`. Native rendering is required: missing graphics fails the
 test instead of counting blank output as a pass.
 
 ```sh
 make test-scene3d
-./test/test_scene3d_gtest.exe --gtest_filter='*WebGl*:*Three*:*Khronos*'
+./test/test_radiant_view_gtest.exe --gtest_filter='Scene3dTest.*:EventSimRenderTest.*'
 ./test/test_scene3d_unit_gtest.exe --gtest_filter='*WebGl*:*Es100*'
 ```
 
@@ -81,7 +81,7 @@ playback, PBR loss during crossfade, resize and two complete contexts.
 ```sh
 CHROME_HEADLESS_SHELL=/path/to/chrome-headless-shell \
   node test/webgl/capture-browser.cjs temp/webgl3/browser --phase3
-LAMBDA_SCENE3D_CAPTURE_DIR=temp/webgl3 ./test/test_scene3d_gtest.exe \
+LAMBDA_SCENE3D_CAPTURE_DIR=temp/webgl3 ./test/test_radiant_view_gtest.exe \
   --gtest_filter=Scene3dTest.ThreePbrEnvironmentShadowsAndMultipassProduceRealPixels
 node test/webgl/animation-oracle.mjs
 ```
@@ -91,13 +91,13 @@ pin. Reproduce the 144-frame release measurement with:
 
 ```sh
 make build-release-compile
-make -C build/premake config=release_native lambda test_scene3d_gtest
-LAMBDA_SCENE3D_MEASURE_FRAMES=1 ./test/test_scene3d_gtest.exe \
+make -C build/premake config=release_native lambda test_radiant_view_gtest
+LAMBDA_SCENE3D_MEASURE_FRAMES=1 ./test/test_radiant_view_gtest.exe \
   --gtest_filter=Scene3dTest.ThreePbrEnvironmentShadowsAndMultipassProduceRealPixels \
   --gtest_output=xml:temp/webgl3/release.xml
 ```
 
-The optional 144-frame benchmark now runs inside `lambda.exe` through the `measure_frames` event. Its `pbr-metrics.json` artifact lives beside the per-case `events.json` and `viewer.log` under `temp/scene3d/`; it records frame/sampling p50 and p95, vector-cache metadata and final CPU/GPU accounting. The same cache and resource growth bounds remain asserted. `LAMBDA_SCENE3D_CAPTURE_DIR` still captures the PBR samples and imported model poses. Debug measurements are rejected by the host executable. Never run `make release` in a worktree.
+The optional 144-frame benchmark runs inside `lambda.exe` through the `measure_frames` event. Its `pbr-metrics.json` artifact lives under the per-launch `scene3d_artifacts` directory recorded in GTest properties. It records frame/sampling p50 and p95, vector-cache metadata and final CPU/GPU accounting. Logs, phase timings and `events.json` use the shared View report directory. The same cache and resource growth bounds remain asserted. `LAMBDA_SCENE3D_CAPTURE_DIR` still captures the PBR samples and imported model poses; capture paths are relative to each isolated launch workspace. Debug measurements are rejected by the host executable. Never run `make release` in a worktree.
 [Historical validation and raw metrics](../demo/scene3d/reference/phase3/validation.json)
 record the earlier cost and bounded owned storage.
 
@@ -108,13 +108,13 @@ Each run retained all 779 event-sim assertions. CPU sampling identified repeated
 filesystem canonicalization while reading loaded Three.js imports; registry
 lookups now probe existing canonical keys before resolving aliases. The native
 Scene3D, WebGL context-loss, pixel, resource-growth and retained-surface checks
-remain in the same cases. The unified runner completed the integration target
+remain in the same cases. Before the View merge, the unified runner completed the integration target
 (44 cases plus 10 negative controls) and 19 native unit tests in 12.106 seconds
 with the existing worker configuration; all 73 passed. Reproduce serial suite
 timing with a release host:
 
 ```sh
-RADIANT_TEST_EXECUTABLE=./lambda.exe ./test/test_scene3d_gtest.exe \
+RADIANT_TEST_EXECUTABLE=./lambda.exe ./test/test_radiant_view_gtest.exe \
   --gtest_filter='Scene3dTest.*' --gtest_output=json:temp/scene3d-timing.json
 ```
 
