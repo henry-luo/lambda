@@ -65,6 +65,11 @@ TypePattern* compile_literal_type_pattern(Pool* pool, Type* type, bool is_symbol
 bool pattern_full_match(TypePattern* pattern, String* str);
 bool pattern_full_match_chars(TypePattern* pattern, const char* chars, size_t len);
 
+// Match anchored at byte offset `pos` of `text[0, len)`; on success `*end` is
+// the byte offset just past the match (which may equal `pos`).
+bool pattern_match_prefix_at(TypePattern* pattern, const char* text, size_t len,
+    size_t pos, size_t* end);
+
 /**
  * Check if a string contains a match for the pattern.
  *
@@ -177,6 +182,11 @@ void escape_regex_literal(StrBuf* regex, String* str);
  * @param node Resolved pattern AST node
  */
 bool pattern_is_char_set(AstNode* node);
+
+// True when the island is only non-empty literals — `'for'`, `'in' | 'let'` —
+// each byte of which passes `byte_ok` (NULL accepts any). A grammar token made
+// of word-character literals gets the literal word boundary (GM4.2).
+bool pattern_is_literal_set(AstNode* node, bool (*byte_ok)(char));
 
 // -----------------------------------------------------------------------
 // One-shot RE2 helpers — the C+-convention-friendly entry point for

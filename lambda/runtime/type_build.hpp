@@ -84,3 +84,6 @@ void record_unknown_base_type_span(Transpiler* tp, SourceSpan span,
 // hand parser can report through the same channel rather than inventing one.
 void record_semantic_error_span(Transpiler* tp, SourceSpan span,
         LambdaErrorCode code, const char* format, ...);
+// An advisory warning at a span: printed by the runner, never fails compilation.
+void record_semantic_warning_span(Transpiler* tp, SourceSpan span,
+        LambdaErrorCode code, const char* format, ...);

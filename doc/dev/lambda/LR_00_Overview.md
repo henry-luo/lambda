@@ -89,6 +89,7 @@ A run of `lambda script.ls` threads through these stages (full detail in [LR_01]
 ### Part VI — Validation
 
 - **[LR_13 — Schema Validator](LR_13_Schema_Validator.md)** — validating runtime data against `type`-definition schemas: the per-kind dispatch, occurrence/union/reference/pattern handling, error reporting and suggestions, and the parallel dead schema model.
+- **[LR_14 — Grammar Module](LR_14_Grammar_Module.md)** — `grammar Name { ... }` as a type: the declaration path, token rules on the string-pattern compiler, the PEG interpreter behind `parse(text, g)` with bounded left recursion and precedence levels, the parse tree, the lint, and diagnostics.
 
 ---
 

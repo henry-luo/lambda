@@ -25,7 +25,8 @@ Lambda ships a set of **packages**: libraries written in Lambda Script itself, d
 9. [openapi — OpenAPI Tools](#9-openapi--openapi-tools)
 10. [Engine Packages: edit, editor, dom, doc](#10-engine-packages-edit-editor-dom-doc)
 11. [map — Geographic Maps](#11-map--geographic-maps)
-12. [Tests](#12-tests)
+12. [grammar — Language Grammars](#12-grammar--language-grammars)
+13. [Tests](#13-tests)
 
 ---
 
@@ -41,6 +42,7 @@ Lambda ships a set of **packages**: libraries written in Lambda Script itself, d
 | `math` | `lambda.doc.math.math` | Library | Typesets LaTeX math as HTML | Markdown math in `lambda view`, `layout` and `render`; math inside LaTeX documents |
 | `latex` | `lambda.latex.latex` | Library | Renders LaTeX documents as HTML | `lambda convert x.tex -t html`; `lambda view`, `layout` and `render` on `.tex`/`.latex` |
 | `pdf` | `lambda.pdf.pdf` | Library, experimental | Renders PDF pages as SVG, and whole documents as HTML | `lambda view`, `layout` and `render` on `.pdf` |
+| `grammar` | `lambda.grammar.xpath` | Library, experimental | Grammars for other languages, written as Lambda `grammar` declarations: XPath 3.1 parses to a Lambda element tree | None |
 | `openapi` | `lambda.openapi.openapi`, `lambda.openapi.server` | Experimental | Route listing, Lambda type generation, validation and Swagger UI pages for OpenAPI specs | None |
 | `slide` | `lambda.slide` | Library, experimental | Slide elements, cues/effects, presenter console/navigation tools, themes/layouts/masters, snapshots and handouts; see [Slide Presentations](Lambda_Slide.md) | `lambda view deck.slides` |
 | `doc` | `lambda.doc.doc_viewer` | Engine internal | The document viewer and project browser, with its startup splash and icon font | Bare `lambda view`; `lambda demo` adds the startup splash |
@@ -1059,7 +1061,53 @@ also remains open. JavaScript support is Phase 2. See the
 [implementation record](../vibe/impl/Lambda_Impl_Map.md) for coverage, limits,
 engine prerequisites and validation evidence.
 
-## 12. Tests
+## 12. `grammar` — Language Grammars
+
+Each module declares a `pub grammar` that `parse(text, g)` runs (see
+`parse` in [Lambda_Sys_Func.md](Lambda_Sys_Func.md)). The packages parse
+only: they turn source text into a Lambda element tree, and evaluating that
+tree is up to the caller.
+
+### 12.1 `lambda.grammar.xpath` — XPath 3.1
+
+```lambda
+import lambda.grammar.xpath
+
+let tree = parse("//book[@year > 2000]/title", xpath)^
+let step = xpath.AxisStep
+"child::a" is step              // true: a rule is a type
+parse("$x + 1", xpath, {spans: true})^   // start/end byte offsets on every element
+```
+
+The tree follows the W3C XPath 3.1 grammar with one node per construct, not
+per precedence level:
+
+| XPath | Tree |
+|-------|------|
+| `a + b` | `<Expr left: <Expr …>, op: '+', right: <Expr …>>`; every binary operator, including `/`, `//`, `!`, `||`, `to`, comparisons, `union`/`|`, `intersect`/`except` |
+| `-a` | `<Expr op: '-', operand: <Expr …>>` |
+| `/a`, `//a`, `/` | `<Expr op: '/', right: …>`, `<Expr op: '//', right: …>`, `<Expr root: '/'>` |
+| `$f(1)`, `$x[1]`, `$m?k` | `<Expr base: …, args: <ArgumentList …>>`, `… predicate: <Predicate …>`, `… lookup: <Lookup key: "k">` |
+| `x instance of T`, `x cast as T` | `<Expr left: …, op: 'instance', type: <SequenceType …>>`, `op: 'cast', type: <SingleType …>` |
+| `$s => f()` | `<Expr left: …, op: '=>', function: "f", args: <ArgumentList>>` |
+| `child::a[1]`, `@id`, `..`, `a` | `<AxisStep axis: 'child', test: <NameTest "a">, <Predicate …>>`, `abbrev: '@'`, `abbrev: '..'`, `test:` only |
+| `text()`, `element(x)` | `test: <TextTest>`, `test: <ElementTest name: "x">` (and the other kind tests) |
+| `f(1, ?)`, `f#2` | `<FunctionCall name: "f", args: <ArgumentList <Expr …> <ArgumentPlaceholder>>>`, `<NamedFunctionRef name: "f", arity: "2">` |
+| literals, `$x`, `.` | `<IntegerLiteral "1">`, `<DecimalLiteral "1.5">`, `<DoubleLiteral "1e3">`, `<StringLiteral value: "a">`, `<VarRef name: "x">`, `<ContextItemExpr>` |
+| `for`, `let`, `some`/`every`, `if` | `<ForExpr <Binding var: "i", in: …> … return: …>`, `<LetExpr <LetBinding var:, value:> … return:>`, `<QuantifiedExpr quantifier: 'some', <Binding …> satisfies: …>`, `<IfExpr condition:, then:, else:>` |
+| `function($a) { … }`, `map { }`, `[ ]`, `array { }` | `<InlineFunctionExpr <Param name: "a"> … body: <EnclosedExpr …>>`, `<MapConstructor <MapConstructorEntry key:, value:>…>`, `<SquareArrayConstructor …>`, `<CurlyArrayConstructor <EnclosedExpr …>>` |
+
+Every expression node is an `Expr` element; a leaf keeps one `<Expr …>`
+around its own node. Operators and keywords are symbols; names and literal
+text are strings; `StringLiteral`'s `value` is the text between the quotes,
+with doubled quotes left as written. The whole expression is `<XPath …>`,
+holding one `Expr` per comma-separated item.
+
+Known differences from the spec: `(: … :)` comments do not nest, and the
+parser accepts a few forms the spec restricts (an ExprSingle such as `for`
+as an operand of a binary operator; chained `instance of`).
+
+## 13. Tests
 
 A `.ls` script in these directories runs in the Lambda runtime test suite (`test/test_lambda_gtest.exe`) when it has an expected-output `.txt` file beside it; the `test/ui/` event scripts run in the UI automation suite.
 
@@ -1072,6 +1120,7 @@ A `.ls` script in these directories runs in the Lambda runtime test suite (`test
 | `graph` | `test/lambda/graph/mermaid/`, `test/lambda/graph/graphviz/`, `test/lambda/graph/structurizr/`; `test/lambda/graph_layout*.ls` and `test/lambda/graph_transform_*.ls` |
 | `math` | `test/lambda/math/` |
 | `latex` | `test/lambda/latex/` |
+| `grammar` | `test/lambda/grammar/xpath.ls` (the grammar module itself: `test/lambda/grammar/`) |
 | `pdf` | `test/lambda/pdf/` |
 | `openapi` | None yet |
 | `edit` | `test/lambda/edit/`, `test/lambda/proc/edit_session_save.ls`; UI scripts `test/ui/edit_*.json` |

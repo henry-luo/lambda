@@ -1,0 +1,39 @@
+<value
+  <object
+    "{"
+    <pair key: <string
+        "\"a\"">, value: <value
+        <array
+          "["
+          <value
+            "1">
+          <value
+            "2.5">
+          <value
+            "-3e2">
+          "]">>,
+      ":">
+    <pair key: <string
+        "\"b\"">, value: <value
+        <object
+          "{"
+          <pair key: <string
+              "\"c\"">, value: <value
+              "null">,
+            ":">
+          "}">>,
+      ":">
+    "}">>
+[null, "\"a\"", "\"b\"", null]
+<value
+  <array
+    "["
+    <value
+      "true">
+    <value
+      "false">
+    "]">>
+<value
+  <string
+    "\"x\\\"y\"">>
+[true, false, false]

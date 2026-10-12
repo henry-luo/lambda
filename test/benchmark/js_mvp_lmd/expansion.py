@@ -32,6 +32,8 @@ LIBRARY_TARGETS = ('jetstream/raytrace3d', 'text/prettier_ast', 'beng/pidigits',
     'beng/regexredux', 'text/fast_diff', 'text/hyphen', 'text/microdiff',
     'text/jq_mix', 'text/jq_records', 'text/jq_bf', 'text/jq_tree')
 LIBRARY_CONTROL_SHA = '990bae9b78b747f85e8ec5053a15a3757c7b5f8f0ac3f868293dcd96dd7f876b'
+PROPERTIES_TARGETS = ('jetstream/hashmap',)
+PROPERTIES_CONTROL_SHA = '2c67152b386faf735960f302264fb08602042812be47eebb09a3970a899b29af'
 FLAGS = dict(JS_EXEC_BACKEND='mir', JS_EXECUTION_BACKEND='mir', JS_MIR_INTERP='0',
     LAMBDA_JS_LARGE_INTERP='0', LAMBDA_EXEC_BACKEND='jit', LAMBDA_TIER='jit')
 
@@ -114,12 +116,14 @@ def prepare_new(out, binary, references, targets=TARGETS, population='new16'):
             row['lambda_expected'] = normalized_stdout(golden.read_text()) if golden.exists() else None
             if spec['suite'] == 'jetstream':
                 row['lambda_expected'] = {'cube3d': '3d-cube: PASS',
+                    'hashmap': 'hash-map: PASS',
                     'navier_stokes': 'navier-stokes: PASS (checksum=77)',
                     'splay': 'splay: PASS (nodes=8000)',
                     'raytrace3d': '3d-raytrace: PASS (pixels=7200)'}.get(spec['name'], row['lambda_expected'])
             row['lambda_variant'] = 'canonical .ls with annotations' if re.search(
                 r':\s*(?:int|float|u32)\b', path.read_text()) else 'untyped canonical .ls'
             row['lambda_comparability'] = {
+                'jetstream/hashmap': 'unmatched storage/allocation: Lambda preallocates parallel arrays; JS grows chained entry objects; counts and sums match',
                 'jetstream/navier_stokes': 'unmatched: Lambda times setup and 15 frames; JS times one frame',
                 'jetstream/splay': 'unmatched: Lambda includes setup and uses LCG/tree port; JS uses Jenkins fixture',
             }.get(identifier, 'canonical counts and script-defined timing; source hashes retained')
@@ -194,6 +198,49 @@ def prepare_phase29(out, binary, control):
     return rows
 
 
+def prepare_result9(out, baseline, binary, control):
+    """Replay the published source/oracle contracts with fresh sample timestamps."""
+    archive = json.loads(baseline.read_text())
+    if archive['metadata']['candidate']['sha256'] != PROPERTIES_CONTROL_SHA:
+        raise ValueError('baseline is not the accepted Result9 binary')
+    blobs = archive['provenance']['sources']
+    paths = {path: digest for digest, blob in blobs.items() for path in blob['paths']}
+    rows = []
+    for previous in archive['rows']:
+        if previous['status'] != 'ok':
+            raise ValueError('unvalidated Result9 workload: ' + previous['id'])
+        command = previous['commands']['candidate'][:]
+        sources = [{'record': str(baseline), 'sha256': sha(baseline)}]
+        script = out / ('prior_' + previous['id'].replace('/', '_') + '.js')
+        inline = '-p' in command
+        if inline:
+            code = command[command.index('-p') + 1]
+        else:
+            index = next(i for i, arg in enumerate(command) if arg.endswith('.js'))
+            digest = paths[command[index]]
+            code = blobs[digest]['text']
+            if hashlib.sha256(code.encode()).hexdigest() != digest:
+                raise ValueError('corrupt archived script: ' + previous['id'])
+            command[index] = str(script)
+        script.write_text(code)
+        sources.append({'frozen': str(script), 'sha256': sha(script)})
+        for source in previous['sources']:
+            if 'input' not in source:
+                continue
+            path = Path(source['input'])
+            if sha(path) != source['sha256']:
+                raise ValueError('Result9 input changed: ' + str(path))
+            sources.append(source.copy())
+        commands = {lane: [executable] + command[1:] for lane, executable in
+            [('candidate', binary), ('control', control), ('control_peer', control)]}
+        rows.append(dict(id=previous['id'], population='prior87', contract=previous['contract'],
+            expected=previous['expected'], oracle_format='json' if inline else 'text',
+            sources=sources, commands=commands, samples=[], pending=[]))
+    if len(rows) != 87 or len({r['id'] for r in rows}) != 87:
+        raise ValueError('Result9 must contain 87 distinct contracts')
+    return rows
+
+
 def capture(row, lane, iteration, out, environment, timeout):
     command = row['commands'][lane][:]
     env = environment.copy()
@@ -203,9 +250,10 @@ def capture(row, lane, iteration, out, environment, timeout):
         if '--no-log' in command:
             command.remove('--no-log')
         env['LAMBDA_MIR_DUMP_PATH'] = str(mir)
+    started = datetime.datetime.now().astimezone().isoformat()
     result = run_once(command[0], '', timeout, language='lambda' if lane == 'lambda_untyped' else 'js',
         command=command, environment=env, strict_timing=True,
-        exact_stdout=row['population'] != 'prior60' and lane != 'lambda_untyped', capture_output=True)
+        exact_stdout=row.get('oracle_format', 'json' if row['population'] == 'prior60' else 'text') != 'json' and lane != 'lambda_untyped', capture_output=True)
     for stream in ('stdout', 'stderr'):
         (out / (stem + '.' + stream)).write_text(result.pop(stream, ''))
     output = result.pop('stable_stdout', '')
@@ -216,7 +264,7 @@ def capture(row, lane, iteration, out, environment, timeout):
         else:
             result['status'] = 'oracle_failed'
     expected = row.get('lambda_expected') if lane == 'lambda_untyped' else row.get('expected')
-    if row['population'] == 'prior60':
+    if row.get('oracle_format', 'json' if row['population'] == 'prior60' else 'text') == 'json':
         # The archived CLI prints JSON values; retain the original typed oracle.
         try:
             output = json.loads(output, strict=False)
@@ -231,18 +279,23 @@ def capture(row, lane, iteration, out, environment, timeout):
             result['status'] = 'backend_unverified'
         else:
             result['mir'] = {'path': str(mir), 'sha256': sha(mir)}
-    result.update(lane=lane, round=iteration)
+    result.update(lane=lane, round=iteration, started=started,
+        finished=datetime.datetime.now().astimezone().isoformat())
     row['samples'].append(result)
     return result['status'] == 'ok'
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--phase', choices=['expansion', 'library'], default='expansion')
+    parser.add_argument('--phase', choices=['expansion', 'library', 'properties'], default='expansion')
     parser.add_argument('--candidate', default='lambda.exe')
     parser.add_argument('--control')
+    parser.add_argument('--control-record', type=Path,
+        help='Properties phase: frozen control manifest with head and sha256, independent of the Result9 workload catalog')
     parser.add_argument('--baseline-dir', default='temp/mvp_regressions_20261009/accepted')
-    parser.add_argument('--population', choices=['new16', 'prior60', 'new11', 'prior76', 'all'], default='all')
+    parser.add_argument('--population', choices=['new16', 'prior60', 'new11', 'prior76', 'new1', 'prior87', 'all'], default='all')
+    parser.add_argument('--baseline-result', default='test/benchmark/js_mvp_lmd/MVP_Result9.json')
+    parser.add_argument('--exclude', help='comma-separated exact workload IDs to omit')
     parser.add_argument('--bench', help='comma-separated exact workload IDs')
     parser.add_argument('--runs', type=int, default=15,
         help='measured repeats after preflight; 0 validates outputs/backend without a timing comparison')
@@ -260,24 +313,39 @@ def main():
     if binary.resolve() != Path(args.candidate).resolve():
         shutil.copy2(args.candidate, binary)
     check_release_build(exe_path=str(binary), log_path=str(out / 'release.log'))
+    properties = args.phase == 'properties'
     library = args.phase == 'library'
-    control = Path(args.control or ('temp/mvp_library/control.exe' if library else 'temp/mvp_expansion/control.exe')).resolve()
-    if args.population not in (('new11', 'prior76', 'all') if library else ('new16', 'prior60', 'all')):
+    control = Path(args.control or ('temp/mvp_properties/control/lambda.exe' if properties else 'temp/mvp_library/control.exe' if library else 'temp/mvp_expansion/control.exe')).resolve()
+    control_record = None
+    if args.control_record:
+        if not properties or not args.control:
+            parser.error('--control-record requires --phase properties and an explicit --control')
+        control_record = json.loads(args.control_record.read_text())
+        if not re.fullmatch(r'[0-9a-f]{40}', control_record.get('head', '')) or control_record.get('sha256') != sha(control):
+            parser.error('control binary differs from its source manifest')
+        check_release_build(exe_path=str(control), log_path=str(out / 'control-release.log'))
+    if args.population not in (('new1', 'prior87', 'all') if properties else ('new11', 'prior76', 'all') if library else ('new16', 'prior60', 'all')):
         parser.error('population does not belong to the selected phase')
     rows = []
-    if args.population in ('new16', 'new11', 'all'):
+    if args.population in ('new16', 'new11', 'new1', 'all'):
         rows.extend(prepare_new(out, str(binary), args.lambda_reference,
-            LIBRARY_TARGETS if library else TARGETS, 'new11' if library else 'new16'))
-    if args.population in ('prior60', 'prior76', 'all'):
-        if sha(control) != (LIBRARY_CONTROL_SHA if library else CONTROL_SHA):
+            PROPERTIES_TARGETS if properties else LIBRARY_TARGETS if library else TARGETS, 'new1' if properties else 'new11' if library else 'new16'))
+    if args.population in ('prior60', 'prior76', 'prior87', 'all'):
+        if not control_record and sha(control) != (PROPERTIES_CONTROL_SHA if properties else LIBRARY_CONTROL_SHA if library else CONTROL_SHA):
             parser.error('control differs from the accepted phase binary')
-        rows.extend(prepare_phase29(out, str(binary), str(control)) if library else
+        rows.extend(prepare_result9(out, Path(args.baseline_result), str(binary), str(control)) if properties else
+            prepare_phase29(out, str(binary), str(control)) if library else
             prepare_previous(out, Path(args.baseline_dir), str(binary), str(control)))
     if args.bench:
         selected = set(args.bench.split(','))
         rows = [r for r in rows if r['id'] in selected]
         if len(rows) != len(selected):
             parser.error('unknown workload ID in --bench')
+    if args.exclude:
+        excluded = set(args.exclude.split(','))
+        if not excluded.issubset({row['id'] for row in rows}):
+            parser.error('unknown workload ID in --exclude')
+        rows = [row for row in rows if row['id'] not in excluded]
     environment = {k: v for k, v in os.environ.items() if not k.startswith('LAMBDA_GC_') and k not in
         ('LAMBDA_MIR_DUMP_PATH', 'JS_MIR_DUMP', 'LAMBDA_MIR_LOG_FRAME_SLOTS', 'LAMBDA_LOG_FILE',
          'JS_OPT_TRACE', 'JS_TRANSPILE_TIMING', 'LAMBDA_COMPILER_TIMING')}
@@ -287,6 +355,8 @@ def main():
         revision=subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip(),
         platform=platform.platform(), machine=platform.machine(),
         control={'path': str(control), 'sha256': sha(control)} if control.exists() else None,
+        control_record={'path': str(args.control_record), 'sha256': sha(args.control_record),
+                        'manifest': control_record} if control_record else None,
         runs=args.runs, warmups=1, validation_only=args.runs == 0, flags=FLAGS, phase=args.phase,
         node_version=subprocess.check_output(['node', '--version'], text=True).strip(),
         node_sha256=sha(shutil.which('node')),
@@ -321,12 +391,14 @@ def main():
             row['median_ms'] = {lane: statistics.median(s['exec_ms'] for s in row['samples']
                 if s['lane'] == lane and s['round']) for lane in row['commands']}
             if 'control' in row['commands']:
-                for lane in ('candidate', 'control_peer'):
+                for lane, reference, key in (('candidate', 'control', 'candidate_interval'),
+                        ('control_peer', 'control', 'control_peer_interval'),
+                        ('candidate', 'control_peer', 'candidate_peer_interval')):
                     pairs = [{'control': next(s for s in row['samples']
-                              if s['lane'] == 'control' and s['round'] == i),
+                              if s['lane'] == reference and s['round'] == i),
                               'candidate': next(s for s in row['samples']
                               if s['lane'] == lane and s['round'] == i)} for i in range(1, args.runs + 1)]
-                    row[lane + '_interval'] = paired_ratio_bootstrap(pairs, 10000, 260026)
+                    row[key] = paired_ratio_bootstrap(pairs, 10000, 260026)
         complete = complete and row['status'] == 'ok'
         save()
         print(row['id'], row['status'], row.get('median_ms', {}), flush=True)
@@ -334,6 +406,8 @@ def main():
     record['metadata']['complete'] = complete
     if sha(binary) != record['metadata']['candidate']['sha256']:
         raise RuntimeError('candidate changed during capture')
+    if record['metadata']['control'] and sha(control) != record['metadata']['control']['sha256']:
+        raise RuntimeError('control changed during capture')
     for row in rows:
         for source in row['sources']:
             path = next(source[key] for key in ('frozen', 'original', 'input', 'reference', 'record') if key in source)

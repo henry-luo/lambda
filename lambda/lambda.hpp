@@ -29,6 +29,10 @@ enum TypeKind {
     // module-local Type graphs remain relocatable (D3.1.1v4).
     TYPE_KIND_BINDER,
     TYPE_KIND_BOUND_REF,
+    // GM5v2: a grammar is a type and so is each of its syntax rules; both
+    // extend TypeType (runtime/grammar/grammar.hpp). `kind` is 4 bits wide.
+    TYPE_KIND_GRAMMAR,
+    TYPE_KIND_GRAMMAR_RULE,
 };
 
 // Name - a qualified name with optional namespace
@@ -657,8 +661,10 @@ static inline Item array_native_lane_read(const Array* array, int64_t index) {
 // as a pointer -- which is how `==`, `in`, `++` and the numeric folds crashed
 // on an admitted `int?[]`. Index must be in range.
 static inline Item array_item_read(const Array* array, int64_t index) {
-    return array_has_native_lane(array) ? array_native_lane_read(array, index)
-        : array->items[index];
+    if (array_has_native_lane(array)) return array_native_lane_read(array, index);
+    // passive Lambda readers require an initialized dense data projection.
+    if (container_js_elements_kind(array) == JS_ELEMENTS_SPARSE_TAGGED) return ItemError;
+    return array->items[index];
 }
 
 static inline bool array_native_lane_store(Array* array, int64_t index, Item value) {

@@ -7,6 +7,7 @@
 #include "ast_build.hpp"
 #include "write_set.hpp"
 #include "parse_type_pattern.hpp"
+#include "grammar/grammar.hpp"
 #include "interp.hpp"  // interp_visit_children: the complete Lambda child traversal
 #include "../../lib/time_util.h"
 #ifndef SIMPLE_SCHEMA_PARSER
@@ -1536,6 +1537,30 @@ void record_semantic_error_span(Transpiler* tp, SourceSpan span,
     vsnprintf(error_msg, sizeof(error_msg), format, args);
     va_end(args);
     record_semantic_error_message(tp, span, code, error_msg);
+}
+
+// Record an advisory warning against a source span. It joins the warnings the
+// runner prints before any errors (err_print_warning) and never fails the
+// compile; the grammar lint (GM9) is its first user.
+void record_semantic_warning_span(Transpiler* tp, SourceSpan span,
+        LambdaErrorCode code, const char* format, ...) {
+    char warning_msg[512];
+    va_list args;
+    va_start(args, format);
+    vsnprintf(warning_msg, sizeof(warning_msg), format, args);
+    va_end(args);
+    LambdaSourcePoint start = lambda_source_span_start_point(tp->source, span);
+    LambdaSourcePoint end = lambda_source_span_end_point(tp->source, span);
+    SourceLocation loc = src_loc_span(tp->reference,
+        start.row + 1, start.column + 1, end.row + 1, end.column + 1);
+    loc.source = tp->source;
+    LambdaError* warning = err_create(code, warning_msg, &loc);
+    tp->warning_count++;
+    if (!tp->warnings) tp->warnings = arraylist_new(8);
+    arraylist_append(tp->warnings, warning);
+    log_warn("warning[E%d] at %s:%u:%u: %s", code,
+        tp->reference ? tp->reference : "<unknown>",
+        start.row + 1, start.column + 1, warning_msg);
 }
 
 // Check if should continue transpiling based on error count
@@ -14126,6 +14151,10 @@ enum { LSF_VIEW_RETURN, LSF_VIEW_ERROR, LSF_VIEW_TAIL };
 enum { LSF_ALIAS_TYPE, LSF_ALIAS_SPAN, LSF_ALIAS_TAIL };
 enum { LSF_ALIAS_PREBOUND = 1u << 0 };
 
+// LSF_GRAMMAR tail: the body span inside the braces, which the grammar
+// loader parses when the declaration resolves (GM5v2).
+enum { LSF_GRAMMAR_BODY, LSF_GRAMMAR_TAIL };
+
 // LSF_PATTERN_DEF tail: the island, and the alias its name pre-bound, if any.
 enum { LSF_PATTERN_ISLAND, LSF_PATTERN_PREBOUND, LSF_PATTERN_TAIL };
 
@@ -14416,6 +14445,21 @@ static AstNode* syntax_type_alias(LambdaSyntaxSink* sink,
     tail[LSF_ALIAS_TYPE] = type_node;
     syntax_tail_set_span(&tail[LSF_ALIAS_SPAN], reduction->span);
     return syntax_type_stam(tp, reduction->span, (AstNode*)alias, is_public);
+}
+
+// `grammar Name { ... }` is a type declaration (GM5v2): the same TYPE_STAM
+// and declarator as `type Name = T` (D8.2.2: one node, the form as a field),
+// so both execution tiers treat it as a compile-time type binding.
+static AstNode* syntax_grammar(LambdaSyntaxSink* sink,
+        const LambdaParseReduction* reduction) {
+    Transpiler* tp = sink->tp;
+    AstDeclaratorNode* grammar = build_declarator_syntax(tp, reduction->span,
+        direct_token_name(tp, reduction->detail_token), LSF_GRAMMAR,
+        LSF_GRAMMAR_TAIL);
+    syntax_tail_set_span(&syntax_tail((AstNode*)grammar,
+        sizeof(AstDeclaratorNode))[LSF_GRAMMAR_BODY], reduction->secondary_token.span);
+    return syntax_type_stam(tp, reduction->span, (AstNode*)grammar,
+        (reduction->flags & LAMBDA_REDUCTION_FLAG_PUBLIC) != 0);
 }
 
 static void syntax_object_begin(LambdaSyntaxSink* sink,
@@ -14752,6 +14796,8 @@ static AstNode* syntax_declaration(LambdaSyntaxSink* sink,
     }
     case LAMBDA_REDUCTION_FORM_TYPE_ALIAS:
         return syntax_type_alias(sink, reduction);
+    case LAMBDA_REDUCTION_FORM_GRAMMAR:
+        return syntax_grammar(sink, reduction);
     case LAMBDA_REDUCTION_FORM_TYPE_OBJECT: {
         AstNode* object = (AstNode*)sink->completed_object;
         sink->completed_object = NULL;
@@ -15867,6 +15913,17 @@ static void resolve_type_alias(Transpiler* tp, AstDeclaratorNode* alias) {
     if (!prebound) lambda_ast_register_name(tp, (AstNode*)alias);
 }
 
+// GM5v2: the grammar is built from its body here, in source order with the
+// other declarations, and bound like a type alias.
+static void resolve_grammar(Transpiler* tp, AstDeclaratorNode* declaration) {
+    SourceSpan body = syntax_tail_span(&syntax_tail((AstNode*)declaration,
+        sizeof(AstDeclaratorNode))[LSF_GRAMMAR_BODY]);
+    TypeGrammar* grammar = grammar_compile(tp, declaration->name, body);
+    declaration->type = grammar ? (Type*)grammar : &TYPE_ANY;
+    declaration->is_type_definition = true;
+    lambda_ast_register_name(tp, (AstNode*)declaration);
+}
+
 // A parenthesized group. A group holding a `let` owns the scope its group
 // production opened; the declarations leave the item list (S2.5.4).
 static void resolve_group_list(LambdaResolver* r, AstListNode* list) {
@@ -16528,6 +16585,10 @@ static AstNode* resolve_form(LambdaResolver* r, AstNode* node, uint8_t form) {
         resolve_pattern_def(tp, (AstPatternDefNode*)node);
         break;
     }
+    case LSF_GRAMMAR:
+        resolve_diagnostics(r, node);
+        resolve_grammar(tp, (AstDeclaratorNode*)node);
+        break;
     case LSF_TYPE_ALIAS: {
         AstDeclaratorNode* alias = (AstDeclaratorNode*)node;
         if (alias->syntax_flags & LSF_ALIAS_PREBOUND) resolver_type_alias_begin(r, alias);

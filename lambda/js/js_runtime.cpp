@@ -120,6 +120,15 @@ typedef struct JsProxyMapCarrier {
     Map base;
     JsProxyData payload;
 } JsProxyMapCarrier;
+#if defined(__clang__)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Winvalid-offsetof"
+#endif
+static_assert(offsetof(JsProxyMapCarrier, payload) == sizeof(LambdaGcMapLayout), "proxy GC payload offset");
+#if defined(__clang__)
+#pragma clang diagnostic pop
+#endif
+static_assert(offsetof(JsProxyData, private_slots) == 2 * sizeof(uint64_t), "proxy GC Item edges");
 
 struct JsRegexData;
 typedef struct JsRegExpMapCarrier JsRegExpMapCarrier;
@@ -287,7 +296,7 @@ extern "C" TypeMap* js_typemap_transition_for_type(Item obj, ShapeEntry* entry,
 Item js_map_shape_lookup_ext(Map* m, const char* key_str, int key_len, bool* out_found);
 static void js_set_prototype_fresh(Item object, Item prototype);
 static bool js_constructor_instance_shape_is_admissible(TypeMap* shape);
-static bool js_array_sparse_get(Array* arr, int64_t index, Item* out_value);
+bool js_array_sparse_get(Array* arr, int64_t index, Item* out_value);
 static bool js_array_companion_has_array_index_shape(Array* arr);
 
 extern "C" void js_map_promote_descriptor_kind(Map* m) {
@@ -1361,7 +1370,16 @@ extern "C" Item js_proxy_new(Item target, Item handler) {
     if (!js_is_object_value(handler)) {
         return js_throw_type_error("Cannot create proxy with a non-object as handler");
     }
+    RootFrame roots(2);
+    if (!roots.valid()) return ItemError;
+    Rooted<Item> target_root(roots, target), handler_root(roots, handler);
+    TypeMap* shape = js_object_type_for_class(JS_CLASS_PROXY);
+    if (!shape) shape = js_empty_object_type_map();
+    return js_proxy_carrier_new(target_root.get(), handler_root.get(), shape,
+        js_has_call_capability(target_root.get()), js_is_constructor_internal(target_root.get()));
+}
 
+extern "C" Item js_proxy_carrier_new(Item target, Item handler, TypeMap* shape, bool callable, bool constructable) {
     RootFrame roots(3);
     Rooted<Item> target_root(roots, target);
     Rooted<Item> handler_root(roots, handler);
@@ -1374,8 +1392,8 @@ extern "C" Item js_proxy_new(Item target, Item handler) {
     pd->private_slots = ItemNull.item;
     // Proxy capabilities are immutable creation-time facts. Reading mutable
     // target metadata during every call let ordinary Maps acquire [[Call]].
-    pd->callable = js_has_call_capability(target_root.get());
-    pd->constructable = js_is_constructor_internal(target_root.get());
+    pd->callable = callable;
+    pd->constructable = constructable;
     pd->revoked = false;
 
     // heap_calloc may compact both operands before the Proxy owns them; copy
@@ -1385,8 +1403,7 @@ extern "C" Item js_proxy_new(Item target, Item handler) {
     Map* m = &carrier->base;
     m->type_id = LMD_TYPE_MAP;
     m->map_kind = MAP_KIND_PROXY;
-    m->type = js_object_type_for_class(JS_CLASS_PROXY);
-    if (!m->type) m->type = js_empty_object_type_map();
+    m->type = shape;
     m->data = NULL;
     m->data_cap = 0;
     proxy_root.set((Item){.map = m});
@@ -6233,8 +6250,10 @@ extern "C" Item js_set_primitive_completion(Item object, Item key, Item value) {
 
 typedef struct JsArraySparseHashEntry {
     int64_t index;
-    Item value;
+    TypedItem value;
 } JsArraySparseHashEntry;
+static_assert(offsetof(JsArraySparseHashEntry, value) == 8 && sizeof(JsArraySparseHashEntry) == 24,
+    "sparse entries must match the collector layout");
 
 static uint64_t js_array_sparse_hash(const void* item, uint64_t seed0, uint64_t seed1) {
     const JsArraySparseHashEntry* entry = (const JsArraySparseHashEntry*)item;
@@ -6252,27 +6271,31 @@ static SparseArrayMap* js_array_sparse_from_map(Map* map) {
     return (SparseArrayMap*)map;
 }
 
+SparseArrayMap* js_sparse_array_map_new(Map* existing, TypeMap* empty_shape) {
+    RootFrame roots(1);
+    if (!roots.valid()) return NULL;
+    Rooted<Map*> properties(roots, existing);
+    SparseArrayMap* sm = (SparseArrayMap*)heap_calloc(sizeof(SparseArrayMap), LMD_TYPE_MAP);
+    if (!sm) return NULL;
+    if (properties.get()) *(Map*)sm = *properties.get();
+    else sm->type = empty_shape;
+    sm->type_id = LMD_TYPE_MAP;
+    sm->map_kind = MAP_KIND_ARRAY_SPARSE;
+    sm->sparse_version = 1;
+    return sm;
+}
+
 static SparseArrayMap* js_array_ensure_sparse_map(Array* arr) {
     if (!arr) return NULL;
     Map* existing = js_array_props(arr);
-    if (existing && existing->map_kind == MAP_KIND_ARRAY_SPARSE) {
-        return (SparseArrayMap*)existing;
-    }
-
-    SparseArrayMap* sm = (SparseArrayMap*)heap_calloc(sizeof(SparseArrayMap), LMD_TYPE_MAP);
+    if (existing && existing->map_kind == MAP_KIND_ARRAY_SPARSE) return (SparseArrayMap*)existing;
+    RootFrame roots(1);
+    if (!roots.valid()) return NULL;
+    Rooted<Array*> owner(roots, arr);
+    SparseArrayMap* sm = js_sparse_array_map_new(existing, js_empty_object_type_map());
     if (!sm) return NULL;
-    Map* base = (Map*)sm;
-    if (existing) {
-        *base = *existing;
-    } else {
-        base->type_id = LMD_TYPE_MAP;
-        base->type = js_empty_object_type_map();
-    }
-    base->map_kind = MAP_KIND_ARRAY_SPARSE;
-    sm->sparse_indices = NULL;
-    sm->sparse_version = 1;
-    js_elements_set_props(arr, (Map*)sm);
-    return sm;
+    js_elements_set_props(owner.get(), sm);
+    return js_array_props(owner.get()) == sm ? sm : NULL;
 }
 
 static bool js_array_sparse_ensure_table(SparseArrayMap* sm) {
@@ -6288,30 +6311,39 @@ static bool js_array_sparse_get_from_map(Map* map, int64_t index, Item* out_valu
     if (!sm || !sm->sparse_indices || index < 0) return false;
     JsArraySparseHashEntry probe;
     probe.index = index;
-    probe.value = ItemNull;
+    probe.value = {};
     const JsArraySparseHashEntry* found =
         (const JsArraySparseHashEntry*)hashmap_get(sm->sparse_indices, &probe);
     if (!found) return false;
-    if (out_value) *out_value = found->value;
+    if (out_value) *out_value = typeditem_to_item((TypedItem*)&found->value);
     return true;
 }
 
-static bool js_array_sparse_get(Array* arr, int64_t index, Item* out_value) {
+bool js_array_sparse_get(Array* arr, int64_t index, Item* out_value) {
     if (!js_array_has_props(arr)) return false;
     return js_array_sparse_get_from_map(js_array_props(arr), index, out_value);
 }
 
-static bool js_array_sparse_set(Item array_item, int64_t index, Item value) {
-    if (get_type_id(array_item) != LMD_TYPE_ARRAY || index < 0) return false;
-    SparseArrayMap* sm = js_array_ensure_sparse_map(array_item.array);
-    if (!js_array_sparse_ensure_table(sm)) return false;
-    JsArraySparseHashEntry entry;
+bool js_sparse_array_map_set(SparseArrayMap* sm, int64_t index, Item value) {
+    // D2.6.4: a movable hash entry owns its scalar payload, never a borrowed Item home.
+    if (!sm || index < 0 || !js_array_sparse_ensure_table(sm)) return false;
+    JsArraySparseHashEntry entry = {};
     entry.index = index;
-    entry.value = value;
+    if (!typeditem_store_item(&entry.value, value)) return false;
     hashmap_set(sm->sparse_indices, &entry);
     if (hashmap_oom(sm->sparse_indices)) return false;
     sm->sparse_version++;
     return true;
+}
+
+static bool js_array_sparse_set(Item array_item, int64_t index, Item value) {
+    if (get_type_id(array_item) != LMD_TYPE_ARRAY || index < 0) return false;
+    RootFrame roots(2);
+    if (!roots.valid()) return false;
+    uint64_t home = 0;
+    Rooted<Item> owner(roots, array_item), held(roots, lambda_item_adopt_scalar_home(value, &home));
+    SparseArrayMap* sm = js_array_ensure_sparse_map(owner.get().array);
+    return js_sparse_array_map_set(sm, index, held.get());
 }
 
 static bool js_array_sparse_delete(Array* arr, int64_t index) {
@@ -6320,7 +6352,7 @@ static bool js_array_sparse_delete(Array* arr, int64_t index) {
     if (!sm || !sm->sparse_indices) return false;
     JsArraySparseHashEntry probe;
     probe.index = index;
-    probe.value = ItemNull;
+    probe.value = {};
     const void* removed = hashmap_delete(sm->sparse_indices, &probe);
     if (removed) {
         sm->sparse_version++;
@@ -6372,7 +6404,6 @@ extern "C" int64_t js_array_sparse_collect_indices(Item array, int64_t start, in
         JsArraySparseHashEntry* entry = (JsArraySparseHashEntry*)item;
         if (!entry) continue;
         if (entry->index < start || entry->index >= end) continue;
-        if (entry->value.item == JS_DELETED_SENTINEL_VAL) continue;
         if (indices && written < cap) indices[written++] = entry->index;
         count++;
     }
@@ -6431,7 +6462,7 @@ static bool js_array_projected_density_is_sparse(Array* arr, int64_t projected_l
     return projected_present < min_dense_present;
 }
 
-static bool js_array_should_store_sparse_for_index(Array* arr, int64_t index) {
+bool js_array_should_store_sparse_for_index(Array* arr, int64_t index) {
     if (!arr || index < 0) return false;
     int64_t length_gap = index >= arr->length ? index - arr->length : 0;
     int64_t dense_capacity = js_array_dense_capacity(arr);
@@ -6444,7 +6475,7 @@ static bool js_array_should_store_sparse_for_index(Array* arr, int64_t index) {
     return js_array_projected_density_is_sparse(arr, projected_length, projected_present);
 }
 
-static bool js_array_should_keep_length_sparse(Array* arr, int64_t new_length) {
+bool js_array_should_keep_length_sparse(Array* arr, int64_t new_length) {
     if (!arr || new_length <= arr->length) return false;
     int64_t length_gap = new_length - arr->length;
     int64_t dense_capacity = js_array_dense_capacity(arr);
@@ -6476,16 +6507,23 @@ static bool js_array_should_promote_sparse_dense(Array* arr, SparseArrayMap* sm)
     return true;
 }
 
-static void js_array_try_promote_sparse_dense(Item array_item) {
+void js_array_try_promote_sparse_dense(Item array_item, bool gc_items) {
     if (get_type_id(array_item) != LMD_TYPE_ARRAY) return;
     Array* arr = array_item.array;
     if (!js_array_has_props(arr)) return;
     SparseArrayMap* sm = js_array_sparse_from_map(js_array_props(arr));
     if (!js_array_should_promote_sparse_dense(arr, sm)) return;
 
-    int64_t new_cap = arr->length + 4;
-    Item* new_items = js_array_runtime_items_alloc(new_cap);
+    RootFrame roots(1);
+    if (!roots.valid()) return;
+    Rooted<Item> owner(roots, array_item);
+    // Retain existing homes and reserve sparse payload homes before publishing
+    // the dense buffer; promotion must not collect while walking the hash table.
+    int64_t new_cap = arr->length + arr->extra + 2 * js_array_sparse_count(sm) + 4;
+    Item* new_items = gc_items ? js_array_gc_items_alloc(new_cap) : js_array_runtime_items_alloc(new_cap);
     if (!new_items) return;
+    arr = owner.get().array;
+    sm = js_array_sparse_from_map(js_array_props(arr));
     Item hole = lam::hole_sentinel_item();
     for (int64_t i = 0; i < new_cap; i++) {
         new_items[i] = hole;
@@ -6497,12 +6535,17 @@ static void js_array_try_promote_sparse_dense(Item array_item) {
         memcpy(new_items, arr->items, copy_len * sizeof(Item));
     }
 
-    js_array_install_runtime_items(arr, new_items, new_cap);
+    if (gc_items) {
+        if (arr->items) list_relocate_owned_tail((List*)arr, arr->items, arr->capacity, new_items, new_cap);
+        js_array_runtime_items_release(arr);
+        arr->items = new_items;
+        arr->capacity = new_cap;
+    } else js_array_install_runtime_items(arr, new_items, new_cap);
     size_t iter = 0;
     void* item = NULL;
     while (hashmap_iter(sm->sparse_indices, &iter, &item)) {
         JsArraySparseHashEntry* entry = (JsArraySparseHashEntry*)item;
-        js_array_store_owned(arr, entry->index, entry->value);
+        js_array_store_owned(arr, entry->index, typeditem_to_item(&entry->value));
     }
     hashmap_free(sm->sparse_indices);
     sm->sparse_indices = NULL;
@@ -6538,7 +6581,7 @@ static void js_array_store_sparse_property(Item array_item, int64_t index, Item 
     if (update_length && index <= 0xFFFFFFFELL && arr->length <= index) {
         arr->length = index + 1;
     }
-    js_array_try_promote_sparse_dense(array_item);
+    js_array_try_promote_sparse_dense(array_item, false);
 }
 
 static bool js_array_parse_index_name(const char* name, int name_len,
@@ -6590,7 +6633,7 @@ static void js_array_delete_sparse_indices_range(lam::GcPtr<Array> arr,
             if (entry->index >= first_index && entry->index < end_index) {
                 JsArraySparseHashEntry probe;
                 probe.index = entry->index;
-                probe.value = ItemNull;
+                probe.value = {};
                 hashmap_delete(sm->sparse_indices, &probe);
                 sm->sparse_version++;
                 iter = 0;
@@ -24615,8 +24658,7 @@ static bool js_array_sparse_key_cursor_rebuild(JsArraySparseKeyCursor* cursor, l
         void* item = NULL;
         while (hashmap_iter(sm->sparse_indices, &iter, &item)) {
             JsArraySparseHashEntry* entry = (JsArraySparseHashEntry*)item;
-            if (entry->value.item == JS_DELETED_SENTINEL_VAL) continue;
-            cursor->keys[pos++] = entry->index;
+                cursor->keys[pos++] = entry->index;
         }
     }
     if (pos > 1) qsort(cursor->keys, (size_t)pos, sizeof(int64_t), js_array_sparse_index_cmp);
@@ -24769,8 +24811,7 @@ static bool js_array_find_own_element(Item arr, lam::GcPtr<Array> a,
                     int64_t idx = entry->index;
                     if (reverse ? (idx > start || idx < 0)
                             : (idx < start || idx >= len)) continue;
-                    if (entry->value.item == JS_DELETED_SENTINEL_VAL) continue;
-                    if (best_extra < 0 || (reverse ? idx > best_extra
+                                if (best_extra < 0 || (reverse ? idx > best_extra
                             : idx < best_extra)) best_extra = idx;
                 }
             }

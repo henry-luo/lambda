@@ -48,6 +48,7 @@ const KEYWORD_NAMES = [
   'let', 'pub', 'var', 'type', 'fn', 'pn', 'view', 'edit', 'state',
   'if', 'match', 'for', 'while', 'break', 'continue', 'return', 'raise',
   'import', 'apply', 'last', 'put', 'del', 'commit', 'rollback', 'open',
+  'grammar',
 ];
 // Reserved as well, but a data name in neither parser: the prefix operator
 // `not` and the named values.
@@ -531,6 +532,7 @@ module.exports = grammar({
       $.var_stam,
       $.fn_expr_stam,
       $.type_stam,
+      $.grammar_stam,
       $.assign_stam,
       $.return_stam,
       // PTH60v3/PTH62: the Tier-3 statements. `put`/`del` end in a greedy
@@ -561,6 +563,7 @@ module.exports = grammar({
       $.fn_stam,
       $.fn_expr_stam,
       $.type_stam,
+      $.grammar_stam,
       $.object_type,
       $.view_stam,
     ),
@@ -1467,6 +1470,28 @@ module.exports = grammar({
       field('declare', alias($.type_assign, $.assign_expr)),
       repeat(seq(',', field('declare', alias($.type_assign, $.assign_expr)))),
     ),
+
+    // GM5v2: `grammar Name { ... }`. The body is its own sub-language (`:=`
+    // token rules, island escapes such as "\d"), parsed by the grammar loader;
+    // this first-cut reference reads it as one opaque token, as the C parser
+    // hands it over as one span. Quoted text, comments and one level of
+    // nested braces (counts such as `{2,3}`) are skipped.
+    grammar_stam: $ => seq(
+      optional(field('pub', 'pub')), 'grammar',
+      field('name', $.identifier),
+      field('body', $.grammar_body),
+    ),
+    grammar_body: _ => token(seq('{',
+      repeat(choice(
+        /[^{}"'\/]+/,
+        /"([^"\\\n]|\\.)*"/,
+        /'([^'\\\n]|\\.)*'/,
+        /\/\/[^\n]*/,
+        /\/\*([^*]|\*+[^*\/])*\*+\//,
+        /\//,
+        /\{[^{}]*\}/,
+      )),
+      '}')),
 
     that_constraint: $ => prec.right(seq('that', field('constraint', $._expr))),
 

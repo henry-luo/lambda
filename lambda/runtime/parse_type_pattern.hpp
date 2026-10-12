@@ -48,6 +48,14 @@ AstNode* parse_type_pattern_syntax(Transpiler* tp, const char* begin,
         const char* end, SourceSpan span, TypePatternMode mode,
         TypePatternFailure* failure);
 
+// Skip whitespace and `//` / `/* */` comments in sub-language source text.
+const char* type_pattern_skip_space(const char* p, const char* end);
+
+// An island body without its `\(` `)` delimiter — a grammar `:=` rule (GM5v2) —
+// wrapped in an LSF_TP_ISLAND node. Resolving the node compiles its TypePattern.
+AstNode* parse_pattern_island_syntax(Transpiler* tp, const char* begin,
+        const char* end, SourceSpan span, TypePatternFailure* failure);
+
 // Resolve half: attach the Type graph, bind type and pattern names, and
 // register constants/types in the order the productions completed. A node
 // that is not an unresolved type-pattern node is left untouched.

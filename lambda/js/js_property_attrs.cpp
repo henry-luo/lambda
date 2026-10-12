@@ -632,40 +632,39 @@ static Item js_store_virtual_accessor_pair(Item obj, Item name,
         return js_throw_error_with_code("ERR_RUNTIME_FAILURE",
             "accessor shape privatization failed");
     }
-    ShapeEntry* entry = js_accessor_shape_entry(type, key);
+    ShapeEntry* previous = js_accessor_shape_entry(type, key);
+    uint8_t flags = attrs | (previous ? previous->flags : 0);
+    if (!js_map_store_accessor(js_obj_underlying_map(obj), key, pair, flags, js_input->pool))
+        return js_throw_error_with_code("ERR_RUNTIME_FAILURE", "accessor shape installation failed");
+    js_map_promote_descriptor_kind(js_obj_underlying_map(obj));
+    return js_status_ok();
+}
+
+extern "C" bool js_map_store_accessor(Map* map, String* key,
+        JsAccessorPair* pair, uint8_t attrs, Pool* pool) {
+    if (!map || !key || !pair || pair->layout_magic != JS_ACCESSOR_CELL_LAYOUT_MAGIC) return false;
+    TypeMap* type = map_clone_typemap_for_mutation(map, pool);
+    if (!type) return false;
+    ShapeEntry* entry = typemap_hash_lookup_key(type, key);
     if (!entry) {
-        entry = alloc_shape_entry(js_input->pool, key, LMD_TYPE_UNDEFINED,
-            type->last);
-        if (!entry) {
-            return js_throw_error_with_code("ERR_RUNTIME_FAILURE",
-                "accessor shape entry allocation failed");
-        }
+        entry = alloc_shape_entry(pool, key, LMD_TYPE_UNDEFINED, type->last);
+        if (!entry) return false;
         entry->byte_offset = -1;
         if (!type->shape) type->shape = entry;
         type->last = entry;
         type->length++;
-        typemap_hash_insert_owned(type, entry, js_input->pool);
+        typemap_hash_insert_owned(type, entry, pool);
     }
-    // The cell is descriptor metadata, not a data-lane value. Retire any
-    // prior physical bytes so the raw-word GC safety sweep cannot retain the
-    // former data value after this entry becomes virtual (D3.4.8).
+    // D3.4.8: retire the former data edge before publishing the virtual cell.
     if (entry->byte_offset >= 0) {
-        Map* property_map = js_obj_underlying_map(obj);
-        int storage_size = shape_entry_storage_size(entry);
-        if (property_map && property_map->data && storage_size > 0 &&
-                entry->byte_offset + storage_size <= property_map->data_cap) {
-            memset((char*)property_map->data + entry->byte_offset, 0,
-                (size_t)storage_size);
-        }
+        int size = shape_entry_storage_size(entry);
+        if (map->data && size > 0 && entry->byte_offset + size <= map->data_cap)
+            memset((char*)map->data + entry->byte_offset, 0, (size_t)size);
     }
-    // A later accessor-to-data conversion allocates a fresh physical lane.
     entry->byte_offset = -1;
     entry->accessor = pair;
-    entry->flags |= (uint8_t)(JSPD_IS_ACCESSOR | (attrs &
-        (JSPD_NON_ENUMERABLE | JSPD_NON_CONFIGURABLE)));
-    entry->flags &= (uint8_t)~JSPD_DELETED;
-    js_map_promote_descriptor_kind(js_obj_underlying_map(obj));
-    return js_status_ok();
+    entry->flags = JSPD_IS_ACCESSOR | (attrs & (JSPD_NON_ENUMERABLE | JSPD_NON_CONFIGURABLE));
+    return true;
 }
 
 // =============================================================================

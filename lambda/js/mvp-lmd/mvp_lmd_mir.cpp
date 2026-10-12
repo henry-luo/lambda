@@ -1,11 +1,13 @@
 #include "mvp_lmd.h"
 #include "mvp_lmd_runtime.h"
 #include "../js_transpiler.hpp"
+#include "../js_runtime.h"
 #include "../../runtime/mir_emitter_shared.hpp"
 #include "../../runtime/runtime-state.h"
 #include "../../runtime/heap_api.h"
 #include "../../runtime/lambda-root-frame.hpp"
 #include "../../runtime/lambda-error.h"
+#include "../../runtime/context_capsule.h"
 #include "../../input/input.hpp"
 #include "../../core/lambda-decimal.hpp"
 #include "../../mir/mir-gen.h"
@@ -20,10 +22,10 @@ enum LmdKind { K_UNDEFINED = 1, K_NULL = 2, K_BOOL = 4, K_NUMBER = 8,
     K_TYPED_ARRAY = 512, K_BIGINT = 1024, K_SYMBOL = 2048, K_ANY = 4095, K_BOXED = 4096 };
 enum LmdIntrinsic { I_UNDEFINED = 1, I_NAN, I_INFINITY, I_MAP, I_OBJECT,
     I_MATH, I_INT32_ARRAY, I_UINT8_ARRAY, I_FLOAT64_ARRAY, I_ARRAY, I_STRING, I_ERROR,
-    I_NUMBER, I_PARSE_INT, I_IS_NAN, I_PERFORMANCE, I_CONSOLE, I_PROCESS, I_REQUIRE, I_JSON, I_DATE, I_REGEXP, I_GLOBAL_THIS, I_SYMBOL, I_SET, I_COUNT };
+    I_NUMBER, I_PARSE_INT, I_IS_NAN, I_PERFORMANCE, I_CONSOLE, I_PROCESS, I_REQUIRE, I_JSON, I_DATE, I_REGEXP, I_GLOBAL_THIS, I_SYMBOL, I_SET, I_REFLECT, I_PROXY, I_COUNT };
 static const char* intrinsic_names[] = {"undefined", "NaN", "Infinity", "Map", "Object",
     "Math", "Int32Array", "Uint8Array", "Float64Array", "Array", "String", "Error",
-    "Number", "parseInt", "isNaN", "performance", "console", "process", "require", "JSON", "Date", "RegExp", "globalThis", "Symbol", "Set"};
+    "Number", "parseInt", "isNaN", "performance", "console", "process", "require", "JSON", "Date", "RegExp", "globalThis", "Symbol", "Set", "Reflect", "Proxy"};
 static const ArrayNumElemType typed_lanes[] = {ELEM_INT32, ELEM_UINT8, ELEM_FLOAT64};
 static const struct { const char* name; const char* native; int arity;
     double (*unary)(double); double (*binary)(double, double); } math_operations[] = {
@@ -41,6 +43,7 @@ struct LmdValue;
 struct LmdScalarField;
 struct LmdInlineFrame;
 struct LmdNumericRegion;
+struct LmdDenseArrayLoopPlan;
 struct LmdRegionRead { LmdNumericRegion* region; int parent; String* name;
     unsigned kind; int index; MvpLmdPropertyCache cache; LmdFunction* target; };
 struct LmdNumericRegion {
@@ -80,6 +83,8 @@ struct LmdBinding {
     bool reflected_global;
     bool class_name;
     bool captured;
+    bool implicit_write;
+    bool dense_array_storage;
 };
 struct LmdFunction {
     AstFuncNode* ast;
@@ -114,6 +119,8 @@ struct LmdFunction {
     bool observes_receiver;
     bool owns_captures;
     bool complex_params;
+    bool object_home;
+    bool lexical_super;
     LmdNumericRegion* numeric_region;
 };
 struct LmdObjectPlan { AstNode* literal; TypeMap* blueprint; TypeMap* shape;
@@ -144,10 +151,13 @@ struct MvpLmdProgram {
     unsigned* literal_kinds;
     Item* character_items;
     bool immutable_objects;
+    bool property_callbacks;
+    bool coercion_callbacks;
     bool bigints;
     bool symbols;
     bool iterators;
     bool array_holes;
+    bool excludes_sparse_arrays;
     bool array_named_properties;
     bool array_method_overrides;
     bool map_method_overrides;
@@ -235,9 +245,18 @@ struct LmdCompiler {
     MIR_reg_t new_target;
     MIR_reg_t receiver_cell;
     MvpLmdClass* initializer_class;
+    LmdBinding* dense_arrays[8];
+    int dense_array_count;
+    LmdDenseArrayLoopPlan* dense_loop;
 };
 struct LmdValue { MIR_reg_t reg; unsigned kind; bool literal = false; double number = 0; bool integer = false; LmdRange range;
     MIR_reg_t number_present = 0; };
+struct LmdDenseArrayLoopPlan {
+    LmdCompiler* compiler; AstLoopControlNode* node; LmdBinding* arrays[8];
+    int count; int reads; int nodes; bool allowed; MIR_label_t bail;
+    int element_writes; bool nested;
+    int writes; LmdBinding* written[32]; LmdValue snapshots[32];
+};
 struct LmdScalarField { LmdValue value; unsigned kinds; bool written; bool integer;
     LmdRange range; int home; AstNode* initializer; };
 struct LmdInlineFrame { LmdInlineFrame* parent; LmdFunction* function; int count;
@@ -250,7 +269,8 @@ struct LmdInlineFrame { LmdInlineFrame* parent; LmdFunction* function; int count
 struct LmdReference { LmdBinding* binding; LmdValue owner; MIR_reg_t key;
     bool key_known = false; int64_t index = 0; MIR_reg_t name = 0; LmdObjectPlan* plan = NULL; ShapeEntry* field = NULL; int method = 0; LmdShapeSet shapes = {}; String* spelling = NULL; bool guarded = false;
     unsigned lanes = 0; bool numeric_key = false; bool in_bounds = false; LmdRange elements;
-    MIR_reg_t key_present = 0; String* string_literal = NULL; LmdValue deferred_name = {}; };
+    MIR_reg_t key_present = 0; String* string_literal = NULL; LmdValue deferred_name = {}; MIR_reg_t receiver = 0;
+    bool dense_storage = false; };
 
 static LmdBinding* binding(MvpLmdProgram* p, NameEntry* entry) {
     for (int i = 0; i < p->bindings->length; i++) {
@@ -285,11 +305,13 @@ static void diagnostic(MvpLmdProgram* p, AstNode* n, const char* reason) {
 static bool named(String* s, const char* name) {
     return s && s->len == strlen(name) && !memcmp(s->chars, name, s->len);
 }
+static String* property_spelling(AstNode* key, bool computed) {
+    if (!computed && key->node_type == AST_NODE_IDENT) return ((AstIdentNode*)key)->name;
+    return key->node_type == AST_NODE_LITERAL && ((AstLiteralNode*)key)->literal_type == AST_LITERAL_STRING
+        ? ((AstLiteralNode*)key)->value.string_value : NULL;
+}
 static String* member_spelling(AstFieldNode* member) {
-    if (!member->computed) return ((AstIdentNode*)member->property)->name;
-    return member->property->node_type == AST_NODE_LITERAL &&
-        ((AstLiteralNode*)member->property)->literal_type == AST_LITERAL_STRING
-            ? ((AstLiteralNode*)member->property)->value.string_value : NULL;
+    return property_spelling(member->property, member->computed);
 }
 static int math_operation(MvpLmdProgram* p, AstCallNode* call) {
     if (p->math_observed) return -1;
@@ -319,26 +341,16 @@ static void mvp_lmd_nominal_initialize(MvpLmdClass* cls, String* name, MvpLmdPro
 }
 Item mvp_lmd_object_create(MvpLmdProgram* p, Item prototype) {
     TypeId type = get_type_id(prototype);
-    if (type != LMD_TYPE_MAP && type != LMD_TYPE_NULL)
-        return mvp_lmd_fail(type == LMD_TYPE_ARRAY || type == LMD_TYPE_FUNC || type == LMD_TYPE_ARRAY_NUM ? LMD_MVP_CAPABILITY : LMD_MVP_TYPE, 0);
+    if (type != LMD_TYPE_MAP && type != LMD_TYPE_ARRAY && type != LMD_TYPE_FUNC && type != LMD_TYPE_NULL)
+        return mvp_lmd_fail(LMD_MVP_TYPE, 0);
     RootFrame roots(2);
     if (!roots.valid()) return ItemError;
-    Rooted<Item> parent(roots, prototype), owner(roots, ItemNull);
-    MvpLmdClass* cls = (MvpLmdClass*)pool_calloc(p->frontend->pool, sizeof(MvpLmdClass));
-    if (!cls) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
-    mvp_lmd_nominal_initialize(cls, name_pool_create_len(p->frontend->name_pool, "Object", 6), p);
-    MvpLmdClass* base = type == LMD_TYPE_MAP ? mvp_lmd_class_record(prototype) : NULL;
-    if (base) cls->nominal.base = prototype.item == mvp_lmd_class_values(base)[1].item ? base->nominal.base : &base->nominal;
-    Function* keeper = (Function*)heap_calloc(sizeof(Function), LMD_TYPE_FUNC);
-    if (!keeper) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
-    function_init_abi(keeper, LMD_TYPE_FUNC, FN_ENTRY_ABI_MVP_LMD); owner.set(Item{.function = keeper});
-    Item* values = (Item*)heap_calloc_closure_env(3 * sizeof(Item));
-    if (!values) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
-    keeper->closure_env = values; keeper->closure_field_count = 3;
-    values[0] = values[2] = ItemNull; values[1] = parent.get(); cls->owner = keeper;
-    // The nominal extension traces this ordinary Function environment, including the fixed prototype.
-    return mvp_lmd_object_new(&cls->shape, 0);
+    Rooted<Item> parent(roots, prototype), object(roots, mvp_lmd_object_new(p->roots[0], 0));
+    if (item_is_error(object.get())) return object.get();
+    Item result = mvp_lmd_set_prototype(object.get(), parent.get());
+    return item_is_error(result) ? result : object.get();
 }
+
 static MvpLmdClass* class_plan(MvpLmdProgram* p, AstClassNode* ast, LmdBinding* name = NULL) {
     if (name) {
         if (!name->class_name || name->assigned || !name->entry->node ||
@@ -396,19 +408,34 @@ static void capture_binding(MvpLmdProgram* p, LmdFunction* f, LmdBinding* b, Ast
 }
 static void walk(AstNode* n, LmdWalk* state);
 static void child(AstNode* n, void* context) { walk(n, (LmdWalk*)context); }
-MvpLmdLibraryState* mvp_lmd_program_library(MvpLmdProgram* program) { return program->library; }
+static constexpr uint32_t MVP_LMD_CAPSULE_OWNER = 0x4d56504c;
+MvpLmdLibraryState* mvp_lmd_program_library(MvpLmdProgram* program) {
+    if (program) return program->library_active ? program->library : NULL;
+    MvpLmdLibraryState** state = (MvpLmdLibraryState**)context_capsule_extension(
+        context, MVP_LMD_CAPSULE_OWNER, 0);
+    return state ? *state : NULL;
+}
 static void activate_library(MvpLmdProgram* p, AstNode* site) {
     if (p->library_active) return;
-    p->library = (MvpLmdLibraryState*)pool_calloc(p->frontend->pool, sizeof(MvpLmdLibraryState));
+    if (!p->library) p->library = (MvpLmdLibraryState*)pool_calloc(p->frontend->pool, sizeof(MvpLmdLibraryState));
     if (!p->library) { diagnostic(p, site, "builtin metadata allocation"); return; }
     p->library_active = p->receiver_abi = true; p->immutable_objects = false;
     p->library_slot = p->slot_count; p->slot_count += LMD_LIBRARY_COUNT;
+}
+static void observe_coercion_member(MvpLmdProgram* p, AstNode* node, String* name) {
+    if (!named(name, "toString") && !named(name, "valueOf") && !named(name, "toJSON")) return;
+    activate_library(p, node);
+    p->coercion_callbacks = true;
+    if (named(name, "toJSON")) p->property_callbacks = true;
 }
 static void collect_pattern_binding(AstNode* node, void* opaque) {
     MvpLmdProgram* p = (MvpLmdProgram*)opaque;
     if (node->node_type == AST_NODE_IDENT) {
         LmdBinding* b = identifier_binding(p, (AstIdentNode*)node);
-        if (b) { b->kinds = K_ANY; b->assigned = true; b->dominated = false; }
+        if (b) { b->kinds = K_ANY; b->assigned = b->implicit_write = true; b->dominated = false; }
+    } else if (node->node_type == AST_NODE_MEMBER_EXPR || node->node_type == AST_NODE_INDEX_EXPR) {
+        // pattern/iteration targets perform the same observable Set as explicit assignments.
+        activate_library(p, node); p->property_callbacks = p->array_holes = p->array_named_properties = true;
     } else js_ast_visit_binding_pattern_children(node, collect_pattern_binding, p);
 }
 static void walk(AstNode* n, LmdWalk* state) {
@@ -425,11 +452,7 @@ static void walk(AstNode* n, LmdWalk* state) {
     case AST_NODE_CATCH_CLAUSE: {
         JsCatchNode* handler = (JsCatchNode*)n;
         collect_scope(p, state->owner, handler->vars);
-        if (handler->param && handler->param->node_type != AST_NODE_IDENT) collect_pattern_binding(handler->param, p);
-        if (handler->param && handler->param->node_type == AST_NODE_IDENT) {
-            LmdBinding* b = identifier_binding(p, (AstIdentNode*)handler->param);
-            if (b) { b->kinds = K_ANY; b->assigned = true; }
-        }
+        if (handler->param) collect_pattern_binding(handler->param, p);
         break;
     }
     case AST_NODE_LOOP:
@@ -447,13 +470,10 @@ static void walk(AstNode* n, LmdWalk* state) {
                 if (e->node_type != AST_NODE_IDENT) diagnostic(p, e, "for-of pair binding");
         } else if (head->node_type == AST_NODE_MAP_PATTERN) {
             activate_library(p, head); collect_pattern_binding(head, p);
-        } else if (head->node_type != AST_NODE_IDENT) diagnostic(p, head, "for-of binding");
-        AstNode* first = head->node_type == AST_NODE_ARRAY_PATTERN ? ((AstArrayNode*)head)->item : head;
-        for (AstNode* e = first; e; e = head->node_type == AST_NODE_ARRAY_PATTERN ? e->next : NULL) {
-            if (e->node_type != AST_NODE_IDENT) continue;
-            LmdBinding* binding = identifier_binding(p, (AstIdentNode*)e);
-            if (binding) { binding->kinds = K_ANY; binding->assigned = true; binding->dominated = false; }
-        }
+        } else if (head->node_type != AST_NODE_IDENT && (loop->declares_binding ||
+                (head->node_type != AST_NODE_MEMBER_EXPR && head->node_type != AST_NODE_INDEX_EXPR)))
+            diagnostic(p, head, "for-of binding");
+        collect_pattern_binding(head, p);
         break;
     }
     case AST_NODE_ARRAY_PATTERN: break;
@@ -482,8 +502,9 @@ static void walk(AstNode* n, LmdWalk* state) {
             diagnostic(p, n, "only named public fields are admitted"); return;
         }
         String* name = ((AstIdentNode*)field->key)->name;
-        if (named(name, "__proto__") || (field->is_static &&
-                (named(name, "prototype") || named(name, "name") || named(name, "length"))))
+        observe_coercion_member(p, n, name);
+        if (field->is_static &&
+                (named(name, "prototype") || named(name, "name") || named(name, "length")))
             diagnostic(p, n, "static field replaces protected constructor metadata");
         walk(!field->is_static && field->value ? (AstNode*)js_script_field_initializer_ensure(p->frontend, field) : field->value, &inner);
         return;
@@ -495,15 +516,24 @@ static void walk(AstNode* n, LmdWalk* state) {
         break;
     case AST_NODE_PROPERTY: {
         AstPropertyNode* prop = (AstPropertyNode*)n;
+        String* property_name = property_spelling(prop->key, prop->computed);
+        if (state->parent && state->parent->node_type == AST_NODE_MAP_PATTERN && named(property_name, "prototype")) {
+            // Destructuring exposes the same mutable prototype as a member read.
+            activate_library(p, n); p->property_callbacks = true;
+        }
+        observe_coercion_member(p, n, property_name);
+        if (prop->computed && prop->method) { activate_library(p, n); p->property_callbacks = true; }
         if (prop->computed || prop->key->node_type != AST_NODE_IDENT) p->immutable_objects = false;
-        if (prop->is_getter || prop->is_setter) diagnostic(p, n, "object accessor");
+        if (prop->is_getter || prop->is_setter) {
+            activate_library(p, n); p->property_callbacks = true; p->immutable_objects = false;
+        }
         if (prop->method) p->receiver_abi = true;
         if (prop->computed) walk(prop->key, &inner);
-        else if (prop->key->node_type == AST_NODE_IDENT && named(((AstIdentNode*)prop->key)->name, "__proto__"))
-            diagnostic(p, n, "__proto__");
-        else if (prop->key->node_type == AST_NODE_LITERAL &&
-                 ((AstLiteralNode*)prop->key)->literal_type == AST_LITERAL_STRING &&
-                 named(((AstLiteralNode*)prop->key)->value.string_value, "__proto__")) diagnostic(p, n, "__proto__");
+        else if ((prop->key->node_type == AST_NODE_IDENT && named(((AstIdentNode*)prop->key)->name, "__proto__")) ||
+                (prop->key->node_type == AST_NODE_LITERAL && ((AstLiteralNode*)prop->key)->literal_type == AST_LITERAL_STRING &&
+                 named(((AstLiteralNode*)prop->key)->value.string_value, "__proto__"))) {
+            activate_library(p, n); p->property_callbacks = true; p->immutable_objects = false;
+        }
         walk(prop->value, &inner); return;
     }
     case AST_NODE_NEW_EXPR: {
@@ -541,10 +571,14 @@ static void walk(AstNode* n, LmdWalk* state) {
             AstNode* parent = ast_index_parent(&p->frontend->ast_index, state->parent);
             if (!parent || parent->node_type != AST_NODE_CLASS || method->computed ||
                     method->key->node_type != AST_NODE_IDENT ||
-                    named(((AstIdentNode*)method->key)->name, "__proto__") ||
                     ((AstIdentNode*)method->key)->name->chars[0] == '#') {
                 diagnostic(p, n, "class member outside basic method scope"); return;
             }
+            if (method->kind == AstMethodNode::JS_METHOD_GET || method->kind == AstMethodNode::JS_METHOD_SET) {
+                activate_library(p, n); p->property_callbacks = true;
+            }
+            String* method_name = ((AstIdentNode*)method->key)->name;
+            observe_coercion_member(p, n, method_name);
             f->home = class_plan(p, (AstClassNode*)parent);
             if (method->kind == AstMethodNode::JS_METHOD_CONSTRUCTOR) f->home->constructor_id = f->id;
         }
@@ -635,19 +669,37 @@ static void walk(AstNode* n, LmdWalk* state) {
         if (named(id->name, "this") && !state->owner->ast) {
             p->global_receiver = true; p->receiver_abi = true;
         }
-        // lexical super needs a retained home method as well as the receiver cell.
-        if (named(id->name, "super") && !state->owner->home)
-            diagnostic(p, n, "lexical super outside MVP scope");
+        if (named(id->name, "super")) {
+            LmdFunction* method = state->owner;
+            while (method && method->ast && method->ast->node_type == AST_NODE_ARROW_FUNC) method = method->parent;
+            AstNode* property = method && method->ast ? ast_index_parent(&p->frontend->ast_index, (AstNode*)method->ast) : NULL;
+            bool literal = property && property->node_type == AST_NODE_PROPERTY &&
+                (((AstPropertyNode*)property)->method || ((AstPropertyNode*)property)->is_getter || ((AstPropertyNode*)property)->is_setter);
+            if (!method || (!method->home && !literal)) diagnostic(p, n, "super requires a home method");
+            else {
+                method->object_home |= literal;
+                method->observes_receiver = true; p->receiver_abi = true;
+                if (literal) { activate_library(p, n); p->property_callbacks = true; }
+                if (method != state->owner) {
+                    method->receiver_captured = true;
+                    for (LmdFunction* current = state->owner; current != method; current = current->parent)
+                        current->lexical_super = current->lexical_receiver = true;
+                }
+            }
+        }
         if (!state->facts && !id->entry) {
             for (int i = 0; i < I_COUNT - 1; i++) if (named(id->name, intrinsic_names[i])) {
-                if (i + 1 == I_OBJECT) {
+                if (i + 1 == I_OBJECT || i + 1 == I_ARRAY || i + 1 == I_SYMBOL) {
                     AstNode* parent = state->parent;
                     bool member_owner = parent && (parent->node_type == AST_NODE_MEMBER_EXPR || parent->node_type == AST_NODE_INDEX_EXPR) &&
                         ((AstFieldNode*)parent)->object == n;
                     bool constructor = parent && (parent->node_type == AST_NODE_CALL_EXPR || parent->node_type == AST_NODE_NEW_EXPR) &&
                         ((AstCallNode*)parent)->callee == n;
-                    // an escaped Object constructor can expose reflective writers through aliases.
-                    if (!member_owner && !constructor) p->array_method_overrides = p->map_method_overrides = true;
+                    // escaped constructors can expose reflective writers or mutable static methods.
+                    if (!member_owner && !constructor) {
+                        activate_library(p, n); p->property_callbacks = true;
+                        p->array_method_overrides = p->map_method_overrides = true;
+                    }
                 }
                 if (i + 1 == I_IS_NAN) activate_library(p, n);
                 else if (i + 1 == I_MATH && (!state->parent ||
@@ -661,8 +713,11 @@ static void walk(AstNode* n, LmdWalk* state) {
                     activate_library(p, n);
                     if (i + 1 == I_SYMBOL) p->symbols = p->iterators = true;
                     if (i + 1 == I_SET) p->iterators = true;
+                    if (i + 1 == I_REFLECT || i + 1 == I_PROXY) p->property_callbacks = true;
+                    if (i + 1 == I_PROXY) p->symbols = p->iterators = true;
                     int index = i + 1 == I_JSON ? LMD_LIBRARY_JSON : i + 1 == I_DATE ? LMD_LIBRARY_DATE :
-                        i + 1 == I_SYMBOL ? LMD_LIBRARY_SYMBOL : i + 1 == I_SET ? LMD_LIBRARY_SET : LMD_LIBRARY_REGEXP;
+                        i + 1 == I_SYMBOL ? LMD_LIBRARY_SYMBOL : i + 1 == I_SET ? LMD_LIBRARY_SET :
+                        i + 1 == I_REFLECT ? LMD_LIBRARY_REFLECT : i + 1 == I_PROXY ? LMD_LIBRARY_PROXY : LMD_LIBRARY_REGEXP;
                     p->intrinsics[i].slot = p->library_slot + index;
                 } else if (i + 1 >= I_PERFORMANCE) {
                     if (!p->host_enabled) continue;
@@ -719,9 +774,20 @@ static void walk(AstNode* n, LmdWalk* state) {
             ((AstCallNode*)state->parent)->callee == n;
         AstNode* consumer = method_call ? ast_index_parent(&p->frontend->ast_index, state->parent) : NULL;
         AstIdentNode* receiver = field->object->node_type == AST_NODE_IDENT ? (AstIdentNode*)field->object : NULL;
-        if (named(spelling, "defineProperty") || named(spelling, "assign") ||
-                (receiver && !receiver->entry && named(receiver->name, "Object") && !spelling))
+        if (named(spelling, "create") || named(spelling, "getPrototypeOf") || named(spelling, "defineProperties") || named(spelling, "getOwnPropertyDescriptor") || named(spelling, "getOwnPropertyDescriptors") ||
+                named(spelling, "propertyIsEnumerable") || named(spelling, "isPrototypeOf") ||
+                named(spelling, "getOwnPropertyNames") || named(spelling, "getOwnPropertySymbols") || named(spelling, "preventExtensions") || named(spelling, "seal") ||
+                named(spelling, "freeze") || named(spelling, "isExtensible") || named(spelling, "isSealed") || named(spelling, "isFrozen") ||
+                named(spelling, "defineProperty") || named(spelling, "setPrototypeOf") || named(spelling, "__proto__")) {
+            activate_library(p, n); p->property_callbacks = true; p->immutable_objects = false;
             p->array_method_overrides = p->map_method_overrides = true;
+        }
+        if (named(spelling, "defineProperty") || named(spelling, "assign") ||
+                (receiver && !receiver->entry && named(receiver->name, "Object") && !spelling)) {
+            p->array_method_overrides = p->map_method_overrides = true;
+            if (named(spelling, "assign")) p->array_holes = p->array_named_properties = true;
+            if (!spelling) { activate_library(p, n); p->property_callbacks = true; }
+        }
         if (collection_method && !(receiver && !receiver->entry && named(receiver->name, "Object")) &&
                 (!method_call || (collection_method >= 6 && (!consumer || consumer->node_type != AST_NODE_FOR_OF_STAM)))) {
             activate_library(p, n); p->iterators = true;
@@ -729,9 +795,9 @@ static void walk(AstNode* n, LmdWalk* state) {
         // a borrowed map method can create holes from an array-like receiver without sparse syntax.
         if (named(spelling, "map") && (!state->parent || state->parent->node_type != AST_NODE_CALL_EXPR ||
                 ((AstCallNode*)state->parent)->callee != n)) p->array_holes = true;
-        if (named(spelling, "prototype") && field->object->node_type == AST_NODE_IDENT &&
-                (named(((AstIdentNode*)field->object)->name, "Object") || named(((AstIdentNode*)field->object)->name, "Array")) && !((AstIdentNode*)field->object)->entry) activate_library(p, n);
+        if (named(spelling, "prototype")) { activate_library(p, n); p->immutable_objects = false; }
         if (named(spelling, "call") || named(spelling, "apply") || named(spelling, "bind") || named(spelling, "hasOwnProperty") ||
+                named(spelling, "toString") || named(spelling, "valueOf") || named(spelling, "constructor") ||
                 named(spelling, "defineProperty") || named(spelling, "getPrototypeOf") || named(spelling, "create") || named(spelling, "assign") ||
                 ((named(spelling, "push") || named(spelling, "concat") || named(spelling, "splice") || named(spelling, "unshift") || named(spelling, "shift") || named(spelling, "toReversed") || named(spelling, "at")) &&
                  (!state->parent || state->parent->node_type != AST_NODE_CALL_EXPR || ((AstCallNode*)state->parent)->callee != n)))
@@ -740,9 +806,16 @@ static void walk(AstNode* n, LmdWalk* state) {
         bool write = parent && ((parent->node_type == AST_NODE_ASSIGN && ((AstAssignNode*)parent)->left == n) ||
                 (parent->node_type == AST_NODE_UNARY && (((AstUnaryNode*)parent)->op == OPERATOR_JS_DELETE ||
                  ((AstUnaryNode*)parent)->op == OPERATOR_JS_INCREMENT || ((AstUnaryNode*)parent)->op == OPERATOR_JS_DECREMENT)));
+        if (receiver && !receiver->entry && (named(receiver->name, "Object") || named(receiver->name, "Array")) && write) {
+            activate_library(p, n); p->property_callbacks = true;
+        }
+        if (receiver && !receiver->entry && named(receiver->name, "Symbol") && !named(spelling, "iterator")) {
+            activate_library(p, n); p->property_callbacks = true;
+        }
         // implicit array conversion invokes these hooks through the native receiver-aware call ABI.
-        if (write && (named(spelling, "toString") || named(spelling, "valueOf") || named(spelling, "join")))
-            p->receiver_abi = true;
+        if (write && (named(spelling, "toString") || named(spelling, "valueOf") || named(spelling, "toJSON") || named(spelling, "join"))) {
+            activate_library(p, n); p->property_callbacks = true;
+        }
         if (receiver && !receiver->entry && named(receiver->name, "Math") &&
                 (write || (!method_call && !named(spelling, "PI")) || !spelling ||
                  (method_call && ((AstCallNode*)state->parent)->interp_has_spread_args))) {
@@ -750,16 +823,11 @@ static void walk(AstNode* n, LmdWalk* state) {
             p->math_observed = true; activate_library(p, n);
         }
         if (write) p->immutable_objects = false;
-        if (field->object->node_type == AST_NODE_IDENT && named(((AstIdentNode*)field->object)->name, "super") &&
-                (write || field->computed))
-            diagnostic(p, n, "super property mutation or computed key");
         if (field->optional) activate_library(p, n);
         walk(field->object, &inner);
         if (field->computed) walk(field->property, &inner);
         else if (!field->property || field->property->node_type != AST_NODE_IDENT)
             diagnostic(p, n, "invalid named property");
-        else if (named(((AstIdentNode*)field->property)->name, "__proto__")) diagnostic(p, n, "__proto__");
-        else if (named(((AstIdentNode*)field->property)->name, "prototype")) p->receiver_abi = true;
         return;
     }
     case AST_NODE_CALL_EXPR: {
@@ -798,7 +866,7 @@ static void walk(AstNode* n, LmdWalk* state) {
                     b->assigned = true;
                     // literal RHS elements have independent facts; an arbitrary array may contain anything.
                     if (assignment->right->node_type != AST_NODE_ARRAY) {
-                        b->kinds = K_ANY; b->dominated = false;
+                        b->kinds = K_ANY; b->implicit_write = true; b->dominated = false;
                         b->array = {LMD_ARRAY_UNKNOWN, {0, 0, 2}};
                     }
                     if (!state->facts) b->writes++;
@@ -944,12 +1012,20 @@ static unsigned kind(MvpLmdProgram* p, AstNode* n, LmdInlineFrame* facts = NULL)
         String* spelling = member_spelling(member);
         if ((owner == K_TYPED_ARRAY || owner == K_ARRAY || owner == K_STRING) && named(spelling, "length"))
             return K_NUMBER;
-        if ((owner == K_TYPED_ARRAY && !named(spelling, "fill")) ||
-                (owner == K_ARRAY && array_facts(p, member->object).lanes == LMD_ARRAY_ITEMS)) {
+        // element facts do not describe named methods or inherited values at holes.
+        unsigned key_kind = member->computed && !spelling ? kind(p, member->property, facts) : 0;
+        if ((owner == K_TYPED_ARRAY || owner == K_ARRAY) && member->computed && !spelling && !key_kind) return 0;
+        // optional typed indices either read a numeric lane or take the existing named-key capability check.
+        bool indexed = spelling ? mvp_lmd_string_key(spelling) >= 0 :
+            member->computed && (key_kind == K_NUMBER || (owner == K_TYPED_ARRAY &&
+                !(key_kind & ~(K_NUMBER | K_UNDEFINED))));
+        if (indexed && (owner == K_TYPED_ARRAY ||
+                (owner == K_ARRAY && array_facts(p, member->object).lanes == LMD_ARRAY_ITEMS))) {
             LmdArrayFacts array = array_facts(p, member->object);
             LmdRange index = member->computed ? range(p, member->property, true) : LmdRange{};
-            return index.state == 1 && array.length.state == 1 && index.lower >= 0 && index.upper < array.length.lower
-                ? K_NUMBER : K_NUMBER | K_UNDEFINED;
+            bool present = index.state == 1 && array.length.state == 1 && index.lower >= 0 && index.upper < array.length.lower;
+            if (present) return K_NUMBER;
+            if (owner == K_TYPED_ARRAY || !p->property_callbacks) return K_NUMBER | K_UNDEFINED;
         }
         LmdBinding* b = !member->computed && member->object->node_type == AST_NODE_IDENT
             ? identifier_binding(p, (AstIdentNode*)member->object) : NULL;
@@ -1373,6 +1449,21 @@ static LmdRange range(MvpLmdProgram* p, AstNode* n, bool scoped, bool present_on
         return result;
     }
     case AST_NODE_CALL_EXPR: {
+        AstCallNode* call = (AstCallNode*)n;
+        int operation = math_operation(p, call);
+        if (operation >= 0 && !strcmp(math_operations[operation].name, "floor") &&
+                call->arguments && !call->arguments->next && !call->interp_has_spread_args) {
+            AstNode* argument = call->arguments;
+            LmdRange value = range(p, argument, scoped);
+            if (value.state == 1) return value;
+            if (argument->node_type == AST_NODE_BINARY && ((AstBinaryNode*)argument)->op == OPERATOR_DIV) {
+                AstBinaryNode* quotient = (AstBinaryNode*)argument;
+                LmdRange left = range(p, quotient->left, scoped), right = range(p, quotient->right, scoped);
+                // positive division is monotone and cannot produce negative zero.
+                if (left.state == 1 && right.state == 1 && left.lower >= 0 && right.lower > 0)
+                    return finite_range(floor(left.lower / right.upper), floor(left.upper / right.lower));
+            }
+        }
         LmdFunction* f = direct_target(p, (AstCallNode*)n);
         // explicit numeric returns do not exclude an implicit undefined return.
         return f && f->returns == K_NUMBER ? f->range : LmdRange{0, 0, 2};
@@ -1759,8 +1850,10 @@ static void return_value(LmdCompiler* c, LmdValue value) {
         ? scalar_reg(c, value, c->function->returns, c->function->integer)
         : box(c, value).reg;
     if (c->function->home && ((AstMethodNode*)c->function->ast)->kind == AstMethodNode::JS_METHOD_CONSTRUCTOR) {
+        MIR_reg_t receiver = c->receiver_cell ? em_load_at(&c->em,
+            em_array_element_address(&c->em, c->receiver_cell, constant(c, 0), 8), 0, MIR_T_I64, "constructor_receiver") : c->receiver;
         result = em_call_3(&c->em, "mvp_lmd_constructor_result", MIR_T_I64,
-            MIR_T_I64, reg(c, result), MIR_T_I64, reg(c, c->receiver),
+            MIR_T_I64, reg(c, result), MIR_T_I64, reg(c, receiver),
             MIR_T_I64, integer(c, c->function->home->ast->superclass != NULL), true);
     }
     em_stage_function_return(&c->em, reg(c, result));
@@ -1878,7 +1971,8 @@ static MIR_reg_t coerce_noninline_number(void* owner, MIR_reg_t item) {
         fail(c, LMD_MVP_TYPE, NULL); put_label(c, other);
     }
     if (c->program->library_active) {
-        MIR_reg_t converted = em_call_1(&c->em, "mvp_lmd_primitive_to_number", MIR_T_I64, MIR_T_I64, reg(c, item), true);
+        MIR_reg_t converted = em_call_1(&c->em, c->program->coercion_callbacks ?
+            "mvp_lmd_primitive_to_number" : "mvp_lmd_primitive_to_number_fixed", MIR_T_I64, MIR_T_I64, reg(c, item), true);
         // keep the uncommon object-conversion decoder out of every numeric loop's MIR body.
         check_error(c, converted);
         move(c, result, reg(c, em_call_1(&c->em, "it2d", MIR_T_D,
@@ -1950,14 +2044,25 @@ static MIR_reg_t truth(LmdCompiler* c, LmdValue v) {
     if (k == K_ARRAY || k == K_TYPED_ARRAY || k == K_FUNCTION || k == K_OBJECT || k == K_MAP) return constant(c, 1);
     if (k == K_STRING) return op(c, MIR_NE,
         reg(c, em_load_at(&c->em, payload(c, v.reg), offsetof(String, len), MIR_T_U32, "string_length")), integer(c, 0));
-    MIR_reg_t tid = tag(c, v), result = em_new_reg(&c->em, "truth", MIR_T_I64);
+    constexpr unsigned falsy = K_NUMBER | K_BIGINT | K_STRING | K_BOOL | K_NULL | K_UNDEFINED;
+    if (k && !(k & falsy)) return constant(c, 1);
+    if (k && !(k & ~(K_NULL | K_UNDEFINED))) return constant(c, 0);
+    if (k && !(k & ~(K_BOOL | K_NULL | K_UNDEFINED)))
+        return op(c, MIR_EQ, reg(c, v.reg), integer(c, ITEM_TRUE));
+    // every object is truthy; scalar tags suffice without decoding a container header.
+    MIR_reg_t tid = op(c, MIR_URSH, reg(c, v.reg), integer(c, 56));
+    MIR_reg_t result = em_new_reg(&c->em, "truth", MIR_T_I64);
     MIR_label_t done = label(c), numeric = label(c), string = label(c), boolean = label(c);
     move(c, result, integer(c, 0));
-    branch(c, MIR_BEQ, done, reg(c, tid), integer(c, LMD_TYPE_NULL));
-    branch(c, MIR_BEQ, done, reg(c, tid), integer(c, LMD_TYPE_UNDEFINED));
-    branch(c, MIR_BEQ, numeric, reg(c, tid), integer(c, LMD_TYPE_FLOAT));
-    branch(c, MIR_BEQ, string, reg(c, tid), integer(c, LMD_TYPE_STRING));
-    branch(c, MIR_BEQ, boolean, reg(c, tid), integer(c, LMD_TYPE_BOOL));
+    if (k & K_BOOL) branch(c, MIR_BEQ, boolean, reg(c, tid), integer(c, LMD_TYPE_BOOL));
+    if (k & K_NULL) branch(c, MIR_BEQ, done, reg(c, tid), integer(c, LMD_TYPE_NULL));
+    if (k & K_UNDEFINED) branch(c, MIR_BEQ, done, reg(c, tid), integer(c, LMD_TYPE_UNDEFINED));
+    if (k & K_NUMBER) {
+        branch(c, MIR_BEQ, numeric, reg(c, tid), integer(c, LMD_TYPE_INT));
+        branch(c, MIR_BEQ, numeric, reg(c, tid), integer(c, LMD_TYPE_FLOAT));
+        branch_truth(c, numeric, op(c, MIR_AND, reg(c, v.reg), integer(c, ITEM_DBL_MASK)));
+    }
+    if (k & K_STRING) branch(c, MIR_BEQ, string, reg(c, tid), integer(c, LMD_TYPE_STRING));
     if (c->program->bigints && (k & K_BIGINT)) {
         MIR_label_t other = label(c);
         branch(c, MIR_BNE, other, reg(c, tid), integer(c, LMD_TYPE_DECIMAL));
@@ -1967,7 +2072,8 @@ static MIR_reg_t truth(LmdCompiler* c, LmdValue v) {
     const unsigned kinds[] = {K_NUMBER, K_STRING, K_BOOL};
     MIR_label_t labels[] = {numeric, string, boolean};
     for (int i = 0; i < 3; i++) {
-        put_label(c, labels[i]); move(c, result, reg(c, truth(c, {v.reg, kinds[i] | K_BOXED}))); jump(c, done);
+        put_label(c, labels[i]);
+        if (k & kinds[i]) { move(c, result, reg(c, truth(c, {v.reg, kinds[i] | K_BOXED}))); jump(c, done); }
     }
     put_label(c, done); return result;
 }
@@ -2003,7 +2109,8 @@ static LmdValue to_string(LmdCompiler* c, LmdValue v) {
     unsigned k = semantic(v);
     if (k == K_STRING) return box(c, v);
     if (k == K_ARRAY) {
-        MIR_reg_t result = em_call_2(&c->em, "mvp_lmd_primitive_to_string", MIR_T_I64,
+        MIR_reg_t result = em_call_2(&c->em, c->program->coercion_callbacks ?
+            "mvp_lmd_primitive_to_string" : "mvp_lmd_primitive_to_string_fixed", MIR_T_I64,
             MIR_T_I64, reg(c, box(c, v).reg), MIR_T_I64, integer(c, c->program->library_active), true);
         check_error(c, result); return boxed(c, result, K_STRING);
     }
@@ -2031,7 +2138,8 @@ static LmdValue to_string(LmdCompiler* c, LmdValue v) {
     move(c, result, reg(c, v.reg));
     if (k & K_STRING) branch(c, MIR_BEQ, done, reg(c, tag(c, v)), integer(c, LMD_TYPE_STRING));
     // keep dynamic coercion out of numeric loops while preserving each unit's object boundary.
-    MIR_reg_t converted = em_call_2(&c->em, "mvp_lmd_primitive_to_string", MIR_T_I64,
+    MIR_reg_t converted = em_call_2(&c->em, c->program->coercion_callbacks ?
+        "mvp_lmd_primitive_to_string" : "mvp_lmd_primitive_to_string_fixed", MIR_T_I64,
         MIR_T_I64, reg(c, v.reg), MIR_T_I64, integer(c, c->program->library_active), true);
     check_error(c, converted); move(c, result, reg(c, converted));
     put_label(c, done); return boxed(c, result, K_STRING);
@@ -2187,7 +2295,8 @@ static LmdValue binary_value(LmdCompiler* c, Operator operation, LmdValue left, 
             MIR_label_t ready = label(c);
             // all admitted objects use Lambda's direct-pointer lane; tagged primitives have no hooks.
             em_guard_container(&c->em, original, LMD_TYPE_RAW_POINTER, ready);
-            MIR_reg_t converted = em_call_3(&c->em, "mvp_lmd_to_primitive", MIR_T_I64,
+            MIR_reg_t converted = em_call_3(&c->em, c->program->coercion_callbacks ?
+                "mvp_lmd_to_primitive" : "mvp_lmd_to_primitive_fixed", MIR_T_I64,
                 MIR_T_I64, reg(c, original), MIR_T_I64, integer(c, operation == OPERATOR_ADD ? 0 : 1),
                 MIR_T_I64, integer(c, 1), true);
             check_error(c, converted); move(c, value, reg(c, converted)); put_label(c, ready);
@@ -2383,7 +2492,8 @@ static MIR_reg_t binding_item(LmdCompiler* c, LmdBinding* b) {
         b->slot * sizeof(Item), MIR_T_I64, "program_value") : b->reg;
 }
 static void check_tdz(LmdCompiler* c, LmdBinding* b, MIR_reg_t value, AstNode* site) {
-    if ((b->entry->is_lexical && !b->entry->is_function_name_binding && !b->dominated) ||
+    // a receiver cell has no lexical binding; its constructor state supplies the admission proof.
+    if (!b || (b->entry->is_lexical && !b->entry->is_function_name_binding && !b->dominated) ||
             (b->entry->is_parameter && b->owner->complex_params)) {
         MIR_label_t ok = label(c);
         branch(c, MIR_BNE, ok, reg(c, value), integer(c, ITEM_JS_TDZ));
@@ -2461,6 +2571,10 @@ static LmdValue read_binding(LmdCompiler* c, LmdBinding* b, AstNode* site, bool 
     if (known && !(b->kinds & K_NUMBER)) return boxed(c, copy, b->kinds);
     LmdValue result = borrow_scalar ? boxed(c, copy) : stable_item(c, copy);
     if (known) result.kind = b->kinds | K_BOXED;
+    else if (!(b->kinds & ~(K_NUMBER | K_BOOL | K_STRING | K_NULL | K_UNDEFINED))) {
+        // captured scalar writes retain their domain; hoisted var reads still include undefined.
+        result.kind = b->kinds | K_BOXED | (b->entry->is_lexical ? 0 : K_UNDEFINED);
+    }
     return result;
 }
 static void write_binding(LmdCompiler* c, LmdBinding* b, LmdValue v, AstNode* site, bool initialize = false) {
@@ -2767,12 +2881,31 @@ static MIR_reg_t property_access(LmdCompiler* c, int operation, MIR_reg_t owner,
         MIR_reg_t name = 0, MIR_reg_t value = 0, String* spelling = NULL, bool numeric = false,
         const LmdValue* native_value = NULL, MvpLmdPropertyCache* shared_cache = NULL, bool plain = false,
         bool nullable_value = true) {
+    if (plain && (operation == LMD_PROP_CREATE_DATA || (!c->program->receiver_abi &&
+            (operation == LMD_PROP_SET || operation == LMD_PROP_DELETE)))) {
+        // literal CreateDataProperty targets are fresh and unexposed, with default own descriptors.
+        // Lambda owns their shape transitions and scalar homes, even in reflective units.
+        // closed units without Symbol exposure produce only canonical ordinary string keys.
+        bool text_key = !c->program->symbols;
+        MIR_reg_t key = payload(c, name);
+        MIR_reg_t stored = operation != LMD_PROP_DELETE
+            ? em_call_3(&c->em, text_key ? "map_shape_set_text" : "map_shape_set", MIR_T_I64, MIR_T_P, reg(c, owner),
+                MIR_T_P, reg(c, key), MIR_T_I64, reg(c, value), true)
+            : em_call_2(&c->em, text_key ? "map_shape_delete_text" : "map_shape_delete", MIR_T_I64,
+                MIR_T_P, reg(c, owner), MIR_T_P, reg(c, key), true);
+        // C bool returns use only the low byte, as in the shared field-store path.
+        MIR_label_t done = label(c);
+        branch_truth(c, done, op(c, MIR_AND, reg(c, stored), integer(c, UINT8_MAX)));
+        fail(c, LMD_MVP_MEMORY, NULL); put_label(c, done);
+        return operation == LMD_PROP_DELETE ? constant(c, ITEM_TRUE) : value;
+    }
     if (c->program->receiver_abi) {
         LmdFunction* active = c->inlining ? c->inlining->function : c->function;
-        bool initializing = operation == LMD_PROP_SET && active->home &&
+        bool initializing = !c->program->property_callbacks && operation == LMD_PROP_SET && active->home &&
             active->id == active->home->constructor_id;
         MvpLmdPropertyCache* cache = shared_cache ? shared_cache : spelling && operation <= LMD_PROP_SET
             ? (MvpLmdPropertyCache*)pool_calloc(c->program->frontend->pool, sizeof(MvpLmdPropertyCache)) : NULL;
+        // existing own-slot guards remain valid in mutable units; misses use semantic Set.
         MIR_reg_t joined = 0;
         MIR_label_t done = NULL;
         if (cache) {
@@ -2886,7 +3019,8 @@ static MIR_reg_t property_access(LmdCompiler* c, int operation, MIR_reg_t owner,
             put_label(c, miss);
         }
         if (native_value) value = box(c, *native_value).reg;
-        MIR_reg_t result = em_call_5(&c->em, "mvp_lmd_class_property", MIR_T_I64,
+        MIR_reg_t result = em_call_5(&c->em, c->program->property_callbacks ?
+            "mvp_lmd_class_property" : "mvp_lmd_class_property_fixed", MIR_T_I64,
             MIR_T_I64, reg(c, owner), MIR_T_I64, name ? reg(c, name) : integer(c, ITEM_JS_UNDEFINED),
             MIR_T_I64, value ? reg(c, value) : integer(c, ITEM_JS_UNDEFINED),
             MIR_T_I64, integer(c, initializing ? LMD_PROP_INITIALIZE : operation |
@@ -2896,30 +3030,19 @@ static MIR_reg_t property_access(LmdCompiler* c, int operation, MIR_reg_t owner,
         if (!done) return result;
         move(c, joined, reg(c, result), numeric); put_label(c, done); return joined;
     }
-    if (plain && (operation == LMD_PROP_SET || operation == LMD_PROP_DELETE)) {
-        // proven ordinary objects need no second family check; Lambda still owns shape mutation and GC.
-        // closed units without Symbol exposure produce only canonical ordinary string keys.
-        bool text_key = !c->program->symbols;
-        MIR_reg_t key = payload(c, name);
-        MIR_reg_t stored = operation == LMD_PROP_SET
-            ? em_call_3(&c->em, text_key ? "map_shape_set_text" : "map_shape_set", MIR_T_I64, MIR_T_P, reg(c, owner),
-                MIR_T_P, reg(c, key), MIR_T_I64, reg(c, value), true)
-            : em_call_2(&c->em, text_key ? "map_shape_delete_text" : "map_shape_delete", MIR_T_I64,
-                MIR_T_P, reg(c, owner), MIR_T_P, reg(c, key), true);
-        // C bool returns use only the low byte, as in the shared field-store path above.
-        MIR_label_t done = label(c);
-        branch_truth(c, done, op(c, MIR_AND, reg(c, stored), integer(c, UINT8_MAX)));
-        fail(c, LMD_MVP_MEMORY, NULL); put_label(c, done);
-        return operation == LMD_PROP_SET ? value : constant(c, ITEM_TRUE);
-    }
     if (operation >= LMD_PROP_KEYS)
-        return em_call_2(&c->em, "mvp_lmd_object_project", MIR_T_I64,
+        return em_call_2(&c->em, c->program->property_callbacks ?
+            "mvp_lmd_object_project" : "mvp_lmd_object_project_fixed", MIR_T_I64,
             MIR_T_I64, reg(c, owner), MIR_T_I64, integer(c, operation - LMD_PROP_KEYS), true);
     if (operation == LMD_PROP_DELETE)
         return em_call_2(&c->em, "mvp_lmd_property_delete", MIR_T_I64,
             MIR_T_I64, reg(c, owner), MIR_T_I64, reg(c, name), true);
     const char* helper = operation == LMD_PROP_SET ? "mvp_lmd_property_set" :
         operation >= LMD_PROP_OWN ? "mvp_lmd_property_has" : "mvp_lmd_property_get";
+    if (!c->program->property_callbacks) {
+        if (operation == LMD_PROP_SET) helper = "mvp_lmd_property_set_fixed";
+        else if (operation < LMD_PROP_OWN) helper = "mvp_lmd_property_get_fixed";
+    }
     return em_call_3(&c->em, helper, MIR_T_I64, MIR_T_I64, reg(c, owner), MIR_T_I64, reg(c, name),
         MIR_T_I64, operation == LMD_PROP_SET ? reg(c, value) :
             integer(c, operation == LMD_PROP_CALLEE || operation == LMD_PROP_HAS), true);
@@ -2936,7 +3059,8 @@ static LmdValue canonical_key(LmdCompiler* c, LmdValue value, bool preserve_numb
         branch(c, MIR_BEQ, done, reg(c, tag(c, value)), integer(c, LMD_TYPE_FLOAT));
     }
     LmdValue string = c->program->symbols ? box(c, value) : to_string(c, value);
-    MIR_reg_t key = em_call_1(&c->em, "mvp_lmd_property_key", MIR_T_I64, MIR_T_I64, reg(c, string.reg), true);
+    MIR_reg_t key = em_call_1(&c->em, c->program->coercion_callbacks ?
+        "mvp_lmd_property_key" : "mvp_lmd_property_key_fixed", MIR_T_I64, MIR_T_I64, reg(c, string.reg), true);
     check_error(c, key);
     if (!done) return boxed(c, key, K_STRING);
     move(c, result, reg(c, key)); put_label(c, done);
@@ -2956,12 +3080,28 @@ static LmdReference reference(LmdCompiler* c, AstNode* n, bool capture_name = fa
     }
     bool continues = field->source_span.start_byte == field->object->source_span.start_byte;
     LmdValue owner = box(c, expression(c, field->object, false, false, continues));
+    bool guarded_dense = false;
+    if (field->object->node_type == AST_NODE_IDENT) {
+        LmdBinding* binding = identifier_binding(c->program, (AstIdentNode*)field->object);
+        for (int i = 0; i < c->dense_array_count; i++)
+            if (c->dense_arrays[i] == binding) guarded_dense = true;
+    }
+    if (guarded_dense) owner.kind = K_BOXED | K_ARRAY;
     if (field->optional) {
         branch(c, MIR_BEQ, c->optional_exit, reg(c, owner.reg), integer(c, ITEM_NULL));
         branch(c, MIR_BEQ, c->optional_exit, reg(c, owner.reg), integer(c, ITEM_JS_UNDEFINED));
     }
-    LmdValue key = field->computed ? expression(c, field->property)
-        : boxed(c, constant(c, s2it(((AstIdentNode*)field->property)->name)), K_STRING);
+    // lexical property names are canonical pooled names; only computed keys need runtime conversion.
+    LmdValue key = field->computed ? expression(c, field->property) : boxed(c, constant(c, s2it(
+        name_pool_create_string(c->program->frontend->name_pool, ((AstIdentNode*)field->property)->name))), K_STRING);
+    if (field->object->node_type == AST_NODE_IDENT && named(((AstIdentNode*)field->object)->name, "super")) {
+        LmdReference ref = {NULL, owner};
+        ref.name = field->computed ? canonical_key(c, key).reg : key.reg;
+        ref.receiver = c->receiver_cell ? em_load_at(&c->em,
+            em_array_element_address(&c->em, c->receiver_cell, constant(c, 0), 8), 0, MIR_T_I64, "super_receiver") : c->receiver;
+        root_value(c, ref.receiver, JIT_VALUE_BOXED_ITEM);
+        return ref;
+    }
     LmdValue name = {};
     bool typed = semantic(owner) == K_TYPED_ARRAY;
     bool known = !field->computed || field->property->node_type == AST_NODE_LITERAL;
@@ -2977,6 +3117,10 @@ static LmdReference reference(LmdCompiler* c, AstNode* n, bool capture_name = fa
         }
     }
     if (typed || semantic(owner) == K_ARRAY || semantic(owner) == K_STRING) {
+        if (field->computed && semantic(owner) == K_ARRAY && c->program->property_callbacks) {
+            // coerce effectful keys once; numeric indices need a spelling only on a named miss.
+            key = canonical_key(c, key, true);
+        }
         // optional numeric lanes already carry presence and range proofs; preserve their native index path.
         if (!known && !capture_name && !key.number_present && semantic(key) != K_NUMBER && (semantic(key) & K_NUMBER))
             key = canonical_key(c, key, true);
@@ -2996,6 +3140,9 @@ static LmdReference reference(LmdCompiler* c, AstNode* n, bool capture_name = fa
         ref.elements = facts.elements;
         ref.numeric_key = semantic(key) == K_NUMBER || key.number_present;
         ref.key_present = key.number_present;
+        LmdBinding* array_binding = field->object->node_type == AST_NODE_IDENT ?
+            identifier_binding(c->program, (AstIdentNode*)field->object) : NULL;
+        ref.dense_storage = guarded_dense || (array_binding && array_binding->dense_array_storage);
         // a present integer element retains its range even when the producer can be absent.
         LmdRange bounds = known ? finite_range(index, index) : range(c->program, field->property, true);
         if (!known && key.integer && key.range.state == 1) {
@@ -3007,8 +3154,13 @@ static LmdReference reference(LmdCompiler* c, AstNode* n, bool capture_name = fa
             }
         }
         ref.in_bounds = !key.number_present && !(facts.lanes & LMD_ARRAY_UNKNOWN) && bounds.state == 1 && facts.length.state == 1 && bounds.lower >= 0 && bounds.upper < facts.length.lower;
+        if (guarded_dense && field->computed) {
+            // invalid numeric indices join the bounds replay, before any named-property lookup.
+            ref.numeric_key = true;
+            return ref;
+        }
         // numeric nonindices are absent when the unit cannot write named array properties.
-        bool index_only = ref.numeric_key && (!c->program->array_named_properties ||
+        bool index_only = ref.numeric_key && ((!c->program->property_callbacks && !c->program->array_named_properties) ||
             (!key.number_present && bounds.state == 1 && bounds.lower >= 0 && bounds.upper < UINT32_MAX));
         bool fixed_method = ref.spelling && mvp_lmd_builtin_method(ref.spelling,
             semantic(owner) == K_STRING ? LMD_TYPE_STRING : LMD_TYPE_ARRAY);
@@ -3018,7 +3170,7 @@ static LmdReference reference(LmdCompiler* c, AstNode* n, bool capture_name = fa
             ref.name = to_string(c, key).reg;
         } else if (capture_name || ((semantic(owner) == K_ARRAY || c->program->iterators) && !index_only && (!known || index < -1))) {
             if (!capture_name && (semantic(key) & K_NUMBER)) ref.deferred_name = key;
-            else ref.name = canonical_key(c, key).reg;
+            else ref.name = field->computed ? canonical_key(c, key).reg : key.reg;
         }
         return ref;
     }
@@ -3032,8 +3184,7 @@ static LmdReference reference(LmdCompiler* c, AstNode* n, bool capture_name = fa
         return ref;
     }
     if (!field->computed) {
-        String* s = name_pool_create_string(c->program->frontend->name_pool, ((AstIdentNode*)field->property)->name);
-        name = boxed(c, constant(c, s2it(s)), K_STRING);
+        name = key;
     } else name = canonical_key(c, key);
     MIR_reg_t slot = known ? constant(c, (uint64_t)index) : property_key(c, name);
     LmdObjectPlan* plan = known ? value_plan(c, field->object) : NULL;
@@ -3063,12 +3214,25 @@ static void property_failure(LmdCompiler* c, LmdValue owner, AstNode* site) {
     fail(c, LMD_MVP_CAPABILITY, site); put_label(c, type);
     fail(c, LMD_MVP_TYPE, site);
 }
+static void branch_sparse_array(LmdCompiler* c, MIR_label_t fallback, MIR_reg_t owner) {
+    if (c->program->excludes_sparse_arrays) return;
+    static_assert(JS_ELEMENTS_SPARSE_TAGGED == 0x80 && JS_ELEMENTS_HOLEY_TAGGED < 0x80 &&
+        JS_ELEMENTS_PACKED_TAGGED < 0x80 && JS_ELEMENTS_PACKED_NUMERIC < 0x80 && JS_ELEMENTS_NONE < 0x80,
+        "the sparse guard uses the existing element-kind sign bit");
+    MIR_reg_t kind = em_load_at(&c->em, owner, offsetof(Container, array_flags), MIR_T_I8, "elements_kind");
+    // dense states and layout bits are nonnegative; sparse or future high states use fallback.
+    branch(c, MIR_BLT, fallback, reg(c, kind), integer(c, 0));
+}
 static LmdValue array_read(LmdCompiler* c, LmdReference ref, bool borrow_scalar = false,
         bool numeric = false, bool dense = false) {
+    MIR_label_t replay = ref.dense_storage && c->dense_loop ? c->dense_loop->bail : NULL;
+    bool callbacks = c->program->property_callbacks && !dense && !replay;
     MIR_reg_t size = em_load_at(&c->em, ref.owner.reg, LAMBDA_GC_OFF_LIST_LENGTH, MIR_T_I64, "array_length");
     if (ref.key_known && ref.index == -1) {
         return {size, K_NUMBER, false, 0, true, finite_range(0, UINT32_MAX)};
     }
+    // callbacks can replace numeric contents or change length; retain only the current physical proof.
+    if (callbacks || replay) { ref.lanes = LMD_ARRAY_UNKNOWN; ref.in_bounds = false; }
     // numeric consumers can merge absence as NaN at the load, without a second conversion branch.
     bool integral = ref.lanes == LMD_ARRAY_ITEMS && ref.elements.state == 1 && (!numeric || ref.in_bounds);
     bool optional = ref.lanes == LMD_ARRAY_ITEMS && (!numeric || integral) && !ref.in_bounds;
@@ -3079,15 +3243,19 @@ static LmdValue array_read(LmdCompiler* c, LmdReference ref, bool borrow_scalar 
     MIR_reg_t result = em_new_reg(&c->em, "element", floating ? MIR_T_D : MIR_T_I64);
     if (length) branch(c, MIR_BEQ, length, reg(c, ref.key), MIR_new_int_op(c->em.ctx, -1));
     move(c, result, floating ? MIR_new_double_op(c->em.ctx, NAN) : integer(c, integral ? 0 : ITEM_JS_UNDEFINED), floating);
-    if (!ref.in_bounds) branch(c, MIR_UBGE, done, reg(c, ref.key), reg(c, size));
+    // sparse storage requires holes; closed hole-free units and numeric literals exclude it.
+    MIR_label_t sparse = callbacks ? label(c) : dense || ref.dense_storage || c->program->excludes_sparse_arrays ||
+        !c->program->array_holes || ref.lanes == LMD_ARRAY_ITEMS ? NULL : label(c);
+    if (sparse) branch_sparse_array(c, sparse, ref.owner.reg);
+    if (!ref.in_bounds) branch(c, MIR_UBGE, replay ? replay : callbacks ? sparse : done, reg(c, ref.key), reg(c, size));
     MIR_reg_t element = em_load_at(&c->em,
         em_array_element_address(&c->em, ref.owner.reg, ref.key, 8), 0, MIR_T_I64, "element");
     // specialize proven arrays in hole-free units; retain the generic property fallback's CFG.
-    if (!numeric && !dense && (c->program->array_holes || semantic(ref.owner) != K_ARRAY))
-        branch(c, MIR_BEQ, done, reg(c, element), integer(c, ITEM_JS_DELETED_SENTINEL));
-    move(c, result, reg(c, integral ? em_unbox_finite_int_item(&c->em, element) :
+    if (!numeric && !dense && (replay || callbacks || c->program->array_holes || semantic(ref.owner) != K_ARRAY))
+        branch(c, MIR_BEQ, replay ? replay : callbacks ? sparse : done, reg(c, element), integer(c, ITEM_JS_DELETED_SENTINEL));
+    move(c, result, reg(c, integral ? em_unbox_finite_int_item(&c->em, element, 0, ref.elements.lower >= 0) :
         numeric ? to_number(c, boxed(c, element, K_NUMBER)) :
-        borrow_scalar ? element : stable_item(c, element).reg), floating);
+        element), floating);
     if (present) move(c, present, integer(c, 1));
     if (length) {
         jump(c, done); put_label(c, length);
@@ -3096,9 +3264,23 @@ static LmdValue array_read(LmdCompiler* c, LmdReference ref, bool borrow_scalar 
         move(c, result, reg(c, integral ? value.reg : numeric ? to_number(c, value) : box(c, value).reg), floating);
         if (present) move(c, present, integer(c, 1));
     }
+    if (sparse) {
+        jump(c, done); put_label(c, sparse);
+        // indexed descriptors clear physical slots, so only misses need semantic lookup.
+        MIR_reg_t observed = callbacks ? em_call_4(&c->em, "mvp_lmd_array_index_property", MIR_T_I64,
+            MIR_T_I64, reg(c, ref.owner.reg), MIR_T_I64, reg(c, ref.key),
+            MIR_T_I64, integer(c, ITEM_JS_UNDEFINED), MIR_T_I64, integer(c, LMD_PROP_GET), true) :
+            em_call_2(&c->em, "mvp_lmd_array_own_item", MIR_T_I64,
+                MIR_T_P, reg(c, ref.owner.reg), MIR_T_I64, reg(c, ref.key), true);
+        if (callbacks) check_error(c, observed);
+        branch(c, MIR_BEQ, done, reg(c, observed), integer(c, ITEM_JS_DELETED_SENTINEL));
+        move(c, result, reg(c, observed));
+    }
     put_label(c, done); return numeric ? LmdValue{result, present ? K_NUMBER | K_UNDEFINED : K_NUMBER,
         false, 0, integral, length ? LmdRange{} : ref.elements, present} :
-        boxed(c, result, ref.lanes == LMD_ARRAY_ITEMS ? K_NUMBER | K_UNDEFINED : K_ANY);
+        // mutually exclusive storage paths share one destination-owned scalar snapshot.
+        boxed(c, !borrow_scalar || callbacks ? stable_item(c, result).reg : result,
+            ref.lanes == LMD_ARRAY_ITEMS ? K_NUMBER | K_UNDEFINED : K_ANY);
 }
 static Item* literal_characters(MvpLmdProgram* p) {
     if (p->character_items) return p->character_items;
@@ -3288,10 +3470,10 @@ static LmdValue sequence_reference(LmdCompiler* c, LmdReference ref, unsigned ow
         return boxed(c, constant(c, mvp_lmd_method_token(method)));
     if ((owner_kind == K_ARRAY || c->program->iterators) && (ref.name || ref.deferred_name.reg) &&
             !(ref.key_known && ref.index >= -1)) {
-        MIR_label_t indexed = label(c), done = label(c);
+        MIR_label_t indexed = ref.key_known ? NULL : label(c), done = label(c);
         MIR_reg_t result = em_new_reg(&c->em, "array_property", MIR_T_I64);
         if (!ref.key_known) branch(c, MIR_BGE, indexed, reg(c, ref.key), integer(c, -1));
-        if (callee && method && owner_kind == K_ARRAY) {
+        if (callee && method && owner_kind == K_ARRAY && !c->program->property_callbacks) {
             MIR_label_t attributes = label(c);
             branch(c, MIR_BNE, attributes, reg(c, em_load_at(&c->em, ref.owner.reg,
                 LAMBDA_GC_OFF_MAP_TYPE, MIR_T_I64, "array_attributes")), integer(c, 0));
@@ -3299,17 +3481,24 @@ static LmdValue sequence_reference(LmdCompiler* c, LmdReference ref, unsigned ow
             put_label(c, attributes);
         }
         MIR_reg_t value = c->program->library_active ?
-            em_call_4(&c->em, "mvp_lmd_array_method_value", MIR_T_I64, MIR_T_P, reg(c, c->unit),
+            em_call_4(&c->em, c->program->property_callbacks ?
+                "mvp_lmd_array_method_value" : "mvp_lmd_array_method_value_fixed", MIR_T_I64, MIR_T_P, reg(c, c->unit),
                 MIR_T_I64, reg(c, ref.owner.reg), MIR_T_I64, reg(c, reference_name(c, ref)), MIR_T_I64, integer(c, callee), true) :
             property_access(c, callee ? LMD_PROP_CALLEE : LMD_PROP_GET, ref.owner.reg, reference_name(c, ref));
-        check_error(c, value); move(c, result, reg(c, value)); jump(c, done);
-        put_label(c, indexed);
-        move(c, result, reg(c, box(c, owner_kind == K_ARRAY ? array_read(c, ref, borrow_scalar, numeric) : string_read(c, ref)).reg));
-        put_label(c, done); return boxed(c, result);
+        check_error(c, value);
+        move(c, result, reg(c, value)); jump(c, done);
+        // a statically named property has no indexed alternative or its scalar homes.
+        if (indexed) {
+            put_label(c, indexed);
+            move(c, result, reg(c, box(c, owner_kind == K_ARRAY ? array_read(c, ref, true, numeric) : string_read(c, ref)).reg));
+        }
+        // snapshot after the branch joins, before a later operand can mutate the source owner.
+        put_label(c, done); return boxed(c, borrow_scalar || callee ? result : stable_item(c, result).reg);
     }
     if (!callee || (ref.key_known && ref.index >= -1)) {
         // invalid numeric keys fail the unsigned bounds guard and preserve the optional lane.
-        if (!(owner_kind == K_ARRAY && ref.numeric_key && !c->program->array_named_properties))
+        if (!(owner_kind == K_ARRAY && ((ref.dense_storage && c->dense_loop) ||
+                (ref.numeric_key && !c->program->array_named_properties))))
             array_key_check(c, ref, site);
         return owner_kind == K_ARRAY ? array_read(c, ref, borrow_scalar, numeric) : string_read(c, ref);
     }
@@ -3325,6 +3514,13 @@ static LmdValue sequence_reference(LmdCompiler* c, LmdReference ref, unsigned ow
 }
 static LmdValue read_reference(LmdCompiler* c, LmdReference ref, AstNode* site, bool callee = false,
         bool borrow_scalar = false, bool numeric = false) {
+    if (ref.receiver) {
+        MIR_reg_t result = em_call_5(&c->em, "mvp_lmd_property_with_receiver", MIR_T_I64,
+            MIR_T_I64, reg(c, ref.owner.reg), MIR_T_I64, reg(c, ref.name), MIR_T_I64, integer(c, ITEM_JS_UNDEFINED),
+            MIR_T_I64, integer(c, LMD_PROP_GET), MIR_T_I64, reg(c, ref.receiver), true);
+        check_error(c, result); return stable_item(c, result);
+    }
+
     LmdFunction* active = c->inlining ? c->inlining->function : c->function;
     LmdRegionRead* read = numeric_region_read(c->program, active->numeric_region, site);
     if (read && c->inlining && c->inlining->region == read->region)
@@ -3366,9 +3562,10 @@ static LmdValue read_reference(LmdCompiler* c, LmdReference ref, AstNode* site, 
             branch(c, MIR_BEQ, object, reg(c, tid), integer(c, LMD_TYPE_DECIMAL));
         property_failure(c, ref.owner, site);
         put_label(c, array);
-        save(sequence_reference(c, ref, K_ARRAY, site, callee)); jump(c, done);
+        // immediate conversion consumes the borrowed scalar before another operand can mutate it.
+        save(sequence_reference(c, ref, K_ARRAY, site, callee, borrow_scalar || consume, consume)); jump(c, done);
         put_label(c, string);
-        save(sequence_reference(c, ref, K_STRING, site, callee)); jump(c, done);
+        save(sequence_reference(c, ref, K_STRING, site, callee, borrow_scalar || consume, consume)); jump(c, done);
         put_label(c, typed);
         save(typed_array_reference(c, ref, site, NULL, callee)); jump(c, done);
     }
@@ -3406,45 +3603,92 @@ static LmdValue read_reference(LmdCompiler* c, LmdReference ref, AstNode* site, 
         save(field_read(c, candidate)); jump(c, done);
         put_label(c, miss);
     }
+    MIR_reg_t name = reference_name(c, ref), own_value = 0;
+    MIR_label_t own_done = NULL;
+    if (!callee && k == K_OBJECT && !c->program->receiver_abi && !c->program->property_callbacks) {
+        // a closed ordinary-map unit needs no repeated carrier admission for a present own field.
+        MIR_label_t missing = label(c); own_done = label(c);
+        own_value = em_new_reg(&c->em, "own_property", MIR_T_I64);
+        MIR_reg_t shape = em_load_at(&c->em, ref.owner.reg, LAMBDA_GC_OFF_MAP_TYPE, MIR_T_I64, "own_shape");
+        MIR_reg_t field = em_call_2(&c->em, "typemap_hash_lookup_key", MIR_T_P,
+            MIR_T_P, reg(c, shape), MIR_T_P, reg(c, payload(c, name)), true);
+        branch_truth(c, missing, field, false);
+        MIR_reg_t data = em_load_at(&c->em, ref.owner.reg, LAMBDA_GC_OFF_MAP_DATA, MIR_T_I64, "own_data");
+        MIR_reg_t item = em_call_2(&c->em, "map_shape_field_to_item", MIR_T_I64,
+            MIR_T_P, reg(c, data), MIR_T_P, reg(c, field), true);
+        move(c, own_value, reg(c, item)); jump(c, own_done); put_label(c, missing);
+    }
     MIR_reg_t value = property_access(c, callee ? LMD_PROP_CALLEE : LMD_PROP_GET,
-        ref.owner.reg, reference_name(c, ref), 0, ref.spelling, consume, NULL, read ? &read->cache : NULL);
+        ref.owner.reg, name, 0, ref.spelling, consume, NULL, read ? &read->cache : NULL);
+    if (own_done) { move(c, own_value, reg(c, value)); put_label(c, own_done); value = own_value; }
     if (consume) { move(c, result, reg(c, value), true); put_label(c, done); return {result, K_NUMBER}; }
     unsigned result_kind = !callee && site && (site->node_type == AST_NODE_MEMBER_EXPR || site->node_type == AST_NODE_INDEX_EXPR)
         ? kind(c->program, site, c->inlining) : K_ANY;
     check_error(c, value); move(c, result, reg(c, (result_kind & K_NUMBER) ? stable_item(c, value).reg : value));
     put_label(c, done); return boxed(c, result, result_kind);
 }
-static void array_index_write(LmdCompiler* c, LmdReference ref, LmdValue value) {
+static void array_index_write(LmdCompiler* c, LmdReference ref, LmdValue value,
+        bool initialize = false, int64_t reserved_slots = 0) {
+    bool guarded_write = !initialize && ref.dense_storage && c->dense_loop && c->dense_loop->element_writes;
+    bool callbacks = c->program->property_callbacks && !initialize && !guarded_write;
+    // a fresh literal reserves two slots per item, including a possible scalar home.
+    bool reserved = initialize && ref.key_known && ref.index >= 0 && ref.index < reserved_slots;
+    bool scalar_home = !value.integer && (semantic(value) & K_NUMBER);
     LmdValue item = box(c, value);
-    MIR_reg_t size = em_load_at(&c->em, ref.owner.reg, LAMBDA_GC_OFF_LIST_LENGTH, MIR_T_I64, "length");
+    MIR_reg_t size = reserved ? 0 : em_load_at(&c->em, ref.owner.reg, LAMBDA_GC_OFF_LIST_LENGTH, MIR_T_I64, "length");
     MIR_label_t done = label(c), slow = label(c), store = label(c);
-    branch(c, MIR_UBGT, slow, reg(c, ref.key), reg(c, size));
+    // the entry proof excludes indexed hooks; bounds must fail before the iteration's sole store.
+    if (guarded_write) branch(c, MIR_UBGE, c->dense_loop->bail, reg(c, ref.key), reg(c, size));
+    if (!initialize && !ref.dense_storage && (callbacks || (c->program->array_holes && ref.lanes != LMD_ARRAY_ITEMS)))
+        branch_sparse_array(c, slow, ref.owner.reg);
+    if (!reserved && callbacks) branch(c, MIR_UBGE, slow, reg(c, ref.key), reg(c, size));
+    if (callbacks) {
+        MIR_reg_t current = em_load_at(&c->em, em_array_element_address(&c->em, ref.owner.reg, ref.key, 8), 0, MIR_T_I64, "own_element");
+        branch(c, MIR_BEQ, slow, reg(c, current), integer(c, ITEM_JS_DELETED_SENTINEL));
+    }
     // only out-of-band Numbers require an owned scalar home; zero sentinels store verbatim.
-    if (!value.integer && (semantic(value) & K_NUMBER)) {
+    if (scalar_home) {
         MIR_reg_t wide_tag = op(c, MIR_URSH, reg(c, item.reg), integer(c, 56));
         MIR_label_t immediate = label(c);
         branch(c, MIR_BNE, immediate, reg(c, wide_tag), integer(c, LMD_TYPE_FLOAT));
         branch(c, MIR_UBGT, slow, reg(c, item.reg), integer(c, ITEM_FLOAT_N0)); put_label(c, immediate);
     }
-    branch(c, MIR_UBLT, store, reg(c, ref.key), reg(c, size));
-    MIR_reg_t capacity = em_load_at(&c->em, ref.owner.reg, LAMBDA_GC_OFF_LIST_CAPACITY, MIR_T_I64, "capacity");
-    MIR_reg_t extra = em_load_at(&c->em, ref.owner.reg, LAMBDA_GC_OFF_LIST_EXTRA, MIR_T_I64, "tail_homes");
-    branch(c, MIR_UBGE, slow, reg(c, size), reg(c, op(c, MIR_SUB, reg(c, capacity), reg(c, extra))));
+    if (!reserved) {
+        branch(c, MIR_UBLT, store, reg(c, ref.key), reg(c, size));
+        branch(c, MIR_BNE, slow, reg(c, ref.key), reg(c, size));
+        MIR_reg_t capacity = em_load_at(&c->em, ref.owner.reg, LAMBDA_GC_OFF_LIST_CAPACITY, MIR_T_I64, "capacity");
+        MIR_reg_t extra = em_load_at(&c->em, ref.owner.reg, LAMBDA_GC_OFF_LIST_EXTRA, MIR_T_I64, "tail_homes");
+        branch(c, MIR_UBGE, slow, reg(c, size), reg(c, op(c, MIR_SUB, reg(c, capacity), reg(c, extra))));
+        // only append changes length; no safepoint occurs before the owned slot is installed.
+        em_store_at(&c->em, ref.owner.reg, LAMBDA_GC_OFF_LIST_LENGTH, MIR_T_I64,
+            op(c, MIR_ADD, reg(c, size), integer(c, 1)));
+    }
     put_label(c, store);
     em_store_at(&c->em, em_array_element_address(&c->em, ref.owner.reg, ref.key, 8), 0, MIR_T_I64, item.reg);
-    branch(c, MIR_UBLT, done, reg(c, ref.key), reg(c, size));
-    em_store_at(&c->em, ref.owner.reg, LAMBDA_GC_OFF_LIST_LENGTH, MIR_T_I64,
-        op(c, MIR_ADD, reg(c, size), integer(c, 1))); jump(c, done);
+    if (reserved) em_store_at(&c->em, ref.owner.reg, LAMBDA_GC_OFF_LIST_LENGTH, MIR_T_I64,
+        constant(c, ref.index + 1));
+    if (reserved && !scalar_home) return;
+    jump(c, done);
     put_label(c, slow);
-    MIR_reg_t stored = em_call_3(&c->em, "mvp_lmd_array_store", MIR_T_I64, MIR_T_I64,
-        reg(c, ref.owner.reg), MIR_T_I64, reg(c, ref.key), MIR_T_I64, reg(c, item.reg), true);
+    MIR_reg_t stored = callbacks ? em_call_4(&c->em, "mvp_lmd_array_index_property", MIR_T_I64,
+        MIR_T_I64, reg(c, ref.owner.reg), MIR_T_I64, reg(c, ref.key), MIR_T_I64, reg(c, item.reg),
+        MIR_T_I64, integer(c, LMD_PROP_SET | (c->strict ? LMD_PROP_STRICT : 0)), true) :
+        em_call_3(&c->em, "mvp_lmd_array_store", MIR_T_I64, MIR_T_I64,
+            reg(c, ref.owner.reg), MIR_T_I64, reg(c, ref.key), MIR_T_I64, reg(c, item.reg), true);
     check_error(c, stored); put_label(c, done);
 }
 static void array_length_write(LmdCompiler* c, LmdReference ref, LmdValue value, AstNode* site) {
+    if (c->program->property_callbacks) {
+        MIR_reg_t result = em_call_4(&c->em, "mvp_lmd_array_index_property", MIR_T_I64,
+            MIR_T_I64, reg(c, ref.owner.reg), MIR_T_I64, integer(c, -1),
+            MIR_T_I64, reg(c, box(c, value).reg), MIR_T_I64, integer(c, LMD_PROP_SET | (c->strict ? LMD_PROP_STRICT : 0)), true);
+        check_error(c, result); return;
+    }
     MIR_reg_t d = to_number(c, value);
     MIR_label_t range_error = label(c), capability = label(c), done = label(c);
     MIR_reg_t i = integer_lane(c, d, 0, UINT32_MAX, range_error, true);
     MIR_reg_t size = em_load_at(&c->em, ref.owner.reg, LAMBDA_GC_OFF_LIST_LENGTH, MIR_T_I64, "old_length");
+    branch_sparse_array(c, capability, ref.owner.reg);
     branch(c, MIR_UBGT, capability, reg(c, i), reg(c, size));
     em_store_at(&c->em, ref.owner.reg, LAMBDA_GC_OFF_LIST_LENGTH, MIR_T_I64, i); jump(c, done);
     put_label(c, range_error); fail(c, LMD_MVP_RANGE, site);
@@ -3454,6 +3698,13 @@ static void array_length_write(LmdCompiler* c, LmdReference ref, LmdValue value,
     check_error(c, resized); put_label(c, done);
 }
 static void write_reference(LmdCompiler* c, LmdReference ref, LmdValue value, AstNode* site) {
+    if (ref.receiver) {
+        MIR_reg_t result = em_call_5(&c->em, "mvp_lmd_property_with_receiver", MIR_T_I64,
+            MIR_T_I64, reg(c, ref.owner.reg), MIR_T_I64, reg(c, ref.name), MIR_T_I64, reg(c, box(c, value).reg),
+            MIR_T_I64, integer(c, LMD_PROP_SET | (c->strict ? LMD_PROP_STRICT : 0)), MIR_T_I64, reg(c, ref.receiver), true);
+        check_error(c, result); return;
+    }
+
     if (!ref.key) { write_binding(c, ref.binding, value, site); return; }
     if (LmdScalarField* field = scalar_reference(ref)) { scalar_field_write(c, field, value); return; }
     MIR_label_t done = label(c), object = label(c);
@@ -3479,7 +3730,7 @@ static void write_reference(LmdCompiler* c, LmdReference ref, LmdValue value, As
     if (ref.name || ref.deferred_name.reg) {
         if (ref.key_known && ref.index < -1) jump(c, object);
         else if (!ref.key_known) branch(c, MIR_BLT, object, reg(c, ref.key), integer(c, -1));
-    } else array_key_check(c, ref, site);
+    } else if (!(ref.dense_storage && c->dense_loop && c->dense_loop->element_writes)) array_key_check(c, ref, site);
     // numeric keys cannot spell length; nonindices have already branched to named storage.
     if (ref.key_known || ref.numeric_key) {
         if (ref.key_known && ref.index == -1) array_length_write(c, ref, value, site);
@@ -3544,7 +3795,9 @@ static LmdValue new_function(LmdCompiler* c, LmdFunction* f) {
     MIR_reg_t value = em_call_2(&c->em, "mvp_lmd_function_new", MIR_T_I64,
         MIR_T_I64, integer(c, f->id), MIR_T_P, reg(c, c->unit), true);
     check_error(c, value); LmdValue result = boxed(c, value, K_FUNCTION);
-    int count = (f->captures ? f->captures->length : 0) + f->lexical_receiver;
+    int captures = (f->captures ? f->captures->length : 0) + f->lexical_receiver;
+    int count = captures + (f->object_home || f->lexical_super);
+    if (count > UINT8_MAX) { diagnostic(c->program, (AstNode*)f->ast, "closure capture limit"); return result; }
     if (count) {
         MIR_reg_t env = em_call_1(&c->em, "heap_calloc_closure_env", MIR_T_P,
             MIR_T_I64, integer(c, count * sizeof(Item)), true);
@@ -3553,11 +3806,15 @@ static LmdValue new_function(LmdCompiler* c, LmdFunction* f) {
         // publish the shared precisely traced environment before any later allocation.
         em_store_at(&c->em, result.reg, offsetof(Function, closure_env), MIR_T_I64, env);
         em_store_at(&c->em, result.reg, offsetof(Function, closure_field_count), MIR_T_U8, constant(c, count));
-        for (int i = 0; i < count; i++) {
+        for (int i = 0; i < captures; i++) {
             MIR_reg_t cell = f->lexical_receiver && i == 0 ? c->receiver_cell :
                 binding_cell(c, (LmdBinding*)f->captures->data[i - f->lexical_receiver]);
             em_call_void_4(&c->em, "owned_item_slot_store", MIR_T_P, reg(c, env),
                 MIR_T_I64, integer(c, count), MIR_T_I64, integer(c, i), MIR_T_I64, reg(c, cell), true);
+        }
+        if (f->lexical_super) {
+            // the enclosing method retains its home object; Lambda traces the ordinary closure edge.
+            em_store_at(&c->em, env, captures * sizeof(Item), MIR_T_I64, c->self);
         }
     }
     return result;
@@ -3605,7 +3862,9 @@ static LmdValue array_fill_call(LmdCompiler* c, LmdValue owner, LmdValue* values
         MIR_label_t loop = label(c), done = label(c);
         put_label(c, loop);
         branch(c, MIR_UBGE, done, reg(c, bounds[0]), reg(c, bounds[1]));
-        array_index_write(c, {NULL, owner, bounds[0]}, value);
+        // the method guard survives primitive bounds conversion and callback-free stores.
+        LmdReference ref = {NULL, owner, bounds[0]}; ref.dense_storage = !c->program->property_callbacks;
+        array_index_write(c, ref, value);
         move(c, bounds[0], reg(c, op(c, MIR_ADD, reg(c, bounds[0]), integer(c, 1)))); jump(c, loop);
         put_label(c, done); return owner;
     }
@@ -3649,28 +3908,36 @@ static LmdValue array_construct(LmdCompiler* c, AstCallNode* n) {
     put_label(c, elements);
     MIR_reg_t empty = em_call_1(&c->em, "mvp_lmd_array_new", MIR_T_I64, MIR_T_I64, integer(c, 0), true);
     check_error(c, empty); LmdValue owner = boxed(c, empty, K_ARRAY);
-    for (int i = 0; i < count; i++) array_index_write(c, {NULL, owner, constant(c, i), true, i}, values[i]);
+    // Array construction creates own data properties even when indexed prototype setters exist.
+    for (int i = 0; i < count; i++) array_index_write(c, {NULL, owner, constant(c, i), true, i}, values[i], true);
     move(c, result, reg(c, owner.reg)); put_label(c, done);
     mem_free(values); return boxed(c, result, K_ARRAY);
 }
 static LmdValue iterable_source(LmdCompiler*, AstNode*, int&, MIR_reg_t&, bool* = NULL);
 static LmdValue array_foreach_call(LmdCompiler* c, LmdValue owner, LmdValue* values, int count, int method);
-static LmdValue sequence_method_call(LmdCompiler* c, LmdValue owner, int method,
+static MIR_reg_t sequence_method_runtime(LmdCompiler* c, LmdValue owner, int method,
+        LmdValue* values, int count) {
+    MIR_reg_t span = 0;
+    if (count) {
+        if (count > c->argument_count) c->argument_count = count;
+        span = em_deferred_root_span_base(&c->em, &c->argument_span, &c->argument_fixup);
+        for (int i = 0; i < count; i++) em_store_at(&c->em, span, i * sizeof(Item), MIR_T_I64, box(c, values[i]).reg);
+    }
+    bool visit = method == LMD_METHOD_FOREACH || method == LMD_METHOD_ARRAY_MAP || method == LMD_METHOD_FILTER ||
+        method == LMD_METHOD_REDUCE || method == LMD_METHOD_SOME;
+    MIR_reg_t result = em_call_4(&c->em, visit ? "mvp_lmd_array_visit" : "mvp_lmd_array_edit", MIR_T_I64,
+        MIR_T_I64, reg(c, owner.reg), MIR_T_P, span ? reg(c, span) : integer(c, 0),
+        MIR_T_I64, integer(c, count), MIR_T_I64, integer(c, method), true);
+    check_error(c, result);
+    for (int i = 0; i < count; i++) em_store_at(&c->em, span, i * sizeof(Item), MIR_T_I64, constant(c, ITEM_JS_UNDEFINED));
+    return result;
+}
+static LmdValue sequence_method_dense(LmdCompiler* c, LmdValue owner, int method,
         LmdValue* values, int count) {
     LmdValue absent = boxed(c, constant(c, ITEM_JS_UNDEFINED), K_UNDEFINED);
     if (method == LMD_METHOD_CONCAT || method == LMD_METHOD_SPLICE || method == LMD_METHOD_UNSHIFT ||
             method == LMD_METHOD_SHIFT || method == LMD_METHOD_TO_REVERSED || method == LMD_METHOD_AT) {
-        MIR_reg_t span = 0;
-        if (count) {
-            if (count > c->argument_count) c->argument_count = count;
-            span = em_deferred_root_span_base(&c->em, &c->argument_span, &c->argument_fixup);
-            for (int i = 0; i < count; i++) em_store_at(&c->em, span, i * sizeof(Item), MIR_T_I64, box(c, values[i]).reg);
-        }
-        MIR_reg_t result = em_call_4(&c->em, "mvp_lmd_array_edit", MIR_T_I64,
-            MIR_T_I64, reg(c, owner.reg), MIR_T_P, span ? reg(c, span) : integer(c, 0),
-            MIR_T_I64, integer(c, count), MIR_T_I64, integer(c, method), true);
-        check_error(c, result);
-        for (int i = 0; i < count; i++) em_store_at(&c->em, span, i * sizeof(Item), MIR_T_I64, absent.reg);
+        MIR_reg_t result = sequence_method_runtime(c, owner, method, values, count);
         return method == LMD_METHOD_SHIFT || method == LMD_METHOD_AT ? stable_item(c, result) :
             boxed(c, result, method == LMD_METHOD_UNSHIFT ? K_NUMBER : K_ARRAY);
     }
@@ -3717,8 +3984,8 @@ static LmdValue sequence_method_call(LmdCompiler* c, LmdValue owner, int method,
             branch(c, MIR_BEQ, supplied, reg(c, tag(c, values[0])), integer(c, LMD_TYPE_UNDEFINED));
             move(c, depth, reg(c, to_number(c, values[0])), true); put_label(c, supplied);
         }
-        MIR_reg_t result = em_call_2(&c->em, "mvp_lmd_array_flatten", MIR_T_I64,
-            MIR_T_I64, reg(c, owner.reg), MIR_T_D, reg(c, depth), true);
+        MIR_reg_t result = em_call_3(&c->em, "mvp_lmd_array_flatten", MIR_T_I64,
+            MIR_T_I64, reg(c, owner.reg), MIR_T_D, reg(c, depth), MIR_T_I64, integer(c, -1), true);
         check_error(c, result); return boxed(c, result, K_ARRAY);
     }
     if (method == LMD_METHOD_TO_FIXED) {
@@ -3859,15 +4126,18 @@ static LmdValue sequence_method_call(LmdCompiler* c, LmdValue owner, int method,
     if (method == LMD_METHOD_INCLUDES || method == LMD_METHOD_ARRAY_INDEX_OF) {
         bool includes = method == LMD_METHOD_INCLUDES;
         MIR_reg_t result = constant(c, includes ? 0 : -1), index = constant(c, 0);
+        MIR_label_t start = label(c), found = label(c), next = label(c), done = label(c);
+        // an empty search returns before even coercing its fromIndex argument.
+        branch_truth(c, done, size, false);
         if (count > 1) {
             MIR_reg_t bounds[2]; sequence_bounds(c, size, values + 1, 1, bounds); index = bounds[0];
         }
         LmdValue sought = count ? values[0] : absent;
-        MIR_label_t start = label(c), found = label(c), next = label(c), done = label(c);
         put_label(c, start); branch(c, MIR_UBGE, done, reg(c, index), reg(c, size));
         if (!includes) branch(c, MIR_BEQ, next, reg(c, em_load_at(&c->em,
             em_array_element_address(&c->em, owner.reg, index, 8), 0, MIR_T_I64, "search_element")), integer(c, ITEM_JS_DELETED_SENTINEL));
-        LmdValue current = array_read(c, {NULL, owner, index});
+        LmdReference ref = {NULL, owner, index}; ref.dense_storage = !c->program->property_callbacks;
+        LmdValue current = array_read(c, ref);
         branch_truth(c, found, truth(c, binary_value(c, OPERATOR_JS_STRICT_EQ, current, sought)));
         // SameValueZero differs from strict equality only for NaN.
         if (includes) {
@@ -3885,8 +4155,11 @@ static LmdValue sequence_method_call(LmdCompiler* c, LmdValue owner, int method,
         MIR_label_t valid = label(c);
         branch(c, MIR_UBLE, valid, reg(c, size), integer(c, UINT32_MAX - (uint64_t)count));
         fail(c, LMD_MVP_RANGE, NULL); put_label(c, valid);
-        for (int i = 0; i < count; i++) array_index_write(c,
-            {NULL, owner, op(c, MIR_ADD, reg(c, size), integer(c, i))}, values[i]);
+        for (int i = 0; i < count; i++) {
+            LmdReference ref = {NULL, owner, op(c, MIR_ADD, reg(c, size), integer(c, i))};
+            ref.dense_storage = !c->program->property_callbacks;
+            array_index_write(c, ref, values[i]);
+        }
         return {op(c, MIR_ADD, reg(c, size), integer(c, count)), K_NUMBER, false, 0, true};
     }
     if (method == LMD_METHOD_POP) {
@@ -3894,7 +4167,8 @@ static LmdValue sequence_method_call(LmdCompiler* c, LmdValue owner, int method,
         MIR_label_t done = label(c); branch_truth(c, done, size, false);
         MIR_reg_t index = op(c, MIR_SUB, reg(c, size), integer(c, 1));
         // copy a tail-owned scalar before shrinking or clearing the source slot.
-        move(c, result, reg(c, box(c, array_read(c, {NULL, owner, index})).reg));
+        LmdReference ref = {NULL, owner, index}; ref.dense_storage = !c->program->property_callbacks;
+        move(c, result, reg(c, box(c, array_read(c, ref)).reg));
         em_store_at(&c->em, em_array_element_address(&c->em, owner.reg, index, 8), 0, MIR_T_I64, absent.reg);
         em_store_at(&c->em, owner.reg, LAMBDA_GC_OFF_LIST_LENGTH, MIR_T_I64, index);
         put_label(c, done); return boxed(c, result);
@@ -3906,10 +4180,9 @@ static LmdValue sequence_method_call(LmdCompiler* c, LmdValue owner, int method,
         branch(c, MIR_BEQ, default_separator, reg(c, tag(c, values[0])), integer(c, LMD_TYPE_UNDEFINED));
         move(c, separator, reg(c, to_string(c, values[0]).reg)); put_label(c, default_separator);
     }
-    MIR_reg_t joined_source = em_new_reg(&c->em, "join_source", MIR_T_I64);
-    move(c, joined_source, reg(c, owner.reg));
+    MIR_reg_t result = em_new_reg(&c->em, "joined", MIR_T_I64);
     MIR_reg_t scan = constant(c, 0);
-    MIR_label_t inspect = label(c), convert = label(c), join = label(c);
+    MIR_label_t inspect = label(c), convert = label(c), join = label(c), done = label(c);
     // a successful string-only scan needs no conversion allocation or user-code invocation.
     put_label(c, inspect); branch(c, MIR_UBGE, join, reg(c, scan), reg(c, size));
     MIR_reg_t part = em_load_at(&c->em,
@@ -3917,22 +4190,40 @@ static LmdValue sequence_method_call(LmdCompiler* c, LmdValue owner, int method,
     branch(c, MIR_BNE, convert, reg(c, op(c, MIR_URSH, reg(c, part), integer(c, 56))), integer(c, LMD_TYPE_STRING));
     move(c, scan, reg(c, op(c, MIR_ADD, reg(c, scan), integer(c, 1)))); jump(c, inspect);
     put_label(c, convert);
-    MIR_reg_t array = em_call_1(&c->em, "mvp_lmd_array_new", MIR_T_I64, MIR_T_I64, reg(c, size), true);
-    check_error(c, array); LmdValue converted = boxed(c, array, K_ARRAY);
-    MIR_reg_t index = constant(c, 0);
-    MIR_label_t loop = label(c), done = label(c), append = label(c);
-    put_label(c, loop); branch(c, MIR_UBGE, done, reg(c, index), reg(c, size));
-    LmdValue value = array_read(c, {NULL, owner, index});
-    MIR_reg_t string = text(c, "").reg;
-    branch_truth(c, append, nullish(c, value));
-    move(c, string, reg(c, to_string(c, value).reg)); put_label(c, append);
-    array_index_write(c, {NULL, converted, index}, boxed(c, string, K_STRING));
-    move(c, index, reg(c, op(c, MIR_ADD, reg(c, index), integer(c, 1)))); jump(c, loop);
-    put_label(c, done);
-    move(c, joined_source, reg(c, converted.reg)); put_label(c, join);
-    MIR_reg_t result = em_call_2(&c->em, "fn_join2", MIR_T_I64,
-        MIR_T_I64, reg(c, joined_source), MIR_T_I64, reg(c, separator), true);
-    check_error(c, result); return boxed(c, result, K_STRING);
+    // the shared converter snapshots length and owns the recursion guard before invoking elements.
+    move(c, result, reg(c, em_call_3(&c->em, "mvp_lmd_array_to_string", MIR_T_I64,
+        MIR_T_I64, reg(c, owner.reg), MIR_T_I64, reg(c, separator),
+        MIR_T_I64, integer(c, c->program->library_active), true)));
+    jump(c, done); put_label(c, join);
+    move(c, result, reg(c, em_call_2(&c->em, "fn_join2", MIR_T_I64,
+        MIR_T_I64, reg(c, owner.reg), MIR_T_I64, reg(c, separator), true)));
+    put_label(c, done); check_error(c, result); return boxed(c, result, K_STRING);
+}
+static LmdValue sequence_method_call(LmdCompiler* c, LmdValue owner, int method,
+        LmdValue* values, int count, bool dense_storage = false) {
+    int first = 0, end = 0;
+    if (method == LMD_METHOD_JOIN || method == LMD_METHOD_FLAT) end = 1;
+    else if (method == LMD_METHOD_FILL) { first = 1; end = 3; }
+    else if (method == LMD_METHOD_SLICE) end = 2;
+    else if (method == LMD_METHOD_INCLUDES || method == LMD_METHOD_ARRAY_INDEX_OF) { first = 1; end = 2; }
+    for (int i = first; i < count && i < end; i++)
+        if (semantic(values[i]) & (K_OBJECT | K_MAP | K_ARRAY | K_TYPED_ARRAY | K_FUNCTION)) {
+            // argument coercion can resize or sparsify the receiver after a storage guard.
+            return stable_item(c, sequence_method_runtime(c, owner, method, values, count));
+        }
+    if (dense_storage || c->program->excludes_sparse_arrays || mvp_lmd_method_owner(method) != LMD_TYPE_ARRAY || method == LMD_METHOD_CONCAT ||
+            method == LMD_METHOD_SPLICE || method == LMD_METHOD_UNSHIFT || method == LMD_METHOD_SHIFT ||
+            method == LMD_METHOD_TO_REVERSED || method == LMD_METHOD_AT)
+        return sequence_method_dense(c, owner, method, values, count);
+    MIR_label_t sparse = label(c), done = label(c);
+    branch_sparse_array(c, sparse, owner.reg);
+    LmdValue result = sequence_method_dense(c, owner, method, values, count);
+    jump(c, done); put_label(c, sparse);
+    MIR_reg_t observed = sequence_method_runtime(c, owner, method, values, count);
+    bool floating = !is_boxed(result) && semantic(result) == K_NUMBER && !result.integer;
+    move(c, result.reg, reg(c, is_boxed(result) ? stable_item(c, observed).reg :
+        scalar_reg(c, boxed(c, observed), semantic(result), result.integer)), floating);
+    put_label(c, done); return result;
 }
 // negative paths identify the receiver (-2) or a parameter (-3-index); -1 is failure.
 static int numeric_region_path(MvpLmdProgram* p, LmdNumericRegion* region, AstNode* node, int depth = 0) {
@@ -4124,7 +4415,7 @@ static void inline_budget(AstNode* node, void* opaque) {
     if (budget->allowed) js_ast_visit_children(node, inline_budget, budget);
 }
 static void plan_numeric_region(MvpLmdProgram* p, LmdFunction* f, bool calls = false) {
-    if (!p->receiver_abi || !f->ast || f->complex_params || f->owns_captures || f->lexical_receiver ||
+    if (!p->receiver_abi || p->property_callbacks || !f->ast || f->complex_params || f->owns_captures || f->lexical_receiver ||
             f->receiver_captured || (f->captures && f->captures->length) ||
             (f->home && f->id == f->home->constructor_id) ||
             js_ast_collect_parameter_facts(f->ast->params).has_duplicate_param_names) return;
@@ -4346,10 +4637,47 @@ static LmdValue inline_call_body(LmdCompiler* c, LmdInlineFrame& frame, const Lm
 struct LmdCallCapture { LmdValue callee; LmdValue* values; LmdFunction* direct = NULL;
     bool borrows_arguments = false; LmdValue receiver; LmdValue new_target; };
 static LmdValue call(LmdCompiler* c, AstCallNode* n, LmdCallCapture* captured = NULL) {
-    if (!captured && n->interp_has_spread_args) {
-        bool member = n->callee->node_type == AST_NODE_MEMBER_EXPR || n->callee->node_type == AST_NODE_INDEX_EXPR;
+    if (!captured && (c->function->home || c->function->lexical_super) && n->callee->node_type == AST_NODE_IDENT &&
+            named(((AstIdentNode*)n->callee)->name, "super")) {
+        LmdFunction* method = c->function;
+        MIR_reg_t constructor = c->self;
+        while (method->lexical_super) {
+            int slot = (method->captures ? method->captures->length : 0) + method->lexical_receiver;
+            MIR_reg_t env = em_load_at(&c->em, constructor, offsetof(Function, closure_env), MIR_T_I64, "super_environment");
+            constructor = em_load_at(&c->em, env, slot * sizeof(Item), MIR_T_I64, "super_constructor");
+            root_value(c, constructor, JIT_VALUE_BOXED_ITEM);
+            method = method->parent;
+        }
+        if (!method->home || method->id != method->home->constructor_id) {
+            diagnostic(c->program, (AstNode*)n, "super call requires a derived constructor");
+            return boxed(c, constant(c, ITEM_JS_UNDEFINED));
+        }
+        MIR_reg_t base = em_call_2(&c->em, "mvp_lmd_class_super", MIR_T_I64,
+            MIR_T_I64, reg(c, constructor), MIR_T_I64, integer(c, 1), true);
+        check_error(c, base);
+        LmdCallCapture capture = {boxed(c, base, K_FUNCTION),
+            n->interp_has_spread_args ? NULL : call_arguments(c, n, true)};
+        capture.new_target = boxed(c, c->receiver_cell ? em_load_at(&c->em,
+            em_array_element_address(&c->em, c->receiver_cell, constant(c, 1), 8), 0, MIR_T_I64, "super_new_target") : c->new_target);
+        LmdValue result = call(c, n, &capture);
+        MIR_reg_t receiver = c->receiver_cell ? em_load_at(&c->em,
+            em_array_element_address(&c->em, c->receiver_cell, constant(c, 0), 8), 0, MIR_T_I64, "super_receiver") : c->receiver;
+        MIR_label_t uninitialized = label(c);
+        branch(c, MIR_BEQ, uninitialized, reg(c, receiver), integer(c, ITEM_JS_TDZ));
+        fail(c, LMD_MVP_REFERENCE, (AstNode*)n); put_label(c, uninitialized);
+        move(c, c->receiver, reg(c, result.reg));
+        if (c->receiver_cell) array_index_write(c, {NULL, boxed(c, c->receiver_cell, K_ARRAY), constant(c, 0)}, result, true);
+        if (method->home->initializer_count) {
+            MIR_reg_t initialized = em_call_2(&c->em, "mvp_lmd_class_initialize_instance", MIR_T_I64,
+                MIR_T_I64, reg(c, constructor), MIR_T_I64, reg(c, c->receiver), true);
+            check_error(c, initialized);
+        }
+        return result;
+    }
+    if (n->interp_has_spread_args && (!captured || !captured->values)) {
+        bool member = !captured && (n->callee->node_type == AST_NODE_MEMBER_EXPR || n->callee->node_type == AST_NODE_INDEX_EXPR);
         LmdReference ref = member ? reference(c, n->callee, true) : LmdReference{};
-        LmdValue function = box(c, member ? read_reference(c, ref, (AstNode*)n, false) : expression(c, n->callee));
+        LmdValue function = captured ? captured->callee : box(c, member ? read_reference(c, ref, (AstNode*)n, false) : expression(c, n->callee));
         if (n->optional) {
             branch(c, MIR_BEQ, c->optional_exit, reg(c, function.reg), integer(c, ITEM_NULL));
             branch(c, MIR_BEQ, c->optional_exit, reg(c, function.reg), integer(c, ITEM_JS_UNDEFINED));
@@ -4360,29 +4688,10 @@ static LmdValue call(LmdCompiler* c, AstCallNode* n, LmdCallCapture* captured = 
         arguments.length = ast_linked_node_count(n->arguments);
         LmdValue values = expression(c, (AstNode*)&arguments);
         MIR_reg_t result = em_call_4(&c->em, "mvp_lmd_call_array", MIR_T_I64,
-            MIR_T_I64, reg(c, function.reg), MIR_T_I64, member ? reg(c, ref.owner.reg) : integer(c, ITEM_JS_UNDEFINED),
-            MIR_T_I64, reg(c, values.reg), MIR_T_I64, integer(c, ITEM_JS_UNDEFINED), true);
+            MIR_T_I64, reg(c, function.reg), MIR_T_I64, member ? reg(c, ref.receiver ? ref.receiver : ref.owner.reg) : integer(c, ITEM_JS_UNDEFINED),
+            MIR_T_I64, reg(c, values.reg), MIR_T_I64, captured && captured->new_target.reg
+                ? reg(c, captured->new_target.reg) : integer(c, ITEM_JS_UNDEFINED), true);
         check_error(c, result); return stable_item(c, result);
-    }
-    if (!captured && c->function->home && n->callee->node_type == AST_NODE_IDENT &&
-            named(((AstIdentNode*)n->callee)->name, "super")) {
-        MIR_reg_t base = em_call_2(&c->em, "mvp_lmd_class_super", MIR_T_I64,
-            MIR_T_I64, reg(c, c->self), MIR_T_I64, integer(c, 1), true);
-        check_error(c, base);
-        LmdCallCapture capture = {boxed(c, base, K_FUNCTION), call_arguments(c, n, true)};
-        capture.new_target = boxed(c, c->new_target);
-        LmdValue result = call(c, n, &capture);
-        MIR_label_t uninitialized = label(c);
-        branch(c, MIR_BEQ, uninitialized, reg(c, c->receiver), integer(c, ITEM_JS_TDZ));
-        fail(c, LMD_MVP_REFERENCE, (AstNode*)n); put_label(c, uninitialized);
-        move(c, c->receiver, reg(c, result.reg));
-        if (c->receiver_cell) array_index_write(c, {NULL, boxed(c, c->receiver_cell, K_ARRAY), constant(c, 0)}, result);
-        if (c->function->home->initializer_count) {
-            MIR_reg_t initialized = em_call_2(&c->em, "mvp_lmd_class_initialize_instance", MIR_T_I64,
-                MIR_T_I64, reg(c, c->self), MIR_T_I64, reg(c, c->receiver), true);
-            check_error(c, initialized);
-        }
-        return result;
     }
     LmdBinding* intrinsic = !captured && n->callee->node_type == AST_NODE_IDENT
         ? identifier_binding(c->program, (AstIdentNode*)n->callee) : NULL;
@@ -4460,7 +4769,7 @@ static LmdValue call(LmdCompiler* c, AstCallNode* n, LmdCallCapture* captured = 
         LmdBinding* builtin = field->object->node_type == AST_NODE_IDENT
             ? identifier_binding(c->program, (AstIdentNode*)field->object) : NULL;
         if (builtin && ((builtin->intrinsic == I_NUMBER && (named(member_spelling(field), "isNaN") || named(member_spelling(field), "isFinite"))) ||
-                (builtin->intrinsic == I_ARRAY && named(member_spelling(field), "isArray")))) {
+                (!c->program->property_callbacks && builtin->intrinsic == I_ARRAY && named(member_spelling(field), "isArray")))) {
             LmdValue* values = call_arguments(c, n, false);
             LmdValue value = n->arguments ? values[0] : boxed(c, constant(c, ITEM_JS_UNDEFINED), K_UNDEFINED);
             MIR_reg_t result = constant(c, 0);
@@ -4499,7 +4808,7 @@ static LmdValue call(LmdCompiler* c, AstCallNode* n, LmdCallCapture* captured = 
             }
             mem_free(values); return result;
         }
-        if (builtin && builtin->intrinsic == 5 && !field->computed &&
+        if (!c->program->property_callbacks && builtin && builtin->intrinsic == 5 && !field->computed &&
                 (named(member_spelling(field), "keys") || named(member_spelling(field), "values") ||
                  named(member_spelling(field), "entries") || named(member_spelling(field), "hasOwn"))) {
             String* key = ((AstIdentNode*)field->property)->name;
@@ -4620,13 +4929,13 @@ static LmdValue call(LmdCompiler* c, AstCallNode* n, LmdCallCapture* captured = 
     }
     if (sequence_method) {
         if (receiver != K_ARRAY || !c->program->array_method_overrides) {
-            LmdValue result = sequence_method_call(c, method.owner, sequence_method, values, count);
+            LmdValue result = sequence_method_call(c, method.owner, sequence_method, values, count, method.dense_storage);
             mem_free(values); return result;
         }
         MIR_label_t overridden = label(c), done = label(c);
         MIR_reg_t result = em_new_reg(&c->em, "array_method_result", MIR_T_I64);
         branch(c, MIR_BNE, overridden, reg(c, callee.reg), integer(c, mvp_lmd_method_token(sequence_method)));
-        move(c, result, reg(c, box(c, sequence_method_call(c, method.owner, sequence_method, values, count)).reg));
+        move(c, result, reg(c, box(c, sequence_method_call(c, method.owner, sequence_method, values, count, method.dense_storage)).reg));
         jump(c, done); put_label(c, overridden);
         for (int i = 0; i < count; i++) values[i] = box(c, values[i]);
         LmdCallCapture capture = {callee, values, NULL, true}; capture.receiver = method.owner;
@@ -4646,7 +4955,9 @@ static LmdValue call(LmdCompiler* c, AstCallNode* n, LmdCallCapture* captured = 
     }
     int i = 0;
     MIR_reg_t target = 0;
+    MIR_label_t exotic = !direct && c->program->property_callbacks ? label(c) : NULL;
     if (!direct) {
+        if (exotic) branch(c, MIR_BEQ, exotic, reg(c, tag(c, callee)), integer(c, LMD_TYPE_MAP));
         MIR_label_t valid = label(c);
         branch(c, MIR_BEQ, valid, reg(c, tag(c, callee)), integer(c, LMD_TYPE_FUNC));
         fail(c, LMD_MVP_TYPE, (AstNode*)n); put_label(c, valid);
@@ -4697,9 +5008,7 @@ static LmdValue call(LmdCompiler* c, AstCallNode* n, LmdCallCapture* captured = 
                 branch(c, MIR_BNE, other, reg(c, target), MIR_new_ref_op(c->em.ctx, candidate->forward));
                 LmdInlineFrame frame = {}; frame.parent = c->inlining; frame.function = candidate;
                 frame.self = callee.reg;
-                bool super_member = member && ((AstFieldNode*)n->callee)->object->node_type == AST_NODE_IDENT &&
-                    named(((AstIdentNode*)((AstFieldNode*)n->callee)->object)->name, "super");
-                frame.receiver = member ? (super_member ? c->receiver : method.owner.reg) : 0;
+                frame.receiver = member ? (method.receiver ? method.receiver : method.owner.reg) : 0;
                 LmdValue numeric_values[LAMBDA_MAX_FUNCTION_ARGS];
                 LmdValue* inline_values = values;
                 MIR_label_t generic_inline = numeric_region && ordinary_inline &&
@@ -4725,6 +5034,7 @@ static LmdValue call(LmdCompiler* c, AstCallNode* n, LmdCallCapture* captured = 
             }
         }
     }
+    if (exotic) put_label(c, exotic);
     MIR_reg_t span = 0;
     if (count && !direct_args) {
         if (count > c->argument_count) c->argument_count = count;
@@ -4755,13 +5065,12 @@ static LmdValue call(LmdCompiler* c, AstCallNode* n, LmdCallCapture* captured = 
     MIR_reg_t companion = pair ? em_new_reg(&c->em, "call_error", MIR_T_I64) : 0;
     MIR_label_t invoked = NULL;
     if (c->program->receiver_abi && !direct) {
-        bool super_member = member && ((AstFieldNode*)n->callee)->object->node_type == AST_NODE_IDENT &&
-            named(((AstIdentNode*)((AstFieldNode*)n->callee)->object)->name, "super");
         MIR_op_t receiver = captured && captured->receiver.reg ? reg(c, captured->receiver.reg) :
-            member ? reg(c, super_member ? c->receiver : method.owner.reg) : integer(c, ITEM_JS_UNDEFINED);
+            member ? reg(c, method.receiver ? method.receiver : method.owner.reg) : integer(c, ITEM_JS_UNDEFINED);
         MIR_label_t slow = label(c), fast = label(c); invoked = label(c);
         if (captured && captured->new_target.reg) jump(c, slow);
         else {
+            if (exotic) branch(c, MIR_BNE, slow, reg(c, tag(c, callee)), integer(c, LMD_TYPE_FUNC));
             // the shared ABI tag alone does not prove the extended callable tail exists.
             MvpLmdCallable marker = {}; marker.requires_runtime_context = true;
             MIR_reg_t flags = em_load_at(&c->em, callee.reg, offsetof(Function, flags), MIR_T_U32, "call_flags");
@@ -4917,11 +5226,11 @@ static LmdValue array_foreach_call(LmdCompiler* c, LmdValue owner, LmdValue* val
     LmdCallCapture capture = {callback, args, NULL, true};
     capture.receiver = !reduce && count > 1 ? box(c, values[1]) : boxed(c, constant(c, ITEM_JS_UNDEFINED));
     LmdValue mapped = call(c, &invocation, &capture);
-    if (map) array_index_write(c, {NULL, output, index}, mapped);
+    if (map) array_index_write(c, {NULL, output, index}, mapped, true);
     if (filter) {
         branch_truth(c, next, truth(c, mapped), false);
         MIR_reg_t at = em_load_at(&c->em, output.reg, LAMBDA_GC_OFF_LIST_LENGTH, MIR_T_I64, "filtered_length");
-        array_index_write(c, {NULL, output, at}, value);
+        array_index_write(c, {NULL, output, at}, value, true);
     }
     if (reduce) move(c, output.reg, reg(c, box(c, mapped).reg));
     if (some) {
@@ -5035,11 +5344,11 @@ static bool remainder_zero(LmdCompiler* c, AstBinaryNode* test, LmdValue* result
     return true;
 }
 static bool string_concat(LmdCompiler* c, AstBinaryNode* node, LmdValue* result) {
-    AstNode* leaves[6];
+    AstNode* leaves[LAMBDA_STRING_CONCAT_MAX_PARTS];
     int count = 0;
     AstNode* left = (AstNode*)node;
     const unsigned primitives = K_STRING | K_NUMBER | K_BOOL | K_NULL | K_UNDEFINED;
-    while (left->node_type == AST_NODE_BINARY && count < 5) {
+    while (left->node_type == AST_NODE_BINARY && count < LAMBDA_STRING_CONCAT_MAX_PARTS - 1) {
         AstBinaryNode* part = (AstBinaryNode*)left;
         unsigned right_kind = kind(c->program, part->right, c->inlining);
         if (part->op != OPERATOR_ADD || kind(c->program, part->left, c->inlining) != K_STRING ||
@@ -5048,14 +5357,21 @@ static bool string_concat(LmdCompiler* c, AstBinaryNode* node, LmdValue* result)
     }
     if (count < 2) return false;
     leaves[count++] = left;
-    MIR_type_t types[6]; MIR_op_t args[6];
+    MIR_type_t types[LAMBDA_STRING_CONCAT_MAX_PARTS]; MIR_op_t args[LAMBDA_STRING_CONCAT_MAX_PARTS];
     for (int i = 0; i < count; i++) {
         // only primitive conversions can be combined; retain source evaluation and conversion order.
         LmdValue part = to_string(c, expression(c, leaves[count - i - 1]));
         types[i] = MIR_T_P; args[i] = reg(c, payload(c, part.reg));
     }
     const char* helpers[] = {"fn_strcat3", "fn_strcat4", "fn_strcat5", "fn_strcat6"};
-    MIR_reg_t joined = em_call_with_args(&c->em, helpers[count - 3], MIR_T_P, count, types, args, true);
+    MIR_reg_t joined;
+    if (count <= 6) joined = em_call_with_args(&c->em, helpers[count - 3], MIR_T_P, count, types, args, true);
+    else {
+        // reuse Lambda's variadic ABI and precise root handling for long primitive chains.
+        MIR_var_t prefix[] = {{MIR_T_I64, "owned", 0}, {MIR_T_I64, "count", 0}};
+        MIR_op_t values[] = {integer(c, 0), integer(c, count)};
+        joined = em_emit_vararg_call(&c->em, "fn_strcat_many", MIR_T_P, 1, 2, prefix, values, count, args);
+    }
     MIR_label_t valid = label(c), invalid = label(c);
     branch_truth(c, invalid, joined, false);
     branch(c, MIR_BNE, valid, reg(c, joined), integer(c, (uint64_t)&STR_ERROR));
@@ -5142,9 +5458,8 @@ static LmdValue expression(LmdCompiler* c, AstNode* n, bool borrow_scalar, bool 
                 (named(id->name, "this") || named(id->name, "new.target"))) {
             MIR_reg_t value = em_load_at(&c->em, em_array_element_address(&c->em, c->inlining->receiver_cell,
                 constant(c, named(id->name, "this") ? 0 : 1), 8), 0, MIR_T_I64, "inline_receiver");
-            MIR_label_t ready = label(c);
-            branch(c, MIR_BNE, ready, reg(c, value), integer(c, ITEM_JS_TDZ));
-            fail(c, LMD_MVP_REFERENCE, n); put_label(c, ready); return boxed(c, value);
+            if (named(id->name, "this")) check_tdz(c, NULL, value, n);
+            return boxed(c, value);
         }
         if (c->inlining && c->inlining->receiver &&
                 (named(id->name, "this") || named(id->name, "new.target")))
@@ -5153,20 +5468,23 @@ static LmdValue expression(LmdCompiler* c, AstNode* n, bool borrow_scalar, bool 
                 : boxed(c, constant(c, ITEM_JS_UNDEFINED), K_UNDEFINED);
         if ((c->function->home || c->function->lexical_receiver || c->function->observes_receiver) &&
                 (named(id->name, "this") || named(id->name, "new.target"))) {
+            bool constructor = c->function->home && c->function->id == c->function->home->constructor_id;
             MIR_reg_t value = named(id->name, "this") ? c->receiver : c->new_target;
-            if (c->function->lexical_receiver) value = em_load_at(&c->em,
+            if (c->function->lexical_receiver || (constructor && c->receiver_cell)) value = em_load_at(&c->em,
                 em_array_element_address(&c->em, c->receiver_cell,
                     constant(c, named(id->name, "this") ? 0 : 1), 8), 0, MIR_T_I64, "lexical_receiver");
-            MIR_label_t ready = label(c);
-            branch(c, MIR_BNE, ready, reg(c, value), integer(c, ITEM_JS_TDZ));
-            fail(c, LMD_MVP_REFERENCE, n); put_label(c, ready);
+            // ordinary calls already bind this; only constructor/lexical receivers can retain TDZ.
+            if (named(id->name, "this") && (constructor || c->function->lexical_receiver))
+                check_tdz(c, NULL, value, n);
             // preserve the value of an earlier this read across a later super() call.
             return boxed(c, op(c, MIR_OR, reg(c, value), integer(c, 0)));
         }
-        if (c->function->home && named(id->name, "super")) {
-            MIR_label_t initialized = label(c);
-            branch(c, MIR_BNE, initialized, reg(c, c->receiver), integer(c, ITEM_JS_TDZ));
-            fail(c, LMD_MVP_REFERENCE, n); put_label(c, initialized);
+        if ((c->function->home || c->function->object_home || c->function->lexical_super) && named(id->name, "super")) {
+            MIR_reg_t receiver = c->receiver_cell ? em_load_at(&c->em,
+                em_array_element_address(&c->em, c->receiver_cell, constant(c, 0), 8), 0, MIR_T_I64, "super_receiver") : c->receiver;
+            if (c->function->lexical_receiver ||
+                    (c->function->home && c->function->id == c->function->home->constructor_id))
+                check_tdz(c, NULL, receiver, n);
             MIR_reg_t base = em_call_2(&c->em, "mvp_lmd_class_super", MIR_T_I64,
                 MIR_T_I64, reg(c, c->self), MIR_T_I64, integer(c, 0), true);
             check_error(c, base); return boxed(c, base, K_OBJECT);
@@ -5296,6 +5614,14 @@ static LmdValue expression(LmdCompiler* c, AstNode* n, bool borrow_scalar, bool 
             TypeId types[] = {LMD_TYPE_UNDEFINED, LMD_TYPE_BOOL, LMD_TYPE_FLOAT, LMD_TYPE_STRING, LMD_TYPE_FUNC, LMD_TYPE_DECIMAL, LMD_TYPE_SYMBOL};
             const char* names[] = {"undefined", "boolean", "number", "string", "function", "bigint", "symbol"};
             move(c, result, reg(c, text(c, "object").reg));
+            if (c->program->property_callbacks) {
+                MIR_label_t ordinary = label(c);
+                branch(c, MIR_BNE, ordinary, reg(c, tid), integer(c, LMD_TYPE_MAP));
+                MIR_reg_t callable = em_call_1(&c->em, "mvp_lmd_is_callable", MIR_T_I64,
+                    MIR_T_I64, reg(c, box(c, v).reg), true);
+                branch(c, MIR_BEQ, done, reg(c, callable), integer(c, 0));
+                move(c, result, reg(c, text(c, "function").reg)); jump(c, done); put_label(c, ordinary);
+            }
             for (int i = 0; i < (c->program->symbols ? 7 : c->program->bigints ? 6 : 5); i++) {
                 MIR_label_t next = label(c);
                 branch(c, MIR_BNE, next, reg(c, tid), integer(c, types[i]));
@@ -5359,8 +5685,9 @@ static LmdValue expression(LmdCompiler* c, AstNode* n, bool borrow_scalar, bool 
         LmdValue left = expression(c, b->left, right_borrow && immediate_scalar_operand(c, b->left), consume);
         LmdValue right = expression(c, b->right, right_borrow, consume);
         if (b->op == OPERATOR_JS_INSTANCEOF) {
-            MIR_reg_t result = em_call_2(&c->em, "mvp_lmd_instanceof", MIR_T_I64,
-                MIR_T_I64, reg(c, box(c, left).reg), MIR_T_I64, reg(c, box(c, right).reg), true);
+            MIR_reg_t result = em_call_3(&c->em, c->program->property_callbacks ? "mvp_lmd_instanceof_dynamic" : "mvp_lmd_instanceof", MIR_T_I64,
+                MIR_T_I64, reg(c, box(c, left).reg), MIR_T_I64, reg(c, box(c, right).reg),
+                MIR_T_I64, integer(c, c->program->property_callbacks ? 0 : 2), true);
             check_error(c, result); return boxed(c, result, K_BOOL);
         }
         if (b->op == OPERATOR_IN) {
@@ -5595,6 +5922,34 @@ static LmdValue expression(LmdCompiler* c, AstNode* n, bool borrow_scalar, bool 
             LmdValue name = spelling ? boxed(c, constant(c, s2it(spelling)), K_STRING)
                 : canonical_key(c, expression(c, prop->key));
             LmdValue value = values ? values[index++] : expression(c, prop->value);
+            LmdFunction* method = prop->method || prop->is_getter || prop->is_setter ? function(c->program, prop->value) : NULL;
+            if (method && method->object_home) {
+                int slot = (method->captures ? method->captures->length : 0) + method->lexical_receiver;
+                MIR_reg_t env = em_load_at(&c->em, box(c, value).reg, offsetof(Function, closure_env), MIR_T_I64, "method_environment");
+                // bind after literal allocation; repeated evaluations retain distinct live home objects.
+                em_store_at(&c->em, env, slot * sizeof(Item), MIR_T_I64, object);
+            }
+            bool proto_literal = !prop->computed && !prop->method && !prop->shorthand &&
+                !prop->is_getter && !prop->is_setter && (named(spelling, "__proto__") ||
+                (prop->key->node_type == AST_NODE_LITERAL && ((AstLiteralNode*)prop->key)->literal_type == AST_LITERAL_STRING &&
+                    named(((AstLiteralNode*)prop->key)->value.string_value, "__proto__")));
+            if (proto_literal) {
+                LmdValue parent = box(c, value);
+                MIR_label_t ignored = label(c), accepted = label(c);
+                MIR_reg_t kind = tag(c, parent);
+                for (int type : {LMD_TYPE_MAP, LMD_TYPE_ARRAY, LMD_TYPE_FUNC, LMD_TYPE_NULL})
+                    branch(c, MIR_BEQ, accepted, reg(c, kind), integer(c, type));
+                jump(c, ignored); put_label(c, accepted);
+                MIR_reg_t set = em_call_2(&c->em, "mvp_lmd_set_prototype", MIR_T_I64,
+                    MIR_T_I64, reg(c, object), MIR_T_I64, reg(c, parent.reg), true);
+                check_error(c, set); put_label(c, ignored); fresh = false; continue;
+            }
+            if (prop->is_getter || prop->is_setter) {
+                MIR_reg_t defined = em_call_4(&c->em, "mvp_lmd_define_accessor", MIR_T_I64,
+                    MIR_T_I64, reg(c, object), MIR_T_I64, reg(c, name.reg),
+                    MIR_T_I64, reg(c, box(c, value).reg), MIR_T_I64, integer(c, prop->is_setter ? 1 : 0), true);
+                check_error(c, defined); fresh = false; continue;
+            }
             MIR_label_t miss = label(c), done = label(c);
             ShapeEntry* field = plan && spelling ? typemap_hash_lookup(plan->blueprint, spelling->chars, spelling->len) : NULL;
             // all initializers ran before allocation; only a prior fallback can have reshaped this owner.
@@ -5603,7 +5958,7 @@ static LmdValue expression(LmdCompiler* c, AstNode* n, bool borrow_scalar, bool 
                     fresh, &preserved)) jump(c, done);
             fresh &= preserved;
             put_label(c, miss);
-            MIR_reg_t stored = property_access(c, LMD_PROP_SET, owner.reg, name.reg,
+            MIR_reg_t stored = property_access(c, LMD_PROP_CREATE_DATA, owner.reg, name.reg,
                 box(c, value).reg, NULL, false, NULL, NULL, true);
             check_error(c, stored); put_label(c, done);
         }
@@ -5638,7 +5993,8 @@ static LmdValue expression(LmdCompiler* c, AstNode* n, bool borrow_scalar, bool 
                 LmdValue value = e->node_type == AST_NODE_NULL ? boxed(c, constant(c, ITEM_JS_DELETED_SENTINEL)) : expression(c, e);
                 MIR_reg_t index = spread ? em_load_at(&c->em, result, LAMBDA_GC_OFF_LIST_LENGTH,
                     MIR_T_I64, "spread_length") : constant(c, i);
-                array_index_write(c, {NULL, boxed(c, result, K_ARRAY), index, !spread, i}, value);
+                // fresh literal slots use CreateDataProperty, so inherited setters cannot observe them.
+                array_index_write(c, {NULL, boxed(c, result, K_ARRAY), index, !spread, i}, value, true, a->length);
             }
         }
         return boxed(c, result, K_ARRAY);
@@ -5793,28 +6149,209 @@ static void integer_loop(LmdCompiler* c, AstLoopControlNode* node, MIR_label_t d
             {snapshots[i], K_NUMBER, false, 0, true, finite_range(1, INT53_MAX)}, (AstNode*)node);
     put_label(c, slow);
 }
-static void loop(LmdCompiler* c, AstLoopControlNode* n, const char* name = NULL, int length = 0) {
+static void loop(LmdCompiler* c, AstLoopControlNode* n, const char* name = NULL, int length = 0,
+    bool initialized = false);
+static void dense_array_loop_node(AstNode* node, void* opaque) {
+    if (!node) return;
+    LmdDenseArrayLoopPlan* plan = (LmdDenseArrayLoopPlan*)opaque;
+    if (!plan->allowed || ++plan->nodes > 160) { plan->allowed = false; return; }
+    MvpLmdProgram* p = plan->compiler->program;
+    constexpr unsigned objects = K_ARRAY | K_OBJECT | K_MAP | K_FUNCTION | K_TYPED_ARRAY;
+    auto primitive = [&](AstNode* value) {
+        if (!(kind(p, value, plan->compiler->inlining) & objects)) return true;
+        // the visitor guards every array receiver, including an otherwise unknown parameter's length.
+        return value && (value->node_type == AST_NODE_MEMBER_EXPR || value->node_type == AST_NODE_INDEX_EXPR) &&
+            named(member_spelling((AstFieldNode*)value), "length");
+    };
+    AstNode* written = NULL;
+    switch (node->node_type) {
+    case AST_NODE_MEMBER_EXPR: case AST_NODE_INDEX_EXPR: {
+        AstFieldNode* field = (AstFieldNode*)node;
+        if (field->object->node_type != AST_NODE_IDENT || !(kind(p, field->object) & K_ARRAY) ||
+                (!field->computed && !named(member_spelling(field), "length")) ||
+                (field->computed && kind(p, field->property) != K_NUMBER)) { plan->allowed = false; return; }
+        LmdBinding* binding = identifier_binding(p, (AstIdentNode*)field->object);
+        if (!binding || binding->external || binding->captured || binding->reflected_global ||
+                binding->owner != plan->compiler->function) { plan->allowed = false; return; }
+        int i = 0; while (i < plan->count && plan->arrays[i] != binding) i++;
+        if (i == plan->count) {
+            if (i == 8) { plan->allowed = false; return; }
+            plan->arrays[plan->count++] = binding;
+        }
+        if (field->computed) {
+            plan->reads++;
+            dense_array_loop_node(field->property, opaque);
+        }
+        return;
+    }
+    case AST_NODE_BINARY: {
+        AstBinaryNode* binary = (AstBinaryNode*)node;
+        if (binary->op != OPERATOR_JS_STRICT_EQ && binary->op != OPERATOR_JS_STRICT_NE &&
+                binary->op != OPERATOR_AND && binary->op != OPERATOR_OR &&
+                (!primitive(binary->left) || !primitive(binary->right))) { plan->allowed = false; return; }
+        break;
+    }
+    case AST_NODE_ASSIGN: {
+        AstAssignNode* assignment = (AstAssignNode*)node;
+        if (assignment->left->node_type == AST_NODE_MEMBER_EXPR || assignment->left->node_type == AST_NODE_INDEX_EXPR) {
+            AstFieldNode* field = (AstFieldNode*)assignment->left;
+            AstNode* body = plan->node->body;
+            if (!field->computed || assignment->op != OPERATOR_ASSIGN || !primitive(assignment->right) || !body ||
+                    node->source_span.start_byte < body->source_span.start_byte ||
+                    node->source_span.end_byte > body->source_span.end_byte) { plan->allowed = false; return; }
+            plan->element_writes++;
+            break;
+        }
+        if (assignment->left->node_type != AST_NODE_IDENT || !primitive(assignment->left) ||
+                (assignment->op != OPERATOR_ASSIGN && !primitive(assignment->right))) { plan->allowed = false; return; }
+        written = assignment->left;
+        break;
+    }
+    case AST_NODE_VARIABLE_DECLARATOR: {
+        AstDeclaratorNode* declaration = (AstDeclaratorNode*)node;
+        if (!declaration->id || declaration->id->node_type != AST_NODE_IDENT ||
+                !declaration->init || kind(p, declaration->init) != K_NUMBER) { plan->allowed = false; return; }
+        written = declaration->id;
+        break;
+    }
+    case AST_NODE_UNARY: {
+        AstUnaryNode* unary = (AstUnaryNode*)node;
+        if (unary->op == OPERATOR_JS_DELETE ||
+                (unary->op != OPERATOR_NOT && unary->op != OPERATOR_JS_TYPEOF && !primitive(unary->operand)) ||
+                ((unary->op == OPERATOR_JS_INCREMENT || unary->op == OPERATOR_JS_DECREMENT) &&
+                 unary->operand->node_type != AST_NODE_IDENT)) { plan->allowed = false; return; }
+        if (unary->op == OPERATOR_JS_INCREMENT || unary->op == OPERATOR_JS_DECREMENT) written = unary->operand;
+        break;
+    }
+    case AST_NODE_IDENT: {
+        LmdBinding* binding = identifier_binding(p, (AstIdentNode*)node);
+        if (!binding || binding->captured || binding->external || binding->reflected_global)
+            { plan->allowed = false; return; }
+        return;
+    }
+    case AST_NODE_LOOP:
+        if (node != (AstNode*)plan->node) plan->nested = true;
+        break;
+    case AST_NODE_VAR_STAM: case AST_NODE_BLOCK: case AST_NODE_IF_EXPR: case AST_NODE_CONDITIONAL_EXPR:
+    case AST_NODE_EXPR_STMT: case AST_NODE_RETURN_STAM: case AST_NODE_BREAK_STAM:
+    case AST_NODE_CONTINUE_STAM:
+    case AST_NODE_LITERAL: case AST_NODE_NULL: break;
+    default: plan->allowed = false; return;
+    }
+    if (written) {
+        LmdBinding* binding = identifier_binding(p, (AstIdentNode*)written);
+        if (!binding || !binding->native || binding->kinds != K_NUMBER || binding->captured ||
+                binding->external || binding->reflected_global || binding->owner != plan->compiler->function)
+            { plan->allowed = false; return; }
+        AstNode* init = binding->initializer;
+        bool header = init && plan->node->init &&
+            init->source_span.start_byte >= plan->node->init->source_span.start_byte &&
+            init->source_span.end_byte <= plan->node->init->source_span.end_byte;
+        bool iteration_local = init && binding->entry->is_lexical && plan->node->body &&
+            init->source_span.start_byte >= plan->node->body->source_span.start_byte &&
+            init->source_span.end_byte <= plan->node->body->source_span.end_byte;
+        if (!binding->entry->is_parameter && (!binding->dominated || !init ||
+                (!header && !iteration_local && init->source_span.end_byte > plan->node->source_span.start_byte)))
+            { plan->allowed = false; return; }
+        // body-scoped lexical locals are initialized again when this iteration replays.
+        if (!iteration_local) {
+            int i = 0; while (i < plan->writes && plan->written[i] != binding) i++;
+            if (i == plan->writes) {
+                if (i == 32) { plan->allowed = false; return; }
+                plan->written[plan->writes++] = binding;
+            }
+        }
+    }
+    js_ast_visit_children(node, dense_array_loop_node, opaque);
+}
+static MIR_label_t dense_array_loop(LmdCompiler* c, AstLoopControlNode* node, const char* name, int length) {
+    if (c->dense_array_count || c->inlining || !c->function->id || node->form == LOOP_FORM_DO_WHILE ||
+            c->program->global_reflection ||
+            c->program->excludes_sparse_arrays || !c->program->array_holes) return NULL;
+    // a bailout in the update would replay the preceding body; admit only local numeric updates.
+    if (node->update) {
+        AstNode* update = node->update;
+        bool increment = update->node_type == AST_NODE_UNARY &&
+            (((AstUnaryNode*)update)->op == OPERATOR_JS_INCREMENT || ((AstUnaryNode*)update)->op == OPERATOR_JS_DECREMENT) &&
+            ((AstUnaryNode*)update)->operand->node_type == AST_NODE_IDENT;
+        bool step = update->node_type == AST_NODE_ASSIGN &&
+            ((AstAssignNode*)update)->left->node_type == AST_NODE_IDENT &&
+            ((AstAssignNode*)update)->right->node_type == AST_NODE_LITERAL &&
+            ((AstLiteralNode*)((AstAssignNode*)update)->right)->literal_type == AST_LITERAL_NUMBER;
+        if (!increment && !step) return NULL;
+    }
+    LmdDenseArrayLoopPlan plan = {}; plan.compiler = c; plan.node = node; plan.allowed = true;
+    dense_array_loop_node((AstNode*)node, &plan);
+    // a write version has no later element access or nested iteration that could replay its store.
+    if (!plan.allowed || !plan.count || (plan.element_writes ?
+            plan.element_writes != 1 || plan.reads != 1 || plan.nested : plan.reads < 2)) return NULL;
+    AstIndex* tree = &c->program->frontend->ast_index;
+    for (int i = 0; i < plan.count; i++) {
+        LmdBinding* binding = plan.arrays[i];
+        // receiver guards still require bindings initialized before the loop, excluding body-local arrays.
+        if (!binding->entry->is_parameter && (!binding->dominated || !binding->initializer ||
+                ast_index_find(tree, binding->initializer) >= ast_index_find(tree, (AstNode*)node))) return NULL;
+    }
+    log_debug("js mvp dense loop: %s at byte %u, %d arrays", c->function->name, node->source_span.start_byte, plan.count);
+    MIR_label_t slow = label(c), done = label(c);
+    plan.bail = label(c);
+    for (int i = 0; i < plan.count; i++) {
+        LmdValue owner = read_binding(c, plan.arrays[i], (AstNode*)node);
+        if (semantic(owner) != K_ARRAY)
+            branch(c, MIR_BNE, slow, reg(c, tag(c, box(c, owner))), integer(c, LMD_TYPE_ARRAY));
+        if (plan.element_writes) {
+            MIR_reg_t storage = em_call_1(&c->em, "mvp_lmd_array_indices_use_own_storage", MIR_T_I64,
+                MIR_T_I64, reg(c, owner.reg), true);
+            branch(c, MIR_BEQ, slow, reg(c, storage), integer(c, 0));
+        } else branch_sparse_array(c, slow, owner.reg);
+        c->dense_arrays[i] = plan.arrays[i];
+    }
+    for (int i = 0; i < plan.writes; i++) {
+        plan.snapshots[i] = read_binding(c, plan.written[i], (AstNode*)node);
+        plan.snapshots[i].reg = em_new_reg(&c->em, "dense_iteration_snapshot", plan.written[i]->integer ? MIR_T_I64 : MIR_T_D);
+    }
+    // holes and bounds misses replay only the current iteration, before any observable operation.
+    c->dense_array_count = plan.count; c->dense_loop = &plan;
+    loop(c, node, name, length, true);
+    c->dense_array_count = 0; c->dense_loop = NULL;
+    jump(c, done); put_label(c, plan.bail);
+    for (int i = 0; i < plan.writes; i++)
+        write_binding(c, plan.written[i], plan.snapshots[i], (AstNode*)node);
+    put_label(c, slow);
+    return done;
+}
+static void loop(LmdCompiler* c, AstLoopControlNode* n, const char* name, int length, bool initialized) {
     control_completion(c);
-    scope_initialize(c, n->vars);
+    if (!initialized) {
+        scope_initialize(c, n->vars);
+        if (n->init) {
+            if (n->init->node_type == AST_NODE_VAR_STAM) statement(c, n->init);
+            else (void)expression(c, n->init);
+        }
+        clone_loop_bindings(c, n->vars);
+    }
+    // both storage versions share initialization; a mid-loop bailout must retain its current induction value.
+    MIR_label_t dense_done = initialized ? NULL : dense_array_loop(c, n, name, length);
     MIR_label_t start = label(c), test = label(c), next = label(c), done = label(c);
     LmdControl control = {c->control, done, next, name, length, (AstNode*)n}; c->control = &control;
     for (LmdControl* outer = control.parent; outer; outer = outer->parent) {
         if (outer->loop_target == (AstNode*)n) { outer->next = next; outer->stop = done; }
     }
-    if (n->init) {
-        if (n->init->node_type == AST_NODE_VAR_STAM) statement(c, n->init);
-        else (void)expression(c, n->init);
-    }
-    clone_loop_bindings(c, n->vars);
     integer_loop(c, n, done);
     if (n->form != LOOP_FORM_DO_WHILE) jump(c, test);
     put_label(c, start); statement(c, n->body);
     put_label(c, next); clone_loop_bindings(c, n->vars);
     if (n->update) (void)expression(c, n->update);
     put_label(c, test);
+    if (c->dense_loop && c->dense_loop->node == n)
+        for (int i = 0; i < c->dense_loop->writes; i++) {
+            LmdBinding* binding = c->dense_loop->written[i];
+            move(c, c->dense_loop->snapshots[i].reg, reg(c, binding->reg), !binding->integer);
+        }
     if (n->cond) branch_condition(c, n->cond, start);
     else jump(c, start);
     put_label(c, done); c->control = control.parent;
+    if (dense_done) put_label(c, dense_done);
 }
 static LmdValue iterable_source(LmdCompiler* c, AstNode* iterable, int& projection, MIR_reg_t& selected_projection, bool* object) {
     LmdValue owner;
@@ -5869,6 +6406,13 @@ static void for_of(LmdCompiler* c, JsForOfNode* loop, const char* name = NULL, i
     } else if (c->program->iterators) owner = box(c, expression(c, iterable));
     else owner = iterable_source(c, iterable, projection, selected_projection, &object_projection);
     bool direct_pair = loop->left->node_type == AST_NODE_ARRAY_PATTERN && projection == 6;
+    bool borrow_pair = direct_pair && loop->declares_binding && !c->inlining;
+    if (borrow_pair) for (AstNode* e = ((AstArrayNode*)loop->left)->item; e; e = e->next) {
+        LmdBinding* b = e->node_type == AST_NODE_IDENT ? identifier_binding(c->program, (AstIdentNode*)e) : NULL;
+        // both local bindings adopt their scalars before any body call or captured-cell allocation.
+        if (!b || b->owner != c->function || !b->owner->id || b->captured || b->external ||
+                b->reflected_global || b->native || b->intrinsic) borrow_pair = false;
+    }
     MIR_reg_t components[2] = {0, 0};
     MIR_label_t bind_pair = direct_pair ? label(c) : NULL;
     if (direct_pair) for (int i = 0; i < 2; i++) components[i] = em_new_reg(&c->em, "pair_component", MIR_T_I64);
@@ -5876,6 +6420,7 @@ static void for_of(LmdCompiler* c, JsForOfNode* loop, const char* name = NULL, i
     MIR_label_t test = label(c), array = label(c), map = label(c), body = label(c), next = label(c), done = label(c);
     MIR_reg_t active = constant(c, 0);
     bool protocol = c->program->iterators && !enumerate;
+    bool native_map = !protocol && semantic(owner) == K_MAP;
     MIR_reg_t record = protocol ? constant(c, ITEM_NULL) : 0;
     if (record) boxed(c, record);
     // iteration snapshots the owner; mutations cannot change its array/ordered-map representation.
@@ -5920,12 +6465,23 @@ static void for_of(LmdCompiler* c, JsForOfNode* loop, const char* name = NULL, i
         check_error(c, yielded); move(c, item, reg(c, stable_item(c, yielded).reg));
         move(c, active, integer(c, 1)); jump(c, body); put_label(c, native);
     }
-    branch(c, MIR_BNE, map, reg(c, iterable_type), integer(c, LMD_TYPE_ARRAY));
-    put_label(c, array);
-    branch(c, MIR_UBGE, done, reg(c, cursor), reg(c, em_load_at(&c->em, owner.reg,
-        LAMBDA_GC_OFF_LIST_LENGTH, MIR_T_I64, "iteration_length")));
-    // Object projections produce a fresh dense snapshot even when the input has holes.
-    move(c, item, reg(c, box(c, array_read(c, {NULL, owner, cursor}, false, false, object_projection)).reg)); jump(c, body);
+    if (!native_map) {
+        // a proven native Map never enters array iteration or allocates its scalar snapshots.
+        branch(c, MIR_BNE, map, reg(c, iterable_type), integer(c, LMD_TYPE_ARRAY));
+        put_label(c, array);
+        branch(c, MIR_UBGE, done, reg(c, cursor), reg(c, em_load_at(&c->em, owner.reg,
+            LAMBDA_GC_OFF_LIST_LENGTH, MIR_T_I64, "iteration_length")));
+        // Object projections produce a fresh dense snapshot even when the input has holes.
+        LmdReference element = {NULL, owner, cursor};
+        // the cursor is a numeric index already checked above, with no intervening callback.
+        element.numeric_key = element.in_bounds = true;
+        LmdBinding* iteration_binding = loop->left->node_type == AST_NODE_IDENT
+            ? identifier_binding(c->program, (AstIdentNode*)loop->left) : NULL;
+        // a local identifier adopts the scalar before the body; captured cells may allocate first.
+        bool borrow_iteration = !enumerate && iteration_binding && iteration_binding->owner->id && !iteration_binding->captured &&
+            !iteration_binding->external && !iteration_binding->reflected_global;
+        move(c, item, reg(c, box(c, array_read(c, element, borrow_iteration || borrow_pair, false, object_projection)).reg)); jump(c, body);
+    }
     put_label(c, map);
     MIR_reg_t entries = em_load_at(&c->em, owner.reg, offsetof(LambdaGcOrderedMapLayout, entries), MIR_T_I64, "ordered_entries");
     branch(c, MIR_UBGE, done, reg(c, cursor), reg(c, em_load_at(&c->em, entries,
@@ -5948,8 +6504,9 @@ static void for_of(LmdCompiler* c, JsForOfNode* loop, const char* name = NULL, i
         int count = direct_pair ? 2 : 1;
         for (int i = 0; i < count; i++) {
             MIR_reg_t slot = op(c, MIR_ADD, reg(c, cursor), integer(c, direct_pair ? i : projection == 8));
-            LmdValue value = stable_item(c, em_load_at(&c->em,
-                em_array_element_address(&c->em, entries, slot, 8), 0, MIR_T_I64, "ordered_value"));
+            MIR_reg_t loaded = em_load_at(&c->em,
+                em_array_element_address(&c->em, entries, slot, 8), 0, MIR_T_I64, "ordered_value");
+            LmdValue value = borrow_pair ? boxed(c, loaded) : stable_item(c, loaded);
             move(c, direct_pair ? components[i] : item, reg(c, value.reg));
             boxed(c, direct_pair ? components[i] : item);
         }
@@ -5972,12 +6529,15 @@ static void for_of(LmdCompiler* c, JsForOfNode* loop, const char* name = NULL, i
     }
     AstNode* head = loop->left;
     if (head->node_type == AST_NODE_ARRAY_PATTERN) {
-        MIR_label_t pair = label(c);
-        branch(c, MIR_BEQ, pair, reg(c, tag(c, value)), integer(c, LMD_TYPE_ARRAY));
-        fail(c, LMD_MVP_CAPABILITY, head); put_label(c, pair);
+        if (!native_map) {
+            MIR_label_t pair = label(c);
+            branch(c, MIR_BEQ, pair, reg(c, tag(c, value)), integer(c, LMD_TYPE_ARRAY));
+            fail(c, LMD_MVP_CAPABILITY, head); put_label(c, pair);
+        }
         if (direct_pair) {
-            for (int i = 0; i < 2; i++) move(c, components[i], reg(c, box(c,
-                array_read(c, {NULL, value, constant(c, i), true, i})).reg));
+            // local pairs adopt both values without reentry; array_read still snapshots accessor results.
+            if (!native_map) for (int i = 0; i < 2; i++) move(c, components[i], reg(c, box(c,
+                array_read(c, {NULL, value, constant(c, i), true, i}, borrow_pair)).reg));
             put_label(c, bind_pair);
         }
     }
@@ -6068,7 +6628,7 @@ static void statement(LmdCompiler* c, AstNode* n) {
                 ((AstIdentNode*)field->key)->name);
             MIR_reg_t written = em_call_5(&c->em, "mvp_lmd_class_property", MIR_T_I64,
                 MIR_T_I64, reg(c, result), MIR_T_I64, integer(c, s2it(name)), MIR_T_I64, reg(c, value.reg),
-                MIR_T_I64, integer(c, LMD_PROP_INITIALIZE), MIR_T_P, integer(c, 0), true);
+                MIR_T_I64, integer(c, LMD_PROP_CREATE_DATA), MIR_T_P, integer(c, 0), true);
             check_error(c, written);
         }
         c->receiver = receiver; c->initializer_class = initializer;
@@ -6114,7 +6674,10 @@ static void statement(LmdCompiler* c, AstNode* n) {
             if (declaration->init && b->target && (AstNode*)b->target->ast == declaration->init &&
                     b->target->closed_calls && !b->observed && !b->assigned) continue;
             if (declaration->init || ((AstVarDeclNode*)n)->kind != JS_VAR_VAR) {
-                LmdValue value = expression(c, declaration->init);
+                // an uncaptured local adopts the scalar immediately, with no intervening call.
+                bool borrow = !c->inlining && b->owner == c->function && b->owner->id &&
+                    !b->captured && !b->external && !b->reflected_global && !b->native && !b->intrinsic;
+                LmdValue value = expression(c, declaration->init, borrow);
                 if (!b->shape_hint || b->shape_hint->scalar_binding != b)
                     write_binding(c, b, value, d, true);
             }
@@ -6217,18 +6780,27 @@ struct LmdImport { const char* name; void* address; JitImportMetadata audit; };
 #define AUDIT(gc, cls, args) {gc, JIT_REENTRY_NO, cls, args, \
     JIT_IMPORT_SCALAR_RESULT(SCALAR_RETURN_NONE) | JIT_IMPORT_NUMBER_STACK_PRESERVES | \
     JIT_IMPORT_ARGS_BORROWED_AUDITED, JIT_EXCEPTION_PRESERVES, 0}
+#define REENTRY(gc, cls, args) {gc, JIT_REENTRY_YES, cls, args, \
+    JIT_IMPORT_SCALAR_RESULT(SCALAR_RETURN_NONE) | JIT_IMPORT_NUMBER_STACK_PRESERVES | \
+    JIT_IMPORT_ARGS_BORROWED_AUDITED, JIT_EXCEPTION_PRESERVES, 0}
+#define COERCION_IMPORT(name, args) \
+    {#name, (void*)name, REENTRY(JIT_EFFECT_MAY_GC, ITEM, args)}, \
+    {#name "_fixed", (void*)name, AUDIT(JIT_EFFECT_MAY_GC, ITEM, args)}
 static const LmdImport imports[] = {
+    {"mvp_lmd_property_with_receiver", (void*)mvp_lmd_property_with_receiver, REENTRY(JIT_EFFECT_MAY_GC, ITEM, ARG(0,ITEM)|ARG(1,ITEM)|ARG(2,ITEM)|ARG(3,SCALAR)|ARG(4,ITEM))},
+    {"mvp_lmd_set_prototype", (void*)mvp_lmd_set_prototype, REENTRY(JIT_EFFECT_MAY_GC, ITEM, ARG(0,ITEM)|ARG(1,ITEM))},
+    {"mvp_lmd_define_accessor", (void*)mvp_lmd_define_accessor, AUDIT(JIT_EFFECT_MAY_GC, ITEM, ARG(0,ITEM)|ARG(1,ITEM)|ARG(2,ITEM)|ARG(3,SCALAR))},
     {"it2d", (void*)it2d, AUDIT(JIT_EFFECT_NO_GC, SCALAR, ARG(0,ITEM))},
     {"bigint_from_string", (void*)bigint_from_string, AUDIT(JIT_EFFECT_MAY_GC, ITEM, ARG(0,RAW_PTR)|ARG(1,SCALAR))},
     {"bigint_is_zero", (void*)bigint_is_zero, AUDIT(JIT_EFFECT_NO_GC, SCALAR, ARG(0,ITEM))},
     {"bigint_to_double", (void*)bigint_to_double, AUDIT(JIT_EFFECT_NO_GC, SCALAR, ARG(0,ITEM))},
     {"mvp_lmd_bigint_binary", (void*)mvp_lmd_bigint_binary, AUDIT(JIT_EFFECT_MAY_GC, ITEM, ARG(0,ITEM)|ARG(1,ITEM)|ARG(2,SCALAR))},
     {"mvp_lmd_bigint_to_string", (void*)mvp_lmd_bigint_to_string, AUDIT(JIT_EFFECT_MAY_GC, ITEM, ARG(0,ITEM)|ARG(1,SCALAR))},
-    {"mvp_lmd_array_flatten", (void*)mvp_lmd_array_flatten, AUDIT(JIT_EFFECT_MAY_GC, ITEM, ARG(0,ITEM)|ARG(1,SCALAR))},
+    {"mvp_lmd_array_flatten", (void*)mvp_lmd_array_flatten, REENTRY(JIT_EFFECT_MAY_GC, ITEM, ARG(0,ITEM)|ARG(1,SCALAR)|ARG(2,SCALAR))},
     {"mvp_lmd_array_to_string", (void*)mvp_lmd_array_to_string, {JIT_EFFECT_MAY_GC, JIT_REENTRY_YES, ITEM, ARG(0,ITEM)|ARG(1,ITEM)|ARG(2,SCALAR), JIT_IMPORT_SCALAR_RESULT(SCALAR_RETURN_NONE)|JIT_IMPORT_NUMBER_STACK_PRESERVES|JIT_IMPORT_ARGS_BORROWED_AUDITED, JIT_EXCEPTION_PRESERVES, 0}},
-    {"mvp_lmd_primitive_to_string", (void*)mvp_lmd_primitive_to_string, {JIT_EFFECT_MAY_GC, JIT_REENTRY_YES, ITEM, ARG(0,ITEM)|ARG(1,SCALAR), JIT_IMPORT_SCALAR_RESULT(SCALAR_RETURN_NONE)|JIT_IMPORT_NUMBER_STACK_PRESERVES|JIT_IMPORT_ARGS_BORROWED_AUDITED, JIT_EXCEPTION_PRESERVES, 0}},
-    {"mvp_lmd_primitive_to_number", (void*)mvp_lmd_primitive_to_number, {JIT_EFFECT_MAY_GC, JIT_REENTRY_YES, ITEM, ARG(0,ITEM), JIT_IMPORT_SCALAR_RESULT(SCALAR_RETURN_NONE)|JIT_IMPORT_NUMBER_STACK_PRESERVES|JIT_IMPORT_ARGS_BORROWED_AUDITED, JIT_EXCEPTION_PRESERVES, 0}},
-    {"mvp_lmd_to_primitive", (void*)mvp_lmd_to_primitive, {JIT_EFFECT_MAY_GC, JIT_REENTRY_YES, ITEM, ARG(0,ITEM)|ARG(1,SCALAR)|ARG(2,SCALAR), JIT_IMPORT_SCALAR_RESULT(SCALAR_RETURN_NONE)|JIT_IMPORT_NUMBER_STACK_PRESERVES|JIT_IMPORT_ARGS_BORROWED_AUDITED, JIT_EXCEPTION_PRESERVES, 0}},
+    COERCION_IMPORT(mvp_lmd_primitive_to_string, ARG(0,ITEM)|ARG(1,SCALAR)),
+    COERCION_IMPORT(mvp_lmd_primitive_to_number, ARG(0,ITEM)),
+    COERCION_IMPORT(mvp_lmd_to_primitive, ARG(0,ITEM)|ARG(1,SCALAR)|ARG(2,SCALAR)),
     {"mvp_lmd_fail", (void*)mvp_lmd_fail, AUDIT(JIT_EFFECT_MAY_GC, ITEM, ARG(0,SCALAR)|ARG(1,SCALAR))},
     {"mvp_lmd_string_to_number", (void*)mvp_lmd_string_to_number, AUDIT(JIT_EFFECT_NO_GC, SCALAR, ARG(0,GC_PTR))},
     {"mvp_lmd_parse_number", (void*)mvp_lmd_parse_number, AUDIT(JIT_EFFECT_NO_GC, SCALAR, ARG(0,GC_PTR)|ARG(1,SCALAR))},
@@ -6242,6 +6814,7 @@ static const LmdImport imports[] = {
     {"fn_strcat4", (void*)fn_strcat4, AUDIT(JIT_EFFECT_MAY_GC, GC_PTR, ARG(0,GC_PTR)|ARG(1,GC_PTR)|ARG(2,GC_PTR)|ARG(3,GC_PTR))},
     {"fn_strcat5", (void*)fn_strcat5, AUDIT(JIT_EFFECT_MAY_GC, GC_PTR, ARG(0,GC_PTR)|ARG(1,GC_PTR)|ARG(2,GC_PTR)|ARG(3,GC_PTR)|ARG(4,GC_PTR))},
     {"fn_strcat6", (void*)fn_strcat6, AUDIT(JIT_EFFECT_MAY_GC, GC_PTR, ARG(0,GC_PTR)|ARG(1,GC_PTR)|ARG(2,GC_PTR)|ARG(3,GC_PTR)|ARG(4,GC_PTR)|ARG(5,GC_PTR))},
+    {"fn_strcat_many", (void*)fn_strcat_many, AUDIT(JIT_EFFECT_MAY_GC, GC_PTR, ARG(0,SCALAR)|ARG(1,SCALAR))},
     {"fn_string_freeze", (void*)fn_string_freeze, AUDIT(JIT_EFFECT_NO_GC, GC_PTR, ARG(0,GC_PTR))},
     {"mvp_lmd_string_compare", (void*)mvp_lmd_string_compare, AUDIT(JIT_EFFECT_NO_GC, SCALAR, ARG(0,ITEM)|ARG(1,ITEM))},
     {"mvp_lmd_string_at", (void*)mvp_lmd_string_at, AUDIT(JIT_EFFECT_MAY_GC, ITEM, ARG(0,ITEM)|ARG(1,SCALAR)|ARG(2,SCALAR))},
@@ -6258,34 +6831,44 @@ static const LmdImport imports[] = {
     {"mvp_lmd_number_pow", (void*)mvp_lmd_number_pow, AUDIT(JIT_EFFECT_NO_GC, SCALAR, ARG(0,SCALAR)|ARG(1,SCALAR))},
     {"mvp_lmd_string_key", (void*)mvp_lmd_string_key, AUDIT(JIT_EFFECT_NO_GC, SCALAR, ARG(0,GC_PTR)|ARG(1,SCALAR))},
     {"mvp_lmd_array_store", (void*)mvp_lmd_array_store, AUDIT(JIT_EFFECT_MAY_GC, ITEM, ARG(0,ITEM)|ARG(1,SCALAR)|ARG(2,ITEM))},
+    {"mvp_lmd_array_indices_use_own_storage", (void*)mvp_lmd_array_indices_use_own_storage, AUDIT(JIT_EFFECT_MAY_GC, SCALAR, ARG(0,ITEM))},
     {"array_reverse_in_place", (void*)array_reverse_in_place, AUDIT(JIT_EFFECT_NO_GC, SCALAR, ARG(0,GC_PTR))},
-    {"mvp_lmd_array_method_value", (void*)mvp_lmd_array_method_value, AUDIT(JIT_EFFECT_MAY_GC, ITEM, ARG(0,RAW_PTR)|ARG(1,ITEM)|ARG(2,ITEM)|ARG(3,SCALAR))},
-    {"mvp_lmd_array_edit", (void*)mvp_lmd_array_edit, AUDIT(JIT_EFFECT_MAY_GC, ITEM, ARG(0,ITEM)|ARG(1,RAW_PTR)|ARG(2,SCALAR)|ARG(3,SCALAR))},
-    {"mvp_lmd_for_in_keys", (void*)mvp_lmd_for_in_keys, AUDIT(JIT_EFFECT_MAY_GC, ITEM, ARG(0,ITEM))},
+    {"mvp_lmd_array_method_value", (void*)mvp_lmd_array_method_value, REENTRY(JIT_EFFECT_MAY_GC, ITEM, ARG(0,RAW_PTR)|ARG(1,ITEM)|ARG(2,ITEM)|ARG(3,SCALAR))},
+    {"mvp_lmd_array_method_value_fixed", (void*)mvp_lmd_array_method_value, AUDIT(JIT_EFFECT_MAY_GC, ITEM, ARG(0,RAW_PTR)|ARG(1,ITEM)|ARG(2,ITEM)|ARG(3,SCALAR))},
+    {"mvp_lmd_array_visit", (void*)mvp_lmd_array_visit, REENTRY(JIT_EFFECT_MAY_GC, ITEM, ARG(0,ITEM)|ARG(1,RAW_PTR)|ARG(2,SCALAR)|ARG(3,SCALAR))},
+    {"mvp_lmd_array_edit", (void*)mvp_lmd_array_edit, REENTRY(JIT_EFFECT_MAY_GC, ITEM, ARG(0,ITEM)|ARG(1,RAW_PTR)|ARG(2,SCALAR)|ARG(3,SCALAR))},
+    {"mvp_lmd_for_in_keys", (void*)mvp_lmd_for_in_keys, REENTRY(JIT_EFFECT_MAY_GC, ITEM, ARG(0,ITEM))},
     {"mvp_lmd_array_sort", (void*)mvp_lmd_array_sort, {JIT_EFFECT_MAY_GC, JIT_REENTRY_YES, ITEM, ARG(0,ITEM)|ARG(1,ITEM), JIT_IMPORT_SCALAR_RESULT(SCALAR_RETURN_NONE)|JIT_IMPORT_NUMBER_STACK_PRESERVES|JIT_IMPORT_ARGS_BORROWED_AUDITED, JIT_EXCEPTION_PRESERVES, 0}},
-    {"mvp_lmd_array_spread", (void*)mvp_lmd_array_spread, AUDIT(JIT_EFFECT_MAY_GC, ITEM, ARG(0,ITEM)|ARG(1,ITEM)|ARG(2,SCALAR))},
+    {"mvp_lmd_array_spread", (void*)mvp_lmd_array_spread, REENTRY(JIT_EFFECT_MAY_GC, ITEM, ARG(0,ITEM)|ARG(1,ITEM)|ARG(2,SCALAR))},
     {"mvp_lmd_array_new", (void*)mvp_lmd_array_new, AUDIT(JIT_EFFECT_MAY_GC, ITEM, ARG(0,SCALAR))},
+    {"mvp_lmd_array_own_item", (void*)mvp_lmd_array_own_item, AUDIT(JIT_EFFECT_NO_GC, ITEM, ARG(0,GC_PTR)|ARG(1,SCALAR))},
+    {"mvp_lmd_is_callable", (void*)mvp_lmd_is_callable, AUDIT(JIT_EFFECT_NO_GC, SCALAR, ARG(0,ITEM))},
+    {"mvp_lmd_array_index_property", (void*)mvp_lmd_array_index_property, REENTRY(JIT_EFFECT_MAY_GC, ITEM, ARG(0,ITEM)|ARG(1,SCALAR)|ARG(2,ITEM)|ARG(3,SCALAR))},
     {"mvp_lmd_array_resize", (void*)mvp_lmd_array_resize, AUDIT(JIT_EFFECT_MAY_GC, ITEM, ARG(0,ITEM)|ARG(1,SCALAR))},
     {"fn_slice", (void*)fn_slice, AUDIT(JIT_EFFECT_MAY_GC, ITEM, ARG(0,ITEM)|ARG(1,ITEM)|ARG(2,ITEM))},
     {"heap_calloc_closure_env", (void*)heap_calloc_closure_env, AUDIT(JIT_EFFECT_MAY_GC, GC_PTR, ARG(0,SCALAR))},
     {"str_repeat", (void*)str_repeat, AUDIT(JIT_EFFECT_MAY_GC, GC_PTR, ARG(0,GC_PTR)|ARG(1,SCALAR))},
     {"fn_join2", (void*)fn_join2, AUDIT(JIT_EFFECT_MAY_GC, ITEM, ARG(0,ITEM)|ARG(1,ITEM))},
-    {"mvp_lmd_class_property", (void*)mvp_lmd_class_property, AUDIT(JIT_EFFECT_MAY_GC, ITEM, ARG(0,ITEM)|ARG(1,ITEM)|ARG(2,ITEM)|ARG(3,SCALAR)|ARG(4,RAW_PTR))},
+    {"mvp_lmd_class_property", (void*)mvp_lmd_class_property, REENTRY(JIT_EFFECT_MAY_GC, ITEM, ARG(0,ITEM)|ARG(1,ITEM)|ARG(2,ITEM)|ARG(3,SCALAR)|ARG(4,RAW_PTR))},
+    // the closed-unit admission proof excludes guest callbacks; storage and C ABI are shared.
+    {"mvp_lmd_class_property_fixed", (void*)mvp_lmd_class_property_fixed, AUDIT(JIT_EFFECT_MAY_GC, ITEM, ARG(0,ITEM)|ARG(1,ITEM)|ARG(2,ITEM)|ARG(3,SCALAR)|ARG(4,RAW_PTR))},
     {"map_shape_field_to_item", (void*)map_shape_field_to_item, AUDIT(JIT_EFFECT_NO_GC, ITEM, ARG(0,RAW_PTR)|ARG(1,RAW_PTR))},
+    {"typemap_hash_lookup_key", (void*)typemap_hash_lookup_key, AUDIT(JIT_EFFECT_NO_GC, RAW_PTR, ARG(0,RAW_PTR)|ARG(1,GC_PTR))},
     {"map_field_store", (void*)map_field_store, AUDIT(JIT_EFFECT_NO_GC, SCALAR, ARG(0,RAW_PTR)|ARG(1,ITEM)|ARG(2,SCALAR))},
     {"map_shape_set", (void*)map_shape_set, AUDIT(JIT_EFFECT_MAY_GC, SCALAR, ARG(0,GC_PTR)|ARG(1,GC_PTR)|ARG(2,ITEM))},
     {"map_shape_set_text", (void*)map_shape_set_text, AUDIT(JIT_EFFECT_MAY_GC, SCALAR, ARG(0,GC_PTR)|ARG(1,GC_PTR)|ARG(2,ITEM))},
     {"map_shape_delete", (void*)map_shape_delete, AUDIT(JIT_EFFECT_MAY_GC, SCALAR, ARG(0,GC_PTR)|ARG(1,GC_PTR))},
     {"map_shape_delete_text", (void*)map_shape_delete_text, AUDIT(JIT_EFFECT_MAY_GC, SCALAR, ARG(0,GC_PTR)|ARG(1,GC_PTR))},
     {"mvp_lmd_class_new", (void*)mvp_lmd_class_new, AUDIT(JIT_EFFECT_MAY_GC, ITEM, ARG(0,RAW_PTR)|ARG(1,ITEM))},
-    {"mvp_lmd_class_initialize_instance", (void*)mvp_lmd_class_initialize_instance, AUDIT(JIT_EFFECT_MAY_GC, ITEM, ARG(0,ITEM)|ARG(1,ITEM))},
+    {"mvp_lmd_class_initialize_instance", (void*)mvp_lmd_class_initialize_instance, REENTRY(JIT_EFFECT_MAY_GC, ITEM, ARG(0,ITEM)|ARG(1,ITEM))},
     {"mvp_lmd_class_invoke", (void*)mvp_lmd_class_invoke, {JIT_EFFECT_MAY_GC, JIT_REENTRY_YES, SCALAR,
         ARG(0,ITEM)|ARG(1,ITEM)|ARG(2,RAW_PTR)|ARG(3,SCALAR)|ARG(4,ITEM),
         JIT_IMPORT_SCALAR_RESULT(SCALAR_RETURN_NONE)|JIT_IMPORT_NUMBER_STACK_PRESERVES|JIT_IMPORT_ARGS_BORROWED_AUDITED,
         JIT_EXCEPTION_PRESERVES, 0}},
-    {"mvp_lmd_class_super", (void*)mvp_lmd_class_super, AUDIT(JIT_EFFECT_MAY_GC, ITEM, ARG(0,ITEM)|ARG(1,SCALAR))},
+    {"mvp_lmd_class_super", (void*)mvp_lmd_class_super, REENTRY(JIT_EFFECT_MAY_GC, ITEM, ARG(0,ITEM)|ARG(1,SCALAR))},
     {"mvp_lmd_constructor_result", (void*)mvp_lmd_constructor_result, AUDIT(JIT_EFFECT_MAY_GC, ITEM, ARG(0,ITEM)|ARG(1,ITEM)|ARG(2,SCALAR))},
-    {"mvp_lmd_instanceof", (void*)mvp_lmd_instanceof, AUDIT(JIT_EFFECT_MAY_GC, ITEM, ARG(0,ITEM)|ARG(1,ITEM))},
+    {"mvp_lmd_instanceof", (void*)mvp_lmd_instanceof, AUDIT(JIT_EFFECT_MAY_GC, ITEM, ARG(0,ITEM)|ARG(1,ITEM)|ARG(2,SCALAR))},
+    {"mvp_lmd_instanceof_dynamic", (void*)mvp_lmd_instanceof, REENTRY(JIT_EFFECT_MAY_GC, ITEM, ARG(0,ITEM)|ARG(1,ITEM)|ARG(2,SCALAR))},
     {"mvp_lmd_throw", (void*)mvp_lmd_throw, AUDIT(JIT_EFFECT_MAY_GC, ITEM, ARG(0,ITEM)|ARG(1,SCALAR))},
     {"mvp_lmd_caught_value", (void*)mvp_lmd_caught_value, AUDIT(JIT_EFFECT_MAY_GC, ITEM, ARG(0,RAW_PTR)|ARG(1,ITEM))},
     {"mvp_lmd_generator_park", (void*)mvp_lmd_generator_park, {JIT_EFFECT_MAY_GC, JIT_REENTRY_YES, ITEM, ARG(0,ITEM)|ARG(1,SCALAR), JIT_IMPORT_SCALAR_RESULT(SCALAR_RETURN_NONE)|JIT_IMPORT_NUMBER_STACK_PRESERVES|JIT_IMPORT_ARGS_BORROWED_AUDITED, JIT_EXCEPTION_PRESERVES, 0}},
@@ -6296,14 +6879,17 @@ static const LmdImport imports[] = {
     {"mvp_lmd_iterator_collect", (void*)mvp_lmd_iterator_collect, {JIT_EFFECT_MAY_GC, JIT_REENTRY_YES, ITEM, ARG(0,RAW_PTR)|ARG(1,ITEM)|ARG(2,ITEM)|ARG(3,ITEM)|ARG(4,ITEM), JIT_IMPORT_SCALAR_RESULT(SCALAR_RETURN_NONE)|JIT_IMPORT_NUMBER_STACK_PRESERVES|JIT_IMPORT_ARGS_BORROWED_AUDITED, JIT_EXCEPTION_PRESERVES, 0}},
     {"mvp_lmd_call_array", (void*)mvp_lmd_call_array, {JIT_EFFECT_MAY_GC, JIT_REENTRY_YES, ITEM, ARG(0,ITEM)|ARG(1,ITEM)|ARG(2,ITEM)|ARG(3,ITEM), JIT_IMPORT_SCALAR_RESULT(SCALAR_RETURN_F64)|JIT_IMPORT_ARGS_BORROWED_AUDITED, JIT_EXCEPTION_PRESERVES, 0}},
     {"mvp_lmd_function_new", (void*)mvp_lmd_function_new, AUDIT(JIT_EFFECT_MAY_GC, ITEM, ARG(0,SCALAR)|ARG(1,RAW_PTR))},
-    {"mvp_lmd_property_key", (void*)mvp_lmd_property_key, {JIT_EFFECT_MAY_GC, JIT_REENTRY_YES, ITEM, ARG(0,ITEM), JIT_IMPORT_SCALAR_RESULT(SCALAR_RETURN_NONE)|JIT_IMPORT_NUMBER_STACK_PRESERVES|JIT_IMPORT_ARGS_BORROWED_AUDITED, JIT_EXCEPTION_PRESERVES, 0}},
+    COERCION_IMPORT(mvp_lmd_property_key, ARG(0,ITEM)),
     {"mvp_lmd_object_new", (void*)mvp_lmd_object_new, AUDIT(JIT_EFFECT_MAY_GC, ITEM, ARG(0,RAW_PTR)|ARG(1,SCALAR))},
-    {"mvp_lmd_property_get", (void*)mvp_lmd_property_get, AUDIT(JIT_EFFECT_MAY_GC, ITEM, ARG(0,ITEM)|ARG(1,ITEM)|ARG(2,SCALAR))},
-    {"mvp_lmd_property_set", (void*)mvp_lmd_property_set, AUDIT(JIT_EFFECT_MAY_GC, ITEM, ARG(0,ITEM)|ARG(1,ITEM)|ARG(2,ITEM))},
-    {"mvp_lmd_property_delete", (void*)mvp_lmd_property_delete, AUDIT(JIT_EFFECT_MAY_GC, ITEM, ARG(0,ITEM)|ARG(1,ITEM))},
-    {"mvp_lmd_property_has", (void*)mvp_lmd_property_has, AUDIT(JIT_EFFECT_MAY_GC, ITEM, ARG(0,ITEM)|ARG(1,ITEM)|ARG(2,SCALAR))},
-    {"mvp_lmd_object_project", (void*)mvp_lmd_object_project, AUDIT(JIT_EFFECT_MAY_GC, ITEM, ARG(0,ITEM)|ARG(1,SCALAR))},
-    {"mvp_lmd_object_copy", (void*)mvp_lmd_object_copy, AUDIT(JIT_EFFECT_MAY_GC, ITEM, ARG(0,ITEM)|ARG(1,ITEM)|ARG(2,SCALAR))},
+    {"mvp_lmd_property_get", (void*)mvp_lmd_property_get, REENTRY(JIT_EFFECT_MAY_GC, ITEM, ARG(0,ITEM)|ARG(1,ITEM)|ARG(2,SCALAR))},
+    {"mvp_lmd_property_get_fixed", (void*)mvp_lmd_property_get, AUDIT(JIT_EFFECT_MAY_GC, ITEM, ARG(0,ITEM)|ARG(1,ITEM)|ARG(2,SCALAR))},
+    {"mvp_lmd_property_set", (void*)mvp_lmd_property_set, REENTRY(JIT_EFFECT_MAY_GC, ITEM, ARG(0,ITEM)|ARG(1,ITEM)|ARG(2,ITEM))},
+    {"mvp_lmd_property_set_fixed", (void*)mvp_lmd_property_set, AUDIT(JIT_EFFECT_MAY_GC, ITEM, ARG(0,ITEM)|ARG(1,ITEM)|ARG(2,ITEM))},
+    {"mvp_lmd_property_delete", (void*)mvp_lmd_property_delete, REENTRY(JIT_EFFECT_MAY_GC, ITEM, ARG(0,ITEM)|ARG(1,ITEM))},
+    {"mvp_lmd_property_has", (void*)mvp_lmd_property_has, REENTRY(JIT_EFFECT_MAY_GC, ITEM, ARG(0,ITEM)|ARG(1,ITEM)|ARG(2,SCALAR))},
+    {"mvp_lmd_object_project", (void*)mvp_lmd_object_project, REENTRY(JIT_EFFECT_MAY_GC, ITEM, ARG(0,ITEM)|ARG(1,SCALAR))},
+    {"mvp_lmd_object_project_fixed", (void*)mvp_lmd_object_project, AUDIT(JIT_EFFECT_MAY_GC, ITEM, ARG(0,ITEM)|ARG(1,SCALAR))},
+    {"mvp_lmd_object_copy", (void*)mvp_lmd_object_copy, REENTRY(JIT_EFFECT_MAY_GC, ITEM, ARG(0,ITEM)|ARG(1,ITEM)|ARG(2,SCALAR))},
     {"mvp_lmd_map_call", (void*)mvp_lmd_map_call, AUDIT(JIT_EFFECT_MAY_GC, ITEM, ARG(0,ITEM)|ARG(1,ITEM)|ARG(2,ITEM)|ARG(3,ITEM))},
     {"mvp_lmd_map_next", (void*)mvp_lmd_map_next, AUDIT(JIT_EFFECT_NO_GC, SCALAR, ARG(0,ITEM)|ARG(1,SCALAR))},
     {"mvp_lmd_map_entry", (void*)mvp_lmd_map_entry, AUDIT(JIT_EFFECT_MAY_GC, ITEM, ARG(0,ITEM)|ARG(1,SCALAR)|ARG(2,SCALAR))},
@@ -6327,6 +6913,7 @@ static const LmdImport imports[] = {
     {"fn_max2_u", (void*)fn_max2_u, AUDIT(JIT_EFFECT_NO_GC, SCALAR, ARG(0,SCALAR)|ARG(1,SCALAR))},
 
 };
+#undef COERCION_IMPORT
 static bool import_metadata(const char* name, JitImportMetadata* out) {
     for (const LmdImport& entry : imports) if (!strcmp(name, entry.name)) { *out = entry.audit; return true; }
     if (!strcmp(name, "lambda_side_stack_ensure_for") || !strcmp(name, "lambda_stack_is_exhausted"))
@@ -6454,8 +7041,8 @@ static bool compile_function(MvpLmdProgram* p, LmdFunction* f) {
         } else if (f->receiver_captured) {
             c.receiver_cell = em_call_1(&c.em, "mvp_lmd_array_new", MIR_T_I64, MIR_T_I64, integer(&c, 2), true);
             check_error(&c, c.receiver_cell); boxed(&c, c.receiver_cell, K_ARRAY);
-            array_index_write(&c, {NULL, boxed(&c, c.receiver_cell, K_ARRAY), constant(&c, 0)}, boxed(&c, c.receiver));
-            array_index_write(&c, {NULL, boxed(&c, c.receiver_cell, K_ARRAY), constant(&c, 1)}, boxed(&c, c.new_target));
+            array_index_write(&c, {NULL, boxed(&c, c.receiver_cell, K_ARRAY), constant(&c, 0)}, boxed(&c, c.receiver), true);
+            array_index_write(&c, {NULL, boxed(&c, c.receiver_cell, K_ARRAY), constant(&c, 1)}, boxed(&c, c.new_target), true);
         }
         for (int parameter = 0; parameter < p->bindings->length; parameter++) {
             LmdBinding* b = (LmdBinding*)p->bindings->data[parameter];
@@ -6476,7 +7063,7 @@ static bool compile_function(MvpLmdProgram* p, LmdFunction* f) {
                 MIR_reg_t address = op(&c, MIR_ADD, reg(&c, c.arguments),
                     reg(&c, op(&c, MIR_MUL, reg(&c, index), integer(&c, sizeof(Item)))));
                 MIR_reg_t value = em_load_at(&c.em, address, 0, MIR_T_I64, "rest_argument");
-                array_index_write(&c, {NULL, array, op(&c, MIR_SUB, reg(&c, index), integer(&c, i))}, boxed(&c, value));
+                array_index_write(&c, {NULL, array, op(&c, MIR_SUB, reg(&c, index), integer(&c, i))}, boxed(&c, value), true);
                 move(&c, index, reg(&c, op(&c, MIR_ADD, reg(&c, index), integer(&c, 1)))); jump(&c, start);
                 put_label(&c, done);
                 if (b) write_binding(&c, b, array, a, true);
@@ -6578,12 +7165,12 @@ static bool compile_function(MvpLmdProgram* p, LmdFunction* f) {
 static bool plan_shape_field(MvpLmdProgram*, TypeMap*, String*, TypeId, uint8_t);
 extern "C" Item mvp_lmd_function_prepare(Item owner) {
     Function* function = owner.function;
-    if (function->entry_abi != FN_ENTRY_ABI_MVP_LMD || !function->requires_runtime_context || !function->def)
+    if (function->entry_abi != FN_ENTRY_ABI_MVP_LMD || !function->requires_runtime_context)
         return mvp_lmd_fail(LMD_MVP_CAPABILITY, 0);
     MvpLmdCallable* callable = (MvpLmdCallable*)function;
     if (callable->properties || callable->constructor) return owner;
     const AstFuncNode* ast = (const AstFuncNode*)function->def;
-    bool has_prototype = !callable->non_constructible || ast->is_generator;
+    bool has_prototype = ast && (!callable->non_constructible || ast->is_generator);
     if (function->closure_field_count > UINT8_MAX - 3) return mvp_lmd_fail(LMD_MVP_CAPABILITY, 0);
     RootFrame roots(1);
     if (!roots.valid()) return ItemError;
@@ -6591,13 +7178,13 @@ extern "C" Item mvp_lmd_function_prepare(Item owner) {
     MvpLmdProgram* p = callable->program;
     MvpLmdClass* cls = (MvpLmdClass*)pool_calloc(p->frontend->pool, sizeof(MvpLmdClass));
     if (!cls) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
-    mvp_lmd_nominal_initialize(cls, ast->name ? ast->name : name_pool_create_len(p->frontend->name_pool, "", 0), p);
-    if (ast->is_generator) cls->nominal.base = &p->library->generator.nominal;
+    mvp_lmd_nominal_initialize(cls, ast && ast->name ? ast->name : name_pool_create_len(p->frontend->name_pool, "", 0), p);
+    if (ast && ast->is_generator) cls->nominal.base = &p->library->generator.nominal;
     cls->owner = function; cls->property_slot = function->closure_field_count;
     const char* names[] = {"constructor", "prototype", "name", "length"};
     const TypeId types[] = {LMD_TYPE_FUNC, LMD_TYPE_MAP, LMD_TYPE_STRING, LMD_TYPE_INT};
     for (int i = has_prototype ? 0 : 2; i < 4; i++) if (!plan_shape_field(p, i ? &cls->static_shape : &cls->prototype_shape,
-            name_pool_create_len(p->frontend->name_pool, names[i], strlen(names[i])), types[i], JSPD_NON_ENUMERABLE))
+            name_pool_create_len(p->frontend->name_pool, names[i], strlen(names[i])), types[i], JSPD_NON_ENUMERABLE | (i == 1 ? JSPD_NON_CONFIGURABLE : 0)))
         return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
     typemap_hash_build(&cls->static_shape, p->frontend->pool);
     typemap_hash_build(&cls->prototype_shape, p->frontend->pool);
@@ -6628,9 +7215,12 @@ extern "C" Item mvp_lmd_function_new(uint64_t code_id, MvpLmdProgram* p) {
     if (p->receiver_abi) {
         MvpLmdCallable* callable = (MvpLmdCallable*)value;
         callable->requires_runtime_context = true; callable->program = p; callable->home = f->home;
+        if (f->object_home || f->lexical_super)
+            callable->home_slot = (f->captures ? f->captures->length : 0) + f->lexical_receiver + 1;
         AstNode* parent = ast_index_parent(&p->frontend->ast_index, (AstNode*)f->ast);
         callable->non_constructible = f->ast->node_type == AST_NODE_ARROW_FUNC || f->ast->is_generator ||
-            (parent && parent->node_type == AST_NODE_PROPERTY && ((AstPropertyNode*)parent)->method);
+            (parent && parent->node_type == AST_NODE_PROPERTY && (((AstPropertyNode*)parent)->method ||
+                ((AstPropertyNode*)parent)->is_getter || ((AstPropertyNode*)parent)->is_setter));
         if (f->home) {
             AstMethodNode* method = (AstMethodNode*)f->ast;
             callable->constructor = method->kind == AstMethodNode::JS_METHOD_CONSTRUCTOR;
@@ -6679,7 +7269,7 @@ extern "C" Item mvp_lmd_class_new(MvpLmdClass* cls, Item base) {
     ShapeEntry* name = typemap_hash_lookup(&cls->static_shape, "name", 4);
     ShapeEntry* length = typemap_hash_lookup(&cls->static_shape, "length", 6);
     if (name->type->type_id == LMD_TYPE_STRING)
-        map_field_store((char*)statics->data + name->byte_offset, Item{.item = s2it(cls->ast ? cls->ast->name : ((AstFuncNode*)cls->owner->def)->name ?
+        map_field_store((char*)statics->data + name->byte_offset, Item{.item = s2it(cls->ast ? cls->ast->name : cls->owner->def && ((AstFuncNode*)cls->owner->def)->name ?
             ((AstFuncNode*)cls->owner->def)->name : name_pool_create_len(cls->program->frontend->name_pool, "", 0))}, LMD_TYPE_STRING);
     if (length->type->type_id == LMD_TYPE_INT)
         map_field_store((char*)statics->data + length->byte_offset, Item{.item = i2it(mvp_lmd_class_values(cls)[0].function->arity)}, LMD_TYPE_INT);
@@ -6692,12 +7282,121 @@ extern "C" Item mvp_lmd_class_new(MvpLmdClass* cls, Item base) {
         Item value = mvp_lmd_function_new(function->id, cls->program);
         if (item_is_error(value)) return value;
         Map* target = method->static_method ? statics : prototype;
-        ShapeEntry* field = typemap_hash_lookup((TypeMap*)target->type, key->chars, key->len);
-        map_field_store((char*)target->data + field->byte_offset, value, LMD_TYPE_FUNC);
+        if (method->kind == AstMethodNode::JS_METHOD_GET || method->kind == AstMethodNode::JS_METHOD_SET) {
+            Item defined = mvp_lmd_define_accessor(Item{.map = target}, Item{.item = s2it(key)}, value,
+                (JSPD_NON_ENUMERABLE << 8) | (method->kind == AstMethodNode::JS_METHOD_SET ? 1 : 0));
+            if (item_is_error(defined)) return defined;
+        } else {
+            ShapeEntry* field = typemap_hash_lookup((TypeMap*)target->type, key->chars, key->len);
+            // an earlier accessor with the same name has no physical slot to overwrite.
+            if (!map_shape_set_resolved(target, key, field, value)) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
+        }
     }
     return mvp_lmd_class_values(cls)[0];
 }
 
+static void plan_library_shapes(MvpLmdProgram* p, bool metadata_only = false) {
+    // key admission inspects the native field inventory without enabling runtime coercion.
+    if (!p->library) p->library = (MvpLmdLibraryState*)pool_calloc(p->frontend->pool, sizeof(MvpLmdLibraryState));
+    if (!p->library) { diagnostic(p, NULL, "builtin metadata allocation"); return; }
+    if (!p->library->object.shape.type_id) {
+        MvpLmdClass* classes[] = {&p->library->date, &p->library->regexp, &p->library->object, &p->library->array, &p->library->generator, &p->library->symbol, &p->library->iterator, &p->library->map, &p->library->set};
+        const char* names[] = {"Date", "RegExp", "Object", "Array", "Generator", "Symbol", "Iterator", "Map", "Set"};
+        const char* common[] = {"constructor", "prototype", "name", "length"};
+        TypeId common_types[] = {LMD_TYPE_FUNC, LMD_TYPE_MAP, LMD_TYPE_STRING, LMD_TYPE_INT};
+        for (int i = 0; i < 9; i++) {
+            mvp_lmd_nominal_initialize(classes[i], name_pool_create_len(p->frontend->name_pool, names[i], strlen(names[i])), p);
+            for (int j = 0; j < 4; j++) if (!plan_shape_field(p, j ? &classes[i]->static_shape : &classes[i]->prototype_shape,
+                    name_pool_create_len(p->frontend->name_pool, common[j], strlen(common[j])), i == 3 && j == 1 ? LMD_TYPE_ARRAY : common_types[j], JSPD_NON_ENUMERABLE))
+                diagnostic(p, NULL, "builtin common shape allocation");
+        }
+        p->library->regexp.nominal.base = &p->library->object.nominal;
+        p->library->generator.nominal.base = &p->library->object.nominal;
+        p->library->iterator.nominal.base = &p->library->object.nominal;
+        p->library->map.nominal.base = &p->library->object.nominal;
+        p->library->set.nominal.base = &p->library->object.nominal;
+        p->library->json_shape = *p->roots[0];
+        p->library->json_shape.nominal = &p->library->object.nominal;
+        struct Field { TypeMap* shape; const char* name; TypeId type; };
+        const Field fields[] = {
+            {&p->library->json_shape, "parse", LMD_TYPE_FUNC}, {&p->library->json_shape, "stringify", LMD_TYPE_FUNC},
+            {&p->library->date.prototype_shape, "getTime", LMD_TYPE_FUNC},
+            {&p->library->date.prototype_shape, "valueOf", LMD_TYPE_FUNC}, {&p->library->date.static_shape, "now", LMD_TYPE_FUNC},
+            {&p->library->regexp.shape, "source", LMD_TYPE_STRING}, {&p->library->regexp.shape, "flags", LMD_TYPE_STRING},
+            {&p->library->regexp.shape, "lastIndex", LMD_TYPE_INT}, {&p->library->regexp.shape, "global", LMD_TYPE_BOOL},
+            {&p->library->regexp.shape, "ignoreCase", LMD_TYPE_BOOL}, {&p->library->regexp.shape, "multiline", LMD_TYPE_BOOL},
+            {&p->library->regexp.shape, "dotAll", LMD_TYPE_BOOL}, {&p->library->regexp.shape, "unicode", LMD_TYPE_BOOL},
+            {&p->library->regexp.shape, "sticky", LMD_TYPE_BOOL}, {&p->library->regexp.prototype_shape, "exec", LMD_TYPE_FUNC},
+            {&p->library->regexp.prototype_shape, "test", LMD_TYPE_FUNC},
+            {&p->library->regexp.prototype_shape, "toString", LMD_TYPE_FUNC},
+            {&p->library->object.prototype_shape, "toString", LMD_TYPE_FUNC},
+            {&p->library->object.prototype_shape, "isPrototypeOf", LMD_TYPE_FUNC},
+            {&p->library->object.prototype_shape, "propertyIsEnumerable", LMD_TYPE_FUNC},
+            {&p->library->array.static_shape, "isArray", LMD_TYPE_FUNC},
+            {&p->library->object.prototype_shape, "hasOwnProperty", LMD_TYPE_FUNC},
+            {&p->library->object.prototype_shape, "valueOf", LMD_TYPE_FUNC},
+            {&p->library->object.static_shape, "keys", LMD_TYPE_FUNC},
+            {&p->library->object.static_shape, "values", LMD_TYPE_FUNC},
+            {&p->library->object.static_shape, "entries", LMD_TYPE_FUNC},
+            {&p->library->object.static_shape, "hasOwn", LMD_TYPE_FUNC},
+            {&p->library->object.static_shape, "getOwnPropertyNames", LMD_TYPE_FUNC},
+            {&p->library->object.static_shape, "getOwnPropertySymbols", LMD_TYPE_FUNC},
+            {&p->library->object.static_shape, "getOwnPropertyDescriptors", LMD_TYPE_FUNC},
+            {&p->library->object.static_shape, "defineProperty", LMD_TYPE_FUNC},
+            {&p->library->object.static_shape, "defineProperties", LMD_TYPE_FUNC},
+            {&p->library->object.static_shape, "setPrototypeOf", LMD_TYPE_FUNC},
+            {&p->library->object.static_shape, "getOwnPropertyDescriptor", LMD_TYPE_FUNC},
+            {&p->library->object.static_shape, "preventExtensions", LMD_TYPE_FUNC},
+            {&p->library->object.static_shape, "seal", LMD_TYPE_FUNC},
+            {&p->library->object.static_shape, "freeze", LMD_TYPE_FUNC},
+            {&p->library->object.static_shape, "isExtensible", LMD_TYPE_FUNC},
+            {&p->library->object.static_shape, "isSealed", LMD_TYPE_FUNC},
+            {&p->library->object.static_shape, "isFrozen", LMD_TYPE_FUNC},
+            {&p->library->object.static_shape, "create", LMD_TYPE_FUNC},
+            {&p->library->object.static_shape, "assign", LMD_TYPE_FUNC},
+            {&p->library->object.static_shape, "getPrototypeOf", LMD_TYPE_FUNC},
+            {&p->library->array.static_shape, "from", LMD_TYPE_FUNC},
+            {&p->library->generator.prototype_shape, "next", LMD_TYPE_FUNC},
+            {&p->library->generator.prototype_shape, "return", LMD_TYPE_FUNC},
+            {&p->library->generator.prototype_shape, "throw", LMD_TYPE_FUNC},
+            {&p->library->symbol.static_shape, "iterator", LMD_TYPE_SYMBOL},
+            {&p->library->iterator.prototype_shape, "next", LMD_TYPE_FUNC}};
+        for (const Field& field : fields) if (!plan_shape_field(p, field.shape,
+                name_pool_create_len(p->frontend->name_pool, field.name, strlen(field.name)), field.type, JSPD_NON_ENUMERABLE))
+            diagnostic(p, NULL, "builtin shape allocation");
+        for (int i = 0; i < mvp_lmd_builtin_method_count; i++) {
+            const MvpLmdBuiltinMethod& method = mvp_lmd_builtin_methods[i];
+            if (method.owner == LMD_TYPE_ARRAY && !plan_shape_field(p, &p->library->array.prototype_shape,
+                    name_pool_create_len(p->frontend->name_pool, method.name, strlen(method.name)), LMD_TYPE_FUNC, JSPD_NON_ENUMERABLE))
+                diagnostic(p, NULL, "array builtin shape allocation");
+        }
+        const char* collection_names[] = {"get", "set", "has", "delete", "clear", "entries", "keys", "values", "add"};
+        for (int set = 0; set < 2; set++) for (int i = 0; i < 9; i++) {
+            if (set ? i < 2 : i == 8) continue;
+            const char* name = collection_names[i];
+            if (!plan_shape_field(p, set ? &p->library->set.prototype_shape : &p->library->map.prototype_shape,
+                    name_pool_create_len(p->frontend->name_pool, name, strlen(name)), LMD_TYPE_FUNC, JSPD_NON_ENUMERABLE))
+                diagnostic(p, NULL, "collection shape allocation");
+        }
+        typemap_hash_build(&p->library->json_shape, p->frontend->pool);
+        for (MvpLmdClass* cls : classes) {
+            typemap_hash_build(&cls->shape, p->frontend->pool);
+            typemap_hash_build(&cls->prototype_shape, p->frontend->pool);
+            typemap_hash_build(&cls->static_shape, p->frontend->pool);
+        }
+    }
+    if (metadata_only) return;
+    p->roots[1]->nominal = &p->library->map.nominal;
+    p->roots[0]->nominal = &p->library->object.nominal;
+    p->library->object_shape = p->roots[0];
+    p->intrinsics[I_OBJECT - 1].kinds = K_FUNCTION;
+    p->intrinsics[I_OBJECT - 1].slot = p->library_slot + LMD_LIBRARY_OBJECT;
+    p->intrinsics[I_ARRAY - 1].kinds = K_FUNCTION;
+    p->intrinsics[I_ARRAY - 1].slot = p->library_slot + LMD_LIBRARY_ARRAY;
+    p->intrinsics[I_MAP - 1].kinds = p->intrinsics[I_SET - 1].kinds = K_FUNCTION;
+    p->intrinsics[I_MAP - 1].slot = p->library_slot + LMD_LIBRARY_MAP;
+    p->intrinsics[I_MATH - 1].slot = p->library_slot + LMD_LIBRARY_MATH;
+}
 static int admission_pass(void* opaque) {
     MvpLmdProgram* p = (MvpLmdProgram*)opaque;
     // append shared synthetic definitions before sizing node-indexed MVP analysis tables.
@@ -6726,12 +7425,13 @@ static int admission_pass(void* opaque) {
     for (int i = 0; i < I_COUNT - 1; i++) {
         p->intrinsics[i].owner = main; p->intrinsics[i].intrinsic = (uint8_t)i + 1;
         p->intrinsics[i].kinds = i >= 3 ? K_OBJECT : i ? K_NUMBER : K_UNDEFINED;
-        if (i + 1 == I_REQUIRE || i + 1 == I_DATE || i + 1 == I_REGEXP || i + 1 == I_SYMBOL) p->intrinsics[i].kinds = K_FUNCTION;
+        if (i + 1 == I_REQUIRE || i + 1 == I_DATE || i + 1 == I_REGEXP || i + 1 == I_SYMBOL || i + 1 == I_PROXY) p->intrinsics[i].kinds = K_FUNCTION;
     }
     for (int i = 0; i < 2; i++) {
         const char* name = i ? "MvpLmdMap" : "MvpLmdObject";
         p->families[i].type_name = {name, strlen(name)};
         p->families[i].struct_kind = LMD_TYPE_MAP;
+        p->families[i].extension = &mvp_lmd_plain_extension;
         p->roots[i] = (TypeMap*)alloc_type(p->frontend->pool, LMD_TYPE_MAP, sizeof(TypeMap));
         if (!p->roots[i]) return false;
         p->roots[i]->type_id = LMD_TYPE_MAP;
@@ -6741,6 +7441,7 @@ static int admission_pass(void* opaque) {
     }
     LmdWalk gather = {p, main, NULL, false}; walk(p->frontend->ast_root, &gather);
     gather.facts = true; walk(p->frontend->ast_root, &gather);
+    if (p->property_callbacks) p->array_method_overrides = p->map_method_overrides = true;
     if (p->global_reflection) for (int i = 0; i < p->bindings->length; i++) {
         LmdBinding* b = (LmdBinding*)p->bindings->data[i];
         if (!b->owner->id && !b->entry->is_lexical && !b->intrinsic &&
@@ -6750,87 +7451,7 @@ static int admission_pass(void* opaque) {
         }
     }
     if (p->global_receiver) p->global_slot = p->slot_count++;
-    if (p->library_active) {
-        MvpLmdClass* classes[] = {&p->library->date, &p->library->regexp, &p->library->object, &p->library->array, &p->library->generator, &p->library->symbol, &p->library->iterator, &p->library->map, &p->library->set};
-        const char* names[] = {"Date", "RegExp", "Object", "Array", "Generator", "Symbol", "Iterator", "Map", "Set"};
-        const char* common[] = {"constructor", "prototype", "name", "length"};
-        TypeId common_types[] = {LMD_TYPE_FUNC, LMD_TYPE_MAP, LMD_TYPE_STRING, LMD_TYPE_INT};
-        for (int i = 0; i < 9; i++) {
-            mvp_lmd_nominal_initialize(classes[i], name_pool_create_len(p->frontend->name_pool, names[i], strlen(names[i])), p);
-            for (int j = 0; j < 4; j++) if (!plan_shape_field(p, j ? &classes[i]->static_shape : &classes[i]->prototype_shape,
-                    name_pool_create_len(p->frontend->name_pool, common[j], strlen(common[j])), i == 3 && j == 1 ? LMD_TYPE_ARRAY : common_types[j], JSPD_NON_ENUMERABLE))
-                diagnostic(p, NULL, "builtin common shape allocation");
-        }
-        p->library->regexp.nominal.base = &p->library->object.nominal;
-        p->library->generator.nominal.base = &p->library->object.nominal;
-        p->library->iterator.nominal.base = &p->library->object.nominal;
-        p->library->map.nominal.base = &p->library->object.nominal;
-        p->library->set.nominal.base = &p->library->object.nominal;
-        p->roots[1]->nominal = &p->library->map.nominal;
-        p->roots[0]->nominal = &p->library->object.nominal;
-        p->library->object_shape = p->roots[0]; p->library->json_shape = *p->roots[0];
-        struct Field { TypeMap* shape; const char* name; TypeId type; };
-        const Field fields[] = {
-            {&p->library->json_shape, "parse", LMD_TYPE_FUNC}, {&p->library->json_shape, "stringify", LMD_TYPE_FUNC},
-            {&p->library->date.prototype_shape, "getTime", LMD_TYPE_FUNC},
-            {&p->library->date.prototype_shape, "valueOf", LMD_TYPE_FUNC}, {&p->library->date.static_shape, "now", LMD_TYPE_FUNC},
-            {&p->library->regexp.shape, "source", LMD_TYPE_STRING}, {&p->library->regexp.shape, "flags", LMD_TYPE_STRING},
-            {&p->library->regexp.shape, "lastIndex", LMD_TYPE_INT}, {&p->library->regexp.shape, "global", LMD_TYPE_BOOL},
-            {&p->library->regexp.shape, "ignoreCase", LMD_TYPE_BOOL}, {&p->library->regexp.shape, "multiline", LMD_TYPE_BOOL},
-            {&p->library->regexp.shape, "dotAll", LMD_TYPE_BOOL}, {&p->library->regexp.shape, "unicode", LMD_TYPE_BOOL},
-            {&p->library->regexp.shape, "sticky", LMD_TYPE_BOOL}, {&p->library->regexp.prototype_shape, "exec", LMD_TYPE_FUNC},
-            {&p->library->regexp.prototype_shape, "test", LMD_TYPE_FUNC},
-            {&p->library->regexp.prototype_shape, "toString", LMD_TYPE_FUNC},
-            {&p->library->object.prototype_shape, "toString", LMD_TYPE_FUNC},
-            {&p->library->object.prototype_shape, "hasOwnProperty", LMD_TYPE_FUNC},
-            {&p->library->object.prototype_shape, "valueOf", LMD_TYPE_FUNC},
-            {&p->library->object.static_shape, "defineProperty", LMD_TYPE_FUNC},
-            {&p->library->object.static_shape, "create", LMD_TYPE_FUNC},
-            {&p->library->object.static_shape, "assign", LMD_TYPE_FUNC},
-            {&p->library->object.static_shape, "getPrototypeOf", LMD_TYPE_FUNC},
-            {&p->library->array.prototype_shape, "push", LMD_TYPE_FUNC},
-            {&p->library->array.prototype_shape, "concat", LMD_TYPE_FUNC},
-            {&p->library->array.prototype_shape, "splice", LMD_TYPE_FUNC},
-            {&p->library->array.prototype_shape, "unshift", LMD_TYPE_FUNC},
-            {&p->library->array.prototype_shape, "shift", LMD_TYPE_FUNC},
-            {&p->library->array.prototype_shape, "toReversed", LMD_TYPE_FUNC},
-            {&p->library->array.prototype_shape, "at", LMD_TYPE_FUNC},
-            {&p->library->array.prototype_shape, "map", LMD_TYPE_FUNC},
-            {&p->library->array.prototype_shape, "filter", LMD_TYPE_FUNC},
-            {&p->library->array.prototype_shape, "forEach", LMD_TYPE_FUNC},
-            {&p->library->array.prototype_shape, "some", LMD_TYPE_FUNC},
-            {&p->library->array.prototype_shape, "reduce", LMD_TYPE_FUNC},
-            {&p->library->array.static_shape, "from", LMD_TYPE_FUNC},
-            {&p->library->generator.prototype_shape, "next", LMD_TYPE_FUNC},
-            {&p->library->generator.prototype_shape, "return", LMD_TYPE_FUNC},
-            {&p->library->generator.prototype_shape, "throw", LMD_TYPE_FUNC},
-            {&p->library->symbol.static_shape, "iterator", LMD_TYPE_SYMBOL},
-            {&p->library->iterator.prototype_shape, "next", LMD_TYPE_FUNC}};
-        for (const Field& field : fields) if (!plan_shape_field(p, field.shape,
-                name_pool_create_len(p->frontend->name_pool, field.name, strlen(field.name)), field.type, JSPD_NON_ENUMERABLE))
-            diagnostic(p, NULL, "builtin shape allocation");
-        const char* collection_names[] = {"get", "set", "has", "delete", "clear", "entries", "keys", "values", "add"};
-        for (int set = 0; set < 2; set++) for (int i = 0; i < 9; i++) {
-            if (set ? i < 2 : i == 8) continue;
-            const char* name = collection_names[i];
-            if (!plan_shape_field(p, set ? &p->library->set.prototype_shape : &p->library->map.prototype_shape,
-                    name_pool_create_len(p->frontend->name_pool, name, strlen(name)), LMD_TYPE_FUNC, JSPD_NON_ENUMERABLE))
-                diagnostic(p, NULL, "collection shape allocation");
-        }
-        typemap_hash_build(&p->library->json_shape, p->frontend->pool);
-        for (MvpLmdClass* cls : classes) {
-            typemap_hash_build(&cls->shape, p->frontend->pool);
-            typemap_hash_build(&cls->prototype_shape, p->frontend->pool);
-            typemap_hash_build(&cls->static_shape, p->frontend->pool);
-        }
-        p->intrinsics[I_OBJECT - 1].kinds = K_FUNCTION;
-        p->intrinsics[I_OBJECT - 1].slot = p->library_slot + LMD_LIBRARY_OBJECT;
-        p->intrinsics[I_ARRAY - 1].kinds = K_FUNCTION;
-        p->intrinsics[I_ARRAY - 1].slot = p->library_slot + LMD_LIBRARY_ARRAY;
-        p->intrinsics[I_MAP - 1].kinds = p->intrinsics[I_SET - 1].kinds = K_FUNCTION;
-        p->intrinsics[I_MAP - 1].slot = p->library_slot + LMD_LIBRARY_MAP;
-        p->intrinsics[I_MATH - 1].slot = p->library_slot + LMD_LIBRARY_MATH;
-    }
+    if (p->library_active) plan_library_shapes(p);
     for (int i = 0; i < p->bindings->length; i++) {
         LmdBinding* b = (LmdBinding*)p->bindings->data[i]; b->seed_kinds = b->kinds;
     }
@@ -6861,10 +7482,12 @@ static int representation_pass(void* opaque) {
     }
     for (int i = 0; i < p->bindings->length; i++) {
         LmdBinding* b = (LmdBinding*)p->bindings->data[i];
-        if (b->entry->is_parameter && b->owner->closed_calls) b->kinds = 0;
+        // Closed calls constrain incoming arguments, not later iterator/pattern writes.
+        if (b->entry->is_parameter && b->owner->closed_calls && !b->implicit_write) b->kinds = 0;
         b->array = {};
         b->array_changes = 0;
-        if (b->entry->is_parameter && !b->owner->closed_calls) b->array.lanes = LMD_ARRAY_UNKNOWN;
+        if (b->implicit_write) { b->range.state = 2; b->array.length.state = 2; }
+        if (b->implicit_write || (b->entry->is_parameter && !b->owner->closed_calls)) b->array.lanes = LMD_ARRAY_UNKNOWN;
     }
     // refine kinds once with solved extents; unknown bounds keep number-or-undefined.
     for (int pass = 0; pass < 2; pass++) {
@@ -6872,7 +7495,7 @@ static int representation_pass(void* opaque) {
             memset(p->literal_kinds, 0, p->frontend->ast_index.count * sizeof(unsigned));
             for (int i = 0; i < p->bindings->length; i++) {
                 LmdBinding* b = (LmdBinding*)p->bindings->data[i];
-                b->kinds = b->entry->is_parameter && b->owner->closed_calls ? 0 : b->seed_kinds;
+                b->kinds = b->entry->is_parameter && b->owner->closed_calls && !b->implicit_write ? 0 : b->seed_kinds;
             }
             for (int i = 0; i < p->functions->length; i++)
                 ((LmdFunction*)p->functions->data[i])->returns = 0;
@@ -6971,8 +7594,9 @@ static void plan_objects(AstNode* node, void* opaque) {
         for (AstNode* n = ((AstMapNode*)node)->properties; n; n = n->next) {
             if (n->node_type != AST_NODE_PROPERTY) { exact = false; break; }
             AstPropertyNode* prop = (AstPropertyNode*)n;
-            if (prop->computed || prop->key->node_type != AST_NODE_IDENT) { exact = false; break; }
+            if (prop->computed || prop->is_getter || prop->is_setter || prop->key->node_type != AST_NODE_IDENT) { exact = false; break; }
             String* key = name_pool_create_string(p->frontend->name_pool, ((AstIdentNode*)prop->key)->name);
+            if (named(key, "__proto__")) { exact = false; break; }
             if (!key || typemap_shape_lookup_last(shape, key->chars, key->len)) { exact = false; break; }
             unsigned k = kind(p, prop->value);
             TypeId tid = k == K_UNDEFINED ? LMD_TYPE_UNDEFINED : k == K_NULL ? LMD_TYPE_NULL :
@@ -7288,6 +7912,141 @@ static bool dense_append_loop(MvpLmdProgram* p, AstFieldNode* field, AstNode* wr
     }
     return true;
 }
+static LmdRange guarded_array_index_extent(MvpLmdProgram* p, AstNode* node) {
+    double offset;
+    LmdBinding* binding = linear_index(p, node, &offset);
+    if (!binding || !binding->owner || !binding->owner->id || binding->external || binding->captured ||
+            binding->reflected_global || binding->kinds != K_NUMBER) return {0, 0, 2};
+    AstIndex* tree = &p->frontend->ast_index;
+    AstNode* child = node;
+    for (AstNode* parent = ast_index_parent(tree, child); parent;
+            child = parent, parent = ast_index_parent(tree, parent)) {
+        if (parent->node_type != AST_NODE_LOOP) continue;
+        AstLoopControlNode* loop = (AstLoopControlNode*)parent;
+        if (loop->form == LOOP_FORM_DO_WHILE || loop->body != child || !loop->cond ||
+                loop->cond->node_type != AST_NODE_BINARY) continue;
+        AstBinaryNode* condition = (AstBinaryNode*)loop->cond;
+        if ((condition->op != OPERATOR_LT && condition->op != OPERATOR_LE) ||
+                !same_binding(p, condition->left, binding)) continue;
+        LmdRange limit = range(p, condition->right);
+        if (limit.state != 1) continue;
+        AstNodeId body = ast_index_find(tree, loop->body), cond = ast_index_find(tree, loop->cond);
+        bool stable = true;
+        for (AstNodeId i = 0; i < tree->count && stable; i++) {
+            AstNode* use = tree->nodes[i];
+            if (!same_binding(p, use, binding) ||
+                    (!ast_index_node_descends(tree, i, body) && !ast_index_node_descends(tree, i, cond))) continue;
+            AstNode* consumer = ast_index_parent(tree, use);
+            if (!consumer) continue;
+            bool write = (consumer->node_type == AST_NODE_ASSIGN && ((AstAssignNode*)consumer)->left == use) ||
+                (consumer->node_type == AST_NODE_VARIABLE_DECLARATOR && ((AstDeclaratorNode*)consumer)->id == use) ||
+                (consumer->node_type == AST_NODE_UNARY &&
+                    (((AstUnaryNode*)consumer)->op == OPERATOR_JS_INCREMENT || ((AstUnaryNode*)consumer)->op == OPERATOR_JS_DECREMENT)) ||
+                ((consumer->node_type == AST_NODE_FOR_IN_STAM || consumer->node_type == AST_NODE_FOR_OF_STAM) &&
+                    ((JsForOfNode*)consumer)->left == use);
+            // a later write in this same iteration is followed by the loop condition before another read.
+            stable = !write || (i > ast_index_find(tree, node) &&
+                enclosing_loop(p, consumer, binding->owner, true) == parent &&
+                enclosing_loop(p, node, binding->owner, true) == parent);
+        }
+        // only nonnegative integer keys index arrays; other Numbers cannot create sparse elements.
+        if (stable) return finite_range(0, fmax(0, limit.upper + offset - (condition->op == OPERATOR_LT ? 1 : 0)));
+    }
+    return {0, 0, 2};
+}
+static bool unit_excludes_sparse_arrays(MvpLmdProgram* p, LmdBinding* local = NULL) {
+    auto reject = [&](AstNode* node, const char* reason) {
+        log_debug("js mvp sparse proof: %s at byte %u", reason, node ? node->source_span.start_byte : 0);
+        return false;
+    };
+    if (p->property_callbacks || p->global_reflection || p->iterators || p->symbols) return reject(NULL, "observable unit");
+    Array empty = {}; empty.type_id = LMD_TYPE_ARRAY;
+    auto bounded = [&](LmdRange extent, bool length) {
+        if (extent.state != 1 || !finite_integer(extent.upper) || extent.upper < 0 || extent.upper > UINT32_MAX) return false;
+        // an empty array is the worst density/capacity case; reuse the runtime thresholds.
+        return length ? !js_array_should_keep_length_sparse(&empty, (int64_t)extent.upper) :
+            !js_array_should_store_sparse_for_index(&empty, (int64_t)extent.upper);
+    };
+    if (local) {
+        if (!local->owner || !local->owner->id || local->writes != 1 || local->assigned ||
+                local->captured || local->external || local->reflected_global ||
+                !local->dominated || !local->initializer || local->kinds != K_ARRAY) return false;
+        AstNode* source = local->initializer;
+        if (source->node_type == AST_NODE_ARRAY) {
+            for (AstNode* value = ((AstArrayNode*)source)->item; value; value = value->next)
+                if (value->node_type == AST_NODE_SPREAD) return false;
+            if (!bounded(finite_range(0, ((AstArrayNode*)source)->length), true)) return false;
+        } else if (source->node_type == AST_NODE_CALL_EXPR || source->node_type == AST_NODE_NEW_EXPR) {
+            AstCallNode* call = (AstCallNode*)source;
+            LmdBinding* ctor = call->callee->node_type == AST_NODE_IDENT ?
+                identifier_binding(p, (AstIdentNode*)call->callee) : NULL;
+            if (!ctor || ctor->intrinsic != I_ARRAY || call->interp_has_spread_args) return false;
+            if (call->arguments && !call->arguments->next && (kind(p, call->arguments) & K_NUMBER) &&
+                    !bounded(range(p, call->arguments, true), true)) return false;
+        } else return false;
+    }
+    AstIndex* tree = &p->frontend->ast_index;
+    for (AstNodeId i = 0; i < tree->count; i++) {
+        AstNode* node = tree->nodes[i];
+        AstNode* parent = ast_index_parent(tree, node);
+        if (!local && (node->node_type == AST_NODE_MAP_PATTERN || node->node_type == AST_NODE_ARRAY_PATTERN)) return reject(node, "pattern writes");
+        if (node->node_type == AST_NODE_IDENT) {
+            LmdBinding* value = identifier_binding(p, (AstIdentNode*)node);
+            if (local && value == local) {
+                if (parent && parent->node_type == AST_NODE_VARIABLE_DECLARATOR &&
+                        ((AstDeclaratorNode*)parent)->id == node) continue;
+                // aliases escape the inventory; these native methods preserve dense physical storage.
+                if (!parent || (parent->node_type != AST_NODE_MEMBER_EXPR && parent->node_type != AST_NODE_INDEX_EXPR) ||
+                        ((AstFieldNode*)parent)->object != node) return false;
+                AstNode* consumer = ast_index_parent(tree, parent);
+                if (consumer && consumer->node_type == AST_NODE_CALL_EXPR && ((AstCallNode*)consumer)->callee == parent) {
+                    String* method = member_spelling((AstFieldNode*)parent);
+                    if (p->array_method_overrides || (!named(method, "push") && !named(method, "pop") && !named(method, "join"))) return false;
+                }
+                if (consumer && (consumer->node_type == AST_NODE_ARRAY_PATTERN || consumer->node_type == AST_NODE_MAP_PATTERN ||
+                        consumer->node_type == AST_NODE_PROPERTY || consumer->node_type == AST_NODE_FOR_OF_STAM ||
+                        consumer->node_type == AST_NODE_FOR_IN_STAM)) return false;
+            }
+            if (!local && value && value->intrinsic == I_ARRAY) {
+                if (!parent || (parent->node_type != AST_NODE_CALL_EXPR && parent->node_type != AST_NODE_NEW_EXPR) ||
+                        ((AstCallNode*)parent)->callee != node) return reject(node, "Array exposure");
+                AstCallNode* call = (AstCallNode*)parent;
+                if (call->interp_has_spread_args) return reject(node, "constructor spread");
+                if (call->arguments && !call->arguments->next && (kind(p, call->arguments) & K_NUMBER) &&
+                        !bounded(range(p, call->arguments, true), true)) return reject(parent, "allocation extent");
+            }
+        }
+        if (!local && (node->node_type == AST_NODE_FOR_OF_STAM || node->node_type == AST_NODE_FOR_IN_STAM)) {
+            // member/pattern targets can create indexed writes without an assignment node.
+            if (((JsForOfNode*)node)->left->node_type != AST_NODE_IDENT) return reject(node, "iteration target");
+        }
+        if (node->node_type != AST_NODE_MEMBER_EXPR && node->node_type != AST_NODE_INDEX_EXPR) continue;
+        AstFieldNode* field = (AstFieldNode*)node;
+        if (local && !same_binding(p, field->object, local)) continue;
+        String* name = member_spelling(field);
+        // these exposed operations can allocate a length-sized sparse result or escape Array.
+        if (named(name, "map") || (!local && named(name, "join")) || named(name, "slice") || named(name, "concat") ||
+                named(name, "splice") || named(name, "unshift") || named(name, "assign") ||
+                named(name, "constructor") || named(name, "argv")) return reject(node, "bulk operation");
+        if (!(kind(p, field->object) & K_ARRAY)) continue;
+        bool assignment = parent && parent->node_type == AST_NODE_ASSIGN && ((AstAssignNode*)parent)->left == node;
+        bool update = parent && parent->node_type == AST_NODE_UNARY &&
+            (((AstUnaryNode*)parent)->op == OPERATOR_JS_INCREMENT || ((AstUnaryNode*)parent)->op == OPERATOR_JS_DECREMENT);
+        if (!assignment && !update) continue;
+        if (name) {
+            if (!named(name, "length")) {
+                int64_t index = mvp_lmd_string_key(name);
+                if (index >= 0 && !bounded(finite_range(index, index), false)) return reject(node, "named index");
+                continue;
+            }
+            if (!assignment || ((AstAssignNode*)parent)->op != OPERATOR_ASSIGN ||
+                    !bounded(range(p, ((AstAssignNode*)parent)->right, true), true)) return reject(node, "length write");
+        } else if (kind(p, field->property) != K_NUMBER ||
+                (!bounded(range(p, field->property, true), false) &&
+                 !bounded(guarded_array_index_extent(p, field->property), false))) return reject(node, "index write");
+    }
+    return true;
+}
 static bool constructor_layout_reusable(MvpLmdProgram* p, AstNode* node, bool value, bool construction, int depth) {
     if (!node || depth >= 16) return false;
     if (value) {
@@ -7343,14 +8102,850 @@ static bool constructor_layout_reusable(MvpLmdProgram* p, AstNode* node, bool va
     return !field->computed && field->object->node_type == AST_NODE_IDENT &&
         named(((AstIdentNode*)field->object)->name, "this") && constructor_layout_reusable(p, assignment->right, true, construction, depth);
 }
+// Admission proofs share the runtime shape inventory, including native result records.
+template <typename Matches>
+static bool native_property_matches(MvpLmdProgram* p, Matches matches) {
+    if (!p->library) return true;
+    MvpLmdClass* classes[] = {&p->library->date, &p->library->regexp, &p->library->object,
+        &p->library->array, &p->library->generator, &p->library->symbol,
+        &p->library->iterator, &p->library->map, &p->library->set};
+    for (MvpLmdClass* cls : classes) {
+        TypeMap* shapes[] = {&cls->shape, &cls->prototype_shape, &cls->static_shape};
+        for (TypeMap* shape : shapes) FOR_EACH_MAP_FIELD(shape, field)
+            if (field->name && matches(field->name->str, field->name->length)) return true;
+    }
+    TypeMap* shapes[] = {&p->library->json_shape, &p->library->proxy_shape};
+    for (TypeMap* shape : shapes) FOR_EACH_MAP_FIELD(shape, field)
+        if (field->name && matches(field->name->str, field->name->length)) return true;
+    for (const auto& operation : math_operations)
+        if (matches(operation.name, strlen(operation.name))) return true;
+    const char* names[] = {"message", "value", "done", "input", "index", "groups", "description",
+        "stdout", "argv", "platform", "now", "log", "write", "readFileSync", "writeFileSync", "arguments", "caller", "callee",
+        "__proto__", "toJSON", "call", "apply", "bind", "get", "set", "has", "deleteProperty", "ownKeys", "construct"};
+    for (const char* name : names) if (matches(name, strlen(name))) return true;
+    return false;
+}
+// Constructor provenance narrows same-spelled method calls without changing their runtime ABI.
+static MvpLmdClass* property_receiver_class(MvpLmdProgram* p, AstNode* node, int depth = 0) {
+    if (!node || depth == 16) return NULL;
+    if (node->node_type == AST_NODE_ARRAY) return p->library ? &p->library->array : NULL;
+    if (node->node_type == AST_NODE_NEW_EXPR)
+        return property_receiver_class(p, ((AstCallNode*)node)->callee, depth + 1);
+    if (node->node_type == AST_NODE_CALL_EXPR) {
+        AstCallNode* call = (AstCallNode*)node;
+        LmdBinding* callee = call->callee->node_type == AST_NODE_IDENT
+            ? identifier_binding(p, (AstIdentNode*)call->callee) : NULL;
+        LmdFunction* target = callee && !callee->assigned ? callee->target : NULL;
+        String* method = NULL;
+        if (call->callee->node_type == AST_NODE_MEMBER_EXPR) {
+            AstFieldNode* member = (AstFieldNode*)call->callee;
+            LmdBinding* owner = member->object->node_type == AST_NODE_IDENT
+                ? identifier_binding(p, (AstIdentNode*)member->object) : NULL;
+            MvpLmdClass* cls = class_plan(p, NULL, owner);
+            method = member_spelling(member);
+            for (int i = 1; cls && method && i < p->functions->length; i++) {
+                LmdFunction* function = (LmdFunction*)p->functions->data[i];
+                if (function->home == cls && function->ast->node_type == AST_NODE_METHOD &&
+                        ((AstMethodNode*)function->ast)->static_method &&
+                        named(((AstIdentNode*)((AstMethodNode*)function->ast)->key)->name, method->chars)) target = function;
+            }
+        }
+        bool instance_returns = !target && method;
+        if ((!target && !instance_returns) || (target && target->ast->is_generator)) return NULL;
+        if (instance_returns && (p->global_reflection || mvp_lmd_builtin_method(method) ||
+                native_property_matches(p, [&](const char* name, size_t length) {
+                    return method->len == length && !memcmp(method->chars, name, length);
+                }))) return NULL;
+        const AstIndex* tree = &p->frontend->ast_index;
+        MvpLmdClass* result = NULL;
+        for (AstNodeId i = 0; i < tree->count; i++) {
+            AstNode* use = tree->nodes[i];
+            if (method && use->node_type == AST_NODE_PROPERTY && named(property_spelling(
+                    ((AstPropertyNode*)use)->key, ((AstPropertyNode*)use)->computed), method->chars)) return NULL;
+            if (method && use->node_type == AST_NODE_FIELD && named(property_spelling(
+                    ((AstClassFieldNode*)use)->key, ((AstClassFieldNode*)use)->computed), method->chars)) return NULL;
+            if (instance_returns && use->node_type == AST_NODE_MAP_PATTERN) return NULL;
+            if (instance_returns && (use->node_type == AST_NODE_MEMBER_EXPR || use->node_type == AST_NODE_INDEX_EXPR) &&
+                    named(member_spelling((AstFieldNode*)use), method->chars)) {
+                AstNode* consumer = ast_index_parent(tree, use);
+                if (!consumer || consumer->node_type != AST_NODE_CALL_EXPR || ((AstCallNode*)consumer)->callee != use) return NULL;
+            }
+            if (method && use->node_type == AST_NODE_CALL_EXPR) {
+                AstNode* invoked = ((AstCallNode*)use)->callee;
+                if ((invoked->node_type == AST_NODE_MEMBER_EXPR || invoked->node_type == AST_NODE_INDEX_EXPR) &&
+                        named(member_spelling((AstFieldNode*)invoked), "assign")) return NULL;
+            }
+            AstNode* written = use->node_type == AST_NODE_ASSIGN ? ((AstAssignNode*)use)->left :
+                use->node_type == AST_NODE_UNARY ? ((AstUnaryNode*)use)->operand : NULL;
+            if (method && written && (written->node_type == AST_NODE_MEMBER_EXPR || written->node_type == AST_NODE_INDEX_EXPR) &&
+                    named(member_spelling((AstFieldNode*)written), method->chars)) return NULL;
+            if (use->node_type != AST_NODE_RETURN_STAM) continue;
+            AstNode* owner = ast_index_parent(tree, use);
+            while (owner && !function(p, owner)) owner = ast_index_parent(tree, owner);
+            LmdFunction* candidate = owner ? function(p, owner) : NULL;
+            if (instance_returns ? !candidate || !candidate->home || candidate->ast->node_type != AST_NODE_METHOD ||
+                    !named(property_spelling(((AstMethodNode*)candidate->ast)->key, ((AstMethodNode*)candidate->ast)->computed), method->chars) :
+                    owner != (AstNode*)target->ast) continue;
+            if (candidate->ast->is_generator) return NULL;
+            AstNode* returned = ((AstReturnNode*)use)->value;
+            // A method returning its receiver preserves the nominal family only
+            // when all uses are direct calls and the method cannot be replaced.
+            MvpLmdClass* next = instance_returns && !((AstMethodNode*)candidate->ast)->static_method &&
+                returned && returned->node_type == AST_NODE_IDENT && named(((AstIdentNode*)returned)->name, "this") ?
+                candidate->home : property_receiver_class(p, returned, depth + 1);
+            if (!next || (result && result != next)) return NULL;
+            result = next;
+        }
+        return result;
+    }
+    if (node->node_type == AST_NODE_IDENT) {
+        LmdBinding* value = identifier_binding(p, (AstIdentNode*)node);
+        if (named(((AstIdentNode*)node)->name, "this")) {
+            AstNode* owner = ast_index_parent(&p->frontend->ast_index, node);
+            while (owner && !function(p, owner)) owner = ast_index_parent(&p->frontend->ast_index, owner);
+            LmdFunction* constructor = owner ? function(p, owner) : NULL;
+            if (constructor && constructor->home && constructor->id == constructor->home->constructor_id &&
+                    !constructor->home->ast->superclass) return constructor->home;
+        }
+        if (value && value->intrinsic == I_ARRAY) return p->library ? &p->library->array : NULL;
+        if (value && value->class_name && !value->assigned) {
+            MvpLmdClass* cls = class_plan(p, NULL, value);
+            if (cls && cls->constructor_id >= 0) {
+                LmdFunction* constructor = (LmdFunction*)p->functions->data[cls->constructor_id];
+                const AstIndex* tree = &p->frontend->ast_index;
+                for (AstNodeId i = 0; i < tree->count; i++) {
+                    AstNode* ret = tree->nodes[i];
+                    if (ret->node_type != AST_NODE_RETURN_STAM) continue;
+                    AstNode* owner = ast_index_parent(tree, ret);
+                    while (owner && !function(p, owner)) owner = ast_index_parent(tree, owner);
+                    if (owner == (AstNode*)constructor->ast) return NULL;
+                }
+            }
+            // an inherited constructor can also return a different object family.
+            if (cls && cls->ast->superclass && !property_receiver_class(p, cls->ast->superclass, depth + 1)) return NULL;
+            return cls;
+        }
+        if (value && value->writes == 1 && value->initializer)
+            return property_receiver_class(p, value->initializer, depth + 1);
+        return NULL;
+    }
+    if (node->node_type == AST_NODE_CONDITIONAL_EXPR) {
+        MvpLmdClass* left = property_receiver_class(p, ((AstIfNode*)node)->then, depth + 1);
+        return left == property_receiver_class(p, ((AstIfNode*)node)->otherwise, depth + 1) ? left : NULL;
+    }
+    if (node->node_type != AST_NODE_MEMBER_EXPR && node->node_type != AST_NODE_INDEX_EXPR) return NULL;
+    AstFieldNode* member = (AstFieldNode*)node;
+    String* name = member_spelling(member);
+    if (!name || member->object->node_type != AST_NODE_IDENT) return NULL;
+    AstIdentNode* owner = (AstIdentNode*)member->object;
+    LmdBinding* binding = identifier_binding(p, owner);
+    MvpLmdClass* result = NULL;
+    MvpLmdClass* static_owner = class_plan(p, NULL, binding);
+    if (static_owner) {
+        for (AstNodeId i = 0; i < p->frontend->ast_index.count; i++) {
+            AstNode* field = p->frontend->ast_index.nodes[i];
+            if (field->node_type != AST_NODE_FIELD || !((AstClassFieldNode*)field)->is_static ||
+                    !named(property_spelling(((AstClassFieldNode*)field)->key, ((AstClassFieldNode*)field)->computed), name->chars)) continue;
+            AstNode* parent = ast_index_parent(&p->frontend->ast_index, field);
+            while (parent && parent->node_type != AST_NODE_CLASS) parent = ast_index_parent(&p->frontend->ast_index, parent);
+            if (parent == (AstNode*)static_owner->ast)
+                result = property_receiver_class(p, ((AstClassFieldNode*)field)->value, depth + 1);
+        }
+    } else if (binding && binding->writes == 1 && binding->initializer &&
+            (binding->initializer->node_type == AST_NODE_MAP || binding->initializer->node_type == AST_NODE_OBJECT_LITERAL)) {
+        for (AstNode* n = ((AstMapNode*)binding->initializer)->properties; n; n = n->next) {
+            if (n->node_type != AST_NODE_PROPERTY) return NULL;
+            AstPropertyNode* property = (AstPropertyNode*)n;
+            if (named(property_spelling(property->key, property->computed), name->chars))
+                result = property_receiver_class(p, property->value, depth + 1);
+        }
+    } else if (!named(owner->name, "this")) return NULL;
+    const AstIndex* tree = &p->frontend->ast_index;
+    for (AstNodeId i = 0; i < tree->count; i++) {
+        AstNode* n = tree->nodes[i];
+        if (n->node_type == AST_NODE_CALL_EXPR) {
+            AstNode* invoked = ((AstCallNode*)n)->callee;
+            if ((invoked->node_type == AST_NODE_MEMBER_EXPR || invoked->node_type == AST_NODE_INDEX_EXPR) &&
+                    named(member_spelling((AstFieldNode*)invoked), "assign")) return NULL;
+        }
+        if (!binding && n->node_type == AST_NODE_PROPERTY && named(property_spelling(
+                ((AstPropertyNode*)n)->key, ((AstPropertyNode*)n)->computed), name->chars)) return NULL;
+        if (!binding && n->node_type == AST_NODE_FIELD && named(property_spelling(
+                ((AstClassFieldNode*)n)->key, ((AstClassFieldNode*)n)->computed), name->chars)) return NULL;
+        AstNode* written = n->node_type == AST_NODE_ASSIGN ? ((AstAssignNode*)n)->left :
+            n->node_type == AST_NODE_UNARY ? ((AstUnaryNode*)n)->operand : NULL;
+        if (!written || (written->node_type != AST_NODE_MEMBER_EXPR && written->node_type != AST_NODE_INDEX_EXPR)) continue;
+        if (!named(member_spelling((AstFieldNode*)written), name->chars)) continue;
+        if (binding) {
+            // a known unrelated instance cannot write this constructor's static property.
+            MvpLmdClass* actual = static_owner ? property_receiver_class(p, ((AstFieldNode*)written)->object, depth + 1) : NULL;
+            if (actual && actual != static_owner) continue;
+            return NULL;
+        }
+        if (n->node_type != AST_NODE_ASSIGN) return NULL;
+        AstAssignNode* assign = (AstAssignNode*)n;
+        if (assign->op != OPERATOR_ASSIGN) return NULL;
+        if (kind(p, assign->right) == K_NULL || kind(p, assign->right) == K_UNDEFINED) continue;
+        MvpLmdClass* next = property_receiver_class(p, assign->right, depth + 1);
+        if (!next || (result && result != next)) return NULL;
+        result = next;
+    }
+    return result;
+}
+// This closed-unit proof is only for hook admission, never for a native value ABI.
+// All computed accesses must pass this or the observation proof; named stores
+// seed inductive field domains, and escaped methods retain unknown inputs.
+static bool property_key_may_name(String* affix, bool prefix, const char* name, size_t length) {
+    if (length <= affix->len) return false;
+    size_t digits = length - affix->len;
+    if (memcmp(name + (prefix ? 0 : digits), affix->chars, affix->len)) return false;
+    const char* number = name + (prefix ? affix->len : 0);
+    size_t i = number[0] == '-' ? 1 : 0;
+    if (i == digits) return false;
+    for (; i < digits; i++) if (number[i] < '0' || number[i] > '9') return false;
+    return true;
+}
+static bool primitive_property_key(MvpLmdProgram* p, AstNode* node, AstNode** path, int depth = 0) {
+    const unsigned primitive = K_NUMBER | K_BOOL | K_NULL | K_UNDEFINED | K_BIGINT;
+    if (!node) return true;
+    unsigned known = kind(p, node);
+    if (known && !(known & ~primitive)) return true;
+    if (node->node_type == AST_NODE_INDEX_EXPR || node->node_type == AST_NODE_MEMBER_EXPR) {
+        AstFieldNode* member = (AstFieldNode*)node;
+        unsigned key = kind(p, member->property);
+        if (member->computed && kind(p, member->object) == K_STRING && key && !(key & ~primitive)) {
+            // A numeric string lookup yields one UTF-16 unit or undefined, never
+            // a prototype/hook name. Reflected one-unit globals still need a join.
+            for (int i = 0; p->global_reflection && i < p->bindings->length; i++) {
+                LmdBinding* binding = (LmdBinding*)p->bindings->data[i];
+                String* name = binding->entry->name;
+                if (binding->reflected_global && name->len <= 3) return false;
+            }
+            return true;
+        }
+    }
+    if (depth == 48) return false;
+    for (int i = 0; i < depth; i++) if (path[i] == node) return true;
+    path[depth++] = node;
+    auto safe = [&](AstNode* value) { return primitive_property_key(p, value, path, depth); };
+    if (node->node_type == AST_NODE_BINARY) {
+        AstBinaryNode* binary = (AstBinaryNode*)node;
+        AstNode* literal = binary->left;
+        AstNode* numeric = binary->right;
+        bool prefix = true;
+        if (literal->node_type != AST_NODE_LITERAL || ((AstLiteralNode*)literal)->literal_type != AST_LITERAL_STRING) {
+            literal = binary->right; numeric = binary->left; prefix = false;
+        }
+        if (binary->op == OPERATOR_ADD && p->library && literal->node_type == AST_NODE_LITERAL &&
+                ((AstLiteralNode*)literal)->literal_type == AST_LITERAL_STRING && kind(p, numeric) == K_NUMBER &&
+                range(p, numeric, true).state == 1) {
+            String* affix = ((AstLiteralNode*)literal)->value.string_value;
+            // finite int53 stringification is decimal; inspect the same native shape inventory as runtime lookup.
+            auto matches = [&](const char* name, size_t length) { return property_key_may_name(affix, prefix, name, length); };
+            if (native_property_matches(p, matches)) return false;
+            for (int i = 0; i < p->bindings->length; i++) {
+                LmdBinding* binding = (LmdBinding*)p->bindings->data[i];
+                String* name = binding->entry->name;
+                if (binding->reflected_global && matches(name->chars, name->len)) return false;
+            }
+            const AstIndex* tree = &p->frontend->ast_index;
+            for (AstNodeId i = 0; i < tree->count; i++) {
+                AstNode* use = tree->nodes[i];
+                String* name = use->node_type == AST_NODE_METHOD ? property_spelling(((AstMethodNode*)use)->key, ((AstMethodNode*)use)->computed) :
+                    use->node_type == AST_NODE_PROPERTY ? property_spelling(((AstPropertyNode*)use)->key, ((AstPropertyNode*)use)->computed) :
+                    use->node_type == AST_NODE_FIELD ? property_spelling(((AstClassFieldNode*)use)->key, ((AstClassFieldNode*)use)->computed) :
+                    use->node_type == AST_NODE_MEMBER_EXPR || use->node_type == AST_NODE_INDEX_EXPR ? member_spelling((AstFieldNode*)use) : NULL;
+                if (name && matches(name->chars, name->len)) return false;
+            }
+            return true;
+        }
+        return safe(binary->left) && safe(binary->right);
+    }
+    if (node->node_type == AST_NODE_ASSIGN) {
+        AstAssignNode* assign = (AstAssignNode*)node;
+        return safe(assign->right) && (assign->op == OPERATOR_ASSIGN || safe(assign->left));
+    }
+    if (node->node_type == AST_NODE_CONDITIONAL_EXPR)
+        return safe(((AstIfNode*)node)->then) && safe(((AstIfNode*)node)->otherwise);
+    AstNode* backing = node;
+    bool popped_array = false;
+    if (node->node_type == AST_NODE_CALL_EXPR) {
+        AstCallNode* call = (AstCallNode*)node;
+        if (call->callee->node_type == AST_NODE_MEMBER_EXPR && !call->interp_has_spread_args &&
+                named(member_spelling((AstFieldNode*)call->callee), "pop")) {
+            backing = ((AstFieldNode*)call->callee)->object;
+            popped_array = true;
+        }
+    }
+    LmdBinding* local = backing->node_type == AST_NODE_IDENT ? identifier_binding(p, (AstIdentNode*)backing) : NULL;
+    String* field = backing->node_type == AST_NODE_MEMBER_EXPR || backing->node_type == AST_NODE_INDEX_EXPR
+        ? member_spelling((AstFieldNode*)backing) : NULL;
+    AstFieldNode* indexed_field = NULL;
+    bool indexed_local = popped_array && local;
+    int indexed_depth = popped_array ? 1 : 0;
+    if (popped_array && field) indexed_field = (AstFieldNode*)backing;
+    if (!field && (node->node_type == AST_NODE_MEMBER_EXPR || node->node_type == AST_NODE_INDEX_EXPR)) {
+        AstNode* element = node;
+        while (element->node_type == AST_NODE_MEMBER_EXPR || element->node_type == AST_NODE_INDEX_EXPR) {
+            AstFieldNode* member = (AstFieldNode*)element;
+            field = member_spelling(member);
+            if (field) { indexed_field = member; break; }
+            if (!member->computed || indexed_depth == 16 || !safe(member->property)) return false;
+            indexed_depth++;
+            element = member->object;
+        }
+        if (!field && element->node_type == AST_NODE_IDENT) {
+            local = identifier_binding(p, (AstIdentNode*)element);
+            indexed_local = local && !local->entry->is_parameter;
+            if (!indexed_local) return false;
+        }
+    }
+    LmdFunction* incoming = local && local->entry->is_parameter ? local->owner : NULL;
+    // Global reflection cannot reach unaliased local arrays; calls and field inventories
+    // still require a closed global binding environment.
+    bool global_scalar = local && local->reflected_global && !indexed_local && local->initializer &&
+        kind(p, local->initializer) && !(kind(p, local->initializer) & ~primitive);
+    if (p->global_reflection && (!local || incoming || (local->reflected_global && !global_scalar))) return false;
+    const AstIndex* tree = &p->frontend->ast_index;
+    LmdFunction* receiver_method = incoming;
+    if (field && !named(field, "length")) {
+        AstNode* receiver = (indexed_field ? indexed_field : (AstFieldNode*)node)->object;
+        if (receiver->node_type == AST_NODE_IDENT && named(((AstIdentNode*)receiver)->name, "this")) {
+            AstNode* owner = ast_index_parent(tree, node);
+            while (owner && !function(p, owner)) owner = ast_index_parent(tree, owner);
+            receiver_method = owner ? function(p, owner) : NULL;
+            if (!receiver_method || (receiver_method->home && ((AstMethodNode*)receiver_method->ast)->static_method)) return false;
+            // Ordinary constructors and installed functions have no class home.
+            // Only user fields can use their whole-unit write domain; native
+            // records may supply the same spelling without a source assignment.
+            if (!receiver_method->home && (mvp_lmd_builtin_method(field) ||
+                    native_property_matches(p, [&](const char* name, size_t length) {
+                        return field->len == length && !memcmp(field->chars, name, length);
+                    }))) return false;
+        } else {
+            // Native records have writes outside the source inventory. Reject their
+            // public fields before considering the closed set of user field stores.
+            if (mvp_lmd_builtin_method(field) || native_property_matches(p, [&](const char* name, size_t length) {
+                    return field->len == length && !memcmp(field->chars, name, length);
+                })) return false;
+        }
+    }
+    String* method = receiver_method && receiver_method->home && receiver_method->ast->node_type == AST_NODE_METHOD &&
+        ((AstMethodNode*)receiver_method->ast)->kind != AstMethodNode::JS_METHOD_CONSTRUCTOR
+        ? ((AstIdentNode*)((AstMethodNode*)receiver_method->ast)->key)->name : NULL;
+    bool instance_function = false;
+    if (incoming && !method && !incoming->home) {
+        AstNode* assignment = ast_index_parent(tree, (AstNode*)incoming->ast);
+        AstNode* statement = assignment ? ast_index_parent(tree, assignment) : NULL;
+        if (assignment && assignment->node_type == AST_NODE_ASSIGN && statement &&
+                statement->node_type == AST_NODE_EXPR_STMT &&
+                ((AstAssignNode*)assignment)->op == OPERATOR_ASSIGN &&
+                ((AstAssignNode*)assignment)->right == (AstNode*)incoming->ast) {
+            AstNode* target = ((AstAssignNode*)assignment)->left;
+            if (target->node_type == AST_NODE_MEMBER_EXPR) {
+                method = member_spelling((AstFieldNode*)target);
+                instance_function = method != NULL;
+            }
+        }
+    }
+    bool class_constructor = incoming && incoming->home && incoming->id == incoming->home->constructor_id;
+    LmdBinding* direct_binding = NULL;
+    if (incoming && !method && !incoming->closed_calls) {
+        for (int i = 0; i < p->bindings->length; i++) {
+            LmdBinding* candidate = (LmdBinding*)p->bindings->data[i];
+            if (!candidate->assigned && (candidate->target == incoming ||
+                    (class_constructor && class_plan(p, NULL, candidate) == incoming->home))) direct_binding = candidate;
+        }
+        if (!direct_binding) return false;
+        for (AstNodeId i = 0; i < tree->count; i++) {
+            AstNode* use = tree->nodes[i];
+            if (use->node_type != AST_NODE_IDENT) continue;
+            LmdBinding* use_binding = identifier_binding(p, (AstIdentNode*)use);
+            if (class_constructor ? class_plan(p, NULL, use_binding) != incoming->home : use_binding != direct_binding) continue;
+            AstNode* parent = ast_index_parent(tree, use);
+            if (!parent || (parent->node_type != AST_NODE_CALL_EXPR && parent->node_type != AST_NODE_NEW_EXPR) ||
+                    ((AstCallNode*)parent)->callee != use) return false;
+        }
+    }
+    if (incoming && incoming->complex_params) return false;
+    if (local && (local->intrinsic || (local->reflected_global && !global_scalar) ||
+            (!incoming && !global_scalar && local->seed_kinds == K_ANY))) return false;
+    if (method) for (AstNodeId i = 0; i < tree->count; i++) {
+        AstNode* other = tree->nodes[i];
+        if (other->node_type == AST_NODE_MAP_PATTERN) return false;
+
+        if (instance_function && (other->node_type == AST_NODE_MEMBER_EXPR || other->node_type == AST_NODE_INDEX_EXPR) &&
+                (named(member_spelling((AstFieldNode*)other), "values") || named(member_spelling((AstFieldNode*)other), "entries")))
+            return false; // enumerable instance functions can escape through value projections.
+        if ((other->node_type == AST_NODE_MEMBER_EXPR || other->node_type == AST_NODE_INDEX_EXPR) &&
+                named(member_spelling((AstFieldNode*)other), method->chars)) {
+            AstNode* use = ast_index_parent(tree, other);
+            if (instance_function && use && use->node_type == AST_NODE_ASSIGN &&
+                    ((AstAssignNode*)use)->left == other) continue;
+            if (!use || use->node_type != AST_NODE_CALL_EXPR || ((AstCallNode*)use)->callee != other) return false;
+        }
+    }
+    if (node->node_type == AST_NODE_CALL_EXPR && !popped_array) {
+        AstCallNode* call = (AstCallNode*)node;
+        String* name = call->callee->node_type == AST_NODE_MEMBER_EXPR || call->callee->node_type == AST_NODE_INDEX_EXPR
+            ? member_spelling((AstFieldNode*)call->callee) : NULL;
+        LmdFunction* direct = direct_target(p, call);
+        MvpLmdClass* receiver = name ? property_receiver_class(p, ((AstFieldNode*)call->callee)->object) : NULL;
+        if (name && ((mvp_lmd_builtin_method(name) && (!receiver || !receiver->ast)) || named(name, "call") || named(name, "apply") ||
+                named(name, "bind") || named(name, "readFileSync"))) return false;
+        if (name && p->library) {
+            // Native functions sharing a spelling are outside the source method inventory.
+            TypeMap* shapes[] = {&p->library->json_shape, &p->library->object.static_shape,
+                &p->library->object.prototype_shape, &p->library->array.static_shape,
+                &p->library->date.static_shape, &p->library->date.prototype_shape,
+                &p->library->regexp.prototype_shape};
+            for (TypeMap* shape : shapes)
+                if (typemap_shape_lookup_last(shape, name->chars, name->len)) return false;
+        }
+        bool found = false;
+        for (int fi = 1; fi < p->functions->length; fi++) {
+            LmdFunction* candidate = (LmdFunction*)p->functions->data[fi];
+            if (candidate != direct && (!name || !candidate->home || candidate->ast->node_type != AST_NODE_METHOD ||
+                    !named(((AstIdentNode*)((AstMethodNode*)candidate->ast)->key)->name, name->chars))) continue;
+            if (candidate != direct && receiver && receiver->ast && !receiver->ast->superclass && candidate->home != receiver) continue;
+            if (candidate->ast->is_generator) return false;
+            found = true;
+            if (candidate->ast->body->node_type != AST_NODE_BLOCK) {
+                if (!safe(candidate->ast->body)) return false;
+                continue;
+            }
+            for (AstNodeId i = 0; i < tree->count; i++) {
+                AstNode* ret = tree->nodes[i];
+                if (ret->node_type != AST_NODE_RETURN_STAM) continue;
+                AstNode* owner = ast_index_parent(tree, ret);
+                while (owner && !function(p, owner)) owner = ast_index_parent(tree, owner);
+                if (owner == (AstNode*)candidate->ast && !safe(((AstReturnNode*)ret)->value)) return false;
+            }
+        }
+        if (!found) return false;
+        // A same-spelled user store can replace the callable without changing its receiver type.
+        if (name) for (AstNodeId i = 0; i < tree->count; i++) {
+            AstNode* other = tree->nodes[i];
+            if (other->node_type == AST_NODE_PROPERTY && named(property_spelling(
+                    ((AstPropertyNode*)other)->key, ((AstPropertyNode*)other)->computed), name->chars)) return false;
+            if (other->node_type == AST_NODE_FIELD && named(property_spelling(
+                    ((AstClassFieldNode*)other)->key, ((AstClassFieldNode*)other)->computed), name->chars)) return false;
+            AstNode* target = other->node_type == AST_NODE_ASSIGN ? ((AstAssignNode*)other)->left : NULL;
+            if (target && (target->node_type == AST_NODE_MEMBER_EXPR || target->node_type == AST_NODE_INDEX_EXPR) &&
+                    named(member_spelling((AstFieldNode*)target), name->chars)) return false;
+        }
+        return true;
+    }
+    if (!local && !field) return false;
+    auto array_seed = [&](auto&& seed, AstNode* value, int levels) -> bool {
+        if (!levels) return safe(value);
+        if (!value) return false;
+        if (value->node_type == AST_NODE_CALL_EXPR) {
+            AstCallNode* call = (AstCallNode*)value;
+            if (call->callee->node_type != AST_NODE_MEMBER_EXPR ||
+                    !named(member_spelling((AstFieldNode*)call->callee), "fill") ||
+                    call->interp_has_spread_args || !seed(seed, call->arguments, levels - 1)) return false;
+            value = ((AstFieldNode*)call->callee)->object;
+        }
+        if (value->node_type == AST_NODE_ARRAY) {
+            for (AstNode* item = ((AstArrayNode*)value)->item; item; item = item->next)
+                if (item->node_type != AST_NODE_NULL && !seed(seed, item, levels - 1)) return false;
+            return true;
+        }
+        if (value->node_type != AST_NODE_NEW_EXPR) return false;
+        if (p->global_reflection) return false;
+        AstCallNode* allocation = (AstCallNode*)value;
+        if (allocation->callee->node_type != AST_NODE_IDENT || allocation->interp_has_spread_args) return false;
+        LmdBinding* ctor = identifier_binding(p, (AstIdentNode*)allocation->callee);
+        if (!ctor || ctor->intrinsic != I_ARRAY) return false;
+        for (AstNode* item = allocation->arguments; item; item = item->next)
+            if (allocation->arguments->next ? !seed(seed, item, levels - 1) : !safe(item)) return false;
+        return true;
+    };
+    bool seeded = local != NULL || named(field, "length");
+    int parameter = 0;
+    if (incoming) for (AstNode* formal = incoming->ast->params; formal; formal = formal->next, parameter++)
+        if (js_ast_parameter_binding_identifier(formal)->entry == local->entry) break;
+    for (AstNodeId i = 0; i < tree->count; i++) {
+        AstNode* other = tree->nodes[i];
+        if (other->node_type == AST_NODE_MAP_PATTERN) return false;
+        if (local) {
+            AstNode* implicit = other->node_type == AST_NODE_FOR_OF_STAM || other->node_type == AST_NODE_FOR_IN_STAM ?
+                ((JsForOfNode*)other)->left : NULL;
+            if (other->node_type == AST_NODE_ASSIGN) {
+                AstNode* left = ((AstAssignNode*)other)->left;
+                if (left->node_type == AST_NODE_ARRAY || left->node_type == AST_NODE_ARRAY_PATTERN) implicit = left;
+            }
+            if (implicit && (implicit->node_type == AST_NODE_ARRAY || implicit->node_type == AST_NODE_ARRAY_PATTERN))
+                implicit = ((AstArrayNode*)implicit)->item;
+            // Iterator and destructuring writes are not ordinary assignment nodes.
+            for (AstNode* item = implicit; item; item = item->next)
+                if (item->node_type == AST_NODE_IDENT && identifier_binding(p, (AstIdentNode*)item) == local) return false;
+        }
+        if (global_scalar) {
+            // Reflective reads can expose the global through aliases or bulk
+            // projections. Named writes to this binding must join its domain.
+            if (other->node_type == AST_NODE_FOR_IN_STAM) return false;
+            String* name = other->node_type == AST_NODE_PROPERTY ? property_spelling(
+                ((AstPropertyNode*)other)->key, ((AstPropertyNode*)other)->computed) :
+                other->node_type == AST_NODE_MEMBER_EXPR || other->node_type == AST_NODE_INDEX_EXPR ?
+                    member_spelling((AstFieldNode*)other) : NULL;
+            if (name && (named(name, local->entry->name->chars) || named(name, "assign") ||
+                    named(name, "values") || named(name, "entries") || named(name, "getOwnPropertyDescriptors"))) return false;
+        }
+        // Named regexp groups, like JSON records, can introduce arbitrary field names.
+        if (field && (other->node_type == JS_AST_NODE_REGEX || (other->node_type == AST_NODE_IDENT &&
+                identifier_binding(p, (AstIdentNode*)other) == &p->intrinsics[I_REGEXP - 1]))) return false;
+        if (field && other->node_type == AST_NODE_IDENT &&
+                identifier_binding(p, (AstIdentNode*)other) == &p->intrinsics[I_JSON - 1]) {
+            AstNode* use = ast_index_parent(tree, other);
+            // stringify cannot introduce foreign fields; parse or an escaped namespace can.
+            if (!use || use->node_type != AST_NODE_MEMBER_EXPR ||
+                    ((AstFieldNode*)use)->object != other || !named(member_spelling((AstFieldNode*)use), "stringify")) return false;
+        }
+        if ((indexed_field && (other->node_type == AST_NODE_MEMBER_EXPR || other->node_type == AST_NODE_INDEX_EXPR) &&
+                named(member_spelling((AstFieldNode*)other), field->chars)) ||
+                (indexed_local && other->node_type == AST_NODE_IDENT && identifier_binding(p, (AstIdentNode*)other) == local)) {
+            AstNode* declaration = ast_index_parent(tree, other);
+            if (indexed_local && declaration && declaration->node_type == AST_NODE_VARIABLE_DECLARATOR &&
+                    ((AstDeclaratorNode*)declaration)->id == other) continue;
+            // The backing array must never escape through an alias or callback.
+            AstNode* current = other;
+            // Every intermediate array stays on the indexed path; aliases can mutate unseen leaves.
+            for (int level = 0; level <= indexed_depth; level++) {
+                AstNode* use = ast_index_parent(tree, current);
+                if (use && use->node_type == AST_NODE_ASSIGN && ((AstAssignNode*)use)->left == current) {
+                    if (level == indexed_depth ? !safe(use) : ((AstAssignNode*)use)->op != OPERATOR_ASSIGN ||
+                            !array_seed(array_seed, ((AstAssignNode*)use)->right, indexed_depth - level)) return false;
+                    if (!level) seeded = true;
+                    break;
+                }
+                if (level == indexed_depth) break;
+                if (use && use->node_type == AST_NODE_MEMBER_EXPR && ((AstFieldNode*)use)->object == current &&
+                        (named(member_spelling((AstFieldNode*)use), "push") ||
+                        (level + 1 == indexed_depth && named(member_spelling((AstFieldNode*)use), "pop")))) {
+                    AstNode* consumer = ast_index_parent(tree, use);
+                    if (!consumer || consumer->node_type != AST_NODE_CALL_EXPR || ((AstCallNode*)consumer)->callee != use ||
+                            ((AstCallNode*)consumer)->interp_has_spread_args) return false;
+                    if (named(member_spelling((AstFieldNode*)use), "push"))
+                        for (AstNode* argument = ((AstCallNode*)consumer)->arguments; argument; argument = argument->next)
+                            if (!array_seed(array_seed, argument, indexed_depth - level - 1)) return false;
+                    break;
+                }
+                if (use && (use->node_type == AST_NODE_MEMBER_EXPR || use->node_type == AST_NODE_INDEX_EXPR) &&
+                        ((AstFieldNode*)use)->object == current && named(member_spelling((AstFieldNode*)use), "length")) {
+                    AstNode* consumer = ast_index_parent(tree, use);
+                    if (consumer && ((consumer->node_type == AST_NODE_ASSIGN && ((AstAssignNode*)consumer)->left == use) ||
+                            (consumer->node_type == AST_NODE_UNARY &&
+                                (((AstUnaryNode*)consumer)->op == OPERATOR_JS_DELETE ||
+                                 ((AstUnaryNode*)consumer)->op == OPERATOR_JS_INCREMENT ||
+                                 ((AstUnaryNode*)consumer)->op == OPERATOR_JS_DECREMENT)))) return false;
+                    break; // reading length exposes no array alias.
+                }
+                if (!use || (use->node_type != AST_NODE_MEMBER_EXPR && use->node_type != AST_NODE_INDEX_EXPR) ||
+                        ((AstFieldNode*)use)->object != current || !((AstFieldNode*)use)->computed ||
+                        !safe(((AstFieldNode*)use)->property)) return false;
+                current = use;
+            }
+        }
+        AstNode* target = NULL; AstNode* value = NULL;
+        if (other->node_type == AST_NODE_ASSIGN) {
+            target = ((AstAssignNode*)other)->left; value = other;
+        } else if (other->node_type == AST_NODE_VARIABLE_DECLARATOR) {
+            target = ((AstDeclaratorNode*)other)->id; value = ((AstDeclaratorNode*)other)->init;
+        } else if (other->node_type == AST_NODE_UNARY &&
+                (((AstUnaryNode*)other)->op == OPERATOR_JS_INCREMENT || ((AstUnaryNode*)other)->op == OPERATOR_JS_DECREMENT)) {
+            target = ((AstUnaryNode*)other)->operand; value = other;
+        }
+        bool matching = local ? target && target->node_type == AST_NODE_IDENT && identifier_binding(p, (AstIdentNode*)target) == local :
+            target && (target->node_type == AST_NODE_MEMBER_EXPR || target->node_type == AST_NODE_INDEX_EXPR) &&
+                named(member_spelling((AstFieldNode*)target), field->chars);
+        if (matching && !indexed_field) {
+            seeded = true;
+            if (indexed_local ? other->node_type == AST_NODE_VARIABLE_DECLARATOR &&
+                    !array_seed(array_seed, value, indexed_depth) : !safe(value)) return false;
+        }
+        if (field && other->node_type == AST_NODE_PROPERTY) {
+            AstPropertyNode* property = (AstPropertyNode*)other;
+            String* name = property_spelling(property->key, property->computed);
+            if (name && named(name, field->chars)) {
+                seeded = true;
+                if (indexed_field ? !array_seed(array_seed, property->value, indexed_depth) : !safe(property->value)) return false;
+            }
+        }
+        if (field && other->node_type == AST_NODE_METHOD &&
+                named(((AstIdentNode*)((AstMethodNode*)other)->key)->name, field->chars)) return false;
+        if (field && other->node_type == AST_NODE_FIELD) {
+            AstClassFieldNode* member = (AstClassFieldNode*)other;
+            if (!member->computed && member->key->node_type == AST_NODE_IDENT &&
+                    named(((AstIdentNode*)member->key)->name, field->chars)) {
+                seeded = true;
+                if (indexed_field ? !array_seed(array_seed, member->value, indexed_depth) : !safe(member->value)) return false;
+            }
+        }
+        if (!incoming) continue;
+        if (other->node_type != AST_NODE_CALL_EXPR && other->node_type != AST_NODE_NEW_EXPR) continue;
+        AstCallNode* call = (AstCallNode*)other;
+        bool match = method ? (call->callee->node_type == AST_NODE_MEMBER_EXPR || call->callee->node_type == AST_NODE_INDEX_EXPR) &&
+            named(member_spelling((AstFieldNode*)call->callee), method->chars) : class_constructor ?
+            call->callee->node_type == AST_NODE_IDENT && class_plan(p, NULL,
+                identifier_binding(p, (AstIdentNode*)call->callee)) == incoming->home : direct_target(p, call) == incoming;
+        if (!match) continue;
+        if (method && incoming->home) {
+            MvpLmdClass* actual = property_receiver_class(p, ((AstFieldNode*)call->callee)->object);
+            // A known unrelated nominal family cannot invoke this method through the same spelling.
+            bool related = !actual;
+            for (int level = 0; actual && level < 16; level++) {
+                if (actual == incoming->home) { related = true; break; }
+                if (!actual->ast || !actual->ast->superclass) break;
+                MvpLmdClass* base = property_receiver_class(p, actual->ast->superclass);
+                if (!base) { related = true; break; }
+                actual = base;
+            }
+            if (!related) continue;
+        }
+        if (call->interp_has_spread_args) return false;
+        AstNode* argument = call->arguments;
+        for (int j = 0; argument && j < parameter; j++) argument = argument->next;
+        if (!safe(argument)) return false;
+    }
+    return seeded;
+}
+// An Array prototype cannot supply a user-only class method unless a visible
+// named store installed it. The consumer either calls an element's method or
+// throws; it cannot retain a builtin prototype/constructor for a later mutation.
+static bool computed_read_is_observation(MvpLmdProgram* p, AstFieldNode* member) {
+    const AstIndex* tree = &p->frontend->ast_index;
+    AstNode* declaration = ast_index_parent(tree, (AstNode*)member);
+    if (declaration && declaration->node_type == AST_NODE_BINARY &&
+            (((AstBinaryNode*)declaration)->op == OPERATOR_JS_STRICT_EQ ||
+             ((AstBinaryNode*)declaration)->op == OPERATOR_JS_STRICT_NE)) return true;
+    if (declaration && declaration->node_type == AST_NODE_UNARY &&
+            (((AstUnaryNode*)declaration)->op == OPERATOR_JS_TYPEOF ||
+             ((AstUnaryNode*)declaration)->op == OPERATOR_NOT || ((AstUnaryNode*)declaration)->op == OPERATOR_JS_VOID)) return true;
+    if (kind(p, member->object) != K_ARRAY && (!p->library ||
+            property_receiver_class(p, member->object) != &p->library->array)) return false;
+    LmdBinding* value = NULL;
+    if (declaration && declaration->node_type == AST_NODE_VARIABLE_DECLARATOR) {
+        if (((AstDeclaratorNode*)declaration)->init != (AstNode*)member ||
+                ((AstDeclaratorNode*)declaration)->id->node_type != AST_NODE_IDENT) return false;
+        value = identifier_binding(p, (AstIdentNode*)((AstDeclaratorNode*)declaration)->id);
+        if (!value || value->writes != 1 || value->captured || value->reflected_global) return false;
+    }
+    bool used = false;
+    for (AstNodeId i = 0; i < (value ? tree->count : 1); i++) {
+        AstNode* use = value ? tree->nodes[i] : (AstNode*)member;
+        if (value && (use->node_type != AST_NODE_IDENT || identifier_binding(p, (AstIdentNode*)use) != value ||
+                use == ((AstDeclaratorNode*)declaration)->id)) continue;
+        AstNode* parent = ast_index_parent(tree, use);
+        if (!parent || (parent->node_type != AST_NODE_MEMBER_EXPR && parent->node_type != AST_NODE_INDEX_EXPR) ||
+                ((AstFieldNode*)parent)->object != use) return false;
+        String* name = member_spelling((AstFieldNode*)parent);
+        AstNode* call = ast_index_parent(tree, parent);
+        if (!name || named(name, "constructor") || mvp_lmd_builtin_method(name) ||
+                !call || call->node_type != AST_NODE_CALL_EXPR || ((AstCallNode*)call)->callee != parent) return false;
+        bool declared = false;
+        for (int fi = 1; fi < p->functions->length; fi++) {
+            LmdFunction* method = (LmdFunction*)p->functions->data[fi];
+            if (method->home && method->ast->node_type == AST_NODE_METHOD &&
+                    named(property_spelling(((AstMethodNode*)method->ast)->key, false), name->chars)) declared = true;
+        }
+        if (!declared) return false;
+        for (AstNodeId j = 0; j < tree->count; j++) {
+            AstNode* n = tree->nodes[j];
+            if (n->node_type != AST_NODE_ASSIGN) continue;
+            AstNode* target = ((AstAssignNode*)n)->left;
+            if ((target->node_type == AST_NODE_MEMBER_EXPR || target->node_type == AST_NODE_INDEX_EXPR) &&
+                    named(member_spelling((AstFieldNode*)target), name->chars)) return false;
+        }
+        used = true;
+    }
+    return used;
+}
+// Inherited-value caches are valid after a passive, nonescaping prototype setup.
+static bool fixed_prototype_setup(MvpLmdProgram* p) {
+    const AstIndex* tree = &p->frontend->ast_index;
+    auto same = [&](auto&& equal, AstNode* a, AstNode* b, int depth) -> bool {
+        if (!a || !b || depth == 16) return false;
+        if (a->node_type == AST_NODE_IDENT && b->node_type == AST_NODE_IDENT)
+            return identifier_binding(p, (AstIdentNode*)a) &&
+                identifier_binding(p, (AstIdentNode*)a) == identifier_binding(p, (AstIdentNode*)b);
+        if ((a->node_type != AST_NODE_MEMBER_EXPR && a->node_type != AST_NODE_INDEX_EXPR) ||
+                (b->node_type != AST_NODE_MEMBER_EXPR && b->node_type != AST_NODE_INDEX_EXPR)) return false;
+        String* x = member_spelling((AstFieldNode*)a), *y = member_spelling((AstFieldNode*)b);
+        return x && y && x->len == y->len && !memcmp(x->chars, y->chars, x->len) &&
+            equal(equal, ((AstFieldNode*)a)->object, ((AstFieldNode*)b)->object, depth + 1);
+    };
+    auto constructor = [&](auto&& fixed, AstNode* owner, int depth) -> bool {
+        if (!owner || depth == 16) return false;
+        if (owner->node_type == AST_NODE_IDENT) {
+            LmdBinding* binding = identifier_binding(p, (AstIdentNode*)owner);
+            return binding && !binding->assigned && !binding->reflected_global && binding->target &&
+                !binding->target->home && !binding->target->ast->is_generator;
+        }
+        if (owner->node_type != AST_NODE_MEMBER_EXPR || !member_spelling((AstFieldNode*)owner) ||
+                !fixed(fixed, ((AstFieldNode*)owner)->object, depth + 1)) return false;
+        int definitions = 0;
+        for (AstNodeId i = 0; i < tree->count; i++) {
+            AstNode* node = tree->nodes[i];
+            AstNode* target = node->node_type == AST_NODE_ASSIGN ? ((AstAssignNode*)node)->left :
+                node->node_type == AST_NODE_UNARY ? ((AstUnaryNode*)node)->operand : NULL;
+            if (!same(same, owner, target, 0)) continue;
+            if (node->node_type != AST_NODE_ASSIGN || ((AstAssignNode*)node)->op != OPERATOR_ASSIGN ||
+                    ((AstAssignNode*)node)->right->node_type != AST_NODE_FUNC_EXPR) return false;
+            AstNode* statement = ast_index_parent(tree, node);
+            if (!statement || statement->node_type != AST_NODE_EXPR_STMT ||
+                    ast_index_parent(tree, statement) != p->frontend->ast_root ||
+                    statement->source_span.start_byte >= owner->source_span.start_byte) return false;
+            definitions++;
+        }
+        return definitions == 1;
+    };
+    uint32_t last = 0;
+    bool any = false;
+    for (AstNodeId i = 0; i < tree->count; i++) {
+        AstNode* node = tree->nodes[i];
+        if ((node->node_type != AST_NODE_MEMBER_EXPR && node->node_type != AST_NODE_INDEX_EXPR) ||
+                !named(member_spelling((AstFieldNode*)node), "prototype")) continue;
+        if (p->global_reflection) return false;
+        AstNode* member = ast_index_parent(tree, node);
+        if (!member || member->node_type != AST_NODE_MEMBER_EXPR || ((AstFieldNode*)member)->object != node ||
+                !member_spelling((AstFieldNode*)member) || named(member_spelling((AstFieldNode*)member), "constructor")) return false;
+        AstNode* owner = ((AstFieldNode*)node)->object;
+        LmdBinding* builtin = owner->node_type == AST_NODE_IDENT ? identifier_binding(p, (AstIdentNode*)owner) : NULL;
+        TypeMap* native = p->library && builtin ?
+            builtin->intrinsic == I_OBJECT ? &p->library->object.prototype_shape :
+            builtin->intrinsic == I_REGEXP ? &p->library->regexp.prototype_shape : NULL : NULL;
+        if (native) {
+            String* name = member_spelling((AstFieldNode*)member);
+            ShapeEntry* field = typemap_hash_lookup(native, name->chars, name->len);
+            AstNode* forwarding = ast_index_parent(tree, member);
+            if (!field || field->type->type_id != LMD_TYPE_FUNC || (field->flags & JSPD_IS_ACCESSOR) ||
+                    !forwarding || forwarding->node_type != AST_NODE_MEMBER_EXPR ||
+                    ((AstFieldNode*)forwarding)->object != member) return false;
+            String* operation = member_spelling((AstFieldNode*)forwarding);
+            AstNode* call = ast_index_parent(tree, forwarding);
+            // borrowing a native method does not expose its owning prototype;
+            // every other prototype use and computed escape still needs its own proof.
+            if ((!named(operation, "call") && !named(operation, "apply") && !named(operation, "bind")) ||
+                    !call || call->node_type != AST_NODE_CALL_EXPR || ((AstCallNode*)call)->callee != forwarding) return false;
+            continue;
+        }
+        any = true;
+        if (!constructor(constructor, owner, 0)) return false;
+        AstNode* assignment = ast_index_parent(tree, member);
+        if (!assignment || assignment->node_type != AST_NODE_ASSIGN || ((AstAssignNode*)assignment)->left != member ||
+                ((AstAssignNode*)assignment)->op != OPERATOR_ASSIGN) return false;
+        AstNode* statement = ast_index_parent(tree, assignment);
+        if (!statement || statement->node_type != AST_NODE_EXPR_STMT ||
+                ast_index_parent(tree, statement) != p->frontend->ast_root) return false;
+        if (statement->source_span.start_byte > last) last = statement->source_span.start_byte;
+    }
+    if (!any) return true;
+    auto passive = [&](auto&& safe, AstNode* node, int depth) -> bool {
+        if (!node) return true;
+        if (depth == 32) return false;
+        auto visit = [&](AstNode* value) { return safe(safe, value, depth + 1); };
+        switch (node->node_type) {
+        case AST_NODE_LITERAL: case AST_NODE_IDENT: case AST_NODE_NULL:
+        case AST_NODE_FUNC: case AST_NODE_FUNC_EXPR: case AST_NODE_ARROW_FUNC: return true;
+        case AST_NODE_EXPR_STMT: return visit(((AstExprStmtNode*)node)->expression);
+        case AST_NODE_VARIABLE_DECLARATOR: return visit(((AstDeclaratorNode*)node)->init);
+        case AST_NODE_RETURN_STAM: return visit(((AstReturnNode*)node)->value);
+        case AST_NODE_VAR_STAM: case AST_NODE_BLOCK: case AST_NODE_ARRAY: {
+            AstNode* first = node->node_type == AST_NODE_VAR_STAM ? ((AstVarDeclNode*)node)->declarations :
+                node->node_type == AST_NODE_BLOCK ? ((AstBlockNode*)node)->statements : ((AstArrayNode*)node)->item;
+            for (AstNode* child = first; child; child = child->next) if (!visit(child)) return false;
+            return true;
+        }
+        case AST_NODE_MAP: case AST_NODE_OBJECT_LITERAL:
+            for (AstNode* property = ((AstMapNode*)node)->properties; property; property = property->next) {
+                if (property->node_type != AST_NODE_PROPERTY) return false;
+                AstPropertyNode* field = (AstPropertyNode*)property;
+                if (field->is_getter || field->is_setter || (field->computed && !visit(field->key)) || !visit(field->value)) return false;
+            }
+            return true;
+        case AST_NODE_CALL_EXPR: {
+            AstCallNode* call = (AstCallNode*)node;
+            if (call->arguments || call->interp_has_spread_args || call->callee->node_type != AST_NODE_FUNC_EXPR) return false;
+            AstFuncNode* function = (AstFuncNode*)call->callee;
+            return !function->params && !function->is_generator && visit(function->body);
+        }
+        case AST_NODE_NEW_EXPR: {
+            AstCallNode* call = (AstCallNode*)node;
+            LmdBinding* target = call->callee->node_type == AST_NODE_IDENT ?
+                identifier_binding(p, (AstIdentNode*)call->callee) : NULL;
+            // Reuse construction analysis for the intrinsic Array allocator;
+            // user constructors can observe inherited members during setup.
+            return target && target->intrinsic == I_ARRAY &&
+                constructor_layout_reusable(p, node, true, true);
+        }
+        case AST_NODE_ASSIGN: {
+            AstAssignNode* assignment = (AstAssignNode*)node;
+            if (assignment->op != OPERATOR_ASSIGN || !visit(assignment->right)) return false;
+            AstNode* target = assignment->left;
+            if (target->node_type == AST_NODE_IDENT) return true;
+            if (target->node_type != AST_NODE_MEMBER_EXPR) return false;
+            AstNode* owner = ((AstFieldNode*)target)->object;
+            if (owner->node_type == AST_NODE_MEMBER_EXPR && named(member_spelling((AstFieldNode*)owner), "prototype"))
+                owner = ((AstFieldNode*)owner)->object;
+            return constructor(constructor, owner, 0);
+        }
+        default: return false;
+        }
+    };
+    for (AstNode* statement = ((AstScript*)p->frontend->ast_root)->body; statement &&
+            statement->source_span.start_byte <= last; statement = statement->next)
+        if (!passive(passive, statement, 0)) {
+            log_debug("js mvp prototype setup: observable statement at byte %u", statement->source_span.start_byte);
+            return false;
+        }
+    return true;
+}
 static int lower_pass(void* opaque) {
     MvpLmdProgram* p = (MvpLmdProgram*)opaque;
+    if (!p->property_callbacks && !fixed_prototype_setup(p)) {
+        p->property_callbacks = p->array_method_overrides = p->map_method_overrides = true;
+    }
+    if (!p->property_callbacks) {
+        for (AstNodeId i = 0; i < p->frontend->ast_index.count; i++) {
+            AstNode* node = p->frontend->ast_index.nodes[i];
+            bool callbacks = false;
+            if (node->node_type == AST_NODE_PROPERTY) {
+                AstPropertyNode* property = (AstPropertyNode*)node;
+                AstNode* path[48];
+                if (!property->computed || primitive_property_key(p, property->key, path)) continue;
+                callbacks = true;
+            } else {
+                if (node->node_type != AST_NODE_MEMBER_EXPR && node->node_type != AST_NODE_INDEX_EXPR) continue;
+                AstFieldNode* member = (AstFieldNode*)node;
+                AstNode* path[48];
+                if (member->computed && !member_spelling(member) && !p->library &&
+                        (kind(p, member->property) & (K_STRING | K_OBJECT | K_ARRAY | K_FUNCTION | K_MAP))) {
+                    // The key proof needs the same native property inventory as runtime lookup.
+                    plan_library_shapes(p, true);
+                    if (p->diagnostic[0]) return false;
+                }
+                if (!member->computed || member_spelling(member) || primitive_property_key(p, member->property, path)) continue;
+                // A computed read can expose a prototype or method for a later aliased write/call.
+                callbacks = !computed_read_is_observation(p, member);
+            }
+            // arbitrary string keys can name prototype or coercion hooks through aliases.
+            if (callbacks) log_debug("js mvp property admission: semantic dispatch at byte %u", node->source_span.start_byte);
+            bool had_library = p->library_active;
+            activate_library(p, node); p->property_callbacks = callbacks;
+            if (callbacks) p->array_method_overrides = p->map_method_overrides = true;
+            if (!had_library) plan_library_shapes(p);
+            if (p->diagnostic[0]) return false;
+            if (callbacks) break;
+        }
+    }
     for (int i = 0; i < p->classes->length; i++) {
         MvpLmdClass* cls = (MvpLmdClass*)p->classes->data[i];
         if (cls->constructor_id >= 0 && !cls->ast->superclass) {
             LmdFunction* constructor = (LmdFunction*)p->functions->data[cls->constructor_id];
             // parameter initializers can inspect or expose this before the proven body starts.
-            cls->reusable_layout = !cls->initializer_count && !constructor->complex_params &&
+            cls->reusable_layout = !p->property_callbacks && !cls->initializer_count && !constructor->complex_params &&
                 constructor_layout_reusable(p, constructor->ast->body, false, true);
             if (cls->reusable_layout) {
                 AstNode* first = ((AstBlockNode*)constructor->ast->body)->statements;
@@ -7377,14 +8972,15 @@ static int lower_pass(void* opaque) {
         bool ok = plan_shape_field(p, &cls->prototype_shape,
             name_pool_create_len(p->frontend->name_pool, "constructor", 11), LMD_TYPE_FUNC, JSPD_NON_ENUMERABLE);
         ok &= plan_shape_field(p, &cls->static_shape,
-            name_pool_create_len(p->frontend->name_pool, "prototype", 9), LMD_TYPE_MAP, JSPD_NON_ENUMERABLE);
+            name_pool_create_len(p->frontend->name_pool, "prototype", 9), LMD_TYPE_MAP,
+            JSPD_NON_ENUMERABLE | JSPD_NON_WRITABLE | JSPD_NON_CONFIGURABLE);
         for (AstNode* n = ((AstBlockNode*)cls->ast->body)->statements; n; n = n->next) {
             if (n->node_type != AST_NODE_METHOD) continue;
             AstMethodNode* method = (AstMethodNode*)n;
             if (method->kind == AstMethodNode::JS_METHOD_CONSTRUCTOR) continue;
             uint8_t flags = JSPD_NON_ENUMERABLE;
             if (method->kind == AstMethodNode::JS_METHOD_GET || method->kind == AstMethodNode::JS_METHOD_SET)
-                flags |= JSPD_IS_ACCESSOR;
+                continue; // virtual cells are attached to the actual prototype at class evaluation.
             ok &= plan_shape_field(p, method->static_method ? &cls->static_shape : &cls->prototype_shape,
                 ((AstIdentNode*)method->key)->name, LMD_TYPE_FUNC, flags);
         }
@@ -7444,6 +9040,23 @@ static int lower_pass(void* opaque) {
         p->array_holes |= !(index.state == 1 && array.length.state == 1 && index.lower >= 0 && index.upper <= array.length.lower) &&
             !dense_append_loop(p, field, n);
     }
+    p->excludes_sparse_arrays = unit_excludes_sparse_arrays(p);
+    if (!p->excludes_sparse_arrays && !p->property_callbacks && !p->global_reflection && !p->iterators && !p->symbols)
+        for (int i = 0; i < p->bindings->length; i++) {
+            LmdBinding* binding = (LmdBinding*)p->bindings->data[i];
+            binding->dense_array_storage = unit_excludes_sparse_arrays(p, binding);
+        }
+    // fixed property lookup can still reach an ordinary own coercion method; audit those definitions separately.
+    p->coercion_callbacks |= p->property_callbacks || p->global_reflection || p->iterators || p->symbols;
+    for (AstNodeId i = 0; !p->coercion_callbacks && i < p->frontend->ast_index.count; i++) {
+        AstNode* node = p->frontend->ast_index.nodes[i];
+        String* name = node->node_type == AST_NODE_PROPERTY ? property_spelling(
+            ((AstPropertyNode*)node)->key, ((AstPropertyNode*)node)->computed) :
+            node->node_type == AST_NODE_METHOD ? property_spelling(((AstMethodNode*)node)->key, ((AstMethodNode*)node)->computed) :
+            node->node_type == AST_NODE_FIELD ? property_spelling(((AstClassFieldNode*)node)->key, ((AstClassFieldNode*)node)->computed) :
+            node->node_type == AST_NODE_MEMBER_EXPR || node->node_type == AST_NODE_INDEX_EXPR ? member_spelling((AstFieldNode*)node) : NULL;
+        if (named(name, "toString") || named(name, "valueOf") || named(name, "join")) p->coercion_callbacks = true;
+    }
     p->import_cache = em_import_cache_new(32);
     p->mir = MIR_init(); p->module = MIR_new_module(p->mir, "js_mvp_lmd");
     MIR_type_t result_type = MIR_T_I64;
@@ -7500,6 +9113,7 @@ static int lower_pass(void* opaque) {
     for (int i = 0; i < p->functions->length; i++) {
         LmdFunction* f = (LmdFunction*)p->functions->data[i]; f->address = MIR_gen(p->mir, f->item);
     }
+    jit_log_code_addresses(p->mir);
     return true;
 }
 static bool compile(MvpLmdProgram* p, const char* source, size_t length) {
@@ -7579,6 +9193,15 @@ MvpLmdExecution* mvp_lmd_execute(const char* source, size_t length, double* exec
     }
     if (p->library_active) {
         p->library->values = p->slots + p->library_slot;
+        p->library->mutable_prototypes = p->property_callbacks;
+        static const ContextCapsuleOps ops = {"js-mvp-library", CONTEXT_CAPSULE_LIFETIME_CONTEXT,
+            sizeof(MvpLmdLibraryState*), NULL, NULL, NULL};
+        MvpLmdLibraryState** state = (MvpLmdLibraryState**)mem_alloc(sizeof(*state), MEM_CAT_EVAL);
+        if (!state) return e;
+        *state = p->library;
+        if (!context_capsule_extension_install(&e->context, MVP_LMD_CAPSULE_OWNER, 0, state, &ops)) {
+            mem_free(state); return e;
+        }
         Item result = mvp_lmd_library_initialize(p, p->library);
         if (item_is_error(result)) { e->result = runtime_publish_result(&e->context, result); return e; }
         Item& math = p->library->values[LMD_LIBRARY_MATH];

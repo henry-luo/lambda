@@ -1,0 +1,82 @@
+<expr
+  <expr
+    <primary
+      "a">>
+  "+"
+  <expr
+    <expr
+      <primary
+        "b">>
+    "*"
+    <expr
+      <primary
+        "c">>>>
+<expr
+  <expr
+    <expr
+      <primary
+        "a">>
+    "*"
+    <expr
+      <primary
+        "b">>>
+  "+"
+  <expr
+    <primary
+      "c">>>
+<expr
+  <expr
+    "-"
+    <expr
+      <primary
+        "a">>>
+  "*"
+  <expr
+    <primary
+      "b">>>
+<expr
+  "-"
+  <expr
+    <expr
+      <primary
+        "a">>
+    "^"
+    <expr
+      <primary
+        "b">>>>
+<expr
+  <expr
+    <primary
+      "a">>
+  "^"
+  <expr
+    <expr
+      <primary
+        "b">>
+    "^"
+    <expr
+      <primary
+        "c">>>>
+<expr
+  <expr
+    <expr
+      <primary
+        "1">>
+    "-"
+    <expr
+      <primary
+        "2">>>
+  "-"
+  <expr
+    <primary
+      "3">>>
+<primary
+  "("
+  <expr
+    <primary
+      "1.5">>
+  ")">
+"42primary rejects: parse: grammar 'calc': expected end of input at 1:2, found "*y""
+<primary
+  "x">
+[true, false, false, false]

@@ -1298,6 +1298,38 @@ typedef struct TypePattern : Type {
     String* regex_source;   // compiled anchored regex source used by partial matching
 } TypePattern;
 
+// GM5v2: a grammar is a type and so is each of its `=` rules (a `:=` rule is
+// a TypePattern). Both extend TypeType so every generic reader of a type
+// value's `type` field stays in bounds; that payload names the domain a
+// grammar describes, strings in its language. Rules and the engine live in
+// runtime/grammar/grammar.hpp.
+struct GrammarRule;
+struct TypeGrammar;
+
+typedef struct TypeGrammarRule : TypeType {
+    struct TypeGrammar* grammar;
+    String* name;                   // the rule's name, for printing `calc.expr`
+    uint32_t index;
+} TypeGrammarRule;
+
+typedef struct TypeGrammar : TypeType {
+    String* name;
+    struct GrammarRule** rules;
+    uint32_t rule_count;
+    uint32_t space_rule;            // or GRAMMAR_NO_RULE
+    uint32_t entry_rule;            // the first rule in the block (GM5.1)
+} TypeGrammar;
+
+static inline TypeGrammar* lambda_type_grammar(Type* type) {
+    return type && type->type_id == LMD_TYPE_TYPE && type->kind == TYPE_KIND_GRAMMAR
+        ? (TypeGrammar*)type : NULL;
+}
+
+static inline TypeGrammarRule* lambda_type_grammar_rule(Type* type) {
+    return type && type->type_id == LMD_TYPE_TYPE && type->kind == TYPE_KIND_GRAMMAR_RULE
+        ? (TypeGrammarRule*)type : NULL;
+}
+
 struct Pack {
     size_t size;           // Current used size of the pack
     size_t capacity;       // Total capacity of the pack

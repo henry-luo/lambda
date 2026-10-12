@@ -65,6 +65,10 @@ static bool lexer_is_ident_continue_byte(char ch) {
     return lexer_is_ident_start_byte(ch) || lexer_is_digit(ch);
 }
 
+bool lambda_lexer_is_ident_continue_byte(char ch) {
+    return lexer_is_ident_continue_byte(ch);
+}
+
 static size_t lexer_unicode_escape_length(const LambdaLexer* lexer) {
     if (lexer_peek(lexer, 0) != '\\' || lexer_peek(lexer, 1) != 'u') return 0;
     if (lexer_peek(lexer, 2) == '{') {
@@ -208,7 +212,7 @@ static const struct LexerKeyword lexer_keywords[] = {
         {"raise", LAMBDA_TOK_RAISE}, {"import", LAMBDA_TOK_IMPORT},
         {"put", LAMBDA_TOK_PUT}, {"del", LAMBDA_TOK_DEL},
         {"commit", LAMBDA_TOK_COMMIT}, {"rollback", LAMBDA_TOK_ROLLBACK},
-        {"open", LAMBDA_TOK_OPEN},
+        {"open", LAMBDA_TOK_OPEN}, {"grammar", LAMBDA_TOK_GRAMMAR},
         {"apply", LAMBDA_TOK_APPLY}, {"not", LAMBDA_TOK_NOT},
         {"div", LAMBDA_TOK_DIV}, {"and", LAMBDA_TOK_AND},
         {"or", LAMBDA_TOK_OR}, {"to", LAMBDA_TOK_TO},
@@ -403,6 +407,29 @@ static bool lexer_scan_island(LambdaLexer* lexer) {
         else lexer_advance_byte(lexer);
     }
     return depth == 0;
+}
+
+// GM5v2: a grammar body is its own sub-language. The parser hands it to the
+// grammar loader as one span, as type slots go to the type-pattern parser, so
+// this only finds the closing brace: quotes are scanned with island escapes
+// (`"\d"` is legal in a `:=` rule), comments and nested braces are skipped.
+// Called just after the opening `{`; stops AT the matching `}`.
+bool lambda_lexer_skip_block_body(LambdaLexer* lexer) {
+    int depth = 1;
+    while (lexer->offset < lexer->length) {
+        if (!lexer_skip_extras(lexer)) return false;
+        if (lexer->offset >= lexer->length) break;
+        char ch = lexer_peek(lexer, 0);
+        if (ch == '"' || ch == '\'') {
+            if (!lexer_scan_quoted(lexer, ch, ch == '"', true)) return false;
+            continue;
+        }
+        if (ch == '{') depth++;
+        if (ch == '}' && --depth == 0) return true;
+        if (lexer_is_newline(lexer)) lexer_advance_newline(lexer);
+        else lexer_advance_byte(lexer);
+    }
+    return false;
 }
 
 static void lexer_scan_digits(LambdaLexer* lexer, bool hexadecimal) {
