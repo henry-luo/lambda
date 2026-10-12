@@ -12,14 +12,15 @@ pub fn render_mbox(items) {
     <span class: "latex-mbox", style: "white-space:nowrap", for c in items { c }>
 }
 
-// \fbox{text} — framed box
+// \fbox{text} — framed box; a TeX box, so the border encloses tall content
+// such as a picture instead of only the text line
 pub fn render_fbox(items) {
-    <span class: "latex-fbox", style: "border:1px solid;padding:3pt", for c in items { c }>
+    <span class: "latex-fbox", style: "display:inline-block;border:1px solid;padding:3pt", for c in items { c }>
 }
 
 // \frame{text} — frame with no padding (TeX primitive)
 pub fn render_frame(items) {
-    <span class: "latex-frame", style: "border:1px solid", for c in items { c }>
+    <span class: "latex-frame", style: "display:inline-block;border:1px solid", for c in items { c }>
 }
 
 // ============================================================

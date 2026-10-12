@@ -1,0 +1,40 @@
+[{
+    name: "framed picture has no unsupported output",
+    ok: true
+  }, {
+    name: "framed picture uses the frame's unit length",
+    ok: true
+  }, {
+    name: "framed picture draws its line",
+    ok: true
+  }, {
+    name: "frame is a box around the picture",
+    ok: true
+  }, {
+    name: "top-level calc setlength reaches the picture",
+    ok: true
+  }, {
+    name: "multicols preface spans the columns",
+    ok: true
+  }, {
+    name: "multicols preface heading is numbered",
+    ok: true
+  }, {
+    name: "multicols uses its column count",
+    ok: true
+  }, {
+    name: "multicols header is not body text",
+    ok: true
+  }, {
+    name: "multicols without preface",
+    ok: true
+  }, {
+    name: "italic correction renders nothing",
+    ok: true
+  }, {
+    name: "slash renders a breakable solidus",
+    ok: true
+  }, {
+    name: "textgreek, textcomp and gensymb symbols",
+    ok: true
+  }]

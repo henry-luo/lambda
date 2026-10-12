@@ -178,7 +178,7 @@ let EXTENDED_SYMBOLS = {
     'textdelta':   "\u03B4", 'textepsilon': "\u03B5", 'textzeta':    "\u03B6",
     'texteta':     "\u03B7", 'texttheta':   "\u03B8", 'textiota':    "\u03B9",
     'textkappa':   "\u03BA", 'textlambda':  "\u03BB", 'textmu':      "\u03BC",
-    'textnu':      "\u03BD", 'textxi':      "\u03BE", 'textomicron': "\u03BF",
+    'textnu':      "\u03BD", 'textxi':      "\u03BE", 'textomikron': "\u03BF",
     'textpi':      "\u03C0", 'textrho':     "\u03C1", 'textsigma':   "\u03C3",
     'texttau':     "\u03C4", 'textupsilon': "\u03C5", 'textphi':     "\u03C6",
     'textchi':     "\u03C7", 'textpsi':     "\u03C8", 'textomega':   "\u03C9",
@@ -188,7 +188,7 @@ let EXTENDED_SYMBOLS = {
     'textDelta':   "\u0394", 'textEpsilon': "\u0395", 'textZeta':    "\u0396",
     'textEta':     "\u0397", 'textTheta':   "\u0398", 'textIota':    "\u0399",
     'textKappa':   "\u039A", 'textLambda':  "\u039B", 'textMu':      "\u039C",
-    'textNu':      "\u039D", 'textXi':      "\u039E", 'textOmicron': "\u039F",
+    'textNu':      "\u039D", 'textXi':      "\u039E", 'textOmikron': "\u039F",
     'textPi':      "\u03A0", 'textRho':     "\u03A1", 'textSigma':   "\u03A3",
     'textTau':     "\u03A4", 'textUpsilon': "\u03A5", 'textPhi':     "\u03A6",
     'textChi':     "\u03A7", 'textPsi':     "\u03A8", 'textOmega':   "\u03A9",
@@ -218,6 +218,7 @@ let EXTENDED_SYMBOLS = {
     'textrightarrow': "\u2192", 'textdownarrow':  "\u2193",
 
     // ---- gensymb / misc ----
+    'perthousand':       "\u2030", 'textcopyright':     "\u00A9",
     'textcelsius':       "\u2103", 'textdegree':        "\u00B0",
     'textohm':           "\u2126", 'textmicro':         "\u00B5",
     'checkmark':         "\u2713", 'textreferencemark':  "\u203B",

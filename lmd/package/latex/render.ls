@@ -358,6 +358,8 @@ fn render_element(el, info) {
         case 'quad': spacing.render_quad_el()
         case 'qquad': spacing.render_qquad_el()
         case 'enspace': spacing.render_enspace_el()
+        case '/': spacing.render_italcorr_el()
+        case 'slash': spacing.render_slash_el()
         case 'thinspace': spacing.render_thinspace_el()
         case 'negthinspace': spacing.render_negthinspace_el()
         case 'noindent': spacing.render_noindent_el()
@@ -1361,12 +1363,18 @@ fn check_figure_match(figures, text, i) {
     else find_figure_num(figures, text, i + 1)
 }
 
+// The parser keeps \begin{multicols}{n}[preface] as a `columns` attribute and a
+// leading multicols_preface child; the preface spans all columns.
 fn render_multicols(el, info) {
-    let col_group = util.find_child(el, 'curly_group')
-    let cols = if (col_group != null) util.text_of(col_group) else "2"
-    let items = render_children(el, 0, info);
-    <div class: "latex-multicols", style: "column-count:" ++ trim(cols),
-        for c in items { c }
+    let cols = if (el.columns != null) trim(el.columns) else "2"
+    let preface = util.find_child(el, 'multicols_preface')
+    let columns = <div class: "latex-multicols", style: "column-count:" ++ cols,
+        for c in render_children(el, if (preface == null) 0 else 1, info) { c }
+    >
+    if (preface == null) columns
+    else <div class: "latex-multicols-block",
+        <div class: "latex-multicols-preface", for c in render_children(preface, 0, info) { c }>
+        columns
     >
 }
 
