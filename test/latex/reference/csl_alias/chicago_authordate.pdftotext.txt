@@ -1,0 +1,12 @@
+First (Doe and Roe 2020). Second (Roe 2021). Third (Smith, Jones, and
+Lee 2019).
+
+References
+Doe, John, and Jane Roe. 2020. “Measuring Citation Styles.” Journal of Examples 12 (3): 1–9. https://doi.org/10.1234/jex.2020.003.
+Roe, Jane. 2021. A Book about Bibliographies. Boston: Example Press.
+Smith, Alice, Bob Jones, and Carol Lee. 2019. “Three Authors Agree.” Review
+of Samples 4:20–31.
+
+1
+
+

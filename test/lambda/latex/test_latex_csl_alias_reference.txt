@@ -1,0 +1,55 @@
+[{
+    name: "apa",
+    diagnostics: ["csl-style-alias"],
+    citations: "same",
+    entries: [{
+        reference: "Doe, J., & Roe, J. (2020). Measuring citation styles. Journal of Examples, 12 (3), 1–9. https://doi.org/10.1234/jex.2020.003",
+        lambda: "Doe, J., & Roe, J. (2020). Measuring Citation Styles. Journal of Examples, 12(3), 1–9. https://doi.org/10.1234/jex.2020.003"
+      }, {
+        reference: "Roe, J. (2021). A book about bibliographies. Example Press.",
+        lambda: "Roe, J. (2021). A Book about Bibliographies. Example Press."
+      }, {
+        reference: "Smith, A., Jones, B., & Lee, C. (2019). Three authors agree. Review of Samples, 4, 20–31.",
+        lambda: "Smith, A., Jones, B., & Lee, C. (2019). Three Authors Agree. Review of Samples, 4, 20–31."
+      }],
+    notes: []
+  }, {
+    name: "ieee",
+    diagnostics: ["csl-style-alias"],
+    citations: "same",
+    entries: [{
+        reference: "[1] J. Doe and J. Roe, “Measuring citation styles,” Journal of Examples, vol. 12, no. 3, pp. 1–9, 2020. doi: 10.1234/jex.2020.003",
+        lambda: "[1] J. Doe and J. Roe, “Measuring Citation Styles,” Journal of Examples, vol. 12, no. 3, pp. 1–9, 2020, doi: 10.1234/jex.2020.003."
+      }, "same", {
+        reference: "[3] A. Smith, B. Jones, and C. Lee, “Three authors agree,” Review of Samples, vol. 4, pp. 20–31, 2019.",
+        lambda: "[3] A. Smith, B. Jones, and C. Lee, “Three Authors Agree,” Review of Samples, vol. 4, pp. 20–31, 2019."
+      }],
+    notes: []
+  }, {
+    name: "chicago_authordate",
+    diagnostics: ["csl-style-alias"],
+    citations: {
+      reference: "First (Doe and Roe 2020). Second (Roe 2021). Third (Smith, Jones, and Lee 2019).",
+      lambda: "First (Doe and Roe 2020). Second (Roe 2021). Third (Smith et al. 2019)."
+    },
+    entries: ["same", {
+        reference: "Roe, Jane. 2021. A Book about Bibliographies. Boston: Example Press.",
+        lambda: "Roe, Jane. 2021. A Book About Bibliographies. Example Press."
+      }, {
+        reference: "Smith, Alice, Bob Jones, and Carol Lee. 2019. “Three Authors Agree.” Review of Samples 4:20–31.",
+        lambda: "Smith, Alice, Bob Jones, and Carol Lee. 2019. “Three Authors Agree.” Review of Samples 4: 20–31."
+      }],
+    notes: []
+  }, {
+    name: "chicago_notes",
+    diagnostics: ["csl-style-alias"],
+    citations: "same",
+    entries: ["same", {
+        reference: "Roe, Jane. A Book about Bibliographies. Boston: Example Press, 2021.",
+        lambda: "Roe, Jane. A Book About Bibliographies. Boston: Example Press, 2021."
+      }, "same"],
+    notes: ["same", {
+        reference: "Jane Roe, A Book about Bibliographies (Boston: Example Press, 2021).",
+        lambda: "Jane Roe, A Book About Bibliographies (Boston: Example Press, 2021)."
+      }, "same"]
+  }]

@@ -21,6 +21,7 @@ import bib_style: .packages.bib_style
 import bib_data: .packages.bib_data
 import csl_resources: .citeproc.resources
 import csl: .citeproc.adapter
+import csl_aliases: .citeproc.aliases
 import hyperref: .packages.hyperref
 import amsmath: .packages.amsmath
 import paths: lambda.edit.session
@@ -87,13 +88,24 @@ pub fn render_result(ast, options) {
         amsmath.operators(ast) else {definitions: [], diagnostics: []}
     // package activation precedes counter and label analysis.
     let language = document_language(options, loaded.packages, polyglossia)
-    let csl_capture = if (options != null and options.citeproc != null)
-        csl_resources.load(ast, base_uri, options.citeproc, language) else null
+    let biblatex_options = registry.options_for(loaded.packages, "biblatex")
+    let explicit_citeproc = if (options == null) null else options.citeproc
+    // a guide-level biblatex style selects its CSL style unless the caller chose one
+    // (Lambda_Design_BibTeX_CSL §7.4)
+    let style_alias = if (explicit_citeproc != null) null
+        else csl_aliases.select(biblatex_options, ast,
+            registry.offset_for(loaded.packages, "biblatex"))
+    let citeproc_request = if (explicit_citeproc != null) explicit_citeproc
+        else if (style_alias != null) style_alias.citeproc else null
+    let csl_capture = if (citeproc_request != null)
+        csl_resources.load(ast, base_uri, citeproc_request, language) else null
     let base_info = analyzer.analyze_with_language(ast, loaded.packages, language,
         {citeproc: csl_capture != null, note_style: csl_capture.compiled.style.class == "note"})
     let bibliography = if (csl_capture != null)
         csl.prepare(ast, csl_capture, base_info.footnotes,
-            {*:options.citeproc, legacy_options: registry.options_for(loaded.packages, "biblatex")})
+            // under an alias the biblatex style is the request, not a conflict;
+            // the options CSL cannot follow are reported by the alias itself
+            {*:citeproc_request, legacy_options: if (style_alias != null) {} else biblatex_options})
         else if (registry.active(loaded.packages, "biblatex"))
         biblatex.prepare(ast, base_uri,
             registry.options_for(loaded.packages, "biblatex"), language)
@@ -160,7 +172,11 @@ pub fn render_result(ast, options) {
     } else {
         completed
     }
-    let diagnostics = engine_diagnostics(ast) ++ loaded.diagnostics ++ math_operators.diagnostics ++
+    // an aliased style is supported through CSL, so its unsupported-style report is dropped
+    let package_issues = if (style_alias == null) loaded.diagnostics
+        else [for (issue in loaded.diagnostics where not (issue.code == "unsupported-bib-style" and
+            issue.item == style_alias.biblatex_style)) issue] ++ style_alias.diagnostics
+    let diagnostics = engine_diagnostics(ast) ++ package_issues ++ math_operators.diagnostics ++
         bibliography.diagnostics ++ language_issues ++ cleveref_issues ++ font_issues ++
         math_font_issues ++ script_font_issues ++ greek_font_issues ++ helvet_issues ++
         hyperref.issues(link_settings, registry.offset_for(loaded.packages, "hyperref")) ++
@@ -195,7 +211,8 @@ pub fn render_result(ast, options) {
      stylesheet: css.get_stylesheet() ++ math.stylesheet(options) ++ package_stylesheet(info),
      metadata: if (csl_capture == null) hyperref.metadata(link_settings, info.title, info.author)
          else {*:hyperref.metadata(link_settings, info.title, info.author),
-             bibliography: bibliography.metadata},
+             bibliography: if (style_alias == null) bibliography.metadata
+                 else {*:bibliography.metadata, biblatex_style: style_alias.biblatex_style}},
      packages: loaded.packages, diagnostics: diagnostics,
      assets: registry.assets(ast, info.base_uri) ++ (if (csl_capture == null)
          bib_data.resource_assets(ast, info.base_uri) else bibliography.assets)}

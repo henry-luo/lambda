@@ -394,6 +394,8 @@ function discoverTests(config) {
             baseName: t.runner_name || path.basename(t.script, path.extname(t.script)),
             displayName: t.name,
             runner: 'node',
+            workerSlots: t.worker_slots || 1,
+            workerSlotsEnv: t.worker_slots_env,
             exclusive: t.parallel === false,
         }));
     for (const scriptTest of [...SCRIPT_TESTS, ...configuredScripts]) {
@@ -812,6 +814,13 @@ async function runGtestCases(testInfo, workers) {
         if (!originalArgs[i].startsWith('--gtest_filter=')) runnerArgs.push(originalArgs[i]);
     }
     const cases = new Array(names.length);
+    // seed split variants from a retired bundled case so the first run still balances expensive launches.
+    const currentNames = new Set(names);
+    for (const [previousName, elapsed] of [...previousTimes]) {
+        if (currentNames.has(previousName)) continue;
+        const variants = names.filter(name => name.startsWith(`${previousName}_`));
+        for (const name of variants) if (!previousTimes.has(name)) previousTimes.set(name, elapsed / variants.length);
+    }
     // start expensive cases first, keeping merged reports in discovery order.
     const queue = names.map((name, index) => ({ name, index })).sort((a, b) =>
         (previousTimes.get(b.name) || 0) - (previousTimes.get(a.name) || 0));

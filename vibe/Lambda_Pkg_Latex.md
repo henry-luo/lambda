@@ -219,7 +219,7 @@ The package offers four bibliography paths, in order of preference:
 - **natbib and BibTeX** with named-style approximations.
 - **In-document `thebibliography`.**
 
-All four share resource loading, citation collection, scopes and links. The design and the built-in profile are in [Lambda_Design_BibTeX_CSL.md](latex/Lambda_Design_BibTeX_CSL.md). Biblatex style files are never executed. A document that names a guide-level biblatex style, such as `apa`, `ieee` or the biblatex-chicago styles, is formatted by the matching CSL style with a diagnostic naming it ([Lambda_Design_BibTeX_CSL.md](latex/Lambda_Design_BibTeX_CSL.md#74-biblatex-style-names-mapped-to-csl) §7.4). This mapping was decided on 2026-10-12 and is not yet built.
+All four share resource loading, citation collection, scopes and links. The design and the built-in profile are in [Lambda_Design_BibTeX_CSL.md](latex/Lambda_Design_BibTeX_CSL.md). Biblatex style files are never executed. A document that names a guide-level biblatex style, such as `apa`, `ieee` or the biblatex-chicago styles, is formatted by the matching CSL style with a diagnostic naming it ([Lambda_Design_BibTeX_CSL.md](latex/Lambda_Design_BibTeX_CSL.md#74-biblatex-style-names-mapped-to-csl) §7.4). The mapping was implemented on 2026-10-12, and its aliases are admitted against pinned biblatex output, with the differences recorded in `test/latex/reference/csl_alias/`.
 
 ### 8.3 Graphics and drawing
 
@@ -244,7 +244,7 @@ One shared table model serves `tabular`, the `array` column types, `multirow`, `
 
 ## 9. Compatibility matrix
 
-The matrix was checked on 2026-10-07; the engine, bibliography, natbib and corpus tests were rerun and pass on 2026-10-12. The adapter catalogue has 62 entries. The rows below cover the packages with active behavior. The remaining catalogue entries are declarations with defined effects, each accepted under the contract of its row or listed in the last row.
+The matrix was checked on 2026-10-07; the engine, bibliography, natbib and corpus tests were rerun and pass on 2026-10-12. The adapter catalogue has 63 entries. The rows below cover the packages with active behavior. The remaining catalogue entries are declarations with defined effects, each accepted under the contract of its row or listed in the last row.
 
 | Package | Supported in HTML | PDF/SVG | Explicitly unsupported |
 |---|---|---|---|
@@ -283,7 +283,7 @@ The matrix was checked on 2026-10-07; the engine, bibliography, natbib and corpu
 
 ### 11.1 Decisions
 
-No decisions are open. Decided on 2026-10-12 and not yet built: the biblatex-to-CSL style mapping (§8.2).
+- **Chicago author–date edition.** The `chicago-authordate` alias formats with the bundled Chicago 18th-edition CSL style, while biblatex-chicago 3.18b implements the 17th edition; the two differ on *et al.* for three authors and on the place of publication. Keep the 18th edition, or bundle the 17th-edition CSL style for this alias.
 
 ### 11.2 Correctness gaps in the script package
 
@@ -323,6 +323,7 @@ These were reproduced on 2026-10-12.
 | 2026-10-07 (Phase IV) | The TeX expansion engine, pdfTeX conformance, bundled programming packages and expl3, and six native PGF/PGFPlots slices. |
 | 2026-10-10 | The Lambda-script CSL citeproc, opt-in. |
 | 2026-10-12 (ruling) | The user dropped M4, running biblatex style files on the TeX engine, and chose to map guide-level biblatex styles to CSL styles instead. |
+| 2026-10-12 (CSL aliases) | `style=apa`, `style=ieee` and `biblatex-chicago` documents are formatted by the bundled CSL styles through the alias table, with diagnostics, and admitted against pinned biblatex 3.21/biber 2.21 output. A note-style `\autocite` now places its mark after the following punctuation. |
 | 2026-10-12 (D7.2.7) | Expansion became the only front end: the raw parse branch, the `expand` option, the `LAMBDA_TEX_EXPAND` knob and the script macro substitution were removed, and the native document transform and doc viewer parse through the package. The engine boundary and its resolution order were ratified as **D7.2.7**. |
 | 2026-10-12 | This consolidation. The retired documents, all recoverable from git, are listed below. |
 | 2026-10-12 cleanup | Removed the unused LaTeX.js-era `css/` stylesheets and `js/base.js`, the unused document-class exports and dead macro helpers. The appendix-letter helper moved to `util.upper_alph`. |

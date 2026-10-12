@@ -1,0 +1,12 @@
+First (Doe & Roe, 2020). Second (Roe, 2021). Third (Smith et al., 2019).
+
+References
+Doe, J., & Roe, J. (2020). Measuring citation styles. Journal of Examples, 12 (3),
+1–9. https://doi.org/10.1234/jex.2020.003
+Roe, J. (2021). A book about bibliographies. Example Press.
+Smith, A., Jones, B., & Lee, C. (2019). Three authors agree. Review of Samples,
+4, 20–31.
+
+1
+
+
